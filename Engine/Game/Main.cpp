@@ -1,5 +1,5 @@
-#include "../Engine/Core/Window.h"
-#include "../Engine/Renderers/Game/DX12GameRenderer.h"
+#include "Core/Window.h"
+#include "Core/Renderers/Game/DX12GameRenderer.h"
 
 // ---------------------------------------------------------------------------
 // WinMain – entry point

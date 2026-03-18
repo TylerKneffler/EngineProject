@@ -35,9 +35,9 @@ void DX12EditorRenderer::Init(HWND hwnd, uint32_t width, uint32_t height)
     if (!m_fenceEvent)
         throw std::runtime_error("Failed to create fence event.");
     
-    // SRV heap for ImGui font texture
+    // SRV heap: slot 0 = ImGui font atlas, slot 1+ = user textures (e.g. scene viewport).
     D3D12_DESCRIPTOR_HEAP_DESC srvDesc{};
-    srvDesc.NumDescriptors = 1;
+    srvDesc.NumDescriptors = 2;
     srvDesc.Type  = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     srvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     ThrowIfFailed(m_device->CreateDescriptorHeap(&srvDesc, IID_PPV_ARGS(&m_srvHeap)));
@@ -224,6 +224,24 @@ D3D12_CPU_DESCRIPTOR_HANDLE DX12EditorRenderer::GetCurrentRTV() const
     D3D12_CPU_DESCRIPTOR_HANDLE handle = m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
     handle.ptr += static_cast<SIZE_T>(m_frameIndex) * m_rtvDescriptorSize;
     return handle;
+}
+
+// ---------------------------------------------------------------------------
+// GetSrvSlot
+// ---------------------------------------------------------------------------
+std::pair<D3D12_CPU_DESCRIPTOR_HANDLE, D3D12_GPU_DESCRIPTOR_HANDLE>
+DX12EditorRenderer::GetSrvSlot(uint32_t slot) const
+{
+    const uint32_t stride = m_device->GetDescriptorHandleIncrementSize(
+        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+    D3D12_CPU_DESCRIPTOR_HANDLE cpu = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
+    cpu.ptr += static_cast<SIZE_T>(slot) * stride;
+
+    D3D12_GPU_DESCRIPTOR_HANDLE gpu = m_srvHeap->GetGPUDescriptorHandleForHeapStart();
+    gpu.ptr += static_cast<UINT64>(slot) * stride;
+
+    return { cpu, gpu };
 }
 
 // ---------------------------------------------------------------------------

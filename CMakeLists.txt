@@ -12,8 +12,8 @@ include(FetchContent)
 set(ALL_HEADERS
     Engine/pch.h
     Engine/Core/Window.h
-    Engine/Renderers/Game/DX12GameRenderer.h
-    Engine/Renderers/Editor/DX12EditorRenderer.h
+    Engine/Core/Renderers/Game/DX12GameRenderer.h
+    Engine/Core/Renderers/Editor/DX12EditorRenderer.h
 )
 
 # ---------------------------------------------------------------------------
@@ -46,8 +46,8 @@ target_compile_definitions(ImGui PUBLIC IMGUI_ENABLE_DOCKING)
 # ---------------------------------------------------------------------------
 add_library(Engine STATIC
     Engine/Core/Window.cpp
-    Engine/Renderers/Game/DX12GameRenderer.cpp
-    Engine/Renderers/Editor/DX12EditorRenderer.cpp
+    Engine/Core/Renderers/Game/DX12GameRenderer.cpp
+    Engine/Core/Renderers/Editor/DX12EditorRenderer.cpp
     ${ALL_HEADERS}
 )
 target_include_directories(Engine PUBLIC
@@ -88,6 +88,20 @@ endif()
 # ---------------------------------------------------------------------------
 # Editor — primary executable (hosts the game view)
 # ---------------------------------------------------------------------------
-add_executable(Editor WIN32 Editor/Main.cpp)
+add_executable(Editor WIN32
+    Engine/Editor/Main.cpp
+    Engine/Editor/Scene/SceneViewport.cpp
+    Engine/Editor/Scene/SceneViewport.h
+)
 target_link_libraries(Editor PRIVATE Engine)
 target_precompile_headers(Editor REUSE_FROM Engine)
+target_include_directories(Editor PRIVATE
+    ${CMAKE_SOURCE_DIR}/Engine
+    ${CMAKE_SOURCE_DIR}/Engine/Editor
+)
+target_compile_definitions(Editor PRIVATE
+    ASSETS_PATH="${CMAKE_SOURCE_DIR}/Assets/"
+)
+set_target_properties(Editor PROPERTIES
+    VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)

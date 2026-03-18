@@ -1,5 +1,5 @@
 #pragma once
-#include "../../pch.h"
+#include "pch.h"
 #include "imgui.h"
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx12.h"
@@ -78,6 +78,12 @@ public:
     // Number of back-buffer slots (double-buffering). Declared before member
     // arrays that use it as a size.
     static constexpr uint32_t FRAME_COUNT = 2;
+
+    // Returns CPU and GPU descriptor handles for the given slot in the
+    // shader-visible SRV heap. Slot 0 is reserved for the ImGui font atlas;
+    // additional slots (1, 2, …) are available for scene textures etc.
+    std::pair<D3D12_CPU_DESCRIPTOR_HANDLE, D3D12_GPU_DESCRIPTOR_HANDLE>
+        GetSrvSlot(uint32_t slot) const;
 
 private:
     // These are kept private so all rendering is gated through RenderIfNeeded.

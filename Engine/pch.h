@@ -27,8 +27,11 @@
 #include <cassert>
 #include <cstdint>
 #include <array>
+#include <vector>
 #include <memory>
 #include <iostream>
+#include <fstream>
+#include <sstream>
 
 // Lib links (can also be done in .vcxproj)
 #pragma comment(lib, "d3d12.lib")
