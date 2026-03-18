@@ -17,6 +17,16 @@ set(ALL_HEADERS
 )
 
 # ---------------------------------------------------------------------------
+# GLM — Git library 
+# ---------------------------------------------------------------------------
+FetchContent_Declare(
+    glm
+    GIT_REPOSITORY https://github.com/g-truc/glm.git
+    GIT_TAG        1.0.1
+)
+FetchContent_MakeAvailable(glm)
+
+# ---------------------------------------------------------------------------
 # IMGUI — Git library
 # ---------------------------------------------------------------------------
 
@@ -48,6 +58,7 @@ add_library(Engine STATIC
     Engine/Core/Window.cpp
     Engine/Core/Renderers/Game/DX12GameRenderer.cpp
     Engine/Core/Renderers/Editor/DX12EditorRenderer.cpp
+    Engine/Core/Compoonents/Transform.cpp
     ${ALL_HEADERS}
 )
 target_include_directories(Engine PUBLIC
@@ -63,6 +74,7 @@ target_link_libraries(Engine PUBLIC
     d2d1.lib 
     dwrite.lib
     ImGui
+    glm::glm
 )
 
 # ---------------------------------------------------------------------------

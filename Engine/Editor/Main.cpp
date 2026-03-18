@@ -192,11 +192,13 @@ int WINAPI wWinMain(
           D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
     };
 
-    // Rasterizer — solid fill, back-face culling (CW = front-face, DX default).
+    // Rasterizer — solid fill, back-face culling. OBJ files use CCW winding
+    // (standard in most DCC tools), so tell DX12 to treat CCW as front-facing.
     D3D12_RASTERIZER_DESC rasterDesc{};
-    rasterDesc.FillMode        = D3D12_FILL_MODE_SOLID;
-    rasterDesc.CullMode        = D3D12_CULL_MODE_BACK;
-    rasterDesc.DepthClipEnable = TRUE;
+    rasterDesc.FillMode              = D3D12_FILL_MODE_SOLID;
+    rasterDesc.CullMode              = D3D12_CULL_MODE_BACK;
+    rasterDesc.FrontCounterClockwise = TRUE;
+    rasterDesc.DepthClipEnable       = TRUE;
 
     D3D12_RENDER_TARGET_BLEND_DESC rtBlend{};
     rtBlend.BlendEnable           = FALSE;
@@ -302,7 +304,8 @@ int WINAPI wWinMain(
     QueryPerformanceFrequency(&perfFreq);
     QueryPerformanceCounter(&lastCounter);
 
-    float angle = 0.0f; // cumulative Y-rotation in radians
+    float yaw   = 0.0f; // cumulative Y-axis rotation (radians)
+    float pitch = 0.0f; // cumulative X-axis rotation (radians)
 
     // -----------------------------------------------------------------------
     // Window callbacks
@@ -340,12 +343,9 @@ int WINAPI wWinMain(
                 {
                     using namespace DirectX;
 
-                    // Rotation disabled — static cube for debugging.
-                    // angle += XM_PI * 0.5f * dt;
-
                     float aspect = sceneViewport.GetAspect();
 
-                    XMMATRIX worldMat = XMMatrixRotationY(angle);
+                    XMMATRIX worldMat = XMMatrixRotationX(pitch) * XMMatrixRotationY(yaw);
                     XMMATRIX view  = XMMatrixLookAtLH(
                         XMVectorSet(0.f,  1.5f, -3.f, 1.f),
                         XMVectorSet(0.f,  0.f,   0.f, 1.f),
@@ -407,6 +407,15 @@ int WINAPI wWinMain(
             ImGui::End();
 
             sceneViewport.DrawPanel();
+
+            // Rotate cube by dragging left mouse button inside the Scene panel.
+            constexpr float kSensitivity = 0.005f;
+            yaw   += sceneViewport.GetDragDeltaX() * kSensitivity;
+            pitch += sceneViewport.GetDragDeltaY() * kSensitivity;
+            // Clamp pitch so the cube doesn't flip past vertical (~89 degrees).
+            constexpr float kPitchLimit = 1.5607963f; // XM_PIDIV2 - 0.01
+            if (pitch >  kPitchLimit) pitch =  kPitchLimit;
+            if (pitch < -kPitchLimit) pitch = -kPitchLimit;
         });
     };
 

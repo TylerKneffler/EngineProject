@@ -191,6 +191,24 @@ void SceneViewport::DrawPanel()
     {
         m_aspect = size.x / size.y;  // cache for caller's projection matrix
         ImGui::Image((ImTextureID)(uintptr_t)m_srvGpu.ptr, size);
+
+        // Capture left-button drag over the scene image for orbit rotation.
+        if (ImGui::IsItemHovered() && ImGui::IsMouseDown(ImGuiMouseButton_Left))
+        {
+            ImVec2 d    = ImGui::GetIO().MouseDelta;
+            m_dragDeltaX = d.x;
+            m_dragDeltaY = d.y;
+        }
+        else
+        {
+            m_dragDeltaX = 0.0f;
+            m_dragDeltaY = 0.0f;
+        }
+    }
+    else
+    {
+        m_dragDeltaX = 0.0f;
+        m_dragDeltaY = 0.0f;
     }
 
     ImGui::End();

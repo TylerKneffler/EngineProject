@@ -60,6 +60,11 @@ public:
     // Use this for the projection matrix to avoid squishing the rendered geometry.
     float GetAspect() const { return m_aspect; }
 
+    // Per-frame mouse drag delta over the scene image (pixels), captured during
+    // the most recent DrawPanel() call. Both values are 0 when not dragging.
+    float GetDragDeltaX() const { return m_dragDeltaX; }
+    float GetDragDeltaY() const { return m_dragDeltaY; }
+
 private:
     void CreateResources(ID3D12Device* device, uint32_t width, uint32_t height);
 
@@ -74,4 +79,6 @@ private:
     uint32_t m_width   = 0;
     uint32_t m_height  = 0;
     float    m_aspect  = 1.0f;  // scene panel aspect ratio, updated each DrawPanel()
+    float    m_dragDeltaX = 0.0f; // per-frame mouse drag over the image (pixels)
+    float    m_dragDeltaY = 0.0f;
 };

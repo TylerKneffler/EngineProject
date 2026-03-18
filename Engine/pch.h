@@ -33,6 +33,10 @@
 #include <fstream>
 #include <sstream>
 
+// Engine Core
+#include "Core/Object/Object.h"
+#include "Core/Compoonents/Transform.h"
+
 // Lib links (can also be done in .vcxproj)
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
