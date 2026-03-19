@@ -2,8 +2,8 @@
 #include "Core/Renderers/Editor/DX12EditorRenderer.h"
 #include "Core/Object/Object.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/MeshComponent.h"
-#include "Core/Compoonents/MaterialComponent.h"
+#include "Core/Compoonents/Mesh.h"
+#include "Core/Compoonents/Material.h"
 #include "Scene/SceneViewport.h"
 #include "imgui_internal.h"  // DockBuilder API
 
@@ -165,7 +165,7 @@ int WINAPI wWinMain(
     scene.Init(device);
 
     Object*            cubeObj = scene.AddObject("Cube");
-    MeshComponent*     mesh    = cubeObj->AddComponent<MeshComponent>();
+    Mesh*     mesh    = cubeObj->AddComponent<Mesh>();
     Material* mat     = cubeObj->AddComponent<Material>();
     mesh->LoadFromFile(ASSETS_PATH "cube.obj");
     mesh->CreateBuffer(device);
