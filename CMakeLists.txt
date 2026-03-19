@@ -58,7 +58,12 @@ add_library(Engine STATIC
     Engine/Core/Window.cpp
     Engine/Core/Renderers/Game/DX12GameRenderer.cpp
     Engine/Core/Renderers/Editor/DX12EditorRenderer.cpp
+    Engine/Core/component.cpp
+    Engine/Core/Object/Object.cpp
+    Engine/Core/Scene/Scene.cpp
     Engine/Core/Compoonents/Transform.cpp
+    Engine/Core/Compoonents/MeshComponent.cpp
+    Engine/Core/Compoonents/MaterialComponent.cpp
     ${ALL_HEADERS}
 )
 target_include_directories(Engine PUBLIC

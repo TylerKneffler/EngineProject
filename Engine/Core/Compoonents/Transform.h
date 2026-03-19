@@ -1,8 +1,9 @@
 #pragma once
+#include "../component.h"
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-class Transform
+class Transform : public Component
 {
 public:
     Transform() = default;
@@ -14,4 +15,7 @@ public:
 
     // Returns the world matrix: T * Rz * Ry * Rx * S
     glm::mat4 GetWorldMatrix() const;
+    
+    glm::vec3 GetWorldPosition();
+    glm::vec3 GetLocalPosition();
 };

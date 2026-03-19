@@ -1,5 +1,9 @@
 #include "Core/Window.h"
 #include "Core/Renderers/Editor/DX12EditorRenderer.h"
+#include "Core/Object/Object.h"
+#include "Core/Scene/Scene.h"
+#include "Core/Compoonents/MeshComponent.h"
+#include "Core/Compoonents/MaterialComponent.h"
 #include "Scene/SceneViewport.h"
 #include "imgui_internal.h"  // DockBuilder API
 
@@ -13,96 +17,13 @@
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 // ---------------------------------------------------------------------------
-// Geometry
-// ---------------------------------------------------------------------------
-
-struct Vertex
-{
-    float pos[3];
-    float normal[3];
-};
-
-// Parse a single OBJ face token of the form:  v  |  v/vt  |  v//vn  |  v/vt/vn
-static void ParseFaceVertex(const std::string& t, int& vi, int& vni)
-{
-    vi = vni = 0;
-    size_t a = t.find('/');
-    if (a == std::string::npos) { vi = std::stoi(t); return; }
-    vi = std::stoi(t.substr(0, a));
-    size_t b = t.find('/', a + 1);
-    if (b != std::string::npos && b + 1 < t.size())
-        vni = std::stoi(t.substr(b + 1));
-}
-
-// Minimal OBJ loader — handles triangulated meshes with positions + normals.
-static std::vector<Vertex> LoadOBJ(const std::string& path)
-{
-    std::ifstream file(path);
-    if (!file.is_open())
-        throw std::runtime_error("Failed to open OBJ: " + path);
-
-    std::vector<std::array<float, 3>> positions;
-    std::vector<std::array<float, 3>> normals;
-    std::vector<Vertex>               verts;
-
-    std::string line;
-    while (std::getline(file, line))
-    {
-        std::istringstream ss(line);
-        std::string token;
-        ss >> token;
-
-        if (token == "v")
-        {
-            std::array<float, 3> p{};
-            ss >> p[0] >> p[1] >> p[2];
-            positions.push_back(p);
-        }
-        else if (token == "vn")
-        {
-            std::array<float, 3> n{};
-            ss >> n[0] >> n[1] >> n[2];
-            normals.push_back(n);
-        }
-        else if (token == "f")
-        {
-            // Only triangulated faces supported (3 vertices per line).
-            for (int i = 0; i < 3; ++i)
-            {
-                std::string fv;
-                ss >> fv;
-
-                int vi = 0, vni = 0;
-                ParseFaceVertex(fv, vi, vni);
-
-                Vertex vtx{};
-                if (vi  > 0 && vi  <= (int)positions.size())
-                {
-                    vtx.pos[0] = positions[vi  - 1][0];
-                    vtx.pos[1] = positions[vi  - 1][1];
-                    vtx.pos[2] = positions[vi  - 1][2];
-                }
-                if (vni > 0 && vni <= (int)normals.size())
-                {
-                    vtx.normal[0] = normals[vni - 1][0];
-                    vtx.normal[1] = normals[vni - 1][1];
-                    vtx.normal[2] = normals[vni - 1][2];
-                }
-                verts.push_back(vtx);
-            }
-        }
-    }
-    return verts;
-}
-
-// ---------------------------------------------------------------------------
 // Embedded HLSL — simple diffuse Phong shader for the cube
 // ---------------------------------------------------------------------------
 
 static constexpr char kVS[] = R"(
 cbuffer Constants : register(b0) {
     float4x4 mvp;
-    float4x4 world;  // transposed world matrix for normal transformation
+    float4x4 world;
 };
 
 void VSMain(float3 pos    : POSITION,
@@ -111,18 +32,26 @@ void VSMain(float3 pos    : POSITION,
             out float3 oNormal : NORMAL)
 {
     oPos    = mul(mvp, float4(pos, 1.0));
-    // mul(M, v) with M = world matrix and v as column vector = correct world-space normal.
     oNormal = mul((float3x3)world, normal);
 }
 )";
 
 static constexpr char kPS[] = R"(
+cbuffer Constants : register(b0) {
+    float4x4 mvp;
+    float4x4 world;
+    float4   diffuseColor;
+    float4   ambientColor;
+    float4   specularColor; // w = shininess
+};
+
 float4 PSMain(float4 pos    : SV_POSITION,
               float3 normal : NORMAL) : SV_TARGET
 {
     float3 lightDir = normalize(float3(1.0, 2.0, -1.0));
-    float  diffuse  = saturate(dot(normalize(normal), lightDir)) * 0.8 + 0.2;
-    return float4(float3(0.85, 0.55, 0.25) * diffuse, 1.0);
+    float  diffuse  = saturate(dot(normalize(normal), lightDir));
+    float3 color    = ambientColor.rgb + diffuseColor.rgb * diffuse;
+    return float4(color, 1.0);
 }
 )";
 
@@ -167,7 +96,7 @@ int WINAPI wWinMain(
     rootParam.ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
     rootParam.Descriptor.ShaderRegister = 0;
     rootParam.Descriptor.RegisterSpace  = 0;
-    rootParam.ShaderVisibility          = D3D12_SHADER_VISIBILITY_VERTEX;
+    rootParam.ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
 
     D3D12_ROOT_SIGNATURE_DESC rsDesc{};
     rsDesc.NumParameters = 1;
@@ -231,47 +160,26 @@ int WINAPI wWinMain(
     ComPtr<ID3D12PipelineState> pso;
     ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso)));
 
-    // Load cube from OBJ — ASSETS_PATH is an absolute path string defined by CMake.
-    std::vector<Vertex> vertices = LoadOBJ(ASSETS_PATH "cube.obj");
-    UINT vertexCount = static_cast<UINT>(vertices.size());
+    // Create the scene and add the cube as a managed game object.
+    Scene scene;
+    scene.Init(device);
 
-    // Vertex buffer on an upload heap — simple and sufficient for a static mesh.
-    ComPtr<ID3D12Resource>   vertexBuffer;
-    D3D12_VERTEX_BUFFER_VIEW vbv{};
-    {
-        const UINT byteSize = vertexCount * sizeof(Vertex);
-
-        D3D12_HEAP_PROPERTIES uploadProps{};
-        uploadProps.Type = D3D12_HEAP_TYPE_UPLOAD;
-
-        D3D12_RESOURCE_DESC bufDesc{};
-        bufDesc.Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER;
-        bufDesc.Width            = byteSize;
-        bufDesc.Height           = 1;
-        bufDesc.DepthOrArraySize = 1;
-        bufDesc.MipLevels        = 1;
-        bufDesc.Format           = DXGI_FORMAT_UNKNOWN;
-        bufDesc.SampleDesc       = { 1, 0 };
-        bufDesc.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-
-        ThrowIfFailed(device->CreateCommittedResource(
-            &uploadProps, D3D12_HEAP_FLAG_NONE, &bufDesc,
-            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-            IID_PPV_ARGS(&vertexBuffer)));
-
-        void* mapped;
-        ThrowIfFailed(vertexBuffer->Map(0, nullptr, &mapped));
-        memcpy(mapped, vertices.data(), byteSize);
-        vertexBuffer->Unmap(0, nullptr);
-
-        vbv.BufferLocation = vertexBuffer->GetGPUVirtualAddress();
-        vbv.SizeInBytes    = byteSize;
-        vbv.StrideInBytes  = sizeof(Vertex);
-    }
+    Object*            cubeObj = scene.AddObject("Cube");
+    MeshComponent*     mesh    = cubeObj->AddComponent<MeshComponent>();
+    MaterialComponent* mat     = cubeObj->AddComponent<MaterialComponent>();
+    mesh->LoadFromFile(ASSETS_PATH "cube.obj");
+    mesh->CreateBuffer(device);
 
     // Constant buffer — 256-byte aligned, persistently mapped for per-frame uploads.
-    // Layout: float4x4 mvp (64B) + float4x4 world (64B) = 128B, aligned to 256B.
-    struct CBData { DirectX::XMFLOAT4X4 mvp; DirectX::XMFLOAT4X4 world; };
+    // Layout: float4x4 mvp (64B) + float4x4 world (64B) + 3x float4 material (48B) = 176B -> 256B.
+    struct CBData
+    {
+        DirectX::XMFLOAT4X4 mvp;
+        DirectX::XMFLOAT4X4 world;
+        DirectX::XMFLOAT4   diffuseColor;   // xyz = color
+        DirectX::XMFLOAT4   ambientColor;   // xyz = color
+        DirectX::XMFLOAT4   specularColor;  // xyz = color, w = shininess
+    };
     ComPtr<ID3D12Resource> constantBuffer;
     void*                  cbMapped = nullptr;
     {
@@ -359,15 +267,22 @@ int WINAPI wWinMain(
                     CBData cbData{};
                     XMStoreFloat4x4(&cbData.mvp,   worldMat * view * proj);
                     XMStoreFloat4x4(&cbData.world, worldMat);
+                    cbData.diffuseColor  = { mat->diffuseColor.r,  mat->diffuseColor.g,  mat->diffuseColor.b,  1.f };
+                    cbData.ambientColor  = { mat->ambientColor.r,  mat->ambientColor.g,  mat->ambientColor.b,  1.f };
+                    cbData.specularColor = { mat->specularColor.r, mat->specularColor.g, mat->specularColor.b, mat->shininess };
                     memcpy(cbMapped, &cbData, sizeof(cbData));
 
                     cmd->SetGraphicsRootSignature(rootSig.Get());
                     cmd->SetPipelineState(pso.Get());
                     cmd->SetGraphicsRootConstantBufferView(
                         0, constantBuffer->GetGPUVirtualAddress());
+                    D3D12_VERTEX_BUFFER_VIEW vbv = mesh->GetVertexBufferView();
                     cmd->IASetVertexBuffers(0, 1, &vbv);
                     cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-                    cmd->DrawInstanced(vertexCount, 1, 0, 0);
+                    cmd->DrawInstanced(mesh->GetVertexCount(), 1, 0, 0);
+
+                    // Draw scene helpers (grid etc.) after opaque objects.
+                    scene.Render(cmd, view, proj);
                 });
 
             ImGuiID dockspaceId = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
