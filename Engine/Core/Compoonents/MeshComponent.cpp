@@ -4,10 +4,7 @@
 #include <array>
 #include <stdexcept>
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
+#pragma region OBJ file parsing helpers
 static void ParseFaceToken(const std::string& t, int& vi, int& vni)
 {
     vi = vni = 0;
@@ -18,10 +15,8 @@ static void ParseFaceToken(const std::string& t, int& vi, int& vni)
     if (b != std::string::npos && b + 1 < t.size())
         vni = std::stoi(t.substr(b + 1));
 }
-
-// ---------------------------------------------------------------------------
-// MeshComponent
-// ---------------------------------------------------------------------------
+#pragma endregion
+#pragma region MeshComponent implementation
 
 void MeshComponent::LoadFromFile(const std::string& path)
 {
@@ -71,6 +66,8 @@ void MeshComponent::LoadFromFile(const std::string& path)
     m_ready = false;
 }
 
+#pragma region DX12 buffer creation and rendering
+
 void MeshComponent::CreateBuffer(ID3D12Device* device)
 {
     if (m_vertices.empty()) return;
@@ -106,3 +103,5 @@ void MeshComponent::CreateBuffer(ID3D12Device* device)
 
     m_ready = true;
 }
+#pragma endregion
+#pragma endregion
