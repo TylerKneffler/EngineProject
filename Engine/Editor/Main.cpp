@@ -166,7 +166,7 @@ int WINAPI wWinMain(
 
     Object*            cubeObj = scene.AddObject("Cube");
     MeshComponent*     mesh    = cubeObj->AddComponent<MeshComponent>();
-    MaterialComponent* mat     = cubeObj->AddComponent<MaterialComponent>();
+    Material* mat     = cubeObj->AddComponent<Material>();
     mesh->LoadFromFile(ASSETS_PATH "cube.obj");
     mesh->CreateBuffer(device);
 

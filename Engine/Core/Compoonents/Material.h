@@ -1,12 +1,12 @@
 #pragma once
-#include "../component.h"
+#include "component.h"
 #include <glm/glm.hpp>
 
-class MaterialComponent : public Component
+class Material : public Component
 {
 public:
-    MaterialComponent() = default;
-    ~MaterialComponent() = default;
+    Material() = default;
+    ~Material() = default;
 
     // Phong shading properties — must match the CBData layout expected by the HLSL.
     glm::vec3 diffuseColor  { 1.f, 0.5f, 0.1f }; // base/albedo colour

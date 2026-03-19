@@ -1,5 +1,5 @@
 #pragma once
-#include "../component.h"
+#include "component.h"
 #include <d3d12.h>
 #include <wrl/client.h>
 #include <string>
@@ -11,11 +11,11 @@ struct Vertex
     float normal[3];
 };
 
-class MeshComponent : public Component
+class Mesh : public Component
 {
 public:
-    MeshComponent() = default;
-    ~MeshComponent() = default;
+    Mesh() = default;
+    ~Mesh() = default;
 
     // Load vertex data from a triangulated OBJ file (CPU side only).
     void LoadFromFile(const std::string& path);

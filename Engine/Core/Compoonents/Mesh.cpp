@@ -1,4 +1,4 @@
-#include "MeshComponent.h"
+#include "Mesh.h"
 #include <fstream>
 #include <sstream>
 #include <array>
@@ -16,13 +16,13 @@ static void ParseFaceToken(const std::string& t, int& vi, int& vni)
         vni = std::stoi(t.substr(b + 1));
 }
 #pragma endregion
-#pragma region MeshComponent implementation
+#pragma region Mesh implementation
 
-void MeshComponent::LoadFromFile(const std::string& path)
+void Mesh::LoadFromFile(const std::string& path)
 {
     std::ifstream file(path);
     if (!file.is_open())
-        throw std::runtime_error("MeshComponent: failed to open OBJ: " + path);
+        throw std::runtime_error("Mesh: failed to open OBJ: " + path);
 
     std::vector<std::array<float, 3>> positions;
     std::vector<std::array<float, 3>> normals;
@@ -68,7 +68,7 @@ void MeshComponent::LoadFromFile(const std::string& path)
 
 #pragma region DX12 buffer creation and rendering
 
-void MeshComponent::CreateBuffer(ID3D12Device* device)
+void Mesh::CreateBuffer(ID3D12Device* device)
 {
     if (m_vertices.empty()) return;
 

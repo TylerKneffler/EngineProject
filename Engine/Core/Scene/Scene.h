@@ -38,6 +38,9 @@ public:
     Scene()  = default;
     ~Scene() = default;
 
+    // --- Editor Settings ---
+    Object editorCamera; // not used by the game runtime, used for editor scene view navigation
+
     // Build GPU resources (grid vertex buffer, PSO, root sig).
     // Must be called once before the first Render() call.
     void Init(ID3D12Device* device);
