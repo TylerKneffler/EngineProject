@@ -1,4 +1,5 @@
 #include "Scene.h"
+#include "Core/Compoonents/Camera.h"
 #include <d3dcompiler.h>
 #include <stdexcept>
 
@@ -66,6 +67,11 @@ void Scene::Init(ID3D12Device* device)
     // Constant buffer for the grid (just MVP, aligned to 256 B).
     constexpr UINT kCBSize = 256;
     m_gridCB = CreateUploadBuffer(device, kCBSize, &m_gridCBMapped);
+
+    // Set up the default editor camera.
+    // Position is owned by the Transform; target defaults to the origin.
+    editorCamera.AddComponent<Camera>();
+    editorCamera.transform.position = { 0.f, 1.5f, -3.f };
 }
 
 // ---------------------------------------------------------------------------

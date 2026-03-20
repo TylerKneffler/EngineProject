@@ -62,8 +62,9 @@ add_library(Engine STATIC
     Engine/Core/Object/Object.cpp
     Engine/Core/Scene/Scene.cpp
     Engine/Core/Compoonents/Transform.cpp
-    Engine/Core/Compoonents/MeshComponent.cpp
-    Engine/Core/Compoonents/MaterialComponent.cpp
+    Engine/Core/Compoonents/Mesh.cpp
+    Engine/Core/Compoonents/Material.cpp
+    Engine/Core/Compoonents/Camera.cpp
     ${ALL_HEADERS}
 )
 target_include_directories(Engine PUBLIC

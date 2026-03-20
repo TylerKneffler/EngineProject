@@ -4,6 +4,7 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Compoonents/Material.h"
+#include "Core/Compoonents/Camera.h"
 #include "Scene/SceneViewport.h"
 #include "imgui_internal.h"  // DockBuilder API
 
@@ -68,17 +69,22 @@ int WINAPI wWinMain(
     auto renderer = std::make_unique<DX12EditorRenderer>();
     renderer->Init(window->GetHWND(), window->GetWidth(), window->GetHeight());
 
-    // Scene viewport — renders 3-D content into an offscreen texture (SRV slot 1).
-    auto [srvCpu, srvGpu] = renderer->GetSrvSlot(1);
-    SceneViewport sceneViewport;
-    sceneViewport.Init(renderer->GetDevice(),
-                       window->GetWidth(), window->GetHeight(),
-                       srvCpu, srvGpu);
-
     // -----------------------------------------------------------------------
     // Cube pipeline — temporary home in Main; will be extracted later
     // -----------------------------------------------------------------------
     ID3D12Device* device = renderer->GetDevice();
+
+    // Scene must be initialised before the viewport so it can be passed in.
+    Scene scene;
+    scene.Init(device);
+
+    // Scene viewport — renders 3-D content into an offscreen texture (SRV slot 1).
+    auto [srvCpu, srvGpu] = renderer->GetSrvSlot(1);
+    SceneViewport sceneViewport;
+    sceneViewport.Init(device,
+                       window->GetWidth(), window->GetHeight(),
+                       srvCpu, srvGpu,
+                       &scene);
 
     // Compile shaders at runtime from embedded HLSL source.
     ComPtr<ID3DBlob> vsBlob, psBlob, errBlob;
@@ -161,9 +167,6 @@ int WINAPI wWinMain(
     ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso)));
 
     // Create the scene and add the cube as a managed game object.
-    Scene scene;
-    scene.Init(device);
-
     Object*            cubeObj = scene.AddObject("Cube");
     Mesh*     mesh    = cubeObj->AddComponent<Mesh>();
     Material* mat     = cubeObj->AddComponent<Material>();
@@ -212,9 +215,6 @@ int WINAPI wWinMain(
     QueryPerformanceFrequency(&perfFreq);
     QueryPerformanceCounter(&lastCounter);
 
-    float yaw   = 0.0f; // cumulative Y-axis rotation (radians)
-    float pitch = 0.0f; // cumulative X-axis rotation (radians)
-
     // -----------------------------------------------------------------------
     // Window callbacks
     // -----------------------------------------------------------------------
@@ -253,13 +253,10 @@ int WINAPI wWinMain(
 
                     float aspect = sceneViewport.GetAspect();
 
-                    XMMATRIX worldMat = XMMatrixRotationX(pitch) * XMMatrixRotationY(yaw);
-                    XMMATRIX view  = XMMatrixLookAtLH(
-                        XMVectorSet(0.f,  1.5f, -3.f, 1.f),
-                        XMVectorSet(0.f,  0.f,   0.f, 1.f),
-                        XMVectorSet(0.f,  1.f,   0.f, 0.f));
-                    XMMATRIX proj  = XMMatrixPerspectiveFovLH(
-                        XMConvertToRadians(60.f), aspect, 0.01f, 100.f);
+                    Camera* cam  = scene.editorCamera.GetComponent<Camera>();
+                    XMMATRIX worldMat = XMMatrixIdentity();
+                    XMMATRIX view     = cam->GetViewMatrix();
+                    XMMATRIX proj     = cam->GetProjectionMatrix(aspect);
 
                     // XMStoreFloat4x4 writes row-major, which HLSL cbuffer reads as
                     // row-major — no extra transpose needed. mul(M, v) in the shader
@@ -322,15 +319,6 @@ int WINAPI wWinMain(
             ImGui::End();
 
             sceneViewport.DrawPanel();
-
-            // Rotate cube by dragging left mouse button inside the Scene panel.
-            constexpr float kSensitivity = 0.005f;
-            yaw   += sceneViewport.GetDragDeltaX() * kSensitivity;
-            pitch += sceneViewport.GetDragDeltaY() * kSensitivity;
-            // Clamp pitch so the cube doesn't flip past vertical (~89 degrees).
-            constexpr float kPitchLimit = 1.5607963f; // XM_PIDIV2 - 0.01
-            if (pitch >  kPitchLimit) pitch =  kPitchLimit;
-            if (pitch < -kPitchLimit) pitch = -kPitchLimit;
         });
     };
 

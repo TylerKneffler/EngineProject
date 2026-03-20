@@ -1,18 +1,23 @@
 #pragma once
 #include "pch.h"
 
+class Scene; // forward declaration — full definition in Core/Scene/Scene.h
+
 // ---------------------------------------------------------------------------
 // SceneViewport
 //
 // Renders the 3-D scene into an off-screen texture and presents it inside an
 // ImGui panel labelled "Scene".
 //
-// ---- Per-frame call order (inside drawFn) ----
+// ---- Per-frame call order ----
 //
-//   // 1. Record GPU work that writes 3-D content into the offscreen texture.
+//   // 1. Initialise once, passing the scene whose editorCamera will be driven.
+//   sceneViewport.Init(device, width, height, srvCpu, srvGpu, &scene);
+//
+//   // 2. Record GPU work that writes 3-D content into the offscreen texture.
 //   sceneViewport.Render(renderer.GetCommandList(), renderer.GetCurrentRTV());
 //
-//   // 2. Draw the ImGui panel — the texture is now in SRV state for ImGui.
+//   // 3. Draw the ImGui panel — captures mouse input and drives the camera.
 //   sceneViewport.DrawPanel();
 //
 // ---- Resize ----
@@ -35,10 +40,12 @@ public:
 
     // Creates the offscreen texture and registers it in ImGui's SRV heap.
     // srvCpu/srvGpu must be a free slot in ImGui's shader-visible SRV heap.
+    // scene must outlive this viewport; its editorCamera is used for all controls.
     void Init(ID3D12Device* device,
               uint32_t width, uint32_t height,
               D3D12_CPU_DESCRIPTOR_HANDLE srvCpu,
-              D3D12_GPU_DESCRIPTOR_HANDLE srvGpu);
+              D3D12_GPU_DESCRIPTOR_HANDLE srvGpu,
+              Scene* scene);
 
     // Recreates the offscreen texture at the new dimensions.
     // Safe to call only when the GPU is idle (i.e. after renderer->Resize()).
@@ -52,7 +59,8 @@ public:
                 D3D12_CPU_DESCRIPTOR_HANDLE mainRtv,
                 std::function<void(ID3D12GraphicsCommandList*)> drawFn = nullptr);
 
-    // Draws the "Scene" ImGui panel displaying the offscreen texture.
+    // Draws the "Scene" ImGui panel, captures mouse input, and applies the
+    // resulting pan / orbit deltas to the scene's editorCamera.
     void DrawPanel();
 
     // Returns the aspect ratio (width / height) of the scene panel as measured
@@ -60,13 +68,9 @@ public:
     // Use this for the projection matrix to avoid squishing the rendered geometry.
     float GetAspect() const { return m_aspect; }
 
-    // Per-frame mouse drag delta over the scene image (pixels), captured during
-    // the most recent DrawPanel() call. Both values are 0 when not dragging.
-    float GetDragDeltaX() const { return m_dragDeltaX; }
-    float GetDragDeltaY() const { return m_dragDeltaY; }
-
 private:
     void CreateResources(ID3D12Device* device, uint32_t width, uint32_t height);
+    void ApplyCameraControls(float panDX, float panDY, float orbitDX, float orbitDY, float zoom);
 
     ComPtr<ID3D12Resource>       m_texture;     // offscreen colour render target / SRV
     ComPtr<ID3D12DescriptorHeap> m_rtvHeap;     // 1-slot non-shader-visible RTV heap
@@ -79,6 +83,6 @@ private:
     uint32_t m_width   = 0;
     uint32_t m_height  = 0;
     float    m_aspect  = 1.0f;  // scene panel aspect ratio, updated each DrawPanel()
-    float    m_dragDeltaX = 0.0f; // per-frame mouse drag over the image (pixels)
-    float    m_dragDeltaY = 0.0f;
+
+    Scene*   m_scene = nullptr; // non-owning; set via Init()
 };
