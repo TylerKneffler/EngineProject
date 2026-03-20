@@ -34,8 +34,10 @@
 #include <sstream>
 
 // Engine Core
-#include "Core/Object/Object.h"
 #include "Core/Compoonents/Transform.h"
+#include "Core/Compoonents/Camera.h"
+#include "Core/Compoonents/Mesh.h"
+#include "Core/Compoonents/Material.h"
 
 // Lib links (can also be done in .vcxproj)
 #pragma comment(lib, "d3d12.lib")

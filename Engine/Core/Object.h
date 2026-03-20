@@ -2,6 +2,7 @@
 #include "pch.h"
 #include <list>
 #include <algorithm>
+#include "Core/component.h"         
 #include "Core/Compoonents/Transform.h"
 
 class Object

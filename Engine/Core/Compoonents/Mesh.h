@@ -1,5 +1,5 @@
 #pragma once
-#include "../component.h"
+#include "Core/component.h"
 #include <d3d12.h>
 #include <wrl/client.h>
 #include <string>

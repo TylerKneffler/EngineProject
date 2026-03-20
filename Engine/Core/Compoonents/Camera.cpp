@@ -1,5 +1,5 @@
 #include "Camera.h"
-#include "Core/Object/Object.h"
+#include "Core/Object.h"
 #include <cassert>
 
 using namespace DirectX;

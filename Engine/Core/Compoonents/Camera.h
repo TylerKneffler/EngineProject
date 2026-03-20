@@ -1,5 +1,5 @@
 #pragma once
-#include "../component.h"
+#include "Core/component.h"
 #include <DirectXMath.h>
 
 class Camera : public Component

@@ -1,1 +1,1 @@
-#include "component.h"
+#include "Component.h"

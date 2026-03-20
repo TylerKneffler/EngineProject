@@ -1,6 +1,5 @@
 #pragma once
-
-class Object;
+#include "Object.h"
 
 class Component
 {

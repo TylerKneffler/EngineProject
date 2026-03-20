@@ -1,11 +1,11 @@
 #include "Core/Window.h"
 #include "Core/Renderers/Editor/DX12EditorRenderer.h"
-#include "Core/Object/Object.h"
+#include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Compoonents/Material.h"
 #include "Core/Compoonents/Camera.h"
-#include "Scene/SceneViewport.h"
+#include "View/Views/SceneViewport.h"
 #include "imgui_internal.h"  // DockBuilder API
 
 // Fallback for IntelliSense — CMake overrides this with the real absolute path.

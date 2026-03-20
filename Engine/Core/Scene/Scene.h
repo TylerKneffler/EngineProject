@@ -1,7 +1,6 @@
 #pragma once
-#include "pch.h"
-#include "Core/Object/Object.h"
 #include <DirectXMath.h>
+#include "Core/Object.h"
 
 // ---------------------------------------------------------------------------
 // Scene

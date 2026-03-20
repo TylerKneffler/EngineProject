@@ -1,5 +1,5 @@
 #include "Transform.h"
-#include "../Object/Object.h"
+#include "Core/Object.h"
 #include <glm/gtc/matrix_transform.hpp>
 
 glm::vec3 Transform::GetLocalPosition()

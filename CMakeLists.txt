@@ -59,7 +59,7 @@ add_library(Engine STATIC
     Engine/Core/Renderers/Game/DX12GameRenderer.cpp
     Engine/Core/Renderers/Editor/DX12EditorRenderer.cpp
     Engine/Core/component.cpp
-    Engine/Core/Object/Object.cpp
+    Engine/Core/Object.cpp
     Engine/Core/Scene/Scene.cpp
     Engine/Core/Compoonents/Transform.cpp
     Engine/Core/Compoonents/Mesh.cpp
@@ -108,14 +108,17 @@ endif()
 # ---------------------------------------------------------------------------
 add_executable(Editor WIN32
     Engine/Editor/Main.cpp
-    Engine/Editor/Scene/SceneViewport.cpp
-    Engine/Editor/Scene/SceneViewport.h
+    Engine/Editor/Core/View/View.cpp
+    Engine/Editor/Core/View/View.h
+    Engine/Editor/Core/View/Views/SceneViewport.cpp
+    Engine/Editor/Core/View/Views/SceneViewport.h
 )
 target_link_libraries(Editor PRIVATE Engine)
 target_precompile_headers(Editor REUSE_FROM Engine)
 target_include_directories(Editor PRIVATE
     ${CMAKE_SOURCE_DIR}/Engine
     ${CMAKE_SOURCE_DIR}/Engine/Editor
+    ${CMAKE_SOURCE_DIR}/Engine/Editor/Core
 )
 target_compile_definitions(Editor PRIVATE
     ASSETS_PATH="${CMAKE_SOURCE_DIR}/Assets/"
