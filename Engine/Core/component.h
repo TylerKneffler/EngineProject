@@ -1,5 +1,6 @@
 #pragma once
-#include "Object.h"
+
+class Object; // forward declaration — full definition in Object.h
 
 class Component
 {

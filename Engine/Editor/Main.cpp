@@ -5,7 +5,9 @@
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Compoonents/Material.h"
 #include "Core/Compoonents/Camera.h"
-#include "View/Views/SceneViewport.h"
+#include "View/Views/SceneView.h"
+#include "View/Views/HierarchyView.h"
+#include "View/Views/PropertiesView.h"
 #include "imgui_internal.h"  // DockBuilder API
 
 // Fallback for IntelliSense — CMake overrides this with the real absolute path.
@@ -80,12 +82,16 @@ int WINAPI wWinMain(
 
     // Scene viewport — renders 3-D content into an offscreen texture (SRV slot 1).
     auto [srvCpu, srvGpu] = renderer->GetSrvSlot(1);
-    SceneViewport sceneViewport;
+    SceneView sceneViewport;
     sceneViewport.Init(device,
                        window->GetWidth(), window->GetHeight(),
                        srvCpu, srvGpu,
                        &scene);
 
+    HierarchyView hierarchy;
+    hierarchy.Init(&scene);
+    PropertiesView propertiesView;
+    hierarchy.OnSelectionChanged = [&](Object* obj) { propertiesView.SetSelectedObject(obj); };
     // Compile shaders at runtime from embedded HLSL source.
     ComPtr<ID3DBlob> vsBlob, psBlob, errBlob;
 
@@ -158,7 +164,7 @@ int WINAPI wWinMain(
     psoDesc.DepthStencilState     = dsDesc;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     psoDesc.NumRenderTargets      = 1;
-    psoDesc.RTVFormats[0]         = DXGI_FORMAT_R8G8B8A8_UNORM; // matches SceneViewport
+    psoDesc.RTVFormats[0]         = DXGI_FORMAT_R8G8B8A8_UNORM; // matches SceneView
     psoDesc.DSVFormat             = DXGI_FORMAT_D32_FLOAT;
     psoDesc.SampleDesc            = { 1, 0 };
     psoDesc.SampleMask            = UINT_MAX;
@@ -296,7 +302,7 @@ int WINAPI wWinMain(
                 ImGui::DockBuilderSplitNode(dockspaceId, ImGuiDir_Left,  0.20f, &left,   &center);
                 ImGui::DockBuilderSplitNode(center,      ImGuiDir_Right, 0.31f, &right,  &center);
 
-                ImGui::DockBuilderDockWindow("Hierarchy",  left);
+                ImGui::DockBuilderDockWindow("HierarchyView",  left);
                 ImGui::DockBuilderDockWindow("Scene",      center);
                 ImGui::DockBuilderDockWindow("Properties", right);
                 ImGui::DockBuilderFinish(dockspaceId);
@@ -312,12 +318,8 @@ int WINAPI wWinMain(
                 ImGui::EndMainMenuBar();
             }
 
-            ImGui::Begin("Hierarchy");
-            ImGui::End();
-
-            ImGui::Begin("Properties");
-            ImGui::End();
-
+            hierarchy.DrawPanel();
+            propertiesView.DrawPanel();
             sceneViewport.DrawPanel();
         });
     };

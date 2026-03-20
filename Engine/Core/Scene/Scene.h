@@ -13,7 +13,7 @@
 //
 //   scene.Init(device);
 //
-//   // inside SceneViewport drawFn:
+//   // inside SceneView drawFn:
 //   scene.Render(cmd, view, proj);
 // ---------------------------------------------------------------------------
 
@@ -45,7 +45,7 @@ public:
     void Init(ID3D12Device* device);
 
     // Draw all objects and scene helpers (grid) using the supplied VP matrices.
-    // Call inside the SceneViewport drawFn.
+    // Call inside the SceneView drawFn.
     void Render(ID3D12GraphicsCommandList* cmd,
                 const DirectX::XMMATRIX&  view,
                 const DirectX::XMMATRIX&  proj);

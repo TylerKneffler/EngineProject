@@ -12,6 +12,7 @@ public:
     Object(Transform transform);
     ~Object();
 
+    std::string name;
     Transform transform;
 
     Object*             Parent = nullptr;

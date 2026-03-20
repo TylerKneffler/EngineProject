@@ -1,10 +1,9 @@
 #pragma once
 #include "View/View.h"
-
-class Scene; // full definition in Core/Scene/Scene.h — only a pointer is stored here
+#include "Core/Scene/Scene.h"
 
 // ---------------------------------------------------------------------------
-// SceneViewport — editor Scene panel
+// SceneView — editor Scene panel
 //
 // Extends View with scene-camera orbit/pan/zoom controls driven by mouse
 // input captured inside the "Scene" ImGui panel.
@@ -14,11 +13,11 @@ class Scene; // full definition in Core/Scene/Scene.h — only a pointer is stor
 //   sceneViewport.Render(cmdList, mainRtv, drawFn);   // inherited from View
 //   sceneViewport.DrawPanel();                        // overridden here
 // ---------------------------------------------------------------------------
-class SceneViewport : public View
+class SceneView : public View
 {
 public:
-    SceneViewport()  = default;
-    ~SceneViewport() = default;
+    SceneView()  = default;
+    ~SceneView() = default;
 
     // Calls View::Init then stores the scene pointer.
     // scene must outlive this viewport; its editorCamera drives all controls.

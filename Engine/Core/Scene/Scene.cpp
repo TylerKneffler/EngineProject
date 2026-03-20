@@ -244,10 +244,11 @@ Object* Scene::AddObject()
     return raw;
 }
 
-Object* Scene::AddObject(const std::string& /*name*/)
+Object* Scene::AddObject(const std::string& name)
 {
-    // Name support can be added to Object later; for now just create one.
-    return AddObject();
+    Object* obj = AddObject();
+    obj->name = name;
+    return obj;
 }
 
 void Scene::RemoveObject(Object* obj)

@@ -1,12 +1,12 @@
 
-#include "SceneViewport.h"
+#include "SceneView.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Camera.h"
 
 // ---------------------------------------------------------------------------
 // Init — store the scene pointer, then delegate resource creation to View.
 // ---------------------------------------------------------------------------
-void SceneViewport::Init(ID3D12Device* device,
+void SceneView::Init(ID3D12Device* device,
                          uint32_t width, uint32_t height,
                          D3D12_CPU_DESCRIPTOR_HANDLE srvCpu,
                          D3D12_GPU_DESCRIPTOR_HANDLE srvGpu,
@@ -19,7 +19,7 @@ void SceneViewport::Init(ID3D12Device* device,
 // ---------------------------------------------------------------------------
 // DrawPanel
 // ---------------------------------------------------------------------------
-void SceneViewport::DrawPanel()
+void SceneView::DrawPanel()
 {
     // Remove inner padding so the texture fills the panel edge-to-edge.
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.f, 0.f));
@@ -67,7 +67,7 @@ void SceneViewport::DrawPanel()
 // ---------------------------------------------------------------------------
 // ApplyCameraControls
 // ---------------------------------------------------------------------------
-void SceneViewport::ApplyCameraControls(float panDX, float panDY,
+void SceneView::ApplyCameraControls(float panDX, float panDY,
                                         float orbitDX, float orbitDY,
                                         float zoom)
 {

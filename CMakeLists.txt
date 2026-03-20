@@ -110,8 +110,12 @@ add_executable(Editor WIN32
     Engine/Editor/Main.cpp
     Engine/Editor/Core/View/View.cpp
     Engine/Editor/Core/View/View.h
-    Engine/Editor/Core/View/Views/SceneViewport.cpp
-    Engine/Editor/Core/View/Views/SceneViewport.h
+    Engine/Editor/Core/View/Views/SceneView.cpp
+    Engine/Editor/Core/View/Views/SceneView.h
+    Engine/Editor/Core/View/Views/HierarchyView.cpp
+    Engine/Editor/Core/View/Views/HierarchyView.h
+    Engine/Editor/Core/View/Views/PropertiesView.cpp
+    Engine/Editor/Core/View/Views/PropertiesView.h
 )
 target_link_libraries(Editor PRIVATE Engine)
 target_precompile_headers(Editor REUSE_FROM Engine)
