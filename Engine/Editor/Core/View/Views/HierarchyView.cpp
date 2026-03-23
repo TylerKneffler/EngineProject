@@ -33,8 +33,10 @@ void HierarchyView::DrawPanel()
         ImGui::TreePop();
     }
 
-    // Clicking in empty space deselects.
-    if (ImGui::IsMouseDown(ImGuiMouseButton_Left) && ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem))
+    // Clicking on empty space (no item under cursor) deselects.
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+        ImGui::IsWindowHovered() &&
+        !ImGui::IsAnyItemHovered())
         SetSelectedObject(nullptr);
 
     ImGui::End();
