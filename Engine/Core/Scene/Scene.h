@@ -46,9 +46,8 @@ public:
 
     // Draw all objects and scene helpers (grid) using the supplied VP matrices.
     // Call inside the SceneView drawFn.
-    void Render(ID3D12GraphicsCommandList* cmd,
-                const DirectX::XMMATRIX&  view,
-                const DirectX::XMMATRIX&  proj);
+    void Render(ID3D12GraphicsCommandList* cmd, float aspect);
+    void SetSelectedObject(Object* obj) { m_selectedObject = obj; }
 
     // Object management
     Object* AddObject();                     // create an empty Object owned by this scene
@@ -77,6 +76,19 @@ private:
     // Shared 256-byte constant buffer: just a float4x4 MVP.
     Microsoft::WRL::ComPtr<ID3D12Resource> m_gridCB;
     void*                                  m_gridCBMapped = nullptr;
+
+    // ---- Object rendering resources ----
+    void BuildObjectPipeline(ID3D12Device* device);
+
+    static constexpr UINT kMaxObjects = 64;
+    static constexpr UINT kCBStride   = 256;
+
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_objectRootSig;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_objectPSO;
+    Microsoft::WRL::ComPtr<ID3D12Resource>      m_objectCB;
+    void*                                       m_objectCBMapped = nullptr;
+
+    Object* m_selectedObject = nullptr;
 
     ID3D12Device* m_device = nullptr; // non-owning, valid for the lifetime of the scene
 };

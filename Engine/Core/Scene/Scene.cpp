@@ -1,5 +1,7 @@
 #include "Scene.h"
 #include "Core/Compoonents/Camera.h"
+#include "Core/Compoonents/Mesh.h"
+#include "Core/Compoonents/Material.h"
 #include <d3dcompiler.h>
 #include <stdexcept>
 
@@ -30,6 +32,52 @@ float4 PSMain(float4 pos   : SV_POSITION,
     return color;
 }
 )";
+
+// ---------------------------------------------------------------------------
+// Object HLSL — Phong-shaded mesh shader
+// ---------------------------------------------------------------------------
+
+static constexpr char kObjectVS[] = R"(
+cbuffer Constants : register(b0) {
+    float4x4 mvp;
+    float4x4 world;
+};
+void VSMain(float3 pos    : POSITION,
+            float3 normal : NORMAL,
+            out float4 oPos    : SV_POSITION,
+            out float3 oNormal : NORMAL)
+{
+    oPos    = mul(mvp, float4(pos, 1.0));
+    oNormal = mul((float3x3)world, normal);
+}
+)";
+
+static constexpr char kObjectPS[] = R"(
+cbuffer Constants : register(b0) {
+    float4x4 mvp;
+    float4x4 world;
+    float4   diffuseColor;
+    float4   ambientColor;
+    float4   specularColor; // w = shininess
+};
+float4 PSMain(float4 pos    : SV_POSITION,
+              float3 normal : NORMAL) : SV_TARGET
+{
+    float3 lightDir = normalize(float3(1.0, 2.0, -1.0));
+    float  diffuse  = saturate(dot(normalize(normal), lightDir));
+    float3 color    = ambientColor.rgb + diffuseColor.rgb * diffuse;
+    return float4(color, 1.0);
+}
+)";
+
+struct CBData
+{
+    DirectX::XMFLOAT4X4 mvp;
+    DirectX::XMFLOAT4X4 world;
+    DirectX::XMFLOAT4   diffuseColor;
+    DirectX::XMFLOAT4   ambientColor;
+    DirectX::XMFLOAT4   specularColor; // xyz = color, w = shininess
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -72,6 +120,8 @@ void Scene::Init(ID3D12Device* device)
     // Position is owned by the Transform; target defaults to the origin.
     editorCamera.AddComponent<Camera>();
     editorCamera.transform.position = { 0.f, 1.5f, -3.f };
+
+    BuildObjectPipeline(device);
 }
 
 // ---------------------------------------------------------------------------
@@ -209,14 +259,150 @@ void Scene::BuildGridPipeline(ID3D12Device* device)
 }
 
 // ---------------------------------------------------------------------------
+// Scene::BuildObjectPipeline
+// ---------------------------------------------------------------------------
+
+void Scene::BuildObjectPipeline(ID3D12Device* device)
+{
+    // Compile shaders.
+    ComPtr<ID3DBlob> vsBlob, psBlob, errBlob;
+    if (FAILED(D3DCompile(kObjectVS, sizeof(kObjectVS) - 1, "ObjectVS",
+            nullptr, nullptr, "VSMain", "vs_5_0", 0, 0, &vsBlob, &errBlob)))
+        throw std::runtime_error(static_cast<char*>(errBlob->GetBufferPointer()));
+    if (FAILED(D3DCompile(kObjectPS, sizeof(kObjectPS) - 1, "ObjectPS",
+            nullptr, nullptr, "PSMain", "ps_5_0", 0, 0, &psBlob, &errBlob)))
+        throw std::runtime_error(static_cast<char*>(errBlob->GetBufferPointer()));
+
+    // Root signature: one root CBV at b0, visible to all stages.
+    D3D12_ROOT_PARAMETER rp{};
+    rp.ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
+    rp.Descriptor.ShaderRegister = 0;
+    rp.ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
+
+    D3D12_ROOT_SIGNATURE_DESC rsDesc{};
+    rsDesc.NumParameters = 1;
+    rsDesc.pParameters   = &rp;
+    rsDesc.Flags         = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+
+    ComPtr<ID3DBlob> sigBlob, sigErr;
+    D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1, &sigBlob, &sigErr);
+    device->CreateRootSignature(0, sigBlob->GetBufferPointer(),
+        sigBlob->GetBufferSize(), IID_PPV_ARGS(&m_objectRootSig));
+
+    // Input layout: POSITION (float3) + NORMAL (float3).
+    D3D12_INPUT_ELEMENT_DESC layout[] =
+    {
+        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0,  0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+    };
+
+    D3D12_RASTERIZER_DESC rasterDesc{};
+    rasterDesc.FillMode              = D3D12_FILL_MODE_SOLID;
+    rasterDesc.CullMode              = D3D12_CULL_MODE_BACK;
+    rasterDesc.FrontCounterClockwise = TRUE;
+    rasterDesc.DepthClipEnable       = TRUE;
+
+    D3D12_RENDER_TARGET_BLEND_DESC rtb{};
+    rtb.BlendEnable           = FALSE;
+    rtb.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    D3D12_BLEND_DESC blendDesc{};
+    blendDesc.RenderTarget[0] = rtb;
+
+    D3D12_DEPTH_STENCIL_DESC dsDesc{};
+    dsDesc.DepthEnable    = TRUE;
+    dsDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+    dsDesc.DepthFunc      = D3D12_COMPARISON_FUNC_LESS;
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
+    psoDesc.pRootSignature        = m_objectRootSig.Get();
+    psoDesc.VS                    = { vsBlob->GetBufferPointer(), vsBlob->GetBufferSize() };
+    psoDesc.PS                    = { psBlob->GetBufferPointer(), psBlob->GetBufferSize() };
+    psoDesc.InputLayout           = { layout, _countof(layout) };
+    psoDesc.RasterizerState       = rasterDesc;
+    psoDesc.BlendState            = blendDesc;
+    psoDesc.DepthStencilState     = dsDesc;
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psoDesc.NumRenderTargets      = 1;
+    psoDesc.RTVFormats[0]         = DXGI_FORMAT_R8G8B8A8_UNORM;
+    psoDesc.DSVFormat             = DXGI_FORMAT_D32_FLOAT;
+    psoDesc.SampleDesc            = { 1, 0 };
+    psoDesc.SampleMask            = UINT_MAX;
+    device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_objectPSO));
+
+    // Constant buffer: kMaxObjects slots, each kCBStride bytes apart.
+    constexpr UINT64 kTotalCBSize = static_cast<UINT64>(kMaxObjects) * kCBStride;
+    D3D12_HEAP_PROPERTIES hp{}; hp.Type = D3D12_HEAP_TYPE_UPLOAD;
+    D3D12_RESOURCE_DESC rd{};
+    rd.Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER;
+    rd.Width            = kTotalCBSize;
+    rd.Height           = rd.DepthOrArraySize = rd.MipLevels = 1;
+    rd.SampleDesc.Count = 1;
+    rd.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    device->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &rd,
+        D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&m_objectCB));
+    m_objectCB->Map(0, nullptr, &m_objectCBMapped);
+}
+
+// ---------------------------------------------------------------------------
 // Scene::Render
 // ---------------------------------------------------------------------------
 
-void Scene::Render(ID3D12GraphicsCommandList* cmd,
-                   const XMMATRIX& view,
-                   const XMMATRIX& proj)
+void Scene::Render(ID3D12GraphicsCommandList* cmd, float aspect)
 {
-    // --- Render grid (after opaque objects so blending works correctly) ---
+    // Prefer a Camera component on the selected object; fall back to the editor camera.
+    Camera* cam = nullptr;
+    if (m_selectedObject)
+        cam = m_selectedObject->GetComponent<Camera>();
+    if (!cam)
+        cam = editorCamera.GetComponent<Camera>();
+    if (!cam) return;
+
+    XMMATRIX view = cam->GetViewMatrix();
+    XMMATRIX proj = cam->GetProjectionMatrix(aspect);
+
+    // Draw all scene objects that have a Mesh component.
+    UINT slot = 0;
+    for (const auto& objPtr : m_objects)
+    {
+        if (slot >= kMaxObjects) break;
+        Object* obj  = objPtr.get();
+        Mesh*   mesh = obj->GetComponent<Mesh>();
+        if (!mesh || !mesh->IsReady()) continue;
+
+        Material* mat      = obj->GetComponent<Material>();
+        glm::mat4 glmWorld = obj->transform.GetWorldMatrix();
+        XMMATRIX  worldMat = XMLoadFloat4x4(reinterpret_cast<const XMFLOAT4X4*>(&glmWorld));
+        UINT64    offset   = static_cast<UINT64>(slot) * kCBStride;
+
+        CBData cbData{};
+        XMStoreFloat4x4(&cbData.mvp,   worldMat * view * proj);
+        XMStoreFloat4x4(&cbData.world, worldMat);
+        if (mat)
+        {
+            cbData.diffuseColor  = { mat->diffuseColor.r,  mat->diffuseColor.g,  mat->diffuseColor.b,  1.f };
+            cbData.ambientColor  = { mat->ambientColor.r,  mat->ambientColor.g,  mat->ambientColor.b,  1.f };
+            cbData.specularColor = { mat->specularColor.r, mat->specularColor.g, mat->specularColor.b, mat->shininess };
+        }
+        else
+        {
+            cbData.diffuseColor  = { 0.8f, 0.8f, 0.8f, 1.f };
+            cbData.ambientColor  = { 0.1f, 0.1f, 0.1f, 1.f };
+            cbData.specularColor = { 1.f,  1.f,  1.f,  32.f };
+        }
+        memcpy(static_cast<uint8_t*>(m_objectCBMapped) + offset, &cbData, sizeof(cbData));
+
+        cmd->SetGraphicsRootSignature(m_objectRootSig.Get());
+        cmd->SetPipelineState(m_objectPSO.Get());
+        cmd->SetGraphicsRootConstantBufferView(0, m_objectCB->GetGPUVirtualAddress() + offset);
+        D3D12_VERTEX_BUFFER_VIEW vbv = mesh->GetVertexBufferView();
+        cmd->IASetVertexBuffers(0, 1, &vbv);
+        cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        cmd->DrawInstanced(mesh->GetVertexCount(), 1, 0, 0);
+
+        ++slot;
+    }
+
+    // Draw scene helpers (grid) after opaque objects so blending works correctly.
     if (settings.showGrid && m_gridPSO)
     {
         XMFLOAT4X4 mvp;
