@@ -47,4 +47,15 @@ public:
         }
         return nullptr;
     }
+
+    template<typename T>
+    const T* GetComponent() const
+    {
+        for (const Component* comp : Components)
+        {
+            if (const T* casted = dynamic_cast<const T*>(comp))
+                return casted;
+        }
+        return nullptr;
+    }
 };

@@ -1,4 +1,5 @@
 #include "Object.h"
+#include "Core/Script.h"
 
 Object::Object()
 {
@@ -25,10 +26,16 @@ void Object::Disabled()
 
 void Object::Start()
 {
+    for (Component* comp : Components)
+        if (Script* s = dynamic_cast<Script*>(comp))
+            s->Start();
 }
 
 void Object::Update()
 {
+    for (Component* comp : Components)
+        if (Script* s = dynamic_cast<Script*>(comp))
+            s->Update();
 }
 
 void Object::Destroy()

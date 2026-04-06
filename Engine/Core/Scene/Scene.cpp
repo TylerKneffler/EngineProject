@@ -347,11 +347,19 @@ void Scene::BuildObjectPipeline(ID3D12Device* device)
 // Scene::Render
 // ---------------------------------------------------------------------------
 
-void Scene::Render(ID3D12GraphicsCommandList* cmd, float aspect)
+Camera* Scene::FindGameCamera()
 {
-    // Prefer a Camera component on the selected object; fall back to the editor camera.
-    Camera* cam = nullptr;
-    if (m_selectedObject)
+    for (const auto& obj : m_objects)
+        if (Camera* cam = obj->GetComponent<Camera>())
+            return cam;
+    return editorCamera.GetComponent<Camera>();
+}
+
+void Scene::Render(ID3D12GraphicsCommandList* cmd, float aspect, Camera* cameraOverride)
+{
+    // Priority: explicit override > selected object's camera > editor camera.
+    Camera* cam = cameraOverride;
+    if (!cam && m_selectedObject)
         cam = m_selectedObject->GetComponent<Camera>();
     if (!cam)
         cam = editorCamera.GetComponent<Camera>();

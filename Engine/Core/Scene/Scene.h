@@ -46,8 +46,13 @@ public:
 
     // Draw all objects and scene helpers (grid) using the supplied VP matrices.
     // Call inside the SceneView drawFn.
-    void Render(ID3D12GraphicsCommandList* cmd, float aspect);
+    // cameraOverride: if non-null, use this camera instead of the normal selection.
+    void Render(ID3D12GraphicsCommandList* cmd, float aspect, Camera* cameraOverride = nullptr);
     void SetSelectedObject(Object* obj) { m_selectedObject = obj; }
+
+    // Returns the first Camera component found on any scene game object,
+    // or the editor camera as a fallback. Used by GameView.
+    Camera* FindGameCamera();
 
     // Object management
     Object* AddObject();                     // create an empty Object owned by this scene
