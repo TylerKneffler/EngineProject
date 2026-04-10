@@ -20,10 +20,11 @@
 struct SceneSettings
 {
     // Grid
-    bool  showGrid       = true;
-    int   gridHalfSize   = 10;          // lines extend ±gridHalfSize on X and Z
-    float gridCellSize   = 1.f;         // spacing between lines (world units)
-    float gridOpacity    = 0.4f;        // 0 = invisible, 1 = fully opaque
+    bool  showGrid        = true;
+    int   gridHalfSize    = 10;          // legacy — kept for serialization compat
+    float gridCellSize    = 1.f;         // spacing between lines (world units)
+    float gridOpacity     = 0.4f;        // 0 = invisible, 1 = fully opaque
+    float gridFadeDistance = 80.f;       // world units; grid fades to 0 at this distance
     DirectX::XMFLOAT3 gridColor        = { 0.45f, 0.45f, 0.45f };
     DirectX::XMFLOAT3 gridOriginColor  = { 0.30f, 0.50f, 0.80f }; // X/Z axis lines
 
@@ -58,7 +59,15 @@ public:
     Object* AddObject();                     // create an empty Object owned by this scene
     Object* AddObject(const std::string& name);
     void    RemoveObject(Object* obj);
+    void    ClearObjects();                  // remove all objects and reset selection
     const std::vector<std::unique_ptr<Object>>& GetObjects() const { return m_objects; }
+
+    // Serialization — delegates to SceneSerializer.
+    // Save writes the scene to a .scene JSON file.
+    // Load clears the scene and repopulates it from the file.  Mesh GPU
+    // buffers are created automatically using the device stored by Init().
+    bool Save(const std::string& path) const;
+    bool Load(const std::string& path);
 
     SceneSettings settings;
 
@@ -67,18 +76,12 @@ private:
     std::vector<std::unique_ptr<Object>> m_objects;
 
     // ---- Grid resources ----
-    void BuildGridBuffers(ID3D12Device* device);
     void BuildGridPipeline(ID3D12Device* device);
 
-    struct GridVertex { float x, y, z, r, g, b, a; };
-
-    Microsoft::WRL::ComPtr<ID3D12Resource>      m_gridVB;
-    D3D12_VERTEX_BUFFER_VIEW                    m_gridVBV{};
-    uint32_t                                    m_gridVertexCount = 0;
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_gridRootSig;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_gridPSO;
 
-    // Shared 256-byte constant buffer: just a float4x4 MVP.
+    // Per-frame grid constant buffer (256 bytes).
     Microsoft::WRL::ComPtr<ID3D12Resource> m_gridCB;
     void*                                  m_gridCBMapped = nullptr;
 

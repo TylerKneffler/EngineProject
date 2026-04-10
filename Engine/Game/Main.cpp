@@ -4,6 +4,7 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Compoonents/Material.h"
+#include "Core/Serialization/SceneSerializer.h"
 #include "Scripts/Rotate.h"
 
 // Fallback for IntelliSense — CMake overrides this with the real absolute path.
@@ -29,13 +30,21 @@ int WINAPI wWinMain(
     Scene scene;
     scene.Init(device);
 
-    // Load the default scene content.
+    // Register script types for scene deserialization.
+    SceneSerializer::Register("Rotate", []() -> Component* { return new Rotate(); });
+
+    // Try to load the saved scene; fall back to a built-in default scene if none exists.
+    const std::string kScenePath = std::string(ASSETS_PATH) + "Scenes/default.scene";
+    if (!scene.Load(kScenePath))
+    {
+        // Default scene — used when no .scene file has been saved yet.
     Object* cubeObj = scene.AddObject("Cube");
     Mesh*   mesh    = cubeObj->AddComponent<Mesh>();
     cubeObj->AddComponent<Material>();
     cubeObj->AddComponent<Rotate>(); // spins 45 deg/s around Y by default
     mesh->LoadFromFile(ASSETS_PATH "cube.obj");
-    mesh->CreateBuffer(device);
+        mesh->CreateBuffer(device);
+    }
 
     // Start lifecycle.
     for (const auto& obj : scene.GetObjects())

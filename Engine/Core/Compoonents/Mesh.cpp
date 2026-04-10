@@ -20,6 +20,7 @@ static void ParseFaceToken(const std::string& t, int& vi, int& vni)
 
 void Mesh::LoadFromFile(const std::string& path)
 {
+    m_filePath = path;  // store for serialization
     std::ifstream file(path);
     if (!file.is_open())
         throw std::runtime_error("Mesh: failed to open OBJ: " + path);
@@ -104,4 +105,20 @@ void Mesh::CreateBuffer(ID3D12Device* device)
     m_ready = true;
 }
 #pragma endregion
-#pragma endregion
+
+// ---- Serialization ----------------------------------------------------------
+JsonValue Mesh::Serialize() const
+{
+    JsonValue node = JsonValue::MakeObject();
+    node.Set("type", JsonValue(std::string("Mesh")));
+    node.Set("file", JsonValue(m_filePath));
+    return node;
+}
+
+void Mesh::Deserialize(const JsonValue& v)
+{
+    m_filePath = v["file"].AsString();
+    if (!m_filePath.empty())
+        LoadFromFile(m_filePath);
+    // CreateBuffer() must be called separately once a D3D12 device is available.
+}

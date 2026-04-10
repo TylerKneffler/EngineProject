@@ -18,4 +18,9 @@ public:
 
     void Start()  override;
     void Update() override;
+
+    // Serialization
+    std::string GetTypeName() const override { return "Rotate"; }
+    JsonValue   Serialize()   const override;
+    void        Deserialize(const JsonValue& v) override;
 };

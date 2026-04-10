@@ -4,6 +4,7 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Compoonents/Material.h"
+#include "Core/Serialization/SceneSerializer.h"
 #include "View/Views/SceneView.h"
 #include "View/Views/GameView.h"
 #include "View/Views/HierarchyView.h"
@@ -74,6 +75,9 @@ int WINAPI wWinMain(
     // Scene must be initialised before the viewport so it can be passed in.
     Scene scene;
     scene.Init(device);
+
+    // Register script component types for scene serialization.
+    SceneSerializer::Register("Rotate", []() -> Component* { return new Rotate(); });
 
     // Scene viewport — renders 3-D content into an offscreen texture (SRV slot 1).
     auto [srvCpu, srvGpu] = renderer->GetSrvSlot(1);
@@ -221,6 +225,11 @@ int WINAPI wWinMain(
             {
                 if (ImGui::BeginMenu("File"))
                 {
+                    if (ImGui::MenuItem("Save Scene", "Ctrl+S"))
+                        scene.Save(std::string(ASSETS_PATH) + "Scenes/default.scene");
+                    if (ImGui::MenuItem("Load Scene"))
+                        scene.Load(std::string(ASSETS_PATH) + "Scenes/default.scene");
+                    ImGui::Separator();
                     if (ImGui::MenuItem("Exit")) PostQuitMessage(0);
                     ImGui::EndMenu();
                 }

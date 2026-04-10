@@ -13,4 +13,9 @@ public:
     glm::vec3 ambientColor  { 0.1f, 0.1f, 0.1f };
     glm::vec3 specularColor { 1.f, 1.f, 1.f };
     float     shininess     { 32.f };
+
+    // Serialization
+    std::string GetTypeName() const override { return "Material"; }
+    JsonValue   Serialize()   const override;
+    void        Deserialize(const JsonValue& v) override;
 };

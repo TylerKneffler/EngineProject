@@ -83,11 +83,17 @@ target_link_libraries(Engine PUBLIC
     ImGui
     glm::glm
 )
+target_compile_definitions(Engine PUBLIC
+    ENGINE_SHADERS_PATH="${CMAKE_SOURCE_DIR}/Engine/Core/Shaders/"
+)
 
 # ---------------------------------------------------------------------------
 # Compiler flags (MSVC)
 # ---------------------------------------------------------------------------
 if(MSVC)
+    # /FS is required globally when MSBuild builds targets in parallel — without
+    # it multiple cl.exe processes race to write the same .pdb and corrupt it.
+    add_compile_options(/FS)
     target_compile_definitions(Engine PUBLIC
         UNICODE
         _UNICODE
@@ -97,6 +103,7 @@ if(MSVC)
     target_compile_options(Engine PRIVATE
         /W4
         /MP          # parallel compilation
+        /FS          # force synchronous PDB writes (required with /MP)
         $<$<CONFIG:Release>:/O2 /GL>
     )
     target_link_options(Engine INTERFACE

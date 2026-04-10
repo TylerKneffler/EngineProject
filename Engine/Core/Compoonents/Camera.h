@@ -24,4 +24,9 @@ public:
     // Returns a left-handed perspective projection matrix.
     // aspect = viewport width / height.
     DirectX::XMMATRIX GetProjectionMatrix(float aspect) const;
+
+    // Serialization
+    std::string GetTypeName() const override { return "Camera"; }
+    JsonValue   Serialize()   const override;
+    void        Deserialize(const JsonValue& v) override;
 };

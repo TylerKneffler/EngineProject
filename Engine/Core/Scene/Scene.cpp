@@ -2,73 +2,74 @@
 #include "Core/Compoonents/Camera.h"
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Compoonents/Material.h"
+#include "Core/Serialization/SceneSerializer.h"
 #include <d3dcompiler.h>
 #include <stdexcept>
+#include <string>
+#include <fstream>
+#include <shellapi.h>
+#include <windows.h>  // OutputDebugStringA, ShellExecuteA
 
 using namespace DirectX;
 using Microsoft::WRL::ComPtr;
 
 // ---------------------------------------------------------------------------
-// Grid HLSL — minimal vertex-colored, alpha-blended line shader.
-// cbuffer b0: float4x4 mvp only.
+// Shader loading helper
 // ---------------------------------------------------------------------------
 
-static constexpr char kGridVS[] = R"(
-cbuffer CB : register(b0) { float4x4 mvp; };
-void VSMain(float3 pos   : POSITION,
-            float4 color : COLOR,
-            out float4 oPos   : SV_POSITION,
-            out float4 oColor : COLOR)
+static ComPtr<ID3DBlob> CompileShaderFromFile(
+    const std::string& path, const char* entry, const char* profile)
 {
-    oPos   = mul(mvp, float4(pos, 1.0));
-    oColor = color;
-}
-)";
+    std::wstring wpath(path.begin(), path.end());
+    ComPtr<ID3DBlob> blob, errBlob;
+    HRESULT hr = D3DCompileFromFile(
+        wpath.c_str(), nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
+        entry, profile, 0, 0, &blob, &errBlob);
+    if (FAILED(hr))
+    {
+        std::string msg = "[Shader] Failed to compile " + path + " (" + entry + ")\n";
+        if (errBlob)
+            msg += static_cast<char*>(errBlob->GetBufferPointer());
+        else if (hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND))
+            msg += "File not found.";
+        else
+        {
+            char buf[32]; sprintf_s(buf, "HRESULT 0x%08X", static_cast<unsigned>(hr));
+            msg += buf;
+        }
+        OutputDebugStringA((msg + "\n").c_str());
 
-static constexpr char kGridPS[] = R"(
-float4 PSMain(float4 pos   : SV_POSITION,
-              float4 color : COLOR) : SV_TARGET
+        // Write to shader_errors.log beside the exe so the full message is
+        // copyable, then open it in the default text editor.
+        /*{
+            char exePath[MAX_PATH]{};
+            GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+            std::string logPath(exePath);
+            auto slash = logPath.find_last_of("\\/");
+            if (slash != std::string::npos) logPath = logPath.substr(0, slash + 1);
+            logPath += "shader_errors.log";
+            std::ofstream log(logPath, std::ios::app);
+            log << msg << "\n\n";
+            ShellExecuteA(nullptr, "open", logPath.c_str(), nullptr, nullptr, SW_SHOW);
+        }*/
+
+        throw std::runtime_error(msg);
+    }
+    return blob;
+}
+
+// GridCBData — matches the GridCB cbuffer layout in the HLSL above.
+struct GridCBData
 {
-    return color;
-}
-)";
-
-// ---------------------------------------------------------------------------
-// Object HLSL — Phong-shaded mesh shader
-// ---------------------------------------------------------------------------
-
-static constexpr char kObjectVS[] = R"(
-cbuffer Constants : register(b0) {
-    float4x4 mvp;
-    float4x4 world;
+    XMFLOAT4X4 invVP;         // 64 bytes — inverse of (view*proj), row-major
+    XMFLOAT3   cameraPos;     // 12 bytes
+    float      cellSize;      //  4 bytes
+    XMFLOAT4   gridColor;     // 16 bytes  (rgb + opacity)
+    XMFLOAT4   axisColor;     // 16 bytes  (rgb + 1)
+    float      fadeDistance;  //  4 bytes
+    float      _pad[3];       // 12 bytes  — total: 128 bytes
 };
-void VSMain(float3 pos    : POSITION,
-            float3 normal : NORMAL,
-            out float4 oPos    : SV_POSITION,
-            out float3 oNormal : NORMAL)
-{
-    oPos    = mul(mvp, float4(pos, 1.0));
-    oNormal = mul((float3x3)world, normal);
-}
-)";
-
-static constexpr char kObjectPS[] = R"(
-cbuffer Constants : register(b0) {
-    float4x4 mvp;
-    float4x4 world;
-    float4   diffuseColor;
-    float4   ambientColor;
-    float4   specularColor; // w = shininess
-};
-float4 PSMain(float4 pos    : SV_POSITION,
-              float3 normal : NORMAL) : SV_TARGET
-{
-    float3 lightDir = normalize(float3(1.0, 2.0, -1.0));
-    float  diffuse  = saturate(dot(normalize(normal), lightDir));
-    float3 color    = ambientColor.rgb + diffuseColor.rgb * diffuse;
-    return float4(color, 1.0);
-}
-)";
+static_assert(sizeof(GridCBData) <= 256, "GridCBData exceeds 256-byte CB alignment");
 
 struct CBData
 {
@@ -109,10 +110,9 @@ static ComPtr<ID3D12Resource> CreateUploadBuffer(
 void Scene::Init(ID3D12Device* device)
 {
     m_device = device;
-    BuildGridBuffers(device);
     BuildGridPipeline(device);
 
-    // Constant buffer for the grid (just MVP, aligned to 256 B).
+    // Constant buffer for per-frame grid data (256 bytes).
     constexpr UINT kCBSize = 256;
     m_gridCB = CreateUploadBuffer(device, kCBSize, &m_gridCBMapped);
 
@@ -125,95 +125,32 @@ void Scene::Init(ID3D12Device* device)
 }
 
 // ---------------------------------------------------------------------------
-// Scene::BuildGridBuffers
-// Generates line-list vertices for the XZ grid.
-// ---------------------------------------------------------------------------
-
-void Scene::BuildGridBuffers(ID3D12Device* device)
-{
-    const int   half = settings.gridHalfSize;
-    const float step = settings.gridCellSize;
-    const float ext  = half * step;
-
-    auto gc = settings.gridColor;
-    auto oc = settings.gridOriginColor;
-    float op = settings.gridOpacity;
-
-    std::vector<GridVertex> verts;
-    // lines parallel to Z (vary X)
-    for (int i = -half; i <= half; ++i)
-    {
-        float x = i * step;
-        bool  origin = (i == 0);
-        float r = origin ? oc.x : gc.x;
-        float g = origin ? oc.y : gc.y;
-        float b = origin ? oc.z : gc.z;
-        verts.push_back({ x, 0.f, -ext, r, g, b, op });
-        verts.push_back({ x, 0.f,  ext, r, g, b, op });
-    }
-    // lines parallel to X (vary Z)
-    for (int i = -half; i <= half; ++i)
-    {
-        float z = i * step;
-        bool  origin = (i == 0);
-        float r = origin ? oc.x : gc.x;
-        float g = origin ? oc.y : gc.y;
-        float b = origin ? oc.z : gc.z;
-        verts.push_back({ -ext, 0.f, z, r, g, b, op });
-        verts.push_back({  ext, 0.f, z, r, g, b, op });
-    }
-
-    m_gridVertexCount = static_cast<uint32_t>(verts.size());
-    const UINT byteSize = m_gridVertexCount * sizeof(GridVertex);
-
-    m_gridVB = CreateUploadBuffer(device, byteSize, nullptr);
-    void* mapped = nullptr;
-    m_gridVB->Map(0, nullptr, &mapped);
-    memcpy(mapped, verts.data(), byteSize);
-    m_gridVB->Unmap(0, nullptr);
-
-    m_gridVBV.BufferLocation = m_gridVB->GetGPUVirtualAddress();
-    m_gridVBV.SizeInBytes    = byteSize;
-    m_gridVBV.StrideInBytes  = sizeof(GridVertex);
-}
-
-// ---------------------------------------------------------------------------
 // Scene::BuildGridPipeline
 // ---------------------------------------------------------------------------
 
 void Scene::BuildGridPipeline(ID3D12Device* device)
 {
-    // Compile shaders.
-    ComPtr<ID3DBlob> vsBlob, psBlob, errBlob;
-    if (FAILED(D3DCompile(kGridVS, sizeof(kGridVS) - 1, "GridVS",
-            nullptr, nullptr, "VSMain", "vs_5_0", 0, 0, &vsBlob, &errBlob)))
-        throw std::runtime_error(static_cast<char*>(errBlob->GetBufferPointer()));
-    if (FAILED(D3DCompile(kGridPS, sizeof(kGridPS) - 1, "GridPS",
-            nullptr, nullptr, "PSMain", "ps_5_0", 0, 0, &psBlob, &errBlob)))
-        throw std::runtime_error(static_cast<char*>(errBlob->GetBufferPointer()));
+    // Compile shaders from disk.
+    auto vsBlob = CompileShaderFromFile(ENGINE_SHADERS_PATH "Grid.hlsl", "VSMain", "vs_5_0");
+    auto psBlob = CompileShaderFromFile(ENGINE_SHADERS_PATH "Grid.hlsl", "PSMain", "ps_5_0");
 
-    // Root signature: one root CBV at b0.
+    // Root signature: one root CBV at b0, visible to all shader stages.
     D3D12_ROOT_PARAMETER rp{};
     rp.ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
     rp.Descriptor.ShaderRegister = 0;
-    rp.ShaderVisibility          = D3D12_SHADER_VISIBILITY_VERTEX;
+    rp.ShaderVisibility          = D3D12_SHADER_VISIBILITY_ALL;
 
     D3D12_ROOT_SIGNATURE_DESC rsDesc{};
     rsDesc.NumParameters = 1;
     rsDesc.pParameters   = &rp;
-    rsDesc.Flags         = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+    rsDesc.Flags         = D3D12_ROOT_SIGNATURE_FLAG_NONE; // no IA, no vertex buffer
 
     ComPtr<ID3DBlob> sigBlob, sigErr;
     D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1, &sigBlob, &sigErr);
     device->CreateRootSignature(0, sigBlob->GetBufferPointer(),
         sigBlob->GetBufferSize(), IID_PPV_ARGS(&m_gridRootSig));
 
-    // Input layout: POSITION (float3) + COLOR (float4).
-    D3D12_INPUT_ELEMENT_DESC layout[] =
-    {
-        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0,  0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-        { "COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT,  0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-    };
+    // No input layout — vertices are generated from SV_VertexID in the VS.
 
     // Rasterizer — no culling for lines.
     D3D12_RASTERIZER_DESC rasterDesc{};
@@ -234,21 +171,22 @@ void Scene::BuildGridPipeline(ID3D12Device* device)
     D3D12_BLEND_DESC blendDesc{};
     blendDesc.RenderTarget[0] = rtb;
 
-    // Depth — read but do not write so objects render correctly on top.
+    // Depth — test at the far plane so opaque objects (depth < 1.0) occlude the
+    // grid, while empty background (cleared to 1.0) lets it through.
     D3D12_DEPTH_STENCIL_DESC dsDesc{};
     dsDesc.DepthEnable    = TRUE;
     dsDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-    dsDesc.DepthFunc      = D3D12_COMPARISON_FUNC_LESS;
+    dsDesc.DepthFunc      = D3D12_COMPARISON_FUNC_LESS_EQUAL;
 
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
     psoDesc.pRootSignature        = m_gridRootSig.Get();
     psoDesc.VS                    = { vsBlob->GetBufferPointer(), vsBlob->GetBufferSize() };
     psoDesc.PS                    = { psBlob->GetBufferPointer(), psBlob->GetBufferSize() };
-    psoDesc.InputLayout           = { layout, _countof(layout) };
+    psoDesc.InputLayout           = { nullptr, 0 };  // no vertex buffer
     psoDesc.RasterizerState       = rasterDesc;
     psoDesc.BlendState            = blendDesc;
     psoDesc.DepthStencilState     = dsDesc;
-    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
+    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     psoDesc.NumRenderTargets      = 1;
     psoDesc.RTVFormats[0]         = DXGI_FORMAT_R8G8B8A8_UNORM;
     psoDesc.DSVFormat             = DXGI_FORMAT_D32_FLOAT;
@@ -264,14 +202,9 @@ void Scene::BuildGridPipeline(ID3D12Device* device)
 
 void Scene::BuildObjectPipeline(ID3D12Device* device)
 {
-    // Compile shaders.
-    ComPtr<ID3DBlob> vsBlob, psBlob, errBlob;
-    if (FAILED(D3DCompile(kObjectVS, sizeof(kObjectVS) - 1, "ObjectVS",
-            nullptr, nullptr, "VSMain", "vs_5_0", 0, 0, &vsBlob, &errBlob)))
-        throw std::runtime_error(static_cast<char*>(errBlob->GetBufferPointer()));
-    if (FAILED(D3DCompile(kObjectPS, sizeof(kObjectPS) - 1, "ObjectPS",
-            nullptr, nullptr, "PSMain", "ps_5_0", 0, 0, &psBlob, &errBlob)))
-        throw std::runtime_error(static_cast<char*>(errBlob->GetBufferPointer()));
+    // Compile shaders from disk.
+    auto vsBlob = CompileShaderFromFile(ENGINE_SHADERS_PATH "Object.hlsl", "VSMain", "vs_5_0");
+    auto psBlob = CompileShaderFromFile(ENGINE_SHADERS_PATH "Object.hlsl", "PSMain", "ps_5_0");
 
     // Root signature: one root CBV at b0, visible to all stages.
     D3D12_ROOT_PARAMETER rp{};
@@ -413,16 +346,25 @@ void Scene::Render(ID3D12GraphicsCommandList* cmd, float aspect, Camera* cameraO
     // Draw scene helpers (grid) after opaque objects so blending works correctly.
     if (settings.showGrid && m_gridPSO)
     {
-        XMFLOAT4X4 mvp;
-        XMStoreFloat4x4(&mvp, view * proj);
-        memcpy(m_gridCBMapped, &mvp, sizeof(XMFLOAT4X4));
+        XMMATRIX vp = view * proj;
+
+        const glm::vec3& cp = cam->Owner->transform.position;
+        GridCBData gridData{};
+        XMStoreFloat4x4(&gridData.invVP, XMMatrixInverse(nullptr, vp));
+        gridData.cameraPos    = { cp.x, cp.y, cp.z };
+        gridData.cellSize     = settings.gridCellSize;
+        gridData.gridColor    = { settings.gridColor.x, settings.gridColor.y,
+                                   settings.gridColor.z, settings.gridOpacity };
+        gridData.axisColor    = { settings.gridOriginColor.x, settings.gridOriginColor.y,
+                                   settings.gridOriginColor.z, 1.f };
+        gridData.fadeDistance = settings.gridFadeDistance;
+        memcpy(m_gridCBMapped, &gridData, sizeof(GridCBData));
 
         cmd->SetGraphicsRootSignature(m_gridRootSig.Get());
         cmd->SetPipelineState(m_gridPSO.Get());
         cmd->SetGraphicsRootConstantBufferView(0, m_gridCB->GetGPUVirtualAddress());
-        cmd->IASetVertexBuffers(0, 1, &m_gridVBV);
-        cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
-        cmd->DrawInstanced(m_gridVertexCount, 1, 0, 0);
+        cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        cmd->DrawInstanced(3, 1, 0, 0);  // fullscreen triangle, no vertex buffer
     }
 }
 
@@ -451,4 +393,20 @@ void Scene::RemoveObject(Object* obj)
         std::remove_if(m_objects.begin(), m_objects.end(),
             [obj](const std::unique_ptr<Object>& p){ return p.get() == obj; }),
         m_objects.end());
+}
+
+void Scene::ClearObjects()
+{
+    m_objects.clear();
+    m_selectedObject = nullptr;
+}
+
+bool Scene::Save(const std::string& path) const
+{
+    return SceneSerializer::Save(*this, path);
+}
+
+bool Scene::Load(const std::string& path)
+{
+    return SceneSerializer::Load(*this, path, m_device);
 }

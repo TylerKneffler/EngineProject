@@ -27,8 +27,15 @@ public:
     const D3D12_VERTEX_BUFFER_VIEW& GetVertexBufferView() const { return m_vbView; }
     uint32_t                        GetVertexCount()      const { return static_cast<uint32_t>(m_vertices.size()); }
     bool                            IsReady()             const { return m_ready; }
+    const std::string&              GetFilePath()         const { return m_filePath; }
+
+    // Serialization
+    std::string GetTypeName() const override { return "Mesh"; }
+    JsonValue   Serialize()   const override;
+    void        Deserialize(const JsonValue& v) override;
 
 private:
+    std::string                            m_filePath;
     std::vector<Vertex>                    m_vertices;
     Microsoft::WRL::ComPtr<ID3D12Resource> m_vertexBuffer;
     D3D12_VERTEX_BUFFER_VIEW               m_vbView{};
