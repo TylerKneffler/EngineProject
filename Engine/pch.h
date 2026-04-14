@@ -32,6 +32,7 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <filesystem>
 
 // Engine Core
 #include "Core/Compoonents/Transform.h"

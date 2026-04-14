@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  
+  <!-- Project Metadata -->
+  <PropertyGroup>
+    <ProjectName>EngineProject</ProjectName>
+    <ProjectVersion>1.0.0</ProjectVersion>
+    <ProjectDescription>A 3D graphics engine project</ProjectDescription>
+  </PropertyGroup>
+
+  <!-- Paths Configuration -->
+  <PropertyGroup>
+    <AssetsDirectory>Assets/</AssetsDirectory>
+    <SceneDirectory>Assets/Scenes/</SceneDirectory>
+    <ScriptsDirectory>Assets/Scripts/</ScriptsDirectory>
+    <ShadersDirectory>Engine/Core/Shaders/</ShadersDirectory>
+    <BuildDirectory>build/</BuildDirectory>
+  </PropertyGroup>
+
+  <!-- Build Configuration -->
+  <PropertyGroup>
+    <CMakeGenerator>Visual Studio 17 2022</CMakeGenerator>
+    <Platform>x64</Platform>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <BuildConfiguration Include="Debug">
+      <CppStandard>17</CppStandard>
+      <Optimizations>false</Optimizations>
+      <DebugInfo>true</DebugInfo>
+      <DefineSymbols>_DEBUG</DefineSymbols>
+    </BuildConfiguration>
+    <BuildConfiguration Include="Release">
+      <CppStandard>17</CppStandard>
+      <Optimizations>true</Optimizations>
+      <DebugInfo>false</DebugInfo>
+      <DefineSymbols>NDEBUG</DefineSymbols>
+    </BuildConfiguration>
+  </ItemGroup>
+
+  <!-- Editor Configuration -->
+  <PropertyGroup>
+    <DefaultScene>Assets/Scenes/default.scene</DefaultScene>
+    <ViewportWidth>1280</ViewportWidth>
+    <ViewportHeight>720</ViewportHeight>
+    <LeftPanelWidth>0.20</LeftPanelWidth>
+    <RightPanelWidth>0.31</RightPanelWidth>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <LeftPanelTab Include="HierarchyView" />
+    <LeftPanelTab Include="Assets" />
+    <CenterPanelTab Include="Scene" />
+    <CenterPanelTab Include="Game" />
+    <RightPanel Include="Properties" />
+  </ItemGroup>
+
+  <!-- Rendering Configuration -->
+  <PropertyGroup>
+    <RenderingAPI>DirectX12</RenderingAPI>
+    <ClearColorR>0.18</ClearColorR>
+    <ClearColorG>0.18</ClearColorG>
+    <ClearColorB>0.18</ClearColorB>
+    <ClearColorA>1.0</ClearColorA>
+    <TargetFramerate>60</TargetFramerate>
+  </PropertyGroup>
+
+  <!-- Dependencies -->
+  <ItemGroup>
+    <Dependency Include="glm">
+      <Version>1.0.1</Version>
+      <Source>git</Source>
+      <Repository>https://github.com/g-truc/glm.git</Repository>
+    </Dependency>
+    <Dependency Include="imgui">
+      <Version>docking</Version>
+      <Source>git</Source>
+      <Repository>https://github.com/ocornut/imgui.git</Repository>
+      <Features>docking</Features>
+    </Dependency>
+  </ItemGroup>
+
+  <!-- Built-in Components -->
+  <ItemGroup>
+    <BuiltInComponent Include="Transform" />
+    <BuiltInComponent Include="Mesh" />
+    <BuiltInComponent Include="Material" />
+    <BuiltInComponent Include="Camera" />
+  </ItemGroup>
+
+</Project>

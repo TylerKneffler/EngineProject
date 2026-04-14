@@ -5,16 +5,21 @@
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Compoonents/Material.h"
 #include "Core/Serialization/SceneSerializer.h"
+#include "Core/ProjectLoader.h"
 #include "View/Views/SceneView.h"
 #include "View/Views/GameView.h"
 #include "View/Views/HierarchyView.h"
 #include "View/Views/PropertiesView.h"
+#include "View/Views/AssetsExplorerView.h"
 #include "imgui_internal.h"  // DockBuilder API
 #include "Scripts/Rotate.h"
 
 // Fallback for IntelliSense — CMake overrides these with real absolute paths.
 #ifndef ASSETS_PATH
 #define ASSETS_PATH "Assets/"
+#endif
+#ifndef PROJECT_FILE
+#define PROJECT_FILE "Example_Proj.proj"
 #endif
 #ifndef ENGINE_BUILD_DIR
 #define ENGINE_BUILD_DIR "build/Debug"
@@ -66,7 +71,24 @@ int WINAPI wWinMain(
     _In_     LPWSTR    /*lpCmdLine*/,
     _In_     int       /*nShowCmd*/)
 {
-    auto window   = std::make_unique<Window>(hInstance, L"Engine Editor", 1280, 720);
+    // Load project configuration
+    ProjectLoader projectLoader;
+    ProjectSettings projectSettings;
+    try
+    {
+        projectSettings = projectLoader.LoadProject(PROJECT_FILE);
+    }
+    catch (const std::exception& e)
+    {
+        // If project loading fails, use defaults
+        std::cerr << "Warning: Failed to load project file: " << e.what() << std::endl;
+        projectSettings.assetsDirectory = ASSETS_PATH;
+        projectSettings.viewportWidth = 1280;
+        projectSettings.viewportHeight = 720;
+        projectSettings.clearColor = glm::vec4(0.18f, 0.18f, 0.18f, 1.0f);
+    }
+
+    auto window   = std::make_unique<Window>(hInstance, L"Engine Editor", projectSettings.viewportWidth, projectSettings.viewportHeight);
     auto renderer = std::make_unique<DX12EditorRenderer>();
     renderer->Init(window->GetHWND(), window->GetWidth(), window->GetHeight());
 
@@ -102,6 +124,9 @@ int WINAPI wWinMain(
         propertiesView.SetSelectedObject(obj);
         scene.SetSelectedObject(obj);
     };
+
+    AssetsExplorerView assetsExplorer;
+    assetsExplorer.Init(projectSettings.assetsDirectory);
 
     // Add the cube as a managed game object.
     Object* cubeObj = scene.AddObject("Cube");
@@ -180,7 +205,7 @@ int WINAPI wWinMain(
         renderer->MarkDirty();
         renderer->RenderIfNeeded([&]()
         {
-            renderer->Clear(0.18f, 0.18f, 0.18f);
+            renderer->Clear(projectSettings.clearColor.r, projectSettings.clearColor.g, projectSettings.clearColor.b);
 
             // Render 3-D scene into the scene offscreen texture.
             sceneViewport.Render(renderer->GetCommandList(), renderer->GetCurrentRTV(),
@@ -212,9 +237,10 @@ int WINAPI wWinMain(
                 ImGui::DockBuilderSplitNode(center,      ImGuiDir_Right, 0.31f, &right,  &center);
 
                 ImGui::DockBuilderDockWindow("HierarchyView",  left);
-                ImGui::DockBuilderDockWindow("Scene",      center);
-                ImGui::DockBuilderDockWindow("Game",       center); // tabs with Scene
-                ImGui::DockBuilderDockWindow("Properties", right);
+                ImGui::DockBuilderDockWindow("Assets",         left);
+                ImGui::DockBuilderDockWindow("Scene",          center);
+                ImGui::DockBuilderDockWindow("Game",           center); // tabs with Scene
+                ImGui::DockBuilderDockWindow("Properties",     right);
                 ImGui::DockBuilderFinish(dockspaceId);
             }
 
@@ -293,6 +319,7 @@ int WINAPI wWinMain(
 
             hierarchy.DrawPanel();
             propertiesView.DrawPanel();
+            assetsExplorer.DrawPanel();
             sceneViewport.DrawPanel();
             gameViewport.DrawPanel();
         });

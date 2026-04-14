@@ -63,6 +63,16 @@ target_include_directories(ImGui PUBLIC
 target_compile_definitions(ImGui PUBLIC IMGUI_ENABLE_DOCKING)
 
 # ---------------------------------------------------------------------------
+# pugixml — XML parsing library
+# ---------------------------------------------------------------------------
+FetchContent_Declare(
+    pugixml
+    GIT_REPOSITORY https://github.com/zeux/pugixml.git
+    GIT_TAG        v1.14
+)
+FetchContent_MakeAvailable(pugixml)
+
+# ---------------------------------------------------------------------------
 # Engine — static library
 # ---------------------------------------------------------------------------
 add_library(Engine STATIC
@@ -82,6 +92,7 @@ target_link_libraries(Engine PUBLIC
     dwrite.lib
     ImGui
     glm::glm
+    pugixml
 )
 target_compile_definitions(Engine PUBLIC
     ENGINE_SHADERS_PATH="${CMAKE_SOURCE_DIR}/Engine/Core/Shaders/"
@@ -118,7 +129,7 @@ add_executable(Editor WIN32
     ${EDITOR_SOURCES}
     ${ASSET_SOURCES}
 )
-target_link_libraries(Editor PRIVATE Engine)
+target_link_libraries(Editor PRIVATE Engine shell32.lib)
 target_precompile_headers(Editor REUSE_FROM Engine)
 target_include_directories(Editor PRIVATE
     ${CMAKE_SOURCE_DIR}/Engine
@@ -128,6 +139,7 @@ target_include_directories(Editor PRIVATE
 )
 target_compile_definitions(Editor PRIVATE
     ASSETS_PATH="${CMAKE_SOURCE_DIR}/Assets/"
+    PROJECT_FILE="${CMAKE_SOURCE_DIR}/Example_Proj.proj"
     ENGINE_BUILD_DIR="${CMAKE_BINARY_DIR}"
 )
 set_target_properties(Editor PROPERTIES
