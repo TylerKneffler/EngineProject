@@ -30,6 +30,7 @@ ProjectSettings ProjectLoader::LoadProject(const std::string& projFilePath)
     ParseBuild(projectNode, settings);
     ParseEditor(projectNode, settings);
     ParseRendering(projectNode, settings);
+    ParseAspectRatio(projectNode, settings);
     ParseDependencies(projectNode, settings);
     ParseComponents(projectNode, settings);
 
@@ -198,6 +199,58 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
             settings.targetFramerate = std::stoul(framerate.child_value());
 
         if (!settings.renderingAPI.empty())
+            break;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ParseAspectRatio
+// ---------------------------------------------------------------------------
+void ProjectLoader::ParseAspectRatio(const pugi::xml_node& projectNode, ProjectSettings& settings)
+{
+    for (auto prop : projectNode.children("PropertyGroup"))
+    {
+        auto modeNode = prop.child("AspectRatioMode");
+        if (modeNode)
+        {
+            std::string mode = modeNode.child_value();
+            if (mode == "Free")
+                settings.aspectRatioMode = ProjectSettings::AspectRatioMode::Free;
+            else if (mode == "Locked")
+                settings.aspectRatioMode = ProjectSettings::AspectRatioMode::Locked;
+            else if (mode == "Hardcoded")
+                settings.aspectRatioMode = ProjectSettings::AspectRatioMode::Hardcoded;
+        }
+
+        auto aspectNode = prop.child("GameAspectRatio");
+        if (aspectNode)
+            settings.gameAspectRatio = std::stof(aspectNode.child_value());
+
+        auto widthNode = prop.child("GameWindowWidth");
+        if (widthNode)
+            settings.gameWindowWidth = std::stoul(widthNode.child_value());
+
+        auto heightNode = prop.child("GameWindowHeight");
+        if (heightNode)
+            settings.gameWindowHeight = std::stoul(heightNode.child_value());
+
+        auto lbR = prop.child("LetterboxColorR");
+        if (lbR)
+            settings.letterboxColor.r = std::stof(lbR.child_value());
+
+        auto lbG = prop.child("LetterboxColorG");
+        if (lbG)
+            settings.letterboxColor.g = std::stof(lbG.child_value());
+
+        auto lbB = prop.child("LetterboxColorB");
+        if (lbB)
+            settings.letterboxColor.b = std::stof(lbB.child_value());
+
+        auto lbA = prop.child("LetterboxColorA");
+        if (lbA)
+            settings.letterboxColor.a = std::stof(lbA.child_value());
+
+        if (modeNode)
             break;
     }
 }

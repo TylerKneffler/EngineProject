@@ -105,6 +105,18 @@ bool AssetsExplorerView::DrawDirectoryTree(const std::string& path)
 // ---------------------------------------------------------------------------
 void AssetsExplorerView::OpenFile(const std::string& filePath)
 {
+    // Check if this is a scene file
+    std::string extension = fs::path(filePath).extension().string();
+    if (extension == ".scene" || extension == ".Scene")
+    {
+        // Trigger the scene load callback
+        if (OnSceneRequested)
+        {
+            OnSceneRequested(filePath);
+        }
+        return;
+    }
+
     // Convert to wide string for Windows API
     int size_needed = MultiByteToWideChar(CP_UTF8, 0, filePath.c_str(), (int)filePath.length(), NULL, 0);
     std::wstring wideFilePath(size_needed, 0);

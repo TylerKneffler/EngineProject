@@ -6,6 +6,7 @@
 #include "Core/Compoonents/Material.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/ProjectLoader.h"
+#include "Core/View/Views/PreferencesView.h"
 #include "View/Views/SceneView.h"
 #include "View/Views/GameView.h"
 #include "View/Views/HierarchyView.h"
@@ -107,7 +108,8 @@ int WINAPI wWinMain(
     sceneViewport.Init(device,
                        window->GetWidth(), window->GetHeight(),
                        srvCpu, srvGpu,
-                       &scene);
+                       &scene,
+                       projectSettings);
 
     // Game viewport — renders from the game camera (SRV slot 2).
     auto [gameSrvCpu, gameSrvGpu] = renderer->GetSrvSlot(2);
@@ -125,8 +127,35 @@ int WINAPI wWinMain(
         scene.SetSelectedObject(obj);
     };
 
+    // Track unsaved changes
+    bool hasUnsavedChanges = false;
+    std::string sceneToLoad;
+    bool showUnsavedWarning = false;
+
     AssetsExplorerView assetsExplorer;
     assetsExplorer.Init(projectSettings.assetsDirectory);
+    assetsExplorer.OnSceneRequested = [&](const std::string& scenePath)
+    {
+        if (hasUnsavedChanges)
+        {
+            sceneToLoad = scenePath;
+            showUnsavedWarning = true;
+        }
+        else
+        {
+            scene.Load(scenePath);
+            hasUnsavedChanges = false;
+        }
+    };
+
+    PreferencesView preferencesView;
+    preferencesView.Init(projectSettings, PROJECT_FILE);
+    bool showPreferences = false;
+    bool showProperties = false;
+    bool showHierarchy = true;
+    bool showAssets = true;
+    bool showScene = true;
+    bool showGame = true;
 
     // Add the cube as a managed game object.
     Object* cubeObj = scene.AddObject("Cube");
@@ -200,6 +229,7 @@ int WINAPI wWinMain(
         {
             for (const auto& obj : scene.GetObjects())
                 obj->Update();
+            hasUnsavedChanges = true;  // Mark as unsaved if game is running
         }
 
         renderer->MarkDirty();
@@ -240,7 +270,6 @@ int WINAPI wWinMain(
                 ImGui::DockBuilderDockWindow("Assets",         left);
                 ImGui::DockBuilderDockWindow("Scene",          center);
                 ImGui::DockBuilderDockWindow("Game",           center); // tabs with Scene
-                ImGui::DockBuilderDockWindow("Properties",     right);
                 ImGui::DockBuilderFinish(dockspaceId);
             }
 
@@ -251,12 +280,32 @@ int WINAPI wWinMain(
             {
                 if (ImGui::BeginMenu("File"))
                 {
-                    if (ImGui::MenuItem("Save Scene", "Ctrl+S"))
+                    if (ImGui::MenuItem("Save All", "Ctrl+S"))
+                    {
+                        // Save scene changes
                         scene.Save(std::string(ASSETS_PATH) + "Scenes/default.scene");
-                    if (ImGui::MenuItem("Load Scene"))
-                        scene.Load(std::string(ASSETS_PATH) + "Scenes/default.scene");
+                        // Save project settings changes
+                        preferencesView.SaveSettings();
+                        hasUnsavedChanges = false;
+                    }
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Properties"))
+                        showProperties = !showProperties;
+                    if (ImGui::MenuItem("Project Preferences"))
+                        showPreferences = true;
                     ImGui::Separator();
                     if (ImGui::MenuItem("Exit")) PostQuitMessage(0);
+                    ImGui::EndMenu();
+                }
+
+                if (ImGui::BeginMenu("Views"))
+                {
+                    ImGui::MenuItem("Hierarchy", nullptr, &showHierarchy);
+                    ImGui::MenuItem("Assets", nullptr, &showAssets);
+                    ImGui::MenuItem("Scene", nullptr, &showScene);
+                    ImGui::MenuItem("Game", nullptr, &showGame);
+                    ImGui::Separator();
+                    ImGui::MenuItem("Properties", nullptr, &showProperties);
                     ImGui::EndMenu();
                 }
 
@@ -317,11 +366,75 @@ int WINAPI wWinMain(
                 ImGui::EndMainMenuBar();
             }
 
-            hierarchy.DrawPanel();
-            propertiesView.DrawPanel();
-            assetsExplorer.DrawPanel();
-            sceneViewport.DrawPanel();
-            gameViewport.DrawPanel();
+            // Unsaved changes warning modal
+            if (showUnsavedWarning)
+            {
+                ImGui::OpenPopup("Unsaved Changes");
+            }
+
+            ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+            ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+
+            if (ImGui::BeginPopupModal("Unsaved Changes", NULL, ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                ImGui::Text("You have unsaved changes. What would you like to do?");
+                ImGui::Separator();
+
+                if (ImGui::Button("Save & Load", ImVec2(150, 0)))
+                {
+                    scene.Save(std::string(ASSETS_PATH) + "Scenes/default.scene");
+                    preferencesView.SaveSettings();
+                    hasUnsavedChanges = false;
+                    if (!sceneToLoad.empty())
+                    {
+                        scene.Load(sceneToLoad);
+                        sceneToLoad.clear();
+                    }
+                    showUnsavedWarning = false;
+                    ImGui::CloseCurrentPopup();
+                }
+
+                ImGui::SameLine();
+                if (ImGui::Button("Load Without Saving", ImVec2(150, 0)))
+                {
+                    if (!sceneToLoad.empty())
+                    {
+                        scene.Load(sceneToLoad);
+                        sceneToLoad.clear();
+                    }
+                    hasUnsavedChanges = false;
+                    showUnsavedWarning = false;
+                    ImGui::CloseCurrentPopup();
+                }
+
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel", ImVec2(100, 0)))
+                {
+                    sceneToLoad.clear();
+                    showUnsavedWarning = false;
+                    ImGui::CloseCurrentPopup();
+                }
+
+                ImGui::EndPopup();
+            }
+
+            if (showHierarchy)
+                hierarchy.DrawPanel();
+            if (showProperties)
+                propertiesView.DrawPanel();
+            if (showAssets)
+                assetsExplorer.DrawPanel();
+            if (showScene)
+                sceneViewport.DrawPanel();
+            if (showGame)
+                gameViewport.DrawPanel();
+            
+            // Draw preferences window if open
+            preferencesView.SetOpen(showPreferences);
+            if (showPreferences)
+            {
+                preferencesView.DrawWindow(showPreferences);
+            }
         });
     };
 

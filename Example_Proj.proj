@@ -65,6 +65,25 @@
     <TargetFramerate>60</TargetFramerate>
   </PropertyGroup>
 
+  <!-- Game Resolution/Aspect Ratio Configuration -->
+  <PropertyGroup>
+    <!-- AspectRatioMode: Free, Locked, or Hardcoded -->
+    <AspectRatioMode>Locked</AspectRatioMode>
+    
+    <!-- For Locked mode: aspect ratio value (width/height), e.g., 1.777 for 16:9 -->
+    <GameAspectRatio>1.777</GameAspectRatio>
+    
+    <!-- For Hardcoded mode: fixed game window size -->
+    <GameWindowWidth>1920</GameWindowWidth>
+    <GameWindowHeight>1080</GameWindowHeight>
+    
+    <!-- Black bars color (for letterboxing/pillarboxing) -->
+    <LetterboxColorR>0.0</LetterboxColorR>
+    <LetterboxColorG>0.0</LetterboxColorG>
+    <LetterboxColorB>0.0</LetterboxColorB>
+    <LetterboxColorA>1.0</LetterboxColorA>
+  </PropertyGroup>
+
   <!-- Dependencies -->
   <ItemGroup>
     <Dependency Include="glm">

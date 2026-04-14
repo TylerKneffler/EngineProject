@@ -1,0 +1,52 @@
+#pragma once
+#include "pch.h"
+#include "Core/ProjectLoader.h"
+
+// ---------------------------------------------------------------------------
+// PreferencesView
+//
+// Displays an ImGui window for editing project settings loaded from the
+// .proj file. Users can modify settings and save them back to the project file.
+//
+// Usage:
+//   preferencesView.Init(settings, projectFilePath);
+//   if (preferencesView.IsOpen())
+//       preferencesView.DrawWindow();
+// ---------------------------------------------------------------------------
+class PreferencesView
+{
+public:
+    PreferencesView()  = default;
+    ~PreferencesView() = default;
+
+    // Initialize with current project settings and file path
+    void Init(const ProjectSettings& settings, const std::string& projFilePath);
+
+    // Draw the preferences window, returns true if window is still open
+    void DrawWindow(bool& isOpen);
+
+    // Check if preferences window should be shown
+    bool IsOpen() const { return m_isOpen; }
+    void SetOpen(bool open) { m_isOpen = open; }
+
+    // Get the modified settings
+    ProjectSettings GetSettings() const { return m_settings; }
+
+    // Save settings back to the project file
+    bool SaveSettings();
+
+private:
+    void DrawMetadataSection();
+    void DrawPathsSection();
+    void DrawRenderingSection();
+    void DrawAspectRatioSection();
+
+    bool m_isOpen = false;
+    std::string m_projFilePath;
+    ProjectSettings m_settings;
+
+    // Temporary buffers for string editing
+    char m_projectNameBuf[256] = {};
+    char m_assetsPathBuf[512] = {};
+    char m_defaultSceneBuf[512] = {};
+};

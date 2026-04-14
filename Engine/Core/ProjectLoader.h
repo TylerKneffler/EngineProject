@@ -41,6 +41,14 @@ struct ProjectSettings
     glm::vec4 clearColor;
     uint32_t targetFramerate;
 
+    // Game Resolution / Aspect Ratio
+    enum class AspectRatioMode { Free, Locked, Hardcoded };
+    AspectRatioMode aspectRatioMode = AspectRatioMode::Locked;
+    float gameAspectRatio = 1.777f;  // 16:9
+    uint32_t gameWindowWidth = 1920;
+    uint32_t gameWindowHeight = 1080;
+    glm::vec4 letterboxColor = glm::vec4(0.f, 0.f, 0.f, 1.f);  // black
+
     // Components
     std::vector<std::string> builtInComponents;
 };
@@ -74,6 +82,7 @@ private:
     void ParseBuild(const pugi::xml_node& projectNode, ProjectSettings& settings);
     void ParseEditor(const pugi::xml_node& projectNode, ProjectSettings& settings);
     void ParseRendering(const pugi::xml_node& projectNode, ProjectSettings& settings);
+    void ParseAspectRatio(const pugi::xml_node& projectNode, ProjectSettings& settings);
     void ParseDependencies(const pugi::xml_node& projectNode, ProjectSettings& settings);
     void ParseComponents(const pugi::xml_node& projectNode, ProjectSettings& settings);
 };

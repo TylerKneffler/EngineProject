@@ -10,9 +10,16 @@ void SceneView::Init(ID3D12Device* device,
                          uint32_t width, uint32_t height,
                          D3D12_CPU_DESCRIPTOR_HANDLE srvCpu,
                          D3D12_GPU_DESCRIPTOR_HANDLE srvGpu,
-                         Scene* scene)
+                         Scene* scene,
+                         const ProjectSettings& settings)
 {
     m_scene = scene;
+    m_aspectRatioMode = settings.aspectRatioMode;
+    m_gameAspectRatio = settings.gameAspectRatio;
+    m_gameWindowWidth = settings.gameWindowWidth;
+    m_gameWindowHeight = settings.gameWindowHeight;
+    m_letterboxColor = settings.letterboxColor;
+    
     View::Init(device, width, height, srvCpu, srvGpu);
 }
 
@@ -33,8 +40,34 @@ void SceneView::DrawPanel()
     if (size.x > 0.f && size.y > 0.f)
     {
         m_aspect = size.x / size.y;
-        ImGui::Image((ImTextureID)(uintptr_t)m_srvGpu.ptr, size);
 
+        // Calculate game viewport with aspect ratio constraints
+        ImVec2 viewportSize, viewportPos;
+        CalculateGameViewport(size, viewportSize, viewportPos);
+
+        // Draw letterbox/pillarbox background (if needed)
+        if (viewportSize.x < size.x || viewportSize.y < size.y)
+        {
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+            ImVec2 panelPos = ImGui::GetCursorScreenPos();
+            
+            // Draw background in letterbox color
+            ImU32 bgColor = ImGui::GetColorU32(ImVec4(
+                m_letterboxColor.r, m_letterboxColor.g, 
+                m_letterboxColor.b, m_letterboxColor.a
+            ));
+            drawList->AddRectFilled(
+                panelPos,
+                ImVec2(panelPos.x + size.x, panelPos.y + size.y),
+                bgColor
+            );
+        }
+
+        // Position cursor at viewport location and draw the game texture
+        ImGui::SetCursorPos(viewportPos);
+        ImGui::Image((ImTextureID)(uintptr_t)m_srvGpu.ptr, viewportSize);
+
+        // Check for mouse input on the viewport
         if (ImGui::IsItemHovered())
         {
             ImVec2 d = ImGui::GetIO().MouseDelta;
@@ -62,6 +95,69 @@ void SceneView::DrawPanel()
     ImGui::PopStyleVar();
 
     ApplyCameraControls(panDX, panDY, orbitDX, orbitDY, zoom);
+}
+
+// ---------------------------------------------------------------------------
+// CalculateGameViewport
+// ---------------------------------------------------------------------------
+void SceneView::CalculateGameViewport(ImVec2 availableSize, ImVec2& outViewportSize, ImVec2& outViewportPos)
+{
+    outViewportPos = ImVec2(0.f, 0.f);
+
+    switch (m_aspectRatioMode)
+    {
+        case ProjectSettings::AspectRatioMode::Free:
+        {
+            // Free aspect: use full available size
+            outViewportSize = availableSize;
+            break;
+        }
+
+        case ProjectSettings::AspectRatioMode::Locked:
+        {
+            // Locked aspect ratio: fit to aspect while maintaining ratio
+            float availableAspect = availableSize.x / availableSize.y;
+
+            if (availableAspect > m_gameAspectRatio)
+            {
+                // Panel is wider than game aspect: pillarbox (vertical bars)
+                outViewportSize.y = availableSize.y;
+                outViewportSize.x = availableSize.y * m_gameAspectRatio;
+                outViewportPos.x = (availableSize.x - outViewportSize.x) * 0.5f;
+            }
+            else
+            {
+                // Panel is narrower than game aspect: letterbox (horizontal bars)
+                outViewportSize.x = availableSize.x;
+                outViewportSize.y = availableSize.x / m_gameAspectRatio;
+                outViewportPos.y = (availableSize.y - outViewportSize.y) * 0.5f;
+            }
+            break;
+        }
+
+        case ProjectSettings::AspectRatioMode::Hardcoded:
+        {
+            // Hardcoded size: fit to exact window size, scale to fit
+            float gameAspect = (float)m_gameWindowWidth / (float)m_gameWindowHeight;
+            float availableAspect = availableSize.x / availableSize.y;
+
+            if (availableAspect > gameAspect)
+            {
+                // Panel is wider: pillarbox
+                outViewportSize.y = availableSize.y;
+                outViewportSize.x = availableSize.y * gameAspect;
+                outViewportPos.x = (availableSize.x - outViewportSize.x) * 0.5f;
+            }
+            else
+            {
+                // Panel is narrower: letterbox
+                outViewportSize.x = availableSize.x;
+                outViewportSize.y = availableSize.x / gameAspect;
+                outViewportPos.y = (availableSize.y - outViewportSize.y) * 0.5f;
+            }
+            break;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
