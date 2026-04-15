@@ -55,33 +55,6 @@ void PreferencesView::DrawWindow(bool& isOpen)
 
             ImGui::EndTabBar();
         }
-
-        ImGui::Separator();
-
-        // Save and Apply buttons
-        if (ImGui::Button("Apply", ImVec2(100, 0)))
-        {
-            // Apply changes immediately
-            m_isOpen = false;
-        }
-
-        ImGui::SameLine();
-
-        if (ImGui::Button("Save", ImVec2(100, 0)))
-        {
-            if (SaveSettings())
-            {
-                // Settings saved successfully
-                m_isOpen = false;
-            }
-        }
-
-        ImGui::SameLine();
-
-        if (ImGui::Button("Close", ImVec2(100, 0)))
-        {
-            m_isOpen = false;
-        }
     }
 
     ImGui::End();
@@ -97,7 +70,10 @@ void PreferencesView::DrawMetadataSection()
 
     ImGui::SetNextItemWidth(-1.f);
     if (ImGui::InputText("##projectName", m_projectNameBuf, sizeof(m_projectNameBuf)))
+    {
         m_settings.name = m_projectNameBuf;
+        NotifyChanged();
+    }
     ImGui::SameLine(0, 0);
     ImGui::TextDisabled("Project Name");
 
@@ -122,7 +98,10 @@ void PreferencesView::DrawPathsSection()
 
     ImGui::SetNextItemWidth(-1.f);
     if (ImGui::InputText("##assetsPath", m_assetsPathBuf, sizeof(m_assetsPathBuf)))
+    {
         m_settings.assetsDirectory = m_assetsPathBuf;
+        NotifyChanged();
+    }
     ImGui::SameLine(0, 0);
     ImGui::TextDisabled("Assets Directory");
 
@@ -146,7 +125,10 @@ void PreferencesView::DrawPathsSection()
 
     ImGui::SetNextItemWidth(-1.f);
     if (ImGui::InputText("##defaultScene", m_defaultSceneBuf, sizeof(m_defaultSceneBuf)))
+    {
         m_settings.defaultScene = m_defaultSceneBuf;
+        NotifyChanged();
+    }
     ImGui::SameLine(0, 0);
     ImGui::TextDisabled("Default Scene");
 }
@@ -165,17 +147,21 @@ void PreferencesView::DrawRenderingSection()
     if (ImGui::ColorEdit4("Clear Color", clearColor))
     {
         m_settings.clearColor = glm::vec4(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
+        NotifyChanged();
     }
 
-    ImGui::SliderInt("Target Framerate", (int*)&m_settings.targetFramerate, 30, 240);
+    if (ImGui::SliderInt("Target Framerate", (int*)&m_settings.targetFramerate, 30, 240))
+        NotifyChanged();
 
     ImGui::SetNextItemWidth(-1.f);
-    ImGui::InputScalar("##editorViewportWidth", ImGuiDataType_U32, &m_settings.viewportWidth);
+    if (ImGui::InputScalar("##editorViewportWidth", ImGuiDataType_U32, &m_settings.viewportWidth))
+        NotifyChanged();
     ImGui::SameLine(0, 0);
     ImGui::TextDisabled("Editor Viewport Width");
 
     ImGui::SetNextItemWidth(-1.f);
-    ImGui::InputScalar("##editorViewportHeight", ImGuiDataType_U32, &m_settings.viewportHeight);
+    if (ImGui::InputScalar("##editorViewportHeight", ImGuiDataType_U32, &m_settings.viewportHeight))
+        NotifyChanged();
     ImGui::SameLine(0, 0);
     ImGui::TextDisabled("Editor Viewport Height");
 }
@@ -194,22 +180,27 @@ void PreferencesView::DrawAspectRatioSection()
     if (ImGui::Combo("Aspect Ratio Mode", &currentMode, modes, 3))
     {
         m_settings.aspectRatioMode = (ProjectSettings::AspectRatioMode)currentMode;
+        NotifyChanged();
     }
 
     ImGui::Separator();
 
     // Aspect ratio value (for Locked mode)
-    ImGui::DragFloat("Game Aspect Ratio (W/H)", &m_settings.gameAspectRatio, 0.01f, 0.5f, 5.0f, "%.3f");
+    if (ImGui::DragFloat("Game Aspect Ratio (W/H)", &m_settings.gameAspectRatio, 0.01f, 0.5f, 5.0f, "%.3f"))
+        NotifyChanged();
 
     // Game window size (for Hardcoded mode)
-    ImGui::InputScalar("Game Window Width", ImGuiDataType_U32, &m_settings.gameWindowWidth);
-    ImGui::InputScalar("Game Window Height", ImGuiDataType_U32, &m_settings.gameWindowHeight);
+    if (ImGui::InputScalar("Game Window Width", ImGuiDataType_U32, &m_settings.gameWindowWidth))
+        NotifyChanged();
+    if (ImGui::InputScalar("Game Window Height", ImGuiDataType_U32, &m_settings.gameWindowHeight))
+        NotifyChanged();
 
     // Letterbox color
     float letterboxColor[4] = { m_settings.letterboxColor.r, m_settings.letterboxColor.g, m_settings.letterboxColor.b, m_settings.letterboxColor.a };
     if (ImGui::ColorEdit4("Letterbox Color", letterboxColor))
     {
         m_settings.letterboxColor = glm::vec4(letterboxColor[0], letterboxColor[1], letterboxColor[2], letterboxColor[3]);
+        NotifyChanged();
     }
 }
 

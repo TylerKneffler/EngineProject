@@ -7,6 +7,7 @@
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/ProjectLoader.h"
 #include "Core/View/Views/PreferencesView.h"
+#include "Core/View/Views/ConsoleView.h"
 #include "View/Views/SceneView.h"
 #include "View/Views/GameView.h"
 #include "View/Views/HierarchyView.h"
@@ -35,13 +36,30 @@ extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam
 // ---------------------------------------------------------------------------
 enum class PlayState { Stopped, Building, BuildFailed, Playing, Paused };
 
+// What to do once a background build completes.
+enum class PostBuildAction { PlayInEditor, LaunchStandalone, Nothing };
+
 // ---------------------------------------------------------------------------
 // Launches  cmake --build <dir> --config Debug --target Game --parallel
-// in a detached background process.  Returns the process HANDLE (caller must
-// CloseHandle it) or nullptr on failure.
+// in a detached background process.  Stdout and stderr are captured via
+// an anonymous pipe; the read end is returned via outReadPipe so the caller
+// can poll it each frame. Returns the process HANDLE or nullptr on failure.
 // ---------------------------------------------------------------------------
-static HANDLE StartGameBuild()
+static HANDLE StartGameBuild(HANDLE& outReadPipe)
 {
+    outReadPipe = nullptr;
+
+    // Create an anonymous pipe.  The write end is inherited by the child;
+    // the read end stays in the parent and must NOT be inherited.
+    SECURITY_ATTRIBUTES sa{};
+    sa.nLength        = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+
+    HANDLE hRead = nullptr, hWrite = nullptr;
+    if (!CreatePipe(&hRead, &hWrite, &sa, 0))
+        return nullptr;
+    SetHandleInformation(hRead, HANDLE_FLAG_INHERIT, 0); // parent-only
+
     std::string cmd =
         "cmake --build \"" ENGINE_BUILD_DIR
         "\" --config Debug --target Game --parallel";
@@ -50,17 +68,51 @@ static HANDLE StartGameBuild()
     buf.push_back('\0');
 
     STARTUPINFOA si{};
-    si.cb = sizeof(si);
+    si.cb          = sizeof(si);
+    si.dwFlags     = STARTF_USESTDHANDLES;
+    si.hStdOutput  = hWrite;
+    si.hStdError   = hWrite;
+    si.hStdInput   = nullptr;
     PROCESS_INFORMATION pi{};
 
     if (!CreateProcessA(nullptr, buf.data(),
-                        nullptr, nullptr, FALSE,
-                        CREATE_NO_WINDOW,   // no console flash
+                        nullptr, nullptr, TRUE,   // bInheritHandles = TRUE
+                        CREATE_NO_WINDOW,
                         nullptr, nullptr, &si, &pi))
+    {
+        CloseHandle(hRead);
+        CloseHandle(hWrite);
         return nullptr;
+    }
 
-    CloseHandle(pi.hThread); // we only need the process handle
+    CloseHandle(hWrite); // parent doesn't write; close so ReadFile detects EOF
+    CloseHandle(pi.hThread);
+    outReadPipe = hRead;
     return pi.hProcess;
+}
+
+// ---------------------------------------------------------------------------
+// Launches the compiled Game.exe as an independent process (standalone run).
+// Returns immediately — does not wait for the game to exit.
+// ---------------------------------------------------------------------------
+static void LaunchGameExe()
+{
+    std::string path = std::string(ENGINE_BUILD_DIR) + "/Debug/Game.exe";
+    std::vector<char> buf(path.begin(), path.end());
+    buf.push_back('\0');
+
+    STARTUPINFOA si{};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi{};
+
+    if (CreateProcessA(nullptr, buf.data(),
+                       nullptr, nullptr, FALSE,
+                       0, nullptr, nullptr, &si, &pi))
+    {
+        // We don't track this process — it's standalone.
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -151,6 +203,7 @@ int WINAPI wWinMain(
 
     PreferencesView preferencesView;
     preferencesView.Init(projectSettings, PROJECT_FILE);
+    preferencesView.OnSettingsChanged = [&]() { hasUnsavedChanges = true; };
     bool showPreferences = false;
     bool showProperties = false;
     bool showHierarchy = true;
@@ -166,14 +219,20 @@ int WINAPI wWinMain(
     mesh->LoadFromFile(ASSETS_PATH "cube.obj");
     mesh->CreateBuffer(device);
 
+    ConsoleView consoleView;
+    bool showConsole = true;
+
     // High-resolution timer for frame delta time.
     LARGE_INTEGER perfFreq, lastCounter;
     QueryPerformanceFrequency(&perfFreq);
     QueryPerformanceCounter(&lastCounter);
 
     // Play state — tracks whether the game simulation is running.
-    PlayState playState    = PlayState::Stopped;
+    PlayState playState     = PlayState::Stopped;
+    PostBuildAction postBuildAction = PostBuildAction::Nothing;
     HANDLE    hBuildProcess = nullptr;  // valid only while playState == Building
+    HANDLE    hBuildPipe    = nullptr;  // read end of the cmake stdout/stderr pipe
+    std::string buildLineBuffer;        // accumulates partial lines from the pipe
 
     // -----------------------------------------------------------------------
     // Window callbacks
@@ -201,6 +260,38 @@ int WINAPI wWinMain(
         lastCounter = now;
         (void)dt;
 
+        // Drain the cmake pipe — read whatever bytes are available this frame.
+        if (hBuildPipe)
+        {
+            DWORD available = 0;
+            while (PeekNamedPipe(hBuildPipe, nullptr, 0, nullptr, &available, nullptr) && available > 0)
+            {
+                char tmp[512];
+                DWORD toRead = available < sizeof(tmp) ? available : sizeof(tmp);
+                DWORD bytesRead = 0;
+                if (!ReadFile(hBuildPipe, tmp, toRead, &bytesRead, nullptr) || bytesRead == 0)
+                    break;
+
+                // Split raw bytes into lines and forward to the console.
+                for (DWORD i = 0; i < bytesRead; ++i)
+                {
+                    if (tmp[i] == '\n')
+                    {
+                        // Strip trailing \r if present.
+                        if (!buildLineBuffer.empty() && buildLineBuffer.back() == '\r')
+                            buildLineBuffer.pop_back();
+                        if (!buildLineBuffer.empty())
+                            consoleView.AddLog(ConsoleView::Level::Build, buildLineBuffer);
+                        buildLineBuffer.clear();
+                    }
+                    else
+                    {
+                        buildLineBuffer += tmp[i];
+                    }
+                }
+            }
+        }
+
         // Poll the background cmake build process.
         if (playState == PlayState::Building && hBuildProcess)
         {
@@ -211,16 +302,42 @@ int WINAPI wWinMain(
                 CloseHandle(hBuildProcess);
                 hBuildProcess = nullptr;
 
+                // Flush any remaining partial line from the pipe.
+                if (!buildLineBuffer.empty())
+                {
+                    consoleView.AddLog(ConsoleView::Level::Build, buildLineBuffer);
+                    buildLineBuffer.clear();
+                }
+                if (hBuildPipe) { CloseHandle(hBuildPipe); hBuildPipe = nullptr; }
+
                 if (exitCode == 0)
                 {
-                    // Build succeeded — kick off the in-process simulation.
-                    playState = PlayState::Playing;
-                    for (const auto& obj : scene.GetObjects())
-                        obj->Start();
+                    // Build succeeded — act on the requested post-build action.
+                    switch (postBuildAction)
+                    {
+                        case PostBuildAction::PlayInEditor:
+                            playState = PlayState::Playing;
+                            for (const auto& obj : scene.GetObjects())
+                                obj->Start();
+                            consoleView.AddLog(ConsoleView::Level::Info, "[Build] Build succeeded. Running in editor.");
+                            break;
+                        case PostBuildAction::LaunchStandalone:
+                            LaunchGameExe();
+                            playState = PlayState::Stopped;
+                            consoleView.AddLog(ConsoleView::Level::Info, "[Build] Build succeeded. Launching standalone.");
+                            break;
+                        case PostBuildAction::Nothing:
+                        default:
+                            playState = PlayState::Stopped;
+                            consoleView.AddLog(ConsoleView::Level::Info, "[Build] Build succeeded.");
+                            break;
+                    }
+                    postBuildAction = PostBuildAction::Nothing;
                 }
                 else
                 {
                     playState = PlayState::BuildFailed;
+                    consoleView.AddLog(ConsoleView::Level::Error, "[Build] Build FAILED.");
                 }
             }
         }
@@ -234,6 +351,11 @@ int WINAPI wWinMain(
         }
 
         renderer->MarkDirty();
+
+        // Update window title to reflect unsaved-changes state.
+        SetWindowTextW(window->GetHWND(),
+                       hasUnsavedChanges ? L"Engine Editor *" : L"Engine Editor");
+
         renderer->RenderIfNeeded([&]()
         {
             renderer->Clear(projectSettings.clearColor.r, projectSettings.clearColor.g, projectSettings.clearColor.b);
@@ -267,10 +389,14 @@ int WINAPI wWinMain(
                 ImGui::DockBuilderSplitNode(dockspaceId, ImGuiDir_Left,  0.20f, &left,   &center);
                 ImGui::DockBuilderSplitNode(center,      ImGuiDir_Right, 0.31f, &right,  &center);
 
+                ImGuiID centerTop, centerBottom;
+                ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.25f, &centerBottom, &centerTop);
+
                 ImGui::DockBuilderDockWindow("HierarchyView",  left);
                 ImGui::DockBuilderDockWindow("Assets",         left);
-                ImGui::DockBuilderDockWindow("Scene",          center);
-                ImGui::DockBuilderDockWindow("Game",           center); // tabs with Scene
+                ImGui::DockBuilderDockWindow("Scene",          centerTop);
+                ImGui::DockBuilderDockWindow("Game",           centerTop);
+                ImGui::DockBuilderDockWindow("Console",        centerBottom);
                 ImGui::DockBuilderFinish(dockspaceId);
             }
 
@@ -290,6 +416,38 @@ int WINAPI wWinMain(
                         hasUnsavedChanges = false;
                     }
                     ImGui::Separator();
+                    // Build actions
+                    bool isBusy = (playState == PlayState::Building || playState == PlayState::Playing || playState == PlayState::Paused);
+                    if (isBusy) ImGui::BeginDisabled();
+                    if (ImGui::MenuItem("Build", "Ctrl+B"))
+                    {
+                        consoleView.Clear();
+                        consoleView.AddLog(ConsoleView::Level::Info, "[Build] Starting build...");
+                        showConsole = true;
+                        postBuildAction = PostBuildAction::Nothing;
+                        hBuildProcess   = StartGameBuild(hBuildPipe);
+                        playState       = hBuildProcess ? PlayState::Building : PlayState::BuildFailed;
+                    }
+                    if (ImGui::MenuItem("Build and Run in Editor", nullptr))
+                    {
+                        consoleView.Clear();
+                        consoleView.AddLog(ConsoleView::Level::Info, "[Build] Starting build (run in editor)...");
+                        showConsole = true;
+                        postBuildAction = PostBuildAction::PlayInEditor;
+                        hBuildProcess   = StartGameBuild(hBuildPipe);
+                        playState       = hBuildProcess ? PlayState::Building : PlayState::BuildFailed;
+                    }
+                    if (ImGui::MenuItem("Build and Run Standalone", nullptr))
+                    {
+                        consoleView.Clear();
+                        consoleView.AddLog(ConsoleView::Level::Info, "[Build] Starting build (standalone)...");
+                        showConsole = true;
+                        postBuildAction = PostBuildAction::LaunchStandalone;
+                        hBuildProcess   = StartGameBuild(hBuildPipe);
+                        playState       = hBuildProcess ? PlayState::Building : PlayState::BuildFailed;
+                    }
+                    if (isBusy) ImGui::EndDisabled();
+                    ImGui::Separator();
                     if (ImGui::MenuItem("Project Preferences"))
                         showPreferences = true;
                     ImGui::Separator();
@@ -299,12 +457,13 @@ int WINAPI wWinMain(
 
                 if (ImGui::BeginMenu("Views"))
                 {
-                    ImGui::MenuItem("Hierarchy", nullptr, &showHierarchy);
-                    ImGui::MenuItem("Assets", nullptr, &showAssets);
-                    ImGui::MenuItem("Scene", nullptr, &showScene);
-                    ImGui::MenuItem("Game", nullptr, &showGame);
+                    if (ImGui::MenuItem("Hierarchy"))  showHierarchy  = true;
+                    if (ImGui::MenuItem("Assets"))     showAssets     = true;
+                    if (ImGui::MenuItem("Scene"))      showScene      = true;
+                    if (ImGui::MenuItem("Game"))       showGame       = true;
                     ImGui::Separator();
-                    ImGui::MenuItem("Properties", nullptr, &showProperties);
+                    if (ImGui::MenuItem("Properties")) showProperties = true;
+                    if (ImGui::MenuItem("Console"))    showConsole    = true;
                     ImGui::EndMenu();
                 }
 
@@ -317,9 +476,13 @@ int WINAPI wWinMain(
                     ImGui::SetCursorPosX((barW - singleBtnW) * 0.5f);
                     if (ImGui::Button("Play", { singleBtnW, 0.f }))
                     {
-                        hBuildProcess = StartGameBuild();
-                        playState = hBuildProcess ? PlayState::Building
-                                                  : PlayState::BuildFailed;
+                        consoleView.Clear();
+                        consoleView.AddLog(ConsoleView::Level::Info, "[Build] Starting build (run in editor)...");
+                        showConsole = true;
+                        postBuildAction = PostBuildAction::PlayInEditor;
+                        hBuildProcess   = StartGameBuild(hBuildPipe);
+                        playState       = hBuildProcess ? PlayState::Building
+                                                       : PlayState::BuildFailed;
                     }
                     if (playState == PlayState::BuildFailed)
                     {
@@ -340,6 +503,9 @@ int WINAPI wWinMain(
                         TerminateProcess(hBuildProcess, 1);
                         CloseHandle(hBuildProcess);
                         hBuildProcess = nullptr;
+                        if (hBuildPipe) { CloseHandle(hBuildPipe); hBuildPipe = nullptr; }
+                        buildLineBuffer.clear();
+                        consoleView.AddLog(ConsoleView::Level::Warning, "[Build] Build cancelled.");
                         playState = PlayState::Stopped;
                     }
                 }
@@ -417,6 +583,8 @@ int WINAPI wWinMain(
                 ImGui::EndPopup();
             }
 
+            if (showConsole)
+                consoleView.DrawPanel();
             if (showHierarchy)
                 hierarchy.DrawPanel();
             if (showProperties)
@@ -445,6 +613,8 @@ int WINAPI wWinMain(
         TerminateProcess(hBuildProcess, 1);
         CloseHandle(hBuildProcess);
     }
+    if (hBuildPipe)
+        CloseHandle(hBuildPipe);
 
     return result;
 }

@@ -45,6 +45,7 @@ void DX12EditorRenderer::Init(HWND hwnd, uint32_t width, uint32_t height)
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
 
     ImGui_ImplWin32_Init(hwnd);
 
@@ -189,6 +190,13 @@ void DX12EditorRenderer::EndFrame()
     ID3D12DescriptorHeap* heaps[] = { m_srvHeap.Get() };
     m_commandList->SetDescriptorHeaps(1, heaps);
     ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_commandList.Get());
+
+    // Update and render additional platform windows (viewports outside the main window).
+    if (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
+    {
+        ImGui::UpdatePlatformWindows();
+        ImGui::RenderPlatformWindows();
+    }
 
     // Transition back-buffer: RENDER_TARGET → PRESENT
     // Must happen after ImGui has finished drawing to the render target.

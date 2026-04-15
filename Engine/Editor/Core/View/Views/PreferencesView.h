@@ -35,11 +35,15 @@ public:
     // Save settings back to the project file
     bool SaveSettings();
 
+    // Callback fired when any setting is changed in the UI
+    std::function<void()> OnSettingsChanged;
+
 private:
     void DrawMetadataSection();
     void DrawPathsSection();
     void DrawRenderingSection();
     void DrawAspectRatioSection();
+    void NotifyChanged() { if (OnSettingsChanged) OnSettingsChanged(); }
 
     bool m_isOpen = false;
     std::string m_projFilePath;
