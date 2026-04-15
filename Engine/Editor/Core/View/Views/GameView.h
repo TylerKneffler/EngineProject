@@ -1,6 +1,7 @@
 #pragma once
 #include "View/View.h"
 #include "Core/Scene/Scene.h"
+#include "Core/ProjectLoader.h"
 
 // ---------------------------------------------------------------------------
 // GameView — editor Game panel
@@ -14,7 +15,7 @@
 // play state in Main.cpp, not here.
 //
 // ---- Per-frame call order ----
-//   gameView.Init(device, w, h, srvCpu, srvGpu, &scene);
+//   gameView.Init(device, w, h, srvCpu, srvGpu, &scene, projectSettings);
 //   gameView.Render(cmdList, mainRtv, drawFn);   // inherited from View
 //   gameView.DrawPanel();                        // overridden here
 // ---------------------------------------------------------------------------
@@ -24,17 +25,27 @@ public:
     GameView()  = default;
     ~GameView() = default;
 
-    // Calls View::Init then stores the scene pointer.
+    // Calls View::Init then stores the scene pointer and aspect ratio settings.
     // scene must outlive this view.
     void Init(ID3D12Device* device,
               uint32_t width, uint32_t height,
               D3D12_CPU_DESCRIPTOR_HANDLE srvCpu,
               D3D12_GPU_DESCRIPTOR_HANDLE srvGpu,
-              Scene* scene);
+              Scene* scene,
+              const ProjectSettings& settings);
 
     // Draws the "Game" ImGui window showing the game-camera render output.
     void DrawPanel() override;
 
 private:
+    void CalculateGameViewport(ImVec2 availableSize, ImVec2& outViewportSize, ImVec2& outViewportPos);
+
     Scene* m_scene = nullptr; // non-owning
+
+    // Aspect ratio settings
+    ProjectSettings::AspectRatioMode m_aspectRatioMode = ProjectSettings::AspectRatioMode::Locked;
+    float m_gameAspectRatio = 1.777f;  // 16:9
+    uint32_t m_gameWindowWidth = 1920;
+    uint32_t m_gameWindowHeight = 1080;
+    glm::vec4 m_letterboxColor{0.f, 0.f, 0.f, 1.f};
 };

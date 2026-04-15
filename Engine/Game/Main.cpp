@@ -2,14 +2,19 @@
 #include "Core/Renderers/Game/DX12GameRenderer.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/Mesh.h"
-#include "Core/Compoonents/Material.h"
 #include "Core/Serialization/SceneSerializer.h"
+#include "Core/ProjectLoader.h"
 #include "Scripts/Rotate.h"
 
-// Fallback for IntelliSense — CMake overrides this with the real absolute path.
+// Fallback for IntelliSense — CMake overrides these with real absolute paths.
 #ifndef ASSETS_PATH
 #define ASSETS_PATH "Assets/"
+#endif
+#ifndef PROJECT_FILE
+#define PROJECT_FILE "Example_Proj.proj"
+#endif
+#ifndef ENGINE_ASSETS_PATH
+#define ENGINE_ASSETS_PATH "Engine/Core/Assets/"
 #endif
 
 // ---------------------------------------------------------------------------
@@ -21,7 +26,24 @@ int WINAPI wWinMain(
     _In_     LPWSTR    /*lpCmdLine*/,
     _In_     int       /*nShowCmd*/)
 {
-    auto window   = std::make_unique<Window>(hInstance, L"Game", 1280, 720);
+    // Load project configuration.
+    ProjectLoader projectLoader;
+    ProjectSettings projectSettings;
+    try
+    {
+        projectSettings = projectLoader.LoadProject(PROJECT_FILE);
+    }
+    catch (const std::exception&)
+    {
+        projectSettings.assetsDirectory = ASSETS_PATH;
+        projectSettings.defaultScene    = std::string(ASSETS_PATH) + "Scenes/default.scene";
+        projectSettings.viewportWidth   = 1280;
+        projectSettings.viewportHeight  = 720;
+    }
+
+    auto window   = std::make_unique<Window>(hInstance, L"Game",
+                        projectSettings.viewportWidth,
+                        projectSettings.viewportHeight);
     auto renderer = std::make_unique<DX12GameRenderer>();
     renderer->Init(window->GetHWND(), window->GetWidth(), window->GetHeight());
 
@@ -33,18 +55,9 @@ int WINAPI wWinMain(
     // Register script types for scene deserialization.
     SceneSerializer::Register("Rotate", []() -> Component* { return new Rotate(); });
 
-    // Try to load the saved scene; fall back to a built-in default scene if none exists.
-    const std::string kScenePath = std::string(ASSETS_PATH) + "Scenes/default.scene";
-    if (!scene.Load(kScenePath))
-    {
-        // Default scene — used when no .scene file has been saved yet.
-    Object* cubeObj = scene.AddObject("Cube");
-    Mesh*   mesh    = cubeObj->AddComponent<Mesh>();
-    cubeObj->AddComponent<Material>();
-    cubeObj->AddComponent<Rotate>(); // spins 45 deg/s around Y by default
-    mesh->LoadFromFile(ASSETS_PATH "cube.obj");
-        mesh->CreateBuffer(device);
-    }
+    // Load the project's entry scene; fall back to the engine's built-in default.
+    if (!scene.Load(projectSettings.defaultScene))
+        scene.Load(std::string(ENGINE_ASSETS_PATH) + "Scenes/default.scene");
 
     // Start lifecycle.
     for (const auto& obj : scene.GetObjects())

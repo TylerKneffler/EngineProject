@@ -117,7 +117,8 @@ int WINAPI wWinMain(
     gameViewport.Init(device,
                       window->GetWidth(), window->GetHeight(),
                       gameSrvCpu, gameSrvGpu,
-                      &scene);
+                      &scene,
+                      projectSettings);
 
     HierarchyView hierarchy;
     hierarchy.Init(&scene);
@@ -289,8 +290,6 @@ int WINAPI wWinMain(
                         hasUnsavedChanges = false;
                     }
                     ImGui::Separator();
-                    if (ImGui::MenuItem("Properties"))
-                        showProperties = !showProperties;
                     if (ImGui::MenuItem("Project Preferences"))
                         showPreferences = true;
                     ImGui::Separator();

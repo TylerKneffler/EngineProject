@@ -141,6 +141,7 @@ target_compile_definitions(Editor PRIVATE
     ASSETS_PATH="${CMAKE_SOURCE_DIR}/Assets/"
     PROJECT_FILE="${CMAKE_SOURCE_DIR}/Example_Proj.proj"
     ENGINE_BUILD_DIR="${CMAKE_BINARY_DIR}"
+    ENGINE_ASSETS_PATH="${CMAKE_SOURCE_DIR}/Engine/Core/Assets/"
 )
 set_target_properties(Editor PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
@@ -161,6 +162,8 @@ target_include_directories(Game PRIVATE
 )
 target_compile_definitions(Game PRIVATE
     ASSETS_PATH="${CMAKE_SOURCE_DIR}/Assets/"
+    PROJECT_FILE="${CMAKE_SOURCE_DIR}/Example_Proj.proj"
+    ENGINE_ASSETS_PATH="${CMAKE_SOURCE_DIR}/Engine/Core/Assets/"
 )
 set_target_properties(Game PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
