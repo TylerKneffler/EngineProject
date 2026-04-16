@@ -2,8 +2,6 @@
 #include "Core/Renderers/Editor/DX12EditorRenderer.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/Mesh.h"
-#include "Core/Compoonents/Material.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/ProjectLoader.h"
 #include "Core/View/Views/PreferencesView.h"
@@ -211,13 +209,15 @@ int WINAPI wWinMain(
     preferencesView.OnSettingsChanged = [&]() { hasUnsavedChanges = true; };
     bool showPreferences = false;
 
-    // Add the cube as a managed game object.
-    Object* cubeObj = scene.AddObject("Cube");
-    Mesh*   mesh    = cubeObj->AddComponent<Mesh>();
-    cubeObj->AddComponent<Material>();
-    cubeObj->AddComponent<Rotate>(); 
-    mesh->LoadFromFile(ASSETS_PATH "cube.obj");
-    mesh->CreateBuffer(device);
+    // Load the default scene: prefer the project-specified scene, fall back to the built-in default.
+    {
+        const std::string fallback = std::string(ASSETS_PATH) + "Scenes/default.scene";
+        const std::string& scenePath = !projectSettings.defaultScene.empty()
+                                            ? projectSettings.defaultScene
+                                            : fallback;
+        if (!scene.Load(scenePath) && scenePath != fallback)
+            scene.Load(fallback);
+    }
 
     // High-resolution timer for frame delta time.
     LARGE_INTEGER perfFreq, lastCounter;
