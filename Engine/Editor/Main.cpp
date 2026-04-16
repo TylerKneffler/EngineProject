@@ -8,11 +8,7 @@
 #include "Core/ProjectLoader.h"
 #include "Core/View/Views/PreferencesView.h"
 #include "Core/View/Views/ConsoleView.h"
-#include "View/Views/SceneView.h"
-#include "View/Views/GameView.h"
-#include "View/Views/HierarchyView.h"
-#include "View/Views/PropertiesView.h"
-#include "View/Views/AssetsExplorerView.h"
+#include "Core/View/ViewFactory.h"
 #include "imgui_internal.h"  // DockBuilder API
 #include "Scripts/Rotate.h"
 
@@ -154,40 +150,47 @@ int WINAPI wWinMain(
     // Register script component types for scene serialization.
     SceneSerializer::Register("Rotate", []() -> Component* { return new Rotate(); });
 
-    // Scene viewport — renders 3-D content into an offscreen texture (SRV slot 1).
-    auto [srvCpu, srvGpu] = renderer->GetSrvSlot(1);
-    SceneView sceneViewport;
-    sceneViewport.Init(device,
-                       window->GetWidth(), window->GetHeight(),
-                       srvCpu, srvGpu,
-                       &scene,
-                       projectSettings);
-
-    // Game viewport — renders from the game camera (SRV slot 2).
-    auto [gameSrvCpu, gameSrvGpu] = renderer->GetSrvSlot(2);
-    GameView gameViewport;
-    gameViewport.Init(device,
-                      window->GetWidth(), window->GetHeight(),
-                      gameSrvCpu, gameSrvGpu,
-                      &scene,
-                      projectSettings);
-
-    HierarchyView hierarchy;
-    hierarchy.Init(&scene);
-    PropertiesView propertiesView;
-    hierarchy.OnSelectionChanged = [&](Object* obj) {
-        propertiesView.SetSelectedObject(obj);
-        scene.SetSelectedObject(obj);
-    };
-
     // Track unsaved changes
     bool hasUnsavedChanges = false;
     std::string sceneToLoad;
     bool showUnsavedWarning = false;
 
-    AssetsExplorerView assetsExplorer;
-    assetsExplorer.Init(projectSettings.assetsDirectory);
-    assetsExplorer.OnSceneRequested = [&](const std::string& scenePath)
+    // -----------------------------------------------------------------------
+    // View factory — creates and names all editor panels.
+    // -----------------------------------------------------------------------
+    ViewFactory viewFactory(renderer.get(), &scene, projectSettings);
+
+    // Callbacks shared by all hierarchy / assets panels.
+    // (Populated below after creating primary panels.)
+    std::vector<std::unique_ptr<IEditorPanel>> panels;
+
+    // Create default layout panels.
+    panels.push_back(viewFactory.Create("Scene"));
+    panels.push_back(viewFactory.Create("Game"));
+    panels.push_back(viewFactory.Create("Hierarchy"));
+    panels.push_back(viewFactory.Create("Properties"));
+    panels.push_back(viewFactory.Create("Assets"));
+    panels.push_back(viewFactory.Create("Console"));
+
+    // Keep a raw pointer to the primary console for build log output.
+    auto* primaryConsole    = static_cast<ConsoleView*>(panels[5].get());
+
+    // Wire hierarchy → properties + scene selection for all hierarchy panels.
+    auto selectionCallback = [&](Object* obj)
+    {
+        // Update every PropertiesView in the panel list.
+        for (auto& p : panels)
+        {
+            if (auto* pv = dynamic_cast<PropertiesView*>(p.get()))
+                pv->SetSelectedObject(obj);
+        }
+        scene.SetSelectedObject(obj);
+    };
+    viewFactory.OnSelectionChanged = selectionCallback;
+    static_cast<HierarchyView*>(panels[2].get())->OnSelectionChanged = selectionCallback;
+
+    // Wire assets explorer → scene load for all assets panels.
+    auto sceneRequestCallback = [&](const std::string& scenePath)
     {
         if (hasUnsavedChanges)
         {
@@ -200,16 +203,13 @@ int WINAPI wWinMain(
             hasUnsavedChanges = false;
         }
     };
+    viewFactory.OnSceneRequested = sceneRequestCallback;
+    static_cast<AssetsExplorerView*>(panels[4].get())->OnSceneRequested = sceneRequestCallback;
 
     PreferencesView preferencesView;
     preferencesView.Init(projectSettings, PROJECT_FILE);
     preferencesView.OnSettingsChanged = [&]() { hasUnsavedChanges = true; };
     bool showPreferences = false;
-    bool showProperties = false;
-    bool showHierarchy = true;
-    bool showAssets = true;
-    bool showScene = true;
-    bool showGame = true;
 
     // Add the cube as a managed game object.
     Object* cubeObj = scene.AddObject("Cube");
@@ -218,9 +218,6 @@ int WINAPI wWinMain(
     cubeObj->AddComponent<Rotate>(); 
     mesh->LoadFromFile(ASSETS_PATH "cube.obj");
     mesh->CreateBuffer(device);
-
-    ConsoleView consoleView;
-    bool showConsole = true;
 
     // High-resolution timer for frame delta time.
     LARGE_INTEGER perfFreq, lastCounter;
@@ -241,8 +238,11 @@ int WINAPI wWinMain(
     window->OnResize = [&](uint32_t w, uint32_t h)
     {
         renderer->Resize(w, h);           // flushes GPU before recreating swap chain
-        sceneViewport.Resize(renderer->GetDevice(), w, h);
-        gameViewport.Resize(renderer->GetDevice(), w, h);
+        for (auto& panel : panels)
+        {
+            if (panel->NeedsRender())
+                static_cast<View*>(panel.get())->Resize(renderer->GetDevice(), w, h);
+        }
         renderer->MarkDirty();
     };
 
@@ -281,7 +281,7 @@ int WINAPI wWinMain(
                         if (!buildLineBuffer.empty() && buildLineBuffer.back() == '\r')
                             buildLineBuffer.pop_back();
                         if (!buildLineBuffer.empty())
-                            consoleView.AddLog(ConsoleView::Level::Build, buildLineBuffer);
+                            primaryConsole->AddLog(ConsoleView::Level::Build, buildLineBuffer);
                         buildLineBuffer.clear();
                     }
                     else
@@ -305,7 +305,7 @@ int WINAPI wWinMain(
                 // Flush any remaining partial line from the pipe.
                 if (!buildLineBuffer.empty())
                 {
-                    consoleView.AddLog(ConsoleView::Level::Build, buildLineBuffer);
+                    primaryConsole->AddLog(ConsoleView::Level::Build, buildLineBuffer);
                     buildLineBuffer.clear();
                 }
                 if (hBuildPipe) { CloseHandle(hBuildPipe); hBuildPipe = nullptr; }
@@ -319,17 +319,17 @@ int WINAPI wWinMain(
                             playState = PlayState::Playing;
                             for (const auto& obj : scene.GetObjects())
                                 obj->Start();
-                            consoleView.AddLog(ConsoleView::Level::Info, "[Build] Build succeeded. Running in editor.");
+                            primaryConsole->AddLog(ConsoleView::Level::Info, "[Build] Build succeeded. Running in editor.");
                             break;
                         case PostBuildAction::LaunchStandalone:
                             LaunchGameExe();
                             playState = PlayState::Stopped;
-                            consoleView.AddLog(ConsoleView::Level::Info, "[Build] Build succeeded. Launching standalone.");
+                            primaryConsole->AddLog(ConsoleView::Level::Info, "[Build] Build succeeded. Launching standalone.");
                             break;
                         case PostBuildAction::Nothing:
                         default:
                             playState = PlayState::Stopped;
-                            consoleView.AddLog(ConsoleView::Level::Info, "[Build] Build succeeded.");
+                            primaryConsole->AddLog(ConsoleView::Level::Info, "[Build] Build succeeded.");
                             break;
                     }
                     postBuildAction = PostBuildAction::Nothing;
@@ -337,7 +337,7 @@ int WINAPI wWinMain(
                 else
                 {
                     playState = PlayState::BuildFailed;
-                    consoleView.AddLog(ConsoleView::Level::Error, "[Build] Build FAILED.");
+                    primaryConsole->AddLog(ConsoleView::Level::Error, "[Build] Build FAILED.");
                 }
             }
         }
@@ -360,20 +360,14 @@ int WINAPI wWinMain(
         {
             renderer->Clear(projectSettings.clearColor.r, projectSettings.clearColor.g, projectSettings.clearColor.b);
 
-            // Render 3-D scene into the scene offscreen texture.
-            sceneViewport.Render(renderer->GetCommandList(), renderer->GetCurrentRTV(),
-                [&](ID3D12GraphicsCommandList* cmd)
-                {
-                    scene.Render(cmd, sceneViewport.GetAspect());
-                });
-
-            // Render game camera view into the game offscreen texture.
-            gameViewport.Render(renderer->GetCommandList(), renderer->GetCurrentRTV(),
-                [&](ID3D12GraphicsCommandList* cmd)
-                {
-                    scene.Render(cmd, gameViewport.GetAspect(),
-                                 scene.FindGameCamera());
-                });
+            // Render every 3-D panel's offscreen texture before drawing ImGui.
+            for (auto& panel : panels)
+            {
+                if (!panel->NeedsRender() || !panel->IsOpen()) continue;
+                View* view = static_cast<View*>(panel.get());
+                view->Render(renderer->GetCommandList(), renderer->GetCurrentRTV(),
+                    [view](ID3D12GraphicsCommandList* cmd) { view->Render3D(cmd); });
+            }
 
             ImGuiID dockspaceId = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
 
@@ -392,11 +386,11 @@ int WINAPI wWinMain(
                 ImGuiID centerTop, centerBottom;
                 ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.25f, &centerBottom, &centerTop);
 
-                ImGui::DockBuilderDockWindow("HierarchyView",  left);
-                ImGui::DockBuilderDockWindow("Assets",         left);
-                ImGui::DockBuilderDockWindow("Scene",          centerTop);
-                ImGui::DockBuilderDockWindow("Game",           centerTop);
-                ImGui::DockBuilderDockWindow("Console",        centerBottom);
+                ImGui::DockBuilderDockWindow("Hierarchy 1",  left);
+                ImGui::DockBuilderDockWindow("Assets 1",     left);
+                ImGui::DockBuilderDockWindow("Scene 1",      centerTop);
+                ImGui::DockBuilderDockWindow("Game 1",       centerTop);
+                ImGui::DockBuilderDockWindow("Console 1",    centerBottom);
                 ImGui::DockBuilderFinish(dockspaceId);
             }
 
@@ -421,27 +415,24 @@ int WINAPI wWinMain(
                     if (isBusy) ImGui::BeginDisabled();
                     if (ImGui::MenuItem("Build", "Ctrl+B"))
                     {
-                        consoleView.Clear();
-                        consoleView.AddLog(ConsoleView::Level::Info, "[Build] Starting build...");
-                        showConsole = true;
+                        primaryConsole->Clear();
+                        primaryConsole->AddLog(ConsoleView::Level::Info, "[Build] Starting build...");
                         postBuildAction = PostBuildAction::Nothing;
                         hBuildProcess   = StartGameBuild(hBuildPipe);
                         playState       = hBuildProcess ? PlayState::Building : PlayState::BuildFailed;
                     }
                     if (ImGui::MenuItem("Build and Run in Editor", nullptr))
                     {
-                        consoleView.Clear();
-                        consoleView.AddLog(ConsoleView::Level::Info, "[Build] Starting build (run in editor)...");
-                        showConsole = true;
+                        primaryConsole->Clear();
+                        primaryConsole->AddLog(ConsoleView::Level::Info, "[Build] Starting build (run in editor)...");
                         postBuildAction = PostBuildAction::PlayInEditor;
                         hBuildProcess   = StartGameBuild(hBuildPipe);
                         playState       = hBuildProcess ? PlayState::Building : PlayState::BuildFailed;
                     }
                     if (ImGui::MenuItem("Build and Run Standalone", nullptr))
                     {
-                        consoleView.Clear();
-                        consoleView.AddLog(ConsoleView::Level::Info, "[Build] Starting build (standalone)...");
-                        showConsole = true;
+                        primaryConsole->Clear();
+                        primaryConsole->AddLog(ConsoleView::Level::Info, "[Build] Starting build (standalone)...");
                         postBuildAction = PostBuildAction::LaunchStandalone;
                         hBuildProcess   = StartGameBuild(hBuildPipe);
                         playState       = hBuildProcess ? PlayState::Building : PlayState::BuildFailed;
@@ -455,15 +446,43 @@ int WINAPI wWinMain(
                     ImGui::EndMenu();
                 }
 
+                // Views menu — each item creates a new panel instance.
                 if (ImGui::BeginMenu("Views"))
                 {
-                    if (ImGui::MenuItem("Hierarchy"))  showHierarchy  = true;
-                    if (ImGui::MenuItem("Assets"))     showAssets     = true;
-                    if (ImGui::MenuItem("Scene"))      showScene      = true;
-                    if (ImGui::MenuItem("Game"))       showGame       = true;
+                    bool no3D = !viewFactory.CanCreate3DView();
+                    if (no3D) ImGui::BeginDisabled();
+                    if (ImGui::MenuItem("Scene"))
+                    {
+                        auto p = viewFactory.Create("Scene");
+                        if (p) panels.push_back(std::move(p));
+                    }
+                    if (ImGui::MenuItem("Game"))
+                    {
+                        auto p = viewFactory.Create("Game");
+                        if (p) panels.push_back(std::move(p));
+                    }
+                    if (no3D) ImGui::EndDisabled();
                     ImGui::Separator();
-                    if (ImGui::MenuItem("Properties")) showProperties = true;
-                    if (ImGui::MenuItem("Console"))    showConsole    = true;
+                    if (ImGui::MenuItem("Hierarchy"))
+                    {
+                        auto p = viewFactory.Create("Hierarchy");
+                        if (p) panels.push_back(std::move(p));
+                    }
+                    if (ImGui::MenuItem("Properties"))
+                    {
+                        auto p = viewFactory.Create("Properties");
+                        if (p) panels.push_back(std::move(p));
+                    }
+                    if (ImGui::MenuItem("Assets"))
+                    {
+                        auto p = viewFactory.Create("Assets");
+                        if (p) panels.push_back(std::move(p));
+                    }
+                    if (ImGui::MenuItem("Console"))
+                    {
+                        auto p = viewFactory.Create("Console");
+                        if (p) panels.push_back(std::move(p));
+                    }
                     ImGui::EndMenu();
                 }
 
@@ -476,9 +495,8 @@ int WINAPI wWinMain(
                     ImGui::SetCursorPosX((barW - singleBtnW) * 0.5f);
                     if (ImGui::Button("Play", { singleBtnW, 0.f }))
                     {
-                        consoleView.Clear();
-                        consoleView.AddLog(ConsoleView::Level::Info, "[Build] Starting build (run in editor)...");
-                        showConsole = true;
+                        primaryConsole->Clear();
+                        primaryConsole->AddLog(ConsoleView::Level::Info, "[Build] Starting build (run in editor)...");
                         postBuildAction = PostBuildAction::PlayInEditor;
                         hBuildProcess   = StartGameBuild(hBuildPipe);
                         playState       = hBuildProcess ? PlayState::Building
@@ -505,7 +523,7 @@ int WINAPI wWinMain(
                         hBuildProcess = nullptr;
                         if (hBuildPipe) { CloseHandle(hBuildPipe); hBuildPipe = nullptr; }
                         buildLineBuffer.clear();
-                        consoleView.AddLog(ConsoleView::Level::Warning, "[Build] Build cancelled.");
+                        primaryConsole->AddLog(ConsoleView::Level::Warning, "[Build] Build cancelled.");
                         playState = PlayState::Stopped;
                     }
                 }
@@ -583,24 +601,31 @@ int WINAPI wWinMain(
                 ImGui::EndPopup();
             }
 
-            if (showConsole)
-                consoleView.DrawPanel();
-            if (showHierarchy)
-                hierarchy.DrawPanel();
-            if (showProperties)
-                propertiesView.DrawPanel();
-            if (showAssets)
-                assetsExplorer.DrawPanel();
-            if (showScene)
-                sceneViewport.DrawPanel();
-            if (showGame)
-                gameViewport.DrawPanel();
-            
+            // Draw all open panels.
+            for (auto& panel : panels)
+                panel->DrawPanel();
+
             // Draw preferences window if open
             preferencesView.SetOpen(showPreferences);
             if (showPreferences)
             {
                 preferencesView.DrawWindow(showPreferences);
+            }
+
+            // Remove panels that were closed this frame, returning SRV slots.
+            for (auto it = panels.begin(); it != panels.end(); )
+            {
+                if (!(*it)->IsOpen())
+                {
+                    if ((*it)->NeedsRender())
+                        viewFactory.FreeSrvSlot(static_cast<View*>(it->get())->GetSrvSlotIndex());
+                    viewFactory.NotifyPanelRemoved(it->get());
+                    it = panels.erase(it);
+                }
+                else
+                {
+                    ++it;
+                }
             }
         });
     };

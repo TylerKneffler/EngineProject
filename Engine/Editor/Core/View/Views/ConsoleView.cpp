@@ -25,7 +25,7 @@ void ConsoleView::DrawPanel()
 {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(4.f, 4.f));
 
-    if (!ImGui::Begin("Console"))
+    if (!ImGui::Begin(m_title.c_str(), &m_open))
     {
         ImGui::End();
         ImGui::PopStyleVar();

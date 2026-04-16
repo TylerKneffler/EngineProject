@@ -27,8 +27,12 @@ public:
               uint32_t width, uint32_t height,
               D3D12_CPU_DESCRIPTOR_HANDLE srvCpu,
               D3D12_GPU_DESCRIPTOR_HANDLE srvGpu,
+              uint32_t srvSlotIndex,
               Scene* scene,
               const ProjectSettings& settings);
+
+    // Issues the editor-camera scene draw into cmd each frame.
+    void Render3D(ID3D12GraphicsCommandList* cmd) override;
 
     // Shows the offscreen texture with letterboxing/pillarboxing based on
     // aspect ratio settings, captures mouse input, and drives the

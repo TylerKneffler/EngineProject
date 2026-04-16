@@ -3,6 +3,7 @@
 
 #include "Core/Scene/Scene.h"
 #include "Core/Object.h"
+#include "View/IEditorPanel.h"
 
 // ---------------------------------------------------------------------------
 // HierarchyView
@@ -19,7 +20,7 @@
 // Call GetSelectedObject() to retrieve the currently selected object for
 // use in the Properties panel.
 // ---------------------------------------------------------------------------
-class HierarchyView
+class HierarchyView : public IEditorPanel
 {
 public:
     HierarchyView()  = default;

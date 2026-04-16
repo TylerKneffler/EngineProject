@@ -1,6 +1,7 @@
 #pragma once
 #include "pch.h"
 #include <functional>
+#include "View/IEditorPanel.h"
 
 // ---------------------------------------------------------------------------
 // AssetsExplorerView
@@ -14,7 +15,7 @@
 //   assetsExplorerView.OnSceneRequested = [](const std::string& path) { /* load scene */ };
 //   assetsExplorerView.DrawPanel();
 // ---------------------------------------------------------------------------
-class AssetsExplorerView
+class AssetsExplorerView : public IEditorPanel
 {
 public:
     AssetsExplorerView()  = default;

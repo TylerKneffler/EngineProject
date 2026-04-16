@@ -8,10 +8,12 @@ static constexpr DXGI_FORMAT VIEW_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
 void View::Init(ID3D12Device* device,
                 uint32_t width, uint32_t height,
                 D3D12_CPU_DESCRIPTOR_HANDLE srvCpu,
-                D3D12_GPU_DESCRIPTOR_HANDLE srvGpu)
+                D3D12_GPU_DESCRIPTOR_HANDLE srvGpu,
+                uint32_t srvSlotIndex)
 {
-    m_srvCpu = srvCpu;
-    m_srvGpu = srvGpu;
+    m_srvCpu       = srvCpu;
+    m_srvGpu       = srvGpu;
+    m_srvSlotIndex = srvSlotIndex;
     CreateResources(device, width, height);
 }
 

@@ -17,7 +17,7 @@ void AssetsExplorerView::Init(const std::string& assetsPath)
 // ---------------------------------------------------------------------------
 void AssetsExplorerView::DrawPanel()
 {
-    ImGui::Begin("Assets");
+    ImGui::Begin(m_title.c_str(), &m_open);
 
     if (m_assetsPath.empty())
     {

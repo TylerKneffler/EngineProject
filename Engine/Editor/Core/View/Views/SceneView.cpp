@@ -10,6 +10,7 @@ void SceneView::Init(ID3D12Device* device,
                          uint32_t width, uint32_t height,
                          D3D12_CPU_DESCRIPTOR_HANDLE srvCpu,
                          D3D12_GPU_DESCRIPTOR_HANDLE srvGpu,
+                         uint32_t srvSlotIndex,
                          Scene* scene,
                          const ProjectSettings& settings)
 {
@@ -20,7 +21,7 @@ void SceneView::Init(ID3D12Device* device,
     m_gameWindowHeight = settings.gameWindowHeight;
     m_letterboxColor = settings.letterboxColor;
     
-    View::Init(device, width, height, srvCpu, srvGpu);
+    View::Init(device, width, height, srvCpu, srvGpu, srvSlotIndex);
 }
 
 // ---------------------------------------------------------------------------
@@ -30,7 +31,7 @@ void SceneView::DrawPanel()
 {
     // Remove inner padding so the texture fills the panel edge-to-edge.
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.f, 0.f));
-    ImGui::Begin("Scene");
+    ImGui::Begin(m_title.c_str(), &m_open);
 
     float panDX = 0.f, panDY = 0.f;
     float orbitDX = 0.f, orbitDY = 0.f;
@@ -231,4 +232,13 @@ void SceneView::ApplyCameraControls(float panDX, float panDY,
         XMStoreFloat3(&moveF, move);
         pos.x += moveF.x; pos.y += moveF.y; pos.z += moveF.z;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Render3D
+// ---------------------------------------------------------------------------
+void SceneView::Render3D(ID3D12GraphicsCommandList* cmd)
+{
+    if (m_scene)
+        m_scene->Render(cmd, m_aspect);
 }

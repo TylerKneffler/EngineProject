@@ -1,5 +1,6 @@
 #pragma once
 #include "pch.h"
+#include "View/IEditorPanel.h"
 
 // ---------------------------------------------------------------------------
 // ConsoleView — editor Console panel
@@ -11,7 +12,7 @@
 //   consoleView.AddLog(ConsoleView::Level::Build, "cmake output...");
 //   consoleView.DrawPanel();
 // ---------------------------------------------------------------------------
-class ConsoleView
+class ConsoleView : public IEditorPanel
 {
 public:
     enum class Level { Info, Warning, Error, Build };

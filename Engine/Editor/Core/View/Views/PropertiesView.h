@@ -1,6 +1,7 @@
 #pragma once
 #include "pch.h"
 #include "Core/Object.h"
+#include "View/IEditorPanel.h"
 
 // ---------------------------------------------------------------------------
 // PropertiesView
@@ -12,7 +13,7 @@
 //   propertiesView.SetSelectedObject(hierarchy.GetSelectedObject());
 //   propertiesView.DrawPanel();
 // ---------------------------------------------------------------------------
-class PropertiesView
+class PropertiesView : public IEditorPanel
 {
 public:
     PropertiesView()  = default;

@@ -7,10 +7,11 @@ void GameView::Init(ID3D12Device* device,
                     uint32_t width, uint32_t height,
                     D3D12_CPU_DESCRIPTOR_HANDLE srvCpu,
                     D3D12_GPU_DESCRIPTOR_HANDLE srvGpu,
+                    uint32_t srvSlotIndex,
                     Scene* scene,
                     const ProjectSettings& settings)
 {
-    View::Init(device, width, height, srvCpu, srvGpu);
+    View::Init(device, width, height, srvCpu, srvGpu, srvSlotIndex);
     m_scene = scene;
     m_aspectRatioMode  = settings.aspectRatioMode;
     m_gameAspectRatio  = settings.gameAspectRatio;
@@ -26,7 +27,7 @@ void GameView::DrawPanel()
 {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, { 0.f, 0.f });
 
-    if (ImGui::Begin("Game"))
+    if (ImGui::Begin(m_title.c_str(), &m_open))
     {
         ImVec2 available = ImGui::GetContentRegionAvail();
         if (available.x > 1.f && available.y > 1.f)
@@ -60,6 +61,15 @@ void GameView::DrawPanel()
     ImGui::End();
 
     ImGui::PopStyleVar();
+}
+
+// ---------------------------------------------------------------------------
+// Render3D
+// ---------------------------------------------------------------------------
+void GameView::Render3D(ID3D12GraphicsCommandList* cmd)
+{
+    if (m_scene)
+        m_scene->Render(cmd, m_aspect, m_scene->FindGameCamera());
 }
 
 // ---------------------------------------------------------------------------

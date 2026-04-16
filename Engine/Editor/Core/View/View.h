@@ -1,24 +1,32 @@
 #pragma once
 #include "pch.h"
+#include "IEditorPanel.h"
 
 // ---------------------------------------------------------------------------
-// View — base class for all editor panel views.
+// View — base class for DX12-backed editor panels (SceneView, GameView, …).
 //
-// Owns the offscreen DX12 render target, depth buffer, and SRV registration
-// that every panel needs. Subclasses override DrawPanel() to provide their
-// specific ImGui content and interaction logic.
+// Owns the offscreen render target, depth buffer, and SRV registration that
+// every 3-D panel needs. Derives from IEditorPanel so all panels can be
+// managed uniformly. Subclasses override DrawPanel() for ImGui content and
+// Render3D() for per-frame scene draw calls.
 // ---------------------------------------------------------------------------
-class View
+class View : public IEditorPanel
 {
 public:
     View()          = default;
     virtual ~View() = default;
 
+    // NeedsRender always returns true for DX12-backed views.
+    bool NeedsRender() const override { return true; }
+
     // Creates the offscreen texture and registers it in ImGui's SRV heap.
+    // srvSlotIndex identifies the heap slot so it can be returned to the
+    // ViewFactory free-list when this view is closed.
     virtual void Init(ID3D12Device* device,
                       uint32_t width, uint32_t height,
                       D3D12_CPU_DESCRIPTOR_HANDLE srvCpu,
-                      D3D12_GPU_DESCRIPTOR_HANDLE srvGpu);
+                      D3D12_GPU_DESCRIPTOR_HANDLE srvGpu,
+                      uint32_t srvSlotIndex = 0);
 
     // Recreates the offscreen texture at the new dimensions.
     // Safe to call only when the GPU is idle (after renderer->Resize()).
@@ -37,6 +45,9 @@ public:
     uint32_t GetWidth()  const { return m_width;  }
     uint32_t GetHeight() const { return m_height; }
 
+    // SRV slot index assigned at Init time (used by ViewFactory for slot reuse).
+    uint32_t GetSrvSlotIndex() const { return m_srvSlotIndex; }
+
 protected:
     // Allocates / reallocates all DX12 resources for the offscreen target.
     void CreateResources(ID3D12Device* device, uint32_t width, uint32_t height);
@@ -49,6 +60,7 @@ protected:
     D3D12_CPU_DESCRIPTOR_HANDLE  m_srvCpu{};
     D3D12_GPU_DESCRIPTOR_HANDLE  m_srvGpu{};
 
+    uint32_t m_srvSlotIndex = 0;
     uint32_t m_width  = 0;
     uint32_t m_height = 0;
     float    m_aspect = 1.0f;

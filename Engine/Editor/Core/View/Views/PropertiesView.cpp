@@ -9,7 +9,7 @@
 // ---------------------------------------------------------------------------
 void PropertiesView::DrawPanel()
 {
-    ImGui::Begin("Properties");
+    ImGui::Begin(m_title.c_str(), &m_open);
 
     if (!m_selectedObject)
     {

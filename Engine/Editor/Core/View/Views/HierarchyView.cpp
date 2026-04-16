@@ -7,7 +7,7 @@
 // ---------------------------------------------------------------------------
 void HierarchyView::DrawPanel()
 {
-    ImGui::Begin("HierarchyView");
+    ImGui::Begin(m_title.c_str(), &m_open);
 
     if (!m_scene)
     {
