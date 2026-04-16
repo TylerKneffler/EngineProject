@@ -77,15 +77,8 @@ void PreferencesView::DrawMetadataSection()
     ImGui::SameLine(0, 0);
     ImGui::TextDisabled("Project Name");
 
-    ImGui::SetNextItemWidth(-1.f);
-    ImGui::InputText("##version", (char*)m_settings.version.c_str(), m_settings.version.size(), ImGuiInputTextFlags_ReadOnly);
-    ImGui::SameLine(0, 0);
-    ImGui::TextDisabled("Version");
-
-    ImGui::SetNextItemWidth(-1.f);
-    ImGui::InputText("##description", (char*)m_settings.description.c_str(), m_settings.description.size(), ImGuiInputTextFlags_ReadOnly);
-    ImGui::SameLine(0, 0);
-    ImGui::TextDisabled("Description");
+    ImGui::LabelText("Version", "%s", m_settings.version.c_str());
+    ImGui::LabelText("Description", "%s", m_settings.description.c_str());
 }
 
 // ---------------------------------------------------------------------------
@@ -105,23 +98,9 @@ void PreferencesView::DrawPathsSection()
     ImGui::SameLine(0, 0);
     ImGui::TextDisabled("Assets Directory");
 
-    ImGui::SetNextItemWidth(-1.f);
-    if (ImGui::InputText("##scenePath", (char*)m_settings.sceneDirectory.c_str(), m_settings.sceneDirectory.size(), ImGuiInputTextFlags_ReadOnly))
-        m_settings.sceneDirectory = m_settings.sceneDirectory;
-    ImGui::SameLine(0, 0);
-    ImGui::TextDisabled("Scene Directory");
-
-    ImGui::SetNextItemWidth(-1.f);
-    if (ImGui::InputText("##scriptsPath", (char*)m_settings.scriptsDirectory.c_str(), m_settings.scriptsDirectory.size(), ImGuiInputTextFlags_ReadOnly))
-        m_settings.scriptsDirectory = m_settings.scriptsDirectory;
-    ImGui::SameLine(0, 0);
-    ImGui::TextDisabled("Scripts Directory");
-
-    ImGui::SetNextItemWidth(-1.f);
-    if (ImGui::InputText("##shadersPath", (char*)m_settings.shadersDirectory.c_str(), m_settings.shadersDirectory.size(), ImGuiInputTextFlags_ReadOnly))
-        m_settings.shadersDirectory = m_settings.shadersDirectory;
-    ImGui::SameLine(0, 0);
-    ImGui::TextDisabled("Shaders Directory");
+    ImGui::LabelText("Scene Directory",   "%s", m_settings.sceneDirectory.c_str());
+    ImGui::LabelText("Scripts Directory", "%s", m_settings.scriptsDirectory.c_str());
+    ImGui::LabelText("Shaders Directory", "%s", m_settings.shadersDirectory.c_str());
 
     ImGui::SetNextItemWidth(-1.f);
     if (ImGui::InputText("##defaultScene", m_defaultSceneBuf, sizeof(m_defaultSceneBuf)))

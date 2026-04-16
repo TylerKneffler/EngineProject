@@ -195,7 +195,7 @@ void DX12EditorRenderer::EndFrame()
     if (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
     {
         ImGui::UpdatePlatformWindows();
-        ImGui::RenderPlatformWindows();
+        ImGui::RenderPlatformWindowsDefault();
     }
 
     // Transition back-buffer: RENDER_TARGET → PRESENT
