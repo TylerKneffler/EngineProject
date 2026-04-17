@@ -5,6 +5,8 @@
 #include "Core/component.h"         
 #include "Core/Compoonents/Transform.h"
 
+class Scene; // forward declaration
+
 class Object
 {
 public:
@@ -18,6 +20,7 @@ public:
     Object*             Parent = nullptr;
     std::vector<Object*> Children;
     std::list<Component*> Components;
+    Scene*              OwnerScene = nullptr;  // Set by Scene when object is added
 
     // Lifecycle methods
     virtual void Enabled();
@@ -25,6 +28,9 @@ public:
     virtual void Start();
     virtual void Update();
     virtual void Destroy();
+
+    // Get the scene this object belongs to
+    Scene* GetScene() const { return OwnerScene; }
 
     // Component management — implementations must live in the header so the
     // compiler sees them at every instantiation site.

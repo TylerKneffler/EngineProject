@@ -1,4 +1,5 @@
 #include "ViewFactory.h"
+#include "Core/Renderers/DX12/DX12EditorRenderer.h"
 #include <cassert>
 #include <stdexcept>
 
@@ -13,7 +14,7 @@ const std::unordered_set<std::string> ViewFactory::kSingletonTypes =
 // ---------------------------------------------------------------------------
 // Constructor — populate the SRV free list (slot 0 is ImGui font atlas).
 // ---------------------------------------------------------------------------
-ViewFactory::ViewFactory(DX12EditorRenderer* renderer,
+ViewFactory::ViewFactory(IEditorRenderer*    renderer,
                          Scene*              scene,
                          const ProjectSettings& settings)
     : m_renderer(renderer)
@@ -83,18 +84,22 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
             return nullptr;
         }
     }
-    ID3D12Device* device = m_renderer->GetDevice();
+    // For D3D12-specific views, cast to the concrete renderer implementation
+    auto* dx12Renderer = dynamic_cast<DX12EditorRenderer*>(m_renderer);
+    if (!dx12Renderer)
+        throw std::runtime_error("ViewFactory requires a D3D12-based renderer");
+    
     uint32_t w = 1280, h = 720; // default offscreen size; views resize on first DrawPanel
 
     if (typeName == "Scene")
     {
         if (!CanCreate3DView()) return nullptr;
         uint32_t slot = AllocSrvSlot();
-        auto [cpu, gpu] = m_renderer->GetSrvSlot(slot);
+        auto [cpu, gpu] = dx12Renderer->GetSrvSlot(slot);
 
         auto view = std::make_unique<SceneView>();
         view->SetTitle("Scene " + std::to_string(++m_sceneCount));
-        view->Init(device, w, h, cpu, gpu, slot, m_scene, m_settings);
+        view->Init(dx12Renderer, w, h, &cpu, &gpu, slot, m_scene, m_settings);
         return view;
     }
 
@@ -102,11 +107,11 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
     {
         if (!CanCreate3DView()) return nullptr;
         uint32_t slot = AllocSrvSlot();
-        auto [cpu, gpu] = m_renderer->GetSrvSlot(slot);
+        auto [cpu, gpu] = dx12Renderer->GetSrvSlot(slot);
 
         auto view = std::make_unique<GameView>();
         view->SetTitle("Game " + std::to_string(++m_gameCount));
-        view->Init(device, w, h, cpu, gpu, slot, m_scene, m_settings);
+        view->Init(dx12Renderer, w, h, &cpu, &gpu, slot, m_scene, m_settings);
         return view;
     }
 

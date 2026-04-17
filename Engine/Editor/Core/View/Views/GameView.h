@@ -27,16 +27,19 @@ public:
 
     // Calls View::Init then stores the scene pointer and aspect ratio settings.
     // scene must outlive this view.
-    void Init(ID3D12Device* device,
+    // device: opaque renderer device handle (cast internally to ID3D12Device*)
+    // srvCpu/srvGpu: opaque descriptor handles (cast internally from void*)
+    void Init(void* device,
               uint32_t width, uint32_t height,
-              D3D12_CPU_DESCRIPTOR_HANDLE srvCpu,
-              D3D12_GPU_DESCRIPTOR_HANDLE srvGpu,
+              void* srvCpu,
+              void* srvGpu,
               uint32_t srvSlotIndex,
               Scene* scene,
               const ProjectSettings& settings);
 
     // Issues the game-camera scene draw into cmd each frame.
-    void Render3D(ID3D12GraphicsCommandList* cmd) override;
+    // cmd: opaque graphics command list handle (cast internally to ID3D12GraphicsCommandList*)
+    void Render3D(void* cmd) override;
 
     // Draws the "Game" ImGui window showing the game-camera render output.
     void DrawPanel() override;

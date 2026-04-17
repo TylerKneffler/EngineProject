@@ -1,9 +1,9 @@
 #pragma once
 #include "Core/component.h"
-#include <d3d12.h>
-#include <wrl/client.h>
+#include "Core/Graphics/IGraphicsBuffer.h"
 #include <string>
 #include <vector>
+#include <memory>
 
 struct Vertex
 {
@@ -20,14 +20,17 @@ public:
     // Load vertex data from a triangulated OBJ file (CPU side only).
     void LoadFromFile(const std::string& path);
 
-    // Create a persistently-mapped upload-heap vertex buffer and copy CPU data into it.
-    // Call after LoadFromFile. Safe to call before the first render.
-    void CreateBuffer(ID3D12Device* device);
+    // Create a graphics buffer from loaded vertex data.
+    // bufferFactory: creates GPU vertex buffers (API-agnostic)
+    void CreateBuffer(IGraphicsBufferFactory* bufferFactory);
 
-    const D3D12_VERTEX_BUFFER_VIEW& GetVertexBufferView() const { return m_vbView; }
-    uint32_t                        GetVertexCount()      const { return static_cast<uint32_t>(m_vertices.size()); }
-    bool                            IsReady()             const { return m_ready; }
-    const std::string&              GetFilePath()         const { return m_filePath; }
+    // Get the underlying graphics buffer (API-agnostic)
+    IGraphicsBuffer* GetGraphicsBuffer() const { return m_vertexBuffer.get(); }
+    
+    uint32_t GetVertexCount() const { return static_cast<uint32_t>(m_vertices.size()); }
+    uint32_t GetVertexStride() const { return sizeof(Vertex); }
+    bool     IsReady()        const { return m_ready; }
+    const std::string& GetFilePath() const { return m_filePath; }
 
     // Serialization
     std::string GetTypeName() const override { return "Mesh"; }
@@ -35,9 +38,8 @@ public:
     void        Deserialize(const JsonValue& v) override;
 
 private:
-    std::string                            m_filePath;
-    std::vector<Vertex>                    m_vertices;
-    Microsoft::WRL::ComPtr<ID3D12Resource> m_vertexBuffer;
-    D3D12_VERTEX_BUFFER_VIEW               m_vbView{};
-    bool                                   m_ready = false;
+    std::string m_filePath;
+    std::vector<Vertex> m_vertices;
+    std::unique_ptr<IGraphicsBuffer> m_vertexBuffer;
+    bool m_ready = false;
 };

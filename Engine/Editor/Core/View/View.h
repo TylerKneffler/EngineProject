@@ -20,23 +20,26 @@ public:
     bool NeedsRender() const override { return true; }
 
     // Creates the offscreen texture and registers it in ImGui's SRV heap.
+    // device: opaque renderer device handle (cast internally to ID3D12Device*)
+    // srvCpu/srvGpu: opaque descriptor handles (cast internally from void*)
     // srvSlotIndex identifies the heap slot so it can be returned to the
     // ViewFactory free-list when this view is closed.
-    virtual void Init(ID3D12Device* device,
+    virtual void Init(void* device,
                       uint32_t width, uint32_t height,
-                      D3D12_CPU_DESCRIPTOR_HANDLE srvCpu,
-                      D3D12_GPU_DESCRIPTOR_HANDLE srvGpu,
+                      void* srvCpu, void* srvGpu,
                       uint32_t srvSlotIndex = 0);
 
     // Recreates the offscreen texture at the new dimensions.
     // Safe to call only when the GPU is idle (after renderer->Resize()).
-    void Resize(ID3D12Device* device, uint32_t width, uint32_t height);
+    // device: opaque renderer device handle (cast internally to ID3D12Device*)
+    void Resize(void* device, uint32_t width, uint32_t height);
 
     // Transitions SRV->RTV, clears, invokes drawFn, transitions RTV->SRV,
     // then restores mainRtv for subsequent UI rendering.
-    void Render(ID3D12GraphicsCommandList* cmdList,
-                D3D12_CPU_DESCRIPTOR_HANDLE mainRtv,
-                std::function<void(ID3D12GraphicsCommandList*)> drawFn = nullptr);
+    // cmdList: opaque graphics command list handle (cast internally to ID3D12GraphicsCommandList*)
+    // mainRtv: opaque render target view handle (cast internally)
+    void Render(void* cmdList, void* mainRtv,
+                std::function<void(void*)> drawFn = nullptr);
 
     // Draws the ImGui panel for this view. Each subclass provides its own.
     virtual void DrawPanel() = 0;
@@ -50,7 +53,7 @@ public:
 
 protected:
     // Allocates / reallocates all DX12 resources for the offscreen target.
-    void CreateResources(ID3D12Device* device, uint32_t width, uint32_t height);
+    void CreateResources(void* device, uint32_t width, uint32_t height);
 
     ComPtr<ID3D12Resource>       m_texture;     // offscreen colour render target / SRV
     ComPtr<ID3D12DescriptorHeap> m_rtvHeap;     // 1-slot non-shader-visible RTV heap

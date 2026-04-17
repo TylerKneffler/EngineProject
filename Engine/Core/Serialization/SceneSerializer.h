@@ -5,7 +5,7 @@
 
 class Scene;
 class Component;
-struct ID3D12Device;
+class IGraphicsProvider;
 
 // ---------------------------------------------------------------------------
 // SceneSerializer — saves and loads Scene objects to/from .scene files.
@@ -44,9 +44,9 @@ public:
     static bool Save(const Scene& scene, const std::string& path);
 
     // Read a .scene JSON file into scene, replacing all existing objects.
-    // Pass a D3D12 device so that Mesh GPU buffers are created after load.
+    // Pass a graphics provider so that Mesh GPU buffers are created after load.
     // Returns false if the file cannot be read or has an unsupported format.
-    static bool Load(Scene& scene, const std::string& path, ID3D12Device* device = nullptr);
+    static bool Load(Scene& scene, const std::string& path, IGraphicsProvider* graphicsProvider = nullptr);
 
     // Called internally; exposed so Scene::Load can invoke it.
     static void EnsureBuiltinsRegistered();

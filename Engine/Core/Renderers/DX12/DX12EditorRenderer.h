@@ -3,9 +3,15 @@
 #include "imgui.h"
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx12.h"
+#include "../IEditorRenderer.h"
+#include "DX12GraphicsProvider.h"
+#include <vector>
+#include <memory>
 
 // ---------------------------------------------------------------------------
 // DX12EditorRenderer
+//
+// Concrete implementation of IEditorRenderer using DirectX 12.
 //
 // An on-demand renderer for the editor. Unlike DX12GameRenderer, which redraws
 // every tick unconditionally, this renderer only submits GPU work when something
@@ -44,46 +50,42 @@
 //   };
 // ---------------------------------------------------------------------------
 
-class DX12EditorRenderer
+class DX12EditorRenderer : public IEditorRenderer
 {
 public:
     DX12EditorRenderer() = default;
     ~DX12EditorRenderer();
 
-    void Init(HWND hwnd, uint32_t width, uint32_t height);
-    void Resize(uint32_t width, uint32_t height);
+    // IRenderer interface
+    bool Init(void* hwnd, uint32_t width, uint32_t height) override;
+    void Resize(uint32_t width, uint32_t height) override;
+    uint32_t GetWidth() const override { return m_width; }
+    uint32_t GetHeight() const override { return m_height; }
+    void Clear(float r, float g, float b, float a = 1.0f) override;
+    IGraphicsProvider* GetGraphicsProvider() override;
 
-    // ---------- Dirty-driven rendering ----------
+    // IEditorRenderer interface
+    void MarkDirty() override { m_dirty = true; }
+    void RenderIfNeeded(std::function<void()> drawFn = nullptr) override;
+    std::pair<std::pair<void*, void*>, uint32_t> AllocateSrvSlot() override;
+    void FreeSrvSlot(uint32_t slotIndex) override;
+    bool CanAllocateSrvSlot() const override;
+    uint32_t GetAvailableSrvSlots() const override;
 
-    // Mark the back-buffer as stale. Call whenever anything changes that
-    // requires a new frame: resize, input events, scene/property edits, etc.
-    void MarkDirty() { m_dirty = true; }
-
-    // If dirty, records and submits one frame: BeginFrame → drawFn → EndFrame.
-    // drawFn is called between the two so the caller can issue draw commands
-    // (clears, UI draws, etc.). If drawFn is nullptr the back-buffer is just
-    // cleared to the default editor background colour.
-    // Clears the dirty flag after the frame so subsequent calls are no-ops
-    // until MarkDirty() is called again.
-    void RenderIfNeeded(std::function<void()> drawFn = nullptr);
-    
-    //make private later
-    void Clear(float r, float g, float b, float a = 1.0f);
-
-    // ---------- Accessors ----------
+    // ---------- D3D12-specific accessors (for internal use) ----------
     ID3D12Device*              GetDevice()      const { return m_device.Get(); }
     ID3D12GraphicsCommandList* GetCommandList() const { return m_commandList.Get(); }
     D3D12_CPU_DESCRIPTOR_HANDLE GetCurrentRTV() const;
-
-    // Number of back-buffer slots (double-buffering). Declared before member
-    // arrays that use it as a size.
-    static constexpr uint32_t FRAME_COUNT = 2;
 
     // Returns CPU and GPU descriptor handles for the given slot in the
     // shader-visible SRV heap. Slot 0 is reserved for the ImGui font atlas;
     // additional slots (1, 2, …) are available for scene textures etc.
     std::pair<D3D12_CPU_DESCRIPTOR_HANDLE, D3D12_GPU_DESCRIPTOR_HANDLE>
         GetSrvSlot(uint32_t slot) const;
+
+    // Number of back-buffer slots (double-buffering). Declared before member
+    // arrays that use it as a size.
+    static constexpr uint32_t FRAME_COUNT = 2;
 
 private:
     // These are kept private so all rendering is gated through RenderIfNeeded.
@@ -121,6 +123,10 @@ private:
     // -- imgui integration --
     ComPtr<ID3D12DescriptorHeap> m_srvHeap;   // shader-visible, for ImGui font texture
 
+    // -- SRV slot management --
+    std::vector<uint32_t> m_freeSrvSlots;  // available slots for views
+    uint32_t m_srvDescriptorSize = 0;
+
     // -- Viewport / scissor --
     D3D12_VIEWPORT                    m_viewport{};
     D3D12_RECT                        m_scissorRect{};
@@ -131,4 +137,7 @@ private:
 
     // Initialized true so the very first call to RenderIfNeeded always draws.
     bool m_dirty = true;
+
+    // Graphics provider for shader compilation, buffer creation, pipeline building
+    std::unique_ptr<D3D12GraphicsProvider> m_graphicsProvider;
 };

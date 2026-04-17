@@ -5,14 +5,17 @@ static constexpr DXGI_FORMAT VIEW_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
-void View::Init(ID3D12Device* device,
+void View::Init(void* device,
                 uint32_t width, uint32_t height,
-                D3D12_CPU_DESCRIPTOR_HANDLE srvCpu,
-                D3D12_GPU_DESCRIPTOR_HANDLE srvGpu,
+                void* srvCpu,
+                void* srvGpu,
                 uint32_t srvSlotIndex)
 {
-    m_srvCpu       = srvCpu;
-    m_srvGpu       = srvGpu;
+    auto srvCpuHandle = *static_cast<D3D12_CPU_DESCRIPTOR_HANDLE*>(srvCpu);
+    auto srvGpuHandle = *static_cast<D3D12_GPU_DESCRIPTOR_HANDLE*>(srvGpu);
+    
+    m_srvCpu       = srvCpuHandle;
+    m_srvGpu       = srvGpuHandle;
     m_srvSlotIndex = srvSlotIndex;
     CreateResources(device, width, height);
 }
@@ -20,7 +23,7 @@ void View::Init(ID3D12Device* device,
 // ---------------------------------------------------------------------------
 // Resize
 // ---------------------------------------------------------------------------
-void View::Resize(ID3D12Device* device, uint32_t width, uint32_t height)
+void View::Resize(void* device, uint32_t width, uint32_t height)
 {
     if (width == 0 || height == 0)              return;
     if (width == m_width && height == m_height) return;
@@ -33,8 +36,9 @@ void View::Resize(ID3D12Device* device, uint32_t width, uint32_t height)
 // ---------------------------------------------------------------------------
 // CreateResources
 // ---------------------------------------------------------------------------
-void View::CreateResources(ID3D12Device* device, uint32_t width, uint32_t height)
+void View::CreateResources(void* device, uint32_t width, uint32_t height)
 {
+    auto* d3dDevice = static_cast<ID3D12Device*>(device);
     m_width  = width;
     m_height = height;
 
@@ -57,7 +61,7 @@ void View::CreateResources(ID3D12Device* device, uint32_t width, uint32_t height
     D3D12_HEAP_PROPERTIES heapProps{};
     heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
 
-    ThrowIfFailed(device->CreateCommittedResource(
+    ThrowIfFailed(d3dDevice->CreateCommittedResource(
         &heapProps, D3D12_HEAP_FLAG_NONE, &texDesc,
         D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
         &clearVal, IID_PPV_ARGS(&m_texture)));
@@ -68,9 +72,9 @@ void View::CreateResources(ID3D12Device* device, uint32_t width, uint32_t height
         rtvDesc.NumDescriptors = 1;
         rtvDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
         rtvDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-        ThrowIfFailed(device->CreateDescriptorHeap(&rtvDesc, IID_PPV_ARGS(&m_rtvHeap)));
+        ThrowIfFailed(d3dDevice->CreateDescriptorHeap(&rtvDesc, IID_PPV_ARGS(&m_rtvHeap)));
     }
-    device->CreateRenderTargetView(
+    d3dDevice->CreateRenderTargetView(
         m_texture.Get(), nullptr,
         m_rtvHeap->GetCPUDescriptorHandleForHeapStart());
 
@@ -79,7 +83,7 @@ void View::CreateResources(ID3D12Device* device, uint32_t width, uint32_t height
     srvDesc.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D;
     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     srvDesc.Texture2D.MipLevels     = 1;
-    device->CreateShaderResourceView(m_texture.Get(), &srvDesc, m_srvCpu);
+    d3dDevice->CreateShaderResourceView(m_texture.Get(), &srvDesc, m_srvCpu);
 
     D3D12_RESOURCE_DESC depthDesc = texDesc;
     depthDesc.Format = DXGI_FORMAT_D32_FLOAT;
@@ -90,7 +94,7 @@ void View::CreateResources(ID3D12Device* device, uint32_t width, uint32_t height
     depthClear.DepthStencil.Depth   = 1.0f;
     depthClear.DepthStencil.Stencil = 0;
 
-    ThrowIfFailed(device->CreateCommittedResource(
+    ThrowIfFailed(d3dDevice->CreateCommittedResource(
         &heapProps, D3D12_HEAP_FLAG_NONE, &depthDesc,
         D3D12_RESOURCE_STATE_DEPTH_WRITE, &depthClear,
         IID_PPV_ARGS(&m_depthBuffer)));
@@ -101,12 +105,12 @@ void View::CreateResources(ID3D12Device* device, uint32_t width, uint32_t height
         dsvDesc.NumDescriptors = 1;
         dsvDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
         dsvDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-        ThrowIfFailed(device->CreateDescriptorHeap(&dsvDesc, IID_PPV_ARGS(&m_dsvHeap)));
+        ThrowIfFailed(d3dDevice->CreateDescriptorHeap(&dsvDesc, IID_PPV_ARGS(&m_dsvHeap)));
     }
     D3D12_DEPTH_STENCIL_VIEW_DESC dsvViewDesc{};
     dsvViewDesc.Format        = DXGI_FORMAT_D32_FLOAT;
     dsvViewDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
-    device->CreateDepthStencilView(
+    d3dDevice->CreateDepthStencilView(
         m_depthBuffer.Get(), &dsvViewDesc,
         m_dsvHeap->GetCPUDescriptorHandleForHeapStart());
 }
@@ -114,17 +118,20 @@ void View::CreateResources(ID3D12Device* device, uint32_t width, uint32_t height
 // ---------------------------------------------------------------------------
 // Render
 // ---------------------------------------------------------------------------
-void View::Render(ID3D12GraphicsCommandList* cmdList,
-                  D3D12_CPU_DESCRIPTOR_HANDLE mainRtv,
-                  std::function<void(ID3D12GraphicsCommandList*)> drawFn)
+void View::Render(void* cmdList,
+                  void* mainRtv,
+                  std::function<void(void*)> drawFn)
 {
+    auto* d3dCmdList = static_cast<ID3D12GraphicsCommandList*>(cmdList);
+    auto mainRtvHandle = *static_cast<D3D12_CPU_DESCRIPTOR_HANDLE*>(mainRtv);
+    
     D3D12_RESOURCE_BARRIER toRtv{};
     toRtv.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
     toRtv.Transition.pResource   = m_texture.Get();
     toRtv.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
     toRtv.Transition.StateAfter  = D3D12_RESOURCE_STATE_RENDER_TARGET;
     toRtv.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-    cmdList->ResourceBarrier(1, &toRtv);
+    d3dCmdList->ResourceBarrier(1, &toRtv);
 
     D3D12_CPU_DESCRIPTOR_HANDLE sceneRtv = m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
     D3D12_CPU_DESCRIPTOR_HANDLE dsv      = m_dsvHeap->GetCPUDescriptorHandleForHeapStart();
@@ -134,13 +141,13 @@ void View::Render(ID3D12GraphicsCommandList* cmdList,
     D3D12_RECT sr{ 0, 0,
         static_cast<LONG>(m_width), static_cast<LONG>(m_height) };
 
-    cmdList->RSSetViewports(1, &vp);
-    cmdList->RSSetScissorRects(1, &sr);
-    cmdList->OMSetRenderTargets(1, &sceneRtv, FALSE, &dsv);
+    d3dCmdList->RSSetViewports(1, &vp);
+    d3dCmdList->RSSetScissorRects(1, &sr);
+    d3dCmdList->OMSetRenderTargets(1, &sceneRtv, FALSE, &dsv);
 
     const float clearColor[4] = { 0.0f, 0.0f, 0.502f, 1.0f }; // navy blue
-    cmdList->ClearRenderTargetView(sceneRtv, clearColor, 0, nullptr);
-    cmdList->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+    d3dCmdList->ClearRenderTargetView(sceneRtv, clearColor, 0, nullptr);
+    d3dCmdList->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
     if (drawFn)
         drawFn(cmdList);
@@ -151,7 +158,7 @@ void View::Render(ID3D12GraphicsCommandList* cmdList,
     toSrv.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
     toSrv.Transition.StateAfter  = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
     toSrv.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-    cmdList->ResourceBarrier(1, &toSrv);
+    d3dCmdList->ResourceBarrier(1, &toSrv);
 
-    cmdList->OMSetRenderTargets(1, &mainRtv, FALSE, nullptr);
+    d3dCmdList->OMSetRenderTargets(1, &mainRtvHandle, FALSE, nullptr);
 }

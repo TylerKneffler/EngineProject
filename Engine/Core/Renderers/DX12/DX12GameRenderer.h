@@ -1,5 +1,8 @@
 #pragma once
 #include "pch.h"
+#include "../IGameRenderer.h"
+#include "DX12GraphicsProvider.h"
+#include <memory>
 
 // ---------------------------------------------------------------------------
 // DX12Renderer — Tutorial Overview
@@ -60,27 +63,31 @@
 //   (m_fenceValues[]) so we only stall when we actually need to reuse a
 //   back-buffer the GPU might still be writing.
 //
-// ---- Per-frame usage ----
-//   renderer.BeginFrame();              // fence wait, reset list, PRESENT→RT
-//   renderer.Clear(r,g,b);             // fill back-buffer with solid colour
-//   renderer.EndFrame();               // execute, overlay, Present, signal
+// ---------------------------------------------------------------------------
+// DX12GameRenderer — Tutorial Overview
+//
+// Concrete implementation of IGameRenderer using DirectX 12.
 // ---------------------------------------------------------------------------
 
-class DX12GameRenderer
+class DX12GameRenderer : public IGameRenderer
 {
 public:
     DX12GameRenderer() = default;
     ~DX12GameRenderer();
 
-    void Init(HWND hwnd, uint32_t width, uint32_t height);
-    void Resize(uint32_t width, uint32_t height);
+    // IRenderer interface
+    bool Init(void* hwnd, uint32_t width, uint32_t height) override;
+    void Resize(uint32_t width, uint32_t height) override;
+    uint32_t GetWidth() const override { return m_width; }
+    uint32_t GetHeight() const override { return m_height; }
+    void Clear(float r, float g, float b, float a = 1.0f) override;
+    IGraphicsProvider* GetGraphicsProvider() override;
 
-    // ---------- Per-frame helpers ----------
-    void BeginFrame();   // reset allocator + list, transition backbuffer to RENDER_TARGET
-    void Clear(float r, float g, float b, float a = 1.0f);  // clear backbuffer
-    void EndFrame();     // execute list, present, signal fence
+    // IGameRenderer interface
+    void BeginFrame() override;   // reset allocator + list, transition backbuffer to RENDER_TARGET
+    void EndFrame() override;     // execute list, present, signal fence
 
-    // ---------- Accessors (for later extension) ----------
+    // ---------- D3D12-specific accessors (for internal use) ----------
     ID3D12Device*              GetDevice()      const { return m_device.Get(); }
     ID3D12GraphicsCommandList* GetCommandList() const { return m_commandList.Get(); }
     D3D12_CPU_DESCRIPTOR_HANDLE GetCurrentRTV() const;
@@ -177,5 +184,8 @@ private:
     // the frame rate in windowed mode — Present(0,0) alone isn't sufficient
     // because DWM can still throttle to the monitor refresh rate.
     bool m_tearingSupported = false;
+
+    // Graphics provider for shader compilation, buffer creation, pipeline building
+    std::unique_ptr<D3D12GraphicsProvider> m_graphicsProvider;
 
 };

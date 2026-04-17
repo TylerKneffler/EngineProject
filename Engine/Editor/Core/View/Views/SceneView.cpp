@@ -2,14 +2,15 @@
 #include "SceneView.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Camera.h"
+#include "Core/Renderers/DX12/DX12GraphicsContext.h"
 
 // ---------------------------------------------------------------------------
 // Init — store the scene pointer, then delegate resource creation to View.
 // ---------------------------------------------------------------------------
-void SceneView::Init(ID3D12Device* device,
+void SceneView::Init(void* device,
                          uint32_t width, uint32_t height,
-                         D3D12_CPU_DESCRIPTOR_HANDLE srvCpu,
-                         D3D12_GPU_DESCRIPTOR_HANDLE srvGpu,
+                         void* srvCpu,
+                         void* srvGpu,
                          uint32_t srvSlotIndex,
                          Scene* scene,
                          const ProjectSettings& settings)
@@ -237,8 +238,11 @@ void SceneView::ApplyCameraControls(float panDX, float panDY,
 // ---------------------------------------------------------------------------
 // Render3D
 // ---------------------------------------------------------------------------
-void SceneView::Render3D(ID3D12GraphicsCommandList* cmd)
+void SceneView::Render3D(void* cmd)
 {
     if (m_scene)
-        m_scene->Render(cmd, m_aspect);
+    {
+        D3D12GraphicsContext graphicsContext(static_cast<ID3D12GraphicsCommandList*>(cmd));
+        m_scene->Render(&graphicsContext, m_aspect);
+    }
 }

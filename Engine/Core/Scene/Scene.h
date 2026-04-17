@@ -1,6 +1,15 @@
 #pragma once
-#include <DirectXMath.h>
 #include "Core/Object.h"
+#include "Core/Graphics/IPipelineState.h"
+#include "Core/Graphics/IGraphicsBuffer.h"
+#include <glm/glm.hpp>
+
+// Forward declarations
+class IGraphicsProvider;
+class IGraphicsContext;
+class IShaderCompiler;
+class IPipelineStateFactory;
+class IGraphicsBufferFactory;
 
 // ---------------------------------------------------------------------------
 // Scene
@@ -11,10 +20,11 @@
 //
 // ---- Typical editor usage ----
 //
-//   scene.Init(device);
+//   auto graphicsProvider = renderer->GetGraphicsProvider();
+//   scene.Init(graphicsProvider);
 //
 //   // inside SceneView drawFn:
-//   scene.Render(cmd, view, proj);
+//   scene.Render(graphicsContext);
 // ---------------------------------------------------------------------------
 
 struct SceneSettings
@@ -25,11 +35,11 @@ struct SceneSettings
     float gridCellSize    = 1.f;         // spacing between lines (world units)
     float gridOpacity     = 0.4f;        // 0 = invisible, 1 = fully opaque
     float gridFadeDistance = 80.f;       // world units; grid fades to 0 at this distance
-    DirectX::XMFLOAT3 gridColor        = { 0.45f, 0.45f, 0.45f };
-    DirectX::XMFLOAT3 gridOriginColor  = { 0.30f, 0.50f, 0.80f }; // X/Z axis lines
+    glm::vec3 gridColor        = glm::vec3(0.45f, 0.45f, 0.45f);
+    glm::vec3 gridOriginColor  = glm::vec3(0.30f, 0.50f, 0.80f); // X/Z axis lines
 
     // Ambient light
-    DirectX::XMFLOAT3 ambientColor = { 0.12f, 0.12f, 0.12f };
+    glm::vec3 ambientColor = glm::vec3(0.12f, 0.12f, 0.12f);
 };
 
 class Scene
@@ -41,14 +51,15 @@ public:
     // --- Editor Settings ---
     Object editorCamera; // not used by the game runtime, used for editor scene view navigation
 
-    // Build GPU resources (grid vertex buffer, PSO, root sig).
+    // Build GPU resources (grid vertex buffer, PSO).
     // Must be called once before the first Render() call.
-    void Init(ID3D12Device* device);
+    void Init(IGraphicsProvider* graphicsProvider);
 
-    // Draw all objects and scene helpers (grid) using the supplied VP matrices.
-    // Call inside the SceneView drawFn.
+    // Draw all objects and scene helpers (grid).
+    // context: Graphics rendering context (API-agnostic command recorder)
+    // aspect: Viewport aspect ratio
     // cameraOverride: if non-null, use this camera instead of the normal selection.
-    void Render(ID3D12GraphicsCommandList* cmd, float aspect, Camera* cameraOverride = nullptr);
+    void Render(IGraphicsContext* context, float aspect, Camera* cameraOverride = nullptr);
     void SetSelectedObject(Object* obj) { m_selectedObject = obj; }
 
     // Returns the first Camera component found on any scene game object,
@@ -65,38 +76,30 @@ public:
     // Serialization — delegates to SceneSerializer.
     // Save writes the scene to a .scene JSON file.
     // Load clears the scene and repopulates it from the file.  Mesh GPU
-    // buffers are created automatically using the device stored by Init().
+    // buffers are created automatically using the graphics provider stored by Init().
     bool Save(const std::string& path) const;
     bool Load(const std::string& path);
 
     SceneSettings settings;
 
 private:
+    // ---- Rendering resources (kept API-agnostic) ----
+    IGraphicsProvider* m_graphicsProvider = nullptr;
+    std::unique_ptr<IPipelineState> m_gridPipeline;
+    std::unique_ptr<IGraphicsBuffer> m_gridConstantBuffer;
+    void* m_gridCBMapped = nullptr;
+
+    std::unique_ptr<IPipelineState> m_objectPipeline;
+    std::unique_ptr<IGraphicsBuffer> m_objectConstantBuffer;
+    void* m_objectCBMapped = nullptr;
+
+    void BuildGridPipeline();
+    void BuildObjectPipeline();
+
     // ---- Object list ----
     std::vector<std::unique_ptr<Object>> m_objects;
-
-    // ---- Grid resources ----
-    void BuildGridPipeline(ID3D12Device* device);
-
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_gridRootSig;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_gridPSO;
-
-    // Per-frame grid constant buffer (256 bytes).
-    Microsoft::WRL::ComPtr<ID3D12Resource> m_gridCB;
-    void*                                  m_gridCBMapped = nullptr;
-
-    // ---- Object rendering resources ----
-    void BuildObjectPipeline(ID3D12Device* device);
-
-    static constexpr UINT kMaxObjects = 64;
-    static constexpr UINT kCBStride   = 256;
-
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_objectRootSig;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_objectPSO;
-    Microsoft::WRL::ComPtr<ID3D12Resource>      m_objectCB;
-    void*                                       m_objectCBMapped = nullptr;
-
     Object* m_selectedObject = nullptr;
 
-    ID3D12Device* m_device = nullptr; // non-owning, valid for the lifetime of the scene
+    static constexpr uint32_t kMaxObjects = 64;
+    static constexpr uint32_t kCBStride = 256;
 };

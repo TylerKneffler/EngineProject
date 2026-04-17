@@ -6,7 +6,7 @@
 #include "Views/PropertiesView.h"
 #include "Views/AssetsExplorerView.h"
 #include "Views/ConsoleView.h"
-#include "Core/Renderers/Editor/DX12EditorRenderer.h"
+#include "Core/Renderers/IEditorRenderer.h"
 #include "Core/Scene/Scene.h"
 #include "Core/ProjectLoader.h"
 #include <vector>
@@ -38,7 +38,7 @@ public:
     // Slot 0 is always reserved for the ImGui font atlas.
     static constexpr uint32_t MAX_SRV_SLOTS = 32; // must match renderer heap size
 
-    ViewFactory(DX12EditorRenderer* renderer,
+    ViewFactory(IEditorRenderer*    renderer,
                 Scene*              scene,
                 const ProjectSettings& settings);
 
@@ -68,8 +68,8 @@ public:
 private:
     uint32_t AllocSrvSlot(); // takes from free list; asserts CanCreate3DView()
 
-    DX12EditorRenderer* m_renderer = nullptr;
-    Scene*              m_scene    = nullptr;
+    IEditorRenderer* m_renderer = nullptr;
+    Scene*           m_scene    = nullptr;
     ProjectSettings     m_settings;
 
     std::vector<uint32_t> m_freeSrvSlots;

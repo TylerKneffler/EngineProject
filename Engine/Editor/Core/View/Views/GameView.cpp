@@ -1,12 +1,13 @@
 #include "GameView.h"
+#include "Core/Renderers/DX12/DX12GraphicsContext.h"
 
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
-void GameView::Init(ID3D12Device* device,
+void GameView::Init(void* device,
                     uint32_t width, uint32_t height,
-                    D3D12_CPU_DESCRIPTOR_HANDLE srvCpu,
-                    D3D12_GPU_DESCRIPTOR_HANDLE srvGpu,
+                    void* srvCpu,
+                    void* srvGpu,
                     uint32_t srvSlotIndex,
                     Scene* scene,
                     const ProjectSettings& settings)
@@ -66,10 +67,13 @@ void GameView::DrawPanel()
 // ---------------------------------------------------------------------------
 // Render3D
 // ---------------------------------------------------------------------------
-void GameView::Render3D(ID3D12GraphicsCommandList* cmd)
+void GameView::Render3D(void* cmd)
 {
     if (m_scene)
-        m_scene->Render(cmd, m_aspect, m_scene->FindGameCamera());
+    {
+        D3D12GraphicsContext graphicsContext(static_cast<ID3D12GraphicsCommandList*>(cmd));
+        m_scene->Render(&graphicsContext, m_aspect, m_scene->FindGameCamera());
+    }
 }
 
 // ---------------------------------------------------------------------------

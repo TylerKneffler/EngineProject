@@ -17,16 +17,23 @@ DX12EditorRenderer::~DX12EditorRenderer()
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
-void DX12EditorRenderer::Init(HWND hwnd, uint32_t width, uint32_t height)
+bool DX12EditorRenderer::Init(void* hwnd, uint32_t width, uint32_t height)
 {
-    m_width  = width;
-    m_height = height;
+    try
+    {
+        m_width  = width;
+        m_height = height;
 
-    CreateDevice();
-    CreateCommandObjects();
-    CreateSwapChain(hwnd, width, height);
-    CreateRTVHeap();
-    CreateRenderTargets();
+        CreateDevice();
+        CreateCommandObjects();
+        CreateSwapChain(static_cast<HWND>(hwnd), width, height);
+        CreateRTVHeap();
+        CreateRenderTargets();
+
+        // ---- Graphics provider ----
+        // Initialize the graphics provider for shader compilation, buffer creation, etc.
+        m_graphicsProvider = std::make_unique<D3D12GraphicsProvider>(
+            m_device.Get(), m_commandQueue.Get(), nullptr);
 
     ThrowIfFailed(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE,
         IID_PPV_ARGS(&m_fence)));
@@ -37,10 +44,14 @@ void DX12EditorRenderer::Init(HWND hwnd, uint32_t width, uint32_t height)
     
     // SRV heap: slot 0 = ImGui font atlas; slots 1-31 available for view textures.
     D3D12_DESCRIPTOR_HEAP_DESC srvDesc{};
-    srvDesc.NumDescriptors = 32; // enough headroom for many simultaneous view panels
+    srvDesc.NumDescriptors = IEditorRenderer::MAX_SRV_SLOTS;
     srvDesc.Type  = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     srvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     ThrowIfFailed(m_device->CreateDescriptorHeap(&srvDesc, IID_PPV_ARGS(&m_srvHeap)));
+
+    // Initialize the free SRV slots list (slots 1-31; slot 0 reserved for ImGui)
+    for (uint32_t i = IEditorRenderer::MAX_SRV_SLOTS - 1; i > 0; --i)
+        m_freeSrvSlots.push_back(i);
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -68,6 +79,16 @@ void DX12EditorRenderer::Init(HWND hwnd, uint32_t width, uint32_t height)
 
     m_viewport    = { 0.f, 0.f, static_cast<float>(width), static_cast<float>(height), 0.f, 1.f };
     m_scissorRect = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
+
+    return true;
+    }
+    catch (const std::exception& e)
+    {
+        OutputDebugStringA("Init failed: ");
+        OutputDebugStringA(e.what());
+        OutputDebugStringA("\n");
+        return false;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -101,6 +122,14 @@ void DX12EditorRenderer::Resize(uint32_t width, uint32_t height)
 
     m_viewport    = { 0.f, 0.f, static_cast<float>(width), static_cast<float>(height), 0.f, 1.f };
     m_scissorRect = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
+}
+
+// ---------------------------------------------------------------------------
+// GetGraphicsProvider
+// ---------------------------------------------------------------------------
+IGraphicsProvider* DX12EditorRenderer::GetGraphicsProvider()
+{
+    return m_graphicsProvider.get();
 }
 
 // ---------------------------------------------------------------------------
@@ -250,6 +279,49 @@ DX12EditorRenderer::GetSrvSlot(uint32_t slot) const
     gpu.ptr += static_cast<UINT64>(slot) * stride;
 
     return { cpu, gpu };
+}
+
+// ---------------------------------------------------------------------------
+// AllocateSrvSlot
+// ---------------------------------------------------------------------------
+std::pair<std::pair<void*, void*>, uint32_t> DX12EditorRenderer::AllocateSrvSlot()
+{
+    if (m_freeSrvSlots.empty())
+        throw std::runtime_error("No available SRV slots in editor renderer.");
+
+    uint32_t slot = m_freeSrvSlots.back();
+    m_freeSrvSlots.pop_back();
+
+    auto [cpu, gpu] = GetSrvSlot(slot);
+    return { { reinterpret_cast<void*>(cpu.ptr), reinterpret_cast<void*>(gpu.ptr) }, slot };
+}
+
+// ---------------------------------------------------------------------------
+// FreeSrvSlot
+// ---------------------------------------------------------------------------
+void DX12EditorRenderer::FreeSrvSlot(uint32_t slotIndex)
+{
+    if (slotIndex == 0)
+        return;  // Slot 0 is reserved for ImGui font atlas
+
+    // Add back to free list
+    m_freeSrvSlots.push_back(slotIndex);
+}
+
+// ---------------------------------------------------------------------------
+// CanAllocateSrvSlot
+// ---------------------------------------------------------------------------
+bool DX12EditorRenderer::CanAllocateSrvSlot() const
+{
+    return !m_freeSrvSlots.empty();
+}
+
+// ---------------------------------------------------------------------------
+// GetAvailableSrvSlots
+// ---------------------------------------------------------------------------
+uint32_t DX12EditorRenderer::GetAvailableSrvSlots() const
+{
+    return static_cast<uint32_t>(m_freeSrvSlots.size());
 }
 
 // ---------------------------------------------------------------------------

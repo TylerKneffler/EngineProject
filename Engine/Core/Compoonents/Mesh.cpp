@@ -69,38 +69,22 @@ void Mesh::LoadFromFile(const std::string& path)
 
 #pragma region DX12 buffer creation and rendering
 
-void Mesh::CreateBuffer(ID3D12Device* device)
+void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory)
 {
-    if (m_vertices.empty()) return;
+    if (!bufferFactory || m_vertices.empty())
+        return;
 
-    const UINT byteSize = static_cast<UINT>(m_vertices.size() * sizeof(Vertex));
+    const uint64_t byteSize = m_vertices.size() * sizeof(Vertex);
 
-    D3D12_HEAP_PROPERTIES uploadProps{};
-    uploadProps.Type = D3D12_HEAP_TYPE_UPLOAD;
+    // Create upload buffer through the graphics factory
+    m_vertexBuffer = bufferFactory->CreateBuffer(
+        IGraphicsBuffer::Usage::VertexBuffer,
+        IGraphicsBuffer::AccessMode::Upload,
+        byteSize,
+        m_vertices.data());
 
-    D3D12_RESOURCE_DESC bufDesc{};
-    bufDesc.Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER;
-    bufDesc.Width            = byteSize;
-    bufDesc.Height           = 1;
-    bufDesc.DepthOrArraySize = 1;
-    bufDesc.MipLevels        = 1;
-    bufDesc.Format           = DXGI_FORMAT_UNKNOWN;
-    bufDesc.SampleDesc.Count = 1;
-    bufDesc.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-
-    device->CreateCommittedResource(
-        &uploadProps, D3D12_HEAP_FLAG_NONE, &bufDesc,
-        D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-        IID_PPV_ARGS(&m_vertexBuffer));
-
-    void* mapped = nullptr;
-    m_vertexBuffer->Map(0, nullptr, &mapped);
-    memcpy(mapped, m_vertices.data(), byteSize);
-    m_vertexBuffer->Unmap(0, nullptr);
-
-    m_vbView.BufferLocation = m_vertexBuffer->GetGPUVirtualAddress();
-    m_vbView.SizeInBytes    = byteSize;
-    m_vbView.StrideInBytes  = sizeof(Vertex);
+    if (!m_vertexBuffer)
+        throw std::runtime_error("Failed to create vertex buffer");
 
     m_ready = true;
 }

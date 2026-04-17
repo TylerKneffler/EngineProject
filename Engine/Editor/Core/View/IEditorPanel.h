@@ -1,8 +1,6 @@
 #pragma once
 #include <string>
 
-struct ID3D12GraphicsCommandList;
-
 // ---------------------------------------------------------------------------
 // IEditorPanel — common polymorphic interface for every editor panel.
 //
@@ -31,7 +29,8 @@ public:
     virtual bool NeedsRender() const { return false; }
 
     // Subclasses override to issue scene draw calls into cmd each frame.
-    virtual void Render3D(ID3D12GraphicsCommandList* /*cmd*/) {}
+    // cmd: opaque graphics command list handle (cast internally to ID3D12GraphicsCommandList*)
+    virtual void Render3D(void* /*cmd*/) {}
 
     // ---- Title / open state ----
     const std::string& GetTitle() const { return m_title; }

@@ -1,6 +1,7 @@
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Serialization/Json.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Object.h"
 #include "Core/component.h"
 #include "Core/Compoonents/Mesh.h"
@@ -101,9 +102,9 @@ bool SceneSerializer::Save(const Scene& scene, const std::string& path)
     settings.Set("gridHalfSize",    JsonValue(s.gridHalfSize));
     settings.Set("gridCellSize",    JsonValue(s.gridCellSize));
     settings.Set("gridOpacity",     JsonValue(s.gridOpacity));
-    settings.Set("gridColor",       JXm(s.gridColor));
-    settings.Set("gridOriginColor", JXm(s.gridOriginColor));
-    settings.Set("ambientColor",    JXm(s.ambientColor));
+    settings.Set("gridColor",       JGlm(s.gridColor));
+    settings.Set("gridOriginColor", JGlm(s.gridOriginColor));
+    settings.Set("ambientColor",    JGlm(s.ambientColor));
     root.Set("settings", std::move(settings));
 
     // Objects — only root-level (no parent)
@@ -120,7 +121,7 @@ bool SceneSerializer::Save(const Scene& scene, const std::string& path)
 }
 
 // ---- Load -------------------------------------------------------------------
-bool SceneSerializer::Load(Scene& scene, const std::string& path, ID3D12Device* device)
+bool SceneSerializer::Load(Scene& scene, const std::string& path, IGraphicsProvider* graphicsProvider)
 {
     EnsureBuiltinsRegistered();
     auto& registry = GetRegistry();
@@ -146,10 +147,15 @@ bool SceneSerializer::Load(Scene& scene, const std::string& path, ID3D12Device* 
         if (settings.Has("gridHalfSize"))  s.gridHalfSize  = settings["gridHalfSize"].AsInt();
         if (settings.Has("gridCellSize"))  s.gridCellSize  = settings["gridCellSize"].AsFloat();
         if (settings.Has("gridOpacity"))   s.gridOpacity   = settings["gridOpacity"].AsFloat();
-        if (settings.Has("gridColor"))     s.gridColor     = XmFrom(settings["gridColor"], s.gridColor);
-        if (settings.Has("gridOriginColor")) s.gridOriginColor = XmFrom(settings["gridOriginColor"], s.gridOriginColor);
-        if (settings.Has("ambientColor"))  s.ambientColor  = XmFrom(settings["ambientColor"], s.ambientColor);
+        if (settings.Has("gridColor"))     s.gridColor     = GlmFrom(settings["gridColor"], s.gridColor);
+        if (settings.Has("gridOriginColor")) s.gridOriginColor = GlmFrom(settings["gridOriginColor"], s.gridOriginColor);
+        if (settings.Has("ambientColor"))  s.ambientColor  = GlmFrom(settings["ambientColor"], s.ambientColor);
     }
+
+    // Get buffer factory for mesh GPU resource creation
+    IGraphicsBufferFactory* bufferFactory = nullptr;
+    if (graphicsProvider)
+        bufferFactory = graphicsProvider->GetBufferFactory();
 
     // Deserialise a single Object node, then recurse for children.
     // Uses std::function so it can reference itself (recursive lambda).
@@ -184,9 +190,9 @@ bool SceneSerializer::Load(Scene& scene, const std::string& path, ID3D12Device* 
             obj.Components.push_back(comp);
 
             // Mesh needs GPU resources created immediately after CPU load.
-            if (device)
+            if (bufferFactory)
                 if (Mesh* mesh = dynamic_cast<Mesh*>(comp))
-                    mesh->CreateBuffer(device);
+                    mesh->CreateBuffer(bufferFactory);
         }
 
         // Children (recursive) — added to scene so they participate in loops.

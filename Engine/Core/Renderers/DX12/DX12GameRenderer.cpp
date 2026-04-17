@@ -24,28 +24,35 @@ DX12GameRenderer::~DX12GameRenderer()
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
-void DX12GameRenderer::Init(HWND hwnd, uint32_t width, uint32_t height)
+bool DX12GameRenderer::Init(void* hwnd, uint32_t width, uint32_t height)
 {
-    m_width  = width;
-    m_height = height;
+    try
+    {
+        m_width  = width;
+        m_height = height;
 
-    // ---- Initialisation order matters ----
-    // 1. CreateDevice()         — must come first; everything else is created
-    //                              through the ID3D12Device it produces.
-    // 2. CreateCommandObjects() — command queue is created here, and
-    //                              CreateSwapChain needs the queue pointer because
-    //                              DXGI ties Present() signals to that queue.
-    // 3. CreateSwapChain()      — creates the back-buffer textures and the
-    //                              DXGI flip mechanism.
-    // 4. CreateRTVHeap()        — allocates the descriptor heap that will hold
-    //                              the Render Target Views (one per back-buffer).
-    // 5. CreateRenderTargets()  — retrieves the back-buffer resources from the
-    //                              swap chain and writes RTVs into the heap.
-    CreateDevice();
-    CreateCommandObjects();
-    CreateSwapChain(hwnd, width, height);
-    CreateRTVHeap();
-    CreateRenderTargets();
+        // ---- Initialisation order matters ----
+        // 1. CreateDevice()         — must come first; everything else is created
+        //                              through the ID3D12Device it produces.
+        // 2. CreateCommandObjects() — command queue is created here, and
+        //                              CreateSwapChain needs the queue pointer because
+        //                              DXGI ties Present() signals to that queue.
+        // 3. CreateSwapChain()      — creates the back-buffer textures and the
+        //                              DXGI flip mechanism.
+        // 4. CreateRTVHeap()        — allocates the descriptor heap that will hold
+        //                              the Render Target Views (one per back-buffer).
+        // 5. CreateRenderTargets()  — retrieves the back-buffer resources from the
+        //                              swap chain and writes RTVs into the heap.
+        CreateDevice();
+        CreateCommandObjects();
+        CreateSwapChain(static_cast<HWND>(hwnd), width, height);
+        CreateRTVHeap();
+        CreateRenderTargets();
+
+        // ---- Graphics provider ----
+        // Initialize the graphics provider for shader compilation, buffer creation, etc.
+        m_graphicsProvider = std::make_unique<D3D12GraphicsProvider>(
+            m_device.Get(), m_commandQueue.Get(), nullptr);
 
     // ---- Fence ----
     // A fence is a GPU/CPU synchronisation primitive. The GPU signals the fence
@@ -77,8 +84,15 @@ void DX12GameRenderer::Init(HWND hwnd, uint32_t width, uint32_t height)
     // bound or the validation layer will warn. Both are re-set on every Resize().
     m_viewport   = { 0.f, 0.f, static_cast<float>(width), static_cast<float>(height), 0.f, 1.f };
     m_scissorRect = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
-
-}
+    return true;
+    }
+    catch (const std::exception& e)
+    {
+        OutputDebugStringA("Init failed: ");
+        OutputDebugStringA(e.what());
+        OutputDebugStringA("\n");
+        return false;
+    }}
 
 // ---------------------------------------------------------------------------
 // Resize
@@ -266,6 +280,14 @@ void DX12GameRenderer::EndFrame()
     // 0→1→0→… after each Present(). We query rather than manually toggling
     // to stay in sync with the swap chain’s internal state.
     m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+}
+
+// ---------------------------------------------------------------------------
+// GetGraphicsProvider
+// ---------------------------------------------------------------------------
+IGraphicsProvider* DX12GameRenderer::GetGraphicsProvider()
+{
+    return m_graphicsProvider.get();
 }
 
 // ---------------------------------------------------------------------------

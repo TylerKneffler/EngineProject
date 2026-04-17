@@ -1,7 +1,11 @@
 #include "Core/Window.h"
-#include "Core/Renderers/Game/DX12GameRenderer.h"
+#include "Core/Renderers/RendererFactory.h"
+#include "Core/Renderers/IGameRenderer.h"
+#include "Core/Renderers/DX12/DX12GameRenderer.h"
+#include "Core/Renderers/DX12/DX12GraphicsContext.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
+#include "Core/SceneManager.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/ProjectLoader.h"
 #include "Scripts/Rotate.h"
@@ -44,13 +48,18 @@ int WINAPI wWinMain(
     auto window   = std::make_unique<Window>(hInstance, L"Game",
                         projectSettings.viewportWidth,
                         projectSettings.viewportHeight);
-    auto renderer = std::make_unique<DX12GameRenderer>();
-    renderer->Init(window->GetHWND(), window->GetWidth(), window->GetHeight());
+    auto renderer = RendererFactory::CreateGameRenderer(projectSettings);
+    if (!renderer || !renderer->Init(window->GetHWND(), window->GetWidth(), window->GetHeight()))
+        return 1;
 
-    ID3D12Device* device = renderer->GetDevice();
+    // For D3D12-specific operations, cast to concrete renderer
+    auto* dx12Renderer = dynamic_cast<DX12GameRenderer*>(renderer.get());
+    if (!dx12Renderer)
+        return 1;
 
     Scene scene;
-    scene.Init(device);
+    scene.Init(dx12Renderer->GetGraphicsProvider());
+    SceneManager::SetActiveScene(&scene);
 
     // Register script types for scene deserialization.
     SceneSerializer::Register("Rotate", []() -> Component* { return new Rotate(); });
@@ -86,7 +95,13 @@ int WINAPI wWinMain(
 
         renderer->BeginFrame();
         renderer->Clear(0.1f, 0.1f, 0.1f);
-        // TODO: game renderer scene draw pass
+        
+        // Render the scene
+        float aspect = static_cast<float>(window->GetWidth()) / static_cast<float>(window->GetHeight());
+        D3D12GraphicsContext graphicsContext(dx12Renderer->GetCommandList());
+        Camera* gameCamera = scene.FindGameCamera();
+        scene.Render(&graphicsContext, aspect, gameCamera);
+        
         renderer->EndFrame();
     };
 
