@@ -1,5 +1,6 @@
 #include "ViewFactory.h"
 #include "Core/Renderers/DX12/DX12EditorRenderer.h"
+#include "Core/Renderers/DX12/D3D12View.h"
 #include <cassert>
 #include <stdexcept>
 

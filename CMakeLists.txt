@@ -73,6 +73,16 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(pugixml)
 
 # ---------------------------------------------------------------------------
+# Vulkan SDK — Optional, for Vulkan renderer support
+# ---------------------------------------------------------------------------
+find_package(Vulkan QUIET)
+if(Vulkan_FOUND)
+    message(STATUS "Vulkan SDK found: ${Vulkan_INCLUDE_DIR}")
+else()
+    message(STATUS "Vulkan SDK not found - Vulkan renderer support disabled")
+endif()
+
+# ---------------------------------------------------------------------------
 # Engine — static library
 # ---------------------------------------------------------------------------
 add_library(Engine STATIC
@@ -81,6 +91,7 @@ add_library(Engine STATIC
 target_include_directories(Engine PUBLIC
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/Engine
+    $<$<BOOL:${Vulkan_FOUND}>:${Vulkan_INCLUDE_DIR}>
 )
 target_precompile_headers(Engine PRIVATE Engine/pch.h)
 target_link_libraries(Engine PUBLIC
@@ -93,6 +104,7 @@ target_link_libraries(Engine PUBLIC
     ImGui
     glm::glm
     pugixml
+    $<$<BOOL:${Vulkan_FOUND}>:Vulkan::Vulkan>
 )
 target_compile_definitions(Engine PUBLIC
     ENGINE_SHADERS_PATH="${CMAKE_SOURCE_DIR}/Engine/Core/Shaders/"

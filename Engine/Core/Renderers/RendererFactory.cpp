@@ -2,6 +2,8 @@
 #include "RendererFactory.h"
 #include "DX12/DX12EditorRenderer.h"
 #include "DX12/DX12GameRenderer.h"
+#include "Vulkan/VulkanEditorRenderer.h"
+#include "Vulkan/VulkanGameRenderer.h"
 #include "Core/ProjectLoader.h"
 #include <stdexcept>
 
@@ -11,7 +13,7 @@
 std::unique_ptr<IEditorRenderer> RendererFactory::CreateEditorRenderer(
     const ProjectSettings& settings)
 {
-    std::string api = settings.renderingAPI;
+    std::string api = settings.editorRenderingAPI;
     
     // Normalize API name (case-insensitive)
     for (auto& c : api) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -20,15 +22,14 @@ std::unique_ptr<IEditorRenderer> RendererFactory::CreateEditorRenderer(
     {
         return std::make_unique<DX12EditorRenderer>();
     }
-    // Future renderers can be added here:
-    // else if (api == "vulkan")
-    // {
-    //     return std::make_unique<VulkanEditorRenderer>();
-    // }
+    else if (api == "vulkan")
+    {
+        return std::make_unique<VulkanEditorRenderer>();
+    }
     
     throw std::runtime_error(
-        "Unsupported rendering API: " + settings.renderingAPI + 
-        "\nSupported: DirectX12, Vulkan (coming soon)");
+        "Unsupported editor rendering API: " + settings.editorRenderingAPI + 
+        "\nSupported: DirectX12, Vulkan");
 }
 
 // ---------------------------------------------------------------------------
@@ -37,7 +38,7 @@ std::unique_ptr<IEditorRenderer> RendererFactory::CreateEditorRenderer(
 std::unique_ptr<IGameRenderer> RendererFactory::CreateGameRenderer(
     const ProjectSettings& settings)
 {
-    std::string api = settings.renderingAPI;
+    std::string api = settings.gameRenderingAPI;
     
     // Normalize API name (case-insensitive)
     for (auto& c : api) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -46,15 +47,14 @@ std::unique_ptr<IGameRenderer> RendererFactory::CreateGameRenderer(
     {
         return std::make_unique<DX12GameRenderer>();
     }
-    // Future renderers can be added here:
-    // else if (api == "vulkan")
-    // {
-    //     return std::make_unique<VulkanGameRenderer>();
-    // }
+    else if (api == "vulkan")
+    {
+        return std::make_unique<VulkanGameRenderer>();
+    }
     
     throw std::runtime_error(
-        "Unsupported rendering API: " + settings.renderingAPI + 
-        "\nSupported: DirectX12, Vulkan (coming soon)");
+        "Unsupported game rendering API: " + settings.gameRenderingAPI + 
+        "\nSupported: DirectX12, Vulkan");
 }
 
 // ---------------------------------------------------------------------------

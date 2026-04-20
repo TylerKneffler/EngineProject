@@ -3,6 +3,7 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Camera.h"
 #include "Core/Renderers/DX12/DX12GraphicsContext.h"
+#include "Core/Renderers/DX12/D3D12View.h"
 
 // ---------------------------------------------------------------------------
 // Init — store the scene pointer, then delegate resource creation to View.
@@ -41,6 +42,7 @@ void SceneView::DrawPanel()
     ImVec2 size = ImGui::GetContentRegionAvail();
     if (size.x > 0.f && size.y > 0.f)
     {
+        // Update computed aspect ratio
         m_aspect = size.x / size.y;
 
         // Calculate game viewport with aspect ratio constraints
@@ -67,7 +69,7 @@ void SceneView::DrawPanel()
 
         // Position cursor at viewport location and draw the game texture
         ImGui::SetCursorPos(viewportPos);
-        ImGui::Image((ImTextureID)(uintptr_t)m_srvGpu.ptr, viewportSize);
+        ImGui::Image((ImTextureID)(uintptr_t)GetD3D12View()->GetSrvGpu().ptr, viewportSize);
 
         // Check for mouse input on the viewport
         if (ImGui::IsItemHovered())

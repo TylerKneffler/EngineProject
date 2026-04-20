@@ -45,7 +45,16 @@
 		<RightPanel Include="Properties" />
 	</ItemGroup>
 	<PropertyGroup>
+		<!-- Rendering API Configuration -->
+		<!-- Legacy setting: used if EditorRenderingAPI or GameRenderingAPI are not specified -->
 		<RenderingAPI>DirectX12</RenderingAPI>
+		
+		<!-- Separate rendering API selection for editor and game (overrides RenderingAPI if set) -->
+		<!-- Options: DirectX12, Vulkan -->
+		<EditorRenderingAPI>DirectX12</EditorRenderingAPI>
+		<GameRenderingAPI>DirectX12</GameRenderingAPI>
+		
+		<!-- Rendering settings -->
 		<ClearColorR>0.180000</ClearColorR>
 		<ClearColorG>0.180000</ClearColorG>
 		<ClearColorB>0.180000</ClearColorB>

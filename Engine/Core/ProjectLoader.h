@@ -37,7 +37,9 @@ struct ProjectSettings
     std::vector<std::string> rightPanelTabs;
 
     // Rendering
-    std::string renderingAPI;
+    std::string renderingAPI;              // Deprecated: use editorRenderingAPI and gameRenderingAPI
+    std::string editorRenderingAPI;        // Rendering API for editor views (DirectX12, Vulkan)
+    std::string gameRenderingAPI;          // Rendering API for game window (DirectX12, Vulkan)
     glm::vec4 clearColor;
     uint32_t targetFramerate;
 

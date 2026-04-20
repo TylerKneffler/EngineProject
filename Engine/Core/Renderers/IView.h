@@ -1,56 +1,55 @@
 #pragma once
-#include "IEditorPanel.h"
+#include <functional>
+#include <cstdint>
+
+// Forward declaration - editor UI interface (no dependency from Core layer)
+class IEditorPanel;
 
 // ---------------------------------------------------------------------------
-// IView — Abstract interface for renderer-agnostic views.
+// IView — Graphics-agnostic interface for offscreen rendered editor panels
 //
-// Views are 2-D panels that can contain offscreen-rendered 3-D content
-// (e.g., SceneView, GameView). This interface decouples view logic from
-// the underlying renderer API (DirectX 12, Vulkan, etc.).
+// Abstracts offscreen rendering for editor views (SceneView, GameView, etc).
+// The view owns:
+//   - An offscreen render target texture
+//   - A depth buffer
+//   - SRV registration for ImGui display
 //
-// Each view owns:
-// - An offscreen texture for 3-D rendering
-// - Descriptor handles (what these are depends on the renderer)
-// - A slot index in the renderer's SRV heap (for reuse tracking)
+// Graphics API specifics (D3D12, Vulkan, Metal) are hidden from public API.
+// All handles are opaque void* pointers.
 //
-// Concrete implementations (e.g., DX12View) will inherit from this and
-// IEditorPanel, providing ImGui rendering (DrawPanel) and 3-D content
-// (via OnRender callbacks wired by subclasses).
+// Note: View class will implement both IView (graphics API) and IEditorPanel
+// (editor UI) to provide complete panel functionality.
 // ---------------------------------------------------------------------------
-class IView : public virtual IEditorPanel
+class IView
 {
 public:
     virtual ~IView() = default;
 
-    // Initialize the view with offscreen texture resources.
-    // Concrete implementations will interpret descriptorHandles according to
-    // their renderer backend (D3D12 GPU/CPU handles, Vulkan image handles, etc.).
-    //
-    // descriptorHandles: A pair of opaque handles returned by the renderer's
-    //                    AllocateSrvSlot(). For D3D12, these are CPU/GPU
-    //                    descriptor handles cast to void*.
-    // srvSlotIndex:      The slot index in the renderer's SRV heap, used for
-    //                    cleanup when the view is destroyed.
-    virtual bool Init(uint32_t width, uint32_t height,
-                      std::pair<void*, void*> descriptorHandles,
-                      uint32_t srvSlotIndex) = 0;
+    // Initialize offscreen rendering resources
+    // device: opaque graphics device handle
+    // srvCpu/srvGpu: opaque descriptor handles for shader resource view
+    // srvSlotIndex: identifies the heap slot for cleanup
+    virtual void Init(void* device,
+                      uint32_t width, uint32_t height,
+                      void* srvCpu, void* srvGpu,
+                      uint32_t srvSlotIndex = 0) = 0;
 
-    // Resize the view's offscreen texture to the given dimensions.
-    // Safe to call only when the GPU is idle.
-    virtual void Resize(uint32_t width, uint32_t height) = 0;
+    // Resize rendering targets
+    // device: opaque graphics device handle
+    virtual void Resize(void* device, uint32_t width, uint32_t height) = 0;
 
-    // Render 3-D content to the view's offscreen texture.
-    // Concrete implementations will use renderer-specific command lists,
-    // transitions, etc. to set up the rendering environment, then invoke
-    // drawFn to let the caller issue draw commands.
-    virtual void Render(std::function<void()> drawFn = nullptr) = 0;
+    // Render to offscreen target, then transition back to SRV
+    // cmdList: opaque graphics command list handle
+    // mainRtv: opaque main render target handle (restored after rendering)
+    // drawFn: callback function invoked between clear and transition operations
+    virtual void Render(void* cmdList, void* mainRtv,
+                        std::function<void(void*)> drawFn = nullptr) = 0;
 
-    // Access view metadata.
+    // Query dimensions and aspect ratio
     virtual float    GetAspect() const = 0;
-    virtual uint32_t GetWidth() const = 0;
+    virtual uint32_t GetWidth()  const = 0;
     virtual uint32_t GetHeight() const = 0;
-    virtual uint32_t GetSrvSlotIndex() const = 0;
 
-    // ImGui panel rendering (implemented by subclasses).
-    virtual void DrawPanel() = 0;
+    // SRV slot index for resource cleanup
+    virtual uint32_t GetSrvSlotIndex() const = 0;
 };

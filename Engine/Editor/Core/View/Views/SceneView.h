@@ -57,4 +57,7 @@ private:
     uint32_t m_gameWindowWidth = 1920;
     uint32_t m_gameWindowHeight = 1080;
     glm::vec4 m_letterboxColor{0.f, 0.f, 0.f, 1.f};
+
+    // Computed viewport aspect ratio
+    float m_aspect = 1.0f;
 };

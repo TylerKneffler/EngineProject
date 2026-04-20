@@ -1,4 +1,5 @@
 #include "GameView.h"
+#include "../../../../Core/Renderers/DX12/D3D12View.h"
 #include "Core/Renderers/DX12/DX12GraphicsContext.h"
 
 // ---------------------------------------------------------------------------
@@ -55,7 +56,7 @@ void GameView::DrawPanel()
 
             ImGui::SetCursorPos(viewportPos);
             ImGui::Image(
-                static_cast<ImTextureID>(m_srvGpu.ptr),
+                static_cast<ImTextureID>(GetD3D12View()->GetSrvGpu().ptr),
                 viewportSize);
         }
     }

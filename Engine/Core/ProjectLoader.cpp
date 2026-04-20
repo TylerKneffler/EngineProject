@@ -178,6 +178,14 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
         if (api)
             settings.renderingAPI = api.child_value();
 
+        auto editorApi = prop.child("EditorRenderingAPI");
+        if (editorApi)
+            settings.editorRenderingAPI = editorApi.child_value();
+
+        auto gameApi = prop.child("GameRenderingAPI");
+        if (gameApi)
+            settings.gameRenderingAPI = gameApi.child_value();
+
         auto r = prop.child("ClearColorR");
         if (r)
             settings.clearColor.r = std::stof(r.child_value());
@@ -198,9 +206,15 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
         if (framerate)
             settings.targetFramerate = std::stoul(framerate.child_value());
 
-        if (!settings.renderingAPI.empty())
+        if (!settings.renderingAPI.empty() || !settings.editorRenderingAPI.empty())
             break;
     }
+    
+    // Fallback to legacy renderingAPI field if separate APIs not specified
+    if (settings.editorRenderingAPI.empty() && !settings.renderingAPI.empty())
+        settings.editorRenderingAPI = settings.renderingAPI;
+    if (settings.gameRenderingAPI.empty() && !settings.renderingAPI.empty())
+        settings.gameRenderingAPI = settings.renderingAPI;
 }
 
 // ---------------------------------------------------------------------------
