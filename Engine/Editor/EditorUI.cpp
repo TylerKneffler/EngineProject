@@ -238,6 +238,9 @@ void EditorUI::DrawPanels()
 void EditorUI::DrawPreferences()
 {
     PreferencesView* prefs = m_state->GetPreferences();
+    if (!prefs)
+        return;
+
     bool show = m_state->IsShowingPreferences();
     prefs->SetOpen(show);
     if (show)
