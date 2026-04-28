@@ -277,6 +277,9 @@ void EditorUI::DrawPreferences()
     if (!prefs)
         return;
     
+    if (!prefs)
+        return;
+
     bool show = m_state->IsShowingPreferences();
     prefs->SetOpen(show);
     if (show)
