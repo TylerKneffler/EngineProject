@@ -24,7 +24,8 @@
     typedef void* VkFence;
     typedef void* VkSemaphore;
     typedef void* VkCommandBuffer;
-    typedef void* VkDescriptorHeap;
+    typedef void* VkDescriptorPool;
+    typedef int   VkFormat;
     
     #define VK_NULL_HANDLE nullptr
 #endif
@@ -61,6 +62,8 @@ public:
     uint32_t GetAvailableSrvSlots() const override;
     void* GetNativeDeviceHandle() const override { return m_device; }
     std::unique_ptr<IView> CreateViewBackend() override;
+    void* GetCurrentCommandBuffer() const override;
+    void* GetCurrentRenderTargetHandle() const override { return nullptr; }
 
 private:
     VkInstance m_instance = VK_NULL_HANDLE;
@@ -77,6 +80,8 @@ private:
     std::vector<VkFramebuffer> m_framebuffers;
 
     VkRenderPass m_renderPass = VK_NULL_HANDLE;
+    VkDescriptorPool m_imguiDescriptorPool = VK_NULL_HANDLE;
+    VkFormat m_swapchainFormat{};
 
     std::vector<VkCommandBuffer> m_commandBuffers;
     std::vector<VkFence> m_inFlightFences;

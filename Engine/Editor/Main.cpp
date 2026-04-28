@@ -2,7 +2,6 @@
 #include "Core/ProjectLoader.h"
 #include "Core/SceneManager.h"
 #include "Core/Renderers/IEditorRenderer.h"
-#include "Core/Renderers/DX12/DX12EditorRenderer.h"
 #include "Core/View/View.h"
 #include "Engine/Editor/EditorState.h"
 #include "Engine/Editor/GameBuildManager.h"
@@ -97,23 +96,11 @@ int WINAPI wWinMain(
     
     OutputDebugStringA("[Main] Got editor components\n");
 
-    OutputDebugStringA("[Main] Got editor components\n");
-
-    // For D3D12-specific operations, cast to concrete renderer
-    OutputDebugStringA("[Main] Casting to DX12EditorRenderer...\n");
-    auto* dx12Renderer = dynamic_cast<DX12EditorRenderer*>(renderer);
-    if (!dx12Renderer)
+    gameBuildManager->OnPlayStart = [&]()
     {
-        OutputDebugStringA("Error: Editor requires a D3D12-based renderer\n");
-        return 1;
-    }
-        gameBuildManager->OnPlayStart = [&]()
-        {
-            for (const auto& obj : scene->GetObjects())
-                obj->Start();
-        };
-
-        // For D3D12-specific operations, cast to concrete renderer
+        for (const auto& obj : scene->GetObjects())
+            obj->Start();
+    };
 
     // Frame timing
     OutputDebugStringA("[Main] Setting up frame timing...\n");
@@ -152,7 +139,7 @@ int WINAPI wWinMain(
             {
                 OutputDebugStringA("[OnResize] Resizing a panel view...\n");
                 class View* view = reinterpret_cast<class View*>(panel.get());
-                view->Resize(dx12Renderer->GetDevice(), w, h);
+                view->Resize(renderer->GetNativeDeviceHandle(), w, h);
             }
         }
         OutputDebugStringA("[OnResize] Panels resized\n");
@@ -229,11 +216,11 @@ int WINAPI wWinMain(
                 class View* view = dynamic_cast<class View*>(panel.get());
                 if (!view) { OutputDebugStringA("[RenderIfNeeded Lambda] dynamic_cast to View failed\n"); continue; }
                 
-                auto cmdList = dx12Renderer->GetCommandList();
-                auto rtv = dx12Renderer->GetCurrentRTV();
+                void* cmdList = renderer->GetCurrentCommandBuffer();
+                void* rtvHandle = renderer->GetCurrentRenderTargetHandle();
                 
                 OutputDebugStringA(("[RenderIfNeeded Lambda] Rendering: " + panel->GetTitle() + "\n").c_str());
-                view->Render(cmdList, &rtv,
+                view->Render(cmdList, rtvHandle,
                     [view](void* cmd) { view->Render3D(cmd); });
             }
             OutputDebugStringA("[RenderIfNeeded Lambda] 3D panels done\n");

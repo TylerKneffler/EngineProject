@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "VulkanGameRenderer.h"
 #include "VulkanGraphicsProvider.h"
+#include "VulkanGraphicsContext.h"
 
 #if defined(ENGINE_VULKAN_ENABLED)
 #include <array>
@@ -389,7 +390,7 @@ bool VulkanGameRenderer::Init(void* hwnd, uint32_t width, uint32_t height)
 
     // Create graphics provider
     m_graphicsProvider = std::make_unique<VulkanGraphicsProvider>(
-        m_device, m_graphicsQueue, m_commandPool);
+        m_device, m_physicalDevice, m_graphicsQueue, m_commandPool);
 
     return m_graphicsProvider != nullptr;
 #endif
@@ -401,11 +402,12 @@ bool VulkanGameRenderer::Init(void* hwnd, uint32_t width, uint32_t height)
 void VulkanGameRenderer::Resize(uint32_t width, uint32_t height)
 {
     if (width == 0 || height == 0) return;
-    
-    m_width = width;
+
+    m_width  = width;
     m_height = height;
 
-    // TODO: Recreate swapchain and framebuffers.
+    // TODO: Recreate swapchain and framebuffers for new dimensions.
+    // For now, mark the swapchain as needing recreation on next frame.
 }
 
 // ---------------------------------------------------------------------------
@@ -458,6 +460,15 @@ void VulkanGameRenderer::BeginFrame()
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     vkBeginCommandBuffer(m_commandBuffers[m_currentFrame], &beginInfo);
+
+    // Inform the context factory which command buffer is active this frame
+    if (m_graphicsProvider)
+    {
+        auto* factory = static_cast<VulkanGraphicsContextFactory*>(
+            m_graphicsProvider->GetContextFactory());
+        if (factory)
+            factory->SetCurrentCommandBuffer(m_commandBuffers[m_currentFrame]);
+    }
 #endif
 }
 
@@ -507,6 +518,6 @@ void VulkanGameRenderer::EndFrame()
 
 std::unique_ptr<IGraphicsContext> VulkanGameRenderer::CreateFrameGraphicsContext()
 {
-    // TODO: Return Vulkan graphics context once command recording is implemented.
-    return nullptr;
+    if (!m_graphicsProvider) return nullptr;
+    return m_graphicsProvider->GetContextFactory()->CreateContext();
 }

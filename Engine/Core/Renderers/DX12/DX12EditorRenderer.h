@@ -73,6 +73,8 @@ public:
     uint32_t GetAvailableSrvSlots() const override;
     void* GetNativeDeviceHandle() const override { return m_device.Get(); }
     std::unique_ptr<IView> CreateViewBackend() override;
+    void* GetCurrentCommandBuffer() const override { return m_commandList.Get(); }
+    void* GetCurrentRenderTargetHandle() const override;  // returns &m_currentRTVHandle
 
     // ---------- D3D12-specific accessors (for internal use) ----------
     ID3D12Device*              GetDevice()      const { return m_device.Get(); }
@@ -127,6 +129,12 @@ private:
 
     // -- imgui integration --
     ComPtr<ID3D12DescriptorHeap> m_srvHeap;   // shader-visible, for ImGui font texture
+
+    // Cached current-frame RTV handle (stable address for GetCurrentRenderTargetHandle)
+    D3D12_CPU_DESCRIPTOR_HANDLE m_currentRTVHandle{};
+
+    // Cached current-frame RTV pointer (used by GetCurrentRenderTargetHandle)
+    SIZE_T m_currentRTVPtr = 0;
 
     // -- SRV slot management --
     std::vector<uint32_t> m_freeSrvSlots;  // available slots for views

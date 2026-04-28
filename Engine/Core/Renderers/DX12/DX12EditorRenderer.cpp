@@ -230,6 +230,7 @@ void DX12EditorRenderer::BeginFrame()
     m_commandList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
 
     OutputDebugStringA("[BeginFrame] Calling ImGui_ImplDX12_NewFrame\n");
+    m_currentRTVHandle = GetCurrentRTV();
     ImGui_ImplDX12_NewFrame();
     OutputDebugStringA("[BeginFrame] Calling ImGui_ImplWin32_NewFrame\n");
     ImGui_ImplWin32_NewFrame();
@@ -306,6 +307,15 @@ D3D12_CPU_DESCRIPTOR_HANDLE DX12EditorRenderer::GetCurrentRTV() const
     D3D12_CPU_DESCRIPTOR_HANDLE handle = m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
     handle.ptr += static_cast<SIZE_T>(m_frameIndex) * m_rtvDescriptorSize;
     return handle;
+}
+
+// ---------------------------------------------------------------------------
+// GetCurrentRenderTargetHandle
+// ---------------------------------------------------------------------------
+void* DX12EditorRenderer::GetCurrentRenderTargetHandle() const
+{
+    // m_currentRTVHandle is updated in BeginFrame; return stable pointer to it
+    return reinterpret_cast<void*>(const_cast<D3D12_CPU_DESCRIPTOR_HANDLE*>(&m_currentRTVHandle));
 }
 
 // ---------------------------------------------------------------------------

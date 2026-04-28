@@ -9,6 +9,9 @@
 #include "imgui.h"
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx12.h"
+#if defined(ENGINE_VULKAN_ENABLED)
+    #include "imgui_impl_vulkan.h"
+#endif
 
 // DirectX 12
 #include <d3d12.h>

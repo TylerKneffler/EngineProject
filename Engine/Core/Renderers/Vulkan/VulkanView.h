@@ -62,6 +62,12 @@ public:
     VkImageView GetDepthImageView() const { return m_depthImageView; }
     VkFramebuffer GetFramebuffer() const { return m_framebuffer; }
 
+    // Must be called before Init() when a real VkPhysicalDevice is available.
+    void SetPhysicalDevice(VkPhysicalDevice physicalDevice)
+    {
+        m_physicalDevice = physicalDevice;
+    }
+
 private:
     void CreateResources(void* device, uint32_t width, uint32_t height);
     void CleanupResources();

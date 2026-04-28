@@ -62,6 +62,13 @@ target_include_directories(ImGui PUBLIC
 )
 target_compile_definitions(ImGui PUBLIC IMGUI_ENABLE_DOCKING)
 
+# Add Vulkan backend to ImGui when Vulkan SDK is available
+if(Vulkan_FOUND)
+    target_sources(ImGui PRIVATE ${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp)
+    target_include_directories(ImGui PUBLIC ${Vulkan_INCLUDE_DIR})
+    target_link_libraries(ImGui PUBLIC Vulkan::Vulkan)
+endif()
+
 # ---------------------------------------------------------------------------
 # pugixml — XML parsing library
 # ---------------------------------------------------------------------------

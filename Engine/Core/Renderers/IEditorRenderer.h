@@ -52,6 +52,18 @@ public:
     // Create a view backend for offscreen editor rendering.
     virtual std::unique_ptr<IView> CreateViewBackend() = 0;
 
+    // Get the current active command buffer / command list as a void*.
+    // D3D12: returns ID3D12GraphicsCommandList*
+    // Vulkan: returns VkCommandBuffer
+    // Only valid while inside a RenderIfNeeded drawFn callback.
+    virtual void* GetCurrentCommandBuffer() const = 0;
+
+    // Get a pointer to the current render target handle (API-specific).
+    // D3D12: returns D3D12_CPU_DESCRIPTOR_HANDLE*
+    // Vulkan: returns nullptr (render pass handles the target)
+    // Only valid while inside a RenderIfNeeded drawFn callback.
+    virtual void* GetCurrentRenderTargetHandle() const = 0;
+
     // Get the maximum number of SRV slots.
     static constexpr uint32_t MAX_SRV_SLOTS = 32;
 };
