@@ -66,6 +66,11 @@ public:
     // or the editor camera as a fallback. Used by GameView.
     Camera* FindGameCamera();
 
+    // Move the editor camera to frame the given object, keeping a comfortable
+    // viewing distance and looking directly at its world-space origin.
+    // Pass nullptr to reset to the default startup position.
+    void FocusEditorCamera(Object* obj);
+
     // Object management
     Object* AddObject();                     // create an empty Object owned by this scene
     Object* AddObject(const std::string& name);

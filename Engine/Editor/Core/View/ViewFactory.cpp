@@ -1,7 +1,4 @@
 #include "ViewFactory.h"
-#include "Core/Renderers/DX12/DX12EditorRenderer.h"
-#include "Core/Renderers/DX12/D3D12View.h"
-#include <cassert>
 #include <stdexcept>
 
 // ---------------------------------------------------------------------------
@@ -22,20 +19,8 @@ ViewFactory::ViewFactory(IEditorRenderer*    renderer,
     , m_scene(scene)
     , m_settings(settings)
 {
-    // Slots 1 … MAX_SRV_SLOTS-1 are available for view textures.
-    for (uint32_t i = MAX_SRV_SLOTS - 1; i >= 1; --i)
-        m_freeSrvSlots.push_back(i);
-}
-
-// ---------------------------------------------------------------------------
-// AllocSrvSlot — take the lowest-numbered free slot.
-// ---------------------------------------------------------------------------
-uint32_t ViewFactory::AllocSrvSlot()
-{
-    assert(!m_freeSrvSlots.empty() && "ViewFactory: SRV slot pool exhausted");
-    uint32_t slot = m_freeSrvSlots.back();
-    m_freeSrvSlots.pop_back();
-    return slot;
+    OutputDebugStringA("[ViewFactory] Constructor called\n");
+    OutputDebugStringA("[ViewFactory] Constructor completed\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -43,7 +28,8 @@ uint32_t ViewFactory::AllocSrvSlot()
 // ---------------------------------------------------------------------------
 void ViewFactory::FreeSrvSlot(uint32_t slot)
 {
-    m_freeSrvSlots.push_back(slot);
+    if (m_renderer)
+        m_renderer->FreeSrvSlot(slot);
 }
 
 // ---------------------------------------------------------------------------
@@ -85,34 +71,40 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
             return nullptr;
         }
     }
-    // For D3D12-specific views, cast to the concrete renderer implementation
-    auto* dx12Renderer = dynamic_cast<DX12EditorRenderer*>(m_renderer);
-    if (!dx12Renderer)
-        throw std::runtime_error("ViewFactory requires a D3D12-based renderer");
+    if (!m_renderer)
+        throw std::runtime_error("ViewFactory requires a valid renderer");
+
+    void* deviceHandle = m_renderer->GetNativeDeviceHandle();
+    if (!deviceHandle)
+        throw std::runtime_error("ViewFactory failed to get native device handle from renderer");
     
     uint32_t w = 1280, h = 720; // default offscreen size; views resize on first DrawPanel
 
     if (typeName == "Scene")
     {
         if (!CanCreate3DView()) return nullptr;
-        uint32_t slot = AllocSrvSlot();
-        auto [cpu, gpu] = dx12Renderer->GetSrvSlot(slot);
+        auto [handles, slot] = m_renderer->AllocateSrvSlot();
+        void* cpu = handles.first;
+        void* gpu = handles.second;
 
         auto view = std::make_unique<SceneView>();
+        view->SetViewBackend(m_renderer->CreateViewBackend());
         view->SetTitle("Scene " + std::to_string(++m_sceneCount));
-        view->Init(dx12Renderer, w, h, &cpu, &gpu, slot, m_scene, m_settings);
+        view->Init(deviceHandle, w, h, cpu, gpu, slot, m_scene, m_settings);
         return view;
     }
 
     if (typeName == "Game")
     {
         if (!CanCreate3DView()) return nullptr;
-        uint32_t slot = AllocSrvSlot();
-        auto [cpu, gpu] = dx12Renderer->GetSrvSlot(slot);
+        auto [handles, slot] = m_renderer->AllocateSrvSlot();
+        void* cpu = handles.first;
+        void* gpu = handles.second;
 
         auto view = std::make_unique<GameView>();
+        view->SetViewBackend(m_renderer->CreateViewBackend());
         view->SetTitle("Game " + std::to_string(++m_gameCount));
-        view->Init(dx12Renderer, w, h, &cpu, &gpu, slot, m_scene, m_settings);
+        view->Init(deviceHandle, w, h, cpu, gpu, slot, m_scene, m_settings);
         return view;
     }
 
@@ -123,6 +115,8 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
         view->Init(m_scene);
         if (OnSelectionChanged)
             view->OnSelectionChanged = OnSelectionChanged;
+        if (OnFocusObject)
+            view->OnFocusObject = OnFocusObject;
         m_singletonInstances[typeName] = view.get();
         return view;
     }

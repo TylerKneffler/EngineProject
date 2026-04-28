@@ -2,6 +2,7 @@
 #include "Engine/Editor/EditorUI.h"
 #include "Engine/Editor/EditorState.h"
 #include "Engine/Editor/GameBuildManager.h"
+#include "Engine/Editor/GameBuildManager.h"
 #include "Core/Window.h"
 #include "Core/Scene/Scene.h"
 #include "Core/View/ViewFactory.h"
@@ -22,6 +23,7 @@ extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam
 EditorUI::EditorUI(EditorState* state)
     : m_state(state)
 {
+    OutputDebugStringA("[EditorUI] Constructor called\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -29,14 +31,32 @@ EditorUI::EditorUI(EditorState* state)
 // ---------------------------------------------------------------------------
 void EditorUI::Render(PlayState playState)
 {
+    OutputDebugStringA("[EditorUI::Render] Entry\n");
     if (!m_state)
+    {
+        OutputDebugStringA("[EditorUI::Render] m_state is null!\n");
         return;
+    }
 
+    OutputDebugStringA("[EditorUI::Render] Calling SetupDockingLayout\n");
     SetupDockingLayout();
+    OutputDebugStringA("[EditorUI::Render] SetupDockingLayout completed\n");
+    
+    OutputDebugStringA("[EditorUI::Render] Calling DrawMenuBar\n");
     DrawMenuBar(playState);
+    OutputDebugStringA("[EditorUI::Render] DrawMenuBar completed\n");
+    
+    OutputDebugStringA("[EditorUI::Render] Calling DrawPanels\n");
     DrawPanels();
+    OutputDebugStringA("[EditorUI::Render] DrawPanels completed\n");
+    
+    OutputDebugStringA("[EditorUI::Render] Calling DrawPreferences\n");
     DrawPreferences();
+    OutputDebugStringA("[EditorUI::Render] DrawPreferences completed\n");
+    
+    OutputDebugStringA("[EditorUI::Render] Calling DrawUnsavedChangesModal\n");
     DrawUnsavedChangesModal();
+    OutputDebugStringA("[EditorUI::Render] DrawUnsavedChangesModal completed\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -191,12 +211,25 @@ void EditorUI::DrawPlayControls(PlayState playState)
         ImGui::SetCursorPosX((barW - doubleBtnW) * 0.5f);
         if (ImGui::Button("Pause", { singleBtnW, 0.f }))
         {
-            // TODO: signal pause
+            if (m_gameBuildManager) m_gameBuildManager->Pause();
         }
         ImGui::SameLine(0.f, 4.f);
         if (ImGui::Button("Stop", { singleBtnW, 0.f }))
         {
-            // TODO: signal stop
+            if (m_gameBuildManager) m_gameBuildManager->Stop();
+        }
+    }
+    else if (playState == PlayState::Paused)
+    {
+        ImGui::SetCursorPosX((barW - doubleBtnW) * 0.5f);
+        if (ImGui::Button("Resume", { singleBtnW, 0.f }))
+        {
+            if (m_gameBuildManager) m_gameBuildManager->Resume();
+        }
+        ImGui::SameLine(0.f, 4.f);
+        if (ImGui::Button("Stop", { singleBtnW, 0.f }))
+        {
+            if (m_gameBuildManager) m_gameBuildManager->Stop();
         }
     }
 }
@@ -218,9 +251,12 @@ void EditorUI::DrawPanels()
         {
             if ((*it)->NeedsRender())
             {
-                // Assuming it's a View
-                class View* view = reinterpret_cast<class View*>(it->get());
-                factory->FreeSrvSlot(view->GetSrvSlotIndex());
+                // Safe cast to View to free SRV slot
+                View* view = dynamic_cast<View*>(it->get());
+                if (view)
+                {
+                    factory->FreeSrvSlot(view->GetSrvSlotIndex());
+                }
             }
             factory->NotifyPanelRemoved(it->get());
             it = panels.erase(it);
@@ -238,6 +274,9 @@ void EditorUI::DrawPanels()
 void EditorUI::DrawPreferences()
 {
     PreferencesView* prefs = m_state->GetPreferences();
+    if (!prefs)
+        return;
+    
     bool show = m_state->IsShowingPreferences();
     prefs->SetOpen(show);
     if (show)
@@ -314,7 +353,8 @@ void EditorUI::OnMenuBuild()
 // ---------------------------------------------------------------------------
 void EditorUI::OnMenuBuildAndPlay()
 {
-    // TODO: wire to GameBuildManager
+    if (m_gameBuildManager)
+        m_gameBuildManager->StartBuild(PostBuildAction::PlayInEditor);
 }
 
 // ---------------------------------------------------------------------------
@@ -322,7 +362,8 @@ void EditorUI::OnMenuBuildAndPlay()
 // ---------------------------------------------------------------------------
 void EditorUI::OnMenuBuildAndLaunchStandalone()
 {
-    // TODO: wire to GameBuildManager
+    if (m_gameBuildManager)
+        m_gameBuildManager->StartBuild(PostBuildAction::LaunchStandalone);
 }
 
 // ---------------------------------------------------------------------------

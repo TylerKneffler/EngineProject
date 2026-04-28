@@ -1,7 +1,10 @@
 #pragma once
 #include "../../Graphics/IGraphicsProvider.h"
 
-#ifdef VK_USE_PLATFORM_WIN32_KHR
+#if defined(ENGINE_VULKAN_ENABLED)
+    #ifndef VK_USE_PLATFORM_WIN32_KHR
+        #define VK_USE_PLATFORM_WIN32_KHR 1
+    #endif
     #include <vulkan/vulkan.h>
 #else
     // Minimal Vulkan type stubs for compilation when Vulkan SDK is not installed

@@ -1,7 +1,10 @@
 #pragma once
 #include "../IView.h"
 
-#ifdef VK_USE_PLATFORM_WIN32_KHR
+#if defined(ENGINE_VULKAN_ENABLED)
+    #ifndef VK_USE_PLATFORM_WIN32_KHR
+        #define VK_USE_PLATFORM_WIN32_KHR 1
+    #endif
     #include <vulkan/vulkan.h>
 #else
     // Minimal Vulkan type stubs for compilation when Vulkan SDK is not installed
@@ -48,6 +51,7 @@ public:
     float    GetAspect() const override { return m_aspect; }
     uint32_t GetWidth()  const override { return m_width;  }
     uint32_t GetHeight() const override { return m_height; }
+    void* GetImGuiTextureHandle() const override { return m_descriptorSet; }
 
     uint32_t GetSrvSlotIndex() const override { return m_srvSlotIndex; }
 

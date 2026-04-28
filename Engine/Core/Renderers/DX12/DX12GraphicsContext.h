@@ -10,8 +10,7 @@
 class D3D12GraphicsContext : public IGraphicsContext
 {
 public:
-    explicit D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList);
-
+    explicit D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList);    D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList, ID3D12RootSignature* rootSig);
     void SetPipeline(const IPipelineState* pipeline) override;
     void SetConstantBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint64_t offset = 0) override;
     void SetVertexBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset = 0) override;
@@ -40,6 +39,7 @@ public:
 
 private:
     ID3D12GraphicsCommandList* m_cmdList;
+    ID3D12RootSignature* m_rootSignature = nullptr;
     uint32_t m_indexCount = 0;
 
     D3D12_RESOURCE_STATES ConvertResourceState(ResourceState state) const;
@@ -53,13 +53,15 @@ class D3D12GraphicsContextFactory : public IGraphicsContextFactory
 public:
     D3D12GraphicsContextFactory(
         ID3D12Device* device,
-        ID3D12CommandQueue* commandQueue);
+        ID3D12CommandQueue* commandQueue,
+        ID3D12RootSignature* rootSignature);
 
     std::unique_ptr<IGraphicsContext> CreateContext() override;
 
 private:
     ID3D12Device* m_device;
     ID3D12CommandQueue* m_commandQueue;
+    ID3D12RootSignature* m_rootSignature;
     Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_cmdAllocator;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_cmdList;
 };

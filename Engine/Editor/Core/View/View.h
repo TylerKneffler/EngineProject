@@ -4,24 +4,22 @@
 #include <memory>
 #include <functional>
 
-// Forward declaration — graphics API implementation (D3D12, Vulkan, etc.)
-class D3D12View;
-
 // ---------------------------------------------------------------------------
-// View — Graphics-agnostic base for DX12-backed editor panels
+// View — Graphics-agnostic base for editor panels
 //
 // Derives from IView for API-neutral interface and IEditorPanel for
-// panel management. Composes a D3D12View instance for offscreen rendering.
+// panel management. Composes an IView backend for offscreen rendering.
 // Subclasses (SceneView, GameView) override DrawPanel() and Render3D().
-//
-// The graphics API implementation is completely hidden; D3D12 is encapsulated
-// in the composed D3D12View member.
+// The backend implementation is provided by the active renderer.
 // ---------------------------------------------------------------------------
 class View : public IEditorPanel
 {
 public:
     View();
-    virtual ~View() = default;
+    virtual ~View();
+
+    // Inject graphics backend implementation created by the renderer.
+    void SetViewBackend(std::unique_ptr<IView> viewBackend);
 
     // NeedsRender always returns true for graphics-backed views.
     bool NeedsRender() const override { return true; }
@@ -50,6 +48,7 @@ public:
     float    GetAspect() const;
     uint32_t GetWidth()  const;
     uint32_t GetHeight() const;
+    void*    GetImGuiTextureHandle() const;
 
     // SRV slot index for resource cleanup
     uint32_t GetSrvSlotIndex() const;
@@ -62,10 +61,6 @@ public:
     virtual void Render3D(void* cmd) = 0;
 
 protected:
-    // Access to underlying D3D12View for derived classes
-    D3D12View* GetD3D12View();
-    const D3D12View* GetD3D12View() const;
-
 private:
-    std::unique_ptr<D3D12View> m_d3d12View;  // Graphics API implementation
+    std::unique_ptr<IView> m_viewBackend;  // Graphics API implementation
 };

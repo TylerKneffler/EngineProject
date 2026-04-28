@@ -76,6 +76,46 @@ void GameBuildManager::CancelBuild()
 }
 
 // ---------------------------------------------------------------------------
+// GameBuildManager::Stop
+// ---------------------------------------------------------------------------
+void GameBuildManager::Stop()
+{
+    if (m_playState == PlayState::Playing || m_playState == PlayState::Paused)
+    {
+        m_playState = PlayState::Stopped;
+        m_postBuildAction = PostBuildAction::Nothing;
+        if (m_console)
+            m_console->AddLog(ConsoleView::Level::Info, "[Play] Stopped.");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GameBuildManager::Pause
+// ---------------------------------------------------------------------------
+void GameBuildManager::Pause()
+{
+    if (m_playState == PlayState::Playing)
+    {
+        m_playState = PlayState::Paused;
+        if (m_console)
+            m_console->AddLog(ConsoleView::Level::Info, "[Play] Paused.");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GameBuildManager::Resume
+// ---------------------------------------------------------------------------
+void GameBuildManager::Resume()
+{
+    if (m_playState == PlayState::Paused)
+    {
+        m_playState = PlayState::Playing;
+        if (m_console)
+            m_console->AddLog(ConsoleView::Level::Info, "[Play] Resumed.");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // GameBuildManager::LaunchStandalone
 // ---------------------------------------------------------------------------
 void GameBuildManager::LaunchStandalone()

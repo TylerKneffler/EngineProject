@@ -71,6 +71,8 @@ public:
     void FreeSrvSlot(uint32_t slotIndex) override;
     bool CanAllocateSrvSlot() const override;
     uint32_t GetAvailableSrvSlots() const override;
+    void* GetNativeDeviceHandle() const override { return m_device.Get(); }
+    std::unique_ptr<IView> CreateViewBackend() override;
 
     // ---------- D3D12-specific accessors (for internal use) ----------
     ID3D12Device*              GetDevice()      const { return m_device.Get(); }
@@ -118,6 +120,9 @@ private:
     ComPtr<ID3D12Fence>               m_fence;
     HANDLE                            m_fenceEvent  = nullptr;
     uint64_t                          m_fenceValue  = 0;
+
+    // -- Root signature --
+    ComPtr<ID3D12RootSignature>       m_rootSignature;
     uint64_t                          m_fenceValues[FRAME_COUNT]{};
 
     // -- imgui integration --

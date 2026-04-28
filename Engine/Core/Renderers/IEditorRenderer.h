@@ -1,6 +1,7 @@
 #pragma once
 #include "IRenderer.h"
 #include <functional>
+#include <memory>
 #include <utility>
 
 // Forward declare the view interface so renderers can work with it.
@@ -43,6 +44,13 @@ public:
 
     // Get the number of available SRV slots.
     virtual uint32_t GetAvailableSrvSlots() const = 0;
+
+    // Opaque native device handle used by view initialization.
+    // D3D12: ID3D12Device*; Vulkan: VkDevice.
+    virtual void* GetNativeDeviceHandle() const = 0;
+
+    // Create a view backend for offscreen editor rendering.
+    virtual std::unique_ptr<IView> CreateViewBackend() = 0;
 
     // Get the maximum number of SRV slots.
     static constexpr uint32_t MAX_SRV_SLOTS = 32;

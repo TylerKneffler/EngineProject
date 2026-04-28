@@ -36,6 +36,9 @@ public:
     // Fires whenever the selected object changes (including deselect → nullptr).
     std::function<void(Object*)> OnSelectionChanged;
 
+    // Fires when the user double-clicks an object — editor should frame it in the scene view.
+    std::function<void(Object*)> OnFocusObject;
+
 private:
     void DrawObjectNode(Object* obj);
 

@@ -24,7 +24,12 @@ std::unique_ptr<IEditorRenderer> RendererFactory::CreateEditorRenderer(
     }
     else if (api == "vulkan")
     {
+#if defined(ENGINE_VULKAN_ENABLED)
         return std::make_unique<VulkanEditorRenderer>();
+#else
+        throw std::runtime_error(
+            "Vulkan editor renderer requested, but Vulkan SDK support is not enabled in this build.");
+#endif
     }
     
     throw std::runtime_error(
@@ -49,7 +54,12 @@ std::unique_ptr<IGameRenderer> RendererFactory::CreateGameRenderer(
     }
     else if (api == "vulkan")
     {
+#if defined(ENGINE_VULKAN_ENABLED)
         return std::make_unique<VulkanGameRenderer>();
+#else
+        throw std::runtime_error(
+            "Vulkan game renderer requested, but Vulkan SDK support is not enabled in this build.");
+#endif
     }
     
     throw std::runtime_error(

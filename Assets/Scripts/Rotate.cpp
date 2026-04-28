@@ -1,6 +1,20 @@
 #include "Scripts/Rotate.h"
 #include "Core/Object.h"
+#include "Core/Serialization/SceneSerializer.h"
 #include <glm/gtc/matrix_transform.hpp>
+
+namespace
+{
+struct RotateRegistration
+{
+    RotateRegistration()
+    {
+        SceneSerializer::Register("Rotate", []() -> Component* { return new Rotate(); });
+    }
+};
+
+RotateRegistration g_rotateRegistration;
+}
 
 void Rotate::Start()
 {

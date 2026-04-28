@@ -73,11 +73,9 @@ Window::Window(HINSTANCE hInstance, const wchar_t* title, uint32_t width, uint32
     if (!m_hwnd)
         throw std::runtime_error("Failed to create window.");
 
-    // SW_SHOWDEFAULT honours any show-state flags passed on the command line
-    // (e.g. minimised or maximised start). UpdateWindow sends WM_PAINT
-    // immediately so the window appears painted before the first frame runs.
-    ShowWindow(m_hwnd, SW_SHOWDEFAULT);
-    UpdateWindow(m_hwnd);
+    // Note: We do NOT call ShowWindow here. The window will be shown after
+    // the caller has wired up all callbacks (OnUpdate, OnResize, WndProcHook).
+    // This prevents Windows from sending messages before the callbacks are ready.
 }
 
 Window::~Window()
@@ -86,8 +84,21 @@ Window::~Window()
         DestroyWindow(m_hwnd);
 }
 
+void Window::Show()
+{
+    if (!m_hwnd)
+        return;
+
+    // SW_SHOWDEFAULT honours any show-state flags passed on the command line
+    // (e.g. minimised or maximised start). UpdateWindow sends WM_PAINT
+    // immediately so the window appears painted before the first frame runs.
+    ShowWindow(m_hwnd, SW_SHOWDEFAULT);
+    UpdateWindow(m_hwnd);
+}
+
 int Window::Run()
 {
+    OutputDebugStringA("[Window::Run] Entering message loop\n");
     // ---- Game-style message loop ----
     // A traditional Win32 loop uses GetMessage(), which blocks the thread when
     // the queue is empty. That is fine for event-driven apps (text editors,
@@ -108,33 +119,50 @@ int Window::Run()
     MSG msg{};
     while (true)
     {
+        OutputDebugStringA("[Window::Run] Loop iteration start\n");
         // Drain all pending messages without blocking.
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE))
         {
+            OutputDebugStringA("[Window::Run] Processing message\n");
             if (msg.message == WM_QUIT)
                 return static_cast<int>(msg.wParam);
 
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
+            OutputDebugStringA("[Window::Run] Message dispatched\n");
         }
+        OutputDebugStringA("[Window::Run] Messages drained\n");
 
         // ---- Deferred resize ----
         // WM_SIZE is processed above inside DispatchMessageW, which writes
         // m_pendingWidth/Height and sets m_resizePending. We apply the resize
         // here, after the queue is empty and outside any WndProc call stack,
         // so there is no risk of re-entrant Present() / FlushGPU() calls.
+        OutputDebugStringA("[Window::Run] Checking resize pending\n");
         if (m_resizePending)
         {
+            OutputDebugStringA("[Window::Run] Resize is pending\n");
             m_resizePending = false;
             m_width  = m_pendingWidth;
             m_height = m_pendingHeight;
             if (OnResize)
+            {
+                OutputDebugStringA("[Window::Run] Calling OnResize\n");
                 OnResize(m_width, m_height);
+                OutputDebugStringA("[Window::Run] OnResize returned\n");
+            }
         }
+        OutputDebugStringA("[Window::Run] After resize check\n");
 
         // No pending messages — run one frame.
+        OutputDebugStringA("[Window::Run] About to call OnUpdate\n");
         if (OnUpdate)
+        {
+            OutputDebugStringA("[Window::Run] Calling OnUpdate\n");
             OnUpdate();
+            OutputDebugStringA("[Window::Run] OnUpdate returned\n");
+        }
+        OutputDebugStringA("[Window::Run] Loop iteration complete\n");
     }
 }
 

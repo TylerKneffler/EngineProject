@@ -3,7 +3,6 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Camera.h"
 #include "Core/Renderers/DX12/DX12GraphicsContext.h"
-#include "Core/Renderers/DX12/D3D12View.h"
 
 // ---------------------------------------------------------------------------
 // Init — store the scene pointer, then delegate resource creation to View.
@@ -69,7 +68,7 @@ void SceneView::DrawPanel()
 
         // Position cursor at viewport location and draw the game texture
         ImGui::SetCursorPos(viewportPos);
-        ImGui::Image((ImTextureID)(uintptr_t)GetD3D12View()->GetSrvGpu().ptr, viewportSize);
+        ImGui::Image((ImTextureID)GetImGuiTextureHandle(), viewportSize);
 
         // Check for mouse input on the viewport
         if (ImGui::IsItemHovered())

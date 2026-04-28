@@ -1,4 +1,5 @@
 #include "DX12GameRenderer.h"
+#include "DX12GraphicsContext.h"
 
 // ---------------------------------------------------------------------------
 // Destruction
@@ -288,6 +289,11 @@ void DX12GameRenderer::EndFrame()
 IGraphicsProvider* DX12GameRenderer::GetGraphicsProvider()
 {
     return m_graphicsProvider.get();
+}
+
+std::unique_ptr<IGraphicsContext> DX12GameRenderer::CreateFrameGraphicsContext()
+{
+    return std::make_unique<D3D12GraphicsContext>(m_commandList.Get());
 }
 
 // ---------------------------------------------------------------------------

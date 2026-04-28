@@ -54,8 +54,12 @@ class Window
 public:
     // Creates and shows a Win32 window whose *client area* is exactly
     // width x height pixels. Throws std::runtime_error on failure.
+    // Note: The window is created but NOT shown. Call Show() after setting up callbacks.
     Window(HINSTANCE hInstance, const wchar_t* title, uint32_t width, uint32_t height);
     ~Window();
+
+    // Shows the window. Must be called after setting up OnUpdate, OnResize, and WndProcHook.
+    void Show();
 
     // Enters the message loop. Blocks until WM_QUIT is received (e.g. the
     // user closes the window or Escape is pressed). Returns the wParam value

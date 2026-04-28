@@ -13,6 +13,16 @@ D3D12GraphicsContext::D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList)
 {
 }
 
+D3D12GraphicsContext::D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList, ID3D12RootSignature* rootSig)
+    : m_cmdList(cmdList), m_rootSignature(rootSig)
+{
+    // Set the root signature immediately if provided
+    if (m_cmdList && m_rootSignature)
+    {
+        m_cmdList->SetGraphicsRootSignature(m_rootSignature);
+    }
+}
+
 void D3D12GraphicsContext::SetPipeline(const IPipelineState* pipeline)
 {
     if (!pipeline || !m_cmdList) return;
@@ -104,6 +114,8 @@ void D3D12GraphicsContext::DrawInstanced(
     uint32_t startInstanceLocation)
 {
     if (!m_cmdList) return;
+    // D3D12 requires primitive topology to be set before drawing
+    m_cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     m_cmdList->DrawInstanced(vertexCountPerInstance, instanceCount, startVertexLocation, startInstanceLocation);
 }
 
@@ -160,26 +172,33 @@ D3D12_RESOURCE_STATES D3D12GraphicsContext::ConvertResourceState(ResourceState s
 
 D3D12GraphicsContextFactory::D3D12GraphicsContextFactory(
     ID3D12Device* device,
-    ID3D12CommandQueue* commandQueue)
-    : m_device(device), m_commandQueue(commandQueue)
+    ID3D12CommandQueue* commandQueue,
+    ID3D12RootSignature* rootSignature)
+    : m_device(device), m_commandQueue(commandQueue), m_rootSignature(rootSignature)
 {
     // Create command allocator
-    device->CreateCommandAllocator(
+    HRESULT hr = device->CreateCommandAllocator(
         D3D12_COMMAND_LIST_TYPE_DIRECT,
         IID_PPV_ARGS(&m_cmdAllocator));
+    
+    if (FAILED(hr))
+        throw std::runtime_error("Failed to create D3D12 command allocator");
 
     // Create command list
-    device->CreateCommandList(
+    hr = device->CreateCommandList(
         0,
         D3D12_COMMAND_LIST_TYPE_DIRECT,
         m_cmdAllocator.Get(),
         nullptr,
         IID_PPV_ARGS(&m_cmdList));
+    
+    if (FAILED(hr))
+        throw std::runtime_error("Failed to create D3D12 command list");
 }
 
 std::unique_ptr<IGraphicsContext> D3D12GraphicsContextFactory::CreateContext()
 {
     // In a full implementation, this would reset the allocator and command list
     // and return a new wrapper. For now, we return a wrapper around the existing list.
-    return std::make_unique<D3D12GraphicsContext>(m_cmdList.Get());
+    return std::make_unique<D3D12GraphicsContext>(m_cmdList.Get(), m_rootSignature);
 }

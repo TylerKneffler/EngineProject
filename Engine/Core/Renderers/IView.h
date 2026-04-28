@@ -27,7 +27,7 @@ public:
 
     // Initialize offscreen rendering resources
     // device: opaque graphics device handle
-    // srvCpu/srvGpu: opaque descriptor handles for shader resource view
+    // srvCpu/srvGpu: opaque descriptor handle values for shader resource view
     // srvSlotIndex: identifies the heap slot for cleanup
     virtual void Init(void* device,
                       uint32_t width, uint32_t height,
@@ -49,6 +49,10 @@ public:
     virtual float    GetAspect() const = 0;
     virtual uint32_t GetWidth()  const = 0;
     virtual uint32_t GetHeight() const = 0;
+
+    // Opaque texture handle for ImGui::Image. For D3D12 this is a GPU SRV
+    // descriptor pointer; for Vulkan this will be a VkDescriptorSet.
+    virtual void* GetImGuiTextureHandle() const = 0;
 
     // SRV slot index for resource cleanup
     virtual uint32_t GetSrvSlotIndex() const = 0;

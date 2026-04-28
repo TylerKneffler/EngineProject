@@ -19,8 +19,8 @@
 // ViewFactory — creates and names editor panels.
 //
 // 3-D views (SceneView, GameView) require an SRV slot from the renderer's
-// shader-visible heap.  The factory owns a free-list of slots; callers must
-// call FreeSrvSlot() before destroying a 3-D view so the slot can be reused.
+// shader-visible heap. Callers must call FreeSrvSlot() before destroying a
+// 3-D view so the slot can be reused.
 //
 // All panel types are numbered sequentially per-type ("Scene 1", "Scene 2", …).
 //
@@ -48,7 +48,7 @@ public:
     std::unique_ptr<IEditorPanel> Create(const std::string& typeName);
 
     // Returns false when no SRV slots remain for 3-D views (Scene / Game).
-    bool CanCreate3DView() const { return !m_freeSrvSlots.empty(); }
+    bool CanCreate3DView() const { return m_renderer && m_renderer->CanAllocateSrvSlot(); }
 
     // Return a previously-used SRV slot back to the free list.
     void FreeSrvSlot(uint32_t slot);
@@ -63,16 +63,13 @@ public:
 
     // ---- Callbacks wired into newly created panels ----
     std::function<void(Object*)>           OnSelectionChanged;  // HierarchyView
+    std::function<void(Object*)>           OnFocusObject;       // HierarchyView double-click
     std::function<void(const std::string&)> OnSceneRequested;   // AssetsExplorerView
 
 private:
-    uint32_t AllocSrvSlot(); // takes from free list; asserts CanCreate3DView()
-
     IEditorRenderer* m_renderer = nullptr;
     Scene*           m_scene    = nullptr;
     ProjectSettings     m_settings;
-
-    std::vector<uint32_t> m_freeSrvSlots;
 
     // Tracks live singleton panel instances (raw, non-owning).
     // Cleared via NotifyPanelRemoved when a panel is erased from the panels vector.

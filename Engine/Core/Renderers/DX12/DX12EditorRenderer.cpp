@@ -1,4 +1,5 @@
 #include "DX12EditorRenderer.h"
+#include "D3D12View.h"
 
 // ---------------------------------------------------------------------------
 // Destruction
@@ -30,10 +31,43 @@ bool DX12EditorRenderer::Init(void* hwnd, uint32_t width, uint32_t height)
         CreateRTVHeap();
         CreateRenderTargets();
 
+        // ---- Create root signature ----
+        // Simple root signature with one constant buffer view (for MVP matrix, colors, etc.)
+        D3D12_ROOT_PARAMETER rootParam{};
+        rootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        rootParam.Descriptor.ShaderRegister = 0;  // b0
+        rootParam.Descriptor.RegisterSpace = 0;
+        rootParam.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+        D3D12_ROOT_SIGNATURE_DESC rootSigDesc{};
+        rootSigDesc.NumParameters = 1;
+        rootSigDesc.pParameters = &rootParam;
+        rootSigDesc.NumStaticSamplers = 0;
+        rootSigDesc.pStaticSamplers = nullptr;
+        rootSigDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+
+        ComPtr<ID3DBlob> signature;
+        ComPtr<ID3DBlob> error;
+        HRESULT hr = D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1,
+            &signature, &error);
+        if (FAILED(hr))
+        {
+            if (error)
+            {
+                std::string errorMsg = "Failed to serialize root signature: ";
+                errorMsg += static_cast<const char*>(error->GetBufferPointer());
+                throw std::runtime_error(errorMsg);
+            }
+            ThrowIfFailed(hr);
+        }
+
+        ThrowIfFailed(m_device->CreateRootSignature(0, signature->GetBufferPointer(),
+            signature->GetBufferSize(), IID_PPV_ARGS(&m_rootSignature)));
+
         // ---- Graphics provider ----
         // Initialize the graphics provider for shader compilation, buffer creation, etc.
         m_graphicsProvider = std::make_unique<D3D12GraphicsProvider>(
-            m_device.Get(), m_commandQueue.Get(), nullptr);
+            m_device.Get(), m_commandQueue.Get(), m_rootSignature.Get());
 
     ThrowIfFailed(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE,
         IID_PPV_ARGS(&m_fence)));
@@ -160,19 +194,26 @@ void DX12EditorRenderer::RenderIfNeeded(std::function<void()> drawFn)
 // ---------------------------------------------------------------------------
 void DX12EditorRenderer::BeginFrame()
 {
+    OutputDebugStringA("[BeginFrame] Entry\n");
     // Wait for the GPU to finish with this slot's allocator.
     if (m_fence->GetCompletedValue() < m_fenceValues[m_frameIndex])
     {
+        OutputDebugStringA("[BeginFrame] Waiting for fence\n");
         ThrowIfFailed(m_fence->SetEventOnCompletion(
             m_fenceValues[m_frameIndex], m_fenceEvent));
         WaitForSingleObject(m_fenceEvent, INFINITE);
     }
 
+    OutputDebugStringA("[BeginFrame] Resetting command allocator\n");
     ThrowIfFailed(m_commandAllocators[m_frameIndex]->Reset());
+    OutputDebugStringA("[BeginFrame] Resetting command list\n");
     ThrowIfFailed(m_commandList->Reset(
         m_commandAllocators[m_frameIndex].Get(), nullptr));
 
-    // Transition back-buffer: PRESENT → RENDER_TARGET
+    // Set the root signature immediately after reset (required for D3D12)
+    m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
+
+    // Transition back-buffer: PRESENT -> RENDER_TARGET
     D3D12_RESOURCE_BARRIER barrier{};
     barrier.Type  = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
     barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
@@ -188,9 +229,13 @@ void DX12EditorRenderer::BeginFrame()
     D3D12_CPU_DESCRIPTOR_HANDLE rtv = GetCurrentRTV();
     m_commandList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
 
+    OutputDebugStringA("[BeginFrame] Calling ImGui_ImplDX12_NewFrame\n");
     ImGui_ImplDX12_NewFrame();
+    OutputDebugStringA("[BeginFrame] Calling ImGui_ImplWin32_NewFrame\n");
     ImGui_ImplWin32_NewFrame();
+    OutputDebugStringA("[BeginFrame] Calling ImGui::NewFrame\n");
     ImGui::NewFrame();
+    OutputDebugStringA("[BeginFrame] Complete\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -314,6 +359,11 @@ void DX12EditorRenderer::FreeSrvSlot(uint32_t slotIndex)
 bool DX12EditorRenderer::CanAllocateSrvSlot() const
 {
     return !m_freeSrvSlots.empty();
+}
+
+std::unique_ptr<IView> DX12EditorRenderer::CreateViewBackend()
+{
+    return std::make_unique<D3D12View>();
 }
 
 // ---------------------------------------------------------------------------

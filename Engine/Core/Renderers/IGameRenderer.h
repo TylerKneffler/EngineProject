@@ -1,5 +1,8 @@
 #pragma once
 #include "IRenderer.h"
+#include <memory>
+
+class IGraphicsContext;
 
 // ---------------------------------------------------------------------------
 // IGameRenderer — Abstract interface for game renderers.
@@ -24,4 +27,8 @@ public:
     // buffers to screen, and synchronize GPU/CPU state. Must follow a
     // corresponding BeginFrame().
     virtual void EndFrame() = 0;
+
+    // Create a graphics context bound to the renderer's current frame command
+    // stream. Call after BeginFrame() and before EndFrame().
+    virtual std::unique_ptr<IGraphicsContext> CreateFrameGraphicsContext() = 0;
 };

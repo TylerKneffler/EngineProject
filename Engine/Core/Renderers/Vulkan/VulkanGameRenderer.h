@@ -1,14 +1,19 @@
 #pragma once
 #include "../IGameRenderer.h"
 
-#ifdef VK_USE_PLATFORM_WIN32_KHR
+#if defined(ENGINE_VULKAN_ENABLED)
+    #ifndef VK_USE_PLATFORM_WIN32_KHR
+        #define VK_USE_PLATFORM_WIN32_KHR 1
+    #endif
     #include <vulkan/vulkan.h>
 #else
     // Minimal Vulkan type stubs for compilation when Vulkan SDK is not installed
+    typedef void* VkInstance;
     typedef void* VkDevice;
     typedef void* VkPhysicalDevice;
     typedef void* VkQueue;
     typedef void* VkCommandPool;
+    typedef void* VkSurfaceKHR;
     typedef void* VkSwapchainKHR;
     typedef void* VkImage;
     typedef void* VkImageView;
@@ -50,11 +55,15 @@ public:
     // IGameRenderer interface
     void BeginFrame() override;
     void EndFrame() override;
+    std::unique_ptr<IGraphicsContext> CreateFrameGraphicsContext() override;
 
 private:
+    VkInstance m_instance = VK_NULL_HANDLE;
+    VkSurfaceKHR m_surface = VK_NULL_HANDLE;
     VkDevice m_device = VK_NULL_HANDLE;
     VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
     VkQueue m_graphicsQueue = VK_NULL_HANDLE;
+    VkQueue m_presentQueue = VK_NULL_HANDLE;
     VkCommandPool m_commandPool = VK_NULL_HANDLE;
     VkSwapchainKHR m_swapchain = VK_NULL_HANDLE;
 
@@ -72,6 +81,10 @@ private:
     uint32_t m_width = 0;
     uint32_t m_height = 0;
     uint32_t m_currentFrame = 0;
+    uint32_t m_currentImageIndex = 0;
+    uint32_t m_graphicsQueueFamilyIndex = 0;
+    uint32_t m_presentQueueFamilyIndex = 0;
+    float m_clearColor[4] = { 0.1f, 0.1f, 0.1f, 1.0f };
     static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
 
     std::unique_ptr<VulkanGraphicsProvider> m_graphicsProvider;

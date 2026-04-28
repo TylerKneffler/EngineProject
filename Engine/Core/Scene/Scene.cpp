@@ -107,16 +107,25 @@ void Scene::BuildGridPipeline()
         throw std::runtime_error("Failed to get shader compiler or pipeline factory");
 
     // Compile shaders from disk
-    // Assuming shaders are at standard paths (adjust as needed)
+    // Working directory is project root (C:\repos\EngineProject)
+    std::string shaderPath = "Engine/Core/Shaders/Grid.hlsl";
+    std::string currentDir = std::filesystem::current_path().string();
+    std::string absolutePath = std::filesystem::absolute(shaderPath).string();
+    
+    OutputDebugStringA(("[Scene::BuildGridPipeline] Current directory: " + currentDir + "\n").c_str());
+    OutputDebugStringA(("[Scene::BuildGridPipeline] Shader path: " + shaderPath + "\n").c_str());
+    OutputDebugStringA(("[Scene::BuildGridPipeline] Absolute path: " + absolutePath + "\n").c_str());
+    OutputDebugStringA(("[Scene::BuildGridPipeline] File exists: " + std::string(std::filesystem::exists(shaderPath) ? "YES" : "NO") + "\n").c_str());
+    
     auto vsShader = shaderCompiler->CompileFromFile(
-        "Engine/Shaders/Grid.hlsl",
+        shaderPath.c_str(),
         "VSMain",
         IShaderCompiler::CompileProfile::VS_5_0);
     if (!vsShader)
         throw std::runtime_error("Failed to compile grid vertex shader: " + shaderCompiler->GetLastError());
 
     auto psShader = shaderCompiler->CompileFromFile(
-        "Engine/Shaders/Grid.hlsl",
+        shaderPath.c_str(),
         "PSMain",
         IShaderCompiler::CompileProfile::PS_5_0);
     if (!psShader)
@@ -139,18 +148,18 @@ void Scene::BuildGridPipeline()
         .SetFrontCounterClockwise(true)
         .SetDepthClipEnable(true)
         .SetBlendEnable(true)
-        .SetSrcBlend(5)                        // D3D12_BLEND_SRC_ALPHA
-        .SetDestBlend(6)                       // D3D12_BLEND_INV_SRC_ALPHA
-        .SetBlendOp(1)                         // D3D12_BLEND_OP_ADD
-        .SetSrcBlendAlpha(1)                   // D3D12_BLEND_ONE
-        .SetDestBlendAlpha(0)                  // D3D12_BLEND_ZERO
-        .SetBlendOpAlpha(1)                    // D3D12_BLEND_OP_ADD
+        .SetSrcBlend(4)                        // D3D12_BLEND_SRC_ALPHA (0-indexed: 4)
+        .SetDestBlend(5)                       // D3D12_BLEND_INV_SRC_ALPHA (0-indexed: 5)
+        .SetBlendOp(0)                         // D3D12_BLEND_OP_ADD (0-indexed: 0)
+        .SetSrcBlendAlpha(1)                   // D3D12_BLEND_ONE (0-indexed: 1)
+        .SetDestBlendAlpha(0)                  // D3D12_BLEND_ZERO (0-indexed: 0)
+        .SetBlendOpAlpha(0)                    // D3D12_BLEND_OP_ADD (0-indexed: 0)
         .SetDepthEnable(true)
         .SetDepthWriteEnable(false)
-        .SetDepthFunc(13)                      // D3D12_COMPARISON_FUNC_LESS_EQUAL
+        .SetDepthFunc(3)                       // D3D12_COMPARISON_FUNC_LESS_EQUAL (0-indexed: 3)
         .SetInputLayout(nullptr, 0)            // No vertex buffer
         .SetPrimitiveTopology(IPipelineStateBuilder::PrimitiveTopology::TriangleList)
-        .SetRenderTargetFormat(28, 30)         // DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_D32_FLOAT
+        .SetRenderTargetFormat(28, 40)         // DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_D32_FLOAT
         .Build();
     
     if (!m_gridPipeline)
@@ -174,14 +183,14 @@ void Scene::BuildObjectPipeline()
 
     // Compile shaders
     auto vsShader = shaderCompiler->CompileFromFile(
-        "Engine/Shaders/Object.hlsl",
+        "Engine/Core/Shaders/Object.hlsl",
         "VSMain",
         IShaderCompiler::CompileProfile::VS_5_0);
     if (!vsShader)
         throw std::runtime_error("Failed to compile object vertex shader: " + shaderCompiler->GetLastError());
 
     auto psShader = shaderCompiler->CompileFromFile(
-        "Engine/Shaders/Object.hlsl",
+        "Engine/Core/Shaders/Object.hlsl",
         "PSMain",
         IShaderCompiler::CompileProfile::PS_5_0);
     if (!psShader)
@@ -190,8 +199,8 @@ void Scene::BuildObjectPipeline()
     // Define input layout: POSITION (float3) + NORMAL (float3)
     IPipelineStateBuilder::VertexElement layout[] =
     {
-        { "POSITION", 0, 30, 0,  0, false },  // DXGI_FORMAT_R32G32B32_FLOAT = 30
-        { "NORMAL",   0, 30, 0, 12, false },  // DXGI_FORMAT_R32G32B32_FLOAT = 30, offset 12
+        { "POSITION", 0, 6, 0,  0, false },   // DXGI_FORMAT_R32G32B32_FLOAT = 6
+        { "NORMAL",   0, 6, 0, 12, false },   // DXGI_FORMAT_R32G32B32_FLOAT = 6, offset 12
     };
 
     // Build pipeline state using fluent API
@@ -209,10 +218,10 @@ void Scene::BuildObjectPipeline()
         .SetBlendEnable(false)                 // No blending for opaque objects
         .SetDepthEnable(true)
         .SetDepthWriteEnable(true)
-        .SetDepthFunc(4)                       // D3D12_COMPARISON_FUNC_LESS
+        .SetDepthFunc(1)                       // D3D12_COMPARISON_FUNC_LESS (0-indexed: 1)
         .SetInputLayout(layout, 2)             // 2 elements: POSITION, NORMAL
         .SetPrimitiveTopology(IPipelineStateBuilder::PrimitiveTopology::TriangleList)
-        .SetRenderTargetFormat(28, 30)         // DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_D32_FLOAT
+        .SetRenderTargetFormat(28, 40)         // DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_D32_FLOAT
         .Build();
     if (!m_objectPipeline)
         throw std::runtime_error("Failed to build object pipeline: " + builder->GetLastError());
@@ -233,10 +242,16 @@ Camera* Scene::FindGameCamera()
 void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverride)
 {
     if (!context)
+    {
+        OutputDebugStringA("[Scene::Render] Context is null\n");
         return;
+    }
 
     if (!m_graphicsProvider || !m_gridPipeline || !m_objectPipeline)
+    {
+        OutputDebugStringA("[Scene::Render] Graphics provider or pipelines not initialized\n");
         return;
+    }
 
     // Priority: explicit override > selected object's camera > editor camera
     Camera* cam = cameraOverride;
@@ -245,10 +260,15 @@ void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverri
     if (!cam)
         cam = editorCamera.GetComponent<Camera>();
     if (!cam)
+    {
+        OutputDebugStringA("[Scene::Render] No camera available\n");
         return;
+    }
 
     XMMATRIX view = cam->GetViewMatrix();
     XMMATRIX proj = cam->GetProjectionMatrix(aspect);
+
+    OutputDebugStringA(("[Scene::Render] Rendering " + std::to_string(m_objects.size()) + " objects\n").c_str());
 
     // Draw all scene objects that have a Mesh component
     UINT slot = 0;
@@ -259,8 +279,18 @@ void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverri
 
         Object* obj = objPtr.get();
         Mesh* mesh = obj->GetComponent<Mesh>();
-        if (!mesh || !mesh->IsReady())
+        if (!mesh)
+        {
+            OutputDebugStringA(("[Scene::Render] Object '" + obj->name + "' has no mesh\n").c_str());
             continue;
+        }
+        if (!mesh->IsReady())
+        {
+            OutputDebugStringA(("[Scene::Render] Mesh for '" + obj->name + "' is not ready\n").c_str());
+            continue;
+        }
+        
+        OutputDebugStringA(("[Scene::Render] Drawing object '" + obj->name + "' with " + std::to_string(mesh->GetVertexCount()) + " vertices\n").c_str());
 
         Material* mat = obj->GetComponent<Material>();
         glm::mat4 glmWorld = obj->transform.GetWorldMatrix();
@@ -328,6 +358,45 @@ void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverri
         // Draw fullscreen triangle (3 vertices, no vertex buffer)
         context->DrawInstanced(3, 1, 0, 0);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Scene::FocusEditorCamera
+// ---------------------------------------------------------------------------
+
+void Scene::FocusEditorCamera(Object* obj)
+{
+    Camera* cam = editorCamera.GetComponent<Camera>();
+    if (!cam) return;
+
+    // Determine the world-space target point (object origin, or world origin).
+    glm::vec3 targetPos = obj ? obj->transform.position : glm::vec3(0.f, 0.f, 0.f);
+
+    // Keep a fixed orbital distance from the object (3 units gives a nice view
+    // of a 1-unit cube; scale this later if bounding-box info is available).
+    constexpr float kDistance = 3.f;
+
+    // Preserve the current orbital angle but re-aim at the new target.
+    // Compute the current direction from camera to its old target, then apply
+    // the same direction offset to the new target.
+    const glm::vec3& eye = editorCamera.transform.position;
+    DirectX::XMFLOAT3 oldTarget = cam->target;
+    glm::vec3 oldDir = glm::vec3(eye.x - oldTarget.x,
+                                  eye.y - oldTarget.y,
+                                  eye.z - oldTarget.z);
+    float oldLen = std::sqrt(oldDir.x*oldDir.x + oldDir.y*oldDir.y + oldDir.z*oldDir.z);
+    if (oldLen < 0.001f)
+    {
+        // Camera was sitting on its target — use a default offset.
+        oldDir = glm::vec3(0.f, 1.5f, -1.f);
+        oldLen = std::sqrt(oldDir.x*oldDir.x + oldDir.y*oldDir.y + oldDir.z*oldDir.z);
+    }
+    const float s = kDistance / oldLen;
+    editorCamera.transform.position = glm::vec3(
+        targetPos.x + oldDir.x * s,
+        targetPos.y + oldDir.y * s,
+        targetPos.z + oldDir.z * s);
+    cam->target = { targetPos.x, targetPos.y, targetPos.z };
 }
 
 // ---------------------------------------------------------------------------

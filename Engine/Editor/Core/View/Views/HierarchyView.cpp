@@ -74,6 +74,12 @@ void HierarchyView::DrawObjectNode(Object* obj)
     if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
         SetSelectedObject(obj);
 
+    if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+    {
+        SetSelectedObject(obj);
+        if (OnFocusObject) OnFocusObject(obj);
+    }
+
     if (open && hasChildren)
     {
         for (Object* child : obj->Children)

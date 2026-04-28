@@ -31,6 +31,7 @@ public:
     float    GetAspect() const override { return m_aspect; }
     uint32_t GetWidth()  const override { return m_width;  }
     uint32_t GetHeight() const override { return m_height; }
+    void* GetImGuiTextureHandle() const override { return reinterpret_cast<void*>(m_srvGpu.ptr); }
 
     uint32_t GetSrvSlotIndex() const override { return m_srvSlotIndex; }
 

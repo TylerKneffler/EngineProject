@@ -24,6 +24,9 @@ public:
     // ---- Build Control ----
     void StartBuild(PostBuildAction action);
     void CancelBuild();
+    void Stop();
+    void Pause();
+    void Resume();
     void LaunchStandalone();
 
     // ---- Frame Update ----

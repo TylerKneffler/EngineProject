@@ -12,13 +12,22 @@ void D3D12View::Init(void* device,
                      void* srvGpu,
                      uint32_t srvSlotIndex)
 {
-    auto srvCpuHandle = *static_cast<D3D12_CPU_DESCRIPTOR_HANDLE*>(srvCpu);
-    auto srvGpuHandle = *static_cast<D3D12_GPU_DESCRIPTOR_HANDLE*>(srvGpu);
+    OutputDebugStringA("[D3D12View::Init] Entry\n");
     
+    OutputDebugStringA("[D3D12View::Init] Casting handles\n");
+    D3D12_CPU_DESCRIPTOR_HANDLE srvCpuHandle{};
+    srvCpuHandle.ptr = reinterpret_cast<SIZE_T>(srvCpu);
+    D3D12_GPU_DESCRIPTOR_HANDLE srvGpuHandle{};
+    srvGpuHandle.ptr = reinterpret_cast<UINT64>(srvGpu);
+    
+    OutputDebugStringA("[D3D12View::Init] Storing handles\n");
     m_srvCpu       = srvCpuHandle;
     m_srvGpu       = srvGpuHandle;
     m_srvSlotIndex = srvSlotIndex;
+    
+    OutputDebugStringA("[D3D12View::Init] Calling CreateResources\n");
     CreateResources(device, width, height);
+    OutputDebugStringA("[D3D12View::Init] Complete\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -39,11 +48,17 @@ void D3D12View::Resize(void* device, uint32_t width, uint32_t height)
 // ---------------------------------------------------------------------------
 void D3D12View::CreateResources(void* device, uint32_t width, uint32_t height)
 {
+    OutputDebugStringA("[D3D12View::CreateResources] Entry\n");
+    
+    OutputDebugStringA("[D3D12View::CreateResources] Casting device\n");
     auto* d3dDevice = static_cast<ID3D12Device*>(device);
+    
+    OutputDebugStringA("[D3D12View::CreateResources] Setting dimensions\n");
     m_width  = width;
     m_height = height;
     m_aspect = static_cast<float>(width) / static_cast<float>(height);
 
+    OutputDebugStringA("[D3D12View::CreateResources] Creating texture descriptor\n");
     D3D12_RESOURCE_DESC texDesc{};
     texDesc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     texDesc.Width            = width;
@@ -55,18 +70,22 @@ void D3D12View::CreateResources(void* device, uint32_t width, uint32_t height)
     texDesc.Layout           = D3D12_TEXTURE_LAYOUT_UNKNOWN;
     texDesc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 
+    OutputDebugStringA("[D3D12View::CreateResources] Creating clear value\n");
     const float clearColor[4] = { 0.1f, 0.1f, 0.1f, 1.0f };
     D3D12_CLEAR_VALUE clearVal{};
     clearVal.Format = VIEW_FORMAT;
     memcpy(clearVal.Color, clearColor, sizeof(clearColor));
 
+    OutputDebugStringA("[D3D12View::CreateResources] Creating heap properties\n");
     D3D12_HEAP_PROPERTIES heapProps{};
     heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
 
+    OutputDebugStringA("[D3D12View::CreateResources] Creating committed resource (texture)\n");
     ThrowIfFailed(d3dDevice->CreateCommittedResource(
         &heapProps, D3D12_HEAP_FLAG_NONE, &texDesc,
         D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
         &clearVal, IID_PPV_ARGS(&m_texture)));
+    OutputDebugStringA("[D3D12View::CreateResources] Texture created\n");
 
     if (!m_rtvHeap)
     {

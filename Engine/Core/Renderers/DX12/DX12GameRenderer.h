@@ -86,6 +86,7 @@ public:
     // IGameRenderer interface
     void BeginFrame() override;   // reset allocator + list, transition backbuffer to RENDER_TARGET
     void EndFrame() override;     // execute list, present, signal fence
+    std::unique_ptr<IGraphicsContext> CreateFrameGraphicsContext() override;
 
     // ---------- D3D12-specific accessors (for internal use) ----------
     ID3D12Device*              GetDevice()      const { return m_device.Get(); }

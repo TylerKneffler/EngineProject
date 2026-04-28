@@ -56,7 +56,16 @@ void ConsoleView::DrawPanel()
             default:             color = { 1.f,  1.f,   1.f,  1.f }; break;
         }
         ImGui::PushStyleColor(ImGuiCol_Text, color);
-        ImGui::TextUnformatted(entry.message.c_str());
+        // Use Selectable to enable clicking and copying
+        ImGui::Selectable(entry.message.c_str(), false);
+        if (ImGui::IsItemHovered())
+        {
+            // Allow copying on right-click
+            if (ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+            {
+                ImGui::SetClipboardText(entry.message.c_str());
+            }
+        }
         ImGui::PopStyleColor();
     }
 

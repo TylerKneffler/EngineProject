@@ -182,7 +182,12 @@ bool SceneSerializer::Load(Scene& scene, const std::string& path, IGraphicsProvi
             const std::string& t = cn["type"].AsString();
 
             auto it = registry.find(t);
-            if (it == registry.end()) continue;   // unknown type — skip
+            if (it == registry.end())
+            {
+                std::string msg = "[SceneSerializer] Unknown component type '" + t + "' on object '" + obj.name + "' (skipped)\n";
+                OutputDebugStringA(msg.c_str());
+                continue;
+            }
 
             Component* comp = it->second();        // factory: default-construct
             comp->Owner = &obj;

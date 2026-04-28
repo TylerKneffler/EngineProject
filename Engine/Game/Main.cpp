@@ -1,14 +1,11 @@
 #include "Core/Window.h"
+#include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Renderers/RendererFactory.h"
 #include "Core/Renderers/IGameRenderer.h"
-#include "Core/Renderers/DX12/DX12GameRenderer.h"
-#include "Core/Renderers/DX12/DX12GraphicsContext.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/SceneManager.h"
-#include "Core/Serialization/SceneSerializer.h"
 #include "Core/ProjectLoader.h"
-#include "Scripts/Rotate.h"
 
 // Fallback for IntelliSense — CMake overrides these with real absolute paths.
 #ifndef ASSETS_PATH
@@ -52,17 +49,9 @@ int WINAPI wWinMain(
     if (!renderer || !renderer->Init(window->GetHWND(), window->GetWidth(), window->GetHeight()))
         return 1;
 
-    // For D3D12-specific operations, cast to concrete renderer
-    auto* dx12Renderer = dynamic_cast<DX12GameRenderer*>(renderer.get());
-    if (!dx12Renderer)
-        return 1;
-
     Scene scene;
-    scene.Init(dx12Renderer->GetGraphicsProvider());
+    scene.Init(renderer->GetGraphicsProvider());
     SceneManager::SetActiveScene(&scene);
-
-    // Register script types for scene deserialization.
-    SceneSerializer::Register("Rotate", []() -> Component* { return new Rotate(); });
 
     // Load the project's entry scene; fall back to the engine's built-in default.
     if (!scene.Load(projectSettings.defaultScene))
@@ -98,12 +87,16 @@ int WINAPI wWinMain(
         
         // Render the scene
         float aspect = static_cast<float>(window->GetWidth()) / static_cast<float>(window->GetHeight());
-        D3D12GraphicsContext graphicsContext(dx12Renderer->GetCommandList());
+        auto graphicsContext = renderer->CreateFrameGraphicsContext();
         Camera* gameCamera = scene.FindGameCamera();
-        scene.Render(&graphicsContext, aspect, gameCamera);
+        if (graphicsContext)
+            scene.Render(graphicsContext.get(), aspect, gameCamera);
         
         renderer->EndFrame();
     };
+
+    // Show the window after all callbacks are set up
+    window->Show();
 
     return window->Run();
 }

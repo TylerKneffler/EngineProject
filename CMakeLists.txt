@@ -108,6 +108,7 @@ target_link_libraries(Engine PUBLIC
 )
 target_compile_definitions(Engine PUBLIC
     ENGINE_SHADERS_PATH="${CMAKE_SOURCE_DIR}/Engine/Core/Shaders/"
+    $<$<BOOL:${Vulkan_FOUND}>:ENGINE_VULKAN_ENABLED=1>
 )
 
 # ---------------------------------------------------------------------------

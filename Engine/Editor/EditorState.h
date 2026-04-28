@@ -12,6 +12,7 @@ class ViewFactory;
 class IEditorPanel;
 class PreferencesView;
 class ConsoleView;
+class PropertiesView;
 class HierarchyView;
 class AssetsExplorerView;
 struct ProjectSettings;
@@ -71,6 +72,7 @@ private:
     // Panels
     std::vector<std::unique_ptr<IEditorPanel>> m_panels;
     ConsoleView* m_primaryConsole = nullptr;
+    PropertiesView* m_primaryProperties = nullptr;
 
     // State
     ProjectSettings m_projectSettings;
