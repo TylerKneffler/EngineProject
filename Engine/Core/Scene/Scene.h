@@ -87,6 +87,8 @@ public:
 
     SceneSettings settings;
 
+    IGraphicsProvider* GetGraphicsProvider() const { return m_graphicsProvider; }
+
 private:
     // ---- Rendering resources (kept API-agnostic) ----
     IGraphicsProvider* m_graphicsProvider = nullptr;

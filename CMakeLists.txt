@@ -11,6 +11,18 @@ include(FetchContent)
 set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
 
 # ---------------------------------------------------------------------------
+# Vulkan SDK — Optional, for Vulkan renderer support
+# Must be found before FetchContent/ImGui so Vulkan_FOUND is set when
+# deciding whether to include imgui_impl_vulkan.cpp in the ImGui target.
+# ---------------------------------------------------------------------------
+find_package(Vulkan QUIET)
+if(Vulkan_FOUND)
+    message(STATUS "Vulkan SDK found: ${Vulkan_INCLUDE_DIR}")
+else()
+    message(STATUS "Vulkan SDK not found - Vulkan renderer support disabled")
+endif()
+
+# ---------------------------------------------------------------------------
 # Source auto-discovery — CONFIGURE_DEPENDS re-runs CMake configure when
 # files are added or removed, keeping targets up to date automatically.
 # ---------------------------------------------------------------------------
@@ -48,6 +60,12 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(imgui)
 
+# Collect ImGui sources — add Vulkan backend if SDK is available
+set(IMGUI_VULKAN_SOURCES "")
+if(Vulkan_FOUND)
+    set(IMGUI_VULKAN_SOURCES ${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp)
+endif()
+
 add_library(ImGui STATIC
     ${imgui_SOURCE_DIR}/imgui.cpp
     ${imgui_SOURCE_DIR}/imgui_draw.cpp
@@ -55,6 +73,7 @@ add_library(ImGui STATIC
     ${imgui_SOURCE_DIR}/imgui_widgets.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_dx12.cpp
+    ${IMGUI_VULKAN_SOURCES}
 )
 target_include_directories(ImGui PUBLIC
     ${imgui_SOURCE_DIR}
@@ -62,11 +81,10 @@ target_include_directories(ImGui PUBLIC
 )
 target_compile_definitions(ImGui PUBLIC IMGUI_ENABLE_DOCKING)
 
-# Add Vulkan backend to ImGui when Vulkan SDK is available
 if(Vulkan_FOUND)
-    target_sources(ImGui PRIVATE ${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp)
     target_include_directories(ImGui PUBLIC ${Vulkan_INCLUDE_DIR})
     target_link_libraries(ImGui PUBLIC Vulkan::Vulkan)
+    target_compile_definitions(ImGui PRIVATE VK_USE_PLATFORM_WIN32_KHR)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -80,16 +98,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(pugixml)
 
 # ---------------------------------------------------------------------------
-# Vulkan SDK — Optional, for Vulkan renderer support
-# ---------------------------------------------------------------------------
-find_package(Vulkan QUIET)
-if(Vulkan_FOUND)
-    message(STATUS "Vulkan SDK found: ${Vulkan_INCLUDE_DIR}")
-else()
-    message(STATUS "Vulkan SDK not found - Vulkan renderer support disabled")
-endif()
 
-# ---------------------------------------------------------------------------
 # Engine — static library
 # ---------------------------------------------------------------------------
 add_library(Engine STATIC
@@ -188,3 +197,52 @@ target_compile_definitions(Game PRIVATE
 set_target_properties(Game PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
 )
+
+# ---------------------------------------------------------------------------
+# SPIR-V shader compilation — HLSL → .spv via Vulkan SDK dxc
+# Outputs are written next to the source .hlsl files so the engine can load
+# them using relative paths (e.g. "Engine/Core/Shaders/Grid.hlsl.VSMain.spv")
+# from the project root working directory.
+# ---------------------------------------------------------------------------
+if(Vulkan_FOUND)
+    find_program(DXC_EXECUTABLE dxc
+        HINTS "${Vulkan_INCLUDE_DIR}/../Bin"
+              "$ENV{VULKAN_SDK}/Bin"
+    )
+
+    if(DXC_EXECUTABLE)
+        message(STATUS "dxc found: ${DXC_EXECUTABLE}")
+        set(SHADER_DIR "${CMAKE_SOURCE_DIR}/Engine/Core/Shaders")
+
+        # Helper: compile one HLSL entry point to SPIR-V
+        # Usage: compile_hlsl_to_spirv(<hlsl_file> <entry_point> <profile>)
+        function(compile_hlsl_to_spirv HLSL_FILE ENTRY_POINT PROFILE)
+            set(INPUT  "${SHADER_DIR}/${HLSL_FILE}")
+            set(OUTPUT "${SHADER_DIR}/${HLSL_FILE}.${ENTRY_POINT}.spv")
+            add_custom_command(
+                OUTPUT  "${OUTPUT}"
+                COMMAND "${DXC_EXECUTABLE}"
+                        -spirv
+                        -T "${PROFILE}"
+                        -E "${ENTRY_POINT}"
+                        "${INPUT}"
+                        -Fo "${OUTPUT}"
+                DEPENDS "${INPUT}"
+                COMMENT "SPIR-V: ${HLSL_FILE} [${ENTRY_POINT}]"
+            )
+            # Append output to parent-scope list
+            set(SPIRV_OUTPUTS ${SPIRV_OUTPUTS} "${OUTPUT}" PARENT_SCOPE)
+        endfunction()
+
+        set(SPIRV_OUTPUTS "")
+        compile_hlsl_to_spirv(Grid.hlsl   VSMain vs_6_0)
+        compile_hlsl_to_spirv(Grid.hlsl   PSMain ps_6_0)
+        compile_hlsl_to_spirv(Object.hlsl VSMain vs_6_0)
+        compile_hlsl_to_spirv(Object.hlsl PSMain ps_6_0)
+
+        add_custom_target(SpirvShaders ALL DEPENDS ${SPIRV_OUTPUTS})
+        add_dependencies(Engine SpirvShaders)
+    else()
+        message(WARNING "dxc not found — SPIR-V shaders will not be compiled automatically")
+    endif()
+endif()

@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "VulkanPipelineStateBuilder.h"
+#include "VulkanShaderCompiler.h"
 
 // ---------------------------------------------------------------------------
 // VulkanPipelineState
@@ -47,6 +48,8 @@ IPipelineStateBuilder& VulkanPipelineStateBuilder::SetVertexShader(const IShader
     {
         const auto* data = static_cast<const uint8_t*>(shader->GetBytecode());
         m_vsBytecode.assign(data, data + shader->GetBytecodeSize());
+        if (const auto* vk = dynamic_cast<const VulkanShader*>(shader))
+            m_vsEntryPoint = vk->GetEntryPoint();
     }
     return *this;
 }
@@ -57,6 +60,8 @@ IPipelineStateBuilder& VulkanPipelineStateBuilder::SetPixelShader(const IShader*
     {
         const auto* data = static_cast<const uint8_t*>(shader->GetBytecode());
         m_psBytecode.assign(data, data + shader->GetBytecodeSize());
+        if (const auto* vk = dynamic_cast<const VulkanShader*>(shader))
+            m_psEntryPoint = vk->GetEntryPoint();
     }
     return *this;
 }
@@ -336,12 +341,12 @@ std::unique_ptr<IPipelineState> VulkanPipelineStateBuilder::Build()
     stages[0].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stages[0].stage  = VK_SHADER_STAGE_VERTEX_BIT;
     stages[0].module = vsModule;
-    stages[0].pName  = "main";
+    stages[0].pName  = m_vsEntryPoint.c_str();
 
     stages[1].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stages[1].stage  = VK_SHADER_STAGE_FRAGMENT_BIT;
     stages[1].module = psModule;
-    stages[1].pName  = "main";
+    stages[1].pName  = m_psEntryPoint.c_str();
 
     // --- Vertex input ---
     std::vector<VkVertexInputAttributeDescription> attrDescs;

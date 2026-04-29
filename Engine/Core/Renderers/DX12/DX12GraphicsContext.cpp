@@ -198,7 +198,13 @@ D3D12GraphicsContextFactory::D3D12GraphicsContextFactory(
 
 std::unique_ptr<IGraphicsContext> D3D12GraphicsContextFactory::CreateContext()
 {
-    // In a full implementation, this would reset the allocator and command list
-    // and return a new wrapper. For now, we return a wrapper around the existing list.
-    return std::make_unique<D3D12GraphicsContext>(m_cmdList.Get(), m_rootSignature);
+    // Use the externally-supplied command list if one was set via SetCommandBuffer,
+    // otherwise fall back to the factory's own command list.
+    auto* list = m_externalCmdList ? m_externalCmdList : m_cmdList.Get();
+    return std::make_unique<D3D12GraphicsContext>(list, m_rootSignature);
+}
+
+void D3D12GraphicsContextFactory::SetCommandBuffer(void* cmd)
+{
+    m_externalCmdList = static_cast<ID3D12GraphicsCommandList*>(cmd);
 }

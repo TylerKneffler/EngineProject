@@ -99,5 +99,9 @@ class IGraphicsContextFactory
 {
 public:
     virtual ~IGraphicsContextFactory() = default;
+    // Set the command buffer/list to wrap for the upcoming CreateContext() call.
+    // For DX12: ID3D12GraphicsCommandList*. For Vulkan: VkCommandBuffer.
+    // The default is a no-op; override in each backend.
+    virtual void SetCommandBuffer(void* /*cmd*/) {}
     virtual std::unique_ptr<IGraphicsContext> CreateContext() = 0;
 };

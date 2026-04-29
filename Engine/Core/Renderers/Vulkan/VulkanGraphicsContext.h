@@ -91,7 +91,10 @@ public:
     VulkanGraphicsContextFactory(VkDevice device, VkCommandPool commandPool);
     ~VulkanGraphicsContextFactory() override;
 
-    // Point the factory at the command buffer that BeginFrame already began.
+    // IGraphicsContextFactory: wraps a void* VkCommandBuffer
+    void SetCommandBuffer(void* cmd) override;
+
+    // Vulkan-typed variant (used internally by the renderer)
     void SetCurrentCommandBuffer(VkCommandBuffer cmdBuffer);
 
     std::unique_ptr<IGraphicsContext> CreateContext() override;

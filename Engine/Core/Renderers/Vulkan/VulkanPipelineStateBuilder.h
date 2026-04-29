@@ -104,6 +104,8 @@ private:
     // Shader bytecode (SPIR-V)
     std::vector<uint8_t> m_vsBytecode;
     std::vector<uint8_t> m_psBytecode;
+    std::string          m_vsEntryPoint = "main";
+    std::string          m_psEntryPoint = "main";
 
     // Input layout
     struct InputElement

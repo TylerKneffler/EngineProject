@@ -2,7 +2,8 @@
 #include "SceneView.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Camera.h"
-#include "Core/Renderers/DX12/DX12GraphicsContext.h"
+#include "Core/Graphics/IGraphicsContext.h"
+#include "Core/Graphics/IGraphicsProvider.h"
 
 // ---------------------------------------------------------------------------
 // Init — store the scene pointer, then delegate resource creation to View.
@@ -243,7 +244,9 @@ void SceneView::Render3D(void* cmd)
 {
     if (m_scene)
     {
-        D3D12GraphicsContext graphicsContext(static_cast<ID3D12GraphicsCommandList*>(cmd));
-        m_scene->Render(&graphicsContext, m_aspect);
+        auto* factory = m_scene->GetGraphicsProvider()->GetContextFactory();
+        factory->SetCommandBuffer(cmd);
+        auto ctx = factory->CreateContext();
+        m_scene->Render(ctx.get(), m_aspect);
     }
 }

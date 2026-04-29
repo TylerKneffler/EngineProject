@@ -246,6 +246,11 @@ VulkanGraphicsContextFactory::~VulkanGraphicsContextFactory()
 #endif
 }
 
+void VulkanGraphicsContextFactory::SetCommandBuffer(void* cmd)
+{
+    SetCurrentCommandBuffer(static_cast<VkCommandBuffer>(cmd));
+}
+
 void VulkanGraphicsContextFactory::SetCurrentCommandBuffer(VkCommandBuffer cmdBuffer)
 {
     m_cmdBuffer = cmdBuffer;

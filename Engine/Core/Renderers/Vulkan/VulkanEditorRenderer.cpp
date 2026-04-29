@@ -472,15 +472,15 @@ bool VulkanEditorRenderer::Init(void* hwnd, uint32_t width, uint32_t height)
     }
 
     // ---- ImGui initialization ----
-    VkDescriptorPoolSize poolSize{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 };
-    VkDescriptorPoolCreateInfo poolInfo{};
-    poolInfo.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    poolInfo.maxSets       = 1;
-    poolInfo.poolSizeCount = 1;
-    poolInfo.pPoolSizes    = &poolSize;
+    VkDescriptorPoolSize imguiPoolSize{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 };
+    VkDescriptorPoolCreateInfo imguiPoolInfo{};
+    imguiPoolInfo.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    imguiPoolInfo.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    imguiPoolInfo.maxSets       = 1;
+    imguiPoolInfo.poolSizeCount = 1;
+    imguiPoolInfo.pPoolSizes    = &imguiPoolSize;
 
-    if (!CheckVk(vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_imguiDescriptorPool), "Failed to create ImGui descriptor pool"))
+    if (!CheckVk(vkCreateDescriptorPool(m_device, &imguiPoolInfo, nullptr, &m_imguiDescriptorPool), "Failed to create ImGui descriptor pool"))
         return false;
 
     IMGUI_CHECKVERSION();
@@ -488,17 +488,35 @@ bool VulkanEditorRenderer::Init(void* hwnd, uint32_t width, uint32_t height)
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     ImGui_ImplWin32_Init(hwnd);
 
+    // ImGui_ImplWin32_Init sets ImGuiBackendFlags_PlatformHasViewports, which
+    // causes ImGui_ImplVulkan_Init to assert that Platform_CreateVkSurface is
+    // provided.  Supply a Win32 surface factory so multi-viewport works.
+    ImGui::GetPlatformIO().Platform_CreateVkSurface =
+        [](ImGuiViewport* vp, ImU64 vk_inst, const void* vk_alloc, ImU64* out_surface) -> int
+        {
+            VkWin32SurfaceCreateInfoKHR ci{};
+            ci.sType     = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
+            ci.hinstance = GetModuleHandle(nullptr);
+            ci.hwnd      = static_cast<HWND>(vp->PlatformHandle);
+            return vkCreateWin32SurfaceKHR(
+                reinterpret_cast<VkInstance>(vk_inst),
+                &ci,
+                reinterpret_cast<const VkAllocationCallbacks*>(vk_alloc),
+                reinterpret_cast<VkSurfaceKHR*>(out_surface));
+        };
+
     ImGui_ImplVulkan_InitInfo vkInitInfo{};
-    vkInitInfo.Instance       = m_instance;
-    vkInitInfo.PhysicalDevice = m_physicalDevice;
-    vkInitInfo.Device         = m_device;
-    vkInitInfo.QueueFamily    = m_graphicsQueueFamilyIndex;
-    vkInitInfo.Queue          = m_graphicsQueue;
-    vkInitInfo.DescriptorPool = m_imguiDescriptorPool;
-    vkInitInfo.RenderPass     = m_renderPass;
-    vkInitInfo.MinImageCount  = 2;
-    vkInitInfo.ImageCount     = static_cast<uint32_t>(m_swapchainImages.size());
-    vkInitInfo.MSAASamples    = VK_SAMPLE_COUNT_1_BIT;
+    vkInitInfo.ApiVersion                      = VK_API_VERSION_1_0;
+    vkInitInfo.Instance                        = m_instance;
+    vkInitInfo.PhysicalDevice                  = m_physicalDevice;
+    vkInitInfo.Device                          = m_device;
+    vkInitInfo.QueueFamily                     = m_graphicsQueueFamilyIndex;
+    vkInitInfo.Queue                           = m_graphicsQueue;
+    vkInitInfo.DescriptorPool                  = m_imguiDescriptorPool;
+    vkInitInfo.MinImageCount                   = 2;
+    vkInitInfo.ImageCount                      = static_cast<uint32_t>(m_swapchainImages.size());
+    vkInitInfo.PipelineInfoMain.RenderPass     = m_renderPass;
+    vkInitInfo.PipelineInfoMain.MSAASamples    = VK_SAMPLE_COUNT_1_BIT;
 
     ImGui_ImplVulkan_Init(&vkInitInfo);
 

@@ -4,15 +4,21 @@
 
 std::unique_ptr<IShader> VulkanShaderCompiler::CompileFromFile(
     const std::string& filePath,
-    const char*        /*entryPoint*/,
+    const char*        entryPoint,
     CompileProfile     /*profile*/)
 {
-    // Append .spv if not already present
-    std::string spvPath = filePath;
-    if (spvPath.size() < 4 ||
-        spvPath.compare(spvPath.size() - 4, 4, ".spv") != 0)
+    // Build per-entry-point SPIR-V path: "Grid.hlsl.VSMain.spv"
+    // This matches the filenames produced by the CMake dxc compile step.
+    std::string ep = (entryPoint && *entryPoint) ? entryPoint : "main";
+    std::string spvPath;
+    if (filePath.size() >= 4 &&
+        filePath.compare(filePath.size() - 4, 4, ".spv") == 0)
     {
-        spvPath += ".spv";
+        spvPath = filePath;  // already a .spv path
+    }
+    else
+    {
+        spvPath = filePath + "." + ep + ".spv";
     }
 
     std::ifstream file(spvPath, std::ios::binary | std::ios::ate);
@@ -39,5 +45,5 @@ std::unique_ptr<IShader> VulkanShaderCompiler::CompileFromFile(
     }
 
     m_lastError.clear();
-    return std::make_unique<VulkanShader>(std::move(bytecode));
+    return std::make_unique<VulkanShader>(std::move(bytecode), ep);
 }

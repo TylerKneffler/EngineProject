@@ -10,6 +10,9 @@
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx12.h"
 #if defined(ENGINE_VULKAN_ENABLED)
+    #ifndef VK_USE_PLATFORM_WIN32_KHR
+        #define VK_USE_PLATFORM_WIN32_KHR 1
+    #endif
     #include "imgui_impl_vulkan.h"
 #endif
 

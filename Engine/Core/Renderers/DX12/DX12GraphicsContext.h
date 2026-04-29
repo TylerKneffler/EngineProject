@@ -56,6 +56,7 @@ public:
         ID3D12CommandQueue* commandQueue,
         ID3D12RootSignature* rootSignature);
 
+    void SetCommandBuffer(void* cmd) override;
     std::unique_ptr<IGraphicsContext> CreateContext() override;
 
 private:
@@ -64,4 +65,5 @@ private:
     ID3D12RootSignature* m_rootSignature;
     Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_cmdAllocator;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_cmdList;
+    ID3D12GraphicsCommandList* m_externalCmdList = nullptr; // set via SetCommandBuffer
 };

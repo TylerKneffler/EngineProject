@@ -9,14 +9,16 @@
 class VulkanShader : public IShader
 {
 public:
-    explicit VulkanShader(std::vector<uint8_t> bytecode)
-        : m_bytecode(std::move(bytecode)) {}
+    VulkanShader(std::vector<uint8_t> bytecode, std::string entryPoint)
+        : m_bytecode(std::move(bytecode)), m_entryPoint(std::move(entryPoint)) {}
 
-    const void* GetBytecode()  const override { return m_bytecode.data(); }
-    size_t      GetBytecodeSize() const override { return m_bytecode.size(); }
+    const void*        GetBytecode()     const override { return m_bytecode.data(); }
+    size_t             GetBytecodeSize() const override { return m_bytecode.size(); }
+    const std::string& GetEntryPoint()   const          { return m_entryPoint; }
 
 private:
     std::vector<uint8_t> m_bytecode;
+    std::string          m_entryPoint;
 };
 
 // ---------------------------------------------------------------------------
