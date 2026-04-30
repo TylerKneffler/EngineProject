@@ -56,7 +56,7 @@ void VulkanGraphicsContext::SetConstantBuffer(uint32_t slot,
            static_cast<const uint8_t*>(data) + offset,
            static_cast<size_t>(copySize));
 
-    const_cast<IGraphicsBuffer*>(buffer)->Unmap();
+    // Do NOT unmap — the caller (Scene) may hold a persistent mapped pointer.
     m_pushDirty = true;
 #else
     (void)slot; (void)buffer; (void)offset;

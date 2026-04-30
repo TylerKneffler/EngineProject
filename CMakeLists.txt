@@ -223,6 +223,7 @@ if(Vulkan_FOUND)
                 OUTPUT  "${OUTPUT}"
                 COMMAND "${DXC_EXECUTABLE}"
                         -spirv
+                        -DVULKAN=1
                         -T "${PROFILE}"
                         -E "${ENTRY_POINT}"
                         "${INPUT}"

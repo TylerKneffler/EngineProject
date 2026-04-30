@@ -24,7 +24,6 @@ using namespace DirectX;
 struct CBData
 {
     DirectX::XMFLOAT4X4 mvp;
-    DirectX::XMFLOAT4X4 world;
     DirectX::XMFLOAT4 diffuseColor;
     DirectX::XMFLOAT4 ambientColor;
     DirectX::XMFLOAT4 specularColor;
@@ -300,7 +299,6 @@ void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverri
         // Prepare constant buffer data
         CBData cbData{};
         XMStoreFloat4x4(&cbData.mvp, worldMat * view * proj);
-        XMStoreFloat4x4(&cbData.world, worldMat);
 
         if (mat)
         {

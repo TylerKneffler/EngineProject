@@ -3,6 +3,34 @@
 // The PS unprojects each NDC pixel to find its Y=0 world position, then draws
 // antialiased grid lines analytically and fades them by distance.
 
+// Layout (128 bytes, fits Vulkan's 128-byte push-constant minimum):
+//   float4x4 invVP       (64 b)
+//   float3   cameraPos   (12 b)
+//   float    cellSize    ( 4 b)
+//   float4   gridColor   (16 b)
+//   float4   axisColor   (16 b)
+//   float    fadeDistance( 4 b)
+//   float3   _pad        (12 b)
+
+#ifdef VULKAN
+struct GridConst
+{
+    float4x4 invVP;
+    float3   cameraPos;
+    float    cellSize;
+    float4   gridColor;
+    float4   axisColor;
+    float    fadeDistance;
+    float3   _pad;
+};
+[[vk::push_constant]] GridConst cb;
+#define invVP        cb.invVP
+#define cameraPos    cb.cameraPos
+#define cellSize     cb.cellSize
+#define gridColor    cb.gridColor
+#define axisColor    cb.axisColor
+#define fadeDistance cb.fadeDistance
+#else
 cbuffer GridCB : register(b0)
 {
     float4x4 invVP;
@@ -13,6 +41,7 @@ cbuffer GridCB : register(b0)
     float    fadeDistance;
     float3   _pad;
 };
+#endif
 
 // ---------------------------------------------------------------------------
 // Vertex shader

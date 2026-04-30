@@ -1,13 +1,36 @@
 // Object.hlsl — Phong-shaded mesh shader.
 
-cbuffer Constants : register(b0)
+// Layout (112 bytes, fits Vulkan's 128-byte push-constant minimum):
+//   float4x4 mvp          (64 b)
+//   float4   diffuseColor (16 b)
+//   float4   ambientColor (16 b)
+//   float4   specularColor (16 b)
+//
+// When compiled with -DVULKAN=1 (dxc -spirv), the cbuffer becomes a
+// push-constant block so no descriptor set is needed.
+
+#ifdef VULKAN
+struct ObjectConst
 {
     float4x4 mvp;
-    float4x4 world;
     float4   diffuseColor;
     float4   ambientColor;
     float4   specularColor; // xyz = color, w = shininess
 };
+[[vk::push_constant]] ObjectConst cb;
+#define mvp           cb.mvp
+#define diffuseColor  cb.diffuseColor
+#define ambientColor  cb.ambientColor
+#define specularColor cb.specularColor
+#else
+cbuffer Constants : register(b0)
+{
+    float4x4 mvp;
+    float4   diffuseColor;
+    float4   ambientColor;
+    float4   specularColor; // xyz = color, w = shininess
+};
+#endif
 
 // ---------------------------------------------------------------------------
 // Vertex shader
@@ -18,7 +41,7 @@ void VSMain(float3 pos    : POSITION,
             out float3 oNormal : NORMAL)
 {
     oPos    = mul(mvp, float4(pos, 1.0));
-    oNormal = mul((float3x3)world, normal);
+    oNormal = normal; // object-space normal (approximation without world matrix)
 }
 
 // ---------------------------------------------------------------------------
