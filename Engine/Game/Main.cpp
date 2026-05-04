@@ -45,9 +45,40 @@ int WINAPI wWinMain(
     auto window   = std::make_unique<Window>(hInstance, L"Game",
                         projectSettings.viewportWidth,
                         projectSettings.viewportHeight);
-    auto renderer = RendererFactory::CreateGameRenderer(projectSettings);
-    if (!renderer || !renderer->Init(window->GetHWND(), window->GetWidth(), window->GetHeight()))
+
+    std::unique_ptr<IGameRenderer> renderer;
+    try
+    {
+        renderer = RendererFactory::CreateGameRenderer(projectSettings);
+    }
+    catch (const std::exception& e)
+    {
+        std::string api = projectSettings.gameRenderingAPI;
+        std::string download = (api == "Vulkan") ? "\n\nDownload the Vulkan SDK: https://vulkan.lunarg.com/sdk/home" : "";
+        std::string msg = "Failed to create the " + api + " renderer.\n\n"
+            "Please ensure " + api + " is installed and your GPU supports it.\n\n"
+            "Details: " + e.what() + download;
+        MessageBoxA(window->GetHWND(), msg.c_str(), "Renderer Initialization Error", MB_OK | MB_ICONERROR);
         return 1;
+    }
+    if (!renderer)
+    {
+        std::string api = projectSettings.gameRenderingAPI;
+        std::string download = (api == "Vulkan") ? "\n\nDownload the Vulkan SDK: https://vulkan.lunarg.com/sdk/home" : "";
+        std::string msg = "Failed to create the " + api + " renderer.\n\n"
+            "Please ensure " + api + " is installed and your GPU supports it." + download;
+        MessageBoxA(window->GetHWND(), msg.c_str(), "Renderer Initialization Error", MB_OK | MB_ICONERROR);
+        return 1;
+    }
+    if (!renderer->Init(window->GetHWND(), window->GetWidth(), window->GetHeight()))
+    {
+        std::string api = projectSettings.gameRenderingAPI;
+        std::string download = (api == "Vulkan") ? "\n\nDownload the Vulkan SDK: https://vulkan.lunarg.com/sdk/home" : "";
+        std::string msg = "Failed to initialize the " + api + " renderer.\n\n"
+            "Please ensure " + api + " is installed and your GPU driver is up to date." + download;
+        MessageBoxA(window->GetHWND(), msg.c_str(), "Renderer Initialization Error", MB_OK | MB_ICONERROR);
+        return 1;
+    }
 
     Scene scene;
     scene.Init(renderer->GetGraphicsProvider());

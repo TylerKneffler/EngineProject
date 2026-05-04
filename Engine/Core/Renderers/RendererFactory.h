@@ -10,8 +10,8 @@ struct ProjectSettings;
 // ---------------------------------------------------------------------------
 // RendererFactory — Creates renderer instances based on project settings.
 //
-// The application specifies the desired renderer API (e.g., "DirectX12" or
-// "Vulkan") in ProjectSettings::renderingAPI. The factory instantiates the
+// The application specifies the desired renderer API (e.g., "DirectX12")
+// in ProjectSettings::renderingAPI. The factory instantiates the
 // corresponding renderer implementation, decoupling the rest of the application
 // from graphics API selection.
 //
@@ -20,9 +20,9 @@ struct ProjectSettings;
 //   auto editorRenderer = RendererFactory::CreateEditorRenderer(settings);
 //   auto gameRenderer   = RendererFactory::CreateGameRenderer(settings);
 //
-// Supported renderers are registered in the factory; adding a new API (e.g.,
-// Vulkan) requires implementing the IEditorRenderer / IGameRenderer interfaces
-// and registering a creation function in the factory.
+// Supported renderers are registered in the factory; adding a new API requires
+// implementing the IEditorRenderer / IGameRenderer interfaces and registering
+// a creation function in the factory.
 // ---------------------------------------------------------------------------
 class RendererFactory
 {

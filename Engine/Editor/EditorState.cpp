@@ -49,13 +49,37 @@ bool EditorState::Init()
 
     // Initialize renderer
     OutputDebugStringA("[EditorState] Creating renderer...\n");
-    m_renderer = RendererFactory::CreateEditorRenderer(m_projectSettings);
-    if (!m_renderer)
+    try
+    {
+        m_renderer = RendererFactory::CreateEditorRenderer(m_projectSettings);
+    }
+    catch (const std::exception& e)
+    {
+        std::string api = m_projectSettings.editorRenderingAPI;
+        std::string msg = "Failed to create the " + api + " renderer.\n\n"
+            "Please ensure " + api + " is installed and your GPU supports it.\n\n"
+            "Details: " + e.what();
+        MessageBoxA(hwnd, msg.c_str(), "Renderer Initialization Error", MB_OK | MB_ICONERROR);
         return false;
+    }
+    if (!m_renderer)
+    {
+        std::string api = m_projectSettings.editorRenderingAPI;
+        std::string msg = "Failed to create the " + api + " renderer.\n\n"
+            "Please ensure " + api + " is installed and your GPU supports it.";
+        MessageBoxA(hwnd, msg.c_str(), "Renderer Initialization Error", MB_OK | MB_ICONERROR);
+        return false;
+    }
     
     OutputDebugStringA("[EditorState] Initializing renderer...\n");
     if (!m_renderer->Init(hwnd, 1280, 720))
+    {
+        std::string api = m_projectSettings.editorRenderingAPI;
+        std::string msg = "Failed to initialize the " + api + " renderer.\n\n"
+            "Please ensure " + api + " is installed and your GPU driver is up to date.";
+        MessageBoxA(hwnd, msg.c_str(), "Renderer Initialization Error", MB_OK | MB_ICONERROR);
         return false;
+    }
     OutputDebugStringA("[EditorState] Renderer initialized\n");
 
     // Initialize scene

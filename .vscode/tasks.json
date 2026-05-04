@@ -9,7 +9,10 @@
                 "-S", "${workspaceFolder}",
                 "-B", "${workspaceFolder}/build/Debug",
                 "-G", "Visual Studio 17 2022",
-                "-A", "x64"
+                "-A", "x64",
+                "-DCMAKE_PREFIX_PATH=C:/VulkanSDK/1.4.341.1",
+                "-DVulkan_INCLUDE_DIR=C:/VulkanSDK/1.4.341.1/Include",
+                "-DVulkan_LIBRARY=C:/VulkanSDK/1.4.341.1/Lib/vulkan-1.lib"
             ],
             "group": "build",
             "presentation": { "reveal": "always", "panel": "shared" },
@@ -40,7 +43,10 @@
                 "-S", "${workspaceFolder}",
                 "-B", "${workspaceFolder}/build/Release",
                 "-G", "Visual Studio 17 2022",
-                "-A", "x64"
+                "-A", "x64",
+                "-DCMAKE_PREFIX_PATH=C:/VulkanSDK/1.4.341.1",
+                "-DVulkan_INCLUDE_DIR=C:/VulkanSDK/1.4.341.1/Include",
+                "-DVulkan_LIBRARY=C:/VulkanSDK/1.4.341.1/Lib/vulkan-1.lib"
             ],
             "group": "build",
             "presentation": { "reveal": "always", "panel": "shared" },
