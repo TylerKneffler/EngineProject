@@ -50,9 +50,9 @@
 		<RenderingAPI>DirectX12</RenderingAPI>
 		
 		<!-- Separate rendering API selection for editor and game (overrides RenderingAPI if set) -->
-		<!-- Options: DirectX12, -->
-		<EditorRenderingAPI>DirectX12</EditorRenderingAPI>
-		<GameRenderingAPI>DirectX12</GameRenderingAPI>
+		<!-- Options: DirectX12, DirectX11, Vulkan -->
+		<EditorRenderingAPI>Vulkan</EditorRenderingAPI>
+		<GameRenderingAPI>Vulkan</GameRenderingAPI>
 		
 		<!-- Rendering settings -->
 		<ClearColorR>0.180000</ClearColorR>

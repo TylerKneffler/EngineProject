@@ -46,6 +46,8 @@ public:
 
     void SaveScene();
     void LoadScene(const std::string& path);
+    void CapturePlayModeScene();
+    void RestorePlayModeScene();
 
     bool IsShowingPreferences() const { return m_showPreferences; }
     void SetShowPreferences(bool show) { m_showPreferences = show; }
@@ -78,6 +80,8 @@ private:
     ProjectSettings m_projectSettings;
     bool m_hasUnsavedChanges = false;
     bool m_showPreferences = false;
+    std::string m_playModeSceneSnapshot;
+    bool m_prePlayHasUnsavedChanges = false;
 
     std::string m_sceneToLoad;
     bool m_showUnsavedWarning = false;

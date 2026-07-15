@@ -345,7 +345,8 @@ void EditorUI::OnMenuSave()
 // ---------------------------------------------------------------------------
 void EditorUI::OnMenuBuild()
 {
-    // TODO: wire to GameBuildManager
+    if (m_gameBuildManager)
+        m_gameBuildManager->StartBuild(PostBuildAction::Nothing);
 }
 
 // ---------------------------------------------------------------------------

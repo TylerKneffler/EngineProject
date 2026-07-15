@@ -50,8 +50,8 @@ public:
     virtual uint32_t GetWidth()  const = 0;
     virtual uint32_t GetHeight() const = 0;
 
-    // Opaque texture handle for ImGui::Image. For D3D12 this is a GPU SRV
-    // descriptor pointer; for Vulkan this will be a VkDescriptorSet.
+    // Opaque texture handle for ImGui::Image. D3D11 uses an ID3D11ShaderResourceView*,
+    // D3D12 uses a GPU descriptor pointer, and Vulkan uses a VkDescriptorSet.
     virtual void* GetImGuiTextureHandle() const = 0;
 
     // SRV slot index for resource cleanup

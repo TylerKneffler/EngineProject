@@ -46,7 +46,7 @@ public:
     virtual uint32_t GetAvailableSrvSlots() const = 0;
 
     // Opaque native device handle used by view initialization.
-    // D3D12: ID3D12Device*; Vulkan: VkDevice.
+    // D3D12: ID3D12Device*; D3D11: ID3D11Device*; Vulkan: backend device context.
     virtual void* GetNativeDeviceHandle() const = 0;
 
     // Create a view backend for offscreen editor rendering.
@@ -54,13 +54,13 @@ public:
 
     // Get the current active command buffer / command list as a void*.
     // D3D12: returns ID3D12GraphicsCommandList*
-    // Vulkan: returns VkCommandBuffer
+    // D3D11: returns ID3D11DeviceContext*; Vulkan: returns VkCommandBuffer
     // Only valid while inside a RenderIfNeeded drawFn callback.
     virtual void* GetCurrentCommandBuffer() const = 0;
 
     // Get a pointer to the current render target handle (API-specific).
     // D3D12: returns D3D12_CPU_DESCRIPTOR_HANDLE*
-    // Vulkan: returns nullptr (render pass handles the target)
+    // D3D11: returns ID3D11RenderTargetView*; Vulkan: returns nullptr
     // Only valid while inside a RenderIfNeeded drawFn callback.
     virtual void* GetCurrentRenderTargetHandle() const = 0;
 

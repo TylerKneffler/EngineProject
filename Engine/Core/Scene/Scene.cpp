@@ -443,3 +443,15 @@ bool Scene::Load(const std::string& path)
         return false;
     return SceneSerializer::Load(*this, path, m_graphicsProvider);
 }
+
+std::string Scene::SaveToString() const
+{
+    return SceneSerializer::SaveToString(*this);
+}
+
+bool Scene::LoadFromString(const std::string& source)
+{
+    if (!m_graphicsProvider)
+        return false;
+    return SceneSerializer::LoadFromString(*this, source, m_graphicsProvider);
+}

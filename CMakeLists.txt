@@ -1,10 +1,53 @@
 cmake_minimum_required(VERSION 3.20)
-project(EngineProject CXX)
+project(EngineProject C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(FetchContent)
+
+set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
+
+option(ENGINE_ENABLE_VULKAN "Build the Vulkan renderer" ON)
+set(ENGINE_VULKAN_ENABLED OFF)
+
+if(ENGINE_ENABLE_VULKAN)
+    FetchContent_Declare(
+        VulkanHeaders
+        GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
+        GIT_TAG        v1.4.341
+    )
+    FetchContent_MakeAvailable(VulkanHeaders)
+
+    set(VOLK_PULL_IN_VULKAN OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        volk
+        GIT_REPOSITORY https://github.com/zeux/volk.git
+        GIT_TAG        vulkan-sdk-1.4.341.0
+    )
+    FetchContent_MakeAvailable(volk)
+    target_link_libraries(volk PUBLIC Vulkan::Headers)
+    target_compile_definitions(volk PUBLIC VK_USE_PLATFORM_WIN32_KHR)
+
+    set(DXC_SPIRV_EXECUTABLE "" CACHE FILEPATH "DXC executable with SPIR-V CodeGen")
+    if(NOT DXC_SPIRV_EXECUTABLE)
+        FetchContent_Declare(
+            dxc_spirv
+            URL      https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2602.24/dxc_2026_05_27.zip
+            URL_HASH SHA256=cf658aacf070d3045e31b8f1f8a696c2945f37c1095019481ef7c513368db3b4
+            DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+        )
+        FetchContent_MakeAvailable(dxc_spirv)
+        set(DXC_SPIRV_EXECUTABLE "${dxc_spirv_SOURCE_DIR}/bin/x64/dxc.exe")
+    endif()
+
+    if(EXISTS "${DXC_SPIRV_EXECUTABLE}")
+        set(ENGINE_VULKAN_ENABLED ON)
+        message(STATUS "[Renderer] Vulkan enabled; SPIR-V DXC: ${DXC_SPIRV_EXECUTABLE}")
+    else()
+        message(WARNING "[Renderer] Vulkan disabled: SPIR-V DXC was not found. Set DXC_SPIRV_EXECUTABLE to override it.")
+    endif()
+endif()
 
 # Don't re-check for updates on packages already downloaded — prevents
 # MSBuild-triggered cmake re-runs from failing on network/subbuild issues.
@@ -48,19 +91,28 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(imgui)
 
-add_library(ImGui STATIC
+set(IMGUI_SOURCES
     ${imgui_SOURCE_DIR}/imgui.cpp
     ${imgui_SOURCE_DIR}/imgui_draw.cpp
     ${imgui_SOURCE_DIR}/imgui_tables.cpp
     ${imgui_SOURCE_DIR}/imgui_widgets.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_dx12.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_dx11.cpp
 )
+if(ENGINE_VULKAN_ENABLED)
+    list(APPEND IMGUI_SOURCES ${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp)
+endif()
+add_library(ImGui STATIC ${IMGUI_SOURCES})
 target_include_directories(ImGui PUBLIC
     ${imgui_SOURCE_DIR}
     ${imgui_SOURCE_DIR}/backends
 )
 target_compile_definitions(ImGui PUBLIC IMGUI_ENABLE_DOCKING)
+if(ENGINE_VULKAN_ENABLED)
+    target_link_libraries(ImGui PUBLIC volk::volk Vulkan::Headers)
+    target_compile_definitions(ImGui PUBLIC VK_USE_PLATFORM_WIN32_KHR VK_NO_PROTOTYPES)
+endif()
 
 # ---------------------------------------------------------------------------
 # pugixml — XML parsing library
@@ -98,6 +150,44 @@ target_link_libraries(Engine PUBLIC
 target_compile_definitions(Engine PUBLIC
     ENGINE_SHADERS_PATH="${CMAKE_SOURCE_DIR}/Engine/Core/Shaders/"
 )
+
+if(ENGINE_VULKAN_ENABLED)
+    set(VULKAN_SHADER_DIR "${CMAKE_BINARY_DIR}/VulkanShaders")
+    set(VULKAN_SHADER_OUTPUTS)
+    foreach(SHADER_NAME Grid Object)
+        foreach(STAGE VS PS)
+            if(STAGE STREQUAL "VS")
+                set(SHADER_PROFILE vs_6_0)
+                set(SHADER_ENTRY VSMain)
+            else()
+                set(SHADER_PROFILE ps_6_0)
+                set(SHADER_ENTRY PSMain)
+            endif()
+            set(SHADER_SOURCE "${CMAKE_SOURCE_DIR}/Engine/Core/Shaders/${SHADER_NAME}.hlsl")
+            set(SHADER_OUTPUT "${VULKAN_SHADER_DIR}/${SHADER_NAME}.${STAGE}.spv")
+            add_custom_command(
+                OUTPUT "${SHADER_OUTPUT}"
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${VULKAN_SHADER_DIR}"
+                COMMAND "${DXC_SPIRV_EXECUTABLE}" -spirv -fspv-target-env=vulkan1.1
+                        -fvk-use-dx-layout -D VULKAN=1 -T ${SHADER_PROFILE}
+                        -E ${SHADER_ENTRY} -Fo "${SHADER_OUTPUT}" "${SHADER_SOURCE}"
+                DEPENDS "${SHADER_SOURCE}"
+                VERBATIM
+                COMMENT "Compiling ${SHADER_NAME}.${STAGE} for Vulkan"
+            )
+            list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
+        endforeach()
+    endforeach()
+    add_custom_target(VulkanShaders DEPENDS ${VULKAN_SHADER_OUTPUTS})
+    add_dependencies(Engine VulkanShaders)
+    target_link_libraries(Engine PUBLIC volk::volk Vulkan::Headers)
+    target_compile_definitions(Engine PUBLIC
+        ENGINE_VULKAN_ENABLED
+        VK_USE_PLATFORM_WIN32_KHR
+        VK_NO_PROTOTYPES
+        ENGINE_VULKAN_SHADER_PATH="${VULKAN_SHADER_DIR}/"
+    )
+endif()
 
 # ---------------------------------------------------------------------------
 # Compiler flags (MSVC)

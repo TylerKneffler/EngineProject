@@ -43,6 +43,12 @@ public:
     // Returns false if the destination file cannot be opened.
     static bool Save(const Scene& scene, const std::string& path);
 
+    // Capture/restore a scene entirely in memory. Used by the editor to keep
+    // play-mode mutations separate from the editable scene state.
+    static std::string SaveToString(const Scene& scene);
+    static bool LoadFromString(Scene& scene, const std::string& source,
+        IGraphicsProvider* graphicsProvider = nullptr);
+
     // Read a .scene JSON file into scene, replacing all existing objects.
     // Pass a graphics provider so that Mesh GPU buffers are created after load.
     // Returns false if the file cannot be read or has an unsupported format.

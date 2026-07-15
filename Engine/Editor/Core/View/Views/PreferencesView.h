@@ -53,4 +53,6 @@ private:
     char m_projectNameBuf[256] = {};
     char m_assetsPathBuf[512] = {};
     char m_defaultSceneBuf[512] = {};
+    std::string m_saveStatus;
+    bool m_lastSaveSucceeded = false;
 };

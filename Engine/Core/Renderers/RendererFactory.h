@@ -4,8 +4,16 @@
 #include "IGameRenderer.h"
 #include <memory>
 #include <string>
+#include <vector>
 
 struct ProjectSettings;
+
+struct RendererOption
+{
+    std::string name;
+    bool available = false;
+    std::string unavailableReason;
+};
 
 // ---------------------------------------------------------------------------
 // RendererFactory — Creates renderer instances based on project settings.
@@ -40,6 +48,11 @@ public:
     // Get a human-readable list of supported renderer APIs.
     // Used for error messages, logging, UI dropdowns, etc.
     static std::string GetSupportedRenderers();
+
+    // Runtime availability includes the Windows graphics runtime, a compatible
+    // hardware adapter, and a driver exposing the feature level used by us.
+    static const std::vector<RendererOption>& GetRendererOptions();
+    static bool IsRendererAvailable(const std::string& api, std::string* reason = nullptr);
 
 private:
     RendererFactory() = delete;  // static factory, no instances

@@ -5,11 +5,16 @@
 #include "Core/View/Views/PreferencesView.h"
 #include "Core/View/Views/ConsoleView.h"
 #include "Core/View/Views/PropertiesView.h"
+#include "Core/View/Views/HierarchyView.h"
 #include "Core/Window.h"
 #include "Core/Renderers/RendererFactory.h"
 #include "Core/Scene/Scene.h"
 #include <chrono>
 #include <filesystem>
+
+#ifndef PROJECT_FILE
+#define PROJECT_FILE "Example_Proj.proj"
+#endif
 
 // ---------------------------------------------------------------------------
 // EditorState::EditorState
@@ -208,6 +213,45 @@ void EditorState::LoadScene(const std::string& path)
     }
 }
 
+void EditorState::CapturePlayModeScene()
+{
+    if (!m_scene)
+        return;
+
+    m_playModeSceneSnapshot = m_scene->SaveToString();
+    m_prePlayHasUnsavedChanges = m_hasUnsavedChanges;
+    OutputDebugStringA("[Play] Captured editor scene state.\n");
+}
+
+void EditorState::RestorePlayModeScene()
+{
+    if (!m_scene || m_playModeSceneSnapshot.empty())
+        return;
+
+    // Scene replacement invalidates object pointers held by editor panels.
+    for (auto& panel : m_panels)
+        if (auto* hierarchy = dynamic_cast<HierarchyView*>(panel.get()))
+            hierarchy->SetSelectedObject(nullptr);
+    if (m_primaryProperties)
+        m_primaryProperties->SetSelectedObject(nullptr);
+
+    if (m_scene->LoadFromString(m_playModeSceneSnapshot))
+    {
+        m_hasUnsavedChanges = m_prePlayHasUnsavedChanges;
+        OutputDebugStringA("[Play] Restored editor scene state.\n");
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Info, "[Play] Restored pre-play scene state.");
+    }
+    else
+    {
+        OutputDebugStringA("[Play] ERROR: Failed to restore editor scene state.\n");
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Error, "[Play] Failed to restore pre-play scene state.");
+    }
+
+    m_playModeSceneSnapshot.clear();
+}
+
 // ---------------------------------------------------------------------------
 // EditorState::InitializePanels
 // ---------------------------------------------------------------------------
@@ -217,7 +261,7 @@ void EditorState::InitializePanels()
     m_preferences = std::make_unique<PreferencesView>();
     
     OutputDebugStringA("[EditorState::InitializePanels] Calling preferences->Init\n");
-    m_preferences->Init(m_projectSettings, "");  // TODO: pass actual project file path
+    m_preferences->Init(m_projectSettings, PROJECT_FILE);
     
     OutputDebugStringA("[EditorState::InitializePanels] Checking view factory\n");
     if (m_viewFactory)

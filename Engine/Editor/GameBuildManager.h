@@ -40,8 +40,10 @@ public:
     std::function<void()> OnBuildStart;
     std::function<void(bool success)> OnBuildComplete;
     std::function<void()> OnPlayStart;
+    std::function<void()> OnPlayStop;
 
 private:
+    bool ValidateRendererPrerequisites();
     void PollBuildProcess();
     void DrainBuildPipe();
     void HandleBuildCompletion(bool success);

@@ -13,6 +13,9 @@ Object::Object(Transform transform)
 
 Object::~Object()
 {
+    for (Component* component : Components)
+        delete component;
+    Components.clear();
 }
 
 #pragma region Lifecycle methods

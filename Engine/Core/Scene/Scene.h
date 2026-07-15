@@ -84,6 +84,8 @@ public:
     // buffers are created automatically using the graphics provider stored by Init().
     bool Save(const std::string& path) const;
     bool Load(const std::string& path);
+    std::string SaveToString() const;
+    bool LoadFromString(const std::string& source);
 
     SceneSettings settings;
 

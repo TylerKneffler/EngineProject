@@ -9,15 +9,15 @@
 #include "imgui.h"
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx12.h"
+#include "imgui_impl_dx11.h"
 #if defined(ENGINE_VULKAN_ENABLED)
-    #ifndef VK_USE_PLATFORM_WIN32_KHR
-        #define VK_USE_PLATFORM_WIN32_KHR 1
-    #endif
-    #include "imgui_impl_vulkan.h"
+#include <volk.h>
+#include "imgui_impl_vulkan.h"
 #endif
 
 // DirectX 12
 #include <d3d12.h>
+#include <d3d11.h>
 #include <dxgi1_6.h>
 #include <d3dcompiler.h>
 #include <DirectXMath.h>

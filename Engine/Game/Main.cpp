@@ -54,28 +54,25 @@ int WINAPI wWinMain(
     catch (const std::exception& e)
     {
         std::string api = projectSettings.gameRenderingAPI;
-        std::string download = (api == "Vulkan") ? "\n\nDownload the Vulkan SDK: https://vulkan.lunarg.com/sdk/home" : "";
         std::string msg = "Failed to create the " + api + " renderer.\n\n"
             "Please ensure " + api + " is installed and your GPU supports it.\n\n"
-            "Details: " + e.what() + download;
+            "Details: " + e.what();
         MessageBoxA(window->GetHWND(), msg.c_str(), "Renderer Initialization Error", MB_OK | MB_ICONERROR);
         return 1;
     }
     if (!renderer)
     {
         std::string api = projectSettings.gameRenderingAPI;
-        std::string download = (api == "Vulkan") ? "\n\nDownload the Vulkan SDK: https://vulkan.lunarg.com/sdk/home" : "";
         std::string msg = "Failed to create the " + api + " renderer.\n\n"
-            "Please ensure " + api + " is installed and your GPU supports it." + download;
+            "Please ensure " + api + " is installed and your GPU supports it.";
         MessageBoxA(window->GetHWND(), msg.c_str(), "Renderer Initialization Error", MB_OK | MB_ICONERROR);
         return 1;
     }
     if (!renderer->Init(window->GetHWND(), window->GetWidth(), window->GetHeight()))
     {
         std::string api = projectSettings.gameRenderingAPI;
-        std::string download = (api == "Vulkan") ? "\n\nDownload the Vulkan SDK: https://vulkan.lunarg.com/sdk/home" : "";
         std::string msg = "Failed to initialize the " + api + " renderer.\n\n"
-            "Please ensure " + api + " is installed and your GPU driver is up to date." + download;
+            "Please ensure " + api + " is installed and your GPU driver is up to date.";
         MessageBoxA(window->GetHWND(), msg.c_str(), "Renderer Initialization Error", MB_OK | MB_ICONERROR);
         return 1;
     }

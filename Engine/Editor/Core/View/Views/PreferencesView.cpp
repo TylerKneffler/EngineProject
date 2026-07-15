@@ -1,6 +1,37 @@
 #include "PreferencesView.h"
+#include "Core/Renderers/RendererFactory.h"
 #include <pugixml.hpp>
 #include <fstream>
+
+namespace
+{
+bool DrawRendererCombo(const char* label, std::string& selectedApi)
+{
+    bool changed = false;
+    if (ImGui::BeginCombo(label, selectedApi.empty() ? "Not selected" : selectedApi.c_str()))
+    {
+        for (const auto& option : RendererFactory::GetRendererOptions())
+        {
+            const bool selected = selectedApi == option.name;
+            std::string displayName = option.name;
+            if (!option.available) displayName += " (Unavailable)";
+
+            if (!option.available) ImGui::BeginDisabled();
+            if (ImGui::Selectable(displayName.c_str(), selected) && option.available)
+            {
+                selectedApi = option.name;
+                changed = true;
+            }
+            if (!option.available && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("%s", option.unavailableReason.c_str());
+            if (!option.available) ImGui::EndDisabled();
+            if (selected) ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+    return changed;
+}
+}
 
 // ---------------------------------------------------------------------------
 // Init
@@ -54,6 +85,20 @@ void PreferencesView::DrawWindow(bool& isOpen)
             }
 
             ImGui::EndTabBar();
+        }
+
+        ImGui::Separator();
+        if (ImGui::Button("Save Project Settings"))
+        {
+            m_lastSaveSucceeded = SaveSettings();
+            m_saveStatus = m_lastSaveSucceeded ? "Project settings saved." : "Failed to save project settings.";
+        }
+        if (!m_saveStatus.empty())
+        {
+            ImGui::SameLine();
+            ImGui::TextColored(m_lastSaveSucceeded ? ImVec4(0.35f, 0.85f, 0.45f, 1.0f)
+                                                    : ImVec4(1.0f, 0.35f, 0.35f, 1.0f),
+                               "%s", m_saveStatus.c_str());
         }
     }
 
@@ -120,7 +165,19 @@ void PreferencesView::DrawRenderingSection()
     ImGui::Text("Rendering Settings");
     ImGui::Separator();
 
-    ImGui::TextDisabled("Rendering API: %s", m_settings.renderingAPI.c_str());
+    if (DrawRendererCombo("Editor Rendering API", m_settings.editorRenderingAPI))
+        NotifyChanged();
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Changing the editor renderer takes effect after restarting the editor.");
+
+    if (DrawRendererCombo("Game Rendering API", m_settings.gameRenderingAPI))
+        NotifyChanged();
+
+    for (const auto& option : RendererFactory::GetRendererOptions())
+    {
+        if (!option.available)
+            ImGui::TextDisabled("%s unavailable: %s", option.name.c_str(), option.unavailableReason.c_str());
+    }
 
     float clearColor[4] = { m_settings.clearColor.r, m_settings.clearColor.g, m_settings.clearColor.b, m_settings.clearColor.a };
     if (ImGui::ColorEdit4("Clear Color", clearColor))
@@ -217,6 +274,18 @@ bool PreferencesView::SaveSettings()
             auto defaultSceneNode = prop.child("DefaultScene");
             if (defaultSceneNode)
                 defaultSceneNode.text().set(m_settings.defaultScene.c_str());
+
+            auto renderingApi = prop.child("RenderingAPI");
+            if (renderingApi)
+                renderingApi.text().set(m_settings.gameRenderingAPI.c_str());
+
+            auto editorRenderingApi = prop.child("EditorRenderingAPI");
+            if (editorRenderingApi)
+                editorRenderingApi.text().set(m_settings.editorRenderingAPI.c_str());
+
+            auto gameRenderingApi = prop.child("GameRenderingAPI");
+            if (gameRenderingApi)
+                gameRenderingApi.text().set(m_settings.gameRenderingAPI.c_str());
 
             auto clearColorR = prop.child("ClearColorR");
             if (clearColorR)

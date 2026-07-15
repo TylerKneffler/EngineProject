@@ -89,8 +89,7 @@ static JsonValue SerialiseObject(const Object& obj)
     return node;
 }
 
-// ---- Save -------------------------------------------------------------------
-bool SceneSerializer::Save(const Scene& scene, const std::string& path)
+static JsonValue SerialiseScene(const Scene& scene)
 {
     JsonValue root = JsonValue::MakeObject();
     root.Set("version", JsonValue(1));
@@ -114,22 +113,27 @@ bool SceneSerializer::Save(const Scene& scene, const std::string& path)
             objects.Push(SerialiseObject(*obj));
     root.Set("objects", std::move(objects));
 
+    return root;
+}
+
+// ---- Save -------------------------------------------------------------------
+std::string SceneSerializer::SaveToString(const Scene& scene)
+{
+    return JsonWrite(SerialiseScene(scene));
+}
+
+bool SceneSerializer::Save(const Scene& scene, const std::string& path)
+{
     std::ofstream file(path);
     if (!file) return false;
-    file << JsonWrite(root);
+    file << SaveToString(scene);
     return file.good();
 }
 
-// ---- Load -------------------------------------------------------------------
-bool SceneSerializer::Load(Scene& scene, const std::string& path, IGraphicsProvider* graphicsProvider)
+static bool DeserialiseScene(Scene& scene, const JsonValue& root,
+    IGraphicsProvider* graphicsProvider,
+    const std::unordered_map<std::string, SceneSerializer::Factory>& registry)
 {
-    EnsureBuiltinsRegistered();
-    auto& registry = GetRegistry();
-
-    JsonValue root;
-    try { root = JsonParseFile(path); }
-    catch (const std::exception&) { return false; }
-
     if (!root.IsObject()) return false;
 
     int version = root["version"].AsInt();
@@ -220,4 +224,20 @@ bool SceneSerializer::Load(Scene& scene, const std::string& path, IGraphicsProvi
     }
 
     return true;
+}
+
+// ---- Load -------------------------------------------------------------------
+bool SceneSerializer::LoadFromString(Scene& scene, const std::string& source,
+    IGraphicsProvider* graphicsProvider)
+{
+    EnsureBuiltinsRegistered();
+    try { return DeserialiseScene(scene, JsonParse(source), graphicsProvider, GetRegistry()); }
+    catch (const std::exception&) { return false; }
+}
+
+bool SceneSerializer::Load(Scene& scene, const std::string& path, IGraphicsProvider* graphicsProvider)
+{
+    EnsureBuiltinsRegistered();
+    try { return DeserialiseScene(scene, JsonParseFile(path), graphicsProvider, GetRegistry()); }
+    catch (const std::exception&) { return false; }
 }

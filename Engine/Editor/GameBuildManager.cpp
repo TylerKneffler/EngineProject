@@ -1,10 +1,15 @@
 #include "pch.h"
 #include "Engine/Editor/GameBuildManager.h"
 #include "Core/View/Views/ConsoleView.h"
+#include "Core/ProjectLoader.h"
+#include "Core/Renderers/RendererFactory.h"
 
 // Fallback for IntelliSense — CMake overrides these with real absolute paths.
 #ifndef ENGINE_BUILD_DIR
 #define ENGINE_BUILD_DIR "build/Debug"
+#endif
+#ifndef PROJECT_FILE
+#define PROJECT_FILE "Example_Proj.proj"
 #endif
 
 // Forward declaration
@@ -33,6 +38,14 @@ void GameBuildManager::StartBuild(PostBuildAction action)
     if (m_buildProcess)
         return; // Already building
 
+    if (!ValidateRendererPrerequisites())
+    {
+        m_playState = PlayState::BuildFailed;
+        m_postBuildAction = PostBuildAction::Nothing;
+        if (OnBuildComplete) OnBuildComplete(false);
+        return;
+    }
+
     // Start the background build process
     m_buildProcess = StartGameBuild(m_buildPipe);
     if (m_buildProcess)
@@ -46,6 +59,46 @@ void GameBuildManager::StartBuild(PostBuildAction action)
     else
     {
         m_playState = PlayState::BuildFailed;
+    }
+}
+
+bool GameBuildManager::ValidateRendererPrerequisites()
+{
+    for (const auto& option : RendererFactory::GetRendererOptions())
+    {
+        const std::string line = "[Build][Renderer] " + option.name + ": " +
+            (option.available ? "available" : "UNAVAILABLE - " + option.unavailableReason);
+        OutputDebugStringA((line + "\n").c_str());
+        if (m_console)
+            m_console->AddLog(option.available ? ConsoleView::Level::Info : ConsoleView::Level::Warning, line);
+    }
+
+    try
+    {
+        ProjectLoader loader;
+        const ProjectSettings settings = loader.LoadProject(PROJECT_FILE);
+        std::string reason;
+        if (!RendererFactory::IsRendererAvailable(settings.gameRenderingAPI, &reason))
+        {
+            const std::string error = "[Build][Renderer] Cannot build/run with " +
+                settings.gameRenderingAPI + ": " + reason;
+            OutputDebugStringA((error + "\n").c_str());
+            if (m_console) m_console->AddLog(ConsoleView::Level::Error, error);
+            return false;
+        }
+
+        const std::string selected = "[Build][Renderer] Selected game renderer: " + settings.gameRenderingAPI;
+        OutputDebugStringA((selected + "\n").c_str());
+        if (m_console) m_console->AddLog(ConsoleView::Level::Info, selected);
+        return true;
+    }
+    catch (const std::exception& error)
+    {
+        const std::string message = "[Build][Renderer] Failed to validate project renderer settings: " +
+            std::string(error.what());
+        OutputDebugStringA((message + "\n").c_str());
+        if (m_console) m_console->AddLog(ConsoleView::Level::Error, message);
+        return false;
     }
 }
 
@@ -84,6 +137,8 @@ void GameBuildManager::Stop()
     {
         m_playState = PlayState::Stopped;
         m_postBuildAction = PostBuildAction::Nothing;
+        if (OnPlayStop)
+            OnPlayStop();
         if (m_console)
             m_console->AddLog(ConsoleView::Level::Info, "[Play] Stopped.");
     }

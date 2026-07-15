@@ -98,8 +98,13 @@ int WINAPI wWinMain(
 
     gameBuildManager->OnPlayStart = [&]()
     {
+        editorState->CapturePlayModeScene();
         for (const auto& obj : scene->GetObjects())
             obj->Start();
+    };
+    gameBuildManager->OnPlayStop = [&]()
+    {
+        editorState->RestorePlayModeScene();
     };
 
     // Frame timing
@@ -183,7 +188,6 @@ int WINAPI wWinMain(
             OutputDebugStringA("[OnUpdate] PlayState is Playing, updating objects\n");
             for (const auto& obj : scene->GetObjects())
                 obj->Update();
-            editorState->SetHasUnsavedChanges(true);
         }
         OutputDebugStringA("[OnUpdate] After playState check\n");
 
