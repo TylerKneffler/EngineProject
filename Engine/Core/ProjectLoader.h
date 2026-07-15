@@ -15,6 +15,7 @@ struct ProjectSettings
     std::string description;
 
     // Paths
+    std::string engineDirectory;
     std::string assetsDirectory;
     std::string sceneDirectory;
     std::string scriptsDirectory;
@@ -63,7 +64,7 @@ struct ProjectSettings
 //
 // Usage:
 //   ProjectLoader loader;
-//   ProjectSettings settings = loader.LoadProject("Example_Proj.proj");
+//   ProjectSettings settings = loader.LoadProject("MyGame.proj");
 //   renderer.SetClearColor(settings.clearColor);
 //   assetsExplorer.Init(settings.assetsDirectory);
 // ---------------------------------------------------------------------------

@@ -28,7 +28,7 @@ class IGraphicsProvider;
 // Load() call, typically at application startup:
 //
 //   SceneSerializer::Register("Rotate", []() -> Component* { return new Rotate(); });
-//   scene.Load("Assets/Scenes/default.scene");
+//   scene.Load("Assets/Scenes/level1.scene");
 // ---------------------------------------------------------------------------
 class SceneSerializer
 {

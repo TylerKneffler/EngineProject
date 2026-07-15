@@ -1,0 +1,29 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "CMake: Configure Debug",
+      "type": "process",
+      "command": "cmake",
+      "args": ["-S", "${workspaceFolder}", "-B", "${workspaceFolder}/build/Debug", "-G", "Visual Studio 17 2022", "-A", "x64"]
+    },
+    {
+      "label": "CMake: Build Debug",
+      "type": "process",
+      "command": "cmake",
+      "args": ["--build", "${workspaceFolder}/build/Debug", "--config", "Debug", "--parallel"],
+      "dependsOn": "CMake: Configure Debug",
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "Engine: Start Editor",
+      "type": "process",
+      "command": "${workspaceFolder}/build/Debug/Engine/Debug/Editor.exe",
+      "options": { "cwd": "${workspaceFolder}" },
+      "dependsOn": "CMake: Build Debug",
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    }
+  ]
+}

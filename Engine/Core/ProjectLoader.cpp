@@ -68,6 +68,10 @@ void ProjectLoader::ParsePaths(const pugi::xml_node& projectNode, ProjectSetting
 {
     for (auto prop : projectNode.children("PropertyGroup"))
     {
+        auto engineDir = prop.child("EngineDirectory");
+        if (engineDir)
+            settings.engineDirectory = engineDir.child_value();
+
         auto assetsDir = prop.child("AssetsDirectory");
         if (assetsDir)
             settings.assetsDirectory = assetsDir.child_value();

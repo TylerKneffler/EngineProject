@@ -12,7 +12,7 @@
 #define ASSETS_PATH "Assets/"
 #endif
 #ifndef PROJECT_FILE
-#define PROJECT_FILE "Example_Proj.proj"
+#define PROJECT_FILE ""
 #endif
 #ifndef ENGINE_ASSETS_PATH
 #define ENGINE_ASSETS_PATH "Engine/Core/Assets/"

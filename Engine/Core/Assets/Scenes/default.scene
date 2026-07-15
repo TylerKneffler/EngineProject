@@ -44,7 +44,7 @@
             "components": [
                 {
                     "type": "Mesh",
-                    "file": "C:/Users/tyler/source/repos/EngineProject/Assets/cube.obj"
+                    "file": "Assets/Mesh/cube.obj"
                 },
                 {
                     "type": "Material",

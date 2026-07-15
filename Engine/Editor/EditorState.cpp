@@ -12,15 +12,13 @@
 #include <chrono>
 #include <filesystem>
 
-#ifndef PROJECT_FILE
-#define PROJECT_FILE "Example_Proj.proj"
-#endif
-
 // ---------------------------------------------------------------------------
 // EditorState::EditorState
 // ---------------------------------------------------------------------------
-EditorState::EditorState(HINSTANCE hInstance, const ProjectSettings& projectSettings)
+EditorState::EditorState(HINSTANCE hInstance, const ProjectSettings& projectSettings,
+    std::string projectFilePath)
     : m_projectSettings(projectSettings)
+    , m_projectFilePath(std::move(projectFilePath))
 {
     try
     {
@@ -261,7 +259,7 @@ void EditorState::InitializePanels()
     m_preferences = std::make_unique<PreferencesView>();
     
     OutputDebugStringA("[EditorState::InitializePanels] Calling preferences->Init\n");
-    m_preferences->Init(m_projectSettings, PROJECT_FILE);
+    m_preferences->Init(m_projectSettings, m_projectFilePath);
     
     OutputDebugStringA("[EditorState::InitializePanels] Checking view factory\n");
     if (m_viewFactory)

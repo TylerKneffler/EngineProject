@@ -26,9 +26,35 @@ If Git reports `detected dubious ownership` for an existing checkout, trust only
 git config --global --add safe.directory "C:/path/to/EngineProject"
 ```
 
-## Build
+## Create a project
 
-Run all commands from the repository root.
+The engine repository contains no root `Assets` directory or embedded game project. Build and start the engine editor:
+
+```powershell
+cmake -S . -B build/Debug -G "Visual Studio 17 2022" -A x64
+cmake --build build/Debug --config Debug --target Editor --parallel
+.\build\Debug\Debug\Editor.exe
+```
+
+When no valid `.proj` exists in the working directory, `Editor.exe` opens the Project Hub. From there you can:
+
+- Create a project in a new folder.
+- Open an existing `.proj` file.
+- Reopen projects recorded in the recent-project list.
+
+New projects reference this engine checkout from their generated `CMakeLists.txt` and `.proj` file. Starter content from `Engine/Core/Assets` is copied into the new project's `Assets` directory, where it becomes project-owned.
+
+If exactly one `.proj` exists in the working directory, the editor opens it automatically. You can also pass a project explicitly:
+
+```powershell
+.\Editor.exe "C:\Projects\MyGame\MyGame.proj"
+```
+
+After creating a project, build from its folder so project-owned C++ scripts are linked into its Editor and Game executables.
+
+## Build a project
+
+Run these commands from the generated project folder.
 
 ### Debug
 
@@ -58,41 +84,54 @@ cmake -S . -B build/Release -G "Visual Studio 17 2022" -A x64
 cmake --build build/Release --config Release --parallel
 ```
 
-The first configure may take a few minutes while dependencies are downloaded. Later configurations use the cached dependency sources.
+The first configure may take a few minutes while dependencies are downloaded. Later configurations use the project build directory's cached dependency sources.
 
 ## Start the engine editor
 
-The editor must be started with the repository root as its working directory because project, shader, scene, and asset paths are resolved from there.
+The editor must be started with the generated project folder as its working directory because project scenes and assets are resolved from there.
 
 Debug:
 
 ```powershell
-.\build\Debug\Debug\Editor.exe
+.\build\Debug\Engine\Debug\Editor.exe
 ```
 
 Release:
 
 ```powershell
-.\build\Release\Release\Editor.exe
+.\build\Release\Engine\Release\Editor.exe
 ```
 
-You can also open `build/Debug/EngineProject.sln` in Visual Studio, select `Editor` as the startup project, and ensure its working directory is the repository root.
+You can also open the generated solution under `build/Debug`. `Editor` is configured as the startup project automatically: Visual Studio's green Play button or F5 builds it when needed and launches it with the generated project folder as its working directory. An engine-only solution launches the Project Hub instead.
 
 ## Start the standalone game
 
 Build the `Game` target first, then run:
 
 ```powershell
-.\build\Debug\Debug\Game.exe
+.\build\Debug\Engine\Debug\Game.exe
 ```
 
 For a Release build:
 
 ```powershell
-.\build\Release\Release\Game.exe
+.\build\Release\Engine\Release\Game.exe
 ```
 
 The editor's **File** menu also provides build-and-run commands for running in the editor or launching the standalone game.
+
+## Project and engine assets
+
+Each generated project owns its own `Assets/` directory. Add project scenes, meshes, textures, and scripts there. The generated `.proj` points the editor at this directory, and the generated CMake build compiles project-owned `.cpp` scripts.
+
+`Engine/Core/Assets/` contains immutable starter content owned by the engine. The Project Hub copies it into each new project's `Assets/` directory. Project-specific content should never be added to the engine copy.
+
+Asset paths stored in scene files must be relative to the project working directory. For example:
+
+```text
+Assets/Mesh/player.obj
+Assets/Mesh/cube.obj
+```
 
 ## Select a renderer
 
@@ -104,7 +143,7 @@ Open **File > Project Preferences > Rendering** and choose separate renderers fo
 
 An unavailable renderer is disabled and displays the reason. Save the project settings after changing a selection. Changing the editor renderer requires restarting the editor.
 
-The same options can be configured directly in `Example_Proj.proj`:
+The same options can be configured directly in the generated `<ProjectName>.proj` file:
 
 ```xml
 <EditorRenderingAPI>DirectX12</EditorRenderingAPI>
@@ -121,7 +160,7 @@ cmake -S . -B build/Debug -G "Visual Studio 17 2022" -A x64 -DENGINE_ENABLE_VULK
 
 ## VS Code tasks
 
-The repository includes tasks under `.vscode/tasks.json` for configuring and building Debug or Release configurations. Run **Tasks: Run Build Task** from the command palette to configure and build Debug. To build and launch the editor with the correct working directory, run **Tasks: Run Task > Engine: Start Editor (Debug)**.
+Every generated project includes `.vscode/tasks.json`. Open the generated project folder in VS Code, then run **Tasks: Run Task > Engine: Start Editor** to configure, build, and launch with the correct working directory.
 
 ## Common problems
 
@@ -135,7 +174,7 @@ Update the GPU driver and install current Windows updates. DirectX 12 requires a
 
 ### Shaders, assets, or the project file cannot be found
 
-Start `Editor.exe` or `Game.exe` from the repository root. Starting an executable with another working directory prevents relative asset and shader paths from resolving.
+Start `Editor.exe` or `Game.exe` from the generated project folder. Starting an executable with another working directory prevents project-relative asset paths from resolving.
 
 ### Reconfigure from scratch
 

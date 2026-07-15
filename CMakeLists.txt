@@ -4,6 +4,29 @@ project(EngineProject C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# This CMake project can be built directly for engine development or consumed
+# by a generated game project via add_subdirectory(). Generated projects set
+# ENGINE_PROJECT_DIR and ENGINE_PROJECT_FILE before referencing the engine.
+set(ENGINE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
+if(NOT DEFINED ENGINE_PROJECT_DIR)
+    set(ENGINE_PROJECT_DIR "" CACHE PATH "Game project root")
+endif()
+if(NOT DEFINED ENGINE_PROJECT_FILE)
+    set(ENGINE_PROJECT_FILE "" CACHE FILEPATH "Game project .proj file")
+endif()
+
+if(ENGINE_PROJECT_DIR)
+    cmake_path(ABSOLUTE_PATH ENGINE_PROJECT_DIR NORMALIZE)
+    set(ENGINE_RUNTIME_WORKING_DIRECTORY "${ENGINE_PROJECT_DIR}")
+    file(GLOB_RECURSE ASSET_SOURCES CONFIGURE_DEPENDS
+        "${ENGINE_PROJECT_DIR}/Assets/*.cpp"
+    )
+else()
+    set(ENGINE_RUNTIME_WORKING_DIRECTORY "${ENGINE_ROOT}")
+    set(ASSET_SOURCES)
+    message(STATUS "[Project] Engine-only build. Editor.exe will open the project launcher.")
+endif()
+
 include(FetchContent)
 
 set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
@@ -58,16 +81,15 @@ set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
 # files are added or removed, keeping targets up to date automatically.
 # ---------------------------------------------------------------------------
 file(GLOB_RECURSE ENGINE_SOURCES CONFIGURE_DEPENDS
-    "${CMAKE_SOURCE_DIR}/Engine/Core/*.cpp"
+    "${ENGINE_ROOT}/Engine/Core/*.cpp"
 )
+# Engine/Core/Assets contains project template content, not engine code.
+list(FILTER ENGINE_SOURCES EXCLUDE REGEX "[/\\\\]Assets[/\\\\]")
 file(GLOB_RECURSE EDITOR_SOURCES CONFIGURE_DEPENDS
-    "${CMAKE_SOURCE_DIR}/Engine/Editor/*.cpp"
+    "${ENGINE_ROOT}/Engine/Editor/*.cpp"
 )
 file(GLOB_RECURSE GAME_SOURCES CONFIGURE_DEPENDS
-    "${CMAKE_SOURCE_DIR}/Engine/Game/*.cpp"
-)
-file(GLOB_RECURSE ASSET_SOURCES CONFIGURE_DEPENDS
-    "${CMAKE_SOURCE_DIR}/Assets/*.cpp"
+    "${ENGINE_ROOT}/Engine/Game/*.cpp"
 )
 
 # ---------------------------------------------------------------------------
@@ -132,8 +154,8 @@ add_library(Engine STATIC
     ${ENGINE_SOURCES}
 )
 target_include_directories(Engine PUBLIC
-    ${CMAKE_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/Engine
+    ${ENGINE_ROOT}
+    ${ENGINE_ROOT}/Engine
 )
 target_precompile_headers(Engine PRIVATE Engine/pch.h)
 target_link_libraries(Engine PUBLIC
@@ -148,7 +170,7 @@ target_link_libraries(Engine PUBLIC
     pugixml
 )
 target_compile_definitions(Engine PUBLIC
-    ENGINE_SHADERS_PATH="${CMAKE_SOURCE_DIR}/Engine/Core/Shaders/"
+    ENGINE_SHADERS_PATH="${ENGINE_ROOT}/Engine/Core/Shaders/"
 )
 
 if(ENGINE_VULKAN_ENABLED)
@@ -163,7 +185,7 @@ if(ENGINE_VULKAN_ENABLED)
                 set(SHADER_PROFILE ps_6_0)
                 set(SHADER_ENTRY PSMain)
             endif()
-            set(SHADER_SOURCE "${CMAKE_SOURCE_DIR}/Engine/Core/Shaders/${SHADER_NAME}.hlsl")
+            set(SHADER_SOURCE "${ENGINE_ROOT}/Engine/Core/Shaders/${SHADER_NAME}.hlsl")
             set(SHADER_OUTPUT "${VULKAN_SHADER_DIR}/${SHADER_NAME}.${STAGE}.spv")
             add_custom_command(
                 OUTPUT "${SHADER_OUTPUT}"
@@ -220,23 +242,31 @@ add_executable(Editor WIN32
     ${EDITOR_SOURCES}
     ${ASSET_SOURCES}
 )
-target_link_libraries(Editor PRIVATE Engine shell32.lib)
+target_link_libraries(Editor PRIVATE Engine shell32.lib ole32.lib comdlg32.lib)
 target_precompile_headers(Editor REUSE_FROM Engine)
 target_include_directories(Editor PRIVATE
-    ${CMAKE_SOURCE_DIR}/Engine
-    ${CMAKE_SOURCE_DIR}/Engine/Editor
-    ${CMAKE_SOURCE_DIR}/Engine/Editor/Core
-    ${CMAKE_SOURCE_DIR}/Assets
+    ${ENGINE_ROOT}/Engine
+    ${ENGINE_ROOT}/Engine/Editor
+    ${ENGINE_ROOT}/Engine/Editor/Core
+    ${ENGINE_PROJECT_DIR}/Assets
 )
 target_compile_definitions(Editor PRIVATE
-    ASSETS_PATH="${CMAKE_SOURCE_DIR}/Assets/"
-    PROJECT_FILE="${CMAKE_SOURCE_DIR}/Example_Proj.proj"
+    ASSETS_PATH="${ENGINE_PROJECT_DIR}/Assets/"
+    PROJECT_FILE="${ENGINE_PROJECT_FILE}"
     ENGINE_BUILD_DIR="${CMAKE_BINARY_DIR}"
-    ENGINE_ASSETS_PATH="${CMAKE_SOURCE_DIR}/Engine/Core/Assets/"
+    ENGINE_ASSETS_PATH="${ENGINE_ROOT}/Engine/Core/Assets/"
+    ENGINE_ROOT_PATH="${ENGINE_ROOT}"
+    GAME_EXECUTABLE_PATH="${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/Game.exe"
 )
 set_target_properties(Editor PROPERTIES
-    VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    VS_DEBUGGER_COMMAND "$<TARGET_FILE:Editor>"
+    VS_DEBUGGER_WORKING_DIRECTORY "${ENGINE_RUNTIME_WORKING_DIRECTORY}"
 )
+
+# Make Visual Studio's green Play button / F5 build and launch the editor by
+# default. Setting this on the top-level directory also applies when the engine
+# is referenced by a generated project's add_subdirectory().
+set_property(DIRECTORY "${CMAKE_SOURCE_DIR}" PROPERTY VS_STARTUP_PROJECT Editor)
 
 # ---------------------------------------------------------------------------
 # Game — standalone runtime built when pressing Play in the editor
@@ -248,16 +278,16 @@ add_executable(Game WIN32
 target_link_libraries(Game PRIVATE Engine)
 target_precompile_headers(Game REUSE_FROM Engine)
 target_include_directories(Game PRIVATE
-    ${CMAKE_SOURCE_DIR}/Engine
-    ${CMAKE_SOURCE_DIR}/Assets
+    ${ENGINE_ROOT}/Engine
+    ${ENGINE_PROJECT_DIR}/Assets
 )
 target_compile_definitions(Game PRIVATE
-    ASSETS_PATH="${CMAKE_SOURCE_DIR}/Assets/"
-    PROJECT_FILE="${CMAKE_SOURCE_DIR}/Example_Proj.proj"
-    ENGINE_ASSETS_PATH="${CMAKE_SOURCE_DIR}/Engine/Core/Assets/"
+    ASSETS_PATH="${ENGINE_PROJECT_DIR}/Assets/"
+    PROJECT_FILE="${ENGINE_PROJECT_FILE}"
+    ENGINE_ASSETS_PATH="${ENGINE_ROOT}/Engine/Core/Assets/"
 )
 set_target_properties(Game PROPERTIES
-    VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    VS_DEBUGGER_WORKING_DIRECTORY "${ENGINE_RUNTIME_WORKING_DIRECTORY}"
 )
 
 

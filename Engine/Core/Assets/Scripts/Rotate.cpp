@@ -1,4 +1,4 @@
-#include "Core/Assets/Scripts/Rotate.h"
+#include "Scripts/Rotate.h"
 #include "Core/Object.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include <glm/gtc/matrix_transform.hpp>

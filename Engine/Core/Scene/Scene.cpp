@@ -242,13 +242,11 @@ void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverri
 {
     if (!context)
     {
-        OutputDebugStringA("[Scene::Render] Context is null\n");
         return;
     }
 
     if (!m_graphicsProvider || !m_gridPipeline || !m_objectPipeline)
     {
-        OutputDebugStringA("[Scene::Render] Graphics provider or pipelines not initialized\n");
         return;
     }
 
@@ -260,14 +258,12 @@ void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverri
         cam = editorCamera.GetComponent<Camera>();
     if (!cam)
     {
-        OutputDebugStringA("[Scene::Render] No camera available\n");
         return;
     }
 
     XMMATRIX view = cam->GetViewMatrix();
     XMMATRIX proj = cam->GetProjectionMatrix(aspect);
 
-    OutputDebugStringA(("[Scene::Render] Rendering " + std::to_string(m_objects.size()) + " objects\n").c_str());
 
     // Draw all scene objects that have a Mesh component
     UINT slot = 0;
@@ -280,16 +276,13 @@ void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverri
         Mesh* mesh = obj->GetComponent<Mesh>();
         if (!mesh)
         {
-            OutputDebugStringA(("[Scene::Render] Object '" + obj->name + "' has no mesh\n").c_str());
             continue;
         }
         if (!mesh->IsReady())
         {
-            OutputDebugStringA(("[Scene::Render] Mesh for '" + obj->name + "' is not ready\n").c_str());
             continue;
         }
         
-        OutputDebugStringA(("[Scene::Render] Drawing object '" + obj->name + "' with " + std::to_string(mesh->GetVertexCount()) + " vertices\n").c_str());
 
         Material* mat = obj->GetComponent<Material>();
         glm::mat4 glmWorld = obj->transform.GetWorldMatrix();

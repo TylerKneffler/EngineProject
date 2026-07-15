@@ -194,19 +194,15 @@ void DX12EditorRenderer::RenderIfNeeded(std::function<void()> drawFn)
 // ---------------------------------------------------------------------------
 void DX12EditorRenderer::BeginFrame()
 {
-    OutputDebugStringA("[BeginFrame] Entry\n");
     // Wait for the GPU to finish with this slot's allocator.
     if (m_fence->GetCompletedValue() < m_fenceValues[m_frameIndex])
     {
-        OutputDebugStringA("[BeginFrame] Waiting for fence\n");
         ThrowIfFailed(m_fence->SetEventOnCompletion(
             m_fenceValues[m_frameIndex], m_fenceEvent));
         WaitForSingleObject(m_fenceEvent, INFINITE);
     }
 
-    OutputDebugStringA("[BeginFrame] Resetting command allocator\n");
     ThrowIfFailed(m_commandAllocators[m_frameIndex]->Reset());
-    OutputDebugStringA("[BeginFrame] Resetting command list\n");
     ThrowIfFailed(m_commandList->Reset(
         m_commandAllocators[m_frameIndex].Get(), nullptr));
 
@@ -229,14 +225,10 @@ void DX12EditorRenderer::BeginFrame()
     D3D12_CPU_DESCRIPTOR_HANDLE rtv = GetCurrentRTV();
     m_commandList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
 
-    OutputDebugStringA("[BeginFrame] Calling ImGui_ImplDX12_NewFrame\n");
     m_currentRTVHandle = GetCurrentRTV();
     ImGui_ImplDX12_NewFrame();
-    OutputDebugStringA("[BeginFrame] Calling ImGui_ImplWin32_NewFrame\n");
     ImGui_ImplWin32_NewFrame();
-    OutputDebugStringA("[BeginFrame] Calling ImGui::NewFrame\n");
     ImGui::NewFrame();
-    OutputDebugStringA("[BeginFrame] Complete\n");
 }
 
 // ---------------------------------------------------------------------------

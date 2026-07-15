@@ -1,0 +1,58 @@
+<?xml version="1.0"?>
+<Project ToolsVersion="4.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <ProjectName>{{PROJECT_NAME}}</ProjectName>
+    <ProjectVersion>1.0.0</ProjectVersion>
+    <ProjectDescription>A project built with EngineProject</ProjectDescription>
+    <EngineDirectory>{{ENGINE_ROOT}}</EngineDirectory>
+  </PropertyGroup>
+  <PropertyGroup>
+    <AssetsDirectory>Assets/</AssetsDirectory>
+    <SceneDirectory>Assets/Scenes/</SceneDirectory>
+    <ScriptsDirectory>Assets/Scripts/</ScriptsDirectory>
+    <ShadersDirectory>{{ENGINE_ROOT}}/Engine/Core/Shaders/</ShadersDirectory>
+    <BuildDirectory>build/</BuildDirectory>
+  </PropertyGroup>
+  <PropertyGroup>
+    <CMakeGenerator>Visual Studio 17 2022</CMakeGenerator>
+    <Platform>x64</Platform>
+    <DefaultScene>Assets/Scenes/default.scene</DefaultScene>
+    <ViewportWidth>1280</ViewportWidth>
+    <ViewportHeight>720</ViewportHeight>
+    <LeftPanelWidth>0.20</LeftPanelWidth>
+    <RightPanelWidth>0.31</RightPanelWidth>
+  </PropertyGroup>
+  <ItemGroup>
+    <LeftPanelTab Include="HierarchyView" />
+    <LeftPanelTab Include="Assets" />
+    <CenterPanelTab Include="Scene" />
+    <CenterPanelTab Include="Game" />
+    <RightPanel Include="Properties" />
+  </ItemGroup>
+  <PropertyGroup>
+    <RenderingAPI>DirectX12</RenderingAPI>
+    <EditorRenderingAPI>DirectX12</EditorRenderingAPI>
+    <GameRenderingAPI>DirectX12</GameRenderingAPI>
+    <ClearColorR>0.18</ClearColorR>
+    <ClearColorG>0.18</ClearColorG>
+    <ClearColorB>0.18</ClearColorB>
+    <ClearColorA>1.0</ClearColorA>
+    <TargetFramerate>60</TargetFramerate>
+  </PropertyGroup>
+  <PropertyGroup>
+    <AspectRatioMode>Free</AspectRatioMode>
+    <GameAspectRatio>1.777</GameAspectRatio>
+    <GameWindowWidth>1920</GameWindowWidth>
+    <GameWindowHeight>1080</GameWindowHeight>
+    <LetterboxColorR>0.0</LetterboxColorR>
+    <LetterboxColorG>0.0</LetterboxColorG>
+    <LetterboxColorB>0.0</LetterboxColorB>
+    <LetterboxColorA>1.0</LetterboxColorA>
+  </PropertyGroup>
+  <ItemGroup>
+    <BuiltInComponent Include="Transform" />
+    <BuiltInComponent Include="Mesh" />
+    <BuiltInComponent Include="Material" />
+    <BuiltInComponent Include="Camera" />
+  </ItemGroup>
+</Project>

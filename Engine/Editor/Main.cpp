@@ -6,10 +6,13 @@
 #include "Engine/Editor/EditorState.h"
 #include "Engine/Editor/GameBuildManager.h"
 #include "Engine/Editor/EditorUI.h"
+#include "Engine/Editor/ProjectLauncher.h"
+#include <filesystem>
+#include <shellapi.h>
 
 // Fallback for IntelliSense
 #ifndef PROJECT_FILE
-#define PROJECT_FILE "Example_Proj.proj"
+#define PROJECT_FILE ""
 #endif
 #ifndef ASSETS_PATH
 #define ASSETS_PATH "Assets/"
@@ -26,25 +29,68 @@ int WINAPI wWinMain(
     _In_     LPWSTR    /*lpCmdLine*/,
     _In_     int       /*nShowCmd*/)
 {
-    // Load project configuration
+    HRESULT comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+
+    auto resolveProject = []() -> std::string
+    {
+        int argumentCount = 0;
+        LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
+        if (arguments)
+        {
+            if (argumentCount > 1 && std::filesystem::exists(arguments[1]))
+            {
+                std::string path = std::filesystem::absolute(arguments[1]).string();
+                LocalFree(arguments);
+                return path;
+            }
+            LocalFree(arguments);
+        }
+
+        if (std::string(PROJECT_FILE).size() > 0 && std::filesystem::exists(PROJECT_FILE))
+            return std::filesystem::absolute(PROJECT_FILE).string();
+
+        std::vector<std::string> projects;
+        for (const auto& entry : std::filesystem::directory_iterator(std::filesystem::current_path()))
+            if (entry.is_regular_file() && entry.path().extension() == ".proj")
+                projects.push_back(std::filesystem::absolute(entry.path()).string());
+        if (projects.size() == 1)
+            return projects.front();
+        for (const auto& project : projects)
+            ProjectLauncher::RememberProject(project);
+        return {};
+    };
+
+    std::string projectFile = resolveProject();
     ProjectLoader projectLoader;
     ProjectSettings projectSettings;
-    try
+    while (true)
     {
-        projectSettings = projectLoader.LoadProject(PROJECT_FILE);
-    }
-    catch (const std::exception& e)
-    {
-        std::cerr << "Warning: Failed to load project file: " << e.what() << std::endl;
-        projectSettings.assetsDirectory = ASSETS_PATH;
-        projectSettings.viewportWidth = 1280;
-        projectSettings.viewportHeight = 720;
-        projectSettings.clearColor = glm::vec4(0.18f, 0.18f, 0.18f, 1.0f);
+        if (projectFile.empty())
+            projectFile = ProjectLauncher::Run(hInstance);
+        if (projectFile.empty())
+        {
+            if (SUCCEEDED(comResult)) CoUninitialize();
+            return 0;
+        }
+
+        try
+        {
+            projectFile = std::filesystem::weakly_canonical(projectFile).string();
+            std::filesystem::current_path(std::filesystem::path(projectFile).parent_path());
+            projectSettings = projectLoader.LoadProject(projectFile);
+            ProjectLauncher::RememberProject(projectFile);
+            break;
+        }
+        catch (const std::exception& error)
+        {
+            MessageBoxA(nullptr, error.what(), "Could not open project", MB_OK | MB_ICONERROR);
+            projectFile.clear();
+        }
     }
 
     // Create editor state and UI
     OutputDebugStringA("[Main] Creating EditorState...\n");
-    auto editorState = std::make_unique<EditorState>(hInstance, projectSettings);
+    auto editorState = std::make_unique<EditorState>(hInstance, projectSettings, projectFile);
     OutputDebugStringA("[Main] EditorState created, calling Init...\n");
     if (!editorState->Init())
         return 1;
@@ -62,7 +108,7 @@ int WINAPI wWinMain(
     OutputDebugStringA("[Main] EditorUI created\n");
     
     OutputDebugStringA("[Main] Creating GameBuildManager...\n");
-    auto gameBuildManager = std::make_unique<GameBuildManager>(editorState->GetConsole());
+    auto gameBuildManager = std::make_unique<GameBuildManager>(editorState->GetConsole(), projectFile);
     OutputDebugStringA("[Main] GameBuildManager created\n");
     editorUI->SetGameBuildManager(gameBuildManager.get());
     OutputDebugStringA("[Main] Getting window, renderer, scene...\n");
@@ -130,28 +176,16 @@ int WINAPI wWinMain(
         sprintf_s(buf, "[OnResize] Called with w=%u, h=%u\n", w, h);
         OutputDebugStringA(buf);
         
-        sprintf_s(buf, "[OnResize] renderer pointer: %p\n", (void*)renderer);
-        OutputDebugStringA(buf);
-        
-        OutputDebugStringA("[OnResize] Calling renderer->Resize...\n");
         renderer->Resize(w, h);
-        OutputDebugStringA("[OnResize] renderer->Resize completed\n");
-        
-        OutputDebugStringA("[OnResize] Iterating panels...\n");
         for (auto& panel : editorState->GetPanels())
         {
             if (panel->NeedsRender())
             {
-                OutputDebugStringA("[OnResize] Resizing a panel view...\n");
                 class View* view = reinterpret_cast<class View*>(panel.get());
                 view->Resize(renderer->GetNativeDeviceHandle(), w, h);
             }
         }
-        OutputDebugStringA("[OnResize] Panels resized\n");
-        
-        OutputDebugStringA("[OnResize] Calling renderer->MarkDirty...\n");
         renderer->MarkDirty();
-        OutputDebugStringA("[OnResize] renderer->MarkDirty completed\n");
     };
     OutputDebugStringA("[Main] OnResize callback set\n");
 
@@ -164,75 +198,53 @@ int WINAPI wWinMain(
     OutputDebugStringA("[Main] Setting OnUpdate callback...\n");
     window->OnUpdate = [&]()
     {
-        OutputDebugStringA("[OnUpdate] Entry\n");
         // Update delta time
-        OutputDebugStringA("[OnUpdate] Querying performance counter\n");
         LARGE_INTEGER now;
         QueryPerformanceCounter(&now);
-        OutputDebugStringA("[OnUpdate] Calculating delta time\n");
         float dt = static_cast<float>(now.QuadPart - lastCounter.QuadPart)
                  / static_cast<float>(perfFreq.QuadPart);
         lastCounter = now;
         (void)dt;
 
         // Update build manager
-        OutputDebugStringA("[OnUpdate] Updating build manager\n");
         PostBuildAction postBuildAction;
         gameBuildManager->Update(playState, postBuildAction);
-        OutputDebugStringA("[OnUpdate] Build manager updated\n");
 
         // Tick game objects while playing
-        OutputDebugStringA("[OnUpdate] Checking playState\n");
         if (playState == PlayState::Playing)
         {
-            OutputDebugStringA("[OnUpdate] PlayState is Playing, updating objects\n");
             for (const auto& obj : scene->GetObjects())
                 obj->Update();
         }
-        OutputDebugStringA("[OnUpdate] After playState check\n");
 
-        OutputDebugStringA("[OnUpdate] Calling renderer->MarkDirty\n");
         renderer->MarkDirty();
-        OutputDebugStringA("[OnUpdate] MarkDirty completed\n");
 
         // Update window title
-        OutputDebugStringA("[OnUpdate] Updating window title\n");
         SetWindowTextW(window->GetHWND(),
                        editorState->HasUnsavedChanges() ? L"Engine Editor *" : L"Engine Editor");
-        OutputDebugStringA("[OnUpdate] Window title updated\n");
 
         // Render frame
-        OutputDebugStringA("[OnUpdate] Calling RenderIfNeeded\n");
         renderer->RenderIfNeeded([&]()
         {
-            OutputDebugStringA("[RenderIfNeeded Lambda] Entry\n");
-            OutputDebugStringA("[RenderIfNeeded Lambda] Calling renderer->Clear\n");
             renderer->Clear(projectSettings.clearColor.r, projectSettings.clearColor.g, projectSettings.clearColor.b);
-            OutputDebugStringA("[RenderIfNeeded Lambda] Clear completed\n");
 
             // Render 3D panels
-            OutputDebugStringA("[RenderIfNeeded Lambda] Rendering 3D panels\n");
             for (auto& panel : editorState->GetPanels())
             {
-                if (!panel) { OutputDebugStringA("[RenderIfNeeded Lambda] NULL panel in list!\n"); continue; }
-                OutputDebugStringA(("[RenderIfNeeded Lambda] Panel: " + panel->GetTitle() + " NeedsRender=" + std::to_string(panel->NeedsRender()) + " IsOpen=" + std::to_string(panel->IsOpen()) + "\n").c_str());
+                if (!panel) continue;
                 if (!panel->NeedsRender() || !panel->IsOpen()) continue;
                 class View* view = dynamic_cast<class View*>(panel.get());
-                if (!view) { OutputDebugStringA("[RenderIfNeeded Lambda] dynamic_cast to View failed\n"); continue; }
+                if (!view) continue;
                 
                 void* cmdList = renderer->GetCurrentCommandBuffer();
                 void* rtvHandle = renderer->GetCurrentRenderTargetHandle();
                 
-                OutputDebugStringA(("[RenderIfNeeded Lambda] Rendering: " + panel->GetTitle() + "\n").c_str());
                 view->Render(cmdList, rtvHandle,
                     [view](void* cmd) { view->Render3D(cmd); });
             }
-            OutputDebugStringA("[RenderIfNeeded Lambda] 3D panels done\n");
 
             // Render UI
-            OutputDebugStringA("[RenderIfNeeded Lambda] Calling editorUI->Render\n");
             editorUI->Render(playState);
-            OutputDebugStringA("[RenderIfNeeded Lambda] editorUI->Render completed\n");
         });
     };
     OutputDebugStringA("[Main] OnUpdate callback set\n");
@@ -244,6 +256,7 @@ int WINAPI wWinMain(
 
     int result = window->Run();
 
+    if (SUCCEEDED(comResult)) CoUninitialize();
     return result;
 }
 

@@ -18,7 +18,8 @@ enum class PostBuildAction { PlayInEditor, LaunchStandalone, Nothing };
 class GameBuildManager
 {
 public:
-    GameBuildManager(ConsoleView* console) : m_console(console) {}
+    GameBuildManager(ConsoleView* console, std::string projectFilePath)
+        : m_projectFilePath(std::move(projectFilePath)), m_console(console) {}
     ~GameBuildManager();
 
     // ---- Build Control ----
@@ -56,6 +57,7 @@ private:
     // State tracking
     PlayState m_playState = PlayState::Stopped;
     PostBuildAction m_postBuildAction = PostBuildAction::Nothing;
+    std::string m_projectFilePath;
 
     // References
     ConsoleView* m_console = nullptr;

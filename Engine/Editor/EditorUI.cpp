@@ -31,32 +31,20 @@ EditorUI::EditorUI(EditorState* state)
 // ---------------------------------------------------------------------------
 void EditorUI::Render(PlayState playState)
 {
-    OutputDebugStringA("[EditorUI::Render] Entry\n");
     if (!m_state)
     {
-        OutputDebugStringA("[EditorUI::Render] m_state is null!\n");
         return;
     }
 
-    OutputDebugStringA("[EditorUI::Render] Calling SetupDockingLayout\n");
     SetupDockingLayout();
-    OutputDebugStringA("[EditorUI::Render] SetupDockingLayout completed\n");
     
-    OutputDebugStringA("[EditorUI::Render] Calling DrawMenuBar\n");
     DrawMenuBar(playState);
-    OutputDebugStringA("[EditorUI::Render] DrawMenuBar completed\n");
     
-    OutputDebugStringA("[EditorUI::Render] Calling DrawPanels\n");
     DrawPanels();
-    OutputDebugStringA("[EditorUI::Render] DrawPanels completed\n");
     
-    OutputDebugStringA("[EditorUI::Render] Calling DrawPreferences\n");
     DrawPreferences();
-    OutputDebugStringA("[EditorUI::Render] DrawPreferences completed\n");
     
-    OutputDebugStringA("[EditorUI::Render] Calling DrawUnsavedChangesModal\n");
     DrawUnsavedChangesModal();
-    OutputDebugStringA("[EditorUI::Render] DrawUnsavedChangesModal completed\n");
 }
 
 // ---------------------------------------------------------------------------

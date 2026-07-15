@@ -48,6 +48,10 @@ bool AssetsExplorerView::DrawDirectoryTree(const std::string& path)
         std::vector<fs::directory_entry> entries;
         for (const auto& entry : fs::directory_iterator(path))
         {
+            // Repository metadata such as .gitkeep is not project content.
+            const std::string entryName = entry.path().filename().string();
+            if (!entryName.empty() && entryName.front() == '.')
+                continue;
             entries.push_back(entry);
         }
 

@@ -8,8 +8,8 @@
 #ifndef ENGINE_BUILD_DIR
 #define ENGINE_BUILD_DIR "build/Debug"
 #endif
-#ifndef PROJECT_FILE
-#define PROJECT_FILE "Example_Proj.proj"
+#ifndef GAME_EXECUTABLE_PATH
+#define GAME_EXECUTABLE_PATH "build/Debug/Debug/Game.exe"
 #endif
 
 // Forward declaration
@@ -76,7 +76,7 @@ bool GameBuildManager::ValidateRendererPrerequisites()
     try
     {
         ProjectLoader loader;
-        const ProjectSettings settings = loader.LoadProject(PROJECT_FILE);
+        const ProjectSettings settings = loader.LoadProject(m_projectFilePath);
         std::string reason;
         if (!RendererFactory::IsRendererAvailable(settings.gameRenderingAPI, &reason))
         {
@@ -175,7 +175,7 @@ void GameBuildManager::Resume()
 // ---------------------------------------------------------------------------
 void GameBuildManager::LaunchStandalone()
 {
-    std::string path = std::string(ENGINE_BUILD_DIR) + "/Debug/Game.exe";
+    std::string path = GAME_EXECUTABLE_PATH;
     std::vector<char> buf(path.begin(), path.end());
     buf.push_back('\0');
 

@@ -23,7 +23,8 @@ struct ProjectSettings;
 class EditorState
 {
 public:
-    EditorState(HINSTANCE hInstance, const ProjectSettings& projectSettings);
+    EditorState(HINSTANCE hInstance, const ProjectSettings& projectSettings,
+        std::string projectFilePath);
     ~EditorState();
 
     // ---- Initialization ----
@@ -78,6 +79,7 @@ private:
 
     // State
     ProjectSettings m_projectSettings;
+    std::string m_projectFilePath;
     bool m_hasUnsavedChanges = false;
     bool m_showPreferences = false;
     std::string m_playModeSceneSnapshot;

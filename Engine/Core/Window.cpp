@@ -119,50 +119,37 @@ int Window::Run()
     MSG msg{};
     while (true)
     {
-        OutputDebugStringA("[Window::Run] Loop iteration start\n");
         // Drain all pending messages without blocking.
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE))
         {
-            OutputDebugStringA("[Window::Run] Processing message\n");
             if (msg.message == WM_QUIT)
                 return static_cast<int>(msg.wParam);
 
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
-            OutputDebugStringA("[Window::Run] Message dispatched\n");
         }
-        OutputDebugStringA("[Window::Run] Messages drained\n");
 
         // ---- Deferred resize ----
         // WM_SIZE is processed above inside DispatchMessageW, which writes
         // m_pendingWidth/Height and sets m_resizePending. We apply the resize
         // here, after the queue is empty and outside any WndProc call stack,
         // so there is no risk of re-entrant Present() / FlushGPU() calls.
-        OutputDebugStringA("[Window::Run] Checking resize pending\n");
         if (m_resizePending)
         {
-            OutputDebugStringA("[Window::Run] Resize is pending\n");
             m_resizePending = false;
             m_width  = m_pendingWidth;
             m_height = m_pendingHeight;
             if (OnResize)
             {
-                OutputDebugStringA("[Window::Run] Calling OnResize\n");
                 OnResize(m_width, m_height);
-                OutputDebugStringA("[Window::Run] OnResize returned\n");
             }
         }
-        OutputDebugStringA("[Window::Run] After resize check\n");
 
         // No pending messages — run one frame.
-        OutputDebugStringA("[Window::Run] About to call OnUpdate\n");
         if (OnUpdate)
         {
-            OutputDebugStringA("[Window::Run] Calling OnUpdate\n");
             OnUpdate();
-            OutputDebugStringA("[Window::Run] OnUpdate returned\n");
         }
-        OutputDebugStringA("[Window::Run] Loop iteration complete\n");
     }
 }
 
