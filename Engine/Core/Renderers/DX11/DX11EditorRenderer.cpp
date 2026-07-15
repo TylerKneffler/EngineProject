@@ -3,6 +3,7 @@
 #include "D3D11View.h"
 #include "imgui_impl_dx11.h"
 #include <algorithm>
+#include <fstream>
 
 DX11EditorRenderer::~DX11EditorRenderer()
 {
@@ -81,6 +82,9 @@ bool DX11EditorRenderer::Init(void* hwndHandle, uint32_t width, uint32_t height)
             ImGui::DestroyContext();
         }
         OutputDebugStringA((std::string("DX11 editor initialization failed: ") + error.what() + "\n").c_str());
+        std::ofstream log("editor-startup.log", std::ios::app);
+        if (log)
+            log << "DirectX11 initialization error: " << error.what() << '\n';
         return false;
     }
 }

@@ -41,8 +41,15 @@ When no valid `.proj` exists in the working directory, `Editor.exe` opens the Pr
 - Create a project in a new folder.
 - Open an existing `.proj` file.
 - Reopen projects recorded in the recent-project list.
+- Remove an entry from the recent-project list without touching its files, or permanently delete a generated project after confirmation.
 
 New projects reference this engine checkout from their generated `CMakeLists.txt` and `.proj` file. Starter content from `Engine/Core/Assets` is copied into the new project's `Assets` directory, where it becomes project-owned.
+
+After Create or Open is selected, the Project Hub launches that project's own Debug `Editor.exe`. If it has not been built yet, the hub configures and builds it in the background first. Build output is written to `project-build.log` in the project folder; the hub remains open and reports the log path if configuration or compilation fails.
+
+While a project is being created, the Project Setup view shows progress through asset copying, project-file generation, CMake configuration, and the initial Editor build.
+
+Each newly created project also has an `Open <Project Name> Editor.lnk` shortcut in its root folder. Double-click it to start that project's Editor directly with the correct project file and working directory.
 
 If exactly one `.proj` exists in the working directory, the editor opens it automatically. You can also pass a project explicitly:
 

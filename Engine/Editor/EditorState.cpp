@@ -11,6 +11,17 @@
 #include "Core/Scene/Scene.h"
 #include <chrono>
 #include <filesystem>
+#include <fstream>
+
+namespace
+{
+    void LogStartupFailure(const std::string& message)
+    {
+        std::ofstream log("editor-startup.log", std::ios::app);
+        if (log)
+            log << message << '\n';
+    }
+}
 
 // ---------------------------------------------------------------------------
 // EditorState::EditorState
@@ -44,11 +55,17 @@ bool EditorState::Init()
 {
     // Window was created in constructor; get its handle
     if (!m_window)
+    {
+        LogStartupFailure("EditorState: window creation failed");
         return false;
+    }
 
     HWND hwnd = m_window->GetHWND();
     if (!hwnd)
+    {
+        LogStartupFailure("EditorState: window handle is invalid");
         return false;
+    }
 
     // Initialize renderer
     OutputDebugStringA("[EditorState] Creating renderer...\n");
@@ -77,6 +94,7 @@ bool EditorState::Init()
     OutputDebugStringA("[EditorState] Initializing renderer...\n");
     if (!m_renderer->Init(hwnd, 1280, 720))
     {
+        LogStartupFailure("EditorState: renderer Init returned false");
         std::string api = m_projectSettings.editorRenderingAPI;
         std::string msg = "Failed to initialize the " + api + " renderer.\n\n"
             "Please ensure " + api + " is installed and your GPU driver is up to date.";
@@ -96,6 +114,7 @@ bool EditorState::Init()
     IGraphicsProvider* graphicsProvider = m_renderer->GetGraphicsProvider();
     if (!graphicsProvider)
     {
+        LogStartupFailure("EditorState: renderer did not provide a graphics provider");
         OutputDebugStringA("[EditorState] ERROR: Failed to get graphics provider from renderer\n");
         return false;
     }
@@ -107,6 +126,7 @@ bool EditorState::Init()
     }
     catch (const std::exception& e)
     {
+        LogStartupFailure(std::string("EditorState: scene initialization failed: ") + e.what());
         std::string errorMsg = "[EditorState] ERROR: Scene initialization failed: ";
         errorMsg += e.what();
         errorMsg += "\n";

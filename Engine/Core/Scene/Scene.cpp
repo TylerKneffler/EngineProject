@@ -16,6 +16,10 @@
 
 using namespace DirectX;
 
+#ifndef ENGINE_SHADERS_PATH
+#define ENGINE_SHADERS_PATH "Engine/Core/Shaders/"
+#endif
+
 // ---------------------------------------------------------------------------
 // Constant buffer data structures
 // ---------------------------------------------------------------------------
@@ -105,9 +109,9 @@ void Scene::BuildGridPipeline()
     if (!shaderCompiler || !pipelineFactory)
         throw std::runtime_error("Failed to get shader compiler or pipeline factory");
 
-    // Compile shaders from disk
-    // Working directory is project root (C:\repos\EngineProject)
-    std::string shaderPath = "Engine/Core/Shaders/Grid.hlsl";
+    // Engine shaders live with the referenced engine, not in each project's
+    // Assets directory.
+    std::string shaderPath = (std::filesystem::path(ENGINE_SHADERS_PATH) / "Grid.hlsl").string();
     std::string currentDir = std::filesystem::current_path().string();
     std::string absolutePath = std::filesystem::absolute(shaderPath).string();
     
@@ -181,15 +185,17 @@ void Scene::BuildObjectPipeline()
         throw std::runtime_error("Failed to get shader compiler or pipeline factory");
 
     // Compile shaders
+    const std::string shaderPath =
+        (std::filesystem::path(ENGINE_SHADERS_PATH) / "Object.hlsl").string();
     auto vsShader = shaderCompiler->CompileFromFile(
-        "Engine/Core/Shaders/Object.hlsl",
+        shaderPath.c_str(),
         "VSMain",
         IShaderCompiler::CompileProfile::VS_5_0);
     if (!vsShader)
         throw std::runtime_error("Failed to compile object vertex shader: " + shaderCompiler->GetLastError());
 
     auto psShader = shaderCompiler->CompileFromFile(
-        "Engine/Core/Shaders/Object.hlsl",
+        shaderPath.c_str(),
         "PSMain",
         IShaderCompiler::CompileProfile::PS_5_0);
     if (!psShader)

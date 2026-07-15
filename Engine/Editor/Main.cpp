@@ -2,12 +2,14 @@
 #include "Core/ProjectLoader.h"
 #include "Core/SceneManager.h"
 #include "Core/Renderers/IEditorRenderer.h"
+#include "Core/Renderers/RendererFactory.h"
 #include "Core/View/View.h"
 #include "Engine/Editor/EditorState.h"
 #include "Engine/Editor/GameBuildManager.h"
 #include "Engine/Editor/EditorUI.h"
 #include "Engine/Editor/ProjectLauncher.h"
 #include <filesystem>
+#include <fstream>
 #include <shellapi.h>
 
 // Fallback for IntelliSense
@@ -20,6 +22,16 @@
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
+namespace
+{
+    void WriteStartupLog(const std::string& message, bool reset = false)
+    {
+        std::ofstream log("editor-startup.log", reset ? std::ios::trunc : std::ios::app);
+        if (log)
+            log << message << '\n';
+    }
+}
+
 // ---------------------------------------------------------------------------
 // WinMain — Editor entry point
 // ---------------------------------------------------------------------------
@@ -30,6 +42,7 @@ int WINAPI wWinMain(
     _In_     int       /*nShowCmd*/)
 {
     HRESULT comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    WriteStartupLog("Editor startup", true);
 
     auto resolveProject = []() -> std::string
     {
@@ -61,6 +74,23 @@ int WINAPI wWinMain(
     };
 
     std::string projectFile = resolveProject();
+    auto rendererOverride = []() -> std::string
+    {
+        int argumentCount = 0;
+        LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
+        std::string value;
+        if (arguments)
+        {
+            for (int i = 1; i + 1 < argumentCount; ++i)
+                if (std::wstring(arguments[i]) == L"--editor-renderer")
+                {
+                    value = std::filesystem::path(arguments[i + 1]).string();
+                    break;
+                }
+            LocalFree(arguments);
+        }
+        return value;
+    };
     ProjectLoader projectLoader;
     ProjectSettings projectSettings;
     while (true)
@@ -78,6 +108,11 @@ int WINAPI wWinMain(
             projectFile = std::filesystem::weakly_canonical(projectFile).string();
             std::filesystem::current_path(std::filesystem::path(projectFile).parent_path());
             projectSettings = projectLoader.LoadProject(projectFile);
+            const std::string overrideApi = rendererOverride();
+            if (!overrideApi.empty())
+                projectSettings.editorRenderingAPI = overrideApi;
+            WriteStartupLog("Project: " + projectFile);
+            WriteStartupLog("Editor renderer: " + projectSettings.editorRenderingAPI);
             ProjectLauncher::RememberProject(projectFile);
             break;
         }
@@ -93,7 +128,26 @@ int WINAPI wWinMain(
     auto editorState = std::make_unique<EditorState>(hInstance, projectSettings, projectFile);
     OutputDebugStringA("[Main] EditorState created, calling Init...\n");
     if (!editorState->Init())
-        return 1;
+    {
+        WriteStartupLog("Editor initialization failed with " + projectSettings.editorRenderingAPI);
+        std::string fallbackReason;
+        if (projectSettings.editorRenderingAPI != "DirectX11" &&
+            RendererFactory::IsRendererAvailable("DirectX11", &fallbackReason))
+        {
+            OutputDebugStringA(("[Main] " + projectSettings.editorRenderingAPI +
+                " editor initialization failed; retrying with DirectX11.\n").c_str());
+            projectSettings.editorRenderingAPI = "DirectX11";
+            editorState = std::make_unique<EditorState>(hInstance, projectSettings, projectFile);
+            if (!editorState->Init())
+            {
+                WriteStartupLog("DirectX11 fallback initialization failed");
+                return 1;
+            }
+        }
+        else
+            return 1;
+    }
+    WriteStartupLog("Editor initialized successfully");
     OutputDebugStringA("[Main] EditorState initialized\n");
 
     // Load default scene if specified

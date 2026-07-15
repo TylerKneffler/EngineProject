@@ -30,9 +30,9 @@
     <RightPanel Include="Properties" />
   </ItemGroup>
   <PropertyGroup>
-    <RenderingAPI>DirectX12</RenderingAPI>
-    <EditorRenderingAPI>DirectX12</EditorRenderingAPI>
-    <GameRenderingAPI>DirectX12</GameRenderingAPI>
+    <RenderingAPI>DirectX11</RenderingAPI>
+    <EditorRenderingAPI>DirectX11</EditorRenderingAPI>
+    <GameRenderingAPI>DirectX11</GameRenderingAPI>
     <ClearColorR>0.18</ClearColorR>
     <ClearColorG>0.18</ClearColorG>
     <ClearColorB>0.18</ClearColorB>
