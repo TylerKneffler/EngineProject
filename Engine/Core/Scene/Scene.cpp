@@ -20,6 +20,18 @@ using namespace DirectX;
 #define ENGINE_SHADERS_PATH "Engine/Core/Shaders/"
 #endif
 
+namespace
+{
+    std::string EngineShaderPath(const char* fileName)
+    {
+        const std::filesystem::path bundled =
+            std::filesystem::path("Engine") / "Shaders" / fileName;
+        if (std::filesystem::is_regular_file(bundled))
+            return bundled.string();
+        return (std::filesystem::path(ENGINE_SHADERS_PATH) / fileName).string();
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Constant buffer data structures
 // ---------------------------------------------------------------------------
@@ -111,7 +123,7 @@ void Scene::BuildGridPipeline()
 
     // Engine shaders live with the referenced engine, not in each project's
     // Assets directory.
-    std::string shaderPath = (std::filesystem::path(ENGINE_SHADERS_PATH) / "Grid.hlsl").string();
+    std::string shaderPath = EngineShaderPath("Grid.hlsl");
     std::string currentDir = std::filesystem::current_path().string();
     std::string absolutePath = std::filesystem::absolute(shaderPath).string();
     
@@ -185,8 +197,7 @@ void Scene::BuildObjectPipeline()
         throw std::runtime_error("Failed to get shader compiler or pipeline factory");
 
     // Compile shaders
-    const std::string shaderPath =
-        (std::filesystem::path(ENGINE_SHADERS_PATH) / "Object.hlsl").string();
+    const std::string shaderPath = EngineShaderPath("Object.hlsl");
     auto vsShader = shaderCompiler->CompileFromFile(
         shaderPath.c_str(),
         "VSMain",

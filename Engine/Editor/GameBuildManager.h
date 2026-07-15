@@ -1,5 +1,6 @@
 #pragma once
 #include "pch.h"
+#include "Core/ProjectLoader.h"
 #include <functional>
 
 class ConsoleView;
@@ -18,8 +19,11 @@ enum class PostBuildAction { PlayInEditor, LaunchStandalone, Nothing };
 class GameBuildManager
 {
 public:
-    GameBuildManager(ConsoleView* console, std::string projectFilePath)
-        : m_projectFilePath(std::move(projectFilePath)), m_console(console) {}
+    GameBuildManager(ConsoleView* console, std::string projectFilePath,
+        ProjectSettings developmentSettings = {})
+        : m_projectFilePath(std::move(projectFilePath))
+        , m_developmentSettings(std::move(developmentSettings))
+        , m_console(console) {}
     ~GameBuildManager();
 
     // ---- Build Control ----
@@ -58,6 +62,7 @@ private:
     PlayState m_playState = PlayState::Stopped;
     PostBuildAction m_postBuildAction = PostBuildAction::Nothing;
     std::string m_projectFilePath;
+    ProjectSettings m_developmentSettings;
 
     // References
     ConsoleView* m_console = nullptr;

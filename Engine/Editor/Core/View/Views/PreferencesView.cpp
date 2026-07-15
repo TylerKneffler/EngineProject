@@ -1,10 +1,184 @@
 #include "PreferencesView.h"
 #include "Core/Renderers/RendererFactory.h"
 #include <pugixml.hpp>
+#include <algorithm>
+#include <chrono>
+#include <cctype>
+#include <filesystem>
 #include <fstream>
+
+#ifndef ENGINE_SHADERS_PATH
+#define ENGINE_SHADERS_PATH "Engine/Core/Shaders/"
+#endif
 
 namespace
 {
+namespace fs = std::filesystem;
+
+enum ExportStage
+{
+    ExportConfiguring,
+    ExportBuilding,
+    ExportPackaging
+};
+
+const char* ExportStageLabel(int stage)
+{
+    switch (stage)
+    {
+    case ExportConfiguring: return "Configuring portable Release build...";
+    case ExportBuilding: return "Building the standalone game...";
+    case ExportPackaging: return "Packaging executable, assets, and shaders...";
+    default: return "Preparing export...";
+    }
+}
+
+bool RunExportCommand(const std::wstring& command, const fs::path& workingDirectory,
+    const fs::path& logFile)
+{
+    HANDLE log = CreateFileW(logFile.c_str(), FILE_APPEND_DATA,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (log == INVALID_HANDLE_VALUE)
+        return false;
+    SetHandleInformation(log, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdOutput = log;
+    startup.hStdError = log;
+    startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    PROCESS_INFORMATION process{};
+    std::vector<wchar_t> mutableCommand(command.begin(), command.end());
+    mutableCommand.push_back(L'\0');
+    const BOOL created = CreateProcessW(nullptr, mutableCommand.data(), nullptr, nullptr,
+        TRUE, CREATE_NO_WINDOW, nullptr, workingDirectory.c_str(), &startup, &process);
+    CloseHandle(log);
+    if (!created)
+        return false;
+
+    WaitForSingleObject(process.hProcess, INFINITE);
+    DWORD exitCode = 1;
+    GetExitCodeProcess(process.hProcess, &exitCode);
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    return exitCode == 0;
+}
+
+void CopyRuntimeAssets(const fs::path& source, const fs::path& destination)
+{
+    for (const auto& entry : fs::recursive_directory_iterator(source))
+    {
+        const fs::path relative = fs::relative(entry.path(), source);
+        const fs::path output = destination / relative;
+        if (entry.is_directory())
+        {
+            fs::create_directories(output);
+            continue;
+        }
+        if (!entry.is_regular_file())
+            continue;
+
+        std::string extension = entry.path().extension().string();
+        std::transform(extension.begin(), extension.end(), extension.begin(),
+            [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+        if (extension == ".cpp" || extension == ".c" || extension == ".h" ||
+            extension == ".hpp" || extension == ".inl")
+            continue;
+        fs::create_directories(output.parent_path());
+        fs::copy_file(entry.path(), output, fs::copy_options::overwrite_existing);
+    }
+}
+
+void MakePackagedProjectPortable(const fs::path& projectFile)
+{
+    pugi::xml_document document;
+    if (!document.load_file(projectFile.c_str()))
+        throw std::runtime_error("Could not update the packaged project settings");
+    const auto project = document.child("Project");
+    for (auto group : project.children("PropertyGroup"))
+    {
+        if (auto engine = group.child("EngineDirectory"))
+            engine.text().set(".");
+        if (auto shaders = group.child("ShadersDirectory"))
+            shaders.text().set("Engine/Shaders/");
+        if (auto build = group.child("BuildDirectory"))
+            build.text().set("");
+    }
+    if (!document.save_file(projectFile.c_str(), "  "))
+        throw std::runtime_error("Could not save the packaged project settings");
+}
+
+std::pair<bool, std::string> BuildPortableExport(const std::string& projectFile,
+    const std::shared_ptr<std::atomic<float>>& progress,
+    const std::shared_ptr<std::atomic<int>>& stage)
+{
+    try
+    {
+        const fs::path projectPath = fs::weakly_canonical(projectFile);
+        const fs::path projectRoot = projectPath.parent_path();
+        const fs::path buildDirectory = projectRoot / "build" / "Export";
+        const fs::path exportDirectory = projectRoot / "Export";
+        const fs::path logFile = projectRoot / "export-build.log";
+        std::ofstream(logFile, std::ios::trunc)
+            << "Building portable export for " << projectPath.string() << '\n';
+
+        stage->store(ExportConfiguring);
+        progress->store(0.10f);
+        const std::wstring configure = L"cmake -S \"" + projectRoot.wstring() +
+            L"\" -B \"" + buildDirectory.wstring() +
+            L"\" -G \"Visual Studio 17 2022\" -A x64 -DENGINE_PORTABLE_EXPORT=ON "
+            L"-DENGINE_GENERATE_ROOT_SOLUTION=OFF";
+        if (!RunExportCommand(configure, projectRoot, logFile))
+            return { false, "Export configuration failed. See " + logFile.string() };
+
+        stage->store(ExportBuilding);
+        progress->store(0.35f);
+        const std::wstring build = L"cmake --build \"" + buildDirectory.wstring() +
+            L"\" --config Release --target Game --parallel";
+        if (!RunExportCommand(build, projectRoot, logFile))
+            return { false, "Export build failed. See " + logFile.string() };
+
+        const fs::path gameExecutable = buildDirectory / "Engine" / "Release" / "Game.exe";
+        if (!fs::is_regular_file(gameExecutable))
+            return { false, "Game.exe was not produced. See " + logFile.string() };
+
+        stage->store(ExportPackaging);
+        progress->store(0.82f);
+        std::error_code error;
+        fs::remove_all(exportDirectory, error);
+        if (error)
+            return { false, "Could not replace the Export folder: " + error.message() };
+        fs::create_directories(exportDirectory / "Engine");
+
+        const std::string gameName = projectPath.stem().string();
+        fs::copy_file(gameExecutable, exportDirectory / (gameName + ".exe"),
+            fs::copy_options::overwrite_existing);
+        const fs::path packagedProject = exportDirectory / projectPath.filename();
+        fs::copy_file(projectPath, packagedProject,
+            fs::copy_options::overwrite_existing);
+        MakePackagedProjectPortable(packagedProject);
+        CopyRuntimeAssets(projectRoot / "Assets", exportDirectory / "Assets");
+        fs::copy(fs::path(ENGINE_SHADERS_PATH), exportDirectory / "Engine" / "Shaders",
+            fs::copy_options::recursive | fs::copy_options::overwrite_existing);
+
+        const fs::path vulkanShaders = buildDirectory / "VulkanShaders";
+        if (fs::is_directory(vulkanShaders))
+            fs::copy(vulkanShaders, exportDirectory / "VulkanShaders",
+                fs::copy_options::recursive | fs::copy_options::overwrite_existing);
+
+        std::ofstream(exportDirectory / "README.txt", std::ios::trunc)
+            << "Run " << gameName << ".exe from this folder.\n";
+        progress->store(1.f);
+        return { true, "Portable export ready: " + exportDirectory.string() };
+    }
+    catch (const std::exception& error)
+    {
+        return { false, std::string("Export failed: ") + error.what() };
+    }
+}
+
 bool DrawRendererCombo(const char* label, std::string& selectedApi)
 {
     bool changed = false;
@@ -53,6 +227,7 @@ void PreferencesView::Init(const ProjectSettings& settings, const std::string& p
 void PreferencesView::DrawWindow(bool& isOpen)
 {
     if (!isOpen) return;
+    UpdatePortableExport();
 
     ImGui::SetNextWindowSize(ImVec2(600, 700), ImGuiCond_FirstUseEver);
     
@@ -84,15 +259,28 @@ void PreferencesView::DrawWindow(bool& isOpen)
                 ImGui::EndTabItem();
             }
 
+            if (ImGui::BeginTabItem("Export"))
+            {
+                DrawExportSection();
+                ImGui::EndTabItem();
+            }
+
             ImGui::EndTabBar();
         }
 
         ImGui::Separator();
+        if (m_projFilePath.empty())
+        {
+            ImGui::TextDisabled("Engine Sandbox settings are temporary and are not saved to a project file.");
+            ImGui::BeginDisabled();
+        }
         if (ImGui::Button("Save Project Settings"))
         {
             m_lastSaveSucceeded = SaveSettings();
             m_saveStatus = m_lastSaveSucceeded ? "Project settings saved." : "Failed to save project settings.";
         }
+        if (m_projFilePath.empty())
+            ImGui::EndDisabled();
         if (!m_saveStatus.empty())
         {
             ImGui::SameLine();
@@ -103,6 +291,77 @@ void PreferencesView::DrawWindow(bool& isOpen)
     }
 
     ImGui::End();
+}
+
+void PreferencesView::DrawExportSection()
+{
+    ImGui::Text("Portable Game Export");
+    ImGui::Separator();
+    ImGui::TextWrapped("Builds a Release game and packages its executable, project settings, assets, and shaders into the project's Export folder.");
+    ImGui::Spacing();
+    if (!m_projFilePath.empty())
+        ImGui::TextDisabled("Output: %s", (std::filesystem::path(m_projFilePath).parent_path() / "Export").string().c_str());
+    else
+        ImGui::TextDisabled("Portable export requires a project file.");
+
+    ImGui::Spacing();
+    ImGui::BeginDisabled(m_exporting || m_projFilePath.empty());
+    if (ImGui::Button("Build Portable Export", { 190.f, 34.f }))
+        StartPortableExport();
+    ImGui::EndDisabled();
+
+    if (m_exporting)
+    {
+        ImGui::Spacing();
+        ImGui::Text("%s", ExportStageLabel(m_exportStage ? m_exportStage->load() : 0));
+        ImGui::ProgressBar(m_exportProgress ? m_exportProgress->load() : 0.f,
+            { -1.f, 22.f });
+        ImGui::TextDisabled("Build details: export-build.log");
+    }
+    else if (!m_exportStatus.empty())
+    {
+        ImGui::Spacing();
+        ImGui::TextColored(m_exportSucceeded
+            ? ImVec4(0.35f, 0.85f, 0.45f, 1.f)
+            : ImVec4(1.f, 0.35f, 0.35f, 1.f), "%s", m_exportStatus.c_str());
+    }
+}
+
+void PreferencesView::StartPortableExport()
+{
+    if (m_exporting || m_projFilePath.empty())
+        return;
+    if (!SaveSettings())
+    {
+        m_exportSucceeded = false;
+        m_exportStatus = "Save the project settings before exporting.";
+        return;
+    }
+
+    m_exporting = true;
+    m_exportSucceeded = false;
+    m_exportStatus.clear();
+    m_exportProgress = std::make_shared<std::atomic<float>>(0.f);
+    m_exportStage = std::make_shared<std::atomic<int>>(ExportConfiguring);
+    const std::string projectFile = m_projFilePath;
+    const auto progress = m_exportProgress;
+    const auto stage = m_exportStage;
+    m_exportFuture = std::async(std::launch::async,
+        [projectFile, progress, stage]()
+        {
+            return BuildPortableExport(projectFile, progress, stage);
+        });
+}
+
+void PreferencesView::UpdatePortableExport()
+{
+    if (!m_exporting || !m_exportFuture.valid() ||
+        m_exportFuture.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+        return;
+    const auto result = m_exportFuture.get();
+    m_exporting = false;
+    m_exportSucceeded = result.first;
+    m_exportStatus = result.second;
 }
 
 // ---------------------------------------------------------------------------

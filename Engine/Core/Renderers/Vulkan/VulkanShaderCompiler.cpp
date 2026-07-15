@@ -15,8 +15,10 @@ std::unique_ptr<IShader> VulkanShaderCompiler::CompileFromFile(
     std::string name = std::filesystem::path(filePath).stem().string();
     const char* stage = profile == CompileProfile::VS_5_0 ? "VS" :
                         profile == CompileProfile::PS_5_0 ? "PS" : "CS";
-    std::filesystem::path binary = std::filesystem::path(ENGINE_VULKAN_SHADER_PATH) /
-        (name + "." + stage + ".spv");
+    const std::string binaryName = name + "." + stage + ".spv";
+    std::filesystem::path binary = std::filesystem::path("VulkanShaders") / binaryName;
+    if (!std::filesystem::is_regular_file(binary))
+        binary = std::filesystem::path(ENGINE_VULKAN_SHADER_PATH) / binaryName;
     std::ifstream stream(binary, std::ios::binary | std::ios::ate);
     if (!stream)
     {

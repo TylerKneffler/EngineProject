@@ -2,4 +2,6 @@ build/
 .vscode/settings.json
 editor-startup.log
 project-build.log
+export-build.log
+Export/
 Open * Editor.lnk

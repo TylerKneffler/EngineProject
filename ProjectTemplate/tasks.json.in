@@ -24,6 +24,16 @@
       "dependsOn": "CMake: Build Debug",
       "dependsOrder": "sequence",
       "problemMatcher": []
+    },
+    {
+      "label": "Engine: Open Project Hub",
+      "type": "process",
+      "command": "${workspaceFolder}/build/Debug/Engine/Debug/Editor.exe",
+      "args": ["--project-hub"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "dependsOn": "CMake: Build Debug",
+      "dependsOrder": "sequence",
+      "problemMatcher": []
     }
   ]
 }

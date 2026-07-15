@@ -6,6 +6,7 @@
 #include "Core/Scene/Scene.h"
 #include "Core/SceneManager.h"
 #include "Core/ProjectLoader.h"
+#include <filesystem>
 
 // Fallback for IntelliSense — CMake overrides these with real absolute paths.
 #ifndef ASSETS_PATH
@@ -30,16 +31,27 @@ int WINAPI wWinMain(
     // Load project configuration.
     ProjectLoader projectLoader;
     ProjectSettings projectSettings;
+    std::string projectFile = PROJECT_FILE;
+    std::vector<std::string> localProjects;
+    for (const auto& entry : std::filesystem::directory_iterator(std::filesystem::current_path()))
+        if (entry.is_regular_file() && entry.path().extension() == ".proj")
+            localProjects.push_back(entry.path().string());
+    if (localProjects.size() == 1)
+        projectFile = localProjects.front();
     try
     {
-        projectSettings = projectLoader.LoadProject(PROJECT_FILE);
+        projectSettings = projectLoader.LoadProject(projectFile);
     }
     catch (const std::exception&)
     {
-        projectSettings.assetsDirectory = ASSETS_PATH;
-        projectSettings.defaultScene    = std::string(ASSETS_PATH) + "Scenes/default.scene";
+        projectSettings.assetsDirectory = ENGINE_ASSETS_PATH;
+        projectSettings.defaultScene    = std::string(ENGINE_ASSETS_PATH) + "Scenes/default.scene";
         projectSettings.viewportWidth   = 1280;
         projectSettings.viewportHeight  = 720;
+        projectSettings.renderingAPI = "DirectX11";
+        projectSettings.editorRenderingAPI = "DirectX11";
+        projectSettings.gameRenderingAPI = "DirectX11";
+        projectSettings.clearColor = { 0.1f, 0.1f, 0.1f, 1.f };
     }
 
     auto window   = std::make_unique<Window>(hInstance, L"Game",

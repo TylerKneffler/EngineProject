@@ -89,6 +89,23 @@
                 "focus": false
             },
             "problemMatcher": []
+        },
+        {
+            "label": "Engine: Open Project Hub",
+            "type": "process",
+            "command": "${workspaceFolder}/build/Debug/Debug/Editor.exe",
+            "args": ["--project-hub"],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": "CMake: Build Debug",
+            "dependsOrder": "sequence",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "focus": false
+            },
+            "problemMatcher": []
         }
     ]
 }

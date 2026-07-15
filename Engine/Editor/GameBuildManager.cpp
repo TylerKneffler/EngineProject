@@ -75,8 +75,12 @@ bool GameBuildManager::ValidateRendererPrerequisites()
 
     try
     {
-        ProjectLoader loader;
-        const ProjectSettings settings = loader.LoadProject(m_projectFilePath);
+        ProjectSettings settings = m_developmentSettings;
+        if (!m_projectFilePath.empty())
+        {
+            ProjectLoader loader;
+            settings = loader.LoadProject(m_projectFilePath);
+        }
         std::string reason;
         if (!RendererFactory::IsRendererAvailable(settings.gameRenderingAPI, &reason))
         {

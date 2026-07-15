@@ -32,6 +32,11 @@ include(FetchContent)
 set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
 
 option(ENGINE_ENABLE_VULKAN "Build the Vulkan renderer" ON)
+option(ENGINE_PORTABLE_EXPORT "Link the game with the static MSVC runtime for portable exports" OFF)
+option(ENGINE_GENERATE_ROOT_SOLUTION "Generate a discoverable solution in the project root" ON)
+if(MSVC AND ENGINE_PORTABLE_EXPORT)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
 set(ENGINE_VULKAN_ENABLED OFF)
 
 if(ENGINE_ENABLE_VULKAN)
@@ -85,12 +90,49 @@ file(GLOB_RECURSE ENGINE_SOURCES CONFIGURE_DEPENDS
 )
 # Engine/Core/Assets contains project template content, not engine code.
 list(FILTER ENGINE_SOURCES EXCLUDE REGEX "[/\\\\]Assets[/\\\\]")
+file(GLOB_RECURSE ENGINE_HEADERS CONFIGURE_DEPENDS
+    "${ENGINE_ROOT}/Engine/Core/*.h"
+    "${ENGINE_ROOT}/Engine/Core/*.hpp"
+    "${ENGINE_ROOT}/Engine/Core/*.inl"
+)
+file(GLOB_RECURSE ENGINE_RESOURCE_FILES CONFIGURE_DEPENDS
+    "${ENGINE_ROOT}/Engine/Core/Assets/*"
+    "${ENGINE_ROOT}/Engine/Core/Shaders/*"
+)
+list(APPEND ENGINE_HEADERS "${ENGINE_ROOT}/Engine/pch.h")
+set_source_files_properties(${ENGINE_RESOURCE_FILES} PROPERTIES HEADER_FILE_ONLY TRUE)
+
 file(GLOB_RECURSE EDITOR_SOURCES CONFIGURE_DEPENDS
     "${ENGINE_ROOT}/Engine/Editor/*.cpp"
+)
+file(GLOB_RECURSE EDITOR_HEADERS CONFIGURE_DEPENDS
+    "${ENGINE_ROOT}/Engine/Editor/*.h"
+    "${ENGINE_ROOT}/Engine/Editor/*.hpp"
+    "${ENGINE_ROOT}/Engine/Editor/*.inl"
 )
 file(GLOB_RECURSE GAME_SOURCES CONFIGURE_DEPENDS
     "${ENGINE_ROOT}/Engine/Game/*.cpp"
 )
+file(GLOB_RECURSE GAME_HEADERS CONFIGURE_DEPENDS
+    "${ENGINE_ROOT}/Engine/Game/*.h"
+    "${ENGINE_ROOT}/Engine/Game/*.hpp"
+    "${ENGINE_ROOT}/Engine/Game/*.inl"
+)
+
+set(PROJECT_BROWSE_FILES)
+set(PROJECT_ROOT_FILES)
+if(ENGINE_PROJECT_DIR)
+    file(GLOB_RECURSE PROJECT_BROWSE_FILES CONFIGURE_DEPENDS
+        "${ENGINE_PROJECT_DIR}/Assets/*"
+    )
+    list(FILTER PROJECT_BROWSE_FILES EXCLUDE REGEX "\\.cpp$")
+    set_source_files_properties(${PROJECT_BROWSE_FILES} PROPERTIES HEADER_FILE_ONLY TRUE)
+    set(PROJECT_ROOT_FILES
+        "${ENGINE_PROJECT_DIR}/CMakeLists.txt"
+        "${ENGINE_PROJECT_FILE}"
+    )
+    set_source_files_properties(${PROJECT_ROOT_FILES} PROPERTIES HEADER_FILE_ONLY TRUE)
+endif()
 
 # ---------------------------------------------------------------------------
 # GLM — Git library 
@@ -152,7 +194,11 @@ FetchContent_MakeAvailable(pugixml)
 # ---------------------------------------------------------------------------
 add_library(Engine STATIC
     ${ENGINE_SOURCES}
+    ${ENGINE_HEADERS}
+    ${ENGINE_RESOURCE_FILES}
 )
+source_group(TREE "${ENGINE_ROOT}" FILES
+    ${ENGINE_SOURCES} ${ENGINE_HEADERS} ${ENGINE_RESOURCE_FILES})
 target_include_directories(Engine PUBLIC
     ${ENGINE_ROOT}
     ${ENGINE_ROOT}/Engine
@@ -240,8 +286,16 @@ endif()
 # ---------------------------------------------------------------------------
 add_executable(Editor WIN32
     ${EDITOR_SOURCES}
+    ${EDITOR_HEADERS}
     ${ASSET_SOURCES}
+    ${PROJECT_BROWSE_FILES}
+    ${PROJECT_ROOT_FILES}
 )
+source_group(TREE "${ENGINE_ROOT}" FILES ${EDITOR_SOURCES} ${EDITOR_HEADERS})
+if(ENGINE_PROJECT_DIR)
+    source_group(TREE "${ENGINE_PROJECT_DIR}" PREFIX "Project" FILES
+        ${ASSET_SOURCES} ${PROJECT_BROWSE_FILES} ${PROJECT_ROOT_FILES})
+endif()
 target_link_libraries(Editor PRIVATE Engine shell32.lib ole32.lib comdlg32.lib)
 target_precompile_headers(Editor REUSE_FROM Engine)
 target_include_directories(Editor PRIVATE
@@ -263,6 +317,24 @@ set_target_properties(Editor PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "${ENGINE_RUNTIME_WORKING_DIRECTORY}"
 )
 
+# Place a discoverable solution in the source/project root while keeping the
+# generated Visual Studio projects in the build directory.
+if(ENGINE_GENERATE_ROOT_SOLUTION)
+    file(RELATIVE_PATH ROOT_SOLUTION_BUILD_RELATIVE "${CMAKE_SOURCE_DIR}" "${CMAKE_BINARY_DIR}")
+    set(ROOT_SOLUTION_SOURCE "${CMAKE_BINARY_DIR}/${CMAKE_PROJECT_NAME}.sln")
+    set(ROOT_SOLUTION_OUTPUT "${CMAKE_SOURCE_DIR}/${CMAKE_PROJECT_NAME}.sln")
+    add_custom_target(RootSolution
+        COMMAND ${CMAKE_COMMAND}
+            -DSOURCE_SOLUTION=${ROOT_SOLUTION_SOURCE}
+            -DOUTPUT_SOLUTION=${ROOT_SOLUTION_OUTPUT}
+            -DBUILD_RELATIVE=${ROOT_SOLUTION_BUILD_RELATIVE}
+            -P "${ENGINE_ROOT}/cmake/CreateRootSolution.cmake"
+        COMMENT "Creating root ${CMAKE_PROJECT_NAME}.sln"
+        VERBATIM
+    )
+    add_dependencies(Editor RootSolution)
+endif()
+
 # Make Visual Studio's green Play button / F5 build and launch the editor by
 # default. Setting this on the top-level directory also applies when the engine
 # is referenced by a generated project's add_subdirectory().
@@ -273,14 +345,24 @@ set_property(DIRECTORY "${CMAKE_SOURCE_DIR}" PROPERTY VS_STARTUP_PROJECT Editor)
 # ---------------------------------------------------------------------------
 add_executable(Game WIN32
     ${GAME_SOURCES}
+    ${GAME_HEADERS}
     ${ASSET_SOURCES}
+    ${PROJECT_BROWSE_FILES}
 )
+source_group(TREE "${ENGINE_ROOT}" FILES ${GAME_SOURCES} ${GAME_HEADERS})
+if(ENGINE_PROJECT_DIR)
+    source_group(TREE "${ENGINE_PROJECT_DIR}" PREFIX "Project" FILES
+        ${ASSET_SOURCES} ${PROJECT_BROWSE_FILES})
+endif()
 target_link_libraries(Game PRIVATE Engine)
 target_precompile_headers(Game REUSE_FROM Engine)
 target_include_directories(Game PRIVATE
     ${ENGINE_ROOT}/Engine
     ${ENGINE_PROJECT_DIR}/Assets
 )
+if(ENGINE_GENERATE_ROOT_SOLUTION)
+    add_dependencies(Game RootSolution)
+endif()
 target_compile_definitions(Game PRIVATE
     ASSETS_PATH="${ENGINE_PROJECT_DIR}/Assets/"
     PROJECT_FILE="${ENGINE_PROJECT_FILE}"

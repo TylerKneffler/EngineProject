@@ -1,6 +1,8 @@
 #pragma once
 #include "pch.h"
 #include "Core/ProjectLoader.h"
+#include <atomic>
+#include <future>
 
 // ---------------------------------------------------------------------------
 // PreferencesView
@@ -43,6 +45,9 @@ private:
     void DrawPathsSection();
     void DrawRenderingSection();
     void DrawAspectRatioSection();
+    void DrawExportSection();
+    void StartPortableExport();
+    void UpdatePortableExport();
     void NotifyChanged() { if (OnSettingsChanged) OnSettingsChanged(); }
 
     bool m_isOpen = false;
@@ -55,4 +60,10 @@ private:
     char m_defaultSceneBuf[512] = {};
     std::string m_saveStatus;
     bool m_lastSaveSucceeded = false;
+    bool m_exporting = false;
+    bool m_exportSucceeded = false;
+    std::string m_exportStatus;
+    std::shared_ptr<std::atomic<float>> m_exportProgress;
+    std::shared_ptr<std::atomic<int>> m_exportStage;
+    std::future<std::pair<bool, std::string>> m_exportFuture;
 };

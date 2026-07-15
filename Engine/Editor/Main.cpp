@@ -19,6 +19,18 @@
 #ifndef ASSETS_PATH
 #define ASSETS_PATH "Assets/"
 #endif
+#ifndef ENGINE_ROOT_PATH
+#define ENGINE_ROOT_PATH "."
+#endif
+#ifndef ENGINE_ASSETS_PATH
+#define ENGINE_ASSETS_PATH "Engine/Core/Assets/"
+#endif
+#ifndef ENGINE_SHADERS_PATH
+#define ENGINE_SHADERS_PATH "Engine/Core/Shaders/"
+#endif
+#ifndef ENGINE_BUILD_DIR
+#define ENGINE_BUILD_DIR "build/Debug"
+#endif
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -29,6 +41,51 @@ namespace
         std::ofstream log("editor-startup.log", reset ? std::ios::trunc : std::ios::app);
         if (log)
             log << message << '\n';
+    }
+
+    bool IsEngineDevelopmentDirectory()
+    {
+        std::error_code error;
+        const auto current = std::filesystem::weakly_canonical(
+            std::filesystem::current_path(), error);
+        if (error) return false;
+        const auto engineRoot = std::filesystem::weakly_canonical(
+            std::filesystem::path(ENGINE_ROOT_PATH), error);
+        return !error && current == engineRoot &&
+            std::filesystem::is_directory(engineRoot / "Engine" / "Core" / "Assets") &&
+            std::filesystem::is_regular_file(engineRoot / "CMakeLists.txt");
+    }
+
+    ProjectSettings CreateEngineDevelopmentSettings()
+    {
+        ProjectSettings settings{};
+        settings.name = "Engine Sandbox";
+        settings.version = "Development";
+        settings.description = "Built-in project-free engine development environment";
+        settings.engineDirectory = std::filesystem::path(ENGINE_ROOT_PATH).string();
+        settings.assetsDirectory = std::filesystem::path(ENGINE_ASSETS_PATH).string();
+        settings.sceneDirectory =
+            (std::filesystem::path(ENGINE_ASSETS_PATH) / "Scenes").string();
+        settings.scriptsDirectory =
+            (std::filesystem::path(ENGINE_ASSETS_PATH) / "Scripts").string();
+        settings.shadersDirectory = std::filesystem::path(ENGINE_SHADERS_PATH).string();
+        settings.buildDirectory = std::filesystem::path(ENGINE_BUILD_DIR).string();
+        settings.defaultScene =
+            (std::filesystem::path(ENGINE_ASSETS_PATH) / "Scenes" / "default.scene").string();
+        settings.viewportWidth = 1280;
+        settings.viewportHeight = 720;
+        settings.leftPanelWidth = 0.20f;
+        settings.rightPanelWidth = 0.31f;
+        settings.leftPanelTabs = { "HierarchyView", "Assets" };
+        settings.centerPanelTabs = { "Scene", "Game" };
+        settings.rightPanelTabs = { "Properties" };
+        settings.renderingAPI = "DirectX11";
+        settings.editorRenderingAPI = "DirectX11";
+        settings.gameRenderingAPI = "DirectX11";
+        settings.clearColor = { 0.18f, 0.18f, 0.18f, 1.f };
+        settings.targetFramerate = 60;
+        settings.aspectRatioMode = ProjectSettings::AspectRatioMode::Free;
+        return settings;
     }
 }
 
@@ -74,6 +131,23 @@ int WINAPI wWinMain(
     };
 
     std::string projectFile = resolveProject();
+    auto hasArgument = [](const wchar_t* expected) -> bool
+    {
+        int argumentCount = 0;
+        LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
+        bool found = false;
+        if (arguments)
+        {
+            for (int i = 1; i < argumentCount; ++i)
+                if (std::wstring(arguments[i]) == expected)
+                {
+                    found = true;
+                    break;
+                }
+            LocalFree(arguments);
+        }
+        return found;
+    };
     auto rendererOverride = []() -> std::string
     {
         int argumentCount = 0;
@@ -91,35 +165,51 @@ int WINAPI wWinMain(
         }
         return value;
     };
+    if (hasArgument(L"--project-hub"))
+        projectFile.clear();
     ProjectLoader projectLoader;
     ProjectSettings projectSettings;
-    while (true)
+    const bool engineDevelopmentMode = projectFile.empty() &&
+        !hasArgument(L"--project-hub") && IsEngineDevelopmentDirectory();
+    if (engineDevelopmentMode)
     {
-        if (projectFile.empty())
-            projectFile = ProjectLauncher::Run(hInstance);
-        if (projectFile.empty())
+        projectSettings = CreateEngineDevelopmentSettings();
+        const std::string overrideApi = rendererOverride();
+        if (!overrideApi.empty())
+            projectSettings.editorRenderingAPI = overrideApi;
+        WriteStartupLog("Mode: Engine Sandbox");
+        WriteStartupLog("Editor renderer: " + projectSettings.editorRenderingAPI);
+    }
+    else
+    {
+        while (true)
         {
-            if (SUCCEEDED(comResult)) CoUninitialize();
-            return 0;
-        }
+            if (projectFile.empty())
+                projectFile = ProjectLauncher::Run(hInstance);
+            if (projectFile.empty())
+            {
+                if (SUCCEEDED(comResult)) CoUninitialize();
+                return 0;
+            }
 
-        try
-        {
-            projectFile = std::filesystem::weakly_canonical(projectFile).string();
-            std::filesystem::current_path(std::filesystem::path(projectFile).parent_path());
-            projectSettings = projectLoader.LoadProject(projectFile);
-            const std::string overrideApi = rendererOverride();
-            if (!overrideApi.empty())
-                projectSettings.editorRenderingAPI = overrideApi;
-            WriteStartupLog("Project: " + projectFile);
-            WriteStartupLog("Editor renderer: " + projectSettings.editorRenderingAPI);
-            ProjectLauncher::RememberProject(projectFile);
-            break;
-        }
-        catch (const std::exception& error)
-        {
-            MessageBoxA(nullptr, error.what(), "Could not open project", MB_OK | MB_ICONERROR);
-            projectFile.clear();
+            try
+            {
+                projectFile = std::filesystem::weakly_canonical(projectFile).string();
+                std::filesystem::current_path(std::filesystem::path(projectFile).parent_path());
+                projectSettings = projectLoader.LoadProject(projectFile);
+                const std::string overrideApi = rendererOverride();
+                if (!overrideApi.empty())
+                    projectSettings.editorRenderingAPI = overrideApi;
+                WriteStartupLog("Project: " + projectFile);
+                WriteStartupLog("Editor renderer: " + projectSettings.editorRenderingAPI);
+                ProjectLauncher::RememberProject(projectFile);
+                break;
+            }
+            catch (const std::exception& error)
+            {
+                MessageBoxA(nullptr, error.what(), "Could not open project", MB_OK | MB_ICONERROR);
+                projectFile.clear();
+            }
         }
     }
 
@@ -162,7 +252,8 @@ int WINAPI wWinMain(
     OutputDebugStringA("[Main] EditorUI created\n");
     
     OutputDebugStringA("[Main] Creating GameBuildManager...\n");
-    auto gameBuildManager = std::make_unique<GameBuildManager>(editorState->GetConsole(), projectFile);
+    auto gameBuildManager = std::make_unique<GameBuildManager>(
+        editorState->GetConsole(), projectFile, projectSettings);
     OutputDebugStringA("[Main] GameBuildManager created\n");
     editorUI->SetGameBuildManager(gameBuildManager.get());
     OutputDebugStringA("[Main] Getting window, renderer, scene...\n");
@@ -274,8 +365,12 @@ int WINAPI wWinMain(
         renderer->MarkDirty();
 
         // Update window title
-        SetWindowTextW(window->GetHWND(),
-                       editorState->HasUnsavedChanges() ? L"Engine Editor *" : L"Engine Editor");
+        if (engineDevelopmentMode)
+            SetWindowTextW(window->GetHWND(), editorState->HasUnsavedChanges()
+                ? L"Engine Editor - Engine Sandbox *" : L"Engine Editor - Engine Sandbox");
+        else
+            SetWindowTextW(window->GetHWND(),
+                           editorState->HasUnsavedChanges() ? L"Engine Editor *" : L"Engine Editor");
 
         // Render frame
         renderer->RenderIfNeeded([&]()
