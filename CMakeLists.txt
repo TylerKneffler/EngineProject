@@ -23,8 +23,10 @@ if(ENGINE_PROJECT_DIR)
     )
 else()
     set(ENGINE_RUNTIME_WORKING_DIRECTORY "${ENGINE_ROOT}")
-    set(ASSET_SOURCES)
-    message(STATUS "[Project] Engine-only build. Editor.exe will open the project launcher.")
+    file(GLOB_RECURSE ASSET_SOURCES CONFIGURE_DEPENDS
+        "${ENGINE_ROOT}/Engine/Core/Assets/*.cpp"
+    )
+    message(STATUS "[Project] Engine-only build. Editor.exe will open the Engine Sandbox from the engine root.")
 endif()
 
 include(FetchContent)
@@ -33,7 +35,6 @@ set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
 
 option(ENGINE_ENABLE_VULKAN "Build the Vulkan renderer" ON)
 option(ENGINE_PORTABLE_EXPORT "Link the game with the static MSVC runtime for portable exports" OFF)
-option(ENGINE_GENERATE_ROOT_SOLUTION "Generate a discoverable solution in the project root" ON)
 if(MSVC AND ENGINE_PORTABLE_EXPORT)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
@@ -99,6 +100,9 @@ file(GLOB_RECURSE ENGINE_RESOURCE_FILES CONFIGURE_DEPENDS
     "${ENGINE_ROOT}/Engine/Core/Assets/*"
     "${ENGINE_ROOT}/Engine/Core/Shaders/*"
 )
+# Built-in asset scripts are compiled into the root development Editor/Game.
+# Keep only non-source assets in the Engine library's browse-only list.
+list(FILTER ENGINE_RESOURCE_FILES EXCLUDE REGEX "\\.cpp$")
 list(APPEND ENGINE_HEADERS "${ENGINE_ROOT}/Engine/pch.h")
 set_source_files_properties(${ENGINE_RESOURCE_FILES} PROPERTIES HEADER_FILE_ONLY TRUE)
 
@@ -217,6 +221,7 @@ target_link_libraries(Engine PUBLIC
 )
 target_compile_definitions(Engine PUBLIC
     ENGINE_SHADERS_PATH="${ENGINE_ROOT}/Engine/Core/Shaders/"
+    ENGINE_ASSETS_PATH="${ENGINE_ROOT}/Engine/Core/Assets/"
 )
 
 if(ENGINE_VULKAN_ENABLED)
@@ -302,6 +307,7 @@ target_include_directories(Editor PRIVATE
     ${ENGINE_ROOT}/Engine
     ${ENGINE_ROOT}/Engine/Editor
     ${ENGINE_ROOT}/Engine/Editor/Core
+    ${ENGINE_ROOT}/Engine/Core/Assets
     ${ENGINE_PROJECT_DIR}/Assets
 )
 target_compile_definitions(Editor PRIVATE
@@ -316,24 +322,6 @@ set_target_properties(Editor PROPERTIES
     VS_DEBUGGER_COMMAND "$<TARGET_FILE:Editor>"
     VS_DEBUGGER_WORKING_DIRECTORY "${ENGINE_RUNTIME_WORKING_DIRECTORY}"
 )
-
-# Place a discoverable solution in the source/project root while keeping the
-# generated Visual Studio projects in the build directory.
-if(ENGINE_GENERATE_ROOT_SOLUTION)
-    file(RELATIVE_PATH ROOT_SOLUTION_BUILD_RELATIVE "${CMAKE_SOURCE_DIR}" "${CMAKE_BINARY_DIR}")
-    set(ROOT_SOLUTION_SOURCE "${CMAKE_BINARY_DIR}/${CMAKE_PROJECT_NAME}.sln")
-    set(ROOT_SOLUTION_OUTPUT "${CMAKE_SOURCE_DIR}/${CMAKE_PROJECT_NAME}.sln")
-    add_custom_target(RootSolution
-        COMMAND ${CMAKE_COMMAND}
-            -DSOURCE_SOLUTION=${ROOT_SOLUTION_SOURCE}
-            -DOUTPUT_SOLUTION=${ROOT_SOLUTION_OUTPUT}
-            -DBUILD_RELATIVE=${ROOT_SOLUTION_BUILD_RELATIVE}
-            -P "${ENGINE_ROOT}/cmake/CreateRootSolution.cmake"
-        COMMENT "Creating root ${CMAKE_PROJECT_NAME}.sln"
-        VERBATIM
-    )
-    add_dependencies(Editor RootSolution)
-endif()
 
 # Make Visual Studio's green Play button / F5 build and launch the editor by
 # default. Setting this on the top-level directory also applies when the engine
@@ -358,11 +346,9 @@ target_link_libraries(Game PRIVATE Engine)
 target_precompile_headers(Game REUSE_FROM Engine)
 target_include_directories(Game PRIVATE
     ${ENGINE_ROOT}/Engine
+    ${ENGINE_ROOT}/Engine/Core/Assets
     ${ENGINE_PROJECT_DIR}/Assets
 )
-if(ENGINE_GENERATE_ROOT_SOLUTION)
-    add_dependencies(Game RootSolution)
-endif()
 target_compile_definitions(Game PRIVATE
     ASSETS_PATH="${ENGINE_PROJECT_DIR}/Assets/"
     PROJECT_FILE="${ENGINE_PROJECT_FILE}"

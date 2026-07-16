@@ -16,8 +16,8 @@ DirectX is included with Windows. Vulkan build dependencies are downloaded autom
 ```powershell
 git clone https://github.com/TylerKneffler/EngineProject.git
 cd EngineProject
-cmake -S . -B build/Debug -G "Visual Studio 17 2022" -A x64
-cmake --build build/Debug --config Debug --target Editor --parallel
+cmake --preset debug
+cmake --build --preset debug --target Editor --parallel
 .\build\Debug\Debug\Editor.exe
 ```
 
@@ -49,8 +49,8 @@ Each new project contains its own `Assets/` directory and an `Open <Project Name
 Run these commands from the generated project folder:
 
 ```powershell
-cmake -S . -B build/Debug -G "Visual Studio 17 2022" -A x64
-cmake --build build/Debug --config Debug --parallel
+cmake --preset debug
+cmake --build --preset debug --parallel
 ```
 
 Start the project Editor or standalone game:
@@ -62,9 +62,7 @@ Start the project Editor or standalone game:
 
 For a distributable build, open **File > Project Preferences > Export** and select **Build Portable Export**. The packaged game is written to the project's `Export/` folder with its assets, settings, and shaders. Build details are saved in `export-build.log`.
 
-The generated Visual Studio solution sets `Editor` as the startup project, so F5 builds and launches it. VS Code provides **Engine: Start Editor** and **Engine: Open Project Hub** tasks.
-
-CMake also places a curated `<ProjectName>.sln` in the project root so Visual Studio and other code editors can detect it. It shows only `Engine`, `Editor`, and `Game`, with source, header, asset, and shader filters matching the repository structure. The complete CMake solution and generated project files remain under `build/Debug`.
+Open the repository or generated project folder directly in Visual Studio 2022. Visual Studio detects `CMakePresets.json`, and the generated solution remains in `build/Debug`. The CMake project sets `Editor` as the startup target. VS Code provides **Engine: Start Editor** and **Engine: Open Project Hub** tasks.
 
 ## Assets
 
@@ -86,7 +84,7 @@ Unavailable renderers are disabled and show the reason. Restart the Editor after
 To build without Vulkan support:
 
 ```powershell
-cmake -S . -B build/Debug -G "Visual Studio 17 2022" -A x64 -DENGINE_ENABLE_VULKAN=OFF
+cmake --preset debug -DENGINE_ENABLE_VULKAN=OFF
 ```
 
 ## Troubleshooting

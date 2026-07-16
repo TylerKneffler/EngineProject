@@ -2,7 +2,37 @@
 #include <fstream>
 #include <sstream>
 #include <array>
+#include <filesystem>
 #include <stdexcept>
+
+#ifndef ENGINE_ASSETS_PATH
+#define ENGINE_ASSETS_PATH "Engine/Core/Assets/"
+#endif
+
+namespace
+{
+std::filesystem::path ResolveMeshPath(const std::string& path)
+{
+    const std::filesystem::path requested(path);
+    if (std::filesystem::exists(requested))
+        return requested;
+
+    // Scenes distributed with a project deliberately store portable paths such
+    // as Assets/Mesh/cube.obj. In the project-free Engine Sandbox, resolve that
+    // same path against the built-in template assets instead.
+    const std::filesystem::path projectAssets("Assets");
+    const std::filesystem::path relativeAsset = requested.lexically_relative(projectAssets);
+    if (!relativeAsset.empty() && *relativeAsset.begin() != "..")
+    {
+        const std::filesystem::path engineAsset =
+            std::filesystem::path(ENGINE_ASSETS_PATH) / relativeAsset;
+        if (std::filesystem::exists(engineAsset))
+            return engineAsset;
+    }
+
+    return requested;
+}
+}
 
 #pragma region OBJ file parsing helpers
 static void ParseFaceToken(const std::string& t, int& vi, int& vni)
@@ -21,9 +51,11 @@ static void ParseFaceToken(const std::string& t, int& vi, int& vni)
 void Mesh::LoadFromFile(const std::string& path)
 {
     m_filePath = path;  // store for serialization
-    std::ifstream file(path);
+    const std::filesystem::path resolvedPath = ResolveMeshPath(path);
+    std::ifstream file(resolvedPath);
     if (!file.is_open())
-        throw std::runtime_error("Mesh: failed to open OBJ: " + path);
+        throw std::runtime_error("Mesh: failed to open OBJ: " + path +
+            " (resolved to " + resolvedPath.string() + ")");
 
     std::vector<std::array<float, 3>> positions;
     std::vector<std::array<float, 3>> normals;

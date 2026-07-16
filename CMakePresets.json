@@ -1,0 +1,54 @@
+{
+  "version": 2,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "debug",
+      "displayName": "Visual Studio 2022 - Debug",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/Debug"
+    },
+    {
+      "name": "release",
+      "displayName": "Visual Studio 2022 - Release",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/Release"
+    },
+    {
+      "name": "export",
+      "displayName": "Visual Studio 2022 - Portable Export",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/Export",
+      "cacheVariables": {
+        "ENGINE_PORTABLE_EXPORT": true
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug",
+      "displayName": "Build Debug",
+      "configurePreset": "debug",
+      "configuration": "Debug"
+    },
+    {
+      "name": "release",
+      "displayName": "Build Release",
+      "configurePreset": "release",
+      "configuration": "Release"
+    },
+    {
+      "name": "export",
+      "displayName": "Build Portable Export",
+      "configurePreset": "export",
+      "configuration": "Release"
+    }
+  ]
+}

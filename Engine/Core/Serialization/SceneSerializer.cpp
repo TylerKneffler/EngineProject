@@ -232,12 +232,22 @@ bool SceneSerializer::LoadFromString(Scene& scene, const std::string& source,
 {
     EnsureBuiltinsRegistered();
     try { return DeserialiseScene(scene, JsonParse(source), graphicsProvider, GetRegistry()); }
-    catch (const std::exception&) { return false; }
+    catch (const std::exception& error)
+    {
+        OutputDebugStringA((std::string("[SceneSerializer] Failed to load scene data: ") +
+            error.what() + "\n").c_str());
+        return false;
+    }
 }
 
 bool SceneSerializer::Load(Scene& scene, const std::string& path, IGraphicsProvider* graphicsProvider)
 {
     EnsureBuiltinsRegistered();
     try { return DeserialiseScene(scene, JsonParseFile(path), graphicsProvider, GetRegistry()); }
-    catch (const std::exception&) { return false; }
+    catch (const std::exception& error)
+    {
+        OutputDebugStringA((std::string("[SceneSerializer] Failed to load '") + path +
+            "': " + error.what() + "\n").c_str());
+        return false;
+    }
 }

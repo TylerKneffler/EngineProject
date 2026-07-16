@@ -201,6 +201,7 @@ void EditorState::LoadScene(const std::string& path)
         if (m_scene->Load(resolvedPath))
         {
             OutputDebugStringA("[EditorState::LoadScene] Scene loaded successfully\n");
+            LogStartupFailure("Scene loaded successfully: " + resolvedPath);
             m_hasUnsavedChanges = false;
             
             if (m_primaryConsole)
@@ -211,6 +212,7 @@ void EditorState::LoadScene(const std::string& path)
         else
         {
             OutputDebugStringA("[EditorState::LoadScene] Failed to load scene\n");
+            LogStartupFailure("Failed to load scene: " + resolvedPath);
             if (m_primaryConsole)
             {
                 m_primaryConsole->AddLog(ConsoleView::Level::Error, "Failed to load scene: " + resolvedPath);

@@ -214,6 +214,7 @@ std::string CreateProject(const std::string& name, const std::string& location,
             fs::copy_options::recursive);
         if (progress) progress->Set(0.35f, ProjectSetupStage::WritingProjectFiles);
         WriteTemplate(templateRoot / "CMakeLists.txt.in", projectRoot / "CMakeLists.txt", name);
+        WriteTemplate(templateRoot / "CMakePresets.json.in", projectRoot / "CMakePresets.json", name);
         WriteTemplate(templateRoot / "Project.proj.in", projectRoot / (name + ".proj"), name);
         WriteTemplate(templateRoot / "tasks.json.in", projectRoot / ".vscode" / "tasks.json", name);
         WriteTemplate(templateRoot / "gitignore.in", projectRoot / ".gitignore", name);
@@ -328,9 +329,7 @@ ProjectBuildResult BuildProjectEditor(const std::string& projectFile,
         << "Configuring and building the EngineProject editor for " << projectRoot.string() << "\n";
 
     if (progress) progress->Set(0.55f, ProjectSetupStage::Configuring);
-    const std::wstring configure = L"cmake -S \"" + projectRoot.wstring() +
-        L"\" -B \"" + buildDirectory.wstring() +
-        L"\" -G \"Visual Studio 17 2022\" -A x64";
+    const std::wstring configure = L"cmake --preset debug";
     if (!RunCommand(configure, projectRoot, logFile))
     {
         result.message = "Project configuration failed. See " + logFile.string();
@@ -338,8 +337,7 @@ ProjectBuildResult BuildProjectEditor(const std::string& projectFile,
     }
 
     if (progress) progress->Set(0.70f, ProjectSetupStage::Building);
-    const std::wstring build = L"cmake --build \"" + buildDirectory.wstring() +
-        L"\" --config Debug --target Editor --parallel";
+    const std::wstring build = L"cmake --build --preset debug --target Editor --parallel";
     if (!RunCommand(build, projectRoot, logFile) || !fs::exists(result.editorExecutable))
     {
         result.message = "Editor build failed. See " + logFile.string();

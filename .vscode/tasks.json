@@ -6,10 +6,7 @@
             "type": "shell",
             "command": "cmake",
             "args": [
-                "-S", "${workspaceFolder}",
-                "-B", "${workspaceFolder}/build/Debug",
-                "-G", "Visual Studio 17 2022",
-                "-A", "x64"
+                "--preset", "debug"
             ],
             "group": "build",
             "presentation": { "reveal": "always", "panel": "shared" },
@@ -20,8 +17,7 @@
             "type": "shell",
             "command": "cmake",
             "args": [
-                "--build", "${workspaceFolder}/build/Debug",
-                "--config", "Debug",
+                "--build", "--preset", "debug",
                 "--parallel"
             ],
             "dependsOn": "CMake: Configure (Debug)",
@@ -37,10 +33,7 @@
             "type": "shell",
             "command": "cmake",
             "args": [
-                "-S", "${workspaceFolder}",
-                "-B", "${workspaceFolder}/build/Release",
-                "-G", "Visual Studio 17 2022",
-                "-A", "x64"
+                "--preset", "release"
             ],
             "group": "build",
             "presentation": { "reveal": "always", "panel": "shared" },
@@ -51,8 +44,7 @@
             "type": "shell",
             "command": "cmake",
             "args": [
-                "--build", "${workspaceFolder}/build/Release",
-                "--config", "Release",
+                "--build", "--preset", "release",
                 "--parallel"
             ],
             "dependsOn": "CMake: Configure (Release)",
@@ -65,8 +57,7 @@
             "type": "shell",
             "command": "cmake",
             "args": [
-                "--build", "${workspaceFolder}/build/Debug",
-                "--config", "Debug",
+                "--build", "--preset", "debug",
                 "--target", "clean"
             ],
             "group": "build",

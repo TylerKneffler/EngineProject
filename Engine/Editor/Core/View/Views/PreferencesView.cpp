@@ -126,17 +126,21 @@ std::pair<bool, std::string> BuildPortableExport(const std::string& projectFile,
 
         stage->store(ExportConfiguring);
         progress->store(0.10f);
-        const std::wstring configure = L"cmake -S \"" + projectRoot.wstring() +
-            L"\" -B \"" + buildDirectory.wstring() +
-            L"\" -G \"Visual Studio 17 2022\" -A x64 -DENGINE_PORTABLE_EXPORT=ON "
-            L"-DENGINE_GENERATE_ROOT_SOLUTION=OFF";
+        const bool hasPresets = fs::is_regular_file(projectRoot / "CMakePresets.json");
+        const std::wstring configure = hasPresets
+            ? L"cmake --preset export"
+            : L"cmake -S \"" + projectRoot.wstring() + L"\" -B \"" +
+                buildDirectory.wstring() +
+                L"\" -G \"Visual Studio 17 2022\" -A x64 -DENGINE_PORTABLE_EXPORT=ON";
         if (!RunExportCommand(configure, projectRoot, logFile))
             return { false, "Export configuration failed. See " + logFile.string() };
 
         stage->store(ExportBuilding);
         progress->store(0.35f);
-        const std::wstring build = L"cmake --build \"" + buildDirectory.wstring() +
-            L"\" --config Release --target Game --parallel";
+        const std::wstring build = hasPresets
+            ? L"cmake --build --preset export --target Game --parallel"
+            : L"cmake --build \"" + buildDirectory.wstring() +
+                L"\" --config Release --target Game --parallel";
         if (!RunExportCommand(build, projectRoot, logFile))
             return { false, "Export build failed. See " + logFile.string() };
 
