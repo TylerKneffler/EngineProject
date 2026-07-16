@@ -16,6 +16,8 @@ public:
     void Clear(float r, float g, float b, float a = 1.0f) override;
     IGraphicsProvider* GetGraphicsProvider() override { return m_provider.get(); }
     void MarkDirty() override { m_dirty = true; }
+    void SetUiRenderHooks(EditorUiRenderHooks hooks) override { m_uiHooks = std::move(hooks); }
+    void SetUiTextureHooks(EditorUiTextureHooks hooks) override;
     void RenderIfNeeded(std::function<void()> drawFn = nullptr) override;
     std::pair<std::pair<void*, void*>, uint32_t> AllocateSrvSlot() override;
     void FreeSrvSlot(uint32_t slot) override;
@@ -25,8 +27,8 @@ public:
     std::unique_ptr<IView> CreateViewBackend() override;
     void* GetCurrentCommandBuffer() const override { return reinterpret_cast<void*>(m_commandBuffer); }
     void* GetCurrentRenderTargetHandle() const override { return nullptr; }
+    VulkanRenderCore& GetRenderCore() { return m_core; }
 private:
-    static PFN_vkVoidFunction LoadFunction(const char* name, void* instance);
     VulkanRenderCore m_core;
     VulkanViewDeviceContext m_viewContext{};
     std::unique_ptr<VulkanGraphicsProvider> m_provider;
@@ -35,6 +37,6 @@ private:
     float m_clearColor[4] = { 0.18f, 0.18f, 0.18f, 1.0f };
     uint32_t m_width = 0, m_height = 0;
     bool m_dirty = true;
-    bool m_imguiInitialized = false;
+    EditorUiRenderHooks m_uiHooks;
 };
 #endif

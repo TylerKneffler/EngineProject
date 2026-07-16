@@ -29,6 +29,17 @@
       "cacheVariables": {
         "ENGINE_PORTABLE_EXPORT": true
       }
+    },
+    {
+      "name": "nuklear",
+      "displayName": "Visual Studio 2022 - Nuklear UI",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/Nuklear",
+      "cacheVariables": {
+        "ENGINE_EDITOR_UI": "NUKLEAR",
+        "ENGINE_ENABLE_VULKAN": true
+      }
     }
   ],
   "buildPresets": [
@@ -49,6 +60,12 @@
       "displayName": "Build Portable Export",
       "configurePreset": "export",
       "configuration": "Release"
+    },
+    {
+      "name": "nuklear",
+      "displayName": "Build Debug with Nuklear UI",
+      "configurePreset": "nuklear",
+      "configuration": "Debug"
     }
   ]
 }

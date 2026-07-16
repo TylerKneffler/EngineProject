@@ -12,7 +12,7 @@ class IEditorPanel;
 // The view owns:
 //   - An offscreen render target texture
 //   - A depth buffer
-//   - SRV registration for ImGui display
+//   - texture registration for display by the selected editor UI
 //
 // Graphics API specifics (D3D12, Vulkan, Metal) are hidden from public API.
 // All handles are opaque void* pointers.
@@ -50,9 +50,8 @@ public:
     virtual uint32_t GetWidth()  const = 0;
     virtual uint32_t GetHeight() const = 0;
 
-    // Opaque texture handle for ImGui::Image. D3D11 uses an ID3D11ShaderResourceView*,
-    // D3D12 uses a GPU descriptor pointer, and Vulkan uses a VkDescriptorSet.
-    virtual void* GetImGuiTextureHandle() const = 0;
+    // Opaque texture handle consumable by the selected editor UI backend.
+    virtual void* GetUiTextureHandle() const = 0;
 
     // SRV slot index for resource cleanup
     virtual uint32_t GetSrvSlotIndex() const = 0;

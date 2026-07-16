@@ -2,6 +2,7 @@
 #include "View/View.h"
 #include "Core/Scene/Scene.h"
 #include "Core/ProjectLoader.h"
+#include "Engine/Editor/UI/IEditorUi.h"
 
 // ---------------------------------------------------------------------------
 // GameView — editor Game panel
@@ -42,11 +43,9 @@ public:
     void Render3D(void* cmd) override;
 
     // Draws the "Game" ImGui window showing the game-camera render output.
-    void DrawPanel() override;
+    void DrawPanel(IEditorUi& ui) override;
 
 private:
-    void CalculateGameViewport(ImVec2 availableSize, ImVec2& outViewportSize, ImVec2& outViewportPos);
-
     Scene* m_scene = nullptr; // non-owning
 
     // Aspect ratio settings

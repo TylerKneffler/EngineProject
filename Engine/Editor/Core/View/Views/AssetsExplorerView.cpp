@@ -1,4 +1,5 @@
 #include "AssetsExplorerView.h"
+#include "Engine/Editor/UI/IEditorUi.h"
 #include <filesystem>
 #include <shellapi.h>
 
@@ -15,33 +16,34 @@ void AssetsExplorerView::Init(const std::string& assetsPath)
 // ---------------------------------------------------------------------------
 // DrawPanel
 // ---------------------------------------------------------------------------
-void AssetsExplorerView::DrawPanel()
+void AssetsExplorerView::DrawPanel(IEditorUi& ui)
 {
-    ImGui::Begin(m_title.c_str(), &m_open);
+    ui.BeginWindow(m_title.c_str(), &m_open);
 
     if (m_assetsPath.empty())
     {
-        ImGui::TextDisabled("Assets path not initialized");
-        ImGui::End();
+        ui.DisabledLabel("Assets path not initialized");
+        ui.EndWindow();
         return;
     }
 
     if (!fs::exists(m_assetsPath))
     {
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Assets path does not exist: %s", m_assetsPath.c_str());
-        ImGui::End();
+        std::string error = "Assets path does not exist: " + m_assetsPath;
+        ui.ColoredLabel(error.c_str(), {1,0,0,1});
+        ui.EndWindow();
         return;
     }
 
-    DrawDirectoryTree(m_assetsPath);
+    DrawDirectoryTree(ui, m_assetsPath);
 
-    ImGui::End();
+    ui.EndWindow();
 }
 
 // ---------------------------------------------------------------------------
 // DrawDirectoryTree
 // ---------------------------------------------------------------------------
-bool AssetsExplorerView::DrawDirectoryTree(const std::string& path)
+bool AssetsExplorerView::DrawDirectoryTree(IEditorUi& ui, const std::string& path)
 {
     try
     {
@@ -67,27 +69,22 @@ bool AssetsExplorerView::DrawDirectoryTree(const std::string& path)
             if (entry.is_directory())
             {
                 std::string dirName = entry.path().filename().string();
-                ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_DefaultOpen;
-
-                if (ImGui::TreeNodeEx(dirName.c_str(), flags))
+                if (ui.TreeNode(entry.path().c_str(), dirName.c_str(), false, false, true))
                 {
-                    if (DrawDirectoryTree(entry.path().string()))
+                    if (DrawDirectoryTree(ui, entry.path().string()))
                     {
-                        ImGui::TreePop();
+                        ui.TreePop();
                         return true;
                     }
-                    ImGui::TreePop();
+                    ui.TreePop();
                 }
             }
             else
             {
                 std::string fileName = entry.path().filename().string();
-                ImGuiSelectableFlags flags = ImGuiSelectableFlags_AllowDoubleClick;
-                
-                if (ImGui::Selectable(fileName.c_str(), false, flags))
+                if (ui.Selectable(fileName.c_str(), false, true))
                 {
-                    // Check if this was a double-click
-                    if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                    if (ui.IsItemDoubleClicked())
                     {
                         OpenFile(entry.path().string());
                         return true;
@@ -98,7 +95,8 @@ bool AssetsExplorerView::DrawDirectoryTree(const std::string& path)
     }
     catch (const std::exception& e)
     {
-        ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Error reading directory: %s", e.what());
+        std::string error = "Error reading directory: " + std::string(e.what());
+        ui.ColoredLabel(error.c_str(), {1,0,0,1});
     }
 
     return false;

@@ -29,6 +29,7 @@ public:
 
     // ---- Initialization ----
     bool Init();
+    void InitializeUiState();
 
     // ---- Access ----
     Window* GetWindow() const { return m_window.get(); }

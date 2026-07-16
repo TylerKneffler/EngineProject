@@ -3,6 +3,7 @@
 #include "Core/ProjectLoader.h"
 #include <atomic>
 #include <future>
+class IEditorUi;
 
 // ---------------------------------------------------------------------------
 // PreferencesView
@@ -25,7 +26,7 @@ public:
     void Init(const ProjectSettings& settings, const std::string& projFilePath);
 
     // Draw the preferences window, returns true if window is still open
-    void DrawWindow(bool& isOpen);
+    void DrawWindow(IEditorUi& ui, bool& isOpen);
 
     // Check if preferences window should be shown
     bool IsOpen() const { return m_isOpen; }
@@ -41,11 +42,11 @@ public:
     std::function<void()> OnSettingsChanged;
 
 private:
-    void DrawMetadataSection();
-    void DrawPathsSection();
-    void DrawRenderingSection();
-    void DrawAspectRatioSection();
-    void DrawExportSection();
+    void DrawMetadataSection(IEditorUi& ui);
+    void DrawPathsSection(IEditorUi& ui);
+    void DrawRenderingSection(IEditorUi& ui);
+    void DrawAspectRatioSection(IEditorUi& ui);
+    void DrawExportSection(IEditorUi& ui);
     void StartPortableExport();
     void UpdatePortableExport();
     void NotifyChanged() { if (OnSettingsChanged) OnSettingsChanged(); }

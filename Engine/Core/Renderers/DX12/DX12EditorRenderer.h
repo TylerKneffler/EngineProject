@@ -1,8 +1,5 @@
 #pragma once
 #include "pch.h"
-#include "imgui.h"
-#include "imgui_impl_win32.h"
-#include "imgui_impl_dx12.h"
 #include "../IEditorRenderer.h"
 #include "DX12GraphicsProvider.h"
 #include <vector>
@@ -66,6 +63,7 @@ public:
 
     // IEditorRenderer interface
     void MarkDirty() override { m_dirty = true; }
+    void SetUiRenderHooks(EditorUiRenderHooks hooks) override { m_uiHooks = std::move(hooks); }
     void RenderIfNeeded(std::function<void()> drawFn = nullptr) override;
     std::pair<std::pair<void*, void*>, uint32_t> AllocateSrvSlot() override;
     void FreeSrvSlot(uint32_t slotIndex) override;
@@ -79,10 +77,12 @@ public:
     // ---------- D3D12-specific accessors (for internal use) ----------
     ID3D12Device*              GetDevice()      const { return m_device.Get(); }
     ID3D12GraphicsCommandList* GetCommandList() const { return m_commandList.Get(); }
+    ID3D12CommandQueue*        GetCommandQueue() const { return m_commandQueue.Get(); }
+    ID3D12DescriptorHeap*      GetUiDescriptorHeap() const { return m_srvHeap.Get(); }
     D3D12_CPU_DESCRIPTOR_HANDLE GetCurrentRTV() const;
 
     // Returns CPU and GPU descriptor handles for the given slot in the
-    // shader-visible SRV heap. Slot 0 is reserved for the ImGui font atlas;
+    // shader-visible SRV heap. Slot 0 is reserved for the UI package;
     // additional slots (1, 2, …) are available for scene textures etc.
     std::pair<D3D12_CPU_DESCRIPTOR_HANDLE, D3D12_GPU_DESCRIPTOR_HANDLE>
         GetSrvSlot(uint32_t slot) const;
@@ -127,8 +127,8 @@ private:
     ComPtr<ID3D12RootSignature>       m_rootSignature;
     uint64_t                          m_fenceValues[FRAME_COUNT]{};
 
-    // -- imgui integration --
-    ComPtr<ID3D12DescriptorHeap> m_srvHeap;   // shader-visible, for ImGui font texture
+    // Shared shader-visible descriptors used by UI and editor view textures.
+    ComPtr<ID3D12DescriptorHeap> m_srvHeap;
 
     // Cached current-frame RTV handle (stable address for GetCurrentRenderTargetHandle)
     D3D12_CPU_DESCRIPTOR_HANDLE m_currentRTVHandle{};
@@ -153,4 +153,5 @@ private:
 
     // Graphics provider for shader compilation, buffer creation, pipeline building
     std::unique_ptr<D3D12GraphicsProvider> m_graphicsProvider;
+    EditorUiRenderHooks m_uiHooks;
 };

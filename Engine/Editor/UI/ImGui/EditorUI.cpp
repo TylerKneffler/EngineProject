@@ -1,5 +1,5 @@
 #include "pch.h"
-#include "Engine/Editor/EditorUI.h"
+#include "Engine/Editor/UI/ImGui/EditorUI.h"
 #include "Engine/Editor/EditorState.h"
 #include "Engine/Editor/GameBuildManager.h"
 #include "Engine/Editor/GameBuildManager.h"
@@ -20,8 +20,8 @@ extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam
 // ---------------------------------------------------------------------------
 // EditorUI::EditorUI
 // ---------------------------------------------------------------------------
-EditorUI::EditorUI(EditorState* state)
-    : m_state(state)
+EditorUI::EditorUI(EditorState* state, std::function<void()> switchToNuklear)
+    : m_state(state), m_switchToNuklear(std::move(switchToNuklear))
 {
     OutputDebugStringA("[EditorUI] Constructor called\n");
 }
@@ -162,9 +162,17 @@ void EditorUI::DrawMenuBar(PlayState playState)
         ImGui::EndMenu();
     }
 
+    if (ImGui::BeginMenu("UI"))
+    {
+        ImGui::MenuItem("Dear ImGui", nullptr, true, false);
+        if (ImGui::MenuItem("Switch to Nuklear", "Ctrl+Shift+U") && m_switchToNuklear)
+            m_switchToNuklear();
+        ImGui::EndMenu();
+    }
+
     DrawPlayControls(playState);
 
-    ImGui::EndMainMenuBar();
+    ImGui::EndMainMenuBar(); // Balances BeginMainMenuBar above.
 }
 
 // ---------------------------------------------------------------------------
@@ -229,7 +237,7 @@ void EditorUI::DrawPanels()
 {
     auto& panels = m_state->GetPanels();
     for (auto& panel : panels)
-        panel->DrawPanel();
+        panel->DrawPanel(m_ui);
 
     // Remove closed panels
     ViewFactory* factory = m_state->GetViewFactory();
@@ -266,9 +274,12 @@ void EditorUI::DrawPreferences()
         return;
 
     bool show = m_state->IsShowingPreferences();
-    prefs->SetOpen(show);
     if (show)
-        prefs->DrawWindow(show);
+    {
+        prefs->DrawWindow(m_ui, show);
+        m_state->SetShowPreferences(show);
+    }
+    prefs->SetOpen(show);
 }
 
 // ---------------------------------------------------------------------------

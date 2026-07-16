@@ -6,8 +6,8 @@
 #include "Core/View/View.h"
 #include "Engine/Editor/EditorState.h"
 #include "Engine/Editor/GameBuildManager.h"
-#include "Engine/Editor/EditorUI.h"
 #include "Engine/Editor/ProjectLauncher.h"
+#include "Engine/Editor/UI/IEditorUiBackend.h"
 #include <filesystem>
 #include <fstream>
 #include <shellapi.h>
@@ -31,8 +31,6 @@
 #ifndef ENGINE_BUILD_DIR
 #define ENGINE_BUILD_DIR "build/Debug"
 #endif
-
-extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 namespace
 {
@@ -240,6 +238,28 @@ int WINAPI wWinMain(
     WriteStartupLog("Editor initialized successfully");
     OutputDebugStringA("[Main] EditorState initialized\n");
 
+    Window* window = editorState->GetWindow();
+    IEditorRenderer* renderer = editorState->GetRenderer();
+    Scene* scene = editorState->GetScene();
+    if (!window || !renderer || !scene)
+    {
+        WriteStartupLog("Editor did not create all required core components");
+        return 1;
+    }
+
+    auto uiBackend = CreateEditorUiBackend();
+    if (!uiBackend->Initialize(window->GetHWND(), *renderer))
+    {
+        WriteStartupLog("UI backend initialization failed");
+        return 1;
+    }
+    renderer->SetUiRenderHooks({
+        [&]() { uiBackend->BeginFrame(); },
+        [&](void* commands) { uiBackend->Render(commands); },
+        [&]() { uiBackend->EndFrame(); }
+    });
+    editorState->InitializeUiState();
+
     // Load default scene if specified
     if (!projectSettings.defaultScene.empty())
     {
@@ -247,36 +267,11 @@ int WINAPI wWinMain(
         editorState->LoadScene(projectSettings.defaultScene);
     }
 
-    OutputDebugStringA("[Main] Creating EditorUI...\n");
-    auto editorUI = std::make_unique<EditorUI>(editorState.get());
-    OutputDebugStringA("[Main] EditorUI created\n");
-    
     OutputDebugStringA("[Main] Creating GameBuildManager...\n");
     auto gameBuildManager = std::make_unique<GameBuildManager>(
         editorState->GetConsole(), projectFile, projectSettings);
     OutputDebugStringA("[Main] GameBuildManager created\n");
-    editorUI->SetGameBuildManager(gameBuildManager.get());
     OutputDebugStringA("[Main] Getting window, renderer, scene...\n");
-    Window* window = editorState->GetWindow();
-    IEditorRenderer* renderer = editorState->GetRenderer();
-    Scene* scene = editorState->GetScene();
-    
-    if (!window)
-    {
-        OutputDebugStringA("[Main] ERROR: Window is null!\n");
-        return 1;
-    }
-    if (!renderer)
-    {
-        OutputDebugStringA("[Main] ERROR: Renderer is null!\n");
-        return 1;
-    }
-    if (!scene)
-    {
-        OutputDebugStringA("[Main] ERROR: Scene is null!\n");
-        return 1;
-    }
-    
     char buf[256];
     sprintf_s(buf, "[Main] Window pointer: %p\n", (void*)window);
     OutputDebugStringA(buf);
@@ -322,6 +317,7 @@ int WINAPI wWinMain(
         OutputDebugStringA(buf);
         
         renderer->Resize(w, h);
+        uiBackend->Resize(w, h);
         for (auto& panel : editorState->GetPanels())
         {
             if (panel->NeedsRender())
@@ -335,9 +331,11 @@ int WINAPI wWinMain(
     OutputDebugStringA("[Main] OnResize callback set\n");
 
     OutputDebugStringA("[Main] Setting WndProcHook callback...\n");
-    window->WndProcHook = [](HWND h, UINT m, WPARAM w, LPARAM l) -> bool {
-        return ImGui_ImplWin32_WndProcHandler(h, m, w, l) != 0;
+    window->WndProcHook = [&](HWND h, UINT m, WPARAM w, LPARAM l) -> bool {
+        return uiBackend->HandleMessage(h, m, w, l);
     };
+    window->OnInputBegin = [&]() { uiBackend->BeginInput(); };
+    window->OnInputEnd = [&]() { uiBackend->EndInput(); };
     OutputDebugStringA("[Main] WndProcHook callback set\n");
 
     OutputDebugStringA("[Main] Setting OnUpdate callback...\n");
@@ -393,7 +391,7 @@ int WINAPI wWinMain(
             }
 
             // Render UI
-            editorUI->Render(playState);
+            uiBackend->DrawEditor(*editorState, playState, gameBuildManager.get());
         });
     };
     OutputDebugStringA("[Main] OnUpdate callback set\n");
@@ -404,6 +402,12 @@ int WINAPI wWinMain(
     OutputDebugStringA("[Main] Window shown, entering message loop...\n");
 
     int result = window->Run();
+
+    // Panels release UI texture registrations while the selected package is
+    // still alive. The renderer itself is owned by EditorState.
+    gameBuildManager.reset();
+    editorState.reset();
+    uiBackend.reset();
 
     if (SUCCEEDED(comResult)) CoUninitialize();
     return result;

@@ -119,6 +119,9 @@ int Window::Run()
     MSG msg{};
     while (true)
     {
+        if (OnInputBegin)
+            OnInputBegin();
+
         // Drain all pending messages without blocking.
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE))
         {
@@ -128,6 +131,9 @@ int Window::Run()
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
+
+        if (OnInputEnd)
+            OnInputEnd();
 
         // ---- Deferred resize ----
         // WM_SIZE is processed above inside DispatchMessageW, which writes
@@ -173,6 +179,35 @@ LRESULT CALLBACK Window::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
     // Retrieve the instance pointer. May be nullptr for very early messages
     // (before WM_NCCREATE), but those fall through to DefWindowProcW anyway.
     auto* self = reinterpret_cast<Window*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+
+    // Trackpads do not always expose a reliable two-finger right click. Treat
+    // Alt+left-click as a right-button gesture before forwarding input to the
+    // UI backend. Keeping the gesture active through mouse-up also preserves
+    // right-button dragging if Alt is released before the trackpad click.
+    if (self)
+    {
+        const bool altDown = (GetKeyState(VK_MENU) & 0x8000) != 0;
+        if ((msg == WM_LBUTTONDOWN || msg == WM_LBUTTONDBLCLK) && altDown)
+        {
+            self->m_altLeftClickActive = true;
+            msg = (msg == WM_LBUTTONDBLCLK) ? WM_RBUTTONDBLCLK : WM_RBUTTONDOWN;
+            wParam = (wParam & ~static_cast<WPARAM>(MK_LBUTTON)) | MK_RBUTTON;
+        }
+        else if (msg == WM_MOUSEMOVE && self->m_altLeftClickActive)
+        {
+            wParam = (wParam & ~static_cast<WPARAM>(MK_LBUTTON)) | MK_RBUTTON;
+        }
+        else if (msg == WM_LBUTTONUP && self->m_altLeftClickActive)
+        {
+            self->m_altLeftClickActive = false;
+            msg = WM_RBUTTONUP;
+            wParam &= ~(static_cast<WPARAM>(MK_LBUTTON) | MK_RBUTTON);
+        }
+        else if (msg == WM_CANCELMODE || msg == WM_KILLFOCUS || msg == WM_CAPTURECHANGED)
+        {
+            self->m_altLeftClickActive = false;
+        }
+    }
     
     if (self && self->WndProcHook)
         if (self->WndProcHook(hwnd, msg, wParam, lParam))

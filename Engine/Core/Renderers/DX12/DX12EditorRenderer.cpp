@@ -6,10 +6,6 @@
 // ---------------------------------------------------------------------------
 DX12EditorRenderer::~DX12EditorRenderer()
 {
-    ImGui_ImplDX12_Shutdown();
-    ImGui_ImplWin32_Shutdown();
-    ImGui::DestroyContext();
-
     FlushGPU();
     if (m_fenceEvent)
         CloseHandle(m_fenceEvent);
@@ -76,40 +72,16 @@ bool DX12EditorRenderer::Init(void* hwnd, uint32_t width, uint32_t height)
     if (!m_fenceEvent)
         throw std::runtime_error("Failed to create fence event.");
     
-    // SRV heap: slot 0 = ImGui font atlas; slots 1-31 available for view textures.
+    // SRV heap: slot 0 = UI package; slots 1-31 = view textures.
     D3D12_DESCRIPTOR_HEAP_DESC srvDesc{};
     srvDesc.NumDescriptors = IEditorRenderer::MAX_SRV_SLOTS;
     srvDesc.Type  = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     srvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     ThrowIfFailed(m_device->CreateDescriptorHeap(&srvDesc, IID_PPV_ARGS(&m_srvHeap)));
 
-    // Initialize the free SRV slots list (slots 1-31; slot 0 reserved for ImGui)
+    // Initialize free view slots; slot 0 remains reserved for the UI package.
     for (uint32_t i = IEditorRenderer::MAX_SRV_SLOTS - 1; i > 0; --i)
         m_freeSrvSlots.push_back(i);
-
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
-
-    ImGui_ImplWin32_Init(hwnd);
-
-    ImGui_ImplDX12_InitInfo dxInitInfo{};
-    dxInitInfo.Device            = m_device.Get();
-    dxInitInfo.CommandQueue      = m_commandQueue.Get();  // required for font texture upload
-    dxInitInfo.NumFramesInFlight = static_cast<int>(FRAME_COUNT);
-    dxInitInfo.RTVFormat         = DXGI_FORMAT_R8G8B8A8_UNORM;
-    dxInitInfo.DSVFormat         = DXGI_FORMAT_UNKNOWN;
-    dxInitInfo.SrvDescriptorHeap = m_srvHeap.Get();
-    dxInitInfo.SrvDescriptorAllocFn = [](ImGui_ImplDX12_InitInfo* info,
-        D3D12_CPU_DESCRIPTOR_HANDLE* out_cpu, D3D12_GPU_DESCRIPTOR_HANDLE* out_gpu)
-    {
-        *out_cpu = info->SrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-        *out_gpu = info->SrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
-    };
-    dxInitInfo.SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo*,
-        D3D12_CPU_DESCRIPTOR_HANDLE, D3D12_GPU_DESCRIPTOR_HANDLE) {};
-    ImGui_ImplDX12_Init(&dxInitInfo);
 
     m_viewport    = { 0.f, 0.f, static_cast<float>(width), static_cast<float>(height), 0.f, 1.f };
     m_scissorRect = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
@@ -226,9 +198,7 @@ void DX12EditorRenderer::BeginFrame()
     m_commandList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
 
     m_currentRTVHandle = GetCurrentRTV();
-    ImGui_ImplDX12_NewFrame();
-    ImGui_ImplWin32_NewFrame();
-    ImGui::NewFrame();
+    if (m_uiHooks.beginFrame) m_uiHooks.beginFrame();
 }
 
 // ---------------------------------------------------------------------------
@@ -253,20 +223,11 @@ void DX12EditorRenderer::EndFrame()
     // Transition back-buffer: RENDER_TARGET → PRESENT
     // Unlike DX12GameRenderer (which used D3D11On12 to issue this barrier),
     // the editor renderer handles it directly here.
-    ImGui::Render();
-    ID3D12DescriptorHeap* heaps[] = { m_srvHeap.Get() };
-    m_commandList->SetDescriptorHeaps(1, heaps);
-    ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_commandList.Get());
-
-    // Update and render additional platform windows (viewports outside the main window).
-    if (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
-    {
-        ImGui::UpdatePlatformWindows();
-        ImGui::RenderPlatformWindowsDefault();
-    }
+    if (m_uiHooks.render) m_uiHooks.render(m_commandList.Get());
+    if (m_uiHooks.endFrame) m_uiHooks.endFrame();
 
     // Transition back-buffer: RENDER_TARGET → PRESENT
-    // Must happen after ImGui has finished drawing to the render target.
+    // Must happen after the UI package has finished drawing.
     D3D12_RESOURCE_BARRIER barrier{};
     barrier.Type  = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
     barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
@@ -349,7 +310,7 @@ std::pair<std::pair<void*, void*>, uint32_t> DX12EditorRenderer::AllocateSrvSlot
 void DX12EditorRenderer::FreeSrvSlot(uint32_t slotIndex)
 {
     if (slotIndex == 0)
-        return;  // Slot 0 is reserved for ImGui font atlas
+        return;  // Slot 0 is reserved for the selected UI package.
 
     // Add back to free list
     m_freeSrvSlots.push_back(slotIndex);

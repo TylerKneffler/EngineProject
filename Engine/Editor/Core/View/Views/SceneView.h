@@ -2,6 +2,7 @@
 #include "View/View.h"
 #include "Core/Scene/Scene.h"
 #include "Core/ProjectLoader.h"
+#include "Engine/Editor/UI/IEditorUi.h"
 
 // ---------------------------------------------------------------------------
 // SceneView — editor Scene panel
@@ -40,15 +41,13 @@ public:
     // Shows the offscreen texture with letterboxing/pillarboxing based on
     // aspect ratio settings, captures mouse input, and drives the
     // scene's editorCamera with orbit / pan / zoom.
-    void DrawPanel() override;
+    void DrawPanel(IEditorUi& ui) override;
 
 private:
     void ApplyCameraControls(float panDX, float panDY,
                              float orbitDX, float orbitDY, float zoom);
 
     // Calculates the game viewport size and position based on aspect ratio mode
-    void CalculateGameViewport(ImVec2 availableSize, ImVec2& outViewportSize, ImVec2& outViewportPos);
-
     Scene* m_scene = nullptr; // non-owning; set via Init()
     
     // Aspect ratio settings

@@ -1,7 +1,6 @@
 #include "pch.h"
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "VulkanView.h"
-#include "imgui_impl_vulkan.h"
 
 VulkanView::~VulkanView()
 {
@@ -47,17 +46,19 @@ void VulkanView::CreateResources(uint32_t width, uint32_t height)
     framebufferInfo.pAttachments = attachments;
     framebufferInfo.width = width; framebufferInfo.height = height; framebufferInfo.layers = 1;
     VkCheck(vkCreateFramebuffer(m_context.device, &framebufferInfo, nullptr, &m_framebuffer), "vkCreateFramebuffer(view)");
-    m_descriptorSet = ImGui_ImplVulkan_AddTexture(m_sampler, m_color.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    if (!m_descriptorSet) throw std::runtime_error("ImGui failed to allocate a Vulkan texture descriptor");
+    if (m_context.registerUiTexture)
+        m_uiTexture = m_context.registerUiTexture(
+            m_sampler, m_color.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
 void VulkanView::DestroyResources()
 {
-    if (m_descriptorSet) ImGui_ImplVulkan_RemoveTexture(m_descriptorSet);
+    if (m_uiTexture && m_context.unregisterUiTexture)
+        m_context.unregisterUiTexture(m_uiTexture);
     if (m_framebuffer) vkDestroyFramebuffer(m_context.device, m_framebuffer, nullptr);
     VulkanDestroyImage(m_context.device, m_depth);
     VulkanDestroyImage(m_context.device, m_color);
-    m_descriptorSet = VK_NULL_HANDLE; m_framebuffer = VK_NULL_HANDLE;
+    m_uiTexture = nullptr; m_framebuffer = VK_NULL_HANDLE;
 }
 
 void VulkanView::Render(void* commandBuffer, void*, std::function<void(void*)> drawFn)

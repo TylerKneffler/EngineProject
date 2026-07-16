@@ -1,17 +1,16 @@
 #pragma once
 #include <string>
+class IEditorUi;
 
 // ---------------------------------------------------------------------------
 // IEditorPanel — common polymorphic interface for every editor panel.
 //
-// Both the DX12-backed 3-D views (SceneView, GameView) and the pure-ImGui
+// Both graphics-backed 3-D views and package-neutral utility panels
 // panels (HierarchyView, PropertiesView, etc.) derive from this interface so
 // the editor can manage them uniformly through a single vector.
 //
 // Lifecycle:
-//   - DrawPanel()    : called each frame inside RenderIfNeeded to render the
-//                      ImGui window.  Implementations call ImGui::Begin with
-//                      m_title and &m_open so the user gets a close button.
+//   - DrawPanel(ui)  : defines the panel once against the active UI facade.
 //   - NeedsRender()  : returns true for panels that own an offscreen DX12
 //                      render target (SceneView, GameView).
 //   - Render3D(cmd)  : for NeedsRender panels, issues the scene draw calls
@@ -22,8 +21,8 @@ class IEditorPanel
 public:
     virtual ~IEditorPanel() = default;
 
-    // Draws the ImGui window.  Must call ImGui::Begin(m_title, &m_open).
-    virtual void DrawPanel() = 0;
+    // Draws through the selected package-neutral UI implementation.
+    virtual void DrawPanel(IEditorUi& ui) = 0;
 
     // Returns true if this panel owns an offscreen DX12 render target.
     virtual bool NeedsRender() const { return false; }

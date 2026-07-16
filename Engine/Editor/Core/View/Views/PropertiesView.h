@@ -22,13 +22,13 @@ public:
     void SetSelectedObject(Object* obj) { m_selectedObject = obj; }
     Object* GetSelectedObject() const   { return m_selectedObject; }
 
-    void DrawPanel();
+    void DrawPanel(IEditorUi& ui) override;
 
 private:
-    void DrawTransform();
-    void DrawMesh();
-    void DrawMaterial();
-    void DrawCamera();
+    void DrawTransform(IEditorUi& ui);
+    void DrawMesh(IEditorUi& ui);
+    void DrawMaterial(IEditorUi& ui);
+    void DrawCamera(IEditorUi& ui);
 
     Object* m_selectedObject = nullptr;
 };

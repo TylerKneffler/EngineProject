@@ -14,7 +14,7 @@ public:
     float GetAspect() const override { return m_aspect; }
     uint32_t GetWidth() const override { return m_width; }
     uint32_t GetHeight() const override { return m_height; }
-    void* GetImGuiTextureHandle() const override { return m_srv.Get(); }
+    void* GetUiTextureHandle() const override { return m_srv.Get(); }
     uint32_t GetSrvSlotIndex() const override { return m_srvSlotIndex; }
 
 private:

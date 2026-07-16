@@ -1,18 +1,17 @@
 #pragma once
 
+// This is a C++ precompiled header. Some editor language services inspect C
+// sources with workspace-wide settings, so keep all C++/DirectX declarations
+// out of a C translation unit even if the header is injected accidentally.
+#ifdef __cplusplus
+
 // Windows
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <Windows.h>
 
-//IMGUI
-#include "imgui.h"
-#include "imgui_impl_win32.h"
-#include "imgui_impl_dx12.h"
-#include "imgui_impl_dx11.h"
 #if defined(ENGINE_VULKAN_ENABLED)
 #include <volk.h>
-#include "imgui_impl_vulkan.h"
 #endif
 
 // DirectX 12
@@ -69,3 +68,5 @@ inline void ThrowIfFailed(HRESULT hr)
             std::to_string(static_cast<unsigned long>(hr)));
     }
 }
+
+#endif // __cplusplus

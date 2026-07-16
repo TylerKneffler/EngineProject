@@ -35,6 +35,12 @@ set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
 
 option(ENGINE_ENABLE_VULKAN "Build the Vulkan renderer" ON)
 option(ENGINE_PORTABLE_EXPORT "Link the game with the static MSVC runtime for portable exports" OFF)
+set(ENGINE_EDITOR_UI "IMGUI" CACHE STRING "Initial editor UI package (IMGUI or NUKLEAR; switchable at runtime)")
+set_property(CACHE ENGINE_EDITOR_UI PROPERTY STRINGS IMGUI NUKLEAR)
+string(TOUPPER "${ENGINE_EDITOR_UI}" ENGINE_EDITOR_UI)
+if(NOT ENGINE_EDITOR_UI STREQUAL "IMGUI" AND NOT ENGINE_EDITOR_UI STREQUAL "NUKLEAR")
+    message(FATAL_ERROR "ENGINE_EDITOR_UI must be IMGUI or NUKLEAR")
+endif()
 if(MSVC AND ENGINE_PORTABLE_EXPORT)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
@@ -114,6 +120,9 @@ file(GLOB_RECURSE EDITOR_HEADERS CONFIGURE_DEPENDS
     "${ENGINE_ROOT}/Engine/Editor/*.hpp"
     "${ENGINE_ROOT}/Engine/Editor/*.inl"
 )
+list(APPEND EDITOR_SOURCES
+    "${ENGINE_ROOT}/Engine/Editor/UI/Nuklear/NuklearCore.c"
+)
 file(GLOB_RECURSE GAME_SOURCES CONFIGURE_DEPENDS
     "${ENGINE_ROOT}/Engine/Game/*.cpp"
 )
@@ -182,6 +191,14 @@ if(ENGINE_VULKAN_ENABLED)
     target_compile_definitions(ImGui PUBLIC VK_USE_PLATFORM_WIN32_KHR VK_NO_PROTOTYPES)
 endif()
 
+FetchContent_Declare(
+    nuklear
+    GIT_REPOSITORY https://github.com/Immediate-Mode-UI/Nuklear.git
+    GIT_TAG        v4.13.3
+)
+FetchContent_MakeAvailable(nuklear)
+message(STATUS "[Editor UI] Dear ImGui + Nuklear v4.13.3 (live switchable)")
+
 # ---------------------------------------------------------------------------
 # pugixml — XML parsing library
 # ---------------------------------------------------------------------------
@@ -215,7 +232,6 @@ target_link_libraries(Engine PUBLIC
     d3d11.lib 
     d2d1.lib 
     dwrite.lib
-    ImGui
     glm::glm
     pugixml
 )
@@ -301,7 +317,7 @@ if(ENGINE_PROJECT_DIR)
     source_group(TREE "${ENGINE_PROJECT_DIR}" PREFIX "Project" FILES
         ${ASSET_SOURCES} ${PROJECT_BROWSE_FILES} ${PROJECT_ROOT_FILES})
 endif()
-target_link_libraries(Editor PRIVATE Engine shell32.lib ole32.lib comdlg32.lib)
+target_link_libraries(Editor PRIVATE Engine ImGui shell32.lib ole32.lib comdlg32.lib)
 target_precompile_headers(Editor REUSE_FROM Engine)
 target_include_directories(Editor PRIVATE
     ${ENGINE_ROOT}/Engine
@@ -317,7 +333,14 @@ target_compile_definitions(Editor PRIVATE
     ENGINE_ASSETS_PATH="${ENGINE_ROOT}/Engine/Core/Assets/"
     ENGINE_ROOT_PATH="${ENGINE_ROOT}"
     GAME_EXECUTABLE_PATH="${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/Game.exe"
+    $<$<STREQUAL:${ENGINE_EDITOR_UI},IMGUI>:ENGINE_EDITOR_UI_IMGUI>
+    $<$<STREQUAL:${ENGINE_EDITOR_UI},NUKLEAR>:ENGINE_EDITOR_UI_NUKLEAR>
 )
+set_source_files_properties(
+    "${ENGINE_ROOT}/Engine/Editor/UI/Nuklear/NuklearCore.c"
+    PROPERTIES SKIP_PRECOMPILE_HEADERS ON
+)
+target_include_directories(Editor PRIVATE ${nuklear_SOURCE_DIR})
 set_target_properties(Editor PROPERTIES
     VS_DEBUGGER_COMMAND "$<TARGET_FILE:Editor>"
     VS_DEBUGGER_WORKING_DIRECTORY "${ENGINE_RUNTIME_WORKING_DIRECTORY}"

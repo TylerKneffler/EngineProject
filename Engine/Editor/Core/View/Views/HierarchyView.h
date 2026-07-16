@@ -28,7 +28,7 @@ public:
 
     void Init(Scene* scene) { m_scene = scene; }
 
-    void DrawPanel();
+    void DrawPanel(IEditorUi& ui) override;
 
     Object* GetSelectedObject() const  { return m_selectedObject; }
     void    SetSelectedObject(Object* obj);
@@ -40,7 +40,7 @@ public:
     std::function<void(Object*)> OnFocusObject;
 
 private:
-    void DrawObjectNode(Object* obj);
+    void DrawObjectNode(IEditorUi& ui, Object* obj);
 
     Scene*  m_scene          = nullptr;
     Object* m_selectedObject = nullptr;

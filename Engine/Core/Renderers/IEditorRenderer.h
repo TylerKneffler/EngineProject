@@ -3,9 +3,25 @@
 #include <functional>
 #include <memory>
 #include <utility>
+#include <cstdint>
 
 // Forward declare the view interface so renderers can work with it.
 class IView;
+
+// Package-neutral callbacks installed by the editor UI layer. Keeping this
+// value type in Core prevents Engine/Core from depending on Engine/Editor/UI.
+struct EditorUiRenderHooks
+{
+    std::function<void()> beginFrame;
+    std::function<void(void* commandBuffer)> render;
+    std::function<void()> endFrame;
+};
+
+struct EditorUiTextureHooks
+{
+    std::function<void*(void* sampler, void* imageView, uint32_t imageLayout)> registerTexture;
+    std::function<void(void* texture)> unregisterTexture;
+};
 
 // ---------------------------------------------------------------------------
 // IEditorRenderer — Abstract interface for editor renderers.
@@ -26,13 +42,16 @@ public:
     // (resize, input, property edits, scene changes, etc.).
     virtual void MarkDirty() = 0;
 
+    virtual void SetUiRenderHooks(EditorUiRenderHooks hooks) = 0;
+    virtual void SetUiTextureHooks(EditorUiTextureHooks) {}
+
     // If the dirty flag is set, record and execute one frame, then clear the
     // flag. drawFn is called between BeginFrame and EndFrame so the caller can
     // issue draw commands. If drawFn is nullptr, just clear to background colour.
     virtual void RenderIfNeeded(std::function<void()> drawFn = nullptr) = 0;
 
     // Allocate an SRV slot for a view. Returns a handle pair and slot index.
-    // Slot 0 is reserved for ImGui; slots 1+ are for scene/game views.
+    // Slot 0 is reserved for the selected UI backend; slots 1+ are views.
     virtual std::pair<std::pair<void*, void*>, uint32_t> AllocateSrvSlot() = 0;
 
     // Free a previously-allocated SRV slot (identified by its index).

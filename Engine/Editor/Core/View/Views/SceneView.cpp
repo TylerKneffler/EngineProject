@@ -1,5 +1,6 @@
 
 #include "SceneView.h"
+#include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Camera.h"
 #include "Core/Graphics/IGraphicsContext.h"
@@ -29,74 +30,62 @@ void SceneView::Init(void* device,
 // ---------------------------------------------------------------------------
 // DrawPanel
 // ---------------------------------------------------------------------------
-void SceneView::DrawPanel()
+void SceneView::DrawPanel(IEditorUi& ui)
 {
     // Remove inner padding so the texture fills the panel edge-to-edge.
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.f, 0.f));
-    ImGui::Begin(m_title.c_str(), &m_open);
+    ui.BeginWindow(m_title.c_str(), &m_open, true);
 
     float panDX = 0.f, panDY = 0.f;
     float orbitDX = 0.f, orbitDY = 0.f;
     float zoom = 0.f;
 
-    ImVec2 size = ImGui::GetContentRegionAvail();
+    const float targetAspect = m_aspectRatioMode == ProjectSettings::AspectRatioMode::Free ? 0.f :
+        (m_aspectRatioMode == ProjectSettings::AspectRatioMode::Locked ? m_gameAspectRatio :
+         static_cast<float>(m_gameWindowWidth) / static_cast<float>(m_gameWindowHeight));
+    const auto input = ui.Viewport(GetUiTextureHandle(), targetAspect,
+        {m_letterboxColor.r,m_letterboxColor.g,m_letterboxColor.b,m_letterboxColor.a});
+    EditorUiVec2 size = input.available;
     if (size.x > 0.f && size.y > 0.f)
     {
         // Update computed aspect ratio
         m_aspect = size.x / size.y;
 
         // Calculate game viewport with aspect ratio constraints
-        ImVec2 viewportSize, viewportPos;
-        CalculateGameViewport(size, viewportSize, viewportPos);
+        EditorUiVec2 viewportSize = size, viewportPos{};
 
         // Draw letterbox/pillarbox background (if needed)
         if (viewportSize.x < size.x || viewportSize.y < size.y)
         {
-            ImDrawList* drawList = ImGui::GetWindowDrawList();
-            ImVec2 panelPos = ImGui::GetCursorScreenPos();
-            
             // Draw background in letterbox color
-            ImU32 bgColor = ImGui::GetColorU32(ImVec4(
-                m_letterboxColor.r, m_letterboxColor.g, 
-                m_letterboxColor.b, m_letterboxColor.a
-            ));
-            drawList->AddRectFilled(
-                panelPos,
-                ImVec2(panelPos.x + size.x, panelPos.y + size.y),
-                bgColor
-            );
         }
 
         // Position cursor at viewport location and draw the game texture
-        ImGui::SetCursorPos(viewportPos);
-        ImGui::Image((ImTextureID)GetImGuiTextureHandle(), viewportSize);
 
         // Check for mouse input on the viewport
-        if (ImGui::IsItemHovered())
+        if (input.hovered)
         {
-            ImVec2 d = ImGui::GetIO().MouseDelta;
+            EditorUiVec2 d = input.mouseDelta;
 
             // Right-button drag → pan.
-            if (ImGui::IsMouseDown(ImGuiMouseButton_Right))
+            if (input.rightDown)
             {
                 panDX = d.x;
                 panDY = d.y;
             }
 
             // Middle-button drag → orbit.
-            if (ImGui::IsMouseDown(ImGuiMouseButton_Middle))
+            if (input.middleDown)
             {
                 orbitDX = d.x;
                 orbitDY = d.y;
             }
 
             // Scroll wheel → zoom.
-            zoom = ImGui::GetIO().MouseWheel;
+            zoom = input.mouseWheel;
         }
     }
 
-    ImGui::End();
-    ImGui::PopStyleVar();
+    ui.EndWindow();
 
     ApplyCameraControls(panDX, panDY, orbitDX, orbitDY, zoom);
 }
@@ -104,11 +93,12 @@ void SceneView::DrawPanel()
 // ---------------------------------------------------------------------------
 // CalculateGameViewport
 // ---------------------------------------------------------------------------
-void SceneView::CalculateGameViewport(ImVec2 availableSize, ImVec2& outViewportSize, ImVec2& outViewportPos)
+static void CalculateGameViewport(EditorUiVec2 availableSize, EditorUiVec2& outViewportSize, EditorUiVec2& outViewportPos,
+    ProjectSettings::AspectRatioMode mode, float lockedAspect, uint32_t windowWidth, uint32_t windowHeight)
 {
-    outViewportPos = ImVec2(0.f, 0.f);
+    outViewportPos = {0.f, 0.f};
 
-    switch (m_aspectRatioMode)
+    switch (mode)
     {
         case ProjectSettings::AspectRatioMode::Free:
         {
@@ -122,18 +112,18 @@ void SceneView::CalculateGameViewport(ImVec2 availableSize, ImVec2& outViewportS
             // Locked aspect ratio: fit to aspect while maintaining ratio
             float availableAspect = availableSize.x / availableSize.y;
 
-            if (availableAspect > m_gameAspectRatio)
+            if (availableAspect > lockedAspect)
             {
                 // Panel is wider than game aspect: pillarbox (vertical bars)
                 outViewportSize.y = availableSize.y;
-                outViewportSize.x = availableSize.y * m_gameAspectRatio;
+                outViewportSize.x = availableSize.y * lockedAspect;
                 outViewportPos.x = (availableSize.x - outViewportSize.x) * 0.5f;
             }
             else
             {
                 // Panel is narrower than game aspect: letterbox (horizontal bars)
                 outViewportSize.x = availableSize.x;
-                outViewportSize.y = availableSize.x / m_gameAspectRatio;
+                outViewportSize.y = availableSize.x / lockedAspect;
                 outViewportPos.y = (availableSize.y - outViewportSize.y) * 0.5f;
             }
             break;
@@ -142,7 +132,7 @@ void SceneView::CalculateGameViewport(ImVec2 availableSize, ImVec2& outViewportS
         case ProjectSettings::AspectRatioMode::Hardcoded:
         {
             // Hardcoded size: fit to exact window size, scale to fit
-            float gameAspect = (float)m_gameWindowWidth / (float)m_gameWindowHeight;
+            float gameAspect = static_cast<float>(windowWidth) / static_cast<float>(windowHeight);
             float availableAspect = availableSize.x / availableSize.y;
 
             if (availableAspect > gameAspect)

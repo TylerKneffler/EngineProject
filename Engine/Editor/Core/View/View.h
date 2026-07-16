@@ -48,13 +48,13 @@ public:
     float    GetAspect() const;
     uint32_t GetWidth()  const;
     uint32_t GetHeight() const;
-    void*    GetImGuiTextureHandle() const;
+    void*    GetUiTextureHandle() const;
 
     // SRV slot index for resource cleanup
     uint32_t GetSrvSlotIndex() const;
 
     // DrawPanel — implemented by subclasses for ImGui content
-    virtual void DrawPanel() = 0;
+    virtual void DrawPanel(IEditorUi& ui) = 0;
 
     // Render3D — implemented by subclasses to record scene rendering commands
     // cmd: opaque graphics command list handle

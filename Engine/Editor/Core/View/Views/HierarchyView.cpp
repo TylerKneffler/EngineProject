@@ -1,50 +1,21 @@
 #include "HierarchyView.h"
+#include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Object.h"
 
-// ---------------------------------------------------------------------------
-// DrawPanel
-// ---------------------------------------------------------------------------
-void HierarchyView::DrawPanel()
+void HierarchyView::DrawPanel(IEditorUi& ui)
 {
-    ImGui::Begin(m_title.c_str(), &m_open);
-
-    if (!m_scene)
+    ui.BeginWindow(m_title.c_str(), &m_open);
+    if (!m_scene) { ui.DisabledLabel("No scene loaded"); ui.EndWindow(); return; }
+    if (ui.TreeNode(this, "World", false, false, true))
     {
-        ImGui::TextDisabled("No scene loaded");
-        ImGui::End();
-        return;
+        for (const auto& obj : m_scene->GetObjects()) if (!obj->Parent) DrawObjectNode(ui, obj.get());
+        ui.TreePop();
     }
-
-    // "World" root node — always open by default.
-    ImGuiTreeNodeFlags worldFlags =
-        ImGuiTreeNodeFlags_DefaultOpen |
-        ImGuiTreeNodeFlags_OpenOnArrow |
-        ImGuiTreeNodeFlags_SpanAvailWidth;
-
-    if (ImGui::TreeNodeEx("World", worldFlags))
-    {
-        for (const auto& obj : m_scene->GetObjects())
-        {
-            // Only draw root-level objects here; children are drawn recursively.
-            if (obj->Parent == nullptr)
-                DrawObjectNode(obj.get());
-        }
-        ImGui::TreePop();
-    }
-
-    // Clicking on empty space (no item under cursor) deselects.
-    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-        ImGui::IsWindowHovered() &&
-        !ImGui::IsAnyItemHovered())
-        SetSelectedObject(nullptr);
-
-    ImGui::End();
+    if (ui.IsWindowBackgroundClicked()) SetSelectedObject(nullptr);
+    ui.EndWindow();
 }
 
-// ---------------------------------------------------------------------------
-// DrawObjectNode  (recursive)
-// ---------------------------------------------------------------------------
 void HierarchyView::SetSelectedObject(Object* obj)
 {
     if (m_selectedObject == obj) return;
@@ -52,38 +23,12 @@ void HierarchyView::SetSelectedObject(Object* obj)
     if (OnSelectionChanged) OnSelectionChanged(obj);
 }
 
-void HierarchyView::DrawObjectNode(Object* obj)
+void HierarchyView::DrawObjectNode(IEditorUi& ui, Object* obj)
 {
-    bool hasChildren = !obj->Children.empty();
-
-    ImGuiTreeNodeFlags flags =
-        ImGuiTreeNodeFlags_OpenOnArrow |
-        ImGuiTreeNodeFlags_SpanAvailWidth;
-
-    if (!hasChildren)
-        flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-
-    if (obj == m_selectedObject)
-        flags |= ImGuiTreeNodeFlags_Selected;
-
+    const bool hasChildren = !obj->Children.empty();
     const char* label = obj->name.empty() ? "(unnamed)" : obj->name.c_str();
-
-    // Use the object pointer as the unique ID so sibling names can collide safely.
-    bool open = ImGui::TreeNodeEx(reinterpret_cast<void*>(obj), flags, "%s", label);
-
-    if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
-        SetSelectedObject(obj);
-
-    if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-    {
-        SetSelectedObject(obj);
-        if (OnFocusObject) OnFocusObject(obj);
-    }
-
-    if (open && hasChildren)
-    {
-        for (Object* child : obj->Children)
-            DrawObjectNode(child);
-        ImGui::TreePop();
-    }
+    const bool open = ui.TreeNode(obj, label, obj == m_selectedObject, !hasChildren);
+    if (ui.IsItemClicked()) SetSelectedObject(obj);
+    if (ui.IsItemDoubleClicked()) { SetSelectedObject(obj); if (OnFocusObject) OnFocusObject(obj); }
+    if (open && hasChildren) { for (Object* child : obj->Children) DrawObjectNode(ui, child); ui.TreePop(); }
 }

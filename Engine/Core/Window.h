@@ -72,6 +72,8 @@ public:
     // OnResize  — called between frames when the window client area changes.
     //             Notify the renderer to resize its swap chain buffers.
     std::function<void()> OnUpdate;
+    std::function<void()> OnInputBegin;
+    std::function<void()> OnInputEnd;
     std::function<void(uint32_t w, uint32_t h)> OnResize;
     std::function<bool(HWND, UINT, WPARAM, LPARAM)> WndProcHook;
 
@@ -94,5 +96,9 @@ private:
     uint32_t m_pendingWidth  = 0;
     uint32_t m_pendingHeight = 0;
     bool     m_resizePending = false;
+
+    // Track an Alt+left-button gesture so its drag and release are delivered
+    // consistently as right-button input, even if Alt is released first.
+    bool m_altLeftClickActive = false;
 
 };

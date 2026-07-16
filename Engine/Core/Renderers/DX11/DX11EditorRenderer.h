@@ -17,6 +17,7 @@ public:
     void Clear(float r, float g, float b, float a = 1.0f) override;
     IGraphicsProvider* GetGraphicsProvider() override { return m_graphicsProvider.get(); }
     void MarkDirty() override { m_dirty = true; }
+    void SetUiRenderHooks(EditorUiRenderHooks hooks) override { m_uiHooks = std::move(hooks); }
     void RenderIfNeeded(std::function<void()> drawFn = nullptr) override;
     std::pair<std::pair<void*, void*>, uint32_t> AllocateSrvSlot() override;
     void FreeSrvSlot(uint32_t slotIndex) override;
@@ -26,6 +27,8 @@ public:
     std::unique_ptr<IView> CreateViewBackend() override;
     void* GetCurrentCommandBuffer() const override { return m_context.Get(); }
     void* GetCurrentRenderTargetHandle() const override { return m_rtv.Get(); }
+    ID3D11Device* GetDevice() const { return m_device.Get(); }
+    ID3D11DeviceContext* GetDeviceContext() const { return m_context.Get(); }
 
 private:
     void CreateRenderTarget();
@@ -39,5 +42,5 @@ private:
     uint32_t m_width = 0;
     uint32_t m_height = 0;
     bool m_dirty = true;
-    bool m_imguiInitialized = false;
+    EditorUiRenderHooks m_uiHooks;
 };

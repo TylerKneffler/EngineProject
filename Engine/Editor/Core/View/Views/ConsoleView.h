@@ -16,6 +16,11 @@ class ConsoleView : public IEditorPanel
 {
 public:
     enum class Level { Info, Warning, Error, Build };
+    struct Entry
+    {
+        Level level;
+        std::string message;
+    };
 
     ConsoleView()  = default;
     ~ConsoleView() = default;
@@ -28,15 +33,10 @@ public:
     void Clear();
 
     // Draws the "Console" ImGui panel.
-    void DrawPanel();
+    void DrawPanel(IEditorUi& ui) override;
+    const std::vector<Entry>& GetEntries() const { return m_entries; }
 
 private:
-    struct Entry
-    {
-        Level       level;
-        std::string message;
-    };
-
     std::vector<Entry> m_entries;
     bool m_autoScroll     = true;
     bool m_scrollToBottom = false;

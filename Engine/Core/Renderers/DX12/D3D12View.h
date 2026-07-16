@@ -31,11 +31,11 @@ public:
     float    GetAspect() const override { return m_aspect; }
     uint32_t GetWidth()  const override { return m_width;  }
     uint32_t GetHeight() const override { return m_height; }
-    void* GetImGuiTextureHandle() const override { return reinterpret_cast<void*>(m_srvGpu.ptr); }
+    void* GetUiTextureHandle() const override { return reinterpret_cast<void*>(m_srvGpu.ptr); }
 
     uint32_t GetSrvSlotIndex() const override { return m_srvSlotIndex; }
 
-    // Access GPU descriptor handle for ImGui texture binding
+    // Access the GPU descriptor used by the selected UI package.
     D3D12_GPU_DESCRIPTOR_HANDLE GetSrvGpu() const { return m_srvGpu; }
 
 private:

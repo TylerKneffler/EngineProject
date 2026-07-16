@@ -1,9 +1,11 @@
 #include "pch.h"
 #include "Engine/Editor/ProjectLauncher.h"
+#include "Engine/Editor/UI/ImGui/ImGuiUiBackend.h"
 #include "Core/Window.h"
 #include "Core/ProjectLoader.h"
 #include "Core/Renderers/RendererFactory.h"
 #include "Core/Renderers/IEditorRenderer.h"
+#include "imgui.h"
 #include <commdlg.h>
 #include <shobjidl.h>
 #include <algorithm>
@@ -468,6 +470,14 @@ std::string ProjectLauncher::Run(HINSTANCE instance)
     auto renderer = RendererFactory::CreateEditorRenderer(settings);
     if (!renderer || !renderer->Init(window->GetHWND(), window->GetWidth(), window->GetHeight()))
         return {};
+    auto uiBackend = std::make_unique<ImGuiUiBackend>();
+    if (!uiBackend->Initialize(window->GetHWND(), *renderer))
+        return {};
+    renderer->SetUiRenderHooks({
+        [&]() { uiBackend->BeginFrame(); },
+        [&](void* commands) { uiBackend->Render(commands); },
+        [&]() { uiBackend->EndFrame(); }
+    });
 
     std::vector<std::string> projects = LoadRecentProjects();
     int selected = projects.empty() ? -1 : 0;
@@ -521,10 +531,15 @@ std::string ProjectLauncher::Run(HINSTANCE instance)
         status = "Removed from recent projects: " + removed;
     };
 
-    window->WndProcHook = [](HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
-        return ImGui_ImplWin32_WndProcHandler(hwnd, message, wParam, lParam) != 0;
+    window->WndProcHook = [&](HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
+        return uiBackend->HandleMessage(hwnd, message, wParam, lParam);
     };
-    window->OnResize = [&](uint32_t width, uint32_t height) { renderer->Resize(width, height); };
+    window->OnInputBegin = [&]() { uiBackend->BeginInput(); };
+    window->OnInputEnd = [&]() { uiBackend->EndInput(); };
+    window->OnResize = [&](uint32_t width, uint32_t height) {
+        renderer->Resize(width, height);
+        uiBackend->Resize(width, height);
+    };
     window->OnUpdate = [&]()
     {
         if (building && buildFuture.valid() &&
@@ -734,6 +749,7 @@ std::string ProjectLauncher::Run(HINSTANCE instance)
 
     window->Show();
     window->Run();
+    uiBackend.reset();
     renderer.reset();
     window.reset();
 

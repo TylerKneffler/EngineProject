@@ -67,7 +67,6 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
         auto it = m_singletonInstances.find(typeName);
         if (it != m_singletonInstances.end() && it->second->IsOpen())
         {
-            ImGui::SetWindowFocus(it->second->GetTitle().c_str());
             return nullptr;
         }
     }

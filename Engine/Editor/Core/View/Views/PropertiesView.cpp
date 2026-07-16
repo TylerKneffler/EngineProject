@@ -1,107 +1,33 @@
 #include "PropertiesView.h"
+#include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Compoonents/Transform.h"
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Compoonents/Material.h"
 #include "Core/Compoonents/Camera.h"
 
-// ---------------------------------------------------------------------------
-// DrawPanel
-// ---------------------------------------------------------------------------
-void PropertiesView::DrawPanel()
+void PropertiesView::DrawPanel(IEditorUi& ui)
 {
-    ImGui::Begin(m_title.c_str(), &m_open);
-
-    if (!m_selectedObject)
-    {
-        ImGui::TextDisabled("No object selected");
-        ImGui::End();
-        return;
-    }
-
-    // ---- Object name ----
-    char nameBuf[256];
-    strncpy_s(nameBuf, m_selectedObject->name.c_str(), sizeof(nameBuf));
-    nameBuf[sizeof(nameBuf) - 1] = '\0';
-    ImGui::SetNextItemWidth(-1.f);
-    if (ImGui::InputText("##name", nameBuf, sizeof(nameBuf)))
-        m_selectedObject->name = nameBuf;
-
-    ImGui::Separator();
-
-    DrawTransform();
-    DrawMesh();
-    DrawMaterial();
-    DrawCamera();
-
-    ImGui::End();
+    ui.BeginWindow(m_title.c_str(), &m_open);
+    if (!m_selectedObject) { ui.DisabledLabel("No object selected"); ui.EndWindow(); return; }
+    char name[256]; strncpy_s(name, m_selectedObject->name.c_str(), sizeof(name));
+    if (ui.InputText("##name", name, sizeof(name))) m_selectedObject->name = name;
+    ui.Separator(); DrawTransform(ui); DrawMesh(ui); DrawMaterial(ui); DrawCamera(ui); ui.EndWindow();
 }
 
-// ---------------------------------------------------------------------------
-// DrawTransform
-// ---------------------------------------------------------------------------
-void PropertiesView::DrawTransform()
+void PropertiesView::DrawTransform(IEditorUi& ui)
 {
-    // Transform is a direct member of Object, always present.
-    Transform& t = m_selectedObject->transform;
-
-    if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen))
-    {
-        ImGui::DragFloat3("Position", &t.position.x, 0.01f);
-
-        // Display rotation in degrees; store in radians.
-        glm::vec3 deg = glm::degrees(t.rotation);
-        if (ImGui::DragFloat3("Rotation", &deg.x, 0.5f))
-            t.rotation = glm::radians(deg);
-
-        ImGui::DragFloat3("Scale", &t.scale.x, 0.01f, 0.001f, 1000.f);
-    }
+    Transform& t=m_selectedObject->transform;
+    if(ui.CollapsingHeader("Transform")){ui.DragFloat3("Position",&t.position.x,.01f);glm::vec3 d=glm::degrees(t.rotation);if(ui.DragFloat3("Rotation",&d.x,.5f))t.rotation=glm::radians(d);ui.DragFloat3("Scale",&t.scale.x,.01f,.001f,1000.f);}
 }
-
-// ---------------------------------------------------------------------------
-// DrawMesh
-// ---------------------------------------------------------------------------
-void PropertiesView::DrawMesh()
+void PropertiesView::DrawMesh(IEditorUi& ui)
 {
-    Mesh* mesh = m_selectedObject->GetComponent<Mesh>();
-    if (!mesh) return;
-
-    if (ImGui::CollapsingHeader("Mesh", ImGuiTreeNodeFlags_DefaultOpen))
-    {
-        ImGui::LabelText("Vertices", "%u", mesh->GetVertexCount());
-        ImGui::LabelText("Ready",    "%s", mesh->IsReady() ? "Yes" : "No");
-    }
+    Mesh* m=m_selectedObject->GetComponent<Mesh>();if(!m)return;if(ui.CollapsingHeader("Mesh")){std::string count=std::to_string(m->GetVertexCount());ui.ValueLabel("Vertices",count.c_str());ui.ValueLabel("Ready",m->IsReady()?"Yes":"No");}
 }
-
-// ---------------------------------------------------------------------------
-// DrawMaterial
-// ---------------------------------------------------------------------------
-void PropertiesView::DrawMaterial()
+void PropertiesView::DrawMaterial(IEditorUi& ui)
 {
-    Material* mat = m_selectedObject->GetComponent<Material>();
-    if (!mat) return;
-
-    if (ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen))
-    {
-        ImGui::ColorEdit3("Diffuse",  &mat->diffuseColor.r);
-        ImGui::ColorEdit3("Ambient",  &mat->ambientColor.r);
-        ImGui::ColorEdit3("Specular", &mat->specularColor.r);
-        ImGui::DragFloat("Shininess", &mat->shininess, 0.5f, 1.f, 256.f);
-    }
+    Material* m=m_selectedObject->GetComponent<Material>();if(!m)return;if(ui.CollapsingHeader("Material")){ui.ColorEdit3("Diffuse",&m->diffuseColor.r);ui.ColorEdit3("Ambient",&m->ambientColor.r);ui.ColorEdit3("Specular",&m->specularColor.r);ui.DragFloat("Shininess",&m->shininess,.5f,1.f,256.f);}
 }
-
-// ---------------------------------------------------------------------------
-// DrawCamera
-// ---------------------------------------------------------------------------
-void PropertiesView::DrawCamera()
+void PropertiesView::DrawCamera(IEditorUi& ui)
 {
-    Camera* cam = m_selectedObject->GetComponent<Camera>();
-    if (!cam) return;
-
-    if (ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen))
-    {
-        ImGui::DragFloat("FOV",        &cam->fov,       0.5f,  1.f,  179.f);
-        ImGui::DragFloat("Near Plane", &cam->nearPlane, 0.001f, 0.001f, 10.f);
-        ImGui::DragFloat("Far Plane",  &cam->farPlane,  1.f,    1.f,   10000.f);
-        ImGui::DragFloat3("Target",    &cam->target.x,  0.01f);
-    }
+    Camera* c=m_selectedObject->GetComponent<Camera>();if(!c)return;if(ui.CollapsingHeader("Camera")){ui.DragFloat("FOV",&c->fov,.5f,1.f,179.f);ui.DragFloat("Near Plane",&c->nearPlane,.001f,.001f,10.f);ui.DragFloat("Far Plane",&c->farPlane,1.f,1.f,10000.f);ui.DragFloat3("Target",&c->target.x,.01f);}
 }

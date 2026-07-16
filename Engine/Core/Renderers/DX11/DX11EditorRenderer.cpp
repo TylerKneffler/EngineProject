@@ -1,18 +1,11 @@
 #include "pch.h"
 #include "DX11EditorRenderer.h"
 #include "D3D11View.h"
-#include "imgui_impl_dx11.h"
 #include <algorithm>
 #include <fstream>
 
 DX11EditorRenderer::~DX11EditorRenderer()
 {
-    if (m_imguiInitialized)
-    {
-        ImGui_ImplDX11_Shutdown();
-        ImGui_ImplWin32_Shutdown();
-        ImGui::DestroyContext();
-    }
     if (m_context) m_context->ClearState();
 }
 
@@ -60,27 +53,10 @@ bool DX11EditorRenderer::Init(void* hwndHandle, uint32_t width, uint32_t height)
         for (uint32_t slot = MAX_SRV_SLOTS - 1; slot > 0; --slot)
             m_freeSrvSlots.push_back(slot);
 
-        IMGUI_CHECKVERSION();
-        ImGui::CreateContext();
-        ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-        ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
-        if (!ImGui_ImplWin32_Init(hwnd))
-            throw std::runtime_error("Failed to initialize the ImGui Win32 backend");
-        if (!ImGui_ImplDX11_Init(m_device.Get(), m_context.Get()))
-            throw std::runtime_error("Failed to initialize ImGui for Direct3D 11");
-        m_imguiInitialized = true;
         return true;
     }
     catch (const std::exception& error)
     {
-        if (ImGui::GetCurrentContext())
-        {
-            if (ImGui::GetIO().BackendRendererUserData)
-                ImGui_ImplDX11_Shutdown();
-            if (ImGui::GetIO().BackendPlatformUserData)
-                ImGui_ImplWin32_Shutdown();
-            ImGui::DestroyContext();
-        }
         OutputDebugStringA((std::string("DX11 editor initialization failed: ") + error.what() + "\n").c_str());
         std::ofstream log("editor-startup.log", std::ios::app);
         if (log)
@@ -105,6 +81,8 @@ void DX11EditorRenderer::Resize(uint32_t width, uint32_t height)
     m_width = width;
     m_height = height;
     CreateRenderTarget();
+    if (m_uiHooks.beginFrame)
+        m_dirty = true;
     m_dirty = true;
 }
 
@@ -122,21 +100,14 @@ void DX11EditorRenderer::RenderIfNeeded(std::function<void()> drawFn)
     m_context->OMSetRenderTargets(1, &target, nullptr);
     D3D11_VIEWPORT viewport{ 0.0f, 0.0f, static_cast<float>(m_width), static_cast<float>(m_height), 0.0f, 1.0f };
     m_context->RSSetViewports(1, &viewport);
-    ImGui_ImplDX11_NewFrame();
-    ImGui_ImplWin32_NewFrame();
-    ImGui::NewFrame();
+    if (m_uiHooks.beginFrame) m_uiHooks.beginFrame();
 
     if (drawFn) drawFn(); else Clear(0.18f, 0.18f, 0.18f);
 
-    ImGui::Render();
     target = m_rtv.Get();
     m_context->OMSetRenderTargets(1, &target, nullptr);
-    ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
-    if (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
-    {
-        ImGui::UpdatePlatformWindows();
-        ImGui::RenderPlatformWindowsDefault();
-    }
+    if (m_uiHooks.render) m_uiHooks.render(m_context.Get());
+    if (m_uiHooks.endFrame) m_uiHooks.endFrame();
     ThrowIfFailed(m_swapChain->Present(1, 0));
 }
 

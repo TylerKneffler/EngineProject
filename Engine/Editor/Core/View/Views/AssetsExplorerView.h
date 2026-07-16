@@ -25,7 +25,7 @@ public:
     void Init(const std::string& assetsPath);
 
     // Draws the ImGui panel showing the file tree
-    void DrawPanel();
+    void DrawPanel(IEditorUi& ui) override;
 
     // Callback when a scene file is requested to load
     std::function<void(const std::string&)> OnSceneRequested;
@@ -33,7 +33,7 @@ public:
 private:
     // Recursively draws the directory tree starting from the given path
     // Returns true if any item in the tree was double-clicked
-    bool DrawDirectoryTree(const std::string& path);
+    bool DrawDirectoryTree(IEditorUi& ui, const std::string& path);
 
     // Opens a file with the system's default application (unless it's a scene file)
     void OpenFile(const std::string& filePath);

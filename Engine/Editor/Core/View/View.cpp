@@ -61,9 +61,9 @@ uint32_t View::GetHeight() const
     return m_viewBackend ? m_viewBackend->GetHeight() : 0;
 }
 
-void* View::GetImGuiTextureHandle() const
+void* View::GetUiTextureHandle() const
 {
-    return m_viewBackend ? m_viewBackend->GetImGuiTextureHandle() : nullptr;
+    return m_viewBackend ? m_viewBackend->GetUiTextureHandle() : nullptr;
 }
 
 uint32_t View::GetSrvSlotIndex() const

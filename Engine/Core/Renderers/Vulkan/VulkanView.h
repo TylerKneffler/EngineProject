@@ -15,7 +15,7 @@ public:
     float GetAspect() const override { return m_aspect; }
     uint32_t GetWidth() const override { return m_width; }
     uint32_t GetHeight() const override { return m_height; }
-    void* GetImGuiTextureHandle() const override { return reinterpret_cast<void*>(m_descriptorSet); }
+    void* GetUiTextureHandle() const override { return m_uiTexture; }
     uint32_t GetSrvSlotIndex() const override { return m_slot; }
 private:
     void CreateResources(uint32_t width, uint32_t height);
@@ -25,7 +25,7 @@ private:
     VulkanImageResource m_depth;
     VkFramebuffer m_framebuffer = VK_NULL_HANDLE;
     VkSampler m_sampler = VK_NULL_HANDLE;
-    VkDescriptorSet m_descriptorSet = VK_NULL_HANDLE;
+    void* m_uiTexture = nullptr;
     uint32_t m_width = 0, m_height = 0, m_slot = 0;
     float m_aspect = 1.0f;
 };

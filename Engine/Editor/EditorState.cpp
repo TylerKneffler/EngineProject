@@ -141,18 +141,16 @@ bool EditorState::Init()
         return false;
     OutputDebugStringA("[EditorState] View factory created\n");
 
-    // Wire up callbacks FIRST so ViewFactory has them when creating panels
-    OutputDebugStringA("[EditorState] Wiring up callbacks...\n");
-    WireupCallbacks();
-    OutputDebugStringA("[EditorState] Callbacks wired\n");
-
-    // Initialize panels
-    OutputDebugStringA("[EditorState] Initializing panels...\n");
-    InitializePanels();
-    OutputDebugStringA("[EditorState] Panels initialized\n");
-
     OutputDebugStringA("[EditorState] Init completed\n");
     return true;
+}
+
+void EditorState::InitializeUiState()
+{
+    if (!m_panels.empty() || m_preferences)
+        return;
+    WireupCallbacks();
+    InitializePanels();
 }
 
 // ---------------------------------------------------------------------------
