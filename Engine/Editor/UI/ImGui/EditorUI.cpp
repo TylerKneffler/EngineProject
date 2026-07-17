@@ -9,7 +9,6 @@
 #include "Core/View/Views/PreferencesView.h"
 #include "Core/View/Views/ConsoleView.h"
 #include "imgui_internal.h"
-#include <algorithm>
 
 // Fallback for IntelliSense
 #ifndef ASSETS_PATH
@@ -42,7 +41,6 @@ void EditorUI::Render(PlayState playState)
     DrawMenuBar(playState);
     
     DrawPanels();
-    CaptureDockingLayout();
     
     DrawPreferences();
     
@@ -57,64 +55,27 @@ void EditorUI::SetupDockingLayout()
     ImGuiID dockspaceId = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
 
     // Build the default layout once — only when no saved layout exists.
-    if (!m_dockingInitialized)
+    if (ImGui::DockBuilderGetNode(dockspaceId) == nullptr ||
+        ImGui::DockBuilderGetNode(dockspaceId)->IsLeafNode())
     {
-        EditorLayout& layout = m_state->GetEditorLayout();
         ImGui::DockBuilderRemoveNode(dockspaceId);
         ImGui::DockBuilderAddNode(dockspaceId, ImGuiDockNodeFlags_DockSpace);
         ImGui::DockBuilderSetNodeSize(dockspaceId, ImGui::GetMainViewport()->Size);
 
         ImGuiID left, center, right;
-        ImGui::DockBuilderSplitNode(dockspaceId, ImGuiDir_Left,
-            layout.LeftWidthRatio(), &left, &center);
-        const float remainingWidth = std::max(0.01f, 1.f - layout.LeftWidthRatio());
-        ImGui::DockBuilderSplitNode(center, ImGuiDir_Right,
-            std::clamp(layout.RightWidthRatio() / remainingWidth, 0.10f, 0.80f), &right, &center);
+        ImGui::DockBuilderSplitNode(dockspaceId, ImGuiDir_Left,  0.20f, &left,  &center);
+        ImGui::DockBuilderSplitNode(center,      ImGuiDir_Right, 0.31f, &right, &center);
 
         ImGuiID centerTop, centerBottom;
-        ImGui::DockBuilderSplitNode(center, ImGuiDir_Down,
-            layout.ConsoleHeightRatio(), &centerBottom, &centerTop);
+        ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.25f, &centerBottom, &centerTop);
 
-        const bool hierarchyActive = layout.ActiveLeftTab() == "Hierarchy 1";
-        ImGui::DockBuilderDockWindow(hierarchyActive ? "Assets 1" : "Hierarchy 1", left);
-        ImGui::DockBuilderDockWindow(hierarchyActive ? "Hierarchy 1" : "Assets 1", left);
-        const bool sceneActive = layout.ActiveCenterTab() == "Scene 1";
-        ImGui::DockBuilderDockWindow(sceneActive ? "Game 1" : "Scene 1", centerTop);
-        ImGui::DockBuilderDockWindow(sceneActive ? "Scene 1" : "Game 1", centerTop);
+        ImGui::DockBuilderDockWindow("Hierarchy 1", left);
+        ImGui::DockBuilderDockWindow("Assets 1", left);
+        ImGui::DockBuilderDockWindow("Scene 1", centerTop);
+        ImGui::DockBuilderDockWindow("Game 1", centerTop);
         ImGui::DockBuilderDockWindow("Console 1",    centerBottom);
         ImGui::DockBuilderFinish(dockspaceId);
-        m_leftDockId = left;
-        m_rightDockId = right;
-        m_centerTopDockId = centerTop;
-        m_centerBottomDockId = centerBottom;
-        m_dockingInitialized = true;
     }
-}
-
-void EditorUI::CaptureDockingLayout()
-{
-    if (!m_dockingInitialized) return;
-    const ImVec2 viewportSize = ImGui::GetMainViewport()->Size;
-    if (viewportSize.x <= 0.f || viewportSize.y <= 0.f) return;
-    ImGuiDockNode* left = ImGui::DockBuilderGetNode(m_leftDockId);
-    ImGuiDockNode* right = ImGui::DockBuilderGetNode(m_rightDockId);
-    ImGuiDockNode* bottom = ImGui::DockBuilderGetNode(m_centerBottomDockId);
-    if (left && right && bottom)
-        m_state->GetEditorLayout().SetDockRatios(
-            left->Size.x / viewportSize.x,
-            right->Size.x / viewportSize.x,
-            bottom->Size.y / viewportSize.y);
-
-    auto captureActiveTab = [&](uint32_t dockId, bool leftGroup)
-    {
-        ImGuiDockNode* node = ImGui::DockBuilderGetNode(dockId);
-        if (!node || !node->VisibleWindow) return;
-        const std::string title = node->VisibleWindow->Name;
-        if (leftGroup) m_state->GetEditorLayout().SetActiveLeftTab(title);
-        else m_state->GetEditorLayout().SetActiveCenterTab(title);
-    };
-    captureActiveTab(m_leftDockId, true);
-    captureActiveTab(m_centerTopDockId, false);
 }
 
 // ---------------------------------------------------------------------------
@@ -268,11 +229,7 @@ void EditorUI::DrawPanels()
 {
     auto& panels = m_state->GetPanels();
     for (auto& panel : panels)
-    {
-        if (!panel) continue;
-        if (panel->IsOpen()) panel->DrawPanel(m_ui);
-        m_state->GetEditorLayout().SetPanelOpen(panel->GetTitle(), panel->IsOpen());
-    }
+        panel->DrawPanel(m_ui);
 
     // Remove closed panels
     ViewFactory* factory = m_state->GetViewFactory();

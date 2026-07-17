@@ -107,7 +107,6 @@ void SwitchableEditorUiBackend::DrawEditor(EditorState& state, PlayState playSta
 {
     m_editorState = &state;
     m_buildManager = buildManager;
-    state.GetEditorLayout().Update();
     if (PreferencesView* preferences = state.GetPreferences())
     {
         preferences->ConfigureEditorUiPackage(

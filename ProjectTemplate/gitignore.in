@@ -1,5 +1,4 @@
 build/
-.editor/
 .vscode/settings.json
 editor-startup.log
 project-build.log

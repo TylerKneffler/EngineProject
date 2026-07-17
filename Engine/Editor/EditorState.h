@@ -3,7 +3,6 @@
 #include "Core/ProjectLoader.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Renderers/IEditorRenderer.h"
-#include "Engine/Editor/UI/EditorLayout.h"
 #include <memory>
 #include <vector>
 #include <functional>
@@ -39,8 +38,6 @@ public:
     ViewFactory* GetViewFactory() const { return m_viewFactory.get(); }
     ConsoleView* GetConsole() const { return m_primaryConsole; }
     PreferencesView* GetPreferences() const { return m_preferences.get(); }
-    EditorLayout& GetEditorLayout() { return m_editorLayout; }
-    const EditorLayout& GetEditorLayout() const { return m_editorLayout; }
 
     std::vector<std::unique_ptr<IEditorPanel>>& GetPanels() { return m_panels; }
     const std::vector<std::unique_ptr<IEditorPanel>>& GetPanels() const { return m_panels; }
@@ -86,7 +83,6 @@ private:
     std::string m_projectFilePath;
     bool m_hasUnsavedChanges = false;
     bool m_showPreferences = false;
-    EditorLayout m_editorLayout;
     std::string m_playModeSceneSnapshot;
     bool m_prePlayHasUnsavedChanges = false;
 

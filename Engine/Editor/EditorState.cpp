@@ -31,7 +31,6 @@ EditorState::EditorState(HINSTANCE hInstance, const ProjectSettings& projectSett
     : m_projectSettings(projectSettings)
     , m_projectFilePath(std::move(projectFilePath))
 {
-    m_editorLayout.Initialize(m_projectFilePath);
     try
     {
         m_window = std::make_unique<Window>(hInstance, L"Engine Editor", 1280, 720);
@@ -47,7 +46,6 @@ EditorState::EditorState(HINSTANCE hInstance, const ProjectSettings& projectSett
 // ---------------------------------------------------------------------------
 EditorState::~EditorState()
 {
-    m_editorLayout.Flush();
 }
 
 // ---------------------------------------------------------------------------
@@ -322,9 +320,6 @@ void EditorState::InitializePanels()
             m_panels.push_back(std::move(console));
         }
     }
-    for (auto& panel : m_panels)
-        if (panel)
-            panel->SetOpen(m_editorLayout.IsPanelOpen(panel->GetTitle(), true));
     OutputDebugStringA("[EditorState::InitializePanels] Complete\n");
 }
 

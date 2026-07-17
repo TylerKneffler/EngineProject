@@ -53,7 +53,6 @@ bool ImGuiUiBackend::Initialize(void* nativeWindow, IEditorRenderer& renderer)
     Shutdown();
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImGui::GetIO().IniFilename = nullptr;
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
 

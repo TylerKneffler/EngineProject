@@ -48,7 +48,4 @@ private:
     NuklearEditorUi m_editorUi;
     IEditorPanel* m_activeLeftTab = nullptr;
     IEditorPanel* m_activeCenterTab = nullptr;
-    bool m_draggingLeftSplitter = false;
-    bool m_draggingRightSplitter = false;
-    bool m_draggingConsoleSplitter = false;
 };

@@ -317,11 +317,10 @@ void NuklearUiBackend::DrawEditor(EditorState& state, PlayState playState,
     nk_context* m_context = &m_impl->context;
     const float width = static_cast<float>(m_renderer->GetWidth());
     const float height = static_cast<float>(m_renderer->GetHeight());
-    EditorLayout& editorLayout = state.GetEditorLayout();
     constexpr float toolbarHeight = 76.f;
-    const float consoleHeight = std::max(100.f, height * editorLayout.ConsoleHeightRatio());
-    const float leftWidth = std::max(160.f, width * editorLayout.LeftWidthRatio());
-    const float rightWidth = std::max(180.f, width * editorLayout.RightWidthRatio());
+    const float consoleHeight = std::max(150.f, height * 0.24f);
+    const float leftWidth = std::max(220.f, width * 0.20f);
+    const float rightWidth = std::max(260.f, width * 0.25f);
     const float middleWidth = std::max(100.f, width - leftWidth - rightWidth);
     const float workspaceHeight = std::max(100.f, height - toolbarHeight - consoleHeight);
 
@@ -344,7 +343,6 @@ void NuklearUiBackend::DrawEditor(EditorState& state, PlayState playState,
                 {
                     if (!existing || existing->GetTitle().rfind(titlePrefix, 0) != 0) continue;
                     existing->SetOpen(true);
-                    editorLayout.SetPanelOpen(existing->GetTitle(), true);
                     if (dynamic_cast<HierarchyView*>(existing.get()) ||
                         dynamic_cast<AssetsExplorerView*>(existing.get()))
                         m_activeLeftTab = existing.get();
@@ -356,7 +354,6 @@ void NuklearUiBackend::DrawEditor(EditorState& state, PlayState playState,
             {
                 IEditorPanel* created = panel.get();
                 state.GetPanels().push_back(std::move(panel));
-                editorLayout.SetPanelOpen(created->GetTitle(), true);
                 if (created->NeedsRender()) m_activeCenterTab = created;
                 else if (dynamic_cast<HierarchyView*>(created) ||
                          dynamic_cast<AssetsExplorerView*>(created))
@@ -438,23 +435,16 @@ void NuklearUiBackend::DrawEditor(EditorState& state, PlayState playState,
     for (auto& panel : state.GetPanels())
     {
         if (!panel || !panel->IsOpen()) continue;
-        editorLayout.SetPanelOpen(panel->GetTitle(), true);
         if (dynamic_cast<PropertiesView*>(panel.get())) propertiesPanel = panel.get();
         else if (dynamic_cast<ConsoleView*>(panel.get())) consolePanel = panel.get();
         else if (panel->NeedsRender()) centerTabs.push_back(panel.get());
         else leftTabs.push_back(panel.get());
     }
 
-    auto ensureActive = [](IEditorPanel*& active, const std::vector<IEditorPanel*>& tabs,
-                           const std::string& preferredTitle)
+    auto ensureActive = [](IEditorPanel*& active, const std::vector<IEditorPanel*>& tabs)
     {
         if (std::find(tabs.begin(), tabs.end(), active) == tabs.end())
-        {
-            active = nullptr;
-            for (IEditorPanel* tab : tabs)
-                if (tab->GetTitle() == preferredTitle) { active = tab; break; }
-            if (!active && !tabs.empty()) active = tabs.front();
-        }
+            active = tabs.empty() ? nullptr : tabs.front();
     };
     auto drawTabs = [&](const char* hostName, float x, float y, float w,
                         const std::vector<IEditorPanel*>& tabs, IEditorPanel*& active)
@@ -476,75 +466,35 @@ void NuklearUiBackend::DrawEditor(EditorState& state, PlayState playState,
     };
 
     constexpr float tabHeight = 32.f;
-    ensureActive(m_activeLeftTab, leftTabs, editorLayout.ActiveLeftTab());
-    ensureActive(m_activeCenterTab, centerTabs, editorLayout.ActiveCenterTab());
+    ensureActive(m_activeLeftTab, leftTabs);
+    ensureActive(m_activeCenterTab, centerTabs);
     drawTabs("Left Dock Tabs", 0.f, toolbarHeight, leftWidth, leftTabs, m_activeLeftTab);
     drawTabs("Center Dock Tabs", leftWidth, toolbarHeight, middleWidth, centerTabs, m_activeCenterTab);
-    if (m_activeLeftTab) editorLayout.SetActiveLeftTab(m_activeLeftTab->GetTitle());
-    if (m_activeCenterTab) editorLayout.SetActiveCenterTab(m_activeCenterTab->GetTitle());
 
     if (m_activeLeftTab)
     {
         m_editorUi.SetNextWindowRect(0.f, toolbarHeight + tabHeight, leftWidth,
                                      workspaceHeight - tabHeight);
         m_activeLeftTab->DrawPanel(m_editorUi);
-        editorLayout.SetPanelOpen(m_activeLeftTab->GetTitle(), m_activeLeftTab->IsOpen());
     }
     if (m_activeCenterTab)
     {
         m_editorUi.SetNextWindowRect(leftWidth, toolbarHeight + tabHeight, middleWidth,
                                      workspaceHeight - tabHeight);
         m_activeCenterTab->DrawPanel(m_editorUi);
-        editorLayout.SetPanelOpen(m_activeCenterTab->GetTitle(), m_activeCenterTab->IsOpen());
     }
     if (propertiesPanel)
     {
         m_editorUi.SetNextWindowRect(leftWidth + middleWidth, toolbarHeight,
                                      rightWidth, workspaceHeight);
         propertiesPanel->DrawPanel(m_editorUi);
-        editorLayout.SetPanelOpen(propertiesPanel->GetTitle(), propertiesPanel->IsOpen());
     }
     if (consolePanel)
     {
         m_editorUi.SetNextWindowRect(0.f, toolbarHeight + workspaceHeight,
                                      width, consoleHeight);
         consolePanel->DrawPanel(m_editorUi);
-        editorLayout.SetPanelOpen(consolePanel->GetTitle(), consolePanel->IsOpen());
     }
-
-    auto drawSplitter = [&](const char* name, const struct nk_rect& bounds, bool& dragging)
-    {
-        nk_window_set_bounds(m_context, name, bounds);
-        if (nk_begin(m_context, name, bounds, NK_WINDOW_NO_SCROLLBAR))
-        {
-            const bool clicked = nk_input_is_mouse_click_in_rect(
-                &m_context->input, NK_BUTTON_LEFT, bounds) != 0;
-            if (clicked) dragging = true;
-            if (!nk_input_is_mouse_down(&m_context->input, NK_BUTTON_LEFT)) dragging = false;
-            nk_layout_row_dynamic(m_context, std::max(1.f, bounds.h), 1);
-            nk_button_color(m_context, dragging ? nk_rgb(105, 145, 205) : nk_rgb(65, 70, 80));
-        }
-        nk_end(m_context);
-    };
-
-    drawSplitter("Left Dock Splitter",
-        nk_rect(leftWidth - 3.f, toolbarHeight, 6.f, workspaceHeight), m_draggingLeftSplitter);
-    drawSplitter("Right Dock Splitter",
-        nk_rect(width - rightWidth - 3.f, toolbarHeight, 6.f, workspaceHeight), m_draggingRightSplitter);
-    drawSplitter("Console Dock Splitter",
-        nk_rect(0.f, toolbarHeight + workspaceHeight - 3.f, width, 6.f), m_draggingConsoleSplitter);
-
-    const float mouseX = m_context->input.mouse.pos.x;
-    const float mouseY = m_context->input.mouse.pos.y;
-    if (m_draggingLeftSplitter)
-        editorLayout.SetDockRatios(mouseX / width, editorLayout.RightWidthRatio(),
-                                   editorLayout.ConsoleHeightRatio());
-    else if (m_draggingRightSplitter)
-        editorLayout.SetDockRatios(editorLayout.LeftWidthRatio(), (width - mouseX) / width,
-                                   editorLayout.ConsoleHeightRatio());
-    if (m_draggingConsoleSplitter)
-        editorLayout.SetDockRatios(editorLayout.LeftWidthRatio(), editorLayout.RightWidthRatio(),
-                                   (height - mouseY) / height);
 
     bool showPreferences = state.IsShowingPreferences();
     if (showPreferences && state.GetPreferences())

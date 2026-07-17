@@ -31,7 +31,6 @@ public:
 
 private:
     void SetupDockingLayout();
-    void CaptureDockingLayout();
     void DrawMenuBar(PlayState playState);
     void DrawPlayControls(PlayState playState);
     void DrawPanels();
@@ -44,9 +43,4 @@ private:
 
     bool m_showUnsavedWarning = false;
     std::string m_sceneToLoadOnConfirm;
-    bool m_dockingInitialized = false;
-    uint32_t m_leftDockId = 0;
-    uint32_t m_rightDockId = 0;
-    uint32_t m_centerTopDockId = 0;
-    uint32_t m_centerBottomDockId = 0;
 };
