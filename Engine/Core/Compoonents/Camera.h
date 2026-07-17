@@ -1,6 +1,6 @@
 #pragma once
 #include "Core/component.h"
-#include <DirectXMath.h>
+#include <glm/glm.hpp>
 
 class Camera : public Component
 {
@@ -14,16 +14,16 @@ public:
     float farPlane  = 100.f;
 
     // View settings — position is driven by the owner's Transform component.
-    DirectX::XMFLOAT3 target { 0.f, 0.f, 0.f };
-    DirectX::XMFLOAT3 up     { 0.f, 1.f, 0.f };
+    glm::vec3 target { 0.f, 0.f, 0.f };
+    glm::vec3 up     { 0.f, 1.f, 0.f };
 
     // Returns the view matrix using the owner Transform's world position as the eye.
     // Asserts that Owner and its Transform are valid.
-    DirectX::XMMATRIX GetViewMatrix() const;
+    glm::mat4 GetViewMatrix() const;
 
     // Returns a left-handed perspective projection matrix.
     // aspect = viewport width / height.
-    DirectX::XMMATRIX GetProjectionMatrix(float aspect) const;
+    glm::mat4 GetProjectionMatrix(float aspect) const;
 
     // Serialization
     std::string GetTypeName() const override { return "Camera"; }

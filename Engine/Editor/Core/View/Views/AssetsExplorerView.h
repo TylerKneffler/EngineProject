@@ -39,4 +39,5 @@ private:
     void OpenFile(const std::string& filePath);
 
     std::string m_assetsPath;
+    std::string m_selectedPath;
 };

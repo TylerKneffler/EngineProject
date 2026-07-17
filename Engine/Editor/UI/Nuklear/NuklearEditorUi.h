@@ -1,5 +1,7 @@
 #pragma once
 #include "Engine/Editor/UI/IEditorUi.h"
+#include <string>
+#include <unordered_set>
 
 class NuklearEditorUi final : public IEditorUi
 {
@@ -19,5 +21,8 @@ public:
     EditorUiViewportInput Viewport(void*,float,EditorUiColor) override; void FocusWindow(const char*) override;
 private:
     void Layout(float height=24.f);
+    void RecordNextWidgetBounds();
     void* m_context=nullptr; float m_x=0,m_y=0,m_w=400,m_h=300; bool m_lastClicked=false; bool m_disabled=false;
+    float m_lastItemX=0.f,m_lastItemY=0.f,m_lastItemW=0.f,m_lastItemH=0.f;
+    std::unordered_set<std::string> m_closedWindows;
 };

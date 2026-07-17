@@ -41,6 +41,7 @@ struct ProjectSettings
     std::string renderingAPI;              // Deprecated: use editorRenderingAPI and gameRenderingAPI
     std::string editorRenderingAPI;        // Rendering API for editor views (DirectX12, DirectX11, Vulkan)
     std::string gameRenderingAPI;          // Rendering API for game window (DirectX12, DirectX11, Vulkan)
+    std::string editorUiPackage;            // Editor presentation package (ImGui or Nuklear)
     glm::vec4 clearColor;
     uint32_t targetFramerate;
 

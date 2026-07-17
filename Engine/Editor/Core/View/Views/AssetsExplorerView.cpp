@@ -69,9 +69,17 @@ bool AssetsExplorerView::DrawDirectoryTree(IEditorUi& ui, const std::string& pat
             if (entry.is_directory())
             {
                 std::string dirName = entry.path().filename().string();
-                if (ui.TreeNode(entry.path().c_str(), dirName.c_str(), false, false, true))
+                const std::string entryPath = entry.path().string();
+                uintptr_t idValue = std::hash<std::string>{}(entryPath);
+                if (idValue == 0) idValue = 1;
+                const void* entryId = reinterpret_cast<const void*>(idValue);
+                const bool open = ui.TreeNode(entryId, dirName.c_str(),
+                                              m_selectedPath == entryPath, false, true);
+                if (ui.IsItemClicked())
+                    m_selectedPath = entryPath;
+                if (open)
                 {
-                    if (DrawDirectoryTree(ui, entry.path().string()))
+                    if (DrawDirectoryTree(ui, entryPath))
                     {
                         ui.TreePop();
                         return true;
@@ -82,11 +90,13 @@ bool AssetsExplorerView::DrawDirectoryTree(IEditorUi& ui, const std::string& pat
             else
             {
                 std::string fileName = entry.path().filename().string();
-                if (ui.Selectable(fileName.c_str(), false, true))
+                const std::string entryPath = entry.path().string();
+                if (ui.Selectable(fileName.c_str(), m_selectedPath == entryPath, true))
                 {
+                    m_selectedPath = entryPath;
                     if (ui.IsItemDoubleClicked())
                     {
-                        OpenFile(entry.path().string());
+                        OpenFile(entryPath);
                         return true;
                     }
                 }

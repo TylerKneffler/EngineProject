@@ -247,7 +247,7 @@ int WINAPI wWinMain(
         return 1;
     }
 
-    auto uiBackend = CreateEditorUiBackend();
+    auto uiBackend = CreateEditorUiBackend(projectSettings.editorUiPackage);
     if (!uiBackend->Initialize(window->GetHWND(), *renderer))
     {
         WriteStartupLog("UI backend initialization failed");

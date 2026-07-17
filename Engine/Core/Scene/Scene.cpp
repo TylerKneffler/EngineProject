@@ -9,12 +9,9 @@
 #include "Core/Graphics/IPipelineState.h"
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Graphics/IGraphicsContext.h"
-#include <DirectXMath.h>
 #include <stdexcept>
 #include <sstream>
 #include <glm/glm.hpp>
-
-using namespace DirectX;
 
 #ifndef ENGINE_SHADERS_PATH
 #define ENGINE_SHADERS_PATH "Engine/Core/Shaders/"
@@ -39,24 +36,27 @@ namespace
 // Constant buffer for object rendering (MVP matrix, material colors)
 struct CBData
 {
-    DirectX::XMFLOAT4X4 mvp;
-    DirectX::XMFLOAT4 diffuseColor;
-    DirectX::XMFLOAT4 ambientColor;
-    DirectX::XMFLOAT4 specularColor;
-    DirectX::XMFLOAT4 padding;  // Align to 256 bytes
+    glm::mat4 mvp;
+    glm::vec4 diffuseColor;
+    glm::vec4 ambientColor;
+    glm::vec4 specularColor;
+    glm::vec4 padding;  // Constant-buffer allocation uses a 256-byte stride.
 };
 
 // Constant buffer for grid rendering
 struct GridCBData
 {
-    DirectX::XMFLOAT4X4 invVP;
-    DirectX::XMFLOAT3 cameraPos;
+    glm::mat4 invVP;
+    glm::vec3 cameraPos;
     float cellSize;
-    DirectX::XMFLOAT4 gridColor;
-    DirectX::XMFLOAT4 axisColor;
+    glm::vec4 gridColor;
+    glm::vec4 axisColor;
     float fadeDistance;
-    DirectX::XMFLOAT3 padding;  // Align to 256 bytes
+    glm::vec3 padding;  // Constant-buffer allocation uses a 256-byte stride.
 };
+
+static_assert(sizeof(CBData) == 128, "Object constant-buffer layout must match Object.hlsl");
+static_assert(sizeof(GridCBData) == 128, "Grid constant-buffer layout must match Grid.hlsl");
 
 // ---------------------------------------------------------------------------
 // Scene::Init
@@ -278,8 +278,8 @@ void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverri
         return;
     }
 
-    XMMATRIX view = cam->GetViewMatrix();
-    XMMATRIX proj = cam->GetProjectionMatrix(aspect);
+    const glm::mat4 view = cam->GetViewMatrix();
+    const glm::mat4 proj = cam->GetProjectionMatrix(aspect);
 
 
     // Draw all scene objects that have a Mesh component
@@ -302,13 +302,12 @@ void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverri
         
 
         Material* mat = obj->GetComponent<Material>();
-        glm::mat4 glmWorld = obj->transform.GetWorldMatrix();
-        XMMATRIX worldMat = XMLoadFloat4x4(reinterpret_cast<const XMFLOAT4X4*>(&glmWorld));
+        const glm::mat4 world = obj->transform.GetWorldMatrix();
         UINT64 offset = static_cast<UINT64>(slot) * kCBStride;
 
         // Prepare constant buffer data
         CBData cbData{};
-        XMStoreFloat4x4(&cbData.mvp, worldMat * view * proj);
+        cbData.mvp = proj * view * world;
 
         if (mat)
         {
@@ -344,12 +343,12 @@ void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverri
     // Draw scene helpers (grid) after opaque objects so blending works correctly
     if (settings.showGrid && m_gridPipeline)
     {
-        XMMATRIX vp = view * proj;
+        const glm::mat4 vp = proj * view;
         const glm::vec3& cp = cam->Owner->transform.position;
 
         // Prepare grid constant buffer data
         GridCBData gridData{};
-        XMStoreFloat4x4(&gridData.invVP, XMMatrixInverse(nullptr, vp));
+        gridData.invVP = glm::inverse(vp);
         gridData.cameraPos = { cp.x, cp.y, cp.z };
         gridData.cellSize = settings.gridCellSize;
         gridData.gridColor = { settings.gridColor.x, settings.gridColor.y, settings.gridColor.z, settings.gridOpacity };
@@ -388,10 +387,8 @@ void Scene::FocusEditorCamera(Object* obj)
     // Compute the current direction from camera to its old target, then apply
     // the same direction offset to the new target.
     const glm::vec3& eye = editorCamera.transform.position;
-    DirectX::XMFLOAT3 oldTarget = cam->target;
-    glm::vec3 oldDir = glm::vec3(eye.x - oldTarget.x,
-                                  eye.y - oldTarget.y,
-                                  eye.z - oldTarget.z);
+    const glm::vec3 oldTarget = cam->target;
+    glm::vec3 oldDir = eye - oldTarget;
     float oldLen = std::sqrt(oldDir.x*oldDir.x + oldDir.y*oldDir.y + oldDir.z*oldDir.z);
     if (oldLen < 0.001f)
     {

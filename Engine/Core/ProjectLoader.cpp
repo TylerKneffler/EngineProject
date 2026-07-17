@@ -190,6 +190,10 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
         if (gameApi)
             settings.gameRenderingAPI = gameApi.child_value();
 
+        auto editorUi = prop.child("EditorUIPackage");
+        if (editorUi)
+            settings.editorUiPackage = editorUi.child_value();
+
         auto r = prop.child("ClearColorR");
         if (r)
             settings.clearColor.r = std::stof(r.child_value());

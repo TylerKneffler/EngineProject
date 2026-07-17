@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 
 class IEditorRenderer;
 class EditorState;
@@ -38,4 +39,4 @@ public:
     virtual void RequestSwitch(EditorUiKind kind) = 0;
 };
 
-std::unique_ptr<IEditorUiBackend> CreateEditorUiBackend();
+std::unique_ptr<IEditorUiBackend> CreateEditorUiBackend(const std::string& initialPackage = {});

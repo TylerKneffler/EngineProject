@@ -34,7 +34,7 @@ void SceneSerializer::EnsureBuiltinsRegistered()
     Register("Camera",   []() -> Component* { return new Camera(); });
 }
 
-// ---- Local GLM / XMFLOAT3 helpers ------------------------------------------
+// ---- Local GLM helpers ------------------------------------------------------
 namespace
 {
 
@@ -46,14 +46,6 @@ JsonValue J3(float x, float y, float z)
 JsonValue JGlm(const glm::vec3& v) { return J3(v.x, v.y, v.z); }
 
 glm::vec3 GlmFrom(const JsonValue& v, glm::vec3 def = {})
-{
-    if (!v.IsArray() || v.ArraySize() < 3) return def;
-    return { v.ArrayAt(0).AsFloat(), v.ArrayAt(1).AsFloat(), v.ArrayAt(2).AsFloat() };
-}
-
-JsonValue JXm(const DirectX::XMFLOAT3& v) { return J3(v.x, v.y, v.z); }
-
-DirectX::XMFLOAT3 XmFrom(const JsonValue& v, DirectX::XMFLOAT3 def = {})
 {
     if (!v.IsArray() || v.ArraySize() < 3) return def;
     return { v.ArrayAt(0).AsFloat(), v.ArrayAt(1).AsFloat(), v.ArrayAt(2).AsFloat() };

@@ -524,6 +524,12 @@ bool PreferencesView::SaveSettings()
             if (gameRenderingApi)
                 gameRenderingApi.text().set(m_settings.gameRenderingAPI.c_str());
 
+            auto editorUiPackage = prop.child("EditorUIPackage");
+            if (editorUiPackage)
+                editorUiPackage.text().set(m_settings.editorUiPackage.c_str());
+            else if (editorRenderingApi && !m_settings.editorUiPackage.empty())
+                prop.append_child("EditorUIPackage").text().set(m_settings.editorUiPackage.c_str());
+
             auto clearColorR = prop.child("ClearColorR");
             if (clearColorR)
                 clearColorR.text().set(std::to_string(m_settings.clearColor.r).c_str());

@@ -5,6 +5,7 @@
 #include "Core/Compoonents/Camera.h"
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Graphics/IGraphicsProvider.h"
+#include <glm/ext/matrix_transform.hpp>
 
 // ---------------------------------------------------------------------------
 // Init — store the scene pointer, then delegate resource creation to View.
@@ -164,36 +165,27 @@ void SceneView::ApplyCameraControls(float panDX, float panDY,
     if (!m_scene) return;
     if (panDX == 0.f && panDY == 0.f && orbitDX == 0.f && orbitDY == 0.f && zoom == 0.f) return;
 
-    using namespace DirectX;
-
     Camera*    cam = m_scene->editorCamera.GetComponent<Camera>();
     assert(cam && "Scene editorCamera must have a Camera component");
     glm::vec3& pos = m_scene->editorCamera.transform.position;
 
-    XMVECTOR eyeV    = XMVectorSet(pos.x, pos.y, pos.z, 0.f);
-    XMVECTOR targetV = XMLoadFloat3(&cam->target);
-    XMVECTOR upV     = XMLoadFloat3(&cam->up);
-    XMVECTOR fwdV    = XMVector3Normalize(XMVectorSubtract(targetV, eyeV));
-    XMVECTOR rightV  = XMVector3Normalize(XMVector3Cross(upV, fwdV));
-    XMVECTOR realUpV = XMVector3Normalize(XMVector3Cross(fwdV, rightV));
+    glm::vec3 eye     = pos;
+    glm::vec3 target  = cam->target;
+    glm::vec3 forward = glm::normalize(target - eye);
+    const glm::vec3 right  = glm::normalize(glm::cross(cam->up, forward));
+    const glm::vec3 realUp = glm::normalize(glm::cross(forward, right));
 
     // Pan — move camera and target together along the view plane,
     //        opposite the drag direction (grab-the-world feel).
     if (panDX != 0.f || panDY != 0.f)
     {
-        float dist  = XMVectorGetX(XMVector3Length(XMVectorSubtract(targetV, eyeV)));
+        const float dist = glm::length(target - eye);
         float speed = dist * 0.002f;
-        XMVECTOR pan = XMVectorAdd(
-            XMVectorScale(rightV,   -panDX * speed),
-            XMVectorScale(realUpV,   panDY * speed));
-        XMFLOAT3 panF;
-        XMStoreFloat3(&panF, pan);
-        pos.x += panF.x; pos.y += panF.y; pos.z += panF.z;
-        cam->target.x += panF.x;
-        cam->target.y += panF.y;
-        cam->target.z += panF.z;
-        eyeV    = XMVectorSet(pos.x, pos.y, pos.z, 0.f);  // refresh for orbit
-        targetV = XMLoadFloat3(&cam->target);
+        const glm::vec3 pan = right * (-panDX * speed) + realUp * (panDY * speed);
+        pos += pan;
+        cam->target += pan;
+        eye = pos;
+        target = cam->target;
     }
 
     // Orbit — rotate camera around target.
@@ -201,13 +193,12 @@ void SceneView::ApplyCameraControls(float panDX, float panDY,
     if (orbitDX != 0.f || orbitDY != 0.f)
     {
         constexpr float kSensitivity = 0.005f;
-        XMVECTOR arm = XMVectorSubtract(eyeV, targetV);
-        arm = XMVector3Transform(arm, XMMatrixRotationY(orbitDX * kSensitivity));
-        arm = XMVector3Transform(arm, XMMatrixRotationAxis(rightV, orbitDY * kSensitivity));
-        XMFLOAT3 newEye;
-        XMStoreFloat3(&newEye, XMVectorAdd(targetV, arm));
-        pos.x = newEye.x; pos.y = newEye.y; pos.z = newEye.z;
-        eyeV = XMVectorSet(pos.x, pos.y, pos.z, 0.f);  // refresh for zoom
+        glm::vec3 arm = eye - target;
+        arm = glm::mat3(glm::rotate(glm::mat4(1.f), orbitDX * kSensitivity,
+                                    glm::vec3(0.f, 1.f, 0.f))) * arm;
+        arm = glm::mat3(glm::rotate(glm::mat4(1.f), orbitDY * kSensitivity, right)) * arm;
+        pos = target + arm;
+        eye = pos;
     }
 
     // Zoom — move eye along the forward vector, scaled by distance so the
@@ -216,14 +207,12 @@ void SceneView::ApplyCameraControls(float panDX, float panDY,
     {
         constexpr float kZoomFactor  = 0.1f;
         constexpr float kMinDistance = 0.05f;
-        float dist   = XMVectorGetX(XMVector3Length(XMVectorSubtract(targetV, eyeV)));
+        const float dist = glm::length(target - eye);
         float step   = zoom * dist * kZoomFactor;
         // Clamp so we never overshoot the target or go below the minimum distance.
         step = std::min(step, dist - kMinDistance);
-        XMVECTOR move = XMVectorScale(fwdV, step);
-        XMFLOAT3 moveF;
-        XMStoreFloat3(&moveF, move);
-        pos.x += moveF.x; pos.y += moveF.y; pos.z += moveF.z;
+        forward = glm::normalize(target - eye);
+        pos += forward * step;
     }
 }
 

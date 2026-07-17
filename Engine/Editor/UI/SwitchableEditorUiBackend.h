@@ -36,5 +36,7 @@ private:
     std::optional<EditorUiKind> m_pendingKind;
     ImGuiUiBackend m_imgui;
     NuklearUiBackend m_nuklear;
+    EditorState* m_editorState = nullptr;
+    GameBuildManager* m_buildManager = nullptr;
     bool m_initialized = false;
 };

@@ -18,9 +18,11 @@
 #include "Engine/Editor/GameBuildManager.h"
 #include "Engine/Editor/Core/View/IEditorPanel.h"
 #include "Engine/Editor/Core/View/View.h"
+#include "Engine/Editor/Core/View/ViewFactory.h"
 #include "Engine/Editor/Core/View/Views/HierarchyView.h"
 #include "Engine/Editor/Core/View/Views/PropertiesView.h"
 #include "Engine/Editor/Core/View/Views/ConsoleView.h"
+#include "Engine/Editor/Core/View/Views/AssetsExplorerView.h"
 #include "Engine/Editor/Core/View/Views/PreferencesView.h"
 #include "Core/Compoonents/Camera.h"
 
@@ -286,6 +288,18 @@ bool NuklearUiBackend::HandleMessage(void* nativeWindow, uint32_t message,
     case WM_MBUTTONUP: nk_input_button(context, NK_BUTTON_MIDDLE, x, y, 0); ReleaseCapture(); return true;
     case WM_MOUSEMOVE: nk_input_motion(context, x, y); return true;
     case WM_MOUSEWHEEL: nk_input_scroll(context, nk_vec2(0.f, static_cast<float>(static_cast<short>(HIWORD(wParam))) / WHEEL_DELTA)); return true;
+    case WM_CANCELMODE:
+    case WM_CAPTURECHANGED:
+    case WM_KILLFOCUS:
+    {
+        const int mouseX = static_cast<int>(context->input.mouse.pos.x);
+        const int mouseY = static_cast<int>(context->input.mouse.pos.y);
+        nk_input_button(context, NK_BUTTON_LEFT, mouseX, mouseY, 0);
+        nk_input_button(context, NK_BUTTON_DOUBLE, mouseX, mouseY, 0);
+        nk_input_button(context, NK_BUTTON_RIGHT, mouseX, mouseY, 0);
+        nk_input_button(context, NK_BUTTON_MIDDLE, mouseX, mouseY, 0);
+        return false;
+    }
     }
     return false;
 }
@@ -313,19 +327,111 @@ void NuklearUiBackend::DrawEditor(EditorState& state, PlayState playState,
     nk_context* m_context = &m_impl->context;
     const float width = static_cast<float>(m_renderer->GetWidth());
     const float height = static_cast<float>(m_renderer->GetHeight());
-    constexpr float toolbarHeight = 48.f;
+    constexpr float toolbarHeight = 76.f;
     const float consoleHeight = std::max(150.f, height * 0.24f);
     const float leftWidth = std::max(220.f, width * 0.20f);
     const float rightWidth = std::max(260.f, width * 0.25f);
     const float middleWidth = std::max(100.f, width - leftWidth - rightWidth);
     const float workspaceHeight = std::max(100.f, height - toolbarHeight - consoleHeight);
 
-    if (nk_begin(m_context, "Editor Toolbar", nk_rect(0, 0, width, toolbarHeight),
+    const struct nk_rect toolbarBounds = nk_rect(0, 0, width, toolbarHeight);
+    nk_window_set_bounds(m_context, "Editor Toolbar", toolbarBounds);
+    if (nk_begin(m_context, "Editor Toolbar", toolbarBounds,
         NK_WINDOW_BORDER | NK_WINDOW_NO_SCROLLBAR))
     {
-        nk_layout_row_dynamic(m_context, 30.f, 7);
+        const bool isBusy = playState == PlayState::Building ||
+                            playState == PlayState::Playing ||
+                            playState == PlayState::Paused;
+        auto createPanel = [&](const char* type)
+        {
+            ViewFactory* factory = state.GetViewFactory();
+            if (!factory) return;
+            if (ViewFactory::IsSingleton(type))
+            {
+                const std::string titlePrefix = std::string(type) + " ";
+                for (auto& existing : state.GetPanels())
+                {
+                    if (!existing || existing->GetTitle().rfind(titlePrefix, 0) != 0) continue;
+                    existing->SetOpen(true);
+                    if (dynamic_cast<HierarchyView*>(existing.get()) ||
+                        dynamic_cast<AssetsExplorerView*>(existing.get()))
+                        m_activeLeftTab = existing.get();
+                    return;
+                }
+            }
+            auto panel = factory->Create(type);
+            if (panel)
+            {
+                IEditorPanel* created = panel.get();
+                state.GetPanels().push_back(std::move(panel));
+                if (created->NeedsRender()) m_activeCenterTab = created;
+                else if (dynamic_cast<HierarchyView*>(created) ||
+                         dynamic_cast<AssetsExplorerView*>(created))
+                    m_activeLeftTab = created;
+            }
+        };
+
+        nk_menubar_begin(m_context);
+        nk_layout_row_begin(m_context, NK_STATIC, 24.f, 3);
+        nk_layout_row_push(m_context, 55.f);
+        if (nk_menu_begin_label(m_context, "File", NK_TEXT_LEFT, nk_vec2(285.f, 255.f)))
+        {
+            nk_layout_row_dynamic(m_context, 25.f, 1);
+            if (nk_menu_item_label(m_context, "Save All        Ctrl+S", NK_TEXT_LEFT))
+                state.SaveScene();
+
+            if (isBusy) nk_widget_disable_begin(m_context);
+            if (nk_menu_item_label(m_context, "Build           Ctrl+B", NK_TEXT_LEFT) && buildManager)
+                buildManager->StartBuild(PostBuildAction::Nothing);
+            if (nk_menu_item_label(m_context, "Build and Run in Editor", NK_TEXT_LEFT) && buildManager)
+                buildManager->StartBuild(PostBuildAction::PlayInEditor);
+            if (nk_menu_item_label(m_context, "Build and Run Standalone", NK_TEXT_LEFT) && buildManager)
+                buildManager->StartBuild(PostBuildAction::LaunchStandalone);
+            if (isBusy) nk_widget_disable_end(m_context);
+
+            if (nk_menu_item_label(m_context, "Project Preferences", NK_TEXT_LEFT))
+                state.SetShowPreferences(true);
+            if (nk_menu_item_label(m_context, "Exit", NK_TEXT_LEFT))
+                PostQuitMessage(0);
+            nk_menu_end(m_context);
+        }
+
+        nk_layout_row_push(m_context, 60.f);
+        if (nk_menu_begin_label(m_context, "Views", NK_TEXT_LEFT, nk_vec2(210.f, 190.f)))
+        {
+            nk_layout_row_dynamic(m_context, 25.f, 1);
+            ViewFactory* factory = state.GetViewFactory();
+            const bool no3D = !factory || !factory->CanCreate3DView();
+            if (no3D) nk_widget_disable_begin(m_context);
+            if (nk_menu_item_label(m_context, "Scene", NK_TEXT_LEFT)) createPanel("Scene");
+            if (nk_menu_item_label(m_context, "Game", NK_TEXT_LEFT)) createPanel("Game");
+            if (no3D) nk_widget_disable_end(m_context);
+            if (nk_menu_item_label(m_context, "Hierarchy", NK_TEXT_LEFT)) createPanel("Hierarchy");
+            if (nk_menu_item_label(m_context, "Properties", NK_TEXT_LEFT)) createPanel("Properties");
+            if (nk_menu_item_label(m_context, "Assets", NK_TEXT_LEFT)) createPanel("Assets");
+            if (nk_menu_item_label(m_context, "Console", NK_TEXT_LEFT)) createPanel("Console");
+            nk_menu_end(m_context);
+        }
+
+        nk_layout_row_push(m_context, 45.f);
+        if (nk_menu_begin_label(m_context, "UI", NK_TEXT_LEFT, nk_vec2(235.f, 80.f)))
+        {
+            nk_layout_row_dynamic(m_context, 25.f, 1);
+            nk_widget_disable_begin(m_context);
+            nk_menu_item_label(m_context, "Nuklear (active)", NK_TEXT_LEFT);
+            nk_widget_disable_end(m_context);
+            if (nk_menu_item_label(m_context, "Switch to Dear ImGui  Ctrl+Shift+U", NK_TEXT_LEFT))
+                RequestSwitch(EditorUiKind::ImGui);
+            nk_menu_end(m_context);
+        }
+        nk_layout_row_end(m_context);
+        nk_menubar_end(m_context);
+
+        nk_layout_row_dynamic(m_context, 30.f, 6);
         if (nk_button_label(m_context, "Save")) state.SaveScene();
+        if (isBusy) nk_widget_disable_begin(m_context);
         if (nk_button_label(m_context, "Build") && buildManager) buildManager->StartBuild(PostBuildAction::Nothing);
+        if (isBusy) nk_widget_disable_end(m_context);
         if (playState == PlayState::Stopped || playState == PlayState::BuildFailed)
         {
             if (nk_button_label(m_context, "Play") && buildManager) buildManager->StartBuild(PostBuildAction::PlayInEditor);
@@ -344,20 +450,72 @@ void NuklearUiBackend::DrawEditor(EditorState& state, PlayState playState,
     }
     nk_end(m_context);
 
+    std::vector<IEditorPanel*> leftTabs;
+    std::vector<IEditorPanel*> centerTabs;
+    IEditorPanel* propertiesPanel = nullptr;
+    IEditorPanel* consolePanel = nullptr;
     for (auto& panel : state.GetPanels())
     {
         if (!panel || !panel->IsOpen()) continue;
-        if (dynamic_cast<HierarchyView*>(panel.get()))
-            m_editorUi.SetNextWindowRect(0, toolbarHeight, leftWidth, workspaceHeight);
-        else if (dynamic_cast<PropertiesView*>(panel.get()))
-            m_editorUi.SetNextWindowRect(leftWidth + middleWidth, toolbarHeight, rightWidth, workspaceHeight);
-        else if (dynamic_cast<ConsoleView*>(panel.get()))
-            m_editorUi.SetNextWindowRect(0, toolbarHeight + workspaceHeight, width, consoleHeight);
-        else if (panel->NeedsRender())
-            m_editorUi.SetNextWindowRect(leftWidth, toolbarHeight, middleWidth, workspaceHeight);
-        else
-            m_editorUi.SetNextWindowRect(0, toolbarHeight, leftWidth, workspaceHeight);
-        panel->DrawPanel(m_editorUi);
+        if (dynamic_cast<PropertiesView*>(panel.get())) propertiesPanel = panel.get();
+        else if (dynamic_cast<ConsoleView*>(panel.get())) consolePanel = panel.get();
+        else if (panel->NeedsRender()) centerTabs.push_back(panel.get());
+        else leftTabs.push_back(panel.get());
+    }
+
+    auto ensureActive = [](IEditorPanel*& active, const std::vector<IEditorPanel*>& tabs)
+    {
+        if (std::find(tabs.begin(), tabs.end(), active) == tabs.end())
+            active = tabs.empty() ? nullptr : tabs.front();
+    };
+    auto drawTabs = [&](const char* hostName, float x, float y, float w,
+                        const std::vector<IEditorPanel*>& tabs, IEditorPanel*& active)
+    {
+        if (tabs.empty()) return;
+        const struct nk_rect bounds = nk_rect(x, y, w, 32.f);
+        nk_window_set_bounds(m_context, hostName, bounds);
+        if (nk_begin(m_context, hostName, bounds, NK_WINDOW_BORDER | NK_WINDOW_NO_SCROLLBAR))
+        {
+            nk_layout_row_dynamic(m_context, 24.f, static_cast<int>(tabs.size()));
+            for (IEditorPanel* panel : tabs)
+            {
+                int selected = panel == active ? 1 : 0;
+                if (nk_selectable_label(m_context, panel->GetTitle().c_str(), NK_TEXT_CENTERED, &selected))
+                    active = panel;
+            }
+        }
+        nk_end(m_context);
+    };
+
+    constexpr float tabHeight = 32.f;
+    ensureActive(m_activeLeftTab, leftTabs);
+    ensureActive(m_activeCenterTab, centerTabs);
+    drawTabs("Left Dock Tabs", 0.f, toolbarHeight, leftWidth, leftTabs, m_activeLeftTab);
+    drawTabs("Center Dock Tabs", leftWidth, toolbarHeight, middleWidth, centerTabs, m_activeCenterTab);
+
+    if (m_activeLeftTab)
+    {
+        m_editorUi.SetNextWindowRect(0.f, toolbarHeight + tabHeight, leftWidth,
+                                     workspaceHeight - tabHeight);
+        m_activeLeftTab->DrawPanel(m_editorUi);
+    }
+    if (m_activeCenterTab)
+    {
+        m_editorUi.SetNextWindowRect(leftWidth, toolbarHeight + tabHeight, middleWidth,
+                                     workspaceHeight - tabHeight);
+        m_activeCenterTab->DrawPanel(m_editorUi);
+    }
+    if (propertiesPanel)
+    {
+        m_editorUi.SetNextWindowRect(leftWidth + middleWidth, toolbarHeight,
+                                     rightWidth, workspaceHeight);
+        propertiesPanel->DrawPanel(m_editorUi);
+    }
+    if (consolePanel)
+    {
+        m_editorUi.SetNextWindowRect(0.f, toolbarHeight + workspaceHeight,
+                                     width, consoleHeight);
+        consolePanel->DrawPanel(m_editorUi);
     }
     bool showPreferences = state.IsShowingPreferences();
     if (showPreferences && state.GetPreferences())

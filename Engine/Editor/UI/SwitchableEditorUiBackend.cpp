@@ -1,5 +1,7 @@
 #include "pch.h"
 #include "SwitchableEditorUiBackend.h"
+#include "Engine/Editor/EditorState.h"
+#include "Engine/Editor/GameBuildManager.h"
 
 SwitchableEditorUiBackend::SwitchableEditorUiBackend(EditorUiKind initialKind)
     : m_activeKind(initialKind)
@@ -32,6 +34,8 @@ void SwitchableEditorUiBackend::Shutdown()
     m_nuklear.Shutdown();
     m_imgui.Shutdown();
     m_pendingKind.reset();
+    m_editorState = nullptr;
+    m_buildManager = nullptr;
     m_initialized = false;
 }
 
@@ -45,11 +49,26 @@ IEditorUiBackend& SwitchableEditorUiBackend::ActiveBackend()
 bool SwitchableEditorUiBackend::HandleMessage(void* nativeWindow, uint32_t message,
     uintptr_t wParam, intptr_t lParam)
 {
-    if ((message == WM_KEYDOWN || message == WM_SYSKEYDOWN) && wParam == 'U' &&
-        (GetKeyState(VK_CONTROL) & 0x8000) && (GetKeyState(VK_SHIFT) & 0x8000))
+    const bool keyDown = message == WM_KEYDOWN || message == WM_SYSKEYDOWN;
+    const bool firstPress = (static_cast<uintptr_t>(lParam) & (uintptr_t{1} << 30)) == 0;
+    const bool control = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+    const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+    if (keyDown && firstPress && control && shift && wParam == 'U')
     {
         RequestSwitch(m_activeKind == EditorUiKind::ImGui
             ? EditorUiKind::Nuklear : EditorUiKind::ImGui);
+        return true;
+    }
+    if (keyDown && firstPress && control && !shift && wParam == 'S' && m_editorState)
+    {
+        m_editorState->SaveScene();
+        return true;
+    }
+    if (keyDown && firstPress && control && !shift && wParam == 'B' && m_buildManager)
+    {
+        const PlayState state = m_buildManager->GetPlayState();
+        if (state == PlayState::Stopped || state == PlayState::BuildFailed)
+            m_buildManager->StartBuild(PostBuildAction::Nothing);
         return true;
     }
     return m_initialized && ActiveBackend().HandleMessage(nativeWindow, message, wParam, lParam);
@@ -93,6 +112,8 @@ void SwitchableEditorUiBackend::EndFrame()
 void SwitchableEditorUiBackend::DrawEditor(EditorState& state, PlayState playState,
     GameBuildManager* buildManager)
 {
+    m_editorState = &state;
+    m_buildManager = buildManager;
     if (m_activeKind == EditorUiKind::ImGui)
         m_imgui.DrawEditorPresentation(state, playState, buildManager,
             [this]() { RequestSwitch(EditorUiKind::Nuklear); });
@@ -105,8 +126,12 @@ void SwitchableEditorUiBackend::RequestSwitch(EditorUiKind kind)
     if (kind != m_activeKind) m_pendingKind = kind;
 }
 
-std::unique_ptr<IEditorUiBackend> CreateEditorUiBackend()
+std::unique_ptr<IEditorUiBackend> CreateEditorUiBackend(const std::string& initialPackage)
 {
+    if (initialPackage == "Nuklear" || initialPackage == "NUKLEAR")
+        return std::make_unique<SwitchableEditorUiBackend>(EditorUiKind::Nuklear);
+    if (initialPackage == "ImGui" || initialPackage == "IMGUI")
+        return std::make_unique<SwitchableEditorUiBackend>(EditorUiKind::ImGui);
 #if defined(ENGINE_EDITOR_UI_NUKLEAR)
     return std::make_unique<SwitchableEditorUiBackend>(EditorUiKind::Nuklear);
 #else

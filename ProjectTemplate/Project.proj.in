@@ -33,6 +33,7 @@
     <RenderingAPI>DirectX11</RenderingAPI>
     <EditorRenderingAPI>DirectX11</EditorRenderingAPI>
     <GameRenderingAPI>DirectX11</GameRenderingAPI>
+    <EditorUIPackage>ImGui</EditorUIPackage>
     <ClearColorR>0.18</ClearColorR>
     <ClearColorG>0.18</ClearColorG>
     <ClearColorB>0.18</ClearColorB>

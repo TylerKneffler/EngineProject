@@ -6,6 +6,7 @@
 
 class Object;
 class ImGuiUiBackend;
+class IEditorPanel;
 
 // Nuklear owns editor layout, widgets, and input. Its renderer-independent
 // triangle output is submitted through the shared editor UI graphics bridge.
@@ -48,4 +49,6 @@ private:
     std::function<void(EditorUiKind)> m_switchCallback;
     bool m_inputOpen = false;
     NuklearEditorUi m_editorUi;
+    IEditorPanel* m_activeLeftTab = nullptr;
+    IEditorPanel* m_activeCenterTab = nullptr;
 };
