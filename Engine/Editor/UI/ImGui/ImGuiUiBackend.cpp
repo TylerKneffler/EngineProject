@@ -53,6 +53,7 @@ bool ImGuiUiBackend::Initialize(void* nativeWindow, IEditorRenderer& renderer)
     Shutdown();
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
+    ImGui::GetIO().IniFilename = nullptr;
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
 
@@ -177,18 +178,14 @@ void ImGuiUiBackend::Shutdown()
 void ImGuiUiBackend::DrawEditor(EditorState& state, PlayState playState,
     GameBuildManager* buildManager)
 {
-    DrawEditorPresentation(state, playState, buildManager, {});
+    DrawEditorPresentation(state, playState, buildManager);
 }
 
 void ImGuiUiBackend::DrawEditorPresentation(EditorState& state, PlayState playState,
-    GameBuildManager* buildManager, const std::function<void()>& switchToNuklear)
+    GameBuildManager* buildManager)
 {
-    m_switchToNuklear = switchToNuklear;
     if (!m_presentation)
-        m_presentation = std::make_unique<EditorUI>(&state, [this]()
-        {
-            if (m_switchToNuklear) m_switchToNuklear();
-        });
+        m_presentation = std::make_unique<EditorUI>(&state);
     m_presentation->SetGameBuildManager(buildManager);
     m_presentation->Render(playState);
 }

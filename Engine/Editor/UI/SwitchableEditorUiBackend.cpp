@@ -2,12 +2,11 @@
 #include "SwitchableEditorUiBackend.h"
 #include "Engine/Editor/EditorState.h"
 #include "Engine/Editor/GameBuildManager.h"
+#include "Engine/Editor/Core/View/Views/PreferencesView.h"
 
 SwitchableEditorUiBackend::SwitchableEditorUiBackend(EditorUiKind initialKind)
     : m_activeKind(initialKind)
-{
-    m_nuklear.SetSwitchCallback([this](EditorUiKind kind) { RequestSwitch(kind); });
-}
+{}
 
 SwitchableEditorUiBackend::~SwitchableEditorUiBackend() { Shutdown(); }
 
@@ -53,12 +52,6 @@ bool SwitchableEditorUiBackend::HandleMessage(void* nativeWindow, uint32_t messa
     const bool firstPress = (static_cast<uintptr_t>(lParam) & (uintptr_t{1} << 30)) == 0;
     const bool control = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
     const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-    if (keyDown && firstPress && control && shift && wParam == 'U')
-    {
-        RequestSwitch(m_activeKind == EditorUiKind::ImGui
-            ? EditorUiKind::Nuklear : EditorUiKind::ImGui);
-        return true;
-    }
     if (keyDown && firstPress && control && !shift && wParam == 'S' && m_editorState)
     {
         m_editorState->SaveScene();
@@ -114,9 +107,19 @@ void SwitchableEditorUiBackend::DrawEditor(EditorState& state, PlayState playSta
 {
     m_editorState = &state;
     m_buildManager = buildManager;
+    state.GetEditorLayout().Update();
+    if (PreferencesView* preferences = state.GetPreferences())
+    {
+        preferences->ConfigureEditorUiPackage(
+            m_activeKind == EditorUiKind::ImGui ? "ImGui" : "Nuklear",
+            [this](const std::string& package)
+            {
+                RequestSwitch(package == "Nuklear"
+                    ? EditorUiKind::Nuklear : EditorUiKind::ImGui);
+            });
+    }
     if (m_activeKind == EditorUiKind::ImGui)
-        m_imgui.DrawEditorPresentation(state, playState, buildManager,
-            [this]() { RequestSwitch(EditorUiKind::Nuklear); });
+        m_imgui.DrawEditorPresentation(state, playState, buildManager);
     else
         m_nuklear.DrawEditor(state, playState, buildManager);
 }

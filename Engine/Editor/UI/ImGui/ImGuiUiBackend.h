@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Engine/Editor/UI/IEditorUiBackend.h"
-#include <functional>
 
 class EditorUI;
 
@@ -26,8 +25,7 @@ public:
     void RequestSwitch(EditorUiKind) override {}
 
     void DrawEditorPresentation(EditorState& state, PlayState playState,
-                                GameBuildManager* buildManager,
-                                const std::function<void()>& switchToNuklear);
+                                GameBuildManager* buildManager);
     void RenderDrawData(struct ImDrawData* drawData, void* commandBuffer);
     void EndHiddenFrame();
 
@@ -37,5 +35,4 @@ private:
     IEditorRenderer* m_renderer = nullptr;
     bool m_initialized = false;
     std::unique_ptr<EditorUI> m_presentation;
-    std::function<void()> m_switchToNuklear;
 };

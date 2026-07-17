@@ -287,6 +287,14 @@ void PreferencesView::DrawWindow(IEditorUi& ui, bool& isOpen)
     ui.EndWindow();
 }
 
+void PreferencesView::ConfigureEditorUiPackage(
+    const std::string& activePackage,
+    std::function<void(const std::string&)> switchPackage)
+{
+    m_activeEditorUiPackage = activePackage;
+    m_switchEditorUiPackage = std::move(switchPackage);
+}
+
 void PreferencesView::DrawExportSection(IEditorUi& ui)
 {
     ui.Label("Portable Game Export");
@@ -407,6 +415,20 @@ void PreferencesView::DrawPathsSection(IEditorUi& ui)
 void PreferencesView::DrawRenderingSection(IEditorUi& ui)
 {
     ui.Label("Rendering Settings"); ui.Separator();
+
+    const char* uiPackages[] = { "ImGui", "Nuklear" };
+    const std::string displayedPackage = m_settings.editorUiPackage.empty()
+        ? m_activeEditorUiPackage : m_settings.editorUiPackage;
+    int currentUiPackage = displayedPackage == "Nuklear" ? 1 : 0;
+    if (ui.Combo("Editor UI Package", &currentUiPackage, uiPackages, 2))
+    {
+        m_settings.editorUiPackage = uiPackages[currentUiPackage];
+        if (m_switchEditorUiPackage)
+            m_switchEditorUiPackage(m_settings.editorUiPackage);
+        NotifyChanged();
+    }
+    ui.Tooltip("Applies immediately. Use Save Project Settings to persist it.");
+    ui.Separator();
 
     if (DrawRendererCombo(ui, "Editor Rendering API", m_settings.editorRenderingAPI))
         NotifyChanged();

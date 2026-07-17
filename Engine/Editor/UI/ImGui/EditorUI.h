@@ -1,7 +1,6 @@
 #pragma once
 // ImGui editor presentation selected through IEditorUiBackend.
 #include "pch.h"
-#include <functional>
 #include "Engine/Editor/UI/ImGui/ImGuiEditorUi.h"
 
 class EditorState;
@@ -14,7 +13,7 @@ enum class PlayState;
 class EditorUI
 {
 public:
-    EditorUI(EditorState* state, std::function<void()> switchToNuklear = {});
+    explicit EditorUI(EditorState* state);
 
     // ---- Rendering ----
     void Render(PlayState playState);
@@ -32,6 +31,7 @@ public:
 
 private:
     void SetupDockingLayout();
+    void CaptureDockingLayout();
     void DrawMenuBar(PlayState playState);
     void DrawPlayControls(PlayState playState);
     void DrawPanels();
@@ -40,9 +40,13 @@ private:
 
     EditorState* m_state = nullptr;
     GameBuildManager* m_gameBuildManager = nullptr;
-    std::function<void()> m_switchToNuklear;
     ImGuiEditorUi m_ui;
 
     bool m_showUnsavedWarning = false;
     std::string m_sceneToLoadOnConfirm;
+    bool m_dockingInitialized = false;
+    uint32_t m_leftDockId = 0;
+    uint32_t m_rightDockId = 0;
+    uint32_t m_centerTopDockId = 0;
+    uint32_t m_centerBottomDockId = 0;
 };

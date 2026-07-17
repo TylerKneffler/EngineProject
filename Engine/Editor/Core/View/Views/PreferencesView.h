@@ -41,6 +41,11 @@ public:
     // Callback fired when any setting is changed in the UI
     std::function<void()> OnSettingsChanged;
 
+    // Runtime UI selection is supplied by the switchable backend. Selecting a
+    // package applies immediately and is persisted with the project settings.
+    void ConfigureEditorUiPackage(const std::string& activePackage,
+                                  std::function<void(const std::string&)> switchPackage);
+
 private:
     void DrawMetadataSection(IEditorUi& ui);
     void DrawPathsSection(IEditorUi& ui);
@@ -67,4 +72,6 @@ private:
     std::shared_ptr<std::atomic<float>> m_exportProgress;
     std::shared_ptr<std::atomic<int>> m_exportStage;
     std::future<std::pair<bool, std::string>> m_exportFuture;
+    std::string m_activeEditorUiPackage;
+    std::function<void(const std::string&)> m_switchEditorUiPackage;
 };

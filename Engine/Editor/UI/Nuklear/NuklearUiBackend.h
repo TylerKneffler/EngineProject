@@ -2,7 +2,6 @@
 
 #include "Engine/Editor/UI/IEditorUiBackend.h"
 #include "Engine/Editor/UI/Nuklear/NuklearEditorUi.h"
-#include <functional>
 
 class Object;
 class ImGuiUiBackend;
@@ -32,8 +31,7 @@ public:
     void DrawEditor(EditorState& state, PlayState playState,
                     GameBuildManager* buildManager) override;
     EditorUiKind ActiveKind() const override { return EditorUiKind::Nuklear; }
-    void RequestSwitch(EditorUiKind kind) override;
-    void SetSwitchCallback(std::function<void(EditorUiKind)> callback);
+    void RequestSwitch(EditorUiKind) override {}
 
 private:
     void DrawHierarchy(EditorState& state, float x, float y, float w, float h);
@@ -46,9 +44,11 @@ private:
     std::unique_ptr<Impl> m_impl;
     IEditorRenderer* m_renderer = nullptr;
     ImGuiUiBackend* m_renderBridge = nullptr;
-    std::function<void(EditorUiKind)> m_switchCallback;
     bool m_inputOpen = false;
     NuklearEditorUi m_editorUi;
     IEditorPanel* m_activeLeftTab = nullptr;
     IEditorPanel* m_activeCenterTab = nullptr;
+    bool m_draggingLeftSplitter = false;
+    bool m_draggingRightSplitter = false;
+    bool m_draggingConsoleSplitter = false;
 };
