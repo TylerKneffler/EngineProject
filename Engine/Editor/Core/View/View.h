@@ -53,7 +53,7 @@ public:
     // SRV slot index for resource cleanup
     uint32_t GetSrvSlotIndex() const;
 
-    // DrawPanel — implemented by subclasses for ImGui content
+    // DrawPanel is implemented against the package-neutral UI facade.
     virtual void DrawPanel(IEditorUi& ui) = 0;
 
     // Render3D — implemented by subclasses to record scene rendering commands

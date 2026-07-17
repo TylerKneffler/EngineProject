@@ -2,13 +2,12 @@
 #include "View/View.h"
 #include "Core/Scene/Scene.h"
 #include "Core/ProjectLoader.h"
-#include "Engine/Editor/UI/IEditorUi.h"
 
 // ---------------------------------------------------------------------------
 // SceneView — editor Scene panel
 //
 // Extends View with scene-camera orbit/pan/zoom controls driven by mouse
-// input captured inside the "Scene" ImGui panel. Supports aspect ratio
+// input captured inside the Scene panel. Supports aspect ratio
 // constraints with letterboxing/pillarboxing visualization.
 //
 // ---- Per-frame call order ----

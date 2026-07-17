@@ -10,7 +10,7 @@ const std::unordered_set<std::string> ViewFactory::kSingletonTypes =
 };
 
 // ---------------------------------------------------------------------------
-// Constructor — populate the SRV free list (slot 0 is ImGui font atlas).
+// Constructor.
 // ---------------------------------------------------------------------------
 ViewFactory::ViewFactory(IEditorRenderer*    renderer,
                          Scene*              scene,
@@ -61,7 +61,7 @@ void ViewFactory::NotifyPanelRemoved(IEditorPanel* panel)
 std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
 {
     // Singleton check: if the panel type is restricted to one instance and one
-    // already exists, focus its ImGui window and return nullptr.
+    // already exists, keep that singleton and return nullptr.
     if (IsSingleton(typeName))
     {
         auto it = m_singletonInstances.find(typeName);

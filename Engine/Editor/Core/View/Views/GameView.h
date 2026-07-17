@@ -2,7 +2,6 @@
 #include "View/View.h"
 #include "Core/Scene/Scene.h"
 #include "Core/ProjectLoader.h"
-#include "Engine/Editor/UI/IEditorUi.h"
 
 // ---------------------------------------------------------------------------
 // GameView — editor Game panel
@@ -42,7 +41,7 @@ public:
     // cmd: opaque graphics command list handle (cast internally to ID3D12GraphicsCommandList*)
     void Render3D(void* cmd) override;
 
-    // Draws the "Game" ImGui window showing the game-camera render output.
+    // Defines the Game panel showing the game-camera render output.
     void DrawPanel(IEditorUi& ui) override;
 
 private:

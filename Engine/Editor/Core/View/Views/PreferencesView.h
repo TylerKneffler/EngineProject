@@ -8,7 +8,7 @@ class IEditorUi;
 // ---------------------------------------------------------------------------
 // PreferencesView
 //
-// Displays an ImGui window for editing project settings loaded from the
+// Defines a package-neutral window for editing project settings loaded from the
 // .proj file. Users can modify settings and save them back to the project file.
 //
 // Usage:

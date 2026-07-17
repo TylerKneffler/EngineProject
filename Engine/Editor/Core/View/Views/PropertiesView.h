@@ -6,7 +6,7 @@
 // ---------------------------------------------------------------------------
 // PropertiesView
 //
-// Draws the "Properties" ImGui panel showing the editable properties of the
+// Defines the Properties panel showing the editable properties of the
 // currently selected Object and all its components.
 //
 // Usage:

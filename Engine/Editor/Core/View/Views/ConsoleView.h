@@ -32,7 +32,7 @@ public:
     // Clears all log entries.
     void Clear();
 
-    // Draws the "Console" ImGui panel.
+    // Defines the package-neutral Console panel.
     void DrawPanel(IEditorUi& ui) override;
     const std::vector<Entry>& GetEntries() const { return m_entries; }
 

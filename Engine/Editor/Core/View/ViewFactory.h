@@ -35,7 +35,7 @@
 class ViewFactory
 {
 public:
-    // Slot 0 is always reserved for the ImGui font atlas.
+    // Slot 0 is reserved by the active UI graphics bridge.
     static constexpr uint32_t MAX_SRV_SLOTS = 32; // must match renderer heap size
 
     ViewFactory(IEditorRenderer*    renderer,

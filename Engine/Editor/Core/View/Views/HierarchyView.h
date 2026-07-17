@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------
 // HierarchyView
 //
-// Draws the "HierarchyView" ImGui panel showing all scene objects in a
+// Defines the Hierarchy panel showing all scene objects in a
 // parent → child tree, with a "World" root node, matching the style of
 // Unity / Unreal / Godot editors.
 //

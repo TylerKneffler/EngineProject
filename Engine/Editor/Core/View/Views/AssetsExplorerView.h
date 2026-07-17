@@ -24,7 +24,7 @@ public:
     // Initializes the view with the path to the Assets directory
     void Init(const std::string& assetsPath);
 
-    // Draws the ImGui panel showing the file tree
+    // Defines the package-neutral asset file tree.
     void DrawPanel(IEditorUi& ui) override;
 
     // Callback when a scene file is requested to load
