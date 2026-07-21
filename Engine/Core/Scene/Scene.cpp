@@ -21,11 +21,14 @@ namespace
 {
     std::string EngineShaderPath(const char* fileName)
     {
+        const std::filesystem::path shaderFile(fileName);
+        const std::filesystem::path relativePath =
+            shaderFile.stem() / shaderFile;
         const std::filesystem::path bundled =
-            std::filesystem::path("Engine") / "Shaders" / fileName;
+            std::filesystem::path("Engine") / "Shaders" / relativePath;
         if (std::filesystem::is_regular_file(bundled))
             return bundled.string();
-        return (std::filesystem::path(ENGINE_SHADERS_PATH) / fileName).string();
+        return (std::filesystem::path(ENGINE_SHADERS_PATH) / relativePath).string();
     }
 }
 

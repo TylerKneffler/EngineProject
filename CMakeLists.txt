@@ -252,7 +252,8 @@ if(ENGINE_VULKAN_ENABLED)
                 set(SHADER_PROFILE ps_6_0)
                 set(SHADER_ENTRY PSMain)
             endif()
-            set(SHADER_SOURCE "${ENGINE_ROOT}/Engine/Core/Shaders/${SHADER_NAME}.hlsl")
+            set(SHADER_SOURCE
+                "${ENGINE_ROOT}/Engine/Core/Shaders/${SHADER_NAME}/${SHADER_NAME}.hlsl")
             set(SHADER_OUTPUT "${VULKAN_SHADER_DIR}/${SHADER_NAME}.${STAGE}.spv")
             add_custom_command(
                 OUTPUT "${SHADER_OUTPUT}"
