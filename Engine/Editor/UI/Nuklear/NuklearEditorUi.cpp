@@ -13,9 +13,11 @@
 #define CTX static_cast<nk_context*>(m_context)
 void NuklearEditorUi::Layout(float h){nk_layout_row_dynamic(CTX,h,1);}
 void NuklearEditorUi::RecordNextWidgetBounds(){const struct nk_rect b=nk_widget_bounds(CTX);m_lastItemX=b.x;m_lastItemY=b.y;m_lastItemW=b.w;m_lastItemH=b.h;}
-void NuklearEditorUi::SetNextWindowRect(float x,float y,float w,float h){m_x=x;m_y=y;m_w=w;m_h=h;}
+void NuklearEditorUi::SetNextWindowRect(float x,float y,float w,float h){m_x=x;m_y=y;m_w=w;m_h=h;m_hasNextWindowRect=true;}
 bool NuklearEditorUi::BeginWindow(const char* title, bool* open, bool)
 {
+    m_windowBegun = false;
+    m_currentWindow.clear();
     if (open && !*open) return false;
     const auto closed = m_closedWindows.find(title);
     if (closed != m_closedWindows.end())
@@ -24,10 +26,18 @@ bool NuklearEditorUi::BeginWindow(const char* title, bool* open, bool)
         m_closedWindows.erase(closed);
     }
     const struct nk_rect bounds = nk_rect(m_x, m_y, m_w, m_h);
-    nk_window_set_bounds(CTX, title, bounds);
-    nk_flags flags = NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_SCROLL_AUTO_HIDE;
+    // Editor panels live in backend-managed dock slots. Applying the slot
+    // rectangle every frame prevents a moved/scaled Nuklear window from
+    // drifting away from its tab strip or overlapping adjacent panels.
+    if (m_hasNextWindowRect)
+        nk_window_set_bounds(CTX, title, bounds);
+    m_hasNextWindowRect = false;
+    nk_flags flags = NK_WINDOW_BORDER | NK_WINDOW_TITLE |
+                     NK_WINDOW_SCROLL_AUTO_HIDE;
     if (open) flags |= NK_WINDOW_CLOSABLE;
     const bool visible = nk_begin(CTX, title, bounds, flags) != 0;
+    m_windowBegun = true;
+    m_currentWindow = title;
     if (open && nk_window_is_closed(CTX, title))
     {
         *open = false;
@@ -37,7 +47,12 @@ bool NuklearEditorUi::BeginWindow(const char* title, bool* open, bool)
 }
 void NuklearEditorUi::EndWindow()
 {
-    nk_end(CTX);
+    if (m_windowBegun)
+    {
+        nk_end(CTX);
+        m_windowBegun = false;
+        m_currentWindow.clear();
+    }
 }
 bool NuklearEditorUi::Button(const char*l,float,float h){Layout(h>0?h:28);m_lastClicked=!m_disabled&&nk_button_label(CTX,l);return m_lastClicked;}
 void NuklearEditorUi::Label(const char*t){Layout();nk_label(CTX,t,NK_TEXT_LEFT);} void NuklearEditorUi::DisabledLabel(const char*t){Label(t);} void NuklearEditorUi::ColoredLabel(const char*t,EditorUiColor c){Layout();nk_label_colored(CTX,t,NK_TEXT_LEFT,nk_rgba_f(c.r,c.g,c.b,c.a));}
@@ -49,12 +64,42 @@ bool NuklearEditorUi::DragFloat3(const char*l,float*v,float s,float lo,float hi)
 bool NuklearEditorUi::ColorEdit3(const char*l,float*c){return DragFloat3(l,c,.01f,0,1);} bool NuklearEditorUi::ColorEdit4(const char*l,float*c){bool r=ColorEdit3(l,c);return DragFloat("Alpha",c+3,.01f,0,1)||r;}
 bool NuklearEditorUi::SliderInt(const char*l,int*v,int a,int b){Layout();int old=*v;nk_property_int(CTX,l,a,v,b,1,1);return old!=*v;} bool NuklearEditorUi::InputUInt(const char*l,uint32_t*v){int n=static_cast<int>(*v);bool c=SliderInt(l,&n,0,100000);*v=static_cast<uint32_t>(n);return c;}
 void NuklearEditorUi::ValueLabel(const char*l,const char*v){std::string s=std::string(l)+": "+v;Label(s.c_str());}
-bool NuklearEditorUi::CollapsingHeader(const char*l,bool d){return TreeNode(l,l,false,false,d);} bool NuklearEditorUi::TreeNode(const void*id,const char*l,bool selected,bool leaf,bool d){Layout();RecordNextWidgetBounds();std::string display=selected?std::string("> ")+l:l;bool open=nk_tree_push_hashed(CTX,NK_TREE_TAB,display.c_str(),d?NK_MAXIMIZED:NK_MINIMIZED,reinterpret_cast<const char*>(&id),sizeof(id),0)!=0;const struct nk_rect b=nk_rect(m_lastItemX,m_lastItemY,m_lastItemW,m_lastItemH);m_lastClicked=nk_input_is_mouse_click_in_rect(&CTX->input,NK_BUTTON_LEFT,b)!=0;if(leaf&&open){nk_tree_pop(CTX);return false;}return open;} void NuklearEditorUi::TreePop(){nk_tree_pop(CTX);}
+bool NuklearEditorUi::CollapsingHeader(const char* label,bool defaultOpen)
+{
+    const std::string key=m_currentWindow+'\x1f'+label;
+    auto [state,inserted]=m_collapsingHeaders.emplace(key,defaultOpen);
+    (void)inserted;
+    const std::string display=std::string(state->second?"[-] ":"[+] ")+label;
+    Layout();
+    RecordNextWidgetBounds();
+    m_lastClicked=!m_disabled&&nk_button_label(CTX,display.c_str())!=0;
+    if(m_lastClicked) state->second=!state->second;
+    return state->second;
+}
+bool NuklearEditorUi::TreeNode(const void* id,const char* label,bool selected,bool leaf,bool defaultOpen)
+{
+    Layout();
+    RecordNextWidgetBounds();
+    if(leaf)
+    {
+        int active=selected?1:0;
+        m_lastClicked=nk_selectable_label(CTX,label,NK_TEXT_LEFT,&active)!=0;
+        return false;
+    }
+    std::string display=selected?std::string("> ")+label:label;
+    const bool open=nk_tree_push_hashed(CTX,NK_TREE_TAB,display.c_str(),
+        defaultOpen?NK_MAXIMIZED:NK_MINIMIZED,
+        reinterpret_cast<const char*>(&id),sizeof(id),0)!=0;
+    const struct nk_rect bounds=nk_rect(m_lastItemX,m_lastItemY,m_lastItemW,m_lastItemH);
+    m_lastClicked=nk_input_is_mouse_click_in_rect(&CTX->input,NK_BUTTON_LEFT,bounds)!=0;
+    return open;
+}
+void NuklearEditorUi::TreePop(){nk_tree_pop(CTX);}
 bool NuklearEditorUi::Selectable(const char*l,bool s,bool){Layout();RecordNextWidgetBounds();int selected=s;m_lastClicked=nk_selectable_label(CTX,l,NK_TEXT_LEFT,&selected)!=0;return m_lastClicked;}
 bool NuklearEditorUi::BeginChild(const char*i){return nk_group_begin(CTX,i,NK_WINDOW_BORDER|NK_WINDOW_SCROLL_AUTO_HIDE)!=0;} void NuklearEditorUi::EndChild(){nk_group_end(CTX);}
 bool NuklearEditorUi::IsItemHovered()const{const struct nk_rect b=nk_rect(m_lastItemX,m_lastItemY,m_lastItemW,m_lastItemH);return nk_input_is_mouse_hovering_rect(&CTX->input,b)!=0;} bool NuklearEditorUi::IsItemClicked()const{return m_lastClicked;} bool NuklearEditorUi::IsItemDoubleClicked()const{const struct nk_rect b=nk_rect(m_lastItemX,m_lastItemY,m_lastItemW,m_lastItemH);return nk_input_is_mouse_click_in_rect(&CTX->input,NK_BUTTON_DOUBLE,b)!=0;}
 bool NuklearEditorUi::IsWindowBackgroundClicked()const{return false;} void NuklearEditorUi::SetClipboardText(const char*t){if(OpenClipboard(nullptr)){EmptyClipboard();size_t n=strlen(t)+1;HGLOBAL h=GlobalAlloc(GMEM_MOVEABLE,n);if(h){memcpy(GlobalLock(h),t,n);GlobalUnlock(h);SetClipboardData(CF_TEXT,h);}CloseClipboard();}} void NuklearEditorUi::ScrollToBottom(){}
-bool NuklearEditorUi::BeginTabBar(const char*){return true;}void NuklearEditorUi::EndTabBar(){}bool NuklearEditorUi::BeginTab(const char*l){return CollapsingHeader(l,false);}void NuklearEditorUi::EndTab(){TreePop();}
+bool NuklearEditorUi::BeginTabBar(const char*){return true;}void NuklearEditorUi::EndTabBar(){}bool NuklearEditorUi::BeginTab(const char*l){return TreeNode(l,l,false,false,false);}void NuklearEditorUi::EndTab(){TreePop();}
 void NuklearEditorUi::BeginDisabled(bool d){m_disabled=d;}void NuklearEditorUi::EndDisabled(){m_disabled=false;}
 bool NuklearEditorUi::Combo(const char*l,int*s,const char*const*i,int c){Layout();int old=*s;*s=nk_combo(CTX,i,c,*s,24,nk_vec2(240,200));return old!=*s;}void NuklearEditorUi::Tooltip(const char*){}void NuklearEditorUi::Progress(float f,const char*){Layout();nk_size v=static_cast<nk_size>(f*1000);nk_progress(CTX,&v,1000,NK_FIXED);}
 EditorUiViewportInput NuklearEditorUi::Viewport(void*tex,float aspect,EditorUiColor)

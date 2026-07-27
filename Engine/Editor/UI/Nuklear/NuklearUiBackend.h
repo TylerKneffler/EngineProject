@@ -48,4 +48,8 @@ private:
     NuklearEditorUi m_editorUi;
     IEditorPanel* m_activeLeftTab = nullptr;
     IEditorPanel* m_activeCenterTab = nullptr;
+    float m_leftDockFraction = 0.20f;
+    float m_rightDockFraction = 0.25f;
+    float m_bottomDockFraction = 0.24f;
+    int m_draggedSplitter = 0;
 };

@@ -7,7 +7,11 @@
 
 void PropertiesView::DrawPanel(IEditorUi& ui)
 {
-    ui.BeginWindow(m_title.c_str(), &m_open);
+    if (!ui.BeginWindow(m_title.c_str(), &m_open))
+    {
+        ui.EndWindow();
+        return;
+    }
     if (!m_selectedObject) { ui.DisabledLabel("No object selected"); ui.EndWindow(); return; }
     char name[256]; strncpy_s(name, m_selectedObject->name.c_str(), sizeof(name));
     if (ui.InputText("##name", name, sizeof(name))) m_selectedObject->name = name;

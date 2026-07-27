@@ -5,7 +5,11 @@
 
 void HierarchyView::DrawPanel(IEditorUi& ui)
 {
-    ui.BeginWindow(m_title.c_str(), &m_open);
+    if (!ui.BeginWindow(m_title.c_str(), &m_open))
+    {
+        ui.EndWindow();
+        return;
+    }
     if (!m_scene) { ui.DisabledLabel("No scene loaded"); ui.EndWindow(); return; }
     if (ui.TreeNode(this, "World", false, false, true))
     {

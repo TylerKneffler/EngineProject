@@ -318,11 +318,84 @@ void NuklearUiBackend::DrawEditor(EditorState& state, PlayState playState,
     const float width = static_cast<float>(m_renderer->GetWidth());
     const float height = static_cast<float>(m_renderer->GetHeight());
     constexpr float toolbarHeight = 76.f;
-    const float consoleHeight = std::max(150.f, height * 0.24f);
-    const float leftWidth = std::max(220.f, width * 0.20f);
-    const float rightWidth = std::max(260.f, width * 0.25f);
-    const float middleWidth = std::max(100.f, width - leftWidth - rightWidth);
-    const float workspaceHeight = std::max(100.f, height - toolbarHeight - consoleHeight);
+    constexpr float splitterSize = 6.f;
+    constexpr float minimumLeftWidth = 180.f;
+    constexpr float minimumCenterWidth = 240.f;
+    constexpr float minimumRightWidth = 220.f;
+    constexpr float minimumWorkspaceHeight = 180.f;
+    constexpr float minimumConsoleHeight = 120.f;
+
+    auto calculateDockSizes = [&]()
+    {
+        struct DockSizes
+        {
+            float left;
+            float center;
+            float right;
+            float workspace;
+            float console;
+        };
+
+        const float maximumLeft = std::max(minimumLeftWidth,
+            width - minimumCenterWidth - minimumRightWidth - splitterSize * 2.f);
+        const float left = std::clamp(width * m_leftDockFraction,
+            std::min(minimumLeftWidth, maximumLeft), maximumLeft);
+        const float maximumRight = std::max(minimumRightWidth,
+            width - left - minimumCenterWidth - splitterSize * 2.f);
+        const float right = std::clamp(width * m_rightDockFraction,
+            std::min(minimumRightWidth, maximumRight), maximumRight);
+        const float center = std::max(1.f,
+            width - left - right - splitterSize * 2.f);
+
+        const float usableHeight = std::max(1.f, height - toolbarHeight - splitterSize);
+        const float maximumConsole = std::max(minimumConsoleHeight,
+            usableHeight - minimumWorkspaceHeight);
+        const float console = std::clamp(height * m_bottomDockFraction,
+            std::min(minimumConsoleHeight, maximumConsole), maximumConsole);
+        const float workspace = std::max(1.f, usableHeight - console);
+        return DockSizes{left, center, right, workspace, console};
+    };
+
+    auto dock = calculateDockSizes();
+    const auto& mouse = m_context->input.mouse;
+    const struct nk_rect leftSplitter = nk_rect(
+        dock.left, toolbarHeight, splitterSize, dock.workspace);
+    const struct nk_rect rightSplitter = nk_rect(
+        dock.left + splitterSize + dock.center, toolbarHeight,
+        splitterSize, dock.workspace);
+    const struct nk_rect bottomSplitter = nk_rect(
+        0.f, toolbarHeight + dock.workspace, width, splitterSize);
+    if (mouse.buttons[NK_BUTTON_LEFT].clicked)
+    {
+        if (nk_input_is_mouse_hovering_rect(&m_context->input, leftSplitter))
+            m_draggedSplitter = 1;
+        else if (nk_input_is_mouse_hovering_rect(&m_context->input, rightSplitter))
+            m_draggedSplitter = 2;
+        else if (nk_input_is_mouse_hovering_rect(&m_context->input, bottomSplitter))
+            m_draggedSplitter = 3;
+    }
+    if (!mouse.buttons[NK_BUTTON_LEFT].down)
+        m_draggedSplitter = 0;
+    else if (m_draggedSplitter == 1)
+        m_leftDockFraction = std::clamp(mouse.pos.x / std::max(1.f, width), .10f, .55f);
+    else if (m_draggedSplitter == 2)
+        m_rightDockFraction = std::clamp((width - mouse.pos.x) / std::max(1.f, width), .10f, .55f);
+    else if (m_draggedSplitter == 3)
+        m_bottomDockFraction = std::clamp((height - mouse.pos.y) / std::max(1.f, height), .12f, .55f);
+    dock = calculateDockSizes();
+
+    auto drawSplitter = [&](const char* name, const struct nk_rect& bounds,
+                            const char* grip)
+    {
+        nk_window_set_bounds(m_context, name, bounds);
+        if (nk_begin(m_context, name, bounds,
+            NK_WINDOW_BORDER | NK_WINDOW_NO_SCROLLBAR))
+        {
+            nk_layout_row_dynamic(m_context, std::max(1.f, bounds.h - 4.f), 1);
+            nk_label(m_context, grip, NK_TEXT_CENTERED);
+        }
+        nk_end(m_context);
+    };
 
     const struct nk_rect toolbarBounds = nk_rect(0, 0, width, toolbarHeight);
     nk_window_set_bounds(m_context, "Editor Toolbar", toolbarBounds);
@@ -468,33 +541,42 @@ void NuklearUiBackend::DrawEditor(EditorState& state, PlayState playState,
     constexpr float tabHeight = 32.f;
     ensureActive(m_activeLeftTab, leftTabs);
     ensureActive(m_activeCenterTab, centerTabs);
-    drawTabs("Left Dock Tabs", 0.f, toolbarHeight, leftWidth, leftTabs, m_activeLeftTab);
-    drawTabs("Center Dock Tabs", leftWidth, toolbarHeight, middleWidth, centerTabs, m_activeCenterTab);
+    const float centerX = dock.left + splitterSize;
+    const float rightX = centerX + dock.center + splitterSize;
+    drawTabs("Left Dock Tabs", 0.f, toolbarHeight, dock.left, leftTabs, m_activeLeftTab);
+    drawTabs("Center Dock Tabs", centerX, toolbarHeight, dock.center, centerTabs, m_activeCenterTab);
 
     if (m_activeLeftTab)
     {
-        m_editorUi.SetNextWindowRect(0.f, toolbarHeight + tabHeight, leftWidth,
-                                     workspaceHeight - tabHeight);
+        m_editorUi.SetNextWindowRect(0.f, toolbarHeight + tabHeight, dock.left,
+                                     dock.workspace - tabHeight);
         m_activeLeftTab->DrawPanel(m_editorUi);
     }
     if (m_activeCenterTab)
     {
-        m_editorUi.SetNextWindowRect(leftWidth, toolbarHeight + tabHeight, middleWidth,
-                                     workspaceHeight - tabHeight);
+        m_editorUi.SetNextWindowRect(centerX, toolbarHeight + tabHeight, dock.center,
+                                     dock.workspace - tabHeight);
         m_activeCenterTab->DrawPanel(m_editorUi);
     }
     if (propertiesPanel)
     {
-        m_editorUi.SetNextWindowRect(leftWidth + middleWidth, toolbarHeight,
-                                     rightWidth, workspaceHeight);
+        m_editorUi.SetNextWindowRect(rightX, toolbarHeight,
+                                     dock.right, dock.workspace);
         propertiesPanel->DrawPanel(m_editorUi);
     }
     if (consolePanel)
     {
-        m_editorUi.SetNextWindowRect(0.f, toolbarHeight + workspaceHeight,
-                                     width, consoleHeight);
+        m_editorUi.SetNextWindowRect(0.f, toolbarHeight + dock.workspace + splitterSize,
+                                     width, dock.console);
         consolePanel->DrawPanel(m_editorUi);
     }
+
+    drawSplitter("Left Dock Splitter",
+        nk_rect(dock.left, toolbarHeight, splitterSize, dock.workspace), "|");
+    drawSplitter("Right Dock Splitter",
+        nk_rect(centerX + dock.center, toolbarHeight, splitterSize, dock.workspace), "|");
+    drawSplitter("Bottom Dock Splitter",
+        nk_rect(0.f, toolbarHeight + dock.workspace, width, splitterSize), "-");
 
     bool showPreferences = state.IsShowingPreferences();
     if (showPreferences && state.GetPreferences())
@@ -504,6 +586,33 @@ void NuklearUiBackend::DrawEditor(EditorState& state, PlayState playState,
         state.GetPreferences()->DrawWindow(m_editorUi, showPreferences);
         state.SetShowPreferences(showPreferences);
     }
+
+    // A Nuklear close button hides its nk_window immediately, but panel
+    // ownership lives in EditorState. Remove closed render views here so the
+    // next frame cannot select and draw a stale active tab again.
+    auto& panels = state.GetPanels();
+    ViewFactory* factory = state.GetViewFactory();
+    for (auto it = panels.begin(); it != panels.end();)
+    {
+        IEditorPanel* panel = it->get();
+        if (!panel || panel->IsOpen() || !panel->NeedsRender())
+        {
+            ++it;
+            continue;
+        }
+        if (m_activeLeftTab == panel) m_activeLeftTab = nullptr;
+        if (m_activeCenterTab == panel) m_activeCenterTab = nullptr;
+        if (auto* view = dynamic_cast<View*>(panel); view && factory)
+            factory->FreeSrvSlot(view->GetSrvSlotIndex());
+        if (factory) factory->NotifyPanelRemoved(panel);
+        it = panels.erase(it);
+    }
+
+    // Singleton utility panels remain owned while closed so EditorState's
+    // primary Console/Properties pointers stay valid. They are omitted from
+    // the dock vectors above and can be reopened from the Views menu.
+    if (m_activeLeftTab && !m_activeLeftTab->IsOpen()) m_activeLeftTab = nullptr;
+    if (m_activeCenterTab && !m_activeCenterTab->IsOpen()) m_activeCenterTab = nullptr;
 }
 
 void NuklearUiBackend::DrawHierarchy(EditorState& state, float x, float y, float w, float h)

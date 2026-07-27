@@ -34,7 +34,11 @@ void SceneView::Init(void* device,
 void SceneView::DrawPanel(IEditorUi& ui)
 {
     // Remove inner padding so the texture fills the panel edge-to-edge.
-    ui.BeginWindow(m_title.c_str(), &m_open, true);
+    if (!ui.BeginWindow(m_title.c_str(), &m_open, true))
+    {
+        ui.EndWindow();
+        return;
+    }
 
     float panDX = 0.f, panDY = 0.f;
     float orbitDX = 0.f, orbitDY = 0.f;

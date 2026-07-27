@@ -18,7 +18,11 @@ void AssetsExplorerView::Init(const std::string& assetsPath)
 // ---------------------------------------------------------------------------
 void AssetsExplorerView::DrawPanel(IEditorUi& ui)
 {
-    ui.BeginWindow(m_title.c_str(), &m_open);
+    if (!ui.BeginWindow(m_title.c_str(), &m_open))
+    {
+        ui.EndWindow();
+        return;
+    }
 
     if (m_assetsPath.empty())
     {
