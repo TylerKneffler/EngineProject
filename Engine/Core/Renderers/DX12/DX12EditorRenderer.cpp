@@ -27,38 +27,8 @@ bool DX12EditorRenderer::Init(void* hwnd, uint32_t width, uint32_t height)
         CreateRTVHeap();
         CreateRenderTargets();
 
-        // ---- Create root signature ----
-        // Simple root signature with one constant buffer view (for MVP matrix, colors, etc.)
-        D3D12_ROOT_PARAMETER rootParam{};
-        rootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-        rootParam.Descriptor.ShaderRegister = 0;  // b0
-        rootParam.Descriptor.RegisterSpace = 0;
-        rootParam.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
-        D3D12_ROOT_SIGNATURE_DESC rootSigDesc{};
-        rootSigDesc.NumParameters = 1;
-        rootSigDesc.pParameters = &rootParam;
-        rootSigDesc.NumStaticSamplers = 0;
-        rootSigDesc.pStaticSamplers = nullptr;
-        rootSigDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
-
-        ComPtr<ID3DBlob> signature;
-        ComPtr<ID3DBlob> error;
-        HRESULT hr = D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1,
-            &signature, &error);
-        if (FAILED(hr))
-        {
-            if (error)
-            {
-                std::string errorMsg = "Failed to serialize root signature: ";
-                errorMsg += static_cast<const char*>(error->GetBufferPointer());
-                throw std::runtime_error(errorMsg);
-            }
-            ThrowIfFailed(hr);
-        }
-
-        ThrowIfFailed(m_device->CreateRootSignature(0, signature->GetBufferPointer(),
-            signature->GetBufferSize(), IID_PPV_ARGS(&m_rootSignature)));
+        // Object materials use b0 plus five glTF texture slots (t0-t4).
+        m_rootSignature = CreateD3D12MaterialRootSignature(m_device.Get());
 
         // ---- Graphics provider ----
         // Initialize the graphics provider for shader compilation, buffer creation, etc.

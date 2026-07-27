@@ -2,6 +2,7 @@
 #include "Core/Compoonents/Camera.h"
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Compoonents/Material.h"
+#include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Compoonents/Transform.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Graphics/IGraphicsProvider.h"
@@ -43,7 +44,7 @@ struct CBData
     glm::vec4 diffuseColor;
     glm::vec4 ambientColor;
     glm::vec4 specularColor;
-    glm::vec4 padding;  // Constant-buffer allocation uses a 256-byte stride.
+    glm::vec4 materialParams; // metallic, roughness, normal scale, texture mask
 };
 
 // Constant buffer for grid rendering
@@ -220,6 +221,8 @@ void Scene::BuildObjectPipeline()
     {
         { "POSITION", 0, 6, 0,  0, false },   // DXGI_FORMAT_R32G32B32_FLOAT = 6
         { "NORMAL",   0, 6, 0, 12, false },   // DXGI_FORMAT_R32G32B32_FLOAT = 6, offset 12
+        { "TEXCOORD", 0, 16, 0, 24, false },  // DXGI_FORMAT_R32G32_FLOAT = 16
+        { "TANGENT",  0, 2, 0, 32, false },   // DXGI_FORMAT_R32G32B32A32_FLOAT = 2
     };
 
     // Build pipeline state using fluent API
@@ -238,7 +241,7 @@ void Scene::BuildObjectPipeline()
         .SetDepthEnable(true)
         .SetDepthWriteEnable(true)
         .SetDepthFunc(1)                       // D3D12_COMPARISON_FUNC_LESS (0-indexed: 1)
-        .SetInputLayout(layout, 2)             // 2 elements: POSITION, NORMAL
+        .SetInputLayout(layout, 4)
         .SetPrimitiveTopology(IPipelineStateBuilder::PrimitiveTopology::TriangleList)
         .SetRenderTargetFormat(28, 40)         // DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_D32_FLOAT
         .Build();
@@ -314,15 +317,44 @@ void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverri
 
         if (mat)
         {
-            cbData.diffuseColor = { mat->diffuseColor.r, mat->diffuseColor.g, mat->diffuseColor.b, 1.f };
+            mat->PrepareTextures(m_graphicsProvider);
+            uint32_t textureFlags = 0;
+            auto bindTexture = [&](uint32_t textureSlot,
+                                   const std::shared_ptr<Texture>& texture,
+                                   uint32_t flag)
+            {
+                const IGraphicsTexture* graphicsTexture =
+                    texture ? texture->GetGraphicsTexture() : nullptr;
+                context->SetTexture(textureSlot, graphicsTexture);
+                if (graphicsTexture)
+                    textureFlags |= flag;
+            };
+            bindTexture(0, mat->baseColorTexture, 1u);
+            bindTexture(1, mat->metallicRoughnessTexture, 2u);
+            bindTexture(2, mat->normalTexture, 4u);
+            bindTexture(3, mat->occlusionTexture, 8u);
+            bindTexture(4, mat->emissiveTexture, 16u);
+
+            cbData.diffuseColor = {
+                mat->diffuseColor.r, mat->diffuseColor.g, mat->diffuseColor.b,
+                mat->baseColorAlpha
+            };
             cbData.ambientColor = { mat->ambientColor.r, mat->ambientColor.g, mat->ambientColor.b, 1.f };
-            cbData.specularColor = { mat->specularColor.r, mat->specularColor.g, mat->specularColor.b, mat->shininess };
+            cbData.specularColor = {
+                mat->emissiveColor.r, mat->emissiveColor.g, mat->emissiveColor.b,
+                mat->occlusionStrength
+            };
+            cbData.materialParams = {
+                mat->metallicFactor, mat->roughnessFactor, mat->normalScale,
+                static_cast<float>(textureFlags)
+            };
         }
         else
         {
             cbData.diffuseColor = { 0.8f, 0.8f, 0.8f, 1.f };
             cbData.ambientColor = { 0.1f, 0.1f, 0.1f, 1.f };
             cbData.specularColor = { 1.f, 1.f, 1.f, 32.f };
+            cbData.materialParams = { 0.f, 1.f, 1.f, 0.f };
         }
 
         // Write to constant buffer
@@ -430,9 +462,37 @@ Object* Scene::AddObject(const std::string& name)
 
 void Scene::RemoveObject(Object* obj)
 {
+    if (!obj)
+        return;
+
+    std::vector<Object*> objectsToRemove;
+    std::function<void(Object*)> collect = [&](Object* current)
+    {
+        if (!current)
+            return;
+        objectsToRemove.push_back(current);
+        for (Object* child : current->Children)
+            collect(child);
+    };
+    collect(obj);
+
+    if (obj->Parent)
+    {
+        auto& siblings = obj->Parent->Children;
+        siblings.erase(std::remove(siblings.begin(), siblings.end(), obj), siblings.end());
+        obj->Parent = nullptr;
+    }
+    if (m_selectedObject &&
+        std::find(objectsToRemove.begin(), objectsToRemove.end(), m_selectedObject) != objectsToRemove.end())
+        m_selectedObject = nullptr;
+
     m_objects.erase(
         std::remove_if(m_objects.begin(), m_objects.end(),
-            [obj](const std::unique_ptr<Object>& p) { return p.get() == obj; }),
+            [&](const std::unique_ptr<Object>& p)
+            {
+                return std::find(objectsToRemove.begin(), objectsToRemove.end(), p.get()) !=
+                    objectsToRemove.end();
+            }),
         m_objects.end());
 }
 

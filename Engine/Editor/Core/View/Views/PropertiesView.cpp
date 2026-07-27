@@ -15,6 +15,10 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
     if (!m_selectedObject) { ui.DisabledLabel("No object selected"); ui.EndWindow(); return; }
     char name[256]; strncpy_s(name, m_selectedObject->name.c_str(), sizeof(name));
     if (ui.InputText("##name", name, sizeof(name))) m_selectedObject->name = name;
+    if (m_selectedObject->Prefab)
+        ui.ValueLabel("Prefab", m_selectedObject->Prefab->GetPath().c_str());
+    else
+        ui.DisabledLabel("Scene-only object");
     ui.Separator(); DrawTransform(ui); DrawMesh(ui); DrawMaterial(ui); DrawCamera(ui); ui.EndWindow();
 }
 
@@ -25,7 +29,7 @@ void PropertiesView::DrawTransform(IEditorUi& ui)
 }
 void PropertiesView::DrawMesh(IEditorUi& ui)
 {
-    Mesh* m=m_selectedObject->GetComponent<Mesh>();if(!m)return;if(ui.CollapsingHeader("Mesh")){std::string count=std::to_string(m->GetVertexCount());ui.ValueLabel("Vertices",count.c_str());ui.ValueLabel("Ready",m->IsReady()?"Yes":"No");}
+    Mesh* m=m_selectedObject->GetComponent<Mesh>();if(!m)return;if(ui.CollapsingHeader("Mesh")){ui.ValueLabel("Asset",m->GetFilePath().c_str());std::string count=std::to_string(m->GetVertexCount());ui.ValueLabel("Vertices",count.c_str());ui.ValueLabel("Ready",m->IsReady()?"Yes":"No");}
 }
 void PropertiesView::DrawMaterial(IEditorUi& ui)
 {

@@ -1,6 +1,7 @@
 #include "pch.h"
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "VulkanPipelineStateBuilder.h"
+#include "Core/Compoonents/Mesh.h"
 #include <cstring>
 
 VulkanPipelineState::~VulkanPipelineState()
@@ -51,13 +52,21 @@ IPipelineStateBuilder& VulkanPipelineStateBuilder::SetInputLayout(const VertexEl
         VkVertexInputAttributeDescription attribute{};
         attribute.location = i;
         attribute.binding = elements[i].inputSlot;
-        attribute.format = elements[i].format == 6 ? VK_FORMAT_R32G32B32_SFLOAT
-                                                   : static_cast<VkFormat>(elements[i].format);
+        switch (elements[i].format)
+        {
+        case 2:  attribute.format = VK_FORMAT_R32G32B32A32_SFLOAT; break;
+        case 6:  attribute.format = VK_FORMAT_R32G32B32_SFLOAT; break;
+        case 16: attribute.format = VK_FORMAT_R32G32_SFLOAT; break;
+        default:
+            throw std::runtime_error(
+                "Unsupported cross-API vertex format " +
+                std::to_string(elements[i].format));
+        }
         attribute.offset = elements[i].alignedByteOffset;
         m_attributes.push_back(attribute);
     }
-    // The current engine uses one POSITION/NORMAL stream of float3 values.
-    for (auto& binding : m_bindings) binding.stride = 24;
+    // POSITION/NORMAL plus imported UV and tangent data.
+    for (auto& binding : m_bindings) binding.stride = sizeof(Vertex);
     return *this;
 }
 
@@ -114,6 +123,8 @@ std::unique_ptr<IPipelineState> VulkanPipelineStateBuilder::Build()
         dynamic.dynamicStateCount = ARRAYSIZE(states); dynamic.pDynamicStates = states;
         VkPushConstantRange push{}; push.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT; push.size = 128;
         VkPipelineLayoutCreateInfo layoutInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+        layoutInfo.setLayoutCount = m_materialLayout ? 1u : 0u;
+        layoutInfo.pSetLayouts = m_materialLayout ? &m_materialLayout : nullptr;
         layoutInfo.pushConstantRangeCount = 1; layoutInfo.pPushConstantRanges = &push;
         VkPipelineLayout layout = VK_NULL_HANDLE;
         VkCheck(vkCreatePipelineLayout(m_device, &layoutInfo, nullptr, &layout), "vkCreatePipelineLayout");

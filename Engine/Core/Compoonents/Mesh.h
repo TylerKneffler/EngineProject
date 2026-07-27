@@ -9,6 +9,8 @@ struct Vertex
 {
     float pos[3];
     float normal[3];
+    float uv[2];
+    float tangent[4];
 };
 
 class Mesh : public Component
@@ -19,6 +21,7 @@ public:
 
     // Load vertex data from a triangulated OBJ file (CPU side only).
     void LoadFromFile(const std::string& path);
+    static bool SaveNativeFile(const std::string& path, const std::vector<Vertex>& vertices);
 
     // Create a graphics buffer from loaded vertex data.
     // bufferFactory: creates GPU vertex buffers (API-agnostic)

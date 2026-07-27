@@ -49,6 +49,12 @@ public:
     virtual bool IsItemClicked() const = 0;
     virtual bool IsItemDoubleClicked() const = 0;
     virtual bool IsWindowBackgroundClicked() const = 0;
+    virtual bool BeginDragDropSource() = 0;
+    virtual void SetDragDropPayload(const char* type, const void* data, size_t size) = 0;
+    virtual void EndDragDropSource() = 0;
+    virtual bool BeginDragDropTarget() = 0;
+    virtual const void* AcceptDragDropPayload(const char* type, size_t* size = nullptr) = 0;
+    virtual void EndDragDropTarget() = 0;
     virtual void SetClipboardText(const char* text) = 0;
     virtual void ScrollToBottom() = 0;
     virtual bool BeginTabBar(const char* id) = 0;

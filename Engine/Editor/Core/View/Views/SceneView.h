@@ -41,6 +41,7 @@ public:
     // aspect ratio settings, captures mouse input, and drives the
     // scene's editorCamera with orbit / pan / zoom.
     void DrawPanel(IEditorUi& ui) override;
+    std::function<void(const std::string&)> OnAssetDropped;
 
 private:
     void ApplyCameraControls(float panDX, float panDY,

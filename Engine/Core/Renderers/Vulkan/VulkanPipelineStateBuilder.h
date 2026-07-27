@@ -22,8 +22,11 @@ private:
 class VulkanPipelineStateBuilder : public IPipelineStateBuilder
 {
 public:
-    VulkanPipelineStateBuilder(VkDevice device, VkRenderPass renderPass)
-        : m_device(device), m_renderPass(renderPass) {}
+    VulkanPipelineStateBuilder(
+        VkDevice device,
+        VkRenderPass renderPass,
+        VkDescriptorSetLayout materialLayout)
+        : m_device(device), m_renderPass(renderPass), m_materialLayout(materialLayout) {}
     IPipelineStateBuilder& SetVertexShader(const IShader* shader) override;
     IPipelineStateBuilder& SetPixelShader(const IShader* shader) override;
     IPipelineStateBuilder& SetFillMode(bool wireframe) override;
@@ -51,6 +54,7 @@ private:
     static VkCompareOp Compare(int value);
     VkDevice m_device;
     VkRenderPass m_renderPass;
+    VkDescriptorSetLayout m_materialLayout;
     std::vector<uint8_t> m_vs;
     std::vector<uint8_t> m_ps;
     std::vector<VkVertexInputBindingDescription> m_bindings;
@@ -75,12 +79,19 @@ private:
 class VulkanPipelineStateFactory : public IPipelineStateFactory
 {
 public:
-    VulkanPipelineStateFactory(VkDevice device, VkRenderPass renderPass)
-        : m_device(device), m_renderPass(renderPass) {}
+    VulkanPipelineStateFactory(
+        VkDevice device,
+        VkRenderPass renderPass,
+        VkDescriptorSetLayout materialLayout)
+        : m_device(device), m_renderPass(renderPass), m_materialLayout(materialLayout) {}
     std::unique_ptr<IPipelineStateBuilder> CreateBuilder() override
-    { return std::make_unique<VulkanPipelineStateBuilder>(m_device, m_renderPass); }
+    {
+        return std::make_unique<VulkanPipelineStateBuilder>(
+            m_device, m_renderPass, m_materialLayout);
+    }
 private:
     VkDevice m_device;
     VkRenderPass m_renderPass;
+    VkDescriptorSetLayout m_materialLayout;
 };
 #endif

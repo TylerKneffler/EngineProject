@@ -13,6 +13,7 @@ public:
     void SetConstantBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint64_t offset = 0) override;
     void SetVertexBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset = 0) override;
     void SetIndexBuffer(const IGraphicsBuffer* buffer, uint32_t indexCount, uint64_t offset = 0) override;
+    void SetTexture(uint32_t slot, const IGraphicsTexture* texture) override;
     void SetViewport(const Viewport& vp) override;
     void SetScissorRect(const ScissorRect& rect) override;
     void Clear(float r, float g, float b, float a, float depth = 1.0f) override;
@@ -30,6 +31,7 @@ private:
     ID3D11Device* m_device = nullptr;
     ID3D11DeviceContext* m_context = nullptr;
     std::array<Microsoft::WRL::ComPtr<ID3D11Buffer>, CONSTANT_BUFFER_SLOTS> m_constantBuffers;
+    Microsoft::WRL::ComPtr<ID3D11SamplerState> m_materialSampler;
 };
 
 class D3D11GraphicsContextFactory : public IGraphicsContextFactory

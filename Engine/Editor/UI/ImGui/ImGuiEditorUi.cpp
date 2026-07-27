@@ -24,6 +24,12 @@ bool ImGuiEditorUi::BeginChild(const char*i){return ImGui::BeginChild(i,{0,0},fa
 bool ImGuiEditorUi::IsItemHovered()const{return ImGui::IsItemHovered();} bool ImGuiEditorUi::IsItemClicked()const{return ImGui::IsItemClicked()&&!ImGui::IsItemToggledOpen();}
 bool ImGuiEditorUi::IsItemDoubleClicked()const{return ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);}
 bool ImGuiEditorUi::IsWindowBackgroundClicked()const{return ImGui::IsMouseClicked(ImGuiMouseButton_Left)&&ImGui::IsWindowHovered()&&!ImGui::IsAnyItemHovered();}
+bool ImGuiEditorUi::BeginDragDropSource(){return ImGui::BeginDragDropSource();}
+void ImGuiEditorUi::SetDragDropPayload(const char*t,const void*d,size_t s){ImGui::SetDragDropPayload(t,d,s);}
+void ImGuiEditorUi::EndDragDropSource(){ImGui::EndDragDropSource();}
+bool ImGuiEditorUi::BeginDragDropTarget(){return ImGui::BeginDragDropTarget();}
+const void* ImGuiEditorUi::AcceptDragDropPayload(const char*t,size_t*s){const ImGuiPayload*p=ImGui::AcceptDragDropPayload(t);if(!p)return nullptr;if(s)*s=static_cast<size_t>(p->DataSize);return p->Data;}
+void ImGuiEditorUi::EndDragDropTarget(){ImGui::EndDragDropTarget();}
 void ImGuiEditorUi::SetClipboardText(const char*t){ImGui::SetClipboardText(t);} void ImGuiEditorUi::ScrollToBottom(){ImGui::SetScrollHereY(1.f);}
 bool ImGuiEditorUi::BeginTabBar(const char*i){return ImGui::BeginTabBar(i);} void ImGuiEditorUi::EndTabBar(){ImGui::EndTabBar();}
 bool ImGuiEditorUi::BeginTab(const char*l){return ImGui::BeginTabItem(l);} void ImGuiEditorUi::EndTab(){ImGui::EndTabItem();}

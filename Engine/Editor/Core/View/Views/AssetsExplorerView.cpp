@@ -1,7 +1,12 @@
 #include "AssetsExplorerView.h"
 #include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Object.h"
+#include "Core/Serialization/SceneSerializer.h"
 #include <filesystem>
 #include <shellapi.h>
+#include <commdlg.h>
+
+#pragma comment(lib, "Comdlg32.lib")
 
 namespace fs = std::filesystem;
 
@@ -38,6 +43,17 @@ void AssetsExplorerView::DrawPanel(IEditorUi& ui)
         ui.EndWindow();
         return;
     }
+
+    if (ui.Button("Import .obj"))
+        ImportObj();
+    ui.SameLine();
+    if (ui.Button("Import glTF"))
+        ImportGltf();
+
+    ui.Selectable("Assets", m_selectedPath == m_assetsPath);
+    if (ui.IsItemClicked())
+        m_selectedPath = m_assetsPath;
+    AcceptSceneObject(ui, m_assetsPath);
 
     DrawDirectoryTree(ui, m_assetsPath);
 
@@ -81,6 +97,7 @@ bool AssetsExplorerView::DrawDirectoryTree(IEditorUi& ui, const std::string& pat
                                               m_selectedPath == entryPath, false, true);
                 if (ui.IsItemClicked())
                     m_selectedPath = entryPath;
+                AcceptSceneObject(ui, entryPath);
                 if (open)
                 {
                     if (DrawDirectoryTree(ui, entryPath))
@@ -104,6 +121,13 @@ bool AssetsExplorerView::DrawDirectoryTree(IEditorUi& ui, const std::string& pat
                         return true;
                     }
                 }
+                if (ui.BeginDragDropSource())
+                {
+                    ui.SetDragDropPayload("ENGINE_ASSET_PATH",
+                        entryPath.c_str(), entryPath.size() + 1);
+                    ui.Label(fileName.c_str());
+                    ui.EndDragDropSource();
+                }
             }
         }
     }
@@ -114,6 +138,104 @@ bool AssetsExplorerView::DrawDirectoryTree(IEditorUi& ui, const std::string& pat
     }
 
     return false;
+}
+
+std::string AssetsExplorerView::CurrentDirectory() const
+{
+    if (m_selectedPath.empty())
+        return m_assetsPath;
+    const fs::path selected(m_selectedPath);
+    return fs::is_directory(selected) ? selected.string() : selected.parent_path().string();
+}
+
+bool AssetsExplorerView::AcceptSceneObject(IEditorUi& ui, const std::string& directory)
+{
+    if (!ui.BeginDragDropTarget())
+        return false;
+
+    size_t size = 0;
+    const void* data = ui.AcceptDragDropPayload("ENGINE_SCENE_OBJECT", &size);
+    bool created = false;
+    if (data && size == sizeof(Object*))
+    {
+        Object* object = *static_cast<Object* const*>(data);
+        if (object && object->Prefab)
+        {
+            m_selectedPath = object->Prefab->GetPath();
+        }
+        else if (object)
+        {
+            std::string base = object->name.empty() ? "Prefab" : object->name;
+            for (char& c : base)
+                if (c == '<' || c == '>' || c == ':' || c == '"' || c == '/' ||
+                    c == '\\' || c == '|' || c == '?' || c == '*')
+                    c = '_';
+
+            fs::path destination = fs::path(directory) / (base + ".prefab");
+            for (unsigned suffix = 2; fs::exists(destination); ++suffix)
+                destination = fs::path(directory) /
+                    (base + " " + std::to_string(suffix) + ".prefab");
+
+            if (SceneSerializer::SavePrefab(*object, destination.string()))
+            {
+                object->SetPrefab(destination.string());
+                m_selectedPath = destination.string();
+                created = true;
+                if (OnPrefabCreated)
+                    OnPrefabCreated(object, destination.string());
+            }
+        }
+    }
+    ui.EndDragDropTarget();
+    return created;
+}
+
+void AssetsExplorerView::ImportObj()
+{
+    wchar_t source[MAX_PATH] = {};
+    OPENFILENAMEW dialog{};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.lpstrFile = source;
+    dialog.nMaxFile = MAX_PATH;
+    dialog.lpstrFilter = L"Wavefront OBJ (*.obj)\0*.obj\0All files\0*.*\0";
+    dialog.nFilterIndex = 1;
+    dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+    if (!GetOpenFileNameW(&dialog))
+        return;
+
+    fs::path from(source);
+    fs::path destination = fs::path(CurrentDirectory()) / from.filename();
+    const std::string stem = destination.stem().string();
+    const std::string extension = destination.extension().string();
+    for (unsigned suffix = 2; fs::exists(destination); ++suffix)
+        destination = destination.parent_path() /
+            (stem + " " + std::to_string(suffix) + extension);
+
+    std::error_code error;
+    fs::copy_file(from, destination, fs::copy_options::none, error);
+    if (!error)
+    {
+        m_selectedPath = destination.string();
+        if (OnAssetImported)
+            OnAssetImported(destination.string());
+    }
+}
+
+void AssetsExplorerView::ImportGltf()
+{
+    wchar_t source[MAX_PATH] = {};
+    OPENFILENAMEW dialog{};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.lpstrFile = source;
+    dialog.nMaxFile = MAX_PATH;
+    dialog.lpstrFilter =
+        L"glTF Models (*.gltf;*.glb)\0*.gltf;*.glb\0"
+        L"glTF JSON (*.gltf)\0*.gltf\0"
+        L"Binary glTF (*.glb)\0*.glb\0";
+    dialog.nFilterIndex = 1;
+    dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+    if (GetOpenFileNameW(&dialog) && OnGltfImportRequested)
+        OnGltfImportRequested(fs::path(source).string());
 }
 
 // ---------------------------------------------------------------------------

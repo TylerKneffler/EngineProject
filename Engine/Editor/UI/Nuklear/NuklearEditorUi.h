@@ -3,6 +3,7 @@
 #include "Engine/Editor/UI/Nuklear/Windows/NuklearWindowController.h"
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 class NuklearEditorUi final : public IEditorUi
 {
@@ -21,6 +22,8 @@ public:
     void ValueLabel(const char*,const char*) override; bool CollapsingHeader(const char*,bool) override; bool TreeNode(const void*,const char*,bool,bool,bool) override; void TreePop() override;
     bool Selectable(const char*,bool,bool) override; bool BeginChild(const char*) override; void EndChild() override; bool IsItemHovered()const override; bool IsItemClicked()const override;
     bool IsItemDoubleClicked()const override; bool IsWindowBackgroundClicked()const override; void SetClipboardText(const char*) override; void ScrollToBottom() override;
+    bool BeginDragDropSource() override; void SetDragDropPayload(const char*,const void*,size_t) override; void EndDragDropSource() override;
+    bool BeginDragDropTarget() override; const void* AcceptDragDropPayload(const char*,size_t*) override; void EndDragDropTarget() override;
     bool BeginTabBar(const char*) override; void EndTabBar() override; bool BeginTab(const char*) override; void EndTab() override; void BeginDisabled(bool) override; void EndDisabled() override;
     bool Combo(const char*,int*,const char*const*,int) override; void Tooltip(const char*) override; void Progress(float,const char*) override;
     EditorUiViewportInput Viewport(void*,float,EditorUiColor) override; void FocusWindow(const char*) override;
@@ -29,6 +32,9 @@ private:
     void RecordNextWidgetBounds();
     void* m_context=nullptr; bool m_lastClicked=false; bool m_disabled=false;
     float m_lastItemX=0.f,m_lastItemY=0.f,m_lastItemW=0.f,m_lastItemH=0.f;
+    bool m_dragPayloadDelivered=false;
+    std::string m_dragPayloadType;
+    std::vector<unsigned char> m_dragPayload;
     NuklearWindowController m_window;
     std::unordered_map<std::string, bool> m_collapsingHeaders;
 };

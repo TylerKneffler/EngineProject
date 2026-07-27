@@ -2,16 +2,21 @@
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "Core/Graphics/IGraphicsContext.h"
 #include "VulkanCommon.h"
+#include "VulkanGraphicsTexture.h"
 
 class VulkanPipelineState;
 class VulkanGraphicsContext : public IGraphicsContext
 {
 public:
-    explicit VulkanGraphicsContext(VkCommandBuffer commandBuffer) : m_commandBuffer(commandBuffer) {}
+    VulkanGraphicsContext(
+        VkCommandBuffer commandBuffer,
+        std::shared_ptr<VulkanTextureSystem> textureSystem)
+        : m_commandBuffer(commandBuffer), m_textureSystem(std::move(textureSystem)) {}
     void SetPipeline(const IPipelineState* pipeline) override;
     void SetConstantBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint64_t offset = 0) override;
     void SetVertexBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset = 0) override;
     void SetIndexBuffer(const IGraphicsBuffer* buffer, uint32_t indexCount, uint64_t offset = 0) override;
+    void SetTexture(uint32_t slot, const IGraphicsTexture* texture) override;
     void SetViewport(const Viewport& viewport) override;
     void SetScissorRect(const ScissorRect& rect) override;
     void Clear(float, float, float, float, float = 1.0f) override {}
@@ -23,6 +28,8 @@ public:
 private:
     VkCommandBuffer m_commandBuffer;
     const VulkanPipelineState* m_pipeline = nullptr;
+    std::shared_ptr<VulkanTextureSystem> m_textureSystem;
+    std::array<const VulkanGraphicsTexture*, 5> m_textures{};
 };
 
 class VulkanGraphicsContextFactory : public IGraphicsContextFactory
@@ -31,8 +38,15 @@ public:
     void SetCommandBuffer(void* commandBuffer) override
     { m_commandBuffer = reinterpret_cast<VkCommandBuffer>(commandBuffer); }
     std::unique_ptr<IGraphicsContext> CreateContext() override
-    { return m_commandBuffer ? std::make_unique<VulkanGraphicsContext>(m_commandBuffer) : nullptr; }
+    {
+        return m_commandBuffer
+            ? std::make_unique<VulkanGraphicsContext>(m_commandBuffer, m_textureSystem)
+            : nullptr;
+    }
+    void SetTextureSystem(std::shared_ptr<VulkanTextureSystem> textureSystem)
+    { m_textureSystem = std::move(textureSystem); }
 private:
     VkCommandBuffer m_commandBuffer = VK_NULL_HANDLE;
+    std::shared_ptr<VulkanTextureSystem> m_textureSystem;
 };
 #endif

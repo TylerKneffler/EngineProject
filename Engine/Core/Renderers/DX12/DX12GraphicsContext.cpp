@@ -2,6 +2,7 @@
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Graphics/IPipelineState.h"
 #include "DX12GraphicsBuffer.h"
+#include "DX12GraphicsTexture.h"
 #include <stdexcept>
 
 // ---------------------------------------------------------------------------
@@ -70,6 +71,18 @@ void D3D12GraphicsContext::SetIndexBuffer(const IGraphicsBuffer* buffer, uint32_
 
     m_cmdList->IASetIndexBuffer(&ibv);
     m_indexCount = indexCount;
+}
+
+void D3D12GraphicsContext::SetTexture(uint32_t slot, const IGraphicsTexture* texture)
+{
+    if (!m_cmdList || slot >= 5)
+        return;
+    const auto* nativeTexture = dynamic_cast<const D3D12GraphicsTexture*>(texture);
+    if (!nativeTexture)
+        return;
+    ID3D12DescriptorHeap* heaps[] = { nativeTexture->GetHeap() };
+    m_cmdList->SetDescriptorHeaps(1, heaps);
+    m_cmdList->SetGraphicsRootDescriptorTable(slot + 1, nativeTexture->GetGpuHandle());
 }
 
 void D3D12GraphicsContext::SetViewport(const Viewport& vp)

@@ -58,6 +58,8 @@ static JsonValue SerialiseObject(const Object& obj)
 {
     JsonValue node = JsonValue::MakeObject();
     node.Set("name", JsonValue(obj.name));
+    if (obj.Prefab)
+        node.Set("prefab", JsonValue(obj.Prefab->GetPath()));
 
     // Transform
     JsonValue tf = JsonValue::MakeObject();
@@ -160,6 +162,8 @@ static bool DeserialiseScene(Scene& scene, const JsonValue& root,
     {
         if (node.Has("name"))
             obj.name = node["name"].AsString();
+        if (node.Has("prefab"))
+            obj.SetPrefab(node["prefab"].AsString());
 
         // Transform
         const JsonValue& tf = node["transform"];
@@ -241,5 +245,94 @@ bool SceneSerializer::Load(Scene& scene, const std::string& path, IGraphicsProvi
         OutputDebugStringA((std::string("[SceneSerializer] Failed to load '") + path +
             "': " + error.what() + "\n").c_str());
         return false;
+    }
+}
+
+bool SceneSerializer::SavePrefab(const Object& object, const std::string& path)
+{
+    JsonValue root = JsonValue::MakeObject();
+    root.Set("version", JsonValue(1));
+    root.Set("type", JsonValue(std::string("prefab")));
+    root.Set("object", SerialiseObject(object));
+
+    std::ofstream file(path);
+    if (!file)
+        return false;
+    file << JsonWrite(root);
+    return file.good();
+}
+
+Object* SceneSerializer::InstantiatePrefab(
+    Scene& scene,
+    const std::string& path,
+    IGraphicsProvider* graphicsProvider)
+{
+    EnsureBuiltinsRegistered();
+    Object* rootObject = nullptr;
+    try
+    {
+        const JsonValue root = JsonParseFile(path);
+        if (!root.IsObject() || root["version"].AsInt() != 1 ||
+            root["type"].AsString() != "prefab" || !root["object"].IsObject())
+            return nullptr;
+
+        IGraphicsBufferFactory* bufferFactory = graphicsProvider
+            ? graphicsProvider->GetBufferFactory()
+            : nullptr;
+
+        std::function<void(Object&, const JsonValue&)> instantiate =
+            [&](Object& object, const JsonValue& node)
+        {
+            if (node.Has("name"))
+                object.name = node["name"].AsString();
+
+            const JsonValue& transform = node["transform"];
+            if (transform.IsObject())
+            {
+                object.transform.position = GlmFrom(transform["position"]);
+                object.transform.rotation = GlmFrom(transform["rotation"]);
+                object.transform.scale = GlmFrom(transform["scale"], { 1.f, 1.f, 1.f });
+            }
+
+            const JsonValue& components = node["components"];
+            for (std::size_t i = 0; i < components.ArraySize(); ++i)
+            {
+                const JsonValue& componentNode = components.ArrayAt(i);
+                const std::string type = componentNode["type"].AsString();
+                auto factory = GetRegistry().find(type);
+                if (factory == GetRegistry().end())
+                    continue;
+
+                Component* component = factory->second();
+                component->Owner = &object;
+                component->Deserialize(componentNode);
+                object.Components.push_back(component);
+                if (bufferFactory)
+                    if (Mesh* mesh = dynamic_cast<Mesh*>(component))
+                        mesh->CreateBuffer(bufferFactory);
+            }
+
+            const JsonValue& children = node["children"];
+            for (std::size_t i = 0; i < children.ArraySize(); ++i)
+            {
+                Object* child = scene.AddObject();
+                child->Parent = &object;
+                object.Children.push_back(child);
+                instantiate(*child, children.ArrayAt(i));
+            }
+        };
+
+        rootObject = scene.AddObject();
+        instantiate(*rootObject, root["object"]);
+        rootObject->SetPrefab(path);
+        return rootObject;
+    }
+    catch (const std::exception& error)
+    {
+        if (rootObject)
+            scene.RemoveObject(rootObject);
+        OutputDebugStringA((std::string("[SceneSerializer] Failed to instantiate prefab '") +
+            path + "': " + error.what() + "\n").c_str());
+        return nullptr;
     }
 }

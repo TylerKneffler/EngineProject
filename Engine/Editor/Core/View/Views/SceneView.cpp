@@ -49,6 +49,18 @@ void SceneView::DrawPanel(IEditorUi& ui)
          static_cast<float>(m_gameWindowWidth) / static_cast<float>(m_gameWindowHeight));
     const auto input = ui.Viewport(GetUiTextureHandle(), targetAspect,
         {m_letterboxColor.r,m_letterboxColor.g,m_letterboxColor.b,m_letterboxColor.a});
+    if (ui.BeginDragDropTarget())
+    {
+        size_t payloadSize = 0;
+        const void* payload = ui.AcceptDragDropPayload("ENGINE_ASSET_PATH", &payloadSize);
+        if (payload && payloadSize > 0 && OnAssetDropped)
+        {
+            const char* path = static_cast<const char*>(payload);
+            if (path[payloadSize - 1] == '\0')
+                OnAssetDropped(path);
+        }
+        ui.EndDragDropTarget();
+    }
     EditorUiVec2 size = input.available;
     if (size.x > 0.f && size.y > 0.f)
     {

@@ -2,6 +2,7 @@
 #include "DX11GraphicsContext.h"
 #include "DX11GraphicsBuffer.h"
 #include "DX11PipelineStateBuilder.h"
+#include "DX11GraphicsTexture.h"
 #include <algorithm>
 #include <cstring>
 
@@ -71,6 +72,29 @@ void D3D11GraphicsContext::SetIndexBuffer(const IGraphicsBuffer* buffer, uint32_
     const auto* nativeBuffer = dynamic_cast<const D3D11GraphicsBuffer*>(buffer);
     if (nativeBuffer)
         m_context->IASetIndexBuffer(nativeBuffer->GetBuffer(), DXGI_FORMAT_R32_UINT, static_cast<UINT>(offset));
+}
+
+void D3D11GraphicsContext::SetTexture(uint32_t slot, const IGraphicsTexture* texture)
+{
+    if (!m_device || !m_context || slot >= D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT)
+        return;
+    const auto* nativeTexture = dynamic_cast<const D3D11GraphicsTexture*>(texture);
+    ID3D11ShaderResourceView* view = nativeTexture ? nativeTexture->GetView() : nullptr;
+    m_context->PSSetShaderResources(slot, 1, &view);
+
+    if (!m_materialSampler)
+    {
+        D3D11_SAMPLER_DESC desc{};
+        desc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+        desc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
+        desc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
+        desc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+        desc.MaxLOD = D3D11_FLOAT32_MAX;
+        if (FAILED(m_device->CreateSamplerState(&desc, &m_materialSampler)))
+            return;
+    }
+    ID3D11SamplerState* sampler = m_materialSampler.Get();
+    m_context->PSSetSamplers(0, 1, &sampler);
 }
 
 void D3D11GraphicsContext::SetViewport(const Viewport& value)

@@ -4,6 +4,7 @@
 #include "DX11GraphicsBuffer.h"
 #include "DX11PipelineStateBuilder.h"
 #include "DX11GraphicsContext.h"
+#include "DX11GraphicsTexture.h"
 
 class D3D11GraphicsProvider : public IGraphicsProvider
 {
@@ -13,10 +14,12 @@ public:
     IGraphicsBufferFactory* GetBufferFactory() override { return m_bufferFactory.get(); }
     IPipelineStateFactory* GetPipelineStateFactory() override { return m_pipelineFactory.get(); }
     IGraphicsContextFactory* GetContextFactory() override { return m_contextFactory.get(); }
+    IGraphicsTextureFactory* GetTextureFactory() override { return m_textureFactory.get(); }
 
 private:
     D3D11ShaderCompiler m_shaderCompiler;
     std::unique_ptr<D3D11BufferFactory> m_bufferFactory;
     std::unique_ptr<D3D11PipelineStateFactory> m_pipelineFactory;
     std::unique_ptr<D3D11GraphicsContextFactory> m_contextFactory;
+    std::unique_ptr<D3D11TextureFactory> m_textureFactory;
 };

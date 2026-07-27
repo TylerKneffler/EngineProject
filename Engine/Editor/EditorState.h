@@ -65,6 +65,8 @@ public:
 private:
     void InitializePanels();
     void WireupCallbacks();
+    Object* InstantiateAsset(const std::string& path);
+    void SelectObject(Object* object);
 
     // Core objects
     std::unique_ptr<Window> m_window;

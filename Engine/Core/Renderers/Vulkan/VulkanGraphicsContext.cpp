@@ -37,6 +37,12 @@ void VulkanGraphicsContext::SetIndexBuffer(const IGraphicsBuffer* buffer, uint32
     if (vkBuffer) vkCmdBindIndexBuffer(m_commandBuffer, vkBuffer->GetBuffer(), offset, VK_INDEX_TYPE_UINT32);
 }
 
+void VulkanGraphicsContext::SetTexture(uint32_t slot, const IGraphicsTexture* texture)
+{
+    if (slot < m_textures.size())
+        m_textures[slot] = dynamic_cast<const VulkanGraphicsTexture*>(texture);
+}
+
 void VulkanGraphicsContext::SetViewport(const Viewport& value)
 {
     VkViewport viewport{ value.x, value.y + value.height, value.width, -value.height, value.minDepth, value.maxDepth };
@@ -50,8 +56,34 @@ void VulkanGraphicsContext::SetScissorRect(const ScissorRect& value)
 }
 
 void VulkanGraphicsContext::DrawInstanced(uint32_t vertices, uint32_t instances, uint32_t firstVertex, uint32_t firstInstance)
-{ vkCmdDraw(m_commandBuffer, vertices, instances, firstVertex, firstInstance); }
+{
+    try
+    {
+        if (m_textureSystem && m_pipeline)
+            m_textureSystem->Bind(m_commandBuffer, m_pipeline->GetLayout(), m_textures);
+    }
+    catch (const std::exception& error)
+    {
+        OutputDebugStringA((std::string("[Vulkan] Material binding failed: ") +
+            error.what() + "\n").c_str());
+        return;
+    }
+    vkCmdDraw(m_commandBuffer, vertices, instances, firstVertex, firstInstance);
+}
 void VulkanGraphicsContext::DrawIndexedInstanced(uint32_t indices, uint32_t instances, uint32_t firstIndex, int32_t vertexOffset, uint32_t firstInstance)
-{ vkCmdDrawIndexed(m_commandBuffer, indices, instances, firstIndex, vertexOffset, firstInstance); }
+{
+    try
+    {
+        if (m_textureSystem && m_pipeline)
+            m_textureSystem->Bind(m_commandBuffer, m_pipeline->GetLayout(), m_textures);
+    }
+    catch (const std::exception& error)
+    {
+        OutputDebugStringA((std::string("[Vulkan] Material binding failed: ") +
+            error.what() + "\n").c_str());
+        return;
+    }
+    vkCmdDrawIndexed(m_commandBuffer, indices, instances, firstIndex, vertexOffset, firstInstance);
+}
 void VulkanGraphicsContext::TransitionResource(void*, ResourceState, ResourceState) {}
 #endif

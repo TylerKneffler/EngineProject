@@ -3,6 +3,7 @@
 #include <cstdint>
 #include "IPipelineState.h"
 #include "IGraphicsBuffer.h"
+#include "IGraphicsTexture.h"
 
 // ---------------------------------------------------------------------------
 // IGraphicsContext — Rendering command recorder
@@ -37,6 +38,10 @@ public:
 
     // Index buffer binding
     virtual void SetIndexBuffer(const IGraphicsBuffer* buffer, uint32_t indexCount, uint64_t offset = 0) = 0;
+
+    // Pixel-shader texture binding (t0, t1, ...). Backends without sampled
+    // texture support may retain the default no-op.
+    virtual void SetTexture(uint32_t, const IGraphicsTexture*) {}
 
     // Viewport and scissor
     struct Viewport

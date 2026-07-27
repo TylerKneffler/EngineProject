@@ -133,6 +133,7 @@ private:
     ComPtr<ID3D12CommandQueue>        m_commandQueue;
     ComPtr<ID3D12CommandAllocator>    m_commandAllocators[FRAME_COUNT];
     ComPtr<ID3D12GraphicsCommandList> m_commandList;
+    ComPtr<ID3D12RootSignature>       m_rootSignature;
 
     // -- Render targets --
     // m_rtvHeap          : Descriptor heap holding one RTV slot per back-buffer.

@@ -3,6 +3,8 @@
 #include <functional>
 #include "View/IEditorPanel.h"
 
+class Object;
+
 // ---------------------------------------------------------------------------
 // AssetsExplorerView
 //
@@ -29,6 +31,9 @@ public:
 
     // Callback when a scene file is requested to load
     std::function<void(const std::string&)> OnSceneRequested;
+    std::function<void(Object*, const std::string&)> OnPrefabCreated;
+    std::function<void(const std::string&)> OnAssetImported;
+    std::function<void(const std::string&)> OnGltfImportRequested;
 
 private:
     // Recursively draws the directory tree starting from the given path
@@ -37,6 +42,10 @@ private:
 
     // Opens a file with the system's default application (unless it's a scene file)
     void OpenFile(const std::string& filePath);
+    void ImportObj();
+    void ImportGltf();
+    bool AcceptSceneObject(IEditorUi& ui, const std::string& directory);
+    std::string CurrentDirectory() const;
 
     std::string m_assetsPath;
     std::string m_selectedPath;

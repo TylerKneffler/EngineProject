@@ -11,6 +11,9 @@
 
 namespace
 {
+constexpr uint32_t kNativeMeshMagic = 0x4853454d; // "MESH"
+constexpr uint32_t kNativeMeshVersion = 2;
+
 std::filesystem::path ResolveMeshPath(const std::string& path)
 {
     const std::filesystem::path requested(path);
@@ -52,6 +55,24 @@ void Mesh::LoadFromFile(const std::string& path)
 {
     m_filePath = path;  // store for serialization
     const std::filesystem::path resolvedPath = ResolveMeshPath(path);
+    if (resolvedPath.extension() == ".mesh")
+    {
+        std::ifstream native(resolvedPath, std::ios::binary);
+        uint32_t magic = 0, version = 0, count = 0;
+        native.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+        native.read(reinterpret_cast<char*>(&version), sizeof(version));
+        native.read(reinterpret_cast<char*>(&count), sizeof(count));
+        if (!native || magic != kNativeMeshMagic || version != kNativeMeshVersion)
+            throw std::runtime_error("Mesh: invalid native mesh: " + path);
+        m_vertices.resize(count);
+        native.read(reinterpret_cast<char*>(m_vertices.data()),
+            static_cast<std::streamsize>(m_vertices.size() * sizeof(Vertex)));
+        if (!native)
+            throw std::runtime_error("Mesh: truncated native mesh: " + path);
+        m_ready = false;
+        return;
+    }
+
     std::ifstream file(resolvedPath);
     if (!file.is_open())
         throw std::runtime_error("Mesh: failed to open OBJ: " + path +
@@ -97,6 +118,20 @@ void Mesh::LoadFromFile(const std::string& path)
     }
 
     m_ready = false;
+}
+
+bool Mesh::SaveNativeFile(const std::string& path, const std::vector<Vertex>& vertices)
+{
+    std::ofstream file(path, std::ios::binary);
+    if (!file)
+        return false;
+    const uint32_t count = static_cast<uint32_t>(vertices.size());
+    file.write(reinterpret_cast<const char*>(&kNativeMeshMagic), sizeof(kNativeMeshMagic));
+    file.write(reinterpret_cast<const char*>(&kNativeMeshVersion), sizeof(kNativeMeshVersion));
+    file.write(reinterpret_cast<const char*>(&count), sizeof(count));
+    file.write(reinterpret_cast<const char*>(vertices.data()),
+        static_cast<std::streamsize>(vertices.size() * sizeof(Vertex)));
+    return file.good();
 }
 
 #pragma region DX12 buffer creation and rendering

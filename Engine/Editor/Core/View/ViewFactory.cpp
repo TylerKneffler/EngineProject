@@ -90,6 +90,7 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
         view->SetViewBackend(m_renderer->CreateViewBackend());
         view->SetTitle("Scene " + std::to_string(++m_sceneCount));
         view->Init(deviceHandle, w, h, cpu, gpu, slot, m_scene, m_settings);
+        view->OnAssetDropped = OnAssetDropped;
         return view;
     }
 
@@ -135,6 +136,9 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
         view->Init(m_settings.assetsDirectory);
         if (OnSceneRequested)
             view->OnSceneRequested = OnSceneRequested;
+        view->OnPrefabCreated = OnPrefabCreated;
+        view->OnAssetImported = OnAssetImported;
+        view->OnGltfImportRequested = OnGltfImportRequested;
         m_singletonInstances[typeName] = view.get();
         return view;
     }

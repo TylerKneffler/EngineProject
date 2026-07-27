@@ -4,6 +4,7 @@
 #include <algorithm>
 #include "Core/component.h"         
 #include "Core/Compoonents/Transform.h"
+#include "Core/Assets/PrefabAsset.h"
 
 class Scene; // forward declaration
 
@@ -21,6 +22,10 @@ public:
     std::vector<Object*> Children;
     std::list<Component*> Components;
     Scene*              OwnerScene = nullptr;  // Set by Scene when object is added
+    std::shared_ptr<const PrefabAsset> Prefab; // null for scene-only objects
+
+    bool IsPrefabInstance() const { return static_cast<bool>(Prefab); }
+    void SetPrefab(const std::string& path) { Prefab = PrefabAsset::Acquire(path); }
 
     // Lifecycle methods
     virtual void Enabled();

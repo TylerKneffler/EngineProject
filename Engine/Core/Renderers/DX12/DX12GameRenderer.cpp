@@ -50,10 +50,12 @@ bool DX12GameRenderer::Init(void* hwnd, uint32_t width, uint32_t height)
         CreateRTVHeap();
         CreateRenderTargets();
 
+        m_rootSignature = CreateD3D12MaterialRootSignature(m_device.Get());
+
         // ---- Graphics provider ----
         // Initialize the graphics provider for shader compilation, buffer creation, etc.
         m_graphicsProvider = std::make_unique<D3D12GraphicsProvider>(
-            m_device.Get(), m_commandQueue.Get(), nullptr);
+            m_device.Get(), m_commandQueue.Get(), m_rootSignature.Get());
 
     // ---- Fence ----
     // A fence is a GPU/CPU synchronisation primitive. The GPU signals the fence

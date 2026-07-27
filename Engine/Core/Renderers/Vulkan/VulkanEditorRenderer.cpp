@@ -17,7 +17,8 @@ bool VulkanEditorRenderer::Init(void* hwnd, uint32_t width, uint32_t height)
         if (!m_core.Init(static_cast<HWND>(hwnd), width, height, false)) return false;
         m_viewContext = { m_core.GetPhysicalDevice(), m_core.GetDevice(), m_core.GetOffscreenRenderPass() };
         m_provider = std::make_unique<VulkanGraphicsProvider>(
-            m_core.GetPhysicalDevice(), m_core.GetDevice(), m_core.GetOffscreenRenderPass());
+            m_core.GetPhysicalDevice(), m_core.GetDevice(), m_core.GetOffscreenRenderPass(),
+            m_core.GetQueue(), m_core.GetQueueFamily());
         for (uint32_t i = MAX_SRV_SLOTS - 1; i > 0; --i) m_freeSlots.push_back(i);
         return true;
     }
@@ -35,6 +36,8 @@ void VulkanEditorRenderer::Clear(float r, float g, float b, float a)
 
 void VulkanEditorRenderer::RenderIfNeeded(std::function<void()> drawFn)
 {
+    try
+    {
     if (!m_dirty) return;
     m_dirty = false; m_commandBuffer = m_core.BeginFrame();
     if (!m_commandBuffer) { m_dirty = true; return; }
@@ -49,6 +52,14 @@ void VulkanEditorRenderer::RenderIfNeeded(std::function<void()> drawFn)
     vkCmdEndRenderPass(m_commandBuffer);
     if (m_uiHooks.endFrame) m_uiHooks.endFrame();
     m_core.EndFrame(); m_commandBuffer = VK_NULL_HANDLE;
+    }
+    catch (const std::exception& error)
+    {
+        OutputDebugStringA((std::string("[VulkanEditorRenderer] Frame failed: ") +
+            error.what() + "\n").c_str());
+        m_commandBuffer = VK_NULL_HANDLE;
+        m_dirty = false;
+    }
 }
 
 std::pair<std::pair<void*, void*>, uint32_t> VulkanEditorRenderer::AllocateSrvSlot()

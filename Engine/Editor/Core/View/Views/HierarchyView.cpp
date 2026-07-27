@@ -30,9 +30,17 @@ void HierarchyView::SetSelectedObject(Object* obj)
 void HierarchyView::DrawObjectNode(IEditorUi& ui, Object* obj)
 {
     const bool hasChildren = !obj->Children.empty();
-    const char* label = obj->name.empty() ? "(unnamed)" : obj->name.c_str();
-    const bool open = ui.TreeNode(obj, label, obj == m_selectedObject, !hasChildren);
+    const std::string label = (obj->name.empty() ? "(unnamed)" : obj->name) +
+        (obj->IsPrefabInstance() ? " [Prefab]" : "");
+    const bool open = ui.TreeNode(obj, label.c_str(), obj == m_selectedObject, !hasChildren);
     if (ui.IsItemClicked()) SetSelectedObject(obj);
     if (ui.IsItemDoubleClicked()) { SetSelectedObject(obj); if (OnFocusObject) OnFocusObject(obj); }
+    if (ui.BeginDragDropSource())
+    {
+        Object* payload = obj;
+        ui.SetDragDropPayload("ENGINE_SCENE_OBJECT", &payload, sizeof(payload));
+        ui.Label(label.c_str());
+        ui.EndDragDropSource();
+    }
     if (open && hasChildren) { for (Object* child : obj->Children) DrawObjectNode(ui, child); ui.TreePop(); }
 }

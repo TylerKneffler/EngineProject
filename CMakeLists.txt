@@ -210,6 +210,20 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(pugixml)
 
 # ---------------------------------------------------------------------------
+# fastgltf — editor-time glTF/GLB import
+# ---------------------------------------------------------------------------
+set(FASTGLTF_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+set(FASTGLTF_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(FASTGLTF_ENABLE_DOCS OFF CACHE BOOL "" FORCE)
+set(FASTGLTF_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    fastgltf
+    GIT_REPOSITORY https://github.com/spnda/fastgltf.git
+    GIT_TAG        v0.9.0
+)
+FetchContent_MakeAvailable(fastgltf)
+
+# ---------------------------------------------------------------------------
 
 # Engine — static library
 # ---------------------------------------------------------------------------
@@ -232,6 +246,7 @@ target_link_libraries(Engine PUBLIC
     d3d11.lib 
     d2d1.lib 
     dwrite.lib
+    windowscodecs.lib
     glm::glm
     pugixml
 )
@@ -318,7 +333,7 @@ if(ENGINE_PROJECT_DIR)
     source_group(TREE "${ENGINE_PROJECT_DIR}" PREFIX "Project" FILES
         ${ASSET_SOURCES} ${PROJECT_BROWSE_FILES} ${PROJECT_ROOT_FILES})
 endif()
-target_link_libraries(Editor PRIVATE Engine ImGui shell32.lib ole32.lib comdlg32.lib)
+target_link_libraries(Editor PRIVATE Engine ImGui fastgltf::fastgltf shell32.lib ole32.lib comdlg32.lib)
 target_precompile_headers(Editor REUSE_FROM Engine)
 target_include_directories(Editor PRIVATE
     ${ENGINE_ROOT}/Engine

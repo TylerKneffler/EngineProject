@@ -7,7 +7,8 @@ bool VulkanGameRenderer::Init(void* hwnd, uint32_t width, uint32_t height)
     m_width = width; m_height = height;
     if (!m_core.Init(static_cast<HWND>(hwnd), width, height, true)) return false;
     m_provider = std::make_unique<VulkanGraphicsProvider>(
-        m_core.GetPhysicalDevice(), m_core.GetDevice(), m_core.GetMainRenderPass());
+        m_core.GetPhysicalDevice(), m_core.GetDevice(), m_core.GetMainRenderPass(),
+        m_core.GetQueue(), m_core.GetQueueFamily());
     return true;
 }
 
@@ -48,5 +49,11 @@ void VulkanGameRenderer::EndFrame()
 }
 
 std::unique_ptr<IGraphicsContext> VulkanGameRenderer::CreateFrameGraphicsContext()
-{ return m_commandBuffer ? std::make_unique<VulkanGraphicsContext>(m_commandBuffer) : nullptr; }
+{
+    if (!m_commandBuffer || !m_provider)
+        return nullptr;
+    auto* factory = m_provider->GetContextFactory();
+    factory->SetCommandBuffer(reinterpret_cast<void*>(m_commandBuffer));
+    return factory->CreateContext();
+}
 #endif

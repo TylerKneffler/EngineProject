@@ -19,6 +19,8 @@ public:
     bool Selectable(const char*, bool, bool) override; bool BeginChild(const char*) override; void EndChild() override;
     bool IsItemHovered() const override; bool IsItemClicked() const override;
     bool IsItemDoubleClicked() const override; bool IsWindowBackgroundClicked() const override;
+    bool BeginDragDropSource() override; void SetDragDropPayload(const char*,const void*,size_t) override; void EndDragDropSource() override;
+    bool BeginDragDropTarget() override; const void* AcceptDragDropPayload(const char*,size_t*) override; void EndDragDropTarget() override;
     void SetClipboardText(const char*) override; void ScrollToBottom() override;
     bool BeginTabBar(const char*) override; void EndTabBar() override;
     bool BeginTab(const char*) override; void EndTab() override;

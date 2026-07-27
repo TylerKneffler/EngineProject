@@ -9,7 +9,14 @@
 #include "Core/Window.h"
 #include "Core/Renderers/RendererFactory.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Serialization/SceneSerializer.h"
+#include "Core/Compoonents/Mesh.h"
+#include "Core/Compoonents/Material.h"
+#include "Core/Graphics/IGraphicsProvider.h"
+#include "Core/Assets/GltfImporter.h"
 #include <chrono>
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 
@@ -356,6 +363,127 @@ void EditorState::WireupCallbacks()
         if (m_scene)
             m_scene->FocusEditorCamera(obj);
     };
+
+    m_viewFactory->OnAssetDropped = [this](const std::string& path) {
+        SelectObject(InstantiateAsset(path));
+    };
+
+    m_viewFactory->OnPrefabCreated = [this](Object*, const std::string& path) {
+        m_hasUnsavedChanges = true;
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Info, "Prefab created: " + path);
+    };
+
+    m_viewFactory->OnAssetImported = [this](const std::string& path) {
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Info, "Asset imported: " + path);
+    };
+
+    m_viewFactory->OnGltfImportRequested = [this](const std::string& path) {
+        const std::string assetsDirectory = m_projectSettings.assetsDirectory.empty()
+            ? std::string("Assets")
+            : m_projectSettings.assetsDirectory;
+        const GltfImportResult imported = GltfImporter::Import(path, assetsDirectory);
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(
+                imported.success ? ConsoleView::Level::Info : ConsoleView::Level::Error,
+                imported.success
+                    ? "glTF imported: " + imported.prefabPath
+                    : "glTF import failed: " + imported.message);
+    };
+
+    if (m_window)
+        m_window->OnFilesDropped = [this](const std::vector<std::string>& paths) {
+            Object* lastObject = nullptr;
+            for (const std::string& path : paths)
+                if (Object* object = InstantiateAsset(path))
+                    lastObject = object;
+            SelectObject(lastObject);
+        };
+}
+
+Object* EditorState::InstantiateAsset(const std::string& path)
+{
+    if (!m_scene)
+        return nullptr;
+
+    std::string extension = std::filesystem::path(path).extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    Object* object = nullptr;
+    try
+    {
+        if (extension == ".gltf" || extension == ".glb")
+        {
+            const std::string assetsDirectory = m_projectSettings.assetsDirectory.empty()
+                ? std::string("Assets")
+                : m_projectSettings.assetsDirectory;
+            const GltfImportResult imported = GltfImporter::Import(path, assetsDirectory);
+            if (!imported.success)
+                throw std::runtime_error(imported.message);
+            object = SceneSerializer::InstantiatePrefab(
+                *m_scene, imported.prefabPath, m_scene->GetGraphicsProvider());
+        }
+        else if (extension == ".prefab")
+        {
+            object = SceneSerializer::InstantiatePrefab(
+                *m_scene, path, m_scene->GetGraphicsProvider());
+        }
+        else if (extension == ".obj")
+        {
+            object = m_scene->AddObject(std::filesystem::path(path).stem().string());
+            Mesh* mesh = object->AddComponent<Mesh>();
+            mesh->LoadFromFile(path);
+            if (m_scene->GetGraphicsProvider())
+                mesh->CreateBuffer(m_scene->GetGraphicsProvider()->GetBufferFactory());
+            object->AddComponent<Material>();
+        }
+        else if (extension == ".scene")
+        {
+            LoadScene(path);
+            return nullptr;
+        }
+        else
+        {
+            if (m_primaryConsole)
+                m_primaryConsole->AddLog(ConsoleView::Level::Warning,
+                    "Unsupported scene drop: " + path);
+            return nullptr;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        if (object)
+            m_scene->RemoveObject(object);
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                "Could not instantiate asset '" + path + "': " + error.what());
+        return nullptr;
+    }
+
+    if (object)
+    {
+        m_hasUnsavedChanges = true;
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Info,
+                "Added to scene: " + path);
+    }
+    return object;
+}
+
+void EditorState::SelectObject(Object* object)
+{
+    if (!object)
+        return;
+    for (auto& panel : m_panels)
+        if (auto* hierarchy = dynamic_cast<HierarchyView*>(panel.get()))
+        {
+            hierarchy->SetSelectedObject(object);
+            break;
+        }
+    if (m_primaryProperties)
+        m_primaryProperties->SetSelectedObject(object);
 }
 
 // ---------------------------------------------------------------------------

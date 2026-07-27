@@ -4,6 +4,7 @@
 #include "DX12GraphicsBuffer.h"
 #include "DX12PipelineStateBuilder.h"
 #include "DX12GraphicsContext.h"
+#include "DX12GraphicsTexture.h"
 #include <memory>
 #include <d3d12.h>
 
@@ -25,10 +26,15 @@ public:
     IGraphicsBufferFactory* GetBufferFactory() override { return m_bufferFactory.get(); }
     IPipelineStateFactory* GetPipelineStateFactory() override { return m_pipelineFactory.get(); }
     IGraphicsContextFactory* GetContextFactory() override { return m_contextFactory.get(); }
+    IGraphicsTextureFactory* GetTextureFactory() override { return m_textureFactory.get(); }
 
 private:
     std::unique_ptr<D3D12ShaderCompiler> m_shaderCompiler;
     std::unique_ptr<D3D12BufferFactory> m_bufferFactory;
     std::unique_ptr<D3D12PipelineStateFactory> m_pipelineFactory;
     std::unique_ptr<D3D12GraphicsContextFactory> m_contextFactory;
+    std::unique_ptr<D3D12TextureFactory> m_textureFactory;
 };
+
+Microsoft::WRL::ComPtr<ID3D12RootSignature>
+CreateD3D12MaterialRootSignature(ID3D12Device* device);

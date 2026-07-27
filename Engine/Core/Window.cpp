@@ -1,4 +1,5 @@
 #include "Window.h"
+#include <shellapi.h>
 
 // ---------------------------------------------------------------------------
 // Instance forwarding via GWLP_USERDATA
@@ -72,6 +73,8 @@ Window::Window(HINSTANCE hInstance, const wchar_t* title, uint32_t width, uint32
 
     if (!m_hwnd)
         throw std::runtime_error("Failed to create window.");
+
+    DragAcceptFiles(m_hwnd, TRUE);
 
     // Note: We do NOT call ShowWindow here. The window will be shown after
     // the caller has wired up all callbacks (OnUpdate, OnResize, WndProcHook).
@@ -209,6 +212,26 @@ LRESULT CALLBACK Window::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         }
     }
     
+    if (self && msg == WM_DROPFILES)
+    {
+        HDROP drop = reinterpret_cast<HDROP>(wParam);
+        const UINT count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+        std::vector<std::string> paths;
+        paths.reserve(count);
+        for (UINT i = 0; i < count; ++i)
+        {
+            const UINT length = DragQueryFileW(drop, i, nullptr, 0);
+            std::wstring path(length + 1, L'\0');
+            DragQueryFileW(drop, i, path.data(), length + 1);
+            path.resize(length);
+            paths.push_back(std::filesystem::path(path).string());
+        }
+        DragFinish(drop);
+        if (self->OnFilesDropped)
+            self->OnFilesDropped(paths);
+        return 0;
+    }
+
     if (self && self->WndProcHook)
         if (self->WndProcHook(hwnd, msg, wParam, lParam))
             return true;

@@ -75,6 +75,7 @@ public:
     std::function<void()> OnInputBegin;
     std::function<void()> OnInputEnd;
     std::function<void(uint32_t w, uint32_t h)> OnResize;
+    std::function<void(const std::vector<std::string>&)> OnFilesDropped;
     std::function<bool(HWND, UINT, WPARAM, LPARAM)> WndProcHook;
 
     HWND     GetHWND()   const { return m_hwnd; }

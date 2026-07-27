@@ -8,6 +8,7 @@
 #include "Engine/Editor/GameBuildManager.h"
 #include "Engine/Editor/ProjectLauncher.h"
 #include "Engine/Editor/UI/IEditorUiBackend.h"
+#include "Engine/Editor/Core/Assets/GltfImporter.h"
 #include <filesystem>
 #include <fstream>
 #include <shellapi.h>
@@ -98,6 +99,28 @@ int WINAPI wWinMain(
 {
     HRESULT comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     WriteStartupLog("Editor startup", true);
+
+    // Headless importer entry point used by automation and project tooling.
+    // Editor.exe --import-gltf <source.gltf|source.glb> <Assets directory>
+    {
+        int argumentCount = 0;
+        LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
+        if (arguments && argumentCount >= 4 &&
+            std::wstring(arguments[1]) == L"--import-gltf")
+        {
+            const GltfImportResult imported = GltfImporter::Import(
+                std::filesystem::path(arguments[2]).string(),
+                std::filesystem::path(arguments[3]).string());
+            WriteStartupLog(imported.success
+                ? "glTF imported: " + imported.prefabPath
+                : "glTF import failed: " + imported.message);
+            LocalFree(arguments);
+            if (SUCCEEDED(comResult)) CoUninitialize();
+            return imported.success ? 0 : 1;
+        }
+        if (arguments)
+            LocalFree(arguments);
+    }
 
     auto resolveProject = []() -> std::string
     {

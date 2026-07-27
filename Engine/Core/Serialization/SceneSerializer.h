@@ -4,6 +4,7 @@
 #include <functional>
 
 class Scene;
+class Object;
 class Component;
 class IGraphicsProvider;
 
@@ -53,6 +54,10 @@ public:
     // Pass a graphics provider so that Mesh GPU buffers are created after load.
     // Returns false if the file cannot be read or has an unsupported format.
     static bool Load(Scene& scene, const std::string& path, IGraphicsProvider* graphicsProvider = nullptr);
+
+    static bool SavePrefab(const Object& object, const std::string& path);
+    static Object* InstantiatePrefab(Scene& scene, const std::string& path,
+        IGraphicsProvider* graphicsProvider = nullptr);
 
     // Called internally; exposed so Scene::Load can invoke it.
     static void EnsureBuiltinsRegistered();
