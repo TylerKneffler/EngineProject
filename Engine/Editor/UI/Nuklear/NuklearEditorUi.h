@@ -1,13 +1,17 @@
 #pragma once
 #include "Engine/Editor/UI/IEditorUi.h"
+#include "Engine/Editor/UI/Nuklear/Windows/NuklearWindowController.h"
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 
 class NuklearEditorUi final : public IEditorUi
 {
 public:
-    void SetContext(void* context) { m_context = context; }
+    void SetContext(void* context)
+    {
+        m_context = context;
+        m_window.SetContext(static_cast<struct nk_context*>(context));
+    }
     void SetNextWindowRect(float,float,float,float) override;
     bool BeginWindow(const char*,bool*,bool) override; void EndWindow() override;
     bool Button(const char*,float,float) override; void Label(const char*) override; void DisabledLabel(const char*) override; void ColoredLabel(const char*,EditorUiColor) override;
@@ -23,9 +27,8 @@ public:
 private:
     void Layout(float height=24.f);
     void RecordNextWidgetBounds();
-    void* m_context=nullptr; float m_x=0,m_y=0,m_w=400,m_h=300; bool m_lastClicked=false; bool m_disabled=false; bool m_windowBegun=false; bool m_hasNextWindowRect=false;
+    void* m_context=nullptr; bool m_lastClicked=false; bool m_disabled=false;
     float m_lastItemX=0.f,m_lastItemY=0.f,m_lastItemW=0.f,m_lastItemH=0.f;
-    std::string m_currentWindow;
+    NuklearWindowController m_window;
     std::unordered_map<std::string, bool> m_collapsingHeaders;
-    std::unordered_set<std::string> m_closedWindows;
 };

@@ -13,47 +13,9 @@
 #define CTX static_cast<nk_context*>(m_context)
 void NuklearEditorUi::Layout(float h){nk_layout_row_dynamic(CTX,h,1);}
 void NuklearEditorUi::RecordNextWidgetBounds(){const struct nk_rect b=nk_widget_bounds(CTX);m_lastItemX=b.x;m_lastItemY=b.y;m_lastItemW=b.w;m_lastItemH=b.h;}
-void NuklearEditorUi::SetNextWindowRect(float x,float y,float w,float h){m_x=x;m_y=y;m_w=w;m_h=h;m_hasNextWindowRect=true;}
-bool NuklearEditorUi::BeginWindow(const char* title, bool* open, bool)
-{
-    m_windowBegun = false;
-    m_currentWindow.clear();
-    if (open && !*open) return false;
-    const auto closed = m_closedWindows.find(title);
-    if (closed != m_closedWindows.end())
-    {
-        nk_window_show(CTX, title, NK_SHOWN);
-        m_closedWindows.erase(closed);
-    }
-    const struct nk_rect bounds = nk_rect(m_x, m_y, m_w, m_h);
-    // Editor panels live in backend-managed dock slots. Applying the slot
-    // rectangle every frame prevents a moved/scaled Nuklear window from
-    // drifting away from its tab strip or overlapping adjacent panels.
-    if (m_hasNextWindowRect)
-        nk_window_set_bounds(CTX, title, bounds);
-    m_hasNextWindowRect = false;
-    nk_flags flags = NK_WINDOW_BORDER | NK_WINDOW_TITLE |
-                     NK_WINDOW_SCROLL_AUTO_HIDE;
-    if (open) flags |= NK_WINDOW_CLOSABLE;
-    const bool visible = nk_begin(CTX, title, bounds, flags) != 0;
-    m_windowBegun = true;
-    m_currentWindow = title;
-    if (open && nk_window_is_closed(CTX, title))
-    {
-        *open = false;
-        m_closedWindows.emplace(title);
-    }
-    return visible && (!open || *open);
-}
-void NuklearEditorUi::EndWindow()
-{
-    if (m_windowBegun)
-    {
-        nk_end(CTX);
-        m_windowBegun = false;
-        m_currentWindow.clear();
-    }
-}
+void NuklearEditorUi::SetNextWindowRect(float x,float y,float w,float h){m_window.SetNextRect(x,y,w,h);}
+bool NuklearEditorUi::BeginWindow(const char* title,bool* open,bool){return m_window.Begin(title,open);}
+void NuklearEditorUi::EndWindow(){m_window.End();}
 bool NuklearEditorUi::Button(const char*l,float,float h){Layout(h>0?h:28);m_lastClicked=!m_disabled&&nk_button_label(CTX,l);return m_lastClicked;}
 void NuklearEditorUi::Label(const char*t){Layout();nk_label(CTX,t,NK_TEXT_LEFT);} void NuklearEditorUi::DisabledLabel(const char*t){Label(t);} void NuklearEditorUi::ColoredLabel(const char*t,EditorUiColor c){Layout();nk_label_colored(CTX,t,NK_TEXT_LEFT,nk_rgba_f(c.r,c.g,c.b,c.a));}
 void NuklearEditorUi::SameLine(){} void NuklearEditorUi::Separator(){Layout(3);nk_rule_horizontal(CTX,nk_rgb(80,80,80),nk_true);} void NuklearEditorUi::Spacing(){Layout(8);nk_spacing(CTX,1);}
@@ -66,7 +28,7 @@ bool NuklearEditorUi::SliderInt(const char*l,int*v,int a,int b){Layout();int old
 void NuklearEditorUi::ValueLabel(const char*l,const char*v){std::string s=std::string(l)+": "+v;Label(s.c_str());}
 bool NuklearEditorUi::CollapsingHeader(const char* label,bool defaultOpen)
 {
-    const std::string key=m_currentWindow+'\x1f'+label;
+    const std::string key=m_window.CurrentWindow()+'\x1f'+label;
     auto [state,inserted]=m_collapsingHeaders.emplace(key,defaultOpen);
     (void)inserted;
     const std::string display=std::string(state->second?"[-] ":"[+] ")+label;

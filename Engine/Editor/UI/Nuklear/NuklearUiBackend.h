@@ -1,11 +1,13 @@
 #pragma once
 
 #include "Engine/Editor/UI/IEditorUiBackend.h"
+#include "Engine/Editor/UI/Nuklear/Layout/NuklearDockLayout.h"
 #include "Engine/Editor/UI/Nuklear/NuklearEditorUi.h"
+#include "Engine/Editor/UI/Nuklear/Input/NuklearInputHandler.h"
+#include "Engine/Editor/UI/Nuklear/Panels/NuklearPanelHost.h"
+#include "Engine/Editor/UI/Nuklear/Menus/NuklearToolbar.h"
 
-class Object;
 class ImGuiUiBackend;
-class IEditorPanel;
 
 // Nuklear owns editor layout, widgets, and input. Its renderer-independent
 // triangle output is submitted through the shared editor UI graphics bridge.
@@ -34,22 +36,14 @@ public:
     void RequestSwitch(EditorUiKind) override {}
 
 private:
-    void DrawHierarchy(EditorState& state, float x, float y, float w, float h);
-    void DrawObjectRow(Object* object, int depth, class HierarchyView* hierarchy);
-    void DrawProperties(EditorState& state, float x, float y, float w, float h);
-    void DrawViewport(EditorState& state, float x, float y, float w, float h);
-    void DrawConsole(EditorState& state, float x, float y, float w, float h);
-
     struct Impl;
     std::unique_ptr<Impl> m_impl;
     IEditorRenderer* m_renderer = nullptr;
     ImGuiUiBackend* m_renderBridge = nullptr;
     bool m_inputOpen = false;
+    NuklearInputHandler m_inputHandler;
     NuklearEditorUi m_editorUi;
-    IEditorPanel* m_activeLeftTab = nullptr;
-    IEditorPanel* m_activeCenterTab = nullptr;
-    float m_leftDockFraction = 0.20f;
-    float m_rightDockFraction = 0.25f;
-    float m_bottomDockFraction = 0.24f;
-    int m_draggedSplitter = 0;
+    NuklearDockLayout m_dockLayout;
+    NuklearToolbar m_toolbar;
+    NuklearPanelHost m_panelHost;
 };
