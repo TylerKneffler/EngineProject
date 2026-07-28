@@ -18,6 +18,12 @@ class IGraphicsProvider;
 //     "objects":  [ { "name", "transform", "components", "children" }, ... ]
 //   }
 //
+// Prefab instances are stored as compact references:
+//   { "prefab": "Assets/Model/Model.prefab", "transform": { ... } }
+// Names, components, children, meshes, materials, and other prefab-owned
+// properties are rebuilt from that file. The root transform remains
+// scene-owned placement data.
+//
 // Only top-level objects (those with no parent) appear in "objects"; their
 // children are nested inside "children" arrays recursively.  On load, ALL
 // objects (including children) are added to the scene's flat object list so
@@ -57,6 +63,10 @@ public:
 
     static bool SavePrefab(const Object& object, const std::string& path);
     static Object* InstantiatePrefab(Scene& scene, const std::string& path,
+        IGraphicsProvider* graphicsProvider = nullptr);
+    // Reload every scene instance that references path while preserving each
+    // root placement transform. Returns false if the prefab cannot be read.
+    static bool RefreshPrefabInstances(Scene& scene, const std::string& path,
         IGraphicsProvider* graphicsProvider = nullptr);
 
     // Called internally; exposed so Scene::Load can invoke it.

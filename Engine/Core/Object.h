@@ -26,6 +26,24 @@ public:
 
     bool IsPrefabInstance() const { return static_cast<bool>(Prefab); }
     void SetPrefab(const std::string& path) { Prefab = PrefabAsset::Acquire(path); }
+    Object* GetPrefabInstanceRoot()
+    {
+        for (Object* current = this; current; current = current->Parent)
+            if (current->Prefab)
+                return current;
+        return nullptr;
+    }
+    const Object* GetPrefabInstanceRoot() const
+    {
+        for (const Object* current = this; current; current = current->Parent)
+            if (current->Prefab)
+                return current;
+        return nullptr;
+    }
+    bool IsPartOfPrefabInstance() const
+    {
+        return GetPrefabInstanceRoot() != nullptr;
+    }
 
     // Lifecycle methods
     virtual void Enabled();

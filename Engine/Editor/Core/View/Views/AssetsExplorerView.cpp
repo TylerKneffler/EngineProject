@@ -159,9 +159,10 @@ bool AssetsExplorerView::AcceptSceneObject(IEditorUi& ui, const std::string& dir
     if (data && size == sizeof(Object*))
     {
         Object* object = *static_cast<Object* const*>(data);
-        if (object && object->Prefab)
+        Object* prefabRoot = object ? object->GetPrefabInstanceRoot() : nullptr;
+        if (prefabRoot && prefabRoot->Prefab)
         {
-            m_selectedPath = object->Prefab->GetPath();
+            m_selectedPath = prefabRoot->Prefab->GetPath();
         }
         else if (object)
         {

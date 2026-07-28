@@ -19,6 +19,7 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <commdlg.h>
 
 namespace
 {
@@ -165,10 +166,49 @@ void EditorState::InitializeUiState()
 // ---------------------------------------------------------------------------
 void EditorState::SaveScene()
 {
-    if (m_scene)
+    if (!m_scene)
+        return;
+
+    std::string destination = m_currentScenePath;
+    if (destination.empty() && !m_projectSettings.defaultScene.empty())
+        destination = m_projectSettings.defaultScene;
+
+    if (destination.empty())
     {
-        // TODO: Implement scene serialization
+        wchar_t filePath[MAX_PATH] = {};
+        std::filesystem::path initialDirectory = m_projectSettings.sceneDirectory.empty()
+            ? std::filesystem::current_path()
+            : std::filesystem::path(m_projectSettings.sceneDirectory);
+        std::wstring initial = initialDirectory.wstring();
+        OPENFILENAMEW dialog{};
+        dialog.lStructSize = sizeof(dialog);
+        dialog.hwndOwner = m_window ? m_window->GetHWND() : nullptr;
+        dialog.lpstrFile = filePath;
+        dialog.nMaxFile = MAX_PATH;
+        dialog.lpstrFilter = L"Scene Files (*.scene)\0*.scene\0All Files\0*.*\0";
+        dialog.lpstrDefExt = L"scene";
+        dialog.lpstrInitialDir = initial.c_str();
+        dialog.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+        if (!GetSaveFileNameW(&dialog))
+            return;
+        destination = std::filesystem::path(filePath).string();
+    }
+
+    if (std::filesystem::path(destination).extension().empty())
+        destination += ".scene";
+
+    if (m_scene->Save(destination))
+    {
+        m_currentScenePath = std::filesystem::path(destination).lexically_normal().string();
         m_hasUnsavedChanges = false;
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(
+                ConsoleView::Level::Info, "Scene saved: " + m_currentScenePath);
+    }
+    else if (m_primaryConsole)
+    {
+        m_primaryConsole->AddLog(
+            ConsoleView::Level::Error, "Failed to save scene: " + destination);
     }
 }
 
@@ -208,6 +248,8 @@ void EditorState::LoadScene(const std::string& path)
             OutputDebugStringA("[EditorState::LoadScene] Scene loaded successfully\n");
             LogStartupFailure("Scene loaded successfully: " + resolvedPath);
             m_hasUnsavedChanges = false;
+            m_currentScenePath =
+                std::filesystem::path(resolvedPath).lexically_normal().string();
             
             if (m_primaryConsole)
             {

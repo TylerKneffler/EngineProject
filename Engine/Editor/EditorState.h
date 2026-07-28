@@ -83,6 +83,7 @@ private:
     // State
     ProjectSettings m_projectSettings;
     std::string m_projectFilePath;
+    std::string m_currentScenePath;
     bool m_hasUnsavedChanges = false;
     bool m_showPreferences = false;
     std::string m_playModeSceneSnapshot;

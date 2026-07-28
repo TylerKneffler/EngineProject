@@ -8,8 +8,12 @@
 #include "Core/Compoonents/Material.h"
 #include "Core/Compoonents/Camera.h"
 #include <fstream>
+#include <algorithm>
+#include <cctype>
+#include <filesystem>
 #include <functional>
 #include <stdexcept>
+#include <vector>
 
 // ---- Registry ---------------------------------------------------------------
 std::unordered_map<std::string, SceneSerializer::Factory>& SceneSerializer::GetRegistry()
@@ -54,19 +58,40 @@ glm::vec3 GlmFrom(const JsonValue& v, glm::vec3 def = {})
 } // namespace
 
 // ---- Serialise a single Object (recursive) ----------------------------------
-static JsonValue SerialiseObject(const Object& obj)
+static JsonValue SerialiseTransform(const Transform& transform)
 {
     JsonValue node = JsonValue::MakeObject();
-    node.Set("name", JsonValue(obj.name));
-    if (obj.Prefab)
+    node.Set("position", JGlm(transform.position));
+    node.Set("rotation", JGlm(transform.rotation));
+    node.Set("scale", JGlm(transform.scale));
+    return node;
+}
+
+static void DeserialiseTransform(Transform& transform, const JsonValue& node)
+{
+    if (!node.IsObject())
+        return;
+    transform.position = GlmFrom(node["position"]);
+    transform.rotation = GlmFrom(node["rotation"]);
+    transform.scale = GlmFrom(node["scale"], { 1.f, 1.f, 1.f });
+}
+
+static JsonValue SerialiseObject(
+    const Object& obj,
+    bool serialisePrefabAsReference = true)
+{
+    JsonValue node = JsonValue::MakeObject();
+    if (serialisePrefabAsReference && obj.Prefab)
+    {
         node.Set("prefab", JsonValue(obj.Prefab->GetPath()));
+        node.Set("transform", SerialiseTransform(obj.transform));
+        return node;
+    }
+
+    node.Set("name", JsonValue(obj.name));
 
     // Transform
-    JsonValue tf = JsonValue::MakeObject();
-    tf.Set("position", JGlm(obj.transform.position));
-    tf.Set("rotation", JGlm(obj.transform.rotation));
-    tf.Set("scale",    JGlm(obj.transform.scale));
-    node.Set("transform", std::move(tf));
+    node.Set("transform", SerialiseTransform(obj.transform));
 
     // Components
     JsonValue comps = JsonValue::MakeArray();
@@ -77,7 +102,7 @@ static JsonValue SerialiseObject(const Object& obj)
     // Children (recursive)
     JsonValue children = JsonValue::MakeArray();
     for (const Object* child : obj.Children)
-        children.Push(SerialiseObject(*child));
+        children.Push(SerialiseObject(*child, true));
     node.Set("children", std::move(children));
 
     return node;
@@ -166,13 +191,7 @@ static bool DeserialiseScene(Scene& scene, const JsonValue& root,
             obj.SetPrefab(node["prefab"].AsString());
 
         // Transform
-        const JsonValue& tf = node["transform"];
-        if (tf.IsObject())
-        {
-            obj.transform.position = GlmFrom(tf["position"]);
-            obj.transform.rotation = GlmFrom(tf["rotation"]);
-            obj.transform.scale    = GlmFrom(tf["scale"], { 1.f, 1.f, 1.f });
-        }
+        DeserialiseTransform(obj.transform, node["transform"]);
 
         // Components
         const JsonValue& comps = node["components"];
@@ -204,10 +223,25 @@ static bool DeserialiseScene(Scene& scene, const JsonValue& root,
         const JsonValue& children = node["children"];
         for (std::size_t i = 0; i < children.ArraySize(); ++i)
         {
-            Object* child = scene.AddObject();
+            const JsonValue& childNode = children.ArrayAt(i);
+            Object* child = nullptr;
+            if (childNode.Has("prefab"))
+            {
+                child = SceneSerializer::InstantiatePrefab(
+                    scene, childNode["prefab"].AsString(), graphicsProvider);
+                if (!child)
+                    throw std::runtime_error(
+                        "Could not instantiate nested prefab '" +
+                        childNode["prefab"].AsString() + "'");
+                DeserialiseTransform(child->transform, childNode["transform"]);
+            }
+            else
+            {
+                child = scene.AddObject();
+                deserialise(*child, childNode);
+            }
             child->Parent = &obj;
             obj.Children.push_back(child);
-            deserialise(*child, children.ArrayAt(i));
         }
     };
 
@@ -215,8 +249,22 @@ static bool DeserialiseScene(Scene& scene, const JsonValue& root,
     const JsonValue& objects = root["objects"];
     for (std::size_t i = 0; i < objects.ArraySize(); ++i)
     {
-        Object* obj = scene.AddObject();
-        deserialise(*obj, objects.ArrayAt(i));
+        const JsonValue& objectNode = objects.ArrayAt(i);
+        if (objectNode.Has("prefab"))
+        {
+            Object* object = SceneSerializer::InstantiatePrefab(
+                scene, objectNode["prefab"].AsString(), graphicsProvider);
+            if (!object)
+                throw std::runtime_error(
+                    "Could not instantiate prefab '" +
+                    objectNode["prefab"].AsString() + "'");
+            DeserialiseTransform(object->transform, objectNode["transform"]);
+        }
+        else
+        {
+            Object* object = scene.AddObject();
+            deserialise(*object, objectNode);
+        }
     }
 
     return true;
@@ -253,7 +301,9 @@ bool SceneSerializer::SavePrefab(const Object& object, const std::string& path)
     JsonValue root = JsonValue::MakeObject();
     root.Set("version", JsonValue(1));
     root.Set("type", JsonValue(std::string("prefab")));
-    root.Set("object", SerialiseObject(object));
+    // A prefab file owns the complete expanded object definition. If this
+    // object is already an instance, do not write a self-referencing link.
+    root.Set("object", SerialiseObject(object, false));
 
     std::ofstream file(path);
     if (!file)
@@ -269,6 +319,29 @@ Object* SceneSerializer::InstantiatePrefab(
 {
     EnsureBuiltinsRegistered();
     Object* rootObject = nullptr;
+    static thread_local std::vector<std::string> prefabStack;
+    std::error_code absoluteError;
+    std::filesystem::path identity = std::filesystem::absolute(path, absoluteError);
+    if (absoluteError)
+        identity = std::filesystem::path(path);
+    std::string prefabKey = identity.lexically_normal().generic_string();
+#ifdef _WIN32
+    std::transform(prefabKey.begin(), prefabKey.end(), prefabKey.begin(),
+        [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+#endif
+    if (std::find(prefabStack.begin(), prefabStack.end(), prefabKey) != prefabStack.end())
+    {
+        OutputDebugStringA(("[SceneSerializer] Cyclic prefab reference: " +
+            path + "\n").c_str());
+        return nullptr;
+    }
+    prefabStack.push_back(prefabKey);
+    struct StackGuard
+    {
+        std::vector<std::string>& stack;
+        ~StackGuard() { stack.pop_back(); }
+    } stackGuard{ prefabStack };
+
     try
     {
         const JsonValue root = JsonParseFile(path);
@@ -286,13 +359,7 @@ Object* SceneSerializer::InstantiatePrefab(
             if (node.Has("name"))
                 object.name = node["name"].AsString();
 
-            const JsonValue& transform = node["transform"];
-            if (transform.IsObject())
-            {
-                object.transform.position = GlmFrom(transform["position"]);
-                object.transform.rotation = GlmFrom(transform["rotation"]);
-                object.transform.scale = GlmFrom(transform["scale"], { 1.f, 1.f, 1.f });
-            }
+            DeserialiseTransform(object.transform, node["transform"]);
 
             const JsonValue& components = node["components"];
             for (std::size_t i = 0; i < components.ArraySize(); ++i)
@@ -315,10 +382,25 @@ Object* SceneSerializer::InstantiatePrefab(
             const JsonValue& children = node["children"];
             for (std::size_t i = 0; i < children.ArraySize(); ++i)
             {
-                Object* child = scene.AddObject();
+                const JsonValue& childNode = children.ArrayAt(i);
+                Object* child = nullptr;
+                if (childNode.Has("prefab"))
+                {
+                    child = InstantiatePrefab(
+                        scene, childNode["prefab"].AsString(), graphicsProvider);
+                    if (!child)
+                        throw std::runtime_error(
+                            "Could not instantiate nested prefab '" +
+                            childNode["prefab"].AsString() + "'");
+                    DeserialiseTransform(child->transform, childNode["transform"]);
+                }
+                else
+                {
+                    child = scene.AddObject();
+                    instantiate(*child, childNode);
+                }
                 child->Parent = &object;
                 object.Children.push_back(child);
-                instantiate(*child, children.ArrayAt(i));
             }
         };
 
@@ -334,5 +416,123 @@ Object* SceneSerializer::InstantiatePrefab(
         OutputDebugStringA((std::string("[SceneSerializer] Failed to instantiate prefab '") +
             path + "': " + error.what() + "\n").c_str());
         return nullptr;
+    }
+}
+
+bool SceneSerializer::RefreshPrefabInstances(
+    Scene& scene,
+    const std::string& path,
+    IGraphicsProvider* graphicsProvider)
+{
+    EnsureBuiltinsRegistered();
+    try
+    {
+        const JsonValue root = JsonParseFile(path);
+        if (!root.IsObject() || root["version"].AsInt() != 1 ||
+            root["type"].AsString() != "prefab" || !root["object"].IsObject())
+            return false;
+
+        auto identity = [](const std::string& value)
+        {
+            std::error_code error;
+            std::filesystem::path result =
+                std::filesystem::absolute(value, error);
+            if (error)
+                result = std::filesystem::path(value);
+            std::string key = result.lexically_normal().generic_string();
+#ifdef _WIN32
+            std::transform(key.begin(), key.end(), key.begin(),
+                [](unsigned char character)
+                {
+                    return static_cast<char>(std::tolower(character));
+                });
+#endif
+            return key;
+        };
+
+        const std::string targetKey = identity(path);
+        std::vector<Object*> instances;
+        for (const auto& candidate : scene.GetObjects())
+            if (candidate->Prefab &&
+                identity(candidate->Prefab->GetPath()) == targetKey)
+                instances.push_back(candidate.get());
+
+        IGraphicsBufferFactory* bufferFactory = graphicsProvider
+            ? graphicsProvider->GetBufferFactory()
+            : nullptr;
+        std::function<void(Object&, const JsonValue&)> populate =
+            [&](Object& object, const JsonValue& node)
+        {
+            object.name = node.Has("name")
+                ? node["name"].AsString()
+                : std::string("Object");
+            DeserialiseTransform(object.transform, node["transform"]);
+
+            const JsonValue& components = node["components"];
+            for (std::size_t index = 0; index < components.ArraySize(); ++index)
+            {
+                const JsonValue& componentNode = components.ArrayAt(index);
+                const std::string type = componentNode["type"].AsString();
+                auto factory = GetRegistry().find(type);
+                if (factory == GetRegistry().end())
+                    continue;
+                Component* component = factory->second();
+                component->Owner = &object;
+                component->Deserialize(componentNode);
+                object.Components.push_back(component);
+                if (bufferFactory)
+                    if (Mesh* mesh = dynamic_cast<Mesh*>(component))
+                        mesh->CreateBuffer(bufferFactory);
+            }
+
+            const JsonValue& children = node["children"];
+            for (std::size_t index = 0; index < children.ArraySize(); ++index)
+            {
+                const JsonValue& childNode = children.ArrayAt(index);
+                Object* child = nullptr;
+                if (childNode.Has("prefab"))
+                {
+                    child = InstantiatePrefab(
+                        scene, childNode["prefab"].AsString(), graphicsProvider);
+                    if (!child)
+                        throw std::runtime_error(
+                            "Could not refresh nested prefab '" +
+                            childNode["prefab"].AsString() + "'");
+                    DeserialiseTransform(child->transform, childNode["transform"]);
+                }
+                else
+                {
+                    child = scene.AddObject();
+                    populate(*child, childNode);
+                }
+                child->Parent = &object;
+                object.Children.push_back(child);
+            }
+        };
+
+        for (Object* instance : instances)
+        {
+            const Transform placement = instance->transform;
+            const auto prefab = instance->Prefab;
+            const std::vector<Object*> oldChildren = instance->Children;
+            for (Object* child : oldChildren)
+                scene.RemoveObject(child);
+            instance->Children.clear();
+            for (Component* component : instance->Components)
+                delete component;
+            instance->Components.clear();
+
+            populate(*instance, root["object"]);
+            instance->transform = placement;
+            instance->Prefab = prefab;
+        }
+        return true;
+    }
+    catch (const std::exception& error)
+    {
+        OutputDebugStringA((
+            std::string("[SceneSerializer] Failed to refresh prefab '") +
+            path + "': " + error.what() + "\n").c_str());
+        return false;
     }
 }

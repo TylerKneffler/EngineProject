@@ -31,7 +31,7 @@ void HierarchyView::DrawObjectNode(IEditorUi& ui, Object* obj)
 {
     const bool hasChildren = !obj->Children.empty();
     const std::string label = (obj->name.empty() ? "(unnamed)" : obj->name) +
-        (obj->IsPrefabInstance() ? " [Prefab]" : "");
+        (obj->IsPartOfPrefabInstance() ? " [Prefab]" : "");
     const bool open = ui.TreeNode(obj, label.c_str(), obj == m_selectedObject, !hasChildren);
     if (ui.IsItemClicked()) SetSelectedObject(obj);
     if (ui.IsItemDoubleClicked()) { SetSelectedObject(obj); if (OnFocusObject) OnFocusObject(obj); }
