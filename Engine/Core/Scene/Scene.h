@@ -99,6 +99,7 @@ private:
     void* m_gridCBMapped = nullptr;
 
     std::unique_ptr<IPipelineState> m_objectPipeline;
+    std::unique_ptr<IPipelineState> m_objectOutlinePipeline;
     std::unique_ptr<IGraphicsBuffer> m_objectConstantBuffer;
     void* m_objectCBMapped = nullptr;
 

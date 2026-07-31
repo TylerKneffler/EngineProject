@@ -2,6 +2,21 @@
 #include "Core/Object.h"
 #include <glm/gtc/matrix_transform.hpp>
 
+namespace
+{
+JsonValue JVec3(const glm::vec3& v)
+{
+    return JsonValue::MakeArray().Push(JsonValue(v.x)).Push(JsonValue(v.y)).Push(JsonValue(v.z));
+}
+
+glm::vec3 Vec3From(const JsonValue& v, const glm::vec3& def)
+{
+    if (!v.IsArray() || v.ArraySize() < 3)
+        return def;
+    return { v.ArrayAt(0).AsFloat(), v.ArrayAt(1).AsFloat(), v.ArrayAt(2).AsFloat() };
+}
+}
+
 glm::vec3 Transform::GetLocalPosition()
 {
     return position;
@@ -25,4 +40,21 @@ glm::mat4 Transform::GetWorldMatrix() const
         return Owner->Parent->transform.GetWorldMatrix() * local;
 
     return local;
+}
+
+JsonValue Transform::Serialize() const
+{
+    JsonValue node = JsonValue::MakeObject();
+    node.Set("type", JsonValue(std::string("Transform")));
+    node.Set("position", JVec3(position));
+    node.Set("rotation", JVec3(rotation));
+    node.Set("scale", JVec3(scale));
+    return node;
+}
+
+void Transform::Deserialize(const JsonValue& v)
+{
+    if (v.Has("position")) position = Vec3From(v["position"], position);
+    if (v.Has("rotation")) rotation = Vec3From(v["rotation"], rotation);
+    if (v.Has("scale"))    scale    = Vec3From(v["scale"], scale);
 }

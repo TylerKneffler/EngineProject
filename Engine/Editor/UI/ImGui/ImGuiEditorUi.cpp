@@ -44,6 +44,6 @@ EditorUiViewportInput ImGuiEditorUi::Viewport(void* texture,float aspect,EditorU
     ImVec2 size=a,pos{0,0}; if(aspect>0){float aa=a.x/a.y;if(aa>aspect){size.x=a.y*aspect;pos.x=(a.x-size.x)*.5f;}else{size.y=a.x/aspect;pos.y=(a.y-size.y)*.5f;}}
     if(size.x<a.x||size.y<a.y){ImVec2 p=ImGui::GetCursorScreenPos();ImGui::GetWindowDrawList()->AddRectFilled(p,{p.x+a.x,p.y+a.y},ImGui::GetColorU32({bg.r,bg.g,bg.b,bg.a}));}
     out.available={size.x,size.y}; ImGui::SetCursorPos(pos); ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(texture)),size);
-    out.hovered=ImGui::IsItemHovered();if(out.hovered){auto d=ImGui::GetIO().MouseDelta;out.mouseDelta={d.x,d.y};out.mouseWheel=ImGui::GetIO().MouseWheel;out.rightDown=ImGui::IsMouseDown(ImGuiMouseButton_Right);out.middleDown=ImGui::IsMouseDown(ImGuiMouseButton_Middle);}return out;
+    out.hovered=ImGui::IsItemHovered();if(out.hovered){auto d=ImGui::GetIO().MouseDelta;out.mouseDelta={d.x,d.y};out.mouseWheel=ImGui::GetIO().MouseWheel;out.rightDown=ImGui::IsMouseDown(ImGuiMouseButton_Right);out.middleDown=ImGui::IsMouseDown(ImGuiMouseButton_Middle);out.leftClicked=ImGui::IsMouseClicked(ImGuiMouseButton_Left);ImVec2 min=ImGui::GetItemRectMin();ImVec2 mp=ImGui::GetIO().MousePos;out.mousePosInViewport={mp.x-min.x,mp.y-min.y};}return out;
 }
 void ImGuiEditorUi::FocusWindow(const char*t){ImGui::SetWindowFocus(t);}

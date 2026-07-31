@@ -395,6 +395,8 @@ void EditorState::WireupCallbacks()
     // Wire up selection changed callback (for hierarchy -> properties)
     m_viewFactory->OnSelectionChanged = [this](Object* obj) {
         OutputDebugStringA(("[EditorState] Selection changed to: " + (obj ? obj->name : "nullptr") + "\n").c_str());
+        if (m_scene)
+            m_scene->SetSelectedObject(obj);
         if (m_primaryProperties)
         {
             m_primaryProperties->SetSelectedObject(obj);
@@ -404,6 +406,20 @@ void EditorState::WireupCallbacks()
         {
             OutputDebugStringA("[EditorState] WARNING: Properties view is null\n");
         }
+    };
+
+    // Scene viewport click-selection -> hierarchy/properties + render selection state
+    m_viewFactory->OnObjectSelected = [this](Object* obj) {
+        for (auto& panel : m_panels)
+            if (auto* hierarchy = dynamic_cast<HierarchyView*>(panel.get()))
+            {
+                hierarchy->SetSelectedObject(obj);
+                break;
+            }
+        if (m_primaryProperties)
+            m_primaryProperties->SetSelectedObject(obj);
+        if (m_scene)
+            m_scene->SetSelectedObject(obj);
     };
 
     // Wire up focus (double-click) callback — frame the object in the scene camera
@@ -522,8 +538,6 @@ Object* EditorState::InstantiateAsset(const std::string& path)
 
 void EditorState::SelectObject(Object* object)
 {
-    if (!object)
-        return;
     for (auto& panel : m_panels)
         if (auto* hierarchy = dynamic_cast<HierarchyView*>(panel.get()))
         {
@@ -532,6 +546,8 @@ void EditorState::SelectObject(Object* object)
         }
     if (m_primaryProperties)
         m_primaryProperties->SetSelectedObject(object);
+    if (m_scene)
+        m_scene->SetSelectedObject(object);
 }
 
 // ---------------------------------------------------------------------------

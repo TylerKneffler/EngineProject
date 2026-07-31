@@ -63,6 +63,7 @@ public:
 
     // ---- Callbacks wired into newly created panels ----
     std::function<void(Object*)>           OnSelectionChanged;  // HierarchyView
+    std::function<void(Object*)>           OnObjectSelected;    // SceneView click selection
     std::function<void(Object*)>           OnFocusObject;       // HierarchyView double-click
     std::function<void(const std::string&)> OnSceneRequested;   // AssetsExplorerView
     std::function<void(const std::string&)> OnAssetDropped;     // SceneView

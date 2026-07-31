@@ -17,8 +17,10 @@ struct EditorUiViewportInput
 {
     EditorUiVec2 available;
     EditorUiVec2 mouseDelta;
+    EditorUiVec2 mousePosInViewport;
     float mouseWheel = 0.f;
     bool hovered = false;
+    bool leftClicked = false;
     bool rightDown = false;
     bool middleDown = false;
 };

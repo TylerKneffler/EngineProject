@@ -247,6 +247,45 @@ void Scene::BuildObjectPipeline()
         .Build();
     if (!m_objectPipeline)
         throw std::runtime_error("Failed to build object pipeline: " + builder->GetLastError());
+
+    // Build a wireframe outline pipeline for selected object highlighting.
+    auto outlineBuilder = pipelineFactory->CreateBuilder();
+    if (!outlineBuilder)
+        throw std::runtime_error("Failed to create outline pipeline state builder");
+
+    // Compile dedicated outline shaders from file instead of reusing object shader.
+    const std::string outlineShaderPath = EngineShaderPath("ObjectOutline.hlsl");
+    auto outlineVsShader = shaderCompiler->CompileFromFile(
+        outlineShaderPath.c_str(),
+        "VSMain",
+        IShaderCompiler::CompileProfile::VS_5_0);
+    if (!outlineVsShader)
+        throw std::runtime_error("Failed to compile object outline vertex shader: " + shaderCompiler->GetLastError());
+
+    auto outlinePsShader = shaderCompiler->CompileFromFile(
+        outlineShaderPath.c_str(),
+        "PSMain",
+        IShaderCompiler::CompileProfile::PS_5_0);
+    if (!outlinePsShader)
+        throw std::runtime_error("Failed to compile object outline pixel shader: " + shaderCompiler->GetLastError());
+
+    auto& op = *outlineBuilder;
+    m_objectOutlinePipeline = op.SetVertexShader(outlineVsShader.get())
+        .SetPixelShader(outlinePsShader.get())
+        .SetFillMode(true)                     // Wireframe outline
+        .SetCullMode(false)
+        .SetFrontCounterClockwise(true)
+        .SetDepthClipEnable(true)
+        .SetBlendEnable(false)
+        .SetDepthEnable(true)
+        .SetDepthWriteEnable(false)
+        .SetDepthFunc(3)                       // D3D12_COMPARISON_FUNC_LESS_EQUAL
+        .SetInputLayout(layout, 4)
+        .SetPrimitiveTopology(IPipelineStateBuilder::PrimitiveTopology::TriangleList)
+        .SetRenderTargetFormat(28, 40)
+        .Build();
+    if (!m_objectOutlinePipeline)
+        throw std::runtime_error("Failed to build object outline pipeline: " + outlineBuilder->GetLastError());
 }
 
 // ---------------------------------------------------------------------------
@@ -370,6 +409,31 @@ void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverri
         {
             context->SetVertexBuffer(0, vertexBuffer, mesh->GetVertexStride(), 0);
             context->DrawInstanced(mesh->GetVertexCount(), 1, 0, 0);
+
+            // Draw selected object outline overlay.
+            if (obj == m_selectedObject && m_objectOutlinePipeline)
+            {
+                CBData outlineCb{};
+                glm::mat4 outlineWorld = world * glm::scale(glm::mat4(1.f), glm::vec3(1.03f));
+                outlineCb.mvp = proj * view * outlineWorld;
+                outlineCb.diffuseColor = { 1.f, 0.85f, 0.1f, 1.f };
+                outlineCb.ambientColor = { 0.f, 0.f, 0.f, 1.f };
+                outlineCb.specularColor = { 1.f, 0.85f, 0.1f, 1.f };
+                outlineCb.materialParams = { 0.f, 1.f, 1.f, 0.f }; // no textures
+
+                memcpy(static_cast<uint8_t*>(m_objectCBMapped) + offset, &outlineCb, sizeof(outlineCb));
+                context->SetPipeline(m_objectOutlinePipeline.get());
+                context->SetConstantBuffer(0, m_objectConstantBuffer.get(), offset);
+                context->SetTexture(0, nullptr);
+                context->SetTexture(1, nullptr);
+                context->SetTexture(2, nullptr);
+                context->SetTexture(3, nullptr);
+                context->SetTexture(4, nullptr);
+                context->DrawInstanced(mesh->GetVertexCount(), 1, 0, 0);
+
+                // Restore the regular object data for consistency.
+                memcpy(static_cast<uint8_t*>(m_objectCBMapped) + offset, &cbData, sizeof(cbData));
+            }
         }
 
         ++slot;

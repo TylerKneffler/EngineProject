@@ -258,7 +258,7 @@ target_compile_definitions(Engine PUBLIC
 if(ENGINE_VULKAN_ENABLED)
     set(VULKAN_SHADER_DIR "${CMAKE_BINARY_DIR}/VulkanShaders")
     set(VULKAN_SHADER_OUTPUTS)
-    foreach(SHADER_NAME Grid Object)
+    foreach(SHADER_NAME Grid Object ObjectOutline)
         foreach(STAGE VS PS)
             if(STAGE STREQUAL "VS")
                 set(SHADER_PROFILE vs_6_0)

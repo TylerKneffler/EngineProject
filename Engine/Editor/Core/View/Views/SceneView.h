@@ -1,5 +1,6 @@
 #pragma once
 #include "View/View.h"
+#include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
 #include "Core/ProjectLoader.h"
 
@@ -42,8 +43,10 @@ public:
     // scene's editorCamera with orbit / pan / zoom.
     void DrawPanel(IEditorUi& ui) override;
     std::function<void(const std::string&)> OnAssetDropped;
+    std::function<void(Object*)> OnObjectSelected;
 
 private:
+    Object* PickObjectInViewport(const EditorUiVec2& mousePos, const EditorUiVec2& viewportSize) const;
     void ApplyCameraControls(float panDX, float panDY,
                              float orbitDX, float orbitDY, float zoom);
 

@@ -3,8 +3,13 @@
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Camera.h"
+#include "Core/Compoonents/Mesh.h"
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Graphics/IGraphicsProvider.h"
+#include <cfloat>
+#include <cmath>
+#include <glm/gtc/matrix_inverse.hpp>
+#include <glm/geometric.hpp>
 #include <glm/ext/matrix_transform.hpp>
 
 // ---------------------------------------------------------------------------
@@ -81,6 +86,9 @@ void SceneView::DrawPanel(IEditorUi& ui)
         // Check for mouse input on the viewport
         if (input.hovered)
         {
+            if (input.leftClicked && !input.rightDown && !input.middleDown && OnObjectSelected)
+                OnObjectSelected(PickObjectInViewport(input.mousePosInViewport, input.available));
+
             EditorUiVec2 d = input.mouseDelta;
 
             // Right-button drag → pan.
@@ -105,6 +113,64 @@ void SceneView::DrawPanel(IEditorUi& ui)
     ui.EndWindow();
 
     ApplyCameraControls(panDX, panDY, orbitDX, orbitDY, zoom);
+}
+
+Object* SceneView::PickObjectInViewport(const EditorUiVec2& mousePos, const EditorUiVec2& viewportSize) const
+{
+    if (!m_scene || viewportSize.x <= 1.f || viewportSize.y <= 1.f)
+        return nullptr;
+
+    Camera* cam = m_scene->editorCamera.GetComponent<Camera>();
+    if (!cam)
+        return nullptr;
+
+    const glm::mat4 view = cam->GetViewMatrix();
+    const glm::mat4 proj = cam->GetProjectionMatrix(viewportSize.x / viewportSize.y);
+    const glm::mat4 invVP = glm::inverse(proj * view);
+
+    const float ndcX = (2.f * mousePos.x / viewportSize.x) - 1.f;
+    const float ndcY = 1.f - (2.f * mousePos.y / viewportSize.y);
+
+    glm::vec4 nearH = invVP * glm::vec4(ndcX, ndcY, 0.f, 1.f);
+    glm::vec4 farH  = invVP * glm::vec4(ndcX, ndcY, 1.f, 1.f);
+    if (nearH.w == 0.f || farH.w == 0.f)
+        return nullptr;
+
+    const glm::vec3 rayOrigin = glm::vec3(nearH) / nearH.w;
+    const glm::vec3 rayTarget = glm::vec3(farH) / farH.w;
+    const glm::vec3 rayDir = glm::normalize(rayTarget - rayOrigin);
+
+    Object* best = nullptr;
+    float bestT = FLT_MAX;
+
+    for (const auto& objPtr : m_scene->GetObjects())
+    {
+        Object* obj = objPtr.get();
+        if (!obj || !obj->GetComponent<Mesh>())
+            continue;
+
+        const glm::vec3 center = obj->transform.GetWorldPosition();
+        const float radius = glm::max(glm::max(obj->transform.scale.x, obj->transform.scale.y), obj->transform.scale.z) * 0.75f;
+        const glm::vec3 oc = rayOrigin - center;
+        const float a = glm::dot(rayDir, rayDir);
+        const float b = 2.f * glm::dot(oc, rayDir);
+        const float c = glm::dot(oc, oc) - (radius * radius);
+        const float disc = b * b - 4.f * a * c;
+        if (disc < 0.f)
+            continue;
+
+        const float sqrtDisc = std::sqrt(disc);
+        const float t0 = (-b - sqrtDisc) / (2.f * a);
+        const float t1 = (-b + sqrtDisc) / (2.f * a);
+        float t = t0 > 0.f ? t0 : t1;
+        if (t > 0.f && t < bestT)
+        {
+            bestT = t;
+            best = obj;
+        }
+    }
+
+    return best;
 }
 
 // ---------------------------------------------------------------------------

@@ -11,8 +11,13 @@
 #include <cctype>
 #include <string>
 #include <map>
+#include <filesystem>
 #include <Windows.h>
 #include <commdlg.h>
+
+#ifndef ENGINE_ASSETS_PATH
+#define ENGINE_ASSETS_PATH "Engine/Core/Assets/"
+#endif
 
 // State tracking for property editing
 static std::map<std::string, std::string> s_editingProperty;  // componentPtr+key -> "editing"
@@ -207,6 +212,32 @@ void Component::DrawProperties(IEditorUi& ui)
                     {
                         // Open file picker dialog
                         wchar_t filename[MAX_PATH] = {};
+                        wchar_t initialDir[MAX_PATH] = {};
+
+                        std::filesystem::path initialPath;
+                        if (!editValue.empty())
+                        {
+                            const std::filesystem::path valuePath(editValue);
+                            if (std::filesystem::exists(valuePath))
+                                initialPath = valuePath.parent_path();
+                        }
+                        if (initialPath.empty())
+                        {
+                            const std::filesystem::path projectAssets("Assets");
+                            if (std::filesystem::is_directory(projectAssets))
+                                initialPath = std::filesystem::absolute(projectAssets);
+                        }
+                        if (initialPath.empty())
+                        {
+                            const std::filesystem::path engineAssets(ENGINE_ASSETS_PATH);
+                            if (std::filesystem::is_directory(engineAssets))
+                                initialPath = std::filesystem::absolute(engineAssets);
+                        }
+                        if (!initialPath.empty())
+                        {
+                            const std::wstring wideInit = initialPath.wstring();
+                            wcsncpy_s(initialDir, wideInit.c_str(), _TRUNCATE);
+                        }
                         
                         OPENFILENAMEW ofn{};
                         ofn.lStructSize = sizeof(ofn);
@@ -214,6 +245,7 @@ void Component::DrawProperties(IEditorUi& ui)
                         ofn.lpstrFilter = L"All Files\0*.*\0Images\0*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.dds\0Models\0*.obj;*.gltf;*.glb\0\0";
                         ofn.lpstrFile = filename;
                         ofn.nMaxFile = MAX_PATH;
+                        ofn.lpstrInitialDir = initialDir[0] ? initialDir : nullptr;
                         ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
                         
                         if (GetOpenFileNameW(&ofn))
