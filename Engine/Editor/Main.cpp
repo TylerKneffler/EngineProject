@@ -81,6 +81,7 @@ namespace
         settings.renderingAPI = "DirectX11";
         settings.editorRenderingAPI = "DirectX11";
         settings.gameRenderingAPI = "DirectX11";
+        settings.editorUiPackage = "ImGui";
         settings.clearColor = { 0.18f, 0.18f, 0.18f, 1.f };
         settings.targetFramerate = 60;
         settings.aspectRatioMode = ProjectSettings::AspectRatioMode::Free;

@@ -28,7 +28,7 @@ public:
     float     shininess     { 32.f };
     
     PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "0.0, 1.0")
-    float     metallicFactor { 1.f };
+    float     metallicFactor { 0.f };
     
     PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "0.0, 1.0")
     float     roughnessFactor { 1.f };

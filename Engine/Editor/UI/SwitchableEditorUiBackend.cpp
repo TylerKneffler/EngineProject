@@ -134,9 +134,5 @@ std::unique_ptr<IEditorUiBackend> CreateEditorUiBackend(const std::string& initi
         return std::make_unique<SwitchableEditorUiBackend>(EditorUiKind::Nuklear);
     if (initialPackage == "ImGui" || initialPackage == "IMGUI")
         return std::make_unique<SwitchableEditorUiBackend>(EditorUiKind::ImGui);
-#if defined(ENGINE_EDITOR_UI_NUKLEAR)
-    return std::make_unique<SwitchableEditorUiBackend>(EditorUiKind::Nuklear);
-#else
     return std::make_unique<SwitchableEditorUiBackend>(EditorUiKind::ImGui);
-#endif
 }
