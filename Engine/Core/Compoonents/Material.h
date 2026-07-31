@@ -11,7 +11,7 @@ class IGraphicsProvider;
 class Material : public Component
 {
 public:
-    Material() = default;
+    Material();
     ~Material() = default;
 
     // Phong shading properties — must match the CBData layout expected by the HLSL.
@@ -71,11 +71,6 @@ public:
     void SetOcclusionTexture(const std::string& path);
     void SetEmissiveTexture(const std::string& path);
     void PrepareTextures(IGraphicsProvider* graphicsProvider);
-
-    // Serialization
-    std::string GetTypeName() const override { return "Material"; }
-    JsonValue   Serialize()   const override;
-    void        Deserialize(const JsonValue& v) override;
 
 private:
     static std::string TexturePath(const std::shared_ptr<Texture>& texture);

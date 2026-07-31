@@ -5,6 +5,12 @@
 #include <filesystem>
 #include <stdexcept>
 
+Mesh::Mesh()
+{
+    SetTypeName(COMPONENT_TYPE_NAME(Mesh));
+    RegisterField("file", m_filePath);
+}
+
 #ifndef ENGINE_ASSETS_PATH
 #define ENGINE_ASSETS_PATH "Engine/Core/Assets/"
 #endif
@@ -157,19 +163,9 @@ void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory)
 }
 #pragma endregion
 
-// ---- Serialization ----------------------------------------------------------
-JsonValue Mesh::Serialize() const
-{
-    JsonValue node = JsonValue::MakeObject();
-    node.Set("type", JsonValue(std::string("Mesh")));
-    node.Set("file", JsonValue(m_filePath));
-    return node;
-}
-
 void Mesh::Deserialize(const JsonValue& v)
 {
-    m_filePath = v["file"].AsString();
-    if (!m_filePath.empty())
-        LoadFromFile(m_filePath);
-    // CreateBuffer() must be called separately once a D3D12 device is available.
+    if (v.Has("file"))
+        LoadFromFile(v["file"].AsString());
 }
+

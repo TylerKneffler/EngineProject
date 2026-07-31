@@ -7,7 +7,7 @@
 class Transform : public Component
 {
 public:
-    Transform() = default;
+    Transform();
     ~Transform() = default;
 
     PROPERTY(Inspector, EditAnywhere, Category = "Transform")
@@ -24,9 +24,4 @@ public:
     
     glm::vec3 GetWorldPosition();
     glm::vec3 GetLocalPosition();
-
-    // Serialization
-    std::string GetTypeName() const override { return "Transform"; }
-    JsonValue   Serialize() const override;
-    void        Deserialize(const JsonValue& v) override;
 };

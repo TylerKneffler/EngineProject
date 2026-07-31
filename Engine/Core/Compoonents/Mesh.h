@@ -17,7 +17,7 @@ struct Vertex
 class Mesh : public Component
 {
 public:
-    Mesh() = default;
+    Mesh();
     ~Mesh() = default;
 
     // Load vertex data from a triangulated OBJ file (CPU side only).
@@ -36,9 +36,6 @@ public:
     bool     IsReady()        const { return m_ready; }
     const std::string& GetFilePath() const { return m_filePath; }
 
-    // Serialization
-    std::string GetTypeName() const override { return "Mesh"; }
-    JsonValue   Serialize()   const override;
     void        Deserialize(const JsonValue& v) override;
 
 private:

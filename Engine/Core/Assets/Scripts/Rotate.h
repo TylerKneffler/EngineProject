@@ -14,19 +14,16 @@
 class Rotate : public Script
 {
 public:
+    Rotate();
+
     PROPERTY(Inspector, EditAnywhere, Category = "Rotation", Range = "-1.0, 1.0")
     glm::vec3 axis  { 0.f, 1.f, 0.f }; // rotation axis (world space)
     
-    PROPERTY(Inspector, EditAnywhere, Category = "Rotation", Range = "-360.0, 360.0")
+    PROPERTY(Inspector, EditAnywhere, Category = "Rotation")
     float     speed { 45.f };           // degrees per second
 
     void Start()  override;
     void Update() override;
-
-    // Serialization
-    std::string GetTypeName() const override { return "Rotate"; }
-    JsonValue   Serialize()   const override;
-    void        Deserialize(const JsonValue& v) override;
 
     // Custom property editor
     void DrawProperties(IEditorUi& ui) override;

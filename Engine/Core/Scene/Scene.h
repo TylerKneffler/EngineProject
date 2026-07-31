@@ -79,7 +79,7 @@ public:
     const std::vector<std::unique_ptr<Object>>& GetObjects() const { return m_objects; }
 
     // Serialization — delegates to SceneSerializer.
-    // Save writes the scene to a .scene JSON file.
+    // Save writes the scene to a scene XML file.
     // Load clears the scene and repopulates it from the file.  Mesh GPU
     // buffers are created automatically using the graphics provider stored by Init().
     bool Save(const std::string& path) const;

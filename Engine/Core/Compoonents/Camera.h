@@ -6,7 +6,7 @@
 class Camera : public Component
 {
 public:
-    Camera() = default;
+    Camera();
     ~Camera() = default;
 
     // Projection settings
@@ -34,8 +34,4 @@ public:
     // aspect = viewport width / height.
     glm::mat4 GetProjectionMatrix(float aspect) const;
 
-    // Serialization
-    std::string GetTypeName() const override { return "Camera"; }
-    JsonValue   Serialize()   const override;
-    void        Deserialize(const JsonValue& v) override;
 };

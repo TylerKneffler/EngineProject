@@ -4,6 +4,25 @@
 #include <filesystem>
 #include <fstream>
 
+Material::Material()
+{
+    SetTypeName(COMPONENT_TYPE_NAME(Material));
+    RegisterField("diffuse", diffuseColor);
+    RegisterField("ambient", ambientColor);
+    RegisterField("specular", specularColor);
+    RegisterField("shininess", shininess);
+    RegisterField("metallicFactor", metallicFactor);
+    RegisterField("roughnessFactor", roughnessFactor);
+    RegisterField("baseColorAlpha", baseColorAlpha);
+    RegisterField("alphaCutoff", alphaCutoff);
+    RegisterField("normalScale", normalScale);
+    RegisterField("occlusionStrength", occlusionStrength);
+    RegisterField("doubleSided", doubleSided);
+    RegisterField("unlit", unlit);
+    RegisterField("alphaMode", alphaMode);
+    RegisterField("emissiveColor", emissiveColor);
+}
+
 namespace
 {
     JsonValue J3(const glm::vec3& v)
@@ -31,35 +50,6 @@ namespace
             return besideMaterial.lexically_normal().generic_string();
         return requested.lexically_normal().generic_string();
     }
-}
-
-JsonValue Material::Serialize() const
-{
-    JsonValue node = JsonValue::MakeObject();
-    node.Set("type",     JsonValue(std::string("Material")));
-    if (!m_filePath.empty())
-    {
-        node.Set("file", JsonValue(m_filePath));
-        return node;
-    }
-    node.Set("diffuse",  J3(diffuseColor));
-    node.Set("ambient",  J3(ambientColor));
-    node.Set("specular", J3(specularColor));
-    node.Set("shininess",JsonValue(shininess));
-    return node;
-}
-
-void Material::Deserialize(const JsonValue& v)
-{
-    if (v.Has("file"))
-    {
-        LoadFromFile(v["file"].AsString());
-        return;
-    }
-    diffuseColor  = from3(v["diffuse"],  diffuseColor);
-    ambientColor  = from3(v["ambient"],  ambientColor);
-    specularColor = from3(v["specular"], specularColor);
-    if (v.Has("shininess")) shininess = v["shininess"].AsFloat();
 }
 
 bool Material::LoadFromFile(const std::string& path)

@@ -9,14 +9,23 @@ class Component;
 class IGraphicsProvider;
 
 // ---------------------------------------------------------------------------
-// SceneSerializer — saves and loads Scene objects to/from .scene files.
+// SceneSerializer — saves and loads Scene objects to/from scene XML files.
 //
-// .scene files are UTF-8 JSON with the following root structure:
-//   {
-//     "version":  1,
-//     "settings": { ... SceneSettings fields ... },
-//     "objects":  [ { "name", "transform", "components", "children" }, ... ]
-//   }
+// Scene XML files use an explicit element tree with the following root structure:
+//   <Scene>
+//     <version>1</version>
+//     <settings>...</settings>
+//     <objects>
+//       <Object>
+//         <components>
+//           <Component>
+//             <type>Mesh</type>
+//             ...
+//           </Component>
+//         </components>
+//       </Object>
+//     </objects>
+//   </Scene>
 //
 // Prefab instances are stored as compact references:
 //   { "prefab": "Assets/Model/Model.prefab", "transform": { ... } }
@@ -46,7 +55,7 @@ public:
     // Register a component type for deserialization by name.
     static void Register(const std::string& typeName, Factory factory);
 
-    // Write the scene to a .scene JSON file.
+    // Write the scene to a scene XML file.
     // Returns false if the destination file cannot be opened.
     static bool Save(const Scene& scene, const std::string& path);
 
@@ -56,7 +65,7 @@ public:
     static bool LoadFromString(Scene& scene, const std::string& source,
         IGraphicsProvider* graphicsProvider = nullptr);
 
-    // Read a .scene JSON file into scene, replacing all existing objects.
+    // Read a scene XML file into scene, replacing all existing objects.
     // Pass a graphics provider so that Mesh GPU buffers are created after load.
     // Returns false if the file cannot be read or has an unsupported format.
     static bool Load(Scene& scene, const std::string& path, IGraphicsProvider* graphicsProvider = nullptr);
@@ -75,3 +84,10 @@ public:
 private:
     static std::unordered_map<std::string, Factory>& GetRegistry();
 };
+
+// Helper for registering component types with the scene serializer registry.
+template<typename T>
+inline void RegisterComponentType(const std::string& typeName)
+{
+    SceneSerializer::Register(typeName, []() -> Component* { return new T(); });
+}

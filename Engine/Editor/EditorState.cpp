@@ -191,7 +191,7 @@ void EditorState::SaveScene()
         dialog.hwndOwner = m_window ? m_window->GetHWND() : nullptr;
         dialog.lpstrFile = filePath;
         dialog.nMaxFile = MAX_PATH;
-        dialog.lpstrFilter = L"Scene Files (*.scene)\0*.scene\0All Files\0*.*\0";
+        dialog.lpstrFilter = L"Scene Files (*.scene;*.xml)\0*.scene;*.xml\0All Files\0*.*\0";
         dialog.lpstrDefExt = L"scene";
         dialog.lpstrInitialDir = initial.c_str();
         dialog.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
@@ -503,7 +503,7 @@ Object* EditorState::InstantiateAsset(const std::string& path)
                 mesh->CreateBuffer(m_scene->GetGraphicsProvider()->GetBufferFactory());
             object->AddComponent<Material>();
         }
-        else if (extension == ".scene")
+        else if (extension == ".scene" || extension == ".xml")
         {
             LoadScene(path);
             return nullptr;

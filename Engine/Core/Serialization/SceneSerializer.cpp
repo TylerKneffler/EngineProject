@@ -7,13 +7,21 @@
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Compoonents/Material.h"
 #include "Core/Compoonents/Camera.h"
+#include <pugixml.hpp>
 #include <fstream>
 #include <algorithm>
+#include <cerrno>
 #include <cctype>
 #include <filesystem>
 #include <functional>
+#include <cstdlib>
 #include <stdexcept>
+#include <sstream>
 #include <vector>
+
+static bool DeserialiseScene(Scene& scene, const JsonValue& root,
+    IGraphicsProvider* graphicsProvider,
+    const std::unordered_map<std::string, SceneSerializer::Factory>& registry);
 
 // ---- Registry ---------------------------------------------------------------
 std::unordered_map<std::string, SceneSerializer::Factory>& SceneSerializer::GetRegistry()
@@ -33,9 +41,9 @@ void SceneSerializer::EnsureBuiltinsRegistered()
     if (s_done) return;
     s_done = true;
 
-    Register("Mesh",     []() -> Component* { return new Mesh(); });
-    Register("Material", []() -> Component* { return new Material(); });
-    Register("Camera",   []() -> Component* { return new Camera(); });
+    RegisterComponentType<Mesh>("Mesh");
+    RegisterComponentType<Material>("Material");
+    RegisterComponentType<Camera>("Camera");
 }
 
 // ---- Local GLM helpers ------------------------------------------------------
@@ -53,6 +61,277 @@ glm::vec3 GlmFrom(const JsonValue& v, glm::vec3 def = {})
 {
     if (!v.IsArray() || v.ArraySize() < 3) return def;
     return { v.ArrayAt(0).AsFloat(), v.ArrayAt(1).AsFloat(), v.ArrayAt(2).AsFloat() };
+}
+
+bool LooksLikeXml(const std::string& source)
+{
+    const std::size_t start = source.find_first_not_of(" \t\r\n");
+    return start != std::string::npos && source[start] == '<';
+}
+
+bool IsStructuralName(const std::string& name)
+{
+    return name == "Scene" || name == "objects" || name == "components" ||
+           name == "children";
+}
+
+std::string ToLowerCopy(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return value;
+}
+
+std::string ToTitleCopy(std::string value)
+{
+    if (!value.empty())
+        value[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(value[0])));
+    return value;
+}
+
+bool SplitTypedName(const std::string& name, std::string& baseName, std::string& typeName)
+{
+    const std::size_t colon = name.find(':');
+    if (colon == std::string::npos)
+        return false;
+    baseName = name.substr(0, colon);
+    typeName = name.substr(colon + 1);
+    return true;
+}
+
+std::string StripOwnedPrefix(const std::string& childName)
+{
+    const std::size_t dot = childName.rfind('.');
+    if (dot == std::string::npos)
+        return childName;
+    return childName.substr(dot + 1);
+}
+
+JsonValue ParseScalarText(const std::string& text)
+{
+    if (text == "true")
+        return JsonValue(true);
+    if (text == "false")
+        return JsonValue(false);
+
+    if (!text.empty())
+    {
+        char* end = nullptr;
+        errno = 0;
+        const double number = std::strtod(text.c_str(), &end);
+        if (end && *end == '\0' && end != text.c_str() && errno != ERANGE)
+            return JsonValue(number);
+    }
+
+    return JsonValue(text);
+}
+
+JsonValue ReadXmlNode(const pugi::xml_node& node)
+{
+    const std::string name = node.name();
+    std::string baseName;
+    std::string typeName;
+    const bool isTypedElement = SplitTypedName(name, baseName, typeName);
+
+    if (name == "objects" || name == "children")
+    {
+        JsonValue array = JsonValue::MakeArray();
+        for (const pugi::xml_node& child : node.children())
+            if (child.type() == pugi::node_element)
+                array.Push(ReadXmlNode(child));
+        return array;
+    }
+
+    if (name == "components")
+    {
+        JsonValue array = JsonValue::MakeArray();
+        for (const pugi::xml_node& child : node.children())
+            if (child.type() == pugi::node_element)
+                array.Push(ReadXmlNode(child));
+        return array;
+    }
+
+    if (isTypedElement && baseName == "components")
+    {
+        JsonValue component = JsonValue::MakeObject();
+        component.Set("type", JsonValue(ToTitleCopy(typeName)));
+        for (const pugi::xml_node& child : node.children())
+        {
+            if (child.type() != pugi::node_element)
+                continue;
+            component.Set(child.name(), ReadXmlNode(child));
+        }
+        return component;
+    }
+
+    if (!node.first_child())
+        return ParseScalarText(node.child_value());
+
+    std::string firstChildName;
+    bool allSame = true;
+    for (const pugi::xml_node& child : node.children())
+    {
+        if (child.type() != pugi::node_element)
+            continue;
+        if (firstChildName.empty())
+            firstChildName = child.name();
+        else if (child.name() != firstChildName)
+        {
+            allSame = false;
+            break;
+        }
+    }
+
+    const bool looksLikeOwnedList =
+        firstChildName == "item" ||
+        firstChildName == "object" ||
+        firstChildName == "component" ||
+        firstChildName == "components:mesh" ||
+        firstChildName == "components:material" ||
+        firstChildName == "components:rotate" ||
+        firstChildName == name + ".item" ||
+        firstChildName == name + ".object" ||
+        firstChildName == name + ".component";
+
+    if (allSame && looksLikeOwnedList)
+    {
+        JsonValue array = JsonValue::MakeArray();
+        for (const pugi::xml_node& child : node.children())
+            if (child.type() == pugi::node_element)
+                array.Push(ReadXmlNode(child));
+        return array;
+    }
+
+    JsonValue object = JsonValue::MakeObject();
+    for (const pugi::xml_node& child : node.children())
+    {
+        if (child.type() != pugi::node_element)
+            continue;
+        object.Set(StripOwnedPrefix(child.name()), ReadXmlNode(child));
+    }
+    return object;
+}
+
+void WriteXmlNode(pugi::xml_node node, const JsonValue& value);
+void WriteXmlField(pugi::xml_node parent, const char* name, const JsonValue& value);
+void WriteXmlArrayItems(pugi::xml_node parent, const JsonValue& value, const char* itemName)
+{
+    for (std::size_t i = 0; i < value.ArraySize(); ++i)
+    {
+        pugi::xml_node child = parent.append_child(itemName);
+        WriteXmlNode(child, value.ArrayAt(i));
+    }
+}
+
+void WriteXmlObjectFields(pugi::xml_node parent, const JsonValue& value, const char* skipKey = nullptr)
+{
+    for (std::size_t i = 0; i < value.ObjectSize(); ++i)
+    {
+        const std::string key = value.ObjectKey(i);
+        if (skipKey && key == skipKey)
+            continue;
+        WriteXmlField(parent, key.c_str(), value.ObjectValue(i));
+    }
+}
+
+void WriteXmlField(pugi::xml_node parent, const char* name, const JsonValue& value)
+{
+    const std::string parentName = parent.name();
+    std::string childName = name ? name : "";
+    if ((parentName == "settings" || parentName == "object" ||
+        parentName == "transform") && name && *name)
+    {
+        childName = parentName + "." + name;
+    }
+
+    pugi::xml_node child = parent.append_child(childName.c_str());
+    if (value.IsArray())
+    {
+        if (name && std::string(name) == "components")
+        {
+            for (std::size_t i = 0; i < value.ArraySize(); ++i)
+            {
+                const JsonValue& component = value.ArrayAt(i);
+                const std::string typeName = component["type"].AsString(); // Use capitalized name
+                pugi::xml_node typed = child.append_child((std::string("components:") + typeName).c_str());
+                WriteXmlObjectFields(typed, component, "type");
+            }
+            return;
+        }
+
+        const char* itemName = "item";
+        if (name && std::string(name) == "objects")
+            itemName = "object";
+        else if (name && std::string(name) == "children")
+            itemName = "object";
+
+        WriteXmlArrayItems(child, value, itemName);
+        return;
+    }
+    WriteXmlNode(child, value);
+}
+
+void WriteXmlNode(pugi::xml_node node, const JsonValue& value)
+{
+    switch (value.GetType())
+    {
+    case JsonValue::Type::Null:
+        node.text().set("");
+        break;
+    case JsonValue::Type::Bool:
+        node.text().set(value.AsBool() ? "true" : "false");
+        break;
+    case JsonValue::Type::Number:
+    {
+        std::ostringstream stream;
+        stream << value.AsDouble();
+        node.text().set(stream.str().c_str());
+        break;
+    }
+    case JsonValue::Type::String:
+        node.text().set(value.AsString().c_str());
+        break;
+    case JsonValue::Type::Array:
+        WriteXmlArrayItems(node, value, "item");
+        break;
+    case JsonValue::Type::Object:
+        WriteXmlObjectFields(node, value);
+        break;
+    }
+}
+
+std::string WriteXmlDocument(const JsonValue& value, const char* rootName = "Scene")
+{
+    pugi::xml_document document;
+    pugi::xml_node root = document.append_child(rootName);
+    root.append_attribute("xmlns:components") = "urn:engine-components";
+    if (value.IsObject())
+        WriteXmlObjectFields(root, value);
+    else
+        WriteXmlNode(root, value);
+
+    std::ostringstream stream;
+    document.save(stream, "  ");
+    return stream.str();
+}
+
+bool LoadXmlDocument(Scene& scene, const std::string& source,
+    IGraphicsProvider* graphicsProvider,
+    const std::unordered_map<std::string, SceneSerializer::Factory>& registry,
+    bool isFile)
+{
+    pugi::xml_document document;
+    pugi::xml_parse_result result = isFile
+        ? document.load_file(source.c_str())
+        : document.load_string(source.c_str());
+    if (!result)
+        return false;
+
+    const pugi::xml_node root = document.document_element();
+    if (!root)
+        return false;
+
+    return DeserialiseScene(scene, ReadXmlNode(root), graphicsProvider, registry);
 }
 
 } // namespace
@@ -138,7 +417,7 @@ static JsonValue SerialiseScene(const Scene& scene)
 // ---- Save -------------------------------------------------------------------
 std::string SceneSerializer::SaveToString(const Scene& scene)
 {
-    return JsonWrite(SerialiseScene(scene));
+    return WriteXmlDocument(SerialiseScene(scene));
 }
 
 bool SceneSerializer::Save(const Scene& scene, const std::string& path)
@@ -276,17 +555,30 @@ bool SceneSerializer::LoadFromString(Scene& scene, const std::string& source,
 {
     EnsureBuiltinsRegistered();
     try { return DeserialiseScene(scene, JsonParse(source), graphicsProvider, GetRegistry()); }
+    catch (const std::exception&) {}
+
+    try
+    {
+        if (LoadXmlDocument(scene, source, graphicsProvider, GetRegistry(), false))
+            return true;
+    }
     catch (const std::exception& error)
     {
         OutputDebugStringA((std::string("[SceneSerializer] Failed to load scene data: ") +
             error.what() + "\n").c_str());
         return false;
     }
+
+    OutputDebugStringA("[SceneSerializer] Failed to load scene data: unsupported format\n");
+    return false;
 }
 
 bool SceneSerializer::Load(Scene& scene, const std::string& path, IGraphicsProvider* graphicsProvider)
 {
     EnsureBuiltinsRegistered();
+    try { return LoadXmlDocument(scene, path, graphicsProvider, GetRegistry(), true); }
+    catch (const std::exception&) {}
+
     try { return DeserialiseScene(scene, JsonParseFile(path), graphicsProvider, GetRegistry()); }
     catch (const std::exception& error)
     {

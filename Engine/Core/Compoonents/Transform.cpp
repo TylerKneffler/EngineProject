@@ -2,6 +2,14 @@
 #include "Core/Object.h"
 #include <glm/gtc/matrix_transform.hpp>
 
+Transform::Transform()
+{
+    SetTypeName(COMPONENT_TYPE_NAME(Transform));
+    RegisterField("position", position);
+    RegisterField("rotation", rotation);
+    RegisterField("scale", scale);
+}
+
 namespace
 {
 JsonValue JVec3(const glm::vec3& v)
@@ -42,19 +50,3 @@ glm::mat4 Transform::GetWorldMatrix() const
     return local;
 }
 
-JsonValue Transform::Serialize() const
-{
-    JsonValue node = JsonValue::MakeObject();
-    node.Set("type", JsonValue(std::string("Transform")));
-    node.Set("position", JVec3(position));
-    node.Set("rotation", JVec3(rotation));
-    node.Set("scale", JVec3(scale));
-    return node;
-}
-
-void Transform::Deserialize(const JsonValue& v)
-{
-    if (v.Has("position")) position = Vec3From(v["position"], position);
-    if (v.Has("rotation")) rotation = Vec3From(v["rotation"], rotation);
-    if (v.Has("scale"))    scale    = Vec3From(v["scale"], scale);
-}

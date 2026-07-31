@@ -439,3 +439,19 @@ void Component::DrawProperties(IEditorUi& ui)
         Deserialize(editedData);
     }
 }
+
+JsonValue Component::Serialize() const
+{
+    JsonValue data = JsonValue::MakeObject();
+    data.Set("type", JsonValue(GetTypeName()));
+    for (const auto& field : m_serializedFields)
+        data.Set(field.name, field.write());
+    return data;
+}
+
+void Component::Deserialize(const JsonValue& v)
+{
+    for (const auto& field : m_serializedFields)
+        if (v.Has(field.name))
+            field.read(v[field.name]);
+}

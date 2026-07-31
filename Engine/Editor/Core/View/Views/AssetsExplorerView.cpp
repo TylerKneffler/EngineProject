@@ -246,7 +246,7 @@ void AssetsExplorerView::OpenFile(const std::string& filePath)
 {
     // Check if this is a scene file
     std::string extension = fs::path(filePath).extension().string();
-    if (extension == ".scene" || extension == ".Scene")
+    if (extension == ".scene" || extension == ".Scene" || extension == ".xml" || extension == ".XML")
     {
         // Trigger the scene load callback
         if (OnSceneRequested)
