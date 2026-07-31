@@ -9,6 +9,7 @@
 #include <unordered_map>
 
 class VulkanGraphicsTexture;
+class VulkanGraphicsBuffer;
 
 class VulkanTextureSystem : public std::enable_shared_from_this<VulkanTextureSystem>
 {
@@ -25,7 +26,8 @@ public:
     void Bind(
         VkCommandBuffer commands,
         VkPipelineLayout pipelineLayout,
-        const std::array<const VulkanGraphicsTexture*, 5>& textures);
+        const std::array<const VulkanGraphicsTexture*, 5>& textures,
+        const std::array<const VulkanGraphicsBuffer*, 2>& buffers);
     VkDescriptorSetLayout GetDescriptorSetLayout() const { return m_layout; }
     VkDevice GetDevice() const { return m_device; }
 
@@ -33,7 +35,11 @@ private:
     struct TextureKey
     {
         std::array<VkImageView, 5> views{};
-        bool operator==(const TextureKey& other) const { return views == other.views; }
+        std::array<VkBuffer, 2> buffers{};
+        bool operator==(const TextureKey& other) const
+        {
+            return views == other.views && buffers == other.buffers;
+        }
     };
     struct TextureKeyHash
     {
@@ -50,6 +56,8 @@ private:
     VkDescriptorSetLayout m_layout = VK_NULL_HANDLE;
     VkDescriptorPool m_pool = VK_NULL_HANDLE;
     VkSampler m_sampler = VK_NULL_HANDLE;
+    VkBuffer m_dummyBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory m_dummyBufferMemory = VK_NULL_HANDLE;
     VulkanImageResource m_white;
     std::unordered_map<TextureKey, VkDescriptorSet, TextureKeyHash> m_sets;
 };

@@ -100,6 +100,36 @@ bool NuklearEditorUi::TreeNode(const void* id,const char* label,bool selected,bo
     return open;
 }
 void NuklearEditorUi::TreePop(){nk_tree_pop(CTX);}
+EditorUiObjectRowResult NuklearEditorUi::ObjectTreeRow(const void* id,char* name,size_t size,bool* enabled,bool selected,bool leaf,bool lockName)
+{
+    EditorUiObjectRowResult result;
+    auto [state,inserted]=m_objectTreeOpen.emplace(id,false);(void)inserted;
+    if(m_sameLineCount>0){nk_layout_row_end(CTX);m_sameLineCount=0;}m_sameLine=false;
+    nk_layout_row_begin(CTX,NK_DYNAMIC,24,3);
+    nk_layout_row_push(CTX,0.16f);
+    const std::string marker=std::string(static_cast<size_t>(m_objectTreeDepth)*2,' ')+(selected?">":" ")+(leaf?" ":(state->second?"-":"+"));
+    const struct nk_rect first=nk_widget_bounds(CTX);
+    if(!leaf&&nk_button_label(CTX,marker.c_str()))state->second=!state->second;else if(leaf)nk_label(CTX,marker.c_str(),NK_TEXT_LEFT);
+    nk_layout_row_push(CTX,0.14f);int active=*enabled?1:0;result.enabledChanged=!m_disabled&&nk_checkbox_label(CTX,"",&active)!=0;*enabled=active!=0;
+    nk_layout_row_push(CTX,0.70f);const std::string before=name;int len=static_cast<int>(strlen(name));nk_flags editFlags=NK_EDIT_FIELD|((m_disabled||lockName)?NK_EDIT_READ_ONLY:0);nk_edit_string(CTX,editFlags,name,&len,static_cast<int>(size)-1,nk_filter_default);name[len]=0;result.nameChanged=!m_disabled&&!lockName&&before!=name;
+    const struct nk_rect last=nk_widget_bounds(CTX);nk_layout_row_end(CTX);
+    m_lastItemX=first.x;m_lastItemY=first.y;m_lastItemW=(last.x+last.w)-first.x;m_lastItemH=first.h;
+    const struct nk_rect row=nk_rect(m_lastItemX,m_lastItemY,m_lastItemW,m_lastItemH);
+    result.clicked=nk_input_is_mouse_click_in_rect(&CTX->input,NK_BUTTON_LEFT,row)!=0;
+    result.doubleClicked=nk_input_is_mouse_click_in_rect(&CTX->input,NK_BUTTON_DOUBLE,row)!=0;
+    result.open=!leaf&&state->second;if(result.open)++m_objectTreeDepth;
+    m_lastClicked=result.clicked;
+    return result;
+}
+void NuklearEditorUi::ObjectTreePop(){if(m_objectTreeDepth>0)--m_objectTreeDepth;}
+EditorUiObjectRowResult NuklearEditorUi::ObjectHeader(const void* id,char* name,size_t size,bool* enabled,bool lockName)
+{
+    (void)id;EditorUiObjectRowResult result;Label("Object");Separator();
+    nk_layout_row_begin(CTX,NK_DYNAMIC,24,2);nk_layout_row_push(CTX,0.68f);
+    const std::string before=name;int len=static_cast<int>(strlen(name));nk_flags flags=NK_EDIT_FIELD|(lockName?NK_EDIT_READ_ONLY:0);nk_edit_string(CTX,flags,name,&len,static_cast<int>(size)-1,nk_filter_default);name[len]=0;result.nameChanged=!lockName&&before!=name;
+    nk_layout_row_push(CTX,0.32f);int active=*enabled?1:0;result.enabledChanged=!m_disabled&&nk_checkbox_label(CTX,"Enabled",&active)!=0;*enabled=active!=0;nk_layout_row_end(CTX);
+    return result;
+}
 bool NuklearEditorUi::Selectable(const char*l,bool s,bool){Layout();RecordNextWidgetBounds();int selected=s;m_lastClicked=nk_selectable_label(CTX,l,NK_TEXT_LEFT,&selected)!=0;return m_lastClicked;}
 bool NuklearEditorUi::BeginChild(const char*i){return nk_group_begin(CTX,i,NK_WINDOW_BORDER|NK_WINDOW_SCROLL_AUTO_HIDE)!=0;} void NuklearEditorUi::EndChild(){nk_group_end(CTX);}
 bool NuklearEditorUi::IsItemHovered()const{const struct nk_rect b=nk_rect(m_lastItemX,m_lastItemY,m_lastItemW,m_lastItemH);return nk_input_is_mouse_hovering_rect(&CTX->input,b)!=0;} bool NuklearEditorUi::IsItemClicked()const{return m_lastClicked;} bool NuklearEditorUi::IsItemDoubleClicked()const{const struct nk_rect b=nk_rect(m_lastItemX,m_lastItemY,m_lastItemW,m_lastItemH);return nk_input_is_mouse_click_in_rect(&CTX->input,NK_BUTTON_DOUBLE,b)!=0;}

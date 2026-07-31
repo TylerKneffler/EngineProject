@@ -9,23 +9,28 @@ class D3D11GraphicsBuffer : public IGraphicsBuffer
 public:
     D3D11GraphicsBuffer(Microsoft::WRL::ComPtr<ID3D11Buffer> buffer,
                         Usage usage, AccessMode access, uint64_t size,
-                        const void* initialData);
+                        const void* initialData, uint32_t elementStride,
+                        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv);
 
     Usage GetUsage() const override { return m_usage; }
     AccessMode GetAccessMode() const override { return m_access; }
     uint64_t GetSize() const override { return m_size; }
+    uint32_t GetElementStride() const override { return m_elementStride; }
     void* Map() override;
     void Unmap() override {}
     void* GetNativeHandle() const override { return m_buffer.Get(); }
 
     ID3D11Buffer* GetBuffer() const { return m_buffer.Get(); }
     const uint8_t* GetShadowData() const { return m_shadowData.empty() ? nullptr : m_shadowData.data(); }
+    ID3D11ShaderResourceView* GetShaderResourceView() const { return m_srv.Get(); }
 
 private:
     Microsoft::WRL::ComPtr<ID3D11Buffer> m_buffer;
     Usage m_usage;
     AccessMode m_access;
     uint64_t m_size;
+    uint32_t m_elementStride = 0;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_srv;
     std::vector<uint8_t> m_shadowData;
 };
 
@@ -38,7 +43,8 @@ public:
         IGraphicsBuffer::Usage usage,
         IGraphicsBuffer::AccessMode access,
         uint64_t sizeBytes,
-        const void* initialData = nullptr) override;
+        const void* initialData = nullptr,
+        uint32_t elementStride = 0) override;
 
 private:
     ID3D11Device* m_device = nullptr;

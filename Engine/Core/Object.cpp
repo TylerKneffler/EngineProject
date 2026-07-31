@@ -21,14 +21,23 @@ Object::~Object()
 #pragma region Lifecycle methods
 void Object::Enabled()
 {
+    if (enabled) return;
+    enabled = true;
+    for (Component* comp : Components)
+        if (Script* script = dynamic_cast<Script*>(comp)) script->Enabled();
 }
 
 void Object::Disabled()
 {
+    if (!enabled) return;
+    enabled = false;
+    for (Component* comp : Components)
+        if (Script* script = dynamic_cast<Script*>(comp)) script->Disabled();
 }
 
 void Object::Start()
 {
+    if (!IsEnabledInHierarchy()) return;
     for (Component* comp : Components)
         if (Script* s = dynamic_cast<Script*>(comp))
             s->Start();
@@ -36,6 +45,7 @@ void Object::Start()
 
 void Object::Update()
 {
+    if (!IsEnabledInHierarchy()) return;
     for (Component* comp : Components)
         if (Script* s = dynamic_cast<Script*>(comp))
             s->Update();

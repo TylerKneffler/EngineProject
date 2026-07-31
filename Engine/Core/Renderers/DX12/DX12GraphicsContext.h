@@ -13,6 +13,7 @@ public:
     explicit D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList);    D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList, ID3D12RootSignature* rootSig);
     void SetPipeline(const IPipelineState* pipeline) override;
     void SetConstantBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint64_t offset = 0) override;
+    void SetStructuredBuffer(uint32_t slot, const IGraphicsBuffer* buffer) override;
     void SetVertexBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset = 0) override;
     void SetIndexBuffer(const IGraphicsBuffer* buffer, uint32_t indexCount, uint64_t offset = 0) override;
     void SetTexture(uint32_t slot, const IGraphicsTexture* texture) override;

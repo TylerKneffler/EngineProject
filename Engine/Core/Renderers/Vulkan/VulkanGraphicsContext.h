@@ -5,6 +5,7 @@
 #include "VulkanGraphicsTexture.h"
 
 class VulkanPipelineState;
+class VulkanGraphicsBuffer;
 class VulkanGraphicsContext : public IGraphicsContext
 {
 public:
@@ -14,6 +15,7 @@ public:
         : m_commandBuffer(commandBuffer), m_textureSystem(std::move(textureSystem)) {}
     void SetPipeline(const IPipelineState* pipeline) override;
     void SetConstantBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint64_t offset = 0) override;
+    void SetStructuredBuffer(uint32_t slot, const IGraphicsBuffer* buffer) override;
     void SetVertexBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset = 0) override;
     void SetIndexBuffer(const IGraphicsBuffer* buffer, uint32_t indexCount, uint64_t offset = 0) override;
     void SetTexture(uint32_t slot, const IGraphicsTexture* texture) override;
@@ -30,6 +32,7 @@ private:
     const VulkanPipelineState* m_pipeline = nullptr;
     std::shared_ptr<VulkanTextureSystem> m_textureSystem;
     std::array<const VulkanGraphicsTexture*, 5> m_textures{};
+    std::array<const VulkanGraphicsBuffer*, 2> m_structuredBuffers{};
 };
 
 class VulkanGraphicsContextFactory : public IGraphicsContextFactory

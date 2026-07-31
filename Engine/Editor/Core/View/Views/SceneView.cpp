@@ -146,7 +146,7 @@ Object* SceneView::PickObjectInViewport(const EditorUiVec2& mousePos, const Edit
     for (const auto& objPtr : m_scene->GetObjects())
     {
         Object* obj = objPtr.get();
-        if (!obj || !obj->GetComponent<Mesh>())
+        if (!obj || !obj->IsEnabledInHierarchy() || !obj->GetComponent<Mesh>())
             continue;
 
         const glm::vec3 center = obj->transform.GetWorldPosition();

@@ -11,6 +11,8 @@ class IEditorUi; // forward declaration — full definition in Editor/UI/IEditor
 
 #define COMPONENT_TYPE_NAME(ClassName) #ClassName
 
+class IGraphicsProvider;
+
 class Component
 {
 public:
@@ -27,7 +29,10 @@ public:
     // not override Serialize()/Deserialize().
     virtual std::string GetTypeName() const { return m_typeName; }
     virtual JsonValue   Serialize() const;
+    JsonValue           SerializeFields() const;
     virtual void        Deserialize(const JsonValue& v);
+    // Lets components rebuild runtime resources without serializer type checks.
+    virtual void        OnAfterDeserialize(IGraphicsProvider*) {}
     // Called by the Properties panel to draw editable properties in the editor.
     virtual void DrawProperties(IEditorUi& ui);
 

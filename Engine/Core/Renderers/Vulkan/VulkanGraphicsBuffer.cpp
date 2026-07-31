@@ -17,7 +17,7 @@ VulkanGraphicsBuffer::~VulkanGraphicsBuffer()
 
 std::unique_ptr<IGraphicsBuffer> VulkanBufferFactory::CreateBuffer(
     IGraphicsBuffer::Usage usage, IGraphicsBuffer::AccessMode access,
-    uint64_t sizeBytes, const void* initialData)
+    uint64_t sizeBytes, const void* initialData, uint32_t elementStride)
 {
     VkBufferUsageFlags vkUsage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     switch (usage)
@@ -45,6 +45,9 @@ std::unique_ptr<IGraphicsBuffer> VulkanBufferFactory::CreateBuffer(
     void* mapped = nullptr;
     VkCheck(vkMapMemory(m_device, memory, 0, sizeBytes, 0, &mapped), "vkMapMemory");
     if (initialData) std::memcpy(mapped, initialData, static_cast<size_t>(sizeBytes));
-    return std::make_unique<VulkanGraphicsBuffer>(m_device, buffer, memory, usage, access, sizeBytes, mapped);
+    auto result = std::make_unique<VulkanGraphicsBuffer>(
+        m_device, buffer, memory, usage, access, sizeBytes, mapped);
+    result->SetElementStride(elementStride);
+    return result;
 }
 #endif

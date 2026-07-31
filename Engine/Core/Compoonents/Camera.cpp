@@ -7,6 +7,7 @@
 Camera::Camera()
 {
     SetTypeName(COMPONENT_TYPE_NAME(Camera));
+    RegisterField("active", active);
     RegisterField("fov", fov);
     RegisterField("near", nearPlane);
     RegisterField("far", farPlane);

@@ -54,7 +54,7 @@ std::unique_ptr<IGraphicsBuffer> D3D12BufferFactory::CreateBuffer(
     IGraphicsBuffer::Usage usage,
     IGraphicsBuffer::AccessMode access,
     uint64_t sizeBytes,
-    const void* initialData)
+    const void* initialData, uint32_t elementStride)
 {
     D3D12_HEAP_TYPE heapType = D3D12_HEAP_TYPE_DEFAULT;
     D3D12_RESOURCE_STATES initialState = D3D12_RESOURCE_STATE_COMMON;
@@ -119,6 +119,7 @@ std::unique_ptr<IGraphicsBuffer> D3D12BufferFactory::CreateBuffer(
         throw std::runtime_error("Failed to create D3D12 buffer");
 
     auto buffer = std::make_unique<D3D12GraphicsBuffer>(resource, usage, access, sizeBytes);
+    buffer->SetElementStride(elementStride);
 
     // If initial data provided, copy it
     if (initialData && access == IGraphicsBuffer::AccessMode::Upload)

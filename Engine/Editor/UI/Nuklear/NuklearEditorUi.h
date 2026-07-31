@@ -20,6 +20,9 @@ public:
     bool InputText(const char*,char*,size_t) override; bool DragFloat(const char*,float*,float,float,float) override; bool DragFloat3(const char*,float*,float,float,float) override;
     bool ColorEdit3(const char*,float*) override; bool ColorEdit4(const char*,float*) override; bool SliderInt(const char*,int*,int,int) override; bool InputUInt(const char*,uint32_t*) override;
     void ValueLabel(const char*,const char*) override; bool CollapsingHeader(const char*,bool) override; bool TreeNode(const void*,const char*,bool,bool,bool) override; void TreePop() override;
+    EditorUiObjectRowResult ObjectTreeRow(const void*,char*,size_t,bool*,bool,bool,bool) override;
+    void ObjectTreePop() override;
+    EditorUiObjectRowResult ObjectHeader(const void*,char*,size_t,bool*,bool) override;
     bool Selectable(const char*,bool,bool) override; bool BeginChild(const char*) override; void EndChild() override; bool IsItemHovered()const override; bool IsItemClicked()const override;
     bool IsItemDoubleClicked()const override; bool IsWindowBackgroundClicked()const override; void SetClipboardText(const char*) override; void ScrollToBottom() override;
     bool BeginDragDropSource() override; void SetDragDropPayload(const char*,const void*,size_t) override; void EndDragDropSource() override;
@@ -38,4 +41,6 @@ private:
     std::vector<unsigned char> m_dragPayload;
     NuklearWindowController m_window;
     std::unordered_map<std::string, bool> m_collapsingHeaders;
+    std::unordered_map<const void*, bool> m_objectTreeOpen;
+    int m_objectTreeDepth=0;
 };

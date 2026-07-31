@@ -25,6 +25,15 @@ struct EditorUiViewportInput
     bool middleDown = false;
 };
 
+struct EditorUiObjectRowResult
+{
+    bool open = false;
+    bool clicked = false;
+    bool doubleClicked = false;
+    bool nameChanged = false;
+    bool enabledChanged = false;
+};
+
 // Package-neutral immediate UI facade used throughout Editor/Core/View.
 class IEditorUi
 {
@@ -52,6 +61,11 @@ public:
     virtual bool CollapsingHeader(const char* label, bool defaultOpen = true) = 0;
     virtual bool TreeNode(const void* id, const char* label, bool selected, bool leaf, bool defaultOpen = false) = 0;
     virtual void TreePop() = 0;
+    virtual EditorUiObjectRowResult ObjectTreeRow(const void* id, char* name, size_t size,
+        bool* enabled, bool selected, bool leaf, bool lockName) = 0;
+    virtual void ObjectTreePop() = 0;
+    virtual EditorUiObjectRowResult ObjectHeader(const void* id, char* name, size_t size,
+        bool* enabled, bool lockName) = 0;
     virtual bool Selectable(const char* label, bool selected = false, bool allowDoubleClick = false) = 0;
     virtual bool BeginChild(const char* id) = 0;
     virtual void EndChild() = 0;

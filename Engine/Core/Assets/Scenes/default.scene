@@ -2,78 +2,156 @@
 <Scene xmlns:components="urn:engine-components">
   <version>1</version>
   <settings>
-    <settings.showGrid>true</settings.showGrid>
-    <settings.gridHalfSize>10</settings.gridHalfSize>
-    <settings.gridCellSize>1</settings.gridCellSize>
-    <settings.gridOpacity>0.4</settings.gridOpacity>
-    <settings.gridColor>
+    <showGrid>true</showGrid>
+    <gridHalfSize>10</gridHalfSize>
+    <gridCellSize>1</gridCellSize>
+    <gridOpacity>0.4</gridOpacity>
+    <gridFadeDistance>80</gridFadeDistance>
+    <gridColor>
       <item>0.45</item>
       <item>0.45</item>
       <item>0.45</item>
-    </settings.gridColor>
-    <settings.gridOriginColor>
+    </gridColor>
+    <gridOriginColor>
       <item>0.3</item>
       <item>0.5</item>
       <item>0.8</item>
-    </settings.gridOriginColor>
-    <settings.ambientColor>
+    </gridOriginColor>
+    <ambientColor>
       <item>0.12</item>
       <item>0.12</item>
       <item>0.12</item>
-    </settings.ambientColor>
+    </ambientColor>
+    <skyboxTexture></skyboxTexture>
   </settings>
   <objects>
-    <object>
-      <object.name>Cube</object.name>
-      <object.transform>
-        <transform.position>
+    <item>
+      <name>Cube</name>
+      <enabled>true</enabled>
+      <transform>
+        <Transform.position>
           <item>0</item>
           <item>0</item>
           <item>0</item>
-        </transform.position>
-        <transform.rotation>
+        </Transform.position>
+        <Transform.rotation>
           <item>0</item>
           <item>0</item>
           <item>0</item>
-        </transform.rotation>
-        <transform.scale>
+        </Transform.rotation>
+        <Transform.scale>
           <item>1</item>
           <item>1</item>
           <item>1</item>
-        </transform.scale>
-      </object.transform>
-      <object.components>
+        </Transform.scale>
+      </transform>
+      <components>
         <components:Mesh>
-          <file>Assets/Mesh/cube.obj</file>
+          <Mesh.file>Assets/Mesh/cube.obj</Mesh.file>
         </components:Mesh>
         <components:Material>
-          <diffuse>
+          <Material.diffuse>
             <item>1</item>
             <item>0.5</item>
             <item>0.1</item>
-          </diffuse>
-          <ambient>
+          </Material.diffuse>
+          <Material.ambient>
             <item>0.1</item>
             <item>0.1</item>
             <item>0.1</item>
-          </ambient>
-          <specular>
+          </Material.ambient>
+          <Material.specular>
             <item>1</item>
             <item>1</item>
             <item>1</item>
-          </specular>
-          <shininess>32</shininess>
+          </Material.specular>
+          <Material.shininess>32</Material.shininess>
         </components:Material>
         <components:Rotate>
-          <axis>
+          <Rotate.axis>
             <item>0</item>
             <item>1</item>
             <item>0</item>
-          </axis>
-          <speed>45</speed>
+          </Rotate.axis>
+          <Rotate.speed>45</Rotate.speed>
         </components:Rotate>
-      </object.components>
-      <object.children />
-    </object>
+      </components>
+      <children />
+    </item>
+    <item>
+      <name>Camera</name>
+      <enabled>true</enabled>
+      <transform>
+        <Transform.position>
+          <item>0</item>
+          <item>1.5</item>
+          <item>-3</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Camera>
+          <Camera.active>true</Camera.active>
+          <Camera.fov>60</Camera.fov>
+          <Camera.near>0.01</Camera.near>
+          <Camera.far>100</Camera.far>
+          <Camera.target>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </Camera.target>
+          <Camera.up>
+            <item>0</item>
+            <item>1</item>
+            <item>0</item>
+          </Camera.up>
+        </components:Camera>
+      </components>
+      <children />
+    </item>
+    <item>
+      <name>Point Light</name>
+      <enabled>true</enabled>
+      <transform>
+        <Transform.position>
+          <item>1.5</item>
+          <item>2</item>
+          <item>-1</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Light>
+          <Light.color>
+            <item>1</item>
+            <item>0.95</item>
+            <item>0.85</item>
+          </Light.color>
+          <Light.intensity>4</Light.intensity>
+          <Light.range>8</Light.range>
+          <Light.falloff>2</Light.falloff>
+          <Light.baked>false</Light.baked>
+        </components:Light>
+      </components>
+      <children />
+    </item>
   </objects>
 </Scene>

@@ -3,6 +3,8 @@
 #include "Core/Object.h"
 #include "View/IEditorPanel.h"
 
+class Scene;
+
 // ---------------------------------------------------------------------------
 // PropertiesView
 //
@@ -19,6 +21,8 @@ public:
     PropertiesView()  = default;
     ~PropertiesView() = default;
 
+    void Init(Scene* scene) { m_scene = scene; }
+
     void SetSelectedObject(Object* obj) { m_selectedObject = obj; }
     Object* GetSelectedObject() const   { return m_selectedObject; }
 
@@ -28,4 +32,5 @@ private:
     void DrawTransform(IEditorUi& ui);
 
     Object* m_selectedObject = nullptr;
+    Scene* m_scene = nullptr;
 };

@@ -4,8 +4,10 @@
 
 D3D11GraphicsBuffer::D3D11GraphicsBuffer(
     Microsoft::WRL::ComPtr<ID3D11Buffer> buffer,
-    Usage usage, AccessMode access, uint64_t size, const void* initialData)
-    : m_buffer(std::move(buffer)), m_usage(usage), m_access(access), m_size(size)
+    Usage usage, AccessMode access, uint64_t size, const void* initialData,
+    uint32_t elementStride, Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv)
+    : m_buffer(std::move(buffer)), m_usage(usage), m_access(access), m_size(size),
+      m_elementStride(elementStride), m_srv(std::move(srv))
 {
     if (access == AccessMode::Upload)
     {
@@ -26,7 +28,7 @@ std::unique_ptr<IGraphicsBuffer> D3D11BufferFactory::CreateBuffer(
     IGraphicsBuffer::Usage usage,
     IGraphicsBuffer::AccessMode access,
     uint64_t sizeBytes,
-    const void* initialData)
+    const void* initialData, uint32_t elementStride)
 {
     if (!m_device || sizeBytes == 0 || sizeBytes > UINT_MAX)
         throw std::runtime_error("Invalid DX11 buffer request");
@@ -46,7 +48,13 @@ std::unique_ptr<IGraphicsBuffer> D3D11BufferFactory::CreateBuffer(
             break;
         case IGraphicsBuffer::Usage::VertexBuffer: desc.BindFlags = D3D11_BIND_VERTEX_BUFFER; break;
         case IGraphicsBuffer::Usage::IndexBuffer: desc.BindFlags = D3D11_BIND_INDEX_BUFFER; break;
-        case IGraphicsBuffer::Usage::ShaderResource: desc.BindFlags = D3D11_BIND_SHADER_RESOURCE; break;
+        case IGraphicsBuffer::Usage::ShaderResource:
+            desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+            if (!elementStride || sizeBytes % elementStride != 0)
+                throw std::runtime_error("Structured DX11 buffers require a valid element stride");
+            desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+            desc.StructureByteStride = elementStride;
+            break;
     }
     if (access == IGraphicsBuffer::AccessMode::Readback)
         desc.BindFlags = 0;
@@ -55,6 +63,15 @@ std::unique_ptr<IGraphicsBuffer> D3D11BufferFactory::CreateBuffer(
     data.pSysMem = initialData;
     Microsoft::WRL::ComPtr<ID3D11Buffer> buffer;
     ThrowIfFailed(m_device->CreateBuffer(&desc, initialData ? &data : nullptr, &buffer));
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv;
+    if (usage == IGraphicsBuffer::Usage::ShaderResource)
+    {
+        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+        srvDesc.Format = DXGI_FORMAT_UNKNOWN;
+        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
+        srvDesc.Buffer.NumElements = static_cast<UINT>(sizeBytes / elementStride);
+        ThrowIfFailed(m_device->CreateShaderResourceView(buffer.Get(), &srvDesc, &srv));
+    }
     return std::make_unique<D3D11GraphicsBuffer>(
-        std::move(buffer), usage, access, sizeBytes, initialData);
+        std::move(buffer), usage, access, sizeBytes, initialData, elementStride, std::move(srv));
 }

@@ -16,6 +16,7 @@ public:
     ~Object();
 
     std::string name;
+    bool enabled = true;
     Transform transform;
 
     Object*             Parent = nullptr;
@@ -43,6 +44,14 @@ public:
     bool IsPartOfPrefabInstance() const
     {
         return GetPrefabInstanceRoot() != nullptr;
+    }
+
+    bool IsEnabledInHierarchy() const
+    {
+        for (const Object* current = this; current; current = current->Parent)
+            if (!current->enabled)
+                return false;
+        return true;
     }
 
     // Lifecycle methods

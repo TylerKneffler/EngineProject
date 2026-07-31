@@ -30,17 +30,22 @@ void HierarchyView::SetSelectedObject(Object* obj)
 void HierarchyView::DrawObjectNode(IEditorUi& ui, Object* obj)
 {
     const bool hasChildren = !obj->Children.empty();
-    const std::string label = (obj->name.empty() ? "(unnamed)" : obj->name) +
-        (obj->IsPartOfPrefabInstance() ? " [Prefab]" : "");
-    const bool open = ui.TreeNode(obj, label.c_str(), obj == m_selectedObject, !hasChildren);
-    if (ui.IsItemClicked()) SetSelectedObject(obj);
-    if (ui.IsItemDoubleClicked()) { SetSelectedObject(obj); if (OnFocusObject) OnFocusObject(obj); }
+    char name[256]; strncpy_s(name, obj->name.c_str(), sizeof(name));
+    bool enabled = obj->enabled;
+    const EditorUiObjectRowResult row = ui.ObjectTreeRow(
+        obj, name, sizeof(name), &enabled, obj == m_selectedObject,
+        !hasChildren, obj->IsPartOfPrefabInstance());
+    if (row.nameChanged) obj->name = name;
+    if (row.enabledChanged)
+        enabled ? obj->Enabled() : obj->Disabled();
+    if (row.clicked) SetSelectedObject(obj);
+    if (row.doubleClicked) { SetSelectedObject(obj); if (OnFocusObject) OnFocusObject(obj); }
     if (ui.BeginDragDropSource())
     {
         Object* payload = obj;
         ui.SetDragDropPayload("ENGINE_SCENE_OBJECT", &payload, sizeof(payload));
-        ui.Label(label.c_str());
+        ui.Label(obj->name.empty() ? "(unnamed)" : obj->name.c_str());
         ui.EndDragDropSource();
     }
-    if (open && hasChildren) { for (Object* child : obj->Children) DrawObjectNode(ui, child); ui.TreePop(); }
+    if (row.open && hasChildren) { for (Object* child : obj->Children) DrawObjectNode(ui, child); ui.ObjectTreePop(); }
 }

@@ -127,6 +127,7 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
     {
         auto view = std::make_unique<PropertiesView>();
         view->SetTitle("Properties " + std::to_string(++m_propertiesCount));
+        view->Init(m_scene);
         m_singletonInstances[typeName] = view.get();
         return view;
     }

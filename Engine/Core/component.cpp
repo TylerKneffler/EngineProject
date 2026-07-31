@@ -444,6 +444,15 @@ JsonValue Component::Serialize() const
 {
     JsonValue data = JsonValue::MakeObject();
     data.Set("type", JsonValue(GetTypeName()));
+    const JsonValue fields = SerializeFields();
+    for (std::size_t i = 0; i < fields.ObjectSize(); ++i)
+        data.Set(fields.ObjectKey(i), fields.ObjectValue(i));
+    return data;
+}
+
+JsonValue Component::SerializeFields() const
+{
+    JsonValue data = JsonValue::MakeObject();
     for (const auto& field : m_serializedFields)
         data.Set(field.name, field.write());
     return data;

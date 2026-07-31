@@ -2,7 +2,9 @@
 #include "Core/Object.h"
 #include "Core/Graphics/IPipelineState.h"
 #include "Core/Graphics/IGraphicsBuffer.h"
+#include "Core/Serialization/Json.h"
 #include <glm/glm.hpp>
+#include <string>
 
 // Forward declarations
 class IGraphicsProvider;
@@ -10,6 +12,7 @@ class IGraphicsContext;
 class IShaderCompiler;
 class IPipelineStateFactory;
 class IGraphicsBufferFactory;
+class Texture;
 
 // ---------------------------------------------------------------------------
 // Scene
@@ -40,6 +43,12 @@ struct SceneSettings
 
     // Ambient light
     glm::vec3 ambientColor = glm::vec3(0.12f, 0.12f, 0.12f);
+
+    // Optional equirectangular panorama. Empty uses the bundled editor sky.
+    std::string skyboxTexture;
+
+    JsonValue Serialize() const;
+    void Deserialize(const JsonValue& value);
 };
 
 class Scene
@@ -62,8 +71,9 @@ public:
     void Render(IGraphicsContext* context, float aspect, Camera* cameraOverride = nullptr);
     void SetSelectedObject(Object* obj) { m_selectedObject = obj; }
 
-    // Returns the first Camera component found on any scene game object,
-    // or the editor camera as a fallback. Used by GameView.
+    // Returns the first active Camera component found on a scene game object.
+    // The editor camera is deliberately excluded so GameView cannot silently
+    // render from the Scene view's navigation camera.
     Camera* FindGameCamera();
 
     // Move the editor camera to frame the given object, keeping a comfortable
@@ -98,18 +108,32 @@ private:
     std::unique_ptr<IGraphicsBuffer> m_gridConstantBuffer;
     void* m_gridCBMapped = nullptr;
 
+    std::unique_ptr<IPipelineState> m_skyboxPipeline;
+    std::unique_ptr<IGraphicsBuffer> m_skyboxConstantBuffer;
+    void* m_skyboxCBMapped = nullptr;
+    std::shared_ptr<Texture> m_defaultSkyboxTexture;
+    std::shared_ptr<Texture> m_sceneSkyboxTexture;
+    std::string m_loadedSkyboxPath;
+
     std::unique_ptr<IPipelineState> m_objectPipeline;
     std::unique_ptr<IPipelineState> m_objectOutlinePipeline;
     std::unique_ptr<IGraphicsBuffer> m_objectConstantBuffer;
     void* m_objectCBMapped = nullptr;
+    std::unique_ptr<IGraphicsBuffer> m_objectDataBuffer;
+    void* m_objectDataMapped = nullptr;
+    std::unique_ptr<IGraphicsBuffer> m_lightDataBuffer;
+    void* m_lightDataMapped = nullptr;
 
     void BuildGridPipeline();
+    void BuildSkyboxPipeline();
     void BuildObjectPipeline();
+    const Texture* ResolveSkyboxTexture();
 
     // ---- Object list ----
     std::vector<std::unique_ptr<Object>> m_objects;
     Object* m_selectedObject = nullptr;
 
     static constexpr uint32_t kMaxObjects = 64;
+    static constexpr uint32_t kMaxLights = 64;
     static constexpr uint32_t kCBStride = 256;
 };

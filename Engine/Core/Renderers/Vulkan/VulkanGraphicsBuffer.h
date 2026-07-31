@@ -12,6 +12,8 @@ public:
     Usage GetUsage() const override { return m_usage; }
     AccessMode GetAccessMode() const override { return m_access; }
     uint64_t GetSize() const override { return m_size; }
+    uint32_t GetElementStride() const override { return m_elementStride; }
+    void SetElementStride(uint32_t value) { m_elementStride = value; }
     void* Map() override { return m_mapped; }
     void Unmap() override {}
     void* GetNativeHandle() const override { return reinterpret_cast<void*>(m_buffer); }
@@ -25,6 +27,7 @@ private:
     AccessMode m_access;
     uint64_t m_size = 0;
     void* m_mapped = nullptr;
+    uint32_t m_elementStride = 0;
 };
 
 class VulkanBufferFactory : public IGraphicsBufferFactory
@@ -34,7 +37,8 @@ public:
         : m_physicalDevice(physicalDevice), m_device(device) {}
     std::unique_ptr<IGraphicsBuffer> CreateBuffer(IGraphicsBuffer::Usage usage,
         IGraphicsBuffer::AccessMode access, uint64_t sizeBytes,
-        const void* initialData = nullptr) override;
+        const void* initialData = nullptr,
+        uint32_t elementStride = 0) override;
 private:
     VkPhysicalDevice m_physicalDevice;
     VkDevice m_device;

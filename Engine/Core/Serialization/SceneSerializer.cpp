@@ -7,6 +7,7 @@
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Compoonents/Material.h"
 #include "Core/Compoonents/Camera.h"
+#include "Core/Compoonents/Light.h"
 #include <pugixml.hpp>
 #include <fstream>
 #include <algorithm>
@@ -15,6 +16,7 @@
 #include <filesystem>
 #include <functional>
 #include <cstdlib>
+#include <memory>
 #include <stdexcept>
 #include <sstream>
 #include <vector>
@@ -35,68 +37,82 @@ void SceneSerializer::Register(const std::string& typeName, Factory factory)
     GetRegistry()[typeName] = std::move(factory);
 }
 
+void SceneSerializer::Register(Factory factory)
+{
+    if (!factory)
+        throw std::invalid_argument("Cannot register an empty component factory");
+
+    std::unique_ptr<Component> prototype(factory());
+    if (!prototype || prototype->GetTypeName().empty())
+        throw std::invalid_argument("Registered components must provide a type name");
+
+    Register(prototype->GetTypeName(), std::move(factory));
+}
+
 void SceneSerializer::EnsureBuiltinsRegistered()
 {
     static bool s_done = false;
     if (s_done) return;
     s_done = true;
 
-    RegisterComponentType<Mesh>("Mesh");
-    RegisterComponentType<Material>("Material");
-    RegisterComponentType<Camera>("Camera");
+    RegisterComponentType<Mesh>();
+    RegisterComponentType<Material>();
+    RegisterComponentType<Camera>();
+    RegisterComponentType<Light>();
 }
 
 // ---- Local GLM helpers ------------------------------------------------------
 namespace
 {
 
-JsonValue J3(float x, float y, float z)
+namespace SceneXml
 {
-    return JsonValue::MakeArray().Push(JsonValue(x)).Push(JsonValue(y)).Push(JsonValue(z));
+constexpr const char* ComponentPrefix = "components";
+constexpr const char* ComponentNamespace = "urn:engine-components";
+constexpr const char* TypeField = "type";
+constexpr const char* ArrayItem = "item";
+
+// Files written before arrays became self-describing used semantic collection
+// element names. Keep those names here only as an input compatibility rule;
+// newly serialized arrays do not depend on them.
+bool IsLegacyCollection(const std::string& name)
+{
+    return name == "objects" || name == "components" || name == "children";
+}
 }
 
-JsonValue JGlm(const glm::vec3& v) { return J3(v.x, v.y, v.z); }
-
-glm::vec3 GlmFrom(const JsonValue& v, glm::vec3 def = {})
-{
-    if (!v.IsArray() || v.ArraySize() < 3) return def;
-    return { v.ArrayAt(0).AsFloat(), v.ArrayAt(1).AsFloat(), v.ArrayAt(2).AsFloat() };
-}
-
-bool LooksLikeXml(const std::string& source)
-{
-    const std::size_t start = source.find_first_not_of(" \t\r\n");
-    return start != std::string::npos && source[start] == '<';
-}
-
-bool IsStructuralName(const std::string& name)
-{
-    return name == "Scene" || name == "objects" || name == "components" ||
-           name == "children";
-}
-
-std::string ToLowerCopy(std::string value)
-{
-    std::transform(value.begin(), value.end(), value.begin(),
-        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return value;
-}
-
-std::string ToTitleCopy(std::string value)
-{
-    if (!value.empty())
-        value[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(value[0])));
-    return value;
-}
-
-bool SplitTypedName(const std::string& name, std::string& baseName, std::string& typeName)
+bool SplitQualifiedName(const std::string& name, std::string& prefix, std::string& localName)
 {
     const std::size_t colon = name.find(':');
     if (colon == std::string::npos)
         return false;
-    baseName = name.substr(0, colon);
-    typeName = name.substr(colon + 1);
+    prefix = name.substr(0, colon);
+    localName = name.substr(colon + 1);
     return true;
+}
+
+const SceneSerializer::Factory* FindComponentFactory(
+    const std::unordered_map<std::string, SceneSerializer::Factory>& registry,
+    const std::string& typeName)
+{
+    const auto exact = registry.find(typeName);
+    if (exact != registry.end())
+        return &exact->second;
+
+    // Older XML writers normalized component element casing. Preserve input
+    // compatibility without changing the class-defined serialized type name.
+    const auto sameIgnoringCase = [&typeName](const auto& entry)
+    {
+        if (entry.first.size() != typeName.size())
+            return false;
+        return std::equal(entry.first.begin(), entry.first.end(), typeName.begin(),
+            [](unsigned char left, unsigned char right)
+            {
+                return std::tolower(left) == std::tolower(right);
+            });
+    };
+    const auto legacy = std::find_if(registry.begin(), registry.end(), sameIgnoringCase);
+    return legacy == registry.end() ? nullptr : &legacy->second;
 }
 
 std::string StripOwnedPrefix(const std::string& childName)
@@ -129,71 +145,40 @@ JsonValue ParseScalarText(const std::string& text)
 JsonValue ReadXmlNode(const pugi::xml_node& node)
 {
     const std::string name = node.name();
-    std::string baseName;
-    std::string typeName;
-    const bool isTypedElement = SplitTypedName(name, baseName, typeName);
+    const std::string fieldName = StripOwnedPrefix(name);
+    std::string namespacePrefix;
+    std::string localName;
+    const bool isQualified =
+        SplitQualifiedName(name, namespacePrefix, localName);
 
-    if (name == "objects" || name == "children")
-    {
-        JsonValue array = JsonValue::MakeArray();
-        for (const pugi::xml_node& child : node.children())
-            if (child.type() == pugi::node_element)
-                array.Push(ReadXmlNode(child));
-        return array;
-    }
-
-    if (name == "components")
-    {
-        JsonValue array = JsonValue::MakeArray();
-        for (const pugi::xml_node& child : node.children())
-            if (child.type() == pugi::node_element)
-                array.Push(ReadXmlNode(child));
-        return array;
-    }
-
-    if (isTypedElement && baseName == "components")
+    if (isQualified && namespacePrefix == SceneXml::ComponentPrefix)
     {
         JsonValue component = JsonValue::MakeObject();
-        component.Set("type", JsonValue(ToTitleCopy(typeName)));
+        component.Set(SceneXml::TypeField, JsonValue(localName));
         for (const pugi::xml_node& child : node.children())
-        {
-            if (child.type() != pugi::node_element)
-                continue;
-            component.Set(child.name(), ReadXmlNode(child));
-        }
+            if (child.type() == pugi::node_element)
+                component.Set(StripOwnedPrefix(child.name()), ReadXmlNode(child));
         return component;
     }
 
-    if (!node.first_child())
-        return ParseScalarText(node.child_value());
-
-    std::string firstChildName;
-    bool allSame = true;
+    bool hasElementChildren = false;
+    bool allItems = true;
+    bool allComponents = true;
     for (const pugi::xml_node& child : node.children())
     {
         if (child.type() != pugi::node_element)
             continue;
-        if (firstChildName.empty())
-            firstChildName = child.name();
-        else if (child.name() != firstChildName)
-        {
-            allSame = false;
-            break;
-        }
+        hasElementChildren = true;
+        allItems = allItems && std::string(child.name()) == SceneXml::ArrayItem;
+        std::string childPrefix;
+        std::string childLocalName;
+        allComponents = allComponents &&
+            SplitQualifiedName(child.name(), childPrefix, childLocalName) &&
+            childPrefix == SceneXml::ComponentPrefix;
     }
 
-    const bool looksLikeOwnedList =
-        firstChildName == "item" ||
-        firstChildName == "object" ||
-        firstChildName == "component" ||
-        firstChildName == "components:mesh" ||
-        firstChildName == "components:material" ||
-        firstChildName == "components:rotate" ||
-        firstChildName == name + ".item" ||
-        firstChildName == name + ".object" ||
-        firstChildName == name + ".component";
-
-    if (allSame && looksLikeOwnedList)
+    if (SceneXml::IsLegacyCollection(fieldName) ||
+        (hasElementChildren && (allItems || allComponents)))
     {
         JsonValue array = JsonValue::MakeArray();
         for (const pugi::xml_node& child : node.children())
@@ -201,6 +186,9 @@ JsonValue ReadXmlNode(const pugi::xml_node& node)
                 array.Push(ReadXmlNode(child));
         return array;
     }
+
+    if (!hasElementChildren)
+        return ParseScalarText(node.child_value());
 
     JsonValue object = JsonValue::MakeObject();
     for (const pugi::xml_node& child : node.children())
@@ -214,58 +202,58 @@ JsonValue ReadXmlNode(const pugi::xml_node& node)
 
 void WriteXmlNode(pugi::xml_node node, const JsonValue& value);
 void WriteXmlField(pugi::xml_node parent, const char* name, const JsonValue& value);
+void WriteXmlObjectFields(pugi::xml_node parent, const JsonValue& value,
+    const char* skipKey = nullptr, const char* ownerName = nullptr);
 void WriteXmlArrayItems(pugi::xml_node parent, const JsonValue& value, const char* itemName)
 {
     for (std::size_t i = 0; i < value.ArraySize(); ++i)
     {
-        pugi::xml_node child = parent.append_child(itemName);
-        WriteXmlNode(child, value.ArrayAt(i));
+        const JsonValue& item = value.ArrayAt(i);
+        if (item.IsObject() && item[SceneXml::TypeField].IsString() &&
+            !item[SceneXml::TypeField].AsString().empty())
+        {
+            const std::string elementName = std::string(SceneXml::ComponentPrefix) +
+                ":" + item[SceneXml::TypeField].AsString();
+            pugi::xml_node child = parent.append_child(elementName.c_str());
+            WriteXmlObjectFields(child, item, SceneXml::TypeField,
+                item[SceneXml::TypeField].AsString().c_str());
+        }
+        else
+        {
+            pugi::xml_node child = parent.append_child(itemName);
+            WriteXmlNode(child, item);
+        }
     }
 }
 
-void WriteXmlObjectFields(pugi::xml_node parent, const JsonValue& value, const char* skipKey = nullptr)
+void WriteXmlObjectFields(pugi::xml_node parent, const JsonValue& value,
+    const char* skipKey, const char* ownerName)
 {
     for (std::size_t i = 0; i < value.ObjectSize(); ++i)
     {
         const std::string key = value.ObjectKey(i);
         if (skipKey && key == skipKey)
             continue;
-        WriteXmlField(parent, key.c_str(), value.ObjectValue(i));
+        const std::string fieldName = ownerName && *ownerName
+            ? std::string(ownerName) + "." + key
+            : key;
+        WriteXmlField(parent, fieldName.c_str(), value.ObjectValue(i));
     }
 }
 
 void WriteXmlField(pugi::xml_node parent, const char* name, const JsonValue& value)
 {
-    const std::string parentName = parent.name();
-    std::string childName = name ? name : "";
-    if ((parentName == "settings" || parentName == "object" ||
-        parentName == "transform") && name && *name)
-    {
-        childName = parentName + "." + name;
-    }
-
-    pugi::xml_node child = parent.append_child(childName.c_str());
+    pugi::xml_node child = parent.append_child(name ? name : "");
     if (value.IsArray())
     {
-        if (name && std::string(name) == "components")
-        {
-            for (std::size_t i = 0; i < value.ArraySize(); ++i)
-            {
-                const JsonValue& component = value.ArrayAt(i);
-                const std::string typeName = component["type"].AsString(); // Use capitalized name
-                pugi::xml_node typed = child.append_child((std::string("components:") + typeName).c_str());
-                WriteXmlObjectFields(typed, component, "type");
-            }
-            return;
-        }
-
-        const char* itemName = "item";
-        if (name && std::string(name) == "objects")
-            itemName = "object";
-        else if (name && std::string(name) == "children")
-            itemName = "object";
-
-        WriteXmlArrayItems(child, value, itemName);
+        WriteXmlArrayItems(child, value, SceneXml::ArrayItem);
+        return;
+    }
+    if (value.IsObject() && value[SceneXml::TypeField].IsString() &&
+        !value[SceneXml::TypeField].AsString().empty())
+    {
+        WriteXmlObjectFields(child, value, SceneXml::TypeField,
+            value[SceneXml::TypeField].AsString().c_str());
         return;
     }
     WriteXmlNode(child, value);
@@ -304,7 +292,7 @@ std::string WriteXmlDocument(const JsonValue& value, const char* rootName = "Sce
 {
     pugi::xml_document document;
     pugi::xml_node root = document.append_child(rootName);
-    root.append_attribute("xmlns:components") = "urn:engine-components";
+    root.append_attribute("xmlns:components") = SceneXml::ComponentNamespace;
     if (value.IsObject())
         WriteXmlObjectFields(root, value);
     else
@@ -339,20 +327,14 @@ bool LoadXmlDocument(Scene& scene, const std::string& source,
 // ---- Serialise a single Object (recursive) ----------------------------------
 static JsonValue SerialiseTransform(const Transform& transform)
 {
-    JsonValue node = JsonValue::MakeObject();
-    node.Set("position", JGlm(transform.position));
-    node.Set("rotation", JGlm(transform.rotation));
-    node.Set("scale", JGlm(transform.scale));
-    return node;
+    return transform.Serialize();
 }
 
 static void DeserialiseTransform(Transform& transform, const JsonValue& node)
 {
     if (!node.IsObject())
         return;
-    transform.position = GlmFrom(node["position"]);
-    transform.rotation = GlmFrom(node["rotation"]);
-    transform.scale = GlmFrom(node["scale"], { 1.f, 1.f, 1.f });
+    transform.Deserialize(node);
 }
 
 static JsonValue SerialiseObject(
@@ -363,11 +345,13 @@ static JsonValue SerialiseObject(
     if (serialisePrefabAsReference && obj.Prefab)
     {
         node.Set("prefab", JsonValue(obj.Prefab->GetPath()));
+        node.Set("enabled", JsonValue(obj.enabled));
         node.Set("transform", SerialiseTransform(obj.transform));
         return node;
     }
 
     node.Set("name", JsonValue(obj.name));
+    node.Set("enabled", JsonValue(obj.enabled));
 
     // Transform
     node.Set("transform", SerialiseTransform(obj.transform));
@@ -393,16 +377,7 @@ static JsonValue SerialiseScene(const Scene& scene)
     root.Set("version", JsonValue(1));
 
     // Settings
-    const SceneSettings& s = scene.settings;
-    JsonValue settings = JsonValue::MakeObject();
-    settings.Set("showGrid",        JsonValue(s.showGrid));
-    settings.Set("gridHalfSize",    JsonValue(s.gridHalfSize));
-    settings.Set("gridCellSize",    JsonValue(s.gridCellSize));
-    settings.Set("gridOpacity",     JsonValue(s.gridOpacity));
-    settings.Set("gridColor",       JGlm(s.gridColor));
-    settings.Set("gridOriginColor", JGlm(s.gridOriginColor));
-    settings.Set("ambientColor",    JGlm(s.ambientColor));
-    root.Set("settings", std::move(settings));
+    root.Set("settings", scene.settings.Serialize());
 
     // Objects — only root-level (no parent)
     JsonValue objects = JsonValue::MakeArray();
@@ -440,24 +415,7 @@ static bool DeserialiseScene(Scene& scene, const JsonValue& root,
     // Clear existing scene content
     scene.ClearObjects();
 
-    // Settings
-    const JsonValue& settings = root["settings"];
-    if (settings.IsObject())
-    {
-        SceneSettings& s = scene.settings;
-        if (settings.Has("showGrid"))      s.showGrid      = settings["showGrid"].AsBool();
-        if (settings.Has("gridHalfSize"))  s.gridHalfSize  = settings["gridHalfSize"].AsInt();
-        if (settings.Has("gridCellSize"))  s.gridCellSize  = settings["gridCellSize"].AsFloat();
-        if (settings.Has("gridOpacity"))   s.gridOpacity   = settings["gridOpacity"].AsFloat();
-        if (settings.Has("gridColor"))     s.gridColor     = GlmFrom(settings["gridColor"], s.gridColor);
-        if (settings.Has("gridOriginColor")) s.gridOriginColor = GlmFrom(settings["gridOriginColor"], s.gridOriginColor);
-        if (settings.Has("ambientColor"))  s.ambientColor  = GlmFrom(settings["ambientColor"], s.ambientColor);
-    }
-
-    // Get buffer factory for mesh GPU resource creation
-    IGraphicsBufferFactory* bufferFactory = nullptr;
-    if (graphicsProvider)
-        bufferFactory = graphicsProvider->GetBufferFactory();
+    scene.settings.Deserialize(root["settings"]);
 
     // Deserialise a single Object node, then recurse for children.
     // Uses std::function so it can reference itself (recursive lambda).
@@ -466,6 +424,7 @@ static bool DeserialiseScene(Scene& scene, const JsonValue& root,
     {
         if (node.Has("name"))
             obj.name = node["name"].AsString();
+        obj.enabled = !node.Has("enabled") || node["enabled"].AsBool();
         if (node.Has("prefab"))
             obj.SetPrefab(node["prefab"].AsString());
 
@@ -479,23 +438,19 @@ static bool DeserialiseScene(Scene& scene, const JsonValue& root,
             const JsonValue& cn  = comps.ArrayAt(i);
             const std::string& t = cn["type"].AsString();
 
-            auto it = registry.find(t);
-            if (it == registry.end())
+            const SceneSerializer::Factory* factory = FindComponentFactory(registry, t);
+            if (!factory)
             {
                 std::string msg = "[SceneSerializer] Unknown component type '" + t + "' on object '" + obj.name + "' (skipped)\n";
                 OutputDebugStringA(msg.c_str());
                 continue;
             }
 
-            Component* comp = it->second();        // factory: default-construct
+            Component* comp = (*factory)();        // factory: default-construct
             comp->Owner = &obj;
             comp->Deserialize(cn);
+            comp->OnAfterDeserialize(graphicsProvider);
             obj.Components.push_back(comp);
-
-            // Mesh needs GPU resources created immediately after CPU load.
-            if (bufferFactory)
-                if (Mesh* mesh = dynamic_cast<Mesh*>(comp))
-                    mesh->CreateBuffer(bufferFactory);
         }
 
         // Children (recursive) — added to scene so they participate in loops.
@@ -513,6 +468,8 @@ static bool DeserialiseScene(Scene& scene, const JsonValue& root,
                         "Could not instantiate nested prefab '" +
                         childNode["prefab"].AsString() + "'");
                 DeserialiseTransform(child->transform, childNode["transform"]);
+                if (childNode.Has("enabled"))
+                    child->enabled = childNode["enabled"].AsBool();
             }
             else
             {
@@ -538,6 +495,8 @@ static bool DeserialiseScene(Scene& scene, const JsonValue& root,
                     "Could not instantiate prefab '" +
                     objectNode["prefab"].AsString() + "'");
             DeserialiseTransform(object->transform, objectNode["transform"]);
+            if (objectNode.Has("enabled"))
+                object->enabled = objectNode["enabled"].AsBool();
         }
         else
         {
@@ -641,15 +600,12 @@ Object* SceneSerializer::InstantiatePrefab(
             root["type"].AsString() != "prefab" || !root["object"].IsObject())
             return nullptr;
 
-        IGraphicsBufferFactory* bufferFactory = graphicsProvider
-            ? graphicsProvider->GetBufferFactory()
-            : nullptr;
-
         std::function<void(Object&, const JsonValue&)> instantiate =
             [&](Object& object, const JsonValue& node)
         {
             if (node.Has("name"))
                 object.name = node["name"].AsString();
+            object.enabled = !node.Has("enabled") || node["enabled"].AsBool();
 
             DeserialiseTransform(object.transform, node["transform"]);
 
@@ -658,17 +614,15 @@ Object* SceneSerializer::InstantiatePrefab(
             {
                 const JsonValue& componentNode = components.ArrayAt(i);
                 const std::string type = componentNode["type"].AsString();
-                auto factory = GetRegistry().find(type);
-                if (factory == GetRegistry().end())
+                const SceneSerializer::Factory* factory = FindComponentFactory(GetRegistry(), type);
+                if (!factory)
                     continue;
 
-                Component* component = factory->second();
+                Component* component = (*factory)();
                 component->Owner = &object;
                 component->Deserialize(componentNode);
+                component->OnAfterDeserialize(graphicsProvider);
                 object.Components.push_back(component);
-                if (bufferFactory)
-                    if (Mesh* mesh = dynamic_cast<Mesh*>(component))
-                        mesh->CreateBuffer(bufferFactory);
             }
 
             const JsonValue& children = node["children"];
@@ -685,6 +639,8 @@ Object* SceneSerializer::InstantiatePrefab(
                             "Could not instantiate nested prefab '" +
                             childNode["prefab"].AsString() + "'");
                     DeserialiseTransform(child->transform, childNode["transform"]);
+                    if (childNode.Has("enabled"))
+                        child->enabled = childNode["enabled"].AsBool();
                 }
                 else
                 {
@@ -749,15 +705,13 @@ bool SceneSerializer::RefreshPrefabInstances(
                 identity(candidate->Prefab->GetPath()) == targetKey)
                 instances.push_back(candidate.get());
 
-        IGraphicsBufferFactory* bufferFactory = graphicsProvider
-            ? graphicsProvider->GetBufferFactory()
-            : nullptr;
         std::function<void(Object&, const JsonValue&)> populate =
             [&](Object& object, const JsonValue& node)
         {
             object.name = node.Has("name")
                 ? node["name"].AsString()
                 : std::string("Object");
+            object.enabled = !node.Has("enabled") || node["enabled"].AsBool();
             DeserialiseTransform(object.transform, node["transform"]);
 
             const JsonValue& components = node["components"];
@@ -765,16 +719,14 @@ bool SceneSerializer::RefreshPrefabInstances(
             {
                 const JsonValue& componentNode = components.ArrayAt(index);
                 const std::string type = componentNode["type"].AsString();
-                auto factory = GetRegistry().find(type);
-                if (factory == GetRegistry().end())
+                const SceneSerializer::Factory* factory = FindComponentFactory(GetRegistry(), type);
+                if (!factory)
                     continue;
-                Component* component = factory->second();
+                Component* component = (*factory)();
                 component->Owner = &object;
                 component->Deserialize(componentNode);
+                component->OnAfterDeserialize(graphicsProvider);
                 object.Components.push_back(component);
-                if (bufferFactory)
-                    if (Mesh* mesh = dynamic_cast<Mesh*>(component))
-                        mesh->CreateBuffer(bufferFactory);
             }
 
             const JsonValue& children = node["children"];
@@ -791,6 +743,8 @@ bool SceneSerializer::RefreshPrefabInstances(
                             "Could not refresh nested prefab '" +
                             childNode["prefab"].AsString() + "'");
                     DeserialiseTransform(child->transform, childNode["transform"]);
+                    if (childNode.Has("enabled"))
+                        child->enabled = childNode["enabled"].AsBool();
                 }
                 else
                 {

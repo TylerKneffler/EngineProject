@@ -16,7 +16,10 @@ void VulkanGraphicsContext::SetConstantBuffer(uint32_t, const IGraphicsBuffer* b
     if (!m_pipeline || !buffer || offset >= buffer->GetSize()) return;
     const auto* vkBuffer = dynamic_cast<const VulkanGraphicsBuffer*>(buffer);
     if (!vkBuffer || !vkBuffer->GetMappedData()) return;
-    uint32_t size = static_cast<uint32_t>(std::min<uint64_t>(128, buffer->GetSize() - offset));
+    const uint64_t requested = buffer->GetElementStride()
+        ? buffer->GetElementStride()
+        : buffer->GetSize() - offset;
+    uint32_t size = static_cast<uint32_t>(std::min<uint64_t>(128, requested));
     size &= ~3u;
     vkCmdPushConstants(m_commandBuffer, m_pipeline->GetLayout(),
         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, size,
@@ -43,6 +46,12 @@ void VulkanGraphicsContext::SetTexture(uint32_t slot, const IGraphicsTexture* te
         m_textures[slot] = dynamic_cast<const VulkanGraphicsTexture*>(texture);
 }
 
+void VulkanGraphicsContext::SetStructuredBuffer(uint32_t slot, const IGraphicsBuffer* buffer)
+{
+    if (slot < 5 || slot > 6) return;
+    m_structuredBuffers[slot - 5] = dynamic_cast<const VulkanGraphicsBuffer*>(buffer);
+}
+
 void VulkanGraphicsContext::SetViewport(const Viewport& value)
 {
     VkViewport viewport{ value.x, value.y + value.height, value.width, -value.height, value.minDepth, value.maxDepth };
@@ -60,7 +69,8 @@ void VulkanGraphicsContext::DrawInstanced(uint32_t vertices, uint32_t instances,
     try
     {
         if (m_textureSystem && m_pipeline)
-            m_textureSystem->Bind(m_commandBuffer, m_pipeline->GetLayout(), m_textures);
+            m_textureSystem->Bind(m_commandBuffer, m_pipeline->GetLayout(), m_textures,
+                m_structuredBuffers);
     }
     catch (const std::exception& error)
     {
@@ -75,7 +85,8 @@ void VulkanGraphicsContext::DrawIndexedInstanced(uint32_t indices, uint32_t inst
     try
     {
         if (m_textureSystem && m_pipeline)
-            m_textureSystem->Bind(m_commandBuffer, m_pipeline->GetLayout(), m_textures);
+            m_textureSystem->Bind(m_commandBuffer, m_pipeline->GetLayout(), m_textures,
+                m_structuredBuffers);
     }
     catch (const std::exception& error)
     {

@@ -19,6 +19,44 @@ void ImGuiEditorUi::ValueLabel(const char*l,const char*v){ImGui::LabelText(l,"%s
 bool ImGuiEditorUi::CollapsingHeader(const char*l,bool d){return ImGui::CollapsingHeader(l,d?ImGuiTreeNodeFlags_DefaultOpen:0);}
 bool ImGuiEditorUi::TreeNode(const void*id,const char*l,bool s,bool leaf,bool d){ImGuiTreeNodeFlags f=ImGuiTreeNodeFlags_OpenOnArrow|ImGuiTreeNodeFlags_SpanAvailWidth|(s?ImGuiTreeNodeFlags_Selected:0)|(d?ImGuiTreeNodeFlags_DefaultOpen:0);if(leaf)f|=ImGuiTreeNodeFlags_Leaf|ImGuiTreeNodeFlags_NoTreePushOnOpen;return ImGui::TreeNodeEx(id,f,"%s",l);}
 void ImGuiEditorUi::TreePop(){ImGui::TreePop();}
+EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,char* name,size_t size,bool* enabled,bool selected,bool leaf,bool lockName)
+{
+    EditorUiObjectRowResult result;
+    ImGui::PushID(id);
+    ImGuiTreeNodeFlags flags=ImGuiTreeNodeFlags_OpenOnArrow|(selected?ImGuiTreeNodeFlags_Selected:0);
+    if(leaf)flags|=ImGuiTreeNodeFlags_Leaf|ImGuiTreeNodeFlags_NoTreePushOnOpen;
+    result.open=ImGui::TreeNodeEx("##object",flags,"");
+    result.clicked=ImGui::IsItemClicked()&&!ImGui::IsItemToggledOpen();
+    result.doubleClicked=ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+    ImGui::SameLine(0.f,2.f);
+    result.enabledChanged=ImGui::Checkbox("##enabled",enabled);
+    result.clicked=result.clicked||ImGui::IsItemClicked();
+    ImGui::SameLine(0.f,4.f);
+    ImGui::SetNextItemWidth(-1.f);
+    ImGui::BeginDisabled(lockName);
+    result.nameChanged=ImGui::InputText("##name",name,size);
+    ImGui::EndDisabled();
+    result.clicked=result.clicked||ImGui::IsItemClicked();
+    ImGui::PopID();
+    return result;
+}
+void ImGuiEditorUi::ObjectTreePop(){ImGui::TreePop();}
+EditorUiObjectRowResult ImGuiEditorUi::ObjectHeader(const void* id,char* name,size_t size,bool* enabled,bool lockName)
+{
+    EditorUiObjectRowResult result;
+    ImGui::PushID(id);
+    ImGui::TextUnformatted("Object");
+    ImGui::Separator();
+    const float available=ImGui::GetContentRegionAvail().x;
+    ImGui::SetNextItemWidth(available>110.f?available-100.f:available*0.65f);
+    ImGui::BeginDisabled(lockName);
+    result.nameChanged=ImGui::InputText("##name",name,size);
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    result.enabledChanged=ImGui::Checkbox("Enabled",enabled);
+    ImGui::PopID();
+    return result;
+}
 bool ImGuiEditorUi::Selectable(const char*l,bool s,bool d){return ImGui::Selectable(l,s,d?ImGuiSelectableFlags_AllowDoubleClick:0);}
 bool ImGuiEditorUi::BeginChild(const char*i){return ImGui::BeginChild(i,{0,0},false,ImGuiWindowFlags_HorizontalScrollbar);} void ImGuiEditorUi::EndChild(){ImGui::EndChild();}
 bool ImGuiEditorUi::IsItemHovered()const{return ImGui::IsItemHovered();} bool ImGuiEditorUi::IsItemClicked()const{return ImGui::IsItemClicked()&&!ImGui::IsItemToggledOpen();}

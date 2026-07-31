@@ -2,6 +2,7 @@
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Compoonents/Transform.h"
 #include "Core/Component.h"
+#include "Core/Scene/Scene.h"
 
 void PropertiesView::DrawPanel(IEditorUi& ui)
 {
@@ -10,13 +11,33 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         ui.EndWindow();
         return;
     }
-    if (!m_selectedObject) { ui.DisabledLabel("No object selected"); ui.EndWindow(); return; }
+    if (!m_selectedObject)
+    {
+        ui.Label("Scene");
+        ui.Separator();
+        if (!m_scene)
+            ui.DisabledLabel("No scene loaded");
+        else
+        {
+            char skyboxPath[512];
+            strncpy_s(skyboxPath, m_scene->settings.skyboxTexture.c_str(), sizeof(skyboxPath));
+            if (ui.InputText("Skybox Texture Override", skyboxPath, sizeof(skyboxPath)))
+                m_scene->settings.skyboxTexture = skyboxPath;
+            if (m_scene->settings.skyboxTexture.empty())
+                ui.DisabledLabel("Using the editor default skybox texture.");
+        }
+        ui.EndWindow();
+        return;
+    }
     Object* prefabRoot = m_selectedObject->GetPrefabInstanceRoot();
     const bool linked = prefabRoot != nullptr;
     char name[256]; strncpy_s(name, m_selectedObject->name.c_str(), sizeof(name));
-    ui.BeginDisabled(linked);
-    if (ui.InputText("##name", name, sizeof(name))) m_selectedObject->name = name;
-    ui.EndDisabled();
+    bool enabled = m_selectedObject->enabled;
+    const EditorUiObjectRowResult header = ui.ObjectHeader(
+        m_selectedObject, name, sizeof(name), &enabled, linked);
+    if (header.nameChanged) m_selectedObject->name = name;
+    if (header.enabledChanged)
+        enabled ? m_selectedObject->Enabled() : m_selectedObject->Disabled();
     if (prefabRoot && prefabRoot->Prefab)
     {
         ui.ValueLabel("Prefab", prefabRoot->Prefab->GetPath().c_str());

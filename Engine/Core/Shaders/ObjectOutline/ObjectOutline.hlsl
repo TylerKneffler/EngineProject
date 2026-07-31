@@ -1,28 +1,28 @@
-// ObjectOutline.hlsl
-// Dedicated selected-object outline shader.
-// Uses the same constant-buffer layout as Object.hlsl to keep CPU bindings unchanged.
+struct DrawConstants
+{
+    uint objectIndex;
+    uint lightCount;
+    uint drawFlags;
+    uint padding;
+};
+
+struct ObjectData
+{
+    float4x4 mvp;
+    float4x4 world;
+    float4 baseColor;
+    float4 ambientUnlit;
+    float4 emissiveOcclusion;
+    float4 materialParams;
+    float4 specularShininess;
+};
 
 #ifdef VULKAN
-struct ObjectConst
-{
-    float4x4 mvp;
-    float4 diffuseColor;
-    float4 ambientColor;
-    float4 specularColor;
-    float4 materialParams;
-};
-[[vk::push_constant]] ObjectConst cb;
-#define mvp          cb.mvp
-#define diffuseColor cb.diffuseColor
+[[vk::push_constant]] DrawConstants draw;
+[[vk::binding(7, 0)]] StructuredBuffer<ObjectData> objects;
 #else
-cbuffer Constants : register(b0)
-{
-    float4x4 mvp;
-    float4 diffuseColor;
-    float4 ambientColor;
-    float4 specularColor;
-    float4 materialParams;
-};
+cbuffer DrawBuffer : register(b0) { DrawConstants draw; };
+StructuredBuffer<ObjectData> objects : register(t6);
 #endif
 
 void VSMain(
@@ -32,10 +32,10 @@ void VSMain(
     float4 tangent : TANGENT,
     out float4 oPos : SV_POSITION)
 {
-    oPos = mul(mvp, float4(pos, 1.0));
+    oPos = mul(objects[draw.objectIndex].mvp, float4(pos * 1.03, 1.0));
 }
 
 float4 PSMain(float4 pos : SV_POSITION) : SV_TARGET
 {
-    return diffuseColor;
+    return float4(1.0, 0.85, 0.1, 1.0);
 }

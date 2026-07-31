@@ -129,7 +129,7 @@ int WINAPI wWinMain(
         float aspect = static_cast<float>(window->GetWidth()) / static_cast<float>(window->GetHeight());
         auto graphicsContext = renderer->CreateFrameGraphicsContext();
         Camera* gameCamera = scene.FindGameCamera();
-        if (graphicsContext)
+        if (graphicsContext && gameCamera)
             scene.Render(graphicsContext.get(), aspect, gameCamera);
         
         renderer->EndFrame();

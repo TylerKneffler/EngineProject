@@ -1,4 +1,5 @@
 #include "Mesh.h"
+#include "Core/Graphics/IGraphicsProvider.h"
 #include <fstream>
 #include <sstream>
 #include <array>
@@ -167,5 +168,11 @@ void Mesh::Deserialize(const JsonValue& v)
 {
     if (v.Has("file"))
         LoadFromFile(v["file"].AsString());
+}
+
+void Mesh::OnAfterDeserialize(IGraphicsProvider* graphicsProvider)
+{
+    if (graphicsProvider)
+        CreateBuffer(graphicsProvider->GetBufferFactory());
 }
 

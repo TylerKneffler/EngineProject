@@ -32,6 +32,7 @@ public:
 
     // Constant buffer binding
     virtual void SetConstantBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint64_t offset = 0) = 0;
+    virtual void SetStructuredBuffer(uint32_t slot, const IGraphicsBuffer* buffer) = 0;
 
     // Vertex buffer binding
     virtual void SetVertexBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset = 0) = 0;

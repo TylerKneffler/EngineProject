@@ -1,6 +1,7 @@
 #include "pch.h"
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "VulkanGraphicsTexture.h"
+#include "VulkanGraphicsBuffer.h"
 
 #include <cstring>
 
@@ -9,6 +10,9 @@ size_t VulkanTextureSystem::TextureKeyHash::operator()(const TextureKey& key) co
     size_t hash = 0;
     for (VkImageView value : key.views)
         hash ^= std::hash<VkImageView>{}(value) +
+            0x9e3779b9 + (hash << 6) + (hash >> 2);
+    for (VkBuffer value : key.buffers)
+        hash ^= std::hash<VkBuffer>{}(value) +
             0x9e3779b9 + (hash << 6) + (hash >> 2);
     return hash;
 }
@@ -23,7 +27,7 @@ VulkanTextureSystem::VulkanTextureSystem(
       m_queue(queue),
       m_queueFamily(queueFamily)
 {
-    VkDescriptorSetLayoutBinding bindings[6]{};
+    VkDescriptorSetLayoutBinding bindings[8]{};
     for (uint32_t binding = 0; binding < 5; ++binding)
     {
         bindings[binding].binding = binding;
@@ -35,6 +39,14 @@ VulkanTextureSystem::VulkanTextureSystem(
     bindings[5].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
     bindings[5].descriptorCount = 1;
     bindings[5].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    for (uint32_t binding = 6; binding < 8; ++binding)
+    {
+        bindings[binding].binding = binding;
+        bindings[binding].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        bindings[binding].descriptorCount = 1;
+        bindings[binding].stageFlags =
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
     VkDescriptorSetLayoutCreateInfo layoutInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
     layoutInfo.bindingCount = ARRAYSIZE(bindings);
@@ -42,9 +54,10 @@ VulkanTextureSystem::VulkanTextureSystem(
     VkCheck(vkCreateDescriptorSetLayout(
         m_device, &layoutInfo, nullptr, &m_layout), "vkCreateDescriptorSetLayout");
 
-    VkDescriptorPoolSize sizes[2]{
+    VkDescriptorPoolSize sizes[3]{
         { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 5 * 512 },
-        { VK_DESCRIPTOR_TYPE_SAMPLER, 512 }
+        { VK_DESCRIPTOR_TYPE_SAMPLER, 512 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2 * 512 }
     };
     VkDescriptorPoolCreateInfo poolInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
@@ -65,6 +78,26 @@ VulkanTextureSystem::VulkanTextureSystem(
     VkCheck(vkCreateSampler(m_device, &samplerInfo, nullptr, &m_sampler),
         "vkCreateSampler");
 
+    VkBufferCreateInfo dummyInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+    dummyInfo.size = 16;
+    dummyInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    dummyInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    VkCheck(vkCreateBuffer(m_device, &dummyInfo, nullptr, &m_dummyBuffer),
+        "vkCreateBuffer(dummy storage)");
+    VkMemoryRequirements dummyRequirements{};
+    vkGetBufferMemoryRequirements(m_device, m_dummyBuffer, &dummyRequirements);
+    VkMemoryAllocateInfo dummyAllocation{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+    dummyAllocation.allocationSize = dummyRequirements.size;
+    dummyAllocation.memoryTypeIndex = VulkanFindMemoryType(
+        m_physicalDevice, dummyRequirements.memoryTypeBits,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    VkCheck(vkAllocateMemory(
+        m_device, &dummyAllocation, nullptr, &m_dummyBufferMemory),
+        "vkAllocateMemory(dummy storage)");
+    VkCheck(vkBindBufferMemory(
+        m_device, m_dummyBuffer, m_dummyBufferMemory, 0),
+        "vkBindBufferMemory(dummy storage)");
+
     const uint8_t white[] = { 255, 255, 255, 255 };
     m_white = Upload(1, 1, white);
 }
@@ -75,6 +108,8 @@ VulkanTextureSystem::~VulkanTextureSystem()
     {
         vkDeviceWaitIdle(m_device);
         VulkanDestroyImage(m_device, m_white);
+        if (m_dummyBuffer) vkDestroyBuffer(m_device, m_dummyBuffer, nullptr);
+        if (m_dummyBufferMemory) vkFreeMemory(m_device, m_dummyBufferMemory, nullptr);
         if (m_sampler) vkDestroySampler(m_device, m_sampler, nullptr);
         if (m_pool) vkDestroyDescriptorPool(m_device, m_pool, nullptr);
         if (m_layout) vkDestroyDescriptorSetLayout(m_device, m_layout, nullptr);
@@ -189,12 +224,16 @@ std::shared_ptr<VulkanGraphicsTexture> VulkanTextureSystem::CreateTexture(
 void VulkanTextureSystem::Bind(
     VkCommandBuffer commands,
     VkPipelineLayout pipelineLayout,
-    const std::array<const VulkanGraphicsTexture*, 5>& textures)
+    const std::array<const VulkanGraphicsTexture*, 5>& textures,
+    const std::array<const VulkanGraphicsBuffer*, 2>& buffers)
 {
     TextureKey key{};
     for (size_t index = 0; index < textures.size(); ++index)
         key.views[index] =
             textures[index] ? textures[index]->GetView() : m_white.view;
+    for (size_t index = 0; index < buffers.size(); ++index)
+        key.buffers[index] =
+            buffers[index] ? buffers[index]->GetBuffer() : m_dummyBuffer;
 
     VkDescriptorSet set = VK_NULL_HANDLE;
     if (auto found = m_sets.find(key); found != m_sets.end())
@@ -210,7 +249,7 @@ void VulkanTextureSystem::Bind(
             "vkAllocateDescriptorSets(material)");
 
         VkDescriptorImageInfo images[5]{};
-        VkWriteDescriptorSet writes[6]{};
+        VkWriteDescriptorSet writes[8]{};
         for (uint32_t index = 0; index < 5; ++index)
         {
             images[index].imageView =
@@ -231,6 +270,20 @@ void VulkanTextureSystem::Bind(
         writes[5].descriptorCount = 1;
         writes[5].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
         writes[5].pImageInfo = &samplerInfo;
+        VkDescriptorBufferInfo bufferInfos[2]{};
+        for (uint32_t index = 0; index < 2; ++index)
+        {
+            bufferInfos[index].buffer =
+                buffers[index] ? buffers[index]->GetBuffer() : m_dummyBuffer;
+            bufferInfos[index].range =
+                buffers[index] ? buffers[index]->GetSize() : 16;
+            writes[index + 6] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            writes[index + 6].dstSet = set;
+            writes[index + 6].dstBinding = index + 6;
+            writes[index + 6].descriptorCount = 1;
+            writes[index + 6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[index + 6].pBufferInfo = &bufferInfos[index];
+        }
         vkUpdateDescriptorSets(m_device, ARRAYSIZE(writes), writes, 0, nullptr);
         m_sets.emplace(key, set);
     }

@@ -59,13 +59,25 @@ void GameView::DrawPanel(IEditorUi& ui)
 // ---------------------------------------------------------------------------
 void GameView::Render3D(void* cmd)
 {
-    if (m_scene)
-    {
-        auto* factory = m_scene->GetGraphicsProvider()->GetContextFactory();
-        factory->SetCommandBuffer(cmd);
-        auto ctx = factory->CreateContext();
-        m_scene->Render(ctx.get(), m_aspect, m_scene->FindGameCamera());
-    }
+    if (!m_scene)
+        return;
+
+    Camera* gameCamera = m_scene->FindGameCamera();
+    if (!gameCamera)
+        return;
+
+    auto* graphicsProvider = m_scene->GetGraphicsProvider();
+    if (!graphicsProvider)
+        return;
+
+    auto* factory = graphicsProvider->GetContextFactory();
+    if (!factory)
+        return;
+
+    factory->SetCommandBuffer(cmd);
+    auto ctx = factory->CreateContext();
+    if (ctx)
+        m_scene->Render(ctx.get(), m_aspect, gameCamera);
 }
 
 // ---------------------------------------------------------------------------

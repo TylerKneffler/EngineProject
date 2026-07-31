@@ -9,6 +9,10 @@ public:
     Camera();
     ~Camera() = default;
 
+    // Only active scene cameras are eligible to drive the Game view/runtime.
+    PROPERTY(Inspector, EditAnywhere, Category = "Camera")
+    bool active = true;
+
     // Projection settings
     PROPERTY(Inspector, EditAnywhere, Category = "Camera | Projection", Range = "1.0, 179.0")
     float fov       = 60.f;    // vertical field of view in degrees

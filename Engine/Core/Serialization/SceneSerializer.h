@@ -11,19 +11,20 @@ class IGraphicsProvider;
 // ---------------------------------------------------------------------------
 // SceneSerializer — saves and loads Scene objects to/from scene XML files.
 //
-// Scene XML files use an explicit element tree with the following root structure:
-//   <Scene>
+// Scene XML files use a generic element tree. Arrays use <item>; objects use
+// their serialized field names; objects with a serialized "type" use that type
+// as a namespace-qualified element without serializer-side type lists:
+//   <Scene xmlns:components="urn:engine-components">
 //     <version>1</version>
 //     <settings>...</settings>
 //     <objects>
-//       <Object>
+//       <item>
 //         <components>
-//           <Component>
-//             <type>Mesh</type>
-//             ...
-//           </Component>
+//           <components:Material>
+//             <Material.diffuse>...</Material.diffuse>
+//           </components:Material>
 //         </components>
-//       </Object>
+//       </item>
 //     </objects>
 //   </Scene>
 //
@@ -39,11 +40,11 @@ class IGraphicsProvider;
 // they participate in Update/Render loops, while the parent-child hierarchy
 // is also reconstructed.
 //
-// Built-in component types (Mesh, Material, Camera) are registered
-// automatically.  User script types must be registered before the first
-// Load() call, typically at application startup:
+// Built-in component types are registered automatically. User component types
+// must be registered before the first Load() call, typically at application
+// startup. The serialized name is obtained from the component itself:
 //
-//   SceneSerializer::Register("Rotate", []() -> Component* { return new Rotate(); });
+//   RegisterComponentType<Rotate>();
 //   scene.Load("Assets/Scenes/level1.scene");
 // ---------------------------------------------------------------------------
 class SceneSerializer
@@ -54,6 +55,8 @@ public:
 
     // Register a component type for deserialization by name.
     static void Register(const std::string& typeName, Factory factory);
+    // Register a component factory using the type name reported by an instance.
+    static void Register(Factory factory);
 
     // Write the scene to a scene XML file.
     // Returns false if the destination file cannot be opened.
@@ -86,6 +89,13 @@ private:
 };
 
 // Helper for registering component types with the scene serializer registry.
+template<typename T>
+inline void RegisterComponentType()
+{
+    SceneSerializer::Register([]() -> Component* { return new T(); });
+}
+
+// Backward-compatible overload for components that need a serialized alias.
 template<typename T>
 inline void RegisterComponentType(const std::string& typeName)
 {

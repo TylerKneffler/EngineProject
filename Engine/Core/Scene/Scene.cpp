@@ -1,5 +1,6 @@
 #include "Scene.h"
 #include "Core/Compoonents/Camera.h"
+#include "Core/Compoonents/Light.h"
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Compoonents/Material.h"
 #include "Core/Compoonents/Materials/Texture.h"
@@ -18,8 +19,31 @@
 #define ENGINE_SHADERS_PATH "Engine/Core/Shaders/"
 #endif
 
+#ifndef ENGINE_ASSETS_PATH
+#define ENGINE_ASSETS_PATH "Engine/Core/Assets/"
+#endif
+
 namespace
 {
+    JsonValue Vec3ToJson(const glm::vec3& value)
+    {
+        return JsonValue::MakeArray()
+            .Push(JsonValue(value.x))
+            .Push(JsonValue(value.y))
+            .Push(JsonValue(value.z));
+    }
+
+    glm::vec3 Vec3FromJson(const JsonValue& value, const glm::vec3& fallback)
+    {
+        if (!value.IsArray() || value.ArraySize() < 3)
+            return fallback;
+        return {
+            value.ArrayAt(0).AsFloat(),
+            value.ArrayAt(1).AsFloat(),
+            value.ArrayAt(2).AsFloat()
+        };
+    }
+
     std::string EngineShaderPath(const char* fileName)
     {
         const std::filesystem::path shaderFile(fileName);
@@ -33,18 +57,72 @@ namespace
     }
 }
 
+JsonValue SceneSettings::Serialize() const
+{
+    JsonValue value = JsonValue::MakeObject();
+    value.Set("showGrid", JsonValue(showGrid));
+    value.Set("gridHalfSize", JsonValue(gridHalfSize));
+    value.Set("gridCellSize", JsonValue(gridCellSize));
+    value.Set("gridOpacity", JsonValue(gridOpacity));
+    value.Set("gridFadeDistance", JsonValue(gridFadeDistance));
+    value.Set("gridColor", Vec3ToJson(gridColor));
+    value.Set("gridOriginColor", Vec3ToJson(gridOriginColor));
+    value.Set("ambientColor", Vec3ToJson(ambientColor));
+    value.Set("skyboxTexture", JsonValue(skyboxTexture));
+    return value;
+}
+
+void SceneSettings::Deserialize(const JsonValue& value)
+{
+    if (!value.IsObject())
+        return;
+    if (value.Has("showGrid")) showGrid = value["showGrid"].AsBool();
+    if (value.Has("gridHalfSize")) gridHalfSize = value["gridHalfSize"].AsInt();
+    if (value.Has("gridCellSize")) gridCellSize = value["gridCellSize"].AsFloat();
+    if (value.Has("gridOpacity")) gridOpacity = value["gridOpacity"].AsFloat();
+    if (value.Has("gridFadeDistance")) gridFadeDistance = value["gridFadeDistance"].AsFloat();
+    if (value.Has("gridColor"))
+        gridColor = Vec3FromJson(value["gridColor"], gridColor);
+    if (value.Has("gridOriginColor"))
+        gridOriginColor = Vec3FromJson(value["gridOriginColor"], gridOriginColor);
+    if (value.Has("ambientColor"))
+        ambientColor = Vec3FromJson(value["ambientColor"], ambientColor);
+    skyboxTexture = value.Has("skyboxTexture")
+        ? value["skyboxTexture"].AsString()
+        : std::string{};
+}
+
 // ---------------------------------------------------------------------------
 // Constant buffer data structures
 // ---------------------------------------------------------------------------
 
-// Constant buffer for object rendering (MVP matrix, material colors)
-struct CBData
+// Per-draw constants stay deliberately small. Vulkan sends these as push
+// constants; DirectX binds them through its native constant-buffer path.
+struct DrawCBData
+{
+    uint32_t objectIndex;
+    uint32_t lightCount;
+    uint32_t flags;
+    uint32_t padding;
+};
+
+// Large, indexed records live in shader-readable buffers on every backend.
+struct ObjectGPUData
 {
     glm::mat4 mvp;
-    glm::vec4 diffuseColor;
-    glm::vec4 ambientColor;
-    glm::vec4 specularColor;
+    glm::mat4 world;
+    glm::vec4 baseColor;
+    glm::vec4 ambientUnlit;
+    glm::vec4 emissiveOcclusion;
     glm::vec4 materialParams; // metallic, roughness, normal scale, texture mask
+    glm::vec4 specularShininess;
+};
+
+struct PointLightGPUData
+{
+    glm::vec4 positionRange;
+    glm::vec4 colorIntensity;
+    glm::vec4 params; // falloff, reserved
 };
 
 // Constant buffer for grid rendering
@@ -59,8 +137,16 @@ struct GridCBData
     glm::vec3 padding;  // Constant-buffer allocation uses a 256-byte stride.
 };
 
-static_assert(sizeof(CBData) == 128, "Object constant-buffer layout must match Object.hlsl");
+struct SkyboxCBData
+{
+    glm::mat4 invVP;
+};
+
+static_assert(sizeof(DrawCBData) == 16, "Draw constants must remain small");
+static_assert(sizeof(ObjectGPUData) == 208, "Object buffer layout must match Object.hlsl");
+static_assert(sizeof(PointLightGPUData) == 48, "Light buffer layout must match Object.hlsl");
 static_assert(sizeof(GridCBData) == 128, "Grid constant-buffer layout must match Grid.hlsl");
+static_assert(sizeof(SkyboxCBData) == 64, "Skybox constant-buffer layout must match Skybox.hlsl");
 
 // ---------------------------------------------------------------------------
 // Scene::Init
@@ -89,17 +175,45 @@ void Scene::Init(IGraphicsProvider* graphicsProvider)
     if (!m_gridCBMapped)
         throw std::runtime_error("Failed to map grid constant buffer");
 
+    m_skyboxConstantBuffer = bufferFactory->CreateBuffer(
+        IGraphicsBuffer::Usage::ConstantBuffer,
+        IGraphicsBuffer::AccessMode::Upload,
+        256);
+    if (!m_skyboxConstantBuffer)
+        throw std::runtime_error("Failed to create skybox constant buffer");
+    m_skyboxCBMapped = m_skyboxConstantBuffer->Map();
+    if (!m_skyboxCBMapped)
+        throw std::runtime_error("Failed to map skybox constant buffer");
+
     // Object constant buffer (256 * kMaxObjects bytes for per-object data)
     const uint64_t objectCBSize = static_cast<uint64_t>(kMaxObjects) * kCBStride;
     m_objectConstantBuffer = bufferFactory->CreateBuffer(
         IGraphicsBuffer::Usage::ConstantBuffer,
         IGraphicsBuffer::AccessMode::Upload,
-        objectCBSize);
+        objectCBSize, nullptr, sizeof(DrawCBData));
     if (!m_objectConstantBuffer)
         throw std::runtime_error("Failed to create object constant buffer");
     m_objectCBMapped = m_objectConstantBuffer->Map();
     if (!m_objectCBMapped)
         throw std::runtime_error("Failed to map object constant buffer");
+
+    m_objectDataBuffer = bufferFactory->CreateBuffer(
+        IGraphicsBuffer::Usage::ShaderResource,
+        IGraphicsBuffer::AccessMode::Upload,
+        static_cast<uint64_t>(kMaxObjects) * sizeof(ObjectGPUData),
+        nullptr, sizeof(ObjectGPUData));
+    m_objectDataMapped = m_objectDataBuffer ? m_objectDataBuffer->Map() : nullptr;
+    if (!m_objectDataMapped)
+        throw std::runtime_error("Failed to create object structured buffer");
+
+    m_lightDataBuffer = bufferFactory->CreateBuffer(
+        IGraphicsBuffer::Usage::ShaderResource,
+        IGraphicsBuffer::AccessMode::Upload,
+        static_cast<uint64_t>(kMaxLights) * sizeof(PointLightGPUData),
+        nullptr, sizeof(PointLightGPUData));
+    m_lightDataMapped = m_lightDataBuffer ? m_lightDataBuffer->Map() : nullptr;
+    if (!m_lightDataMapped)
+        throw std::runtime_error("Failed to create light structured buffer");
 
     // Set up the default editor camera
     editorCamera.AddComponent<Camera>();
@@ -107,7 +221,68 @@ void Scene::Init(IGraphicsProvider* graphicsProvider)
 
     // Build pipeline states
     BuildGridPipeline();
+    BuildSkyboxPipeline();
     BuildObjectPipeline();
+}
+
+void Scene::BuildSkyboxPipeline()
+{
+    auto* shaderCompiler = m_graphicsProvider->GetShaderCompiler();
+    auto* pipelineFactory = m_graphicsProvider->GetPipelineStateFactory();
+    if (!shaderCompiler || !pipelineFactory)
+        throw std::runtime_error("Failed to get skybox shader or pipeline factory");
+
+    const std::string shaderPath = EngineShaderPath("Skybox.hlsl");
+    auto vertexShader = shaderCompiler->CompileFromFile(
+        shaderPath.c_str(), "VSMain", IShaderCompiler::CompileProfile::VS_5_0);
+    if (!vertexShader)
+        throw std::runtime_error("Failed to compile skybox vertex shader: " + shaderCompiler->GetLastError());
+    auto pixelShader = shaderCompiler->CompileFromFile(
+        shaderPath.c_str(), "PSMain", IShaderCompiler::CompileProfile::PS_5_0);
+    if (!pixelShader)
+        throw std::runtime_error("Failed to compile skybox pixel shader: " + shaderCompiler->GetLastError());
+
+    auto builder = pipelineFactory->CreateBuilder();
+    if (!builder)
+        throw std::runtime_error("Failed to create skybox pipeline builder");
+    m_skyboxPipeline = builder->SetVertexShader(vertexShader.get())
+        .SetPixelShader(pixelShader.get())
+        .SetFillMode(false)
+        .SetCullMode(false)
+        .SetFrontCounterClockwise(true)
+        .SetDepthClipEnable(false)
+        .SetBlendEnable(false)
+        .SetDepthEnable(false)
+        .SetDepthWriteEnable(false)
+        .SetDepthFunc(7)
+        .SetInputLayout(nullptr, 0)
+        .SetPrimitiveTopology(IPipelineStateBuilder::PrimitiveTopology::TriangleList)
+        .SetRenderTargetFormat(28, 40)
+        .Build();
+    if (!m_skyboxPipeline)
+        throw std::runtime_error("Failed to build skybox pipeline: " + builder->GetLastError());
+
+    const std::string defaultPath =
+        (std::filesystem::path(ENGINE_ASSETS_PATH) / "Textures" / "Skyboxes" /
+            "editor-default-sky.png").string();
+    m_defaultSkyboxTexture = Texture::Acquire(defaultPath);
+    if (!m_defaultSkyboxTexture->Prepare(m_graphicsProvider))
+        m_defaultSkyboxTexture.reset();
+}
+
+const Texture* Scene::ResolveSkyboxTexture()
+{
+    if (settings.skyboxTexture.empty())
+        return m_defaultSkyboxTexture.get();
+
+    if (m_loadedSkyboxPath != settings.skyboxTexture)
+    {
+        m_loadedSkyboxPath = settings.skyboxTexture;
+        m_sceneSkyboxTexture = Texture::Acquire(settings.skyboxTexture);
+        if (!m_sceneSkyboxTexture->Prepare(m_graphicsProvider))
+            m_sceneSkyboxTexture.reset();
+    }
+    return m_sceneSkyboxTexture ? m_sceneSkyboxTexture.get() : m_defaultSkyboxTexture.get();
 }
 
 // ---------------------------------------------------------------------------
@@ -296,8 +471,9 @@ Camera* Scene::FindGameCamera()
 {
     for (const auto& obj : m_objects)
         if (Camera* cam = obj->GetComponent<Camera>())
-            return cam;
-    return editorCamera.GetComponent<Camera>();
+            if (obj->IsEnabledInHierarchy() && cam->active)
+                return cam;
+    return nullptr;
 }
 
 void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverride)
@@ -326,6 +502,38 @@ void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverri
     const glm::mat4 view = cam->GetViewMatrix();
     const glm::mat4 proj = cam->GetProjectionMatrix(aspect);
 
+    if (const Texture* skybox = ResolveSkyboxTexture();
+        skybox && skybox->GetGraphicsTexture() && m_skyboxPipeline)
+    {
+        SkyboxCBData skyboxData{};
+        skyboxData.invVP = glm::inverse(proj * view);
+        memcpy(m_skyboxCBMapped, &skyboxData, sizeof(skyboxData));
+        context->SetPipeline(m_skyboxPipeline.get());
+        context->SetConstantBuffer(0, m_skyboxConstantBuffer.get(), 0);
+        context->SetTexture(0, skybox->GetGraphicsTexture());
+        context->DrawInstanced(3, 1, 0, 0);
+    }
+
+    uint32_t lightCount = 0;
+    for (const auto& candidate : m_objects)
+    {
+        if (!candidate->IsEnabledInHierarchy() || lightCount >= kMaxLights)
+            continue;
+        Light* light = candidate->GetComponent<Light>();
+        if (light && !light->baked && light->intensity > 0.f && light->range > 0.f)
+        {
+            PointLightGPUData data{};
+            data.positionRange = glm::vec4(
+                candidate->transform.GetWorldPosition(), light->range);
+            data.colorIntensity = glm::vec4(light->color, light->intensity);
+            data.params = glm::vec4(light->falloff, 0.f, 0.f, 0.f);
+            memcpy(static_cast<uint8_t*>(m_lightDataMapped) +
+                static_cast<size_t>(lightCount) * sizeof(PointLightGPUData),
+                &data, sizeof(data));
+            ++lightCount;
+        }
+    }
+
 
     // Draw all scene objects that have a Mesh component
     UINT slot = 0;
@@ -335,6 +543,8 @@ void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverri
             break;
 
         Object* obj = objPtr.get();
+        if (!obj->IsEnabledInHierarchy())
+            continue;
         Mesh* mesh = obj->GetComponent<Mesh>();
         if (!mesh)
         {
@@ -350,9 +560,9 @@ void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverri
         const glm::mat4 world = obj->transform.GetWorldMatrix();
         UINT64 offset = static_cast<UINT64>(slot) * kCBStride;
 
-        // Prepare constant buffer data
-        CBData cbData{};
-        cbData.mvp = proj * view * world;
+        ObjectGPUData objectData{};
+        objectData.mvp = proj * view * world;
+        objectData.world = world;
 
         if (mat)
         {
@@ -374,34 +584,38 @@ void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverri
             bindTexture(3, mat->occlusionTexture, 8u);
             bindTexture(4, mat->emissiveTexture, 16u);
 
-            cbData.diffuseColor = {
-                mat->diffuseColor.r, mat->diffuseColor.g, mat->diffuseColor.b,
-                mat->baseColorAlpha
-            };
-            cbData.ambientColor = { mat->ambientColor.r, mat->ambientColor.g, mat->ambientColor.b, 1.f };
-            cbData.specularColor = {
-                mat->emissiveColor.r, mat->emissiveColor.g, mat->emissiveColor.b,
-                mat->occlusionStrength
-            };
-            cbData.materialParams = {
+            objectData.baseColor = glm::vec4(mat->diffuseColor, mat->baseColorAlpha);
+            objectData.ambientUnlit = glm::vec4(
+                mat->ambientColor, mat->unlit ? 1.f : 0.f);
+            objectData.emissiveOcclusion = glm::vec4(
+                mat->emissiveColor, mat->occlusionStrength);
+            objectData.materialParams = {
                 mat->metallicFactor, mat->roughnessFactor, mat->normalScale,
                 static_cast<float>(textureFlags)
             };
+            objectData.specularShininess = glm::vec4(
+                mat->specularColor, mat->shininess);
         }
         else
         {
-            cbData.diffuseColor = { 0.8f, 0.8f, 0.8f, 1.f };
-            cbData.ambientColor = { 0.1f, 0.1f, 0.1f, 1.f };
-            cbData.specularColor = { 1.f, 1.f, 1.f, 32.f };
-            cbData.materialParams = { 0.f, 1.f, 1.f, 0.f };
+            objectData.baseColor = { 0.8f, 0.8f, 0.8f, 1.f };
+            objectData.ambientUnlit = glm::vec4(settings.ambientColor, 0.f);
+            objectData.emissiveOcclusion = { 0.f, 0.f, 0.f, 1.f };
+            objectData.materialParams = { 0.f, 1.f, 1.f, 0.f };
+            objectData.specularShininess = { 1.f, 1.f, 1.f, 32.f };
         }
 
-        // Write to constant buffer
-        memcpy(static_cast<uint8_t*>(m_objectCBMapped) + offset, &cbData, sizeof(cbData));
+        const DrawCBData drawData{ slot, lightCount, 0u, 0u };
+        memcpy(static_cast<uint8_t*>(m_objectCBMapped) + offset,
+            &drawData, sizeof(drawData));
+        memcpy(static_cast<uint8_t*>(m_objectDataMapped) +
+            static_cast<size_t>(slot) * sizeof(ObjectGPUData),
+            &objectData, sizeof(objectData));
 
-        // Set pipeline and constant buffer
         context->SetPipeline(m_objectPipeline.get());
         context->SetConstantBuffer(0, m_objectConstantBuffer.get(), offset);
+        context->SetStructuredBuffer(5, m_lightDataBuffer.get());
+        context->SetStructuredBuffer(6, m_objectDataBuffer.get());
 
         // Set vertex buffer and draw
         IGraphicsBuffer* vertexBuffer = mesh->GetGraphicsBuffer();
@@ -413,26 +627,11 @@ void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverri
             // Draw selected object outline overlay.
             if (obj == m_selectedObject && m_objectOutlinePipeline)
             {
-                CBData outlineCb{};
-                glm::mat4 outlineWorld = world * glm::scale(glm::mat4(1.f), glm::vec3(1.03f));
-                outlineCb.mvp = proj * view * outlineWorld;
-                outlineCb.diffuseColor = { 1.f, 0.85f, 0.1f, 1.f };
-                outlineCb.ambientColor = { 0.f, 0.f, 0.f, 1.f };
-                outlineCb.specularColor = { 1.f, 0.85f, 0.1f, 1.f };
-                outlineCb.materialParams = { 0.f, 1.f, 1.f, 0.f }; // no textures
-
-                memcpy(static_cast<uint8_t*>(m_objectCBMapped) + offset, &outlineCb, sizeof(outlineCb));
                 context->SetPipeline(m_objectOutlinePipeline.get());
                 context->SetConstantBuffer(0, m_objectConstantBuffer.get(), offset);
-                context->SetTexture(0, nullptr);
-                context->SetTexture(1, nullptr);
-                context->SetTexture(2, nullptr);
-                context->SetTexture(3, nullptr);
-                context->SetTexture(4, nullptr);
+                context->SetStructuredBuffer(5, m_lightDataBuffer.get());
+                context->SetStructuredBuffer(6, m_objectDataBuffer.get());
                 context->DrawInstanced(mesh->GetVertexCount(), 1, 0, 0);
-
-                // Restore the regular object data for consistency.
-                memcpy(static_cast<uint8_t*>(m_objectCBMapped) + offset, &cbData, sizeof(cbData));
             }
         }
 

@@ -30,6 +30,7 @@ public:
     virtual Usage GetUsage() const = 0;
     virtual AccessMode GetAccessMode() const = 0;
     virtual uint64_t GetSize() const = 0;
+    virtual uint32_t GetElementStride() const { return 0; }
 
     // Map for CPU access (for Upload buffers)
     // Returns nullptr if buffer is not mappable
@@ -55,5 +56,6 @@ public:
         IGraphicsBuffer::Usage usage,
         IGraphicsBuffer::AccessMode access,
         uint64_t sizeBytes,
-        const void* initialData = nullptr) = 0;
+        const void* initialData = nullptr,
+        uint32_t elementStride = 0) = 0;
 };

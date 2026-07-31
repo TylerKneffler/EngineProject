@@ -16,6 +16,9 @@ public:
     bool SliderInt(const char*, int*, int, int) override; bool InputUInt(const char*, uint32_t*) override;
     void ValueLabel(const char*, const char*) override; bool CollapsingHeader(const char*, bool) override;
     bool TreeNode(const void*, const char*, bool, bool, bool) override; void TreePop() override;
+    EditorUiObjectRowResult ObjectTreeRow(const void*,char*,size_t,bool*,bool,bool,bool) override;
+    void ObjectTreePop() override;
+    EditorUiObjectRowResult ObjectHeader(const void*,char*,size_t,bool*,bool) override;
     bool Selectable(const char*, bool, bool) override; bool BeginChild(const char*) override; void EndChild() override;
     bool IsItemHovered() const override; bool IsItemClicked() const override;
     bool IsItemDoubleClicked() const override; bool IsWindowBackgroundClicked() const override;

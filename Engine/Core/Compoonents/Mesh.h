@@ -37,6 +37,7 @@ public:
     const std::string& GetFilePath() const { return m_filePath; }
 
     void        Deserialize(const JsonValue& v) override;
+    void        OnAfterDeserialize(IGraphicsProvider* graphicsProvider) override;
 
 private:
     std::string m_filePath;
