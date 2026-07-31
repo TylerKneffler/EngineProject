@@ -11,8 +11,29 @@
 //
 // Usage:
 //   class MyScript : public Script {
+//   public:
+//       PROPERTY(Inspector, EditAnywhere, Category = "Stats")
+//       float health = 100.f;
+//       
+//       PROPERTY(Inspector, EditAnywhere, Category = "Movement")
+//       float speed = 5.f;
+//       
 //       void Start()  override { /* init */ }
 //       void Update() override { /* per frame */ }
+//       std::string GetTypeName() const override { return "MyScript"; }
+//       
+//       // IMPORTANT: Include all PROPERTY(Inspector) fields in Serialize/Deserialize
+//       JsonValue Serialize() const override {
+//           JsonValue data = JsonValue::MakeObject();
+//           data.Set("type", JsonValue(std::string("MyScript")));
+//           data.Set("health", JsonValue(health));  // <- Makes it appear in inspector
+//           data.Set("speed", JsonValue(speed));    // <- Makes it appear in inspector
+//           return data;
+//       }
+//       void Deserialize(const JsonValue& v) override {
+//           if (v.Has("health")) health = v["health"].AsFloat();
+//           if (v.Has("speed")) speed = v["speed"].AsFloat();
+//       }
 //   };
 //   obj->AddComponent<MyScript>();
 // ---------------------------------------------------------------------------
@@ -27,4 +48,10 @@ public:
     virtual void Enabled() {}
     virtual void Disabled(){}
     virtual void OnDestroy(){}
+
+    // Override in derived classes to provide a custom name for the inspector
+    std::string GetTypeName() const override { return "Script"; }
+    
+    // Override in derived classes to draw custom properties in the inspector
+    // void DrawProperties(IEditorUi& ui) override { /* custom UI */ }
 };

@@ -3,6 +3,14 @@
 #include <cstddef>
 #include <cstdint>
 
+// Avoid Windows macro collisions with method names in this interface.
+#ifdef Combo
+#undef Combo
+#endif
+#ifdef Tooltip
+#undef Tooltip
+#endif
+
 struct EditorUiVec2 { float x = 0.f, y = 0.f; };
 struct EditorUiColor { float r = 1.f, g = 1.f, b = 1.f, a = 1.f; };
 struct EditorUiViewportInput
@@ -66,6 +74,7 @@ public:
     virtual bool Combo(const char* label, int* selected, const char* const* items, int count) = 0;
     virtual void Tooltip(const char* text) = 0;
     virtual void Progress(float fraction, const char* overlay = nullptr) = 0;
+    virtual void DrawImage(void* texture, float width, float height) = 0;
     virtual EditorUiViewportInput Viewport(void* texture, float aspectRatio, EditorUiColor letterboxColor) = 0;
     virtual void FocusWindow(const char* title) = 0;
 };

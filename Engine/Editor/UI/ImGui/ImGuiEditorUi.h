@@ -27,6 +27,7 @@ public:
     void BeginDisabled(bool) override; void EndDisabled() override;
     bool Combo(const char*, int*, const char* const*, int) override;
     void Tooltip(const char*) override; void Progress(float, const char*) override;
+    void DrawImage(void*, float, float) override;
     EditorUiViewportInput Viewport(void*, float, EditorUiColor) override;
     void FocusWindow(const char*) override;
 };

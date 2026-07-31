@@ -37,6 +37,7 @@ void ImGuiEditorUi::BeginDisabled(bool d){ImGui::BeginDisabled(d);} void ImGuiEd
 bool ImGuiEditorUi::Combo(const char*l,int*s,const char*const*i,int c){return ImGui::Combo(l,s,i,c);}
 void ImGuiEditorUi::Tooltip(const char*t){if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("%s",t);}
 void ImGuiEditorUi::Progress(float f,const char*o){ImGui::ProgressBar(f,{-1,0},o);}
+void ImGuiEditorUi::DrawImage(void*tex,float w,float h){ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(tex)),{w,h});}
 EditorUiViewportInput ImGuiEditorUi::Viewport(void* texture,float aspect,EditorUiColor bg)
 {
     EditorUiViewportInput out; ImVec2 a=ImGui::GetContentRegionAvail(); if(a.x<=1||a.y<=1)return out;

@@ -94,4 +94,5 @@ private:
 
     // Timing
     LARGE_INTEGER m_perfFreq, m_lastCounter;
+    float m_deltaTime = 0.0f;
 };

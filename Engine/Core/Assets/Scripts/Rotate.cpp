@@ -1,6 +1,7 @@
 #include "Scripts/Rotate.h"
 #include "Core/Object.h"
 #include "Core/Serialization/SceneSerializer.h"
+#include "Engine/Editor/UI/IEditorUi.h"
 #include <glm/gtc/matrix_transform.hpp>
 
 namespace
@@ -55,4 +56,11 @@ void Rotate::Deserialize(const JsonValue& v)
 {
     axis  = from3(v["axis"], axis);
     if (v.Has("speed")) speed = v["speed"].AsFloat();
+}
+
+void Rotate::DrawProperties(IEditorUi& ui)
+{
+    // Custom interactive editor for Rotate script properties
+    ui.DragFloat3("Rotation Axis", &axis.x, 0.01f, -1.f, 1.f);
+    ui.DragFloat("Speed (deg/s)", &speed, 0.5f, -360.f, 360.f);
 }

@@ -1,5 +1,6 @@
 #pragma once
 #include "Core/Script.h"
+#include "Core/PropertyMacros.h"
 #include <glm/glm.hpp>
 
 // ---------------------------------------------------------------------------
@@ -13,7 +14,10 @@
 class Rotate : public Script
 {
 public:
+    PROPERTY(Inspector, EditAnywhere, Category = "Rotation", Range = "-1.0, 1.0")
     glm::vec3 axis  { 0.f, 1.f, 0.f }; // rotation axis (world space)
+    
+    PROPERTY(Inspector, EditAnywhere, Category = "Rotation", Range = "-360.0, 360.0")
     float     speed { 45.f };           // degrees per second
 
     void Start()  override;
@@ -23,4 +27,7 @@ public:
     std::string GetTypeName() const override { return "Rotate"; }
     JsonValue   Serialize()   const override;
     void        Deserialize(const JsonValue& v) override;
+
+    // Custom property editor
+    void DrawProperties(IEditorUi& ui) override;
 };

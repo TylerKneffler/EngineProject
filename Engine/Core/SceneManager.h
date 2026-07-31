@@ -28,9 +28,10 @@ public:
     // Returns true if successful
     static bool LoadScene(const std::string& path);
     
-    // Load a scene in the background without changing the active scene
+    // Load a scene in the background without blocking the main thread
     // When load completes, the callback is invoked with the loaded scene
-    // TODO: implement async with thread pool
+    // Note: Callbacks are invoked on the background thread - ensure thread safety
+    //       or queue operations for the main thread as needed
     static void LoadSceneAsync(const std::string& path, 
                                std::function<void(Scene*)> onComplete);
     

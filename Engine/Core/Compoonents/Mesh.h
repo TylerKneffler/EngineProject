@@ -1,5 +1,6 @@
 #pragma once
 #include "Core/component.h"
+#include "Core/PropertyMacros.h"
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include <string>
 #include <vector>

@@ -26,11 +26,12 @@ public:
     bool BeginDragDropTarget() override; const void* AcceptDragDropPayload(const char*,size_t*) override; void EndDragDropTarget() override;
     bool BeginTabBar(const char*) override; void EndTabBar() override; bool BeginTab(const char*) override; void EndTab() override; void BeginDisabled(bool) override; void EndDisabled() override;
     bool Combo(const char*,int*,const char*const*,int) override; void Tooltip(const char*) override; void Progress(float,const char*) override;
+    void DrawImage(void*,float,float) override;
     EditorUiViewportInput Viewport(void*,float,EditorUiColor) override; void FocusWindow(const char*) override;
 private:
     void Layout(float height=24.f);
     void RecordNextWidgetBounds();
-    void* m_context=nullptr; bool m_lastClicked=false; bool m_disabled=false;
+    void* m_context=nullptr; bool m_lastClicked=false; bool m_disabled=false; bool m_sameLine=false; int m_sameLineCount=0;
     float m_lastItemX=0.f,m_lastItemY=0.f,m_lastItemW=0.f,m_lastItemH=0.f;
     bool m_dragPayloadDelivered=false;
     std::string m_dragPayloadType;

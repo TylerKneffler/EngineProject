@@ -149,6 +149,12 @@ bool EditorState::Init()
         return false;
     OutputDebugStringA("[EditorState] View factory created\n");
 
+    // Initialize timing
+    QueryPerformanceFrequency(&m_perfFreq);
+    QueryPerformanceCounter(&m_lastCounter);
+    m_deltaTime = 0.0f;
+    OutputDebugStringA("[EditorState] Timing initialized\n");
+
     OutputDebugStringA("[EditorState] Init completed\n");
     return true;
 }
@@ -533,8 +539,7 @@ void EditorState::SelectObject(Object* object)
 // ---------------------------------------------------------------------------
 float EditorState::GetDeltaTime() const
 {
-    // TODO: Implement delta time calculation
-    return 0.0f;
+    return m_deltaTime;
 }
 
 // ---------------------------------------------------------------------------
@@ -542,5 +547,13 @@ float EditorState::GetDeltaTime() const
 // ---------------------------------------------------------------------------
 void EditorState::UpdateDeltaTime()
 {
-    // TODO: Implement delta time update
+    LARGE_INTEGER currentCounter;
+    QueryPerformanceCounter(&currentCounter);
+    
+    // Calculate elapsed time in seconds
+    LONGLONG elapsedCounts = currentCounter.QuadPart - m_lastCounter.QuadPart;
+    m_deltaTime = static_cast<float>(elapsedCounts) / static_cast<float>(m_perfFreq.QuadPart);
+    
+    // Update last counter for next frame
+    m_lastCounter = currentCounter;
 }

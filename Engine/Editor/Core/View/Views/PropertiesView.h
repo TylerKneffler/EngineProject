@@ -26,9 +26,6 @@ public:
 
 private:
     void DrawTransform(IEditorUi& ui);
-    void DrawMesh(IEditorUi& ui);
-    void DrawMaterial(IEditorUi& ui);
-    void DrawCamera(IEditorUi& ui);
 
     Object* m_selectedObject = nullptr;
 };
