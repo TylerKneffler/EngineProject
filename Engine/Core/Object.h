@@ -12,7 +12,7 @@ class Object
 {
 public:
     Object();
-    Object(Transform transform);
+    Object(Transform initialTransform);
     ~Object();
 
     std::string name;

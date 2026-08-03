@@ -22,9 +22,14 @@ void ImGuiEditorUi::TreePop(){ImGui::TreePop();}
 EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,char* name,size_t size,bool* enabled,bool selected,bool leaf,bool lockName)
 {
     EditorUiObjectRowResult result;
+    (void)size;
     ImGui::PushID(id);
-    ImGuiTreeNodeFlags flags=ImGuiTreeNodeFlags_OpenOnArrow|(selected?ImGuiTreeNodeFlags_Selected:0);
+    ImGuiTreeNodeFlags flags=ImGuiTreeNodeFlags_OpenOnArrow|
+        ImGuiTreeNodeFlags_SpanAvailWidth|ImGuiTreeNodeFlags_FramePadding|
+        ImGuiTreeNodeFlags_AllowOverlap|
+        (selected?ImGuiTreeNodeFlags_Selected:0);
     if(leaf)flags|=ImGuiTreeNodeFlags_Leaf|ImGuiTreeNodeFlags_NoTreePushOnOpen;
+    ImGui::SetNextItemAllowOverlap();
     result.open=ImGui::TreeNodeEx("##object",flags,"");
     result.clicked=ImGui::IsItemClicked()&&!ImGui::IsItemToggledOpen();
     result.doubleClicked=ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
@@ -32,11 +37,21 @@ EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,char* name,s
     result.enabledChanged=ImGui::Checkbox("##enabled",enabled);
     result.clicked=result.clicked||ImGui::IsItemClicked();
     ImGui::SameLine(0.f,4.f);
-    ImGui::SetNextItemWidth(-1.f);
-    ImGui::BeginDisabled(lockName);
-    result.nameChanged=ImGui::InputText("##name",name,size);
-    ImGui::EndDisabled();
-    result.clicked=result.clicked||ImGui::IsItemClicked();
+    const char* display=name[0]?name:"(unnamed)";
+    ImGui::Selectable("##nameText",false,
+        ImGuiSelectableFlags_AllowDoubleClick|ImGuiSelectableFlags_AllowOverlap,
+        {ImGui::GetContentRegionAvail().x,ImGui::GetFrameHeight()});
+    const bool nameClicked=ImGui::IsItemClicked();
+    const bool nameDoubleClicked=ImGui::IsItemHovered()&&
+        ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+    const ImVec2 textMin=ImGui::GetItemRectMin();
+    const ImVec2 textMax=ImGui::GetItemRectMax();
+    const ImVec2 textSize=ImGui::CalcTextSize(display);
+    ImGui::GetWindowDrawList()->AddText(
+        {textMin.x,textMin.y+(textMax.y-textMin.y-textSize.y)*0.5f},
+        ImGui::GetColorU32(lockName?ImGuiCol_TextDisabled:ImGuiCol_Text),display);
+    result.clicked=result.clicked||nameClicked;
+    result.doubleClicked=result.doubleClicked||nameDoubleClicked;
     ImGui::PopID();
     return result;
 }

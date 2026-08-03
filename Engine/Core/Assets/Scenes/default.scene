@@ -88,7 +88,7 @@
           <item>-3</item>
         </Transform.position>
         <Transform.rotation>
-          <item>0</item>
+          <item>0.463648</item>
           <item>0</item>
           <item>0</item>
         </Transform.rotation>
@@ -101,6 +101,7 @@
       <components>
         <components:Camera>
           <Camera.active>true</Camera.active>
+          <Camera.useTransformRotation>true</Camera.useTransformRotation>
           <Camera.fov>60</Camera.fov>
           <Camera.near>0.01</Camera.near>
           <Camera.far>100</Camera.far>
@@ -119,7 +120,7 @@
       <children />
     </item>
     <item>
-      <name>Point Light</name>
+      <name>Global Light</name>
       <enabled>true</enabled>
       <transform>
         <Transform.position>
@@ -128,8 +129,8 @@
           <item>-1</item>
         </Transform.position>
         <Transform.rotation>
-          <item>0</item>
-          <item>0</item>
+          <item>0.55</item>
+          <item>0.55</item>
           <item>0</item>
         </Transform.rotation>
         <Transform.scale>
@@ -140,12 +141,13 @@
       </transform>
       <components>
         <components:Light>
+          <Light.lightType>1</Light.lightType>
           <Light.color>
             <item>1</item>
             <item>0.95</item>
             <item>0.85</item>
           </Light.color>
-          <Light.intensity>4</Light.intensity>
+          <Light.intensity>0.65</Light.intensity>
           <Light.range>8</Light.range>
           <Light.falloff>2</Light.falloff>
           <Light.baked>false</Light.baked>

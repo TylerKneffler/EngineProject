@@ -10,6 +10,27 @@ Transform::Transform()
     RegisterField("scale", scale);
 }
 
+Transform::Transform(const Transform& other)
+    : Transform()
+{
+    position = other.position;
+    rotation = other.rotation;
+    scale = other.scale;
+}
+
+Transform& Transform::operator=(const Transform& other)
+{
+    if (this == &other)
+        return *this;
+
+    // Keep this instance's registered field callbacks and owner. They must
+    // continue to reference this Transform rather than the copied source.
+    position = other.position;
+    rotation = other.rotation;
+    scale = other.scale;
+    return *this;
+}
+
 namespace
 {
 JsonValue JVec3(const glm::vec3& v)

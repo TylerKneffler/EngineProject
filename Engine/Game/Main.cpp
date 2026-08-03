@@ -6,6 +6,10 @@
 #include "Core/Scene/Scene.h"
 #include "Core/SceneManager.h"
 #include "Core/ProjectLoader.h"
+#ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
+#include "Core/Assets/Scripts/Rotate.h"
+#include "Core/Serialization/SceneSerializer.h"
+#endif
 #include <filesystem>
 
 // Fallback for IntelliSense — CMake overrides these with real absolute paths.
@@ -28,6 +32,9 @@ int WINAPI wWinMain(
     _In_     LPWSTR    /*lpCmdLine*/,
     _In_     int       /*nShowCmd*/)
 {
+#ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
+    RegisterComponentType<Rotate>("Rotate");
+#endif
     // Load project configuration.
     ProjectLoader projectLoader;
     ProjectSettings projectSettings;

@@ -11,7 +11,11 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
         return;
     }
     if (!m_scene) { ui.DisabledLabel("No scene loaded"); ui.EndWindow(); return; }
-    if (ui.TreeNode(this, "World", false, false, true))
+    const bool worldOpen = ui.TreeNode(
+        this, "World", m_selectedObject == nullptr, false, true);
+    if (ui.IsItemClicked())
+        SetSelectedObject(nullptr);
+    if (worldOpen)
     {
         for (const auto& obj : m_scene->GetObjects()) if (!obj->Parent) DrawObjectNode(ui, obj.get());
         ui.TreePop();

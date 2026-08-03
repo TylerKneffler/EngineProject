@@ -3,12 +3,13 @@
 
 Object::Object()
 {
-    this->transform = Transform();
+    this->transform.Owner = this;
 }
 
-Object::Object(Transform transform)
+Object::Object(Transform initialTransform)
+    : transform(initialTransform)
 {
-    this->transform = transform;
+    this->transform.Owner = this;
 }
 
 Object::~Object()

@@ -28,6 +28,7 @@ public:
 
     // ---- Build Control ----
     void StartBuild(PostBuildAction action);
+    void PlayInEditor();
     void CancelBuild();
     void Stop();
     void Pause();

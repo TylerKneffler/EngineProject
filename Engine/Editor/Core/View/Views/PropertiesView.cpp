@@ -25,6 +25,16 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
                 m_scene->settings.skyboxTexture = skyboxPath;
             if (m_scene->settings.skyboxTexture.empty())
                 ui.DisabledLabel("Using the editor default skybox texture.");
+            ui.Separator();
+            ui.Label("Baked Lighting");
+            if (ui.Button("Bake Lighting", 140.f, 30.f))
+                m_scene->BakeLighting();
+            ui.SameLine();
+            if (ui.Button("Clear Bake", 110.f, 30.f))
+                m_scene->ClearBakedLighting();
+            ui.DisabledLabel(m_scene->GetLightingBakeStatus().c_str());
+            ui.DisabledLabel(
+                "Bakes point-light irradiance into persistent object records.");
         }
         ui.EndWindow();
         return;

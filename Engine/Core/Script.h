@@ -40,7 +40,7 @@
 class Script : public Component
 {
 public:
-    Script()          = default;
+    Script() { SetTypeName("Script"); }
     virtual ~Script() = default;
 
     virtual void Start()   {}
@@ -49,8 +49,13 @@ public:
     virtual void Disabled(){}
     virtual void OnDestroy(){}
 
-    // Override in derived classes to provide a custom name for the inspector
-    std::string GetTypeName() const override { return "Script"; }
+    // Derived scripts set their serialized type name in their constructor.
+    // Returning Component's stored name preserves that identity in scene and
+    // play-mode snapshot serialization.
+    std::string GetTypeName() const override
+    {
+        return Component::GetTypeName();
+    }
     
     // Override in derived classes to draw custom properties in the inspector
     // void DrawProperties(IEditorUi& ui) override { /* custom UI */ }

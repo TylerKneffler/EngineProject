@@ -13,6 +13,11 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Camera")
     bool active = true;
 
+    // Scene cameras normally look along their Transform's local +Z axis.
+    // The editor navigation camera disables this to retain its orbit target.
+    PROPERTY(Inspector, EditAnywhere, Category = "Camera")
+    bool useTransformRotation = true;
+
     // Projection settings
     PROPERTY(Inspector, EditAnywhere, Category = "Camera | Projection", Range = "1.0, 179.0")
     float fov       = 60.f;    // vertical field of view in degrees

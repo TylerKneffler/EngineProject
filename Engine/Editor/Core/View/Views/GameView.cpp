@@ -64,6 +64,8 @@ void GameView::Render3D(void* cmd)
 
     Camera* gameCamera = m_scene->FindGameCamera();
     if (!gameCamera)
+        gameCamera = m_scene->editorCamera.GetComponent<Camera>();
+    if (!gameCamera)
         return;
 
     auto* graphicsProvider = m_scene->GetGraphicsProvider();

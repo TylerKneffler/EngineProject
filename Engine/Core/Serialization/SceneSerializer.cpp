@@ -8,6 +8,7 @@
 #include "Core/Compoonents/Material.h"
 #include "Core/Compoonents/Camera.h"
 #include "Core/Compoonents/Light.h"
+#include "Core/Rendering/Lighting/BakedLightingData.h"
 #include <pugixml.hpp>
 #include <fstream>
 #include <algorithm>
@@ -46,7 +47,8 @@ void SceneSerializer::Register(Factory factory)
     if (!prototype || prototype->GetTypeName().empty())
         throw std::invalid_argument("Registered components must provide a type name");
 
-    Register(prototype->GetTypeName(), std::move(factory));
+    const std::string typeName = prototype->GetTypeName();
+    Register(typeName, std::move(factory));
 }
 
 void SceneSerializer::EnsureBuiltinsRegistered()
@@ -59,6 +61,7 @@ void SceneSerializer::EnsureBuiltinsRegistered()
     RegisterComponentType<Material>();
     RegisterComponentType<Camera>();
     RegisterComponentType<Light>();
+    RegisterComponentType<BakedLightingData>();
 }
 
 // ---- Local GLM helpers ------------------------------------------------------

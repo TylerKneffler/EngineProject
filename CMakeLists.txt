@@ -351,6 +351,7 @@ target_compile_definitions(Editor PRIVATE
     GAME_EXECUTABLE_PATH="${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/Game.exe"
     $<$<STREQUAL:${ENGINE_EDITOR_UI},IMGUI>:ENGINE_EDITOR_UI_IMGUI>
     $<$<STREQUAL:${ENGINE_EDITOR_UI},NUKLEAR>:ENGINE_EDITOR_UI_NUKLEAR>
+    $<$<NOT:$<BOOL:${ENGINE_PROJECT_DIR}>>:ENGINE_BUILTIN_ASSET_SCRIPTS>
 )
 set_source_files_properties(
     "${ENGINE_ROOT}/Engine/Editor/UI/Nuklear/NuklearCore.c"
@@ -392,9 +393,32 @@ target_compile_definitions(Game PRIVATE
     ASSETS_PATH="${ENGINE_PROJECT_DIR}/Assets/"
     PROJECT_FILE="${ENGINE_PROJECT_FILE}"
     ENGINE_ASSETS_PATH="${ENGINE_ROOT}/Engine/Core/Assets/"
+    $<$<NOT:$<BOOL:${ENGINE_PROJECT_DIR}>>:ENGINE_BUILTIN_ASSET_SCRIPTS>
 )
 set_target_properties(Game PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "${ENGINE_RUNTIME_WORKING_DIRECTORY}"
 )
+
+if(NOT ENGINE_PROJECT_DIR)
+    enable_testing()
+    add_executable(EngineLifecycleTests
+        "${ENGINE_ROOT}/Engine/Tests/RotateLifecycleTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/PrefabAsset.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Rotate.cpp"
+    )
+    target_link_libraries(EngineLifecycleTests PRIVATE Engine)
+    target_precompile_headers(EngineLifecycleTests REUSE_FROM Engine)
+    target_include_directories(EngineLifecycleTests PRIVATE
+        "${ENGINE_ROOT}/Engine"
+        "${ENGINE_ROOT}/Engine/Core/Assets"
+    )
+    target_compile_definitions(EngineLifecycleTests PRIVATE
+        ENGINE_ASSETS_PATH="${ENGINE_ROOT}/Engine/Core/Assets/"
+    )
+    add_test(NAME RotateDefaultSceneLifecycle COMMAND EngineLifecycleTests)
+    set_tests_properties(RotateDefaultSceneLifecycle PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}"
+    )
+endif()
 
 

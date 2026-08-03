@@ -62,6 +62,20 @@ void GameBuildManager::StartBuild(PostBuildAction action)
     }
 }
 
+void GameBuildManager::PlayInEditor()
+{
+    if (m_buildProcess || m_playState == PlayState::Playing ||
+        m_playState == PlayState::Paused)
+        return;
+
+    m_postBuildAction = PostBuildAction::Nothing;
+    m_playState = PlayState::Playing;
+    if (OnPlayStart)
+        OnPlayStart();
+    if (m_console)
+        m_console->AddLog(ConsoleView::Level::Info, "[Play] Running in editor.");
+}
+
 bool GameBuildManager::ValidateRendererPrerequisites()
 {
     for (const auto& option : RendererFactory::GetRendererOptions())
@@ -201,14 +215,16 @@ void GameBuildManager::LaunchStandalone()
 // ---------------------------------------------------------------------------
 void GameBuildManager::Update(PlayState& outState, PostBuildAction& outAction)
 {
-    outState = m_playState;
-    outAction = m_postBuildAction;
-
     if (m_playState == PlayState::Building)
     {
         DrainBuildPipe();
         PollBuildProcess();
     }
+
+    // Publish state after polling so build completion and play transitions are
+    // visible to the editor during this frame rather than one frame later.
+    outState = m_playState;
+    outAction = m_postBuildAction;
 }
 
 // ---------------------------------------------------------------------------
@@ -340,7 +356,7 @@ static HANDLE StartGameBuild(HANDLE& outReadPipe)
 
     std::string cmd =
         "cmake --build \"" ENGINE_BUILD_DIR
-        "\" --config Debug --target Game --parallel";
+        "\" --config Debug --target Game --parallel 1";
 
     std::vector<char> buf(cmd.begin(), cmd.end());
     buf.push_back('\0');

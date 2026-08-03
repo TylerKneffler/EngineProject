@@ -88,6 +88,8 @@ private:
     bool m_showPreferences = false;
     std::string m_playModeSceneSnapshot;
     bool m_prePlayHasUnsavedChanges = false;
+    bool m_prePlayHadObjectSelection = false;
+    Scene::ObjectPath m_prePlaySelectionPath;
 
     std::string m_sceneToLoad;
     bool m_showUnsavedWarning = false;

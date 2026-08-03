@@ -8,6 +8,8 @@ class Transform : public Component
 {
 public:
     Transform();
+    Transform(const Transform& other);
+    Transform& operator=(const Transform& other);
     ~Transform() = default;
 
     PROPERTY(Inspector, EditAnywhere, Category = "Transform")

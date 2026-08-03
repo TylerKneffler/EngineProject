@@ -293,6 +293,18 @@ void EditorState::CapturePlayModeScene()
 
     m_playModeSceneSnapshot = m_scene->SaveToString();
     m_prePlayHasUnsavedChanges = m_hasUnsavedChanges;
+    m_prePlayHadObjectSelection = false;
+    m_prePlaySelectionPath.clear();
+    for (const auto& panel : m_panels)
+    {
+        const auto* hierarchy = dynamic_cast<const HierarchyView*>(panel.get());
+        if (!hierarchy)
+            continue;
+        Object* selected = hierarchy->GetSelectedObject();
+        m_prePlayHadObjectSelection = selected &&
+            m_scene->TryGetObjectPath(selected, m_prePlaySelectionPath);
+        break;
+    }
     OutputDebugStringA("[Play] Captured editor scene state.\n");
 }
 
@@ -311,6 +323,9 @@ void EditorState::RestorePlayModeScene()
     if (m_scene->LoadFromString(m_playModeSceneSnapshot))
     {
         m_hasUnsavedChanges = m_prePlayHasUnsavedChanges;
+        SelectObject(m_prePlayHadObjectSelection
+            ? m_scene->FindObjectByPath(m_prePlaySelectionPath)
+            : nullptr);
         OutputDebugStringA("[Play] Restored editor scene state.\n");
         if (m_primaryConsole)
             m_primaryConsole->AddLog(ConsoleView::Level::Info, "[Play] Restored pre-play scene state.");
@@ -323,6 +338,8 @@ void EditorState::RestorePlayModeScene()
     }
 
     m_playModeSceneSnapshot.clear();
+    m_prePlaySelectionPath.clear();
+    m_prePlayHadObjectSelection = false;
 }
 
 // ---------------------------------------------------------------------------

@@ -17,7 +17,7 @@ struct RotateRegistration
 {
     RotateRegistration()
     {
-        RegisterComponentType<Rotate>();
+        RegisterComponentType<Rotate>("Rotate");
     }
 };
 

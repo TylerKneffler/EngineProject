@@ -9,6 +9,10 @@
 #include "Engine/Editor/ProjectLauncher.h"
 #include "Engine/Editor/UI/IEditorUiBackend.h"
 #include "Engine/Editor/Core/Assets/GltfImporter.h"
+#ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
+#include "Core/Assets/Scripts/Rotate.h"
+#include "Core/Serialization/SceneSerializer.h"
+#endif
 #include <filesystem>
 #include <fstream>
 #include <shellapi.h>
@@ -98,6 +102,9 @@ int WINAPI wWinMain(
     _In_     LPWSTR    /*lpCmdLine*/,
     _In_     int       /*nShowCmd*/)
 {
+#ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
+    RegisterComponentType<Rotate>("Rotate");
+#endif
     HRESULT comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     WriteStartupLog("Editor startup", true);
 
@@ -436,4 +443,3 @@ int WINAPI wWinMain(
     if (SUCCEEDED(comResult)) CoUninitialize();
     return result;
 }
-

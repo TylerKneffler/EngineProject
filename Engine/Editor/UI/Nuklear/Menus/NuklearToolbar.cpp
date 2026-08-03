@@ -89,7 +89,7 @@ void NuklearToolbar::Draw(nk_context& context, float width,
         if (playState == PlayState::Stopped || playState == PlayState::BuildFailed)
         {
             if (nk_button_label(&context, "Play") && buildManager)
-                buildManager->StartBuild(PostBuildAction::PlayInEditor);
+                buildManager->PlayInEditor();
         }
         else if (nk_button_label(&context, "Stop") && buildManager)
             buildManager->Stop();

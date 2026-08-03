@@ -2,6 +2,8 @@
 #include "Core/Object.h"
 #include "Core/Graphics/IPipelineState.h"
 #include "Core/Graphics/IGraphicsBuffer.h"
+#include "Core/Rendering/Lighting/Pipelines/Realtime/RealtimeLightingPipeline.h"
+#include "Core/Rendering/Lighting/Pipelines/Baked/BakedLightingPipeline.h"
 #include "Core/Serialization/Json.h"
 #include <glm/glm.hpp>
 #include <string>
@@ -54,6 +56,8 @@ struct SceneSettings
 class Scene
 {
 public:
+    using ObjectPath = std::vector<std::size_t>;
+
     Scene()  = default;
     ~Scene() = default;
 
@@ -87,6 +91,8 @@ public:
     void    RemoveObject(Object* obj);
     void    ClearObjects();                  // remove all objects and reset selection
     const std::vector<std::unique_ptr<Object>>& GetObjects() const { return m_objects; }
+    bool TryGetObjectPath(const Object* object, ObjectPath& path) const;
+    Object* FindObjectByPath(const ObjectPath& path) const;
 
     // Serialization — delegates to SceneSerializer.
     // Save writes the scene to a scene XML file.
@@ -96,6 +102,10 @@ public:
     bool Load(const std::string& path);
     std::string SaveToString() const;
     bool LoadFromString(const std::string& source);
+
+    Engine::Rendering::Lighting::BakeResult BakeLighting();
+    void ClearBakedLighting();
+    const std::string& GetLightingBakeStatus() const { return m_lightingBakeStatus; }
 
     SceneSettings settings;
 
@@ -124,6 +134,10 @@ private:
     std::unique_ptr<IGraphicsBuffer> m_lightDataBuffer;
     void* m_lightDataMapped = nullptr;
 
+    Engine::Rendering::Lighting::RealtimeLightingPipeline m_realtimeLightingPipeline;
+    Engine::Rendering::Lighting::BakedLightingPipeline m_bakedLightingPipeline;
+    std::string m_lightingBakeStatus = "Lighting has not been baked.";
+
     void BuildGridPipeline();
     void BuildSkyboxPipeline();
     void BuildObjectPipeline();
@@ -134,6 +148,7 @@ private:
     Object* m_selectedObject = nullptr;
 
     static constexpr uint32_t kMaxObjects = 64;
-    static constexpr uint32_t kMaxLights = 64;
+    static constexpr uint32_t kMaxLights =
+        Engine::Rendering::Lighting::MaxRealtimeLights;
     static constexpr uint32_t kCBStride = 256;
 };

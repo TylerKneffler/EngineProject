@@ -18,9 +18,11 @@ struct ObjectData
     float4 emissiveOcclusion;
     float4 materialParams;
     float4 specularShininess;
+    float4 bakedDirectional;
+    float4 bakedLightDirection;
 };
 
-struct PointLightData
+struct SceneLightData
 {
     float4 positionRange;
     float4 colorIntensity;
@@ -29,7 +31,7 @@ struct PointLightData
 
 #ifdef VULKAN
 [[vk::push_constant]] DrawConstants draw;
-[[vk::binding(6, 0)]] StructuredBuffer<PointLightData> sceneLights;
+[[vk::binding(6, 0)]] StructuredBuffer<SceneLightData> sceneLights;
 [[vk::binding(7, 0)]] StructuredBuffer<ObjectData> objects;
 [[vk::binding(0, 0)]] Texture2D baseColorMap;
 [[vk::binding(1, 0)]] Texture2D metallicRoughnessMap;
@@ -47,7 +49,7 @@ Texture2D metallicRoughnessMap : register(t1);
 Texture2D normalMap            : register(t2);
 Texture2D occlusionMap         : register(t3);
 Texture2D emissiveMap          : register(t4);
-StructuredBuffer<PointLightData> sceneLights : register(t5);
+StructuredBuffer<SceneLightData> sceneLights : register(t5);
 StructuredBuffer<ObjectData> objects : register(t6);
 SamplerState materialSampler : register(s0);
 #endif
@@ -118,7 +120,16 @@ float4 PSMain(
     [loop]
     for (uint index = 0; index < draw.lightCount; ++index)
     {
-        PointLightData light = sceneLights[index];
+        SceneLightData light = sceneLights[index];
+        if (light.params.y > 0.5)
+        {
+            float directionalDiffuse = saturate(
+                dot(normalize(normal), normalize(light.positionRange.xyz)));
+            float globalContribution = 0.15 + 0.85 * directionalDiffuse;
+            directLight += light.colorIntensity.rgb *
+                light.colorIntensity.w * globalContribution;
+            continue;
+        }
         float3 toLight = light.positionRange.xyz - worldPos;
         float distanceToLight = length(toLight);
         float3 lightDir = distanceToLight > 0.0001
@@ -131,7 +142,15 @@ float4 PSMain(
             light.colorIntensity.w * attenuation * diffuse;
     }
 
-    float3 litBase = base.rgb *
-        (objectData.ambientUnlit.rgb + directLight * (1.0 - metallic));
+    float3 bakedDirect = 0.0;
+    if (dot(objectData.bakedDirectional.rgb,
+        objectData.bakedDirectional.rgb) > 0.000001)
+    {
+        float bakedDiffuse = 0.15 + 0.85 * saturate(dot(
+            normalize(normal), normalize(objectData.bakedLightDirection.xyz)));
+        bakedDirect = objectData.bakedDirectional.rgb * bakedDiffuse;
+    }
+    float3 litBase = base.rgb * (objectData.ambientUnlit.rgb +
+        (directLight + bakedDirect) * (1.0 - metallic));
     return float4(litBase * occlusion + emissive, base.a);
 }

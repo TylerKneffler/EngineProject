@@ -15,6 +15,8 @@ struct ObjectData
     float4 emissiveOcclusion;
     float4 materialParams;
     float4 specularShininess;
+    float4 bakedDirectional;
+    float4 bakedLightDirection;
 };
 
 #ifdef VULKAN

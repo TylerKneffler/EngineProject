@@ -81,7 +81,7 @@ void ImGuiMainMenu::DrawPlayControls(
     {
         ImGui::SetCursorPosX((barWidth - buttonWidth) * 0.5f);
         if (ImGui::Button("Play", {buttonWidth, 0.f}) && buildManager)
-            buildManager->StartBuild(PostBuildAction::PlayInEditor);
+            buildManager->PlayInEditor();
         if (playState == PlayState::BuildFailed)
         {
             ImGui::SameLine();

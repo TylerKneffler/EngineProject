@@ -7,7 +7,8 @@
 // GameView — editor Game panel
 //
 // Renders the scene from the perspective of the first active Camera component
-// found on a game object. The editor camera is never used by this view.
+// found on a game object. If a scene has no active game camera, the editor
+// camera is used as a preview instead of leaving the render target blank.
 //
 // Unlike SceneView, this panel is purely a display surface — no camera
 // controls are exposed. Lifecycle (Start / Update) is driven by the editor

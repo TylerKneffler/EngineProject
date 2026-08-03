@@ -5,6 +5,8 @@
 #include "Core/Compoonents/Material.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Compoonents/Transform.h"
+#include "Core/Rendering/Lighting/BakedLightingData.h"
+#include "Core/Rendering/Lighting/LightingTypes.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Graphics/IShader.h"
@@ -116,13 +118,8 @@ struct ObjectGPUData
     glm::vec4 emissiveOcclusion;
     glm::vec4 materialParams; // metallic, roughness, normal scale, texture mask
     glm::vec4 specularShininess;
-};
-
-struct PointLightGPUData
-{
-    glm::vec4 positionRange;
-    glm::vec4 colorIntensity;
-    glm::vec4 params; // falloff, reserved
+    glm::vec4 bakedDirectional;
+    glm::vec4 bakedLightDirection;
 };
 
 // Constant buffer for grid rendering
@@ -143,8 +140,9 @@ struct SkyboxCBData
 };
 
 static_assert(sizeof(DrawCBData) == 16, "Draw constants must remain small");
-static_assert(sizeof(ObjectGPUData) == 208, "Object buffer layout must match Object.hlsl");
-static_assert(sizeof(PointLightGPUData) == 48, "Light buffer layout must match Object.hlsl");
+static_assert(sizeof(ObjectGPUData) == 240, "Object buffer layout must match Object.hlsl");
+static_assert(sizeof(Engine::Rendering::Lighting::LightData) == 48,
+    "Light buffer layout must match Object.hlsl");
 static_assert(sizeof(GridCBData) == 128, "Grid constant-buffer layout must match Grid.hlsl");
 static_assert(sizeof(SkyboxCBData) == 64, "Skybox constant-buffer layout must match Skybox.hlsl");
 
@@ -209,14 +207,16 @@ void Scene::Init(IGraphicsProvider* graphicsProvider)
     m_lightDataBuffer = bufferFactory->CreateBuffer(
         IGraphicsBuffer::Usage::ShaderResource,
         IGraphicsBuffer::AccessMode::Upload,
-        static_cast<uint64_t>(kMaxLights) * sizeof(PointLightGPUData),
-        nullptr, sizeof(PointLightGPUData));
+        static_cast<uint64_t>(kMaxLights) *
+            sizeof(Engine::Rendering::Lighting::LightData),
+        nullptr, sizeof(Engine::Rendering::Lighting::LightData));
     m_lightDataMapped = m_lightDataBuffer ? m_lightDataBuffer->Map() : nullptr;
     if (!m_lightDataMapped)
         throw std::runtime_error("Failed to create light structured buffer");
 
     // Set up the default editor camera
-    editorCamera.AddComponent<Camera>();
+    Camera* editorCameraComponent = editorCamera.AddComponent<Camera>();
+    editorCameraComponent->useTransformRotation = false;
     editorCamera.transform.position = { 0.f, 1.5f, -3.f };
 
     // Build pipeline states
@@ -488,12 +488,12 @@ void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverri
         return;
     }
 
-    // Priority: explicit override > selected object's camera > editor camera
-    Camera* cam = cameraOverride;
-    if (!cam && m_selectedObject)
-        cam = m_selectedObject->GetComponent<Camera>();
-    if (!cam)
-        cam = editorCamera.GetComponent<Camera>();
+    // Scene View always uses its navigation camera. Game View supplies its
+    // active scene camera explicitly, so hierarchy selection cannot hijack
+    // either viewport.
+    Camera* cam = cameraOverride
+        ? cameraOverride
+        : editorCamera.GetComponent<Camera>();
     if (!cam)
     {
         return;
@@ -514,25 +514,10 @@ void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverri
         context->DrawInstanced(3, 1, 0, 0);
     }
 
-    uint32_t lightCount = 0;
-    for (const auto& candidate : m_objects)
-    {
-        if (!candidate->IsEnabledInHierarchy() || lightCount >= kMaxLights)
-            continue;
-        Light* light = candidate->GetComponent<Light>();
-        if (light && !light->baked && light->intensity > 0.f && light->range > 0.f)
-        {
-            PointLightGPUData data{};
-            data.positionRange = glm::vec4(
-                candidate->transform.GetWorldPosition(), light->range);
-            data.colorIntensity = glm::vec4(light->color, light->intensity);
-            data.params = glm::vec4(light->falloff, 0.f, 0.f, 0.f);
-            memcpy(static_cast<uint8_t*>(m_lightDataMapped) +
-                static_cast<size_t>(lightCount) * sizeof(PointLightGPUData),
-                &data, sizeof(data));
-            ++lightCount;
-        }
-    }
+    const uint32_t lightCount = m_realtimeLightingPipeline.CollectLights(
+        *this,
+        static_cast<Engine::Rendering::Lighting::LightData*>(m_lightDataMapped),
+        kMaxLights);
 
 
     // Draw all scene objects that have a Mesh component
@@ -557,6 +542,12 @@ void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverri
         
 
         Material* mat = obj->GetComponent<Material>();
+        const BakedLightingData* bakedLighting =
+            obj->GetComponent<BakedLightingData>();
+        const glm::vec3 bakedIrradiance =
+            bakedLighting && bakedLighting->valid
+                ? bakedLighting->irradiance
+                : glm::vec3(0.f);
         const glm::mat4 world = obj->transform.GetWorldMatrix();
         UINT64 offset = static_cast<UINT64>(slot) * kCBStride;
 
@@ -586,7 +577,8 @@ void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverri
 
             objectData.baseColor = glm::vec4(mat->diffuseColor, mat->baseColorAlpha);
             objectData.ambientUnlit = glm::vec4(
-                mat->ambientColor, mat->unlit ? 1.f : 0.f);
+                settings.ambientColor + mat->ambientColor + bakedIrradiance,
+                mat->unlit ? 1.f : 0.f);
             objectData.emissiveOcclusion = glm::vec4(
                 mat->emissiveColor, mat->occlusionStrength);
             objectData.materialParams = {
@@ -599,10 +591,18 @@ void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverri
         else
         {
             objectData.baseColor = { 0.8f, 0.8f, 0.8f, 1.f };
-            objectData.ambientUnlit = glm::vec4(settings.ambientColor, 0.f);
+            objectData.ambientUnlit = glm::vec4(
+                settings.ambientColor + bakedIrradiance, 0.f);
             objectData.emissiveOcclusion = { 0.f, 0.f, 0.f, 1.f };
             objectData.materialParams = { 0.f, 1.f, 1.f, 0.f };
             objectData.specularShininess = { 1.f, 1.f, 1.f, 32.f };
+        }
+        if (bakedLighting && bakedLighting->valid)
+        {
+            objectData.bakedDirectional = glm::vec4(
+                bakedLighting->directionalIrradiance, 0.f);
+            objectData.bakedLightDirection = glm::vec4(
+                bakedLighting->lightDirection, 1.f);
         }
 
         const DrawCBData drawData{ slot, lightCount, 0u, 0u };
@@ -723,6 +723,81 @@ Object* Scene::AddObject(const std::string& name)
     return obj;
 }
 
+bool Scene::TryGetObjectPath(const Object* object, ObjectPath& path) const
+{
+    path.clear();
+    if (!object)
+        return false;
+
+    for (const Object* current = object; current; current = current->Parent)
+    {
+        std::size_t index = 0;
+        bool found = false;
+        if (current->Parent)
+        {
+            const auto& siblings = current->Parent->Children;
+            const auto position = std::find(siblings.begin(), siblings.end(), current);
+            if (position != siblings.end())
+            {
+                index = static_cast<std::size_t>(position - siblings.begin());
+                found = true;
+            }
+        }
+        else
+        {
+            for (const auto& candidate : m_objects)
+            {
+                if (candidate->Parent)
+                    continue;
+                if (candidate.get() == current)
+                {
+                    found = true;
+                    break;
+                }
+                ++index;
+            }
+        }
+        if (!found)
+        {
+            path.clear();
+            return false;
+        }
+        path.push_back(index);
+    }
+
+    std::reverse(path.begin(), path.end());
+    return true;
+}
+
+Object* Scene::FindObjectByPath(const ObjectPath& path) const
+{
+    if (path.empty())
+        return nullptr;
+
+    Object* current = nullptr;
+    std::size_t rootIndex = 0;
+    for (const auto& candidate : m_objects)
+    {
+        if (candidate->Parent)
+            continue;
+        if (rootIndex++ == path.front())
+        {
+            current = candidate.get();
+            break;
+        }
+    }
+    if (!current)
+        return nullptr;
+
+    for (std::size_t depth = 1; depth < path.size(); ++depth)
+    {
+        if (path[depth] >= current->Children.size())
+            return nullptr;
+        current = current->Children[path[depth]];
+    }
+    return current;
+}
+
 void Scene::RemoveObject(Object* obj)
 {
     if (!obj)
@@ -787,4 +862,18 @@ bool Scene::LoadFromString(const std::string& source)
     if (!m_graphicsProvider)
         return false;
     return SceneSerializer::LoadFromString(*this, source, m_graphicsProvider);
+}
+
+Engine::Rendering::Lighting::BakeResult Scene::BakeLighting()
+{
+    auto result = m_bakedLightingPipeline.Bake(*this);
+    m_lightingBakeStatus = result.message;
+    return result;
+}
+
+void Scene::ClearBakedLighting()
+{
+    const uint32_t count = m_bakedLightingPipeline.Clear(*this);
+    m_lightingBakeStatus = "Cleared " + std::to_string(count) +
+        " baked lighting record(s).";
 }

@@ -103,6 +103,8 @@ void NuklearEditorUi::TreePop(){nk_tree_pop(CTX);}
 EditorUiObjectRowResult NuklearEditorUi::ObjectTreeRow(const void* id,char* name,size_t size,bool* enabled,bool selected,bool leaf,bool lockName)
 {
     EditorUiObjectRowResult result;
+    (void)size;
+    (void)lockName;
     auto [state,inserted]=m_objectTreeOpen.emplace(id,false);(void)inserted;
     if(m_sameLineCount>0){nk_layout_row_end(CTX);m_sameLineCount=0;}m_sameLine=false;
     nk_layout_row_begin(CTX,NK_DYNAMIC,24,3);
@@ -111,7 +113,9 @@ EditorUiObjectRowResult NuklearEditorUi::ObjectTreeRow(const void* id,char* name
     const struct nk_rect first=nk_widget_bounds(CTX);
     if(!leaf&&nk_button_label(CTX,marker.c_str()))state->second=!state->second;else if(leaf)nk_label(CTX,marker.c_str(),NK_TEXT_LEFT);
     nk_layout_row_push(CTX,0.14f);int active=*enabled?1:0;result.enabledChanged=!m_disabled&&nk_checkbox_label(CTX,"",&active)!=0;*enabled=active!=0;
-    nk_layout_row_push(CTX,0.70f);const std::string before=name;int len=static_cast<int>(strlen(name));nk_flags editFlags=NK_EDIT_FIELD|((m_disabled||lockName)?NK_EDIT_READ_ONLY:0);nk_edit_string(CTX,editFlags,name,&len,static_cast<int>(size)-1,nk_filter_default);name[len]=0;result.nameChanged=!m_disabled&&!lockName&&before!=name;
+    nk_layout_row_push(CTX,0.70f);
+    int nameSelected=selected?1:0;
+    nk_selectable_label(CTX,name[0]?name:"(unnamed)",NK_TEXT_LEFT,&nameSelected);
     const struct nk_rect last=nk_widget_bounds(CTX);nk_layout_row_end(CTX);
     m_lastItemX=first.x;m_lastItemY=first.y;m_lastItemW=(last.x+last.w)-first.x;m_lastItemH=first.h;
     const struct nk_rect row=nk_rect(m_lastItemX,m_lastItemY,m_lastItemW,m_lastItemH);
