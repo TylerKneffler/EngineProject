@@ -30,7 +30,7 @@ void NuklearToolbar::Draw(nk_context& context, float width,
                             playState == PlayState::Paused;
 
         nk_menubar_begin(&context);
-        nk_layout_row_begin(&context, NK_STATIC, 24.f, 2);
+        nk_layout_row_begin(&context, NK_STATIC, 24.f, 4);
         nk_layout_row_push(&context, 55.f);
         if (nk_menu_begin_label(
             &context, "File", NK_TEXT_LEFT, nk_vec2(285.f, 255.f)))
@@ -58,6 +58,17 @@ void NuklearToolbar::Draw(nk_context& context, float width,
             nk_menu_end(&context);
         }
 
+        nk_layout_row_push(&context, 65.f);
+        if (nk_menu_begin_label(
+            &context, "Import", NK_TEXT_LEFT, nk_vec2(245.f, 80.f)))
+        {
+            nk_layout_row_dynamic(&context, 25.f, 1);
+            if (nk_menu_item_label(&context, "Asset...", NK_TEXT_LEFT))
+                state.ImportAsset();
+            nk_label(&context, "Or drag files into the editor", NK_TEXT_LEFT);
+            nk_menu_end(&context);
+        }
+
         nk_layout_row_push(&context, 60.f);
         if (nk_menu_begin_label(
             &context, "Views", NK_TEXT_LEFT, nk_vec2(210.f, 190.f)))
@@ -73,6 +84,34 @@ void NuklearToolbar::Draw(nk_context& context, float width,
             if (nk_menu_item_label(&context, "Properties", NK_TEXT_LEFT)) openPanel("Properties");
             if (nk_menu_item_label(&context, "Assets", NK_TEXT_LEFT)) openPanel("Assets");
             if (nk_menu_item_label(&context, "Console", NK_TEXT_LEFT)) openPanel("Console");
+            nk_menu_end(&context);
+        }
+
+        nk_layout_row_push(&context, 90.f);
+        if (nk_menu_begin_label(
+            &context, "Rendering", NK_TEXT_LEFT, nk_vec2(220.f, 110.f)))
+        {
+            nk_layout_row_dynamic(&context, 25.f, 1);
+            if (nk_menu_begin_label(
+                &context, "Lighting", NK_TEXT_LEFT, nk_vec2(220.f, 80.f)))
+            {
+                nk_layout_row_dynamic(&context, 25.f, 1);
+                Scene* scene = state.GetScene();
+                if (!scene || isBusy) nk_widget_disable_begin(&context);
+                if (nk_menu_item_label(&context, "Bake Lighting", NK_TEXT_LEFT))
+                {
+                    scene->BakeLighting();
+                    state.SetHasUnsavedChanges(true);
+                }
+                if (nk_menu_item_label(
+                    &context, "Clear Baked Lighting", NK_TEXT_LEFT))
+                {
+                    scene->ClearBakedLighting();
+                    state.SetHasUnsavedChanges(true);
+                }
+                if (!scene || isBusy) nk_widget_disable_end(&context);
+                nk_menu_end(&context);
+            }
             nk_menu_end(&context);
         }
 

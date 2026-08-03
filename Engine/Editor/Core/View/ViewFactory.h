@@ -65,11 +65,13 @@ public:
     std::function<void(Object*)>           OnSelectionChanged;  // HierarchyView
     std::function<void(Object*)>           OnObjectSelected;    // SceneView click selection
     std::function<void(Object*)>           OnFocusObject;       // HierarchyView double-click
+    std::function<void()>                  OnHierarchyChanged;
+    std::function<void(const std::string&)> OnHierarchyInteraction;
     std::function<void(const std::string&)> OnSceneRequested;   // AssetsExplorerView
     std::function<void(const std::string&)> OnAssetDropped;     // SceneView
+    std::function<void()>                  OnPropertiesChanged;
+    std::function<void(const std::string&, bool)> OnPropertiesAssetDropLog;
     std::function<void(Object*, const std::string&)> OnPrefabCreated;
-    std::function<void(const std::string&)> OnAssetImported;
-    std::function<void(const std::string&)> OnGltfImportRequested;
 
 private:
     IEditorRenderer* m_renderer = nullptr;

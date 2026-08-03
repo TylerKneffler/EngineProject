@@ -70,5 +70,44 @@ int main()
         return 6;
     }
 
+    Object* camera = nullptr;
+    Object* light = nullptr;
+    for (const auto& object : scene.GetObjects())
+    {
+        if (object->name == "Camera") camera = object.get();
+        if (object->name == "Global Light") light = object.get();
+    }
+    if (!camera || !light)
+        return 8;
+    const glm::vec3 lightWorldBefore = light->transform.GetWorldPosition();
+    if (!scene.MoveObject(light, cube, Scene::ObjectPlacement::AsChild) ||
+        light->Parent != cube ||
+        scene.MoveObject(cube, light, Scene::ObjectPlacement::AsChild))
+    {
+        std::cerr << "Hierarchy reparenting or cycle prevention failed\n";
+        return 9;
+    }
+    if (glm::length(light->transform.GetWorldPosition() - lightWorldBefore) > 0.001f ||
+        !scene.MoveObject(light, camera, Scene::ObjectPlacement::Before) ||
+        light->Parent != nullptr)
+    {
+        std::cerr << "Hierarchy ordering or world transform preservation failed\n";
+        return 10;
+    }
+
+    if (!scene.MoveObject(light, cube, Scene::ObjectPlacement::AsChild))
+        return 11;
+    const std::string copiedGroup = SceneSerializer::SaveObjectToString(*cube);
+    Object* copiedCube = SceneSerializer::InstantiateObjectFromString(
+        scene, copiedGroup, nullptr);
+    if (!copiedCube || copiedCube == cube ||
+        !copiedCube->GetComponent<Rotate>() || copiedCube->Children.size() != 1 ||
+        copiedCube->Children.front() == light ||
+        copiedCube->Children.front()->name != light->name)
+    {
+        std::cerr << "Object hierarchy clipboard copy failed\n";
+        return 12;
+    }
+
     return 0;
 }

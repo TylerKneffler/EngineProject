@@ -4,6 +4,7 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Object.h"
 #include "View/IEditorPanel.h"
+#include "Engine/Editor/UI/IEditorUi.h"
 
 // ---------------------------------------------------------------------------
 // HierarchyView
@@ -32,16 +33,39 @@ public:
 
     Object* GetSelectedObject() const  { return m_selectedObject; }
     void    SetSelectedObject(Object* obj);
+    void SetDebugInteractionLogging(bool enabled);
 
     // Fires whenever the selected object changes (including deselect → nullptr).
     std::function<void(Object*)> OnSelectionChanged;
 
     // Fires when the user double-clicks an object — editor should frame it in the scene view.
     std::function<void(Object*)> OnFocusObject;
+    std::function<void()> OnHierarchyChanged;
+    std::function<void(const std::string&)> OnInteractionLog;
 
 private:
-    void DrawObjectNode(IEditorUi& ui, Object* obj);
+    void DrawObjectNode(IEditorUi& ui, Object* obj, int depth);
+    void LogInteraction(const std::string& message) const;
+    void CopySelection();
+    void PasteClipboard();
 
     Scene*  m_scene          = nullptr;
     Object* m_selectedObject = nullptr;
+    Object* m_pendingDragged = nullptr;
+    Object* m_pendingTarget = nullptr;
+    Object* m_pendingAddParent = nullptr;
+    Object* m_pendingDelete = nullptr;
+    bool m_hasPendingAdd = false;
+    Scene::ObjectPlacement m_pendingPlacement = Scene::ObjectPlacement::AsChild;
+    bool m_hasPendingMove = false;
+    bool m_debugInteractionLogging = true;
+    bool m_dragObservedThisFrame = false;
+    bool m_dropObservedThisFrame = false;
+    Object* m_debugDragSource = nullptr;
+    Object* m_debugHoverTarget = nullptr;
+    EditorUiHierarchyDropPosition m_debugHoverPosition = EditorUiHierarchyDropPosition::None;
+    int m_debugHoverTargetDepth = 0;
+    int m_debugDropDepth = -1;
+    std::string m_objectClipboard;
+    Scene::ObjectPath m_clipboardSourcePath;
 };

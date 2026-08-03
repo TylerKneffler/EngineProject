@@ -2,6 +2,7 @@
 #include <string>
 #include <unordered_map>
 #include <functional>
+#include <vector>
 
 class Scene;
 class Object;
@@ -58,6 +59,11 @@ public:
     // Register a component factory using the type name reported by an instance.
     static void Register(Factory factory);
 
+    // Create a default instance of a registered component type. The editor
+    // uses this for component-script assets dropped onto an object.
+    static Component* CreateRegisteredComponent(const std::string& typeName);
+    static std::vector<std::string> GetRegisteredComponentTypes();
+
     // Write the scene to a scene XML file.
     // Returns false if the destination file cannot be opened.
     static bool Save(const Scene& scene, const std::string& path);
@@ -66,6 +72,12 @@ public:
     // play-mode mutations separate from the editable scene state.
     static std::string SaveToString(const Scene& scene);
     static bool LoadFromString(Scene& scene, const std::string& source,
+        IGraphicsProvider* graphicsProvider = nullptr);
+
+    // Capture and recreate one object plus its complete child hierarchy.
+    // Used by editor copy/paste without touching the filesystem.
+    static std::string SaveObjectToString(const Object& object);
+    static Object* InstantiateObjectFromString(Scene& scene, const std::string& source,
         IGraphicsProvider* graphicsProvider = nullptr);
 
     // Read a scene XML file into scene, replacing all existing objects.

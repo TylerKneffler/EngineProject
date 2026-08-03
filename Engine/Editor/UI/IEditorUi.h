@@ -25,6 +25,15 @@ struct EditorUiViewportInput
     bool middleDown = false;
 };
 
+enum class EditorUiHierarchyDropPosition { None, Before, AsChild, After };
+
+struct EditorUiHierarchyDropResult
+{
+    EditorUiHierarchyDropPosition position = EditorUiHierarchyDropPosition::None;
+    const void* data = nullptr;
+    size_t size = 0;
+};
+
 struct EditorUiObjectRowResult
 {
     bool open = false;
@@ -32,6 +41,17 @@ struct EditorUiObjectRowResult
     bool doubleClicked = false;
     bool nameChanged = false;
     bool enabledChanged = false;
+    const void* droppedItem = nullptr;
+    EditorUiHierarchyDropPosition dropPosition = EditorUiHierarchyDropPosition::None;
+    bool dragActive = false;
+    bool dropHovered = false;
+    int dropDepth = -1;
+};
+
+struct EditorUiContextMenuResult
+{
+    bool addRequested = false;
+    bool deleteRequested = false;
 };
 
 // Package-neutral immediate UI facade used throughout Editor/Core/View.
@@ -62,17 +82,24 @@ public:
     virtual bool TreeNode(const void* id, const char* label, bool selected, bool leaf, bool defaultOpen = false) = 0;
     virtual void TreePop() = 0;
     virtual EditorUiObjectRowResult ObjectTreeRow(const void* id, char* name, size_t size,
-        bool* enabled, bool selected, bool leaf, bool lockName) = 0;
+        bool* enabled, bool selected, bool leaf, bool lockName,
+        bool enabledInHierarchy, int hierarchyDepth) = 0;
     virtual void ObjectTreePop() = 0;
+    virtual EditorUiHierarchyDropResult HierarchyDropTarget(const char* type) = 0;
+    virtual EditorUiHierarchyDropResult HierarchyBackgroundDropTarget(const char* type) = 0;
     virtual EditorUiObjectRowResult ObjectHeader(const void* id, char* name, size_t size,
         bool* enabled, bool lockName) = 0;
     virtual bool Selectable(const char* label, bool selected = false, bool allowDoubleClick = false) = 0;
+    virtual EditorUiContextMenuResult ContextMenu(const void* id,
+        const char* addLabel, const char* deleteLabel) = 0;
     virtual bool BeginChild(const char* id) = 0;
     virtual void EndChild() = 0;
     virtual bool IsItemHovered() const = 0;
     virtual bool IsItemClicked() const = 0;
     virtual bool IsItemDoubleClicked() const = 0;
     virtual bool IsWindowBackgroundClicked() const = 0;
+    virtual bool CopyShortcutPressed() const = 0;
+    virtual bool PasteShortcutPressed() const = 0;
     virtual bool BeginDragDropSource() = 0;
     virtual void SetDragDropPayload(const char* type, const void* data, size_t size) = 0;
     virtual void EndDragDropSource() = 0;

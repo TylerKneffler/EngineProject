@@ -20,9 +20,43 @@ void ImGuiMainMenu::Draw(EditorState& state, PlayState playState,
 {
     if (!ImGui::BeginMainMenuBar()) return;
     DrawFileMenu(state, playState, buildManager);
+    if (ImGui::BeginMenu("Import"))
+    {
+        if (ImGui::MenuItem("Asset..."))
+            state.ImportAsset();
+        ImGui::Separator();
+        ImGui::TextDisabled("Or drag files into the editor");
+        ImGui::EndMenu();
+    }
     DrawViewsMenu(state);
+    DrawRenderingMenu(state, playState);
     DrawPlayControls(playState, buildManager);
     ImGui::EndMainMenuBar();
+}
+
+void ImGuiMainMenu::DrawRenderingMenu(
+    EditorState& state, PlayState playState) const
+{
+    if (!ImGui::BeginMenu("Rendering")) return;
+    if (ImGui::BeginMenu("Lighting"))
+    {
+        Scene* scene = state.GetScene();
+        const bool disabled = !scene || IsBusy(playState);
+        if (disabled) ImGui::BeginDisabled();
+        if (ImGui::MenuItem("Bake Lighting"))
+        {
+            scene->BakeLighting();
+            state.SetHasUnsavedChanges(true);
+        }
+        if (ImGui::MenuItem("Clear Baked Lighting"))
+        {
+            scene->ClearBakedLighting();
+            state.SetHasUnsavedChanges(true);
+        }
+        if (disabled) ImGui::EndDisabled();
+        ImGui::EndMenu();
+    }
+    ImGui::EndMenu();
 }
 
 void ImGuiMainMenu::DrawFileMenu(EditorState& state, PlayState playState,

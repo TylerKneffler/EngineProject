@@ -407,7 +407,6 @@ if(NOT ENGINE_PROJECT_DIR)
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Rotate.cpp"
     )
     target_link_libraries(EngineLifecycleTests PRIVATE Engine)
-    target_precompile_headers(EngineLifecycleTests REUSE_FROM Engine)
     target_include_directories(EngineLifecycleTests PRIVATE
         "${ENGINE_ROOT}/Engine"
         "${ENGINE_ROOT}/Engine/Core/Assets"

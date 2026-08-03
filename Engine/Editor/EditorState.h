@@ -48,6 +48,7 @@ public:
 
     void SaveScene();
     void LoadScene(const std::string& path);
+    void ImportAsset();
     void CapturePlayModeScene();
     void RestorePlayModeScene();
 
@@ -66,6 +67,7 @@ private:
     void InitializePanels();
     void WireupCallbacks();
     Object* InstantiateAsset(const std::string& path);
+    std::string ImportAssetFile(const std::string& path);
     void SelectObject(Object* object);
 
     // Core objects

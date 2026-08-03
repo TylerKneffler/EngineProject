@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "ImGuiEditorUi.h"
 #include "imgui.h"
+#include "imgui_internal.h"
 
 void ImGuiEditorUi::SetNextWindowRect(float x,float y,float w,float h){ ImGui::SetNextWindowPos({x,y},ImGuiCond_FirstUseEver); ImGui::SetNextWindowSize({w,h},ImGuiCond_FirstUseEver); }
 bool ImGuiEditorUi::BeginWindow(const char* t,bool* o,bool p){ if(p) ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,{0,0}); bool r=ImGui::Begin(t,o); if(p) ImGui::PopStyleVar(); return r; }
@@ -19,11 +20,20 @@ void ImGuiEditorUi::ValueLabel(const char*l,const char*v){ImGui::LabelText(l,"%s
 bool ImGuiEditorUi::CollapsingHeader(const char*l,bool d){return ImGui::CollapsingHeader(l,d?ImGuiTreeNodeFlags_DefaultOpen:0);}
 bool ImGuiEditorUi::TreeNode(const void*id,const char*l,bool s,bool leaf,bool d){ImGuiTreeNodeFlags f=ImGuiTreeNodeFlags_OpenOnArrow|ImGuiTreeNodeFlags_SpanAvailWidth|(s?ImGuiTreeNodeFlags_Selected:0)|(d?ImGuiTreeNodeFlags_DefaultOpen:0);if(leaf)f|=ImGuiTreeNodeFlags_Leaf|ImGuiTreeNodeFlags_NoTreePushOnOpen;return ImGui::TreeNodeEx(id,f,"%s",l);}
 void ImGuiEditorUi::TreePop(){ImGui::TreePop();}
-EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,char* name,size_t size,bool* enabled,bool selected,bool leaf,bool lockName)
+EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,char* name,size_t size,bool* enabled,bool selected,bool leaf,bool lockName,bool enabledInHierarchy,int hierarchyDepth)
 {
     EditorUiObjectRowResult result;
     (void)size;
     ImGui::PushID(id);
+    const bool hasChildren=!leaf;
+    auto [openState,inserted]=m_objectTreeOpen.emplace(id,hasChildren);
+    (void)inserted;
+    const bool hadChildren=m_objectHadChildren[id];
+    if(hasChildren&&!hadChildren)
+        openState->second=true;
+    m_objectHadChildren[id]=hasChildren;
+    if(hasChildren)
+        ImGui::SetNextItemOpen(openState->second,ImGuiCond_Always);
     ImGuiTreeNodeFlags flags=ImGuiTreeNodeFlags_OpenOnArrow|
         ImGuiTreeNodeFlags_SpanAvailWidth|ImGuiTreeNodeFlags_FramePadding|
         ImGuiTreeNodeFlags_AllowOverlap|
@@ -31,31 +41,154 @@ EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,char* name,s
     if(leaf)flags|=ImGuiTreeNodeFlags_Leaf|ImGuiTreeNodeFlags_NoTreePushOnOpen;
     ImGui::SetNextItemAllowOverlap();
     result.open=ImGui::TreeNodeEx("##object",flags,"");
+    if(hasChildren)
+        openState->second=result.open;
+    const ImVec2 rowMinimum=ImGui::GetItemRectMin();
+    const ImVec2 rowMaximum=ImGui::GetItemRectMax();
     result.clicked=ImGui::IsItemClicked()&&!ImGui::IsItemToggledOpen();
     result.doubleClicked=ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+    const EditorUiHierarchyDropResult drop=HierarchyDropTarget("ENGINE_SCENE_OBJECT");
+    result.dropHovered=drop.position!=EditorUiHierarchyDropPosition::None;
+    result.dropPosition=drop.position;
+    if(result.dropHovered){
+        const float indent=std::max(ImGui::GetStyle().IndentSpacing,1.f);
+        const float rootX=rowMinimum.x-static_cast<float>(hierarchyDepth)*indent;
+        const int maximumDepth=hierarchyDepth+
+            (drop.position==EditorUiHierarchyDropPosition::AsChild?1:0);
+        result.dropDepth=std::clamp(static_cast<int>(
+            std::floor((ImGui::GetIO().MousePos.x-rootX+indent*.35f)/indent)),
+            0,maximumDepth);
+        const bool makeChild=drop.position==EditorUiHierarchyDropPosition::AsChild&&
+            result.dropDepth==hierarchyDepth+1;
+        if(!makeChild){
+            const float y=drop.position==EditorUiHierarchyDropPosition::Before
+                ? rowMinimum.y:rowMaximum.y;
+            const float x=rootX+static_cast<float>(result.dropDepth)*indent;
+            ImDrawList* preview=ImGui::GetWindowDrawList();
+            const ImU32 color=IM_COL32(90,160,255,255);
+            preview->AddCircleFilled({x,y},3.f,color);
+            preview->AddLine({x,y},{rowMaximum.x,y},color,3.f);
+        }
+    }
+    if(drop.data&&drop.size==sizeof(const void*)){
+        result.droppedItem=*static_cast<const void* const*>(drop.data);
+    }
+    if(ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceNoPreviewTooltip)){
+        result.dragActive=true;
+        const void* payload=id;
+        ImGui::SetDragDropPayload("ENGINE_SCENE_OBJECT",&payload,sizeof(payload));
+        ImGui::EndDragDropSource();
+    }
     ImGui::SameLine(0.f,2.f);
     result.enabledChanged=ImGui::Checkbox("##enabled",enabled);
     result.clicked=result.clicked||ImGui::IsItemClicked();
     ImGui::SameLine(0.f,4.f);
     const char* display=name[0]?name:"(unnamed)";
-    ImGui::Selectable("##nameText",false,
-        ImGuiSelectableFlags_AllowDoubleClick|ImGuiSelectableFlags_AllowOverlap,
-        {ImGui::GetContentRegionAvail().x,ImGui::GetFrameHeight()});
-    const bool nameClicked=ImGui::IsItemClicked();
-    const bool nameDoubleClicked=ImGui::IsItemHovered()&&
-        ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
-    const ImVec2 textMin=ImGui::GetItemRectMin();
-    const ImVec2 textMax=ImGui::GetItemRectMax();
+    const ImVec2 textMin=ImGui::GetCursorScreenPos();
+    const ImVec2 textMax={
+        ImGui::GetWindowPos().x+ImGui::GetWindowContentRegionMax().x,
+        textMin.y+ImGui::GetFrameHeight()};
     const ImVec2 textSize=ImGui::CalcTextSize(display);
     ImGui::GetWindowDrawList()->AddText(
         {textMin.x,textMin.y+(textMax.y-textMin.y-textSize.y)*0.5f},
         ImGui::GetColorU32(lockName?ImGuiCol_TextDisabled:ImGuiCol_Text),display);
-    result.clicked=result.clicked||nameClicked;
-    result.doubleClicked=result.doubleClicked||nameDoubleClicked;
+    ImVec4 separatorColor=ImGui::GetStyleColorVec4(ImGuiCol_Separator);
+    separatorColor.w*=0.45f;
+    const ImVec2 contentMin={
+        ImGui::GetWindowPos().x+ImGui::GetWindowContentRegionMin().x,textMax.y};
+    const ImVec2 contentMax={
+        ImGui::GetWindowPos().x+ImGui::GetWindowContentRegionMax().x,textMax.y};
+    ImGui::GetWindowDrawList()->AddLine(
+        contentMin,contentMax,ImGui::GetColorU32(separatorColor),1.f);
+    ImGui::Dummy({std::max(ImGui::GetContentRegionAvail().x,1.f),ImGui::GetFrameHeight()});
+    if(!enabledInHierarchy&&!result.dragActive){
+        // Effective hierarchy disablement is visual only. The checkbox still
+        // reflects and edits this object's own saved enabled state.
+        ImVec4 dimColor=ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
+        dimColor.w=.58f;
+        ImGui::GetWindowDrawList()->AddRectFilled(
+            rowMinimum,rowMaximum,ImGui::GetColorU32(dimColor));
+        ImGui::GetWindowDrawList()->AddText(
+            {textMin.x,textMin.y+(textMax.y-textMin.y-textSize.y)*.5f},
+            ImGui::GetColorU32(ImGuiCol_TextDisabled),display);
+    }
+    if(result.dragActive){
+        // Remove the copy-like duplicate at the source and leave a subdued
+        // placeholder showing where the lifted row came from.
+        ImDrawList* rowDraw=ImGui::GetWindowDrawList();
+        rowDraw->AddRectFilled(rowMinimum,rowMaximum,
+            ImGui::GetColorU32(ImGuiCol_WindowBg));
+        rowDraw->AddRect(rowMinimum,rowMaximum,
+            ImGui::GetColorU32(ImGuiCol_Separator),2.f,0,1.f);
+
+        // Draw one row-shaped moving item instead of ImGui's tooltip preview.
+        const ImVec2 mouse=ImGui::GetIO().MousePos;
+        const float ghostWidth=std::max(rowMaximum.x-rowMinimum.x,160.f);
+        const ImVec2 ghostMin={mouse.x+14.f,mouse.y+12.f};
+        const ImVec2 ghostMax={ghostMin.x+ghostWidth,ghostMin.y+ImGui::GetFrameHeight()};
+        ImDrawList* foreground=ImGui::GetForegroundDrawList();
+        foreground->AddRectFilled(ghostMin,ghostMax,IM_COL32(35,40,48,238),3.f);
+        foreground->AddRect(ghostMin,ghostMax,IM_COL32(90,160,255,255),3.f,0,1.5f);
+        foreground->AddText({ghostMin.x+8.f,ghostMin.y+
+            (ghostMax.y-ghostMin.y-textSize.y)*.5f},
+            ImGui::GetColorU32(ImGuiCol_Text),display);
+    }
     ImGui::PopID();
     return result;
 }
 void ImGuiEditorUi::ObjectTreePop(){ImGui::TreePop();}
+EditorUiHierarchyDropResult ImGuiEditorUi::HierarchyDropTarget(const char* type)
+{
+    EditorUiHierarchyDropResult result;
+    const ImVec2 minimum=ImGui::GetItemRectMin(),maximum=ImGui::GetItemRectMax();
+    if(!ImGui::BeginDragDropTarget())return result;
+    const ImGuiPayload* payload=ImGui::AcceptDragDropPayload(type,
+        ImGuiDragDropFlags_AcceptBeforeDelivery|ImGuiDragDropFlags_AcceptNoDrawDefaultRect);
+    if(payload){
+        const float fraction=(ImGui::GetIO().MousePos.y-minimum.y)/std::max(maximum.y-minimum.y,1.f);
+        result.position=fraction<.25f?EditorUiHierarchyDropPosition::Before:
+            (fraction>.75f?EditorUiHierarchyDropPosition::After:EditorUiHierarchyDropPosition::AsChild);
+        ImDrawList* draw=ImGui::GetWindowDrawList();
+        if(result.position==EditorUiHierarchyDropPosition::AsChild)
+            draw->AddRect(minimum,maximum,ImGui::GetColorU32(ImGuiCol_DragDropTarget),2.f,0,2.f);
+        else{const float y=result.position==EditorUiHierarchyDropPosition::Before?minimum.y:maximum.y;
+            draw->AddLine({minimum.x,y},{maximum.x,y},ImGui::GetColorU32(ImGuiCol_DragDropTarget),2.f);}
+        // ImGui's built-in delivery additionally requires this exact target ID
+        // to have won acceptance on the previous frame. Hierarchy rows contain
+        // overlapping tree/checkbox items, so that ID can change while the
+        // pointer visibly remains over the same row. Once this typed payload
+        // has reached the current hovered target, releasing the mouse is an
+        // unambiguous drop and should be delivered.
+        if(payload->IsDelivery()||!ImGui::IsMouseDown(ImGuiMouseButton_Left)){
+            const auto* bytes=static_cast<const unsigned char*>(payload->Data);
+            m_dropResultPayload.assign(bytes,bytes+payload->DataSize);
+            result.data=m_dropResultPayload.data();
+            result.size=m_dropResultPayload.size();
+        }
+    }
+    ImGui::EndDragDropTarget();return result;
+}
+EditorUiHierarchyDropResult ImGuiEditorUi::HierarchyBackgroundDropTarget(const char* type)
+{
+    EditorUiHierarchyDropResult result;
+    ImGuiWindow* window=ImGui::GetCurrentWindow();
+    const ImRect bounds=window->InnerRect;
+    const ImGuiID id=window->GetID("##hierarchyBackgroundDrop");
+    if(!ImGui::BeginDragDropTargetCustom(bounds,id))return result;
+    const ImGuiPayload* payload=ImGui::AcceptDragDropPayload(type,
+        ImGuiDragDropFlags_AcceptBeforeDelivery|ImGuiDragDropFlags_AcceptNoDrawDefaultRect);
+    if(payload){
+        result.position=EditorUiHierarchyDropPosition::AsChild;
+        if(payload->IsDelivery()||!ImGui::IsMouseDown(ImGuiMouseButton_Left)){
+            const auto* bytes=static_cast<const unsigned char*>(payload->Data);
+            m_dropResultPayload.assign(bytes,bytes+payload->DataSize);
+            result.data=m_dropResultPayload.data();
+            result.size=m_dropResultPayload.size();
+        }
+    }
+    ImGui::EndDragDropTarget();
+    return result;
+}
 EditorUiObjectRowResult ImGuiEditorUi::ObjectHeader(const void* id,char* name,size_t size,bool* enabled,bool lockName)
 {
     EditorUiObjectRowResult result;
@@ -73,11 +206,33 @@ EditorUiObjectRowResult ImGuiEditorUi::ObjectHeader(const void* id,char* name,si
     return result;
 }
 bool ImGuiEditorUi::Selectable(const char*l,bool s,bool d){return ImGui::Selectable(l,s,d?ImGuiSelectableFlags_AllowDoubleClick:0);}
+EditorUiContextMenuResult ImGuiEditorUi::ContextMenu(const void* id,const char* addLabel,const char* deleteLabel)
+{
+    EditorUiContextMenuResult result;
+    ImGui::PushID(id);
+    if(ImGui::BeginPopupContextItem("##context")){
+        if(addLabel&&addLabel[0])result.addRequested=ImGui::MenuItem(addLabel);
+        if(deleteLabel&&deleteLabel[0])result.deleteRequested=ImGui::MenuItem(deleteLabel);
+        ImGui::EndPopup();
+    }
+    ImGui::PopID();
+    return result;
+}
 bool ImGuiEditorUi::BeginChild(const char*i){return ImGui::BeginChild(i,{0,0},false,ImGuiWindowFlags_HorizontalScrollbar);} void ImGuiEditorUi::EndChild(){ImGui::EndChild();}
 bool ImGuiEditorUi::IsItemHovered()const{return ImGui::IsItemHovered();} bool ImGuiEditorUi::IsItemClicked()const{return ImGui::IsItemClicked()&&!ImGui::IsItemToggledOpen();}
 bool ImGuiEditorUi::IsItemDoubleClicked()const{return ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);}
 bool ImGuiEditorUi::IsWindowBackgroundClicked()const{return ImGui::IsMouseClicked(ImGuiMouseButton_Left)&&ImGui::IsWindowHovered()&&!ImGui::IsAnyItemHovered();}
-bool ImGuiEditorUi::BeginDragDropSource(){return ImGui::BeginDragDropSource();}
+bool ImGuiEditorUi::CopyShortcutPressed()const{return ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)&&ImGui::GetIO().KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_C,false);}
+bool ImGuiEditorUi::PasteShortcutPressed()const{return ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)&&ImGui::GetIO().KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_V,false);}
+bool ImGuiEditorUi::BeginDragDropSource(){
+    const ImVec2 minimum=ImGui::GetItemRectMin(),maximum=ImGui::GetItemRectMax();
+    ImDrawList* rowDrawList=ImGui::GetWindowDrawList();
+    if(!ImGui::BeginDragDropSource())return false;
+    // Keep the source row visible as the item being moved while ImGui's
+    // standard preview tooltip follows the pointer.
+    rowDrawList->AddRectFilled(minimum,maximum,IM_COL32(90,160,255,55));
+    return true;
+}
 void ImGuiEditorUi::SetDragDropPayload(const char*t,const void*d,size_t s){ImGui::SetDragDropPayload(t,d,s);}
 void ImGuiEditorUi::EndDragDropSource(){ImGui::EndDragDropSource();}
 bool ImGuiEditorUi::BeginDragDropTarget(){return ImGui::BeginDragDropTarget();}

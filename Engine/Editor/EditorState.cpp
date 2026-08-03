@@ -352,6 +352,13 @@ void EditorState::InitializePanels()
     
     OutputDebugStringA("[EditorState::InitializePanels] Calling preferences->Init\n");
     m_preferences->Init(m_projectSettings, m_projectFilePath);
+    m_preferences->OnSettingsChanged = [this]() {
+        m_projectSettings = m_preferences->GetSettings();
+        for (auto& panel : m_panels)
+            if (auto* hierarchy = dynamic_cast<HierarchyView*>(panel.get()))
+                hierarchy->SetDebugInteractionLogging(
+                    m_projectSettings.debugHierarchyInteractions);
+    };
     
     OutputDebugStringA("[EditorState::InitializePanels] Checking view factory\n");
     if (m_viewFactory)
@@ -444,6 +451,21 @@ void EditorState::WireupCallbacks()
         if (m_scene)
             m_scene->FocusEditorCamera(obj);
     };
+    m_viewFactory->OnHierarchyChanged = [this]() {
+        m_hasUnsavedChanges = true;
+    };
+    m_viewFactory->OnPropertiesChanged = [this]() {
+        m_hasUnsavedChanges = true;
+    };
+    m_viewFactory->OnPropertiesAssetDropLog = [this](const std::string& message, bool error) {
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(error ? ConsoleView::Level::Error : ConsoleView::Level::Info,
+                message);
+    };
+    m_viewFactory->OnHierarchyInteraction = [this](const std::string& message) {
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Info, message);
+    };
 
     m_viewFactory->OnAssetDropped = [this](const std::string& path) {
         SelectObject(InstantiateAsset(path));
@@ -455,32 +477,95 @@ void EditorState::WireupCallbacks()
             m_primaryConsole->AddLog(ConsoleView::Level::Info, "Prefab created: " + path);
     };
 
-    m_viewFactory->OnAssetImported = [this](const std::string& path) {
-        if (m_primaryConsole)
-            m_primaryConsole->AddLog(ConsoleView::Level::Info, "Asset imported: " + path);
-    };
-
-    m_viewFactory->OnGltfImportRequested = [this](const std::string& path) {
-        const std::string assetsDirectory = m_projectSettings.assetsDirectory.empty()
-            ? std::string("Assets")
-            : m_projectSettings.assetsDirectory;
-        const GltfImportResult imported = GltfImporter::Import(path, assetsDirectory);
-        if (m_primaryConsole)
-            m_primaryConsole->AddLog(
-                imported.success ? ConsoleView::Level::Info : ConsoleView::Level::Error,
-                imported.success
-                    ? "glTF imported: " + imported.prefabPath
-                    : "glTF import failed: " + imported.message);
-    };
-
     if (m_window)
         m_window->OnFilesDropped = [this](const std::vector<std::string>& paths) {
             Object* lastObject = nullptr;
             for (const std::string& path : paths)
-                if (Object* object = InstantiateAsset(path))
+            {
+                const std::string importedPath = ImportAssetFile(path);
+                if (Object* object = importedPath.empty()
+                    ? nullptr : InstantiateAsset(importedPath))
                     lastObject = object;
-            SelectObject(lastObject);
+            }
+            if (lastObject)
+                SelectObject(lastObject);
         };
+}
+
+void EditorState::ImportAsset()
+{
+    wchar_t source[MAX_PATH] = {};
+    OPENFILENAMEW dialog{};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = m_window ? m_window->GetHWND() : nullptr;
+    dialog.lpstrFile = source;
+    dialog.nMaxFile = MAX_PATH;
+    dialog.lpstrFilter =
+        L"Supported Assets (*.obj;*.gltf;*.glb;*.prefab;*.png;*.jpg;*.jpeg;*.dds;*.hdr)\0"
+        L"*.obj;*.gltf;*.glb;*.prefab;*.png;*.jpg;*.jpeg;*.dds;*.hdr\0"
+        L"3D Models (*.obj;*.gltf;*.glb)\0*.obj;*.gltf;*.glb\0"
+        L"Images (*.png;*.jpg;*.jpeg;*.dds;*.hdr)\0*.png;*.jpg;*.jpeg;*.dds;*.hdr\0"
+        L"All Files (*.*)\0*.*\0";
+    dialog.nFilterIndex = 1;
+    dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    if (GetOpenFileNameW(&dialog))
+        ImportAssetFile(std::filesystem::path(source).string());
+}
+
+std::string EditorState::ImportAssetFile(const std::string& path)
+{
+    namespace fs = std::filesystem;
+    const fs::path source(path);
+    std::string extension = source.extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    const fs::path assetsDirectory = m_projectSettings.assetsDirectory.empty()
+        ? fs::path("Assets") : fs::path(m_projectSettings.assetsDirectory);
+
+    try
+    {
+        fs::create_directories(assetsDirectory);
+        if (extension == ".gltf" || extension == ".glb")
+        {
+            const GltfImportResult imported =
+                GltfImporter::Import(source.string(), assetsDirectory.string());
+            if (!imported.success)
+                throw std::runtime_error(imported.message);
+            if (m_primaryConsole)
+                m_primaryConsole->AddLog(ConsoleView::Level::Info,
+                    "Asset imported: " + imported.prefabPath);
+            return imported.prefabPath;
+        }
+
+        std::error_code relativeError;
+        const fs::path absoluteSource = fs::weakly_canonical(source, relativeError);
+        const fs::path absoluteAssets = fs::weakly_canonical(assetsDirectory, relativeError);
+        if (!relativeError)
+        {
+            const fs::path relative = absoluteSource.lexically_relative(absoluteAssets);
+            if (!relative.empty() && *relative.begin() != "..")
+                return source.string();
+        }
+
+        fs::path destination = assetsDirectory / source.filename();
+        const std::string stem = destination.stem().string();
+        const std::string suffix = destination.extension().string();
+        for (unsigned index = 2; fs::exists(destination); ++index)
+            destination = assetsDirectory /
+                (stem + " " + std::to_string(index) + suffix);
+        fs::copy_file(source, destination);
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Info,
+                "Asset imported: " + destination.string());
+        return destination.string();
+    }
+    catch (const std::exception& error)
+    {
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                "Asset import failed: " + std::string(error.what()));
+        return {};
+    }
 }
 
 Object* EditorState::InstantiateAsset(const std::string& path)

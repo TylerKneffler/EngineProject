@@ -32,6 +32,7 @@ struct ProjectSettings
     uint32_t viewportHeight;
     float leftPanelWidth;
     float rightPanelWidth;
+    bool debugHierarchyInteractions = true;
 
     std::vector<std::string> leftPanelTabs;
     std::vector<std::string> centerPanelTabs;

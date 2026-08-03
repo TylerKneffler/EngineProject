@@ -4,9 +4,6 @@
 #include "Core/Serialization/SceneSerializer.h"
 #include <filesystem>
 #include <shellapi.h>
-#include <commdlg.h>
-
-#pragma comment(lib, "Comdlg32.lib")
 
 namespace fs = std::filesystem;
 
@@ -43,12 +40,6 @@ void AssetsExplorerView::DrawPanel(IEditorUi& ui)
         ui.EndWindow();
         return;
     }
-
-    if (ui.Button("Import .obj"))
-        ImportObj();
-    ui.SameLine();
-    if (ui.Button("Import glTF"))
-        ImportGltf();
 
     ui.Selectable("Assets", m_selectedPath == m_assetsPath);
     if (ui.IsItemClicked())
@@ -140,14 +131,6 @@ bool AssetsExplorerView::DrawDirectoryTree(IEditorUi& ui, const std::string& pat
     return false;
 }
 
-std::string AssetsExplorerView::CurrentDirectory() const
-{
-    if (m_selectedPath.empty())
-        return m_assetsPath;
-    const fs::path selected(m_selectedPath);
-    return fs::is_directory(selected) ? selected.string() : selected.parent_path().string();
-}
-
 bool AssetsExplorerView::AcceptSceneObject(IEditorUi& ui, const std::string& directory)
 {
     if (!ui.BeginDragDropTarget())
@@ -189,54 +172,6 @@ bool AssetsExplorerView::AcceptSceneObject(IEditorUi& ui, const std::string& dir
     }
     ui.EndDragDropTarget();
     return created;
-}
-
-void AssetsExplorerView::ImportObj()
-{
-    wchar_t source[MAX_PATH] = {};
-    OPENFILENAMEW dialog{};
-    dialog.lStructSize = sizeof(dialog);
-    dialog.lpstrFile = source;
-    dialog.nMaxFile = MAX_PATH;
-    dialog.lpstrFilter = L"Wavefront OBJ (*.obj)\0*.obj\0All files\0*.*\0";
-    dialog.nFilterIndex = 1;
-    dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
-    if (!GetOpenFileNameW(&dialog))
-        return;
-
-    fs::path from(source);
-    fs::path destination = fs::path(CurrentDirectory()) / from.filename();
-    const std::string stem = destination.stem().string();
-    const std::string extension = destination.extension().string();
-    for (unsigned suffix = 2; fs::exists(destination); ++suffix)
-        destination = destination.parent_path() /
-            (stem + " " + std::to_string(suffix) + extension);
-
-    std::error_code error;
-    fs::copy_file(from, destination, fs::copy_options::none, error);
-    if (!error)
-    {
-        m_selectedPath = destination.string();
-        if (OnAssetImported)
-            OnAssetImported(destination.string());
-    }
-}
-
-void AssetsExplorerView::ImportGltf()
-{
-    wchar_t source[MAX_PATH] = {};
-    OPENFILENAMEW dialog{};
-    dialog.lStructSize = sizeof(dialog);
-    dialog.lpstrFile = source;
-    dialog.nMaxFile = MAX_PATH;
-    dialog.lpstrFilter =
-        L"glTF Models (*.gltf;*.glb)\0*.gltf;*.glb\0"
-        L"glTF JSON (*.gltf)\0*.gltf\0"
-        L"Binary glTF (*.glb)\0*.glb\0";
-    dialog.nFilterIndex = 1;
-    dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
-    if (GetOpenFileNameW(&dialog) && OnGltfImportRequested)
-        OnGltfImportRequested(fs::path(source).string());
 }
 
 // ---------------------------------------------------------------------------

@@ -57,6 +57,7 @@ class Scene
 {
 public:
     using ObjectPath = std::vector<std::size_t>;
+    enum class ObjectPlacement { Before, AsChild, After };
 
     Scene()  = default;
     ~Scene() = default;
@@ -71,8 +72,11 @@ public:
     // Draw all objects and scene helpers (grid).
     // context: Graphics rendering context (API-agnostic command recorder)
     // aspect: Viewport aspect ratio
-    // cameraOverride: if non-null, use this camera instead of the normal selection.
-    void Render(IGraphicsContext* context, float aspect, Camera* cameraOverride = nullptr);
+    // cameraOverride: if non-null, use this camera instead of the editor camera.
+    // includeEditorVisuals: draws editor-only overlays such as the grid and
+    // selected-object outline. Game cameras must pass false.
+    void Render(IGraphicsContext* context, float aspect,
+        Camera* cameraOverride = nullptr, bool includeEditorVisuals = true);
     void SetSelectedObject(Object* obj) { m_selectedObject = obj; }
 
     // Returns the first active Camera component found on a scene game object.
@@ -93,6 +97,7 @@ public:
     const std::vector<std::unique_ptr<Object>>& GetObjects() const { return m_objects; }
     bool TryGetObjectPath(const Object* object, ObjectPath& path) const;
     Object* FindObjectByPath(const ObjectPath& path) const;
+    bool MoveObject(Object* object, Object* target, ObjectPlacement placement);
 
     // Serialization — delegates to SceneSerializer.
     // Save writes the scene to a scene XML file.

@@ -79,7 +79,7 @@ void GameView::Render3D(void* cmd)
     factory->SetCommandBuffer(cmd);
     auto ctx = factory->CreateContext();
     if (ctx)
-        m_scene->Render(ctx.get(), m_aspect, gameCamera);
+        m_scene->Render(ctx.get(), m_aspect, gameCamera, false);
 }
 
 // ---------------------------------------------------------------------------

@@ -50,6 +50,7 @@ private:
     void DrawMetadataSection(IEditorUi& ui);
     void DrawPathsSection(IEditorUi& ui);
     void DrawRenderingSection(IEditorUi& ui);
+    void DrawDebugSection(IEditorUi& ui);
     void DrawAspectRatioSection(IEditorUi& ui);
     void DrawExportSection(IEditorUi& ui);
     void StartPortableExport();

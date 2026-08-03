@@ -15,6 +15,7 @@ private:
     void DrawFileMenu(EditorState& state, PlayState playState,
         GameBuildManager* buildManager) const;
     void DrawViewsMenu(EditorState& state) const;
+    void DrawRenderingMenu(EditorState& state, PlayState playState) const;
     void DrawPlayControls(PlayState playState,
         GameBuildManager* buildManager) const;
     void OpenPanel(EditorState& state, const char* type) const;

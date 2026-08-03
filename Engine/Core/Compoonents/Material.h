@@ -67,6 +67,7 @@ public:
     const std::string& GetFilePath() const { return m_filePath; }
     void SetBaseColorTexture(const std::string& path);
     void SetMetallicRoughnessTexture(const std::string& path);
+    
     void SetNormalTexture(const std::string& path);
     void SetOcclusionTexture(const std::string& path);
     void SetEmissiveTexture(const std::string& path);

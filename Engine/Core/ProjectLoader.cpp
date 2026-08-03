@@ -144,6 +144,15 @@ void ProjectLoader::ParseEditor(const pugi::xml_node& projectNode, ProjectSettin
         if (rightWidth)
             settings.rightPanelWidth = std::stof(rightWidth.child_value());
 
+        auto hierarchyDebug = prop.child("DebugHierarchyInteractions");
+        if (hierarchyDebug)
+        {
+            std::string value = hierarchyDebug.child_value();
+            std::transform(value.begin(), value.end(), value.begin(),
+                [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+            settings.debugHierarchyInteractions = value != "false" && value != "0" && value != "off";
+        }
+
         if (!settings.defaultScene.empty())
             break;
     }

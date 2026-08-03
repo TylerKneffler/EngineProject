@@ -64,6 +64,41 @@ void SceneSerializer::EnsureBuiltinsRegistered()
     RegisterComponentType<BakedLightingData>();
 }
 
+Component* SceneSerializer::CreateRegisteredComponent(const std::string& typeName)
+{
+    EnsureBuiltinsRegistered();
+    auto& registry = GetRegistry();
+    auto found = registry.find(typeName);
+    if (found == registry.end())
+    {
+        found = std::find_if(registry.begin(), registry.end(), [&typeName](const auto& entry)
+        {
+            return entry.first.size() == typeName.size() &&
+                std::equal(entry.first.begin(), entry.first.end(), typeName.begin(),
+                    [](unsigned char left, unsigned char right)
+                    {
+                        return std::tolower(left) == std::tolower(right);
+                    });
+        });
+    }
+    return found != registry.end() && found->second ? found->second() : nullptr;
+}
+
+std::vector<std::string> SceneSerializer::GetRegisteredComponentTypes()
+{
+    EnsureBuiltinsRegistered();
+    std::vector<std::string> types;
+    types.reserve(GetRegistry().size());
+    for (const auto& entry : GetRegistry())
+        types.push_back(entry.first);
+    std::sort(types.begin(), types.end(), [](const std::string& left, const std::string& right)
+    {
+        return std::lexicographical_compare(left.begin(), left.end(), right.begin(), right.end(),
+            [](unsigned char a, unsigned char b) { return std::tolower(a) < std::tolower(b); });
+    });
+    return types;
+}
+
 // ---- Local GLM helpers ------------------------------------------------------
 namespace
 {
@@ -547,6 +582,97 @@ bool SceneSerializer::Load(Scene& scene, const std::string& path, IGraphicsProvi
         OutputDebugStringA((std::string("[SceneSerializer] Failed to load '") + path +
             "': " + error.what() + "\n").c_str());
         return false;
+    }
+}
+
+std::string SceneSerializer::SaveObjectToString(const Object& object)
+{
+    JsonValue root = JsonValue::MakeObject();
+    root.Set("version", JsonValue(1));
+    root.Set("type", JsonValue(std::string("object-clipboard")));
+    root.Set("object", SerialiseObject(object, true));
+    return JsonWrite(root);
+}
+
+Object* SceneSerializer::InstantiateObjectFromString(
+    Scene& scene, const std::string& source, IGraphicsProvider* graphicsProvider)
+{
+    EnsureBuiltinsRegistered();
+    Object* rootObject = nullptr;
+    try
+    {
+        const JsonValue root = JsonParse(source);
+        if (!root.IsObject() || root["version"].AsInt() != 1 ||
+            root["type"].AsString() != "object-clipboard" ||
+            !root["object"].IsObject())
+            return nullptr;
+
+        std::function<Object*(const JsonValue&)> instantiate;
+        instantiate = [&](const JsonValue& node) -> Object*
+        {
+            Object* object = nullptr;
+            if (node.Has("prefab"))
+            {
+                object = InstantiatePrefab(
+                    scene, node["prefab"].AsString(), graphicsProvider);
+                if (!object)
+                    throw std::runtime_error(
+                        "Could not instantiate copied prefab '" +
+                        node["prefab"].AsString() + "'");
+                DeserialiseTransform(object->transform, node["transform"]);
+                if (node.Has("enabled"))
+                    object->enabled = node["enabled"].AsBool();
+                if (!rootObject)
+                    rootObject = object;
+                return object;
+            }
+
+            object = scene.AddObject();
+            if (!rootObject)
+                rootObject = object;
+            object->name = node.Has("name")
+                ? node["name"].AsString() : std::string("Object");
+            object->enabled = !node.Has("enabled") || node["enabled"].AsBool();
+            DeserialiseTransform(object->transform, node["transform"]);
+
+            const JsonValue& components = node["components"];
+            for (std::size_t index = 0; index < components.ArraySize(); ++index)
+            {
+                const JsonValue& componentNode = components.ArrayAt(index);
+                const SceneSerializer::Factory* factory = FindComponentFactory(
+                    GetRegistry(), componentNode["type"].AsString());
+                if (!factory)
+                    continue;
+                Component* component = (*factory)();
+                component->Owner = object;
+                component->Deserialize(componentNode);
+                component->OnAfterDeserialize(graphicsProvider);
+                object->Components.push_back(component);
+            }
+
+            const JsonValue& children = node["children"];
+            for (std::size_t index = 0; index < children.ArraySize(); ++index)
+            {
+                Object* child = instantiate(children.ArrayAt(index));
+                if (!child)
+                    throw std::runtime_error("Could not instantiate copied child object");
+                child->Parent = object;
+                object->Children.push_back(child);
+            }
+            return object;
+        };
+
+        rootObject = instantiate(root["object"]);
+        return rootObject;
+    }
+    catch (const std::exception& error)
+    {
+        if (rootObject)
+            scene.RemoveObject(rootObject);
+        OutputDebugStringA((std::string(
+            "[SceneSerializer] Failed to instantiate copied object: ") +
+            error.what() + "\n").c_str());
+        return nullptr;
     }
 }
 

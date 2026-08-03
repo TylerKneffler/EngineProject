@@ -115,10 +115,15 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
         auto view = std::make_unique<HierarchyView>();
         view->SetTitle("Hierarchy " + std::to_string(++m_hierarchyCount));
         view->Init(m_scene);
+        view->SetDebugInteractionLogging(m_settings.debugHierarchyInteractions);
         if (OnSelectionChanged)
             view->OnSelectionChanged = OnSelectionChanged;
         if (OnFocusObject)
             view->OnFocusObject = OnFocusObject;
+        if (OnHierarchyChanged)
+            view->OnHierarchyChanged = OnHierarchyChanged;
+        if (OnHierarchyInteraction)
+            view->OnInteractionLog = OnHierarchyInteraction;
         m_singletonInstances[typeName] = view.get();
         return view;
     }
@@ -128,6 +133,8 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
         auto view = std::make_unique<PropertiesView>();
         view->SetTitle("Properties " + std::to_string(++m_propertiesCount));
         view->Init(m_scene);
+        view->OnComponentsChanged = OnPropertiesChanged;
+        view->OnAssetDropLog = OnPropertiesAssetDropLog;
         m_singletonInstances[typeName] = view.get();
         return view;
     }
@@ -140,8 +147,6 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
         if (OnSceneRequested)
             view->OnSceneRequested = OnSceneRequested;
         view->OnPrefabCreated = OnPrefabCreated;
-        view->OnAssetImported = OnAssetImported;
-        view->OnGltfImportRequested = OnGltfImportRequested;
         m_singletonInstances[typeName] = view.get();
         return view;
     }

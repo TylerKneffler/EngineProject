@@ -15,6 +15,7 @@
 #include "Core/Graphics/IGraphicsContext.h"
 #include <stdexcept>
 #include <sstream>
+#include <cmath>
 #include <glm/glm.hpp>
 
 #ifndef ENGINE_SHADERS_PATH
@@ -476,14 +477,15 @@ Camera* Scene::FindGameCamera()
     return nullptr;
 }
 
-void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverride)
+void Scene::Render(IGraphicsContext* context, float aspect,
+    Camera* cameraOverride, bool includeEditorVisuals)
 {
     if (!context)
     {
         return;
     }
 
-    if (!m_graphicsProvider || !m_gridPipeline || !m_objectPipeline)
+    if (!m_graphicsProvider || !m_objectPipeline)
     {
         return;
     }
@@ -625,7 +627,7 @@ void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverri
             context->DrawInstanced(mesh->GetVertexCount(), 1, 0, 0);
 
             // Draw selected object outline overlay.
-            if (obj == m_selectedObject && m_objectOutlinePipeline)
+            if (includeEditorVisuals && obj == m_selectedObject && m_objectOutlinePipeline)
             {
                 context->SetPipeline(m_objectOutlinePipeline.get());
                 context->SetConstantBuffer(0, m_objectConstantBuffer.get(), offset);
@@ -639,7 +641,7 @@ void Scene::Render(IGraphicsContext* context, float aspect, Camera* cameraOverri
     }
 
     // Draw scene helpers (grid) after opaque objects so blending works correctly
-    if (settings.showGrid && m_gridPipeline)
+    if (includeEditorVisuals && settings.showGrid && m_gridPipeline)
     {
         const glm::mat4 vp = proj * view;
         const glm::vec3& cp = cam->Owner->transform.position;
@@ -796,6 +798,88 @@ Object* Scene::FindObjectByPath(const ObjectPath& path) const
         current = current->Children[path[depth]];
     }
     return current;
+}
+
+bool Scene::MoveObject(Object* object, Object* target, ObjectPlacement placement)
+{
+    if (!object || object == target)
+        return false;
+
+    Object* newParent = placement == ObjectPlacement::AsChild
+        ? target : (target ? target->Parent : nullptr);
+    for (Object* ancestor = newParent; ancestor; ancestor = ancestor->Parent)
+        if (ancestor == object)
+            return false;
+
+    const glm::mat4 oldWorld = object->transform.GetWorldMatrix();
+    if (object->Parent)
+    {
+        auto& oldSiblings = object->Parent->Children;
+        oldSiblings.erase(std::remove(oldSiblings.begin(), oldSiblings.end(), object),
+            oldSiblings.end());
+    }
+    object->Parent = newParent;
+
+    if (newParent)
+    {
+        auto& siblings = newParent->Children;
+        if (placement == ObjectPlacement::AsChild || !target)
+            siblings.push_back(object);
+        else
+        {
+            auto position = std::find(siblings.begin(), siblings.end(), target);
+            if (position == siblings.end())
+                siblings.push_back(object);
+            else
+                siblings.insert(placement == ObjectPlacement::After
+                    ? position + 1 : position, object);
+        }
+    }
+    else
+    {
+        auto moving = std::find_if(m_objects.begin(), m_objects.end(),
+            [object](const auto& value) { return value.get() == object; });
+        if (moving == m_objects.end())
+            return false;
+        std::unique_ptr<Object> owned = std::move(*moving);
+        m_objects.erase(moving);
+        auto position = target
+            ? std::find_if(m_objects.begin(), m_objects.end(),
+                [target](const auto& value) { return value.get() == target; })
+            : m_objects.end();
+        if (position == m_objects.end())
+            m_objects.push_back(std::move(owned));
+        else
+            m_objects.insert(placement == ObjectPlacement::After
+                ? position + 1 : position, std::move(owned));
+    }
+
+    const glm::mat4 parentWorld = newParent
+        ? newParent->transform.GetWorldMatrix() : glm::mat4(1.f);
+    const glm::mat4 local = glm::inverse(parentWorld) * oldWorld;
+    object->transform.position = glm::vec3(local[3]);
+    object->transform.scale = {
+        glm::length(glm::vec3(local[0])),
+        glm::length(glm::vec3(local[1])),
+        glm::length(glm::vec3(local[2]))
+    };
+    glm::mat3 rotation(1.f);
+    for (int column = 0; column < 3; ++column)
+    {
+        const float scale = object->transform.scale[column];
+        if (scale > 0.000001f)
+            rotation[column] = glm::vec3(local[column]) / scale;
+    }
+    const float y = std::asin(std::clamp(-rotation[0][2], -1.f, 1.f));
+    const float cosineY = std::cos(y);
+    const float x = std::abs(cosineY) > 0.00001f
+        ? std::atan2(rotation[1][2], rotation[2][2])
+        : std::atan2(-rotation[2][1], rotation[1][1]);
+    const float z = std::abs(cosineY) > 0.00001f
+        ? std::atan2(rotation[0][1], rotation[0][0])
+        : 0.f;
+    object->transform.rotation = { x, y, z };
+    return true;
 }
 
 void Scene::RemoveObject(Object* obj)

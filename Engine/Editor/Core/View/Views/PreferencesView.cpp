@@ -255,6 +255,12 @@ void PreferencesView::DrawWindow(IEditorUi& ui, bool& isOpen)
                 ui.EndTab();
             }
 
+            if (ui.BeginTab("Debug"))
+            {
+                DrawDebugSection(ui);
+                ui.EndTab();
+            }
+
             if (ui.BeginTab("Export"))
             {
                 DrawExportSection(ui);
@@ -285,6 +291,15 @@ void PreferencesView::DrawWindow(IEditorUi& ui, bool& isOpen)
     }
 
     ui.EndWindow();
+}
+
+void PreferencesView::DrawDebugSection(IEditorUi& ui)
+{
+    ui.Label("Editor Diagnostics");
+    ui.Separator();
+    if (ui.Checkbox("Log hierarchy interactions", &m_settings.debugHierarchyInteractions))
+        NotifyChanged();
+    ui.Tooltip("Logs hierarchy selection, dragging, target zones, drops, moves, and cancellations to Console.");
 }
 
 void PreferencesView::ConfigureEditorUiPackage(
@@ -551,6 +566,13 @@ bool PreferencesView::SaveSettings()
                 editorUiPackage.text().set(m_settings.editorUiPackage.c_str());
             else if (editorRenderingApi && !m_settings.editorUiPackage.empty())
                 prop.append_child("EditorUIPackage").text().set(m_settings.editorUiPackage.c_str());
+
+            auto hierarchyDebug = prop.child("DebugHierarchyInteractions");
+            if (hierarchyDebug)
+                hierarchyDebug.text().set(m_settings.debugHierarchyInteractions ? "true" : "false");
+            else if (defaultSceneNode)
+                prop.append_child("DebugHierarchyInteractions").text().set(
+                    m_settings.debugHierarchyInteractions ? "true" : "false");
 
             auto clearColorR = prop.child("ClearColorR");
             if (clearColorR)
