@@ -6,6 +6,7 @@
 #include <memory>
 #include <vector>
 #include <functional>
+#include <deque>
 
 class Window;
 class ViewFactory;
@@ -52,6 +53,14 @@ public:
     void CapturePlayModeScene();
     void RestorePlayModeScene();
 
+    // ---- Undo/Redo ----
+    void TrackSceneChanges(bool allowHistory = true, bool editInProgress = false);
+    void Undo();
+    void Redo();
+    bool CanUndo() const { return m_hasPendingHistoryEdit || !m_undoHistory.empty(); }
+    bool CanRedo() const { return !m_redoHistory.empty(); }
+    void SetHistoryLimit(uint32_t limit);
+
     bool IsShowingPreferences() const { return m_showPreferences; }
     void SetShowPreferences(bool show) { m_showPreferences = show; }
 
@@ -69,6 +78,17 @@ private:
     Object* InstantiateAsset(const std::string& path, bool recordChange = true);
     std::string ImportAssetFile(const std::string& path);
     void SelectObject(Object* object);
+    struct HistoryEntry
+    {
+        std::string scene;
+        bool hasSelection = false;
+        Scene::ObjectPath selectionPath;
+    };
+    HistoryEntry CaptureHistoryEntry() const;
+    void ApplyHistoryEntry(const HistoryEntry& entry, const char* operation);
+    void ResetHistory(bool sceneIsSaved);
+    void CommitPendingHistoryEdit();
+    void TrimHistory();
 
     // Core objects
     std::unique_ptr<Window> m_window;
@@ -92,6 +112,15 @@ private:
     bool m_prePlayHasUnsavedChanges = false;
     bool m_prePlayHadObjectSelection = false;
     Scene::ObjectPath m_prePlaySelectionPath;
+
+    std::deque<HistoryEntry> m_undoHistory;
+    std::deque<HistoryEntry> m_redoHistory;
+    HistoryEntry m_historyBaseline;
+    HistoryEntry m_pendingHistoryBefore;
+    std::string m_savedSceneSnapshot;
+    uint32_t m_historyLimit = 100;
+    bool m_hasPendingHistoryEdit = false;
+    bool m_assetPreviewActive = false;
 
     std::string m_sceneToLoad;
     bool m_showUnsavedWarning = false;

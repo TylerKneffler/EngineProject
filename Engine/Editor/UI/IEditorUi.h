@@ -83,6 +83,8 @@ public:
     virtual void Spacing() = 0;
     virtual bool Checkbox(const char* label, bool* value) = 0;
     virtual bool InputText(const char* label, char* buffer, size_t size) = 0;
+    virtual void ReadOnlyTextBlock(const char* label, const char* text,
+        bool scrollToBottom = false) = 0;
     virtual bool DragFloat(const char* label, float* value, float speed, float minimum = 0.f, float maximum = 0.f) = 0;
     virtual bool DragFloat3(const char* label, float* values, float speed, float minimum = 0.f, float maximum = 0.f) = 0;
     virtual bool ColorEdit3(const char* label, float* color) = 0;

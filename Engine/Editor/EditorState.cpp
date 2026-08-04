@@ -38,6 +38,7 @@ EditorState::EditorState(HINSTANCE hInstance, const ProjectSettings& projectSett
     std::string projectFilePath)
     : m_projectSettings(projectSettings)
     , m_projectFilePath(std::move(projectFilePath))
+    , m_historyLimit(std::min(projectSettings.editorHistoryLimit, 1000u))
 {
     try
     {
@@ -207,6 +208,7 @@ void EditorState::SaveScene()
     {
         m_currentScenePath = std::filesystem::path(destination).lexically_normal().string();
         m_hasUnsavedChanges = false;
+        m_savedSceneSnapshot = m_scene->SaveToString();
         if (m_primaryConsole)
             m_primaryConsole->AddLog(
                 ConsoleView::Level::Info, "Scene saved: " + m_currentScenePath);
@@ -256,6 +258,7 @@ void EditorState::LoadScene(const std::string& path)
             m_hasUnsavedChanges = false;
             m_currentScenePath =
                 std::filesystem::path(resolvedPath).lexically_normal().string();
+            ResetHistory(true);
             
             if (m_primaryConsole)
             {
@@ -326,6 +329,7 @@ void EditorState::RestorePlayModeScene()
         SelectObject(m_prePlayHadObjectSelection
             ? m_scene->FindObjectByPath(m_prePlaySelectionPath)
             : nullptr);
+        m_historyBaseline = CaptureHistoryEntry();
         OutputDebugStringA("[Play] Restored editor scene state.\n");
         if (m_primaryConsole)
             m_primaryConsole->AddLog(ConsoleView::Level::Info, "[Play] Restored pre-play scene state.");
@@ -354,6 +358,7 @@ void EditorState::InitializePanels()
     m_preferences->Init(m_projectSettings, m_projectFilePath);
     m_preferences->OnSettingsChanged = [this]() {
         m_projectSettings = m_preferences->GetSettings();
+        SetHistoryLimit(m_projectSettings.editorHistoryLimit);
         for (auto& panel : m_panels)
             if (auto* hierarchy = dynamic_cast<HierarchyView*>(panel.get()))
                 hierarchy->SetDebugInteractionLogging(
@@ -471,14 +476,19 @@ void EditorState::WireupCallbacks()
         SelectObject(InstantiateAsset(path));
     };
     m_viewFactory->OnAssetPreviewRequested = [this](const std::string& path) {
-        return InstantiateAsset(path, false);
+        m_assetPreviewActive = true;
+        Object* preview = InstantiateAsset(path, false);
+        m_assetPreviewActive = preview != nullptr;
+        return preview;
     };
     m_viewFactory->OnAssetPreviewCancelled = [this](Object* object) {
         if (m_scene && object)
             m_scene->RemoveObject(object);
+        m_assetPreviewActive = false;
     };
     m_viewFactory->OnAssetPreviewCommitted = [this](Object* object,
         const std::string& path) {
+        m_assetPreviewActive = false;
         if (!object)
             return;
         m_hasUnsavedChanges = true;
@@ -667,6 +677,152 @@ void EditorState::SelectObject(Object* object)
         m_primaryProperties->SetSelectedObject(object);
     if (m_scene)
         m_scene->SetSelectedObject(object);
+}
+
+EditorState::HistoryEntry EditorState::CaptureHistoryEntry() const
+{
+    HistoryEntry entry;
+    if (!m_scene)
+        return entry;
+    entry.scene = m_scene->SaveToString();
+    for (const auto& panel : m_panels)
+    {
+        const auto* hierarchy = dynamic_cast<const HierarchyView*>(panel.get());
+        if (!hierarchy)
+            continue;
+        Object* selected = hierarchy->GetSelectedObject();
+        entry.hasSelection = selected &&
+            m_scene->TryGetObjectPath(selected, entry.selectionPath);
+        break;
+    }
+    return entry;
+}
+
+void EditorState::TrackSceneChanges(bool allowHistory, bool editInProgress)
+{
+    if (!m_scene || !allowHistory || m_assetPreviewActive)
+        return;
+
+    HistoryEntry current = CaptureHistoryEntry();
+    if (m_historyBaseline.scene.empty())
+    {
+        m_historyBaseline = std::move(current);
+        if (m_savedSceneSnapshot.empty())
+            m_savedSceneSnapshot = m_historyBaseline.scene;
+        return;
+    }
+
+    if (current.scene != m_historyBaseline.scene)
+    {
+        if (m_historyLimit > 0 && !m_hasPendingHistoryEdit)
+        {
+            m_pendingHistoryBefore = m_historyBaseline;
+            m_hasPendingHistoryEdit = true;
+            m_redoHistory.clear();
+        }
+        m_historyBaseline = std::move(current);
+        m_hasUnsavedChanges = m_historyBaseline.scene != m_savedSceneSnapshot;
+        if (m_hasPendingHistoryEdit && !editInProgress)
+            CommitPendingHistoryEdit();
+    }
+    else
+    {
+        // Selection is editor state too, but changing it alone is not an undo action.
+        m_historyBaseline.hasSelection = current.hasSelection;
+        m_historyBaseline.selectionPath = std::move(current.selectionPath);
+        if (m_hasPendingHistoryEdit && !editInProgress)
+            CommitPendingHistoryEdit();
+    }
+}
+
+void EditorState::CommitPendingHistoryEdit()
+{
+    if (!m_hasPendingHistoryEdit)
+        return;
+    if (m_historyLimit > 0 &&
+        m_pendingHistoryBefore.scene != m_historyBaseline.scene)
+        m_undoHistory.push_back(std::move(m_pendingHistoryBefore));
+    m_pendingHistoryBefore = {};
+    m_hasPendingHistoryEdit = false;
+    TrimHistory();
+}
+
+void EditorState::Undo()
+{
+    CommitPendingHistoryEdit();
+    if (!m_scene || m_undoHistory.empty())
+        return;
+    HistoryEntry target = std::move(m_undoHistory.back());
+    m_undoHistory.pop_back();
+    m_redoHistory.push_back(CaptureHistoryEntry());
+    TrimHistory();
+    ApplyHistoryEntry(target, "Undo");
+}
+
+void EditorState::Redo()
+{
+    CommitPendingHistoryEdit();
+    if (!m_scene || m_redoHistory.empty())
+        return;
+    HistoryEntry target = std::move(m_redoHistory.back());
+    m_redoHistory.pop_back();
+    m_undoHistory.push_back(CaptureHistoryEntry());
+    TrimHistory();
+    ApplyHistoryEntry(target, "Redo");
+}
+
+void EditorState::ApplyHistoryEntry(
+    const HistoryEntry& entry, const char* operation)
+{
+    SelectObject(nullptr);
+    if (!m_scene->LoadFromString(entry.scene))
+    {
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                std::string(operation) + " failed to restore the scene.");
+        return;
+    }
+
+    SelectObject(entry.hasSelection
+        ? m_scene->FindObjectByPath(entry.selectionPath) : nullptr);
+    m_historyBaseline = CaptureHistoryEntry();
+    m_hasUnsavedChanges = m_historyBaseline.scene != m_savedSceneSnapshot;
+    if (m_primaryConsole)
+        m_primaryConsole->AddLog(ConsoleView::Level::Info,
+            std::string(operation) + " completed.");
+}
+
+void EditorState::ResetHistory(bool sceneIsSaved)
+{
+    m_undoHistory.clear();
+    m_redoHistory.clear();
+    m_pendingHistoryBefore = {};
+    m_hasPendingHistoryEdit = false;
+    m_historyBaseline = CaptureHistoryEntry();
+    if (sceneIsSaved)
+        m_savedSceneSnapshot = m_historyBaseline.scene;
+}
+
+void EditorState::SetHistoryLimit(uint32_t limit)
+{
+    m_historyLimit = std::min(limit, 1000u);
+    if (m_historyLimit == 0)
+    {
+        m_undoHistory.clear();
+        m_redoHistory.clear();
+        m_pendingHistoryBefore = {};
+        m_hasPendingHistoryEdit = false;
+    }
+    else
+        TrimHistory();
+}
+
+void EditorState::TrimHistory()
+{
+    while (m_undoHistory.size() > m_historyLimit)
+        m_undoHistory.pop_front();
+    while (m_redoHistory.size() > m_historyLimit)
+        m_redoHistory.pop_front();
 }
 
 // ---------------------------------------------------------------------------

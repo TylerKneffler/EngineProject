@@ -38,8 +38,7 @@ public:
 
 private:
     std::vector<Entry> m_entries;
+    std::string m_textBlock;
     bool m_autoScroll     = true;
     bool m_scrollToBottom = false;
-    size_t m_selectedEntry = static_cast<size_t>(-1);
-    std::string m_copyStatus;
 };

@@ -33,6 +33,7 @@ struct ProjectSettings
     float leftPanelWidth;
     float rightPanelWidth;
     bool debugHierarchyInteractions = true;
+    uint32_t editorHistoryLimit = 100;
 
     std::vector<std::string> leftPanelTabs;
     std::vector<std::string> centerPanelTabs;

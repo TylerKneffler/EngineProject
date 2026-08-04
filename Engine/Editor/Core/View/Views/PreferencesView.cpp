@@ -255,6 +255,12 @@ void PreferencesView::DrawWindow(IEditorUi& ui, bool& isOpen)
                 ui.EndTab();
             }
 
+            if (ui.BeginTab("Editor"))
+            {
+                DrawEditorSection(ui);
+                ui.EndTab();
+            }
+
             if (ui.BeginTab("Debug"))
             {
                 DrawDebugSection(ui);
@@ -300,6 +306,19 @@ void PreferencesView::DrawDebugSection(IEditorUi& ui)
     if (ui.Checkbox("Log hierarchy interactions", &m_settings.debugHierarchyInteractions))
         NotifyChanged();
     ui.Tooltip("Logs hierarchy selection, dragging, target zones, drops, moves, and cancellations to Console.");
+}
+
+void PreferencesView::DrawEditorSection(IEditorUi& ui)
+{
+    ui.Label("Undo History");
+    ui.Separator();
+    if (ui.InputUInt("Action Limit", &m_settings.editorHistoryLimit))
+    {
+        m_settings.editorHistoryLimit =
+            std::min<uint32_t>(m_settings.editorHistoryLimit, 1000u);
+        NotifyChanged();
+    }
+    ui.Tooltip("Maximum undo and redo snapshots kept in memory. Set to 0 to disable history.");
 }
 
 void PreferencesView::DrawExportSection(IEditorUi& ui)
@@ -546,6 +565,13 @@ bool PreferencesView::SaveSettings()
             else if (defaultSceneNode)
                 prop.append_child("DebugHierarchyInteractions").text().set(
                     m_settings.debugHierarchyInteractions ? "true" : "false");
+
+            auto historyLimit = prop.child("EditorHistoryLimit");
+            if (historyLimit)
+                historyLimit.text().set(m_settings.editorHistoryLimit);
+            else if (defaultSceneNode)
+                prop.append_child("EditorHistoryLimit").text().set(
+                    m_settings.editorHistoryLimit);
 
             auto clearColorR = prop.child("ClearColorR");
             if (clearColorR)

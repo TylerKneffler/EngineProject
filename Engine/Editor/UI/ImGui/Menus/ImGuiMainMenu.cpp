@@ -63,11 +63,18 @@ void ImGuiMainMenu::DrawFileMenu(EditorState& state, PlayState playState,
     GameBuildManager* buildManager) const
 {
     if (!ImGui::BeginMenu("File")) return;
+    const bool busy = IsBusy(playState);
+    if (busy) ImGui::BeginDisabled();
+    if (ImGui::MenuItem("Undo", "Ctrl+Z", false, state.CanUndo()))
+        state.Undo();
+    if (ImGui::MenuItem("Redo", "Ctrl+Y", false, state.CanRedo()))
+        state.Redo();
+    if (busy) ImGui::EndDisabled();
+    ImGui::Separator();
     if (ImGui::MenuItem("Save All", "Ctrl+S"))
         state.SaveScene();
     ImGui::Separator();
 
-    const bool busy = IsBusy(playState);
     if (busy) ImGui::BeginDisabled();
     if (ImGui::MenuItem("Build", "Ctrl+B") && buildManager)
         buildManager->StartBuild(PostBuildAction::Nothing);

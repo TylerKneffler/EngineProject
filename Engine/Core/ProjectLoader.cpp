@@ -153,6 +153,11 @@ void ProjectLoader::ParseEditor(const pugi::xml_node& projectNode, ProjectSettin
             settings.debugHierarchyInteractions = value != "false" && value != "0" && value != "off";
         }
 
+        auto historyLimit = prop.child("EditorHistoryLimit");
+        if (historyLimit)
+            settings.editorHistoryLimit = static_cast<uint32_t>(
+                std::min<unsigned long>(std::stoul(historyLimit.child_value()), 1000ul));
+
         if (!settings.defaultScene.empty())
             break;
     }

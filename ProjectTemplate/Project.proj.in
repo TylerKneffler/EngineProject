@@ -21,6 +21,7 @@
     <ViewportHeight>720</ViewportHeight>
     <LeftPanelWidth>0.20</LeftPanelWidth>
     <RightPanelWidth>0.31</RightPanelWidth>
+    <EditorHistoryLimit>100</EditorHistoryLimit>
   </PropertyGroup>
   <ItemGroup>
     <LeftPanelTab Include="HierarchyView" />

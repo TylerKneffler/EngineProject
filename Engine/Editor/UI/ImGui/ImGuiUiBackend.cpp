@@ -185,6 +185,9 @@ void ImGuiUiBackend::DrawEditor(EditorState& state, PlayState playState,
         m_presentation = std::make_unique<EditorUI>(&state);
     m_presentation->SetGameBuildManager(buildManager);
     m_presentation->Render(playState);
+    state.TrackSceneChanges(
+        playState == PlayState::Stopped || playState == PlayState::BuildFailed,
+        ImGui::IsAnyItemActive());
 }
 
 bool ImGuiUiBackend::HandleMessage(void* nativeWindow, uint32_t message,
@@ -193,6 +196,22 @@ bool ImGuiUiBackend::HandleMessage(void* nativeWindow, uint32_t message,
     const bool keyDown = message == WM_KEYDOWN || message == WM_SYSKEYDOWN;
     const bool firstPress = (static_cast<uintptr_t>(lParam) & (uintptr_t{1} << 30)) == 0;
     const bool control = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+    const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+    const bool historyAvailable = !m_buildManager ||
+        m_buildManager->GetPlayState() == PlayState::Stopped ||
+        m_buildManager->GetPlayState() == PlayState::BuildFailed;
+    if (keyDown && firstPress && control && historyAvailable &&
+        (wParam == 'Y' || (wParam == 'Z' && shift)) && m_editorState)
+    {
+        m_editorState->Redo();
+        return true;
+    }
+    if (keyDown && firstPress && control && historyAvailable &&
+        wParam == 'Z' && m_editorState)
+    {
+        m_editorState->Undo();
+        return true;
+    }
     if (keyDown && firstPress && control && wParam == 'S' && m_editorState)
     {
         m_editorState->SaveScene();

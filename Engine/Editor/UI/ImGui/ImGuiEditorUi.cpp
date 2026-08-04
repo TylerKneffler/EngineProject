@@ -16,6 +16,24 @@ void ImGuiEditorUi::BeginTextWrap(){ImGui::PushTextWrapPos(0.f);}
 void ImGuiEditorUi::EndTextWrap(){ImGui::PopTextWrapPos();}
 void ImGuiEditorUi::SameLine(){ImGui::SameLine();} void ImGuiEditorUi::Separator(){ImGui::Separator();} void ImGuiEditorUi::Spacing(){ImGui::Spacing();}
 bool ImGuiEditorUi::Checkbox(const char*l,bool*v){return ImGui::Checkbox(l,v);} bool ImGuiEditorUi::InputText(const char*l,char*b,size_t s){if(l&&l[0]=='#'&&l[1]=='#')ImGui::SetNextItemWidth(-FLT_MIN);return ImGui::InputText(l,b,s);}
+void ImGuiEditorUi::ReadOnlyTextBlock(const char* label,const char* text,bool scrollToBottom)
+{
+    const char* value=text?text:"";
+    const ImGuiID id=ImGui::GetID(label);
+    const ImVec2 available=ImGui::GetContentRegionAvail();
+    ImGui::InputTextMultiline(label,const_cast<char*>(value),strlen(value)+1,
+        available,ImGuiInputTextFlags_ReadOnly|ImGuiInputTextFlags_NoUndoRedo);
+    if(scrollToBottom)
+    {
+        ImGuiContext& context=*GImGui;
+        for(ImGuiWindow* window:context.Windows)
+            if(window&&window->ChildId==id)
+            {
+                ImGui::SetScrollY(window,window->ScrollMax.y);
+                break;
+            }
+    }
+}
 bool ImGuiEditorUi::DragFloat(const char*l,float*v,float s,float a,float b){return ImGui::DragFloat(l,v,s,a,b);}
 bool ImGuiEditorUi::DragFloat3(const char*l,float*v,float s,float a,float b){return ImGui::DragFloat3(l,v,s,a,b);}
 bool ImGuiEditorUi::ColorEdit3(const char*l,float*v){return ImGui::ColorEdit3(l,v);} bool ImGuiEditorUi::ColorEdit4(const char*l,float*v){return ImGui::ColorEdit4(l,v);}

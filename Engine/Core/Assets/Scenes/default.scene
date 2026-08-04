@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0"?>
 <Scene xmlns:components="urn:engine-components">
   <version>1</version>
   <settings>
@@ -92,14 +92,14 @@
       <enabled>true</enabled>
       <transform>
         <Transform.position>
-          <item>1.5</item>
-          <item>2</item>
-          <item>-1</item>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
         </Transform.position>
         <Transform.rotation>
-          <item>0.55</item>
-          <item>0.55</item>
-          <item>0</item>
+          <item>0.436332</item>
+          <item>0.436332</item>
+          <item>0.436332</item>
         </Transform.rotation>
         <Transform.scale>
           <item>1</item>
@@ -115,8 +115,8 @@
             <item>0.95</item>
             <item>0.85</item>
           </Light.color>
-          <Light.intensity>0.65</Light.intensity>
-          <Light.range>8</Light.range>
+          <Light.intensity>1.25</Light.intensity>
+          <Light.range>6.31</Light.range>
           <Light.falloff>2</Light.falloff>
           <Light.baked>false</Light.baked>
         </components:Light>
