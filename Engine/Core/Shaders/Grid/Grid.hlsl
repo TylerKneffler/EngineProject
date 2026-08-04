@@ -10,7 +10,9 @@
 //   float4   gridColor   (16 b)
 //   float4   axisColor   (16 b)
 //   float    fadeDistance( 4 b)
-//   float3   _pad        (12 b)
+//   float    nearPlane   ( 4 b)
+//   float    farPlane    ( 4 b)
+//   float    _pad        ( 4 b)
 
 #ifdef VULKAN
 struct GridConst
@@ -21,7 +23,9 @@ struct GridConst
     float4   gridColor;
     float4   axisColor;
     float    fadeDistance;
-    float3   _pad;
+    float    nearPlane;
+    float    farPlane;
+    float    _pad;
 };
 [[vk::push_constant]] GridConst cb;
 #define invVP        cb.invVP
@@ -30,6 +34,8 @@ struct GridConst
 #define gridColor    cb.gridColor
 #define axisColor    cb.axisColor
 #define fadeDistance cb.fadeDistance
+#define nearPlane    cb.nearPlane
+#define farPlane     cb.farPlane
 #else
 cbuffer GridCB : register(b0)
 {
@@ -39,7 +45,9 @@ cbuffer GridCB : register(b0)
     float4   gridColor;    // rgb + opacity
     float4   axisColor;    // rgb + 1
     float    fadeDistance;
-    float3   _pad;
+    float    nearPlane;
+    float    farPlane;
+    float    _pad;
 };
 #endif
 
@@ -60,8 +68,14 @@ void VSMain(uint id      : SV_VertexID,
 // ---------------------------------------------------------------------------
 // Pixel shader
 // ---------------------------------------------------------------------------
-float4 PSMain(float4 svPos : SV_POSITION,
-              float2 ndc   : TEXCOORD0) : SV_TARGET
+struct GridPixel
+{
+    float4 color : SV_TARGET;
+    float depth : SV_DEPTH;
+};
+
+GridPixel PSMain(float4 svPos : SV_POSITION,
+                 float2 ndc   : TEXCOORD0)
 {
     // Unproject NDC to world space via the inverse view-projection matrix.
     float4 wNear = mul(invVP, float4(ndc, 0.0, 1.0));
@@ -99,5 +113,15 @@ float4 PSMain(float4 svPos : SV_POSITION,
     float  zAxis   = clamp(1.0 - abs(wp.x) / (axDeriv.x * 2.0), 0.0, 1.0);
     float3 color   = lerp(gridColor.rgb, axisColor.rgb, saturate(xAxis + zAxis));
 
-    return float4(color, alpha);
+    // Write the depth of the reconstructed world-space plane rather than the
+    // fullscreen triangle's far depth. This keeps grid/object intersections
+    // stable while the editor camera changes distance or angle.
+    float depthRange = max(farPlane - nearPlane, 1e-5);
+    float viewDepth = nearPlane + t * depthRange;
+    GridPixel output;
+    output.color = float4(color, alpha);
+    output.depth = saturate(
+        farPlane * (viewDepth - nearPlane) /
+        max(depthRange * viewDepth, 1e-5));
+    return output;
 }

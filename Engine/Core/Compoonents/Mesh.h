@@ -35,13 +35,20 @@ public:
     uint32_t GetVertexStride() const { return sizeof(Vertex); }
     bool     IsReady()        const { return m_ready; }
     const std::string& GetFilePath() const { return m_filePath; }
+    bool HasBounds() const { return m_hasBounds; }
+    const glm::vec3& GetBoundsMin() const { return m_boundsMin; }
+    const glm::vec3& GetBoundsMax() const { return m_boundsMax; }
 
     void        Deserialize(const JsonValue& v) override;
     void        OnAfterDeserialize(IGraphicsProvider* graphicsProvider) override;
 
 private:
+    void UpdateBounds();
     std::string m_filePath;
     std::vector<Vertex> m_vertices;
     std::unique_ptr<IGraphicsBuffer> m_vertexBuffer;
     bool m_ready = false;
+    bool m_hasBounds = false;
+    glm::vec3 m_boundsMin{};
+    glm::vec3 m_boundsMax{};
 };

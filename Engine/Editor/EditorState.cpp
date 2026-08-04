@@ -470,6 +470,23 @@ void EditorState::WireupCallbacks()
     m_viewFactory->OnAssetDropped = [this](const std::string& path) {
         SelectObject(InstantiateAsset(path));
     };
+    m_viewFactory->OnAssetPreviewRequested = [this](const std::string& path) {
+        return InstantiateAsset(path, false);
+    };
+    m_viewFactory->OnAssetPreviewCancelled = [this](Object* object) {
+        if (m_scene && object)
+            m_scene->RemoveObject(object);
+    };
+    m_viewFactory->OnAssetPreviewCommitted = [this](Object* object,
+        const std::string& path) {
+        if (!object)
+            return;
+        m_hasUnsavedChanges = true;
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Info,
+                "Placed prefab in scene: " + path);
+        SelectObject(object);
+    };
 
     m_viewFactory->OnPrefabCreated = [this](Object*, const std::string& path) {
         m_hasUnsavedChanges = true;
@@ -568,7 +585,7 @@ std::string EditorState::ImportAssetFile(const std::string& path)
     }
 }
 
-Object* EditorState::InstantiateAsset(const std::string& path)
+Object* EditorState::InstantiateAsset(const std::string& path, bool recordChange)
 {
     if (!m_scene)
         return nullptr;
@@ -628,7 +645,7 @@ Object* EditorState::InstantiateAsset(const std::string& path)
         return nullptr;
     }
 
-    if (object)
+    if (object && recordChange)
     {
         m_hasUnsavedChanges = true;
         if (m_primaryConsole)

@@ -33,9 +33,10 @@ int main()
     for (const auto& object : scene.GetObjects())
         if (object->name == "Cube")
             cube = object.get();
-    if (!cube || !cube->GetComponent<Rotate>())
+    if (!cube || !cube->GetComponent<Rotate>() || !cube->Prefab ||
+        cube->Prefab->GetPath() != "Assets/Prefabs/Cube.prefab")
     {
-        std::cerr << "Default Cube does not contain Rotate\n";
+        std::cerr << "Default Cube prefab or Rotate component is missing\n";
         if (cube)
             for (const Component* component : cube->Components)
                 std::cerr << "Loaded component: " << component->GetTypeName() << '\n';
@@ -95,13 +96,14 @@ int main()
         return 10;
     }
 
-    if (!scene.MoveObject(light, cube, Scene::ObjectPlacement::AsChild))
+    Object* copiedParent = scene.AddObject("Copy Parent");
+    if (!scene.MoveObject(light, copiedParent, Scene::ObjectPlacement::AsChild))
         return 11;
-    const std::string copiedGroup = SceneSerializer::SaveObjectToString(*cube);
+    const std::string copiedGroup = SceneSerializer::SaveObjectToString(*copiedParent);
     Object* copiedCube = SceneSerializer::InstantiateObjectFromString(
         scene, copiedGroup, nullptr);
-    if (!copiedCube || copiedCube == cube ||
-        !copiedCube->GetComponent<Rotate>() || copiedCube->Children.size() != 1 ||
+    if (!copiedCube || copiedCube == copiedParent ||
+        copiedCube->Children.size() != 1 ||
         copiedCube->Children.front() == light ||
         copiedCube->Children.front()->name != light->name)
     {

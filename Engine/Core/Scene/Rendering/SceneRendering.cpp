@@ -1,21 +1,17 @@
-#include "Scene.h"
+#include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Camera.h"
-#include "Core/Compoonents/Light.h"
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Compoonents/Material.h"
 #include "Core/Compoonents/Materials/Texture.h"
-#include "Core/Compoonents/Transform.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
 #include "Core/Rendering/Lighting/LightingTypes.h"
-#include "Core/Serialization/SceneSerializer.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Graphics/IShader.h"
 #include "Core/Graphics/IPipelineState.h"
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Graphics/IGraphicsContext.h"
 #include <stdexcept>
-#include <sstream>
-#include <cmath>
+#include <filesystem>
 #include <glm/glm.hpp>
 
 #ifndef ENGINE_SHADERS_PATH
@@ -28,25 +24,6 @@
 
 namespace
 {
-    JsonValue Vec3ToJson(const glm::vec3& value)
-    {
-        return JsonValue::MakeArray()
-            .Push(JsonValue(value.x))
-            .Push(JsonValue(value.y))
-            .Push(JsonValue(value.z));
-    }
-
-    glm::vec3 Vec3FromJson(const JsonValue& value, const glm::vec3& fallback)
-    {
-        if (!value.IsArray() || value.ArraySize() < 3)
-            return fallback;
-        return {
-            value.ArrayAt(0).AsFloat(),
-            value.ArrayAt(1).AsFloat(),
-            value.ArrayAt(2).AsFloat()
-        };
-    }
-
     std::string EngineShaderPath(const char* fileName)
     {
         const std::filesystem::path shaderFile(fileName);
@@ -58,41 +35,14 @@ namespace
             return bundled.string();
         return (std::filesystem::path(ENGINE_SHADERS_PATH) / relativePath).string();
     }
-}
 
-JsonValue SceneSettings::Serialize() const
-{
-    JsonValue value = JsonValue::MakeObject();
-    value.Set("showGrid", JsonValue(showGrid));
-    value.Set("gridHalfSize", JsonValue(gridHalfSize));
-    value.Set("gridCellSize", JsonValue(gridCellSize));
-    value.Set("gridOpacity", JsonValue(gridOpacity));
-    value.Set("gridFadeDistance", JsonValue(gridFadeDistance));
-    value.Set("gridColor", Vec3ToJson(gridColor));
-    value.Set("gridOriginColor", Vec3ToJson(gridOriginColor));
-    value.Set("ambientColor", Vec3ToJson(ambientColor));
-    value.Set("skyboxTexture", JsonValue(skyboxTexture));
-    return value;
-}
-
-void SceneSettings::Deserialize(const JsonValue& value)
-{
-    if (!value.IsObject())
-        return;
-    if (value.Has("showGrid")) showGrid = value["showGrid"].AsBool();
-    if (value.Has("gridHalfSize")) gridHalfSize = value["gridHalfSize"].AsInt();
-    if (value.Has("gridCellSize")) gridCellSize = value["gridCellSize"].AsFloat();
-    if (value.Has("gridOpacity")) gridOpacity = value["gridOpacity"].AsFloat();
-    if (value.Has("gridFadeDistance")) gridFadeDistance = value["gridFadeDistance"].AsFloat();
-    if (value.Has("gridColor"))
-        gridColor = Vec3FromJson(value["gridColor"], gridColor);
-    if (value.Has("gridOriginColor"))
-        gridOriginColor = Vec3FromJson(value["gridOriginColor"], gridOriginColor);
-    if (value.Has("ambientColor"))
-        ambientColor = Vec3FromJson(value["ambientColor"], ambientColor);
-    skyboxTexture = value.Has("skyboxTexture")
-        ? value["skyboxTexture"].AsString()
-        : std::string{};
+    bool IsObjectOrDescendant(const Object* object, const Object* root)
+    {
+        for (const Object* current = object; current; current = current->Parent)
+            if (current == root)
+                return true;
+        return false;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -132,7 +82,9 @@ struct GridCBData
     glm::vec4 gridColor;
     glm::vec4 axisColor;
     float fadeDistance;
-    glm::vec3 padding;  // Constant-buffer allocation uses a 256-byte stride.
+    float nearPlane;
+    float farPlane;
+    float padding;  // Constant-buffer allocation uses a 256-byte stride.
 };
 
 struct SkyboxCBData
@@ -286,6 +238,11 @@ const Texture* Scene::ResolveSkyboxTexture()
     return m_sceneSkyboxTexture ? m_sceneSkyboxTexture.get() : m_defaultSkyboxTexture.get();
 }
 
+const Texture* Scene::GetSkyboxPreviewTexture()
+{
+    return ResolveSkyboxTexture();
+}
+
 // ---------------------------------------------------------------------------
 // Scene::BuildGridPipeline
 // ---------------------------------------------------------------------------
@@ -424,6 +381,36 @@ void Scene::BuildObjectPipeline()
     if (!m_objectPipeline)
         throw std::runtime_error("Failed to build object pipeline: " + builder->GetLastError());
 
+    // Prefab placement previews use the normal material shader with alpha
+    // blending and no depth writes, so the underlying scene remains visible.
+    auto previewBuilder = pipelineFactory->CreateBuilder();
+    if (!previewBuilder)
+        throw std::runtime_error("Failed to create preview pipeline state builder");
+    m_objectPreviewPipeline = previewBuilder->SetVertexShader(vsShader.get())
+        .SetPixelShader(psShader.get())
+        .SetFillMode(false)
+        .SetCullMode(true)
+        .SetFrontCounterClockwise(true)
+        .SetDepthClipEnable(true)
+        .SetBlendEnable(true)
+        .SetSrcBlend(4)
+        .SetDestBlend(5)
+        .SetBlendOp(0)
+        .SetSrcBlendAlpha(1)
+        .SetDestBlendAlpha(0)
+        .SetBlendOpAlpha(0)
+        .SetDepthEnable(true)
+        .SetDepthWriteEnable(false)
+        .SetDepthFunc(3)
+        .SetInputLayout(layout, 4)
+        .SetPrimitiveTopology(IPipelineStateBuilder::PrimitiveTopology::TriangleList)
+        .SetRenderTargetFormat(28, 40)
+        .Build();
+    if (!m_objectPreviewPipeline)
+        throw std::runtime_error(
+            "Failed to build object preview pipeline: " +
+            previewBuilder->GetLastError());
+
     // Build a wireframe outline pipeline for selected object highlighting.
     auto outlineBuilder = pipelineFactory->CreateBuilder();
     if (!outlineBuilder)
@@ -467,15 +454,6 @@ void Scene::BuildObjectPipeline()
 // ---------------------------------------------------------------------------
 // Scene::Render
 // ---------------------------------------------------------------------------
-
-Camera* Scene::FindGameCamera()
-{
-    for (const auto& obj : m_objects)
-        if (Camera* cam = obj->GetComponent<Camera>())
-            if (obj->IsEnabledInHierarchy() && cam->active)
-                return cam;
-    return nullptr;
-}
 
 void Scene::Render(IGraphicsContext* context, float aspect,
     Camera* cameraOverride, bool includeEditorVisuals)
@@ -532,6 +510,11 @@ void Scene::Render(IGraphicsContext* context, float aspect,
         Object* obj = objPtr.get();
         if (!obj->IsEnabledInHierarchy())
             continue;
+        const bool belongsToPreview = m_previewObject &&
+            IsObjectOrDescendant(obj, m_previewObject);
+        // Placement previews are editor-only and must never leak into Game View.
+        if (belongsToPreview && !includeEditorVisuals)
+            continue;
         Mesh* mesh = obj->GetComponent<Mesh>();
         if (!mesh)
         {
@@ -544,6 +527,7 @@ void Scene::Render(IGraphicsContext* context, float aspect,
         
 
         Material* mat = obj->GetComponent<Material>();
+        const bool isPreview = belongsToPreview;
         const BakedLightingData* bakedLighting =
             obj->GetComponent<BakedLightingData>();
         const glm::vec3 bakedIrradiance =
@@ -599,6 +583,8 @@ void Scene::Render(IGraphicsContext* context, float aspect,
             objectData.materialParams = { 0.f, 1.f, 1.f, 0.f };
             objectData.specularShininess = { 1.f, 1.f, 1.f, 32.f };
         }
+        if (isPreview)
+            objectData.baseColor.a *= 0.45f;
         if (bakedLighting && bakedLighting->valid)
         {
             objectData.bakedDirectional = glm::vec4(
@@ -614,7 +600,9 @@ void Scene::Render(IGraphicsContext* context, float aspect,
             static_cast<size_t>(slot) * sizeof(ObjectGPUData),
             &objectData, sizeof(objectData));
 
-        context->SetPipeline(m_objectPipeline.get());
+        context->SetPipeline(isPreview && m_objectPreviewPipeline
+            ? m_objectPreviewPipeline.get()
+            : m_objectPipeline.get());
         context->SetConstantBuffer(0, m_objectConstantBuffer.get(), offset);
         context->SetStructuredBuffer(5, m_lightDataBuffer.get());
         context->SetStructuredBuffer(6, m_objectDataBuffer.get());
@@ -627,7 +615,8 @@ void Scene::Render(IGraphicsContext* context, float aspect,
             context->DrawInstanced(mesh->GetVertexCount(), 1, 0, 0);
 
             // Draw selected object outline overlay.
-            if (includeEditorVisuals && obj == m_selectedObject && m_objectOutlinePipeline)
+            if (includeEditorVisuals && !isPreview &&
+                obj == m_selectedObject && m_objectOutlinePipeline)
             {
                 context->SetPipeline(m_objectOutlinePipeline.get());
                 context->SetConstantBuffer(0, m_objectConstantBuffer.get(), offset);
@@ -654,6 +643,8 @@ void Scene::Render(IGraphicsContext* context, float aspect,
         gridData.gridColor = { settings.gridColor.x, settings.gridColor.y, settings.gridColor.z, settings.gridOpacity };
         gridData.axisColor = { settings.gridOriginColor.x, settings.gridOriginColor.y, settings.gridOriginColor.z, 1.f };
         gridData.fadeDistance = settings.gridFadeDistance;
+        gridData.nearPlane = cam->nearPlane;
+        gridData.farPlane = cam->farPlane;
 
         // Write to constant buffer
         memcpy(m_gridCBMapped, &gridData, sizeof(GridCBData));
@@ -665,299 +656,4 @@ void Scene::Render(IGraphicsContext* context, float aspect,
         // Draw fullscreen triangle (3 vertices, no vertex buffer)
         context->DrawInstanced(3, 1, 0, 0);
     }
-}
-
-// ---------------------------------------------------------------------------
-// Scene::FocusEditorCamera
-// ---------------------------------------------------------------------------
-
-void Scene::FocusEditorCamera(Object* obj)
-{
-    Camera* cam = editorCamera.GetComponent<Camera>();
-    if (!cam) return;
-
-    // Determine the world-space target point (object origin, or world origin).
-    glm::vec3 targetPos = obj ? obj->transform.position : glm::vec3(0.f, 0.f, 0.f);
-
-    // Keep a fixed orbital distance from the object (3 units gives a nice view
-    // of a 1-unit cube; scale this later if bounding-box info is available).
-    constexpr float kDistance = 3.f;
-
-    // Preserve the current orbital angle but re-aim at the new target.
-    // Compute the current direction from camera to its old target, then apply
-    // the same direction offset to the new target.
-    const glm::vec3& eye = editorCamera.transform.position;
-    const glm::vec3 oldTarget = cam->target;
-    glm::vec3 oldDir = eye - oldTarget;
-    float oldLen = std::sqrt(oldDir.x*oldDir.x + oldDir.y*oldDir.y + oldDir.z*oldDir.z);
-    if (oldLen < 0.001f)
-    {
-        // Camera was sitting on its target — use a default offset.
-        oldDir = glm::vec3(0.f, 1.5f, -1.f);
-        oldLen = std::sqrt(oldDir.x*oldDir.x + oldDir.y*oldDir.y + oldDir.z*oldDir.z);
-    }
-    const float s = kDistance / oldLen;
-    editorCamera.transform.position = glm::vec3(
-        targetPos.x + oldDir.x * s,
-        targetPos.y + oldDir.y * s,
-        targetPos.z + oldDir.z * s);
-    cam->target = { targetPos.x, targetPos.y, targetPos.z };
-}
-
-// ---------------------------------------------------------------------------
-// Scene::Object management
-// ---------------------------------------------------------------------------
-
-Object* Scene::AddObject()
-{
-    auto obj = std::make_unique<Object>();
-    Object* raw = obj.get();
-    raw->OwnerScene = this;
-    m_objects.push_back(std::move(obj));
-    return raw;
-}
-
-Object* Scene::AddObject(const std::string& name)
-{
-    Object* obj = AddObject();
-    obj->name = name;
-    obj->OwnerScene = this;
-    return obj;
-}
-
-bool Scene::TryGetObjectPath(const Object* object, ObjectPath& path) const
-{
-    path.clear();
-    if (!object)
-        return false;
-
-    for (const Object* current = object; current; current = current->Parent)
-    {
-        std::size_t index = 0;
-        bool found = false;
-        if (current->Parent)
-        {
-            const auto& siblings = current->Parent->Children;
-            const auto position = std::find(siblings.begin(), siblings.end(), current);
-            if (position != siblings.end())
-            {
-                index = static_cast<std::size_t>(position - siblings.begin());
-                found = true;
-            }
-        }
-        else
-        {
-            for (const auto& candidate : m_objects)
-            {
-                if (candidate->Parent)
-                    continue;
-                if (candidate.get() == current)
-                {
-                    found = true;
-                    break;
-                }
-                ++index;
-            }
-        }
-        if (!found)
-        {
-            path.clear();
-            return false;
-        }
-        path.push_back(index);
-    }
-
-    std::reverse(path.begin(), path.end());
-    return true;
-}
-
-Object* Scene::FindObjectByPath(const ObjectPath& path) const
-{
-    if (path.empty())
-        return nullptr;
-
-    Object* current = nullptr;
-    std::size_t rootIndex = 0;
-    for (const auto& candidate : m_objects)
-    {
-        if (candidate->Parent)
-            continue;
-        if (rootIndex++ == path.front())
-        {
-            current = candidate.get();
-            break;
-        }
-    }
-    if (!current)
-        return nullptr;
-
-    for (std::size_t depth = 1; depth < path.size(); ++depth)
-    {
-        if (path[depth] >= current->Children.size())
-            return nullptr;
-        current = current->Children[path[depth]];
-    }
-    return current;
-}
-
-bool Scene::MoveObject(Object* object, Object* target, ObjectPlacement placement)
-{
-    if (!object || object == target)
-        return false;
-
-    Object* newParent = placement == ObjectPlacement::AsChild
-        ? target : (target ? target->Parent : nullptr);
-    for (Object* ancestor = newParent; ancestor; ancestor = ancestor->Parent)
-        if (ancestor == object)
-            return false;
-
-    const glm::mat4 oldWorld = object->transform.GetWorldMatrix();
-    if (object->Parent)
-    {
-        auto& oldSiblings = object->Parent->Children;
-        oldSiblings.erase(std::remove(oldSiblings.begin(), oldSiblings.end(), object),
-            oldSiblings.end());
-    }
-    object->Parent = newParent;
-
-    if (newParent)
-    {
-        auto& siblings = newParent->Children;
-        if (placement == ObjectPlacement::AsChild || !target)
-            siblings.push_back(object);
-        else
-        {
-            auto position = std::find(siblings.begin(), siblings.end(), target);
-            if (position == siblings.end())
-                siblings.push_back(object);
-            else
-                siblings.insert(placement == ObjectPlacement::After
-                    ? position + 1 : position, object);
-        }
-    }
-    else
-    {
-        auto moving = std::find_if(m_objects.begin(), m_objects.end(),
-            [object](const auto& value) { return value.get() == object; });
-        if (moving == m_objects.end())
-            return false;
-        std::unique_ptr<Object> owned = std::move(*moving);
-        m_objects.erase(moving);
-        auto position = target
-            ? std::find_if(m_objects.begin(), m_objects.end(),
-                [target](const auto& value) { return value.get() == target; })
-            : m_objects.end();
-        if (position == m_objects.end())
-            m_objects.push_back(std::move(owned));
-        else
-            m_objects.insert(placement == ObjectPlacement::After
-                ? position + 1 : position, std::move(owned));
-    }
-
-    const glm::mat4 parentWorld = newParent
-        ? newParent->transform.GetWorldMatrix() : glm::mat4(1.f);
-    const glm::mat4 local = glm::inverse(parentWorld) * oldWorld;
-    object->transform.position = glm::vec3(local[3]);
-    object->transform.scale = {
-        glm::length(glm::vec3(local[0])),
-        glm::length(glm::vec3(local[1])),
-        glm::length(glm::vec3(local[2]))
-    };
-    glm::mat3 rotation(1.f);
-    for (int column = 0; column < 3; ++column)
-    {
-        const float scale = object->transform.scale[column];
-        if (scale > 0.000001f)
-            rotation[column] = glm::vec3(local[column]) / scale;
-    }
-    const float y = std::asin(std::clamp(-rotation[0][2], -1.f, 1.f));
-    const float cosineY = std::cos(y);
-    const float x = std::abs(cosineY) > 0.00001f
-        ? std::atan2(rotation[1][2], rotation[2][2])
-        : std::atan2(-rotation[2][1], rotation[1][1]);
-    const float z = std::abs(cosineY) > 0.00001f
-        ? std::atan2(rotation[0][1], rotation[0][0])
-        : 0.f;
-    object->transform.rotation = { x, y, z };
-    return true;
-}
-
-void Scene::RemoveObject(Object* obj)
-{
-    if (!obj)
-        return;
-
-    std::vector<Object*> objectsToRemove;
-    std::function<void(Object*)> collect = [&](Object* current)
-    {
-        if (!current)
-            return;
-        objectsToRemove.push_back(current);
-        for (Object* child : current->Children)
-            collect(child);
-    };
-    collect(obj);
-
-    if (obj->Parent)
-    {
-        auto& siblings = obj->Parent->Children;
-        siblings.erase(std::remove(siblings.begin(), siblings.end(), obj), siblings.end());
-        obj->Parent = nullptr;
-    }
-    if (m_selectedObject &&
-        std::find(objectsToRemove.begin(), objectsToRemove.end(), m_selectedObject) != objectsToRemove.end())
-        m_selectedObject = nullptr;
-
-    m_objects.erase(
-        std::remove_if(m_objects.begin(), m_objects.end(),
-            [&](const std::unique_ptr<Object>& p)
-            {
-                return std::find(objectsToRemove.begin(), objectsToRemove.end(), p.get()) !=
-                    objectsToRemove.end();
-            }),
-        m_objects.end());
-}
-
-void Scene::ClearObjects()
-{
-    m_objects.clear();
-    m_selectedObject = nullptr;
-}
-
-bool Scene::Save(const std::string& path) const
-{
-    return SceneSerializer::Save(*this, path);
-}
-
-bool Scene::Load(const std::string& path)
-{
-    if (!m_graphicsProvider)
-        return false;
-    return SceneSerializer::Load(*this, path, m_graphicsProvider);
-}
-
-std::string Scene::SaveToString() const
-{
-    return SceneSerializer::SaveToString(*this);
-}
-
-bool Scene::LoadFromString(const std::string& source)
-{
-    if (!m_graphicsProvider)
-        return false;
-    return SceneSerializer::LoadFromString(*this, source, m_graphicsProvider);
-}
-
-Engine::Rendering::Lighting::BakeResult Scene::BakeLighting()
-{
-    auto result = m_bakedLightingPipeline.Bake(*this);
-    m_lightingBakeStatus = result.message;
-    return result;
-}
-
-void Scene::ClearBakedLighting()
-{
-    const uint32_t count = m_bakedLightingPipeline.Clear(*this);
-    m_lightingBakeStatus = "Cleared " + std::to_string(count) +
-        " baked lighting record(s).";
 }

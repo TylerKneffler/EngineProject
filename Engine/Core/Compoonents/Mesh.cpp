@@ -76,6 +76,7 @@ void Mesh::LoadFromFile(const std::string& path)
             static_cast<std::streamsize>(m_vertices.size() * sizeof(Vertex)));
         if (!native)
             throw std::runtime_error("Mesh: truncated native mesh: " + path);
+        UpdateBounds();
         m_ready = false;
         return;
     }
@@ -124,7 +125,28 @@ void Mesh::LoadFromFile(const std::string& path)
         }
     }
 
+    UpdateBounds();
     m_ready = false;
+}
+
+void Mesh::UpdateBounds()
+{
+    m_hasBounds = !m_vertices.empty();
+    if (!m_hasBounds)
+    {
+        m_boundsMin = {};
+        m_boundsMax = {};
+        return;
+    }
+    m_boundsMin = { m_vertices.front().pos[0], m_vertices.front().pos[1],
+        m_vertices.front().pos[2] };
+    m_boundsMax = m_boundsMin;
+    for (const Vertex& vertex : m_vertices)
+    {
+        const glm::vec3 position(vertex.pos[0], vertex.pos[1], vertex.pos[2]);
+        m_boundsMin = glm::min(m_boundsMin, position);
+        m_boundsMax = glm::max(m_boundsMax, position);
+    }
 }
 
 bool Mesh::SaveNativeFile(const std::string& path, const std::vector<Vertex>& vertices)

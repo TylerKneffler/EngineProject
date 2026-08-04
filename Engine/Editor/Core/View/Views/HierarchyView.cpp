@@ -2,6 +2,9 @@
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Object.h"
+#include "Core/Compoonents/Material.h"
+#include "Core/Compoonents/Mesh.h"
+#include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Serialization/SceneSerializer.h"
 
 namespace
@@ -41,10 +44,12 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
     const bool worldOpen = ui.TreeNode(
         this, "World", m_selectedObject == nullptr, false, true);
     const EditorUiContextMenuResult worldMenu =
-        ui.ContextMenu(this, "Add Object", nullptr);
-    if (worldMenu.addRequested)
+        ui.ContextMenu(this, "Add Object", nullptr, true);
+    if (worldMenu.addRequested || worldMenu.addCubeRequested)
     {
         m_pendingAddParent = nullptr;
+        m_pendingAddType = worldMenu.addCubeRequested
+            ? PendingAddType::Cube : PendingAddType::Empty;
         m_hasPendingAdd = true;
     }
     const EditorUiHierarchyDropResult worldDrop =
@@ -92,20 +97,49 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
     }
     if (m_hasPendingAdd)
     {
-        Object* created = m_scene->AddObject("GameObject");
-        if (m_pendingAddParent)
+        Object* created = nullptr;
+        try
+        {
+            if (m_pendingAddType == PendingAddType::Cube)
+            {
+                created = m_scene->AddObject("Cube");
+                Mesh* mesh = created->AddComponent<Mesh>();
+                mesh->LoadFromFile("Assets/Mesh/cube.obj");
+                if (m_scene->GetGraphicsProvider())
+                    mesh->CreateBuffer(
+                        m_scene->GetGraphicsProvider()->GetBufferFactory());
+                created->AddComponent<Material>();
+            }
+            else
+            {
+                created = m_scene->AddObject("GameObject");
+            }
+        }
+        catch (const std::exception& error)
+        {
+            if (created)
+                m_scene->RemoveObject(created);
+            LogInteraction("Add object failed: " + std::string(error.what()));
+            created = nullptr;
+        }
+        if (created && m_pendingAddParent)
         {
             m_scene->MoveObject(created, m_pendingAddParent, Scene::ObjectPlacement::AsChild);
             created->transform.position = glm::vec3(0.f);
             created->transform.rotation = glm::vec3(0.f);
             created->transform.scale = glm::vec3(1.f);
         }
-        SetSelectedObject(created);
-        LogInteraction("Added 'GameObject'" + std::string(m_pendingAddParent
-            ? " as child of '" + ObjectName(m_pendingAddParent) + "'" : " to World"));
+        if (created)
+        {
+            SetSelectedObject(created);
+            LogInteraction("Added '" + ObjectName(created) + "'" +
+                std::string(m_pendingAddParent
+                    ? " as child of '" + ObjectName(m_pendingAddParent) + "'"
+                    : " to World"));
+        }
         m_pendingAddParent = nullptr;
         m_hasPendingAdd = false;
-        if (OnHierarchyChanged) OnHierarchyChanged();
+        if (created && OnHierarchyChanged) OnHierarchyChanged();
     }
     const EditorUiHierarchyDropResult backgroundDrop =
         ui.HierarchyBackgroundDropTarget("ENGINE_SCENE_OBJECT");
@@ -285,11 +319,14 @@ void HierarchyView::DrawObjectNode(IEditorUi& ui, Object* obj, int depth)
     const bool editableHierarchy = prefabRoot == nullptr;
     const bool deletable = editableHierarchy || prefabRoot == obj;
     const EditorUiContextMenuResult menu = ui.ContextMenu(obj,
-        editableHierarchy ? "Add Child Object" : nullptr,
-        deletable ? "Delete Object" : nullptr);
-    if (menu.addRequested)
+        editableHierarchy ? "Add Object" : nullptr,
+        deletable ? "Delete Object" : nullptr,
+        editableHierarchy);
+    if (menu.addRequested || menu.addCubeRequested)
     {
         m_pendingAddParent = obj;
+        m_pendingAddType = menu.addCubeRequested
+            ? PendingAddType::Cube : PendingAddType::Empty;
         m_hasPendingAdd = true;
     }
     if (menu.deleteRequested)

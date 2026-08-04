@@ -302,14 +302,6 @@ void PreferencesView::DrawDebugSection(IEditorUi& ui)
     ui.Tooltip("Logs hierarchy selection, dragging, target zones, drops, moves, and cancellations to Console.");
 }
 
-void PreferencesView::ConfigureEditorUiPackage(
-    const std::string& activePackage,
-    std::function<void(const std::string&)> switchPackage)
-{
-    m_activeEditorUiPackage = activePackage;
-    m_switchEditorUiPackage = std::move(switchPackage);
-}
-
 void PreferencesView::DrawExportSection(IEditorUi& ui)
 {
     ui.Label("Portable Game Export");
@@ -431,20 +423,6 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
 {
     ui.Label("Rendering Settings"); ui.Separator();
 
-    const char* uiPackages[] = { "ImGui", "Nuklear" };
-    const std::string displayedPackage = m_settings.editorUiPackage.empty()
-        ? m_activeEditorUiPackage : m_settings.editorUiPackage;
-    int currentUiPackage = displayedPackage == "Nuklear" ? 1 : 0;
-    if (ui.Combo("Editor UI Package", &currentUiPackage, uiPackages, 2))
-    {
-        m_settings.editorUiPackage = uiPackages[currentUiPackage];
-        if (m_switchEditorUiPackage)
-            m_switchEditorUiPackage(m_settings.editorUiPackage);
-        NotifyChanged();
-    }
-    ui.Tooltip("Applies immediately. Use Save Project Settings to persist it.");
-    ui.Separator();
-
     if (DrawRendererCombo(ui, "Editor Rendering API", m_settings.editorRenderingAPI))
         NotifyChanged();
     ui.Tooltip("Changing the editor renderer takes effect after restarting the editor.");
@@ -561,11 +539,6 @@ bool PreferencesView::SaveSettings()
             if (gameRenderingApi)
                 gameRenderingApi.text().set(m_settings.gameRenderingAPI.c_str());
 
-            auto editorUiPackage = prop.child("EditorUIPackage");
-            if (editorUiPackage)
-                editorUiPackage.text().set(m_settings.editorUiPackage.c_str());
-            else if (editorRenderingApi && !m_settings.editorUiPackage.empty())
-                prop.append_child("EditorUIPackage").text().set(m_settings.editorUiPackage.c_str());
 
             auto hierarchyDebug = prop.child("DebugHierarchyInteractions");
             if (hierarchyDebug)

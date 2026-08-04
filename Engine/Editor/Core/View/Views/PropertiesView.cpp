@@ -3,7 +3,9 @@
 #include "Core/Compoonents/Transform.h"
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Compoonents/Material.h"
+#include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Component.h"
+#include "Core/Graphics/IGraphicsTexture.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include <algorithm>
@@ -12,6 +14,7 @@
 #include <fstream>
 #include <memory>
 #include <regex>
+#include <shellapi.h>
 #include <sstream>
 
 namespace
@@ -98,15 +101,39 @@ void ReplaceOrAddComponent(Object& object, T* component)
     }
     object.Components.push_back(component);
 }
+
+void RevealFileInExplorer(const std::string& path)
+{
+    if (path.empty())
+        return;
+    std::error_code error;
+    const std::filesystem::path absolutePath =
+        std::filesystem::absolute(path, error);
+    const std::filesystem::path selectedPath = error
+        ? std::filesystem::path(path) : absolutePath;
+    const std::wstring parameters =
+        L"/select,\"" + selectedPath.wstring() + L"\"";
+    ShellExecuteW(nullptr, L"open", L"explorer.exe", parameters.c_str(),
+        nullptr, SW_SHOWNORMAL);
+}
 }
 
 void PropertiesView::DrawPanel(IEditorUi& ui)
 {
+    if (m_skyboxRevealPending &&
+        std::chrono::steady_clock::now() - m_skyboxRevealRequestedAt >=
+            std::chrono::milliseconds(GetDoubleClickTime()))
+    {
+        RevealFileInExplorer(m_skyboxRevealPath);
+        m_skyboxRevealPending = false;
+        m_skyboxRevealPath.clear();
+    }
     if (!ui.BeginWindow(m_title.c_str(), &m_open))
     {
         ui.EndWindow();
         return;
     }
+    ui.BeginTextWrap();
     if (!m_selectedObject)
     {
         ui.Label("Scene");
@@ -115,13 +142,64 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             ui.DisabledLabel("No scene loaded");
         else
         {
-            char skyboxPath[512];
-            strncpy_s(skyboxPath, m_scene->settings.skyboxTexture.c_str(), sizeof(skyboxPath));
-            if (ui.InputText("Skybox Texture Override", skyboxPath, sizeof(skyboxPath)))
-                m_scene->settings.skyboxTexture = skyboxPath;
-            if (m_scene->settings.skyboxTexture.empty())
-                ui.DisabledLabel("Using the editor default skybox texture.");
+            ui.Label("Skybox Texture Override");
+            if (!m_editingSkyboxTexture)
+            {
+                const Texture* skybox = m_scene->GetSkyboxPreviewTexture();
+                void* textureHandle = skybox && skybox->GetGraphicsTexture()
+                    ? skybox->GetGraphicsTexture()->GetNativeHandle()
+                    : nullptr;
+                if (textureHandle)
+                {
+                    constexpr float previewWidth = 160.f;
+                    const float aspect = skybox->GetHeight() > 0
+                        ? static_cast<float>(skybox->GetWidth()) /
+                            static_cast<float>(skybox->GetHeight())
+                        : 2.f;
+                    ui.DrawImage(textureHandle,
+                        previewWidth, previewWidth / std::max(aspect, 0.1f));
+                }
+                else
+                {
+                    ui.DisabledLabel("[Skybox preview unavailable]");
+                }
+
+                const bool previewDoubleClicked = ui.IsItemDoubleClicked();
+                const bool previewClicked = ui.IsItemClicked();
+                if (previewDoubleClicked)
+                {
+                    m_skyboxRevealPending = false;
+                    m_skyboxRevealPath.clear();
+                    strncpy_s(m_skyboxTextureEdit,
+                        m_scene->settings.skyboxTexture.c_str(),
+                        sizeof(m_skyboxTextureEdit));
+                    m_editingSkyboxTexture = true;
+                }
+                else if (previewClicked && skybox)
+                {
+                    m_skyboxRevealPending = true;
+                    m_skyboxRevealRequestedAt =
+                        std::chrono::steady_clock::now();
+                    m_skyboxRevealPath = skybox->GetFilePath();
+                }
+            }
+            else
+            {
+                ui.InputText("##sceneSkyboxTexture",
+                    m_skyboxTextureEdit, sizeof(m_skyboxTextureEdit));
+                if (ui.Button("Apply"))
+                {
+                    m_scene->settings.skyboxTexture = m_skyboxTextureEdit;
+                    m_editingSkyboxTexture = false;
+                    if (OnComponentsChanged)
+                        OnComponentsChanged();
+                }
+                ui.SameLine();
+                if (ui.Button("Cancel"))
+                    m_editingSkyboxTexture = false;
+            }
         }
+        ui.EndTextWrap();
         ui.EndWindow();
         return;
     }
@@ -152,15 +230,20 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
     
     // Draw all components with accordion views
     Component* componentToDelete = nullptr;
+    Component* reorderSource = nullptr;
+    Component* reorderTarget = nullptr;
     for (Component* component : m_selectedObject->Components)
     {
         if (!component) continue;
+        ui.PushId(component);
         
         std::string componentType = component->GetTypeName();
         if (componentType.empty()) componentType = "Component";
         
         const bool componentOpen = ui.CollapsingHeader(componentType.c_str());
         const bool componentEditable = !m_selectedObject->IsPartOfPrefabInstance();
+        // Bind the menu to the header before drag/drop helpers replace the
+        // UI backend's current item.
         const EditorUiContextMenuResult menu = ui.ContextMenu(component,
             componentEditable ? "Add Component" : nullptr,
             componentEditable ? "Delete Component" : nullptr);
@@ -172,6 +255,26 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         }
         if (menu.deleteRequested)
             componentToDelete = component;
+        if (componentEditable && ui.BeginDragDropSource())
+        {
+            Component* payload = component;
+            ui.SetDragDropPayload(
+                "ENGINE_COMPONENT_REORDER", &payload, sizeof(payload));
+            ui.Label(componentType.c_str());
+            ui.EndDragDropSource();
+        }
+        if (componentEditable && ui.BeginDragDropTarget())
+        {
+            size_t payloadSize = 0;
+            const void* payload = ui.AcceptDragDropPayload(
+                "ENGINE_COMPONENT_REORDER", &payloadSize);
+            if (payload && payloadSize == sizeof(Component*))
+            {
+                reorderSource = *static_cast<Component* const*>(payload);
+                reorderTarget = component;
+            }
+            ui.EndDragDropTarget();
+        }
         AcceptAssetDrop(ui);
         if (componentOpen)
         {
@@ -179,6 +282,39 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             ui.BeginDisabled(locked);
             component->DrawProperties(ui);
             ui.EndDisabled();
+        }
+        ui.PopId();
+    }
+
+    if (reorderSource && reorderTarget && reorderSource != reorderTarget)
+    {
+        auto& components = m_selectedObject->Components;
+        const auto source = std::find(
+            components.begin(), components.end(), reorderSource);
+        const auto target = std::find(
+            components.begin(), components.end(), reorderTarget);
+        if (source != components.end() && target != components.end())
+        {
+            bool sourceBeforeTarget = false;
+            for (auto current = components.begin(); current != components.end(); ++current)
+            {
+                if (current == source)
+                {
+                    sourceBeforeTarget = true;
+                    break;
+                }
+                if (current == target)
+                    break;
+            }
+            const auto destination = sourceBeforeTarget
+                ? std::next(target)
+                : target;
+            components.splice(destination, components, source);
+            LogAssetDrop("[Properties] Moved component '" +
+                reorderSource->GetTypeName() + "' " +
+                (sourceBeforeTarget ? "down" : "up"));
+            if (OnComponentsChanged)
+                OnComponentsChanged();
         }
     }
 
@@ -201,6 +337,7 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
     }
     DrawAssetDropTarget(ui, "Drop asset here to add or assign a component");
     
+    ui.EndTextWrap();
     ui.EndWindow();
     DrawComponentPicker(ui);
 }

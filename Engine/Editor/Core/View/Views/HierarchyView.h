@@ -44,6 +44,7 @@ public:
     std::function<void(const std::string&)> OnInteractionLog;
 
 private:
+    enum class PendingAddType { Empty, Cube };
     void DrawObjectNode(IEditorUi& ui, Object* obj, int depth);
     void LogInteraction(const std::string& message) const;
     void CopySelection();
@@ -55,6 +56,7 @@ private:
     Object* m_pendingTarget = nullptr;
     Object* m_pendingAddParent = nullptr;
     Object* m_pendingDelete = nullptr;
+    PendingAddType m_pendingAddType = PendingAddType::Empty;
     bool m_hasPendingAdd = false;
     Scene::ObjectPlacement m_pendingPlacement = Scene::ObjectPlacement::AsChild;
     bool m_hasPendingMove = false;

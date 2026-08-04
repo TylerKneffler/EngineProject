@@ -66,7 +66,7 @@ public:
 private:
     void InitializePanels();
     void WireupCallbacks();
-    Object* InstantiateAsset(const std::string& path);
+    Object* InstantiateAsset(const std::string& path, bool recordChange = true);
     std::string ImportAssetFile(const std::string& path);
     void SelectObject(Object* object);
 

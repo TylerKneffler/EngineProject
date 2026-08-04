@@ -6,12 +6,16 @@
 void ImGuiEditorUi::SetNextWindowRect(float x,float y,float w,float h){ ImGui::SetNextWindowPos({x,y},ImGuiCond_FirstUseEver); ImGui::SetNextWindowSize({w,h},ImGuiCond_FirstUseEver); }
 bool ImGuiEditorUi::BeginWindow(const char* t,bool* o,bool p){ if(p) ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,{0,0}); bool r=ImGui::Begin(t,o); if(p) ImGui::PopStyleVar(); return r; }
 void ImGuiEditorUi::EndWindow(){ImGui::End();}
+void ImGuiEditorUi::PushId(const void* id){ImGui::PushID(id);}
+void ImGuiEditorUi::PopId(){ImGui::PopID();}
 bool ImGuiEditorUi::Button(const char* l,float w,float h){return ImGui::Button(l,{w,h});}
 void ImGuiEditorUi::Label(const char* t){ImGui::TextUnformatted(t);}
 void ImGuiEditorUi::DisabledLabel(const char* t){ImGui::TextDisabled("%s",t);}
 void ImGuiEditorUi::ColoredLabel(const char* t,EditorUiColor c){ImGui::TextColored({c.r,c.g,c.b,c.a},"%s",t);}
+void ImGuiEditorUi::BeginTextWrap(){ImGui::PushTextWrapPos(0.f);}
+void ImGuiEditorUi::EndTextWrap(){ImGui::PopTextWrapPos();}
 void ImGuiEditorUi::SameLine(){ImGui::SameLine();} void ImGuiEditorUi::Separator(){ImGui::Separator();} void ImGuiEditorUi::Spacing(){ImGui::Spacing();}
-bool ImGuiEditorUi::Checkbox(const char*l,bool*v){return ImGui::Checkbox(l,v);} bool ImGuiEditorUi::InputText(const char*l,char*b,size_t s){return ImGui::InputText(l,b,s);}
+bool ImGuiEditorUi::Checkbox(const char*l,bool*v){return ImGui::Checkbox(l,v);} bool ImGuiEditorUi::InputText(const char*l,char*b,size_t s){if(l&&l[0]=='#'&&l[1]=='#')ImGui::SetNextItemWidth(-FLT_MIN);return ImGui::InputText(l,b,s);}
 bool ImGuiEditorUi::DragFloat(const char*l,float*v,float s,float a,float b){return ImGui::DragFloat(l,v,s,a,b);}
 bool ImGuiEditorUi::DragFloat3(const char*l,float*v,float s,float a,float b){return ImGui::DragFloat3(l,v,s,a,b);}
 bool ImGuiEditorUi::ColorEdit3(const char*l,float*v){return ImGui::ColorEdit3(l,v);} bool ImGuiEditorUi::ColorEdit4(const char*l,float*v){return ImGui::ColorEdit4(l,v);}
@@ -206,12 +210,20 @@ EditorUiObjectRowResult ImGuiEditorUi::ObjectHeader(const void* id,char* name,si
     return result;
 }
 bool ImGuiEditorUi::Selectable(const char*l,bool s,bool d){return ImGui::Selectable(l,s,d?ImGuiSelectableFlags_AllowDoubleClick:0);}
-EditorUiContextMenuResult ImGuiEditorUi::ContextMenu(const void* id,const char* addLabel,const char* deleteLabel)
+EditorUiContextMenuResult ImGuiEditorUi::ContextMenu(const void* id,const char* addLabel,const char* deleteLabel,bool objectCreationMenu)
 {
     EditorUiContextMenuResult result;
     ImGui::PushID(id);
     if(ImGui::BeginPopupContextItem("##context")){
-        if(addLabel&&addLabel[0])result.addRequested=ImGui::MenuItem(addLabel);
+        if(addLabel&&addLabel[0]){
+            if(objectCreationMenu){
+                if(ImGui::BeginMenu(addLabel)){
+                    result.addRequested=ImGui::MenuItem("Empty");
+                    result.addCubeRequested=ImGui::MenuItem("Cube");
+                    ImGui::EndMenu();
+                }
+            }else result.addRequested=ImGui::MenuItem(addLabel);
+        }
         if(deleteLabel&&deleteLabel[0])result.deleteRequested=ImGui::MenuItem(deleteLabel);
         ImGui::EndPopup();
     }
@@ -237,6 +249,7 @@ void ImGuiEditorUi::SetDragDropPayload(const char*t,const void*d,size_t s){ImGui
 void ImGuiEditorUi::EndDragDropSource(){ImGui::EndDragDropSource();}
 bool ImGuiEditorUi::BeginDragDropTarget(){return ImGui::BeginDragDropTarget();}
 const void* ImGuiEditorUi::AcceptDragDropPayload(const char*t,size_t*s){const ImGuiPayload*p=ImGui::AcceptDragDropPayload(t);if(!p)return nullptr;if(s)*s=static_cast<size_t>(p->DataSize);return p->Data;}
+EditorUiDragDropPayloadResult ImGuiEditorUi::InspectDragDropPayload(const char*t){EditorUiDragDropPayloadResult r;const ImGuiPayload*p=ImGui::AcceptDragDropPayload(t,ImGuiDragDropFlags_AcceptBeforeDelivery|ImGuiDragDropFlags_AcceptNoDrawDefaultRect);if(p){r.data=p->Data;r.size=static_cast<size_t>(p->DataSize);r.delivered=p->IsDelivery();}return r;}
 void ImGuiEditorUi::EndDragDropTarget(){ImGui::EndDragDropTarget();}
 void ImGuiEditorUi::SetClipboardText(const char*t){ImGui::SetClipboardText(t);} void ImGuiEditorUi::ScrollToBottom(){ImGui::SetScrollHereY(1.f);}
 bool ImGuiEditorUi::BeginTabBar(const char*i){return ImGui::BeginTabBar(i);} void ImGuiEditorUi::EndTabBar(){ImGui::EndTabBar();}
@@ -252,6 +265,7 @@ EditorUiViewportInput ImGuiEditorUi::Viewport(void* texture,float aspect,EditorU
     ImVec2 size=a,pos{0,0}; if(aspect>0){float aa=a.x/a.y;if(aa>aspect){size.x=a.y*aspect;pos.x=(a.x-size.x)*.5f;}else{size.y=a.x/aspect;pos.y=(a.y-size.y)*.5f;}}
     if(size.x<a.x||size.y<a.y){ImVec2 p=ImGui::GetCursorScreenPos();ImGui::GetWindowDrawList()->AddRectFilled(p,{p.x+a.x,p.y+a.y},ImGui::GetColorU32({bg.r,bg.g,bg.b,bg.a}));}
     out.available={size.x,size.y}; ImGui::SetCursorPos(pos); ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(texture)),size);
-    out.hovered=ImGui::IsItemHovered();if(out.hovered){auto d=ImGui::GetIO().MouseDelta;out.mouseDelta={d.x,d.y};out.mouseWheel=ImGui::GetIO().MouseWheel;out.rightDown=ImGui::IsMouseDown(ImGuiMouseButton_Right);out.middleDown=ImGui::IsMouseDown(ImGuiMouseButton_Middle);out.leftClicked=ImGui::IsMouseClicked(ImGuiMouseButton_Left);ImVec2 min=ImGui::GetItemRectMin();ImVec2 mp=ImGui::GetIO().MousePos;out.mousePosInViewport={mp.x-min.x,mp.y-min.y};}return out;
+    const ImVec2 min=ImGui::GetItemRectMin();const ImVec2 mp=ImGui::GetIO().MousePos;out.mousePosInViewport={mp.x-min.x,mp.y-min.y};
+    out.hovered=ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);if(out.hovered){auto d=ImGui::GetIO().MouseDelta;out.mouseDelta={d.x,d.y};out.mouseWheel=ImGui::GetIO().MouseWheel;out.rightDown=ImGui::IsMouseDown(ImGuiMouseButton_Right);out.middleDown=ImGui::IsMouseDown(ImGuiMouseButton_Middle);out.leftClicked=ImGui::IsMouseClicked(ImGuiMouseButton_Left);}return out;
 }
 void ImGuiEditorUi::FocusWindow(const char*t){ImGui::SetWindowFocus(t);}

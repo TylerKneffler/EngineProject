@@ -11,6 +11,82 @@
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/geometric.hpp>
 #include <glm/ext/matrix_transform.hpp>
+#include <filesystem>
+#include <algorithm>
+#include <cctype>
+
+namespace
+{
+bool BuildViewportRay(const Scene& scene, const EditorUiVec2& mousePos,
+    const EditorUiVec2& viewportSize, glm::vec3& origin, glm::vec3& direction)
+{
+    if (viewportSize.x <= 1.f || viewportSize.y <= 1.f)
+        return false;
+    const Camera* camera = scene.editorCamera.GetComponent<Camera>();
+    if (!camera)
+        return false;
+    const glm::mat4 inverseViewProjection = glm::inverse(
+        camera->GetProjectionMatrix(viewportSize.x / viewportSize.y) *
+        camera->GetViewMatrix());
+    const float ndcX = 2.f * mousePos.x / viewportSize.x - 1.f;
+    const float ndcY = 1.f - 2.f * mousePos.y / viewportSize.y;
+    glm::vec4 nearPoint = inverseViewProjection * glm::vec4(ndcX, ndcY, 0.f, 1.f);
+    glm::vec4 farPoint = inverseViewProjection * glm::vec4(ndcX, ndcY, 1.f, 1.f);
+    if (std::abs(nearPoint.w) < 0.000001f || std::abs(farPoint.w) < 0.000001f)
+        return false;
+    origin = glm::vec3(nearPoint) / nearPoint.w;
+    const glm::vec3 target = glm::vec3(farPoint) / farPoint.w;
+    direction = glm::normalize(target - origin);
+    return true;
+}
+
+bool IsInObjectHierarchy(const Object* object, const Object* root)
+{
+    for (const Object* current = object; current; current = current->Parent)
+        if (current == root)
+            return true;
+    return false;
+}
+
+bool IntersectMeshBounds(const Object& object, const Mesh& mesh,
+    const glm::vec3& rayOrigin, const glm::vec3& rayDirection, float& distance)
+{
+    if (!mesh.HasBounds())
+        return false;
+    const glm::mat4 inverseWorld = glm::inverse(object.transform.GetWorldMatrix());
+    const glm::vec3 localOrigin = glm::vec3(inverseWorld * glm::vec4(rayOrigin, 1.f));
+    const glm::vec3 localDirection = glm::vec3(inverseWorld * glm::vec4(rayDirection, 0.f));
+    float nearDistance = 0.f;
+    float farDistance = FLT_MAX;
+    for (int axis = 0; axis < 3; ++axis)
+    {
+        if (std::abs(localDirection[axis]) < 0.000001f)
+        {
+            if (localOrigin[axis] < mesh.GetBoundsMin()[axis] ||
+                localOrigin[axis] > mesh.GetBoundsMax()[axis])
+                return false;
+            continue;
+        }
+        float first = (mesh.GetBoundsMin()[axis] - localOrigin[axis]) /
+            localDirection[axis];
+        float second = (mesh.GetBoundsMax()[axis] - localOrigin[axis]) /
+            localDirection[axis];
+        if (first > second)
+            std::swap(first, second);
+        nearDistance = glm::max(nearDistance, first);
+        farDistance = glm::min(farDistance, second);
+        if (nearDistance > farDistance)
+            return false;
+    }
+    distance = nearDistance > 0.f ? nearDistance : farDistance;
+    return distance > 0.f;
+}
+}
+
+SceneView::~SceneView()
+{
+    CancelPrefabPreview();
+}
 
 // ---------------------------------------------------------------------------
 // Init — store the scene pointer, then delegate resource creation to View.
@@ -41,6 +117,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
     // Remove inner padding so the texture fills the panel edge-to-edge.
     if (!ui.BeginWindow(m_title.c_str(), &m_open, true))
     {
+        CancelPrefabPreview();
         ui.EndWindow();
         return;
     }
@@ -54,18 +131,62 @@ void SceneView::DrawPanel(IEditorUi& ui)
          static_cast<float>(m_gameWindowWidth) / static_cast<float>(m_gameWindowHeight));
     const auto input = ui.Viewport(GetUiTextureHandle(), targetAspect,
         {m_letterboxColor.r,m_letterboxColor.g,m_letterboxColor.b,m_letterboxColor.a});
+    bool prefabDragObserved = false;
     if (ui.BeginDragDropTarget())
     {
-        size_t payloadSize = 0;
-        const void* payload = ui.AcceptDragDropPayload("ENGINE_ASSET_PATH", &payloadSize);
-        if (payload && payloadSize > 0 && OnAssetDropped)
+        const EditorUiDragDropPayloadResult payload =
+            ui.InspectDragDropPayload("ENGINE_ASSET_PATH");
+        if (payload.data && payload.size > 0)
         {
-            const char* path = static_cast<const char*>(payload);
-            if (path[payloadSize - 1] == '\0')
+            const char* bytes = static_cast<const char*>(payload.data);
+            size_t length = 0;
+            while (length < payload.size && bytes[length] != '\0')
+                ++length;
+            const std::string path(bytes, length);
+            std::string extension = std::filesystem::path(path).extension().string();
+            std::transform(extension.begin(), extension.end(), extension.begin(),
+                [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+            if (extension == ".prefab")
+            {
+                prefabDragObserved = true;
+                if ((!m_prefabPreview || m_prefabPreviewPath != path) &&
+                    OnAssetPreviewRequested)
+                {
+                    CancelPrefabPreview();
+                    m_prefabPreview = OnAssetPreviewRequested(path);
+                    m_prefabPreviewPath = m_prefabPreview ? path : std::string{};
+                    m_prefabPreviewHasPlacement = false;
+                    if (m_scene)
+                        m_scene->SetPreviewObject(m_prefabPreview);
+                }
+                glm::vec3 placement{};
+                if (m_prefabPreview && FindPrefabPlacement(
+                    input.mousePosInViewport, input.available, placement))
+                {
+                    m_prefabPreview->transform.position = placement;
+                    m_prefabPreviewHasPlacement = true;
+                }
+                if (payload.delivered && m_prefabPreview &&
+                    m_prefabPreviewHasPlacement)
+                {
+                    Object* placed = m_prefabPreview;
+                    const std::string placedPath = m_prefabPreviewPath;
+                    m_prefabPreview = nullptr;
+                    m_prefabPreviewPath.clear();
+                    m_prefabPreviewHasPlacement = false;
+                    if (m_scene)
+                        m_scene->SetPreviewObject(nullptr);
+                    if (OnAssetPreviewCommitted)
+                        OnAssetPreviewCommitted(placed, placedPath);
+                }
+            }
+            else if (payload.delivered && OnAssetDropped)
                 OnAssetDropped(path);
         }
         ui.EndDragDropTarget();
     }
+    if (!prefabDragObserved)
+        CancelPrefabPreview();
     EditorUiVec2 size = input.available;
     if (size.x > 0.f && size.y > 0.f)
     {
@@ -113,6 +234,62 @@ void SceneView::DrawPanel(IEditorUi& ui)
     ui.EndWindow();
 
     ApplyCameraControls(panDX, panDY, orbitDX, orbitDY, zoom);
+}
+
+void SceneView::CancelPrefabPreview()
+{
+    if (m_scene)
+        m_scene->SetPreviewObject(nullptr);
+    if (m_prefabPreview && OnAssetPreviewCancelled)
+        OnAssetPreviewCancelled(m_prefabPreview);
+    m_prefabPreview = nullptr;
+    m_prefabPreviewPath.clear();
+    m_prefabPreviewHasPlacement = false;
+}
+
+bool SceneView::FindPrefabPlacement(const EditorUiVec2& mousePos,
+    const EditorUiVec2& viewportSize, glm::vec3& placement) const
+{
+    if (!m_scene)
+        return false;
+    glm::vec3 rayOrigin{}, rayDirection{};
+    if (!BuildViewportRay(*m_scene, mousePos, viewportSize, rayOrigin, rayDirection))
+        return false;
+
+    float bestDistance = FLT_MAX;
+    bool found = false;
+    for (const auto& objectPointer : m_scene->GetObjects())
+    {
+        Object* object = objectPointer.get();
+        if (!object || !object->IsEnabledInHierarchy() ||
+            !object->GetComponent<Mesh>() || IsInObjectHierarchy(object, m_prefabPreview))
+            continue;
+        Mesh* mesh = object->GetComponent<Mesh>();
+        float distance = 0.f;
+        if (mesh && IntersectMeshBounds(
+            *object, *mesh, rayOrigin, rayDirection, distance) &&
+            distance < bestDistance)
+        {
+            bestDistance = distance;
+            placement = rayOrigin + rayDirection * distance;
+            found = true;
+        }
+    }
+
+    // The editor grid is the XZ placement plane. Prefer an object surface when
+    // it is in front of the grid intersection; otherwise use the exact ground
+    // intersection without snapping.
+    if (std::abs(rayDirection.y) > 0.000001f)
+    {
+        const float gridDistance = -rayOrigin.y / rayDirection.y;
+        if (gridDistance > 0.f && gridDistance < bestDistance)
+        {
+            placement = rayOrigin + rayDirection * gridDistance;
+            placement.y = 0.f;
+            found = true;
+        }
+    }
+    return found;
 }
 
 Object* SceneView::PickObjectInViewport(const EditorUiVec2& mousePos, const EditorUiVec2& viewportSize) const

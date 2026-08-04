@@ -2,6 +2,7 @@
 #include "pch.h"
 #include "Core/Object.h"
 #include "View/IEditorPanel.h"
+#include <chrono>
 #include <functional>
 
 class Scene;
@@ -30,6 +31,7 @@ public:
         {
             m_componentPickerOpen = false;
             m_componentSearch[0] = '\0';
+            m_editingSkyboxTexture = false;
         }
         m_selectedObject = obj;
     }
@@ -54,4 +56,9 @@ private:
     bool m_componentPickerOpen = false;
     bool m_positionComponentPicker = false;
     char m_componentSearch[128]{};
+    bool m_editingSkyboxTexture = false;
+    char m_skyboxTextureEdit[512]{};
+    bool m_skyboxRevealPending = false;
+    std::chrono::steady_clock::time_point m_skyboxRevealRequestedAt{};
+    std::string m_skyboxRevealPath;
 };

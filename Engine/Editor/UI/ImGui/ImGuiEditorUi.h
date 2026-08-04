@@ -8,8 +8,10 @@ class ImGuiEditorUi final : public IEditorUi
 public:
     void SetNextWindowRect(float x, float y, float width, float height) override;
     bool BeginWindow(const char*, bool*, bool) override; void EndWindow() override;
+    void PushId(const void*) override; void PopId() override;
     bool Button(const char*, float, float) override; void Label(const char*) override;
     void DisabledLabel(const char*) override; void ColoredLabel(const char*, EditorUiColor) override;
+    void BeginTextWrap() override; void EndTextWrap() override;
     void SameLine() override; void Separator() override; void Spacing() override;
     bool Checkbox(const char*, bool*) override; bool InputText(const char*, char*, size_t) override;
     bool DragFloat(const char*, float*, float, float, float) override;
@@ -24,13 +26,14 @@ public:
     EditorUiHierarchyDropResult HierarchyBackgroundDropTarget(const char*) override;
     EditorUiObjectRowResult ObjectHeader(const void*,char*,size_t,bool*,bool) override;
     bool Selectable(const char*, bool, bool) override;
-    EditorUiContextMenuResult ContextMenu(const void*,const char*,const char*) override;
+    EditorUiContextMenuResult ContextMenu(const void*,const char*,const char*,bool) override;
     bool BeginChild(const char*) override; void EndChild() override;
     bool IsItemHovered() const override; bool IsItemClicked() const override;
     bool IsItemDoubleClicked() const override; bool IsWindowBackgroundClicked() const override;
     bool CopyShortcutPressed() const override; bool PasteShortcutPressed() const override;
     bool BeginDragDropSource() override; void SetDragDropPayload(const char*,const void*,size_t) override; void EndDragDropSource() override;
     bool BeginDragDropTarget() override; const void* AcceptDragDropPayload(const char*,size_t*) override; void EndDragDropTarget() override;
+    EditorUiDragDropPayloadResult InspectDragDropPayload(const char*) override;
     void SetClipboardText(const char*) override; void ScrollToBottom() override;
     bool BeginTabBar(const char*) override; void EndTabBar() override;
     bool BeginTab(const char*) override; void EndTab() override;

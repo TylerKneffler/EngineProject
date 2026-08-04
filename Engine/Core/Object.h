@@ -4,7 +4,7 @@
 #include <algorithm>
 #include "Core/component.h"         
 #include "Core/Compoonents/Transform.h"
-#include "Core/Assets/PrefabAsset.h"
+#include "Core/Prefab/PrefabAsset.h"
 
 class Scene; // forward declaration
 

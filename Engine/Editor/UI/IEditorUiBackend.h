@@ -2,21 +2,13 @@
 
 #include <cstdint>
 #include <memory>
-#include <string>
 
 class IEditorRenderer;
 class EditorState;
 class GameBuildManager;
 enum class PlayState;
 
-enum class EditorUiKind
-{
-    ImGui,
-    Nuklear
-};
-
-// Owns one concrete UI package's platform and graphics integration. Editor
-// presentation code talks to the package-neutral UI facade separately.
+// Owns the editor UI package's platform and graphics integration.
 class IEditorUiBackend
 {
 public:
@@ -35,8 +27,6 @@ public:
     virtual void EndFrame() = 0;
     virtual void DrawEditor(EditorState& state, PlayState playState,
                             GameBuildManager* buildManager) = 0;
-    virtual EditorUiKind ActiveKind() const = 0;
-    virtual void RequestSwitch(EditorUiKind kind) = 0;
 };
 
-std::unique_ptr<IEditorUiBackend> CreateEditorUiBackend(const std::string& initialPackage = {});
+std::unique_ptr<IEditorUiBackend> CreateEditorUiBackend();

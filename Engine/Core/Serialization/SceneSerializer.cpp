@@ -688,8 +688,49 @@ bool SceneSerializer::SavePrefab(const Object& object, const std::string& path)
     std::ofstream file(path);
     if (!file)
         return false;
-    file << JsonWrite(root);
+    file << WriteXmlDocument(root, "Prefab");
     return file.good();
+}
+
+namespace
+{
+std::filesystem::path ResolvePrefabPath(const std::string& path)
+{
+    const std::filesystem::path requested(path);
+    if (std::filesystem::exists(requested))
+        return requested;
+
+#ifdef ENGINE_ASSETS_PATH
+    const std::filesystem::path relativeAsset =
+        requested.lexically_relative(std::filesystem::path("Assets"));
+    if (!relativeAsset.empty() && *relativeAsset.begin() != "..")
+    {
+        const std::filesystem::path engineAsset =
+            std::filesystem::path(ENGINE_ASSETS_PATH) / relativeAsset;
+        if (std::filesystem::exists(engineAsset))
+            return engineAsset;
+    }
+#endif
+    return requested;
+}
+
+JsonValue LoadPrefabDocument(const std::filesystem::path& path)
+{
+    try
+    {
+        return JsonParseFile(path.string());
+    }
+    catch (...)
+    {
+        pugi::xml_document document;
+        if (!document.load_file(path.string().c_str()))
+            throw std::runtime_error("Could not parse prefab file: " + path.string());
+        const pugi::xml_node root = document.document_element();
+        if (!root)
+            throw std::runtime_error("Prefab XML has no root element: " + path.string());
+        return ReadXmlNode(root);
+    }
+}
 }
 
 Object* SceneSerializer::InstantiatePrefab(
@@ -701,9 +742,10 @@ Object* SceneSerializer::InstantiatePrefab(
     Object* rootObject = nullptr;
     static thread_local std::vector<std::string> prefabStack;
     std::error_code absoluteError;
-    std::filesystem::path identity = std::filesystem::absolute(path, absoluteError);
+    const std::filesystem::path resolvedPath = ResolvePrefabPath(path);
+    std::filesystem::path identity = std::filesystem::absolute(resolvedPath, absoluteError);
     if (absoluteError)
-        identity = std::filesystem::path(path);
+        identity = resolvedPath;
     std::string prefabKey = identity.lexically_normal().generic_string();
 #ifdef _WIN32
     std::transform(prefabKey.begin(), prefabKey.end(), prefabKey.begin(),
@@ -724,7 +766,7 @@ Object* SceneSerializer::InstantiatePrefab(
 
     try
     {
-        const JsonValue root = JsonParseFile(path);
+        const JsonValue root = LoadPrefabDocument(resolvedPath);
         if (!root.IsObject() || root["version"].AsInt() != 1 ||
             root["type"].AsString() != "prefab" || !root["object"].IsObject())
             return nullptr;

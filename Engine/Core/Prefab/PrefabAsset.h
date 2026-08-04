@@ -3,7 +3,7 @@
 #include <memory>
 #include <string>
 
-// Shared identity for a prefab asset. Scene objects remain independently
+// Shared identity for a prefab resource. Scene objects remain independently
 // owned instances; instances created from the same prefab share this handle.
 class PrefabAsset
 {

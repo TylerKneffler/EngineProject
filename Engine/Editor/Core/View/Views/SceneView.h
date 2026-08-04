@@ -20,7 +20,7 @@ class SceneView : public View
 {
 public:
     SceneView()  = default;
-    ~SceneView() = default;
+    ~SceneView();
 
     // Calls View::Init then stores the scene pointer and aspect ratio settings.
     // scene and settings must outlive this viewport.
@@ -43,10 +43,16 @@ public:
     // scene's editorCamera with orbit / pan / zoom.
     void DrawPanel(IEditorUi& ui) override;
     std::function<void(const std::string&)> OnAssetDropped;
+    std::function<Object*(const std::string&)> OnAssetPreviewRequested;
+    std::function<void(Object*)> OnAssetPreviewCancelled;
+    std::function<void(Object*, const std::string&)> OnAssetPreviewCommitted;
     std::function<void(Object*)> OnObjectSelected;
 
 private:
     Object* PickObjectInViewport(const EditorUiVec2& mousePos, const EditorUiVec2& viewportSize) const;
+    bool FindPrefabPlacement(const EditorUiVec2& mousePos,
+        const EditorUiVec2& viewportSize, glm::vec3& placement) const;
+    void CancelPrefabPreview();
     void ApplyCameraControls(float panDX, float panDY,
                              float orbitDX, float orbitDY, float zoom);
 
@@ -62,4 +68,7 @@ private:
 
     // Computed viewport aspect ratio
     float m_aspect = 1.0f;
+    Object* m_prefabPreview = nullptr;
+    std::string m_prefabPreviewPath;
+    bool m_prefabPreviewHasPlacement = false;
 };

@@ -21,18 +21,13 @@ public:
     void EndFrame() override;
     void DrawEditor(EditorState& state, PlayState playState,
                     GameBuildManager* buildManager) override;
-    EditorUiKind ActiveKind() const override { return EditorUiKind::ImGui; }
-    void RequestSwitch(EditorUiKind) override {}
-
-    void DrawEditorPresentation(EditorState& state, PlayState playState,
-                                GameBuildManager* buildManager);
-    void RenderDrawData(struct ImDrawData* drawData, void* commandBuffer);
-    void EndHiddenFrame();
-
 private:
+    void RenderDrawData(struct ImDrawData* drawData, void* commandBuffer);
     enum class GraphicsApi { None, DirectX11, DirectX12, Vulkan };
     GraphicsApi m_graphicsApi = GraphicsApi::None;
     IEditorRenderer* m_renderer = nullptr;
     bool m_initialized = false;
     std::unique_ptr<EditorUI> m_presentation;
+    EditorState* m_editorState = nullptr;
+    GameBuildManager* m_buildManager = nullptr;
 };

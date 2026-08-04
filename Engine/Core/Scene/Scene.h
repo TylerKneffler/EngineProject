@@ -78,6 +78,7 @@ public:
     void Render(IGraphicsContext* context, float aspect,
         Camera* cameraOverride = nullptr, bool includeEditorVisuals = true);
     void SetSelectedObject(Object* obj) { m_selectedObject = obj; }
+    void SetPreviewObject(Object* obj) { m_previewObject = obj; }
 
     // Returns the first active Camera component found on a scene game object.
     // The editor camera is deliberately excluded so GameView cannot silently
@@ -115,6 +116,7 @@ public:
     SceneSettings settings;
 
     IGraphicsProvider* GetGraphicsProvider() const { return m_graphicsProvider; }
+    const Texture* GetSkyboxPreviewTexture();
 
 private:
     // ---- Rendering resources (kept API-agnostic) ----
@@ -131,6 +133,7 @@ private:
     std::string m_loadedSkyboxPath;
 
     std::unique_ptr<IPipelineState> m_objectPipeline;
+    std::unique_ptr<IPipelineState> m_objectPreviewPipeline;
     std::unique_ptr<IPipelineState> m_objectOutlinePipeline;
     std::unique_ptr<IGraphicsBuffer> m_objectConstantBuffer;
     void* m_objectCBMapped = nullptr;
@@ -151,6 +154,7 @@ private:
     // ---- Object list ----
     std::vector<std::unique_ptr<Object>> m_objects;
     Object* m_selectedObject = nullptr;
+    Object* m_previewObject = nullptr;
 
     static constexpr uint32_t kMaxObjects = 64;
     static constexpr uint32_t kMaxLights =

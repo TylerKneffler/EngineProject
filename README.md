@@ -83,35 +83,16 @@ Unavailable renderers are disabled and show the reason. Restart the Editor after
 
 ## Editor UI backends
 
-Editor UI packages live under `Engine/Editor/UI`. `IEditorUi` is the shared
+The editor UI lives under `Engine/Editor/UI/ImGui`. `IEditorUi` is the shared
 widget/layout facade used by every panel in `Engine/Editor/Core/View`, while
-`IEditorUiBackend` owns package lifecycle, input, and frame submission. Engine
-renderers know only package-neutral frame and texture callbacks; `Engine/Core`
-does not include or link a UI library.
-
-Dear ImGui remains the default:
+`IEditorUiBackend` owns ImGui lifecycle, input, and frame submission. Engine
+renderers expose package-neutral frame and texture callbacks; `Engine/Core`
+does not include or link the UI library.
 
 ```powershell
 cmake --preset debug
 cmake --build --preset debug
 ```
-
-Nuklear is the interchangeable demonstration backend. Both packages are built
-into the editor and support DirectX 11, DirectX 12, and Vulkan:
-
-```powershell
-cmake --preset nuklear
-cmake --build --preset nuklear
-```
-
-The CMake option chooses the startup package only. Switch live with the **UI**
-menu, Nuklear's **Use ImGui** button, or `Ctrl+Shift+U`; changes are committed at
-the frame boundary so viewport textures stay valid.
-
-Add another package by implementing `IEditorUi` plus its `IEditorUiBackend`
-integration under `Engine/Editor/UI/<Package>`. UI backends are initialized
-before editor panels so APIs that register scene textures during panel
-construction are safe.
 
 To build without Vulkan support:
 

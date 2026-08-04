@@ -51,7 +51,15 @@ struct EditorUiObjectRowResult
 struct EditorUiContextMenuResult
 {
     bool addRequested = false;
+    bool addCubeRequested = false;
     bool deleteRequested = false;
+};
+
+struct EditorUiDragDropPayloadResult
+{
+    const void* data = nullptr;
+    size_t size = 0;
+    bool delivered = false;
 };
 
 // Package-neutral immediate UI facade used throughout Editor/Core/View.
@@ -62,10 +70,14 @@ public:
     virtual void SetNextWindowRect(float x, float y, float width, float height) = 0;
     virtual bool BeginWindow(const char* title, bool* open, bool noPadding = false) = 0;
     virtual void EndWindow() = 0;
+    virtual void PushId(const void* id) = 0;
+    virtual void PopId() = 0;
     virtual bool Button(const char* label, float width = 0.f, float height = 0.f) = 0;
     virtual void Label(const char* text) = 0;
     virtual void DisabledLabel(const char* text) = 0;
     virtual void ColoredLabel(const char* text, EditorUiColor color) = 0;
+    virtual void BeginTextWrap() = 0;
+    virtual void EndTextWrap() = 0;
     virtual void SameLine() = 0;
     virtual void Separator() = 0;
     virtual void Spacing() = 0;
@@ -91,7 +103,8 @@ public:
         bool* enabled, bool lockName) = 0;
     virtual bool Selectable(const char* label, bool selected = false, bool allowDoubleClick = false) = 0;
     virtual EditorUiContextMenuResult ContextMenu(const void* id,
-        const char* addLabel, const char* deleteLabel) = 0;
+        const char* addLabel, const char* deleteLabel,
+        bool objectCreationMenu = false) = 0;
     virtual bool BeginChild(const char* id) = 0;
     virtual void EndChild() = 0;
     virtual bool IsItemHovered() const = 0;
@@ -105,6 +118,7 @@ public:
     virtual void EndDragDropSource() = 0;
     virtual bool BeginDragDropTarget() = 0;
     virtual const void* AcceptDragDropPayload(const char* type, size_t* size = nullptr) = 0;
+    virtual EditorUiDragDropPayloadResult InspectDragDropPayload(const char* type) = 0;
     virtual void EndDragDropTarget() = 0;
     virtual void SetClipboardText(const char* text) = 0;
     virtual void ScrollToBottom() = 0;

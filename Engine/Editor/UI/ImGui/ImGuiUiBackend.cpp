@@ -171,18 +171,16 @@ void ImGuiUiBackend::Shutdown()
     }
     m_graphicsApi = GraphicsApi::None;
     m_renderer = nullptr;
+    m_editorState = nullptr;
+    m_buildManager = nullptr;
     m_initialized = false;
 }
 
 void ImGuiUiBackend::DrawEditor(EditorState& state, PlayState playState,
     GameBuildManager* buildManager)
 {
-    DrawEditorPresentation(state, playState, buildManager);
-}
-
-void ImGuiUiBackend::DrawEditorPresentation(EditorState& state, PlayState playState,
-    GameBuildManager* buildManager)
-{
+    m_editorState = &state;
+    m_buildManager = buildManager;
     if (!m_presentation)
         m_presentation = std::make_unique<EditorUI>(&state);
     m_presentation->SetGameBuildManager(buildManager);
@@ -192,6 +190,21 @@ void ImGuiUiBackend::DrawEditorPresentation(EditorState& state, PlayState playSt
 bool ImGuiUiBackend::HandleMessage(void* nativeWindow, uint32_t message,
     uintptr_t wParam, intptr_t lParam)
 {
+    const bool keyDown = message == WM_KEYDOWN || message == WM_SYSKEYDOWN;
+    const bool firstPress = (static_cast<uintptr_t>(lParam) & (uintptr_t{1} << 30)) == 0;
+    const bool control = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+    if (keyDown && firstPress && control && wParam == 'S' && m_editorState)
+    {
+        m_editorState->SaveScene();
+        return true;
+    }
+    if (keyDown && firstPress && control && wParam == 'B' && m_buildManager)
+    {
+        const PlayState state = m_buildManager->GetPlayState();
+        if (state == PlayState::Stopped || state == PlayState::BuildFailed)
+            m_buildManager->StartBuild(PostBuildAction::Nothing);
+        return true;
+    }
     return m_initialized && ImGui_ImplWin32_WndProcHandler(
         static_cast<HWND>(nativeWindow), message,
         static_cast<WPARAM>(wParam), static_cast<LPARAM>(lParam)) != 0;
@@ -238,16 +251,6 @@ void ImGuiUiBackend::RenderDrawData(ImDrawData* drawData, void* commandBuffer)
 #endif
 }
 
-void ImGuiUiBackend::EndHiddenFrame()
-{
-    if (m_initialized)
-    {
-        ImGui::EndFrame();
-        if (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
-            ImGui::UpdatePlatformWindows();
-    }
-}
-
 void ImGuiUiBackend::EndFrame()
 {
     if (!m_initialized) return;
@@ -256,4 +259,9 @@ void ImGuiUiBackend::EndFrame()
         ImGui::UpdatePlatformWindows();
         ImGui::RenderPlatformWindowsDefault();
     }
+}
+
+std::unique_ptr<IEditorUiBackend> CreateEditorUiBackend()
+{
+    return std::make_unique<ImGuiUiBackend>();
 }

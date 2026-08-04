@@ -91,6 +91,9 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
         view->SetTitle("Scene " + std::to_string(++m_sceneCount));
         view->Init(deviceHandle, w, h, cpu, gpu, slot, m_scene, m_settings);
         view->OnAssetDropped = OnAssetDropped;
+        view->OnAssetPreviewRequested = OnAssetPreviewRequested;
+        view->OnAssetPreviewCancelled = OnAssetPreviewCancelled;
+        view->OnAssetPreviewCommitted = OnAssetPreviewCommitted;
         if (OnObjectSelected)
             view->OnObjectSelected = OnObjectSelected;
         return view;
