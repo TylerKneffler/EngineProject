@@ -1,0 +1,39 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "CMake: Configure Debug",
+      "type": "process",
+      "command": "cmake",
+      "args": ["--preset", "debug"]
+    },
+    {
+      "label": "CMake: Build Debug",
+      "type": "process",
+      "command": "cmake",
+      "args": ["--build", "--preset", "debug", "--parallel"],
+      "dependsOn": "CMake: Configure Debug",
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "Engine: Start Editor",
+      "type": "process",
+      "command": "${workspaceFolder}/build/Debug/Engine/Debug/Editor.exe",
+      "options": { "cwd": "${workspaceFolder}" },
+      "dependsOn": "CMake: Build Debug",
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
+      "label": "Engine: Open Project Hub",
+      "type": "process",
+      "command": "${workspaceFolder}/build/Debug/Engine/Debug/Editor.exe",
+      "args": ["--project-hub"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "dependsOn": "CMake: Build Debug",
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    }
+  ]
+}

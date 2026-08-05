@@ -1,0 +1,44 @@
+#pragma once
+#include "pch.h"
+#include "View/IEditorPanel.h"
+
+// ---------------------------------------------------------------------------
+// ConsoleView — editor Console panel
+//
+// Displays log messages from builds, the engine, and scripts.
+// Messages can be added from anywhere via AddLog().
+//
+// Usage:
+//   consoleView.AddLog(ConsoleView::Level::Build, "cmake output...");
+//   consoleView.DrawPanel();
+// ---------------------------------------------------------------------------
+class ConsoleView : public IEditorPanel
+{
+public:
+    enum class Level { Info, Warning, Error, Build };
+    struct Entry
+    {
+        Level level;
+        std::string message;
+    };
+
+    ConsoleView()  = default;
+    ~ConsoleView() = default;
+
+    // Appends a message at the given severity level.
+    void AddLog(Level level, const std::string& message);
+    void AddLog(const std::string& message) { AddLog(Level::Info, message); }
+
+    // Clears all log entries.
+    void Clear();
+
+    // Defines the package-neutral Console panel.
+    void DrawPanel(IEditorUi& ui) override;
+    const std::vector<Entry>& GetEntries() const { return m_entries; }
+
+private:
+    std::vector<Entry> m_entries;
+    std::string m_textBlock;
+    bool m_autoScroll     = true;
+    bool m_scrollToBottom = false;
+};

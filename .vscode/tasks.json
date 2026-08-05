@@ -65,6 +65,24 @@
             "problemMatcher": []
         },
         {
+            "label": "Engine: Package Versioned Release",
+            "type": "shell",
+            "command": "powershell",
+            "args": [
+                "-NoProfile",
+                "-ExecutionPolicy", "Bypass",
+                "-File", "${workspaceFolder}/Scripts/Build-EngineRelease.ps1",
+                "-Version", "${input:engineReleaseVersion}"
+            ],
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "focus": false
+            },
+            "problemMatcher": "$msCompile"
+        },
+        {
             "label": "Engine: Start Editor (Debug)",
             "type": "process",
             "command": "${workspaceFolder}/build/Debug/Debug/Editor.exe",
@@ -97,6 +115,14 @@
                 "focus": false
             },
             "problemMatcher": []
+        }
+    ],
+    "inputs": [
+        {
+            "id": "engineReleaseVersion",
+            "type": "promptString",
+            "description": "Engine release version (creates ReleaseBuilds/v<version>)",
+            "default": "1.0.0"
         }
     ]
 }
