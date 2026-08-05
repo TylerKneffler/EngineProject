@@ -2,6 +2,24 @@
 
 EngineProject is a C++17 Windows game engine with a package-neutral editor UI, scene serialization, a standalone game runtime, and support for DirectX 11, DirectX 12, and Vulkan renderers.
 
+## Quick start — release build
+
+No manual compilation is required to run the packaged Windows x64 editor:
+
+1. [Download EngineProject v1.0.0 for Windows x64](ReleaseBuilds/EngineProject-v1.0.0-windows-x64.zip?raw=1).
+2. Extract the complete `v1.0.0` folder from the ZIP.
+3. Run `Editor.exe` from inside that folder.
+
+Keep the extracted folder together because `Engine/`, `ProjectTemplate/`,
+`VulkanShaders/`, and `imgui.ini` are runtime and tooling dependencies. DirectX
+11 is the default renderer; DirectX 12 and Vulkan can be selected in Project
+Preferences. Vulkan requires a supported GPU and current driver.
+
+The prebuilt editor does not require Visual Studio or CMake just to run. Creating
+projects is supported, but compiling project C++ scripts or rebuilding the engine
+requires the development tools listed below. All downloadable builds are under
+[`ReleaseBuilds/`](ReleaseBuilds/).
+
 ## Requirements
 
 - Windows 10 or 11
@@ -22,6 +40,10 @@ cmake --build --preset debug --target Editor --parallel
 ```
 
 The first build may take a few minutes while dependencies download.
+
+Maintainers can produce a new versioned folder and download ZIP with the VS Code
+task **Engine: Package Versioned Release**. The task prompts for a version and
+writes both artifacts under `ReleaseBuilds/`.
 
 When started from the engine repository, the Editor opens **Engine Sandbox** using `Engine/Core/Assets`. This allows F5 and direct engine testing without creating a project.
 
