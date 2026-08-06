@@ -26,7 +26,7 @@
   </settings>
   <objects>
     <item>
-      <prefab>Assets/Prefabs/Cube.prefab</prefab>
+      <name>Cube</name>
       <enabled>true</enabled>
       <transform>
         <Transform.position>
@@ -36,7 +36,7 @@
         </Transform.position>
         <Transform.rotation>
           <item>0</item>
-          <item>0</item>
+          <item>3.14159</item>
           <item>0</item>
         </Transform.rotation>
         <Transform.scale>
@@ -45,6 +45,85 @@
           <item>1</item>
         </Transform.scale>
       </transform>
+      <components>
+        <components:Mesh>
+          <Mesh.file>Assets/Mesh/cube.obj</Mesh.file>
+        </components:Mesh>
+        <components:Material>
+          <Material.diffuse>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+          </Material.diffuse>
+          <Material.ambient>
+            <item>0.02</item>
+            <item>0.02</item>
+            <item>0.02</item>
+          </Material.ambient>
+          <Material.specular>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+          </Material.specular>
+          <Material.shininess>32</Material.shininess>
+          <Material.metallicFactor>1</Material.metallicFactor>
+          <Material.roughnessFactor>1</Material.roughnessFactor>
+          <Material.baseColorAlpha>1</Material.baseColorAlpha>
+          <Material.alphaCutoff>0.5</Material.alphaCutoff>
+          <Material.normalScale>1</Material.normalScale>
+          <Material.heightScale>0.08</Material.heightScale>
+          <Material.heightMinSteps>12</Material.heightMinSteps>
+          <Material.heightMaxSteps>40</Material.heightMaxSteps>
+          <Material.occlusionStrength>1</Material.occlusionStrength>
+          <Material.doubleSided>false</Material.doubleSided>
+          <Material.unlit>false</Material.unlit>
+          <Material.alphaMode>Opaque</Material.alphaMode>
+          <Material.emissiveColor>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </Material.emissiveColor>
+          <Material.materialAsset>C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/Materials\CopperSlatePBRDemo.material</Material.materialAsset>
+          <Material.baseColorTexture>Engine/Core/Assets/Textures/PBRDemo/CopperSlate_BaseColor.png</Material.baseColorTexture>
+          <Material.metallicRoughnessTexture>Engine/Core/Assets/Textures/PBRDemo/CopperSlate_MetallicRoughness.png</Material.metallicRoughnessTexture>
+          <Material.normalTexture>Engine/Core/Assets/Textures/PBRDemo/CopperSlate_Normal.png</Material.normalTexture>
+          <Material.heightTexture>Engine/Core/Assets/Textures/PBRDemo/CopperSlate_Height.png</Material.heightTexture>
+          <Material.occlusionTexture>Engine/Core/Assets/Textures/PBRDemo/CopperSlate_Occlusion.png</Material.occlusionTexture>
+          <Material.emissiveTexture></Material.emissiveTexture>
+        </components:Material>
+        <components:Rotate>
+          <Rotate.axis>
+            <item>0</item>
+            <item>1</item>
+            <item>0</item>
+          </Rotate.axis>
+          <Rotate.speed>45</Rotate.speed>
+        </components:Rotate>
+        <components:BakedLightingData>
+          <BakedLightingData.irradiance>
+            <item>0.124148</item>
+            <item>0.117941</item>
+            <item>0.105525</item>
+          </BakedLightingData.irradiance>
+          <BakedLightingData.directionalIrradiance>
+            <item>0.124148</item>
+            <item>0.117941</item>
+            <item>0.105525</item>
+          </BakedLightingData.directionalIrradiance>
+          <BakedLightingData.lightDirection>
+            <item>-0.577538</item>
+            <item>0.576697</item>
+            <item>0.577816</item>
+          </BakedLightingData.lightDirection>
+          <BakedLightingData.originalMaterialAsset>Engine/Core/Assets/Baked/default/Materials/Cube_0.source.material</BakedLightingData.originalMaterialAsset>
+          <BakedLightingData.originalMaterialSnapshot>Engine/Core/Assets/Baked/default/Materials/Cube_0.source.material</BakedLightingData.originalMaterialSnapshot>
+          <BakedLightingData.bakedMaterialAsset>Engine/Core/Assets/Baked/default/Materials/Cube_0.baked.material</BakedLightingData.bakedMaterialAsset>
+          <BakedLightingData.bakedLightmapAsset>Engine/Core/Assets/Baked/default/Lightmaps/Cube_0.lightmap.bmp</BakedLightingData.bakedLightmapAsset>
+          <BakedLightingData.valid>true</BakedLightingData.valid>
+          <BakedLightingData.version>3</BakedLightingData.version>
+        </components:BakedLightingData>
+      </components>
+      <children />
     </item>
     <item>
       <name>Camera</name>
@@ -92,14 +171,14 @@
       <enabled>true</enabled>
       <transform>
         <Transform.position>
-          <item>0</item>
-          <item>0</item>
-          <item>0</item>
+          <item>1</item>
+          <item>1</item>
+          <item>-1</item>
         </Transform.position>
         <Transform.rotation>
-          <item>0.436332</item>
-          <item>0.436332</item>
-          <item>0.436332</item>
+          <item>0.55</item>
+          <item>0.75</item>
+          <item>0</item>
         </Transform.rotation>
         <Transform.scale>
           <item>1</item>
@@ -109,15 +188,15 @@
       </transform>
       <components>
         <components:Light>
-          <Light.lightType>1</Light.lightType>
+          <Light.lightType>0</Light.lightType>
           <Light.color>
             <item>1</item>
             <item>0.95</item>
             <item>0.85</item>
           </Light.color>
-          <Light.intensity>1.25</Light.intensity>
-          <Light.range>6.31</Light.range>
-          <Light.falloff>2</Light.falloff>
+          <Light.intensity>1.9</Light.intensity>
+          <Light.range>9.91</Light.range>
+          <Light.falloff>1.4</Light.falloff>
           <Light.baked>false</Light.baked>
         </components:Light>
       </components>

@@ -8,6 +8,13 @@
 class Texture;
 class IGraphicsProvider;
 
+enum class MaterialAlphaMode
+{
+    Opaque,
+    Mask,
+    Blend
+};
+
 class Material : public Component
 {
 public:
@@ -41,6 +48,15 @@ public:
     
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Properties")
     float     normalScale { 1.f };
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "0.0, 0.2")
+    float     heightScale { 0.05f };
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "4.0, 64.0")
+    float     heightMinSteps { 8.f };
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "4.0, 64.0")
+    float     heightMaxSteps { 32.f };
     
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Properties")
     float     occlusionStrength { 1.f };
@@ -59,6 +75,7 @@ public:
     std::shared_ptr<Texture> baseColorTexture;
     std::shared_ptr<Texture> metallicRoughnessTexture;
     std::shared_ptr<Texture> normalTexture;
+    std::shared_ptr<Texture> heightTexture;
     std::shared_ptr<Texture> occlusionTexture;
     std::shared_ptr<Texture> emissiveTexture;
 
@@ -69,9 +86,18 @@ public:
     void SetMetallicRoughnessTexture(const std::string& path);
     
     void SetNormalTexture(const std::string& path);
+    void SetHeightTexture(const std::string& path);
     void SetOcclusionTexture(const std::string& path);
     void SetEmissiveTexture(const std::string& path);
     void PrepareTextures(IGraphicsProvider* graphicsProvider);
+    MaterialAlphaMode GetAlphaMode() const;
+    void Validate();
+    JsonValue Serialize() const override;
+    void Deserialize(const JsonValue& value) override;
+    void OnAfterDeserialize(IGraphicsProvider* graphicsProvider) override
+    {
+        PrepareTextures(graphicsProvider);
+    }
 
 private:
     static std::string TexturePath(const std::shared_ptr<Texture>& texture);

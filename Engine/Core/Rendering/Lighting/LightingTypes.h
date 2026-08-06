@@ -8,6 +8,15 @@ namespace Engine::Rendering::Lighting
 {
     inline constexpr uint32_t MaxRealtimeLights = 64;
 
+    struct BakedLightingSettings
+    {
+        // Kept per-project so all scenes bake at a consistent texel density.
+        uint32_t lightmapResolution = 256;
+        float shadowBias = 0.002f;
+        uint32_t dilationPasses = 4;
+        bool accumulate = true;
+    };
+
     // Shared CPU/GPU layout for point and global directional lights.
     struct LightData
     {

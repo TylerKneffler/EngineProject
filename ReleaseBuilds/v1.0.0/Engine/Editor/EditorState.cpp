@@ -450,6 +450,9 @@ void EditorState::WireupCallbacks()
         if (m_scene)
             m_scene->SetSelectedObject(obj);
     };
+    m_viewFactory->OnGizmoInteraction = [this](bool active) {
+        ReportSceneEditInProgress(active);
+    };
 
     // Wire up focus (double-click) callback — frame the object in the scene camera
     m_viewFactory->OnFocusObject = [this](Object* obj) {

@@ -75,10 +75,14 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
     }
     if (ui.IsItemClicked())
         SetSelectedObject(nullptr);
-    ui.Separator();
     if (worldOpen)
     {
-        for (const auto& obj : m_scene->GetObjects()) if (!obj->Parent) DrawObjectNode(ui, obj.get(), 0);
+        std::vector<Object*> roots;
+        for (const auto& obj : m_scene->GetObjects())
+            if (!obj->Parent)
+                roots.push_back(obj.get());
+        for (size_t index = 0; index < roots.size(); ++index)
+            DrawObjectNode(ui, roots[index], 0, index + 1 == roots.size());
         ui.TreePop();
     }
     if (m_pendingDelete)
@@ -307,21 +311,25 @@ void HierarchyView::SetSelectedObject(Object* obj)
     if (OnSelectionChanged) OnSelectionChanged(obj);
 }
 
-void HierarchyView::DrawObjectNode(IEditorUi& ui, Object* obj, int depth)
+void HierarchyView::DrawObjectNode(
+    IEditorUi& ui, Object* obj, int depth, bool lastSibling,
+    uint64_t ancestorGuideMask)
 {
     const bool hasChildren = !obj->Children.empty();
     char name[256]; strncpy_s(name, obj->name.c_str(), sizeof(name));
     bool enabled = obj->enabled;
     const EditorUiObjectRowResult row = ui.ObjectTreeRow(
         obj, name, sizeof(name), &enabled, obj == m_selectedObject,
-        !hasChildren, obj->IsPartOfPrefabInstance(), obj->IsEnabledInHierarchy(), depth);
+        !hasChildren, obj->IsPartOfPrefabInstance(), obj->IsEnabledInHierarchy(),
+        depth, lastSibling, ancestorGuideMask);
     Object* prefabRoot = obj->GetPrefabInstanceRoot();
     const bool editableHierarchy = prefabRoot == nullptr;
     const bool deletable = editableHierarchy || prefabRoot == obj;
     const EditorUiContextMenuResult menu = ui.ContextMenu(obj,
         editableHierarchy ? "Add Object" : nullptr,
         deletable ? "Delete Object" : nullptr,
-        editableHierarchy);
+        editableHierarchy,
+        prefabRoot ? "Unpack Prefab" : nullptr);
     if (menu.addRequested || menu.addCubeRequested)
     {
         m_pendingAddParent = obj;
@@ -331,6 +339,14 @@ void HierarchyView::DrawObjectNode(IEditorUi& ui, Object* obj, int depth)
     }
     if (menu.deleteRequested)
         m_pendingDelete = obj;
+    if (menu.unpackRequested && prefabRoot && prefabRoot->Prefab)
+    {
+        const std::string prefabPath = prefabRoot->Prefab->GetPath();
+        const std::string instanceName = ObjectName(prefabRoot);
+        prefabRoot->Prefab.reset();
+        LogInteraction("Unpacked prefab instance '" + instanceName + "': " + prefabPath);
+        if (OnHierarchyChanged) OnHierarchyChanged();
+    }
     if (row.nameChanged) obj->name = name;
     if (row.enabledChanged)
     {
@@ -402,5 +418,14 @@ void HierarchyView::DrawObjectNode(IEditorUi& ui, Object* obj, int depth)
             ObjectName(m_pendingTarget) + "' (" + PlacementName(row.dropPosition) +
             ", depth " + std::to_string(row.dropDepth) + ")");
     }
-    if (row.open && hasChildren) { for (Object* child : obj->Children) DrawObjectNode(ui, child, depth + 1); ui.ObjectTreePop(); }
+    if (row.open && hasChildren)
+    {
+        uint64_t childGuideMask = ancestorGuideMask;
+        if (!lastSibling && depth < 64)
+            childGuideMask |= uint64_t{1} << depth;
+        for (size_t index = 0; index < obj->Children.size(); ++index)
+            DrawObjectNode(ui, obj->Children[index], depth + 1,
+                index + 1 == obj->Children.size(), childGuideMask);
+        ui.ObjectTreePop();
+    }
 }

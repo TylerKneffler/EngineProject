@@ -1,5 +1,6 @@
 #pragma once
 #include "pch.h"
+#include "Core/Rendering/Lighting/LightingTypes.h"
 #include <pugixml.hpp>
 
 // ---------------------------------------------------------------------------
@@ -45,6 +46,7 @@ struct ProjectSettings
     std::string gameRenderingAPI;          // Rendering API for game window (DirectX12, DirectX11, Vulkan)
     glm::vec4 clearColor;
     uint32_t targetFramerate;
+    Engine::Rendering::Lighting::BakedLightingSettings bakedLighting;
 
     // Game Resolution / Aspect Ratio
     enum class AspectRatioMode { Free, Locked, Hardcoded };

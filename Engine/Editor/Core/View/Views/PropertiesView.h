@@ -44,11 +44,11 @@ public:
 
 private:
     void DrawTransform(IEditorUi& ui);
-    void DrawAssetDropTarget(IEditorUi& ui, const char* label);
-    void AcceptAssetDrop(IEditorUi& ui);
+    std::string HandleWindowAssetDrop(IEditorUi& ui);
     bool AddComponentFromAsset(const std::string& path, std::string& message);
     bool AddRegisteredComponent(const std::string& typeName, std::string& message);
     void DrawComponentPicker(IEditorUi& ui);
+    void UnpackSelectedPrefab();
     void LogAssetDrop(const std::string& message, bool error = false) const;
 
     Object* m_selectedObject = nullptr;

@@ -393,7 +393,8 @@ set_target_properties(Game PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "${ENGINE_RUNTIME_WORKING_DIRECTORY}"
 )
 
-if(NOT ENGINE_PROJECT_DIR)
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_ROOT}/Engine/Tests/RotateLifecycleTests.cpp")
     enable_testing()
     add_executable(EngineLifecycleTests
         "${ENGINE_ROOT}/Engine/Tests/RotateLifecycleTests.cpp"

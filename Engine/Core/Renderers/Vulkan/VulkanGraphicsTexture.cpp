@@ -27,19 +27,19 @@ VulkanTextureSystem::VulkanTextureSystem(
       m_queue(queue),
       m_queueFamily(queueFamily)
 {
-    VkDescriptorSetLayoutBinding bindings[8]{};
-    for (uint32_t binding = 0; binding < 5; ++binding)
+    VkDescriptorSetLayoutBinding bindings[9]{};
+    for (uint32_t binding = 0; binding < 6; ++binding)
     {
         bindings[binding].binding = binding;
         bindings[binding].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
         bindings[binding].descriptorCount = 1;
         bindings[binding].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     }
-    bindings[5].binding = 5;
-    bindings[5].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-    bindings[5].descriptorCount = 1;
-    bindings[5].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    for (uint32_t binding = 6; binding < 8; ++binding)
+    bindings[6].binding = 6;
+    bindings[6].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+    bindings[6].descriptorCount = 1;
+    bindings[6].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    for (uint32_t binding = 7; binding < 9; ++binding)
     {
         bindings[binding].binding = binding;
         bindings[binding].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -55,7 +55,7 @@ VulkanTextureSystem::VulkanTextureSystem(
         m_device, &layoutInfo, nullptr, &m_layout), "vkCreateDescriptorSetLayout");
 
     VkDescriptorPoolSize sizes[3]{
-        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 5 * 512 },
+        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 6 * 512 },
         { VK_DESCRIPTOR_TYPE_SAMPLER, 512 },
         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2 * 512 }
     };
@@ -119,7 +119,8 @@ VulkanTextureSystem::~VulkanTextureSystem()
 VulkanImageResource VulkanTextureSystem::Upload(
     uint32_t width,
     uint32_t height,
-    const uint8_t* pixels)
+    const uint8_t* pixels,
+    bool srgb)
 {
     const VkDeviceSize size = static_cast<VkDeviceSize>(width) * height * 4;
     VkBuffer staging = VK_NULL_HANDLE;
@@ -148,7 +149,8 @@ VulkanImageResource VulkanTextureSystem::Upload(
     vkUnmapMemory(m_device, stagingMemory);
 
     VulkanImageResource image = VulkanCreateImage(
-        m_physicalDevice, m_device, width, height, VK_FORMAT_R8G8B8A8_SRGB,
+        m_physicalDevice, m_device, width, height,
+        srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM,
         VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
         VK_IMAGE_ASPECT_COLOR_BIT);
 
@@ -213,18 +215,19 @@ VulkanImageResource VulkanTextureSystem::Upload(
 std::shared_ptr<VulkanGraphicsTexture> VulkanTextureSystem::CreateTexture(
     uint32_t width,
     uint32_t height,
-    const uint8_t* rgbaPixels)
+    const uint8_t* rgbaPixels,
+    bool srgb)
 {
     if (!width || !height || !rgbaPixels)
         return nullptr;
     return std::make_shared<VulkanGraphicsTexture>(
-        shared_from_this(), Upload(width, height, rgbaPixels));
+        shared_from_this(), Upload(width, height, rgbaPixels, srgb));
 }
 
 void VulkanTextureSystem::Bind(
     VkCommandBuffer commands,
     VkPipelineLayout pipelineLayout,
-    const std::array<const VulkanGraphicsTexture*, 5>& textures,
+    const std::array<const VulkanGraphicsTexture*, 6>& textures,
     const std::array<const VulkanGraphicsBuffer*, 2>& buffers)
 {
     TextureKey key{};
@@ -248,9 +251,9 @@ void VulkanTextureSystem::Bind(
         VkCheck(vkAllocateDescriptorSets(m_device, &allocate, &set),
             "vkAllocateDescriptorSets(material)");
 
-        VkDescriptorImageInfo images[5]{};
-        VkWriteDescriptorSet writes[8]{};
-        for (uint32_t index = 0; index < 5; ++index)
+        VkDescriptorImageInfo images[6]{};
+        VkWriteDescriptorSet writes[9]{};
+        for (uint32_t index = 0; index < 6; ++index)
         {
             images[index].imageView =
                 textures[index] ? textures[index]->GetView() : m_white.view;
@@ -264,12 +267,12 @@ void VulkanTextureSystem::Bind(
         }
         VkDescriptorImageInfo samplerInfo{};
         samplerInfo.sampler = m_sampler;
-        writes[5] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-        writes[5].dstSet = set;
-        writes[5].dstBinding = 5;
-        writes[5].descriptorCount = 1;
-        writes[5].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-        writes[5].pImageInfo = &samplerInfo;
+        writes[6] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        writes[6].dstSet = set;
+        writes[6].dstBinding = 6;
+        writes[6].descriptorCount = 1;
+        writes[6].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+        writes[6].pImageInfo = &samplerInfo;
         VkDescriptorBufferInfo bufferInfos[2]{};
         for (uint32_t index = 0; index < 2; ++index)
         {
@@ -277,12 +280,12 @@ void VulkanTextureSystem::Bind(
                 buffers[index] ? buffers[index]->GetBuffer() : m_dummyBuffer;
             bufferInfos[index].range =
                 buffers[index] ? buffers[index]->GetSize() : 16;
-            writes[index + 6] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-            writes[index + 6].dstSet = set;
-            writes[index + 6].dstBinding = index + 6;
-            writes[index + 6].descriptorCount = 1;
-            writes[index + 6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            writes[index + 6].pBufferInfo = &bufferInfos[index];
+            writes[index + 7] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            writes[index + 7].dstSet = set;
+            writes[index + 7].dstBinding = index + 7;
+            writes[index + 7].descriptorCount = 1;
+            writes[index + 7].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[index + 7].pBufferInfo = &bufferInfos[index];
         }
         vkUpdateDescriptorSets(m_device, ARRAYSIZE(writes), writes, 0, nullptr);
         m_sets.emplace(key, set);
@@ -301,8 +304,11 @@ VulkanGraphicsTexture::~VulkanGraphicsTexture()
 std::shared_ptr<IGraphicsTexture> VulkanTextureFactory::CreateTexture2D(
     uint32_t width,
     uint32_t height,
-    const uint8_t* rgbaPixels)
+    const uint8_t* rgbaPixels,
+    bool srgb)
 {
-    return m_system ? m_system->CreateTexture(width, height, rgbaPixels) : nullptr;
+    return m_system
+        ? m_system->CreateTexture(width, height, rgbaPixels, srgb)
+        : nullptr;
 }
 #endif

@@ -32,6 +32,7 @@ public:
     IGraphicsBuffer* GetGraphicsBuffer() const { return m_vertexBuffer.get(); }
     
     uint32_t GetVertexCount() const { return static_cast<uint32_t>(m_vertices.size()); }
+    const std::vector<Vertex>& GetVertices() const { return m_vertices; }
     uint32_t GetVertexStride() const { return sizeof(Vertex); }
     bool     IsReady()        const { return m_ready; }
     const std::string& GetFilePath() const { return m_filePath; }

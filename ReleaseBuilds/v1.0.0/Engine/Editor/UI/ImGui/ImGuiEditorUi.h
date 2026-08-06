@@ -43,9 +43,15 @@ public:
     void Tooltip(const char*) override; void Progress(float, const char*) override;
     void DrawImage(void*, float, float) override;
     EditorUiViewportInput Viewport(void*, float, EditorUiColor) override;
+    void DrawViewportLine(EditorUiVec2, EditorUiVec2, EditorUiColor, float) override;
+    void DrawViewportTriangle(EditorUiVec2, EditorUiVec2, EditorUiVec2, EditorUiColor) override;
+    void DrawViewportCircle(EditorUiVec2, float, EditorUiColor, bool, float) override;
+    void DrawViewportText(EditorUiVec2, const char*, EditorUiColor) override;
     void FocusWindow(const char*) override;
 private:
     std::vector<unsigned char> m_dropResultPayload;
     std::unordered_map<const void*, bool> m_objectTreeOpen;
     std::unordered_map<const void*, bool> m_objectHadChildren;
+    EditorUiVec2 m_viewportScreenMin{};
+    EditorUiVec2 m_viewportScreenMax{};
 };

@@ -203,6 +203,7 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         ui.EndWindow();
         return;
     }
+    const std::string assetDropPreview = HandleWindowAssetDrop(ui);
     Object* prefabRoot = m_selectedObject->GetPrefabInstanceRoot();
     const bool linked = prefabRoot != nullptr;
     char name[256]; strncpy_s(name, m_selectedObject->name.c_str(), sizeof(name));
@@ -219,6 +220,8 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             m_selectedObject == prefabRoot
                 ? "Properties come from the prefab; root transform is instance placement."
                 : "Properties and transform come from the prefab asset.");
+        ui.DisabledLabel(
+            "Right-click it in the Hierarchy, or a component header, and choose Unpack Prefab.");
     }
     else
         ui.DisabledLabel("Scene-only object");
@@ -241,12 +244,15 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         if (componentType.empty()) componentType = "Component";
         
         const bool componentOpen = ui.CollapsingHeader(componentType.c_str());
-        const bool componentEditable = !m_selectedObject->IsPartOfPrefabInstance();
+        Object* componentPrefabRoot = m_selectedObject->GetPrefabInstanceRoot();
+        const bool componentEditable = componentPrefabRoot == nullptr;
         // Bind the menu to the header before drag/drop helpers replace the
         // UI backend's current item.
         const EditorUiContextMenuResult menu = ui.ContextMenu(component,
             componentEditable ? "Add Component" : nullptr,
-            componentEditable ? "Delete Component" : nullptr);
+            componentEditable ? "Delete Component" : nullptr,
+            false,
+            componentPrefabRoot ? "Unpack Prefab" : nullptr);
         if (menu.addRequested)
         {
             m_componentPickerOpen = true;
@@ -255,6 +261,8 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         }
         if (menu.deleteRequested)
             componentToDelete = component;
+        if (menu.unpackRequested)
+            UnpackSelectedPrefab();
         if (componentEditable && ui.BeginDragDropSource())
         {
             Component* payload = component;
@@ -275,7 +283,6 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             }
             ui.EndDragDropTarget();
         }
-        AcceptAssetDrop(ui);
         if (componentOpen)
         {
             const bool locked = m_selectedObject->IsPartOfPrefabInstance();
@@ -328,6 +335,16 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             OnComponentsChanged();
     }
 
+    if (!assetDropPreview.empty())
+    {
+        ui.PushId("assetDropPreview");
+        ui.BeginDisabled();
+        const std::string label = assetDropPreview + " (Drop to Add)";
+        ui.CollapsingHeader(label.c_str(), false);
+        ui.EndDisabled();
+        ui.PopId();
+    }
+
     ui.Separator();
     if (ui.Button("Add Component"))
     {
@@ -335,41 +352,51 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         m_positionComponentPicker = true;
         m_componentSearch[0] = '\0';
     }
-    DrawAssetDropTarget(ui, "Drop asset here to add or assign a component");
     
     ui.EndTextWrap();
     ui.EndWindow();
     DrawComponentPicker(ui);
 }
 
-void PropertiesView::DrawAssetDropTarget(IEditorUi& ui, const char* label)
+std::string PropertiesView::HandleWindowAssetDrop(IEditorUi& ui)
 {
-    ui.Selectable(label);
-    ui.Tooltip("Mesh/model, material, texture, or compiled Component header");
-    AcceptAssetDrop(ui);
-}
+    const EditorUiDragDropPayloadResult payload =
+        ui.WindowDragDropTarget("ENGINE_ASSET_PATH");
+    if (!payload.data || payload.size == 0)
+        return {};
 
-void PropertiesView::AcceptAssetDrop(IEditorUi& ui)
-{
-    if (!ui.BeginDragDropTarget())
-        return;
+    const char* bytes = static_cast<const char*>(payload.data);
+    size_t length = 0;
+    while (length < payload.size && bytes[length] != '\0')
+        ++length;
+    const std::string path(bytes, length);
+    if (path.empty())
+        return {};
 
-    size_t payloadSize = 0;
-    const void* payload = ui.AcceptDragDropPayload("ENGINE_ASSET_PATH", &payloadSize);
-    if (payload && payloadSize > 0)
+    if (payload.delivered)
     {
-        const char* bytes = static_cast<const char*>(payload);
-        size_t length = 0;
-        while (length < payloadSize && bytes[length] != '\0')
-            ++length;
-        const std::string path(bytes, length);
         std::string message;
         const bool added = AddComponentFromAsset(path, message);
         LogAssetDrop(message, !added);
         if (added && OnComponentsChanged)
             OnComponentsChanged();
+        return {};
     }
-    ui.EndDragDropTarget();
+
+    const std::string extension = LowerExtension(path);
+    if (extension == ".mesh" || extension == ".obj")
+        return "Mesh Preview";
+    if (extension == ".material" || extension == ".mat" ||
+        IsTextureExtension(extension))
+        return "Material Preview";
+    if (extension == ".h" || extension == ".hpp")
+    {
+        const std::string className = FindComponentSubclass(path);
+        return (className.empty()
+            ? std::filesystem::path(path).stem().string()
+            : className) + " Preview";
+    }
+    return std::filesystem::path(path).filename().string() + " Preview";
 }
 
 bool PropertiesView::AddComponentFromAsset(const std::string& path, std::string& message)
@@ -554,23 +581,41 @@ void PropertiesView::LogAssetDrop(const std::string& message, bool error) const
         OutputDebugStringA((message + "\n").c_str());
 }
 
+void PropertiesView::UnpackSelectedPrefab()
+{
+    Object* prefabRoot = m_selectedObject
+        ? m_selectedObject->GetPrefabInstanceRoot()
+        : nullptr;
+    if (!prefabRoot || !prefabRoot->Prefab)
+        return;
+
+    const std::string prefabPath = prefabRoot->Prefab->GetPath();
+    prefabRoot->Prefab.reset();
+    LogAssetDrop("[Properties] Unpacked prefab instance: " + prefabPath);
+    if (OnComponentsChanged)
+        OnComponentsChanged();
+}
+
 void PropertiesView::DrawTransform(IEditorUi& ui)
 {
     Transform& t = m_selectedObject->transform;
-    const Object* prefabRoot = m_selectedObject->GetPrefabInstanceRoot();
+    Object* prefabRoot = m_selectedObject->GetPrefabInstanceRoot();
     const bool locked = prefabRoot && prefabRoot != m_selectedObject;
     
     const bool transformOpen = ui.CollapsingHeader("Transform");
     const EditorUiContextMenuResult menu = ui.ContextMenu(&t,
         locked || m_selectedObject->IsPartOfPrefabInstance() ? nullptr : "Add Component",
-        nullptr);
+        nullptr,
+        false,
+        prefabRoot ? "Unpack Prefab" : nullptr);
     if (menu.addRequested)
     {
         m_componentPickerOpen = true;
         m_positionComponentPicker = true;
         m_componentSearch[0] = '\0';
     }
-    AcceptAssetDrop(ui);
+    if (menu.unpackRequested)
+        UnpackSelectedPrefab();
     if (transformOpen)
     {
         ui.BeginDisabled(locked);

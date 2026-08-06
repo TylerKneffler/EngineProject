@@ -14,17 +14,18 @@ struct ObjectData
     float4 ambientUnlit;
     float4 emissiveOcclusion;
     float4 materialParams;
-    float4 specularShininess;
+    float4 viewPositionAlphaCutoff;
     float4 bakedDirectional;
     float4 bakedLightDirection;
+    float4 parallaxParams;
 };
 
 #ifdef VULKAN
 [[vk::push_constant]] DrawConstants draw;
-[[vk::binding(7, 0)]] StructuredBuffer<ObjectData> objects;
+[[vk::binding(8, 0)]] StructuredBuffer<ObjectData> objects;
 #else
 cbuffer DrawBuffer : register(b0) { DrawConstants draw; };
-StructuredBuffer<ObjectData> objects : register(t6);
+StructuredBuffer<ObjectData> objects : register(t7);
 #endif
 
 void VSMain(

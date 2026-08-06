@@ -78,6 +78,7 @@ public:
     void Render(IGraphicsContext* context, float aspect,
         Camera* cameraOverride = nullptr, bool includeEditorVisuals = true);
     void SetSelectedObject(Object* obj) { m_selectedObject = obj; }
+    Object* GetSelectedObject() const { return m_selectedObject; }
     void SetPreviewObject(Object* obj) { m_previewObject = obj; }
 
     // Returns the first active Camera component found on a scene game object.

@@ -21,6 +21,8 @@ struct EditorUiViewportInput
     float mouseWheel = 0.f;
     bool hovered = false;
     bool leftClicked = false;
+    bool leftDown = false;
+    bool leftReleased = false;
     bool rightDown = false;
     bool middleDown = false;
 };
@@ -52,6 +54,7 @@ struct EditorUiContextMenuResult
 {
     bool addRequested = false;
     bool addCubeRequested = false;
+    bool unpackRequested = false;
     bool deleteRequested = false;
 };
 
@@ -71,6 +74,7 @@ public:
     virtual bool BeginWindow(const char* title, bool* open, bool noPadding = false) = 0;
     virtual void EndWindow() = 0;
     virtual void PushId(const void* id) = 0;
+    virtual void PushId(const char* id) = 0;
     virtual void PopId() = 0;
     virtual bool Button(const char* label, float width = 0.f, float height = 0.f) = 0;
     virtual void Label(const char* text) = 0;
@@ -97,7 +101,8 @@ public:
     virtual void TreePop() = 0;
     virtual EditorUiObjectRowResult ObjectTreeRow(const void* id, char* name, size_t size,
         bool* enabled, bool selected, bool leaf, bool lockName,
-        bool enabledInHierarchy, int hierarchyDepth) = 0;
+        bool enabledInHierarchy, int hierarchyDepth, bool lastSibling,
+        uint64_t ancestorGuideMask) = 0;
     virtual void ObjectTreePop() = 0;
     virtual EditorUiHierarchyDropResult HierarchyDropTarget(const char* type) = 0;
     virtual EditorUiHierarchyDropResult HierarchyBackgroundDropTarget(const char* type) = 0;
@@ -106,7 +111,8 @@ public:
     virtual bool Selectable(const char* label, bool selected = false, bool allowDoubleClick = false) = 0;
     virtual EditorUiContextMenuResult ContextMenu(const void* id,
         const char* addLabel, const char* deleteLabel,
-        bool objectCreationMenu = false) = 0;
+        bool objectCreationMenu = false,
+        const char* unpackLabel = nullptr) = 0;
     virtual bool BeginChild(const char* id) = 0;
     virtual void EndChild() = 0;
     virtual bool IsItemHovered() const = 0;
@@ -121,6 +127,7 @@ public:
     virtual bool BeginDragDropTarget() = 0;
     virtual const void* AcceptDragDropPayload(const char* type, size_t* size = nullptr) = 0;
     virtual EditorUiDragDropPayloadResult InspectDragDropPayload(const char* type) = 0;
+    virtual EditorUiDragDropPayloadResult WindowDragDropTarget(const char* type) = 0;
     virtual void EndDragDropTarget() = 0;
     virtual void SetClipboardText(const char* text) = 0;
     virtual void ScrollToBottom() = 0;
@@ -135,5 +142,13 @@ public:
     virtual void Progress(float fraction, const char* overlay = nullptr) = 0;
     virtual void DrawImage(void* texture, float width, float height) = 0;
     virtual EditorUiViewportInput Viewport(void* texture, float aspectRatio, EditorUiColor letterboxColor) = 0;
+    virtual void DrawViewportLine(EditorUiVec2 start, EditorUiVec2 end,
+        EditorUiColor color, float thickness = 1.f) = 0;
+    virtual void DrawViewportTriangle(EditorUiVec2 first, EditorUiVec2 second,
+        EditorUiVec2 third, EditorUiColor color) = 0;
+    virtual void DrawViewportCircle(EditorUiVec2 center, float radius,
+        EditorUiColor color, bool filled = true, float thickness = 1.f) = 0;
+    virtual void DrawViewportText(EditorUiVec2 position, const char* text,
+        EditorUiColor color) = 0;
     virtual void FocusWindow(const char* title) = 0;
 };

@@ -220,6 +220,38 @@ void EditorState::SaveScene()
     }
 }
 
+void EditorState::BakeLighting()
+{
+    if (!m_scene)
+        return;
+    const std::string assets = m_projectSettings.assetsDirectory.empty()
+        ? "Assets" : m_projectSettings.assetsDirectory;
+    std::string sceneName = m_currentScenePath.empty()
+        ? m_projectSettings.name
+        : std::filesystem::path(m_currentScenePath).stem().string();
+    if (sceneName.empty())
+        sceneName = "Scene";
+    const auto result = m_scene->BakeLighting(
+        assets, sceneName, m_projectSettings.bakedLighting);
+    if (m_primaryConsole)
+        m_primaryConsole->AddLog(result.succeeded
+            ? ConsoleView::Level::Info : ConsoleView::Level::Error,
+            result.message);
+    if (result.succeeded)
+        m_hasUnsavedChanges = true;
+}
+
+void EditorState::ClearBakedLighting()
+{
+    if (!m_scene)
+        return;
+    m_scene->ClearBakedLighting();
+    if (m_primaryConsole)
+        m_primaryConsole->AddLog(ConsoleView::Level::Info,
+            m_scene->GetLightingBakeStatus());
+    m_hasUnsavedChanges = true;
+}
+
 // ---------------------------------------------------------------------------
 // EditorState::LoadScene
 // ---------------------------------------------------------------------------
@@ -449,6 +481,9 @@ void EditorState::WireupCallbacks()
             m_primaryProperties->SetSelectedObject(obj);
         if (m_scene)
             m_scene->SetSelectedObject(obj);
+    };
+    m_viewFactory->OnGizmoInteraction = [this](bool active) {
+        ReportSceneEditInProgress(active);
     };
 
     // Wire up focus (double-click) callback — frame the object in the scene camera

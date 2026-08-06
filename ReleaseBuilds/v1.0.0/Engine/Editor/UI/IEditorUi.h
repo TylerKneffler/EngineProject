@@ -21,6 +21,8 @@ struct EditorUiViewportInput
     float mouseWheel = 0.f;
     bool hovered = false;
     bool leftClicked = false;
+    bool leftDown = false;
+    bool leftReleased = false;
     bool rightDown = false;
     bool middleDown = false;
 };
@@ -135,5 +137,13 @@ public:
     virtual void Progress(float fraction, const char* overlay = nullptr) = 0;
     virtual void DrawImage(void* texture, float width, float height) = 0;
     virtual EditorUiViewportInput Viewport(void* texture, float aspectRatio, EditorUiColor letterboxColor) = 0;
+    virtual void DrawViewportLine(EditorUiVec2 start, EditorUiVec2 end,
+        EditorUiColor color, float thickness = 1.f) = 0;
+    virtual void DrawViewportTriangle(EditorUiVec2 first, EditorUiVec2 second,
+        EditorUiVec2 third, EditorUiColor color) = 0;
+    virtual void DrawViewportCircle(EditorUiVec2 center, float radius,
+        EditorUiColor color, bool filled = true, float thickness = 1.f) = 0;
+    virtual void DrawViewportText(EditorUiVec2 position, const char* text,
+        EditorUiColor color) = 0;
     virtual void FocusWindow(const char* title) = 0;
 };

@@ -22,11 +22,12 @@ public:
     ~VulkanTextureSystem();
 
     std::shared_ptr<VulkanGraphicsTexture> CreateTexture(
-        uint32_t width, uint32_t height, const uint8_t* rgbaPixels);
+        uint32_t width, uint32_t height, const uint8_t* rgbaPixels,
+        bool srgb = true);
     void Bind(
         VkCommandBuffer commands,
         VkPipelineLayout pipelineLayout,
-        const std::array<const VulkanGraphicsTexture*, 5>& textures,
+        const std::array<const VulkanGraphicsTexture*, 6>& textures,
         const std::array<const VulkanGraphicsBuffer*, 2>& buffers);
     VkDescriptorSetLayout GetDescriptorSetLayout() const { return m_layout; }
     VkDevice GetDevice() const { return m_device; }
@@ -34,7 +35,7 @@ public:
 private:
     struct TextureKey
     {
-        std::array<VkImageView, 5> views{};
+        std::array<VkImageView, 6> views{};
         std::array<VkBuffer, 2> buffers{};
         bool operator==(const TextureKey& other) const
         {
@@ -47,7 +48,8 @@ private:
     };
 
     VulkanImageResource Upload(
-        uint32_t width, uint32_t height, const uint8_t* rgbaPixels);
+        uint32_t width, uint32_t height, const uint8_t* rgbaPixels,
+        bool srgb = true);
 
     VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
     VkDevice m_device = VK_NULL_HANDLE;
@@ -87,7 +89,8 @@ public:
     explicit VulkanTextureFactory(std::shared_ptr<VulkanTextureSystem> system)
         : m_system(std::move(system)) {}
     std::shared_ptr<IGraphicsTexture> CreateTexture2D(
-        uint32_t width, uint32_t height, const uint8_t* rgbaPixels) override;
+        uint32_t width, uint32_t height, const uint8_t* rgbaPixels,
+        bool srgb = true) override;
 
 private:
     std::shared_ptr<VulkanTextureSystem> m_system;

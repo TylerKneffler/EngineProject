@@ -92,6 +92,12 @@ void Component::DrawProperties(IEditorUi& ui)
             
             if (isFilePath)
             {
+                // Texture/file rows reuse hidden widget labels such as
+                // "##path", "Browse...", "Apply", and "Cancel". Scope the
+                // complete row by its serialized property name so multiple
+                // visible material textures never share an ImGui ID.
+                ui.PushId(key.c_str());
+
                 // State key for tracking if this property is being edited
                 std::string stateKey = std::to_string(reinterpret_cast<uintptr_t>(this)) + "_" + key;
                 bool isEditing = (s_editingProperty.find(stateKey) != s_editingProperty.end());
@@ -286,6 +292,8 @@ void Component::DrawProperties(IEditorUi& ui)
                         }
                     }
                 }
+
+                ui.PopId();
             }
             else
             {
@@ -304,7 +312,41 @@ void Component::DrawProperties(IEditorUi& ui)
             float floatVal = value.AsFloat();
             
             // Heuristics for appropriate ranges
-            if (key.find("fov") != std::string::npos || key.find("FOV") != std::string::npos)
+            if (key == "metallicFactor" || key == "roughnessFactor" ||
+                key == "baseColorAlpha" || key == "alphaCutoff" ||
+                key == "occlusionStrength")
+            {
+                if (ui.DragFloat(displayName.c_str(), &floatVal, 0.01f, 0.f, 1.f))
+                {
+                    editedData.Set(key, JsonValue(floatVal));
+                    modified = true;
+                }
+            }
+            else if (key == "normalScale")
+            {
+                if (ui.DragFloat(displayName.c_str(), &floatVal, 0.01f, 0.f, 2.f))
+                {
+                    editedData.Set(key, JsonValue(floatVal));
+                    modified = true;
+                }
+            }
+            else if (key == "heightScale")
+            {
+                if (ui.DragFloat(displayName.c_str(), &floatVal, 0.001f, 0.f, 0.2f))
+                {
+                    editedData.Set(key, JsonValue(floatVal));
+                    modified = true;
+                }
+            }
+            else if (key == "heightMinSteps" || key == "heightMaxSteps")
+            {
+                if (ui.DragFloat(displayName.c_str(), &floatVal, 1.f, 4.f, 64.f))
+                {
+                    editedData.Set(key, JsonValue(floatVal));
+                    modified = true;
+                }
+            }
+            else if (key.find("fov") != std::string::npos || key.find("FOV") != std::string::npos)
             {
                 if (ui.DragFloat(displayName.c_str(), &floatVal, 0.5f, 1.f, 179.f))
                 {

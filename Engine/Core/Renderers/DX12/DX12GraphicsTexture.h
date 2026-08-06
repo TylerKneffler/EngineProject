@@ -29,7 +29,8 @@ class D3D12TextureFactory final : public IGraphicsTextureFactory
 public:
     D3D12TextureFactory(ID3D12Device* device, ID3D12CommandQueue* queue);
     std::shared_ptr<IGraphicsTexture> CreateTexture2D(
-        uint32_t width, uint32_t height, const uint8_t* rgbaPixels) override;
+        uint32_t width, uint32_t height, const uint8_t* rgbaPixels,
+        bool srgb = true) override;
 
 private:
     static constexpr uint32_t kMaxTextures = 1024;

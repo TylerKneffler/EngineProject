@@ -283,7 +283,32 @@ EditorUiViewportInput ImGuiEditorUi::Viewport(void* texture,float aspect,EditorU
     ImVec2 size=a,pos{0,0}; if(aspect>0){float aa=a.x/a.y;if(aa>aspect){size.x=a.y*aspect;pos.x=(a.x-size.x)*.5f;}else{size.y=a.x/aspect;pos.y=(a.y-size.y)*.5f;}}
     if(size.x<a.x||size.y<a.y){ImVec2 p=ImGui::GetCursorScreenPos();ImGui::GetWindowDrawList()->AddRectFilled(p,{p.x+a.x,p.y+a.y},ImGui::GetColorU32({bg.r,bg.g,bg.b,bg.a}));}
     out.available={size.x,size.y}; ImGui::SetCursorPos(pos); ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(texture)),size);
-    const ImVec2 min=ImGui::GetItemRectMin();const ImVec2 mp=ImGui::GetIO().MousePos;out.mousePosInViewport={mp.x-min.x,mp.y-min.y};
-    out.hovered=ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);if(out.hovered){auto d=ImGui::GetIO().MouseDelta;out.mouseDelta={d.x,d.y};out.mouseWheel=ImGui::GetIO().MouseWheel;out.rightDown=ImGui::IsMouseDown(ImGuiMouseButton_Right);out.middleDown=ImGui::IsMouseDown(ImGuiMouseButton_Middle);out.leftClicked=ImGui::IsMouseClicked(ImGuiMouseButton_Left);}return out;
+    const ImVec2 min=ImGui::GetItemRectMin();const ImVec2 max=ImGui::GetItemRectMax();const ImVec2 mp=ImGui::GetIO().MousePos;out.mousePosInViewport={mp.x-min.x,mp.y-min.y};
+    m_viewportScreenMin={min.x,min.y};m_viewportScreenMax={max.x,max.y};
+    out.leftDown=ImGui::IsMouseDown(ImGuiMouseButton_Left);out.leftReleased=ImGui::IsMouseReleased(ImGuiMouseButton_Left);
+    out.hovered=ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);if(out.hovered||out.leftDown){auto d=ImGui::GetIO().MouseDelta;out.mouseDelta={d.x,d.y};}if(out.hovered){out.mouseWheel=ImGui::GetIO().MouseWheel;out.rightDown=ImGui::IsMouseDown(ImGuiMouseButton_Right);out.middleDown=ImGui::IsMouseDown(ImGuiMouseButton_Middle);out.leftClicked=ImGui::IsMouseClicked(ImGuiMouseButton_Left);}return out;
+}
+namespace
+{
+ImU32 ViewportColor(EditorUiColor color)
+{
+    return ImGui::ColorConvertFloat4ToU32({color.r,color.g,color.b,color.a});
+}
+}
+void ImGuiEditorUi::DrawViewportLine(EditorUiVec2 a,EditorUiVec2 b,EditorUiColor color,float thickness)
+{
+    ImDrawList* draw=ImGui::GetWindowDrawList();draw->PushClipRect({m_viewportScreenMin.x,m_viewportScreenMin.y},{m_viewportScreenMax.x,m_viewportScreenMax.y},true);draw->AddLine({m_viewportScreenMin.x+a.x,m_viewportScreenMin.y+a.y},{m_viewportScreenMin.x+b.x,m_viewportScreenMin.y+b.y},ViewportColor(color),thickness);draw->PopClipRect();
+}
+void ImGuiEditorUi::DrawViewportTriangle(EditorUiVec2 a,EditorUiVec2 b,EditorUiVec2 c,EditorUiColor color)
+{
+    ImDrawList* draw=ImGui::GetWindowDrawList();draw->PushClipRect({m_viewportScreenMin.x,m_viewportScreenMin.y},{m_viewportScreenMax.x,m_viewportScreenMax.y},true);draw->AddTriangleFilled({m_viewportScreenMin.x+a.x,m_viewportScreenMin.y+a.y},{m_viewportScreenMin.x+b.x,m_viewportScreenMin.y+b.y},{m_viewportScreenMin.x+c.x,m_viewportScreenMin.y+c.y},ViewportColor(color));draw->PopClipRect();
+}
+void ImGuiEditorUi::DrawViewportCircle(EditorUiVec2 center,float radius,EditorUiColor color,bool filled,float thickness)
+{
+    ImDrawList* draw=ImGui::GetWindowDrawList();draw->PushClipRect({m_viewportScreenMin.x,m_viewportScreenMin.y},{m_viewportScreenMax.x,m_viewportScreenMax.y},true);const ImVec2 point{m_viewportScreenMin.x+center.x,m_viewportScreenMin.y+center.y};if(filled)draw->AddCircleFilled(point,radius,ViewportColor(color));else draw->AddCircle(point,radius,ViewportColor(color),0,thickness);draw->PopClipRect();
+}
+void ImGuiEditorUi::DrawViewportText(EditorUiVec2 position,const char* text,EditorUiColor color)
+{
+    ImDrawList* draw=ImGui::GetWindowDrawList();draw->PushClipRect({m_viewportScreenMin.x,m_viewportScreenMin.y},{m_viewportScreenMax.x,m_viewportScreenMax.y},true);draw->AddText({m_viewportScreenMin.x+position.x,m_viewportScreenMin.y+position.y},ViewportColor(color),text?text:"");draw->PopClipRect();
 }
 void ImGuiEditorUi::FocusWindow(const char*t){ImGui::SetWindowFocus(t);}

@@ -7,6 +7,7 @@ void ImGuiEditorUi::SetNextWindowRect(float x,float y,float w,float h){ ImGui::S
 bool ImGuiEditorUi::BeginWindow(const char* t,bool* o,bool p){ if(p) ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,{0,0}); bool r=ImGui::Begin(t,o); if(p) ImGui::PopStyleVar(); return r; }
 void ImGuiEditorUi::EndWindow(){ImGui::End();}
 void ImGuiEditorUi::PushId(const void* id){ImGui::PushID(id);}
+void ImGuiEditorUi::PushId(const char* id){ImGui::PushID(id);}
 void ImGuiEditorUi::PopId(){ImGui::PopID();}
 bool ImGuiEditorUi::Button(const char* l,float w,float h){return ImGui::Button(l,{w,h});}
 void ImGuiEditorUi::Label(const char* t){ImGui::TextUnformatted(t);}
@@ -42,7 +43,7 @@ void ImGuiEditorUi::ValueLabel(const char*l,const char*v){ImGui::LabelText(l,"%s
 bool ImGuiEditorUi::CollapsingHeader(const char*l,bool d){return ImGui::CollapsingHeader(l,d?ImGuiTreeNodeFlags_DefaultOpen:0);}
 bool ImGuiEditorUi::TreeNode(const void*id,const char*l,bool s,bool leaf,bool d){ImGuiTreeNodeFlags f=ImGuiTreeNodeFlags_OpenOnArrow|ImGuiTreeNodeFlags_SpanAvailWidth|(s?ImGuiTreeNodeFlags_Selected:0)|(d?ImGuiTreeNodeFlags_DefaultOpen:0);if(leaf)f|=ImGuiTreeNodeFlags_Leaf|ImGuiTreeNodeFlags_NoTreePushOnOpen;return ImGui::TreeNodeEx(id,f,"%s",l);}
 void ImGuiEditorUi::TreePop(){ImGui::TreePop();}
-EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,char* name,size_t size,bool* enabled,bool selected,bool leaf,bool lockName,bool enabledInHierarchy,int hierarchyDepth)
+EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,char* name,size_t size,bool* enabled,bool selected,bool leaf,bool lockName,bool enabledInHierarchy,int hierarchyDepth,bool lastSibling,uint64_t ancestorGuideMask)
 {
     EditorUiObjectRowResult result;
     (void)size;
@@ -67,6 +68,24 @@ EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,char* name,s
         openState->second=result.open;
     const ImVec2 rowMinimum=ImGui::GetItemRectMin();
     const ImVec2 rowMaximum=ImGui::GetItemRectMax();
+    const float hierarchyIndent=std::max(ImGui::GetStyle().IndentSpacing,1.f);
+    const float branchX=rowMinimum.x-hierarchyIndent*.5f;
+    const float rowCenterY=(rowMinimum.y+rowMaximum.y)*.5f;
+    ImVec4 guideColor=ImGui::GetStyleColorVec4(ImGuiCol_Separator);
+    guideColor.w*=.7f;
+    ImDrawList* hierarchyDraw=ImGui::GetWindowDrawList();
+    for(int level=0;level<hierarchyDepth;++level){
+        if(level<64&&(ancestorGuideMask&(uint64_t{1}<<level))){
+            const float x=branchX-static_cast<float>(hierarchyDepth-level)*hierarchyIndent;
+            hierarchyDraw->AddLine({x,rowMinimum.y},{x,rowMaximum.y},
+                ImGui::GetColorU32(guideColor),1.f);
+        }
+    }
+    hierarchyDraw->AddLine({branchX,rowMinimum.y},
+        {branchX,lastSibling?rowCenterY:rowMaximum.y},
+        ImGui::GetColorU32(guideColor),1.f);
+    hierarchyDraw->AddLine({branchX,rowCenterY},{rowMinimum.x+4.f,rowCenterY},
+        ImGui::GetColorU32(guideColor),1.f);
     result.clicked=ImGui::IsItemClicked()&&!ImGui::IsItemToggledOpen();
     result.doubleClicked=ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
     const EditorUiHierarchyDropResult drop=HierarchyDropTarget("ENGINE_SCENE_OBJECT");
@@ -116,8 +135,7 @@ EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,char* name,s
         ImGui::GetColorU32(lockName?ImGuiCol_TextDisabled:ImGuiCol_Text),display);
     ImVec4 separatorColor=ImGui::GetStyleColorVec4(ImGuiCol_Separator);
     separatorColor.w*=0.45f;
-    const ImVec2 contentMin={
-        ImGui::GetWindowPos().x+ImGui::GetWindowContentRegionMin().x,textMax.y};
+    const ImVec2 contentMin={branchX,textMax.y};
     const ImVec2 contentMax={
         ImGui::GetWindowPos().x+ImGui::GetWindowContentRegionMax().x,textMax.y};
     ImGui::GetWindowDrawList()->AddLine(
@@ -228,12 +246,16 @@ EditorUiObjectRowResult ImGuiEditorUi::ObjectHeader(const void* id,char* name,si
     return result;
 }
 bool ImGuiEditorUi::Selectable(const char*l,bool s,bool d){return ImGui::Selectable(l,s,d?ImGuiSelectableFlags_AllowDoubleClick:0);}
-EditorUiContextMenuResult ImGuiEditorUi::ContextMenu(const void* id,const char* addLabel,const char* deleteLabel,bool objectCreationMenu)
+EditorUiContextMenuResult ImGuiEditorUi::ContextMenu(const void* id,const char* addLabel,const char* deleteLabel,bool objectCreationMenu,const char* unpackLabel)
 {
     EditorUiContextMenuResult result;
+    const bool hasAdd=addLabel&&addLabel[0];
+    const bool hasDelete=deleteLabel&&deleteLabel[0];
+    const bool hasUnpack=unpackLabel&&unpackLabel[0];
+    if(!hasAdd&&!hasDelete&&!hasUnpack)return result;
     ImGui::PushID(id);
     if(ImGui::BeginPopupContextItem("##context")){
-        if(addLabel&&addLabel[0]){
+        if(hasAdd){
             if(objectCreationMenu){
                 if(ImGui::BeginMenu(addLabel)){
                     result.addRequested=ImGui::MenuItem("Empty");
@@ -242,7 +264,8 @@ EditorUiContextMenuResult ImGuiEditorUi::ContextMenu(const void* id,const char* 
                 }
             }else result.addRequested=ImGui::MenuItem(addLabel);
         }
-        if(deleteLabel&&deleteLabel[0])result.deleteRequested=ImGui::MenuItem(deleteLabel);
+        if(hasUnpack)result.unpackRequested=ImGui::MenuItem(unpackLabel);
+        if(hasDelete)result.deleteRequested=ImGui::MenuItem(deleteLabel);
         ImGui::EndPopup();
     }
     ImGui::PopID();
@@ -268,6 +291,25 @@ void ImGuiEditorUi::EndDragDropSource(){ImGui::EndDragDropSource();}
 bool ImGuiEditorUi::BeginDragDropTarget(){return ImGui::BeginDragDropTarget();}
 const void* ImGuiEditorUi::AcceptDragDropPayload(const char*t,size_t*s){const ImGuiPayload*p=ImGui::AcceptDragDropPayload(t);if(!p)return nullptr;if(s)*s=static_cast<size_t>(p->DataSize);return p->Data;}
 EditorUiDragDropPayloadResult ImGuiEditorUi::InspectDragDropPayload(const char*t){EditorUiDragDropPayloadResult r;const ImGuiPayload*p=ImGui::AcceptDragDropPayload(t,ImGuiDragDropFlags_AcceptBeforeDelivery|ImGuiDragDropFlags_AcceptNoDrawDefaultRect);if(p){r.data=p->Data;r.size=static_cast<size_t>(p->DataSize);r.delivered=p->IsDelivery();}return r;}
+EditorUiDragDropPayloadResult ImGuiEditorUi::WindowDragDropTarget(const char*t)
+{
+    EditorUiDragDropPayloadResult result;
+    ImGuiWindow* window=ImGui::GetCurrentWindow();
+    if(!window||window->SkipItems)return result;
+    const ImGuiID id=window->GetID("##windowAssetDrop");
+    if(!ImGui::BeginDragDropTargetCustom(window->InnerRect,id))return result;
+    const ImGuiPayload* payload=ImGui::AcceptDragDropPayload(t,
+        ImGuiDragDropFlags_AcceptBeforeDelivery|ImGuiDragDropFlags_AcceptNoDrawDefaultRect);
+    if(payload){
+        const auto* bytes=static_cast<const unsigned char*>(payload->Data);
+        m_dropResultPayload.assign(bytes,bytes+payload->DataSize);
+        result.data=m_dropResultPayload.data();
+        result.size=m_dropResultPayload.size();
+        result.delivered=payload->IsDelivery()||!ImGui::IsMouseDown(ImGuiMouseButton_Left);
+    }
+    ImGui::EndDragDropTarget();
+    return result;
+}
 void ImGuiEditorUi::EndDragDropTarget(){ImGui::EndDragDropTarget();}
 void ImGuiEditorUi::SetClipboardText(const char*t){ImGui::SetClipboardText(t);} void ImGuiEditorUi::ScrollToBottom(){ImGui::SetScrollHereY(1.f);}
 bool ImGuiEditorUi::BeginTabBar(const char*i){return ImGui::BeginTabBar(i);} void ImGuiEditorUi::EndTabBar(){ImGui::EndTabBar();}
@@ -283,7 +325,32 @@ EditorUiViewportInput ImGuiEditorUi::Viewport(void* texture,float aspect,EditorU
     ImVec2 size=a,pos{0,0}; if(aspect>0){float aa=a.x/a.y;if(aa>aspect){size.x=a.y*aspect;pos.x=(a.x-size.x)*.5f;}else{size.y=a.x/aspect;pos.y=(a.y-size.y)*.5f;}}
     if(size.x<a.x||size.y<a.y){ImVec2 p=ImGui::GetCursorScreenPos();ImGui::GetWindowDrawList()->AddRectFilled(p,{p.x+a.x,p.y+a.y},ImGui::GetColorU32({bg.r,bg.g,bg.b,bg.a}));}
     out.available={size.x,size.y}; ImGui::SetCursorPos(pos); ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(texture)),size);
-    const ImVec2 min=ImGui::GetItemRectMin();const ImVec2 mp=ImGui::GetIO().MousePos;out.mousePosInViewport={mp.x-min.x,mp.y-min.y};
-    out.hovered=ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);if(out.hovered){auto d=ImGui::GetIO().MouseDelta;out.mouseDelta={d.x,d.y};out.mouseWheel=ImGui::GetIO().MouseWheel;out.rightDown=ImGui::IsMouseDown(ImGuiMouseButton_Right);out.middleDown=ImGui::IsMouseDown(ImGuiMouseButton_Middle);out.leftClicked=ImGui::IsMouseClicked(ImGuiMouseButton_Left);}return out;
+    const ImVec2 min=ImGui::GetItemRectMin();const ImVec2 max=ImGui::GetItemRectMax();const ImVec2 mp=ImGui::GetIO().MousePos;out.mousePosInViewport={mp.x-min.x,mp.y-min.y};
+    m_viewportScreenMin={min.x,min.y};m_viewportScreenMax={max.x,max.y};
+    out.leftDown=ImGui::IsMouseDown(ImGuiMouseButton_Left);out.leftReleased=ImGui::IsMouseReleased(ImGuiMouseButton_Left);
+    out.hovered=ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);if(out.hovered||out.leftDown){auto d=ImGui::GetIO().MouseDelta;out.mouseDelta={d.x,d.y};}if(out.hovered){out.mouseWheel=ImGui::GetIO().MouseWheel;out.rightDown=ImGui::IsMouseDown(ImGuiMouseButton_Right);out.middleDown=ImGui::IsMouseDown(ImGuiMouseButton_Middle);out.leftClicked=ImGui::IsMouseClicked(ImGuiMouseButton_Left);}return out;
+}
+namespace
+{
+ImU32 ViewportColor(EditorUiColor color)
+{
+    return ImGui::ColorConvertFloat4ToU32({color.r,color.g,color.b,color.a});
+}
+}
+void ImGuiEditorUi::DrawViewportLine(EditorUiVec2 a,EditorUiVec2 b,EditorUiColor color,float thickness)
+{
+    ImDrawList* draw=ImGui::GetWindowDrawList();draw->PushClipRect({m_viewportScreenMin.x,m_viewportScreenMin.y},{m_viewportScreenMax.x,m_viewportScreenMax.y},true);draw->AddLine({m_viewportScreenMin.x+a.x,m_viewportScreenMin.y+a.y},{m_viewportScreenMin.x+b.x,m_viewportScreenMin.y+b.y},ViewportColor(color),thickness);draw->PopClipRect();
+}
+void ImGuiEditorUi::DrawViewportTriangle(EditorUiVec2 a,EditorUiVec2 b,EditorUiVec2 c,EditorUiColor color)
+{
+    ImDrawList* draw=ImGui::GetWindowDrawList();draw->PushClipRect({m_viewportScreenMin.x,m_viewportScreenMin.y},{m_viewportScreenMax.x,m_viewportScreenMax.y},true);draw->AddTriangleFilled({m_viewportScreenMin.x+a.x,m_viewportScreenMin.y+a.y},{m_viewportScreenMin.x+b.x,m_viewportScreenMin.y+b.y},{m_viewportScreenMin.x+c.x,m_viewportScreenMin.y+c.y},ViewportColor(color));draw->PopClipRect();
+}
+void ImGuiEditorUi::DrawViewportCircle(EditorUiVec2 center,float radius,EditorUiColor color,bool filled,float thickness)
+{
+    ImDrawList* draw=ImGui::GetWindowDrawList();draw->PushClipRect({m_viewportScreenMin.x,m_viewportScreenMin.y},{m_viewportScreenMax.x,m_viewportScreenMax.y},true);const ImVec2 point{m_viewportScreenMin.x+center.x,m_viewportScreenMin.y+center.y};if(filled)draw->AddCircleFilled(point,radius,ViewportColor(color));else draw->AddCircle(point,radius,ViewportColor(color),0,thickness);draw->PopClipRect();
+}
+void ImGuiEditorUi::DrawViewportText(EditorUiVec2 position,const char* text,EditorUiColor color)
+{
+    ImDrawList* draw=ImGui::GetWindowDrawList();draw->PushClipRect({m_viewportScreenMin.x,m_viewportScreenMin.y},{m_viewportScreenMax.x,m_viewportScreenMax.y},true);draw->AddText({m_viewportScreenMin.x+position.x,m_viewportScreenMin.y+position.y},ViewportColor(color),text?text:"");draw->PopClipRect();
 }
 void ImGuiEditorUi::FocusWindow(const char*t){ImGui::SetWindowFocus(t);}

@@ -45,7 +45,8 @@ public:
 
 private:
     enum class PendingAddType { Empty, Cube };
-    void DrawObjectNode(IEditorUi& ui, Object* obj, int depth);
+    void DrawObjectNode(IEditorUi& ui, Object* obj, int depth,
+        bool lastSibling, uint64_t ancestorGuideMask = 0);
     void LogInteraction(const std::string& message) const;
     void CopySelection();
     void PasteClipboard();

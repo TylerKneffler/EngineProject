@@ -5,8 +5,8 @@
 
 class IEditorUi;
 
-// Persistent output written by BakedLightingPipeline. This first bake stage is
-// an object-space irradiance probe; future lightmap data can live beside it.
+// Persistent source/generated asset mapping written by BakedLightingPipeline.
+// The source snapshot makes inline and prefab materials safely reversible.
 class BakedLightingData final : public Component
 {
 public:
@@ -15,8 +15,12 @@ public:
     glm::vec3 irradiance{ 0.f };
     glm::vec3 directionalIrradiance{ 0.f };
     glm::vec3 lightDirection{ 0.f, 1.f, 0.f };
+    std::string originalMaterialAsset;
+    std::string originalMaterialSnapshot;
+    std::string bakedMaterialAsset;
+    std::string bakedLightmapAsset;
     bool valid = false;
-    int version = 2;
+    int version = 3;
 
     void DrawProperties(IEditorUi& ui) override;
 };

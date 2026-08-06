@@ -35,7 +35,8 @@ D3D12TextureFactory::D3D12TextureFactory(
 std::shared_ptr<IGraphicsTexture> D3D12TextureFactory::CreateTexture2D(
     uint32_t width,
     uint32_t height,
-    const uint8_t* rgbaPixels)
+    const uint8_t* rgbaPixels,
+    bool srgb)
 {
     if (!m_device || !m_queue || !m_heap || !width || !height || !rgbaPixels ||
         m_nextDescriptor >= kMaxTextures)
@@ -146,7 +147,9 @@ std::shared_ptr<IGraphicsTexture> D3D12TextureFactory::CreateTexture2D(
     ++m_nextDescriptor;
 
     D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
-    srv.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+    srv.Format = srgb
+        ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB
+        : DXGI_FORMAT_R8G8B8A8_UNORM;
     srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     srv.Texture2D.MipLevels = 1;

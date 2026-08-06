@@ -224,6 +224,22 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
         if (framerate)
             settings.targetFramerate = std::stoul(framerate.child_value());
 
+        auto lightmapResolution = prop.child("BakedLightmapResolution");
+        if (lightmapResolution)
+            settings.bakedLighting.lightmapResolution =
+                std::stoul(lightmapResolution.child_value());
+        auto shadowBias = prop.child("BakedShadowBias");
+        if (shadowBias)
+            settings.bakedLighting.shadowBias = std::stof(shadowBias.child_value());
+        auto dilationPasses = prop.child("BakedDilationPasses");
+        if (dilationPasses)
+            settings.bakedLighting.dilationPasses =
+                std::stoul(dilationPasses.child_value());
+        auto accumulate = prop.child("BakedPreserveSourceEmission");
+        if (accumulate)
+            settings.bakedLighting.accumulate =
+                std::string(accumulate.child_value()) != "false";
+
         if (!settings.renderingAPI.empty() || !settings.editorRenderingAPI.empty())
             break;
     }

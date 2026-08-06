@@ -78,6 +78,7 @@ public:
     void Render(IGraphicsContext* context, float aspect,
         Camera* cameraOverride = nullptr, bool includeEditorVisuals = true);
     void SetSelectedObject(Object* obj) { m_selectedObject = obj; }
+    Object* GetSelectedObject() const { return m_selectedObject; }
     void SetPreviewObject(Object* obj) { m_previewObject = obj; }
 
     // Returns the first active Camera component found on a scene game object.
@@ -109,7 +110,10 @@ public:
     std::string SaveToString() const;
     bool LoadFromString(const std::string& source);
 
-    Engine::Rendering::Lighting::BakeResult BakeLighting();
+    Engine::Rendering::Lighting::BakeResult BakeLighting(
+        const std::string& assetsDirectory = "Assets",
+        const std::string& sceneName = "Scene",
+        const Engine::Rendering::Lighting::BakedLightingSettings& bakeSettings = {});
     void ClearBakedLighting();
     const std::string& GetLightingBakeStatus() const { return m_lightingBakeStatus; }
 
@@ -133,7 +137,11 @@ private:
     std::string m_loadedSkyboxPath;
 
     std::unique_ptr<IPipelineState> m_objectPipeline;
+    std::unique_ptr<IPipelineState> m_objectDoubleSidedPipeline;
+    std::unique_ptr<IPipelineState> m_objectBlendPipeline;
+    std::unique_ptr<IPipelineState> m_objectBlendDoubleSidedPipeline;
     std::unique_ptr<IPipelineState> m_objectPreviewPipeline;
+    std::unique_ptr<IPipelineState> m_objectPreviewDoubleSidedPipeline;
     std::unique_ptr<IPipelineState> m_objectOutlinePipeline;
     std::unique_ptr<IGraphicsBuffer> m_objectConstantBuffer;
     void* m_objectCBMapped = nullptr;

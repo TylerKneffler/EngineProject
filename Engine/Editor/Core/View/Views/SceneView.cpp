@@ -131,6 +131,13 @@ void SceneView::DrawPanel(IEditorUi& ui)
          static_cast<float>(m_gameWindowWidth) / static_cast<float>(m_gameWindowHeight));
     const auto input = ui.Viewport(GetUiTextureHandle(), targetAspect,
         {m_letterboxColor.r,m_letterboxColor.g,m_letterboxColor.b,m_letterboxColor.a});
+    const EditorGizmoResult gizmoResult = m_scene
+        ? m_gizmos.DrawAndHandle(*m_scene, ui, input)
+        : EditorGizmoResult{};
+    if (OnGizmoInteraction)
+        OnGizmoInteraction(gizmoResult.transformDragging);
+    if (gizmoResult.selectionRequested && OnObjectSelected)
+        OnObjectSelected(gizmoResult.selectedObject);
     bool prefabDragObserved = false;
     if (ui.BeginDragDropTarget())
     {
@@ -207,7 +214,8 @@ void SceneView::DrawPanel(IEditorUi& ui)
         // Check for mouse input on the viewport
         if (input.hovered)
         {
-            if (input.leftClicked && !input.rightDown && !input.middleDown && OnObjectSelected)
+            if (input.leftClicked && !gizmoResult.consumedClick &&
+                !input.rightDown && !input.middleDown && OnObjectSelected)
                 OnObjectSelected(PickObjectInViewport(input.mousePosInViewport, input.available));
 
             EditorUiVec2 d = input.mouseDelta;

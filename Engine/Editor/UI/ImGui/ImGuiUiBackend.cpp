@@ -183,11 +183,12 @@ void ImGuiUiBackend::DrawEditor(EditorState& state, PlayState playState,
     m_buildManager = buildManager;
     if (!m_presentation)
         m_presentation = std::make_unique<EditorUI>(&state);
+    state.ResetSceneEditInProgress();
     m_presentation->SetGameBuildManager(buildManager);
     m_presentation->Render(playState);
     state.TrackSceneChanges(
         playState == PlayState::Stopped || playState == PlayState::BuildFailed,
-        ImGui::IsAnyItemActive());
+        ImGui::IsAnyItemActive() || state.IsSceneEditInProgress());
 }
 
 bool ImGuiUiBackend::HandleMessage(void* nativeWindow, uint32_t message,

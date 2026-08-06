@@ -2,6 +2,7 @@
 
 #include "Core/Rendering/Lighting/Pipelines/ILightingPipeline.h"
 #include "Core/Rendering/Lighting/LightingTypes.h"
+#include <string>
 
 class Scene;
 
@@ -15,7 +16,9 @@ namespace Engine::Rendering::Lighting
             return LightingPipelineKind::Baked;
         }
 
-        BakeResult Bake(Scene& scene) const;
+        BakeResult Bake(Scene& scene, const std::string& assetsDirectory,
+            const std::string& sceneName,
+            const BakedLightingSettings& bakeSettings) const;
         uint32_t Clear(Scene& scene) const;
     };
 }

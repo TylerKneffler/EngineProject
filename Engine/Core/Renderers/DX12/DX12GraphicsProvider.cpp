@@ -3,12 +3,12 @@
 Microsoft::WRL::ComPtr<ID3D12RootSignature>
 CreateD3D12MaterialRootSignature(ID3D12Device* device)
 {
-    D3D12_DESCRIPTOR_RANGE ranges[5]{};
-    D3D12_ROOT_PARAMETER parameters[8]{};
+    D3D12_DESCRIPTOR_RANGE ranges[6]{};
+    D3D12_ROOT_PARAMETER parameters[9]{};
     parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
     parameters[0].Descriptor.ShaderRegister = 0;
     parameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-    for (UINT index = 0; index < 5; ++index)
+    for (UINT index = 0; index < 6; ++index)
     {
         ranges[index].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
         ranges[index].NumDescriptors = 1;
@@ -21,9 +21,9 @@ CreateD3D12MaterialRootSignature(ID3D12Device* device)
     }
     for (UINT index = 0; index < 2; ++index)
     {
-        parameters[index + 6].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
-        parameters[index + 6].Descriptor.ShaderRegister = index + 5;
-        parameters[index + 6].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        parameters[index + 7].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+        parameters[index + 7].Descriptor.ShaderRegister = index + 6;
+        parameters[index + 7].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
     }
 
     D3D12_STATIC_SAMPLER_DESC sampler{};

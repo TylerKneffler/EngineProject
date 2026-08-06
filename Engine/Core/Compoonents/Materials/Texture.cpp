@@ -14,7 +14,13 @@
 
 namespace
 {
-std::string TextureIdentity(const std::string& path)
+std::unordered_map<std::string, std::weak_ptr<Texture>>& TextureRegistry()
+{
+    static std::unordered_map<std::string, std::weak_ptr<Texture>> registry;
+    return registry;
+}
+
+std::string TextureIdentity(const std::string& path, bool srgb)
 {
     std::error_code error;
     std::filesystem::path identity =
@@ -26,22 +32,41 @@ std::string TextureIdentity(const std::string& path)
     std::transform(key.begin(), key.end(), key.begin(),
         [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
 #endif
-    return key;
+    return key + (srgb ? "|srgb" : "|linear");
 }
 }
 
-std::shared_ptr<Texture> Texture::Acquire(const std::string& path)
+std::shared_ptr<Texture> Texture::Acquire(const std::string& path, bool srgb)
 {
-    static std::unordered_map<std::string, std::weak_ptr<Texture>> registry;
-    const std::string key = TextureIdentity(path);
+    const std::string key = TextureIdentity(path, srgb);
+    auto& registry = TextureRegistry();
     if (auto found = registry.find(key); found != registry.end())
         if (auto existing = found->second.lock())
             return existing;
 
     auto texture = std::shared_ptr<Texture>(new Texture(
-        std::filesystem::path(path).lexically_normal().generic_string()));
+        std::filesystem::path(path).lexically_normal().generic_string(), srgb));
     registry[key] = texture;
     return texture;
+}
+
+void Texture::Invalidate(const std::string& path)
+{
+    for (const bool srgb : { false, true })
+    {
+        const auto found = TextureRegistry().find(TextureIdentity(path, srgb));
+        if (found != TextureRegistry().end())
+            if (const auto texture = found->second.lock())
+                texture->InvalidateCache();
+    }
+}
+
+void Texture::InvalidateCache()
+{
+    m_pixels.clear();
+    m_width = m_height = 0;
+    m_graphicsTexture.reset();
+    m_preparedProvider = nullptr;
 }
 
 bool Texture::Load()
@@ -95,6 +120,14 @@ bool Texture::Load()
     return success;
 }
 
+void Texture::Reload()
+{
+    m_pixels.clear();
+    m_width = m_height = 0;
+    m_graphicsTexture.reset();
+    m_preparedProvider = nullptr;
+}
+
 bool Texture::Prepare(IGraphicsProvider* graphicsProvider)
 {
     if (!graphicsProvider)
@@ -109,7 +142,8 @@ bool Texture::Prepare(IGraphicsProvider* graphicsProvider)
     try
     {
         m_graphicsTexture =
-            factory->CreateTexture2D(m_width, m_height, m_pixels.data());
+            factory->CreateTexture2D(
+                m_width, m_height, m_pixels.data(), m_srgb);
     }
     catch (const std::exception& error)
     {

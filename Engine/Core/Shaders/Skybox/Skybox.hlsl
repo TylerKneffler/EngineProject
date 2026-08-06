@@ -5,7 +5,7 @@ struct SkyboxConst { float4x4 invVP; };
 [[vk::push_constant]] SkyboxConst cb;
 #define invVP cb.invVP
 [[vk::binding(0, 0)]] Texture2D skyTexture;
-[[vk::binding(5, 0)]] SamplerState skySampler;
+[[vk::binding(6, 0)]] SamplerState skySampler;
 #else
 cbuffer SkyboxCB : register(b0) { float4x4 invVP; };
 Texture2D skyTexture : register(t0);

@@ -96,6 +96,7 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
         view->OnAssetPreviewCommitted = OnAssetPreviewCommitted;
         if (OnObjectSelected)
             view->OnObjectSelected = OnObjectSelected;
+        view->OnGizmoInteraction = OnGizmoInteraction;
         return view;
     }
 

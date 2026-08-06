@@ -60,6 +60,12 @@ public:
     bool CanUndo() const { return m_hasPendingHistoryEdit || !m_undoHistory.empty(); }
     bool CanRedo() const { return !m_redoHistory.empty(); }
     void SetHistoryLimit(uint32_t limit);
+    void ResetSceneEditInProgress() { m_sceneEditInProgress = false; }
+    void ReportSceneEditInProgress(bool active)
+    {
+        m_sceneEditInProgress = m_sceneEditInProgress || active;
+    }
+    bool IsSceneEditInProgress() const { return m_sceneEditInProgress; }
 
     bool IsShowingPreferences() const { return m_showPreferences; }
     void SetShowPreferences(bool show) { m_showPreferences = show; }
@@ -121,6 +127,7 @@ private:
     uint32_t m_historyLimit = 100;
     bool m_hasPendingHistoryEdit = false;
     bool m_assetPreviewActive = false;
+    bool m_sceneEditInProgress = false;
 
     std::string m_sceneToLoad;
     bool m_showUnsavedWarning = false;

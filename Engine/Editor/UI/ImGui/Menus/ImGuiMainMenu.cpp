@@ -44,15 +44,9 @@ void ImGuiMainMenu::DrawRenderingMenu(
         const bool disabled = !scene || IsBusy(playState);
         if (disabled) ImGui::BeginDisabled();
         if (ImGui::MenuItem("Bake Lighting"))
-        {
-            scene->BakeLighting();
-            state.SetHasUnsavedChanges(true);
-        }
+            state.BakeLighting();
         if (ImGui::MenuItem("Clear Baked Lighting"))
-        {
-            scene->ClearBakedLighting();
-            state.SetHasUnsavedChanges(true);
-        }
+            state.ClearBakedLighting();
         if (disabled) ImGui::EndDisabled();
         ImGui::EndMenu();
     }

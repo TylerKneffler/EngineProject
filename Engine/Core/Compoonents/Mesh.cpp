@@ -45,15 +45,20 @@ std::filesystem::path ResolveMeshPath(const std::string& path)
 }
 
 #pragma region OBJ file parsing helpers
-static void ParseFaceToken(const std::string& t, int& vi, int& vni)
+static void ParseFaceToken(const std::string& t, int& vi, int& vti, int& vni)
 {
-    vi = vni = 0;
+    vi = vti = vni = 0;
     size_t a = t.find('/');
     if (a == std::string::npos) { vi = std::stoi(t); return; }
     vi = std::stoi(t.substr(0, a));
     size_t b = t.find('/', a + 1);
-    if (b != std::string::npos && b + 1 < t.size())
-        vni = std::stoi(t.substr(b + 1));
+    if (b == std::string::npos)
+    {
+        if (a + 1 < t.size()) vti = std::stoi(t.substr(a + 1));
+        return;
+    }
+    if (b > a + 1) vti = std::stoi(t.substr(a + 1, b - a - 1));
+    if (b + 1 < t.size()) vni = std::stoi(t.substr(b + 1));
 }
 #pragma endregion
 #pragma region Mesh implementation
@@ -88,6 +93,7 @@ void Mesh::LoadFromFile(const std::string& path)
 
     std::vector<std::array<float, 3>> positions;
     std::vector<std::array<float, 3>> normals;
+    std::vector<std::array<float, 2>> texcoords;
     m_vertices.clear();
 
     std::string line;
@@ -109,16 +115,23 @@ void Mesh::LoadFromFile(const std::string& path)
             ss >> n[0] >> n[1] >> n[2];
             normals.push_back(n);
         }
+        else if (token == "vt")
+        {
+            std::array<float, 2> uv{};
+            ss >> uv[0] >> uv[1];
+            texcoords.push_back(uv);
+        }
         else if (token == "f")
         {
             std::string t0, t1, t2;
             ss >> t0 >> t1 >> t2;
             for (auto& tok : { t0, t1, t2 })
             {
-                int vi = 0, vni = 0;
-                ParseFaceToken(tok, vi, vni);
+                int vi = 0, vti = 0, vni = 0;
+                ParseFaceToken(tok, vi, vti, vni);
                 Vertex v{};
                 if (vi  > 0) { auto& p = positions[vi  - 1]; v.pos[0]    = p[0]; v.pos[1]    = p[1]; v.pos[2]    = p[2]; }
+                if (vti > 0) { auto& uv = texcoords[vti - 1]; v.uv[0] = uv[0]; v.uv[1] = uv[1]; }
                 if (vni > 0) { auto& n = normals  [vni - 1]; v.normal[0] = n[0]; v.normal[1] = n[1]; v.normal[2] = n[2]; }
                 m_vertices.push_back(v);
             }

@@ -3,6 +3,7 @@
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
 #include "Core/ProjectLoader.h"
+#include "Engine/Editor/Core/Gizmos/EditorGizmoSystem.h"
 
 // ---------------------------------------------------------------------------
 // SceneView — editor Scene panel
@@ -47,6 +48,7 @@ public:
     std::function<void(Object*)> OnAssetPreviewCancelled;
     std::function<void(Object*, const std::string&)> OnAssetPreviewCommitted;
     std::function<void(Object*)> OnObjectSelected;
+    std::function<void(bool)> OnGizmoInteraction;
 
 private:
     Object* PickObjectInViewport(const EditorUiVec2& mousePos, const EditorUiVec2& viewportSize) const;
@@ -71,4 +73,5 @@ private:
     Object* m_prefabPreview = nullptr;
     std::string m_prefabPreviewPath;
     bool m_prefabPreviewHasPlacement = false;
+    EditorGizmoSystem m_gizmos;
 };

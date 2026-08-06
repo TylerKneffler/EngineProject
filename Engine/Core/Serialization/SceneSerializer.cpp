@@ -375,6 +375,74 @@ static void DeserialiseTransform(Transform& transform, const JsonValue& node)
     transform.Deserialize(node);
 }
 
+static JsonValue SerialiseBakedMaterialOverrides(const Object& root)
+{
+    JsonValue overrides = JsonValue::MakeArray();
+    std::function<void(const Object&, std::vector<size_t>)> visit =
+        [&](const Object& object, std::vector<size_t> path)
+    {
+        const auto* baked = object.GetComponent<BakedLightingData>();
+        const auto* material = object.GetComponent<Material>();
+        if (baked && material)
+        {
+            JsonValue entry = JsonValue::MakeObject();
+            JsonValue serializedPath = JsonValue::MakeArray();
+            for (const size_t index : path)
+                serializedPath.Push(JsonValue(static_cast<int>(index)));
+            entry.Set("path", std::move(serializedPath));
+            entry.Set("material", material->Serialize());
+            entry.Set("bakedLighting", baked->Serialize());
+            overrides.Push(std::move(entry));
+        }
+        for (size_t index = 0; index < object.Children.size(); ++index)
+        {
+            auto childPath = path;
+            childPath.push_back(index);
+            visit(*object.Children[index], std::move(childPath));
+        }
+    };
+    visit(root, {});
+    return overrides;
+}
+
+static void ApplyBakedMaterialOverrides(Object& root, const JsonValue& node,
+    IGraphicsProvider* graphicsProvider)
+{
+    const JsonValue& overrides = node["bakedMaterialOverrides"];
+    for (size_t overrideIndex = 0;
+        overrideIndex < overrides.ArraySize(); ++overrideIndex)
+    {
+        const JsonValue& entry = overrides.ArrayAt(overrideIndex);
+        Object* object = &root;
+        const JsonValue& path = entry["path"];
+        bool validPath = true;
+        for (size_t depth = 0; depth < path.ArraySize(); ++depth)
+        {
+            const int index = path.ArrayAt(depth).AsInt();
+            if (index < 0 || static_cast<size_t>(index) >= object->Children.size())
+            {
+                validPath = false;
+                break;
+            }
+            object = object->Children[static_cast<size_t>(index)];
+        }
+        if (!validPath || !entry["material"].IsObject() ||
+            !entry["bakedLighting"].IsObject())
+            continue;
+
+        Material* material = object->GetComponent<Material>();
+        if (!material)
+            material = object->AddComponent<Material>();
+        material->Deserialize(entry["material"]);
+        material->OnAfterDeserialize(graphicsProvider);
+
+        BakedLightingData* baked = object->GetComponent<BakedLightingData>();
+        if (!baked)
+            baked = object->AddComponent<BakedLightingData>();
+        baked->Deserialize(entry["bakedLighting"]);
+    }
+}
+
 static JsonValue SerialiseObject(
     const Object& obj,
     bool serialisePrefabAsReference = true)
@@ -385,6 +453,9 @@ static JsonValue SerialiseObject(
         node.Set("prefab", JsonValue(obj.Prefab->GetPath()));
         node.Set("enabled", JsonValue(obj.enabled));
         node.Set("transform", SerialiseTransform(obj.transform));
+        const JsonValue overrides = SerialiseBakedMaterialOverrides(obj);
+        if (overrides.ArraySize() > 0)
+            node.Set("bakedMaterialOverrides", overrides);
         return node;
     }
 
@@ -508,6 +579,8 @@ static bool DeserialiseScene(Scene& scene, const JsonValue& root,
                 DeserialiseTransform(child->transform, childNode["transform"]);
                 if (childNode.Has("enabled"))
                     child->enabled = childNode["enabled"].AsBool();
+                ApplyBakedMaterialOverrides(
+                    *child, childNode, graphicsProvider);
             }
             else
             {
@@ -535,6 +608,8 @@ static bool DeserialiseScene(Scene& scene, const JsonValue& root,
             DeserialiseTransform(object->transform, objectNode["transform"]);
             if (objectNode.Has("enabled"))
                 object->enabled = objectNode["enabled"].AsBool();
+            ApplyBakedMaterialOverrides(
+                *object, objectNode, graphicsProvider);
         }
         else
         {
@@ -551,7 +626,11 @@ bool SceneSerializer::LoadFromString(Scene& scene, const std::string& source,
     IGraphicsProvider* graphicsProvider)
 {
     EnsureBuiltinsRegistered();
-    try { return DeserialiseScene(scene, JsonParse(source), graphicsProvider, GetRegistry()); }
+    try
+    {
+        if (DeserialiseScene(scene, JsonParse(source), graphicsProvider, GetRegistry()))
+            return true;
+    }
     catch (const std::exception&) {}
 
     try
@@ -812,6 +891,8 @@ Object* SceneSerializer::InstantiatePrefab(
                     DeserialiseTransform(child->transform, childNode["transform"]);
                     if (childNode.Has("enabled"))
                         child->enabled = childNode["enabled"].AsBool();
+                    ApplyBakedMaterialOverrides(
+                        *child, childNode, graphicsProvider);
                 }
                 else
                 {

@@ -472,6 +472,25 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
     if (ui.InputUInt("##editorViewportHeight", &m_settings.viewportHeight))
         NotifyChanged();
     ui.SameLine(); ui.DisabledLabel("Editor Viewport Height");
+
+    ui.Separator();
+    ui.Label("Baked Lighting");
+    if (ui.InputUInt("Lightmap Resolution", &m_settings.bakedLighting.lightmapResolution))
+        NotifyChanged();
+    ui.Tooltip("Per-object lightmap size. The baker clamps this to 32-2048.");
+    if (ui.DragFloat("Shadow Bias", &m_settings.bakedLighting.shadowBias,
+            0.0001f, 0.00001f, 0.1f))
+        NotifyChanged();
+    int dilationPasses = static_cast<int>(m_settings.bakedLighting.dilationPasses);
+    if (ui.SliderInt("Lightmap Dilation", &dilationPasses, 0, 32))
+    {
+        m_settings.bakedLighting.dilationPasses =
+            static_cast<uint32_t>(dilationPasses);
+        NotifyChanged();
+    }
+    if (ui.Checkbox("Preserve Source Emission",
+            &m_settings.bakedLighting.accumulate))
+        NotifyChanged();
 }
 
 // ---------------------------------------------------------------------------
@@ -588,6 +607,24 @@ bool PreferencesView::SaveSettings()
             auto framerate = prop.child("TargetFramerate");
             if (framerate)
                 framerate.text().set(std::to_string(m_settings.targetFramerate).c_str());
+
+            if (renderingApi || editorRenderingApi || gameRenderingApi)
+            {
+                auto setBakeValue = [&prop](const char* name, const std::string& value)
+                {
+                    auto node = prop.child(name);
+                    if (!node) node = prop.append_child(name);
+                    node.text().set(value.c_str());
+                };
+                setBakeValue("BakedLightmapResolution",
+                    std::to_string(m_settings.bakedLighting.lightmapResolution));
+                setBakeValue("BakedShadowBias",
+                    std::to_string(m_settings.bakedLighting.shadowBias));
+                setBakeValue("BakedDilationPasses",
+                    std::to_string(m_settings.bakedLighting.dilationPasses));
+                setBakeValue("BakedPreserveSourceEmission",
+                    m_settings.bakedLighting.accumulate ? "true" : "false");
+            }
 
             auto modeNode = prop.child("AspectRatioMode");
             if (modeNode)
