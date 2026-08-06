@@ -80,6 +80,8 @@ public:
     void SetSelectedObject(Object* obj) { m_selectedObject = obj; }
     Object* GetSelectedObject() const { return m_selectedObject; }
     void SetPreviewObject(Object* obj) { m_previewObject = obj; }
+    void SetEditorMode2D(bool enabled);
+    bool IsEditorMode2D() const { return m_editorMode2D; }
 
     // Returns the first active Camera component found on a scene game object.
     // The editor camera is deliberately excluded so GameView cannot silently
@@ -163,6 +165,8 @@ private:
     std::vector<std::unique_ptr<Object>> m_objects;
     Object* m_selectedObject = nullptr;
     Object* m_previewObject = nullptr;
+    bool m_editorMode2D = false;
+    bool m_editorCameraModeInitialized = false;
 
     static constexpr uint32_t kMaxObjects = 64;
     static constexpr uint32_t kMaxLights =

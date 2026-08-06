@@ -2,6 +2,7 @@
 #include "Core/Compoonents/Camera.h"
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Compoonents/Material.h"
+#include "Core/Compoonents/Sprite.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
 #include "Core/Rendering/Lighting/LightingTypes.h"
@@ -14,6 +15,7 @@
 #include <stdexcept>
 #include <filesystem>
 #include <glm/glm.hpp>
+#include <glm/ext/matrix_transform.hpp>
 
 #ifndef ENGINE_SHADERS_PATH
 #define ENGINE_SHADERS_PATH "Engine/Core/Shaders/"
@@ -73,6 +75,7 @@ struct ObjectGPUData
     glm::vec4 bakedDirectional;
     glm::vec4 bakedLightDirection;
     glm::vec4 parallaxParams; // scale, minimum steps, maximum steps, reserved
+    glm::vec4 spriteUvRect; // offset.xy, scale.xy
 };
 
 // Constant buffer for grid rendering
@@ -86,20 +89,21 @@ struct GridCBData
     float fadeDistance;
     float nearPlane;
     float farPlane;
-    float padding;  // Constant-buffer allocation uses a 256-byte stride.
+    float mode2D;
 };
 
 struct SkyboxCBData
 {
     glm::mat4 invVP;
+    glm::vec4 displayParams; // x: fullscreen 2D background mode
 };
 
 static_assert(sizeof(DrawCBData) == 16, "Draw constants must remain small");
-static_assert(sizeof(ObjectGPUData) == 256, "Object buffer layout must match Object.hlsl");
+static_assert(sizeof(ObjectGPUData) == 272, "Object buffer layout must match Object.hlsl");
 static_assert(sizeof(Engine::Rendering::Lighting::LightData) == 48,
     "Light buffer layout must match Object.hlsl");
 static_assert(sizeof(GridCBData) == 128, "Grid constant-buffer layout must match Grid.hlsl");
-static_assert(sizeof(SkyboxCBData) == 64, "Skybox constant-buffer layout must match Skybox.hlsl");
+static_assert(sizeof(SkyboxCBData) == 80, "Skybox constant-buffer layout must match Skybox.hlsl");
 
 // ---------------------------------------------------------------------------
 // Scene::Init
@@ -172,12 +176,30 @@ void Scene::Init(IGraphicsProvider* graphicsProvider)
     // Set up the default editor camera
     Camera* editorCameraComponent = editorCamera.AddComponent<Camera>();
     editorCameraComponent->useTransformRotation = false;
-    editorCamera.transform.position = { 0.f, 1.5f, -3.f };
+    SetEditorMode2D(m_editorMode2D);
 
     // Build pipeline states
     BuildGridPipeline();
     BuildSkyboxPipeline();
     BuildObjectPipeline();
+}
+
+void Scene::SetEditorMode2D(bool enabled)
+{
+    if (m_editorCameraModeInitialized && m_editorMode2D == enabled)
+        return;
+    m_editorMode2D = enabled;
+    Camera* camera = editorCamera.GetComponent<Camera>();
+    if (!camera)
+        return;
+    m_editorCameraModeInitialized = true;
+    camera->useTransformRotation = false;
+    camera->orthographic = enabled;
+    camera->target = { 0.f, 0.f, 0.f };
+    camera->up = { 0.f, 1.f, 0.f };
+    editorCamera.transform.position = enabled
+        ? glm::vec3(0.f, 0.f, -10.f)
+        : glm::vec3(0.f, 1.5f, -3.f);
 }
 
 void Scene::BuildSkyboxPipeline()
@@ -481,8 +503,15 @@ void Scene::Render(IGraphicsContext* context, float aspect,
         return;
     }
 
-    const glm::mat4 view = cam->GetViewMatrix();
-    const glm::mat4 proj = cam->GetProjectionMatrix(aspect);
+    glm::mat4 view = cam->GetViewMatrix();
+    if (m_editorMode2D && cam->Owner)
+    {
+        const glm::vec3 cameraWorld = cam->Owner->transform.GetWorldPosition();
+        const glm::vec3 eye(cameraWorld.x, cameraWorld.y, -10.f);
+        view = glm::lookAtLH(eye, eye + glm::vec3(0.f, 0.f, 1.f),
+            glm::vec3(0.f, 1.f, 0.f));
+    }
+    const glm::mat4 proj = cam->GetProjectionMatrix(aspect, m_editorMode2D);
     const glm::vec3 cameraPosition = glm::vec3(glm::inverse(view)[3]);
 
     if (const Texture* skybox = ResolveSkyboxTexture();
@@ -490,6 +519,7 @@ void Scene::Render(IGraphicsContext* context, float aspect,
     {
         SkyboxCBData skyboxData{};
         skyboxData.invVP = glm::inverse(proj * view);
+        skyboxData.displayParams.x = m_editorMode2D ? 1.f : 0.f;
         memcpy(m_skyboxCBMapped, &skyboxData, sizeof(skyboxData));
         context->SetPipeline(m_skyboxPipeline.get());
         context->SetConstantBuffer(0, m_skyboxConstantBuffer.get(), 0);
@@ -513,13 +543,20 @@ void Scene::Render(IGraphicsContext* context, float aspect,
         const bool preview = m_previewObject &&
             IsObjectOrDescendant(candidate, m_previewObject);
         Mesh* mesh = candidate->GetComponent<Mesh>();
-        if (candidate->IsEnabledInHierarchy() && mesh && mesh->IsReady() &&
+        Sprite* sprite = candidate->GetComponent<Sprite>();
+        if (sprite)
+            sprite->Prepare(m_graphicsProvider);
+        const bool renderable = (sprite && sprite->IsReady()) ||
+            (mesh && mesh->IsReady());
+        if (candidate->IsEnabledInHierarchy() && renderable &&
             (!preview || includeEditorVisuals))
             renderObjects.push_back(candidate);
     }
     auto isBlended = [&](Object* object)
     {
         if (m_previewObject && IsObjectOrDescendant(object, m_previewObject))
+            return true;
+        if (object->GetComponent<Sprite>())
             return true;
         const Material* material = object->GetComponent<Material>();
         return material &&
@@ -534,6 +571,17 @@ void Scene::Render(IGraphicsContext* context, float aspect,
     std::stable_sort(renderObjects.begin(), renderObjects.end(),
         [&](Object* first, Object* second)
         {
+            if (m_editorMode2D)
+            {
+                const Sprite* firstSprite = first->GetComponent<Sprite>();
+                const Sprite* secondSprite = second->GetComponent<Sprite>();
+                const int firstLayer = firstSprite ? firstSprite->sortingLayer : 0;
+                const int secondLayer = secondSprite ? secondSprite->sortingLayer : 0;
+                if (firstLayer != secondLayer)
+                    return firstLayer < secondLayer;
+                return first->transform.GetWorldPosition().z <
+                    second->transform.GetWorldPosition().z;
+            }
             const bool firstBlend = isBlended(first);
             const bool secondBlend = isBlended(second);
             if (firstBlend != secondBlend)
@@ -552,6 +600,7 @@ void Scene::Render(IGraphicsContext* context, float aspect,
         const bool belongsToPreview = m_previewObject &&
             IsObjectOrDescendant(obj, m_previewObject);
         Mesh* mesh = obj->GetComponent<Mesh>();
+        Sprite* sprite = obj->GetComponent<Sprite>();
 
         Material* mat = obj->GetComponent<Material>();
         const bool isPreview = belongsToPreview;
@@ -566,16 +615,43 @@ void Scene::Render(IGraphicsContext* context, float aspect,
             usesLegacyProbeBake
                 ? bakedLighting->irradiance
                 : glm::vec3(0.f);
-        const glm::mat4 world = obj->transform.GetWorldMatrix();
+        glm::mat4 world = obj->transform.GetWorldMatrix();
+        if (sprite)
+        {
+            if (m_editorMode2D)
+                world[3].z = 0.f;
+            const glm::vec2 size = sprite->GetWorldSize();
+            world = world * glm::scale(glm::mat4(1.f), glm::vec3(size, 1.f));
+        }
         UINT64 offset = static_cast<UINT64>(slot) * kCBStride;
 
         ObjectGPUData objectData{};
         objectData.mvp = proj * view * world;
         objectData.world = world;
+        objectData.spriteUvRect = { 0.f, 0.f, 1.f, 1.f };
         MaterialAlphaMode alphaMode = MaterialAlphaMode::Opaque;
         bool doubleSided = false;
 
-        if (mat)
+        if (sprite)
+        {
+            const Texture* texture = sprite->GetTexture();
+            const IGraphicsTexture* graphicsTexture = texture
+                ? texture->GetGraphicsTexture() : nullptr;
+            context->SetTexture(0, graphicsTexture);
+            for (uint32_t textureSlot = 1; textureSlot < 6; ++textureSlot)
+                context->SetTexture(textureSlot, nullptr);
+            objectData.baseColor = glm::vec4(sprite->tint,
+                std::clamp(sprite->alpha, 0.f, 1.f));
+            objectData.ambientUnlit = { 0.f, 0.f, 0.f, 1.f };
+            objectData.emissiveOcclusion = { 0.f, 0.f, 0.f, 1.f };
+            objectData.materialParams = { 0.f, 1.f, 1.f,
+                graphicsTexture ? 1.f : 0.f };
+            objectData.viewPositionAlphaCutoff = glm::vec4(cameraPosition, 0.5f);
+            objectData.spriteUvRect = sprite->GetUvRect();
+            alphaMode = MaterialAlphaMode::Blend;
+            doubleSided = true;
+        }
+        else if (mat)
         {
             mat->Validate();
             alphaMode = mat->GetAlphaMode();
@@ -664,11 +740,17 @@ void Scene::Render(IGraphicsContext* context, float aspect,
         context->SetStructuredBuffer(7, m_objectDataBuffer.get());
 
         // Set vertex buffer and draw
-        IGraphicsBuffer* vertexBuffer = mesh->GetGraphicsBuffer();
+        IGraphicsBuffer* vertexBuffer = sprite
+            ? sprite->GetGraphicsBuffer()
+            : (mesh ? mesh->GetGraphicsBuffer() : nullptr);
         if (vertexBuffer)
         {
-            context->SetVertexBuffer(0, vertexBuffer, mesh->GetVertexStride(), 0);
-            context->DrawInstanced(mesh->GetVertexCount(), 1, 0, 0);
+            const uint32_t vertexStride = sprite
+                ? sprite->GetVertexStride() : mesh->GetVertexStride();
+            const uint32_t vertexCount = sprite
+                ? sprite->GetVertexCount() : mesh->GetVertexCount();
+            context->SetVertexBuffer(0, vertexBuffer, vertexStride, 0);
+            context->DrawInstanced(vertexCount, 1, 0, 0);
 
             // Draw selected object outline overlay.
             if (includeEditorVisuals && !isPreview &&
@@ -678,7 +760,7 @@ void Scene::Render(IGraphicsContext* context, float aspect,
                 context->SetConstantBuffer(0, m_objectConstantBuffer.get(), offset);
                 context->SetStructuredBuffer(6, m_lightDataBuffer.get());
                 context->SetStructuredBuffer(7, m_objectDataBuffer.get());
-                context->DrawInstanced(mesh->GetVertexCount(), 1, 0, 0);
+                context->DrawInstanced(vertexCount, 1, 0, 0);
             }
         }
 
@@ -701,6 +783,7 @@ void Scene::Render(IGraphicsContext* context, float aspect,
         gridData.fadeDistance = settings.gridFadeDistance;
         gridData.nearPlane = cam->nearPlane;
         gridData.farPlane = cam->farPlane;
+        gridData.mode2D = m_editorMode2D ? 1.f : 0.f;
 
         // Write to constant buffer
         memcpy(m_gridCBMapped, &gridData, sizeof(GridCBData));

@@ -4,6 +4,7 @@
 #include "Core/Object.h"
 #include "Core/Compoonents/Material.h"
 #include "Core/Compoonents/Mesh.h"
+#include "Core/Compoonents/Sprite.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Serialization/SceneSerializer.h"
 
@@ -45,11 +46,13 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
         this, "World", m_selectedObject == nullptr, false, true);
     const EditorUiContextMenuResult worldMenu =
         ui.ContextMenu(this, "Add Object", nullptr, true);
-    if (worldMenu.addRequested || worldMenu.addCubeRequested)
+    if (worldMenu.addRequested || worldMenu.addCubeRequested ||
+        worldMenu.addSpriteRequested)
     {
         m_pendingAddParent = nullptr;
-        m_pendingAddType = worldMenu.addCubeRequested
-            ? PendingAddType::Cube : PendingAddType::Empty;
+        m_pendingAddType = worldMenu.addCubeRequested ? PendingAddType::Cube
+            : (worldMenu.addSpriteRequested ? PendingAddType::Sprite
+                : PendingAddType::Empty);
         m_hasPendingAdd = true;
     }
     const EditorUiHierarchyDropResult worldDrop =
@@ -113,6 +116,11 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
                     mesh->CreateBuffer(
                         m_scene->GetGraphicsProvider()->GetBufferFactory());
                 created->AddComponent<Material>();
+            }
+            else if (m_pendingAddType == PendingAddType::Sprite)
+            {
+                created = m_scene->AddObject("Sprite");
+                created->AddComponent<Sprite>();
             }
             else
             {
@@ -330,11 +338,12 @@ void HierarchyView::DrawObjectNode(
         deletable ? "Delete Object" : nullptr,
         editableHierarchy,
         prefabRoot ? "Unpack Prefab" : nullptr);
-    if (menu.addRequested || menu.addCubeRequested)
+    if (menu.addRequested || menu.addCubeRequested || menu.addSpriteRequested)
     {
         m_pendingAddParent = obj;
-        m_pendingAddType = menu.addCubeRequested
-            ? PendingAddType::Cube : PendingAddType::Empty;
+        m_pendingAddType = menu.addCubeRequested ? PendingAddType::Cube
+            : (menu.addSpriteRequested ? PendingAddType::Sprite
+                : PendingAddType::Empty);
         m_hasPendingAdd = true;
     }
     if (menu.deleteRequested)

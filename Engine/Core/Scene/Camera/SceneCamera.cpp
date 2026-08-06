@@ -19,6 +19,14 @@ void Scene::FocusEditorCamera(Object* obj)
 
     const glm::vec3 targetPos =
         obj ? obj->transform.position : glm::vec3(0.f);
+    if (m_editorMode2D)
+    {
+        editorCamera.transform.position.x = targetPos.x;
+        editorCamera.transform.position.y = targetPos.y;
+        editorCamera.transform.position.z = -10.f;
+        cam->target = { targetPos.x, targetPos.y, 0.f };
+        return;
+    }
     constexpr float kDistance = 3.f;
 
     const glm::vec3& eye = editorCamera.transform.position;

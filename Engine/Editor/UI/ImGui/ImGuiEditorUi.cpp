@@ -260,6 +260,7 @@ EditorUiContextMenuResult ImGuiEditorUi::ContextMenu(const void* id,const char* 
                 if(ImGui::BeginMenu(addLabel)){
                     result.addRequested=ImGui::MenuItem("Empty");
                     result.addCubeRequested=ImGui::MenuItem("Cube");
+                    result.addSpriteRequested=ImGui::MenuItem("Sprite");
                     ImGui::EndMenu();
                 }
             }else result.addRequested=ImGui::MenuItem(addLabel);

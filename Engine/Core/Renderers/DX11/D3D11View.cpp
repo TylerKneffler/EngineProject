@@ -64,8 +64,7 @@ void D3D11View::Render(void* contextHandle, void* mainRtvHandle,
     context->RSSetViewports(1, &viewport);
     D3D11_RECT scissor{ 0, 0, static_cast<LONG>(m_width), static_cast<LONG>(m_height) };
     context->RSSetScissorRects(1, &scissor);
-    const float clearColor[4] = { 0.0f, 0.0f, 0.502f, 1.0f };
-    context->ClearRenderTargetView(target, clearColor);
+    context->ClearRenderTargetView(target, m_clearColor);
     context->ClearDepthStencilView(m_dsv.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
 
     if (drawFn) drawFn(context);

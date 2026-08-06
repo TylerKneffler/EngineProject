@@ -43,6 +43,12 @@ void View::Render(void* cmdList, void* mainRtv,
         m_viewBackend->Render(cmdList, mainRtv, drawFn);
 }
 
+void View::SetClearColor(float r, float g, float b, float a)
+{
+    if (m_viewBackend)
+        m_viewBackend->SetClearColor(r, g, b, a);
+}
+
 // ---------------------------------------------------------------------------
 // Property accessors — delegate to D3D12View
 // ---------------------------------------------------------------------------

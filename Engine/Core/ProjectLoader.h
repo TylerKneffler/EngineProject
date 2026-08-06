@@ -10,6 +10,7 @@
 // ---------------------------------------------------------------------------
 struct ProjectSettings
 {
+    enum class EditorMode { ThreeD, TwoD };
     // Project metadata
     std::string name;
     std::string version;
@@ -35,6 +36,7 @@ struct ProjectSettings
     float rightPanelWidth;
     bool debugHierarchyInteractions = true;
     uint32_t editorHistoryLimit = 100;
+    EditorMode editorMode = EditorMode::ThreeD;
 
     std::vector<std::string> leftPanelTabs;
     std::vector<std::string> centerPanelTabs;

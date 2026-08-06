@@ -54,6 +54,7 @@ struct EditorUiContextMenuResult
 {
     bool addRequested = false;
     bool addCubeRequested = false;
+    bool addSpriteRequested = false;
     bool unpackRequested = false;
     bool deleteRequested = false;
 };

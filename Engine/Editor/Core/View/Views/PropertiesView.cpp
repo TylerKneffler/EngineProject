@@ -3,6 +3,7 @@
 #include "Core/Compoonents/Transform.h"
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Compoonents/Material.h"
+#include "Core/Compoonents/Sprite.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Component.h"
 #include "Core/Graphics/IGraphicsTexture.h"
@@ -389,6 +390,8 @@ std::string PropertiesView::HandleWindowAssetDrop(IEditorUi& ui)
     if (extension == ".material" || extension == ".mat" ||
         IsTextureExtension(extension))
         return "Material Preview";
+    if (extension == ".spritesheet")
+        return "Sprite Preview";
     if (extension == ".h" || extension == ".hpp")
     {
         const std::string className = FindComponentSubclass(path);
@@ -441,6 +444,21 @@ bool PropertiesView::AddComponentFromAsset(const std::string& path, std::string&
             material->PrepareTextures(m_scene ? m_scene->GetGraphicsProvider() : nullptr);
             ReplaceOrAddComponent(*m_selectedObject, material.release());
             message = "[Properties] Assigned Material from: " + path;
+            return true;
+        }
+
+        if (extension == ".spritesheet")
+        {
+            auto sprite = std::make_unique<Sprite>();
+            if (!sprite->LoadFromFile(path))
+            {
+                message = "[Properties] Failed to read spritesheet asset: " + path;
+                return false;
+            }
+            sprite->OnAfterDeserialize(
+                m_scene ? m_scene->GetGraphicsProvider() : nullptr);
+            ReplaceOrAddComponent(*m_selectedObject, sprite.release());
+            message = "[Properties] Assigned Sprite from: " + path;
             return true;
         }
 

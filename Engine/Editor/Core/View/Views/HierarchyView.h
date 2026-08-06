@@ -44,7 +44,7 @@ public:
     std::function<void(const std::string&)> OnInteractionLog;
 
 private:
-    enum class PendingAddType { Empty, Cube };
+    enum class PendingAddType { Empty, Cube, Sprite };
     void DrawObjectNode(IEditorUi& ui, Object* obj, int depth,
         bool lastSibling, uint64_t ancestorGuideMask = 0);
     void LogInteraction(const std::string& message) const;

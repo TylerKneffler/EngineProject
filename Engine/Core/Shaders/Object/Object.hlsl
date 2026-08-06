@@ -21,6 +21,7 @@ struct ObjectData
     float4 bakedDirectional;
     float4 bakedLightDirection;
     float4 parallaxParams;
+    float4 spriteUvRect;
 };
 
 struct SceneLightData
@@ -72,7 +73,7 @@ void VSMain(
     oPos = mul(objectData.mvp, float4(pos, 1.0));
     oWorldPos = mul(objectData.world, float4(pos, 1.0)).xyz;
     oNormal = normalize(mul((float3x3)objectData.world, normal));
-    oUv = uv;
+    oUv = objectData.spriteUvRect.xy + uv * objectData.spriteUvRect.zw;
     oTangent = float4(
         normalize(mul((float3x3)objectData.world, tangent.xyz)), tangent.w);
 }

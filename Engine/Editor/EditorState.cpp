@@ -12,6 +12,7 @@
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Compoonents/Material.h"
+#include "Core/Compoonents/Sprite.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Assets/GltfImporter.h"
 #include <chrono>
@@ -117,6 +118,8 @@ bool EditorState::Init()
     m_scene = std::make_unique<Scene>();
     if (!m_scene)
         return false;
+    m_scene->SetEditorMode2D(
+        m_projectSettings.editorMode == ProjectSettings::EditorMode::TwoD);
     OutputDebugStringA("[EditorState] Scene created\n");
     
     OutputDebugStringA("[EditorState] Initializing scene...\n");
@@ -390,6 +393,9 @@ void EditorState::InitializePanels()
     m_preferences->Init(m_projectSettings, m_projectFilePath);
     m_preferences->OnSettingsChanged = [this]() {
         m_projectSettings = m_preferences->GetSettings();
+        if (m_scene)
+            m_scene->SetEditorMode2D(
+                m_projectSettings.editorMode == ProjectSettings::EditorMode::TwoD);
         SetHistoryLimit(m_projectSettings.editorHistoryLimit);
         for (auto& panel : m_panels)
             if (auto* hierarchy = dynamic_cast<HierarchyView*>(panel.get()))
@@ -563,8 +569,8 @@ void EditorState::ImportAsset()
     dialog.lpstrFile = source;
     dialog.nMaxFile = MAX_PATH;
     dialog.lpstrFilter =
-        L"Supported Assets (*.obj;*.gltf;*.glb;*.prefab;*.png;*.jpg;*.jpeg;*.dds;*.hdr)\0"
-        L"*.obj;*.gltf;*.glb;*.prefab;*.png;*.jpg;*.jpeg;*.dds;*.hdr\0"
+        L"Supported Assets (*.obj;*.gltf;*.glb;*.prefab;*.spritesheet;*.png;*.jpg;*.jpeg;*.dds;*.hdr)\0"
+        L"*.obj;*.gltf;*.glb;*.prefab;*.spritesheet;*.png;*.jpg;*.jpeg;*.dds;*.hdr\0"
         L"3D Models (*.obj;*.gltf;*.glb)\0*.obj;*.gltf;*.glb\0"
         L"Images (*.png;*.jpg;*.jpeg;*.dds;*.hdr)\0*.png;*.jpg;*.jpeg;*.dds;*.hdr\0"
         L"All Files (*.*)\0*.*\0";
@@ -666,6 +672,14 @@ Object* EditorState::InstantiateAsset(const std::string& path, bool recordChange
             if (m_scene->GetGraphicsProvider())
                 mesh->CreateBuffer(m_scene->GetGraphicsProvider()->GetBufferFactory());
             object->AddComponent<Material>();
+        }
+        else if (extension == ".spritesheet")
+        {
+            object = m_scene->AddObject(std::filesystem::path(path).stem().string());
+            Sprite* sprite = object->AddComponent<Sprite>();
+            if (!sprite->LoadFromFile(path) ||
+                !sprite->Prepare(m_scene->GetGraphicsProvider()))
+                throw std::runtime_error("Could not load spritesheet");
         }
         else if (extension == ".scene" || extension == ".xml")
         {

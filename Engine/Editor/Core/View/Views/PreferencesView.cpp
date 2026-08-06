@@ -310,6 +310,19 @@ void PreferencesView::DrawDebugSection(IEditorUi& ui)
 
 void PreferencesView::DrawEditorSection(IEditorUi& ui)
 {
+    ui.Label("Workspace Mode");
+    ui.Separator();
+    const char* editorModes[] = { "3D", "2D" };
+    int editorMode = m_settings.editorMode == ProjectSettings::EditorMode::TwoD ? 1 : 0;
+    if (ui.Combo("Editor Mode", &editorMode, editorModes, 2))
+    {
+        m_settings.editorMode = editorMode == 1
+            ? ProjectSettings::EditorMode::TwoD
+            : ProjectSettings::EditorMode::ThreeD;
+        NotifyChanged();
+    }
+    ui.Tooltip("2D uses an orthographic camera, an XY grid, and sprite layer ordering.");
+    ui.Spacing();
     ui.Label("Undo History");
     ui.Separator();
     if (ui.InputUInt("Action Limit", &m_settings.editorHistoryLimit))
@@ -591,6 +604,14 @@ bool PreferencesView::SaveSettings()
             else if (defaultSceneNode)
                 prop.append_child("EditorHistoryLimit").text().set(
                     m_settings.editorHistoryLimit);
+
+            auto editorMode = prop.child("EditorMode");
+            if (editorMode)
+                editorMode.text().set(m_settings.editorMode ==
+                    ProjectSettings::EditorMode::TwoD ? "2D" : "3D");
+            else if (defaultSceneNode)
+                prop.append_child("EditorMode").text().set(m_settings.editorMode ==
+                    ProjectSettings::EditorMode::TwoD ? "2D" : "3D");
 
             auto clearColorR = prop.child("ClearColorR");
             if (clearColorR)

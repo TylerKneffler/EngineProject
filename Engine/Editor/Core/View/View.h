@@ -44,6 +44,8 @@ public:
     void Render(void* cmdList, void* mainRtv,
                 std::function<void(void*)> drawFn = nullptr);
 
+    void SetClearColor(float r, float g, float b, float a = 1.0f);
+
     // Query rendering target properties
     float    GetAspect() const;
     uint32_t GetWidth()  const;

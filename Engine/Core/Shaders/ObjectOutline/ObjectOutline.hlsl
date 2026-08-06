@@ -18,6 +18,7 @@ struct ObjectData
     float4 bakedDirectional;
     float4 bakedLightDirection;
     float4 parallaxParams;
+    float4 spriteUvRect;
 };
 
 #ifdef VULKAN

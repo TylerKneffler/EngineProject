@@ -65,6 +65,8 @@ int GameApplication::Run(HINSTANCE instance)
         return 1;
 
     Scene scene;
+    scene.SetEditorMode2D(
+        settings.editorMode == ProjectSettings::EditorMode::TwoD);
     scene.Init(renderer->GetGraphicsProvider());
     SceneManager::SetActiveScene(&scene);
     if (!scene.Load(settings.defaultScene))

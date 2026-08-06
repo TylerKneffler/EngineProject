@@ -12,7 +12,7 @@
 //   float    fadeDistance( 4 b)
 //   float    nearPlane   ( 4 b)
 //   float    farPlane    ( 4 b)
-//   float    _pad        ( 4 b)
+//   float    mode2D      ( 4 b)
 
 #ifdef VULKAN
 struct GridConst
@@ -25,7 +25,7 @@ struct GridConst
     float    fadeDistance;
     float    nearPlane;
     float    farPlane;
-    float    _pad;
+    float    mode2D;
 };
 [[vk::push_constant]] GridConst cb;
 #define invVP        cb.invVP
@@ -36,6 +36,7 @@ struct GridConst
 #define fadeDistance cb.fadeDistance
 #define nearPlane    cb.nearPlane
 #define farPlane     cb.farPlane
+#define mode2D       cb.mode2D
 #else
 cbuffer GridCB : register(b0)
 {
@@ -47,7 +48,7 @@ cbuffer GridCB : register(b0)
     float    fadeDistance;
     float    nearPlane;
     float    farPlane;
-    float    _pad;
+    float    mode2D;
 };
 #endif
 
@@ -85,22 +86,25 @@ GridPixel PSMain(float4 svPos : SV_POSITION,
 
     float3 dir = wFar.xyz - wNear.xyz;
 
-    // Intersect the view ray with the Y=0 (XZ) plane.
-    if (abs(dir.y) < 1e-5) discard;
-    float t = -wNear.y / dir.y;
+    // 3D uses the ground XZ plane. 2D uses the canvas XY plane.
+    float denominator = mode2D > 0.5 ? dir.z : dir.y;
+    if (abs(denominator) < 1e-5) discard;
+    float t = mode2D > 0.5 ? -wNear.z / dir.z : -wNear.y / dir.y;
     if (t <= 0.0) discard;
 
     float3 wp = wNear.xyz + t * dir;
 
     // Antialiased grid lines using screen-space derivatives.
-    float2 coord = wp.xz / cellSize;
+    float2 planePosition = mode2D > 0.5 ? wp.xy : wp.xz;
+    float2 cameraPlane = mode2D > 0.5 ? cameraPos.xy : cameraPos.xz;
+    float2 coord = planePosition / cellSize;
     float2 deriv = fwidth(coord);
     float2 g     = abs(frac(coord - 0.5) - 0.5) / max(deriv, 0.0001);
     float  gridLine = min(g.x, g.y);
     float  gridA = 1.0 - clamp(gridLine, 0.0, 1.0);
 
     // Quadratic distance fade.
-    float dist = length(wp.xz - cameraPos.xz);
+    float dist = length(planePosition - cameraPlane);
     float fade = clamp(1.0 - dist / fadeDistance, 0.0, 1.0);
     fade = fade * fade;
 
@@ -108,9 +112,9 @@ GridPixel PSMain(float4 svPos : SV_POSITION,
     if (alpha < 0.005) discard;
 
     // Highlight the world X (red) and Z (blue) axis lines.
-    float2 axDeriv = fwidth(wp.xz);
-    float  xAxis   = clamp(1.0 - abs(wp.z) / (axDeriv.y * 2.0), 0.0, 1.0);
-    float  zAxis   = clamp(1.0 - abs(wp.x) / (axDeriv.x * 2.0), 0.0, 1.0);
+    float2 axDeriv = fwidth(planePosition);
+    float  xAxis   = clamp(1.0 - abs(planePosition.y) / (axDeriv.y * 2.0), 0.0, 1.0);
+    float  zAxis   = clamp(1.0 - abs(planePosition.x) / (axDeriv.x * 2.0), 0.0, 1.0);
     float3 color   = lerp(gridColor.rgb, axisColor.rgb, saturate(xAxis + zAxis));
 
     // Write the depth of the reconstructed world-space plane rather than the
@@ -120,7 +124,7 @@ GridPixel PSMain(float4 svPos : SV_POSITION,
     float viewDepth = nearPlane + t * depthRange;
     GridPixel output;
     output.color = float4(color, alpha);
-    output.depth = saturate(
+    output.depth = mode2D > 0.5 ? 0.999 : saturate(
         farPlane * (viewDepth - nearPlane) /
         max(depthRange * viewDepth, 1e-5));
     return output;

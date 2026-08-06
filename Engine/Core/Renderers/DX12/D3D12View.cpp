@@ -166,8 +166,7 @@ void D3D12View::Render(void* cmdList,
     d3dCmdList->RSSetScissorRects(1, &sr);
     d3dCmdList->OMSetRenderTargets(1, &sceneRtv, FALSE, &dsv);
 
-    const float clearColor[4] = { 0.0f, 0.0f, 0.502f, 1.0f }; // navy blue
-    d3dCmdList->ClearRenderTargetView(sceneRtv, clearColor, 0, nullptr);
+    d3dCmdList->ClearRenderTargetView(sceneRtv, m_clearColor, 0, nullptr);
     d3dCmdList->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
     if (drawFn)

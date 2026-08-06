@@ -4,10 +4,12 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Camera.h"
 #include "Core/Compoonents/Mesh.h"
+#include "Core/Compoonents/Sprite.h"
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include <cfloat>
 #include <cmath>
+#include <limits>
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/geometric.hpp>
 #include <glm/ext/matrix_transform.hpp>
@@ -114,6 +116,11 @@ void SceneView::Init(void* device,
 // ---------------------------------------------------------------------------
 void SceneView::DrawPanel(IEditorUi& ui)
 {
+    const bool mode2D = m_scene && m_scene->IsEditorMode2D();
+    SetClearColor(mode2D ? 0.28f : 0.0f,
+        mode2D ? 0.30f : 0.0f,
+        mode2D ? 0.34f : 0.502f);
+
     // Remove inner padding so the texture fills the panel edge-to-edge.
     if (!ui.BeginWindow(m_title.c_str(), &m_open, true))
     {
@@ -284,7 +291,21 @@ bool SceneView::FindPrefabPlacement(const EditorUiVec2& mousePos,
         }
     }
 
-    // The editor grid is the XZ placement plane. Prefer an object surface when
+    if (m_scene->IsEditorMode2D())
+    {
+        if (std::abs(rayDirection.z) <= 0.000001f)
+            return found;
+        const float canvasDistance = -rayOrigin.z / rayDirection.z;
+        if (canvasDistance > 0.f && canvasDistance < bestDistance)
+        {
+            placement = rayOrigin + rayDirection * canvasDistance;
+            placement.z = 0.f;
+            return true;
+        }
+        return found;
+    }
+
+    // The 3D editor grid is the XZ placement plane. Prefer an object surface when
     // it is in front of the grid intersection; otherwise use the exact ground
     // intersection without snapping.
     if (std::abs(rayDirection.y) > 0.000001f)
@@ -325,13 +346,74 @@ Object* SceneView::PickObjectInViewport(const EditorUiVec2& mousePos, const Edit
     const glm::vec3 rayTarget = glm::vec3(farH) / farH.w;
     const glm::vec3 rayDir = glm::normalize(rayTarget - rayOrigin);
 
+    if (m_scene->IsEditorMode2D())
+    {
+        Object* frontmost = nullptr;
+        int frontLayer = std::numeric_limits<int>::min();
+        float frontZ = -FLT_MAX;
+        for (const auto& objPtr : m_scene->GetObjects())
+        {
+            Object* obj = objPtr.get();
+            Sprite* sprite = obj && obj->IsEnabledInHierarchy()
+                ? obj->GetComponent<Sprite>() : nullptr;
+            if (!sprite || std::abs(rayDir.z) < 0.000001f)
+                continue;
+            glm::mat4 world = obj->transform.GetWorldMatrix();
+            world[3].z = 0.f;
+            const glm::vec2 spriteSize = sprite->GetWorldSize();
+            world = world * glm::scale(glm::mat4(1.f),
+                glm::vec3(spriteSize, 1.f));
+            const glm::mat4 inverseWorld = glm::inverse(world);
+            const glm::vec3 localOrigin = glm::vec3(
+                inverseWorld * glm::vec4(rayOrigin, 1.f));
+            const glm::vec3 localDirection = glm::vec3(
+                inverseWorld * glm::vec4(rayDir, 0.f));
+            if (std::abs(localDirection.z) < 0.000001f)
+                continue;
+            const float distance = -localOrigin.z / localDirection.z;
+            if (distance < 0.f)
+                continue;
+            const glm::vec3 hit = localOrigin + localDirection * distance;
+            if (std::abs(hit.x) > 0.5f || std::abs(hit.y) > 0.5f)
+                continue;
+            const float z = obj->transform.GetWorldPosition().z;
+            if (!frontmost || sprite->sortingLayer > frontLayer ||
+                (sprite->sortingLayer == frontLayer && z >= frontZ))
+            {
+                frontmost = obj;
+                frontLayer = sprite->sortingLayer;
+                frontZ = z;
+            }
+        }
+        if (frontmost)
+            return frontmost;
+
+        Object* closestMesh = nullptr;
+        float closestDistance = FLT_MAX;
+        for (const auto& objPtr : m_scene->GetObjects())
+        {
+            Object* obj = objPtr.get();
+            Mesh* mesh = obj && obj->IsEnabledInHierarchy()
+                ? obj->GetComponent<Mesh>() : nullptr;
+            float distance = 0.f;
+            if (mesh && IntersectMeshBounds(*obj, *mesh,
+                rayOrigin, rayDir, distance) && distance < closestDistance)
+            {
+                closestDistance = distance;
+                closestMesh = obj;
+            }
+        }
+        return closestMesh;
+    }
+
     Object* best = nullptr;
     float bestT = FLT_MAX;
 
     for (const auto& objPtr : m_scene->GetObjects())
     {
         Object* obj = objPtr.get();
-        if (!obj || !obj->IsEnabledInHierarchy() || !obj->GetComponent<Mesh>())
+        if (!obj || !obj->IsEnabledInHierarchy() ||
+            (!obj->GetComponent<Mesh>() && !obj->GetComponent<Sprite>()))
             continue;
 
         const glm::vec3 center = obj->transform.GetWorldPosition();
@@ -435,6 +517,20 @@ void SceneView::ApplyCameraControls(float panDX, float panDY,
     Camera*    cam = m_scene->editorCamera.GetComponent<Camera>();
     assert(cam && "Scene editorCamera must have a Camera component");
     glm::vec3& pos = m_scene->editorCamera.transform.position;
+
+    if (m_scene->IsEditorMode2D())
+    {
+        const float dragX = panDX + orbitDX;
+        const float dragY = panDY + orbitDY;
+        const float speed = glm::max(cam->orthographicSize, 0.01f) * 0.002f;
+        const glm::vec3 pan(-dragX * speed, dragY * speed, 0.f);
+        pos += pan;
+        cam->target += pan;
+        if (zoom != 0.f)
+            cam->orthographicSize = std::clamp(
+                cam->orthographicSize * std::pow(0.85f, zoom), 0.05f, 10000.f);
+        return;
+    }
 
     glm::vec3 eye     = pos;
     glm::vec3 target  = cam->target;
