@@ -206,23 +206,31 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
     }
     const std::string assetDropPreview = HandleWindowAssetDrop(ui);
     Object* prefabRoot = m_selectedObject->GetPrefabInstanceRoot();
-    const bool linked = prefabRoot != nullptr;
     char name[256]; strncpy_s(name, m_selectedObject->name.c_str(), sizeof(name));
     bool enabled = m_selectedObject->enabled;
     const EditorUiObjectRowResult header = ui.ObjectHeader(
-        m_selectedObject, name, sizeof(name), &enabled, linked);
-    if (header.nameChanged) m_selectedObject->name = name;
+        m_selectedObject, name, sizeof(name), &enabled,
+        false);
+    if (header.nameChanged)
+    {
+        m_selectedObject->name = name;
+        if (OnComponentsChanged)
+            OnComponentsChanged();
+    }
     if (header.enabledChanged)
+    {
         enabled ? m_selectedObject->Enabled() : m_selectedObject->Disabled();
+        if (OnComponentsChanged)
+            OnComponentsChanged();
+    }
     if (prefabRoot && prefabRoot->Prefab)
     {
         ui.ValueLabel("Prefab", prefabRoot->Prefab->GetPath().c_str());
-        ui.DisabledLabel(
-            m_selectedObject == prefabRoot
-                ? "Properties come from the prefab; root transform is instance placement."
-                : "Properties and transform come from the prefab asset.");
-        ui.DisabledLabel(
-            "Right-click it in the Hierarchy, or a component header, and choose Unpack Prefab.");
+        ui.ColoredLabel("Linked prefab - changes save automatically",
+            { 0.35f, 0.7f, 1.f, 1.f });
+        if (m_selectedObject == prefabRoot)
+            ui.DisabledLabel(
+                "Root transform is this instance's placement; prefab components and children are shared.");
     }
     else
         ui.DisabledLabel("Scene-only object");
@@ -236,6 +244,7 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
     Component* componentToDelete = nullptr;
     Component* reorderSource = nullptr;
     Component* reorderTarget = nullptr;
+    bool componentPropertiesChanged = false;
     for (Component* component : m_selectedObject->Components)
     {
         if (!component) continue;
@@ -246,7 +255,7 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         
         const bool componentOpen = ui.CollapsingHeader(componentType.c_str());
         Object* componentPrefabRoot = m_selectedObject->GetPrefabInstanceRoot();
-        const bool componentEditable = componentPrefabRoot == nullptr;
+        const bool componentEditable = true;
         // Bind the menu to the header before drag/drop helpers replace the
         // UI backend's current item.
         const EditorUiContextMenuResult menu = ui.ContextMenu(component,
@@ -286,13 +295,18 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         }
         if (componentOpen)
         {
-            const bool locked = m_selectedObject->IsPartOfPrefabInstance();
+            const bool locked = m_selectedObject->IsPartOfPrefabInstance() &&
+                !CanEditSelectedObject();
             ui.BeginDisabled(locked);
-            component->DrawProperties(ui);
+            componentPropertiesChanged =
+                component->DrawProperties(ui) || componentPropertiesChanged;
             ui.EndDisabled();
         }
         ui.PopId();
     }
+
+    if (componentPropertiesChanged && OnComponentsChanged)
+        OnComponentsChanged();
 
     if (reorderSource && reorderTarget && reorderSource != reorderTarget)
     {
@@ -347,13 +361,15 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
     }
 
     ui.Separator();
+    ui.BeginDisabled(!CanEditSelectedObject());
     if (ui.Button("Add Component"))
     {
         m_componentPickerOpen = true;
         m_positionComponentPicker = true;
         m_componentSearch[0] = '\0';
     }
-    
+    ui.EndDisabled();
+
     ui.EndTextWrap();
     ui.EndWindow();
     DrawComponentPicker(ui);
@@ -407,11 +423,6 @@ bool PropertiesView::AddComponentFromAsset(const std::string& path, std::string&
     if (!m_selectedObject)
     {
         message = "[Properties] Select an object before dropping an asset.";
-        return false;
-    }
-    if (m_selectedObject->IsPartOfPrefabInstance())
-    {
-        message = "[Properties] Components on linked prefab objects are read-only.";
         return false;
     }
     if (path.empty() || !std::filesystem::is_regular_file(path))
@@ -505,12 +516,6 @@ bool PropertiesView::AddRegisteredComponent(const std::string& typeName, std::st
         message = "[Properties] Select an object before adding a component.";
         return false;
     }
-    if (m_selectedObject->IsPartOfPrefabInstance())
-    {
-        message = "[Properties] Components on linked prefab objects are read-only.";
-        return false;
-    }
-
     try
     {
         std::unique_ptr<Component> component(
@@ -599,6 +604,48 @@ void PropertiesView::LogAssetDrop(const std::string& message, bool error) const
         OutputDebugStringA((message + "\n").c_str());
 }
 
+bool PropertiesView::CanEditSelectedObject() const
+{
+    return m_selectedObject != nullptr;
+}
+
+bool PropertiesView::ApplyConnectedPrefabChanges(bool force)
+{
+    Object* root = m_selectedObject
+        ? m_selectedObject->GetPrefabInstanceRoot() : nullptr;
+    if (!m_scene || !root || !root->Prefab)
+        return false;
+    const std::string current = SceneSerializer::SavePrefabToString(*root, false);
+    if (m_prefabSnapshotRoot != root || m_prefabSnapshot.empty())
+    {
+        m_prefabSnapshotRoot = root;
+        m_prefabSnapshot = current;
+        if (!force)
+            return false;
+    }
+    else if (current == m_prefabSnapshot)
+        return false;
+
+    const std::string path = root->Prefab->GetPath();
+    if (!SceneSerializer::SavePrefab(*root, path, true))
+    {
+        LogAssetDrop("[Properties] Could not save prefab asset: " + path, true);
+        return false;
+    }
+    if (!SceneSerializer::RefreshPrefabInstances(
+        *m_scene, path, m_scene->GetGraphicsProvider(), root))
+    {
+        LogAssetDrop(
+            "[Properties] Prefab was saved but connected instances could not be refreshed: " +
+            path, true);
+        return false;
+    }
+
+    m_prefabSnapshotRoot = root;
+    m_prefabSnapshot = SceneSerializer::SavePrefabToString(*root, false);
+    return true;
+}
+
 void PropertiesView::UnpackSelectedPrefab()
 {
     Object* prefabRoot = m_selectedObject
@@ -618,11 +665,11 @@ void PropertiesView::DrawTransform(IEditorUi& ui)
 {
     Transform& t = m_selectedObject->transform;
     Object* prefabRoot = m_selectedObject->GetPrefabInstanceRoot();
-    const bool locked = prefabRoot && prefabRoot != m_selectedObject;
+    const bool locked = false;
     
     const bool transformOpen = ui.CollapsingHeader("Transform");
     const EditorUiContextMenuResult menu = ui.ContextMenu(&t,
-        locked || m_selectedObject->IsPartOfPrefabInstance() ? nullptr : "Add Component",
+        CanEditSelectedObject() ? "Add Component" : nullptr,
         nullptr,
         false,
         prefabRoot ? "Unpack Prefab" : nullptr);
@@ -637,7 +684,9 @@ void PropertiesView::DrawTransform(IEditorUi& ui)
     if (transformOpen)
     {
         ui.BeginDisabled(locked);
-        t.DrawProperties(ui);
+        const bool transformChanged = t.DrawProperties(ui);
         ui.EndDisabled();
+        if (transformChanged && OnComponentsChanged)
+            OnComponentsChanged();
     }
 }

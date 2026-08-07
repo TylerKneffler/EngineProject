@@ -58,5 +58,5 @@ public:
     }
     
     // Override in derived classes to draw custom properties in the inspector
-    // void DrawProperties(IEditorUi& ui) override { /* custom UI */ }
+    // bool DrawProperties(IEditorUi& ui) override { /* custom UI */ return false; }
 };

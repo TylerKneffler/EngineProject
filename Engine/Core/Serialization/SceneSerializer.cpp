@@ -757,20 +757,58 @@ Object* SceneSerializer::InstantiateObjectFromString(
     }
 }
 
-bool SceneSerializer::SavePrefab(const Object& object, const std::string& path)
+bool SceneSerializer::SavePrefab(const Object& object, const std::string& path,
+    bool preserveRootTransform)
+{
+    JsonValue root = JsonValue::MakeObject();
+    root.Set("version", JsonValue(1));
+    root.Set("type", JsonValue(std::string("prefab")));
+    JsonValue objectNode = SerialiseObject(object, false);
+    if (preserveRootTransform && std::filesystem::is_regular_file(path))
+    {
+        try
+        {
+            JsonValue existing;
+            try
+            {
+                existing = JsonParseFile(path);
+            }
+            catch (...)
+            {
+                pugi::xml_document document;
+                if (document.load_file(path.c_str()))
+                    existing = ReadXmlNode(document.document_element());
+            }
+            if (existing["object"]["transform"].IsObject())
+                objectNode.Set("transform", existing["object"]["transform"]);
+        }
+        catch (...)
+        {
+            // A malformed previous asset should not prevent a valid edit from
+            // replacing it; fall back to the source instance transform.
+        }
+    }
+    root.Set("object", std::move(objectNode));
+    std::ofstream file(path);
+    if (!file)
+        return false;
+    file << WriteXmlDocument(root, "Prefab");
+    return file.good();
+}
+
+std::string SceneSerializer::SavePrefabToString(const Object& object,
+    bool includeRootTransform)
 {
     JsonValue root = JsonValue::MakeObject();
     root.Set("version", JsonValue(1));
     root.Set("type", JsonValue(std::string("prefab")));
     // A prefab file owns the complete expanded object definition. If this
     // object is already an instance, do not write a self-referencing link.
-    root.Set("object", SerialiseObject(object, false));
-
-    std::ofstream file(path);
-    if (!file)
-        return false;
-    file << WriteXmlDocument(root, "Prefab");
-    return file.good();
+    JsonValue objectNode = SerialiseObject(object, false);
+    if (!includeRootTransform)
+        objectNode.Set("transform", JsonValue::MakeObject());
+    root.Set("object", std::move(objectNode));
+    return WriteXmlDocument(root, "Prefab");
 }
 
 namespace
@@ -924,12 +962,14 @@ Object* SceneSerializer::InstantiatePrefab(
 bool SceneSerializer::RefreshPrefabInstances(
     Scene& scene,
     const std::string& path,
-    IGraphicsProvider* graphicsProvider)
+    IGraphicsProvider* graphicsProvider,
+    Object* preservedInstance)
 {
     EnsureBuiltinsRegistered();
     try
     {
-        const JsonValue root = JsonParseFile(path);
+        const std::filesystem::path resolvedPath = ResolvePrefabPath(path);
+        const JsonValue root = LoadPrefabDocument(resolvedPath);
         if (!root.IsObject() || root["version"].AsInt() != 1 ||
             root["type"].AsString() != "prefab" || !root["object"].IsObject())
             return false;
@@ -952,11 +992,12 @@ bool SceneSerializer::RefreshPrefabInstances(
             return key;
         };
 
-        const std::string targetKey = identity(path);
+        const std::string targetKey = identity(resolvedPath.string());
         std::vector<Object*> instances;
         for (const auto& candidate : scene.GetObjects())
-            if (candidate->Prefab &&
-                identity(candidate->Prefab->GetPath()) == targetKey)
+            if (candidate.get() != preservedInstance && candidate->Prefab &&
+                identity(ResolvePrefabPath(
+                    candidate->Prefab->GetPath()).string()) == targetKey)
                 instances.push_back(candidate.get());
 
         std::function<void(Object&, const JsonValue&)> populate =
@@ -999,6 +1040,8 @@ bool SceneSerializer::RefreshPrefabInstances(
                     DeserialiseTransform(child->transform, childNode["transform"]);
                     if (childNode.Has("enabled"))
                         child->enabled = childNode["enabled"].AsBool();
+                    ApplyBakedMaterialOverrides(
+                        *child, childNode, graphicsProvider);
                 }
                 else
                 {

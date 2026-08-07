@@ -485,8 +485,12 @@ BakeResult BakedLightingPipeline::Bake(Scene& scene,
             return result;
         }
 
+        // Bake outputs are generated cache data rather than user-authored
+        // assets. Keep them under the hidden Assets/.temp tree so they remain
+        // loadable by serialized material paths without cluttering the asset
+        // explorer.
         const std::filesystem::path root = std::filesystem::path(assetsDirectory) /
-            "Baked" / SafeName(sceneName);
+            ".temp" / "Baked" / SafeName(sceneName);
         const std::filesystem::path materialDirectory = root / "Materials";
         const std::filesystem::path lightmapDirectory = root / "Lightmaps";
         std::filesystem::create_directories(materialDirectory);

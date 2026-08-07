@@ -644,9 +644,18 @@ void Scene::Render(IGraphicsContext* context, float aspect,
                 std::clamp(sprite->alpha, 0.f, 1.f));
             objectData.ambientUnlit = { 0.f, 0.f, 0.f, 1.f };
             objectData.emissiveOcclusion = { 0.f, 0.f, 0.f, 1.f };
+            // Sprites use the base-colour texture and alpha testing in addition
+            // to blending. Discarding empty atlas pixels prevents their black
+            // RGB values from ever reaching the render target, while the low
+            // cutoff preserves anti-aliased translucent edge pixels.
+            constexpr uint32_t kBaseColorTextureFlag = 1u;
+            constexpr uint32_t kAlphaMaskFlag = 32u;
+            const uint32_t spriteTextureFlags = graphicsTexture
+                ? kBaseColorTextureFlag | kAlphaMaskFlag
+                : kAlphaMaskFlag;
             objectData.materialParams = { 0.f, 1.f, 1.f,
-                graphicsTexture ? 1.f : 0.f };
-            objectData.viewPositionAlphaCutoff = glm::vec4(cameraPosition, 0.5f);
+                static_cast<float>(spriteTextureFlags) };
+            objectData.viewPositionAlphaCutoff = glm::vec4(cameraPosition, 0.01f);
             objectData.spriteUvRect = sprite->GetUvRect();
             alphaMode = MaterialAlphaMode::Blend;
             doubleSided = true;

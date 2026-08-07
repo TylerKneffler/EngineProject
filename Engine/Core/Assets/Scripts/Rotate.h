@@ -26,5 +26,5 @@ public:
     void Update() override;
 
     // Custom property editor
-    void DrawProperties(IEditorUi& ui) override;
+    bool DrawProperties(IEditorUi& ui) override;
 };

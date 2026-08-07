@@ -33,5 +33,5 @@
     "occlusionStrength": 1,
     "doubleSided": false,
     "unlit": false,
-    "emissiveTexture": "Engine/Core/Assets/Baked/default/Lightmaps/Cube_0.lightmap.bmp"
+    "emissiveTexture": "Engine/Core/Assets/.temp/Baked/default/Lightmaps/Cube_0.lightmap.bmp"
 }

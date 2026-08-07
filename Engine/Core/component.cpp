@@ -48,7 +48,7 @@ static std::map<std::string, std::shared_ptr<Texture>> s_texturePreviewCache;
 // Override in derived classes only when you need specialized UI controls
 // or logic beyond this automatic property editing.
 // ---------------------------------------------------------------------------
-void Component::DrawProperties(IEditorUi& ui)
+bool Component::DrawProperties(IEditorUi& ui)
 {
     // Get current serialized state
     JsonValue originalData = Serialize();
@@ -57,7 +57,7 @@ void Component::DrawProperties(IEditorUi& ui)
     if (originalData.IsNull() || !originalData.IsObject())
     {
         ui.DisabledLabel("(No properties)");
-        return;
+        return false;
     }
     
     // Create a mutable copy for editing
@@ -480,6 +480,7 @@ void Component::DrawProperties(IEditorUi& ui)
     {
         Deserialize(editedData);
     }
+    return modified;
 }
 
 JsonValue Component::Serialize() const

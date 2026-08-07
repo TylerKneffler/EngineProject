@@ -34,7 +34,8 @@ public:
     // Lets components rebuild runtime resources without serializer type checks.
     virtual void        OnAfterDeserialize(IGraphicsProvider*) {}
     // Called by the Properties panel to draw editable properties in the editor.
-    virtual void DrawProperties(IEditorUi& ui);
+    // Returns true when an editor control changed serialized component data.
+    virtual bool DrawProperties(IEditorUi& ui);
 
 protected:
     void SetTypeName(const char* typeName) { m_typeName = typeName ? typeName : "Component"; }

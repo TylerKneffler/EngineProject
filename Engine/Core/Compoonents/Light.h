@@ -46,5 +46,5 @@ public:
             ? Type::Ambient : Type::Point;
     }
 
-    void DrawProperties(IEditorUi& ui) override;
+    bool DrawProperties(IEditorUi& ui) override;
 };

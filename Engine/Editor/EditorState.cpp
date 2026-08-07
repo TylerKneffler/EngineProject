@@ -490,6 +490,8 @@ void EditorState::WireupCallbacks()
     };
     m_viewFactory->OnGizmoInteraction = [this](bool active) {
         ReportSceneEditInProgress(active);
+        if (active && m_primaryProperties)
+            m_primaryProperties->ApplyConnectedPrefabChanges(true);
     };
 
     // Wire up focus (double-click) callback — frame the object in the scene camera
@@ -498,9 +500,13 @@ void EditorState::WireupCallbacks()
             m_scene->FocusEditorCamera(obj);
     };
     m_viewFactory->OnHierarchyChanged = [this]() {
+        if (m_primaryProperties)
+            m_primaryProperties->ApplyConnectedPrefabChanges(true);
         m_hasUnsavedChanges = true;
     };
     m_viewFactory->OnPropertiesChanged = [this]() {
+        if (m_primaryProperties)
+            m_primaryProperties->ApplyConnectedPrefabChanges(true);
         m_hasUnsavedChanges = true;
     };
     m_viewFactory->OnPropertiesAssetDropLog = [this](const std::string& message, bool error) {

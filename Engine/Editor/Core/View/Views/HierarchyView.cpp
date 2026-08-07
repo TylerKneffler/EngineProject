@@ -26,6 +26,23 @@ std::string ObjectName(const Object* object)
     if (!object) return "World";
     return object->name.empty() ? "(unnamed)" : object->name;
 }
+
+bool CanMoveInPrefabContext(Scene* scene, Object* object, Object* target,
+    Scene::ObjectPlacement placement)
+{
+    if (!scene || !object)
+        return false;
+    Object* sourceRoot = object->GetPrefabInstanceRoot();
+    Object* destinationParent = placement == Scene::ObjectPlacement::AsChild
+        ? target : (target ? target->Parent : nullptr);
+    Object* destinationRoot = destinationParent
+        ? destinationParent->GetPrefabInstanceRoot() : nullptr;
+    if (!sourceRoot)
+        return true;
+    if (object == sourceRoot)
+        return destinationRoot == nullptr;
+    return destinationRoot == sourceRoot;
+}
 }
 
 void HierarchyView::DrawPanel(IEditorUi& ui)
@@ -91,12 +108,14 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
     if (m_pendingDelete)
     {
         const std::string deletedName = ObjectName(m_pendingDelete);
+        Object* deletedPrefabRoot = m_pendingDelete->GetPrefabInstanceRoot();
         bool deletesSelection = false;
         for (Object* current = m_selectedObject; current; current = current->Parent)
             if (current == m_pendingDelete)
                 deletesSelection = true;
         if (deletesSelection)
-            SetSelectedObject(nullptr);
+            SetSelectedObject(deletedPrefabRoot != m_pendingDelete
+                ? deletedPrefabRoot : nullptr);
         m_scene->RemoveObject(m_pendingDelete);
         LogInteraction("Deleted '" + deletedName + "' and its child hierarchy");
         m_pendingDelete = nullptr;
@@ -182,8 +201,10 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
     {
         const std::string sourceName = ObjectName(m_pendingDragged);
         const std::string targetName = ObjectName(m_pendingTarget);
-        const bool moved = m_scene->MoveObject(
-            m_pendingDragged, m_pendingTarget, m_pendingPlacement);
+        const bool moved = CanMoveInPrefabContext(
+            m_scene, m_pendingDragged, m_pendingTarget, m_pendingPlacement) &&
+            m_scene->MoveObject(
+                m_pendingDragged, m_pendingTarget, m_pendingPlacement);
         LogInteraction(std::string(moved ? "Move succeeded: '" : "Move rejected: '") +
             sourceName + "' -> '" + targetName + "'");
         if (moved && OnHierarchyChanged) OnHierarchyChanged();
@@ -227,8 +248,10 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
             LogInteraction("Release recovered at last valid target: '" + sourceName +
                 "' -> '" + targetName + "' (" + PlacementName(m_debugHoverPosition) +
                 ", depth " + std::to_string(m_debugDropDepth) + ")");
-            const bool moved = m_scene->MoveObject(
-                m_debugDragSource, resolvedTarget, placement);
+            const bool moved = CanMoveInPrefabContext(
+                m_scene, m_debugDragSource, resolvedTarget, placement) &&
+                m_scene->MoveObject(
+                    m_debugDragSource, resolvedTarget, placement);
             LogInteraction(std::string(moved ? "Move succeeded: '" : "Move rejected: '") +
                 sourceName + "' -> '" + targetName + "'");
             if (moved && OnHierarchyChanged) OnHierarchyChanged();
@@ -324,14 +347,16 @@ void HierarchyView::DrawObjectNode(
     uint64_t ancestorGuideMask)
 {
     const bool hasChildren = !obj->Children.empty();
+    Object* prefabRoot = obj->GetPrefabInstanceRoot();
+    const bool editingPrefab = prefabRoot != nullptr;
     char name[256]; strncpy_s(name, obj->name.c_str(), sizeof(name));
     bool enabled = obj->enabled;
     const EditorUiObjectRowResult row = ui.ObjectTreeRow(
         obj, name, sizeof(name), &enabled, obj == m_selectedObject,
-        !hasChildren, obj->IsPartOfPrefabInstance(), obj->IsEnabledInHierarchy(),
+        !hasChildren, obj->IsPartOfPrefabInstance() && !editingPrefab,
+        obj->IsEnabledInHierarchy(),
         depth, lastSibling, ancestorGuideMask);
-    Object* prefabRoot = obj->GetPrefabInstanceRoot();
-    const bool editableHierarchy = prefabRoot == nullptr;
+    const bool editableHierarchy = prefabRoot == nullptr || editingPrefab;
     const bool deletable = editableHierarchy || prefabRoot == obj;
     const EditorUiContextMenuResult menu = ui.ContextMenu(obj,
         editableHierarchy ? "Add Object" : nullptr,
@@ -357,7 +382,7 @@ void HierarchyView::DrawObjectNode(
         if (OnHierarchyChanged) OnHierarchyChanged();
     }
     if (row.nameChanged) obj->name = name;
-    if (row.enabledChanged)
+    if (row.enabledChanged && (editableHierarchy || prefabRoot == obj))
     {
         enabled ? obj->Enabled() : obj->Disabled();
         LogInteraction("Set '" + ObjectName(obj) + "' " + (enabled ? "enabled" : "disabled"));

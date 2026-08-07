@@ -12,20 +12,24 @@ Light::Light()
     RegisterField("baked", baked);
 }
 
-void Light::DrawProperties(IEditorUi& ui)
+bool Light::DrawProperties(IEditorUi& ui)
 {
+    bool changed = false;
     const char* types[] = { "Point", "Global / Ambient" };
     if (ui.Combo("Type", &lightType, types, 2))
+    {
         lightType = lightType == static_cast<int>(Type::Ambient)
             ? static_cast<int>(Type::Ambient)
             : static_cast<int>(Type::Point);
+        changed = true;
+    }
 
-    ui.ColorEdit3("Color", &color.x);
-    ui.DragFloat("Intensity", &intensity, 0.05f, 0.f, 100.f);
+    changed = ui.ColorEdit3("Color", &color.x) || changed;
+    changed = ui.DragFloat("Intensity", &intensity, 0.05f, 0.f, 100.f) || changed;
     if (GetLightType() == Type::Point)
     {
-        ui.DragFloat("Range", &range, 0.1f, 0.01f, 1000.f);
-        ui.DragFloat("Falloff", &falloff, 0.05f, 0.1f, 8.f);
+        changed = ui.DragFloat("Range", &range, 0.1f, 0.01f, 1000.f) || changed;
+        changed = ui.DragFloat("Falloff", &falloff, 0.05f, 0.1f, 8.f) || changed;
     }
     else
         ui.DisabledLabel("Direction uses the object's rotation; position is ignored.");
@@ -33,8 +37,12 @@ void Light::DrawProperties(IEditorUi& ui)
     int selectedMode = baked ? 1 : 0;
     const char* modes[] = { "Realtime", "Baked" };
     if (ui.Combo("Mode", &selectedMode, modes, 2))
+    {
         baked = selectedMode == 1;
+        changed = true;
+    }
 
     if (baked)
         ui.DisabledLabel("Contributes when Scene > Bake Lighting is run.");
+    return changed;
 }

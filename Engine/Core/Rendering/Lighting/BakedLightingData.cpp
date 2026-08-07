@@ -16,7 +16,7 @@ BakedLightingData::BakedLightingData()
     RegisterField("version", version);
 }
 
-void BakedLightingData::DrawProperties(IEditorUi& ui)
+bool BakedLightingData::DrawProperties(IEditorUi& ui)
 {
     ui.DisabledLabel(valid
         ? "Generated baked material mapping (read-only)."
@@ -37,4 +37,5 @@ void BakedLightingData::DrawProperties(IEditorUi& ui)
         ? originalMaterialSnapshot.c_str() : originalMaterialAsset.c_str());
     ui.ValueLabel("Baked Material", bakedMaterialAsset.c_str());
     ui.ValueLabel("Lightmap", bakedLightmapAsset.c_str());
+    return false;
 }

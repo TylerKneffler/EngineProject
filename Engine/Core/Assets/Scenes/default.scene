@@ -115,10 +115,10 @@
             <item>0.576697</item>
             <item>0.577816</item>
           </BakedLightingData.lightDirection>
-          <BakedLightingData.originalMaterialAsset>Engine/Core/Assets/Baked/default/Materials/Cube_0.source.material</BakedLightingData.originalMaterialAsset>
-          <BakedLightingData.originalMaterialSnapshot>Engine/Core/Assets/Baked/default/Materials/Cube_0.source.material</BakedLightingData.originalMaterialSnapshot>
-          <BakedLightingData.bakedMaterialAsset>Engine/Core/Assets/Baked/default/Materials/Cube_0.baked.material</BakedLightingData.bakedMaterialAsset>
-          <BakedLightingData.bakedLightmapAsset>Engine/Core/Assets/Baked/default/Lightmaps/Cube_0.lightmap.bmp</BakedLightingData.bakedLightmapAsset>
+          <BakedLightingData.originalMaterialAsset>Engine/Core/Assets/.temp/Baked/default/Materials/Cube_0.source.material</BakedLightingData.originalMaterialAsset>
+          <BakedLightingData.originalMaterialSnapshot>Engine/Core/Assets/.temp/Baked/default/Materials/Cube_0.source.material</BakedLightingData.originalMaterialSnapshot>
+          <BakedLightingData.bakedMaterialAsset>Engine/Core/Assets/.temp/Baked/default/Materials/Cube_0.baked.material</BakedLightingData.bakedMaterialAsset>
+          <BakedLightingData.bakedLightmapAsset>Engine/Core/Assets/.temp/Baked/default/Lightmaps/Cube_0.lightmap.bmp</BakedLightingData.bakedLightmapAsset>
           <BakedLightingData.valid>true</BakedLightingData.valid>
           <BakedLightingData.version>3</BakedLightingData.version>
         </components:BakedLightingData>

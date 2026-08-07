@@ -85,13 +85,19 @@ public:
     // Returns false if the file cannot be read or has an unsupported format.
     static bool Load(Scene& scene, const std::string& path, IGraphicsProvider* graphicsProvider = nullptr);
 
-    static bool SavePrefab(const Object& object, const std::string& path);
+    static bool SavePrefab(const Object& object, const std::string& path,
+        bool preserveRootTransform = false);
+    static std::string SavePrefabToString(const Object& object,
+        bool includeRootTransform = true);
     static Object* InstantiatePrefab(Scene& scene, const std::string& path,
         IGraphicsProvider* graphicsProvider = nullptr);
     // Reload every scene instance that references path while preserving each
-    // root placement transform. Returns false if the prefab cannot be read.
+    // root placement transform. preservedInstance can identify the instance
+    // already edited in-place; it will not be rebuilt. Returns false if the
+    // prefab cannot be read.
     static bool RefreshPrefabInstances(Scene& scene, const std::string& path,
-        IGraphicsProvider* graphicsProvider = nullptr);
+        IGraphicsProvider* graphicsProvider = nullptr,
+        Object* preservedInstance = nullptr);
 
     // Called internally; exposed so Scene::Load can invoke it.
     static void EnsureBuiltinsRegistered();

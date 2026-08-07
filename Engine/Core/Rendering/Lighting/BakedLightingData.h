@@ -22,5 +22,5 @@ public:
     bool valid = false;
     int version = 3;
 
-    void DrawProperties(IEditorUi& ui) override;
+    bool DrawProperties(IEditorUi& ui) override;
 };

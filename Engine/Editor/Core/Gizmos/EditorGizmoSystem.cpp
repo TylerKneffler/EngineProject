@@ -176,9 +176,7 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
     EditorUiVec2 axisEnds[3]{};
     float axisScale = 0.f;
     bool axisVisible[3]{};
-    const bool transformLocked = selected && selected->GetPrefabInstanceRoot() &&
-        selected->GetPrefabInstanceRoot() != selected;
-    if (selected && !transformLocked && ProjectPoint(viewProjection,
+    if (selected && ProjectPoint(viewProjection,
         selected->transform.GetWorldPosition(), input.available, originScreen))
     {
         const glm::vec3 cameraPosition =
