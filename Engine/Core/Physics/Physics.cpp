@@ -1,4 +1,4 @@
-#include "Core/Physics/PhysicsSystem.h"
+#include "Core/Physics/Physics.h"
 
 #include "Core/Compoonents/Physics/Collider.h"
 #include "Core/Compoonents/Physics/Cloth.h"
@@ -21,12 +21,11 @@
 #include <limits>
 #include <memory>
 #include <sstream>
-#include <unordered_map>
 #include <vector>
 
 namespace
 {
-struct PhysicsWorld
+struct PhysicsState
 {
     std::unique_ptr<btSoftBodyRigidBodyCollisionConfiguration> collisionConfiguration =
         std::make_unique<btSoftBodyRigidBodyCollisionConfiguration>();
@@ -40,7 +39,7 @@ struct PhysicsWorld
             solver.get(), collisionConfiguration.get());
     btSoftBodyWorldInfo softBodyInfo{};
 
-    PhysicsWorld()
+    PhysicsState()
     {
         world->setGravity(btVector3(0.f, -9.81f, 0.f));
         softBodyInfo.m_broadphase = broadphase.get();
@@ -49,19 +48,6 @@ struct PhysicsWorld
         softBodyInfo.m_sparsesdf.Initialize();
     }
 };
-
-std::unordered_map<Scene*, std::unique_ptr<PhysicsWorld>>& Worlds()
-{
-    static std::unordered_map<Scene*, std::unique_ptr<PhysicsWorld>> worlds;
-    return worlds;
-}
-
-PhysicsWorld& WorldFor(Scene* scene)
-{
-    auto& slot = Worlds()[scene];
-    if (!slot) slot = std::make_unique<PhysicsWorld>();
-    return *slot;
-}
 
 std::string Lower(std::string value)
 {
@@ -128,6 +114,25 @@ std::string ConfigurationSignature(const RigidBody& body)
             output << "|mesh:" << mesh->GetFilePath() << ':' << mesh->GetVertexCount();
     }
     return output.str();
+}
+}
+
+struct Physics::Impl
+{
+    explicit Impl(Scene& owner) : scene(&owner), state(std::make_unique<PhysicsState>()) {}
+    Scene* scene = nullptr;
+    std::unique_ptr<PhysicsState> state;
+};
+
+Physics::Physics(Scene& scene) : m_impl(new Impl(scene)) {}
+Physics::~Physics() { delete m_impl; }
+void* Physics::GetInternalState() { return m_impl ? m_impl->state.get() : nullptr; }
+
+namespace
+{
+PhysicsState& StateFor(Scene* scene)
+{
+    return *static_cast<PhysicsState*>(scene->GetPhysics().GetInternalState());
 }
 }
 
@@ -308,7 +313,7 @@ bool RigidBody::EnsureBody()
     ApplyBodySettings();
     m_impl->body->setLinearVelocity(ToBullet(initialLinearVelocity));
     m_impl->body->setAngularVelocity(ToBullet(initialAngularVelocity));
-    WorldFor(m_impl->scene).world->addRigidBody(m_impl->body.get(),
+    StateFor(m_impl->scene).world->addRigidBody(m_impl->body.get(),
         static_cast<short>(collisionLayer), static_cast<short>(collisionMask));
     m_impl->signature = signature;
     return true;
@@ -319,9 +324,7 @@ void RigidBody::DestroyBody()
     if (!m_impl) return;
     if (m_impl->body && m_impl->scene)
     {
-        const auto found = Worlds().find(m_impl->scene);
-        if (found != Worlds().end())
-            found->second->world->removeRigidBody(m_impl->body.get());
+        StateFor(m_impl->scene).world->removeRigidBody(m_impl->body.get());
     }
     m_impl->body.reset();
     m_impl->motionState.reset();
@@ -590,7 +593,7 @@ bool Cloth::EnsureSoftBody()
     for (std::size_t node : simulationToNode)
         triangles.push_back(static_cast<int>(node));
 
-    PhysicsWorld& physics = WorldFor(m_impl->scene);
+    PhysicsState& physics = StateFor(m_impl->scene);
     m_impl->softBody.reset(btSoftBodyHelpers::CreateFromTriMesh(
         physics.softBodyInfo, worldVertices.data(), triangles.data(),
         static_cast<int>(triangles.size() / 3), false));
@@ -652,9 +655,7 @@ void Cloth::DestroySoftBody(bool restoreMesh)
     if (!m_impl) return;
     if (m_impl->softBody && m_impl->scene)
     {
-        const auto found = Worlds().find(m_impl->scene);
-        if (found != Worlds().end())
-            found->second->world->removeSoftBody(m_impl->softBody.get());
+        StateFor(m_impl->scene).world->removeSoftBody(m_impl->softBody.get());
     }
     m_impl->softBody.reset();
     if (restoreMesh && m_impl->mesh && !m_impl->originalVertices.empty())
@@ -749,8 +750,9 @@ void Cloth::Enabled() { EnsureSoftBody(); }
 void Cloth::Disabled() { DestroySoftBody(true); }
 void Cloth::OnDestroy() { DestroySoftBody(true); }
 
-void PhysicsSystem::Step(Scene& scene, float deltaTime)
+void Physics::Step(float deltaTime)
 {
+    Scene& scene = *m_impl->scene;
     std::vector<RigidBody*> bodies;
     std::vector<Cloth*> clothBodies;
     for (const auto& object : scene.GetObjects())
@@ -773,7 +775,7 @@ void PhysicsSystem::Step(Scene& scene, float deltaTime)
             }
     if (bodies.empty() && clothBodies.empty()) return;
 
-    PhysicsWorld& physics = WorldFor(&scene);
+    PhysicsState& physics = *m_impl->state;
     physics.world->stepSimulation(std::clamp(deltaTime, 0.f, 0.1f), 6, 1.f / 60.f);
 
     for (RigidBody* body : bodies)
@@ -805,11 +807,12 @@ void PhysicsSystem::Step(Scene& scene, float deltaTime)
     }
 }
 
-void PhysicsSystem::Reset(Scene& scene)
+void Physics::Reset()
 {
+    Scene& scene = *m_impl->scene;
     for (const auto& object : scene.GetObjects())
         for (Component* component : object->Components)
             if (auto* body = dynamic_cast<RigidBody*>(component)) body->DestroyBody();
             else if (auto* cloth = dynamic_cast<Cloth*>(component)) cloth->DestroySoftBody(true);
-    Worlds().erase(&scene);
+    m_impl->state = std::make_unique<PhysicsState>();
 }

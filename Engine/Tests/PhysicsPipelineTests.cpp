@@ -1,6 +1,5 @@
 #include "Core/Compoonents/Physics/Collider.h"
 #include "Core/Compoonents/Physics/Cloth.h"
-#include "Core/Physics/PhysicsSystem.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Scene/Scene.h"
@@ -16,7 +15,7 @@ namespace
 void Step(Scene& scene, int count)
 {
     for (int i = 0; i < count; ++i)
-        PhysicsSystem::Step(scene, 1.f / 60.f);
+        scene.Update(1.f / 60.f);
 }
 
 bool PrimitiveSimulation()

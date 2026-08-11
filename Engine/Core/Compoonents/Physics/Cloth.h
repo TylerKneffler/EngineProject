@@ -5,7 +5,7 @@
 #include <glm/glm.hpp>
 #include <string>
 
-class PhysicsSystem;
+class Physics;
 
 // Simulates an independently selectable triangle mesh as a soft body. The
 // object's Mesh component is the rendered target and is restored on stop.
@@ -65,7 +65,7 @@ public:
     void OnDestroy() override;
 
 private:
-    friend class PhysicsSystem;
+    friend class Physics;
     bool EnsureSoftBody();
     void DestroySoftBody(bool restoreMesh);
     void ApplyForces();

@@ -13,6 +13,9 @@
 #include "Core/Compoonents/Physics/Collider.h"
 #include "Core/Compoonents/Physics/Cloth.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
+#include "Core/Compoonents/UI/Canvas.h"
+#include "Core/Compoonents/UI/UIObject.h"
+#include "Core/Compoonents/UI/UIText.h"
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
 #include "Core/Compoonents/Animation/ModelAnimation.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
@@ -74,6 +77,9 @@ void SceneSerializer::EnsureBuiltinsRegistered()
     RegisterComponentType<PrimitiveObjectCollider>();
     RegisterComponentType<MeshObjectCollider>();
     RegisterComponentType<Cloth>();
+    RegisterComponentType<Canvas>();
+    RegisterComponentType<UIObject>();
+    RegisterComponentType<UIText>();
     RegisterComponentType<SpriteAnimationManager>();
     RegisterComponentType<ModelNode>();
     Register("GltfNode", []() -> Component* { return new ModelNode(); });

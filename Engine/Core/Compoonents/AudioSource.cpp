@@ -208,7 +208,6 @@ void AudioSource::Update()
     const bool wasPlaying = IsPlaying();
     if (!EnsureLoaded()) return;
     ApplySettings();
-    UpdateListener();
     if (wasPlaying && !IsPlaying() && !ma_sound_at_end(&m_impl->sound))
         ma_sound_start(&m_impl->sound);
 }

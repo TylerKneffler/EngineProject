@@ -5,7 +5,7 @@
 #include <glm/glm.hpp>
 #include <string>
 
-class PhysicsSystem;
+class Physics;
 
 class RigidBody final : public Script
 {
@@ -74,7 +74,7 @@ public:
     void OnDestroy() override;
 
 private:
-    friend class PhysicsSystem;
+    friend class Physics;
     bool EnsureBody();
     void DestroyBody();
     void SyncBodyFromTransform();

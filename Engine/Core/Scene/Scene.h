@@ -15,13 +15,16 @@ class IShaderCompiler;
 class IPipelineStateFactory;
 class IGraphicsBufferFactory;
 class Texture;
+class UIRenderer;
+class Physics;
+class Audio;
 
 // ---------------------------------------------------------------------------
 // Scene
 //
-// Owns all game objects for one scene and manages scene-wide rendering
-// helpers such as the editor grid.  Only the editor uses Init()/Render();
-// the game runtime will call Start()/Update() instead.
+// Owns all game objects plus the scene's Physics and Audio runtime state.
+// Start()/Update() provide the common runtime path used by the standalone game
+// and Editor Play mode; Init()/Render() manage API-neutral rendering resources.
 //
 // ---- Typical editor usage ----
 //
@@ -59,8 +62,16 @@ public:
     using ObjectPath = std::vector<std::size_t>;
     enum class ObjectPlacement { Before, AsChild, After };
 
-    Scene()  = default;
+    Scene();
     ~Scene();
+
+    // Runtime lifecycle shared by the standalone game and Editor Play mode.
+    void Start();
+    void Update(float deltaTime);
+    Physics& GetPhysics() { return *m_physics; }
+    const Physics& GetPhysics() const { return *m_physics; }
+    Audio& GetAudio() { return *m_audio; }
+    const Audio& GetAudio() const { return *m_audio; }
 
     // --- Editor Settings ---
     Object editorCamera; // not used by the game runtime, used for editor scene view navigation
@@ -153,6 +164,9 @@ private:
     void* m_lightDataMapped = nullptr;
     std::unique_ptr<IGraphicsBuffer> m_boneDataBuffer;
     void* m_boneDataMapped = nullptr;
+    std::unique_ptr<UIRenderer> m_uiRenderer;
+    std::unique_ptr<Physics> m_physics;
+    std::unique_ptr<Audio> m_audio;
 
     Engine::Rendering::Lighting::RealtimeLightingPipeline m_realtimeLightingPipeline;
     Engine::Rendering::Lighting::BakedLightingPipeline m_bakedLightingPipeline;

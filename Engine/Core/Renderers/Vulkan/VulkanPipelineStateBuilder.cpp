@@ -52,11 +52,12 @@ IPipelineStateBuilder& VulkanPipelineStateBuilder::SetInputLayout(const VertexEl
         VkVertexInputAttributeDescription attribute{};
         attribute.location = i;
         attribute.binding = elements[i].inputSlot;
+        uint32_t formatSize = 0;
         switch (elements[i].format)
         {
-        case 2:  attribute.format = VK_FORMAT_R32G32B32A32_SFLOAT; break;
-        case 6:  attribute.format = VK_FORMAT_R32G32B32_SFLOAT; break;
-        case 16: attribute.format = VK_FORMAT_R32G32_SFLOAT; break;
+        case 2:  attribute.format = VK_FORMAT_R32G32B32A32_SFLOAT; formatSize = 16; break;
+        case 6:  attribute.format = VK_FORMAT_R32G32B32_SFLOAT; formatSize = 12; break;
+        case 16: attribute.format = VK_FORMAT_R32G32_SFLOAT; formatSize = 8; break;
         default:
             throw std::runtime_error(
                 "Unsupported cross-API vertex format " +
@@ -64,9 +65,11 @@ IPipelineStateBuilder& VulkanPipelineStateBuilder::SetInputLayout(const VertexEl
         }
         attribute.offset = elements[i].alignedByteOffset;
         m_attributes.push_back(attribute);
+        auto stride = std::find_if(m_bindings.begin(), m_bindings.end(),
+            [&](const auto& binding) { return binding.binding == elements[i].inputSlot; });
+        stride->stride = std::max(stride->stride,
+            elements[i].alignedByteOffset + formatSize);
     }
-    // POSITION/NORMAL plus imported UV and tangent data.
-    for (auto& binding : m_bindings) binding.stride = sizeof(Vertex);
     return *this;
 }
 

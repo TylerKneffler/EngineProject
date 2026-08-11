@@ -9,7 +9,6 @@
 #include "Engine/Editor/ProjectLauncher.h"
 #include "Engine/Editor/UI/IEditorUiBackend.h"
 #include "Engine/Editor/Core/Importers/ModelImporter.h"
-#include "Core/Physics/PhysicsSystem.h"
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
 #include "Core/Assets/Scripts/Rotate.h"
 #include "Core/Serialization/SceneSerializer.h"
@@ -318,8 +317,7 @@ int WINAPI wWinMain(
     gameBuildManager->OnPlayStart = [&]()
     {
         editorState->CapturePlayModeScene();
-        for (const auto& obj : scene->GetObjects())
-            obj->Start();
+        scene->Start();
     };
     gameBuildManager->OnPlayStop = [&]()
     {
@@ -388,9 +386,7 @@ int WINAPI wWinMain(
         // Tick game objects while playing
         if (playState == PlayState::Playing)
         {
-            for (const auto& obj : scene->GetObjects())
-                obj->Update();
-            PhysicsSystem::Step(*scene, dt);
+            scene->Update(dt);
         }
 
         renderer->MarkDirty();

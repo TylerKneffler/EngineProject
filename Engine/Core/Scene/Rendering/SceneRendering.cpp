@@ -12,6 +12,7 @@
 #include "Core/Graphics/IPipelineState.h"
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Graphics/IGraphicsContext.h"
+#include "Core/Renderers/UIRenderer.h"
 #include <algorithm>
 #include <stdexcept>
 #include <filesystem>
@@ -195,6 +196,8 @@ void Scene::Init(IGraphicsProvider* graphicsProvider)
     BuildGridPipeline();
     BuildSkyboxPipeline();
     BuildObjectPipeline();
+    m_uiRenderer = std::make_unique<UIRenderer>();
+    m_uiRenderer->Initialize(m_graphicsProvider);
 }
 
 void Scene::SetEditorMode2D(bool enabled)
@@ -857,4 +860,9 @@ void Scene::Render(IGraphicsContext* context, float aspect,
         // Draw fullscreen triangle (3 vertices, no vertex buffer)
         context->DrawInstanced(3, 1, 0, 0);
     }
+
+    // Screen-space retained UI is always the final scene pass. Editor chrome
+    // is submitted later by the editor renderer and remains above game UI.
+    if (m_uiRenderer)
+        m_uiRenderer->Render(*this, context, aspect);
 }

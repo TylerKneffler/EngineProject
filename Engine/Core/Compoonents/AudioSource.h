@@ -4,6 +4,8 @@
 #include "Core/PropertyMacros.h"
 #include <string>
 
+class Audio;
+
 class AudioSource : public Script
 {
 public:
@@ -60,6 +62,7 @@ public:
     void OnDestroy() override;
 
 private:
+    friend class Audio;
     bool EnsureLoaded();
     void Unload();
     void ApplySettings();

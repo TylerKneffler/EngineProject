@@ -27,9 +27,9 @@
 - [x] Add FBX by converting it into the same internal model-import representation.
 - [x] Add mipmaps, HDR/EXR/TGA, and KTX2 texture processing.
 - [x] Add WAV/OGG/MP3 together with an audio component and mixer.
-- [ ] Add TTF/OTF once runtime text/UI exists.
-- [ ] Add convenience and specialist formats only when a project needs them.
 - [x] Add Rigid Body physics component
 - [x] Add Primitive Object Collider cube,circle,capsule,cylinder, component
 - [x] Add mesh Object Collider component
 - [x] Add Cloth / mesh realtime physics component
+- [ ] Add TTF/OTF once runtime text/UI exists.
+- [ ] Add convenience and specialist formats only when a project needs them.

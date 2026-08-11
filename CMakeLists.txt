@@ -321,6 +321,7 @@ target_include_directories(Engine PUBLIC
 )
 target_include_directories(Engine PRIVATE
     ${assimp_SOURCE_DIR}/contrib/stb
+    ${imgui_SOURCE_DIR}
     ${tinyexr_SOURCE_DIR}
     ${miniaudio_SOURCE_DIR}
     ${miniaudio_SOURCE_DIR}/extras
@@ -353,7 +354,7 @@ target_compile_definitions(Engine PUBLIC
 if(ENGINE_VULKAN_ENABLED)
     set(VULKAN_SHADER_DIR "${CMAKE_BINARY_DIR}/VulkanShaders")
     set(VULKAN_SHADER_OUTPUTS)
-    foreach(SHADER_NAME Grid Object ObjectOutline Skybox)
+    foreach(SHADER_NAME Grid Object ObjectOutline Skybox UI)
         foreach(STAGE VS PS)
             if(STAGE STREQUAL "VS")
                 set(SHADER_PROFILE vs_6_0)
@@ -554,5 +555,19 @@ if(NOT ENGINE_PROJECT_DIR AND
     add_test(NAME RigidBodyAndColliderSimulation COMMAND PhysicsPipelineTests
         "${ENGINE_ROOT}/Engine/Core/Assets/Mesh/cube.obj")
     set_tests_properties(RigidBodyAndColliderSimulation PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_ROOT}/Engine/Tests/UILayoutTests.cpp")
+    enable_testing()
+    add_executable(UILayoutTests
+        "${ENGINE_ROOT}/Engine/Tests/UILayoutTests.cpp")
+    target_link_libraries(UILayoutTests PRIVATE Engine)
+    target_include_directories(UILayoutTests PRIVATE "${ENGINE_ROOT}/Engine")
+    target_link_options(UILayoutTests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/INCREMENTAL:NO>)
+    add_test(NAME RetainedUILayoutAndSerialization COMMAND UILayoutTests)
+    set_tests_properties(RetainedUILayoutAndSerialization PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()

@@ -110,6 +110,10 @@ outer cone angles/gain. Sources route through a named bus such as `SFX`, whose
 level can be controlled with `AudioMixer::Get().SetBusVolume("SFX", 0.8f)`; the
 master level uses `SetMasterVolume()`.
 
+Each Scene owns its `Audio` coordinator, which selects and updates one listener
+after component updates. `AudioMixer` remains process-wide because it owns the
+single output device and named buses.
+
 ### Component references
 
 Inspector component-reference fields behave like Unity object fields. Their empty
@@ -140,6 +144,7 @@ collision layer/mask, and per-axis position/rotation locks. Runtime scripts can
 call `AddForce()`, `AddTorque()`, `AddImpulse()`, `SetLinearVelocity()`, and query
 `IsColliding()` or `IsGrounded()`. Physics advances during Editor Play and in the
 standalone Game runtime; edit-mode transforms are not simulated.
+The owning Scene advances its `Physics` instance through `Scene::Update()`.
 
 Add **Cloth** to an object with a triangle Mesh to deform that render mesh in real
 time. Cloth has independent Simulation Mesh and Render Mesh component references,
@@ -153,6 +158,26 @@ self-collision, and directional wind. `pinMode` can hold the mesh's `Top`,
 free. `pinThreshold` controls how wide that pinned boundary is. The original
 render mesh is restored when play stops or the component is removed, and scripts
 can call `ResetSimulation()` after changing its setup.
+
+### Native screen UI
+
+Screen UI uses retained scene components and is rendered by the engine after the
+3D scene. Add **Canvas** to a root object, then add child objects with **UIObject**
+and **UIText**. An optional UIObject on the Canvas root can arrange its immediate
+children as a `Row` or `Column`; nested UIObjects build the rest of the hierarchy.
+
+UIObject provides top-left-origin anchors, pivot, anchored position, size delta,
+minimum/maximum size, margin, padding, flex growth, spacing, clipping, visibility,
+and z-order. Row/Column containers support start/center/end/space-between
+justification and start/center/end/stretch alignment. Canvas supports constant
+logical sizing or scale-with-screen behavior against a configurable reference
+resolution.
+
+UIText provides size, RGBA color, horizontal/vertical alignment, word wrapping,
+line spacing, and visible/clip/ellipsis overflow. Leave Font Path empty to use the
+Windows UI-font fallback, or assign a `.ttf`/`.otf` file through the inspector.
+The initial SDF atlas covers printable ASCII; unsupported characters render as
+`?`. The same components render in the editor scene view and standalone game.
 
 ### Imported animated characters
 

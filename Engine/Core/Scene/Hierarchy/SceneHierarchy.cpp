@@ -1,12 +1,35 @@
 #include "Core/Scene/Scene.h"
-#include "Core/Physics/PhysicsSystem.h"
+#include "Core/Audio/Audio.h"
+#include "Core/Physics/Physics.h"
+#include "Core/Renderers/UIRenderer.h"
 #include <algorithm>
 #include <cmath>
 #include <functional>
 
+Scene::Scene()
+    : m_physics(std::make_unique<Physics>(*this))
+    , m_audio(std::make_unique<Audio>(*this))
+{
+}
+
 Scene::~Scene()
 {
-    PhysicsSystem::Reset(*this);
+    m_audio->Reset();
+    m_physics->Reset();
+}
+
+void Scene::Start()
+{
+    for (const auto& object : m_objects)
+        object->Start();
+}
+
+void Scene::Update(float deltaTime)
+{
+    for (const auto& object : m_objects)
+        object->Update();
+    m_audio->Update(deltaTime);
+    m_physics->Step(deltaTime);
 }
 
 Object* Scene::AddObject()
@@ -262,7 +285,8 @@ void Scene::RemoveObject(Object* obj)
 
 void Scene::ClearObjects()
 {
-    PhysicsSystem::Reset(*this);
+    m_audio->Reset();
+    m_physics->Reset();
     m_objects.clear();
     m_selectedObject = nullptr;
     m_previewObject = nullptr;
