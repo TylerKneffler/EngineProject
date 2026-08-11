@@ -26,6 +26,12 @@ Material::Material()
     RegisterField("unlit", unlit);
     RegisterField("alphaMode", alphaMode);
     RegisterField("emissiveColor", emissiveColor);
+    RegisterField("baseColorUvSet", baseColorUvSet);
+    RegisterField("metallicRoughnessUvSet", metallicRoughnessUvSet);
+    RegisterField("normalUvSet", normalUvSet);
+    RegisterField("occlusionUvSet", occlusionUvSet);
+    RegisterField("emissiveUvSet", emissiveUvSet);
+    RegisterField("heightUvSet", heightUvSet);
 }
 
 namespace
@@ -85,6 +91,12 @@ bool Material::LoadFromFile(const std::string& path)
         if (root.Has("occlusionStrength")) occlusionStrength = root["occlusionStrength"].AsFloat();
         if (root.Has("doubleSided")) doubleSided = root["doubleSided"].AsBool();
         if (root.Has("unlit")) unlit = root["unlit"].AsBool();
+        if (root.Has("baseColorUvSet")) baseColorUvSet = root["baseColorUvSet"].AsInt();
+        if (root.Has("metallicRoughnessUvSet")) metallicRoughnessUvSet = root["metallicRoughnessUvSet"].AsInt();
+        if (root.Has("normalUvSet")) normalUvSet = root["normalUvSet"].AsInt();
+        if (root.Has("occlusionUvSet")) occlusionUvSet = root["occlusionUvSet"].AsInt();
+        if (root.Has("emissiveUvSet")) emissiveUvSet = root["emissiveUvSet"].AsInt();
+        if (root.Has("heightUvSet")) heightUvSet = root["heightUvSet"].AsInt();
         if (root.Has("baseColorTexture")) SetBaseColorTexture(
             ResolveTexturePath(path, root["baseColorTexture"].AsString()));
         if (root.Has("metallicRoughnessTexture")) SetMetallicRoughnessTexture(
@@ -128,6 +140,12 @@ bool Material::SaveToFile(const std::string& path) const
     root.Set("occlusionStrength", JsonValue(occlusionStrength));
     root.Set("doubleSided", JsonValue(doubleSided));
     root.Set("unlit", JsonValue(unlit));
+    root.Set("baseColorUvSet", JsonValue(baseColorUvSet));
+    root.Set("metallicRoughnessUvSet", JsonValue(metallicRoughnessUvSet));
+    root.Set("normalUvSet", JsonValue(normalUvSet));
+    root.Set("occlusionUvSet", JsonValue(occlusionUvSet));
+    root.Set("emissiveUvSet", JsonValue(emissiveUvSet));
+    root.Set("heightUvSet", JsonValue(heightUvSet));
     if (baseColorTexture) root.Set("baseColorTexture", JsonValue(TexturePath(baseColorTexture)));
     if (metallicRoughnessTexture) root.Set("metallicRoughnessTexture", JsonValue(TexturePath(metallicRoughnessTexture)));
     if (normalTexture) root.Set("normalTexture", JsonValue(TexturePath(normalTexture)));
@@ -211,6 +229,12 @@ void Material::Validate()
     heightMinSteps = std::clamp(heightMinSteps, 4.f, 64.f);
     heightMaxSteps = std::clamp(heightMaxSteps, heightMinSteps, 64.f);
     occlusionStrength = std::clamp(occlusionStrength, 0.f, 1.f);
+    baseColorUvSet = std::clamp(baseColorUvSet, 0, 1);
+    metallicRoughnessUvSet = std::clamp(metallicRoughnessUvSet, 0, 1);
+    normalUvSet = std::clamp(normalUvSet, 0, 1);
+    occlusionUvSet = std::clamp(occlusionUvSet, 0, 1);
+    emissiveUvSet = std::clamp(emissiveUvSet, 0, 1);
+    heightUvSet = std::clamp(heightUvSet, 0, 1);
     switch (GetAlphaMode())
     {
     case MaterialAlphaMode::Mask: alphaMode = "Mask"; break;

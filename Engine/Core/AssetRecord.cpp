@@ -1,4 +1,4 @@
-#include "Core/Assets/AssetRecord.h"
+#include "Core/AssetRecord.h"
 
 #include "Core/Serialization/Json.h"
 

@@ -12,6 +12,14 @@ struct Vertex
     float normal[3];
     float uv[2];
     float tangent[4];
+    float uv1[2];
+    float color[4] { 1.f, 1.f, 1.f, 1.f };
+    // Stored as floats to keep one portable input layout across D3D11,
+    // D3D12, and Vulkan. Values are exact for imported palette indices.
+    float joints0[4] {};
+    float weights0[4] {};
+    float joints1[4] {};
+    float weights1[4] {};
 };
 
 class Mesh : public Component
@@ -33,6 +41,7 @@ public:
     
     uint32_t GetVertexCount() const { return static_cast<uint32_t>(m_vertices.size()); }
     const std::vector<Vertex>& GetVertices() const { return m_vertices; }
+    void SetDeformedVertices(const std::vector<Vertex>& vertices);
     uint32_t GetVertexStride() const { return sizeof(Vertex); }
     bool     IsReady()        const { return m_ready; }
     const std::string& GetFilePath() const { return m_filePath; }

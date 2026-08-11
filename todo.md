@@ -1,4 +1,4 @@
-# Completed
+[x] Completed, [ ] Incomplete
 
 - [x] Establish the C++17 engine, standalone game runtime, and editor application.
 - [x] Add scene objects, reusable components, transforms, and the object-rendering pipeline.
@@ -23,12 +23,11 @@
 - [x] Enhance the Properties view with component and asset-assignment workflows.
 - [x] Add a real asset record with source path, stable ID, and import settings.
 - [x] Add versioned Windows release packaging and quick-start documentation.
-
-# Current TODOs
-
-- [ ] Strengthen glTF with skinning, animation, morphs, vertex colors, and UV1.
-- [ ] Add FBX by converting it into the same internal model-import representation.
+- [x] Strengthen glTF with skinning, animation, morphs, vertex colors, and UV1.
+- [x] Add FBX by converting it into the same internal model-import representation.
 - [ ] Add mipmaps, HDR/EXR/TGA, and KTX2 texture processing.
 - [ ] Add WAV/OGG/MP3 together with an audio component and mixer.
 - [ ] Add TTF/OTF once runtime text/UI exists.
 - [ ] Add convenience and specialist formats only when a project needs them.
+- [ ] Add Rigid Body physics component
+- [ ] Add Cloth / mesh realtime physics component

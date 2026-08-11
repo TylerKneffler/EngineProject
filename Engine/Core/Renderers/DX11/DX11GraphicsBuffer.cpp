@@ -24,6 +24,30 @@ void* D3D11GraphicsBuffer::Map()
     return m_shadowData.data();
 }
 
+void D3D11GraphicsBuffer::Unmap()
+{
+    if (m_usage == Usage::VertexBuffer)
+        FlushMappedWrites();
+}
+
+void D3D11GraphicsBuffer::FlushMappedWrites()
+{
+    if (m_access != AccessMode::Upload || !m_buffer || m_shadowData.empty())
+        return;
+    Microsoft::WRL::ComPtr<ID3D11Device> device;
+    Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
+    m_buffer->GetDevice(&device);
+    if (!device) return;
+    device->GetImmediateContext(&context);
+    if (!context) return;
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    if (SUCCEEDED(context->Map(m_buffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
+    {
+        std::memcpy(mapped.pData, m_shadowData.data(), m_shadowData.size());
+        context->Unmap(m_buffer.Get(), 0);
+    }
+}
+
 std::unique_ptr<IGraphicsBuffer> D3D11BufferFactory::CreateBuffer(
     IGraphicsBuffer::Usage usage,
     IGraphicsBuffer::AccessMode access,

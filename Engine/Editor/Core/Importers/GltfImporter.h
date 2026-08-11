@@ -1,14 +1,8 @@
 #pragma once
 
-#include <string>
+#include "ImportedModel.h"
 
-struct GltfImportResult
-{
-    bool success = false;
-    std::string prefabPath;
-    std::string outputDirectory;
-    std::string message;
-};
+using GltfImportResult = ModelImportResult;
 
 // Converts glTF/GLB source data into an engine prefab plus engine-native
 // mesh/material assets under Assets/ModelName/{Meshes,Materials,Textures}.

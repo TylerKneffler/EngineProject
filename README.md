@@ -93,6 +93,26 @@ Open the repository or generated project folder directly in Visual Studio 2022. 
 - Add project scenes, meshes, textures, and C++ scripts only to the project's `Assets/` directory.
 - Store asset paths relative to the project root, such as `Assets/Mesh/player.obj`.
 
+### Imported animated characters
+
+Importing a Blender glTF/GLB or FBX creates skeleton, animation, animation-manager,
+morph-target, and skinned-mesh components automatically. The renderer performs
+skinning on the GPU on DirectX 11, DirectX 12, and Vulkan, with up to eight
+influences per vertex and 256 joints per rendered primitive.
+
+The editor routes all supported model formats through `ModelImporter`. FBX is
+decoded into the format-neutral `ImportedModel` document (nodes, primitives,
+materials, skins, morphs, and clips), and every import produces the same
+engine-native `.prefab`, `.mesh`, and `.material` references. Use
+`--import-model` for headless imports; the older `--import-gltf` spelling
+remains available for compatibility.
+
+Call `AnimationManager::Play("Run", 0.2f)` to crossfade the base clip. Add
+`AnimationManager::Layer` entries for override or additive animation. A layer's
+`nodeMask` restricts it to the listed imported `ModelNode::nodeIndex` values; an
+empty mask affects the full character. Layers can also be edited on the
+Animation Manager component in the Properties panel.
+
 ## Renderers
 
 Choose the editor and game renderers under **File > Project Preferences > Rendering**:

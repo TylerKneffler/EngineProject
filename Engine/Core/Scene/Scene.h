@@ -151,6 +151,8 @@ private:
     void* m_objectDataMapped = nullptr;
     std::unique_ptr<IGraphicsBuffer> m_lightDataBuffer;
     void* m_lightDataMapped = nullptr;
+    std::unique_ptr<IGraphicsBuffer> m_boneDataBuffer;
+    void* m_boneDataMapped = nullptr;
 
     Engine::Rendering::Lighting::RealtimeLightingPipeline m_realtimeLightingPipeline;
     Engine::Rendering::Lighting::BakedLightingPipeline m_bakedLightingPipeline;
@@ -169,6 +171,7 @@ private:
     bool m_editorCameraModeInitialized = false;
 
     static constexpr uint32_t kMaxObjects = 64;
+    static constexpr uint32_t kMaxBonesPerObject = 256;
     static constexpr uint32_t kMaxLights =
         Engine::Rendering::Lighting::MaxRealtimeLights;
     static constexpr uint32_t kCBStride = 256;

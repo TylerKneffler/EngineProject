@@ -1,8 +1,9 @@
 #include "GltfImporter.h"
 
-#include "Core/Assets/AssetRecord.h"
+#include "Core/AssetRecord.h"
 #include "Core/Compoonents/Material.h"
 #include "Core/Compoonents/Mesh.h"
+#include "Core/Compoonents/Animation/ModelAnimation.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
@@ -20,6 +21,7 @@
 #include <iterator>
 #include <optional>
 #include <unordered_map>
+#include <limits>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -199,6 +201,11 @@ glm::vec3 QuaternionEuler(const glm::quat& q)
     const float cosZ = 1.f - 2.f * (q.y * q.y + q.z * q.z);
     return { std::atan2(sinX, cosX), std::asin(sinY), std::atan2(sinZ, cosZ) };
 }
+
+struct ImportedPrimitiveRuntime
+{
+    std::vector<MorphTargets::Target> morphTargets;
+};
 }
 
 GltfImportResult GltfImporter::Import(
@@ -312,6 +319,18 @@ GltfImportResult GltfImporter::Import(
             material.SetNormalTexture(texturePath(imported.normalTexture));
             material.SetOcclusionTexture(texturePath(imported.occlusionTexture));
             material.SetEmissiveTexture(texturePath(imported.emissiveTexture));
+            auto uvSet = [](const auto& info)
+            {
+                if (!info) return 0;
+                const size_t selected = info->transform && info->transform->texCoordIndex
+                    ? *info->transform->texCoordIndex : info->texCoordIndex;
+                return static_cast<int>(std::min<size_t>(selected, 1));
+            };
+            material.baseColorUvSet = uvSet(imported.pbrData.baseColorTexture);
+            material.metallicRoughnessUvSet = uvSet(imported.pbrData.metallicRoughnessTexture);
+            material.normalUvSet = uvSet(imported.normalTexture);
+            material.occlusionUvSet = uvSet(imported.occlusionTexture);
+            material.emissiveUvSet = uvSet(imported.emissiveTexture);
 
             const std::string name = SafeName(
                 imported.name, "Material " + std::to_string(materialIndex + 1));
@@ -335,10 +354,12 @@ GltfImportResult GltfImporter::Import(
             { { "importer", std::string("gltf-default-material") } });
 
         std::vector<std::vector<std::string>> meshPaths(asset.meshes.size());
+        std::vector<std::vector<ImportedPrimitiveRuntime>> meshRuntime(asset.meshes.size());
         for (size_t meshIndex = 0; meshIndex < asset.meshes.size(); ++meshIndex)
         {
             const auto& importedMesh = asset.meshes[meshIndex];
             meshPaths[meshIndex].resize(importedMesh.primitives.size());
+            meshRuntime[meshIndex].resize(importedMesh.primitives.size());
             for (size_t primitiveIndex = 0; primitiveIndex < importedMesh.primitives.size(); ++primitiveIndex)
             {
                 const auto& primitive = importedMesh.primitives[primitiveIndex];
@@ -358,10 +379,21 @@ GltfImportResult GltfImporter::Import(
 
                 std::vector<fastgltf::math::fvec3> normals(positionAccessor.count);
                 std::vector<fastgltf::math::fvec2> texcoords(positionAccessor.count);
+                std::vector<fastgltf::math::fvec2> texcoords1(positionAccessor.count);
                 std::vector<fastgltf::math::fvec4> tangents(positionAccessor.count);
+                std::vector<fastgltf::math::fvec4> colors(positionAccessor.count,
+                    fastgltf::math::fvec4(1.f));
+                std::vector<fastgltf::math::uvec4> jointData(positionAccessor.count);
+                std::vector<fastgltf::math::fvec4> weightData(positionAccessor.count);
+                std::vector<fastgltf::math::uvec4> jointData1(positionAccessor.count);
+                std::vector<fastgltf::math::fvec4> weightData1(positionAccessor.count);
                 bool hasNormals = false;
                 bool hasTexcoords = false;
+                bool hasTexcoords1 = false;
                 bool hasTangents = false;
+                bool hasColors = false;
+                bool hasSkinData = false;
+                bool hasSkinData1 = false;
                 const auto normalAttribute = primitive.findAttribute("NORMAL");
                 if (normalAttribute != primitive.attributes.end())
                 {
@@ -378,6 +410,13 @@ GltfImportResult GltfImporter::Import(
                         asset, accessor, texcoords.data());
                     hasTexcoords = true;
                 }
+                const auto texcoord1Attribute = primitive.findAttribute("TEXCOORD_1");
+                if (texcoord1Attribute != primitive.attributes.end())
+                {
+                    fastgltf::copyFromAccessor<fastgltf::math::fvec2>(asset,
+                        asset.accessors[texcoord1Attribute->accessorIndex], texcoords1.data());
+                    hasTexcoords1 = true;
+                }
                 const auto tangentAttribute = primitive.findAttribute("TANGENT");
                 if (tangentAttribute != primitive.attributes.end())
                 {
@@ -385,6 +424,59 @@ GltfImportResult GltfImporter::Import(
                     fastgltf::copyFromAccessor<fastgltf::math::fvec4>(
                         asset, accessor, tangents.data());
                     hasTangents = true;
+                }
+                const auto colorAttribute = primitive.findAttribute("COLOR_0");
+                if (colorAttribute != primitive.attributes.end())
+                {
+                    const auto& accessor = asset.accessors[colorAttribute->accessorIndex];
+                    if (accessor.type == fastgltf::AccessorType::Vec3)
+                    {
+                        std::vector<fastgltf::math::fvec3> rgb(positionAccessor.count);
+                        fastgltf::copyFromAccessor<fastgltf::math::fvec3>(asset, accessor, rgb.data());
+                        for (size_t i = 0; i < rgb.size(); ++i)
+                            colors[i] = { rgb[i].x(), rgb[i].y(), rgb[i].z(), 1.f };
+                    }
+                    else
+                        fastgltf::copyFromAccessor<fastgltf::math::fvec4>(asset, accessor, colors.data());
+                    hasColors = true;
+                }
+                const auto jointsAttribute = primitive.findAttribute("JOINTS_0");
+                const auto weightsAttribute = primitive.findAttribute("WEIGHTS_0");
+                if (jointsAttribute != primitive.attributes.end() && weightsAttribute != primitive.attributes.end())
+                {
+                    fastgltf::copyFromAccessor<fastgltf::math::uvec4>(asset,
+                        asset.accessors[jointsAttribute->accessorIndex], jointData.data());
+                    fastgltf::copyFromAccessor<fastgltf::math::fvec4>(asset,
+                        asset.accessors[weightsAttribute->accessorIndex], weightData.data());
+                    hasSkinData = true;
+                }
+                const auto joints1Attribute = primitive.findAttribute("JOINTS_1");
+                const auto weights1Attribute = primitive.findAttribute("WEIGHTS_1");
+                if (joints1Attribute != primitive.attributes.end() && weights1Attribute != primitive.attributes.end())
+                {
+                    fastgltf::copyFromAccessor<fastgltf::math::uvec4>(asset,
+                        asset.accessors[joints1Attribute->accessorIndex], jointData1.data());
+                    fastgltf::copyFromAccessor<fastgltf::math::fvec4>(asset,
+                        asset.accessors[weights1Attribute->accessorIndex], weightData1.data());
+                    hasSkinData1 = true;
+                }
+
+                std::vector<std::vector<fastgltf::math::fvec3>> morphPositions(primitive.targets.size());
+                std::vector<std::vector<fastgltf::math::fvec3>> morphNormals(primitive.targets.size());
+                std::vector<std::vector<fastgltf::math::fvec3>> morphTangents(primitive.targets.size());
+                for (size_t targetIndex = 0; targetIndex < primitive.targets.size(); ++targetIndex)
+                {
+                    auto copyTarget = [&](const char* semantic, auto& destination)
+                    {
+                        const auto attribute = primitive.findTargetAttribute(targetIndex, semantic);
+                        if (attribute == primitive.targets[targetIndex].end()) return;
+                        destination.resize(positionAccessor.count);
+                        fastgltf::copyFromAccessor<fastgltf::math::fvec3>(asset,
+                            asset.accessors[attribute->accessorIndex], destination.data());
+                    };
+                    copyTarget("POSITION", morphPositions[targetIndex]);
+                    copyTarget("NORMAL", morphNormals[targetIndex]);
+                    copyTarget("TANGENT", morphTangents[targetIndex]);
                 }
 
                 const auto& indexAccessor = asset.accessors[*primitive.indicesAccessor];
@@ -394,6 +486,8 @@ GltfImportResult GltfImporter::Import(
 
                 std::vector<Vertex> vertices;
                 vertices.reserve(indices.size());
+                ImportedPrimitiveRuntime& runtime = meshRuntime[meshIndex][primitiveIndex];
+                runtime.morphTargets.resize(primitive.targets.size());
                 for (uint32_t index : indices)
                 {
                     if (index >= positions.size())
@@ -420,7 +514,54 @@ GltfImportResult GltfImporter::Import(
                         vertex.tangent[2] = tangents[index].z();
                         vertex.tangent[3] = tangents[index].w();
                     }
+                    if (hasTexcoords1 && index < texcoords1.size())
+                    {
+                        vertex.uv1[0] = texcoords1[index].x(); vertex.uv1[1] = texcoords1[index].y();
+                    }
+                    if (hasColors && index < colors.size())
+                    {
+                        vertex.color[0] = colors[index].x(); vertex.color[1] = colors[index].y();
+                        vertex.color[2] = colors[index].z(); vertex.color[3] = colors[index].w();
+                    }
+                    if (hasSkinData)
+                    {
+                        const auto& importedJoints = jointData[index];
+                        const auto& importedWeights = weightData[index];
+                        for (size_t influence = 0; influence < 4; ++influence)
+                        {
+                            vertex.joints0[influence] = static_cast<float>(importedJoints[influence]);
+                            vertex.weights0[influence] = importedWeights[influence];
+                        }
+                    }
+                    if (hasSkinData1)
+                    {
+                        const auto& importedJoints = jointData1[index];
+                        const auto& importedWeights = weightData1[index];
+                        for (size_t influence = 0; influence < 4; ++influence)
+                        {
+                            vertex.joints1[influence] = static_cast<float>(importedJoints[influence]);
+                            vertex.weights1[influence] = importedWeights[influence];
+                        }
+                    }
+                    float totalWeight = 0.f;
+                    for (size_t influence = 0; influence < 4; ++influence)
+                        totalWeight += vertex.weights0[influence] + vertex.weights1[influence];
+                    if (hasSkinData && totalWeight > 0.f)
+                        for (size_t influence = 0; influence < 4; ++influence)
+                        {
+                            vertex.weights0[influence] /= totalWeight;
+                            vertex.weights1[influence] /= totalWeight;
+                        }
+                    else if (hasSkinData)
+                        vertex.weights0[0] = 1.f;
                     vertices.push_back(vertex);
+                    for (size_t targetIndex = 0; targetIndex < runtime.morphTargets.size(); ++targetIndex)
+                    {
+                        auto expanded = [index](const auto& source) { return index < source.size() ? glm::vec3(source[index].x(), source[index].y(), source[index].z()) : glm::vec3(0.f); };
+                        runtime.morphTargets[targetIndex].positions.push_back(expanded(morphPositions[targetIndex]));
+                        runtime.morphTargets[targetIndex].normals.push_back(expanded(morphNormals[targetIndex]));
+                        runtime.morphTargets[targetIndex].tangents.push_back(expanded(morphTangents[targetIndex]));
+                    }
                 }
 
                 if (!hasNormals)
@@ -465,12 +606,106 @@ GltfImportResult GltfImporter::Import(
         Scene prefabScene;
         Object* prefabRoot = prefabScene.AddObject(modelName);
 
+        // Skins are shared by every primitive that references the glTF skin.
+        // Keeping them on the prefab root also gives animation and deformation
+        // a single stable place from which to resolve node identities.
+        for (size_t skinIndex = 0; skinIndex < asset.skins.size(); ++skinIndex)
+        {
+            const auto& importedSkin = asset.skins[skinIndex];
+            Skeleton* skeleton = prefabRoot->AddComponent<Skeleton>();
+            skeleton->skinIndex = static_cast<unsigned>(skinIndex);
+            for (size_t joint : importedSkin.joints)
+                skeleton->jointNodes.push_back(static_cast<unsigned>(joint));
+            skeleton->inverseBindMatrices.assign(importedSkin.joints.size(), glm::mat4(1.f));
+            if (importedSkin.inverseBindMatrices)
+            {
+                const auto& accessor = asset.accessors[*importedSkin.inverseBindMatrices];
+                std::vector<fastgltf::math::fmat4x4> matrices(accessor.count);
+                fastgltf::copyFromAccessor<fastgltf::math::fmat4x4>(asset, accessor, matrices.data());
+                skeleton->inverseBindMatrices.resize(matrices.size());
+                for (size_t matrixIndex = 0; matrixIndex < matrices.size(); ++matrixIndex)
+                    for (glm::length_t column = 0; column < 4; ++column)
+                        for (glm::length_t row = 0; row < 4; ++row)
+                            skeleton->inverseBindMatrices[matrixIndex][column][row] = matrices[matrixIndex][column][row];
+            }
+        }
+
+        for (size_t animationIndex = 0; animationIndex < asset.animations.size(); ++animationIndex)
+        {
+            const auto& importedAnimation = asset.animations[animationIndex];
+            Animation* animation = prefabRoot->AddComponent<Animation>();
+            animation->clipName = importedAnimation.name.empty()
+                ? "Animation " + std::to_string(animationIndex + 1)
+                : std::string(importedAnimation.name);
+            for (const auto& importedChannel : importedAnimation.channels)
+            {
+                if (!importedChannel.nodeIndex || importedChannel.samplerIndex >= importedAnimation.samplers.size())
+                    continue;
+                const auto& sampler = importedAnimation.samplers[importedChannel.samplerIndex];
+                const auto& inputAccessor = asset.accessors[sampler.inputAccessor];
+                const auto& outputAccessor = asset.accessors[sampler.outputAccessor];
+                AnimationChannel channel;
+                channel.nodeIndex = static_cast<unsigned>(*importedChannel.nodeIndex);
+                switch (importedChannel.path)
+                {
+                case fastgltf::AnimationPath::Rotation: channel.path = AnimationChannel::Path::Rotation; channel.valueWidth = 4; break;
+                case fastgltf::AnimationPath::Scale: channel.path = AnimationChannel::Path::Scale; channel.valueWidth = 3; break;
+                case fastgltf::AnimationPath::Weights:
+                {
+                    channel.path = AnimationChannel::Path::Weights;
+                    const size_t splineFactor = sampler.interpolation == fastgltf::AnimationInterpolation::CubicSpline ? 3 : 1;
+                    channel.valueWidth = inputAccessor.count > 0
+                        ? static_cast<unsigned>(outputAccessor.count / (inputAccessor.count * splineFactor)) : 0;
+                    break;
+                }
+                default: channel.path = AnimationChannel::Path::Translation; channel.valueWidth = 3; break;
+                }
+                switch (sampler.interpolation)
+                {
+                case fastgltf::AnimationInterpolation::Step: channel.interpolation = AnimationChannel::Interpolation::Step; break;
+                case fastgltf::AnimationInterpolation::CubicSpline: channel.interpolation = AnimationChannel::Interpolation::CubicSpline; break;
+                default: channel.interpolation = AnimationChannel::Interpolation::Linear; break;
+                }
+                channel.times.resize(inputAccessor.count);
+                fastgltf::copyFromAccessor<float>(asset, inputAccessor, channel.times.data());
+                if (!channel.times.empty()) animation->duration = std::max(animation->duration, channel.times.back());
+                if (channel.path == AnimationChannel::Path::Weights)
+                {
+                    channel.values.resize(outputAccessor.count);
+                    fastgltf::copyFromAccessor<float>(asset, outputAccessor, channel.values.data());
+                }
+                else if (channel.valueWidth == 4)
+                {
+                    std::vector<fastgltf::math::fvec4> values(outputAccessor.count);
+                    fastgltf::copyFromAccessor<fastgltf::math::fvec4>(asset, outputAccessor, values.data());
+                    channel.values.reserve(values.size() * 4);
+                    for (const auto& value : values)
+                        channel.values.insert(channel.values.end(), { value.x(), value.y(), value.z(), value.w() });
+                }
+                else
+                {
+                    std::vector<fastgltf::math::fvec3> values(outputAccessor.count);
+                    fastgltf::copyFromAccessor<fastgltf::math::fvec3>(asset, outputAccessor, values.data());
+                    channel.values.reserve(values.size() * 3);
+                    for (const auto& value : values)
+                        channel.values.insert(channel.values.end(), { value.x(), value.y(), value.z() });
+                }
+                animation->channels.push_back(std::move(channel));
+            }
+        }
+        if (!asset.animations.empty())
+        {
+            AnimationManager* manager = prefabRoot->AddComponent<AnimationManager>();
+            manager->clip = prefabRoot->GetComponent<Animation>()->clipName;
+        }
+
         std::function<void(size_t, Object*)> importNode =
             [&](size_t nodeIndex, Object* parent)
         {
             const auto& node = asset.nodes[nodeIndex];
             Object* object = AddChild(prefabScene, parent,
                 SafeName(node.name, "Node " + std::to_string(nodeIndex + 1)));
+            object->AddComponent<ModelNode>()->nodeIndex = static_cast<unsigned>(nodeIndex);
             if (const auto* trs = std::get_if<fastgltf::TRS>(&node.transform))
             {
                 object->transform.position = {
@@ -500,6 +735,23 @@ GltfImportResult GltfImporter::Import(
                             "Primitive " + std::to_string(primitiveIndex + 1));
                     Mesh* mesh = target->AddComponent<Mesh>();
                     mesh->LoadFromFile(meshPaths[meshIndex][primitiveIndex]);
+
+                    ImportedPrimitiveRuntime& runtime = meshRuntime[meshIndex][primitiveIndex];
+                    if (!runtime.morphTargets.empty())
+                    {
+                        MorphTargets* morphs = target->AddComponent<MorphTargets>();
+                        morphs->nodeIndex = static_cast<unsigned>(nodeIndex);
+                        morphs->targets = runtime.morphTargets;
+                        const auto& defaults = !node.weights.empty() ? node.weights : importedMesh.weights;
+                        morphs->weights.assign(runtime.morphTargets.size(), 0.f);
+                        for (size_t i = 0; i < std::min(defaults.size(), morphs->weights.size()); ++i)
+                            morphs->weights[i] = static_cast<float>(defaults[i]);
+                    }
+                    if (node.skinIndex || !runtime.morphTargets.empty())
+                    {
+                        SkinnedMesh* deformer = target->AddComponent<SkinnedMesh>();
+                        deformer->skinIndex = node.skinIndex ? static_cast<int>(*node.skinIndex) : -1;
+                    }
 
                     const auto& primitive = importedMesh.primitives[primitiveIndex];
                     const std::string materialPath =

@@ -36,6 +36,9 @@ public:
     // Returns nullptr if buffer is not mappable
     virtual void* Map() = 0;
     virtual void Unmap() = 0;
+    // Makes persistently mapped writes visible when a backend uses a CPU
+    // shadow allocation (currently D3D11). Other backends are coherent.
+    virtual void FlushMappedWrites() {}
 
     // For internal use: get D3D12 GPU virtual address, Vulkan buffer, etc.
     // The actual type depends on the graphics API

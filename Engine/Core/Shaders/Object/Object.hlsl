@@ -22,6 +22,9 @@ struct ObjectData
     float4 bakedLightDirection;
     float4 parallaxParams;
     float4 spriteUvRect;
+    float4 textureUvSets0;
+    float4 textureUvSets1;
+    float4 skinParams;
 };
 
 struct SceneLightData
@@ -35,6 +38,7 @@ struct SceneLightData
 [[vk::push_constant]] DrawConstants draw;
 [[vk::binding(7, 0)]] StructuredBuffer<SceneLightData> sceneLights;
 [[vk::binding(8, 0)]] StructuredBuffer<ObjectData> objects;
+[[vk::binding(9, 0)]] StructuredBuffer<float4x4> boneMatrices;
 [[vk::binding(0, 0)]] Texture2D baseColorMap;
 [[vk::binding(1, 0)]] Texture2D metallicRoughnessMap;
 [[vk::binding(2, 0)]] Texture2D normalMap;
@@ -55,6 +59,7 @@ Texture2D emissiveMap          : register(t4);
 Texture2D heightMap            : register(t5);
 StructuredBuffer<SceneLightData> sceneLights : register(t6);
 StructuredBuffer<ObjectData> objects : register(t7);
+StructuredBuffer<float4x4> boneMatrices : register(t8);
 SamplerState materialSampler : register(s0);
 #endif
 
@@ -63,19 +68,49 @@ void VSMain(
     float3 normal : NORMAL,
     float2 uv : TEXCOORD,
     float4 tangent : TANGENT,
+    float2 uv1 : TEXCOORD1,
+    float4 color : COLOR,
+    float4 joints0 : JOINTS0,
+    float4 weights0 : WEIGHTS0,
+    float4 joints1 : JOINTS1,
+    float4 weights1 : WEIGHTS1,
     out float4 oPos : SV_POSITION,
-    out float3 oWorldPos : TEXCOORD1,
+    out float3 oWorldPos : TEXCOORD2,
     out float3 oNormal : NORMAL,
     out float2 oUv : TEXCOORD,
+    out float2 oUv1 : TEXCOORD1,
+    out float4 oColor : COLOR,
     out float4 oTangent : TANGENT)
 {
     ObjectData objectData = objects[draw.objectIndex];
-    oPos = mul(objectData.mvp, float4(pos, 1.0));
-    oWorldPos = mul(objectData.world, float4(pos, 1.0)).xyz;
-    oNormal = normalize(mul((float3x3)objectData.world, normal));
+    float4 localPosition = float4(pos, 1.0);
+    float3 localNormal = normal;
+    float3 localTangent = tangent.xyz;
+    uint jointCount = (uint)objectData.skinParams.y;
+    if (jointCount > 0)
+    {
+        uint paletteOffset = (uint)objectData.skinParams.x;
+        float4x4 skin = (float4x4)0;
+        [unroll] for (uint influence = 0; influence < 4; ++influence)
+        {
+            uint joint0 = (uint)joints0[influence];
+            uint joint1 = (uint)joints1[influence];
+            if (joint0 < jointCount) skin += boneMatrices[paletteOffset + joint0] * weights0[influence];
+            if (joint1 < jointCount) skin += boneMatrices[paletteOffset + joint1] * weights1[influence];
+        }
+        localPosition = mul(skin, localPosition);
+        localNormal = normalize(mul((float3x3)skin, localNormal));
+        if (dot(localTangent, localTangent) > 0.0001)
+            localTangent = normalize(mul((float3x3)skin, localTangent));
+    }
+    oPos = mul(objectData.mvp, localPosition);
+    oWorldPos = mul(objectData.world, localPosition).xyz;
+    oNormal = normalize(mul((float3x3)objectData.world, localNormal));
     oUv = objectData.spriteUvRect.xy + uv * objectData.spriteUvRect.zw;
+    oUv1 = uv1;
+    oColor = color;
     oTangent = float4(
-        normalize(mul((float3x3)objectData.world, tangent.xyz)), tangent.w);
+        normalize(mul((float3x3)objectData.world, localTangent)), tangent.w);
 }
 
 static const float PI = 3.14159265359;
@@ -181,19 +216,27 @@ float2 ParallaxOcclusionUv(
 
 float4 PSMain(
     float4 pos : SV_POSITION,
-    float3 worldPos : TEXCOORD1,
+    float3 worldPos : TEXCOORD2,
     float3 normal : NORMAL,
     float2 uv : TEXCOORD,
+    float2 uv1 : TEXCOORD1,
+    float4 vertexColor : COLOR,
     float4 tangent : TANGENT,
     bool frontFace : SV_IsFrontFace) : SV_TARGET
 {
     ObjectData objectData = objects[draw.objectIndex];
     uint flags = (uint)objectData.materialParams.w;
-    float4 base = objectData.baseColor;
+    float4 base = objectData.baseColor * vertexColor;
     float metallic = saturate(objectData.materialParams.x);
     float roughness = clamp(objectData.materialParams.y, 0.045, 1.0);
     float occlusion = 1.0;
     float3 emissive = objectData.emissiveOcclusion.rgb;
+    float2 baseUv = objectData.textureUvSets0.x > 0.5 ? uv1 : uv;
+    float2 metallicRoughnessUv = objectData.textureUvSets0.y > 0.5 ? uv1 : uv;
+    float2 normalUv = objectData.textureUvSets0.z > 0.5 ? uv1 : uv;
+    float2 occlusionUv = objectData.textureUvSets0.w > 0.5 ? uv1 : uv;
+    float2 emissiveUv = objectData.textureUvSets1.x > 0.5 ? uv1 : uv;
+    float2 heightUv = objectData.textureUvSets1.y > 0.5 ? uv1 : uv;
 
     float3 geometryNormal = normalize(normal) * (frontFace ? 1.0 : -1.0);
     bool hasTangents = dot(tangent.xyz, tangent.xyz) > 0.0001;
@@ -212,30 +255,34 @@ float4 PSMain(
             dot(viewDirection, tangentDirection),
             dot(viewDirection, bitangentDirection),
             dot(viewDirection, geometryNormal));
-        uv = ParallaxOcclusionUv(
-            uv, viewDirectionTangent, objectData.parallaxParams.x,
+        float2 parallaxUv = ParallaxOcclusionUv(
+            heightUv, viewDirectionTangent, objectData.parallaxParams.x,
             objectData.parallaxParams.y, objectData.parallaxParams.z);
+        float2 parallaxOffset = parallaxUv - heightUv;
+        baseUv += parallaxOffset; metallicRoughnessUv += parallaxOffset;
+        normalUv += parallaxOffset; occlusionUv += parallaxOffset;
+        emissiveUv += parallaxOffset;
     }
 
     if (flags & 1u)
-        base *= baseColorMap.Sample(materialSampler, uv);
+        base *= baseColorMap.Sample(materialSampler, baseUv);
     if (flags & 2u)
     {
-        float4 mr = metallicRoughnessMap.Sample(materialSampler, uv);
+        float4 mr = metallicRoughnessMap.Sample(materialSampler, metallicRoughnessUv);
         roughness *= mr.g;
         metallic *= mr.b;
     }
     roughness = clamp(roughness, 0.045, 1.0);
     metallic = saturate(metallic);
     if (flags & 8u)
-        occlusion = lerp(1.0, occlusionMap.Sample(materialSampler, uv).r,
+        occlusion = lerp(1.0, occlusionMap.Sample(materialSampler, occlusionUv).r,
             objectData.emissiveOcclusion.w);
     if (flags & 16u)
-        emissive *= emissiveMap.Sample(materialSampler, uv).rgb;
+        emissive *= emissiveMap.Sample(materialSampler, emissiveUv).rgb;
     normal = geometryNormal;
     if ((flags & 4u) && hasTangents)
     {
-        float3 sampledNormal = normalMap.Sample(materialSampler, uv).xyz * 2.0 - 1.0;
+        float3 sampledNormal = normalMap.Sample(materialSampler, normalUv).xyz * 2.0 - 1.0;
         sampledNormal.xy *= objectData.materialParams.z;
         normal = normalize(
             sampledNormal.x * tangentDirection +

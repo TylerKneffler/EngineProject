@@ -5,6 +5,7 @@
 #include <array>
 #include <filesystem>
 #include <stdexcept>
+#include <cstring>
 
 Mesh::Mesh()
 {
@@ -19,7 +20,15 @@ Mesh::Mesh()
 namespace
 {
 constexpr uint32_t kNativeMeshMagic = 0x4853454d; // "MESH"
-constexpr uint32_t kNativeMeshVersion = 2;
+constexpr uint32_t kNativeMeshVersion = 4;
+struct LegacyVertexV2
+{
+    float pos[3], normal[3], uv[2], tangent[4];
+};
+struct LegacyVertexV3
+{
+    float pos[3], normal[3], uv[2], tangent[4], uv1[2], color[4];
+};
 
 std::filesystem::path ResolveMeshPath(const std::string& path)
 {
@@ -74,11 +83,36 @@ void Mesh::LoadFromFile(const std::string& path)
         native.read(reinterpret_cast<char*>(&magic), sizeof(magic));
         native.read(reinterpret_cast<char*>(&version), sizeof(version));
         native.read(reinterpret_cast<char*>(&count), sizeof(count));
-        if (!native || magic != kNativeMeshMagic || version != kNativeMeshVersion)
+        if (!native || magic != kNativeMeshMagic ||
+            (version != 2 && version != 3 && version != kNativeMeshVersion))
             throw std::runtime_error("Mesh: invalid native mesh: " + path);
-        m_vertices.resize(count);
-        native.read(reinterpret_cast<char*>(m_vertices.data()),
-            static_cast<std::streamsize>(m_vertices.size() * sizeof(Vertex)));
+        m_vertices.assign(count, Vertex{});
+        if (version == 2)
+        {
+            std::vector<LegacyVertexV2> legacy(count);
+            native.read(reinterpret_cast<char*>(legacy.data()),
+                static_cast<std::streamsize>(legacy.size() * sizeof(LegacyVertexV2)));
+            for (size_t i = 0; i < legacy.size(); ++i)
+            {
+                std::copy(std::begin(legacy[i].pos), std::end(legacy[i].pos), m_vertices[i].pos);
+                std::copy(std::begin(legacy[i].normal), std::end(legacy[i].normal), m_vertices[i].normal);
+                std::copy(std::begin(legacy[i].uv), std::end(legacy[i].uv), m_vertices[i].uv);
+                std::copy(std::begin(legacy[i].tangent), std::end(legacy[i].tangent), m_vertices[i].tangent);
+            }
+        }
+        else if (version == 3)
+        {
+            std::vector<LegacyVertexV3> legacy(count);
+            native.read(reinterpret_cast<char*>(legacy.data()),
+                static_cast<std::streamsize>(legacy.size() * sizeof(LegacyVertexV3)));
+            for (size_t i = 0; i < legacy.size(); ++i)
+            {
+                std::memcpy(m_vertices[i].pos, legacy[i].pos, sizeof(LegacyVertexV3));
+            }
+        }
+        else
+            native.read(reinterpret_cast<char*>(m_vertices.data()),
+                static_cast<std::streamsize>(m_vertices.size() * sizeof(Vertex)));
         if (!native)
             throw std::runtime_error("Mesh: truncated native mesh: " + path);
         UpdateBounds();
@@ -140,6 +174,22 @@ void Mesh::LoadFromFile(const std::string& path)
 
     UpdateBounds();
     m_ready = false;
+}
+
+void Mesh::SetDeformedVertices(const std::vector<Vertex>& vertices)
+{
+    if (vertices.size() != m_vertices.size())
+        return;
+    m_vertices = vertices;
+    UpdateBounds();
+    if (m_vertexBuffer)
+    {
+        if (void* mapped = m_vertexBuffer->Map())
+        {
+            std::memcpy(mapped, m_vertices.data(), m_vertices.size() * sizeof(Vertex));
+            m_vertexBuffer->Unmap();
+        }
+    }
 }
 
 void Mesh::UpdateBounds()

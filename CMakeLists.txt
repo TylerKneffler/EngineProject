@@ -224,6 +224,27 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(fastgltf)
 
 # ---------------------------------------------------------------------------
+# Assimp - editor-time FBX decoding. Imported data is immediately converted to
+# the engine's format-neutral ImportedModel representation.
+# ---------------------------------------------------------------------------
+set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ZLIB ON CACHE BOOL "" FORCE)
+set(ASSIMP_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_FBX_IMPORTER ON CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ALL_EXPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    assimp
+    GIT_REPOSITORY https://github.com/assimp/assimp.git
+    GIT_TAG        v5.4.3
+)
+FetchContent_MakeAvailable(assimp)
+
+# ---------------------------------------------------------------------------
 
 # Engine — static library
 # ---------------------------------------------------------------------------
@@ -333,7 +354,7 @@ if(ENGINE_PROJECT_DIR)
     source_group(TREE "${ENGINE_PROJECT_DIR}" PREFIX "Project" FILES
         ${ASSET_SOURCES} ${PROJECT_BROWSE_FILES} ${PROJECT_ROOT_FILES})
 endif()
-target_link_libraries(Editor PRIVATE Engine ImGui fastgltf::fastgltf shell32.lib ole32.lib comdlg32.lib)
+target_link_libraries(Editor PRIVATE Engine ImGui fastgltf::fastgltf assimp::assimp shell32.lib ole32.lib comdlg32.lib)
 target_precompile_headers(Editor REUSE_FROM Engine)
 target_include_directories(Editor PRIVATE
     ${ENGINE_ROOT}/Engine
@@ -413,5 +434,3 @@ if(NOT ENGINE_PROJECT_DIR AND
         WORKING_DIRECTORY "${ENGINE_ROOT}"
     )
 endif()
-
-

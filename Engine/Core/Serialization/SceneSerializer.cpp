@@ -10,6 +10,7 @@
 #include "Core/Compoonents/Light.h"
 #include "Core/Compoonents/Sprite.h"
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
+#include "Core/Compoonents/Animation/ModelAnimation.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
 #include <pugixml.hpp>
 #include <fstream>
@@ -65,6 +66,13 @@ void SceneSerializer::EnsureBuiltinsRegistered()
     RegisterComponentType<Light>();
     RegisterComponentType<Sprite>();
     RegisterComponentType<SpriteAnimationManager>();
+    RegisterComponentType<ModelNode>();
+    Register("GltfNode", []() -> Component* { return new ModelNode(); });
+    RegisterComponentType<Animation>();
+    RegisterComponentType<AnimationManager>();
+    RegisterComponentType<Skeleton>();
+    RegisterComponentType<MorphTargets>();
+    RegisterComponentType<SkinnedMesh>();
     RegisterComponentType<BakedLightingData>();
 }
 

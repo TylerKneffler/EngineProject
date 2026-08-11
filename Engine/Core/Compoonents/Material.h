@@ -78,6 +78,12 @@ public:
     std::shared_ptr<Texture> heightTexture;
     std::shared_ptr<Texture> occlusionTexture;
     std::shared_ptr<Texture> emissiveTexture;
+    int baseColorUvSet = 0;
+    int metallicRoughnessUvSet = 0;
+    int normalUvSet = 0;
+    int occlusionUvSet = 0;
+    int emissiveUvSet = 0;
+    int heightUvSet = 0;
 
     bool LoadFromFile(const std::string& path);
     bool SaveToFile(const std::string& path) const;

@@ -3,6 +3,7 @@
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Compoonents/Material.h"
 #include "Core/Compoonents/Sprite.h"
+#include "Core/Compoonents/Animation/ModelAnimation.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
 #include "Core/Rendering/Lighting/LightingTypes.h"
@@ -76,6 +77,9 @@ struct ObjectGPUData
     glm::vec4 bakedLightDirection;
     glm::vec4 parallaxParams; // scale, minimum steps, maximum steps, reserved
     glm::vec4 spriteUvRect; // offset.xy, scale.xy
+    glm::vec4 textureUvSets0;
+    glm::vec4 textureUvSets1;
+    glm::vec4 skinParams; // palette offset, joint count, reserved, reserved
 };
 
 // Constant buffer for grid rendering
@@ -99,7 +103,7 @@ struct SkyboxCBData
 };
 
 static_assert(sizeof(DrawCBData) == 16, "Draw constants must remain small");
-static_assert(sizeof(ObjectGPUData) == 272, "Object buffer layout must match Object.hlsl");
+static_assert(sizeof(ObjectGPUData) == 320, "Object buffer layout must match Object.hlsl");
 static_assert(sizeof(Engine::Rendering::Lighting::LightData) == 48,
     "Light buffer layout must match Object.hlsl");
 static_assert(sizeof(GridCBData) == 128, "Grid constant-buffer layout must match Grid.hlsl");
@@ -172,6 +176,15 @@ void Scene::Init(IGraphicsProvider* graphicsProvider)
     m_lightDataMapped = m_lightDataBuffer ? m_lightDataBuffer->Map() : nullptr;
     if (!m_lightDataMapped)
         throw std::runtime_error("Failed to create light structured buffer");
+
+    m_boneDataBuffer = bufferFactory->CreateBuffer(
+        IGraphicsBuffer::Usage::ShaderResource,
+        IGraphicsBuffer::AccessMode::Upload,
+        static_cast<uint64_t>(kMaxObjects) * kMaxBonesPerObject * sizeof(glm::mat4),
+        nullptr, sizeof(glm::mat4));
+    m_boneDataMapped = m_boneDataBuffer ? m_boneDataBuffer->Map() : nullptr;
+    if (!m_boneDataMapped)
+        throw std::runtime_error("Failed to create bone palette structured buffer");
 
     // Set up the default editor camera
     Camera* editorCameraComponent = editorCamera.AddComponent<Camera>();
@@ -373,13 +386,19 @@ void Scene::BuildObjectPipeline()
     if (!psShader)
         throw std::runtime_error("Failed to compile object pixel shader: " + shaderCompiler->GetLastError());
 
-    // Define input layout: POSITION (float3) + NORMAL (float3)
+    // Engine-native model stream, including the second UV set and vertex colour.
     IPipelineStateBuilder::VertexElement layout[] =
     {
         { "POSITION", 0, 6, 0,  0, false },   // DXGI_FORMAT_R32G32B32_FLOAT = 6
         { "NORMAL",   0, 6, 0, 12, false },   // DXGI_FORMAT_R32G32B32_FLOAT = 6, offset 12
         { "TEXCOORD", 0, 16, 0, 24, false },  // DXGI_FORMAT_R32G32_FLOAT = 16
         { "TANGENT",  0, 2, 0, 32, false },   // DXGI_FORMAT_R32G32B32A32_FLOAT = 2
+        { "TEXCOORD", 1, 16, 0, 48, false },
+        { "COLOR",    0, 2, 0, 56, false },
+        { "JOINTS",   0, 2, 0, 72, false },
+        { "WEIGHTS",  0, 2, 0, 88, false },
+        { "JOINTS",   1, 2, 0, 104, false },
+        { "WEIGHTS",  1, 2, 0, 120, false },
     };
 
     auto buildMaterialPipeline = [&](bool doubleSided, bool blend,
@@ -409,7 +428,7 @@ void Scene::BuildObjectPipeline()
         auto pipeline = state.SetDepthEnable(true)
             .SetDepthWriteEnable(!blend)
             .SetDepthFunc(blend ? 3 : 1)
-            .SetInputLayout(layout, 4)
+            .SetInputLayout(layout, 10)
             .SetPrimitiveTopology(
                 IPipelineStateBuilder::PrimitiveTopology::TriangleList)
             .SetRenderTargetFormat(28, 40)
@@ -467,7 +486,7 @@ void Scene::BuildObjectPipeline()
         .SetDepthEnable(true)
         .SetDepthWriteEnable(false)
         .SetDepthFunc(3)                       // D3D12_COMPARISON_FUNC_LESS_EQUAL
-        .SetInputLayout(layout, 4)
+        .SetInputLayout(layout, 10)
         .SetPrimitiveTopology(IPipelineStateBuilder::PrimitiveTopology::TriangleList)
         .SetRenderTargetFormat(28, 40)
         .Build();
@@ -591,6 +610,27 @@ void Scene::Render(IGraphicsContext* context, float aspect,
                 : false;
         });
 
+    // Populate every palette before the first draw. This lets D3D11 upload the
+    // large shared palette once while D3D12/Vulkan read the same mapped data.
+    std::vector<uint32_t> skinJointCounts(
+        std::min<size_t>(renderObjects.size(), kMaxObjects), 0u);
+    for (size_t skinSlot = 0; skinSlot < skinJointCounts.size(); ++skinSlot)
+    {
+        if (SkinnedMesh* skinned = renderObjects[skinSlot]->GetComponent<SkinnedMesh>())
+        {
+            std::vector<glm::mat4> palette;
+            if (skinned->BuildPalette(palette))
+            {
+                const size_t count = std::min<size_t>(palette.size(), kMaxBonesPerObject);
+                const size_t paletteOffset = skinSlot * kMaxBonesPerObject;
+                std::memcpy(static_cast<glm::mat4*>(m_boneDataMapped) + paletteOffset,
+                    palette.data(), count * sizeof(glm::mat4));
+                skinJointCounts[skinSlot] = static_cast<uint32_t>(count);
+            }
+        }
+    }
+    m_boneDataBuffer->FlushMappedWrites();
+
     UINT slot = 0;
     for (Object* obj : renderObjects)
     {
@@ -629,6 +669,12 @@ void Scene::Render(IGraphicsContext* context, float aspect,
         objectData.mvp = proj * view * world;
         objectData.world = world;
         objectData.spriteUvRect = { 0.f, 0.f, 1.f, 1.f };
+        if (skinJointCounts[slot] > 0)
+        {
+            const size_t paletteOffset = static_cast<size_t>(slot) * kMaxBonesPerObject;
+            objectData.skinParams = { static_cast<float>(paletteOffset),
+                static_cast<float>(skinJointCounts[slot]), 0.f, 0.f };
+        }
         MaterialAlphaMode alphaMode = MaterialAlphaMode::Opaque;
         bool doubleSided = false;
 
@@ -702,6 +748,11 @@ void Scene::Render(IGraphicsContext* context, float aspect,
                 mat->heightScale, mat->heightMinSteps,
                 mat->heightMaxSteps, 0.f
             };
+            objectData.textureUvSets0 = { static_cast<float>(mat->baseColorUvSet),
+                static_cast<float>(mat->metallicRoughnessUvSet), static_cast<float>(mat->normalUvSet),
+                static_cast<float>(mat->occlusionUvSet) };
+            objectData.textureUvSets1 = { static_cast<float>(mat->emissiveUvSet),
+                static_cast<float>(mat->heightUvSet), 0.f, 0.f };
         }
         else
         {
@@ -747,6 +798,7 @@ void Scene::Render(IGraphicsContext* context, float aspect,
         context->SetConstantBuffer(0, m_objectConstantBuffer.get(), offset);
         context->SetStructuredBuffer(6, m_lightDataBuffer.get());
         context->SetStructuredBuffer(7, m_objectDataBuffer.get());
+        context->SetStructuredBuffer(8, m_boneDataBuffer.get());
 
         // Set vertex buffer and draw
         IGraphicsBuffer* vertexBuffer = sprite
@@ -769,6 +821,7 @@ void Scene::Render(IGraphicsContext* context, float aspect,
                 context->SetConstantBuffer(0, m_objectConstantBuffer.get(), offset);
                 context->SetStructuredBuffer(6, m_lightDataBuffer.get());
                 context->SetStructuredBuffer(7, m_objectDataBuffer.get());
+                context->SetStructuredBuffer(8, m_boneDataBuffer.get());
                 context->DrawInstanced(vertexCount, 1, 0, 0);
             }
         }

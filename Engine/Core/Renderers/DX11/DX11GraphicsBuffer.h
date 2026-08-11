@@ -17,7 +17,8 @@ public:
     uint64_t GetSize() const override { return m_size; }
     uint32_t GetElementStride() const override { return m_elementStride; }
     void* Map() override;
-    void Unmap() override {}
+    void Unmap() override;
+    void FlushMappedWrites() override;
     void* GetNativeHandle() const override { return m_buffer.Get(); }
 
     ID3D11Buffer* GetBuffer() const { return m_buffer.Get(); }

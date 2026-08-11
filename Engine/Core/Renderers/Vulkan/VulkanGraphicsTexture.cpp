@@ -27,7 +27,7 @@ VulkanTextureSystem::VulkanTextureSystem(
       m_queue(queue),
       m_queueFamily(queueFamily)
 {
-    VkDescriptorSetLayoutBinding bindings[9]{};
+    VkDescriptorSetLayoutBinding bindings[10]{};
     for (uint32_t binding = 0; binding < 6; ++binding)
     {
         bindings[binding].binding = binding;
@@ -39,7 +39,7 @@ VulkanTextureSystem::VulkanTextureSystem(
     bindings[6].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
     bindings[6].descriptorCount = 1;
     bindings[6].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    for (uint32_t binding = 7; binding < 9; ++binding)
+    for (uint32_t binding = 7; binding < 10; ++binding)
     {
         bindings[binding].binding = binding;
         bindings[binding].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -57,7 +57,7 @@ VulkanTextureSystem::VulkanTextureSystem(
     VkDescriptorPoolSize sizes[3]{
         { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 6 * 512 },
         { VK_DESCRIPTOR_TYPE_SAMPLER, 512 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2 * 512 }
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3 * 512 }
     };
     VkDescriptorPoolCreateInfo poolInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
@@ -228,7 +228,7 @@ void VulkanTextureSystem::Bind(
     VkCommandBuffer commands,
     VkPipelineLayout pipelineLayout,
     const std::array<const VulkanGraphicsTexture*, 6>& textures,
-    const std::array<const VulkanGraphicsBuffer*, 2>& buffers)
+    const std::array<const VulkanGraphicsBuffer*, 3>& buffers)
 {
     TextureKey key{};
     for (size_t index = 0; index < textures.size(); ++index)
@@ -252,7 +252,7 @@ void VulkanTextureSystem::Bind(
             "vkAllocateDescriptorSets(material)");
 
         VkDescriptorImageInfo images[6]{};
-        VkWriteDescriptorSet writes[9]{};
+        VkWriteDescriptorSet writes[10]{};
         for (uint32_t index = 0; index < 6; ++index)
         {
             images[index].imageView =
@@ -273,8 +273,8 @@ void VulkanTextureSystem::Bind(
         writes[6].descriptorCount = 1;
         writes[6].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
         writes[6].pImageInfo = &samplerInfo;
-        VkDescriptorBufferInfo bufferInfos[2]{};
-        for (uint32_t index = 0; index < 2; ++index)
+        VkDescriptorBufferInfo bufferInfos[3]{};
+        for (uint32_t index = 0; index < 3; ++index)
         {
             bufferInfos[index].buffer =
                 buffers[index] ? buffers[index]->GetBuffer() : m_dummyBuffer;

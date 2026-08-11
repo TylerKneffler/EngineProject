@@ -60,7 +60,7 @@ void D3D11GraphicsContext::SetStructuredBuffer(uint32_t slot, const IGraphicsBuf
 {
     if (!m_context || slot >= D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT) return;
     const auto* structured = dynamic_cast<const D3D11GraphicsBuffer*>(buffer);
-    if (structured && structured->GetShadowData() && structured->GetBuffer())
+    if (slot != 8 && structured && structured->GetShadowData() && structured->GetBuffer())
     {
         D3D11_MAPPED_SUBRESOURCE mapped{};
         ThrowIfFailed(m_context->Map(

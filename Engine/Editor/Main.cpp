@@ -8,7 +8,7 @@
 #include "Engine/Editor/GameBuildManager.h"
 #include "Engine/Editor/ProjectLauncher.h"
 #include "Engine/Editor/UI/IEditorUiBackend.h"
-#include "Engine/Editor/Core/Assets/GltfImporter.h"
+#include "Engine/Editor/Core/Importers/ModelImporter.h"
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
 #include "Core/Assets/Scripts/Rotate.h"
 #include "Core/Serialization/SceneSerializer.h"
@@ -108,19 +108,21 @@ int WINAPI wWinMain(
     WriteStartupLog("Editor startup", true);
 
     // Headless importer entry point used by automation and project tooling.
-    // Editor.exe --import-gltf <source.gltf|source.glb> <Assets directory>
+    // Editor.exe --import-model <source.gltf|source.glb|source.fbx> <Assets directory>
+    // --import-gltf remains accepted for existing automation.
     {
         int argumentCount = 0;
         LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
         if (arguments && argumentCount >= 4 &&
-            std::wstring(arguments[1]) == L"--import-gltf")
+            (std::wstring(arguments[1]) == L"--import-model" ||
+             std::wstring(arguments[1]) == L"--import-gltf"))
         {
-            const GltfImportResult imported = GltfImporter::Import(
+            const ModelImportResult imported = ModelImporter::Import(
                 std::filesystem::path(arguments[2]).string(),
                 std::filesystem::path(arguments[3]).string());
             WriteStartupLog(imported.success
-                ? "glTF imported: " + imported.prefabPath
-                : "glTF import failed: " + imported.message);
+                ? "Model imported: " + imported.prefabPath
+                : "Model import failed: " + imported.message);
             LocalFree(arguments);
             if (SUCCEEDED(comResult)) CoUninitialize();
             return imported.success ? 0 : 1;

@@ -14,9 +14,9 @@
 #include "Core/Compoonents/Material.h"
 #include "Core/Compoonents/Sprite.h"
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
-#include "Core/Assets/AssetRecord.h"
+#include "Core/AssetRecord.h"
 #include "Core/Graphics/IGraphicsProvider.h"
-#include "Core/Assets/GltfImporter.h"
+#include "Core/Importers/ModelImporter.h"
 #include <chrono>
 #include <algorithm>
 #include <cctype>
@@ -634,9 +634,9 @@ void EditorState::ImportAsset()
     dialog.lpstrFile = source;
     dialog.nMaxFile = MAX_PATH;
     dialog.lpstrFilter =
-        L"Supported Assets (*.obj;*.gltf;*.glb;*.prefab;*.spriteanim;*.spritesheet;*.png;*.jpg;*.jpeg;*.bmp;*.dds)\0"
-        L"*.obj;*.gltf;*.glb;*.prefab;*.spriteanim;*.spritesheet;*.png;*.jpg;*.jpeg;*.bmp;*.dds\0"
-        L"3D Models (*.obj;*.gltf;*.glb)\0*.obj;*.gltf;*.glb\0"
+        L"Supported Assets (*.obj;*.gltf;*.glb;*.fbx;*.prefab;*.spriteanim;*.spritesheet;*.png;*.jpg;*.jpeg;*.bmp;*.dds)\0"
+        L"*.obj;*.gltf;*.glb;*.fbx;*.prefab;*.spriteanim;*.spritesheet;*.png;*.jpg;*.jpeg;*.bmp;*.dds\0"
+        L"3D Models (*.obj;*.gltf;*.glb;*.fbx)\0*.obj;*.gltf;*.glb;*.fbx\0"
         L"Images (*.png;*.jpg;*.jpeg;*.bmp;*.dds)\0*.png;*.jpg;*.jpeg;*.bmp;*.dds\0"
         L"All Files (*.*)\0*.*\0";
     dialog.nFilterIndex = 1;
@@ -658,10 +658,10 @@ std::string EditorState::ImportAssetFile(const std::string& path)
     try
     {
         fs::create_directories(assetsDirectory);
-        if (extension == ".gltf" || extension == ".glb")
+        if (ModelImporter::SupportsExtension(extension))
         {
-            const GltfImportResult imported =
-                GltfImporter::Import(source.string(), assetsDirectory.string());
+            const ModelImportResult imported =
+                ModelImporter::Import(source.string(), assetsDirectory.string());
             if (!imported.success)
                 throw std::runtime_error(imported.message);
             if (m_primaryConsole)
@@ -719,12 +719,12 @@ Object* EditorState::InstantiateAsset(const std::string& path, bool recordChange
     Object* object = nullptr;
     try
     {
-        if (extension == ".gltf" || extension == ".glb")
+        if (ModelImporter::SupportsExtension(extension))
         {
             const std::string assetsDirectory = m_projectSettings.assetsDirectory.empty()
                 ? std::string("Assets")
                 : m_projectSettings.assetsDirectory;
-            const GltfImportResult imported = GltfImporter::Import(path, assetsDirectory);
+            const ModelImportResult imported = ModelImporter::Import(path, assetsDirectory);
             if (!imported.success)
                 throw std::runtime_error(imported.message);
             object = SceneSerializer::InstantiatePrefab(

@@ -4,7 +4,7 @@ Microsoft::WRL::ComPtr<ID3D12RootSignature>
 CreateD3D12MaterialRootSignature(ID3D12Device* device)
 {
     D3D12_DESCRIPTOR_RANGE ranges[6]{};
-    D3D12_ROOT_PARAMETER parameters[9]{};
+    D3D12_ROOT_PARAMETER parameters[10]{};
     parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
     parameters[0].Descriptor.ShaderRegister = 0;
     parameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
@@ -19,7 +19,7 @@ CreateD3D12MaterialRootSignature(ID3D12Device* device)
         parameters[index + 1].DescriptorTable.pDescriptorRanges = &ranges[index];
         parameters[index + 1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
     }
-    for (UINT index = 0; index < 2; ++index)
+    for (UINT index = 0; index < 3; ++index)
     {
         parameters[index + 7].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
         parameters[index + 7].Descriptor.ShaderRegister = index + 6;
