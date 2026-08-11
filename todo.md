@@ -1,8 +1,34 @@
-Correct the advertised texture list and the KTX2/WebP glTF mismatch.✔
-Add a real asset record with source path, stable ID and import settings.✔
-Strengthen glTF with skinning, animation, morphs, vertex colors and UV1.
-Add FBX by converting it into the same internal model-import representation.
-Add mipmaps, HDR/EXR/TGA and KTX2 texture processing.
-Add WAV/OGG/MP3 together with an audio component and mixer.
-Add TTF/OTF once runtime text/UI exists.
-Add convenience and specialist formats only when a project needs them.
+# Completed
+
+- [x] Establish the C++17 engine, standalone game runtime, and editor application.
+- [x] Add scene objects, reusable components, transforms, and the object-rendering pipeline.
+- [x] Add editor camera controls, object picking, and selection handling.
+- [x] Add the Game, Hierarchy, Properties, Assets Explorer, Console, and Preferences views.
+- [x] Make editor panels dynamically managed and decouple editor UI from the renderer.
+- [x] Add a package-neutral editor UI facade and ImGui backend with persistent layouts.
+- [x] Add scene serialization, deserialization, loading, saving, and asynchronous loading.
+- [x] Add project files, project loading, configurable resolution, and aspect-ratio settings.
+- [x] Add the Project Hub for creating, building, opening, tracking, and deleting projects.
+- [x] Add standalone project builds, portable game exports, and build-output logging.
+- [x] Add DirectX 11, DirectX 12, and Vulkan renderer selection and support.
+- [x] Restore scene state after exiting play mode.
+- [x] Add reusable prefabs with creation, instantiation, references, editing, refresh, and unpacking.
+- [x] Add initial glTF model importing through the engine's internal asset representation.
+- [x] Correct the advertised texture list and the KTX2/WebP glTF mismatch.
+- [x] Add material editing, physically based material properties, and rendering updates.
+- [x] Add hierarchy creation, deletion, reparenting, drag-and-drop, and component interactions.
+- [x] Add editor undo/redo with a configurable history limit.
+- [x] Add baked-lighting controls, lightmaps, light components, and lighting render pipelines.
+- [x] Add 2D scene editing, sprites, sprite sheets, and sprite animation support.
+- [x] Enhance the Properties view with component and asset-assignment workflows.
+- [x] Add a real asset record with source path, stable ID, and import settings.
+- [x] Add versioned Windows release packaging and quick-start documentation.
+
+# Current TODOs
+
+- [ ] Strengthen glTF with skinning, animation, morphs, vertex colors, and UV1.
+- [ ] Add FBX by converting it into the same internal model-import representation.
+- [ ] Add mipmaps, HDR/EXR/TGA, and KTX2 texture processing.
+- [ ] Add WAV/OGG/MP3 together with an audio component and mixer.
+- [ ] Add TTF/OTF once runtime text/UI exists.
+- [ ] Add convenience and specialist formats only when a project needs them.
