@@ -14,6 +14,7 @@
 #include "Core/Compoonents/Material.h"
 #include "Core/Compoonents/Sprite.h"
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
+#include "Core/Assets/AssetRecord.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Assets/GltfImporter.h"
 #include <chrono>
@@ -633,10 +634,10 @@ void EditorState::ImportAsset()
     dialog.lpstrFile = source;
     dialog.nMaxFile = MAX_PATH;
     dialog.lpstrFilter =
-        L"Supported Assets (*.obj;*.gltf;*.glb;*.prefab;*.spriteanim;*.spritesheet;*.png;*.jpg;*.jpeg;*.dds;*.hdr)\0"
-        L"*.obj;*.gltf;*.glb;*.prefab;*.spriteanim;*.spritesheet;*.png;*.jpg;*.jpeg;*.dds;*.hdr\0"
+        L"Supported Assets (*.obj;*.gltf;*.glb;*.prefab;*.spriteanim;*.spritesheet;*.png;*.jpg;*.jpeg;*.bmp;*.dds)\0"
+        L"*.obj;*.gltf;*.glb;*.prefab;*.spriteanim;*.spritesheet;*.png;*.jpg;*.jpeg;*.bmp;*.dds\0"
         L"3D Models (*.obj;*.gltf;*.glb)\0*.obj;*.gltf;*.glb\0"
-        L"Images (*.png;*.jpg;*.jpeg;*.dds;*.hdr)\0*.png;*.jpg;*.jpeg;*.dds;*.hdr\0"
+        L"Images (*.png;*.jpg;*.jpeg;*.bmp;*.dds)\0*.png;*.jpg;*.jpeg;*.bmp;*.dds\0"
         L"All Files (*.*)\0*.*\0";
     dialog.nFilterIndex = 1;
     dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
@@ -676,7 +677,11 @@ std::string EditorState::ImportAssetFile(const std::string& path)
         {
             const fs::path relative = absoluteSource.lexically_relative(absoluteAssets);
             if (!relative.empty() && *relative.begin() != "..")
+            {
+                AssetRecord::Ensure(source, source,
+                    { { "importer", std::string("native") } });
                 return source.string();
+            }
         }
 
         fs::path destination = assetsDirectory / source.filename();
@@ -686,6 +691,8 @@ std::string EditorState::ImportAssetFile(const std::string& path)
             destination = assetsDirectory /
                 (stem + " " + std::to_string(index) + suffix);
         fs::copy_file(source, destination);
+        AssetRecord::Ensure(destination, source,
+            { { "importer", std::string("copy") } });
         if (m_primaryConsole)
             m_primaryConsole->AddLog(ConsoleView::Level::Info,
                 "Asset imported: " + destination.string());

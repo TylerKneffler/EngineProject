@@ -1,6 +1,7 @@
 #include "AssetsExplorerView.h"
 #include "Engine/Editor/Core/View/Templates/Common/AssetPathTemplate.h"
 #include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Assets/AssetRecord.h"
 #include "Core/Object.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include <filesystem>
@@ -72,7 +73,8 @@ bool AssetsExplorerView::DrawDirectoryTree(IEditorUi& ui, const std::string& pat
         {
             // Repository metadata such as .gitkeep is not project content.
             const std::string entryName = entry.path().filename().string();
-            if (!entryName.empty() && entryName.front() == '.')
+            if ((!entryName.empty() && entryName.front() == '.') ||
+                entry.path().extension() == ".meta")
                 continue;
             entries.push_back(entry);
         }
@@ -178,6 +180,8 @@ bool AssetsExplorerView::AcceptSceneObject(IEditorUi& ui, const std::string& dir
 
             if (SceneSerializer::SavePrefab(*object, destination.string()))
             {
+                AssetRecord::Ensure(destination, destination,
+                    { { "importer", std::string("native") } });
                 object->SetPrefab(destination.string());
                 m_selectedPath = destination.string();
                 created = true;

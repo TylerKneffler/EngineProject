@@ -1,6 +1,7 @@
 #include "AssetInspectorTemplate.h"
 #include "Engine/Editor/Core/View/Templates/Common/AssetPathTemplate.h"
 #include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Assets/AssetRecord.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Graphics/IGraphicsTexture.h"
@@ -38,6 +39,15 @@ bool ParseFloat(const char* value, float& result)
     char* end = nullptr;
     result = std::strtof(value, &end);
     return end && *end == '\0';
+}
+
+std::string ImportSettingText(const AssetImportSetting& setting)
+{
+    if (const auto* value = std::get_if<bool>(&setting))
+        return *value ? "true" : "false";
+    if (const auto* value = std::get_if<double>(&setting))
+        return std::to_string(*value);
+    return std::get<std::string>(setting);
 }
 
 bool DrawPrefabFields(IEditorUi& ui, pugi::xml_node parent,
@@ -170,6 +180,16 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Scene* scene)
                     m_renameError = "Rename failed: " + error.message();
                 else
                 {
+                    std::error_code recordError;
+                    if (!AssetRecord::Move(path, destination, recordError))
+                    {
+                        std::error_code rollbackError;
+                        fs::rename(destination, path, rollbackError);
+                        m_renameError = "Asset record rename failed: " +
+                            recordError.message();
+                        ui.EndDisabled();
+                        return;
+                    }
                     m_selectedPath = destination.string();
                     m_renameError.clear();
                     m_texturePreview.reset();
@@ -194,7 +214,8 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Scene* scene)
         std::size_t entries = 0;
         for (fs::directory_iterator iterator(m_selectedPath, error), end;
             !error && iterator != end; iterator.increment(error))
-            ++entries;
+            if (iterator->path().extension() != ".meta")
+                ++entries;
         const std::string value = std::to_string(entries);
         ui.ValueLabel("Entries", value.c_str());
         return;
@@ -205,6 +226,28 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Scene* scene)
     {
         const std::string size = std::to_string(bytes) + " bytes";
         ui.ValueLabel("Size", size.c_str());
+    }
+
+    try
+    {
+        if (const auto record = AssetRecord::Load(m_selectedPath))
+        {
+            ui.Separator();
+            ui.Label("Asset Record");
+            ui.ValueLabel("Stable ID", record->id.c_str());
+            ui.ValueLabel("Source", record->sourcePath.c_str());
+            for (const auto& [name, setting] : record->importSettings)
+            {
+                const std::string value = ImportSettingText(setting);
+                ui.ValueLabel(name.c_str(), value.c_str());
+            }
+        }
+    }
+    catch (const std::exception& exception)
+    {
+        const std::string message = "Invalid asset record: " +
+            std::string(exception.what());
+        ui.ColoredLabel(message.c_str(), { 1.f, 0.35f, 0.35f, 1.f });
     }
 
     if (IsTextureAssetExtension(extension))

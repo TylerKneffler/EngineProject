@@ -248,7 +248,7 @@ bool Component::DrawProperties(IEditorUi& ui)
                         OPENFILENAMEW ofn{};
                         ofn.lStructSize = sizeof(ofn);
                         ofn.hwndOwner = nullptr;
-                        ofn.lpstrFilter = L"All Files\0*.*\0Images\0*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.dds\0Models\0*.obj;*.gltf;*.glb\0\0";
+                        ofn.lpstrFilter = L"All Files\0*.*\0Images\0*.png;*.jpg;*.jpeg;*.bmp;*.dds\0Models\0*.obj;*.gltf;*.glb\0\0";
                         ofn.lpstrFile = filename;
                         ofn.nMaxFile = MAX_PATH;
                         ofn.lpstrInitialDir = initialDir[0] ? initialDir : nullptr;

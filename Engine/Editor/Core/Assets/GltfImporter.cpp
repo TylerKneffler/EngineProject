@@ -1,5 +1,6 @@
 #include "GltfImporter.h"
 
+#include "Core/Assets/AssetRecord.h"
 #include "Core/Compoonents/Material.h"
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Object.h"
@@ -56,9 +57,7 @@ const char* MimeExtension(fastgltf::MimeType mime)
     {
     case fastgltf::MimeType::PNG: return ".png";
     case fastgltf::MimeType::JPEG: return ".jpg";
-    case fastgltf::MimeType::KTX2: return ".ktx2";
     case fastgltf::MimeType::DDS: return ".dds";
-    case fastgltf::MimeType::WEBP: return ".webp";
     default: return ".bin";
     }
 }
@@ -153,9 +152,7 @@ fastgltf::MimeType ImageMime(const fastgltf::Image& image)
 std::optional<size_t> TextureImageIndex(const fastgltf::Texture& texture)
 {
     if (texture.imageIndex) return *texture.imageIndex;
-    if (texture.basisuImageIndex) return *texture.basisuImageIndex;
     if (texture.ddsImageIndex) return *texture.ddsImageIndex;
-    if (texture.webpImageIndex) return *texture.webpImageIndex;
     return std::nullopt;
 }
 
@@ -234,8 +231,6 @@ GltfImportResult GltfImporter::Import(
         constexpr fastgltf::Extensions extensions =
             fastgltf::Extensions::KHR_mesh_quantization |
             fastgltf::Extensions::KHR_texture_transform |
-            fastgltf::Extensions::KHR_texture_basisu |
-            fastgltf::Extensions::EXT_texture_webp |
             fastgltf::Extensions::MSFT_texture_dds |
             fastgltf::Extensions::KHR_materials_emissive_strength |
             fastgltf::Extensions::KHR_materials_unlit;
@@ -265,6 +260,11 @@ GltfImportResult GltfImporter::Import(
                  MimeExtension(ImageMime(image)));
             if (!ExtractImage(asset, image, path))
                 throw std::runtime_error("Could not extract texture " + std::to_string(imageIndex));
+            AssetRecord::Ensure(path, source,
+                {
+                    { "importer", std::string("gltf-image") },
+                    { "imageIndex", static_cast<double>(imageIndex) }
+                });
             imagePaths[imageIndex] = path.generic_string();
         }
 
@@ -319,6 +319,11 @@ GltfImportResult GltfImporter::Import(
                 (name + " " + std::to_string(materialIndex + 1) + ".material");
             if (!material.SaveToFile(path.string()))
                 throw std::runtime_error("Could not save material: " + path.string());
+            AssetRecord::Ensure(path, source,
+                {
+                    { "importer", std::string("gltf-material") },
+                    { "materialIndex", static_cast<double>(materialIndex) }
+                });
             materialPaths[materialIndex] = path.generic_string();
         }
 
@@ -326,6 +331,8 @@ GltfImportResult GltfImporter::Import(
         const fs::path defaultMaterialPath = materialsDirectory / "Default.material";
         if (!defaultMaterial.SaveToFile(defaultMaterialPath.string()))
             throw std::runtime_error("Could not save the default material");
+        AssetRecord::Ensure(defaultMaterialPath, source,
+            { { "importer", std::string("gltf-default-material") } });
 
         std::vector<std::vector<std::string>> meshPaths(asset.meshes.size());
         for (size_t meshIndex = 0; meshIndex < asset.meshes.size(); ++meshIndex)
@@ -445,6 +452,12 @@ GltfImportResult GltfImporter::Import(
                      std::to_string(primitiveIndex + 1) + ".mesh");
                 if (!Mesh::SaveNativeFile(path.string(), vertices))
                     throw std::runtime_error("Could not save mesh: " + path.string());
+                AssetRecord::Ensure(path, source,
+                    {
+                        { "importer", std::string("gltf-mesh") },
+                        { "meshIndex", static_cast<double>(meshIndex) },
+                        { "primitiveIndex", static_cast<double>(primitiveIndex) }
+                    });
                 meshPaths[meshIndex][primitiveIndex] = path.generic_string();
             }
         }
@@ -525,6 +538,14 @@ GltfImportResult GltfImporter::Import(
         const fs::path prefabPath = output / (modelName + ".prefab");
         if (!SceneSerializer::SavePrefab(*prefabRoot, prefabPath.string()))
             throw std::runtime_error("Could not save prefab: " + prefabPath.string());
+        AssetRecord::Ensure(prefabPath, source,
+            {
+                { "importer", std::string("gltf") },
+                { "loadExternalBuffers", true },
+                { "loadExternalImages", true },
+                { "generateMeshIndices", true },
+                { "decomposeNodeMatrices", true }
+            });
 
         result.success = true;
         result.prefabPath = prefabPath.generic_string();

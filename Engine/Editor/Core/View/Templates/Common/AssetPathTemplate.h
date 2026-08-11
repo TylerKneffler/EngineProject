@@ -18,7 +18,7 @@ inline std::string LowerAssetExtension(const std::string& path)
 inline bool IsTextureAssetExtension(const std::string& extension)
 {
     static constexpr const char* extensions[] = {
-        ".png", ".jpg", ".jpeg", ".bmp", ".tga", ".dds", ".hdr"
+        ".png", ".jpg", ".jpeg", ".bmp", ".dds"
     };
     return std::find_if(std::begin(extensions), std::end(extensions),
         [&extension](const char* candidate) { return extension == candidate; }) !=
