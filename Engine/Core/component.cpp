@@ -3,6 +3,7 @@
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Serialization/Json.h"
 #include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Compoonents/Mesh.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Graphics/IGraphicsTexture.h"
 #include "Core/Object.h"
@@ -248,7 +249,7 @@ bool Component::DrawProperties(IEditorUi& ui)
                         OPENFILENAMEW ofn{};
                         ofn.lStructSize = sizeof(ofn);
                         ofn.hwndOwner = nullptr;
-                        ofn.lpstrFilter = L"All Files\0*.*\0Images\0*.png;*.jpg;*.jpeg;*.bmp;*.dds\0Models\0*.obj;*.gltf;*.glb;*.fbx\0\0";
+                        ofn.lpstrFilter = L"All Files\0*.*\0Images\0*.png;*.jpg;*.jpeg;*.bmp;*.dds;*.tga;*.hdr;*.exr;*.ktx2\0Models\0*.obj;*.gltf;*.glb;*.fbx\0Audio\0*.wav;*.ogg;*.mp3\0\0";
                         ofn.lpstrFile = filename;
                         ofn.nMaxFile = MAX_PATH;
                         ofn.lpstrInitialDir = initialDir[0] ? initialDir : nullptr;
@@ -291,6 +292,29 @@ bool Component::DrawProperties(IEditorUi& ui)
                             s_editingProperty[stateKey] = stringValue;
                         }
                     }
+                }
+
+                // Mesh-backed physics properties are asset references, but
+                // Mesh component headers are much more convenient drag
+                // sources than finding the same file again in the browser.
+                // Store the dropped component's portable file path rather
+                // than a raw pointer so scenes remain safe and serializable.
+                if (!isEditing && (key == "meshPath" || key == "MeshPath") &&
+                    ui.BeginDragDropTarget())
+                {
+                    size_t payloadSize = 0;
+                    const void* payload = ui.AcceptDragDropPayload(
+                        "ENGINE_COMPONENT_REORDER", &payloadSize);
+                    if (payload && payloadSize == sizeof(Component*))
+                    {
+                        Component* component = *static_cast<Component* const*>(payload);
+                        if (auto* droppedMesh = dynamic_cast<Mesh*>(component))
+                        {
+                            editedData.Set(key, JsonValue(droppedMesh->GetFilePath()));
+                            modified = true;
+                        }
+                    }
+                    ui.EndDragDropTarget();
                 }
 
                 ui.PopId();
@@ -471,7 +495,46 @@ bool Component::DrawProperties(IEditorUi& ui)
         }
         else if (value.IsObject())
         {
-            ui.ValueLabel(displayName.c_str(), "{object}");
+            if (value.Has("componentType") && value.Has("expectedType"))
+            {
+                ComponentReference reference;
+                FromJson(value, reference);
+                const std::string assignedLabel = reference.IsAssigned()
+                    ? reference.objectName + " / " + reference.componentType
+                    : std::string("(default: ") +
+                        (reference.expectedType.empty() ? "component" : reference.expectedType) + ")";
+                ui.ValueLabel(displayName.c_str(), assignedLabel.c_str());
+                if (ui.BeginDragDropTarget())
+                {
+                    size_t payloadSize = 0;
+                    const void* payload = ui.AcceptDragDropPayload(
+                        "ENGINE_COMPONENT_REORDER", &payloadSize);
+                    if (payload && payloadSize == sizeof(Component*))
+                    {
+                        Component* component = *static_cast<Component* const*>(payload);
+                        if (component && (reference.expectedType.empty() ||
+                            component->GetTypeName() == reference.expectedType))
+                        {
+                            editedData.Set(key, ToJson(CaptureComponentReference(
+                                component, reference.expectedType)));
+                            modified = true;
+                        }
+                    }
+                    ui.EndDragDropTarget();
+                }
+                if (reference.IsAssigned())
+                {
+                    ui.SameLine();
+                    if (ui.Button((std::string("Clear##") + key).c_str()))
+                    {
+                        reference.Clear();
+                        editedData.Set(key, ToJson(reference));
+                        modified = true;
+                    }
+                }
+            }
+            else
+                ui.ValueLabel(displayName.c_str(), "{object}");
         }
     }
     

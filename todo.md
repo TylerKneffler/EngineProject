@@ -25,9 +25,11 @@
 - [x] Add versioned Windows release packaging and quick-start documentation.
 - [x] Strengthen glTF with skinning, animation, morphs, vertex colors, and UV1.
 - [x] Add FBX by converting it into the same internal model-import representation.
-- [ ] Add mipmaps, HDR/EXR/TGA, and KTX2 texture processing.
-- [ ] Add WAV/OGG/MP3 together with an audio component and mixer.
+- [x] Add mipmaps, HDR/EXR/TGA, and KTX2 texture processing.
+- [x] Add WAV/OGG/MP3 together with an audio component and mixer.
 - [ ] Add TTF/OTF once runtime text/UI exists.
 - [ ] Add convenience and specialist formats only when a project needs them.
-- [ ] Add Rigid Body physics component
-- [ ] Add Cloth / mesh realtime physics component
+- [x] Add Rigid Body physics component
+- [x] Add Primitive Object Collider cube,circle,capsule,cylinder, component
+- [x] Add mesh Object Collider component
+- [x] Add Cloth / mesh realtime physics component

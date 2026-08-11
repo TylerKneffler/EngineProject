@@ -244,6 +244,65 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(assimp)
 
+# Texture codecs. stb_image is supplied by the pinned Assimp checkout;
+# TinyEXR handles floating-point EXR and libktx handles KTX2/BasisU.
+set(TINYEXR_BUILD_SAMPLE OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    tinyexr
+    GIT_REPOSITORY https://github.com/syoyo/tinyexr.git
+    GIT_TAG        v1.0.12
+)
+FetchContent_MakeAvailable(tinyexr)
+
+set(KTX_FEATURE_TESTS OFF CACHE BOOL "" FORCE)
+set(KTX_FEATURE_TOOLS OFF CACHE BOOL "" FORCE)
+set(KTX_FEATURE_LOADTEST_APPS OFF CACHE STRING "" FORCE)
+set(KTX_FEATURE_GL_UPLOAD OFF CACHE BOOL "" FORCE)
+set(KTX_FEATURE_VK_UPLOAD OFF CACHE BOOL "" FORCE)
+set(KTX_FEATURE_KTX1 ON CACHE BOOL "" FORCE)
+set(KTX_FEATURE_KTX2 ON CACHE BOOL "" FORCE)
+set(KTX_FEATURE_ETC_UNPACK ON CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    ktx
+    GIT_REPOSITORY https://github.com/KhronosGroup/KTX-Software.git
+    GIT_TAG        v4.4.2
+)
+FetchContent_MakeAvailable(ktx)
+
+# Audio decoding, mixing and spatialization. miniaudio includes native WAV/MP3
+# decoding; its pinned stb_vorbis extra supplies OGG/Vorbis decoding.
+set(MINIAUDIO_NO_LIBVORBIS ON CACHE BOOL "" FORCE)
+set(MINIAUDIO_NO_LIBOPUS ON CACHE BOOL "" FORCE)
+set(MINIAUDIO_INSTALL OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    miniaudio
+    GIT_REPOSITORY https://github.com/mackron/miniaudio.git
+    GIT_TAG        0.11.25
+)
+FetchContent_MakeAvailable(miniaudio)
+set_source_files_properties(${miniaudio_SOURCE_DIR}/extras/stb_vorbis.c PROPERTIES
+    COMPILE_OPTIONS "$<$<C_COMPILER_ID:MSVC>:/w>"
+    SKIP_PRECOMPILE_HEADERS ON
+)
+
+# Runtime rigid-body collision and dynamics.
+set(BUILD_BULLET2_DEMOS OFF CACHE BOOL "" FORCE)
+set(BUILD_BULLET3 OFF CACHE BOOL "" FORCE)
+set(BUILD_CPU_DEMOS OFF CACHE BOOL "" FORCE)
+set(BUILD_OPENGL3_DEMOS OFF CACHE BOOL "" FORCE)
+set(BUILD_UNIT_TESTS OFF CACHE BOOL "" FORCE)
+set(BUILD_EXTRAS OFF CACHE BOOL "" FORCE)
+set(INSTALL_LIBS OFF CACHE BOOL "" FORCE)
+set(USE_MSVC_RUNTIME_LIBRARY_DLL ON CACHE BOOL "" FORCE)
+set(USE_MSVC_DISABLE_RTTI OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    bullet
+    GIT_REPOSITORY https://github.com/bulletphysics/bullet3.git
+    GIT_TAG        3.25
+)
+FetchContent_MakeAvailable(bullet)
+
 # ---------------------------------------------------------------------------
 
 # Engine — static library
@@ -252,12 +311,20 @@ add_library(Engine STATIC
     ${ENGINE_SOURCES}
     ${ENGINE_HEADERS}
     ${ENGINE_RESOURCE_FILES}
+    ${miniaudio_SOURCE_DIR}/extras/stb_vorbis.c
 )
 source_group(TREE "${ENGINE_ROOT}" FILES
     ${ENGINE_SOURCES} ${ENGINE_HEADERS} ${ENGINE_RESOURCE_FILES})
 target_include_directories(Engine PUBLIC
     ${ENGINE_ROOT}
     ${ENGINE_ROOT}/Engine
+)
+target_include_directories(Engine PRIVATE
+    ${assimp_SOURCE_DIR}/contrib/stb
+    ${tinyexr_SOURCE_DIR}
+    ${miniaudio_SOURCE_DIR}
+    ${miniaudio_SOURCE_DIR}/extras
+    ${bullet_SOURCE_DIR}/src
 )
 target_precompile_headers(Engine PRIVATE Engine/pch.h)
 target_link_libraries(Engine PUBLIC
@@ -270,6 +337,13 @@ target_link_libraries(Engine PUBLIC
     windowscodecs.lib
     glm::glm
     pugixml
+    tinyexr
+    ktx_read
+    miniaudio
+    BulletDynamics
+    BulletCollision
+    BulletSoftBody
+    LinearMath
 )
 target_compile_definitions(Engine PUBLIC
     ENGINE_SHADERS_PATH="${ENGINE_COMPILED_SHADERS_PATH}"
@@ -433,4 +507,52 @@ if(NOT ENGINE_PROJECT_DIR AND
     set_tests_properties(RotateDefaultSceneLifecycle PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}"
     )
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_ROOT}/Engine/Tests/TexturePipelineTests.cpp")
+    enable_testing()
+    add_executable(TexturePipelineTests
+        "${ENGINE_ROOT}/Engine/Tests/TexturePipelineTests.cpp")
+    target_link_libraries(TexturePipelineTests PRIVATE Engine)
+    target_include_directories(TexturePipelineTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME TextureDecodingAndMipGeneration COMMAND TexturePipelineTests
+        "${assimp_SOURCE_DIR}/test/models/Collada/duckCM.tga"
+        "${ktx_SOURCE_DIR}/external/astc-encoder/Test/Data/Tiles/hdr.hdr"
+        "${tinyexr_SOURCE_DIR}/test/unit/regression/2by2.exr"
+        "${ktx_SOURCE_DIR}/tests/cts/clitests/golden/create/compare/output_uastc_0_psnr_2d_r8g8b8a8_unorm.ktx2")
+    set_tests_properties(TextureDecodingAndMipGeneration PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_ROOT}/Engine/Tests/AudioPipelineTests.cpp")
+    enable_testing()
+    add_executable(AudioPipelineTests
+        "${ENGINE_ROOT}/Engine/Tests/AudioPipelineTests.cpp")
+    target_link_libraries(AudioPipelineTests PRIVATE Engine)
+    target_include_directories(AudioPipelineTests PRIVATE "${ENGINE_ROOT}/Engine")
+    target_link_options(AudioPipelineTests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/INCREMENTAL:NO>)
+    add_test(NAME AudioDecodingMixingAndSerialization COMMAND AudioPipelineTests
+        "${ENGINE_ROOT}/Engine/Core/Assets/Audio/TestTone.wav"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Audio/TestTone.ogg"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Audio/TestTone.mp3")
+    set_tests_properties(AudioDecodingMixingAndSerialization PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_ROOT}/Engine/Tests/PhysicsPipelineTests.cpp")
+    enable_testing()
+    add_executable(PhysicsPipelineTests
+        "${ENGINE_ROOT}/Engine/Tests/PhysicsPipelineTests.cpp")
+    target_link_libraries(PhysicsPipelineTests PRIVATE Engine)
+    target_include_directories(PhysicsPipelineTests PRIVATE "${ENGINE_ROOT}/Engine")
+    target_link_options(PhysicsPipelineTests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/INCREMENTAL:NO>)
+    add_test(NAME RigidBodyAndColliderSimulation COMMAND PhysicsPipelineTests
+        "${ENGINE_ROOT}/Engine/Core/Assets/Mesh/cube.obj")
+    set_tests_properties(RigidBodyAndColliderSimulation PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()

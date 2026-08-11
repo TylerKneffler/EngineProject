@@ -1,6 +1,7 @@
 #pragma once
 #include "Core/Serialization/Json.h"
 #include "Core/PropertyMacros.h"
+#include "Core/ComponentReference.h"
 #include <glm/glm.hpp>
 #include <functional>
 #include <vector>
@@ -65,6 +66,15 @@ private:
     static JsonValue ToJson(double value) { return JsonValue(static_cast<float>(value)); }
     static JsonValue ToJson(int value) { return JsonValue(value); }
     static JsonValue ToJson(unsigned value) { return JsonValue(static_cast<int>(value)); }
+    static JsonValue ToJson(const ComponentReference& value)
+    {
+        return JsonValue::MakeObject()
+            .Set("expectedType", JsonValue(value.expectedType))
+            .Set("objectPath", JsonValue(value.objectPath))
+            .Set("objectName", JsonValue(value.objectName))
+            .Set("componentType", JsonValue(value.componentType))
+            .Set("componentIndex", JsonValue(value.componentIndex));
+    }
     static JsonValue ToJson(const glm::vec3& value)
     {
         return JsonValue::MakeArray()
@@ -79,6 +89,15 @@ private:
     static void FromJson(const JsonValue& value, double& out) { out = value.AsFloat(); }
     static void FromJson(const JsonValue& value, int& out) { out = value.AsInt(); }
     static void FromJson(const JsonValue& value, unsigned& out) { out = static_cast<unsigned>(value.AsInt()); }
+    static void FromJson(const JsonValue& value, ComponentReference& out)
+    {
+        if (!value.IsObject()) return;
+        if (value.Has("expectedType")) out.expectedType = value["expectedType"].AsString();
+        out.objectPath = value["objectPath"].AsString();
+        out.objectName = value["objectName"].AsString();
+        out.componentType = value["componentType"].AsString();
+        out.componentIndex = value["componentIndex"].AsInt();
+    }
     static void FromJson(const JsonValue& value, glm::vec3& out)
     {
         if (!value.IsArray() || value.ArraySize() < 3)

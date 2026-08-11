@@ -74,7 +74,7 @@ VulkanTextureSystem::VulkanTextureSystem(
     samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.maxLod = 1.0f;
+    samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
     VkCheck(vkCreateSampler(m_device, &samplerInfo, nullptr, &m_sampler),
         "vkCreateSampler");
 
@@ -99,7 +99,7 @@ VulkanTextureSystem::VulkanTextureSystem(
         "vkBindBufferMemory(dummy storage)");
 
     const uint8_t white[] = { 255, 255, 255, 255 };
-    m_white = Upload(1, 1, white);
+    m_white = Upload(1, 1, white, 1, GraphicsTextureFormat::Rgba8);
 }
 
 VulkanTextureSystem::~VulkanTextureSystem()
@@ -120,9 +120,19 @@ VulkanImageResource VulkanTextureSystem::Upload(
     uint32_t width,
     uint32_t height,
     const uint8_t* pixels,
+    uint32_t mipLevels,
+    GraphicsTextureFormat textureFormat,
     bool srgb)
 {
-    const VkDeviceSize size = static_cast<VkDeviceSize>(width) * height * 4;
+    const uint32_t bytesPerPixel = GraphicsTextureBytesPerPixel(textureFormat);
+    VkDeviceSize size = 0;
+    uint32_t mipWidth = width, mipHeight = height;
+    for (uint32_t mip = 0; mip < mipLevels; ++mip)
+    {
+        size += static_cast<VkDeviceSize>(mipWidth) * mipHeight * bytesPerPixel;
+        mipWidth = std::max(1u, mipWidth / 2);
+        mipHeight = std::max(1u, mipHeight / 2);
+    }
     VkBuffer staging = VK_NULL_HANDLE;
     VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
     VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
@@ -150,9 +160,11 @@ VulkanImageResource VulkanTextureSystem::Upload(
 
     VulkanImageResource image = VulkanCreateImage(
         m_physicalDevice, m_device, width, height,
-        srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM,
+        textureFormat == GraphicsTextureFormat::Rgba32Float
+            ? VK_FORMAT_R32G32B32A32_SFLOAT
+            : (srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM),
         VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        VK_IMAGE_ASPECT_COLOR_BIT);
+        VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
 
     VkCommandPool pool = VK_NULL_HANDLE;
     VkCommandPoolCreateInfo poolInfo{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
@@ -180,16 +192,27 @@ VulkanImageResource VulkanTextureSystem::Upload(
     toCopy.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     toCopy.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     toCopy.image = image.image;
-    toCopy.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    toCopy.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1 };
     vkCmdPipelineBarrier(
         commands, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
         0, 0, nullptr, 0, nullptr, 1, &toCopy);
 
-    VkBufferImageCopy copy{};
-    copy.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-    copy.imageExtent = { width, height, 1 };
+    std::vector<VkBufferImageCopy> copies(mipLevels);
+    VkDeviceSize copyOffset = 0;
+    mipWidth = width;
+    mipHeight = height;
+    for (uint32_t mip = 0; mip < mipLevels; ++mip)
+    {
+        copies[mip].bufferOffset = copyOffset;
+        copies[mip].imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, mip, 0, 1 };
+        copies[mip].imageExtent = { mipWidth, mipHeight, 1 };
+        copyOffset += static_cast<VkDeviceSize>(mipWidth) * mipHeight * bytesPerPixel;
+        mipWidth = std::max(1u, mipWidth / 2);
+        mipHeight = std::max(1u, mipHeight / 2);
+    }
     vkCmdCopyBufferToImage(
-        commands, staging, image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+        commands, staging, image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        mipLevels, copies.data());
 
     VkImageMemoryBarrier toShader = toCopy;
     toShader.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -216,12 +239,14 @@ std::shared_ptr<VulkanGraphicsTexture> VulkanTextureSystem::CreateTexture(
     uint32_t width,
     uint32_t height,
     const uint8_t* rgbaPixels,
+    uint32_t mipLevels,
+    GraphicsTextureFormat format,
     bool srgb)
 {
-    if (!width || !height || !rgbaPixels)
+    if (!width || !height || !rgbaPixels || !mipLevels)
         return nullptr;
     return std::make_shared<VulkanGraphicsTexture>(
-        shared_from_this(), Upload(width, height, rgbaPixels, srgb));
+        shared_from_this(), Upload(width, height, rgbaPixels, mipLevels, format, srgb));
 }
 
 void VulkanTextureSystem::Bind(
@@ -305,10 +330,12 @@ std::shared_ptr<IGraphicsTexture> VulkanTextureFactory::CreateTexture2D(
     uint32_t width,
     uint32_t height,
     const uint8_t* rgbaPixels,
+    uint32_t mipLevels,
+    GraphicsTextureFormat format,
     bool srgb)
 {
     return m_system
-        ? m_system->CreateTexture(width, height, rgbaPixels, srgb)
+        ? m_system->CreateTexture(width, height, rgbaPixels, mipLevels, format, srgb)
         : nullptr;
 }
 #endif

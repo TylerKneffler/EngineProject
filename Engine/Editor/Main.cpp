@@ -9,6 +9,7 @@
 #include "Engine/Editor/ProjectLauncher.h"
 #include "Engine/Editor/UI/IEditorUiBackend.h"
 #include "Engine/Editor/Core/Importers/ModelImporter.h"
+#include "Core/Physics/PhysicsSystem.h"
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
 #include "Core/Assets/Scripts/Rotate.h"
 #include "Core/Serialization/SceneSerializer.h"
@@ -379,7 +380,6 @@ int WINAPI wWinMain(
         float dt = static_cast<float>(now.QuadPart - lastCounter.QuadPart)
                  / static_cast<float>(perfFreq.QuadPart);
         lastCounter = now;
-        (void)dt;
 
         // Update build manager
         PostBuildAction postBuildAction;
@@ -390,6 +390,7 @@ int WINAPI wWinMain(
         {
             for (const auto& obj : scene->GetObjects())
                 obj->Update();
+            PhysicsSystem::Step(*scene, dt);
         }
 
         renderer->MarkDirty();

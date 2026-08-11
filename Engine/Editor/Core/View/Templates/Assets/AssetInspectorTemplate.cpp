@@ -1,7 +1,7 @@
 #include "AssetInspectorTemplate.h"
 #include "Engine/Editor/Core/View/Templates/Common/AssetPathTemplate.h"
 #include "Engine/Editor/UI/IEditorUi.h"
-#include "Core/Assets/AssetRecord.h"
+#include "Core/AssetRecord.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Graphics/IGraphicsTexture.h"

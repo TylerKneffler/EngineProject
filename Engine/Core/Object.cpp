@@ -15,6 +15,8 @@ Object::Object(Transform initialTransform)
 Object::~Object()
 {
     for (Component* component : Components)
+        if (Script* script = dynamic_cast<Script*>(component)) script->OnDestroy();
+    for (Component* component : Components)
         delete component;
     Components.clear();
 }
@@ -63,6 +65,11 @@ void Object::Destroy()
     Children.clear();
 
     // Destroy components
+    for (Component* comp : Components)
+    {
+        if (Script* script = dynamic_cast<Script*>(comp))
+            script->OnDestroy();
+    }
     for (Component* comp : Components)
     {
         if (comp)

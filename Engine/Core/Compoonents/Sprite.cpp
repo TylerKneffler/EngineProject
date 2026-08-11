@@ -11,6 +11,7 @@ Sprite::Sprite()
     SetTypeName(COMPONENT_TYPE_NAME(Sprite));
     singlecomponent = true;
     RegisterField("animationManager", animationManager);
+    RegisterField("animationManagerReference", animationManagerReference);
     RegisterField("sortingLayer", sortingLayer);
     RegisterField("pixelsPerUnit", pixelsPerUnit);
     RegisterField("tint", tint);
@@ -34,7 +35,10 @@ bool Sprite::DrawProperties(IEditorUi& ui)
 {
     bool changed = false;
     SpriteAnimationManager* manager = ResolveAnimationManager();
-    ui.ValueLabel("Animation Manager", manager ? manager->GetTypeName().c_str() : "(drop SpriteAnimationManager here)");
+    const std::string managerLabel = manager && manager->Owner
+        ? manager->Owner->name + " / " + manager->GetTypeName()
+        : "(default: same-object SpriteAnimationManager)";
+    ui.ValueLabel("Animation Manager", managerLabel.c_str());
     if (ui.BeginDragDropTarget())
     {
         size_t size = 0;
@@ -43,7 +47,7 @@ bool Sprite::DrawProperties(IEditorUi& ui)
         {
             Component* component = *static_cast<Component* const*>(data);
             auto* dropped = dynamic_cast<SpriteAnimationManager*>(component);
-            if (dropped && dropped->Owner == Owner)
+            if (dropped)
             {
                 SetAnimationManager(dropped);
                 changed = true;
@@ -51,12 +55,12 @@ bool Sprite::DrawProperties(IEditorUi& ui)
         }
         ui.EndDragDropTarget();
     }
-    if (manager)
+    if (animationManagerReference.IsAssigned())
     {
         ui.SameLine();
         if (ui.Button("Clear"))
         {
-            animationManager.clear();
+            animationManagerReference.Clear();
             m_animationManager = nullptr;
             changed = true;
         }
@@ -72,20 +76,24 @@ bool Sprite::DrawProperties(IEditorUi& ui)
 
 void Sprite::SetAnimationManager(SpriteAnimationManager* manager)
 {
-    m_animationManager = manager && manager->Owner == Owner ? manager : nullptr;
+    m_animationManager = manager;
+    animationManagerReference = CaptureComponentReference(
+        manager, "SpriteAnimationManager");
     animationManager = m_animationManager ? m_animationManager->GetTypeName() : std::string{};
 }
 
 SpriteAnimationManager* Sprite::ResolveAnimationManager() const
 {
-    if (!Owner || animationManager.empty())
+    if (!Owner)
     {
         m_animationManager = nullptr;
         return nullptr;
     }
     // Resolve on demand so deleting or replacing the single manager component
     // cannot leave the renderer holding a stale pointer.
-    m_animationManager = Owner->GetComponent<SpriteAnimationManager>();
+    m_animationManager = animationManagerReference.IsAssigned()
+        ? ResolveComponentReference<SpriteAnimationManager>(Owner, animationManagerReference)
+        : Owner->GetComponent<SpriteAnimationManager>();
     return m_animationManager;
 }
 

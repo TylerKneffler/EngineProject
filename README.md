@@ -92,6 +92,67 @@ Open the repository or generated project folder directly in Visual Studio 2022. 
 - A new project receives a copy in its own `Assets/` directory.
 - Add project scenes, meshes, textures, and C++ scripts only to the project's `Assets/` directory.
 - Store asset paths relative to the project root, such as `Assets/Mesh/player.obj`.
+- Textures generate a complete mip chain on load. PNG, JPEG, BMP, DDS, TGA,
+  Radiance HDR, OpenEXR, and KTX2 are supported; HDR/EXR remain floating-point
+  through upload, and Basis Universal KTX2 images are transcoded by libktx.
+- WAV, OGG/Vorbis, and MP3 files can be imported and assigned to an Audio Source.
+
+### Audio sources
+
+Add an **AudioSource** from an object's **Add Component** menu and assign its
+`audioPath`. Enable `playOnStart` or use the component's **Play** button; scripts
+can trigger the same voice with `audioSource->Play()`, then `Pause()` or `Stop()`.
+`loop`, `volume`, and `pitch` apply per source. Enable `spatial` for camera-relative
+3D audio and tune `minDistance`, `maxDistance`, `rolloff`, `dopplerFactor`, and the
+attenuation model (`Inverse`, `Linear`, `Exponential`, or `None`). Enable
+`directional` to use the object's local +Z direction and configure its inner and
+outer cone angles/gain. Sources route through a named bus such as `SFX`, whose
+level can be controlled with `AudioMixer::Get().SetBusVolume("SFX", 0.8f)`; the
+master level uses `SetMasterVolume()`.
+
+### Component references
+
+Inspector component-reference fields behave like Unity object fields. Their empty
+state uses the documented conventional component (usually one on the same object),
+while dropping a compatible component header assigns an override from the same or
+another scene object. **Clear** returns to the default. References serialize with
+the scene and retain both hierarchy and object-name information so ordinary object
+renames or hierarchy moves can still resolve when one identity remains valid.
+
+This is used by Sprite animation managers, audio listener cameras, skinned-mesh
+mesh/morph/skeleton inputs, animation hierarchy/source inputs, mesh colliders, and
+Cloth simulation/render meshes.
+
+### Physics
+
+Rigid-body motion and collision use separate components. Add a **RigidBody** for
+`Dynamic`, `Kinematic`, or `Static` motion, then add one or more colliders to the
+same object. **PrimitiveObjectCollider** supports `Box`/`Cube`, `Sphere`/`Circle`,
+`Capsule`, and `Cylinder`, with configurable center and dimensions.
+**MeshObjectCollider** accepts an independent Mesh component reference from any
+scene object, then `meshPath`, then the same-object Mesh default. Drag a Mesh
+component header onto Mesh Reference to override the default. Convex colliders support
+dynamic bodies; concave triangle meshes are used by static and kinematic bodies.
+
+Rigid bodies expose mass, gravity scale, linear/angular damping, friction,
+restitution, triggers, continuous collision detection, initial velocities,
+collision layer/mask, and per-axis position/rotation locks. Runtime scripts can
+call `AddForce()`, `AddTorque()`, `AddImpulse()`, `SetLinearVelocity()`, and query
+`IsColliding()` or `IsGrounded()`. Physics advances during Editor Play and in the
+standalone Game runtime; edit-mode transforms are not simulated.
+
+Add **Cloth** to an object with a triangle Mesh to deform that render mesh in real
+time. Cloth has independent Simulation Mesh and Render Mesh component references,
+so a different object or lower-detail triangle cage can drive the visible mesh;
+empty references preserve the same-object default. `meshPath` remains available
+as an asset-only simulation source. Cloth supports mass,
+stretch/bending stiffness, damping, drag,
+friction, gravity scaling, solver iterations, rigid-body collision, optional
+self-collision, and directional wind. `pinMode` can hold the mesh's `Top`,
+`Bottom`, `Left`, or `Right` boundary in object space; `None` leaves it fully
+free. `pinThreshold` controls how wide that pinned boundary is. The original
+render mesh is restored when play stops or the component is removed, and scripts
+can call `ResetSimulation()` after changing its setup.
 
 ### Imported animated characters
 

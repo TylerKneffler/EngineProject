@@ -64,6 +64,7 @@ class Skeleton : public Component
 {
 public:
     Skeleton();
+    ComponentReference hierarchyRootReference { "ModelNode" };
     unsigned skinIndex = 0;
     std::vector<unsigned> jointNodes;
     std::vector<glm::mat4> inverseBindMatrices;
@@ -76,6 +77,9 @@ class SkinnedMesh : public Script
 {
 public:
     SkinnedMesh();
+    ComponentReference meshReference { "Mesh" };
+    ComponentReference morphTargetsReference { "MorphTargets" };
+    ComponentReference skeletonReference { "Skeleton" };
     int skinIndex = -1;
     std::vector<glm::uvec4> joints;
     std::vector<glm::vec4> weights;
@@ -107,6 +111,8 @@ public:
     };
 
     AnimationManager();
+    ComponentReference hierarchyRootReference { "ModelNode" };
+    ComponentReference animationSourceReference { "Animation" };
     std::string clip;
     bool playing = true;
     bool looping = true;

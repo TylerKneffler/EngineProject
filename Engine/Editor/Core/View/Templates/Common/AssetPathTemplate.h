@@ -18,10 +18,16 @@ inline std::string LowerAssetExtension(const std::string& path)
 inline bool IsTextureAssetExtension(const std::string& extension)
 {
     static constexpr const char* extensions[] = {
-        ".png", ".jpg", ".jpeg", ".bmp", ".dds"
+        ".png", ".jpg", ".jpeg", ".bmp", ".dds", ".tga", ".hdr",
+        ".exr", ".ktx2"
     };
     return std::find_if(std::begin(extensions), std::end(extensions),
         [&extension](const char* candidate) { return extension == candidate; }) !=
         std::end(extensions);
+}
+
+inline bool IsAudioAssetExtension(const std::string& extension)
+{
+    return extension == ".wav" || extension == ".ogg" || extension == ".mp3";
 }
 }

@@ -30,6 +30,7 @@ public:
     D3D12TextureFactory(ID3D12Device* device, ID3D12CommandQueue* queue);
     std::shared_ptr<IGraphicsTexture> CreateTexture2D(
         uint32_t width, uint32_t height, const uint8_t* rgbaPixels,
+        uint32_t mipLevels, GraphicsTextureFormat format,
         bool srgb = true) override;
 
 private:

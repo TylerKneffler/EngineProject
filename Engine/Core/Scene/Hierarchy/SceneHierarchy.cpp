@@ -1,7 +1,13 @@
 #include "Core/Scene/Scene.h"
+#include "Core/Physics/PhysicsSystem.h"
 #include <algorithm>
 #include <cmath>
 #include <functional>
+
+Scene::~Scene()
+{
+    PhysicsSystem::Reset(*this);
+}
 
 Object* Scene::AddObject()
 {
@@ -256,6 +262,7 @@ void Scene::RemoveObject(Object* obj)
 
 void Scene::ClearObjects()
 {
+    PhysicsSystem::Reset(*this);
     m_objects.clear();
     m_selectedObject = nullptr;
     m_previewObject = nullptr;

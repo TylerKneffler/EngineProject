@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "Core/Graphics/IGraphicsTexture.h"
+
 class IGraphicsProvider;
 class IGraphicsTexture;
 
@@ -26,6 +28,8 @@ public:
     const std::string& GetFilePath() const { return m_filePath; }
     uint32_t GetWidth() const { return m_width; }
     uint32_t GetHeight() const { return m_height; }
+    uint32_t GetMipLevels() const { return m_mipLevels; }
+    GraphicsTextureFormat GetFormat() const { return m_format; }
     bool HasPixels() const { return !m_pixels.empty(); }
     const std::vector<uint8_t>& GetPixels() const { return m_pixels; }
     bool IsSrgb() const { return m_srgb; }
@@ -39,7 +43,9 @@ private:
     std::string m_filePath;
     uint32_t m_width = 0;
     uint32_t m_height = 0;
+    uint32_t m_mipLevels = 0;
     std::vector<uint8_t> m_pixels;
+    GraphicsTextureFormat m_format = GraphicsTextureFormat::Rgba8;
     bool m_srgb = true;
     IGraphicsProvider* m_preparedProvider = nullptr;
     std::shared_ptr<IGraphicsTexture> m_graphicsTexture;

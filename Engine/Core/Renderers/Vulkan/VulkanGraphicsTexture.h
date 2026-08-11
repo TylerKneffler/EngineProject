@@ -23,6 +23,7 @@ public:
 
     std::shared_ptr<VulkanGraphicsTexture> CreateTexture(
         uint32_t width, uint32_t height, const uint8_t* rgbaPixels,
+        uint32_t mipLevels, GraphicsTextureFormat format,
         bool srgb = true);
     void Bind(
         VkCommandBuffer commands,
@@ -49,6 +50,7 @@ private:
 
     VulkanImageResource Upload(
         uint32_t width, uint32_t height, const uint8_t* rgbaPixels,
+        uint32_t mipLevels, GraphicsTextureFormat format,
         bool srgb = true);
 
     VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
@@ -90,6 +92,7 @@ public:
         : m_system(std::move(system)) {}
     std::shared_ptr<IGraphicsTexture> CreateTexture2D(
         uint32_t width, uint32_t height, const uint8_t* rgbaPixels,
+        uint32_t mipLevels, GraphicsTextureFormat format,
         bool srgb = true) override;
 
 private:

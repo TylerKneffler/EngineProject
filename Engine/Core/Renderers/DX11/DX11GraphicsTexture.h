@@ -27,6 +27,7 @@ public:
     explicit D3D11TextureFactory(ID3D11Device* device) : m_device(device) {}
     std::shared_ptr<IGraphicsTexture> CreateTexture2D(
         uint32_t width, uint32_t height, const uint8_t* rgbaPixels,
+        uint32_t mipLevels, GraphicsTextureFormat format,
         bool srgb = true) override;
 
 private:

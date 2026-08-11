@@ -258,11 +258,15 @@ void MorphTargets::Deserialize(const JsonValue& value)
     }
 }
 
-Skeleton::Skeleton() { SetTypeName(COMPONENT_TYPE_NAME(Skeleton)); }
+Skeleton::Skeleton()
+{
+    SetTypeName(COMPONENT_TYPE_NAME(Skeleton));
+    RegisterField("hierarchyRootReference", hierarchyRootReference);
+}
 
 JsonValue Skeleton::Serialize() const
 {
-    JsonValue result = JsonValue::MakeObject().Set("type", JsonValue(GetTypeName())).Set("skinIndex", JsonValue(static_cast<int>(skinIndex)));
+    JsonValue result = Component::Serialize().Set("skinIndex", JsonValue(static_cast<int>(skinIndex)));
     JsonValue nodes = JsonValue::MakeArray(), matrices = JsonValue::MakeArray();
     for (unsigned node : jointNodes) nodes.Push(JsonValue(static_cast<int>(node)));
     for (const glm::mat4& matrix : inverseBindMatrices)
@@ -277,6 +281,7 @@ JsonValue Skeleton::Serialize() const
 
 void Skeleton::Deserialize(const JsonValue& value)
 {
+    Component::Deserialize(value);
     skinIndex = static_cast<unsigned>(value["skinIndex"].AsInt()); jointNodes.clear(); inverseBindMatrices.clear();
     for (size_t i = 0; i < value["joints"].ArraySize(); ++i)
         jointNodes.push_back(static_cast<unsigned>(value["joints"].ArrayAt(i).AsInt()));
@@ -288,12 +293,25 @@ void Skeleton::Deserialize(const JsonValue& value)
     }
 }
 
-Object* Skeleton::FindNode(unsigned index) const { return FindNodeRecursive(Root(Owner), index); }
+Object* Skeleton::FindNode(unsigned index) const
+{
+    ModelNode* rootMarker = hierarchyRootReference.IsAssigned()
+        ? ResolveComponentReference<ModelNode>(Owner, hierarchyRootReference) : nullptr;
+    return FindNodeRecursive(rootMarker ? rootMarker->Owner : Root(Owner), index);
+}
 
-SkinnedMesh::SkinnedMesh() { SetTypeName(COMPONENT_TYPE_NAME(SkinnedMesh)); }
+SkinnedMesh::SkinnedMesh()
+{
+    SetTypeName(COMPONENT_TYPE_NAME(SkinnedMesh));
+    RegisterField("meshReference", meshReference);
+    RegisterField("morphTargetsReference", morphTargetsReference);
+    RegisterField("skeletonReference", skeletonReference);
+}
 void SkinnedMesh::Start()
 {
-    Mesh* mesh = Owner ? Owner->GetComponent<Mesh>() : nullptr;
+    Mesh* mesh = Owner ? (meshReference.IsAssigned()
+        ? ResolveComponentReference<Mesh>(Owner, meshReference)
+        : Owner->GetComponent<Mesh>()) : nullptr;
     if (!mesh) return;
     m_baseVertices = mesh->GetVertices();
     // Migrate prefabs imported by the CPU-skinning implementation: their
@@ -322,9 +340,13 @@ void SkinnedMesh::Start()
 
 void SkinnedMesh::Update()
 {
-    Mesh* mesh = Owner ? Owner->GetComponent<Mesh>() : nullptr;
+    Mesh* mesh = Owner ? (meshReference.IsAssigned()
+        ? ResolveComponentReference<Mesh>(Owner, meshReference)
+        : Owner->GetComponent<Mesh>()) : nullptr;
     if (!mesh) return;
-    MorphTargets* morphs = Owner->GetComponent<MorphTargets>();
+    MorphTargets* morphs = morphTargetsReference.IsAssigned()
+        ? ResolveComponentReference<MorphTargets>(Owner, morphTargetsReference)
+        : Owner->GetComponent<MorphTargets>();
     if (!morphs) return;
     if (m_baseVertices.size() != mesh->GetVertices().size()) m_baseVertices = mesh->GetVertices();
     std::vector<Vertex> deformed = m_baseVertices;
@@ -365,15 +387,21 @@ bool SkinnedMesh::BuildPalette(std::vector<glm::mat4>& palette) const
 {
     palette.clear();
     if (!Owner || skinIndex < 0) return false;
-    Skeleton* skeleton = nullptr;
-    for (Object* ancestor = Owner; ancestor && !skeleton; ancestor = ancestor->Parent)
-        for (Component* component : ancestor->Components)
-            if (auto* candidate = dynamic_cast<Skeleton*>(component);
-                candidate && candidate->skinIndex == static_cast<unsigned>(skinIndex))
-            { skeleton = candidate; break; }
+    Skeleton* skeleton = skeletonReference.IsAssigned()
+        ? ResolveComponentReference<Skeleton>(Owner, skeletonReference) : nullptr;
+    if (!skeletonReference.IsAssigned())
+        for (Object* ancestor = Owner; ancestor && !skeleton; ancestor = ancestor->Parent)
+            for (Component* component : ancestor->Components)
+                if (auto* candidate = dynamic_cast<Skeleton*>(component);
+                    candidate && candidate->skinIndex == static_cast<unsigned>(skinIndex))
+                { skeleton = candidate; break; }
     if (!skeleton) return false;
     palette.assign(skeleton->jointNodes.size(), glm::mat4(1.f));
-    const glm::mat4 inverseMesh = glm::inverse(Owner->transform.GetWorldMatrix());
+    Mesh* mesh = meshReference.IsAssigned()
+        ? ResolveComponentReference<Mesh>(Owner, meshReference)
+        : Owner->GetComponent<Mesh>();
+    Object* meshObject = mesh && mesh->Owner ? mesh->Owner : Owner;
+    const glm::mat4 inverseMesh = glm::inverse(meshObject->transform.GetWorldMatrix());
     for (size_t i = 0; i < palette.size(); ++i)
         if (Object* joint = skeleton->FindNode(skeleton->jointNodes[i]))
             palette[i] = inverseMesh * joint->transform.GetWorldMatrix() *
@@ -384,7 +412,7 @@ bool SkinnedMesh::BuildPalette(std::vector<glm::mat4>& palette) const
 
 JsonValue SkinnedMesh::Serialize() const
 {
-    JsonValue result = JsonValue::MakeObject().Set("type", JsonValue(GetTypeName())).Set("skinIndex", JsonValue(skinIndex));
+    JsonValue result = Component::Serialize().Set("skinIndex", JsonValue(skinIndex));
     JsonValue serializedJoints = JsonValue::MakeArray(), serializedWeights = JsonValue::MakeArray();
     for (size_t i = 0; i < joints.size(); ++i)
     {
@@ -396,6 +424,7 @@ JsonValue SkinnedMesh::Serialize() const
 
 void SkinnedMesh::Deserialize(const JsonValue& value)
 {
+    Component::Deserialize(value);
     skinIndex = value["skinIndex"].AsInt(); joints.clear(); weights.clear();
     for (size_t i = 0; i < value["joints"].ArraySize(); ++i)
     {
@@ -408,6 +437,8 @@ void SkinnedMesh::Deserialize(const JsonValue& value)
 AnimationManager::AnimationManager()
 {
     SetTypeName(COMPONENT_TYPE_NAME(AnimationManager));
+    RegisterField("hierarchyRootReference", hierarchyRootReference);
+    RegisterField("animationSourceReference", animationSourceReference);
     RegisterField("clip", clip); RegisterField("playing", playing); RegisterField("looping", looping);
     RegisterField("speed", speed); RegisterField("time", time);
 }
@@ -425,9 +456,16 @@ void AnimationManager::Start()
             m_restMorphs.emplace(morphs->nodeIndex, morphs->weights);
         for (Object* child : object->Children) capture(child);
     };
-    capture(Root(Owner));
+    ModelNode* rootMarker = hierarchyRootReference.IsAssigned()
+        ? ResolveComponentReference<ModelNode>(Owner, hierarchyRootReference) : nullptr;
+    capture(rootMarker ? rootMarker->Owner : Root(Owner));
     if (clip.empty())
-        if (Animation* first = FindAnimation(Owner, {})) clip = first->clipName;
+    {
+        Animation* first = animationSourceReference.IsAssigned()
+            ? ResolveComponentReference<Animation>(Owner, animationSourceReference)
+            : FindAnimation(Owner, {});
+        if (first) clip = first->clipName;
+    }
 }
 
 void AnimationManager::Play(const std::string& clipName, float fadeSeconds)
@@ -458,14 +496,23 @@ void AnimationManager::Tick(float frameDelta)
     if (m_restPose.empty()) Start();
     frameDelta = std::max(frameDelta, 0.f);
     const float delta = playing ? frameDelta : 0.f;
-    Animation* animation = FindAnimation(Owner, clip);
+    const auto resolveAnimation = [this](const std::string& clipName)
+    {
+        Animation* assigned = animationSourceReference.IsAssigned()
+            ? ResolveComponentReference<Animation>(Owner, animationSourceReference) : nullptr;
+        if (animationSourceReference.IsAssigned())
+            return assigned && (clipName.empty() || assigned->clipName == clipName)
+                ? assigned : nullptr;
+        return FindAnimation(Owner, clipName);
+    };
+    Animation* animation = resolveAnimation(clip);
     if (!animation) return;
     time = AdvanceTime(time, delta, speed, looping, animation);
 
     Pose basePose = SampleAnimation(animation, time);
     if (!m_previousClip.empty() && m_fadeDuration > 0.f)
     {
-        Animation* previousAnimation = FindAnimation(Owner, m_previousClip);
+        Animation* previousAnimation = resolveAnimation(m_previousClip);
         m_previousTime = AdvanceTime(m_previousTime, delta, speed, looping, previousAnimation);
         m_fadeElapsed += delta;
         const float blend = std::clamp(m_fadeElapsed / m_fadeDuration, 0.f, 1.f);
@@ -527,7 +574,7 @@ void AnimationManager::Tick(float frameDelta)
     for (Layer& layer : layers)
     {
         if (!layer.enabled || layer.weight <= 0.f) continue;
-        Animation* layerAnimation = FindAnimation(Owner, layer.clip);
+        Animation* layerAnimation = resolveAnimation(layer.clip);
         if (!layerAnimation) continue;
         layer.time = AdvanceTime(layer.time, delta, layer.speed, layer.looping, layerAnimation);
         const Pose layerPose = SampleAnimation(layerAnimation, layer.time);
@@ -574,8 +621,11 @@ void AnimationManager::Tick(float frameDelta)
         }
     }
 
+    ModelNode* rootMarker = hierarchyRootReference.IsAssigned()
+        ? ResolveComponentReference<ModelNode>(Owner, hierarchyRootReference) : nullptr;
+    Object* hierarchyRoot = rootMarker ? rootMarker->Owner : Root(Owner);
     for (const auto& [nodeIndex, pose] : finalPose)
-        if (Object* target = FindNodeRecursive(Root(Owner), nodeIndex))
+        if (Object* target = FindNodeRecursive(hierarchyRoot, nodeIndex))
         {
             if (pose.hasTranslation) target->transform.position = pose.translation;
             if (pose.hasRotation) target->transform.rotation = QuaternionEuler(pose.rotation);
@@ -588,7 +638,7 @@ void AnimationManager::Tick(float frameDelta)
                 morphs->weights = found->second.weights;
         for (Object* child : object->Children) applyMorphs(child);
     };
-    applyMorphs(Root(Owner));
+    applyMorphs(hierarchyRoot);
 }
 
 JsonValue AnimationManager::Serialize() const

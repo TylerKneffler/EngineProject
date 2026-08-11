@@ -60,7 +60,7 @@ public:
     enum class ObjectPlacement { Before, AsChild, After };
 
     Scene()  = default;
-    ~Scene() = default;
+    ~Scene();
 
     // --- Editor Settings ---
     Object editorCamera; // not used by the game runtime, used for editor scene view navigation

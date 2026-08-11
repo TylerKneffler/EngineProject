@@ -18,6 +18,8 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Sprite")
     std::string animationManager = "SpriteAnimationManager";
     PROPERTY(Inspector, EditAnywhere, Category = "Sprite")
+    ComponentReference animationManagerReference { "SpriteAnimationManager" };
+    PROPERTY(Inspector, EditAnywhere, Category = "Sprite")
     int sortingLayer = 0;
     PROPERTY(Inspector, EditAnywhere, Category = "Sprite", ClampMin = "0.01")
     float pixelsPerUnit = 100.f;

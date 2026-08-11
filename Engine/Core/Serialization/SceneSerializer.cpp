@@ -9,6 +9,10 @@
 #include "Core/Compoonents/Camera.h"
 #include "Core/Compoonents/Light.h"
 #include "Core/Compoonents/Sprite.h"
+#include "Core/Compoonents/AudioSource.h"
+#include "Core/Compoonents/Physics/Collider.h"
+#include "Core/Compoonents/Physics/Cloth.h"
+#include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
 #include "Core/Compoonents/Animation/ModelAnimation.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
@@ -65,6 +69,11 @@ void SceneSerializer::EnsureBuiltinsRegistered()
     RegisterComponentType<Camera>();
     RegisterComponentType<Light>();
     RegisterComponentType<Sprite>();
+    RegisterComponentType<AudioSource>();
+    RegisterComponentType<RigidBody>();
+    RegisterComponentType<PrimitiveObjectCollider>();
+    RegisterComponentType<MeshObjectCollider>();
+    RegisterComponentType<Cloth>();
     RegisterComponentType<SpriteAnimationManager>();
     RegisterComponentType<ModelNode>();
     Register("GltfNode", []() -> Component* { return new ModelNode(); });

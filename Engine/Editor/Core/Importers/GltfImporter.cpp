@@ -60,6 +60,7 @@ const char* MimeExtension(fastgltf::MimeType mime)
     case fastgltf::MimeType::PNG: return ".png";
     case fastgltf::MimeType::JPEG: return ".jpg";
     case fastgltf::MimeType::DDS: return ".dds";
+    case fastgltf::MimeType::KTX2: return ".ktx2";
     default: return ".bin";
     }
 }
@@ -151,9 +152,27 @@ fastgltf::MimeType ImageMime(const fastgltf::Image& image)
     }, image.data);
 }
 
+std::string ImageExtension(const fastgltf::Image& image)
+{
+    const char* mimeExtension = MimeExtension(ImageMime(image));
+    if (*mimeExtension)
+        return mimeExtension;
+    return std::visit(fastgltf::visitor {
+        [](const fastgltf::sources::URI& source)
+        {
+            std::string extension = source.uri.fspath().extension().string();
+            std::transform(extension.begin(), extension.end(), extension.begin(),
+                [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+            return extension;
+        },
+        [](const auto&) { return std::string{}; }
+    }, image.data);
+}
+
 std::optional<size_t> TextureImageIndex(const fastgltf::Texture& texture)
 {
     if (texture.imageIndex) return *texture.imageIndex;
+    if (texture.basisuImageIndex) return *texture.basisuImageIndex;
     if (texture.ddsImageIndex) return *texture.ddsImageIndex;
     return std::nullopt;
 }
@@ -238,6 +257,7 @@ GltfImportResult GltfImporter::Import(
         constexpr fastgltf::Extensions extensions =
             fastgltf::Extensions::KHR_mesh_quantization |
             fastgltf::Extensions::KHR_texture_transform |
+            fastgltf::Extensions::KHR_texture_basisu |
             fastgltf::Extensions::MSFT_texture_dds |
             fastgltf::Extensions::KHR_materials_emissive_strength |
             fastgltf::Extensions::KHR_materials_unlit;
@@ -264,7 +284,7 @@ GltfImportResult GltfImporter::Import(
                 image.name, "Texture " + std::to_string(imageIndex + 1));
             const fs::path path = texturesDirectory /
                 (name + " " + std::to_string(imageIndex + 1) +
-                 MimeExtension(ImageMime(image)));
+                 ImageExtension(image));
             if (!ExtractImage(asset, image, path))
                 throw std::runtime_error("Could not extract texture " + std::to_string(imageIndex));
             AssetRecord::Ensure(path, source,

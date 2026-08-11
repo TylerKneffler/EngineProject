@@ -6,6 +6,7 @@
 #include "Core/Compoonents/Material.h"
 #include "Core/Compoonents/Sprite.h"
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
+#include "Core/Compoonents/AudioSource.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Scene/Scene.h"
@@ -48,6 +49,8 @@ std::string PropertiesView::HandleWindowAssetDrop(IEditorUi& ui)
         return "Material Preview";
     if (extension == ".spriteanim")
         return "Sprite Animation Preview";
+    if (Editor::ViewTemplates::IsAudioAssetExtension(extension))
+        return "Audio Source Preview";
     if (extension == ".spritesheet")
         return "Sprite Sheet Preview";
     if (extension == ".h" || extension == ".hpp")
@@ -138,6 +141,16 @@ bool PropertiesView::AddComponentFromAsset(const std::string& path, std::string&
             return true;
         }
 
+        if (Editor::ViewTemplates::IsAudioAssetExtension(extension))
+        {
+            AudioSource* source = m_selectedObject->GetComponent<AudioSource>();
+            if (!source)
+                source = m_selectedObject->AddComponent<AudioSource>();
+            source->audioPath = path;
+            message = "[Properties] Assigned Audio Source from: " + path;
+            return true;
+        }
+
         if (extension == ".h" || extension == ".hpp")
         {
             const std::string className = FindComponentSubclass(path);
@@ -162,4 +175,3 @@ bool PropertiesView::AddComponentFromAsset(const std::string& path, std::string&
     message = "[Properties] No compatible component mapping for asset: " + path;
     return false;
 }
-

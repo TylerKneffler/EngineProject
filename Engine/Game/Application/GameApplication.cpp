@@ -9,6 +9,7 @@
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/SceneManager.h"
+#include "Core/Physics/PhysicsSystem.h"
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
 #include "Core/Assets/Scripts/Rotate.h"
 #include "Core/Serialization/SceneSerializer.h"
@@ -88,13 +89,14 @@ int GameApplication::Run(HINSTANCE instance)
     {
         LARGE_INTEGER currentCounter{};
         QueryPerformanceCounter(&currentCounter);
-        [[maybe_unused]] const float deltaTime =
+        const float deltaTime =
             static_cast<float>(currentCounter.QuadPart - lastCounter.QuadPart) /
             static_cast<float>(performanceFrequency.QuadPart);
         lastCounter = currentCounter;
 
         for (const auto& object : scene.GetObjects())
             object->Update();
+        PhysicsSystem::Step(scene, deltaTime);
 
         renderer->BeginFrame();
         renderer->Clear(0.1f, 0.1f, 0.1f);
