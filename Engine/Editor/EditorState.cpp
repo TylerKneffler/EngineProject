@@ -13,6 +13,7 @@
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Compoonents/Material.h"
 #include "Core/Compoonents/Sprite.h"
+#include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Assets/GltfImporter.h"
 #include <chrono>
@@ -431,7 +432,12 @@ void EditorState::InitializePanels()
         }
         
         OutputDebugStringA("[EditorState::InitializePanels] Creating Assets view\n");
-        m_panels.push_back(m_viewFactory->Create("Assets"));
+        auto assets = m_viewFactory->Create("Assets");
+        if (assets)
+        {
+            m_primaryAssets = static_cast<AssetsExplorerView*>(assets.get());
+            m_panels.push_back(std::move(assets));
+        }
         
         OutputDebugStringA("[EditorState::InitializePanels] Creating Console view\n");
         auto console = m_viewFactory->Create("Console");
@@ -459,11 +465,61 @@ void EditorState::WireupCallbacks()
         LoadScene(scenePath);
     };
 
+    m_viewFactory->OnAssetSelected = [this](const std::string& assetPath) {
+        for (auto& panel : m_panels)
+            if (auto* hierarchy = dynamic_cast<HierarchyView*>(panel.get()))
+                hierarchy->SetSelectedObject(nullptr);
+        if (m_scene)
+            m_scene->SetSelectedObject(nullptr);
+        if (m_primaryProperties)
+        {
+            m_primaryProperties->SetSelectedObject(nullptr);
+            m_primaryProperties->SetSelectedAsset(assetPath);
+        }
+        if (m_primaryAssets)
+            m_primaryAssets->SetSelectedPath(assetPath);
+    };
+
+    m_viewFactory->OnAssetRenamed = [this](const std::string& oldPath,
+        const std::string& newPath) {
+        if (m_primaryAssets)
+            m_primaryAssets->SetSelectedPath(newPath);
+        if (!m_scene)
+            return;
+        std::function<void(Object*)> updatePrefab = [&](Object* object) {
+            if (!object)
+                return;
+            if (object->Prefab &&
+                std::filesystem::path(object->Prefab->GetPath()).lexically_normal() ==
+                std::filesystem::path(oldPath).lexically_normal())
+                object->SetPrefab(newPath);
+            for (Object* child : object->Children)
+                updatePrefab(child);
+        };
+        for (const auto& object : m_scene->GetObjects())
+            if (object && !object->Parent)
+                updatePrefab(object.get());
+        m_hasUnsavedChanges = true;
+    };
+
+    m_viewFactory->OnAssetContentsChanged = [this](const std::string&) {
+        if (!m_scene)
+            return;
+        const std::string sceneSnapshot = m_scene->SaveToString();
+        m_scene->SetSelectedObject(nullptr);
+        if (!m_scene->LoadFromString(sceneSnapshot) && m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                "Could not refresh scene after asset properties changed.");
+        m_hasUnsavedChanges = true;
+    };
+
     // Wire up selection changed callback (for hierarchy -> properties)
     m_viewFactory->OnSelectionChanged = [this](Object* obj) {
         OutputDebugStringA(("[EditorState] Selection changed to: " + (obj ? obj->name : "nullptr") + "\n").c_str());
         if (m_scene)
             m_scene->SetSelectedObject(obj);
+        if (m_primaryAssets)
+            m_primaryAssets->SetSelectedPath({});
         if (m_primaryProperties)
         {
             m_primaryProperties->SetSelectedObject(obj);
@@ -485,6 +541,8 @@ void EditorState::WireupCallbacks()
             }
         if (m_primaryProperties)
             m_primaryProperties->SetSelectedObject(obj);
+        if (m_primaryAssets)
+            m_primaryAssets->SetSelectedPath({});
         if (m_scene)
             m_scene->SetSelectedObject(obj);
     };
@@ -575,8 +633,8 @@ void EditorState::ImportAsset()
     dialog.lpstrFile = source;
     dialog.nMaxFile = MAX_PATH;
     dialog.lpstrFilter =
-        L"Supported Assets (*.obj;*.gltf;*.glb;*.prefab;*.spritesheet;*.png;*.jpg;*.jpeg;*.dds;*.hdr)\0"
-        L"*.obj;*.gltf;*.glb;*.prefab;*.spritesheet;*.png;*.jpg;*.jpeg;*.dds;*.hdr\0"
+        L"Supported Assets (*.obj;*.gltf;*.glb;*.prefab;*.spriteanim;*.spritesheet;*.png;*.jpg;*.jpeg;*.dds;*.hdr)\0"
+        L"*.obj;*.gltf;*.glb;*.prefab;*.spriteanim;*.spritesheet;*.png;*.jpg;*.jpeg;*.dds;*.hdr\0"
         L"3D Models (*.obj;*.gltf;*.glb)\0*.obj;*.gltf;*.glb\0"
         L"Images (*.png;*.jpg;*.jpeg;*.dds;*.hdr)\0*.png;*.jpg;*.jpeg;*.dds;*.hdr\0"
         L"All Files (*.*)\0*.*\0";
@@ -679,13 +737,15 @@ Object* EditorState::InstantiateAsset(const std::string& path, bool recordChange
                 mesh->CreateBuffer(m_scene->GetGraphicsProvider()->GetBufferFactory());
             object->AddComponent<Material>();
         }
-        else if (extension == ".spritesheet")
+        else if (extension == ".spriteanim")
         {
             object = m_scene->AddObject(std::filesystem::path(path).stem().string());
+            SpriteAnimationManager* manager = object->AddComponent<SpriteAnimationManager>();
             Sprite* sprite = object->AddComponent<Sprite>();
-            if (!sprite->LoadFromFile(path) ||
+            sprite->SetAnimationManager(manager);
+            if (!manager->LoadFromFile(path) ||
                 !sprite->Prepare(m_scene->GetGraphicsProvider()))
-                throw std::runtime_error("Could not load spritesheet");
+                throw std::runtime_error("Could not load sprite animation");
         }
         else if (extension == ".scene" || extension == ".xml")
         {
@@ -722,6 +782,8 @@ Object* EditorState::InstantiateAsset(const std::string& path, bool recordChange
 
 void EditorState::SelectObject(Object* object)
 {
+    if (m_primaryAssets)
+        m_primaryAssets->SetSelectedPath({});
     for (auto& panel : m_panels)
         if (auto* hierarchy = dynamic_cast<HierarchyView*>(panel.get()))
         {

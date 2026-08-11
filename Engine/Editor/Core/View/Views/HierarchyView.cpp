@@ -5,6 +5,7 @@
 #include "Core/Compoonents/Material.h"
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Compoonents/Sprite.h"
+#include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Serialization/SceneSerializer.h"
 
@@ -139,7 +140,10 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
             else if (m_pendingAddType == PendingAddType::Sprite)
             {
                 created = m_scene->AddObject("Sprite");
-                created->AddComponent<Sprite>();
+                SpriteAnimationManager* manager =
+                    created->AddComponent<SpriteAnimationManager>();
+                Sprite* sprite = created->AddComponent<Sprite>();
+                sprite->SetAnimationManager(manager);
             }
             else
             {

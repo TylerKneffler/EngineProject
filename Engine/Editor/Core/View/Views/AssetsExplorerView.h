@@ -31,7 +31,11 @@ public:
 
     // Callback when a scene file is requested to load
     std::function<void(const std::string&)> OnSceneRequested;
+    std::function<void(const std::string&)> OnSelectionChanged;
     std::function<void(Object*, const std::string&)> OnPrefabCreated;
+
+    void SetSelectedPath(const std::string& path) { m_selectedPath = path; }
+    const std::string& GetSelectedPath() const { return m_selectedPath; }
 
 private:
     // Recursively draws the directory tree starting from the given path
@@ -41,6 +45,7 @@ private:
     // Opens a file with the system's default application (unless it's a scene file)
     void OpenFile(const std::string& filePath);
     bool AcceptSceneObject(IEditorUi& ui, const std::string& directory);
+    void SelectPath(const std::string& path);
 
     std::string m_assetsPath;
     std::string m_selectedPath;

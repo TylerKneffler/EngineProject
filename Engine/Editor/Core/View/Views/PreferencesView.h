@@ -2,7 +2,12 @@
 #include "pch.h"
 #include "Core/ProjectLoader.h"
 #include <atomic>
+#include <cstdint>
+#include <functional>
 #include <future>
+#include <memory>
+#include <string>
+#include <utility>
 class IEditorUi;
 
 // ---------------------------------------------------------------------------
@@ -46,7 +51,7 @@ private:
     void DrawPathsSection(IEditorUi& ui);
     void DrawRenderingSection(IEditorUi& ui);
     void DrawEditorSection(IEditorUi& ui);
-    void DrawDebugSection(IEditorUi& ui);
+    void DrawDiagnosticsSection(IEditorUi& ui);
     void DrawAspectRatioSection(IEditorUi& ui);
     void DrawExportSection(IEditorUi& ui);
     void StartPortableExport();

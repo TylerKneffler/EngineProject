@@ -109,6 +109,7 @@ private:
     std::vector<std::unique_ptr<IEditorPanel>> m_panels;
     ConsoleView* m_primaryConsole = nullptr;
     PropertiesView* m_primaryProperties = nullptr;
+    AssetsExplorerView* m_primaryAssets = nullptr;
 
     // State
     ProjectSettings m_projectSettings;

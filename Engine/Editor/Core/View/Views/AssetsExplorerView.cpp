@@ -1,4 +1,5 @@
 #include "AssetsExplorerView.h"
+#include "Engine/Editor/Core/View/Templates/Common/AssetPathTemplate.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Object.h"
 #include "Core/Serialization/SceneSerializer.h"
@@ -43,8 +44,16 @@ void AssetsExplorerView::DrawPanel(IEditorUi& ui)
 
     ui.Selectable("Assets", m_selectedPath == m_assetsPath);
     if (ui.IsItemClicked())
-        m_selectedPath = m_assetsPath;
+        SelectPath(m_assetsPath);
     AcceptSceneObject(ui, m_assetsPath);
+
+    if (!m_selectedPath.empty())
+    {
+        const std::string selected = "Selected: " +
+            fs::path(m_selectedPath).filename().string();
+        ui.ColoredLabel(selected.c_str(), { 0.35f, 0.7f, 1.f, 1.f });
+        ui.Separator();
+    }
 
     DrawDirectoryTree(ui, m_assetsPath);
 
@@ -87,7 +96,7 @@ bool AssetsExplorerView::DrawDirectoryTree(IEditorUi& ui, const std::string& pat
                 const bool open = ui.TreeNode(entryId, dirName.c_str(),
                                               m_selectedPath == entryPath, false, true);
                 if (ui.IsItemClicked())
-                    m_selectedPath = entryPath;
+                    SelectPath(entryPath);
                 AcceptSceneObject(ui, entryPath);
                 if (open)
                 {
@@ -105,7 +114,7 @@ bool AssetsExplorerView::DrawDirectoryTree(IEditorUi& ui, const std::string& pat
                 const std::string entryPath = entry.path().string();
                 if (ui.Selectable(fileName.c_str(), m_selectedPath == entryPath, true))
                 {
-                    m_selectedPath = entryPath;
+                    SelectPath(entryPath);
                     if (ui.IsItemDoubleClicked())
                     {
                         OpenFile(entryPath);
@@ -129,6 +138,13 @@ bool AssetsExplorerView::DrawDirectoryTree(IEditorUi& ui, const std::string& pat
     }
 
     return false;
+}
+
+void AssetsExplorerView::SelectPath(const std::string& path)
+{
+    m_selectedPath = path;
+    if (OnSelectionChanged)
+        OnSelectionChanged(path);
 }
 
 bool AssetsExplorerView::AcceptSceneObject(IEditorUi& ui, const std::string& directory)
@@ -180,8 +196,9 @@ bool AssetsExplorerView::AcceptSceneObject(IEditorUi& ui, const std::string& dir
 void AssetsExplorerView::OpenFile(const std::string& filePath)
 {
     // Check if this is a scene file
-    std::string extension = fs::path(filePath).extension().string();
-    if (extension == ".scene" || extension == ".Scene" || extension == ".xml" || extension == ".XML")
+    const std::string extension =
+        Editor::ViewTemplates::LowerAssetExtension(filePath);
+    if (extension == ".scene" || extension == ".xml")
     {
         // Trigger the scene load callback
         if (OnSceneRequested)

@@ -2,6 +2,7 @@
 #include "pch.h"
 #include "Core/Object.h"
 #include "View/IEditorPanel.h"
+#include "Engine/Editor/Core/View/Templates/Assets/AssetInspectorTemplate.h"
 #include <chrono>
 #include <functional>
 
@@ -37,6 +38,7 @@ public:
             m_editingSkyboxTexture = false;
         }
         m_selectedObject = obj;
+        m_assetInspector.Clear();
         if (previousRoot != nextRoot)
         {
             m_prefabSnapshotRoot = nextRoot;
@@ -44,11 +46,18 @@ public:
         }
     }
     Object* GetSelectedObject() const   { return m_selectedObject; }
+    void SetSelectedAsset(const std::string& path);
+    const std::string& GetSelectedAsset() const
+    {
+        return m_assetInspector.GetSelectedPath();
+    }
 
     void DrawPanel(IEditorUi& ui) override;
 
     std::function<void()> OnComponentsChanged;
     std::function<void(const std::string&, bool)> OnAssetDropLog;
+    std::function<void(const std::string&, const std::string&)> OnAssetRenamed;
+    std::function<void(const std::string&)> OnAssetContentsChanged;
     bool ApplyConnectedPrefabChanges(bool force = false);
 
 private:
@@ -62,6 +71,7 @@ private:
     void LogAssetDrop(const std::string& message, bool error = false) const;
 
     Object* m_selectedObject = nullptr;
+    Editor::ViewTemplates::AssetInspectorTemplate m_assetInspector;
     Scene* m_scene = nullptr;
     bool m_componentPickerOpen = false;
     bool m_positionComponentPicker = false;

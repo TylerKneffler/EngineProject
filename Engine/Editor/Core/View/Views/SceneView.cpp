@@ -1,5 +1,6 @@
 
 #include "SceneView.h"
+#include "Engine/Editor/Core/View/Templates/Common/AssetPathTemplate.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Camera.h"
@@ -157,9 +158,8 @@ void SceneView::DrawPanel(IEditorUi& ui)
             while (length < payload.size && bytes[length] != '\0')
                 ++length;
             const std::string path(bytes, length);
-            std::string extension = std::filesystem::path(path).extension().string();
-            std::transform(extension.begin(), extension.end(), extension.begin(),
-                [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+            const std::string extension =
+                Editor::ViewTemplates::LowerAssetExtension(path);
             if (extension == ".prefab")
             {
                 prefabDragObserved = true;

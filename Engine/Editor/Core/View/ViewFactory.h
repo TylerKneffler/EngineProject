@@ -69,12 +69,15 @@ public:
     std::function<void()>                  OnHierarchyChanged;
     std::function<void(const std::string&)> OnHierarchyInteraction;
     std::function<void(const std::string&)> OnSceneRequested;   // AssetsExplorerView
+    std::function<void(const std::string&)> OnAssetSelected;    // AssetsExplorerView
     std::function<void(const std::string&)> OnAssetDropped;     // SceneView
     std::function<Object*(const std::string&)> OnAssetPreviewRequested;
     std::function<void(Object*)> OnAssetPreviewCancelled;
     std::function<void(Object*, const std::string&)> OnAssetPreviewCommitted;
     std::function<void()>                  OnPropertiesChanged;
     std::function<void(const std::string&, bool)> OnPropertiesAssetDropLog;
+    std::function<void(const std::string&, const std::string&)> OnAssetRenamed;
+    std::function<void(const std::string&)> OnAssetContentsChanged;
     std::function<void(Object*, const std::string&)> OnPrefabCreated;
 
 private:

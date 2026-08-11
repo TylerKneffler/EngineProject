@@ -1,4 +1,4 @@
-#include "PreferencesView.h"
+#include "Engine/Editor/Core/View/Views/PreferencesView.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Renderers/RendererFactory.h"
 #include <pugixml.hpp>
@@ -263,7 +263,7 @@ void PreferencesView::DrawWindow(IEditorUi& ui, bool& isOpen)
 
             if (ui.BeginTab("Debug"))
             {
-                DrawDebugSection(ui);
+                DrawDiagnosticsSection(ui);
                 ui.EndTab();
             }
 
@@ -299,7 +299,7 @@ void PreferencesView::DrawWindow(IEditorUi& ui, bool& isOpen)
     ui.EndWindow();
 }
 
-void PreferencesView::DrawDebugSection(IEditorUi& ui)
+void PreferencesView::DrawDiagnosticsSection(IEditorUi& ui)
 {
     ui.Label("Editor Diagnostics");
     ui.Separator();

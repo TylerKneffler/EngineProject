@@ -1,0 +1,8 @@
+{
+  "type": "sprite-animation",
+  "spriteSheet": "slime_idle.spritesheet",
+  "animation": "Idle",
+  "speed": 1,
+  "loop": true,
+  "autoplay": true
+}

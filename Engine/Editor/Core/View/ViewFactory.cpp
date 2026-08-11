@@ -139,6 +139,8 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
         view->Init(m_scene);
         view->OnComponentsChanged = OnPropertiesChanged;
         view->OnAssetDropLog = OnPropertiesAssetDropLog;
+        view->OnAssetRenamed = OnAssetRenamed;
+        view->OnAssetContentsChanged = OnAssetContentsChanged;
         m_singletonInstances[typeName] = view.get();
         return view;
     }
@@ -150,6 +152,7 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
         view->Init(m_settings.assetsDirectory);
         if (OnSceneRequested)
             view->OnSceneRequested = OnSceneRequested;
+        view->OnSelectionChanged = OnAssetSelected;
         view->OnPrefabCreated = OnPrefabCreated;
         m_singletonInstances[typeName] = view.get();
         return view;

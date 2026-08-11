@@ -1,64 +1,28 @@
 #include "Sprite.h"
+#include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Graphics/IGraphicsProvider.h"
+#include "Core/Object.h"
+#include "Engine/Editor/UI/IEditorUi.h"
 #include <algorithm>
 
 Sprite::Sprite()
 {
     SetTypeName(COMPONENT_TYPE_NAME(Sprite));
     singlecomponent = true;
-    RegisterField("spriteSheetFile", spriteSheetFile);
-    RegisterField("animation", animation);
-    RegisterField("frame", frame);
-    RegisterField("playing", playing);
+    RegisterField("animationManager", animationManager);
     RegisterField("sortingLayer", sortingLayer);
     RegisterField("pixelsPerUnit", pixelsPerUnit);
     RegisterField("tint", tint);
     RegisterField("alpha", alpha);
 }
 
-bool Sprite::LoadFromFile(const std::string& path)
-{
-    spriteSheetFile = path;
-    m_loadedSheetPath.clear();
-    return m_sheet.Load(path);
-}
-
-void Sprite::Start()
-{
-    m_lastFrameTime = std::chrono::steady_clock::now();
-}
-
-void Sprite::Update()
-{
-    const SpriteSheetAnimation* current = CurrentAnimation();
-    if (!playing || !current || current->frames.size() < 2)
-        return;
-    const auto now = std::chrono::steady_clock::now();
-    if (m_lastFrameTime.time_since_epoch().count() == 0)
-        m_lastFrameTime = now;
-    const SpriteSheetFrame* currentFrame = CurrentFrame();
-    const float duration = currentFrame ? currentFrame->duration : 0.1f;
-    if (std::chrono::duration<float>(now - m_lastFrameTime).count() < duration)
-        return;
-    m_lastFrameTime = now;
-    ++frame;
-    if (frame >= static_cast<int>(current->frames.size()))
-    {
-        frame = current->loop ? 0 : static_cast<int>(current->frames.size()) - 1;
-        if (!current->loop)
-            playing = false;
-    }
-    SelectTexture();
-}
-
 void Sprite::Deserialize(const JsonValue& value)
 {
     Component::Deserialize(value);
-    m_loadedSheetPath.clear();
-    frame = std::max(frame, 0);
     pixelsPerUnit = std::max(pixelsPerUnit, 0.01f);
     alpha = std::clamp(alpha, 0.f, 1.f);
+    m_animationManager = nullptr;
 }
 
 void Sprite::OnAfterDeserialize(IGraphicsProvider* graphicsProvider)
@@ -66,21 +30,69 @@ void Sprite::OnAfterDeserialize(IGraphicsProvider* graphicsProvider)
     Prepare(graphicsProvider);
 }
 
+bool Sprite::DrawProperties(IEditorUi& ui)
+{
+    bool changed = false;
+    SpriteAnimationManager* manager = ResolveAnimationManager();
+    ui.ValueLabel("Animation Manager", manager ? manager->GetTypeName().c_str() : "(drop SpriteAnimationManager here)");
+    if (ui.BeginDragDropTarget())
+    {
+        size_t size = 0;
+        const void* data = ui.AcceptDragDropPayload("ENGINE_COMPONENT_REORDER", &size);
+        if (data && size == sizeof(Component*))
+        {
+            Component* component = *static_cast<Component* const*>(data);
+            auto* dropped = dynamic_cast<SpriteAnimationManager*>(component);
+            if (dropped && dropped->Owner == Owner)
+            {
+                SetAnimationManager(dropped);
+                changed = true;
+            }
+        }
+        ui.EndDragDropTarget();
+    }
+    if (manager)
+    {
+        ui.SameLine();
+        if (ui.Button("Clear"))
+        {
+            animationManager.clear();
+            m_animationManager = nullptr;
+            changed = true;
+        }
+    }
+    changed = ui.SliderInt("Sorting Layer", &sortingLayer, -1000, 1000) || changed;
+    changed = ui.DragFloat("Pixels Per Unit", &pixelsPerUnit, 0.5f, 0.01f, 10000.f) || changed;
+    changed = ui.ColorEdit3("Tint", &tint.x) || changed;
+    changed = ui.DragFloat("Alpha", &alpha, 0.01f, 0.f, 1.f) || changed;
+    pixelsPerUnit = std::max(pixelsPerUnit, 0.01f);
+    alpha = std::clamp(alpha, 0.f, 1.f);
+    return changed;
+}
+
+void Sprite::SetAnimationManager(SpriteAnimationManager* manager)
+{
+    m_animationManager = manager && manager->Owner == Owner ? manager : nullptr;
+    animationManager = m_animationManager ? m_animationManager->GetTypeName() : std::string{};
+}
+
+SpriteAnimationManager* Sprite::ResolveAnimationManager() const
+{
+    if (!Owner || animationManager.empty())
+    {
+        m_animationManager = nullptr;
+        return nullptr;
+    }
+    // Resolve on demand so deleting or replacing the single manager component
+    // cannot leave the renderer holding a stale pointer.
+    m_animationManager = Owner->GetComponent<SpriteAnimationManager>();
+    return m_animationManager;
+}
+
 bool Sprite::Prepare(IGraphicsProvider* graphicsProvider)
 {
-    if (!graphicsProvider || spriteSheetFile.empty())
-        return false;
-    if (m_loadedSheetPath != spriteSheetFile)
-    {
-        if (!m_sheet.Load(spriteSheetFile))
-            return false;
-        m_loadedSheetPath = spriteSheetFile;
-        frame = std::max(frame, 0);
-        SelectTexture();
-    }
-    else
-        SelectTexture();
-    if (!m_texture || !m_texture->Prepare(graphicsProvider))
+    SpriteAnimationManager* manager = ResolveAnimationManager();
+    if (!graphicsProvider || !manager || !manager->Prepare(graphicsProvider))
         return false;
     if (!m_vertexBuffer)
     {
@@ -93,70 +105,45 @@ bool Sprite::Prepare(IGraphicsProvider* graphicsProvider)
             {{ .5f, .5f,0.f},{0.f,0.f,-1.f},{1.f,0.f},{1.f,0.f,0.f,1.f}}
         };
         m_vertexBuffer = graphicsProvider->GetBufferFactory()->CreateBuffer(
-            IGraphicsBuffer::Usage::VertexBuffer,
-            IGraphicsBuffer::AccessMode::Upload,
+            IGraphicsBuffer::Usage::VertexBuffer, IGraphicsBuffer::AccessMode::Upload,
             sizeof(vertices), vertices);
     }
     return IsReady();
 }
 
-const SpriteSheetAnimation* Sprite::CurrentAnimation() const
-{
-    const SpriteSheetAnimation* selected = m_sheet.FindAnimation(animation);
-    return selected ? selected : m_sheet.GetDefaultAnimation();
-}
-
-const SpriteSheetFrame* Sprite::CurrentFrame() const
-{
-    const SpriteSheetAnimation* selected = CurrentAnimation();
-    if (!selected || selected->frames.empty())
-        return nullptr;
-    const int index = std::clamp(frame, 0, static_cast<int>(selected->frames.size()) - 1);
-    return &selected->frames[static_cast<size_t>(index)];
-}
-
-void Sprite::SelectTexture()
-{
-    const SpriteSheetFrame* selected = CurrentFrame();
-    const std::string image = selected ? selected->image : std::string{};
-    if (image == m_loadedImagePath)
-        return;
-    m_loadedImagePath = image;
-    m_texture = image.empty() ? nullptr : Texture::Acquire(image, true);
-}
-
 bool Sprite::IsReady() const
 {
-    return m_vertexBuffer && m_texture && m_texture->GetGraphicsTexture();
+    const SpriteAnimationManager* manager = ResolveAnimationManager();
+    return m_vertexBuffer && manager && manager->IsReady();
 }
 
 glm::vec4 Sprite::GetUvRect() const
 {
-    const SpriteSheetFrame* selected = CurrentFrame();
-    if (!selected || !m_texture || m_texture->GetWidth() == 0 || m_texture->GetHeight() == 0)
+    const SpriteAnimationManager* manager = ResolveAnimationManager();
+    const SpriteSheetFrame* selected = manager ? manager->GetCurrentFrame() : nullptr;
+    const Texture* texture = manager ? manager->GetTexture() : nullptr;
+    if (!selected || !texture || texture->GetWidth() == 0 || texture->GetHeight() == 0)
         return { 0.f, 0.f, 1.f, 1.f };
-    const float width = selected->width > 0.f
-        ? selected->width : static_cast<float>(m_texture->GetWidth());
-    const float height = selected->height > 0.f
-        ? selected->height : static_cast<float>(m_texture->GetHeight());
-    return { selected->x / m_texture->GetWidth(), selected->y / m_texture->GetHeight(),
-        width / m_texture->GetWidth(), height / m_texture->GetHeight() };
+    const float width = selected->width > 0.f ? selected->width : static_cast<float>(texture->GetWidth());
+    const float height = selected->height > 0.f ? selected->height : static_cast<float>(texture->GetHeight());
+    return { selected->x / texture->GetWidth(), selected->y / texture->GetHeight(),
+        width / texture->GetWidth(), height / texture->GetHeight() };
 }
 
 glm::vec2 Sprite::GetWorldSize() const
 {
-    const SpriteSheetFrame* selected = CurrentFrame();
-    if (!selected || !m_texture)
+    const SpriteAnimationManager* manager = ResolveAnimationManager();
+    const SpriteSheetFrame* selected = manager ? manager->GetCurrentFrame() : nullptr;
+    const Texture* texture = manager ? manager->GetTexture() : nullptr;
+    if (!selected || !texture)
         return { 1.f, 1.f };
-    const float width = selected->width > 0.f
-        ? selected->width : static_cast<float>(m_texture->GetWidth());
-    const float height = selected->height > 0.f
-        ? selected->height : static_cast<float>(m_texture->GetHeight());
-    return { width / std::max(pixelsPerUnit, 0.01f),
-        height / std::max(pixelsPerUnit, 0.01f) };
+    const float width = selected->width > 0.f ? selected->width : static_cast<float>(texture->GetWidth());
+    const float height = selected->height > 0.f ? selected->height : static_cast<float>(texture->GetHeight());
+    return { width / std::max(pixelsPerUnit, 0.01f), height / std::max(pixelsPerUnit, 0.01f) };
 }
 
 const Texture* Sprite::GetTexture() const
 {
-    return m_texture.get();
+    const SpriteAnimationManager* manager = ResolveAnimationManager();
+    return manager ? manager->GetTexture() : nullptr;
 }

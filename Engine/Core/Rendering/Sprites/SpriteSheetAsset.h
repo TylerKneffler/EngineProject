@@ -30,6 +30,7 @@ public:
     const SpriteSheetAnimation* FindAnimation(const std::string& name) const;
     const SpriteSheetAnimation* GetDefaultAnimation() const;
     const std::string& GetPath() const { return m_path; }
+    const std::vector<SpriteSheetAnimation>& GetAnimations() const { return m_animations; }
 
 private:
     std::string ResolveImage(const std::string& image) const;

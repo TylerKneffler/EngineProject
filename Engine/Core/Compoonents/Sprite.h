@@ -1,27 +1,22 @@
 #pragma once
 
-#include "Core/Script.h"
+#include "Core/Component.h"
 #include "Core/Compoonents/Mesh.h"
-#include "Core/Rendering/Sprites/SpriteSheetAsset.h"
-#include <chrono>
 #include <memory>
 
 class Texture;
 class IGraphicsBuffer;
+class SpriteAnimationManager;
 
-class Sprite : public Script
+// Sprite is rendering-only. Playback and clip selection belong to the
+// explicitly 2D SpriteAnimationManager component.
+class Sprite : public Component
 {
 public:
     Sprite();
 
     PROPERTY(Inspector, EditAnywhere, Category = "Sprite")
-    std::string spriteSheetFile;
-    PROPERTY(Inspector, EditAnywhere, Category = "Sprite")
-    std::string animation;
-    PROPERTY(Inspector, EditAnywhere, Category = "Sprite")
-    int frame = 0;
-    PROPERTY(Inspector, EditAnywhere, Category = "Sprite")
-    bool playing = true;
+    std::string animationManager = "SpriteAnimationManager";
     PROPERTY(Inspector, EditAnywhere, Category = "Sprite")
     int sortingLayer = 0;
     PROPERTY(Inspector, EditAnywhere, Category = "Sprite", ClampMin = "0.01")
@@ -31,11 +26,10 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Sprite | Color")
     float alpha = 1.f;
 
-    bool LoadFromFile(const std::string& path);
-    void Start() override;
-    void Update() override;
     void Deserialize(const JsonValue& value) override;
     void OnAfterDeserialize(IGraphicsProvider* graphicsProvider) override;
+    bool DrawProperties(IEditorUi& ui) override;
+    void SetAnimationManager(SpriteAnimationManager* manager);
     bool Prepare(IGraphicsProvider* graphicsProvider);
     bool IsReady() const;
     IGraphicsBuffer* GetGraphicsBuffer() const { return m_vertexBuffer.get(); }
@@ -46,14 +40,8 @@ public:
     const Texture* GetTexture() const;
 
 private:
-    const SpriteSheetAnimation* CurrentAnimation() const;
-    const SpriteSheetFrame* CurrentFrame() const;
-    void SelectTexture();
+    SpriteAnimationManager* ResolveAnimationManager() const;
 
-    SpriteSheetAsset m_sheet;
-    std::shared_ptr<Texture> m_texture;
-    std::string m_loadedSheetPath;
-    std::string m_loadedImagePath;
+    mutable SpriteAnimationManager* m_animationManager = nullptr;
     std::unique_ptr<IGraphicsBuffer> m_vertexBuffer;
-    std::chrono::steady_clock::time_point m_lastFrameTime{};
 };

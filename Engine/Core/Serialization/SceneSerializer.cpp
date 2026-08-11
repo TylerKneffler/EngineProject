@@ -9,6 +9,7 @@
 #include "Core/Compoonents/Camera.h"
 #include "Core/Compoonents/Light.h"
 #include "Core/Compoonents/Sprite.h"
+#include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
 #include <pugixml.hpp>
 #include <fstream>
@@ -63,6 +64,7 @@ void SceneSerializer::EnsureBuiltinsRegistered()
     RegisterComponentType<Camera>();
     RegisterComponentType<Light>();
     RegisterComponentType<Sprite>();
+    RegisterComponentType<SpriteAnimationManager>();
     RegisterComponentType<BakedLightingData>();
 }
 

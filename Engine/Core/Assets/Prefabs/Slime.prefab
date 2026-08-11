@@ -23,11 +23,13 @@
       </scale>
     </transform>
     <components>
+      <components:SpriteAnimationManager>
+        <SpriteAnimationManager.animationFile>Engine/Core/Assets/Textures/Sprites/Slime/slime_idle.spriteanim</SpriteAnimationManager.animationFile>
+        <SpriteAnimationManager.playing>true</SpriteAnimationManager.playing>
+        <SpriteAnimationManager.frame>0</SpriteAnimationManager.frame>
+      </components:SpriteAnimationManager>
       <components:Sprite>
-        <Sprite.spriteSheetFile>Engine/Core/Assets/Textures/Sprites/Slime/slime_idle.spritesheet</Sprite.spriteSheetFile>
-        <Sprite.animation>Idle</Sprite.animation>
-        <Sprite.frame>5</Sprite.frame>
-        <Sprite.playing>true</Sprite.playing>
+        <Sprite.animationManager>SpriteAnimationManager</Sprite.animationManager>
         <Sprite.sortingLayer>0</Sprite.sortingLayer>
         <Sprite.pixelsPerUnit>8</Sprite.pixelsPerUnit>
         <Sprite.tint>
