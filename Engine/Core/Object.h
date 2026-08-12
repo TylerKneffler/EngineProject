@@ -31,6 +31,12 @@ public:
     mutable bool PrefabHasOverrides = false;
     mutable bool PrefabHasNonTransformOverrides = false;
     mutable std::string PrefabOverridePatchSnapshot;
+    // Kept separately so moving a prefab root can be checked without parsing
+    // and diffing the complete serialized prefab hierarchy every frame.
+    glm::vec3 PrefabSourcePosition { 0.f };
+    glm::vec3 PrefabSourceRotation { 0.f };
+    glm::vec3 PrefabSourceScale { 1.f };
+    bool PrefabSourceTransformValid = false;
 
     bool IsPrefabInstance() const { return static_cast<bool>(Prefab); }
     void SetPrefab(const std::string& path) { Prefab = PrefabAsset::Acquire(path); }

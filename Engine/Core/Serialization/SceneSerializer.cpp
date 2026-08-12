@@ -430,6 +430,34 @@ static void DeserialiseTransform(Transform& transform, const JsonValue& node)
     transform.Deserialize(node);
 }
 
+static void SetPrefabSourceSnapshot(Object& object, const JsonValue& source)
+{
+    object.PrefabSourceSnapshot = JsonWrite(source);
+    Transform sourceTransform;
+    DeserialiseTransform(sourceTransform, source["transform"]);
+    object.PrefabSourcePosition = sourceTransform.position;
+    object.PrefabSourceRotation = sourceTransform.rotation;
+    object.PrefabSourceScale = sourceTransform.scale;
+    object.PrefabSourceTransformValid = true;
+    object.PrefabOverrideCacheValid = false;
+}
+
+static bool PrefabRootTransformDiffers(const Object& instance)
+{
+    if (!instance.PrefabSourceTransformValid)
+        return false;
+    constexpr float epsilon = 0.000001f;
+    const auto differs = [epsilon](const glm::vec3& left, const glm::vec3& right)
+    {
+        return std::abs(left.x - right.x) > epsilon ||
+            std::abs(left.y - right.y) > epsilon ||
+            std::abs(left.z - right.z) > epsilon;
+    };
+    return differs(instance.transform.position, instance.PrefabSourcePosition) ||
+        differs(instance.transform.rotation, instance.PrefabSourceRotation) ||
+        differs(instance.transform.scale, instance.PrefabSourceScale);
+}
+
 static JsonValue SerialiseBakedMaterialOverrides(const Object& root)
 {
     JsonValue overrides = JsonValue::MakeArray();
@@ -676,7 +704,7 @@ static void EnsurePrefabPatchCache(const Object& instance)
     instance.PrefabOverridePatchSnapshot = JsonWrite(nonTransform);
     instance.PrefabHasNonTransformOverrides = nonTransform.ArraySize() > 0;
     instance.PrefabHasOverrides = instance.PrefabHasNonTransformOverrides ||
-        BuildPrefabPatches(instance, true).ArraySize() > 0;
+        PrefabRootTransformDiffers(instance);
     instance.PrefabOverrideCacheValid = true;
 }
 
@@ -1227,7 +1255,7 @@ Object* SceneSerializer::InstantiatePrefab(
 
         rootObject = scene.AddObject();
         instantiate(*rootObject, root["object"]);
-        rootObject->PrefabSourceSnapshot = JsonWrite(SerialiseObject(*rootObject, false));
+        SetPrefabSourceSnapshot(*rootObject, SerialiseObject(*rootObject, false));
         rootObject->SetPrefab(path);
         return rootObject;
     }
@@ -1349,7 +1377,7 @@ bool SceneSerializer::RefreshPrefabInstances(
             instance->Components.clear();
 
             populate(*instance, root["object"]);
-            instance->PrefabSourceSnapshot = JsonWrite(root["object"]);
+            SetPrefabSourceSnapshot(*instance, root["object"]);
             ApplyPrefabPatches(*instance, localOverrides, graphicsProvider);
             instance->transform = placement;
             instance->Prefab = prefab;
@@ -1372,8 +1400,11 @@ bool SceneSerializer::HasPrefabOverrides(const Object& instance,
     const Object* root = instance.GetPrefabInstanceRoot();
     if (!root || !root->Prefab) return false;
     EnsurePrefabPatchCache(*root);
-    return includeRootTransform
-        ? root->PrefabHasOverrides : root->PrefabHasNonTransformOverrides;
+    if (!includeRootTransform)
+        return root->PrefabHasNonTransformOverrides;
+    root->PrefabHasOverrides = root->PrefabHasNonTransformOverrides ||
+        PrefabRootTransformDiffers(*root);
+    return root->PrefabHasOverrides;
 }
 
 bool SceneSerializer::RevertPrefabOverrides(Object& instance,
@@ -1400,7 +1431,7 @@ bool SceneSerializer::ApplyPrefabOverridesToAsset(Object& instance,
     if (!SavePrefab(*root, path, !includeRootTransform)) return false;
     try
     {
-        root->PrefabSourceSnapshot = JsonWrite(
+        SetPrefabSourceSnapshot(*root,
             LoadPrefabDocument(ResolvePrefabPath(path))["object"]);
     }
     catch (...) { return false; }

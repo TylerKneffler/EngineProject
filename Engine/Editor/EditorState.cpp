@@ -864,7 +864,11 @@ void EditorState::WireupCallbacks()
     m_viewFactory->OnGizmoInteraction = [this](bool active) {
         ReportSceneEditInProgress(active);
         if (active && m_scene && m_scene->GetSelectedObject())
-            m_scene->GetSelectedObject()->InvalidatePrefabOverrideCache();
+        {
+            Object* selected = m_scene->GetSelectedObject();
+            if (selected != selected->GetPrefabInstanceRoot())
+                selected->InvalidatePrefabOverrideCache();
+        }
     };
 
     // Wire up focus (double-click) callback — frame the object in the scene camera
@@ -1136,6 +1140,14 @@ EditorState::HistoryEntry EditorState::CaptureHistoryEntry() const
 void EditorState::TrackSceneChanges(bool allowHistory, bool editInProgress)
 {
     if (!m_scene || !allowHistory || m_assetPreviewActive)
+        return;
+
+    // Property drags and gizmos can update every rendered frame. Capturing the
+    // complete scene here made large linked prefabs serialize and diff for
+    // every intermediate mouse position. The existing baseline is already the
+    // correct undo "before" state, so wait until the interaction ends and
+    // capture its final value once.
+    if (editInProgress)
         return;
 
     HistoryEntry current = CaptureHistoryEntry();
