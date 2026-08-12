@@ -27,6 +27,10 @@ public:
     // Full prefab object state at the time this linked instance was loaded.
     // Scene serialization stores only differences from this baseline.
     std::string PrefabSourceSnapshot;
+    mutable bool PrefabOverrideCacheValid = false;
+    mutable bool PrefabHasOverrides = false;
+    mutable bool PrefabHasNonTransformOverrides = false;
+    mutable std::string PrefabOverridePatchSnapshot;
 
     bool IsPrefabInstance() const { return static_cast<bool>(Prefab); }
     void SetPrefab(const std::string& path) { Prefab = PrefabAsset::Acquire(path); }
@@ -47,6 +51,11 @@ public:
     bool IsPartOfPrefabInstance() const
     {
         return GetPrefabInstanceRoot() != nullptr;
+    }
+    void InvalidatePrefabOverrideCache()
+    {
+        if (Object* root = GetPrefabInstanceRoot())
+            root->PrefabOverrideCacheValid = false;
     }
 
     bool IsEnabledInHierarchy() const

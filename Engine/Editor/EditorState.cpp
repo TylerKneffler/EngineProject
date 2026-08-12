@@ -863,6 +863,8 @@ void EditorState::WireupCallbacks()
     };
     m_viewFactory->OnGizmoInteraction = [this](bool active) {
         ReportSceneEditInProgress(active);
+        if (active && m_scene && m_scene->GetSelectedObject())
+            m_scene->GetSelectedObject()->InvalidatePrefabOverrideCache();
     };
 
     // Wire up focus (double-click) callback — frame the object in the scene camera

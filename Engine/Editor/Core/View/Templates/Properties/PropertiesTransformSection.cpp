@@ -23,7 +23,10 @@ void PropertiesView::DrawTransform(IEditorUi& ui)
     if (transformOpen)
     {
         const bool transformChanged = t.DrawProperties(ui);
-        if (transformChanged && OnComponentsChanged)
-            OnComponentsChanged();
+        if (transformChanged)
+        {
+            m_selectedObject->InvalidatePrefabOverrideCache();
+            if (OnComponentsChanged) OnComponentsChanged();
+        }
     }
 }

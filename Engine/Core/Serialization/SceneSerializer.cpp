@@ -500,6 +500,7 @@ static void ApplyBakedMaterialOverrides(Object& root, const JsonValue& node,
 
 static JsonValue BuildPrefabPatches(const Object& instance,
     bool includeRootTransform);
+static void EnsurePrefabPatchCache(const Object& instance);
 
 static JsonValue SerialiseObject(
     const Object& obj,
@@ -510,7 +511,14 @@ static JsonValue SerialiseObject(
     {
         node.Set("prefab", JsonValue(obj.Prefab->GetPath()));
         node.Set("transform", SerialiseTransform(obj.transform));
-        const JsonValue prefabOverrides = BuildPrefabPatches(obj, false);
+        EnsurePrefabPatchCache(obj);
+        JsonValue prefabOverrides = JsonValue::MakeArray();
+        try
+        {
+            if (!obj.PrefabOverridePatchSnapshot.empty())
+                prefabOverrides = JsonParse(obj.PrefabOverridePatchSnapshot);
+        }
+        catch (...) {}
         if (prefabOverrides.ArraySize() > 0)
             node.Set("prefabOverrides", prefabOverrides);
         const JsonValue overrides = SerialiseBakedMaterialOverrides(obj);
@@ -659,6 +667,17 @@ static JsonValue BuildPrefabPatches(const Object& instance,
     }
     catch (...) {}
     return patches;
+}
+
+static void EnsurePrefabPatchCache(const Object& instance)
+{
+    if (instance.PrefabOverrideCacheValid) return;
+    const JsonValue nonTransform = BuildPrefabPatches(instance, false);
+    instance.PrefabOverridePatchSnapshot = JsonWrite(nonTransform);
+    instance.PrefabHasNonTransformOverrides = nonTransform.ArraySize() > 0;
+    instance.PrefabHasOverrides = instance.PrefabHasNonTransformOverrides ||
+        BuildPrefabPatches(instance, true).ArraySize() > 0;
+    instance.PrefabOverrideCacheValid = true;
 }
 
 static bool ApplyPatch(JsonValue& target, const JsonValue& patch)
@@ -1334,6 +1353,7 @@ bool SceneSerializer::RefreshPrefabInstances(
             ApplyPrefabPatches(*instance, localOverrides, graphicsProvider);
             instance->transform = placement;
             instance->Prefab = prefab;
+            instance->PrefabOverrideCacheValid = false;
         }
         return true;
     }
@@ -1350,8 +1370,10 @@ bool SceneSerializer::HasPrefabOverrides(const Object& instance,
     bool includeRootTransform)
 {
     const Object* root = instance.GetPrefabInstanceRoot();
-    return root && root->Prefab &&
-        BuildPrefabPatches(*root, includeRootTransform).ArraySize() > 0;
+    if (!root || !root->Prefab) return false;
+    EnsurePrefabPatchCache(*root);
+    return includeRootTransform
+        ? root->PrefabHasOverrides : root->PrefabHasNonTransformOverrides;
 }
 
 bool SceneSerializer::RevertPrefabOverrides(Object& instance,
@@ -1361,8 +1383,10 @@ bool SceneSerializer::RevertPrefabOverrides(Object& instance,
     if (!root || !root->Prefab || root->PrefabSourceSnapshot.empty()) return false;
     try
     {
-        return ApplyObjectState(*root, JsonParse(root->PrefabSourceSnapshot),
-            graphicsProvider);
+        const bool result = ApplyObjectState(*root,
+            JsonParse(root->PrefabSourceSnapshot), graphicsProvider);
+        root->PrefabOverrideCacheValid = false;
+        return result;
     }
     catch (...) { return false; }
 }
@@ -1380,6 +1404,7 @@ bool SceneSerializer::ApplyPrefabOverridesToAsset(Object& instance,
             LoadPrefabDocument(ResolvePrefabPath(path))["object"]);
     }
     catch (...) { return false; }
+    root->PrefabOverrideCacheValid = false;
     Scene* scene = root->GetScene();
     return !scene || RefreshPrefabInstances(*scene, path, graphicsProvider, root);
 }

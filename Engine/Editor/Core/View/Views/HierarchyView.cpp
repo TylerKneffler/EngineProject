@@ -415,10 +415,15 @@ void HierarchyView::DrawObjectNode(
     }
     if (menu.deleteRequested)
         m_pendingDelete = obj;
-    if (row.nameChanged) obj->name = name;
+    if (row.nameChanged)
+    {
+        obj->name = name;
+        obj->InvalidatePrefabOverrideCache();
+    }
     if (row.enabledChanged)
     {
         enabled ? obj->Enabled() : obj->Disabled();
+        obj->InvalidatePrefabOverrideCache();
         LogInteraction("Set '" + ObjectName(obj) + "' " + (enabled ? "enabled" : "disabled"));
     }
     if ((row.nameChanged || row.enabledChanged) && OnHierarchyChanged)

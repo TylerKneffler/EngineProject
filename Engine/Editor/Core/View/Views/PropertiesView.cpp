@@ -150,12 +150,14 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
     if (header.nameChanged)
     {
         m_selectedObject->name = name;
+        m_selectedObject->InvalidatePrefabOverrideCache();
         if (OnComponentsChanged)
             OnComponentsChanged();
     }
     if (header.enabledChanged)
     {
         enabled ? m_selectedObject->Enabled() : m_selectedObject->Disabled();
+        m_selectedObject->InvalidatePrefabOverrideCache();
         if (OnComponentsChanged)
             OnComponentsChanged();
     }
@@ -260,7 +262,10 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
     }
 
     if (componentPropertiesChanged && OnComponentsChanged)
+    {
+        m_selectedObject->InvalidatePrefabOverrideCache();
         OnComponentsChanged();
+    }
 
     if (reorderSource && reorderTarget && reorderSource != reorderTarget)
     {
