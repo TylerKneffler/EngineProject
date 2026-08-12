@@ -4,6 +4,7 @@
 #include "Core/Component.h"
 #include "Core/Graphics/IGraphicsTexture.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Serialization/SceneSerializer.h"
 #include <filesystem>
 #include <shellapi.h>
 
@@ -129,13 +130,23 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
     }
     const std::string assetDropPreview = HandleWindowAssetDrop(ui);
     Object* prefabRoot = m_selectedObject->GetPrefabInstanceRoot();
+    const bool hasPrefabOverrides = prefabRoot &&
+        SceneSerializer::HasPrefabOverrides(*prefabRoot, true);
     char name[256]; strncpy_s(name, m_selectedObject->name.c_str(), sizeof(name));
     bool enabled = m_selectedObject->enabled;
-    ui.BeginDisabled(prefabRoot != nullptr);
     const EditorUiObjectRowResult header = ui.ObjectHeader(
         m_selectedObject, name, sizeof(name), &enabled,
         false);
-    ui.EndDisabled();
+    if (prefabRoot)
+        HandlePrefabMenu(ui.PrefabOverrideMenu(m_selectedObject,
+            hasPrefabOverrides));
+    if (hasPrefabOverrides)
+    {
+        ui.SameLine();
+        ui.ColoredLabel("◆", { 1.f, 0.65f, 0.15f, 1.f });
+        if (ui.IsItemHovered())
+            ui.Tooltip("This prefab instance has local overrides");
+    }
     if (header.nameChanged)
     {
         m_selectedObject->name = name;
@@ -154,6 +165,8 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         ui.ValueLabel("Owner", m_selectedObject->Parent
             ? m_selectedObject->Parent->name.c_str() : "Scene Root");
     }
+    else
+        ui.ColoredLabel("Linked Prefab", { 0.35f, 0.7f, 1.f, 1.f });
     
     ui.Separator();
     ui.Indent(16.f);
@@ -169,20 +182,21 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             OnPrefabRequested(prefabPath);
         ui.EndDisabled();
         ui.SameLine();
+        ui.BeginDisabled(!hasPrefabOverrides);
+        if (ui.Button("Apply Overrides"))
+            ApplySelectedPrefabOverrides(false);
+        ui.SameLine();
+        if (ui.Button("Apply All"))
+            ApplySelectedPrefabOverrides(true);
+        ui.SameLine();
+        if (ui.Button("Revert"))
+            RevertSelectedPrefabOverrides();
+        ui.EndDisabled();
+        ui.SameLine();
         if (ui.Button("Unpack Prefab"))
         {
             UnpackSelectedPrefab();
             prefabRoot = nullptr;
-        }
-
-        // Inherited component and child data is edited in the prefab stage.
-        // Keep the instance inspector focused on placement and instance actions.
-        if (prefabRoot)
-        {
-            ui.Unindent(16.f);
-            ui.EndTextWrap();
-            ui.EndWindow();
-            return;
         }
     }
     
@@ -204,11 +218,13 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         const bool componentEditable = componentPrefabRoot == nullptr;
         // Bind the menu to the header before drag/drop helpers replace the
         // UI backend's current item.
-        const EditorUiContextMenuResult menu = ui.ContextMenu(component,
-            componentEditable ? "Add Component" : nullptr,
-            componentEditable ? "Delete Component" : nullptr,
-            false,
-            componentPrefabRoot ? "Unpack Prefab" : nullptr);
+        EditorUiContextMenuResult menu;
+        if (componentPrefabRoot)
+            HandlePrefabMenu(ui.PrefabOverrideMenu(component,
+                SceneSerializer::HasPrefabOverrides(*componentPrefabRoot, true)));
+        else
+            menu = ui.ContextMenu(component, "Add Component",
+                "Delete Component", false);
         if (menu.addRequested)
         {
             m_componentPickerOpen = true;
@@ -217,8 +233,6 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         }
         if (menu.deleteRequested)
             componentToDelete = component;
-        if (menu.unpackRequested)
-            UnpackSelectedPrefab();
         if (componentEditable && ui.BeginDragDropSource())
         {
             Component* payload = component;
@@ -240,14 +254,8 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             ui.EndDragDropTarget();
         }
         if (componentOpen)
-        {
-            const bool locked = componentPrefabRoot != nullptr;
-            if (locked)
-                ui.DisabledLabel("Inherited from prefab asset");
-            else
-                componentPropertiesChanged =
-                    component->DrawProperties(ui) || componentPropertiesChanged;
-        }
+            componentPropertiesChanged =
+                component->DrawProperties(ui) || componentPropertiesChanged;
         ui.PopId();
     }
 

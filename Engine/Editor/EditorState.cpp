@@ -205,6 +205,18 @@ void EditorState::SaveScene()
             return;
         }
         m_prefabHasUnsavedChanges = false;
+        if (m_scene)
+        {
+            Scene::ObjectPath selectionPath;
+            const bool hadSelection = m_scene->GetSelectedObject() &&
+                m_scene->TryGetObjectPath(m_scene->GetSelectedObject(), selectionPath);
+            if (!SceneSerializer::RefreshPrefabInstances(*m_scene,
+                m_activePrefabPath, m_scene->GetGraphicsProvider()) && m_primaryConsole)
+                m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                    "Prefab saved, but scene instances could not be refreshed.");
+            if (hadSelection)
+                RefreshSelectionAfterReload(selectionPath);
+        }
         if (m_primaryConsole)
             m_primaryConsole->AddLog(ConsoleView::Level::Info,
                 "Prefab saved: " + m_activePrefabPath);

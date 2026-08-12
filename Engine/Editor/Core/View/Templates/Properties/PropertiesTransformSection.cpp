@@ -1,19 +1,19 @@
 #include "Engine/Editor/Core/View/Views/PropertiesView.h"
 #include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Serialization/SceneSerializer.h"
 
 void PropertiesView::DrawTransform(IEditorUi& ui)
 {
     Transform& t = m_selectedObject->transform;
     Object* prefabRoot = m_selectedObject->GetPrefabInstanceRoot();
-    // A prefab instance owns only its root placement. Descendant transforms
-    // come from the referenced asset and are edited by opening that asset.
-    const bool locked = prefabRoot && m_selectedObject != prefabRoot;
 
     const bool transformOpen = ui.CollapsingHeader("Transform");
-    const EditorUiContextMenuResult menu = ui.ContextMenu(&t,
-        CanEditSelectedObject() ? "Add Component" : nullptr,
-        nullptr,
-        false);
+    EditorUiContextMenuResult menu;
+    if (prefabRoot)
+        HandlePrefabMenu(ui.PrefabOverrideMenu(&t,
+            SceneSerializer::HasPrefabOverrides(*prefabRoot, true)));
+    else
+        menu = ui.ContextMenu(&t, "Add Component", nullptr, false);
     if (menu.addRequested)
     {
         m_componentPickerOpen = true;
@@ -22,9 +22,7 @@ void PropertiesView::DrawTransform(IEditorUi& ui)
     }
     if (transformOpen)
     {
-        ui.BeginDisabled(locked);
         const bool transformChanged = t.DrawProperties(ui);
-        ui.EndDisabled();
         if (transformChanged && OnComponentsChanged)
             OnComponentsChanged();
     }

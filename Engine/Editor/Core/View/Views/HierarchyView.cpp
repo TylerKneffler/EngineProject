@@ -108,6 +108,29 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
             DrawObjectNode(ui, roots[index], 0, index + 1 == roots.size());
         ui.TreePop();
     }
+    if (m_pendingPrefabRoot && m_pendingPrefabAction != PendingPrefabAction::None)
+    {
+        bool changed = false;
+        if (m_pendingPrefabAction == PendingPrefabAction::Apply)
+            changed = SceneSerializer::ApplyPrefabOverridesToAsset(
+                *m_pendingPrefabRoot, false, m_scene->GetGraphicsProvider());
+        else if (m_pendingPrefabAction == PendingPrefabAction::ApplyAll)
+            changed = SceneSerializer::ApplyPrefabOverridesToAsset(
+                *m_pendingPrefabRoot, true, m_scene->GetGraphicsProvider());
+        else if (m_pendingPrefabAction == PendingPrefabAction::Revert)
+            changed = SceneSerializer::RevertPrefabOverrides(
+                *m_pendingPrefabRoot, m_scene->GetGraphicsProvider());
+        else if (m_pendingPrefabAction == PendingPrefabAction::Unpack &&
+            m_pendingPrefabRoot->Prefab)
+        {
+            m_pendingPrefabRoot->Prefab.reset();
+            m_pendingPrefabRoot->PrefabSourceSnapshot.clear();
+            changed = true;
+        }
+        m_pendingPrefabRoot = nullptr;
+        m_pendingPrefabAction = PendingPrefabAction::None;
+        if (changed && OnHierarchyChanged) OnHierarchyChanged();
+    }
     if (m_pendingDelete)
     {
         const std::string deletedName = ObjectName(m_pendingDelete);
@@ -358,16 +381,30 @@ void HierarchyView::DrawObjectNode(
     bool enabled = obj->enabled;
     const EditorUiObjectRowResult row = ui.ObjectTreeRow(
         obj, name, sizeof(name), &enabled, obj == m_selectedObject,
-        !hasChildren, obj->IsPartOfPrefabInstance(),
+        !hasChildren, false,
         obj->IsEnabledInHierarchy(),
         depth, lastSibling, ancestorGuideMask);
     const bool editableHierarchy = prefabRoot == nullptr;
     const bool deletable = editableHierarchy || prefabRoot == obj;
-    const EditorUiContextMenuResult menu = ui.ContextMenu(obj,
-        editableHierarchy ? "Add Object" : nullptr,
-        deletable ? "Delete Object" : nullptr,
-        editableHierarchy,
-        prefabRoot ? "Unpack Prefab" : nullptr);
+    EditorUiContextMenuResult menu;
+    if (prefabRoot)
+    {
+        const EditorUiPrefabMenuResult prefabMenu = ui.PrefabOverrideMenu(obj,
+            SceneSerializer::HasPrefabOverrides(*prefabRoot, true));
+        if (prefabMenu.applyRequested)
+            m_pendingPrefabAction = PendingPrefabAction::Apply;
+        if (prefabMenu.applyAllRequested)
+            m_pendingPrefabAction = PendingPrefabAction::ApplyAll;
+        if (prefabMenu.revertRequested)
+            m_pendingPrefabAction = PendingPrefabAction::Revert;
+        if (prefabMenu.unpackRequested)
+            m_pendingPrefabAction = PendingPrefabAction::Unpack;
+        if (m_pendingPrefabAction != PendingPrefabAction::None)
+            m_pendingPrefabRoot = prefabRoot;
+    }
+    else
+        menu = ui.ContextMenu(obj, "Add Object",
+            deletable ? "Delete Object" : nullptr, true);
     if (menu.addRequested || menu.addCubeRequested || menu.addSpriteRequested)
     {
         m_pendingAddParent = obj;
@@ -378,20 +415,14 @@ void HierarchyView::DrawObjectNode(
     }
     if (menu.deleteRequested)
         m_pendingDelete = obj;
-    if (menu.unpackRequested && prefabRoot && prefabRoot->Prefab)
-    {
-        const std::string prefabPath = prefabRoot->Prefab->GetPath();
-        const std::string instanceName = ObjectName(prefabRoot);
-        prefabRoot->Prefab.reset();
-        LogInteraction("Unpacked prefab instance '" + instanceName + "': " + prefabPath);
-        if (OnHierarchyChanged) OnHierarchyChanged();
-    }
     if (row.nameChanged) obj->name = name;
-    if (row.enabledChanged && (editableHierarchy || prefabRoot == obj))
+    if (row.enabledChanged)
     {
         enabled ? obj->Enabled() : obj->Disabled();
         LogInteraction("Set '" + ObjectName(obj) + "' " + (enabled ? "enabled" : "disabled"));
     }
+    if ((row.nameChanged || row.enabledChanged) && OnHierarchyChanged)
+        OnHierarchyChanged();
     if (row.clicked) { SetSelectedObject(obj); LogInteraction("Selected '" + ObjectName(obj) + "'"); }
     if (row.doubleClicked) { SetSelectedObject(obj); LogInteraction("Focused '" + ObjectName(obj) + "'"); if (OnFocusObject) OnFocusObject(obj); }
     if (row.dragActive)

@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cctype>
+#include <cmath>
 #include <filesystem>
 #include <functional>
 #include <cstdlib>
@@ -497,6 +498,9 @@ static void ApplyBakedMaterialOverrides(Object& root, const JsonValue& node,
     }
 }
 
+static JsonValue BuildPrefabPatches(const Object& instance,
+    bool includeRootTransform);
+
 static JsonValue SerialiseObject(
     const Object& obj,
     bool serialisePrefabAsReference = true)
@@ -505,8 +509,10 @@ static JsonValue SerialiseObject(
     if (serialisePrefabAsReference && obj.Prefab)
     {
         node.Set("prefab", JsonValue(obj.Prefab->GetPath()));
-        node.Set("enabled", JsonValue(obj.enabled));
         node.Set("transform", SerialiseTransform(obj.transform));
+        const JsonValue prefabOverrides = BuildPrefabPatches(obj, false);
+        if (prefabOverrides.ArraySize() > 0)
+            node.Set("prefabOverrides", prefabOverrides);
         const JsonValue overrides = SerialiseBakedMaterialOverrides(obj);
         if (overrides.ArraySize() > 0)
             node.Set("bakedMaterialOverrides", overrides);
@@ -532,6 +538,201 @@ static JsonValue SerialiseObject(
     node.Set("children", std::move(children));
 
     return node;
+}
+
+static bool JsonEquals(const JsonValue& left, const JsonValue& right)
+{
+    if (left.GetType() != right.GetType()) return false;
+    switch (left.GetType())
+    {
+    case JsonValue::Type::Null: return true;
+    case JsonValue::Type::Bool: return left.AsBool() == right.AsBool();
+    case JsonValue::Type::Number:
+    {
+        const double a = left.AsDouble();
+        const double b = right.AsDouble();
+        return std::abs(a - b) <= 0.000001 * std::max({ 1.0, std::abs(a), std::abs(b) });
+    }
+    case JsonValue::Type::String: return left.AsString() == right.AsString();
+    case JsonValue::Type::Array:
+        if (left.ArraySize() != right.ArraySize()) return false;
+        for (size_t i = 0; i < left.ArraySize(); ++i)
+            if (!JsonEquals(left.ArrayAt(i), right.ArrayAt(i))) return false;
+        return true;
+    case JsonValue::Type::Object:
+        if (left.ObjectSize() != right.ObjectSize()) return false;
+        for (size_t i = 0; i < left.ObjectSize(); ++i)
+        {
+            const std::string& key = left.ObjectKey(i);
+            if (!right.Has(key) || !JsonEquals(left.ObjectValue(i), right[key]))
+                return false;
+        }
+        return true;
+    }
+    return false;
+}
+
+static JsonValue PathWith(const JsonValue& path, const std::string& key)
+{
+    JsonValue result = path;
+    JsonValue segment = JsonValue::MakeObject();
+    segment.Set("key", JsonValue(key));
+    result.Push(std::move(segment));
+    return result;
+}
+
+static JsonValue PathWith(const JsonValue& path, size_t index)
+{
+    JsonValue result = path;
+    JsonValue segment = JsonValue::MakeObject();
+    segment.Set("index", JsonValue(static_cast<int>(index)));
+    result.Push(std::move(segment));
+    return result;
+}
+
+static void AddPatch(JsonValue& patches, const JsonValue& path,
+    const JsonValue* value)
+{
+    JsonValue patch = JsonValue::MakeObject();
+    patch.Set("path", path);
+    if (value) patch.Set("value", *value);
+    else patch.Set("remove", JsonValue(true));
+    patches.Push(std::move(patch));
+}
+
+static void DiffJson(const JsonValue& baseline, const JsonValue& current,
+    const JsonValue& path, JsonValue& patches, bool skipRootTransform)
+{
+    if (baseline.GetType() != current.GetType())
+    {
+        AddPatch(patches, path, &current);
+        return;
+    }
+    if (baseline.IsObject())
+    {
+        for (size_t i = 0; i < current.ObjectSize(); ++i)
+        {
+            const std::string& key = current.ObjectKey(i);
+            if (skipRootTransform && path.ArraySize() == 0 && key == "transform")
+                continue;
+            const JsonValue nextPath = PathWith(path, key);
+            if (!baseline.Has(key)) AddPatch(patches, nextPath, &current.ObjectValue(i));
+            else DiffJson(baseline[key], current.ObjectValue(i), nextPath,
+                patches, skipRootTransform);
+        }
+        for (size_t i = 0; i < baseline.ObjectSize(); ++i)
+        {
+            const std::string& key = baseline.ObjectKey(i);
+            if ((skipRootTransform && path.ArraySize() == 0 && key == "transform") ||
+                current.Has(key)) continue;
+            const JsonValue nextPath = PathWith(path, key);
+            AddPatch(patches, nextPath, nullptr);
+        }
+        return;
+    }
+    if (baseline.IsArray())
+    {
+        if (baseline.ArraySize() != current.ArraySize())
+        {
+            AddPatch(patches, path, &current);
+            return;
+        }
+        for (size_t i = 0; i < current.ArraySize(); ++i)
+            DiffJson(baseline.ArrayAt(i), current.ArrayAt(i), PathWith(path, i),
+                patches, skipRootTransform);
+        return;
+    }
+    if (!JsonEquals(baseline, current)) AddPatch(patches, path, &current);
+}
+
+static JsonValue BuildPrefabPatches(const Object& instance,
+    bool includeRootTransform)
+{
+    JsonValue patches = JsonValue::MakeArray();
+    if (instance.PrefabSourceSnapshot.empty()) return patches;
+    try
+    {
+        const JsonValue baseline = JsonParse(instance.PrefabSourceSnapshot);
+        const JsonValue current = SerialiseObject(instance, false);
+        DiffJson(baseline, current, JsonValue::MakeArray(), patches,
+            !includeRootTransform);
+    }
+    catch (...) {}
+    return patches;
+}
+
+static bool ApplyPatch(JsonValue& target, const JsonValue& patch)
+{
+    const JsonValue& path = patch["path"];
+    if (!path.IsArray() || path.ArraySize() == 0) return false;
+    JsonValue* node = &target;
+    for (size_t i = 0; i + 1 < path.ArraySize(); ++i)
+    {
+        const JsonValue& segment = path.ArrayAt(i);
+        if (segment.Has("key")) node = &(*node)[segment["key"].AsString()];
+        else if (segment.Has("index") && node->IsArray() &&
+            segment["index"].AsInt() >= 0 &&
+            static_cast<size_t>(segment["index"].AsInt()) < node->ArraySize())
+            node = &node->ArrayAt(static_cast<size_t>(segment["index"].AsInt()));
+        else return false;
+    }
+    const JsonValue& last = path.ArrayAt(path.ArraySize() - 1);
+    if (last.Has("key"))
+    {
+        const std::string key = last["key"].AsString();
+        if (patch.Has("remove")) node->Erase(key);
+        else (*node)[key] = patch["value"];
+        return true;
+    }
+    if (last.Has("index") && node->IsArray())
+    {
+        const int index = last["index"].AsInt();
+        if (index < 0 || static_cast<size_t>(index) >= node->ArraySize()) return false;
+        node->ArrayAt(static_cast<size_t>(index)) = patch["value"];
+        return true;
+    }
+    return false;
+}
+
+static bool ApplyObjectState(Object& object, const JsonValue& node,
+    IGraphicsProvider* graphicsProvider)
+{
+    if (!node.IsObject()) return false;
+    if (node.Has("name")) object.name = node["name"].AsString();
+    object.enabled = !node.Has("enabled") || node["enabled"].AsBool();
+    DeserialiseTransform(object.transform, node["transform"]);
+    if (node.Has("prefab")) return true;
+    const JsonValue& components = node["components"];
+    if (components.ArraySize() != object.Components.size()) return false;
+    auto component = object.Components.begin();
+    for (size_t i = 0; i < components.ArraySize(); ++i, ++component)
+    {
+        if (!*component || (*component)->GetTypeName() !=
+            components.ArrayAt(i)["type"].AsString()) return false;
+        (*component)->Deserialize(components.ArrayAt(i));
+        (*component)->OnAfterDeserialize(graphicsProvider);
+    }
+    const JsonValue& children = node["children"];
+    if (children.ArraySize() != object.Children.size()) return false;
+    for (size_t i = 0; i < children.ArraySize(); ++i)
+        if (!ApplyObjectState(*object.Children[i], children.ArrayAt(i), graphicsProvider))
+            return false;
+    return true;
+}
+
+static bool ApplyPrefabPatches(Object& instance, const JsonValue& patches,
+    IGraphicsProvider* graphicsProvider)
+{
+    if (instance.PrefabSourceSnapshot.empty()) return false;
+    JsonValue merged;
+    try { merged = JsonParse(instance.PrefabSourceSnapshot); }
+    catch (...) { return false; }
+    for (size_t i = 0; i < patches.ArraySize(); ++i)
+        if (!ApplyPatch(merged, patches.ArrayAt(i))) return false;
+    const Transform placement = instance.transform;
+    const bool applied = ApplyObjectState(instance, merged, graphicsProvider);
+    instance.transform = placement;
+    return applied;
 }
 
 static JsonValue SerialiseScene(const Scene& scene)
@@ -633,6 +834,9 @@ static bool DeserialiseScene(Scene& scene, const JsonValue& root,
                 DeserialiseTransform(child->transform, childNode["transform"]);
                 if (childNode.Has("enabled"))
                     child->enabled = childNode["enabled"].AsBool();
+                if (childNode.Has("prefabOverrides"))
+                    ApplyPrefabPatches(*child, childNode["prefabOverrides"],
+                        graphicsProvider);
                 ApplyBakedMaterialOverrides(
                     *child, childNode, graphicsProvider);
             }
@@ -662,6 +866,9 @@ static bool DeserialiseScene(Scene& scene, const JsonValue& root,
             DeserialiseTransform(object->transform, objectNode["transform"]);
             if (objectNode.Has("enabled"))
                 object->enabled = objectNode["enabled"].AsBool();
+            if (objectNode.Has("prefabOverrides"))
+                ApplyPrefabPatches(*object, objectNode["prefabOverrides"],
+                    graphicsProvider);
             ApplyBakedMaterialOverrides(
                 *object, objectNode, graphicsProvider);
         }
@@ -755,6 +962,9 @@ Object* SceneSerializer::InstantiateObjectFromString(
                 DeserialiseTransform(object->transform, node["transform"]);
                 if (node.Has("enabled"))
                     object->enabled = node["enabled"].AsBool();
+                if (node.Has("prefabOverrides"))
+                    ApplyPrefabPatches(*object, node["prefabOverrides"],
+                        graphicsProvider);
                 if (!rootObject)
                     rootObject = object;
                 return object;
@@ -998,6 +1208,7 @@ Object* SceneSerializer::InstantiatePrefab(
 
         rootObject = scene.AddObject();
         instantiate(*rootObject, root["object"]);
+        rootObject->PrefabSourceSnapshot = JsonWrite(SerialiseObject(*rootObject, false));
         rootObject->SetPrefab(path);
         return rootObject;
     }
@@ -1107,6 +1318,7 @@ bool SceneSerializer::RefreshPrefabInstances(
 
         for (Object* instance : instances)
         {
+            const JsonValue localOverrides = BuildPrefabPatches(*instance, false);
             const Transform placement = instance->transform;
             const auto prefab = instance->Prefab;
             const std::vector<Object*> oldChildren = instance->Children;
@@ -1118,6 +1330,8 @@ bool SceneSerializer::RefreshPrefabInstances(
             instance->Components.clear();
 
             populate(*instance, root["object"]);
+            instance->PrefabSourceSnapshot = JsonWrite(root["object"]);
+            ApplyPrefabPatches(*instance, localOverrides, graphicsProvider);
             instance->transform = placement;
             instance->Prefab = prefab;
         }
@@ -1130,4 +1344,42 @@ bool SceneSerializer::RefreshPrefabInstances(
             path + "': " + error.what() + "\n").c_str());
         return false;
     }
+}
+
+bool SceneSerializer::HasPrefabOverrides(const Object& instance,
+    bool includeRootTransform)
+{
+    const Object* root = instance.GetPrefabInstanceRoot();
+    return root && root->Prefab &&
+        BuildPrefabPatches(*root, includeRootTransform).ArraySize() > 0;
+}
+
+bool SceneSerializer::RevertPrefabOverrides(Object& instance,
+    IGraphicsProvider* graphicsProvider)
+{
+    Object* root = instance.GetPrefabInstanceRoot();
+    if (!root || !root->Prefab || root->PrefabSourceSnapshot.empty()) return false;
+    try
+    {
+        return ApplyObjectState(*root, JsonParse(root->PrefabSourceSnapshot),
+            graphicsProvider);
+    }
+    catch (...) { return false; }
+}
+
+bool SceneSerializer::ApplyPrefabOverridesToAsset(Object& instance,
+    bool includeRootTransform, IGraphicsProvider* graphicsProvider)
+{
+    Object* root = instance.GetPrefabInstanceRoot();
+    if (!root || !root->Prefab) return false;
+    const std::string path = root->Prefab->GetPath();
+    if (!SavePrefab(*root, path, !includeRootTransform)) return false;
+    try
+    {
+        root->PrefabSourceSnapshot = JsonWrite(
+            LoadPrefabDocument(ResolvePrefabPath(path))["object"]);
+    }
+    catch (...) { return false; }
+    Scene* scene = root->GetScene();
+    return !scene || RefreshPrefabInstances(*scene, path, graphicsProvider, root);
 }

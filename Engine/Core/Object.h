@@ -24,6 +24,9 @@ public:
     std::list<Component*> Components;
     Scene*              OwnerScene = nullptr;  // Set by Scene when object is added
     std::shared_ptr<const PrefabAsset> Prefab; // null for scene-only objects
+    // Full prefab object state at the time this linked instance was loaded.
+    // Scene serialization stores only differences from this baseline.
+    std::string PrefabSourceSnapshot;
 
     bool IsPrefabInstance() const { return static_cast<bool>(Prefab); }
     void SetPrefab(const std::string& path) { Prefab = PrefabAsset::Acquire(path); }

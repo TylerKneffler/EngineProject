@@ -7,6 +7,7 @@
 #include <functional>
 
 class Scene;
+struct EditorUiPrefabMenuResult;
 
 // ---------------------------------------------------------------------------
 // PropertiesView
@@ -61,6 +62,9 @@ private:
     void DrawComponentPicker(IEditorUi& ui);
     bool CanEditSelectedObject() const;
     void UnpackSelectedPrefab();
+    void ApplySelectedPrefabOverrides(bool includeRootTransform);
+    void RevertSelectedPrefabOverrides();
+    void HandlePrefabMenu(const EditorUiPrefabMenuResult& menu);
     void LogAssetDrop(const std::string& message, bool error = false) const;
 
     Object* m_selectedObject = nullptr;

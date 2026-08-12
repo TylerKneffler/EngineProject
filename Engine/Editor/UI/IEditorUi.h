@@ -59,6 +59,14 @@ struct EditorUiContextMenuResult
     bool deleteRequested = false;
 };
 
+struct EditorUiPrefabMenuResult
+{
+    bool applyRequested = false;
+    bool applyAllRequested = false;
+    bool revertRequested = false;
+    bool unpackRequested = false;
+};
+
 struct EditorUiDragDropPayloadResult
 {
     const void* data = nullptr;
@@ -118,6 +126,8 @@ public:
         const char* addLabel, const char* deleteLabel,
         bool objectCreationMenu = false,
         const char* unpackLabel = nullptr) = 0;
+    virtual EditorUiPrefabMenuResult PrefabOverrideMenu(const void* id,
+        bool hasOverrides) = 0;
     virtual bool BeginChild(const char* id) = 0;
     virtual void EndChild() = 0;
     virtual bool IsItemHovered() const = 0;

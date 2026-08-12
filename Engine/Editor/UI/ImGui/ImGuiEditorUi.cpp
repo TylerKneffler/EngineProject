@@ -277,6 +277,23 @@ EditorUiContextMenuResult ImGuiEditorUi::ContextMenu(const void* id,const char* 
     ImGui::PopID();
     return result;
 }
+EditorUiPrefabMenuResult ImGuiEditorUi::PrefabOverrideMenu(const void* id,bool hasOverrides)
+{
+    EditorUiPrefabMenuResult result;
+    ImGui::PushID(id);
+    if(ImGui::BeginPopupContextItem("##prefabOverrides")){
+        ImGui::BeginDisabled(!hasOverrides);
+        result.applyRequested=ImGui::MenuItem("Apply Overrides to Prefab");
+        result.applyAllRequested=ImGui::MenuItem("Apply All to Prefab (Including Transform)");
+        result.revertRequested=ImGui::MenuItem("Revert Overrides");
+        ImGui::EndDisabled();
+        ImGui::Separator();
+        result.unpackRequested=ImGui::MenuItem("Unpack Prefab");
+        ImGui::EndPopup();
+    }
+    ImGui::PopID();
+    return result;
+}
 bool ImGuiEditorUi::BeginChild(const char*i){return ImGui::BeginChild(i,{0,0},false,ImGuiWindowFlags_HorizontalScrollbar);} void ImGuiEditorUi::EndChild(){ImGui::EndChild();}
 bool ImGuiEditorUi::IsItemHovered()const{return ImGui::IsItemHovered();} bool ImGuiEditorUi::IsItemClicked()const{return ImGui::IsItemClicked()&&!ImGui::IsItemToggledOpen();}
 bool ImGuiEditorUi::IsItemDoubleClicked()const{return ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);}

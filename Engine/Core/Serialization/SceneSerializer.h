@@ -101,6 +101,13 @@ public:
     static bool RefreshPrefabInstances(Scene& scene, const std::string& path,
         IGraphicsProvider* graphicsProvider = nullptr,
         Object* preservedInstance = nullptr);
+    static bool HasPrefabOverrides(const Object& instance,
+        bool includeRootTransform = true);
+    static bool RevertPrefabOverrides(Object& instance,
+        IGraphicsProvider* graphicsProvider = nullptr);
+    static bool ApplyPrefabOverridesToAsset(Object& instance,
+        bool includeRootTransform,
+        IGraphicsProvider* graphicsProvider = nullptr);
 
     // Called internally; exposed so Scene::Load can invoke it.
     static void EnsureBuiltinsRegistered();

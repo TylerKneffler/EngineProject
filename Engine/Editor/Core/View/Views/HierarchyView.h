@@ -45,6 +45,7 @@ public:
 
 private:
     enum class PendingAddType { Empty, Cube, Sprite };
+    enum class PendingPrefabAction { None, Apply, ApplyAll, Revert, Unpack };
     void DrawObjectNode(IEditorUi& ui, Object* obj, int depth,
         bool lastSibling, uint64_t ancestorGuideMask = 0);
     void LogInteraction(const std::string& message) const;
@@ -57,6 +58,8 @@ private:
     Object* m_pendingTarget = nullptr;
     Object* m_pendingAddParent = nullptr;
     Object* m_pendingDelete = nullptr;
+    Object* m_pendingPrefabRoot = nullptr;
+    PendingPrefabAction m_pendingPrefabAction = PendingPrefabAction::None;
     PendingAddType m_pendingAddType = PendingAddType::Empty;
     bool m_hasPendingAdd = false;
     Scene::ObjectPlacement m_pendingPlacement = Scene::ObjectPlacement::AsChild;
