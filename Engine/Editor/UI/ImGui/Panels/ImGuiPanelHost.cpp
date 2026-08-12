@@ -19,6 +19,10 @@ void ImGuiPanelHost::DrawPanels(EditorState& state)
         if (panel)
             panel->DrawPanel(m_ui);
 
+    // The prefab viewport, hierarchy, and properties panes form one document.
+    // Closing any one closes the whole document once it is safe to do so.
+    state.HandlePrefabPanelClosures();
+
     ViewFactory* factory = state.GetViewFactory();
     for (auto it = panels.begin(); it != panels.end();)
     {

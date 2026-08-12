@@ -123,7 +123,9 @@ void SceneView::DrawPanel(IEditorUi& ui)
         mode2D ? 0.34f : 0.502f);
 
     // Remove inner padding so the texture fills the panel edge-to-edge.
-    if (!ui.BeginWindow(m_title.c_str(), &m_open, true))
+    const bool windowVisible = ui.BeginWindow(m_title.c_str(), &m_open, true);
+    if (ui.IsWindowFocused() && OnFocused) OnFocused();
+    if (!windowVisible)
     {
         CancelPrefabPreview();
         ui.EndWindow();

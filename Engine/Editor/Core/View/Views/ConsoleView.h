@@ -1,6 +1,7 @@
 #pragma once
 #include "pch.h"
 #include "View/IEditorPanel.h"
+#include "ProblemsView.h"
 
 // ---------------------------------------------------------------------------
 // ConsoleView — editor Console panel
@@ -31,6 +32,10 @@ public:
 
     // Clears all log entries.
     void Clear();
+    void SetProblemStore(std::shared_ptr<EditorProblemStore> store)
+    {
+        m_problemStore = std::move(store);
+    }
 
     // Defines the package-neutral Console panel.
     void DrawPanel(IEditorUi& ui) override;
@@ -41,4 +46,5 @@ private:
     std::string m_textBlock;
     bool m_autoScroll     = true;
     bool m_scrollToBottom = false;
+    std::shared_ptr<EditorProblemStore> m_problemStore;
 };

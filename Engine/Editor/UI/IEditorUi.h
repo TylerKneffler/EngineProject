@@ -74,6 +74,7 @@ public:
     virtual void SetNextWindowRect(float x, float y, float width, float height) = 0;
     virtual bool BeginWindow(const char* title, bool* open, bool noPadding = false) = 0;
     virtual void EndWindow() = 0;
+    virtual bool IsWindowFocused() const { return false; }
     virtual void PushId(const void* id) = 0;
     virtual void PushId(const char* id) = 0;
     virtual void PopId() = 0;
@@ -86,6 +87,8 @@ public:
     virtual void SameLine() = 0;
     virtual void Separator() = 0;
     virtual void Spacing() = 0;
+    virtual void Indent(float width = 0.f) = 0;
+    virtual void Unindent(float width = 0.f) = 0;
     virtual bool Checkbox(const char* label, bool* value) = 0;
     virtual bool InputText(const char* label, char* buffer, size_t size) = 0;
     virtual bool InputTextSubmit(const char* label, char* buffer, size_t size) = 0;

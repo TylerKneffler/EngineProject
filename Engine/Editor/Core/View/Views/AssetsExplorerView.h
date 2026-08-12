@@ -8,9 +8,8 @@ class Object;
 // ---------------------------------------------------------------------------
 // AssetsExplorerView
 //
-// Displays a hierarchical file tree of the Assets directory, allowing users
-// to navigate files and folders. Double-clicking a file opens it with the
-// system's default application. Scene files can be loaded via callback.
+// Displays a hierarchical file tree of the Assets directory. Scene and prefab
+// assets open inside the editor; other files use the system application.
 //
 // Usage:
 //   assetsExplorerView.Init(assetsPath);
@@ -31,6 +30,7 @@ public:
 
     // Callback when a scene file is requested to load
     std::function<void(const std::string&)> OnSceneRequested;
+    std::function<void(const std::string&)> OnPrefabRequested;
     std::function<void(const std::string&)> OnSelectionChanged;
     std::function<void(Object*, const std::string&)> OnPrefabCreated;
 

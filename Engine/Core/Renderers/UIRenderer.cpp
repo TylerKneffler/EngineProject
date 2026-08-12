@@ -290,7 +290,7 @@ void UIRenderer::Initialize(IGraphicsProvider* graphicsProvider)
     if (!builder) return;
     m_impl->pipeline = builder->SetVertexShader(vertexShader.get())
         .SetPixelShader(pixelShader.get()).SetFillMode(false).SetCullMode(false)
-        .SetFrontCounterClockwise(true).SetDepthClipEnable(false).SetBlendEnable(true)
+        .SetFrontCounterClockwise(false).SetDepthClipEnable(false).SetBlendEnable(true)
         .SetSrcBlend(4).SetDestBlend(5).SetBlendOp(0)
         .SetSrcBlendAlpha(1).SetDestBlendAlpha(0).SetBlendOpAlpha(0)
         .SetDepthEnable(false).SetDepthWriteEnable(false).SetDepthFunc(7)

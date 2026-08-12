@@ -7,6 +7,7 @@
 #include "Views/AssetsExplorerView.h"
 #include "Views/ConsoleView.h"
 #include "Views/TerminalView.h"
+#include "Views/ProblemsView.h"
 #include "Core/Renderers/IEditorRenderer.h"
 #include "Core/Scene/Scene.h"
 #include "Core/ProjectLoader.h"
@@ -44,9 +45,15 @@ public:
                 const ProjectSettings& settings);
 
     // Create a new panel by type name.
-    // Supported names: "Scene", "Game", "Hierarchy", "Properties", "Assets", "Console", "Terminal"
+    // Supported names: "Scene", "Game", "Hierarchy", "Properties", "Assets", "Console", "Terminal", "Problems"
     // Returns nullptr if the type name is unknown or if no SRV slot is available for a 3-D view.
     std::unique_ptr<IEditorPanel> Create(const std::string& typeName);
+
+    // Creates an additional scene viewport bound to an independent scene.
+    // Used by prefab editing so the project Scene/Game views keep rendering
+    // the active project scene.
+    std::unique_ptr<SceneView> CreateSceneView(
+        Scene* scene, const std::string& title);
 
     // Returns false when no SRV slots remain for 3-D views (Scene / Game).
     bool CanCreate3DView() const { return m_renderer && m_renderer->CanAllocateSrvSlot(); }
@@ -64,12 +71,14 @@ public:
 
     // ---- Callbacks wired into newly created panels ----
     std::function<void(Object*)>           OnSelectionChanged;  // HierarchyView
+    std::function<void()>                  OnMainDocumentFocused;
     std::function<void(Object*)>           OnObjectSelected;    // SceneView click selection
     std::function<void(bool)>              OnGizmoInteraction;  // SceneView transform drag
     std::function<void(Object*)>           OnFocusObject;       // HierarchyView double-click
     std::function<void()>                  OnHierarchyChanged;
     std::function<void(const std::string&)> OnHierarchyInteraction;
     std::function<void(const std::string&)> OnSceneRequested;   // AssetsExplorerView
+    std::function<void(const std::string&)> OnPrefabRequested;  // AssetsExplorerView
     std::function<void(const std::string&)> OnAssetSelected;    // AssetsExplorerView
     std::function<void(const std::string&)> OnAssetDropped;     // SceneView
     std::function<Object*(const std::string&)> OnAssetPreviewRequested;
@@ -85,6 +94,8 @@ private:
     IEditorRenderer* m_renderer = nullptr;
     Scene*           m_scene    = nullptr;
     ProjectSettings     m_settings;
+    std::shared_ptr<EditorProblemStore> m_problemStore =
+        std::make_shared<EditorProblemStore>();
 
     // Tracks live singleton panel instances (raw, non-owning).
     // Cleared via NotifyPanelRemoved when a panel is erased from the panels vector.
@@ -101,4 +112,5 @@ private:
     int m_assetsCount     = 0;
     int m_consoleCount    = 0;
     int m_terminalCount   = 0;
+    int m_problemsCount   = 0;
 };

@@ -141,6 +141,10 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         camera->GetProjectionMatrix(input.available.x / input.available.y) *
         camera->GetViewMatrix();
     Object* selected = scene.GetSelectedObject();
+    Object* selectedPrefabRoot = selected
+        ? selected->GetPrefabInstanceRoot() : nullptr;
+    const bool selectedTransformEditable = selected &&
+        (!selectedPrefabRoot || selected == selectedPrefabRoot);
 
     Object* iconHit = nullptr;
     float iconHitDistance = FLT_MAX;
@@ -176,7 +180,7 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
     EditorUiVec2 axisEnds[3]{};
     float axisScale = 0.f;
     bool axisVisible[3]{};
-    if (selected && ProjectPoint(viewProjection,
+    if (selectedTransformEditable && ProjectPoint(viewProjection,
         selected->transform.GetWorldPosition(), input.available, originScreen))
     {
         const glm::vec3 cameraPosition =

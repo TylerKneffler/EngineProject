@@ -48,7 +48,9 @@ bool CanMoveInPrefabContext(Scene* scene, Object* object, Object* target,
 
 void HierarchyView::DrawPanel(IEditorUi& ui)
 {
-    if (!ui.BeginWindow(m_title.c_str(), &m_open))
+    const bool windowVisible = ui.BeginWindow(m_title.c_str(), &m_open);
+    if (ui.IsWindowFocused() && OnFocused) OnFocused();
+    if (!windowVisible)
     {
         ui.EndWindow();
         return;
@@ -352,15 +354,14 @@ void HierarchyView::DrawObjectNode(
 {
     const bool hasChildren = !obj->Children.empty();
     Object* prefabRoot = obj->GetPrefabInstanceRoot();
-    const bool editingPrefab = prefabRoot != nullptr;
     char name[256]; strncpy_s(name, obj->name.c_str(), sizeof(name));
     bool enabled = obj->enabled;
     const EditorUiObjectRowResult row = ui.ObjectTreeRow(
         obj, name, sizeof(name), &enabled, obj == m_selectedObject,
-        !hasChildren, obj->IsPartOfPrefabInstance() && !editingPrefab,
+        !hasChildren, obj->IsPartOfPrefabInstance(),
         obj->IsEnabledInHierarchy(),
         depth, lastSibling, ancestorGuideMask);
-    const bool editableHierarchy = prefabRoot == nullptr || editingPrefab;
+    const bool editableHierarchy = prefabRoot == nullptr;
     const bool deletable = editableHierarchy || prefabRoot == obj;
     const EditorUiContextMenuResult menu = ui.ContextMenu(obj,
         editableHierarchy ? "Add Object" : nullptr,

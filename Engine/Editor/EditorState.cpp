@@ -2,10 +2,12 @@
 #include "EditorState.h"
 #include "Core/View/ViewFactory.h"
 #include "Core/View/IEditorPanel.h"
+#include "Core/View/View.h"
 #include "Core/View/Views/PreferencesView.h"
 #include "Core/View/Views/ConsoleView.h"
 #include "Core/View/Views/PropertiesView.h"
 #include "Core/View/Views/HierarchyView.h"
+#include "Core/View/Views/SceneView.h"
 #include "Core/Window.h"
 #include "Core/Renderers/RendererFactory.h"
 #include "Core/Scene/Scene.h"
@@ -178,6 +180,42 @@ void EditorState::InitializeUiState()
 // ---------------------------------------------------------------------------
 void EditorState::SaveScene()
 {
+    if (!m_activePrefabPath.empty() && m_prefabDocumentFocused)
+    {
+        if (!m_prefabScene)
+            return;
+        Object* root = nullptr;
+        for (const auto& object : m_prefabScene->GetObjects())
+            if (object && !object->Parent)
+            {
+                if (root)
+                {
+                    if (m_primaryConsole)
+                        m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                            "Prefab stage must contain exactly one root object.");
+                    return;
+                }
+                root = object.get();
+            }
+        if (!root || !SceneSerializer::SavePrefab(*root, m_activePrefabPath))
+        {
+            if (m_primaryConsole)
+                m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                    "Failed to save prefab: " + m_activePrefabPath);
+            return;
+        }
+        m_prefabHasUnsavedChanges = false;
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Info,
+                "Prefab saved: " + m_activePrefabPath);
+        return;
+    }
+
+    SaveMainScene();
+}
+
+void EditorState::SaveMainScene()
+{
     if (!m_scene)
         return;
 
@@ -223,6 +261,36 @@ void EditorState::SaveScene()
         m_primaryConsole->AddLog(
             ConsoleView::Level::Error, "Failed to save scene: " + destination);
     }
+}
+
+void EditorState::SaveAll()
+{
+    if (!m_activePrefabPath.empty())
+    {
+        const bool previousFocus = m_prefabDocumentFocused;
+        m_prefabDocumentFocused = true;
+        SaveScene();
+        m_prefabDocumentFocused = previousFocus;
+    }
+    SaveMainScene();
+    const bool projectSaved = !m_preferences || m_projectFilePath.empty()
+        ? true : m_preferences->SaveSettings();
+    if (m_primaryConsole)
+        m_primaryConsole->AddLog(projectSaved
+            ? ConsoleView::Level::Info : ConsoleView::Level::Error,
+            projectSaved
+                ? "Saved all open documents and project settings."
+                : "Save All completed with errors.");
+}
+
+std::string EditorState::GetActiveDocumentName() const
+{
+    const std::string sceneName = m_currentScenePath.empty()
+        ? "Untitled" : std::filesystem::path(m_currentScenePath).stem().string();
+    if (m_activePrefabPath.empty())
+        return sceneName;
+    return sceneName + " | " +
+        std::filesystem::path(m_activePrefabPath).stem().string() + " (Prefab)";
 }
 
 void EditorState::BakeLighting()
@@ -326,6 +394,188 @@ void EditorState::LoadScene(const std::string& path)
     }
 }
 
+void EditorState::OpenPrefabStage(const std::string& path)
+{
+    if (!m_scene || !m_viewFactory || path.empty()) return;
+    const std::string normalized =
+        std::filesystem::path(path).lexically_normal().string();
+    if (normalized == m_activePrefabPath) return;
+    if (!m_activePrefabPath.empty() && m_prefabHasUnsavedChanges)
+    {
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Warning,
+                "Save the active prefab before opening another prefab.");
+        return;
+    }
+
+    if (!m_activePrefabPath.empty())
+        ClosePrefabStage();
+
+    auto prefabScene = std::make_unique<Scene>();
+    Object* root = nullptr;
+    try
+    {
+        prefabScene->SetEditorMode2D(
+            m_projectSettings.editorMode == ProjectSettings::EditorMode::TwoD);
+        prefabScene->Init(m_renderer->GetGraphicsProvider());
+        root = SceneSerializer::InstantiatePrefab(
+            *prefabScene, normalized, prefabScene->GetGraphicsProvider());
+    }
+    catch (const std::exception& error)
+    {
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                "Could not open prefab editor: " + std::string(error.what()));
+        return;
+    }
+    if (!root)
+    {
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                "Could not open prefab stage: " + normalized);
+        return;
+    }
+
+    // In the isolated stage this is the editable asset root, not an instance.
+    root->Prefab.reset();
+    const std::string prefabName =
+        std::filesystem::path(normalized).stem().string();
+    auto sceneView = m_viewFactory->CreateSceneView(
+        prefabScene.get(), prefabName + " (Prefab)");
+    if (!sceneView)
+    {
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                "Could not create prefab editor viewport: " + normalized);
+        return;
+    }
+    auto hierarchy = std::make_unique<HierarchyView>();
+    hierarchy->SetTitle(prefabName + " Hierarchy");
+    hierarchy->Init(prefabScene.get());
+    auto properties = std::make_unique<PropertiesView>();
+    properties->SetTitle(prefabName + " Properties");
+    properties->Init(prefabScene.get());
+
+    m_prefabScene = std::move(prefabScene);
+    m_prefabSceneView = sceneView.get();
+    m_prefabHierarchy = hierarchy.get();
+    m_prefabProperties = properties.get();
+    m_prefabHierarchy->OnSelectionChanged = [this](Object* object)
+    {
+        if (m_prefabScene) m_prefabScene->SetSelectedObject(object);
+        if (m_prefabProperties) m_prefabProperties->SetSelectedObject(object);
+    };
+    m_prefabHierarchy->OnFocusObject = [this](Object* object)
+    {
+        if (m_prefabScene) m_prefabScene->FocusEditorCamera(object);
+    };
+    m_prefabHierarchy->OnHierarchyChanged = [this]()
+    {
+        m_prefabHasUnsavedChanges = true;
+    };
+    m_prefabProperties->OnComponentsChanged = [this]()
+    {
+        m_prefabHasUnsavedChanges = true;
+    };
+    m_prefabSceneView->OnObjectSelected = [this](Object* object)
+    {
+        if (m_prefabScene) m_prefabScene->SetSelectedObject(object);
+        if (m_prefabHierarchy) m_prefabHierarchy->SetSelectedObject(object);
+        if (m_prefabProperties) m_prefabProperties->SetSelectedObject(object);
+    };
+    m_prefabSceneView->OnGizmoInteraction = [this](bool active)
+    {
+        if (active) m_prefabHasUnsavedChanges = true;
+    };
+    sceneView->OnFocused = [this]() { m_prefabDocumentFocused = true; };
+    hierarchy->OnFocused = [this]() { m_prefabDocumentFocused = true; };
+    properties->OnFocused = [this]() { m_prefabDocumentFocused = true; };
+    m_panels.push_back(std::move(sceneView));
+    m_panels.push_back(std::move(hierarchy));
+    m_panels.push_back(std::move(properties));
+    m_activePrefabPath = normalized;
+    m_prefabHasUnsavedChanges = false;
+    m_prefabDocumentFocused = true;
+    m_prefabHierarchy->SetSelectedObject(root);
+    m_prefabProperties->SetSelectedObject(root);
+    m_prefabScene->SetSelectedObject(root);
+    if (m_primaryConsole)
+        m_primaryConsole->AddLog(ConsoleView::Level::Info,
+            "Opened prefab stage: " + normalized);
+}
+
+void EditorState::ClosePrefabStage()
+{
+    if (m_activePrefabPath.empty()) return;
+    if (m_prefabHasUnsavedChanges)
+    {
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Warning,
+                "Save the prefab before closing its stage.");
+        return;
+    }
+
+    RemovePrefabPanels();
+    m_prefabScene.reset();
+    m_activePrefabPath.clear();
+    m_prefabHasUnsavedChanges = false;
+    m_prefabDocumentFocused = false;
+    if (m_primaryConsole)
+        m_primaryConsole->AddLog(ConsoleView::Level::Info,
+            "Closed prefab stage.");
+}
+
+void EditorState::HandlePrefabPanelClosures()
+{
+    if (m_activePrefabPath.empty())
+        return;
+    const bool panelClosed =
+        (m_prefabSceneView && !m_prefabSceneView->IsOpen()) ||
+        (m_prefabHierarchy && !m_prefabHierarchy->IsOpen()) ||
+        (m_prefabProperties && !m_prefabProperties->IsOpen());
+    if (!panelClosed)
+        return;
+
+    if (m_prefabHasUnsavedChanges)
+    {
+        if (m_prefabSceneView) m_prefabSceneView->SetOpen(true);
+        if (m_prefabHierarchy) m_prefabHierarchy->SetOpen(true);
+        if (m_prefabProperties) m_prefabProperties->SetOpen(true);
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Warning,
+                "Save the prefab before closing its editor.");
+        return;
+    }
+    ClosePrefabStage();
+}
+
+void EditorState::RemovePrefabPanels()
+{
+    auto isPrefabPanel = [this](const std::unique_ptr<IEditorPanel>& panel)
+    {
+        return panel.get() == m_prefabSceneView ||
+            panel.get() == m_prefabHierarchy ||
+            panel.get() == m_prefabProperties;
+    };
+    for (auto it = m_panels.begin(); it != m_panels.end();)
+    {
+        if (!isPrefabPanel(*it))
+        {
+            ++it;
+            continue;
+        }
+        if ((*it)->NeedsRender() && m_viewFactory)
+            if (auto* view = dynamic_cast<View*>(it->get()))
+                m_viewFactory->FreeSrvSlot(view->GetSrvSlotIndex());
+        if (m_viewFactory)
+            m_viewFactory->NotifyPanelRemoved(it->get());
+        it = m_panels.erase(it);
+    }
+    m_prefabSceneView = nullptr;
+    m_prefabHierarchy = nullptr;
+    m_prefabProperties = nullptr;
+}
+
 void EditorState::CapturePlayModeScene()
 {
     if (!m_scene)
@@ -415,17 +665,29 @@ void EditorState::InitializePanels()
     {
         OutputDebugStringA("[EditorState::InitializePanels] Creating Scene view\n");
         auto scenePanel = m_viewFactory->Create("Scene");
-        if (scenePanel) m_panels.push_back(std::move(scenePanel));
+        if (scenePanel)
+        {
+            scenePanel->OnFocused = [this]() { m_prefabDocumentFocused = false; };
+            m_panels.push_back(std::move(scenePanel));
+        }
         else OutputDebugStringA("[EditorState::InitializePanels] WARNING: Scene panel is null\n");
         
         OutputDebugStringA("[EditorState::InitializePanels] Creating Game view\n");
         auto gamePanel = m_viewFactory->Create("Game");
-        if (gamePanel) m_panels.push_back(std::move(gamePanel));
+        if (gamePanel)
+        {
+            gamePanel->OnFocused = [this]() { m_prefabDocumentFocused = false; };
+            m_panels.push_back(std::move(gamePanel));
+        }
         else OutputDebugStringA("[EditorState::InitializePanels] WARNING: Game panel is null\n");
         
         OutputDebugStringA("[EditorState::InitializePanels] Creating Hierarchy view\n");
         auto hierarchyPanel = m_viewFactory->Create("Hierarchy");
-        if (hierarchyPanel) m_panels.push_back(std::move(hierarchyPanel));
+        if (hierarchyPanel)
+        {
+            hierarchyPanel->OnFocused = [this]() { m_prefabDocumentFocused = false; };
+            m_panels.push_back(std::move(hierarchyPanel));
+        }
         else OutputDebugStringA("[EditorState::InitializePanels] WARNING: Hierarchy panel is null\n");
         
         OutputDebugStringA("[EditorState::InitializePanels] Creating Properties view\n");
@@ -434,6 +696,7 @@ void EditorState::InitializePanels()
         {
             OutputDebugStringA("[EditorState::InitializePanels] Storing properties pointer\n");
             m_primaryProperties = static_cast<PropertiesView*>(properties.get());
+            properties->OnFocused = [this]() { m_prefabDocumentFocused = false; };
             m_panels.push_back(std::move(properties));
         }
         
@@ -454,6 +717,11 @@ void EditorState::InitializePanels()
             m_panels.push_back(std::move(console));
         }
 
+        OutputDebugStringA("[EditorState::InitializePanels] Creating Problems view\n");
+        auto problems = m_viewFactory->Create("Problems");
+        if (problems)
+            m_panels.push_back(std::move(problems));
+
         OutputDebugStringA("[EditorState::InitializePanels] Creating Terminal view\n");
         auto terminal = m_viewFactory->Create("Terminal");
         if (terminal)
@@ -469,11 +737,18 @@ void EditorState::WireupCallbacks()
 {
     if (!m_viewFactory)
         return;
+    m_viewFactory->OnMainDocumentFocused = [this]()
+    {
+        m_prefabDocumentFocused = false;
+    };
 
     // Wire up scene loading callback
     m_viewFactory->OnSceneRequested = [this](const std::string& scenePath) {
         OutputDebugStringA(("[EditorState] Scene requested: " + scenePath + "\n").c_str());
         LoadScene(scenePath);
+    };
+    m_viewFactory->OnPrefabRequested = [this](const std::string& prefabPath) {
+        OpenPrefabStage(prefabPath);
     };
 
     m_viewFactory->OnAssetSelected = [this](const std::string& assetPath) {
@@ -559,8 +834,6 @@ void EditorState::WireupCallbacks()
     };
     m_viewFactory->OnGizmoInteraction = [this](bool active) {
         ReportSceneEditInProgress(active);
-        if (active && m_primaryProperties)
-            m_primaryProperties->ApplyConnectedPrefabChanges(true);
     };
 
     // Wire up focus (double-click) callback — frame the object in the scene camera
@@ -569,13 +842,9 @@ void EditorState::WireupCallbacks()
             m_scene->FocusEditorCamera(obj);
     };
     m_viewFactory->OnHierarchyChanged = [this]() {
-        if (m_primaryProperties)
-            m_primaryProperties->ApplyConnectedPrefabChanges(true);
         m_hasUnsavedChanges = true;
     };
     m_viewFactory->OnPropertiesChanged = [this]() {
-        if (m_primaryProperties)
-            m_primaryProperties->ApplyConnectedPrefabChanges(true);
         m_hasUnsavedChanges = true;
     };
     m_viewFactory->OnPropertiesAssetDropLog = [this](const std::string& message, bool error) {

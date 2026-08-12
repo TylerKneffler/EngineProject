@@ -16,6 +16,7 @@ class ConsoleView;
 class PropertiesView;
 class HierarchyView;
 class AssetsExplorerView;
+class SceneView;
 struct ProjectSettings;
 
 // ---------------------------------------------------------------------------
@@ -44,11 +45,20 @@ public:
     const std::vector<std::unique_ptr<IEditorPanel>>& GetPanels() const { return m_panels; }
 
     // ---- Save/Load State ----
-    bool HasUnsavedChanges() const { return m_hasUnsavedChanges; }
+    bool HasUnsavedChanges() const
+    {
+        return m_hasUnsavedChanges || m_prefabHasUnsavedChanges;
+    }
     void SetHasUnsavedChanges(bool dirty) { m_hasUnsavedChanges = dirty; }
 
     void SaveScene();
+    void SaveAll();
     void LoadScene(const std::string& path);
+    void OpenPrefabStage(const std::string& path);
+    void ClosePrefabStage();
+    void HandlePrefabPanelClosures();
+    bool IsEditingPrefab() const { return !m_activePrefabPath.empty(); }
+    std::string GetActiveDocumentName() const;
     void BakeLighting();
     void ClearBakedLighting();
     void ImportAsset();
@@ -105,11 +115,14 @@ private:
     void ResetHistory(bool sceneIsSaved);
     void CommitPendingHistoryEdit();
     void TrimHistory();
+    void SaveMainScene();
+    void RemovePrefabPanels();
 
     // Core objects
     std::unique_ptr<Window> m_window;
     std::unique_ptr<IEditorRenderer> m_renderer;
     std::unique_ptr<Scene> m_scene;
+    std::unique_ptr<Scene> m_prefabScene;
     std::unique_ptr<ViewFactory> m_viewFactory;
     std::unique_ptr<PreferencesView> m_preferences;
 
@@ -118,11 +131,17 @@ private:
     ConsoleView* m_primaryConsole = nullptr;
     PropertiesView* m_primaryProperties = nullptr;
     AssetsExplorerView* m_primaryAssets = nullptr;
+    SceneView* m_prefabSceneView = nullptr;
+    HierarchyView* m_prefabHierarchy = nullptr;
+    PropertiesView* m_prefabProperties = nullptr;
 
     // State
     ProjectSettings m_projectSettings;
     std::string m_projectFilePath;
     std::string m_currentScenePath;
+    std::string m_activePrefabPath;
+    bool m_prefabHasUnsavedChanges = false;
+    bool m_prefabDocumentFocused = false;
     bool m_hasUnsavedChanges = false;
     bool m_showPreferences = false;
     bool m_loadingOverlayVisible = false;

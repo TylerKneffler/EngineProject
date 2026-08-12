@@ -6,6 +6,7 @@
 void ImGuiEditorUi::SetNextWindowRect(float x,float y,float w,float h){ ImGui::SetNextWindowPos({x,y},ImGuiCond_FirstUseEver); ImGui::SetNextWindowSize({w,h},ImGuiCond_FirstUseEver); }
 bool ImGuiEditorUi::BeginWindow(const char* t,bool* o,bool p){ if(p) ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,{0,0}); bool r=ImGui::Begin(t,o); if(p) ImGui::PopStyleVar(); return r; }
 void ImGuiEditorUi::EndWindow(){ImGui::End();}
+bool ImGuiEditorUi::IsWindowFocused() const{return ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);}
 void ImGuiEditorUi::PushId(const void* id){ImGui::PushID(id);}
 void ImGuiEditorUi::PushId(const char* id){ImGui::PushID(id);}
 void ImGuiEditorUi::PopId(){ImGui::PopID();}
@@ -16,6 +17,8 @@ void ImGuiEditorUi::ColoredLabel(const char* t,EditorUiColor c){ImGui::TextColor
 void ImGuiEditorUi::BeginTextWrap(){ImGui::PushTextWrapPos(0.f);}
 void ImGuiEditorUi::EndTextWrap(){ImGui::PopTextWrapPos();}
 void ImGuiEditorUi::SameLine(){ImGui::SameLine();} void ImGuiEditorUi::Separator(){ImGui::Separator();} void ImGuiEditorUi::Spacing(){ImGui::Spacing();}
+void ImGuiEditorUi::Indent(float width){ImGui::Indent(width);}
+void ImGuiEditorUi::Unindent(float width){ImGui::Unindent(width);}
 bool ImGuiEditorUi::Checkbox(const char*l,bool*v){return ImGui::Checkbox(l,v);} bool ImGuiEditorUi::InputText(const char*l,char*b,size_t s){if(l&&l[0]=='#'&&l[1]=='#')ImGui::SetNextItemWidth(-FLT_MIN);return ImGui::InputText(l,b,s);}
 bool ImGuiEditorUi::InputTextSubmit(const char*l,char*b,size_t s){if(l&&l[0]=='#'&&l[1]=='#')ImGui::SetNextItemWidth(-FLT_MIN);return ImGui::InputText(l,b,s,ImGuiInputTextFlags_EnterReturnsTrue);}
 void ImGuiEditorUi::ReadOnlyTextBlock(const char* label,const char* text,bool scrollToBottom,float reservedBottom)

@@ -65,8 +65,12 @@ void ImGuiMainMenu::DrawFileMenu(EditorState& state, PlayState playState,
         state.Redo();
     if (busy) ImGui::EndDisabled();
     ImGui::Separator();
-    if (ImGui::MenuItem("Save All", "Ctrl+S"))
+    if (ImGui::MenuItem("Save", "Ctrl+S"))
         state.SaveScene();
+    if (ImGui::MenuItem("Save All", "Ctrl+A+S"))
+        state.SaveAll();
+    if (state.IsEditingPrefab() && ImGui::MenuItem("Close Prefab Stage"))
+        state.ClosePrefabStage();
     ImGui::Separator();
 
     if (busy) ImGui::BeginDisabled();
@@ -102,6 +106,7 @@ void ImGuiMainMenu::DrawViewsMenu(EditorState& state) const
     if (ImGui::MenuItem("Properties")) OpenPanel(state, "Properties");
     if (ImGui::MenuItem("Assets")) OpenPanel(state, "Assets");
     if (ImGui::MenuItem("Console")) OpenPanel(state, "Console");
+    if (ImGui::MenuItem("Problems")) OpenPanel(state, "Problems");
     if (ImGui::MenuItem("Terminal")) OpenPanel(state, "Terminal");
     ImGui::EndMenu();
 }

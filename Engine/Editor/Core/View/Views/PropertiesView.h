@@ -28,9 +28,6 @@ public:
 
     void SetSelectedObject(Object* obj)
     {
-        Object* previousRoot = m_selectedObject
-            ? m_selectedObject->GetPrefabInstanceRoot() : nullptr;
-        Object* nextRoot = obj ? obj->GetPrefabInstanceRoot() : nullptr;
         if (obj != m_selectedObject)
         {
             m_componentPickerOpen = false;
@@ -39,11 +36,6 @@ public:
         }
         m_selectedObject = obj;
         m_assetInspector.Clear();
-        if (previousRoot != nextRoot)
-        {
-            m_prefabSnapshotRoot = nextRoot;
-            m_prefabSnapshot.clear();
-        }
     }
     Object* GetSelectedObject() const   { return m_selectedObject; }
     void SetSelectedAsset(const std::string& path);
@@ -58,7 +50,6 @@ public:
     std::function<void(const std::string&, bool)> OnAssetDropLog;
     std::function<void(const std::string&, const std::string&)> OnAssetRenamed;
     std::function<void(const std::string&)> OnAssetContentsChanged;
-    bool ApplyConnectedPrefabChanges(bool force = false);
 
 private:
     void DrawTransform(IEditorUi& ui);
@@ -81,6 +72,4 @@ private:
     bool m_skyboxRevealPending = false;
     std::chrono::steady_clock::time_point m_skyboxRevealRequestedAt{};
     std::string m_skyboxRevealPath;
-    Object* m_prefabSnapshotRoot = nullptr;
-    std::string m_prefabSnapshot;
 };

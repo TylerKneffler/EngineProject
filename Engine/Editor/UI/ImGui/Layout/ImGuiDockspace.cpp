@@ -12,12 +12,14 @@ void ImGuiDockspace::Draw()
     ImGuiDockNode* root = ImGui::DockBuilderGetNode(dockspaceId);
     if (root != nullptr && !root->IsLeafNode())
     {
-        // Existing layouts predate the Terminal panel. Once both windows have
-        // appeared, place an undocked Terminal beside Console as another tab.
+        // Add bottom-panel tabs introduced after a user's layout was saved.
         ImGuiWindow* console = ImGui::FindWindowByName("Console 1");
         ImGuiWindow* terminal = ImGui::FindWindowByName("Terminal 1");
+        ImGuiWindow* problems = ImGui::FindWindowByName("Problems 1");
         if (console && console->DockNode && terminal && !terminal->DockNode)
             ImGui::DockBuilderDockWindow("Terminal 1", console->DockNode->ID);
+        if (console && console->DockNode && problems && !problems->DockNode)
+            ImGui::DockBuilderDockWindow("Problems 1", console->DockNode->ID);
         return;
     }
 
@@ -40,6 +42,7 @@ void ImGuiDockspace::Draw()
     ImGui::DockBuilderDockWindow("Scene 1", centerTop);
     ImGui::DockBuilderDockWindow("Game 1", centerTop);
     ImGui::DockBuilderDockWindow("Console 1", centerBottom);
+    ImGui::DockBuilderDockWindow("Problems 1", centerBottom);
     ImGui::DockBuilderDockWindow("Terminal 1", centerBottom);
     ImGui::DockBuilderDockWindow("Properties 1", right);
     ImGui::DockBuilderFinish(dockspaceId);

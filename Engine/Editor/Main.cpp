@@ -408,12 +408,11 @@ int WINAPI wWinMain(
         renderer->MarkDirty();
 
         // Update window title
-        if (engineDevelopmentMode)
-            SetWindowTextW(window->GetHWND(), editorState->HasUnsavedChanges()
-                ? L"Engine Editor - Engine Sandbox *" : L"Engine Editor - Engine Sandbox");
-        else
-            SetWindowTextW(window->GetHWND(),
-                           editorState->HasUnsavedChanges() ? L"Engine Editor *" : L"Engine Editor");
+        const std::string title = std::string("Engine Editor - ") +
+            editorState->GetActiveDocumentName() +
+            (engineDevelopmentMode ? " - Engine Sandbox" : "") +
+            (editorState->HasUnsavedChanges() ? " *" : "");
+        SetWindowTextA(window->GetHWND(), title.c_str());
 
         // Render frame
         renderer->RenderIfNeeded([&]()

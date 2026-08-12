@@ -5,7 +5,9 @@ void PropertiesView::DrawTransform(IEditorUi& ui)
 {
     Transform& t = m_selectedObject->transform;
     Object* prefabRoot = m_selectedObject->GetPrefabInstanceRoot();
-    const bool locked = false;
+    // A prefab instance owns only its root placement. Descendant transforms
+    // come from the referenced asset and are edited by opening that asset.
+    const bool locked = prefabRoot && m_selectedObject != prefabRoot;
 
     const bool transformOpen = ui.CollapsingHeader("Transform");
     const EditorUiContextMenuResult menu = ui.ContextMenu(&t,

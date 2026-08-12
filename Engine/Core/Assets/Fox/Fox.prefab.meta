@@ -1,0 +1,13 @@
+{
+    "version": 1,
+    "id": "796597e0-56ab-48f3-9f63-e1f67a36f79c",
+    "sourcePath": "C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/Gltf/Fox.glb",
+    "importSettings": {
+        "decomposeNodeMatrices": true,
+        "generateMeshIndices": true,
+        "importer": "gltf",
+        "loadExternalBuffers": true,
+        "loadExternalImages": true
+    }
+}
+

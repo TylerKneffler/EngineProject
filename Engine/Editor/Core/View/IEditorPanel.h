@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <functional>
 class IEditorUi;
 
 // ---------------------------------------------------------------------------
@@ -30,6 +31,9 @@ public:
     // Subclasses override to issue scene draw calls into cmd each frame.
     // cmd: opaque graphics command list handle (cast internally to ID3D12GraphicsCommandList*)
     virtual void Render3D(void* /*cmd*/) {}
+
+    // Allows document-aware commands such as Ctrl+S to follow panel focus.
+    std::function<void()> OnFocused;
 
     // ---- Title / open state ----
     const std::string& GetTitle() const { return m_title; }

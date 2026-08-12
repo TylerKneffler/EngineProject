@@ -41,7 +41,9 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         m_skyboxRevealPending = false;
         m_skyboxRevealPath.clear();
     }
-    if (!ui.BeginWindow(m_title.c_str(), &m_open))
+    const bool windowVisible = ui.BeginWindow(m_title.c_str(), &m_open);
+    if (ui.IsWindowFocused() && OnFocused) OnFocused();
+    if (!windowVisible)
     {
         ui.EndWindow();
         return;
@@ -129,9 +131,11 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
     Object* prefabRoot = m_selectedObject->GetPrefabInstanceRoot();
     char name[256]; strncpy_s(name, m_selectedObject->name.c_str(), sizeof(name));
     bool enabled = m_selectedObject->enabled;
+    ui.BeginDisabled(prefabRoot != nullptr);
     const EditorUiObjectRowResult header = ui.ObjectHeader(
         m_selectedObject, name, sizeof(name), &enabled,
         false);
+    ui.EndDisabled();
     if (header.nameChanged)
     {
         m_selectedObject->name = name;
@@ -147,16 +151,22 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
     if (prefabRoot && prefabRoot->Prefab)
     {
         ui.ValueLabel("Prefab", prefabRoot->Prefab->GetPath().c_str());
-        ui.ColoredLabel("Linked prefab - changes save automatically",
+        ui.ColoredLabel("Prefab instance - asset content is read-only",
             { 0.35f, 0.7f, 1.f, 1.f });
         if (m_selectedObject == prefabRoot)
             ui.DisabledLabel(
-                "Root transform is this instance's placement; prefab components and children are shared.");
+                "Root transform is instance-local. Components and children come from the asset.");
+        else
+            ui.DisabledLabel(
+                "Open the prefab asset or unpack the instance to edit this object.");
     }
     else
         ui.DisabledLabel("Scene-only object");
+    ui.ValueLabel("Owner", m_selectedObject->Parent
+        ? m_selectedObject->Parent->name.c_str() : "Scene Root");
     
     ui.Separator();
+    ui.Indent(16.f);
     
     // Draw Transform (always present, not in Components list)
     DrawTransform(ui);
@@ -176,7 +186,7 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         
         const bool componentOpen = ui.CollapsingHeader(componentType.c_str());
         Object* componentPrefabRoot = m_selectedObject->GetPrefabInstanceRoot();
-        const bool componentEditable = true;
+        const bool componentEditable = componentPrefabRoot == nullptr;
         // Bind the menu to the header before drag/drop helpers replace the
         // UI backend's current item.
         const EditorUiContextMenuResult menu = ui.ContextMenu(component,
@@ -216,12 +226,12 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         }
         if (componentOpen)
         {
-            const bool locked = m_selectedObject->IsPartOfPrefabInstance() &&
-                !CanEditSelectedObject();
-            ui.BeginDisabled(locked);
-            componentPropertiesChanged =
-                component->DrawProperties(ui) || componentPropertiesChanged;
-            ui.EndDisabled();
+            const bool locked = componentPrefabRoot != nullptr;
+            if (locked)
+                ui.DisabledLabel("Inherited from prefab asset");
+            else
+                componentPropertiesChanged =
+                    component->DrawProperties(ui) || componentPropertiesChanged;
         }
         ui.PopId();
     }
@@ -271,6 +281,26 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             OnComponentsChanged();
     }
 
+    if (!m_selectedObject->Children.empty() &&
+        ui.CollapsingHeader("Children", false))
+    {
+        std::function<void(Object*)> drawChild = [&](Object* child)
+        {
+            if (!child) return;
+            const bool leaf = child->Children.empty();
+            const bool open = ui.TreeNode(child, child->name.c_str(),
+                false, leaf, true);
+            if (open && !leaf)
+            {
+                for (Object* grandchild : child->Children)
+                    drawChild(grandchild);
+                ui.TreePop();
+            }
+        };
+        for (Object* child : m_selectedObject->Children)
+            drawChild(child);
+    }
+
     if (!assetDropPreview.empty())
     {
         ui.PushId("assetDropPreview");
@@ -290,6 +320,7 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         m_componentSearch[0] = '\0';
     }
     ui.EndDisabled();
+    ui.Unindent(16.f);
 
     ui.EndTextWrap();
     ui.EndWindow();

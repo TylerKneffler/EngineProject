@@ -211,6 +211,12 @@ void AssetsExplorerView::OpenFile(const std::string& filePath)
         }
         return;
     }
+    if (extension == ".prefab")
+    {
+        if (OnPrefabRequested)
+            OnPrefabRequested(filePath);
+        return;
+    }
 
     // Convert to wide string for Windows API
     int size_needed = MultiByteToWideChar(CP_UTF8, 0, filePath.c_str(), (int)filePath.length(), NULL, 0);

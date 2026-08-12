@@ -1,0 +1,11 @@
+{
+    "version": 1,
+    "id": "529ee456-a553-4c8e-bf4f-e4a4ac08da9d",
+    "sourcePath": "C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/Gltf/Fox.glb",
+    "importSettings": {
+        "importer": "gltf-mesh",
+        "meshIndex": 0,
+        "primitiveIndex": 0
+    }
+}
+

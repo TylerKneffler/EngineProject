@@ -29,7 +29,9 @@ void GameView::Init(void* device,
 // ---------------------------------------------------------------------------
 void GameView::DrawPanel(IEditorUi& ui)
 {
-    if (ui.BeginWindow(m_title.c_str(), &m_open, true))
+    const bool windowVisible = ui.BeginWindow(m_title.c_str(), &m_open, true);
+    if (ui.IsWindowFocused() && OnFocused) OnFocused();
+    if (windowVisible)
     {
         const float targetAspect = m_aspectRatioMode == ProjectSettings::AspectRatioMode::Free ? 0.f :
             (m_aspectRatioMode == ProjectSettings::AspectRatioMode::Locked ? m_gameAspectRatio :

@@ -70,6 +70,11 @@ bool PropertiesView::AddComponentFromAsset(const std::string& path, std::string&
         message = "[Properties] Select an object before dropping an asset.";
         return false;
     }
+    if (m_selectedObject->IsPartOfPrefabInstance())
+    {
+        message = "[Properties] Prefab instance content is read-only. Open the prefab asset or unpack the instance first.";
+        return false;
+    }
     if (path.empty() || !std::filesystem::is_regular_file(path))
     {
         message = "[Properties] Dropped asset does not exist: " + path;

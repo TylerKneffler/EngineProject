@@ -16,6 +16,11 @@ bool PropertiesView::AddRegisteredComponent(const std::string& typeName, std::st
         message = "[Properties] Select an object before adding a component.";
         return false;
     }
+    if (m_selectedObject->IsPartOfPrefabInstance())
+    {
+        message = "[Properties] Prefab instance content is read-only. Open the prefab asset or unpack the instance first.";
+        return false;
+    }
     try
     {
         std::unique_ptr<Component> component(
@@ -103,4 +108,3 @@ void PropertiesView::LogAssetDrop(const std::string& message, bool error) const
     else
         OutputDebugStringA((message + "\n").c_str());
 }
-

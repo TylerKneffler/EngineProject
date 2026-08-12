@@ -215,7 +215,9 @@ bool ImGuiUiBackend::HandleMessage(void* nativeWindow, uint32_t message,
     }
     if (keyDown && firstPress && control && wParam == 'S' && m_editorState)
     {
-        m_editorState->SaveScene();
+        const bool saveAll = (GetKeyState('A') & 0x8000) != 0;
+        if (saveAll) m_editorState->SaveAll();
+        else m_editorState->SaveScene();
         return true;
     }
     if (keyDown && firstPress && control && wParam == 'B' && m_buildManager)

@@ -8,11 +8,13 @@ class ImGuiEditorUi final : public IEditorUi
 public:
     void SetNextWindowRect(float x, float y, float width, float height) override;
     bool BeginWindow(const char*, bool*, bool) override; void EndWindow() override;
+    bool IsWindowFocused() const override;
     void PushId(const void*) override; void PushId(const char*) override; void PopId() override;
     bool Button(const char*, float, float) override; void Label(const char*) override;
     void DisabledLabel(const char*) override; void ColoredLabel(const char*, EditorUiColor) override;
     void BeginTextWrap() override; void EndTextWrap() override;
     void SameLine() override; void Separator() override; void Spacing() override;
+    void Indent(float) override; void Unindent(float) override;
     bool Checkbox(const char*, bool*) override; bool InputText(const char*, char*, size_t) override;
     bool InputTextSubmit(const char*, char*, size_t) override;
     void ReadOnlyTextBlock(const char*, const char*, bool, float) override;

@@ -190,6 +190,7 @@ void Scene::Init(IGraphicsProvider* graphicsProvider)
     // Set up the default editor camera
     Camera* editorCameraComponent = editorCamera.AddComponent<Camera>();
     editorCameraComponent->useTransformRotation = false;
+    editorCameraComponent->farPlane = 1000.f;
     SetEditorMode2D(m_editorMode2D);
 
     // Build pipeline states
@@ -242,7 +243,7 @@ void Scene::BuildSkyboxPipeline()
         .SetPixelShader(pixelShader.get())
         .SetFillMode(false)
         .SetCullMode(false)
-        .SetFrontCounterClockwise(true)
+        .SetFrontCounterClockwise(false)
         .SetDepthClipEnable(false)
         .SetBlendEnable(false)
         .SetDepthEnable(false)
@@ -337,7 +338,7 @@ void Scene::BuildGridPipeline()
         .SetPixelShader(psShader.get())
         .SetFillMode(false)                    // Solid fill
         .SetCullMode(false)                    // No culling (draw lines from both sides)
-        .SetFrontCounterClockwise(true)
+        .SetFrontCounterClockwise(false)
         .SetDepthClipEnable(true)
         .SetBlendEnable(true)
         .SetSrcBlend(4)                        // D3D12_BLEND_SRC_ALPHA (0-indexed: 4)
@@ -416,7 +417,7 @@ void Scene::BuildObjectPipeline()
             .SetPixelShader(psShader.get())
             .SetFillMode(false)
             .SetCullMode(!doubleSided)
-            .SetFrontCounterClockwise(true)
+            .SetFrontCounterClockwise(false)
             .SetDepthClipEnable(true)
             .SetBlendEnable(blend);
         if (blend)
@@ -483,7 +484,7 @@ void Scene::BuildObjectPipeline()
         .SetPixelShader(outlinePsShader.get())
         .SetFillMode(true)                     // Wireframe outline
         .SetCullMode(false)
-        .SetFrontCounterClockwise(true)
+        .SetFrontCounterClockwise(false)
         .SetDepthClipEnable(true)
         .SetBlendEnable(false)
         .SetDepthEnable(true)
