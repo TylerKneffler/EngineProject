@@ -455,6 +455,11 @@ void EditorState::OpenPrefabStage(const std::string& path)
     auto properties = std::make_unique<PropertiesView>();
     properties->SetTitle(prefabName + " Properties");
     properties->Init(prefabScene.get());
+    properties->SetShowChildHierarchy(false);
+    properties->OnPrefabRequested = [this](const std::string& prefabPath)
+    {
+        m_pendingPrefabPath = prefabPath;
+    };
 
     m_prefabScene = std::move(prefabScene);
     m_prefabSceneView = sceneView.get();
@@ -502,6 +507,18 @@ void EditorState::OpenPrefabStage(const std::string& path)
     if (m_primaryConsole)
         m_primaryConsole->AddLog(ConsoleView::Level::Info,
             "Opened prefab stage: " + normalized);
+}
+
+void EditorState::ProcessPendingPrefabStageOpen()
+{
+    if (m_pendingPrefabPath.empty())
+        return;
+
+    // Opening a prefab creates three panels. Do it after the panel draw loop so
+    // growing m_panels cannot invalidate the iterator currently drawing Assets.
+    std::string path = std::move(m_pendingPrefabPath);
+    m_pendingPrefabPath.clear();
+    OpenPrefabStage(path);
 }
 
 void EditorState::ClosePrefabStage()
@@ -748,7 +765,7 @@ void EditorState::WireupCallbacks()
         LoadScene(scenePath);
     };
     m_viewFactory->OnPrefabRequested = [this](const std::string& prefabPath) {
-        OpenPrefabStage(prefabPath);
+        m_pendingPrefabPath = prefabPath;
     };
 
     m_viewFactory->OnAssetSelected = [this](const std::string& assetPath) {

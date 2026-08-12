@@ -148,28 +148,43 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         if (OnComponentsChanged)
             OnComponentsChanged();
     }
-    if (prefabRoot && prefabRoot->Prefab)
+    if (!prefabRoot)
     {
-        ui.ValueLabel("Prefab", prefabRoot->Prefab->GetPath().c_str());
-        ui.ColoredLabel("Prefab instance - asset content is read-only",
-            { 0.35f, 0.7f, 1.f, 1.f });
-        if (m_selectedObject == prefabRoot)
-            ui.DisabledLabel(
-                "Root transform is instance-local. Components and children come from the asset.");
-        else
-            ui.DisabledLabel(
-                "Open the prefab asset or unpack the instance to edit this object.");
-    }
-    else
         ui.DisabledLabel("Scene-only object");
-    ui.ValueLabel("Owner", m_selectedObject->Parent
-        ? m_selectedObject->Parent->name.c_str() : "Scene Root");
+        ui.ValueLabel("Owner", m_selectedObject->Parent
+            ? m_selectedObject->Parent->name.c_str() : "Scene Root");
+    }
     
     ui.Separator();
     ui.Indent(16.f);
     
     // Draw Transform (always present, not in Components list)
     DrawTransform(ui);
+
+    if (prefabRoot && prefabRoot->Prefab)
+    {
+        const std::string prefabPath = prefabRoot->Prefab->GetPath();
+        ui.BeginDisabled(!OnPrefabRequested);
+        if (ui.Button("Edit Prefab") && OnPrefabRequested)
+            OnPrefabRequested(prefabPath);
+        ui.EndDisabled();
+        ui.SameLine();
+        if (ui.Button("Unpack Prefab"))
+        {
+            UnpackSelectedPrefab();
+            prefabRoot = nullptr;
+        }
+
+        // Inherited component and child data is edited in the prefab stage.
+        // Keep the instance inspector focused on placement and instance actions.
+        if (prefabRoot)
+        {
+            ui.Unindent(16.f);
+            ui.EndTextWrap();
+            ui.EndWindow();
+            return;
+        }
+    }
     
     // Draw all components with accordion views
     Component* componentToDelete = nullptr;
@@ -281,7 +296,7 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             OnComponentsChanged();
     }
 
-    if (!m_selectedObject->Children.empty() &&
+    if (m_showChildHierarchy && !m_selectedObject->Children.empty() &&
         ui.CollapsingHeader("Children", false))
     {
         std::function<void(Object*)> drawChild = [&](Object* child)

@@ -55,6 +55,7 @@ public:
     void SaveAll();
     void LoadScene(const std::string& path);
     void OpenPrefabStage(const std::string& path);
+    void ProcessPendingPrefabStageOpen();
     void ClosePrefabStage();
     void HandlePrefabPanelClosures();
     bool IsEditingPrefab() const { return !m_activePrefabPath.empty(); }
@@ -140,6 +141,7 @@ private:
     std::string m_projectFilePath;
     std::string m_currentScenePath;
     std::string m_activePrefabPath;
+    std::string m_pendingPrefabPath;
     bool m_prefabHasUnsavedChanges = false;
     bool m_prefabDocumentFocused = false;
     bool m_hasUnsavedChanges = false;

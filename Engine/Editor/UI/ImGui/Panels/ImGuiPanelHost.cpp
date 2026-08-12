@@ -19,6 +19,10 @@ void ImGuiPanelHost::DrawPanels(EditorState& state)
         if (panel)
             panel->DrawPanel(m_ui);
 
+    // Asset callbacks may request panels to be added. Apply those requests only
+    // after traversal, because push_back can invalidate this vector's iterators.
+    state.ProcessPendingPrefabStageOpen();
+
     // The prefab viewport, hierarchy, and properties panes form one document.
     // Closing any one closes the whole document once it is safe to do so.
     state.HandlePrefabPanelClosures();

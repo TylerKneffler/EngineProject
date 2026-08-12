@@ -145,6 +145,7 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
         view->OnAssetDropLog = OnPropertiesAssetDropLog;
         view->OnAssetRenamed = OnAssetRenamed;
         view->OnAssetContentsChanged = OnAssetContentsChanged;
+        view->OnPrefabRequested = OnPrefabRequested;
         m_singletonInstances[typeName] = view.get();
         return view;
     }

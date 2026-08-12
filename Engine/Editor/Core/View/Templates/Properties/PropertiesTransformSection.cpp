@@ -13,16 +13,13 @@ void PropertiesView::DrawTransform(IEditorUi& ui)
     const EditorUiContextMenuResult menu = ui.ContextMenu(&t,
         CanEditSelectedObject() ? "Add Component" : nullptr,
         nullptr,
-        false,
-        prefabRoot ? "Unpack Prefab" : nullptr);
+        false);
     if (menu.addRequested)
     {
         m_componentPickerOpen = true;
         m_positionComponentPicker = true;
         m_componentSearch[0] = '\0';
     }
-    if (menu.unpackRequested)
-        UnpackSelectedPrefab();
     if (transformOpen)
     {
         ui.BeginDisabled(locked);

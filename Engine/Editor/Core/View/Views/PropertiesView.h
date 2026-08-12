@@ -25,6 +25,7 @@ public:
     ~PropertiesView() = default;
 
     void Init(Scene* scene) { m_scene = scene; }
+    void SetShowChildHierarchy(bool show) { m_showChildHierarchy = show; }
 
     void SetSelectedObject(Object* obj)
     {
@@ -50,6 +51,7 @@ public:
     std::function<void(const std::string&, bool)> OnAssetDropLog;
     std::function<void(const std::string&, const std::string&)> OnAssetRenamed;
     std::function<void(const std::string&)> OnAssetContentsChanged;
+    std::function<void(const std::string&)> OnPrefabRequested;
 
 private:
     void DrawTransform(IEditorUi& ui);
@@ -65,6 +67,7 @@ private:
     Editor::ViewTemplates::AssetInspectorTemplate m_assetInspector;
     Scene* m_scene = nullptr;
     bool m_componentPickerOpen = false;
+    bool m_showChildHierarchy = true;
     bool m_positionComponentPicker = false;
     char m_componentSearch[128]{};
     bool m_editingSkyboxTexture = false;

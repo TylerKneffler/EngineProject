@@ -51,14 +51,26 @@ std::string ImportSettingText(const AssetImportSetting& setting)
 }
 
 bool DrawPrefabFields(IEditorUi& ui, pugi::xml_node parent,
-    const std::string& prefix)
+    const std::string& prefix, bool prefabObjectRoot = false)
 {
     bool changed = false;
     std::size_t index = 0;
     for (pugi::xml_node node : parent.children())
     {
+        const std::string nodeName = node.name();
         const std::string id = prefix + "/" + node.name() + "/" +
             std::to_string(index++);
+
+        if (prefabObjectRoot && nodeName == "children")
+            continue;
+        if (prefabObjectRoot && nodeName == "components")
+        {
+            // Match the regular object inspector: components are peer sections,
+            // not nested inside an extra serialized collection accordion.
+            changed = DrawPrefabFields(ui, node, id) || changed;
+            continue;
+        }
+
         const std::string label = XmlDisplayName(node.name());
         ui.PushId(id.c_str());
         const std::size_t children = static_cast<std::size_t>(
@@ -347,7 +359,7 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Scene* scene)
             return;
         ui.Separator();
         ui.Label("Prefab Defaults");
-        const bool prefabChanged = DrawPrefabFields(ui, root, "Prefab");
+        const bool prefabChanged = DrawPrefabFields(ui, root, "Prefab", true);
         std::size_t components = 0;
         for (pugi::xml_node ignored : root.child("components").children())
         {
