@@ -232,6 +232,9 @@ LRESULT CALLBACK Window::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         return 0;
     }
 
+    if (self && msg == WM_ACTIVATEAPP)
+        self->m_focused = wParam != FALSE;
+
     if (self && self->WndProcHook)
         if (self->WndProcHook(hwnd, msg, wParam, lParam))
             return true;

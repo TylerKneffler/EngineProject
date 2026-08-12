@@ -54,6 +54,14 @@ public:
     void ImportAsset();
     void CapturePlayModeScene();
     void RestorePlayModeScene();
+    void SetLoadingOverlay(bool visible, std::string message = {})
+    {
+        m_loadingOverlayVisible = visible;
+        m_loadingOverlayMessage = std::move(message);
+    }
+    bool IsLoadingOverlayVisible() const { return m_loadingOverlayVisible; }
+    const std::string& GetLoadingOverlayMessage() const { return m_loadingOverlayMessage; }
+    void RefreshSelectionAfterReload(const Scene::ObjectPath& selectedPath);
 
     // ---- Undo/Redo ----
     void TrackSceneChanges(bool allowHistory = true, bool editInProgress = false);
@@ -117,6 +125,8 @@ private:
     std::string m_currentScenePath;
     bool m_hasUnsavedChanges = false;
     bool m_showPreferences = false;
+    bool m_loadingOverlayVisible = false;
+    std::string m_loadingOverlayMessage;
     std::string m_playModeSceneSnapshot;
     bool m_prePlayHasUnsavedChanges = false;
     bool m_prePlayHadObjectSelection = false;

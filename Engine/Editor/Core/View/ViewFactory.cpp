@@ -6,7 +6,7 @@
 // ---------------------------------------------------------------------------
 const std::unordered_set<std::string> ViewFactory::kSingletonTypes =
 {
-    "Hierarchy", "Properties", "Assets", "Console"
+    "Hierarchy", "Properties", "Assets", "Console", "Terminal"
 };
 
 // ---------------------------------------------------------------------------
@@ -162,6 +162,15 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
     {
         auto view = std::make_unique<ConsoleView>();
         view->SetTitle("Console " + std::to_string(++m_consoleCount));
+        m_singletonInstances[typeName] = view.get();
+        return view;
+    }
+
+    if (typeName == "Terminal")
+    {
+        auto view = std::make_unique<TerminalView>();
+        view->SetTitle("Terminal " + std::to_string(++m_terminalCount));
+        view->Init(std::filesystem::current_path().string());
         m_singletonInstances[typeName] = view.get();
         return view;
     }

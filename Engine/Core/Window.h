@@ -81,6 +81,7 @@ public:
     HWND     GetHWND()   const { return m_hwnd; }
     uint32_t GetWidth()  const { return m_width; }
     uint32_t GetHeight() const { return m_height; }
+    bool IsFocused() const { return m_focused; }
 
 private:
     // Static WndProc required by Win32 (cannot be a non-static member).
@@ -101,5 +102,6 @@ private:
     // Track an Alt+left-button gesture so its drag and release are delivered
     // consistently as right-button input, even if Alt is released first.
     bool m_altLeftClickActive = false;
+    bool m_focused = false;
 
 };

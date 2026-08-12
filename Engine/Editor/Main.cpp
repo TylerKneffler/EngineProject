@@ -6,6 +6,7 @@
 #include "Core/View/View.h"
 #include "Engine/Editor/EditorState.h"
 #include "Engine/Editor/GameBuildManager.h"
+#include "Engine/Editor/HotReload/EditorHotReload.h"
 #include "Engine/Editor/ProjectLauncher.h"
 #include "Engine/Editor/UI/IEditorUiBackend.h"
 #include "Engine/Editor/Core/Importers/ModelImporter.h"
@@ -26,6 +27,12 @@
 #endif
 #ifndef ENGINE_ROOT_PATH
 #define ENGINE_ROOT_PATH "."
+#endif
+#ifndef ENGINE_BUILD_DIR
+#define ENGINE_BUILD_DIR "build/Debug"
+#endif
+#ifndef PROJECT_SCRIPTS_PATH
+#define PROJECT_SCRIPTS_PATH "build/Debug/Debug/ProjectScripts.dll"
 #endif
 #ifndef ENGINE_ASSETS_PATH
 #define ENGINE_ASSETS_PATH "Engine/Core/Assets/"
@@ -302,6 +309,14 @@ int WINAPI wWinMain(
     OutputDebugStringA("[Main] Creating GameBuildManager...\n");
     auto gameBuildManager = std::make_unique<GameBuildManager>(
         editorState->GetConsole(), projectFile, projectSettings);
+    auto hotReload = std::make_unique<EditorHotReload>(*editorState,
+        editorState->GetConsole(), projectSettings.scriptsDirectory,
+        ENGINE_BUILD_DIR, PROJECT_SCRIPTS_PATH);
+    hotReload->BeforeApply = [&]()
+    {
+        if (gameBuildManager->IsBuilding()) gameBuildManager->CancelBuild();
+        gameBuildManager->Stop();
+    };
     OutputDebugStringA("[Main] GameBuildManager created\n");
     OutputDebugStringA("[Main] Getting window, renderer, scene...\n");
     char buf[256];
@@ -382,6 +397,7 @@ int WINAPI wWinMain(
         // Update build manager
         PostBuildAction postBuildAction;
         gameBuildManager->Update(playState, postBuildAction);
+        hotReload->Update(window->IsFocused());
 
         // Tick game objects while playing
         if (playState == PlayState::Playing)
@@ -435,6 +451,7 @@ int WINAPI wWinMain(
     // Panels release UI texture registrations while the selected package is
     // still alive. The renderer itself is owned by EditorState.
     gameBuildManager.reset();
+    hotReload.reset();
     editorState.reset();
     uiBackend.reset();
 

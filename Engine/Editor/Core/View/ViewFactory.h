@@ -6,6 +6,7 @@
 #include "Views/PropertiesView.h"
 #include "Views/AssetsExplorerView.h"
 #include "Views/ConsoleView.h"
+#include "Views/TerminalView.h"
 #include "Core/Renderers/IEditorRenderer.h"
 #include "Core/Scene/Scene.h"
 #include "Core/ProjectLoader.h"
@@ -43,7 +44,7 @@ public:
                 const ProjectSettings& settings);
 
     // Create a new panel by type name.
-    // Supported names: "Scene", "Game", "Hierarchy", "Properties", "Assets", "Console"
+    // Supported names: "Scene", "Game", "Hierarchy", "Properties", "Assets", "Console", "Terminal"
     // Returns nullptr if the type name is unknown or if no SRV slot is available for a 3-D view.
     std::unique_ptr<IEditorPanel> Create(const std::string& typeName);
 
@@ -99,4 +100,5 @@ private:
     int m_propertiesCount = 0;
     int m_assetsCount     = 0;
     int m_consoleCount    = 0;
+    int m_terminalCount   = 0;
 };

@@ -383,6 +383,11 @@ void EditorState::RestorePlayModeScene()
     m_prePlayHadObjectSelection = false;
 }
 
+void EditorState::RefreshSelectionAfterReload(const Scene::ObjectPath& selectedPath)
+{
+    SelectObject(m_scene ? m_scene->FindObjectByPath(selectedPath) : nullptr);
+}
+
 // ---------------------------------------------------------------------------
 // EditorState::InitializePanels
 // ---------------------------------------------------------------------------
@@ -448,6 +453,11 @@ void EditorState::InitializePanels()
             m_primaryConsole = static_cast<ConsoleView*>(console.get());
             m_panels.push_back(std::move(console));
         }
+
+        OutputDebugStringA("[EditorState::InitializePanels] Creating Terminal view\n");
+        auto terminal = m_viewFactory->Create("Terminal");
+        if (terminal)
+            m_panels.push_back(std::move(terminal));
     }
     OutputDebugStringA("[EditorState::InitializePanels] Complete\n");
 }

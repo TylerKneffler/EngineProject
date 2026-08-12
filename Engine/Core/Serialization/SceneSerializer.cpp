@@ -4,6 +4,7 @@
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Object.h"
 #include "Core/component.h"
+#include "Core/Script.h"
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Compoonents/Material.h"
 #include "Core/Compoonents/Camera.h"
@@ -46,6 +47,18 @@ std::unordered_map<std::string, SceneSerializer::Factory>& SceneSerializer::GetR
 void SceneSerializer::Register(const std::string& typeName, Factory factory)
 {
     GetRegistry()[typeName] = std::move(factory);
+}
+
+void SceneSerializer::Unregister(const std::string& typeName)
+{
+    GetRegistry().erase(typeName);
+}
+
+SceneSerializer::Factory SceneSerializer::GetRegisteredFactory(
+    const std::string& typeName)
+{
+    auto found = GetRegistry().find(typeName);
+    return found == GetRegistry().end() ? Factory{} : found->second;
 }
 
 void SceneSerializer::Register(Factory factory)
@@ -123,6 +136,20 @@ std::vector<std::string> SceneSerializer::GetRegisteredComponentTypes()
         return std::lexicographical_compare(left.begin(), left.end(), right.begin(), right.end(),
             [](unsigned char a, unsigned char b) { return std::tolower(a) < std::tolower(b); });
     });
+    return types;
+}
+
+std::vector<std::string> SceneSerializer::GetRegisteredScriptTypes()
+{
+    EnsureBuiltinsRegistered();
+    std::vector<std::string> types;
+    for (const auto& entry : GetRegistry())
+    {
+        std::unique_ptr<Component> prototype(entry.second ? entry.second() : nullptr);
+        if (prototype && dynamic_cast<Script*>(prototype.get()))
+            types.push_back(entry.first);
+    }
+    std::sort(types.begin(), types.end());
     return types;
 }
 

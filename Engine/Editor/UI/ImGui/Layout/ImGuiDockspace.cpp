@@ -10,7 +10,16 @@ void ImGuiDockspace::Draw()
 
     // Build defaults only when imgui.ini did not restore a dock tree.
     ImGuiDockNode* root = ImGui::DockBuilderGetNode(dockspaceId);
-    if (root != nullptr && !root->IsLeafNode()) return;
+    if (root != nullptr && !root->IsLeafNode())
+    {
+        // Existing layouts predate the Terminal panel. Once both windows have
+        // appeared, place an undocked Terminal beside Console as another tab.
+        ImGuiWindow* console = ImGui::FindWindowByName("Console 1");
+        ImGuiWindow* terminal = ImGui::FindWindowByName("Terminal 1");
+        if (console && console->DockNode && terminal && !terminal->DockNode)
+            ImGui::DockBuilderDockWindow("Terminal 1", console->DockNode->ID);
+        return;
+    }
 
     ImGui::DockBuilderRemoveNode(dockspaceId);
     ImGui::DockBuilderAddNode(dockspaceId, ImGuiDockNodeFlags_DockSpace);
@@ -31,6 +40,7 @@ void ImGuiDockspace::Draw()
     ImGui::DockBuilderDockWindow("Scene 1", centerTop);
     ImGui::DockBuilderDockWindow("Game 1", centerTop);
     ImGui::DockBuilderDockWindow("Console 1", centerBottom);
+    ImGui::DockBuilderDockWindow("Terminal 1", centerBottom);
     ImGui::DockBuilderDockWindow("Properties 1", right);
     ImGui::DockBuilderFinish(dockspaceId);
 }

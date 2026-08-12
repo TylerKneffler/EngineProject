@@ -14,7 +14,8 @@ public:
     void BeginTextWrap() override; void EndTextWrap() override;
     void SameLine() override; void Separator() override; void Spacing() override;
     bool Checkbox(const char*, bool*) override; bool InputText(const char*, char*, size_t) override;
-    void ReadOnlyTextBlock(const char*, const char*, bool) override;
+    bool InputTextSubmit(const char*, char*, size_t) override;
+    void ReadOnlyTextBlock(const char*, const char*, bool, float) override;
     bool DragFloat(const char*, float*, float, float, float) override;
     bool DragFloat3(const char*, float*, float, float, float) override;
     bool ColorEdit3(const char*, float*) override; bool ColorEdit4(const char*, float*) override;

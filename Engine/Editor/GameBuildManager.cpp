@@ -15,6 +15,28 @@
 // Forward declaration
 static HANDLE StartGameBuild(HANDLE& outReadPipe);
 
+namespace
+{
+size_t CountFiles(const std::string& directory,
+    std::initializer_list<const char*> extensions)
+{
+    if (directory.empty()) return 0;
+    std::error_code error;
+    size_t count = 0;
+    for (std::filesystem::recursive_directory_iterator iterator(directory, error), end;
+         iterator != end && !error; iterator.increment(error))
+    {
+        if (!iterator->is_regular_file(error)) continue;
+        std::string extension = iterator->path().extension().string();
+        std::transform(extension.begin(), extension.end(), extension.begin(),
+            [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+        for (const char* expected : extensions)
+            if (extension == expected) { ++count; break; }
+    }
+    return count;
+}
+}
+
 // ---------------------------------------------------------------------------
 // GameBuildManager::~GameBuildManager
 // ---------------------------------------------------------------------------
@@ -46,6 +68,24 @@ void GameBuildManager::StartBuild(PostBuildAction action)
         return;
     }
 
+    if (m_console)
+    {
+        const size_t scripts = CountFiles(m_developmentSettings.scriptsDirectory,
+            {".cpp", ".c", ".cc", ".cxx"});
+        const size_t shaders = CountFiles(m_developmentSettings.shadersDirectory,
+            {".hlsl", ".glsl", ".vert", ".frag", ".comp"});
+        const size_t assets = CountFiles(m_developmentSettings.assetsDirectory,
+            {".png", ".jpg", ".jpeg", ".dds", ".obj", ".fbx", ".gltf", ".glb", ".wav"});
+        m_console->AddLog(ConsoleView::Level::Build,
+            "[Build] Starting Debug Game build: cmake configure/check, compile, and link.");
+        m_console->AddLog(ConsoleView::Level::Build,
+            "[Scripts] " + std::to_string(scripts) + " project source file(s) queued for the Game target.");
+        m_console->AddLog(ConsoleView::Level::Build,
+            "[Shaders] " + std::to_string(shaders) + " shader source file(s) discovered; renderer compilation occurs at startup.");
+        m_console->AddLog(ConsoleView::Level::Build,
+            "[Assets] " + std::to_string(assets) + " runtime asset file(s) discovered.");
+    }
+
     // Start the background build process
     m_buildProcess = StartGameBuild(m_buildPipe);
     if (m_buildProcess)
@@ -59,6 +99,10 @@ void GameBuildManager::StartBuild(PostBuildAction action)
     else
     {
         m_playState = PlayState::BuildFailed;
+        if (m_console)
+            m_console->AddLog(ConsoleView::Level::Error,
+                "[Build] Could not start the CMake build process.");
+        if (OnBuildComplete) OnBuildComplete(false);
     }
 }
 

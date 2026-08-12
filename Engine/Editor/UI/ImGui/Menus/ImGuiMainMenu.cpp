@@ -102,6 +102,7 @@ void ImGuiMainMenu::DrawViewsMenu(EditorState& state) const
     if (ImGui::MenuItem("Properties")) OpenPanel(state, "Properties");
     if (ImGui::MenuItem("Assets")) OpenPanel(state, "Assets");
     if (ImGui::MenuItem("Console")) OpenPanel(state, "Console");
+    if (ImGui::MenuItem("Terminal")) OpenPanel(state, "Terminal");
     ImGui::EndMenu();
 }
 

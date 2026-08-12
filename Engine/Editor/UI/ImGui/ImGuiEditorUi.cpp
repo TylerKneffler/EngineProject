@@ -17,11 +17,13 @@ void ImGuiEditorUi::BeginTextWrap(){ImGui::PushTextWrapPos(0.f);}
 void ImGuiEditorUi::EndTextWrap(){ImGui::PopTextWrapPos();}
 void ImGuiEditorUi::SameLine(){ImGui::SameLine();} void ImGuiEditorUi::Separator(){ImGui::Separator();} void ImGuiEditorUi::Spacing(){ImGui::Spacing();}
 bool ImGuiEditorUi::Checkbox(const char*l,bool*v){return ImGui::Checkbox(l,v);} bool ImGuiEditorUi::InputText(const char*l,char*b,size_t s){if(l&&l[0]=='#'&&l[1]=='#')ImGui::SetNextItemWidth(-FLT_MIN);return ImGui::InputText(l,b,s);}
-void ImGuiEditorUi::ReadOnlyTextBlock(const char* label,const char* text,bool scrollToBottom)
+bool ImGuiEditorUi::InputTextSubmit(const char*l,char*b,size_t s){if(l&&l[0]=='#'&&l[1]=='#')ImGui::SetNextItemWidth(-FLT_MIN);return ImGui::InputText(l,b,s,ImGuiInputTextFlags_EnterReturnsTrue);}
+void ImGuiEditorUi::ReadOnlyTextBlock(const char* label,const char* text,bool scrollToBottom,float reservedBottom)
 {
     const char* value=text?text:"";
     const ImGuiID id=ImGui::GetID(label);
-    const ImVec2 available=ImGui::GetContentRegionAvail();
+    ImVec2 available=ImGui::GetContentRegionAvail();
+    available.y=std::max(1.f,available.y-reservedBottom);
     ImGui::InputTextMultiline(label,const_cast<char*>(value),strlen(value)+1,
         available,ImGuiInputTextFlags_ReadOnly|ImGuiInputTextFlags_NoUndoRedo);
     if(scrollToBottom)

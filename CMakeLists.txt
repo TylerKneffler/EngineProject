@@ -424,6 +424,24 @@ add_executable(Editor WIN32
     ${PROJECT_BROWSE_FILES}
     ${PROJECT_ROOT_FILES}
 )
+
+# Project scripts are also built as a reloadable module. The editor loads a
+# versioned copy so this canonical output remains writable on the next edit.
+add_library(ProjectScripts SHARED
+    ${ASSET_SOURCES}
+    "${ENGINE_ROOT}/Engine/Editor/HotReload/ProjectScriptModule.cpp"
+)
+target_link_libraries(ProjectScripts PRIVATE Engine)
+target_include_directories(ProjectScripts PRIVATE
+    ${ENGINE_ROOT}
+    ${ENGINE_ROOT}/Engine
+    ${ENGINE_ROOT}/Engine/Editor
+    ${ENGINE_ROOT}/Engine/Core/Assets
+    ${ENGINE_PROJECT_DIR}/Assets
+)
+set_target_properties(ProjectScripts PROPERTIES PREFIX "" OUTPUT_NAME "ProjectScripts")
+target_precompile_headers(ProjectScripts REUSE_FROM Engine)
+add_dependencies(Editor ProjectScripts)
 source_group(TREE "${ENGINE_ROOT}" FILES ${EDITOR_SOURCES} ${EDITOR_HEADERS})
 if(ENGINE_PROJECT_DIR)
     source_group(TREE "${ENGINE_PROJECT_DIR}" PREFIX "Project" FILES
@@ -445,6 +463,7 @@ target_compile_definitions(Editor PRIVATE
     ENGINE_ASSETS_PATH="${ENGINE_COMPILED_ASSETS_PATH}"
     ENGINE_ROOT_PATH="${ENGINE_COMPILED_ROOT_PATH}"
     GAME_EXECUTABLE_PATH="${ENGINE_COMPILED_GAME_PATH}"
+    PROJECT_SCRIPTS_PATH="$<TARGET_FILE:ProjectScripts>"
     ENGINE_EDITOR_UI_IMGUI
     $<$<NOT:$<BOOL:${ENGINE_PROJECT_DIR}>>:ENGINE_BUILTIN_ASSET_SCRIPTS>
 )

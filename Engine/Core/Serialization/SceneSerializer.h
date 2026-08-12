@@ -63,6 +63,9 @@ public:
     // uses this for component-script assets dropped onto an object.
     static Component* CreateRegisteredComponent(const std::string& typeName);
     static std::vector<std::string> GetRegisteredComponentTypes();
+    static std::vector<std::string> GetRegisteredScriptTypes();
+    static void Unregister(const std::string& typeName);
+    static Factory GetRegisteredFactory(const std::string& typeName);
 
     // Write the scene to a scene XML file.
     // Returns false if the destination file cannot be opened.
