@@ -57,8 +57,8 @@ struct EditorUiObjectRowResult
 struct EditorUiContextMenuResult
 {
     bool addRequested = false;
-    bool addCubeRequested = false;
     bool addSpriteRequested = false;
+    std::string primitive3D;
     bool unpackRequested = false;
     bool deleteRequested = false;
 };

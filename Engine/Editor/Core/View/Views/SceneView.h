@@ -50,6 +50,7 @@ public:
     std::function<void(Engine::Core::Object*)> OnAssetPreviewCancelled;
     std::function<void(Engine::Core::Object*, const std::string&)> OnAssetPreviewCommitted;
     std::function<void(Engine::Core::Object*)> OnObjectSelected;
+    std::function<void(Engine::Core::Object*)> OnObjectCreated;
     std::function<void(bool)> OnGizmoInteraction;
 
 private:

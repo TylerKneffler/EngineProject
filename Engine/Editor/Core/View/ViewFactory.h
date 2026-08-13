@@ -75,6 +75,7 @@ public:
     std::function<void(Engine::Core::Object*)>           OnSelectionChanged;  // HierarchyView
     std::function<void()>                  OnMainDocumentFocused;
     std::function<void(Engine::Core::Object*)>           OnObjectSelected;    // SceneView click selection
+    std::function<void(Engine::Core::Object*)>           OnObjectCreated;     // SceneView context creation
     std::function<void(bool)>              OnGizmoInteraction;  // SceneView transform drag
     std::function<void(Engine::Core::Object*)>           OnFocusObject;       // HierarchyView double-click
     std::function<void()>                  OnHierarchyChanged;

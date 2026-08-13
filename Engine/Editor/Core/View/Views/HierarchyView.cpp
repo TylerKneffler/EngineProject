@@ -1,4 +1,5 @@
 #include "HierarchyView.h"
+#include "Engine/Editor/Core/PrimitiveObjectFactory.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Object.h"
@@ -67,14 +68,15 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
     const bool worldOpen = ui.TreeNode(
         this, "World", m_selectedObject == nullptr, false, true);
     const EditorUiContextMenuResult worldMenu =
-        ui.ContextMenu(this, "Add Object", nullptr, true);
-    if (worldMenu.addRequested || worldMenu.addCubeRequested ||
+        ui.ContextMenu(this, "Create", nullptr, true);
+    if (worldMenu.addRequested || !worldMenu.primitive3D.empty() ||
         worldMenu.addSpriteRequested)
     {
         m_pendingAddParent = nullptr;
-        m_pendingAddType = worldMenu.addCubeRequested ? PendingAddType::Cube
+        m_pendingAddType = !worldMenu.primitive3D.empty() ? PendingAddType::Primitive3D
             : (worldMenu.addSpriteRequested ? PendingAddType::Sprite
                 : PendingAddType::Empty);
+        m_pendingPrimitive3D = worldMenu.primitive3D;
         m_hasPendingAdd = true;
     }
     const EditorUiHierarchyDropResult worldDrop =
@@ -154,16 +156,8 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
         Engine::Core::Object* created = nullptr;
         try
         {
-            if (m_pendingAddType == PendingAddType::Cube)
-            {
-                created = m_scene->AddObject("Cube");
-                Engine::Components::Mesh* mesh = created->AddComponent<Engine::Components::Mesh>();
-                mesh->LoadFromFile("Assets/Mesh/cube.obj");
-                if (m_scene->GetGraphicsProvider())
-                    mesh->CreateBuffer(
-                        m_scene->GetGraphicsProvider()->GetBufferFactory());
-                created->AddComponent<Engine::Components::Material>();
-            }
+            if (m_pendingAddType == PendingAddType::Primitive3D)
+                created = CreatePrimitiveObject(*m_scene, m_pendingPrimitive3D);
             else if (m_pendingAddType == PendingAddType::Sprite)
             {
                 created = m_scene->AddObject("Sprite");
@@ -200,6 +194,7 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
                     : " to World"));
         }
         m_pendingAddParent = nullptr;
+        m_pendingPrimitive3D.clear();
         m_hasPendingAdd = false;
         if (created && OnHierarchyChanged) OnHierarchyChanged();
     }
@@ -405,14 +400,15 @@ void HierarchyView::DrawObjectNode(
             m_pendingPrefabRoot = prefabRoot;
     }
     else
-        menu = ui.ContextMenu(obj, "Add Object",
+        menu = ui.ContextMenu(obj, "Create",
             deletable ? "Delete Object" : nullptr, true);
-    if (menu.addRequested || menu.addCubeRequested || menu.addSpriteRequested)
+    if (menu.addRequested || !menu.primitive3D.empty() || menu.addSpriteRequested)
     {
         m_pendingAddParent = obj;
-        m_pendingAddType = menu.addCubeRequested ? PendingAddType::Cube
+        m_pendingAddType = !menu.primitive3D.empty() ? PendingAddType::Primitive3D
             : (menu.addSpriteRequested ? PendingAddType::Sprite
                 : PendingAddType::Empty);
+        m_pendingPrimitive3D = menu.primitive3D;
         m_hasPendingAdd = true;
     }
     if (menu.deleteRequested)

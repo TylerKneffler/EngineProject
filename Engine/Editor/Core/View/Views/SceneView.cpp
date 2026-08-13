@@ -1,11 +1,13 @@
 
 #include "SceneView.h"
+#include "Engine/Editor/Core/PrimitiveObjectFactory.h"
 #include "Engine/Editor/Core/View/Templates/Common/AssetPathTemplate.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Camera.h"
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Compoonents/Sprite.h"
+#include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include <cfloat>
@@ -143,6 +145,49 @@ void SceneView::DrawPanel(IEditorUi& ui)
          static_cast<float>(m_gameWindowWidth) / static_cast<float>(m_gameWindowHeight));
     const auto input = ui.Viewport(GetUiTextureHandle(), targetAspect,
         {m_letterboxColor.r,m_letterboxColor.g,m_letterboxColor.b,m_letterboxColor.a});
+    const EditorUiContextMenuResult createMenu =
+        ui.ContextMenu(this, "Create", nullptr, true);
+    if (m_scene && (createMenu.addRequested ||
+        !createMenu.primitive3D.empty() || createMenu.addSpriteRequested))
+    {
+        Engine::Core::Object* created = nullptr;
+        glm::vec3 placement(0.f);
+        const bool hasPlacement = FindPrefabPlacement(
+            input.mousePosInViewport, input.available, placement);
+        try
+        {
+            if (!createMenu.primitive3D.empty())
+                created = CreatePrimitiveObject(*m_scene, createMenu.primitive3D);
+            else if (createMenu.addSpriteRequested)
+            {
+                created = m_scene->AddObject("Sprite");
+                Engine::Components::SpriteAnimationManager* manager =
+                    created->AddComponent<Engine::Components::SpriteAnimationManager>();
+                Engine::Components::Sprite* sprite =
+                    created->AddComponent<Engine::Components::Sprite>();
+                sprite->SetAnimationManager(manager);
+            }
+            else
+                created = m_scene->AddObject("GameObject");
+        }
+        catch (const std::exception& error)
+        {
+            if (created)
+            {
+                m_scene->RemoveObject(created);
+                created = nullptr;
+            }
+            OutputDebugStringA(("[SceneView] Create object failed: " +
+                std::string(error.what()) + "\n").c_str());
+        }
+        if (created)
+        {
+            if (hasPlacement)
+                created->transform.position = placement;
+            if (OnObjectCreated)
+                OnObjectCreated(created);
+        }
+    }
     const EditorGizmoResult gizmoResult = m_scene
         ? m_gizmos.DrawAndHandle(*m_scene, ui, input)
         : EditorGizmoResult{};

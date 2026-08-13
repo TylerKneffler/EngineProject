@@ -502,6 +502,13 @@ void EditorState::OpenPrefabStage(const std::string& path)
         if (m_prefabHierarchy) m_prefabHierarchy->SetSelectedObject(object);
         if (m_prefabProperties) m_prefabProperties->SetSelectedObject(object);
     };
+    m_prefabSceneView->OnObjectCreated = [this](Engine::Core::Object* object)
+    {
+        m_prefabHasUnsavedChanges = true;
+        if (m_prefabScene) m_prefabScene->SetSelectedObject(object);
+        if (m_prefabHierarchy) m_prefabHierarchy->SetSelectedObject(object);
+        if (m_prefabProperties) m_prefabProperties->SetSelectedObject(object);
+    };
     m_prefabSceneView->OnGizmoInteraction = [this](bool active)
     {
         if (active) m_prefabHasUnsavedChanges = true;
@@ -862,6 +869,10 @@ void EditorState::WireupCallbacks()
             m_primaryAssets->SetSelectedPath({});
         if (m_scene)
             m_scene->SetSelectedObject(obj);
+    };
+    m_viewFactory->OnObjectCreated = [this](Engine::Core::Object* obj) {
+        m_hasUnsavedChanges = true;
+        SelectObject(obj);
     };
     m_viewFactory->OnGizmoInteraction = [this](bool active) {
         ReportSceneEditInProgress(active);

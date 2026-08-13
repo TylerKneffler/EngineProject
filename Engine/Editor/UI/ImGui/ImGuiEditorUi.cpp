@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "ImGuiEditorUi.h"
+#include "Engine/Editor/Core/PrimitiveObjectFactory.h"
 #include "Engine/Editor/Input/EditorKeyBindings.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -267,8 +268,15 @@ EditorUiContextMenuResult ImGuiEditorUi::ContextMenu(const void* id,const char* 
             if(objectCreationMenu){
                 if(ImGui::BeginMenu(addLabel)){
                     result.addRequested=ImGui::MenuItem("Empty");
-                    result.addCubeRequested=ImGui::MenuItem("Cube");
-                    result.addSpriteRequested=ImGui::MenuItem("Sprite");
+                    if(ImGui::BeginMenu("3D")){
+                        for(const PrimitiveObjectDefinition& primitive:PrimitiveObjectDefinitions())
+                            if(ImGui::MenuItem(primitive.name))result.primitive3D=primitive.name;
+                        ImGui::EndMenu();
+                    }
+                    if(ImGui::BeginMenu("2D")){
+                        result.addSpriteRequested=ImGui::MenuItem("Sprite");
+                        ImGui::EndMenu();
+                    }
                     ImGui::EndMenu();
                 }
             }else result.addRequested=ImGui::MenuItem(addLabel);

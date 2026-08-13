@@ -46,7 +46,7 @@ public:
     std::function<void(const std::string&)> OnInteractionLog;
 
 private:
-    enum class PendingAddType { Empty, Cube, Sprite };
+    enum class PendingAddType { Empty, Primitive3D, Sprite };
     enum class PendingPrefabAction { None, Apply, ApplyAll, Revert, Unpack };
     void DrawObjectNode(IEditorUi& ui, Engine::Core::Object* obj, int depth,
         bool lastSibling, uint64_t ancestorGuideMask = 0);
@@ -63,6 +63,7 @@ private:
     Engine::Core::Object* m_pendingPrefabRoot = nullptr;
     PendingPrefabAction m_pendingPrefabAction = PendingPrefabAction::None;
     PendingAddType m_pendingAddType = PendingAddType::Empty;
+    std::string m_pendingPrimitive3D;
     bool m_hasPendingAdd = false;
     ::Engine::Scene::Scene::ObjectPlacement m_pendingPlacement = ::Engine::Scene::Scene::ObjectPlacement::AsChild;
     bool m_hasPendingMove = false;
