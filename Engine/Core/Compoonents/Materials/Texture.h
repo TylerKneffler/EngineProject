@@ -7,6 +7,8 @@
 
 #include "Core/Graphics/IGraphicsTexture.h"
 
+namespace Engine::Graphics { class IGraphicsProvider; }
+
 namespace Engine::Components
 {
 class Texture

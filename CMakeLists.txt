@@ -319,7 +319,7 @@ target_include_directories(Engine PUBLIC
     ${ENGINE_ROOT}
     ${ENGINE_ROOT}/Engine
 )
-target_include_directories(Engine PRIVATE
+target_include_directories(Engine SYSTEM PRIVATE
     ${assimp_SOURCE_DIR}/contrib/stb
     ${imgui_SOURCE_DIR}
     ${tinyexr_SOURCE_DIR}
@@ -403,8 +403,13 @@ if(MSVC)
         $<$<CONFIG:Debug>:_DEBUG>
         $<$<CONFIG:Release>:NDEBUG>
     )
-    target_compile_options(Engine PRIVATE
+    # Targets reusing Engine's precompiled header must use the same warning
+    # level with which the PCH was created, otherwise MSVC emits C4652 for
+    # every consuming translation unit.
+    target_compile_options(Engine PUBLIC
         /W4
+    )
+    target_compile_options(Engine PRIVATE
         /MP          # parallel compilation
         /FS          # force synchronous PDB writes (required with /MP)
         $<$<CONFIG:Release>:/O2 /GL>

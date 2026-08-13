@@ -3,6 +3,7 @@
 #include <functional>
 #include "View/IEditorPanel.h"
 
+namespace Engine::Core { class Object; }
 
 namespace Engine::Editor
 {

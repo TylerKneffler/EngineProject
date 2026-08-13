@@ -5,6 +5,7 @@
 #include <string>
 
 namespace Engine::Scene { class Scene; }
+namespace Engine::Components { class Texture; }
 
 namespace Engine::Editor
 {

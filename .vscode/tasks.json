@@ -60,6 +60,8 @@
                 "--build", "--preset", "debug",
                 "--target", "clean"
             ],
+            "dependsOn": "CMake: Configure (Debug)",
+            "dependsOrder": "sequence",
             "group": "build",
             "presentation": { "reveal": "always", "panel": "shared" },
             "problemMatcher": []

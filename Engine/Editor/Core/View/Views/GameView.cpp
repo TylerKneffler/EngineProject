@@ -1,5 +1,6 @@
 #include "GameView.h"
 #include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Compoonents/Camera.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Graphics/IGraphicsProvider.h"

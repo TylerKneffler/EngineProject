@@ -127,6 +127,11 @@ void D3D12GraphicsContext::SetScissorRect(const ScissorRect& rect)
 
 void D3D12GraphicsContext::Clear(float r, float g, float b, float a, float depth)
 {
+    (void)r;
+    (void)g;
+    (void)b;
+    (void)a;
+    (void)depth;
     // This would typically clear the current render target
     // Implementation depends on having RTV/DSV descriptors
     // For now, this is a placeholder
