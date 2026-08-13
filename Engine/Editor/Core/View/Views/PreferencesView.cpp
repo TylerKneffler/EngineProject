@@ -1,5 +1,6 @@
 #include "Engine/Editor/Core/View/Views/PreferencesView.h"
 #include "Engine/Editor/UI/IEditorUi.h"
+#include "Engine/Editor/Input/EditorKeyBindings.h"
 #include "Core/Renderers/RendererFactory.h"
 #include <pugixml.hpp>
 #include <algorithm>
@@ -7,6 +8,7 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 
 #ifndef ENGINE_SHADERS_PATH
 #define ENGINE_SHADERS_PATH "Engine/Core/Shaders/"
@@ -212,6 +214,7 @@ void PreferencesView::Init(const Engine::Model::ProjectSettings& settings, const
 {
     m_settings = settings;
     m_projFilePath = projFilePath;
+    EditorKeyBindings::Get().Initialize(projFilePath);
 
     // Initialize string buffers
     strncpy_s(m_projectNameBuf, m_settings.name.c_str(), sizeof(m_projectNameBuf) - 1);
@@ -226,6 +229,7 @@ void PreferencesView::DrawWindow(IEditorUi& ui, bool& isOpen)
 {
     if (!isOpen) return;
     UpdatePortableExport();
+    bool keybindTabVisible = false;
 
     ui.SetNextWindowRect(100, 50, 600, 700);
     
@@ -260,6 +264,13 @@ void PreferencesView::DrawWindow(IEditorUi& ui, bool& isOpen)
             if (ui.BeginTab("Editor"))
             {
                 DrawEditorSection(ui);
+                ui.EndTab();
+            }
+
+            if (ui.BeginTab("Keybinds"))
+            {
+                keybindTabVisible = true;
+                DrawKeybindsSection(ui);
                 ui.EndTab();
             }
 
@@ -299,6 +310,105 @@ void PreferencesView::DrawWindow(IEditorUi& ui, bool& isOpen)
     }
 
     ui.EndWindow();
+    if (!isOpen || !keybindTabVisible)
+        ui.CancelKeyBindingCapture();
+}
+
+void PreferencesView::DrawKeybindsSection(IEditorUi& ui)
+{
+    EditorKeyBindings& keybinds = EditorKeyBindings::Get();
+    ui.Label("Editor Controls");
+    ui.DisabledLabel("Click a binding, then press a keyboard key, mouse button, or scroll the wheel. Escape cancels; Delete or Backspace clears the slot.");
+    ui.Spacing();
+
+    const std::size_t bindingColumns = keybinds.BindingColumnCount();
+    std::size_t deleteColumn = std::numeric_limits<std::size_t>::max();
+    bool addColumn = false;
+    if (ui.BeginTable("EditorKeybinds", static_cast<int>(bindingColumns + 3)))
+    {
+        ui.TableSetupColumn("Category");
+        ui.TableSetupColumn("Action");
+        for (std::size_t slot = 0; slot < bindingColumns; ++slot)
+        {
+            const std::string setupId = "Binding " + std::to_string(slot + 1);
+            ui.TableSetupColumn(setupId.c_str());
+        }
+        ui.TableSetupCompactColumn("+");
+        ui.TableNextRow();
+        ui.TableNextColumn(); ui.Label("Category");
+        ui.TableNextColumn(); ui.Label("Action");
+        for (std::size_t slot = 0; slot < bindingColumns; ++slot)
+        {
+            ui.TableNextColumn();
+            const std::string label = slot == 0 ? "Primary" :
+                (slot == 1 ? "Secondary" : "Binding " + std::to_string(slot + 1));
+            const std::string id = "binding-column-" + std::to_string(slot);
+            if (ui.BindingColumnHeader(id.c_str(), label.c_str(), bindingColumns > 1))
+                deleteColumn = slot;
+        }
+        ui.TableNextColumn();
+        addColumn = ui.AddBindingColumnHeader("add-binding-column");
+        for (auto& entry : keybinds.Entries())
+        {
+            ui.TableNextRow();
+            ui.TableNextColumn(); ui.Label(entry.category);
+            ui.TableNextColumn(); ui.Label(entry.label);
+            for (std::size_t slot = 0; slot < entry.bindings.size(); ++slot)
+            {
+                ui.TableNextColumn();
+                EditorKeyBinding& binding = entry.bindings[slot];
+                const std::string display = keybinds.BindingLabel(binding);
+                const std::string id = std::string(entry.id) + ".binding." +
+                    std::to_string(slot);
+                if (ui.KeyBindingInput(id.c_str(), display.c_str(), &binding.key,
+                    &binding.control, &binding.shift, &binding.alt))
+                {
+                    m_keybindStatus.clear();
+                    NotifyChanged();
+                }
+            }
+            ui.TableNextColumn();
+        }
+        ui.EndTable();
+    }
+    if (deleteColumn != std::numeric_limits<std::size_t>::max() &&
+        keybinds.RemoveBindingColumn(deleteColumn))
+    {
+        ui.CancelKeyBindingCapture();
+        m_keybindStatus.clear();
+        NotifyChanged();
+    }
+    else if (addColumn)
+    {
+        keybinds.AddBindingColumn();
+        m_keybindStatus.clear();
+        NotifyChanged();
+    }
+
+    ui.Spacing();
+    if (ui.Button("Save Keybinds", 150.f, 30.f))
+    {
+        m_keybindStatusSucceeded = keybinds.Save();
+        m_keybindStatus = m_keybindStatusSucceeded
+            ? "Keybinds saved." : keybinds.LastError();
+    }
+    ui.SameLine();
+    if (ui.Button("Reset Keybinds", 150.f, 30.f))
+    {
+        m_keybindStatusSucceeded = keybinds.ResetToDefaults() && keybinds.Save();
+        m_keybindStatus = m_keybindStatusSucceeded
+            ? "Default keybinds restored and saved." : keybinds.LastError();
+        NotifyChanged();
+    }
+    if (!m_keybindStatus.empty())
+    {
+        ui.Spacing();
+        ui.ColoredLabel(m_keybindStatus.c_str(), m_keybindStatusSucceeded
+            ? EditorUiColor{.35f,.85f,.45f,1.f}
+            : EditorUiColor{1.f,.35f,.35f,1.f});
+    }
+    ui.DisabledLabel(("Defaults: " + keybinds.DefaultPath()).c_str());
+    ui.DisabledLabel(("User bindings: " + keybinds.UserPath()).c_str());
 }
 
 void PreferencesView::DrawDiagnosticsSection(IEditorUi& ui)

@@ -47,6 +47,14 @@ public:
     void SetClipboardText(const char*) override; void ScrollToBottom() override;
     bool BeginTabBar(const char*) override; void EndTabBar() override;
     bool BeginTab(const char*) override; void EndTab() override;
+    bool BeginTable(const char*, int) override; void TableSetupColumn(const char*) override;
+    void TableSetupCompactColumn(const char*) override;
+    void TableHeadersRow() override; void TableNextRow() override;
+    void TableNextColumn() override; void EndTable() override;
+    bool BindingColumnHeader(const char*, const char*, bool) override;
+    bool AddBindingColumnHeader(const char*) override;
+    bool KeyBindingInput(const char*, const char*, std::string*, bool*, bool*, bool*) override;
+    void CancelKeyBindingCapture() override;
     void BeginDisabled(bool) override; void EndDisabled() override;
     bool Combo(const char*, int*, const char* const*, int) override;
     void Tooltip(const char*) override; void Progress(float, const char*) override;
@@ -63,5 +71,7 @@ private:
     std::unordered_map<const void*, bool> m_objectHadChildren;
     EditorUiVec2 m_viewportScreenMin{};
     EditorUiVec2 m_viewportScreenMax{};
+    void* m_capturedViewportTexture = nullptr;
+    unsigned int m_bindingCaptureId = 0;
 };
 }

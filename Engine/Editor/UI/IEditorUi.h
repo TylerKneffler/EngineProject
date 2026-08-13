@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 namespace Engine::Editor
 {
@@ -27,6 +28,7 @@ struct EditorUiViewportInput
     bool leftReleased = false;
     bool rightDown = false;
     bool middleDown = false;
+    bool zoomDragDown = false;
 };
 
 enum class EditorUiHierarchyDropPosition { None, Before, AsChild, After };
@@ -167,6 +169,19 @@ public:
     virtual void EndTabBar() = 0;
     virtual bool BeginTab(const char* label) = 0;
     virtual void EndTab() = 0;
+    virtual bool BeginTable(const char* id, int columns) = 0;
+    virtual void TableSetupColumn(const char* label) = 0;
+    virtual void TableSetupCompactColumn(const char* label) = 0;
+    virtual void TableHeadersRow() = 0;
+    virtual void TableNextRow() = 0;
+    virtual void TableNextColumn() = 0;
+    virtual void EndTable() = 0;
+    virtual bool BindingColumnHeader(const char* id, const char* label,
+        bool canDelete) = 0;
+    virtual bool AddBindingColumnHeader(const char* id) = 0;
+    virtual bool KeyBindingInput(const char* id, const char* display,
+        std::string* key, bool* control, bool* shift, bool* alt) = 0;
+    virtual void CancelKeyBindingCapture() = 0;
     virtual void BeginDisabled(bool disabled = true) = 0;
     virtual void EndDisabled() = 0;
     virtual bool Combo(const char* label, int* selected, const char* const* items, int count) = 0;

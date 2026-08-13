@@ -2,6 +2,7 @@
 #include "Engine/Editor/UI/ImGui/Menus/ImGuiMainMenu.h"
 #include "Engine/Editor/EditorState.h"
 #include "Engine/Editor/GameBuildManager.h"
+#include "Engine/Editor/Input/EditorKeyBindings.h"
 #include "Engine/Editor/Core/View/ViewFactory.h"
 #include "imgui.h"
 
@@ -24,7 +25,9 @@ void ImGuiMainMenu::Draw(EditorState& state, PlayState playState,
     DrawFileMenu(state, playState, buildManager);
     if (ImGui::BeginMenu("Import"))
     {
-        if (ImGui::MenuItem("Asset..."))
+        const std::string shortcut = EditorKeyBindings::Get().ShortcutLabel(
+            EditorCommand::ImportAsset);
+        if (ImGui::MenuItem("Asset...", shortcut.c_str()))
             state.ImportAsset();
         ImGui::Separator();
         ImGui::TextDisabled("Or drag files into the editor");
@@ -45,9 +48,13 @@ void ImGuiMainMenu::DrawRenderingMenu(
         Engine::Scene::Scene* scene = state.GetScene();
         const bool disabled = !scene || IsBusy(playState);
         if (disabled) ImGui::BeginDisabled();
-        if (ImGui::MenuItem("Bake Lighting"))
+        const std::string bakeShortcut = EditorKeyBindings::Get().ShortcutLabel(
+            EditorCommand::BakeLighting);
+        const std::string clearShortcut = EditorKeyBindings::Get().ShortcutLabel(
+            EditorCommand::ClearBakedLighting);
+        if (ImGui::MenuItem("Bake Lighting", bakeShortcut.c_str()))
             state.BakeLighting();
-        if (ImGui::MenuItem("Clear Baked Lighting"))
+        if (ImGui::MenuItem("Clear Baked Lighting", clearShortcut.c_str()))
             state.ClearBakedLighting();
         if (disabled) ImGui::EndDisabled();
         ImGui::EndMenu();
@@ -61,31 +68,41 @@ void ImGuiMainMenu::DrawFileMenu(EditorState& state, PlayState playState,
     if (!ImGui::BeginMenu("File")) return;
     const bool busy = IsBusy(playState);
     if (busy) ImGui::BeginDisabled();
-    if (ImGui::MenuItem("Undo", "Ctrl+Z", false, state.CanUndo()))
+    EditorKeyBindings& keybinds = EditorKeyBindings::Get();
+    const std::string undoShortcut = keybinds.ShortcutLabel(EditorCommand::Undo);
+    const std::string redoShortcut = keybinds.ShortcutLabel(EditorCommand::Redo);
+    const std::string saveShortcut = keybinds.ShortcutLabel(EditorCommand::SaveScene);
+    const std::string saveAllShortcut = keybinds.ShortcutLabel(EditorCommand::SaveAll);
+    const std::string buildShortcut = keybinds.ShortcutLabel(EditorCommand::Build);
+    const std::string buildPlayShortcut = keybinds.ShortcutLabel(EditorCommand::BuildAndPlay);
+    const std::string buildStandaloneShortcut = keybinds.ShortcutLabel(EditorCommand::BuildStandalone);
+    if (ImGui::MenuItem("Undo", undoShortcut.c_str(), false, state.CanUndo()))
         state.Undo();
-    if (ImGui::MenuItem("Redo", "Ctrl+Y", false, state.CanRedo()))
+    if (ImGui::MenuItem("Redo", redoShortcut.c_str(), false, state.CanRedo()))
         state.Redo();
     if (busy) ImGui::EndDisabled();
     ImGui::Separator();
-    if (ImGui::MenuItem("Save", "Ctrl+S"))
+    if (ImGui::MenuItem("Save", saveShortcut.c_str()))
         state.SaveScene();
-    if (ImGui::MenuItem("Save All", "Ctrl+A+S"))
+    if (ImGui::MenuItem("Save All", saveAllShortcut.c_str()))
         state.SaveAll();
     if (state.IsEditingPrefab() && ImGui::MenuItem("Close Prefab Stage"))
         state.ClosePrefabStage();
     ImGui::Separator();
 
     if (busy) ImGui::BeginDisabled();
-    if (ImGui::MenuItem("Build", "Ctrl+B") && buildManager)
+    if (ImGui::MenuItem("Build", buildShortcut.c_str()) && buildManager)
         buildManager->StartBuild(PostBuildAction::Nothing);
-    if (ImGui::MenuItem("Build and Run in Editor") && buildManager)
+    if (ImGui::MenuItem("Build and Run in Editor", buildPlayShortcut.c_str()) && buildManager)
         buildManager->StartBuild(PostBuildAction::PlayInEditor);
-    if (ImGui::MenuItem("Build and Run Standalone") && buildManager)
+    if (ImGui::MenuItem("Build and Run Standalone", buildStandaloneShortcut.c_str()) && buildManager)
         buildManager->StartBuild(PostBuildAction::LaunchStandalone);
     if (busy) ImGui::EndDisabled();
 
     ImGui::Separator();
-    if (ImGui::MenuItem("Project Preferences"))
+    const std::string preferencesShortcut = keybinds.ShortcutLabel(
+        EditorCommand::Preferences);
+    if (ImGui::MenuItem("Project Preferences", preferencesShortcut.c_str()))
         state.SetShowPreferences(true);
     ImGui::Separator();
     if (ImGui::MenuItem("Exit"))

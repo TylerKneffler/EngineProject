@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "ImGuiEditorUi.h"
+#include "Engine/Editor/Input/EditorKeyBindings.h"
 #include "imgui.h"
 #include "imgui_internal.h"
 
@@ -323,8 +324,8 @@ bool ImGuiEditorUi::BeginChild(const char*i){return ImGui::BeginChild(i,{0,0},fa
 bool ImGuiEditorUi::IsItemHovered()const{return ImGui::IsItemHovered();} bool ImGuiEditorUi::IsItemClicked()const{return ImGui::IsItemClicked()&&!ImGui::IsItemToggledOpen();}
 bool ImGuiEditorUi::IsItemDoubleClicked()const{return ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);}
 bool ImGuiEditorUi::IsWindowBackgroundClicked()const{return ImGui::IsMouseClicked(ImGuiMouseButton_Left)&&ImGui::IsWindowHovered()&&!ImGui::IsAnyItemHovered();}
-bool ImGuiEditorUi::CopyShortcutPressed()const{return ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)&&ImGui::GetIO().KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_C,false);}
-bool ImGuiEditorUi::PasteShortcutPressed()const{return ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)&&ImGui::GetIO().KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_V,false);}
+bool ImGuiEditorUi::CopyShortcutPressed()const{return ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)&&EditorKeyBindings::Get().Pressed(EditorCommand::Copy);}
+bool ImGuiEditorUi::PasteShortcutPressed()const{return ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)&&EditorKeyBindings::Get().Pressed(EditorCommand::Paste);}
 bool ImGuiEditorUi::BeginDragDropSource(){
     const ImVec2 minimum=ImGui::GetItemRectMin(),maximum=ImGui::GetItemRectMax();
     ImDrawList* rowDrawList=ImGui::GetWindowDrawList();
@@ -362,6 +363,79 @@ void ImGuiEditorUi::EndDragDropTarget(){ImGui::EndDragDropTarget();}
 void ImGuiEditorUi::SetClipboardText(const char*t){ImGui::SetClipboardText(t);} void ImGuiEditorUi::ScrollToBottom(){ImGui::SetScrollHereY(1.f);}
 bool ImGuiEditorUi::BeginTabBar(const char*i){return ImGui::BeginTabBar(i);} void ImGuiEditorUi::EndTabBar(){ImGui::EndTabBar();}
 bool ImGuiEditorUi::BeginTab(const char*l){return ImGui::BeginTabItem(l);} void ImGuiEditorUi::EndTab(){ImGui::EndTabItem();}
+bool ImGuiEditorUi::BeginTable(const char* id,int columns){return ImGui::BeginTable(id,columns,ImGuiTableFlags_Borders|ImGuiTableFlags_RowBg|ImGuiTableFlags_Resizable|ImGuiTableFlags_SizingStretchProp);}
+void ImGuiEditorUi::TableSetupColumn(const char* label){ImGui::TableSetupColumn(label);}
+void ImGuiEditorUi::TableSetupCompactColumn(const char* label){ImGui::TableSetupColumn(label,ImGuiTableColumnFlags_WidthFixed,28.f);}
+void ImGuiEditorUi::TableHeadersRow(){ImGui::TableHeadersRow();}
+void ImGuiEditorUi::TableNextRow(){ImGui::TableNextRow();}
+void ImGuiEditorUi::TableNextColumn(){ImGui::TableNextColumn();}
+void ImGuiEditorUi::EndTable(){ImGui::EndTable();}
+bool ImGuiEditorUi::BindingColumnHeader(const char* id,const char* label,bool canDelete)
+{
+    ImGui::PushID(id);ImGui::TextUnformatted(label);bool remove=false;
+    if(ImGui::BeginPopupContextItem("##bindingColumnMenu"))
+    {
+        if(ImGui::MenuItem("Delete binding column",nullptr,false,canDelete))remove=true;
+        if(!canDelete&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("At least one binding column is required.");
+        ImGui::EndPopup();
+    }
+    ImGui::PopID();return remove;
+}
+bool ImGuiEditorUi::AddBindingColumnHeader(const char* id)
+{
+    ImGui::PushID(id);const bool add=ImGui::SmallButton("+");
+    if(ImGui::IsItemHovered())ImGui::SetTooltip("Add another binding column");
+    ImGui::PopID();return add;
+}
+bool ImGuiEditorUi::KeyBindingInput(const char* id,const char* display,std::string* key,bool* control,bool* shift,bool* alt)
+{
+    if(!key||!control||!shift||!alt)return false;
+    const ImGuiID captureId=ImGui::GetID(id);
+    const bool capturing=m_bindingCaptureId==captureId;
+    const std::string buttonLabel=std::string(capturing?"Press a key...":display)+"##"+id;
+    const bool activated=ImGui::Button(buttonLabel.c_str(),{-1.f,0.f});
+    if(activated)m_bindingCaptureId=captureId;
+    bool changed=false;
+    if(m_bindingCaptureId==captureId&&!activated)
+    {
+        if(ImGui::IsKeyPressed(ImGuiKey_Escape,false))m_bindingCaptureId=0;
+        else if(ImGui::IsKeyPressed(ImGuiKey_Delete,false)||ImGui::IsKeyPressed(ImGuiKey_Backspace,false))
+        {
+            key->clear();*control=*shift=*alt=false;m_bindingCaptureId=0;changed=true;
+        }
+        else
+        {
+            const ImGuiIO& io=ImGui::GetIO();
+            const char* mouseName=nullptr;
+            if(ImGui::IsMouseClicked(ImGuiMouseButton_Left,false))mouseName="Mouse Left";
+            else if(ImGui::IsMouseClicked(ImGuiMouseButton_Right,false))mouseName="Mouse Right";
+            else if(ImGui::IsMouseClicked(ImGuiMouseButton_Middle,false))mouseName="Mouse Middle";
+            else if(ImGui::IsMouseClicked(3,false))mouseName="Mouse X1";
+            else if(ImGui::IsMouseClicked(4,false))mouseName="Mouse X2";
+            else if(io.MouseWheel!=0.f)mouseName="Mouse Wheel";
+            if(mouseName)
+            {
+                *key=mouseName;*control=io.KeyCtrl;*shift=io.KeyShift;*alt=io.KeyAlt;
+                m_bindingCaptureId=0;changed=true;
+            }
+            else
+            {
+                for(int value=ImGuiKey_NamedKey_BEGIN;value<ImGuiKey_NamedKey_END;++value)
+                {
+                    const ImGuiKey candidate=static_cast<ImGuiKey>(value);
+                    if(candidate==ImGuiKey_LeftCtrl||candidate==ImGuiKey_RightCtrl||candidate==ImGuiKey_LeftShift||candidate==ImGuiKey_RightShift||candidate==ImGuiKey_LeftAlt||candidate==ImGuiKey_RightAlt||!ImGui::IsKeyPressed(candidate,false))continue;
+                    const char* name=ImGui::GetKeyName(candidate);if(!name||!*name)continue;
+                    *key=name;*control=io.KeyCtrl;*shift=io.KeyShift;*alt=io.KeyAlt;
+                    m_bindingCaptureId=0;changed=true;break;
+                }
+            }
+        }
+    }
+    EditorKeyBindings::Get().SetCapturing(m_bindingCaptureId!=0);
+    return changed;
+}
+void ImGuiEditorUi::CancelKeyBindingCapture(){m_bindingCaptureId=0;EditorKeyBindings::Get().SetCapturing(false);}
 void ImGuiEditorUi::BeginDisabled(bool d){ImGui::BeginDisabled(d);} void ImGuiEditorUi::EndDisabled(){ImGui::EndDisabled();}
 bool ImGuiEditorUi::Combo(const char*l,int*s,const char*const*i,int c){return ImGui::Combo(l,s,i,c);}
 void ImGuiEditorUi::Tooltip(const char*t){if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("%s",t);}
@@ -369,14 +443,75 @@ void ImGuiEditorUi::Progress(float f,const char*o){ImGui::ProgressBar(f,{-1,0},o
 void ImGuiEditorUi::DrawImage(void*tex,float w,float h){ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(tex)),{w,h});}
 EditorUiViewportInput ImGuiEditorUi::Viewport(void* texture,float aspect,EditorUiColor bg)
 {
-    EditorUiViewportInput out; ImVec2 a=ImGui::GetContentRegionAvail(); if(a.x<=1||a.y<=1)return out;
-    ImVec2 size=a,pos{0,0}; if(aspect>0){float aa=a.x/a.y;if(aa>aspect){size.x=a.y*aspect;pos.x=(a.x-size.x)*.5f;}else{size.y=a.x/aspect;pos.y=(a.y-size.y)*.5f;}}
-    if(size.x<a.x||size.y<a.y){ImVec2 p=ImGui::GetCursorScreenPos();ImGui::GetWindowDrawList()->AddRectFilled(p,{p.x+a.x,p.y+a.y},ImGui::GetColorU32({bg.r,bg.g,bg.b,bg.a}));}
-    out.available={size.x,size.y}; ImGui::SetCursorPos(pos); ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(texture)),size);
-    const ImVec2 min=ImGui::GetItemRectMin();const ImVec2 max=ImGui::GetItemRectMax();const ImVec2 mp=ImGui::GetIO().MousePos;out.mousePosInViewport={mp.x-min.x,mp.y-min.y};
-    m_viewportScreenMin={min.x,min.y};m_viewportScreenMax={max.x,max.y};
-    out.leftDown=ImGui::IsMouseDown(ImGuiMouseButton_Left);out.leftReleased=ImGui::IsMouseReleased(ImGuiMouseButton_Left);
-    out.hovered=ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);if(out.hovered||out.leftDown){auto d=ImGui::GetIO().MouseDelta;out.mouseDelta={d.x,d.y};}if(out.hovered){out.mouseWheel=ImGui::GetIO().MouseWheel;out.rightDown=ImGui::IsMouseDown(ImGuiMouseButton_Right);out.middleDown=ImGui::IsMouseDown(ImGuiMouseButton_Middle);out.leftClicked=ImGui::IsMouseClicked(ImGuiMouseButton_Left);}return out;
+    EditorUiViewportInput out;
+    const ImVec2 available = ImGui::GetContentRegionAvail();
+    if (available.x <= 1.f || available.y <= 1.f) return out;
+
+    ImVec2 size = available;
+    ImVec2 position{0.f, 0.f};
+    if (aspect > 0.f)
+    {
+        const float availableAspect = available.x / available.y;
+        if (availableAspect > aspect)
+        {
+            size.x = available.y * aspect;
+            position.x = (available.x - size.x) * 0.5f;
+        }
+        else
+        {
+            size.y = available.x / aspect;
+            position.y = (available.y - size.y) * 0.5f;
+        }
+    }
+    if (size.x < available.x || size.y < available.y)
+    {
+        const ImVec2 cursor = ImGui::GetCursorScreenPos();
+        ImGui::GetWindowDrawList()->AddRectFilled(cursor,
+            {cursor.x + available.x, cursor.y + available.y},
+            ImGui::GetColorU32({bg.r, bg.g, bg.b, bg.a}));
+    }
+
+    out.available = {size.x, size.y};
+    ImGui::SetCursorPos(position);
+    ImGui::Image(static_cast<ImTextureID>(
+        reinterpret_cast<uintptr_t>(texture)), size);
+    const ImVec2 minimum = ImGui::GetItemRectMin();
+    const ImVec2 maximum = ImGui::GetItemRectMax();
+    const ImVec2 mouse = ImGui::GetIO().MousePos;
+    out.mousePosInViewport = {mouse.x - minimum.x, mouse.y - minimum.y};
+    m_viewportScreenMin = {minimum.x, minimum.y};
+    m_viewportScreenMax = {maximum.x, maximum.y};
+
+    out.hovered = ImGui::IsItemHovered(
+        ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
+    out.leftDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+    out.leftReleased = ImGui::IsMouseReleased(ImGuiMouseButton_Left);
+    const bool anyMouseDown = out.leftDown ||
+        ImGui::IsMouseDown(ImGuiMouseButton_Right) ||
+        ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+    const bool mousePressed = ImGui::IsMouseClicked(ImGuiMouseButton_Left) ||
+        ImGui::IsMouseClicked(ImGuiMouseButton_Right) ||
+        ImGui::IsMouseClicked(ImGuiMouseButton_Middle);
+    if (out.hovered && mousePressed)
+        m_capturedViewportTexture = texture;
+    const bool ownsDrag = m_capturedViewportTexture == texture;
+
+    if (out.hovered || ownsDrag)
+    {
+        const ImVec2 delta = ImGui::GetIO().MouseDelta;
+        out.mouseDelta = {delta.x, delta.y};
+        auto& bindings = EditorKeyBindings::Get();
+        out.mouseWheel = out.hovered
+            ? bindings.Wheel(EditorCommand::ViewportZoom) : 0.f;
+        out.rightDown = bindings.Down(EditorCommand::ViewportPan);
+        out.middleDown = bindings.Down(EditorCommand::ViewportOrbit);
+        out.zoomDragDown = bindings.Down(EditorCommand::ViewportZoom);
+        out.leftClicked = out.hovered &&
+            bindings.Pressed(EditorCommand::ViewportSelect);
+    }
+    if (!anyMouseDown)
+        m_capturedViewportTexture = nullptr;
+    return out;
 }
 namespace
 {

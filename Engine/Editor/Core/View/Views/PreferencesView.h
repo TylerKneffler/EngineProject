@@ -53,6 +53,7 @@ private:
     void DrawPathsSection(IEditorUi& ui);
     void DrawRenderingSection(IEditorUi& ui);
     void DrawEditorSection(IEditorUi& ui);
+    void DrawKeybindsSection(IEditorUi& ui);
     void DrawDiagnosticsSection(IEditorUi& ui);
     void DrawAspectRatioSection(IEditorUi& ui);
     void DrawExportSection(IEditorUi& ui);
@@ -69,6 +70,8 @@ private:
     char m_assetsPathBuf[512] = {};
     char m_defaultSceneBuf[512] = {};
     std::string m_saveStatus;
+    std::string m_keybindStatus;
+    bool m_keybindStatusSucceeded = false;
     bool m_lastSaveSucceeded = false;
     bool m_exporting = false;
     bool m_exportSucceeded = false;

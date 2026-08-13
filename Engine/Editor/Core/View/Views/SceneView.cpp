@@ -223,7 +223,8 @@ void SceneView::DrawPanel(IEditorUi& ui)
         // Position cursor at viewport location and draw the game texture
 
         // Check for mouse input on the viewport
-        if (input.hovered)
+        if (input.hovered || input.rightDown || input.middleDown ||
+            input.zoomDragDown)
         {
             if (input.leftClicked && !gizmoResult.consumedClick &&
                 !input.rightDown && !input.middleDown && OnObjectSelected)
@@ -247,6 +248,9 @@ void SceneView::DrawPanel(IEditorUi& ui)
 
             // Scroll wheel → zoom.
             zoom = input.mouseWheel;
+            // Alt+Ctrl+left drag provides a trackpad-friendly dolly gesture.
+            if (input.zoomDragDown)
+                zoom += -d.y * 0.05f;
         }
     }
 

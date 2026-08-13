@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "bindings": {
+    "edit.undo": [
+      { "key": "Z", "control": true, "shift": false, "alt": false },
+      { "key": "", "control": false, "shift": false, "alt": false }
+    ],
+    "edit.redo": [
+      { "key": "Y", "control": true, "shift": false, "alt": false },
+      { "key": "Z", "control": true, "shift": true, "alt": false }
+    ],
+    "file.save": [
+      { "key": "S", "control": true, "shift": false, "alt": false },
+      { "key": "", "control": false, "shift": false, "alt": false }
+    ],
+    "file.save_all": [
+      { "key": "S", "control": true, "shift": true, "alt": false },
+      { "key": "", "control": false, "shift": false, "alt": false }
+    ],
+    "edit.copy": [
+      { "key": "C", "control": true, "shift": false, "alt": false },
+      { "key": "", "control": false, "shift": false, "alt": false }
+    ],
+    "edit.paste": [
+      { "key": "V", "control": true, "shift": false, "alt": false },
+      { "key": "", "control": false, "shift": false, "alt": false }
+    ],
+    "build.build": [
+      { "key": "B", "control": true, "shift": false, "alt": false },
+      { "key": "", "control": false, "shift": false, "alt": false }
+    ],
+    "build.play": [
+      { "key": "B", "control": true, "shift": true, "alt": false },
+      { "key": "", "control": false, "shift": false, "alt": false }
+    ],
+    "build.standalone": [
+      { "key": "B", "control": true, "shift": false, "alt": true },
+      { "key": "", "control": false, "shift": false, "alt": false }
+    ],
+    "play.toggle": [
+      { "key": "F5", "control": false, "shift": false, "alt": false },
+      { "key": "F6", "control": false, "shift": false, "alt": false }
+    ],
+    "play.stop": [
+      { "key": "F5", "control": false, "shift": true, "alt": false },
+      { "key": "", "control": false, "shift": false, "alt": false }
+    ],
+    "window.preferences": [
+      { "key": ",", "control": true, "shift": false, "alt": false },
+      { "key": "", "control": false, "shift": false, "alt": false }
+    ],
+    "file.import": [
+      { "key": "I", "control": true, "shift": false, "alt": false },
+      { "key": "", "control": false, "shift": false, "alt": false }
+    ],
+    "lighting.bake": [
+      { "key": "", "control": false, "shift": false, "alt": false },
+      { "key": "", "control": false, "shift": false, "alt": false }
+    ],
+    "lighting.clear": [
+      { "key": "", "control": false, "shift": false, "alt": false },
+      { "key": "", "control": false, "shift": false, "alt": false }
+    ],
+    "viewport.select": [
+      { "key": "Mouse Left", "control": false, "shift": false, "alt": false },
+      { "key": "", "control": false, "shift": false, "alt": false }
+    ],
+    "viewport.pan": [
+      { "key": "Mouse Right", "control": false, "shift": false, "alt": false },
+      { "key": "Mouse Middle", "control": false, "shift": true, "alt": false },
+      { "key": "Mouse Left", "control": false, "shift": true, "alt": true }
+    ],
+    "viewport.orbit": [
+      { "key": "Mouse Middle", "control": false, "shift": false, "alt": false },
+      { "key": "Mouse Left", "control": false, "shift": false, "alt": true }
+    ],
+    "viewport.zoom": [
+      { "key": "Mouse Wheel", "control": false, "shift": false, "alt": false },
+      { "key": "Mouse Left", "control": true, "shift": false, "alt": true },
+      { "key": "", "control": false, "shift": false, "alt": false }
+    ]
+  }
+}

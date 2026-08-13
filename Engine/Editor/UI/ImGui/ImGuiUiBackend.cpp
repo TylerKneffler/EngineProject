@@ -11,6 +11,7 @@
 #include "Core/Renderers/DX11/DX11EditorRenderer.h"
 #include "Core/Renderers/DX12/DX12EditorRenderer.h"
 #include "Engine/Editor/UI/ImGui/EditorUI.h"
+#include "Engine/Editor/Input/EditorKeyBindings.h"
 #include "Engine/Editor/EditorState.h"
 #include "Engine/Editor/GameBuildManager.h"
 #if defined(ENGINE_VULKAN_ENABLED)
@@ -186,6 +187,36 @@ void ImGuiUiBackend::DrawEditor(EditorState& state, PlayState playState,
     if (!m_presentation)
         m_presentation = std::make_unique<EditorUI>(&state);
     state.ResetSceneEditInProgress();
+    EditorKeyBindings& keybinds = EditorKeyBindings::Get();
+    const bool historyAvailable = playState == PlayState::Stopped ||
+        playState == PlayState::BuildFailed;
+    if (historyAvailable && keybinds.Pressed(EditorCommand::Undo)) state.Undo();
+    if (historyAvailable && keybinds.Pressed(EditorCommand::Redo)) state.Redo();
+    if (keybinds.Pressed(EditorCommand::SaveScene)) state.SaveScene();
+    if (keybinds.Pressed(EditorCommand::SaveAll)) state.SaveAll();
+    if (keybinds.Pressed(EditorCommand::Preferences)) state.SetShowPreferences(true);
+    if (keybinds.Pressed(EditorCommand::ImportAsset)) state.ImportAsset();
+    if (historyAvailable && keybinds.Pressed(EditorCommand::BakeLighting)) state.BakeLighting();
+    if (historyAvailable && keybinds.Pressed(EditorCommand::ClearBakedLighting)) state.ClearBakedLighting();
+    if (buildManager)
+    {
+        if (historyAvailable && keybinds.Pressed(EditorCommand::Build))
+            buildManager->StartBuild(PostBuildAction::Nothing);
+        if (historyAvailable && keybinds.Pressed(EditorCommand::BuildAndPlay))
+            buildManager->StartBuild(PostBuildAction::PlayInEditor);
+        if (historyAvailable && keybinds.Pressed(EditorCommand::BuildStandalone))
+            buildManager->StartBuild(PostBuildAction::LaunchStandalone);
+        if (keybinds.Pressed(EditorCommand::Stop) &&
+            (playState == PlayState::Playing || playState == PlayState::Paused))
+            buildManager->Stop();
+        else if (keybinds.Pressed(EditorCommand::PlayPause))
+        {
+            if (playState == PlayState::Stopped || playState == PlayState::BuildFailed)
+                buildManager->PlayInEditor();
+            else if (playState == PlayState::Playing) buildManager->Pause();
+            else if (playState == PlayState::Paused) buildManager->Resume();
+        }
+    }
     m_presentation->SetGameBuildManager(buildManager);
     m_presentation->Render(playState);
     state.TrackSceneChanges(
@@ -196,39 +227,6 @@ void ImGuiUiBackend::DrawEditor(EditorState& state, PlayState playState,
 bool ImGuiUiBackend::HandleMessage(void* nativeWindow, uint32_t message,
     uintptr_t wParam, intptr_t lParam)
 {
-    const bool keyDown = message == WM_KEYDOWN || message == WM_SYSKEYDOWN;
-    const bool firstPress = (static_cast<uintptr_t>(lParam) & (uintptr_t{1} << 30)) == 0;
-    const bool control = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
-    const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-    const bool historyAvailable = !m_buildManager ||
-        m_buildManager->GetPlayState() == PlayState::Stopped ||
-        m_buildManager->GetPlayState() == PlayState::BuildFailed;
-    if (keyDown && firstPress && control && historyAvailable &&
-        (wParam == 'Y' || (wParam == 'Z' && shift)) && m_editorState)
-    {
-        m_editorState->Redo();
-        return true;
-    }
-    if (keyDown && firstPress && control && historyAvailable &&
-        wParam == 'Z' && m_editorState)
-    {
-        m_editorState->Undo();
-        return true;
-    }
-    if (keyDown && firstPress && control && wParam == 'S' && m_editorState)
-    {
-        const bool saveAll = (GetKeyState('A') & 0x8000) != 0;
-        if (saveAll) m_editorState->SaveAll();
-        else m_editorState->SaveScene();
-        return true;
-    }
-    if (keyDown && firstPress && control && wParam == 'B' && m_buildManager)
-    {
-        const PlayState state = m_buildManager->GetPlayState();
-        if (state == PlayState::Stopped || state == PlayState::BuildFailed)
-            m_buildManager->StartBuild(PostBuildAction::Nothing);
-        return true;
-    }
     return m_initialized && ::ImGui_ImplWin32_WndProcHandler(
         static_cast<HWND>(nativeWindow), message,
         static_cast<WPARAM>(wParam), static_cast<LPARAM>(lParam)) != 0;
