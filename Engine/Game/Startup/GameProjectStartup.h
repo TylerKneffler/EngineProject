@@ -5,6 +5,6 @@
 
 namespace Engine::Game
 {
-ProjectSettings LoadGameProjectSettings();
+Engine::Model::ProjectSettings LoadGameProjectSettings();
 std::string GetFallbackScenePath();
 }

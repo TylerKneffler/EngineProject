@@ -17,6 +17,9 @@ extern "C" {
 #include <stb_vorbis.c>
 }
 
+namespace Engine::Components
+{
+
 #ifndef ENGINE_ASSETS_PATH
 #define ENGINE_ASSETS_PATH "Engine/Core/Assets/"
 #endif
@@ -98,8 +101,8 @@ bool AudioSource::EnsureLoaded()
         return true;
     Unload();
 
-    auto* engine = static_cast<ma_engine*>(AudioMixer::Get().GetEngineHandle());
-    auto* group = static_cast<ma_sound_group*>(AudioMixer::Get().GetBusHandle(bus));
+    auto* engine = static_cast<ma_engine*>(Engine::Audio::AudioMixer::Get().GetEngineHandle());
+    auto* group = static_cast<ma_sound_group*>(Engine::Audio::AudioMixer::Get().GetBusHandle(bus));
     if (!engine || !group) return false;
 
     const std::filesystem::path resolved = ResolveAudioPath(audioPath);
@@ -181,7 +184,7 @@ bool AudioSource::IsPlaying() const
     return m_impl && m_impl->soundInitialized && ma_sound_is_playing(&m_impl->sound);
 }
 
-bool AudioSource::DrawProperties(IEditorUi& ui)
+bool AudioSource::DrawProperties(::Engine::Editor::IEditorUi& ui)
 {
     const bool changed = Component::DrawProperties(ui);
     ui.Separator();
@@ -222,7 +225,7 @@ void AudioSource::ApplySettings()
     float sourceRateScale = 1.f;
     if (m_impl->oggSampleRate > 0)
     {
-        auto* engine = static_cast<ma_engine*>(AudioMixer::Get().GetEngineHandle());
+        auto* engine = static_cast<ma_engine*>(Engine::Audio::AudioMixer::Get().GetEngineHandle());
         const ma_uint32 outputRate = engine ? ma_engine_get_sample_rate(engine) : 0;
         if (outputRate > 0)
             sourceRateScale = static_cast<float>(m_impl->oggSampleRate) / outputRate;
@@ -263,9 +266,9 @@ void AudioSource::ApplySettings()
 void AudioSource::UpdateListener()
 {
     if (!Owner || !Owner->GetScene()) return;
-    Scene* scene = Owner->GetScene();
+    Engine::Scene::Scene* scene = Owner->GetScene();
     Camera* camera = listenerCameraReference.IsAssigned()
-        ? ResolveComponentReference<Camera>(Owner, listenerCameraReference)
+        ? Engine::Core::ResolveComponentReference<Camera>(Owner, listenerCameraReference)
         : scene->FindGameCamera();
     Object* cameraObject = camera ? camera->Owner : &scene->editorCamera;
     camera = camera ? camera : (listenerCameraReference.IsAssigned()
@@ -286,5 +289,6 @@ void AudioSource::UpdateListener()
         forward = SafeDirection(glm::vec3(world[2]), glm::vec3(0.f, 0.f, 1.f));
         up = SafeDirection(glm::vec3(world[1]), glm::vec3(0.f, 1.f, 0.f));
     }
-    AudioMixer::Get().SetListener(position, forward, up);
+    Engine::Audio::AudioMixer::Get().SetListener(position, forward, up);
+}
 }

@@ -3,7 +3,9 @@
 #include "Core/PropertyMacros.h"
 #include <glm/glm.hpp>
 
-class Camera : public Component
+namespace Engine::Components
+{
+class Camera : public Engine::Core::Component
 {
 public:
     Camera();
@@ -50,3 +52,4 @@ public:
     glm::mat4 GetProjectionMatrix(float aspect, bool forceOrthographic = false) const;
 
 };
+}

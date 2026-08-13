@@ -1,6 +1,8 @@
 #include "BakedLightingData.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 
+namespace Engine::Rendering
+{
 BakedLightingData::BakedLightingData()
 {
     SetTypeName(COMPONENT_TYPE_NAME(BakedLightingData));
@@ -16,7 +18,7 @@ BakedLightingData::BakedLightingData()
     RegisterField("version", version);
 }
 
-bool BakedLightingData::DrawProperties(IEditorUi& ui)
+bool BakedLightingData::DrawProperties(::Engine::Editor::IEditorUi& ui)
 {
     ui.DisabledLabel(valid
         ? "Generated baked material mapping (read-only)."
@@ -38,4 +40,5 @@ bool BakedLightingData::DrawProperties(IEditorUi& ui)
     ui.ValueLabel("Baked Material", bakedMaterialAsset.c_str());
     ui.ValueLabel("Lightmap", bakedLightmapAsset.c_str());
     return false;
+}
 }

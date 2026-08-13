@@ -4,15 +4,19 @@
 #include "Core/Compoonents/Mesh.h"
 #include <memory>
 
+namespace Engine::Components
+{
 class Texture;
-class IGraphicsBuffer;
 class SpriteAnimationManager;
 
 // Sprite is rendering-only. Playback and clip selection belong to the
 // explicitly 2D SpriteAnimationManager component.
-class Sprite : public Component
+class Sprite : public Engine::Core::Component
 {
 public:
+    using Vertex = Engine::Model::Vertex;
+    using IGraphicsBuffer = Engine::Graphics::IGraphicsBuffer;
+
     Sprite();
 
     PROPERTY(Inspector, EditAnywhere, Category = "Sprite")
@@ -30,7 +34,7 @@ public:
 
     void Deserialize(const JsonValue& value) override;
     void OnAfterDeserialize(IGraphicsProvider* graphicsProvider) override;
-    bool DrawProperties(IEditorUi& ui) override;
+    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
     void SetAnimationManager(SpriteAnimationManager* manager);
     bool Prepare(IGraphicsProvider* graphicsProvider);
     bool IsReady() const;
@@ -47,3 +51,4 @@ private:
     mutable SpriteAnimationManager* m_animationManager = nullptr;
     std::unique_ptr<IGraphicsBuffer> m_vertexBuffer;
 };
+}

@@ -5,19 +5,21 @@
 #include <memory>
 #include <string>
 
+namespace Engine::Components
+{
 class Texture;
-class IGraphicsProvider;
-
-enum class MaterialAlphaMode
+enum class MaterialAlphaMode : int
 {
     Opaque,
     Mask,
     Blend
 };
 
-class Material : public Component
+class Material : public Engine::Core::Component
 {
 public:
+    using JsonValue = Engine::Serialization::JsonValue;
+    using IGraphicsProvider = Engine::Graphics::IGraphicsProvider;
     Material();
     ~Material() = default;
 
@@ -109,3 +111,4 @@ private:
     static std::string TexturePath(const std::shared_ptr<Texture>& texture);
     std::string m_filePath;
 };
+}

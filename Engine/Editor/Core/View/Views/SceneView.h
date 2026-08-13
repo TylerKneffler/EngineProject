@@ -5,6 +5,8 @@
 #include "Core/ProjectLoader.h"
 #include "Engine/Editor/Core/Gizmos/EditorGizmoSystem.h"
 
+namespace Engine::Editor
+{
 // ---------------------------------------------------------------------------
 // SceneView — editor Scene panel
 //
@@ -32,8 +34,8 @@ public:
               void* srvCpu,
               void* srvGpu,
               uint32_t srvSlotIndex,
-              Scene* scene,
-              const ProjectSettings& settings);
+              Engine::Scene::Scene* scene,
+              const Engine::Model::ProjectSettings& settings);
 
     // Issues the editor-camera scene draw into cmd each frame.
     // cmd: opaque graphics command list handle (cast internally to ID3D12GraphicsCommandList*)
@@ -44,14 +46,14 @@ public:
     // scene's editorCamera with orbit / pan / zoom.
     void DrawPanel(IEditorUi& ui) override;
     std::function<void(const std::string&)> OnAssetDropped;
-    std::function<Object*(const std::string&)> OnAssetPreviewRequested;
-    std::function<void(Object*)> OnAssetPreviewCancelled;
-    std::function<void(Object*, const std::string&)> OnAssetPreviewCommitted;
-    std::function<void(Object*)> OnObjectSelected;
+    std::function<Engine::Core::Object*(const std::string&)> OnAssetPreviewRequested;
+    std::function<void(Engine::Core::Object*)> OnAssetPreviewCancelled;
+    std::function<void(Engine::Core::Object*, const std::string&)> OnAssetPreviewCommitted;
+    std::function<void(Engine::Core::Object*)> OnObjectSelected;
     std::function<void(bool)> OnGizmoInteraction;
 
 private:
-    Object* PickObjectInViewport(const EditorUiVec2& mousePos, const EditorUiVec2& viewportSize) const;
+    Engine::Core::Object* PickObjectInViewport(const EditorUiVec2& mousePos, const EditorUiVec2& viewportSize) const;
     bool FindPrefabPlacement(const EditorUiVec2& mousePos,
         const EditorUiVec2& viewportSize, glm::vec3& placement) const;
     void CancelPrefabPreview();
@@ -59,10 +61,10 @@ private:
                              float orbitDX, float orbitDY, float zoom);
 
     // Calculates the game viewport size and position based on aspect ratio mode
-    Scene* m_scene = nullptr; // non-owning; set via Init()
+    Engine::Scene::Scene* m_scene = nullptr; // non-owning; set via Init()
     
     // Aspect ratio settings
-    ProjectSettings::AspectRatioMode m_aspectRatioMode = ProjectSettings::AspectRatioMode::Locked;
+    Engine::Model::ProjectSettings::AspectRatioMode m_aspectRatioMode = Engine::Model::ProjectSettings::AspectRatioMode::Locked;
     float m_gameAspectRatio = 1.777f;  // 16:9
     uint32_t m_gameWindowWidth = 1920;
     uint32_t m_gameWindowHeight = 1080;
@@ -70,8 +72,9 @@ private:
 
     // Computed viewport aspect ratio
     float m_aspect = 1.0f;
-    Object* m_prefabPreview = nullptr;
+    Engine::Core::Object* m_prefabPreview = nullptr;
     std::string m_prefabPreviewPath;
     bool m_prefabPreviewHasPlacement = false;
     EditorGizmoSystem m_gizmos;
 };
+}

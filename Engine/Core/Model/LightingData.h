@@ -4,7 +4,7 @@
 #include <glm/glm.hpp>
 #include <string>
 
-namespace Engine::Rendering::Lighting
+namespace Engine::Model
 {
     inline constexpr uint32_t MaxRealtimeLights = 64;
 

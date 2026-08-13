@@ -1,6 +1,9 @@
 #include "DX12GameRenderer.h"
 #include "DX12GraphicsContext.h"
 
+
+namespace Engine::Renderers
+{
 // ---------------------------------------------------------------------------
 // Destruction
 //
@@ -288,12 +291,12 @@ void DX12GameRenderer::EndFrame()
 // ---------------------------------------------------------------------------
 // GetGraphicsProvider
 // ---------------------------------------------------------------------------
-IGraphicsProvider* DX12GameRenderer::GetGraphicsProvider()
+Engine::Graphics::IGraphicsProvider* DX12GameRenderer::GetGraphicsProvider()
 {
     return m_graphicsProvider.get();
 }
 
-std::unique_ptr<IGraphicsContext> DX12GameRenderer::CreateFrameGraphicsContext()
+std::unique_ptr<Engine::Graphics::IGraphicsContext> DX12GameRenderer::CreateFrameGraphicsContext()
 {
     return std::make_unique<D3D12GraphicsContext>(m_commandList.Get());
 }
@@ -594,4 +597,5 @@ void DX12GameRenderer::FlushGPU()
         WaitForSingleObject(m_fenceEvent, INFINITE);
     }
     m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+}
 }

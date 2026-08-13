@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "D3D12View.h"
 
+namespace Engine::Renderers
+{
 static constexpr DXGI_FORMAT VIEW_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
 
 // ---------------------------------------------------------------------------
@@ -181,4 +183,5 @@ void D3D12View::Render(void* cmdList,
     d3dCmdList->ResourceBarrier(1, &toSrv);
 
     d3dCmdList->OMSetRenderTargets(1, &mainRtvHandle, FALSE, nullptr);
+}
 }

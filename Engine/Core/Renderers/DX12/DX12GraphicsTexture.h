@@ -5,7 +5,9 @@
 #include <d3d12.h>
 #include <wrl/client.h>
 
-class D3D12GraphicsTexture final : public IGraphicsTexture
+namespace Engine::Renderers
+{
+class D3D12GraphicsTexture final : public Engine::Graphics::IGraphicsTexture
 {
 public:
     D3D12GraphicsTexture(
@@ -24,13 +26,13 @@ private:
     D3D12_GPU_DESCRIPTOR_HANDLE m_handle{};
 };
 
-class D3D12TextureFactory final : public IGraphicsTextureFactory
+class D3D12TextureFactory final : public Engine::Graphics::IGraphicsTextureFactory
 {
 public:
     D3D12TextureFactory(ID3D12Device* device, ID3D12CommandQueue* queue);
-    std::shared_ptr<IGraphicsTexture> CreateTexture2D(
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> CreateTexture2D(
         uint32_t width, uint32_t height, const uint8_t* rgbaPixels,
-        uint32_t mipLevels, GraphicsTextureFormat format,
+        uint32_t mipLevels, Engine::Graphics::GraphicsTextureFormat format,
         bool srgb = true) override;
 
 private:
@@ -41,3 +43,4 @@ private:
     uint32_t m_descriptorSize = 0;
     uint32_t m_nextDescriptor = 0;
 };
+}

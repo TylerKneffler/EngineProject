@@ -3,6 +3,8 @@
 #include "View/IEditorPanel.h"
 #include "ProblemsView.h"
 
+namespace Engine::Editor
+{
 // ---------------------------------------------------------------------------
 // ConsoleView — editor Console panel
 //
@@ -48,3 +50,4 @@ private:
     bool m_scrollToBottom = false;
     std::shared_ptr<EditorProblemStore> m_problemStore;
 };
+}

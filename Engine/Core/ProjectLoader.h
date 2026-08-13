@@ -15,9 +15,13 @@
 //   renderer.SetClearColor(settings.clearColor);
 //   assetsExplorer.Init(settings.assetsDirectory);
 // ---------------------------------------------------------------------------
+namespace Engine::Core
+{
 class ProjectLoader
 {
 public:
+    using ProjectSettings = Engine::Model::ProjectSettings;
+
     ProjectLoader()  = default;
     ~ProjectLoader() = default;
 
@@ -36,3 +40,4 @@ private:
     void ParseDependencies(const pugi::xml_node& projectNode, ProjectSettings& settings);
     void ParseComponents(const pugi::xml_node& projectNode, ProjectSettings& settings);
 };
+}

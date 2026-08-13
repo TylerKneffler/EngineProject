@@ -1,5 +1,7 @@
 #include "Core/Compoonents/UI/UIObject.h"
 
+namespace Engine::Components
+{
 UIObject::UIObject()
 {
     SetTypeName(COMPONENT_TYPE_NAME(UIObject));
@@ -29,4 +31,5 @@ UIObject::UIObject()
     RegisterField("clipChildren", clipChildren);
     RegisterField("visible", visible);
     RegisterField("zOrder", zOrder);
+}
 }

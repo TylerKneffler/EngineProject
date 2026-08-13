@@ -1,6 +1,8 @@
 #pragma once
 #include "pch.h"
 
+namespace Engine::Core
+{
 // ---------------------------------------------------------------------------
 // Window — Tutorial Overview
 //
@@ -105,3 +107,4 @@ private:
     bool m_focused = false;
 
 };
+}

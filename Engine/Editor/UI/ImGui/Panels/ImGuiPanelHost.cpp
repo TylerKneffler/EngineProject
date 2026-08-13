@@ -6,6 +6,8 @@
 #include "Engine/Editor/Core/View/ViewFactory.h"
 #include "Engine/Editor/Core/View/Views/PreferencesView.h"
 
+namespace Engine::Editor
+{
 void ImGuiPanelHost::Draw(EditorState& state)
 {
     DrawPanels(state);
@@ -57,4 +59,5 @@ void ImGuiPanelHost::DrawPreferences(EditorState& state)
         state.SetShowPreferences(show);
     }
     preferences->SetOpen(show);
+}
 }

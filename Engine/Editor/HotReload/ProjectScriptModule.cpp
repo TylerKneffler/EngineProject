@@ -8,7 +8,7 @@ namespace
 const std::vector<std::string>& ScriptTypes()
 {
     static const std::vector<std::string> types =
-        SceneSerializer::GetRegisteredScriptTypes();
+        Engine::Serialization::SceneSerializer::GetRegisteredScriptTypes();
     return types;
 }
 }
@@ -25,7 +25,8 @@ extern "C" __declspec(dllexport) const char* EngineScriptTypeName(int index)
         ? types[static_cast<size_t>(index)].c_str() : nullptr;
 }
 
-extern "C" __declspec(dllexport) Component* EngineCreateScript(const char* typeName)
+extern "C" __declspec(dllexport) Engine::Core::Component* EngineCreateScript(
+    const char* typeName)
 {
-    return typeName ? SceneSerializer::CreateRegisteredComponent(typeName) : nullptr;
+    return typeName ? Engine::Serialization::SceneSerializer::CreateRegisteredComponent(typeName) : nullptr;
 }

@@ -7,6 +7,8 @@
 #include <stdexcept>
 #include <cstring>
 
+namespace Engine::Components
+{
 Mesh::Mesh()
 {
     SetTypeName(COMPONENT_TYPE_NAME(Mesh));
@@ -52,28 +54,28 @@ std::filesystem::path ResolveMeshPath(const std::string& path)
     return requested;
 }
 
-JsonValue FloatArray(const std::vector<float>& values)
+Engine::Serialization::JsonValue FloatArray(const std::vector<float>& values)
 {
-    JsonValue result = JsonValue::MakeArray();
-    for (float value : values) result.Push(JsonValue(value));
+    Engine::Serialization::JsonValue result = Engine::Serialization::JsonValue::MakeArray();
+    for (float value : values) result.Push(Engine::Serialization::JsonValue(value));
     return result;
 }
 
-JsonValue Vec3Array(const std::vector<glm::vec3>& values)
+Engine::Serialization::JsonValue Vec3Array(const std::vector<glm::vec3>& values)
 {
-    JsonValue result = JsonValue::MakeArray();
+    Engine::Serialization::JsonValue result = Engine::Serialization::JsonValue::MakeArray();
     for (const glm::vec3& value : values)
-        result.Push(JsonValue::MakeArray().Push(JsonValue(value.x))
-            .Push(JsonValue(value.y)).Push(JsonValue(value.z)));
+        result.Push(Engine::Serialization::JsonValue::MakeArray().Push(Engine::Serialization::JsonValue(value.x))
+            .Push(Engine::Serialization::JsonValue(value.y)).Push(Engine::Serialization::JsonValue(value.z)));
     return result;
 }
 
-std::vector<glm::vec3> ReadVec3Array(const JsonValue& value)
+std::vector<glm::vec3> ReadVec3Array(const Engine::Serialization::JsonValue& value)
 {
     std::vector<glm::vec3> result;
     for (size_t i = 0; i < value.ArraySize(); ++i)
     {
-        const JsonValue& item = value.ArrayAt(i);
+        const Engine::Serialization::JsonValue& item = value.ArrayAt(i);
         result.emplace_back(item.ArrayAt(0).AsFloat(), item.ArrayAt(1).AsFloat(),
             item.ArrayAt(2).AsFloat());
     }
@@ -286,7 +288,7 @@ void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory)
 }
 #pragma endregion
 
-JsonValue Mesh::Serialize() const
+Mesh::JsonValue Mesh::Serialize() const
 {
     JsonValue result = Component::Serialize();
     if (m_morphTargets.empty()) return result;
@@ -339,4 +341,4 @@ void Mesh::OnAfterDeserialize(IGraphicsProvider* graphicsProvider)
     if (graphicsProvider)
         CreateBuffer(graphicsProvider->GetBufferFactory());
 }
-
+}

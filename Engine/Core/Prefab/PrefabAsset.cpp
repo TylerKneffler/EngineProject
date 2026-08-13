@@ -4,6 +4,8 @@
 #include <filesystem>
 #include <unordered_map>
 
+namespace Engine::Prefab
+{
 std::shared_ptr<const PrefabAsset> PrefabAsset::Acquire(const std::string& path)
 {
     static std::unordered_map<std::string, std::weak_ptr<const PrefabAsset>> registry;
@@ -30,4 +32,5 @@ std::shared_ptr<const PrefabAsset> PrefabAsset::Acquire(const std::string& path)
         new PrefabAsset(normalized.generic_string()));
     registry[key] = asset;
     return asset;
+}
 }

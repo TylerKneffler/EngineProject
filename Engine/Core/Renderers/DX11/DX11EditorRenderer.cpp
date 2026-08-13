@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <fstream>
 
+namespace Engine::Renderers
+{
 DX11EditorRenderer::~DX11EditorRenderer()
 {
     if (m_context) m_context->ClearState();
@@ -130,4 +132,5 @@ void DX11EditorRenderer::FreeSrvSlot(uint32_t slot)
 std::unique_ptr<IView> DX11EditorRenderer::CreateViewBackend()
 {
     return std::make_unique<D3D11View>();
+}
 }

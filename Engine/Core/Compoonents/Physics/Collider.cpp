@@ -1,5 +1,7 @@
 #include "Core/Compoonents/Physics/Collider.h"
 
+namespace Engine::Components
+{
 Collider::Collider()
 {
     RegisterField("collisionEnabled", collisionEnabled);
@@ -21,4 +23,5 @@ MeshObjectCollider::MeshObjectCollider()
     RegisterField("meshReference", meshReference);
     RegisterField("meshPath", meshPath);
     RegisterField("convex", convex);
+}
 }

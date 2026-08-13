@@ -2,6 +2,9 @@
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "VulkanCommon.h"
 
+
+namespace Engine::Renderers
+{
 uint32_t VulkanFindMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeBits,
                               VkMemoryPropertyFlags required)
 {
@@ -58,5 +61,6 @@ void VulkanDestroyImage(VkDevice device, VulkanImageResource& image)
     if (image.image) vkDestroyImage(device, image.image, nullptr);
     if (image.memory) vkFreeMemory(device, image.memory, nullptr);
     image = {};
+}
 }
 #endif

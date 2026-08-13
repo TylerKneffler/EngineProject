@@ -7,10 +7,17 @@
 #include <vector>
 #include <memory>
 
-class Mesh : public Component
+namespace Engine::Components
+{
+class Mesh : public Engine::Core::Component
 {
 public:
-    using MorphTarget = ::MorphTarget;
+    using Vertex = Engine::Model::Vertex;
+    using MorphTarget = Engine::Model::MorphTarget;
+    using JsonValue = Engine::Serialization::JsonValue;
+    using IGraphicsBuffer = Engine::Graphics::IGraphicsBuffer;
+    using IGraphicsBufferFactory = Engine::Graphics::IGraphicsBufferFactory;
+    using IGraphicsProvider = Engine::Graphics::IGraphicsProvider;
 
     Mesh();
     ~Mesh() = default;
@@ -61,3 +68,4 @@ private:
     std::vector<MorphTarget> m_morphTargets;
     std::vector<float> m_morphWeights;
 };
+}

@@ -36,12 +36,13 @@ std::optional<std::string> LoadPreference(const std::filesystem::path& path)
     {
         if (!std::filesystem::is_regular_file(path))
             return std::nullopt;
-        const JsonValue root = JsonParseFile(path.string());
+        const Engine::Serialization::JsonValue root =
+            Engine::Serialization::JsonParseFile(path.string());
         if (!root.Has("always") || !root["always"].AsBool() ||
             !root.Has("renderer") || !root["renderer"].IsString())
             return std::nullopt;
         const std::string renderer = root["renderer"].AsString();
-        return RendererFactory::IsRendererAvailable(renderer)
+        return ::Engine::Renderers::RendererFactory::IsRendererAvailable(renderer)
             ? std::optional<std::string>(renderer) : std::nullopt;
     }
     catch (...)
@@ -52,19 +53,20 @@ std::optional<std::string> LoadPreference(const std::filesystem::path& path)
 
 bool SavePreference(const std::filesystem::path& path, const std::string& renderer)
 {
-    JsonValue root = JsonValue::MakeObject();
-    root.Set("version", JsonValue(1));
-    root.Set("renderer", JsonValue(renderer));
-    root.Set("always", JsonValue(true));
+    Engine::Serialization::JsonValue root =
+        Engine::Serialization::JsonValue::MakeObject();
+    root.Set("version", Engine::Serialization::JsonValue(1));
+    root.Set("renderer", Engine::Serialization::JsonValue(renderer));
+    root.Set("always", Engine::Serialization::JsonValue(true));
     std::ofstream output(path, std::ios::trunc);
     if (!output)
         return false;
-    output << JsonWrite(root);
+    output << Engine::Serialization::JsonWrite(root);
     return output.good();
 }
 }
 
-bool SelectStartupRenderer(ProjectSettings& settings)
+bool SelectStartupRenderer(Engine::Model::ProjectSettings& settings)
 {
     const std::filesystem::path preferencePath = PreferencePath();
     if (const std::optional<std::string> saved = LoadPreference(preferencePath))
@@ -76,7 +78,8 @@ bool SelectStartupRenderer(ProjectSettings& settings)
     std::vector<std::string> available;
     std::vector<std::wstring> buttonLabels;
     std::wstring unavailableDetails;
-    for (const RendererOption& option : RendererFactory::GetRendererOptions())
+    for (const Engine::Model::RendererOption& option :
+        ::Engine::Renderers::RendererFactory::GetRendererOptions())
     {
         if (option.available)
         {

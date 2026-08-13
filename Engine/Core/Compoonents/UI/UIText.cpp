@@ -1,5 +1,7 @@
 #include "Core/Compoonents/UI/UIText.h"
 
+namespace Engine::Components
+{
 UIText::UIText()
 {
     SetTypeName(COMPONENT_TYPE_NAME(UIText));
@@ -14,4 +16,5 @@ UIText::UIText()
     RegisterField("wordWrap", wordWrap);
     RegisterField("overflow", overflow);
     RegisterField("lineSpacing", lineSpacing);
+}
 }

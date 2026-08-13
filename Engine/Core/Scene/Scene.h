@@ -8,17 +8,13 @@
 #include <glm/glm.hpp>
 #include <string>
 
-// Forward declarations
-class IGraphicsProvider;
-class IGraphicsContext;
-class IShaderCompiler;
-class IPipelineStateFactory;
-class IGraphicsBufferFactory;
-class Texture;
-class UIRenderer;
-class Physics;
-class Audio;
+namespace Engine::Physics { class Physics; }
+namespace Engine::Audio { class Audio; }
+namespace Engine::Components { class Camera; class Texture; }
+namespace Engine::Renderers { class UIRenderer; }
+namespace Engine::Graphics { class IGraphicsProvider; class IGraphicsContext; }
 
+// Forward declarations
 // ---------------------------------------------------------------------------
 // Scene
 //
@@ -35,9 +31,19 @@ class Audio;
 //   scene.Render(graphicsContext);
 // ---------------------------------------------------------------------------
 
+namespace Engine::Scene
+{
 class Scene
 {
 public:
+    using Object = Engine::Core::Object;
+    using Camera = Engine::Components::Camera;
+    using SceneSettings = Engine::Model::SceneSettings;
+    using IGraphicsProvider = Engine::Graphics::IGraphicsProvider;
+    using IGraphicsContext = Engine::Graphics::IGraphicsContext;
+    using IPipelineState = Engine::Graphics::IPipelineState;
+    using IGraphicsBuffer = Engine::Graphics::IGraphicsBuffer;
+
     using ObjectPath = std::vector<std::size_t>;
     enum class ObjectPlacement { Before, AsChild, After };
 
@@ -47,10 +53,10 @@ public:
     // Runtime lifecycle shared by the standalone game and Editor Play mode.
     void Start();
     void Update(float deltaTime);
-    Physics& GetPhysics() { return *m_physics; }
-    const Physics& GetPhysics() const { return *m_physics; }
-    Audio& GetAudio() { return *m_audio; }
-    const Audio& GetAudio() const { return *m_audio; }
+    Engine::Physics::Physics& GetPhysics() { return *m_physics; }
+    const Engine::Physics::Physics& GetPhysics() const { return *m_physics; }
+    Engine::Audio::Audio& GetAudio() { return *m_audio; }
+    const Engine::Audio::Audio& GetAudio() const { return *m_audio; }
 
     // --- Editor Settings ---
     Object editorCamera; // not used by the game runtime, used for editor scene view navigation
@@ -102,17 +108,17 @@ public:
     std::string SaveToString() const;
     bool LoadFromString(const std::string& source);
 
-    Engine::Rendering::Lighting::BakeResult BakeLighting(
+    Engine::Model::BakeResult BakeLighting(
         const std::string& assetsDirectory = "Assets",
         const std::string& sceneName = "Scene",
-        const Engine::Rendering::Lighting::BakedLightingSettings& bakeSettings = {});
+        const Engine::Model::BakedLightingSettings& bakeSettings = {});
     void ClearBakedLighting();
     const std::string& GetLightingBakeStatus() const { return m_lightingBakeStatus; }
 
     SceneSettings settings;
 
     IGraphicsProvider* GetGraphicsProvider() const { return m_graphicsProvider; }
-    const Texture* GetSkyboxPreviewTexture();
+    const Engine::Components::Texture* GetSkyboxPreviewTexture();
 
 private:
     // ---- Rendering resources (kept API-agnostic) ----
@@ -124,8 +130,8 @@ private:
     std::unique_ptr<IPipelineState> m_skyboxPipeline;
     std::unique_ptr<IGraphicsBuffer> m_skyboxConstantBuffer;
     void* m_skyboxCBMapped = nullptr;
-    std::shared_ptr<Texture> m_defaultSkyboxTexture;
-    std::shared_ptr<Texture> m_sceneSkyboxTexture;
+    std::shared_ptr<Engine::Components::Texture> m_defaultSkyboxTexture;
+    std::shared_ptr<Engine::Components::Texture> m_sceneSkyboxTexture;
     std::string m_loadedSkyboxPath;
 
     std::unique_ptr<IPipelineState> m_objectPipeline;
@@ -143,18 +149,18 @@ private:
     void* m_lightDataMapped = nullptr;
     std::unique_ptr<IGraphicsBuffer> m_boneDataBuffer;
     void* m_boneDataMapped = nullptr;
-    std::unique_ptr<UIRenderer> m_uiRenderer;
-    std::unique_ptr<Physics> m_physics;
-    std::unique_ptr<Audio> m_audio;
+    std::unique_ptr<Engine::Renderers::UIRenderer> m_uiRenderer;
+    std::unique_ptr<Engine::Physics::Physics> m_physics;
+    std::unique_ptr<Engine::Audio::Audio> m_audio;
 
-    Engine::Rendering::Lighting::RealtimeLightingPipeline m_realtimeLightingPipeline;
-    Engine::Rendering::Lighting::BakedLightingPipeline m_bakedLightingPipeline;
+    Engine::Rendering::RealtimeLightingPipeline m_realtimeLightingPipeline;
+    Engine::Rendering::BakedLightingPipeline m_bakedLightingPipeline;
     std::string m_lightingBakeStatus = "Lighting has not been baked.";
 
     void BuildGridPipeline();
     void BuildSkyboxPipeline();
     void BuildObjectPipeline();
-    const Texture* ResolveSkyboxTexture();
+    const Engine::Components::Texture* ResolveSkyboxTexture();
 
     // ---- Object list ----
     std::vector<std::unique_ptr<Object>> m_objects;
@@ -166,6 +172,7 @@ private:
     static constexpr uint32_t kMaxObjects = 64;
     static constexpr uint32_t kMaxBonesPerObject = 256;
     static constexpr uint32_t kMaxLights =
-        Engine::Rendering::Lighting::MaxRealtimeLights;
+        Engine::Model::MaxRealtimeLights;
     static constexpr uint32_t kCBStride = 256;
 };
+}

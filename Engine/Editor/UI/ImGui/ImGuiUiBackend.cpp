@@ -19,6 +19,8 @@
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 
+namespace Engine::Editor
+{
 namespace
 {
 #if defined(ENGINE_VULKAN_ENABLED)
@@ -48,7 +50,7 @@ ImGuiUiBackend::~ImGuiUiBackend()
     Shutdown();
 }
 
-bool ImGuiUiBackend::Initialize(void* nativeWindow, IEditorRenderer& renderer)
+bool ImGuiUiBackend::Initialize(void* nativeWindow, ::Engine::Renderers::IEditorRenderer& renderer)
 {
     Shutdown();
     IMGUI_CHECKVERSION();
@@ -63,7 +65,7 @@ bool ImGuiUiBackend::Initialize(void* nativeWindow, IEditorRenderer& renderer)
         return false;
     }
 
-    if (auto* dx11 = dynamic_cast<DX11EditorRenderer*>(&renderer))
+    if (auto* dx11 = dynamic_cast<::Engine::Renderers::DX11EditorRenderer*>(&renderer))
     {
         if (!ImGui_ImplDX11_Init(dx11->GetDevice(), dx11->GetDeviceContext()))
         {
@@ -72,12 +74,12 @@ bool ImGuiUiBackend::Initialize(void* nativeWindow, IEditorRenderer& renderer)
         }
         m_graphicsApi = GraphicsApi::DirectX11;
     }
-    else if (auto* dx12 = dynamic_cast<DX12EditorRenderer*>(&renderer))
+    else if (auto* dx12 = dynamic_cast<::Engine::Renderers::DX12EditorRenderer*>(&renderer))
     {
         ImGui_ImplDX12_InitInfo info{};
         info.Device = dx12->GetDevice();
         info.CommandQueue = dx12->GetCommandQueue();
-        info.NumFramesInFlight = static_cast<int>(DX12EditorRenderer::FRAME_COUNT);
+        info.NumFramesInFlight = static_cast<int>(::Engine::Renderers::DX12EditorRenderer::FRAME_COUNT);
         info.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
         info.DSVFormat = DXGI_FORMAT_UNKNOWN;
         info.SrvDescriptorHeap = dx12->GetUiDescriptorHeap();
@@ -97,7 +99,7 @@ bool ImGuiUiBackend::Initialize(void* nativeWindow, IEditorRenderer& renderer)
         m_graphicsApi = GraphicsApi::DirectX12;
     }
 #if defined(ENGINE_VULKAN_ENABLED)
-    else if (auto* vulkan = dynamic_cast<VulkanEditorRenderer*>(&renderer))
+    else if (auto* vulkan = dynamic_cast<::Engine::Renderers::VulkanEditorRenderer*>(&renderer))
     {
         auto& core = vulkan->GetRenderCore();
         ImGui::GetPlatformIO().Platform_CreateVkSurface = CreateImGuiWin32VulkanSurface;
@@ -227,7 +229,7 @@ bool ImGuiUiBackend::HandleMessage(void* nativeWindow, uint32_t message,
             m_buildManager->StartBuild(PostBuildAction::Nothing);
         return true;
     }
-    return m_initialized && ImGui_ImplWin32_WndProcHandler(
+    return m_initialized && ::ImGui_ImplWin32_WndProcHandler(
         static_cast<HWND>(nativeWindow), message,
         static_cast<WPARAM>(wParam), static_cast<LPARAM>(lParam)) != 0;
 }
@@ -253,14 +255,14 @@ void ImGuiUiBackend::Render(void* commandBuffer)
     RenderDrawData(ImGui::GetDrawData(), commandBuffer);
 }
 
-void ImGuiUiBackend::RenderDrawData(ImDrawData* drawData, void* commandBuffer)
+void ImGuiUiBackend::RenderDrawData(::ImDrawData* drawData, void* commandBuffer)
 {
     if (!m_initialized || !drawData) return;
     if (m_graphicsApi == GraphicsApi::DirectX11)
         ImGui_ImplDX11_RenderDrawData(drawData);
     else if (m_graphicsApi == GraphicsApi::DirectX12)
     {
-        auto* dx12 = static_cast<DX12EditorRenderer*>(m_renderer);
+        auto* dx12 = static_cast<::Engine::Renderers::DX12EditorRenderer*>(m_renderer);
         ID3D12DescriptorHeap* heaps[] = { dx12->GetUiDescriptorHeap() };
         auto* commands = static_cast<ID3D12GraphicsCommandList*>(commandBuffer);
         commands->SetDescriptorHeaps(1, heaps);
@@ -286,4 +288,5 @@ void ImGuiUiBackend::EndFrame()
 std::unique_ptr<IEditorUiBackend> CreateEditorUiBackend()
 {
     return std::make_unique<ImGuiUiBackend>();
+}
 }

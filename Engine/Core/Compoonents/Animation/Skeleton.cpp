@@ -3,6 +3,8 @@
 #include "Core/Object.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 
+namespace Engine::Components
+{
 Skeleton::Skeleton()
 {
     SetTypeName(COMPONENT_TYPE_NAME(Skeleton));
@@ -10,7 +12,7 @@ Skeleton::Skeleton()
     RegisterField("showBones", showBones);
 }
 
-JsonValue Skeleton::Serialize() const
+Skeleton::JsonValue Skeleton::Serialize() const
 {
     JsonValue result = Component::Serialize()
         .Set("skinIndex", JsonValue(static_cast<int>(skinIndex)));
@@ -46,7 +48,7 @@ void Skeleton::Deserialize(const JsonValue& value)
     }
 }
 
-bool Skeleton::DrawProperties(IEditorUi& ui)
+bool Skeleton::DrawProperties(::Engine::Editor::IEditorUi& ui)
 {
     const char* label = showBones ? "Hide Bones in Scene" : "Show Bones in Scene";
     if (ui.Button(label))
@@ -61,13 +63,13 @@ bool Skeleton::DrawProperties(IEditorUi& ui)
     return false;
 }
 
-Object* Skeleton::FindNode(unsigned index) const
+Skeleton::Object* Skeleton::FindNode(unsigned index) const
 {
     Model* model = ResolveModel();
     return model ? model->ResolveNode(index) : nullptr;
 }
 
-Object* Skeleton::GetHierarchyRoot() const
+Skeleton::Object* Skeleton::GetHierarchyRoot() const
 {
     Model* model = ResolveModel();
     return model ? model->Owner : Owner;
@@ -76,18 +78,19 @@ Object* Skeleton::GetHierarchyRoot() const
 Model* Skeleton::ResolveModel() const
 {
     Model* model = modelReference.IsAssigned()
-        ? ResolveComponentReference<Model>(Owner, modelReference) : nullptr;
+        ? Engine::Core::ResolveComponentReference<Model>(Owner, modelReference) : nullptr;
     if (!modelReference.IsAssigned())
         for (Object* current = Owner; current && !model; current = current->Parent)
             model = current->GetComponent<Model>();
     return model;
 }
 
-std::vector<Object*> Skeleton::ResolveJoints() const
+std::vector<Skeleton::Object*> Skeleton::ResolveJoints() const
 {
-    std::vector<Object*> result;
+    std::vector<Skeleton::Object*> result;
     result.reserve(jointNodes.size());
     for (const unsigned node : jointNodes)
         if (Object* joint = FindNode(node)) result.push_back(joint);
     return result;
+}
 }

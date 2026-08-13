@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 
+namespace Engine::Editor
+{
 // Avoid Windows macro collisions with method names in this interface.
 #ifdef Combo
 #undef Combo
@@ -182,3 +184,4 @@ public:
         EditorUiColor color) = 0;
     virtual void FocusWindow(const char* title) = 0;
 };
+}

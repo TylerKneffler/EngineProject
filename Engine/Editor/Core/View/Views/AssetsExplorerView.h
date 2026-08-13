@@ -3,8 +3,9 @@
 #include <functional>
 #include "View/IEditorPanel.h"
 
-class Object;
 
+namespace Engine::Editor
+{
 // ---------------------------------------------------------------------------
 // AssetsExplorerView
 //
@@ -32,7 +33,7 @@ public:
     std::function<void(const std::string&)> OnSceneRequested;
     std::function<void(const std::string&)> OnPrefabRequested;
     std::function<void(const std::string&)> OnSelectionChanged;
-    std::function<void(Object*, const std::string&)> OnPrefabCreated;
+    std::function<void(Engine::Core::Object*, const std::string&)> OnPrefabCreated;
 
     void SetSelectedPath(const std::string& path) { m_selectedPath = path; }
     const std::string& GetSelectedPath() const { return m_selectedPath; }
@@ -60,3 +61,4 @@ private:
     bool m_focusScriptName = false;
     std::string m_error;
 };
+}

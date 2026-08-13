@@ -3,6 +3,8 @@
 #include "../IView.h"
 #include "VulkanCommon.h"
 
+namespace Engine::Renderers
+{
 class VulkanView : public IView
 {
 public:
@@ -35,4 +37,5 @@ private:
     float m_aspect = 1.0f;
     float m_clearColor[4] = { 0.0f, 0.0f, 0.502f, 1.0f };
 };
+}
 #endif

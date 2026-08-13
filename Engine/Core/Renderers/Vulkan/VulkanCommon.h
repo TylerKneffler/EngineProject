@@ -6,6 +6,10 @@
 #include <string>
 #include <functional>
 
+
+namespace Engine::Renderers
+{
+
 inline void VkCheck(VkResult result, const char* operation)
 {
     if (result != VK_SUCCESS)
@@ -36,4 +40,5 @@ struct VulkanViewDeviceContext
     std::function<void*(VkSampler, VkImageView, VkImageLayout)> registerUiTexture;
     std::function<void(void*)> unregisterUiTexture;
 };
+}
 #endif

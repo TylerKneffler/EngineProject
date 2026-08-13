@@ -3,6 +3,8 @@
 #include "imgui.h"
 #include "imgui_internal.h"
 
+namespace Engine::Editor
+{
 void ImGuiDockspace::Draw()
 {
     const ImGuiID dockspaceId =
@@ -46,4 +48,5 @@ void ImGuiDockspace::Draw()
     ImGui::DockBuilderDockWindow("Terminal 1", centerBottom);
     ImGui::DockBuilderDockWindow("Properties 1", right);
     ImGui::DockBuilderFinish(dockspaceId);
+}
 }

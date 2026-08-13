@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+namespace Engine::Model
+{
 struct ProjectSettings
 {
     enum class EditorMode { ThreeD, TwoD };
@@ -36,7 +38,7 @@ struct ProjectSettings
     std::string gameRenderingAPI;
     glm::vec4 clearColor;
     uint32_t targetFramerate;
-    Engine::Rendering::Lighting::BakedLightingSettings bakedLighting;
+    Engine::Model::BakedLightingSettings bakedLighting;
     enum class AspectRatioMode { Free, Locked, Hardcoded };
     AspectRatioMode aspectRatioMode = AspectRatioMode::Locked;
     float gameAspectRatio = 1.777f;
@@ -45,3 +47,5 @@ struct ProjectSettings
     glm::vec4 letterboxColor = glm::vec4(0.f, 0.f, 0.f, 1.f);
     std::vector<std::string> builtInComponents;
 };
+}
+

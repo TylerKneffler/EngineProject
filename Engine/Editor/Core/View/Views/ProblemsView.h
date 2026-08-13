@@ -2,6 +2,8 @@
 #include "pch.h"
 #include "View/IEditorPanel.h"
 
+namespace Engine::Editor
+{
 enum class EditorProblemSeverity { Warning, Error };
 
 struct EditorProblem
@@ -45,3 +47,4 @@ private:
     bool m_showErrors = true;
     bool m_filtersChanged = true;
 };
+}

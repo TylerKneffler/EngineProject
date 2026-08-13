@@ -31,6 +31,9 @@
 #define ENGINE_ASSETS_PATH "Engine/Core/Assets/"
 #endif
 
+
+namespace Engine::Renderers
+{
 namespace
 {
 constexpr int kFirstGlyph = 32;
@@ -48,7 +51,7 @@ struct Glyph
 
 struct FontAtlas
 {
-    std::shared_ptr<IGraphicsTexture> texture;
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> texture;
     std::array<Glyph, kLastGlyph - kFirstGlyph + 1> glyphs{};
     float ascent = 0.f;
     float lineHeight = kAtlasFontHeight;
@@ -68,7 +71,8 @@ struct DrawSegment
     uint32_t vertexCount = 0;
 };
 
-UIRect Intersect(const UIRect& first, const UIRect& second)
+Engine::Model::UIRect Intersect(const Engine::Model::UIRect& first,
+    const Engine::Model::UIRect& second)
 {
     const float left = std::max(first.x, second.x);
     const float top = std::max(first.y, second.y);
@@ -119,7 +123,7 @@ float Measure(const std::string& value, const FontAtlas& atlas, float scale)
     return width;
 }
 
-std::vector<std::string> WrapText(const UIText& text, const FontAtlas& atlas,
+std::vector<std::string> WrapText(const Engine::Components::UIText& text, const FontAtlas& atlas,
     float maxWidth, float scale)
 {
     std::vector<std::string> lines;
@@ -154,7 +158,7 @@ std::vector<std::string> WrapText(const UIText& text, const FontAtlas& atlas,
 }
 
 bool ClipQuad(float& x0, float& y0, float& x1, float& y1,
-    float& u0, float& v0, float& u1, float& v1, const UIRect& clip)
+    float& u0, float& v0, float& u1, float& v1, const Engine::Model::UIRect& clip)
 {
     if (x1 <= clip.x || y1 <= clip.y || x0 >= clip.x + clip.width ||
         y0 >= clip.y + clip.height) return false;
@@ -199,9 +203,9 @@ void AddQuad(std::vector<UIVertex>& vertices, float x0, float y0, float x1, floa
 
 struct UIRenderer::Impl
 {
-    IGraphicsProvider* provider = nullptr;
-    std::unique_ptr<IPipelineState> pipeline;
-    std::unique_ptr<IGraphicsBuffer> vertexBuffer;
+    Engine::Graphics::IGraphicsProvider* provider = nullptr;
+    std::unique_ptr<Engine::Graphics::IPipelineState> pipeline;
+    std::unique_ptr<Engine::Graphics::IGraphicsBuffer> vertexBuffer;
     std::size_t vertexCapacity = 0;
     std::unordered_map<std::string, std::unique_ptr<FontAtlas>> atlases;
 
@@ -258,7 +262,7 @@ struct UIRenderer::Impl
             stbtt_FreeSDF(sdf, nullptr);
         }
         atlas->texture = provider->GetTextureFactory()->CreateTexture2D(
-            kAtlasSize, kAtlasSize, pixels.data(), 1, GraphicsTextureFormat::Rgba8, false);
+            kAtlasSize, kAtlasSize, pixels.data(), 1, Engine::Graphics::GraphicsTextureFormat::Rgba8, false);
         if (!atlas->texture) return nullptr;
         FontAtlas* result = atlas.get();
         atlases.emplace(key, std::move(atlas));
@@ -269,7 +273,7 @@ struct UIRenderer::Impl
 UIRenderer::UIRenderer() : m_impl(new Impl()) {}
 UIRenderer::~UIRenderer() { delete m_impl; }
 
-void UIRenderer::Initialize(IGraphicsProvider* graphicsProvider)
+void UIRenderer::Initialize(Engine::Graphics::IGraphicsProvider* graphicsProvider)
 {
     if (!m_impl || !graphicsProvider) return;
     m_impl->provider = graphicsProvider;
@@ -278,11 +282,11 @@ void UIRenderer::Initialize(IGraphicsProvider* graphicsProvider)
     if (!compiler || !factory) return;
     const std::filesystem::path shader = std::filesystem::path(ENGINE_SHADERS_PATH) / "UI" / "UI.hlsl";
     auto vertexShader = compiler->CompileFromFile(shader.string().c_str(), "VSMain",
-        IShaderCompiler::CompileProfile::VS_5_0);
+        Engine::Graphics::IShaderCompiler::CompileProfile::VS_5_0);
     auto pixelShader = compiler->CompileFromFile(shader.string().c_str(), "PSMain",
-        IShaderCompiler::CompileProfile::PS_5_0);
+        Engine::Graphics::IShaderCompiler::CompileProfile::PS_5_0);
     if (!vertexShader || !pixelShader) return;
-    IPipelineStateBuilder::VertexElement layout[] = {
+    Engine::Graphics::IPipelineStateBuilder::VertexElement layout[] = {
         { "POSITION", 0, 16, 0, 0, false },
         { "TEXCOORD", 0, 16, 0, 8, false },
         { "COLOR", 0, 2, 0, 16, false }
@@ -296,26 +300,27 @@ void UIRenderer::Initialize(IGraphicsProvider* graphicsProvider)
         .SetSrcBlendAlpha(1).SetDestBlendAlpha(0).SetBlendOpAlpha(0)
         .SetDepthEnable(false).SetDepthWriteEnable(false).SetDepthFunc(7)
         .SetInputLayout(layout, 3)
-        .SetPrimitiveTopology(IPipelineStateBuilder::PrimitiveTopology::TriangleList)
+        .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
         .SetRenderTargetFormat(28, 40).Build();
 }
 
 bool UIRenderer::IsReady() const { return m_impl && m_impl->pipeline; }
 
-void UIRenderer::Render(Scene& scene, IGraphicsContext* context, float viewportAspect)
+void UIRenderer::Render(Engine::Scene::Scene& scene,
+    Engine::Graphics::IGraphicsContext* context, float viewportAspect)
 {
     if (!IsReady() || !context || !m_impl->provider) return;
-    const std::vector<UITextLayout> items = UILayout::Resolve(scene, viewportAspect);
+    const std::vector<Engine::Model::UITextLayout> items = Engine::UI::UILayout::Resolve(scene, viewportAspect);
     std::vector<UIVertex> vertices;
     std::vector<DrawSegment> segments;
-    for (const UITextLayout& item : items)
+    for (const Engine::Model::UITextLayout& item : items)
     {
         if (!item.layout || !item.text || item.text->text.empty()) continue;
         FontAtlas* atlas = m_impl->GetAtlas(item.text->fontPath);
         if (!atlas) continue;
         const float scale = std::max(1.f, item.text->fontSize) / kAtlasFontHeight;
-        const UIRect& rect = item.layout->GetComputedRect();
-        UIRect clip = item.layout->GetComputedClipRect();
+        const Engine::Model::UIRect& rect = item.layout->GetComputedRect();
+        Engine::Model::UIRect clip = item.layout->GetComputedClipRect();
         if (item.text->overflow != "Visible") clip = Intersect(clip, rect);
         std::vector<std::string> lines = WrapText(*item.text, *atlas, rect.width, scale);
         const float lineHeight = atlas->lineHeight * scale * std::max(0.1f, item.text->lineSpacing);
@@ -377,7 +382,7 @@ void UIRenderer::Render(Scene& scene, IGraphicsContext* context, float viewportA
         m_impl->vertexCapacity = std::max<std::size_t>(vertices.size(),
             std::max<std::size_t>(1024, m_impl->vertexCapacity * 2));
         m_impl->vertexBuffer = m_impl->provider->GetBufferFactory()->CreateBuffer(
-            IGraphicsBuffer::Usage::VertexBuffer, IGraphicsBuffer::AccessMode::Upload,
+            Engine::Graphics::IGraphicsBuffer::Usage::VertexBuffer, Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
             m_impl->vertexCapacity * sizeof(UIVertex));
     }
     if (!m_impl->vertexBuffer) return;
@@ -396,4 +401,5 @@ void UIRenderer::Render(Scene& scene, IGraphicsContext* context, float viewportA
         context->SetTexture(0, segment.atlas->texture.get());
         context->DrawInstanced(segment.vertexCount, 1, segment.firstVertex, 0);
     }
+}
 }

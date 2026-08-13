@@ -1,6 +1,8 @@
 #include "Core/Compoonents/UI/Canvas.h"
 #include <algorithm>
 
+namespace Engine::Components
+{
 Canvas::Canvas()
 {
     SetTypeName(COMPONENT_TYPE_NAME(Canvas));
@@ -21,4 +23,5 @@ glm::vec2 Canvas::GetLogicalSize(float viewportAspect) const
     const glm::vec2 matchWidth(width, width / aspect);
     return glm::mix(matchHeight, matchWidth,
         std::clamp(matchWidthOrHeight, 0.f, 1.f));
+}
 }

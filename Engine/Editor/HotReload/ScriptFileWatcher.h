@@ -3,6 +3,8 @@
 #include <string>
 #include <unordered_map>
 
+namespace Engine::Editor
+{
 class ScriptFileWatcher
 {
 public:
@@ -16,3 +18,4 @@ private:
     std::filesystem::path m_directory;
     std::unordered_map<std::string, Stamp> m_files;
 };
+}

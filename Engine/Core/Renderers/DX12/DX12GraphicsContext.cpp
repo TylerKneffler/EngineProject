@@ -9,6 +9,8 @@
 // D3D12GraphicsContext
 // ---------------------------------------------------------------------------
 
+namespace Engine::Renderers
+{
 D3D12GraphicsContext::D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList)
     : m_cmdList(cmdList)
 {
@@ -24,7 +26,7 @@ D3D12GraphicsContext::D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList, I
     }
 }
 
-void D3D12GraphicsContext::SetPipeline(const IPipelineState* pipeline)
+void D3D12GraphicsContext::SetPipeline(const Engine::Graphics::IPipelineState* pipeline)
 {
     if (!pipeline || !m_cmdList) return;
 
@@ -35,20 +37,20 @@ void D3D12GraphicsContext::SetPipeline(const IPipelineState* pipeline)
     }
 }
 
-void D3D12GraphicsContext::SetConstantBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint64_t offset)
+void D3D12GraphicsContext::SetConstantBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint64_t offset)
 {
     if (!buffer || !m_cmdList) return;
 
-    auto* d3dBuffer = static_cast<D3D12GraphicsBuffer*>(const_cast<IGraphicsBuffer*>(buffer));
+    auto* d3dBuffer = static_cast<D3D12GraphicsBuffer*>(const_cast<Engine::Graphics::IGraphicsBuffer*>(buffer));
     D3D12_GPU_VIRTUAL_ADDRESS gpuAddr = d3dBuffer->GetGPUVirtualAddress() + offset;
     m_cmdList->SetGraphicsRootConstantBufferView(slot, gpuAddr);
 }
 
-void D3D12GraphicsContext::SetVertexBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset)
+void D3D12GraphicsContext::SetVertexBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset)
 {
     if (!buffer || !m_cmdList) return;
 
-    auto* d3dBuffer = static_cast<D3D12GraphicsBuffer*>(const_cast<IGraphicsBuffer*>(buffer));
+    auto* d3dBuffer = static_cast<D3D12GraphicsBuffer*>(const_cast<Engine::Graphics::IGraphicsBuffer*>(buffer));
     
     D3D12_VERTEX_BUFFER_VIEW vbv{};
     vbv.BufferLocation = d3dBuffer->GetGPUVirtualAddress() + offset;
@@ -58,11 +60,11 @@ void D3D12GraphicsContext::SetVertexBuffer(uint32_t slot, const IGraphicsBuffer*
     m_cmdList->IASetVertexBuffers(slot, 1, &vbv);
 }
 
-void D3D12GraphicsContext::SetIndexBuffer(const IGraphicsBuffer* buffer, uint32_t indexCount, uint64_t offset)
+void D3D12GraphicsContext::SetIndexBuffer(const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t indexCount, uint64_t offset)
 {
     if (!buffer || !m_cmdList) return;
 
-    auto* d3dBuffer = static_cast<D3D12GraphicsBuffer*>(const_cast<IGraphicsBuffer*>(buffer));
+    auto* d3dBuffer = static_cast<D3D12GraphicsBuffer*>(const_cast<Engine::Graphics::IGraphicsBuffer*>(buffer));
     
     D3D12_INDEX_BUFFER_VIEW ibv{};
     ibv.BufferLocation = d3dBuffer->GetGPUVirtualAddress() + offset;
@@ -73,7 +75,7 @@ void D3D12GraphicsContext::SetIndexBuffer(const IGraphicsBuffer* buffer, uint32_
     m_indexCount = indexCount;
 }
 
-void D3D12GraphicsContext::SetStructuredBuffer(uint32_t slot, const IGraphicsBuffer* buffer)
+void D3D12GraphicsContext::SetStructuredBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer)
 {
     if (!buffer || !m_cmdList || slot < 6 || slot > 8) return;
     const auto* structured = dynamic_cast<const D3D12GraphicsBuffer*>(buffer);
@@ -83,7 +85,7 @@ void D3D12GraphicsContext::SetStructuredBuffer(uint32_t slot, const IGraphicsBuf
         slot + 1, structured->GetGPUVirtualAddress());
 }
 
-void D3D12GraphicsContext::SetTexture(uint32_t slot, const IGraphicsTexture* texture)
+void D3D12GraphicsContext::SetTexture(uint32_t slot, const Engine::Graphics::IGraphicsTexture* texture)
 {
     if (!m_cmdList || slot >= 6)
         return;
@@ -219,7 +221,7 @@ D3D12GraphicsContextFactory::D3D12GraphicsContextFactory(
         throw std::runtime_error("Failed to create D3D12 command list");
 }
 
-std::unique_ptr<IGraphicsContext> D3D12GraphicsContextFactory::CreateContext()
+std::unique_ptr<Engine::Graphics::IGraphicsContext> D3D12GraphicsContextFactory::CreateContext()
 {
     // Use the externally-supplied command list if one was set via SetCommandBuffer,
     // otherwise fall back to the factory's own command list.
@@ -230,4 +232,5 @@ std::unique_ptr<IGraphicsContext> D3D12GraphicsContextFactory::CreateContext()
 void D3D12GraphicsContextFactory::SetCommandBuffer(void* cmd)
 {
     m_externalCmdList = static_cast<ID3D12GraphicsCommandList*>(cmd);
+}
 }

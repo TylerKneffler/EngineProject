@@ -14,6 +14,8 @@
 #include <stdexcept>
 #include <unordered_map>
 
+namespace Engine::Editor
+{
 namespace fs = std::filesystem;
 
 namespace
@@ -49,19 +51,19 @@ glm::vec3 QuaternionEuler(const glm::quat& q)
     return { std::atan2(sinX, cosX), std::asin(sinY), std::atan2(sinZ, cosZ) };
 }
 
-Object* AddChild(Scene& scene, Object* parent, const std::string& name)
+Engine::Core::Object* AddChild(Engine::Scene::Scene& scene, Engine::Core::Object* parent, const std::string& name)
 {
-    Object* child = scene.AddObject(name);
+    Engine::Core::Object* child = scene.AddObject(name);
     child->Parent = parent;
     parent->Children.push_back(child);
     return child;
 }
 }
 
-ModelImportResult ModelAssetWriter::Write(const ImportedModel& model,
+Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::ImportedModel& model,
     const std::string& sourcePath, const std::string& assetsDirectory)
 {
-    ModelImportResult result;
+    Engine::Model::ModelImportResult result;
     const fs::path source = fs::path(sourcePath).lexically_normal();
     const fs::path assets = fs::path(assetsDirectory).lexically_normal();
     fs::path output;
@@ -85,7 +87,7 @@ ModelImportResult ModelAssetWriter::Write(const ImportedModel& model,
             if (value.front() == '*')
             {
                 const auto embedded = std::find_if(model.textures.begin(), model.textures.end(),
-                    [&](const ImportedTexture& texture) { return texture.source == value; });
+                    [&](const Engine::Model::ImportedTexture& texture) { return texture.source == value; });
                 if (embedded == model.textures.end() || embedded->bytes.empty()) return {};
                 const fs::path destination = texturesDirectory /
                     SafeName(embedded->name, "Embedded Texture.bin");
@@ -93,7 +95,7 @@ ModelImportResult ModelAssetWriter::Write(const ImportedModel& model,
                 file.write(reinterpret_cast<const char*>(embedded->bytes.data()),
                     static_cast<std::streamsize>(embedded->bytes.size()));
                 if (!file.good()) throw std::runtime_error("Could not write embedded texture");
-                AssetRecord::Ensure(destination, source,
+                Engine::Core::AssetRecord::Ensure(destination, source,
                     { { "importer", std::string("model-texture") },
                       { "sourceFormat", model.sourceFormat } });
                 return importedTextures.emplace(value, destination.generic_string()).first->second;
@@ -106,7 +108,7 @@ ModelImportResult ModelAssetWriter::Write(const ImportedModel& model,
                 destination = texturesDirectory /
                     (original.stem().string() + " " + std::to_string(suffix) + original.extension().string());
             fs::copy_file(original, destination);
-            AssetRecord::Ensure(destination, source,
+            Engine::Core::AssetRecord::Ensure(destination, source,
                 { { "importer", std::string("model-texture") },
                   { "sourceFormat", model.sourceFormat } });
             return importedTextures.emplace(value, destination.generic_string()).first->second;
@@ -116,8 +118,8 @@ ModelImportResult ModelAssetWriter::Write(const ImportedModel& model,
         materialPaths.reserve(model.materials.size() + 1);
         for (size_t index = 0; index < model.materials.size(); ++index)
         {
-            const ImportedMaterial& imported = model.materials[index];
-            Material material;
+            const Engine::Model::ImportedMaterial& imported = model.materials[index];
+            Engine::Components::Material material;
             material.diffuseColor = glm::vec3(imported.baseColor);
             material.baseColorAlpha = imported.baseColor.a;
             material.emissiveColor = imported.emissiveColor;
@@ -141,13 +143,13 @@ ModelImportResult ModelAssetWriter::Write(const ImportedModel& model,
             const fs::path path = materialsDirectory /
                 (SafeName(imported.name, "Material") + " " + std::to_string(index + 1) + ".material");
             if (!material.SaveToFile(path.string())) throw std::runtime_error("Could not save material");
-            AssetRecord::Ensure(path, source,
+            Engine::Core::AssetRecord::Ensure(path, source,
                 { { "importer", std::string("model-material") },
                   { "sourceFormat", model.sourceFormat },
                   { "materialIndex", static_cast<double>(index) } });
             materialPaths.push_back(path.generic_string());
         }
-        Material defaultMaterial;
+        Engine::Components::Material defaultMaterial;
         const fs::path defaultMaterialPath = materialsDirectory / "Default.material";
         if (!defaultMaterial.SaveToFile(defaultMaterialPath.string()))
             throw std::runtime_error("Could not save default material");
@@ -155,49 +157,51 @@ ModelImportResult ModelAssetWriter::Write(const ImportedModel& model,
         std::vector<std::string> meshPaths(model.primitives.size());
         for (size_t index = 0; index < model.primitives.size(); ++index)
         {
-            const ImportedPrimitive& primitive = model.primitives[index];
+            const Engine::Model::ImportedPrimitive& primitive = model.primitives[index];
             if (primitive.vertices.empty()) continue;
             const fs::path path = meshesDirectory /
                 (SafeName(primitive.name, "Mesh") + " " + std::to_string(index + 1) + ".mesh");
-            if (!Mesh::SaveNativeFile(path.string(), primitive.vertices))
+            if (!Engine::Components::Mesh::SaveNativeFile(path.string(), primitive.vertices))
                 throw std::runtime_error("Could not save mesh: " + path.string());
-            AssetRecord::Ensure(path, source,
+            Engine::Core::AssetRecord::Ensure(path, source,
                 { { "importer", std::string("model-mesh") },
                   { "sourceFormat", model.sourceFormat },
                   { "primitiveIndex", static_cast<double>(index) } });
             meshPaths[index] = path.generic_string();
         }
 
-        Scene scene;
-        Object* root = scene.AddObject(sourceName);
+        ::Engine::Scene::Scene scene;
+        Engine::Core::Object* root = scene.AddObject(sourceName);
         for (size_t index = 0; index < model.skins.size(); ++index)
         {
-            Skeleton* skeleton = root->AddComponent<Skeleton>();
+            Engine::Components::Skeleton* skeleton =
+                root->AddComponent<Engine::Components::Skeleton>();
             skeleton->skinIndex = static_cast<unsigned>(index);
             skeleton->jointNodes = model.skins[index].jointNodes;
             skeleton->inverseBindMatrices = model.skins[index].inverseBindMatrices;
         }
-        for (const ImportedAnimation& imported : model.animations)
+        for (const Engine::Model::ImportedAnimation& imported : model.animations)
         {
-            Animation* animation = root->AddComponent<Animation>();
+            Engine::Components::Animation* animation = root->AddComponent<Engine::Components::Animation>();
             animation->clipName = imported.name;
             animation->duration = imported.duration;
             animation->channels = imported.channels;
         }
         if (!model.animations.empty())
         {
-            AnimationManager* manager = root->AddComponent<AnimationManager>();
+            Engine::Components::AnimationManager* manager = root->AddComponent<Engine::Components::AnimationManager>();
             manager->clip = model.animations.front().name;
         }
 
-        Model* modelComponent = root->AddComponent<Model>();
-        std::vector<Object*> objects(model.nodes.size(), nullptr);
+        ::Engine::Components::Model* modelComponent =
+            root->AddComponent<::Engine::Components::Model>();
+        std::vector<Engine::Core::Object*> objects(model.nodes.size(), nullptr);
         for (size_t index = 0; index < model.nodes.size(); ++index)
         {
-            const ImportedNode& imported = model.nodes[index];
-            Object* parent = imported.parent >= 0 && static_cast<size_t>(imported.parent) < objects.size()
+            const Engine::Model::ImportedNode& imported = model.nodes[index];
+            Engine::Core::Object* parent = imported.parent >= 0 && static_cast<size_t>(imported.parent) < objects.size()
                 ? objects[static_cast<size_t>(imported.parent)] : root;
-            Object* object = AddChild(scene, parent,
+            Engine::Core::Object* object = AddChild(scene, parent,
                 SafeName(imported.name, "Node " + std::to_string(index + 1)));
             objects[index] = object;
             modelComponent->BindNode(static_cast<unsigned>(index), object);
@@ -209,12 +213,12 @@ ModelImportResult ModelAssetWriter::Write(const ImportedModel& model,
             {
                 const unsigned primitiveIndex = imported.primitives[slot];
                 if (primitiveIndex >= model.primitives.size() || meshPaths[primitiveIndex].empty()) continue;
-                const ImportedPrimitive& primitive = model.primitives[primitiveIndex];
-                Object* target = imported.primitives.size() == 1 ? object :
+                const Engine::Model::ImportedPrimitive& primitive = model.primitives[primitiveIndex];
+                Engine::Core::Object* target = imported.primitives.size() == 1 ? object :
                     AddChild(scene, object, SafeName(primitive.name, "Primitive " + std::to_string(slot + 1)));
-                Mesh* mesh = target->AddComponent<Mesh>();
+                Engine::Components::Mesh* mesh = target->AddComponent<Engine::Components::Mesh>();
                 mesh->LoadFromFile(meshPaths[primitiveIndex]);
-                Material* material = target->AddComponent<Material>();
+                Engine::Components::Material* material = target->AddComponent<Engine::Components::Material>();
                 const std::string materialPath = primitive.materialIndex >= 0 &&
                     static_cast<size_t>(primitive.materialIndex) < materialPaths.size()
                     ? materialPaths[static_cast<size_t>(primitive.materialIndex)]
@@ -226,16 +230,16 @@ ModelImportResult ModelAssetWriter::Write(const ImportedModel& model,
                         primitive.morphTargets, primitive.morphWeights);
                 if (primitive.skinIndex >= 0 || !primitive.morphTargets.empty())
                 {
-                    SkinnedMesh* deformer = target->AddComponent<SkinnedMesh>();
+                    Engine::Components::SkinnedMesh* deformer = target->AddComponent<Engine::Components::SkinnedMesh>();
                     deformer->skinIndex = primitive.skinIndex;
                 }
             }
         }
 
         const fs::path prefabPath = output / (output.filename().string() + ".prefab");
-        if (!SceneSerializer::SavePrefab(*root, prefabPath.string()))
+        if (!Engine::Serialization::SceneSerializer::SavePrefab(*root, prefabPath.string()))
             throw std::runtime_error("Could not save prefab");
-        AssetRecord::Ensure(prefabPath, source,
+        Engine::Core::AssetRecord::Ensure(prefabPath, source,
             { { "importer", std::string("model") }, { "sourceFormat", model.sourceFormat } });
         result.success = true;
         result.prefabPath = prefabPath.generic_string();
@@ -250,4 +254,5 @@ ModelImportResult ModelAssetWriter::Write(const ImportedModel& model,
         result.message = error.what();
     }
     return result;
+}
 }

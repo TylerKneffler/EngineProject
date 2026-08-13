@@ -7,7 +7,8 @@
 #include <algorithm>
 #include <memory>
 
-using namespace Editor::ViewTemplates;
+namespace Engine::Editor
+{
 
 bool PropertiesView::AddRegisteredComponent(const std::string& typeName, std::string& message)
 {
@@ -23,8 +24,8 @@ bool PropertiesView::AddRegisteredComponent(const std::string& typeName, std::st
     }
     try
     {
-        std::unique_ptr<Component> component(
-            SceneSerializer::CreateRegisteredComponent(typeName));
+        std::unique_ptr<Engine::Core::Component> component(
+            Engine::Serialization::SceneSerializer::CreateRegisteredComponent(typeName));
         if (!component)
         {
             message = "[Properties] Component '" + typeName +
@@ -35,7 +36,7 @@ bool PropertiesView::AddRegisteredComponent(const std::string& typeName, std::st
         {
             const std::string serializedType = component->GetTypeName();
             const auto duplicate = std::find_if(m_selectedObject->Components.begin(),
-                m_selectedObject->Components.end(), [&serializedType](const Component* existing)
+                m_selectedObject->Components.end(), [&serializedType](const Engine::Core::Component* existing)
                 {
                     return existing && existing->GetTypeName() == serializedType;
                 });
@@ -76,7 +77,7 @@ void PropertiesView::DrawComponentPicker(IEditorUi& ui)
 
     ui.InputText("Search", m_componentSearch, sizeof(m_componentSearch));
     ui.Separator();
-    const std::vector<std::string> types = SceneSerializer::GetRegisteredComponentTypes();
+    const std::vector<std::string> types = Engine::Serialization::SceneSerializer::GetRegisteredComponentTypes();
     bool foundMatch = false;
     for (const std::string& type : types)
     {
@@ -107,4 +108,5 @@ void PropertiesView::LogAssetDrop(const std::string& message, bool error) const
         OnAssetDropLog(message, error);
     else
         OutputDebugStringA((message + "\n").c_str());
+}
 }

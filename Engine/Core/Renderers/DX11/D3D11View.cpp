@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "D3D11View.h"
 
+namespace Engine::Renderers
+{
 void D3D11View::Init(void* device, uint32_t width, uint32_t height,
                      void*, void*, uint32_t srvSlotIndex)
 {
@@ -70,4 +72,5 @@ void D3D11View::Render(void* contextHandle, void* mainRtvHandle,
     if (drawFn) drawFn(context);
 
     context->OMSetRenderTargets(1, &mainRtv, nullptr);
+}
 }

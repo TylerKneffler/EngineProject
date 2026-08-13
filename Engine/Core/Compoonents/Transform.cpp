@@ -2,6 +2,8 @@
 #include "Core/Object.h"
 #include <glm/gtc/matrix_transform.hpp>
 
+namespace Engine::Components
+{
 Transform::Transform()
 {
     SetTypeName(COMPONENT_TYPE_NAME(Transform));
@@ -33,12 +35,15 @@ Transform& Transform::operator=(const Transform& other)
 
 namespace
 {
-JsonValue JVec3(const glm::vec3& v)
+Engine::Serialization::JsonValue JVec3(const glm::vec3& v)
 {
-    return JsonValue::MakeArray().Push(JsonValue(v.x)).Push(JsonValue(v.y)).Push(JsonValue(v.z));
+    return Engine::Serialization::JsonValue::MakeArray()
+        .Push(Engine::Serialization::JsonValue(v.x))
+        .Push(Engine::Serialization::JsonValue(v.y))
+        .Push(Engine::Serialization::JsonValue(v.z));
 }
 
-glm::vec3 Vec3From(const JsonValue& v, const glm::vec3& def)
+glm::vec3 Vec3From(const Engine::Serialization::JsonValue& v, const glm::vec3& def)
 {
     if (!v.IsArray() || v.ArraySize() < 3)
         return def;
@@ -70,4 +75,4 @@ glm::mat4 Transform::GetWorldMatrix() const
 
     return local;
 }
-
+}

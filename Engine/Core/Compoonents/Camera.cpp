@@ -4,6 +4,8 @@
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 
+namespace Engine::Components
+{
 Camera::Camera()
 {
     SetTypeName(COMPONENT_TYPE_NAME(Camera));
@@ -43,4 +45,4 @@ glm::mat4 Camera::GetProjectionMatrix(float aspect, bool forceOrthographic) cons
     return glm::perspectiveLH_ZO(
         glm::radians(fov), aspect, nearPlane, farPlane);
 }
-
+}

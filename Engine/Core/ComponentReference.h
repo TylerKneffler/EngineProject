@@ -2,11 +2,13 @@
 
 #include <string>
 
+// Serializable, editor-assignable reference to a component in the same scene.
+// An empty componentType means "use the owning component's conventional default".
+namespace Engine::Core
+{
 class Component;
 class Object;
 
-// Serializable, editor-assignable reference to a component in the same scene.
-// An empty componentType means "use the owning component's conventional default".
 struct ComponentReference
 {
     std::string expectedType;
@@ -38,4 +40,5 @@ template<typename T>
 T* ResolveComponentReference(Object* context, const ComponentReference& reference)
 {
     return dynamic_cast<T*>(ResolveComponentReferenceRaw(context, reference));
+}
 }

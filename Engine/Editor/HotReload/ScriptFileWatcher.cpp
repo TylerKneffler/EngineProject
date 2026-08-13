@@ -1,6 +1,8 @@
 #include "ScriptFileWatcher.h"
 #include <algorithm>
 
+namespace Engine::Editor
+{
 void ScriptFileWatcher::Initialize(std::string directory)
 {
     m_directory = std::filesystem::path(std::move(directory));
@@ -37,4 +39,5 @@ bool ScriptFileWatcher::Poll()
     if (current == m_files) return false;
     m_files = std::move(current);
     return true;
+}
 }

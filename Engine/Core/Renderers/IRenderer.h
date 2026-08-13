@@ -1,8 +1,8 @@
 #pragma once
+#include "Core/Graphics/IGraphicsProvider.h"
 
-// Forward declaration
-class IGraphicsProvider;
-
+namespace Engine::Renderers
+{
 // ---------------------------------------------------------------------------
 // IRenderer — Abstract base for all renderer implementations.
 //
@@ -32,5 +32,6 @@ public:
     virtual void Clear(float r, float g, float b, float a = 1.0f) = 0;
 
     // Get access to graphics services (shader compilation, buffer creation, pipeline building)
-    virtual IGraphicsProvider* GetGraphicsProvider() = 0;
+    virtual Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() = 0;
 };
+}

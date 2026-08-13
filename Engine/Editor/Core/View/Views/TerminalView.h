@@ -2,6 +2,8 @@
 #include "pch.h"
 #include "View/IEditorPanel.h"
 
+namespace Engine::Editor
+{
 // Interactive PowerShell session embedded in the editor. Output is drained
 // without blocking the render loop and commands are sent over redirected stdin.
 class TerminalView : public IEditorPanel
@@ -29,3 +31,4 @@ private:
     HANDLE m_stdoutRead = nullptr;
     bool m_scrollToBottom = false;
 };
+}

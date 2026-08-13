@@ -8,6 +8,8 @@
 #include <fstream>
 #include <shellapi.h>
 
+namespace Engine::Editor
+{
 namespace fs = std::filesystem;
 
 // ---------------------------------------------------------------------------
@@ -300,7 +302,7 @@ void AssetsExplorerView::CreateScript()
     }
     header << "#pragma once\n"
         "#include \"Core/Script.h\"\n\n"
-        "class " << className << " : public Script\n"
+        "class " << className << " : public Engine::Core::Script\n"
         "{\npublic:\n    " << className << "();\n\n"
         "    void Start() override;\n"
         "    void Update() override;\n};\n";
@@ -310,7 +312,8 @@ void AssetsExplorerView::CreateScript()
         "    SetTypeName(COMPONENT_TYPE_NAME(" << className << "));\n}\n\n"
         "namespace\n{\nstruct " << className << "Registration\n{\n"
         "    " << className << "Registration()\n    {\n"
-        "        RegisterComponentType<" << className << ">(\"" << className << "\");\n"
+        "        Engine::Serialization::RegisterComponentType<" << className
+        << ">(\"" << className << "\");\n"
         "    }\n};\n\n" << className << "Registration g_" << className
         << "Registration;\n}\n\n"
         "void " << className << "::Start()\n{\n}\n\n"
@@ -395,10 +398,10 @@ bool AssetsExplorerView::AcceptSceneObject(IEditorUi& ui, const std::string& dir
     size_t size = 0;
     const void* data = ui.AcceptDragDropPayload("ENGINE_SCENE_OBJECT", &size);
     bool created = false;
-    if (data && size == sizeof(Object*))
+    if (data && size == sizeof(Engine::Core::Object*))
     {
-        Object* object = *static_cast<Object* const*>(data);
-        Object* prefabRoot = object ? object->GetPrefabInstanceRoot() : nullptr;
+        Engine::Core::Object* object = *static_cast<Engine::Core::Object* const*>(data);
+        Engine::Core::Object* prefabRoot = object ? object->GetPrefabInstanceRoot() : nullptr;
         if (prefabRoot && prefabRoot->Prefab)
         {
             m_selectedPath = prefabRoot->Prefab->GetPath();
@@ -416,9 +419,9 @@ bool AssetsExplorerView::AcceptSceneObject(IEditorUi& ui, const std::string& dir
                 destination = fs::path(directory) /
                     (base + " " + std::to_string(suffix) + ".prefab");
 
-            if (SceneSerializer::SavePrefab(*object, destination.string()))
+            if (Engine::Serialization::SceneSerializer::SavePrefab(*object, destination.string()))
             {
-                AssetRecord::Ensure(destination, destination,
+                Engine::Core::AssetRecord::Ensure(destination, destination,
                     { { "importer", std::string("native") } });
                 object->SetPrefab(destination.string());
                 m_selectedPath = destination.string();
@@ -439,7 +442,7 @@ void AssetsExplorerView::OpenFile(const std::string& filePath)
 {
     // Check if this is a scene file
     const std::string extension =
-        Editor::ViewTemplates::LowerAssetExtension(filePath);
+        Engine::Editor::LowerAssetExtension(filePath);
     if (extension == ".scene" || extension == ".xml")
     {
         // Trigger the scene load callback
@@ -463,4 +466,5 @@ void AssetsExplorerView::OpenFile(const std::string& filePath)
 
     // Use ShellExecute to open the file with the default application
     ShellExecuteW(NULL, L"open", wideFilePath.c_str(), NULL, NULL, SW_SHOW);
+}
 }

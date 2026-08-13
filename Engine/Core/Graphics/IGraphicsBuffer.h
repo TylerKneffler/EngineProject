@@ -2,6 +2,9 @@
 #include <cstdint>
 #include <memory>
 
+namespace Engine::Graphics
+{
+
 // ---------------------------------------------------------------------------
 // IGraphicsBuffer — GPU-side buffer (constant, vertex, index, etc.)
 // 
@@ -62,3 +65,4 @@ public:
         const void* initialData = nullptr,
         uint32_t elementStride = 0) = 0;
 };
+}

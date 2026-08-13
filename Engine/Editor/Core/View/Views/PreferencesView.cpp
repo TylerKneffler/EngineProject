@@ -12,6 +12,8 @@
 #define ENGINE_SHADERS_PATH "Engine/Core/Shaders/"
 #endif
 
+namespace Engine::Editor
+{
 namespace
 {
 namespace fs = std::filesystem;
@@ -186,7 +188,7 @@ std::pair<bool, std::string> BuildPortableExport(const std::string& projectFile,
 
 bool DrawRendererCombo(IEditorUi& ui, const char* label, std::string& selectedApi)
 {
-    const auto options = RendererFactory::GetRendererOptions();
+    const auto options = ::Engine::Renderers::RendererFactory::GetRendererOptions();
     std::vector<std::string> labels;
     std::vector<const char*> items;
     int selected = 0;
@@ -206,7 +208,7 @@ bool DrawRendererCombo(IEditorUi& ui, const char* label, std::string& selectedAp
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
-void PreferencesView::Init(const ProjectSettings& settings, const std::string& projFilePath)
+void PreferencesView::Init(const Engine::Model::ProjectSettings& settings, const std::string& projFilePath)
 {
     m_settings = settings;
     m_projFilePath = projFilePath;
@@ -313,12 +315,12 @@ void PreferencesView::DrawEditorSection(IEditorUi& ui)
     ui.Label("Workspace Mode");
     ui.Separator();
     const char* editorModes[] = { "3D", "2D" };
-    int editorMode = m_settings.editorMode == ProjectSettings::EditorMode::TwoD ? 1 : 0;
+    int editorMode = m_settings.editorMode == Engine::Model::ProjectSettings::EditorMode::TwoD ? 1 : 0;
     if (ui.Combo("Editor Mode", &editorMode, editorModes, 2))
     {
         m_settings.editorMode = editorMode == 1
-            ? ProjectSettings::EditorMode::TwoD
-            : ProjectSettings::EditorMode::ThreeD;
+            ? Engine::Model::ProjectSettings::EditorMode::TwoD
+            : Engine::Model::ProjectSettings::EditorMode::ThreeD;
         NotifyChanged();
     }
     ui.Tooltip("2D uses an orthographic camera, an XY grid, and sprite layer ordering.");
@@ -462,7 +464,7 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
     if (DrawRendererCombo(ui, "Game Rendering API", m_settings.gameRenderingAPI))
         NotifyChanged();
 
-    for (const auto& option : RendererFactory::GetRendererOptions())
+    for (const auto& option : ::Engine::Renderers::RendererFactory::GetRendererOptions())
     {
         if (!option.available)
         { std::string reason=option.name+" unavailable: "+option.unavailableReason; ui.DisabledLabel(reason.c_str()); }
@@ -518,7 +520,7 @@ void PreferencesView::DrawAspectRatioSection(IEditorUi& ui)
     int currentMode = (int)m_settings.aspectRatioMode;
     if (ui.Combo("Aspect Ratio Mode", &currentMode, modes, 3))
     {
-        m_settings.aspectRatioMode = (ProjectSettings::AspectRatioMode)currentMode;
+        m_settings.aspectRatioMode = (Engine::Model::ProjectSettings::AspectRatioMode)currentMode;
         NotifyChanged();
     }
 
@@ -608,10 +610,10 @@ bool PreferencesView::SaveSettings()
             auto editorMode = prop.child("EditorMode");
             if (editorMode)
                 editorMode.text().set(m_settings.editorMode ==
-                    ProjectSettings::EditorMode::TwoD ? "2D" : "3D");
+                    Engine::Model::ProjectSettings::EditorMode::TwoD ? "2D" : "3D");
             else if (defaultSceneNode)
                 prop.append_child("EditorMode").text().set(m_settings.editorMode ==
-                    ProjectSettings::EditorMode::TwoD ? "2D" : "3D");
+                    Engine::Model::ProjectSettings::EditorMode::TwoD ? "2D" : "3D");
 
             auto clearColorR = prop.child("ClearColorR");
             if (clearColorR)
@@ -653,9 +655,9 @@ bool PreferencesView::SaveSettings()
                 const char* modeStr = "";
                 switch (m_settings.aspectRatioMode)
                 {
-                    case ProjectSettings::AspectRatioMode::Free: modeStr = "Free"; break;
-                    case ProjectSettings::AspectRatioMode::Locked: modeStr = "Locked"; break;
-                    case ProjectSettings::AspectRatioMode::Hardcoded: modeStr = "Hardcoded"; break;
+                    case Engine::Model::ProjectSettings::AspectRatioMode::Free: modeStr = "Free"; break;
+                    case Engine::Model::ProjectSettings::AspectRatioMode::Locked: modeStr = "Locked"; break;
+                    case Engine::Model::ProjectSettings::AspectRatioMode::Hardcoded: modeStr = "Hardcoded"; break;
                 }
                 modeNode.text().set(modeStr);
             }
@@ -704,4 +706,5 @@ bool PreferencesView::SaveSettings()
         std::cerr << "Error saving project settings: " << e.what() << std::endl;
         return false;
     }
+}
 }

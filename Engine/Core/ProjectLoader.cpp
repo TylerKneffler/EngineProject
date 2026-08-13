@@ -4,7 +4,9 @@
 // ---------------------------------------------------------------------------
 // LoadProject
 // ---------------------------------------------------------------------------
-ProjectSettings ProjectLoader::LoadProject(const std::string& projFilePath)
+namespace Engine::Core
+{
+ProjectLoader::ProjectSettings ProjectLoader::LoadProject(const std::string& projFilePath)
 {
     pugi::xml_document doc;
     pugi::xml_parse_result result = doc.load_file(projFilePath.c_str());
@@ -334,4 +336,5 @@ void ProjectLoader::ParseComponents(const pugi::xml_node& projectNode, ProjectSe
         if (name && *name)
             settings.builtInComponents.push_back(name);
     }
+}
 }

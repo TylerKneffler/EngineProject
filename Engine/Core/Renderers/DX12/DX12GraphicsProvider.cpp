@@ -1,5 +1,9 @@
 #include "DX12GraphicsProvider.h"
 
+
+namespace Engine::Renderers
+{
+
 Microsoft::WRL::ComPtr<ID3D12RootSignature>
 CreateD3D12MaterialRootSignature(ID3D12Device* device)
 {
@@ -68,4 +72,5 @@ D3D12GraphicsProvider::D3D12GraphicsProvider(
     m_contextFactory = std::make_unique<D3D12GraphicsContextFactory>(device, commandQueue, rootSig);
     m_textureFactory = std::make_unique<D3D12TextureFactory>(device, commandQueue);
     OutputDebugStringA("[D3D12GraphicsProvider] All factories created\n");
+}
 }

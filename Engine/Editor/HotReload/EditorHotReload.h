@@ -4,6 +4,8 @@
 #include "Engine/Editor/Core/View/Views/ConsoleView.h"
 #include "Core/Scene/Scene.h"
 
+namespace Engine::Editor
+{
 class EditorState;
 
 class EditorHotReload
@@ -21,7 +23,7 @@ public:
 private:
     using ScriptTypeCount = int (*)();
     using ScriptTypeName = const char* (*)(int);
-    using CreateScript = Component* (*)(const char*);
+    using CreateScript = Engine::Core::Component* (*)(const char*);
 
     void StartCompile();
     void DrainOutput();
@@ -48,3 +50,4 @@ private:
     bool m_wasFocused = true;
     bool m_applying = false;
 };
+}

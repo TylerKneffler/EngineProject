@@ -5,9 +5,13 @@
 #include <glm/glm.hpp>
 #include <vector>
 
-class SkinnedMesh : public Component
+namespace Engine::Components
+{
+class SkinnedMesh : public Engine::Core::Component
 {
 public:
+    using Vertex = Engine::Model::Vertex;
+
     SkinnedMesh();
     ComponentReference meshReference { "Mesh" };
     ComponentReference skeletonReference { "Skeleton" };
@@ -24,3 +28,4 @@ public:
 private:
     std::vector<Vertex> m_baseVertices;
 };
+}

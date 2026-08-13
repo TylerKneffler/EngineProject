@@ -9,10 +9,12 @@
 #include <unordered_map>
 #include <vector>
 
-class AnimationManager : public Component
+namespace Engine::Components
+{
+class AnimationManager : public Engine::Core::Component
 {
 public:
-    using Layer = AnimationLayer;
+    using Layer = Engine::Model::AnimationLayer;
 
     AnimationManager();
     ComponentReference modelReference { "Model" };
@@ -29,7 +31,7 @@ public:
     void Play(const std::string& clipName, float fadeSeconds = 0.2f);
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
-    bool DrawProperties(IEditorUi& ui) override;
+    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
 
 private:
     struct RestTransform
@@ -46,3 +48,4 @@ private:
     float m_fadeDuration = 0.f;
     float m_fadeElapsed = 0.f;
 };
+}

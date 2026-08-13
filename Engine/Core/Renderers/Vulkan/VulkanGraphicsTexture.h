@@ -8,6 +8,9 @@
 #include <memory>
 #include <unordered_map>
 
+
+namespace Engine::Renderers
+{
 class VulkanGraphicsTexture;
 class VulkanGraphicsBuffer;
 
@@ -23,7 +26,7 @@ public:
 
     std::shared_ptr<VulkanGraphicsTexture> CreateTexture(
         uint32_t width, uint32_t height, const uint8_t* rgbaPixels,
-        uint32_t mipLevels, GraphicsTextureFormat format,
+        uint32_t mipLevels, Engine::Graphics::GraphicsTextureFormat format,
         bool srgb = true);
     void Bind(
         VkCommandBuffer commands,
@@ -50,7 +53,7 @@ private:
 
     VulkanImageResource Upload(
         uint32_t width, uint32_t height, const uint8_t* rgbaPixels,
-        uint32_t mipLevels, GraphicsTextureFormat format,
+        uint32_t mipLevels, Engine::Graphics::GraphicsTextureFormat format,
         bool srgb = true);
 
     VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
@@ -66,7 +69,7 @@ private:
     std::unordered_map<TextureKey, VkDescriptorSet, TextureKeyHash> m_sets;
 };
 
-class VulkanGraphicsTexture final : public IGraphicsTexture
+class VulkanGraphicsTexture final : public Engine::Graphics::IGraphicsTexture
 {
 public:
     VulkanGraphicsTexture(
@@ -85,17 +88,18 @@ private:
     VulkanImageResource m_image;
 };
 
-class VulkanTextureFactory final : public IGraphicsTextureFactory
+class VulkanTextureFactory final : public Engine::Graphics::IGraphicsTextureFactory
 {
 public:
     explicit VulkanTextureFactory(std::shared_ptr<VulkanTextureSystem> system)
         : m_system(std::move(system)) {}
-    std::shared_ptr<IGraphicsTexture> CreateTexture2D(
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> CreateTexture2D(
         uint32_t width, uint32_t height, const uint8_t* rgbaPixels,
-        uint32_t mipLevels, GraphicsTextureFormat format,
+        uint32_t mipLevels, Engine::Graphics::GraphicsTextureFormat format,
         bool srgb = true) override;
 
 private:
     std::shared_ptr<VulkanTextureSystem> m_system;
 };
+}
 #endif

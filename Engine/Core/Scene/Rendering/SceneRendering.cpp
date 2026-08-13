@@ -23,6 +23,9 @@
 #define ENGINE_SHADERS_PATH "Engine/Core/Shaders/"
 #endif
 
+namespace Engine::Scene
+{
+
 #ifndef ENGINE_ASSETS_PATH
 #define ENGINE_ASSETS_PATH "Engine/Core/Assets/"
 #endif
@@ -41,9 +44,9 @@ namespace
         return (std::filesystem::path(ENGINE_SHADERS_PATH) / relativePath).string();
     }
 
-    bool IsObjectOrDescendant(const Object* object, const Object* root)
+    bool IsObjectOrDescendant(const Engine::Core::Object* object, const Engine::Core::Object* root)
     {
-        for (const Object* current = object; current; current = current->Parent)
+        for (const Engine::Core::Object* current = object; current; current = current->Parent)
             if (current == root)
                 return true;
         return false;
@@ -105,7 +108,7 @@ struct SkyboxCBData
 
 static_assert(sizeof(DrawCBData) == 16, "Draw constants must remain small");
 static_assert(sizeof(ObjectGPUData) == 320, "Object buffer layout must match Object.hlsl");
-static_assert(sizeof(Engine::Rendering::Lighting::LightData) == 48,
+static_assert(sizeof(Engine::Model::LightData) == 48,
     "Light buffer layout must match Object.hlsl");
 static_assert(sizeof(GridCBData) == 128, "Grid constant-buffer layout must match Grid.hlsl");
 static_assert(sizeof(SkyboxCBData) == 80, "Skybox constant-buffer layout must match Skybox.hlsl");
@@ -114,10 +117,10 @@ static_assert(sizeof(SkyboxCBData) == 80, "Skybox constant-buffer layout must ma
 // Scene::Init
 // ---------------------------------------------------------------------------
 
-void Scene::Init(IGraphicsProvider* graphicsProvider)
+void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
 {
     if (!graphicsProvider)
-        throw std::runtime_error("Scene::Init requires a non-null IGraphicsProvider");
+        throw std::runtime_error("Scene::Init requires a non-null graphics provider");
 
     m_graphicsProvider = graphicsProvider;
 
@@ -128,8 +131,8 @@ void Scene::Init(IGraphicsProvider* graphicsProvider)
 
     // Grid constant buffer (256 bytes, uploadable)
     m_gridConstantBuffer = bufferFactory->CreateBuffer(
-        IGraphicsBuffer::Usage::ConstantBuffer,
-        IGraphicsBuffer::AccessMode::Upload,
+        Engine::Graphics::IGraphicsBuffer::Usage::ConstantBuffer,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
         256);
     if (!m_gridConstantBuffer)
         throw std::runtime_error("Failed to create grid constant buffer");
@@ -138,8 +141,8 @@ void Scene::Init(IGraphicsProvider* graphicsProvider)
         throw std::runtime_error("Failed to map grid constant buffer");
 
     m_skyboxConstantBuffer = bufferFactory->CreateBuffer(
-        IGraphicsBuffer::Usage::ConstantBuffer,
-        IGraphicsBuffer::AccessMode::Upload,
+        Engine::Graphics::IGraphicsBuffer::Usage::ConstantBuffer,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
         256);
     if (!m_skyboxConstantBuffer)
         throw std::runtime_error("Failed to create skybox constant buffer");
@@ -147,11 +150,11 @@ void Scene::Init(IGraphicsProvider* graphicsProvider)
     if (!m_skyboxCBMapped)
         throw std::runtime_error("Failed to map skybox constant buffer");
 
-    // Object constant buffer (256 * kMaxObjects bytes for per-object data)
+    // Engine::Core::Object constant buffer (256 * kMaxObjects bytes for per-object data)
     const uint64_t objectCBSize = static_cast<uint64_t>(kMaxObjects) * kCBStride;
     m_objectConstantBuffer = bufferFactory->CreateBuffer(
-        IGraphicsBuffer::Usage::ConstantBuffer,
-        IGraphicsBuffer::AccessMode::Upload,
+        Engine::Graphics::IGraphicsBuffer::Usage::ConstantBuffer,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
         objectCBSize, nullptr, sizeof(DrawCBData));
     if (!m_objectConstantBuffer)
         throw std::runtime_error("Failed to create object constant buffer");
@@ -160,8 +163,8 @@ void Scene::Init(IGraphicsProvider* graphicsProvider)
         throw std::runtime_error("Failed to map object constant buffer");
 
     m_objectDataBuffer = bufferFactory->CreateBuffer(
-        IGraphicsBuffer::Usage::ShaderResource,
-        IGraphicsBuffer::AccessMode::Upload,
+        Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
         static_cast<uint64_t>(kMaxObjects) * sizeof(ObjectGPUData),
         nullptr, sizeof(ObjectGPUData));
     m_objectDataMapped = m_objectDataBuffer ? m_objectDataBuffer->Map() : nullptr;
@@ -169,18 +172,18 @@ void Scene::Init(IGraphicsProvider* graphicsProvider)
         throw std::runtime_error("Failed to create object structured buffer");
 
     m_lightDataBuffer = bufferFactory->CreateBuffer(
-        IGraphicsBuffer::Usage::ShaderResource,
-        IGraphicsBuffer::AccessMode::Upload,
+        Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
         static_cast<uint64_t>(kMaxLights) *
-            sizeof(Engine::Rendering::Lighting::LightData),
-        nullptr, sizeof(Engine::Rendering::Lighting::LightData));
+            sizeof(Engine::Model::LightData),
+        nullptr, sizeof(Engine::Model::LightData));
     m_lightDataMapped = m_lightDataBuffer ? m_lightDataBuffer->Map() : nullptr;
     if (!m_lightDataMapped)
         throw std::runtime_error("Failed to create light structured buffer");
 
     m_boneDataBuffer = bufferFactory->CreateBuffer(
-        IGraphicsBuffer::Usage::ShaderResource,
-        IGraphicsBuffer::AccessMode::Upload,
+        Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
         static_cast<uint64_t>(kMaxObjects) * kMaxBonesPerObject * sizeof(glm::mat4),
         nullptr, sizeof(glm::mat4));
     m_boneDataMapped = m_boneDataBuffer ? m_boneDataBuffer->Map() : nullptr;
@@ -188,7 +191,7 @@ void Scene::Init(IGraphicsProvider* graphicsProvider)
         throw std::runtime_error("Failed to create bone palette structured buffer");
 
     // Set up the default editor camera
-    Camera* editorCameraComponent = editorCamera.AddComponent<Camera>();
+    Engine::Components::Camera* editorCameraComponent = editorCamera.AddComponent<Engine::Components::Camera>();
     editorCameraComponent->useTransformRotation = false;
     editorCameraComponent->farPlane = 1000.f;
     SetEditorMode2D(m_editorMode2D);
@@ -197,7 +200,7 @@ void Scene::Init(IGraphicsProvider* graphicsProvider)
     BuildGridPipeline();
     BuildSkyboxPipeline();
     BuildObjectPipeline();
-    m_uiRenderer = std::make_unique<UIRenderer>();
+    m_uiRenderer = std::make_unique<Engine::Renderers::UIRenderer>();
     m_uiRenderer->Initialize(m_graphicsProvider);
 }
 
@@ -206,7 +209,7 @@ void Scene::SetEditorMode2D(bool enabled)
     if (m_editorCameraModeInitialized && m_editorMode2D == enabled)
         return;
     m_editorMode2D = enabled;
-    Camera* camera = editorCamera.GetComponent<Camera>();
+    Engine::Components::Camera* camera = editorCamera.GetComponent<Engine::Components::Camera>();
     if (!camera)
         return;
     m_editorCameraModeInitialized = true;
@@ -228,11 +231,11 @@ void Scene::BuildSkyboxPipeline()
 
     const std::string shaderPath = EngineShaderPath("Skybox.hlsl");
     auto vertexShader = shaderCompiler->CompileFromFile(
-        shaderPath.c_str(), "VSMain", IShaderCompiler::CompileProfile::VS_5_0);
+        shaderPath.c_str(), "VSMain", Engine::Graphics::IShaderCompiler::CompileProfile::VS_5_0);
     if (!vertexShader)
         throw std::runtime_error("Failed to compile skybox vertex shader: " + shaderCompiler->GetLastError());
     auto pixelShader = shaderCompiler->CompileFromFile(
-        shaderPath.c_str(), "PSMain", IShaderCompiler::CompileProfile::PS_5_0);
+        shaderPath.c_str(), "PSMain", Engine::Graphics::IShaderCompiler::CompileProfile::PS_5_0);
     if (!pixelShader)
         throw std::runtime_error("Failed to compile skybox pixel shader: " + shaderCompiler->GetLastError());
 
@@ -250,7 +253,7 @@ void Scene::BuildSkyboxPipeline()
         .SetDepthWriteEnable(false)
         .SetDepthFunc(7)
         .SetInputLayout(nullptr, 0)
-        .SetPrimitiveTopology(IPipelineStateBuilder::PrimitiveTopology::TriangleList)
+        .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
         .SetRenderTargetFormat(28, 40)
         .Build();
     if (!m_skyboxPipeline)
@@ -259,12 +262,12 @@ void Scene::BuildSkyboxPipeline()
     const std::string defaultPath =
         (std::filesystem::path(ENGINE_ASSETS_PATH) / "Textures" / "Skyboxes" /
             "editor-default-sky.png").string();
-    m_defaultSkyboxTexture = Texture::Acquire(defaultPath);
+    m_defaultSkyboxTexture = Engine::Components::Texture::Acquire(defaultPath);
     if (!m_defaultSkyboxTexture->Prepare(m_graphicsProvider))
         m_defaultSkyboxTexture.reset();
 }
 
-const Texture* Scene::ResolveSkyboxTexture()
+const Engine::Components::Texture* Scene::ResolveSkyboxTexture()
 {
     if (settings.skyboxTexture.empty())
         return m_defaultSkyboxTexture.get();
@@ -272,14 +275,14 @@ const Texture* Scene::ResolveSkyboxTexture()
     if (m_loadedSkyboxPath != settings.skyboxTexture)
     {
         m_loadedSkyboxPath = settings.skyboxTexture;
-        m_sceneSkyboxTexture = Texture::Acquire(settings.skyboxTexture);
+        m_sceneSkyboxTexture = Engine::Components::Texture::Acquire(settings.skyboxTexture);
         if (!m_sceneSkyboxTexture->Prepare(m_graphicsProvider))
             m_sceneSkyboxTexture.reset();
     }
     return m_sceneSkyboxTexture ? m_sceneSkyboxTexture.get() : m_defaultSkyboxTexture.get();
 }
 
-const Texture* Scene::GetSkyboxPreviewTexture()
+const Engine::Components::Texture* Scene::GetSkyboxPreviewTexture()
 {
     return ResolveSkyboxTexture();
 }
@@ -313,14 +316,14 @@ void Scene::BuildGridPipeline()
     auto vsShader = shaderCompiler->CompileFromFile(
         shaderPath.c_str(),
         "VSMain",
-        IShaderCompiler::CompileProfile::VS_5_0);
+        Engine::Graphics::IShaderCompiler::CompileProfile::VS_5_0);
     if (!vsShader)
         throw std::runtime_error("Failed to compile grid vertex shader: " + shaderCompiler->GetLastError());
 
     auto psShader = shaderCompiler->CompileFromFile(
         shaderPath.c_str(),
         "PSMain",
-        IShaderCompiler::CompileProfile::PS_5_0);
+        Engine::Graphics::IShaderCompiler::CompileProfile::PS_5_0);
     if (!psShader)
         throw std::runtime_error("Failed to compile grid pixel shader: " + shaderCompiler->GetLastError());
 
@@ -351,7 +354,7 @@ void Scene::BuildGridPipeline()
         .SetDepthWriteEnable(false)
         .SetDepthFunc(3)                       // D3D12_COMPARISON_FUNC_LESS_EQUAL (0-indexed: 3)
         .SetInputLayout(nullptr, 0)            // No vertex buffer
-        .SetPrimitiveTopology(IPipelineStateBuilder::PrimitiveTopology::TriangleList)
+        .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
         .SetRenderTargetFormat(28, 40)         // DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_D32_FLOAT
         .Build();
     
@@ -379,19 +382,19 @@ void Scene::BuildObjectPipeline()
     auto vsShader = shaderCompiler->CompileFromFile(
         shaderPath.c_str(),
         "VSMain",
-        IShaderCompiler::CompileProfile::VS_5_0);
+        Engine::Graphics::IShaderCompiler::CompileProfile::VS_5_0);
     if (!vsShader)
         throw std::runtime_error("Failed to compile object vertex shader: " + shaderCompiler->GetLastError());
 
     auto psShader = shaderCompiler->CompileFromFile(
         shaderPath.c_str(),
         "PSMain",
-        IShaderCompiler::CompileProfile::PS_5_0);
+        Engine::Graphics::IShaderCompiler::CompileProfile::PS_5_0);
     if (!psShader)
         throw std::runtime_error("Failed to compile object pixel shader: " + shaderCompiler->GetLastError());
 
     // Engine-native model stream, including the second UV set and vertex colour.
-    IPipelineStateBuilder::VertexElement layout[] =
+    Engine::Graphics::IPipelineStateBuilder::VertexElement layout[] =
     {
         { "POSITION", 0, 6, 0,  0, false },   // DXGI_FORMAT_R32G32B32_FLOAT = 6
         { "NORMAL",   0, 6, 0, 12, false },   // DXGI_FORMAT_R32G32B32_FLOAT = 6, offset 12
@@ -434,7 +437,7 @@ void Scene::BuildObjectPipeline()
             .SetDepthFunc(blend ? 3 : 1)
             .SetInputLayout(layout, 10)
             .SetPrimitiveTopology(
-                IPipelineStateBuilder::PrimitiveTopology::TriangleList)
+                Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
             .SetRenderTargetFormat(28, 40)
             .Build();
         if (!pipeline)
@@ -468,14 +471,14 @@ void Scene::BuildObjectPipeline()
     auto outlineVsShader = shaderCompiler->CompileFromFile(
         outlineShaderPath.c_str(),
         "VSMain",
-        IShaderCompiler::CompileProfile::VS_5_0);
+        Engine::Graphics::IShaderCompiler::CompileProfile::VS_5_0);
     if (!outlineVsShader)
         throw std::runtime_error("Failed to compile object outline vertex shader: " + shaderCompiler->GetLastError());
 
     auto outlinePsShader = shaderCompiler->CompileFromFile(
         outlineShaderPath.c_str(),
         "PSMain",
-        IShaderCompiler::CompileProfile::PS_5_0);
+        Engine::Graphics::IShaderCompiler::CompileProfile::PS_5_0);
     if (!outlinePsShader)
         throw std::runtime_error("Failed to compile object outline pixel shader: " + shaderCompiler->GetLastError());
 
@@ -491,7 +494,7 @@ void Scene::BuildObjectPipeline()
         .SetDepthWriteEnable(false)
         .SetDepthFunc(3)                       // D3D12_COMPARISON_FUNC_LESS_EQUAL
         .SetInputLayout(layout, 10)
-        .SetPrimitiveTopology(IPipelineStateBuilder::PrimitiveTopology::TriangleList)
+        .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
         .SetRenderTargetFormat(28, 40)
         .Build();
     if (!m_objectOutlinePipeline)
@@ -502,8 +505,8 @@ void Scene::BuildObjectPipeline()
 // Scene::Render
 // ---------------------------------------------------------------------------
 
-void Scene::Render(IGraphicsContext* context, float aspect,
-    Camera* cameraOverride, bool includeEditorVisuals)
+void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
+    Engine::Components::Camera* cameraOverride, bool includeEditorVisuals)
 {
     if (!context)
     {
@@ -518,9 +521,9 @@ void Scene::Render(IGraphicsContext* context, float aspect,
     // Scene View always uses its navigation camera. Game View supplies its
     // active scene camera explicitly, so hierarchy selection cannot hijack
     // either viewport.
-    Camera* cam = cameraOverride
+    Engine::Components::Camera* cam = cameraOverride
         ? cameraOverride
-        : editorCamera.GetComponent<Camera>();
+        : editorCamera.GetComponent<Engine::Components::Camera>();
     if (!cam)
     {
         return;
@@ -537,7 +540,7 @@ void Scene::Render(IGraphicsContext* context, float aspect,
     const glm::mat4 proj = cam->GetProjectionMatrix(aspect, m_editorMode2D);
     const glm::vec3 cameraPosition = glm::vec3(glm::inverse(view)[3]);
 
-    if (const Texture* skybox = ResolveSkyboxTexture();
+    if (const Engine::Components::Texture* skybox = ResolveSkyboxTexture();
         skybox && skybox->GetGraphicsTexture() && m_skyboxPipeline)
     {
         SkyboxCBData skyboxData{};
@@ -552,21 +555,21 @@ void Scene::Render(IGraphicsContext* context, float aspect,
 
     const uint32_t lightCount = m_realtimeLightingPipeline.CollectLights(
         *this,
-        static_cast<Engine::Rendering::Lighting::LightData*>(m_lightDataMapped),
+        static_cast<Engine::Model::LightData*>(m_lightDataMapped),
         kMaxLights);
 
 
     // Opaque and masked materials render first. Blended materials render
     // back-to-front with depth writes disabled.
-    std::vector<Object*> renderObjects;
+    std::vector<Engine::Core::Object*> renderObjects;
     renderObjects.reserve(m_objects.size());
     for (const auto& object : m_objects)
     {
-        Object* candidate = object.get();
+        Engine::Core::Object* candidate = object.get();
         const bool preview = m_previewObject &&
             IsObjectOrDescendant(candidate, m_previewObject);
-        Mesh* mesh = candidate->GetComponent<Mesh>();
-        Sprite* sprite = candidate->GetComponent<Sprite>();
+        Engine::Components::Mesh* mesh = candidate->GetComponent<Engine::Components::Mesh>();
+        Engine::Components::Sprite* sprite = candidate->GetComponent<Engine::Components::Sprite>();
         if (sprite)
             sprite->Prepare(m_graphicsProvider);
         const bool renderable = (sprite && sprite->IsReady()) ||
@@ -575,29 +578,29 @@ void Scene::Render(IGraphicsContext* context, float aspect,
             (!preview || includeEditorVisuals))
             renderObjects.push_back(candidate);
     }
-    auto isBlended = [&](Object* object)
+    auto isBlended = [&](Engine::Core::Object* object)
     {
         if (m_previewObject && IsObjectOrDescendant(object, m_previewObject))
             return true;
-        if (object->GetComponent<Sprite>())
+        if (object->GetComponent<Engine::Components::Sprite>())
             return true;
-        const Material* material = object->GetComponent<Material>();
+        const Engine::Components::Material* material = object->GetComponent<Engine::Components::Material>();
         return material &&
-            material->GetAlphaMode() == MaterialAlphaMode::Blend;
+            material->GetAlphaMode() == Engine::Components::MaterialAlphaMode::Blend;
     };
-    auto distanceSquared = [&](Object* object)
+    auto distanceSquared = [&](Engine::Core::Object* object)
     {
         const glm::vec3 delta =
             glm::vec3(object->transform.GetWorldMatrix()[3]) - cameraPosition;
         return glm::dot(delta, delta);
     };
     std::stable_sort(renderObjects.begin(), renderObjects.end(),
-        [&](Object* first, Object* second)
+        [&](Engine::Core::Object* first, Engine::Core::Object* second)
         {
             if (m_editorMode2D)
             {
-                const Sprite* firstSprite = first->GetComponent<Sprite>();
-                const Sprite* secondSprite = second->GetComponent<Sprite>();
+                const Engine::Components::Sprite* firstSprite = first->GetComponent<Engine::Components::Sprite>();
+                const Engine::Components::Sprite* secondSprite = second->GetComponent<Engine::Components::Sprite>();
                 const int firstLayer = firstSprite ? firstSprite->sortingLayer : 0;
                 const int secondLayer = secondSprite ? secondSprite->sortingLayer : 0;
                 if (firstLayer != secondLayer)
@@ -620,7 +623,7 @@ void Scene::Render(IGraphicsContext* context, float aspect,
         std::min<size_t>(renderObjects.size(), kMaxObjects), 0u);
     for (size_t skinSlot = 0; skinSlot < skinJointCounts.size(); ++skinSlot)
     {
-        if (SkinnedMesh* skinned = renderObjects[skinSlot]->GetComponent<SkinnedMesh>())
+        if (Engine::Components::SkinnedMesh* skinned = renderObjects[skinSlot]->GetComponent<Engine::Components::SkinnedMesh>())
         {
             std::vector<glm::mat4> palette;
             if (skinned->BuildPalette(palette))
@@ -636,20 +639,20 @@ void Scene::Render(IGraphicsContext* context, float aspect,
     m_boneDataBuffer->FlushMappedWrites();
 
     UINT slot = 0;
-    for (Object* obj : renderObjects)
+    for (Engine::Core::Object* obj : renderObjects)
     {
         if (slot >= kMaxObjects)
             break;
 
         const bool belongsToPreview = m_previewObject &&
             IsObjectOrDescendant(obj, m_previewObject);
-        Mesh* mesh = obj->GetComponent<Mesh>();
-        Sprite* sprite = obj->GetComponent<Sprite>();
+        Engine::Components::Mesh* mesh = obj->GetComponent<Engine::Components::Mesh>();
+        Engine::Components::Sprite* sprite = obj->GetComponent<Engine::Components::Sprite>();
 
-        Material* mat = obj->GetComponent<Material>();
+        Engine::Components::Material* mat = obj->GetComponent<Engine::Components::Material>();
         const bool isPreview = belongsToPreview;
-        const BakedLightingData* bakedLighting =
-            obj->GetComponent<BakedLightingData>();
+        const Engine::Rendering::BakedLightingData* bakedLighting =
+            obj->GetComponent<Engine::Rendering::BakedLightingData>();
         // Version 3 and later bake lighting into generated material assets.
         // Keep the component values for inspection, but do not add them again
         // at runtime or the baked result would be double-lit.
@@ -679,13 +682,13 @@ void Scene::Render(IGraphicsContext* context, float aspect,
             objectData.skinParams = { static_cast<float>(paletteOffset),
                 static_cast<float>(skinJointCounts[slot]), 0.f, 0.f };
         }
-        MaterialAlphaMode alphaMode = MaterialAlphaMode::Opaque;
+        Engine::Components::MaterialAlphaMode alphaMode = Engine::Components::MaterialAlphaMode::Opaque;
         bool doubleSided = false;
 
         if (sprite)
         {
-            const Texture* texture = sprite->GetTexture();
-            const IGraphicsTexture* graphicsTexture = texture
+            const Engine::Components::Texture* texture = sprite->GetTexture();
+            const Engine::Graphics::IGraphicsTexture* graphicsTexture = texture
                 ? texture->GetGraphicsTexture() : nullptr;
             context->SetTexture(0, graphicsTexture);
             for (uint32_t textureSlot = 1; textureSlot < 6; ++textureSlot)
@@ -707,7 +710,7 @@ void Scene::Render(IGraphicsContext* context, float aspect,
                 static_cast<float>(spriteTextureFlags) };
             objectData.viewPositionAlphaCutoff = glm::vec4(cameraPosition, 0.01f);
             objectData.spriteUvRect = sprite->GetUvRect();
-            alphaMode = MaterialAlphaMode::Blend;
+            alphaMode = Engine::Components::MaterialAlphaMode::Blend;
             doubleSided = true;
         }
         else if (mat)
@@ -718,10 +721,10 @@ void Scene::Render(IGraphicsContext* context, float aspect,
             mat->PrepareTextures(m_graphicsProvider);
             uint32_t textureFlags = 0;
             auto bindTexture = [&](uint32_t textureSlot,
-                                   const std::shared_ptr<Texture>& texture,
+                                   const std::shared_ptr<Engine::Components::Texture>& texture,
                                    uint32_t flag)
             {
-                const IGraphicsTexture* graphicsTexture =
+                const Engine::Graphics::IGraphicsTexture* graphicsTexture =
                     texture ? texture->GetGraphicsTexture() : nullptr;
                 context->SetTexture(textureSlot, graphicsTexture);
                 if (graphicsTexture)
@@ -733,7 +736,7 @@ void Scene::Render(IGraphicsContext* context, float aspect,
             bindTexture(3, mat->occlusionTexture, 8u);
             bindTexture(4, mat->emissiveTexture, 16u);
             bindTexture(5, mat->heightTexture, 64u);
-            if (alphaMode == MaterialAlphaMode::Mask)
+            if (alphaMode == Engine::Components::MaterialAlphaMode::Mask)
                 textureFlags |= 32u;
 
             objectData.baseColor = glm::vec4(mat->diffuseColor, mat->baseColorAlpha);
@@ -785,12 +788,12 @@ void Scene::Render(IGraphicsContext* context, float aspect,
             static_cast<size_t>(slot) * sizeof(ObjectGPUData),
             &objectData, sizeof(objectData));
 
-        IPipelineState* materialPipeline = nullptr;
+        Engine::Graphics::IPipelineState* materialPipeline = nullptr;
         if (isPreview)
             materialPipeline = doubleSided
                 ? m_objectPreviewDoubleSidedPipeline.get()
                 : m_objectPreviewPipeline.get();
-        else if (alphaMode == MaterialAlphaMode::Blend)
+        else if (alphaMode == Engine::Components::MaterialAlphaMode::Blend)
             materialPipeline = doubleSided
                 ? m_objectBlendDoubleSidedPipeline.get()
                 : m_objectBlendPipeline.get();
@@ -805,7 +808,7 @@ void Scene::Render(IGraphicsContext* context, float aspect,
         context->SetStructuredBuffer(8, m_boneDataBuffer.get());
 
         // Set vertex buffer and draw
-        IGraphicsBuffer* vertexBuffer = sprite
+        Engine::Graphics::IGraphicsBuffer* vertexBuffer = sprite
             ? sprite->GetGraphicsBuffer()
             : (mesh ? mesh->GetGraphicsBuffer() : nullptr);
         if (vertexBuffer)
@@ -866,4 +869,6 @@ void Scene::Render(IGraphicsContext* context, float aspect,
     // is submitted later by the editor renderer and remains above game UI.
     if (m_uiRenderer)
         m_uiRenderer->Render(*this, context, aspect);
+}
+
 }

@@ -7,16 +7,23 @@
 #include <vector>
 #include <string>
 
-class Object; // forward declaration — full definition in Object.h
-class IEditorUi; // forward declaration — full definition in Editor/UI/IEditorUi.h
-
 #define COMPONENT_TYPE_NAME(ClassName) #ClassName
 
-class IGraphicsProvider;
+namespace Engine::Graphics { class IGraphicsProvider; }
+namespace Engine::Editor { class IEditorUi; }
+
+namespace Engine::Core
+{
+class Object;
 
 class Component
 {
 public:
+    using JsonValue = Engine::Serialization::JsonValue;
+    using ComponentReference = Engine::Core::ComponentReference;
+    using Object = Engine::Core::Object;
+    using IGraphicsProvider = Engine::Graphics::IGraphicsProvider;
+
     Component() = default;
     virtual ~Component() = default;
 
@@ -30,11 +37,11 @@ public:
     // Derived components register fields in their constructor and usually do
     // not override Serialize()/Deserialize().
     virtual std::string GetTypeName() const { return m_typeName; }
-    virtual JsonValue   Serialize() const;
-    JsonValue           SerializeFields() const;
-    virtual void        Deserialize(const JsonValue& v);
+    virtual Engine::Serialization::JsonValue Serialize() const;
+    Engine::Serialization::JsonValue SerializeFields() const;
+    virtual void Deserialize(const Engine::Serialization::JsonValue& v);
     // Lets components rebuild runtime resources without serializer type checks.
-    virtual void        OnAfterDeserialize(IGraphicsProvider*) {}
+    virtual void        OnAfterDeserialize(Engine::Graphics::IGraphicsProvider*) {}
     // Engine components and game scripts share lifecycle dispatch. Script is
     // a semantic marker for user-authored/hot-reloadable behavior, not the
     // mechanism that makes a component update.
@@ -45,7 +52,7 @@ public:
     virtual void OnDestroy() {}
     // Called by the Properties panel to draw editable properties in the editor.
     // Returns true when an editor control changed serialized component data.
-    virtual bool DrawProperties(IEditorUi& ui);
+    virtual bool DrawProperties(::Engine::Editor::IEditorUi& ui);
 
 protected:
     void SetTypeName(const char* typeName) { m_typeName = typeName ? typeName : "Component"; }
@@ -117,3 +124,4 @@ private:
     std::vector<SerializedField> m_serializedFields;
     std::string m_typeName = "Component";
 };
+}

@@ -1,11 +1,14 @@
 #pragma once
 
-class Scene;
 
+namespace Engine::Scene { class Scene; }
+
+namespace Engine::Physics
+{
 class Physics
 {
 public:
-    explicit Physics(Scene& scene);
+    explicit Physics(Engine::Scene::Scene& scene);
     ~Physics();
 
     Physics(const Physics&) = delete;
@@ -22,3 +25,4 @@ private:
     struct Impl;
     Impl* m_impl = nullptr;
 };
+}

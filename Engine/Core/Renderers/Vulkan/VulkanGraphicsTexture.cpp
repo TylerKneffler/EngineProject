@@ -5,6 +5,8 @@
 
 #include <cstring>
 
+namespace Engine::Renderers
+{
 size_t VulkanTextureSystem::TextureKeyHash::operator()(const TextureKey& key) const
 {
     size_t hash = 0;
@@ -99,7 +101,7 @@ VulkanTextureSystem::VulkanTextureSystem(
         "vkBindBufferMemory(dummy storage)");
 
     const uint8_t white[] = { 255, 255, 255, 255 };
-    m_white = Upload(1, 1, white, 1, GraphicsTextureFormat::Rgba8);
+    m_white = Upload(1, 1, white, 1, Engine::Graphics::GraphicsTextureFormat::Rgba8);
 }
 
 VulkanTextureSystem::~VulkanTextureSystem()
@@ -121,7 +123,7 @@ VulkanImageResource VulkanTextureSystem::Upload(
     uint32_t height,
     const uint8_t* pixels,
     uint32_t mipLevels,
-    GraphicsTextureFormat textureFormat,
+    Engine::Graphics::GraphicsTextureFormat textureFormat,
     bool srgb)
 {
     const uint32_t bytesPerPixel = GraphicsTextureBytesPerPixel(textureFormat);
@@ -160,7 +162,7 @@ VulkanImageResource VulkanTextureSystem::Upload(
 
     VulkanImageResource image = VulkanCreateImage(
         m_physicalDevice, m_device, width, height,
-        textureFormat == GraphicsTextureFormat::Rgba32Float
+        textureFormat == Engine::Graphics::GraphicsTextureFormat::Rgba32Float
             ? VK_FORMAT_R32G32B32A32_SFLOAT
             : (srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM),
         VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
@@ -240,7 +242,7 @@ std::shared_ptr<VulkanGraphicsTexture> VulkanTextureSystem::CreateTexture(
     uint32_t height,
     const uint8_t* rgbaPixels,
     uint32_t mipLevels,
-    GraphicsTextureFormat format,
+    Engine::Graphics::GraphicsTextureFormat format,
     bool srgb)
 {
     if (!width || !height || !rgbaPixels || !mipLevels)
@@ -326,16 +328,17 @@ VulkanGraphicsTexture::~VulkanGraphicsTexture()
         VulkanDestroyImage(m_system->GetDevice(), m_image);
 }
 
-std::shared_ptr<IGraphicsTexture> VulkanTextureFactory::CreateTexture2D(
+std::shared_ptr<Engine::Graphics::IGraphicsTexture> VulkanTextureFactory::CreateTexture2D(
     uint32_t width,
     uint32_t height,
     const uint8_t* rgbaPixels,
     uint32_t mipLevels,
-    GraphicsTextureFormat format,
+    Engine::Graphics::GraphicsTextureFormat format,
     bool srgb)
 {
     return m_system
         ? m_system->CreateTexture(width, height, rgbaPixels, mipLevels, format, srgb)
         : nullptr;
+}
 }
 #endif

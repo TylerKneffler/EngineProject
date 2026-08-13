@@ -1,4 +1,5 @@
 #pragma once
+#include "Core/Model/ProjectSettings.h"
 #include "pch.h"
 #include "Core/ProjectLoader.h"
 #include "Core/Scene/Scene.h"
@@ -8,7 +9,10 @@
 #include <functional>
 #include <deque>
 
-class Window;
+namespace Engine::Core { class Window; }
+
+namespace Engine::Editor
+{
 class ViewFactory;
 class IEditorPanel;
 class PreferencesView;
@@ -17,7 +21,6 @@ class PropertiesView;
 class HierarchyView;
 class AssetsExplorerView;
 class SceneView;
-struct ProjectSettings;
 
 // ---------------------------------------------------------------------------
 // EditorState — Encapsulates all editor application state
@@ -25,7 +28,7 @@ struct ProjectSettings;
 class EditorState
 {
 public:
-    EditorState(HINSTANCE hInstance, const ProjectSettings& projectSettings,
+    EditorState(HINSTANCE hInstance, const Engine::Model::ProjectSettings& projectSettings,
         std::string projectFilePath);
     ~EditorState();
 
@@ -34,9 +37,9 @@ public:
     void InitializeUiState();
 
     // ---- Access ----
-    Window* GetWindow() const { return m_window.get(); }
-    IEditorRenderer* GetRenderer() const { return m_renderer.get(); }
-    Scene* GetScene() const { return m_scene.get(); }
+    ::Engine::Core::Window* GetWindow() const { return m_window.get(); }
+    ::Engine::Renderers::IEditorRenderer* GetRenderer() const { return m_renderer.get(); }
+    Engine::Scene::Scene* GetScene() const { return m_scene.get(); }
     ViewFactory* GetViewFactory() const { return m_viewFactory.get(); }
     ConsoleView* GetConsole() const { return m_primaryConsole; }
     PreferencesView* GetPreferences() const { return m_preferences.get(); }
@@ -72,7 +75,7 @@ public:
     }
     bool IsLoadingOverlayVisible() const { return m_loadingOverlayVisible; }
     const std::string& GetLoadingOverlayMessage() const { return m_loadingOverlayMessage; }
-    void RefreshSelectionAfterReload(const Scene::ObjectPath& selectedPath);
+    void RefreshSelectionAfterReload(const ::Engine::Scene::Scene::ObjectPath& selectedPath);
 
     // ---- Undo/Redo ----
     void TrackSceneChanges(bool allowHistory = true, bool editInProgress = false);
@@ -102,14 +105,14 @@ public:
 private:
     void InitializePanels();
     void WireupCallbacks();
-    Object* InstantiateAsset(const std::string& path, bool recordChange = true);
+    Engine::Core::Object* InstantiateAsset(const std::string& path, bool recordChange = true);
     std::string ImportAssetFile(const std::string& path);
-    void SelectObject(Object* object);
+    void SelectObject(Engine::Core::Object* object);
     struct HistoryEntry
     {
         std::string scene;
         bool hasSelection = false;
-        Scene::ObjectPath selectionPath;
+        ::Engine::Scene::Scene::ObjectPath selectionPath;
     };
     HistoryEntry CaptureHistoryEntry() const;
     void ApplyHistoryEntry(const HistoryEntry& entry, const char* operation);
@@ -120,10 +123,10 @@ private:
     void RemovePrefabPanels();
 
     // Core objects
-    std::unique_ptr<Window> m_window;
-    std::unique_ptr<IEditorRenderer> m_renderer;
-    std::unique_ptr<Scene> m_scene;
-    std::unique_ptr<Scene> m_prefabScene;
+    std::unique_ptr<::Engine::Core::Window> m_window;
+    std::unique_ptr<::Engine::Renderers::IEditorRenderer> m_renderer;
+    std::unique_ptr<Engine::Scene::Scene> m_scene;
+    std::unique_ptr<Engine::Scene::Scene> m_prefabScene;
     std::unique_ptr<ViewFactory> m_viewFactory;
     std::unique_ptr<PreferencesView> m_preferences;
 
@@ -137,7 +140,7 @@ private:
     PropertiesView* m_prefabProperties = nullptr;
 
     // State
-    ProjectSettings m_projectSettings;
+    Engine::Model::ProjectSettings m_projectSettings;
     std::string m_projectFilePath;
     std::string m_currentScenePath;
     std::string m_activePrefabPath;
@@ -151,7 +154,7 @@ private:
     std::string m_playModeSceneSnapshot;
     bool m_prePlayHasUnsavedChanges = false;
     bool m_prePlayHadObjectSelection = false;
-    Scene::ObjectPath m_prePlaySelectionPath;
+    ::Engine::Scene::Scene::ObjectPath m_prePlaySelectionPath;
 
     std::deque<HistoryEntry> m_undoHistory;
     std::deque<HistoryEntry> m_redoHistory;
@@ -170,3 +173,4 @@ private:
     LARGE_INTEGER m_perfFreq, m_lastCounter;
     float m_deltaTime = 0.0f;
 };
+}

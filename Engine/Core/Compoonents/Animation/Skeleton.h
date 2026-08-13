@@ -4,9 +4,9 @@
 #include <glm/glm.hpp>
 #include <vector>
 
-class Object;
-
-class Skeleton : public Component
+namespace Engine::Components
+{
+class Skeleton : public Engine::Core::Component
 {
 public:
     Skeleton();
@@ -17,9 +17,10 @@ public:
     std::vector<glm::mat4> inverseBindMatrices;
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
-    bool DrawProperties(IEditorUi& ui) override;
+    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
     Object* GetHierarchyRoot() const;
     std::vector<Object*> ResolveJoints() const;
     Object* FindNode(unsigned index) const;
     class Model* ResolveModel() const;
 };
+}

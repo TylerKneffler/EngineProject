@@ -5,9 +5,13 @@
 #include <string>
 #include <vector>
 
-class Animation : public Component
+namespace Engine::Components
+{
+class Animation : public Engine::Core::Component
 {
 public:
+    using AnimationChannel = Engine::Model::AnimationChannel;
+
     Animation();
     std::string clipName;
     float duration = 0.f;
@@ -15,3 +19,4 @@ public:
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
 };
+}

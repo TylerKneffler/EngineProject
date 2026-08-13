@@ -1,8 +1,10 @@
 #pragma once
 
-// ImGui panel-hosting feature.
-
 #include "Engine/Editor/UI/ImGui/ImGuiEditorUi.h"
+
+namespace Engine::Editor
+{
+// ImGui panel-hosting feature.
 
 class EditorState;
 
@@ -19,3 +21,4 @@ private:
 
     ImGuiEditorUi m_ui;
 };
+}

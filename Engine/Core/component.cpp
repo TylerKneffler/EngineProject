@@ -20,10 +20,13 @@
 #define ENGINE_ASSETS_PATH "Engine/Core/Assets/"
 #endif
 
+namespace Engine::Core
+{
+
 // State tracking for property editing
 static std::map<std::string, std::string> s_editingProperty;  // componentPtr+key -> "editing"
 // Cache for texture previews
-static std::map<std::string, std::shared_ptr<Texture>> s_texturePreviewCache;
+static std::map<std::string, std::shared_ptr<Engine::Components::Texture>> s_texturePreviewCache;
 
 // ---------------------------------------------------------------------------
 // Component::DrawProperties — Generic interactive property editor
@@ -49,7 +52,7 @@ static std::map<std::string, std::shared_ptr<Texture>> s_texturePreviewCache;
 // Override in derived classes only when you need specialized UI controls
 // or logic beyond this automatic property editing.
 // ---------------------------------------------------------------------------
-bool Component::DrawProperties(IEditorUi& ui)
+bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
 {
     // Get current serialized state
     JsonValue originalData = Serialize();
@@ -121,7 +124,7 @@ bool Component::DrawProperties(IEditorUi& ui)
                     
                     // Try to load and display texture preview
                     void* textureHandle = nullptr;
-                    std::shared_ptr<Texture> previewTexture = nullptr;
+                    std::shared_ptr<Engine::Components::Texture> previewTexture = nullptr;
                     
                     // Get graphics provider through the component's owner object and scene
                     IGraphicsProvider* graphicsProvider = nullptr;
@@ -141,7 +144,7 @@ bool Component::DrawProperties(IEditorUi& ui)
                         else
                         {
                             // Load texture from file
-                            previewTexture = Texture::Acquire(stringValue);
+                            previewTexture = Engine::Components::Texture::Acquire(stringValue);
                             if (previewTexture && previewTexture->Load())
                             {
                                 s_texturePreviewCache[stringValue] = previewTexture;
@@ -308,7 +311,7 @@ bool Component::DrawProperties(IEditorUi& ui)
                     if (payload && payloadSize == sizeof(Component*))
                     {
                         Component* component = *static_cast<Component* const*>(payload);
-                        if (auto* droppedMesh = dynamic_cast<Mesh*>(component))
+                        if (auto* droppedMesh = dynamic_cast<Engine::Components::Mesh*>(component))
                         {
                             editedData.Set(key, JsonValue(droppedMesh->GetFilePath()));
                             modified = true;
@@ -546,7 +549,7 @@ bool Component::DrawProperties(IEditorUi& ui)
     return modified;
 }
 
-JsonValue Component::Serialize() const
+Component::JsonValue Component::Serialize() const
 {
     JsonValue data = JsonValue::MakeObject();
     data.Set("type", JsonValue(GetTypeName()));
@@ -556,7 +559,7 @@ JsonValue Component::Serialize() const
     return data;
 }
 
-JsonValue Component::SerializeFields() const
+Component::JsonValue Component::SerializeFields() const
 {
     JsonValue data = JsonValue::MakeObject();
     for (const auto& field : m_serializedFields)
@@ -569,4 +572,6 @@ void Component::Deserialize(const JsonValue& v)
     for (const auto& field : m_serializedFields)
         if (v.Has(field.name))
             field.read(v[field.name]);
+}
+
 }

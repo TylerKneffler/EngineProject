@@ -4,7 +4,9 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-class Transform : public Component
+namespace Engine::Components
+{
+class Transform : public Engine::Core::Component
 {
 public:
     Transform();
@@ -27,3 +29,4 @@ public:
     glm::vec3 GetWorldPosition();
     glm::vec3 GetLocalPosition();
 };
+}

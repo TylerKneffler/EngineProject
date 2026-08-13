@@ -6,6 +6,8 @@
 #include <mutex>
 #include <unordered_map>
 
+namespace Engine::Audio
+{
 struct AudioMixer::Impl
 {
     ma_engine engine{};
@@ -119,4 +121,5 @@ void* AudioMixer::GetBusHandle(const std::string& requestedBus)
     ma_sound_group* result = group.get();
     m_impl->buses.emplace(bus, std::move(group));
     return result;
+}
 }

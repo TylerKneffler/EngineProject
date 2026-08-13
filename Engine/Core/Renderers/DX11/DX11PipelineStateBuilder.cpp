@@ -3,7 +3,9 @@
 #include <cstring>
 #include <sstream>
 
-IPipelineStateBuilder& D3D11PipelineStateBuilder::SetVertexShader(const IShader* shader)
+namespace Engine::Renderers
+{
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetVertexShader(const Engine::Graphics::IShader* shader)
 {
     m_vsBytecode.clear();
     if (shader && shader->GetBytecode())
@@ -14,7 +16,7 @@ IPipelineStateBuilder& D3D11PipelineStateBuilder::SetVertexShader(const IShader*
     return *this;
 }
 
-IPipelineStateBuilder& D3D11PipelineStateBuilder::SetPixelShader(const IShader* shader)
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetPixelShader(const Engine::Graphics::IShader* shader)
 {
     m_psBytecode.clear();
     if (shader && shader->GetBytecode())
@@ -25,23 +27,23 @@ IPipelineStateBuilder& D3D11PipelineStateBuilder::SetPixelShader(const IShader* 
     return *this;
 }
 
-IPipelineStateBuilder& D3D11PipelineStateBuilder::SetFillMode(bool value) { m_fillMode = value ? D3D11_FILL_WIREFRAME : D3D11_FILL_SOLID; return *this; }
-IPipelineStateBuilder& D3D11PipelineStateBuilder::SetCullMode(bool value) { m_cullMode = value ? D3D11_CULL_BACK : D3D11_CULL_NONE; return *this; }
-IPipelineStateBuilder& D3D11PipelineStateBuilder::SetFrontCounterClockwise(bool value) { m_frontCCW = value; return *this; }
-IPipelineStateBuilder& D3D11PipelineStateBuilder::SetDepthClipEnable(bool value) { m_depthClip = value; return *this; }
-IPipelineStateBuilder& D3D11PipelineStateBuilder::SetBlendEnable(bool value) { m_blendEnable = value; return *this; }
-IPipelineStateBuilder& D3D11PipelineStateBuilder::SetSrcBlend(int value) { m_srcBlend = ConvertBlend(value); return *this; }
-IPipelineStateBuilder& D3D11PipelineStateBuilder::SetDestBlend(int value) { m_destBlend = ConvertBlend(value); return *this; }
-IPipelineStateBuilder& D3D11PipelineStateBuilder::SetBlendOp(int value) { m_blendOp = ConvertBlendOp(value); return *this; }
-IPipelineStateBuilder& D3D11PipelineStateBuilder::SetSrcBlendAlpha(int value) { m_srcBlendAlpha = ConvertBlend(value); return *this; }
-IPipelineStateBuilder& D3D11PipelineStateBuilder::SetDestBlendAlpha(int value) { m_destBlendAlpha = ConvertBlend(value); return *this; }
-IPipelineStateBuilder& D3D11PipelineStateBuilder::SetBlendOpAlpha(int value) { m_blendOpAlpha = ConvertBlendOp(value); return *this; }
-IPipelineStateBuilder& D3D11PipelineStateBuilder::SetDepthEnable(bool value) { m_depthEnable = value; return *this; }
-IPipelineStateBuilder& D3D11PipelineStateBuilder::SetDepthWriteEnable(bool value) { m_depthWrite = value; return *this; }
-IPipelineStateBuilder& D3D11PipelineStateBuilder::SetDepthFunc(int value) { m_depthFunc = ConvertComparison(value); return *this; }
-IPipelineStateBuilder& D3D11PipelineStateBuilder::SetRenderTargetFormat(int, int) { return *this; }
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetFillMode(bool value) { m_fillMode = value ? D3D11_FILL_WIREFRAME : D3D11_FILL_SOLID; return *this; }
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetCullMode(bool value) { m_cullMode = value ? D3D11_CULL_BACK : D3D11_CULL_NONE; return *this; }
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetFrontCounterClockwise(bool value) { m_frontCCW = value; return *this; }
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetDepthClipEnable(bool value) { m_depthClip = value; return *this; }
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetBlendEnable(bool value) { m_blendEnable = value; return *this; }
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetSrcBlend(int value) { m_srcBlend = ConvertBlend(value); return *this; }
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetDestBlend(int value) { m_destBlend = ConvertBlend(value); return *this; }
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetBlendOp(int value) { m_blendOp = ConvertBlendOp(value); return *this; }
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetSrcBlendAlpha(int value) { m_srcBlendAlpha = ConvertBlend(value); return *this; }
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetDestBlendAlpha(int value) { m_destBlendAlpha = ConvertBlend(value); return *this; }
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetBlendOpAlpha(int value) { m_blendOpAlpha = ConvertBlendOp(value); return *this; }
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetDepthEnable(bool value) { m_depthEnable = value; return *this; }
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetDepthWriteEnable(bool value) { m_depthWrite = value; return *this; }
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetDepthFunc(int value) { m_depthFunc = ConvertComparison(value); return *this; }
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetRenderTargetFormat(int, int) { return *this; }
 
-IPipelineStateBuilder& D3D11PipelineStateBuilder::SetInputLayout(const VertexElement* elements, uint32_t count)
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetInputLayout(const VertexElement* elements, uint32_t count)
 {
     m_inputLayout.clear();
     for (uint32_t i = 0; elements && i < count; ++i)
@@ -59,7 +61,7 @@ IPipelineStateBuilder& D3D11PipelineStateBuilder::SetInputLayout(const VertexEle
     return *this;
 }
 
-IPipelineStateBuilder& D3D11PipelineStateBuilder::SetPrimitiveTopology(PrimitiveTopology value)
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetPrimitiveTopology(PrimitiveTopology value)
 {
     switch (value)
     {
@@ -72,7 +74,7 @@ IPipelineStateBuilder& D3D11PipelineStateBuilder::SetPrimitiveTopology(Primitive
     return *this;
 }
 
-std::unique_ptr<IPipelineState> D3D11PipelineStateBuilder::Build()
+std::unique_ptr<Engine::Graphics::IPipelineState> D3D11PipelineStateBuilder::Build()
 {
     m_lastError.clear();
     if (!m_device || m_vsBytecode.empty() || m_psBytecode.empty())
@@ -157,4 +159,5 @@ D3D11_COMPARISON_FUNC D3D11PipelineStateBuilder::ConvertComparison(int value)
         case 6: return D3D11_COMPARISON_GREATER_EQUAL; case 7: return D3D11_COMPARISON_ALWAYS;
         default: return D3D11_COMPARISON_LESS;
     }
+}
 }

@@ -36,6 +36,8 @@
 //   };
 //   obj->AddComponent<MyScript>();
 // ---------------------------------------------------------------------------
+namespace Engine::Core
+{
 class Script : public Component
 {
 public:
@@ -57,5 +59,6 @@ public:
     }
     
     // Override in derived classes to draw custom properties in the inspector
-    // bool DrawProperties(IEditorUi& ui) override { /* custom UI */ return false; }
+    // bool DrawProperties(::Engine::Editor::IEditorUi& ui) override { /* custom UI */ return false; }
 };
+}

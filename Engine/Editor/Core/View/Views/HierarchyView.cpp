@@ -9,6 +9,8 @@
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Serialization/SceneSerializer.h"
 
+namespace Engine::Editor
+{
 namespace
 {
 const char* PlacementName(EditorUiHierarchyDropPosition position)
@@ -22,21 +24,21 @@ const char* PlacementName(EditorUiHierarchyDropPosition position)
     }
 }
 
-std::string ObjectName(const Object* object)
+std::string ObjectName(const Engine::Core::Object* object)
 {
     if (!object) return "World";
     return object->name.empty() ? "(unnamed)" : object->name;
 }
 
-bool CanMoveInPrefabContext(Scene* scene, Object* object, Object* target,
-    Scene::ObjectPlacement placement)
+bool CanMoveInPrefabContext(Engine::Scene::Scene* scene, Engine::Core::Object* object, Engine::Core::Object* target,
+    ::Engine::Scene::Scene::ObjectPlacement placement)
 {
     if (!scene || !object)
         return false;
-    Object* sourceRoot = object->GetPrefabInstanceRoot();
-    Object* destinationParent = placement == Scene::ObjectPlacement::AsChild
+    Engine::Core::Object* sourceRoot = object->GetPrefabInstanceRoot();
+    Engine::Core::Object* destinationParent = placement == ::Engine::Scene::Scene::ObjectPlacement::AsChild
         ? target : (target ? target->Parent : nullptr);
-    Object* destinationRoot = destinationParent
+    Engine::Core::Object* destinationRoot = destinationParent
         ? destinationParent->GetPrefabInstanceRoot() : nullptr;
     if (!sourceRoot)
         return true;
@@ -88,11 +90,11 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
     }
     if (worldDrop.position != EditorUiHierarchyDropPosition::None)
         m_dropObservedThisFrame = true;
-    if (worldDrop.data && worldDrop.size == sizeof(Object*))
+    if (worldDrop.data && worldDrop.size == sizeof(Engine::Core::Object*))
     {
-        m_pendingDragged = *static_cast<Object* const*>(worldDrop.data);
+        m_pendingDragged = *static_cast<Engine::Core::Object* const*>(worldDrop.data);
         m_pendingTarget = nullptr;
-        m_pendingPlacement = Scene::ObjectPlacement::AsChild;
+        m_pendingPlacement = ::Engine::Scene::Scene::ObjectPlacement::AsChild;
         m_hasPendingMove = true;
         LogInteraction("Drop requested: '" + ObjectName(m_pendingDragged) + "' -> 'World' (root level)");
     }
@@ -100,7 +102,7 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
         SetSelectedObject(nullptr);
     if (worldOpen)
     {
-        std::vector<Object*> roots;
+        std::vector<Engine::Core::Object*> roots;
         for (const auto& obj : m_scene->GetObjects())
             if (!obj->Parent)
                 roots.push_back(obj.get());
@@ -112,13 +114,13 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
     {
         bool changed = false;
         if (m_pendingPrefabAction == PendingPrefabAction::Apply)
-            changed = SceneSerializer::ApplyPrefabOverridesToAsset(
+            changed = Engine::Serialization::SceneSerializer::ApplyPrefabOverridesToAsset(
                 *m_pendingPrefabRoot, false, m_scene->GetGraphicsProvider());
         else if (m_pendingPrefabAction == PendingPrefabAction::ApplyAll)
-            changed = SceneSerializer::ApplyPrefabOverridesToAsset(
+            changed = Engine::Serialization::SceneSerializer::ApplyPrefabOverridesToAsset(
                 *m_pendingPrefabRoot, true, m_scene->GetGraphicsProvider());
         else if (m_pendingPrefabAction == PendingPrefabAction::Revert)
-            changed = SceneSerializer::RevertPrefabOverrides(
+            changed = Engine::Serialization::SceneSerializer::RevertPrefabOverrides(
                 *m_pendingPrefabRoot, m_scene->GetGraphicsProvider());
         else if (m_pendingPrefabAction == PendingPrefabAction::Unpack &&
             m_pendingPrefabRoot->Prefab)
@@ -134,9 +136,9 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
     if (m_pendingDelete)
     {
         const std::string deletedName = ObjectName(m_pendingDelete);
-        Object* deletedPrefabRoot = m_pendingDelete->GetPrefabInstanceRoot();
+        Engine::Core::Object* deletedPrefabRoot = m_pendingDelete->GetPrefabInstanceRoot();
         bool deletesSelection = false;
-        for (Object* current = m_selectedObject; current; current = current->Parent)
+        for (Engine::Core::Object* current = m_selectedObject; current; current = current->Parent)
             if (current == m_pendingDelete)
                 deletesSelection = true;
         if (deletesSelection)
@@ -149,25 +151,25 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
     }
     if (m_hasPendingAdd)
     {
-        Object* created = nullptr;
+        Engine::Core::Object* created = nullptr;
         try
         {
             if (m_pendingAddType == PendingAddType::Cube)
             {
                 created = m_scene->AddObject("Cube");
-                Mesh* mesh = created->AddComponent<Mesh>();
+                Engine::Components::Mesh* mesh = created->AddComponent<Engine::Components::Mesh>();
                 mesh->LoadFromFile("Assets/Mesh/cube.obj");
                 if (m_scene->GetGraphicsProvider())
                     mesh->CreateBuffer(
                         m_scene->GetGraphicsProvider()->GetBufferFactory());
-                created->AddComponent<Material>();
+                created->AddComponent<Engine::Components::Material>();
             }
             else if (m_pendingAddType == PendingAddType::Sprite)
             {
                 created = m_scene->AddObject("Sprite");
-                SpriteAnimationManager* manager =
-                    created->AddComponent<SpriteAnimationManager>();
-                Sprite* sprite = created->AddComponent<Sprite>();
+                Engine::Components::SpriteAnimationManager* manager =
+                    created->AddComponent<Engine::Components::SpriteAnimationManager>();
+                Engine::Components::Sprite* sprite = created->AddComponent<Engine::Components::Sprite>();
                 sprite->SetAnimationManager(manager);
             }
             else
@@ -184,7 +186,7 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
         }
         if (created && m_pendingAddParent)
         {
-            m_scene->MoveObject(created, m_pendingAddParent, Scene::ObjectPlacement::AsChild);
+            m_scene->MoveObject(created, m_pendingAddParent, ::Engine::Scene::Scene::ObjectPlacement::AsChild);
             created->transform.position = glm::vec3(0.f);
             created->transform.rotation = glm::vec3(0.f);
             created->transform.scale = glm::vec3(1.f);
@@ -216,11 +218,11 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
         m_debugDropDepth = 0;
         if (targetChanged)
             LogInteraction("Hover hierarchy background (World root, append)");
-        if (backgroundDrop.data && backgroundDrop.size == sizeof(Object*))
+        if (backgroundDrop.data && backgroundDrop.size == sizeof(Engine::Core::Object*))
         {
-            m_pendingDragged = *static_cast<Object* const*>(backgroundDrop.data);
+            m_pendingDragged = *static_cast<Engine::Core::Object* const*>(backgroundDrop.data);
             m_pendingTarget = nullptr;
-            m_pendingPlacement = Scene::ObjectPlacement::AsChild;
+            m_pendingPlacement = ::Engine::Scene::Scene::ObjectPlacement::AsChild;
             m_hasPendingMove = true;
             LogInteraction("Drop requested: '" + ObjectName(m_pendingDragged) +
                 "' -> 'World' (root append)");
@@ -250,14 +252,14 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
         if (m_debugHoverPosition != EditorUiHierarchyDropPosition::None)
         {
             const std::string sourceName = ObjectName(m_debugDragSource);
-            Object* resolvedTarget = m_debugHoverTarget;
-            Scene::ObjectPlacement placement = !resolvedTarget
-                ? Scene::ObjectPlacement::AsChild
+            Engine::Core::Object* resolvedTarget = m_debugHoverTarget;
+            ::Engine::Scene::Scene::ObjectPlacement placement = !resolvedTarget
+                ? ::Engine::Scene::Scene::ObjectPlacement::AsChild
                 : (m_debugHoverPosition == EditorUiHierarchyDropPosition::Before
-                    ? Scene::ObjectPlacement::Before
+                    ? ::Engine::Scene::Scene::ObjectPlacement::Before
                     : (m_debugHoverPosition == EditorUiHierarchyDropPosition::After
-                        ? Scene::ObjectPlacement::After
-                        : Scene::ObjectPlacement::AsChild));
+                        ? ::Engine::Scene::Scene::ObjectPlacement::After
+                        : ::Engine::Scene::Scene::ObjectPlacement::AsChild));
             const int naturalDepth = m_debugHoverPosition == EditorUiHierarchyDropPosition::AsChild
                 ? m_debugHoverTargetDepth + 1 : m_debugHoverTargetDepth;
             if (resolvedTarget && m_debugDropDepth >= 0 && m_debugDropDepth < naturalDepth)
@@ -270,8 +272,8 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
                 }
                 placement = resolvedTarget
                     ? (m_debugHoverPosition == EditorUiHierarchyDropPosition::Before
-                        ? Scene::ObjectPlacement::Before : Scene::ObjectPlacement::After)
-                    : Scene::ObjectPlacement::AsChild;
+                        ? ::Engine::Scene::Scene::ObjectPlacement::Before : ::Engine::Scene::Scene::ObjectPlacement::After)
+                    : ::Engine::Scene::Scene::ObjectPlacement::AsChild;
             }
             const std::string targetName = ObjectName(resolvedTarget);
             LogInteraction("Release recovered at last valid target: '" + sourceName +
@@ -308,7 +310,7 @@ void HierarchyView::CopySelection()
 {
     if (!m_scene || !m_selectedObject)
         return;
-    m_objectClipboard = SceneSerializer::SaveObjectToString(*m_selectedObject);
+    m_objectClipboard = Engine::Serialization::SceneSerializer::SaveObjectToString(*m_selectedObject);
     m_clipboardSourcePath.clear();
     m_scene->TryGetObjectPath(m_selectedObject, m_clipboardSourcePath);
     LogInteraction("Copied '" + ObjectName(m_selectedObject) + "' with " +
@@ -320,8 +322,8 @@ void HierarchyView::PasteClipboard()
     if (!m_scene || m_objectClipboard.empty())
         return;
 
-    Object* source = m_scene->FindObjectByPath(m_clipboardSourcePath);
-    Object* pasted = SceneSerializer::InstantiateObjectFromString(
+    Engine::Core::Object* source = m_scene->FindObjectByPath(m_clipboardSourcePath);
+    Engine::Core::Object* pasted = Engine::Serialization::SceneSerializer::InstantiateObjectFromString(
         *m_scene, m_objectClipboard, m_scene->GetGraphicsProvider());
     if (!pasted)
     {
@@ -334,7 +336,7 @@ void HierarchyView::PasteClipboard()
     const glm::vec3 localScale = pasted->transform.scale;
     if (source)
     {
-        m_scene->MoveObject(pasted, source, Scene::ObjectPlacement::After);
+        m_scene->MoveObject(pasted, source, ::Engine::Scene::Scene::ObjectPlacement::After);
         pasted->transform.position = localPosition;
         pasted->transform.rotation = localRotation;
         pasted->transform.scale = localScale;
@@ -364,7 +366,7 @@ void HierarchyView::LogInteraction(const std::string& message) const
         OnInteractionLog("[Hierarchy] " + message);
 }
 
-void HierarchyView::SetSelectedObject(Object* obj)
+void HierarchyView::SetSelectedObject(Engine::Core::Object* obj)
 {
     if (m_selectedObject == obj) return;
     m_selectedObject = obj;
@@ -372,11 +374,11 @@ void HierarchyView::SetSelectedObject(Object* obj)
 }
 
 void HierarchyView::DrawObjectNode(
-    IEditorUi& ui, Object* obj, int depth, bool lastSibling,
+    IEditorUi& ui, Engine::Core::Object* obj, int depth, bool lastSibling,
     uint64_t ancestorGuideMask)
 {
     const bool hasChildren = !obj->Children.empty();
-    Object* prefabRoot = obj->GetPrefabInstanceRoot();
+    Engine::Core::Object* prefabRoot = obj->GetPrefabInstanceRoot();
     char name[256]; strncpy_s(name, obj->name.c_str(), sizeof(name));
     bool enabled = obj->enabled;
     const EditorUiObjectRowResult row = ui.ObjectTreeRow(
@@ -390,7 +392,7 @@ void HierarchyView::DrawObjectNode(
     if (prefabRoot)
     {
         const EditorUiPrefabMenuResult prefabMenu = ui.PrefabOverrideMenu(obj,
-            SceneSerializer::HasPrefabOverrides(*prefabRoot, true));
+            Engine::Serialization::SceneSerializer::HasPrefabOverrides(*prefabRoot, true));
         if (prefabMenu.applyRequested)
             m_pendingPrefabAction = PendingPrefabAction::Apply;
         if (prefabMenu.applyAllRequested)
@@ -454,13 +456,13 @@ void HierarchyView::DrawObjectNode(
         m_dropObservedThisFrame = true;
     if (row.droppedItem)
     {
-        m_pendingDragged = static_cast<Object*>(const_cast<void*>(row.droppedItem));
+        m_pendingDragged = static_cast<Engine::Core::Object*>(const_cast<void*>(row.droppedItem));
         m_pendingTarget = obj;
         m_pendingPlacement = row.dropPosition == EditorUiHierarchyDropPosition::Before
-            ? Scene::ObjectPlacement::Before
+            ? ::Engine::Scene::Scene::ObjectPlacement::Before
             : (row.dropPosition == EditorUiHierarchyDropPosition::After
-                ? Scene::ObjectPlacement::After
-                : Scene::ObjectPlacement::AsChild);
+                ? ::Engine::Scene::Scene::ObjectPlacement::After
+                : ::Engine::Scene::Scene::ObjectPlacement::AsChild);
 
         const int naturalDepth = row.dropPosition == EditorUiHierarchyDropPosition::AsChild
             ? depth + 1 : depth;
@@ -469,7 +471,7 @@ void HierarchyView::DrawObjectNode(
             // Outdent to the ancestor aligned with the pointer. Dropping in
             // the lower/center portion places the object after that ancestor;
             // the upper portion places it before the ancestor.
-            Object* anchor = obj;
+            Engine::Core::Object* anchor = obj;
             int anchorDepth = depth;
             while (anchor && anchorDepth > row.dropDepth)
             {
@@ -480,12 +482,12 @@ void HierarchyView::DrawObjectNode(
             {
                 m_pendingTarget = anchor;
                 m_pendingPlacement = row.dropPosition == EditorUiHierarchyDropPosition::Before
-                    ? Scene::ObjectPlacement::Before : Scene::ObjectPlacement::After;
+                    ? ::Engine::Scene::Scene::ObjectPlacement::Before : ::Engine::Scene::Scene::ObjectPlacement::After;
             }
             else
             {
                 m_pendingTarget = nullptr;
-                m_pendingPlacement = Scene::ObjectPlacement::AsChild;
+                m_pendingPlacement = ::Engine::Scene::Scene::ObjectPlacement::AsChild;
             }
         }
         m_hasPendingMove = true;
@@ -503,4 +505,5 @@ void HierarchyView::DrawObjectNode(
                 index + 1 == obj->Children.size(), childGuideMask);
         ui.ObjectTreePop();
     }
+}
 }

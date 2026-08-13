@@ -11,7 +11,7 @@
 
 namespace fs = std::filesystem;
 
-namespace
+namespace Engine::Core
 {
 std::string GenerateStableId()
 {
@@ -49,24 +49,24 @@ std::string NormalizeSourcePath(const fs::path& path)
     return normalized.generic_string();
 }
 
-JsonValue WriteSettings(const AssetImportSettings& settings)
+Engine::Serialization::JsonValue WriteSettings(const Engine::Model::AssetImportSettings& settings)
 {
-    JsonValue output = JsonValue::MakeObject();
+    Engine::Serialization::JsonValue output = Engine::Serialization::JsonValue::MakeObject();
     for (const auto& [name, setting] : settings)
     {
-        std::visit([&](const auto& value) { output.Set(name, JsonValue(value)); }, setting);
+        std::visit([&](const auto& value) { output.Set(name, Engine::Serialization::JsonValue(value)); }, setting);
     }
     return output;
 }
 
-AssetImportSettings ReadSettings(const JsonValue& value)
+Engine::Model::AssetImportSettings ReadSettings(const Engine::Serialization::JsonValue& value)
 {
-    AssetImportSettings settings;
+    Engine::Model::AssetImportSettings settings;
     if (!value.IsObject())
         return settings;
     for (std::size_t index = 0; index < value.ObjectSize(); ++index)
     {
-        const JsonValue& setting = value.ObjectValue(index);
+        const Engine::Serialization::JsonValue& setting = value.ObjectValue(index);
         if (setting.IsBool())
             settings[value.ObjectKey(index)] = setting.AsBool();
         else if (setting.IsNumber())
@@ -76,8 +76,6 @@ AssetImportSettings ReadSettings(const JsonValue& value)
     }
     return settings;
 }
-}
-
 fs::path AssetRecord::SidecarPath(const fs::path& assetPath)
 {
     return fs::path(assetPath.string() + ".meta");
@@ -90,7 +88,7 @@ std::optional<AssetRecord> AssetRecord::Load(const fs::path& assetPath)
     if (!fs::exists(sidecar, error))
         return std::nullopt;
 
-    const JsonValue root = JsonParseFile(sidecar.string());
+    const Engine::Serialization::JsonValue root = Engine::Serialization::JsonParseFile(sidecar.string());
     if (!root.IsObject() || !root["version"].IsNumber() ||
         !root["id"].IsString() ||
         !root["sourcePath"].IsString())
@@ -109,7 +107,7 @@ std::optional<AssetRecord> AssetRecord::Load(const fs::path& assetPath)
 }
 
 AssetRecord AssetRecord::Ensure(const fs::path& assetPath,
-    const fs::path& sourcePath, const AssetImportSettings& defaultSettings)
+    const fs::path& sourcePath, const Engine::Model::AssetImportSettings& defaultSettings)
 {
     if (auto existing = Load(assetPath))
     {
@@ -157,15 +155,16 @@ bool AssetRecord::Save(const fs::path& assetPath) const
     if (version != CurrentVersion || id.empty() || sourcePath.empty())
         return false;
 
-    JsonValue root = JsonValue::MakeObject();
-    root.Set("version", JsonValue(version));
-    root.Set("id", JsonValue(id));
-    root.Set("sourcePath", JsonValue(sourcePath));
+    Engine::Serialization::JsonValue root = Engine::Serialization::JsonValue::MakeObject();
+    root.Set("version", Engine::Serialization::JsonValue(version));
+    root.Set("id", Engine::Serialization::JsonValue(id));
+    root.Set("sourcePath", Engine::Serialization::JsonValue(sourcePath));
     root.Set("importSettings", WriteSettings(importSettings));
 
     std::ofstream output(SidecarPath(assetPath), std::ios::binary | std::ios::trunc);
     if (!output)
         return false;
-    output << JsonWrite(root) << '\n';
+    output << Engine::Serialization::JsonWrite(root) << '\n';
     return output.good();
+}
 }

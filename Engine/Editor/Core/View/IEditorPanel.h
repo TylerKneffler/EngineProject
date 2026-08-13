@@ -1,6 +1,8 @@
 #pragma once
 #include <string>
 #include <functional>
+namespace Engine::Editor
+{
 class IEditorUi;
 
 // ---------------------------------------------------------------------------
@@ -46,3 +48,4 @@ protected:
     std::string m_title;
     bool        m_open = true;
 };
+}

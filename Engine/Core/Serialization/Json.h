@@ -24,6 +24,8 @@
 //   float x  = obj["x"].AsFloat();
 //   bool  ok  = obj.Has("name");
 // ---------------------------------------------------------------------------
+namespace Engine::Serialization
+{
 class JsonValue
 {
 public:
@@ -109,3 +111,5 @@ JsonValue JsonParse(const std::string& src);
 
 // Read a file and parse it; throws on I/O or parse error.
 JsonValue JsonParseFile(const std::string& path);
+}
+

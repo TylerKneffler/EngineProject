@@ -4,12 +4,14 @@
 #include <algorithm>
 #include <sstream>
 
+namespace Engine::Components
+{
 namespace
 {
-std::string RelativePath(const Object* root, const Object* object)
+std::string RelativePath(const Engine::Core::Object* root, const Engine::Core::Object* object)
 {
     std::vector<size_t> indices;
-    for (const Object* current = object; current && current != root;
+    for (const Engine::Core::Object* current = object; current && current != root;
         current = current->Parent)
     {
         if (!current->Parent) return {};
@@ -45,7 +47,7 @@ void Model::BindNode(unsigned index, Object* object)
     m_nodePaths[index] = RelativePath(Owner, object);
 }
 
-Object* Model::ResolveNode(unsigned index) const
+Model::Object* Model::ResolveNode(unsigned index) const
 {
     if (!Owner || index >= m_nodePaths.size()) return nullptr;
     Object* object = Owner;
@@ -65,7 +67,7 @@ Object* Model::ResolveNode(unsigned index) const
     return object;
 }
 
-JsonValue Model::Serialize() const
+Model::JsonValue Model::Serialize() const
 {
     JsonValue result = Component::Serialize();
     JsonValue paths = JsonValue::MakeArray();
@@ -82,9 +84,10 @@ void Model::Deserialize(const JsonValue& value)
         m_nodePaths.push_back(paths.ArrayAt(i).AsString());
 }
 
-bool Model::DrawProperties(IEditorUi& ui)
+bool Model::DrawProperties(::Engine::Editor::IEditorUi& ui)
 {
     const std::string count = std::to_string(m_nodePaths.size());
     ui.ValueLabel("Imported Nodes", count.c_str());
     return false;
+}
 }

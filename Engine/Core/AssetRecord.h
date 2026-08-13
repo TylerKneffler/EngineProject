@@ -8,8 +8,12 @@
 // Persistent metadata stored beside an asset as <filename>.meta. The record
 // owns the identity of the asset, so moving the asset and its sidecar preserves
 // references independently of the asset's display path.
+namespace Engine::Core
+{
 struct AssetRecord
 {
+    using AssetImportSettings = Engine::Model::AssetImportSettings;
+
     static constexpr int CurrentVersion = 1;
 
     int version = CurrentVersion;
@@ -27,3 +31,4 @@ struct AssetRecord
 
     bool Save(const std::filesystem::path& assetPath) const;
 };
+}

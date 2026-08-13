@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cctype>
 
+namespace Engine::Editor
+{
 namespace
 {
 const char* LevelName(ConsoleView::Level level)
@@ -58,4 +60,5 @@ void ConsoleView::DrawPanel(IEditorUi& ui)
     ui.ReadOnlyTextBlock("##consoleText",m_textBlock.c_str(),scrollToBottom);
     if(scrollToBottom)m_scrollToBottom=false;
     ui.EndWindow();
+}
 }

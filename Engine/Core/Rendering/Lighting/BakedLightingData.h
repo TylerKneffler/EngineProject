@@ -3,11 +3,12 @@
 #include "Core/component.h"
 #include <glm/glm.hpp>
 
-class IEditorUi;
+namespace Engine::Rendering
+{
 
 // Persistent source/generated asset mapping written by BakedLightingPipeline.
 // The source snapshot makes inline and prefab materials safely reversible.
-class BakedLightingData final : public Component
+class BakedLightingData final : public Engine::Core::Component
 {
 public:
     BakedLightingData();
@@ -22,5 +23,6 @@ public:
     bool valid = false;
     int version = 3;
 
-    bool DrawProperties(IEditorUi& ui) override;
+    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
 };
+}

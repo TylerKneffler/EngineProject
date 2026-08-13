@@ -4,6 +4,8 @@
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 
+namespace Engine::Editor
+{
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
@@ -12,8 +14,8 @@ void GameView::Init(void* device,
                     void* srvCpu,
                     void* srvGpu,
                     uint32_t srvSlotIndex,
-                    Scene* scene,
-                    const ProjectSettings& settings)
+                    Engine::Scene::Scene* scene,
+                    const Engine::Model::ProjectSettings& settings)
 {
     View::Init(device, width, height, srvCpu, srvGpu, srvSlotIndex);
     m_scene = scene;
@@ -33,8 +35,8 @@ void GameView::DrawPanel(IEditorUi& ui)
     if (ui.IsWindowFocused() && OnFocused) OnFocused();
     if (windowVisible)
     {
-        const float targetAspect = m_aspectRatioMode == ProjectSettings::AspectRatioMode::Free ? 0.f :
-            (m_aspectRatioMode == ProjectSettings::AspectRatioMode::Locked ? m_gameAspectRatio :
+        const float targetAspect = m_aspectRatioMode == Engine::Model::ProjectSettings::AspectRatioMode::Free ? 0.f :
+            (m_aspectRatioMode == Engine::Model::ProjectSettings::AspectRatioMode::Locked ? m_gameAspectRatio :
              static_cast<float>(m_gameWindowWidth) / static_cast<float>(m_gameWindowHeight));
         const auto input = ui.Viewport(GetUiTextureHandle(), targetAspect,
             {m_letterboxColor.r,m_letterboxColor.g,m_letterboxColor.b,m_letterboxColor.a});
@@ -64,9 +66,9 @@ void GameView::Render3D(void* cmd)
     if (!m_scene)
         return;
 
-    Camera* gameCamera = m_scene->FindGameCamera();
+    Engine::Components::Camera* gameCamera = m_scene->FindGameCamera();
     if (!gameCamera)
-        gameCamera = m_scene->editorCamera.GetComponent<Camera>();
+        gameCamera = m_scene->editorCamera.GetComponent<Engine::Components::Camera>();
     if (!gameCamera)
         return;
 
@@ -88,19 +90,19 @@ void GameView::Render3D(void* cmd)
 // CalculateGameViewport
 // ---------------------------------------------------------------------------
 static void CalculateGameViewport(EditorUiVec2 availableSize, EditorUiVec2& outViewportSize, EditorUiVec2& outViewportPos,
-    ProjectSettings::AspectRatioMode mode, float lockedAspect, uint32_t windowWidth, uint32_t windowHeight)
+    Engine::Model::ProjectSettings::AspectRatioMode mode, float lockedAspect, uint32_t windowWidth, uint32_t windowHeight)
 {
     outViewportPos = {0.f, 0.f};
 
     switch (mode)
     {
-        case ProjectSettings::AspectRatioMode::Free:
+        case Engine::Model::ProjectSettings::AspectRatioMode::Free:
         {
             outViewportSize = availableSize;
             break;
         }
 
-        case ProjectSettings::AspectRatioMode::Locked:
+        case Engine::Model::ProjectSettings::AspectRatioMode::Locked:
         {
             float availableAspect = availableSize.x / availableSize.y;
             if (availableAspect > lockedAspect)
@@ -118,7 +120,7 @@ static void CalculateGameViewport(EditorUiVec2 availableSize, EditorUiVec2& outV
             break;
         }
 
-        case ProjectSettings::AspectRatioMode::Hardcoded:
+        case Engine::Model::ProjectSettings::AspectRatioMode::Hardcoded:
         {
             float gameAspect = static_cast<float>(windowWidth) / static_cast<float>(windowHeight);
             float availableAspect = availableSize.x / availableSize.y;
@@ -137,4 +139,5 @@ static void CalculateGameViewport(EditorUiVec2 availableSize, EditorUiVec2& outV
             break;
         }
     }
+}
 }

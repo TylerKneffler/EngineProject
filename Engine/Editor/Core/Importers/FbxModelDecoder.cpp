@@ -13,6 +13,8 @@
 #include <functional>
 #include <unordered_map>
 
+namespace Engine::Editor
+{
 namespace
 {
 glm::vec3 Vec3(const aiVector3D& value) { return { value.x, value.y, value.z }; }
@@ -43,7 +45,7 @@ std::string TexturePath(const aiMaterial* material, aiTextureType type)
 
 struct Influence { unsigned joint = 0; float weight = 0.f; };
 
-void StoreInfluences(Vertex& vertex, std::vector<Influence> influences)
+void StoreInfluences(Engine::Model::Vertex& vertex, std::vector<Influence> influences)
 {
     influences.erase(std::remove_if(influences.begin(), influences.end(),
         [](const Influence& value) { return value.weight <= 0.f; }), influences.end());
@@ -63,10 +65,10 @@ void StoreInfluences(Vertex& vertex, std::vector<Influence> influences)
     }
 }
 
-AnimationChannel VectorChannel(unsigned nodeIndex, AnimationChannel::Path path,
+Engine::Model::AnimationChannel VectorChannel(unsigned nodeIndex, Engine::Model::AnimationChannel::Path path,
     const aiVectorKey* keys, unsigned count, double ticksPerSecond)
 {
-    AnimationChannel channel;
+    Engine::Model::AnimationChannel channel;
     channel.nodeIndex = nodeIndex;
     channel.path = path;
     channel.valueWidth = 3;
@@ -82,7 +84,7 @@ AnimationChannel VectorChannel(unsigned nodeIndex, AnimationChannel::Path path,
 }
 }
 
-bool FbxModelDecoder::Decode(const std::string& sourcePath, ImportedModel& model,
+bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::ImportedModel& model,
     std::string& error)
 {
     Assimp::Importer importer;
@@ -109,7 +111,7 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, ImportedModel& model
         // image encoder and are deliberately left unresolved instead of being
         // written as a misleading image file.
         if (!source || source->mHeight != 0 || source->mWidth == 0) continue;
-        ImportedTexture texture;
+        Engine::Model::ImportedTexture texture;
         texture.source = "*" + std::to_string(index);
         std::string extension = source->achFormatHint;
         if (extension.empty()) extension = "bin";
@@ -124,7 +126,7 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, ImportedModel& model
     std::function<void(const aiNode*, int)> readNode = [&](const aiNode* source, int parent)
     {
         const unsigned index = static_cast<unsigned>(model.nodes.size());
-        ImportedNode node;
+        Engine::Model::ImportedNode node;
         node.name = Name(source->mName, "Node " + std::to_string(index + 1));
         node.parent = parent;
         aiVector3D scale, translation;
@@ -148,7 +150,7 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, ImportedModel& model
     for (unsigned index = 0; index < scene->mNumMaterials; ++index)
     {
         const aiMaterial* source = scene->mMaterials[index];
-        ImportedMaterial& material = model.materials[index];
+        Engine::Model::ImportedMaterial& material = model.materials[index];
         aiString materialName;
         if (source->Get(AI_MATKEY_NAME, materialName) == AI_SUCCESS)
             material.name = Name(materialName, "Material " + std::to_string(index + 1));
@@ -181,7 +183,7 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, ImportedModel& model
     for (unsigned meshIndex = 0; meshIndex < scene->mNumMeshes; ++meshIndex)
     {
         const aiMesh* source = scene->mMeshes[meshIndex];
-        ImportedPrimitive& primitive = model.primitives[meshIndex];
+        Engine::Model::ImportedPrimitive& primitive = model.primitives[meshIndex];
         primitive.name = Name(source->mName, "Mesh " + std::to_string(meshIndex + 1));
         primitive.materialIndex = source->mMaterialIndex < scene->mNumMaterials
             ? static_cast<int>(source->mMaterialIndex) : -1;
@@ -189,7 +191,7 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, ImportedModel& model
         std::vector<std::vector<Influence>> influences(source->mNumVertices);
         if (source->HasBones())
         {
-            ImportedSkin skin;
+            Engine::Model::ImportedSkin skin;
             skin.name = primitive.name + " Skeleton";
             for (unsigned boneIndex = 0; boneIndex < source->mNumBones; ++boneIndex)
             {
@@ -217,7 +219,7 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, ImportedModel& model
         for (unsigned morphIndex = 0; morphIndex < source->mNumAnimMeshes; ++morphIndex)
         {
             const aiAnimMesh* morph = source->mAnimMeshes[morphIndex];
-            Mesh::MorphTarget target;
+            Engine::Model::MorphTarget target;
             target.positions.resize(source->mNumVertices);
             if (morph->HasNormals()) target.normals.resize(source->mNumVertices);
             if (morph->HasTangentsAndBitangents()) target.tangents.resize(source->mNumVertices);
@@ -238,7 +240,7 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, ImportedModel& model
             for (unsigned corner = 0; corner < 3; ++corner)
             {
                 const unsigned sourceIndex = face.mIndices[corner];
-                Vertex vertex{};
+                Engine::Model::Vertex vertex{};
                 vertex.color[0] = vertex.color[1] = vertex.color[2] = vertex.color[3] = 1.f;
                 const aiVector3D& position = source->mVertices[sourceIndex];
                 vertex.pos[0] = position.x; vertex.pos[1] = position.y; vertex.pos[2] = position.z;
@@ -276,9 +278,9 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, ImportedModel& model
         }
 
         // Morph arrays must follow the expanded triangle vertex stream.
-        for (Mesh::MorphTarget& target : primitive.morphTargets)
+        for (Engine::Model::MorphTarget& target : primitive.morphTargets)
         {
-            Mesh::MorphTarget expanded;
+            Engine::Model::MorphTarget expanded;
             expanded.positions.reserve(primitive.vertices.size());
             if (!target.normals.empty()) expanded.normals.reserve(primitive.vertices.size());
             if (!target.tangents.empty()) expanded.tangents.reserve(primitive.vertices.size());
@@ -298,7 +300,7 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, ImportedModel& model
     for (unsigned animationIndex = 0; animationIndex < scene->mNumAnimations; ++animationIndex)
     {
         const aiAnimation* source = scene->mAnimations[animationIndex];
-        ImportedAnimation animation;
+        Engine::Model::ImportedAnimation animation;
         animation.name = Name(source->mName, "Animation " + std::to_string(animationIndex + 1));
         const double ticksPerSecond = source->mTicksPerSecond > 0.0 ? source->mTicksPerSecond : 25.0;
         animation.duration = static_cast<float>(source->mDuration / ticksPerSecond);
@@ -309,17 +311,17 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, ImportedModel& model
             if (found == nodeByName.end()) continue;
             if (sourceChannel->mNumPositionKeys)
                 animation.channels.push_back(VectorChannel(found->second,
-                    AnimationChannel::Path::Translation, sourceChannel->mPositionKeys,
+                    Engine::Model::AnimationChannel::Path::Translation, sourceChannel->mPositionKeys,
                     sourceChannel->mNumPositionKeys, ticksPerSecond));
             if (sourceChannel->mNumScalingKeys)
                 animation.channels.push_back(VectorChannel(found->second,
-                    AnimationChannel::Path::Scale, sourceChannel->mScalingKeys,
+                    Engine::Model::AnimationChannel::Path::Scale, sourceChannel->mScalingKeys,
                     sourceChannel->mNumScalingKeys, ticksPerSecond));
             if (sourceChannel->mNumRotationKeys)
             {
-                AnimationChannel channel;
+                Engine::Model::AnimationChannel channel;
                 channel.nodeIndex = found->second;
-                channel.path = AnimationChannel::Path::Rotation;
+                channel.path = Engine::Model::AnimationChannel::Path::Rotation;
                 channel.valueWidth = 4;
                 channel.times.reserve(sourceChannel->mNumRotationKeys);
                 channel.values.reserve(static_cast<size_t>(sourceChannel->mNumRotationKeys) * 4);
@@ -343,9 +345,9 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, ImportedModel& model
             if (meshIndex >= scene->mNumMeshes || sourceChannel->mNumKeys == 0) continue;
             const unsigned width = scene->mMeshes[meshIndex]->mNumAnimMeshes;
             if (width == 0) continue;
-            AnimationChannel channel;
+            Engine::Model::AnimationChannel channel;
             channel.nodeIndex = meshOwnerNode[meshIndex];
-            channel.path = AnimationChannel::Path::Weights;
+            channel.path = Engine::Model::AnimationChannel::Path::Weights;
             channel.valueWidth = width;
             channel.times.reserve(sourceChannel->mNumKeys);
             channel.values.assign(static_cast<size_t>(sourceChannel->mNumKeys) * width, 0.f);
@@ -363,4 +365,5 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, ImportedModel& model
         model.animations.push_back(std::move(animation));
     }
     return true;
+}
 }

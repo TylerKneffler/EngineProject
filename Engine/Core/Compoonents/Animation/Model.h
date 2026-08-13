@@ -4,12 +4,12 @@
 #include <string>
 #include <vector>
 
-class Object;
-
+namespace Engine::Components
+{
 // Imported-model metadata owned by the model root. Node bindings are stored as
 // child-index paths relative to the root, keeping generic Object free of model
 // importer fields and avoiding one marker component per imported node.
-class Model : public Component
+class Model : public Engine::Core::Component
 {
 public:
     Model();
@@ -18,8 +18,9 @@ public:
     size_t GetNodeCount() const { return m_nodePaths.size(); }
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
-    bool DrawProperties(IEditorUi& ui) override;
+    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
 
 private:
     std::vector<std::string> m_nodePaths;
 };
+}

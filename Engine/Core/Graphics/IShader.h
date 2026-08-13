@@ -1,6 +1,10 @@
 #pragma once
 #include <memory>
 #include <vector>
+#include <string>
+
+namespace Engine::Graphics
+{
 
 // ---------------------------------------------------------------------------
 // IShader — Opaque shader bytecode handle
@@ -57,3 +61,4 @@ public:
     // Get the last compilation error message
     virtual std::string GetLastError() const = 0;
 };
+}

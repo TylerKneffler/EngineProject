@@ -1,8 +1,11 @@
 #include "Core/Scene/Scene.h"
 
-Engine::Rendering::Lighting::BakeResult Scene::BakeLighting(
+namespace Engine::Scene
+{
+
+Engine::Model::BakeResult Scene::BakeLighting(
     const std::string& assetsDirectory, const std::string& sceneName,
-    const Engine::Rendering::Lighting::BakedLightingSettings& bakeSettings)
+    const Engine::Model::BakedLightingSettings& bakeSettings)
 {
     auto result = m_bakedLightingPipeline.Bake(
         *this, assetsDirectory, sceneName, bakeSettings);
@@ -15,4 +18,6 @@ void Scene::ClearBakedLighting()
     const uint32_t count = m_bakedLightingPipeline.Clear(*this);
     m_lightingBakeStatus = "Cleared " + std::to_string(count) +
         " object(s) to their original material(s). Generated assets were retained.";
+}
+
 }

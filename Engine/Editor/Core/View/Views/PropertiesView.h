@@ -6,14 +6,15 @@
 #include <chrono>
 #include <functional>
 
-class Scene;
+namespace Engine::Editor
+{
 struct EditorUiPrefabMenuResult;
 
 // ---------------------------------------------------------------------------
 // PropertiesView
 //
 // Defines the Properties panel showing the editable properties of the
-// currently selected Object and all its components.
+// currently selected Engine::Core::Object and all its components.
 //
 // Usage:
 //   propertiesView.SetSelectedObject(hierarchy.GetSelectedObject());
@@ -25,10 +26,10 @@ public:
     PropertiesView()  = default;
     ~PropertiesView() = default;
 
-    void Init(Scene* scene) { m_scene = scene; }
+    void Init(Engine::Scene::Scene* scene) { m_scene = scene; }
     void SetShowChildHierarchy(bool show) { m_showChildHierarchy = show; }
 
-    void SetSelectedObject(Object* obj)
+    void SetSelectedObject(Engine::Core::Object* obj)
     {
         if (obj != m_selectedObject)
         {
@@ -39,7 +40,7 @@ public:
         m_selectedObject = obj;
         m_assetInspector.Clear();
     }
-    Object* GetSelectedObject() const   { return m_selectedObject; }
+    Engine::Core::Object* GetSelectedObject() const   { return m_selectedObject; }
     void SetSelectedAsset(const std::string& path);
     const std::string& GetSelectedAsset() const
     {
@@ -67,9 +68,9 @@ private:
     void HandlePrefabMenu(const EditorUiPrefabMenuResult& menu);
     void LogAssetDrop(const std::string& message, bool error = false) const;
 
-    Object* m_selectedObject = nullptr;
-    Editor::ViewTemplates::AssetInspectorTemplate m_assetInspector;
-    Scene* m_scene = nullptr;
+    Engine::Core::Object* m_selectedObject = nullptr;
+    AssetInspectorTemplate m_assetInspector;
+    Engine::Scene::Scene* m_scene = nullptr;
     bool m_componentPickerOpen = false;
     bool m_showChildHierarchy = true;
     bool m_positionComponentPicker = false;
@@ -80,3 +81,4 @@ private:
     std::chrono::steady_clock::time_point m_skyboxRevealRequestedAt{};
     std::string m_skyboxRevealPath;
 };
+}

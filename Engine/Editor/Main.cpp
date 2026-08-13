@@ -66,9 +66,9 @@ namespace
             std::filesystem::is_regular_file(engineRoot / "CMakeLists.txt");
     }
 
-    ProjectSettings CreateEngineDevelopmentSettings()
+    Engine::Model::ProjectSettings CreateEngineDevelopmentSettings()
     {
-        ProjectSettings settings{};
+        Engine::Model::ProjectSettings settings{};
         settings.name = "Engine Sandbox";
         settings.version = "Development";
         settings.description = "Built-in project-free engine development environment";
@@ -94,7 +94,7 @@ namespace
         settings.gameRenderingAPI = "DirectX11";
         settings.clearColor = { 0.18f, 0.18f, 0.18f, 1.f };
         settings.targetFramerate = 60;
-        settings.aspectRatioMode = ProjectSettings::AspectRatioMode::Free;
+        settings.aspectRatioMode = Engine::Model::ProjectSettings::AspectRatioMode::Free;
         return settings;
     }
 }
@@ -109,7 +109,7 @@ int WINAPI wWinMain(
     _In_     int       /*nShowCmd*/)
 {
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
-    RegisterComponentType<Rotate>("Rotate");
+    Engine::Serialization::RegisterComponentType<Rotate>("Rotate");
 #endif
     HRESULT comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     WriteStartupLog("Editor startup", true);
@@ -124,7 +124,7 @@ int WINAPI wWinMain(
             (std::wstring(arguments[1]) == L"--import-model" ||
              std::wstring(arguments[1]) == L"--import-gltf"))
         {
-            const ModelImportResult imported = ModelImporter::Import(
+            const Engine::Model::ModelImportResult imported = Engine::Editor::ModelImporter::Import(
                 std::filesystem::path(arguments[2]).string(),
                 std::filesystem::path(arguments[3]).string());
             WriteStartupLog(imported.success
@@ -163,7 +163,7 @@ int WINAPI wWinMain(
         if (projects.size() == 1)
             return projects.front();
         for (const auto& project : projects)
-            ProjectLauncher::RememberProject(project);
+            Engine::Editor::ProjectLauncher::RememberProject(project);
         return {};
     };
 
@@ -204,8 +204,8 @@ int WINAPI wWinMain(
     };
     if (hasArgument(L"--project-hub"))
         projectFile.clear();
-    ProjectLoader projectLoader;
-    ProjectSettings projectSettings;
+    Engine::Core::ProjectLoader projectLoader;
+    Engine::Model::ProjectSettings projectSettings;
     const bool engineDevelopmentMode = projectFile.empty() &&
         !hasArgument(L"--project-hub") && IsEngineDevelopmentDirectory();
     if (engineDevelopmentMode)
@@ -222,7 +222,7 @@ int WINAPI wWinMain(
         while (true)
         {
             if (projectFile.empty())
-                projectFile = ProjectLauncher::Run(hInstance);
+                projectFile = Engine::Editor::ProjectLauncher::Run(hInstance);
             if (projectFile.empty())
             {
                 if (SUCCEEDED(comResult)) CoUninitialize();
@@ -239,7 +239,7 @@ int WINAPI wWinMain(
                     projectSettings.editorRenderingAPI = overrideApi;
                 WriteStartupLog("Project: " + projectFile);
                 WriteStartupLog("Editor renderer: " + projectSettings.editorRenderingAPI);
-                ProjectLauncher::RememberProject(projectFile);
+                Engine::Editor::ProjectLauncher::RememberProject(projectFile);
                 break;
             }
             catch (const std::exception& error)
@@ -252,19 +252,21 @@ int WINAPI wWinMain(
 
     // Create editor state and UI
     OutputDebugStringA("[Main] Creating EditorState...\n");
-    auto editorState = std::make_unique<EditorState>(hInstance, projectSettings, projectFile);
+    auto editorState = std::make_unique<Engine::Editor::EditorState>(
+        hInstance, projectSettings, projectFile);
     OutputDebugStringA("[Main] EditorState created, calling Init...\n");
     if (!editorState->Init())
     {
         WriteStartupLog("Editor initialization failed with " + projectSettings.editorRenderingAPI);
         std::string fallbackReason;
         if (projectSettings.editorRenderingAPI != "DirectX11" &&
-            RendererFactory::IsRendererAvailable("DirectX11", &fallbackReason))
+            ::Engine::Renderers::RendererFactory::IsRendererAvailable("DirectX11", &fallbackReason))
         {
             OutputDebugStringA(("[Main] " + projectSettings.editorRenderingAPI +
                 " editor initialization failed; retrying with DirectX11.\n").c_str());
             projectSettings.editorRenderingAPI = "DirectX11";
-            editorState = std::make_unique<EditorState>(hInstance, projectSettings, projectFile);
+            editorState = std::make_unique<Engine::Editor::EditorState>(
+                hInstance, projectSettings, projectFile);
             if (!editorState->Init())
             {
                 WriteStartupLog("DirectX11 fallback initialization failed");
@@ -277,16 +279,16 @@ int WINAPI wWinMain(
     WriteStartupLog("Editor initialized successfully");
     OutputDebugStringA("[Main] EditorState initialized\n");
 
-    Window* window = editorState->GetWindow();
-    IEditorRenderer* renderer = editorState->GetRenderer();
-    Scene* scene = editorState->GetScene();
+    Engine::Core::Window* window = editorState->GetWindow();
+    Engine::Renderers::IEditorRenderer* renderer = editorState->GetRenderer();
+    Engine::Scene::Scene* scene = editorState->GetScene();
     if (!window || !renderer || !scene)
     {
         WriteStartupLog("Editor did not create all required core components");
         return 1;
     }
 
-    auto uiBackend = CreateEditorUiBackend();
+    auto uiBackend = Engine::Editor::CreateEditorUiBackend();
     if (!uiBackend->Initialize(window->GetHWND(), *renderer))
     {
         WriteStartupLog("UI backend initialization failed");
@@ -307,9 +309,9 @@ int WINAPI wWinMain(
     }
 
     OutputDebugStringA("[Main] Creating GameBuildManager...\n");
-    auto gameBuildManager = std::make_unique<GameBuildManager>(
+    auto gameBuildManager = std::make_unique<Engine::Editor::GameBuildManager>(
         editorState->GetConsole(), projectFile, projectSettings);
-    auto hotReload = std::make_unique<EditorHotReload>(*editorState,
+    auto hotReload = std::make_unique<Engine::Editor::EditorHotReload>(*editorState,
         editorState->GetConsole(), projectSettings.scriptsDirectory,
         ENGINE_BUILD_DIR, PROJECT_SCRIPTS_PATH);
     hotReload->BeforeApply = [&]()
@@ -346,7 +348,7 @@ int WINAPI wWinMain(
     QueryPerformanceCounter(&lastCounter);
 
     // Play state
-    PlayState playState = PlayState::Stopped;
+    Engine::Editor::PlayState playState = Engine::Editor::PlayState::Stopped;
     OutputDebugStringA("[Main] Frame timing setup complete\n");
 
     // -----------------------------------------------------------------------
@@ -368,7 +370,7 @@ int WINAPI wWinMain(
         {
             if (panel->NeedsRender())
             {
-                class View* view = reinterpret_cast<class View*>(panel.get());
+                Engine::Editor::View* view = reinterpret_cast<Engine::Editor::View*>(panel.get());
                 view->Resize(renderer->GetNativeDeviceHandle(), w, h);
             }
         }
@@ -395,12 +397,12 @@ int WINAPI wWinMain(
         lastCounter = now;
 
         // Update build manager
-        PostBuildAction postBuildAction;
+        Engine::Editor::PostBuildAction postBuildAction;
         gameBuildManager->Update(playState, postBuildAction);
         hotReload->Update(window->IsFocused());
 
         // Tick game objects while playing
-        if (playState == PlayState::Playing)
+        if (playState == Engine::Editor::PlayState::Playing)
         {
             scene->Update(dt);
         }
@@ -424,7 +426,7 @@ int WINAPI wWinMain(
             {
                 if (!panel) continue;
                 if (!panel->NeedsRender() || !panel->IsOpen()) continue;
-                class View* view = dynamic_cast<class View*>(panel.get());
+                Engine::Editor::View* view = dynamic_cast<Engine::Editor::View*>(panel.get());
                 if (!view) continue;
                 
                 void* cmdList = renderer->GetCurrentCommandBuffer();

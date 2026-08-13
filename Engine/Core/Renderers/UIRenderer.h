@@ -1,20 +1,23 @@
 #pragma once
+#include "Core/Graphics/IGraphicsContext.h"
+#include "Core/Graphics/IGraphicsProvider.h"
 
-class IGraphicsContext;
-class IGraphicsProvider;
-class Scene;
+namespace Engine::Scene { class Scene; }
 
+namespace Engine::Renderers
+{
 class UIRenderer
 {
 public:
     UIRenderer();
     ~UIRenderer();
 
-    void Initialize(IGraphicsProvider* graphicsProvider);
-    void Render(Scene& scene, IGraphicsContext* context, float viewportAspect);
+    void Initialize(Engine::Graphics::IGraphicsProvider* graphicsProvider);
+    void Render(Engine::Scene::Scene& scene, Engine::Graphics::IGraphicsContext* context, float viewportAspect);
     bool IsReady() const;
 
 private:
     struct Impl;
     Impl* m_impl = nullptr;
 };
+}

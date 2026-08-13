@@ -11,6 +11,8 @@
 #include <unordered_set>
 #include <glm/gtc/matrix_inverse.hpp>
 
+namespace Engine::Editor
+{
 namespace
 {
 constexpr EditorUiColor kXColor{ 0.95f, 0.20f, 0.18f, 1.f };
@@ -117,7 +119,7 @@ void DrawCameraIcon(IEditorUi& ui, EditorUiVec2 center, bool selected)
         { center.x + 10.f, center.y + 6.f }, color);
 }
 
-bool SceneContains(const Scene& scene, const Object* object)
+bool SceneContains(const Engine::Scene::Scene& scene, const Engine::Core::Object* object)
 {
     for (const auto& candidate : scene.GetObjects())
         if (candidate.get() == object)
@@ -157,10 +159,10 @@ void DrawBoneShape(IEditorUi& ui, EditorUiVec2 root, EditorUiVec2 tip,
 }
 
 EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
-    Scene& scene, IEditorUi& ui, const EditorUiViewportInput& input)
+    Engine::Scene::Scene& scene, IEditorUi& ui, const EditorUiViewportInput& input)
 {
     EditorGizmoResult result{};
-    const Camera* camera = scene.editorCamera.GetComponent<Camera>();
+    const Engine::Components::Camera* camera = scene.editorCamera.GetComponent<Engine::Components::Camera>();
     if (!camera || input.available.x <= 1.f || input.available.y <= 1.f)
         return result;
 
@@ -173,33 +175,33 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
     const glm::mat4 viewProjection =
         camera->GetProjectionMatrix(input.available.x / input.available.y) *
         camera->GetViewMatrix();
-    Object* selected = scene.GetSelectedObject();
-    Object* selectedPrefabRoot = selected
+    Engine::Core::Object* selected = scene.GetSelectedObject();
+    Engine::Core::Object* selectedPrefabRoot = selected
         ? selected->GetPrefabInstanceRoot() : nullptr;
 
-    Object* boneHit = nullptr;
+    Engine::Core::Object* boneHit = nullptr;
     float boneHitDistance = FLT_MAX;
-    std::set<std::pair<Object*, Object*>> drawnBones;
-    std::unordered_set<Object*> drawnRoots;
-    std::unordered_set<Object*> visibleSkeletonJoints;
+    std::set<std::pair<Engine::Core::Object*, Engine::Core::Object*>> drawnBones;
+    std::unordered_set<Engine::Core::Object*> drawnRoots;
+    std::unordered_set<Engine::Core::Object*> visibleSkeletonJoints;
     for (const auto& ownerPointer : scene.GetObjects())
     {
-        Object* owner = ownerPointer.get();
+        Engine::Core::Object* owner = ownerPointer.get();
         if (!owner || !owner->IsEnabledInHierarchy()) continue;
-        for (Component* component : owner->Components)
+        for (Engine::Core::Component* component : owner->Components)
         {
-            auto* skeleton = dynamic_cast<Skeleton*>(component);
+            auto* skeleton = dynamic_cast<Engine::Components::Skeleton*>(component);
             if (!skeleton || !skeleton->showBones) continue;
-            std::unordered_set<Object*> joints;
-            for (Object* joint : skeleton->ResolveJoints())
+            std::unordered_set<Engine::Core::Object*> joints;
+            for (Engine::Core::Object* joint : skeleton->ResolveJoints())
                 if (joint)
                 {
                     joints.insert(joint);
                     visibleSkeletonJoints.insert(joint);
                 }
-            for (Object* joint : joints)
+            for (Engine::Core::Object* joint : joints)
             {
-                Object* parentJoint = joint->Parent;
+                Engine::Core::Object* parentJoint = joint->Parent;
                 while (parentJoint && joints.find(parentJoint) == joints.end())
                     parentJoint = parentJoint->Parent;
 
@@ -256,15 +258,15 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         }
     }
 
-    Object* iconHit = nullptr;
+    Engine::Core::Object* iconHit = nullptr;
     float iconHitDistance = FLT_MAX;
     for (const auto& objectPointer : scene.GetObjects())
     {
-        Object* object = objectPointer.get();
+        Engine::Core::Object* object = objectPointer.get();
         if (!object || !object->IsEnabledInHierarchy())
             continue;
-        const bool hasLight = object->GetComponent<Light>() != nullptr;
-        const bool hasCamera = object->GetComponent<Camera>() != nullptr;
+        const bool hasLight = object->GetComponent<Engine::Components::Light>() != nullptr;
+        const bool hasCamera = object->GetComponent<Engine::Components::Camera>() != nullptr;
         if (!hasLight && !hasCamera)
             continue;
 
@@ -402,4 +404,5 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
     }
 
     return result;
+}
 }

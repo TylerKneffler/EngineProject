@@ -8,13 +8,15 @@
 #include <memory>
 #include <d3d12.h>
 
+namespace Engine::Renderers
+{
 // ---------------------------------------------------------------------------
 // D3D12GraphicsProvider — Provides graphics services for D3D12 rendering
 //
 // This is owned by D3D12EditorRenderer and D3D12GameRenderer and provides
 // access to all graphics factories needed by Scene, Mesh, View, etc.
 // ---------------------------------------------------------------------------
-class D3D12GraphicsProvider : public IGraphicsProvider
+class D3D12GraphicsProvider : public Engine::Graphics::IGraphicsProvider
 {
 public:
     D3D12GraphicsProvider(
@@ -22,11 +24,11 @@ public:
         ID3D12CommandQueue* commandQueue,
         ID3D12RootSignature* rootSig);
 
-    IShaderCompiler* GetShaderCompiler() override { return m_shaderCompiler.get(); }
-    IGraphicsBufferFactory* GetBufferFactory() override { return m_bufferFactory.get(); }
-    IPipelineStateFactory* GetPipelineStateFactory() override { return m_pipelineFactory.get(); }
-    IGraphicsContextFactory* GetContextFactory() override { return m_contextFactory.get(); }
-    IGraphicsTextureFactory* GetTextureFactory() override { return m_textureFactory.get(); }
+    Engine::Graphics::IShaderCompiler* GetShaderCompiler() override { return m_shaderCompiler.get(); }
+    Engine::Graphics::IGraphicsBufferFactory* GetBufferFactory() override { return m_bufferFactory.get(); }
+    Engine::Graphics::IPipelineStateFactory* GetPipelineStateFactory() override { return m_pipelineFactory.get(); }
+    Engine::Graphics::IGraphicsContextFactory* GetContextFactory() override { return m_contextFactory.get(); }
+    Engine::Graphics::IGraphicsTextureFactory* GetTextureFactory() override { return m_textureFactory.get(); }
 
 private:
     std::unique_ptr<D3D12ShaderCompiler> m_shaderCompiler;
@@ -38,3 +40,4 @@ private:
 
 Microsoft::WRL::ComPtr<ID3D12RootSignature>
 CreateD3D12MaterialRootSignature(ID3D12Device* device);
+}

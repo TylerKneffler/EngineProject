@@ -1,16 +1,18 @@
 #include "Core/Scene/Settings/SceneSettingsSerialization.h"
 
+namespace Engine::Scene
+{
 namespace
 {
-    JsonValue Vec3ToJson(const glm::vec3& value)
+    Engine::Serialization::JsonValue Vec3ToJson(const glm::vec3& value)
     {
-        return JsonValue::MakeArray()
-            .Push(JsonValue(value.x))
-            .Push(JsonValue(value.y))
-            .Push(JsonValue(value.z));
+        return Engine::Serialization::JsonValue::MakeArray()
+            .Push(Engine::Serialization::JsonValue(value.x))
+            .Push(Engine::Serialization::JsonValue(value.y))
+            .Push(Engine::Serialization::JsonValue(value.z));
     }
 
-    glm::vec3 Vec3FromJson(const JsonValue& value, const glm::vec3& fallback)
+    glm::vec3 Vec3FromJson(const Engine::Serialization::JsonValue& value, const glm::vec3& fallback)
     {
         if (!value.IsArray() || value.ArraySize() < 3)
             return fallback;
@@ -22,22 +24,22 @@ namespace
     }
 }
 
-JsonValue SerializeSceneSettings(const SceneSettings& settings)
+Engine::Serialization::JsonValue SerializeSceneSettings(const Engine::Model::SceneSettings& settings)
 {
-    JsonValue value = JsonValue::MakeObject();
-    value.Set("showGrid", JsonValue(settings.showGrid));
-    value.Set("gridHalfSize", JsonValue(settings.gridHalfSize));
-    value.Set("gridCellSize", JsonValue(settings.gridCellSize));
-    value.Set("gridOpacity", JsonValue(settings.gridOpacity));
-    value.Set("gridFadeDistance", JsonValue(settings.gridFadeDistance));
+    Engine::Serialization::JsonValue value = Engine::Serialization::JsonValue::MakeObject();
+    value.Set("showGrid", Engine::Serialization::JsonValue(settings.showGrid));
+    value.Set("gridHalfSize", Engine::Serialization::JsonValue(settings.gridHalfSize));
+    value.Set("gridCellSize", Engine::Serialization::JsonValue(settings.gridCellSize));
+    value.Set("gridOpacity", Engine::Serialization::JsonValue(settings.gridOpacity));
+    value.Set("gridFadeDistance", Engine::Serialization::JsonValue(settings.gridFadeDistance));
     value.Set("gridColor", Vec3ToJson(settings.gridColor));
     value.Set("gridOriginColor", Vec3ToJson(settings.gridOriginColor));
     value.Set("ambientColor", Vec3ToJson(settings.ambientColor));
-    value.Set("skyboxTexture", JsonValue(settings.skyboxTexture));
+    value.Set("skyboxTexture", Engine::Serialization::JsonValue(settings.skyboxTexture));
     return value;
 }
 
-void DeserializeSceneSettings(SceneSettings& settings, const JsonValue& value)
+void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engine::Serialization::JsonValue& value)
 {
     if (!value.IsObject())
         return;
@@ -55,4 +57,5 @@ void DeserializeSceneSettings(SceneSettings& settings, const JsonValue& value)
     settings.skyboxTexture = value.Has("skyboxTexture")
         ? value["skyboxTexture"].AsString()
         : std::string{};
+}
 }

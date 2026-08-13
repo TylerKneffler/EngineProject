@@ -6,6 +6,8 @@
 #include <string>
 #include <chrono>
 
+namespace Engine::Core
+{
 class Project
 {
     private:
@@ -32,3 +34,4 @@ class Project
     std::string skyboxColor;
     std::string skyboxTexturePath;
 };
+}

@@ -14,7 +14,8 @@
 #include <filesystem>
 #include <memory>
 
-using namespace Editor::ViewTemplates;
+namespace Engine::Editor
+{
 
 std::string PropertiesView::HandleWindowAssetDrop(IEditorUi& ui)
 {
@@ -41,15 +42,15 @@ std::string PropertiesView::HandleWindowAssetDrop(IEditorUi& ui)
         return {};
     }
 
-    const std::string extension = Editor::ViewTemplates::LowerAssetExtension(path);
+    const std::string extension = Engine::Editor::LowerAssetExtension(path);
     if (extension == ".mesh" || extension == ".obj")
         return "Mesh Preview";
     if (extension == ".material" || extension == ".mat" ||
-        Editor::ViewTemplates::IsTextureAssetExtension(extension))
+        Engine::Editor::IsTextureAssetExtension(extension))
         return "Material Preview";
     if (extension == ".spriteanim")
         return "Sprite Animation Preview";
-    if (Editor::ViewTemplates::IsAudioAssetExtension(extension))
+    if (Engine::Editor::IsAudioAssetExtension(extension))
         return "Audio Source Preview";
     if (extension == ".spritesheet")
         return "Sprite Sheet Preview";
@@ -81,12 +82,12 @@ bool PropertiesView::AddComponentFromAsset(const std::string& path, std::string&
         return false;
     }
 
-    const std::string extension = Editor::ViewTemplates::LowerAssetExtension(path);
+    const std::string extension = Engine::Editor::LowerAssetExtension(path);
     try
     {
         if (extension == ".mesh" || extension == ".obj")
         {
-            auto mesh = std::make_unique<Mesh>();
+            auto mesh = std::make_unique<Engine::Components::Mesh>();
             mesh->LoadFromFile(path);
             mesh->OnAfterDeserialize(m_scene ? m_scene->GetGraphicsProvider() : nullptr);
             ReplaceOrAddComponent(*m_selectedObject, mesh.release());
@@ -96,7 +97,7 @@ bool PropertiesView::AddComponentFromAsset(const std::string& path, std::string&
 
         if (extension == ".material" || extension == ".mat")
         {
-            auto material = std::make_unique<Material>();
+            auto material = std::make_unique<Engine::Components::Material>();
             if (!material->LoadFromFile(path))
             {
                 message = "[Properties] Failed to read material asset: " + path;
@@ -110,7 +111,7 @@ bool PropertiesView::AddComponentFromAsset(const std::string& path, std::string&
 
         if (extension == ".spriteanim")
         {
-            auto manager = std::make_unique<SpriteAnimationManager>();
+            auto manager = std::make_unique<Engine::Components::SpriteAnimationManager>();
             if (!manager->LoadFromFile(path))
             {
                 message = "[Properties] Failed to read sprite animation asset: " + path;
@@ -119,13 +120,13 @@ bool PropertiesView::AddComponentFromAsset(const std::string& path, std::string&
             manager->OnAfterDeserialize(
                 m_scene ? m_scene->GetGraphicsProvider() : nullptr);
             ReplaceOrAddComponent(*m_selectedObject, manager.release());
-            Sprite* sprite = m_selectedObject->GetComponent<Sprite>();
+            Engine::Components::Sprite* sprite = m_selectedObject->GetComponent<Engine::Components::Sprite>();
             if (!sprite)
-                sprite = m_selectedObject->AddComponent<Sprite>();
+                sprite = m_selectedObject->AddComponent<Engine::Components::Sprite>();
             sprite->SetAnimationManager(
-                m_selectedObject->GetComponent<SpriteAnimationManager>());
+                m_selectedObject->GetComponent<Engine::Components::SpriteAnimationManager>());
             sprite->Prepare(m_scene ? m_scene->GetGraphicsProvider() : nullptr);
-            message = "[Properties] Assigned Sprite Animation from: " + path;
+            message = "[Properties] Assigned Engine::Components::Sprite Animation from: " + path;
             return true;
         }
 
@@ -135,22 +136,22 @@ bool PropertiesView::AddComponentFromAsset(const std::string& path, std::string&
             return false;
         }
 
-        if (Editor::ViewTemplates::IsTextureAssetExtension(extension))
+        if (Engine::Editor::IsTextureAssetExtension(extension))
         {
-            Material* material = m_selectedObject->GetComponent<Material>();
+            Engine::Components::Material* material = m_selectedObject->GetComponent<Engine::Components::Material>();
             if (!material)
-                material = m_selectedObject->AddComponent<Material>();
+                material = m_selectedObject->AddComponent<Engine::Components::Material>();
             material->SetBaseColorTexture(path);
             material->PrepareTextures(m_scene ? m_scene->GetGraphicsProvider() : nullptr);
             message = "[Properties] Assigned texture as Material base color: " + path;
             return true;
         }
 
-        if (Editor::ViewTemplates::IsAudioAssetExtension(extension))
+        if (Engine::Editor::IsAudioAssetExtension(extension))
         {
-            AudioSource* source = m_selectedObject->GetComponent<AudioSource>();
+            Engine::Components::AudioSource* source = m_selectedObject->GetComponent<Engine::Components::AudioSource>();
             if (!source)
-                source = m_selectedObject->AddComponent<AudioSource>();
+                source = m_selectedObject->AddComponent<Engine::Components::AudioSource>();
             source->audioPath = path;
             message = "[Properties] Assigned Audio Source from: " + path;
             return true;
@@ -179,4 +180,5 @@ bool PropertiesView::AddComponentFromAsset(const std::string& path, std::string&
 
     message = "[Properties] No compatible component mapping for asset: " + path;
     return false;
+}
 }

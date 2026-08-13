@@ -5,6 +5,8 @@
 // A reusable 2D animation clip. The .spriteanim file selects an animation
 // from a .spritesheet and supplies playback settings. It is intentionally
 // separate from future skeletal/3D animation assets.
+namespace Engine::Rendering
+{
 class SpriteAnimationAsset
 {
 public:
@@ -23,3 +25,5 @@ public:
 private:
     std::string m_path;
 };
+}
+

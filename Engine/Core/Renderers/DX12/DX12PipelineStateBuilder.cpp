@@ -8,12 +8,14 @@
 // D3D12PipelineStateBuilder Implementation
 // ---------------------------------------------------------------------------
 
+namespace Engine::Renderers
+{
 D3D12PipelineStateBuilder::D3D12PipelineStateBuilder(ID3D12Device* device, ID3D12RootSignature* rootSig)
     : m_device(device), m_rootSig(rootSig)
 {
 }
 
-IPipelineStateBuilder& D3D12PipelineStateBuilder::SetVertexShader(const IShader* shader)
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetVertexShader(const Engine::Graphics::IShader* shader)
 {
     if (shader)
     {
@@ -25,7 +27,7 @@ IPipelineStateBuilder& D3D12PipelineStateBuilder::SetVertexShader(const IShader*
     return *this;
 }
 
-IPipelineStateBuilder& D3D12PipelineStateBuilder::SetPixelShader(const IShader* shader)
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetPixelShader(const Engine::Graphics::IShader* shader)
 {
     if (shader)
     {
@@ -39,91 +41,91 @@ IPipelineStateBuilder& D3D12PipelineStateBuilder::SetPixelShader(const IShader* 
 
 
 
-IPipelineStateBuilder& D3D12PipelineStateBuilder::SetFillMode(bool wireframe)
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetFillMode(bool wireframe)
 {
     m_fillMode = wireframe ? D3D12_FILL_MODE_WIREFRAME : D3D12_FILL_MODE_SOLID;
     return *this;
 }
 
-IPipelineStateBuilder& D3D12PipelineStateBuilder::SetCullMode(bool cullBackFaces)
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetCullMode(bool cullBackFaces)
 {
     m_cullMode = cullBackFaces ? D3D12_CULL_MODE_BACK : D3D12_CULL_MODE_NONE;
     return *this;
 }
 
-IPipelineStateBuilder& D3D12PipelineStateBuilder::SetFrontCounterClockwise(bool ccw)
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetFrontCounterClockwise(bool ccw)
 {
     m_frontCCW = ccw ? TRUE : FALSE;
     return *this;
 }
 
-IPipelineStateBuilder& D3D12PipelineStateBuilder::SetDepthClipEnable(bool enable)
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetDepthClipEnable(bool enable)
 {
     m_depthClip = enable ? TRUE : FALSE;
     return *this;
 }
 
-IPipelineStateBuilder& D3D12PipelineStateBuilder::SetBlendEnable(bool enable)
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetBlendEnable(bool enable)
 {
     m_blendEnable = enable ? TRUE : FALSE;
     return *this;
 }
 
-IPipelineStateBuilder& D3D12PipelineStateBuilder::SetSrcBlend(int mode)
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetSrcBlend(int mode)
 {
     m_srcBlend = ConvertBlendMode(mode);
     return *this;
 }
 
-IPipelineStateBuilder& D3D12PipelineStateBuilder::SetDestBlend(int mode)
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetDestBlend(int mode)
 {
     m_destBlend = ConvertBlendMode(mode);
     return *this;
 }
 
-IPipelineStateBuilder& D3D12PipelineStateBuilder::SetBlendOp(int op)
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetBlendOp(int op)
 {
     m_blendOp = ConvertBlendOp(op);
     return *this;
 }
 
-IPipelineStateBuilder& D3D12PipelineStateBuilder::SetSrcBlendAlpha(int mode)
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetSrcBlendAlpha(int mode)
 {
     m_srcBlendAlpha = ConvertBlendMode(mode);
     return *this;
 }
 
-IPipelineStateBuilder& D3D12PipelineStateBuilder::SetDestBlendAlpha(int mode)
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetDestBlendAlpha(int mode)
 {
     m_destBlendAlpha = ConvertBlendMode(mode);
     return *this;
 }
 
-IPipelineStateBuilder& D3D12PipelineStateBuilder::SetBlendOpAlpha(int op)
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetBlendOpAlpha(int op)
 {
     m_blendOpAlpha = ConvertBlendOp(op);
     return *this;
 }
 
-IPipelineStateBuilder& D3D12PipelineStateBuilder::SetDepthEnable(bool enable)
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetDepthEnable(bool enable)
 {
     m_depthEnable = enable ? TRUE : FALSE;
     return *this;
 }
 
-IPipelineStateBuilder& D3D12PipelineStateBuilder::SetDepthWriteEnable(bool enable)
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetDepthWriteEnable(bool enable)
 {
     m_depthWriteEnable = enable ? TRUE : FALSE;
     return *this;
 }
 
-IPipelineStateBuilder& D3D12PipelineStateBuilder::SetDepthFunc(int func)
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetDepthFunc(int func)
 {
     m_depthFunc = ConvertComparisonFunc(func);
     return *this;
 }
 
-IPipelineStateBuilder& D3D12PipelineStateBuilder::SetInputLayout(const VertexElement* elements, uint32_t elementCount)
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetInputLayout(const VertexElement* elements, uint32_t elementCount)
 {
     m_inputLayout.clear();
     for (uint32_t i = 0; i < elementCount; ++i)
@@ -142,7 +144,7 @@ IPipelineStateBuilder& D3D12PipelineStateBuilder::SetInputLayout(const VertexEle
     return *this;
 }
 
-IPipelineStateBuilder& D3D12PipelineStateBuilder::SetPrimitiveTopology(PrimitiveTopology topology)
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetPrimitiveTopology(PrimitiveTopology topology)
 {
     switch (topology)
     {
@@ -165,14 +167,14 @@ IPipelineStateBuilder& D3D12PipelineStateBuilder::SetPrimitiveTopology(Primitive
     return *this;
 }
 
-IPipelineStateBuilder& D3D12PipelineStateBuilder::SetRenderTargetFormat(int format, int depthFormat)
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetRenderTargetFormat(int format, int depthFormat)
 {
     m_rtFormat = static_cast<DXGI_FORMAT>(format);
     m_dsFormat = depthFormat >= 0 ? static_cast<DXGI_FORMAT>(depthFormat) : DXGI_FORMAT_D32_FLOAT;
     return *this;
 }
 
-std::unique_ptr<IPipelineState> D3D12PipelineStateBuilder::Build()
+std::unique_ptr<Engine::Graphics::IPipelineState> D3D12PipelineStateBuilder::Build()
 {
     if (!m_device || !m_rootSig)
     {
@@ -256,7 +258,7 @@ std::unique_ptr<IPipelineState> D3D12PipelineStateBuilder::Build()
         return nullptr;
     }
 
-    return std::unique_ptr<IPipelineState>(std::make_unique<D3D12PipelineState>(pso));
+    return std::unique_ptr<Engine::Graphics::IPipelineState>(std::make_unique<D3D12PipelineState>(pso));
 }
 
 D3D12_BLEND D3D12PipelineStateBuilder::ConvertBlendMode(int mode) const
@@ -310,7 +312,8 @@ D3D12_COMPARISON_FUNC D3D12PipelineStateBuilder::ConvertComparisonFunc(int func)
 // D3D12PipelineStateFactory Implementation
 // ---------------------------------------------------------------------------
 
-std::unique_ptr<IPipelineStateBuilder> D3D12PipelineStateFactory::CreateBuilder()
+std::unique_ptr<Engine::Graphics::IPipelineStateBuilder> D3D12PipelineStateFactory::CreateBuilder()
 {
     return std::make_unique<D3D12PipelineStateBuilder>(m_device, m_rootSig);
+}
 }

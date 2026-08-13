@@ -1,6 +1,8 @@
 #include "ViewFactory.h"
 #include <stdexcept>
 
+namespace Engine::Editor
+{
 // ---------------------------------------------------------------------------
 // Static singleton type registry
 // ---------------------------------------------------------------------------
@@ -12,9 +14,9 @@ const std::unordered_set<std::string> ViewFactory::kSingletonTypes =
 // ---------------------------------------------------------------------------
 // Constructor.
 // ---------------------------------------------------------------------------
-ViewFactory::ViewFactory(IEditorRenderer*    renderer,
-                         Scene*              scene,
-                         const ProjectSettings& settings)
+ViewFactory::ViewFactory(::Engine::Renderers::IEditorRenderer*    renderer,
+                         Engine::Scene::Scene*              scene,
+                         const Engine::Model::ProjectSettings& settings)
     : m_renderer(renderer)
     , m_scene(scene)
     , m_settings(settings)
@@ -194,7 +196,7 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
 }
 
 std::unique_ptr<SceneView> ViewFactory::CreateSceneView(
-    Scene* scene, const std::string& title)
+    Engine::Scene::Scene* scene, const std::string& title)
 {
     if (!scene || !m_renderer || !CanCreate3DView())
         return nullptr;
@@ -210,4 +212,5 @@ std::unique_ptr<SceneView> ViewFactory::CreateSceneView(
     view->Init(deviceHandle, 1280, 720, handles.first, handles.second,
         slot, scene, m_settings);
     return view;
+}
 }

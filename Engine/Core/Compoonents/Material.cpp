@@ -6,6 +6,8 @@
 #include <filesystem>
 #include <fstream>
 
+namespace Engine::Components
+{
 Material::Material()
 {
     SetTypeName(COMPONENT_TYPE_NAME(Material));
@@ -36,11 +38,14 @@ Material::Material()
 
 namespace
 {
-    JsonValue J3(const glm::vec3& v)
+    Engine::Serialization::JsonValue J3(const glm::vec3& v)
     {
-        return JsonValue::MakeArray().Push(JsonValue(v.x)).Push(JsonValue(v.y)).Push(JsonValue(v.z));
+        return Engine::Serialization::JsonValue::MakeArray()
+            .Push(Engine::Serialization::JsonValue(v.x))
+            .Push(Engine::Serialization::JsonValue(v.y))
+            .Push(Engine::Serialization::JsonValue(v.z));
     }
-    glm::vec3 from3(const JsonValue& v, glm::vec3 def = {})
+    glm::vec3 from3(const Engine::Serialization::JsonValue& v, glm::vec3 def = {})
     {
         if (!v.IsArray() || v.ArraySize() < 3) return def;
         return { v.ArrayAt(0).AsFloat(), v.ArrayAt(1).AsFloat(), v.ArrayAt(2).AsFloat() };
@@ -67,7 +72,7 @@ bool Material::LoadFromFile(const std::string& path)
 {
     try
     {
-        const JsonValue root = JsonParseFile(path);
+        const JsonValue root = Engine::Serialization::JsonParseFile(path);
         baseColorTexture.reset();
         metallicRoughnessTexture.reset();
         normalTexture.reset();
@@ -243,7 +248,7 @@ void Material::Validate()
     }
 }
 
-JsonValue Material::Serialize() const
+Material::JsonValue Material::Serialize() const
 {
     JsonValue value = Component::Serialize();
     value.Set("materialAsset", JsonValue(m_filePath));
@@ -274,4 +279,5 @@ void Material::Deserialize(const JsonValue& value)
     if (value.Has("emissiveTexture"))
         SetEmissiveTexture(value["emissiveTexture"].AsString());
     Validate();
+}
 }

@@ -4,10 +4,12 @@
 #include <functional>
 #include <vector>
 
-class Scene;
-class Object;
-class Component;
-class IGraphicsProvider;
+namespace Engine::Core { class Component; class Object; }
+namespace Engine::Scene { class Scene; }
+namespace Engine::Graphics { class IGraphicsProvider; }
+
+namespace Engine::Serialization
+{
 
 // ---------------------------------------------------------------------------
 // SceneSerializer — saves and loads Scene objects to/from scene XML files.
@@ -51,6 +53,11 @@ class IGraphicsProvider;
 class SceneSerializer
 {
 public:
+    using Component = Engine::Core::Component;
+    using Object = Engine::Core::Object;
+    using Scene = Engine::Scene::Scene;
+    using IGraphicsProvider = Engine::Graphics::IGraphicsProvider;
+
     // Factory function: creates a default-constructed Component of the named type.
     using Factory = std::function<Component*()>;
 
@@ -120,12 +127,13 @@ private:
 template<typename T>
 inline void RegisterComponentType()
 {
-    SceneSerializer::Register([]() -> Component* { return new T(); });
+    SceneSerializer::Register([]() -> Engine::Core::Component* { return new T(); });
 }
 
 // Backward-compatible overload for components that need a serialized alias.
 template<typename T>
 inline void RegisterComponentType(const std::string& typeName)
 {
-    SceneSerializer::Register(typeName, []() -> Component* { return new T(); });
+    SceneSerializer::Register(typeName, []() -> Engine::Core::Component* { return new T(); });
+}
 }

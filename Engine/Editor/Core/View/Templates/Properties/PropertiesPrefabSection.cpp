@@ -4,6 +4,8 @@
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Scene/Scene.h"
 
+namespace Engine::Editor
+{
 bool PropertiesView::CanEditSelectedObject() const
 {
     return m_selectedObject && !m_selectedObject->IsPartOfPrefabInstance();
@@ -11,7 +13,7 @@ bool PropertiesView::CanEditSelectedObject() const
 
 void PropertiesView::UnpackSelectedPrefab()
 {
-    Object* prefabRoot = m_selectedObject
+    Engine::Core::Object* prefabRoot = m_selectedObject
         ? m_selectedObject->GetPrefabInstanceRoot()
         : nullptr;
     if (!prefabRoot || !prefabRoot->Prefab)
@@ -27,10 +29,10 @@ void PropertiesView::UnpackSelectedPrefab()
 
 void PropertiesView::ApplySelectedPrefabOverrides(bool includeRootTransform)
 {
-    Object* prefabRoot = m_selectedObject
+    Engine::Core::Object* prefabRoot = m_selectedObject
         ? m_selectedObject->GetPrefabInstanceRoot() : nullptr;
     if (!prefabRoot) return;
-    if (SceneSerializer::ApplyPrefabOverridesToAsset(*prefabRoot,
+    if (Engine::Serialization::SceneSerializer::ApplyPrefabOverridesToAsset(*prefabRoot,
         includeRootTransform, m_scene ? m_scene->GetGraphicsProvider() : nullptr))
     {
         LogAssetDrop(includeRootTransform
@@ -44,10 +46,10 @@ void PropertiesView::ApplySelectedPrefabOverrides(bool includeRootTransform)
 
 void PropertiesView::RevertSelectedPrefabOverrides()
 {
-    Object* prefabRoot = m_selectedObject
+    Engine::Core::Object* prefabRoot = m_selectedObject
         ? m_selectedObject->GetPrefabInstanceRoot() : nullptr;
     if (!prefabRoot) return;
-    if (SceneSerializer::RevertPrefabOverrides(*prefabRoot,
+    if (Engine::Serialization::SceneSerializer::RevertPrefabOverrides(*prefabRoot,
         m_scene ? m_scene->GetGraphicsProvider() : nullptr))
     {
         LogAssetDrop("[Properties] Reverted prefab instance overrides.");
@@ -62,4 +64,5 @@ void PropertiesView::HandlePrefabMenu(const EditorUiPrefabMenuResult& menu)
     if (menu.applyAllRequested) ApplySelectedPrefabOverrides(true);
     if (menu.revertRequested) RevertSelectedPrefabOverrides();
     if (menu.unpackRequested) UnpackSelectedPrefab();
+}
 }

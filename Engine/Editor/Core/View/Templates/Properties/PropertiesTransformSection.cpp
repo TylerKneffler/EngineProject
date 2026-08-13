@@ -2,16 +2,18 @@
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Serialization/SceneSerializer.h"
 
+namespace Engine::Editor
+{
 void PropertiesView::DrawTransform(IEditorUi& ui)
 {
-    Transform& t = m_selectedObject->transform;
-    Object* prefabRoot = m_selectedObject->GetPrefabInstanceRoot();
+    Engine::Components::Transform& t = m_selectedObject->transform;
+    Engine::Core::Object* prefabRoot = m_selectedObject->GetPrefabInstanceRoot();
 
     const bool transformOpen = ui.CollapsingHeader("Transform");
     EditorUiContextMenuResult menu;
     if (prefabRoot)
         HandlePrefabMenu(ui.PrefabOverrideMenu(&t,
-            SceneSerializer::HasPrefabOverrides(*prefabRoot, true)));
+            Engine::Serialization::SceneSerializer::HasPrefabOverrides(*prefabRoot, true)));
     else
         menu = ui.ContextMenu(&t, "Add Component", nullptr, false);
     if (menu.addRequested)
@@ -33,4 +35,5 @@ void PropertiesView::DrawTransform(IEditorUi& ui)
             if (OnComponentsChanged) OnComponentsChanged();
         }
     }
+}
 }

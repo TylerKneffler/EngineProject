@@ -4,6 +4,8 @@
 #include <memory>
 #include <functional>
 
+namespace Engine::Editor
+{
 // ---------------------------------------------------------------------------
 // View — Graphics-agnostic base for editor panels
 //
@@ -19,7 +21,7 @@ public:
     virtual ~View();
 
     // Inject graphics backend implementation created by the renderer.
-    void SetViewBackend(std::unique_ptr<IView> viewBackend);
+    void SetViewBackend(std::unique_ptr<::Engine::Renderers::IView> viewBackend);
 
     // NeedsRender always returns true for graphics-backed views.
     bool NeedsRender() const override { return true; }
@@ -64,5 +66,6 @@ public:
 
 protected:
 private:
-    std::unique_ptr<IView> m_viewBackend;  // Graphics API implementation
+    std::unique_ptr<::Engine::Renderers::IView> m_viewBackend;  // Graphics API implementation
 };
+}

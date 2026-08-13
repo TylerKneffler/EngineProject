@@ -3,7 +3,8 @@
 
 #include <cstring>
 
-namespace
+
+namespace Engine::Renderers
 {
 D3D12_HEAP_PROPERTIES HeapProperties(D3D12_HEAP_TYPE type)
 {
@@ -16,6 +17,9 @@ D3D12_HEAP_PROPERTIES HeapProperties(D3D12_HEAP_TYPE type)
     return properties;
 }
 }
+
+namespace Engine::Renderers
+{
 
 D3D12TextureFactory::D3D12TextureFactory(
     ID3D12Device* device,
@@ -32,12 +36,12 @@ D3D12TextureFactory::D3D12TextureFactory(
         m_descriptorSize = m_device->GetDescriptorHandleIncrementSize(desc.Type);
 }
 
-std::shared_ptr<IGraphicsTexture> D3D12TextureFactory::CreateTexture2D(
+std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D12TextureFactory::CreateTexture2D(
     uint32_t width,
     uint32_t height,
     const uint8_t* rgbaPixels,
     uint32_t mipLevels,
-    GraphicsTextureFormat format,
+    Engine::Graphics::GraphicsTextureFormat format,
     bool srgb)
 {
     if (!m_device || !m_queue || !m_heap || !width || !height || !rgbaPixels ||
@@ -50,7 +54,7 @@ std::shared_ptr<IGraphicsTexture> D3D12TextureFactory::CreateTexture2D(
     textureDesc.Height = height;
     textureDesc.DepthOrArraySize = 1;
     textureDesc.MipLevels = static_cast<UINT16>(mipLevels);
-    textureDesc.Format = format == GraphicsTextureFormat::Rgba32Float
+    textureDesc.Format = format == Engine::Graphics::GraphicsTextureFormat::Rgba32Float
         ? DXGI_FORMAT_R32G32B32A32_FLOAT : DXGI_FORMAT_R8G8B8A8_TYPELESS;
     textureDesc.SampleDesc.Count = 1;
     textureDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
@@ -164,7 +168,7 @@ std::shared_ptr<IGraphicsTexture> D3D12TextureFactory::CreateTexture2D(
     ++m_nextDescriptor;
 
     D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
-    srv.Format = format == GraphicsTextureFormat::Rgba32Float
+    srv.Format = format == Engine::Graphics::GraphicsTextureFormat::Rgba32Float
         ? DXGI_FORMAT_R32G32B32A32_FLOAT
         : (srgb ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R8G8B8A8_UNORM);
     srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
@@ -173,4 +177,5 @@ std::shared_ptr<IGraphicsTexture> D3D12TextureFactory::CreateTexture2D(
     m_device->CreateShaderResourceView(texture.Get(), &srv, cpu);
     return std::make_shared<D3D12GraphicsTexture>(
         std::move(texture), m_heap, gpu);
+}
 }

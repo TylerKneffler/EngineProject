@@ -8,6 +8,8 @@
 #include <filesystem>
 #include <shellapi.h>
 
+namespace Engine::Editor
+{
 namespace
 {
 void RevealFileInExplorer(const std::string& path)
@@ -70,7 +72,8 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             ui.Label("Skybox Texture Override");
             if (!m_editingSkyboxTexture)
             {
-                const Texture* skybox = m_scene->GetSkyboxPreviewTexture();
+                const Engine::Components::Texture* skybox =
+                    m_scene->GetSkyboxPreviewTexture();
                 void* textureHandle = skybox && skybox->GetGraphicsTexture()
                     ? skybox->GetGraphicsTexture()->GetNativeHandle()
                     : nullptr;
@@ -129,9 +132,9 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         return;
     }
     const std::string assetDropPreview = HandleWindowAssetDrop(ui);
-    Object* prefabRoot = m_selectedObject->GetPrefabInstanceRoot();
+    Engine::Core::Object* prefabRoot = m_selectedObject->GetPrefabInstanceRoot();
     const bool hasPrefabOverrides = prefabRoot &&
-        SceneSerializer::HasPrefabOverrides(*prefabRoot, true);
+        Engine::Serialization::SceneSerializer::HasPrefabOverrides(*prefabRoot, true);
     char name[256]; strncpy_s(name, m_selectedObject->name.c_str(), sizeof(name));
     bool enabled = m_selectedObject->enabled;
     const EditorUiObjectRowResult header = ui.ObjectHeader(
@@ -173,7 +176,7 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
     ui.Separator();
     ui.Indent(16.f);
     
-    // Draw Transform (always present, not in Components list)
+    // Draw Engine::Components::Transform (always present, not in Components list)
     DrawTransform(ui);
 
     if (prefabRoot && prefabRoot->Prefab)
@@ -203,11 +206,11 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
     }
     
     // Draw all components with accordion views
-    Component* componentToDelete = nullptr;
-    Component* reorderSource = nullptr;
-    Component* reorderTarget = nullptr;
+    Engine::Core::Component* componentToDelete = nullptr;
+    Engine::Core::Component* reorderSource = nullptr;
+    Engine::Core::Component* reorderTarget = nullptr;
     bool componentPropertiesChanged = false;
-    for (Component* component : m_selectedObject->Components)
+    for (Engine::Core::Component* component : m_selectedObject->Components)
     {
         if (!component) continue;
         ui.PushId(component);
@@ -216,14 +219,14 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         if (componentType.empty()) componentType = "Component";
         
         const bool componentOpen = ui.CollapsingHeader(componentType.c_str());
-        Object* componentPrefabRoot = m_selectedObject->GetPrefabInstanceRoot();
+        Engine::Core::Object* componentPrefabRoot = m_selectedObject->GetPrefabInstanceRoot();
         const bool componentEditable = componentPrefabRoot == nullptr;
         // Bind the menu to the header before drag/drop helpers replace the
         // UI backend's current item.
         EditorUiContextMenuResult menu;
         if (componentPrefabRoot)
             HandlePrefabMenu(ui.PrefabOverrideMenu(component,
-                SceneSerializer::HasPrefabOverrides(*componentPrefabRoot, true)));
+                Engine::Serialization::SceneSerializer::HasPrefabOverrides(*componentPrefabRoot, true)));
         else
             menu = ui.ContextMenu(component, "Add Component",
                 "Delete Component", false);
@@ -237,7 +240,7 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             componentToDelete = component;
         if (componentEditable && ui.BeginDragDropSource())
         {
-            Component* payload = component;
+            Engine::Core::Component* payload = component;
             ui.SetDragDropPayload(
                 "ENGINE_COMPONENT_REORDER", &payload, sizeof(payload));
             ui.Label(componentType.c_str());
@@ -248,9 +251,9 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             size_t payloadSize = 0;
             const void* payload = ui.AcceptDragDropPayload(
                 "ENGINE_COMPONENT_REORDER", &payloadSize);
-            if (payload && payloadSize == sizeof(Component*))
+            if (payload && payloadSize == sizeof(Engine::Core::Component*))
             {
-                reorderSource = *static_cast<Component* const*>(payload);
+                reorderSource = *static_cast<Engine::Core::Component* const*>(payload);
                 reorderTarget = component;
             }
             ui.EndDragDropTarget();
@@ -312,7 +315,7 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
     if (m_showChildHierarchy && !m_selectedObject->Children.empty() &&
         ui.CollapsingHeader("Children", false))
     {
-        std::function<void(Object*)> drawChild = [&](Object* child)
+        std::function<void(Engine::Core::Object*)> drawChild = [&](Engine::Core::Object* child)
         {
             if (!child) return;
             const bool leaf = child->Children.empty();
@@ -320,12 +323,12 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
                 false, leaf, true);
             if (open && !leaf)
             {
-                for (Object* grandchild : child->Children)
+                for (Engine::Core::Object* grandchild : child->Children)
                     drawChild(grandchild);
                 ui.TreePop();
             }
         };
-        for (Object* child : m_selectedObject->Children)
+        for (Engine::Core::Object* child : m_selectedObject->Children)
             drawChild(child);
     }
 
@@ -353,4 +356,5 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
     ui.EndTextWrap();
     ui.EndWindow();
     DrawComponentPicker(ui);
+}
 }

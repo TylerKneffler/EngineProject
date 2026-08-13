@@ -18,7 +18,7 @@
 #include <vector>
 #include <glm/gtc/matrix_inverse.hpp>
 
-namespace Engine::Rendering::Lighting
+namespace Engine::Rendering
 {
 namespace
 {
@@ -29,7 +29,7 @@ struct BakeLight
     float intensity = 0.f;
     float range = 0.f;
     float falloff = 2.f;
-    Light::Type type = Light::Type::Point;
+    Engine::Components::Light::Type type = Engine::Components::Light::Type::Point;
     glm::vec3 direction{ 0.f, 1.f, 0.f };
 };
 
@@ -38,7 +38,7 @@ struct SurfaceTriangle
     glm::vec3 positions[3]{};
     glm::vec3 normals[3]{};
     glm::vec2 uvs[3]{};
-    const Object* owner = nullptr;
+    const Engine::Core::Object* owner = nullptr;
 };
 
 struct Image
@@ -75,9 +75,9 @@ std::string SafeName(std::string value)
     return value.empty() ? "Object" : value;
 }
 
-std::string ObjectKey(const Scene& scene, const Object& object)
+std::string ObjectKey(const Engine::Scene::Scene& scene, const Engine::Core::Object& object)
 {
-    Scene::ObjectPath path;
+    Engine::Scene::Scene::ObjectPath path;
     scene.TryGetObjectPath(&object, path);
     std::ostringstream result;
     result << SafeName(object.name);
@@ -116,7 +116,7 @@ uint8_t SrgbByte(float value)
         std::clamp(encoded, 0.f, 1.f) * 255.f));
 }
 
-glm::vec3 SampleTexture(const std::shared_ptr<Texture>& texture,
+glm::vec3 SampleTexture(const std::shared_ptr<Engine::Components::Texture>& texture,
     glm::vec2 uv, const glm::vec3& fallback)
 {
     if (!texture || (!texture->HasPixels() && !texture->Load()) ||
@@ -179,7 +179,7 @@ glm::vec3 EvaluateLighting(const glm::vec3& position, glm::vec3 normal,
     glm::vec3 result(0.f);
     for (const BakeLight& light : lights)
     {
-        if (light.type == Light::Type::Ambient)
+        if (light.type == Engine::Components::Light::Type::Ambient)
         {
             const float diffuse = std::max(0.f, glm::dot(normal, light.direction));
             if (!Occluded(position, normal, light.direction,
@@ -260,10 +260,10 @@ void Dilate(Image& image, uint32_t passes)
     }
 }
 
-Image BakeImage(const Object& object, const Material& material,
+Image BakeImage(const Engine::Core::Object& object, const Engine::Components::Material& material,
     const std::vector<BakeLight>& lights,
     const std::vector<SurfaceTriangle>& geometry,
-    const BakedLightingSettings& settings)
+    const Engine::Model::BakedLightingSettings& settings)
 {
     Image image(settings.lightmapResolution);
     bool wroteTexel = false;
@@ -399,14 +399,14 @@ bool SaveBmp(const std::filesystem::path& path, const Image& image)
     return file.good();
 }
 
-std::vector<SurfaceTriangle> GatherGeometry(const Scene& scene)
+std::vector<SurfaceTriangle> GatherGeometry(const Engine::Scene::Scene& scene)
 {
     std::vector<SurfaceTriangle> result;
     for (const auto& object : scene.GetObjects())
     {
         if (!object->IsEnabledInHierarchy())
             continue;
-        const Mesh* mesh = object->GetComponent<Mesh>();
+        const Engine::Components::Mesh* mesh = object->GetComponent<Engine::Components::Mesh>();
         if (!mesh)
             continue;
         const glm::mat4 world = object->transform.GetWorldMatrix();
@@ -418,7 +418,7 @@ std::vector<SurfaceTriangle> GatherGeometry(const Scene& scene)
             triangle.owner = object.get();
             for (int index = 0; index < 3; ++index)
             {
-                const Vertex& vertex = vertices[offset + index];
+                const Engine::Model::Vertex& vertex = vertices[offset + index];
                 triangle.positions[index] = glm::vec3(world * glm::vec4(
                     vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.f));
                 triangle.normals[index] = glm::normalize(normalMatrix * glm::vec3(
@@ -431,12 +431,12 @@ std::vector<SurfaceTriangle> GatherGeometry(const Scene& scene)
     return result;
 }
 
-bool RestoreMaterial(Object& object, const BakedLightingData& data,
-    IGraphicsProvider* graphicsProvider)
+bool RestoreMaterial(Engine::Core::Object& object, const BakedLightingData& data,
+    Engine::Graphics::IGraphicsProvider* graphicsProvider)
 {
-    Material* material = object.GetComponent<Material>();
+    Engine::Components::Material* material = object.GetComponent<Engine::Components::Material>();
     if (!material)
-        material = object.AddComponent<Material>();
+        material = object.AddComponent<Engine::Components::Material>();
     bool restored = false;
     if (!data.originalMaterialAsset.empty())
         restored = material->LoadFromFile(data.originalMaterialAsset);
@@ -448,14 +448,14 @@ bool RestoreMaterial(Object& object, const BakedLightingData& data,
 }
 }
 
-BakeResult BakedLightingPipeline::Bake(Scene& scene,
+Engine::Model::BakeResult BakedLightingPipeline::Bake(Engine::Scene::Scene& scene,
     const std::string& assetsDirectory, const std::string& sceneName,
-    const BakedLightingSettings& requestedBakeSettings) const
+    const Engine::Model::BakedLightingSettings& requestedBakeSettings) const
 {
-    BakeResult result{};
+    Engine::Model::BakeResult result{};
     try
     {
-        BakedLightingSettings settings = requestedBakeSettings;
+        Engine::Model::BakedLightingSettings settings = requestedBakeSettings;
         settings.lightmapResolution = std::clamp(
             settings.lightmapResolution, 32u, 2048u);
         settings.shadowBias = std::clamp(settings.shadowBias, 0.00001f, 0.1f);
@@ -465,12 +465,12 @@ BakeResult BakedLightingPipeline::Bake(Scene& scene,
         {
             if (!object->IsEnabledInHierarchy())
                 continue;
-            const Light* light = object->GetComponent<Light>();
+            const Engine::Components::Light* light = object->GetComponent<Engine::Components::Light>();
             if (!light || !light->baked || light->intensity <= 0.f)
                 continue;
-            if (light->GetLightType() == Light::Type::Point && light->range <= 0.f)
+            if (light->GetLightType() == Engine::Components::Light::Type::Point && light->range <= 0.f)
                 continue;
-            const glm::vec3 direction = light->GetLightType() == Light::Type::Ambient
+            const glm::vec3 direction = light->GetLightType() == Engine::Components::Light::Type::Ambient
                 ? -glm::normalize(glm::vec3(object->transform.GetWorldMatrix()[2]))
                 : glm::vec3(0.f, 1.f, 0.f);
             lights.push_back({ object->transform.GetWorldPosition(), light->color,
@@ -505,12 +505,12 @@ BakeResult BakedLightingPipeline::Bake(Scene& scene,
         const std::vector<SurfaceTriangle> geometry = GatherGeometry(scene);
         for (const auto& object : scene.GetObjects())
         {
-            const Mesh* mesh = object->GetComponent<Mesh>();
+            const Engine::Components::Mesh* mesh = object->GetComponent<Engine::Components::Mesh>();
             if (!mesh || !object->IsEnabledInHierarchy())
                 continue;
-            Material* source = object->GetComponent<Material>();
+            Engine::Components::Material* source = object->GetComponent<Engine::Components::Material>();
             if (!source)
-                source = object->AddComponent<Material>();
+                source = object->AddComponent<Engine::Components::Material>();
             BakedLightingData* data = object->GetComponent<BakedLightingData>();
             const std::string previousOriginal = data
                 ? data->originalMaterialAsset : source->GetFilePath();
@@ -530,9 +530,9 @@ BakeResult BakedLightingPipeline::Bake(Scene& scene,
             const Image image = BakeImage(*object, *source, lights, geometry, settings);
             if (!SaveBmp(lightmapPath, image))
                 throw std::runtime_error("Could not save baked lightmap");
-            Texture::Invalidate(PortablePath(lightmapPath));
+            Engine::Components::Texture::Invalidate(PortablePath(lightmapPath));
 
-            Material baked;
+            Engine::Components::Material baked;
             if (!baked.LoadFromFile(snapshotPath.string()))
                 throw std::runtime_error("Could not create baked material");
             baked.emissiveColor = glm::vec3(1.f);
@@ -582,7 +582,7 @@ BakeResult BakedLightingPipeline::Bake(Scene& scene,
     return result;
 }
 
-uint32_t BakedLightingPipeline::Clear(Scene& scene) const
+uint32_t BakedLightingPipeline::Clear(Engine::Scene::Scene& scene) const
 {
     uint32_t cleared = 0;
     for (const auto& object : scene.GetObjects())

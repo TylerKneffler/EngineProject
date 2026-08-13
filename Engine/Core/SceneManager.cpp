@@ -4,8 +4,11 @@
 #include <future>
 #include <thread>
 
+namespace Engine::Core
+{
+
 // Static member initialization
-Scene* SceneManager::s_activeScene = nullptr;
+Engine::Scene::Scene* SceneManager::s_activeScene = nullptr;
 SceneManager::SceneLoadedCallback SceneManager::s_onSceneLoaded = nullptr;
 
 // ---------------------------------------------------------------------------
@@ -31,7 +34,7 @@ bool SceneManager::LoadScene(const std::string& path)
 // SceneManager::LoadSceneAsync
 // ---------------------------------------------------------------------------
 void SceneManager::LoadSceneAsync(const std::string& path,
-                                   std::function<void(Scene*)> onComplete)
+                                   std::function<void(Engine::Scene::Scene*)> onComplete)
 {
     if (!s_activeScene)
     {
@@ -41,7 +44,7 @@ void SceneManager::LoadSceneAsync(const std::string& path,
     }
 
     // Launch async loading task using std::async
-    // Note: Scene loading typically involves file I/O which is safe to do on background thread,
+    // Note: Engine::Scene::Scene loading typically involves file I/O which is safe to do on background thread,
     // but graphics resource creation must happen on main thread
     std::thread([path, onComplete, activeScene = s_activeScene]()
     {
@@ -63,4 +66,6 @@ void SceneManager::LoadSceneAsync(const std::string& path,
                 onComplete(nullptr);
         }
     }).detach(); // Detach thread to run independently
+}
+
 }

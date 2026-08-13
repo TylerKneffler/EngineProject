@@ -1,17 +1,21 @@
 #pragma once
 
-class Scene;
 
+namespace Engine::Scene { class Scene; }
+
+namespace Engine::Audio
+{
 // Per-scene audio coordination. The process-wide output device and buses remain
 // owned by AudioMixer; this class selects one listener and manages scene reset.
 class Audio
 {
 public:
-    explicit Audio(Scene& scene);
+    explicit Audio(Engine::Scene::Scene& scene);
 
     void Update(float deltaTime);
     void Reset();
 
 private:
-    Scene* m_scene = nullptr;
+    Engine::Scene::Scene* m_scene = nullptr;
 };
+}

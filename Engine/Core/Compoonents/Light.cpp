@@ -1,6 +1,8 @@
 #include "Light.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 
+namespace Engine::Components
+{
 Light::Light()
 {
     SetTypeName(COMPONENT_TYPE_NAME(Light));
@@ -12,7 +14,7 @@ Light::Light()
     RegisterField("baked", baked);
 }
 
-bool Light::DrawProperties(IEditorUi& ui)
+bool Light::DrawProperties(::Engine::Editor::IEditorUi& ui)
 {
     bool changed = false;
     const char* types[] = { "Point", "Global / Ambient" };
@@ -45,4 +47,5 @@ bool Light::DrawProperties(IEditorUi& ui)
     if (baked)
         ui.DisabledLabel("Contributes when Scene > Bake Lighting is run.");
     return changed;
+}
 }

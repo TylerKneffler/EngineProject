@@ -8,9 +8,9 @@
 #include <algorithm>
 #include <cmath>
 
-namespace
+namespace Engine::UI
 {
-UIRect Intersect(const UIRect& first, const UIRect& second)
+Engine::Model::UIRect Intersect(const Engine::Model::UIRect& first, const Engine::Model::UIRect& second)
 {
     const float left = std::max(first.x, second.x);
     const float top = std::max(first.y, second.y);
@@ -19,7 +19,7 @@ UIRect Intersect(const UIRect& first, const UIRect& second)
     return { left, top, std::max(0.f, right - left), std::max(0.f, bottom - top) };
 }
 
-UIRect AnchoredRect(const UIObject& item, const UIRect& parent)
+Engine::Model::UIRect AnchoredRect(const Engine::Components::UIObject& item, const Engine::Model::UIRect& parent)
 {
     const float anchorWidth = (item.anchorMax.x - item.anchorMin.x) * parent.width;
     const float anchorHeight = (item.anchorMax.y - item.anchorMin.y) * parent.height;
@@ -36,36 +36,36 @@ UIRect AnchoredRect(const UIObject& item, const UIRect& parent)
     };
 }
 
-void ResolveObject(Object* object, Canvas* canvas, const glm::vec2& canvasSize,
-    const UIRect& parentRect, const UIRect& parentClip, int& hierarchyOrder,
-    std::vector<UITextLayout>& output);
+void ResolveObject(Engine::Core::Object* object, Engine::Components::Canvas* canvas, const glm::vec2& canvasSize,
+    const Engine::Model::UIRect& parentRect, const Engine::Model::UIRect& parentClip, int& hierarchyOrder,
+    std::vector<Engine::Model::UITextLayout>& output);
 
-void ResolveChildren(Object* object, Canvas* canvas, const glm::vec2& canvasSize,
-    UIObject* parentLayout, const UIRect& parentRect, const UIRect& parentClip,
-    int& hierarchyOrder, std::vector<UITextLayout>& output)
+void ResolveChildren(Engine::Core::Object* object, Engine::Components::Canvas* canvas, const glm::vec2& canvasSize,
+    Engine::Components::UIObject* parentLayout, const Engine::Model::UIRect& parentRect, const Engine::Model::UIRect& parentClip,
+    int& hierarchyOrder, std::vector<Engine::Model::UITextLayout>& output)
 {
     const bool row = parentLayout && parentLayout->layoutDirection == "Row";
     const bool column = parentLayout && parentLayout->layoutDirection == "Column";
     if (!row && !column)
     {
-        const UIRect childClip = parentLayout && parentLayout->clipChildren
+        const Engine::Model::UIRect childClip = parentLayout && parentLayout->clipChildren
             ? Intersect(parentClip, parentRect) : parentClip;
-        for (Object* child : object->Children)
+        for (Engine::Core::Object* child : object->Children)
             ResolveObject(child, canvas, canvasSize, parentRect, childClip,
                 hierarchyOrder, output);
         return;
     }
 
-    UIRect content = parentRect;
+    Engine::Model::UIRect content = parentRect;
     content.x += parentLayout->paddingLeft;
     content.y += parentLayout->paddingTop;
     content.width = std::max(0.f, content.width - parentLayout->paddingLeft - parentLayout->paddingRight);
     content.height = std::max(0.f, content.height - parentLayout->paddingTop - parentLayout->paddingBottom);
 
-    std::vector<std::pair<Object*, UIObject*>> children;
-    for (Object* child : object->Children)
+    std::vector<std::pair<Engine::Core::Object*, Engine::Components::UIObject*>> children;
+    for (Engine::Core::Object* child : object->Children)
         if (child && child->IsEnabledInHierarchy())
-            if (UIObject* layout = child->GetComponent<UIObject>(); layout && layout->visible)
+            if (Engine::Components::UIObject* layout = child->GetComponent<Engine::Components::UIObject>(); layout && layout->visible)
                 children.emplace_back(child, layout);
 
     float fixed = 0.f;
@@ -92,7 +92,7 @@ void ResolveChildren(Object* object, Canvas* canvas, const glm::vec2& canvasSize
     {
         const float grow = totalGrow > 0.f
             ? remaining * std::max(0.f, layout->flexGrow) / totalGrow : 0.f;
-        UIRect rect{};
+        Engine::Model::UIRect rect{};
         if (row)
         {
             rect.width = std::clamp(std::max(0.f, layout->sizeDelta.x) + grow,
@@ -126,11 +126,11 @@ void ResolveChildren(Object* object, Canvas* canvas, const glm::vec2& canvasSize
             cursor += layout->marginTop + rect.height + layout->marginBottom + gap;
         }
 
-        const UIRect clip = parentLayout->clipChildren
+        const Engine::Model::UIRect clip = parentLayout->clipChildren
             ? Intersect(parentClip, parentRect) : parentClip;
         layout->SetComputedLayout(rect, clip);
         ++hierarchyOrder;
-        if (UIText* text = child->GetComponent<UIText>())
+        if (Engine::Components::UIText* text = child->GetComponent<Engine::Components::UIText>())
             output.push_back({ canvas, layout, text, canvasSize,
                 canvas->sortingOrder * 1000000 + layout->zOrder * 1000 + hierarchyOrder });
         ResolveChildren(child, canvas, canvasSize, layout, rect,
@@ -138,18 +138,18 @@ void ResolveChildren(Object* object, Canvas* canvas, const glm::vec2& canvasSize
     }
 
     // Non-layout grouping objects still pass their descendants through.
-    for (Object* child : object->Children)
-        if (!child->GetComponent<UIObject>())
+    for (Engine::Core::Object* child : object->Children)
+        if (!child->GetComponent<Engine::Components::UIObject>())
             ResolveChildren(child, canvas, canvasSize, parentLayout, parentRect,
                 parentClip, hierarchyOrder, output);
 }
 
-void ResolveObject(Object* object, Canvas* canvas, const glm::vec2& canvasSize,
-    const UIRect& parentRect, const UIRect& parentClip, int& hierarchyOrder,
-    std::vector<UITextLayout>& output)
+void ResolveObject(Engine::Core::Object* object, Engine::Components::Canvas* canvas, const glm::vec2& canvasSize,
+    const Engine::Model::UIRect& parentRect, const Engine::Model::UIRect& parentClip, int& hierarchyOrder,
+    std::vector<Engine::Model::UITextLayout>& output)
 {
     if (!object || !object->IsEnabledInHierarchy()) return;
-    UIObject* layout = object->GetComponent<UIObject>();
+    Engine::Components::UIObject* layout = object->GetComponent<Engine::Components::UIObject>();
     if (!layout)
     {
         ResolveChildren(object, canvas, canvasSize, nullptr, parentRect,
@@ -159,33 +159,32 @@ void ResolveObject(Object* object, Canvas* canvas, const glm::vec2& canvasSize,
     if (!layout->visible) return;
     layout->SetComputedLayout(AnchoredRect(*layout, parentRect), parentClip);
     ++hierarchyOrder;
-    if (UIText* text = object->GetComponent<UIText>())
+    if (Engine::Components::UIText* text = object->GetComponent<Engine::Components::UIText>())
         output.push_back({ canvas, layout, text, canvasSize,
             canvas->sortingOrder * 1000000 + layout->zOrder * 1000 + hierarchyOrder });
     ResolveChildren(object, canvas, canvasSize, layout, layout->GetComputedRect(),
         layout->GetComputedClipRect(), hierarchyOrder, output);
 }
-}
-
-std::vector<UITextLayout> UILayout::Resolve(Scene& scene, float viewportAspect)
+std::vector<Engine::Model::UITextLayout> UILayout::Resolve(
+    Engine::Scene::Scene& scene, float viewportAspect)
 {
-    std::vector<UITextLayout> output;
+    std::vector<Engine::Model::UITextLayout> output;
     for (const auto& candidate : scene.GetObjects())
     {
-        Object* object = candidate.get();
-        Canvas* canvas = object && object->IsEnabledInHierarchy()
-            ? object->GetComponent<Canvas>() : nullptr;
-        for (Object* ancestor = object ? object->Parent : nullptr;
+        Engine::Core::Object* object = candidate.get();
+        Engine::Components::Canvas* canvas = object && object->IsEnabledInHierarchy()
+            ? object->GetComponent<Engine::Components::Canvas>() : nullptr;
+        for (Engine::Core::Object* ancestor = object ? object->Parent : nullptr;
             canvas && ancestor; ancestor = ancestor->Parent)
-            if (ancestor->GetComponent<Canvas>()) canvas = nullptr;
+            if (ancestor->GetComponent<Engine::Components::Canvas>()) canvas = nullptr;
         if (!canvas) continue;
         const glm::vec2 size = canvas->GetLogicalSize(viewportAspect);
-        const UIRect root { 0.f, 0.f, size.x, size.y };
+        const Engine::Model::UIRect root { 0.f, 0.f, size.x, size.y };
         int hierarchyOrder = 0;
-        if (UIObject* rootLayout = object->GetComponent<UIObject>())
+        if (Engine::Components::UIObject* rootLayout = object->GetComponent<Engine::Components::UIObject>())
         {
             rootLayout->SetComputedLayout(root, root);
-            if (UIText* text = object->GetComponent<UIText>())
+            if (Engine::Components::UIText* text = object->GetComponent<Engine::Components::UIText>())
                 output.push_back({ canvas, rootLayout, text, size,
                     canvas->sortingOrder * 1000000 + rootLayout->zOrder * 1000 });
             ResolveChildren(object, canvas, size, rootLayout, root, root,
@@ -198,4 +197,5 @@ std::vector<UITextLayout> UILayout::Resolve(Scene& scene, float viewportAspect)
     std::stable_sort(output.begin(), output.end(), [](const auto& first, const auto& second)
     { return first.sortKey < second.sortKey; });
     return output;
+}
 }

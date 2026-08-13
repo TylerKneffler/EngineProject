@@ -2,6 +2,9 @@
 #include <functional>
 #include <cstdint>
 
+
+namespace Engine::Renderers
+{
 // Forward declaration - editor UI interface (no dependency from Core layer)
 class IEditorPanel;
 
@@ -59,3 +62,4 @@ public:
     // SRV slot index for resource cleanup
     virtual uint32_t GetSrvSlotIndex() const = 0;
 };
+}

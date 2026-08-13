@@ -5,7 +5,9 @@
 #include <glm/glm.hpp>
 #include <string>
 
-class UIText final : public Component
+namespace Engine::Components
+{
+class UIText final : public Engine::Core::Component
 {
 public:
     UIText();
@@ -31,3 +33,4 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "UI | Text", ClampMin = "0.1")
     float lineSpacing = 1.f;
 };
+}

@@ -1,15 +1,17 @@
 #include "Animation.h"
 
+namespace Engine::Components
+{
 namespace
 {
-JsonValue FloatArray(const std::vector<float>& values)
+Engine::Serialization::JsonValue FloatArray(const std::vector<float>& values)
 {
-    JsonValue result = JsonValue::MakeArray();
-    for (float value : values) result.Push(JsonValue(value));
+    Engine::Serialization::JsonValue result = Engine::Serialization::JsonValue::MakeArray();
+    for (float value : values) result.Push(Engine::Serialization::JsonValue(value));
     return result;
 }
 
-std::vector<float> ReadFloats(const JsonValue& value)
+std::vector<float> ReadFloats(const Engine::Serialization::JsonValue& value)
 {
     std::vector<float> result;
     result.reserve(value.ArraySize());
@@ -21,7 +23,7 @@ std::vector<float> ReadFloats(const JsonValue& value)
 
 Animation::Animation() { SetTypeName(COMPONENT_TYPE_NAME(Animation)); }
 
-JsonValue Animation::Serialize() const
+Animation::JsonValue Animation::Serialize() const
 {
     JsonValue value = JsonValue::MakeObject().Set("type", JsonValue(GetTypeName()))
         .Set("name", JsonValue(clipName)).Set("duration", JsonValue(duration));
@@ -57,4 +59,5 @@ void Animation::Deserialize(const JsonValue& value)
         channel.values = ReadFloats(item["values"]);
         channels.push_back(std::move(channel));
     }
+}
 }

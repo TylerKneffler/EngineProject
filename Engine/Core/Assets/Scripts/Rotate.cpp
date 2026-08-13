@@ -17,7 +17,7 @@ struct RotateRegistration
 {
     RotateRegistration()
     {
-        RegisterComponentType<Rotate>("Rotate");
+        Engine::Serialization::RegisterComponentType<Rotate>("Rotate");
     }
 };
 
@@ -36,7 +36,7 @@ void Rotate::Update()
     Owner->transform.rotation += axis * glm::radians(speed) * kFixedDt;
 }
 
-bool Rotate::DrawProperties(IEditorUi& ui)
+bool Rotate::DrawProperties(::Engine::Editor::IEditorUi& ui)
 {
     // Custom interactive editor for Rotate script properties
     const bool axisChanged =

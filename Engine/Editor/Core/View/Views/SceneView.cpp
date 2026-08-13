@@ -18,14 +18,16 @@
 #include <algorithm>
 #include <cctype>
 
+namespace Engine::Editor
+{
 namespace
 {
-bool BuildViewportRay(const Scene& scene, const EditorUiVec2& mousePos,
+bool BuildViewportRay(const Engine::Scene::Scene& scene, const EditorUiVec2& mousePos,
     const EditorUiVec2& viewportSize, glm::vec3& origin, glm::vec3& direction)
 {
     if (viewportSize.x <= 1.f || viewportSize.y <= 1.f)
         return false;
-    const Camera* camera = scene.editorCamera.GetComponent<Camera>();
+    const Engine::Components::Camera* camera = scene.editorCamera.GetComponent<Engine::Components::Camera>();
     if (!camera)
         return false;
     const glm::mat4 inverseViewProjection = glm::inverse(
@@ -43,15 +45,15 @@ bool BuildViewportRay(const Scene& scene, const EditorUiVec2& mousePos,
     return true;
 }
 
-bool IsInObjectHierarchy(const Object* object, const Object* root)
+bool IsInObjectHierarchy(const Engine::Core::Object* object, const Engine::Core::Object* root)
 {
-    for (const Object* current = object; current; current = current->Parent)
+    for (const Engine::Core::Object* current = object; current; current = current->Parent)
         if (current == root)
             return true;
     return false;
 }
 
-bool IntersectMeshBounds(const Object& object, const Mesh& mesh,
+bool IntersectMeshBounds(const Engine::Core::Object& object, const Engine::Components::Mesh& mesh,
     const glm::vec3& rayOrigin, const glm::vec3& rayDirection, float& distance)
 {
     if (!mesh.HasBounds())
@@ -99,8 +101,8 @@ void SceneView::Init(void* device,
                          void* srvCpu,
                          void* srvGpu,
                          uint32_t srvSlotIndex,
-                         Scene* scene,
-                         const ProjectSettings& settings)
+                         Engine::Scene::Scene* scene,
+                         const Engine::Model::ProjectSettings& settings)
 {
     m_scene = scene;
     m_aspectRatioMode = settings.aspectRatioMode;
@@ -136,8 +138,8 @@ void SceneView::DrawPanel(IEditorUi& ui)
     float orbitDX = 0.f, orbitDY = 0.f;
     float zoom = 0.f;
 
-    const float targetAspect = m_aspectRatioMode == ProjectSettings::AspectRatioMode::Free ? 0.f :
-        (m_aspectRatioMode == ProjectSettings::AspectRatioMode::Locked ? m_gameAspectRatio :
+    const float targetAspect = m_aspectRatioMode == Engine::Model::ProjectSettings::AspectRatioMode::Free ? 0.f :
+        (m_aspectRatioMode == Engine::Model::ProjectSettings::AspectRatioMode::Locked ? m_gameAspectRatio :
          static_cast<float>(m_gameWindowWidth) / static_cast<float>(m_gameWindowHeight));
     const auto input = ui.Viewport(GetUiTextureHandle(), targetAspect,
         {m_letterboxColor.r,m_letterboxColor.g,m_letterboxColor.b,m_letterboxColor.a});
@@ -161,7 +163,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
                 ++length;
             const std::string path(bytes, length);
             const std::string extension =
-                Editor::ViewTemplates::LowerAssetExtension(path);
+                Engine::Editor::LowerAssetExtension(path);
             if (extension == ".prefab")
             {
                 prefabDragObserved = true;
@@ -185,7 +187,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
                 if (payload.delivered && m_prefabPreview &&
                     m_prefabPreviewHasPlacement)
                 {
-                    Object* placed = m_prefabPreview;
+                    Engine::Core::Object* placed = m_prefabPreview;
                     const std::string placedPath = m_prefabPreviewPath;
                     m_prefabPreview = nullptr;
                     m_prefabPreviewPath.clear();
@@ -277,11 +279,11 @@ bool SceneView::FindPrefabPlacement(const EditorUiVec2& mousePos,
     bool found = false;
     for (const auto& objectPointer : m_scene->GetObjects())
     {
-        Object* object = objectPointer.get();
+        Engine::Core::Object* object = objectPointer.get();
         if (!object || !object->IsEnabledInHierarchy() ||
-            !object->GetComponent<Mesh>() || IsInObjectHierarchy(object, m_prefabPreview))
+            !object->GetComponent<Engine::Components::Mesh>() || IsInObjectHierarchy(object, m_prefabPreview))
             continue;
-        Mesh* mesh = object->GetComponent<Mesh>();
+        Engine::Components::Mesh* mesh = object->GetComponent<Engine::Components::Mesh>();
         float distance = 0.f;
         if (mesh && IntersectMeshBounds(
             *object, *mesh, rayOrigin, rayDirection, distance) &&
@@ -323,12 +325,12 @@ bool SceneView::FindPrefabPlacement(const EditorUiVec2& mousePos,
     return found;
 }
 
-Object* SceneView::PickObjectInViewport(const EditorUiVec2& mousePos, const EditorUiVec2& viewportSize) const
+Engine::Core::Object* SceneView::PickObjectInViewport(const EditorUiVec2& mousePos, const EditorUiVec2& viewportSize) const
 {
     if (!m_scene || viewportSize.x <= 1.f || viewportSize.y <= 1.f)
         return nullptr;
 
-    Camera* cam = m_scene->editorCamera.GetComponent<Camera>();
+    Engine::Components::Camera* cam = m_scene->editorCamera.GetComponent<Engine::Components::Camera>();
     if (!cam)
         return nullptr;
 
@@ -350,14 +352,14 @@ Object* SceneView::PickObjectInViewport(const EditorUiVec2& mousePos, const Edit
 
     if (m_scene->IsEditorMode2D())
     {
-        Object* frontmost = nullptr;
+        Engine::Core::Object* frontmost = nullptr;
         int frontLayer = std::numeric_limits<int>::min();
         float frontZ = -FLT_MAX;
         for (const auto& objPtr : m_scene->GetObjects())
         {
-            Object* obj = objPtr.get();
-            Sprite* sprite = obj && obj->IsEnabledInHierarchy()
-                ? obj->GetComponent<Sprite>() : nullptr;
+            Engine::Core::Object* obj = objPtr.get();
+            Engine::Components::Sprite* sprite = obj && obj->IsEnabledInHierarchy()
+                ? obj->GetComponent<Engine::Components::Sprite>() : nullptr;
             if (!sprite || std::abs(rayDir.z) < 0.000001f)
                 continue;
             glm::mat4 world = obj->transform.GetWorldMatrix();
@@ -390,13 +392,13 @@ Object* SceneView::PickObjectInViewport(const EditorUiVec2& mousePos, const Edit
         if (frontmost)
             return frontmost;
 
-        Object* closestMesh = nullptr;
+        Engine::Core::Object* closestMesh = nullptr;
         float closestDistance = FLT_MAX;
         for (const auto& objPtr : m_scene->GetObjects())
         {
-            Object* obj = objPtr.get();
-            Mesh* mesh = obj && obj->IsEnabledInHierarchy()
-                ? obj->GetComponent<Mesh>() : nullptr;
+            Engine::Core::Object* obj = objPtr.get();
+            Engine::Components::Mesh* mesh = obj && obj->IsEnabledInHierarchy()
+                ? obj->GetComponent<Engine::Components::Mesh>() : nullptr;
             float distance = 0.f;
             if (mesh && IntersectMeshBounds(*obj, *mesh,
                 rayOrigin, rayDir, distance) && distance < closestDistance)
@@ -408,14 +410,14 @@ Object* SceneView::PickObjectInViewport(const EditorUiVec2& mousePos, const Edit
         return closestMesh;
     }
 
-    Object* best = nullptr;
+    Engine::Core::Object* best = nullptr;
     float bestT = FLT_MAX;
 
     for (const auto& objPtr : m_scene->GetObjects())
     {
-        Object* obj = objPtr.get();
+        Engine::Core::Object* obj = objPtr.get();
         if (!obj || !obj->IsEnabledInHierarchy() ||
-            (!obj->GetComponent<Mesh>() && !obj->GetComponent<Sprite>()))
+            (!obj->GetComponent<Engine::Components::Mesh>() && !obj->GetComponent<Engine::Components::Sprite>()))
             continue;
 
         const glm::vec3 center = obj->transform.GetWorldPosition();
@@ -446,20 +448,20 @@ Object* SceneView::PickObjectInViewport(const EditorUiVec2& mousePos, const Edit
 // CalculateGameViewport
 // ---------------------------------------------------------------------------
 static void CalculateGameViewport(EditorUiVec2 availableSize, EditorUiVec2& outViewportSize, EditorUiVec2& outViewportPos,
-    ProjectSettings::AspectRatioMode mode, float lockedAspect, uint32_t windowWidth, uint32_t windowHeight)
+    Engine::Model::ProjectSettings::AspectRatioMode mode, float lockedAspect, uint32_t windowWidth, uint32_t windowHeight)
 {
     outViewportPos = {0.f, 0.f};
 
     switch (mode)
     {
-        case ProjectSettings::AspectRatioMode::Free:
+        case Engine::Model::ProjectSettings::AspectRatioMode::Free:
         {
             // Free aspect: use full available size
             outViewportSize = availableSize;
             break;
         }
 
-        case ProjectSettings::AspectRatioMode::Locked:
+        case Engine::Model::ProjectSettings::AspectRatioMode::Locked:
         {
             // Locked aspect ratio: fit to aspect while maintaining ratio
             float availableAspect = availableSize.x / availableSize.y;
@@ -481,7 +483,7 @@ static void CalculateGameViewport(EditorUiVec2 availableSize, EditorUiVec2& outV
             break;
         }
 
-        case ProjectSettings::AspectRatioMode::Hardcoded:
+        case Engine::Model::ProjectSettings::AspectRatioMode::Hardcoded:
         {
             // Hardcoded size: fit to exact window size, scale to fit
             float gameAspect = static_cast<float>(windowWidth) / static_cast<float>(windowHeight);
@@ -516,7 +518,7 @@ void SceneView::ApplyCameraControls(float panDX, float panDY,
     if (!m_scene) return;
     if (panDX == 0.f && panDY == 0.f && orbitDX == 0.f && orbitDY == 0.f && zoom == 0.f) return;
 
-    Camera*    cam = m_scene->editorCamera.GetComponent<Camera>();
+    Engine::Components::Camera*    cam = m_scene->editorCamera.GetComponent<Engine::Components::Camera>();
     assert(cam && "Scene editorCamera must have a Camera component");
     glm::vec3& pos = m_scene->editorCamera.transform.position;
 
@@ -593,4 +595,5 @@ void SceneView::Render3D(void* cmd)
         auto ctx = factory->CreateContext();
         m_scene->Render(ctx.get(), m_aspect);
     }
+}
 }

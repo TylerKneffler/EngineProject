@@ -3,6 +3,8 @@
 #include "Core/Serialization/SceneSerializer.h"
 #include <system_error>
 
+namespace Engine::Editor
+{
 EditorHotReload::EditorHotReload(EditorState& editorState, ConsoleView* console,
     std::string scriptsDirectory, std::string buildDirectory,
     std::string modulePath)
@@ -195,21 +197,21 @@ bool EditorHotReload::ApplyModule()
         return false;
 
     if (BeforeApply) BeforeApply();
-    Scene* scene = m_editorState.GetScene();
+    Engine::Scene::Scene* scene = m_editorState.GetScene();
     if (!scene)
     {
         FreeLibrary(candidate);
         return false;
     }
     const std::string snapshot = scene->SaveToString();
-    Scene::ObjectPath selectedPath;
+    ::Engine::Scene::Scene::ObjectPath selectedPath;
     scene->TryGetObjectPath(scene->GetSelectedObject(), selectedPath);
     scene->ClearObjects();
 
     const HMODULE previousModule = m_module;
     const std::filesystem::path previousModulePath = m_loadedModulePath;
     const auto previousTypes = m_registeredTypes;
-    std::vector<std::pair<std::string, SceneSerializer::Factory>> previousFactories;
+    std::vector<std::pair<std::string, Engine::Serialization::SceneSerializer::Factory>> previousFactories;
     std::vector<std::string> affectedTypes = previousTypes;
     for (const auto& type : candidateTypes)
         if (std::find(affectedTypes.begin(), affectedTypes.end(), type) ==
@@ -218,19 +220,19 @@ bool EditorHotReload::ApplyModule()
     previousFactories.reserve(affectedTypes.size());
     for (const auto& type : affectedTypes)
         previousFactories.emplace_back(type,
-            SceneSerializer::GetRegisteredFactory(type));
+            Engine::Serialization::SceneSerializer::GetRegisteredFactory(type));
     for (const auto& type : previousTypes)
-        SceneSerializer::Unregister(type);
+        Engine::Serialization::SceneSerializer::Unregister(type);
     for (const auto& type : candidateTypes)
-        SceneSerializer::Register(type,
+        Engine::Serialization::SceneSerializer::Register(type,
             [candidateCreate, type]() { return candidateCreate(type.c_str()); });
 
     if (!scene->LoadFromString(snapshot))
     {
         scene->ClearObjects();
-        for (const auto& type : candidateTypes) SceneSerializer::Unregister(type);
+        for (const auto& type : candidateTypes) Engine::Serialization::SceneSerializer::Unregister(type);
         for (auto& [type, factory] : previousFactories)
-            if (factory) SceneSerializer::Register(type, std::move(factory));
+            if (factory) Engine::Serialization::SceneSerializer::Register(type, std::move(factory));
         scene->LoadFromString(snapshot);
         m_editorState.RefreshSelectionAfterReload(selectedPath);
         FreeLibrary(candidate);
@@ -248,4 +250,5 @@ bool EditorHotReload::ApplyModule()
         std::filesystem::remove(previousModulePath, error);
     }
     return true;
+}
 }

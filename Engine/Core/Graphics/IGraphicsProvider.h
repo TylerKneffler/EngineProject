@@ -6,6 +6,9 @@
 #include "IGraphicsContext.h"
 #include "IGraphicsTexture.h"
 
+namespace Engine::Graphics
+{
+
 // ---------------------------------------------------------------------------
 // IGraphicsProvider — Access point for all graphics abstractions
 // 
@@ -33,3 +36,4 @@ public:
     // Access sampled 2-D texture creation for the active graphics API.
     virtual IGraphicsTextureFactory* GetTextureFactory() { return nullptr; }
 };
+}

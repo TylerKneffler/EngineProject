@@ -3,6 +3,8 @@
 #include "Core/Object.h"
 #include <glm/gtc/matrix_inverse.hpp>
 
+namespace Engine::Components
+{
 SkinnedMesh::SkinnedMesh()
 {
     SetTypeName(COMPONENT_TYPE_NAME(SkinnedMesh));
@@ -13,7 +15,7 @@ SkinnedMesh::SkinnedMesh()
 void SkinnedMesh::Start()
 {
     Mesh* mesh = Owner ? (meshReference.IsAssigned()
-        ? ResolveComponentReference<Mesh>(Owner, meshReference)
+        ? Engine::Core::ResolveComponentReference<Mesh>(Owner, meshReference)
         : Owner->GetComponent<Mesh>()) : nullptr;
     if (!mesh) return;
     m_baseVertices = mesh->GetVertices();
@@ -44,7 +46,7 @@ void SkinnedMesh::Start()
 void SkinnedMesh::Update()
 {
     Mesh* mesh = Owner ? (meshReference.IsAssigned()
-        ? ResolveComponentReference<Mesh>(Owner, meshReference)
+        ? Engine::Core::ResolveComponentReference<Mesh>(Owner, meshReference)
         : Owner->GetComponent<Mesh>()) : nullptr;
     if (!mesh) return;
     if (!mesh->HasMorphTargets()) return;
@@ -108,7 +110,7 @@ bool SkinnedMesh::BuildPalette(std::vector<glm::mat4>& palette) const
     palette.clear();
     if (!Owner || skinIndex < 0) return false;
     Skeleton* skeleton = skeletonReference.IsAssigned()
-        ? ResolveComponentReference<Skeleton>(Owner, skeletonReference) : nullptr;
+        ? Engine::Core::ResolveComponentReference<Skeleton>(Owner, skeletonReference) : nullptr;
     if (!skeletonReference.IsAssigned())
         for (Object* ancestor = Owner; ancestor && !skeleton; ancestor = ancestor->Parent)
             for (Component* component : ancestor->Components)
@@ -121,7 +123,7 @@ bool SkinnedMesh::BuildPalette(std::vector<glm::mat4>& palette) const
     if (!skeleton) return false;
     palette.assign(skeleton->jointNodes.size(), glm::mat4(1.f));
     Mesh* mesh = meshReference.IsAssigned()
-        ? ResolveComponentReference<Mesh>(Owner, meshReference)
+        ? Engine::Core::ResolveComponentReference<Mesh>(Owner, meshReference)
         : Owner->GetComponent<Mesh>();
     Object* meshObject = mesh && mesh->Owner ? mesh->Owner : Owner;
     const glm::mat4 inverseMesh = glm::inverse(meshObject->transform.GetWorldMatrix());
@@ -133,7 +135,7 @@ bool SkinnedMesh::BuildPalette(std::vector<glm::mat4>& palette) const
     return !palette.empty();
 }
 
-JsonValue SkinnedMesh::Serialize() const
+SkinnedMesh::JsonValue SkinnedMesh::Serialize() const
 {
     JsonValue result = Component::Serialize().Set("skinIndex", JsonValue(skinIndex));
     JsonValue serializedJoints = JsonValue::MakeArray();
@@ -168,4 +170,5 @@ void SkinnedMesh::Deserialize(const JsonValue& value)
         weights.emplace_back(weight.ArrayAt(0).AsFloat(), weight.ArrayAt(1).AsFloat(),
             weight.ArrayAt(2).AsFloat(), weight.ArrayAt(3).AsFloat());
     }
+}
 }

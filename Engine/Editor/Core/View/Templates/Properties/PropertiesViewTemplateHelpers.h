@@ -8,7 +8,7 @@
 #include <regex>
 #include <sstream>
 
-namespace Editor::ViewTemplates
+namespace Engine::Editor
 {
 inline bool ContainsIgnoringCase(const std::string& value,
     const std::string& search)
@@ -57,7 +57,7 @@ inline std::string FindComponentSubclass(const std::string& path)
 }
 
 template<typename T>
-void ReplaceOrAddComponent(Object& object, T* component)
+void ReplaceOrAddComponent(Engine::Core::Object& object, T* component)
 {
     component->Owner = &object;
     for (auto it = object.Components.begin(); it != object.Components.end(); ++it)

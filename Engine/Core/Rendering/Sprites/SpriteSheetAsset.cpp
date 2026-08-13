@@ -7,17 +7,17 @@
 #include <fstream>
 #include <sstream>
 
-namespace
+namespace Engine::Rendering
 {
-float Number(const JsonValue& object, const char* name, float fallback)
+float Number(const Engine::Serialization::JsonValue& object, const char* name, float fallback)
 {
     return object.Has(name) ? object[name].AsFloat() : fallback;
 }
 
-SpriteSheetFrame ReadJsonFrame(const JsonValue& value,
+Engine::Model::SpriteSheetFrame ReadJsonFrame(const Engine::Serialization::JsonValue& value,
     const std::string& defaultImage)
 {
-    SpriteSheetFrame frame;
+    Engine::Model::SpriteSheetFrame frame;
     frame.image = value.Has("image") ? value["image"].AsString() : defaultImage;
     frame.x = Number(value, "x", 0.f);
     frame.y = Number(value, "y", 0.f);
@@ -26,8 +26,6 @@ SpriteSheetFrame ReadJsonFrame(const JsonValue& value,
     frame.duration = std::max(Number(value, "duration", 0.1f), 0.001f);
     return frame;
 }
-}
-
 bool SpriteSheetAsset::Load(const std::string& path)
 {
     m_path = std::filesystem::path(path).lexically_normal().generic_string();
@@ -48,8 +46,8 @@ bool SpriteSheetAsset::Load(const std::string& path)
             ? LoadJson(source) : LoadXml(source);
         if (!loaded)
             m_animations.clear();
-        for (SpriteSheetAnimation& animation : m_animations)
-            for (SpriteSheetFrame& frame : animation.frames)
+        for (Engine::Model::SpriteSheetAnimation& animation : m_animations)
+            for (Engine::Model::SpriteSheetFrame& frame : animation.frames)
                 frame.image = ResolveImage(frame.image);
         return loaded && !m_animations.empty();
     }
@@ -73,21 +71,21 @@ std::string SpriteSheetAsset::ResolveImage(const std::string& image) const
 
 bool SpriteSheetAsset::LoadJson(const std::string& source)
 {
-    const JsonValue root = JsonParse(source);
+    const Engine::Serialization::JsonValue root = Engine::Serialization::JsonParse(source);
     const std::string defaultImage = root.Has("image")
         ? root["image"].AsString()
         : (root.Has("texture") ? root["texture"].AsString() : std::string{});
-    const JsonValue& animations = root["animations"];
+    const Engine::Serialization::JsonValue& animations = root["animations"];
     if (animations.IsArray())
     {
         for (size_t index = 0; index < animations.ArraySize(); ++index)
         {
-            const JsonValue& value = animations.ArrayAt(index);
-            SpriteSheetAnimation animation;
+            const Engine::Serialization::JsonValue& value = animations.ArrayAt(index);
+            Engine::Model::SpriteSheetAnimation animation;
             animation.name = value.Has("name") ? value["name"].AsString()
                 : "Animation " + std::to_string(index);
             animation.loop = !value.Has("loop") || value["loop"].AsBool();
-            const JsonValue& frames = value["frames"];
+            const Engine::Serialization::JsonValue& frames = value["frames"];
             for (size_t frame = 0; frame < frames.ArraySize(); ++frame)
                 animation.frames.push_back(ReadJsonFrame(frames.ArrayAt(frame), defaultImage));
             if (!animation.frames.empty())
@@ -98,11 +96,11 @@ bool SpriteSheetAsset::LoadJson(const std::string& source)
     {
         for (size_t index = 0; index < animations.ObjectSize(); ++index)
         {
-            const JsonValue& value = animations.ObjectValue(index);
-            SpriteSheetAnimation animation;
+            const Engine::Serialization::JsonValue& value = animations.ObjectValue(index);
+            Engine::Model::SpriteSheetAnimation animation;
             animation.name = animations.ObjectKey(index);
             animation.loop = !value.Has("loop") || value["loop"].AsBool();
-            const JsonValue& frames = value["frames"];
+            const Engine::Serialization::JsonValue& frames = value["frames"];
             for (size_t frame = 0; frame < frames.ArraySize(); ++frame)
                 animation.frames.push_back(ReadJsonFrame(frames.ArrayAt(frame), defaultImage));
             if (!animation.frames.empty())
@@ -111,9 +109,9 @@ bool SpriteSheetAsset::LoadJson(const std::string& source)
     }
     if (m_animations.empty() && root.Has("frames"))
     {
-        SpriteSheetAnimation animation;
+        Engine::Model::SpriteSheetAnimation animation;
         animation.name = "Default";
-        const JsonValue& frames = root["frames"];
+        const Engine::Serialization::JsonValue& frames = root["frames"];
         for (size_t frame = 0; frame < frames.ArraySize(); ++frame)
             animation.frames.push_back(ReadJsonFrame(frames.ArrayAt(frame), defaultImage));
         if (!animation.frames.empty())
@@ -132,12 +130,12 @@ bool SpriteSheetAsset::LoadXml(const std::string& source)
         ? root.attribute("image").value() : root.attribute("texture").value();
     for (pugi::xml_node node : root.children("Animation"))
     {
-        SpriteSheetAnimation animation;
+        Engine::Model::SpriteSheetAnimation animation;
         animation.name = node.attribute("name").as_string("Default");
         animation.loop = node.attribute("loop").as_bool(true);
         for (pugi::xml_node frameNode : node.children("Frame"))
         {
-            SpriteSheetFrame frame;
+            Engine::Model::SpriteSheetFrame frame;
             frame.image = frameNode.attribute("image").as_string(defaultImage.c_str());
             frame.x = frameNode.attribute("x").as_float();
             frame.y = frameNode.attribute("y").as_float();
@@ -154,18 +152,19 @@ bool SpriteSheetAsset::LoadXml(const std::string& source)
     return !m_animations.empty();
 }
 
-const SpriteSheetAnimation* SpriteSheetAsset::FindAnimation(
+const Engine::Model::SpriteSheetAnimation* SpriteSheetAsset::FindAnimation(
     const std::string& name) const
 {
     const auto found = std::find_if(m_animations.begin(), m_animations.end(),
-        [&name](const SpriteSheetAnimation& animation)
+        [&name](const Engine::Model::SpriteSheetAnimation& animation)
         {
             return animation.name == name;
         });
     return found == m_animations.end() ? nullptr : &*found;
 }
 
-const SpriteSheetAnimation* SpriteSheetAsset::GetDefaultAnimation() const
+const Engine::Model::SpriteSheetAnimation* SpriteSheetAsset::GetDefaultAnimation() const
 {
     return m_animations.empty() ? nullptr : &m_animations.front();
+}
 }

@@ -6,11 +6,16 @@
 #include "Core/Compoonents/Transform.h"
 #include "Core/Prefab/PrefabAsset.h"
 
-class Scene; // forward declaration
+namespace Engine::Scene { class Scene; }
 
+namespace Engine::Core
+{
 class Object
 {
 public:
+    using Transform = Engine::Components::Transform;
+    using PrefabAsset = Engine::Prefab::PrefabAsset;
+
     Object();
     Object(Transform initialTransform);
     ~Object();
@@ -22,7 +27,7 @@ public:
     Object*             Parent = nullptr;
     std::vector<Object*> Children;
     std::list<Component*> Components;
-    Scene*              OwnerScene = nullptr;  // Set by Scene when object is added
+    Engine::Scene::Scene* OwnerScene = nullptr;
     std::shared_ptr<const PrefabAsset> Prefab; // null for scene-only objects
     // Full prefab object state at the time this linked instance was loaded.
     // Scene serialization stores only differences from this baseline.
@@ -80,7 +85,7 @@ public:
     virtual void Destroy();
 
     // Get the scene this object belongs to
-    Scene* GetScene() const { return OwnerScene; }
+    Engine::Scene::Scene* GetScene() const { return OwnerScene; }
 
     // Component management — implementations must live in the header so the
     // compiler sees them at every instantiation site.
@@ -115,3 +120,4 @@ public:
         return nullptr;
     }
 };
+}

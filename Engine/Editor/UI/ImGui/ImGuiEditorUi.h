@@ -3,6 +3,8 @@
 #include <unordered_map>
 #include <vector>
 
+namespace Engine::Editor
+{
 class ImGuiEditorUi final : public IEditorUi
 {
 public:
@@ -62,3 +64,4 @@ private:
     EditorUiVec2 m_viewportScreenMin{};
     EditorUiVec2 m_viewportScreenMax{};
 };
+}

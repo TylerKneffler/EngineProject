@@ -11,7 +11,7 @@
 //   r->axis  = { 0.f, 1.f, 0.f }; // spin around Y
 //   r->speed = 90.f;               // degrees per second
 // ---------------------------------------------------------------------------
-class Rotate : public Script
+class Rotate : public Engine::Core::Script
 {
 public:
     Rotate();
@@ -26,5 +26,5 @@ public:
     void Update() override;
 
     // Custom property editor
-    bool DrawProperties(IEditorUi& ui) override;
+    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
 };

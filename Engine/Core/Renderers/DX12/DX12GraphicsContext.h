@@ -4,19 +4,22 @@
 #include <d3d12.h>
 #include <vector>
 
+namespace Engine::Renderers
+{
+
 // ---------------------------------------------------------------------------
 // D3D12GraphicsContext — DirectX 12 command recording wrapper
 // ---------------------------------------------------------------------------
-class D3D12GraphicsContext : public IGraphicsContext
+class D3D12GraphicsContext : public Engine::Graphics::IGraphicsContext
 {
 public:
     explicit D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList);    D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList, ID3D12RootSignature* rootSig);
-    void SetPipeline(const IPipelineState* pipeline) override;
-    void SetConstantBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint64_t offset = 0) override;
-    void SetStructuredBuffer(uint32_t slot, const IGraphicsBuffer* buffer) override;
-    void SetVertexBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset = 0) override;
-    void SetIndexBuffer(const IGraphicsBuffer* buffer, uint32_t indexCount, uint64_t offset = 0) override;
-    void SetTexture(uint32_t slot, const IGraphicsTexture* texture) override;
+    void SetPipeline(const Engine::Graphics::IPipelineState* pipeline) override;
+    void SetConstantBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint64_t offset = 0) override;
+    void SetStructuredBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer) override;
+    void SetVertexBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset = 0) override;
+    void SetIndexBuffer(const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t indexCount, uint64_t offset = 0) override;
+    void SetTexture(uint32_t slot, const Engine::Graphics::IGraphicsTexture* texture) override;
 
     void SetViewport(const Viewport& vp) override;
     void SetScissorRect(const ScissorRect& rect) override;
@@ -50,7 +53,7 @@ private:
 // ---------------------------------------------------------------------------
 // D3D12GraphicsContextFactory — Create command lists
 // ---------------------------------------------------------------------------
-class D3D12GraphicsContextFactory : public IGraphicsContextFactory
+class D3D12GraphicsContextFactory : public Engine::Graphics::IGraphicsContextFactory
 {
 public:
     D3D12GraphicsContextFactory(
@@ -59,7 +62,7 @@ public:
         ID3D12RootSignature* rootSignature);
 
     void SetCommandBuffer(void* cmd) override;
-    std::unique_ptr<IGraphicsContext> CreateContext() override;
+    std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateContext() override;
 
 private:
     ID3D12Device* m_device;
@@ -69,3 +72,4 @@ private:
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_cmdList;
     ID3D12GraphicsCommandList* m_externalCmdList = nullptr; // set via SetCommandBuffer
 };
+}

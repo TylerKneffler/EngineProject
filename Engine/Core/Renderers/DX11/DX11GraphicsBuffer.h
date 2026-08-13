@@ -4,9 +4,14 @@
 #include <d3d11.h>
 #include <vector>
 
-class D3D11GraphicsBuffer : public IGraphicsBuffer
+namespace Engine::Renderers
+{
+class D3D11GraphicsBuffer : public Engine::Graphics::IGraphicsBuffer
 {
 public:
+    using Usage = Engine::Graphics::IGraphicsBuffer::Usage;
+    using AccessMode = Engine::Graphics::IGraphicsBuffer::AccessMode;
+
     D3D11GraphicsBuffer(Microsoft::WRL::ComPtr<ID3D11Buffer> buffer,
                         Usage usage, AccessMode access, uint64_t size,
                         const void* initialData, uint32_t elementStride,
@@ -35,14 +40,14 @@ private:
     std::vector<uint8_t> m_shadowData;
 };
 
-class D3D11BufferFactory : public IGraphicsBufferFactory
+class D3D11BufferFactory : public Engine::Graphics::IGraphicsBufferFactory
 {
 public:
     explicit D3D11BufferFactory(ID3D11Device* device) : m_device(device) {}
 
-    std::unique_ptr<IGraphicsBuffer> CreateBuffer(
-        IGraphicsBuffer::Usage usage,
-        IGraphicsBuffer::AccessMode access,
+    std::unique_ptr<Engine::Graphics::IGraphicsBuffer> CreateBuffer(
+        Engine::Graphics::IGraphicsBuffer::Usage usage,
+        Engine::Graphics::IGraphicsBuffer::AccessMode access,
         uint64_t sizeBytes,
         const void* initialData = nullptr,
         uint32_t elementStride = 0) override;
@@ -50,3 +55,4 @@ public:
 private:
     ID3D11Device* m_device = nullptr;
 };
+}

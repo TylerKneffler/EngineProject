@@ -24,6 +24,8 @@
 #include <limits>
 #include <vector>
 
+namespace Engine::Editor
+{
 namespace fs = std::filesystem;
 
 namespace
@@ -203,9 +205,9 @@ std::vector<uint32_t> TriangleIndices(
     return triangles;
 }
 
-Object* AddChild(Scene& scene, Object* parent, const std::string& name)
+Engine::Core::Object* AddChild(Engine::Scene::Scene& scene, Engine::Core::Object* parent, const std::string& name)
 {
-    Object* child = scene.AddObject(name);
+    Engine::Core::Object* child = scene.AddObject(name);
     child->Parent = parent;
     parent->Children.push_back(child);
     return child;
@@ -223,15 +225,15 @@ glm::vec3 QuaternionEuler(const glm::quat& q)
 
 struct ImportedPrimitiveRuntime
 {
-    std::vector<Mesh::MorphTarget> morphTargets;
+    std::vector<Engine::Model::MorphTarget> morphTargets;
 };
 }
 
-GltfImportResult GltfImporter::Import(
+Engine::Model::ModelImportResult GltfImporter::Import(
     const std::string& sourcePath,
     const std::string& assetsDirectory)
 {
-    GltfImportResult result;
+    Engine::Model::ModelImportResult result;
     fs::path output;
     fs::path normalizedAssets;
     const fs::path source = fs::path(sourcePath).lexically_normal();
@@ -287,7 +289,7 @@ GltfImportResult GltfImporter::Import(
                  ImageExtension(image));
             if (!ExtractImage(asset, image, path))
                 throw std::runtime_error("Could not extract texture " + std::to_string(imageIndex));
-            AssetRecord::Ensure(path, source,
+            Engine::Core::AssetRecord::Ensure(path, source,
                 {
                     { "importer", std::string("gltf-image") },
                     { "imageIndex", static_cast<double>(imageIndex) }
@@ -307,7 +309,7 @@ GltfImportResult GltfImporter::Import(
         for (size_t materialIndex = 0; materialIndex < asset.materials.size(); ++materialIndex)
         {
             const auto& imported = asset.materials[materialIndex];
-            Material material;
+            Engine::Components::Material material;
             material.diffuseColor = {
                 imported.pbrData.baseColorFactor.x(),
                 imported.pbrData.baseColorFactor.y(),
@@ -358,7 +360,7 @@ GltfImportResult GltfImporter::Import(
                 (name + " " + std::to_string(materialIndex + 1) + ".material");
             if (!material.SaveToFile(path.string()))
                 throw std::runtime_error("Could not save material: " + path.string());
-            AssetRecord::Ensure(path, source,
+            Engine::Core::AssetRecord::Ensure(path, source,
                 {
                     { "importer", std::string("gltf-material") },
                     { "materialIndex", static_cast<double>(materialIndex) }
@@ -366,11 +368,11 @@ GltfImportResult GltfImporter::Import(
             materialPaths[materialIndex] = path.generic_string();
         }
 
-        Material defaultMaterial;
+        Engine::Components::Material defaultMaterial;
         const fs::path defaultMaterialPath = materialsDirectory / "Default.material";
         if (!defaultMaterial.SaveToFile(defaultMaterialPath.string()))
             throw std::runtime_error("Could not save the default material");
-        AssetRecord::Ensure(defaultMaterialPath, source,
+        Engine::Core::AssetRecord::Ensure(defaultMaterialPath, source,
             { { "importer", std::string("gltf-default-material") } });
 
         std::vector<std::vector<std::string>> meshPaths(asset.meshes.size());
@@ -504,7 +506,7 @@ GltfImportResult GltfImporter::Import(
                 fastgltf::copyFromAccessor<uint32_t>(asset, indexAccessor, indices.data());
                 indices = TriangleIndices(primitive, std::move(indices));
 
-                std::vector<Vertex> vertices;
+                std::vector<Engine::Model::Vertex> vertices;
                 vertices.reserve(indices.size());
                 ImportedPrimitiveRuntime& runtime = meshRuntime[meshIndex][primitiveIndex];
                 runtime.morphTargets.resize(primitive.targets.size());
@@ -512,7 +514,7 @@ GltfImportResult GltfImporter::Import(
                 {
                     if (index >= positions.size())
                         throw std::runtime_error("Mesh index is outside the position accessor");
-                    Vertex vertex{};
+                    Engine::Model::Vertex vertex{};
                     vertex.pos[0] = positions[index].x();
                     vertex.pos[1] = positions[index].y();
                     vertex.pos[2] = positions[index].z();
@@ -611,9 +613,9 @@ GltfImportResult GltfImporter::Import(
                 const fs::path path = meshesDirectory /
                     (meshName + " " + std::to_string(meshIndex + 1) + "_" +
                      std::to_string(primitiveIndex + 1) + ".mesh");
-                if (!Mesh::SaveNativeFile(path.string(), vertices))
+                if (!Engine::Components::Mesh::SaveNativeFile(path.string(), vertices))
                     throw std::runtime_error("Could not save mesh: " + path.string());
-                AssetRecord::Ensure(path, source,
+                Engine::Core::AssetRecord::Ensure(path, source,
                     {
                         { "importer", std::string("gltf-mesh") },
                         { "meshIndex", static_cast<double>(meshIndex) },
@@ -623,8 +625,8 @@ GltfImportResult GltfImporter::Import(
             }
         }
 
-        Scene prefabScene;
-        Object* prefabRoot = prefabScene.AddObject(modelName);
+        ::Engine::Scene::Scene prefabScene;
+        Engine::Core::Object* prefabRoot = prefabScene.AddObject(modelName);
 
         // Skins are shared by every primitive that references the glTF skin.
         // Keeping them on the prefab root also gives animation and deformation
@@ -632,7 +634,8 @@ GltfImportResult GltfImporter::Import(
         for (size_t skinIndex = 0; skinIndex < asset.skins.size(); ++skinIndex)
         {
             const auto& importedSkin = asset.skins[skinIndex];
-            Skeleton* skeleton = prefabRoot->AddComponent<Skeleton>();
+            Engine::Components::Skeleton* skeleton =
+                prefabRoot->AddComponent<Engine::Components::Skeleton>();
             skeleton->skinIndex = static_cast<unsigned>(skinIndex);
             for (size_t joint : importedSkin.joints)
                 skeleton->jointNodes.push_back(static_cast<unsigned>(joint));
@@ -653,7 +656,7 @@ GltfImportResult GltfImporter::Import(
         for (size_t animationIndex = 0; animationIndex < asset.animations.size(); ++animationIndex)
         {
             const auto& importedAnimation = asset.animations[animationIndex];
-            Animation* animation = prefabRoot->AddComponent<Animation>();
+            Engine::Components::Animation* animation = prefabRoot->AddComponent<Engine::Components::Animation>();
             animation->clipName = importedAnimation.name.empty()
                 ? "Animation " + std::to_string(animationIndex + 1)
                 : std::string(importedAnimation.name);
@@ -664,32 +667,32 @@ GltfImportResult GltfImporter::Import(
                 const auto& sampler = importedAnimation.samplers[importedChannel.samplerIndex];
                 const auto& inputAccessor = asset.accessors[sampler.inputAccessor];
                 const auto& outputAccessor = asset.accessors[sampler.outputAccessor];
-                AnimationChannel channel;
+                Engine::Model::AnimationChannel channel;
                 channel.nodeIndex = static_cast<unsigned>(*importedChannel.nodeIndex);
                 switch (importedChannel.path)
                 {
-                case fastgltf::AnimationPath::Rotation: channel.path = AnimationChannel::Path::Rotation; channel.valueWidth = 4; break;
-                case fastgltf::AnimationPath::Scale: channel.path = AnimationChannel::Path::Scale; channel.valueWidth = 3; break;
+                case fastgltf::AnimationPath::Rotation: channel.path = Engine::Model::AnimationChannel::Path::Rotation; channel.valueWidth = 4; break;
+                case fastgltf::AnimationPath::Scale: channel.path = Engine::Model::AnimationChannel::Path::Scale; channel.valueWidth = 3; break;
                 case fastgltf::AnimationPath::Weights:
                 {
-                    channel.path = AnimationChannel::Path::Weights;
+                    channel.path = Engine::Model::AnimationChannel::Path::Weights;
                     const size_t splineFactor = sampler.interpolation == fastgltf::AnimationInterpolation::CubicSpline ? 3 : 1;
                     channel.valueWidth = inputAccessor.count > 0
                         ? static_cast<unsigned>(outputAccessor.count / (inputAccessor.count * splineFactor)) : 0;
                     break;
                 }
-                default: channel.path = AnimationChannel::Path::Translation; channel.valueWidth = 3; break;
+                default: channel.path = Engine::Model::AnimationChannel::Path::Translation; channel.valueWidth = 3; break;
                 }
                 switch (sampler.interpolation)
                 {
-                case fastgltf::AnimationInterpolation::Step: channel.interpolation = AnimationChannel::Interpolation::Step; break;
-                case fastgltf::AnimationInterpolation::CubicSpline: channel.interpolation = AnimationChannel::Interpolation::CubicSpline; break;
-                default: channel.interpolation = AnimationChannel::Interpolation::Linear; break;
+                case fastgltf::AnimationInterpolation::Step: channel.interpolation = Engine::Model::AnimationChannel::Interpolation::Step; break;
+                case fastgltf::AnimationInterpolation::CubicSpline: channel.interpolation = Engine::Model::AnimationChannel::Interpolation::CubicSpline; break;
+                default: channel.interpolation = Engine::Model::AnimationChannel::Interpolation::Linear; break;
                 }
                 channel.times.resize(inputAccessor.count);
                 fastgltf::copyFromAccessor<float>(asset, inputAccessor, channel.times.data());
                 if (!channel.times.empty()) animation->duration = std::max(animation->duration, channel.times.back());
-                if (channel.path == AnimationChannel::Path::Weights)
+                if (channel.path == Engine::Model::AnimationChannel::Path::Weights)
                 {
                     channel.values.resize(outputAccessor.count);
                     fastgltf::copyFromAccessor<float>(asset, outputAccessor, channel.values.data());
@@ -715,16 +718,17 @@ GltfImportResult GltfImporter::Import(
         }
         if (!asset.animations.empty())
         {
-            AnimationManager* manager = prefabRoot->AddComponent<AnimationManager>();
-            manager->clip = prefabRoot->GetComponent<Animation>()->clipName;
+            Engine::Components::AnimationManager* manager = prefabRoot->AddComponent<Engine::Components::AnimationManager>();
+            manager->clip = prefabRoot->GetComponent<Engine::Components::Animation>()->clipName;
         }
 
-        Model* modelComponent = prefabRoot->AddComponent<Model>();
-        std::function<void(size_t, Object*)> importNode =
-            [&](size_t nodeIndex, Object* parent)
+        ::Engine::Components::Model* modelComponent =
+            prefabRoot->AddComponent<::Engine::Components::Model>();
+        std::function<void(size_t, Engine::Core::Object*)> importNode =
+            [&](size_t nodeIndex, Engine::Core::Object* parent)
         {
             const auto& node = asset.nodes[nodeIndex];
-            Object* object = AddChild(prefabScene, parent,
+            Engine::Core::Object* object = AddChild(prefabScene, parent,
                 SafeName(node.name, "Node " + std::to_string(nodeIndex + 1)));
             modelComponent->BindNode(static_cast<unsigned>(nodeIndex), object);
             if (const auto* trs = std::get_if<fastgltf::TRS>(&node.transform))
@@ -750,11 +754,11 @@ GltfImportResult GltfImporter::Import(
                 {
                     if (meshPaths[meshIndex][primitiveIndex].empty())
                         continue;
-                    Object* target = importedMesh.primitives.size() == 1
+                    Engine::Core::Object* target = importedMesh.primitives.size() == 1
                         ? object
                         : AddChild(prefabScene, object,
                             "Primitive " + std::to_string(primitiveIndex + 1));
-                    Mesh* mesh = target->AddComponent<Mesh>();
+                    Engine::Components::Mesh* mesh = target->AddComponent<Engine::Components::Mesh>();
                     mesh->LoadFromFile(meshPaths[meshIndex][primitiveIndex]);
 
                     ImportedPrimitiveRuntime& runtime = meshRuntime[meshIndex][primitiveIndex];
@@ -769,7 +773,7 @@ GltfImportResult GltfImporter::Import(
                     }
                     if (node.skinIndex || !runtime.morphTargets.empty())
                     {
-                        SkinnedMesh* deformer = target->AddComponent<SkinnedMesh>();
+                        Engine::Components::SkinnedMesh* deformer = target->AddComponent<Engine::Components::SkinnedMesh>();
                         deformer->skinIndex = node.skinIndex ? static_cast<int>(*node.skinIndex) : -1;
                     }
 
@@ -778,7 +782,7 @@ GltfImportResult GltfImporter::Import(
                         primitive.materialIndex && *primitive.materialIndex < materialPaths.size()
                         ? materialPaths[*primitive.materialIndex]
                         : defaultMaterialPath.generic_string();
-                    Material* material = target->AddComponent<Material>();
+                    Engine::Components::Material* material = target->AddComponent<Engine::Components::Material>();
                     if (!material->LoadFromFile(materialPath))
                         throw std::runtime_error("Could not load generated material");
                 }
@@ -808,9 +812,9 @@ GltfImportResult GltfImporter::Import(
         }
 
         const fs::path prefabPath = output / (modelName + ".prefab");
-        if (!SceneSerializer::SavePrefab(*prefabRoot, prefabPath.string()))
+        if (!Engine::Serialization::SceneSerializer::SavePrefab(*prefabRoot, prefabPath.string()))
             throw std::runtime_error("Could not save prefab: " + prefabPath.string());
-        AssetRecord::Ensure(prefabPath, source,
+        Engine::Core::AssetRecord::Ensure(prefabPath, source,
             {
                 { "importer", std::string("gltf") },
                 { "loadExternalBuffers", true },
@@ -833,4 +837,5 @@ GltfImportResult GltfImporter::Import(
         result.message = error.what();
         return result;
     }
+}
 }

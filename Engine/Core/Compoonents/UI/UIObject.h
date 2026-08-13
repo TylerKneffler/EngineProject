@@ -6,11 +6,15 @@
 #include <glm/glm.hpp>
 #include <string>
 
+namespace Engine::Components
+{
 // RectTransform-style screen layout with an optional flex row/column for its
 // immediate UIObject children. Normalized anchors use top-left as (0, 0).
-class UIObject final : public Component
+class UIObject final : public Engine::Core::Component
 {
 public:
+    using UIRect = Engine::Model::UIRect;
+
     UIObject();
 
     PROPERTY(Inspector, EditAnywhere, Category = "UI | Rect")
@@ -75,3 +79,4 @@ private:
     UIRect m_computedRect{};
     UIRect m_computedClipRect{};
 };
+}

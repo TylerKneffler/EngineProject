@@ -8,6 +8,8 @@
 #include <memory>
 #include <string>
 #include <utility>
+namespace Engine::Editor
+{
 class IEditorUi;
 
 // ---------------------------------------------------------------------------
@@ -28,7 +30,7 @@ public:
     ~PreferencesView() = default;
 
     // Initialize with current project settings and file path
-    void Init(const ProjectSettings& settings, const std::string& projFilePath);
+    void Init(const Engine::Model::ProjectSettings& settings, const std::string& projFilePath);
 
     // Draw the preferences window, returns true if window is still open
     void DrawWindow(IEditorUi& ui, bool& isOpen);
@@ -38,7 +40,7 @@ public:
     void SetOpen(bool open) { m_isOpen = open; }
 
     // Get the modified settings
-    ProjectSettings GetSettings() const { return m_settings; }
+    Engine::Model::ProjectSettings GetSettings() const { return m_settings; }
 
     // Save settings back to the project file
     bool SaveSettings();
@@ -60,7 +62,7 @@ private:
 
     bool m_isOpen = false;
     std::string m_projFilePath;
-    ProjectSettings m_settings;
+    Engine::Model::ProjectSettings m_settings;
 
     // Temporary buffers for string editing
     char m_projectNameBuf[256] = {};
@@ -75,3 +77,4 @@ private:
     std::shared_ptr<std::atomic<int>> m_exportStage;
     std::future<std::pair<bool, std::string>> m_exportFuture;
 };
+}

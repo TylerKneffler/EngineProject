@@ -2,7 +2,10 @@
 #include "Core/Compoonents/Camera.h"
 #include <cmath>
 
-Camera* Scene::FindGameCamera()
+namespace Engine::Scene
+{
+
+Scene::Camera* Scene::FindGameCamera()
 {
     for (const auto& obj : m_objects)
         if (Camera* cam = obj->GetComponent<Camera>())
@@ -41,4 +44,6 @@ void Scene::FocusEditorCamera(Object* obj)
 
     editorCamera.transform.position = targetPos + oldDir * (kDistance / oldLen);
     cam->target = targetPos;
+}
+
 }

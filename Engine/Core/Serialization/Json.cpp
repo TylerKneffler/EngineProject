@@ -8,6 +8,9 @@
 #include <iomanip>
 #include <algorithm>
 
+namespace Engine::Serialization
+{
+
 // ---- Concrete storage types (only visible in this TU) ----------------------
 using JArray  = std::vector<JsonValue>;
 using JKV     = std::pair<std::string, JsonValue>;
@@ -440,4 +443,5 @@ JsonValue JsonParseFile(const std::string& path)
     if (!f) throw std::runtime_error("JsonParseFile: cannot open '" + path + "'");
     std::string src((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     return JsonParse(src);
+}
 }

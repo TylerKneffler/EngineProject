@@ -1,6 +1,8 @@
 #include "Window.h"
 #include <shellapi.h>
 
+namespace Engine::Core
+{
 // ---------------------------------------------------------------------------
 // Instance forwarding via GWLP_USERDATA
 //
@@ -284,4 +286,5 @@ LRESULT CALLBACK Window::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
     // for unhandled messages or the window will behave incorrectly (no
     // resizing, no system menu, broken hit-testing, etc.).
     return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
 }

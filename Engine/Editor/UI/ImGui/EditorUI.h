@@ -4,6 +4,8 @@
 #include "Engine/Editor/UI/ImGui/Menus/ImGuiMainMenu.h"
 #include "Engine/Editor/UI/ImGui/Panels/ImGuiPanelHost.h"
 
+namespace Engine::Editor
+{
 class EditorState;
 class GameBuildManager;
 enum class PlayState;
@@ -28,3 +30,4 @@ private:
     ImGuiMainMenu m_mainMenu;
     ImGuiPanelHost m_panelHost;
 };
+}

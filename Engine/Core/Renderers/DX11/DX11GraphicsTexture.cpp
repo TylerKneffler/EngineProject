@@ -1,12 +1,14 @@
 #include "pch.h"
 #include "DX11GraphicsTexture.h"
 
-std::shared_ptr<IGraphicsTexture> D3D11TextureFactory::CreateTexture2D(
+namespace Engine::Renderers
+{
+std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D11TextureFactory::CreateTexture2D(
     uint32_t width,
     uint32_t height,
     const uint8_t* rgbaPixels,
     uint32_t mipLevels,
-    GraphicsTextureFormat format,
+    Engine::Graphics::GraphicsTextureFormat format,
     bool srgb)
 {
     if (!m_device || !width || !height || !rgbaPixels || !mipLevels)
@@ -17,7 +19,7 @@ std::shared_ptr<IGraphicsTexture> D3D11TextureFactory::CreateTexture2D(
     desc.Height = height;
     desc.MipLevels = mipLevels;
     desc.ArraySize = 1;
-    desc.Format = format == GraphicsTextureFormat::Rgba32Float
+    desc.Format = format == Engine::Graphics::GraphicsTextureFormat::Rgba32Float
         ? DXGI_FORMAT_R32G32B32A32_FLOAT
         : (srgb ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R8G8B8A8_UNORM);
     desc.SampleDesc.Count = 1;
@@ -43,4 +45,5 @@ std::shared_ptr<IGraphicsTexture> D3D11TextureFactory::CreateTexture2D(
         FAILED(m_device->CreateShaderResourceView(texture.Get(), nullptr, &view)))
         return nullptr;
     return std::make_shared<D3D11GraphicsTexture>(std::move(texture), std::move(view));
+}
 }

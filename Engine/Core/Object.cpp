@@ -1,5 +1,8 @@
 #include "Object.h"
 
+namespace Engine::Core
+{
+
 Object::Object()
 {
     this->transform.Owner = this;
@@ -89,3 +92,5 @@ void Object::Destroy()
 // Template bodies are defined in Object.h so they are visible at every
 // instantiation site — nothing to implement here.
 #pragma endregion
+
+}

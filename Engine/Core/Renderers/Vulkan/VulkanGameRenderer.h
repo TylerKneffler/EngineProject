@@ -4,6 +4,8 @@
 #include "VulkanRenderCore.h"
 #include "VulkanGraphicsProvider.h"
 
+namespace Engine::Renderers
+{
 class VulkanGameRenderer : public IGameRenderer
 {
 public:
@@ -13,10 +15,10 @@ public:
     uint32_t GetWidth() const override { return m_width; }
     uint32_t GetHeight() const override { return m_height; }
     void Clear(float r, float g, float b, float a = 1.0f) override;
-    IGraphicsProvider* GetGraphicsProvider() override { return m_provider.get(); }
+    Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override { return m_provider.get(); }
     void BeginFrame() override;
     void EndFrame() override;
-    std::unique_ptr<IGraphicsContext> CreateFrameGraphicsContext() override;
+    std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateFrameGraphicsContext() override;
 private:
     void BeginMainRenderPass(const float color[4]);
     VulkanRenderCore m_core;
@@ -25,4 +27,5 @@ private:
     uint32_t m_width = 0, m_height = 0;
     bool m_renderPassActive = false;
 };
+}
 #endif

@@ -6,6 +6,8 @@
 #include "Engine/Editor/UI/IEditorUi.h"
 #include <algorithm>
 
+namespace Engine::Components
+{
 Sprite::Sprite()
 {
     SetTypeName(COMPONENT_TYPE_NAME(Sprite));
@@ -31,7 +33,7 @@ void Sprite::OnAfterDeserialize(IGraphicsProvider* graphicsProvider)
     Prepare(graphicsProvider);
 }
 
-bool Sprite::DrawProperties(IEditorUi& ui)
+bool Sprite::DrawProperties(::Engine::Editor::IEditorUi& ui)
 {
     bool changed = false;
     SpriteAnimationManager* manager = ResolveAnimationManager();
@@ -77,7 +79,7 @@ bool Sprite::DrawProperties(IEditorUi& ui)
 void Sprite::SetAnimationManager(SpriteAnimationManager* manager)
 {
     m_animationManager = manager;
-    animationManagerReference = CaptureComponentReference(
+    animationManagerReference = Engine::Core::CaptureComponentReference(
         manager, "SpriteAnimationManager");
     animationManager = m_animationManager ? m_animationManager->GetTypeName() : std::string{};
 }
@@ -92,7 +94,7 @@ SpriteAnimationManager* Sprite::ResolveAnimationManager() const
     // Resolve on demand so deleting or replacing the single manager component
     // cannot leave the renderer holding a stale pointer.
     m_animationManager = animationManagerReference.IsAssigned()
-        ? ResolveComponentReference<SpriteAnimationManager>(Owner, animationManagerReference)
+        ? Engine::Core::ResolveComponentReference<SpriteAnimationManager>(Owner, animationManagerReference)
         : Owner->GetComponent<SpriteAnimationManager>();
     return m_animationManager;
 }
@@ -128,7 +130,7 @@ bool Sprite::IsReady() const
 glm::vec4 Sprite::GetUvRect() const
 {
     const SpriteAnimationManager* manager = ResolveAnimationManager();
-    const SpriteSheetFrame* selected = manager ? manager->GetCurrentFrame() : nullptr;
+    const Engine::Model::SpriteSheetFrame* selected = manager ? manager->GetCurrentFrame() : nullptr;
     const Texture* texture = manager ? manager->GetTexture() : nullptr;
     if (!selected || !texture || texture->GetWidth() == 0 || texture->GetHeight() == 0)
         return { 0.f, 0.f, 1.f, 1.f };
@@ -141,7 +143,7 @@ glm::vec4 Sprite::GetUvRect() const
 glm::vec2 Sprite::GetWorldSize() const
 {
     const SpriteAnimationManager* manager = ResolveAnimationManager();
-    const SpriteSheetFrame* selected = manager ? manager->GetCurrentFrame() : nullptr;
+    const Engine::Model::SpriteSheetFrame* selected = manager ? manager->GetCurrentFrame() : nullptr;
     const Texture* texture = manager ? manager->GetTexture() : nullptr;
     if (!selected || !texture)
         return { 1.f, 1.f };
@@ -154,4 +156,5 @@ const Texture* Sprite::GetTexture() const
 {
     const SpriteAnimationManager* manager = ResolveAnimationManager();
     return manager ? manager->GetTexture() : nullptr;
+}
 }

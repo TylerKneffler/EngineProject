@@ -12,6 +12,9 @@ using Microsoft::WRL::ComPtr;
 // Owns offscreen render target and depth buffer resources for editor views.
 // Creates DirectX 12 textures, descriptor heaps, and manages transitions.
 // ---------------------------------------------------------------------------
+
+namespace Engine::Renderers
+{
 class D3D12View : public IView
 {
 public:
@@ -61,3 +64,4 @@ private:
     float    m_aspect = 1.0f;
     float    m_clearColor[4] = { 0.0f, 0.0f, 0.502f, 1.0f };
 };
+}

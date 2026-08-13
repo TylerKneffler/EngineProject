@@ -1,9 +1,11 @@
 #pragma once
 #include "IRenderer.h"
+#include "Core/Graphics/IGraphicsContext.h"
 #include <memory>
 
-class IGraphicsContext;
 
+namespace Engine::Renderers
+{
 // ---------------------------------------------------------------------------
 // IGameRenderer — Abstract interface for game renderers.
 //
@@ -30,5 +32,6 @@ public:
 
     // Create a graphics context bound to the renderer's current frame command
     // stream. Call after BeginFrame() and before EndFrame().
-    virtual std::unique_ptr<IGraphicsContext> CreateFrameGraphicsContext() = 0;
+    virtual std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateFrameGraphicsContext() = 0;
 };
+}

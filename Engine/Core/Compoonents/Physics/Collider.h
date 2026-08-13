@@ -5,9 +5,11 @@
 #include <glm/glm.hpp>
 #include <string>
 
+namespace Engine::Components
+{
 // Geometry is intentionally separate from RigidBody. Multiple collider
 // components on one object are combined into one compound rigid body.
-class Collider : public Component
+class Collider : public Engine::Core::Component
 {
 public:
     bool collisionEnabled = true;
@@ -49,3 +51,4 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Collider")
     bool convex = true;
 };
+}

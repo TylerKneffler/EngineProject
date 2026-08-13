@@ -4,11 +4,13 @@
 #include <filesystem>
 #include <fstream>
 
+namespace Engine::Rendering
+{
 bool SpriteAnimationAsset::Load(const std::string& path)
 {
     try
     {
-        const JsonValue root = JsonParseFile(path);
+        const Engine::Serialization::JsonValue root = Engine::Serialization::JsonParseFile(path);
         if (!root.IsObject())
             return false;
         spriteSheetFile = root.Has("spriteSheet") ? root["spriteSheet"].AsString()
@@ -30,17 +32,17 @@ bool SpriteAnimationAsset::Save() const
 {
     if (m_path.empty())
         return false;
-    JsonValue root = JsonValue::MakeObject();
-    root.Set("type", JsonValue("sprite-animation"));
-    root.Set("spriteSheet", JsonValue(spriteSheetFile));
-    root.Set("animation", JsonValue(animation));
-    root.Set("speed", JsonValue(std::max(speed, 0.f)));
-    root.Set("loop", JsonValue(loop));
-    root.Set("autoplay", JsonValue(autoplay));
+    Engine::Serialization::JsonValue root = Engine::Serialization::JsonValue::MakeObject();
+    root.Set("type", Engine::Serialization::JsonValue("sprite-animation"));
+    root.Set("spriteSheet", Engine::Serialization::JsonValue(spriteSheetFile));
+    root.Set("animation", Engine::Serialization::JsonValue(animation));
+    root.Set("speed", Engine::Serialization::JsonValue(std::max(speed, 0.f)));
+    root.Set("loop", Engine::Serialization::JsonValue(loop));
+    root.Set("autoplay", Engine::Serialization::JsonValue(autoplay));
     std::ofstream output(m_path, std::ios::binary | std::ios::trunc);
     if (!output)
         return false;
-    output << JsonWrite(root) << '\n';
+    output << Engine::Serialization::JsonWrite(root) << '\n';
     return static_cast<bool>(output);
 }
 
@@ -59,4 +61,5 @@ std::string SpriteAnimationAsset::ResolveSpriteSheet() const
         return requested.lexically_normal().generic_string();
     return (std::filesystem::path(m_path).parent_path() / requested)
         .lexically_normal().generic_string();
+}
 }

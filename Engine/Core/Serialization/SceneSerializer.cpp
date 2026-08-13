@@ -39,8 +39,10 @@
 #include <sstream>
 #include <vector>
 
-static bool DeserialiseScene(Scene& scene, const JsonValue& root,
-    IGraphicsProvider* graphicsProvider,
+namespace Engine::Serialization
+{
+static bool DeserialiseScene(Engine::Scene::Scene& scene, const JsonValue& root,
+    Engine::Graphics::IGraphicsProvider* graphicsProvider,
     const std::unordered_map<std::string, SceneSerializer::Factory>& registry);
 
 // ---- Registry ---------------------------------------------------------------
@@ -72,7 +74,7 @@ void SceneSerializer::Register(Factory factory)
     if (!factory)
         throw std::invalid_argument("Cannot register an empty component factory");
 
-    std::unique_ptr<Component> prototype(factory());
+    std::unique_ptr<Engine::Core::Component> prototype(factory());
     if (!prototype || prototype->GetTypeName().empty())
         throw std::invalid_argument("Registered components must provide a type name");
 
@@ -86,29 +88,29 @@ void SceneSerializer::EnsureBuiltinsRegistered()
     if (s_done) return;
     s_done = true;
 
-    RegisterComponentType<Mesh>();
-    RegisterComponentType<Material>();
-    RegisterComponentType<Camera>();
-    RegisterComponentType<Light>();
-    RegisterComponentType<Sprite>();
-    RegisterComponentType<AudioSource>();
-    RegisterComponentType<RigidBody>();
-    RegisterComponentType<PrimitiveObjectCollider>();
-    RegisterComponentType<MeshObjectCollider>();
-    RegisterComponentType<Cloth>();
-    RegisterComponentType<Canvas>();
-    RegisterComponentType<UIObject>();
-    RegisterComponentType<UIText>();
-    RegisterComponentType<SpriteAnimationManager>();
-    RegisterComponentType<Model>();
-    RegisterComponentType<Animation>();
-    RegisterComponentType<AnimationManager>();
-    RegisterComponentType<Skeleton>();
-    RegisterComponentType<SkinnedMesh>();
-    RegisterComponentType<BakedLightingData>();
+    RegisterComponentType<Engine::Components::Mesh>();
+    RegisterComponentType<Engine::Components::Material>();
+    RegisterComponentType<Engine::Components::Camera>();
+    RegisterComponentType<Engine::Components::Light>();
+    RegisterComponentType<Engine::Components::Sprite>();
+    RegisterComponentType<Engine::Components::AudioSource>();
+    RegisterComponentType<Engine::Components::RigidBody>();
+    RegisterComponentType<Engine::Components::PrimitiveObjectCollider>();
+    RegisterComponentType<Engine::Components::MeshObjectCollider>();
+    RegisterComponentType<Engine::Components::Cloth>();
+    RegisterComponentType<Engine::Components::Canvas>();
+    RegisterComponentType<Engine::Components::UIObject>();
+    RegisterComponentType<Engine::Components::UIText>();
+    RegisterComponentType<Engine::Components::SpriteAnimationManager>();
+    RegisterComponentType<Engine::Components::Model>();
+    RegisterComponentType<Engine::Components::Animation>();
+    RegisterComponentType<Engine::Components::AnimationManager>();
+    RegisterComponentType<Engine::Components::Skeleton>();
+    RegisterComponentType<Engine::Components::SkinnedMesh>();
+    RegisterComponentType<Engine::Rendering::BakedLightingData>();
 }
 
-Component* SceneSerializer::CreateRegisteredComponent(const std::string& typeName)
+Engine::Core::Component* SceneSerializer::CreateRegisteredComponent(const std::string& typeName)
 {
     EnsureBuiltinsRegistered();
     auto& registry = GetRegistry();
@@ -135,7 +137,7 @@ std::vector<std::string> SceneSerializer::GetRegisteredComponentTypes()
     types.reserve(GetRegistry().size());
     for (const auto& entry : GetRegistry())
     {
-        std::unique_ptr<Component> prototype(entry.second ? entry.second() : nullptr);
+        std::unique_ptr<Engine::Core::Component> prototype(entry.second ? entry.second() : nullptr);
         if (prototype && prototype->editorAddable)
             types.push_back(entry.first);
     }
@@ -153,8 +155,8 @@ std::vector<std::string> SceneSerializer::GetRegisteredScriptTypes()
     std::vector<std::string> types;
     for (const auto& entry : GetRegistry())
     {
-        std::unique_ptr<Component> prototype(entry.second ? entry.second() : nullptr);
-        if (prototype && dynamic_cast<Script*>(prototype.get()))
+        std::unique_ptr<Engine::Core::Component> prototype(entry.second ? entry.second() : nullptr);
+        if (prototype && dynamic_cast<Engine::Core::Script*>(prototype.get()))
             types.push_back(entry.first);
     }
     std::sort(types.begin(), types.end());
@@ -403,8 +405,8 @@ std::string WriteXmlDocument(const JsonValue& value, const char* rootName = "Sce
     return stream.str();
 }
 
-bool LoadXmlDocument(Scene& scene, const std::string& source,
-    IGraphicsProvider* graphicsProvider,
+bool LoadXmlDocument(Engine::Scene::Scene& scene, const std::string& source,
+    Engine::Graphics::IGraphicsProvider* graphicsProvider,
     const std::unordered_map<std::string, SceneSerializer::Factory>& registry,
     bool isFile)
 {
@@ -424,23 +426,23 @@ bool LoadXmlDocument(Scene& scene, const std::string& source,
 
 } // namespace
 
-// ---- Serialise a single Object (recursive) ----------------------------------
-static JsonValue SerialiseTransform(const Transform& transform)
+// ---- Serialise a single Engine::Core::Object (recursive) ----------------------------------
+static JsonValue SerialiseTransform(const Engine::Components::Transform& transform)
 {
     return transform.Serialize();
 }
 
-static void DeserialiseTransform(Transform& transform, const JsonValue& node)
+static void DeserialiseTransform(Engine::Components::Transform& transform, const JsonValue& node)
 {
     if (!node.IsObject())
         return;
     transform.Deserialize(node);
 }
 
-static void SetPrefabSourceSnapshot(Object& object, const JsonValue& source)
+static void SetPrefabSourceSnapshot(Engine::Core::Object& object, const JsonValue& source)
 {
     object.PrefabSourceSnapshot = JsonWrite(source);
-    Transform sourceTransform;
+    Engine::Components::Transform sourceTransform;
     DeserialiseTransform(sourceTransform, source["transform"]);
     object.PrefabSourcePosition = sourceTransform.position;
     object.PrefabSourceRotation = sourceTransform.rotation;
@@ -449,7 +451,7 @@ static void SetPrefabSourceSnapshot(Object& object, const JsonValue& source)
     object.PrefabOverrideCacheValid = false;
 }
 
-static bool PrefabRootTransformDiffers(const Object& instance)
+static bool PrefabRootTransformDiffers(const Engine::Core::Object& instance)
 {
     if (!instance.PrefabSourceTransformValid)
         return false;
@@ -465,14 +467,14 @@ static bool PrefabRootTransformDiffers(const Object& instance)
         differs(instance.transform.scale, instance.PrefabSourceScale);
 }
 
-static JsonValue SerialiseBakedMaterialOverrides(const Object& root)
+static JsonValue SerialiseBakedMaterialOverrides(const Engine::Core::Object& root)
 {
     JsonValue overrides = JsonValue::MakeArray();
-    std::function<void(const Object&, std::vector<size_t>)> visit =
-        [&](const Object& object, std::vector<size_t> path)
+    std::function<void(const Engine::Core::Object&, std::vector<size_t>)> visit =
+        [&](const Engine::Core::Object& object, std::vector<size_t> path)
     {
-        const auto* baked = object.GetComponent<BakedLightingData>();
-        const auto* material = object.GetComponent<Material>();
+        const auto* baked = object.GetComponent<Engine::Rendering::BakedLightingData>();
+        const auto* material = object.GetComponent<Engine::Components::Material>();
         if (baked && material)
         {
             JsonValue entry = JsonValue::MakeObject();
@@ -495,15 +497,15 @@ static JsonValue SerialiseBakedMaterialOverrides(const Object& root)
     return overrides;
 }
 
-static void ApplyBakedMaterialOverrides(Object& root, const JsonValue& node,
-    IGraphicsProvider* graphicsProvider)
+static void ApplyBakedMaterialOverrides(Engine::Core::Object& root, const JsonValue& node,
+    Engine::Graphics::IGraphicsProvider* graphicsProvider)
 {
     const JsonValue& overrides = node["bakedMaterialOverrides"];
     for (size_t overrideIndex = 0;
         overrideIndex < overrides.ArraySize(); ++overrideIndex)
     {
         const JsonValue& entry = overrides.ArrayAt(overrideIndex);
-        Object* object = &root;
+        Engine::Core::Object* object = &root;
         const JsonValue& path = entry["path"];
         bool validPath = true;
         for (size_t depth = 0; depth < path.ArraySize(); ++depth)
@@ -520,25 +522,25 @@ static void ApplyBakedMaterialOverrides(Object& root, const JsonValue& node,
             !entry["bakedLighting"].IsObject())
             continue;
 
-        Material* material = object->GetComponent<Material>();
+        Engine::Components::Material* material = object->GetComponent<Engine::Components::Material>();
         if (!material)
-            material = object->AddComponent<Material>();
+            material = object->AddComponent<Engine::Components::Material>();
         material->Deserialize(entry["material"]);
         material->OnAfterDeserialize(graphicsProvider);
 
-        BakedLightingData* baked = object->GetComponent<BakedLightingData>();
+        Engine::Rendering::BakedLightingData* baked = object->GetComponent<Engine::Rendering::BakedLightingData>();
         if (!baked)
-            baked = object->AddComponent<BakedLightingData>();
+            baked = object->AddComponent<Engine::Rendering::BakedLightingData>();
         baked->Deserialize(entry["bakedLighting"]);
     }
 }
 
-static JsonValue BuildPrefabPatches(const Object& instance,
+static JsonValue BuildPrefabPatches(const Engine::Core::Object& instance,
     bool includeRootTransform);
-static void EnsurePrefabPatchCache(const Object& instance);
+static void EnsurePrefabPatchCache(const Engine::Core::Object& instance);
 
 static JsonValue SerialiseObject(
-    const Object& obj,
+    const Engine::Core::Object& obj,
     bool serialisePrefabAsReference = true)
 {
     JsonValue node = JsonValue::MakeObject();
@@ -565,18 +567,18 @@ static JsonValue SerialiseObject(
     node.Set("name", JsonValue(obj.name));
     node.Set("enabled", JsonValue(obj.enabled));
 
-    // Transform
+    // Engine::Components::Transform
     node.Set("transform", SerialiseTransform(obj.transform));
 
     // Components
     JsonValue comps = JsonValue::MakeArray();
-    for (const Component* comp : obj.Components)
+    for (const Engine::Core::Component* comp : obj.Components)
         comps.Push(comp->Serialize());
     node.Set("components", std::move(comps));
 
     // Children (recursive)
     JsonValue children = JsonValue::MakeArray();
-    for (const Object* child : obj.Children)
+    for (const Engine::Core::Object* child : obj.Children)
         children.Push(SerialiseObject(*child, true));
     node.Set("children", std::move(children));
 
@@ -688,7 +690,7 @@ static void DiffJson(const JsonValue& baseline, const JsonValue& current,
     if (!JsonEquals(baseline, current)) AddPatch(patches, path, &current);
 }
 
-static JsonValue BuildPrefabPatches(const Object& instance,
+static JsonValue BuildPrefabPatches(const Engine::Core::Object& instance,
     bool includeRootTransform)
 {
     JsonValue patches = JsonValue::MakeArray();
@@ -704,7 +706,7 @@ static JsonValue BuildPrefabPatches(const Object& instance,
     return patches;
 }
 
-static void EnsurePrefabPatchCache(const Object& instance)
+static void EnsurePrefabPatchCache(const Engine::Core::Object& instance)
 {
     if (instance.PrefabOverrideCacheValid) return;
     const JsonValue nonTransform = BuildPrefabPatches(instance, false);
@@ -748,8 +750,8 @@ static bool ApplyPatch(JsonValue& target, const JsonValue& patch)
     return false;
 }
 
-static bool ApplyObjectState(Object& object, const JsonValue& node,
-    IGraphicsProvider* graphicsProvider)
+static bool ApplyObjectState(Engine::Core::Object& object, const JsonValue& node,
+    Engine::Graphics::IGraphicsProvider* graphicsProvider)
 {
     if (!node.IsObject()) return false;
     if (node.Has("name")) object.name = node["name"].AsString();
@@ -774,8 +776,8 @@ static bool ApplyObjectState(Object& object, const JsonValue& node,
     return true;
 }
 
-static bool ApplyPrefabPatches(Object& instance, const JsonValue& patches,
-    IGraphicsProvider* graphicsProvider)
+static bool ApplyPrefabPatches(Engine::Core::Object& instance, const JsonValue& patches,
+    Engine::Graphics::IGraphicsProvider* graphicsProvider)
 {
     if (instance.PrefabSourceSnapshot.empty()) return false;
     JsonValue merged;
@@ -783,19 +785,19 @@ static bool ApplyPrefabPatches(Object& instance, const JsonValue& patches,
     catch (...) { return false; }
     for (size_t i = 0; i < patches.ArraySize(); ++i)
         if (!ApplyPatch(merged, patches.ArrayAt(i))) return false;
-    const Transform placement = instance.transform;
+    const Engine::Components::Transform placement = instance.transform;
     const bool applied = ApplyObjectState(instance, merged, graphicsProvider);
     instance.transform = placement;
     return applied;
 }
 
-static JsonValue SerialiseScene(const Scene& scene)
+static JsonValue SerialiseScene(const Engine::Scene::Scene& scene)
 {
     JsonValue root = JsonValue::MakeObject();
     root.Set("version", JsonValue(1));
 
     // Settings
-    root.Set("settings", SerializeSceneSettings(scene.settings));
+    root.Set("settings", Engine::Scene::SerializeSceneSettings(scene.settings));
 
     // Objects — only root-level (no parent)
     JsonValue objects = JsonValue::MakeArray();
@@ -808,12 +810,12 @@ static JsonValue SerialiseScene(const Scene& scene)
 }
 
 // ---- Save -------------------------------------------------------------------
-std::string SceneSerializer::SaveToString(const Scene& scene)
+std::string SceneSerializer::SaveToString(const Engine::Scene::Scene& scene)
 {
     return WriteXmlDocument(SerialiseScene(scene));
 }
 
-bool SceneSerializer::Save(const Scene& scene, const std::string& path)
+bool SceneSerializer::Save(const Engine::Scene::Scene& scene, const std::string& path)
 {
     std::ofstream file(path);
     if (!file) return false;
@@ -821,8 +823,8 @@ bool SceneSerializer::Save(const Scene& scene, const std::string& path)
     return file.good();
 }
 
-static bool DeserialiseScene(Scene& scene, const JsonValue& root,
-    IGraphicsProvider* graphicsProvider,
+static bool DeserialiseScene(Engine::Scene::Scene& scene, const JsonValue& root,
+    Engine::Graphics::IGraphicsProvider* graphicsProvider,
     const std::unordered_map<std::string, SceneSerializer::Factory>& registry)
 {
     if (!root.IsObject()) return false;
@@ -833,12 +835,12 @@ static bool DeserialiseScene(Scene& scene, const JsonValue& root,
     // Clear existing scene content
     scene.ClearObjects();
 
-    DeserializeSceneSettings(scene.settings, root["settings"]);
+    Engine::Scene::DeserializeSceneSettings(scene.settings, root["settings"]);
 
-    // Deserialise a single Object node, then recurse for children.
+    // Deserialise a single Engine::Core::Object node, then recurse for children.
     // Uses std::function so it can reference itself (recursive lambda).
-    std::function<void(Object&, const JsonValue&)> deserialise
-        = [&](Object& obj, const JsonValue& node)
+    std::function<void(Engine::Core::Object&, const JsonValue&)> deserialise
+        = [&](Engine::Core::Object& obj, const JsonValue& node)
     {
         if (node.Has("name"))
             obj.name = node["name"].AsString();
@@ -846,7 +848,7 @@ static bool DeserialiseScene(Scene& scene, const JsonValue& root,
         if (node.Has("prefab"))
             obj.SetPrefab(node["prefab"].AsString());
 
-        // Transform
+        // Engine::Components::Transform
         DeserialiseTransform(obj.transform, node["transform"]);
 
         // Components
@@ -864,7 +866,7 @@ static bool DeserialiseScene(Scene& scene, const JsonValue& root,
                 continue;
             }
 
-            Component* comp = (*factory)();        // factory: default-construct
+            Engine::Core::Component* comp = (*factory)();        // factory: default-construct
             comp->Owner = &obj;
             comp->Deserialize(cn);
             comp->OnAfterDeserialize(graphicsProvider);
@@ -876,7 +878,7 @@ static bool DeserialiseScene(Scene& scene, const JsonValue& root,
         for (std::size_t i = 0; i < children.ArraySize(); ++i)
         {
             const JsonValue& childNode = children.ArrayAt(i);
-            Object* child = nullptr;
+            Engine::Core::Object* child = nullptr;
             if (childNode.Has("prefab"))
             {
                 child = SceneSerializer::InstantiatePrefab(
@@ -911,7 +913,7 @@ static bool DeserialiseScene(Scene& scene, const JsonValue& root,
         const JsonValue& objectNode = objects.ArrayAt(i);
         if (objectNode.Has("prefab"))
         {
-            Object* object = SceneSerializer::InstantiatePrefab(
+            Engine::Core::Object* object = SceneSerializer::InstantiatePrefab(
                 scene, objectNode["prefab"].AsString(), graphicsProvider);
             if (!object)
                 throw std::runtime_error(
@@ -928,7 +930,7 @@ static bool DeserialiseScene(Scene& scene, const JsonValue& root,
         }
         else
         {
-            Object* object = scene.AddObject();
+            Engine::Core::Object* object = scene.AddObject();
             deserialise(*object, objectNode);
         }
     }
@@ -937,8 +939,8 @@ static bool DeserialiseScene(Scene& scene, const JsonValue& root,
 }
 
 // ---- Load -------------------------------------------------------------------
-bool SceneSerializer::LoadFromString(Scene& scene, const std::string& source,
-    IGraphicsProvider* graphicsProvider)
+bool SceneSerializer::LoadFromString(Engine::Scene::Scene& scene, const std::string& source,
+    Engine::Graphics::IGraphicsProvider* graphicsProvider)
 {
     EnsureBuiltinsRegistered();
     try
@@ -964,7 +966,7 @@ bool SceneSerializer::LoadFromString(Scene& scene, const std::string& source,
     return false;
 }
 
-bool SceneSerializer::Load(Scene& scene, const std::string& path, IGraphicsProvider* graphicsProvider)
+bool SceneSerializer::Load(Engine::Scene::Scene& scene, const std::string& path, Engine::Graphics::IGraphicsProvider* graphicsProvider)
 {
     EnsureBuiltinsRegistered();
     try { return LoadXmlDocument(scene, path, graphicsProvider, GetRegistry(), true); }
@@ -979,7 +981,7 @@ bool SceneSerializer::Load(Scene& scene, const std::string& path, IGraphicsProvi
     }
 }
 
-std::string SceneSerializer::SaveObjectToString(const Object& object)
+std::string SceneSerializer::SaveObjectToString(const Engine::Core::Object& object)
 {
     JsonValue root = JsonValue::MakeObject();
     root.Set("version", JsonValue(1));
@@ -988,11 +990,11 @@ std::string SceneSerializer::SaveObjectToString(const Object& object)
     return JsonWrite(root);
 }
 
-Object* SceneSerializer::InstantiateObjectFromString(
-    Scene& scene, const std::string& source, IGraphicsProvider* graphicsProvider)
+Engine::Core::Object* SceneSerializer::InstantiateObjectFromString(
+    Engine::Scene::Scene& scene, const std::string& source, Engine::Graphics::IGraphicsProvider* graphicsProvider)
 {
     EnsureBuiltinsRegistered();
-    Object* rootObject = nullptr;
+    Engine::Core::Object* rootObject = nullptr;
     try
     {
         const JsonValue root = JsonParse(source);
@@ -1001,10 +1003,10 @@ Object* SceneSerializer::InstantiateObjectFromString(
             !root["object"].IsObject())
             return nullptr;
 
-        std::function<Object*(const JsonValue&)> instantiate;
-        instantiate = [&](const JsonValue& node) -> Object*
+        std::function<Engine::Core::Object*(const JsonValue&)> instantiate;
+        instantiate = [&](const JsonValue& node) -> Engine::Core::Object*
         {
-            Object* object = nullptr;
+            Engine::Core::Object* object = nullptr;
             if (node.Has("prefab"))
             {
                 object = InstantiatePrefab(
@@ -1040,7 +1042,7 @@ Object* SceneSerializer::InstantiateObjectFromString(
                     GetRegistry(), componentNode["type"].AsString());
                 if (!factory)
                     continue;
-                Component* component = (*factory)();
+                Engine::Core::Component* component = (*factory)();
                 component->Owner = object;
                 component->Deserialize(componentNode);
                 component->OnAfterDeserialize(graphicsProvider);
@@ -1050,7 +1052,7 @@ Object* SceneSerializer::InstantiateObjectFromString(
             const JsonValue& children = node["children"];
             for (std::size_t index = 0; index < children.ArraySize(); ++index)
             {
-                Object* child = instantiate(children.ArrayAt(index));
+                Engine::Core::Object* child = instantiate(children.ArrayAt(index));
                 if (!child)
                     throw std::runtime_error("Could not instantiate copied child object");
                 child->Parent = object;
@@ -1073,7 +1075,7 @@ Object* SceneSerializer::InstantiateObjectFromString(
     }
 }
 
-bool SceneSerializer::SavePrefab(const Object& object, const std::string& path,
+bool SceneSerializer::SavePrefab(const Engine::Core::Object& object, const std::string& path,
     bool preserveRootTransform)
 {
     JsonValue root = JsonValue::MakeObject();
@@ -1112,7 +1114,7 @@ bool SceneSerializer::SavePrefab(const Object& object, const std::string& path,
     return file.good();
 }
 
-std::string SceneSerializer::SavePrefabToString(const Object& object,
+std::string SceneSerializer::SavePrefabToString(const Engine::Core::Object& object,
     bool includeRootTransform)
 {
     JsonValue root = JsonValue::MakeObject();
@@ -1168,13 +1170,13 @@ JsonValue LoadPrefabDocument(const std::filesystem::path& path)
 }
 }
 
-Object* SceneSerializer::InstantiatePrefab(
-    Scene& scene,
+Engine::Core::Object* SceneSerializer::InstantiatePrefab(
+    Engine::Scene::Scene& scene,
     const std::string& path,
-    IGraphicsProvider* graphicsProvider)
+    Engine::Graphics::IGraphicsProvider* graphicsProvider)
 {
     EnsureBuiltinsRegistered();
-    Object* rootObject = nullptr;
+    Engine::Core::Object* rootObject = nullptr;
     static thread_local std::vector<std::string> prefabStack;
     std::error_code absoluteError;
     const std::filesystem::path resolvedPath = ResolvePrefabPath(path);
@@ -1206,9 +1208,9 @@ Object* SceneSerializer::InstantiatePrefab(
             root["type"].AsString() != "prefab" || !root["object"].IsObject())
             return nullptr;
 
-        std::vector<std::pair<Object*, unsigned>> legacyNodeBindings;
-        std::function<void(Object&, const JsonValue&)> instantiate =
-            [&](Object& object, const JsonValue& node)
+        std::vector<std::pair<Engine::Core::Object*, unsigned>> legacyNodeBindings;
+        std::function<void(Engine::Core::Object&, const JsonValue&)> instantiate =
+            [&](Engine::Core::Object& object, const JsonValue& node)
         {
             if (node.Has("name"))
                 object.name = node["name"].AsString();
@@ -1228,12 +1230,12 @@ Object* SceneSerializer::InstantiatePrefab(
                         legacyNodeBindings.emplace_back(&object,
                             static_cast<unsigned>(componentNode["nodeIndex"].AsInt()));
                     else if (type == "MorphTargets")
-                        if (Mesh* mesh = object.GetComponent<Mesh>())
+                        if (Engine::Components::Mesh* mesh = object.GetComponent<Engine::Components::Mesh>())
                             mesh->DeserializeLegacyMorphTargets(componentNode);
                     continue;
                 }
 
-                Component* component = (*factory)();
+                Engine::Core::Component* component = (*factory)();
                 component->Owner = &object;
                 component->Deserialize(componentNode);
                 component->OnAfterDeserialize(graphicsProvider);
@@ -1244,7 +1246,7 @@ Object* SceneSerializer::InstantiatePrefab(
             for (std::size_t i = 0; i < children.ArraySize(); ++i)
             {
                 const JsonValue& childNode = children.ArrayAt(i);
-                Object* child = nullptr;
+                Engine::Core::Object* child = nullptr;
                 if (childNode.Has("prefab"))
                 {
                     child = InstantiatePrefab(
@@ -1273,8 +1275,8 @@ Object* SceneSerializer::InstantiatePrefab(
         instantiate(*rootObject, root["object"]);
         if (!legacyNodeBindings.empty())
         {
-            Model* model = rootObject->GetComponent<Model>();
-            if (!model) model = rootObject->AddComponent<Model>();
+            Engine::Components::Model* model = rootObject->GetComponent<Engine::Components::Model>();
+            if (!model) model = rootObject->AddComponent<Engine::Components::Model>();
             for (const auto& [object, index] : legacyNodeBindings)
                 model->BindNode(index, object);
         }
@@ -1293,10 +1295,10 @@ Object* SceneSerializer::InstantiatePrefab(
 }
 
 bool SceneSerializer::RefreshPrefabInstances(
-    Scene& scene,
+    Engine::Scene::Scene& scene,
     const std::string& path,
-    IGraphicsProvider* graphicsProvider,
-    Object* preservedInstance)
+    Engine::Graphics::IGraphicsProvider* graphicsProvider,
+    Engine::Core::Object* preservedInstance)
 {
     EnsureBuiltinsRegistered();
     try
@@ -1326,16 +1328,16 @@ bool SceneSerializer::RefreshPrefabInstances(
         };
 
         const std::string targetKey = identity(resolvedPath.string());
-        std::vector<Object*> instances;
+        std::vector<Engine::Core::Object*> instances;
         for (const auto& candidate : scene.GetObjects())
             if (candidate.get() != preservedInstance && candidate->Prefab &&
                 identity(ResolvePrefabPath(
                     candidate->Prefab->GetPath()).string()) == targetKey)
                 instances.push_back(candidate.get());
 
-        std::vector<std::pair<Object*, unsigned>>* legacyNodeBindings = nullptr;
-        std::function<void(Object&, const JsonValue&)> populate =
-            [&](Object& object, const JsonValue& node)
+        std::vector<std::pair<Engine::Core::Object*, unsigned>>* legacyNodeBindings = nullptr;
+        std::function<void(Engine::Core::Object&, const JsonValue&)> populate =
+            [&](Engine::Core::Object& object, const JsonValue& node)
         {
             object.name = node.Has("name")
                 ? node["name"].AsString()
@@ -1355,11 +1357,11 @@ bool SceneSerializer::RefreshPrefabInstances(
                         legacyNodeBindings->emplace_back(&object,
                             static_cast<unsigned>(componentNode["nodeIndex"].AsInt()));
                     else if (type == "MorphTargets")
-                        if (Mesh* mesh = object.GetComponent<Mesh>())
+                        if (Engine::Components::Mesh* mesh = object.GetComponent<Engine::Components::Mesh>())
                             mesh->DeserializeLegacyMorphTargets(componentNode);
                     continue;
                 }
-                Component* component = (*factory)();
+                Engine::Core::Component* component = (*factory)();
                 component->Owner = &object;
                 component->Deserialize(componentNode);
                 component->OnAfterDeserialize(graphicsProvider);
@@ -1370,7 +1372,7 @@ bool SceneSerializer::RefreshPrefabInstances(
             for (std::size_t index = 0; index < children.ArraySize(); ++index)
             {
                 const JsonValue& childNode = children.ArrayAt(index);
-                Object* child = nullptr;
+                Engine::Core::Object* child = nullptr;
                 if (childNode.Has("prefab"))
                 {
                     child = InstantiatePrefab(
@@ -1395,27 +1397,27 @@ bool SceneSerializer::RefreshPrefabInstances(
             }
         };
 
-        for (Object* instance : instances)
+        for (Engine::Core::Object* instance : instances)
         {
             const JsonValue localOverrides = BuildPrefabPatches(*instance, false);
-            const Transform placement = instance->transform;
+            const Engine::Components::Transform placement = instance->transform;
             const auto prefab = instance->Prefab;
-            const std::vector<Object*> oldChildren = instance->Children;
-            for (Object* child : oldChildren)
+            const std::vector<Engine::Core::Object*> oldChildren = instance->Children;
+            for (Engine::Core::Object* child : oldChildren)
                 scene.RemoveObject(child);
             instance->Children.clear();
-            for (Component* component : instance->Components)
+            for (Engine::Core::Component* component : instance->Components)
                 delete component;
             instance->Components.clear();
 
-            std::vector<std::pair<Object*, unsigned>> bindings;
+            std::vector<std::pair<Engine::Core::Object*, unsigned>> bindings;
             legacyNodeBindings = &bindings;
             populate(*instance, root["object"]);
             legacyNodeBindings = nullptr;
             if (!bindings.empty())
             {
-                Model* model = instance->GetComponent<Model>();
-                if (!model) model = instance->AddComponent<Model>();
+                Engine::Components::Model* model = instance->GetComponent<Engine::Components::Model>();
+                if (!model) model = instance->AddComponent<Engine::Components::Model>();
                 for (const auto& [object, index] : bindings)
                     model->BindNode(index, object);
             }
@@ -1438,10 +1440,10 @@ bool SceneSerializer::RefreshPrefabInstances(
     }
 }
 
-bool SceneSerializer::HasPrefabOverrides(const Object& instance,
+bool SceneSerializer::HasPrefabOverrides(const Engine::Core::Object& instance,
     bool includeRootTransform)
 {
-    const Object* root = instance.GetPrefabInstanceRoot();
+    const Engine::Core::Object* root = instance.GetPrefabInstanceRoot();
     if (!root || !root->Prefab) return false;
     EnsurePrefabPatchCache(*root);
     if (!includeRootTransform)
@@ -1451,10 +1453,10 @@ bool SceneSerializer::HasPrefabOverrides(const Object& instance,
     return root->PrefabHasOverrides;
 }
 
-bool SceneSerializer::RevertPrefabOverrides(Object& instance,
-    IGraphicsProvider* graphicsProvider)
+bool SceneSerializer::RevertPrefabOverrides(Engine::Core::Object& instance,
+    Engine::Graphics::IGraphicsProvider* graphicsProvider)
 {
-    Object* root = instance.GetPrefabInstanceRoot();
+    Engine::Core::Object* root = instance.GetPrefabInstanceRoot();
     if (!root || !root->Prefab || root->PrefabSourceSnapshot.empty()) return false;
     try
     {
@@ -1466,10 +1468,10 @@ bool SceneSerializer::RevertPrefabOverrides(Object& instance,
     catch (...) { return false; }
 }
 
-bool SceneSerializer::ApplyPrefabOverridesToAsset(Object& instance,
-    bool includeRootTransform, IGraphicsProvider* graphicsProvider)
+bool SceneSerializer::ApplyPrefabOverridesToAsset(Engine::Core::Object& instance,
+    bool includeRootTransform, Engine::Graphics::IGraphicsProvider* graphicsProvider)
 {
-    Object* root = instance.GetPrefabInstanceRoot();
+    Engine::Core::Object* root = instance.GetPrefabInstanceRoot();
     if (!root || !root->Prefab) return false;
     const std::string path = root->Prefab->GetPath();
     if (!SavePrefab(*root, path, !includeRootTransform)) return false;
@@ -1480,6 +1482,7 @@ bool SceneSerializer::ApplyPrefabOverridesToAsset(Object& instance,
     }
     catch (...) { return false; }
     root->PrefabOverrideCacheValid = false;
-    Scene* scene = root->GetScene();
+    Engine::Scene::Scene* scene = root->GetScene();
     return !scene || RefreshPrefabInstances(*scene, path, graphicsProvider, root);
+}
 }

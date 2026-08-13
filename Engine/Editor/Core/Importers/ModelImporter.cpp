@@ -8,6 +8,8 @@
 #include <cctype>
 #include <filesystem>
 
+namespace Engine::Editor
+{
 namespace
 {
 std::string LowerExtension(const std::string& value)
@@ -28,7 +30,7 @@ bool ModelImporter::SupportsExtension(const std::string& extension)
     return normalized == ".gltf" || normalized == ".glb" || normalized == ".fbx";
 }
 
-ModelImportResult ModelImporter::Import(const std::string& sourcePath,
+Engine::Model::ModelImportResult ModelImporter::Import(const std::string& sourcePath,
     const std::string& assetsDirectory)
 {
     const std::string extension = LowerExtension(sourcePath);
@@ -38,11 +40,12 @@ ModelImportResult ModelImporter::Import(const std::string& sourcePath,
     }
     if (extension == ".fbx")
     {
-        ImportedModel model;
+        Engine::Model::ImportedModel model;
         std::string error;
         if (!FbxModelDecoder::Decode(sourcePath, model, error))
             return { false, {}, {}, error.empty() ? "Could not decode FBX" : error };
         return ModelAssetWriter::Write(model, sourcePath, assetsDirectory);
     }
     return { false, {}, {}, "Unsupported model format: " + extension };
+}
 }

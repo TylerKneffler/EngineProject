@@ -5,9 +5,9 @@
 #include "Core/Scene/Scene.h"
 #include <sstream>
 
-namespace
+namespace Engine::Core
 {
-std::string EncodePath(const Scene::ObjectPath& path)
+std::string EncodePath(const Engine::Scene::Scene::ObjectPath& path)
 {
     std::ostringstream output;
     for (std::size_t index = 0; index < path.size(); ++index)
@@ -18,9 +18,9 @@ std::string EncodePath(const Scene::ObjectPath& path)
     return output.str();
 }
 
-Scene::ObjectPath DecodePath(const std::string& encoded)
+Engine::Scene::Scene::ObjectPath DecodePath(const std::string& encoded)
 {
-    Scene::ObjectPath path;
+    Engine::Scene::Scene::ObjectPath path;
     std::istringstream input(encoded);
     std::string part;
     try
@@ -30,7 +30,6 @@ Scene::ObjectPath DecodePath(const std::string& encoded)
     }
     catch (...) { path.clear(); }
     return path;
-}
 }
 
 ComponentReference CaptureComponentReference(const Component* component,
@@ -44,7 +43,7 @@ ComponentReference CaptureComponentReference(const Component* component,
 
     result.objectName = component->Owner->name;
     result.componentType = component->GetTypeName();
-    Scene::ObjectPath path;
+    Engine::Scene::Scene::ObjectPath path;
     if (component->Owner->GetScene()->TryGetObjectPath(component->Owner, path))
         result.objectPath = EncodePath(path);
 
@@ -61,7 +60,7 @@ Component* ResolveComponentReferenceRaw(Object* context,
     const ComponentReference& reference)
 {
     if (!context || !reference.IsAssigned() || !context->GetScene()) return nullptr;
-    Scene* scene = context->GetScene();
+    Engine::Scene::Scene* scene = context->GetScene();
     Object* target = scene->FindObjectByPath(DecodePath(reference.objectPath));
     if (!target || (!reference.objectName.empty() && target->name != reference.objectName))
     {
@@ -85,4 +84,5 @@ Component* ResolveComponentReferenceRaw(Object* context,
             if (index++ == reference.componentIndex) return component;
         }
     return nullptr;
+}
 }

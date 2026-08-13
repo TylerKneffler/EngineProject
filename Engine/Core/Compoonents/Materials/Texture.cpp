@@ -20,6 +20,8 @@
 #include <memory>
 #include <unordered_map>
 
+namespace Engine::Components
+{
 namespace
 {
 std::unordered_map<std::string, std::weak_ptr<Texture>>& TextureRegistry()
@@ -70,12 +72,12 @@ uint8_t LinearToSrgb(float value)
 }
 
 void GenerateMipChain(std::vector<uint8_t>& pixels, uint32_t width,
-    uint32_t height, GraphicsTextureFormat format, bool srgb)
+    uint32_t height, Engine::Graphics::GraphicsTextureFormat format, bool srgb)
 {
     uint32_t sourceWidth = width;
     uint32_t sourceHeight = height;
     size_t sourceOffset = 0;
-    const uint32_t bytesPerPixel = GraphicsTextureBytesPerPixel(format);
+    const uint32_t bytesPerPixel = Engine::Graphics::GraphicsTextureBytesPerPixel(format);
     while (sourceWidth > 1 || sourceHeight > 1)
     {
         const uint32_t targetWidth = std::max(1u, sourceWidth / 2);
@@ -98,7 +100,7 @@ void GenerateMipChain(std::vector<uint8_t>& pixels, uint32_t width,
                         const uint32_t sourceY = std::min(sourceHeight - 1, y * 2 + sampleY);
                         const size_t source = sourceOffset +
                             (static_cast<size_t>(sourceY) * sourceWidth + sourceX) * bytesPerPixel;
-                        if (format == GraphicsTextureFormat::Rgba32Float)
+                        if (format == Engine::Graphics::GraphicsTextureFormat::Rgba32Float)
                         {
                             float value = 0.f;
                             std::memcpy(&value, pixels.data() + source + channel * sizeof(float), sizeof(float));
@@ -111,7 +113,7 @@ void GenerateMipChain(std::vector<uint8_t>& pixels, uint32_t width,
                         }
                     }
                     const float average = sum * 0.25f;
-                    if (format == GraphicsTextureFormat::Rgba32Float)
+                    if (format == Engine::Graphics::GraphicsTextureFormat::Rgba32Float)
                         std::memcpy(pixels.data() + destination + channel * sizeof(float), &average, sizeof(float));
                     else
                         pixels[destination + channel] = srgb && channel < 3
@@ -324,7 +326,7 @@ bool Texture::Prepare(IGraphicsProvider* graphicsProvider)
         return true;
     if (!Load())
         return false;
-    IGraphicsTextureFactory* factory = graphicsProvider->GetTextureFactory();
+    Engine::Graphics::IGraphicsTextureFactory* factory = graphicsProvider->GetTextureFactory();
     if (!factory)
         return false;
     try
@@ -341,4 +343,5 @@ bool Texture::Prepare(IGraphicsProvider* graphicsProvider)
     }
     m_preparedProvider = m_graphicsTexture ? graphicsProvider : nullptr;
     return static_cast<bool>(m_graphicsTexture);
+}
 }

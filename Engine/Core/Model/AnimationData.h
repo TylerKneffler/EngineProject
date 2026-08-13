@@ -5,6 +5,8 @@
 
 // Serializable animation channel data. Sampling and playback live in the
 // animation components, not in this model type.
+namespace Engine::Model
+{
 struct AnimationChannel
 {
     enum class Path { Translation, Rotation, Scale, Weights };
@@ -28,3 +30,5 @@ struct AnimationLayer
     bool additive = false;
     std::vector<unsigned> nodeMask;
 };
+}
+

@@ -1,6 +1,9 @@
 #include "DX12EditorRenderer.h"
 #include "D3D12View.h"
 
+
+namespace Engine::Renderers
+{
 // ---------------------------------------------------------------------------
 // Destruction
 // ---------------------------------------------------------------------------
@@ -103,7 +106,7 @@ void DX12EditorRenderer::Resize(uint32_t width, uint32_t height)
 // ---------------------------------------------------------------------------
 // GetGraphicsProvider
 // ---------------------------------------------------------------------------
-IGraphicsProvider* DX12EditorRenderer::GetGraphicsProvider()
+Engine::Graphics::IGraphicsProvider* DX12EditorRenderer::GetGraphicsProvider()
 {
     return m_graphicsProvider.get();
 }
@@ -447,4 +450,5 @@ void DX12EditorRenderer::FlushGPU()
         WaitForSingleObject(m_fenceEvent, INFINITE);
     }
     m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+}
 }

@@ -3,11 +3,11 @@
 #include "Core/PropertyMacros.h"
 #include <glm/glm.hpp>
 
-class IEditorUi;
-
+namespace Engine::Components
+{
 // Realtime or baked light. Point lights attenuate from their object position;
 // global lights illuminate the whole scene from their Transform rotation.
-class Light : public Component
+class Light : public Engine::Core::Component
 {
 public:
     enum class Type : int
@@ -46,5 +46,6 @@ public:
             ? Type::Ambient : Type::Point;
     }
 
-    bool DrawProperties(IEditorUi& ui) override;
+    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
 };
+}

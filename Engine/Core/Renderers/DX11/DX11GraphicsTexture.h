@@ -5,7 +5,9 @@
 #include <d3d11.h>
 #include <wrl/client.h>
 
-class D3D11GraphicsTexture final : public IGraphicsTexture
+namespace Engine::Renderers
+{
+class D3D11GraphicsTexture final : public Engine::Graphics::IGraphicsTexture
 {
 public:
     D3D11GraphicsTexture(
@@ -21,15 +23,16 @@ private:
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_view;
 };
 
-class D3D11TextureFactory final : public IGraphicsTextureFactory
+class D3D11TextureFactory final : public Engine::Graphics::IGraphicsTextureFactory
 {
 public:
     explicit D3D11TextureFactory(ID3D11Device* device) : m_device(device) {}
-    std::shared_ptr<IGraphicsTexture> CreateTexture2D(
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> CreateTexture2D(
         uint32_t width, uint32_t height, const uint8_t* rgbaPixels,
-        uint32_t mipLevels, GraphicsTextureFormat format,
+        uint32_t mipLevels, Engine::Graphics::GraphicsTextureFormat format,
         bool srgb = true) override;
 
 private:
     ID3D11Device* m_device = nullptr;
 };
+}

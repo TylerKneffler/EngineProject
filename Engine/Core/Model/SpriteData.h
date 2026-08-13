@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+namespace Engine::Model
+{
 struct SpriteSheetFrame
 {
     std::string image;
@@ -19,3 +21,5 @@ struct SpriteSheetAnimation
     bool loop = true;
     std::vector<SpriteSheetFrame> frames;
 };
+}
+

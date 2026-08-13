@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cstring>
 
+namespace Engine::Components
+{
 SpriteAnimationManager::SpriteAnimationManager()
 {
     SetTypeName(COMPONENT_TYPE_NAME(SpriteAnimationManager));
@@ -72,7 +74,7 @@ void SpriteAnimationManager::OnAfterDeserialize(IGraphicsProvider* graphicsProvi
     Prepare(graphicsProvider);
 }
 
-bool SpriteAnimationManager::DrawProperties(IEditorUi& ui)
+bool SpriteAnimationManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
 {
     const std::string previousFile = animationFile;
     bool changed = Component::DrawProperties(ui);
@@ -153,13 +155,13 @@ bool SpriteAnimationManager::Prepare(IGraphicsProvider* graphicsProvider)
     return m_texture && m_texture->Prepare(graphicsProvider);
 }
 
-const SpriteSheetAnimation* SpriteAnimationManager::CurrentAnimation() const
+const SpriteAnimationManager::SpriteSheetAnimation* SpriteAnimationManager::CurrentAnimation() const
 {
     const SpriteSheetAnimation* selected = m_sheet.FindAnimation(m_asset.animation);
     return selected ? selected : m_sheet.GetDefaultAnimation();
 }
 
-const SpriteSheetFrame* SpriteAnimationManager::GetCurrentFrame() const
+const SpriteAnimationManager::SpriteSheetFrame* SpriteAnimationManager::GetCurrentFrame() const
 {
     const SpriteSheetAnimation* selected = CurrentAnimation();
     if (!selected || selected->frames.empty())
@@ -186,4 +188,5 @@ bool SpriteAnimationManager::IsReady() const
 const Texture* SpriteAnimationManager::GetTexture() const
 {
     return m_texture.get();
+}
 }

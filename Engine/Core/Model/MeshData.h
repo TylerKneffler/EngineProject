@@ -3,7 +3,9 @@
 #include <glm/glm.hpp>
 #include <vector>
 
-// Portable CPU-side vertex format shared by importers, physics and renderers.
+// Portable CPU-side Vertex format shared by importers, physics and renderers.
+namespace Engine::Model
+{
 struct Vertex
 {
     float pos[3];
@@ -24,3 +26,5 @@ struct MorphTarget
     std::vector<glm::vec3> normals;
     std::vector<glm::vec3> tangents;
 };
+}
+

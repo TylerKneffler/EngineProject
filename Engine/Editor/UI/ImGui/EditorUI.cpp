@@ -3,6 +3,8 @@
 #include "Engine/Editor/EditorState.h"
 #include "imgui.h"
 
+namespace Engine::Editor
+{
 EditorUI::EditorUI(EditorState* state)
     : m_state(state)
 {
@@ -34,4 +36,5 @@ void EditorUI::Render(PlayState playState)
         ImGui::TextUnformatted(message);
         ImGui::End();
     }
+}
 }

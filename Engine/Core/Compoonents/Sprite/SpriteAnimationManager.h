@@ -6,11 +6,18 @@
 #include <chrono>
 #include <memory>
 
+namespace Engine::Components
+{
 class Texture;
 
-class SpriteAnimationManager : public Component
+class SpriteAnimationManager : public Engine::Core::Component
 {
 public:
+    using SpriteSheetFrame = Engine::Model::SpriteSheetFrame;
+    using SpriteSheetAnimation = Engine::Model::SpriteSheetAnimation;
+    using SpriteAnimationAsset = Engine::Rendering::SpriteAnimationAsset;
+    using SpriteSheetAsset = Engine::Rendering::SpriteSheetAsset;
+
     SpriteAnimationManager();
 
     PROPERTY(Inspector, EditAnywhere, Category = "Sprite Animation")
@@ -25,7 +32,7 @@ public:
     void Update() override;
     void Deserialize(const JsonValue& value) override;
     void OnAfterDeserialize(IGraphicsProvider* graphicsProvider) override;
-    bool DrawProperties(IEditorUi& ui) override;
+    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
     bool Prepare(IGraphicsProvider* graphicsProvider);
     bool IsReady() const;
     const SpriteSheetFrame* GetCurrentFrame() const;
@@ -43,3 +50,4 @@ private:
     std::string m_loadedImagePath;
     std::chrono::steady_clock::time_point m_lastFrameTime{};
 };
+}

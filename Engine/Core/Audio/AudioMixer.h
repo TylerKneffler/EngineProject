@@ -3,6 +3,8 @@
 #include <glm/glm.hpp>
 #include <string>
 
+namespace Engine::Audio
+{
 // One process-wide output device and node graph. AudioSource components feed
 // named buses into this mixer; buses are created lazily and default to unity.
 class AudioMixer
@@ -33,3 +35,4 @@ private:
     struct Impl;
     Impl* m_impl = nullptr;
 };
+}

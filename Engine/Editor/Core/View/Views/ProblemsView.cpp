@@ -1,6 +1,8 @@
 #include "ProblemsView.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 
+namespace Engine::Editor
+{
 void EditorProblemStore::Add(EditorProblemSeverity severity,
     const std::string& message)
 {
@@ -70,4 +72,5 @@ void ProblemsView::DrawPanel(IEditorUi& ui)
         RebuildText();
     ui.ReadOnlyTextBlock("##problemsText", m_textBlock.c_str());
     ui.EndWindow();
+}
 }

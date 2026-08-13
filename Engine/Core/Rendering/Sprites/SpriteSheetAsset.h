@@ -6,9 +6,13 @@
 
 // Runtime datatype for .spritesheet assets. Files may contain JSON or XML;
 // image references are resolved relative to the spritesheet file.
+namespace Engine::Rendering
+{
 class SpriteSheetAsset
 {
 public:
+    using SpriteSheetAnimation = Engine::Model::SpriteSheetAnimation;
+
     bool Load(const std::string& path);
     const SpriteSheetAnimation* FindAnimation(const std::string& name) const;
     const SpriteSheetAnimation* GetDefaultAnimation() const;
@@ -23,3 +27,4 @@ private:
     std::string m_path;
     std::vector<SpriteSheetAnimation> m_animations;
 };
+}

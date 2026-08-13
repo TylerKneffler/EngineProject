@@ -4,13 +4,16 @@
 #include <glm/glm.hpp>
 #include <vector>
 
-class Object;
-class Scene;
-
+namespace Engine::Scene { class Scene; }
+namespace Engine::UI
+{
 class UILayout
 {
 public:
+    using UITextLayout = Engine::Model::UITextLayout;
+
     // Resolves every enabled Canvas hierarchy and returns visible text items in
     // deterministic canvas/z/hierarchy order.
-    static std::vector<UITextLayout> Resolve(Scene& scene, float viewportAspect);
+    static std::vector<UITextLayout> Resolve(Engine::Scene::Scene& scene, float viewportAspect);
 };
+}

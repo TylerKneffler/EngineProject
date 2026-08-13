@@ -7,12 +7,15 @@
 
 #include "Core/Graphics/IGraphicsTexture.h"
 
-class IGraphicsProvider;
-class IGraphicsTexture;
-
+namespace Engine::Components
+{
 class Texture
 {
 public:
+    using IGraphicsProvider = Engine::Graphics::IGraphicsProvider;
+    using IGraphicsTexture = Engine::Graphics::IGraphicsTexture;
+    using GraphicsTextureFormat = Engine::Graphics::GraphicsTextureFormat;
+
     static std::shared_ptr<Texture> Acquire(
         const std::string& path, bool srgb = true);
     // Discard decoded/GPU data for a generated asset that was overwritten.
@@ -50,3 +53,4 @@ private:
     IGraphicsProvider* m_preparedProvider = nullptr;
     std::shared_ptr<IGraphicsTexture> m_graphicsTexture;
 };
+}

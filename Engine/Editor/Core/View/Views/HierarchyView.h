@@ -6,6 +6,8 @@
 #include "View/IEditorPanel.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 
+namespace Engine::Editor
+{
 // ---------------------------------------------------------------------------
 // HierarchyView
 //
@@ -27,51 +29,52 @@ public:
     HierarchyView()  = default;
     ~HierarchyView() = default;
 
-    void Init(Scene* scene) { m_scene = scene; }
+    void Init(Engine::Scene::Scene* scene) { m_scene = scene; }
 
     void DrawPanel(IEditorUi& ui) override;
 
-    Object* GetSelectedObject() const  { return m_selectedObject; }
-    void    SetSelectedObject(Object* obj);
+    Engine::Core::Object* GetSelectedObject() const  { return m_selectedObject; }
+    void    SetSelectedObject(Engine::Core::Object* obj);
     void SetDebugInteractionLogging(bool enabled);
 
     // Fires whenever the selected object changes (including deselect → nullptr).
-    std::function<void(Object*)> OnSelectionChanged;
+    std::function<void(Engine::Core::Object*)> OnSelectionChanged;
 
     // Fires when the user double-clicks an object — editor should frame it in the scene view.
-    std::function<void(Object*)> OnFocusObject;
+    std::function<void(Engine::Core::Object*)> OnFocusObject;
     std::function<void()> OnHierarchyChanged;
     std::function<void(const std::string&)> OnInteractionLog;
 
 private:
     enum class PendingAddType { Empty, Cube, Sprite };
     enum class PendingPrefabAction { None, Apply, ApplyAll, Revert, Unpack };
-    void DrawObjectNode(IEditorUi& ui, Object* obj, int depth,
+    void DrawObjectNode(IEditorUi& ui, Engine::Core::Object* obj, int depth,
         bool lastSibling, uint64_t ancestorGuideMask = 0);
     void LogInteraction(const std::string& message) const;
     void CopySelection();
     void PasteClipboard();
 
-    Scene*  m_scene          = nullptr;
-    Object* m_selectedObject = nullptr;
-    Object* m_pendingDragged = nullptr;
-    Object* m_pendingTarget = nullptr;
-    Object* m_pendingAddParent = nullptr;
-    Object* m_pendingDelete = nullptr;
-    Object* m_pendingPrefabRoot = nullptr;
+    Engine::Scene::Scene*  m_scene          = nullptr;
+    Engine::Core::Object* m_selectedObject = nullptr;
+    Engine::Core::Object* m_pendingDragged = nullptr;
+    Engine::Core::Object* m_pendingTarget = nullptr;
+    Engine::Core::Object* m_pendingAddParent = nullptr;
+    Engine::Core::Object* m_pendingDelete = nullptr;
+    Engine::Core::Object* m_pendingPrefabRoot = nullptr;
     PendingPrefabAction m_pendingPrefabAction = PendingPrefabAction::None;
     PendingAddType m_pendingAddType = PendingAddType::Empty;
     bool m_hasPendingAdd = false;
-    Scene::ObjectPlacement m_pendingPlacement = Scene::ObjectPlacement::AsChild;
+    ::Engine::Scene::Scene::ObjectPlacement m_pendingPlacement = ::Engine::Scene::Scene::ObjectPlacement::AsChild;
     bool m_hasPendingMove = false;
     bool m_debugInteractionLogging = true;
     bool m_dragObservedThisFrame = false;
     bool m_dropObservedThisFrame = false;
-    Object* m_debugDragSource = nullptr;
-    Object* m_debugHoverTarget = nullptr;
+    Engine::Core::Object* m_debugDragSource = nullptr;
+    Engine::Core::Object* m_debugHoverTarget = nullptr;
     EditorUiHierarchyDropPosition m_debugHoverPosition = EditorUiHierarchyDropPosition::None;
     int m_debugHoverTargetDepth = 0;
     int m_debugDropDepth = -1;
     std::string m_objectClipboard;
-    Scene::ObjectPath m_clipboardSourcePath;
+    ::Engine::Scene::Scene::ObjectPath m_clipboardSourcePath;
 };
+}

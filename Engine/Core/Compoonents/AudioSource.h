@@ -4,9 +4,11 @@
 #include "Core/PropertyMacros.h"
 #include <string>
 
-class Audio;
+namespace Engine::Audio { class Audio; }
 
-class AudioSource : public Component
+namespace Engine::Components
+{
+class AudioSource : public Engine::Core::Component
 {
 public:
     AudioSource();
@@ -54,7 +56,7 @@ public:
     void Pause();
     void Stop();
     bool IsPlaying() const;
-    bool DrawProperties(IEditorUi& ui) override;
+    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
 
     void Start() override;
     void Update() override;
@@ -62,7 +64,7 @@ public:
     void OnDestroy() override;
 
 private:
-    friend class Audio;
+    friend class Engine::Audio::Audio;
     bool EnsureLoaded();
     void Unload();
     void ApplySettings();
@@ -71,3 +73,4 @@ private:
     struct Impl;
     Impl* m_impl = nullptr;
 };
+}

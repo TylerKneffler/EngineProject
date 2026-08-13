@@ -3,6 +3,9 @@
 #include <cstdint>
 #include <memory>
 
+namespace Engine::Graphics
+{
+
 enum class GraphicsTextureFormat
 {
     Rgba8,
@@ -33,3 +36,5 @@ public:
         GraphicsTextureFormat format,
         bool srgb = true) = 0;
 };
+}
+

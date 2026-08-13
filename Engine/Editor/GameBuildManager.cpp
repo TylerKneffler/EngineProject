@@ -4,6 +4,8 @@
 #include "Core/ProjectLoader.h"
 #include "Core/Renderers/RendererFactory.h"
 
+namespace Engine::Editor
+{
 // Fallback for IntelliSense — CMake overrides these with real absolute paths.
 #ifndef ENGINE_BUILD_DIR
 #define ENGINE_BUILD_DIR "build/Debug"
@@ -122,7 +124,7 @@ void GameBuildManager::PlayInEditor()
 
 bool GameBuildManager::ValidateRendererPrerequisites()
 {
-    for (const auto& option : RendererFactory::GetRendererOptions())
+    for (const auto& option : ::Engine::Renderers::RendererFactory::GetRendererOptions())
     {
         const std::string line = "[Build][Renderer] " + option.name + ": " +
             (option.available ? "available" : "UNAVAILABLE - " + option.unavailableReason);
@@ -133,14 +135,14 @@ bool GameBuildManager::ValidateRendererPrerequisites()
 
     try
     {
-        ProjectSettings settings = m_developmentSettings;
+        Engine::Model::ProjectSettings settings = m_developmentSettings;
         if (!m_projectFilePath.empty())
         {
-            ProjectLoader loader;
+            Engine::Core::ProjectLoader loader;
             settings = loader.LoadProject(m_projectFilePath);
         }
         std::string reason;
-        if (!RendererFactory::IsRendererAvailable(settings.gameRenderingAPI, &reason))
+        if (!::Engine::Renderers::RendererFactory::IsRendererAvailable(settings.gameRenderingAPI, &reason))
         {
             const std::string error = "[Build][Renderer] Cannot build/run with " +
                 settings.gameRenderingAPI + ": " + reason;
@@ -427,4 +429,5 @@ static HANDLE StartGameBuild(HANDLE& outReadPipe)
     CloseHandle(pi.hThread);
     outReadPipe = hRead;
     return pi.hProcess;
+}
 }

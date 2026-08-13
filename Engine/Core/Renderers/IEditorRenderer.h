@@ -5,6 +5,9 @@
 #include <utility>
 #include <cstdint>
 
+
+namespace Engine::Renderers
+{
 // Forward declare the view interface so renderers can work with it.
 class IView;
 
@@ -86,3 +89,4 @@ public:
     // Get the maximum number of SRV slots.
     static constexpr uint32_t MAX_SRV_SLOTS = 32;
 };
+}

@@ -9,14 +9,17 @@
 #include <functional>
 #include <sstream>
 
+namespace Engine::Components
+{
 namespace
 {
-Model* FindModel(Object* owner, const ComponentReference& reference)
+Model* FindModel(Engine::Core::Object* owner,
+    const Engine::Core::ComponentReference& reference)
 {
     Model* model = reference.IsAssigned()
-        ? ResolveComponentReference<Model>(owner, reference) : nullptr;
+        ? Engine::Core::ResolveComponentReference<Model>(owner, reference) : nullptr;
     if (!reference.IsAssigned())
-        for (Object* current = owner; current && !model; current = current->Parent)
+        for (Engine::Core::Object* current = owner; current && !model; current = current->Parent)
             model = current->GetComponent<Model>();
     return model;
 }
@@ -38,7 +41,7 @@ glm::quat EulerQuaternion(const glm::vec3& euler)
         glm::angleAxis(euler.x, glm::vec3(1.f, 0.f, 0.f)));
 }
 
-std::vector<float> Sample(const AnimationChannel& channel, float time)
+std::vector<float> Sample(const Engine::Model::AnimationChannel& channel, float time)
 {
     std::vector<float> result(channel.valueWidth, 0.f);
     if (channel.times.empty() || channel.valueWidth == 0) return result;
@@ -48,14 +51,14 @@ std::vector<float> Sample(const AnimationChannel& channel, float time)
     const float span = channel.times[next] - channel.times[previous];
     float amount = span > 0.f ? (time - channel.times[previous]) / span : 0.f;
     amount = std::clamp(amount, 0.f, 1.f);
-    if (channel.interpolation == AnimationChannel::Interpolation::Step) amount = 0.f;
+    if (channel.interpolation == Engine::Model::AnimationChannel::Interpolation::Step) amount = 0.f;
     const size_t stride = channel.valueWidth *
-        (channel.interpolation == AnimationChannel::Interpolation::CubicSpline ? 3u : 1u);
-    const size_t valueOffset = channel.interpolation == AnimationChannel::Interpolation::CubicSpline
+        (channel.interpolation == Engine::Model::AnimationChannel::Interpolation::CubicSpline ? 3u : 1u);
+    const size_t valueOffset = channel.interpolation == Engine::Model::AnimationChannel::Interpolation::CubicSpline
         ? channel.valueWidth : 0u;
     if ((next + 1) * stride > channel.values.size()) return result;
-    if (channel.path == AnimationChannel::Path::Rotation && channel.valueWidth == 4 &&
-        channel.interpolation == AnimationChannel::Interpolation::Linear)
+    if (channel.path == Engine::Model::AnimationChannel::Path::Rotation && channel.valueWidth == 4 &&
+        channel.interpolation == Engine::Model::AnimationChannel::Interpolation::Linear)
     {
         const glm::quat first(channel.values[previous * stride + 3],
             channel.values[previous * stride], channel.values[previous * stride + 1],
@@ -70,7 +73,7 @@ std::vector<float> Sample(const AnimationChannel& channel, float time)
     {
         const float first = channel.values[previous * stride + valueOffset + component];
         const float second = channel.values[next * stride + valueOffset + component];
-        if (channel.interpolation != AnimationChannel::Interpolation::CubicSpline || previous == next)
+        if (channel.interpolation != Engine::Model::AnimationChannel::Interpolation::CubicSpline || previous == next)
             result[component] = first + (second - first) * amount;
         else
         {
@@ -101,11 +104,11 @@ struct NodePose
 };
 using Pose = std::unordered_map<unsigned, NodePose>;
 
-Animation* FindAnimation(Object* owner, const std::string& name)
+Animation* FindAnimation(Engine::Core::Object* owner, const std::string& name)
 {
     if (!owner) return nullptr;
     Animation* first = nullptr;
-    for (Component* component : owner->Components)
+    for (Engine::Core::Component* component : owner->Components)
         if (auto* animation = dynamic_cast<Animation*>(component))
         {
             if (!first) first = animation;
@@ -118,22 +121,22 @@ Pose SampleAnimation(const Animation* animation, float time)
 {
     Pose pose;
     if (!animation) return pose;
-    for (const AnimationChannel& channel : animation->channels)
+    for (const Engine::Model::AnimationChannel& channel : animation->channels)
     {
         const std::vector<float> sampled = Sample(channel, time);
         NodePose& node = pose[channel.nodeIndex];
         switch (channel.path)
         {
-        case AnimationChannel::Path::Translation:
+        case Engine::Model::AnimationChannel::Path::Translation:
             if (sampled.size() >= 3) { node.hasTranslation = true; node.translation = { sampled[0], sampled[1], sampled[2] }; }
             break;
-        case AnimationChannel::Path::Rotation:
+        case Engine::Model::AnimationChannel::Path::Rotation:
             if (sampled.size() >= 4) { node.hasRotation = true; node.rotation = glm::normalize(glm::quat(sampled[3], sampled[0], sampled[1], sampled[2])); }
             break;
-        case AnimationChannel::Path::Scale:
+        case Engine::Model::AnimationChannel::Path::Scale:
             if (sampled.size() >= 3) { node.hasScale = true; node.scale = { sampled[0], sampled[1], sampled[2] }; }
             break;
-        case AnimationChannel::Path::Weights:
+        case Engine::Model::AnimationChannel::Path::Weights:
             node.hasWeights = true; node.weights = sampled; break;
         }
     }
@@ -176,22 +179,22 @@ void AnimationManager::Start()
     Model* model = FindModel(Owner, modelReference);
     if (!model) return;
     for (unsigned index = 0; index < model->GetNodeCount(); ++index)
-        if (Object* object = model->ResolveNode(index))
+        if (Engine::Core::Object* object = model->ResolveNode(index))
             m_restPose[index] = { object->transform.position,
                 EulerQuaternion(object->transform.rotation), object->transform.scale };
-    std::function<void(Object*)> captureMorphs = [&](Object* object)
+    std::function<void(Engine::Core::Object*)> captureMorphs = [&](Engine::Core::Object* object)
     {
         if (!object) return;
         if (const auto* mesh = object->GetComponent<Mesh>();
             mesh && mesh->HasMorphTargets())
             m_restMorphs.emplace(mesh->GetMorphNodeIndex(), mesh->GetMorphWeights());
-        for (Object* child : object->Children) captureMorphs(child);
+        for (Engine::Core::Object* child : object->Children) captureMorphs(child);
     };
     captureMorphs(model->Owner);
     if (clip.empty())
     {
         Animation* first = animationSourceReference.IsAssigned()
-            ? ResolveComponentReference<Animation>(Owner, animationSourceReference)
+            ? Engine::Core::ResolveComponentReference<Animation>(Owner, animationSourceReference)
             : FindAnimation(Owner, {});
         if (first) clip = first->clipName;
     }
@@ -235,7 +238,7 @@ void AnimationManager::Tick(float frameDelta)
     const auto resolveAnimation = [this](const std::string& clipName)
     {
         Animation* assigned = animationSourceReference.IsAssigned()
-            ? ResolveComponentReference<Animation>(Owner, animationSourceReference) : nullptr;
+            ? Engine::Core::ResolveComponentReference<Animation>(Owner, animationSourceReference) : nullptr;
         if (animationSourceReference.IsAssigned())
             return assigned && (clipName.empty() || assigned->clipName == clipName)
                 ? assigned : nullptr;
@@ -367,13 +370,13 @@ void AnimationManager::Tick(float frameDelta)
     Model* model = FindModel(Owner, modelReference);
     if (!model) return;
     for (const auto& [nodeIndex, pose] : finalPose)
-        if (Object* target = model->ResolveNode(nodeIndex))
+        if (Engine::Core::Object* target = model->ResolveNode(nodeIndex))
         {
             if (pose.hasTranslation) target->transform.position = pose.translation;
             if (pose.hasRotation) target->transform.rotation = QuaternionEuler(pose.rotation);
             if (pose.hasScale) target->transform.scale = pose.scale;
         }
-    std::function<void(Object*)> applyMorphs = [&](Object* object)
+    std::function<void(Engine::Core::Object*)> applyMorphs = [&](Engine::Core::Object* object)
     {
         if (!object) return;
         if (auto* mesh = object->GetComponent<Mesh>();
@@ -381,12 +384,12 @@ void AnimationManager::Tick(float frameDelta)
             if (const auto found = finalPose.find(mesh->GetMorphNodeIndex());
                 found != finalPose.end() && found->second.hasWeights)
                 mesh->GetMorphWeights() = found->second.weights;
-        for (Object* child : object->Children) applyMorphs(child);
+        for (Engine::Core::Object* child : object->Children) applyMorphs(child);
     };
     applyMorphs(model->Owner);
 }
 
-JsonValue AnimationManager::Serialize() const
+AnimationManager::JsonValue AnimationManager::Serialize() const
 {
     JsonValue result = Component::Serialize();
     JsonValue serializedLayers = JsonValue::MakeArray();
@@ -426,7 +429,7 @@ void AnimationManager::Deserialize(const JsonValue& value)
     }
 }
 
-bool AnimationManager::DrawProperties(IEditorUi& ui)
+bool AnimationManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
 {
     bool changed = Component::DrawProperties(ui);
     ui.Separator();
@@ -489,4 +492,5 @@ bool AnimationManager::DrawProperties(IEditorUi& ui)
         changed = true;
     }
     return changed;
+}
 }

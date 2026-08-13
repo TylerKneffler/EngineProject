@@ -2,6 +2,8 @@
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "VulkanView.h"
 
+namespace Engine::Renderers
+{
 VulkanView::~VulkanView()
 {
     if (m_context.device) vkDeviceWaitIdle(m_context.device);
@@ -77,5 +79,6 @@ void VulkanView::Render(void* commandBuffer, void*, std::function<void(void*)> d
     vkCmdSetViewport(command, 0, 1, &viewport); vkCmdSetScissor(command, 0, 1, &scissor);
     if (drawFn) drawFn(commandBuffer);
     vkCmdEndRenderPass(command);
+}
 }
 #endif

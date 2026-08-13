@@ -3,6 +3,8 @@
 #include <glm/glm.hpp>
 #include <string>
 
+namespace Engine::Model
+{
 struct SceneSettings
 {
     bool showGrid = true;
@@ -16,3 +18,5 @@ struct SceneSettings
     std::string skyboxTexture;
 
 };
+}
+

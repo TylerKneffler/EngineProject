@@ -2,6 +2,8 @@
 #include "Engine/Editor/UI/IEditorUi.h"
 #include <algorithm>
 
+namespace Engine::Editor
+{
 namespace
 {
 constexpr size_t kMaximumTerminalText = 1024 * 1024;
@@ -197,4 +199,5 @@ void TerminalView::DrawPanel(IEditorUi& ui)
     if (ui.InputTextSubmit("##terminalCommand", m_command.data(), m_command.size()))
         SubmitCommand();
     ui.EndWindow();
+}
 }

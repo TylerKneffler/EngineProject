@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+namespace Engine::Model
+{
 struct ImportedMaterial
 {
     std::string name;
@@ -92,3 +94,5 @@ struct ModelImportResult
     std::string outputDirectory;
     std::string message;
 };
+}
+

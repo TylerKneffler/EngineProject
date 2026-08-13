@@ -5,9 +5,9 @@
 #include <glm/glm.hpp>
 #include <string>
 
-class Physics;
-
-class RigidBody final : public Component
+namespace Engine::Components
+{
+class RigidBody final : public Engine::Core::Component
 {
 public:
     RigidBody();
@@ -74,7 +74,7 @@ public:
     void OnDestroy() override;
 
 private:
-    friend class Physics;
+    friend class Engine::Physics::Physics;
     bool EnsureBody();
     void DestroyBody();
     void SyncBodyFromTransform();
@@ -85,3 +85,4 @@ private:
     bool m_isColliding = false;
     bool m_isGrounded = false;
 };
+}

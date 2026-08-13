@@ -5,6 +5,8 @@
 #include "Engine/Editor/Core/View/ViewFactory.h"
 #include "imgui.h"
 
+namespace Engine::Editor
+{
 namespace
 {
 bool IsBusy(PlayState state)
@@ -40,7 +42,7 @@ void ImGuiMainMenu::DrawRenderingMenu(
     if (!ImGui::BeginMenu("Rendering")) return;
     if (ImGui::BeginMenu("Lighting"))
     {
-        Scene* scene = state.GetScene();
+        Engine::Scene::Scene* scene = state.GetScene();
         const bool disabled = !scene || IsBusy(playState);
         if (disabled) ImGui::BeginDisabled();
         if (ImGui::MenuItem("Bake Lighting"))
@@ -162,4 +164,5 @@ void ImGuiMainMenu::OpenPanel(EditorState& state, const char* type) const
     if (!factory) return;
     auto panel = factory->Create(type);
     if (panel) state.GetPanels().push_back(std::move(panel));
+}
 }

@@ -6,13 +6,15 @@
 #include <memory>
 #include <string>
 
+namespace Engine::Renderers
+{
 // Forward declarations
 class D3D12Shader;
 
 // ---------------------------------------------------------------------------
 // D3D12PipelineState — DirectX 12 pipeline state wrapper
 // ---------------------------------------------------------------------------
-class D3D12PipelineState : public IPipelineState
+class D3D12PipelineState : public Engine::Graphics::IPipelineState
 {
 public:
     explicit D3D12PipelineState(Microsoft::WRL::ComPtr<ID3D12PipelineState> pso)
@@ -32,36 +34,36 @@ private:
 // ---------------------------------------------------------------------------
 // D3D12PipelineStateBuilder — Fluent pipeline state construction
 // ---------------------------------------------------------------------------
-class D3D12PipelineStateBuilder : public IPipelineStateBuilder
+class D3D12PipelineStateBuilder : public Engine::Graphics::IPipelineStateBuilder
 {
 public:
     explicit D3D12PipelineStateBuilder(ID3D12Device* device, ID3D12RootSignature* rootSig);
 
-    IPipelineStateBuilder& SetVertexShader(const IShader* shader) override;
-    IPipelineStateBuilder& SetPixelShader(const IShader* shader) override;
+    Engine::Graphics::IPipelineStateBuilder& SetVertexShader(const Engine::Graphics::IShader* shader) override;
+    Engine::Graphics::IPipelineStateBuilder& SetPixelShader(const Engine::Graphics::IShader* shader) override;
 
-    IPipelineStateBuilder& SetFillMode(bool wireframe) override;
-    IPipelineStateBuilder& SetCullMode(bool cullBackFaces) override;
-    IPipelineStateBuilder& SetFrontCounterClockwise(bool ccw) override;
-    IPipelineStateBuilder& SetDepthClipEnable(bool enable) override;
+    Engine::Graphics::IPipelineStateBuilder& SetFillMode(bool wireframe) override;
+    Engine::Graphics::IPipelineStateBuilder& SetCullMode(bool cullBackFaces) override;
+    Engine::Graphics::IPipelineStateBuilder& SetFrontCounterClockwise(bool ccw) override;
+    Engine::Graphics::IPipelineStateBuilder& SetDepthClipEnable(bool enable) override;
 
-    IPipelineStateBuilder& SetBlendEnable(bool enable) override;
-    IPipelineStateBuilder& SetSrcBlend(int mode) override;
-    IPipelineStateBuilder& SetDestBlend(int mode) override;
-    IPipelineStateBuilder& SetBlendOp(int op) override;
-    IPipelineStateBuilder& SetSrcBlendAlpha(int mode) override;
-    IPipelineStateBuilder& SetDestBlendAlpha(int mode) override;
-    IPipelineStateBuilder& SetBlendOpAlpha(int op) override;
+    Engine::Graphics::IPipelineStateBuilder& SetBlendEnable(bool enable) override;
+    Engine::Graphics::IPipelineStateBuilder& SetSrcBlend(int mode) override;
+    Engine::Graphics::IPipelineStateBuilder& SetDestBlend(int mode) override;
+    Engine::Graphics::IPipelineStateBuilder& SetBlendOp(int op) override;
+    Engine::Graphics::IPipelineStateBuilder& SetSrcBlendAlpha(int mode) override;
+    Engine::Graphics::IPipelineStateBuilder& SetDestBlendAlpha(int mode) override;
+    Engine::Graphics::IPipelineStateBuilder& SetBlendOpAlpha(int op) override;
 
-    IPipelineStateBuilder& SetDepthEnable(bool enable) override;
-    IPipelineStateBuilder& SetDepthWriteEnable(bool enable) override;
-    IPipelineStateBuilder& SetDepthFunc(int func) override;
+    Engine::Graphics::IPipelineStateBuilder& SetDepthEnable(bool enable) override;
+    Engine::Graphics::IPipelineStateBuilder& SetDepthWriteEnable(bool enable) override;
+    Engine::Graphics::IPipelineStateBuilder& SetDepthFunc(int func) override;
 
-    IPipelineStateBuilder& SetInputLayout(const VertexElement* elements, uint32_t elementCount) override;
-    IPipelineStateBuilder& SetPrimitiveTopology(PrimitiveTopology topology) override;
-    IPipelineStateBuilder& SetRenderTargetFormat(int format, int depthFormat = -1) override;
+    Engine::Graphics::IPipelineStateBuilder& SetInputLayout(const VertexElement* elements, uint32_t elementCount) override;
+    Engine::Graphics::IPipelineStateBuilder& SetPrimitiveTopology(PrimitiveTopology topology) override;
+    Engine::Graphics::IPipelineStateBuilder& SetRenderTargetFormat(int format, int depthFormat = -1) override;
 
-    std::unique_ptr<IPipelineState> Build() override;
+    std::unique_ptr<Engine::Graphics::IPipelineState> Build() override;
     std::string GetLastError() const override { return m_lastError; }
 
 private:
@@ -104,15 +106,16 @@ private:
 // ---------------------------------------------------------------------------
 // D3D12PipelineStateFactory — Create pipeline state builders
 // ---------------------------------------------------------------------------
-class D3D12PipelineStateFactory : public IPipelineStateFactory
+class D3D12PipelineStateFactory : public Engine::Graphics::IPipelineStateFactory
 {
 public:
     D3D12PipelineStateFactory(ID3D12Device* device, ID3D12RootSignature* rootSig)
         : m_device(device), m_rootSig(rootSig) {}
 
-    std::unique_ptr<IPipelineStateBuilder> CreateBuilder() override;
+    std::unique_ptr<Engine::Graphics::IPipelineStateBuilder> CreateBuilder() override;
 
 private:
     ID3D12Device* m_device;
     ID3D12RootSignature* m_rootSig;
 };
+}

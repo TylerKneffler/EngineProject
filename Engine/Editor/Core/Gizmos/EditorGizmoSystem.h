@@ -3,12 +3,14 @@
 #include "Engine/Editor/UI/IEditorUi.h"
 #include <glm/glm.hpp>
 
-class Object;
-class Scene;
+namespace Engine::Core { class Object; }
+namespace Engine::Scene { class Scene; }
 
+namespace Engine::Editor
+{
 struct EditorGizmoResult
 {
-    Object* selectedObject = nullptr;
+    Engine::Core::Object* selectedObject = nullptr;
     bool selectionRequested = false;
     bool consumedClick = false;
     bool transformDragging = false;
@@ -21,10 +23,11 @@ class EditorGizmoSystem
 {
 public:
     EditorGizmoResult DrawAndHandle(
-        Scene& scene, IEditorUi& ui, const EditorUiViewportInput& input);
+        Engine::Scene::Scene& scene, IEditorUi& ui,
+        const EditorUiViewportInput& input);
 
 private:
-    Object* m_dragObject = nullptr;
+    Engine::Core::Object* m_dragObject = nullptr;
     int m_dragAxis = -1;
     glm::vec3 m_dragStartLocalPosition{};
     glm::vec3 m_dragWorldAxis{};
@@ -32,3 +35,4 @@ private:
     EditorUiVec2 m_dragScreenDirection{};
     float m_dragWorldUnitsPerPixel = 0.f;
 };
+}

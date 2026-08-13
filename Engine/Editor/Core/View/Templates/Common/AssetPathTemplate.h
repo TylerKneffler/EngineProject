@@ -5,7 +5,7 @@
 #include <filesystem>
 #include <string>
 
-namespace Editor::ViewTemplates
+namespace Engine::Editor
 {
 inline std::string LowerAssetExtension(const std::string& path)
 {

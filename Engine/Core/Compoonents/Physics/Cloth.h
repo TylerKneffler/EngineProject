@@ -5,11 +5,11 @@
 #include <glm/glm.hpp>
 #include <string>
 
-class Physics;
-
+namespace Engine::Components
+{
 // Simulates an independently selectable triangle mesh as a soft body. The
 // object's Mesh component is the rendered target and is restored on stop.
-class Cloth final : public Component
+class Cloth final : public Engine::Core::Component
 {
 public:
     Cloth();
@@ -65,7 +65,7 @@ public:
     void OnDestroy() override;
 
 private:
-    friend class Physics;
+    friend class Engine::Physics::Physics;
     bool EnsureSoftBody();
     void DestroySoftBody(bool restoreMesh);
     void ApplyForces();
@@ -75,3 +75,4 @@ private:
     struct Impl;
     Impl* m_impl = nullptr;
 };
+}

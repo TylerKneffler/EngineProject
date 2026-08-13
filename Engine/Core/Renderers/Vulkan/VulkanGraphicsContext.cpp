@@ -5,13 +5,16 @@
 #include "VulkanPipelineStateBuilder.h"
 #include <algorithm>
 
-void VulkanGraphicsContext::SetPipeline(const IPipelineState* pipeline)
+
+namespace Engine::Renderers
+{
+void VulkanGraphicsContext::SetPipeline(const Engine::Graphics::IPipelineState* pipeline)
 {
     m_pipeline = dynamic_cast<const VulkanPipelineState*>(pipeline);
     if (m_pipeline) vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline->GetPipeline());
 }
 
-void VulkanGraphicsContext::SetConstantBuffer(uint32_t, const IGraphicsBuffer* buffer, uint64_t offset)
+void VulkanGraphicsContext::SetConstantBuffer(uint32_t, const Engine::Graphics::IGraphicsBuffer* buffer, uint64_t offset)
 {
     if (!m_pipeline || !buffer || offset >= buffer->GetSize()) return;
     const auto* vkBuffer = dynamic_cast<const VulkanGraphicsBuffer*>(buffer);
@@ -26,7 +29,7 @@ void VulkanGraphicsContext::SetConstantBuffer(uint32_t, const IGraphicsBuffer* b
         vkBuffer->GetMappedData() + offset);
 }
 
-void VulkanGraphicsContext::SetVertexBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint32_t, uint64_t offset)
+void VulkanGraphicsContext::SetVertexBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t, uint64_t offset)
 {
     const auto* vkBuffer = dynamic_cast<const VulkanGraphicsBuffer*>(buffer);
     if (!vkBuffer) return;
@@ -34,19 +37,19 @@ void VulkanGraphicsContext::SetVertexBuffer(uint32_t slot, const IGraphicsBuffer
     vkCmdBindVertexBuffers(m_commandBuffer, slot, 1, &native, &nativeOffset);
 }
 
-void VulkanGraphicsContext::SetIndexBuffer(const IGraphicsBuffer* buffer, uint32_t, uint64_t offset)
+void VulkanGraphicsContext::SetIndexBuffer(const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t, uint64_t offset)
 {
     const auto* vkBuffer = dynamic_cast<const VulkanGraphicsBuffer*>(buffer);
     if (vkBuffer) vkCmdBindIndexBuffer(m_commandBuffer, vkBuffer->GetBuffer(), offset, VK_INDEX_TYPE_UINT32);
 }
 
-void VulkanGraphicsContext::SetTexture(uint32_t slot, const IGraphicsTexture* texture)
+void VulkanGraphicsContext::SetTexture(uint32_t slot, const Engine::Graphics::IGraphicsTexture* texture)
 {
     if (slot < m_textures.size())
         m_textures[slot] = dynamic_cast<const VulkanGraphicsTexture*>(texture);
 }
 
-void VulkanGraphicsContext::SetStructuredBuffer(uint32_t slot, const IGraphicsBuffer* buffer)
+void VulkanGraphicsContext::SetStructuredBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer)
 {
     if (slot < 6 || slot > 8) return;
     m_structuredBuffers[slot - 6] = dynamic_cast<const VulkanGraphicsBuffer*>(buffer);
@@ -97,4 +100,5 @@ void VulkanGraphicsContext::DrawIndexedInstanced(uint32_t indices, uint32_t inst
     vkCmdDrawIndexed(m_commandBuffer, indices, instances, firstIndex, vertexOffset, firstInstance);
 }
 void VulkanGraphicsContext::TransitionResource(void*, ResourceState, ResourceState) {}
+}
 #endif

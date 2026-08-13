@@ -3,11 +3,10 @@
 #include "IEditorRenderer.h"
 #include "IGameRenderer.h"
 #include "Core/Model/RendererData.h"
+#include "Core/Model/ProjectSettings.h"
 #include <memory>
 #include <string>
 #include <vector>
-
-struct ProjectSettings;
 
 // ---------------------------------------------------------------------------
 // RendererFactory — Creates renderer instances based on project settings.
@@ -26,9 +25,16 @@ struct ProjectSettings;
 // implementing the IEditorRenderer / IGameRenderer interfaces and registering
 // a creation function in the factory.
 // ---------------------------------------------------------------------------
+
+
+namespace Engine::Renderers
+{
 class RendererFactory
 {
 public:
+    using ProjectSettings = Engine::Model::ProjectSettings;
+    using RendererOption = Engine::Model::RendererOption;
+
     // Create an editor renderer based on ProjectSettings::renderingAPI.
     // Returns nullptr if the API is unsupported or initialization fails.
     static std::unique_ptr<IEditorRenderer> CreateEditorRenderer(
@@ -51,3 +57,4 @@ public:
 private:
     RendererFactory() = delete;  // static factory, no instances
 };
+}

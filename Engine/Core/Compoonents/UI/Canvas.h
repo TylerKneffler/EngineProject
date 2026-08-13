@@ -5,9 +5,11 @@
 #include <glm/glm.hpp>
 #include <string>
 
+namespace Engine::Components
+{
 // Root of a screen-space retained UI hierarchy. Child Objects with UIObject
 // components are laid out inside this logical resolution.
-class Canvas final : public Component
+class Canvas final : public Engine::Core::Component
 {
 public:
     Canvas();
@@ -23,3 +25,4 @@ public:
 
     glm::vec2 GetLogicalSize(float viewportAspect) const;
 };
+}

@@ -6,9 +6,12 @@
 #include <cmath>
 #include <functional>
 
+namespace Engine::Scene
+{
+
 Scene::Scene()
-    : m_physics(std::make_unique<Physics>(*this))
-    , m_audio(std::make_unique<Audio>(*this))
+    : m_physics(std::make_unique<Engine::Physics::Physics>(*this))
+    , m_audio(std::make_unique<Engine::Audio::Audio>(*this))
 {
 }
 
@@ -32,30 +35,30 @@ void Scene::Update(float deltaTime)
     m_physics->Step(deltaTime);
 }
 
-Object* Scene::AddObject()
+Engine::Core::Object* Scene::AddObject()
 {
-    auto obj = std::make_unique<Object>();
-    Object* raw = obj.get();
+    auto obj = std::make_unique<Engine::Core::Object>();
+    Engine::Core::Object* raw = obj.get();
     raw->OwnerScene = this;
     m_objects.push_back(std::move(obj));
     return raw;
 }
 
-Object* Scene::AddObject(const std::string& name)
+Engine::Core::Object* Scene::AddObject(const std::string& name)
 {
-    Object* obj = AddObject();
+    Engine::Core::Object* obj = AddObject();
     obj->name = name;
     obj->OwnerScene = this;
     return obj;
 }
 
-bool Scene::TryGetObjectPath(const Object* object, ObjectPath& path) const
+bool Scene::TryGetObjectPath(const Engine::Core::Object* object, ObjectPath& path) const
 {
     path.clear();
     if (!object)
         return false;
 
-    for (const Object* current = object; current; current = current->Parent)
+    for (const Engine::Core::Object* current = object; current; current = current->Parent)
     {
         std::size_t index = 0;
         bool found = false;
@@ -98,12 +101,12 @@ bool Scene::TryGetObjectPath(const Object* object, ObjectPath& path) const
     return true;
 }
 
-Object* Scene::FindObjectByPath(const ObjectPath& path) const
+Engine::Core::Object* Scene::FindObjectByPath(const ObjectPath& path) const
 {
     if (path.empty())
         return nullptr;
 
-    Object* current = nullptr;
+    Engine::Core::Object* current = nullptr;
     std::size_t rootIndex = 0;
     for (const auto& candidate : m_objects)
     {
@@ -128,17 +131,17 @@ Object* Scene::FindObjectByPath(const ObjectPath& path) const
 }
 
 bool Scene::MoveObject(
-    Object* object,
-    Object* target,
+    Engine::Core::Object* object,
+    Engine::Core::Object* target,
     ObjectPlacement placement)
 {
     if (!object || object == target)
         return false;
 
-    Object* newParent = placement == ObjectPlacement::AsChild
+    Engine::Core::Object* newParent = placement == ObjectPlacement::AsChild
         ? target
         : (target ? target->Parent : nullptr);
-    for (Object* ancestor = newParent; ancestor; ancestor = ancestor->Parent)
+    for (Engine::Core::Object* ancestor = newParent; ancestor; ancestor = ancestor->Parent)
         if (ancestor == object)
             return false;
 
@@ -179,7 +182,7 @@ bool Scene::MoveObject(
         if (moving == m_objects.end())
             return false;
 
-        std::unique_ptr<Object> owned = std::move(*moving);
+        std::unique_ptr<Engine::Core::Object> owned = std::move(*moving);
         m_objects.erase(moving);
         auto position = target
             ? std::find_if(
@@ -230,18 +233,18 @@ bool Scene::MoveObject(
     return true;
 }
 
-void Scene::RemoveObject(Object* obj)
+void Scene::RemoveObject(Engine::Core::Object* obj)
 {
     if (!obj)
         return;
 
-    std::vector<Object*> objectsToRemove;
-    std::function<void(Object*)> collect = [&](Object* current)
+    std::vector<Engine::Core::Object*> objectsToRemove;
+    std::function<void(Engine::Core::Object*)> collect = [&](Engine::Core::Object* current)
     {
         if (!current)
             return;
         objectsToRemove.push_back(current);
-        for (Object* child : current->Children)
+        for (Engine::Core::Object* child : current->Children)
             collect(child);
     };
     collect(obj);
@@ -273,7 +276,7 @@ void Scene::RemoveObject(Object* obj)
         std::remove_if(
             m_objects.begin(),
             m_objects.end(),
-            [&](const std::unique_ptr<Object>& candidate)
+            [&](const std::unique_ptr<Engine::Core::Object>& candidate)
             {
                 return std::find(
                     objectsToRemove.begin(),
@@ -290,4 +293,6 @@ void Scene::ClearObjects()
     m_objects.clear();
     m_selectedObject = nullptr;
     m_previewObject = nullptr;
+}
+
 }

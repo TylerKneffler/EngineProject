@@ -14,7 +14,7 @@
 #include <iterator>
 #include <pugixml.hpp>
 
-namespace Editor::ViewTemplates
+namespace Engine::Editor
 {
 namespace
 {
@@ -41,7 +41,7 @@ bool ParseFloat(const char* value, float& result)
     return end && *end == '\0';
 }
 
-std::string ImportSettingText(const AssetImportSetting& setting)
+std::string ImportSettingText(const Engine::Model::AssetImportSetting& setting)
 {
     if (const auto* value = std::get_if<bool>(&setting))
         return *value ? "true" : "false";
@@ -154,7 +154,7 @@ void AssetInspectorTemplate::Clear()
     m_texturePreview.reset();
 }
 
-void AssetInspectorTemplate::Draw(IEditorUi& ui, Scene* scene)
+void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
 {
     namespace fs = std::filesystem;
     std::error_code error;
@@ -193,7 +193,7 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Scene* scene)
                 else
                 {
                     std::error_code recordError;
-                    if (!AssetRecord::Move(path, destination, recordError))
+                    if (!Engine::Core::AssetRecord::Move(path, destination, recordError))
                     {
                         std::error_code rollbackError;
                         fs::rename(destination, path, rollbackError);
@@ -242,7 +242,7 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Scene* scene)
 
     try
     {
-        if (const auto record = AssetRecord::Load(m_selectedPath))
+        if (const auto record = Engine::Core::AssetRecord::Load(m_selectedPath))
         {
             ui.Separator();
             ui.Label("Asset Record");
@@ -265,8 +265,8 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Scene* scene)
     if (IsTextureAssetExtension(extension))
     {
         if (!m_texturePreview)
-            m_texturePreview = Texture::Acquire(m_selectedPath, true);
-        IGraphicsProvider* graphics = scene ? scene->GetGraphicsProvider() : nullptr;
+        m_texturePreview = ::Engine::Components::Texture::Acquire(m_selectedPath, true);
+        Engine::Graphics::IGraphicsProvider* graphics = scene ? scene->GetGraphicsProvider() : nullptr;
         if (m_texturePreview && graphics)
             m_texturePreview->Prepare(graphics);
         void* handle = m_texturePreview && m_texturePreview->GetGraphicsTexture()
@@ -286,7 +286,7 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Scene* scene)
 
     if (extension == ".spriteanim")
     {
-        SpriteAnimationAsset asset;
+        Engine::Rendering::SpriteAnimationAsset asset;
         if (!asset.Load(m_selectedPath))
         {
             ui.ColoredLabel("Invalid sprite animation asset", { 1.f, 0.35f, 0.35f, 1.f });
@@ -330,14 +330,14 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Scene* scene)
 
     if (extension == ".spritesheet")
     {
-        SpriteSheetAsset sheet;
+        Engine::Rendering::SpriteSheetAsset sheet;
         if (!sheet.Load(m_selectedPath))
         {
             ui.ColoredLabel("Invalid sprite sheet asset", { 1.f, 0.35f, 0.35f, 1.f });
             return;
         }
         std::size_t frames = 0;
-        for (const SpriteSheetAnimation& animation : sheet.GetAnimations())
+        for (const Engine::Model::SpriteSheetAnimation& animation : sheet.GetAnimations())
             frames += animation.frames.size();
         const std::string animations = std::to_string(sheet.GetAnimations().size());
         const std::string frameCount = std::to_string(frames);
