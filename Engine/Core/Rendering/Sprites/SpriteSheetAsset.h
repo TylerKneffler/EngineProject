@@ -1,25 +1,8 @@
 #pragma once
 
+#include "Core/Model/SpriteData.h"
 #include <string>
-#include <unordered_map>
 #include <vector>
-
-struct SpriteSheetFrame
-{
-    std::string image;
-    float x = 0.f;
-    float y = 0.f;
-    float width = 0.f;
-    float height = 0.f;
-    float duration = 0.1f;
-};
-
-struct SpriteSheetAnimation
-{
-    std::string name;
-    bool loop = true;
-    std::vector<SpriteSheetFrame> frames;
-};
 
 // Runtime datatype for .spritesheet assets. Files may contain JSON or XML;
 // image references are resolved relative to the spritesheet file.

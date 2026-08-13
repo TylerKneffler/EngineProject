@@ -1,6 +1,9 @@
 #pragma once
 
-// Format-neutral public include for imported model animation components.
-// GltfAnimation.h remains as the implementation header for compatibility with
-// projects created before FBX and the unified model importer were added.
-#include "GltfAnimation.h"
+// Format-neutral aggregate include for imported model animation components.
+#include "Model.h"
+#include "Core/Model/AnimationData.h"
+#include "Animation.h"
+#include "Skeleton.h"
+#include "SkinnedMesh.h"
+#include "AnimationManager.h"

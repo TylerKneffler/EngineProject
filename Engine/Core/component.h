@@ -22,6 +22,7 @@ public:
 
     Object* Owner = nullptr;     // The Object this component is attached to
     bool singlecomponent = false; // If true, only one component of this type can be added
+    bool editorAddable = true;   // Internal/import components stay out of Add Component.
 
     // ---- Serialization interface -------------------------------------------
     // The base component handles the shared JSON envelope:
@@ -34,6 +35,14 @@ public:
     virtual void        Deserialize(const JsonValue& v);
     // Lets components rebuild runtime resources without serializer type checks.
     virtual void        OnAfterDeserialize(IGraphicsProvider*) {}
+    // Engine components and game scripts share lifecycle dispatch. Script is
+    // a semantic marker for user-authored/hot-reloadable behavior, not the
+    // mechanism that makes a component update.
+    virtual void Start() {}
+    virtual void Update() {}
+    virtual void Enabled() {}
+    virtual void Disabled() {}
+    virtual void OnDestroy() {}
     // Called by the Properties panel to draw editable properties in the editor.
     // Returns true when an editor control changed serialized component data.
     virtual bool DrawProperties(IEditorUi& ui);

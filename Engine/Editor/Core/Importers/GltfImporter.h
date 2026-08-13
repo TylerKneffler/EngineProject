@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ImportedModel.h"
+#include "Core/Model/ImportedModel.h"
 
 using GltfImportResult = ModelImportResult;
 

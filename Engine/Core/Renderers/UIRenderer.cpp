@@ -1,6 +1,7 @@
 #include "Core/Renderers/UIRenderer.h"
 
 #include "Core/UI/UILayout.h"
+#include "Core/Compoonents/UI/UIObject.h"
 #include "Core/Compoonents/UI/UIText.h"
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Graphics/IGraphicsContext.h"

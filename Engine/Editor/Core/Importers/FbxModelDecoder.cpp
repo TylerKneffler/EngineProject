@@ -217,7 +217,7 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, ImportedModel& model
         for (unsigned morphIndex = 0; morphIndex < source->mNumAnimMeshes; ++morphIndex)
         {
             const aiAnimMesh* morph = source->mAnimMeshes[morphIndex];
-            MorphTargets::Target target;
+            Mesh::MorphTarget target;
             target.positions.resize(source->mNumVertices);
             if (morph->HasNormals()) target.normals.resize(source->mNumVertices);
             if (morph->HasTangentsAndBitangents()) target.tangents.resize(source->mNumVertices);
@@ -276,9 +276,9 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, ImportedModel& model
         }
 
         // Morph arrays must follow the expanded triangle vertex stream.
-        for (MorphTargets::Target& target : primitive.morphTargets)
+        for (Mesh::MorphTarget& target : primitive.morphTargets)
         {
-            MorphTargets::Target expanded;
+            Mesh::MorphTarget expanded;
             expanded.positions.reserve(primitive.vertices.size());
             if (!target.normals.empty()) expanded.normals.reserve(primitive.vertices.size());
             if (!target.tangents.empty()) expanded.tangents.reserve(primitive.vertices.size());

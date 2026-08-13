@@ -2,29 +2,16 @@
 #include "Core/component.h"
 #include "Core/PropertyMacros.h"
 #include "Core/Graphics/IGraphicsBuffer.h"
+#include "Core/Model/MeshData.h"
 #include <string>
 #include <vector>
 #include <memory>
 
-struct Vertex
-{
-    float pos[3];
-    float normal[3];
-    float uv[2];
-    float tangent[4];
-    float uv1[2];
-    float color[4] { 1.f, 1.f, 1.f, 1.f };
-    // Stored as floats to keep one portable input layout across D3D11,
-    // D3D12, and Vulkan. Values are exact for imported palette indices.
-    float joints0[4] {};
-    float weights0[4] {};
-    float joints1[4] {};
-    float weights1[4] {};
-};
-
 class Mesh : public Component
 {
 public:
+    using MorphTarget = ::MorphTarget;
+
     Mesh();
     ~Mesh() = default;
 
@@ -48,8 +35,17 @@ public:
     bool HasBounds() const { return m_hasBounds; }
     const glm::vec3& GetBoundsMin() const { return m_boundsMin; }
     const glm::vec3& GetBoundsMax() const { return m_boundsMax; }
+    unsigned GetMorphNodeIndex() const { return m_morphNodeIndex; }
+    void SetMorphData(unsigned nodeIndex, std::vector<MorphTarget> targets,
+        std::vector<float> weights);
+    const std::vector<MorphTarget>& GetMorphTargets() const { return m_morphTargets; }
+    const std::vector<float>& GetMorphWeights() const { return m_morphWeights; }
+    std::vector<float>& GetMorphWeights() { return m_morphWeights; }
+    bool HasMorphTargets() const { return !m_morphTargets.empty(); }
 
+    JsonValue   Serialize() const override;
     void        Deserialize(const JsonValue& v) override;
+    void        DeserializeLegacyMorphTargets(const JsonValue& value);
     void        OnAfterDeserialize(IGraphicsProvider* graphicsProvider) override;
 
 private:
@@ -61,4 +57,7 @@ private:
     bool m_hasBounds = false;
     glm::vec3 m_boundsMin{};
     glm::vec3 m_boundsMax{};
+    unsigned m_morphNodeIndex = 0;
+    std::vector<MorphTarget> m_morphTargets;
+    std::vector<float> m_morphWeights;
 };

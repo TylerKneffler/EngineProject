@@ -1,4 +1,4 @@
-#include "Core/Scene/Scene.h"
+#include "Core/Scene/Settings/SceneSettingsSerialization.h"
 
 namespace
 {
@@ -22,37 +22,37 @@ namespace
     }
 }
 
-JsonValue SceneSettings::Serialize() const
+JsonValue SerializeSceneSettings(const SceneSettings& settings)
 {
     JsonValue value = JsonValue::MakeObject();
-    value.Set("showGrid", JsonValue(showGrid));
-    value.Set("gridHalfSize", JsonValue(gridHalfSize));
-    value.Set("gridCellSize", JsonValue(gridCellSize));
-    value.Set("gridOpacity", JsonValue(gridOpacity));
-    value.Set("gridFadeDistance", JsonValue(gridFadeDistance));
-    value.Set("gridColor", Vec3ToJson(gridColor));
-    value.Set("gridOriginColor", Vec3ToJson(gridOriginColor));
-    value.Set("ambientColor", Vec3ToJson(ambientColor));
-    value.Set("skyboxTexture", JsonValue(skyboxTexture));
+    value.Set("showGrid", JsonValue(settings.showGrid));
+    value.Set("gridHalfSize", JsonValue(settings.gridHalfSize));
+    value.Set("gridCellSize", JsonValue(settings.gridCellSize));
+    value.Set("gridOpacity", JsonValue(settings.gridOpacity));
+    value.Set("gridFadeDistance", JsonValue(settings.gridFadeDistance));
+    value.Set("gridColor", Vec3ToJson(settings.gridColor));
+    value.Set("gridOriginColor", Vec3ToJson(settings.gridOriginColor));
+    value.Set("ambientColor", Vec3ToJson(settings.ambientColor));
+    value.Set("skyboxTexture", JsonValue(settings.skyboxTexture));
     return value;
 }
 
-void SceneSettings::Deserialize(const JsonValue& value)
+void DeserializeSceneSettings(SceneSettings& settings, const JsonValue& value)
 {
     if (!value.IsObject())
         return;
-    if (value.Has("showGrid")) showGrid = value["showGrid"].AsBool();
-    if (value.Has("gridHalfSize")) gridHalfSize = value["gridHalfSize"].AsInt();
-    if (value.Has("gridCellSize")) gridCellSize = value["gridCellSize"].AsFloat();
-    if (value.Has("gridOpacity")) gridOpacity = value["gridOpacity"].AsFloat();
-    if (value.Has("gridFadeDistance")) gridFadeDistance = value["gridFadeDistance"].AsFloat();
+    if (value.Has("showGrid")) settings.showGrid = value["showGrid"].AsBool();
+    if (value.Has("gridHalfSize")) settings.gridHalfSize = value["gridHalfSize"].AsInt();
+    if (value.Has("gridCellSize")) settings.gridCellSize = value["gridCellSize"].AsFloat();
+    if (value.Has("gridOpacity")) settings.gridOpacity = value["gridOpacity"].AsFloat();
+    if (value.Has("gridFadeDistance")) settings.gridFadeDistance = value["gridFadeDistance"].AsFloat();
     if (value.Has("gridColor"))
-        gridColor = Vec3FromJson(value["gridColor"], gridColor);
+        settings.gridColor = Vec3FromJson(value["gridColor"], settings.gridColor);
     if (value.Has("gridOriginColor"))
-        gridOriginColor = Vec3FromJson(value["gridOriginColor"], gridOriginColor);
+        settings.gridOriginColor = Vec3FromJson(value["gridOriginColor"], settings.gridOriginColor);
     if (value.Has("ambientColor"))
-        ambientColor = Vec3FromJson(value["ambientColor"], ambientColor);
-    skyboxTexture = value.Has("skyboxTexture")
+        settings.ambientColor = Vec3FromJson(value["ambientColor"], settings.ambientColor);
+    settings.skyboxTexture = value.Has("skyboxTexture")
         ? value["skyboxTexture"].AsString()
         : std::string{};
 }

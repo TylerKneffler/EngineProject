@@ -51,6 +51,34 @@ std::filesystem::path ResolveMeshPath(const std::string& path)
 
     return requested;
 }
+
+JsonValue FloatArray(const std::vector<float>& values)
+{
+    JsonValue result = JsonValue::MakeArray();
+    for (float value : values) result.Push(JsonValue(value));
+    return result;
+}
+
+JsonValue Vec3Array(const std::vector<glm::vec3>& values)
+{
+    JsonValue result = JsonValue::MakeArray();
+    for (const glm::vec3& value : values)
+        result.Push(JsonValue::MakeArray().Push(JsonValue(value.x))
+            .Push(JsonValue(value.y)).Push(JsonValue(value.z)));
+    return result;
+}
+
+std::vector<glm::vec3> ReadVec3Array(const JsonValue& value)
+{
+    std::vector<glm::vec3> result;
+    for (size_t i = 0; i < value.ArraySize(); ++i)
+    {
+        const JsonValue& item = value.ArrayAt(i);
+        result.emplace_back(item.ArrayAt(0).AsFloat(), item.ArrayAt(1).AsFloat(),
+            item.ArrayAt(2).AsFloat());
+    }
+    return result;
+}
 }
 
 #pragma region OBJ file parsing helpers
@@ -192,6 +220,15 @@ void Mesh::SetDeformedVertices(const std::vector<Vertex>& vertices)
     }
 }
 
+void Mesh::SetMorphData(unsigned nodeIndex, std::vector<MorphTarget> targets,
+    std::vector<float> weights)
+{
+    m_morphNodeIndex = nodeIndex;
+    m_morphTargets = std::move(targets);
+    m_morphWeights = std::move(weights);
+    m_morphWeights.resize(m_morphTargets.size(), 0.f);
+}
+
 void Mesh::UpdateBounds()
 {
     m_hasBounds = !m_vertices.empty();
@@ -249,10 +286,52 @@ void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory)
 }
 #pragma endregion
 
+JsonValue Mesh::Serialize() const
+{
+    JsonValue result = Component::Serialize();
+    if (m_morphTargets.empty()) return result;
+    result.Set("morphNodeIndex", JsonValue(static_cast<int>(m_morphNodeIndex)));
+    result.Set("morphWeights", FloatArray(m_morphWeights));
+    JsonValue targets = JsonValue::MakeArray();
+    for (const MorphTarget& target : m_morphTargets)
+        targets.Push(JsonValue::MakeObject()
+            .Set("positions", Vec3Array(target.positions))
+            .Set("normals", Vec3Array(target.normals))
+            .Set("tangents", Vec3Array(target.tangents)));
+    return result.Set("morphTargets", std::move(targets));
+}
+
+void Mesh::DeserializeLegacyMorphTargets(const JsonValue& value)
+{
+    std::vector<MorphTarget> targets;
+    const JsonValue& list = value["targets"];
+    for (size_t i = 0; i < list.ArraySize(); ++i)
+    {
+        MorphTarget target;
+        target.positions = ReadVec3Array(list.ArrayAt(i)["positions"]);
+        target.normals = ReadVec3Array(list.ArrayAt(i)["normals"]);
+        target.tangents = ReadVec3Array(list.ArrayAt(i)["tangents"]);
+        targets.push_back(std::move(target));
+    }
+    std::vector<float> weights;
+    for (size_t i = 0; i < value["weights"].ArraySize(); ++i)
+        weights.push_back(value["weights"].ArrayAt(i).AsFloat());
+    SetMorphData(static_cast<unsigned>(value["nodeIndex"].AsInt()),
+        std::move(targets), std::move(weights));
+}
+
 void Mesh::Deserialize(const JsonValue& v)
 {
     if (v.Has("file"))
         LoadFromFile(v["file"].AsString());
+    if (v.Has("morphTargets"))
+    {
+        JsonValue legacy = JsonValue::MakeObject()
+            .Set("nodeIndex", v["morphNodeIndex"])
+            .Set("weights", v["morphWeights"])
+            .Set("targets", v["morphTargets"]);
+        DeserializeLegacyMorphTargets(legacy);
+    }
 }
 
 void Mesh::OnAfterDeserialize(IGraphicsProvider* graphicsProvider)

@@ -2,16 +2,9 @@
 
 #include "Core/Component.h"
 #include "Core/PropertyMacros.h"
+#include "Core/Model/UIData.h"
 #include <glm/glm.hpp>
 #include <string>
-
-struct UIRect
-{
-    float x = 0.f;
-    float y = 0.f;
-    float width = 0.f;
-    float height = 0.f;
-};
 
 // RectTransform-style screen layout with an optional flex row/column for its
 // immediate UIObject children. Normalized anchors use top-left as (0, 0).

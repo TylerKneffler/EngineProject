@@ -3,9 +3,12 @@
 #include "Core/Object.h"
 #include "Core/Compoonents/Camera.h"
 #include "Core/Compoonents/Light.h"
+#include "Core/Compoonents/Animation/Skeleton.h"
 #include <algorithm>
 #include <cmath>
 #include <cfloat>
+#include <set>
+#include <unordered_set>
 #include <glm/gtc/matrix_inverse.hpp>
 
 namespace
@@ -121,6 +124,36 @@ bool SceneContains(const Scene& scene, const Object* object)
             return true;
     return false;
 }
+
+void DrawBoneShape(IEditorUi& ui, EditorUiVec2 root, EditorUiVec2 tip,
+    bool selected)
+{
+    const EditorUiVec2 difference = Subtract(tip, root);
+    const float length = Length(difference);
+    if (length < 1.f) return;
+    const EditorUiVec2 direction = Multiply(difference, 1.f / length);
+    const EditorUiVec2 perpendicular{ -direction.y, direction.x };
+    const float width = std::clamp(length * 0.13f, 3.f, 11.f);
+    const EditorUiVec2 shoulder = Add(root,
+        Multiply(direction, std::clamp(length * 0.22f, 5.f, 22.f)));
+    const EditorUiVec2 first = Add(shoulder, Multiply(perpendicular, width));
+    const EditorUiVec2 second = Subtract(shoulder, Multiply(perpendicular, width));
+    const EditorUiColor fill = selected
+        ? EditorUiColor{ 1.f, 0.72f, 0.16f, 0.75f }
+        : EditorUiColor{ 0.35f, 0.78f, 1.f, 0.58f };
+    const EditorUiColor line = selected
+        ? kHoverColor : EditorUiColor{ 0.45f, 0.86f, 1.f, 1.f };
+    ui.DrawViewportTriangle(root, first, tip, fill);
+    ui.DrawViewportTriangle(root, tip, second, fill);
+    ui.DrawViewportLine(root, first, kOutline, 4.f);
+    ui.DrawViewportLine(first, tip, kOutline, 4.f);
+    ui.DrawViewportLine(tip, second, kOutline, 4.f);
+    ui.DrawViewportLine(second, root, kOutline, 4.f);
+    ui.DrawViewportLine(root, first, line, 1.5f);
+    ui.DrawViewportLine(first, tip, line, 1.5f);
+    ui.DrawViewportLine(tip, second, line, 1.5f);
+    ui.DrawViewportLine(second, root, line, 1.5f);
+}
 }
 
 EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
@@ -143,8 +176,85 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
     Object* selected = scene.GetSelectedObject();
     Object* selectedPrefabRoot = selected
         ? selected->GetPrefabInstanceRoot() : nullptr;
-    const bool selectedTransformEditable = selected &&
-        (!selectedPrefabRoot || selected == selectedPrefabRoot);
+
+    Object* boneHit = nullptr;
+    float boneHitDistance = FLT_MAX;
+    std::set<std::pair<Object*, Object*>> drawnBones;
+    std::unordered_set<Object*> drawnRoots;
+    std::unordered_set<Object*> visibleSkeletonJoints;
+    for (const auto& ownerPointer : scene.GetObjects())
+    {
+        Object* owner = ownerPointer.get();
+        if (!owner || !owner->IsEnabledInHierarchy()) continue;
+        for (Component* component : owner->Components)
+        {
+            auto* skeleton = dynamic_cast<Skeleton*>(component);
+            if (!skeleton || !skeleton->showBones) continue;
+            std::unordered_set<Object*> joints;
+            for (Object* joint : skeleton->ResolveJoints())
+                if (joint)
+                {
+                    joints.insert(joint);
+                    visibleSkeletonJoints.insert(joint);
+                }
+            for (Object* joint : joints)
+            {
+                Object* parentJoint = joint->Parent;
+                while (parentJoint && joints.find(parentJoint) == joints.end())
+                    parentJoint = parentJoint->Parent;
+
+                EditorUiVec2 tipScreen{};
+                if (!ProjectPoint(viewProjection,
+                    joint->transform.GetWorldPosition(), input.available,
+                    tipScreen))
+                    continue;
+
+                float hitDistance = Length(Subtract(
+                    input.mousePosInViewport, tipScreen));
+                if (hitDistance <= 9.f && hitDistance < boneHitDistance)
+                {
+                    boneHit = joint;
+                    boneHitDistance = hitDistance;
+                }
+
+                if (!parentJoint)
+                {
+                    if (drawnRoots.insert(joint).second)
+                    {
+                        ui.DrawViewportCircle(tipScreen, joint == selected ? 7.f : 5.f,
+                            kOutline, true);
+                        ui.DrawViewportCircle(tipScreen, joint == selected ? 5.f : 3.5f,
+                            joint == selected ? kHoverColor :
+                                EditorUiColor{ 0.45f, 0.86f, 1.f, 1.f }, true);
+                    }
+                    continue;
+                }
+
+                if (!drawnBones.insert({ parentJoint, joint }).second)
+                    continue;
+                EditorUiVec2 rootScreen{};
+                if (!ProjectPoint(viewProjection,
+                    parentJoint->transform.GetWorldPosition(), input.available,
+                    rootScreen))
+                    continue;
+                DrawBoneShape(ui, rootScreen, tipScreen,
+                    joint == selected || parentJoint == selected);
+                ui.DrawViewportCircle(rootScreen, 4.f, kOutline, true);
+                ui.DrawViewportCircle(rootScreen, 2.5f,
+                    parentJoint == selected ? kHoverColor :
+                        EditorUiColor{ 0.55f, 0.9f, 1.f, 1.f }, true);
+
+                float parameter = 0.f;
+                hitDistance = DistanceToSegment(input.mousePosInViewport,
+                    rootScreen, tipScreen, parameter);
+                if (hitDistance <= 7.f && hitDistance < boneHitDistance)
+                {
+                    boneHit = joint;
+                    boneHitDistance = hitDistance;
+                }
+            }
+        }
+    }
 
     Object* iconHit = nullptr;
     float iconHitDistance = FLT_MAX;
@@ -175,6 +285,9 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         }
     }
 
+    const bool selectedTransformEditable = selected &&
+        (!selectedPrefabRoot || selected == selectedPrefabRoot ||
+            visibleSkeletonJoints.find(selected) != visibleSkeletonJoints.end());
     int hoveredAxis = -1;
     EditorUiVec2 originScreen{};
     EditorUiVec2 axisEnds[3]{};
@@ -278,6 +391,12 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
     else if (input.hovered && input.leftClicked && iconHit)
     {
         result.selectedObject = iconHit;
+        result.selectionRequested = true;
+        result.consumedClick = true;
+    }
+    else if (input.hovered && input.leftClicked && boneHit)
+    {
+        result.selectedObject = boneHit;
         result.selectionRequested = true;
         result.consumedClick = true;
     }

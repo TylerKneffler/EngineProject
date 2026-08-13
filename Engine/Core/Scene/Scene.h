@@ -4,7 +4,7 @@
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Rendering/Lighting/Pipelines/Realtime/RealtimeLightingPipeline.h"
 #include "Core/Rendering/Lighting/Pipelines/Baked/BakedLightingPipeline.h"
-#include "Core/Serialization/Json.h"
+#include "Core/Model/SceneSettings.h"
 #include <glm/glm.hpp>
 #include <string>
 
@@ -34,27 +34,6 @@ class Audio;
 //   // inside SceneView drawFn:
 //   scene.Render(graphicsContext);
 // ---------------------------------------------------------------------------
-
-struct SceneSettings
-{
-    // Grid
-    bool  showGrid        = true;
-    int   gridHalfSize    = 10;          // legacy — kept for serialization compat
-    float gridCellSize    = 1.f;         // spacing between lines (world units)
-    float gridOpacity     = 0.4f;        // 0 = invisible, 1 = fully opaque
-    float gridFadeDistance = 80.f;       // world units; grid fades to 0 at this distance
-    glm::vec3 gridColor        = glm::vec3(0.45f, 0.45f, 0.45f);
-    glm::vec3 gridOriginColor  = glm::vec3(0.30f, 0.50f, 0.80f); // X/Z axis lines
-
-    // Ambient light
-    glm::vec3 ambientColor = glm::vec3(0.12f, 0.12f, 0.12f);
-
-    // Optional equirectangular panorama. Empty uses the bundled editor sky.
-    std::string skyboxTexture;
-
-    JsonValue Serialize() const;
-    void Deserialize(const JsonValue& value);
-};
 
 class Scene
 {

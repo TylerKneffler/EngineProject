@@ -1,6 +1,7 @@
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Serialization/Json.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Scene/Settings/SceneSettingsSerialization.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Object.h"
 #include "Core/component.h"
@@ -18,7 +19,11 @@
 #include "Core/Compoonents/UI/UIObject.h"
 #include "Core/Compoonents/UI/UIText.h"
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
-#include "Core/Compoonents/Animation/ModelAnimation.h"
+#include "Core/Compoonents/Animation/Model.h"
+#include "Core/Compoonents/Animation/Animation.h"
+#include "Core/Compoonents/Animation/AnimationManager.h"
+#include "Core/Compoonents/Animation/Skeleton.h"
+#include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
 #include <pugixml.hpp>
 #include <fstream>
@@ -95,12 +100,10 @@ void SceneSerializer::EnsureBuiltinsRegistered()
     RegisterComponentType<UIObject>();
     RegisterComponentType<UIText>();
     RegisterComponentType<SpriteAnimationManager>();
-    RegisterComponentType<ModelNode>();
-    Register("GltfNode", []() -> Component* { return new ModelNode(); });
+    RegisterComponentType<Model>();
     RegisterComponentType<Animation>();
     RegisterComponentType<AnimationManager>();
     RegisterComponentType<Skeleton>();
-    RegisterComponentType<MorphTargets>();
     RegisterComponentType<SkinnedMesh>();
     RegisterComponentType<BakedLightingData>();
 }
@@ -131,7 +134,11 @@ std::vector<std::string> SceneSerializer::GetRegisteredComponentTypes()
     std::vector<std::string> types;
     types.reserve(GetRegistry().size());
     for (const auto& entry : GetRegistry())
-        types.push_back(entry.first);
+    {
+        std::unique_ptr<Component> prototype(entry.second ? entry.second() : nullptr);
+        if (prototype && prototype->editorAddable)
+            types.push_back(entry.first);
+    }
     std::sort(types.begin(), types.end(), [](const std::string& left, const std::string& right)
     {
         return std::lexicographical_compare(left.begin(), left.end(), right.begin(), right.end(),
@@ -788,7 +795,7 @@ static JsonValue SerialiseScene(const Scene& scene)
     root.Set("version", JsonValue(1));
 
     // Settings
-    root.Set("settings", scene.settings.Serialize());
+    root.Set("settings", SerializeSceneSettings(scene.settings));
 
     // Objects — only root-level (no parent)
     JsonValue objects = JsonValue::MakeArray();
@@ -826,7 +833,7 @@ static bool DeserialiseScene(Scene& scene, const JsonValue& root,
     // Clear existing scene content
     scene.ClearObjects();
 
-    scene.settings.Deserialize(root["settings"]);
+    DeserializeSceneSettings(scene.settings, root["settings"]);
 
     // Deserialise a single Object node, then recurse for children.
     // Uses std::function so it can reference itself (recursive lambda).
@@ -1199,6 +1206,7 @@ Object* SceneSerializer::InstantiatePrefab(
             root["type"].AsString() != "prefab" || !root["object"].IsObject())
             return nullptr;
 
+        std::vector<std::pair<Object*, unsigned>> legacyNodeBindings;
         std::function<void(Object&, const JsonValue&)> instantiate =
             [&](Object& object, const JsonValue& node)
         {
@@ -1215,7 +1223,15 @@ Object* SceneSerializer::InstantiatePrefab(
                 const std::string type = componentNode["type"].AsString();
                 const SceneSerializer::Factory* factory = FindComponentFactory(GetRegistry(), type);
                 if (!factory)
+                {
+                    if (type == "ModelNode")
+                        legacyNodeBindings.emplace_back(&object,
+                            static_cast<unsigned>(componentNode["nodeIndex"].AsInt()));
+                    else if (type == "MorphTargets")
+                        if (Mesh* mesh = object.GetComponent<Mesh>())
+                            mesh->DeserializeLegacyMorphTargets(componentNode);
                     continue;
+                }
 
                 Component* component = (*factory)();
                 component->Owner = &object;
@@ -1255,6 +1271,13 @@ Object* SceneSerializer::InstantiatePrefab(
 
         rootObject = scene.AddObject();
         instantiate(*rootObject, root["object"]);
+        if (!legacyNodeBindings.empty())
+        {
+            Model* model = rootObject->GetComponent<Model>();
+            if (!model) model = rootObject->AddComponent<Model>();
+            for (const auto& [object, index] : legacyNodeBindings)
+                model->BindNode(index, object);
+        }
         SetPrefabSourceSnapshot(*rootObject, SerialiseObject(*rootObject, false));
         rootObject->SetPrefab(path);
         return rootObject;
@@ -1310,6 +1333,7 @@ bool SceneSerializer::RefreshPrefabInstances(
                     candidate->Prefab->GetPath()).string()) == targetKey)
                 instances.push_back(candidate.get());
 
+        std::vector<std::pair<Object*, unsigned>>* legacyNodeBindings = nullptr;
         std::function<void(Object&, const JsonValue&)> populate =
             [&](Object& object, const JsonValue& node)
         {
@@ -1326,7 +1350,15 @@ bool SceneSerializer::RefreshPrefabInstances(
                 const std::string type = componentNode["type"].AsString();
                 const SceneSerializer::Factory* factory = FindComponentFactory(GetRegistry(), type);
                 if (!factory)
+                {
+                    if (legacyNodeBindings && type == "ModelNode")
+                        legacyNodeBindings->emplace_back(&object,
+                            static_cast<unsigned>(componentNode["nodeIndex"].AsInt()));
+                    else if (type == "MorphTargets")
+                        if (Mesh* mesh = object.GetComponent<Mesh>())
+                            mesh->DeserializeLegacyMorphTargets(componentNode);
                     continue;
+                }
                 Component* component = (*factory)();
                 component->Owner = &object;
                 component->Deserialize(componentNode);
@@ -1376,8 +1408,20 @@ bool SceneSerializer::RefreshPrefabInstances(
                 delete component;
             instance->Components.clear();
 
+            std::vector<std::pair<Object*, unsigned>> bindings;
+            legacyNodeBindings = &bindings;
             populate(*instance, root["object"]);
-            SetPrefabSourceSnapshot(*instance, root["object"]);
+            legacyNodeBindings = nullptr;
+            if (!bindings.empty())
+            {
+                Model* model = instance->GetComponent<Model>();
+                if (!model) model = instance->AddComponent<Model>();
+                for (const auto& [object, index] : bindings)
+                    model->BindNode(index, object);
+            }
+            // Keep the baseline in the current schema. Legacy ModelNode and
+            // MorphTargets entries have already been migrated while populating.
+            SetPrefabSourceSnapshot(*instance, SerialiseObject(*instance, false));
             ApplyPrefabPatches(*instance, localOverrides, graphicsProvider);
             instance->transform = placement;
             instance->Prefab = prefab;

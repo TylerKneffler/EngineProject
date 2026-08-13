@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Core/Rendering/Lighting/Pipelines/ILightingPipeline.h"
-#include "Core/Rendering/Lighting/LightingTypes.h"
+#include "Core/Model/LightingData.h"
 #include <cstdint>
 
 class Scene;

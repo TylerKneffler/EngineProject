@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Core/Script.h"
+#include "Core/Component.h"
 #include "Core/Rendering/Sprites/SpriteAnimationAsset.h"
 #include "Core/Rendering/Sprites/SpriteSheetAsset.h"
 #include <chrono>
@@ -8,7 +8,7 @@
 
 class Texture;
 
-class SpriteAnimationManager : public Script
+class SpriteAnimationManager : public Component
 {
 public:
     SpriteAnimationManager();

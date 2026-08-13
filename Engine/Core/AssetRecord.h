@@ -1,13 +1,9 @@
 #pragma once
 
+#include "Core/Model/AssetData.h"
 #include <filesystem>
-#include <map>
 #include <optional>
 #include <string>
-#include <variant>
-
-using AssetImportSetting = std::variant<bool, double, std::string>;
-using AssetImportSettings = std::map<std::string, AssetImportSetting>;
 
 // Persistent metadata stored beside an asset as <filename>.meta. The record
 // owns the identity of the asset, so moving the asset and its sidecar preserves

@@ -1,5 +1,4 @@
 #include "Object.h"
-#include "Core/Script.h"
 
 Object::Object()
 {
@@ -15,7 +14,7 @@ Object::Object(Transform initialTransform)
 Object::~Object()
 {
     for (Component* component : Components)
-        if (Script* script = dynamic_cast<Script*>(component)) script->OnDestroy();
+        if (component) component->OnDestroy();
     for (Component* component : Components)
         delete component;
     Components.clear();
@@ -27,7 +26,7 @@ void Object::Enabled()
     if (enabled) return;
     enabled = true;
     for (Component* comp : Components)
-        if (Script* script = dynamic_cast<Script*>(comp)) script->Enabled();
+        if (comp) comp->Enabled();
 }
 
 void Object::Disabled()
@@ -35,23 +34,21 @@ void Object::Disabled()
     if (!enabled) return;
     enabled = false;
     for (Component* comp : Components)
-        if (Script* script = dynamic_cast<Script*>(comp)) script->Disabled();
+        if (comp) comp->Disabled();
 }
 
 void Object::Start()
 {
     if (!IsEnabledInHierarchy()) return;
     for (Component* comp : Components)
-        if (Script* s = dynamic_cast<Script*>(comp))
-            s->Start();
+        if (comp) comp->Start();
 }
 
 void Object::Update()
 {
     if (!IsEnabledInHierarchy()) return;
     for (Component* comp : Components)
-        if (Script* s = dynamic_cast<Script*>(comp))
-            s->Update();
+        if (comp) comp->Update();
 }
 
 void Object::Destroy()
@@ -66,10 +63,7 @@ void Object::Destroy()
 
     // Destroy components
     for (Component* comp : Components)
-    {
-        if (Script* script = dynamic_cast<Script*>(comp))
-            script->OnDestroy();
-    }
+        if (comp) comp->OnDestroy();
     for (Component* comp : Components)
     {
         if (comp)

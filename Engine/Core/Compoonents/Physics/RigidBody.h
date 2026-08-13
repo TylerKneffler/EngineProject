@@ -1,13 +1,13 @@
 #pragma once
 
-#include "Core/Script.h"
+#include "Core/Component.h"
 #include "Core/PropertyMacros.h"
 #include <glm/glm.hpp>
 #include <string>
 
 class Physics;
 
-class RigidBody final : public Script
+class RigidBody final : public Component
 {
 public:
     RigidBody();

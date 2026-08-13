@@ -2,18 +2,12 @@
 #include "IRenderer.h"
 #include "IEditorRenderer.h"
 #include "IGameRenderer.h"
+#include "Core/Model/RendererData.h"
 #include <memory>
 #include <string>
 #include <vector>
 
 struct ProjectSettings;
-
-struct RendererOption
-{
-    std::string name;
-    bool available = false;
-    std::string unavailableReason;
-};
 
 // ---------------------------------------------------------------------------
 // RendererFactory — Creates renderer instances based on project settings.

@@ -2,6 +2,7 @@
 
 #include "Core/AssetRecord.h"
 #include "Core/Compoonents/Material.h"
+#include "Core/Compoonents/Animation/ModelAnimation.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
@@ -189,6 +190,7 @@ ModelImportResult ModelAssetWriter::Write(const ImportedModel& model,
             manager->clip = model.animations.front().name;
         }
 
+        Model* modelComponent = root->AddComponent<Model>();
         std::vector<Object*> objects(model.nodes.size(), nullptr);
         for (size_t index = 0; index < model.nodes.size(); ++index)
         {
@@ -198,7 +200,7 @@ ModelImportResult ModelAssetWriter::Write(const ImportedModel& model,
             Object* object = AddChild(scene, parent,
                 SafeName(imported.name, "Node " + std::to_string(index + 1)));
             objects[index] = object;
-            object->AddComponent<ModelNode>()->nodeIndex = static_cast<unsigned>(index);
+            modelComponent->BindNode(static_cast<unsigned>(index), object);
             object->transform.position = imported.translation;
             object->transform.rotation = QuaternionEuler(imported.rotation);
             object->transform.scale = imported.scale;
@@ -220,13 +222,8 @@ ModelImportResult ModelAssetWriter::Write(const ImportedModel& model,
                 if (!material->LoadFromFile(materialPath))
                     throw std::runtime_error("Could not load generated material");
                 if (!primitive.morphTargets.empty())
-                {
-                    MorphTargets* morphs = target->AddComponent<MorphTargets>();
-                    morphs->nodeIndex = static_cast<unsigned>(index);
-                    morphs->targets = primitive.morphTargets;
-                    morphs->weights = primitive.morphWeights;
-                    morphs->weights.resize(primitive.morphTargets.size(), 0.f);
-                }
+                    mesh->SetMorphData(static_cast<unsigned>(index),
+                        primitive.morphTargets, primitive.morphWeights);
                 if (primitive.skinIndex >= 0 || !primitive.morphTargets.empty())
                 {
                     SkinnedMesh* deformer = target->AddComponent<SkinnedMesh>();

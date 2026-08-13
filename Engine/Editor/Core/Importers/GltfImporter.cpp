@@ -223,7 +223,7 @@ glm::vec3 QuaternionEuler(const glm::quat& q)
 
 struct ImportedPrimitiveRuntime
 {
-    std::vector<MorphTargets::Target> morphTargets;
+    std::vector<Mesh::MorphTarget> morphTargets;
 };
 }
 
@@ -719,13 +719,14 @@ GltfImportResult GltfImporter::Import(
             manager->clip = prefabRoot->GetComponent<Animation>()->clipName;
         }
 
+        Model* modelComponent = prefabRoot->AddComponent<Model>();
         std::function<void(size_t, Object*)> importNode =
             [&](size_t nodeIndex, Object* parent)
         {
             const auto& node = asset.nodes[nodeIndex];
             Object* object = AddChild(prefabScene, parent,
                 SafeName(node.name, "Node " + std::to_string(nodeIndex + 1)));
-            object->AddComponent<ModelNode>()->nodeIndex = static_cast<unsigned>(nodeIndex);
+            modelComponent->BindNode(static_cast<unsigned>(nodeIndex), object);
             if (const auto* trs = std::get_if<fastgltf::TRS>(&node.transform))
             {
                 object->transform.position = {
@@ -759,13 +760,12 @@ GltfImportResult GltfImporter::Import(
                     ImportedPrimitiveRuntime& runtime = meshRuntime[meshIndex][primitiveIndex];
                     if (!runtime.morphTargets.empty())
                     {
-                        MorphTargets* morphs = target->AddComponent<MorphTargets>();
-                        morphs->nodeIndex = static_cast<unsigned>(nodeIndex);
-                        morphs->targets = runtime.morphTargets;
                         const auto& defaults = !node.weights.empty() ? node.weights : importedMesh.weights;
-                        morphs->weights.assign(runtime.morphTargets.size(), 0.f);
-                        for (size_t i = 0; i < std::min(defaults.size(), morphs->weights.size()); ++i)
-                            morphs->weights[i] = static_cast<float>(defaults[i]);
+                        std::vector<float> weights(runtime.morphTargets.size(), 0.f);
+                        for (size_t i = 0; i < std::min(defaults.size(), weights.size()); ++i)
+                            weights[i] = static_cast<float>(defaults[i]);
+                        mesh->SetMorphData(static_cast<unsigned>(nodeIndex),
+                            runtime.morphTargets, std::move(weights));
                     }
                     if (node.skinIndex || !runtime.morphTargets.empty())
                     {

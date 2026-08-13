@@ -1,66 +1,7 @@
 #pragma once
 #include "pch.h"
-#include "Core/Rendering/Lighting/LightingTypes.h"
+#include "Core/Model/ProjectSettings.h"
 #include <pugixml.hpp>
-
-// ---------------------------------------------------------------------------
-// ProjectSettings
-//
-// Contains all project configuration loaded from the .proj file.
-// ---------------------------------------------------------------------------
-struct ProjectSettings
-{
-    enum class EditorMode { ThreeD, TwoD };
-    // Project metadata
-    std::string name;
-    std::string version;
-    std::string description;
-
-    // Paths
-    std::string engineDirectory;
-    std::string assetsDirectory;
-    std::string sceneDirectory;
-    std::string scriptsDirectory;
-    std::string shadersDirectory;
-    std::string buildDirectory;
-
-    // Build
-    std::string cmakeGenerator;
-    std::string platform;
-
-    // Editor
-    std::string defaultScene;
-    uint32_t viewportWidth;
-    uint32_t viewportHeight;
-    float leftPanelWidth;
-    float rightPanelWidth;
-    bool debugHierarchyInteractions = true;
-    uint32_t editorHistoryLimit = 100;
-    EditorMode editorMode = EditorMode::ThreeD;
-
-    std::vector<std::string> leftPanelTabs;
-    std::vector<std::string> centerPanelTabs;
-    std::vector<std::string> rightPanelTabs;
-
-    // Rendering
-    std::string renderingAPI;              // Deprecated: use editorRenderingAPI and gameRenderingAPI
-    std::string editorRenderingAPI;        // Rendering API for editor views (DirectX12, DirectX11, Vulkan)
-    std::string gameRenderingAPI;          // Rendering API for game window (DirectX12, DirectX11, Vulkan)
-    glm::vec4 clearColor;
-    uint32_t targetFramerate;
-    Engine::Rendering::Lighting::BakedLightingSettings bakedLighting;
-
-    // Game Resolution / Aspect Ratio
-    enum class AspectRatioMode { Free, Locked, Hardcoded };
-    AspectRatioMode aspectRatioMode = AspectRatioMode::Locked;
-    float gameAspectRatio = 1.777f;  // 16:9
-    uint32_t gameWindowWidth = 1920;
-    uint32_t gameWindowHeight = 1080;
-    glm::vec4 letterboxColor = glm::vec4(0.f, 0.f, 0.f, 1.f);  // black
-
-    // Components
-    std::vector<std::string> builtInComponents;
-};
 
 // ---------------------------------------------------------------------------
 // ProjectLoader

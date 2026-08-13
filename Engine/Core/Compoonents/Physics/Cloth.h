@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Core/Script.h"
+#include "Core/Component.h"
 #include "Core/PropertyMacros.h"
 #include <glm/glm.hpp>
 #include <string>
@@ -9,7 +9,7 @@ class Physics;
 
 // Simulates an independently selectable triangle mesh as a soft body. The
 // object's Mesh component is the rendered target and is restored on stop.
-class Cloth final : public Script
+class Cloth final : public Component
 {
 public:
     Cloth();

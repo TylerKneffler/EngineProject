@@ -1,12 +1,12 @@
 #pragma once
 
-#include "Core/Script.h"
+#include "Core/Component.h"
 #include "Core/PropertyMacros.h"
 #include <string>
 
 class Audio;
 
-class AudioSource : public Script
+class AudioSource : public Component
 {
 public:
     AudioSource();

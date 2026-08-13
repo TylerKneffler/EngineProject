@@ -1,16 +1,13 @@
 #pragma once
 
-#include "Core/Compoonents/Animation/ModelAnimation.h"
-#include "Core/Compoonents/Mesh.h"
-
+#include "Core/Model/AnimationData.h"
+#include "Core/Model/MeshData.h"
+#include <cstddef>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <string>
-#include <cstddef>
 #include <vector>
 
-// Canonical editor-time representation shared by every model decoder. Nothing
-// here refers to glTF, FBX, Assimp, or a renderer API.
 struct ImportedMaterial
 {
     std::string name;
@@ -37,7 +34,6 @@ struct ImportedMaterial
 
 struct ImportedTexture
 {
-    // Decoder-local reference used by material texture fields (for example *0).
     std::string source;
     std::string name;
     std::vector<std::byte> bytes;
@@ -47,7 +43,7 @@ struct ImportedPrimitive
 {
     std::string name;
     std::vector<Vertex> vertices;
-    std::vector<MorphTargets::Target> morphTargets;
+    std::vector<MorphTarget> morphTargets;
     std::vector<float> morphWeights;
     int materialIndex = -1;
     int skinIndex = -1;
