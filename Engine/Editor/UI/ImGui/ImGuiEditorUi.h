@@ -31,6 +31,8 @@ public:
     EditorUiObjectRowResult ObjectHeader(const void*,char*,size_t,bool*,bool) override;
     bool Selectable(const char*, bool, bool) override;
     EditorUiContextMenuResult ContextMenu(const void*,const char*,const char*,bool,const char*) override;
+    EditorUiAssetCreateMenuResult AssetWindowContextMenu() override;
+    EditorUiTextEditResult RenameText(const char*,char*,size_t,bool) override;
     EditorUiPrefabMenuResult PrefabOverrideMenu(const void*,bool) override;
     bool BeginChild(const char*) override; void EndChild() override;
     bool IsItemHovered() const override; bool IsItemClicked() const override;

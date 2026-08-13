@@ -74,6 +74,18 @@ struct EditorUiDragDropPayloadResult
     bool delivered = false;
 };
 
+struct EditorUiAssetCreateMenuResult
+{
+    bool folderRequested = false;
+    bool scriptRequested = false;
+};
+
+struct EditorUiTextEditResult
+{
+    bool submitted = false;
+    bool deactivated = false;
+};
+
 // Package-neutral immediate UI facade used throughout Editor/Core/View.
 class IEditorUi
 {
@@ -126,6 +138,9 @@ public:
         const char* addLabel, const char* deleteLabel,
         bool objectCreationMenu = false,
         const char* unpackLabel = nullptr) = 0;
+    virtual EditorUiAssetCreateMenuResult AssetWindowContextMenu() = 0;
+    virtual EditorUiTextEditResult RenameText(const char* label, char* buffer,
+        size_t size, bool focus) = 0;
     virtual EditorUiPrefabMenuResult PrefabOverrideMenu(const void* id,
         bool hasOverrides) = 0;
     virtual bool BeginChild(const char* id) = 0;

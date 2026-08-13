@@ -8,7 +8,7 @@ class Object;
 // ---------------------------------------------------------------------------
 // AssetsExplorerView
 //
-// Displays a hierarchical file tree of the Assets directory. Scene and prefab
+// Displays the immediate contents of one Assets directory. Scene and prefab
 // assets open inside the editor; other files use the system application.
 //
 // Usage:
@@ -38,9 +38,12 @@ public:
     const std::string& GetSelectedPath() const { return m_selectedPath; }
 
 private:
-    // Recursively draws the directory tree starting from the given path
-    // Returns true if any item in the tree was double-clicked
-    bool DrawDirectoryTree(IEditorUi& ui, const std::string& path);
+    void DrawCurrentDirectory(IEditorUi& ui);
+    void DrawBreadcrumbs(IEditorUi& ui);
+    void EnterDirectory(const std::string& path);
+    void CreateFolder();
+    void CreateScript();
+    void CommitScriptRename();
 
     // Opens a file with the system's default application (unless it's a scene file)
     void OpenFile(const std::string& filePath);
@@ -48,5 +51,12 @@ private:
     void SelectPath(const std::string& path);
 
     std::string m_assetsPath;
+    std::string m_currentDirectory;
     std::string m_selectedPath;
+    char m_search[256]{};
+    char m_scriptName[256]{};
+    std::string m_scriptBasePath;
+    bool m_renamingScript = false;
+    bool m_focusScriptName = false;
+    std::string m_error;
 };

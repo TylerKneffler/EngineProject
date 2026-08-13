@@ -277,6 +277,29 @@ EditorUiContextMenuResult ImGuiEditorUi::ContextMenu(const void* id,const char* 
     ImGui::PopID();
     return result;
 }
+EditorUiAssetCreateMenuResult ImGuiEditorUi::AssetWindowContextMenu()
+{
+    EditorUiAssetCreateMenuResult result;
+    if(ImGui::BeginPopupContextWindow("##windowContext",
+        ImGuiPopupFlags_MouseButtonRight|ImGuiPopupFlags_NoOpenOverItems)){
+        if(ImGui::BeginMenu("Create")){
+            result.folderRequested=ImGui::MenuItem("Folder");
+            result.scriptRequested=ImGui::MenuItem("Script");
+            ImGui::EndMenu();
+        }
+        ImGui::EndPopup();
+    }
+    return result;
+}
+EditorUiTextEditResult ImGuiEditorUi::RenameText(const char* label,char* buffer,size_t size,bool focus)
+{
+    EditorUiTextEditResult result;
+    if(focus)ImGui::SetKeyboardFocusHere();
+    result.submitted=ImGui::InputText(label,buffer,size,
+        ImGuiInputTextFlags_AutoSelectAll|ImGuiInputTextFlags_EnterReturnsTrue);
+    result.deactivated=ImGui::IsItemDeactivated();
+    return result;
+}
 EditorUiPrefabMenuResult ImGuiEditorUi::PrefabOverrideMenu(const void* id,bool hasOverrides)
 {
     EditorUiPrefabMenuResult result;
