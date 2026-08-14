@@ -17,6 +17,14 @@ public:
     using Vertex = Engine::Model::Vertex;
     using IGraphicsBuffer = Engine::Graphics::IGraphicsBuffer;
 
+    struct RenderData
+    {
+        IGraphicsBuffer* vertexBuffer = nullptr;
+        const Texture* texture = nullptr;
+        glm::vec4 uvRect{ 0.f, 0.f, 1.f, 1.f };
+        glm::vec2 worldSize{ 1.f, 1.f };
+    };
+
     Sprite();
 
     PROPERTY(Inspector, EditAnywhere, Category = "Sprite")
@@ -36,6 +44,9 @@ public:
     void OnAfterDeserialize(IGraphicsProvider* graphicsProvider) override;
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
     void SetAnimationManager(SpriteAnimationManager* manager);
+    // Resolves the animation-manager component once and captures everything
+    // the renderer needs for this snapshot.
+    bool PrepareRenderData(IGraphicsProvider* graphicsProvider, RenderData& data);
     bool Prepare(IGraphicsProvider* graphicsProvider);
     bool IsReady() const;
     IGraphicsBuffer* GetGraphicsBuffer() const { return m_vertexBuffer.get(); }

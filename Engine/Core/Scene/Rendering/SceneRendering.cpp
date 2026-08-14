@@ -14,6 +14,7 @@
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Renderers/UIRenderer.h"
 #include <algorithm>
+#include <array>
 #include <stdexcept>
 #include <filesystem>
 #include <glm/glm.hpp>
@@ -518,6 +519,7 @@ void Scene::PrepareRenderFrame()
         *this,
         static_cast<Engine::Model::LightData*>(m_lightDataMapped),
         kMaxLights);
+    m_lightDataBuffer->FlushMappedWrites();
 
     m_frameRenderItems.reserve(m_objects.size());
     uint32_t skinPaletteSlot = 0;
@@ -529,9 +531,10 @@ void Scene::PrepareRenderFrame()
             candidate->GetComponent<Engine::Components::Mesh>();
         Engine::Components::Sprite* sprite =
             candidate->GetComponent<Engine::Components::Sprite>();
-        if (sprite)
-            sprite->Prepare(m_graphicsProvider);
-        const bool renderable = (sprite && sprite->IsReady()) ||
+        Engine::Components::Sprite::RenderData spriteData;
+        const bool spriteReady = sprite &&
+            sprite->PrepareRenderData(m_graphicsProvider, spriteData);
+        const bool renderable = spriteReady ||
             (mesh && mesh->IsReady());
         if (!candidate->IsEnabledInHierarchy() || !renderable)
             continue;
@@ -549,7 +552,10 @@ void Scene::PrepareRenderFrame()
 
         if (sprite)
         {
-            item.spriteWorldSize = sprite->GetWorldSize();
+            item.spriteVertexBuffer = spriteData.vertexBuffer;
+            item.spriteTexture = spriteData.texture;
+            item.spriteWorldSize = spriteData.worldSize;
+            item.spriteUvRect = spriteData.uvRect;
             item.sortingLayer = sprite->sortingLayer;
             item.blended = true;
         }
@@ -685,6 +691,20 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 : false;
         });
 
+    struct PreparedDraw
+    {
+        Engine::Core::Object* object = nullptr;
+        Engine::Graphics::IGraphicsBuffer* vertexBuffer = nullptr;
+        Engine::Graphics::IPipelineState* pipeline = nullptr;
+        std::array<const Engine::Graphics::IGraphicsTexture*, 6> textures{};
+        UINT64 constantBufferOffset = 0;
+        uint32_t vertexStride = 0;
+        uint32_t vertexCount = 0;
+        bool preview = false;
+    };
+    std::vector<PreparedDraw> preparedDraws;
+    preparedDraws.reserve(std::min<size_t>(renderObjects.size(), kMaxObjects));
+
     UINT slot = 0;
     for (const ViewRenderItem& sortedItem : renderObjects)
     {
@@ -698,6 +718,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         Engine::Components::Material* mat = renderItem->material;
         const bool belongsToPreview = renderItem->belongsToPreview;
         const bool isPreview = belongsToPreview;
+        PreparedDraw preparedDraw{};
+        preparedDraw.object = obj;
+        preparedDraw.preview = isPreview;
         const Engine::Rendering::BakedLightingData* bakedLighting =
             renderItem->bakedLighting;
         // Version 3 and later bake lighting into generated material assets.
@@ -734,12 +757,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
         if (sprite)
         {
-            const Engine::Components::Texture* texture = sprite->GetTexture();
+            const Engine::Components::Texture* texture = renderItem->spriteTexture;
             const Engine::Graphics::IGraphicsTexture* graphicsTexture = texture
                 ? texture->GetGraphicsTexture() : nullptr;
-            context->SetTexture(0, graphicsTexture);
-            for (uint32_t textureSlot = 1; textureSlot < 6; ++textureSlot)
-                context->SetTexture(textureSlot, nullptr);
+            preparedDraw.textures[0] = graphicsTexture;
             objectData.baseColor = glm::vec4(sprite->tint,
                 std::clamp(sprite->alpha, 0.f, 1.f));
             objectData.ambientUnlit = { 0.f, 0.f, 0.f, 1.f };
@@ -756,7 +777,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             objectData.materialParams = { 0.f, 1.f, 1.f,
                 static_cast<float>(spriteTextureFlags) };
             objectData.viewPositionAlphaCutoff = glm::vec4(cameraPosition, 0.01f);
-            objectData.spriteUvRect = sprite->GetUvRect();
+            objectData.spriteUvRect = renderItem->spriteUvRect;
             alphaMode = Engine::Components::MaterialAlphaMode::Blend;
             doubleSided = true;
         }
@@ -765,22 +786,22 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             alphaMode = mat->GetAlphaMode();
             doubleSided = mat->doubleSided;
             uint32_t textureFlags = 0;
-            auto bindTexture = [&](uint32_t textureSlot,
-                                   const std::shared_ptr<Engine::Components::Texture>& texture,
-                                   uint32_t flag)
+            auto prepareTexture = [&](uint32_t textureSlot,
+                                      const std::shared_ptr<Engine::Components::Texture>& texture,
+                                      uint32_t flag)
             {
                 const Engine::Graphics::IGraphicsTexture* graphicsTexture =
                     texture ? texture->GetGraphicsTexture() : nullptr;
-                context->SetTexture(textureSlot, graphicsTexture);
+                preparedDraw.textures[textureSlot] = graphicsTexture;
                 if (graphicsTexture)
                     textureFlags |= flag;
             };
-            bindTexture(0, mat->baseColorTexture, 1u);
-            bindTexture(1, mat->metallicRoughnessTexture, 2u);
-            bindTexture(2, mat->normalTexture, 4u);
-            bindTexture(3, mat->occlusionTexture, 8u);
-            bindTexture(4, mat->emissiveTexture, 16u);
-            bindTexture(5, mat->heightTexture, 64u);
+            prepareTexture(0, mat->baseColorTexture, 1u);
+            prepareTexture(1, mat->metallicRoughnessTexture, 2u);
+            prepareTexture(2, mat->normalTexture, 4u);
+            prepareTexture(3, mat->occlusionTexture, 8u);
+            prepareTexture(4, mat->emissiveTexture, 16u);
+            prepareTexture(5, mat->heightTexture, 64u);
             if (alphaMode == Engine::Components::MaterialAlphaMode::Mask)
                 textureFlags |= 32u;
 
@@ -846,39 +867,52 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             materialPipeline = doubleSided
                 ? m_objectDoubleSidedPipeline.get()
                 : m_objectPipeline.get();
-        context->SetPipeline(materialPipeline);
-        context->SetConstantBuffer(0, m_objectConstantBuffer.get(), offset);
+        preparedDraw.pipeline = materialPipeline;
+        preparedDraw.constantBufferOffset = offset;
+        preparedDraw.vertexBuffer = sprite
+            ? renderItem->spriteVertexBuffer
+            : (mesh ? mesh->GetGraphicsBuffer() : nullptr);
+        preparedDraw.vertexStride = sprite
+            ? sprite->GetVertexStride() : mesh->GetVertexStride();
+        preparedDraw.vertexCount = sprite
+            ? sprite->GetVertexCount() : mesh->GetVertexCount();
+        preparedDraws.push_back(preparedDraw);
+
+        ++slot;
+    }
+
+    // DX11 buffers use CPU-side shadow storage. Upload the complete object
+    // array once, then keep structured-buffer binding free of hidden copies.
+    if (!preparedDraws.empty())
+    {
+        m_objectDataBuffer->FlushMappedWrites();
         context->SetStructuredBuffer(6, m_lightDataBuffer.get());
         context->SetStructuredBuffer(7, m_objectDataBuffer.get());
         context->SetStructuredBuffer(8, m_boneDataBuffer.get());
+    }
 
-        // Set vertex buffer and draw
-        Engine::Graphics::IGraphicsBuffer* vertexBuffer = sprite
-            ? sprite->GetGraphicsBuffer()
-            : (mesh ? mesh->GetGraphicsBuffer() : nullptr);
-        if (vertexBuffer)
+    for (const PreparedDraw& draw : preparedDraws)
+    {
+        if (!draw.vertexBuffer)
+            continue;
+        context->SetPipeline(draw.pipeline);
+        context->SetConstantBuffer(
+            0, m_objectConstantBuffer.get(), draw.constantBufferOffset);
+        for (uint32_t textureSlot = 0; textureSlot < draw.textures.size(); ++textureSlot)
+            context->SetTexture(textureSlot, draw.textures[textureSlot]);
+        context->SetVertexBuffer(0, draw.vertexBuffer, draw.vertexStride, 0);
+        context->DrawInstanced(draw.vertexCount, 1, 0, 0);
+
+        // Draw selected object outline overlay. Structured buffers remain
+        // bound across the pipeline change and do not need rebinding.
+        if (includeEditorVisuals && !draw.preview &&
+            draw.object == m_selectedObject && m_objectOutlinePipeline)
         {
-            const uint32_t vertexStride = sprite
-                ? sprite->GetVertexStride() : mesh->GetVertexStride();
-            const uint32_t vertexCount = sprite
-                ? sprite->GetVertexCount() : mesh->GetVertexCount();
-            context->SetVertexBuffer(0, vertexBuffer, vertexStride, 0);
-            context->DrawInstanced(vertexCount, 1, 0, 0);
-
-            // Draw selected object outline overlay.
-            if (includeEditorVisuals && !isPreview &&
-                obj == m_selectedObject && m_objectOutlinePipeline)
-            {
-                context->SetPipeline(m_objectOutlinePipeline.get());
-                context->SetConstantBuffer(0, m_objectConstantBuffer.get(), offset);
-                context->SetStructuredBuffer(6, m_lightDataBuffer.get());
-                context->SetStructuredBuffer(7, m_objectDataBuffer.get());
-                context->SetStructuredBuffer(8, m_boneDataBuffer.get());
-                context->DrawInstanced(vertexCount, 1, 0, 0);
-            }
+            context->SetPipeline(m_objectOutlinePipeline.get());
+            context->SetConstantBuffer(
+                0, m_objectConstantBuffer.get(), draw.constantBufferOffset);
+            context->DrawInstanced(draw.vertexCount, 1, 0, 0);
         }
-
-        ++slot;
     }
 
     // Draw scene helpers (grid) after opaque objects so blending works correctly

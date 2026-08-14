@@ -101,6 +101,13 @@ SpriteAnimationManager* Sprite::ResolveAnimationManager() const
 
 bool Sprite::Prepare(IGraphicsProvider* graphicsProvider)
 {
+    RenderData data;
+    return PrepareRenderData(graphicsProvider, data);
+}
+
+bool Sprite::PrepareRenderData(IGraphicsProvider* graphicsProvider, RenderData& data)
+{
+    data = {};
     SpriteAnimationManager* manager = ResolveAnimationManager();
     if (!graphicsProvider || !manager || !manager->Prepare(graphicsProvider))
         return false;
@@ -118,7 +125,27 @@ bool Sprite::Prepare(IGraphicsProvider* graphicsProvider)
             IGraphicsBuffer::Usage::VertexBuffer, IGraphicsBuffer::AccessMode::Upload,
             sizeof(vertices), vertices);
     }
-    return IsReady();
+    if (!m_vertexBuffer || !manager->IsReady())
+        return false;
+
+    data.vertexBuffer = m_vertexBuffer.get();
+    data.texture = manager->GetTexture();
+    const Engine::Model::SpriteSheetFrame* selected = manager->GetCurrentFrame();
+    if (!selected || !data.texture)
+        return true;
+
+    const float textureWidth = static_cast<float>(data.texture->GetWidth());
+    const float textureHeight = static_cast<float>(data.texture->GetHeight());
+    const float width = selected->width > 0.f ? selected->width : textureWidth;
+    const float height = selected->height > 0.f ? selected->height : textureHeight;
+    data.worldSize = { width / std::max(pixelsPerUnit, 0.01f),
+        height / std::max(pixelsPerUnit, 0.01f) };
+    if (textureWidth > 0.f && textureHeight > 0.f)
+    {
+        data.uvRect = { selected->x / textureWidth, selected->y / textureHeight,
+            width / textureWidth, height / textureHeight };
+    }
+    return true;
 }
 
 bool Sprite::IsReady() const

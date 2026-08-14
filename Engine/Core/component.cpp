@@ -572,6 +572,7 @@ void Component::Deserialize(const JsonValue& v)
     for (const auto& field : m_serializedFields)
         if (v.Has(field.name))
             field.read(v[field.name]);
+    MarkConfigurationDirty();
 }
 
 }

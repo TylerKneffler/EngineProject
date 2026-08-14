@@ -6,7 +6,6 @@
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Serialization/Json.h"
 #include <btBulletDynamicsCommon.h>
 #include <BulletCollision/CollisionShapes/btShapeHull.h>
 #include <BulletSoftBody/btSoftBodyHelpers.h>
@@ -20,7 +19,7 @@
 #include <cmath>
 #include <limits>
 #include <memory>
-#include <sstream>
+#include <utility>
 #include <vector>
 
 namespace Engine::Physics
@@ -99,23 +98,9 @@ btTransform ObjectWorldTransform(const Engine::Core::Object& object)
     return result;
 }
 
-std::string ConfigurationSignature(const Engine::Components::RigidBody& body)
+bool SameVector(const glm::vec3& first, const glm::vec3& second)
 {
-    std::ostringstream output;
-    output << Engine::Serialization::JsonWrite(body.Serialize()) << '|';
-    if (body.Owner)
-    {
-        const glm::vec3 scale = WorldScale(*body.Owner);
-        output << scale.x << ',' << scale.y << ',' << scale.z;
-        for (const Engine::Core::Component* component : body.Owner->Components)
-        {
-            if (dynamic_cast<const Engine::Components::Collider*>(component))
-                output << '|' << Engine::Serialization::JsonWrite(component->Serialize());
-        }
-        if (const Engine::Components::Mesh* mesh = body.Owner->GetComponent<Engine::Components::Mesh>())
-            output << "|mesh:" << mesh->GetFilePath() << ':' << mesh->GetVertexCount();
-    }
-    return output.str();
+    return first.x == second.x && first.y == second.y && first.z == second.z;
 }
 }
 
@@ -144,7 +129,11 @@ namespace Engine::Components
 struct Engine::Components::RigidBody::Impl
 {
     Engine::Scene::Scene* scene = nullptr;
-    std::string signature;
+    uint64_t configurationRevision = 0;
+    glm::vec3 worldScale{};
+    std::vector<std::pair<const Engine::Components::Collider*, uint64_t>> colliders;
+    const Engine::Components::Mesh* ownerMesh = nullptr;
+    uint64_t ownerMeshRevision = 0;
     std::unique_ptr<btCompoundShape> compound;
     std::vector<std::unique_ptr<btCollisionShape>> shapes;
     std::vector<std::unique_ptr<btTriangleMesh>> triangleMeshes;
@@ -191,14 +180,39 @@ bool Engine::Components::RigidBody::EnsureBody()
         DestroyBody();
         return false;
     }
-    const std::string signature = Engine::Physics::ConfigurationSignature(*this);
-    if (m_impl->body && m_impl->signature == signature)
+    const glm::vec3 scale = Engine::Physics::WorldScale(*Owner);
+    const Engine::Components::Mesh* ownerMesh =
+        Owner->GetComponent<Engine::Components::Mesh>();
+    bool configurationMatches = m_impl->body &&
+        m_impl->configurationRevision == GetConfigurationRevision() &&
+        Engine::Physics::SameVector(m_impl->worldScale, scale) &&
+        m_impl->ownerMesh == ownerMesh &&
+        m_impl->ownerMeshRevision ==
+            (ownerMesh ? ownerMesh->GetConfigurationRevision() : 0);
+    size_t colliderIndex = 0;
+    for (Engine::Core::Component* component : Owner->Components)
+    {
+        const auto* collider =
+            dynamic_cast<const Engine::Components::Collider*>(component);
+        if (!collider)
+            continue;
+        if (colliderIndex >= m_impl->colliders.size() ||
+            m_impl->colliders[colliderIndex].first != collider ||
+            m_impl->colliders[colliderIndex].second !=
+                collider->GetConfigurationRevision())
+        {
+            configurationMatches = false;
+        }
+        ++colliderIndex;
+    }
+    configurationMatches = configurationMatches &&
+        colliderIndex == m_impl->colliders.size();
+    if (configurationMatches)
         return true;
     DestroyBody();
 
     m_impl->scene = Owner->GetScene();
     m_impl->compound = std::make_unique<btCompoundShape>();
-    const glm::vec3 scale = Engine::Physics::WorldScale(*Owner);
 
     for (Engine::Core::Component* component : Owner->Components)
     {
@@ -320,7 +334,17 @@ bool Engine::Components::RigidBody::EnsureBody()
     m_impl->body->setAngularVelocity(Engine::Physics::ToBullet(initialAngularVelocity));
     Engine::Physics::StateFor(m_impl->scene).world->addRigidBody(m_impl->body.get(),
         static_cast<short>(collisionLayer), static_cast<short>(collisionMask));
-    m_impl->signature = signature;
+    m_impl->configurationRevision = GetConfigurationRevision();
+    m_impl->worldScale = scale;
+    m_impl->ownerMesh = ownerMesh;
+    m_impl->ownerMeshRevision = ownerMesh
+        ? ownerMesh->GetConfigurationRevision() : 0;
+    m_impl->colliders.clear();
+    for (Engine::Core::Component* component : Owner->Components)
+        if (const auto* collider =
+            dynamic_cast<const Engine::Components::Collider*>(component))
+            m_impl->colliders.emplace_back(
+                collider, collider->GetConfigurationRevision());
     return true;
 }
 
@@ -337,7 +361,11 @@ void Engine::Components::RigidBody::DestroyBody()
     m_impl->shapes.clear();
     m_impl->triangleMeshes.clear();
     m_impl->scene = nullptr;
-    m_impl->signature.clear();
+    m_impl->configurationRevision = 0;
+    m_impl->worldScale = {};
+    m_impl->colliders.clear();
+    m_impl->ownerMesh = nullptr;
+    m_impl->ownerMeshRevision = 0;
     m_isColliding = false;
     m_isGrounded = false;
 }
@@ -393,16 +421,9 @@ void Engine::Components::RigidBody::SyncTransformFromBody()
     }
 }
 
-void Engine::Components::RigidBody::Start() { EnsureBody(); }
-void Engine::Components::RigidBody::Update()
-{
-    if (EnsureBody())
-    {
-        ApplyBodySettings();
-        if (!Engine::Physics::IsDynamic(*this)) SyncBodyFromTransform();
-    }
-}
-void Engine::Components::RigidBody::Enabled() { EnsureBody(); }
+void Engine::Components::RigidBody::Start() {}
+void Engine::Components::RigidBody::Update() {}
+void Engine::Components::RigidBody::Enabled() {}
 void Engine::Components::RigidBody::Disabled() { DestroyBody(); }
 void Engine::Components::RigidBody::OnDestroy() { DestroyBody(); }
 
@@ -439,7 +460,11 @@ struct Engine::Components::Cloth::Impl
 {
     Engine::Scene::Scene* scene = nullptr;
     Engine::Components::Mesh* mesh = nullptr; // Render target owned by the object.
-    std::string signature;
+    const Engine::Components::Mesh* simulationMeshSource = nullptr;
+    uint64_t configurationRevision = 0;
+    uint64_t renderMeshRevision = 0;
+    uint64_t simulationMeshRevision = 0;
+    glm::vec3 worldScale{};
     std::vector<Engine::Model::Vertex> originalVertices;
     std::vector<glm::vec3> nodeLocalPositions;
     std::vector<std::size_t> renderToNode;
@@ -494,10 +519,27 @@ bool Engine::Components::Cloth::EnsureSoftBody()
         : Owner->GetComponent<Engine::Components::Mesh>();
     if (!mesh || mesh->GetVertices().size() < 3) return false;
 
-    std::unique_ptr<Engine::Components::Mesh> loadedSimulationMesh;
-    const Engine::Components::Mesh* simulationMesh = simulationMeshReference.IsAssigned()
+    const Engine::Components::Mesh* referencedSimulationMesh = simulationMeshReference.IsAssigned()
         ? Engine::Core::ResolveComponentReference<Engine::Components::Mesh>(Owner, simulationMeshReference) : nullptr;
-    if (simulationMeshReference.IsAssigned() && !simulationMesh) return false;
+    if (simulationMeshReference.IsAssigned() && !referencedSimulationMesh) return false;
+    const Engine::Components::Mesh* persistentSimulationMesh = referencedSimulationMesh
+        ? referencedSimulationMesh : (meshPath.empty() ? mesh : nullptr);
+    const glm::vec3 scale = Engine::Physics::WorldScale(*Owner);
+    if (m_impl->softBody &&
+        m_impl->configurationRevision == GetConfigurationRevision() &&
+        m_impl->mesh == mesh &&
+        m_impl->renderMeshRevision == mesh->GetConfigurationRevision() &&
+        m_impl->simulationMeshSource == persistentSimulationMesh &&
+        m_impl->simulationMeshRevision == (persistentSimulationMesh
+            ? persistentSimulationMesh->GetConfigurationRevision() : 0) &&
+        Engine::Physics::SameVector(m_impl->worldScale, scale))
+    {
+        return true;
+    }
+    DestroySoftBody(true);
+
+    std::unique_ptr<Engine::Components::Mesh> loadedSimulationMesh;
+    const Engine::Components::Mesh* simulationMesh = referencedSimulationMesh;
     if (!simulationMesh && !meshPath.empty())
     {
         loadedSimulationMesh = std::make_unique<Engine::Components::Mesh>();
@@ -508,19 +550,8 @@ bool Engine::Components::Cloth::EnsureSoftBody()
     if (!simulationMesh) simulationMesh = mesh;
     if (simulationMesh->GetVertices().size() < 3) return false;
 
-    const glm::vec3 scale = Engine::Physics::WorldScale(*Owner);
-    std::ostringstream signatureBuilder;
-    signatureBuilder << Engine::Serialization::JsonWrite(Serialize()) << "|render:" << mesh->GetFilePath() << ':'
-        << mesh->GetVertexCount() << "|simulation:" << simulationMesh->GetFilePath() << ':'
-        << simulationMesh->GetVertexCount() << '|' << scale.x << ',' << scale.y << ',' << scale.z;
-    const std::string signature = signatureBuilder.str();
-    if (m_impl->softBody && m_impl->signature == signature && m_impl->mesh == mesh)
-        return true;
-    DestroySoftBody(true);
-
     m_impl->scene = Owner->GetScene();
     m_impl->mesh = mesh;
-    m_impl->signature = signature;
     m_impl->originalVertices = mesh->GetVertices();
 
     struct PositionKey
@@ -652,6 +683,12 @@ bool Engine::Components::Cloth::EnsureSoftBody()
     }
 
     physics.world->addSoftBody(softBody);
+    m_impl->configurationRevision = GetConfigurationRevision();
+    m_impl->renderMeshRevision = mesh->GetConfigurationRevision();
+    m_impl->simulationMeshSource = persistentSimulationMesh;
+    m_impl->simulationMeshRevision = persistentSimulationMesh
+        ? persistentSimulationMesh->GetConfigurationRevision() : 0;
+    m_impl->worldScale = scale;
     return true;
 }
 
@@ -667,7 +704,11 @@ void Engine::Components::Cloth::DestroySoftBody(bool restoreMesh)
         m_impl->mesh->SetDeformedVertices(m_impl->originalVertices);
     m_impl->scene = nullptr;
     m_impl->mesh = nullptr;
-    m_impl->signature.clear();
+    m_impl->simulationMeshSource = nullptr;
+    m_impl->configurationRevision = 0;
+    m_impl->renderMeshRevision = 0;
+    m_impl->simulationMeshRevision = 0;
+    m_impl->worldScale = {};
     m_impl->originalVertices.clear();
     m_impl->nodeLocalPositions.clear();
     m_impl->renderToNode.clear();
@@ -749,9 +790,9 @@ void Engine::Components::Cloth::ResetSimulation()
     DestroySoftBody(true);
     EnsureSoftBody();
 }
-void Engine::Components::Cloth::Start() { EnsureSoftBody(); }
-void Engine::Components::Cloth::Update() { EnsureSoftBody(); }
-void Engine::Components::Cloth::Enabled() { EnsureSoftBody(); }
+void Engine::Components::Cloth::Start() {}
+void Engine::Components::Cloth::Update() {}
+void Engine::Components::Cloth::Enabled() {}
 void Engine::Components::Cloth::Disabled() { DestroySoftBody(true); }
 void Engine::Components::Cloth::OnDestroy() { DestroySoftBody(true); }
 
@@ -772,7 +813,12 @@ void Physics::Step(float deltaTime)
                 bodies.push_back(body);
                 body->m_isColliding = false;
                 body->m_isGrounded = false;
-                if (body->EnsureBody() && !Engine::Physics::IsDynamic(*body)) body->SyncBodyFromTransform();
+                if (body->EnsureBody())
+                {
+                    body->ApplyBodySettings();
+                    if (!Engine::Physics::IsDynamic(*body))
+                        body->SyncBodyFromTransform();
+                }
             }
             else if (auto* cloth = dynamic_cast<Engine::Components::Cloth*>(component))
             {

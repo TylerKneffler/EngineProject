@@ -104,6 +104,7 @@ static void ParseFaceToken(const std::string& t, int& vi, int& vti, int& vni)
 
 void Mesh::LoadFromFile(const std::string& path)
 {
+    MarkConfigurationDirty();
     m_filePath = path;  // store for serialization
     const std::filesystem::path resolvedPath = ResolveMeshPath(path);
     if (resolvedPath.extension() == ".mesh")

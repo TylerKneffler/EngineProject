@@ -4,6 +4,7 @@
 #include "Core/ComponentReference.h"
 #include <glm/glm.hpp>
 #include <functional>
+#include <cstdint>
 #include <vector>
 #include <string>
 
@@ -53,6 +54,16 @@ public:
     // Called by the Properties panel to draw editable properties in the editor.
     // Returns true when an editor control changed serialized component data.
     virtual bool DrawProperties(::Engine::Editor::IEditorUi& ui);
+
+    // Runtime systems use this monotonically increasing value to rebuild
+    // derived state only after configuration changes. Scripts that mutate
+    // public component fields directly should call MarkConfigurationDirty().
+    uint64_t GetConfigurationRevision() const { return m_configurationRevision; }
+    void MarkConfigurationDirty()
+    {
+        if (++m_configurationRevision == 0)
+            ++m_configurationRevision;
+    }
 
 protected:
     void SetTypeName(const char* typeName) { m_typeName = typeName ? typeName : "Component"; }
@@ -123,5 +134,6 @@ private:
 
     std::vector<SerializedField> m_serializedFields;
     std::string m_typeName = "Component";
+    uint64_t m_configurationRevision = 1;
 };
 }

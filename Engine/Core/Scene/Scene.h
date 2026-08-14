@@ -181,8 +181,11 @@ private:
         Engine::Components::Sprite* sprite = nullptr;
         Engine::Components::Material* material = nullptr;
         const Engine::Rendering::BakedLightingData* bakedLighting = nullptr;
+        IGraphicsBuffer* spriteVertexBuffer = nullptr;
+        const Engine::Components::Texture* spriteTexture = nullptr;
         glm::mat4 world{1.f};
         glm::vec2 spriteWorldSize{1.f};
+        glm::vec4 spriteUvRect{0.f, 0.f, 1.f, 1.f};
         uint32_t skinPaletteOffset = 0;
         uint32_t skinJointCount = 0;
         int sortingLayer = 0;

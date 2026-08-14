@@ -62,15 +62,6 @@ void D3D11GraphicsContext::SetStructuredBuffer(uint32_t slot, const Engine::Grap
 {
     if (!m_context || slot >= D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT) return;
     const auto* structured = dynamic_cast<const D3D11GraphicsBuffer*>(buffer);
-    if (slot != 8 && structured && structured->GetShadowData() && structured->GetBuffer())
-    {
-        D3D11_MAPPED_SUBRESOURCE mapped{};
-        ThrowIfFailed(m_context->Map(
-            structured->GetBuffer(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped));
-        std::memcpy(mapped.pData, structured->GetShadowData(),
-            static_cast<size_t>(structured->GetSize()));
-        m_context->Unmap(structured->GetBuffer(), 0);
-    }
     ID3D11ShaderResourceView* view = structured ? structured->GetShaderResourceView() : nullptr;
     m_context->VSSetShaderResources(slot, 1, &view);
     m_context->PSSetShaderResources(slot, 1, &view);

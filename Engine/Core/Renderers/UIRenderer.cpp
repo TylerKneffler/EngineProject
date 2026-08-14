@@ -390,7 +390,6 @@ void UIRenderer::Render(Engine::Scene::Scene& scene,
     {
         std::memcpy(mapped, vertices.data(), vertices.size() * sizeof(UIVertex));
         m_impl->vertexBuffer->Unmap();
-        m_impl->vertexBuffer->FlushMappedWrites();
     }
     else return;
 
