@@ -23,6 +23,8 @@ struct EditorUiViewportInput
     EditorUiVec2 mousePosInViewport;
     float mouseWheel = 0.f;
     bool hovered = false;
+    bool viewportDragActive = false;
+    bool rawLeftClicked = false;
     bool leftClicked = false;
     bool leftDown = false;
     bool leftReleased = false;
@@ -31,6 +33,7 @@ struct EditorUiViewportInput
     bool zoomDragDown = false;
     float keyPanDX = 0.f;
     float keyPanDY = 0.f;
+    float keyDolly = 0.f;
 };
 
 enum class EditorUiHierarchyDropPosition { None, Before, AsChild, After };

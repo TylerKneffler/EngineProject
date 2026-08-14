@@ -59,7 +59,10 @@ private:
         const EditorUiVec2& viewportSize, glm::vec3& placement) const;
     void CancelPrefabPreview();
     void ApplyCameraControls(float panDX, float panDY,
-                             float orbitDX, float orbitDY, float zoom);
+                             float orbitDX, float orbitDY, float zoom,
+                             float dolly);
+    bool DrawTransformToolbar(IEditorUi& ui,
+        const EditorUiViewportInput& input);
 
     // Calculates the game viewport size and position based on aspect ratio mode
     Engine::Scene::Scene* m_scene = nullptr; // non-owning; set via Init()
@@ -77,5 +80,7 @@ private:
     std::string m_prefabPreviewPath;
     bool m_prefabPreviewHasPlacement = false;
     EditorGizmoSystem m_gizmos;
+    EditorTransformTool m_transformTool = EditorTransformTool::Translate;
+    bool m_transformToolbarExpanded = false;
 };
 }

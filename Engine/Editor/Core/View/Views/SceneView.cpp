@@ -88,6 +88,62 @@ bool IntersectMeshBounds(const Engine::Core::Object& object, const Engine::Compo
     distance = nearDistance > 0.f ? nearDistance : farDistance;
     return distance > 0.f;
 }
+
+bool Contains(EditorUiVec2 point, EditorUiVec2 center, float radius)
+{
+    const float x = point.x - center.x;
+    const float y = point.y - center.y;
+    return x * x + y * y <= radius * radius;
+}
+
+void DrawToolIcon(IEditorUi& ui, EditorTransformTool tool,
+    EditorUiVec2 center, EditorUiColor color)
+{
+    if (tool == EditorTransformTool::Translate)
+    {
+        ui.DrawViewportLine({center.x - 10.f, center.y},
+            {center.x + 10.f, center.y}, color, 2.f);
+        ui.DrawViewportLine({center.x, center.y - 10.f},
+            {center.x, center.y + 10.f}, color, 2.f);
+        ui.DrawViewportTriangle({center.x + 12.f, center.y},
+            {center.x + 7.f, center.y - 4.f},
+            {center.x + 7.f, center.y + 4.f}, color);
+        ui.DrawViewportTriangle({center.x - 12.f, center.y},
+            {center.x - 7.f, center.y - 4.f},
+            {center.x - 7.f, center.y + 4.f}, color);
+        ui.DrawViewportTriangle({center.x, center.y - 12.f},
+            {center.x - 4.f, center.y - 7.f},
+            {center.x + 4.f, center.y - 7.f}, color);
+        ui.DrawViewportTriangle({center.x, center.y + 12.f},
+            {center.x - 4.f, center.y + 7.f},
+            {center.x + 4.f, center.y + 7.f}, color);
+    }
+    else if (tool == EditorTransformTool::Rotate)
+    {
+        ui.DrawViewportCircle(center, 10.f, color, false, 2.f);
+        ui.DrawViewportTriangle({center.x + 11.f, center.y - 2.f},
+            {center.x + 5.f, center.y - 7.f},
+            {center.x + 12.f, center.y - 9.f}, color);
+    }
+    else if (tool == EditorTransformTool::Scale)
+    {
+        ui.DrawViewportLine({center.x - 8.f, center.y + 8.f},
+            {center.x + 8.f, center.y - 8.f}, color, 3.f);
+        ui.DrawViewportCircle({center.x - 9.f, center.y + 9.f}, 4.f,
+            color, true);
+        ui.DrawViewportCircle({center.x + 9.f, center.y - 9.f}, 4.f,
+            color, true);
+    }
+    else
+    {
+        ui.DrawViewportCircle({center.x, center.y + 4.f}, 7.f,
+            color, false, 2.f);
+        for (int finger = -2; finger <= 2; ++finger)
+            ui.DrawViewportLine({center.x + finger * 3.f, center.y + 2.f},
+                {center.x + finger * 3.f, center.y - 9.f + std::abs(finger)},
+                color, 2.f);
+    }
+}
 }
 
 SceneView::~SceneView()
@@ -139,6 +195,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
     float panDX = 0.f, panDY = 0.f;
     float orbitDX = 0.f, orbitDY = 0.f;
     float zoom = 0.f;
+    float dolly = 0.f;
 
     const float targetAspect = m_aspectRatioMode == Engine::Model::ProjectSettings::AspectRatioMode::Free ? 0.f :
         (m_aspectRatioMode == Engine::Model::ProjectSettings::AspectRatioMode::Locked ? m_gameAspectRatio :
@@ -147,6 +204,8 @@ void SceneView::DrawPanel(IEditorUi& ui)
         {m_letterboxColor.r,m_letterboxColor.g,m_letterboxColor.b,m_letterboxColor.a});
     panDX = input.keyPanDX;
     panDY = input.keyPanDY;
+    dolly = input.keyDolly;
+    const bool toolbarConsumedClick = DrawTransformToolbar(ui, input);
     const EditorUiContextMenuResult createMenu =
         ui.ContextMenu(this, "Create", nullptr, true);
     if (m_scene && (createMenu.addRequested ||
@@ -190,8 +249,11 @@ void SceneView::DrawPanel(IEditorUi& ui)
                 OnObjectCreated(created);
         }
     }
+    EditorUiViewportInput gizmoInput = input;
+    if (toolbarConsumedClick || m_transformTool == EditorTransformTool::Hand)
+        gizmoInput.leftClicked = false;
     const EditorGizmoResult gizmoResult = m_scene
-        ? m_gizmos.DrawAndHandle(*m_scene, ui, input)
+        ? m_gizmos.DrawAndHandle(*m_scene, ui, gizmoInput, m_transformTool)
         : EditorGizmoResult{};
     if (OnGizmoInteraction)
         OnGizmoInteraction(gizmoResult.transformDragging);
@@ -270,10 +332,13 @@ void SceneView::DrawPanel(IEditorUi& ui)
         // Position cursor at viewport location and draw the game texture
 
         // Check for mouse input on the viewport
-        if (input.hovered || input.rightDown || input.middleDown ||
+        if (input.hovered || input.viewportDragActive ||
+            input.rightDown || input.middleDown ||
             input.zoomDragDown)
         {
-            if (input.leftClicked && !gizmoResult.consumedClick &&
+            if (input.leftClicked && !toolbarConsumedClick &&
+                m_transformTool != EditorTransformTool::Hand &&
+                !gizmoResult.consumedClick &&
                 !input.rightDown && !input.middleDown && OnObjectSelected)
                 OnObjectSelected(PickObjectInViewport(input.mousePosInViewport, input.available));
 
@@ -293,6 +358,14 @@ void SceneView::DrawPanel(IEditorUi& ui)
                 orbitDY = d.y;
             }
 
+            // Hand mode grabs the view plane directly with the left mouse.
+            if (m_transformTool == EditorTransformTool::Hand &&
+                input.leftDown && !toolbarConsumedClick)
+            {
+                panDX += d.x;
+                panDY += d.y;
+            }
+
             // Scroll wheel → zoom.
             zoom = input.mouseWheel;
             // Alt+Ctrl+left drag provides a trackpad-friendly dolly gesture.
@@ -303,7 +376,72 @@ void SceneView::DrawPanel(IEditorUi& ui)
 
     ui.EndWindow();
 
-    ApplyCameraControls(panDX, panDY, orbitDX, orbitDY, zoom);
+    ApplyCameraControls(panDX, panDY, orbitDX, orbitDY, zoom, dolly);
+}
+
+bool SceneView::DrawTransformToolbar(IEditorUi& ui,
+    const EditorUiViewportInput& input)
+{
+    if (input.available.x < 60.f || input.available.y < 60.f)
+        return false;
+
+    constexpr float radius = 18.f;
+    constexpr float spacing = 44.f;
+    const EditorUiVec2 mainCenter{input.available.x - 28.f, 28.f};
+    bool consumed = false;
+    if (input.rawLeftClicked && Contains(
+        input.mousePosInViewport, mainCenter, radius))
+    {
+        m_transformToolbarExpanded = !m_transformToolbarExpanded;
+        consumed = true;
+    }
+
+    const bool mainHovered = Contains(
+        input.mousePosInViewport, mainCenter, radius);
+    ui.DrawViewportCircle(mainCenter, radius,
+        mainHovered ? EditorUiColor{0.22f, 0.25f, 0.31f, 0.98f}
+                    : EditorUiColor{0.10f, 0.12f, 0.16f, 0.94f}, true);
+    ui.DrawViewportCircle(mainCenter, radius,
+        {0.72f, 0.78f, 0.90f, 0.9f}, false, 1.5f);
+    DrawToolIcon(ui, m_transformTool, mainCenter,
+        {0.92f, 0.95f, 1.f, 1.f});
+
+    if (!m_transformToolbarExpanded)
+        return consumed;
+
+    constexpr EditorTransformTool tools[] = {
+        EditorTransformTool::Translate,
+        EditorTransformTool::Rotate,
+        EditorTransformTool::Scale,
+        EditorTransformTool::Hand
+    };
+    constexpr const char* labels[] = {"Move", "Rotate", "Scale", "Hand"};
+    for (int index = 0; index < 4; ++index)
+    {
+        const EditorUiVec2 center{mainCenter.x, mainCenter.y +
+            spacing * static_cast<float>(index + 1)};
+        if (center.y + radius > input.available.y)
+            break;
+        const bool hovered = Contains(input.mousePosInViewport, center, radius);
+        if (input.rawLeftClicked && hovered)
+        {
+            m_transformTool = tools[index];
+            m_transformToolbarExpanded = false;
+            consumed = true;
+        }
+        const bool selected = tools[index] == m_transformTool;
+        ui.DrawViewportCircle(center, radius,
+            selected ? EditorUiColor{0.18f, 0.38f, 0.68f, 0.98f}
+                     : hovered ? EditorUiColor{0.22f, 0.25f, 0.31f, 0.98f}
+                               : EditorUiColor{0.10f, 0.12f, 0.16f, 0.94f}, true);
+        ui.DrawViewportCircle(center, radius,
+            selected ? EditorUiColor{0.45f, 0.72f, 1.f, 1.f}
+                     : EditorUiColor{0.62f, 0.68f, 0.78f, 0.9f}, false, 1.5f);
+        DrawToolIcon(ui, tools[index], center, {0.92f, 0.95f, 1.f, 1.f});
+        ui.DrawViewportText({center.x - 68.f, center.y - 7.f}, labels[index],
+            {0.92f, 0.95f, 1.f, 0.95f});
+    }
+    return consumed;
 }
 
 void SceneView::CancelPrefabPreview()
@@ -564,10 +702,11 @@ static void CalculateGameViewport(EditorUiVec2 availableSize, EditorUiVec2& outV
 // ---------------------------------------------------------------------------
 void SceneView::ApplyCameraControls(float panDX, float panDY,
                                         float orbitDX, float orbitDY,
-                                        float zoom)
+                                        float zoom, float dolly)
 {
     if (!m_scene) return;
-    if (panDX == 0.f && panDY == 0.f && orbitDX == 0.f && orbitDY == 0.f && zoom == 0.f) return;
+    if (panDX == 0.f && panDY == 0.f && orbitDX == 0.f &&
+        orbitDY == 0.f && zoom == 0.f && dolly == 0.f) return;
 
     Engine::Components::Camera*    cam = m_scene->editorCamera.GetComponent<Engine::Components::Camera>();
     assert(cam && "Scene editorCamera must have a Camera component");
@@ -581,9 +720,11 @@ void SceneView::ApplyCameraControls(float panDX, float panDY,
         const glm::vec3 pan(-dragX * speed, dragY * speed, 0.f);
         pos += pan;
         cam->target += pan;
-        if (zoom != 0.f)
+        const float zoomInput = zoom + dolly * 0.01f;
+        if (zoomInput != 0.f)
             cam->orthographicSize = std::clamp(
-                cam->orthographicSize * std::pow(0.85f, zoom), 0.05f, 10000.f);
+                cam->orthographicSize * std::pow(0.85f, zoomInput),
+                0.05f, 10000.f);
         return;
     }
 
@@ -602,6 +743,18 @@ void SceneView::ApplyCameraControls(float panDX, float panDY,
         const glm::vec3 pan = right * (-panDX * speed) + realUp * (panDY * speed);
         pos += pan;
         cam->target += pan;
+        eye = pos;
+        target = cam->target;
+    }
+
+    // Arrow-key dolly translates both the camera and its orbit target along
+    // the look direction, rather than moving vertically in the view plane.
+    if (dolly != 0.f)
+    {
+        const float speed = std::max(glm::length(target - eye), 0.05f) * 0.002f;
+        const glm::vec3 movement = forward * (dolly * speed);
+        pos += movement;
+        cam->target += movement;
         eye = pos;
         target = cam->target;
     }

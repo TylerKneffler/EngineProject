@@ -29,8 +29,8 @@ enum class EditorCommand
     ViewportZoom,
     ViewportMoveLeft,
     ViewportMoveRight,
-    ViewportMoveUp,
-    ViewportMoveDown
+    ViewportMoveForward,
+    ViewportMoveBackward
 };
 
 struct EditorKeyBinding

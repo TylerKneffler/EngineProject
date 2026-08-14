@@ -213,7 +213,8 @@ void DrawBoneShape(IEditorUi& ui, EditorUiVec2 root, EditorUiVec2 tip,
 }
 
 EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
-    Engine::Scene::Scene& scene, IEditorUi& ui, const EditorUiViewportInput& input)
+    Engine::Scene::Scene& scene, IEditorUi& ui,
+    const EditorUiViewportInput& input, EditorTransformTool tool)
 {
     EditorGizmoResult result{};
     const Engine::Components::Camera* camera = scene.editorCamera.GetComponent<Engine::Components::Camera>();
@@ -351,7 +352,8 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
     EditorUiVec2 axisEnds[3]{};
     float axisScale = 0.f;
     bool axisVisible[3]{};
-    if (selectedTransformEditable && ProjectPoint(viewProjection,
+    if (selectedTransformEditable && tool != EditorTransformTool::Hand &&
+        ProjectPoint(viewProjection,
         CachedWorldPosition(selected, worldMatrices), input.available, originScreen))
     {
         const glm::vec3 cameraPosition =
@@ -400,11 +402,16 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
                 ? kHoverColor : colors[axis];
             ui.DrawViewportLine(originScreen, axisEnds[axis], kOutline, 6.f);
             ui.DrawViewportLine(originScreen, axisEnds[axis], color, 3.f);
-            ui.DrawViewportTriangle(axisEnds[axis],
-                Add(Subtract(axisEnds[axis], Multiply(direction, 11.f)),
-                    Multiply(perpendicular, 5.f)),
-                Subtract(Subtract(axisEnds[axis], Multiply(direction, 11.f)),
-                    Multiply(perpendicular, 5.f)), color);
+            if (tool == EditorTransformTool::Translate)
+                ui.DrawViewportTriangle(axisEnds[axis],
+                    Add(Subtract(axisEnds[axis], Multiply(direction, 11.f)),
+                        Multiply(perpendicular, 5.f)),
+                    Subtract(Subtract(axisEnds[axis], Multiply(direction, 11.f)),
+                        Multiply(perpendicular, 5.f)), color);
+            else
+                ui.DrawViewportCircle(axisEnds[axis],
+                    tool == EditorTransformTool::Scale ? 5.f : 7.f,
+                    color, tool == EditorTransformTool::Scale, 2.f);
             ui.DrawViewportText(Add(axisEnds[axis], Multiply(perpendicular, 7.f)),
                 labels[axis], color);
         }
@@ -414,18 +421,28 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
     {
         const float pixels = Dot(Subtract(
             input.mousePosInViewport, m_dragStartMouse), m_dragScreenDirection);
-        const glm::vec3 worldDelta =
-            m_dragWorldAxis * pixels * m_dragWorldUnitsPerPixel;
-        glm::vec3 localDelta = worldDelta;
-        if (m_dragObject->Parent)
+        if (m_dragTool == EditorTransformTool::Translate)
         {
-            const glm::mat4 parentWorld =
-                m_dragObject->Parent->transform.GetWorldMatrix();
-            if (std::abs(glm::determinant(parentWorld)) > 0.000001f)
-                localDelta = glm::vec3(glm::inverse(parentWorld) *
-                    glm::vec4(worldDelta, 0.f));
+            const glm::vec3 worldDelta =
+                m_dragWorldAxis * pixels * m_dragWorldUnitsPerPixel;
+            glm::vec3 localDelta = worldDelta;
+            if (m_dragObject->Parent)
+            {
+                const glm::mat4 parentWorld =
+                    m_dragObject->Parent->transform.GetWorldMatrix();
+                if (std::abs(glm::determinant(parentWorld)) > 0.000001f)
+                    localDelta = glm::vec3(glm::inverse(parentWorld) *
+                        glm::vec4(worldDelta, 0.f));
+            }
+            m_dragObject->transform.position =
+                m_dragStartLocalPosition + localDelta;
         }
-        m_dragObject->transform.position = m_dragStartLocalPosition + localDelta;
+        else if (m_dragTool == EditorTransformTool::Rotate)
+            m_dragObject->transform.rotation[m_dragAxis] =
+                m_dragStartLocalRotation[m_dragAxis] + pixels * 0.01f;
+        else if (m_dragTool == EditorTransformTool::Scale)
+            m_dragObject->transform.scale[m_dragAxis] = std::max(0.001f,
+                m_dragStartLocalScale[m_dragAxis] + pixels * 0.01f);
         result.transformDragging = true;
         result.consumedClick = true;
     }
@@ -442,10 +459,13 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
             m_dragObject = selected;
             m_dragAxis = hoveredAxis;
             m_dragStartLocalPosition = selected->transform.position;
+            m_dragStartLocalRotation = selected->transform.rotation;
+            m_dragStartLocalScale = selected->transform.scale;
             m_dragWorldAxis = axes[hoveredAxis];
             m_dragStartMouse = input.mousePosInViewport;
             m_dragScreenDirection = Multiply(screenAxis, 1.f / screenLength);
             m_dragWorldUnitsPerPixel = axisScale / screenLength;
+            m_dragTool = tool;
             result.transformDragging = true;
             result.consumedClick = true;
         }

@@ -90,12 +90,12 @@
       { "key": "", "control": false, "shift": false, "alt": false },
       { "key": "", "control": false, "shift": false, "alt": false }
     ],
-    "viewport.move_up": [
+    "viewport.move_forward": [
       { "key": "UpArrow", "control": false, "shift": false, "alt": false },
       { "key": "", "control": false, "shift": false, "alt": false },
       { "key": "", "control": false, "shift": false, "alt": false }
     ],
-    "viewport.move_down": [
+    "viewport.move_backward": [
       { "key": "DownArrow", "control": false, "shift": false, "alt": false },
       { "key": "", "control": false, "shift": false, "alt": false },
       { "key": "", "control": false, "shift": false, "alt": false }

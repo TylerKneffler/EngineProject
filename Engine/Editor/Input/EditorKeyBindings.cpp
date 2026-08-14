@@ -112,8 +112,8 @@ void EditorKeyBindings::SetCompiledDefaults()
         { EditorCommand::ViewportZoom, "viewport.zoom", "Scene View", "Zoom Camera", { Key("Mouse Wheel"), Key("Mouse Left", true, false, true) } },
         { EditorCommand::ViewportMoveLeft, "viewport.move_left", "Scene View", "Move Camera Left", { Key("LeftArrow"), Key("") } },
         { EditorCommand::ViewportMoveRight, "viewport.move_right", "Scene View", "Move Camera Right", { Key("RightArrow"), Key("") } },
-        { EditorCommand::ViewportMoveUp, "viewport.move_up", "Scene View", "Move Camera Up", { Key("UpArrow"), Key("") } },
-        { EditorCommand::ViewportMoveDown, "viewport.move_down", "Scene View", "Move Camera Down", { Key("DownArrow"), Key("") } }
+        { EditorCommand::ViewportMoveForward, "viewport.move_forward", "Scene View", "Move Camera Forward", { Key("UpArrow"), Key("") } },
+        { EditorCommand::ViewportMoveBackward, "viewport.move_backward", "Scene View", "Move Camera Backward", { Key("DownArrow"), Key("") } }
     };
     NormalizeBindingColumns();
 }

@@ -495,6 +495,8 @@ EditorUiViewportInput ImGuiEditorUi::Viewport(void* texture,float aspect,EditorU
 
     out.hovered = ImGui::IsItemHovered(
         ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
+    out.rawLeftClicked = out.hovered &&
+        ImGui::IsMouseClicked(ImGuiMouseButton_Left, false);
     out.leftDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);
     out.leftReleased = ImGui::IsMouseReleased(ImGuiMouseButton_Left);
     const bool anyMouseDown = out.leftDown ||
@@ -506,6 +508,7 @@ EditorUiViewportInput ImGuiEditorUi::Viewport(void* texture,float aspect,EditorU
     if (out.hovered && mousePressed)
         m_capturedViewportTexture = texture;
     const bool ownsDrag = m_capturedViewportTexture == texture;
+    out.viewportDragActive = ownsDrag;
 
     if (out.hovered || ownsDrag)
     {
@@ -528,10 +531,10 @@ EditorUiViewportInput ImGuiEditorUi::Viewport(void* texture,float aspect,EditorU
             out.keyPanDX += keyPanStep;
         if (bindings.Down(EditorCommand::ViewportMoveRight))
             out.keyPanDX -= keyPanStep;
-        if (bindings.Down(EditorCommand::ViewportMoveUp))
-            out.keyPanDY += keyPanStep;
-        if (bindings.Down(EditorCommand::ViewportMoveDown))
-            out.keyPanDY -= keyPanStep;
+        if (bindings.Down(EditorCommand::ViewportMoveForward))
+            out.keyDolly += keyPanStep;
+        if (bindings.Down(EditorCommand::ViewportMoveBackward))
+            out.keyDolly -= keyPanStep;
     }
     if (!anyMouseDown)
         m_capturedViewportTexture = nullptr;
