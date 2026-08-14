@@ -94,6 +94,7 @@ int GameApplication::Run(HINSTANCE instance)
         lastCounter = currentCounter;
 
         scene.Update(deltaTime);
+        scene.PrepareRenderFrame();
 
         renderer->BeginFrame();
         renderer->Clear(0.1f, 0.1f, 0.1f);

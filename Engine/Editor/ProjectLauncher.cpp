@@ -539,6 +539,8 @@ std::string ProjectLauncher::Run(HINSTANCE instance)
     };
 
     window->WndProcHook = [&](HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
+        if (Engine::Core::Window::MessageRequestsRedraw(message))
+            renderer->MarkDirty();
         return uiBackend->HandleMessage(hwnd, message, wParam, lParam);
     };
     window->OnInputBegin = [&]() { uiBackend->BeginInput(); };
@@ -546,14 +548,17 @@ std::string ProjectLauncher::Run(HINSTANCE instance)
     window->OnResize = [&](uint32_t width, uint32_t height) {
         renderer->Resize(width, height);
         uiBackend->Resize(width, height);
+        renderer->MarkDirty();
     };
     window->OnUpdate = [&]()
     {
+        bool stateChanged = false;
         if (building && buildFuture.valid() &&
             buildFuture.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
         {
             ProjectBuildResult buildResult = buildFuture.get();
             building = false;
+            stateChanged = true;
             status = buildResult.message;
             if (!buildResult.projectFile.empty())
                 RememberProject(buildResult.projectFile);
@@ -568,7 +573,8 @@ std::string ProjectLauncher::Run(HINSTANCE instance)
             }
         }
 
-        renderer->MarkDirty();
+        if (building || stateChanged || uiBackend->NeedsContinuousRendering())
+            renderer->MarkDirty();
         renderer->RenderIfNeeded([&]()
         {
             renderer->Clear(0.075f, 0.085f, 0.11f, 1.0f);
@@ -752,6 +758,11 @@ std::string ProjectLauncher::Run(HINSTANCE instance)
             }
             ImGui::End();
         });
+
+        if (!renderer->IsDirty() && !building &&
+            !uiBackend->NeedsContinuousRendering())
+            MsgWaitForMultipleObjectsEx(0, nullptr, 50, QS_ALLINPUT,
+                MWMO_INPUTAVAILABLE);
     };
 
     window->Show();

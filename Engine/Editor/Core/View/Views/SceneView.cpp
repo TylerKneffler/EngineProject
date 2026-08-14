@@ -145,6 +145,8 @@ void SceneView::DrawPanel(IEditorUi& ui)
          static_cast<float>(m_gameWindowWidth) / static_cast<float>(m_gameWindowHeight));
     const auto input = ui.Viewport(GetUiTextureHandle(), targetAspect,
         {m_letterboxColor.r,m_letterboxColor.g,m_letterboxColor.b,m_letterboxColor.a});
+    panDX = input.keyPanDX;
+    panDY = input.keyPanDY;
     const EditorUiContextMenuResult createMenu =
         ui.ContextMenu(this, "Create", nullptr, true);
     if (m_scene && (createMenu.addRequested ||
@@ -280,8 +282,8 @@ void SceneView::DrawPanel(IEditorUi& ui)
             // Right-button drag → pan.
             if (input.rightDown)
             {
-                panDX = d.x;
-                panDY = d.y;
+                panDX += d.x;
+                panDY += d.y;
             }
 
             // Middle-button drag → orbit.

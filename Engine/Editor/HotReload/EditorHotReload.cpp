@@ -43,11 +43,10 @@ void EditorHotReload::Update(bool editorFocused)
         DrainOutput();
         PollCompile();
     }
-    else if (editorFocused && !m_wasFocused && m_dirty)
+    else if (editorFocused && m_dirty)
     {
         StartCompile();
     }
-    m_wasFocused = editorFocused;
 }
 
 void EditorHotReload::StartCompile()

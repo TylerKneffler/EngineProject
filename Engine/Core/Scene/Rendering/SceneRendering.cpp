@@ -502,6 +502,97 @@ void Scene::BuildObjectPipeline()
 }
 
 // ---------------------------------------------------------------------------
+// Scene::PrepareRenderFrame
+// ---------------------------------------------------------------------------
+
+void Scene::PrepareRenderFrame()
+{
+    m_renderFramePrepared = false;
+    m_frameRenderItems.clear();
+    m_frameLightCount = 0;
+
+    if (!m_graphicsProvider || !m_lightDataMapped || !m_boneDataMapped)
+        return;
+
+    m_frameLightCount = m_realtimeLightingPipeline.CollectLights(
+        *this,
+        static_cast<Engine::Model::LightData*>(m_lightDataMapped),
+        kMaxLights);
+
+    m_frameRenderItems.reserve(m_objects.size());
+    uint32_t skinPaletteSlot = 0;
+    bool boneDataChanged = false;
+    for (const auto& object : m_objects)
+    {
+        Engine::Core::Object* candidate = object.get();
+        Engine::Components::Mesh* mesh =
+            candidate->GetComponent<Engine::Components::Mesh>();
+        Engine::Components::Sprite* sprite =
+            candidate->GetComponent<Engine::Components::Sprite>();
+        if (sprite)
+            sprite->Prepare(m_graphicsProvider);
+        const bool renderable = (sprite && sprite->IsReady()) ||
+            (mesh && mesh->IsReady());
+        if (!candidate->IsEnabledInHierarchy() || !renderable)
+            continue;
+
+        FrameRenderItem item{};
+        item.object = candidate;
+        item.mesh = mesh;
+        item.sprite = sprite;
+        item.material = candidate->GetComponent<Engine::Components::Material>();
+        item.bakedLighting =
+            candidate->GetComponent<Engine::Rendering::BakedLightingData>();
+        item.belongsToPreview = m_previewObject &&
+            IsObjectOrDescendant(candidate, m_previewObject);
+        item.world = candidate->transform.GetWorldMatrix();
+
+        if (sprite)
+        {
+            item.spriteWorldSize = sprite->GetWorldSize();
+            item.sortingLayer = sprite->sortingLayer;
+            item.blended = true;
+        }
+        else if (item.material)
+        {
+            item.material->Validate();
+            item.material->PrepareTextures(m_graphicsProvider);
+            item.blended = item.material->GetAlphaMode() ==
+                Engine::Components::MaterialAlphaMode::Blend;
+        }
+        item.blended = item.belongsToPreview || item.blended;
+
+        if (skinPaletteSlot < kMaxObjects)
+        {
+            if (Engine::Components::SkinnedMesh* skinned =
+                candidate->GetComponent<Engine::Components::SkinnedMesh>())
+            {
+                std::vector<glm::mat4> palette;
+                if (skinned->BuildPalette(palette))
+                {
+                    const size_t count =
+                        std::min<size_t>(palette.size(), kMaxBonesPerObject);
+                    item.skinPaletteOffset = skinPaletteSlot * kMaxBonesPerObject;
+                    item.skinJointCount = static_cast<uint32_t>(count);
+                    std::memcpy(
+                        static_cast<glm::mat4*>(m_boneDataMapped) +
+                            item.skinPaletteOffset,
+                        palette.data(), count * sizeof(glm::mat4));
+                    ++skinPaletteSlot;
+                    boneDataChanged = true;
+                }
+            }
+        }
+
+        m_frameRenderItems.push_back(item);
+    }
+
+    if (boneDataChanged)
+        m_boneDataBuffer->FlushMappedWrites();
+    m_renderFramePrepared = true;
+}
+
+// ---------------------------------------------------------------------------
 // Scene::Render
 // ---------------------------------------------------------------------------
 
@@ -517,6 +608,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     {
         return;
     }
+
+    if (!m_renderFramePrepared)
+        PrepareRenderFrame();
 
     // Scene View always uses its navigation camera. Game View supplies its
     // active scene camera explicitly, so hierarchy selection cannot hijack
@@ -553,106 +647,59 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         context->DrawInstanced(3, 1, 0, 0);
     }
 
-    const uint32_t lightCount = m_realtimeLightingPipeline.CollectLights(
-        *this,
-        static_cast<Engine::Model::LightData*>(m_lightDataMapped),
-        kMaxLights);
-
-
     // Opaque and masked materials render first. Blended materials render
-    // back-to-front with depth writes disabled.
-    std::vector<Engine::Core::Object*> renderObjects;
-    renderObjects.reserve(m_objects.size());
-    for (const auto& object : m_objects)
+    // back-to-front with depth writes disabled. Build the complete view sort
+    // key once so the comparator performs field comparisons only.
+    struct ViewRenderItem
     {
-        Engine::Core::Object* candidate = object.get();
-        const bool preview = m_previewObject &&
-            IsObjectOrDescendant(candidate, m_previewObject);
-        Engine::Components::Mesh* mesh = candidate->GetComponent<Engine::Components::Mesh>();
-        Engine::Components::Sprite* sprite = candidate->GetComponent<Engine::Components::Sprite>();
-        if (sprite)
-            sprite->Prepare(m_graphicsProvider);
-        const bool renderable = (sprite && sprite->IsReady()) ||
-            (mesh && mesh->IsReady());
-        if (candidate->IsEnabledInHierarchy() && renderable &&
-            (!preview || includeEditorVisuals))
-            renderObjects.push_back(candidate);
+        const FrameRenderItem* source = nullptr;
+        float cameraDistanceSquared = 0.f;
+        float worldDepth = 0.f;
+        int sortingLayer = 0;
+        bool blended = false;
+    };
+    std::vector<ViewRenderItem> renderObjects;
+    renderObjects.reserve(m_frameRenderItems.size());
+    for (const FrameRenderItem& item : m_frameRenderItems)
+    {
+        if (!item.belongsToPreview || includeEditorVisuals)
+        {
+            const glm::vec3 delta = glm::vec3(item.world[3]) - cameraPosition;
+            renderObjects.push_back({ &item, glm::dot(delta, delta),
+                item.world[3].z, item.sortingLayer, item.blended });
+        }
     }
-    auto isBlended = [&](Engine::Core::Object* object)
-    {
-        if (m_previewObject && IsObjectOrDescendant(object, m_previewObject))
-            return true;
-        if (object->GetComponent<Engine::Components::Sprite>())
-            return true;
-        const Engine::Components::Material* material = object->GetComponent<Engine::Components::Material>();
-        return material &&
-            material->GetAlphaMode() == Engine::Components::MaterialAlphaMode::Blend;
-    };
-    auto distanceSquared = [&](Engine::Core::Object* object)
-    {
-        const glm::vec3 delta =
-            glm::vec3(object->transform.GetWorldMatrix()[3]) - cameraPosition;
-        return glm::dot(delta, delta);
-    };
     std::stable_sort(renderObjects.begin(), renderObjects.end(),
-        [&](Engine::Core::Object* first, Engine::Core::Object* second)
+        [&](const ViewRenderItem& first, const ViewRenderItem& second)
         {
             if (m_editorMode2D)
             {
-                const Engine::Components::Sprite* firstSprite = first->GetComponent<Engine::Components::Sprite>();
-                const Engine::Components::Sprite* secondSprite = second->GetComponent<Engine::Components::Sprite>();
-                const int firstLayer = firstSprite ? firstSprite->sortingLayer : 0;
-                const int secondLayer = secondSprite ? secondSprite->sortingLayer : 0;
-                if (firstLayer != secondLayer)
-                    return firstLayer < secondLayer;
-                return first->transform.GetWorldPosition().z <
-                    second->transform.GetWorldPosition().z;
+                if (first.sortingLayer != second.sortingLayer)
+                    return first.sortingLayer < second.sortingLayer;
+                return first.worldDepth < second.worldDepth;
             }
-            const bool firstBlend = isBlended(first);
-            const bool secondBlend = isBlended(second);
-            if (firstBlend != secondBlend)
-                return !firstBlend;
-            return firstBlend
-                ? distanceSquared(first) > distanceSquared(second)
+            if (first.blended != second.blended)
+                return !first.blended;
+            return first.blended
+                ? first.cameraDistanceSquared > second.cameraDistanceSquared
                 : false;
         });
 
-    // Populate every palette before the first draw. This lets D3D11 upload the
-    // large shared palette once while D3D12/Vulkan read the same mapped data.
-    std::vector<uint32_t> skinJointCounts(
-        std::min<size_t>(renderObjects.size(), kMaxObjects), 0u);
-    for (size_t skinSlot = 0; skinSlot < skinJointCounts.size(); ++skinSlot)
-    {
-        if (Engine::Components::SkinnedMesh* skinned = renderObjects[skinSlot]->GetComponent<Engine::Components::SkinnedMesh>())
-        {
-            std::vector<glm::mat4> palette;
-            if (skinned->BuildPalette(palette))
-            {
-                const size_t count = std::min<size_t>(palette.size(), kMaxBonesPerObject);
-                const size_t paletteOffset = skinSlot * kMaxBonesPerObject;
-                std::memcpy(static_cast<glm::mat4*>(m_boneDataMapped) + paletteOffset,
-                    palette.data(), count * sizeof(glm::mat4));
-                skinJointCounts[skinSlot] = static_cast<uint32_t>(count);
-            }
-        }
-    }
-    m_boneDataBuffer->FlushMappedWrites();
-
     UINT slot = 0;
-    for (Engine::Core::Object* obj : renderObjects)
+    for (const ViewRenderItem& sortedItem : renderObjects)
     {
         if (slot >= kMaxObjects)
             break;
 
-        const bool belongsToPreview = m_previewObject &&
-            IsObjectOrDescendant(obj, m_previewObject);
-        Engine::Components::Mesh* mesh = obj->GetComponent<Engine::Components::Mesh>();
-        Engine::Components::Sprite* sprite = obj->GetComponent<Engine::Components::Sprite>();
-
-        Engine::Components::Material* mat = obj->GetComponent<Engine::Components::Material>();
+        const FrameRenderItem* renderItem = sortedItem.source;
+        Engine::Core::Object* obj = renderItem->object;
+        Engine::Components::Mesh* mesh = renderItem->mesh;
+        Engine::Components::Sprite* sprite = renderItem->sprite;
+        Engine::Components::Material* mat = renderItem->material;
+        const bool belongsToPreview = renderItem->belongsToPreview;
         const bool isPreview = belongsToPreview;
         const Engine::Rendering::BakedLightingData* bakedLighting =
-            obj->GetComponent<Engine::Rendering::BakedLightingData>();
+            renderItem->bakedLighting;
         // Version 3 and later bake lighting into generated material assets.
         // Keep the component values for inspection, but do not add them again
         // at runtime or the baked result would be double-lit.
@@ -662,13 +709,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             usesLegacyProbeBake
                 ? bakedLighting->irradiance
                 : glm::vec3(0.f);
-        glm::mat4 world = obj->transform.GetWorldMatrix();
+        glm::mat4 world = renderItem->world;
         if (sprite)
         {
             if (m_editorMode2D)
                 world[3].z = 0.f;
-            const glm::vec2 size = sprite->GetWorldSize();
-            world = world * glm::scale(glm::mat4(1.f), glm::vec3(size, 1.f));
+            world = world * glm::scale(glm::mat4(1.f),
+                glm::vec3(renderItem->spriteWorldSize, 1.f));
         }
         UINT64 offset = static_cast<UINT64>(slot) * kCBStride;
 
@@ -676,11 +723,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         objectData.mvp = proj * view * world;
         objectData.world = world;
         objectData.spriteUvRect = { 0.f, 0.f, 1.f, 1.f };
-        if (skinJointCounts[slot] > 0)
+        if (renderItem->skinJointCount > 0)
         {
-            const size_t paletteOffset = static_cast<size_t>(slot) * kMaxBonesPerObject;
-            objectData.skinParams = { static_cast<float>(paletteOffset),
-                static_cast<float>(skinJointCounts[slot]), 0.f, 0.f };
+            objectData.skinParams = {
+                static_cast<float>(renderItem->skinPaletteOffset),
+                static_cast<float>(renderItem->skinJointCount), 0.f, 0.f };
         }
         Engine::Components::MaterialAlphaMode alphaMode = Engine::Components::MaterialAlphaMode::Opaque;
         bool doubleSided = false;
@@ -715,10 +762,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         }
         else if (mat)
         {
-            mat->Validate();
             alphaMode = mat->GetAlphaMode();
             doubleSided = mat->doubleSided;
-            mat->PrepareTextures(m_graphicsProvider);
             uint32_t textureFlags = 0;
             auto bindTexture = [&](uint32_t textureSlot,
                                    const std::shared_ptr<Engine::Components::Texture>& texture,
@@ -781,7 +826,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 bakedLighting->lightDirection, 1.f);
         }
 
-        const DrawCBData drawData{ slot, lightCount, 0u, 0u };
+        const DrawCBData drawData{ slot, m_frameLightCount, 0u, 0u };
         memcpy(static_cast<uint8_t*>(m_objectCBMapped) + offset,
             &drawData, sizeof(drawData));
         memcpy(static_cast<uint8_t*>(m_objectDataMapped) +

@@ -65,6 +65,7 @@ public:
 
     // IEditorRenderer interface
     void MarkDirty() override { m_dirty = true; }
+    bool IsDirty() const override { return m_dirty; }
     void SetUiRenderHooks(EditorUiRenderHooks hooks) override { m_uiHooks = std::move(hooks); }
     void RenderIfNeeded(std::function<void()> drawFn = nullptr) override;
     std::pair<std::pair<void*, void*>, uint32_t> AllocateSrvSlot() override;

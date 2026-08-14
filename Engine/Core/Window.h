@@ -85,6 +85,11 @@ public:
     uint32_t GetHeight() const { return m_height; }
     bool IsFocused() const { return m_focused; }
 
+    // Returns true for window messages that can change rendered editor
+    // content. Housekeeping messages such as WM_SETCURSOR must not keep a
+    // dirty-driven renderer awake.
+    static bool MessageRequestsRedraw(UINT message);
+
 private:
     // Static WndProc required by Win32 (cannot be a non-static member).
     // Forwards to the Window instance stored in GWLP_USERDATA (see .cpp).

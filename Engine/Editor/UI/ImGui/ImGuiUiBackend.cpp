@@ -246,6 +246,21 @@ void ImGuiUiBackend::BeginFrame()
     ImGui::NewFrame();
 }
 
+bool ImGuiUiBackend::NeedsContinuousRendering() const
+{
+    if (!m_initialized || !ImGui::GetCurrentContext())
+        return false;
+    if (ImGui::IsAnyItemActive() || ImGui::IsAnyMouseDown())
+        return true;
+
+    // Held viewport-navigation keys need updates between Win32 key-repeat
+    // messages, otherwise camera motion becomes visibly stepped.
+    for (int key = ImGuiKey_NamedKey_BEGIN; key < ImGuiKey_NamedKey_END; ++key)
+        if (ImGui::IsKeyDown(static_cast<ImGuiKey>(key)))
+            return true;
+    return false;
+}
+
 void ImGuiUiBackend::Render(void* commandBuffer)
 {
     if (!m_initialized) return;

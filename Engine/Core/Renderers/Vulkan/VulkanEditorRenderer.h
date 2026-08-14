@@ -19,6 +19,7 @@ public:
     void Clear(float r, float g, float b, float a = 1.0f) override;
     Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override { return m_provider.get(); }
     void MarkDirty() override { m_dirty = true; }
+    bool IsDirty() const override { return m_dirty; }
     void SetUiRenderHooks(EditorUiRenderHooks hooks) override { m_uiHooks = std::move(hooks); }
     void SetUiTextureHooks(EditorUiTextureHooks hooks) override;
     void RenderIfNeeded(std::function<void()> drawFn = nullptr) override;

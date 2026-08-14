@@ -44,6 +44,7 @@ public:
     // Mark the back-buffer as needing a redraw. Call after any change
     // (resize, input, property edits, scene changes, etc.).
     virtual void MarkDirty() = 0;
+    virtual bool IsDirty() const = 0;
 
     virtual void SetUiRenderHooks(EditorUiRenderHooks hooks) = 0;
     virtual void SetUiTextureHooks(EditorUiTextureHooks) {}

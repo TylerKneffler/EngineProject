@@ -380,6 +380,8 @@ int WINAPI wWinMain(
 
     OutputDebugStringA("[Main] Setting WndProcHook callback...\n");
     window->WndProcHook = [&](HWND h, UINT m, WPARAM w, LPARAM l) -> bool {
+        if (Engine::Core::Window::MessageRequestsRedraw(m))
+            renderer->MarkDirty();
         return uiBackend->HandleMessage(h, m, w, l);
     };
     window->OnInputBegin = [&]() { uiBackend->BeginInput(); };
@@ -387,6 +389,7 @@ int WINAPI wWinMain(
     OutputDebugStringA("[Main] WndProcHook callback set\n");
 
     OutputDebugStringA("[Main] Setting OnUpdate callback...\n");
+    std::string displayedWindowTitle;
     window->OnUpdate = [&]()
     {
         // Update delta time
@@ -396,10 +399,19 @@ int WINAPI wWinMain(
                  / static_cast<float>(perfFreq.QuadPart);
         lastCounter = now;
 
-        // Update build manager
+        // Update background editor work. Transitions themselves invalidate a
+        // frame so the final status/overlay is drawn even when continuous work
+        // ended during this update.
+        const Engine::Editor::PlayState previousPlayState = playState;
+        const bool wasBuilding = gameBuildManager->IsBuilding();
+        const bool wasHotReloadBusy = hotReload->IsBusy();
         Engine::Editor::PostBuildAction postBuildAction;
         gameBuildManager->Update(playState, postBuildAction);
         hotReload->Update(window->IsFocused());
+        if (previousPlayState != playState ||
+            wasBuilding != gameBuildManager->IsBuilding() ||
+            wasHotReloadBusy != hotReload->IsBusy())
+            renderer->MarkDirty();
 
         // Tick game objects while playing
         if (playState == Engine::Editor::PlayState::Playing)
@@ -407,19 +419,35 @@ int WINAPI wWinMain(
             scene->Update(dt);
         }
 
-        renderer->MarkDirty();
+        const auto needsContinuousRendering = [&]()
+        {
+            return playState == Engine::Editor::PlayState::Playing ||
+                gameBuildManager->IsBuilding() || hotReload->IsBusy() ||
+                editorState->IsLoadingOverlayVisible() ||
+                uiBackend->NeedsContinuousRendering();
+        };
+        if (needsContinuousRendering())
+            renderer->MarkDirty();
 
         // Update window title
         const std::string title = std::string("Engine Editor - ") +
             editorState->GetActiveDocumentName() +
             (engineDevelopmentMode ? " - Engine Sandbox" : "") +
             (editorState->HasUnsavedChanges() ? " *" : "");
-        SetWindowTextA(window->GetHWND(), title.c_str());
+        if (title != displayedWindowTitle)
+        {
+            displayedWindowTitle = title;
+            SetWindowTextA(window->GetHWND(), displayedWindowTitle.c_str());
+        }
 
         // Render frame
         renderer->RenderIfNeeded([&]()
         {
             renderer->Clear(projectSettings.clearColor.r, projectSettings.clearColor.g, projectSettings.clearColor.b);
+
+            // Scene and Game views share this camera-independent snapshot.
+            // Each view still performs its own camera matrices and sorting.
+            scene->PrepareRenderFrame();
 
             // Render 3D panels
             for (auto& panel : editorState->GetPanels())
@@ -439,6 +467,13 @@ int WINAPI wWinMain(
             // Render UI
             uiBackend->DrawEditor(*editorState, playState, gameBuildManager.get());
         });
+
+        // Avoid spinning the editor loop while idle. Window input wakes this
+        // wait immediately; the short timeout also services asynchronous
+        // directory notifications and other background state promptly.
+        if (!renderer->IsDirty() && !needsContinuousRendering())
+            MsgWaitForMultipleObjectsEx(0, nullptr, 50, QS_ALLINPUT,
+                MWMO_INPUTAVAILABLE);
     };
     OutputDebugStringA("[Main] OnUpdate callback set\n");
 

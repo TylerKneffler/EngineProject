@@ -263,7 +263,10 @@ EditorUiContextMenuResult ImGuiEditorUi::ContextMenu(const void* id,const char* 
     const bool hasUnpack=unpackLabel&&unpackLabel[0];
     if(!hasAdd&&!hasDelete&&!hasUnpack)return result;
     ImGui::PushID(id);
-    if(ImGui::BeginPopupContextItem("##context")){
+    if(!ImGui::GetIO().KeyAlt&&ImGui::IsItemHovered()&&
+        ImGui::IsMouseReleased(ImGuiMouseButton_Right))
+        ImGui::OpenPopup("##context");
+    if(ImGui::BeginPopup("##context")){
         if(hasAdd){
             if(objectCreationMenu){
                 if(ImGui::BeginMenu(addLabel)){
@@ -516,6 +519,19 @@ EditorUiViewportInput ImGuiEditorUi::Viewport(void* texture,float aspect,EditorU
         out.zoomDragDown = bindings.Down(EditorCommand::ViewportZoom);
         out.leftClicked = out.hovered &&
             bindings.Pressed(EditorCommand::ViewportSelect);
+    }
+    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
+    {
+        auto& bindings = EditorKeyBindings::Get();
+        const float keyPanStep = 500.f * ImGui::GetIO().DeltaTime;
+        if (bindings.Down(EditorCommand::ViewportMoveLeft))
+            out.keyPanDX += keyPanStep;
+        if (bindings.Down(EditorCommand::ViewportMoveRight))
+            out.keyPanDX -= keyPanStep;
+        if (bindings.Down(EditorCommand::ViewportMoveUp))
+            out.keyPanDY += keyPanStep;
+        if (bindings.Down(EditorCommand::ViewportMoveDown))
+            out.keyPanDY -= keyPanStep;
     }
     if (!anyMouseDown)
         m_capturedViewportTexture = nullptr;

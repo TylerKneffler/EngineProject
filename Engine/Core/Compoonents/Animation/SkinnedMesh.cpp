@@ -2,9 +2,54 @@
 #include "Skeleton.h"
 #include "Core/Object.h"
 #include <glm/gtc/matrix_inverse.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <unordered_map>
+#include <vector>
 
 namespace Engine::Components
 {
+namespace
+{
+glm::mat4 LocalMatrix(const Engine::Core::Object& object)
+{
+    const auto& transform = object.transform;
+    return glm::translate(glm::mat4(1.f), transform.position) *
+        glm::rotate(glm::mat4(1.f), transform.rotation.z, { 0.f, 0.f, 1.f }) *
+        glm::rotate(glm::mat4(1.f), transform.rotation.y, { 0.f, 1.f, 0.f }) *
+        glm::rotate(glm::mat4(1.f), transform.rotation.x, { 1.f, 0.f, 0.f }) *
+        glm::scale(glm::mat4(1.f), transform.scale);
+}
+
+// Skinning asks for the world matrix of every joint. Calling
+// Transform::GetWorldMatrix for each one walks and rebuilds the shared parent
+// chain repeatedly, which is quadratic for the long chains common in rigs.
+// Cache ancestors for this palette build so every local transform is composed
+// at most once while still reflecting live gizmo edits in the same frame.
+glm::mat4 CachedWorldMatrix(Engine::Core::Object* object,
+    std::unordered_map<Engine::Core::Object*, glm::mat4>& cache)
+{
+    if (!object) return glm::mat4(1.f);
+    if (const auto found = cache.find(object); found != cache.end())
+        return found->second;
+
+    std::vector<Engine::Core::Object*> chain;
+    Engine::Core::Object* current = object;
+    while (current && cache.find(current) == cache.end())
+    {
+        chain.push_back(current);
+        current = current->Parent;
+    }
+
+    glm::mat4 world = current ? cache.find(current)->second : glm::mat4(1.f);
+    for (auto it = chain.rbegin(); it != chain.rend(); ++it)
+    {
+        world *= LocalMatrix(**it);
+        cache.emplace(*it, world);
+    }
+    return cache.find(object)->second;
+}
+}
+
 SkinnedMesh::SkinnedMesh()
 {
     SetTypeName(COMPONENT_TYPE_NAME(SkinnedMesh));
@@ -126,10 +171,14 @@ bool SkinnedMesh::BuildPalette(std::vector<glm::mat4>& palette) const
         ? Engine::Core::ResolveComponentReference<Mesh>(Owner, meshReference)
         : Owner->GetComponent<Mesh>();
     Object* meshObject = mesh && mesh->Owner ? mesh->Owner : Owner;
-    const glm::mat4 inverseMesh = glm::inverse(meshObject->transform.GetWorldMatrix());
-    for (size_t i = 0; i < palette.size(); ++i)
-        if (Object* joint = skeleton->FindNode(skeleton->jointNodes[i]))
-            palette[i] = inverseMesh * joint->transform.GetWorldMatrix() *
+    std::unordered_map<Engine::Core::Object*, glm::mat4> worldMatrices;
+    worldMatrices.reserve(skeleton->jointNodes.size() * 2 + 1);
+    const glm::mat4 inverseMesh = glm::inverse(
+        CachedWorldMatrix(meshObject, worldMatrices));
+    const std::vector<Object*> resolvedJoints = skeleton->ResolveJoints();
+    for (size_t i = 0; i < resolvedJoints.size(); ++i)
+        if (Object* joint = resolvedJoints[i])
+            palette[i] = inverseMesh * CachedWorldMatrix(joint, worldMatrices) *
                 (i < skeleton->inverseBindMatrices.size()
                     ? skeleton->inverseBindMatrices[i] : glm::mat4(1.f));
     return !palette.empty();

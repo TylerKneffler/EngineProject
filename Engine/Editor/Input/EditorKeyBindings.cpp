@@ -108,8 +108,12 @@ void EditorKeyBindings::SetCompiledDefaults()
         { EditorCommand::ClearBakedLighting, "lighting.clear", "Lighting", "Clear Baked Lighting", { Key(""), Key("") } },
         { EditorCommand::ViewportSelect, "viewport.select", "Scene View", "Select Object", { Key("Mouse Left"), Key("") } },
         { EditorCommand::ViewportPan, "viewport.pan", "Scene View", "Pan Camera", { Key("Mouse Right"), Key("Mouse Middle", false, true), Key("Mouse Left", false, true, true) } },
-        { EditorCommand::ViewportOrbit, "viewport.orbit", "Scene View", "Orbit Camera", { Key("Mouse Middle"), Key("Mouse Left", false, false, true) } },
-        { EditorCommand::ViewportZoom, "viewport.zoom", "Scene View", "Zoom Camera", { Key("Mouse Wheel"), Key("Mouse Left", true, false, true) } }
+        { EditorCommand::ViewportOrbit, "viewport.orbit", "Scene View", "Orbit Camera", { Key("Mouse Middle"), Key("Mouse Left", false, false, true), Key("Mouse Right", false, false, true) } },
+        { EditorCommand::ViewportZoom, "viewport.zoom", "Scene View", "Zoom Camera", { Key("Mouse Wheel"), Key("Mouse Left", true, false, true) } },
+        { EditorCommand::ViewportMoveLeft, "viewport.move_left", "Scene View", "Move Camera Left", { Key("LeftArrow"), Key("") } },
+        { EditorCommand::ViewportMoveRight, "viewport.move_right", "Scene View", "Move Camera Right", { Key("RightArrow"), Key("") } },
+        { EditorCommand::ViewportMoveUp, "viewport.move_up", "Scene View", "Move Camera Up", { Key("UpArrow"), Key("") } },
+        { EditorCommand::ViewportMoveDown, "viewport.move_down", "Scene View", "Move Camera Down", { Key("DownArrow"), Key("") } }
     };
     NormalizeBindingColumns();
 }
@@ -280,8 +284,9 @@ bool EditorKeyBindings::LoadFile(const std::string& path, bool required)
             if (bindings.ObjectValue(index).IsArray())
                 fileColumns = std::max(fileColumns,
                     bindings.ObjectValue(index).ArraySize());
-        for (auto& entry : m_entries)
-            entry.bindings.assign(fileColumns, {});
+        if (required)
+            for (auto& entry : m_entries)
+                entry.bindings.assign(fileColumns, {});
         for (std::size_t index = 0; index < bindings.ObjectSize(); ++index)
         {
             const std::string& id = bindings.ObjectKey(index);
@@ -289,6 +294,7 @@ bool EditorKeyBindings::LoadFile(const std::string& path, bool required)
             auto it = std::find_if(m_entries.begin(), m_entries.end(),
                 [&id](const auto& entry) { return id == entry.id; });
             if (it == m_entries.end() || !slots.IsArray()) continue;
+            it->bindings.assign(fileColumns, {});
             for (std::size_t slot = 0; slot < it->bindings.size() &&
                 slot < slots.ArraySize(); ++slot)
                 it->bindings[slot] = DeserializeBinding(slots.ArrayAt(slot));

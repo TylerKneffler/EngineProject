@@ -10,7 +10,15 @@
 
 namespace Engine::Physics { class Physics; }
 namespace Engine::Audio { class Audio; }
-namespace Engine::Components { class Camera; class Texture; }
+namespace Engine::Components
+{
+    class Camera;
+    class Texture;
+    class Mesh;
+    class Sprite;
+    class Material;
+}
+namespace Engine::Rendering { class BakedLightingData; }
 namespace Engine::Renderers { class UIRenderer; }
 namespace Engine::Graphics { class IGraphicsProvider; class IGraphicsContext; }
 
@@ -71,6 +79,10 @@ public:
     // cameraOverride: if non-null, use this camera instead of the editor camera.
     // includeEditorVisuals: draws editor-only overlays such as the grid and
     // selected-object outline. Game cameras must pass false.
+    // PrepareRenderFrame() performs the camera-independent scene walk once;
+    // multiple views can then reuse the resulting object, light, material,
+    // and skin data.
+    void PrepareRenderFrame();
     void Render(IGraphicsContext* context, float aspect,
         Camera* cameraOverride = nullptr, bool includeEditorVisuals = true);
     void SetSelectedObject(Object* obj) { m_selectedObject = obj; }
@@ -161,6 +173,26 @@ private:
     void BuildSkyboxPipeline();
     void BuildObjectPipeline();
     const Engine::Components::Texture* ResolveSkyboxTexture();
+
+    struct FrameRenderItem
+    {
+        Object* object = nullptr;
+        Engine::Components::Mesh* mesh = nullptr;
+        Engine::Components::Sprite* sprite = nullptr;
+        Engine::Components::Material* material = nullptr;
+        const Engine::Rendering::BakedLightingData* bakedLighting = nullptr;
+        glm::mat4 world{1.f};
+        glm::vec2 spriteWorldSize{1.f};
+        uint32_t skinPaletteOffset = 0;
+        uint32_t skinJointCount = 0;
+        int sortingLayer = 0;
+        bool belongsToPreview = false;
+        bool blended = false;
+    };
+
+    std::vector<FrameRenderItem> m_frameRenderItems;
+    uint32_t m_frameLightCount = 0;
+    bool m_renderFramePrepared = false;
 
     // ---- Object list ----
     std::vector<std::unique_ptr<Object>> m_objects;

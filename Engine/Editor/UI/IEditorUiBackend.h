@@ -25,6 +25,7 @@ public:
     virtual void BeginInput() {}
     virtual void EndInput() {}
     virtual void BeginFrame() = 0;
+    virtual bool NeedsContinuousRendering() const { return false; }
     virtual void Render(void* commandBuffer) = 0;
     virtual void EndFrame() = 0;
     virtual void DrawEditor(EditorState& state, PlayState playState,

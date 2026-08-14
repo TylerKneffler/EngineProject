@@ -89,8 +89,10 @@ std::vector<Skeleton::Object*> Skeleton::ResolveJoints() const
 {
     std::vector<Skeleton::Object*> result;
     result.reserve(jointNodes.size());
+    Model* model = ResolveModel();
+    if (!model) return result;
     for (const unsigned node : jointNodes)
-        if (Object* joint = FindNode(node)) result.push_back(joint);
+        result.push_back(model->ResolveNode(node));
     return result;
 }
 }

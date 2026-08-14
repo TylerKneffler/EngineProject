@@ -8,8 +8,11 @@
 #include <cmath>
 #include <cfloat>
 #include <set>
+#include <unordered_map>
 #include <unordered_set>
+#include <vector>
 #include <glm/gtc/matrix_inverse.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 namespace Engine::Editor
 {
@@ -44,6 +47,57 @@ float Dot(EditorUiVec2 a, EditorUiVec2 b)
 float Length(EditorUiVec2 value)
 {
     return std::sqrt(Dot(value, value));
+}
+
+glm::mat3 WorldRotation(const Engine::Core::Object& object)
+{
+    const glm::vec3& rotation = object.transform.rotation;
+    const glm::mat4 local =
+        glm::rotate(glm::mat4(1.f), rotation.z, { 0.f, 0.f, 1.f }) *
+        glm::rotate(glm::mat4(1.f), rotation.y, { 0.f, 1.f, 0.f }) *
+        glm::rotate(glm::mat4(1.f), rotation.x, { 1.f, 0.f, 0.f });
+    return object.Parent
+        ? WorldRotation(*object.Parent) * glm::mat3(local)
+        : glm::mat3(local);
+}
+
+glm::mat4 LocalMatrix(const Engine::Core::Object& object)
+{
+    const auto& transform = object.transform;
+    return glm::translate(glm::mat4(1.f), transform.position) *
+        glm::rotate(glm::mat4(1.f), transform.rotation.z, { 0.f, 0.f, 1.f }) *
+        glm::rotate(glm::mat4(1.f), transform.rotation.y, { 0.f, 1.f, 0.f }) *
+        glm::rotate(glm::mat4(1.f), transform.rotation.x, { 1.f, 0.f, 0.f }) *
+        glm::scale(glm::mat4(1.f), transform.scale);
+}
+
+glm::mat4 CachedWorldMatrix(Engine::Core::Object* object,
+    std::unordered_map<Engine::Core::Object*, glm::mat4>& cache)
+{
+    if (!object) return glm::mat4(1.f);
+    if (const auto found = cache.find(object); found != cache.end())
+        return found->second;
+
+    std::vector<Engine::Core::Object*> chain;
+    Engine::Core::Object* current = object;
+    while (current && cache.find(current) == cache.end())
+    {
+        chain.push_back(current);
+        current = current->Parent;
+    }
+    glm::mat4 world = current ? cache.find(current)->second : glm::mat4(1.f);
+    for (auto it = chain.rbegin(); it != chain.rend(); ++it)
+    {
+        world *= LocalMatrix(**it);
+        cache.emplace(*it, world);
+    }
+    return cache.find(object)->second;
+}
+
+glm::vec3 CachedWorldPosition(Engine::Core::Object* object,
+    std::unordered_map<Engine::Core::Object*, glm::mat4>& cache)
+{
+    return glm::vec3(CachedWorldMatrix(object, cache)[3]);
 }
 
 bool ProjectPoint(const glm::mat4& viewProjection, const glm::vec3& world,
@@ -175,6 +229,8 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
     const glm::mat4 viewProjection =
         camera->GetProjectionMatrix(input.available.x / input.available.y) *
         camera->GetViewMatrix();
+    std::unordered_map<Engine::Core::Object*, glm::mat4> worldMatrices;
+    worldMatrices.reserve(scene.GetObjects().size() * 2);
     Engine::Core::Object* selected = scene.GetSelectedObject();
     Engine::Core::Object* selectedPrefabRoot = selected
         ? selected->GetPrefabInstanceRoot() : nullptr;
@@ -207,7 +263,7 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
 
                 EditorUiVec2 tipScreen{};
                 if (!ProjectPoint(viewProjection,
-                    joint->transform.GetWorldPosition(), input.available,
+                    CachedWorldPosition(joint, worldMatrices), input.available,
                     tipScreen))
                     continue;
 
@@ -236,7 +292,7 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
                     continue;
                 EditorUiVec2 rootScreen{};
                 if (!ProjectPoint(viewProjection,
-                    parentJoint->transform.GetWorldPosition(), input.available,
+                    CachedWorldPosition(parentJoint, worldMatrices), input.available,
                     rootScreen))
                     continue;
                 DrawBoneShape(ui, rootScreen, tipScreen,
@@ -271,7 +327,7 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
             continue;
 
         EditorUiVec2 center{};
-        if (!ProjectPoint(viewProjection, object->transform.GetWorldPosition(),
+        if (!ProjectPoint(viewProjection, CachedWorldPosition(object, worldMatrices),
             input.available, center))
             continue;
         if (hasLight)
@@ -296,21 +352,24 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
     float axisScale = 0.f;
     bool axisVisible[3]{};
     if (selectedTransformEditable && ProjectPoint(viewProjection,
-        selected->transform.GetWorldPosition(), input.available, originScreen))
+        CachedWorldPosition(selected, worldMatrices), input.available, originScreen))
     {
         const glm::vec3 cameraPosition =
             glm::vec3(scene.editorCamera.transform.GetWorldMatrix()[3]);
+        const glm::vec3 selectedPosition =
+            CachedWorldPosition(selected, worldMatrices);
         axisScale = std::clamp(glm::length(
-            selected->transform.GetWorldPosition() - cameraPosition) * 0.18f,
+            selectedPosition - cameraPosition) * 0.18f,
             0.35f, 8.f);
+        const glm::mat3 rotation = WorldRotation(*selected);
         const glm::vec3 axes[3] = {
-            { 1.f, 0.f, 0.f }, { 0.f, 1.f, 0.f }, { 0.f, 0.f, 1.f }
+            rotation[0], rotation[1], rotation[2]
         };
         float closestDistance = FLT_MAX;
         for (int axis = 0; axis < 3; ++axis)
         {
             axisVisible[axis] = ProjectPoint(viewProjection,
-                selected->transform.GetWorldPosition() + axes[axis] * axisScale,
+                selectedPosition + axes[axis] * axisScale,
                 input.available, axisEnds[axis]);
             if (!axisVisible[axis])
                 continue;
@@ -376,8 +435,9 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         const float screenLength = Length(screenAxis);
         if (screenLength >= 7.f)
         {
+            const glm::mat3 rotation = WorldRotation(*selected);
             const glm::vec3 axes[3] = {
-                { 1.f, 0.f, 0.f }, { 0.f, 1.f, 0.f }, { 0.f, 0.f, 1.f }
+                rotation[0], rotation[1], rotation[2]
             };
             m_dragObject = selected;
             m_dragAxis = hoveredAxis;

@@ -72,11 +72,32 @@
     ],
     "viewport.orbit": [
       { "key": "Mouse Middle", "control": false, "shift": false, "alt": false },
-      { "key": "Mouse Left", "control": false, "shift": false, "alt": true }
+      { "key": "Mouse Left", "control": false, "shift": false, "alt": true },
+      { "key": "Mouse Right", "control": false, "shift": false, "alt": true }
     ],
     "viewport.zoom": [
       { "key": "Mouse Wheel", "control": false, "shift": false, "alt": false },
       { "key": "Mouse Left", "control": true, "shift": false, "alt": true },
+      { "key": "", "control": false, "shift": false, "alt": false }
+    ],
+    "viewport.move_left": [
+      { "key": "LeftArrow", "control": false, "shift": false, "alt": false },
+      { "key": "", "control": false, "shift": false, "alt": false },
+      { "key": "", "control": false, "shift": false, "alt": false }
+    ],
+    "viewport.move_right": [
+      { "key": "RightArrow", "control": false, "shift": false, "alt": false },
+      { "key": "", "control": false, "shift": false, "alt": false },
+      { "key": "", "control": false, "shift": false, "alt": false }
+    ],
+    "viewport.move_up": [
+      { "key": "UpArrow", "control": false, "shift": false, "alt": false },
+      { "key": "", "control": false, "shift": false, "alt": false },
+      { "key": "", "control": false, "shift": false, "alt": false }
+    ],
+    "viewport.move_down": [
+      { "key": "DownArrow", "control": false, "shift": false, "alt": false },
+      { "key": "", "control": false, "shift": false, "alt": false },
       { "key": "", "control": false, "shift": false, "alt": false }
     ]
   }

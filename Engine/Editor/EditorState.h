@@ -8,6 +8,7 @@
 #include <vector>
 #include <functional>
 #include <deque>
+#include <cstdint>
 
 namespace Engine::Core { class Window; }
 
@@ -88,6 +89,8 @@ public:
     void ReportSceneEditInProgress(bool active)
     {
         m_sceneEditInProgress = m_sceneEditInProgress || active;
+        if (active)
+            MarkSceneEdited();
     }
     bool IsSceneEditInProgress() const { return m_sceneEditInProgress; }
 
@@ -115,6 +118,13 @@ private:
         ::Engine::Scene::Scene::ObjectPath selectionPath;
     };
     HistoryEntry CaptureHistoryEntry() const;
+    void CaptureHistorySelection(HistoryEntry& entry) const;
+    void MarkSceneEdited();
+    void MarkHistorySelectionChanged()
+    {
+        m_historySelectionDirty = true;
+        if (m_renderer) m_renderer->MarkDirty();
+    }
     void ApplyHistoryEntry(const HistoryEntry& entry, const char* operation);
     void ResetHistory(bool sceneIsSaved);
     void CommitPendingHistoryEdit();
@@ -165,6 +175,9 @@ private:
     bool m_hasPendingHistoryEdit = false;
     bool m_assetPreviewActive = false;
     bool m_sceneEditInProgress = false;
+    uint64_t m_sceneEditRevision = 0;
+    uint64_t m_historyCapturedRevision = 0;
+    bool m_historySelectionDirty = false;
 
     std::string m_sceneToLoad;
     bool m_showUnsavedWarning = false;

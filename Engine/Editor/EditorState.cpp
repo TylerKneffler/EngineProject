@@ -325,7 +325,10 @@ void EditorState::BakeLighting()
             ? ConsoleView::Level::Info : ConsoleView::Level::Error,
             result.message);
     if (result.succeeded)
+    {
         m_hasUnsavedChanges = true;
+        MarkSceneEdited();
+    }
 }
 
 void EditorState::ClearBakedLighting()
@@ -337,6 +340,7 @@ void EditorState::ClearBakedLighting()
         m_primaryConsole->AddLog(ConsoleView::Level::Info,
             m_scene->GetLightingBakeStatus());
     m_hasUnsavedChanges = true;
+    MarkSceneEdited();
 }
 
 // ---------------------------------------------------------------------------
@@ -655,6 +659,8 @@ void EditorState::RestorePlayModeScene()
             ? m_scene->FindObjectByPath(m_prePlaySelectionPath)
             : nullptr);
         m_historyBaseline = CaptureHistoryEntry();
+        m_historyCapturedRevision = m_sceneEditRevision;
+        m_historySelectionDirty = false;
         OutputDebugStringA("[Play] Restored editor scene state.\n");
         if (m_primaryConsole)
             m_primaryConsole->AddLog(ConsoleView::Level::Info, "[Play] Restored pre-play scene state.");
@@ -802,6 +808,7 @@ void EditorState::WireupCallbacks()
         }
         if (m_primaryAssets)
             m_primaryAssets->SetSelectedPath(assetPath);
+        MarkHistorySelectionChanged();
     };
 
     m_viewFactory->OnAssetRenamed = [this](const std::string& oldPath,
@@ -824,6 +831,7 @@ void EditorState::WireupCallbacks()
             if (object && !object->Parent)
                 updatePrefab(object.get());
         m_hasUnsavedChanges = true;
+        MarkSceneEdited();
     };
 
     m_viewFactory->OnAssetContentsChanged = [this](const std::string&) {
@@ -835,6 +843,7 @@ void EditorState::WireupCallbacks()
             m_primaryConsole->AddLog(ConsoleView::Level::Error,
                 "Could not refresh scene after asset properties changed.");
         m_hasUnsavedChanges = true;
+        MarkSceneEdited();
     };
 
     // Wire up selection changed callback (for hierarchy -> properties)
@@ -853,6 +862,7 @@ void EditorState::WireupCallbacks()
         {
             OutputDebugStringA("[EditorState] WARNING: Properties view is null\n");
         }
+        MarkHistorySelectionChanged();
     };
 
     // Scene viewport click-selection -> hierarchy/properties + render selection state
@@ -869,9 +879,11 @@ void EditorState::WireupCallbacks()
             m_primaryAssets->SetSelectedPath({});
         if (m_scene)
             m_scene->SetSelectedObject(obj);
+        MarkHistorySelectionChanged();
     };
     m_viewFactory->OnObjectCreated = [this](Engine::Core::Object* obj) {
         m_hasUnsavedChanges = true;
+        MarkSceneEdited();
         SelectObject(obj);
     };
     m_viewFactory->OnGizmoInteraction = [this](bool active) {
@@ -891,9 +903,11 @@ void EditorState::WireupCallbacks()
     };
     m_viewFactory->OnHierarchyChanged = [this]() {
         m_hasUnsavedChanges = true;
+        MarkSceneEdited();
     };
     m_viewFactory->OnPropertiesChanged = [this]() {
         m_hasUnsavedChanges = true;
+        MarkSceneEdited();
     };
     m_viewFactory->OnPropertiesAssetDropLog = [this](const std::string& message, bool error) {
         if (m_primaryConsole)
@@ -925,6 +939,7 @@ void EditorState::WireupCallbacks()
         if (!object)
             return;
         m_hasUnsavedChanges = true;
+        MarkSceneEdited();
         if (m_primaryConsole)
             m_primaryConsole->AddLog(ConsoleView::Level::Info,
                 "Placed prefab in scene: " + path);
@@ -933,6 +948,7 @@ void EditorState::WireupCallbacks()
 
     m_viewFactory->OnPrefabCreated = [this](Engine::Core::Object*, const std::string& path) {
         m_hasUnsavedChanges = true;
+        MarkSceneEdited();
         if (m_primaryConsole)
             m_primaryConsole->AddLog(ConsoleView::Level::Info, "Prefab created: " + path);
     };
@@ -1108,6 +1124,7 @@ Engine::Core::Object* EditorState::InstantiateAsset(const std::string& path, boo
     if (object && recordChange)
     {
         m_hasUnsavedChanges = true;
+        MarkSceneEdited();
         if (m_primaryConsole)
             m_primaryConsole->AddLog(ConsoleView::Level::Info,
                 "Added to scene: " + path);
@@ -1129,6 +1146,7 @@ void EditorState::SelectObject(Engine::Core::Object* object)
         m_primaryProperties->SetSelectedObject(object);
     if (m_scene)
         m_scene->SetSelectedObject(object);
+    MarkHistorySelectionChanged();
 }
 
 EditorState::HistoryEntry EditorState::CaptureHistoryEntry() const
@@ -1137,6 +1155,16 @@ EditorState::HistoryEntry EditorState::CaptureHistoryEntry() const
     if (!m_scene)
         return entry;
     entry.scene = m_scene->SaveToString();
+    CaptureHistorySelection(entry);
+    return entry;
+}
+
+void EditorState::CaptureHistorySelection(HistoryEntry& entry) const
+{
+    entry.hasSelection = false;
+    entry.selectionPath.clear();
+    if (!m_scene)
+        return;
     for (const auto& panel : m_panels)
     {
         const auto* hierarchy = dynamic_cast<const HierarchyView*>(panel.get());
@@ -1147,13 +1175,25 @@ EditorState::HistoryEntry EditorState::CaptureHistoryEntry() const
             m_scene->TryGetObjectPath(selected, entry.selectionPath);
         break;
     }
-    return entry;
+}
+
+void EditorState::MarkSceneEdited()
+{
+    ++m_sceneEditRevision;
+    if (m_renderer)
+        m_renderer->MarkDirty();
 }
 
 void EditorState::TrackSceneChanges(bool allowHistory, bool editInProgress)
 {
     if (!m_scene || !allowHistory || m_assetPreviewActive)
         return;
+
+    if (m_historySelectionDirty && !m_historyBaseline.scene.empty())
+    {
+        CaptureHistorySelection(m_historyBaseline);
+        m_historySelectionDirty = false;
+    }
 
     // Property drags and gizmos can update every rendered frame. Capturing the
     // complete scene here made large linked prefabs serialize and diff for
@@ -1163,7 +1203,16 @@ void EditorState::TrackSceneChanges(bool allowHistory, bool editInProgress)
     if (editInProgress)
         return;
 
+    // Editor mutation callbacks advance the revision. If it has not changed,
+    // the serialized scene must still match the existing history baseline, so
+    // avoid rebuilding and comparing the complete scene on this idle frame.
+    if (!m_historyBaseline.scene.empty() &&
+        m_historyCapturedRevision == m_sceneEditRevision)
+        return;
+
     HistoryEntry current = CaptureHistoryEntry();
+    m_historyCapturedRevision = m_sceneEditRevision;
+    m_historySelectionDirty = false;
     if (m_historyBaseline.scene.empty())
     {
         m_historyBaseline = std::move(current);
@@ -1209,6 +1258,7 @@ void EditorState::CommitPendingHistoryEdit()
 
 void EditorState::Undo()
 {
+    TrackSceneChanges(true, false);
     CommitPendingHistoryEdit();
     if (!m_scene || m_undoHistory.empty())
         return;
@@ -1221,6 +1271,7 @@ void EditorState::Undo()
 
 void EditorState::Redo()
 {
+    TrackSceneChanges(true, false);
     CommitPendingHistoryEdit();
     if (!m_scene || m_redoHistory.empty())
         return;
@@ -1246,6 +1297,8 @@ void EditorState::ApplyHistoryEntry(
     SelectObject(entry.hasSelection
         ? m_scene->FindObjectByPath(entry.selectionPath) : nullptr);
     m_historyBaseline = CaptureHistoryEntry();
+    m_historyCapturedRevision = m_sceneEditRevision;
+    m_historySelectionDirty = false;
     m_hasUnsavedChanges = m_historyBaseline.scene != m_savedSceneSnapshot;
     if (m_primaryConsole)
         m_primaryConsole->AddLog(ConsoleView::Level::Info,
@@ -1259,6 +1312,8 @@ void EditorState::ResetHistory(bool sceneIsSaved)
     m_pendingHistoryBefore = {};
     m_hasPendingHistoryEdit = false;
     m_historyBaseline = CaptureHistoryEntry();
+    m_historyCapturedRevision = m_sceneEditRevision;
+    m_historySelectionDirty = false;
     if (sceneIsSaved)
         m_savedSceneSnapshot = m_historyBaseline.scene;
 }

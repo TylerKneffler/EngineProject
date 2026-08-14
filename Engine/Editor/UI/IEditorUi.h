@@ -29,6 +29,8 @@ struct EditorUiViewportInput
     bool rightDown = false;
     bool middleDown = false;
     bool zoomDragDown = false;
+    float keyPanDX = 0.f;
+    float keyPanDY = 0.f;
 };
 
 enum class EditorUiHierarchyDropPosition { None, Before, AsChild, After };

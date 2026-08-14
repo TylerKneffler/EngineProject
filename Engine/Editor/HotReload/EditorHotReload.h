@@ -47,7 +47,6 @@ private:
     CreateScript m_createScript = nullptr;
     uint64_t m_generation = 0;
     bool m_dirty = false;
-    bool m_wasFocused = true;
     bool m_applying = false;
 };
 }

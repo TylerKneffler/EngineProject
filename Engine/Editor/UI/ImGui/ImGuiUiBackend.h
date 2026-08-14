@@ -21,6 +21,7 @@ public:
                        uintptr_t wParam, intptr_t lParam) override;
     void Resize(uint32_t width, uint32_t height) override;
     void BeginFrame() override;
+    bool NeedsContinuousRendering() const override;
     void Render(void* commandBuffer) override;
     void EndFrame() override;
     void DrawEditor(EditorState& state, PlayState playState,

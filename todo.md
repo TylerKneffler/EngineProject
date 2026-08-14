@@ -33,3 +33,20 @@
 - [x] Add Cloth / mesh realtime physics component
 - [ ] Add TTF/OTF once runtime text/UI exists.
 - [ ] Add convenience and specialist formats only when a project needs them.
+- [x] Cache skeleton hierarchy transforms during bone-gizmo rendering and skin-palette generation.
+- [x] Track scene edit revisions so undo history does not serialize and compare the complete scene every idle editor frame.
+- [x] Replace per-frame recursive script-directory scans with filesystem notifications or throttled polling.
+- [x] Make editor rendering genuinely dirty-driven instead of calling `MarkDirty()` unconditionally every update.
+- [x] Build shared per-frame scene render data so Scene and Game views reuse object discovery, lights, materials, and skin palettes.
+- [x] Precompute render keys and world matrices before sorting instead of resolving components and transforms in the comparator.
+- [ ] Populate and upload DX11 light/object structured buffers once per render pass instead of once per object draw.
+- [ ] Remove the duplicate DX11 retained-UI vertex-buffer flush after `Unmap()`.
+- [ ] Add transform revisions and cached world matrices for rendering, lighting, physics, audio, and editor helpers.
+- [ ] Replace per-frame physics JSON configuration signatures with component revision counters and remove duplicate `EnsureBody()` / `EnsureSoftBody()` calls.
+- [ ] Cache cloth simulation meshes so unchanged cloth bodies do not reload mesh files from disk.
+- [ ] Skip morph deformation, bounds rebuilding, and vertex uploads until morph weights actually change.
+- [ ] Cache retained UI layout, wrapped text, and generated vertices until content or viewport dimensions change.
+- [ ] Resolve sprite/component references once per update or render snapshot instead of repeatedly for preparation, readiness, UV, size, and texture queries.
+- [ ] Give animation, mesh, and skinned-mesh components lightweight inspectors that do not serialize their full runtime payload every expanded frame.
+- [ ] Cache registered component-picker entries rather than constructing component prototypes whenever the picker is drawn.
+- [ ] Update the native editor window title only when its displayed state changes.
