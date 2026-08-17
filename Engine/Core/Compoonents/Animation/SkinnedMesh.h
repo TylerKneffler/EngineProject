@@ -22,6 +22,7 @@ public:
     void Update() override;
     void OnAfterDeserialize(IGraphicsProvider*) override { Start(); }
     bool BuildPalette(std::vector<glm::mat4>& palette) const;
+    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
 

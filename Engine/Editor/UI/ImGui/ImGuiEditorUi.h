@@ -39,6 +39,7 @@ public:
     bool BeginChild(const char*) override; void EndChild() override;
     bool IsItemHovered() const override; bool IsItemClicked() const override;
     bool IsItemDoubleClicked() const override; bool IsWindowBackgroundClicked() const override;
+    bool IsAnyItemActive() const override;
     bool CopyShortcutPressed() const override; bool PasteShortcutPressed() const override;
     bool BeginDragDropSource() override; void SetDragDropPayload(const char*,const void*,size_t) override; void EndDragDropSource() override;
     bool BeginDragDropTarget() override; const void* AcceptDragDropPayload(const char*,size_t*) override; void EndDragDropTarget() override;

@@ -888,11 +888,22 @@ void EditorState::WireupCallbacks()
     };
     m_viewFactory->OnGizmoInteraction = [this](bool active) {
         ReportSceneEditInProgress(active);
-        if (active && m_scene && m_scene->GetSelectedObject())
+        // Imported skeleton joints usually live below a linked-prefab root.
+        // Invalidating that root on every mouse move makes the Properties view
+        // serialize and diff the complete model hierarchy once per frame.  The
+        // final transform is all the override cache needs, so defer its single
+        // invalidation until the gizmo interaction ends.
+        if (active)
         {
-            Engine::Core::Object* selected = m_scene->GetSelectedObject();
-            if (selected != selected->GetPrefabInstanceRoot())
-                selected->InvalidatePrefabOverrideCache();
+            m_mainSceneGizmoWasActive = true;
+        }
+        else if (m_mainSceneGizmoWasActive)
+        {
+            m_mainSceneGizmoWasActive = false;
+            if (m_scene)
+                if (Engine::Core::Object* selected = m_scene->GetSelectedObject();
+                    selected && selected != selected->GetPrefabInstanceRoot())
+                    selected->InvalidatePrefabOverrideCache();
         }
     };
 
@@ -1264,9 +1275,12 @@ void EditorState::Undo()
         return;
     HistoryEntry target = std::move(m_undoHistory.back());
     m_undoHistory.pop_back();
-    m_redoHistory.push_back(CaptureHistoryEntry());
+    // TrackSceneChanges has already made the baseline an exact snapshot of
+    // the current scene. Re-serializing it here made every undo pay for a
+    // second complete walk of large prefab/model hierarchies.
+    m_redoHistory.push_back(std::move(m_historyBaseline));
     TrimHistory();
-    ApplyHistoryEntry(target, "Undo");
+    ApplyHistoryEntry(std::move(target), "Undo");
 }
 
 void EditorState::Redo()
@@ -1277,13 +1291,13 @@ void EditorState::Redo()
         return;
     HistoryEntry target = std::move(m_redoHistory.back());
     m_redoHistory.pop_back();
-    m_undoHistory.push_back(CaptureHistoryEntry());
+    m_undoHistory.push_back(std::move(m_historyBaseline));
     TrimHistory();
-    ApplyHistoryEntry(target, "Redo");
+    ApplyHistoryEntry(std::move(target), "Redo");
 }
 
 void EditorState::ApplyHistoryEntry(
-    const HistoryEntry& entry, const char* operation)
+    HistoryEntry entry, const char* operation)
 {
     SelectObject(nullptr);
     if (!m_scene->LoadFromString(entry.scene))
@@ -1296,7 +1310,9 @@ void EditorState::ApplyHistoryEntry(
 
     SelectObject(entry.hasSelection
         ? m_scene->FindObjectByPath(entry.selectionPath) : nullptr);
-    m_historyBaseline = CaptureHistoryEntry();
+    // The restored source is itself the canonical history snapshot. Keeping
+    // it avoids serializing the newly rebuilt scene for a second time.
+    m_historyBaseline = std::move(entry);
     m_historyCapturedRevision = m_sceneEditRevision;
     m_historySelectionDirty = false;
     m_hasUnsavedChanges = m_historyBaseline.scene != m_savedSceneSnapshot;

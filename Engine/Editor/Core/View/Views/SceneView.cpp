@@ -97,51 +97,52 @@ bool Contains(EditorUiVec2 point, EditorUiVec2 center, float radius)
 }
 
 void DrawToolIcon(IEditorUi& ui, EditorTransformTool tool,
-    EditorUiVec2 center, EditorUiColor color)
+    EditorUiVec2 center, EditorUiColor color, float scale = 1.f)
 {
     if (tool == EditorTransformTool::Translate)
     {
-        ui.DrawViewportLine({center.x - 10.f, center.y},
-            {center.x + 10.f, center.y}, color, 2.f);
-        ui.DrawViewportLine({center.x, center.y - 10.f},
-            {center.x, center.y + 10.f}, color, 2.f);
-        ui.DrawViewportTriangle({center.x + 12.f, center.y},
-            {center.x + 7.f, center.y - 4.f},
-            {center.x + 7.f, center.y + 4.f}, color);
-        ui.DrawViewportTriangle({center.x - 12.f, center.y},
-            {center.x - 7.f, center.y - 4.f},
-            {center.x - 7.f, center.y + 4.f}, color);
-        ui.DrawViewportTriangle({center.x, center.y - 12.f},
-            {center.x - 4.f, center.y - 7.f},
-            {center.x + 4.f, center.y - 7.f}, color);
-        ui.DrawViewportTriangle({center.x, center.y + 12.f},
-            {center.x - 4.f, center.y + 7.f},
-            {center.x + 4.f, center.y + 7.f}, color);
+        ui.DrawViewportLine({center.x - 10.f * scale, center.y},
+            {center.x + 10.f * scale, center.y}, color, 2.f * scale);
+        ui.DrawViewportLine({center.x, center.y - 10.f * scale},
+            {center.x, center.y + 10.f * scale}, color, 2.f * scale);
+        ui.DrawViewportTriangle({center.x + 12.f * scale, center.y},
+            {center.x + 7.f * scale, center.y - 4.f * scale},
+            {center.x + 7.f * scale, center.y + 4.f * scale}, color);
+        ui.DrawViewportTriangle({center.x - 12.f * scale, center.y},
+            {center.x - 7.f * scale, center.y - 4.f * scale},
+            {center.x - 7.f * scale, center.y + 4.f * scale}, color);
+        ui.DrawViewportTriangle({center.x, center.y - 12.f * scale},
+            {center.x - 4.f * scale, center.y - 7.f * scale},
+            {center.x + 4.f * scale, center.y - 7.f * scale}, color);
+        ui.DrawViewportTriangle({center.x, center.y + 12.f * scale},
+            {center.x - 4.f * scale, center.y + 7.f * scale},
+            {center.x + 4.f * scale, center.y + 7.f * scale}, color);
     }
     else if (tool == EditorTransformTool::Rotate)
     {
-        ui.DrawViewportCircle(center, 10.f, color, false, 2.f);
-        ui.DrawViewportTriangle({center.x + 11.f, center.y - 2.f},
-            {center.x + 5.f, center.y - 7.f},
-            {center.x + 12.f, center.y - 9.f}, color);
+        ui.DrawViewportCircle(center, 10.f * scale, color, false, 2.f * scale);
+        ui.DrawViewportTriangle({center.x + 11.f * scale, center.y - 2.f * scale},
+            {center.x + 5.f * scale, center.y - 7.f * scale},
+            {center.x + 12.f * scale, center.y - 9.f * scale}, color);
     }
     else if (tool == EditorTransformTool::Scale)
     {
-        ui.DrawViewportLine({center.x - 8.f, center.y + 8.f},
-            {center.x + 8.f, center.y - 8.f}, color, 3.f);
-        ui.DrawViewportCircle({center.x - 9.f, center.y + 9.f}, 4.f,
+        ui.DrawViewportLine({center.x - 8.f * scale, center.y + 8.f * scale},
+            {center.x + 8.f * scale, center.y - 8.f * scale}, color, 3.f * scale);
+        ui.DrawViewportCircle({center.x - 9.f * scale, center.y + 9.f * scale}, 4.f * scale,
             color, true);
-        ui.DrawViewportCircle({center.x + 9.f, center.y - 9.f}, 4.f,
+        ui.DrawViewportCircle({center.x + 9.f * scale, center.y - 9.f * scale}, 4.f * scale,
             color, true);
     }
     else
     {
-        ui.DrawViewportCircle({center.x, center.y + 4.f}, 7.f,
-            color, false, 2.f);
+        ui.DrawViewportCircle({center.x, center.y + 4.f * scale}, 7.f * scale,
+            color, false, 2.f * scale);
         for (int finger = -2; finger <= 2; ++finger)
-            ui.DrawViewportLine({center.x + finger * 3.f, center.y + 2.f},
-                {center.x + finger * 3.f, center.y - 9.f + std::abs(finger)},
-                color, 2.f);
+            ui.DrawViewportLine({center.x + finger * 3.f * scale, center.y + 2.f * scale},
+                {center.x + finger * 3.f * scale,
+                    center.y + (-9.f + std::abs(finger)) * scale},
+                color, 2.f * scale);
     }
 }
 }
@@ -382,12 +383,14 @@ void SceneView::DrawPanel(IEditorUi& ui)
 bool SceneView::DrawTransformToolbar(IEditorUi& ui,
     const EditorUiViewportInput& input)
 {
-    if (input.available.x < 60.f || input.available.y < 60.f)
+    if (input.available.x < 28.f || input.available.y < 28.f)
         return false;
 
-    constexpr float radius = 18.f;
-    constexpr float spacing = 44.f;
-    const EditorUiVec2 mainCenter{input.available.x - 28.f, 28.f};
+    constexpr float scale = 1.f / 3.f;
+    constexpr float radius = 18.f * scale;
+    constexpr float spacing = 44.f * scale;
+    constexpr float padding = 8.f;
+    const EditorUiVec2 mainCenter{padding + radius, padding + radius};
     bool consumed = false;
     if (input.rawLeftClicked && Contains(
         input.mousePosInViewport, mainCenter, radius))
@@ -402,9 +405,9 @@ bool SceneView::DrawTransformToolbar(IEditorUi& ui,
         mainHovered ? EditorUiColor{0.22f, 0.25f, 0.31f, 0.98f}
                     : EditorUiColor{0.10f, 0.12f, 0.16f, 0.94f}, true);
     ui.DrawViewportCircle(mainCenter, radius,
-        {0.72f, 0.78f, 0.90f, 0.9f}, false, 1.5f);
+        {0.72f, 0.78f, 0.90f, 0.9f}, false, 1.5f * scale);
     DrawToolIcon(ui, m_transformTool, mainCenter,
-        {0.92f, 0.95f, 1.f, 1.f});
+        {0.92f, 0.95f, 1.f, 1.f}, scale);
 
     if (!m_transformToolbarExpanded)
         return consumed;
@@ -415,7 +418,6 @@ bool SceneView::DrawTransformToolbar(IEditorUi& ui,
         EditorTransformTool::Scale,
         EditorTransformTool::Hand
     };
-    constexpr const char* labels[] = {"Move", "Rotate", "Scale", "Hand"};
     for (int index = 0; index < 4; ++index)
     {
         const EditorUiVec2 center{mainCenter.x, mainCenter.y +
@@ -436,10 +438,10 @@ bool SceneView::DrawTransformToolbar(IEditorUi& ui,
                                : EditorUiColor{0.10f, 0.12f, 0.16f, 0.94f}, true);
         ui.DrawViewportCircle(center, radius,
             selected ? EditorUiColor{0.45f, 0.72f, 1.f, 1.f}
-                     : EditorUiColor{0.62f, 0.68f, 0.78f, 0.9f}, false, 1.5f);
-        DrawToolIcon(ui, tools[index], center, {0.92f, 0.95f, 1.f, 1.f});
-        ui.DrawViewportText({center.x - 68.f, center.y - 7.f}, labels[index],
-            {0.92f, 0.95f, 1.f, 0.95f});
+                     : EditorUiColor{0.62f, 0.68f, 0.78f, 0.9f}, false,
+            1.5f * scale);
+        DrawToolIcon(ui, tools[index], center,
+            {0.92f, 0.95f, 1.f, 1.f}, scale);
     }
     return consumed;
 }

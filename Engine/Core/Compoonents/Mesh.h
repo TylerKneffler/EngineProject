@@ -50,6 +50,7 @@ public:
     std::vector<float>& GetMorphWeights() { return m_morphWeights; }
     bool HasMorphTargets() const { return !m_morphTargets.empty(); }
 
+    bool        DrawProperties(::Engine::Editor::IEditorUi& ui) override;
     JsonValue   Serialize() const override;
     void        Deserialize(const JsonValue& v) override;
     void        DeserializeLegacyMorphTargets(const JsonValue& value);

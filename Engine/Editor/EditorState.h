@@ -125,7 +125,7 @@ private:
         m_historySelectionDirty = true;
         if (m_renderer) m_renderer->MarkDirty();
     }
-    void ApplyHistoryEntry(const HistoryEntry& entry, const char* operation);
+    void ApplyHistoryEntry(HistoryEntry entry, const char* operation);
     void ResetHistory(bool sceneIsSaved);
     void CommitPendingHistoryEdit();
     void TrimHistory();
@@ -175,6 +175,7 @@ private:
     bool m_hasPendingHistoryEdit = false;
     bool m_assetPreviewActive = false;
     bool m_sceneEditInProgress = false;
+    bool m_mainSceneGizmoWasActive = false;
     uint64_t m_sceneEditRevision = 0;
     uint64_t m_historyCapturedRevision = 0;
     bool m_historySelectionDirty = false;

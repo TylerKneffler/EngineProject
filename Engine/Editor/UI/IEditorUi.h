@@ -157,6 +157,7 @@ public:
     virtual bool IsItemHovered() const = 0;
     virtual bool IsItemClicked() const = 0;
     virtual bool IsItemDoubleClicked() const = 0;
+    virtual bool IsAnyItemActive() const { return false; }
     virtual bool IsWindowBackgroundClicked() const = 0;
     virtual bool CopyShortcutPressed() const = 0;
     virtual bool PasteShortcutPressed() const = 0;

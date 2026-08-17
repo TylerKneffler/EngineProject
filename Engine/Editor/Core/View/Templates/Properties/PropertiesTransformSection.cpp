@@ -9,6 +9,15 @@ void PropertiesView::DrawTransform(IEditorUi& ui)
     Engine::Components::Transform& t = m_selectedObject->transform;
     Engine::Core::Object* prefabRoot = m_selectedObject->GetPrefabInstanceRoot();
 
+    // A completed inspector drag needs one fresh prefab patch.  While the
+    // control is active, keep the previous patch cached so drawing this panel
+    // does not serialize and diff a large imported hierarchy every frame.
+    if (m_deferredTransformPrefabRoot && !ui.IsAnyItemActive())
+    {
+        m_deferredTransformPrefabRoot->PrefabOverrideCacheValid = false;
+        m_deferredTransformPrefabRoot = nullptr;
+    }
+
     const bool transformOpen = ui.CollapsingHeader("Transform");
     EditorUiContextMenuResult menu;
     if (prefabRoot)
@@ -31,7 +40,7 @@ void PropertiesView::DrawTransform(IEditorUi& ui)
             // Keep its potentially large non-transform override patch cached
             // while the user drags position/rotation/scale values.
             if (m_selectedObject != prefabRoot)
-                m_selectedObject->InvalidatePrefabOverrideCache();
+                m_deferredTransformPrefabRoot = prefabRoot;
             if (OnComponentsChanged) OnComponentsChanged();
         }
     }

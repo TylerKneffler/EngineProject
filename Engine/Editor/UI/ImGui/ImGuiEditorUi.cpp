@@ -46,6 +46,7 @@ void ImGuiEditorUi::ReadOnlyTextBlock(const char* label,const char* text,bool sc
 }
 bool ImGuiEditorUi::DragFloat(const char*l,float*v,float s,float a,float b){return ImGui::DragFloat(l,v,s,a,b);}
 bool ImGuiEditorUi::DragFloat3(const char*l,float*v,float s,float a,float b){return ImGui::DragFloat3(l,v,s,a,b);}
+bool ImGuiEditorUi::IsAnyItemActive() const{return ImGui::IsAnyItemActive();}
 bool ImGuiEditorUi::ColorEdit3(const char*l,float*v){return ImGui::ColorEdit3(l,v);} bool ImGuiEditorUi::ColorEdit4(const char*l,float*v){return ImGui::ColorEdit4(l,v);}
 bool ImGuiEditorUi::SliderInt(const char*l,int*v,int a,int b){return ImGui::SliderInt(l,v,a,b);} bool ImGuiEditorUi::InputUInt(const char*l,uint32_t*v){return ImGui::InputScalar(l,ImGuiDataType_U32,v);}
 void ImGuiEditorUi::ValueLabel(const char*l,const char*v){ImGui::LabelText(l,"%s",v);}

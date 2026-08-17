@@ -47,6 +47,6 @@
 - [ ] Skip morph deformation, bounds rebuilding, and vertex uploads until morph weights actually change.
 - [ ] Cache retained UI layout, wrapped text, and generated vertices until content or viewport dimensions change.
 - [x] Resolve sprite/component references once per update or render snapshot instead of repeatedly for preparation, readiness, UV, size, and texture queries.
-- [ ] Give animation, mesh, and skinned-mesh components lightweight inspectors that do not serialize their full runtime payload every expanded frame.
+- [x] Give animation, mesh, and skinned-mesh components lightweight inspectors that do not serialize their full runtime payload every expanded frame.
 - [ ] Cache registered component-picker entries rather than constructing component prototypes whenever the picker is drawn.
 - [ ] Update the native editor window title only when its displayed state changes.

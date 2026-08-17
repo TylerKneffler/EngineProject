@@ -33,6 +33,9 @@ public:
     {
         if (obj != m_selectedObject)
         {
+            if (m_deferredTransformPrefabRoot)
+                m_deferredTransformPrefabRoot->PrefabOverrideCacheValid = false;
+            m_deferredTransformPrefabRoot = nullptr;
             m_componentPickerOpen = false;
             m_componentSearch[0] = '\0';
             m_editingSkyboxTexture = false;
@@ -69,6 +72,7 @@ private:
     void LogAssetDrop(const std::string& message, bool error = false) const;
 
     Engine::Core::Object* m_selectedObject = nullptr;
+    Engine::Core::Object* m_deferredTransformPrefabRoot = nullptr;
     AssetInspectorTemplate m_assetInspector;
     Engine::Scene::Scene* m_scene = nullptr;
     bool m_componentPickerOpen = false;

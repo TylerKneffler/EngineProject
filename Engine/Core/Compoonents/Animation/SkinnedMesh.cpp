@@ -1,6 +1,8 @@
 #include "SkinnedMesh.h"
 #include "Skeleton.h"
 #include "Core/Object.h"
+#include "Engine/Editor/UI/IEditorUi.h"
+#include <cmath>
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <unordered_map>
@@ -55,6 +57,112 @@ SkinnedMesh::SkinnedMesh()
     SetTypeName(COMPONENT_TYPE_NAME(SkinnedMesh));
     RegisterField("meshReference", meshReference);
     RegisterField("skeletonReference", skeletonReference);
+}
+
+bool SkinnedMesh::DrawProperties(::Engine::Editor::IEditorUi& ui)
+{
+    bool changed = false;
+    Mesh* mesh = Owner ? (meshReference.IsAssigned()
+        ? Engine::Core::ResolveComponentReference<Mesh>(Owner, meshReference)
+        : Owner->GetComponent<Mesh>()) : nullptr;
+    const std::string meshLabel = mesh && mesh->Owner
+        ? mesh->Owner->name + " / Mesh"
+        : "(default: same-object Mesh)";
+    ui.PushId("SkinnedMesh.MeshReference");
+    ui.ValueLabel("Mesh", meshLabel.c_str());
+    if (ui.BeginDragDropTarget())
+    {
+        size_t size = 0;
+        const void* data = ui.AcceptDragDropPayload(
+            "ENGINE_COMPONENT_REORDER", &size);
+        if (data && size == sizeof(Component*))
+            if (auto* dropped = dynamic_cast<Mesh*>(
+                *static_cast<Component* const*>(data)))
+            {
+                meshReference = Engine::Core::CaptureComponentReference(
+                    dropped, "Mesh");
+                changed = true;
+            }
+        ui.EndDragDropTarget();
+    }
+    if (meshReference.IsAssigned())
+    {
+        ui.SameLine();
+        if (ui.Button("Clear"))
+        {
+            meshReference.Clear();
+            changed = true;
+        }
+    }
+    ui.PopId();
+
+    Skeleton* skeleton = Owner && skeletonReference.IsAssigned()
+        ? Engine::Core::ResolveComponentReference<Skeleton>(
+            Owner, skeletonReference) : nullptr;
+    if (skinIndex >= 0 && !skeletonReference.IsAssigned())
+        for (Object* ancestor = Owner; ancestor && !skeleton;
+            ancestor = ancestor->Parent)
+            for (Component* component : ancestor->Components)
+                if (auto* candidate = dynamic_cast<Skeleton*>(component);
+                    candidate && candidate->skinIndex == static_cast<unsigned>(skinIndex))
+                {
+                    skeleton = candidate;
+                    break;
+                }
+    const std::string skeletonLabel = skeleton && skeleton->Owner
+        ? skeleton->Owner->name + " / Skeleton"
+        : "(automatic: matching ancestor skin)";
+    ui.PushId("SkinnedMesh.SkeletonReference");
+    ui.ValueLabel("Skeleton", skeletonLabel.c_str());
+    if (ui.BeginDragDropTarget())
+    {
+        size_t size = 0;
+        const void* data = ui.AcceptDragDropPayload(
+            "ENGINE_COMPONENT_REORDER", &size);
+        if (data && size == sizeof(Component*))
+            if (auto* dropped = dynamic_cast<Skeleton*>(
+                *static_cast<Component* const*>(data)))
+            {
+                skeletonReference = Engine::Core::CaptureComponentReference(
+                    dropped, "Skeleton");
+                changed = true;
+            }
+        ui.EndDragDropTarget();
+    }
+    if (skeletonReference.IsAssigned())
+    {
+        ui.SameLine();
+        if (ui.Button("Clear"))
+        {
+            skeletonReference.Clear();
+            changed = true;
+        }
+    }
+    ui.PopId();
+
+    float editedSkin = static_cast<float>(skinIndex);
+    if (ui.DragFloat("Skin Index", &editedSkin, 1.f, -1.f, 10000.f))
+    {
+        skinIndex = static_cast<int>(std::round(editedSkin));
+        changed = true;
+    }
+    const std::string jointEntries = std::to_string(joints.size());
+    const std::string weightEntries = std::to_string(weights.size());
+    const std::string baseVertices = std::to_string(m_baseVertices.size());
+    const std::string resolvedBones = skeleton
+        ? std::to_string(skeleton->jointNodes.size()) : "0";
+    ui.ValueLabel("Joint Entries", jointEntries.c_str());
+    ui.ValueLabel("Weight Entries", weightEntries.c_str());
+    ui.ValueLabel("Base Vertices", baseVertices.c_str());
+    ui.ValueLabel("Resolved Bones", resolvedBones.c_str());
+    ui.DisabledLabel("Per-vertex joint and weight arrays are read-only here.");
+
+    if (changed)
+    {
+        MarkConfigurationDirty();
+        Start();
+    }
+    return changed;
 }
 
 void SkinnedMesh::Start()

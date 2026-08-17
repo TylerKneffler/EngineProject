@@ -1,4 +1,6 @@
 #include "Animation.h"
+#include "Engine/Editor/UI/IEditorUi.h"
+#include <cstdio>
 
 namespace Engine::Components
 {
@@ -22,6 +24,29 @@ std::vector<float> ReadFloats(const Engine::Serialization::JsonValue& value)
 }
 
 Animation::Animation() { SetTypeName(COMPONENT_TYPE_NAME(Animation)); }
+
+bool Animation::DrawProperties(::Engine::Editor::IEditorUi& ui)
+{
+    ui.ValueLabel("Clip", clipName.empty() ? "(unnamed)" : clipName.c_str());
+    char durationText[64]{};
+    std::snprintf(durationText, sizeof(durationText), "%.3f seconds", duration);
+    ui.ValueLabel("Duration", durationText);
+    const std::string channelCount = std::to_string(channels.size());
+    size_t keyframeCount = 0;
+    size_t sampleValueCount = 0;
+    for (const AnimationChannel& channel : channels)
+    {
+        keyframeCount += channel.times.size();
+        sampleValueCount += channel.values.size();
+    }
+    const std::string keyframes = std::to_string(keyframeCount);
+    const std::string values = std::to_string(sampleValueCount);
+    ui.ValueLabel("Channels", channelCount.c_str());
+    ui.ValueLabel("Keyframes", keyframes.c_str());
+    ui.ValueLabel("Sample Values", values.c_str());
+    ui.DisabledLabel("Animation track data is read-only in the component inspector.");
+    return false;
+}
 
 Animation::JsonValue Animation::Serialize() const
 {
@@ -59,5 +84,6 @@ void Animation::Deserialize(const JsonValue& value)
         channel.values = ReadFloats(item["values"]);
         channels.push_back(std::move(channel));
     }
+    MarkConfigurationDirty();
 }
 }

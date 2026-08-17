@@ -1,11 +1,13 @@
 #include "Mesh.h"
 #include "Core/Graphics/IGraphicsProvider.h"
+#include "Engine/Editor/UI/IEditorUi.h"
 #include <fstream>
 #include <sstream>
 #include <array>
 #include <filesystem>
 #include <stdexcept>
 #include <cstring>
+#include <cstdio>
 
 namespace Engine::Components
 {
@@ -288,6 +290,46 @@ void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory)
     m_ready = true;
 }
 #pragma endregion
+
+bool Mesh::DrawProperties(::Engine::Editor::IEditorUi& ui)
+{
+    ui.ValueLabel("Asset", m_filePath.empty() ? "(generated mesh)" : m_filePath.c_str());
+    const std::string vertexCount = std::to_string(m_vertices.size());
+    const std::string triangleCount = std::to_string(m_vertices.size() / 3);
+    ui.ValueLabel("Vertices", vertexCount.c_str());
+    ui.ValueLabel("Triangles", triangleCount.c_str());
+    ui.ValueLabel("GPU Buffer", m_ready ? "Ready" : "Not prepared");
+
+    if (m_hasBounds)
+    {
+        char minimum[96]{}, maximum[96]{};
+        std::snprintf(minimum, sizeof(minimum), "%.3f, %.3f, %.3f",
+            m_boundsMin.x, m_boundsMin.y, m_boundsMin.z);
+        std::snprintf(maximum, sizeof(maximum), "%.3f, %.3f, %.3f",
+            m_boundsMax.x, m_boundsMax.y, m_boundsMax.z);
+        ui.ValueLabel("Bounds Minimum", minimum);
+        ui.ValueLabel("Bounds Maximum", maximum);
+    }
+
+    const std::string morphCount = std::to_string(m_morphTargets.size());
+    ui.ValueLabel("Morph Targets", morphCount.c_str());
+    bool changed = false;
+    if (!m_morphWeights.empty() &&
+        ui.CollapsingHeader("Morph Weights", false))
+    {
+        for (size_t index = 0; index < m_morphWeights.size(); ++index)
+        {
+            ui.PushId(&m_morphWeights[index]);
+            const std::string label = "Target " + std::to_string(index);
+            changed = ui.DragFloat(label.c_str(), &m_morphWeights[index],
+                0.01f, -1.f, 1.f) || changed;
+            ui.PopId();
+        }
+    }
+    if (changed)
+        MarkConfigurationDirty();
+    return changed;
+}
 
 Mesh::JsonValue Mesh::Serialize() const
 {

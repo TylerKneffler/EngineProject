@@ -16,6 +16,7 @@ public:
     std::string clipName;
     float duration = 0.f;
     std::vector<AnimationChannel> channels;
+    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
 };
