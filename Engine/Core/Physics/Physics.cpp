@@ -398,6 +398,13 @@ void Engine::Components::RigidBody::SyncBodyFromTransform()
     m_impl->body->activate(true);
 }
 
+void Engine::Components::RigidBody::NotifyEditorTransformChanged()
+{
+    m_editorTransformChanged = true;
+    if (EnsureBody())
+        SyncBodyFromTransform();
+}
+
 void Engine::Components::RigidBody::SyncTransformFromBody()
 {
     if (!m_impl || !m_impl->body || !Owner) return;
@@ -816,7 +823,8 @@ void Physics::Step(float deltaTime)
                 if (body->EnsureBody())
                 {
                     body->ApplyBodySettings();
-                    if (!Engine::Physics::IsDynamic(*body))
+                    if (!Engine::Physics::IsDynamic(*body) ||
+                        body->m_editorTransformChanged)
                         body->SyncBodyFromTransform();
                 }
             }
@@ -835,7 +843,11 @@ void Physics::Step(float deltaTime)
     physics.world->stepSimulation(std::clamp(deltaTime, 0.f, 0.1f), 6, 1.f / 60.f);
 
     for (Engine::Components::RigidBody* body : bodies)
-        if (body->m_impl->body && Engine::Physics::IsDynamic(*body)) body->SyncTransformFromBody();
+    {
+        if (body->m_impl->body && Engine::Physics::IsDynamic(*body))
+            body->SyncTransformFromBody();
+        body->m_editorTransformChanged = false;
+    }
     for (Engine::Components::Cloth* cloth : clothBodies)
         if (cloth->IsSimulating()) cloth->SyncMeshFromSoftBody();
 

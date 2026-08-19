@@ -3,6 +3,7 @@
 #include "Core/Object.h"
 #include "Core/Compoonents/Camera.h"
 #include "Core/Compoonents/Light.h"
+#include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include <algorithm>
 #include <cmath>
@@ -443,6 +444,9 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         else if (m_dragTool == EditorTransformTool::Scale)
             m_dragObject->transform.scale[m_dragAxis] = std::max(0.001f,
                 m_dragStartLocalScale[m_dragAxis] + pixels * 0.01f);
+        if (auto* body =
+            m_dragObject->GetComponent<Engine::Components::RigidBody>())
+            body->NotifyEditorTransformChanged();
         result.transformDragging = true;
         result.consumedClick = true;
     }

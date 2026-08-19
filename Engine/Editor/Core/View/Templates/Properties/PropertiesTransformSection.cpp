@@ -1,5 +1,6 @@
 #include "Engine/Editor/Core/View/Views/PropertiesView.h"
 #include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Serialization/SceneSerializer.h"
 
 namespace Engine::Editor
@@ -36,6 +37,10 @@ void PropertiesView::DrawTransform(IEditorUi& ui)
         const bool transformChanged = t.DrawProperties(ui);
         if (transformChanged)
         {
+            if (auto* body =
+                m_selectedObject->GetComponent<Engine::Components::RigidBody>())
+                body->NotifyEditorTransformChanged();
+
             // A prefab root's placement transform is serialized separately.
             // Keep its potentially large non-transform override patch cached
             // while the user drags position/rotation/scale values.

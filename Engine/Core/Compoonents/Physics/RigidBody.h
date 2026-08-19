@@ -66,6 +66,7 @@ public:
     glm::vec3 GetAngularVelocity() const;
     bool IsColliding() const { return m_isColliding; }
     bool IsGrounded() const { return m_isGrounded; }
+    void NotifyEditorTransformChanged();
 
     void Start() override;
     void Update() override;
@@ -84,5 +85,6 @@ private:
     Impl* m_impl = nullptr;
     bool m_isColliding = false;
     bool m_isGrounded = false;
+    bool m_editorTransformChanged = false;
 };
 }

@@ -1,6 +1,7 @@
 #include "PropertiesView.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Component.h"
 #include "Core/Graphics/IGraphicsTexture.h"
 #include "Core/Scene/Scene.h"
@@ -266,6 +267,9 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
 
     if (componentPropertiesChanged && OnComponentsChanged)
     {
+        if (auto* body =
+            m_selectedObject->GetComponent<Engine::Components::RigidBody>())
+            body->NotifyEditorTransformChanged();
         m_selectedObject->InvalidatePrefabOverrideCache();
         OnComponentsChanged();
     }
