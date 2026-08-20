@@ -34,7 +34,8 @@ float4 PSMain(float4 position : SV_POSITION,
         float2 backgroundUv = float2(
             ndc.x * 0.5 + 0.5,
             0.5 - ndc.y * 0.5);
-        return float4(skyTexture.Sample(skySampler, backgroundUv).rgb, 1.0);
+        return float4(skyTexture.Sample(skySampler, backgroundUv).rgb *
+            displayParams.y, 1.0);
     }
 
     float4 nearPoint = mul(invVP, float4(ndc, 0.0, 1.0));
@@ -42,11 +43,16 @@ float4 PSMain(float4 position : SV_POSITION,
     nearPoint /= nearPoint.w;
     farPoint /= farPoint.w;
     float3 direction = normalize(farPoint.xyz - nearPoint.xyz);
+    float sine = sin(-displayParams.z);
+    float cosine = cos(-displayParams.z);
+    direction.xz = float2(
+        cosine * direction.x - sine * direction.z,
+        sine * direction.x + cosine * direction.z);
 
     const float inverseTwoPi = 0.1591549431;
     const float inversePi = 0.3183098862;
     float2 uv;
     uv.x = 0.5 + atan2(direction.z, direction.x) * inverseTwoPi;
     uv.y = acos(clamp(direction.y, -1.0, 1.0)) * inversePi;
-    return float4(skyTexture.Sample(skySampler, uv).rgb, 1.0);
+    return float4(skyTexture.Sample(skySampler, uv).rgb * displayParams.y, 1.0);
 }

@@ -67,6 +67,17 @@
             "problemMatcher": []
         },
         {
+            "label": "CMake: Rebuild Debug",
+            "dependsOn": [
+                "CMake: Clean",
+                "CMake: Build Debug"
+            ],
+            "dependsOrder": "sequence",
+            "group": "build",
+            "presentation": { "reveal": "always", "panel": "shared" },
+            "problemMatcher": []
+        },
+        {
             "label": "Engine: Package Versioned Release",
             "type": "shell",
             "command": "powershell",

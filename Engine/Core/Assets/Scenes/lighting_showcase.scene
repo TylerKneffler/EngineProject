@@ -1,16 +1,339 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Scene xmlns:components="urn:engine-components">
-  <version>1</version>
-  <settings><showGrid>true</showGrid><gridHalfSize>15</gridHalfSize><gridCellSize>1</gridCellSize><gridOpacity>0.25</gridOpacity><gridFadeDistance>80</gridFadeDistance><gridColor><item>0.3</item><item>0.3</item><item>0.35</item></gridColor><gridOriginColor><item>0.4</item><item>0.5</item><item>0.8</item></gridOriginColor><ambientColor><item>0.035</item><item>0.04</item><item>0.07</item></ambientColor><skyboxTexture></skyboxTexture></settings>
+<Scene xmlns:components="urn:engine-components" version="1">
+  <settings showGrid="true" gridHalfSize="15" gridCellSize="1" gridOpacity="0.25" gridFadeDistance="80" skyboxTexture="">
+    <gridColor>
+      <item>0.3</item>
+      <item>0.3</item>
+      <item>0.35</item>
+    </gridColor>
+    <gridOriginColor>
+      <item>0.4</item>
+      <item>0.5</item>
+      <item>0.8</item>
+    </gridOriginColor>
+    <ambientColor>
+      <item>0.035</item>
+      <item>0.04</item>
+      <item>0.07</item>
+    </ambientColor>
+  </settings>
   <objects>
-    <item><name>Lighting Camera</name><enabled>true</enabled><transform><Transform.position><item>0</item><item>3.5</item><item>-9</item></Transform.position><Transform.rotation><item>0.28</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform><components><components:Camera><Camera.active>true</Camera.active><Camera.useTransformRotation>true</Camera.useTransformRotation><Camera.fov>55</Camera.fov><Camera.near>0.01</Camera.near><Camera.far>150</Camera.far><Camera.orthographic>false</Camera.orthographic><Camera.orthographicSize>5</Camera.orthographicSize><Camera.target><item>0</item><item>1</item><item>0</item></Camera.target><Camera.up><item>0</item><item>1</item><item>0</item></Camera.up></components:Camera></components><children /></item>
-    <item><name>Cool Global Fill</name><enabled>true</enabled><transform><Transform.position><item>0</item><item>4</item><item>0</item></Transform.position><Transform.rotation><item>0.65</item><item>-0.5</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform><components><components:Light><Light.lightType>1</Light.lightType><Light.color><item>0.45</item><item>0.58</item><item>1</item></Light.color><Light.intensity>0.7</Light.intensity><Light.range>20</Light.range><Light.falloff>2</Light.falloff><Light.baked>false</Light.baked></components:Light></components><children /></item>
-    <item><name>Red Point Light</name><enabled>true</enabled><transform><Transform.position><item>-3</item><item>2.5</item><item>-1</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform><components><components:Light><Light.lightType>0</Light.lightType><Light.color><item>1</item><item>0.12</item><item>0.06</item></Light.color><Light.intensity>10</Light.intensity><Light.range>7</Light.range><Light.falloff>2</Light.falloff><Light.baked>false</Light.baked></components:Light></components><children /></item>
-    <item><name>Blue Point Light</name><enabled>true</enabled><transform><Transform.position><item>3</item><item>2.5</item><item>-1</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform><components><components:Light><Light.lightType>0</Light.lightType><Light.color><item>0.05</item><item>0.3</item><item>1</item></Light.color><Light.intensity>10</Light.intensity><Light.range>7</Light.range><Light.falloff>2</Light.falloff><Light.baked>false</Light.baked></components:Light></components><children /></item>
-    <item><name>Warm Rim Light</name><enabled>true</enabled><transform><Transform.position><item>0</item><item>4</item><item>3</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform><components><components:Light><Light.lightType>0</Light.lightType><Light.color><item>1</item><item>0.65</item><item>0.25</item></Light.color><Light.intensity>8</Light.intensity><Light.range>8</Light.range><Light.falloff>1.6</Light.falloff><Light.baked>false</Light.baked></components:Light></components><children /></item>
-    <item><name>Dark Floor</name><enabled>true</enabled><transform><Transform.position><item>0</item><item>-0.4</item><item>0</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>8</item><item>0.35</item><item>6</item></Transform.scale></transform><components><components:Mesh><Mesh.file>Assets/Mesh/cube.obj</Mesh.file></components:Mesh><components:Material><Material.diffuse><item>0.1</item><item>0.11</item><item>0.14</item></Material.diffuse><Material.ambient><item>0.02</item><item>0.02</item><item>0.025</item></Material.ambient><Material.specular><item>0.7</item><item>0.7</item><item>0.75</item></Material.specular><Material.shininess>72</Material.shininess><Material.metallicFactor>0.45</Material.metallicFactor><Material.roughnessFactor>0.3</Material.roughnessFactor></components:Material></components><children /></item>
-    <item><name>Matte White</name><enabled>true</enabled><transform><Transform.position><item>-2.2</item><item>0.8</item><item>0</item></Transform.position><Transform.rotation><item>0.15</item><item>0.35</item><item>0</item></Transform.rotation><Transform.scale><item>1.4</item><item>1.4</item><item>1.4</item></Transform.scale></transform><components><components:Mesh><Mesh.file>Assets/Mesh/cube.obj</Mesh.file></components:Mesh><components:Material><Material.diffuse><item>0.82</item><item>0.82</item><item>0.82</item></Material.diffuse><Material.ambient><item>0.08</item><item>0.08</item><item>0.08</item></Material.ambient><Material.specular><item>0.2</item><item>0.2</item><item>0.2</item></Material.specular><Material.shininess>8</Material.shininess><Material.metallicFactor>0</Material.metallicFactor><Material.roughnessFactor>0.9</Material.roughnessFactor></components:Material></components><children /></item>
-    <item><name>Glossy Metal</name><enabled>true</enabled><transform><Transform.position><item>0</item><item>1.1</item><item>0.5</item></Transform.position><Transform.rotation><item>0.25</item><item>0.55</item><item>0.15</item></Transform.rotation><Transform.scale><item>1.7</item><item>1.7</item><item>1.7</item></Transform.scale></transform><components><components:Mesh><Mesh.file>Assets/Mesh/cube.obj</Mesh.file></components:Mesh><components:Material><Material.diffuse><item>0.55</item><item>0.58</item><item>0.65</item></Material.diffuse><Material.ambient><item>0.05</item><item>0.05</item><item>0.06</item></Material.ambient><Material.specular><item>1</item><item>1</item><item>1</item></Material.specular><Material.shininess>128</Material.shininess><Material.metallicFactor>1</Material.metallicFactor><Material.roughnessFactor>0.12</Material.roughnessFactor></components:Material><components:Rotate><Rotate.axis><item>0</item><item>1</item><item>0</item></Rotate.axis><Rotate.speed>18</Rotate.speed></components:Rotate></components><children /></item>
-    <item><name>Rough Gold</name><enabled>true</enabled><transform><Transform.position><item>2.2</item><item>0.8</item><item>0</item></Transform.position><Transform.rotation><item>0</item><item>-0.35</item><item>0.1</item></Transform.rotation><Transform.scale><item>1.4</item><item>1.4</item><item>1.4</item></Transform.scale></transform><components><components:Mesh><Mesh.file>Assets/Mesh/cube.obj</Mesh.file></components:Mesh><components:Material><Material.diffuse><item>0.9</item><item>0.55</item><item>0.12</item></Material.diffuse><Material.ambient><item>0.1</item><item>0.055</item><item>0.01</item></Material.ambient><Material.specular><item>1</item><item>0.8</item><item>0.35</item></Material.specular><Material.shininess>36</Material.shininess><Material.metallicFactor>0.8</Material.metallicFactor><Material.roughnessFactor>0.55</Material.roughnessFactor></components:Material></components><children /></item>
+    <item name="Lighting Camera" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>0</item>
+          <item>3.5</item>
+          <item>-9</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0.28</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Camera Camera.active="true" Camera.useTransformRotation="true" Camera.fov="55" Camera.near="0.01" Camera.far="150" Camera.orthographic="false" Camera.orthographicSize="5">
+          <Camera.target>
+            <item>0</item>
+            <item>1</item>
+            <item>0</item>
+          </Camera.target>
+          <Camera.up>
+            <item>0</item>
+            <item>1</item>
+            <item>0</item>
+          </Camera.up>
+        </components:Camera>
+      </components>
+      <children />
+    </item>
+    <item name="Cool Global Fill" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>0</item>
+          <item>4</item>
+          <item>0</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0.65</item>
+          <item>-0.5</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Light Light.lightType="1" Light.intensity="0.7" Light.range="20" Light.falloff="2" Light.baked="false">
+          <Light.color>
+            <item>0.45</item>
+            <item>0.58</item>
+            <item>1</item>
+          </Light.color>
+        </components:Light>
+      </components>
+      <children />
+    </item>
+    <item name="Red Point Light" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>-3</item>
+          <item>2.5</item>
+          <item>-1</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Light Light.lightType="0" Light.intensity="10" Light.range="7" Light.falloff="2" Light.baked="false">
+          <Light.color>
+            <item>1</item>
+            <item>0.12</item>
+            <item>0.06</item>
+          </Light.color>
+        </components:Light>
+      </components>
+      <children />
+    </item>
+    <item name="Blue Point Light" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>3</item>
+          <item>2.5</item>
+          <item>-1</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Light Light.lightType="0" Light.intensity="10" Light.range="7" Light.falloff="2" Light.baked="false">
+          <Light.color>
+            <item>0.05</item>
+            <item>0.3</item>
+            <item>1</item>
+          </Light.color>
+        </components:Light>
+      </components>
+      <children />
+    </item>
+    <item name="Warm Rim Light" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>0</item>
+          <item>4</item>
+          <item>3</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Light Light.lightType="0" Light.intensity="8" Light.range="8" Light.falloff="1.6" Light.baked="false">
+          <Light.color>
+            <item>1</item>
+            <item>0.65</item>
+            <item>0.25</item>
+          </Light.color>
+        </components:Light>
+      </components>
+      <children />
+    </item>
+    <item name="Dark Floor" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>0</item>
+          <item>-0.4</item>
+          <item>0</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>8</item>
+          <item>0.35</item>
+          <item>6</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/cube.obj"></components:Mesh>
+        <components:Material Material.shininess="72" Material.metallicFactor="0.45" Material.roughnessFactor="0.3">
+          <Material.diffuse>
+            <item>0.1</item>
+            <item>0.11</item>
+            <item>0.14</item>
+          </Material.diffuse>
+          <Material.ambient>
+            <item>0.02</item>
+            <item>0.02</item>
+            <item>0.025</item>
+          </Material.ambient>
+          <Material.specular>
+            <item>0.7</item>
+            <item>0.7</item>
+            <item>0.75</item>
+          </Material.specular>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Matte White" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>-2.2</item>
+          <item>0.8</item>
+          <item>0</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0.15</item>
+          <item>0.35</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1.4</item>
+          <item>1.4</item>
+          <item>1.4</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/cube.obj"></components:Mesh>
+        <components:Material Material.shininess="8" Material.metallicFactor="0" Material.roughnessFactor="0.9">
+          <Material.diffuse>
+            <item>0.82</item>
+            <item>0.82</item>
+            <item>0.82</item>
+          </Material.diffuse>
+          <Material.ambient>
+            <item>0.08</item>
+            <item>0.08</item>
+            <item>0.08</item>
+          </Material.ambient>
+          <Material.specular>
+            <item>0.2</item>
+            <item>0.2</item>
+            <item>0.2</item>
+          </Material.specular>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Glossy Metal" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>0</item>
+          <item>1.1</item>
+          <item>0.5</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0.25</item>
+          <item>0.55</item>
+          <item>0.15</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1.7</item>
+          <item>1.7</item>
+          <item>1.7</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/cube.obj"></components:Mesh>
+        <components:Material Material.shininess="128" Material.metallicFactor="1" Material.roughnessFactor="0.12">
+          <Material.diffuse>
+            <item>0.55</item>
+            <item>0.58</item>
+            <item>0.65</item>
+          </Material.diffuse>
+          <Material.ambient>
+            <item>0.05</item>
+            <item>0.05</item>
+            <item>0.06</item>
+          </Material.ambient>
+          <Material.specular>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+          </Material.specular>
+        </components:Material>
+        <components:Rotate Rotate.speed="18">
+          <Rotate.axis>
+            <item>0</item>
+            <item>1</item>
+            <item>0</item>
+          </Rotate.axis>
+        </components:Rotate>
+      </components>
+      <children />
+    </item>
+    <item name="Rough Gold" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>2.2</item>
+          <item>0.8</item>
+          <item>0</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>-0.35</item>
+          <item>0.1</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1.4</item>
+          <item>1.4</item>
+          <item>1.4</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/cube.obj"></components:Mesh>
+        <components:Material Material.shininess="36" Material.metallicFactor="0.8" Material.roughnessFactor="0.55">
+          <Material.diffuse>
+            <item>0.9</item>
+            <item>0.55</item>
+            <item>0.12</item>
+          </Material.diffuse>
+          <Material.ambient>
+            <item>0.1</item>
+            <item>0.055</item>
+            <item>0.01</item>
+          </Material.ambient>
+          <Material.specular>
+            <item>1</item>
+            <item>0.8</item>
+            <item>0.35</item>
+          </Material.specular>
+        </components:Material>
+      </components>
+      <children />
+    </item>
   </objects>
 </Scene>

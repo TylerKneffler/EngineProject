@@ -8,6 +8,7 @@
 #include "Core/Serialization/SceneSerializer.h"
 #include "../Focus/WindowFocusHandler.h"
 #include <filesystem>
+#include <algorithm>
 #include <shellapi.h>
 
 namespace Engine::Editor
@@ -136,6 +137,27 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
                 ui.SameLine();
                 if (ui.Button("Cancel"))
                     m_editingSkyboxTexture = false;
+            }
+
+            ui.Separator();
+            ui.Label("HDRI Environment");
+            bool environmentChanged = false;
+            environmentChanged |= ui.Checkbox("Use Skybox for Lighting",
+                &m_scene->settings.hdriLightingEnabled);
+            environmentChanged |= ui.DragFloat("Intensity",
+                &m_scene->settings.hdriIntensity, 0.02f, 0.f, 32.f);
+            environmentChanged |= ui.DragFloat("Exposure (EV)",
+                &m_scene->settings.hdriExposure, 0.05f, -16.f, 16.f);
+            environmentChanged |= ui.DragFloat("Rotation",
+                &m_scene->settings.hdriRotation, 0.5f, -360.f, 360.f);
+            if (environmentChanged)
+            {
+                m_scene->settings.hdriIntensity = std::max(
+                    0.f, m_scene->settings.hdriIntensity);
+                m_scene->settings.hdriExposure = std::clamp(
+                    m_scene->settings.hdriExposure, -16.f, 16.f);
+                if (OnComponentsChanged)
+                    OnComponentsChanged();
             }
         }
         ui.EndTextWrap();

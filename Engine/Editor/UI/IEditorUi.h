@@ -75,6 +75,7 @@ struct EditorUiPrefabMenuResult
     bool applyAllRequested = false;
     bool revertRequested = false;
     bool unpackRequested = false;
+    bool deleteRequested = false;
 };
 
 struct EditorUiDragDropPayloadResult
@@ -88,6 +89,12 @@ struct EditorUiAssetCreateMenuResult
 {
     bool folderRequested = false;
     bool scriptRequested = false;
+};
+
+struct EditorUiAssetItemMenuResult
+{
+    bool renameRequested = false;
+    bool deleteRequested = false;
 };
 
 struct EditorUiTextEditResult
@@ -149,6 +156,7 @@ public:
         bool objectCreationMenu = false,
         const char* unpackLabel = nullptr) = 0;
     virtual EditorUiAssetCreateMenuResult AssetWindowContextMenu() = 0;
+    virtual EditorUiAssetItemMenuResult AssetItemContextMenu(const void* id) = 0;
     virtual EditorUiTextEditResult RenameText(const char* label, char* buffer,
         size_t size, bool focus) = 0;
     virtual EditorUiPrefabMenuResult PrefabOverrideMenu(const void* id,
@@ -162,6 +170,7 @@ public:
     virtual bool IsWindowBackgroundClicked() const = 0;
     virtual bool CopyShortcutPressed() const = 0;
     virtual bool PasteShortcutPressed() const = 0;
+    virtual bool DeleteShortcutPressed() const = 0;
     virtual bool BeginDragDropSource() = 0;
     virtual void SetDragDropPayload(const char* type, const void* data, size_t size) = 0;
     virtual void EndDragDropSource() = 0;
@@ -195,6 +204,10 @@ public:
     virtual void Tooltip(const char* text) = 0;
     virtual void Progress(float fraction, const char* overlay = nullptr) = 0;
     virtual void DrawImage(void* texture, float width, float height) = 0;
+    // Draws a square texture as a circular item while preserving normal ImGui
+    // hover/click/drag-drop behavior for the preview.
+    virtual void DrawCircularImage(void* texture, float diameter,
+        EditorUiColor border = { 0.35f, 0.35f, 0.35f, 1.f }) = 0;
     virtual EditorUiViewportInput Viewport(void* texture, float aspectRatio, EditorUiColor letterboxColor) = 0;
     virtual void DrawViewportLine(EditorUiVec2 start, EditorUiVec2 end,
         EditorUiColor color, float thickness = 1.f) = 0;

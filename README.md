@@ -95,6 +95,13 @@ Open the repository or generated project folder directly in Visual Studio 2022. 
 - Textures generate a complete mip chain on load. PNG, JPEG, BMP, DDS, TGA,
   Radiance HDR, OpenEXR, and KTX2 are supported; HDR/EXR remain floating-point
   through upload, and Basis Universal KTX2 images are transcoded by libktx.
+- A scene skybox can drive HDRI lighting and reflections. With the Scene root
+  selected, enable **Use Skybox for Lighting** and tune intensity, exposure,
+  and rotation. Materials expose environment diffuse and reflection strengths.
+  `Engine/Core/Assets/Scenes/hdri_showcase.scene` demonstrates the feature.
+- A material can override only its reflections without changing the skybox.
+  Enable **Custom Reflection Environment**, assign a Radiance HDR or OpenEXR
+  file to **Reflection HDRI**, then tune its strength, exposure, and rotation.
 - WAV, OGG/Vorbis, and MP3 files can be imported and assigned to an Audio Source.
 
 ### Audio sources

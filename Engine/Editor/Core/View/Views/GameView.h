@@ -45,6 +45,7 @@ public:
 
     // Defines the Game panel showing the game-camera render output.
     void DrawPanel(IEditorUi& ui) override;
+    Engine::Scene::Scene* GetScene() const { return m_scene; }
 
 private:
     Engine::Scene::Scene* m_scene = nullptr; // non-owning

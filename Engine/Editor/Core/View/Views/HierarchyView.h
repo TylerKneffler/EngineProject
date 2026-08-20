@@ -35,6 +35,7 @@ public:
 
     Engine::Core::Object* GetSelectedObject() const  { return m_selectedObject; }
     void    SetSelectedObject(Engine::Core::Object* obj);
+    void RequestDeleteSelectedObject();
     void SetDebugInteractionLogging(bool enabled);
 
     // Fires whenever the selected object changes (including deselect → nullptr).

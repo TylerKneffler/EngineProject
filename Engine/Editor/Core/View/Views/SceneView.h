@@ -46,12 +46,15 @@ public:
     // aspect ratio settings, captures mouse input, and drives the
     // scene's editorCamera with orbit / pan / zoom.
     void DrawPanel(IEditorUi& ui) override;
+    Engine::Scene::Scene* GetScene() const { return m_scene; }
+    void RequestFocusOnNextDraw() { m_focusOnNextDraw = true; }
     std::function<void(const std::string&)> OnAssetDropped;
     std::function<Engine::Core::Object*(const std::string&)> OnAssetPreviewRequested;
     std::function<void(Engine::Core::Object*)> OnAssetPreviewCancelled;
     std::function<void(Engine::Core::Object*, const std::string&)> OnAssetPreviewCommitted;
     std::function<void(Engine::Core::Object*)> OnObjectSelected;
     std::function<void(Engine::Core::Object*)> OnObjectCreated;
+    std::function<void()> OnDeleteSelectionRequested;
     std::function<void(bool)> OnGizmoInteraction;
 
 private:
@@ -72,6 +75,7 @@ private:
     Engine::Core::Object* m_prefabPreview = nullptr;
     std::string m_prefabPreviewPath;
     bool m_prefabPreviewHasPlacement = false;
+    bool m_focusOnNextDraw = false;
     EditorGizmoSystem m_gizmos;
     SceneViewportToolbar m_toolbar;
 };

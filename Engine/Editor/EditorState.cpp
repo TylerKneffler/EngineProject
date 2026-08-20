@@ -36,6 +36,50 @@ namespace
         if (log)
             log << message << '\n';
     }
+
+    std::string NormalizeAssetPath(const std::string& path)
+    {
+        std::error_code error;
+        std::filesystem::path normalized =
+            std::filesystem::weakly_canonical(path, error);
+        if (error)
+            normalized = std::filesystem::path(path).lexically_normal();
+        return normalized.generic_string();
+    }
+
+    bool ReplaceAllInText(std::string& text, const std::string& from,
+        const std::string& to)
+    {
+        if (from.empty() || from == to)
+            return false;
+        bool replaced = false;
+        size_t position = 0;
+        while ((position = text.find(from, position)) != std::string::npos)
+        {
+            text.replace(position, from.size(), to);
+            position += to.size();
+            replaced = true;
+        }
+        return replaced;
+    }
+
+    std::string RemapPathPrefix(const std::string& value,
+        const std::string& oldPrefix, const std::string& newPrefix)
+    {
+        if (value == oldPrefix)
+            return newPrefix;
+        if (value.size() <= oldPrefix.size() ||
+            value.compare(0, oldPrefix.size(), oldPrefix) != 0)
+            return value;
+
+        const char separator = value[oldPrefix.size()];
+        if (separator != '/' && separator != '\\')
+            return value;
+
+        std::string remapped = newPrefix;
+        remapped += value.substr(oldPrefix.size());
+        return remapped;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +175,7 @@ bool EditorState::Init()
     OutputDebugStringA("[EditorState] Initializing scene...\n");
     Engine::Graphics::IGraphicsProvider* graphicsProvider = m_renderer->GetGraphicsProvider();
     if (!graphicsProvider)
+
     {
         LogStartupFailure("EditorState: renderer did not provide a graphics provider");
         OutputDebugStringA("[EditorState] ERROR: Failed to get graphics provider from renderer\n");
@@ -228,10 +273,10 @@ void EditorState::SaveScene()
     SaveMainScene();
 }
 
-void EditorState::SaveMainScene()
+bool EditorState::SaveMainScene()
 {
     if (!m_scene)
-        return;
+        return false;
 
     std::string destination = m_currentScenePath;
     if (destination.empty() && !m_projectSettings.defaultScene.empty())
@@ -254,7 +299,7 @@ void EditorState::SaveMainScene()
         dialog.lpstrInitialDir = initial.c_str();
         dialog.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
         if (!GetSaveFileNameW(&dialog))
-            return;
+            return false;
         destination = std::filesystem::path(filePath).string();
     }
 
@@ -269,12 +314,15 @@ void EditorState::SaveMainScene()
         if (m_primaryConsole)
             m_primaryConsole->AddLog(
                 ConsoleView::Level::Info, "Scene saved: " + m_currentScenePath);
+        return true;
     }
     else if (m_primaryConsole)
     {
         m_primaryConsole->AddLog(
             ConsoleView::Level::Error, "Failed to save scene: " + destination);
     }
+
+    return false;
 }
 
 void EditorState::SaveAll()
@@ -299,12 +347,19 @@ void EditorState::SaveAll()
 
 std::string EditorState::GetActiveDocumentName() const
 {
-    const std::string sceneName = m_currentScenePath.empty()
+    std::string sceneName = m_currentScenePath.empty()
         ? "Untitled" : std::filesystem::path(m_currentScenePath).stem().string();
+    if (m_hasUnsavedChanges)
+        sceneName += " *";
     if (m_activePrefabPath.empty())
         return sceneName;
-    return sceneName + " | " +
+
+    std::string prefabName =
         std::filesystem::path(m_activePrefabPath).stem().string() + " (Prefab)";
+    if (m_prefabHasUnsavedChanges)
+        prefabName += " *";
+
+    return sceneName + " | " + prefabName;
 }
 
 void EditorState::BakeLighting()
@@ -348,11 +403,53 @@ void EditorState::ClearBakedLighting()
 // ---------------------------------------------------------------------------
 void EditorState::LoadScene(const std::string& path)
 {
+    RequestSceneLoad(path);
+}
+
+void EditorState::RequestSceneLoad(const std::string& path)
+{
     if (!m_scene)
     {
         OutputDebugStringA("[EditorState::LoadScene] ERROR: Scene is null\n");
         return;
     }
+
+    if (m_hasUnsavedChanges)
+    {
+        m_sceneToLoad = path;
+        m_showUnsavedWarning = true;
+        if (m_renderer)
+            m_renderer->MarkDirty();
+        return;
+    }
+
+    LoadSceneNow(path);
+}
+
+bool EditorState::ConfirmSceneLoad(bool saveCurrentScene)
+{
+    if (saveCurrentScene && !SaveMainScene())
+        return false;
+
+    const std::string path = std::move(m_sceneToLoad);
+    m_sceneToLoad.clear();
+    m_showUnsavedWarning = false;
+    if (m_renderer)
+        m_renderer->MarkDirty();
+    LoadSceneNow(path);
+    return true;
+}
+
+void EditorState::CancelSceneLoad()
+{
+    m_sceneToLoad.clear();
+    m_showUnsavedWarning = false;
+    if (m_renderer)
+        m_renderer->MarkDirty();
+}
+
+void EditorState::LoadSceneNow(const std::string& path)
+{
 
     OutputDebugStringA(("[EditorState::LoadScene] Loading scene: " + path + "\n").c_str());
     
@@ -387,6 +484,7 @@ void EditorState::LoadScene(const std::string& path)
             {
                 m_primaryConsole->AddLog(ConsoleView::Level::Info, "Scene loaded: " + resolvedPath);
             }
+            return;
         }
         else
         {
@@ -396,6 +494,7 @@ void EditorState::LoadScene(const std::string& path)
             {
                 m_primaryConsole->AddLog(ConsoleView::Level::Error, "Failed to load scene: " + resolvedPath);
             }
+            return;
         }
     }
     catch (const std::exception& e)
@@ -459,7 +558,7 @@ void EditorState::OpenPrefabStage(const std::string& path)
     const std::string prefabName =
         std::filesystem::path(normalized).stem().string();
     auto sceneView = m_viewFactory->CreateSceneView(
-        prefabScene.get(), prefabName + " (Prefab)");
+        prefabScene.get(), prefabName, EditorPanelDockArea::MainDocument);
     if (!sceneView)
     {
         if (m_primaryConsole)
@@ -467,72 +566,40 @@ void EditorState::OpenPrefabStage(const std::string& path)
                 "Could not create prefab editor viewport: " + normalized);
         return;
     }
-    auto hierarchy = std::make_unique<HierarchyView>();
-    hierarchy->SetTitle(prefabName + " Hierarchy");
-    hierarchy->Init(prefabScene.get());
-    hierarchy->OnPrefabRequested = [this](const std::string& prefabPath)
-    {
-        m_pendingPrefabPath = prefabPath;
-    };
-    auto properties = std::make_unique<PropertiesView>();
-    properties->SetTitle(prefabName + " Properties");
-    properties->Init(prefabScene.get());
-    properties->SetShowChildHierarchy(false);
-    properties->OnPrefabRequested = [this](const std::string& prefabPath)
-    {
-        m_pendingPrefabPath = prefabPath;
-    };
 
     m_prefabScene = std::move(prefabScene);
     m_prefabSceneView = sceneView.get();
-    m_prefabHierarchy = hierarchy.get();
-    m_prefabProperties = properties.get();
-    m_prefabHierarchy->OnSelectionChanged = [this](Engine::Core::Object* object)
-    {
-        if (m_prefabScene) m_prefabScene->SetSelectedObject(object);
-        if (m_prefabProperties) m_prefabProperties->SetSelectedObject(object);
-    };
-    m_prefabHierarchy->OnFocusObject = [this](Engine::Core::Object* object)
-    {
-        if (m_prefabScene) m_prefabScene->FocusEditorCamera(object);
-    };
-    m_prefabHierarchy->OnHierarchyChanged = [this]()
-    {
-        m_prefabHasUnsavedChanges = true;
-    };
-    m_prefabProperties->OnComponentsChanged = [this]()
-    {
-        m_prefabHasUnsavedChanges = true;
-    };
     m_prefabSceneView->OnObjectSelected = [this](Engine::Core::Object* object)
     {
         if (m_prefabScene) m_prefabScene->SetSelectedObject(object);
-        if (m_prefabHierarchy) m_prefabHierarchy->SetSelectedObject(object);
-        if (m_prefabProperties) m_prefabProperties->SetSelectedObject(object);
+        if (m_primaryHierarchy) m_primaryHierarchy->SetSelectedObject(object);
+        if (m_primaryProperties) m_primaryProperties->SetSelectedObject(object);
     };
     m_prefabSceneView->OnObjectCreated = [this](Engine::Core::Object* object)
     {
         m_prefabHasUnsavedChanges = true;
         if (m_prefabScene) m_prefabScene->SetSelectedObject(object);
-        if (m_prefabHierarchy) m_prefabHierarchy->SetSelectedObject(object);
-        if (m_prefabProperties) m_prefabProperties->SetSelectedObject(object);
+        if (m_primaryHierarchy) m_primaryHierarchy->SetSelectedObject(object);
+        if (m_primaryProperties) m_primaryProperties->SetSelectedObject(object);
+    };
+    m_prefabSceneView->OnDeleteSelectionRequested = [this]()
+    {
+        if (m_primaryHierarchy)
+            m_primaryHierarchy->RequestDeleteSelectedObject();
     };
     m_prefabSceneView->OnGizmoInteraction = [this](bool active)
     {
         if (active) m_prefabHasUnsavedChanges = true;
     };
-    sceneView->OnFocused = [this]() { m_prefabDocumentFocused = true; };
-    hierarchy->OnFocused = [this]() { m_prefabDocumentFocused = true; };
-    properties->OnFocused = [this]() { m_prefabDocumentFocused = true; };
+    sceneView->OnFocused = [this]() { SetPrefabDocumentFocused(true); };
+    sceneView->RequestFocusOnNextDraw();
     m_panels.push_back(std::move(sceneView));
-    m_panels.push_back(std::move(hierarchy));
-    m_panels.push_back(std::move(properties));
     m_activePrefabPath = normalized;
     m_prefabHasUnsavedChanges = false;
-    m_prefabDocumentFocused = true;
-    m_prefabHierarchy->SetSelectedObject(root);
-    m_prefabProperties->SetSelectedObject(root);
     m_prefabScene->SetSelectedObject(root);
+    SetPrefabDocumentFocused(true);
+    if (m_primaryHierarchy) m_primaryHierarchy->SetSelectedObject(root);
+    if (m_primaryProperties) m_primaryProperties->SetSelectedObject(root);
     if (m_primaryConsole)
         m_primaryConsole->AddLog(ConsoleView::Level::Info,
             "Opened prefab stage: " + normalized);
@@ -543,7 +610,7 @@ void EditorState::ProcessPendingPrefabStageOpen()
     if (m_pendingPrefabPath.empty())
         return;
 
-    // Opening a prefab creates three panels. Do it after the panel draw loop so
+    // Opening a prefab adds a Scene panel. Do it after the panel draw loop so
     // growing m_panels cannot invalidate the iterator currently drawing Assets.
     std::string path = std::move(m_pendingPrefabPath);
     m_pendingPrefabPath.clear();
@@ -561,11 +628,11 @@ void EditorState::ClosePrefabStage()
         return;
     }
 
+    SetPrefabDocumentFocused(false);
     RemovePrefabPanels();
     m_prefabScene.reset();
     m_activePrefabPath.clear();
     m_prefabHasUnsavedChanges = false;
-    m_prefabDocumentFocused = false;
     if (m_primaryConsole)
         m_primaryConsole->AddLog(ConsoleView::Level::Info,
             "Closed prefab stage.");
@@ -576,17 +643,13 @@ void EditorState::HandlePrefabPanelClosures()
     if (m_activePrefabPath.empty())
         return;
     const bool panelClosed =
-        (m_prefabSceneView && !m_prefabSceneView->IsOpen()) ||
-        (m_prefabHierarchy && !m_prefabHierarchy->IsOpen()) ||
-        (m_prefabProperties && !m_prefabProperties->IsOpen());
+        (m_prefabSceneView && !m_prefabSceneView->IsOpen());
     if (!panelClosed)
         return;
 
     if (m_prefabHasUnsavedChanges)
     {
         if (m_prefabSceneView) m_prefabSceneView->SetOpen(true);
-        if (m_prefabHierarchy) m_prefabHierarchy->SetOpen(true);
-        if (m_prefabProperties) m_prefabProperties->SetOpen(true);
         if (m_primaryConsole)
             m_primaryConsole->AddLog(ConsoleView::Level::Warning,
                 "Save the prefab before closing its editor.");
@@ -599,9 +662,7 @@ void EditorState::RemovePrefabPanels()
 {
     auto isPrefabPanel = [this](const std::unique_ptr<IEditorPanel>& panel)
     {
-        return panel.get() == m_prefabSceneView ||
-            panel.get() == m_prefabHierarchy ||
-            panel.get() == m_prefabProperties;
+        return panel.get() == m_prefabSceneView;
     };
     for (auto it = m_panels.begin(); it != m_panels.end();)
     {
@@ -618,8 +679,6 @@ void EditorState::RemovePrefabPanels()
         it = m_panels.erase(it);
     }
     m_prefabSceneView = nullptr;
-    m_prefabHierarchy = nullptr;
-    m_prefabProperties = nullptr;
 }
 
 void EditorState::CapturePlayModeScene()
@@ -715,7 +774,7 @@ void EditorState::InitializePanels()
         auto scenePanel = m_viewFactory->Create("Scene");
         if (scenePanel)
         {
-            scenePanel->OnFocused = [this]() { m_prefabDocumentFocused = false; };
+            scenePanel->OnFocused = [this]() { SetPrefabDocumentFocused(false); };
             m_panels.push_back(std::move(scenePanel));
         }
         else OutputDebugStringA("[EditorState::InitializePanels] WARNING: Scene panel is null\n");
@@ -724,7 +783,7 @@ void EditorState::InitializePanels()
         auto gamePanel = m_viewFactory->Create("Game");
         if (gamePanel)
         {
-            gamePanel->OnFocused = [this]() { m_prefabDocumentFocused = false; };
+            gamePanel->OnFocused = [this]() { SetPrefabDocumentFocused(false); };
             m_panels.push_back(std::move(gamePanel));
         }
         else OutputDebugStringA("[EditorState::InitializePanels] WARNING: Game panel is null\n");
@@ -733,9 +792,10 @@ void EditorState::InitializePanels()
         auto hierarchyPanel = m_viewFactory->Create("Hierarchy");
         if (hierarchyPanel)
         {
-            hierarchyPanel->OnFocused = [this]() { m_prefabDocumentFocused = false; };
+            hierarchyPanel->OnFocused = [this]() {};
             if (auto* hierarchy = dynamic_cast<HierarchyView*>(hierarchyPanel.get()))
             {
+                m_primaryHierarchy = hierarchy;
                 hierarchy->OnPrefabRequested = [this](const std::string& prefabPath)
                 {
                     m_pendingPrefabPath = prefabPath;
@@ -751,7 +811,7 @@ void EditorState::InitializePanels()
         {
             OutputDebugStringA("[EditorState::InitializePanels] Storing properties pointer\n");
             m_primaryProperties = static_cast<PropertiesView*>(properties.get());
-            properties->OnFocused = [this]() { m_prefabDocumentFocused = false; };
+            properties->OnFocused = [this]() {};
             m_panels.push_back(std::move(properties));
         }
         
@@ -794,7 +854,7 @@ void EditorState::WireupCallbacks()
         return;
     m_viewFactory->OnMainDocumentFocused = [this]()
     {
-        m_prefabDocumentFocused = false;
+        SetPrefabDocumentFocused(false);
     };
 
     // Wire up scene loading callback
@@ -807,11 +867,10 @@ void EditorState::WireupCallbacks()
     };
 
     m_viewFactory->OnAssetSelected = [this](const std::string& assetPath) {
-        for (auto& panel : m_panels)
-            if (auto* hierarchy = dynamic_cast<HierarchyView*>(panel.get()))
-                hierarchy->SetSelectedObject(nullptr);
-        if (m_scene)
-            m_scene->SetSelectedObject(nullptr);
+        if (m_primaryHierarchy)
+            m_primaryHierarchy->SetSelectedObject(nullptr);
+        if (Engine::Scene::Scene* scene = GetActiveDocumentScene())
+            scene->SetSelectedObject(nullptr);
         if (m_primaryProperties)
         {
             m_primaryProperties->SetSelectedObject(nullptr);
@@ -826,23 +885,123 @@ void EditorState::WireupCallbacks()
         const std::string& newPath) {
         if (m_primaryAssets)
             m_primaryAssets->SetSelectedPath(newPath);
-        if (!m_scene)
-            return;
-        std::function<void(Engine::Core::Object*)> updatePrefab = [&](Engine::Core::Object* object) {
-            if (!object)
-                return;
-            if (object->Prefab &&
-                std::filesystem::path(object->Prefab->GetPath()).lexically_normal() ==
-                std::filesystem::path(oldPath).lexically_normal())
-                object->SetPrefab(newPath);
-            for (Engine::Core::Object* child : object->Children)
-                updatePrefab(child);
+
+        const std::string oldNormalized = NormalizeAssetPath(oldPath);
+        const std::string newNormalized = NormalizeAssetPath(newPath);
+
+        const auto remapPath = [&](const std::string& value)
+        {
+            const std::string normalized = NormalizeAssetPath(value);
+            const std::string remapped = RemapPathPrefix(normalized,
+                oldNormalized, newNormalized);
+            if (remapped != normalized)
+                return remapped;
+            return normalized == oldNormalized ? newNormalized : value;
         };
-        for (const auto& object : m_scene->GetObjects())
-            if (object && !object->Parent)
-                updatePrefab(object.get());
-        m_hasUnsavedChanges = true;
-        MarkSceneEdited();
+
+        bool sceneChanged = false;
+        if (m_scene)
+        {
+            std::function<void(Engine::Core::Object*)> updatePrefab =
+                [&](Engine::Core::Object* object) {
+                if (!object)
+                    return;
+                if (object->Prefab)
+                {
+                    const std::string remapped =
+                        remapPath(object->Prefab->GetPath());
+                    if (remapped != object->Prefab->GetPath())
+                    {
+                        object->SetPrefab(remapped);
+                        sceneChanged = true;
+                    }
+                }
+                for (Engine::Core::Object* child : object->Children)
+                    updatePrefab(child);
+            };
+            for (const auto& object : m_scene->GetObjects())
+                if (object && !object->Parent)
+                    updatePrefab(object.get());
+        }
+
+        if (!m_currentScenePath.empty())
+            m_currentScenePath = remapPath(m_currentScenePath);
+        if (!m_activePrefabPath.empty())
+            m_activePrefabPath = remapPath(m_activePrefabPath);
+
+        bool assetReferenceChanged = false;
+        std::error_code error;
+        std::filesystem::path assetsDirectory =
+            m_projectSettings.assetsDirectory.empty()
+            ? std::filesystem::path("Assets")
+            : std::filesystem::path(m_projectSettings.assetsDirectory);
+        assetsDirectory = std::filesystem::weakly_canonical(assetsDirectory,
+            error);
+        if (!error && std::filesystem::exists(assetsDirectory))
+        {
+            const std::vector<std::string> oldCandidates = {
+                oldNormalized,
+                std::filesystem::path(oldNormalized).make_preferred().string()
+            };
+            const std::vector<std::string> newCandidates = {
+                newNormalized,
+                std::filesystem::path(newNormalized).make_preferred().string()
+            };
+
+            for (const auto& entry :
+                std::filesystem::recursive_directory_iterator(assetsDirectory,
+                    error))
+            {
+                if (error)
+                    break;
+                if (!entry.is_regular_file())
+                    continue;
+                const std::string extension =
+                    entry.path().extension().string();
+                if (extension == ".meta")
+                    continue;
+                const std::string lowerExtension = [&]() {
+                    std::string lower = extension;
+                    std::transform(lower.begin(), lower.end(),
+                        lower.begin(), [](unsigned char c) {
+                            return static_cast<char>(std::tolower(c));
+                        });
+                    return lower;
+                }();
+                if (lowerExtension != ".scene" &&
+                    lowerExtension != ".prefab" &&
+                    lowerExtension != ".xml")
+                    continue;
+
+                std::ifstream input(entry.path(), std::ios::binary);
+                if (!input)
+                    continue;
+                std::string contents((std::istreambuf_iterator<char>(input)),
+                    std::istreambuf_iterator<char>());
+                input.close();
+
+                bool changed = false;
+                for (size_t index = 0; index < oldCandidates.size(); ++index)
+                    changed = ReplaceAllInText(contents, oldCandidates[index],
+                        newCandidates[index]) || changed;
+                if (!changed)
+                    continue;
+
+                std::ofstream output(entry.path(),
+                    std::ios::binary | std::ios::trunc);
+                if (!output)
+                    continue;
+                output << contents;
+                if (output.good())
+                    assetReferenceChanged = true;
+            }
+        }
+
+        if (sceneChanged || assetReferenceChanged)
+        {
+            m_hasUnsavedChanges = true;
+            MarkSceneEdited();
+        }
     };
 
     m_viewFactory->OnAssetContentsChanged = [this](const std::string&) {
@@ -860,8 +1019,8 @@ void EditorState::WireupCallbacks()
     // Wire up selection changed callback (for hierarchy -> properties)
     m_viewFactory->OnSelectionChanged = [this](Engine::Core::Object* obj) {
         OutputDebugStringA(("[EditorState] Selection changed to: " + (obj ? obj->name : "nullptr") + "\n").c_str());
-        if (m_scene)
-            m_scene->SetSelectedObject(obj);
+        if (Engine::Scene::Scene* scene = GetActiveDocumentScene())
+            scene->SetSelectedObject(obj);
         if (m_primaryAssets)
             m_primaryAssets->SetSelectedPath({});
         if (m_primaryProperties)
@@ -878,24 +1037,30 @@ void EditorState::WireupCallbacks()
 
     // Scene viewport click-selection -> hierarchy/properties + render selection state
     m_viewFactory->OnObjectSelected = [this](Engine::Core::Object* obj) {
-        for (auto& panel : m_panels)
-            if (auto* hierarchy = dynamic_cast<HierarchyView*>(panel.get()))
-            {
-                hierarchy->SetSelectedObject(obj);
-                break;
-            }
+        if (m_primaryHierarchy)
+            m_primaryHierarchy->SetSelectedObject(obj);
         if (m_primaryProperties)
             m_primaryProperties->SetSelectedObject(obj);
         if (m_primaryAssets)
             m_primaryAssets->SetSelectedPath({});
-        if (m_scene)
-            m_scene->SetSelectedObject(obj);
+        if (Engine::Scene::Scene* scene = GetActiveDocumentScene())
+            scene->SetSelectedObject(obj);
         MarkHistorySelectionChanged();
     };
     m_viewFactory->OnObjectCreated = [this](Engine::Core::Object* obj) {
         m_hasUnsavedChanges = true;
         MarkSceneEdited();
         SelectObject(obj);
+    };
+    m_viewFactory->OnDeleteSelectionRequested = [this]() {
+        if (m_prefabDocumentFocused)
+        {
+            if (m_primaryHierarchy)
+                m_primaryHierarchy->RequestDeleteSelectedObject();
+            return;
+        }
+        if (m_primaryHierarchy)
+            m_primaryHierarchy->RequestDeleteSelectedObject();
     };
     m_viewFactory->OnGizmoInteraction = [this](bool active) {
         ReportSceneEditInProgress(active);
@@ -924,12 +1089,22 @@ void EditorState::WireupCallbacks()
             m_scene->FocusEditorCamera(obj);
     };
     m_viewFactory->OnHierarchyChanged = [this]() {
-        m_hasUnsavedChanges = true;
-        MarkSceneEdited();
+        if (m_prefabDocumentFocused)
+            m_prefabHasUnsavedChanges = true;
+        else
+        {
+            m_hasUnsavedChanges = true;
+            MarkSceneEdited();
+        }
     };
     m_viewFactory->OnPropertiesChanged = [this]() {
-        m_hasUnsavedChanges = true;
-        MarkSceneEdited();
+        if (m_prefabDocumentFocused)
+            m_prefabHasUnsavedChanges = true;
+        else
+        {
+            m_hasUnsavedChanges = true;
+            MarkSceneEdited();
+        }
     };
     m_viewFactory->OnPropertiesAssetDropLog = [this](const std::string& message, bool error) {
         if (m_primaryConsole)
@@ -1154,20 +1329,55 @@ Engine::Core::Object* EditorState::InstantiateAsset(const std::string& path, boo
     return object;
 }
 
+Engine::Scene::Scene* EditorState::GetActiveDocumentScene() const
+{
+    if (m_prefabDocumentFocused && m_prefabScene)
+        return m_prefabScene.get();
+    return m_scene.get();
+}
+
+void EditorState::SetPrefabDocumentFocused(bool focused)
+{
+    const bool nextFocused = focused && m_prefabScene && m_prefabSceneView;
+    if (m_prefabDocumentFocused == nextFocused)
+        return;
+
+    m_prefabDocumentFocused = nextFocused;
+    Engine::Scene::Scene* activeScene = GetActiveDocumentScene();
+
+    if (m_primaryHierarchy)
+    {
+        m_primaryHierarchy->Init(activeScene);
+        m_primaryHierarchy->SetSelectedObject(nullptr);
+    }
+    if (m_primaryProperties)
+    {
+        m_primaryProperties->Init(activeScene);
+        m_primaryProperties->SetSelectedObject(nullptr);
+        m_primaryProperties->SetSelectedAsset("");
+    }
+    if (activeScene)
+    {
+        Engine::Core::Object* selected = activeScene->GetSelectedObject();
+        if (m_primaryHierarchy)
+            m_primaryHierarchy->SetSelectedObject(selected);
+        if (m_primaryProperties)
+            m_primaryProperties->SetSelectedObject(selected);
+    }
+    if (m_renderer)
+        m_renderer->MarkDirty();
+}
+
 void EditorState::SelectObject(Engine::Core::Object* object)
 {
     if (m_primaryAssets)
         m_primaryAssets->SetSelectedPath({});
-    for (auto& panel : m_panels)
-        if (auto* hierarchy = dynamic_cast<HierarchyView*>(panel.get()))
-        {
-            hierarchy->SetSelectedObject(object);
-            break;
-        }
+    if (m_primaryHierarchy)
+        m_primaryHierarchy->SetSelectedObject(object);
     if (m_primaryProperties)
         m_primaryProperties->SetSelectedObject(object);
-    if (m_scene)
-        m_scene->SetSelectedObject(object);
+    if (Engine::Scene::Scene* scene = GetActiveDocumentScene())
+        scene->SetSelectedObject(object);
     MarkHistorySelectionChanged();
 }
 
@@ -1185,18 +1395,11 @@ void EditorState::CaptureHistorySelection(HistoryEntry& entry) const
 {
     entry.hasSelection = false;
     entry.selectionPath.clear();
-    if (!m_scene)
+    if (!m_scene || m_prefabDocumentFocused || !m_primaryHierarchy)
         return;
-    for (const auto& panel : m_panels)
-    {
-        const auto* hierarchy = dynamic_cast<const HierarchyView*>(panel.get());
-        if (!hierarchy)
-            continue;
-        Engine::Core::Object* selected = hierarchy->GetSelectedObject();
-        entry.hasSelection = selected &&
-            m_scene->TryGetObjectPath(selected, entry.selectionPath);
-        break;
-    }
+    Engine::Core::Object* selected = m_primaryHierarchy->GetSelectedObject();
+    entry.hasSelection = selected &&
+        m_scene->TryGetObjectPath(selected, entry.selectionPath);
 }
 
 void EditorState::MarkSceneEdited()

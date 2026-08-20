@@ -15,6 +15,8 @@
 #include "Core/Renderers/UIRenderer.h"
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <cstring>
 #include <stdexcept>
 #include <filesystem>
 #include <glm/glm.hpp>
@@ -52,6 +54,92 @@ namespace
                 return true;
         return false;
     }
+
+    float SrgbToLinear(uint8_t value)
+    {
+        const float color = static_cast<float>(value) / 255.f;
+        return color <= 0.04045f
+            ? color / 12.92f
+            : std::pow((color + 0.055f) / 1.055f, 2.4f);
+    }
+
+    glm::vec3 ReadEnvironmentPixel(const Engine::Components::Texture& texture,
+        uint32_t x, uint32_t y)
+    {
+        const size_t index = static_cast<size_t>(y) * texture.GetWidth() + x;
+        const std::vector<uint8_t>& pixels = texture.GetPixels();
+        if (texture.GetFormat() == Engine::Graphics::GraphicsTextureFormat::Rgba32Float)
+        {
+            glm::vec3 value{};
+            std::memcpy(&value.x, pixels.data() + index * 16, sizeof(float));
+            std::memcpy(&value.y, pixels.data() + index * 16 + 4, sizeof(float));
+            std::memcpy(&value.z, pixels.data() + index * 16 + 8, sizeof(float));
+            return glm::max(value, glm::vec3(0.f));
+        }
+        const uint8_t* source = pixels.data() + index * 4;
+        if (texture.IsSrgb())
+            return { SrgbToLinear(source[0]), SrgbToLinear(source[1]),
+                SrgbToLinear(source[2]) };
+        return glm::vec3(source[0], source[1], source[2]) / 255.f;
+    }
+
+    std::array<float, 9> SphericalHarmonicBasis(const glm::vec3& direction)
+    {
+        return {
+            0.282095f,
+            0.488603f * direction.y,
+            0.488603f * direction.z,
+            0.488603f * direction.x,
+            1.092548f * direction.x * direction.y,
+            1.092548f * direction.y * direction.z,
+            0.315392f * (3.f * direction.z * direction.z - 1.f),
+            1.092548f * direction.x * direction.z,
+            0.546274f * (direction.x * direction.x - direction.y * direction.y)
+        };
+    }
+
+    std::array<glm::vec4, 9> ProjectEnvironment(
+        const Engine::Components::Texture& texture)
+    {
+        std::array<glm::vec4, 9> coefficients{};
+        if (!texture.HasPixels() || !texture.GetWidth() || !texture.GetHeight())
+            return coefficients;
+
+        const uint32_t stepX = std::max(1u, texture.GetWidth() / 256u);
+        const uint32_t stepY = std::max(1u, texture.GetHeight() / 128u);
+        constexpr float pi = 3.14159265358979323846f;
+        float accumulatedWeight = 0.f;
+        for (uint32_t y = 0; y < texture.GetHeight(); y += stepY)
+        {
+            const float v = (static_cast<float>(y) + 0.5f) /
+                static_cast<float>(texture.GetHeight());
+            const float polar = v * pi;
+            const float sinPolar = std::sin(polar);
+            for (uint32_t x = 0; x < texture.GetWidth(); x += stepX)
+            {
+                const float u = (static_cast<float>(x) + 0.5f) /
+                    static_cast<float>(texture.GetWidth());
+                const float azimuth = (u - 0.5f) * 2.f * pi;
+                const glm::vec3 direction(
+                    sinPolar * std::cos(azimuth),
+                    std::cos(polar),
+                    sinPolar * std::sin(azimuth));
+                const glm::vec3 radiance = ReadEnvironmentPixel(texture, x, y);
+                const auto basis = SphericalHarmonicBasis(direction);
+                for (size_t coefficient = 0; coefficient < basis.size(); ++coefficient)
+                    coefficients[coefficient] +=
+                        glm::vec4(radiance * basis[coefficient] * sinPolar, 0.f);
+                accumulatedWeight += sinPolar;
+            }
+        }
+        if (accumulatedWeight > 0.f)
+        {
+            const float solidAngleScale = 4.f * pi / accumulatedWeight;
+            for (glm::vec4& coefficient : coefficients)
+                coefficient *= solidAngleScale;
+        }
+        return coefficients;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -85,6 +173,10 @@ struct ObjectGPUData
     glm::vec4 textureUvSets0;
     glm::vec4 textureUvSets1;
     glm::vec4 skinParams; // palette offset, joint count, reserved, reserved
+    glm::vec4 environmentParams; // intensity, rotation radians, diffuse, reflections
+    glm::vec4 environmentSH[9]; // RGB radiance coefficients
+    glm::vec4 reflectionEnvironmentParams; // exposure scale, rotation, custom enabled, reserved
+    glm::vec4 reflectionEnvironmentSH[9];
 };
 
 // Constant buffer for grid rendering
@@ -108,7 +200,7 @@ struct SkyboxCBData
 };
 
 static_assert(sizeof(DrawCBData) == 16, "Draw constants must remain small");
-static_assert(sizeof(ObjectGPUData) == 320, "Object buffer layout must match Object.hlsl");
+static_assert(sizeof(ObjectGPUData) == 640, "Object buffer layout must match Object.hlsl");
 static_assert(sizeof(Engine::Model::LightData) == 48,
     "Light buffer layout must match Object.hlsl");
 static_assert(sizeof(GridCBData) == 128, "Grid constant-buffer layout must match Grid.hlsl");
@@ -286,6 +378,32 @@ const Engine::Components::Texture* Scene::ResolveSkyboxTexture()
 const Engine::Components::Texture* Scene::GetSkyboxPreviewTexture()
 {
     return ResolveSkyboxTexture();
+}
+
+void Scene::UpdateEnvironmentLighting(const Engine::Components::Texture* texture)
+{
+    const std::string path = texture ? texture->GetFilePath() : std::string{};
+    if (path == m_environmentLightingPath)
+        return;
+
+    m_environmentLightingPath = path;
+    m_environmentSH = texture
+        ? ProjectEnvironment(*texture)
+        : std::array<glm::vec4, 9>{};
+}
+
+const std::array<glm::vec4, 9>* Scene::ResolveReflectionEnvironment(
+    const Engine::Components::Material& material)
+{
+    if (!material.useCustomReflectionEnvironment ||
+        !material.reflectionEnvironmentMap ||
+        !material.reflectionEnvironmentMap->HasPixels())
+        return nullptr;
+    const std::string& path = material.reflectionEnvironmentMap->GetFilePath();
+    const auto [entry, inserted] = m_materialEnvironmentSH.try_emplace(path);
+    if (inserted)
+        entry->second = ProjectEnvironment(*material.reflectionEnvironmentMap);
+    return &entry->second;
 }
 
 // ---------------------------------------------------------------------------
@@ -668,12 +786,16 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         const bool forceUnlitMode =
             settings.renderMode == Engine::Model::SceneRenderMode::Unlit;
 
-    if (const Engine::Components::Texture* skybox = ResolveSkyboxTexture();
-        skybox && skybox->GetGraphicsTexture() && m_skyboxPipeline)
+    const Engine::Components::Texture* skybox = ResolveSkyboxTexture();
+    UpdateEnvironmentLighting(skybox);
+    if (skybox && skybox->GetGraphicsTexture() && m_skyboxPipeline)
     {
         SkyboxCBData skyboxData{};
         skyboxData.invVP = glm::inverse(proj * view);
-        skyboxData.displayParams.x = m_editorMode2D ? 1.f : 0.f;
+        skyboxData.displayParams = {
+            m_editorMode2D ? 1.f : 0.f,
+            std::exp2(settings.hdriExposure),
+            glm::radians(settings.hdriRotation), 0.f };
         memcpy(m_skyboxCBMapped, &skyboxData, sizeof(skyboxData));
         context->SetPipeline(m_skyboxPipeline.get());
         context->SetConstantBuffer(0, m_skyboxConstantBuffer.get(), 0);
@@ -771,6 +893,15 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         UINT64 offset = static_cast<UINT64>(slot) * kCBStride;
 
         ObjectGPUData objectData{};
+        if (settings.hdriLightingEnabled && skybox)
+        {
+            objectData.environmentParams = {
+                std::max(0.f, settings.hdriIntensity) *
+                    std::exp2(std::clamp(settings.hdriExposure, -16.f, 16.f)),
+                glm::radians(settings.hdriRotation), 1.f, 1.f };
+            std::copy(m_environmentSH.begin(), m_environmentSH.end(),
+                objectData.environmentSH);
+        }
         objectData.mvp = proj * view * world;
         objectData.world = world;
         objectData.spriteUvRect = { 0.f, 0.f, 1.f, 1.f };
@@ -849,6 +980,17 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 mat->heightScale, mat->heightMinSteps,
                 mat->heightMaxSteps, 0.f
             };
+            objectData.environmentParams.z = mat->environmentDiffuseStrength;
+            objectData.environmentParams.w = mat->reflectionStrength;
+            if (const auto* reflectionSH = ResolveReflectionEnvironment(*mat))
+            {
+                objectData.reflectionEnvironmentParams = {
+                    std::exp2(std::clamp(mat->reflectionEnvironmentExposure,
+                        -16.f, 16.f)),
+                    glm::radians(mat->reflectionEnvironmentRotation), 1.f, 0.f };
+                std::copy(reflectionSH->begin(), reflectionSH->end(),
+                    objectData.reflectionEnvironmentSH);
+            }
             objectData.textureUvSets0 = { static_cast<float>(mat->baseColorUvSet),
                 static_cast<float>(mat->metallicRoughnessUvSet), static_cast<float>(mat->normalUvSet),
                 static_cast<float>(mat->occlusionUvSet) };

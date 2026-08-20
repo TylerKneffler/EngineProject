@@ -17,6 +17,12 @@ Material::Material()
     RegisterField("shininess", shininess);
     RegisterField("metallicFactor", metallicFactor);
     RegisterField("roughnessFactor", roughnessFactor);
+    RegisterField("environmentDiffuseStrength", environmentDiffuseStrength);
+    RegisterField("reflectionStrength", reflectionStrength);
+    RegisterField("useCustomReflectionEnvironment", useCustomReflectionEnvironment);
+    RegisterField("reflectionEnvironmentTexture", reflectionEnvironmentTexture);
+    RegisterField("reflectionEnvironmentExposure", reflectionEnvironmentExposure);
+    RegisterField("reflectionEnvironmentRotation", reflectionEnvironmentRotation);
     RegisterField("baseColorAlpha", baseColorAlpha);
     RegisterField("alphaCutoff", alphaCutoff);
     RegisterField("normalScale", normalScale);
@@ -79,6 +85,11 @@ bool Material::LoadFromFile(const std::string& path)
         heightTexture.reset();
         occlusionTexture.reset();
         emissiveTexture.reset();
+        reflectionEnvironmentMap.reset();
+        useCustomReflectionEnvironment = false;
+        reflectionEnvironmentTexture.clear();
+        reflectionEnvironmentExposure = 0.f;
+        reflectionEnvironmentRotation = 0.f;
         diffuseColor = from3(root["baseColor"], diffuseColor);
         ambientColor = from3(root["ambientColor"], ambientColor);
         specularColor = from3(root["specularColor"], specularColor);
@@ -86,6 +97,11 @@ bool Material::LoadFromFile(const std::string& path)
         if (root.Has("shininess")) shininess = root["shininess"].AsFloat();
         if (root.Has("metallic")) metallicFactor = root["metallic"].AsFloat();
         if (root.Has("roughness")) roughnessFactor = root["roughness"].AsFloat();
+        if (root.Has("environmentDiffuseStrength")) environmentDiffuseStrength = root["environmentDiffuseStrength"].AsFloat();
+        if (root.Has("reflectionStrength")) reflectionStrength = root["reflectionStrength"].AsFloat();
+        if (root.Has("useCustomReflectionEnvironment")) useCustomReflectionEnvironment = root["useCustomReflectionEnvironment"].AsBool();
+        if (root.Has("reflectionEnvironmentExposure")) reflectionEnvironmentExposure = root["reflectionEnvironmentExposure"].AsFloat();
+        if (root.Has("reflectionEnvironmentRotation")) reflectionEnvironmentRotation = root["reflectionEnvironmentRotation"].AsFloat();
         if (root.Has("baseColorAlpha")) baseColorAlpha = root["baseColorAlpha"].AsFloat();
         if (root.Has("alphaMode")) alphaMode = root["alphaMode"].AsString();
         if (root.Has("alphaCutoff")) alphaCutoff = root["alphaCutoff"].AsFloat();
@@ -114,6 +130,8 @@ bool Material::LoadFromFile(const std::string& path)
             ResolveTexturePath(path, root["occlusionTexture"].AsString()));
         if (root.Has("emissiveTexture")) SetEmissiveTexture(
             ResolveTexturePath(path, root["emissiveTexture"].AsString()));
+        if (root.Has("reflectionEnvironmentTexture")) SetReflectionEnvironmentTexture(
+            ResolveTexturePath(path, root["reflectionEnvironmentTexture"].AsString()));
         Validate();
         m_filePath = path;
         return true;
@@ -135,6 +153,12 @@ bool Material::SaveToFile(const std::string& path) const
     root.Set("shininess", JsonValue(shininess));
     root.Set("metallic", JsonValue(metallicFactor));
     root.Set("roughness", JsonValue(roughnessFactor));
+    root.Set("environmentDiffuseStrength", JsonValue(environmentDiffuseStrength));
+    root.Set("reflectionStrength", JsonValue(reflectionStrength));
+    root.Set("useCustomReflectionEnvironment", JsonValue(useCustomReflectionEnvironment));
+    root.Set("reflectionEnvironmentTexture", JsonValue(reflectionEnvironmentTexture));
+    root.Set("reflectionEnvironmentExposure", JsonValue(reflectionEnvironmentExposure));
+    root.Set("reflectionEnvironmentRotation", JsonValue(reflectionEnvironmentRotation));
     root.Set("baseColorAlpha", JsonValue(baseColorAlpha));
     root.Set("alphaMode", JsonValue(alphaMode));
     root.Set("alphaCutoff", JsonValue(alphaCutoff));
@@ -199,13 +223,27 @@ void Material::SetEmissiveTexture(const std::string& path)
     emissiveTexture = path.empty() ? nullptr : Texture::Acquire(path, true);
 }
 
+void Material::SetReflectionEnvironmentTexture(const std::string& path)
+{
+    reflectionEnvironmentTexture = path;
+    reflectionEnvironmentMap = path.empty() ? nullptr : Texture::Acquire(path, false);
+}
+
 void Material::PrepareTextures(IGraphicsProvider* graphicsProvider)
 {
+    if (!reflectionEnvironmentTexture.empty() &&
+        (!reflectionEnvironmentMap ||
+            reflectionEnvironmentMap->GetFilePath() != reflectionEnvironmentTexture))
+        SetReflectionEnvironmentTexture(reflectionEnvironmentTexture);
     for (const auto& texture : {
         baseColorTexture, metallicRoughnessTexture, normalTexture,
         heightTexture, occlusionTexture, emissiveTexture })
         if (texture)
             texture->Prepare(graphicsProvider);
+    // Per-material environments are projected to spherical harmonics on the
+    // CPU and do not need a second full-resolution GPU upload.
+    if (reflectionEnvironmentMap)
+        reflectionEnvironmentMap->Load();
 }
 
 MaterialAlphaMode Material::GetAlphaMode() const
@@ -227,6 +265,10 @@ void Material::Validate()
 {
     metallicFactor = std::clamp(metallicFactor, 0.f, 1.f);
     roughnessFactor = std::clamp(roughnessFactor, 0.045f, 1.f);
+    environmentDiffuseStrength = std::clamp(environmentDiffuseStrength, 0.f, 4.f);
+    reflectionStrength = std::clamp(reflectionStrength, 0.f, 4.f);
+    reflectionEnvironmentExposure = std::clamp(
+        reflectionEnvironmentExposure, -16.f, 16.f);
     baseColorAlpha = std::clamp(baseColorAlpha, 0.f, 1.f);
     alphaCutoff = std::clamp(alphaCutoff, 0.f, 1.f);
     normalScale = std::max(normalScale, 0.f);
@@ -258,6 +300,7 @@ Material::JsonValue Material::Serialize() const
     value.Set("heightTexture", JsonValue(TexturePath(heightTexture)));
     value.Set("occlusionTexture", JsonValue(TexturePath(occlusionTexture)));
     value.Set("emissiveTexture", JsonValue(TexturePath(emissiveTexture)));
+    value.Set("reflectionEnvironmentTexture", JsonValue(reflectionEnvironmentTexture));
     return value;
 }
 
@@ -278,6 +321,8 @@ void Material::Deserialize(const JsonValue& value)
         SetOcclusionTexture(value["occlusionTexture"].AsString());
     if (value.Has("emissiveTexture"))
         SetEmissiveTexture(value["emissiveTexture"].AsString());
+    if (value.Has("reflectionEnvironmentTexture"))
+        SetReflectionEnvironmentTexture(value["reflectionEnvironmentTexture"].AsString());
     Validate();
 }
 }

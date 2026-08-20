@@ -2,8 +2,10 @@
 #include "pch.h"
 #include <functional>
 #include "View/IEditorPanel.h"
+#include "Engine/Editor/Core/View/Templates/Assets/AssetPreviewCache.h"
 
 namespace Engine::Core { class Object; }
+namespace Engine::Scene { class Scene; }
 
 namespace Engine::Editor
 {
@@ -25,7 +27,7 @@ public:
     ~AssetsExplorerView() = default;
 
     // Initializes the view with the path to the Assets directory
-    void Init(const std::string& assetsPath);
+    void Init(const std::string& assetsPath, Engine::Scene::Scene* scene = nullptr);
 
     // Defines the package-neutral asset file tree.
     void DrawPanel(IEditorUi& ui) override;
@@ -34,6 +36,8 @@ public:
     std::function<void(const std::string&)> OnSceneRequested;
     std::function<void(const std::string&)> OnPrefabRequested;
     std::function<void(const std::string&)> OnSelectionChanged;
+    std::function<void(const std::string&, const std::string&)> OnAssetRenamed;
+    std::function<void(const std::string&)> OnAssetContentsChanged;
     std::function<void(Engine::Core::Object*, const std::string&)> OnPrefabCreated;
 
     void SetSelectedPath(const std::string& path) { m_selectedPath = path; }
@@ -46,6 +50,10 @@ private:
     void CreateFolder();
     void CreateScript();
     void CommitScriptRename();
+    void CommitAssetRename();
+    bool MoveAssetPath(const std::string& sourcePath,
+        const std::string& destinationDirectory, std::string* movedPath = nullptr);
+    bool DeleteAssetPath(const std::string& path);
 
     // Opens a file with the system's default application (unless it's a scene file)
     void OpenFile(const std::string& filePath);
@@ -53,6 +61,8 @@ private:
     void SelectPath(const std::string& path);
 
     std::string m_assetsPath;
+    Engine::Scene::Scene* m_scene = nullptr;
+    AssetPreviewCache m_previewCache;
     std::string m_currentDirectory;
     std::string m_selectedPath;
     char m_search[256]{};
@@ -60,6 +70,10 @@ private:
     std::string m_scriptBasePath;
     bool m_renamingScript = false;
     bool m_focusScriptName = false;
+    std::string m_renamePath;
+    char m_renameName[256]{};
+    bool m_renamingAsset = false;
+    bool m_focusAssetRename = false;
     std::string m_error;
 };
 }

@@ -108,13 +108,15 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
                 
                 // Check if this is an image file for preview
                 bool isImageFile = false;
+                bool isEnvironmentImage = false;
                 if (!stringValue.empty())
                 {
                     std::string ext = stringValue.substr(stringValue.find_last_of('.') + 1);
                     std::transform(ext.begin(), ext.end(), ext.begin(),
                         [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-                    isImageFile = (ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "bmp" || 
-                                  ext == "tga" || ext == "dds" || ext == "hdr");
+                    isEnvironmentImage = ext == "hdr" || ext == "exr";
+                    isImageFile = (ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "bmp" ||
+                                  ext == "tga" || ext == "dds" || isEnvironmentImage);
                 }
                 
                 // Show preview image if available and not editing
@@ -144,7 +146,8 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
                         else
                         {
                             // Load texture from file
-                            previewTexture = Engine::Components::Texture::Acquire(stringValue);
+                            previewTexture = Engine::Components::Texture::Acquire(
+                                stringValue, !isEnvironmentImage);
                             if (previewTexture && previewTexture->Load())
                             {
                                 s_texturePreviewCache[stringValue] = previewTexture;
@@ -179,7 +182,10 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
                         }
                         const float previewHeight = previewWidth / aspectRatio;
                         
-                        ui.DrawImage(textureHandle, previewWidth, previewHeight);
+                        if (isEnvironmentImage)
+                            ui.DrawCircularImage(textureHandle, previewWidth);
+                        else
+                            ui.DrawImage(textureHandle, previewWidth, previewHeight);
                         
                         // When image is clicked, enter editing mode
                         if (ui.IsItemClicked())

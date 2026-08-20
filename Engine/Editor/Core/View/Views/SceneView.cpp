@@ -57,6 +57,12 @@ void SceneView::Init(void* device,
 // ---------------------------------------------------------------------------
 void SceneView::DrawPanel(IEditorUi& ui)
 {
+    if (m_focusOnNextDraw)
+    {
+        ui.FocusWindow(m_title.c_str());
+        m_focusOnNextDraw = false;
+    }
+
     const bool mode2D = m_scene && m_scene->IsEditorMode2D();
     SetClearColor(mode2D ? 0.28f : 0.0f,
         mode2D ? 0.30f : 0.0f,
@@ -71,6 +77,8 @@ void SceneView::DrawPanel(IEditorUi& ui)
         ui.EndWindow();
         return;
     }
+    if (ui.DeleteShortcutPressed() && OnDeleteSelectionRequested)
+        OnDeleteSelectionRequested();
 
     float panDX = 0.f, panDY = 0.f;
     float orbitDX = 0.f, orbitDY = 0.f;

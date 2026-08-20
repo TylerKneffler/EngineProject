@@ -8,6 +8,8 @@
 #include "Engine/Editor/GameBuildManager.h"
 #include "Engine/Editor/HotReload/EditorHotReload.h"
 #include "Engine/Editor/ProjectLauncher.h"
+#include "Engine/Editor/Core/View/Views/SceneView.h"
+#include "Engine/Editor/Core/View/Views/GameView.h"
 #include "Engine/Editor/UI/IEditorUiBackend.h"
 #include "Engine/Editor/Core/Importers/ModelImporter.h"
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
@@ -17,6 +19,7 @@
 #endif
 #include <filesystem>
 #include <fstream>
+#include <unordered_set>
 #include <shellapi.h>
 
 // Fallback for IntelliSense
@@ -434,8 +437,7 @@ int WINAPI wWinMain(
         // Update window title
         const std::string title = std::string("Engine Editor - ") +
             editorState->GetActiveDocumentName() +
-            (engineDevelopmentMode ? " - Engine Sandbox" : "") +
-            (editorState->HasUnsavedChanges() ? " *" : "");
+            (engineDevelopmentMode ? " - Engine Sandbox" : "");
         if (title != displayedWindowTitle)
         {
             displayedWindowTitle = title;
@@ -447,9 +449,27 @@ int WINAPI wWinMain(
         {
             renderer->Clear(projectSettings.clearColor.r, projectSettings.clearColor.g, projectSettings.clearColor.b);
 
-            // Scene and Game views share this camera-independent snapshot.
-            // Each view still performs its own camera matrices and sorting.
-            scene->PrepareRenderFrame();
+            // Prepare render data for every scene that will render this frame.
+            // Prefab edit opens its own scene-backed viewport, so relying on
+            // the main scene alone can leave prefab views with stale/missing
+            // draw state.
+            std::unordered_set<Engine::Scene::Scene*> preparedScenes;
+            for (auto& panel : editorState->GetPanels())
+            {
+                if (!panel || !panel->NeedsRender() || !panel->IsOpen())
+                    continue;
+                if (auto* sceneView = dynamic_cast<Engine::Editor::SceneView*>(panel.get()))
+                {
+                    if (Engine::Scene::Scene* panelScene = sceneView->GetScene())
+                        if (preparedScenes.insert(panelScene).second)
+                            panelScene->PrepareRenderFrame();
+                    continue;
+                }
+                if (auto* gameView = dynamic_cast<Engine::Editor::GameView*>(panel.get()))
+                    if (Engine::Scene::Scene* panelScene = gameView->GetScene())
+                        if (preparedScenes.insert(panelScene).second)
+                            panelScene->PrepareRenderFrame();
+            }
 
             // Render 3D panels
             for (auto& panel : editorState->GetPanels())

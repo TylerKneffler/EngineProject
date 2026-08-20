@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Scene xmlns:components="urn:engine-components" version="1">
+  <settings showGrid="false" gridHalfSize="10" gridCellSize="1" gridOpacity="0.25" gridFadeDistance="80" skyboxTexture="Engine/Core/Assets/Textures/Skyboxes/editor-default-sky.png" renderMode="0" sceneViewUiOverlay="false" hdriLightingEnabled="true" hdriIntensity="1.5" hdriExposure="0" hdriRotation="0">
+    <gridColor><item>0.3</item><item>0.3</item><item>0.35</item></gridColor>
+    <gridOriginColor><item>0.4</item><item>0.5</item><item>0.8</item></gridOriginColor>
+    <ambientColor><item>0</item><item>0</item><item>0</item></ambientColor>
+  </settings>
+  <objects>
+    <item name="HDRI Camera" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>2.2</item><item>-9</item></Transform.position>
+        <Transform.rotation><item>0.08</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Camera Camera.active="true" Camera.useTransformRotation="true" Camera.fov="50" Camera.near="0.01" Camera.far="100" Camera.orthographic="false" Camera.orthographicSize="5">
+          <Camera.target><item>0</item><item>1</item><item>0</item></Camera.target>
+          <Camera.up><item>0</item><item>1</item><item>0</item></Camera.up>
+        </components:Camera>
+      </components>
+      <children />
+    </item>
+    <item name="Reflection Floor" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>-0.35</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>9</item><item>0.25</item><item>5</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/cube.obj" />
+        <components:Material Material.metallicFactor="0.8" Material.roughnessFactor="0.22" Material.environmentDiffuseStrength="0.2" Material.reflectionStrength="1.35">
+          <Material.diffuse><item>0.16</item><item>0.18</item><item>0.22</item></Material.diffuse>
+          <Material.ambient><item>0</item><item>0</item><item>0</item></Material.ambient>
+          <Material.specular><item>1</item><item>1</item><item>1</item></Material.specular>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Matte Dielectric" enabled="true">
+      <transform>
+        <Transform.position><item>-3.2</item><item>1</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/sphere.obj" />
+        <components:Material Material.metallicFactor="0" Material.roughnessFactor="0.9" Material.environmentDiffuseStrength="1" Material.reflectionStrength="1">
+          <Material.diffuse><item>0.8</item><item>0.22</item><item>0.12</item></Material.diffuse>
+          <Material.ambient><item>0</item><item>0</item><item>0</item></Material.ambient>
+          <Material.specular><item>1</item><item>1</item><item>1</item></Material.specular>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Polished Metal - Scene Reflections" enabled="true">
+      <transform>
+        <Transform.position><item>-1.1</item><item>1</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/sphere.obj" />
+        <components:Material Material.metallicFactor="1" Material.roughnessFactor="0.12" Material.environmentDiffuseStrength="1" Material.reflectionStrength="1.25" Material.useCustomReflectionEnvironment="false">
+          <Material.diffuse><item>0.72</item><item>0.76</item><item>0.82</item></Material.diffuse>
+          <Material.ambient><item>0</item><item>0</item><item>0</item></Material.ambient>
+          <Material.specular><item>1</item><item>1</item><item>1</item></Material.specular>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Polished Metal - River Alcove Override" enabled="true">
+      <transform>
+        <Transform.position><item>1.1</item><item>1</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/sphere.obj" />
+        <components:Material Material.metallicFactor="1" Material.roughnessFactor="0.12" Material.environmentDiffuseStrength="1" Material.reflectionStrength="1.25" Material.useCustomReflectionEnvironment="true" Material.reflectionEnvironmentTexture="Engine/Core/Assets/HDRI/river_alcove_4k.exr" Material.reflectionEnvironmentExposure="0" Material.reflectionEnvironmentRotation="0">
+          <Material.diffuse><item>0.72</item><item>0.76</item><item>0.82</item></Material.diffuse>
+          <Material.ambient><item>0</item><item>0</item><item>0</item></Material.ambient>
+          <Material.specular><item>1</item><item>1</item><item>1</item></Material.specular>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Glossy Dielectric" enabled="true">
+      <transform>
+        <Transform.position><item>3.2</item><item>1</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/sphere.obj" />
+        <components:Material Material.metallicFactor="0" Material.roughnessFactor="0.08" Material.environmentDiffuseStrength="0.7" Material.reflectionStrength="2">
+          <Material.diffuse><item>0.08</item><item>0.32</item><item>0.76</item></Material.diffuse>
+          <Material.ambient><item>0</item><item>0</item><item>0</item></Material.ambient>
+          <Material.specular><item>1</item><item>1</item><item>1</item></Material.specular>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+  </objects>
+</Scene>

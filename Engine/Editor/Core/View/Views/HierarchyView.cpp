@@ -59,6 +59,16 @@ bool CanMoveInPrefabContext(Engine::Scene::Scene* scene, Engine::Core::Object* o
 }
 }
 
+void HierarchyView::RequestDeleteSelectedObject()
+{
+    if (!m_selectedObject)
+        return;
+    if (Engine::Core::Object* prefabRoot = m_selectedObject->GetPrefabInstanceRoot())
+        m_pendingDelete = prefabRoot;
+    else
+        m_pendingDelete = m_selectedObject;
+}
+
 void HierarchyView::DrawPanel(IEditorUi& ui)
 {
     const bool windowVisible = ui.BeginWindow(m_title.c_str(), &m_open);
@@ -71,8 +81,10 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
     if (!m_scene) { ui.DisabledLabel("No scene loaded"); ui.EndWindow(); return; }
     const bool copyRequested = ui.CopyShortcutPressed();
     const bool pasteRequested = ui.PasteShortcutPressed();
+    const bool deleteRequested = ui.DeleteShortcutPressed();
     if (copyRequested) CopySelection();
     if (pasteRequested) PasteClipboard();
+    if (deleteRequested) RequestDeleteSelectedObject();
     m_dragObservedThisFrame = false;
     m_dropObservedThisFrame = false;
     const bool worldOpen = ui.TreeNode(
@@ -408,6 +420,8 @@ void HierarchyView::DrawObjectNode(
             m_pendingPrefabAction = PendingPrefabAction::Revert;
         if (prefabMenu.unpackRequested)
             m_pendingPrefabAction = PendingPrefabAction::Unpack;
+        if (prefabMenu.deleteRequested)
+            m_pendingDelete = prefabRoot;
         if (m_pendingPrefabAction != PendingPrefabAction::None)
             m_pendingPrefabRoot = prefabRoot;
     }

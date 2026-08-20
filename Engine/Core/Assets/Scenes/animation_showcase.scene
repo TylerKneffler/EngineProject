@@ -1,46 +1,171 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Scene xmlns:components="urn:engine-components">
-  <version>1</version>
-  <settings>
-    <showGrid>true</showGrid><gridHalfSize>20</gridHalfSize><gridCellSize>1</gridCellSize>
-    <gridOpacity>0.35</gridOpacity><gridFadeDistance>80</gridFadeDistance>
-    <gridColor><item>0.35</item><item>0.35</item><item>0.4</item></gridColor>
-    <gridOriginColor><item>0.3</item><item>0.55</item><item>0.9</item></gridOriginColor>
-    <ambientColor><item>0.09</item><item>0.1</item><item>0.14</item></ambientColor>
-    <skyboxTexture>Assets/Textures/Skyboxes/editor-default-sky.png</skyboxTexture>
+<Scene xmlns:components="urn:engine-components" version="1">
+  <settings showGrid="true" gridHalfSize="20" gridCellSize="1" gridOpacity="0.35" gridFadeDistance="80" skyboxTexture="Assets/Textures/Skyboxes/editor-default-sky.png">
+    <gridColor>
+      <item>0.35</item>
+      <item>0.35</item>
+      <item>0.4</item>
+    </gridColor>
+    <gridOriginColor>
+      <item>0.3</item>
+      <item>0.55</item>
+      <item>0.9</item>
+    </gridOriginColor>
+    <ambientColor>
+      <item>0.09</item>
+      <item>0.1</item>
+      <item>0.14</item>
+    </ambientColor>
   </settings>
   <objects>
-    <item>
-      <name>Animation Camera</name><enabled>true</enabled>
+    <item name="Animation Camera" enabled="true">
       <transform>
-        <Transform.position><item>0</item><item>2.2</item><item>-6.5</item></Transform.position>
-        <Transform.rotation><item>0.2</item><item>0</item><item>0</item></Transform.rotation>
-        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+        <Transform.position>
+          <item>0</item>
+          <item>2.2</item>
+          <item>-6.5</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0.2</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
       </transform>
-      <components><components:Camera><Camera.active>true</Camera.active><Camera.useTransformRotation>true</Camera.useTransformRotation><Camera.fov>55</Camera.fov><Camera.near>0.01</Camera.near><Camera.far>150</Camera.far><Camera.orthographic>false</Camera.orthographic><Camera.orthographicSize>5</Camera.orthographicSize><Camera.target><item>0</item><item>1</item><item>0</item></Camera.target><Camera.up><item>0</item><item>1</item><item>0</item></Camera.up></components:Camera></components>
+      <components>
+        <components:Camera Camera.active="true" Camera.useTransformRotation="true" Camera.fov="55" Camera.near="0.01" Camera.far="150" Camera.orthographic="false" Camera.orthographicSize="5">
+          <Camera.target>
+            <item>0</item>
+            <item>1</item>
+            <item>0</item>
+          </Camera.target>
+          <Camera.up>
+            <item>0</item>
+            <item>1</item>
+            <item>0</item>
+          </Camera.up>
+        </components:Camera>
+      </components>
       <children />
     </item>
-    <item>
-      <name>Animation Key Light</name><enabled>true</enabled>
-      <transform><Transform.position><item>-2.5</item><item>4</item><item>-2</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform>
-      <components><components:Light><Light.lightType>0</Light.lightType><Light.color><item>1</item><item>0.78</item><item>0.55</item></Light.color><Light.intensity>7</Light.intensity><Light.range>12</Light.range><Light.falloff>1.8</Light.falloff><Light.baked>false</Light.baked></components:Light></components><children />
+    <item name="Animation Key Light" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>-2.5</item>
+          <item>4</item>
+          <item>-2</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Light Light.lightType="0" Light.intensity="7" Light.range="12" Light.falloff="1.8" Light.baked="false">
+          <Light.color>
+            <item>1</item>
+            <item>0.78</item>
+            <item>0.55</item>
+          </Light.color>
+        </components:Light>
+      </components>
+      <children />
     </item>
-    <item>
-      <name>Animation Fill Light</name><enabled>true</enabled>
-      <transform><Transform.position><item>3</item><item>2</item><item>-1</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform>
-      <components><components:Light><Light.lightType>0</Light.lightType><Light.color><item>0.3</item><item>0.55</item><item>1</item></Light.color><Light.intensity>4</Light.intensity><Light.range>10</Light.range><Light.falloff>2</Light.falloff><Light.baked>false</Light.baked></components:Light></components><children />
+    <item name="Animation Fill Light" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>3</item>
+          <item>2</item>
+          <item>-1</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Light Light.lightType="0" Light.intensity="4" Light.range="10" Light.falloff="2" Light.baked="false">
+          <Light.color>
+            <item>0.3</item>
+            <item>0.55</item>
+            <item>1</item>
+          </Light.color>
+        </components:Light>
+      </components>
+      <children />
     </item>
-    <item>
-      <prefab>Assets/Fox/Fox.prefab</prefab><enabled>true</enabled>
-      <transform><Transform.position><item>-1.25</item><item>0</item><item>0</item></Transform.position><Transform.rotation><item>0</item><item>3.14159</item><item>0</item></Transform.rotation><Transform.scale><item>0.045</item><item>0.045</item><item>0.045</item></Transform.scale></transform>
+    <item prefab="Assets/Fox/Fox.prefab" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>-1.25</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>3.14159</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>0.045</item>
+          <item>0.045</item>
+          <item>0.045</item>
+        </Transform.scale>
+      </transform>
     </item>
-    <item>
-      <prefab>Assets/Prefabs/Cube.prefab</prefab><enabled>true</enabled>
-      <transform><Transform.position><item>2.25</item><item>1</item><item>0</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1.25</item><item>1.25</item><item>1.25</item></Transform.scale></transform>
+    <item prefab="Assets/Prefabs/Cube.prefab" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>2.25</item>
+          <item>1</item>
+          <item>0</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1.25</item>
+          <item>1.25</item>
+          <item>1.25</item>
+        </Transform.scale>
+      </transform>
     </item>
-    <item>
-      <prefab>Assets/Prefabs/Slime.prefab</prefab><enabled>true</enabled>
-      <transform><Transform.position><item>0.75</item><item>0.9</item><item>0.5</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform>
+    <item prefab="Assets/Prefabs/Slime.prefab" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>0.75</item>
+          <item>0.9</item>
+          <item>0.5</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
     </item>
   </objects>
 </Scene>

@@ -1,37 +1,26 @@
 <?xml version="1.0"?>
-<Prefab xmlns:components="urn:engine-components">
-  <version>1</version>
-  <type>prefab</type>
-  <object>
-    <name>Fox</name>
-    <enabled>true</enabled>
+<Prefab xmlns:components="urn:engine-components" version="1" type="prefab">
+  <object name="Fox" enabled="true">
     <transform>
-      <position>
+      <Transform.position>
         <item>0</item>
         <item>0</item>
         <item>0</item>
-      </position>
-      <rotation>
+      </Transform.position>
+      <Transform.rotation>
         <item>0</item>
         <item>0</item>
         <item>0</item>
-      </rotation>
-      <scale>
-        <item>1</item>
-        <item>1</item>
-        <item>1</item>
-      </scale>
+      </Transform.rotation>
+      <Transform.scale>
+        <item>0.01</item>
+        <item>0.01</item>
+        <item>0.01</item>
+      </Transform.scale>
     </transform>
     <components>
-      <components:Skeleton>
-        <Skeleton.hierarchyRootReference>
-          <expectedType>ModelNode</expectedType>
-          <objectPath></objectPath>
-          <objectName></objectName>
-          <componentType></componentType>
-          <componentIndex>0</componentIndex>
-        </Skeleton.hierarchyRootReference>
-        <Skeleton.skinIndex>0</Skeleton.skinIndex>
+      <components:Skeleton Skeleton.showBones="true" Skeleton.skinIndex="0">
+        <Skeleton.modelReference expectedType="Model" objectPath="" objectName="" componentType="" componentIndex="0" />
         <Skeleton.joints>
           <item>2</item>
           <item>3</item>
@@ -493,15 +482,9 @@
           </item>
         </Skeleton.inverseBindMatrices>
       </components:Skeleton>
-      <components:Animation>
-        <Animation.name>Survey</Animation.name>
-        <Animation.duration>3.41667</Animation.duration>
+      <components:Animation Animation.name="Survey" Animation.duration="3.41667">
         <Animation.channels>
-          <item>
-            <node>8</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="8" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -922,11 +905,7 @@
               <item>0.851734</item>
             </values>
           </item>
-          <item>
-            <node>7</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="7" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -1347,11 +1326,7 @@
               <item>0.933312</item>
             </values>
           </item>
-          <item>
-            <node>11</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="11" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -1772,11 +1747,7 @@
               <item>0.948904</item>
             </values>
           </item>
-          <item>
-            <node>10</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="10" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -2197,11 +2168,7 @@
               <item>0.961625</item>
             </values>
           </item>
-          <item>
-            <node>9</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="9" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -2622,11 +2589,7 @@
               <item>0.634791</item>
             </values>
           </item>
-          <item>
-            <node>14</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="14" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -3047,11 +3010,7 @@
               <item>0.949054</item>
             </values>
           </item>
-          <item>
-            <node>13</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="13" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -3472,11 +3431,7 @@
               <item>0.961643</item>
             </values>
           </item>
-          <item>
-            <node>12</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="12" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -3897,11 +3852,7 @@
               <item>0.634968</item>
             </values>
           </item>
-          <item>
-            <node>6</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="6" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -4322,11 +4273,7 @@
               <item>0.999687</item>
             </values>
           </item>
-          <item>
-            <node>5</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="5" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -4747,11 +4694,7 @@
               <item>0.807099</item>
             </values>
           </item>
-          <item>
-            <node>17</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="17" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -5172,11 +5115,7 @@
               <item>0.997224</item>
             </values>
           </item>
-          <item>
-            <node>16</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="16" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -5597,11 +5536,7 @@
               <item>0.996119</item>
             </values>
           </item>
-          <item>
-            <node>15</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="15" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -6022,11 +5957,7 @@
               <item>0.189133</item>
             </values>
           </item>
-          <item>
-            <node>20</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="20" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -6447,11 +6378,7 @@
               <item>0.852368</item>
             </values>
           </item>
-          <item>
-            <node>19</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="19" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -6872,11 +6799,7 @@
               <item>0.88789</item>
             </values>
           </item>
-          <item>
-            <node>18</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="18" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -7297,11 +7220,7 @@
               <item>-0.268884</item>
             </values>
           </item>
-          <item>
-            <node>24</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="24" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -7722,11 +7641,7 @@
               <item>0.852367</item>
             </values>
           </item>
-          <item>
-            <node>23</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="23" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -8147,11 +8062,7 @@
               <item>0.88789</item>
             </values>
           </item>
-          <item>
-            <node>22</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="22" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -8572,11 +8483,7 @@
               <item>-0.268884</item>
             </values>
           </item>
-          <item>
-            <node>4</node>
-            <path>0</path>
-            <interpolation>0</interpolation>
-            <width>3</width>
+          <item node="4" path="0" interpolation="0" width="3">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -8914,11 +8821,7 @@
               <item>41.0586</item>
             </values>
           </item>
-          <item>
-            <node>4</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="4" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -9341,15 +9244,9 @@
           </item>
         </Animation.channels>
       </components:Animation>
-      <components:Animation>
-        <Animation.name>Walk</Animation.name>
-        <Animation.duration>0.708333</Animation.duration>
+      <components:Animation Animation.name="Walk" Animation.duration="0.708333">
         <Animation.channels>
-          <item>
-            <node>8</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="8" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -9445,11 +9342,7 @@
               <item>0.918854</item>
             </values>
           </item>
-          <item>
-            <node>7</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="7" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -9545,11 +9438,7 @@
               <item>0.95355</item>
             </values>
           </item>
-          <item>
-            <node>11</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="11" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -9645,11 +9534,7 @@
               <item>0.848939</item>
             </values>
           </item>
-          <item>
-            <node>10</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="10" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -9745,11 +9630,7 @@
               <item>0.999995</item>
             </values>
           </item>
-          <item>
-            <node>9</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="9" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -9845,11 +9726,7 @@
               <item>0.523101</item>
             </values>
           </item>
-          <item>
-            <node>14</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="14" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -9945,11 +9822,7 @@
               <item>0.975708</item>
             </values>
           </item>
-          <item>
-            <node>13</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="13" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -10045,11 +9918,7 @@
               <item>0.999997</item>
             </values>
           </item>
-          <item>
-            <node>12</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="12" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -10145,11 +10014,7 @@
               <item>0.87008</item>
             </values>
           </item>
-          <item>
-            <node>6</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="6" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -10245,11 +10110,7 @@
               <item>0.99963</item>
             </values>
           </item>
-          <item>
-            <node>5</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="5" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -10345,11 +10206,7 @@
               <item>0.805987</item>
             </values>
           </item>
-          <item>
-            <node>17</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="17" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -10445,11 +10302,7 @@
               <item>0.975041</item>
             </values>
           </item>
-          <item>
-            <node>16</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="16" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -10545,11 +10398,7 @@
               <item>0.989345</item>
             </values>
           </item>
-          <item>
-            <node>15</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="15" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -10645,11 +10494,7 @@
               <item>0.429306</item>
             </values>
           </item>
-          <item>
-            <node>20</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="20" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -10745,11 +10590,7 @@
               <item>0.844526</item>
             </values>
           </item>
-          <item>
-            <node>19</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="19" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -10845,11 +10686,7 @@
               <item>0.95435</item>
             </values>
           </item>
-          <item>
-            <node>18</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="18" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -10945,11 +10782,7 @@
               <item>-0.0562106</item>
             </values>
           </item>
-          <item>
-            <node>24</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="24" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -11045,11 +10878,7 @@
               <item>0.942006</item>
             </values>
           </item>
-          <item>
-            <node>23</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="23" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -11145,11 +10974,7 @@
               <item>0.815199</item>
             </values>
           </item>
-          <item>
-            <node>22</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="22" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -11245,11 +11070,7 @@
               <item>0.567642</item>
             </values>
           </item>
-          <item>
-            <node>4</node>
-            <path>0</path>
-            <interpolation>0</interpolation>
-            <width>3</width>
+          <item node="4" path="0" interpolation="0" width="3">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -11327,11 +11148,7 @@
               <item>40.0513</item>
             </values>
           </item>
-          <item>
-            <node>4</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="4" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -11429,15 +11246,9 @@
           </item>
         </Animation.channels>
       </components:Animation>
-      <components:Animation>
-        <Animation.name>Run</Animation.name>
-        <Animation.duration>1.15833</Animation.duration>
+      <components:Animation Animation.name="Run" Animation.duration="1.15833">
         <Animation.channels>
-          <item>
-            <node>8</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="8" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -11568,11 +11379,7 @@
               <item>0.982743</item>
             </values>
           </item>
-          <item>
-            <node>7</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="7" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -11703,11 +11510,7 @@
               <item>0.995535</item>
             </values>
           </item>
-          <item>
-            <node>11</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="11" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -11838,11 +11641,7 @@
               <item>0.923255</item>
             </values>
           </item>
-          <item>
-            <node>10</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="10" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -11973,11 +11772,7 @@
               <item>0.754034</item>
             </values>
           </item>
-          <item>
-            <node>9</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="9" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -12108,11 +11903,7 @@
               <item>0.5313</item>
             </values>
           </item>
-          <item>
-            <node>14</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="14" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -12243,11 +12034,7 @@
               <item>0.740861</item>
             </values>
           </item>
-          <item>
-            <node>13</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="13" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -12378,11 +12165,7 @@
               <item>0.702094</item>
             </values>
           </item>
-          <item>
-            <node>12</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="12" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -12513,11 +12296,7 @@
               <item>-0.0956984</item>
             </values>
           </item>
-          <item>
-            <node>6</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="6" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -12648,11 +12427,7 @@
               <item>0.967029</item>
             </values>
           </item>
-          <item>
-            <node>5</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="5" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -12783,11 +12558,7 @@
               <item>0.827297</item>
             </values>
           </item>
-          <item>
-            <node>17</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="17" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -12918,11 +12689,7 @@
               <item>0.977898</item>
             </values>
           </item>
-          <item>
-            <node>16</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="16" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -13053,11 +12820,7 @@
               <item>0.968381</item>
             </values>
           </item>
-          <item>
-            <node>15</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="15" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -13188,11 +12951,7 @@
               <item>0.182277</item>
             </values>
           </item>
-          <item>
-            <node>20</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="20" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -13323,11 +13082,7 @@
               <item>0.729725</item>
             </values>
           </item>
-          <item>
-            <node>19</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="19" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -13458,11 +13213,7 @@
               <item>0.76546</item>
             </values>
           </item>
-          <item>
-            <node>18</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="18" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -13593,11 +13344,7 @@
               <item>-0.494848</item>
             </values>
           </item>
-          <item>
-            <node>24</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="24" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -13728,11 +13475,7 @@
               <item>0.824642</item>
             </values>
           </item>
-          <item>
-            <node>23</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="23" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -13863,11 +13606,7 @@
               <item>0.836994</item>
             </values>
           </item>
-          <item>
-            <node>22</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="22" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -13998,11 +13737,7 @@
               <item>0.716212</item>
             </values>
           </item>
-          <item>
-            <node>4</node>
-            <path>0</path>
-            <interpolation>0</interpolation>
-            <width>3</width>
+          <item node="4" path="0" interpolation="0" width="3">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -14108,11 +13843,7 @@
               <item>33.7702</item>
             </values>
           </item>
-          <item>
-            <node>4</node>
-            <path>1</path>
-            <interpolation>0</interpolation>
-            <width>4</width>
+          <item node="4" path="1" interpolation="0" width="4">
             <times>
               <item>0</item>
               <item>0.0416667</item>
@@ -14245,33 +13976,44 @@
           </item>
         </Animation.channels>
       </components:Animation>
-      <components:AnimationManager>
-        <AnimationManager.hierarchyRootReference>
-          <expectedType>ModelNode</expectedType>
-          <objectPath></objectPath>
-          <objectName></objectName>
-          <componentType></componentType>
-          <componentIndex>0</componentIndex>
-        </AnimationManager.hierarchyRootReference>
-        <AnimationManager.animationSourceReference>
-          <expectedType>Animation</expectedType>
-          <objectPath></objectPath>
-          <objectName></objectName>
-          <componentType></componentType>
-          <componentIndex>0</componentIndex>
-        </AnimationManager.animationSourceReference>
-        <AnimationManager.clip>Run</AnimationManager.clip>
-        <AnimationManager.playing>true</AnimationManager.playing>
-        <AnimationManager.looping>true</AnimationManager.looping>
-        <AnimationManager.speed>1</AnimationManager.speed>
-        <AnimationManager.time>0.664064</AnimationManager.time>
+      <components:AnimationManager AnimationManager.clip="Run" AnimationManager.playing="true" AnimationManager.looping="true" AnimationManager.speed="1" AnimationManager.time="0.664064">
+        <AnimationManager.modelReference expectedType="Model" objectPath="" objectName="" componentType="" componentIndex="0" />
+        <AnimationManager.animationSourceReference expectedType="Animation" objectPath="" objectName="" componentType="" componentIndex="0" />
         <AnimationManager.layers />
       </components:AnimationManager>
+      <components:Model>
+        <Model.nodePaths>
+          <item>0</item>
+          <item>1</item>
+          <item>0.0</item>
+          <item>0.0.0</item>
+          <item>0.0.0.0</item>
+          <item>0.0.0.0.0</item>
+          <item>0.0.0.0.0.0</item>
+          <item>0.0.0.0.0.0.0</item>
+          <item>0.0.0.0.0.0.0.0</item>
+          <item>0.0.0.0.0.0.1</item>
+          <item>0.0.0.0.0.0.1.0</item>
+          <item>0.0.0.0.0.0.1.0.0</item>
+          <item>0.0.0.0.0.0.2</item>
+          <item>0.0.0.0.0.0.2.0</item>
+          <item>0.0.0.0.0.0.2.0.0</item>
+          <item>0.0.0.0.1</item>
+          <item>0.0.0.0.1.0</item>
+          <item>0.0.0.0.1.0.0</item>
+          <item>0.0.0.0.2</item>
+          <item>0.0.0.0.2.0</item>
+          <item>0.0.0.0.2.0.0</item>
+          <item>0.0.0.0.2.0.0.0</item>
+          <item>0.0.0.0.3</item>
+          <item>0.0.0.0.3.0</item>
+          <item>0.0.0.0.3.0.0</item>
+          <item>0.0.0.0.3.0.0.0</item>
+        </Model.nodePaths>
+      </components:Model>
     </components>
     <children>
-      <item>
-        <name>root</name>
-        <enabled>true</enabled>
+      <item name="root" enabled="true">
         <transform>
           <Transform.position>
             <item>0</item>
@@ -14289,15 +14031,9 @@
             <item>1</item>
           </Transform.scale>
         </transform>
-        <components>
-          <components:ModelNode>
-            <ModelNode.nodeIndex>0</ModelNode.nodeIndex>
-          </components:ModelNode>
-        </components>
+        <components />
         <children>
-          <item>
-            <name>_rootJoint</name>
-            <enabled>true</enabled>
+          <item name="_rootJoint" enabled="true">
             <transform>
               <Transform.position>
                 <item>0</item>
@@ -14315,15 +14051,9 @@
                 <item>1</item>
               </Transform.scale>
             </transform>
-            <components>
-              <components:ModelNode>
-                <ModelNode.nodeIndex>2</ModelNode.nodeIndex>
-              </components:ModelNode>
-            </components>
+            <components />
             <children>
-              <item>
-                <name>b_Root_00</name>
-                <enabled>true</enabled>
+              <item name="b_Root_00" enabled="true">
                 <transform>
                   <Transform.position>
                     <item>0</item>
@@ -14341,15 +14071,9 @@
                     <item>1</item>
                   </Transform.scale>
                 </transform>
-                <components>
-                  <components:ModelNode>
-                    <ModelNode.nodeIndex>3</ModelNode.nodeIndex>
-                  </components:ModelNode>
-                </components>
+                <components />
                 <children>
-                  <item>
-                    <name>b_Hip_01</name>
-                    <enabled>true</enabled>
+                  <item name="b_Hip_01" enabled="true">
                     <transform>
                       <Transform.position>
                         <item>2.52069e-06</item>
@@ -14367,15 +14091,9 @@
                         <item>1</item>
                       </Transform.scale>
                     </transform>
-                    <components>
-                      <components:ModelNode>
-                        <ModelNode.nodeIndex>4</ModelNode.nodeIndex>
-                      </components:ModelNode>
-                    </components>
+                    <components />
                     <children>
-                      <item>
-                        <name>b_Spine01_02</name>
-                        <enabled>true</enabled>
+                      <item name="b_Spine01_02" enabled="true">
                         <transform>
                           <Transform.position>
                             <item>12.8506</item>
@@ -14393,15 +14111,9 @@
                             <item>1</item>
                           </Transform.scale>
                         </transform>
-                        <components>
-                          <components:ModelNode>
-                            <ModelNode.nodeIndex>5</ModelNode.nodeIndex>
-                          </components:ModelNode>
-                        </components>
+                        <components />
                         <children>
-                          <item>
-                            <name>b_Spine02_03</name>
-                            <enabled>true</enabled>
+                          <item name="b_Spine02_03" enabled="true">
                             <transform>
                               <Transform.position>
                                 <item>21.6558</item>
@@ -14419,15 +14131,9 @@
                                 <item>1</item>
                               </Transform.scale>
                             </transform>
-                            <components>
-                              <components:ModelNode>
-                                <ModelNode.nodeIndex>6</ModelNode.nodeIndex>
-                              </components:ModelNode>
-                            </components>
+                            <components />
                             <children>
-                              <item>
-                                <name>b_Neck_04</name>
-                                <enabled>true</enabled>
+                              <item name="b_Neck_04" enabled="true">
                                 <transform>
                                   <Transform.position>
                                     <item>25.6491</item>
@@ -14445,15 +14151,9 @@
                                     <item>1</item>
                                   </Transform.scale>
                                 </transform>
-                                <components>
-                                  <components:ModelNode>
-                                    <ModelNode.nodeIndex>7</ModelNode.nodeIndex>
-                                  </components:ModelNode>
-                                </components>
+                                <components />
                                 <children>
-                                  <item>
-                                    <name>b_Head_05</name>
-                                    <enabled>true</enabled>
+                                  <item name="b_Head_05" enabled="true">
                                     <transform>
                                       <Transform.position>
                                         <item>13.377</item>
@@ -14471,18 +14171,12 @@
                                         <item>1</item>
                                       </Transform.scale>
                                     </transform>
-                                    <components>
-                                      <components:ModelNode>
-                                        <ModelNode.nodeIndex>8</ModelNode.nodeIndex>
-                                      </components:ModelNode>
-                                    </components>
+                                    <components />
                                     <children />
                                   </item>
                                 </children>
                               </item>
-                              <item>
-                                <name>b_RightUpperArm_06</name>
-                                <enabled>true</enabled>
+                              <item name="b_RightUpperArm_06" enabled="true">
                                 <transform>
                                   <Transform.position>
                                     <item>18.6779</item>
@@ -14500,15 +14194,9 @@
                                     <item>1</item>
                                   </Transform.scale>
                                 </transform>
-                                <components>
-                                  <components:ModelNode>
-                                    <ModelNode.nodeIndex>9</ModelNode.nodeIndex>
-                                  </components:ModelNode>
-                                </components>
+                                <components />
                                 <children>
-                                  <item>
-                                    <name>b_RightForeArm_07</name>
-                                    <enabled>true</enabled>
+                                  <item name="b_RightForeArm_07" enabled="true">
                                     <transform>
                                       <Transform.position>
                                         <item>23.0451</item>
@@ -14526,15 +14214,9 @@
                                         <item>1</item>
                                       </Transform.scale>
                                     </transform>
-                                    <components>
-                                      <components:ModelNode>
-                                        <ModelNode.nodeIndex>10</ModelNode.nodeIndex>
-                                      </components:ModelNode>
-                                    </components>
+                                    <components />
                                     <children>
-                                      <item>
-                                        <name>b_RightHand_08</name>
-                                        <enabled>true</enabled>
+                                      <item name="b_RightHand_08" enabled="true">
                                         <transform>
                                           <Transform.position>
                                             <item>19.3501</item>
@@ -14552,20 +14234,14 @@
                                             <item>1</item>
                                           </Transform.scale>
                                         </transform>
-                                        <components>
-                                          <components:ModelNode>
-                                            <ModelNode.nodeIndex>11</ModelNode.nodeIndex>
-                                          </components:ModelNode>
-                                        </components>
+                                        <components />
                                         <children />
                                       </item>
                                     </children>
                                   </item>
                                 </children>
                               </item>
-                              <item>
-                                <name>b_LeftUpperArm_09</name>
-                                <enabled>true</enabled>
+                              <item name="b_LeftUpperArm_09" enabled="true">
                                 <transform>
                                   <Transform.position>
                                     <item>18.6779</item>
@@ -14583,15 +14259,9 @@
                                     <item>1</item>
                                   </Transform.scale>
                                 </transform>
-                                <components>
-                                  <components:ModelNode>
-                                    <ModelNode.nodeIndex>12</ModelNode.nodeIndex>
-                                  </components:ModelNode>
-                                </components>
+                                <components />
                                 <children>
-                                  <item>
-                                    <name>b_LeftForeArm_010</name>
-                                    <enabled>true</enabled>
+                                  <item name="b_LeftForeArm_010" enabled="true">
                                     <transform>
                                       <Transform.position>
                                         <item>23.0451</item>
@@ -14609,15 +14279,9 @@
                                         <item>1</item>
                                       </Transform.scale>
                                     </transform>
-                                    <components>
-                                      <components:ModelNode>
-                                        <ModelNode.nodeIndex>13</ModelNode.nodeIndex>
-                                      </components:ModelNode>
-                                    </components>
+                                    <components />
                                     <children>
-                                      <item>
-                                        <name>b_LeftHand_011</name>
-                                        <enabled>true</enabled>
+                                      <item name="b_LeftHand_011" enabled="true">
                                         <transform>
                                           <Transform.position>
                                             <item>19.3501</item>
@@ -14635,11 +14299,7 @@
                                             <item>1</item>
                                           </Transform.scale>
                                         </transform>
-                                        <components>
-                                          <components:ModelNode>
-                                            <ModelNode.nodeIndex>14</ModelNode.nodeIndex>
-                                          </components:ModelNode>
-                                        </components>
+                                        <components />
                                         <children />
                                       </item>
                                     </children>
@@ -14650,9 +14310,7 @@
                           </item>
                         </children>
                       </item>
-                      <item>
-                        <name>b_Tail01_012</name>
-                        <enabled>true</enabled>
+                      <item name="b_Tail01_012" enabled="true">
                         <transform>
                           <Transform.position>
                             <item>4.26038</item>
@@ -14670,15 +14328,9 @@
                             <item>1</item>
                           </Transform.scale>
                         </transform>
-                        <components>
-                          <components:ModelNode>
-                            <ModelNode.nodeIndex>15</ModelNode.nodeIndex>
-                          </components:ModelNode>
-                        </components>
+                        <components />
                         <children>
-                          <item>
-                            <name>b_Tail02_013</name>
-                            <enabled>true</enabled>
+                          <item name="b_Tail02_013" enabled="true">
                             <transform>
                               <Transform.position>
                                 <item>12.4119</item>
@@ -14696,15 +14348,9 @@
                                 <item>1</item>
                               </Transform.scale>
                             </transform>
-                            <components>
-                              <components:ModelNode>
-                                <ModelNode.nodeIndex>16</ModelNode.nodeIndex>
-                              </components:ModelNode>
-                            </components>
+                            <components />
                             <children>
-                              <item>
-                                <name>b_Tail03_014</name>
-                                <enabled>true</enabled>
+                              <item name="b_Tail03_014" enabled="true">
                                 <transform>
                                   <Transform.position>
                                     <item>24.2403</item>
@@ -14722,20 +14368,14 @@
                                     <item>1</item>
                                   </Transform.scale>
                                 </transform>
-                                <components>
-                                  <components:ModelNode>
-                                    <ModelNode.nodeIndex>17</ModelNode.nodeIndex>
-                                  </components:ModelNode>
-                                </components>
+                                <components />
                                 <children />
                               </item>
                             </children>
                           </item>
                         </children>
                       </item>
-                      <item>
-                        <name>b_LeftLeg01_015</name>
-                        <enabled>true</enabled>
+                      <item name="b_LeftLeg01_015" enabled="true">
                         <transform>
                           <Transform.position>
                             <item>4.81377</item>
@@ -14753,15 +14393,9 @@
                             <item>1</item>
                           </Transform.scale>
                         </transform>
-                        <components>
-                          <components:ModelNode>
-                            <ModelNode.nodeIndex>18</ModelNode.nodeIndex>
-                          </components:ModelNode>
-                        </components>
+                        <components />
                         <children>
-                          <item>
-                            <name>b_LeftLeg02_016</name>
-                            <enabled>true</enabled>
+                          <item name="b_LeftLeg02_016" enabled="true">
                             <transform>
                               <Transform.position>
                                 <item>18.9442</item>
@@ -14779,15 +14413,9 @@
                                 <item>1</item>
                               </Transform.scale>
                             </transform>
-                            <components>
-                              <components:ModelNode>
-                                <ModelNode.nodeIndex>19</ModelNode.nodeIndex>
-                              </components:ModelNode>
-                            </components>
+                            <components />
                             <children>
-                              <item>
-                                <name>b_LeftFoot01_017</name>
-                                <enabled>true</enabled>
+                              <item name="b_LeftFoot01_017" enabled="true">
                                 <transform>
                                   <Transform.position>
                                     <item>17.9428</item>
@@ -14805,15 +14433,9 @@
                                     <item>1</item>
                                   </Transform.scale>
                                 </transform>
-                                <components>
-                                  <components:ModelNode>
-                                    <ModelNode.nodeIndex>20</ModelNode.nodeIndex>
-                                  </components:ModelNode>
-                                </components>
+                                <components />
                                 <children>
-                                  <item>
-                                    <name>b_LeftFoot02_018</name>
-                                    <enabled>true</enabled>
+                                  <item name="b_LeftFoot02_018" enabled="true">
                                     <transform>
                                       <Transform.position>
                                         <item>15.7799</item>
@@ -14831,11 +14453,7 @@
                                         <item>1</item>
                                       </Transform.scale>
                                     </transform>
-                                    <components>
-                                      <components:ModelNode>
-                                        <ModelNode.nodeIndex>21</ModelNode.nodeIndex>
-                                      </components:ModelNode>
-                                    </components>
+                                    <components />
                                     <children />
                                   </item>
                                 </children>
@@ -14844,9 +14462,7 @@
                           </item>
                         </children>
                       </item>
-                      <item>
-                        <name>b_RightLeg01_019</name>
-                        <enabled>true</enabled>
+                      <item name="b_RightLeg01_019" enabled="true">
                         <transform>
                           <Transform.position>
                             <item>4.81378</item>
@@ -14864,15 +14480,9 @@
                             <item>1</item>
                           </Transform.scale>
                         </transform>
-                        <components>
-                          <components:ModelNode>
-                            <ModelNode.nodeIndex>22</ModelNode.nodeIndex>
-                          </components:ModelNode>
-                        </components>
+                        <components />
                         <children>
-                          <item>
-                            <name>b_RightLeg02_020</name>
-                            <enabled>true</enabled>
+                          <item name="b_RightLeg02_020" enabled="true">
                             <transform>
                               <Transform.position>
                                 <item>18.9442</item>
@@ -14890,15 +14500,9 @@
                                 <item>1</item>
                               </Transform.scale>
                             </transform>
-                            <components>
-                              <components:ModelNode>
-                                <ModelNode.nodeIndex>23</ModelNode.nodeIndex>
-                              </components:ModelNode>
-                            </components>
+                            <components />
                             <children>
-                              <item>
-                                <name>b_RightFoot01_021</name>
-                                <enabled>true</enabled>
+                              <item name="b_RightFoot01_021" enabled="true">
                                 <transform>
                                   <Transform.position>
                                     <item>17.9428</item>
@@ -14916,15 +14520,9 @@
                                     <item>1</item>
                                   </Transform.scale>
                                 </transform>
-                                <components>
-                                  <components:ModelNode>
-                                    <ModelNode.nodeIndex>24</ModelNode.nodeIndex>
-                                  </components:ModelNode>
-                                </components>
+                                <components />
                                 <children>
-                                  <item>
-                                    <name>b_RightFoot02_022</name>
-                                    <enabled>true</enabled>
+                                  <item name="b_RightFoot02_022" enabled="true">
                                     <transform>
                                       <Transform.position>
                                         <item>15.7799</item>
@@ -14942,11 +14540,7 @@
                                         <item>1</item>
                                       </Transform.scale>
                                     </transform>
-                                    <components>
-                                      <components:ModelNode>
-                                        <ModelNode.nodeIndex>25</ModelNode.nodeIndex>
-                                      </components:ModelNode>
-                                    </components>
+                                    <components />
                                     <children />
                                   </item>
                                 </children>
@@ -14963,9 +14557,7 @@
           </item>
         </children>
       </item>
-      <item>
-        <name>fox</name>
-        <enabled>true</enabled>
+      <item name="fox" enabled="true">
         <transform>
           <Transform.position>
             <item>0</item>
@@ -14984,39 +14576,14 @@
           </Transform.scale>
         </transform>
         <components>
-          <components:ModelNode>
-            <ModelNode.nodeIndex>1</ModelNode.nodeIndex>
-          </components:ModelNode>
-          <components:Mesh>
-            <Mesh.file>C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/Fox/Meshes/fox1 1_1.mesh</Mesh.file>
-          </components:Mesh>
-          <components:SkinnedMesh>
-            <SkinnedMesh.meshReference>
-              <expectedType>Mesh</expectedType>
-              <objectPath></objectPath>
-              <objectName></objectName>
-              <componentType></componentType>
-              <componentIndex>0</componentIndex>
-            </SkinnedMesh.meshReference>
-            <SkinnedMesh.morphTargetsReference>
-              <expectedType>MorphTargets</expectedType>
-              <objectPath></objectPath>
-              <objectName></objectName>
-              <componentType></componentType>
-              <componentIndex>0</componentIndex>
-            </SkinnedMesh.morphTargetsReference>
-            <SkinnedMesh.skeletonReference>
-              <expectedType>Skeleton</expectedType>
-              <objectPath></objectPath>
-              <objectName></objectName>
-              <componentType></componentType>
-              <componentIndex>0</componentIndex>
-            </SkinnedMesh.skeletonReference>
-            <SkinnedMesh.skinIndex>0</SkinnedMesh.skinIndex>
+          <components:Mesh Mesh.file="C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/Fox/Meshes/fox1 1_1.mesh" />
+          <components:SkinnedMesh SkinnedMesh.skinIndex="0">
+            <SkinnedMesh.meshReference expectedType="Mesh" objectPath="" objectName="" componentType="" componentIndex="0" />
+            <SkinnedMesh.skeletonReference expectedType="Skeleton" objectPath="" objectName="" componentType="" componentIndex="0" />
             <SkinnedMesh.joints />
             <SkinnedMesh.weights />
           </components:SkinnedMesh>
-          <components:Material>
+          <components:Material Material.shininess="32" Material.metallicFactor="0" Material.roughnessFactor="0.58" Material.baseColorAlpha="1" Material.alphaCutoff="0.5" Material.normalScale="1" Material.heightScale="0.05" Material.heightMinSteps="8" Material.heightMaxSteps="32" Material.occlusionStrength="1" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque" Material.baseColorUvSet="0" Material.metallicRoughnessUvSet="0" Material.normalUvSet="0" Material.occlusionUvSet="0" Material.emissiveUvSet="0" Material.heightUvSet="0" Material.materialAsset="C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/Fox/Materials/fox_material 1.material" Material.baseColorTexture="C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/Fox/Textures/Texture 1 1.png" Material.metallicRoughnessTexture="" Material.normalTexture="" Material.heightTexture="" Material.occlusionTexture="" Material.emissiveTexture="">
             <Material.diffuse>
               <item>1</item>
               <item>1</item>
@@ -15032,37 +14599,11 @@
               <item>1</item>
               <item>1</item>
             </Material.specular>
-            <Material.shininess>32</Material.shininess>
-            <Material.metallicFactor>0</Material.metallicFactor>
-            <Material.roughnessFactor>0.58</Material.roughnessFactor>
-            <Material.baseColorAlpha>1</Material.baseColorAlpha>
-            <Material.alphaCutoff>0.5</Material.alphaCutoff>
-            <Material.normalScale>1</Material.normalScale>
-            <Material.heightScale>0.05</Material.heightScale>
-            <Material.heightMinSteps>8</Material.heightMinSteps>
-            <Material.heightMaxSteps>32</Material.heightMaxSteps>
-            <Material.occlusionStrength>1</Material.occlusionStrength>
-            <Material.doubleSided>false</Material.doubleSided>
-            <Material.unlit>false</Material.unlit>
-            <Material.alphaMode>Opaque</Material.alphaMode>
             <Material.emissiveColor>
               <item>0</item>
               <item>0</item>
               <item>0</item>
             </Material.emissiveColor>
-            <Material.baseColorUvSet>0</Material.baseColorUvSet>
-            <Material.metallicRoughnessUvSet>0</Material.metallicRoughnessUvSet>
-            <Material.normalUvSet>0</Material.normalUvSet>
-            <Material.occlusionUvSet>0</Material.occlusionUvSet>
-            <Material.emissiveUvSet>0</Material.emissiveUvSet>
-            <Material.heightUvSet>0</Material.heightUvSet>
-            <Material.materialAsset>C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/Fox/Materials/fox_material 1.material</Material.materialAsset>
-            <Material.baseColorTexture>C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/Fox/Textures/Texture 1 1.png</Material.baseColorTexture>
-            <Material.metallicRoughnessTexture></Material.metallicRoughnessTexture>
-            <Material.normalTexture></Material.normalTexture>
-            <Material.heightTexture></Material.heightTexture>
-            <Material.occlusionTexture></Material.occlusionTexture>
-            <Material.emissiveTexture></Material.emissiveTexture>
           </components:Material>
         </components>
         <children />

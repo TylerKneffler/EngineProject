@@ -1,12 +1,6 @@
-<?xml version="1.0"?>
-<Scene xmlns:components="urn:engine-components">
-  <version>1</version>
-  <settings>
-    <showGrid>true</showGrid>
-    <gridHalfSize>10</gridHalfSize>
-    <gridCellSize>1</gridCellSize>
-    <gridOpacity>0.32</gridOpacity>
-    <gridFadeDistance>80</gridFadeDistance>
+<?xml version="1.0" encoding="utf-8"?>
+<Scene xmlns:components="urn:engine-components" version="1">
+  <settings showGrid="true" gridHalfSize="10" gridCellSize="1" gridOpacity="0.32" gridFadeDistance="80" skyboxTexture="">
     <gridColor>
       <item>0.5</item>
       <item>0.5</item>
@@ -22,12 +16,9 @@
       <item>0.12</item>
       <item>0.12</item>
     </ambientColor>
-    <skyboxTexture></skyboxTexture>
   </settings>
   <objects>
-    <item>
-      <prefab>C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/Prefabs/Slime.prefab</prefab>
-      <enabled>true</enabled>
+    <item prefab="C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/Prefabs/Slime.prefab" enabled="true">
       <transform>
         <Transform.position>
           <item>0</item>
@@ -46,9 +37,7 @@
         </Transform.scale>
       </transform>
     </item>
-    <item>
-      <name>Camera</name>
-      <enabled>true</enabled>
+    <item name="Camera" enabled="true">
       <transform>
         <Transform.position>
           <item>0</item>
@@ -67,14 +56,7 @@
         </Transform.scale>
       </transform>
       <components>
-        <components:Camera>
-          <Camera.active>true</Camera.active>
-          <Camera.useTransformRotation>true</Camera.useTransformRotation>
-          <Camera.fov>60</Camera.fov>
-          <Camera.near>0.01</Camera.near>
-          <Camera.far>100</Camera.far>
-          <Camera.orthographic>true</Camera.orthographic>
-          <Camera.orthographicSize>5</Camera.orthographicSize>
+        <components:Camera Camera.active="true" Camera.useTransformRotation="true" Camera.fov="60" Camera.near="0.01" Camera.far="100" Camera.orthographic="true" Camera.orthographicSize="5">
           <Camera.target>
             <item>0</item>
             <item>0</item>

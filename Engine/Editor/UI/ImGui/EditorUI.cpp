@@ -17,6 +17,7 @@ void EditorUI::Render(PlayState playState)
     m_dockspace.Draw();
     m_mainMenu.Draw(*m_state, playState, m_gameBuildManager);
     m_panelHost.Draw(*m_state);
+    m_sceneLoadWarningPopup.Draw(*m_state);
     if (m_state->IsLoadingOverlayVisible())
     {
         ImGuiViewport* viewport = ImGui::GetMainViewport();

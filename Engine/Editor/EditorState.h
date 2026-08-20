@@ -53,11 +53,21 @@ public:
     {
         return m_hasUnsavedChanges || m_prefabHasUnsavedChanges;
     }
+    bool HasActiveDocumentUnsavedChanges() const
+    {
+        return m_prefabDocumentFocused && !m_activePrefabPath.empty()
+            ? m_prefabHasUnsavedChanges : m_hasUnsavedChanges;
+    }
     void SetHasUnsavedChanges(bool dirty) { m_hasUnsavedChanges = dirty; }
 
     void SaveScene();
     void SaveAll();
     void LoadScene(const std::string& path);
+    void RequestSceneLoad(const std::string& path);
+    bool ConfirmSceneLoad(bool saveCurrentScene);
+    void CancelSceneLoad();
+    bool HasPendingSceneLoadWarning() const { return m_showUnsavedWarning; }
+    const std::string& GetPendingSceneLoadPath() const { return m_sceneToLoad; }
     void OpenPrefabStage(const std::string& path);
     void ProcessPendingPrefabStageOpen();
     void ClosePrefabStage();
@@ -129,8 +139,11 @@ private:
     void ResetHistory(bool sceneIsSaved);
     void CommitPendingHistoryEdit();
     void TrimHistory();
-    void SaveMainScene();
+    bool SaveMainScene();
+    void LoadSceneNow(const std::string& path);
     void RemovePrefabPanels();
+    void SetPrefabDocumentFocused(bool focused);
+    Engine::Scene::Scene* GetActiveDocumentScene() const;
 
     // Core objects
     std::unique_ptr<::Engine::Core::Window> m_window;
@@ -143,11 +156,10 @@ private:
     // Panels
     std::vector<std::unique_ptr<IEditorPanel>> m_panels;
     ConsoleView* m_primaryConsole = nullptr;
+    HierarchyView* m_primaryHierarchy = nullptr;
     PropertiesView* m_primaryProperties = nullptr;
     AssetsExplorerView* m_primaryAssets = nullptr;
     SceneView* m_prefabSceneView = nullptr;
-    HierarchyView* m_prefabHierarchy = nullptr;
-    PropertiesView* m_prefabProperties = nullptr;
 
     // State
     Engine::Model::ProjectSettings m_projectSettings;

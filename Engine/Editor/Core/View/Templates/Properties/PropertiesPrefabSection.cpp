@@ -60,10 +60,10 @@ void PropertiesView::RevertSelectedPrefabOverrides()
 
 void PropertiesView::HandlePrefabMenu(const EditorUiPrefabMenuResult& menu)
 {
+    Engine::Core::Object* prefabRoot = m_selectedObject
+        ? m_selectedObject->GetPrefabInstanceRoot() : nullptr;
     if (menu.editRequested)
     {
-        Engine::Core::Object* prefabRoot = m_selectedObject
-            ? m_selectedObject->GetPrefabInstanceRoot() : nullptr;
         if (prefabRoot && prefabRoot->Prefab && OnPrefabRequested)
             OnPrefabRequested(prefabRoot->Prefab->GetPath());
     }
@@ -71,5 +71,16 @@ void PropertiesView::HandlePrefabMenu(const EditorUiPrefabMenuResult& menu)
     if (menu.applyAllRequested) ApplySelectedPrefabOverrides(true);
     if (menu.revertRequested) RevertSelectedPrefabOverrides();
     if (menu.unpackRequested) UnpackSelectedPrefab();
+    if (menu.deleteRequested && prefabRoot && m_scene)
+    {
+        const std::string prefabPath = prefabRoot->Prefab
+            ? prefabRoot->Prefab->GetPath() : std::string();
+        m_scene->RemoveObject(prefabRoot);
+        LogAssetDrop(prefabPath.empty()
+            ? "[Properties] Deleted prefab instance from scene."
+            : "[Properties] Deleted prefab instance from scene: " + prefabPath);
+        if (OnComponentsChanged)
+            OnComponentsChanged();
+    }
 }
 }

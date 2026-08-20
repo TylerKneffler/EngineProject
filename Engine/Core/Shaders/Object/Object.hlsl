@@ -25,6 +25,10 @@ struct ObjectData
     float4 textureUvSets0;
     float4 textureUvSets1;
     float4 skinParams;
+    float4 environmentParams;
+    float4 environmentSH[9];
+    float4 reflectionEnvironmentParams;
+    float4 reflectionEnvironmentSH[9];
 };
 
 struct SceneLightData
@@ -157,6 +161,70 @@ float GeometrySmith(float3 n, float3 v, float3 l, float roughness)
 float3 FresnelSchlick(float cosine, float3 f0)
 {
     return f0 + (1.0 - f0) * pow(saturate(1.0 - cosine), 5.0);
+}
+
+float3 RotateEnvironmentDirection(float3 direction, float radians)
+{
+    float sine = sin(-radians);
+    float cosine = cos(-radians);
+    direction.xz = float2(
+        cosine * direction.x - sine * direction.z,
+        sine * direction.x + cosine * direction.z);
+    return direction;
+}
+
+void EnvironmentBasis(float3 direction, out float basis[9])
+{
+    basis[0] = 0.282095;
+    basis[1] = 0.488603 * direction.y;
+    basis[2] = 0.488603 * direction.z;
+    basis[3] = 0.488603 * direction.x;
+    basis[4] = 1.092548 * direction.x * direction.y;
+    basis[5] = 1.092548 * direction.y * direction.z;
+    basis[6] = 0.315392 * (3.0 * direction.z * direction.z - 1.0);
+    basis[7] = 1.092548 * direction.x * direction.z;
+    basis[8] = 0.546274 * (direction.x * direction.x - direction.y * direction.y);
+}
+
+float3 EvaluateEnvironmentRadiance(ObjectData objectData, float3 direction)
+{
+    float basis[9];
+    EnvironmentBasis(RotateEnvironmentDirection(direction,
+        objectData.environmentParams.y), basis);
+    float3 radiance = 0.0;
+    [unroll]
+    for (uint coefficient = 0; coefficient < 9; ++coefficient)
+        radiance += objectData.environmentSH[coefficient].rgb * basis[coefficient];
+    return max(radiance, 0.0);
+}
+
+float3 EvaluateCustomReflectionRadiance(ObjectData objectData, float3 direction)
+{
+    float basis[9];
+    EnvironmentBasis(RotateEnvironmentDirection(direction,
+        objectData.reflectionEnvironmentParams.y), basis);
+    float3 radiance = 0.0;
+    [unroll]
+    for (uint coefficient = 0; coefficient < 9; ++coefficient)
+        radiance += objectData.reflectionEnvironmentSH[coefficient].rgb *
+            basis[coefficient];
+    return max(radiance, 0.0) * objectData.reflectionEnvironmentParams.x;
+}
+
+float3 EvaluateEnvironmentIrradiance(ObjectData objectData, float3 normal)
+{
+    float basis[9];
+    EnvironmentBasis(RotateEnvironmentDirection(normal,
+        objectData.environmentParams.y), basis);
+    const float bandScale[9] = {
+        PI, 2.0943951, 2.0943951, 2.0943951,
+        0.7853982, 0.7853982, 0.7853982, 0.7853982, 0.7853982 };
+    float3 irradiance = 0.0;
+    [unroll]
+    for (uint coefficient = 0; coefficient < 9; ++coefficient)
+        irradiance += objectData.environmentSH[coefficient].rgb *
+            basis[coefficient] * bandScale[coefficient];
+    return max(irradiance, 0.0);
 }
 
 float3 EvaluatePbrBrdf(
@@ -340,6 +408,36 @@ float4 PSMain(
     float3 f0 = lerp(float3(0.04, 0.04, 0.04), base.rgb, metallic);
     float3 ambient = objectData.ambientUnlit.rgb *
         (base.rgb * (1.0 - metallic) + f0 * 0.25) * occlusion;
+    float3 environment = 0.0;
+    if (objectData.environmentParams.x > 0.0 ||
+        objectData.reflectionEnvironmentParams.z > 0.5)
+    {
+        float3 diffuseEnvironment = 0.0;
+        if (objectData.environmentParams.x > 0.0)
+        {
+            float3 diffuseIrradiance = EvaluateEnvironmentIrradiance(objectData, n);
+            diffuseEnvironment = diffuseIrradiance * base.rgb *
+                (1.0 - metallic) / PI * objectData.environmentParams.z *
+                objectData.environmentParams.x;
+        }
+
+        float3 reflectionDirection = reflect(-v, n);
+        float3 roughReflectionDirection = normalize(lerp(
+            reflectionDirection, n, roughness * roughness));
+        float3 reflectedRadiance =
+            objectData.reflectionEnvironmentParams.z > 0.5
+                ? EvaluateCustomReflectionRadiance(
+                    objectData, roughReflectionDirection)
+                : EvaluateEnvironmentRadiance(
+                    objectData, roughReflectionDirection) *
+                    objectData.environmentParams.x;
+        float3 environmentFresnel = f0 + (max(1.0 - roughness, f0) - f0) *
+            pow(saturate(1.0 - dot(n, v)), 5.0);
+        float roughnessAttenuation = lerp(1.0, 0.25, roughness);
+        float3 specularEnvironment = reflectedRadiance * environmentFresnel *
+            roughnessAttenuation * objectData.environmentParams.w;
+        environment = (diffuseEnvironment + specularEnvironment) * occlusion;
+    }
     return EncodeOutput(
-        ambient + directLight + bakedDirect + emissive, base.a);
+        ambient + environment + directLight + bakedDirect + emissive, base.a);
 }

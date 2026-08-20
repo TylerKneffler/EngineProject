@@ -68,6 +68,10 @@ Engine::Serialization::JsonValue SerializeSceneSettings(const Engine::Model::Sce
     value.Set("gridOriginColor", Vec3ToJson(settings.gridOriginColor));
     value.Set("ambientColor", Vec3ToJson(settings.ambientColor));
     value.Set("skyboxTexture", Engine::Serialization::JsonValue(settings.skyboxTexture));
+    value.Set("hdriLightingEnabled", Engine::Serialization::JsonValue(settings.hdriLightingEnabled));
+    value.Set("hdriIntensity", Engine::Serialization::JsonValue(settings.hdriIntensity));
+    value.Set("hdriExposure", Engine::Serialization::JsonValue(settings.hdriExposure));
+    value.Set("hdriRotation", Engine::Serialization::JsonValue(settings.hdriRotation));
     value.Set("renderMode",
         Engine::Serialization::JsonValue(static_cast<int>(settings.renderMode)));
     value.Set("sceneViewUiOverlay",
@@ -99,6 +103,14 @@ void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engi
         settings.skyboxTexture = skyboxTexture->AsString();
     else
         settings.skyboxTexture.clear();
+    if (const auto* enabled = FindField(value, "hdriLightingEnabled"))
+        settings.hdriLightingEnabled = enabled->AsBool();
+    if (const auto* intensity = FindField(value, "hdriIntensity"))
+        settings.hdriIntensity = std::max(0.f, intensity->AsFloat());
+    if (const auto* exposure = FindField(value, "hdriExposure"))
+        settings.hdriExposure = std::clamp(exposure->AsFloat(), -16.f, 16.f);
+    if (const auto* rotation = FindField(value, "hdriRotation"))
+        settings.hdriRotation = rotation->AsFloat();
     if (const auto* renderMode = FindField(value, "renderMode"))
     {
         const int mode = renderMode->AsInt();

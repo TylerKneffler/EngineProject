@@ -3,6 +3,7 @@
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/AssetRecord.h"
 #include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Compoonents/Material.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Graphics/IGraphicsTexture.h"
 #include "Core/Rendering/Sprites/SpriteAnimationAsset.h"
@@ -205,6 +206,7 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
                     m_selectedPath = destination.string();
                     m_renameError.clear();
                     m_texturePreview.reset();
+                    m_previewCache.Invalidate(oldPath);
                     if (OnRenamed)
                         OnRenamed(oldPath, m_selectedPath);
                 }
@@ -262,21 +264,84 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
         ui.ColoredLabel(message.c_str(), { 1.f, 0.35f, 0.35f, 1.f });
     }
 
+    if (extension == ".material" || extension == ".mat")
+    {
+        ui.Separator();
+        ui.Label("Material Preview");
+        Engine::Graphics::IGraphicsProvider* graphics =
+            scene ? scene->GetGraphicsProvider() : nullptr;
+        if (void* handle = m_previewCache.Get(m_selectedPath, graphics))
+            ui.DrawCircularImage(handle, 192.f,
+                { 0.45f, 0.5f, 0.58f, 1.f });
+        else
+            ui.DisabledLabel("[Material preview unavailable]");
+
+        Engine::Components::Material material;
+        if (material.LoadFromFile(m_selectedPath))
+        {
+            bool changed = false;
+            changed |= ui.Checkbox("Custom Reflection Environment",
+                &material.useCustomReflectionEnvironment);
+            char environmentPath[512]{};
+            strncpy_s(environmentPath, sizeof(environmentPath),
+                material.reflectionEnvironmentTexture.c_str(), _TRUNCATE);
+            if (ui.InputText("Reflection HDRI", environmentPath,
+                sizeof(environmentPath)))
+            {
+                material.SetReflectionEnvironmentTexture(environmentPath);
+                changed = true;
+            }
+            changed |= ui.DragFloat("Reflection Strength",
+                &material.reflectionStrength, 0.02f, 0.f, 4.f);
+            changed |= ui.DragFloat("Reflection Exposure (EV)",
+                &material.reflectionEnvironmentExposure, 0.05f, -16.f, 16.f);
+            changed |= ui.DragFloat("Reflection Rotation",
+                &material.reflectionEnvironmentRotation, 0.5f, -360.f, 360.f);
+            if (changed)
+            {
+                material.Validate();
+                if (material.SaveToFile(m_selectedPath))
+                {
+                    m_previewCache.Invalidate(m_selectedPath);
+                    if (OnContentsChanged)
+                        OnContentsChanged(m_selectedPath);
+                }
+            }
+        }
+        return;
+    }
+
     if (IsTextureAssetExtension(extension))
     {
+        const bool environment = extension == ".hdr" || extension == ".exr";
         if (!m_texturePreview)
-        m_texturePreview = ::Engine::Components::Texture::Acquire(m_selectedPath, true);
+            m_texturePreview = ::Engine::Components::Texture::Acquire(
+                m_selectedPath, !environment);
         Engine::Graphics::IGraphicsProvider* graphics = scene ? scene->GetGraphicsProvider() : nullptr;
-        if (m_texturePreview && graphics)
+        if (m_texturePreview && graphics && !environment)
             m_texturePreview->Prepare(graphics);
-        void* handle = m_texturePreview && m_texturePreview->GetGraphicsTexture()
-            ? m_texturePreview->GetGraphicsTexture()->GetNativeHandle() : nullptr;
+        else if (m_texturePreview && environment)
+            m_texturePreview->Load();
+        void* handle = environment
+            ? m_previewCache.Get(m_selectedPath, graphics)
+            : (m_texturePreview && m_texturePreview->GetGraphicsTexture()
+                ? m_texturePreview->GetGraphicsTexture()->GetNativeHandle() : nullptr);
         if (handle)
         {
-            const float aspect = m_texturePreview->GetHeight() > 0
-                ? static_cast<float>(m_texturePreview->GetWidth()) /
-                    static_cast<float>(m_texturePreview->GetHeight()) : 1.f;
-            ui.DrawImage(handle, 192.f, 192.f / std::max(aspect, 0.1f));
+            if (environment)
+            {
+                ui.Separator();
+                ui.Label("HDRI Mirror Preview");
+                ui.DrawCircularImage(handle, 192.f,
+                    { 0.45f, 0.5f, 0.58f, 1.f });
+            }
+            else
+            {
+                const float aspect = m_texturePreview->GetHeight() > 0
+                    ? static_cast<float>(m_texturePreview->GetWidth()) /
+                        static_cast<float>(m_texturePreview->GetHeight()) : 1.f;
+                ui.DrawImage(handle, 192.f, 192.f / std::max(aspect, 0.1f));
+            }
             const std::string dimensions = std::to_string(m_texturePreview->GetWidth()) +
                 " x " + std::to_string(m_texturePreview->GetHeight());
             ui.ValueLabel("Dimensions", dimensions.c_str());

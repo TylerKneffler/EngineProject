@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include "AssetPreviewCache.h"
 
 namespace Engine::Scene { class Scene; }
 namespace Engine::Components { class Texture; }
@@ -33,5 +34,6 @@ private:
     std::string m_renameError;
     char m_nameEdit[512]{};
     std::shared_ptr<::Engine::Components::Texture> m_texturePreview;
+    AssetPreviewCache m_previewCache;
 };
 }

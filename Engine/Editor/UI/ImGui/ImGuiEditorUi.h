@@ -5,6 +5,8 @@
 
 namespace Engine::Editor
 {
+enum class EditorPanelDockArea;
+
 class ImGuiEditorUi final : public IEditorUi
 {
 public:
@@ -34,6 +36,7 @@ public:
     bool Selectable(const char*, bool, bool) override;
     EditorUiContextMenuResult ContextMenu(const void*,const char*,const char*,bool,const char*) override;
     EditorUiAssetCreateMenuResult AssetWindowContextMenu() override;
+    EditorUiAssetItemMenuResult AssetItemContextMenu(const void*) override;
     EditorUiTextEditResult RenameText(const char*,char*,size_t,bool) override;
     EditorUiPrefabMenuResult PrefabOverrideMenu(const void*,bool) override;
     bool BeginChild(const char*) override; void EndChild() override;
@@ -41,6 +44,7 @@ public:
     bool IsItemDoubleClicked() const override; bool IsWindowBackgroundClicked() const override;
     bool IsAnyItemActive() const override;
     bool CopyShortcutPressed() const override; bool PasteShortcutPressed() const override;
+    bool DeleteShortcutPressed() const override;
     bool BeginDragDropSource() override; void SetDragDropPayload(const char*,const void*,size_t) override; void EndDragDropSource() override;
     bool BeginDragDropTarget() override; const void* AcceptDragDropPayload(const char*,size_t*) override; void EndDragDropTarget() override;
     EditorUiDragDropPayloadResult InspectDragDropPayload(const char*) override;
@@ -60,12 +64,14 @@ public:
     bool Combo(const char*, int*, const char* const*, int) override;
     void Tooltip(const char*) override; void Progress(float, const char*) override;
     void DrawImage(void*, float, float) override;
+    void DrawCircularImage(void*, float, EditorUiColor) override;
     EditorUiViewportInput Viewport(void*, float, EditorUiColor) override;
     void DrawViewportLine(EditorUiVec2, EditorUiVec2, EditorUiColor, float) override;
     void DrawViewportTriangle(EditorUiVec2, EditorUiVec2, EditorUiVec2, EditorUiColor) override;
     void DrawViewportCircle(EditorUiVec2, float, EditorUiColor, bool, float) override;
     void DrawViewportText(EditorUiVec2, const char*, EditorUiColor) override;
     void FocusWindow(const char*) override;
+    void DockWindowToArea(const char* title, EditorPanelDockArea area);
 private:
     std::vector<unsigned char> m_dropResultPayload;
     std::unordered_map<const void*, bool> m_objectTreeOpen;

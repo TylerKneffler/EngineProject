@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "ImGuiEditorUi.h"
+#include "Engine/Editor/Core/View/IEditorPanel.h"
 #include "Engine/Editor/Core/PrimitiveObjectFactory.h"
 #include "Engine/Editor/Input/EditorKeyBindings.h"
 #include "imgui.h"
@@ -306,6 +307,19 @@ EditorUiAssetCreateMenuResult ImGuiEditorUi::AssetWindowContextMenu()
     }
     return result;
 }
+EditorUiAssetItemMenuResult ImGuiEditorUi::AssetItemContextMenu(const void* id)
+{
+    EditorUiAssetItemMenuResult result;
+    ImGui::PushID(id);
+    if(ImGui::BeginPopupContextItem("##assetItemContext"))
+    {
+        result.renameRequested=ImGui::MenuItem("Rename");
+        result.deleteRequested=ImGui::MenuItem("Delete");
+        ImGui::EndPopup();
+    }
+    ImGui::PopID();
+    return result;
+}
 EditorUiTextEditResult ImGuiEditorUi::RenameText(const char* label,char* buffer,size_t size,bool focus)
 {
     EditorUiTextEditResult result;
@@ -328,6 +342,7 @@ EditorUiPrefabMenuResult ImGuiEditorUi::PrefabOverrideMenu(const void* id,bool h
         ImGui::EndDisabled();
         ImGui::Separator();
         result.unpackRequested=ImGui::MenuItem("Unpack Prefab");
+        result.deleteRequested=ImGui::MenuItem("Delete From Scene");
         ImGui::EndPopup();
     }
     ImGui::PopID();
@@ -339,6 +354,12 @@ bool ImGuiEditorUi::IsItemDoubleClicked()const{return ImGui::IsItemHovered()&&Im
 bool ImGuiEditorUi::IsWindowBackgroundClicked()const{return ImGui::IsMouseClicked(ImGuiMouseButton_Left)&&ImGui::IsWindowHovered()&&!ImGui::IsAnyItemHovered();}
 bool ImGuiEditorUi::CopyShortcutPressed()const{return ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)&&EditorKeyBindings::Get().Pressed(EditorCommand::Copy);}
 bool ImGuiEditorUi::PasteShortcutPressed()const{return ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)&&EditorKeyBindings::Get().Pressed(EditorCommand::Paste);}
+bool ImGuiEditorUi::DeleteShortcutPressed()const
+{
+    if(!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))return false;
+    if(EditorKeyBindings::Get().IsCapturing()||ImGui::GetIO().WantTextInput)return false;
+    return ImGui::IsKeyPressed(ImGuiKey_Delete,false)||ImGui::IsKeyPressed(ImGuiKey_Backspace,false);
+}
 bool ImGuiEditorUi::BeginDragDropSource(){
     const ImVec2 minimum=ImGui::GetItemRectMin(),maximum=ImGui::GetItemRectMax();
     ImDrawList* rowDrawList=ImGui::GetWindowDrawList();
@@ -454,6 +475,19 @@ bool ImGuiEditorUi::Combo(const char*l,int*s,const char*const*i,int c){return Im
 void ImGuiEditorUi::Tooltip(const char*t){if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("%s",t);}
 void ImGuiEditorUi::Progress(float f,const char*o){ImGui::ProgressBar(f,{-1,0},o);}
 void ImGuiEditorUi::DrawImage(void*tex,float w,float h){ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(tex)),{w,h});}
+void ImGuiEditorUi::DrawCircularImage(void* tex,float diameter,EditorUiColor border)
+{
+    const ImVec2 minimum=ImGui::GetCursorScreenPos();
+    const ImVec2 maximum{minimum.x+diameter,minimum.y+diameter};
+    ImGui::InvisibleButton("##circularImage",{diameter,diameter});
+    ImDrawList* draw=ImGui::GetWindowDrawList();
+    const ImTextureID texture=static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(tex));
+    draw->AddImageRounded(texture,minimum,maximum,{0,0},{1,1},IM_COL32_WHITE,
+        diameter*0.5f,ImDrawFlags_RoundCornersAll);
+    draw->AddCircle({minimum.x+diameter*0.5f,minimum.y+diameter*0.5f},
+        diameter*0.5f-0.5f,ImGui::ColorConvertFloat4ToU32(
+            {border.r,border.g,border.b,border.a}),0,1.25f);
+}
 EditorUiViewportInput ImGuiEditorUi::Viewport(void* texture,float aspect,EditorUiColor bg)
 {
     EditorUiViewportInput out;
@@ -566,4 +600,39 @@ void ImGuiEditorUi::DrawViewportText(EditorUiVec2 position,const char* text,Edit
     ImDrawList* draw=ImGui::GetWindowDrawList();draw->PushClipRect({m_viewportScreenMin.x,m_viewportScreenMin.y},{m_viewportScreenMax.x,m_viewportScreenMax.y},true);draw->AddText({m_viewportScreenMin.x+position.x,m_viewportScreenMin.y+position.y},ViewportColor(color),text?text:"");draw->PopClipRect();
 }
 void ImGuiEditorUi::FocusWindow(const char*t){ImGui::SetWindowFocus(t);}
+void ImGuiEditorUi::DockWindowToArea(const char* title,EditorPanelDockArea area)
+{
+    if(!title||!title[0]||area==EditorPanelDockArea::None)return;
+
+    auto nodeForWindow=[&](const char* name)->ImGuiID{
+        ImGuiWindow* window=ImGui::FindWindowByName(name);
+        return window&&window->DockNode?window->DockNode->ID:0;
+    };
+
+    ImGuiID targetNode=0;
+    switch(area)
+    {
+    case EditorPanelDockArea::MainDocument:
+        targetNode=nodeForWindow("Scene 1");
+        if(!targetNode)targetNode=nodeForWindow("Game 1");
+        break;
+    case EditorPanelDockArea::LeftSidebar:
+        targetNode=nodeForWindow("Hierarchy 1");
+        if(!targetNode)targetNode=nodeForWindow("Assets 1");
+        break;
+    case EditorPanelDockArea::RightSidebar:
+        targetNode=nodeForWindow("Properties 1");
+        break;
+    case EditorPanelDockArea::BottomPanel:
+        targetNode=nodeForWindow("Console 1");
+        if(!targetNode)targetNode=nodeForWindow("Problems 1");
+        if(!targetNode)targetNode=nodeForWindow("Terminal 1");
+        break;
+    default:
+        break;
+    }
+
+    if(targetNode)
+        ImGui::DockBuilderDockWindow(title,targetNode);
+}
 }

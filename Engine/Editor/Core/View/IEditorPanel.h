@@ -6,6 +6,15 @@ namespace Engine::Editor
 {
 class IEditorUi;
 
+enum class EditorPanelDockArea
+{
+    None,
+    MainDocument,
+    LeftSidebar,
+    RightSidebar,
+    BottomPanel
+};
+
 // ---------------------------------------------------------------------------
 // IEditorPanel — common polymorphic interface for every editor panel.
 //
@@ -50,6 +59,24 @@ public:
     bool IsOpen() const       { return m_open; }
     void SetOpen(bool open)   { m_open = open; }
 
+    void SetDefaultDockArea(EditorPanelDockArea area, bool applyOnce = true)
+    {
+        m_defaultDockArea = area;
+        m_defaultDockPending = applyOnce;
+    }
+
+    EditorPanelDockArea GetDefaultDockArea() const
+    {
+        return m_defaultDockArea;
+    }
+
+    bool ConsumeDefaultDockPending()
+    {
+        const bool pending = m_defaultDockPending;
+        m_defaultDockPending = false;
+        return pending;
+    }
+
     // ---- Cursor & Focus Handling ----
     /// Set cursor behavior when this panel receives focus
     void SetCursorBehaviorOnFocus(CursorBehaviorOnFocus behavior)
@@ -74,5 +101,7 @@ protected:
     std::string m_title;
     bool        m_open = true;
     CursorBehaviorOnFocus m_cursorBehaviorOnFocus = CursorBehaviorOnFocus::Visible;
+    EditorPanelDockArea m_defaultDockArea = EditorPanelDockArea::None;
+    bool m_defaultDockPending = false;
 };
 }

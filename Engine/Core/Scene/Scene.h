@@ -6,6 +6,8 @@
 #include "Core/Rendering/Lighting/Pipelines/Baked/BakedLightingPipeline.h"
 #include "Core/Model/SceneSettings.h"
 #include <glm/glm.hpp>
+#include <array>
+#include <unordered_map>
 #include <string>
 
 namespace Engine::Physics { class Physics; }
@@ -145,6 +147,10 @@ private:
     std::shared_ptr<Engine::Components::Texture> m_defaultSkyboxTexture;
     std::shared_ptr<Engine::Components::Texture> m_sceneSkyboxTexture;
     std::string m_loadedSkyboxPath;
+    std::string m_environmentLightingPath;
+    std::array<glm::vec4, 9> m_environmentSH{};
+    std::unordered_map<std::string, std::array<glm::vec4, 9>>
+        m_materialEnvironmentSH;
 
     std::unique_ptr<IPipelineState> m_objectPipeline;
     std::unique_ptr<IPipelineState> m_objectDoubleSidedPipeline;
@@ -179,6 +185,9 @@ private:
     void BuildSkyboxPipeline();
     void BuildObjectPipeline();
     const Engine::Components::Texture* ResolveSkyboxTexture();
+    void UpdateEnvironmentLighting(const Engine::Components::Texture* texture);
+    const std::array<glm::vec4, 9>* ResolveReflectionEnvironment(
+        const Engine::Components::Material& material);
 
     struct FrameRenderItem
     {

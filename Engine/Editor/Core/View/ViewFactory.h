@@ -55,7 +55,8 @@ public:
     // Used by prefab editing so the project Scene/Game views keep rendering
     // the active project scene.
     std::unique_ptr<SceneView> CreateSceneView(
-        Engine::Scene::Scene* scene, const std::string& title);
+        Engine::Scene::Scene* scene, const std::string& title,
+        EditorPanelDockArea defaultDockArea = EditorPanelDockArea::MainDocument);
 
     // Returns false when no SRV slots remain for 3-D views (Scene / Game).
     bool CanCreate3DView() const { return m_renderer && m_renderer->CanAllocateSrvSlot(); }
@@ -76,6 +77,7 @@ public:
     std::function<void()>                  OnMainDocumentFocused;
     std::function<void(Engine::Core::Object*)>           OnObjectSelected;    // SceneView click selection
     std::function<void(Engine::Core::Object*)>           OnObjectCreated;     // SceneView context creation
+    std::function<void()>                  OnDeleteSelectionRequested;
     std::function<void(bool)>              OnGizmoInteraction;  // SceneView transform drag
     std::function<void(Engine::Core::Object*)>           OnFocusObject;       // HierarchyView double-click
     std::function<void()>                  OnHierarchyChanged;
