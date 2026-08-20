@@ -9,9 +9,19 @@
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Serialization/SceneSerializer.h"
+#include "../Focus/WindowFocusHandler.h"
 
 namespace Engine::Editor
 {
+// ---------------------------------------------------------------------------
+// Constructor
+// ---------------------------------------------------------------------------
+HierarchyView::HierarchyView()
+{
+    // Hierarchy is an editor UI panel with normal cursor
+    SetCursorBehaviorOnFocus(CursorBehaviorOnFocus::Visible);
+}
+
 namespace
 {
 const char* PlacementName(EditorUiHierarchyDropPosition position)
@@ -388,6 +398,8 @@ void HierarchyView::DrawObjectNode(
     {
         const EditorUiPrefabMenuResult prefabMenu = ui.PrefabOverrideMenu(obj,
             Engine::Serialization::SceneSerializer::HasPrefabOverrides(*prefabRoot, true));
+        if (prefabMenu.editRequested && prefabRoot->Prefab && OnPrefabRequested)
+            OnPrefabRequested(prefabRoot->Prefab->GetPath());
         if (prefabMenu.applyRequested)
             m_pendingPrefabAction = PendingPrefabAction::Apply;
         if (prefabMenu.applyAllRequested)

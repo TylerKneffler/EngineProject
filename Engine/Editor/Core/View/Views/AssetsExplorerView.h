@@ -21,7 +21,7 @@ namespace Engine::Editor
 class AssetsExplorerView : public IEditorPanel
 {
 public:
-    AssetsExplorerView()  = default;
+    AssetsExplorerView();
     ~AssetsExplorerView() = default;
 
     // Initializes the view with the path to the Assets directory

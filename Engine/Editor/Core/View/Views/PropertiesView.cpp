@@ -6,11 +6,21 @@
 #include "Core/Graphics/IGraphicsTexture.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
+#include "../Focus/WindowFocusHandler.h"
 #include <filesystem>
 #include <shellapi.h>
 
 namespace Engine::Editor
 {
+// ---------------------------------------------------------------------------
+// Constructor
+// ---------------------------------------------------------------------------
+PropertiesView::PropertiesView()
+{
+    // Properties is an editor UI panel with normal cursor
+    SetCursorBehaviorOnFocus(CursorBehaviorOnFocus::Visible);
+}
+
 namespace
 {
 void RevealFileInExplorer(const std::string& path)

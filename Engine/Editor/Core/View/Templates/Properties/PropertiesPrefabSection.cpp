@@ -60,6 +60,13 @@ void PropertiesView::RevertSelectedPrefabOverrides()
 
 void PropertiesView::HandlePrefabMenu(const EditorUiPrefabMenuResult& menu)
 {
+    if (menu.editRequested)
+    {
+        Engine::Core::Object* prefabRoot = m_selectedObject
+            ? m_selectedObject->GetPrefabInstanceRoot() : nullptr;
+        if (prefabRoot && prefabRoot->Prefab && OnPrefabRequested)
+            OnPrefabRequested(prefabRoot->Prefab->GetPath());
+    }
     if (menu.applyRequested) ApplySelectedPrefabOverrides(false);
     if (menu.applyAllRequested) ApplySelectedPrefabOverrides(true);
     if (menu.revertRequested) RevertSelectedPrefabOverrides();

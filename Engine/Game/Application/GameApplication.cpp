@@ -11,6 +11,7 @@
 #include "Core/SceneManager.h"
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
 #include "Core/Assets/Scripts/Rotate.h"
+#include "Core/Assets/Scripts/FirstPersonController.h"
 #include "Core/Serialization/SceneSerializer.h"
 #endif
 
@@ -22,6 +23,7 @@ void RegisterGameComponents()
 {
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
     ::Engine::Serialization::RegisterComponentType<Rotate>("Rotate");
+    ::Engine::Serialization::RegisterComponentType<FirstPersonController>("FirstPersonController");
 #endif
 }
 

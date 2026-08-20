@@ -65,6 +65,13 @@ public:
             ++m_configurationRevision;
     }
 
+    // Hierarchy lookup helpers available to any component.
+    Object* FindObjectInChildrenByName(const std::string& objectName,
+        bool includeSelf = false) const;
+    Object* FindObjectInSceneByName(const std::string& objectName) const;
+    Component* GetComponentOnObjectNamedInScene(const std::string& objectName,
+        const std::string& componentTypeName) const;
+
 protected:
     void SetTypeName(const char* typeName) { m_typeName = typeName ? typeName : "Component"; }
 

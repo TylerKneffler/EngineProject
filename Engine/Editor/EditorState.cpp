@@ -470,6 +470,10 @@ void EditorState::OpenPrefabStage(const std::string& path)
     auto hierarchy = std::make_unique<HierarchyView>();
     hierarchy->SetTitle(prefabName + " Hierarchy");
     hierarchy->Init(prefabScene.get());
+    hierarchy->OnPrefabRequested = [this](const std::string& prefabPath)
+    {
+        m_pendingPrefabPath = prefabPath;
+    };
     auto properties = std::make_unique<PropertiesView>();
     properties->SetTitle(prefabName + " Properties");
     properties->Init(prefabScene.get());
@@ -730,6 +734,13 @@ void EditorState::InitializePanels()
         if (hierarchyPanel)
         {
             hierarchyPanel->OnFocused = [this]() { m_prefabDocumentFocused = false; };
+            if (auto* hierarchy = dynamic_cast<HierarchyView*>(hierarchyPanel.get()))
+            {
+                hierarchy->OnPrefabRequested = [this](const std::string& prefabPath)
+                {
+                    m_pendingPrefabPath = prefabPath;
+                };
+            }
             m_panels.push_back(std::move(hierarchyPanel));
         }
         else OutputDebugStringA("[EditorState::InitializePanels] WARNING: Hierarchy panel is null\n");

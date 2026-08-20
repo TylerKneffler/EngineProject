@@ -25,7 +25,7 @@ public:
         std::string message;
     };
 
-    ConsoleView()  = default;
+    ConsoleView();
     ~ConsoleView() = default;
 
     // Appends a message at the given severity level.

@@ -16,6 +16,7 @@
 #include "Core/Compoonents/Physics/Cloth.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/UI/Canvas.h"
+#include "Core/Compoonents/UI/UIButton.h"
 #include "Core/Compoonents/UI/UIObject.h"
 #include "Core/Compoonents/UI/UIText.h"
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
@@ -95,6 +96,7 @@ void SceneSerializer::EnsureBuiltinsRegistered()
     RegisterComponentType<Engine::Components::MeshObjectCollider>();
     RegisterComponentType<Engine::Components::Cloth>();
     RegisterComponentType<Engine::Components::Canvas>();
+    RegisterComponentType<Engine::Components::UIButton>();
     RegisterComponentType<Engine::Components::UIObject>();
     RegisterComponentType<Engine::Components::UIText>();
     RegisterComponentType<Engine::Components::SpriteAnimationManager>();

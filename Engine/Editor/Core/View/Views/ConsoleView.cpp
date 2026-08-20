@@ -1,10 +1,20 @@
 #include "ConsoleView.h"
 #include "Engine/Editor/UI/IEditorUi.h"
+#include "../Focus/WindowFocusHandler.h"
 #include <algorithm>
 #include <cctype>
 
 namespace Engine::Editor
 {
+// ---------------------------------------------------------------------------
+// Constructor
+// ---------------------------------------------------------------------------
+ConsoleView::ConsoleView()
+{
+    // Console is an editor UI panel with normal cursor
+    SetCursorBehaviorOnFocus(CursorBehaviorOnFocus::Visible);
+}
+
 namespace
 {
 const char* LevelName(ConsoleView::Level level)

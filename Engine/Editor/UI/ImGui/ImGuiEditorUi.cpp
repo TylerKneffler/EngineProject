@@ -320,6 +320,7 @@ EditorUiPrefabMenuResult ImGuiEditorUi::PrefabOverrideMenu(const void* id,bool h
     EditorUiPrefabMenuResult result;
     ImGui::PushID(id);
     if(ImGui::BeginPopupContextItem("##prefabOverrides")){
+        result.editRequested=ImGui::MenuItem("Edit Prefab");
         ImGui::BeginDisabled(!hasOverrides);
         result.applyRequested=ImGui::MenuItem("Apply Overrides to Prefab");
         result.applyAllRequested=ImGui::MenuItem("Apply All to Prefab (Including Transform)");

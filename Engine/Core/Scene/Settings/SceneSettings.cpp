@@ -1,4 +1,6 @@
 #include "Core/Scene/Settings/SceneSettingsSerialization.h"
+#include <algorithm>
+#include <cctype>
 
 namespace Engine::Scene
 {
@@ -22,6 +24,36 @@ namespace
             value.ArrayAt(2).AsFloat()
         };
     }
+
+    const Engine::Serialization::JsonValue* FindField(
+        const Engine::Serialization::JsonValue& object,
+        const char* key)
+    {
+        if (!object.IsObject() || !key)
+            return nullptr;
+        if (object.Has(key))
+            return &object[key];
+
+        std::string loweredKey(key);
+        std::transform(loweredKey.begin(), loweredKey.end(), loweredKey.begin(),
+            [](unsigned char character)
+            {
+                return static_cast<char>(std::tolower(character));
+            });
+
+        for (std::size_t index = 0; index < object.ObjectSize(); ++index)
+        {
+            std::string candidate = object.ObjectKey(index);
+            std::transform(candidate.begin(), candidate.end(), candidate.begin(),
+                [](unsigned char character)
+                {
+                    return static_cast<char>(std::tolower(character));
+                });
+            if (candidate == loweredKey)
+                return &object.ObjectValue(index);
+        }
+        return nullptr;
+    }
 }
 
 Engine::Serialization::JsonValue SerializeSceneSettings(const Engine::Model::SceneSettings& settings)
@@ -36,6 +68,10 @@ Engine::Serialization::JsonValue SerializeSceneSettings(const Engine::Model::Sce
     value.Set("gridOriginColor", Vec3ToJson(settings.gridOriginColor));
     value.Set("ambientColor", Vec3ToJson(settings.ambientColor));
     value.Set("skyboxTexture", Engine::Serialization::JsonValue(settings.skyboxTexture));
+    value.Set("renderMode",
+        Engine::Serialization::JsonValue(static_cast<int>(settings.renderMode)));
+    value.Set("sceneViewUiOverlay",
+        Engine::Serialization::JsonValue(settings.sceneViewUiOverlay));
     return value;
 }
 
@@ -43,19 +79,43 @@ void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engi
 {
     if (!value.IsObject())
         return;
-    if (value.Has("showGrid")) settings.showGrid = value["showGrid"].AsBool();
-    if (value.Has("gridHalfSize")) settings.gridHalfSize = value["gridHalfSize"].AsInt();
-    if (value.Has("gridCellSize")) settings.gridCellSize = value["gridCellSize"].AsFloat();
-    if (value.Has("gridOpacity")) settings.gridOpacity = value["gridOpacity"].AsFloat();
-    if (value.Has("gridFadeDistance")) settings.gridFadeDistance = value["gridFadeDistance"].AsFloat();
-    if (value.Has("gridColor"))
-        settings.gridColor = Vec3FromJson(value["gridColor"], settings.gridColor);
-    if (value.Has("gridOriginColor"))
-        settings.gridOriginColor = Vec3FromJson(value["gridOriginColor"], settings.gridOriginColor);
-    if (value.Has("ambientColor"))
-        settings.ambientColor = Vec3FromJson(value["ambientColor"], settings.ambientColor);
-    settings.skyboxTexture = value.Has("skyboxTexture")
-        ? value["skyboxTexture"].AsString()
-        : std::string{};
+    if (const auto* showGrid = FindField(value, "showGrid"))
+        settings.showGrid = showGrid->AsBool();
+    if (const auto* gridHalfSize = FindField(value, "gridHalfSize"))
+        settings.gridHalfSize = gridHalfSize->AsInt();
+    if (const auto* gridCellSize = FindField(value, "gridCellSize"))
+        settings.gridCellSize = gridCellSize->AsFloat();
+    if (const auto* gridOpacity = FindField(value, "gridOpacity"))
+        settings.gridOpacity = gridOpacity->AsFloat();
+    if (const auto* gridFadeDistance = FindField(value, "gridFadeDistance"))
+        settings.gridFadeDistance = gridFadeDistance->AsFloat();
+    if (const auto* gridColor = FindField(value, "gridColor"))
+        settings.gridColor = Vec3FromJson(*gridColor, settings.gridColor);
+    if (const auto* gridOriginColor = FindField(value, "gridOriginColor"))
+        settings.gridOriginColor = Vec3FromJson(*gridOriginColor, settings.gridOriginColor);
+    if (const auto* ambientColor = FindField(value, "ambientColor"))
+        settings.ambientColor = Vec3FromJson(*ambientColor, settings.ambientColor);
+    if (const auto* skyboxTexture = FindField(value, "skyboxTexture"))
+        settings.skyboxTexture = skyboxTexture->AsString();
+    else
+        settings.skyboxTexture.clear();
+    if (const auto* renderMode = FindField(value, "renderMode"))
+    {
+        const int mode = renderMode->AsInt();
+        switch (mode)
+        {
+        case 1:
+            settings.renderMode = Engine::Model::SceneRenderMode::Unlit;
+            break;
+        case 2:
+            settings.renderMode = Engine::Model::SceneRenderMode::Wireframe;
+            break;
+        default:
+            settings.renderMode = Engine::Model::SceneRenderMode::Lit;
+            break;
+        }
+    }
+    if (const auto* sceneViewUiOverlay = FindField(value, "sceneViewUiOverlay"))
+        settings.sceneViewUiOverlay = sceneViewUiOverlay->AsBool();
 }
 }

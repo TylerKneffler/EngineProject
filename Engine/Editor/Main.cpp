@@ -12,6 +12,7 @@
 #include "Engine/Editor/Core/Importers/ModelImporter.h"
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
 #include "Core/Assets/Scripts/Rotate.h"
+#include "Core/Assets/Scripts/FirstPersonController.h"
 #include "Core/Serialization/SceneSerializer.h"
 #endif
 #include <filesystem>
@@ -110,6 +111,7 @@ int WINAPI wWinMain(
 {
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
     Engine::Serialization::RegisterComponentType<Rotate>("Rotate");
+    Engine::Serialization::RegisterComponentType<FirstPersonController>("FirstPersonController");
 #endif
     HRESULT comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     WriteStartupLog("Editor startup", true);

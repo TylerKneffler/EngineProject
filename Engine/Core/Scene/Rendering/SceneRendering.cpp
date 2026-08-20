@@ -410,6 +410,7 @@ void Scene::BuildObjectPipeline()
     };
 
     auto buildMaterialPipeline = [&](bool doubleSided, bool blend,
+                                     bool wireframe,
                                      const char* description)
     {
         auto materialBuilder = pipelineFactory->CreateBuilder();
@@ -419,7 +420,7 @@ void Scene::BuildObjectPipeline()
                 " pipeline state builder");
         auto& state = materialBuilder->SetVertexShader(vsShader.get())
             .SetPixelShader(psShader.get())
-            .SetFillMode(false)
+            .SetFillMode(wireframe)
             .SetCullMode(!doubleSided)
             .SetFrontCounterClockwise(false)
             .SetDepthClipEnable(true)
@@ -448,19 +449,42 @@ void Scene::BuildObjectPipeline()
         return pipeline;
     };
 
-    m_objectPipeline = buildMaterialPipeline(false, false, "opaque material");
+    m_objectPipeline =
+        buildMaterialPipeline(false, false, false, "opaque material");
     m_objectDoubleSidedPipeline =
-        buildMaterialPipeline(true, false, "double-sided material");
+        buildMaterialPipeline(true, false, false,
+            "double-sided material");
     m_objectBlendPipeline =
-        buildMaterialPipeline(false, true, "blended material");
+        buildMaterialPipeline(false, true, false, "blended material");
     m_objectBlendDoubleSidedPipeline =
-        buildMaterialPipeline(true, true, "blended double-sided material");
+        buildMaterialPipeline(true, true, false,
+            "blended double-sided material");
+
+    m_objectWirePipeline =
+        buildMaterialPipeline(false, false, true,
+            "wireframe opaque material");
+    m_objectWireDoubleSidedPipeline =
+        buildMaterialPipeline(true, false, true,
+            "wireframe double-sided material");
+    m_objectBlendWirePipeline =
+        buildMaterialPipeline(false, true, true,
+            "wireframe blended material");
+    m_objectBlendWireDoubleSidedPipeline =
+        buildMaterialPipeline(true, true, true,
+            "wireframe blended double-sided material");
 
     // Placement previews always blend, regardless of the source alpha mode.
     m_objectPreviewPipeline =
-        buildMaterialPipeline(false, true, "object preview");
+        buildMaterialPipeline(false, true, false, "object preview");
     m_objectPreviewDoubleSidedPipeline =
-        buildMaterialPipeline(true, true, "double-sided object preview");
+        buildMaterialPipeline(true, true, false,
+            "double-sided object preview");
+    m_objectPreviewWirePipeline =
+        buildMaterialPipeline(false, true, true,
+            "wireframe object preview");
+    m_objectPreviewWireDoubleSidedPipeline =
+        buildMaterialPipeline(true, true, true,
+            "wireframe double-sided object preview");
 
     // Build a wireframe outline pipeline for selected object highlighting.
     auto outlineBuilder = pipelineFactory->CreateBuilder();
@@ -639,6 +663,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     }
     const glm::mat4 proj = cam->GetProjectionMatrix(aspect, m_editorMode2D);
     const glm::vec3 cameraPosition = glm::vec3(glm::inverse(view)[3]);
+        const bool wireframeMode =
+            settings.renderMode == Engine::Model::SceneRenderMode::Wireframe;
+        const bool forceUnlitMode =
+            settings.renderMode == Engine::Model::SceneRenderMode::Unlit;
 
     if (const Engine::Components::Texture* skybox = ResolveSkyboxTexture();
         skybox && skybox->GetGraphicsTexture() && m_skyboxPipeline)
@@ -839,6 +867,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         }
         if (isPreview)
             objectData.baseColor.a *= 0.45f;
+            if (forceUnlitMode)
+                objectData.ambientUnlit.w = 1.f;
         if (usesLegacyProbeBake)
         {
             objectData.bakedDirectional = glm::vec4(
@@ -847,7 +877,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 bakedLighting->lightDirection, 1.f);
         }
 
-        const DrawCBData drawData{ slot, m_frameLightCount, 0u, 0u };
+        const DrawCBData drawData{ slot,
+            forceUnlitMode ? 0u : m_frameLightCount, 0u, 0u };
         memcpy(static_cast<uint8_t*>(m_objectCBMapped) + offset,
             &drawData, sizeof(drawData));
         memcpy(static_cast<uint8_t*>(m_objectDataMapped) +
@@ -856,17 +887,29 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
         Engine::Graphics::IPipelineState* materialPipeline = nullptr;
         if (isPreview)
-            materialPipeline = doubleSided
-                ? m_objectPreviewDoubleSidedPipeline.get()
-                : m_objectPreviewPipeline.get();
+                materialPipeline = wireframeMode
+                    ? (doubleSided
+                        ? m_objectPreviewWireDoubleSidedPipeline.get()
+                        : m_objectPreviewWirePipeline.get())
+                    : (doubleSided
+                        ? m_objectPreviewDoubleSidedPipeline.get()
+                        : m_objectPreviewPipeline.get());
         else if (alphaMode == Engine::Components::MaterialAlphaMode::Blend)
-            materialPipeline = doubleSided
-                ? m_objectBlendDoubleSidedPipeline.get()
-                : m_objectBlendPipeline.get();
+                materialPipeline = wireframeMode
+                    ? (doubleSided
+                        ? m_objectBlendWireDoubleSidedPipeline.get()
+                        : m_objectBlendWirePipeline.get())
+                    : (doubleSided
+                        ? m_objectBlendDoubleSidedPipeline.get()
+                        : m_objectBlendPipeline.get());
         else
-            materialPipeline = doubleSided
-                ? m_objectDoubleSidedPipeline.get()
-                : m_objectPipeline.get();
+                materialPipeline = wireframeMode
+                    ? (doubleSided
+                        ? m_objectWireDoubleSidedPipeline.get()
+                        : m_objectWirePipeline.get())
+                    : (doubleSided
+                        ? m_objectDoubleSidedPipeline.get()
+                        : m_objectPipeline.get());
         preparedDraw.pipeline = materialPipeline;
         preparedDraw.constantBufferOffset = offset;
         preparedDraw.vertexBuffer = sprite
@@ -944,9 +987,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         context->DrawInstanced(3, 1, 0, 0);
     }
 
-    // Screen-space retained UI is always the final scene pass. Editor chrome
-    // is submitted later by the editor renderer and remains above game UI.
-    if (m_uiRenderer)
+    // Screen-space retained UI is a game-view pass. The scene editor camera
+    // should inspect UI objects in the scene without applying runtime
+    // fullscreen composition that anchors to the active viewport.
+    if (m_uiRenderer && (!includeEditorVisuals || settings.sceneViewUiOverlay))
         m_uiRenderer->Render(*this, context, aspect);
 }
 

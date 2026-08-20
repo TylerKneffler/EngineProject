@@ -34,7 +34,11 @@ class ProblemsView : public IEditorPanel
 {
 public:
     explicit ProblemsView(std::shared_ptr<EditorProblemStore> store)
-        : m_store(std::move(store)) {}
+        : m_store(std::move(store))
+    {
+        // Problems panel is an editor UI panel with normal cursor
+        SetCursorBehaviorOnFocus(CursorBehaviorOnFocus::Visible);
+    }
 
     void DrawPanel(IEditorUi& ui) override;
 

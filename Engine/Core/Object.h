@@ -87,6 +87,14 @@ public:
     // Get the scene this object belongs to
     Engine::Scene::Scene* GetScene() const { return OwnerScene; }
 
+    // Hierarchy lookup helpers
+    Object* FindObjectInChildrenByName(const std::string& objectName,
+        bool includeSelf = false);
+    const Object* FindObjectInChildrenByName(const std::string& objectName,
+        bool includeSelf = false) const;
+    Object* FindObjectInSceneByName(const std::string& objectName);
+    const Object* FindObjectInSceneByName(const std::string& objectName) const;
+
     // Component management — implementations must live in the header so the
     // compiler sees them at every instantiation site.
     template<typename T, typename... Args>
@@ -119,5 +127,96 @@ public:
         }
         return nullptr;
     }
+
+    template<typename T>
+    T* GetComponentInParent(bool includeSelf = true)
+    {
+        for (Object* current = includeSelf ? this : Parent;
+            current; current = current->Parent)
+        {
+            if (T* component = current->GetComponent<T>())
+                return component;
+        }
+        return nullptr;
+    }
+
+    template<typename T>
+    const T* GetComponentInParent(bool includeSelf = true) const
+    {
+        for (const Object* current = includeSelf ? this : Parent;
+            current; current = current->Parent)
+        {
+            if (const T* component = current->GetComponent<T>())
+                return component;
+        }
+        return nullptr;
+    }
+
+    template<typename T>
+    T* GetComponentInChildren(bool includeSelf = true)
+    {
+        if (includeSelf)
+            if (T* component = GetComponent<T>())
+                return component;
+        for (Object* child : Children)
+        {
+            if (!child)
+                continue;
+            if (T* component = child->GetComponentInChildren<T>(true))
+                return component;
+        }
+        return nullptr;
+    }
+
+    template<typename T>
+    const T* GetComponentInChildren(bool includeSelf = true) const
+    {
+        if (includeSelf)
+            if (const T* component = GetComponent<T>())
+                return component;
+        for (const Object* child : Children)
+        {
+            if (!child)
+                continue;
+            if (const T* component = child->GetComponentInChildren<T>(true))
+                return component;
+        }
+        return nullptr;
+    }
+
+    template<typename T>
+    std::vector<T*> GetComponentsInChildren(bool includeSelf = true)
+    {
+        std::vector<T*> result;
+        if (includeSelf)
+            if (T* component = GetComponent<T>())
+                result.push_back(component);
+        for (Object* child : Children)
+        {
+            if (!child)
+                continue;
+            std::vector<T*> childComponents = child->GetComponentsInChildren<T>(true);
+            result.insert(result.end(), childComponents.begin(), childComponents.end());
+        }
+        return result;
+    }
+
+    template<typename T>
+    std::vector<const T*> GetComponentsInChildren(bool includeSelf = true) const
+    {
+        std::vector<const T*> result;
+        if (includeSelf)
+            if (const T* component = GetComponent<T>())
+                result.push_back(component);
+        for (const Object* child : Children)
+        {
+            if (!child)
+                continue;
+            std::vector<const T*> childComponents = child->GetComponentsInChildren<T>(true);
+            result.insert(result.end(), childComponents.begin(), childComponents.end());
+        }
+        return result;
+    }
+
 };
 }

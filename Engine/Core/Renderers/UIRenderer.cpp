@@ -1,6 +1,8 @@
 #include "Core/Renderers/UIRenderer.h"
 
 #include "Core/UI/UILayout.h"
+#include "Core/Compoonents/UI/Canvas.h"
+#include "Core/Compoonents/UI/UIButton.h"
 #include "Core/Compoonents/UI/UIObject.h"
 #include "Core/Compoonents/UI/UIText.h"
 #include "Core/Graphics/IGraphicsBuffer.h"
@@ -22,6 +24,9 @@
 #include <memory>
 #include <unordered_map>
 #include <vector>
+#ifdef _WIN32
+#include <Windows.h>
+#endif
 
 #ifndef ENGINE_SHADERS_PATH
 #define ENGINE_SHADERS_PATH "Engine/Core/Shaders/"
@@ -66,7 +71,7 @@ struct UIVertex
 
 struct DrawSegment
 {
-    FontAtlas* atlas = nullptr;
+    Engine::Graphics::IGraphicsTexture* texture = nullptr;
     uint32_t firstVertex = 0;
     uint32_t vertexCount = 0;
 };
@@ -206,6 +211,7 @@ struct UIRenderer::Impl
     Engine::Graphics::IGraphicsProvider* provider = nullptr;
     std::unique_ptr<Engine::Graphics::IPipelineState> pipeline;
     std::unique_ptr<Engine::Graphics::IGraphicsBuffer> vertexBuffer;
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> whiteTexture;
     std::size_t vertexCapacity = 0;
     std::unordered_map<std::string, std::unique_ptr<FontAtlas>> atlases;
 
@@ -302,6 +308,15 @@ void UIRenderer::Initialize(Engine::Graphics::IGraphicsProvider* graphicsProvide
         .SetInputLayout(layout, 3)
         .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
         .SetRenderTargetFormat(28, 40).Build();
+
+    auto* textureFactory = graphicsProvider->GetTextureFactory();
+    if (textureFactory)
+    {
+        const uint8_t whitePixel[4] = { 255, 255, 255, 255 };
+        m_impl->whiteTexture = textureFactory->CreateTexture2D(
+            1, 1, whitePixel, 1,
+            Engine::Graphics::GraphicsTextureFormat::Rgba8, false);
+    }
 }
 
 bool UIRenderer::IsReady() const { return m_impl && m_impl->pipeline; }
@@ -311,8 +326,129 @@ void UIRenderer::Render(Engine::Scene::Scene& scene,
 {
     if (!IsReady() || !context || !m_impl->provider) return;
     const std::vector<Engine::Model::UITextLayout> items = Engine::UI::UILayout::Resolve(scene, viewportAspect);
+
+    glm::vec2 mouseClientPosition(0.f);
+    glm::vec2 mouseClientSize(1.f);
+    bool hasMousePosition = false;
+    bool mouseDown = false;
+#ifdef _WIN32
+    if (HWND hwnd = GetForegroundWindow())
+    {
+        POINT cursor{};
+        if (GetCursorPos(&cursor) && ScreenToClient(hwnd, &cursor))
+        {
+            RECT client{};
+            if (GetClientRect(hwnd, &client))
+            {
+                const float width = static_cast<float>(std::max(1L, client.right - client.left));
+                const float height = static_cast<float>(std::max(1L, client.bottom - client.top));
+                mouseClientPosition.x = static_cast<float>(cursor.x);
+                mouseClientPosition.y = static_cast<float>(cursor.y);
+                mouseClientSize = { width, height };
+                hasMousePosition = true;
+            }
+        }
+    }
+    mouseDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+#endif
+
     std::vector<UIVertex> vertices;
     std::vector<DrawSegment> segments;
+
+    if (m_impl->whiteTexture)
+    {
+        std::vector<std::pair<Engine::Components::Canvas*, glm::vec2>> canvasSizes;
+        for (const auto& candidate : scene.GetObjects())
+        {
+            Engine::Core::Object* object = candidate.get();
+            Engine::Components::Canvas* canvas = object && object->IsEnabledInHierarchy()
+                ? object->GetComponent<Engine::Components::Canvas>() : nullptr;
+            if (!canvas)
+                continue;
+            bool isNestedCanvas = false;
+            for (Engine::Core::Object* ancestor = object->Parent; ancestor; ancestor = ancestor->Parent)
+            {
+                if (ancestor->GetComponent<Engine::Components::Canvas>())
+                {
+                    isNestedCanvas = true;
+                    break;
+                }
+            }
+            if (!isNestedCanvas)
+                canvasSizes.emplace_back(canvas, canvas->GetLogicalSize(viewportAspect));
+        }
+
+        const uint32_t firstButtonVertex = static_cast<uint32_t>(vertices.size());
+        for (const auto& candidate : scene.GetObjects())
+        {
+            Engine::Core::Object* object = candidate.get();
+            if (!object || !object->IsEnabledInHierarchy())
+                continue;
+            auto* layout = object->GetComponent<Engine::Components::UIObject>();
+            auto* button = object->GetComponent<Engine::Components::UIButton>();
+            if (!layout || !button || !layout->visible)
+                continue;
+
+            Engine::Components::Canvas* canvas = nullptr;
+            for (Engine::Core::Object* current = object; current; current = current->Parent)
+            {
+                canvas = current->GetComponent<Engine::Components::Canvas>();
+                if (canvas)
+                    break;
+            }
+            if (!canvas)
+                continue;
+
+            glm::vec2 canvasSize(1.f);
+            for (const auto& entry : canvasSizes)
+            {
+                if (entry.first == canvas)
+                {
+                    canvasSize = entry.second;
+                    break;
+                }
+            }
+
+            const Engine::Model::UIRect& rect = layout->GetComputedRect();
+            const Engine::Model::UIRect& clip = layout->GetComputedClipRect();
+            bool hovered = false;
+            if (hasMousePosition)
+            {
+                const glm::vec2 mousePosition(
+                    mouseClientPosition.x * (canvasSize.x / std::max(1.f, mouseClientSize.x)),
+                    mouseClientPosition.y * (canvasSize.y / std::max(1.f, mouseClientSize.y)));
+                hovered = mousePosition.x >= rect.x && mousePosition.x <= rect.x + rect.width &&
+                    mousePosition.y >= rect.y && mousePosition.y <= rect.y + rect.height &&
+                    mousePosition.x >= clip.x && mousePosition.x <= clip.x + clip.width &&
+                    mousePosition.y >= clip.y && mousePosition.y <= clip.y + clip.height;
+            }
+            button->UpdateInteraction(hovered, mouseDown);
+
+            const glm::vec3 rgb = !button->interactable
+                ? button->disabledColor
+                : (button->IsPressed()
+                    ? button->pressedColor
+                    : (button->IsHovered() ? button->hoverColor : button->normalColor));
+            const glm::vec4 color(rgb, std::clamp(button->alpha, 0.f, 1.f));
+
+            float x0 = rect.x;
+            float y0 = rect.y;
+            float x1 = rect.x + rect.width;
+            float y1 = rect.y + rect.height;
+            float u0 = 0.f;
+            float v0 = 0.f;
+            float u1 = 1.f;
+            float v1 = 1.f;
+            if (!ClipQuad(x0, y0, x1, y1, u0, v0, u1, v1, clip))
+                continue;
+            AddQuad(vertices, x0, y0, x1, y1, u0, v0, u1, v1, color, canvasSize);
+        }
+
+        const uint32_t buttonCount = static_cast<uint32_t>(vertices.size()) - firstButtonVertex;
+        if (buttonCount > 0)
+            segments.push_back({ m_impl->whiteTexture.get(), firstButtonVertex, buttonCount });
+    }
+
     for (const Engine::Model::UITextLayout& item : items)
     {
         if (!item.layout || !item.text || item.text->text.empty()) continue;
@@ -370,10 +506,10 @@ void UIRenderer::Render(Engine::Scene::Scene& scene,
         }
         const uint32_t count = static_cast<uint32_t>(vertices.size()) - firstVertex;
         if (!count) continue;
-        if (!segments.empty() && segments.back().atlas == atlas &&
+        if (!segments.empty() && segments.back().texture == atlas->texture.get() &&
             segments.back().firstVertex + segments.back().vertexCount == firstVertex)
             segments.back().vertexCount += count;
-        else segments.push_back({ atlas, firstVertex, count });
+        else segments.push_back({ atlas->texture.get(), firstVertex, count });
     }
     if (vertices.empty()) return;
 
@@ -397,7 +533,7 @@ void UIRenderer::Render(Engine::Scene::Scene& scene,
     context->SetVertexBuffer(0, m_impl->vertexBuffer.get(), sizeof(UIVertex));
     for (const DrawSegment& segment : segments)
     {
-        context->SetTexture(0, segment.atlas->texture.get());
+        context->SetTexture(0, segment.texture);
         context->DrawInstanced(segment.vertexCount, 1, segment.firstVertex, 0);
     }
 }

@@ -4,6 +4,7 @@
 #include "Core/Scene/Scene.h"
 #include "Core/ProjectLoader.h"
 #include "Engine/Editor/Core/Gizmos/EditorGizmoSystem.h"
+#include "Scene/SceneViewportToolbar.h"
 
 namespace Engine::Editor
 {
@@ -22,7 +23,7 @@ namespace Engine::Editor
 class SceneView : public View
 {
 public:
-    SceneView()  = default;
+    SceneView();
     ~SceneView();
 
     // Calls View::Init then stores the scene pointer and aspect ratio settings.
@@ -54,15 +55,7 @@ public:
     std::function<void(bool)> OnGizmoInteraction;
 
 private:
-    Engine::Core::Object* PickObjectInViewport(const EditorUiVec2& mousePos, const EditorUiVec2& viewportSize) const;
-    bool FindPrefabPlacement(const EditorUiVec2& mousePos,
-        const EditorUiVec2& viewportSize, glm::vec3& placement) const;
     void CancelPrefabPreview();
-    void ApplyCameraControls(float panDX, float panDY,
-                             float orbitDX, float orbitDY, float zoom,
-                             float dolly);
-    bool DrawTransformToolbar(IEditorUi& ui,
-        const EditorUiViewportInput& input);
 
     // Calculates the game viewport size and position based on aspect ratio mode
     Engine::Scene::Scene* m_scene = nullptr; // non-owning; set via Init()
@@ -80,7 +73,6 @@ private:
     std::string m_prefabPreviewPath;
     bool m_prefabPreviewHasPlacement = false;
     EditorGizmoSystem m_gizmos;
-    EditorTransformTool m_transformTool = EditorTransformTool::Translate;
-    bool m_transformToolbarExpanded = false;
+    SceneViewportToolbar m_toolbar;
 };
 }

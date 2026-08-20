@@ -70,6 +70,7 @@ struct EditorUiContextMenuResult
 
 struct EditorUiPrefabMenuResult
 {
+    bool editRequested = false;
     bool applyRequested = false;
     bool applyAllRequested = false;
     bool revertRequested = false;

@@ -4,12 +4,22 @@
 #include "Core/AssetRecord.h"
 #include "Core/Object.h"
 #include "Core/Serialization/SceneSerializer.h"
+#include "../Focus/WindowFocusHandler.h"
 #include <filesystem>
 #include <fstream>
 #include <shellapi.h>
 
 namespace Engine::Editor
 {
+// ---------------------------------------------------------------------------
+// Constructor
+// ---------------------------------------------------------------------------
+AssetsExplorerView::AssetsExplorerView()
+{
+    // Assets explorer is an editor UI panel with normal cursor
+    SetCursorBehaviorOnFocus(CursorBehaviorOnFocus::Visible);
+}
+
 namespace fs = std::filesystem;
 
 // ---------------------------------------------------------------------------

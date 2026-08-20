@@ -26,7 +26,7 @@ namespace Engine::Editor
 class HierarchyView : public IEditorPanel
 {
 public:
-    HierarchyView()  = default;
+    HierarchyView();
     ~HierarchyView() = default;
 
     void Init(Engine::Scene::Scene* scene) { m_scene = scene; }
@@ -42,6 +42,7 @@ public:
 
     // Fires when the user double-clicks an object — editor should frame it in the scene view.
     std::function<void(Engine::Core::Object*)> OnFocusObject;
+    std::function<void(const std::string&)> OnPrefabRequested;
     std::function<void()> OnHierarchyChanged;
     std::function<void(const std::string&)> OnInteractionLog;
 

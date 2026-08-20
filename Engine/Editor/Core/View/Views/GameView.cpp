@@ -4,9 +4,18 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Graphics/IGraphicsProvider.h"
+#include "../Focus/WindowFocusHandler.h"
 
 namespace Engine::Editor
 {
+// ---------------------------------------------------------------------------
+// Constructor
+// ---------------------------------------------------------------------------
+GameView::GameView()
+{
+    // Game view captures the cursor when focused (for gameplay)
+    SetCursorBehaviorOnFocus(CursorBehaviorOnFocus::Captured);
+}
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------

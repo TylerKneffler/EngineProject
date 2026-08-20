@@ -89,6 +89,36 @@ JsonValue ParseScalarText(const std::string& text)
     return JsonValue(text);
 }
 
+bool IsScalarValue(const JsonValue& value)
+{
+    const JsonValue::Type type = value.GetType();
+    return type == JsonValue::Type::Null ||
+        type == JsonValue::Type::Bool ||
+        type == JsonValue::Type::Number ||
+        type == JsonValue::Type::String;
+}
+
+std::string ScalarToText(const JsonValue& value)
+{
+    switch (value.GetType())
+    {
+    case JsonValue::Type::Null:
+        return std::string();
+    case JsonValue::Type::Bool:
+        return value.AsBool() ? "true" : "false";
+    case JsonValue::Type::Number:
+    {
+        std::ostringstream stream;
+        stream << value.AsDouble();
+        return stream.str();
+    }
+    case JsonValue::Type::String:
+        return value.AsString();
+    default:
+        return std::string();
+    }
+}
+
 JsonValue SceneXmlBehavior::ReadNode(const pugi::xml_node& node)
 {
     const std::string name = node.name();
@@ -109,6 +139,13 @@ JsonValue SceneXmlBehavior::ReadNode(const pugi::xml_node& node)
     }
 
     bool hasElementChildren = false;
+    bool hasAttributes = false;
+    for (const pugi::xml_attribute& attribute : node.attributes())
+    {
+        (void)attribute;
+        hasAttributes = true;
+        break;
+    }
     bool allItems = true;
     bool allComponents = true;
     for (const pugi::xml_node& child : node.children())
@@ -134,10 +171,13 @@ JsonValue SceneXmlBehavior::ReadNode(const pugi::xml_node& node)
         return array;
     }
 
-    if (!hasElementChildren)
+    if (!hasElementChildren && !hasAttributes)
         return ParseScalarText(node.child_value());
 
     JsonValue object = JsonValue::MakeObject();
+    for (const pugi::xml_attribute& attribute : node.attributes())
+        object.Set(StripOwnedPrefix(attribute.name()),
+            ParseScalarText(attribute.value()));
     for (const pugi::xml_node& child : node.children())
     {
         if (child.type() != pugi::node_element)
@@ -187,6 +227,22 @@ void SceneXmlBehavior::WriteObjectFields(pugi::xml_node parent, const JsonValue&
 void SceneXmlBehavior::WriteField(pugi::xml_node parent, const char* name, const JsonValue& value)
 {
     pugi::xml_node child = parent.append_child(name ? name : "");
+    if (name && std::string(name) == "settings" && value.IsObject())
+    {
+        for (std::size_t index = 0; index < value.ObjectSize(); ++index)
+        {
+            const std::string key = value.ObjectKey(index);
+            const JsonValue& fieldValue = value.ObjectValue(index);
+            if (IsScalarValue(fieldValue))
+            {
+                const std::string text = ScalarToText(fieldValue);
+                child.append_attribute(key.c_str()) = text.c_str();
+            }
+            else
+                WriteField(child, key.c_str(), fieldValue);
+        }
+        return;
+    }
     if (value.IsArray())
     {
         WriteArrayItems(child, value, SceneXml::ArrayItem);

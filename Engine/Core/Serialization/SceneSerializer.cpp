@@ -2,8 +2,8 @@
 
 // SceneSerializer is intentionally a stable public facade. Its implementation
 // is divided by behavior across:
-//   SceneSerializerRegistry.cpp
-//   SceneSerializerXmlBehavior.cpp
-//   SceneObjectSerializationBehavior.cpp
-//   SceneDocumentSerializationBehavior.cpp
-//   ScenePrefabSerializationBehavior.cpp
+//   Scene/Registry/SceneSerializerRegistry.cpp
+//   Scene/Xml/SceneSerializerXmlBehavior.cpp
+//   Scene/Object/SceneObjectSerializationBehavior.cpp
+//   Scene/Document/SceneDocumentSerializationBehavior.cpp
+//   Scene/Prefab/ScenePrefabSerializationBehavior.cpp

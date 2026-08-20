@@ -5,6 +5,8 @@
 #include <glm/glm.hpp>
 #include <string>
 
+namespace Engine::Physics { class Physics; }
+
 namespace Engine::Components
 {
 class RigidBody final : public Engine::Core::Component

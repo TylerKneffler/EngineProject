@@ -23,7 +23,7 @@ struct EditorUiPrefabMenuResult;
 class PropertiesView : public IEditorPanel
 {
 public:
-    PropertiesView()  = default;
+    PropertiesView();
     ~PropertiesView() = default;
 
     void Init(Engine::Scene::Scene* scene) { m_scene = scene; }

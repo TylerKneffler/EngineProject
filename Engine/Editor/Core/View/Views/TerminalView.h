@@ -9,7 +9,7 @@ namespace Engine::Editor
 class TerminalView : public IEditorPanel
 {
 public:
-    TerminalView() = default;
+    TerminalView();
     ~TerminalView() override;
 
     void Init(std::string workingDirectory);

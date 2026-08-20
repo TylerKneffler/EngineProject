@@ -150,8 +150,14 @@ private:
     std::unique_ptr<IPipelineState> m_objectDoubleSidedPipeline;
     std::unique_ptr<IPipelineState> m_objectBlendPipeline;
     std::unique_ptr<IPipelineState> m_objectBlendDoubleSidedPipeline;
+    std::unique_ptr<IPipelineState> m_objectWirePipeline;
+    std::unique_ptr<IPipelineState> m_objectWireDoubleSidedPipeline;
+    std::unique_ptr<IPipelineState> m_objectBlendWirePipeline;
+    std::unique_ptr<IPipelineState> m_objectBlendWireDoubleSidedPipeline;
     std::unique_ptr<IPipelineState> m_objectPreviewPipeline;
     std::unique_ptr<IPipelineState> m_objectPreviewDoubleSidedPipeline;
+    std::unique_ptr<IPipelineState> m_objectPreviewWirePipeline;
+    std::unique_ptr<IPipelineState> m_objectPreviewWireDoubleSidedPipeline;
     std::unique_ptr<IPipelineState> m_objectOutlinePipeline;
     std::unique_ptr<IGraphicsBuffer> m_objectConstantBuffer;
     void* m_objectCBMapped = nullptr;

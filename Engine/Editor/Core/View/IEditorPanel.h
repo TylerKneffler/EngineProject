@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <functional>
+#include "View/Focus/WindowFocusHandler.h"
 namespace Engine::Editor
 {
 class IEditorUi;
@@ -18,6 +19,11 @@ class IEditorUi;
 //                      render target (SceneView, GameView).
 //   - Render3D(cmd)  : for NeedsRender panels, issues the scene draw calls
 //                      into cmd before DrawPanel() reads the texture.
+//
+// Focus & Cursor Handling:
+//   - SetCursorBehaviorOnFocus() : Configure how cursor behaves when panel is focused
+//   - GetCursorBehaviorOnFocus() : Query current cursor behavior configuration
+//   - CaptureCursorOnFocus() : Convenience method to make panel capture cursor (for game windows)
 // ---------------------------------------------------------------------------
 class IEditorPanel
 {
@@ -44,8 +50,29 @@ public:
     bool IsOpen() const       { return m_open; }
     void SetOpen(bool open)   { m_open = open; }
 
+    // ---- Cursor & Focus Handling ----
+    /// Set cursor behavior when this panel receives focus
+    void SetCursorBehaviorOnFocus(CursorBehaviorOnFocus behavior)
+    {
+        m_cursorBehaviorOnFocus = behavior;
+    }
+
+    /// Get cursor behavior configuration for this panel
+    CursorBehaviorOnFocus GetCursorBehaviorOnFocus() const
+    {
+        return m_cursorBehaviorOnFocus;
+    }
+
+    /// Query whether this panel should hide/capture the cursor when focused
+    bool ShouldCaptureCursorOnFocus() const
+    {
+        return m_cursorBehaviorOnFocus != CursorBehaviorOnFocus::Visible &&
+               m_cursorBehaviorOnFocus != CursorBehaviorOnFocus::Confined;
+    }
+
 protected:
     std::string m_title;
     bool        m_open = true;
+    CursorBehaviorOnFocus m_cursorBehaviorOnFocus = CursorBehaviorOnFocus::Visible;
 };
 }

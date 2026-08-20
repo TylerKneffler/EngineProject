@@ -134,6 +134,8 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
             view->OnHierarchyChanged = OnHierarchyChanged;
         if (OnHierarchyInteraction)
             view->OnInteractionLog = OnHierarchyInteraction;
+        if (OnPrefabRequested)
+            view->OnPrefabRequested = OnPrefabRequested;
         m_singletonInstances[typeName] = view.get();
         return view;
     }

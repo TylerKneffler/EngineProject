@@ -1,5 +1,48 @@
 #include "Object.h"
 
+#include "Core/Scene/Scene.h"
+
+namespace
+{
+Engine::Core::Object* FindInChildrenByName(
+    Engine::Core::Object* node,
+    const std::string& objectName,
+    bool includeSelf)
+{
+    if (!node)
+        return nullptr;
+    if (includeSelf && node->name == objectName)
+        return node;
+    for (Engine::Core::Object* child : node->Children)
+    {
+        if (!child)
+            continue;
+        if (Engine::Core::Object* found = FindInChildrenByName(child, objectName, true))
+            return found;
+    }
+    return nullptr;
+}
+
+const Engine::Core::Object* FindInChildrenByName(
+    const Engine::Core::Object* node,
+    const std::string& objectName,
+    bool includeSelf)
+{
+    if (!node)
+        return nullptr;
+    if (includeSelf && node->name == objectName)
+        return node;
+    for (const Engine::Core::Object* child : node->Children)
+    {
+        if (!child)
+            continue;
+        if (const Engine::Core::Object* found = FindInChildrenByName(child, objectName, true))
+            return found;
+    }
+    return nullptr;
+}
+}
+
 namespace Engine::Core
 {
 
@@ -87,6 +130,44 @@ void Object::Destroy()
     delete this;
 }
 #pragma endregion
+
+Object* Object::FindObjectInChildrenByName(const std::string& objectName,
+    bool includeSelf)
+{
+    return FindInChildrenByName(this, objectName, includeSelf);
+}
+
+const Object* Object::FindObjectInChildrenByName(const std::string& objectName,
+    bool includeSelf) const
+{
+    return FindInChildrenByName(this, objectName, includeSelf);
+}
+
+Object* Object::FindObjectInSceneByName(const std::string& objectName)
+{
+    if (!OwnerScene)
+        return nullptr;
+    for (const auto& candidate : OwnerScene->GetObjects())
+    {
+        Object* object = candidate.get();
+        if (object && object->name == objectName)
+            return object;
+    }
+    return nullptr;
+}
+
+const Object* Object::FindObjectInSceneByName(const std::string& objectName) const
+{
+    if (!OwnerScene)
+        return nullptr;
+    for (const auto& candidate : OwnerScene->GetObjects())
+    {
+        const Object* object = candidate.get();
+        if (object && object->name == objectName)
+            return object;
+    }
+    return nullptr;
+}
 
 #pragma region Component management
 // Template bodies are defined in Object.h so they are visible at every

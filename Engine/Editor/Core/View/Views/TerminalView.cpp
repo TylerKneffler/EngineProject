@@ -1,9 +1,19 @@
 #include "TerminalView.h"
 #include "Engine/Editor/UI/IEditorUi.h"
+#include "../Focus/WindowFocusHandler.h"
 #include <algorithm>
 
 namespace Engine::Editor
 {
+// ---------------------------------------------------------------------------
+// Constructor
+// ---------------------------------------------------------------------------
+TerminalView::TerminalView()
+{
+    // Terminal is an editor UI panel with normal cursor
+    SetCursorBehaviorOnFocus(CursorBehaviorOnFocus::Visible);
+}
+
 namespace
 {
 constexpr size_t kMaximumTerminalText = 1024 * 1024;

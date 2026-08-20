@@ -575,4 +575,32 @@ void Component::Deserialize(const JsonValue& v)
     MarkConfigurationDirty();
 }
 
+Object* Component::FindObjectInChildrenByName(const std::string& objectName,
+    bool includeSelf) const
+{
+    return Owner
+        ? Owner->FindObjectInChildrenByName(objectName, includeSelf)
+        : nullptr;
+}
+
+Object* Component::FindObjectInSceneByName(const std::string& objectName) const
+{
+    return Owner ? Owner->FindObjectInSceneByName(objectName) : nullptr;
+}
+
+Component* Component::GetComponentOnObjectNamedInScene(
+    const std::string& objectName,
+    const std::string& componentTypeName) const
+{
+    Object* object = FindObjectInSceneByName(objectName);
+    if (!object)
+        return nullptr;
+    for (Component* component : object->Components)
+    {
+        if (component && component->GetTypeName() == componentTypeName)
+            return component;
+    }
+    return nullptr;
+}
+
 }

@@ -5,6 +5,13 @@
 
 namespace Engine::Model
 {
+enum class SceneRenderMode
+{
+    Lit = 0,
+    Unlit = 1,
+    Wireframe = 2
+};
+
 struct SceneSettings
 {
     bool showGrid = true;
@@ -16,6 +23,10 @@ struct SceneSettings
     glm::vec3 gridOriginColor = glm::vec3(0.30f, 0.50f, 0.80f);
     glm::vec3 ambientColor = glm::vec3(0.12f, 0.12f, 0.12f);
     std::string skyboxTexture;
+    SceneRenderMode renderMode = SceneRenderMode::Lit;
+    // When true, SceneView also shows game-style screen-space UI composition.
+    // Default stays false so scene camera reflects in-scene editing context.
+    bool sceneViewUiOverlay = false;
 
 };
 }

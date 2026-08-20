@@ -5,6 +5,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace pugi { class xml_node; }
 namespace Engine::Components { class Transform; }
@@ -50,10 +51,30 @@ public:
 class SceneObjectBehavior
 {
 public:
+    struct DeserializeOptions
+    {
+        bool assignDefaultNameIfMissing = false;
+        bool allowLegacyModelBindings = false;
+        std::vector<std::pair<Engine::Core::Object*, unsigned>>* legacyModelBindings = nullptr;
+    };
+
     static JsonValue SerializeTransform(
         const Engine::Components::Transform& transform);
     static void DeserializeTransform(Engine::Components::Transform& transform,
         const JsonValue& node);
+    static Engine::Core::Object* DeserializeObjectTree(
+        Engine::Scene::Scene& scene,
+        const JsonValue& node,
+        Engine::Graphics::IGraphicsProvider* graphicsProvider,
+        const std::unordered_map<std::string, SceneSerializer::Factory>& registry,
+        const DeserializeOptions& options = DeserializeOptions{});
+    static bool DeserializeObjectTreeInto(
+        Engine::Core::Object& object,
+        Engine::Scene::Scene& scene,
+        const JsonValue& node,
+        Engine::Graphics::IGraphicsProvider* graphicsProvider,
+        const std::unordered_map<std::string, SceneSerializer::Factory>& registry,
+        const DeserializeOptions& options = DeserializeOptions{});
     static JsonValue SerializeObject(const Engine::Core::Object& object,
         bool serializePrefabAsReference = true);
     static JsonValue SerializeScene(const Engine::Scene::Scene& scene);

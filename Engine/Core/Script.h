@@ -1,5 +1,6 @@
 #pragma once
 #include "Core/component.h"
+#include "Core/Object.h"
 
 // ---------------------------------------------------------------------------
 // Script — base class for all user scripts.
@@ -56,6 +57,48 @@ public:
     std::string GetTypeName() const override
     {
         return Component::GetTypeName();
+    }
+
+    // Hierarchy helpers for gameplay scripts.
+    Object* FindObjectInChildrenByName(const std::string& objectName,
+        bool includeSelf = false) const
+    {
+        return Owner
+            ? Owner->FindObjectInChildrenByName(objectName, includeSelf)
+            : nullptr;
+    }
+
+    Object* FindObjectInSceneByName(const std::string& objectName) const
+    {
+        return Owner ? Owner->FindObjectInSceneByName(objectName) : nullptr;
+    }
+
+    template<typename T>
+    T* GetComponentInParent(bool includeSelf = true) const
+    {
+        return Owner ? Owner->GetComponentInParent<T>(includeSelf) : nullptr;
+    }
+
+    template<typename T>
+    T* GetComponentInChildren(bool includeSelf = true) const
+    {
+        return Owner ? Owner->GetComponentInChildren<T>(includeSelf) : nullptr;
+    }
+
+    template<typename T>
+    std::vector<T*> GetComponentsInChildren(bool includeSelf = true) const
+    {
+        return Owner ? Owner->GetComponentsInChildren<T>(includeSelf)
+            : std::vector<T*>{};
+    }
+
+    template<typename T>
+    T* GetComponentOnObjectNamedInScene(const std::string& objectName) const
+    {
+        if (!Owner)
+            return nullptr;
+        Object* object = Owner->FindObjectInSceneByName(objectName);
+        return object ? object->GetComponent<T>() : nullptr;
     }
     
     // Override in derived classes to draw custom properties in the inspector

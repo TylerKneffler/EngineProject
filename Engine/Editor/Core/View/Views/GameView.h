@@ -24,7 +24,7 @@ namespace Engine::Editor
 class GameView : public View
 {
 public:
-    GameView()  = default;
+    GameView();
     ~GameView() = default;
 
     // Calls View::Init then stores the scene pointer and aspect ratio settings.
