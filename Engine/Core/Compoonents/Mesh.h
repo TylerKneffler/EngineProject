@@ -3,6 +3,7 @@
 #include "Core/PropertyMacros.h"
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Model/MeshData.h"
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <memory>
@@ -37,7 +38,8 @@ public:
     
     uint32_t GetVertexCount() const { return static_cast<uint32_t>(m_vertices.size()); }
     const std::vector<Vertex>& GetVertices() const { return m_vertices; }
-    void SetDeformedVertices(const std::vector<Vertex>& vertices);
+    // Returns true only when CPU vertices, bounds, and the GPU buffer changed.
+    bool SetDeformedVertices(const std::vector<Vertex>& vertices);
     uint32_t GetVertexStride() const { return sizeof(Vertex); }
     bool     IsReady()        const { return m_ready; }
     const std::string& GetFilePath() const { return m_filePath; }
@@ -47,9 +49,11 @@ public:
     unsigned GetMorphNodeIndex() const { return m_morphNodeIndex; }
     void SetMorphData(unsigned nodeIndex, std::vector<MorphTarget> targets,
         std::vector<float> weights);
+    bool SetMorphWeights(const std::vector<float>& weights);
     const std::vector<MorphTarget>& GetMorphTargets() const { return m_morphTargets; }
     const std::vector<float>& GetMorphWeights() const { return m_morphWeights; }
     std::vector<float>& GetMorphWeights() { return m_morphWeights; }
+    uint64_t GetMorphWeightsRevision() const;
     bool HasMorphTargets() const { return !m_morphTargets.empty(); }
 
     bool        DrawProperties(::Engine::Editor::IEditorUi& ui) override;
@@ -59,6 +63,8 @@ public:
     void        OnAfterDeserialize(IGraphicsProvider* graphicsProvider) override;
 
 private:
+    void ObserveMorphWeights() const;
+    void AdvanceMorphWeightsRevision() const;
     void UpdateBounds();
     std::string m_filePath;
     std::vector<Vertex> m_vertices;
@@ -70,5 +76,8 @@ private:
     unsigned m_morphNodeIndex = 0;
     std::vector<MorphTarget> m_morphTargets;
     std::vector<float> m_morphWeights;
+    mutable std::vector<float> m_observedMorphWeights;
+    mutable uint64_t m_morphWeightsRevision = 1;
+    mutable bool m_morphWeightsObserved = false;
 };
 }

@@ -77,7 +77,8 @@ void PropertiesView::DrawComponentPicker(IEditorUi& ui)
 
     ui.InputText("Search", m_componentSearch, sizeof(m_componentSearch));
     ui.Separator();
-    const std::vector<std::string> types = Engine::Serialization::SceneSerializer::GetRegisteredComponentTypes();
+    const std::vector<std::string>& types =
+        Engine::Serialization::SceneSerializer::GetRegisteredComponentTypes();
     bool foundMatch = false;
     for (const std::string& type : types)
     {

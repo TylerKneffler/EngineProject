@@ -43,6 +43,70 @@
 
 namespace Engine::Serialization
 {
+namespace
+{
+struct RegisteredTypeMetadata
+{
+    bool editorAddable = true;
+    bool script = false;
+};
+
+struct RegistryPickerCache
+{
+    std::unordered_map<std::string, RegisteredTypeMetadata> metadata;
+    std::vector<std::string> componentTypes;
+    std::vector<std::string> scriptTypes;
+    bool dirty = true;
+};
+
+RegistryPickerCache& PickerCache()
+{
+    static RegistryPickerCache cache;
+    return cache;
+}
+
+void CacheRegistrationMetadata(const std::string& typeName,
+    const Engine::Core::Component& prototype)
+{
+    PickerCache().metadata[typeName] = {
+        prototype.editorAddable,
+        dynamic_cast<const Engine::Core::Script*>(&prototype) != nullptr
+    };
+    PickerCache().dirty = true;
+}
+
+void RebuildPickerCache()
+{
+    RegistryPickerCache& cache = PickerCache();
+    if (!cache.dirty)
+        return;
+
+    cache.componentTypes.clear();
+    cache.scriptTypes.clear();
+    cache.componentTypes.reserve(cache.metadata.size());
+    cache.scriptTypes.reserve(cache.metadata.size());
+    for (const auto& entry : cache.metadata)
+    {
+        if (entry.second.editorAddable)
+            cache.componentTypes.push_back(entry.first);
+        if (entry.second.script)
+            cache.scriptTypes.push_back(entry.first);
+    }
+    std::sort(cache.componentTypes.begin(), cache.componentTypes.end(),
+        [](const std::string& left, const std::string& right)
+        {
+            return std::lexicographical_compare(
+                left.begin(), left.end(), right.begin(), right.end(),
+                [](unsigned char a, unsigned char b)
+                {
+                    return std::tolower(a) < std::tolower(b);
+                });
+        });
+    std::sort(cache.scriptTypes.begin(), cache.scriptTypes.end());
+    cache.dirty = false;
+}
+}
+
 // ---- Registry ---------------------------------------------------------------
 std::unordered_map<std::string, SceneSerializer::Factory>& SceneSerializer::GetRegistry()
 {
@@ -52,12 +116,20 @@ std::unordered_map<std::string, SceneSerializer::Factory>& SceneSerializer::GetR
 
 void SceneSerializer::Register(const std::string& typeName, Factory factory)
 {
+    if (!factory)
+        throw std::invalid_argument("Cannot register an empty component factory");
+    std::unique_ptr<Engine::Core::Component> prototype(factory());
+    if (!prototype)
+        throw std::invalid_argument("Registered component factories must create an instance");
+    CacheRegistrationMetadata(typeName, *prototype);
     GetRegistry()[typeName] = std::move(factory);
 }
 
 void SceneSerializer::Unregister(const std::string& typeName)
 {
     GetRegistry().erase(typeName);
+    PickerCache().metadata.erase(typeName);
+    PickerCache().dirty = true;
 }
 
 SceneSerializer::Factory SceneSerializer::GetRegisteredFactory(
@@ -77,7 +149,8 @@ void SceneSerializer::Register(Factory factory)
         throw std::invalid_argument("Registered components must provide a type name");
 
     const std::string typeName = prototype->GetTypeName();
-    Register(typeName, std::move(factory));
+    CacheRegistrationMetadata(typeName, *prototype);
+    GetRegistry()[typeName] = std::move(factory);
 }
 
 void SceneSerializer::EnsureBuiltinsRegistered()
@@ -130,37 +203,18 @@ Engine::Core::Component* SceneSerializer::CreateRegisteredComponent(const std::s
     return found != registry.end() && found->second ? found->second() : nullptr;
 }
 
-std::vector<std::string> SceneSerializer::GetRegisteredComponentTypes()
+const std::vector<std::string>& SceneSerializer::GetRegisteredComponentTypes()
 {
     EnsureBuiltinsRegistered();
-    std::vector<std::string> types;
-    types.reserve(GetRegistry().size());
-    for (const auto& entry : GetRegistry())
-    {
-        std::unique_ptr<Engine::Core::Component> prototype(entry.second ? entry.second() : nullptr);
-        if (prototype && prototype->editorAddable)
-            types.push_back(entry.first);
-    }
-    std::sort(types.begin(), types.end(), [](const std::string& left, const std::string& right)
-    {
-        return std::lexicographical_compare(left.begin(), left.end(), right.begin(), right.end(),
-            [](unsigned char a, unsigned char b) { return std::tolower(a) < std::tolower(b); });
-    });
-    return types;
+    RebuildPickerCache();
+    return PickerCache().componentTypes;
 }
 
 std::vector<std::string> SceneSerializer::GetRegisteredScriptTypes()
 {
     EnsureBuiltinsRegistered();
-    std::vector<std::string> types;
-    for (const auto& entry : GetRegistry())
-    {
-        std::unique_ptr<Engine::Core::Component> prototype(entry.second ? entry.second() : nullptr);
-        if (prototype && dynamic_cast<Engine::Core::Script*>(prototype.get()))
-            types.push_back(entry.first);
-    }
-    std::sort(types.begin(), types.end());
-    return types;
+    RebuildPickerCache();
+    return PickerCache().scriptTypes;
 }
 
 }

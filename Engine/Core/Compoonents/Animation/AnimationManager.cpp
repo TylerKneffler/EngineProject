@@ -383,7 +383,7 @@ void AnimationManager::Tick(float frameDelta)
             mesh && mesh->HasMorphTargets())
             if (const auto found = finalPose.find(mesh->GetMorphNodeIndex());
                 found != finalPose.end() && found->second.hasWeights)
-                mesh->GetMorphWeights() = found->second.weights;
+                mesh->SetMorphWeights(found->second.weights);
         for (Engine::Core::Object* child : object->Children) applyMorphs(child);
     };
     applyMorphs(model->Owner);

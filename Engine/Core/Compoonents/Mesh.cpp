@@ -209,20 +209,25 @@ void Mesh::LoadFromFile(const std::string& path)
     m_ready = false;
 }
 
-void Mesh::SetDeformedVertices(const std::vector<Vertex>& vertices)
+bool Mesh::SetDeformedVertices(const std::vector<Vertex>& vertices)
 {
     if (vertices.size() != m_vertices.size())
-        return;
+        return false;
+    const size_t byteSize = vertices.size() * sizeof(Vertex);
+    if (byteSize == 0 ||
+        std::memcmp(vertices.data(), m_vertices.data(), byteSize) == 0)
+        return false;
     m_vertices = vertices;
     UpdateBounds();
     if (m_vertexBuffer)
     {
         if (void* mapped = m_vertexBuffer->Map())
         {
-            std::memcpy(mapped, m_vertices.data(), m_vertices.size() * sizeof(Vertex));
+            std::memcpy(mapped, m_vertices.data(), byteSize);
             m_vertexBuffer->Unmap();
         }
     }
+    return true;
 }
 
 void Mesh::SetMorphData(unsigned nodeIndex, std::vector<MorphTarget> targets,
@@ -232,6 +237,55 @@ void Mesh::SetMorphData(unsigned nodeIndex, std::vector<MorphTarget> targets,
     m_morphTargets = std::move(targets);
     m_morphWeights = std::move(weights);
     m_morphWeights.resize(m_morphTargets.size(), 0.f);
+    m_observedMorphWeights = m_morphWeights;
+    m_morphWeightsObserved = true;
+    AdvanceMorphWeightsRevision();
+}
+
+namespace
+{
+bool SameMorphWeights(const std::vector<float>& first,
+    const std::vector<float>& second)
+{
+    return first.size() == second.size() &&
+        (first.empty() || std::memcmp(first.data(), second.data(),
+            first.size() * sizeof(float)) == 0);
+}
+}
+
+void Mesh::AdvanceMorphWeightsRevision() const
+{
+    if (++m_morphWeightsRevision == 0)
+        ++m_morphWeightsRevision;
+}
+
+void Mesh::ObserveMorphWeights() const
+{
+    if (m_morphWeightsObserved &&
+        SameMorphWeights(m_morphWeights, m_observedMorphWeights))
+        return;
+    if (m_morphWeightsObserved)
+        AdvanceMorphWeightsRevision();
+    m_observedMorphWeights = m_morphWeights;
+    m_morphWeightsObserved = true;
+}
+
+bool Mesh::SetMorphWeights(const std::vector<float>& weights)
+{
+    ObserveMorphWeights();
+    if (SameMorphWeights(m_morphWeights, weights))
+        return false;
+    m_morphWeights = weights;
+    m_observedMorphWeights = m_morphWeights;
+    m_morphWeightsObserved = true;
+    AdvanceMorphWeightsRevision();
+    return true;
+}
+
+uint64_t Mesh::GetMorphWeightsRevision() const
+{
+    ObserveMorphWeights();
+    return m_morphWeightsRevision;
 }
 
 void Mesh::UpdateBounds()

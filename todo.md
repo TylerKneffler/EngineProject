@@ -44,9 +44,9 @@
 - [x] Add transform revisions and cached world matrices for rendering, lighting, physics, audio, and editor helpers.
 - [x] Replace per-frame physics JSON configuration signatures with component revision counters and remove duplicate `EnsureBody()` / `EnsureSoftBody()` calls.
 - [x] Cache cloth simulation meshes so unchanged cloth bodies do not reload mesh files from disk.
-- [ ] Skip morph deformation, bounds rebuilding, and vertex uploads until morph weights actually change.
+- [x] Skip morph deformation, bounds rebuilding, and vertex uploads until morph weights actually change.
 - [x] Resolve sprite/component references once per update or render snapshot instead of repeatedly for preparation, readiness, UV, size, and texture queries.
 - [x] Give animation, mesh, and skinned-mesh components lightweight inspectors that do not serialize their full runtime payload every expanded frame.
-- [ ] Cache registered component-picker entries rather than constructing component prototypes whenever the picker is drawn.
+- [x] Cache registered component-picker entries rather than constructing component prototypes whenever the picker is drawn.
 - [ ] Update the native editor window title only when its displayed state changes.
-- [x] Implement a centralized storage and cache system for both long and short term memory.
+- [x] Implement a centralized storage and cache system for both long and short term memory, refactor engine systems to use this.

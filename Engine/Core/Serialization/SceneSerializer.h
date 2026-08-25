@@ -69,7 +69,8 @@ public:
     // Create a default instance of a registered component type. The editor
     // uses this for component-script assets dropped onto an object.
     static Component* CreateRegisteredComponent(const std::string& typeName);
-    static std::vector<std::string> GetRegisteredComponentTypes();
+    // Sorted editor-addable names cached by the registration lifecycle.
+    static const std::vector<std::string>& GetRegisteredComponentTypes();
     static std::vector<std::string> GetRegisteredScriptTypes();
     static void Unregister(const std::string& typeName);
     static Factory GetRegisteredFactory(const std::string& typeName);

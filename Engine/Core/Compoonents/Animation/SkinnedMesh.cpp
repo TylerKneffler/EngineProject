@@ -129,6 +129,8 @@ void SkinnedMesh::Start()
         : Owner->GetComponent<Mesh>()) : nullptr;
     if (!mesh) return;
     m_baseVertices = mesh->GetVertices();
+    m_appliedMorphMesh = nullptr;
+    m_appliedMorphRevision = 0;
     // Compatibility with prefabs imported before influences moved into Mesh.
     if (joints.size() == m_baseVertices.size() &&
         weights.size() == m_baseVertices.size())
@@ -160,7 +162,12 @@ void SkinnedMesh::Update()
         : Owner->GetComponent<Mesh>()) : nullptr;
     if (!mesh) return;
     if (!mesh->HasMorphTargets()) return;
-    if (m_baseVertices.size() != mesh->GetVertices().size())
+    const uint64_t morphRevision = mesh->GetMorphWeightsRevision();
+    if (m_appliedMorphMesh == mesh &&
+        m_appliedMorphRevision == morphRevision)
+        return;
+    if (m_appliedMorphMesh != mesh ||
+        m_baseVertices.size() != mesh->GetVertices().size())
         m_baseVertices = mesh->GetVertices();
     std::vector<Vertex> deformed = m_baseVertices;
     const auto& morphTargets = mesh->GetMorphTargets();
@@ -213,6 +220,8 @@ void SkinnedMesh::Update()
         }
     }
     mesh->SetDeformedVertices(deformed);
+    m_appliedMorphMesh = mesh;
+    m_appliedMorphRevision = morphRevision;
 }
 
 bool SkinnedMesh::BuildPalette(std::vector<glm::mat4>& palette) const

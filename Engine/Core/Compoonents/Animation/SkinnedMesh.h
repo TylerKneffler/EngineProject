@@ -2,6 +2,7 @@
 
 #include "Core/Component.h"
 #include "Core/Compoonents/Mesh.h"
+#include <cstdint>
 #include <glm/glm.hpp>
 #include <vector>
 
@@ -28,5 +29,7 @@ public:
 
 private:
     std::vector<Vertex> m_baseVertices;
+    const Mesh* m_appliedMorphMesh = nullptr;
+    uint64_t m_appliedMorphRevision = 0;
 };
 }
