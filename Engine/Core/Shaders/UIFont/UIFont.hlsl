@@ -29,13 +29,10 @@ PSInput VSMain(VSInput input)
     return output;
 }
 
-float4 PSImage(PSInput input) : SV_TARGET
-{
-    return fontAtlas.Sample(fontSampler, input.uv) * input.color;
-}
-
-// Offline Vulkan shader packaging expects the conventional entry point.
 float4 PSMain(PSInput input) : SV_TARGET
 {
-    return PSImage(input);
+    const float distance = fontAtlas.Sample(fontSampler, input.uv).a;
+    const float width = max(fwidth(distance), 0.015);
+    const float coverage = smoothstep(0.5 - width, 0.5 + width, distance);
+    return float4(input.color.rgb, input.color.a * coverage);
 }

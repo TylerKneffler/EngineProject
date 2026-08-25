@@ -349,6 +349,16 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
         return;
     }
 
+    if (IsFontAssetExtension(extension))
+    {
+        ui.Separator();
+        ui.Label("Runtime Font");
+        ui.ValueLabel("Format", extension == ".ttf"
+            ? "TrueType Font" : "OpenType Font");
+        ui.DisabledLabel("Drop this font onto a UI text object or its Font Path property.");
+        return;
+    }
+
     if (extension == ".spriteanim")
     {
         Engine::Rendering::SpriteAnimationAsset asset;

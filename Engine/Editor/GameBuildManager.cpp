@@ -77,7 +77,8 @@ void GameBuildManager::StartBuild(PostBuildAction action)
         const size_t shaders = CountFiles(m_developmentSettings.shadersDirectory,
             {".hlsl", ".glsl", ".vert", ".frag", ".comp"});
         const size_t assets = CountFiles(m_developmentSettings.assetsDirectory,
-            {".png", ".jpg", ".jpeg", ".dds", ".obj", ".fbx", ".gltf", ".glb", ".wav"});
+            {".png", ".jpg", ".jpeg", ".dds", ".obj", ".fbx", ".gltf", ".glb",
+             ".wav", ".ogg", ".mp3", ".ttf", ".otf"});
         m_console->AddLog(ConsoleView::Level::Build,
             "[Build] Starting Debug Game build: cmake configure/check, compile, and link.");
         m_console->AddLog(ConsoleView::Level::Build,

@@ -3,8 +3,10 @@
 #include "Core/UI/UILayout.h"
 #include "Core/Compoonents/UI/Canvas.h"
 #include "Core/Compoonents/UI/UIButton.h"
+#include "Core/Compoonents/UI/UIImage.h"
 #include "Core/Compoonents/UI/UIObject.h"
 #include "Core/Compoonents/UI/UIText.h"
+#include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Graphics/IGraphicsProvider.h"
@@ -17,6 +19,7 @@
 #include <imstb_truetype.h>
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -74,6 +77,7 @@ struct DrawSegment
     Engine::Graphics::IGraphicsTexture* texture = nullptr;
     uint32_t firstVertex = 0;
     uint32_t vertexCount = 0;
+    bool fontSdf = false;
 };
 
 Engine::Model::UIRect Intersect(const Engine::Model::UIRect& first,
@@ -91,9 +95,27 @@ std::filesystem::path ResolveFontPath(const std::string& requested)
     if (!requested.empty())
     {
         std::filesystem::path path(requested);
-        if (std::filesystem::is_regular_file(path)) return path;
-        const auto enginePath = std::filesystem::path(ENGINE_ASSETS_PATH) / path;
-        if (std::filesystem::is_regular_file(enginePath)) return enginePath;
+        std::string extension = path.extension().string();
+        std::transform(extension.begin(), extension.end(), extension.begin(),
+            [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+        if (extension == ".ttf" || extension == ".otf")
+        {
+            std::error_code error;
+            if (std::filesystem::is_regular_file(path, error)) return path;
+
+            const std::filesystem::path relative =
+                path.lexically_relative(std::filesystem::path("Assets"));
+            if (!relative.empty() && *relative.begin() != "..")
+            {
+                const auto bundled =
+                    std::filesystem::path(ENGINE_ASSETS_PATH) / relative;
+                if (std::filesystem::is_regular_file(bundled, error))
+                    return bundled;
+            }
+
+            const auto enginePath = std::filesystem::path(ENGINE_ASSETS_PATH) / path;
+            if (std::filesystem::is_regular_file(enginePath, error)) return enginePath;
+        }
     }
 #ifdef _WIN32
     const std::filesystem::path segoe("C:/Windows/Fonts/segoeui.ttf");
@@ -209,7 +231,8 @@ void AddQuad(std::vector<UIVertex>& vertices, float x0, float y0, float x1, floa
 struct UIRenderer::Impl
 {
     Engine::Graphics::IGraphicsProvider* provider = nullptr;
-    std::unique_ptr<Engine::Graphics::IPipelineState> pipeline;
+    std::unique_ptr<Engine::Graphics::IPipelineState> imagePipeline;
+    std::unique_ptr<Engine::Graphics::IPipelineState> fontPipeline;
     std::unique_ptr<Engine::Graphics::IGraphicsBuffer> vertexBuffer;
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> whiteTexture;
     std::size_t vertexCapacity = 0;
@@ -287,27 +310,36 @@ void UIRenderer::Initialize(Engine::Graphics::IGraphicsProvider* graphicsProvide
     auto* factory = graphicsProvider->GetPipelineStateFactory();
     if (!compiler || !factory) return;
     const std::filesystem::path shader = std::filesystem::path(ENGINE_SHADERS_PATH) / "UI" / "UI.hlsl";
+    const std::filesystem::path fontShader =
+        std::filesystem::path(ENGINE_SHADERS_PATH) / "UIFont" / "UIFont.hlsl";
     auto vertexShader = compiler->CompileFromFile(shader.string().c_str(), "VSMain",
         Engine::Graphics::IShaderCompiler::CompileProfile::VS_5_0);
-    auto pixelShader = compiler->CompileFromFile(shader.string().c_str(), "PSMain",
+    auto imagePixelShader = compiler->CompileFromFile(shader.string().c_str(), "PSMain",
         Engine::Graphics::IShaderCompiler::CompileProfile::PS_5_0);
-    if (!vertexShader || !pixelShader) return;
+    auto fontPixelShader = compiler->CompileFromFile(fontShader.string().c_str(), "PSMain",
+        Engine::Graphics::IShaderCompiler::CompileProfile::PS_5_0);
+    if (!vertexShader || !imagePixelShader || !fontPixelShader) return;
     Engine::Graphics::IPipelineStateBuilder::VertexElement layout[] = {
         { "POSITION", 0, 16, 0, 0, false },
         { "TEXCOORD", 0, 16, 0, 8, false },
         { "COLOR", 0, 2, 0, 16, false }
     };
-    auto builder = factory->CreateBuilder();
-    if (!builder) return;
-    m_impl->pipeline = builder->SetVertexShader(vertexShader.get())
-        .SetPixelShader(pixelShader.get()).SetFillMode(false).SetCullMode(false)
-        .SetFrontCounterClockwise(false).SetDepthClipEnable(false).SetBlendEnable(true)
-        .SetSrcBlend(4).SetDestBlend(5).SetBlendOp(0)
-        .SetSrcBlendAlpha(1).SetDestBlendAlpha(0).SetBlendOpAlpha(0)
-        .SetDepthEnable(false).SetDepthWriteEnable(false).SetDepthFunc(7)
-        .SetInputLayout(layout, 3)
-        .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
-        .SetRenderTargetFormat(28, 40).Build();
+    const auto buildPipeline = [&](const Engine::Graphics::IShader* pixelShader)
+    {
+        auto builder = factory->CreateBuilder();
+        if (!builder) return std::unique_ptr<Engine::Graphics::IPipelineState>{};
+        return builder->SetVertexShader(vertexShader.get())
+            .SetPixelShader(pixelShader).SetFillMode(false).SetCullMode(false)
+            .SetFrontCounterClockwise(false).SetDepthClipEnable(false).SetBlendEnable(true)
+            .SetSrcBlend(4).SetDestBlend(5).SetBlendOp(0)
+            .SetSrcBlendAlpha(1).SetDestBlendAlpha(0).SetBlendOpAlpha(0)
+            .SetDepthEnable(false).SetDepthWriteEnable(false).SetDepthFunc(7)
+            .SetInputLayout(layout, 3)
+            .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
+            .SetRenderTargetFormat(28, 40).Build();
+    };
+    m_impl->imagePipeline = buildPipeline(imagePixelShader.get());
+    m_impl->fontPipeline = buildPipeline(fontPixelShader.get());
 
     auto* textureFactory = graphicsProvider->GetTextureFactory();
     if (textureFactory)
@@ -319,7 +351,10 @@ void UIRenderer::Initialize(Engine::Graphics::IGraphicsProvider* graphicsProvide
     }
 }
 
-bool UIRenderer::IsReady() const { return m_impl && m_impl->pipeline; }
+bool UIRenderer::IsReady() const
+{
+    return m_impl && m_impl->imagePipeline && m_impl->fontPipeline;
+}
 
 void UIRenderer::Render(Engine::Scene::Scene& scene,
     Engine::Graphics::IGraphicsContext* context, float viewportAspect)
@@ -376,6 +411,128 @@ void UIRenderer::Render(Engine::Scene::Scene& scene,
             }
             if (!isNestedCanvas)
                 canvasSizes.emplace_back(canvas, canvas->GetLogicalSize(viewportAspect));
+        }
+
+        // Images are backgrounds in the retained UI stack: they render before
+        // button state overlays and text while respecting the computed rect
+        // and parent clip from UIObject.
+        for (const auto& candidate : scene.GetObjects())
+        {
+            Engine::Core::Object* object = candidate.get();
+            if (!object || !object->IsEnabledInHierarchy()) continue;
+            auto* layout = object->GetComponent<Engine::Components::UIObject>();
+            auto* image = object->GetComponent<Engine::Components::UIImage>();
+            if (!layout || !image || !layout->visible ||
+                image->fillAmount <= 0.f || !image->Prepare(m_impl->provider))
+                continue;
+            const Engine::Components::Texture* texture = image->GetTexture();
+            if (!texture || !texture->GetGraphicsTexture() ||
+                texture->GetWidth() == 0 || texture->GetHeight() == 0)
+                continue;
+
+            Engine::Components::Canvas* canvas = nullptr;
+            for (Engine::Core::Object* current = object; current; current = current->Parent)
+            {
+                canvas = current->GetComponent<Engine::Components::Canvas>();
+                if (canvas) break;
+            }
+            if (!canvas) continue;
+            glm::vec2 canvasSize(1.f);
+            for (const auto& entry : canvasSizes)
+                if (entry.first == canvas) { canvasSize = entry.second; break; }
+
+            const Engine::Model::UIRect& rect = layout->GetComputedRect();
+            if (rect.width <= 0.f || rect.height <= 0.f) continue;
+            float x0 = rect.x, y0 = rect.y;
+            float x1 = rect.x + rect.width, y1 = rect.y + rect.height;
+            float u0 = 0.f, v0 = 0.f, u1 = 1.f, v1 = 1.f;
+            std::string fit = image->fitMode;
+            std::transform(fit.begin(), fit.end(), fit.begin(),
+                [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+            const float sourceAspect = static_cast<float>(texture->GetWidth()) /
+                static_cast<float>(texture->GetHeight());
+            const float targetAspect = rect.height > 0.f ? rect.width / rect.height : sourceAspect;
+            if (fit == "contain")
+            {
+                if (sourceAspect > targetAspect)
+                {
+                    const float height = rect.width / sourceAspect;
+                    y0 += (rect.height - height) * 0.5f;
+                    y1 = y0 + height;
+                }
+                else
+                {
+                    const float width = rect.height * sourceAspect;
+                    x0 += (rect.width - width) * 0.5f;
+                    x1 = x0 + width;
+                }
+            }
+            else if (fit == "cover")
+            {
+                if (sourceAspect > targetAspect)
+                {
+                    const float visible = targetAspect / sourceAspect;
+                    u0 = (1.f - visible) * 0.5f;
+                    u1 = u0 + visible;
+                }
+                else
+                {
+                    const float visible = sourceAspect / targetAspect;
+                    v0 = (1.f - visible) * 0.5f;
+                    v1 = v0 + visible;
+                }
+            }
+            else if (fit == "native" || fit == "none")
+            {
+                const float width = static_cast<float>(texture->GetWidth());
+                const float height = static_cast<float>(texture->GetHeight());
+                x0 += (rect.width - width) * 0.5f;
+                y0 += (rect.height - height) * 0.5f;
+                x1 = x0 + width;
+                y1 = y0 + height;
+            }
+
+            const float amount = std::clamp(image->fillAmount, 0.f, 1.f);
+            std::string direction = image->fillDirection;
+            std::transform(direction.begin(), direction.end(), direction.begin(),
+                [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+            if (direction == "righttoleft")
+            {
+                x0 = x1 - (x1 - x0) * amount;
+                u0 = u1 - (u1 - u0) * amount;
+            }
+            else if (direction == "toptobottom")
+            {
+                y1 = y0 + (y1 - y0) * amount;
+                v1 = v0 + (v1 - v0) * amount;
+            }
+            else if (direction == "bottomtotop")
+            {
+                y0 = y1 - (y1 - y0) * amount;
+                v0 = v1 - (v1 - v0) * amount;
+            }
+            else
+            {
+                x1 = x0 + (x1 - x0) * amount;
+                u1 = u0 + (u1 - u0) * amount;
+            }
+            if (image->flipX) std::swap(u0, u1);
+            if (image->flipY) std::swap(v0, v1);
+            if (!ClipQuad(x0, y0, x1, y1, u0, v0, u1, v1,
+                layout->GetComputedClipRect()))
+                continue;
+
+            const uint32_t first = static_cast<uint32_t>(vertices.size());
+            AddQuad(vertices, x0, y0, x1, y1, u0, v0, u1, v1,
+                glm::vec4(image->color, std::clamp(image->alpha, 0.f, 1.f)), canvasSize);
+            auto* graphicsTexture = const_cast<Engine::Graphics::IGraphicsTexture*>(
+                texture->GetGraphicsTexture());
+            if (!segments.empty() && !segments.back().fontSdf &&
+                segments.back().texture == graphicsTexture &&
+                segments.back().firstVertex + segments.back().vertexCount == first)
+                segments.back().vertexCount += 6;
+            else
+                segments.push_back({ graphicsTexture, first, 6, false });
         }
 
         const uint32_t firstButtonVertex = static_cast<uint32_t>(vertices.size());
@@ -446,7 +603,7 @@ void UIRenderer::Render(Engine::Scene::Scene& scene,
 
         const uint32_t buttonCount = static_cast<uint32_t>(vertices.size()) - firstButtonVertex;
         if (buttonCount > 0)
-            segments.push_back({ m_impl->whiteTexture.get(), firstButtonVertex, buttonCount });
+            segments.push_back({ m_impl->whiteTexture.get(), firstButtonVertex, buttonCount, false });
     }
 
     for (const Engine::Model::UITextLayout& item : items)
@@ -506,10 +663,11 @@ void UIRenderer::Render(Engine::Scene::Scene& scene,
         }
         const uint32_t count = static_cast<uint32_t>(vertices.size()) - firstVertex;
         if (!count) continue;
-        if (!segments.empty() && segments.back().texture == atlas->texture.get() &&
+        if (!segments.empty() && segments.back().fontSdf &&
+            segments.back().texture == atlas->texture.get() &&
             segments.back().firstVertex + segments.back().vertexCount == firstVertex)
             segments.back().vertexCount += count;
-        else segments.push_back({ atlas->texture.get(), firstVertex, count });
+        else segments.push_back({ atlas->texture.get(), firstVertex, count, true });
     }
     if (vertices.empty()) return;
 
@@ -529,10 +687,18 @@ void UIRenderer::Render(Engine::Scene::Scene& scene,
     }
     else return;
 
-    context->SetPipeline(m_impl->pipeline.get());
     context->SetVertexBuffer(0, m_impl->vertexBuffer.get(), sizeof(UIVertex));
+    bool activeFontPipeline = false;
+    bool hasActivePipeline = false;
     for (const DrawSegment& segment : segments)
     {
+        if (!hasActivePipeline || activeFontPipeline != segment.fontSdf)
+        {
+            activeFontPipeline = segment.fontSdf;
+            hasActivePipeline = true;
+            context->SetPipeline(activeFontPipeline
+                ? m_impl->fontPipeline.get() : m_impl->imagePipeline.get());
+        }
         context->SetTexture(0, segment.texture);
         context->DrawInstanced(segment.vertexCount, 1, segment.firstVertex, 0);
     }

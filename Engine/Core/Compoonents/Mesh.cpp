@@ -21,6 +21,28 @@ Mesh::Mesh()
 #define ENGINE_ASSETS_PATH "Engine/Core/Assets/"
 #endif
 
+std::string Mesh::ResolveFilePath(const std::string& path)
+{
+    const std::filesystem::path requested(path);
+    if (std::filesystem::exists(requested))
+        return requested.lexically_normal().generic_string();
+
+    // Scenes distributed with a project deliberately store portable paths such
+    // as Assets/Mesh/cube.obj. In the project-free Engine Sandbox, resolve that
+    // same path against the built-in template assets instead.
+    const std::filesystem::path projectAssets("Assets");
+    const std::filesystem::path relativeAsset = requested.lexically_relative(projectAssets);
+    if (!relativeAsset.empty() && *relativeAsset.begin() != "..")
+    {
+        const std::filesystem::path engineAsset =
+            std::filesystem::path(ENGINE_ASSETS_PATH) / relativeAsset;
+        if (std::filesystem::exists(engineAsset))
+            return engineAsset.lexically_normal().generic_string();
+    }
+
+    return requested.lexically_normal().generic_string();
+}
+
 namespace
 {
 constexpr uint32_t kNativeMeshMagic = 0x4853454d; // "MESH"
@@ -33,28 +55,6 @@ struct LegacyVertexV3
 {
     float pos[3], normal[3], uv[2], tangent[4], uv1[2], color[4];
 };
-
-std::filesystem::path ResolveMeshPath(const std::string& path)
-{
-    const std::filesystem::path requested(path);
-    if (std::filesystem::exists(requested))
-        return requested;
-
-    // Scenes distributed with a project deliberately store portable paths such
-    // as Assets/Mesh/cube.obj. In the project-free Engine Sandbox, resolve that
-    // same path against the built-in template assets instead.
-    const std::filesystem::path projectAssets("Assets");
-    const std::filesystem::path relativeAsset = requested.lexically_relative(projectAssets);
-    if (!relativeAsset.empty() && *relativeAsset.begin() != "..")
-    {
-        const std::filesystem::path engineAsset =
-            std::filesystem::path(ENGINE_ASSETS_PATH) / relativeAsset;
-        if (std::filesystem::exists(engineAsset))
-            return engineAsset;
-    }
-
-    return requested;
-}
 
 Engine::Serialization::JsonValue FloatArray(const std::vector<float>& values)
 {
@@ -108,7 +108,7 @@ void Mesh::LoadFromFile(const std::string& path)
 {
     MarkConfigurationDirty();
     m_filePath = path;  // store for serialization
-    const std::filesystem::path resolvedPath = ResolveMeshPath(path);
+    const std::filesystem::path resolvedPath = ResolveFilePath(path);
     if (resolvedPath.extension() == ".mesh")
     {
         std::ifstream native(resolvedPath, std::ios::binary);

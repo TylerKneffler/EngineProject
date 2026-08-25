@@ -9,7 +9,6 @@
 #include <cmath>
 #include <cfloat>
 #include <set>
-#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 #include <glm/gtc/matrix_inverse.hpp>
@@ -62,43 +61,9 @@ glm::mat3 WorldRotation(const Engine::Core::Object& object)
         : glm::mat3(local);
 }
 
-glm::mat4 LocalMatrix(const Engine::Core::Object& object)
+glm::vec3 WorldPosition(Engine::Core::Object* object)
 {
-    const auto& transform = object.transform;
-    return glm::translate(glm::mat4(1.f), transform.position) *
-        glm::rotate(glm::mat4(1.f), transform.rotation.z, { 0.f, 0.f, 1.f }) *
-        glm::rotate(glm::mat4(1.f), transform.rotation.y, { 0.f, 1.f, 0.f }) *
-        glm::rotate(glm::mat4(1.f), transform.rotation.x, { 1.f, 0.f, 0.f }) *
-        glm::scale(glm::mat4(1.f), transform.scale);
-}
-
-glm::mat4 CachedWorldMatrix(Engine::Core::Object* object,
-    std::unordered_map<Engine::Core::Object*, glm::mat4>& cache)
-{
-    if (!object) return glm::mat4(1.f);
-    if (const auto found = cache.find(object); found != cache.end())
-        return found->second;
-
-    std::vector<Engine::Core::Object*> chain;
-    Engine::Core::Object* current = object;
-    while (current && cache.find(current) == cache.end())
-    {
-        chain.push_back(current);
-        current = current->Parent;
-    }
-    glm::mat4 world = current ? cache.find(current)->second : glm::mat4(1.f);
-    for (auto it = chain.rbegin(); it != chain.rend(); ++it)
-    {
-        world *= LocalMatrix(**it);
-        cache.emplace(*it, world);
-    }
-    return cache.find(object)->second;
-}
-
-glm::vec3 CachedWorldPosition(Engine::Core::Object* object,
-    std::unordered_map<Engine::Core::Object*, glm::mat4>& cache)
-{
-    return glm::vec3(CachedWorldMatrix(object, cache)[3]);
+    return object ? object->transform.GetWorldPosition() : glm::vec3(0.f);
 }
 
 bool ProjectPoint(const glm::mat4& viewProjection, const glm::vec3& world,
@@ -231,8 +196,6 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
     const glm::mat4 viewProjection =
         camera->GetProjectionMatrix(input.available.x / input.available.y) *
         camera->GetViewMatrix();
-    std::unordered_map<Engine::Core::Object*, glm::mat4> worldMatrices;
-    worldMatrices.reserve(scene.GetObjects().size() * 2);
     Engine::Core::Object* selected = scene.GetSelectedObject();
     Engine::Core::Object* selectedPrefabRoot = selected
         ? selected->GetPrefabInstanceRoot() : nullptr;
@@ -265,7 +228,7 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
 
                 EditorUiVec2 tipScreen{};
                 if (!ProjectPoint(viewProjection,
-                    CachedWorldPosition(joint, worldMatrices), input.available,
+                    WorldPosition(joint), input.available,
                     tipScreen))
                     continue;
 
@@ -294,7 +257,7 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
                     continue;
                 EditorUiVec2 rootScreen{};
                 if (!ProjectPoint(viewProjection,
-                    CachedWorldPosition(parentJoint, worldMatrices), input.available,
+                    WorldPosition(parentJoint), input.available,
                     rootScreen))
                     continue;
                 DrawBoneShape(ui, rootScreen, tipScreen,
@@ -329,7 +292,7 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
             continue;
 
         EditorUiVec2 center{};
-        if (!ProjectPoint(viewProjection, CachedWorldPosition(object, worldMatrices),
+        if (!ProjectPoint(viewProjection, WorldPosition(object),
             input.available, center))
             continue;
         if (hasLight)
@@ -355,12 +318,12 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
     bool axisVisible[3]{};
     if (selectedTransformEditable && tool != EditorTransformTool::Hand &&
         ProjectPoint(viewProjection,
-        CachedWorldPosition(selected, worldMatrices), input.available, originScreen))
+        WorldPosition(selected), input.available, originScreen))
     {
         const glm::vec3 cameraPosition =
             glm::vec3(scene.editorCamera.transform.GetWorldMatrix()[3]);
         const glm::vec3 selectedPosition =
-            CachedWorldPosition(selected, worldMatrices);
+            WorldPosition(selected);
         axisScale = std::clamp(glm::length(
             selectedPosition - cameraPosition) * 0.18f,
             0.35f, 8.f);

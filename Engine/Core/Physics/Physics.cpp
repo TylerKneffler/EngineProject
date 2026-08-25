@@ -4,6 +4,7 @@
 #include "Core/Compoonents/Physics/Cloth.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Mesh.h"
+#include "Core/Memory/CacheStore.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include <btBulletDynamicsCommon.h>
@@ -17,6 +18,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <filesystem>
 #include <limits>
 #include <memory>
 #include <utility>
@@ -102,6 +104,61 @@ bool SameVector(const glm::vec3& first, const glm::vec3& second)
 {
     return first.x == second.x && first.y == second.y && first.z == second.z;
 }
+
+struct CachedClothSimulationMesh
+{
+    std::filesystem::file_time_type writeTime{};
+    uintmax_t fileSize = 0;
+    std::shared_ptr<Engine::Components::Mesh> mesh;
+};
+
+std::shared_ptr<Engine::Components::Mesh> AcquireClothSimulationMesh(
+    const std::string& path)
+{
+    constexpr const char* domain = "Physics.ClothSimulationMesh";
+    const std::string resolvedPath =
+        Engine::Components::Mesh::ResolveFilePath(path);
+    const std::string key = Engine::Memory::CacheStore::PathKey(resolvedPath);
+    std::error_code timeError;
+    const auto writeTime =
+        std::filesystem::last_write_time(resolvedPath, timeError);
+    std::error_code sizeError;
+    const uintmax_t fileSize =
+        std::filesystem::file_size(resolvedPath, sizeError);
+    if (timeError || sizeError)
+        return nullptr;
+
+    Engine::Memory::CacheStore& cache = Engine::Memory::CacheStore::Get();
+    std::shared_ptr<CachedClothSimulationMesh> cached =
+        cache.Find<CachedClothSimulationMesh>(domain, key);
+    if (cached && cached->mesh && cached->writeTime == writeTime &&
+        cached->fileSize == fileSize)
+        return cached->mesh;
+
+    cache.Erase(domain, key);
+    cached = cache.GetOrCreate<CachedClothSimulationMesh>(
+        Engine::Memory::CacheLifetime::LongTerm, domain, key,
+        [&]() -> std::shared_ptr<CachedClothSimulationMesh>
+        {
+            auto loaded = std::make_shared<Engine::Components::Mesh>();
+            try
+            {
+                loaded->LoadFromFile(path);
+            }
+            catch (...)
+            {
+                return nullptr;
+            }
+            if (loaded->GetVertices().size() < 3)
+                return nullptr;
+            auto entry = std::make_shared<CachedClothSimulationMesh>();
+            entry->writeTime = writeTime;
+            entry->fileSize = fileSize;
+            entry->mesh = std::move(loaded);
+            return entry;
+        });
+    return cached ? cached->mesh : nullptr;
+}
 }
 
 struct Physics::Impl
@@ -134,6 +191,7 @@ struct Engine::Components::RigidBody::Impl
     std::vector<std::pair<const Engine::Components::Collider*, uint64_t>> colliders;
     const Engine::Components::Mesh* ownerMesh = nullptr;
     uint64_t ownerMeshRevision = 0;
+    uint64_t syncedWorldRevision = 0;
     std::unique_ptr<btCompoundShape> compound;
     std::vector<std::unique_ptr<btCollisionShape>> shapes;
     std::vector<std::unique_ptr<btTriangleMesh>> triangleMeshes;
@@ -335,6 +393,7 @@ bool Engine::Components::RigidBody::EnsureBody()
     Engine::Physics::StateFor(m_impl->scene).world->addRigidBody(m_impl->body.get(),
         static_cast<short>(collisionLayer), static_cast<short>(collisionMask));
     m_impl->configurationRevision = GetConfigurationRevision();
+    m_impl->syncedWorldRevision = Owner->transform.GetWorldRevision();
     m_impl->worldScale = scale;
     m_impl->ownerMesh = ownerMesh;
     m_impl->ownerMeshRevision = ownerMesh
@@ -362,6 +421,7 @@ void Engine::Components::RigidBody::DestroyBody()
     m_impl->triangleMeshes.clear();
     m_impl->scene = nullptr;
     m_impl->configurationRevision = 0;
+    m_impl->syncedWorldRevision = 0;
     m_impl->worldScale = {};
     m_impl->colliders.clear();
     m_impl->ownerMesh = nullptr;
@@ -392,10 +452,14 @@ void Engine::Components::RigidBody::ApplyBodySettings()
 void Engine::Components::RigidBody::SyncBodyFromTransform()
 {
     if (!m_impl || !m_impl->body || !Owner) return;
+    const uint64_t worldRevision = Owner->transform.GetWorldRevision();
+    if (m_impl->syncedWorldRevision == worldRevision)
+        return;
     const btTransform transform = Engine::Physics::ObjectWorldTransform(*Owner);
     m_impl->body->setWorldTransform(transform);
     if (m_impl->motionState) m_impl->motionState->setWorldTransform(transform);
     m_impl->body->activate(true);
+    m_impl->syncedWorldRevision = worldRevision;
 }
 
 void Engine::Components::RigidBody::NotifyEditorTransformChanged()
@@ -425,6 +489,9 @@ void Engine::Components::RigidBody::SyncTransformFromBody()
     {
         Owner->transform.position = translation;
         Owner->transform.rotation = glm::eulerAngles(glm::normalize(rotation));
+        // Observe the direct field writes so all later systems see the new
+        // revision, while recording that Bullet already owns this transform.
+        m_impl->syncedWorldRevision = Owner->transform.GetWorldRevision();
     }
 }
 
@@ -468,6 +535,8 @@ struct Engine::Components::Cloth::Impl
     Engine::Scene::Scene* scene = nullptr;
     Engine::Components::Mesh* mesh = nullptr; // Render target owned by the object.
     const Engine::Components::Mesh* simulationMeshSource = nullptr;
+    std::shared_ptr<const Engine::Components::Mesh> cachedSimulationMesh;
+    std::string simulationMeshPath;
     uint64_t configurationRevision = 0;
     uint64_t renderMeshRevision = 0;
     uint64_t simulationMeshRevision = 0;
@@ -529,14 +598,20 @@ bool Engine::Components::Cloth::EnsureSoftBody()
     const Engine::Components::Mesh* referencedSimulationMesh = simulationMeshReference.IsAssigned()
         ? Engine::Core::ResolveComponentReference<Engine::Components::Mesh>(Owner, simulationMeshReference) : nullptr;
     if (simulationMeshReference.IsAssigned() && !referencedSimulationMesh) return false;
-    const Engine::Components::Mesh* persistentSimulationMesh = referencedSimulationMesh
-        ? referencedSimulationMesh : (meshPath.empty() ? mesh : nullptr);
+    const bool usesFileSimulationMesh =
+        !referencedSimulationMesh && !meshPath.empty();
+    const std::string simulationMeshPathKey = usesFileSimulationMesh
+        ? Engine::Memory::CacheStore::PathKey(meshPath) : std::string{};
+    const Engine::Components::Mesh* persistentSimulationMesh =
+        referencedSimulationMesh ? referencedSimulationMesh
+        : usesFileSimulationMesh ? m_impl->cachedSimulationMesh.get() : mesh;
     const glm::vec3 scale = Engine::Physics::WorldScale(*Owner);
     if (m_impl->softBody &&
         m_impl->configurationRevision == GetConfigurationRevision() &&
         m_impl->mesh == mesh &&
         m_impl->renderMeshRevision == mesh->GetConfigurationRevision() &&
         m_impl->simulationMeshSource == persistentSimulationMesh &&
+        m_impl->simulationMeshPath == simulationMeshPathKey &&
         m_impl->simulationMeshRevision == (persistentSimulationMesh
             ? persistentSimulationMesh->GetConfigurationRevision() : 0) &&
         Engine::Physics::SameVector(m_impl->worldScale, scale))
@@ -545,14 +620,14 @@ bool Engine::Components::Cloth::EnsureSoftBody()
     }
     DestroySoftBody(true);
 
-    std::unique_ptr<Engine::Components::Mesh> loadedSimulationMesh;
     const Engine::Components::Mesh* simulationMesh = referencedSimulationMesh;
-    if (!simulationMesh && !meshPath.empty())
+    if (usesFileSimulationMesh)
     {
-        loadedSimulationMesh = std::make_unique<Engine::Components::Mesh>();
-        try { loadedSimulationMesh->LoadFromFile(meshPath); }
-        catch (...) { return false; }
-        simulationMesh = loadedSimulationMesh.get();
+        m_impl->cachedSimulationMesh =
+            Engine::Physics::AcquireClothSimulationMesh(meshPath);
+        if (!m_impl->cachedSimulationMesh)
+            return false;
+        simulationMesh = m_impl->cachedSimulationMesh.get();
     }
     if (!simulationMesh) simulationMesh = mesh;
     if (simulationMesh->GetVertices().size() < 3) return false;
@@ -692,9 +767,10 @@ bool Engine::Components::Cloth::EnsureSoftBody()
     physics.world->addSoftBody(softBody);
     m_impl->configurationRevision = GetConfigurationRevision();
     m_impl->renderMeshRevision = mesh->GetConfigurationRevision();
-    m_impl->simulationMeshSource = persistentSimulationMesh;
-    m_impl->simulationMeshRevision = persistentSimulationMesh
-        ? persistentSimulationMesh->GetConfigurationRevision() : 0;
+    m_impl->simulationMeshSource = simulationMesh;
+    m_impl->simulationMeshPath = simulationMeshPathKey;
+    m_impl->simulationMeshRevision = simulationMesh
+        ? simulationMesh->GetConfigurationRevision() : 0;
     m_impl->worldScale = scale;
     return true;
 }
@@ -712,6 +788,8 @@ void Engine::Components::Cloth::DestroySoftBody(bool restoreMesh)
     m_impl->scene = nullptr;
     m_impl->mesh = nullptr;
     m_impl->simulationMeshSource = nullptr;
+    m_impl->cachedSimulationMesh.reset();
+    m_impl->simulationMeshPath.clear();
     m_impl->configurationRevision = 0;
     m_impl->renderMeshRevision = 0;
     m_impl->simulationMeshRevision = 0;

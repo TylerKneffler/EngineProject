@@ -2,6 +2,7 @@
 
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Graphics/IGraphicsTexture.h"
+#include "Core/Memory/CacheStore.h"
 
 #include <Windows.h>
 #include <wincodec.h>
@@ -18,31 +19,15 @@
 #include <cmath>
 #include <cstring>
 #include <memory>
-#include <unordered_map>
 
 namespace Engine::Components
 {
 namespace
 {
-std::unordered_map<std::string, std::weak_ptr<Texture>>& TextureRegistry()
-{
-    static std::unordered_map<std::string, std::weak_ptr<Texture>> registry;
-    return registry;
-}
-
 std::string TextureIdentity(const std::string& path, bool srgb)
 {
-    std::error_code error;
-    std::filesystem::path identity =
-        std::filesystem::absolute(std::filesystem::path(path).lexically_normal(), error);
-    if (error)
-        identity = std::filesystem::path(path).lexically_normal();
-    std::string key = identity.generic_string();
-#ifdef _WIN32
-    std::transform(key.begin(), key.end(), key.begin(),
-        [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
-#endif
-    return key + (srgb ? "|srgb" : "|linear");
+    return Engine::Memory::CacheStore::PathKey(path,
+        srgb ? "srgb" : "linear");
 }
 
 uint32_t FullMipCount(uint32_t width, uint32_t height)
@@ -132,25 +117,24 @@ void GenerateMipChain(std::vector<uint8_t>& pixels, uint32_t width,
 std::shared_ptr<Texture> Texture::Acquire(const std::string& path, bool srgb)
 {
     const std::string key = TextureIdentity(path, srgb);
-    auto& registry = TextureRegistry();
-    if (auto found = registry.find(key); found != registry.end())
-        if (auto existing = found->second.lock())
-            return existing;
-
-    auto texture = std::shared_ptr<Texture>(new Texture(
-        std::filesystem::path(path).lexically_normal().generic_string(), srgb));
-    registry[key] = texture;
-    return texture;
+    return Engine::Memory::CacheStore::Get().GetOrCreate<Texture>(
+        Engine::Memory::CacheLifetime::LongTerm, "Texture", key,
+        [&]()
+        {
+            return std::shared_ptr<Texture>(new Texture(
+                std::filesystem::path(path).lexically_normal().generic_string(), srgb));
+        });
 }
 
 void Texture::Invalidate(const std::string& path)
 {
+    Engine::Memory::CacheStore::Get().Erase("Lighting.EnvironmentSH",
+        Engine::Memory::CacheStore::PathKey(path));
     for (const bool srgb : { false, true })
     {
-        const auto found = TextureRegistry().find(TextureIdentity(path, srgb));
-        if (found != TextureRegistry().end())
-            if (const auto texture = found->second.lock())
-                texture->InvalidateCache();
+        if (const auto texture = Engine::Memory::CacheStore::Get().Find<Texture>(
+            "Texture", TextureIdentity(path, srgb)))
+            texture->InvalidateCache();
     }
 }
 
@@ -310,6 +294,8 @@ bool Texture::Load()
 
 void Texture::Reload()
 {
+    Engine::Memory::CacheStore::Get().Erase("Lighting.EnvironmentSH",
+        Engine::Memory::CacheStore::PathKey(m_filePath));
     m_pixels.clear();
     m_width = m_height = 0;
     m_mipLevels = 0;

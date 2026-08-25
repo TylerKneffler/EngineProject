@@ -3,7 +3,6 @@
 #include <filesystem>
 #include <memory>
 #include <string>
-#include <unordered_map>
 
 namespace Engine::Components { class Texture; }
 namespace Engine::Graphics
@@ -34,6 +33,5 @@ private:
         std::shared_ptr<Engine::Components::Texture> source;
         std::shared_ptr<Engine::Graphics::IGraphicsTexture> generated;
     };
-    std::unordered_map<std::string, Entry> m_entries;
 };
 }

@@ -30,6 +30,7 @@ Transform& Transform::operator=(const Transform& other)
     position = other.position;
     rotation = other.rotation;
     scale = other.scale;
+    MarkDirty();
     return *this;
 }
 
@@ -51,28 +52,103 @@ glm::vec3 Vec3From(const Engine::Serialization::JsonValue& v, const glm::vec3& d
 }
 }
 
-glm::vec3 Transform::GetLocalPosition()
+glm::vec3 Transform::GetLocalPosition() const
 {
     return position;
 }
 
-glm::vec3 Transform::GetWorldPosition()
+glm::vec3 Transform::GetWorldPosition() const
 {
     return glm::vec3(GetWorldMatrix()[3]);
 }
 
-glm::mat4 Transform::GetWorldMatrix() const
+void Transform::AdvanceRevision(uint64_t& revision)
 {
+    if (++revision == 0)
+        ++revision;
+}
+
+void Transform::MarkDirty()
+{
+    AdvanceRevision(m_localRevision);
+    m_localCacheInitialized = false;
+}
+
+void Transform::UpdateLocalCache() const
+{
+    const bool valuesChanged = m_localCacheInitialized &&
+        (position != m_cachedPosition || rotation != m_cachedRotation ||
+            scale != m_cachedScale);
+    if (valuesChanged)
+        AdvanceRevision(m_localRevision);
+
+    if (m_localCacheInitialized && !valuesChanged)
+        return;
+
     glm::mat4 t  = glm::translate(glm::mat4(1.f), position);
     glm::mat4 rx = glm::rotate(glm::mat4(1.f), rotation.x, { 1.f, 0.f, 0.f });
     glm::mat4 ry = glm::rotate(glm::mat4(1.f), rotation.y, { 0.f, 1.f, 0.f });
     glm::mat4 rz = glm::rotate(glm::mat4(1.f), rotation.z, { 0.f, 0.f, 1.f });
     glm::mat4 s  = glm::scale(glm::mat4(1.f), scale);
-    glm::mat4 local = t * rz * ry * rx * s;
+    m_cachedLocalMatrix = t * rz * ry * rx * s;
+    m_cachedPosition = position;
+    m_cachedRotation = rotation;
+    m_cachedScale = scale;
+    m_localCacheInitialized = true;
+}
 
-    if (Owner && Owner->Parent)
-        return Owner->Parent->transform.GetWorldMatrix() * local;
+glm::mat4 Transform::GetLocalMatrix() const
+{
+    UpdateLocalCache();
+    return m_cachedLocalMatrix;
+}
 
-    return local;
+uint64_t Transform::GetLocalRevision() const
+{
+    UpdateLocalCache();
+    return m_localRevision;
+}
+
+void Transform::UpdateWorldCache() const
+{
+    UpdateLocalCache();
+
+    const Engine::Core::Object* parent = Owner ? Owner->Parent : nullptr;
+    glm::mat4 parentWorld(1.f);
+    uint64_t parentRevision = 0;
+    if (parent)
+    {
+        parentWorld = parent->transform.GetWorldMatrix();
+        // GetWorldMatrix() has already validated the complete ancestor chain.
+        // Transform instances may inspect each other's private cache state.
+        parentRevision = parent->transform.m_worldRevision;
+    }
+
+    const bool dependenciesChanged = m_worldCacheInitialized &&
+        (m_cachedLocalRevisionForWorld != m_localRevision ||
+            m_cachedParent != parent ||
+            m_cachedParentWorldRevision != parentRevision);
+    if (m_worldCacheInitialized && !dependenciesChanged)
+        return;
+
+    m_cachedWorldMatrix = parentWorld * m_cachedLocalMatrix;
+    m_cachedLocalRevisionForWorld = m_localRevision;
+    m_cachedParent = parent;
+    m_cachedParentWorldRevision = parentRevision;
+    if (dependenciesChanged)
+        AdvanceRevision(m_worldRevision);
+    m_worldCacheInitialized = true;
+}
+
+glm::mat4 Transform::GetWorldMatrix() const
+{
+    UpdateWorldCache();
+    return m_cachedWorldMatrix;
+}
+
+uint64_t Transform::GetWorldRevision() const
+{
+    UpdateWorldCache();
+    return m_worldRevision;
 }
 }

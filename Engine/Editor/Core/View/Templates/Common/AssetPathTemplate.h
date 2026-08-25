@@ -30,4 +30,9 @@ inline bool IsAudioAssetExtension(const std::string& extension)
 {
     return extension == ".wav" || extension == ".ogg" || extension == ".mp3";
 }
+
+inline bool IsFontAssetExtension(const std::string& extension)
+{
+    return extension == ".ttf" || extension == ".otf";
+}
 }

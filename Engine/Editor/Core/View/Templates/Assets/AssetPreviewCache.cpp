@@ -4,6 +4,7 @@
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Graphics/IGraphicsTexture.h"
+#include "Core/Memory/CacheStore.h"
 
 #include <algorithm>
 #include <array>
@@ -17,6 +18,7 @@ namespace
 {
 constexpr uint32_t PreviewSize = 128;
 constexpr float Pi = 3.14159265358979323846f;
+constexpr const char* PreviewCacheDomain = "Editor.AssetPreview";
 
 std::string Extension(const std::string& path)
 {
@@ -184,52 +186,64 @@ void* AssetPreviewCache::Get(const std::string& path,
     const auto writeTime = std::filesystem::last_write_time(path, error);
     if (error)
         return nullptr;
-    Entry& entry = m_entries[path];
-    if (entry.provider == graphicsProvider && entry.writeTime == writeTime &&
-        (entry.generated || entry.source))
+    Engine::Memory::CacheStore& cache = Engine::Memory::CacheStore::Get();
+    const std::string key = Engine::Memory::CacheStore::PathKey(path);
+    std::shared_ptr<Entry> entry = cache.Find<Entry>(PreviewCacheDomain, key);
+    if (entry && entry->provider == graphicsProvider &&
+        entry->writeTime == writeTime && (entry->generated || entry->source))
     {
-        const auto* texture = entry.generated
-            ? entry.generated.get()
-            : entry.source->GetGraphicsTexture();
+        const auto* texture = entry->generated
+            ? entry->generated.get()
+            : entry->source->GetGraphicsTexture();
         return texture ? texture->GetNativeHandle() : nullptr;
     }
 
-    entry = {};
-    entry.writeTime = writeTime;
-    entry.provider = graphicsProvider;
-    const std::string extension = Extension(path);
-    if (extension == ".material" || extension == ".mat")
-    {
-        Engine::Components::Material material;
-        if (material.LoadFromFile(path))
-            entry.generated = Upload(graphicsProvider, MakeMaterialPreview(material));
-    }
-    else
-    {
-        const bool highDynamicRange = extension == ".hdr" || extension == ".exr";
-        entry.source = Engine::Components::Texture::Acquire(path, !highDynamicRange);
-        if (highDynamicRange)
+    cache.Erase(PreviewCacheDomain, key);
+    entry = cache.GetOrCreate<Entry>(Engine::Memory::CacheLifetime::ShortTerm,
+        PreviewCacheDomain, key, [&]()
         {
-            if (entry.source->Load())
-                entry.generated = Upload(graphicsProvider,
-                    MakeEnvironmentPreview(*entry.source));
-        }
-        else
-            entry.source->Prepare(graphicsProvider);
-    }
-    const auto* texture = entry.generated
-        ? entry.generated.get()
-        : (entry.source ? entry.source->GetGraphicsTexture() : nullptr);
+            auto created = std::make_shared<Entry>();
+            created->writeTime = writeTime;
+            created->provider = graphicsProvider;
+            const std::string extension = Extension(path);
+            if (extension == ".material" || extension == ".mat")
+            {
+                Engine::Components::Material material;
+                if (material.LoadFromFile(path))
+                    created->generated = Upload(graphicsProvider,
+                        MakeMaterialPreview(material));
+            }
+            else
+            {
+                const bool highDynamicRange =
+                    extension == ".hdr" || extension == ".exr";
+                created->source = Engine::Components::Texture::Acquire(
+                    path, !highDynamicRange);
+                if (highDynamicRange)
+                {
+                    if (created->source->Load())
+                        created->generated = Upload(graphicsProvider,
+                            MakeEnvironmentPreview(*created->source));
+                }
+                else
+                    created->source->Prepare(graphicsProvider);
+            }
+            return created;
+        }, std::chrono::seconds(30));
+    const auto* texture = entry && entry->generated
+        ? entry->generated.get()
+        : (entry && entry->source ? entry->source->GetGraphicsTexture() : nullptr);
     return texture ? texture->GetNativeHandle() : nullptr;
 }
 
 void AssetPreviewCache::Invalidate(const std::string& path)
 {
-    m_entries.erase(path);
+    Engine::Memory::CacheStore::Get().Erase(PreviewCacheDomain,
+        Engine::Memory::CacheStore::PathKey(path));
 }
 
 void AssetPreviewCache::Clear()
 {
-    m_entries.clear();
+    Engine::Memory::CacheStore::Get().ClearDomain(PreviewCacheDomain);
 }
 }

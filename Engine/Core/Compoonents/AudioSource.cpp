@@ -34,6 +34,7 @@ struct AudioSource::Impl
     std::string loadedPath;
     std::string loadedBus;
     int oggSampleRate = 0;
+    uint64_t appliedTransformRevision = 0;
 };
 
 namespace
@@ -155,6 +156,7 @@ void AudioSource::Unload()
     m_impl->loadedPath.clear();
     m_impl->loadedBus.clear();
     m_impl->oggSampleRate = 0;
+    m_impl->appliedTransformRevision = 0;
 }
 
 bool AudioSource::Play()
@@ -247,14 +249,20 @@ void AudioSource::ApplySettings()
 
     glm::vec3 position(0.f);
     glm::vec3 forward(0.f, 0.f, 1.f);
+    uint64_t transformRevision = 0;
     if (Owner)
     {
+        transformRevision = Owner->transform.GetWorldRevision();
         const glm::mat4 world = Owner->transform.GetWorldMatrix();
         position = glm::vec3(world[3]);
         forward = SafeDirection(glm::vec3(world[2]), forward);
     }
-    ma_sound_set_position(&m_impl->sound, position.x, position.y, position.z);
-    ma_sound_set_direction(&m_impl->sound, forward.x, forward.y, forward.z);
+    if (m_impl->appliedTransformRevision != transformRevision)
+    {
+        ma_sound_set_position(&m_impl->sound, position.x, position.y, position.z);
+        ma_sound_set_direction(&m_impl->sound, forward.x, forward.y, forward.z);
+        m_impl->appliedTransformRevision = transformRevision;
+    }
     const float clampedInner = std::clamp(coneInnerAngle, 0.f, 360.f);
     const float inner = directional ? glm::radians(clampedInner)
                                     : glm::two_pi<float>();

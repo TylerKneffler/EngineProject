@@ -7,6 +7,10 @@
 #include "Core/Compoonents/Sprite.h"
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
 #include "Core/Compoonents/AudioSource.h"
+#include "Core/Compoonents/UI/UIText.h"
+#include "Core/Compoonents/UI/UIImage.h"
+#include "Core/Compoonents/UI/UIObject.h"
+#include "Core/Compoonents/UI/Canvas.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Scene/Scene.h"
@@ -16,6 +20,17 @@
 
 namespace Engine::Editor
 {
+namespace
+{
+bool IsUiContext(const Engine::Core::Object* object)
+{
+    for (const Engine::Core::Object* current = object; current; current = current->Parent)
+        if (current->GetComponent<Engine::Components::Canvas>() ||
+            current->GetComponent<Engine::Components::UIObject>())
+            return true;
+    return false;
+}
+}
 
 std::string PropertiesView::HandleWindowAssetDrop(IEditorUi& ui)
 {
@@ -45,6 +60,9 @@ std::string PropertiesView::HandleWindowAssetDrop(IEditorUi& ui)
     const std::string extension = Engine::Editor::LowerAssetExtension(path);
     if (extension == ".mesh" || extension == ".obj")
         return "Mesh Preview";
+    if (Engine::Editor::IsTextureAssetExtension(extension) &&
+        IsUiContext(m_selectedObject))
+        return "UI Image Preview";
     if (extension == ".material" || extension == ".mat" ||
         Engine::Editor::IsTextureAssetExtension(extension))
         return "Material Preview";
@@ -52,6 +70,8 @@ std::string PropertiesView::HandleWindowAssetDrop(IEditorUi& ui)
         return "Sprite Animation Preview";
     if (Engine::Editor::IsAudioAssetExtension(extension))
         return "Audio Source Preview";
+    if (Engine::Editor::IsFontAssetExtension(extension))
+        return "UI Text Font Preview";
     if (extension == ".spritesheet")
         return "Sprite Sheet Preview";
     if (extension == ".h" || extension == ".hpp")
@@ -138,6 +158,23 @@ bool PropertiesView::AddComponentFromAsset(const std::string& path, std::string&
 
         if (Engine::Editor::IsTextureAssetExtension(extension))
         {
+            if (auto* image = m_selectedObject->GetComponent<Engine::Components::UIImage>())
+            {
+                image->sourcePath = path;
+                image->MarkConfigurationDirty();
+                message = "[Properties] Assigned UI image from: " + path;
+                return true;
+            }
+            if (IsUiContext(m_selectedObject))
+            {
+                if (!m_selectedObject->GetComponent<Engine::Components::UIObject>())
+                    m_selectedObject->AddComponent<Engine::Components::UIObject>();
+                auto* image = m_selectedObject->AddComponent<Engine::Components::UIImage>();
+                image->sourcePath = path;
+                image->MarkConfigurationDirty();
+                message = "[Properties] Added UI image from: " + path;
+                return true;
+            }
             Engine::Components::Material* material = m_selectedObject->GetComponent<Engine::Components::Material>();
             if (!material)
                 material = m_selectedObject->AddComponent<Engine::Components::Material>();
@@ -154,6 +191,19 @@ bool PropertiesView::AddComponentFromAsset(const std::string& path, std::string&
                 source = m_selectedObject->AddComponent<Engine::Components::AudioSource>();
             source->audioPath = path;
             message = "[Properties] Assigned Audio Source from: " + path;
+            return true;
+        }
+
+        if (Engine::Editor::IsFontAssetExtension(extension))
+        {
+            Engine::Components::UIText* text =
+                m_selectedObject->GetComponent<Engine::Components::UIText>();
+            if (!text)
+                text = m_selectedObject->AddComponent<Engine::Components::UIText>();
+            if (!m_selectedObject->GetComponent<Engine::Components::UIObject>())
+                m_selectedObject->AddComponent<Engine::Components::UIObject>();
+            text->fontPath = path;
+            message = "[Properties] Assigned UI font from: " + path;
             return true;
         }
 

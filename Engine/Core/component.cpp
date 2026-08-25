@@ -25,8 +25,36 @@ namespace Engine::Core
 
 // State tracking for property editing
 static std::map<std::string, std::string> s_editingProperty;  // componentPtr+key -> "editing"
-// Cache for texture previews
-static std::map<std::string, std::shared_ptr<Engine::Components::Texture>> s_texturePreviewCache;
+
+static std::string LowerExtension(const std::string& path)
+{
+    std::string extension = std::filesystem::path(path).extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+        [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+    return extension;
+}
+
+static bool IsCompatiblePathAsset(const std::string& property,
+    const std::string& path)
+{
+    std::string name = property;
+    std::transform(name.begin(), name.end(), name.begin(),
+        [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+    const std::string extension = LowerExtension(path);
+    if (name.find("font") != std::string::npos)
+        return extension == ".ttf" || extension == ".otf";
+    if (name.find("audio") != std::string::npos)
+        return extension == ".wav" || extension == ".ogg" || extension == ".mp3";
+    if (name.find("mesh") != std::string::npos)
+        return extension == ".mesh" || extension == ".obj" ||
+            extension == ".gltf" || extension == ".glb" || extension == ".fbx";
+    if (name.find("texture") != std::string::npos)
+        return extension == ".png" || extension == ".jpg" ||
+            extension == ".jpeg" || extension == ".bmp" ||
+            extension == ".dds" || extension == ".tga" ||
+            extension == ".hdr" || extension == ".exr" || extension == ".ktx2";
+    return true;
+}
 
 // ---------------------------------------------------------------------------
 // Component::DrawProperties — Generic interactive property editor
@@ -137,22 +165,12 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
                     
                     if (graphicsProvider)
                     {
-                        // Check cache first
-                        auto cachedIt = s_texturePreviewCache.find(stringValue);
-                        if (cachedIt != s_texturePreviewCache.end())
-                        {
-                            previewTexture = cachedIt->second;
-                        }
-                        else
-                        {
-                            // Load texture from file
-                            previewTexture = Engine::Components::Texture::Acquire(
-                                stringValue, !isEnvironmentImage);
-                            if (previewTexture && previewTexture->Load())
-                            {
-                                s_texturePreviewCache[stringValue] = previewTexture;
-                            }
-                        }
+                        // Texture::Acquire uses the centralized long-term
+                        // resource cache, shared with materials and previews.
+                        previewTexture = Engine::Components::Texture::Acquire(
+                            stringValue, !isEnvironmentImage);
+                        if (previewTexture)
+                            previewTexture->Load();
                         
                         // Ensure texture is prepared for GPU
                         if (previewTexture && previewTexture->HasPixels())
@@ -258,7 +276,11 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
                         OPENFILENAMEW ofn{};
                         ofn.lStructSize = sizeof(ofn);
                         ofn.hwndOwner = nullptr;
-                        ofn.lpstrFilter = L"All Files\0*.*\0Images\0*.png;*.jpg;*.jpeg;*.bmp;*.dds;*.tga;*.hdr;*.exr;*.ktx2\0Models\0*.obj;*.gltf;*.glb;*.fbx\0Audio\0*.wav;*.ogg;*.mp3\0Fonts\0*.ttf;*.otf\0\0";
+                        const bool fontProperty = key.find("font") != std::string::npos ||
+                            key.find("Font") != std::string::npos;
+                        ofn.lpstrFilter = fontProperty
+                            ? L"Fonts (*.ttf;*.otf)\0*.ttf;*.otf\0All Files (*.*)\0*.*\0\0"
+                            : L"All Files\0*.*\0Images\0*.png;*.jpg;*.jpeg;*.bmp;*.dds;*.tga;*.hdr;*.exr;*.ktx2\0Models\0*.obj;*.gltf;*.glb;*.fbx\0Audio\0*.wav;*.ogg;*.mp3\0Fonts\0*.ttf;*.otf\0\0";
                         ofn.lpstrFile = filename;
                         ofn.nMaxFile = MAX_PATH;
                         ofn.lpstrInitialDir = initialDir[0] ? initialDir : nullptr;
@@ -301,6 +323,30 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
                             s_editingProperty[stateKey] = stringValue;
                         }
                     }
+                }
+
+                // Asset-browser files can be assigned directly to serialized
+                // path properties. Font fields accept only TTF/OTF so an
+                // unrelated drop cannot silently replace the active typeface.
+                if (!isEditing && ui.BeginDragDropTarget())
+                {
+                    size_t payloadSize = 0;
+                    const void* payload = ui.AcceptDragDropPayload(
+                        "ENGINE_ASSET_PATH", &payloadSize);
+                    if (payload && payloadSize > 0)
+                    {
+                        const char* bytes = static_cast<const char*>(payload);
+                        size_t length = 0;
+                        while (length < payloadSize && bytes[length] != '\0')
+                            ++length;
+                        const std::string droppedPath(bytes, length);
+                        if (IsCompatiblePathAsset(key, droppedPath))
+                        {
+                            editedData.Set(key, JsonValue(droppedPath));
+                            modified = true;
+                        }
+                    }
+                    ui.EndDragDropTarget();
                 }
 
                 // Mesh-backed physics properties are asset references, but
@@ -347,7 +393,8 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
             // Heuristics for appropriate ranges
             if (key == "metallicFactor" || key == "roughnessFactor" ||
                 key == "baseColorAlpha" || key == "alphaCutoff" ||
-                key == "occlusionStrength")
+                key == "occlusionStrength" || key == "alpha" ||
+                key == "fillAmount")
             {
                 if (ui.DragFloat(displayName.c_str(), &floatVal, 0.01f, 0.f, 1.f))
                 {

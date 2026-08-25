@@ -24,6 +24,8 @@ public:
 
     // Load vertex data from a triangulated OBJ file (CPU side only).
     void LoadFromFile(const std::string& path);
+    // Resolves portable Assets/... paths against bundled sandbox assets.
+    static std::string ResolveFilePath(const std::string& path);
     static bool SaveNativeFile(const std::string& path, const std::vector<Vertex>& vertices);
 
     // Create a graphics buffer from loaded vertex data.

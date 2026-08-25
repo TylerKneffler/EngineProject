@@ -12,6 +12,7 @@
 #include "Core/Graphics/IPipelineState.h"
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Graphics/IGraphicsContext.h"
+#include "Core/Memory/CacheStore.h"
 #include "Core/Renderers/UIRenderer.h"
 #include <algorithm>
 #include <array>
@@ -139,6 +140,22 @@ namespace
                 coefficient *= solidAngleScale;
         }
         return coefficients;
+    }
+
+    std::shared_ptr<std::array<glm::vec4, 9>> CachedEnvironmentProjection(
+        const Engine::Components::Texture& texture)
+    {
+        const std::string key = Engine::Memory::CacheStore::PathKey(
+            texture.GetFilePath());
+        return Engine::Memory::CacheStore::Get().GetOrCreate<
+            std::array<glm::vec4, 9>>(
+                Engine::Memory::CacheLifetime::LongTerm,
+                "Lighting.EnvironmentSH", key,
+                [&texture]()
+                {
+                    return std::make_shared<std::array<glm::vec4, 9>>(
+                        ProjectEnvironment(texture));
+                });
     }
 }
 
@@ -387,23 +404,21 @@ void Scene::UpdateEnvironmentLighting(const Engine::Components::Texture* texture
         return;
 
     m_environmentLightingPath = path;
-    m_environmentSH = texture
-        ? ProjectEnvironment(*texture)
-        : std::array<glm::vec4, 9>{};
+    const auto projection = texture
+        ? CachedEnvironmentProjection(*texture) : nullptr;
+    m_environmentSH = projection
+        ? *projection : std::array<glm::vec4, 9>{};
 }
 
-const std::array<glm::vec4, 9>* Scene::ResolveReflectionEnvironment(
+std::shared_ptr<const std::array<glm::vec4, 9>>
+Scene::ResolveReflectionEnvironment(
     const Engine::Components::Material& material)
 {
     if (!material.useCustomReflectionEnvironment ||
         !material.reflectionEnvironmentMap ||
         !material.reflectionEnvironmentMap->HasPixels())
         return nullptr;
-    const std::string& path = material.reflectionEnvironmentMap->GetFilePath();
-    const auto [entry, inserted] = m_materialEnvironmentSH.try_emplace(path);
-    if (inserted)
-        entry->second = ProjectEnvironment(*material.reflectionEnvironmentMap);
-    return &entry->second;
+    return CachedEnvironmentProjection(*material.reflectionEnvironmentMap);
 }
 
 // ---------------------------------------------------------------------------
@@ -982,7 +997,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             };
             objectData.environmentParams.z = mat->environmentDiffuseStrength;
             objectData.environmentParams.w = mat->reflectionStrength;
-            if (const auto* reflectionSH = ResolveReflectionEnvironment(*mat))
+            if (const auto reflectionSH = ResolveReflectionEnvironment(*mat))
             {
                 objectData.reflectionEnvironmentParams = {
                     std::exp2(std::clamp(mat->reflectionEnvironmentExposure,
