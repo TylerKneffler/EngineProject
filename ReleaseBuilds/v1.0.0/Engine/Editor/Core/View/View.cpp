@@ -1,5 +1,7 @@
 #include "View.h"
 
+namespace Engine::Editor
+{
 // ---------------------------------------------------------------------------
 // Constructor
 // ---------------------------------------------------------------------------
@@ -7,7 +9,7 @@ View::View() = default;
 
 View::~View() = default;
 
-void View::SetViewBackend(std::unique_ptr<IView> viewBackend)
+void View::SetViewBackend(std::unique_ptr<::Engine::Renderers::IView> viewBackend)
 {
     m_viewBackend = std::move(viewBackend);
 }
@@ -43,6 +45,12 @@ void View::Render(void* cmdList, void* mainRtv,
         m_viewBackend->Render(cmdList, mainRtv, drawFn);
 }
 
+void View::SetClearColor(float r, float g, float b, float a)
+{
+    if (m_viewBackend)
+        m_viewBackend->SetClearColor(r, g, b, a);
+}
+
 // ---------------------------------------------------------------------------
 // Property accessors — delegate to D3D12View
 // ---------------------------------------------------------------------------
@@ -70,4 +78,4 @@ uint32_t View::GetSrvSlotIndex() const
 {
     return m_viewBackend ? m_viewBackend->GetSrvSlotIndex() : 0;
 }
-
+}

@@ -2,15 +2,18 @@
 #include "pch.h"
 #include <functional>
 #include "View/IEditorPanel.h"
+#include "Engine/Editor/Core/View/Templates/Assets/AssetPreviewCache.h"
 
-class Object;
+namespace Engine::Core { class Object; }
+namespace Engine::Scene { class Scene; }
 
+namespace Engine::Editor
+{
 // ---------------------------------------------------------------------------
 // AssetsExplorerView
 //
-// Displays a hierarchical file tree of the Assets directory, allowing users
-// to navigate files and folders. Double-clicking a file opens it with the
-// system's default application. Scene files can be loaded via callback.
+// Displays the immediate contents of one Assets directory. Scene and prefab
+// assets open inside the editor; other files use the system application.
 //
 // Usage:
 //   assetsExplorerView.Init(assetsPath);
@@ -20,28 +23,57 @@ class Object;
 class AssetsExplorerView : public IEditorPanel
 {
 public:
-    AssetsExplorerView()  = default;
+    AssetsExplorerView();
     ~AssetsExplorerView() = default;
 
     // Initializes the view with the path to the Assets directory
-    void Init(const std::string& assetsPath);
+    void Init(const std::string& assetsPath, Engine::Scene::Scene* scene = nullptr);
 
     // Defines the package-neutral asset file tree.
     void DrawPanel(IEditorUi& ui) override;
 
     // Callback when a scene file is requested to load
     std::function<void(const std::string&)> OnSceneRequested;
-    std::function<void(Object*, const std::string&)> OnPrefabCreated;
+    std::function<void(const std::string&)> OnPrefabRequested;
+    std::function<void(const std::string&)> OnSelectionChanged;
+    std::function<void(const std::string&, const std::string&)> OnAssetRenamed;
+    std::function<void(const std::string&)> OnAssetContentsChanged;
+    std::function<void(Engine::Core::Object*, const std::string&)> OnPrefabCreated;
+
+    void SetSelectedPath(const std::string& path) { m_selectedPath = path; }
+    const std::string& GetSelectedPath() const { return m_selectedPath; }
 
 private:
-    // Recursively draws the directory tree starting from the given path
-    // Returns true if any item in the tree was double-clicked
-    bool DrawDirectoryTree(IEditorUi& ui, const std::string& path);
+    void DrawCurrentDirectory(IEditorUi& ui);
+    void DrawBreadcrumbs(IEditorUi& ui);
+    void EnterDirectory(const std::string& path);
+    void CreateFolder();
+    void CreateScript();
+    void CommitScriptRename();
+    void CommitAssetRename();
+    bool MoveAssetPath(const std::string& sourcePath,
+        const std::string& destinationDirectory, std::string* movedPath = nullptr);
+    bool DeleteAssetPath(const std::string& path);
 
     // Opens a file with the system's default application (unless it's a scene file)
     void OpenFile(const std::string& filePath);
     bool AcceptSceneObject(IEditorUi& ui, const std::string& directory);
+    void SelectPath(const std::string& path);
 
     std::string m_assetsPath;
+    Engine::Scene::Scene* m_scene = nullptr;
+    AssetPreviewCache m_previewCache;
+    std::string m_currentDirectory;
     std::string m_selectedPath;
+    char m_search[256]{};
+    char m_scriptName[256]{};
+    std::string m_scriptBasePath;
+    bool m_renamingScript = false;
+    bool m_focusScriptName = false;
+    std::string m_renamePath;
+    char m_renameName[256]{};
+    bool m_renamingAsset = false;
+    bool m_focusAssetRename = false;
+    std::string m_error;
 };
+}

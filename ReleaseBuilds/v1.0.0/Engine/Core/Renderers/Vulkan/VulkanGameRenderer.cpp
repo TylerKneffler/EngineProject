@@ -2,6 +2,8 @@
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "VulkanGameRenderer.h"
 
+namespace Engine::Renderers
+{
 bool VulkanGameRenderer::Init(void* hwnd, uint32_t width, uint32_t height)
 {
     m_width = width; m_height = height;
@@ -48,12 +50,13 @@ void VulkanGameRenderer::EndFrame()
     m_core.EndFrame(); m_commandBuffer = VK_NULL_HANDLE; m_renderPassActive = false;
 }
 
-std::unique_ptr<IGraphicsContext> VulkanGameRenderer::CreateFrameGraphicsContext()
+std::unique_ptr<Engine::Graphics::IGraphicsContext> VulkanGameRenderer::CreateFrameGraphicsContext()
 {
     if (!m_commandBuffer || !m_provider)
         return nullptr;
     auto* factory = m_provider->GetContextFactory();
     factory->SetCommandBuffer(reinterpret_cast<void*>(m_commandBuffer));
     return factory->CreateContext();
+}
 }
 #endif

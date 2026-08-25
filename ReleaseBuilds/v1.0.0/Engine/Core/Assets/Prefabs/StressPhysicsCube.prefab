@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Prefab xmlns:components="urn:engine-components">
+  <version>1</version>
+  <type>prefab</type>
+  <object>
+    <name>Stress Physics Cube</name><enabled>true</enabled>
+    <transform><Transform.position><item>0</item><item>0</item><item>0</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform>
+    <components>
+      <components:Mesh><Mesh.file>Assets/Mesh/cube.obj</Mesh.file></components:Mesh>
+      <components:Material><Material.diffuse><item>0.22</item><item>0.62</item><item>0.95</item></Material.diffuse><Material.ambient><item>0.025</item><item>0.07</item><item>0.11</item></Material.ambient><Material.specular><item>0.8</item><item>0.9</item><item>1</item></Material.specular><Material.shininess>48</Material.shininess><Material.metallicFactor>0.2</Material.metallicFactor><Material.roughnessFactor>0.4</Material.roughnessFactor></components:Material>
+      <components:PrimitiveObjectCollider><PrimitiveObjectCollider.collisionEnabled>true</PrimitiveObjectCollider.collisionEnabled><PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center><PrimitiveObjectCollider.shape>Box</PrimitiveObjectCollider.shape><PrimitiveObjectCollider.size><item>1</item><item>1</item><item>1</item></PrimitiveObjectCollider.size></components:PrimitiveObjectCollider>
+      <components:RigidBody><RigidBody.bodyType>Dynamic</RigidBody.bodyType><RigidBody.mass>1</RigidBody.mass><RigidBody.useGravity>true</RigidBody.useGravity><RigidBody.gravityScale>1</RigidBody.gravityScale><RigidBody.linearDamping>0.02</RigidBody.linearDamping><RigidBody.angularDamping>0.02</RigidBody.angularDamping><RigidBody.friction>0.5</RigidBody.friction><RigidBody.restitution>0.15</RigidBody.restitution><RigidBody.continuousCollision>false</RigidBody.continuousCollision></components:RigidBody>
+    </components><children />
+  </object>
+</Prefab>

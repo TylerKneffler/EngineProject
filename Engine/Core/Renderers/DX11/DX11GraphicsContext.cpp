@@ -89,9 +89,12 @@ void D3D11GraphicsContext::SetTexture(uint32_t slot, const Engine::Graphics::IGr
 {
     if (!m_device || !m_context || slot >= D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT)
         return;
+    // Logical texture slot 6 is the reflection panorama. Object shaders keep
+    // t6-t8 available for structured scene buffers, so bind it at t9.
+    const uint32_t shaderSlot = slot == 6 ? 9 : slot;
     const auto* nativeTexture = dynamic_cast<const D3D11GraphicsTexture*>(texture);
     ID3D11ShaderResourceView* view = nativeTexture ? nativeTexture->GetView() : nullptr;
-    m_context->PSSetShaderResources(slot, 1, &view);
+    m_context->PSSetShaderResources(shaderSlot, 1, &view);
 
     if (!m_materialSampler)
     {

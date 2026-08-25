@@ -1,107 +1,29 @@
 #include "PropertiesView.h"
 #include "Engine/Editor/UI/IEditorUi.h"
-#include "Core/Compoonents/Transform.h"
-#include "Core/Compoonents/Mesh.h"
-#include "Core/Compoonents/Material.h"
 #include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Component.h"
 #include "Core/Graphics/IGraphicsTexture.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
-#include <algorithm>
-#include <cctype>
+#include "../Focus/WindowFocusHandler.h"
 #include <filesystem>
-#include <fstream>
-#include <memory>
-#include <regex>
+#include <algorithm>
 #include <shellapi.h>
-#include <sstream>
+
+namespace Engine::Editor
+{
+// ---------------------------------------------------------------------------
+// Constructor
+// ---------------------------------------------------------------------------
+PropertiesView::PropertiesView()
+{
+    // Properties is an editor UI panel with normal cursor
+    SetCursorBehaviorOnFocus(CursorBehaviorOnFocus::Visible);
+}
 
 namespace
 {
-std::string LowerExtension(const std::string& path)
-{
-    std::string extension = std::filesystem::path(path).extension().string();
-    std::transform(extension.begin(), extension.end(), extension.begin(),
-        [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
-    return extension;
-}
-
-bool IsTextureExtension(const std::string& extension)
-{
-    static const char* extensions[] = {
-        ".png", ".jpg", ".jpeg", ".bmp", ".tga", ".dds", ".hdr"
-    };
-    return std::find_if(std::begin(extensions), std::end(extensions),
-        [&extension](const char* candidate) { return extension == candidate; }) !=
-        std::end(extensions);
-}
-
-bool ContainsIgnoringCase(const std::string& value, const std::string& search)
-{
-    if (search.empty())
-        return true;
-    std::string loweredValue = value;
-    std::string loweredSearch = search;
-    std::transform(loweredValue.begin(), loweredValue.end(), loweredValue.begin(),
-        [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
-    std::transform(loweredSearch.begin(), loweredSearch.end(), loweredSearch.begin(),
-        [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
-    return loweredValue.find(loweredSearch) != std::string::npos;
-}
-
-std::string FindComponentSubclass(const std::string& path)
-{
-    std::ifstream input(path);
-    if (!input)
-        return {};
-    std::ostringstream contents;
-    contents << input.rdbuf();
-
-    // Capture each class/struct declaration and inspect its base list. A class
-    // must inherit Component publicly; structs may use their implicit public
-    // inheritance as well.
-    const std::regex declaration(
-        R"(\b(class|struct)\s+([A-Za-z_]\w*)\s*(?:final\s*)?:\s*([^\{]+)\{)");
-    const std::regex publicComponent(
-        R"((?:^|,)\s*public\s+(?:[A-Za-z_]\w*::)*(?:Component|Script)\b)");
-    const std::regex componentBase(
-        R"((?:^|,)\s*(?:[A-Za-z_]\w*::)*(?:Component|Script)\b)");
-    const std::string source = contents.str();
-    const std::string preferred = std::filesystem::path(path).stem().string();
-    std::string firstMatch;
-    for (auto it = std::sregex_iterator(source.begin(), source.end(), declaration);
-        it != std::sregex_iterator(); ++it)
-    {
-        const bool isStruct = (*it)[1].str() == "struct";
-        const std::string className = (*it)[2].str();
-        const std::string bases = (*it)[3].str();
-        if (!std::regex_search(bases, isStruct ? componentBase : publicComponent))
-            continue;
-        if (className == preferred)
-            return className;
-        if (firstMatch.empty())
-            firstMatch = className;
-    }
-    return firstMatch;
-}
-
-template<typename T>
-void ReplaceOrAddComponent(Object& object, T* component)
-{
-    component->Owner = &object;
-    for (auto it = object.Components.begin(); it != object.Components.end(); ++it)
-    {
-        if (dynamic_cast<T*>(*it))
-        {
-            delete *it;
-            *it = component;
-            return;
-        }
-    }
-    object.Components.push_back(component);
-}
-
 void RevealFileInExplorer(const std::string& path)
 {
     if (path.empty())
@@ -116,8 +38,14 @@ void RevealFileInExplorer(const std::string& path)
     ShellExecuteW(nullptr, L"open", L"explorer.exe", parameters.c_str(),
         nullptr, SW_SHOWNORMAL);
 }
+
 }
 
+void PropertiesView::SetSelectedAsset(const std::string& path)
+{
+    m_selectedObject = nullptr;
+    m_assetInspector.Select(path);
+}
 void PropertiesView::DrawPanel(IEditorUi& ui)
 {
     if (m_skyboxRevealPending &&
@@ -128,12 +56,23 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         m_skyboxRevealPending = false;
         m_skyboxRevealPath.clear();
     }
-    if (!ui.BeginWindow(m_title.c_str(), &m_open))
+    const bool windowVisible = ui.BeginWindow(m_title.c_str(), &m_open);
+    if (ui.IsWindowFocused() && OnFocused) OnFocused();
+    if (!windowVisible)
     {
         ui.EndWindow();
         return;
     }
     ui.BeginTextWrap();
+    if (m_assetInspector.HasSelection())
+    {
+        m_assetInspector.OnRenamed = OnAssetRenamed;
+        m_assetInspector.OnContentsChanged = OnAssetContentsChanged;
+        m_assetInspector.Draw(ui, m_scene);
+        ui.EndTextWrap();
+        ui.EndWindow();
+        return;
+    }
     if (!m_selectedObject)
     {
         ui.Label("Scene");
@@ -145,7 +84,8 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             ui.Label("Skybox Texture Override");
             if (!m_editingSkyboxTexture)
             {
-                const Texture* skybox = m_scene->GetSkyboxPreviewTexture();
+                const Engine::Components::Texture* skybox =
+                    m_scene->GetSkyboxPreviewTexture();
                 void* textureHandle = skybox && skybox->GetGraphicsTexture()
                     ? skybox->GetGraphicsTexture()->GetNativeHandle()
                     : nullptr;
@@ -198,41 +138,112 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
                 if (ui.Button("Cancel"))
                     m_editingSkyboxTexture = false;
             }
+
+            ui.Separator();
+            ui.Label("HDRI Environment");
+            bool environmentChanged = false;
+            environmentChanged |= ui.Checkbox("Use Skybox for Lighting",
+                &m_scene->settings.hdriLightingEnabled);
+            environmentChanged |= ui.DragFloat("Intensity",
+                &m_scene->settings.hdriIntensity, 0.02f, 0.f, 32.f);
+            environmentChanged |= ui.DragFloat("Exposure (EV)",
+                &m_scene->settings.hdriExposure, 0.05f, -16.f, 16.f);
+            environmentChanged |= ui.DragFloat("Rotation",
+                &m_scene->settings.hdriRotation, 0.5f, -360.f, 360.f);
+            if (environmentChanged)
+            {
+                m_scene->settings.hdriIntensity = std::max(
+                    0.f, m_scene->settings.hdriIntensity);
+                m_scene->settings.hdriExposure = std::clamp(
+                    m_scene->settings.hdriExposure, -16.f, 16.f);
+                if (OnComponentsChanged)
+                    OnComponentsChanged();
+            }
         }
         ui.EndTextWrap();
         ui.EndWindow();
         return;
     }
-    Object* prefabRoot = m_selectedObject->GetPrefabInstanceRoot();
-    const bool linked = prefabRoot != nullptr;
+    const std::string assetDropPreview = HandleWindowAssetDrop(ui);
+    Engine::Core::Object* prefabRoot = m_selectedObject->GetPrefabInstanceRoot();
+    const bool hasPrefabOverrides = prefabRoot &&
+        Engine::Serialization::SceneSerializer::HasPrefabOverrides(*prefabRoot, true);
     char name[256]; strncpy_s(name, m_selectedObject->name.c_str(), sizeof(name));
     bool enabled = m_selectedObject->enabled;
     const EditorUiObjectRowResult header = ui.ObjectHeader(
-        m_selectedObject, name, sizeof(name), &enabled, linked);
-    if (header.nameChanged) m_selectedObject->name = name;
-    if (header.enabledChanged)
-        enabled ? m_selectedObject->Enabled() : m_selectedObject->Disabled();
-    if (prefabRoot && prefabRoot->Prefab)
+        m_selectedObject, name, sizeof(name), &enabled,
+        false);
+    if (prefabRoot)
+        HandlePrefabMenu(ui.PrefabOverrideMenu(m_selectedObject,
+            hasPrefabOverrides));
+    if (hasPrefabOverrides)
     {
-        ui.ValueLabel("Prefab", prefabRoot->Prefab->GetPath().c_str());
-        ui.DisabledLabel(
-            m_selectedObject == prefabRoot
-                ? "Properties come from the prefab; root transform is instance placement."
-                : "Properties and transform come from the prefab asset.");
+        ui.SameLine();
+        ui.ColoredLabel("◆", { 1.f, 0.65f, 0.15f, 1.f });
+        if (ui.IsItemHovered())
+            ui.Tooltip("This prefab instance has local overrides");
+    }
+    if (header.nameChanged)
+    {
+        m_selectedObject->name = name;
+        m_selectedObject->InvalidatePrefabOverrideCache();
+        if (OnComponentsChanged)
+            OnComponentsChanged();
+    }
+    if (header.enabledChanged)
+    {
+        enabled ? m_selectedObject->Enabled() : m_selectedObject->Disabled();
+        m_selectedObject->InvalidatePrefabOverrideCache();
+        if (OnComponentsChanged)
+            OnComponentsChanged();
+    }
+    if (!prefabRoot)
+    {
+        ui.DisabledLabel("Scene-only object");
+        ui.ValueLabel("Owner", m_selectedObject->Parent
+            ? m_selectedObject->Parent->name.c_str() : "Scene Root");
     }
     else
-        ui.DisabledLabel("Scene-only object");
+        ui.ColoredLabel("Linked Prefab", { 0.35f, 0.7f, 1.f, 1.f });
     
     ui.Separator();
+    ui.Indent(16.f);
     
-    // Draw Transform (always present, not in Components list)
+    // Draw Engine::Components::Transform (always present, not in Components list)
     DrawTransform(ui);
+
+    if (prefabRoot && prefabRoot->Prefab)
+    {
+        const std::string prefabPath = prefabRoot->Prefab->GetPath();
+        ui.BeginDisabled(!OnPrefabRequested);
+        if (ui.Button("Edit Prefab") && OnPrefabRequested)
+            OnPrefabRequested(prefabPath);
+        ui.EndDisabled();
+        ui.SameLine();
+        ui.BeginDisabled(!hasPrefabOverrides);
+        if (ui.Button("Apply Overrides"))
+            ApplySelectedPrefabOverrides(false);
+        ui.SameLine();
+        if (ui.Button("Apply All"))
+            ApplySelectedPrefabOverrides(true);
+        ui.SameLine();
+        if (ui.Button("Revert"))
+            RevertSelectedPrefabOverrides();
+        ui.EndDisabled();
+        ui.SameLine();
+        if (ui.Button("Unpack Prefab"))
+        {
+            UnpackSelectedPrefab();
+            prefabRoot = nullptr;
+        }
+    }
     
     // Draw all components with accordion views
-    Component* componentToDelete = nullptr;
-    Component* reorderSource = nullptr;
-    Component* reorderTarget = nullptr;
-    for (Component* component : m_selectedObject->Components)
+    Engine::Core::Component* componentToDelete = nullptr;
+    Engine::Core::Component* reorderSource = nullptr;
+    Engine::Core::Component* reorderTarget = nullptr;
+    bool componentPropertiesChanged = false;
+    for (Engine::Core::Component* component : m_selectedObject->Components)
     {
         if (!component) continue;
         ui.PushId(component);
@@ -241,12 +252,17 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         if (componentType.empty()) componentType = "Component";
         
         const bool componentOpen = ui.CollapsingHeader(componentType.c_str());
-        const bool componentEditable = !m_selectedObject->IsPartOfPrefabInstance();
+        Engine::Core::Object* componentPrefabRoot = m_selectedObject->GetPrefabInstanceRoot();
+        const bool componentEditable = componentPrefabRoot == nullptr;
         // Bind the menu to the header before drag/drop helpers replace the
         // UI backend's current item.
-        const EditorUiContextMenuResult menu = ui.ContextMenu(component,
-            componentEditable ? "Add Component" : nullptr,
-            componentEditable ? "Delete Component" : nullptr);
+        EditorUiContextMenuResult menu;
+        if (componentPrefabRoot)
+            HandlePrefabMenu(ui.PrefabOverrideMenu(component,
+                Engine::Serialization::SceneSerializer::HasPrefabOverrides(*componentPrefabRoot, true)));
+        else
+            menu = ui.ContextMenu(component, "Add Component",
+                "Delete Component", false);
         if (menu.addRequested)
         {
             m_componentPickerOpen = true;
@@ -257,7 +273,7 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             componentToDelete = component;
         if (componentEditable && ui.BeginDragDropSource())
         {
-            Component* payload = component;
+            Engine::Core::Component* payload = component;
             ui.SetDragDropPayload(
                 "ENGINE_COMPONENT_REORDER", &payload, sizeof(payload));
             ui.Label(componentType.c_str());
@@ -268,22 +284,26 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             size_t payloadSize = 0;
             const void* payload = ui.AcceptDragDropPayload(
                 "ENGINE_COMPONENT_REORDER", &payloadSize);
-            if (payload && payloadSize == sizeof(Component*))
+            if (payload && payloadSize == sizeof(Engine::Core::Component*))
             {
-                reorderSource = *static_cast<Component* const*>(payload);
+                reorderSource = *static_cast<Engine::Core::Component* const*>(payload);
                 reorderTarget = component;
             }
             ui.EndDragDropTarget();
         }
-        AcceptAssetDrop(ui);
         if (componentOpen)
-        {
-            const bool locked = m_selectedObject->IsPartOfPrefabInstance();
-            ui.BeginDisabled(locked);
-            component->DrawProperties(ui);
-            ui.EndDisabled();
-        }
+            componentPropertiesChanged =
+                component->DrawProperties(ui) || componentPropertiesChanged;
         ui.PopId();
+    }
+
+    if (componentPropertiesChanged && OnComponentsChanged)
+    {
+        if (auto* body =
+            m_selectedObject->GetComponent<Engine::Components::RigidBody>())
+            body->NotifyEditorTransformChanged();
+        m_selectedObject->InvalidatePrefabOverrideCache();
+        OnComponentsChanged();
     }
 
     if (reorderSource && reorderTarget && reorderSource != reorderTarget)
@@ -328,253 +348,49 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             OnComponentsChanged();
     }
 
+    if (m_showChildHierarchy && !m_selectedObject->Children.empty() &&
+        ui.CollapsingHeader("Children", false))
+    {
+        std::function<void(Engine::Core::Object*)> drawChild = [&](Engine::Core::Object* child)
+        {
+            if (!child) return;
+            const bool leaf = child->Children.empty();
+            const bool open = ui.TreeNode(child, child->name.c_str(),
+                false, leaf, true);
+            if (open && !leaf)
+            {
+                for (Engine::Core::Object* grandchild : child->Children)
+                    drawChild(grandchild);
+                ui.TreePop();
+            }
+        };
+        for (Engine::Core::Object* child : m_selectedObject->Children)
+            drawChild(child);
+    }
+
+    if (!assetDropPreview.empty())
+    {
+        ui.PushId("assetDropPreview");
+        ui.BeginDisabled();
+        const std::string label = assetDropPreview + " (Drop to Add)";
+        ui.CollapsingHeader(label.c_str(), false);
+        ui.EndDisabled();
+        ui.PopId();
+    }
+
     ui.Separator();
+    ui.BeginDisabled(!CanEditSelectedObject());
     if (ui.Button("Add Component"))
     {
         m_componentPickerOpen = true;
         m_positionComponentPicker = true;
         m_componentSearch[0] = '\0';
     }
-    DrawAssetDropTarget(ui, "Drop asset here to add or assign a component");
-    
+    ui.EndDisabled();
+    ui.Unindent(16.f);
+
     ui.EndTextWrap();
     ui.EndWindow();
     DrawComponentPicker(ui);
 }
-
-void PropertiesView::DrawAssetDropTarget(IEditorUi& ui, const char* label)
-{
-    ui.Selectable(label);
-    ui.Tooltip("Mesh/model, material, texture, or compiled Component header");
-    AcceptAssetDrop(ui);
-}
-
-void PropertiesView::AcceptAssetDrop(IEditorUi& ui)
-{
-    if (!ui.BeginDragDropTarget())
-        return;
-
-    size_t payloadSize = 0;
-    const void* payload = ui.AcceptDragDropPayload("ENGINE_ASSET_PATH", &payloadSize);
-    if (payload && payloadSize > 0)
-    {
-        const char* bytes = static_cast<const char*>(payload);
-        size_t length = 0;
-        while (length < payloadSize && bytes[length] != '\0')
-            ++length;
-        const std::string path(bytes, length);
-        std::string message;
-        const bool added = AddComponentFromAsset(path, message);
-        LogAssetDrop(message, !added);
-        if (added && OnComponentsChanged)
-            OnComponentsChanged();
-    }
-    ui.EndDragDropTarget();
-}
-
-bool PropertiesView::AddComponentFromAsset(const std::string& path, std::string& message)
-{
-    if (!m_selectedObject)
-    {
-        message = "[Properties] Select an object before dropping an asset.";
-        return false;
-    }
-    if (m_selectedObject->IsPartOfPrefabInstance())
-    {
-        message = "[Properties] Components on linked prefab objects are read-only.";
-        return false;
-    }
-    if (path.empty() || !std::filesystem::is_regular_file(path))
-    {
-        message = "[Properties] Dropped asset does not exist: " + path;
-        return false;
-    }
-
-    const std::string extension = LowerExtension(path);
-    try
-    {
-        if (extension == ".mesh" || extension == ".obj")
-        {
-            auto mesh = std::make_unique<Mesh>();
-            mesh->LoadFromFile(path);
-            mesh->OnAfterDeserialize(m_scene ? m_scene->GetGraphicsProvider() : nullptr);
-            ReplaceOrAddComponent(*m_selectedObject, mesh.release());
-            message = "[Properties] Assigned Mesh from: " + path;
-            return true;
-        }
-
-        if (extension == ".material" || extension == ".mat")
-        {
-            auto material = std::make_unique<Material>();
-            if (!material->LoadFromFile(path))
-            {
-                message = "[Properties] Failed to read material asset: " + path;
-                return false;
-            }
-            material->PrepareTextures(m_scene ? m_scene->GetGraphicsProvider() : nullptr);
-            ReplaceOrAddComponent(*m_selectedObject, material.release());
-            message = "[Properties] Assigned Material from: " + path;
-            return true;
-        }
-
-        if (IsTextureExtension(extension))
-        {
-            Material* material = m_selectedObject->GetComponent<Material>();
-            if (!material)
-                material = m_selectedObject->AddComponent<Material>();
-            material->SetBaseColorTexture(path);
-            material->PrepareTextures(m_scene ? m_scene->GetGraphicsProvider() : nullptr);
-            message = "[Properties] Assigned texture as Material base color: " + path;
-            return true;
-        }
-
-        if (extension == ".h" || extension == ".hpp")
-        {
-            const std::string className = FindComponentSubclass(path);
-            if (className.empty())
-            {
-                message = "[Properties] Header does not declare a public Component/Script subclass: " + path;
-                return false;
-            }
-
-            if (!AddRegisteredComponent(className, message))
-                return false;
-            message += " from: " + path;
-            return true;
-        }
-    }
-    catch (const std::exception& error)
-    {
-        message = "[Properties] Could not apply asset '" + path + "': " + error.what();
-        return false;
-    }
-
-    message = "[Properties] No compatible component mapping for asset: " + path;
-    return false;
-}
-
-bool PropertiesView::AddRegisteredComponent(const std::string& typeName, std::string& message)
-{
-    if (!m_selectedObject)
-    {
-        message = "[Properties] Select an object before adding a component.";
-        return false;
-    }
-    if (m_selectedObject->IsPartOfPrefabInstance())
-    {
-        message = "[Properties] Components on linked prefab objects are read-only.";
-        return false;
-    }
-
-    try
-    {
-        std::unique_ptr<Component> component(
-            SceneSerializer::CreateRegisteredComponent(typeName));
-        if (!component)
-        {
-            message = "[Properties] Component '" + typeName +
-                "' is not compiled and registered; rebuild/register it before adding it.";
-            return false;
-        }
-        if (component->singlecomponent)
-        {
-            const std::string serializedType = component->GetTypeName();
-            const auto duplicate = std::find_if(m_selectedObject->Components.begin(),
-                m_selectedObject->Components.end(), [&serializedType](const Component* existing)
-                {
-                    return existing && existing->GetTypeName() == serializedType;
-                });
-            if (duplicate != m_selectedObject->Components.end())
-            {
-                message = "[Properties] Object already has the single-instance component '" +
-                    serializedType + "'.";
-                return false;
-            }
-        }
-        component->Owner = m_selectedObject;
-        component->OnAfterDeserialize(m_scene ? m_scene->GetGraphicsProvider() : nullptr);
-        m_selectedObject->Components.push_back(component.release());
-        message = "[Properties] Added component '" + typeName + "'";
-        return true;
-    }
-    catch (const std::exception& error)
-    {
-        message = "[Properties] Could not add component '" + typeName + "': " + error.what();
-        return false;
-    }
-}
-
-void PropertiesView::DrawComponentPicker(IEditorUi& ui)
-{
-    if (!m_componentPickerOpen || !m_selectedObject)
-        return;
-    if (m_positionComponentPicker)
-    {
-        ui.SetNextWindowRect(420.f, 220.f, 360.f, 420.f);
-        m_positionComponentPicker = false;
-    }
-    if (!ui.BeginWindow("Add Component", &m_componentPickerOpen))
-    {
-        ui.EndWindow();
-        return;
-    }
-
-    ui.InputText("Search", m_componentSearch, sizeof(m_componentSearch));
-    ui.Separator();
-    const std::vector<std::string> types = SceneSerializer::GetRegisteredComponentTypes();
-    bool foundMatch = false;
-    for (const std::string& type : types)
-    {
-        if (!ContainsIgnoringCase(type, m_componentSearch))
-            continue;
-        foundMatch = true;
-        if (ui.Selectable(type.c_str()))
-        {
-            std::string message;
-            const bool added = AddRegisteredComponent(type, message);
-            LogAssetDrop(message, !added);
-            if (added)
-            {
-                if (OnComponentsChanged)
-                    OnComponentsChanged();
-                m_componentPickerOpen = false;
-            }
-        }
-    }
-    if (!foundMatch)
-        ui.DisabledLabel("No matching components");
-    ui.EndWindow();
-}
-
-void PropertiesView::LogAssetDrop(const std::string& message, bool error) const
-{
-    if (OnAssetDropLog)
-        OnAssetDropLog(message, error);
-    else
-        OutputDebugStringA((message + "\n").c_str());
-}
-
-void PropertiesView::DrawTransform(IEditorUi& ui)
-{
-    Transform& t = m_selectedObject->transform;
-    const Object* prefabRoot = m_selectedObject->GetPrefabInstanceRoot();
-    const bool locked = prefabRoot && prefabRoot != m_selectedObject;
-    
-    const bool transformOpen = ui.CollapsingHeader("Transform");
-    const EditorUiContextMenuResult menu = ui.ContextMenu(&t,
-        locked || m_selectedObject->IsPartOfPrefabInstance() ? nullptr : "Add Component",
-        nullptr);
-    if (menu.addRequested)
-    {
-        m_componentPickerOpen = true;
-        m_positionComponentPicker = true;
-        m_componentSearch[0] = '\0';
-    }
-    AcceptAssetDrop(ui);
-    if (transformOpen)
-    {
-        ui.BeginDisabled(locked);
-        t.DrawProperties(ui);
-        ui.EndDisabled();
-    }
 }

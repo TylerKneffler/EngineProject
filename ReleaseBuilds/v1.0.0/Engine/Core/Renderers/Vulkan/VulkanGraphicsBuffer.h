@@ -3,7 +3,9 @@
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "VulkanCommon.h"
 
-class VulkanGraphicsBuffer : public IGraphicsBuffer
+namespace Engine::Renderers
+{
+class VulkanGraphicsBuffer : public Engine::Graphics::IGraphicsBuffer
 {
 public:
     VulkanGraphicsBuffer(VkDevice device, VkBuffer buffer, VkDeviceMemory memory,
@@ -30,17 +32,18 @@ private:
     uint32_t m_elementStride = 0;
 };
 
-class VulkanBufferFactory : public IGraphicsBufferFactory
+class VulkanBufferFactory : public Engine::Graphics::IGraphicsBufferFactory
 {
 public:
     VulkanBufferFactory(VkPhysicalDevice physicalDevice, VkDevice device)
         : m_physicalDevice(physicalDevice), m_device(device) {}
-    std::unique_ptr<IGraphicsBuffer> CreateBuffer(IGraphicsBuffer::Usage usage,
-        IGraphicsBuffer::AccessMode access, uint64_t sizeBytes,
+    std::unique_ptr<Engine::Graphics::IGraphicsBuffer> CreateBuffer(Engine::Graphics::IGraphicsBuffer::Usage usage,
+        Engine::Graphics::IGraphicsBuffer::AccessMode access, uint64_t sizeBytes,
         const void* initialData = nullptr,
         uint32_t elementStride = 0) override;
 private:
     VkPhysicalDevice m_physicalDevice;
     VkDevice m_device;
 };
+}
 #endif

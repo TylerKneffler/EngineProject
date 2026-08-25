@@ -4,6 +4,8 @@
 #include "DX12GraphicsProvider.h"
 #include <memory>
 
+namespace Engine::Renderers
+{
 // ---------------------------------------------------------------------------
 // DX12Renderer — Tutorial Overview
 //
@@ -81,12 +83,12 @@ public:
     uint32_t GetWidth() const override { return m_width; }
     uint32_t GetHeight() const override { return m_height; }
     void Clear(float r, float g, float b, float a = 1.0f) override;
-    IGraphicsProvider* GetGraphicsProvider() override;
+    Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override;
 
     // IGameRenderer interface
     void BeginFrame() override;   // reset allocator + list, transition backbuffer to RENDER_TARGET
     void EndFrame() override;     // execute list, present, signal fence
-    std::unique_ptr<IGraphicsContext> CreateFrameGraphicsContext() override;
+    std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateFrameGraphicsContext() override;
 
     // ---------- D3D12-specific accessors (for internal use) ----------
     ID3D12Device*              GetDevice()      const { return m_device.Get(); }
@@ -191,3 +193,4 @@ private:
     std::unique_ptr<D3D12GraphicsProvider> m_graphicsProvider;
 
 };
+}

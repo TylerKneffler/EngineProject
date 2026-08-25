@@ -3,6 +3,8 @@
 #include <memory>
 #include <string>
 
+namespace Engine::Prefab
+{
 // Shared identity for a prefab resource. Scene objects remain independently
 // owned instances; instances created from the same prefab share this handle.
 class PrefabAsset
@@ -16,3 +18,4 @@ private:
     explicit PrefabAsset(std::string path) : m_path(std::move(path)) {}
     std::string m_path;
 };
+}

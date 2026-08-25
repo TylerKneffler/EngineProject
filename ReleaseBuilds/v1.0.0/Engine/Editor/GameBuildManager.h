@@ -3,6 +3,8 @@
 #include "Core/ProjectLoader.h"
 #include <functional>
 
+namespace Engine::Editor
+{
 class ConsoleView;
 
 // ---------------------------------------------------------------------------
@@ -20,7 +22,7 @@ class GameBuildManager
 {
 public:
     GameBuildManager(ConsoleView* console, std::string projectFilePath,
-        ProjectSettings developmentSettings = {})
+        Engine::Model::ProjectSettings developmentSettings = {})
         : m_projectFilePath(std::move(projectFilePath))
         , m_developmentSettings(std::move(developmentSettings))
         , m_console(console) {}
@@ -63,8 +65,9 @@ private:
     PlayState m_playState = PlayState::Stopped;
     PostBuildAction m_postBuildAction = PostBuildAction::Nothing;
     std::string m_projectFilePath;
-    ProjectSettings m_developmentSettings;
+    Engine::Model::ProjectSettings m_developmentSettings;
 
     // References
     ConsoleView* m_console = nullptr;
 };
+}

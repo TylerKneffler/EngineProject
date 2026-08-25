@@ -2,6 +2,9 @@
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "VulkanCommon.h"
 
+
+namespace Engine::Renderers
+{
 uint32_t VulkanFindMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeBits,
                               VkMemoryPropertyFlags required)
 {
@@ -15,13 +18,14 @@ uint32_t VulkanFindMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeBits
 
 VulkanImageResource VulkanCreateImage(VkPhysicalDevice physicalDevice, VkDevice device,
                                       uint32_t width, uint32_t height, VkFormat format,
-                                      VkImageUsageFlags usage, VkImageAspectFlags aspect)
+                                      VkImageUsageFlags usage, VkImageAspectFlags aspect,
+                                      uint32_t mipLevels)
 {
     VulkanImageResource result;
     VkImageCreateInfo imageInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
     imageInfo.extent = { width, height, 1 };
-    imageInfo.mipLevels = 1;
+    imageInfo.mipLevels = mipLevels;
     imageInfo.arrayLayers = 1;
     imageInfo.format = format;
     imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
@@ -45,7 +49,7 @@ VulkanImageResource VulkanCreateImage(VkPhysicalDevice physicalDevice, VkDevice 
     viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
     viewInfo.format = format;
     viewInfo.subresourceRange.aspectMask = aspect;
-    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.levelCount = mipLevels;
     viewInfo.subresourceRange.layerCount = 1;
     VkCheck(vkCreateImageView(device, &viewInfo, nullptr, &result.view), "vkCreateImageView");
     return result;
@@ -57,5 +61,6 @@ void VulkanDestroyImage(VkDevice device, VulkanImageResource& image)
     if (image.image) vkDestroyImage(device, image.image, nullptr);
     if (image.memory) vkFreeMemory(device, image.memory, nullptr);
     image = {};
+}
 }
 #endif

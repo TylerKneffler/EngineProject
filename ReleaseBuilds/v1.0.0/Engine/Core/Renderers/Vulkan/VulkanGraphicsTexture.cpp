@@ -5,6 +5,8 @@
 
 #include <cstring>
 
+namespace Engine::Renderers
+{
 size_t VulkanTextureSystem::TextureKeyHash::operator()(const TextureKey& key) const
 {
     size_t hash = 0;
@@ -27,19 +29,19 @@ VulkanTextureSystem::VulkanTextureSystem(
       m_queue(queue),
       m_queueFamily(queueFamily)
 {
-    VkDescriptorSetLayoutBinding bindings[8]{};
-    for (uint32_t binding = 0; binding < 5; ++binding)
+    VkDescriptorSetLayoutBinding bindings[11]{};
+    for (uint32_t binding = 0; binding < 6; ++binding)
     {
         bindings[binding].binding = binding;
         bindings[binding].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
         bindings[binding].descriptorCount = 1;
         bindings[binding].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     }
-    bindings[5].binding = 5;
-    bindings[5].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-    bindings[5].descriptorCount = 1;
-    bindings[5].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    for (uint32_t binding = 6; binding < 8; ++binding)
+    bindings[6].binding = 6;
+    bindings[6].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+    bindings[6].descriptorCount = 1;
+    bindings[6].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    for (uint32_t binding = 7; binding < 10; ++binding)
     {
         bindings[binding].binding = binding;
         bindings[binding].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -47,6 +49,10 @@ VulkanTextureSystem::VulkanTextureSystem(
         bindings[binding].stageFlags =
             VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     }
+    bindings[10].binding = 10;
+    bindings[10].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    bindings[10].descriptorCount = 1;
+    bindings[10].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     VkDescriptorSetLayoutCreateInfo layoutInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
     layoutInfo.bindingCount = ARRAYSIZE(bindings);
@@ -55,9 +61,9 @@ VulkanTextureSystem::VulkanTextureSystem(
         m_device, &layoutInfo, nullptr, &m_layout), "vkCreateDescriptorSetLayout");
 
     VkDescriptorPoolSize sizes[3]{
-        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 5 * 512 },
+        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 7 * 512 },
         { VK_DESCRIPTOR_TYPE_SAMPLER, 512 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2 * 512 }
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3 * 512 }
     };
     VkDescriptorPoolCreateInfo poolInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
@@ -74,7 +80,7 @@ VulkanTextureSystem::VulkanTextureSystem(
     samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.maxLod = 1.0f;
+    samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
     VkCheck(vkCreateSampler(m_device, &samplerInfo, nullptr, &m_sampler),
         "vkCreateSampler");
 
@@ -99,7 +105,7 @@ VulkanTextureSystem::VulkanTextureSystem(
         "vkBindBufferMemory(dummy storage)");
 
     const uint8_t white[] = { 255, 255, 255, 255 };
-    m_white = Upload(1, 1, white);
+    m_white = Upload(1, 1, white, 1, Engine::Graphics::GraphicsTextureFormat::Rgba8);
 }
 
 VulkanTextureSystem::~VulkanTextureSystem()
@@ -119,9 +125,20 @@ VulkanTextureSystem::~VulkanTextureSystem()
 VulkanImageResource VulkanTextureSystem::Upload(
     uint32_t width,
     uint32_t height,
-    const uint8_t* pixels)
+    const uint8_t* pixels,
+    uint32_t mipLevels,
+    Engine::Graphics::GraphicsTextureFormat textureFormat,
+    bool srgb)
 {
-    const VkDeviceSize size = static_cast<VkDeviceSize>(width) * height * 4;
+    const uint32_t bytesPerPixel = GraphicsTextureBytesPerPixel(textureFormat);
+    VkDeviceSize size = 0;
+    uint32_t mipWidth = width, mipHeight = height;
+    for (uint32_t mip = 0; mip < mipLevels; ++mip)
+    {
+        size += static_cast<VkDeviceSize>(mipWidth) * mipHeight * bytesPerPixel;
+        mipWidth = std::max(1u, mipWidth / 2);
+        mipHeight = std::max(1u, mipHeight / 2);
+    }
     VkBuffer staging = VK_NULL_HANDLE;
     VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
     VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
@@ -148,9 +165,12 @@ VulkanImageResource VulkanTextureSystem::Upload(
     vkUnmapMemory(m_device, stagingMemory);
 
     VulkanImageResource image = VulkanCreateImage(
-        m_physicalDevice, m_device, width, height, VK_FORMAT_R8G8B8A8_SRGB,
+        m_physicalDevice, m_device, width, height,
+        textureFormat == Engine::Graphics::GraphicsTextureFormat::Rgba32Float
+            ? VK_FORMAT_R32G32B32A32_SFLOAT
+            : (srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM),
         VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        VK_IMAGE_ASPECT_COLOR_BIT);
+        VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
 
     VkCommandPool pool = VK_NULL_HANDLE;
     VkCommandPoolCreateInfo poolInfo{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
@@ -178,16 +198,27 @@ VulkanImageResource VulkanTextureSystem::Upload(
     toCopy.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     toCopy.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     toCopy.image = image.image;
-    toCopy.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    toCopy.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1 };
     vkCmdPipelineBarrier(
         commands, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
         0, 0, nullptr, 0, nullptr, 1, &toCopy);
 
-    VkBufferImageCopy copy{};
-    copy.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-    copy.imageExtent = { width, height, 1 };
+    std::vector<VkBufferImageCopy> copies(mipLevels);
+    VkDeviceSize copyOffset = 0;
+    mipWidth = width;
+    mipHeight = height;
+    for (uint32_t mip = 0; mip < mipLevels; ++mip)
+    {
+        copies[mip].bufferOffset = copyOffset;
+        copies[mip].imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, mip, 0, 1 };
+        copies[mip].imageExtent = { mipWidth, mipHeight, 1 };
+        copyOffset += static_cast<VkDeviceSize>(mipWidth) * mipHeight * bytesPerPixel;
+        mipWidth = std::max(1u, mipWidth / 2);
+        mipHeight = std::max(1u, mipHeight / 2);
+    }
     vkCmdCopyBufferToImage(
-        commands, staging, image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+        commands, staging, image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        mipLevels, copies.data());
 
     VkImageMemoryBarrier toShader = toCopy;
     toShader.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -213,19 +244,22 @@ VulkanImageResource VulkanTextureSystem::Upload(
 std::shared_ptr<VulkanGraphicsTexture> VulkanTextureSystem::CreateTexture(
     uint32_t width,
     uint32_t height,
-    const uint8_t* rgbaPixels)
+    const uint8_t* rgbaPixels,
+    uint32_t mipLevels,
+    Engine::Graphics::GraphicsTextureFormat format,
+    bool srgb)
 {
-    if (!width || !height || !rgbaPixels)
+    if (!width || !height || !rgbaPixels || !mipLevels)
         return nullptr;
     return std::make_shared<VulkanGraphicsTexture>(
-        shared_from_this(), Upload(width, height, rgbaPixels));
+        shared_from_this(), Upload(width, height, rgbaPixels, mipLevels, format, srgb));
 }
 
 void VulkanTextureSystem::Bind(
     VkCommandBuffer commands,
     VkPipelineLayout pipelineLayout,
-    const std::array<const VulkanGraphicsTexture*, 5>& textures,
-    const std::array<const VulkanGraphicsBuffer*, 2>& buffers)
+    const std::array<const VulkanGraphicsTexture*, 7>& textures,
+    const std::array<const VulkanGraphicsBuffer*, 3>& buffers)
 {
     TextureKey key{};
     for (size_t index = 0; index < textures.size(); ++index)
@@ -248,9 +282,9 @@ void VulkanTextureSystem::Bind(
         VkCheck(vkAllocateDescriptorSets(m_device, &allocate, &set),
             "vkAllocateDescriptorSets(material)");
 
-        VkDescriptorImageInfo images[5]{};
-        VkWriteDescriptorSet writes[8]{};
-        for (uint32_t index = 0; index < 5; ++index)
+        VkDescriptorImageInfo images[7]{};
+        VkWriteDescriptorSet writes[11]{};
+        for (uint32_t index = 0; index < 6; ++index)
         {
             images[index].imageView =
                 textures[index] ? textures[index]->GetView() : m_white.view;
@@ -262,27 +296,35 @@ void VulkanTextureSystem::Bind(
             writes[index].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
             writes[index].pImageInfo = &images[index];
         }
+        images[6].imageView = textures[6] ? textures[6]->GetView() : m_white.view;
+        images[6].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        writes[10] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        writes[10].dstSet = set;
+        writes[10].dstBinding = 10;
+        writes[10].descriptorCount = 1;
+        writes[10].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        writes[10].pImageInfo = &images[6];
         VkDescriptorImageInfo samplerInfo{};
         samplerInfo.sampler = m_sampler;
-        writes[5] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-        writes[5].dstSet = set;
-        writes[5].dstBinding = 5;
-        writes[5].descriptorCount = 1;
-        writes[5].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-        writes[5].pImageInfo = &samplerInfo;
-        VkDescriptorBufferInfo bufferInfos[2]{};
-        for (uint32_t index = 0; index < 2; ++index)
+        writes[6] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        writes[6].dstSet = set;
+        writes[6].dstBinding = 6;
+        writes[6].descriptorCount = 1;
+        writes[6].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+        writes[6].pImageInfo = &samplerInfo;
+        VkDescriptorBufferInfo bufferInfos[3]{};
+        for (uint32_t index = 0; index < 3; ++index)
         {
             bufferInfos[index].buffer =
                 buffers[index] ? buffers[index]->GetBuffer() : m_dummyBuffer;
             bufferInfos[index].range =
                 buffers[index] ? buffers[index]->GetSize() : 16;
-            writes[index + 6] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-            writes[index + 6].dstSet = set;
-            writes[index + 6].dstBinding = index + 6;
-            writes[index + 6].descriptorCount = 1;
-            writes[index + 6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            writes[index + 6].pBufferInfo = &bufferInfos[index];
+            writes[index + 7] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            writes[index + 7].dstSet = set;
+            writes[index + 7].dstBinding = index + 7;
+            writes[index + 7].descriptorCount = 1;
+            writes[index + 7].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[index + 7].pBufferInfo = &bufferInfos[index];
         }
         vkUpdateDescriptorSets(m_device, ARRAYSIZE(writes), writes, 0, nullptr);
         m_sets.emplace(key, set);
@@ -298,11 +340,17 @@ VulkanGraphicsTexture::~VulkanGraphicsTexture()
         VulkanDestroyImage(m_system->GetDevice(), m_image);
 }
 
-std::shared_ptr<IGraphicsTexture> VulkanTextureFactory::CreateTexture2D(
+std::shared_ptr<Engine::Graphics::IGraphicsTexture> VulkanTextureFactory::CreateTexture2D(
     uint32_t width,
     uint32_t height,
-    const uint8_t* rgbaPixels)
+    const uint8_t* rgbaPixels,
+    uint32_t mipLevels,
+    Engine::Graphics::GraphicsTextureFormat format,
+    bool srgb)
 {
-    return m_system ? m_system->CreateTexture(width, height, rgbaPixels) : nullptr;
+    return m_system
+        ? m_system->CreateTexture(width, height, rgbaPixels, mipLevels, format, srgb)
+        : nullptr;
+}
 }
 #endif

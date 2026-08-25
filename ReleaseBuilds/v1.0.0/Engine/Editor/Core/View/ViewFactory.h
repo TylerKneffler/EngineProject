@@ -6,6 +6,8 @@
 #include "Views/PropertiesView.h"
 #include "Views/AssetsExplorerView.h"
 #include "Views/ConsoleView.h"
+#include "Views/TerminalView.h"
+#include "Views/ProblemsView.h"
 #include "Core/Renderers/IEditorRenderer.h"
 #include "Core/Scene/Scene.h"
 #include "Core/ProjectLoader.h"
@@ -15,6 +17,8 @@
 #include <unordered_map>
 #include <unordered_set>
 
+namespace Engine::Editor
+{
 // ---------------------------------------------------------------------------
 // ViewFactory — creates and names editor panels.
 //
@@ -26,7 +30,7 @@
 //
 // Usage:
 //   ViewFactory factory(renderer.get(), &scene, settings);
-//   factory.OnSelectionChanged = [&](Object* o){ ... };
+//   factory.OnSelectionChanged = [&](Engine::Core::Object* o){ ... };
 //   factory.OnSceneRequested   = [&](const std::string& p){ ... };
 //
 //   auto panel = factory.Create("Scene");   // returns unique_ptr<IEditorPanel>
@@ -38,14 +42,21 @@ public:
     // Slot 0 is reserved by the active UI graphics bridge.
     static constexpr uint32_t MAX_SRV_SLOTS = 32; // must match renderer heap size
 
-    ViewFactory(IEditorRenderer*    renderer,
-                Scene*              scene,
-                const ProjectSettings& settings);
+    ViewFactory(::Engine::Renderers::IEditorRenderer*    renderer,
+                Engine::Scene::Scene*              scene,
+                const Engine::Model::ProjectSettings& settings);
 
     // Create a new panel by type name.
-    // Supported names: "Scene", "Game", "Hierarchy", "Properties", "Assets", "Console"
+    // Supported names: "Scene", "Game", "Hierarchy", "Properties", "Assets", "Console", "Terminal", "Problems"
     // Returns nullptr if the type name is unknown or if no SRV slot is available for a 3-D view.
     std::unique_ptr<IEditorPanel> Create(const std::string& typeName);
+
+    // Creates an additional scene viewport bound to an independent scene.
+    // Used by prefab editing so the project Scene/Game views keep rendering
+    // the active project scene.
+    std::unique_ptr<SceneView> CreateSceneView(
+        Engine::Scene::Scene* scene, const std::string& title,
+        EditorPanelDockArea defaultDockArea = EditorPanelDockArea::MainDocument);
 
     // Returns false when no SRV slots remain for 3-D views (Scene / Game).
     bool CanCreate3DView() const { return m_renderer && m_renderer->CanAllocateSrvSlot(); }
@@ -62,25 +73,34 @@ public:
     void NotifyPanelRemoved(IEditorPanel* panel);
 
     // ---- Callbacks wired into newly created panels ----
-    std::function<void(Object*)>           OnSelectionChanged;  // HierarchyView
-    std::function<void(Object*)>           OnObjectSelected;    // SceneView click selection
+    std::function<void(Engine::Core::Object*)>           OnSelectionChanged;  // HierarchyView
+    std::function<void()>                  OnMainDocumentFocused;
+    std::function<void(Engine::Core::Object*)>           OnObjectSelected;    // SceneView click selection
+    std::function<void(Engine::Core::Object*)>           OnObjectCreated;     // SceneView context creation
+    std::function<void()>                  OnDeleteSelectionRequested;
     std::function<void(bool)>              OnGizmoInteraction;  // SceneView transform drag
-    std::function<void(Object*)>           OnFocusObject;       // HierarchyView double-click
+    std::function<void(Engine::Core::Object*)>           OnFocusObject;       // HierarchyView double-click
     std::function<void()>                  OnHierarchyChanged;
     std::function<void(const std::string&)> OnHierarchyInteraction;
     std::function<void(const std::string&)> OnSceneRequested;   // AssetsExplorerView
+    std::function<void(const std::string&)> OnPrefabRequested;  // AssetsExplorerView
+    std::function<void(const std::string&)> OnAssetSelected;    // AssetsExplorerView
     std::function<void(const std::string&)> OnAssetDropped;     // SceneView
-    std::function<Object*(const std::string&)> OnAssetPreviewRequested;
-    std::function<void(Object*)> OnAssetPreviewCancelled;
-    std::function<void(Object*, const std::string&)> OnAssetPreviewCommitted;
+    std::function<Engine::Core::Object*(const std::string&)> OnAssetPreviewRequested;
+    std::function<void(Engine::Core::Object*)> OnAssetPreviewCancelled;
+    std::function<void(Engine::Core::Object*, const std::string&)> OnAssetPreviewCommitted;
     std::function<void()>                  OnPropertiesChanged;
     std::function<void(const std::string&, bool)> OnPropertiesAssetDropLog;
-    std::function<void(Object*, const std::string&)> OnPrefabCreated;
+    std::function<void(const std::string&, const std::string&)> OnAssetRenamed;
+    std::function<void(const std::string&)> OnAssetContentsChanged;
+    std::function<void(Engine::Core::Object*, const std::string&)> OnPrefabCreated;
 
 private:
-    IEditorRenderer* m_renderer = nullptr;
-    Scene*           m_scene    = nullptr;
-    ProjectSettings     m_settings;
+    ::Engine::Renderers::IEditorRenderer* m_renderer = nullptr;
+    Engine::Scene::Scene*           m_scene    = nullptr;
+    Engine::Model::ProjectSettings     m_settings;
+    std::shared_ptr<EditorProblemStore> m_problemStore =
+        std::make_shared<EditorProblemStore>();
 
     // Tracks live singleton panel instances (raw, non-owning).
     // Cleared via NotifyPanelRemoved when a panel is erased from the panels vector.
@@ -96,4 +116,7 @@ private:
     int m_propertiesCount = 0;
     int m_assetsCount     = 0;
     int m_consoleCount    = 0;
+    int m_terminalCount   = 0;
+    int m_problemsCount   = 0;
 };
+}

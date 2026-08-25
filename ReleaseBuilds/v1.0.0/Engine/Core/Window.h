@@ -1,6 +1,8 @@
 #pragma once
 #include "pch.h"
 
+namespace Engine::Core
+{
 // ---------------------------------------------------------------------------
 // Window — Tutorial Overview
 //
@@ -81,6 +83,12 @@ public:
     HWND     GetHWND()   const { return m_hwnd; }
     uint32_t GetWidth()  const { return m_width; }
     uint32_t GetHeight() const { return m_height; }
+    bool IsFocused() const { return m_focused; }
+
+    // Returns true for window messages that can change rendered editor
+    // content. Housekeeping messages such as WM_SETCURSOR must not keep a
+    // dirty-driven renderer awake.
+    static bool MessageRequestsRedraw(UINT message);
 
 private:
     // Static WndProc required by Win32 (cannot be a non-static member).
@@ -101,5 +109,7 @@ private:
     // Track an Alt+left-button gesture so its drag and release are delivered
     // consistently as right-button input, even if Alt is released first.
     bool m_altLeftClickActive = false;
+    bool m_focused = false;
 
 };
+}

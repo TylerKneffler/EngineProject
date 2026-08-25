@@ -6,12 +6,14 @@
 #include <algorithm>
 #include <cstring>
 
+namespace Engine::Renderers
+{
 D3D11GraphicsContext::D3D11GraphicsContext(ID3D11Device* device, ID3D11DeviceContext* context)
     : m_device(device), m_context(context)
 {
 }
 
-void D3D11GraphicsContext::SetPipeline(const IPipelineState* state)
+void D3D11GraphicsContext::SetPipeline(const Engine::Graphics::IPipelineState* state)
 {
     if (!m_context || !state) return;
     const auto* pipeline = dynamic_cast<const D3D11PipelineState*>(state);
@@ -27,7 +29,7 @@ void D3D11GraphicsContext::SetPipeline(const IPipelineState* state)
     m_context->OMSetDepthStencilState(pipeline->depthStencilState.Get(), 0);
 }
 
-void D3D11GraphicsContext::SetConstantBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint64_t offset)
+void D3D11GraphicsContext::SetConstantBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint64_t offset)
 {
     if (!m_device || !m_context || !buffer || slot >= CONSTANT_BUFFER_SLOTS) return;
     const auto* source = dynamic_cast<const D3D11GraphicsBuffer*>(buffer);
@@ -56,25 +58,16 @@ void D3D11GraphicsContext::SetConstantBuffer(uint32_t slot, const IGraphicsBuffe
     m_context->PSSetConstantBuffers(slot, 1, &native);
 }
 
-void D3D11GraphicsContext::SetStructuredBuffer(uint32_t slot, const IGraphicsBuffer* buffer)
+void D3D11GraphicsContext::SetStructuredBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer)
 {
     if (!m_context || slot >= D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT) return;
     const auto* structured = dynamic_cast<const D3D11GraphicsBuffer*>(buffer);
-    if (structured && structured->GetShadowData() && structured->GetBuffer())
-    {
-        D3D11_MAPPED_SUBRESOURCE mapped{};
-        ThrowIfFailed(m_context->Map(
-            structured->GetBuffer(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped));
-        std::memcpy(mapped.pData, structured->GetShadowData(),
-            static_cast<size_t>(structured->GetSize()));
-        m_context->Unmap(structured->GetBuffer(), 0);
-    }
     ID3D11ShaderResourceView* view = structured ? structured->GetShaderResourceView() : nullptr;
     m_context->VSSetShaderResources(slot, 1, &view);
     m_context->PSSetShaderResources(slot, 1, &view);
 }
 
-void D3D11GraphicsContext::SetVertexBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset)
+void D3D11GraphicsContext::SetVertexBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset)
 {
     if (!m_context || !buffer || offset > UINT_MAX) return;
     const auto* nativeBuffer = dynamic_cast<const D3D11GraphicsBuffer*>(buffer);
@@ -84,7 +77,7 @@ void D3D11GraphicsContext::SetVertexBuffer(uint32_t slot, const IGraphicsBuffer*
     m_context->IASetVertexBuffers(slot, 1, &native, &stride, &nativeOffset);
 }
 
-void D3D11GraphicsContext::SetIndexBuffer(const IGraphicsBuffer* buffer, uint32_t, uint64_t offset)
+void D3D11GraphicsContext::SetIndexBuffer(const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t, uint64_t offset)
 {
     if (!m_context || !buffer || offset > UINT_MAX) return;
     const auto* nativeBuffer = dynamic_cast<const D3D11GraphicsBuffer*>(buffer);
@@ -92,13 +85,16 @@ void D3D11GraphicsContext::SetIndexBuffer(const IGraphicsBuffer* buffer, uint32_
         m_context->IASetIndexBuffer(nativeBuffer->GetBuffer(), DXGI_FORMAT_R32_UINT, static_cast<UINT>(offset));
 }
 
-void D3D11GraphicsContext::SetTexture(uint32_t slot, const IGraphicsTexture* texture)
+void D3D11GraphicsContext::SetTexture(uint32_t slot, const Engine::Graphics::IGraphicsTexture* texture)
 {
     if (!m_device || !m_context || slot >= D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT)
         return;
+    // Logical texture slot 6 is the reflection panorama. Object shaders keep
+    // t6-t8 available for structured scene buffers, so bind it at t9.
+    const uint32_t shaderSlot = slot == 6 ? 9 : slot;
     const auto* nativeTexture = dynamic_cast<const D3D11GraphicsTexture*>(texture);
     ID3D11ShaderResourceView* view = nativeTexture ? nativeTexture->GetView() : nullptr;
-    m_context->PSSetShaderResources(slot, 1, &view);
+    m_context->PSSetShaderResources(shaderSlot, 1, &view);
 
     if (!m_materialSampler)
     {
@@ -145,3 +141,4 @@ void D3D11GraphicsContext::DrawIndexedInstanced(uint32_t indices, uint32_t insta
 }
 
 void D3D11GraphicsContext::TransitionResource(void*, ResourceState, ResourceState) {}
+}

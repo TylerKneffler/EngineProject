@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "DX11GameRenderer.h"
 
+namespace Engine::Renderers
+{
 DX11GameRenderer::~DX11GameRenderer()
 {
     if (m_context) m_context->ClearState();
@@ -103,7 +105,8 @@ void DX11GameRenderer::EndFrame()
     ThrowIfFailed(m_swapChain->Present(0, 0));
 }
 
-std::unique_ptr<IGraphicsContext> DX11GameRenderer::CreateFrameGraphicsContext()
+std::unique_ptr<Engine::Graphics::IGraphicsContext> DX11GameRenderer::CreateFrameGraphicsContext()
 {
     return std::make_unique<D3D11GraphicsContext>(m_device.Get(), m_context.Get());
+}
 }

@@ -3,6 +3,9 @@
 #include "VulkanGraphicsBuffer.h"
 #include <cstring>
 
+
+namespace Engine::Renderers
+{
 VulkanGraphicsBuffer::VulkanGraphicsBuffer(VkDevice device, VkBuffer buffer, VkDeviceMemory memory,
     Usage usage, AccessMode access, uint64_t size, void* mapped)
     : m_device(device), m_buffer(buffer), m_memory(memory), m_usage(usage),
@@ -15,17 +18,17 @@ VulkanGraphicsBuffer::~VulkanGraphicsBuffer()
     if (m_memory) vkFreeMemory(m_device, m_memory, nullptr);
 }
 
-std::unique_ptr<IGraphicsBuffer> VulkanBufferFactory::CreateBuffer(
-    IGraphicsBuffer::Usage usage, IGraphicsBuffer::AccessMode access,
+std::unique_ptr<Engine::Graphics::IGraphicsBuffer> VulkanBufferFactory::CreateBuffer(
+    Engine::Graphics::IGraphicsBuffer::Usage usage, Engine::Graphics::IGraphicsBuffer::AccessMode access,
     uint64_t sizeBytes, const void* initialData, uint32_t elementStride)
 {
     VkBufferUsageFlags vkUsage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     switch (usage)
     {
-        case IGraphicsBuffer::Usage::ConstantBuffer: vkUsage |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT; break;
-        case IGraphicsBuffer::Usage::VertexBuffer: vkUsage |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT; break;
-        case IGraphicsBuffer::Usage::IndexBuffer: vkUsage |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT; break;
-        case IGraphicsBuffer::Usage::ShaderResource: vkUsage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT; break;
+        case Engine::Graphics::IGraphicsBuffer::Usage::ConstantBuffer: vkUsage |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT; break;
+        case Engine::Graphics::IGraphicsBuffer::Usage::VertexBuffer: vkUsage |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT; break;
+        case Engine::Graphics::IGraphicsBuffer::Usage::IndexBuffer: vkUsage |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT; break;
+        case Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource: vkUsage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT; break;
     }
     VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
     bufferInfo.size = sizeBytes;
@@ -49,5 +52,6 @@ std::unique_ptr<IGraphicsBuffer> VulkanBufferFactory::CreateBuffer(
         m_device, buffer, memory, usage, access, sizeBytes, mapped);
     result->SetElementStride(elementStride);
     return result;
+}
 }
 #endif

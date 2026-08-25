@@ -1,0 +1,187 @@
+#include "Sprite.h"
+#include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
+#include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Graphics/IGraphicsProvider.h"
+#include "Core/Object.h"
+#include "Engine/Editor/UI/IEditorUi.h"
+#include <algorithm>
+
+namespace Engine::Components
+{
+Sprite::Sprite()
+{
+    SetTypeName(COMPONENT_TYPE_NAME(Sprite));
+    singlecomponent = true;
+    RegisterField("animationManager", animationManager);
+    RegisterField("animationManagerReference", animationManagerReference);
+    RegisterField("sortingLayer", sortingLayer);
+    RegisterField("pixelsPerUnit", pixelsPerUnit);
+    RegisterField("tint", tint);
+    RegisterField("alpha", alpha);
+}
+
+void Sprite::Deserialize(const JsonValue& value)
+{
+    Component::Deserialize(value);
+    pixelsPerUnit = std::max(pixelsPerUnit, 0.01f);
+    alpha = std::clamp(alpha, 0.f, 1.f);
+    m_animationManager = nullptr;
+}
+
+void Sprite::OnAfterDeserialize(IGraphicsProvider* graphicsProvider)
+{
+    Prepare(graphicsProvider);
+}
+
+bool Sprite::DrawProperties(::Engine::Editor::IEditorUi& ui)
+{
+    bool changed = false;
+    SpriteAnimationManager* manager = ResolveAnimationManager();
+    const std::string managerLabel = manager && manager->Owner
+        ? manager->Owner->name + " / " + manager->GetTypeName()
+        : "(default: same-object SpriteAnimationManager)";
+    ui.ValueLabel("Animation Manager", managerLabel.c_str());
+    if (ui.BeginDragDropTarget())
+    {
+        size_t size = 0;
+        const void* data = ui.AcceptDragDropPayload("ENGINE_COMPONENT_REORDER", &size);
+        if (data && size == sizeof(Component*))
+        {
+            Component* component = *static_cast<Component* const*>(data);
+            auto* dropped = dynamic_cast<SpriteAnimationManager*>(component);
+            if (dropped)
+            {
+                SetAnimationManager(dropped);
+                changed = true;
+            }
+        }
+        ui.EndDragDropTarget();
+    }
+    if (animationManagerReference.IsAssigned())
+    {
+        ui.SameLine();
+        if (ui.Button("Clear"))
+        {
+            animationManagerReference.Clear();
+            m_animationManager = nullptr;
+            changed = true;
+        }
+    }
+    changed = ui.SliderInt("Sorting Layer", &sortingLayer, -1000, 1000) || changed;
+    changed = ui.DragFloat("Pixels Per Unit", &pixelsPerUnit, 0.5f, 0.01f, 10000.f) || changed;
+    changed = ui.ColorEdit3("Tint", &tint.x) || changed;
+    changed = ui.DragFloat("Alpha", &alpha, 0.01f, 0.f, 1.f) || changed;
+    pixelsPerUnit = std::max(pixelsPerUnit, 0.01f);
+    alpha = std::clamp(alpha, 0.f, 1.f);
+    return changed;
+}
+
+void Sprite::SetAnimationManager(SpriteAnimationManager* manager)
+{
+    m_animationManager = manager;
+    animationManagerReference = Engine::Core::CaptureComponentReference(
+        manager, "SpriteAnimationManager");
+    animationManager = m_animationManager ? m_animationManager->GetTypeName() : std::string{};
+}
+
+SpriteAnimationManager* Sprite::ResolveAnimationManager() const
+{
+    if (!Owner)
+    {
+        m_animationManager = nullptr;
+        return nullptr;
+    }
+    // Resolve on demand so deleting or replacing the single manager component
+    // cannot leave the renderer holding a stale pointer.
+    m_animationManager = animationManagerReference.IsAssigned()
+        ? Engine::Core::ResolveComponentReference<SpriteAnimationManager>(Owner, animationManagerReference)
+        : Owner->GetComponent<SpriteAnimationManager>();
+    return m_animationManager;
+}
+
+bool Sprite::Prepare(IGraphicsProvider* graphicsProvider)
+{
+    RenderData data;
+    return PrepareRenderData(graphicsProvider, data);
+}
+
+bool Sprite::PrepareRenderData(IGraphicsProvider* graphicsProvider, RenderData& data)
+{
+    data = {};
+    SpriteAnimationManager* manager = ResolveAnimationManager();
+    if (!graphicsProvider || !manager || !manager->Prepare(graphicsProvider))
+        return false;
+    if (!m_vertexBuffer)
+    {
+        const Vertex vertices[6] = {
+            {{-.5f,-.5f,0.f},{0.f,0.f,-1.f},{0.f,1.f},{1.f,0.f,0.f,1.f}},
+            {{ .5f, .5f,0.f},{0.f,0.f,-1.f},{1.f,0.f},{1.f,0.f,0.f,1.f}},
+            {{-.5f, .5f,0.f},{0.f,0.f,-1.f},{0.f,0.f},{1.f,0.f,0.f,1.f}},
+            {{-.5f,-.5f,0.f},{0.f,0.f,-1.f},{0.f,1.f},{1.f,0.f,0.f,1.f}},
+            {{ .5f,-.5f,0.f},{0.f,0.f,-1.f},{1.f,1.f},{1.f,0.f,0.f,1.f}},
+            {{ .5f, .5f,0.f},{0.f,0.f,-1.f},{1.f,0.f},{1.f,0.f,0.f,1.f}}
+        };
+        m_vertexBuffer = graphicsProvider->GetBufferFactory()->CreateBuffer(
+            IGraphicsBuffer::Usage::VertexBuffer, IGraphicsBuffer::AccessMode::Upload,
+            sizeof(vertices), vertices);
+    }
+    if (!m_vertexBuffer || !manager->IsReady())
+        return false;
+
+    data.vertexBuffer = m_vertexBuffer.get();
+    data.texture = manager->GetTexture();
+    const Engine::Model::SpriteSheetFrame* selected = manager->GetCurrentFrame();
+    if (!selected || !data.texture)
+        return true;
+
+    const float textureWidth = static_cast<float>(data.texture->GetWidth());
+    const float textureHeight = static_cast<float>(data.texture->GetHeight());
+    const float width = selected->width > 0.f ? selected->width : textureWidth;
+    const float height = selected->height > 0.f ? selected->height : textureHeight;
+    data.worldSize = { width / std::max(pixelsPerUnit, 0.01f),
+        height / std::max(pixelsPerUnit, 0.01f) };
+    if (textureWidth > 0.f && textureHeight > 0.f)
+    {
+        data.uvRect = { selected->x / textureWidth, selected->y / textureHeight,
+            width / textureWidth, height / textureHeight };
+    }
+    return true;
+}
+
+bool Sprite::IsReady() const
+{
+    const SpriteAnimationManager* manager = ResolveAnimationManager();
+    return m_vertexBuffer && manager && manager->IsReady();
+}
+
+glm::vec4 Sprite::GetUvRect() const
+{
+    const SpriteAnimationManager* manager = ResolveAnimationManager();
+    const Engine::Model::SpriteSheetFrame* selected = manager ? manager->GetCurrentFrame() : nullptr;
+    const Texture* texture = manager ? manager->GetTexture() : nullptr;
+    if (!selected || !texture || texture->GetWidth() == 0 || texture->GetHeight() == 0)
+        return { 0.f, 0.f, 1.f, 1.f };
+    const float width = selected->width > 0.f ? selected->width : static_cast<float>(texture->GetWidth());
+    const float height = selected->height > 0.f ? selected->height : static_cast<float>(texture->GetHeight());
+    return { selected->x / texture->GetWidth(), selected->y / texture->GetHeight(),
+        width / texture->GetWidth(), height / texture->GetHeight() };
+}
+
+glm::vec2 Sprite::GetWorldSize() const
+{
+    const SpriteAnimationManager* manager = ResolveAnimationManager();
+    const Engine::Model::SpriteSheetFrame* selected = manager ? manager->GetCurrentFrame() : nullptr;
+    const Texture* texture = manager ? manager->GetTexture() : nullptr;
+    if (!selected || !texture)
+        return { 1.f, 1.f };
+    const float width = selected->width > 0.f ? selected->width : static_cast<float>(texture->GetWidth());
+    const float height = selected->height > 0.f ? selected->height : static_cast<float>(texture->GetHeight());
+    return { width / std::max(pixelsPerUnit, 0.01f), height / std::max(pixelsPerUnit, 0.01f) };
+}
+
+const Texture* Sprite::GetTexture() const
+{
+    const SpriteAnimationManager* manager = ResolveAnimationManager();
+    return manager ? manager->GetTexture() : nullptr;
+}
+}

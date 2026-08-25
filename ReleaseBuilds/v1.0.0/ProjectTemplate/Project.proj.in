@@ -22,6 +22,7 @@
     <LeftPanelWidth>0.20</LeftPanelWidth>
     <RightPanelWidth>0.31</RightPanelWidth>
     <EditorHistoryLimit>100</EditorHistoryLimit>
+    <EditorTheme>Graphite</EditorTheme>
   </PropertyGroup>
   <ItemGroup>
     <LeftPanelTab Include="HierarchyView" />
@@ -39,6 +40,10 @@
     <ClearColorB>0.18</ClearColorB>
     <ClearColorA>1.0</ClearColorA>
     <TargetFramerate>60</TargetFramerate>
+    <BakedLightmapResolution>256</BakedLightmapResolution>
+    <BakedShadowBias>0.002</BakedShadowBias>
+    <BakedDilationPasses>4</BakedDilationPasses>
+    <BakedPreserveSourceEmission>true</BakedPreserveSourceEmission>
   </PropertyGroup>
   <PropertyGroup>
     <AspectRatioMode>Free</AspectRatioMode>

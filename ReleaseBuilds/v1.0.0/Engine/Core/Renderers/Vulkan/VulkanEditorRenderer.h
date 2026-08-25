@@ -5,6 +5,9 @@
 #include "VulkanGraphicsProvider.h"
 #include <vector>
 
+
+namespace Engine::Renderers
+{
 class VulkanEditorRenderer : public IEditorRenderer
 {
 public:
@@ -14,8 +17,9 @@ public:
     uint32_t GetWidth() const override { return m_width; }
     uint32_t GetHeight() const override { return m_height; }
     void Clear(float r, float g, float b, float a = 1.0f) override;
-    IGraphicsProvider* GetGraphicsProvider() override { return m_provider.get(); }
+    Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override { return m_provider.get(); }
     void MarkDirty() override { m_dirty = true; }
+    bool IsDirty() const override { return m_dirty; }
     void SetUiRenderHooks(EditorUiRenderHooks hooks) override { m_uiHooks = std::move(hooks); }
     void SetUiTextureHooks(EditorUiTextureHooks hooks) override;
     void RenderIfNeeded(std::function<void()> drawFn = nullptr) override;
@@ -39,4 +43,5 @@ private:
     bool m_dirty = true;
     EditorUiRenderHooks m_uiHooks;
 };
+}
 #endif

@@ -5,6 +5,9 @@
 #include <utility>
 #include <cstdint>
 
+
+namespace Engine::Renderers
+{
 // Forward declare the view interface so renderers can work with it.
 class IView;
 
@@ -41,6 +44,7 @@ public:
     // Mark the back-buffer as needing a redraw. Call after any change
     // (resize, input, property edits, scene changes, etc.).
     virtual void MarkDirty() = 0;
+    virtual bool IsDirty() const = 0;
 
     virtual void SetUiRenderHooks(EditorUiRenderHooks hooks) = 0;
     virtual void SetUiTextureHooks(EditorUiTextureHooks) {}
@@ -86,3 +90,4 @@ public:
     // Get the maximum number of SRV slots.
     static constexpr uint32_t MAX_SRV_SLOTS = 32;
 };
+}

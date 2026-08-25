@@ -4,6 +4,8 @@
 #include <Windows.h>
 #include <vector>
 
+namespace Engine::Renderers
+{
 class VulkanRenderCore
 {
 public:
@@ -69,4 +71,5 @@ private:
     uint32_t m_imageIndex = 0;
     VkCommandBuffer m_currentCommandBuffer = VK_NULL_HANDLE;
 };
+}
 #endif

@@ -1,0 +1,10 @@
+{
+    "version": 1,
+    "id": "5dd38e5a-a799-4565-bf79-2594e3ff44d0",
+    "sourcePath": "C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/Gltf/Fox.glb",
+    "importSettings": {
+        "importer": "gltf-material",
+        "materialIndex": 0
+    }
+}
+

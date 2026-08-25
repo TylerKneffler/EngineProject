@@ -23,6 +23,8 @@
 #define ENGINE_ASSETS_PATH "Engine/Core/Assets/"
 #endif
 
+namespace Engine::Editor
+{
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 
 namespace fs = std::filesystem;
@@ -276,10 +278,10 @@ std::string BrowseForFolder(HWND owner)
 
 std::string ChooseLauncherRenderer()
 {
-    for (const auto& option : RendererFactory::GetRendererOptions())
+    for (const auto& option : ::Engine::Renderers::RendererFactory::GetRendererOptions())
         if (option.available && option.name == "DirectX11")
             return option.name;
-    for (const auto& option : RendererFactory::GetRendererOptions())
+    for (const auto& option : ::Engine::Renderers::RendererFactory::GetRendererOptions())
         if (option.available)
             return option.name;
     return {};
@@ -469,10 +471,10 @@ std::string ProjectLauncher::Run(HINSTANCE instance)
         return {};
     }
 
-    ProjectSettings settings{};
+    Engine::Model::ProjectSettings settings{};
     settings.editorRenderingAPI = api;
-    auto window = std::make_unique<Window>(instance, L"Engine Project Launcher", 960, 600);
-    auto renderer = RendererFactory::CreateEditorRenderer(settings);
+    auto window = std::make_unique<::Engine::Core::Window>(instance, L"Engine Project Launcher", 960, 600);
+    auto renderer = ::Engine::Renderers::RendererFactory::CreateEditorRenderer(settings);
     if (!renderer || !renderer->Init(window->GetHWND(), window->GetWidth(), window->GetHeight()))
         return {};
     auto uiBackend = std::make_unique<ImGuiUiBackend>();
@@ -537,6 +539,8 @@ std::string ProjectLauncher::Run(HINSTANCE instance)
     };
 
     window->WndProcHook = [&](HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
+        if (Engine::Core::Window::MessageRequestsRedraw(message))
+            renderer->MarkDirty();
         return uiBackend->HandleMessage(hwnd, message, wParam, lParam);
     };
     window->OnInputBegin = [&]() { uiBackend->BeginInput(); };
@@ -544,14 +548,17 @@ std::string ProjectLauncher::Run(HINSTANCE instance)
     window->OnResize = [&](uint32_t width, uint32_t height) {
         renderer->Resize(width, height);
         uiBackend->Resize(width, height);
+        renderer->MarkDirty();
     };
     window->OnUpdate = [&]()
     {
+        bool stateChanged = false;
         if (building && buildFuture.valid() &&
             buildFuture.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
         {
             ProjectBuildResult buildResult = buildFuture.get();
             building = false;
+            stateChanged = true;
             status = buildResult.message;
             if (!buildResult.projectFile.empty())
                 RememberProject(buildResult.projectFile);
@@ -566,7 +573,8 @@ std::string ProjectLauncher::Run(HINSTANCE instance)
             }
         }
 
-        renderer->MarkDirty();
+        if (building || stateChanged || uiBackend->NeedsContinuousRendering())
+            renderer->MarkDirty();
         renderer->RenderIfNeeded([&]()
         {
             renderer->Clear(0.075f, 0.085f, 0.11f, 1.0f);
@@ -750,6 +758,11 @@ std::string ProjectLauncher::Run(HINSTANCE instance)
             }
             ImGui::End();
         });
+
+        if (!renderer->IsDirty() && !building &&
+            !uiBackend->NeedsContinuousRendering())
+            MsgWaitForMultipleObjectsEx(0, nullptr, 50, QS_ALLINPUT,
+                MWMO_INPUTAVAILABLE);
     };
 
     window->Show();
@@ -766,4 +779,5 @@ std::string ProjectLauncher::Run(HINSTANCE instance)
 
     if (!result.empty()) RememberProject(result);
     return result;
+}
 }

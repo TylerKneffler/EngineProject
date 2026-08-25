@@ -1,6 +1,9 @@
 #include "pch.h"
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "VulkanGraphicsProvider.h"
+
+namespace Engine::Renderers
+{
 VulkanGraphicsProvider::VulkanGraphicsProvider(
     VkPhysicalDevice physicalDevice,
     VkDevice device,
@@ -15,5 +18,6 @@ VulkanGraphicsProvider::VulkanGraphicsProvider(
         device, renderPass, m_textureSystem->GetDescriptorSetLayout());
     m_contextFactory.SetTextureSystem(m_textureSystem);
     m_textureFactory = std::make_unique<VulkanTextureFactory>(m_textureSystem);
+}
 }
 #endif

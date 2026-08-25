@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "ImGuiUiBackend.h"
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx11.h"
 #include "imgui_impl_dx12.h"
@@ -11,6 +12,7 @@
 #include "Core/Renderers/DX11/DX11EditorRenderer.h"
 #include "Core/Renderers/DX12/DX12EditorRenderer.h"
 #include "Engine/Editor/UI/ImGui/EditorUI.h"
+#include "Engine/Editor/Input/EditorKeyBindings.h"
 #include "Engine/Editor/EditorState.h"
 #include "Engine/Editor/GameBuildManager.h"
 #if defined(ENGINE_VULKAN_ENABLED)
@@ -19,6 +21,8 @@
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 
+namespace Engine::Editor
+{
 namespace
 {
 #if defined(ENGINE_VULKAN_ENABLED)
@@ -48,7 +52,7 @@ ImGuiUiBackend::~ImGuiUiBackend()
     Shutdown();
 }
 
-bool ImGuiUiBackend::Initialize(void* nativeWindow, IEditorRenderer& renderer)
+bool ImGuiUiBackend::Initialize(void* nativeWindow, ::Engine::Renderers::IEditorRenderer& renderer)
 {
     Shutdown();
     IMGUI_CHECKVERSION();
@@ -63,7 +67,7 @@ bool ImGuiUiBackend::Initialize(void* nativeWindow, IEditorRenderer& renderer)
         return false;
     }
 
-    if (auto* dx11 = dynamic_cast<DX11EditorRenderer*>(&renderer))
+    if (auto* dx11 = dynamic_cast<::Engine::Renderers::DX11EditorRenderer*>(&renderer))
     {
         if (!ImGui_ImplDX11_Init(dx11->GetDevice(), dx11->GetDeviceContext()))
         {
@@ -72,12 +76,12 @@ bool ImGuiUiBackend::Initialize(void* nativeWindow, IEditorRenderer& renderer)
         }
         m_graphicsApi = GraphicsApi::DirectX11;
     }
-    else if (auto* dx12 = dynamic_cast<DX12EditorRenderer*>(&renderer))
+    else if (auto* dx12 = dynamic_cast<::Engine::Renderers::DX12EditorRenderer*>(&renderer))
     {
         ImGui_ImplDX12_InitInfo info{};
         info.Device = dx12->GetDevice();
         info.CommandQueue = dx12->GetCommandQueue();
-        info.NumFramesInFlight = static_cast<int>(DX12EditorRenderer::FRAME_COUNT);
+        info.NumFramesInFlight = static_cast<int>(::Engine::Renderers::DX12EditorRenderer::FRAME_COUNT);
         info.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
         info.DSVFormat = DXGI_FORMAT_UNKNOWN;
         info.SrvDescriptorHeap = dx12->GetUiDescriptorHeap();
@@ -97,7 +101,7 @@ bool ImGuiUiBackend::Initialize(void* nativeWindow, IEditorRenderer& renderer)
         m_graphicsApi = GraphicsApi::DirectX12;
     }
 #if defined(ENGINE_VULKAN_ENABLED)
-    else if (auto* vulkan = dynamic_cast<VulkanEditorRenderer*>(&renderer))
+    else if (auto* vulkan = dynamic_cast<::Engine::Renderers::VulkanEditorRenderer*>(&renderer))
     {
         auto& core = vulkan->GetRenderCore();
         ImGui::GetPlatformIO().Platform_CreateVkSurface = CreateImGuiWin32VulkanSurface;
@@ -184,6 +188,36 @@ void ImGuiUiBackend::DrawEditor(EditorState& state, PlayState playState,
     if (!m_presentation)
         m_presentation = std::make_unique<EditorUI>(&state);
     state.ResetSceneEditInProgress();
+    EditorKeyBindings& keybinds = EditorKeyBindings::Get();
+    const bool historyAvailable = playState == PlayState::Stopped ||
+        playState == PlayState::BuildFailed;
+    if (historyAvailable && keybinds.Pressed(EditorCommand::Undo)) state.Undo();
+    if (historyAvailable && keybinds.Pressed(EditorCommand::Redo)) state.Redo();
+    if (historyAvailable && keybinds.Pressed(EditorCommand::SaveScene)) state.SaveScene();
+    if (historyAvailable && keybinds.Pressed(EditorCommand::SaveAll)) state.SaveAll();
+    if (keybinds.Pressed(EditorCommand::Preferences)) state.SetShowPreferences(true);
+    if (keybinds.Pressed(EditorCommand::ImportAsset)) state.ImportAsset();
+    if (historyAvailable && keybinds.Pressed(EditorCommand::BakeLighting)) state.BakeLighting();
+    if (historyAvailable && keybinds.Pressed(EditorCommand::ClearBakedLighting)) state.ClearBakedLighting();
+    if (buildManager)
+    {
+        if (historyAvailable && keybinds.Pressed(EditorCommand::Build))
+            buildManager->StartBuild(PostBuildAction::Nothing);
+        if (historyAvailable && keybinds.Pressed(EditorCommand::BuildAndPlay))
+            buildManager->StartBuild(PostBuildAction::PlayInEditor);
+        if (historyAvailable && keybinds.Pressed(EditorCommand::BuildStandalone))
+            buildManager->StartBuild(PostBuildAction::LaunchStandalone);
+        if (keybinds.Pressed(EditorCommand::Stop) &&
+            (playState == PlayState::Playing || playState == PlayState::Paused))
+            buildManager->Stop();
+        else if (keybinds.Pressed(EditorCommand::PlayPause))
+        {
+            if (playState == PlayState::Stopped || playState == PlayState::BuildFailed)
+                buildManager->PlayInEditor();
+            else if (playState == PlayState::Playing) buildManager->Pause();
+            else if (playState == PlayState::Paused) buildManager->Resume();
+        }
+    }
     m_presentation->SetGameBuildManager(buildManager);
     m_presentation->Render(playState);
     state.TrackSceneChanges(
@@ -194,38 +228,7 @@ void ImGuiUiBackend::DrawEditor(EditorState& state, PlayState playState,
 bool ImGuiUiBackend::HandleMessage(void* nativeWindow, uint32_t message,
     uintptr_t wParam, intptr_t lParam)
 {
-    const bool keyDown = message == WM_KEYDOWN || message == WM_SYSKEYDOWN;
-    const bool firstPress = (static_cast<uintptr_t>(lParam) & (uintptr_t{1} << 30)) == 0;
-    const bool control = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
-    const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-    const bool historyAvailable = !m_buildManager ||
-        m_buildManager->GetPlayState() == PlayState::Stopped ||
-        m_buildManager->GetPlayState() == PlayState::BuildFailed;
-    if (keyDown && firstPress && control && historyAvailable &&
-        (wParam == 'Y' || (wParam == 'Z' && shift)) && m_editorState)
-    {
-        m_editorState->Redo();
-        return true;
-    }
-    if (keyDown && firstPress && control && historyAvailable &&
-        wParam == 'Z' && m_editorState)
-    {
-        m_editorState->Undo();
-        return true;
-    }
-    if (keyDown && firstPress && control && wParam == 'S' && m_editorState)
-    {
-        m_editorState->SaveScene();
-        return true;
-    }
-    if (keyDown && firstPress && control && wParam == 'B' && m_buildManager)
-    {
-        const PlayState state = m_buildManager->GetPlayState();
-        if (state == PlayState::Stopped || state == PlayState::BuildFailed)
-            m_buildManager->StartBuild(PostBuildAction::Nothing);
-        return true;
-    }
-    return m_initialized && ImGui_ImplWin32_WndProcHandler(
+    return m_initialized && ::ImGui_ImplWin32_WndProcHandler(
         static_cast<HWND>(nativeWindow), message,
         static_cast<WPARAM>(wParam), static_cast<LPARAM>(lParam)) != 0;
 }
@@ -244,6 +247,30 @@ void ImGuiUiBackend::BeginFrame()
     ImGui::NewFrame();
 }
 
+bool ImGuiUiBackend::NeedsContinuousRendering() const
+{
+    if (!m_initialized || !ImGui::GetCurrentContext())
+        return false;
+
+    // Secondary ImGui platform windows use ImGui's Win32 window procedure,
+    // rather than Engine::Core::Window::WndProc. Input delivered to a detached
+    // editor window therefore does not pass through the main window's
+    // MessageRequestsRedraw hook. Request a frame while those queued events
+    // are waiting so they are consumed by NewFrame instead of leaving the
+    // detached window looking frozen.
+    if (!ImGui::GetCurrentContext()->InputEventsQueue.empty())
+        return true;
+    if (ImGui::IsAnyItemActive() || ImGui::IsAnyMouseDown())
+        return true;
+
+    // Held viewport-navigation keys need updates between Win32 key-repeat
+    // messages, otherwise camera motion becomes visibly stepped.
+    for (int key = ImGuiKey_NamedKey_BEGIN; key < ImGuiKey_NamedKey_END; ++key)
+        if (ImGui::IsKeyDown(static_cast<ImGuiKey>(key)))
+            return true;
+    return false;
+}
+
 void ImGuiUiBackend::Render(void* commandBuffer)
 {
     if (!m_initialized) return;
@@ -251,14 +278,14 @@ void ImGuiUiBackend::Render(void* commandBuffer)
     RenderDrawData(ImGui::GetDrawData(), commandBuffer);
 }
 
-void ImGuiUiBackend::RenderDrawData(ImDrawData* drawData, void* commandBuffer)
+void ImGuiUiBackend::RenderDrawData(::ImDrawData* drawData, void* commandBuffer)
 {
     if (!m_initialized || !drawData) return;
     if (m_graphicsApi == GraphicsApi::DirectX11)
         ImGui_ImplDX11_RenderDrawData(drawData);
     else if (m_graphicsApi == GraphicsApi::DirectX12)
     {
-        auto* dx12 = static_cast<DX12EditorRenderer*>(m_renderer);
+        auto* dx12 = static_cast<::Engine::Renderers::DX12EditorRenderer*>(m_renderer);
         ID3D12DescriptorHeap* heaps[] = { dx12->GetUiDescriptorHeap() };
         auto* commands = static_cast<ID3D12GraphicsCommandList*>(commandBuffer);
         commands->SetDescriptorHeaps(1, heaps);
@@ -284,4 +311,5 @@ void ImGuiUiBackend::EndFrame()
 std::unique_ptr<IEditorUiBackend> CreateEditorUiBackend()
 {
     return std::make_unique<ImGuiUiBackend>();
+}
 }

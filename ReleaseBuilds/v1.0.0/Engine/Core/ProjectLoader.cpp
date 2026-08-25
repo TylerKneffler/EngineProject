@@ -4,7 +4,9 @@
 // ---------------------------------------------------------------------------
 // LoadProject
 // ---------------------------------------------------------------------------
-ProjectSettings ProjectLoader::LoadProject(const std::string& projFilePath)
+namespace Engine::Core
+{
+ProjectLoader::ProjectSettings ProjectLoader::LoadProject(const std::string& projFilePath)
 {
     pugi::xml_document doc;
     pugi::xml_parse_result result = doc.load_file(projFilePath.c_str());
@@ -158,8 +160,21 @@ void ProjectLoader::ParseEditor(const pugi::xml_node& projectNode, ProjectSettin
             settings.editorHistoryLimit = static_cast<uint32_t>(
                 std::min<unsigned long>(std::stoul(historyLimit.child_value()), 1000ul));
 
-        if (!settings.defaultScene.empty())
-            break;
+        auto editorMode = prop.child("EditorMode");
+        if (editorMode)
+        {
+            std::string value = editorMode.child_value();
+            std::transform(value.begin(), value.end(), value.begin(),
+                [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+            settings.editorMode = value == "2d" || value == "two" || value == "twod"
+                ? ProjectSettings::EditorMode::TwoD
+                : ProjectSettings::EditorMode::ThreeD;
+        }
+
+        auto editorTheme = prop.child("EditorTheme");
+        if (editorTheme && *editorTheme.child_value())
+            settings.editorTheme = editorTheme.child_value();
+
     }
 
     // Parse panel tabs
@@ -223,6 +238,22 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
         auto framerate = prop.child("TargetFramerate");
         if (framerate)
             settings.targetFramerate = std::stoul(framerate.child_value());
+
+        auto lightmapResolution = prop.child("BakedLightmapResolution");
+        if (lightmapResolution)
+            settings.bakedLighting.lightmapResolution =
+                std::stoul(lightmapResolution.child_value());
+        auto shadowBias = prop.child("BakedShadowBias");
+        if (shadowBias)
+            settings.bakedLighting.shadowBias = std::stof(shadowBias.child_value());
+        auto dilationPasses = prop.child("BakedDilationPasses");
+        if (dilationPasses)
+            settings.bakedLighting.dilationPasses =
+                std::stoul(dilationPasses.child_value());
+        auto accumulate = prop.child("BakedPreserveSourceEmission");
+        if (accumulate)
+            settings.bakedLighting.accumulate =
+                std::string(accumulate.child_value()) != "false";
 
         if (!settings.renderingAPI.empty() || !settings.editorRenderingAPI.empty())
             break;
@@ -309,4 +340,5 @@ void ProjectLoader::ParseComponents(const pugi::xml_node& projectNode, ProjectSe
         if (name && *name)
             settings.builtInComponents.push_back(name);
     }
+}
 }

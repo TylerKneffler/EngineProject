@@ -1,26 +1,36 @@
 #pragma once
 #include "Core/Serialization/Json.h"
 #include "Core/PropertyMacros.h"
+#include "Core/ComponentReference.h"
 #include <glm/glm.hpp>
 #include <functional>
+#include <cstdint>
 #include <vector>
 #include <string>
 
-class Object; // forward declaration — full definition in Object.h
-class IEditorUi; // forward declaration — full definition in Editor/UI/IEditorUi.h
-
 #define COMPONENT_TYPE_NAME(ClassName) #ClassName
 
-class IGraphicsProvider;
+namespace Engine::Graphics { class IGraphicsProvider; }
+namespace Engine::Editor { class IEditorUi; }
+
+namespace Engine::Core
+{
+class Object;
 
 class Component
 {
 public:
+    using JsonValue = Engine::Serialization::JsonValue;
+    using ComponentReference = Engine::Core::ComponentReference;
+    using Object = Engine::Core::Object;
+    using IGraphicsProvider = Engine::Graphics::IGraphicsProvider;
+
     Component() = default;
     virtual ~Component() = default;
 
     Object* Owner = nullptr;     // The Object this component is attached to
     bool singlecomponent = false; // If true, only one component of this type can be added
+    bool editorAddable = true;   // Internal/import components stay out of Add Component.
 
     // ---- Serialization interface -------------------------------------------
     // The base component handles the shared JSON envelope:
@@ -28,13 +38,39 @@ public:
     // Derived components register fields in their constructor and usually do
     // not override Serialize()/Deserialize().
     virtual std::string GetTypeName() const { return m_typeName; }
-    virtual JsonValue   Serialize() const;
-    JsonValue           SerializeFields() const;
-    virtual void        Deserialize(const JsonValue& v);
+    virtual Engine::Serialization::JsonValue Serialize() const;
+    Engine::Serialization::JsonValue SerializeFields() const;
+    virtual void Deserialize(const Engine::Serialization::JsonValue& v);
     // Lets components rebuild runtime resources without serializer type checks.
-    virtual void        OnAfterDeserialize(IGraphicsProvider*) {}
+    virtual void        OnAfterDeserialize(Engine::Graphics::IGraphicsProvider*) {}
+    // Engine components and game scripts share lifecycle dispatch. Script is
+    // a semantic marker for user-authored/hot-reloadable behavior, not the
+    // mechanism that makes a component update.
+    virtual void Start() {}
+    virtual void Update() {}
+    virtual void Enabled() {}
+    virtual void Disabled() {}
+    virtual void OnDestroy() {}
     // Called by the Properties panel to draw editable properties in the editor.
-    virtual void DrawProperties(IEditorUi& ui);
+    // Returns true when an editor control changed serialized component data.
+    virtual bool DrawProperties(::Engine::Editor::IEditorUi& ui);
+
+    // Runtime systems use this monotonically increasing value to rebuild
+    // derived state only after configuration changes. Scripts that mutate
+    // public component fields directly should call MarkConfigurationDirty().
+    uint64_t GetConfigurationRevision() const { return m_configurationRevision; }
+    void MarkConfigurationDirty()
+    {
+        if (++m_configurationRevision == 0)
+            ++m_configurationRevision;
+    }
+
+    // Hierarchy lookup helpers available to any component.
+    Object* FindObjectInChildrenByName(const std::string& objectName,
+        bool includeSelf = false) const;
+    Object* FindObjectInSceneByName(const std::string& objectName) const;
+    Component* GetComponentOnObjectNamedInScene(const std::string& objectName,
+        const std::string& componentTypeName) const;
 
 protected:
     void SetTypeName(const char* typeName) { m_typeName = typeName ? typeName : "Component"; }
@@ -64,6 +100,15 @@ private:
     static JsonValue ToJson(double value) { return JsonValue(static_cast<float>(value)); }
     static JsonValue ToJson(int value) { return JsonValue(value); }
     static JsonValue ToJson(unsigned value) { return JsonValue(static_cast<int>(value)); }
+    static JsonValue ToJson(const ComponentReference& value)
+    {
+        return JsonValue::MakeObject()
+            .Set("expectedType", JsonValue(value.expectedType))
+            .Set("objectPath", JsonValue(value.objectPath))
+            .Set("objectName", JsonValue(value.objectName))
+            .Set("componentType", JsonValue(value.componentType))
+            .Set("componentIndex", JsonValue(value.componentIndex));
+    }
     static JsonValue ToJson(const glm::vec3& value)
     {
         return JsonValue::MakeArray()
@@ -78,6 +123,15 @@ private:
     static void FromJson(const JsonValue& value, double& out) { out = value.AsFloat(); }
     static void FromJson(const JsonValue& value, int& out) { out = value.AsInt(); }
     static void FromJson(const JsonValue& value, unsigned& out) { out = static_cast<unsigned>(value.AsInt()); }
+    static void FromJson(const JsonValue& value, ComponentReference& out)
+    {
+        if (!value.IsObject()) return;
+        if (value.Has("expectedType")) out.expectedType = value["expectedType"].AsString();
+        out.objectPath = value["objectPath"].AsString();
+        out.objectName = value["objectName"].AsString();
+        out.componentType = value["componentType"].AsString();
+        out.componentIndex = value["componentIndex"].AsInt();
+    }
     static void FromJson(const JsonValue& value, glm::vec3& out)
     {
         if (!value.IsArray() || value.ArraySize() < 3)
@@ -87,4 +141,6 @@ private:
 
     std::vector<SerializedField> m_serializedFields;
     std::string m_typeName = "Component";
+    uint64_t m_configurationRevision = 1;
 };
+}

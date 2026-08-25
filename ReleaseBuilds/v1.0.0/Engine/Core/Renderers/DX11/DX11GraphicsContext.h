@@ -4,17 +4,19 @@
 #include <d3d11.h>
 #include <array>
 
-class D3D11GraphicsContext : public IGraphicsContext
+namespace Engine::Renderers
+{
+class D3D11GraphicsContext : public Engine::Graphics::IGraphicsContext
 {
 public:
     D3D11GraphicsContext(ID3D11Device* device, ID3D11DeviceContext* context);
 
-    void SetPipeline(const IPipelineState* pipeline) override;
-    void SetConstantBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint64_t offset = 0) override;
-    void SetStructuredBuffer(uint32_t slot, const IGraphicsBuffer* buffer) override;
-    void SetVertexBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset = 0) override;
-    void SetIndexBuffer(const IGraphicsBuffer* buffer, uint32_t indexCount, uint64_t offset = 0) override;
-    void SetTexture(uint32_t slot, const IGraphicsTexture* texture) override;
+    void SetPipeline(const Engine::Graphics::IPipelineState* pipeline) override;
+    void SetConstantBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint64_t offset = 0) override;
+    void SetStructuredBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer) override;
+    void SetVertexBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset = 0) override;
+    void SetIndexBuffer(const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t indexCount, uint64_t offset = 0) override;
+    void SetTexture(uint32_t slot, const Engine::Graphics::IGraphicsTexture* texture) override;
     void SetViewport(const Viewport& vp) override;
     void SetScissorRect(const ScissorRect& rect) override;
     void Clear(float r, float g, float b, float a, float depth = 1.0f) override;
@@ -35,7 +37,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11SamplerState> m_materialSampler;
 };
 
-class D3D11GraphicsContextFactory : public IGraphicsContextFactory
+class D3D11GraphicsContextFactory : public Engine::Graphics::IGraphicsContextFactory
 {
 public:
     D3D11GraphicsContextFactory(ID3D11Device* device, ID3D11DeviceContext* context)
@@ -45,7 +47,7 @@ public:
     {
         m_externalContext = static_cast<ID3D11DeviceContext*>(context);
     }
-    std::unique_ptr<IGraphicsContext> CreateContext() override
+    std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateContext() override
     {
         return std::make_unique<D3D11GraphicsContext>(
             m_device, m_externalContext ? m_externalContext : m_context);
@@ -56,3 +58,4 @@ private:
     ID3D11DeviceContext* m_context = nullptr;
     ID3D11DeviceContext* m_externalContext = nullptr;
 };
+}

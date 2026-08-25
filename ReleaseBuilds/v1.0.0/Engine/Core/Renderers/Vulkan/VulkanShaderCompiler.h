@@ -3,7 +3,9 @@
 #include "Core/Graphics/IShader.h"
 #include <vector>
 
-class VulkanShader : public IShader
+namespace Engine::Renderers
+{
+class VulkanShader : public Engine::Graphics::IShader
 {
 public:
     explicit VulkanShader(std::vector<uint8_t> bytes) : m_bytes(std::move(bytes)) {}
@@ -13,13 +15,14 @@ private:
     std::vector<uint8_t> m_bytes;
 };
 
-class VulkanShaderCompiler : public IShaderCompiler
+class VulkanShaderCompiler : public Engine::Graphics::IShaderCompiler
 {
 public:
-    std::unique_ptr<IShader> CompileFromFile(const std::string& filePath,
+    std::unique_ptr<Engine::Graphics::IShader> CompileFromFile(const std::string& filePath,
         const char* entryPoint, CompileProfile profile) override;
     std::string GetLastError() const override { return m_lastError; }
 private:
     std::string m_lastError;
 };
+}
 #endif

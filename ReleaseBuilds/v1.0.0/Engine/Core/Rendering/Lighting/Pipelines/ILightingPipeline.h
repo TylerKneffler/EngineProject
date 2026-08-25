@@ -1,6 +1,6 @@
 #pragma once
 
-namespace Engine::Rendering::Lighting
+namespace Engine::Rendering
 {
     enum class LightingPipelineKind
     {

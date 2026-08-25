@@ -4,10 +4,12 @@
 #include <functional>
 #include <vector>
 
-class Scene;
-class Object;
-class Component;
-class IGraphicsProvider;
+namespace Engine::Core { class Component; class Object; }
+namespace Engine::Scene { class Scene; }
+namespace Engine::Graphics { class IGraphicsProvider; }
+
+namespace Engine::Serialization
+{
 
 // ---------------------------------------------------------------------------
 // SceneSerializer — saves and loads Scene objects to/from scene XML files.
@@ -51,6 +53,11 @@ class IGraphicsProvider;
 class SceneSerializer
 {
 public:
+    using Component = Engine::Core::Component;
+    using Object = Engine::Core::Object;
+    using Scene = Engine::Scene::Scene;
+    using IGraphicsProvider = Engine::Graphics::IGraphicsProvider;
+
     // Factory function: creates a default-constructed Component of the named type.
     using Factory = std::function<Component*()>;
 
@@ -62,7 +69,11 @@ public:
     // Create a default instance of a registered component type. The editor
     // uses this for component-script assets dropped onto an object.
     static Component* CreateRegisteredComponent(const std::string& typeName);
-    static std::vector<std::string> GetRegisteredComponentTypes();
+    // Sorted editor-addable names cached by the registration lifecycle.
+    static const std::vector<std::string>& GetRegisteredComponentTypes();
+    static std::vector<std::string> GetRegisteredScriptTypes();
+    static void Unregister(const std::string& typeName);
+    static Factory GetRegisteredFactory(const std::string& typeName);
 
     // Write the scene to a scene XML file.
     // Returns false if the destination file cannot be opened.
@@ -85,12 +96,25 @@ public:
     // Returns false if the file cannot be read or has an unsupported format.
     static bool Load(Scene& scene, const std::string& path, IGraphicsProvider* graphicsProvider = nullptr);
 
-    static bool SavePrefab(const Object& object, const std::string& path);
+    static bool SavePrefab(const Object& object, const std::string& path,
+        bool preserveRootTransform = false);
+    static std::string SavePrefabToString(const Object& object,
+        bool includeRootTransform = true);
     static Object* InstantiatePrefab(Scene& scene, const std::string& path,
         IGraphicsProvider* graphicsProvider = nullptr);
     // Reload every scene instance that references path while preserving each
-    // root placement transform. Returns false if the prefab cannot be read.
+    // root placement transform. preservedInstance can identify the instance
+    // already edited in-place; it will not be rebuilt. Returns false if the
+    // prefab cannot be read.
     static bool RefreshPrefabInstances(Scene& scene, const std::string& path,
+        IGraphicsProvider* graphicsProvider = nullptr,
+        Object* preservedInstance = nullptr);
+    static bool HasPrefabOverrides(const Object& instance,
+        bool includeRootTransform = true);
+    static bool RevertPrefabOverrides(Object& instance,
+        IGraphicsProvider* graphicsProvider = nullptr);
+    static bool ApplyPrefabOverridesToAsset(Object& instance,
+        bool includeRootTransform,
         IGraphicsProvider* graphicsProvider = nullptr);
 
     // Called internally; exposed so Scene::Load can invoke it.
@@ -104,12 +128,13 @@ private:
 template<typename T>
 inline void RegisterComponentType()
 {
-    SceneSerializer::Register([]() -> Component* { return new T(); });
+    SceneSerializer::Register([]() -> Engine::Core::Component* { return new T(); });
 }
 
 // Backward-compatible overload for components that need a serialized alias.
 template<typename T>
 inline void RegisterComponentType(const std::string& typeName)
 {
-    SceneSerializer::Register(typeName, []() -> Component* { return new T(); });
+    SceneSerializer::Register(typeName, []() -> Engine::Core::Component* { return new T(); });
+}
 }

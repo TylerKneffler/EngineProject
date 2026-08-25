@@ -1,6 +1,8 @@
 #include "Window.h"
 #include <shellapi.h>
 
+namespace Engine::Core
+{
 // ---------------------------------------------------------------------------
 // Instance forwarding via GWLP_USERDATA
 //
@@ -162,6 +164,41 @@ int Window::Run()
     }
 }
 
+bool Window::MessageRequestsRedraw(UINT message)
+{
+    if ((message >= WM_MOUSEFIRST && message <= WM_MOUSELAST) ||
+        (message >= WM_KEYFIRST && message <= WM_KEYLAST) ||
+        (message >= WM_POINTERUPDATE && message <= WM_POINTERLEAVE))
+    {
+        return true;
+    }
+
+    switch (message)
+    {
+        case WM_INPUT:
+        case WM_INPUT_DEVICE_CHANGE:
+        case WM_TOUCH:
+        case WM_GESTURE:
+        case WM_GESTURENOTIFY:
+        case WM_SETFOCUS:
+        case WM_KILLFOCUS:
+        case WM_ACTIVATE:
+        case WM_ACTIVATEAPP:
+        case WM_CAPTURECHANGED:
+        case WM_CANCELMODE:
+        case WM_SIZE:
+        case WM_MOVE:
+        case WM_PAINT:
+        case WM_DISPLAYCHANGE:
+        case WM_DPICHANGED:
+        case WM_THEMECHANGED:
+        case WM_SETTINGCHANGE:
+            return true;
+        default:
+            return false;
+    }
+}
+
 LRESULT CALLBACK Window::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     // ---- Instance pointer setup (WM_NCCREATE) ----
@@ -232,6 +269,9 @@ LRESULT CALLBACK Window::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         return 0;
     }
 
+    if (self && msg == WM_ACTIVATEAPP)
+        self->m_focused = wParam != FALSE;
+
     if (self && self->WndProcHook)
         if (self->WndProcHook(hwnd, msg, wParam, lParam))
             return true;
@@ -281,4 +321,5 @@ LRESULT CALLBACK Window::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
     // for unhandled messages or the window will behave incorrectly (no
     // resizing, no system menu, broken hit-testing, etc.).
     return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
 }

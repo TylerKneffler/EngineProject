@@ -2,6 +2,8 @@
 
 #include <string>
 
+namespace Engine::Editor
+{
 class ProjectLauncher
 {
 public:
@@ -9,3 +11,4 @@ public:
     static std::string Run(HINSTANCE instance);
     static void RememberProject(const std::string& projectFile);
 };
+}

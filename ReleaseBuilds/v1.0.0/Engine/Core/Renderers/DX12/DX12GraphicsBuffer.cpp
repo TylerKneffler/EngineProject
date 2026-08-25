@@ -1,6 +1,9 @@
 #include "DX12GraphicsBuffer.h"
 #include <stdexcept>
 
+namespace Engine::Renderers
+{
+
 D3D12GraphicsBuffer::D3D12GraphicsBuffer(
     Microsoft::WRL::ComPtr<ID3D12Resource> resource,
     Usage usage,
@@ -50,9 +53,9 @@ D3D12_GPU_VIRTUAL_ADDRESS D3D12GraphicsBuffer::GetGPUVirtualAddress() const
 // D3D12BufferFactory::CreateBuffer
 // ---------------------------------------------------------------------------
 
-std::unique_ptr<IGraphicsBuffer> D3D12BufferFactory::CreateBuffer(
-    IGraphicsBuffer::Usage usage,
-    IGraphicsBuffer::AccessMode access,
+std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D12BufferFactory::CreateBuffer(
+    Engine::Graphics::IGraphicsBuffer::Usage usage,
+    Engine::Graphics::IGraphicsBuffer::AccessMode access,
     uint64_t sizeBytes,
     const void* initialData, uint32_t elementStride)
 {
@@ -62,32 +65,32 @@ std::unique_ptr<IGraphicsBuffer> D3D12BufferFactory::CreateBuffer(
     // Determine heap type based on access mode
     switch (access)
     {
-        case IGraphicsBuffer::AccessMode::Default:
+        case Engine::Graphics::IGraphicsBuffer::AccessMode::Default:
             heapType = D3D12_HEAP_TYPE_DEFAULT;
             break;
-        case IGraphicsBuffer::AccessMode::Upload:
+        case Engine::Graphics::IGraphicsBuffer::AccessMode::Upload:
             heapType = D3D12_HEAP_TYPE_UPLOAD;
             initialState = D3D12_RESOURCE_STATE_GENERIC_READ;
             break;
-        case IGraphicsBuffer::AccessMode::Readback:
+        case Engine::Graphics::IGraphicsBuffer::AccessMode::Readback:
             heapType = D3D12_HEAP_TYPE_READBACK;
             initialState = D3D12_RESOURCE_STATE_COPY_DEST;
             break;
     }
 
     // Set initial state based on usage
-    if (access == IGraphicsBuffer::AccessMode::Default)
+    if (access == Engine::Graphics::IGraphicsBuffer::AccessMode::Default)
     {
         switch (usage)
         {
-            case IGraphicsBuffer::Usage::ConstantBuffer:
-            case IGraphicsBuffer::Usage::VertexBuffer:
+            case Engine::Graphics::IGraphicsBuffer::Usage::ConstantBuffer:
+            case Engine::Graphics::IGraphicsBuffer::Usage::VertexBuffer:
                 initialState = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
                 break;
-            case IGraphicsBuffer::Usage::IndexBuffer:
+            case Engine::Graphics::IGraphicsBuffer::Usage::IndexBuffer:
                 initialState = D3D12_RESOURCE_STATE_INDEX_BUFFER;
                 break;
-            case IGraphicsBuffer::Usage::ShaderResource:
+            case Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource:
                 initialState = D3D12_RESOURCE_STATE_COMMON;
                 break;
         }
@@ -122,7 +125,7 @@ std::unique_ptr<IGraphicsBuffer> D3D12BufferFactory::CreateBuffer(
     buffer->SetElementStride(elementStride);
 
     // If initial data provided, copy it
-    if (initialData && access == IGraphicsBuffer::AccessMode::Upload)
+    if (initialData && access == Engine::Graphics::IGraphicsBuffer::AccessMode::Upload)
     {
         void* mapped = buffer->Map();
         memcpy(mapped, initialData, sizeBytes);
@@ -130,4 +133,5 @@ std::unique_ptr<IGraphicsBuffer> D3D12BufferFactory::CreateBuffer(
     }
 
     return buffer;
+}
 }

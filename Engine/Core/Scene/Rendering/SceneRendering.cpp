@@ -869,7 +869,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         Engine::Core::Object* object = nullptr;
         Engine::Graphics::IGraphicsBuffer* vertexBuffer = nullptr;
         Engine::Graphics::IPipelineState* pipeline = nullptr;
-        std::array<const Engine::Graphics::IGraphicsTexture*, 6> textures{};
+        std::array<const Engine::Graphics::IGraphicsTexture*, 7> textures{};
         UINT64 constantBufferOffset = 0;
         uint32_t vertexStride = 0;
         uint32_t vertexCount = 0;
@@ -924,6 +924,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 glm::radians(settings.hdriRotation), 1.f, 1.f };
             std::copy(m_environmentSH.begin(), m_environmentSH.end(),
                 objectData.environmentSH);
+            preparedDraw.textures[6] = skybox->GetGraphicsTexture();
+            if (preparedDraw.textures[6])
+                objectData.reflectionEnvironmentParams.w = 1.f;
         }
         objectData.mvp = proj * view * world;
         objectData.world = world;
@@ -1013,6 +1016,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     glm::radians(mat->reflectionEnvironmentRotation), 1.f, 0.f };
                 std::copy(reflectionSH->begin(), reflectionSH->end(),
                     objectData.reflectionEnvironmentSH);
+                if (mat->reflectionEnvironmentMap &&
+                    mat->reflectionEnvironmentMap->GetGraphicsTexture())
+                {
+                    preparedDraw.textures[6] =
+                        mat->reflectionEnvironmentMap->GetGraphicsTexture();
+                    objectData.reflectionEnvironmentParams.w = 1.f;
+                }
             }
             objectData.textureUvSets0 = { static_cast<float>(mat->baseColorUvSet),
                 static_cast<float>(mat->metallicRoughnessUvSet), static_cast<float>(mat->normalUvSet),

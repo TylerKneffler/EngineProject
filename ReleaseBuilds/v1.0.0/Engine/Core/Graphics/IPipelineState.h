@@ -4,6 +4,9 @@
 #include <cstdint>
 #include "IShader.h"
 
+namespace Engine::Graphics
+{
+
 // ---------------------------------------------------------------------------
 // IPipelineState — Graphics pipeline state object
 // 
@@ -102,3 +105,4 @@ public:
     virtual ~IPipelineStateFactory() = default;
     virtual std::unique_ptr<IPipelineStateBuilder> CreateBuilder() = 0;
 };
+}

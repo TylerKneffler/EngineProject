@@ -3,10 +3,12 @@
 #include "Core/Scene/Scene.h"
 #include "Core/ProjectLoader.h"
 
+namespace Engine::Editor
+{
 // ---------------------------------------------------------------------------
 // GameView — editor Game panel
 //
-// Renders the scene from the perspective of the first active Camera component
+// Renders the scene from the perspective of the first active Engine::Components::Camera component
 // found on a game object. If a scene has no active game camera, the editor
 // camera is used as a preview instead of leaving the render target blank.
 //
@@ -22,7 +24,7 @@
 class GameView : public View
 {
 public:
-    GameView()  = default;
+    GameView();
     ~GameView() = default;
 
     // Calls View::Init then stores the scene pointer and aspect ratio settings.
@@ -34,8 +36,8 @@ public:
               void* srvCpu,
               void* srvGpu,
               uint32_t srvSlotIndex,
-              Scene* scene,
-              const ProjectSettings& settings);
+              Engine::Scene::Scene* scene,
+              const Engine::Model::ProjectSettings& settings);
 
     // Issues the game-camera scene draw into cmd each frame.
     // cmd: opaque graphics command list handle (cast internally to ID3D12GraphicsCommandList*)
@@ -43,12 +45,13 @@ public:
 
     // Defines the Game panel showing the game-camera render output.
     void DrawPanel(IEditorUi& ui) override;
+    Engine::Scene::Scene* GetScene() const { return m_scene; }
 
 private:
-    Scene* m_scene = nullptr; // non-owning
+    Engine::Scene::Scene* m_scene = nullptr; // non-owning
 
     // Aspect ratio settings
-    ProjectSettings::AspectRatioMode m_aspectRatioMode = ProjectSettings::AspectRatioMode::Locked;
+    Engine::Model::ProjectSettings::AspectRatioMode m_aspectRatioMode = Engine::Model::ProjectSettings::AspectRatioMode::Locked;
     float m_gameAspectRatio = 1.777f;  // 16:9
     uint32_t m_gameWindowWidth = 1920;
     uint32_t m_gameWindowHeight = 1080;
@@ -57,3 +60,4 @@ private:
     // Computed viewport aspect ratio
     float m_aspect = 1.0f;
 };
+}

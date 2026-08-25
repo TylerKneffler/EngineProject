@@ -47,6 +47,8 @@
 //   };
 // ---------------------------------------------------------------------------
 
+namespace Engine::Renderers
+{
 class DX12EditorRenderer : public IEditorRenderer
 {
 public:
@@ -59,10 +61,11 @@ public:
     uint32_t GetWidth() const override { return m_width; }
     uint32_t GetHeight() const override { return m_height; }
     void Clear(float r, float g, float b, float a = 1.0f) override;
-    IGraphicsProvider* GetGraphicsProvider() override;
+    Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override;
 
     // IEditorRenderer interface
     void MarkDirty() override { m_dirty = true; }
+    bool IsDirty() const override { return m_dirty; }
     void SetUiRenderHooks(EditorUiRenderHooks hooks) override { m_uiHooks = std::move(hooks); }
     void RenderIfNeeded(std::function<void()> drawFn = nullptr) override;
     std::pair<std::pair<void*, void*>, uint32_t> AllocateSrvSlot() override;
@@ -155,3 +158,4 @@ private:
     std::unique_ptr<D3D12GraphicsProvider> m_graphicsProvider;
     EditorUiRenderHooks m_uiHooks;
 };
+}

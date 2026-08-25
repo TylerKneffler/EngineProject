@@ -3,7 +3,9 @@
 #include "Core/PropertyMacros.h"
 #include <glm/glm.hpp>
 
-class Camera : public Component
+namespace Engine::Components
+{
+class Camera : public Engine::Core::Component
 {
 public:
     Camera();
@@ -28,6 +30,12 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Camera | Projection", ClampMin = "1.0")
     float farPlane  = 100.f;
 
+    PROPERTY(Inspector, EditAnywhere, Category = "Camera | Projection")
+    bool orthographic = false;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Camera | Projection", ClampMin = "0.01")
+    float orthographicSize = 5.f;
+
     // View settings — position is driven by the owner's Transform component.
     PROPERTY(Inspector, EditAnywhere, Category = "Camera | View")
     glm::vec3 target { 0.f, 0.f, 0.f };
@@ -41,6 +49,7 @@ public:
 
     // Returns a left-handed perspective projection matrix.
     // aspect = viewport width / height.
-    glm::mat4 GetProjectionMatrix(float aspect) const;
+    glm::mat4 GetProjectionMatrix(float aspect, bool forceOrthographic = false) const;
 
 };
+}

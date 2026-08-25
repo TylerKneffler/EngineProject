@@ -2,8 +2,10 @@
 
 #include <cstdint>
 #include <memory>
+#include "Core/Renderers/IEditorRenderer.h"
 
-class IEditorRenderer;
+namespace Engine::Editor
+{
 class EditorState;
 class GameBuildManager;
 enum class PlayState;
@@ -15,7 +17,7 @@ public:
     virtual ~IEditorUiBackend() = default;
 
     virtual const char* Name() const = 0;
-    virtual bool Initialize(void* nativeWindow, IEditorRenderer& renderer) = 0;
+    virtual bool Initialize(void* nativeWindow, ::Engine::Renderers::IEditorRenderer& renderer) = 0;
     virtual void Shutdown() = 0;
     virtual bool HandleMessage(void* nativeWindow, uint32_t message,
                                uintptr_t wParam, intptr_t lParam) = 0;
@@ -23,6 +25,7 @@ public:
     virtual void BeginInput() {}
     virtual void EndInput() {}
     virtual void BeginFrame() = 0;
+    virtual bool NeedsContinuousRendering() const { return false; }
     virtual void Render(void* commandBuffer) = 0;
     virtual void EndFrame() = 0;
     virtual void DrawEditor(EditorState& state, PlayState playState,
@@ -30,3 +33,4 @@ public:
 };
 
 std::unique_ptr<IEditorUiBackend> CreateEditorUiBackend();
+}

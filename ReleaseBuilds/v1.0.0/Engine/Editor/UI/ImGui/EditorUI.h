@@ -3,7 +3,10 @@
 #include "Engine/Editor/UI/ImGui/Layout/ImGuiDockspace.h"
 #include "Engine/Editor/UI/ImGui/Menus/ImGuiMainMenu.h"
 #include "Engine/Editor/UI/ImGui/Panels/ImGuiPanelHost.h"
+#include "Engine/Editor/UI/ImGui/Popups/SceneLoadWarningPopup.h"
 
+namespace Engine::Editor
+{
 class EditorState;
 class GameBuildManager;
 enum class PlayState;
@@ -27,4 +30,6 @@ private:
     ImGuiDockspace m_dockspace;
     ImGuiMainMenu m_mainMenu;
     ImGuiPanelHost m_panelHost;
+    SceneLoadWarningPopup m_sceneLoadWarningPopup;
 };
+}

@@ -4,6 +4,9 @@
 #include "VulkanView.h"
 #include <algorithm>
 
+
+namespace Engine::Renderers
+{
 VulkanEditorRenderer::~VulkanEditorRenderer()
 {
     m_core.WaitIdle();
@@ -85,5 +88,6 @@ void VulkanEditorRenderer::SetUiTextureHooks(EditorUiTextureHooks hooks)
             : nullptr;
     };
     m_viewContext.unregisterUiTexture = std::move(hooks.unregisterTexture);
+}
 }
 #endif

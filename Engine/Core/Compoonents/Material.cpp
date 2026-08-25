@@ -240,10 +240,10 @@ void Material::PrepareTextures(IGraphicsProvider* graphicsProvider)
         heightTexture, occlusionTexture, emissiveTexture })
         if (texture)
             texture->Prepare(graphicsProvider);
-    // Per-material environments are projected to spherical harmonics on the
-    // CPU and do not need a second full-resolution GPU upload.
+    // Diffuse environment lighting uses the CPU-side SH projection, while
+    // glossy reflections sample the original mipmapped panorama on the GPU.
     if (reflectionEnvironmentMap)
-        reflectionEnvironmentMap->Load();
+        reflectionEnvironmentMap->Prepare(graphicsProvider);
 }
 
 MaterialAlphaMode Material::GetAlphaMode() const

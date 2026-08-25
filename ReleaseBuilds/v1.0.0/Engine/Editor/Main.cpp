@@ -6,15 +6,20 @@
 #include "Core/View/View.h"
 #include "Engine/Editor/EditorState.h"
 #include "Engine/Editor/GameBuildManager.h"
+#include "Engine/Editor/HotReload/EditorHotReload.h"
 #include "Engine/Editor/ProjectLauncher.h"
+#include "Engine/Editor/Core/View/Views/SceneView.h"
+#include "Engine/Editor/Core/View/Views/GameView.h"
 #include "Engine/Editor/UI/IEditorUiBackend.h"
-#include "Engine/Editor/Core/Assets/GltfImporter.h"
+#include "Engine/Editor/Core/Importers/ModelImporter.h"
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
 #include "Core/Assets/Scripts/Rotate.h"
+#include "Core/Assets/Scripts/FirstPersonController.h"
 #include "Core/Serialization/SceneSerializer.h"
 #endif
 #include <filesystem>
 #include <fstream>
+#include <unordered_set>
 #include <shellapi.h>
 
 // Fallback for IntelliSense
@@ -26,6 +31,12 @@
 #endif
 #ifndef ENGINE_ROOT_PATH
 #define ENGINE_ROOT_PATH "."
+#endif
+#ifndef ENGINE_BUILD_DIR
+#define ENGINE_BUILD_DIR "build/Debug"
+#endif
+#ifndef PROJECT_SCRIPTS_PATH
+#define PROJECT_SCRIPTS_PATH "build/Debug/Debug/ProjectScripts.dll"
 #endif
 #ifndef ENGINE_ASSETS_PATH
 #define ENGINE_ASSETS_PATH "Engine/Core/Assets/"
@@ -59,9 +70,9 @@ namespace
             std::filesystem::is_regular_file(engineRoot / "CMakeLists.txt");
     }
 
-    ProjectSettings CreateEngineDevelopmentSettings()
+    Engine::Model::ProjectSettings CreateEngineDevelopmentSettings()
     {
-        ProjectSettings settings{};
+        Engine::Model::ProjectSettings settings{};
         settings.name = "Engine Sandbox";
         settings.version = "Development";
         settings.description = "Built-in project-free engine development environment";
@@ -87,7 +98,7 @@ namespace
         settings.gameRenderingAPI = "DirectX11";
         settings.clearColor = { 0.18f, 0.18f, 0.18f, 1.f };
         settings.targetFramerate = 60;
-        settings.aspectRatioMode = ProjectSettings::AspectRatioMode::Free;
+        settings.aspectRatioMode = Engine::Model::ProjectSettings::AspectRatioMode::Free;
         return settings;
     }
 }
@@ -102,25 +113,28 @@ int WINAPI wWinMain(
     _In_     int       /*nShowCmd*/)
 {
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
-    RegisterComponentType<Rotate>("Rotate");
+    Engine::Serialization::RegisterComponentType<Rotate>("Rotate");
+    Engine::Serialization::RegisterComponentType<FirstPersonController>("FirstPersonController");
 #endif
     HRESULT comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     WriteStartupLog("Editor startup", true);
 
     // Headless importer entry point used by automation and project tooling.
-    // Editor.exe --import-gltf <source.gltf|source.glb> <Assets directory>
+    // Editor.exe --import-model <source.gltf|source.glb|source.fbx> <Assets directory>
+    // --import-gltf remains accepted for existing automation.
     {
         int argumentCount = 0;
         LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
         if (arguments && argumentCount >= 4 &&
-            std::wstring(arguments[1]) == L"--import-gltf")
+            (std::wstring(arguments[1]) == L"--import-model" ||
+             std::wstring(arguments[1]) == L"--import-gltf"))
         {
-            const GltfImportResult imported = GltfImporter::Import(
+            const Engine::Model::ModelImportResult imported = Engine::Editor::ModelImporter::Import(
                 std::filesystem::path(arguments[2]).string(),
                 std::filesystem::path(arguments[3]).string());
             WriteStartupLog(imported.success
-                ? "glTF imported: " + imported.prefabPath
-                : "glTF import failed: " + imported.message);
+                ? "Model imported: " + imported.prefabPath
+                : "Model import failed: " + imported.message);
             LocalFree(arguments);
             if (SUCCEEDED(comResult)) CoUninitialize();
             return imported.success ? 0 : 1;
@@ -154,7 +168,7 @@ int WINAPI wWinMain(
         if (projects.size() == 1)
             return projects.front();
         for (const auto& project : projects)
-            ProjectLauncher::RememberProject(project);
+            Engine::Editor::ProjectLauncher::RememberProject(project);
         return {};
     };
 
@@ -195,8 +209,8 @@ int WINAPI wWinMain(
     };
     if (hasArgument(L"--project-hub"))
         projectFile.clear();
-    ProjectLoader projectLoader;
-    ProjectSettings projectSettings;
+    Engine::Core::ProjectLoader projectLoader;
+    Engine::Model::ProjectSettings projectSettings;
     const bool engineDevelopmentMode = projectFile.empty() &&
         !hasArgument(L"--project-hub") && IsEngineDevelopmentDirectory();
     if (engineDevelopmentMode)
@@ -213,7 +227,7 @@ int WINAPI wWinMain(
         while (true)
         {
             if (projectFile.empty())
-                projectFile = ProjectLauncher::Run(hInstance);
+                projectFile = Engine::Editor::ProjectLauncher::Run(hInstance);
             if (projectFile.empty())
             {
                 if (SUCCEEDED(comResult)) CoUninitialize();
@@ -230,7 +244,7 @@ int WINAPI wWinMain(
                     projectSettings.editorRenderingAPI = overrideApi;
                 WriteStartupLog("Project: " + projectFile);
                 WriteStartupLog("Editor renderer: " + projectSettings.editorRenderingAPI);
-                ProjectLauncher::RememberProject(projectFile);
+                Engine::Editor::ProjectLauncher::RememberProject(projectFile);
                 break;
             }
             catch (const std::exception& error)
@@ -243,19 +257,21 @@ int WINAPI wWinMain(
 
     // Create editor state and UI
     OutputDebugStringA("[Main] Creating EditorState...\n");
-    auto editorState = std::make_unique<EditorState>(hInstance, projectSettings, projectFile);
+    auto editorState = std::make_unique<Engine::Editor::EditorState>(
+        hInstance, projectSettings, projectFile);
     OutputDebugStringA("[Main] EditorState created, calling Init...\n");
     if (!editorState->Init())
     {
         WriteStartupLog("Editor initialization failed with " + projectSettings.editorRenderingAPI);
         std::string fallbackReason;
         if (projectSettings.editorRenderingAPI != "DirectX11" &&
-            RendererFactory::IsRendererAvailable("DirectX11", &fallbackReason))
+            ::Engine::Renderers::RendererFactory::IsRendererAvailable("DirectX11", &fallbackReason))
         {
             OutputDebugStringA(("[Main] " + projectSettings.editorRenderingAPI +
                 " editor initialization failed; retrying with DirectX11.\n").c_str());
             projectSettings.editorRenderingAPI = "DirectX11";
-            editorState = std::make_unique<EditorState>(hInstance, projectSettings, projectFile);
+            editorState = std::make_unique<Engine::Editor::EditorState>(
+                hInstance, projectSettings, projectFile);
             if (!editorState->Init())
             {
                 WriteStartupLog("DirectX11 fallback initialization failed");
@@ -268,16 +284,18 @@ int WINAPI wWinMain(
     WriteStartupLog("Editor initialized successfully");
     OutputDebugStringA("[Main] EditorState initialized\n");
 
-    Window* window = editorState->GetWindow();
-    IEditorRenderer* renderer = editorState->GetRenderer();
-    Scene* scene = editorState->GetScene();
+    Engine::Core::Window* window = editorState->GetWindow();
+    Engine::Renderers::IEditorRenderer* renderer = editorState->GetRenderer();
+    Engine::Scene::Scene* scene = editorState->GetScene();
     if (!window || !renderer || !scene)
     {
         WriteStartupLog("Editor did not create all required core components");
         return 1;
     }
+    Engine::Core::SceneManager::SetActiveScene(scene);
+    Engine::Core::SceneManager::SetDefaultScenePath(projectSettings.defaultScene);
 
-    auto uiBackend = CreateEditorUiBackend();
+    auto uiBackend = Engine::Editor::CreateEditorUiBackend();
     if (!uiBackend->Initialize(window->GetHWND(), *renderer))
     {
         WriteStartupLog("UI backend initialization failed");
@@ -298,8 +316,16 @@ int WINAPI wWinMain(
     }
 
     OutputDebugStringA("[Main] Creating GameBuildManager...\n");
-    auto gameBuildManager = std::make_unique<GameBuildManager>(
+    auto gameBuildManager = std::make_unique<Engine::Editor::GameBuildManager>(
         editorState->GetConsole(), projectFile, projectSettings);
+    auto hotReload = std::make_unique<Engine::Editor::EditorHotReload>(*editorState,
+        editorState->GetConsole(), projectSettings.scriptsDirectory,
+        ENGINE_BUILD_DIR, PROJECT_SCRIPTS_PATH);
+    hotReload->BeforeApply = [&]()
+    {
+        if (gameBuildManager->IsBuilding()) gameBuildManager->CancelBuild();
+        gameBuildManager->Stop();
+    };
     OutputDebugStringA("[Main] GameBuildManager created\n");
     OutputDebugStringA("[Main] Getting window, renderer, scene...\n");
     char buf[256];
@@ -315,11 +341,11 @@ int WINAPI wWinMain(
     gameBuildManager->OnPlayStart = [&]()
     {
         editorState->CapturePlayModeScene();
-        for (const auto& obj : scene->GetObjects())
-            obj->Start();
+        scene->Start();
     };
     gameBuildManager->OnPlayStop = [&]()
     {
+        Engine::Core::SceneManager::CancelPendingSceneLoad();
         editorState->RestorePlayModeScene();
     };
 
@@ -330,7 +356,7 @@ int WINAPI wWinMain(
     QueryPerformanceCounter(&lastCounter);
 
     // Play state
-    PlayState playState = PlayState::Stopped;
+    Engine::Editor::PlayState playState = Engine::Editor::PlayState::Stopped;
     OutputDebugStringA("[Main] Frame timing setup complete\n");
 
     // -----------------------------------------------------------------------
@@ -352,7 +378,7 @@ int WINAPI wWinMain(
         {
             if (panel->NeedsRender())
             {
-                class View* view = reinterpret_cast<class View*>(panel.get());
+                Engine::Editor::View* view = reinterpret_cast<Engine::Editor::View*>(panel.get());
                 view->Resize(renderer->GetNativeDeviceHandle(), w, h);
             }
         }
@@ -362,6 +388,8 @@ int WINAPI wWinMain(
 
     OutputDebugStringA("[Main] Setting WndProcHook callback...\n");
     window->WndProcHook = [&](HWND h, UINT m, WPARAM w, LPARAM l) -> bool {
+        if (Engine::Core::Window::MessageRequestsRedraw(m))
+            renderer->MarkDirty();
         return uiBackend->HandleMessage(h, m, w, l);
     };
     window->OnInputBegin = [&]() { uiBackend->BeginInput(); };
@@ -369,6 +397,7 @@ int WINAPI wWinMain(
     OutputDebugStringA("[Main] WndProcHook callback set\n");
 
     OutputDebugStringA("[Main] Setting OnUpdate callback...\n");
+    std::string displayedWindowTitle;
     window->OnUpdate = [&]()
     {
         // Update delta time
@@ -377,40 +406,81 @@ int WINAPI wWinMain(
         float dt = static_cast<float>(now.QuadPart - lastCounter.QuadPart)
                  / static_cast<float>(perfFreq.QuadPart);
         lastCounter = now;
-        (void)dt;
 
-        // Update build manager
-        PostBuildAction postBuildAction;
+        // Update background editor work. Transitions themselves invalidate a
+        // frame so the final status/overlay is drawn even when continuous work
+        // ended during this update.
+        const Engine::Editor::PlayState previousPlayState = playState;
+        const bool wasBuilding = gameBuildManager->IsBuilding();
+        const bool wasHotReloadBusy = hotReload->IsBusy();
+        Engine::Editor::PostBuildAction postBuildAction;
         gameBuildManager->Update(playState, postBuildAction);
+        hotReload->Update(window->IsFocused());
+        if (previousPlayState != playState ||
+            wasBuilding != gameBuildManager->IsBuilding() ||
+            wasHotReloadBusy != hotReload->IsBusy())
+            renderer->MarkDirty();
 
         // Tick game objects while playing
-        if (playState == PlayState::Playing)
+        if (playState == Engine::Editor::PlayState::Playing)
         {
-            for (const auto& obj : scene->GetObjects())
-                obj->Update();
+            scene->Update(dt);
+            Engine::Core::SceneManager::ProcessPendingSceneLoad();
         }
 
-        renderer->MarkDirty();
+        const auto needsContinuousRendering = [&]()
+        {
+            return playState == Engine::Editor::PlayState::Playing ||
+                gameBuildManager->IsBuilding() || hotReload->IsBusy() ||
+                editorState->IsLoadingOverlayVisible() ||
+                uiBackend->NeedsContinuousRendering();
+        };
+        if (needsContinuousRendering())
+            renderer->MarkDirty();
 
         // Update window title
-        if (engineDevelopmentMode)
-            SetWindowTextW(window->GetHWND(), editorState->HasUnsavedChanges()
-                ? L"Engine Editor - Engine Sandbox *" : L"Engine Editor - Engine Sandbox");
-        else
-            SetWindowTextW(window->GetHWND(),
-                           editorState->HasUnsavedChanges() ? L"Engine Editor *" : L"Engine Editor");
+        const std::string title = std::string("Engine Editor - ") +
+            editorState->GetActiveDocumentName() +
+            (engineDevelopmentMode ? " - Engine Sandbox" : "");
+        if (title != displayedWindowTitle)
+        {
+            displayedWindowTitle = title;
+            SetWindowTextA(window->GetHWND(), displayedWindowTitle.c_str());
+        }
 
         // Render frame
         renderer->RenderIfNeeded([&]()
         {
             renderer->Clear(projectSettings.clearColor.r, projectSettings.clearColor.g, projectSettings.clearColor.b);
 
+            // Prepare render data for every scene that will render this frame.
+            // Prefab edit opens its own scene-backed viewport, so relying on
+            // the main scene alone can leave prefab views with stale/missing
+            // draw state.
+            std::unordered_set<Engine::Scene::Scene*> preparedScenes;
+            for (auto& panel : editorState->GetPanels())
+            {
+                if (!panel || !panel->NeedsRender() || !panel->IsOpen())
+                    continue;
+                if (auto* sceneView = dynamic_cast<Engine::Editor::SceneView*>(panel.get()))
+                {
+                    if (Engine::Scene::Scene* panelScene = sceneView->GetScene())
+                        if (preparedScenes.insert(panelScene).second)
+                            panelScene->PrepareRenderFrame();
+                    continue;
+                }
+                if (auto* gameView = dynamic_cast<Engine::Editor::GameView*>(panel.get()))
+                    if (Engine::Scene::Scene* panelScene = gameView->GetScene())
+                        if (preparedScenes.insert(panelScene).second)
+                            panelScene->PrepareRenderFrame();
+            }
+
             // Render 3D panels
             for (auto& panel : editorState->GetPanels())
             {
                 if (!panel) continue;
                 if (!panel->NeedsRender() || !panel->IsOpen()) continue;
-                class View* view = dynamic_cast<class View*>(panel.get());
+                Engine::Editor::View* view = dynamic_cast<Engine::Editor::View*>(panel.get());
                 if (!view) continue;
                 
                 void* cmdList = renderer->GetCurrentCommandBuffer();
@@ -423,6 +493,13 @@ int WINAPI wWinMain(
             // Render UI
             uiBackend->DrawEditor(*editorState, playState, gameBuildManager.get());
         });
+
+        // Avoid spinning the editor loop while idle. Window input wakes this
+        // wait immediately; the short timeout also services asynchronous
+        // directory notifications and other background state promptly.
+        if (!renderer->IsDirty() && !needsContinuousRendering())
+            MsgWaitForMultipleObjectsEx(0, nullptr, 50, QS_ALLINPUT,
+                MWMO_INPUTAVAILABLE);
     };
     OutputDebugStringA("[Main] OnUpdate callback set\n");
 
@@ -436,6 +513,7 @@ int WINAPI wWinMain(
     // Panels release UI texture registrations while the selected package is
     // still alive. The renderer itself is owned by EditorState.
     gameBuildManager.reset();
+    hotReload.reset();
     editorState.reset();
     uiBackend.reset();
 

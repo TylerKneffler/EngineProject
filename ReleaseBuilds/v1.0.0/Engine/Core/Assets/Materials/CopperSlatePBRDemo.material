@@ -1,0 +1,41 @@
+{
+    "version": 1,
+    "baseColor": [
+        1,
+        1,
+        1
+    ],
+    "ambientColor": [
+        0.02,
+        0.02,
+        0.02
+    ],
+    "specularColor": [
+        1,
+        1,
+        1
+    ],
+    "emissive": [
+        0,
+        0,
+        0
+    ],
+    "shininess": 32,
+    "metallic": 1,
+    "roughness": 1,
+    "baseColorAlpha": 1,
+    "alphaMode": "Opaque",
+    "alphaCutoff": 0.5,
+    "normalScale": 1,
+    "heightScale": 0.08,
+    "heightMinSteps": 12,
+    "heightMaxSteps": 40,
+    "occlusionStrength": 1,
+    "doubleSided": false,
+    "unlit": false,
+    "baseColorTexture": "Engine/Core/Assets/Textures/PBRDemo/CopperSlate_BaseColor.png",
+    "metallicRoughnessTexture": "Engine/Core/Assets/Textures/PBRDemo/CopperSlate_MetallicRoughness.png",
+    "normalTexture": "Engine/Core/Assets/Textures/PBRDemo/CopperSlate_Normal.png",
+    "heightTexture": "Engine/Core/Assets/Textures/PBRDemo/CopperSlate_Height.png",
+    "occlusionTexture": "Engine/Core/Assets/Textures/PBRDemo/CopperSlate_Occlusion.png"
+}

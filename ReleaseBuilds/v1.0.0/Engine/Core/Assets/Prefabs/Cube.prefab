@@ -44,14 +44,6 @@
         </Material.specular>
         <Material.shininess>32</Material.shininess>
       </components:Material>
-      <components:Rotate>
-        <Rotate.axis>
-          <item>0</item>
-          <item>1</item>
-          <item>0</item>
-        </Rotate.axis>
-        <Rotate.speed>45</Rotate.speed>
-      </components:Rotate>
     </components>
     <children />
   </object>

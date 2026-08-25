@@ -164,7 +164,7 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
     {
         auto view = std::make_unique<AssetsExplorerView>();
         view->SetTitle("Assets " + std::to_string(++m_assetsCount));
-        view->SetDefaultDockArea(EditorPanelDockArea::LeftSidebar);
+        view->SetDefaultDockArea(EditorPanelDockArea::BottomPanel);
         view->Init(m_settings.assetsDirectory, m_scene);
         if (OnSceneRequested)
         view->OnSceneRequested = OnSceneRequested;

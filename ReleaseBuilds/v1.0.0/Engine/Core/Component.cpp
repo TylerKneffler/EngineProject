@@ -3,6 +3,7 @@
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Serialization/Json.h"
 #include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Compoonents/Mesh.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Graphics/IGraphicsTexture.h"
 #include "Core/Object.h"
@@ -19,10 +20,41 @@
 #define ENGINE_ASSETS_PATH "Engine/Core/Assets/"
 #endif
 
+namespace Engine::Core
+{
+
 // State tracking for property editing
 static std::map<std::string, std::string> s_editingProperty;  // componentPtr+key -> "editing"
-// Cache for texture previews
-static std::map<std::string, std::shared_ptr<Texture>> s_texturePreviewCache;
+
+static std::string LowerExtension(const std::string& path)
+{
+    std::string extension = std::filesystem::path(path).extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+        [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+    return extension;
+}
+
+static bool IsCompatiblePathAsset(const std::string& property,
+    const std::string& path)
+{
+    std::string name = property;
+    std::transform(name.begin(), name.end(), name.begin(),
+        [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+    const std::string extension = LowerExtension(path);
+    if (name.find("font") != std::string::npos)
+        return extension == ".ttf" || extension == ".otf";
+    if (name.find("audio") != std::string::npos)
+        return extension == ".wav" || extension == ".ogg" || extension == ".mp3";
+    if (name.find("mesh") != std::string::npos)
+        return extension == ".mesh" || extension == ".obj" ||
+            extension == ".gltf" || extension == ".glb" || extension == ".fbx";
+    if (name.find("texture") != std::string::npos)
+        return extension == ".png" || extension == ".jpg" ||
+            extension == ".jpeg" || extension == ".bmp" ||
+            extension == ".dds" || extension == ".tga" ||
+            extension == ".hdr" || extension == ".exr" || extension == ".ktx2";
+    return true;
+}
 
 // ---------------------------------------------------------------------------
 // Component::DrawProperties — Generic interactive property editor
@@ -48,7 +80,7 @@ static std::map<std::string, std::shared_ptr<Texture>> s_texturePreviewCache;
 // Override in derived classes only when you need specialized UI controls
 // or logic beyond this automatic property editing.
 // ---------------------------------------------------------------------------
-void Component::DrawProperties(IEditorUi& ui)
+bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
 {
     // Get current serialized state
     JsonValue originalData = Serialize();
@@ -57,7 +89,7 @@ void Component::DrawProperties(IEditorUi& ui)
     if (originalData.IsNull() || !originalData.IsObject())
     {
         ui.DisabledLabel("(No properties)");
-        return;
+        return false;
     }
     
     // Create a mutable copy for editing
@@ -92,19 +124,27 @@ void Component::DrawProperties(IEditorUi& ui)
             
             if (isFilePath)
             {
+                // Texture/file rows reuse hidden widget labels such as
+                // "##path", "Browse...", "Apply", and "Cancel". Scope the
+                // complete row by its serialized property name so multiple
+                // visible material textures never share an ImGui ID.
+                ui.PushId(key.c_str());
+
                 // State key for tracking if this property is being edited
                 std::string stateKey = std::to_string(reinterpret_cast<uintptr_t>(this)) + "_" + key;
                 bool isEditing = (s_editingProperty.find(stateKey) != s_editingProperty.end());
                 
                 // Check if this is an image file for preview
                 bool isImageFile = false;
+                bool isEnvironmentImage = false;
                 if (!stringValue.empty())
                 {
                     std::string ext = stringValue.substr(stringValue.find_last_of('.') + 1);
                     std::transform(ext.begin(), ext.end(), ext.begin(),
                         [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-                    isImageFile = (ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "bmp" || 
-                                  ext == "tga" || ext == "dds" || ext == "hdr");
+                    isEnvironmentImage = ext == "hdr" || ext == "exr";
+                    isImageFile = (ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "bmp" ||
+                                  ext == "tga" || ext == "dds" || isEnvironmentImage);
                 }
                 
                 // Show preview image if available and not editing
@@ -114,7 +154,7 @@ void Component::DrawProperties(IEditorUi& ui)
                     
                     // Try to load and display texture preview
                     void* textureHandle = nullptr;
-                    std::shared_ptr<Texture> previewTexture = nullptr;
+                    std::shared_ptr<Engine::Components::Texture> previewTexture = nullptr;
                     
                     // Get graphics provider through the component's owner object and scene
                     IGraphicsProvider* graphicsProvider = nullptr;
@@ -125,21 +165,12 @@ void Component::DrawProperties(IEditorUi& ui)
                     
                     if (graphicsProvider)
                     {
-                        // Check cache first
-                        auto cachedIt = s_texturePreviewCache.find(stringValue);
-                        if (cachedIt != s_texturePreviewCache.end())
-                        {
-                            previewTexture = cachedIt->second;
-                        }
-                        else
-                        {
-                            // Load texture from file
-                            previewTexture = Texture::Acquire(stringValue);
-                            if (previewTexture && previewTexture->Load())
-                            {
-                                s_texturePreviewCache[stringValue] = previewTexture;
-                            }
-                        }
+                        // Texture::Acquire uses the centralized long-term
+                        // resource cache, shared with materials and previews.
+                        previewTexture = Engine::Components::Texture::Acquire(
+                            stringValue, !isEnvironmentImage);
+                        if (previewTexture)
+                            previewTexture->Load();
                         
                         // Ensure texture is prepared for GPU
                         if (previewTexture && previewTexture->HasPixels())
@@ -169,7 +200,10 @@ void Component::DrawProperties(IEditorUi& ui)
                         }
                         const float previewHeight = previewWidth / aspectRatio;
                         
-                        ui.DrawImage(textureHandle, previewWidth, previewHeight);
+                        if (isEnvironmentImage)
+                            ui.DrawCircularImage(textureHandle, previewWidth);
+                        else
+                            ui.DrawImage(textureHandle, previewWidth, previewHeight);
                         
                         // When image is clicked, enter editing mode
                         if (ui.IsItemClicked())
@@ -242,7 +276,11 @@ void Component::DrawProperties(IEditorUi& ui)
                         OPENFILENAMEW ofn{};
                         ofn.lStructSize = sizeof(ofn);
                         ofn.hwndOwner = nullptr;
-                        ofn.lpstrFilter = L"All Files\0*.*\0Images\0*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.dds\0Models\0*.obj;*.gltf;*.glb\0\0";
+                        const bool fontProperty = key.find("font") != std::string::npos ||
+                            key.find("Font") != std::string::npos;
+                        ofn.lpstrFilter = fontProperty
+                            ? L"Fonts (*.ttf;*.otf)\0*.ttf;*.otf\0All Files (*.*)\0*.*\0\0"
+                            : L"All Files\0*.*\0Images\0*.png;*.jpg;*.jpeg;*.bmp;*.dds;*.tga;*.hdr;*.exr;*.ktx2\0Models\0*.obj;*.gltf;*.glb;*.fbx\0Audio\0*.wav;*.ogg;*.mp3\0Fonts\0*.ttf;*.otf\0\0";
                         ofn.lpstrFile = filename;
                         ofn.nMaxFile = MAX_PATH;
                         ofn.lpstrInitialDir = initialDir[0] ? initialDir : nullptr;
@@ -286,6 +324,55 @@ void Component::DrawProperties(IEditorUi& ui)
                         }
                     }
                 }
+
+                // Asset-browser files can be assigned directly to serialized
+                // path properties. Font fields accept only TTF/OTF so an
+                // unrelated drop cannot silently replace the active typeface.
+                if (!isEditing && ui.BeginDragDropTarget())
+                {
+                    size_t payloadSize = 0;
+                    const void* payload = ui.AcceptDragDropPayload(
+                        "ENGINE_ASSET_PATH", &payloadSize);
+                    if (payload && payloadSize > 0)
+                    {
+                        const char* bytes = static_cast<const char*>(payload);
+                        size_t length = 0;
+                        while (length < payloadSize && bytes[length] != '\0')
+                            ++length;
+                        const std::string droppedPath(bytes, length);
+                        if (IsCompatiblePathAsset(key, droppedPath))
+                        {
+                            editedData.Set(key, JsonValue(droppedPath));
+                            modified = true;
+                        }
+                    }
+                    ui.EndDragDropTarget();
+                }
+
+                // Mesh-backed physics properties are asset references, but
+                // Mesh component headers are much more convenient drag
+                // sources than finding the same file again in the browser.
+                // Store the dropped component's portable file path rather
+                // than a raw pointer so scenes remain safe and serializable.
+                if (!isEditing && (key == "meshPath" || key == "MeshPath") &&
+                    ui.BeginDragDropTarget())
+                {
+                    size_t payloadSize = 0;
+                    const void* payload = ui.AcceptDragDropPayload(
+                        "ENGINE_COMPONENT_REORDER", &payloadSize);
+                    if (payload && payloadSize == sizeof(Component*))
+                    {
+                        Component* component = *static_cast<Component* const*>(payload);
+                        if (auto* droppedMesh = dynamic_cast<Engine::Components::Mesh*>(component))
+                        {
+                            editedData.Set(key, JsonValue(droppedMesh->GetFilePath()));
+                            modified = true;
+                        }
+                    }
+                    ui.EndDragDropTarget();
+                }
+
+                ui.PopId();
             }
             else
             {
@@ -304,7 +391,42 @@ void Component::DrawProperties(IEditorUi& ui)
             float floatVal = value.AsFloat();
             
             // Heuristics for appropriate ranges
-            if (key.find("fov") != std::string::npos || key.find("FOV") != std::string::npos)
+            if (key == "metallicFactor" || key == "roughnessFactor" ||
+                key == "baseColorAlpha" || key == "alphaCutoff" ||
+                key == "occlusionStrength" || key == "alpha" ||
+                key == "fillAmount")
+            {
+                if (ui.DragFloat(displayName.c_str(), &floatVal, 0.01f, 0.f, 1.f))
+                {
+                    editedData.Set(key, JsonValue(floatVal));
+                    modified = true;
+                }
+            }
+            else if (key == "normalScale")
+            {
+                if (ui.DragFloat(displayName.c_str(), &floatVal, 0.01f, 0.f, 2.f))
+                {
+                    editedData.Set(key, JsonValue(floatVal));
+                    modified = true;
+                }
+            }
+            else if (key == "heightScale")
+            {
+                if (ui.DragFloat(displayName.c_str(), &floatVal, 0.001f, 0.f, 0.2f))
+                {
+                    editedData.Set(key, JsonValue(floatVal));
+                    modified = true;
+                }
+            }
+            else if (key == "heightMinSteps" || key == "heightMaxSteps")
+            {
+                if (ui.DragFloat(displayName.c_str(), &floatVal, 1.f, 4.f, 64.f))
+                {
+                    editedData.Set(key, JsonValue(floatVal));
+                    modified = true;
+                }
+            }
+            else if (key.find("fov") != std::string::npos || key.find("FOV") != std::string::npos)
             {
                 if (ui.DragFloat(displayName.c_str(), &floatVal, 0.5f, 1.f, 179.f))
                 {
@@ -429,7 +551,46 @@ void Component::DrawProperties(IEditorUi& ui)
         }
         else if (value.IsObject())
         {
-            ui.ValueLabel(displayName.c_str(), "{object}");
+            if (value.Has("componentType") && value.Has("expectedType"))
+            {
+                ComponentReference reference;
+                FromJson(value, reference);
+                const std::string assignedLabel = reference.IsAssigned()
+                    ? reference.objectName + " / " + reference.componentType
+                    : std::string("(default: ") +
+                        (reference.expectedType.empty() ? "component" : reference.expectedType) + ")";
+                ui.ValueLabel(displayName.c_str(), assignedLabel.c_str());
+                if (ui.BeginDragDropTarget())
+                {
+                    size_t payloadSize = 0;
+                    const void* payload = ui.AcceptDragDropPayload(
+                        "ENGINE_COMPONENT_REORDER", &payloadSize);
+                    if (payload && payloadSize == sizeof(Component*))
+                    {
+                        Component* component = *static_cast<Component* const*>(payload);
+                        if (component && (reference.expectedType.empty() ||
+                            component->GetTypeName() == reference.expectedType))
+                        {
+                            editedData.Set(key, ToJson(CaptureComponentReference(
+                                component, reference.expectedType)));
+                            modified = true;
+                        }
+                    }
+                    ui.EndDragDropTarget();
+                }
+                if (reference.IsAssigned())
+                {
+                    ui.SameLine();
+                    if (ui.Button((std::string("Clear##") + key).c_str()))
+                    {
+                        reference.Clear();
+                        editedData.Set(key, ToJson(reference));
+                        modified = true;
+                    }
+                }
+            }
+            else
+                ui.ValueLabel(displayName.c_str(), "{object}");
         }
     }
     
@@ -438,9 +599,10 @@ void Component::DrawProperties(IEditorUi& ui)
     {
         Deserialize(editedData);
     }
+    return modified;
 }
 
-JsonValue Component::Serialize() const
+Component::JsonValue Component::Serialize() const
 {
     JsonValue data = JsonValue::MakeObject();
     data.Set("type", JsonValue(GetTypeName()));
@@ -450,7 +612,7 @@ JsonValue Component::Serialize() const
     return data;
 }
 
-JsonValue Component::SerializeFields() const
+Component::JsonValue Component::SerializeFields() const
 {
     JsonValue data = JsonValue::MakeObject();
     for (const auto& field : m_serializedFields)
@@ -463,4 +625,35 @@ void Component::Deserialize(const JsonValue& v)
     for (const auto& field : m_serializedFields)
         if (v.Has(field.name))
             field.read(v[field.name]);
+    MarkConfigurationDirty();
+}
+
+Object* Component::FindObjectInChildrenByName(const std::string& objectName,
+    bool includeSelf) const
+{
+    return Owner
+        ? Owner->FindObjectInChildrenByName(objectName, includeSelf)
+        : nullptr;
+}
+
+Object* Component::FindObjectInSceneByName(const std::string& objectName) const
+{
+    return Owner ? Owner->FindObjectInSceneByName(objectName) : nullptr;
+}
+
+Component* Component::GetComponentOnObjectNamedInScene(
+    const std::string& objectName,
+    const std::string& componentTypeName) const
+{
+    Object* object = FindObjectInSceneByName(objectName);
+    if (!object)
+        return nullptr;
+    for (Component* component : object->Components)
+    {
+        if (component && component->GetTypeName() == componentTypeName)
+            return component;
+    }
+    return nullptr;
+}
+
 }

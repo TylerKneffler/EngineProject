@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cstring>
 
+namespace Engine::Renderers
+{
 VulkanRenderCore::~VulkanRenderCore()
 {
     if (!m_instance) return;
@@ -334,4 +336,5 @@ void VulkanRenderCore::EndFrame()
 }
 
 void VulkanRenderCore::WaitIdle() const { if (m_device) vkDeviceWaitIdle(m_device); }
+}
 #endif

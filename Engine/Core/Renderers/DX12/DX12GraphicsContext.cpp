@@ -87,14 +87,15 @@ void D3D12GraphicsContext::SetStructuredBuffer(uint32_t slot, const Engine::Grap
 
 void D3D12GraphicsContext::SetTexture(uint32_t slot, const Engine::Graphics::IGraphicsTexture* texture)
 {
-    if (!m_cmdList || slot >= 6)
+    if (!m_cmdList || slot >= 7)
         return;
     const auto* nativeTexture = dynamic_cast<const D3D12GraphicsTexture*>(texture);
     if (!nativeTexture)
         return;
     ID3D12DescriptorHeap* heaps[] = { nativeTexture->GetHeap() };
     m_cmdList->SetDescriptorHeaps(1, heaps);
-    m_cmdList->SetGraphicsRootDescriptorTable(slot + 1, nativeTexture->GetGpuHandle());
+    m_cmdList->SetGraphicsRootDescriptorTable(
+        slot == 6 ? 10 : slot + 1, nativeTexture->GetGpuHandle());
 }
 
 void D3D12GraphicsContext::SetViewport(const Viewport& vp)

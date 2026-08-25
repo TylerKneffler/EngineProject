@@ -4,24 +4,33 @@
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Rendering/Lighting/Pipelines/Realtime/RealtimeLightingPipeline.h"
 #include "Core/Rendering/Lighting/Pipelines/Baked/BakedLightingPipeline.h"
-#include "Core/Serialization/Json.h"
+#include "Core/Model/SceneSettings.h"
 #include <glm/glm.hpp>
+#include <array>
+#include <memory>
 #include <string>
 
-// Forward declarations
-class IGraphicsProvider;
-class IGraphicsContext;
-class IShaderCompiler;
-class IPipelineStateFactory;
-class IGraphicsBufferFactory;
-class Texture;
+namespace Engine::Physics { class Physics; }
+namespace Engine::Audio { class Audio; }
+namespace Engine::Components
+{
+    class Camera;
+    class Texture;
+    class Mesh;
+    class Sprite;
+    class Material;
+}
+namespace Engine::Rendering { class BakedLightingData; }
+namespace Engine::Renderers { class UIRenderer; }
+namespace Engine::Graphics { class IGraphicsProvider; class IGraphicsContext; }
 
+// Forward declarations
 // ---------------------------------------------------------------------------
 // Scene
 //
-// Owns all game objects for one scene and manages scene-wide rendering
-// helpers such as the editor grid.  Only the editor uses Init()/Render();
-// the game runtime will call Start()/Update() instead.
+// Owns all game objects plus the scene's Physics and Audio runtime state.
+// Start()/Update() provide the common runtime path used by the standalone game
+// and Editor Play mode; Init()/Render() manage API-neutral rendering resources.
 //
 // ---- Typical editor usage ----
 //
@@ -32,35 +41,32 @@ class Texture;
 //   scene.Render(graphicsContext);
 // ---------------------------------------------------------------------------
 
-struct SceneSettings
+namespace Engine::Scene
 {
-    // Grid
-    bool  showGrid        = true;
-    int   gridHalfSize    = 10;          // legacy — kept for serialization compat
-    float gridCellSize    = 1.f;         // spacing between lines (world units)
-    float gridOpacity     = 0.4f;        // 0 = invisible, 1 = fully opaque
-    float gridFadeDistance = 80.f;       // world units; grid fades to 0 at this distance
-    glm::vec3 gridColor        = glm::vec3(0.45f, 0.45f, 0.45f);
-    glm::vec3 gridOriginColor  = glm::vec3(0.30f, 0.50f, 0.80f); // X/Z axis lines
-
-    // Ambient light
-    glm::vec3 ambientColor = glm::vec3(0.12f, 0.12f, 0.12f);
-
-    // Optional equirectangular panorama. Empty uses the bundled editor sky.
-    std::string skyboxTexture;
-
-    JsonValue Serialize() const;
-    void Deserialize(const JsonValue& value);
-};
-
 class Scene
 {
 public:
+    using Object = Engine::Core::Object;
+    using Camera = Engine::Components::Camera;
+    using SceneSettings = Engine::Model::SceneSettings;
+    using IGraphicsProvider = Engine::Graphics::IGraphicsProvider;
+    using IGraphicsContext = Engine::Graphics::IGraphicsContext;
+    using IPipelineState = Engine::Graphics::IPipelineState;
+    using IGraphicsBuffer = Engine::Graphics::IGraphicsBuffer;
+
     using ObjectPath = std::vector<std::size_t>;
     enum class ObjectPlacement { Before, AsChild, After };
 
-    Scene()  = default;
-    ~Scene() = default;
+    Scene();
+    ~Scene();
+
+    // Runtime lifecycle shared by the standalone game and Editor Play mode.
+    void Start();
+    void Update(float deltaTime);
+    Engine::Physics::Physics& GetPhysics() { return *m_physics; }
+    const Engine::Physics::Physics& GetPhysics() const { return *m_physics; }
+    Engine::Audio::Audio& GetAudio() { return *m_audio; }
+    const Engine::Audio::Audio& GetAudio() const { return *m_audio; }
 
     // --- Editor Settings ---
     Object editorCamera; // not used by the game runtime, used for editor scene view navigation
@@ -75,11 +81,21 @@ public:
     // cameraOverride: if non-null, use this camera instead of the editor camera.
     // includeEditorVisuals: draws editor-only overlays such as the grid and
     // selected-object outline. Game cameras must pass false.
+    // PrepareRenderFrame() performs the camera-independent scene walk once;
+    // multiple views can then reuse the resulting object, light, material,
+    // and skin data.
+    void PrepareRenderFrame();
     void Render(IGraphicsContext* context, float aspect,
         Camera* cameraOverride = nullptr, bool includeEditorVisuals = true);
     void SetSelectedObject(Object* obj) { m_selectedObject = obj; }
     Object* GetSelectedObject() const { return m_selectedObject; }
     void SetPreviewObject(Object* obj) { m_previewObject = obj; }
+    void SetEditorMode2D(bool enabled);
+    bool IsEditorMode2D() const { return m_editorMode2D; }
+    // Pointer coordinates relative to the surface displaying the game render
+    // target, used to keep embedded-view UI hit bounds aligned.
+    void SetUiPointerInput(float x, float y, float viewportWidth,
+        float viewportHeight, bool hovered, bool mouseDown);
 
     // Returns the first active Camera component found on a scene game object.
     // The editor camera is deliberately excluded so GameView cannot silently
@@ -110,14 +126,17 @@ public:
     std::string SaveToString() const;
     bool LoadFromString(const std::string& source);
 
-    Engine::Rendering::Lighting::BakeResult BakeLighting();
+    Engine::Model::BakeResult BakeLighting(
+        const std::string& assetsDirectory = "Assets",
+        const std::string& sceneName = "Scene",
+        const Engine::Model::BakedLightingSettings& bakeSettings = {});
     void ClearBakedLighting();
     const std::string& GetLightingBakeStatus() const { return m_lightingBakeStatus; }
 
     SceneSettings settings;
 
     IGraphicsProvider* GetGraphicsProvider() const { return m_graphicsProvider; }
-    const Texture* GetSkyboxPreviewTexture();
+    const Engine::Components::Texture* GetSkyboxPreviewTexture();
 
 private:
     // ---- Rendering resources (kept API-agnostic) ----
@@ -129,12 +148,24 @@ private:
     std::unique_ptr<IPipelineState> m_skyboxPipeline;
     std::unique_ptr<IGraphicsBuffer> m_skyboxConstantBuffer;
     void* m_skyboxCBMapped = nullptr;
-    std::shared_ptr<Texture> m_defaultSkyboxTexture;
-    std::shared_ptr<Texture> m_sceneSkyboxTexture;
+    std::shared_ptr<Engine::Components::Texture> m_defaultSkyboxTexture;
+    std::shared_ptr<Engine::Components::Texture> m_sceneSkyboxTexture;
     std::string m_loadedSkyboxPath;
+    std::string m_environmentLightingPath;
+    std::array<glm::vec4, 9> m_environmentSH{};
 
     std::unique_ptr<IPipelineState> m_objectPipeline;
+    std::unique_ptr<IPipelineState> m_objectDoubleSidedPipeline;
+    std::unique_ptr<IPipelineState> m_objectBlendPipeline;
+    std::unique_ptr<IPipelineState> m_objectBlendDoubleSidedPipeline;
+    std::unique_ptr<IPipelineState> m_objectWirePipeline;
+    std::unique_ptr<IPipelineState> m_objectWireDoubleSidedPipeline;
+    std::unique_ptr<IPipelineState> m_objectBlendWirePipeline;
+    std::unique_ptr<IPipelineState> m_objectBlendWireDoubleSidedPipeline;
     std::unique_ptr<IPipelineState> m_objectPreviewPipeline;
+    std::unique_ptr<IPipelineState> m_objectPreviewDoubleSidedPipeline;
+    std::unique_ptr<IPipelineState> m_objectPreviewWirePipeline;
+    std::unique_ptr<IPipelineState> m_objectPreviewWireDoubleSidedPipeline;
     std::unique_ptr<IPipelineState> m_objectOutlinePipeline;
     std::unique_ptr<IGraphicsBuffer> m_objectConstantBuffer;
     void* m_objectCBMapped = nullptr;
@@ -142,23 +173,58 @@ private:
     void* m_objectDataMapped = nullptr;
     std::unique_ptr<IGraphicsBuffer> m_lightDataBuffer;
     void* m_lightDataMapped = nullptr;
+    std::unique_ptr<IGraphicsBuffer> m_boneDataBuffer;
+    void* m_boneDataMapped = nullptr;
+    std::unique_ptr<Engine::Renderers::UIRenderer> m_uiRenderer;
+    std::unique_ptr<Engine::Physics::Physics> m_physics;
+    std::unique_ptr<Engine::Audio::Audio> m_audio;
 
-    Engine::Rendering::Lighting::RealtimeLightingPipeline m_realtimeLightingPipeline;
-    Engine::Rendering::Lighting::BakedLightingPipeline m_bakedLightingPipeline;
+    Engine::Rendering::RealtimeLightingPipeline m_realtimeLightingPipeline;
+    Engine::Rendering::BakedLightingPipeline m_bakedLightingPipeline;
     std::string m_lightingBakeStatus = "Lighting has not been baked.";
 
     void BuildGridPipeline();
     void BuildSkyboxPipeline();
     void BuildObjectPipeline();
-    const Texture* ResolveSkyboxTexture();
+    const Engine::Components::Texture* ResolveSkyboxTexture();
+    void UpdateEnvironmentLighting(const Engine::Components::Texture* texture);
+    std::shared_ptr<const std::array<glm::vec4, 9>> ResolveReflectionEnvironment(
+        const Engine::Components::Material& material);
+
+    struct FrameRenderItem
+    {
+        Object* object = nullptr;
+        Engine::Components::Mesh* mesh = nullptr;
+        Engine::Components::Sprite* sprite = nullptr;
+        Engine::Components::Material* material = nullptr;
+        const Engine::Rendering::BakedLightingData* bakedLighting = nullptr;
+        IGraphicsBuffer* spriteVertexBuffer = nullptr;
+        const Engine::Components::Texture* spriteTexture = nullptr;
+        glm::mat4 world{1.f};
+        glm::vec2 spriteWorldSize{1.f};
+        glm::vec4 spriteUvRect{0.f, 0.f, 1.f, 1.f};
+        uint32_t skinPaletteOffset = 0;
+        uint32_t skinJointCount = 0;
+        int sortingLayer = 0;
+        bool belongsToPreview = false;
+        bool blended = false;
+    };
+
+    std::vector<FrameRenderItem> m_frameRenderItems;
+    uint32_t m_frameLightCount = 0;
+    bool m_renderFramePrepared = false;
 
     // ---- Object list ----
     std::vector<std::unique_ptr<Object>> m_objects;
     Object* m_selectedObject = nullptr;
     Object* m_previewObject = nullptr;
+    bool m_editorMode2D = false;
+    bool m_editorCameraModeInitialized = false;
 
     static constexpr uint32_t kMaxObjects = 64;
+    static constexpr uint32_t kMaxBonesPerObject = 256;
     static constexpr uint32_t kMaxLights =
-        Engine::Rendering::Lighting::MaxRealtimeLights;
+        Engine::Model::MaxRealtimeLights;
     static constexpr uint32_t kCBStride = 256;
 };
+}

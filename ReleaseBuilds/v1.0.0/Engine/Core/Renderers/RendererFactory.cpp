@@ -13,6 +13,9 @@
 #include <stdexcept>
 #include <sstream>
 
+
+namespace Engine::Renderers
+{
 namespace
 {
 std::string NormalizeApi(std::string api)
@@ -32,9 +35,9 @@ std::string HResultText(HRESULT hr)
     return out.str();
 }
 
-RendererOption ProbeDX12()
+Engine::Model::RendererOption ProbeDX12()
 {
-    RendererOption result{ "DirectX12" };
+    Engine::Model::RendererOption result{ "DirectX12" };
     HMODULE runtime = LoadLibraryW(L"d3d12.dll");
     if (!runtime)
     {
@@ -51,9 +54,9 @@ RendererOption ProbeDX12()
     return result;
 }
 
-RendererOption ProbeDX11()
+Engine::Model::RendererOption ProbeDX11()
 {
-    RendererOption result{ "DirectX11" };
+    Engine::Model::RendererOption result{ "DirectX11" };
     HMODULE runtime = LoadLibraryW(L"d3d11.dll");
     if (!runtime)
     {
@@ -79,9 +82,9 @@ RendererOption ProbeDX11()
     return result;
 }
 
-RendererOption ProbeVulkan()
+Engine::Model::RendererOption ProbeVulkan()
 {
-    RendererOption result{ "Vulkan" };
+    Engine::Model::RendererOption result{ "Vulkan" };
 #if !defined(ENGINE_VULKAN_ENABLED)
     result.unavailableReason = "The Vulkan backend was not included in this build (DXC was not found during CMake configuration).";
 #else
@@ -117,7 +120,7 @@ RendererOption ProbeVulkan()
 // RendererFactory::CreateEditorRenderer
 // ---------------------------------------------------------------------------
 std::unique_ptr<IEditorRenderer> RendererFactory::CreateEditorRenderer(
-    const ProjectSettings& settings)
+    const Engine::Model::ProjectSettings& settings)
 {
     std::string api = NormalizeApi(settings.editorRenderingAPI);
     std::string unavailableReason;
@@ -146,7 +149,7 @@ std::unique_ptr<IEditorRenderer> RendererFactory::CreateEditorRenderer(
 // RendererFactory::CreateGameRenderer
 // ---------------------------------------------------------------------------
 std::unique_ptr<IGameRenderer> RendererFactory::CreateGameRenderer(
-    const ProjectSettings& settings)
+    const Engine::Model::ProjectSettings& settings)
 {
     std::string api = NormalizeApi(settings.gameRenderingAPI);
     std::string unavailableReason;
@@ -179,11 +182,11 @@ std::string RendererFactory::GetSupportedRenderers()
     return "DirectX12, DirectX11, Vulkan";
 }
 
-const std::vector<RendererOption>& RendererFactory::GetRendererOptions()
+const std::vector<Engine::Model::RendererOption>& RendererFactory::GetRendererOptions()
 {
-    static const std::vector<RendererOption> options = []
+    static const std::vector<Engine::Model::RendererOption> options = []
     {
-        std::vector<RendererOption> detected{ ProbeDX12(), ProbeDX11(), ProbeVulkan() };
+        std::vector<Engine::Model::RendererOption> detected{ ProbeDX12(), ProbeDX11(), ProbeVulkan() };
         for (const auto& option : detected)
         {
             std::string message = "[RendererAvailability] " + option.name + ": " +
@@ -208,4 +211,5 @@ bool RendererFactory::IsRendererAvailable(const std::string& api, std::string* r
     }
     if (reason) *reason = "This renderer is not included in the current engine build.";
     return false;
+}
 }

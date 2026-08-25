@@ -1,5 +1,7 @@
 #pragma once
 
+namespace Engine::Editor
+{
 class EditorState;
 class GameBuildManager;
 enum class PlayState;
@@ -20,3 +22,4 @@ private:
         GameBuildManager* buildManager) const;
     void OpenPanel(EditorState& state, const char* type) const;
 };
+}

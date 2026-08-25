@@ -8,7 +8,9 @@
 #define ENGINE_VULKAN_SHADER_PATH "VulkanShaders/"
 #endif
 
-std::unique_ptr<IShader> VulkanShaderCompiler::CompileFromFile(
+namespace Engine::Renderers
+{
+std::unique_ptr<Engine::Graphics::IShader> VulkanShaderCompiler::CompileFromFile(
     const std::string& filePath, const char*, CompileProfile profile)
 {
     m_lastError.clear();
@@ -35,5 +37,6 @@ std::unique_ptr<IShader> VulkanShaderCompiler::CompileFromFile(
     stream.seekg(0);
     stream.read(reinterpret_cast<char*>(bytes.data()), size);
     return std::make_unique<VulkanShader>(std::move(bytes));
+}
 }
 #endif

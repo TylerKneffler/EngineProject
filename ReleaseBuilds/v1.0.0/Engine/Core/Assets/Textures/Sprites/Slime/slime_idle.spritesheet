@@ -1,0 +1,17 @@
+{
+  "image": "slime_idle2.png",
+  "animations": {
+    "Idle": {
+      "loop": true,
+      "frames": [
+        { "x": 22,  "y": 29, "width": 24, "height": 20, "duration": 0.14 },
+        { "x": 102, "y": 29, "width": 24, "height": 20, "duration": 0.14 },
+        { "x": 182, "y": 29, "width": 24, "height": 20, "duration": 0.14 },
+        { "x": 262, "y": 29, "width": 24, "height": 20, "duration": 0.14 },
+        { "x": 342, "y": 29, "width": 24, "height": 20, "duration": 0.14 },
+        { "x": 422, "y": 29, "width": 24, "height": 20, "duration": 0.14 },
+        { "x": 502, "y": 29, "width": 24, "height": 20, "duration": 0.14 }
+      ]
+    }
+  }
+}

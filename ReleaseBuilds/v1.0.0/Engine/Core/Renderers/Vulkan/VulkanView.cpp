@@ -2,6 +2,8 @@
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "VulkanView.h"
 
+namespace Engine::Renderers
+{
 VulkanView::~VulkanView()
 {
     if (m_context.device) vkDeviceWaitIdle(m_context.device);
@@ -65,7 +67,8 @@ void VulkanView::Render(void* commandBuffer, void*, std::function<void(void*)> d
 {
     VkCommandBuffer command = reinterpret_cast<VkCommandBuffer>(commandBuffer);
     VkClearValue clears[2]{};
-    clears[0].color = { { 0.0f, 0.0f, 0.502f, 1.0f } };
+    clears[0].color = { { m_clearColor[0], m_clearColor[1],
+        m_clearColor[2], m_clearColor[3] } };
     clears[1].depthStencil = { 1.0f, 0 };
     VkRenderPassBeginInfo begin{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
     begin.renderPass = m_context.renderPass; begin.framebuffer = m_framebuffer;
@@ -76,5 +79,6 @@ void VulkanView::Render(void* commandBuffer, void*, std::function<void(void*)> d
     vkCmdSetViewport(command, 0, 1, &viewport); vkCmdSetScissor(command, 0, 1, &scissor);
     if (drawFn) drawFn(commandBuffer);
     vkCmdEndRenderPass(command);
+}
 }
 #endif

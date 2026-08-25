@@ -49,6 +49,7 @@ struct SceneLightData
 [[vk::binding(3, 0)]] Texture2D occlusionMap;
 [[vk::binding(4, 0)]] Texture2D emissiveMap;
 [[vk::binding(5, 0)]] Texture2D heightMap;
+[[vk::binding(10, 0)]] Texture2D environmentMap;
 [[vk::binding(6, 0)]] SamplerState materialSampler;
 #else
 cbuffer DrawBuffer : register(b0)
@@ -61,6 +62,7 @@ Texture2D normalMap            : register(t2);
 Texture2D occlusionMap         : register(t3);
 Texture2D emissiveMap          : register(t4);
 Texture2D heightMap            : register(t5);
+Texture2D environmentMap       : register(t9);
 StructuredBuffer<SceneLightData> sceneLights : register(t6);
 StructuredBuffer<ObjectData> objects : register(t7);
 StructuredBuffer<float4x4> boneMatrices : register(t8);
@@ -209,6 +211,31 @@ float3 EvaluateCustomReflectionRadiance(ObjectData objectData, float3 direction)
         radiance += objectData.reflectionEnvironmentSH[coefficient].rgb *
             basis[coefficient];
     return max(radiance, 0.0) * objectData.reflectionEnvironmentParams.x;
+}
+
+float3 EvaluateDirectReflectionRadiance(
+    ObjectData objectData, float3 direction, float roughness)
+{
+    const bool customEnvironment =
+        objectData.reflectionEnvironmentParams.z > 0.5;
+    const float rotation = customEnvironment
+        ? objectData.reflectionEnvironmentParams.y
+        : objectData.environmentParams.y;
+    direction = RotateEnvironmentDirection(direction, rotation);
+    const float2 uv = float2(
+        0.5 + atan2(direction.z, direction.x) * 0.1591549431,
+        acos(clamp(direction.y, -1.0, 1.0)) * 0.3183098862);
+    uint width = 0, height = 0, mipLevels = 1;
+    environmentMap.GetDimensions(0, width, height, mipLevels);
+    // The generated panorama mips are box-filtered rather than GGX
+    // prefiltered. Squared roughness preserves crisp low-roughness reflections
+    // and still selects progressively softer levels for rough materials.
+    const float lod = roughness * roughness * max((float)mipLevels - 1.0, 0.0);
+    const float exposure = customEnvironment
+        ? objectData.reflectionEnvironmentParams.x
+        : objectData.environmentParams.x;
+    return max(environmentMap.SampleLevel(materialSampler, uv, lod).rgb, 0.0) *
+        exposure;
 }
 
 float3 EvaluateEnvironmentIrradiance(ObjectData objectData, float3 normal)
@@ -422,15 +449,22 @@ float4 PSMain(
         }
 
         float3 reflectionDirection = reflect(-v, n);
-        float3 roughReflectionDirection = normalize(lerp(
-            reflectionDirection, n, roughness * roughness));
-        float3 reflectedRadiance =
-            objectData.reflectionEnvironmentParams.z > 0.5
-                ? EvaluateCustomReflectionRadiance(
-                    objectData, roughReflectionDirection)
-                : EvaluateEnvironmentRadiance(
-                    objectData, roughReflectionDirection) *
-                    objectData.environmentParams.x;
+        float3 reflectedRadiance;
+        if (objectData.reflectionEnvironmentParams.w > 0.5)
+            reflectedRadiance = EvaluateDirectReflectionRadiance(
+                objectData, reflectionDirection, roughness);
+        else
+        {
+            float3 roughReflectionDirection = normalize(lerp(
+                reflectionDirection, n, roughness * roughness));
+            reflectedRadiance =
+                objectData.reflectionEnvironmentParams.z > 0.5
+                    ? EvaluateCustomReflectionRadiance(
+                        objectData, roughReflectionDirection)
+                    : EvaluateEnvironmentRadiance(
+                        objectData, roughReflectionDirection) *
+                        objectData.environmentParams.x;
+        }
         float3 environmentFresnel = f0 + (max(1.0 - roughness, f0) - f0) *
             pow(saturate(1.0 - dot(n, v)), 5.0);
         float roughnessAttenuation = lerp(1.0, 0.25, roughness);

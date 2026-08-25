@@ -6,7 +6,10 @@
 // ---------------------------------------------------------------------------
 // D3D12GraphicsBuffer — DirectX 12 GPU buffer wrapper
 // ---------------------------------------------------------------------------
-class D3D12GraphicsBuffer : public IGraphicsBuffer
+
+namespace Engine::Renderers
+{
+class D3D12GraphicsBuffer : public Engine::Graphics::IGraphicsBuffer
 {
 public:
     D3D12GraphicsBuffer(
@@ -44,15 +47,15 @@ private:
 // ---------------------------------------------------------------------------
 // D3D12BufferFactory — Create DirectX 12 buffers
 // ---------------------------------------------------------------------------
-class D3D12BufferFactory : public IGraphicsBufferFactory
+class D3D12BufferFactory : public Engine::Graphics::IGraphicsBufferFactory
 {
 public:
     explicit D3D12BufferFactory(ID3D12Device* device)
         : m_device(device) {}
 
-    std::unique_ptr<IGraphicsBuffer> CreateBuffer(
-        IGraphicsBuffer::Usage usage,
-        IGraphicsBuffer::AccessMode access,
+    std::unique_ptr<Engine::Graphics::IGraphicsBuffer> CreateBuffer(
+        Engine::Graphics::IGraphicsBuffer::Usage usage,
+        Engine::Graphics::IGraphicsBuffer::AccessMode access,
         uint64_t sizeBytes,
         const void* initialData = nullptr,
         uint32_t elementStride = 0) override;
@@ -60,3 +63,4 @@ public:
 private:
     ID3D12Device* m_device;
 };
+}

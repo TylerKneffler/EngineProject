@@ -317,9 +317,32 @@ bool Texture::Prepare(IGraphicsProvider* graphicsProvider)
         return false;
     try
     {
+        uint32_t uploadWidth = m_width;
+        uint32_t uploadHeight = m_height;
+        uint32_t uploadMipLevels = m_mipLevels;
+        size_t uploadOffset = 0;
+        // Full-resolution float panoramas are unnecessarily expensive for
+        // real-time specular sampling and make Vulkan's synchronous staging
+        // upload stall the editor. Start at an existing 2K mip; the original
+        // pixels remain available for CPU lighting projection.
+        if (m_format == GraphicsTextureFormat::Rgba32Float)
+        {
+            const uint32_t bytesPerPixel =
+                GraphicsTextureBytesPerPixel(m_format);
+            while (std::max(uploadWidth, uploadHeight) > 2048 &&
+                   uploadMipLevels > 1)
+            {
+                uploadOffset += static_cast<size_t>(uploadWidth) *
+                    uploadHeight * bytesPerPixel;
+                uploadWidth = std::max(1u, uploadWidth / 2);
+                uploadHeight = std::max(1u, uploadHeight / 2);
+                --uploadMipLevels;
+            }
+        }
         m_graphicsTexture =
             factory->CreateTexture2D(
-                m_width, m_height, m_pixels.data(), m_mipLevels, m_format, m_srgb);
+                uploadWidth, uploadHeight, m_pixels.data() + uploadOffset,
+                uploadMipLevels, m_format, m_srgb);
     }
     catch (const std::exception& error)
     {

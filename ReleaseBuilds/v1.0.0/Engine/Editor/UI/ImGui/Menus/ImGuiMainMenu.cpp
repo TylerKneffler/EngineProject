@@ -2,9 +2,12 @@
 #include "Engine/Editor/UI/ImGui/Menus/ImGuiMainMenu.h"
 #include "Engine/Editor/EditorState.h"
 #include "Engine/Editor/GameBuildManager.h"
+#include "Engine/Editor/Input/EditorKeyBindings.h"
 #include "Engine/Editor/Core/View/ViewFactory.h"
 #include "imgui.h"
 
+namespace Engine::Editor
+{
 namespace
 {
 bool IsBusy(PlayState state)
@@ -22,7 +25,9 @@ void ImGuiMainMenu::Draw(EditorState& state, PlayState playState,
     DrawFileMenu(state, playState, buildManager);
     if (ImGui::BeginMenu("Import"))
     {
-        if (ImGui::MenuItem("Asset..."))
+        const std::string shortcut = EditorKeyBindings::Get().ShortcutLabel(
+            EditorCommand::ImportAsset);
+        if (ImGui::MenuItem("Asset...", shortcut.c_str()))
             state.ImportAsset();
         ImGui::Separator();
         ImGui::TextDisabled("Or drag files into the editor");
@@ -40,19 +45,17 @@ void ImGuiMainMenu::DrawRenderingMenu(
     if (!ImGui::BeginMenu("Rendering")) return;
     if (ImGui::BeginMenu("Lighting"))
     {
-        Scene* scene = state.GetScene();
+        Engine::Scene::Scene* scene = state.GetScene();
         const bool disabled = !scene || IsBusy(playState);
         if (disabled) ImGui::BeginDisabled();
-        if (ImGui::MenuItem("Bake Lighting"))
-        {
-            scene->BakeLighting();
-            state.SetHasUnsavedChanges(true);
-        }
-        if (ImGui::MenuItem("Clear Baked Lighting"))
-        {
-            scene->ClearBakedLighting();
-            state.SetHasUnsavedChanges(true);
-        }
+        const std::string bakeShortcut = EditorKeyBindings::Get().ShortcutLabel(
+            EditorCommand::BakeLighting);
+        const std::string clearShortcut = EditorKeyBindings::Get().ShortcutLabel(
+            EditorCommand::ClearBakedLighting);
+        if (ImGui::MenuItem("Bake Lighting", bakeShortcut.c_str()))
+            state.BakeLighting();
+        if (ImGui::MenuItem("Clear Baked Lighting", clearShortcut.c_str()))
+            state.ClearBakedLighting();
         if (disabled) ImGui::EndDisabled();
         ImGui::EndMenu();
     }
@@ -65,27 +68,43 @@ void ImGuiMainMenu::DrawFileMenu(EditorState& state, PlayState playState,
     if (!ImGui::BeginMenu("File")) return;
     const bool busy = IsBusy(playState);
     if (busy) ImGui::BeginDisabled();
-    if (ImGui::MenuItem("Undo", "Ctrl+Z", false, state.CanUndo()))
+    EditorKeyBindings& keybinds = EditorKeyBindings::Get();
+    const std::string undoShortcut = keybinds.ShortcutLabel(EditorCommand::Undo);
+    const std::string redoShortcut = keybinds.ShortcutLabel(EditorCommand::Redo);
+    const std::string saveShortcut = keybinds.ShortcutLabel(EditorCommand::SaveScene);
+    const std::string saveAllShortcut = keybinds.ShortcutLabel(EditorCommand::SaveAll);
+    const std::string buildShortcut = keybinds.ShortcutLabel(EditorCommand::Build);
+    const std::string buildPlayShortcut = keybinds.ShortcutLabel(EditorCommand::BuildAndPlay);
+    const std::string buildStandaloneShortcut = keybinds.ShortcutLabel(EditorCommand::BuildStandalone);
+    if (ImGui::MenuItem("Undo", undoShortcut.c_str(), false, state.CanUndo()))
         state.Undo();
-    if (ImGui::MenuItem("Redo", "Ctrl+Y", false, state.CanRedo()))
+    if (ImGui::MenuItem("Redo", redoShortcut.c_str(), false, state.CanRedo()))
         state.Redo();
     if (busy) ImGui::EndDisabled();
     ImGui::Separator();
-    if (ImGui::MenuItem("Save All", "Ctrl+S"))
+    if (busy) ImGui::BeginDisabled();
+    if (ImGui::MenuItem("Save", saveShortcut.c_str()))
         state.SaveScene();
+    if (ImGui::MenuItem("Save All", saveAllShortcut.c_str()))
+        state.SaveAll();
+    if (busy) ImGui::EndDisabled();
+    if (state.IsEditingPrefab() && ImGui::MenuItem("Close Prefab Stage"))
+        state.ClosePrefabStage();
     ImGui::Separator();
 
     if (busy) ImGui::BeginDisabled();
-    if (ImGui::MenuItem("Build", "Ctrl+B") && buildManager)
+    if (ImGui::MenuItem("Build", buildShortcut.c_str()) && buildManager)
         buildManager->StartBuild(PostBuildAction::Nothing);
-    if (ImGui::MenuItem("Build and Run in Editor") && buildManager)
+    if (ImGui::MenuItem("Build and Run in Editor", buildPlayShortcut.c_str()) && buildManager)
         buildManager->StartBuild(PostBuildAction::PlayInEditor);
-    if (ImGui::MenuItem("Build and Run Standalone") && buildManager)
+    if (ImGui::MenuItem("Build and Run Standalone", buildStandaloneShortcut.c_str()) && buildManager)
         buildManager->StartBuild(PostBuildAction::LaunchStandalone);
     if (busy) ImGui::EndDisabled();
 
     ImGui::Separator();
-    if (ImGui::MenuItem("Project Preferences"))
+    const std::string preferencesShortcut = keybinds.ShortcutLabel(
+        EditorCommand::Preferences);
+    if (ImGui::MenuItem("Project Preferences", preferencesShortcut.c_str()))
         state.SetShowPreferences(true);
     ImGui::Separator();
     if (ImGui::MenuItem("Exit"))
@@ -108,6 +127,8 @@ void ImGuiMainMenu::DrawViewsMenu(EditorState& state) const
     if (ImGui::MenuItem("Properties")) OpenPanel(state, "Properties");
     if (ImGui::MenuItem("Assets")) OpenPanel(state, "Assets");
     if (ImGui::MenuItem("Console")) OpenPanel(state, "Console");
+    if (ImGui::MenuItem("Problems")) OpenPanel(state, "Problems");
+    if (ImGui::MenuItem("Terminal")) OpenPanel(state, "Terminal");
     ImGui::EndMenu();
 }
 
@@ -162,4 +183,5 @@ void ImGuiMainMenu::OpenPanel(EditorState& state, const char* type) const
     if (!factory) return;
     auto panel = factory->Create(type);
     if (panel) state.GetPanels().push_back(std::move(panel));
+}
 }

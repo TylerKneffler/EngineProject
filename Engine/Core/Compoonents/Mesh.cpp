@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <cstring>
 #include <cstdio>
+#include <cmath>
 
 namespace Engine::Components
 {
@@ -47,6 +48,7 @@ namespace
 {
 constexpr uint32_t kNativeMeshMagic = 0x4853454d; // "MESH"
 constexpr uint32_t kNativeMeshVersion = 4;
+constexpr float kPi = 3.14159265358979323846f;
 struct LegacyVertexV2
 {
     float pos[3], normal[3], uv[2], tangent[4];
@@ -83,6 +85,77 @@ std::vector<glm::vec3> ReadVec3Array(const Engine::Serialization::JsonValue& val
     }
     return result;
 }
+
+Mesh::Vertex SphereVertex(float longitude, float latitude, float u, float v)
+{
+    const float sinLatitude = std::sin(latitude);
+    const glm::vec3 normal(
+        sinLatitude * std::cos(longitude),
+        std::cos(latitude),
+        sinLatitude * std::sin(longitude));
+    const glm::vec3 tangent(-std::sin(longitude), 0.f, std::cos(longitude));
+    Mesh::Vertex vertex{};
+    vertex.pos[0] = normal.x * 0.5f;
+    vertex.pos[1] = normal.y * 0.5f;
+    vertex.pos[2] = normal.z * 0.5f;
+    vertex.normal[0] = normal.x;
+    vertex.normal[1] = normal.y;
+    vertex.normal[2] = normal.z;
+    vertex.uv[0] = u;
+    vertex.uv[1] = v;
+    vertex.tangent[0] = tangent.x;
+    vertex.tangent[1] = tangent.y;
+    vertex.tangent[2] = tangent.z;
+    vertex.tangent[3] = 1.f;
+    return vertex;
+}
+
+std::vector<Mesh::Vertex> GenerateSmoothSphere()
+{
+    constexpr uint32_t longitudeSegments = 48;
+    constexpr uint32_t latitudeSegments = 24;
+    std::vector<Mesh::Vertex> vertices;
+    vertices.reserve(longitudeSegments * (latitudeSegments - 1) * 6);
+
+    auto emitTriangle = [&](Mesh::Vertex first, Mesh::Vertex second,
+                            Mesh::Vertex third)
+    {
+        const glm::vec3 a(first.pos[0], first.pos[1], first.pos[2]);
+        const glm::vec3 b(second.pos[0], second.pos[1], second.pos[2]);
+        const glm::vec3 c(third.pos[0], third.pos[1], third.pos[2]);
+        if (glm::dot(glm::cross(b - a, c - a), a + b + c) < 0.f)
+            std::swap(second, third);
+        vertices.push_back(first);
+        vertices.push_back(second);
+        vertices.push_back(third);
+    };
+
+    for (uint32_t latitudeIndex = 0;
+         latitudeIndex < latitudeSegments; ++latitudeIndex)
+    {
+        const float v0 = static_cast<float>(latitudeIndex) / latitudeSegments;
+        const float v1 = static_cast<float>(latitudeIndex + 1) / latitudeSegments;
+        const float latitude0 = v0 * kPi;
+        const float latitude1 = v1 * kPi;
+        for (uint32_t longitudeIndex = 0;
+             longitudeIndex < longitudeSegments; ++longitudeIndex)
+        {
+            const float u0 = static_cast<float>(longitudeIndex) / longitudeSegments;
+            const float u1 = static_cast<float>(longitudeIndex + 1) / longitudeSegments;
+            const float longitude0 = u0 * 2.f * kPi;
+            const float longitude1 = u1 * 2.f * kPi;
+            const auto topLeft = SphereVertex(longitude0, latitude0, u0, v0);
+            const auto topRight = SphereVertex(longitude1, latitude0, u1, v0);
+            const auto bottomLeft = SphereVertex(longitude0, latitude1, u0, v1);
+            const auto bottomRight = SphereVertex(longitude1, latitude1, u1, v1);
+            if (latitudeIndex != 0)
+                emitTriangle(topLeft, bottomLeft, topRight);
+            if (latitudeIndex + 1 != latitudeSegments)
+                emitTriangle(topRight, bottomLeft, bottomRight);
+        }
+    }
+    return vertices;
+}
 }
 
 #pragma region OBJ file parsing helpers
@@ -109,6 +182,15 @@ void Mesh::LoadFromFile(const std::string& path)
     MarkConfigurationDirty();
     m_filePath = path;  // store for serialization
     const std::filesystem::path resolvedPath = ResolveFilePath(path);
+    if (resolvedPath.filename() == "sphere.obj")
+    {
+        // The built-in sphere is procedural so reflective silhouettes have
+        // enough geometric resolution without carrying a large OBJ asset.
+        m_vertices = GenerateSmoothSphere();
+        UpdateBounds();
+        m_ready = false;
+        return;
+    }
     if (resolvedPath.extension() == ".mesh")
     {
         std::ifstream native(resolvedPath, std::ios::binary);

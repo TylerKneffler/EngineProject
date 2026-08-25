@@ -29,7 +29,7 @@ VulkanTextureSystem::VulkanTextureSystem(
       m_queue(queue),
       m_queueFamily(queueFamily)
 {
-    VkDescriptorSetLayoutBinding bindings[10]{};
+    VkDescriptorSetLayoutBinding bindings[11]{};
     for (uint32_t binding = 0; binding < 6; ++binding)
     {
         bindings[binding].binding = binding;
@@ -49,6 +49,10 @@ VulkanTextureSystem::VulkanTextureSystem(
         bindings[binding].stageFlags =
             VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     }
+    bindings[10].binding = 10;
+    bindings[10].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    bindings[10].descriptorCount = 1;
+    bindings[10].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     VkDescriptorSetLayoutCreateInfo layoutInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
     layoutInfo.bindingCount = ARRAYSIZE(bindings);
@@ -57,7 +61,7 @@ VulkanTextureSystem::VulkanTextureSystem(
         m_device, &layoutInfo, nullptr, &m_layout), "vkCreateDescriptorSetLayout");
 
     VkDescriptorPoolSize sizes[3]{
-        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 6 * 512 },
+        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 7 * 512 },
         { VK_DESCRIPTOR_TYPE_SAMPLER, 512 },
         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3 * 512 }
     };
@@ -254,7 +258,7 @@ std::shared_ptr<VulkanGraphicsTexture> VulkanTextureSystem::CreateTexture(
 void VulkanTextureSystem::Bind(
     VkCommandBuffer commands,
     VkPipelineLayout pipelineLayout,
-    const std::array<const VulkanGraphicsTexture*, 6>& textures,
+    const std::array<const VulkanGraphicsTexture*, 7>& textures,
     const std::array<const VulkanGraphicsBuffer*, 3>& buffers)
 {
     TextureKey key{};
@@ -278,8 +282,8 @@ void VulkanTextureSystem::Bind(
         VkCheck(vkAllocateDescriptorSets(m_device, &allocate, &set),
             "vkAllocateDescriptorSets(material)");
 
-        VkDescriptorImageInfo images[6]{};
-        VkWriteDescriptorSet writes[10]{};
+        VkDescriptorImageInfo images[7]{};
+        VkWriteDescriptorSet writes[11]{};
         for (uint32_t index = 0; index < 6; ++index)
         {
             images[index].imageView =
@@ -292,6 +296,14 @@ void VulkanTextureSystem::Bind(
             writes[index].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
             writes[index].pImageInfo = &images[index];
         }
+        images[6].imageView = textures[6] ? textures[6]->GetView() : m_white.view;
+        images[6].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        writes[10] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        writes[10].dstSet = set;
+        writes[10].dstBinding = 10;
+        writes[10].descriptorCount = 1;
+        writes[10].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        writes[10].pImageInfo = &images[6];
         VkDescriptorImageInfo samplerInfo{};
         samplerInfo.sampler = m_sampler;
         writes[6] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };

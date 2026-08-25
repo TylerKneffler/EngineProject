@@ -1,11 +1,17 @@
 #include "Mesh.h"
 #include "Core/Graphics/IGraphicsProvider.h"
+#include "Engine/Editor/UI/IEditorUi.h"
 #include <fstream>
 #include <sstream>
 #include <array>
 #include <filesystem>
 #include <stdexcept>
+#include <cstring>
+#include <cstdio>
+#include <cmath>
 
+namespace Engine::Components
+{
 Mesh::Mesh()
 {
     SetTypeName(COMPONENT_TYPE_NAME(Mesh));
@@ -16,16 +22,11 @@ Mesh::Mesh()
 #define ENGINE_ASSETS_PATH "Engine/Core/Assets/"
 #endif
 
-namespace
-{
-constexpr uint32_t kNativeMeshMagic = 0x4853454d; // "MESH"
-constexpr uint32_t kNativeMeshVersion = 2;
-
-std::filesystem::path ResolveMeshPath(const std::string& path)
+std::string Mesh::ResolveFilePath(const std::string& path)
 {
     const std::filesystem::path requested(path);
     if (std::filesystem::exists(requested))
-        return requested;
+        return requested.lexically_normal().generic_string();
 
     // Scenes distributed with a project deliberately store portable paths such
     // as Assets/Mesh/cube.obj. In the project-free Engine Sandbox, resolve that
@@ -37,31 +38,159 @@ std::filesystem::path ResolveMeshPath(const std::string& path)
         const std::filesystem::path engineAsset =
             std::filesystem::path(ENGINE_ASSETS_PATH) / relativeAsset;
         if (std::filesystem::exists(engineAsset))
-            return engineAsset;
+            return engineAsset.lexically_normal().generic_string();
     }
 
-    return requested;
+    return requested.lexically_normal().generic_string();
+}
+
+namespace
+{
+constexpr uint32_t kNativeMeshMagic = 0x4853454d; // "MESH"
+constexpr uint32_t kNativeMeshVersion = 4;
+constexpr float kPi = 3.14159265358979323846f;
+struct LegacyVertexV2
+{
+    float pos[3], normal[3], uv[2], tangent[4];
+};
+struct LegacyVertexV3
+{
+    float pos[3], normal[3], uv[2], tangent[4], uv1[2], color[4];
+};
+
+Engine::Serialization::JsonValue FloatArray(const std::vector<float>& values)
+{
+    Engine::Serialization::JsonValue result = Engine::Serialization::JsonValue::MakeArray();
+    for (float value : values) result.Push(Engine::Serialization::JsonValue(value));
+    return result;
+}
+
+Engine::Serialization::JsonValue Vec3Array(const std::vector<glm::vec3>& values)
+{
+    Engine::Serialization::JsonValue result = Engine::Serialization::JsonValue::MakeArray();
+    for (const glm::vec3& value : values)
+        result.Push(Engine::Serialization::JsonValue::MakeArray().Push(Engine::Serialization::JsonValue(value.x))
+            .Push(Engine::Serialization::JsonValue(value.y)).Push(Engine::Serialization::JsonValue(value.z)));
+    return result;
+}
+
+std::vector<glm::vec3> ReadVec3Array(const Engine::Serialization::JsonValue& value)
+{
+    std::vector<glm::vec3> result;
+    for (size_t i = 0; i < value.ArraySize(); ++i)
+    {
+        const Engine::Serialization::JsonValue& item = value.ArrayAt(i);
+        result.emplace_back(item.ArrayAt(0).AsFloat(), item.ArrayAt(1).AsFloat(),
+            item.ArrayAt(2).AsFloat());
+    }
+    return result;
+}
+
+Mesh::Vertex SphereVertex(float longitude, float latitude, float u, float v)
+{
+    const float sinLatitude = std::sin(latitude);
+    const glm::vec3 normal(
+        sinLatitude * std::cos(longitude),
+        std::cos(latitude),
+        sinLatitude * std::sin(longitude));
+    const glm::vec3 tangent(-std::sin(longitude), 0.f, std::cos(longitude));
+    Mesh::Vertex vertex{};
+    vertex.pos[0] = normal.x * 0.5f;
+    vertex.pos[1] = normal.y * 0.5f;
+    vertex.pos[2] = normal.z * 0.5f;
+    vertex.normal[0] = normal.x;
+    vertex.normal[1] = normal.y;
+    vertex.normal[2] = normal.z;
+    vertex.uv[0] = u;
+    vertex.uv[1] = v;
+    vertex.tangent[0] = tangent.x;
+    vertex.tangent[1] = tangent.y;
+    vertex.tangent[2] = tangent.z;
+    vertex.tangent[3] = 1.f;
+    return vertex;
+}
+
+std::vector<Mesh::Vertex> GenerateSmoothSphere()
+{
+    constexpr uint32_t longitudeSegments = 48;
+    constexpr uint32_t latitudeSegments = 24;
+    std::vector<Mesh::Vertex> vertices;
+    vertices.reserve(longitudeSegments * (latitudeSegments - 1) * 6);
+
+    auto emitTriangle = [&](Mesh::Vertex first, Mesh::Vertex second,
+                            Mesh::Vertex third)
+    {
+        const glm::vec3 a(first.pos[0], first.pos[1], first.pos[2]);
+        const glm::vec3 b(second.pos[0], second.pos[1], second.pos[2]);
+        const glm::vec3 c(third.pos[0], third.pos[1], third.pos[2]);
+        if (glm::dot(glm::cross(b - a, c - a), a + b + c) < 0.f)
+            std::swap(second, third);
+        vertices.push_back(first);
+        vertices.push_back(second);
+        vertices.push_back(third);
+    };
+
+    for (uint32_t latitudeIndex = 0;
+         latitudeIndex < latitudeSegments; ++latitudeIndex)
+    {
+        const float v0 = static_cast<float>(latitudeIndex) / latitudeSegments;
+        const float v1 = static_cast<float>(latitudeIndex + 1) / latitudeSegments;
+        const float latitude0 = v0 * kPi;
+        const float latitude1 = v1 * kPi;
+        for (uint32_t longitudeIndex = 0;
+             longitudeIndex < longitudeSegments; ++longitudeIndex)
+        {
+            const float u0 = static_cast<float>(longitudeIndex) / longitudeSegments;
+            const float u1 = static_cast<float>(longitudeIndex + 1) / longitudeSegments;
+            const float longitude0 = u0 * 2.f * kPi;
+            const float longitude1 = u1 * 2.f * kPi;
+            const auto topLeft = SphereVertex(longitude0, latitude0, u0, v0);
+            const auto topRight = SphereVertex(longitude1, latitude0, u1, v0);
+            const auto bottomLeft = SphereVertex(longitude0, latitude1, u0, v1);
+            const auto bottomRight = SphereVertex(longitude1, latitude1, u1, v1);
+            if (latitudeIndex != 0)
+                emitTriangle(topLeft, bottomLeft, topRight);
+            if (latitudeIndex + 1 != latitudeSegments)
+                emitTriangle(topRight, bottomLeft, bottomRight);
+        }
+    }
+    return vertices;
 }
 }
 
 #pragma region OBJ file parsing helpers
-static void ParseFaceToken(const std::string& t, int& vi, int& vni)
+static void ParseFaceToken(const std::string& t, int& vi, int& vti, int& vni)
 {
-    vi = vni = 0;
+    vi = vti = vni = 0;
     size_t a = t.find('/');
     if (a == std::string::npos) { vi = std::stoi(t); return; }
     vi = std::stoi(t.substr(0, a));
     size_t b = t.find('/', a + 1);
-    if (b != std::string::npos && b + 1 < t.size())
-        vni = std::stoi(t.substr(b + 1));
+    if (b == std::string::npos)
+    {
+        if (a + 1 < t.size()) vti = std::stoi(t.substr(a + 1));
+        return;
+    }
+    if (b > a + 1) vti = std::stoi(t.substr(a + 1, b - a - 1));
+    if (b + 1 < t.size()) vni = std::stoi(t.substr(b + 1));
 }
 #pragma endregion
 #pragma region Mesh implementation
 
 void Mesh::LoadFromFile(const std::string& path)
 {
+    MarkConfigurationDirty();
     m_filePath = path;  // store for serialization
-    const std::filesystem::path resolvedPath = ResolveMeshPath(path);
+    const std::filesystem::path resolvedPath = ResolveFilePath(path);
+    if (resolvedPath.filename() == "sphere.obj")
+    {
+        // The built-in sphere is procedural so reflective silhouettes have
+        // enough geometric resolution without carrying a large OBJ asset.
+        m_vertices = GenerateSmoothSphere();
+        UpdateBounds();
+        m_ready = false;
+        return;
+    }
     if (resolvedPath.extension() == ".mesh")
     {
         std::ifstream native(resolvedPath, std::ios::binary);
@@ -69,11 +198,36 @@ void Mesh::LoadFromFile(const std::string& path)
         native.read(reinterpret_cast<char*>(&magic), sizeof(magic));
         native.read(reinterpret_cast<char*>(&version), sizeof(version));
         native.read(reinterpret_cast<char*>(&count), sizeof(count));
-        if (!native || magic != kNativeMeshMagic || version != kNativeMeshVersion)
+        if (!native || magic != kNativeMeshMagic ||
+            (version != 2 && version != 3 && version != kNativeMeshVersion))
             throw std::runtime_error("Mesh: invalid native mesh: " + path);
-        m_vertices.resize(count);
-        native.read(reinterpret_cast<char*>(m_vertices.data()),
-            static_cast<std::streamsize>(m_vertices.size() * sizeof(Vertex)));
+        m_vertices.assign(count, Vertex{});
+        if (version == 2)
+        {
+            std::vector<LegacyVertexV2> legacy(count);
+            native.read(reinterpret_cast<char*>(legacy.data()),
+                static_cast<std::streamsize>(legacy.size() * sizeof(LegacyVertexV2)));
+            for (size_t i = 0; i < legacy.size(); ++i)
+            {
+                std::copy(std::begin(legacy[i].pos), std::end(legacy[i].pos), m_vertices[i].pos);
+                std::copy(std::begin(legacy[i].normal), std::end(legacy[i].normal), m_vertices[i].normal);
+                std::copy(std::begin(legacy[i].uv), std::end(legacy[i].uv), m_vertices[i].uv);
+                std::copy(std::begin(legacy[i].tangent), std::end(legacy[i].tangent), m_vertices[i].tangent);
+            }
+        }
+        else if (version == 3)
+        {
+            std::vector<LegacyVertexV3> legacy(count);
+            native.read(reinterpret_cast<char*>(legacy.data()),
+                static_cast<std::streamsize>(legacy.size() * sizeof(LegacyVertexV3)));
+            for (size_t i = 0; i < legacy.size(); ++i)
+            {
+                std::memcpy(m_vertices[i].pos, legacy[i].pos, sizeof(LegacyVertexV3));
+            }
+        }
+        else
+            native.read(reinterpret_cast<char*>(m_vertices.data()),
+                static_cast<std::streamsize>(m_vertices.size() * sizeof(Vertex)));
         if (!native)
             throw std::runtime_error("Mesh: truncated native mesh: " + path);
         UpdateBounds();
@@ -88,6 +242,7 @@ void Mesh::LoadFromFile(const std::string& path)
 
     std::vector<std::array<float, 3>> positions;
     std::vector<std::array<float, 3>> normals;
+    std::vector<std::array<float, 2>> texcoords;
     m_vertices.clear();
 
     std::string line;
@@ -109,16 +264,23 @@ void Mesh::LoadFromFile(const std::string& path)
             ss >> n[0] >> n[1] >> n[2];
             normals.push_back(n);
         }
+        else if (token == "vt")
+        {
+            std::array<float, 2> uv{};
+            ss >> uv[0] >> uv[1];
+            texcoords.push_back(uv);
+        }
         else if (token == "f")
         {
             std::string t0, t1, t2;
             ss >> t0 >> t1 >> t2;
             for (auto& tok : { t0, t1, t2 })
             {
-                int vi = 0, vni = 0;
-                ParseFaceToken(tok, vi, vni);
+                int vi = 0, vti = 0, vni = 0;
+                ParseFaceToken(tok, vi, vti, vni);
                 Vertex v{};
                 if (vi  > 0) { auto& p = positions[vi  - 1]; v.pos[0]    = p[0]; v.pos[1]    = p[1]; v.pos[2]    = p[2]; }
+                if (vti > 0) { auto& uv = texcoords[vti - 1]; v.uv[0] = uv[0]; v.uv[1] = uv[1]; }
                 if (vni > 0) { auto& n = normals  [vni - 1]; v.normal[0] = n[0]; v.normal[1] = n[1]; v.normal[2] = n[2]; }
                 m_vertices.push_back(v);
             }
@@ -127,6 +289,85 @@ void Mesh::LoadFromFile(const std::string& path)
 
     UpdateBounds();
     m_ready = false;
+}
+
+bool Mesh::SetDeformedVertices(const std::vector<Vertex>& vertices)
+{
+    if (vertices.size() != m_vertices.size())
+        return false;
+    const size_t byteSize = vertices.size() * sizeof(Vertex);
+    if (byteSize == 0 ||
+        std::memcmp(vertices.data(), m_vertices.data(), byteSize) == 0)
+        return false;
+    m_vertices = vertices;
+    UpdateBounds();
+    if (m_vertexBuffer)
+    {
+        if (void* mapped = m_vertexBuffer->Map())
+        {
+            std::memcpy(mapped, m_vertices.data(), byteSize);
+            m_vertexBuffer->Unmap();
+        }
+    }
+    return true;
+}
+
+void Mesh::SetMorphData(unsigned nodeIndex, std::vector<MorphTarget> targets,
+    std::vector<float> weights)
+{
+    m_morphNodeIndex = nodeIndex;
+    m_morphTargets = std::move(targets);
+    m_morphWeights = std::move(weights);
+    m_morphWeights.resize(m_morphTargets.size(), 0.f);
+    m_observedMorphWeights = m_morphWeights;
+    m_morphWeightsObserved = true;
+    AdvanceMorphWeightsRevision();
+}
+
+namespace
+{
+bool SameMorphWeights(const std::vector<float>& first,
+    const std::vector<float>& second)
+{
+    return first.size() == second.size() &&
+        (first.empty() || std::memcmp(first.data(), second.data(),
+            first.size() * sizeof(float)) == 0);
+}
+}
+
+void Mesh::AdvanceMorphWeightsRevision() const
+{
+    if (++m_morphWeightsRevision == 0)
+        ++m_morphWeightsRevision;
+}
+
+void Mesh::ObserveMorphWeights() const
+{
+    if (m_morphWeightsObserved &&
+        SameMorphWeights(m_morphWeights, m_observedMorphWeights))
+        return;
+    if (m_morphWeightsObserved)
+        AdvanceMorphWeightsRevision();
+    m_observedMorphWeights = m_morphWeights;
+    m_morphWeightsObserved = true;
+}
+
+bool Mesh::SetMorphWeights(const std::vector<float>& weights)
+{
+    ObserveMorphWeights();
+    if (SameMorphWeights(m_morphWeights, weights))
+        return false;
+    m_morphWeights = weights;
+    m_observedMorphWeights = m_morphWeights;
+    m_morphWeightsObserved = true;
+    AdvanceMorphWeightsRevision();
+    return true;
+}
+
+uint64_t Mesh::GetMorphWeightsRevision() const
+{
+    ObserveMorphWeights();
+    return m_morphWeightsRevision;
 }
 
 void Mesh::UpdateBounds()
@@ -186,10 +427,92 @@ void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory)
 }
 #pragma endregion
 
+bool Mesh::DrawProperties(::Engine::Editor::IEditorUi& ui)
+{
+    ui.ValueLabel("Asset", m_filePath.empty() ? "(generated mesh)" : m_filePath.c_str());
+    const std::string vertexCount = std::to_string(m_vertices.size());
+    const std::string triangleCount = std::to_string(m_vertices.size() / 3);
+    ui.ValueLabel("Vertices", vertexCount.c_str());
+    ui.ValueLabel("Triangles", triangleCount.c_str());
+    ui.ValueLabel("GPU Buffer", m_ready ? "Ready" : "Not prepared");
+
+    if (m_hasBounds)
+    {
+        char minimum[96]{}, maximum[96]{};
+        std::snprintf(minimum, sizeof(minimum), "%.3f, %.3f, %.3f",
+            m_boundsMin.x, m_boundsMin.y, m_boundsMin.z);
+        std::snprintf(maximum, sizeof(maximum), "%.3f, %.3f, %.3f",
+            m_boundsMax.x, m_boundsMax.y, m_boundsMax.z);
+        ui.ValueLabel("Bounds Minimum", minimum);
+        ui.ValueLabel("Bounds Maximum", maximum);
+    }
+
+    const std::string morphCount = std::to_string(m_morphTargets.size());
+    ui.ValueLabel("Morph Targets", morphCount.c_str());
+    bool changed = false;
+    if (!m_morphWeights.empty() &&
+        ui.CollapsingHeader("Morph Weights", false))
+    {
+        for (size_t index = 0; index < m_morphWeights.size(); ++index)
+        {
+            ui.PushId(&m_morphWeights[index]);
+            const std::string label = "Target " + std::to_string(index);
+            changed = ui.DragFloat(label.c_str(), &m_morphWeights[index],
+                0.01f, -1.f, 1.f) || changed;
+            ui.PopId();
+        }
+    }
+    if (changed)
+        MarkConfigurationDirty();
+    return changed;
+}
+
+Mesh::JsonValue Mesh::Serialize() const
+{
+    JsonValue result = Component::Serialize();
+    if (m_morphTargets.empty()) return result;
+    result.Set("morphNodeIndex", JsonValue(static_cast<int>(m_morphNodeIndex)));
+    result.Set("morphWeights", FloatArray(m_morphWeights));
+    JsonValue targets = JsonValue::MakeArray();
+    for (const MorphTarget& target : m_morphTargets)
+        targets.Push(JsonValue::MakeObject()
+            .Set("positions", Vec3Array(target.positions))
+            .Set("normals", Vec3Array(target.normals))
+            .Set("tangents", Vec3Array(target.tangents)));
+    return result.Set("morphTargets", std::move(targets));
+}
+
+void Mesh::DeserializeLegacyMorphTargets(const JsonValue& value)
+{
+    std::vector<MorphTarget> targets;
+    const JsonValue& list = value["targets"];
+    for (size_t i = 0; i < list.ArraySize(); ++i)
+    {
+        MorphTarget target;
+        target.positions = ReadVec3Array(list.ArrayAt(i)["positions"]);
+        target.normals = ReadVec3Array(list.ArrayAt(i)["normals"]);
+        target.tangents = ReadVec3Array(list.ArrayAt(i)["tangents"]);
+        targets.push_back(std::move(target));
+    }
+    std::vector<float> weights;
+    for (size_t i = 0; i < value["weights"].ArraySize(); ++i)
+        weights.push_back(value["weights"].ArrayAt(i).AsFloat());
+    SetMorphData(static_cast<unsigned>(value["nodeIndex"].AsInt()),
+        std::move(targets), std::move(weights));
+}
+
 void Mesh::Deserialize(const JsonValue& v)
 {
     if (v.Has("file"))
         LoadFromFile(v["file"].AsString());
+    if (v.Has("morphTargets"))
+    {
+        JsonValue legacy = JsonValue::MakeObject()
+            .Set("nodeIndex", v["morphNodeIndex"])
+            .Set("weights", v["morphWeights"])
+            .Set("targets", v["morphTargets"]);
+        DeserializeLegacyMorphTargets(legacy);
+    }
 }
 
 void Mesh::OnAfterDeserialize(IGraphicsProvider* graphicsProvider)
@@ -197,4 +520,4 @@ void Mesh::OnAfterDeserialize(IGraphicsProvider* graphicsProvider)
     if (graphicsProvider)
         CreateBuffer(graphicsProvider->GetBufferFactory());
 }
-
+}

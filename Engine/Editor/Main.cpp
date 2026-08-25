@@ -90,7 +90,7 @@ namespace
         settings.viewportHeight = 720;
         settings.leftPanelWidth = 0.20f;
         settings.rightPanelWidth = 0.31f;
-        settings.leftPanelTabs = { "HierarchyView", "Assets" };
+        settings.leftPanelTabs = { "HierarchyView" };
         settings.centerPanelTabs = { "Scene", "Game" };
         settings.rightPanelTabs = { "Properties" };
         settings.renderingAPI = "DirectX11";

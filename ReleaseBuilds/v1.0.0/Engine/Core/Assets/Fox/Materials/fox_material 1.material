@@ -1,0 +1,43 @@
+{
+    "version": 1,
+    "baseColor": [
+        1,
+        1,
+        1
+    ],
+    "ambientColor": [
+        0.1,
+        0.1,
+        0.1
+    ],
+    "specularColor": [
+        1,
+        1,
+        1
+    ],
+    "emissive": [
+        0,
+        0,
+        0
+    ],
+    "shininess": 32,
+    "metallic": 0,
+    "roughness": 0.58,
+    "baseColorAlpha": 1,
+    "alphaMode": "Opaque",
+    "alphaCutoff": 0.5,
+    "normalScale": 1,
+    "heightScale": 0.05,
+    "heightMinSteps": 8,
+    "heightMaxSteps": 32,
+    "occlusionStrength": 1,
+    "doubleSided": false,
+    "unlit": false,
+    "baseColorUvSet": 0,
+    "metallicRoughnessUvSet": 0,
+    "normalUvSet": 0,
+    "occlusionUvSet": 0,
+    "emissiveUvSet": 0,
+    "heightUvSet": 0,
+    "baseColorTexture": "C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/Fox/Textures/Texture 1 1.png"
+}

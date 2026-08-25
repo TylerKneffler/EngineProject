@@ -5,12 +5,21 @@
 #include <memory>
 #include <string>
 
+namespace Engine::Components
+{
 class Texture;
-class IGraphicsProvider;
+enum class MaterialAlphaMode : int
+{
+    Opaque,
+    Mask,
+    Blend
+};
 
-class Material : public Component
+class Material : public Engine::Core::Component
 {
 public:
+    using JsonValue = Engine::Serialization::JsonValue;
+    using IGraphicsProvider = Engine::Graphics::IGraphicsProvider;
     Material();
     ~Material() = default;
 
@@ -32,6 +41,24 @@ public:
     
     PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "0.0, 1.0")
     float     roughnessFactor { 1.f };
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "0.0, 4.0")
+    float     environmentDiffuseStrength { 1.f };
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "0.0, 4.0")
+    float     reflectionStrength { 1.f };
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Reflections")
+    bool      useCustomReflectionEnvironment { false };
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Reflections")
+    std::string reflectionEnvironmentTexture;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Reflections", Range = "-16.0, 16.0")
+    float     reflectionEnvironmentExposure { 0.f };
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Reflections", Range = "-360.0, 360.0")
+    float     reflectionEnvironmentRotation { 0.f };
     
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Properties")
     float     baseColorAlpha { 1.f };
@@ -41,6 +68,15 @@ public:
     
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Properties")
     float     normalScale { 1.f };
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "0.0, 0.2")
+    float     heightScale { 0.05f };
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "4.0, 64.0")
+    float     heightMinSteps { 8.f };
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "4.0, 64.0")
+    float     heightMaxSteps { 32.f };
     
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Properties")
     float     occlusionStrength { 1.f };
@@ -59,8 +95,16 @@ public:
     std::shared_ptr<Texture> baseColorTexture;
     std::shared_ptr<Texture> metallicRoughnessTexture;
     std::shared_ptr<Texture> normalTexture;
+    std::shared_ptr<Texture> heightTexture;
     std::shared_ptr<Texture> occlusionTexture;
     std::shared_ptr<Texture> emissiveTexture;
+    std::shared_ptr<Texture> reflectionEnvironmentMap;
+    int baseColorUvSet = 0;
+    int metallicRoughnessUvSet = 0;
+    int normalUvSet = 0;
+    int occlusionUvSet = 0;
+    int emissiveUvSet = 0;
+    int heightUvSet = 0;
 
     bool LoadFromFile(const std::string& path);
     bool SaveToFile(const std::string& path) const;
@@ -69,11 +113,22 @@ public:
     void SetMetallicRoughnessTexture(const std::string& path);
     
     void SetNormalTexture(const std::string& path);
+    void SetHeightTexture(const std::string& path);
     void SetOcclusionTexture(const std::string& path);
     void SetEmissiveTexture(const std::string& path);
+    void SetReflectionEnvironmentTexture(const std::string& path);
     void PrepareTextures(IGraphicsProvider* graphicsProvider);
+    MaterialAlphaMode GetAlphaMode() const;
+    void Validate();
+    JsonValue Serialize() const override;
+    void Deserialize(const JsonValue& value) override;
+    void OnAfterDeserialize(IGraphicsProvider* graphicsProvider) override
+    {
+        PrepareTextures(graphicsProvider);
+    }
 
 private:
     static std::string TexturePath(const std::shared_ptr<Texture>& texture);
     std::string m_filePath;
 };
+}

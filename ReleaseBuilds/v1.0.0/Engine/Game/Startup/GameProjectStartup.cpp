@@ -16,7 +16,7 @@ std::string GetFallbackScenePath()
     return std::string(ENGINE_ASSETS_PATH) + "Scenes/default.scene";
 }
 
-ProjectSettings LoadGameProjectSettings()
+Engine::Model::ProjectSettings LoadGameProjectSettings()
 {
     std::string projectFile = PROJECT_FILE;
     std::vector<std::string> localProjects;
@@ -29,11 +29,11 @@ ProjectSettings LoadGameProjectSettings()
 
     try
     {
-        return ProjectLoader{}.LoadProject(projectFile);
+        return Engine::Core::ProjectLoader{}.LoadProject(projectFile);
     }
     catch (const std::exception&)
     {
-        ProjectSettings settings;
+        Engine::Model::ProjectSettings settings;
         settings.assetsDirectory = ENGINE_ASSETS_PATH;
         settings.defaultScene = GetFallbackScenePath();
         settings.viewportWidth = 1280;

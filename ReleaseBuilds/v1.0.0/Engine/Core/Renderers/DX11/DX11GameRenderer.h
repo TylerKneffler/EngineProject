@@ -5,6 +5,8 @@
 #include <d3d11.h>
 #include <dxgi.h>
 
+namespace Engine::Renderers
+{
 class DX11GameRenderer : public IGameRenderer
 {
 public:
@@ -14,10 +16,10 @@ public:
     uint32_t GetWidth() const override { return m_width; }
     uint32_t GetHeight() const override { return m_height; }
     void Clear(float r, float g, float b, float a = 1.0f) override;
-    IGraphicsProvider* GetGraphicsProvider() override { return m_graphicsProvider.get(); }
+    Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override { return m_graphicsProvider.get(); }
     void BeginFrame() override;
     void EndFrame() override;
-    std::unique_ptr<IGraphicsContext> CreateFrameGraphicsContext() override;
+    std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateFrameGraphicsContext() override;
 
 private:
     void CreateTargets();
@@ -31,3 +33,4 @@ private:
     uint32_t m_width = 0;
     uint32_t m_height = 0;
 };
+}

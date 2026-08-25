@@ -1,9 +1,21 @@
 #include "GameView.h"
 #include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Compoonents/Camera.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Graphics/IGraphicsProvider.h"
+#include "../Focus/WindowFocusHandler.h"
 
+namespace Engine::Editor
+{
+// ---------------------------------------------------------------------------
+// Constructor
+// ---------------------------------------------------------------------------
+GameView::GameView()
+{
+    // Game view captures the cursor when focused (for gameplay)
+    SetCursorBehaviorOnFocus(CursorBehaviorOnFocus::Captured);
+}
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
@@ -12,8 +24,8 @@ void GameView::Init(void* device,
                     void* srvCpu,
                     void* srvGpu,
                     uint32_t srvSlotIndex,
-                    Scene* scene,
-                    const ProjectSettings& settings)
+                    Engine::Scene::Scene* scene,
+                    const Engine::Model::ProjectSettings& settings)
 {
     View::Init(device, width, height, srvCpu, srvGpu, srvSlotIndex);
     m_scene = scene;
@@ -29,13 +41,19 @@ void GameView::Init(void* device,
 // ---------------------------------------------------------------------------
 void GameView::DrawPanel(IEditorUi& ui)
 {
-    if (ui.BeginWindow(m_title.c_str(), &m_open, true))
+    const bool windowVisible = ui.BeginWindow(m_title.c_str(), &m_open, true);
+    if (ui.IsWindowFocused() && OnFocused) OnFocused();
+    if (windowVisible)
     {
-        const float targetAspect = m_aspectRatioMode == ProjectSettings::AspectRatioMode::Free ? 0.f :
-            (m_aspectRatioMode == ProjectSettings::AspectRatioMode::Locked ? m_gameAspectRatio :
+        const float targetAspect = m_aspectRatioMode == Engine::Model::ProjectSettings::AspectRatioMode::Free ? 0.f :
+            (m_aspectRatioMode == Engine::Model::ProjectSettings::AspectRatioMode::Locked ? m_gameAspectRatio :
              static_cast<float>(m_gameWindowWidth) / static_cast<float>(m_gameWindowHeight));
         const auto input = ui.Viewport(GetUiTextureHandle(), targetAspect,
             {m_letterboxColor.r,m_letterboxColor.g,m_letterboxColor.b,m_letterboxColor.a});
+        if (m_scene)
+            m_scene->SetUiPointerInput(input.mousePosInViewport.x,
+                input.mousePosInViewport.y, input.available.x, input.available.y,
+                input.hovered, input.leftDown);
         EditorUiVec2 available = input.available;
         if (available.x > 1.f && available.y > 1.f)
         {
@@ -51,6 +69,12 @@ void GameView::DrawPanel(IEditorUi& ui)
 
         }
     }
+    else if (m_scene)
+    {
+        // Suppress native editor-window coordinates while the embedded game
+        // surface is hidden or collapsed.
+        m_scene->SetUiPointerInput(0.f, 0.f, 1.f, 1.f, false, false);
+    }
     ui.EndWindow();
 }
 
@@ -62,9 +86,9 @@ void GameView::Render3D(void* cmd)
     if (!m_scene)
         return;
 
-    Camera* gameCamera = m_scene->FindGameCamera();
+    Engine::Components::Camera* gameCamera = m_scene->FindGameCamera();
     if (!gameCamera)
-        gameCamera = m_scene->editorCamera.GetComponent<Camera>();
+        gameCamera = m_scene->editorCamera.GetComponent<Engine::Components::Camera>();
     if (!gameCamera)
         return;
 
@@ -86,19 +110,19 @@ void GameView::Render3D(void* cmd)
 // CalculateGameViewport
 // ---------------------------------------------------------------------------
 static void CalculateGameViewport(EditorUiVec2 availableSize, EditorUiVec2& outViewportSize, EditorUiVec2& outViewportPos,
-    ProjectSettings::AspectRatioMode mode, float lockedAspect, uint32_t windowWidth, uint32_t windowHeight)
+    Engine::Model::ProjectSettings::AspectRatioMode mode, float lockedAspect, uint32_t windowWidth, uint32_t windowHeight)
 {
     outViewportPos = {0.f, 0.f};
 
     switch (mode)
     {
-        case ProjectSettings::AspectRatioMode::Free:
+        case Engine::Model::ProjectSettings::AspectRatioMode::Free:
         {
             outViewportSize = availableSize;
             break;
         }
 
-        case ProjectSettings::AspectRatioMode::Locked:
+        case Engine::Model::ProjectSettings::AspectRatioMode::Locked:
         {
             float availableAspect = availableSize.x / availableSize.y;
             if (availableAspect > lockedAspect)
@@ -116,7 +140,7 @@ static void CalculateGameViewport(EditorUiVec2 availableSize, EditorUiVec2& outV
             break;
         }
 
-        case ProjectSettings::AspectRatioMode::Hardcoded:
+        case Engine::Model::ProjectSettings::AspectRatioMode::Hardcoded:
         {
             float gameAspect = static_cast<float>(windowWidth) / static_cast<float>(windowHeight);
             float availableAspect = availableSize.x / availableSize.y;
@@ -135,4 +159,5 @@ static void CalculateGameViewport(EditorUiVec2 availableSize, EditorUiVec2& outV
             break;
         }
     }
+}
 }

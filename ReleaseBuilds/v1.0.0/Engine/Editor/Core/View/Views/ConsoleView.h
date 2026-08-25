@@ -1,7 +1,10 @@
 #pragma once
 #include "pch.h"
 #include "View/IEditorPanel.h"
+#include "ProblemsView.h"
 
+namespace Engine::Editor
+{
 // ---------------------------------------------------------------------------
 // ConsoleView — editor Console panel
 //
@@ -22,7 +25,7 @@ public:
         std::string message;
     };
 
-    ConsoleView()  = default;
+    ConsoleView();
     ~ConsoleView() = default;
 
     // Appends a message at the given severity level.
@@ -31,6 +34,10 @@ public:
 
     // Clears all log entries.
     void Clear();
+    void SetProblemStore(std::shared_ptr<EditorProblemStore> store)
+    {
+        m_problemStore = std::move(store);
+    }
 
     // Defines the package-neutral Console panel.
     void DrawPanel(IEditorUi& ui) override;
@@ -41,4 +48,6 @@ private:
     std::string m_textBlock;
     bool m_autoScroll     = true;
     bool m_scrollToBottom = false;
+    std::shared_ptr<EditorProblemStore> m_problemStore;
 };
+}

@@ -5,6 +5,9 @@
 #include "IGraphicsBuffer.h"
 #include "IGraphicsTexture.h"
 
+namespace Engine::Graphics
+{
+
 // ---------------------------------------------------------------------------
 // IGraphicsContext — Rendering command recorder
 // 
@@ -111,3 +114,4 @@ public:
     virtual void SetCommandBuffer(void* /*cmd*/) {}
     virtual std::unique_ptr<IGraphicsContext> CreateContext() = 0;
 };
+}

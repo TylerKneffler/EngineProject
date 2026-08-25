@@ -2,7 +2,9 @@
 #include <d3dcompiler.h>
 #include <sstream>
 
-std::unique_ptr<IShader> D3D12ShaderCompiler::CompileFromFile(
+namespace Engine::Renderers
+{
+std::unique_ptr<Engine::Graphics::IShader> D3D12ShaderCompiler::CompileFromFile(
     const std::string& filePath,
     const char* entryPoint,
     CompileProfile profile)
@@ -58,4 +60,5 @@ std::unique_ptr<IShader> D3D12ShaderCompiler::CompileFromFile(
     }
 
     return std::make_unique<D3D12Shader>(bytecode);
+}
 }

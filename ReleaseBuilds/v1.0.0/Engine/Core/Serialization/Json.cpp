@@ -6,6 +6,10 @@
 #include <sstream>
 #include <cassert>
 #include <iomanip>
+#include <algorithm>
+
+namespace Engine::Serialization
+{
 
 // ---- Concrete storage types (only visible in this TU) ----------------------
 using JArray  = std::vector<JsonValue>;
@@ -73,6 +77,11 @@ const JsonValue& JsonValue::ArrayAt(std::size_t i) const
     return (*asArr(m_data))[i];
 }
 
+JsonValue& JsonValue::ArrayAt(std::size_t i)
+{
+    return (*asArr(m_data))[i];
+}
+
 // ---- Object accessors -------------------------------------------------------
 std::size_t JsonValue::ObjectSize() const
 {
@@ -106,6 +115,22 @@ const JsonValue& JsonValue::operator[](const std::string& key) const
     return kNull;
 }
 
+JsonValue& JsonValue::operator[](const std::string& key)
+{
+    if (m_type == Type::Null)
+    {
+        m_type = Type::Object;
+        m_data = std::make_shared<JObject>();
+    }
+    assert(m_type == Type::Object);
+    auto& object = *asObj(m_data);
+    for (auto& [existingKey, value] : object)
+        if (existingKey == key)
+            return value;
+    object.emplace_back(key, JsonValue());
+    return object.back().second;
+}
+
 // ---- Mutation ---------------------------------------------------------------
 JsonValue& JsonValue::Set(const std::string& key, JsonValue val)
 {
@@ -132,6 +157,19 @@ JsonValue& JsonValue::Push(JsonValue val)
     assert(m_type == Type::Array);
     asArr(m_data)->push_back(std::move(val));
     return *this;
+}
+
+bool JsonValue::Erase(const std::string& key)
+{
+    if (m_type != Type::Object || !m_data)
+        return false;
+    auto& object = *asObj(m_data);
+    const auto found = std::find_if(object.begin(), object.end(),
+        [&key](const JKV& entry) { return entry.first == key; });
+    if (found == object.end())
+        return false;
+    object.erase(found);
+    return true;
 }
 
 // ---- Factories ---------------------------------------------------------------
@@ -405,4 +443,5 @@ JsonValue JsonParseFile(const std::string& path)
     if (!f) throw std::runtime_error("JsonParseFile: cannot open '" + path + "'");
     std::string src((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     return JsonParse(src);
+}
 }

@@ -3,7 +3,9 @@
 #include <wrl/client.h>
 #include <d3dcompiler.h>
 
-class D3D11Shader : public IShader
+namespace Engine::Renderers
+{
+class D3D11Shader : public Engine::Graphics::IShader
 {
 public:
     explicit D3D11Shader(Microsoft::WRL::ComPtr<ID3DBlob> bytecode)
@@ -23,10 +25,12 @@ private:
     Microsoft::WRL::ComPtr<ID3DBlob> m_bytecode;
 };
 
-class D3D11ShaderCompiler : public IShaderCompiler
+class D3D11ShaderCompiler : public Engine::Graphics::IShaderCompiler
 {
 public:
-    std::unique_ptr<IShader> CompileFromFile(
+    using CompileProfile = Engine::Graphics::IShaderCompiler::CompileProfile;
+
+    std::unique_ptr<Engine::Graphics::IShader> CompileFromFile(
         const std::string& filePath,
         const char* entryPoint,
         CompileProfile profile) override;
@@ -36,3 +40,4 @@ public:
 private:
     std::string m_lastError;
 };
+}

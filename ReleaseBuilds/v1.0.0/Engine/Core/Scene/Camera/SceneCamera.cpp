@@ -2,7 +2,10 @@
 #include "Core/Compoonents/Camera.h"
 #include <cmath>
 
-Camera* Scene::FindGameCamera()
+namespace Engine::Scene
+{
+
+Scene::Camera* Scene::FindGameCamera()
 {
     for (const auto& obj : m_objects)
         if (Camera* cam = obj->GetComponent<Camera>())
@@ -19,6 +22,14 @@ void Scene::FocusEditorCamera(Object* obj)
 
     const glm::vec3 targetPos =
         obj ? obj->transform.position : glm::vec3(0.f);
+    if (m_editorMode2D)
+    {
+        editorCamera.transform.position.x = targetPos.x;
+        editorCamera.transform.position.y = targetPos.y;
+        editorCamera.transform.position.z = -10.f;
+        cam->target = { targetPos.x, targetPos.y, 0.f };
+        return;
+    }
     constexpr float kDistance = 3.f;
 
     const glm::vec3& eye = editorCamera.transform.position;
@@ -33,4 +44,6 @@ void Scene::FocusEditorCamera(Object* obj)
 
     editorCamera.transform.position = targetPos + oldDir * (kDistance / oldLen);
     cam->target = targetPos;
+}
+
 }

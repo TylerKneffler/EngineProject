@@ -2,6 +2,9 @@
 #include <functional>
 #include <cstdint>
 
+
+namespace Engine::Renderers
+{
 // Forward declaration - editor UI interface (no dependency from Core layer)
 class IEditorPanel;
 
@@ -45,6 +48,9 @@ public:
     virtual void Render(void* cmdList, void* mainRtv,
                         std::function<void(void*)> drawFn = nullptr) = 0;
 
+    // Configure the colour used when clearing this offscreen view.
+    virtual void SetClearColor(float r, float g, float b, float a = 1.0f) = 0;
+
     // Query dimensions and aspect ratio
     virtual float    GetAspect() const = 0;
     virtual uint32_t GetWidth()  const = 0;
@@ -56,3 +62,4 @@ public:
     // SRV slot index for resource cleanup
     virtual uint32_t GetSrvSlotIndex() const = 0;
 };
+}

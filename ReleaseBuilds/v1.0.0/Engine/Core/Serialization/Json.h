@@ -24,6 +24,8 @@
 //   float x  = obj["x"].AsFloat();
 //   bool  ok  = obj.Has("name");
 // ---------------------------------------------------------------------------
+namespace Engine::Serialization
+{
 class JsonValue
 {
 public:
@@ -63,6 +65,7 @@ public:
     // ---- Array accessors (safe no-op when not an array) ---------------------
     std::size_t      ArraySize()             const;
     const JsonValue& ArrayAt(std::size_t i)  const;
+    JsonValue&       ArrayAt(std::size_t i);
 
     // ---- Object accessors (safe no-op when not an object) -------------------
     std::size_t        ObjectSize()               const;
@@ -72,12 +75,14 @@ public:
     bool             Has(const std::string& key) const;
     // Returns a null JsonValue when the key is absent — never throws.
     const JsonValue& operator[](const std::string& key) const;
+    JsonValue&       operator[](const std::string& key);
 
     // ---- Mutation -----------------------------------------------------------
     // Calling Set() on a null value promotes it to an object automatically.
     JsonValue& Set(const std::string& key, JsonValue val);
     // Calling Push() on a null value promotes it to an array automatically.
     JsonValue& Push(JsonValue val);
+    bool Erase(const std::string& key);
 
     // ---- Factory helpers ----------------------------------------------------
     static JsonValue MakeObject();
@@ -106,3 +111,5 @@ JsonValue JsonParse(const std::string& src);
 
 // Read a file and parse it; throws on I/O or parse error.
 JsonValue JsonParseFile(const std::string& path);
+}
+

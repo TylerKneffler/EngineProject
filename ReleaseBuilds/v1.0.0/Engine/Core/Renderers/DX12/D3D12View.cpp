@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "D3D12View.h"
 
+namespace Engine::Renderers
+{
 static constexpr DXGI_FORMAT VIEW_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
 
 // ---------------------------------------------------------------------------
@@ -166,8 +168,7 @@ void D3D12View::Render(void* cmdList,
     d3dCmdList->RSSetScissorRects(1, &sr);
     d3dCmdList->OMSetRenderTargets(1, &sceneRtv, FALSE, &dsv);
 
-    const float clearColor[4] = { 0.0f, 0.0f, 0.502f, 1.0f }; // navy blue
-    d3dCmdList->ClearRenderTargetView(sceneRtv, clearColor, 0, nullptr);
+    d3dCmdList->ClearRenderTargetView(sceneRtv, m_clearColor, 0, nullptr);
     d3dCmdList->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
     if (drawFn)
@@ -182,4 +183,5 @@ void D3D12View::Render(void* cmdList,
     d3dCmdList->ResourceBarrier(1, &toSrv);
 
     d3dCmdList->OMSetRenderTargets(1, &mainRtvHandle, FALSE, nullptr);
+}
 }

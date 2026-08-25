@@ -3,6 +3,8 @@
 #include "imgui.h"
 #include "imgui_internal.h"
 
+namespace Engine::Editor
+{
 void ImGuiDockspace::Draw()
 {
     const ImGuiID dockspaceId =
@@ -10,7 +12,18 @@ void ImGuiDockspace::Draw()
 
     // Build defaults only when imgui.ini did not restore a dock tree.
     ImGuiDockNode* root = ImGui::DockBuilderGetNode(dockspaceId);
-    if (root != nullptr && !root->IsLeafNode()) return;
+    if (root != nullptr && !root->IsLeafNode())
+    {
+        // Add bottom-panel tabs introduced after a user's layout was saved.
+        ImGuiWindow* console = ImGui::FindWindowByName("Console 1");
+        ImGuiWindow* terminal = ImGui::FindWindowByName("Terminal 1");
+        ImGuiWindow* problems = ImGui::FindWindowByName("Problems 1");
+        if (console && console->DockNode && terminal && !terminal->DockNode)
+            ImGui::DockBuilderDockWindow("Terminal 1", console->DockNode->ID);
+        if (console && console->DockNode && problems && !problems->DockNode)
+            ImGui::DockBuilderDockWindow("Problems 1", console->DockNode->ID);
+        return;
+    }
 
     ImGui::DockBuilderRemoveNode(dockspaceId);
     ImGui::DockBuilderAddNode(dockspaceId, ImGuiDockNodeFlags_DockSpace);
@@ -31,6 +44,9 @@ void ImGuiDockspace::Draw()
     ImGui::DockBuilderDockWindow("Scene 1", centerTop);
     ImGui::DockBuilderDockWindow("Game 1", centerTop);
     ImGui::DockBuilderDockWindow("Console 1", centerBottom);
+    ImGui::DockBuilderDockWindow("Problems 1", centerBottom);
+    ImGui::DockBuilderDockWindow("Terminal 1", centerBottom);
     ImGui::DockBuilderDockWindow("Properties 1", right);
     ImGui::DockBuilderFinish(dockspaceId);
+}
 }

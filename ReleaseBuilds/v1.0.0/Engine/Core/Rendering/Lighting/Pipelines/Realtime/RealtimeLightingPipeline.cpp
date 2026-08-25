@@ -2,10 +2,10 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Light.h"
 
-namespace Engine::Rendering::Lighting
+namespace Engine::Rendering
 {
     uint32_t RealtimeLightingPipeline::CollectLights(
-        const Scene& scene,
+        const Engine::Scene::Scene& scene,
         LightData* destination,
         uint32_t capacity) const
     {
@@ -17,14 +17,15 @@ namespace Engine::Rendering::Lighting
         {
             if (!candidate->IsEnabledInHierarchy() || count >= capacity)
                 continue;
-            const Light* light = candidate->GetComponent<Light>();
+            const Engine::Components::Light* light =
+                candidate->GetComponent<Engine::Components::Light>();
             if (!light || light->baked || light->intensity <= 0.f)
                 continue;
-            if (light->GetLightType() == Light::Type::Point && light->range <= 0.f)
+            if (light->GetLightType() == Engine::Components::Light::Type::Point && light->range <= 0.f)
                 continue;
 
             LightData& data = destination[count++];
-            if (light->GetLightType() == Light::Type::Ambient)
+            if (light->GetLightType() == Engine::Components::Light::Type::Ambient)
             {
                 const glm::mat4 world = candidate->transform.GetWorldMatrix();
                 const glm::vec3 rayDirection = glm::normalize(glm::vec3(world[2]));
@@ -37,7 +38,7 @@ namespace Engine::Rendering::Lighting
             }
             data.colorIntensity = glm::vec4(light->color, light->intensity);
             data.params = glm::vec4(light->falloff,
-                light->GetLightType() == Light::Type::Ambient ? 1.f : 0.f,
+                light->GetLightType() == Engine::Components::Light::Type::Ambient ? 1.f : 0.f,
                 0.f, 0.f);
         }
         return count;

@@ -4,6 +4,8 @@
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 
+namespace Engine::Components
+{
 Camera::Camera()
 {
     SetTypeName(COMPONENT_TYPE_NAME(Camera));
@@ -12,6 +14,8 @@ Camera::Camera()
     RegisterField("fov", fov);
     RegisterField("near", nearPlane);
     RegisterField("far", farPlane);
+    RegisterField("orthographic", orthographic);
+    RegisterField("orthographicSize", orthographicSize);
     RegisterField("target", target);
     RegisterField("up", up);
 }
@@ -29,9 +33,16 @@ glm::mat4 Camera::GetViewMatrix() const
     return glm::lookAtLH(p, p + forward, cameraUp);
 }
 
-glm::mat4 Camera::GetProjectionMatrix(float aspect) const
+glm::mat4 Camera::GetProjectionMatrix(float aspect, bool forceOrthographic) const
 {
+    if (orthographic || forceOrthographic)
+    {
+        const float halfHeight = glm::max(orthographicSize, 0.01f);
+        const float halfWidth = halfHeight * glm::max(aspect, 0.01f);
+        return glm::orthoLH_ZO(-halfWidth, halfWidth, -halfHeight, halfHeight,
+            nearPlane, farPlane);
+    }
     return glm::perspectiveLH_ZO(
         glm::radians(fov), aspect, nearPlane, farPlane);
 }
-
+}

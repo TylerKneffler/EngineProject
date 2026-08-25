@@ -1,5 +1,7 @@
-#include "PreferencesView.h"
+#include "Engine/Editor/Core/View/Views/PreferencesView.h"
 #include "Engine/Editor/UI/IEditorUi.h"
+#include "Engine/Editor/Input/EditorKeyBindings.h"
+#include "Engine/Editor/UI/ImGui/Themes/ImGuiThemeManager.h"
 #include "Core/Renderers/RendererFactory.h"
 #include <pugixml.hpp>
 #include <algorithm>
@@ -7,11 +9,14 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 
 #ifndef ENGINE_SHADERS_PATH
 #define ENGINE_SHADERS_PATH "Engine/Core/Shaders/"
 #endif
 
+namespace Engine::Editor
+{
 namespace
 {
 namespace fs = std::filesystem;
@@ -186,7 +191,7 @@ std::pair<bool, std::string> BuildPortableExport(const std::string& projectFile,
 
 bool DrawRendererCombo(IEditorUi& ui, const char* label, std::string& selectedApi)
 {
-    const auto options = RendererFactory::GetRendererOptions();
+    const auto options = ::Engine::Renderers::RendererFactory::GetRendererOptions();
     std::vector<std::string> labels;
     std::vector<const char*> items;
     int selected = 0;
@@ -206,10 +211,34 @@ bool DrawRendererCombo(IEditorUi& ui, const char* label, std::string& selectedAp
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
-void PreferencesView::Init(const ProjectSettings& settings, const std::string& projFilePath)
+void PreferencesView::Init(const Engine::Model::ProjectSettings& settings, const std::string& projFilePath)
 {
     m_settings = settings;
     m_projFilePath = projFilePath;
+    EditorKeyBindings::Get().Initialize(projFilePath);
+
+    std::string discoveryMessage;
+    ImGuiThemeManager::Refresh(&discoveryMessage);
+    const auto& themes = ImGuiThemeManager::AvailableThemes();
+    if (!themes.empty())
+    {
+        if (std::find(themes.begin(), themes.end(), m_settings.editorTheme) == themes.end())
+        {
+            const std::string missingTheme = m_settings.editorTheme;
+            m_settings.editorTheme = themes.front();
+            discoveryMessage = "Theme '" + missingTheme + "' was not found; using '" +
+                m_settings.editorTheme + "'." +
+                (discoveryMessage.empty() ? "" : " " + discoveryMessage);
+        }
+        std::string applyError;
+        m_themeStatusSucceeded = ImGuiThemeManager::Apply(m_settings.editorTheme, &applyError);
+        m_themeStatus = m_themeStatusSucceeded ? discoveryMessage : applyError;
+    }
+    else
+    {
+        m_themeStatusSucceeded = false;
+        m_themeStatus = discoveryMessage.empty() ? "No valid ImGui themes were found." : discoveryMessage;
+    }
 
     // Initialize string buffers
     strncpy_s(m_projectNameBuf, m_settings.name.c_str(), sizeof(m_projectNameBuf) - 1);
@@ -224,6 +253,7 @@ void PreferencesView::DrawWindow(IEditorUi& ui, bool& isOpen)
 {
     if (!isOpen) return;
     UpdatePortableExport();
+    bool keybindTabVisible = false;
 
     ui.SetNextWindowRect(100, 50, 600, 700);
     
@@ -261,9 +291,16 @@ void PreferencesView::DrawWindow(IEditorUi& ui, bool& isOpen)
                 ui.EndTab();
             }
 
+            if (ui.BeginTab("Keybinds"))
+            {
+                keybindTabVisible = true;
+                DrawKeybindsSection(ui);
+                ui.EndTab();
+            }
+
             if (ui.BeginTab("Debug"))
             {
-                DrawDebugSection(ui);
+                DrawDiagnosticsSection(ui);
                 ui.EndTab();
             }
 
@@ -297,9 +334,108 @@ void PreferencesView::DrawWindow(IEditorUi& ui, bool& isOpen)
     }
 
     ui.EndWindow();
+    if (!isOpen || !keybindTabVisible)
+        ui.CancelKeyBindingCapture();
 }
 
-void PreferencesView::DrawDebugSection(IEditorUi& ui)
+void PreferencesView::DrawKeybindsSection(IEditorUi& ui)
+{
+    EditorKeyBindings& keybinds = EditorKeyBindings::Get();
+    ui.Label("Editor Controls");
+    ui.DisabledLabel("Click a binding, then press a keyboard key, mouse button, or scroll the wheel. Escape cancels; Delete or Backspace clears the slot.");
+    ui.Spacing();
+
+    const std::size_t bindingColumns = keybinds.BindingColumnCount();
+    std::size_t deleteColumn = std::numeric_limits<std::size_t>::max();
+    bool addColumn = false;
+    if (ui.BeginTable("EditorKeybinds", static_cast<int>(bindingColumns + 3)))
+    {
+        ui.TableSetupColumn("Category");
+        ui.TableSetupColumn("Action");
+        for (std::size_t slot = 0; slot < bindingColumns; ++slot)
+        {
+            const std::string setupId = "Binding " + std::to_string(slot + 1);
+            ui.TableSetupColumn(setupId.c_str());
+        }
+        ui.TableSetupCompactColumn("+");
+        ui.TableNextRow();
+        ui.TableNextColumn(); ui.Label("Category");
+        ui.TableNextColumn(); ui.Label("Action");
+        for (std::size_t slot = 0; slot < bindingColumns; ++slot)
+        {
+            ui.TableNextColumn();
+            const std::string label = slot == 0 ? "Primary" :
+                (slot == 1 ? "Secondary" : "Binding " + std::to_string(slot + 1));
+            const std::string id = "binding-column-" + std::to_string(slot);
+            if (ui.BindingColumnHeader(id.c_str(), label.c_str(), bindingColumns > 1))
+                deleteColumn = slot;
+        }
+        ui.TableNextColumn();
+        addColumn = ui.AddBindingColumnHeader("add-binding-column");
+        for (auto& entry : keybinds.Entries())
+        {
+            ui.TableNextRow();
+            ui.TableNextColumn(); ui.Label(entry.category);
+            ui.TableNextColumn(); ui.Label(entry.label);
+            for (std::size_t slot = 0; slot < entry.bindings.size(); ++slot)
+            {
+                ui.TableNextColumn();
+                EditorKeyBinding& binding = entry.bindings[slot];
+                const std::string display = keybinds.BindingLabel(binding);
+                const std::string id = std::string(entry.id) + ".binding." +
+                    std::to_string(slot);
+                if (ui.KeyBindingInput(id.c_str(), display.c_str(), &binding.key,
+                    &binding.control, &binding.shift, &binding.alt))
+                {
+                    m_keybindStatus.clear();
+                    NotifyChanged();
+                }
+            }
+            ui.TableNextColumn();
+        }
+        ui.EndTable();
+    }
+    if (deleteColumn != std::numeric_limits<std::size_t>::max() &&
+        keybinds.RemoveBindingColumn(deleteColumn))
+    {
+        ui.CancelKeyBindingCapture();
+        m_keybindStatus.clear();
+        NotifyChanged();
+    }
+    else if (addColumn)
+    {
+        keybinds.AddBindingColumn();
+        m_keybindStatus.clear();
+        NotifyChanged();
+    }
+
+    ui.Spacing();
+    if (ui.Button("Save Keybinds", 150.f, 30.f))
+    {
+        m_keybindStatusSucceeded = keybinds.Save();
+        m_keybindStatus = m_keybindStatusSucceeded
+            ? "Keybinds saved." : keybinds.LastError();
+    }
+    ui.SameLine();
+    if (ui.Button("Reset Keybinds", 150.f, 30.f))
+    {
+        m_keybindStatusSucceeded = keybinds.ResetToDefaults() && keybinds.Save();
+        m_keybindStatus = m_keybindStatusSucceeded
+            ? "Default keybinds restored and saved." : keybinds.LastError();
+        NotifyChanged();
+    }
+    if (!m_keybindStatus.empty())
+    {
+        ui.Spacing();
+        ui.ColoredLabel(m_keybindStatus.c_str(), m_keybindStatusSucceeded
+            ? EditorUiColor{.35f,.85f,.45f,1.f}
+            : EditorUiColor{1.f,.35f,.35f,1.f});
+    }
+    ui.DisabledLabel(("Defaults: " + keybinds.DefaultPath()).c_str());
+    ui.DisabledLabel(("User bindings: " + keybinds.UserPath()).c_str());
+}
+
+void PreferencesView::DrawDiagnosticsSection(IEditorUi& ui)
 {
     ui.Label("Editor Diagnostics");
     ui.Separator();
@@ -310,6 +446,78 @@ void PreferencesView::DrawDebugSection(IEditorUi& ui)
 
 void PreferencesView::DrawEditorSection(IEditorUi& ui)
 {
+    ui.Label("Appearance");
+    ui.Separator();
+    const auto& themes = ImGuiThemeManager::AvailableThemes();
+    std::vector<const char*> themeItems;
+    themeItems.reserve(themes.size());
+    int selectedTheme = 0;
+    for (size_t index = 0; index < themes.size(); ++index)
+    {
+        themeItems.push_back(themes[index].c_str());
+        if (themes[index] == m_settings.editorTheme)
+            selectedTheme = static_cast<int>(index);
+    }
+    ui.BeginDisabled(themeItems.empty());
+    if (!themeItems.empty() && ui.Combo("Editor Theme", &selectedTheme,
+        themeItems.data(), static_cast<int>(themeItems.size())))
+    {
+        std::string applyError;
+        m_themeStatusSucceeded = ImGuiThemeManager::Apply(themes[selectedTheme], &applyError);
+        if (m_themeStatusSucceeded)
+        {
+            m_settings.editorTheme = themes[selectedTheme];
+            m_themeStatus = "Applied " + m_settings.editorTheme + ".";
+            NotifyChanged();
+        }
+        else
+            m_themeStatus = applyError;
+    }
+    ui.EndDisabled();
+    ui.SameLine();
+    if (ui.Button("Rescan Themes"))
+    {
+        std::string scanMessage;
+        const bool foundThemes = ImGuiThemeManager::Refresh(&scanMessage);
+        const auto& refreshed = ImGuiThemeManager::AvailableThemes();
+        if (foundThemes && !refreshed.empty())
+        {
+            if (std::find(refreshed.begin(), refreshed.end(), m_settings.editorTheme) == refreshed.end())
+                m_settings.editorTheme = refreshed.front();
+            std::string applyError;
+            m_themeStatusSucceeded = ImGuiThemeManager::Apply(m_settings.editorTheme, &applyError);
+            m_themeStatus = m_themeStatusSucceeded
+                ? (scanMessage.empty() ? "Theme list refreshed." : scanMessage)
+                : applyError;
+            if (m_themeStatusSucceeded) NotifyChanged();
+        }
+        else
+        {
+            m_themeStatusSucceeded = false;
+            m_themeStatus = scanMessage.empty() ? "No valid ImGui themes were found." : scanMessage;
+        }
+    }
+    ui.Tooltip("Reloads validated .imguitheme files from the editor Themes directory.");
+    ui.DisabledLabel(("Directory: " + ImGuiThemeManager::ThemeDirectory()).c_str());
+    if (!m_themeStatus.empty())
+        ui.ColoredLabel(m_themeStatus.c_str(), m_themeStatusSucceeded
+            ? EditorUiColor{.35f,.85f,.45f,1.f}
+            : EditorUiColor{1.f,.55f,.30f,1.f});
+    ui.Spacing();
+
+    ui.Label("Workspace Mode");
+    ui.Separator();
+    const char* editorModes[] = { "3D", "2D" };
+    int editorMode = m_settings.editorMode == Engine::Model::ProjectSettings::EditorMode::TwoD ? 1 : 0;
+    if (ui.Combo("Editor Mode", &editorMode, editorModes, 2))
+    {
+        m_settings.editorMode = editorMode == 1
+            ? Engine::Model::ProjectSettings::EditorMode::TwoD
+            : Engine::Model::ProjectSettings::EditorMode::ThreeD;
+        NotifyChanged();
+    }
+    ui.Tooltip("2D uses an orthographic camera, an XY grid, and sprite layer ordering.");
+    ui.Spacing();
     ui.Label("Undo History");
     ui.Separator();
     if (ui.InputUInt("Action Limit", &m_settings.editorHistoryLimit))
@@ -449,7 +657,7 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
     if (DrawRendererCombo(ui, "Game Rendering API", m_settings.gameRenderingAPI))
         NotifyChanged();
 
-    for (const auto& option : RendererFactory::GetRendererOptions())
+    for (const auto& option : ::Engine::Renderers::RendererFactory::GetRendererOptions())
     {
         if (!option.available)
         { std::string reason=option.name+" unavailable: "+option.unavailableReason; ui.DisabledLabel(reason.c_str()); }
@@ -472,6 +680,25 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
     if (ui.InputUInt("##editorViewportHeight", &m_settings.viewportHeight))
         NotifyChanged();
     ui.SameLine(); ui.DisabledLabel("Editor Viewport Height");
+
+    ui.Separator();
+    ui.Label("Baked Lighting");
+    if (ui.InputUInt("Lightmap Resolution", &m_settings.bakedLighting.lightmapResolution))
+        NotifyChanged();
+    ui.Tooltip("Per-object lightmap size. The baker clamps this to 32-2048.");
+    if (ui.DragFloat("Shadow Bias", &m_settings.bakedLighting.shadowBias,
+            0.0001f, 0.00001f, 0.1f))
+        NotifyChanged();
+    int dilationPasses = static_cast<int>(m_settings.bakedLighting.dilationPasses);
+    if (ui.SliderInt("Lightmap Dilation", &dilationPasses, 0, 32))
+    {
+        m_settings.bakedLighting.dilationPasses =
+            static_cast<uint32_t>(dilationPasses);
+        NotifyChanged();
+    }
+    if (ui.Checkbox("Preserve Source Emission",
+            &m_settings.bakedLighting.accumulate))
+        NotifyChanged();
 }
 
 // ---------------------------------------------------------------------------
@@ -486,7 +713,7 @@ void PreferencesView::DrawAspectRatioSection(IEditorUi& ui)
     int currentMode = (int)m_settings.aspectRatioMode;
     if (ui.Combo("Aspect Ratio Mode", &currentMode, modes, 3))
     {
-        m_settings.aspectRatioMode = (ProjectSettings::AspectRatioMode)currentMode;
+        m_settings.aspectRatioMode = (Engine::Model::ProjectSettings::AspectRatioMode)currentMode;
         NotifyChanged();
     }
 
@@ -573,6 +800,20 @@ bool PreferencesView::SaveSettings()
                 prop.append_child("EditorHistoryLimit").text().set(
                     m_settings.editorHistoryLimit);
 
+            auto editorMode = prop.child("EditorMode");
+            if (editorMode)
+                editorMode.text().set(m_settings.editorMode ==
+                    Engine::Model::ProjectSettings::EditorMode::TwoD ? "2D" : "3D");
+            else if (defaultSceneNode)
+                prop.append_child("EditorMode").text().set(m_settings.editorMode ==
+                    Engine::Model::ProjectSettings::EditorMode::TwoD ? "2D" : "3D");
+
+            auto editorTheme = prop.child("EditorTheme");
+            if (editorTheme)
+                editorTheme.text().set(m_settings.editorTheme.c_str());
+            else if (defaultSceneNode)
+                prop.append_child("EditorTheme").text().set(m_settings.editorTheme.c_str());
+
             auto clearColorR = prop.child("ClearColorR");
             if (clearColorR)
                 clearColorR.text().set(std::to_string(m_settings.clearColor.r).c_str());
@@ -589,15 +830,33 @@ bool PreferencesView::SaveSettings()
             if (framerate)
                 framerate.text().set(std::to_string(m_settings.targetFramerate).c_str());
 
+            if (renderingApi || editorRenderingApi || gameRenderingApi)
+            {
+                auto setBakeValue = [&prop](const char* name, const std::string& value)
+                {
+                    auto node = prop.child(name);
+                    if (!node) node = prop.append_child(name);
+                    node.text().set(value.c_str());
+                };
+                setBakeValue("BakedLightmapResolution",
+                    std::to_string(m_settings.bakedLighting.lightmapResolution));
+                setBakeValue("BakedShadowBias",
+                    std::to_string(m_settings.bakedLighting.shadowBias));
+                setBakeValue("BakedDilationPasses",
+                    std::to_string(m_settings.bakedLighting.dilationPasses));
+                setBakeValue("BakedPreserveSourceEmission",
+                    m_settings.bakedLighting.accumulate ? "true" : "false");
+            }
+
             auto modeNode = prop.child("AspectRatioMode");
             if (modeNode)
             {
                 const char* modeStr = "";
                 switch (m_settings.aspectRatioMode)
                 {
-                    case ProjectSettings::AspectRatioMode::Free: modeStr = "Free"; break;
-                    case ProjectSettings::AspectRatioMode::Locked: modeStr = "Locked"; break;
-                    case ProjectSettings::AspectRatioMode::Hardcoded: modeStr = "Hardcoded"; break;
+                    case Engine::Model::ProjectSettings::AspectRatioMode::Free: modeStr = "Free"; break;
+                    case Engine::Model::ProjectSettings::AspectRatioMode::Locked: modeStr = "Locked"; break;
+                    case Engine::Model::ProjectSettings::AspectRatioMode::Hardcoded: modeStr = "Hardcoded"; break;
                 }
                 modeNode.text().set(modeStr);
             }
@@ -646,4 +905,5 @@ bool PreferencesView::SaveSettings()
         std::cerr << "Error saving project settings: " << e.what() << std::endl;
         return false;
     }
+}
 }

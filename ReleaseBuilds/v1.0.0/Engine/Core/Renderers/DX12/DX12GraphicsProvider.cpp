@@ -1,14 +1,18 @@
 #include "DX12GraphicsProvider.h"
 
+
+namespace Engine::Renderers
+{
+
 Microsoft::WRL::ComPtr<ID3D12RootSignature>
 CreateD3D12MaterialRootSignature(ID3D12Device* device)
 {
-    D3D12_DESCRIPTOR_RANGE ranges[5]{};
-    D3D12_ROOT_PARAMETER parameters[8]{};
+    D3D12_DESCRIPTOR_RANGE ranges[7]{};
+    D3D12_ROOT_PARAMETER parameters[11]{};
     parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
     parameters[0].Descriptor.ShaderRegister = 0;
     parameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-    for (UINT index = 0; index < 5; ++index)
+    for (UINT index = 0; index < 6; ++index)
     {
         ranges[index].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
         ranges[index].NumDescriptors = 1;
@@ -19,12 +23,20 @@ CreateD3D12MaterialRootSignature(ID3D12Device* device)
         parameters[index + 1].DescriptorTable.pDescriptorRanges = &ranges[index];
         parameters[index + 1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
     }
-    for (UINT index = 0; index < 2; ++index)
+    for (UINT index = 0; index < 3; ++index)
     {
-        parameters[index + 6].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
-        parameters[index + 6].Descriptor.ShaderRegister = index + 5;
-        parameters[index + 6].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        parameters[index + 7].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+        parameters[index + 7].Descriptor.ShaderRegister = index + 6;
+        parameters[index + 7].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
     }
+    ranges[6].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    ranges[6].NumDescriptors = 1;
+    ranges[6].BaseShaderRegister = 9;
+    ranges[6].OffsetInDescriptorsFromTableStart = 0;
+    parameters[10].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    parameters[10].DescriptorTable.NumDescriptorRanges = 1;
+    parameters[10].DescriptorTable.pDescriptorRanges = &ranges[6];
+    parameters[10].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
     D3D12_STATIC_SAMPLER_DESC sampler{};
     sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
@@ -68,4 +80,5 @@ D3D12GraphicsProvider::D3D12GraphicsProvider(
     m_contextFactory = std::make_unique<D3D12GraphicsContextFactory>(device, commandQueue, rootSig);
     m_textureFactory = std::make_unique<D3D12TextureFactory>(device, commandQueue);
     OutputDebugStringA("[D3D12GraphicsProvider] All factories created\n");
+}
 }

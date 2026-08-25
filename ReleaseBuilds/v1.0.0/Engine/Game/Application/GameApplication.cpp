@@ -11,6 +11,8 @@
 #include "Core/SceneManager.h"
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
 #include "Core/Assets/Scripts/Rotate.h"
+#include "Core/Assets/Scripts/FirstPersonController.h"
+#include "Core/Assets/Scripts/MainMenuGameManager.h"
 #include "Core/Serialization/SceneSerializer.h"
 #endif
 
@@ -21,17 +23,20 @@ namespace
 void RegisterGameComponents()
 {
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
-    RegisterComponentType<Rotate>("Rotate");
+    ::Engine::Serialization::RegisterComponentType<Rotate>("Rotate");
+    ::Engine::Serialization::RegisterComponentType<FirstPersonController>("FirstPersonController");
+    ::Engine::Serialization::RegisterComponentType<MainMenuGameManager>("MainMenuGameManager");
 #endif
 }
 
-std::unique_ptr<IGameRenderer> CreateRenderer(
-    const ProjectSettings& settings, Window& window)
+std::unique_ptr<::Engine::Renderers::IGameRenderer> CreateRenderer(
+    const Engine::Model::ProjectSettings& settings,
+    ::Engine::Core::Window& window)
 {
     try
     {
-        std::unique_ptr<IGameRenderer> renderer =
-            RendererFactory::CreateGameRenderer(settings);
+        std::unique_ptr<::Engine::Renderers::IGameRenderer> renderer =
+            ::Engine::Renderers::RendererFactory::CreateGameRenderer(settings);
         if (!renderer)
             throw std::runtime_error("The renderer factory returned no renderer.");
         if (!renderer->Init(window.GetHWND(), window.GetWidth(), window.GetHeight()))
@@ -54,24 +59,28 @@ std::unique_ptr<IGameRenderer> CreateRenderer(
 int GameApplication::Run(HINSTANCE instance)
 {
     RegisterGameComponents();
-    ProjectSettings settings = LoadGameProjectSettings();
+    Engine::Model::ProjectSettings settings = LoadGameProjectSettings();
     if (!SelectStartupRenderer(settings))
         return 0;
 
-    auto window = std::make_unique<Window>(instance, L"Game",
+    auto window = std::make_unique<::Engine::Core::Window>(instance, L"Game",
         settings.viewportWidth, settings.viewportHeight);
-    std::unique_ptr<IGameRenderer> renderer = CreateRenderer(settings, *window);
+    std::unique_ptr<::Engine::Renderers::IGameRenderer> renderer = CreateRenderer(settings, *window);
     if (!renderer)
         return 1;
 
-    Scene scene;
+    ::Engine::Scene::Scene scene;
+    scene.SetEditorMode2D(
+        settings.editorMode == Engine::Model::ProjectSettings::EditorMode::TwoD);
     scene.Init(renderer->GetGraphicsProvider());
-    SceneManager::SetActiveScene(&scene);
-    if (!scene.Load(settings.defaultScene))
+    Engine::Core::SceneManager::SetActiveScene(&scene);
+    const std::string defaultScene = settings.defaultScene.empty()
+        ? GetFallbackScenePath() : settings.defaultScene;
+    Engine::Core::SceneManager::SetDefaultScenePath(defaultScene);
+    if (!scene.Load(defaultScene))
         scene.Load(GetFallbackScenePath());
 
-    for (const auto& object : scene.GetObjects())
-        object->Start();
+    scene.Start();
 
     LARGE_INTEGER performanceFrequency{};
     LARGE_INTEGER lastCounter{};
@@ -86,21 +95,22 @@ int GameApplication::Run(HINSTANCE instance)
     {
         LARGE_INTEGER currentCounter{};
         QueryPerformanceCounter(&currentCounter);
-        [[maybe_unused]] const float deltaTime =
+        const float deltaTime =
             static_cast<float>(currentCounter.QuadPart - lastCounter.QuadPart) /
             static_cast<float>(performanceFrequency.QuadPart);
         lastCounter = currentCounter;
 
-        for (const auto& object : scene.GetObjects())
-            object->Update();
+        scene.Update(deltaTime);
+        Engine::Core::SceneManager::ProcessPendingSceneLoad();
+        scene.PrepareRenderFrame();
 
         renderer->BeginFrame();
         renderer->Clear(0.1f, 0.1f, 0.1f);
         const float aspect = static_cast<float>(window->GetWidth()) /
             static_cast<float>(window->GetHeight());
-        std::unique_ptr<IGraphicsContext> graphicsContext =
+        std::unique_ptr<Engine::Graphics::IGraphicsContext> graphicsContext =
             renderer->CreateFrameGraphicsContext();
-        Camera* gameCamera = scene.FindGameCamera();
+        Engine::Components::Camera* gameCamera = scene.FindGameCamera();
         if (graphicsContext && gameCamera)
             scene.Render(graphicsContext.get(), aspect, gameCamera, false);
         renderer->EndFrame();

@@ -1,12 +1,19 @@
 #include "pch.h"
 #include "ImGuiEditorUi.h"
+#include "Engine/Editor/Core/View/IEditorPanel.h"
+#include "Engine/Editor/Core/PrimitiveObjectFactory.h"
+#include "Engine/Editor/Input/EditorKeyBindings.h"
 #include "imgui.h"
 #include "imgui_internal.h"
 
+namespace Engine::Editor
+{
 void ImGuiEditorUi::SetNextWindowRect(float x,float y,float w,float h){ ImGui::SetNextWindowPos({x,y},ImGuiCond_FirstUseEver); ImGui::SetNextWindowSize({w,h},ImGuiCond_FirstUseEver); }
 bool ImGuiEditorUi::BeginWindow(const char* t,bool* o,bool p){ if(p) ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,{0,0}); bool r=ImGui::Begin(t,o); if(p) ImGui::PopStyleVar(); return r; }
 void ImGuiEditorUi::EndWindow(){ImGui::End();}
+bool ImGuiEditorUi::IsWindowFocused() const{return ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);}
 void ImGuiEditorUi::PushId(const void* id){ImGui::PushID(id);}
+void ImGuiEditorUi::PushId(const char* id){ImGui::PushID(id);}
 void ImGuiEditorUi::PopId(){ImGui::PopID();}
 bool ImGuiEditorUi::Button(const char* l,float w,float h){return ImGui::Button(l,{w,h});}
 void ImGuiEditorUi::Label(const char* t){ImGui::TextUnformatted(t);}
@@ -15,12 +22,16 @@ void ImGuiEditorUi::ColoredLabel(const char* t,EditorUiColor c){ImGui::TextColor
 void ImGuiEditorUi::BeginTextWrap(){ImGui::PushTextWrapPos(0.f);}
 void ImGuiEditorUi::EndTextWrap(){ImGui::PopTextWrapPos();}
 void ImGuiEditorUi::SameLine(){ImGui::SameLine();} void ImGuiEditorUi::Separator(){ImGui::Separator();} void ImGuiEditorUi::Spacing(){ImGui::Spacing();}
+void ImGuiEditorUi::Indent(float width){ImGui::Indent(width);}
+void ImGuiEditorUi::Unindent(float width){ImGui::Unindent(width);}
 bool ImGuiEditorUi::Checkbox(const char*l,bool*v){return ImGui::Checkbox(l,v);} bool ImGuiEditorUi::InputText(const char*l,char*b,size_t s){if(l&&l[0]=='#'&&l[1]=='#')ImGui::SetNextItemWidth(-FLT_MIN);return ImGui::InputText(l,b,s);}
-void ImGuiEditorUi::ReadOnlyTextBlock(const char* label,const char* text,bool scrollToBottom)
+bool ImGuiEditorUi::InputTextSubmit(const char*l,char*b,size_t s){if(l&&l[0]=='#'&&l[1]=='#')ImGui::SetNextItemWidth(-FLT_MIN);return ImGui::InputText(l,b,s,ImGuiInputTextFlags_EnterReturnsTrue);}
+void ImGuiEditorUi::ReadOnlyTextBlock(const char* label,const char* text,bool scrollToBottom,float reservedBottom)
 {
     const char* value=text?text:"";
     const ImGuiID id=ImGui::GetID(label);
-    const ImVec2 available=ImGui::GetContentRegionAvail();
+    ImVec2 available=ImGui::GetContentRegionAvail();
+    available.y=std::max(1.f,available.y-reservedBottom);
     ImGui::InputTextMultiline(label,const_cast<char*>(value),strlen(value)+1,
         available,ImGuiInputTextFlags_ReadOnly|ImGuiInputTextFlags_NoUndoRedo);
     if(scrollToBottom)
@@ -36,13 +47,14 @@ void ImGuiEditorUi::ReadOnlyTextBlock(const char* label,const char* text,bool sc
 }
 bool ImGuiEditorUi::DragFloat(const char*l,float*v,float s,float a,float b){return ImGui::DragFloat(l,v,s,a,b);}
 bool ImGuiEditorUi::DragFloat3(const char*l,float*v,float s,float a,float b){return ImGui::DragFloat3(l,v,s,a,b);}
+bool ImGuiEditorUi::IsAnyItemActive() const{return ImGui::IsAnyItemActive();}
 bool ImGuiEditorUi::ColorEdit3(const char*l,float*v){return ImGui::ColorEdit3(l,v);} bool ImGuiEditorUi::ColorEdit4(const char*l,float*v){return ImGui::ColorEdit4(l,v);}
 bool ImGuiEditorUi::SliderInt(const char*l,int*v,int a,int b){return ImGui::SliderInt(l,v,a,b);} bool ImGuiEditorUi::InputUInt(const char*l,uint32_t*v){return ImGui::InputScalar(l,ImGuiDataType_U32,v);}
 void ImGuiEditorUi::ValueLabel(const char*l,const char*v){ImGui::LabelText(l,"%s",v);}
 bool ImGuiEditorUi::CollapsingHeader(const char*l,bool d){return ImGui::CollapsingHeader(l,d?ImGuiTreeNodeFlags_DefaultOpen:0);}
 bool ImGuiEditorUi::TreeNode(const void*id,const char*l,bool s,bool leaf,bool d){ImGuiTreeNodeFlags f=ImGuiTreeNodeFlags_OpenOnArrow|ImGuiTreeNodeFlags_SpanAvailWidth|(s?ImGuiTreeNodeFlags_Selected:0)|(d?ImGuiTreeNodeFlags_DefaultOpen:0);if(leaf)f|=ImGuiTreeNodeFlags_Leaf|ImGuiTreeNodeFlags_NoTreePushOnOpen;return ImGui::TreeNodeEx(id,f,"%s",l);}
 void ImGuiEditorUi::TreePop(){ImGui::TreePop();}
-EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,char* name,size_t size,bool* enabled,bool selected,bool leaf,bool lockName,bool enabledInHierarchy,int hierarchyDepth)
+EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,char* name,size_t size,bool* enabled,bool selected,bool leaf,bool lockName,bool enabledInHierarchy,int hierarchyDepth,bool lastSibling,uint64_t ancestorGuideMask)
 {
     EditorUiObjectRowResult result;
     (void)size;
@@ -67,6 +79,24 @@ EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,char* name,s
         openState->second=result.open;
     const ImVec2 rowMinimum=ImGui::GetItemRectMin();
     const ImVec2 rowMaximum=ImGui::GetItemRectMax();
+    const float hierarchyIndent=std::max(ImGui::GetStyle().IndentSpacing,1.f);
+    const float branchX=rowMinimum.x-hierarchyIndent*.5f;
+    const float rowCenterY=(rowMinimum.y+rowMaximum.y)*.5f;
+    ImVec4 guideColor=ImGui::GetStyleColorVec4(ImGuiCol_Separator);
+    guideColor.w*=.7f;
+    ImDrawList* hierarchyDraw=ImGui::GetWindowDrawList();
+    for(int level=0;level<hierarchyDepth;++level){
+        if(level<64&&(ancestorGuideMask&(uint64_t{1}<<level))){
+            const float x=branchX-static_cast<float>(hierarchyDepth-level)*hierarchyIndent;
+            hierarchyDraw->AddLine({x,rowMinimum.y},{x,rowMaximum.y},
+                ImGui::GetColorU32(guideColor),1.f);
+        }
+    }
+    hierarchyDraw->AddLine({branchX,rowMinimum.y},
+        {branchX,lastSibling?rowCenterY:rowMaximum.y},
+        ImGui::GetColorU32(guideColor),1.f);
+    hierarchyDraw->AddLine({branchX,rowCenterY},{rowMinimum.x+4.f,rowCenterY},
+        ImGui::GetColorU32(guideColor),1.f);
     result.clicked=ImGui::IsItemClicked()&&!ImGui::IsItemToggledOpen();
     result.doubleClicked=ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
     const EditorUiHierarchyDropResult drop=HierarchyDropTarget("ENGINE_SCENE_OBJECT");
@@ -116,8 +146,7 @@ EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,char* name,s
         ImGui::GetColorU32(lockName?ImGuiCol_TextDisabled:ImGuiCol_Text),display);
     ImVec4 separatorColor=ImGui::GetStyleColorVec4(ImGuiCol_Separator);
     separatorColor.w*=0.45f;
-    const ImVec2 contentMin={
-        ImGui::GetWindowPos().x+ImGui::GetWindowContentRegionMin().x,textMax.y};
+    const ImVec2 contentMin={branchX,textMax.y};
     const ImVec2 contentMax={
         ImGui::GetWindowPos().x+ImGui::GetWindowContentRegionMax().x,textMax.y};
     ImGui::GetWindowDrawList()->AddLine(
@@ -228,21 +257,92 @@ EditorUiObjectRowResult ImGuiEditorUi::ObjectHeader(const void* id,char* name,si
     return result;
 }
 bool ImGuiEditorUi::Selectable(const char*l,bool s,bool d){return ImGui::Selectable(l,s,d?ImGuiSelectableFlags_AllowDoubleClick:0);}
-EditorUiContextMenuResult ImGuiEditorUi::ContextMenu(const void* id,const char* addLabel,const char* deleteLabel,bool objectCreationMenu)
+EditorUiContextMenuResult ImGuiEditorUi::ContextMenu(const void* id,const char* addLabel,const char* deleteLabel,bool objectCreationMenu,const char* unpackLabel)
 {
     EditorUiContextMenuResult result;
+    const bool hasAdd=addLabel&&addLabel[0];
+    const bool hasDelete=deleteLabel&&deleteLabel[0];
+    const bool hasUnpack=unpackLabel&&unpackLabel[0];
+    if(!hasAdd&&!hasDelete&&!hasUnpack)return result;
     ImGui::PushID(id);
-    if(ImGui::BeginPopupContextItem("##context")){
-        if(addLabel&&addLabel[0]){
+    if(!ImGui::GetIO().KeyAlt&&ImGui::IsItemHovered()&&
+        ImGui::IsMouseReleased(ImGuiMouseButton_Right))
+        ImGui::OpenPopup("##context");
+    if(ImGui::BeginPopup("##context")){
+        if(hasAdd){
             if(objectCreationMenu){
                 if(ImGui::BeginMenu(addLabel)){
                     result.addRequested=ImGui::MenuItem("Empty");
-                    result.addCubeRequested=ImGui::MenuItem("Cube");
+                    if(ImGui::BeginMenu("3D")){
+                        for(const PrimitiveObjectDefinition& primitive:PrimitiveObjectDefinitions())
+                            if(ImGui::MenuItem(primitive.name))result.primitive3D=primitive.name;
+                        ImGui::EndMenu();
+                    }
+                    if(ImGui::BeginMenu("2D")){
+                        result.addSpriteRequested=ImGui::MenuItem("Sprite");
+                        ImGui::EndMenu();
+                    }
                     ImGui::EndMenu();
                 }
             }else result.addRequested=ImGui::MenuItem(addLabel);
         }
-        if(deleteLabel&&deleteLabel[0])result.deleteRequested=ImGui::MenuItem(deleteLabel);
+        if(hasUnpack)result.unpackRequested=ImGui::MenuItem(unpackLabel);
+        if(hasDelete)result.deleteRequested=ImGui::MenuItem(deleteLabel);
+        ImGui::EndPopup();
+    }
+    ImGui::PopID();
+    return result;
+}
+EditorUiAssetCreateMenuResult ImGuiEditorUi::AssetWindowContextMenu()
+{
+    EditorUiAssetCreateMenuResult result;
+    if(ImGui::BeginPopupContextWindow("##windowContext",
+        ImGuiPopupFlags_MouseButtonRight|ImGuiPopupFlags_NoOpenOverItems)){
+        if(ImGui::BeginMenu("Create")){
+            result.folderRequested=ImGui::MenuItem("Folder");
+            result.scriptRequested=ImGui::MenuItem("Script");
+            ImGui::EndMenu();
+        }
+        ImGui::EndPopup();
+    }
+    return result;
+}
+EditorUiAssetItemMenuResult ImGuiEditorUi::AssetItemContextMenu(const void* id)
+{
+    EditorUiAssetItemMenuResult result;
+    ImGui::PushID(id);
+    if(ImGui::BeginPopupContextItem("##assetItemContext"))
+    {
+        result.renameRequested=ImGui::MenuItem("Rename");
+        result.deleteRequested=ImGui::MenuItem("Delete");
+        ImGui::EndPopup();
+    }
+    ImGui::PopID();
+    return result;
+}
+EditorUiTextEditResult ImGuiEditorUi::RenameText(const char* label,char* buffer,size_t size,bool focus)
+{
+    EditorUiTextEditResult result;
+    if(focus)ImGui::SetKeyboardFocusHere();
+    result.submitted=ImGui::InputText(label,buffer,size,
+        ImGuiInputTextFlags_AutoSelectAll|ImGuiInputTextFlags_EnterReturnsTrue);
+    result.deactivated=ImGui::IsItemDeactivated();
+    return result;
+}
+EditorUiPrefabMenuResult ImGuiEditorUi::PrefabOverrideMenu(const void* id,bool hasOverrides)
+{
+    EditorUiPrefabMenuResult result;
+    ImGui::PushID(id);
+    if(ImGui::BeginPopupContextItem("##prefabOverrides")){
+        result.editRequested=ImGui::MenuItem("Edit Prefab");
+        ImGui::BeginDisabled(!hasOverrides);
+        result.applyRequested=ImGui::MenuItem("Apply Overrides to Prefab");
+        result.applyAllRequested=ImGui::MenuItem("Apply All to Prefab (Including Transform)");
+        result.revertRequested=ImGui::MenuItem("Revert Overrides");
+        ImGui::EndDisabled();
+        ImGui::Separator();
+        result.unpackRequested=ImGui::MenuItem("Unpack Prefab");
+        result.deleteRequested=ImGui::MenuItem("Delete From Scene");
         ImGui::EndPopup();
     }
     ImGui::PopID();
@@ -252,8 +352,14 @@ bool ImGuiEditorUi::BeginChild(const char*i){return ImGui::BeginChild(i,{0,0},fa
 bool ImGuiEditorUi::IsItemHovered()const{return ImGui::IsItemHovered();} bool ImGuiEditorUi::IsItemClicked()const{return ImGui::IsItemClicked()&&!ImGui::IsItemToggledOpen();}
 bool ImGuiEditorUi::IsItemDoubleClicked()const{return ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);}
 bool ImGuiEditorUi::IsWindowBackgroundClicked()const{return ImGui::IsMouseClicked(ImGuiMouseButton_Left)&&ImGui::IsWindowHovered()&&!ImGui::IsAnyItemHovered();}
-bool ImGuiEditorUi::CopyShortcutPressed()const{return ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)&&ImGui::GetIO().KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_C,false);}
-bool ImGuiEditorUi::PasteShortcutPressed()const{return ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)&&ImGui::GetIO().KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_V,false);}
+bool ImGuiEditorUi::CopyShortcutPressed()const{return ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)&&EditorKeyBindings::Get().Pressed(EditorCommand::Copy);}
+bool ImGuiEditorUi::PasteShortcutPressed()const{return ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)&&EditorKeyBindings::Get().Pressed(EditorCommand::Paste);}
+bool ImGuiEditorUi::DeleteShortcutPressed()const
+{
+    if(!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))return false;
+    if(EditorKeyBindings::Get().IsCapturing()||ImGui::GetIO().WantTextInput)return false;
+    return ImGui::IsKeyPressed(ImGuiKey_Delete,false)||ImGui::IsKeyPressed(ImGuiKey_Backspace,false);
+}
 bool ImGuiEditorUi::BeginDragDropSource(){
     const ImVec2 minimum=ImGui::GetItemRectMin(),maximum=ImGui::GetItemRectMax();
     ImDrawList* rowDrawList=ImGui::GetWindowDrawList();
@@ -268,25 +374,209 @@ void ImGuiEditorUi::EndDragDropSource(){ImGui::EndDragDropSource();}
 bool ImGuiEditorUi::BeginDragDropTarget(){return ImGui::BeginDragDropTarget();}
 const void* ImGuiEditorUi::AcceptDragDropPayload(const char*t,size_t*s){const ImGuiPayload*p=ImGui::AcceptDragDropPayload(t);if(!p)return nullptr;if(s)*s=static_cast<size_t>(p->DataSize);return p->Data;}
 EditorUiDragDropPayloadResult ImGuiEditorUi::InspectDragDropPayload(const char*t){EditorUiDragDropPayloadResult r;const ImGuiPayload*p=ImGui::AcceptDragDropPayload(t,ImGuiDragDropFlags_AcceptBeforeDelivery|ImGuiDragDropFlags_AcceptNoDrawDefaultRect);if(p){r.data=p->Data;r.size=static_cast<size_t>(p->DataSize);r.delivered=p->IsDelivery();}return r;}
+EditorUiDragDropPayloadResult ImGuiEditorUi::WindowDragDropTarget(const char*t)
+{
+    EditorUiDragDropPayloadResult result;
+    ImGuiWindow* window=ImGui::GetCurrentWindow();
+    if(!window||window->SkipItems)return result;
+    const ImGuiID id=window->GetID("##windowAssetDrop");
+    if(!ImGui::BeginDragDropTargetCustom(window->InnerRect,id))return result;
+    const ImGuiPayload* payload=ImGui::AcceptDragDropPayload(t,
+        ImGuiDragDropFlags_AcceptBeforeDelivery|ImGuiDragDropFlags_AcceptNoDrawDefaultRect);
+    if(payload){
+        const auto* bytes=static_cast<const unsigned char*>(payload->Data);
+        m_dropResultPayload.assign(bytes,bytes+payload->DataSize);
+        result.data=m_dropResultPayload.data();
+        result.size=m_dropResultPayload.size();
+        result.delivered=payload->IsDelivery()||!ImGui::IsMouseDown(ImGuiMouseButton_Left);
+    }
+    ImGui::EndDragDropTarget();
+    return result;
+}
 void ImGuiEditorUi::EndDragDropTarget(){ImGui::EndDragDropTarget();}
 void ImGuiEditorUi::SetClipboardText(const char*t){ImGui::SetClipboardText(t);} void ImGuiEditorUi::ScrollToBottom(){ImGui::SetScrollHereY(1.f);}
 bool ImGuiEditorUi::BeginTabBar(const char*i){return ImGui::BeginTabBar(i);} void ImGuiEditorUi::EndTabBar(){ImGui::EndTabBar();}
 bool ImGuiEditorUi::BeginTab(const char*l){return ImGui::BeginTabItem(l);} void ImGuiEditorUi::EndTab(){ImGui::EndTabItem();}
+bool ImGuiEditorUi::BeginTable(const char* id,int columns){return ImGui::BeginTable(id,columns,ImGuiTableFlags_Borders|ImGuiTableFlags_RowBg|ImGuiTableFlags_Resizable|ImGuiTableFlags_SizingStretchProp);}
+void ImGuiEditorUi::TableSetupColumn(const char* label){ImGui::TableSetupColumn(label);}
+void ImGuiEditorUi::TableSetupCompactColumn(const char* label){ImGui::TableSetupColumn(label,ImGuiTableColumnFlags_WidthFixed,28.f);}
+void ImGuiEditorUi::TableHeadersRow(){ImGui::TableHeadersRow();}
+void ImGuiEditorUi::TableNextRow(){ImGui::TableNextRow();}
+void ImGuiEditorUi::TableNextColumn(){ImGui::TableNextColumn();}
+void ImGuiEditorUi::EndTable(){ImGui::EndTable();}
+bool ImGuiEditorUi::BindingColumnHeader(const char* id,const char* label,bool canDelete)
+{
+    ImGui::PushID(id);ImGui::TextUnformatted(label);bool remove=false;
+    if(ImGui::BeginPopupContextItem("##bindingColumnMenu"))
+    {
+        if(ImGui::MenuItem("Delete binding column",nullptr,false,canDelete))remove=true;
+        if(!canDelete&&ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("At least one binding column is required.");
+        ImGui::EndPopup();
+    }
+    ImGui::PopID();return remove;
+}
+bool ImGuiEditorUi::AddBindingColumnHeader(const char* id)
+{
+    ImGui::PushID(id);const bool add=ImGui::SmallButton("+");
+    if(ImGui::IsItemHovered())ImGui::SetTooltip("Add another binding column");
+    ImGui::PopID();return add;
+}
+bool ImGuiEditorUi::KeyBindingInput(const char* id,const char* display,std::string* key,bool* control,bool* shift,bool* alt)
+{
+    if(!key||!control||!shift||!alt)return false;
+    const ImGuiID captureId=ImGui::GetID(id);
+    const bool capturing=m_bindingCaptureId==captureId;
+    const std::string buttonLabel=std::string(capturing?"Press a key...":display)+"##"+id;
+    const bool activated=ImGui::Button(buttonLabel.c_str(),{-1.f,0.f});
+    if(activated)m_bindingCaptureId=captureId;
+    bool changed=false;
+    if(m_bindingCaptureId==captureId&&!activated)
+    {
+        if(ImGui::IsKeyPressed(ImGuiKey_Escape,false))m_bindingCaptureId=0;
+        else if(ImGui::IsKeyPressed(ImGuiKey_Delete,false)||ImGui::IsKeyPressed(ImGuiKey_Backspace,false))
+        {
+            key->clear();*control=*shift=*alt=false;m_bindingCaptureId=0;changed=true;
+        }
+        else
+        {
+            const ImGuiIO& io=ImGui::GetIO();
+            const char* mouseName=nullptr;
+            if(ImGui::IsMouseClicked(ImGuiMouseButton_Left,false))mouseName="Mouse Left";
+            else if(ImGui::IsMouseClicked(ImGuiMouseButton_Right,false))mouseName="Mouse Right";
+            else if(ImGui::IsMouseClicked(ImGuiMouseButton_Middle,false))mouseName="Mouse Middle";
+            else if(ImGui::IsMouseClicked(3,false))mouseName="Mouse X1";
+            else if(ImGui::IsMouseClicked(4,false))mouseName="Mouse X2";
+            else if(io.MouseWheel!=0.f)mouseName="Mouse Wheel";
+            if(mouseName)
+            {
+                *key=mouseName;*control=io.KeyCtrl;*shift=io.KeyShift;*alt=io.KeyAlt;
+                m_bindingCaptureId=0;changed=true;
+            }
+            else
+            {
+                for(int value=ImGuiKey_NamedKey_BEGIN;value<ImGuiKey_NamedKey_END;++value)
+                {
+                    const ImGuiKey candidate=static_cast<ImGuiKey>(value);
+                    if(candidate==ImGuiKey_LeftCtrl||candidate==ImGuiKey_RightCtrl||candidate==ImGuiKey_LeftShift||candidate==ImGuiKey_RightShift||candidate==ImGuiKey_LeftAlt||candidate==ImGuiKey_RightAlt||!ImGui::IsKeyPressed(candidate,false))continue;
+                    const char* name=ImGui::GetKeyName(candidate);if(!name||!*name)continue;
+                    *key=name;*control=io.KeyCtrl;*shift=io.KeyShift;*alt=io.KeyAlt;
+                    m_bindingCaptureId=0;changed=true;break;
+                }
+            }
+        }
+    }
+    EditorKeyBindings::Get().SetCapturing(m_bindingCaptureId!=0);
+    return changed;
+}
+void ImGuiEditorUi::CancelKeyBindingCapture(){m_bindingCaptureId=0;EditorKeyBindings::Get().SetCapturing(false);}
 void ImGuiEditorUi::BeginDisabled(bool d){ImGui::BeginDisabled(d);} void ImGuiEditorUi::EndDisabled(){ImGui::EndDisabled();}
 bool ImGuiEditorUi::Combo(const char*l,int*s,const char*const*i,int c){return ImGui::Combo(l,s,i,c);}
 void ImGuiEditorUi::Tooltip(const char*t){if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("%s",t);}
 void ImGuiEditorUi::Progress(float f,const char*o){ImGui::ProgressBar(f,{-1,0},o);}
 void ImGuiEditorUi::DrawImage(void*tex,float w,float h){ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(tex)),{w,h});}
+void ImGuiEditorUi::DrawCircularImage(void* tex,float diameter,EditorUiColor border)
+{
+    const ImVec2 minimum=ImGui::GetCursorScreenPos();
+    const ImVec2 maximum{minimum.x+diameter,minimum.y+diameter};
+    ImGui::InvisibleButton("##circularImage",{diameter,diameter});
+    ImDrawList* draw=ImGui::GetWindowDrawList();
+    const ImTextureID texture=static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(tex));
+    draw->AddImageRounded(texture,minimum,maximum,{0,0},{1,1},IM_COL32_WHITE,
+        diameter*0.5f,ImDrawFlags_RoundCornersAll);
+    draw->AddCircle({minimum.x+diameter*0.5f,minimum.y+diameter*0.5f},
+        diameter*0.5f-0.5f,ImGui::ColorConvertFloat4ToU32(
+            {border.r,border.g,border.b,border.a}),0,1.25f);
+}
 EditorUiViewportInput ImGuiEditorUi::Viewport(void* texture,float aspect,EditorUiColor bg)
 {
-    EditorUiViewportInput out; ImVec2 a=ImGui::GetContentRegionAvail(); if(a.x<=1||a.y<=1)return out;
-    ImVec2 size=a,pos{0,0}; if(aspect>0){float aa=a.x/a.y;if(aa>aspect){size.x=a.y*aspect;pos.x=(a.x-size.x)*.5f;}else{size.y=a.x/aspect;pos.y=(a.y-size.y)*.5f;}}
-    if(size.x<a.x||size.y<a.y){ImVec2 p=ImGui::GetCursorScreenPos();ImGui::GetWindowDrawList()->AddRectFilled(p,{p.x+a.x,p.y+a.y},ImGui::GetColorU32({bg.r,bg.g,bg.b,bg.a}));}
-    out.available={size.x,size.y}; ImGui::SetCursorPos(pos); ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(texture)),size);
-    const ImVec2 min=ImGui::GetItemRectMin();const ImVec2 max=ImGui::GetItemRectMax();const ImVec2 mp=ImGui::GetIO().MousePos;out.mousePosInViewport={mp.x-min.x,mp.y-min.y};
-    m_viewportScreenMin={min.x,min.y};m_viewportScreenMax={max.x,max.y};
-    out.leftDown=ImGui::IsMouseDown(ImGuiMouseButton_Left);out.leftReleased=ImGui::IsMouseReleased(ImGuiMouseButton_Left);
-    out.hovered=ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);if(out.hovered||out.leftDown){auto d=ImGui::GetIO().MouseDelta;out.mouseDelta={d.x,d.y};}if(out.hovered){out.mouseWheel=ImGui::GetIO().MouseWheel;out.rightDown=ImGui::IsMouseDown(ImGuiMouseButton_Right);out.middleDown=ImGui::IsMouseDown(ImGuiMouseButton_Middle);out.leftClicked=ImGui::IsMouseClicked(ImGuiMouseButton_Left);}return out;
+    EditorUiViewportInput out;
+    const ImVec2 contentOrigin = ImGui::GetCursorPos();
+    const ImVec2 available = ImGui::GetContentRegionAvail();
+    if (available.x <= 1.f || available.y <= 1.f) return out;
+
+    ImVec2 size = available;
+    ImVec2 position{0.f, 0.f};
+    if (aspect > 0.f)
+    {
+        const float availableAspect = available.x / available.y;
+        if (availableAspect > aspect)
+        {
+            size.x = available.y * aspect;
+            position.x = (available.x - size.x) * 0.5f;
+        }
+        else
+        {
+            size.y = available.x / aspect;
+            position.y = (available.y - size.y) * 0.5f;
+        }
+    }
+    if (size.x < available.x || size.y < available.y)
+    {
+        const ImVec2 cursor = ImGui::GetCursorScreenPos();
+        ImGui::GetWindowDrawList()->AddRectFilled(cursor,
+            {cursor.x + available.x, cursor.y + available.y},
+            ImGui::GetColorU32({bg.r, bg.g, bg.b, bg.a}));
+    }
+
+    out.available = {size.x, size.y};
+    ImGui::SetCursorPos({contentOrigin.x + position.x,
+        contentOrigin.y + position.y});
+    ImGui::Image(static_cast<ImTextureID>(
+        reinterpret_cast<uintptr_t>(texture)), size);
+    const ImVec2 minimum = ImGui::GetItemRectMin();
+    const ImVec2 maximum = ImGui::GetItemRectMax();
+    const ImVec2 mouse = ImGui::GetIO().MousePos;
+    out.mousePosInViewport = {mouse.x - minimum.x, mouse.y - minimum.y};
+    m_viewportScreenMin = {minimum.x, minimum.y};
+    m_viewportScreenMax = {maximum.x, maximum.y};
+
+    out.hovered = ImGui::IsItemHovered(
+        ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
+    out.rawLeftClicked = out.hovered &&
+        ImGui::IsMouseClicked(ImGuiMouseButton_Left, false);
+    out.leftDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+    out.leftReleased = ImGui::IsMouseReleased(ImGuiMouseButton_Left);
+    const bool anyMouseDown = out.leftDown ||
+        ImGui::IsMouseDown(ImGuiMouseButton_Right) ||
+        ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+    const bool mousePressed = ImGui::IsMouseClicked(ImGuiMouseButton_Left) ||
+        ImGui::IsMouseClicked(ImGuiMouseButton_Right) ||
+        ImGui::IsMouseClicked(ImGuiMouseButton_Middle);
+    if (out.hovered && mousePressed)
+        m_capturedViewportTexture = texture;
+    const bool ownsDrag = m_capturedViewportTexture == texture;
+    out.viewportDragActive = ownsDrag;
+
+    if (out.hovered || ownsDrag)
+    {
+        const ImVec2 delta = ImGui::GetIO().MouseDelta;
+        out.mouseDelta = {delta.x, delta.y};
+        auto& bindings = EditorKeyBindings::Get();
+        out.mouseWheel = out.hovered
+            ? bindings.Wheel(EditorCommand::ViewportZoom) : 0.f;
+        out.rightDown = bindings.Down(EditorCommand::ViewportPan);
+        out.middleDown = bindings.Down(EditorCommand::ViewportOrbit);
+        out.zoomDragDown = bindings.Down(EditorCommand::ViewportZoom);
+        out.leftClicked = out.hovered &&
+            bindings.Pressed(EditorCommand::ViewportSelect);
+    }
+    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
+    {
+        auto& bindings = EditorKeyBindings::Get();
+        const float keyPanStep = 500.f * ImGui::GetIO().DeltaTime;
+        if (bindings.Down(EditorCommand::ViewportMoveLeft))
+            out.keyPanDX += keyPanStep;
+        if (bindings.Down(EditorCommand::ViewportMoveRight))
+            out.keyPanDX -= keyPanStep;
+        if (bindings.Down(EditorCommand::ViewportMoveForward))
+            out.keyDolly += keyPanStep;
+        if (bindings.Down(EditorCommand::ViewportMoveBackward))
+            out.keyDolly -= keyPanStep;
+    }
+    if (!anyMouseDown)
+        m_capturedViewportTexture = nullptr;
+    return out;
 }
 namespace
 {
@@ -312,3 +602,39 @@ void ImGuiEditorUi::DrawViewportText(EditorUiVec2 position,const char* text,Edit
     ImDrawList* draw=ImGui::GetWindowDrawList();draw->PushClipRect({m_viewportScreenMin.x,m_viewportScreenMin.y},{m_viewportScreenMax.x,m_viewportScreenMax.y},true);draw->AddText({m_viewportScreenMin.x+position.x,m_viewportScreenMin.y+position.y},ViewportColor(color),text?text:"");draw->PopClipRect();
 }
 void ImGuiEditorUi::FocusWindow(const char*t){ImGui::SetWindowFocus(t);}
+void ImGuiEditorUi::DockWindowToArea(const char* title,EditorPanelDockArea area)
+{
+    if(!title||!title[0]||area==EditorPanelDockArea::None)return;
+
+    auto nodeForWindow=[&](const char* name)->ImGuiID{
+        ImGuiWindow* window=ImGui::FindWindowByName(name);
+        return window&&window->DockNode?window->DockNode->ID:0;
+    };
+
+    ImGuiID targetNode=0;
+    switch(area)
+    {
+    case EditorPanelDockArea::MainDocument:
+        targetNode=nodeForWindow("Scene 1");
+        if(!targetNode)targetNode=nodeForWindow("Game 1");
+        break;
+    case EditorPanelDockArea::LeftSidebar:
+        targetNode=nodeForWindow("Hierarchy 1");
+        if(!targetNode)targetNode=nodeForWindow("Assets 1");
+        break;
+    case EditorPanelDockArea::RightSidebar:
+        targetNode=nodeForWindow("Properties 1");
+        break;
+    case EditorPanelDockArea::BottomPanel:
+        targetNode=nodeForWindow("Console 1");
+        if(!targetNode)targetNode=nodeForWindow("Problems 1");
+        if(!targetNode)targetNode=nodeForWindow("Terminal 1");
+        break;
+    default:
+        break;
+    }
+
+    if(targetNode)
+        ImGui::DockBuilderDockWindow(title,targetNode);
+}
+}

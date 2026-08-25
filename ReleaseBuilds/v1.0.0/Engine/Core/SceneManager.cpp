@@ -4,9 +4,14 @@
 #include <future>
 #include <thread>
 
+namespace Engine::Core
+{
+
 // Static member initialization
-Scene* SceneManager::s_activeScene = nullptr;
+Engine::Scene::Scene* SceneManager::s_activeScene = nullptr;
 SceneManager::SceneLoadedCallback SceneManager::s_onSceneLoaded = nullptr;
+std::string SceneManager::s_defaultScenePath;
+std::string SceneManager::s_pendingScenePath;
 
 // ---------------------------------------------------------------------------
 // SceneManager::LoadScene
@@ -27,11 +32,41 @@ bool SceneManager::LoadScene(const std::string& path)
     return true;
 }
 
+void SceneManager::RequestSceneLoad(const std::string& path)
+{
+    if (!path.empty())
+        s_pendingScenePath = path;
+}
+
+bool SceneManager::RequestDefaultSceneLoad()
+{
+    if (s_defaultScenePath.empty())
+        return false;
+    RequestSceneLoad(s_defaultScenePath);
+    return true;
+}
+
+bool SceneManager::ProcessPendingSceneLoad()
+{
+    if (s_pendingScenePath.empty())
+        return false;
+
+    std::string path = std::move(s_pendingScenePath);
+    s_pendingScenePath.clear();
+    if (!LoadScene(path))
+        return false;
+
+    // A transition creates a fresh component graph whose lifecycle must begin
+    // before the next update/render frame.
+    s_activeScene->Start();
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // SceneManager::LoadSceneAsync
 // ---------------------------------------------------------------------------
 void SceneManager::LoadSceneAsync(const std::string& path,
-                                   std::function<void(Scene*)> onComplete)
+                                   std::function<void(Engine::Scene::Scene*)> onComplete)
 {
     if (!s_activeScene)
     {
@@ -41,7 +76,7 @@ void SceneManager::LoadSceneAsync(const std::string& path,
     }
 
     // Launch async loading task using std::async
-    // Note: Scene loading typically involves file I/O which is safe to do on background thread,
+    // Note: Engine::Scene::Scene loading typically involves file I/O which is safe to do on background thread,
     // but graphics resource creation must happen on main thread
     std::thread([path, onComplete, activeScene = s_activeScene]()
     {
@@ -63,4 +98,6 @@ void SceneManager::LoadSceneAsync(const std::string& path,
                 onComplete(nullptr);
         }
     }).detach(); // Detach thread to run independently
+}
+
 }

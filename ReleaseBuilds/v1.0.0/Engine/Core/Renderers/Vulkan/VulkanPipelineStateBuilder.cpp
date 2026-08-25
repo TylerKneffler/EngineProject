@@ -4,13 +4,16 @@
 #include "Core/Compoonents/Mesh.h"
 #include <cstring>
 
+
+namespace Engine::Renderers
+{
 VulkanPipelineState::~VulkanPipelineState()
 {
     if (m_pipeline) vkDestroyPipeline(m_device, m_pipeline, nullptr);
     if (m_layout) vkDestroyPipelineLayout(m_device, m_layout, nullptr);
 }
 
-static void CopyShader(std::vector<uint8_t>& target, const IShader* shader)
+static void CopyShader(std::vector<uint8_t>& target, const Engine::Graphics::IShader* shader)
 {
     target.clear();
     if (!shader || !shader->GetBytecode()) return;
@@ -18,25 +21,25 @@ static void CopyShader(std::vector<uint8_t>& target, const IShader* shader)
     target.assign(bytes, bytes + shader->GetBytecodeSize());
 }
 
-IPipelineStateBuilder& VulkanPipelineStateBuilder::SetVertexShader(const IShader* s) { CopyShader(m_vs, s); return *this; }
-IPipelineStateBuilder& VulkanPipelineStateBuilder::SetPixelShader(const IShader* s) { CopyShader(m_ps, s); return *this; }
-IPipelineStateBuilder& VulkanPipelineStateBuilder::SetFillMode(bool w) { m_polygonMode = w ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL; return *this; }
-IPipelineStateBuilder& VulkanPipelineStateBuilder::SetCullMode(bool b) { m_cullMode = b ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_NONE; return *this; }
-IPipelineStateBuilder& VulkanPipelineStateBuilder::SetFrontCounterClockwise(bool c) { m_frontFace = c ? VK_FRONT_FACE_COUNTER_CLOCKWISE : VK_FRONT_FACE_CLOCKWISE; return *this; }
-IPipelineStateBuilder& VulkanPipelineStateBuilder::SetDepthClipEnable(bool) { return *this; }
-IPipelineStateBuilder& VulkanPipelineStateBuilder::SetBlendEnable(bool b) { m_blend = b; return *this; }
-IPipelineStateBuilder& VulkanPipelineStateBuilder::SetSrcBlend(int v) { m_srcBlend = Blend(v); return *this; }
-IPipelineStateBuilder& VulkanPipelineStateBuilder::SetDestBlend(int v) { m_dstBlend = Blend(v); return *this; }
-IPipelineStateBuilder& VulkanPipelineStateBuilder::SetBlendOp(int v) { m_blendOp = BlendOp(v); return *this; }
-IPipelineStateBuilder& VulkanPipelineStateBuilder::SetSrcBlendAlpha(int v) { m_srcBlendAlpha = Blend(v); return *this; }
-IPipelineStateBuilder& VulkanPipelineStateBuilder::SetDestBlendAlpha(int v) { m_dstBlendAlpha = Blend(v); return *this; }
-IPipelineStateBuilder& VulkanPipelineStateBuilder::SetBlendOpAlpha(int v) { m_blendOpAlpha = BlendOp(v); return *this; }
-IPipelineStateBuilder& VulkanPipelineStateBuilder::SetDepthEnable(bool b) { m_depth = b; return *this; }
-IPipelineStateBuilder& VulkanPipelineStateBuilder::SetDepthWriteEnable(bool b) { m_depthWrite = b; return *this; }
-IPipelineStateBuilder& VulkanPipelineStateBuilder::SetDepthFunc(int v) { m_depthCompare = Compare(v); return *this; }
-IPipelineStateBuilder& VulkanPipelineStateBuilder::SetRenderTargetFormat(int, int) { return *this; }
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetVertexShader(const Engine::Graphics::IShader* s) { CopyShader(m_vs, s); return *this; }
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetPixelShader(const Engine::Graphics::IShader* s) { CopyShader(m_ps, s); return *this; }
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetFillMode(bool w) { m_polygonMode = w ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL; return *this; }
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetCullMode(bool b) { m_cullMode = b ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_NONE; return *this; }
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetFrontCounterClockwise(bool c) { m_frontFace = c ? VK_FRONT_FACE_COUNTER_CLOCKWISE : VK_FRONT_FACE_CLOCKWISE; return *this; }
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetDepthClipEnable(bool) { return *this; }
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetBlendEnable(bool b) { m_blend = b; return *this; }
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetSrcBlend(int v) { m_srcBlend = Blend(v); return *this; }
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetDestBlend(int v) { m_dstBlend = Blend(v); return *this; }
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetBlendOp(int v) { m_blendOp = BlendOp(v); return *this; }
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetSrcBlendAlpha(int v) { m_srcBlendAlpha = Blend(v); return *this; }
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetDestBlendAlpha(int v) { m_dstBlendAlpha = Blend(v); return *this; }
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetBlendOpAlpha(int v) { m_blendOpAlpha = BlendOp(v); return *this; }
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetDepthEnable(bool b) { m_depth = b; return *this; }
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetDepthWriteEnable(bool b) { m_depthWrite = b; return *this; }
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetDepthFunc(int v) { m_depthCompare = Compare(v); return *this; }
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetRenderTargetFormat(int, int) { return *this; }
 
-IPipelineStateBuilder& VulkanPipelineStateBuilder::SetInputLayout(const VertexElement* elements, uint32_t count)
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetInputLayout(const VertexElement* elements, uint32_t count)
 {
     m_bindings.clear(); m_attributes.clear();
     for (uint32_t i = 0; elements && i < count; ++i)
@@ -52,11 +55,12 @@ IPipelineStateBuilder& VulkanPipelineStateBuilder::SetInputLayout(const VertexEl
         VkVertexInputAttributeDescription attribute{};
         attribute.location = i;
         attribute.binding = elements[i].inputSlot;
+        uint32_t formatSize = 0;
         switch (elements[i].format)
         {
-        case 2:  attribute.format = VK_FORMAT_R32G32B32A32_SFLOAT; break;
-        case 6:  attribute.format = VK_FORMAT_R32G32B32_SFLOAT; break;
-        case 16: attribute.format = VK_FORMAT_R32G32_SFLOAT; break;
+        case 2:  attribute.format = VK_FORMAT_R32G32B32A32_SFLOAT; formatSize = 16; break;
+        case 6:  attribute.format = VK_FORMAT_R32G32B32_SFLOAT; formatSize = 12; break;
+        case 16: attribute.format = VK_FORMAT_R32G32_SFLOAT; formatSize = 8; break;
         default:
             throw std::runtime_error(
                 "Unsupported cross-API vertex format " +
@@ -64,13 +68,15 @@ IPipelineStateBuilder& VulkanPipelineStateBuilder::SetInputLayout(const VertexEl
         }
         attribute.offset = elements[i].alignedByteOffset;
         m_attributes.push_back(attribute);
+        auto stride = std::find_if(m_bindings.begin(), m_bindings.end(),
+            [&](const auto& binding) { return binding.binding == elements[i].inputSlot; });
+        stride->stride = std::max(stride->stride,
+            elements[i].alignedByteOffset + formatSize);
     }
-    // POSITION/NORMAL plus imported UV and tangent data.
-    for (auto& binding : m_bindings) binding.stride = sizeof(Vertex);
     return *this;
 }
 
-IPipelineStateBuilder& VulkanPipelineStateBuilder::SetPrimitiveTopology(PrimitiveTopology t)
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetPrimitiveTopology(PrimitiveTopology t)
 {
     switch (t)
     {
@@ -83,7 +89,7 @@ IPipelineStateBuilder& VulkanPipelineStateBuilder::SetPrimitiveTopology(Primitiv
     return *this;
 }
 
-std::unique_ptr<IPipelineState> VulkanPipelineStateBuilder::Build()
+std::unique_ptr<Engine::Graphics::IPipelineState> VulkanPipelineStateBuilder::Build()
 {
     try
     {
@@ -152,4 +158,5 @@ VkBlendFactor VulkanPipelineStateBuilder::Blend(int v)
 }
 VkBlendOp VulkanPipelineStateBuilder::BlendOp(int v) { return static_cast<VkBlendOp>(std::clamp(v, 0, 4)); }
 VkCompareOp VulkanPipelineStateBuilder::Compare(int v) { return static_cast<VkCompareOp>(std::clamp(v, 0, 7)); }
+}
 #endif

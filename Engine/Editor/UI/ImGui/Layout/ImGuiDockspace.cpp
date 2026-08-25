@@ -18,10 +18,18 @@ void ImGuiDockspace::Draw()
         ImGuiWindow* console = ImGui::FindWindowByName("Console 1");
         ImGuiWindow* terminal = ImGui::FindWindowByName("Terminal 1");
         ImGuiWindow* problems = ImGui::FindWindowByName("Problems 1");
+        ImGuiWindow* assets = ImGui::FindWindowByName("Assets 1");
+        ImGuiWindow* hierarchy = ImGui::FindWindowByName("Hierarchy 1");
         if (console && console->DockNode && terminal && !terminal->DockNode)
             ImGui::DockBuilderDockWindow("Terminal 1", console->DockNode->ID);
         if (console && console->DockNode && problems && !problems->DockNode)
             ImGui::DockBuilderDockWindow("Problems 1", console->DockNode->ID);
+        // Migrate the former default where Assets shared the left hierarchy
+        // stack. Custom placements elsewhere are left untouched.
+        if (console && console->DockNode && assets && assets->DockNode &&
+            hierarchy && hierarchy->DockNode &&
+            assets->DockNode == hierarchy->DockNode)
+            ImGui::DockBuilderDockWindow("Assets 1", console->DockNode->ID);
         return;
     }
 
@@ -40,9 +48,9 @@ void ImGuiDockspace::Draw()
         center, ImGuiDir_Down, 0.25f, &centerBottom, &centerTop);
 
     ImGui::DockBuilderDockWindow("Hierarchy 1", left);
-    ImGui::DockBuilderDockWindow("Assets 1", left);
     ImGui::DockBuilderDockWindow("Scene 1", centerTop);
     ImGui::DockBuilderDockWindow("Game 1", centerTop);
+    ImGui::DockBuilderDockWindow("Assets 1", centerBottom);
     ImGui::DockBuilderDockWindow("Console 1", centerBottom);
     ImGui::DockBuilderDockWindow("Problems 1", centerBottom);
     ImGui::DockBuilderDockWindow("Terminal 1", centerBottom);

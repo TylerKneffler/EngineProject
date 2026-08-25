@@ -6,6 +6,8 @@
 #include "Engine/Editor/Core/View/ViewFactory.h"
 #include "Engine/Editor/Core/View/Views/PreferencesView.h"
 
+namespace Engine::Editor
+{
 void ImGuiPanelHost::Draw(EditorState& state)
 {
     DrawPanels(state);
@@ -17,7 +19,20 @@ void ImGuiPanelHost::DrawPanels(EditorState& state)
     auto& panels = state.GetPanels();
     for (auto& panel : panels)
         if (panel)
+        {
+            if (panel->ConsumeDefaultDockPending())
+                m_ui.DockWindowToArea(panel->GetTitle().c_str(),
+                    panel->GetDefaultDockArea());
             panel->DrawPanel(m_ui);
+        }
+
+    // Asset callbacks may request panels to be added. Apply those requests only
+    // after traversal, because push_back can invalidate this vector's iterators.
+    state.ProcessPendingPrefabStageOpen();
+
+    // The prefab scene tab is its own document window. Shared hierarchy and
+    // properties panels retarget based on focused document.
+    state.HandlePrefabPanelClosures();
 
     ViewFactory* factory = state.GetViewFactory();
     for (auto it = panels.begin(); it != panels.end();)
@@ -49,4 +64,5 @@ void ImGuiPanelHost::DrawPreferences(EditorState& state)
         state.SetShowPreferences(show);
     }
     preferences->SetOpen(show);
+}
 }
