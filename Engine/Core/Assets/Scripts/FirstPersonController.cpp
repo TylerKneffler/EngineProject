@@ -119,19 +119,19 @@ void FirstPersonController::UpdateMovement(float deltaTime)
     const glm::vec3 right = RightVector(m_yaw);
     const glm::vec3 movement = (forward * moveZ + right * moveX);
 
-    const float speed = moveSpeed * sprint * deltaTime;
     if (glm::length2(movement) > 0.0001f)
     {
         const glm::vec3 direction = glm::normalize(movement);
-        const glm::vec3 worldDelta = direction * speed;
-        Owner->transform.position += worldDelta;
-
         if (auto* body = Owner->GetComponent<Engine::Components::RigidBody>())
         {
             glm::vec3 velocity = body->GetLinearVelocity();
             velocity.x = direction.x * moveSpeed * sprint;
             velocity.z = direction.z * moveSpeed * sprint;
             body->SetLinearVelocity(velocity);
+        }
+        else
+        {
+            Owner->transform.position += direction * moveSpeed * sprint * deltaTime;
         }
     }
     else if (auto* body = Owner->GetComponent<Engine::Components::RigidBody>())

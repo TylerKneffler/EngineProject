@@ -45,7 +45,6 @@
 - [x] Replace per-frame physics JSON configuration signatures with component revision counters and remove duplicate `EnsureBody()` / `EnsureSoftBody()` calls.
 - [ ] Cache cloth simulation meshes so unchanged cloth bodies do not reload mesh files from disk.
 - [ ] Skip morph deformation, bounds rebuilding, and vertex uploads until morph weights actually change.
-- [ ] Cache retained UI layout, wrapped text, and generated vertices until content or viewport dimensions change.
 - [x] Resolve sprite/component references once per update or render snapshot instead of repeatedly for preparation, readiness, UV, size, and texture queries.
 - [x] Give animation, mesh, and skinned-mesh components lightweight inspectors that do not serialize their full runtime payload every expanded frame.
 - [ ] Cache registered component-picker entries rather than constructing component prototypes whenever the picker is drawn.

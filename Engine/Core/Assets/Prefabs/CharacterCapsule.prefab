@@ -76,8 +76,8 @@
           <item>1</item>
           <item>0.5</item>
         </PrimitiveObjectCollider.size>
-        <PrimitiveObjectCollider.radius>0.35</PrimitiveObjectCollider.radius>
-        <PrimitiveObjectCollider.height>1.2</PrimitiveObjectCollider.height>
+        <PrimitiveObjectCollider.radius>0.5</PrimitiveObjectCollider.radius>
+        <PrimitiveObjectCollider.height>2</PrimitiveObjectCollider.height>
       </components:PrimitiveObjectCollider>
       <components:RigidBody>
         <RigidBody.bodyType>Dynamic</RigidBody.bodyType>
@@ -86,10 +86,10 @@
         <RigidBody.gravityScale>1</RigidBody.gravityScale>
         <RigidBody.linearDamping>0.2</RigidBody.linearDamping>
         <RigidBody.angularDamping>0.8</RigidBody.angularDamping>
-        <RigidBody.friction>0.5</RigidBody.friction>
+        <RigidBody.friction>0.05</RigidBody.friction>
         <RigidBody.restitution>0.0</RigidBody.restitution>
         <RigidBody.isTrigger>false</RigidBody.isTrigger>
-        <RigidBody.continuousCollision>false</RigidBody.continuousCollision>
+        <RigidBody.continuousCollision>true</RigidBody.continuousCollision>
         <RigidBody.initialLinearVelocity>
           <item>0</item>
           <item>0</item>

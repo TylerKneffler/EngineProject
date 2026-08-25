@@ -227,6 +227,14 @@ void EditorState::InitializeUiState()
 // ---------------------------------------------------------------------------
 void EditorState::SaveScene()
 {
+    if (!m_playModeSceneSnapshot.empty())
+    {
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Warning,
+                "Scenes cannot be saved during Play mode. Stop the game first.");
+        return;
+    }
+
     if (!m_activePrefabPath.empty() && m_prefabDocumentFocused)
     {
         if (!m_prefabScene)
@@ -275,7 +283,7 @@ void EditorState::SaveScene()
 
 bool EditorState::SaveMainScene()
 {
-    if (!m_scene)
+    if (!m_scene || !m_playModeSceneSnapshot.empty())
         return false;
 
     std::string destination = m_currentScenePath;
@@ -327,6 +335,14 @@ bool EditorState::SaveMainScene()
 
 void EditorState::SaveAll()
 {
+    if (!m_playModeSceneSnapshot.empty())
+    {
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Warning,
+                "Documents cannot be saved during Play mode. Stop the game first.");
+        return;
+    }
+
     if (!m_activePrefabPath.empty())
     {
         const bool previousFocus = m_prefabDocumentFocused;
@@ -683,9 +699,13 @@ void EditorState::RemovePrefabPanels()
 
 void EditorState::CapturePlayModeScene()
 {
-    if (!m_scene)
+    if (!m_scene || !m_playModeSceneSnapshot.empty())
         return;
 
+    // Finish any editor interaction before establishing the immutable play
+    // baseline. Runtime changes must never enter the undo history.
+    TrackSceneChanges(true, false);
+    CommitPendingHistoryEdit();
     m_playModeSceneSnapshot = m_scene->SaveToString();
     m_prePlayHasUnsavedChanges = m_hasUnsavedChanges;
     m_prePlayHadObjectSelection = false;
@@ -724,6 +744,9 @@ void EditorState::RestorePlayModeScene()
         m_historyBaseline = CaptureHistoryEntry();
         m_historyCapturedRevision = m_sceneEditRevision;
         m_historySelectionDirty = false;
+        m_sceneEditInProgress = false;
+        if (m_renderer)
+            m_renderer->MarkDirty();
         OutputDebugStringA("[Play] Restored editor scene state.\n");
         if (m_primaryConsole)
             m_primaryConsole->AddLog(ConsoleView::Level::Info, "[Play] Restored pre-play scene state.");

@@ -82,10 +82,12 @@ void ImGuiMainMenu::DrawFileMenu(EditorState& state, PlayState playState,
         state.Redo();
     if (busy) ImGui::EndDisabled();
     ImGui::Separator();
+    if (busy) ImGui::BeginDisabled();
     if (ImGui::MenuItem("Save", saveShortcut.c_str()))
         state.SaveScene();
     if (ImGui::MenuItem("Save All", saveAllShortcut.c_str()))
         state.SaveAll();
+    if (busy) ImGui::EndDisabled();
     if (state.IsEditingPrefab() && ImGui::MenuItem("Close Prefab Stage"))
         state.ClosePrefabStage();
     ImGui::Separator();

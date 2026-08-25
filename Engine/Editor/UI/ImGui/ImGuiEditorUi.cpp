@@ -491,6 +491,7 @@ void ImGuiEditorUi::DrawCircularImage(void* tex,float diameter,EditorUiColor bor
 EditorUiViewportInput ImGuiEditorUi::Viewport(void* texture,float aspect,EditorUiColor bg)
 {
     EditorUiViewportInput out;
+    const ImVec2 contentOrigin = ImGui::GetCursorPos();
     const ImVec2 available = ImGui::GetContentRegionAvail();
     if (available.x <= 1.f || available.y <= 1.f) return out;
 
@@ -519,7 +520,8 @@ EditorUiViewportInput ImGuiEditorUi::Viewport(void* texture,float aspect,EditorU
     }
 
     out.available = {size.x, size.y};
-    ImGui::SetCursorPos(position);
+    ImGui::SetCursorPos({contentOrigin.x + position.x,
+        contentOrigin.y + position.y});
     ImGui::Image(static_cast<ImTextureID>(
         reinterpret_cast<uintptr_t>(texture)), size);
     const ImVec2 minimum = ImGui::GetItemRectMin();

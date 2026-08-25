@@ -192,8 +192,8 @@ void ImGuiUiBackend::DrawEditor(EditorState& state, PlayState playState,
         playState == PlayState::BuildFailed;
     if (historyAvailable && keybinds.Pressed(EditorCommand::Undo)) state.Undo();
     if (historyAvailable && keybinds.Pressed(EditorCommand::Redo)) state.Redo();
-    if (keybinds.Pressed(EditorCommand::SaveScene)) state.SaveScene();
-    if (keybinds.Pressed(EditorCommand::SaveAll)) state.SaveAll();
+    if (historyAvailable && keybinds.Pressed(EditorCommand::SaveScene)) state.SaveScene();
+    if (historyAvailable && keybinds.Pressed(EditorCommand::SaveAll)) state.SaveAll();
     if (keybinds.Pressed(EditorCommand::Preferences)) state.SetShowPreferences(true);
     if (keybinds.Pressed(EditorCommand::ImportAsset)) state.ImportAsset();
     if (historyAvailable && keybinds.Pressed(EditorCommand::BakeLighting)) state.BakeLighting();
