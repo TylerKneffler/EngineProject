@@ -46,8 +46,9 @@ namespace
 {
 constexpr int kFirstGlyph = 32;
 constexpr int kLastGlyph = 126;
-constexpr int kAtlasSize = 1024;
-constexpr float kAtlasFontHeight = 48.f;
+constexpr int kGlyphCount = kLastGlyph - kFirstGlyph + 1;
+constexpr int kAtlasSize = 2048;
+constexpr unsigned int kFontOversampling = 2;
 
 struct Glyph
 {
@@ -60,9 +61,20 @@ struct Glyph
 struct FontAtlas
 {
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> texture;
-    std::array<Glyph, kLastGlyph - kFirstGlyph + 1> glyphs{};
+    std::array<Glyph, kGlyphCount> glyphs{};
+    std::array<float, kGlyphCount * kGlyphCount> kerning{};
     float ascent = 0.f;
-    float lineHeight = kAtlasFontHeight;
+    float lineHeight = 16.f;
+    float pixelHeight = 16.f;
+
+    float Kerning(int first, int second) const
+    {
+        if (first < kFirstGlyph || first > kLastGlyph ||
+            second < kFirstGlyph || second > kLastGlyph)
+            return 0.f;
+        return kerning[(first - kFirstGlyph) * kGlyphCount +
+            (second - kFirstGlyph)];
+    }
 };
 
 struct UIVertex
@@ -141,11 +153,15 @@ std::vector<unsigned char> ReadBinary(const std::filesystem::path& path)
 float Measure(const std::string& value, const FontAtlas& atlas, float scale)
 {
     float width = 0.f;
+    int previous = -1;
     for (unsigned char character : value)
     {
         const int codepoint = character >= kFirstGlyph && character <= kLastGlyph
             ? character : '?';
+        if (previous >= 0)
+            width += atlas.Kerning(previous, codepoint) * scale;
         width += atlas.glyphs[codepoint - kFirstGlyph].advance * scale;
+        previous = codepoint;
     }
     return width;
 }
@@ -237,12 +253,20 @@ struct UIRenderer::Impl
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> whiteTexture;
     std::size_t vertexCapacity = 0;
     std::unordered_map<std::string, std::unique_ptr<FontAtlas>> atlases;
+    glm::vec2 pointerPosition{};
+    glm::vec2 pointerViewportSize{ 1.f };
+    bool hasExternalPointerInput = false;
+    bool externalPointerHovered = false;
+    bool externalPointerDown = false;
 
-    FontAtlas* GetAtlas(const std::string& requested)
+    FontAtlas* GetAtlas(const std::string& requested, float requestedPixelHeight)
     {
         const std::filesystem::path fontPath = ResolveFontPath(requested);
         if (fontPath.empty() || !provider || !provider->GetTextureFactory()) return nullptr;
-        const std::string key = fontPath.lexically_normal().generic_string();
+        const int pixelHeight = std::clamp(
+            static_cast<int>(std::lround(requestedPixelHeight)), 8, 256);
+        const std::string key = fontPath.lexically_normal().generic_string() +
+            "#" + std::to_string(pixelHeight);
         if (auto found = atlases.find(key); found != atlases.end()) return found->second.get();
 
         const std::vector<unsigned char> fontData = ReadBinary(fontPath);
@@ -252,44 +276,53 @@ struct UIRenderer::Impl
         if (offset < 0 || !stbtt_InitFont(&font, fontData.data(), offset)) return nullptr;
 
         auto atlas = std::make_unique<FontAtlas>();
-        std::vector<uint8_t> pixels(kAtlasSize * kAtlasSize * 4, 255);
-        for (std::size_t index = 0; index < pixels.size() / 4; ++index) pixels[index * 4 + 3] = 0;
-        const float fontScale = stbtt_ScaleForPixelHeight(&font, kAtlasFontHeight);
+        atlas->pixelHeight = static_cast<float>(pixelHeight);
+        std::vector<uint8_t> coverage(kAtlasSize * kAtlasSize, 0);
+        std::array<stbtt_packedchar, kGlyphCount> packed{};
+        stbtt_pack_context packing{};
+        if (!stbtt_PackBegin(&packing, coverage.data(), kAtlasSize,
+            kAtlasSize, 0, 2, nullptr))
+            return nullptr;
+        stbtt_PackSetOversampling(&packing,
+            kFontOversampling, kFontOversampling);
+        const int packedSuccessfully = stbtt_PackFontRange(&packing,
+            fontData.data(), 0, static_cast<float>(pixelHeight),
+            kFirstGlyph, kGlyphCount, packed.data());
+        stbtt_PackEnd(&packing);
+        if (!packedSuccessfully)
+            return nullptr;
+
+        const float fontScale = stbtt_ScaleForPixelHeight(
+            &font, static_cast<float>(pixelHeight));
         int ascent = 0, descent = 0, lineGap = 0;
         stbtt_GetFontVMetrics(&font, &ascent, &descent, &lineGap);
         atlas->ascent = ascent * fontScale;
         atlas->lineHeight = (ascent - descent + lineGap) * fontScale;
 
-        int penX = 1, penY = 1, rowHeight = 0;
         for (int codepoint = kFirstGlyph; codepoint <= kLastGlyph; ++codepoint)
         {
             Glyph& glyph = atlas->glyphs[codepoint - kFirstGlyph];
-            int advance = 0, bearing = 0;
-            stbtt_GetCodepointHMetrics(&font, codepoint, &advance, &bearing);
-            glyph.advance = advance * fontScale;
-            int width = 0, height = 0, xOffset = 0, yOffset = 0;
-            unsigned char* sdf = stbtt_GetCodepointSDF(&font, fontScale, codepoint,
-                5, 128, 32.f, &width, &height, &xOffset, &yOffset);
-            if (!sdf || width <= 0 || height <= 0) continue;
-            if (penX + width + 1 >= kAtlasSize)
-            { penX = 1; penY += rowHeight + 1; rowHeight = 0; }
-            if (penY + height + 1 >= kAtlasSize)
-            { stbtt_FreeSDF(sdf, nullptr); return nullptr; }
-            for (int y = 0; y < height; ++y)
-                for (int x = 0; x < width; ++x)
-                    pixels[((penY + y) * kAtlasSize + penX + x) * 4 + 3] = sdf[y * width + x];
-            glyph.u0 = static_cast<float>(penX) / kAtlasSize;
-            glyph.v0 = static_cast<float>(penY) / kAtlasSize;
-            glyph.u1 = static_cast<float>(penX + width) / kAtlasSize;
-            glyph.v1 = static_cast<float>(penY + height) / kAtlasSize;
-            glyph.xOffset = static_cast<float>(xOffset);
-            glyph.yOffset = static_cast<float>(yOffset);
-            glyph.width = static_cast<float>(width);
-            glyph.height = static_cast<float>(height);
-            penX += width + 1;
-            rowHeight = std::max(rowHeight, height);
-            stbtt_FreeSDF(sdf, nullptr);
+            const stbtt_packedchar& source = packed[codepoint - kFirstGlyph];
+            glyph.u0 = static_cast<float>(source.x0) / kAtlasSize;
+            glyph.v0 = static_cast<float>(source.y0) / kAtlasSize;
+            glyph.u1 = static_cast<float>(source.x1) / kAtlasSize;
+            glyph.v1 = static_cast<float>(source.y1) / kAtlasSize;
+            glyph.xOffset = source.xoff;
+            glyph.yOffset = source.yoff;
+            glyph.width = source.xoff2 - source.xoff;
+            glyph.height = source.yoff2 - source.yoff;
+            glyph.advance = source.xadvance;
         }
+
+        for (int first = kFirstGlyph; first <= kLastGlyph; ++first)
+            for (int second = kFirstGlyph; second <= kLastGlyph; ++second)
+                atlas->kerning[(first - kFirstGlyph) * kGlyphCount +
+                    (second - kFirstGlyph)] = fontScale *
+                        stbtt_GetCodepointKernAdvance(&font, first, second);
+
+        std::vector<uint8_t> pixels(kAtlasSize * kAtlasSize * 4, 255);
+        for (std::size_t index = 0; index < coverage.size(); ++index)
+            pixels[index * 4 + 3] = coverage[index];
         atlas->texture = provider->GetTextureFactory()->CreateTexture2D(
             kAtlasSize, kAtlasSize, pixels.data(), 1, Engine::Graphics::GraphicsTextureFormat::Rgba8, false);
         if (!atlas->texture) return nullptr;
@@ -356,35 +389,52 @@ bool UIRenderer::IsReady() const
     return m_impl && m_impl->imagePipeline && m_impl->fontPipeline;
 }
 
+void UIRenderer::SetPointerInput(float x, float y, float viewportWidth,
+    float viewportHeight, bool hovered, bool mouseDown)
+{
+    if (!m_impl) return;
+    m_impl->pointerPosition = { x, y };
+    m_impl->pointerViewportSize = {
+        std::max(1.f, viewportWidth), std::max(1.f, viewportHeight) };
+    m_impl->hasExternalPointerInput = true;
+    m_impl->externalPointerHovered = hovered;
+    m_impl->externalPointerDown = mouseDown;
+}
+
 void UIRenderer::Render(Engine::Scene::Scene& scene,
     Engine::Graphics::IGraphicsContext* context, float viewportAspect)
 {
     if (!IsReady() || !context || !m_impl->provider) return;
     const std::vector<Engine::Model::UITextLayout> items = Engine::UI::UILayout::Resolve(scene, viewportAspect);
 
-    glm::vec2 mouseClientPosition(0.f);
-    glm::vec2 mouseClientSize(1.f);
+    glm::vec2 mouseClientPosition = m_impl->pointerPosition;
+    glm::vec2 mouseClientSize = m_impl->pointerViewportSize;
     bool hasMousePosition = false;
-    bool mouseDown = false;
+    bool mouseDown = m_impl->externalPointerDown;
+    if (m_impl->hasExternalPointerInput)
+        hasMousePosition = m_impl->externalPointerHovered;
 #ifdef _WIN32
-    if (HWND hwnd = GetForegroundWindow())
+    if (!m_impl->hasExternalPointerInput)
     {
-        POINT cursor{};
-        if (GetCursorPos(&cursor) && ScreenToClient(hwnd, &cursor))
+        if (HWND hwnd = GetForegroundWindow())
         {
-            RECT client{};
-            if (GetClientRect(hwnd, &client))
+            POINT cursor{};
+            if (GetCursorPos(&cursor) && ScreenToClient(hwnd, &cursor))
             {
-                const float width = static_cast<float>(std::max(1L, client.right - client.left));
-                const float height = static_cast<float>(std::max(1L, client.bottom - client.top));
-                mouseClientPosition.x = static_cast<float>(cursor.x);
-                mouseClientPosition.y = static_cast<float>(cursor.y);
-                mouseClientSize = { width, height };
-                hasMousePosition = true;
+                RECT client{};
+                if (GetClientRect(hwnd, &client))
+                {
+                    const float width = static_cast<float>(std::max(1L, client.right - client.left));
+                    const float height = static_cast<float>(std::max(1L, client.bottom - client.top));
+                    mouseClientPosition.x = static_cast<float>(cursor.x);
+                    mouseClientPosition.y = static_cast<float>(cursor.y);
+                    mouseClientSize = { width, height };
+                    hasMousePosition = true;
+                }
             }
         }
+        mouseDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
     }
-    mouseDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
 #endif
 
     std::vector<UIVertex> vertices;
@@ -609,9 +659,11 @@ void UIRenderer::Render(Engine::Scene::Scene& scene,
     for (const Engine::Model::UITextLayout& item : items)
     {
         if (!item.layout || !item.text || item.text->text.empty()) continue;
-        FontAtlas* atlas = m_impl->GetAtlas(item.text->fontPath);
+        FontAtlas* atlas = m_impl->GetAtlas(
+            item.text->fontPath, item.text->fontSize);
         if (!atlas) continue;
-        const float scale = std::max(1.f, item.text->fontSize) / kAtlasFontHeight;
+        const float scale = std::max(1.f, item.text->fontSize) /
+            atlas->pixelHeight;
         const Engine::Model::UIRect& rect = item.layout->GetComputedRect();
         Engine::Model::UIRect clip = item.layout->GetComputedClipRect();
         if (item.text->overflow != "Visible") clip = Intersect(clip, rect);
@@ -646,9 +698,12 @@ void UIRenderer::Render(Engine::Scene::Scene& scene,
             if (item.text->horizontalAlignment == "Center") cursor += (rect.width - lineWidth) * 0.5f;
             else if (item.text->horizontalAlignment == "Right") cursor += rect.width - lineWidth;
             const float baseline = top + lineIndex * lineHeight + atlas->ascent * scale;
+            int previous = -1;
             for (unsigned char character : lines[lineIndex])
             {
                 const int codepoint = character >= kFirstGlyph && character <= kLastGlyph ? character : '?';
+                if (previous >= 0)
+                    cursor += atlas->Kerning(previous, codepoint) * scale;
                 const Glyph& glyph = atlas->glyphs[codepoint - kFirstGlyph];
                 float x0 = cursor + glyph.xOffset * scale;
                 float y0 = baseline + glyph.yOffset * scale;
@@ -659,6 +714,7 @@ void UIRenderer::Render(Engine::Scene::Scene& scene,
                     u0, v0, u1, v1, clip))
                     AddQuad(vertices, x0, y0, x1, y1, u0, v0, u1, v1, color, item.canvasSize);
                 cursor += glyph.advance * scale;
+                previous = codepoint;
             }
         }
         const uint32_t count = static_cast<uint32_t>(vertices.size()) - firstVertex;

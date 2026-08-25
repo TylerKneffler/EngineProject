@@ -10,6 +10,8 @@ namespace Engine::Core
 // Static member initialization
 Engine::Scene::Scene* SceneManager::s_activeScene = nullptr;
 SceneManager::SceneLoadedCallback SceneManager::s_onSceneLoaded = nullptr;
+std::string SceneManager::s_defaultScenePath;
+std::string SceneManager::s_pendingScenePath;
 
 // ---------------------------------------------------------------------------
 // SceneManager::LoadScene
@@ -27,6 +29,36 @@ bool SceneManager::LoadScene(const std::string& path)
     if (s_onSceneLoaded)
         s_onSceneLoaded(s_activeScene);
 
+    return true;
+}
+
+void SceneManager::RequestSceneLoad(const std::string& path)
+{
+    if (!path.empty())
+        s_pendingScenePath = path;
+}
+
+bool SceneManager::RequestDefaultSceneLoad()
+{
+    if (s_defaultScenePath.empty())
+        return false;
+    RequestSceneLoad(s_defaultScenePath);
+    return true;
+}
+
+bool SceneManager::ProcessPendingSceneLoad()
+{
+    if (s_pendingScenePath.empty())
+        return false;
+
+    std::string path = std::move(s_pendingScenePath);
+    s_pendingScenePath.clear();
+    if (!LoadScene(path))
+        return false;
+
+    // A transition creates a fresh component graph whose lifecycle must begin
+    // before the next update/render frame.
+    s_activeScene->Start();
     return true;
 }
 

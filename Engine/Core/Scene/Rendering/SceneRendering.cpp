@@ -29,6 +29,14 @@
 
 namespace Engine::Scene
 {
+void Scene::SetUiPointerInput(float x, float y, float viewportWidth,
+    float viewportHeight, bool hovered, bool mouseDown)
+{
+    if (m_uiRenderer)
+        m_uiRenderer->SetPointerInput(x, y, viewportWidth, viewportHeight,
+            hovered, mouseDown);
+}
+
 
 #ifndef ENGINE_ASSETS_PATH
 #define ENGINE_ASSETS_PATH "Engine/Core/Assets/"

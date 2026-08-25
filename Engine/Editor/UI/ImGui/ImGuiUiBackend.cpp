@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "ImGuiUiBackend.h"
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx11.h"
 #include "imgui_impl_dx12.h"
@@ -250,6 +251,15 @@ bool ImGuiUiBackend::NeedsContinuousRendering() const
 {
     if (!m_initialized || !ImGui::GetCurrentContext())
         return false;
+
+    // Secondary ImGui platform windows use ImGui's Win32 window procedure,
+    // rather than Engine::Core::Window::WndProc. Input delivered to a detached
+    // editor window therefore does not pass through the main window's
+    // MessageRequestsRedraw hook. Request a frame while those queued events
+    // are waiting so they are consumed by NewFrame instead of leaving the
+    // detached window looking frozen.
+    if (!ImGui::GetCurrentContext()->InputEventsQueue.empty())
+        return true;
     if (ImGui::IsAnyItemActive() || ImGui::IsAnyMouseDown())
         return true;
 

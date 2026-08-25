@@ -32,7 +32,7 @@
 - [x] Add mesh Object Collider component
 - [x] Add Cloth / mesh realtime physics component
 - [x] Add TTF/OTF runtime text fonts and editor asset assignment.
-- [x] Add UIImage, implement commen formats cover, fill, ect.
+- [x] Add UIImage, implement basic formats cover, fill, ect.
 - [x] Cache skeleton hierarchy transforms during bone-gizmo rendering and skin-palette generation.
 - [x] Track scene edit revisions so undo history does not serialize and compare the complete scene every idle editor frame.
 - [x] Replace per-frame recursive script-directory scans with filesystem notifications or throttled polling.
@@ -48,5 +48,4 @@
 - [x] Resolve sprite/component references once per update or render snapshot instead of repeatedly for preparation, readiness, UV, size, and texture queries.
 - [x] Give animation, mesh, and skinned-mesh components lightweight inspectors that do not serialize their full runtime payload every expanded frame.
 - [x] Cache registered component-picker entries rather than constructing component prototypes whenever the picker is drawn.
-- [ ] Update the native editor window title only when its displayed state changes.
 - [x] Implement a centralized storage and cache system for both long and short term memory, refactor engine systems to use this.

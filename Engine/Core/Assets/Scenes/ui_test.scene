@@ -52,6 +52,29 @@
       </components>
       <children />
     </item>
+    <item name="Game Manager" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:MainMenuGameManager MainMenuGameManager.playButtonObjectName="Play Label" />
+      </components>
+      <children />
+    </item>
     <item name="UI Root" enabled="true">
       <transform>
         <Transform.position>
@@ -373,7 +396,7 @@
                 <item>0</item>
               </UIObject.sizeDelta>
             </components:UIObject>
-            <components:UIText UIText.text="Layout regression scene: anchors, row/column flow, spacing, and alignment." UIText.fontPath="" UIText.fontSize="28" UIText.alpha="1" UIText.horizontalAlignment="Center" UIText.verticalAlignment="Top" UIText.wordWrap="true" UIText.overflow="Clip" UIText.lineSpacing="1.2">
+            <components:UIText UIText.text="UI regression: hover and click only inside each colored button; text glyphs preserve their background. In Play mode, Play loads the project default scene through the separate Game Manager listener." UIText.fontPath="" UIText.fontSize="28" UIText.alpha="1" UIText.horizontalAlignment="Center" UIText.verticalAlignment="Top" UIText.wordWrap="true" UIText.overflow="Clip" UIText.lineSpacing="1.2">
               <UIText.color>
                 <item>0.82</item>
                 <item>0.84</item>

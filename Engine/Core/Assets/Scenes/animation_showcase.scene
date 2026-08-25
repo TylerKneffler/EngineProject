@@ -1,6 +1,6 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0"?>
 <Scene xmlns:components="urn:engine-components" version="1">
-  <settings showGrid="true" gridHalfSize="20" gridCellSize="1" gridOpacity="0.35" gridFadeDistance="80" skyboxTexture="Assets/Textures/Skyboxes/editor-default-sky.png">
+  <settings showGrid="true" gridHalfSize="20" gridCellSize="1" gridOpacity="0.35" gridFadeDistance="80" skyboxTexture="Assets/Textures/Skyboxes/editor-default-sky.png" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" renderMode="0" sceneViewUiOverlay="false">
     <gridColor>
       <item>0.35</item>
       <item>0.35</item>
@@ -110,7 +110,7 @@
       </components>
       <children />
     </item>
-    <item prefab="Assets/Fox/Fox.prefab" enabled="true">
+    <item prefab="Assets/Fox/Fox.prefab">
       <transform>
         <Transform.position>
           <item>-1.25</item>
@@ -129,7 +129,7 @@
         </Transform.scale>
       </transform>
     </item>
-    <item prefab="Assets/Prefabs/Cube.prefab" enabled="true">
+    <item name="Cube" enabled="true">
       <transform>
         <Transform.position>
           <item>2.25</item>
@@ -147,8 +147,41 @@
           <item>1.25</item>
         </Transform.scale>
       </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/cube.obj" />
+        <components:Material Material.shininess="32" Material.metallicFactor="0" Material.roughnessFactor="1" Material.environmentDiffuseStrength="1" Material.reflectionStrength="1" Material.useCustomReflectionEnvironment="false" Material.reflectionEnvironmentTexture="" Material.reflectionEnvironmentExposure="0" Material.reflectionEnvironmentRotation="0" Material.baseColorAlpha="1" Material.alphaCutoff="0.5" Material.normalScale="1" Material.heightScale="0.05" Material.heightMinSteps="8" Material.heightMaxSteps="32" Material.occlusionStrength="1" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque" Material.baseColorUvSet="0" Material.metallicRoughnessUvSet="0" Material.normalUvSet="0" Material.occlusionUvSet="0" Material.emissiveUvSet="0" Material.heightUvSet="0" Material.materialAsset="" Material.baseColorTexture="" Material.metallicRoughnessTexture="" Material.normalTexture="" Material.heightTexture="" Material.occlusionTexture="" Material.emissiveTexture="">
+          <Material.diffuse>
+            <item>1</item>
+            <item>0.5</item>
+            <item>0.1</item>
+          </Material.diffuse>
+          <Material.ambient>
+            <item>0.1</item>
+            <item>0.1</item>
+            <item>0.1</item>
+          </Material.ambient>
+          <Material.specular>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+          </Material.specular>
+          <Material.emissiveColor>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </Material.emissiveColor>
+        </components:Material>
+        <components:Rotate Rotate.speed="45">
+          <Rotate.axis>
+            <item>0</item>
+            <item>1</item>
+            <item>0</item>
+          </Rotate.axis>
+        </components:Rotate>
+      </components>
+      <children />
     </item>
-    <item prefab="Assets/Prefabs/Slime.prefab" enabled="true">
+    <item prefab="Assets/Prefabs/Slime.prefab">
       <transform>
         <Transform.position>
           <item>0.75</item>

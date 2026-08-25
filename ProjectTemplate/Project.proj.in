@@ -22,6 +22,7 @@
     <LeftPanelWidth>0.20</LeftPanelWidth>
     <RightPanelWidth>0.31</RightPanelWidth>
     <EditorHistoryLimit>100</EditorHistoryLimit>
+    <EditorTheme>Graphite</EditorTheme>
   </PropertyGroup>
   <ItemGroup>
     <LeftPanelTab Include="HierarchyView" />

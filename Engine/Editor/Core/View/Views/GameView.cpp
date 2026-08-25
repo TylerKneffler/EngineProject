@@ -50,6 +50,10 @@ void GameView::DrawPanel(IEditorUi& ui)
              static_cast<float>(m_gameWindowWidth) / static_cast<float>(m_gameWindowHeight));
         const auto input = ui.Viewport(GetUiTextureHandle(), targetAspect,
             {m_letterboxColor.r,m_letterboxColor.g,m_letterboxColor.b,m_letterboxColor.a});
+        if (m_scene)
+            m_scene->SetUiPointerInput(input.mousePosInViewport.x,
+                input.mousePosInViewport.y, input.available.x, input.available.y,
+                input.hovered, input.leftDown);
         EditorUiVec2 available = input.available;
         if (available.x > 1.f && available.y > 1.f)
         {
@@ -64,6 +68,12 @@ void GameView::DrawPanel(IEditorUi& ui)
             }
 
         }
+    }
+    else if (m_scene)
+    {
+        // Suppress native editor-window coordinates while the embedded game
+        // surface is hidden or collapsed.
+        m_scene->SetUiPointerInput(0.f, 0.f, 1.f, 1.f, false, false);
     }
     ui.EndWindow();
 }

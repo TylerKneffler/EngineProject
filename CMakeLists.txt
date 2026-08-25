@@ -129,6 +129,11 @@ file(GLOB_RECURSE EDITOR_HEADERS CONFIGURE_DEPENDS
     "${ENGINE_ROOT}/Engine/Editor/*.hpp"
     "${ENGINE_ROOT}/Engine/Editor/*.inl"
 )
+file(GLOB_RECURSE EDITOR_RESOURCE_FILES CONFIGURE_DEPENDS
+    "${ENGINE_ROOT}/Engine/Editor/UI/ImGui/Themes/*.imguitheme"
+    "${ENGINE_ROOT}/Engine/Editor/UI/ImGui/Themes/*.md"
+)
+set_source_files_properties(${EDITOR_RESOURCE_FILES} PROPERTIES HEADER_FILE_ONLY TRUE)
 file(GLOB_RECURSE GAME_SOURCES CONFIGURE_DEPENDS
     "${ENGINE_ROOT}/Engine/Game/*.cpp"
 )
@@ -425,6 +430,7 @@ endif()
 add_executable(Editor WIN32
     ${EDITOR_SOURCES}
     ${EDITOR_HEADERS}
+    ${EDITOR_RESOURCE_FILES}
     ${ASSET_SOURCES}
     ${PROJECT_BROWSE_FILES}
     ${PROJECT_ROOT_FILES}
@@ -447,7 +453,8 @@ target_include_directories(ProjectScripts PRIVATE
 set_target_properties(ProjectScripts PROPERTIES PREFIX "" OUTPUT_NAME "ProjectScripts")
 target_precompile_headers(ProjectScripts REUSE_FROM Engine)
 add_dependencies(Editor ProjectScripts)
-source_group(TREE "${ENGINE_ROOT}" FILES ${EDITOR_SOURCES} ${EDITOR_HEADERS})
+source_group(TREE "${ENGINE_ROOT}" FILES
+    ${EDITOR_SOURCES} ${EDITOR_HEADERS} ${EDITOR_RESOURCE_FILES})
 if(ENGINE_PROJECT_DIR)
     source_group(TREE "${ENGINE_PROJECT_DIR}" PREFIX "Project" FILES
         ${ASSET_SOURCES} ${PROJECT_BROWSE_FILES} ${PROJECT_ROOT_FILES})

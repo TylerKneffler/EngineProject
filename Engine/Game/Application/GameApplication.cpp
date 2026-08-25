@@ -12,6 +12,7 @@
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
 #include "Core/Assets/Scripts/Rotate.h"
 #include "Core/Assets/Scripts/FirstPersonController.h"
+#include "Core/Assets/Scripts/MainMenuGameManager.h"
 #include "Core/Serialization/SceneSerializer.h"
 #endif
 
@@ -24,6 +25,7 @@ void RegisterGameComponents()
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
     ::Engine::Serialization::RegisterComponentType<Rotate>("Rotate");
     ::Engine::Serialization::RegisterComponentType<FirstPersonController>("FirstPersonController");
+    ::Engine::Serialization::RegisterComponentType<MainMenuGameManager>("MainMenuGameManager");
 #endif
 }
 
@@ -72,7 +74,10 @@ int GameApplication::Run(HINSTANCE instance)
         settings.editorMode == Engine::Model::ProjectSettings::EditorMode::TwoD);
     scene.Init(renderer->GetGraphicsProvider());
     Engine::Core::SceneManager::SetActiveScene(&scene);
-    if (!scene.Load(settings.defaultScene))
+    const std::string defaultScene = settings.defaultScene.empty()
+        ? GetFallbackScenePath() : settings.defaultScene;
+    Engine::Core::SceneManager::SetDefaultScenePath(defaultScene);
+    if (!scene.Load(defaultScene))
         scene.Load(GetFallbackScenePath());
 
     scene.Start();
@@ -96,6 +101,7 @@ int GameApplication::Run(HINSTANCE instance)
         lastCounter = currentCounter;
 
         scene.Update(deltaTime);
+        Engine::Core::SceneManager::ProcessPendingSceneLoad();
         scene.PrepareRenderFrame();
 
         renderer->BeginFrame();

@@ -72,6 +72,8 @@ private:
     std::string m_saveStatus;
     std::string m_keybindStatus;
     bool m_keybindStatusSucceeded = false;
+    std::string m_themeStatus;
+    bool m_themeStatusSucceeded = false;
     bool m_lastSaveSucceeded = false;
     bool m_exporting = false;
     bool m_exportSucceeded = false;

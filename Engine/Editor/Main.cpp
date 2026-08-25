@@ -292,6 +292,8 @@ int WINAPI wWinMain(
         WriteStartupLog("Editor did not create all required core components");
         return 1;
     }
+    Engine::Core::SceneManager::SetActiveScene(scene);
+    Engine::Core::SceneManager::SetDefaultScenePath(projectSettings.defaultScene);
 
     auto uiBackend = Engine::Editor::CreateEditorUiBackend();
     if (!uiBackend->Initialize(window->GetHWND(), *renderer))
@@ -343,6 +345,7 @@ int WINAPI wWinMain(
     };
     gameBuildManager->OnPlayStop = [&]()
     {
+        Engine::Core::SceneManager::CancelPendingSceneLoad();
         editorState->RestorePlayModeScene();
     };
 
@@ -422,6 +425,7 @@ int WINAPI wWinMain(
         if (playState == Engine::Editor::PlayState::Playing)
         {
             scene->Update(dt);
+            Engine::Core::SceneManager::ProcessPendingSceneLoad();
         }
 
         const auto needsContinuousRendering = [&]()

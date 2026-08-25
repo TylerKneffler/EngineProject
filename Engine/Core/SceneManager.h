@@ -29,6 +29,19 @@ public:
     // Immediately load a scene, unloading the current one
     // Returns true if successful
     static bool LoadScene(const std::string& path);
+
+    // Queues a transition for a safe point after script/component updates.
+    // UI listeners should use these methods instead of loading immediately.
+    static void RequestSceneLoad(const std::string& path);
+    static bool RequestDefaultSceneLoad();
+    static bool ProcessPendingSceneLoad();
+    static void CancelPendingSceneLoad() { s_pendingScenePath.clear(); }
+
+    static void SetDefaultScenePath(const std::string& path)
+    {
+        s_defaultScenePath = path;
+    }
+    static const std::string& GetDefaultScenePath() { return s_defaultScenePath; }
     
     // Load a scene in the background without blocking the main thread
     // When load completes, the callback is invoked with the loaded scene
@@ -54,5 +67,7 @@ public:
 private:
     static Engine::Scene::Scene* s_activeScene;
     static SceneLoadedCallback s_onSceneLoaded;
+    static std::string s_defaultScenePath;
+    static std::string s_pendingScenePath;
 };
 }

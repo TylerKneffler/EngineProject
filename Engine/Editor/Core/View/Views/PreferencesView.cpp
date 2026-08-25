@@ -1,6 +1,7 @@
 #include "Engine/Editor/Core/View/Views/PreferencesView.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Engine/Editor/Input/EditorKeyBindings.h"
+#include "Engine/Editor/UI/ImGui/Themes/ImGuiThemeManager.h"
 #include "Core/Renderers/RendererFactory.h"
 #include <pugixml.hpp>
 #include <algorithm>
@@ -216,6 +217,29 @@ void PreferencesView::Init(const Engine::Model::ProjectSettings& settings, const
     m_projFilePath = projFilePath;
     EditorKeyBindings::Get().Initialize(projFilePath);
 
+    std::string discoveryMessage;
+    ImGuiThemeManager::Refresh(&discoveryMessage);
+    const auto& themes = ImGuiThemeManager::AvailableThemes();
+    if (!themes.empty())
+    {
+        if (std::find(themes.begin(), themes.end(), m_settings.editorTheme) == themes.end())
+        {
+            const std::string missingTheme = m_settings.editorTheme;
+            m_settings.editorTheme = themes.front();
+            discoveryMessage = "Theme '" + missingTheme + "' was not found; using '" +
+                m_settings.editorTheme + "'." +
+                (discoveryMessage.empty() ? "" : " " + discoveryMessage);
+        }
+        std::string applyError;
+        m_themeStatusSucceeded = ImGuiThemeManager::Apply(m_settings.editorTheme, &applyError);
+        m_themeStatus = m_themeStatusSucceeded ? discoveryMessage : applyError;
+    }
+    else
+    {
+        m_themeStatusSucceeded = false;
+        m_themeStatus = discoveryMessage.empty() ? "No valid ImGui themes were found." : discoveryMessage;
+    }
+
     // Initialize string buffers
     strncpy_s(m_projectNameBuf, m_settings.name.c_str(), sizeof(m_projectNameBuf) - 1);
     strncpy_s(m_assetsPathBuf, m_settings.assetsDirectory.c_str(), sizeof(m_assetsPathBuf) - 1);
@@ -422,6 +446,65 @@ void PreferencesView::DrawDiagnosticsSection(IEditorUi& ui)
 
 void PreferencesView::DrawEditorSection(IEditorUi& ui)
 {
+    ui.Label("Appearance");
+    ui.Separator();
+    const auto& themes = ImGuiThemeManager::AvailableThemes();
+    std::vector<const char*> themeItems;
+    themeItems.reserve(themes.size());
+    int selectedTheme = 0;
+    for (size_t index = 0; index < themes.size(); ++index)
+    {
+        themeItems.push_back(themes[index].c_str());
+        if (themes[index] == m_settings.editorTheme)
+            selectedTheme = static_cast<int>(index);
+    }
+    ui.BeginDisabled(themeItems.empty());
+    if (!themeItems.empty() && ui.Combo("Editor Theme", &selectedTheme,
+        themeItems.data(), static_cast<int>(themeItems.size())))
+    {
+        std::string applyError;
+        m_themeStatusSucceeded = ImGuiThemeManager::Apply(themes[selectedTheme], &applyError);
+        if (m_themeStatusSucceeded)
+        {
+            m_settings.editorTheme = themes[selectedTheme];
+            m_themeStatus = "Applied " + m_settings.editorTheme + ".";
+            NotifyChanged();
+        }
+        else
+            m_themeStatus = applyError;
+    }
+    ui.EndDisabled();
+    ui.SameLine();
+    if (ui.Button("Rescan Themes"))
+    {
+        std::string scanMessage;
+        const bool foundThemes = ImGuiThemeManager::Refresh(&scanMessage);
+        const auto& refreshed = ImGuiThemeManager::AvailableThemes();
+        if (foundThemes && !refreshed.empty())
+        {
+            if (std::find(refreshed.begin(), refreshed.end(), m_settings.editorTheme) == refreshed.end())
+                m_settings.editorTheme = refreshed.front();
+            std::string applyError;
+            m_themeStatusSucceeded = ImGuiThemeManager::Apply(m_settings.editorTheme, &applyError);
+            m_themeStatus = m_themeStatusSucceeded
+                ? (scanMessage.empty() ? "Theme list refreshed." : scanMessage)
+                : applyError;
+            if (m_themeStatusSucceeded) NotifyChanged();
+        }
+        else
+        {
+            m_themeStatusSucceeded = false;
+            m_themeStatus = scanMessage.empty() ? "No valid ImGui themes were found." : scanMessage;
+        }
+    }
+    ui.Tooltip("Reloads validated .imguitheme files from the editor Themes directory.");
+    ui.DisabledLabel(("Directory: " + ImGuiThemeManager::ThemeDirectory()).c_str());
+    if (!m_themeStatus.empty())
+        ui.ColoredLabel(m_themeStatus.c_str(), m_themeStatusSucceeded
+            ? EditorUiColor{.35f,.85f,.45f,1.f}
+            : EditorUiColor{1.f,.55f,.30f,1.f});
+    ui.Spacing();
+
     ui.Label("Workspace Mode");
     ui.Separator();
     const char* editorModes[] = { "3D", "2D" };
@@ -724,6 +807,12 @@ bool PreferencesView::SaveSettings()
             else if (defaultSceneNode)
                 prop.append_child("EditorMode").text().set(m_settings.editorMode ==
                     Engine::Model::ProjectSettings::EditorMode::TwoD ? "2D" : "3D");
+
+            auto editorTheme = prop.child("EditorTheme");
+            if (editorTheme)
+                editorTheme.text().set(m_settings.editorTheme.c_str());
+            else if (defaultSceneNode)
+                prop.append_child("EditorTheme").text().set(m_settings.editorTheme.c_str());
 
             auto clearColorR = prop.child("ClearColorR");
             if (clearColorR)

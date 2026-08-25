@@ -31,8 +31,11 @@ PSInput VSMain(VSInput input)
 
 float4 PSMain(PSInput input) : SV_TARGET
 {
-    const float distance = fontAtlas.Sample(fontSampler, input.uv).a;
-    const float width = max(fwidth(distance), 0.015);
-    const float coverage = smoothstep(0.5 - width, 0.5 + width, distance);
+    // Atlases are oversampled grayscale coverage at the requested font size,
+    // so no distance-field threshold or artificial outline is required.
+    const float coverage = fontAtlas.Sample(fontSampler, input.uv).a;
+    // Never write the empty area surrounding a glyph. This preserves the
+    // background even if a graphics backend carries stale blend state.
+    clip(coverage - (1.0 / 255.0));
     return float4(input.color.rgb, input.color.a * coverage);
 }

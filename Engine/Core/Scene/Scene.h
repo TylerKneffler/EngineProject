@@ -92,6 +92,10 @@ public:
     void SetPreviewObject(Object* obj) { m_previewObject = obj; }
     void SetEditorMode2D(bool enabled);
     bool IsEditorMode2D() const { return m_editorMode2D; }
+    // Pointer coordinates relative to the surface displaying the game render
+    // target, used to keep embedded-view UI hit bounds aligned.
+    void SetUiPointerInput(float x, float y, float viewportWidth,
+        float viewportHeight, bool hovered, bool mouseDown);
 
     // Returns the first active Camera component found on a scene game object.
     // The editor camera is deliberately excluded so GameView cannot silently
