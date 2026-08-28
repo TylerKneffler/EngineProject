@@ -41,6 +41,14 @@ Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetBlendOpAl
 Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetDepthEnable(bool value) { m_depthEnable = value; return *this; }
 Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetDepthWriteEnable(bool value) { m_depthWrite = value; return *this; }
 Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetDepthFunc(int value) { m_depthFunc = ConvertComparison(value); return *this; }
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetStencilEnable(bool value) { m_stencilEnable = value; return *this; }
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetStencilReadMask(uint8_t value) { m_stencilReadMask = value; return *this; }
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetStencilWriteMask(uint8_t value) { m_stencilWriteMask = value; return *this; }
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetStencilFunc(int value) { m_stencilFunc = ConvertComparison(value); return *this; }
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetStencilFailOp(int value) { m_stencilFailOp = ConvertStencilOp(value); return *this; }
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetStencilDepthFailOp(int value) { m_stencilDepthFailOp = ConvertStencilOp(value); return *this; }
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetStencilPassOp(int value) { m_stencilPassOp = ConvertStencilOp(value); return *this; }
+Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetColorWriteMask(uint8_t value) { m_colorWriteMask = value; return *this; }
 Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetRenderTargetFormat(int, int) { return *this; }
 
 Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetInputLayout(const VertexElement* elements, uint32_t count)
@@ -106,13 +114,21 @@ std::unique_ptr<Engine::Graphics::IPipelineState> D3D11PipelineStateBuilder::Bui
     blend.RenderTarget[0].SrcBlendAlpha = m_srcBlendAlpha;
     blend.RenderTarget[0].DestBlendAlpha = m_destBlendAlpha;
     blend.RenderTarget[0].BlendOpAlpha = m_blendOpAlpha;
-    blend.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+    blend.RenderTarget[0].RenderTargetWriteMask = m_colorWriteMask;
     if (SUCCEEDED(hr)) hr = m_device->CreateBlendState(&blend, &pipeline->blendState);
 
     D3D11_DEPTH_STENCIL_DESC depth{};
     depth.DepthEnable = m_depthEnable;
     depth.DepthWriteMask = m_depthWrite ? D3D11_DEPTH_WRITE_MASK_ALL : D3D11_DEPTH_WRITE_MASK_ZERO;
     depth.DepthFunc = m_depthFunc;
+    depth.StencilEnable = m_stencilEnable;
+    depth.StencilReadMask = m_stencilReadMask;
+    depth.StencilWriteMask = m_stencilWriteMask;
+    depth.FrontFace.StencilFunc = m_stencilFunc;
+    depth.FrontFace.StencilFailOp = m_stencilFailOp;
+    depth.FrontFace.StencilDepthFailOp = m_stencilDepthFailOp;
+    depth.FrontFace.StencilPassOp = m_stencilPassOp;
+    depth.BackFace = depth.FrontFace;
     if (SUCCEEDED(hr)) hr = m_device->CreateDepthStencilState(&depth, &pipeline->depthStencilState);
 
     if (FAILED(hr))
@@ -158,6 +174,22 @@ D3D11_COMPARISON_FUNC D3D11PipelineStateBuilder::ConvertComparison(int value)
         case 4: return D3D11_COMPARISON_GREATER; case 5: return D3D11_COMPARISON_NOT_EQUAL;
         case 6: return D3D11_COMPARISON_GREATER_EQUAL; case 7: return D3D11_COMPARISON_ALWAYS;
         default: return D3D11_COMPARISON_LESS;
+    }
+}
+
+D3D11_STENCIL_OP D3D11PipelineStateBuilder::ConvertStencilOp(int value)
+{
+    switch (value)
+    {
+        case 0: return D3D11_STENCIL_OP_KEEP;
+        case 1: return D3D11_STENCIL_OP_ZERO;
+        case 2: return D3D11_STENCIL_OP_REPLACE;
+        case 3: return D3D11_STENCIL_OP_INCR_SAT;
+        case 4: return D3D11_STENCIL_OP_DECR_SAT;
+        case 5: return D3D11_STENCIL_OP_INVERT;
+        case 6: return D3D11_STENCIL_OP_INCR;
+        case 7: return D3D11_STENCIL_OP_DECR;
+        default: return D3D11_STENCIL_OP_KEEP;
     }
 }
 }

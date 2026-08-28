@@ -169,7 +169,7 @@ VkRenderPass VulkanRenderCore::CreateRenderPass(VkFormat colorFormat, bool depth
     VkAttachmentReference depthReference{ 1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
     if (depth)
     {
-        attachments[1].format = VK_FORMAT_D32_SFLOAT;
+        attachments[1].format = VK_FORMAT_D32_SFLOAT_S8_UINT;
         attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
         attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -262,7 +262,8 @@ void VulkanRenderCore::CreateSwapchain()
         if (m_mainDepth)
         {
             m_depthImages[i] = VulkanCreateImage(m_physicalDevice, m_device, m_extent.width, m_extent.height,
-                VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_IMAGE_ASPECT_DEPTH_BIT);
+                VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
             attachments[1] = m_depthImages[i].view;
         }
         VkFramebufferCreateInfo framebufferInfo{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };

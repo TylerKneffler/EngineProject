@@ -23,7 +23,7 @@ Camera::Camera()
 glm::mat4 Camera::GetViewMatrix() const
 {
     assert(Owner && "Camera requires an owner Object with a Transform");
-    const glm::mat4 world = Owner->transform.GetWorldMatrix();
+    const glm::mat4 world = Owner->transform.GetWorldMatrixWithLayer();
     const glm::vec3 p = glm::vec3(world[3]);
     if (!useTransformRotation)
         return glm::lookAtLH(p, target, up);

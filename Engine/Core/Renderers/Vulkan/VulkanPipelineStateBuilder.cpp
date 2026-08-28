@@ -37,6 +37,15 @@ Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetBlendOpA
 Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetDepthEnable(bool b) { m_depth = b; return *this; }
 Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetDepthWriteEnable(bool b) { m_depthWrite = b; return *this; }
 Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetDepthFunc(int v) { m_depthCompare = Compare(v); return *this; }
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetStencilEnable(bool b) { m_stencilEnable = b; return *this; }
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetStencilReadMask(uint8_t v) { m_stencilReadMask = v; return *this; }
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetStencilWriteMask(uint8_t v) { m_stencilWriteMask = v; return *this; }
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetStencilFunc(int v) { m_stencilCompare = Compare(v); return *this; }
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetStencilFailOp(int v) { m_stencilFailOp = StencilOp(v); return *this; }
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetStencilDepthFailOp(int v) { m_stencilDepthFailOp = StencilOp(v); return *this; }
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetStencilPassOp(int v) { m_stencilPassOp = StencilOp(v); return *this; }
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetStencilRef(uint32_t v) { m_stencilRef = v; return *this; }
+Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetColorWriteMask(uint8_t v) { m_colorWriteMask = v; return *this; }
 Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetRenderTargetFormat(int, int) { return *this; }
 
 Engine::Graphics::IPipelineStateBuilder& VulkanPipelineStateBuilder::SetInputLayout(const VertexElement* elements, uint32_t count)
@@ -119,11 +128,20 @@ std::unique_ptr<Engine::Graphics::IPipelineState> VulkanPipelineStateBuilder::Bu
         VkPipelineColorBlendAttachmentState colorBlend{};
         colorBlend.blendEnable = m_blend; colorBlend.srcColorBlendFactor = m_srcBlend; colorBlend.dstColorBlendFactor = m_dstBlend;
         colorBlend.colorBlendOp = m_blendOp; colorBlend.srcAlphaBlendFactor = m_srcBlendAlpha; colorBlend.dstAlphaBlendFactor = m_dstBlendAlpha;
-        colorBlend.alphaBlendOp = m_blendOpAlpha; colorBlend.colorWriteMask = 0xF;
+        colorBlend.alphaBlendOp = m_blendOpAlpha; colorBlend.colorWriteMask = m_colorWriteMask;
         VkPipelineColorBlendStateCreateInfo blend{ VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
         blend.attachmentCount = 1; blend.pAttachments = &colorBlend;
         VkPipelineDepthStencilStateCreateInfo depth{ VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
         depth.depthTestEnable = m_depth; depth.depthWriteEnable = m_depthWrite; depth.depthCompareOp = m_depthCompare;
+        depth.stencilTestEnable = m_stencilEnable;
+        depth.front.compareOp = m_stencilCompare;
+        depth.front.failOp = m_stencilFailOp;
+        depth.front.depthFailOp = m_stencilDepthFailOp;
+        depth.front.passOp = m_stencilPassOp;
+        depth.front.compareMask = m_stencilReadMask;
+        depth.front.writeMask = m_stencilWriteMask;
+        depth.front.reference = m_stencilRef;
+        depth.back = depth.front;
         VkDynamicState states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
         VkPipelineDynamicStateCreateInfo dynamic{ VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
         dynamic.dynamicStateCount = ARRAYSIZE(states); dynamic.pDynamicStates = states;
@@ -158,5 +176,20 @@ VkBlendFactor VulkanPipelineStateBuilder::Blend(int v)
 }
 VkBlendOp VulkanPipelineStateBuilder::BlendOp(int v) { return static_cast<VkBlendOp>(std::clamp(v, 0, 4)); }
 VkCompareOp VulkanPipelineStateBuilder::Compare(int v) { return static_cast<VkCompareOp>(std::clamp(v, 0, 7)); }
+VkStencilOp VulkanPipelineStateBuilder::StencilOp(int v)
+{
+    switch (v)
+    {
+        case 0: return VK_STENCIL_OP_KEEP;
+        case 1: return VK_STENCIL_OP_ZERO;
+        case 2: return VK_STENCIL_OP_REPLACE;
+        case 3: return VK_STENCIL_OP_INCREMENT_AND_CLAMP;
+        case 4: return VK_STENCIL_OP_DECREMENT_AND_CLAMP;
+        case 5: return VK_STENCIL_OP_INVERT;
+        case 6: return VK_STENCIL_OP_INCREMENT_AND_WRAP;
+        case 7: return VK_STENCIL_OP_DECREMENT_AND_WRAP;
+        default: return VK_STENCIL_OP_KEEP;
+    }
+}
 }
 #endif

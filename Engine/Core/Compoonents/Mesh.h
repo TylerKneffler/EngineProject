@@ -56,6 +56,10 @@ public:
     uint64_t GetMorphWeightsRevision() const;
     bool HasMorphTargets() const { return !m_morphTargets.empty(); }
 
+    using SliceResult = std::pair<std::vector<Vertex>, std::vector<Vertex>>;
+    static SliceResult SliceByPlane(const std::vector<Vertex>& vertices,
+        const glm::vec3& planePoint, const glm::vec3& planeNormal);
+
     bool        DrawProperties(::Engine::Editor::IEditorUi& ui) override;
     JsonValue   Serialize() const override;
     void        Deserialize(const JsonValue& v) override;

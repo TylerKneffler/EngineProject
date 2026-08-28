@@ -35,6 +35,12 @@ struct SceneSettings
     // Default stays false so scene camera reflects in-scene editing context.
     bool sceneViewUiOverlay = false;
 
+    // Debug overlays for portal aperture rendering and mapped-view validation.
+    bool portalDebugVisuals = false;
+    bool portalDebugWireframe = true;
+    bool portalDebugTintRemoteView = true;
+    float portalDebugOverlayAlpha = 0.45f;
+
 };
 }
 

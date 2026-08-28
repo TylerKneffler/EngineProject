@@ -62,6 +62,45 @@ glm::vec3 Transform::GetWorldPosition() const
     return glm::vec3(GetWorldMatrix()[3]);
 }
 
+glm::mat4 Transform::GetLocalMatrixWithLayer() const
+{
+    const glm::mat4 base = GetLocalMatrix();
+    if (!matrixLayer.enabled)
+        return base;
+    return matrixLayer.localToLayer * base;
+}
+
+glm::mat4 Transform::GetWorldMatrixWithLayer() const
+{
+    const glm::mat4 world = GetWorldMatrix();
+    if (!matrixLayer.enabled)
+        return world;
+    return matrixLayer.localToLayer * world;
+}
+
+glm::vec3 Transform::ApplyLocalMatrixLayer(const glm::vec3& point) const
+{
+    return matrixLayer.TransformPoint(point);
+}
+
+glm::vec3 Transform::InverseApplyLocalMatrixLayer(const glm::vec3& point) const
+{
+    return matrixLayer.InverseTransformPoint(point);
+}
+
+glm::vec3 Transform::ApplyWorldMatrixLayer(const glm::vec3& point) const
+{
+    const glm::vec3 local = point;
+    const glm::vec3 layered = ApplyLocalMatrixLayer(local);
+    return GetWorldPosition() + (layered - GetLocalPosition());
+}
+
+glm::vec3 Transform::InverseApplyWorldMatrixLayer(const glm::vec3& point) const
+{
+    const glm::vec3 relative = point - GetWorldPosition();
+    return InverseApplyLocalMatrixLayer(relative + GetLocalPosition());
+}
+
 void Transform::AdvanceRevision(uint64_t& revision)
 {
     if (++revision == 0)

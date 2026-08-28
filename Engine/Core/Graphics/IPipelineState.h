@@ -62,6 +62,15 @@ public:
     virtual IPipelineStateBuilder& SetDepthEnable(bool enable) = 0;
     virtual IPipelineStateBuilder& SetDepthWriteEnable(bool enable) = 0;
     virtual IPipelineStateBuilder& SetDepthFunc(int func) = 0;  // D3D12_COMPARISON_FUNC enum
+    virtual IPipelineStateBuilder& SetStencilEnable(bool) { return *this; }
+    virtual IPipelineStateBuilder& SetStencilReadMask(uint8_t) { return *this; }
+    virtual IPipelineStateBuilder& SetStencilWriteMask(uint8_t) { return *this; }
+    virtual IPipelineStateBuilder& SetStencilFunc(int) { return *this; }
+    virtual IPipelineStateBuilder& SetStencilFailOp(int) { return *this; }
+    virtual IPipelineStateBuilder& SetStencilDepthFailOp(int) { return *this; }
+    virtual IPipelineStateBuilder& SetStencilPassOp(int) { return *this; }
+    virtual IPipelineStateBuilder& SetStencilRef(uint32_t) { return *this; }
+    virtual IPipelineStateBuilder& SetColorWriteMask(uint8_t) { return *this; }
 
     // Input layout (vertex format)
     struct VertexElement

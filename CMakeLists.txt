@@ -521,6 +521,39 @@ set_target_properties(Game PROPERTIES
 )
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_ROOT}/Engine/Tests/MatrixLayerPortalTests.cpp")
+    enable_testing()
+    add_executable(MatrixLayerPortalTests
+        "${ENGINE_ROOT}/Engine/Tests/MatrixLayerPortalTests.cpp"
+    )
+    target_link_libraries(MatrixLayerPortalTests PRIVATE Engine)
+    target_include_directories(MatrixLayerPortalTests PRIVATE
+        "${ENGINE_ROOT}/Engine"
+    )
+    add_test(NAME MatrixLayerPortalRegression COMMAND MatrixLayerPortalTests)
+    set_tests_properties(MatrixLayerPortalRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}"
+    )
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_ROOT}/Engine/Tests/PortalTriggerTraversalTests.cpp")
+    enable_testing()
+    add_executable(PortalTriggerTraversalTests
+        "${ENGINE_ROOT}/Engine/Tests/PortalTriggerTraversalTests.cpp"
+    )
+    target_link_libraries(PortalTriggerTraversalTests PRIVATE Engine)
+    target_include_directories(PortalTriggerTraversalTests PRIVATE
+        "${ENGINE_ROOT}/Engine"
+    )
+    add_test(NAME PortalTriggerTraversalRegression COMMAND PortalTriggerTraversalTests
+        "${ENGINE_ROOT}/Engine/Core/Assets/Mesh/cube.obj")
+    set_tests_properties(PortalTriggerTraversalRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}"
+    )
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_ROOT}/Engine/Tests/RotateLifecycleTests.cpp")
     enable_testing()
     add_executable(EngineLifecycleTests

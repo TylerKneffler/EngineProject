@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -32,6 +33,8 @@ struct Engine::Components::RigidBody::Impl
     std::vector<std::unique_ptr<btTriangleMesh>> triangleMeshes;
     std::unique_ptr<btDefaultMotionState> motionState;
     std::unique_ptr<btRigidBody> body;
+    std::unordered_set<const Engine::Components::RigidBody*> currentOverlaps;
+    std::unordered_set<const Engine::Components::RigidBody*> previousOverlaps;
 };
 
 Engine::Components::RigidBody::RigidBody() : m_impl(new Impl())
@@ -59,6 +62,55 @@ Engine::Components::RigidBody::RigidBody() : m_impl(new Impl())
     RegisterField("collisionLayer", collisionLayer);
     RegisterField("collisionMask", collisionMask);
     RegisterField("collisionIdentifier", collisionIdentifier);
+}
+
+bool Engine::Components::RigidBody::IsOverlapping(const RigidBody* other) const
+{
+    if (!m_impl || !other)
+        return false;
+    return m_impl->currentOverlaps.find(other) != m_impl->currentOverlaps.end();
+}
+
+bool Engine::Components::RigidBody::DidBeginOverlap(const RigidBody* other) const
+{
+    if (!m_impl || !other)
+        return false;
+    return m_impl->currentOverlaps.find(other) != m_impl->currentOverlaps.end() &&
+        m_impl->previousOverlaps.find(other) == m_impl->previousOverlaps.end();
+}
+
+bool Engine::Components::RigidBody::DidEndOverlap(const RigidBody* other) const
+{
+    if (!m_impl || !other)
+        return false;
+    return m_impl->currentOverlaps.find(other) == m_impl->currentOverlaps.end() &&
+        m_impl->previousOverlaps.find(other) != m_impl->previousOverlaps.end();
+}
+
+std::vector<Engine::Components::RigidBody*> Engine::Components::RigidBody::GetOverlappingBodies() const
+{
+    std::vector<Engine::Components::RigidBody*> overlaps;
+    if (!m_impl)
+        return overlaps;
+    overlaps.reserve(m_impl->currentOverlaps.size());
+    for (const Engine::Components::RigidBody* body : m_impl->currentOverlaps)
+        overlaps.push_back(const_cast<Engine::Components::RigidBody*>(body));
+    return overlaps;
+}
+
+void Engine::Components::RigidBody::BeginOverlapFrame()
+{
+    if (!m_impl)
+        return;
+    m_impl->previousOverlaps = m_impl->currentOverlaps;
+    m_impl->currentOverlaps.clear();
+}
+
+void Engine::Components::RigidBody::RegisterOverlap(const RigidBody* other)
+{
+    if (!m_impl || !other || other == this)
+        return;
+    m_impl->currentOverlaps.insert(other);
 }
 
 Engine::Components::RigidBody::~RigidBody()
@@ -264,6 +316,8 @@ void Engine::Components::RigidBody::DestroyBody()
     m_impl->colliders.clear();
     m_impl->ownerMesh = nullptr;
     m_impl->ownerMeshRevision = 0;
+    m_impl->currentOverlaps.clear();
+    m_impl->previousOverlaps.clear();
     m_isColliding = false;
     m_isGrounded = false;
 }
@@ -350,6 +404,71 @@ void Engine::Components::RigidBody::AddTorque(const glm::vec3& torque)
 void Engine::Components::RigidBody::AddImpulse(const glm::vec3& impulse)
 {
     if (EnsureBody()) { m_impl->body->activate(true); m_impl->body->applyCentralImpulse(Engine::Physics::ToBullet(impulse)); }
+}
+void Engine::Components::RigidBody::SetWorldPosition(const glm::vec3& worldPosition)
+{
+    if (!Owner)
+        return;
+
+    if (EnsureBody())
+    {
+        btTransform transform = m_impl->body->getWorldTransform();
+        transform.setOrigin(Engine::Physics::ToBullet(worldPosition));
+        m_impl->body->setWorldTransform(transform);
+        if (m_impl->motionState)
+            m_impl->motionState->setWorldTransform(transform);
+        m_impl->body->activate(true);
+    }
+
+    if (Owner->Parent)
+    {
+        const glm::mat4 parentWorld = Owner->Parent->transform.GetWorldMatrix();
+        Owner->transform.position = glm::vec3(glm::inverse(parentWorld) *
+            glm::vec4(worldPosition, 1.f));
+    }
+    else
+    {
+        Owner->transform.position = worldPosition;
+    }
+
+    m_impl->syncedWorldRevision = Owner->transform.GetWorldRevision();
+}
+void Engine::Components::RigidBody::SetWorldPose(const glm::vec3& worldPosition,
+    const glm::quat& worldRotation)
+{
+    if (!Owner)
+        return;
+
+    const glm::quat normalizedWorldRotation = glm::normalize(worldRotation);
+    if (EnsureBody())
+    {
+        btTransform transform;
+        transform.setIdentity();
+        transform.setOrigin(Engine::Physics::ToBullet(worldPosition));
+        transform.setRotation(btQuaternion(normalizedWorldRotation.x,
+            normalizedWorldRotation.y, normalizedWorldRotation.z,
+            normalizedWorldRotation.w));
+        m_impl->body->setWorldTransform(transform);
+        if (m_impl->motionState)
+            m_impl->motionState->setWorldTransform(transform);
+        m_impl->body->activate(true);
+    }
+
+    glm::mat4 world = glm::mat4_cast(normalizedWorldRotation);
+    world[3] = glm::vec4(worldPosition, 1.f);
+    const glm::mat4 parentWorld = Owner->Parent
+        ? Owner->Parent->transform.GetWorldMatrix() : glm::mat4(1.f);
+    const glm::mat4 local = glm::inverse(parentWorld) * world;
+    glm::vec3 scale, translation, skew;
+    glm::vec4 perspective;
+    glm::quat localRotation;
+    if (glm::decompose(local, scale, localRotation, translation, skew, perspective))
+    {
+        Owner->transform.position = translation;
+        Owner->transform.rotation = glm::eulerAngles(glm::normalize(localRotation));
+    }
+
+    m_impl->syncedWorldRevision = Owner->transform.GetWorldRevision();
 }
 void Engine::Components::RigidBody::SetLinearVelocity(const glm::vec3& velocity)
 {

@@ -404,6 +404,139 @@ bool Mesh::SaveNativeFile(const std::string& path, const std::vector<Vertex>& ve
     return file.good();
 }
 
+namespace
+{
+float SignedDistanceToPlane(const glm::vec3& point,
+    const glm::vec3& planePoint, const glm::vec3& planeNormal)
+{
+    return glm::dot(point - planePoint, glm::normalize(planeNormal));
+}
+
+Mesh::Vertex InterpolateVertex(const Mesh::Vertex& a, const Mesh::Vertex& b, float t)
+{
+    Mesh::Vertex mixed{};
+    for (int i = 0; i < 3; ++i)
+    {
+        mixed.pos[i] = a.pos[i] + (b.pos[i] - a.pos[i]) * t;
+        mixed.normal[i] = a.normal[i] + (b.normal[i] - a.normal[i]) * t;
+        if (i < 2)
+        {
+            mixed.uv[i] = a.uv[i] + (b.uv[i] - a.uv[i]) * t;
+        }
+    }
+    for (int i = 0; i < 4; ++i)
+    {
+        mixed.tangent[i] = a.tangent[i] + (b.tangent[i] - a.tangent[i]) * t;
+    }
+    for (int i = 0; i < 2; ++i)
+    {
+        mixed.uv1[i] = a.uv1[i] + (b.uv1[i] - a.uv1[i]) * t;
+    }
+    for (int i = 0; i < 4; ++i)
+    {
+        mixed.color[i] = a.color[i] + (b.color[i] - a.color[i]) * t;
+    }
+    for (int i = 0; i < 4; ++i)
+    {
+        mixed.joints0[i] = a.joints0[i] + (b.joints0[i] - a.joints0[i]) * t;
+        mixed.weights0[i] = a.weights0[i] + (b.weights0[i] - a.weights0[i]) * t;
+        mixed.joints1[i] = a.joints1[i] + (b.joints1[i] - a.joints1[i]) * t;
+        mixed.weights1[i] = a.weights1[i] + (b.weights1[i] - a.weights1[i]) * t;
+    }
+    return mixed;
+}
+
+void AppendTriangulatedPolygon(std::vector<Mesh::Vertex>& output,
+    const std::vector<Mesh::Vertex>& polygon)
+{
+    if (polygon.size() < 3)
+        return;
+    for (size_t index = 1; index + 1 < polygon.size(); ++index)
+    {
+        output.push_back(polygon.front());
+        output.push_back(polygon[index]);
+        output.push_back(polygon[index + 1]);
+    }
+}
+
+void ClipPolygonToHalfSpace(const std::vector<Mesh::Vertex>& polygon,
+    const glm::vec3& planePoint, const glm::vec3& planeNormal,
+    bool keepPositiveSide, std::vector<Mesh::Vertex>& output)
+{
+    output.clear();
+    if (polygon.empty())
+        return;
+
+    const float epsilon = 1e-5f;
+    const glm::vec3 normal = glm::normalize(planeNormal);
+    std::vector<Mesh::Vertex> current = polygon;
+
+    for (size_t i = 0; i < current.size(); ++i)
+    {
+        const Mesh::Vertex& a = current[i];
+        const Mesh::Vertex& b = current[(i + 1) % current.size()];
+        const glm::vec3 va(a.pos[0], a.pos[1], a.pos[2]);
+        const glm::vec3 vb(b.pos[0], b.pos[1], b.pos[2]);
+        const float da = SignedDistanceToPlane(va, planePoint, normal);
+        const float db = SignedDistanceToPlane(vb, planePoint, normal);
+        const bool insideA = keepPositiveSide ? da >= -epsilon : da <= epsilon;
+        const bool insideB = keepPositiveSide ? db >= -epsilon : db <= epsilon;
+
+        if (insideA && insideB)
+        {
+            output.push_back(b);
+        }
+        else if (insideA && !insideB)
+        {
+            const float t = std::max(0.f, std::min(1.f, da / (da - db)));
+            output.push_back(InterpolateVertex(a, b, t));
+        }
+        else if (!insideA && insideB)
+        {
+            const float t = std::max(0.f, std::min(1.f, da / (da - db)));
+            output.push_back(InterpolateVertex(a, b, t));
+            output.push_back(b);
+        }
+    }
+}
+}
+
+Mesh::SliceResult Mesh::SliceByPlane(const std::vector<Vertex>& vertices,
+    const glm::vec3& planePoint, const glm::vec3& planeNormal)
+{
+    if (vertices.size() < 3)
+        return {{}, {}};
+
+    std::vector<Vertex> front;
+    std::vector<Vertex> back;
+    const glm::vec3 normal = glm::normalize(planeNormal);
+
+    for (size_t index = 0; index < vertices.size(); index += 3)
+    {
+        std::vector<Vertex> triangle;
+        triangle.reserve(3);
+        for (size_t offset = 0; offset < 3; ++offset)
+        {
+            const size_t vertexIndex = index + offset;
+            if (vertexIndex >= vertices.size())
+                break;
+            triangle.push_back(vertices[vertexIndex]);
+        }
+        if (triangle.size() != 3)
+            continue;
+
+        std::vector<Vertex> positiveSide;
+        std::vector<Vertex> negativeSide;
+        ClipPolygonToHalfSpace(triangle, planePoint, normal, true, positiveSide);
+        ClipPolygonToHalfSpace(triangle, planePoint, normal, false, negativeSide);
+
+        AppendTriangulatedPolygon(front, positiveSide);
+        AppendTriangulatedPolygon(back, negativeSide);
+    }
+
+    return { front, back };
+}
+
 #pragma region DX12 buffer creation and rendering
 
 void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory)

@@ -1,0 +1,396 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Scene xmlns:components="urn:engine-components" version="1">
+  <settings showGrid="true" gridHalfSize="30" gridCellSize="1" gridOpacity="0.3" gridFadeDistance="120" skyboxTexture="">
+    <gridColor>
+      <item>0.38</item>
+      <item>0.38</item>
+      <item>0.38</item>
+    </gridColor>
+    <gridOriginColor>
+      <item>0.25</item>
+      <item>0.55</item>
+      <item>0.9</item>
+    </gridOriginColor>
+    <ambientColor>
+      <item>0.1</item>
+      <item>0.1</item>
+      <item>0.12</item>
+    </ambientColor>
+  </settings>
+  <objects>
+    <item name="Portal Demo Camera" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>11</item>
+          <item>7</item>
+          <item>-18</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0.28</item>
+          <item>-0.55</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Camera Camera.active="true" Camera.useTransformRotation="true" Camera.fov="62" Camera.near="0.01" Camera.far="250" Camera.orthographic="false" Camera.orthographicSize="5">
+          <Camera.target>
+            <item>6</item>
+            <item>1.2</item>
+            <item>0</item>
+          </Camera.target>
+          <Camera.up>
+            <item>0</item>
+            <item>1</item>
+            <item>0</item>
+          </Camera.up>
+        </components:Camera>
+      </components>
+      <children />
+    </item>
+
+    <item name="Portal Demo Light" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>2</item>
+          <item>10</item>
+          <item>-3</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0.9</item>
+          <item>-0.7</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Light Light.lightType="1" Light.intensity="1.9" Light.range="45" Light.falloff="2" Light.baked="false">
+          <Light.color>
+            <item>1</item>
+            <item>0.95</item>
+            <item>0.8</item>
+          </Light.color>
+        </components:Light>
+      </components>
+      <children />
+    </item>
+
+    <item name="Portal Demo Ground" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>5</item>
+          <item>-0.5</item>
+          <item>0</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>24</item>
+          <item>0.5</item>
+          <item>14</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/cube.obj"></components:Mesh>
+        <components:Material Material.shininess="18" Material.metallicFactor="0.08" Material.roughnessFactor="0.82">
+          <Material.diffuse>
+            <item>0.18</item>
+            <item>0.21</item>
+            <item>0.24</item>
+          </Material.diffuse>
+          <Material.ambient>
+            <item>0.05</item>
+            <item>0.06</item>
+            <item>0.07</item>
+          </Material.ambient>
+          <Material.specular>
+            <item>0.25</item>
+            <item>0.25</item>
+            <item>0.25</item>
+          </Material.specular>
+        </components:Material>
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box">
+          <PrimitiveObjectCollider.center>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+          </PrimitiveObjectCollider.size>
+        </components:PrimitiveObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.useGravity="false" RigidBody.friction="0.85" RigidBody.restitution="0"></components:RigidBody>
+      </components>
+      <children />
+    </item>
+
+    <item name="Source Portal" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>0</item>
+          <item>1</item>
+          <item>0</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/cube.obj"></components:Mesh>
+        <components:Material Material.shininess="64" Material.metallicFactor="0.22" Material.roughnessFactor="0.3">
+          <Material.diffuse>
+            <item>0.18</item>
+            <item>0.45</item>
+            <item>0.95</item>
+          </Material.diffuse>
+          <Material.ambient>
+            <item>0.03</item>
+            <item>0.08</item>
+            <item>0.16</item>
+          </Material.ambient>
+          <Material.specular>
+            <item>0.8</item>
+            <item>0.9</item>
+            <item>1</item>
+          </Material.specular>
+        </components:Material>
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1">
+          <PrimitiveObjectCollider.center>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size>
+            <item>4</item>
+            <item>4</item>
+            <item>2</item>
+          </PrimitiveObjectCollider.size>
+        </components:PrimitiveObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.useGravity="false" RigidBody.isTrigger="true"></components:RigidBody>
+        <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="2" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="1.2" SpatialManipulator.deformationStrength="1.0">
+          <SpatialManipulator.position>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </SpatialManipulator.position>
+          <SpatialManipulator.rotation>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </SpatialManipulator.rotation>
+          <SpatialManipulator.scale>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+          </SpatialManipulator.scale>
+          <SpatialManipulator.portalPoint>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </SpatialManipulator.portalPoint>
+          <SpatialManipulator.portalNormal>
+            <item>0</item>
+            <item>0</item>
+            <item>1</item>
+          </SpatialManipulator.portalNormal>
+          <SpatialManipulator.portalShapePoint0>
+            <item>-0.5</item>
+            <item>-0.5</item>
+            <item>0</item>
+          </SpatialManipulator.portalShapePoint0>
+          <SpatialManipulator.portalShapePoint1>
+            <item>0.5</item>
+            <item>-0.5</item>
+            <item>0</item>
+          </SpatialManipulator.portalShapePoint1>
+          <SpatialManipulator.portalShapePoint2>
+            <item>0.5</item>
+            <item>0.5</item>
+            <item>0</item>
+          </SpatialManipulator.portalShapePoint2>
+          <SpatialManipulator.portalShapePoint3>
+            <item>-0.5</item>
+            <item>0.5</item>
+            <item>0</item>
+          </SpatialManipulator.portalShapePoint3>
+          <SpatialManipulator.traversalTriggerBodyReference expectedType="RigidBody" objectPath="3" objectName="Source Portal" componentType="RigidBody" componentIndex="0" />
+          <SpatialManipulator.targetManipulator expectedType="SpatialManipulator" objectPath="4" objectName="Target Portal" componentType="SpatialManipulator" componentIndex="0" />
+        </components:SpatialManipulator>
+      </components>
+      <children />
+    </item>
+
+    <item name="Target Portal" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>12</item>
+          <item>1</item>
+          <item>0</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0.3</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>2.2</item>
+          <item>2.2</item>
+          <item>2.2</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/cube.obj"></components:Mesh>
+        <components:Material Material.shininess="64" Material.metallicFactor="0.22" Material.roughnessFactor="0.3">
+          <Material.diffuse>
+            <item>0.95</item>
+            <item>0.42</item>
+            <item>0.18</item>
+          </Material.diffuse>
+          <Material.ambient>
+            <item>0.14</item>
+            <item>0.06</item>
+            <item>0.03</item>
+          </Material.ambient>
+          <Material.specular>
+            <item>1</item>
+            <item>0.85</item>
+            <item>0.8</item>
+          </Material.specular>
+        </components:Material>
+        <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="2" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="1.2" SpatialManipulator.deformationStrength="1.0">
+          <SpatialManipulator.position>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </SpatialManipulator.position>
+          <SpatialManipulator.rotation>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </SpatialManipulator.rotation>
+          <SpatialManipulator.scale>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+          </SpatialManipulator.scale>
+          <SpatialManipulator.portalPoint>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </SpatialManipulator.portalPoint>
+          <SpatialManipulator.portalNormal>
+            <item>0</item>
+            <item>0</item>
+            <item>-1</item>
+          </SpatialManipulator.portalNormal>
+          <SpatialManipulator.portalShapePoint0>
+            <item>-1.2</item>
+            <item>-1.0</item>
+            <item>0</item>
+          </SpatialManipulator.portalShapePoint0>
+          <SpatialManipulator.portalShapePoint1>
+            <item>1.0</item>
+            <item>-1.1</item>
+            <item>0</item>
+          </SpatialManipulator.portalShapePoint1>
+          <SpatialManipulator.portalShapePoint2>
+            <item>1.4</item>
+            <item>1.2</item>
+            <item>0</item>
+          </SpatialManipulator.portalShapePoint2>
+          <SpatialManipulator.portalShapePoint3>
+            <item>-0.9</item>
+            <item>1.0</item>
+            <item>0</item>
+          </SpatialManipulator.portalShapePoint3>
+        </components:SpatialManipulator>
+      </components>
+      <children />
+    </item>
+
+    <item name="Traverser Cube" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>0</item>
+          <item>1</item>
+          <item>-3.5</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/cube.obj"></components:Mesh>
+        <components:Material Material.shininess="36" Material.metallicFactor="0.1" Material.roughnessFactor="0.58">
+          <Material.diffuse>
+            <item>0.92</item>
+            <item>0.93</item>
+            <item>0.95</item>
+          </Material.diffuse>
+          <Material.ambient>
+            <item>0.12</item>
+            <item>0.12</item>
+            <item>0.13</item>
+          </Material.ambient>
+          <Material.specular>
+            <item>0.72</item>
+            <item>0.72</item>
+            <item>0.75</item>
+          </Material.specular>
+        </components:Material>
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Sphere" PrimitiveObjectCollider.radius="0.35" PrimitiveObjectCollider.height="1">
+          <PrimitiveObjectCollider.center>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+          </PrimitiveObjectCollider.size>
+        </components:PrimitiveObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Dynamic" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.linearDamping="0" RigidBody.angularDamping="0.2" RigidBody.friction="0.1" RigidBody.restitution="0" RigidBody.continuousCollision="true">
+          <RigidBody.initialLinearVelocity>
+            <item>0</item>
+            <item>0</item>
+            <item>5.5</item>
+          </RigidBody.initialLinearVelocity>
+          <RigidBody.initialAngularVelocity>
+            <item>0</item>
+            <item>0.8</item>
+            <item>0</item>
+          </RigidBody.initialAngularVelocity>
+        </components:RigidBody>
+      </components>
+      <children />
+    </item>
+  </objects>
+</Scene>

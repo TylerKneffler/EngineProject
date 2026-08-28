@@ -2,6 +2,7 @@
 #include "Core/Compoonents/Camera.h"
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Compoonents/Material.h"
+#include "Core/Compoonents/SpatialManipulator.h"
 #include "Core/Compoonents/Sprite.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Compoonents/Materials/Texture.h"
@@ -22,6 +23,18 @@
 #include <filesystem>
 #include <glm/glm.hpp>
 #include <glm/ext/matrix_transform.hpp>
+
+#if defined(_WIN32)
+#include "Core/Renderers/DX11/DX11GraphicsProvider.h"
+#include "Core/Renderers/DX12/DX12GraphicsProvider.h"
+#include <d3d11.h>
+#include <d3d12.h>
+#include <wrl/client.h>
+#endif
+
+#if defined(ENGINE_VULKAN_ENABLED)
+#include "Core/Renderers/Vulkan/VulkanGraphicsProvider.h"
+#endif
 
 #ifndef ENGINE_SHADERS_PATH
 #define ENGINE_SHADERS_PATH "Engine/Core/Shaders/"
@@ -550,8 +563,17 @@ void Scene::BuildObjectPipeline()
         { "WEIGHTS",  1, 2, 0, 120, false },
     };
 
+    enum class PortalStencilMode
+    {
+        None,
+        Write,
+        Read
+    };
+
     auto buildMaterialPipeline = [&](bool doubleSided, bool blend,
                                      bool wireframe,
+                                     PortalStencilMode stencilMode,
+                                     bool colorWriteEnabled,
                                      const char* description)
     {
         auto materialBuilder = pipelineFactory->CreateBuilder();
@@ -565,7 +587,8 @@ void Scene::BuildObjectPipeline()
             .SetCullMode(!doubleSided)
             .SetFrontCounterClockwise(false)
             .SetDepthClipEnable(true)
-            .SetBlendEnable(blend);
+            .SetBlendEnable(blend)
+            .SetColorWriteMask(colorWriteEnabled ? 0x0F : 0x00);
         if (blend)
         {
             state.SetSrcBlend(4)
@@ -575,9 +598,40 @@ void Scene::BuildObjectPipeline()
                 .SetDestBlendAlpha(0)
                 .SetBlendOpAlpha(0);
         }
+
+        switch (stencilMode)
+        {
+        case PortalStencilMode::Write:
+            state.SetStencilEnable(true)
+                .SetStencilReadMask(0xFF)
+                .SetStencilWriteMask(0xFF)
+                .SetStencilFunc(7)
+                .SetStencilFailOp(0)
+                .SetStencilDepthFailOp(0)
+                .SetStencilPassOp(2)
+                .SetStencilRef(1);
+            break;
+        case PortalStencilMode::Read:
+            state.SetStencilEnable(true)
+                .SetStencilReadMask(0xFF)
+                .SetStencilWriteMask(0x00)
+                .SetStencilFunc(2)
+                .SetStencilFailOp(0)
+                .SetStencilDepthFailOp(0)
+                .SetStencilPassOp(0)
+                .SetStencilRef(1);
+            break;
+        case PortalStencilMode::None:
+        default:
+            state.SetStencilEnable(false);
+            break;
+        }
+
         auto pipeline = state.SetDepthEnable(true)
-            .SetDepthWriteEnable(!blend)
-            .SetDepthFunc(blend ? 3 : 1)
+            .SetDepthWriteEnable(stencilMode == PortalStencilMode::Write
+                ? false : !blend)
+            .SetDepthFunc(stencilMode == PortalStencilMode::Write
+                ? 3 : (blend ? 3 : 1))
             .SetInputLayout(layout, 10)
             .SetPrimitiveTopology(
                 Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
@@ -591,41 +645,93 @@ void Scene::BuildObjectPipeline()
     };
 
     m_objectPipeline =
-        buildMaterialPipeline(false, false, false, "opaque material");
+        buildMaterialPipeline(false, false, false, PortalStencilMode::None,
+            true, "opaque material");
     m_objectDoubleSidedPipeline =
-        buildMaterialPipeline(true, false, false,
+        buildMaterialPipeline(true, false, false, PortalStencilMode::None,
+            true,
             "double-sided material");
     m_objectBlendPipeline =
-        buildMaterialPipeline(false, true, false, "blended material");
+        buildMaterialPipeline(false, true, false, PortalStencilMode::None,
+            true, "blended material");
     m_objectBlendDoubleSidedPipeline =
-        buildMaterialPipeline(true, true, false,
+        buildMaterialPipeline(true, true, false, PortalStencilMode::None,
+            true,
             "blended double-sided material");
 
     m_objectWirePipeline =
-        buildMaterialPipeline(false, false, true,
+        buildMaterialPipeline(false, false, true, PortalStencilMode::None,
+            true,
             "wireframe opaque material");
     m_objectWireDoubleSidedPipeline =
-        buildMaterialPipeline(true, false, true,
+        buildMaterialPipeline(true, false, true, PortalStencilMode::None,
+            true,
             "wireframe double-sided material");
     m_objectBlendWirePipeline =
-        buildMaterialPipeline(false, true, true,
+        buildMaterialPipeline(false, true, true, PortalStencilMode::None,
+            true,
             "wireframe blended material");
     m_objectBlendWireDoubleSidedPipeline =
-        buildMaterialPipeline(true, true, true,
+        buildMaterialPipeline(true, true, true, PortalStencilMode::None,
+            true,
             "wireframe blended double-sided material");
 
     // Placement previews always blend, regardless of the source alpha mode.
     m_objectPreviewPipeline =
-        buildMaterialPipeline(false, true, false, "object preview");
+        buildMaterialPipeline(false, true, false, PortalStencilMode::None,
+            true, "object preview");
     m_objectPreviewDoubleSidedPipeline =
-        buildMaterialPipeline(true, true, false,
+        buildMaterialPipeline(true, true, false, PortalStencilMode::None,
+            true,
             "double-sided object preview");
     m_objectPreviewWirePipeline =
-        buildMaterialPipeline(false, true, true,
+        buildMaterialPipeline(false, true, true, PortalStencilMode::None,
+            true,
             "wireframe object preview");
     m_objectPreviewWireDoubleSidedPipeline =
-        buildMaterialPipeline(true, true, true,
+        buildMaterialPipeline(true, true, true, PortalStencilMode::None,
+            true,
             "wireframe double-sided object preview");
+
+    m_objectPortalStencilWritePipeline =
+        buildMaterialPipeline(true, false, false, PortalStencilMode::Write,
+            false, "portal stencil write");
+    m_objectPortalStencilReadPipeline =
+        buildMaterialPipeline(false, false, false, PortalStencilMode::Read,
+            true, "portal stencil read opaque");
+    m_objectPortalStencilReadDoubleSidedPipeline =
+        buildMaterialPipeline(true, false, false, PortalStencilMode::Read,
+            true, "portal stencil read double-sided");
+    m_objectPortalStencilReadBlendPipeline =
+        buildMaterialPipeline(false, true, false, PortalStencilMode::Read,
+            true, "portal stencil read blend");
+    m_objectPortalStencilReadBlendDoubleSidedPipeline =
+        buildMaterialPipeline(true, true, false, PortalStencilMode::Read,
+            true, "portal stencil read blend double-sided");
+    m_objectPortalStencilReadWirePipeline =
+        buildMaterialPipeline(false, false, true, PortalStencilMode::Read,
+            true, "portal stencil read wire");
+    m_objectPortalStencilReadWireDoubleSidedPipeline =
+        buildMaterialPipeline(true, false, true, PortalStencilMode::Read,
+            true, "portal stencil read wire double-sided");
+    m_objectPortalStencilReadBlendWirePipeline =
+        buildMaterialPipeline(false, true, true, PortalStencilMode::Read,
+            true, "portal stencil read wire blend");
+    m_objectPortalStencilReadBlendWireDoubleSidedPipeline =
+        buildMaterialPipeline(true, true, true, PortalStencilMode::Read,
+            true, "portal stencil read wire blend double-sided");
+    m_objectPortalStencilReadPreviewPipeline =
+        buildMaterialPipeline(false, true, false, PortalStencilMode::Read,
+            true, "portal stencil read preview");
+    m_objectPortalStencilReadPreviewDoubleSidedPipeline =
+        buildMaterialPipeline(true, true, false, PortalStencilMode::Read,
+            true, "portal stencil read preview double-sided");
+    m_objectPortalStencilReadPreviewWirePipeline =
+        buildMaterialPipeline(false, true, true, PortalStencilMode::Read,
+            true, "portal stencil read preview wire");
+    m_objectPortalStencilReadPreviewWireDoubleSidedPipeline =
+        buildMaterialPipeline(true, true, true, PortalStencilMode::Read,
+            true, "portal stencil read preview wire double-sided");
 
     // Build a wireframe outline pipeline for selected object highlighting.
     auto outlineBuilder = pipelineFactory->CreateBuilder();
@@ -713,7 +819,7 @@ void Scene::PrepareRenderFrame()
             candidate->GetComponent<Engine::Rendering::BakedLightingData>();
         item.belongsToPreview = m_previewObject &&
             IsObjectOrDescendant(candidate, m_previewObject);
-        item.world = candidate->transform.GetWorldMatrix();
+        item.world = candidate->transform.GetWorldMatrixWithLayer();
 
         if (sprite)
         {
@@ -875,6 +981,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         Engine::Graphics::IPipelineState* pipeline = nullptr;
         std::array<const Engine::Graphics::IGraphicsTexture*, 7> textures{};
         UINT64 constantBufferOffset = 0;
+        DrawCBData drawData{};
+        ObjectGPUData objectData{};
         uint32_t vertexStride = 0;
         uint32_t vertexCount = 0;
         bool preview = false;
@@ -1058,11 +1166,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
         const DrawCBData drawData{ slot,
             forceUnlitMode ? 0u : m_frameLightCount, 0u, 0u };
+        preparedDraw.drawData = drawData;
+        preparedDraw.objectData = objectData;
         memcpy(static_cast<uint8_t*>(m_objectCBMapped) + offset,
-            &drawData, sizeof(drawData));
+            &preparedDraw.drawData, sizeof(preparedDraw.drawData));
         memcpy(static_cast<uint8_t*>(m_objectDataMapped) +
             static_cast<size_t>(slot) * sizeof(ObjectGPUData),
-            &objectData, sizeof(objectData));
+            &preparedDraw.objectData, sizeof(preparedDraw.objectData));
 
         Engine::Graphics::IPipelineState* materialPipeline = nullptr;
         if (isPreview)
@@ -1134,6 +1244,500 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             context->SetConstantBuffer(
                 0, m_objectConstantBuffer.get(), draw.constantBufferOffset);
             context->DrawInstanced(draw.vertexCount, 1, 0, 0);
+        }
+    }
+
+#if defined(_WIN32)
+    // Render linked-space view through portal aperture with a stencil mask.
+    if (dynamic_cast<Engine::Renderers::D3D11GraphicsProvider*>(m_graphicsProvider))
+    {
+        ID3D11DeviceContext* dx11Context =
+            static_cast<ID3D11DeviceContext*>(context->GetNativeHandle());
+        if (dx11Context)
+        {
+            struct PortalStencilPass
+            {
+                const PreparedDraw* aperture = nullptr;
+                Engine::Components::SpatialManipulator* source = nullptr;
+                Engine::Components::SpatialManipulator* target = nullptr;
+                glm::mat4 mappedView = glm::mat4(1.f);
+                glm::vec3 mappedCameraPosition = glm::vec3(0.f);
+            };
+
+            PortalStencilPass portalPass{};
+            for (const PreparedDraw& draw : preparedDraws)
+            {
+                if (!draw.object || !draw.vertexBuffer || draw.vertexCount < 3)
+                    continue;
+
+                auto* manipulator =
+                    draw.object->GetComponent<Engine::Components::SpatialManipulator>();
+                if (!manipulator || !manipulator->enabled)
+                    continue;
+
+                const auto mode = static_cast<Engine::Components::SpatialManipulator::ConnectionMode>(
+                    manipulator->connectionMode);
+                if (mode != Engine::Components::SpatialManipulator::ConnectionMode::Portal &&
+                    mode != Engine::Components::SpatialManipulator::ConnectionMode::LinkedPortal)
+                    continue;
+
+                Engine::Components::SpatialManipulator* target =
+                    manipulator->ResolveTarget();
+                if (!target || !target->Owner)
+                    continue;
+
+                const glm::mat4 cameraWorld = cam->Owner
+                    ? cam->Owner->transform.GetWorldMatrixWithLayer()
+                    : glm::mat4(1.f);
+                const glm::vec3 cameraForward = glm::normalize(glm::vec3(cameraWorld[2]));
+                const glm::vec3 cameraUp = glm::normalize(glm::vec3(cameraWorld[1]));
+
+                const glm::vec3 mappedCamera =
+                    manipulator->MapWorldPointThroughPortalShape(cameraPosition, *target);
+                const glm::vec3 mappedLookAt = manipulator->MapWorldPointThroughPortalShape(
+                    cameraPosition + cameraForward, *target);
+                const glm::vec3 mappedUpPoint = manipulator->MapWorldPointThroughPortalShape(
+                    cameraPosition + cameraUp, *target);
+
+                const glm::vec3 mappedForward = glm::normalize(mappedLookAt - mappedCamera);
+                glm::vec3 mappedUp = mappedUpPoint - mappedCamera;
+                if (glm::dot(mappedUp, mappedUp) <= 1e-6f)
+                    mappedUp = glm::vec3(0.f, 1.f, 0.f);
+                else
+                    mappedUp = glm::normalize(mappedUp);
+
+                portalPass.aperture = &draw;
+                portalPass.source = manipulator;
+                portalPass.target = target;
+                portalPass.mappedCameraPosition = mappedCamera;
+                portalPass.mappedView = glm::lookAtLH(
+                    mappedCamera, mappedCamera + mappedForward, mappedUp);
+                break;
+            }
+
+            if (portalPass.aperture)
+            {
+                ID3D11Device* dx11Device = nullptr;
+                dx11Context->GetDevice(&dx11Device);
+                if (dx11Device)
+                {
+                    static Microsoft::WRL::ComPtr<ID3D11DepthStencilState>
+                        stencilWriteState;
+                    static Microsoft::WRL::ComPtr<ID3D11DepthStencilState>
+                        stencilReadState;
+                    static Microsoft::WRL::ComPtr<ID3D11BlendState>
+                        colorMaskOffState;
+
+                    if (!stencilWriteState)
+                    {
+                        D3D11_DEPTH_STENCIL_DESC descriptor{};
+                        descriptor.DepthEnable = TRUE;
+                        descriptor.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+                        descriptor.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
+                        descriptor.StencilEnable = TRUE;
+                        descriptor.StencilReadMask = 0xFF;
+                        descriptor.StencilWriteMask = 0xFF;
+                        descriptor.FrontFace.StencilFunc = D3D11_COMPARISON_ALWAYS;
+                        descriptor.FrontFace.StencilPassOp = D3D11_STENCIL_OP_REPLACE;
+                        descriptor.FrontFace.StencilFailOp = D3D11_STENCIL_OP_KEEP;
+                        descriptor.FrontFace.StencilDepthFailOp = D3D11_STENCIL_OP_KEEP;
+                        descriptor.BackFace = descriptor.FrontFace;
+                        dx11Device->CreateDepthStencilState(
+                            &descriptor, &stencilWriteState);
+                    }
+                    if (!stencilReadState)
+                    {
+                        D3D11_DEPTH_STENCIL_DESC descriptor{};
+                        descriptor.DepthEnable = FALSE;
+                        descriptor.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+                        descriptor.DepthFunc = D3D11_COMPARISON_ALWAYS;
+                        descriptor.StencilEnable = TRUE;
+                        descriptor.StencilReadMask = 0xFF;
+                        descriptor.StencilWriteMask = 0x00;
+                        descriptor.FrontFace.StencilFunc = D3D11_COMPARISON_EQUAL;
+                        descriptor.FrontFace.StencilPassOp = D3D11_STENCIL_OP_KEEP;
+                        descriptor.FrontFace.StencilFailOp = D3D11_STENCIL_OP_KEEP;
+                        descriptor.FrontFace.StencilDepthFailOp = D3D11_STENCIL_OP_KEEP;
+                        descriptor.BackFace = descriptor.FrontFace;
+                        dx11Device->CreateDepthStencilState(
+                            &descriptor, &stencilReadState);
+                    }
+                    if (!colorMaskOffState)
+                    {
+                        D3D11_BLEND_DESC descriptor{};
+                        descriptor.RenderTarget[0].BlendEnable = FALSE;
+                        descriptor.RenderTarget[0].RenderTargetWriteMask = 0;
+                        dx11Device->CreateBlendState(&descriptor,
+                            &colorMaskOffState);
+                    }
+                    dx11Device->Release();
+
+                    if (stencilWriteState && stencilReadState && colorMaskOffState)
+                    {
+                        constexpr UINT portalStencilRef = 1u;
+                        const float blendFactor[4]{};
+
+                        context->SetPipeline(portalPass.aperture->pipeline);
+                        context->SetConstantBuffer(
+                            0, m_objectConstantBuffer.get(),
+                            portalPass.aperture->constantBufferOffset);
+                        context->SetVertexBuffer(
+                            0, portalPass.aperture->vertexBuffer,
+                            portalPass.aperture->vertexStride, 0);
+                        dx11Context->OMSetBlendState(colorMaskOffState.Get(),
+                            blendFactor, UINT_MAX);
+                        dx11Context->OMSetDepthStencilState(
+                            stencilWriteState.Get(), portalStencilRef);
+                        context->DrawInstanced(
+                            portalPass.aperture->vertexCount, 1, 0, 0);
+
+                        for (PreparedDraw& draw : preparedDraws)
+                        {
+                            if (!draw.object || !draw.vertexBuffer)
+                                continue;
+                            if (portalPass.source && portalPass.source->Owner == draw.object)
+                                continue;
+
+                            ObjectGPUData mappedData = draw.objectData;
+                            mappedData.mvp = proj * portalPass.mappedView *
+                                mappedData.world;
+                            mappedData.viewPositionAlphaCutoff.x =
+                                portalPass.mappedCameraPosition.x;
+                            mappedData.viewPositionAlphaCutoff.y =
+                                portalPass.mappedCameraPosition.y;
+                            mappedData.viewPositionAlphaCutoff.z =
+                                portalPass.mappedCameraPosition.z;
+                            if (settings.portalDebugVisuals &&
+                                settings.portalDebugTintRemoteView)
+                            {
+                                mappedData.baseColor = glm::vec4(
+                                    mappedData.baseColor.r * 0.35f,
+                                    mappedData.baseColor.g * 0.70f,
+                                    mappedData.baseColor.b * 1.15f,
+                                    mappedData.baseColor.a);
+                                mappedData.emissiveOcclusion.x += 0.05f;
+                                mappedData.emissiveOcclusion.y += 0.15f;
+                                mappedData.emissiveOcclusion.z += 0.2f;
+                            }
+
+                            memcpy(static_cast<uint8_t*>(m_objectCBMapped) +
+                                draw.constantBufferOffset,
+                                &draw.drawData, sizeof(draw.drawData));
+                            memcpy(static_cast<uint8_t*>(m_objectDataMapped) +
+                                static_cast<size_t>(draw.drawData.objectIndex) *
+                                sizeof(ObjectGPUData),
+                                &mappedData, sizeof(mappedData));
+                        }
+
+                        m_objectDataBuffer->FlushMappedWrites();
+                        context->SetStructuredBuffer(6, m_lightDataBuffer.get());
+                        context->SetStructuredBuffer(7, m_objectDataBuffer.get());
+                        context->SetStructuredBuffer(8, m_boneDataBuffer.get());
+
+                        for (const PreparedDraw& draw : preparedDraws)
+                        {
+                            if (!draw.object || !draw.vertexBuffer)
+                                continue;
+                            if (portalPass.source && portalPass.source->Owner == draw.object)
+                                continue;
+
+                            context->SetPipeline(draw.pipeline);
+                            context->SetConstantBuffer(
+                                0, m_objectConstantBuffer.get(),
+                                draw.constantBufferOffset);
+                            for (uint32_t textureSlot = 0;
+                                textureSlot < draw.textures.size(); ++textureSlot)
+                            {
+                                context->SetTexture(textureSlot,
+                                    draw.textures[textureSlot]);
+                            }
+                            context->SetVertexBuffer(0, draw.vertexBuffer,
+                                draw.vertexStride, 0);
+                            dx11Context->OMSetDepthStencilState(
+                                stencilReadState.Get(), portalStencilRef);
+                            context->DrawInstanced(draw.vertexCount, 1, 0, 0);
+                        }
+
+                        dx11Context->OMSetDepthStencilState(nullptr, 0);
+                        dx11Context->OMSetBlendState(nullptr, blendFactor,
+                            UINT_MAX);
+                    }
+                }
+            }
+        }
+    }
+#endif
+
+#if defined(_WIN32) || defined(ENGINE_VULKAN_ENABLED)
+    const bool isDx12Provider =
+        dynamic_cast<Engine::Renderers::D3D12GraphicsProvider*>(m_graphicsProvider) != nullptr;
+#if defined(ENGINE_VULKAN_ENABLED)
+    const bool isVulkanProvider =
+        dynamic_cast<Engine::Renderers::VulkanGraphicsProvider*>(m_graphicsProvider) != nullptr;
+#else
+    const bool isVulkanProvider = false;
+#endif
+
+    if ((isDx12Provider
+#if defined(ENGINE_VULKAN_ENABLED)
+            || isVulkanProvider
+#endif
+        ) && m_objectPortalStencilWritePipeline)
+    {
+        struct PortalStencilPass
+        {
+            const PreparedDraw* aperture = nullptr;
+            Engine::Components::SpatialManipulator* source = nullptr;
+            Engine::Components::SpatialManipulator* target = nullptr;
+            glm::mat4 mappedView = glm::mat4(1.f);
+            glm::vec3 mappedCameraPosition = glm::vec3(0.f);
+        };
+
+        auto resolveStencilReadPipeline =
+            [&](Engine::Graphics::IPipelineState* base)
+        {
+            if (base == m_objectPipeline.get())
+                return m_objectPortalStencilReadPipeline.get();
+            if (base == m_objectDoubleSidedPipeline.get())
+                return m_objectPortalStencilReadDoubleSidedPipeline.get();
+            if (base == m_objectBlendPipeline.get())
+                return m_objectPortalStencilReadBlendPipeline.get();
+            if (base == m_objectBlendDoubleSidedPipeline.get())
+                return m_objectPortalStencilReadBlendDoubleSidedPipeline.get();
+            if (base == m_objectWirePipeline.get())
+                return m_objectPortalStencilReadWirePipeline.get();
+            if (base == m_objectWireDoubleSidedPipeline.get())
+                return m_objectPortalStencilReadWireDoubleSidedPipeline.get();
+            if (base == m_objectBlendWirePipeline.get())
+                return m_objectPortalStencilReadBlendWirePipeline.get();
+            if (base == m_objectBlendWireDoubleSidedPipeline.get())
+                return m_objectPortalStencilReadBlendWireDoubleSidedPipeline.get();
+            if (base == m_objectPreviewPipeline.get())
+                return m_objectPortalStencilReadPreviewPipeline.get();
+            if (base == m_objectPreviewDoubleSidedPipeline.get())
+                return m_objectPortalStencilReadPreviewDoubleSidedPipeline.get();
+            if (base == m_objectPreviewWirePipeline.get())
+                return m_objectPortalStencilReadPreviewWirePipeline.get();
+            if (base == m_objectPreviewWireDoubleSidedPipeline.get())
+                return m_objectPortalStencilReadPreviewWireDoubleSidedPipeline.get();
+            return base;
+        };
+
+        PortalStencilPass portalPass{};
+        for (const PreparedDraw& draw : preparedDraws)
+        {
+            if (!draw.object || !draw.vertexBuffer || draw.vertexCount < 3)
+                continue;
+
+            auto* manipulator =
+                draw.object->GetComponent<Engine::Components::SpatialManipulator>();
+            if (!manipulator || !manipulator->enabled)
+                continue;
+
+            const auto mode = static_cast<Engine::Components::SpatialManipulator::ConnectionMode>(
+                manipulator->connectionMode);
+            if (mode != Engine::Components::SpatialManipulator::ConnectionMode::Portal &&
+                mode != Engine::Components::SpatialManipulator::ConnectionMode::LinkedPortal)
+                continue;
+
+            Engine::Components::SpatialManipulator* target =
+                manipulator->ResolveTarget();
+            if (!target || !target->Owner)
+                continue;
+
+            const glm::mat4 cameraWorld = cam->Owner
+                ? cam->Owner->transform.GetWorldMatrixWithLayer()
+                : glm::mat4(1.f);
+            const glm::vec3 cameraForward = glm::normalize(glm::vec3(cameraWorld[2]));
+            const glm::vec3 cameraUp = glm::normalize(glm::vec3(cameraWorld[1]));
+
+            const glm::vec3 mappedCamera =
+                manipulator->MapWorldPointThroughPortalShape(cameraPosition, *target);
+            const glm::vec3 mappedLookAt = manipulator->MapWorldPointThroughPortalShape(
+                cameraPosition + cameraForward, *target);
+            const glm::vec3 mappedUpPoint = manipulator->MapWorldPointThroughPortalShape(
+                cameraPosition + cameraUp, *target);
+
+            const glm::vec3 mappedForward = glm::normalize(mappedLookAt - mappedCamera);
+            glm::vec3 mappedUp = mappedUpPoint - mappedCamera;
+            if (glm::dot(mappedUp, mappedUp) <= 1e-6f)
+                mappedUp = glm::vec3(0.f, 1.f, 0.f);
+            else
+                mappedUp = glm::normalize(mappedUp);
+
+            portalPass.aperture = &draw;
+            portalPass.source = manipulator;
+            portalPass.target = target;
+            portalPass.mappedCameraPosition = mappedCamera;
+            portalPass.mappedView = glm::lookAtLH(
+                mappedCamera, mappedCamera + mappedForward, mappedUp);
+            break;
+        }
+
+        if (portalPass.aperture)
+        {
+#if defined(_WIN32)
+            if (isDx12Provider)
+            {
+                if (ID3D12GraphicsCommandList* dx12CommandList =
+                    static_cast<ID3D12GraphicsCommandList*>(context->GetNativeHandle()))
+                {
+                    dx12CommandList->OMSetStencilRef(1u);
+                }
+            }
+#endif
+
+            context->SetPipeline(m_objectPortalStencilWritePipeline.get());
+            context->SetConstantBuffer(
+                0, m_objectConstantBuffer.get(),
+                portalPass.aperture->constantBufferOffset);
+            context->SetVertexBuffer(
+                0, portalPass.aperture->vertexBuffer,
+                portalPass.aperture->vertexStride, 0);
+            context->DrawInstanced(portalPass.aperture->vertexCount, 1, 0, 0);
+
+            for (PreparedDraw& draw : preparedDraws)
+            {
+                if (!draw.object || !draw.vertexBuffer)
+                    continue;
+                if (portalPass.source && portalPass.source->Owner == draw.object)
+                    continue;
+
+                ObjectGPUData mappedData = draw.objectData;
+                mappedData.mvp = proj * portalPass.mappedView * mappedData.world;
+                mappedData.viewPositionAlphaCutoff.x =
+                    portalPass.mappedCameraPosition.x;
+                mappedData.viewPositionAlphaCutoff.y =
+                    portalPass.mappedCameraPosition.y;
+                mappedData.viewPositionAlphaCutoff.z =
+                    portalPass.mappedCameraPosition.z;
+                if (settings.portalDebugVisuals &&
+                    settings.portalDebugTintRemoteView)
+                {
+                    mappedData.baseColor = glm::vec4(
+                        mappedData.baseColor.r * 0.35f,
+                        mappedData.baseColor.g * 0.70f,
+                        mappedData.baseColor.b * 1.15f,
+                        mappedData.baseColor.a);
+                    mappedData.emissiveOcclusion.x += 0.05f;
+                    mappedData.emissiveOcclusion.y += 0.15f;
+                    mappedData.emissiveOcclusion.z += 0.2f;
+                }
+
+                memcpy(static_cast<uint8_t*>(m_objectCBMapped) +
+                    draw.constantBufferOffset,
+                    &draw.drawData, sizeof(draw.drawData));
+                memcpy(static_cast<uint8_t*>(m_objectDataMapped) +
+                    static_cast<size_t>(draw.drawData.objectIndex) *
+                    sizeof(ObjectGPUData),
+                    &mappedData, sizeof(mappedData));
+            }
+
+            m_objectDataBuffer->FlushMappedWrites();
+            context->SetStructuredBuffer(6, m_lightDataBuffer.get());
+            context->SetStructuredBuffer(7, m_objectDataBuffer.get());
+            context->SetStructuredBuffer(8, m_boneDataBuffer.get());
+
+            for (const PreparedDraw& draw : preparedDraws)
+            {
+                if (!draw.object || !draw.vertexBuffer)
+                    continue;
+                if (portalPass.source && portalPass.source->Owner == draw.object)
+                    continue;
+
+                context->SetPipeline(resolveStencilReadPipeline(draw.pipeline));
+                context->SetConstantBuffer(
+                    0, m_objectConstantBuffer.get(),
+                    draw.constantBufferOffset);
+                for (uint32_t textureSlot = 0;
+                    textureSlot < draw.textures.size(); ++textureSlot)
+                {
+                    context->SetTexture(textureSlot,
+                        draw.textures[textureSlot]);
+                }
+                context->SetVertexBuffer(0, draw.vertexBuffer,
+                    draw.vertexStride, 0);
+                context->DrawInstanced(draw.vertexCount, 1, 0, 0);
+            }
+        }
+    }
+#endif
+
+    if (settings.portalDebugVisuals)
+    {
+        const float debugAlpha = std::clamp(
+            settings.portalDebugOverlayAlpha, 0.f, 1.f);
+        Engine::Graphics::IPipelineState* portalDebugPipeline =
+            settings.portalDebugWireframe
+                ? m_objectPreviewWireDoubleSidedPipeline.get()
+                : m_objectPreviewDoubleSidedPipeline.get();
+
+        if (portalDebugPipeline)
+        {
+            for (const PreparedDraw& draw : preparedDraws)
+            {
+                if (!draw.object || !draw.vertexBuffer)
+                    continue;
+
+                auto* manipulator =
+                    draw.object->GetComponent<Engine::Components::SpatialManipulator>();
+                if (!manipulator || !manipulator->enabled)
+                    continue;
+
+                const auto mode = static_cast<Engine::Components::SpatialManipulator::ConnectionMode>(
+                    manipulator->connectionMode);
+                if (mode != Engine::Components::SpatialManipulator::ConnectionMode::Portal &&
+                    mode != Engine::Components::SpatialManipulator::ConnectionMode::LinkedPortal)
+                    continue;
+
+                DrawCBData debugDraw = draw.drawData;
+                debugDraw.lightCount = 0u;
+
+                ObjectGPUData debugData = draw.objectData;
+                debugData.baseColor = { 0.08f, 0.95f, 1.0f, debugAlpha };
+                debugData.ambientUnlit = { 0.f, 0.f, 0.f, 1.f };
+                debugData.emissiveOcclusion = { 0.25f, 0.9f, 1.0f, 1.f };
+                debugData.materialParams.w = 0.f;
+                debugData.viewPositionAlphaCutoff.w = 0.001f;
+
+                memcpy(static_cast<uint8_t*>(m_objectCBMapped) +
+                    draw.constantBufferOffset,
+                    &debugDraw, sizeof(debugDraw));
+                memcpy(static_cast<uint8_t*>(m_objectDataMapped) +
+                    static_cast<size_t>(debugDraw.objectIndex) *
+                    sizeof(ObjectGPUData),
+                    &debugData, sizeof(debugData));
+            }
+
+            m_objectDataBuffer->FlushMappedWrites();
+            context->SetStructuredBuffer(6, m_lightDataBuffer.get());
+            context->SetStructuredBuffer(7, m_objectDataBuffer.get());
+            context->SetStructuredBuffer(8, m_boneDataBuffer.get());
+
+            for (const PreparedDraw& draw : preparedDraws)
+            {
+                if (!draw.object || !draw.vertexBuffer)
+                    continue;
+
+                auto* manipulator =
+                    draw.object->GetComponent<Engine::Components::SpatialManipulator>();
+                if (!manipulator || !manipulator->enabled)
+                    continue;
+
+                const auto mode = static_cast<Engine::Components::SpatialManipulator::ConnectionMode>(
+                    manipulator->connectionMode);
+                if (mode != Engine::Components::SpatialManipulator::ConnectionMode::Portal &&
+                    mode != Engine::Components::SpatialManipulator::ConnectionMode::LinkedPortal)
+                    continue;
+
+                context->SetPipeline(portalDebugPipeline);
+                context->SetConstantBuffer(
+                    0, m_objectConstantBuffer.get(),
+                    draw.constantBufferOffset);
+                context->SetVertexBuffer(0, draw.vertexBuffer,
+                    draw.vertexStride, 0);
+                context->DrawInstanced(draw.vertexCount, 1, 0, 0);
+            }
         }
     }
 

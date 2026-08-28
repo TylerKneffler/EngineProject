@@ -159,6 +159,25 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
                 if (OnComponentsChanged)
                     OnComponentsChanged();
             }
+
+            ui.Separator();
+            ui.Label("Portal Debug");
+            bool portalDebugChanged = false;
+            portalDebugChanged |= ui.Checkbox("Enable Portal Debug Visuals",
+                &m_scene->settings.portalDebugVisuals);
+            portalDebugChanged |= ui.Checkbox("Portal Wireframe Overlay",
+                &m_scene->settings.portalDebugWireframe);
+            portalDebugChanged |= ui.Checkbox("Tint Remote Portal View",
+                &m_scene->settings.portalDebugTintRemoteView);
+            portalDebugChanged |= ui.DragFloat("Portal Overlay Alpha",
+                &m_scene->settings.portalDebugOverlayAlpha, 0.02f, 0.f, 1.f);
+            if (portalDebugChanged)
+            {
+                m_scene->settings.portalDebugOverlayAlpha = std::clamp(
+                    m_scene->settings.portalDebugOverlayAlpha, 0.f, 1.f);
+                if (OnComponentsChanged)
+                    OnComponentsChanged();
+            }
         }
         ui.EndTextWrap();
         ui.EndWindow();

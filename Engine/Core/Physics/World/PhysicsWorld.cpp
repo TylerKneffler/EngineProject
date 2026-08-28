@@ -77,6 +77,7 @@ void Physics::Step(float deltaTime)
                 bodies.push_back(body);
                 body->m_isColliding = false;
                 body->m_isGrounded = false;
+                body->BeginOverlapFrame();
                 if (body->EnsureBody())
                 {
                     body->ApplyBodySettings();
@@ -117,6 +118,26 @@ void Physics::Step(float deltaTime)
         btPersistentManifold* manifold = physics.dispatcher->getManifoldByIndexInternal(index);
         auto* first = static_cast<Engine::Components::RigidBody*>(manifold->getBody0()->getUserPointer());
         auto* second = static_cast<Engine::Components::RigidBody*>(manifold->getBody1()->getUserPointer());
+
+        bool hasPenetratingContact = false;
+        for (int contact = 0; contact < manifold->getNumContacts(); ++contact)
+        {
+            const btManifoldPoint& point = manifold->getContactPoint(contact);
+            if (point.getDistance() <= 0.f)
+            {
+                hasPenetratingContact = true;
+                break;
+            }
+        }
+        if (hasPenetratingContact)
+        {
+            if (first && second)
+            {
+                first->RegisterOverlap(second);
+                second->RegisterOverlap(first);
+            }
+        }
+
         for (int contact = 0; contact < manifold->getNumContacts(); ++contact)
         {
             const btManifoldPoint& point = manifold->getContactPoint(contact);

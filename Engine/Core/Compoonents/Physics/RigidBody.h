@@ -3,6 +3,7 @@
 #include "Core/Component.h"
 #include "Core/PropertyMacros.h"
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <string>
 #include <vector>
 
@@ -77,11 +78,17 @@ public:
     void AddForce(const glm::vec3& force);
     void AddTorque(const glm::vec3& torque);
     void AddImpulse(const glm::vec3& impulse);
+    void SetWorldPosition(const glm::vec3& worldPosition);
+    void SetWorldPose(const glm::vec3& worldPosition, const glm::quat& worldRotation);
     void SetLinearVelocity(const glm::vec3& velocity);
     void SetAngularVelocity(const glm::vec3& velocity);
     glm::vec3 GetLinearVelocity() const;
     glm::vec3 GetAngularVelocity() const;
     float ResolveFrictionFor(const RigidBody* other) const;
+    bool IsOverlapping(const RigidBody* other) const;
+    bool DidBeginOverlap(const RigidBody* other) const;
+    bool DidEndOverlap(const RigidBody* other) const;
+    std::vector<RigidBody*> GetOverlappingBodies() const;
     bool IsColliding() const { return m_isColliding; }
     bool IsGrounded() const { return m_isGrounded; }
     void NotifyEditorTransformChanged();
@@ -98,6 +105,8 @@ public:
 
 private:
     friend class Engine::Physics::Physics;
+    void BeginOverlapFrame();
+    void RegisterOverlap(const RigidBody* other);
     bool EnsureBody();
     void DestroyBody();
     void SyncBodyFromTransform();
