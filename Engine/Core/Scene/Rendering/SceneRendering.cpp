@@ -814,7 +814,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     if (skybox && skybox->GetGraphicsTexture() && m_skyboxPipeline)
     {
         SkyboxCBData skyboxData{};
-        skyboxData.invVP = glm::inverse(proj * view);
+        // A skybox represents direction only. Excluding camera translation
+        // prevents cancellation in the shader's farPoint - nearPoint math
+        // when the editor camera is far from the world origin.
+        const glm::mat4 skyboxView = glm::mat4(glm::mat3(view));
+        skyboxData.invVP = glm::inverse(proj * skyboxView);
         skyboxData.displayParams = {
             m_editorMode2D ? 1.f : 0.f,
             std::exp2(settings.hdriExposure),

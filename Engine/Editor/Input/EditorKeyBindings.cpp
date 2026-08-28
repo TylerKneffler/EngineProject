@@ -108,7 +108,7 @@ void EditorKeyBindings::SetCompiledDefaults()
         { EditorCommand::ClearBakedLighting, "lighting.clear", "Lighting", "Clear Baked Lighting", { Key(""), Key("") } },
         { EditorCommand::ViewportSelect, "viewport.select", "Scene View", "Select Object", { Key("Mouse Left"), Key("") } },
         { EditorCommand::ViewportPan, "viewport.pan", "Scene View", "Pan Camera", { Key("Mouse Right"), Key("Mouse Middle", false, true), Key("Mouse Left", false, true, true) } },
-        { EditorCommand::ViewportOrbit, "viewport.orbit", "Scene View", "Orbit Camera", { Key("Mouse Middle"), Key("Mouse Left", false, false, true), Key("Mouse Right", false, false, true) } },
+        { EditorCommand::ViewportOrbit, "viewport.orbit", "Scene View", "Look Camera", { Key("Mouse Middle"), Key("Mouse Left", false, false, true), Key("Mouse Right", false, false, true) } },
         { EditorCommand::ViewportZoom, "viewport.zoom", "Scene View", "Zoom Camera", { Key("Mouse Wheel"), Key("Mouse Left", true, false, true) } },
         { EditorCommand::ViewportMoveLeft, "viewport.move_left", "Scene View", "Move Camera Left", { Key("LeftArrow"), Key("") } },
         { EditorCommand::ViewportMoveRight, "viewport.move_right", "Scene View", "Move Camera Right", { Key("RightArrow"), Key("") } },

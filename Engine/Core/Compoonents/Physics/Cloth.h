@@ -45,6 +45,19 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Cloth")
     bool selfCollision = false;
 
+    // Uses rigid-body contacts to squash and recover the rendered mesh without
+    // creating a second, competing Bullet soft body on the same object.
+    PROPERTY(Inspector, EditAnywhere, Category = "Cloth | Collision Morph")
+    bool collisionMorph = false;
+    PROPERTY(Inspector, EditAnywhere, Category = "Cloth | Collision Morph", ClampMin = "0")
+    float collisionMorphStrength = 0.075f;
+    PROPERTY(Inspector, EditAnywhere, Category = "Cloth | Collision Morph", Range = "0, 0.75")
+    float collisionMorphMaximum = 0.34f;
+    PROPERTY(Inspector, EditAnywhere, Category = "Cloth | Collision Morph", ClampMin = "0")
+    float collisionMorphRecovery = 4.f;
+    PROPERTY(Inspector, EditAnywhere, Category = "Cloth | Collision Morph", Range = "0, 1")
+    float collisionMorphExpansion = 0.55f;
+
     PROPERTY(Inspector, EditAnywhere, Category = "Cloth | Pinning")
     std::string pinMode = "Top"; // None, Top, Bottom, Left, Right
     PROPERTY(Inspector, EditAnywhere, Category = "Cloth | Pinning", ClampMin = "0")
@@ -67,10 +80,14 @@ public:
 private:
     friend class Engine::Physics::Physics;
     bool EnsureSoftBody();
+    bool EnsureCollisionMorph();
     void DestroySoftBody(bool restoreMesh);
     void ApplyForces();
     void UpdatePinnedNodes();
     void SyncMeshFromSoftBody();
+    void NotifyRigidBodyCollision(const glm::vec3& worldNormal,
+        const glm::vec3& worldPoint, float impulse);
+    void UpdateCollisionMorph(float deltaTime);
 
     struct Impl;
     Impl* m_impl = nullptr;

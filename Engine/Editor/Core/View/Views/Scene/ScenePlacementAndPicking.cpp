@@ -253,13 +253,32 @@ Engine::Core::Object* ScenePlacementAndPicking::PickObjectInViewport(
     for (const auto& objPtr : scene.GetObjects())
     {
         Engine::Core::Object* obj = objPtr.get();
+        Engine::Components::Mesh* mesh = obj && obj->IsEnabledInHierarchy()
+            ? obj->GetComponent<Engine::Components::Mesh>() : nullptr;
+        Engine::Components::Sprite* sprite = obj && obj->IsEnabledInHierarchy()
+            ? obj->GetComponent<Engine::Components::Sprite>() : nullptr;
         if (!obj || !obj->IsEnabledInHierarchy() ||
-            (!obj->GetComponent<Engine::Components::Mesh>() &&
-            !obj->GetComponent<Engine::Components::Sprite>()))
+            (!mesh && !sprite))
         {
             continue;
         }
 
+        float distance = 0.f;
+        if (mesh && mesh->HasBounds())
+        {
+            if (IntersectMeshBounds(*obj, *mesh, rayOrigin, rayDir, distance) &&
+                distance < bestDistance)
+            {
+                bestDistance = distance;
+                best = obj;
+            }
+            continue;
+        }
+
+        // Sprites and meshes whose CPU bounds are not available retain the
+        // coarse fallback. Meshes with bounds must use their transformed AABB:
+        // a sphere derived from a wide, flat floor otherwise covers objects
+        // visibly positioned above it and steals their clicks.
         const glm::vec3 center = obj->transform.GetWorldPosition();
         const float radius = glm::max(
             glm::max(obj->transform.scale.x, obj->transform.scale.y),
@@ -275,7 +294,7 @@ Engine::Core::Object* ScenePlacementAndPicking::PickObjectInViewport(
         const float sqrtDiscriminant = std::sqrt(discriminant);
         const float t0 = (-b - sqrtDiscriminant) / (2.f * a);
         const float t1 = (-b + sqrtDiscriminant) / (2.f * a);
-        float distance = t0 > 0.f ? t0 : t1;
+        distance = t0 > 0.f ? t0 : t1;
         if (distance > 0.f && distance < bestDistance)
         {
             bestDistance = distance;

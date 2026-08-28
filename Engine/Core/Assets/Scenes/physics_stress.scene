@@ -130,7 +130,7 @@
             <item>1</item>
           </PrimitiveObjectCollider.size>
         </components:PrimitiveObjectCollider>
-        <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0.8" RigidBody.restitution="0.05"></components:RigidBody>
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0.8" RigidBody.restitution="0" RigidBody.collisionIdentifier="stress-floor"></components:RigidBody>
       </components>
       <children />
     </item>

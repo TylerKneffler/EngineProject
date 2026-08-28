@@ -4,6 +4,7 @@
 #include "Core/PropertyMacros.h"
 #include <glm/glm.hpp>
 #include <string>
+#include <vector>
 
 namespace Engine::Physics { class Physics; }
 
@@ -12,6 +13,15 @@ namespace Engine::Components
 class RigidBody final : public Engine::Core::Component
 {
 public:
+    struct FrictionBehavior
+    {
+        // All, Name, or Identifier. Specific matches take precedence over All.
+        std::string match = "All";
+        std::string target;
+        float friction = 0.5f;
+        bool enabled = true;
+    };
+
     RigidBody();
     ~RigidBody() override;
 
@@ -58,6 +68,11 @@ public:
     int collisionLayer = 1;
     PROPERTY(Inspector, EditAnywhere, Category = "Physics | Filtering")
     int collisionMask = -1;
+    PROPERTY(Inspector, EditAnywhere, Category = "Physics | Filtering")
+    std::string collisionIdentifier;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Physics | Friction")
+    std::vector<FrictionBehavior> frictionBehaviors;
 
     void AddForce(const glm::vec3& force);
     void AddTorque(const glm::vec3& torque);
@@ -66,9 +81,14 @@ public:
     void SetAngularVelocity(const glm::vec3& velocity);
     glm::vec3 GetLinearVelocity() const;
     glm::vec3 GetAngularVelocity() const;
+    float ResolveFrictionFor(const RigidBody* other) const;
     bool IsColliding() const { return m_isColliding; }
     bool IsGrounded() const { return m_isGrounded; }
     void NotifyEditorTransformChanged();
+
+    JsonValue Serialize() const override;
+    void Deserialize(const JsonValue& value) override;
+    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
 
     void Start() override;
     void Update() override;
