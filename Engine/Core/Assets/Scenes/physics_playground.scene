@@ -236,11 +236,11 @@
             <item>1</item>
           </PrimitiveObjectCollider.size>
         </components:PrimitiveObjectCollider>
-        <components:RigidBody RigidBody.bodyType="Dynamic" RigidBody.mass="1" RigidBody.useGravity="true" RigidBody.gravityScale="1" RigidBody.linearDamping="0.03" RigidBody.angularDamping="0.03" RigidBody.friction="0.55" RigidBody.restitution="0.2" RigidBody.continuousCollision="true">
+        <components:RigidBody RigidBody.bodyType="Dynamic" RigidBody.mass="1" RigidBody.useGravity="true" RigidBody.gravityScale="1" RigidBody.linearDamping="0.03" RigidBody.angularDamping="0.015" RigidBody.friction="0.32" RigidBody.restitution="0.45" RigidBody.continuousCollision="true">
           <RigidBody.initialAngularVelocity>
-            <item>0.5</item>
-            <item>1</item>
-            <item>0.2</item>
+            <item>3</item>
+            <item>5</item>
+            <item>1.5</item>
           </RigidBody.initialAngularVelocity>
         </components:RigidBody>
       </components>
@@ -354,11 +354,11 @@
             <item>1</item>
           </PrimitiveObjectCollider.size>
         </components:PrimitiveObjectCollider>
-        <components:RigidBody RigidBody.bodyType="Dynamic" RigidBody.mass="2" RigidBody.useGravity="true" RigidBody.gravityScale="1" RigidBody.friction="0.65" RigidBody.restitution="0.05">
+        <components:RigidBody RigidBody.bodyType="Dynamic" RigidBody.mass="2" RigidBody.useGravity="true" RigidBody.gravityScale="1" RigidBody.angularDamping="0.015" RigidBody.friction="0.35" RigidBody.restitution="0.3">
           <RigidBody.initialAngularVelocity>
-            <item>-0.4</item>
-            <item>0.3</item>
-            <item>0.8</item>
+            <item>-2.5</item>
+            <item>2</item>
+            <item>4</item>
           </RigidBody.initialAngularVelocity>
         </components:RigidBody>
       </components>
