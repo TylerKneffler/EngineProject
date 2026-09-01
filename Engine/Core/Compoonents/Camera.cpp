@@ -1,5 +1,6 @@
 #include "Camera.h"
 #include "Core/Object.h"
+#include "Core/Scene/Scene.h"
 #include <cassert>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
@@ -26,7 +27,11 @@ glm::mat4 Camera::GetViewMatrix() const
     const glm::mat4 world = Owner->transform.GetWorldMatrixWithLayer();
     const glm::vec3 p = glm::vec3(world[3]);
     if (!useTransformRotation)
-        return glm::lookAtLH(p, target, up);
+    {
+        const glm::vec3 mappedTarget = Owner->GetScene()
+            ? Owner->GetScene()->WarpWorldPoint(target) : target;
+        return glm::lookAtLH(p, mappedTarget, up);
+    }
 
     const glm::vec3 forward = glm::normalize(glm::vec3(world[2]));
     const glm::vec3 cameraUp = glm::normalize(glm::vec3(world[1]));

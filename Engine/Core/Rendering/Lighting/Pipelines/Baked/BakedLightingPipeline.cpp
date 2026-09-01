@@ -409,7 +409,7 @@ std::vector<SurfaceTriangle> GatherGeometry(const Engine::Scene::Scene& scene)
         const Engine::Components::Mesh* mesh = object->GetComponent<Engine::Components::Mesh>();
         if (!mesh)
             continue;
-        const glm::mat4 world = object->transform.GetWorldMatrix();
+        const glm::mat4 world = object->transform.GetWorldMatrixWithLayer();
         const glm::mat3 normalMatrix = glm::inverseTranspose(glm::mat3(world));
         const auto& vertices = mesh->GetVertices();
         for (size_t offset = 0; offset + 2 < vertices.size(); offset += 3)
@@ -470,10 +470,11 @@ Engine::Model::BakeResult BakedLightingPipeline::Bake(Engine::Scene::Scene& scen
                 continue;
             if (light->GetLightType() == Engine::Components::Light::Type::Point && light->range <= 0.f)
                 continue;
+            const glm::mat4 lightWorld = object->transform.GetWorldMatrixWithLayer();
             const glm::vec3 direction = light->GetLightType() == Engine::Components::Light::Type::Ambient
-                ? -glm::normalize(glm::vec3(object->transform.GetWorldMatrix()[2]))
+                ? -glm::normalize(glm::vec3(lightWorld[2]))
                 : glm::vec3(0.f, 1.f, 0.f);
-            lights.push_back({ object->transform.GetWorldPosition(), light->color,
+            lights.push_back({ glm::vec3(lightWorld[3]), light->color,
                 light->intensity, light->range, light->falloff,
                 light->GetLightType(), direction });
         }

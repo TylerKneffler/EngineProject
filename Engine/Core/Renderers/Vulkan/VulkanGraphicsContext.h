@@ -17,6 +17,7 @@ public:
         std::shared_ptr<VulkanTextureSystem> textureSystem)
         : m_commandBuffer(commandBuffer), m_textureSystem(std::move(textureSystem)) {}
     void SetPipeline(const Engine::Graphics::IPipelineState* pipeline) override;
+    void SetStencilReference(uint32_t reference) override;
     void SetConstantBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint64_t offset = 0) override;
     void SetStructuredBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer) override;
     void SetVertexBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset = 0) override;

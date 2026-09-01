@@ -201,12 +201,18 @@ int main(int argc, char** argv)
     }
 
     const std::vector<Engine::Model::Vertex> finalVertices = traverserMesh->GetVertices();
+    const glm::vec3 finalTraverserPosition = traverser->transform.GetWorldPosition();
+    const glm::vec3 finalReversePosition = reverseTraverser->transform.GetWorldPosition();
 
     assert(sawBeginOverlap);
     assert(sawEndOverlap);
     assert(sawTeleport);
     assert(sawReverseTeleport);
     assert(!stationaryTeleported);
+    // A stale source-trigger overlap after SetWorldPose must not map either
+    // traverser back through the portal a second time.
+    assert(finalTraverserPosition.x > 6.f);
+    assert(finalReversePosition.x > 6.f);
     assert(glm::length(velocityAfterTeleport - expectedVelocity) < 0.02f);
     assert(glm::length(angularVelocityAfterReverseTeleport -
         expectedReverseAngularVelocity) < 0.02f);

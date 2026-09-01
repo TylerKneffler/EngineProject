@@ -142,7 +142,8 @@ std::unique_ptr<Engine::Graphics::IPipelineState> VulkanPipelineStateBuilder::Bu
         depth.front.writeMask = m_stencilWriteMask;
         depth.front.reference = m_stencilRef;
         depth.back = depth.front;
-        VkDynamicState states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+        VkDynamicState states[] = { VK_DYNAMIC_STATE_VIEWPORT,
+            VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_STENCIL_REFERENCE };
         VkPipelineDynamicStateCreateInfo dynamic{ VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
         dynamic.dynamicStateCount = ARRAYSIZE(states); dynamic.pDynamicStates = states;
         VkPushConstantRange push{}; push.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT; push.size = 128;

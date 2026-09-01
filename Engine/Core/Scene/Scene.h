@@ -102,6 +102,14 @@ public:
     // render from the Scene view's navigation camera.
     Camera* FindGameCamera();
 
+    // Maps the ordinary Euclidean scene chart through every active spatial
+    // volume. Matrices use the local Jacobian at their origin so position,
+    // orientation, and scale stay coherent for nonlinear warps.
+    glm::vec3 WarpWorldPoint(const glm::vec3& worldPoint,
+        const Object* excludedOwner = nullptr) const;
+    glm::mat4 WarpWorldMatrix(const glm::mat4& worldMatrix,
+        const Object* excludedOwner = nullptr) const;
+
     // Move the editor camera to frame the given object, keeping a comfortable
     // viewing distance and looking directly at its world-space origin.
     // Pass nullptr to reset to the default startup position.
@@ -188,6 +196,8 @@ private:
     void* m_lightDataMapped = nullptr;
     std::unique_ptr<IGraphicsBuffer> m_boneDataBuffer;
     void* m_boneDataMapped = nullptr;
+    std::unique_ptr<IGraphicsBuffer> m_portalApertureBuffer;
+    void* m_portalApertureMapped = nullptr;
     std::unique_ptr<Engine::Renderers::UIRenderer> m_uiRenderer;
     std::unique_ptr<Engine::Physics::Physics> m_physics;
     std::unique_ptr<Engine::Audio::Audio> m_audio;
@@ -235,6 +245,9 @@ private:
     bool m_editorCameraModeInitialized = false;
 
     static constexpr uint32_t kMaxObjects = 64;
+    // Per-object upload budget covers either an 8-point portal fan (18
+    // vertices) or an editor-only box volume/matrix gizmo (36 vertices).
+    static constexpr uint32_t kMaxSpatialVerticesPerObject = 36;
     static constexpr uint32_t kMaxBonesPerObject = 256;
     static constexpr uint32_t kMaxLights =
         Engine::Model::MaxRealtimeLights;

@@ -161,15 +161,15 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             }
 
             ui.Separator();
-            ui.Label("Portal Debug");
+            ui.Label("Spatial Debug");
             bool portalDebugChanged = false;
-            portalDebugChanged |= ui.Checkbox("Enable Portal Debug Visuals",
+            portalDebugChanged |= ui.Checkbox("Enable Spatial Debug Visuals",
                 &m_scene->settings.portalDebugVisuals);
-            portalDebugChanged |= ui.Checkbox("Portal Wireframe Overlay",
+            portalDebugChanged |= ui.Checkbox("Spatial Wireframe Overlay",
                 &m_scene->settings.portalDebugWireframe);
             portalDebugChanged |= ui.Checkbox("Tint Remote Portal View",
                 &m_scene->settings.portalDebugTintRemoteView);
-            portalDebugChanged |= ui.DragFloat("Portal Overlay Alpha",
+            portalDebugChanged |= ui.DragFloat("Spatial Overlay Alpha",
                 &m_scene->settings.portalDebugOverlayAlpha, 0.02f, 0.f, 1.f);
             if (portalDebugChanged)
             {

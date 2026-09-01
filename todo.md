@@ -54,10 +54,10 @@
 - [x] CRITICAL: Make portal traversal strictly crossing-based and bidirectional (front-to-back and back-to-front), not merely side-based.
 - [x] CRITICAL: Define and implement a mathematically consistent bidirectional portal transform (position, orientation, and parity/handedness) for non-Euclidean mapping.
 - [x] CRITICAL: Remap rigid-body kinematics through traversal (linear velocity, angular velocity, and orientation) to preserve physically coherent motion across portals or warped spaces.
-- [ ] HIGH: Replace one-sided/discrete teleport gating with robust traversal state handling that prevents double-teleports, spawn-side false positives, and jitter at the portal plane.
-- [ ] HIGH: Compute portal connection transforms as source-to-target relative transforms (including portal anchor frames), not raw overlay assignment.
-- [ ] HIGH: Ensure disconnect/disable operations are symmetric across linked manipulators and always clear both sides safely.
-- [ ] HIGH: Support rendering for multiple active portals per frame with deterministic ordering and correct stencil isolation.
+- [x] HIGH: Replace one-sided/discrete teleport gating with robust traversal state handling that prevents double-teleports, spawn-side false positives, and jitter at the portal plane.
+- [x] HIGH: Compute portal connection transforms as source-to-target relative transforms (including portal anchor frames), not raw overlay assignment.
+- [x] HIGH: Ensure disconnect/disable operations are symmetric across linked manipulators and always clear both sides safely.
+- [x] HIGH: Support rendering for multiple active portals per frame with deterministic ordering and correct stencil isolation.
 - [ ] HIGH: Add recursive portal view support with configurable recursion depth, guardrails for performance, and cycle protection.
 - [ ] HIGH: Extend non-DX11 parity checks to confirm portal aperture behavior is equivalent across DX11, DX12, and Vulkan paths.
 - [ ] MEDIUM: Correct world-layer point transforms to apply full world matrix composition (rotation/scale-safe), not position-offset approximations.

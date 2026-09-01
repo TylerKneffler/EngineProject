@@ -2,6 +2,7 @@
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Compoonents/SpatialManipulator.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Serialization/SceneSerializer.h"
 #include "Core/Object.h"
 #include <glm/glm.hpp>
 #include <cassert>
@@ -69,6 +70,8 @@ int main()
     source->position = glm::vec3(2.f, 0.f, 0.f);
     target->position = glm::vec3(4.f, 0.f, 0.f);
     source->ConnectToTarget(target);
+    assert(source->ResolveTarget() == target);
+    assert(target->ResolveTarget() == source);
     source->Update();
     assert(sourceObject->transform.matrixLayer.enabled);
     assert(targetObject->transform.matrixLayer.enabled);
@@ -105,6 +108,8 @@ int main()
     source->connectionMode = static_cast<int>(SpatialManipulator::ConnectionMode::Portal);
     source->portalPointCount = 4;
     target->portalPointCount = 4;
+    source->portalPoint = glm::vec3(1.f, -0.5f, 0.25f);
+    target->portalPoint = glm::vec3(-0.75f, 0.4f, -0.2f);
     target->portalShapePoint0 = glm::vec3(-1.f, -1.f, 0.f);
     target->portalShapePoint1 = glm::vec3(1.f, -1.f, 0.f);
     target->portalShapePoint2 = glm::vec3(1.f, 1.f, 0.f);
@@ -117,9 +122,13 @@ int main()
         for (int row = 0; row < 4; ++row)
             assert(std::abs(roundTrip[column][row] - (column == row ? 1.f : 0.f)) < 0.0002f);
 
-    const glm::vec3 mappedCenter = glm::vec3(sourceToTarget *
-        glm::vec4(sourceObject->transform.position, 1.f));
-    assert(glm::length(mappedCenter - targetObject->transform.position) < 0.0002f);
+    const glm::vec3 sourceAnchor = glm::vec3(sourceObject->transform.GetWorldMatrix() *
+        glm::vec4(source->portalPoint, 1.f));
+    const glm::vec3 targetAnchor = glm::vec3(targetObject->transform.GetWorldMatrix() *
+        glm::vec4(target->portalPoint, 1.f));
+    const glm::vec3 mappedAnchor = glm::vec3(sourceToTarget *
+        glm::vec4(sourceAnchor, 1.f));
+    assert(glm::length(mappedAnchor - targetAnchor) < 0.0002f);
 
     const glm::vec3 sourceNormal(0.f, 0.f, 1.f);
     const glm::vec3 targetNormal(1.f, 0.f, 0.f);
@@ -137,6 +146,8 @@ int main()
     source->Update();
     const auto& sourceConnection = sourceObject->transform.matrixLayer.connection;
     const auto& targetConnection = targetObject->transform.matrixLayer.connection;
+    assert(glm::length(sourceConnection.boundaryPoint - sourceAnchor) < 0.0002f);
+    assert(glm::length(targetConnection.boundaryPoint - targetAnchor) < 0.0002f);
     for (int column = 0; column < 4; ++column)
         for (int row = 0; row < 4; ++row)
         {
@@ -145,6 +156,87 @@ int main()
             assert(std::abs(targetConnection.localToRemote[column][row] -
                 targetToSource[column][row]) < 0.0002f);
         }
+
+    source->Disconnect();
+    assert(!source->HasTarget());
+    assert(!target->HasTarget());
+    assert(!sourceObject->transform.matrixLayer.connection.enabled);
+    assert(!targetObject->transform.matrixLayer.connection.enabled);
+
+    source->ConnectToTarget(target);
+    source->Update();
+    target->enabled = false;
+    target->Update();
+    assert(!sourceObject->transform.matrixLayer.connection.enabled);
+    assert(!targetObject->transform.matrixLayer.connection.enabled);
+    target->enabled = true;
+
+    Engine::Core::Object* volumeObject = scene.AddObject("SpiralWarpVolume");
+    auto* volume = volumeObject->AddComponent<SpatialManipulator>();
+    volume->definesWarpVolume = true;
+    volume->warpVolumeShape = static_cast<int>(
+        SpatialManipulator::WarpVolumeShape::Box);
+    volume->warpVolumeSize = glm::vec3(10.f);
+    volume->spaceWarpType = static_cast<int>(
+        SpatialManipulator::SpaceWarpType::Formula);
+    volume->formulaA = 1.57079632679f;
+    volume->formulaX = "cos(a*y)*x - sin(a*y)*z";
+    volume->formulaY = "y";
+    volume->formulaZ = "sin(a*y)*x + cos(a*y)*z";
+    volume->scale = glm::vec3(0.5f, 1.f, 0.5f);
+
+    Engine::Core::Object* insideVolume = scene.AddObject("InsideWarpVolume");
+    insideVolume->transform.position = glm::vec3(1.f, 2.f, 0.f);
+    const glm::vec3 warpedInside = glm::vec3(
+        insideVolume->transform.GetWorldMatrixWithLayer()[3]);
+    assert(glm::length(warpedInside - glm::vec3(-0.5f, 2.f, 0.f)) < 0.002f);
+
+    Engine::Core::Object* outsideVolume = scene.AddObject("OutsideWarpVolume");
+    outsideVolume->transform.position = glm::vec3(1.f, 6.f, 0.f);
+    const glm::vec3 warpedOutside = glm::vec3(
+        outsideVolume->transform.GetWorldMatrixWithLayer()[3]);
+    assert(glm::length(warpedOutside - outsideVolume->transform.position) < 0.0002f);
+
+    const glm::vec3 mappedByScene = scene.WarpWorldPoint(glm::vec3(1.f, 2.f, 0.f));
+    assert(glm::length(mappedByScene - warpedInside) < 0.0002f);
+
+    volume->formulaX = "sqrt(-1)";
+    assert(glm::length(scene.WarpWorldPoint(glm::vec3(1.f, 2.f, 0.f)) -
+        glm::vec3(1.f, 2.f, 0.f)) < 0.0002f);
+    volume->formulaX = "cos(a*y)*x - sin(a*y)*z";
+
+    Engine::Scene::Scene showcase;
+    assert(Engine::Serialization::SceneSerializer::Load(showcase,
+        "Engine/Core/Assets/Scenes/spiral_warp_column.scene", nullptr));
+    Engine::Core::Object* loadedVolume = nullptr;
+    Engine::Core::Object* loadedFallingBody = nullptr;
+    for (const auto& object : showcase.GetObjects())
+    {
+        if (object->name == "Spiral Warp Volume") loadedVolume = object.get();
+        if (object->name == "Falling Warp Sphere") loadedFallingBody = object.get();
+    }
+    assert(loadedVolume && loadedFallingBody);
+    const auto* loadedManipulator = loadedVolume->GetComponent<SpatialManipulator>();
+    assert(loadedManipulator && loadedManipulator->definesWarpVolume);
+    assert(static_cast<SpatialManipulator::SpaceWarpType>(
+        loadedManipulator->spaceWarpType) == SpatialManipulator::SpaceWarpType::Formula);
+    assert(glm::length(glm::vec3(loadedFallingBody->transform.GetWorldMatrixWithLayer()[3]) -
+        loadedFallingBody->transform.GetWorldPosition()) > 0.1f);
+
+    Engine::Core::Object* removableObject = scene.AddObject("RemovableLink");
+    Engine::Core::Object* survivingObject = scene.AddObject("SurvivingLink");
+    auto* removable = removableObject->AddComponent<SpatialManipulator>();
+    auto* surviving = survivingObject->AddComponent<SpatialManipulator>();
+    removable->connectionMode = static_cast<int>(
+        SpatialManipulator::ConnectionMode::Portal);
+    surviving->connectionMode = removable->connectionMode;
+    removable->ConnectToTarget(surviving);
+    removable->Update();
+    assert(surviving->HasTarget());
+    assert(survivingObject->transform.matrixLayer.connection.enabled);
+    scene.RemoveObject(removableObject);
+    assert(!surviving->HasTarget());
+    assert(!survivingObject->transform.matrixLayer.connection.enabled);
 
     return 0;
 }

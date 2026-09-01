@@ -1,5 +1,6 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Audio/Audio.h"
+#include "Core/Compoonents/SpatialManipulator.h"
 #include "Core/Physics/Physics.h"
 #include "Core/Renderers/UIRenderer.h"
 #include <algorithm>
@@ -8,6 +9,18 @@
 
 namespace Engine::Scene
 {
+namespace
+{
+void DisconnectSpatialManipulators(Engine::Core::Object* object)
+{
+    if (!object)
+        return;
+    for (Engine::Core::Component* component : object->Components)
+        if (auto* manipulator = dynamic_cast<
+                Engine::Components::SpatialManipulator*>(component))
+            manipulator->Disconnect();
+}
+}
 
 Scene::Scene()
     : m_physics(std::make_unique<Engine::Physics::Physics>(*this))
@@ -19,6 +32,11 @@ Scene::~Scene()
 {
     m_audio->Reset();
     m_physics->Reset();
+    for (const auto& object : m_objects)
+        DisconnectSpatialManipulators(object.get());
+    for (const auto& object : m_objects)
+        if (object)
+            object->OwnerScene = nullptr;
 }
 
 void Scene::Start()
@@ -249,6 +267,14 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
     };
     collect(obj);
 
+    // Sever external links while every endpoint and hierarchy path is still
+    // valid. Component destructors then only need to clear local state.
+    for (Engine::Core::Object* object : objectsToRemove)
+        DisconnectSpatialManipulators(object);
+    for (Engine::Core::Object* object : objectsToRemove)
+        if (object)
+            object->OwnerScene = nullptr;
+
     if (obj->Parent)
     {
         auto& siblings = obj->Parent->Children;
@@ -290,6 +316,11 @@ void Scene::ClearObjects()
 {
     m_audio->Reset();
     m_physics->Reset();
+    for (const auto& object : m_objects)
+        DisconnectSpatialManipulators(object.get());
+    for (const auto& object : m_objects)
+        if (object)
+            object->OwnerScene = nullptr;
     m_objects.clear();
     m_selectedObject = nullptr;
     m_previewObject = nullptr;

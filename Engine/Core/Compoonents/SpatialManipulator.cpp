@@ -1,10 +1,13 @@
 #include "SpatialManipulator.h"
+#include "Core/Math/FormulaExpression.h"
 #include "Core/Object.h"
+#include "Core/Scene/Scene.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <glm/gtc/quaternion.hpp>
 #include <unordered_set>
 
@@ -83,6 +86,21 @@ SpatialManipulator::SpatialManipulator()
     RegisterField("rotation", rotation);
     RegisterField("scale", scale);
     RegisterField("connectionMode", connectionMode);
+    RegisterField("definesWarpVolume", definesWarpVolume);
+    RegisterField("warpVolumeShape", warpVolumeShape);
+    RegisterField("warpVolumeSize", warpVolumeSize);
+    RegisterField("warpVolumeRadius", warpVolumeRadius);
+    RegisterField("warpBoundaryFalloff", warpBoundaryFalloff);
+    RegisterField("spaceWarpType", spaceWarpType);
+    RegisterField("spiralAxis", spiralAxis);
+    RegisterField("spiralRadiansPerUnit", spiralRadiansPerUnit);
+    RegisterField("formulaX", formulaX);
+    RegisterField("formulaY", formulaY);
+    RegisterField("formulaZ", formulaZ);
+    RegisterField("formulaA", formulaA);
+    RegisterField("formulaB", formulaB);
+    RegisterField("formulaC", formulaC);
+    RegisterField("formulaD", formulaD);
     RegisterField("portalPoint", portalPoint);
     RegisterField("portalNormal", portalNormal);
     RegisterField("portalPointCount", portalPointCount);
@@ -106,6 +124,108 @@ SpatialManipulator::SpatialManipulator()
 glm::mat4 SpatialManipulator::GetOverlayMatrix() const
 {
     return BuildTransformMatrix(position, rotation, scale);
+}
+
+bool SpatialManipulator::ContainsWorldPoint(const glm::vec3& worldPoint) const
+{
+    if (!enabled || !definesWarpVolume || !Owner)
+        return false;
+
+    const glm::vec3 localPoint = glm::vec3(glm::inverse(
+        Owner->transform.GetWorldMatrix()) * glm::vec4(worldPoint, 1.f));
+    switch (static_cast<WarpVolumeShape>(warpVolumeShape))
+    {
+    case WarpVolumeShape::Box:
+    {
+        const glm::vec3 halfSize = glm::max(glm::abs(warpVolumeSize) * 0.5f,
+            glm::vec3(0.0001f));
+        return std::abs(localPoint.x) <= halfSize.x &&
+            std::abs(localPoint.y) <= halfSize.y &&
+            std::abs(localPoint.z) <= halfSize.z;
+    }
+    case WarpVolumeShape::Sphere:
+    {
+        const float radius = std::max(0.001f, std::abs(warpVolumeRadius));
+        return glm::dot(localPoint, localPoint) <= radius * radius;
+    }
+    case WarpVolumeShape::Infinite:
+    default:
+        return true;
+    }
+}
+
+glm::vec3 SpatialManipulator::MapWorldPointThroughVolume(
+    const glm::vec3& worldPoint) const
+{
+    if (!ContainsWorldPoint(worldPoint))
+        return worldPoint;
+
+    const glm::mat4 volumeWorld = Owner->transform.GetWorldMatrix();
+    const glm::vec3 localPoint = glm::vec3(glm::inverse(volumeWorld) *
+        glm::vec4(worldPoint, 1.f));
+    const SpaceWarpType warpType = static_cast<SpaceWarpType>(spaceWarpType);
+    glm::vec3 mappedLocal = localPoint;
+    if (warpType == SpaceWarpType::Formula)
+    {
+        const Engine::Math::FormulaVariables variables {
+            localPoint.x, localPoint.y, localPoint.z,
+            formulaA, formulaB, formulaC, formulaD
+        };
+        double mappedX = 0.0;
+        double mappedY = 0.0;
+        double mappedZ = 0.0;
+        if (!Engine::Math::EvaluateFormula(formulaX, variables, mappedX) ||
+            !Engine::Math::EvaluateFormula(formulaY, variables, mappedY) ||
+            !Engine::Math::EvaluateFormula(formulaZ, variables, mappedZ))
+            return worldPoint;
+        mappedLocal = glm::vec3(GetOverlayMatrix() * glm::vec4(
+            static_cast<float>(mappedX), static_cast<float>(mappedY),
+            static_cast<float>(mappedZ), 1.f));
+        if (!std::isfinite(mappedLocal.x) || !std::isfinite(mappedLocal.y) ||
+            !std::isfinite(mappedLocal.z))
+            return worldPoint;
+    }
+    else
+    {
+        mappedLocal = glm::vec3(GetOverlayMatrix() * glm::vec4(localPoint, 1.f));
+    }
+
+    if (warpType == SpaceWarpType::Spiral)
+    {
+        const glm::vec3 axis = SafeNormalize(spiralAxis, glm::vec3(0.f, 1.f, 0.f));
+        const float angle = glm::dot(localPoint, axis) * spiralRadiansPerUnit;
+        mappedLocal = glm::vec3(glm::rotate(glm::mat4(1.f), angle, axis) *
+            glm::vec4(mappedLocal, 1.f));
+    }
+
+    const float falloff = std::max(0.f, warpBoundaryFalloff);
+    if (falloff > 0.f)
+    {
+        float boundaryDistance = falloff;
+        switch (static_cast<WarpVolumeShape>(warpVolumeShape))
+        {
+        case WarpVolumeShape::Box:
+        {
+            const glm::vec3 halfSize = glm::max(glm::abs(warpVolumeSize) * 0.5f,
+                glm::vec3(0.0001f));
+            const glm::vec3 remaining = halfSize - glm::abs(localPoint);
+            boundaryDistance = std::min(remaining.x,
+                std::min(remaining.y, remaining.z));
+            break;
+        }
+        case WarpVolumeShape::Sphere:
+            boundaryDistance = std::max(0.f, std::abs(warpVolumeRadius) -
+                glm::length(localPoint));
+            break;
+        case WarpVolumeShape::Infinite:
+        default:
+            break;
+        }
+        mappedLocal = glm::mix(localPoint, mappedLocal,
+            Clamp01(boundaryDistance / falloff));
+    }
+
+    return glm::vec3(volumeWorld * glm::vec4(mappedLocal, 1.f));
 }
 
 int SpatialManipulator::GetClampedPortalPointCount() const
@@ -475,15 +595,38 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target)
         const glm::vec3 bodyWorldPosition = body->Owner->transform.GetWorldPosition();
         const float currentSignedDistance = ComputeSignedDistanceToPortalPlane(
             bodyWorldPosition);
-        constexpr float kPortalPlaneEpsilon = 1e-4f;
-        const bool isAwayFromPortalPlane =
-            std::abs(currentSignedDistance) > kPortalPlaneEpsilon;
-        const bool crossedPortalPlane = state.hasLastSignedDistance &&
-            isAwayFromPortalPlane &&
-            ((state.lastSignedDistance < -kPortalPlaneEpsilon &&
-                 currentSignedDistance > kPortalPlaneEpsilon) ||
-                (state.lastSignedDistance > kPortalPlaneEpsilon &&
-                    currentSignedDistance < -kPortalPlaneEpsilon));
+        // Crossing and re-arm thresholds intentionally differ. A body must
+        // first establish a stable side, cross the plane, and then move well
+        // clear before another traversal is possible. This suppresses contact
+        // jitter and stale trigger-overlap samples after SetWorldPose.
+        constexpr float kCrossingDistance = 0.001f;
+        constexpr float kRearmDistance = 0.025f;
+        using TraversalPhase = TraversalState::Phase;
+
+        bool crossedPortalPlane = false;
+        switch (state.phase)
+        {
+        case TraversalPhase::Uninitialized:
+            if (currentSignedDistance <= -kRearmDistance)
+                state.phase = TraversalPhase::ArmedNegative;
+            else if (currentSignedDistance >= kRearmDistance)
+                state.phase = TraversalPhase::ArmedPositive;
+            break;
+        case TraversalPhase::ArmedNegative:
+            crossedPortalPlane = currentSignedDistance >= kCrossingDistance;
+            break;
+        case TraversalPhase::ArmedPositive:
+            crossedPortalPlane = currentSignedDistance <= -kCrossingDistance;
+            break;
+        case TraversalPhase::Cooldown:
+            if (state.waitForOverlapExit)
+                break;
+            if (currentSignedDistance <= -kRearmDistance)
+                state.phase = TraversalPhase::ArmedNegative;
+            else if (currentSignedDistance >= kRearmDistance)
+                state.phase = TraversalPhase::ArmedPositive;
+            break;
+        }
 
         if (crossedPortalPlane)
         {
@@ -512,6 +655,15 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target)
             body->SetWorldPose(mappedPosition, mappedRotation);
             body->SetLinearVelocity(mappedLinearVelocity);
             body->SetAngularVelocity(mappedAngularVelocity);
+
+            // Both ends suppress this body until it has moved away from the
+            // destination plane. This also prevents a reciprocal target from
+            // sending it straight back during the same traversal sequence.
+            state.phase = TraversalPhase::Cooldown;
+            state.waitForOverlapExit = true;
+            TraversalState& targetState = target->m_traversalStates[body];
+            targetState.phase = TraversalPhase::Cooldown;
+            targetState.waitForOverlapExit = false;
         }
 
         if (currentSignedDistance > 0.f)
@@ -519,14 +671,6 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target)
         else
             ResetTraversalMeshDeformation(body);
 
-        // Keep the last unambiguous side while the body is within the plane's
-        // dead zone. This makes an exact-on-plane frame part of a crossing,
-        // rather than treating it as a new starting side.
-        if (isAwayFromPortalPlane)
-        {
-            state.lastSignedDistance = currentSignedDistance;
-            state.hasLastSignedDistance = true;
-        }
     }
 
     for (auto it = m_traversalStates.begin(); it != m_traversalStates.end();)
@@ -579,20 +723,70 @@ void SpatialManipulator::ClearSpatialWarpState(SpatialManipulator* target)
         target->Owner->transform.matrixLayer = MatrixLayer {};
 }
 
+SpatialManipulator* SpatialManipulator::FindReciprocalManipulator() const
+{
+    if (!Owner || !Owner->GetScene())
+        return nullptr;
+
+    for (const auto& object : Owner->GetScene()->GetObjects())
+    {
+        if (!object)
+            continue;
+        for (Engine::Core::Component* component : object->Components)
+        {
+            auto* candidate = dynamic_cast<SpatialManipulator*>(component);
+            if (candidate && candidate != this && candidate->ResolveTarget() == this)
+                return candidate;
+        }
+    }
+    return nullptr;
+}
+
 void SpatialManipulator::ConnectToTarget(SpatialManipulator* target)
 {
     if (!target || target == this)
         return;
 
+    if (ResolveTarget() != target || target->ResolveTarget() != this)
+    {
+        Disconnect();
+        target->Disconnect();
+    }
+
     EnsurePointCountCompatibility(target);
     targetManipulator = Engine::Core::CaptureComponentReference(target, "SpatialManipulator");
+    target->targetManipulator = Engine::Core::CaptureComponentReference(
+        this, "SpatialManipulator");
 }
 
 void SpatialManipulator::Disconnect()
 {
+    SpatialManipulator* target = ResolveTarget();
+    if (!target)
+        target = FindReciprocalManipulator();
+
     targetManipulator.Clear();
-    if (Owner)
-        Owner->transform.matrixLayer.connection.enabled = false;
+    ClearSpatialWarpState(target);
+
+    if (target)
+    {
+        if (target->ResolveTarget() == this)
+            target->targetManipulator.Clear();
+        target->ResetTraversalMeshDeformation();
+    }
+}
+
+void SpatialManipulator::Disabled()
+{
+    SpatialManipulator* target = ResolveTarget();
+    if (!target)
+        target = FindReciprocalManipulator();
+    ClearSpatialWarpState(target);
+}
+
+void SpatialManipulator::OnDestroy()
+{
+    Disconnect();
 }
 
 bool SpatialManipulator::HasTarget() const
@@ -637,6 +831,13 @@ void SpatialManipulator::ApplyPortalConnection(SpatialManipulator* target)
     if (!HasCompatiblePortalShapeWith(*target))
         return;
 
+    // Older serialized scenes may only store the source reference. Repair the
+    // harmless missing reciprocal link so both visible apertures render as
+    // portals and either endpoint can tear the connection down safely.
+    if (!target->HasTarget())
+        target->targetManipulator = Engine::Core::CaptureComponentReference(
+            this, "SpatialManipulator");
+
     const glm::mat4 sourceToTarget = GetPortalWorldTransformTo(*target);
     const glm::mat4 targetToSource = glm::inverse(sourceToTarget);
     float sourceRadius = 1.f;
@@ -662,6 +863,9 @@ void SpatialManipulator::ApplyMatrixConnection(SpatialManipulator* target)
     if (!target || !Owner || !target->Owner)
         return;
 
+    Owner->transform.matrixLayer.connection = MatrixLayerConnection {};
+    target->Owner->transform.matrixLayer.connection = MatrixLayerConnection {};
+
     const glm::mat4 targetMatrix = target->GetOverlayMatrix();
     Owner->transform.matrixLayer.enabled = enabled;
     Owner->transform.matrixLayer.localToLayer = targetMatrix;
@@ -677,6 +881,14 @@ void SpatialManipulator::Update()
     if (!enabled)
     {
         ClearSpatialWarpState(ResolveTarget());
+        return;
+    }
+
+    if (definesWarpVolume)
+    {
+        ResetTraversalMeshDeformation();
+        if (Owner)
+            Owner->transform.matrixLayer = MatrixLayer {};
         return;
     }
 
@@ -702,7 +914,7 @@ void SpatialManipulator::Update()
             break;
         case ConnectionMode::None:
         default:
-            ResetTraversalMeshDeformation();
+            ClearSpatialWarpState(target);
             break;
         }
     }
@@ -727,6 +939,53 @@ bool SpatialManipulator::DrawProperties(::Engine::Editor::IEditorUi& ui)
     {
         connectionMode = mode;
         changed = true;
+    }
+
+    changed = ui.Checkbox("Defines Warp Volume", &definesWarpVolume) || changed;
+    if (definesWarpVolume)
+    {
+        static const char* volumeShapes[] = { "Infinite", "Box", "Sphere" };
+        changed = ui.Combo("Warp Volume Shape", &warpVolumeShape,
+            volumeShapes, 3) || changed;
+        if (static_cast<WarpVolumeShape>(warpVolumeShape) == WarpVolumeShape::Box)
+            changed = ui.DragFloat3("Warp Volume Size", &warpVolumeSize.x,
+                0.1f, 0.001f, 100000.f) || changed;
+        else if (static_cast<WarpVolumeShape>(warpVolumeShape) == WarpVolumeShape::Sphere)
+            changed = ui.DragFloat("Warp Volume Radius", &warpVolumeRadius,
+                0.1f, 0.001f, 100000.f) || changed;
+        if (static_cast<WarpVolumeShape>(warpVolumeShape) != WarpVolumeShape::Infinite)
+            changed = ui.DragFloat("Warp Boundary Falloff", &warpBoundaryFalloff,
+                0.05f, 0.f, 100000.f) || changed;
+
+        static const char* warpTypes[] = { "Affine", "Spiral", "Formula" };
+        changed = ui.Combo("Space Warp Type", &spaceWarpType,
+            warpTypes, 3) || changed;
+        if (static_cast<SpaceWarpType>(spaceWarpType) == SpaceWarpType::Spiral)
+        {
+            changed = ui.DragFloat3("Spiral Axis", &spiralAxis.x, 0.05f) || changed;
+            changed = ui.DragFloat("Spiral Radians Per Unit",
+                &spiralRadiansPerUnit, 0.01f, -100.f, 100.f) || changed;
+        }
+        else if (static_cast<SpaceWarpType>(spaceWarpType) == SpaceWarpType::Formula)
+        {
+            const auto editFormula = [&](const char* label, std::string& formula)
+            {
+                char buffer[512] = {};
+                std::snprintf(buffer, sizeof(buffer), "%s", formula.c_str());
+                if (!ui.InputText(label, buffer, sizeof(buffer))) return false;
+                formula = buffer;
+                return true;
+            };
+            changed = editFormula("Formula X", formulaX) || changed;
+            changed = editFormula("Formula Y", formulaY) || changed;
+            changed = editFormula("Formula Z", formulaZ) || changed;
+            changed = ui.DragFloat("Formula a", &formulaA, 0.01f) || changed;
+            changed = ui.DragFloat("Formula b", &formulaB, 0.01f) || changed;
+            changed = ui.DragFloat("Formula c", &formulaC, 0.01f) || changed;
+            changed = ui.DragFloat("Formula d", &formulaD, 0.01f) || changed;
+            ui.DisabledLabel("Variables: x y z a b c d r rho theta phi pi e");
+            ui.DisabledLabel("Functions: sin cos tan sqrt abs exp log min max pow atan2 clamp mix");
+        }
     }
 
     changed = ui.DragFloat3("Portal Point", &portalPoint.x, 0.05f) || changed;

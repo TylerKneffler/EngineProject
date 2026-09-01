@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Scene xmlns:components="urn:engine-components" version="1">
+  <settings showGrid="true" gridHalfSize="24" gridCellSize="1" gridOpacity="0.28" gridFadeDistance="100" skyboxTexture="">
+    <gridColor><item>0.32</item><item>0.36</item><item>0.42</item></gridColor>
+    <gridOriginColor><item>0.2</item><item>0.7</item><item>0.95</item></gridOriginColor>
+    <ambientColor><item>0.07</item><item>0.09</item><item>0.13</item></ambientColor>
+  </settings>
+  <objects>
+    <item name="Spiral Column Camera" enabled="true">
+      <transform>
+        <Transform.position><item>14</item><item>8</item><item>-18</item></Transform.position>
+        <Transform.rotation><item>0.08</item><item>-0.62</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Camera Camera.active="true" Camera.useTransformRotation="false" Camera.fov="58" Camera.near="0.01" Camera.far="180" Camera.orthographic="false" Camera.orthographicSize="5">
+          <Camera.target><item>0</item><item>4.5</item><item>0</item></Camera.target>
+          <Camera.up><item>0</item><item>1</item><item>0</item></Camera.up>
+        </components:Camera>
+      </components>
+      <children />
+    </item>
+
+    <item name="Global Fill Light" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>12</item><item>-6</item></Transform.position>
+        <Transform.rotation><item>0.7</item><item>-0.5</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Light Light.lightType="1" Light.intensity="1.2" Light.range="50" Light.falloff="2" Light.baked="false">
+          <Light.color><item>0.55</item><item>0.68</item><item>1</item></Light.color>
+        </components:Light>
+      </components>
+      <children />
+    </item>
+
+    <item name="Spiral Warp Volume" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>5</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="1" SpatialManipulator.definesWarpVolume="true" SpatialManipulator.warpVolumeShape="1" SpatialManipulator.warpVolumeRadius="5" SpatialManipulator.warpBoundaryFalloff="0.75" SpatialManipulator.spaceWarpType="2" SpatialManipulator.spiralRadiansPerUnit="0.62" SpatialManipulator.formulaX="cos(a*y)*x - sin(a*y)*z" SpatialManipulator.formulaY="y" SpatialManipulator.formulaZ="sin(a*y)*x + cos(a*y)*z" SpatialManipulator.formulaA="0.62" SpatialManipulator.formulaB="1" SpatialManipulator.formulaC="1" SpatialManipulator.formulaD="0">
+          <SpatialManipulator.position><item>0</item><item>0</item><item>0</item></SpatialManipulator.position>
+          <SpatialManipulator.rotation><item>0</item><item>0</item><item>0</item></SpatialManipulator.rotation>
+          <SpatialManipulator.scale><item>1</item><item>1</item><item>1</item></SpatialManipulator.scale>
+          <SpatialManipulator.warpVolumeSize><item>7</item><item>14</item><item>7</item></SpatialManipulator.warpVolumeSize>
+          <SpatialManipulator.spiralAxis><item>0</item><item>1</item><item>0</item></SpatialManipulator.spiralAxis>
+        </components:SpatialManipulator>
+      </components>
+      <children />
+    </item>
+
+    <item name="Falling Warp Sphere" enabled="true">
+      <transform>
+        <Transform.position><item>2</item><item>11</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>0.65</item><item>0.65</item><item>0.65</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/sphere.obj" />
+        <components:Material Material.shininess="72" Material.metallicFactor="0.38" Material.roughnessFactor="0.2">
+          <Material.diffuse><item>1</item><item>0.34</item><item>0.08</item></Material.diffuse>
+          <Material.ambient><item>0.16</item><item>0.035</item><item>0.01</item></Material.ambient>
+          <Material.specular><item>1</item><item>0.82</item><item>0.55</item></Material.specular>
+          <Material.emissiveColor><item>0.18</item><item>0.025</item><item>0.005</item></Material.emissiveColor>
+        </components:Material>
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Sphere" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1">
+          <PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size><item>1</item><item>1</item><item>1</item></PrimitiveObjectCollider.size>
+        </components:PrimitiveObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Dynamic" RigidBody.mass="1" RigidBody.useGravity="true" RigidBody.gravityScale="0.55" RigidBody.linearDamping="0.01" RigidBody.angularDamping="0.08" RigidBody.friction="0.2" RigidBody.restitution="0.3" RigidBody.continuousCollision="true">
+          <RigidBody.initialLinearVelocity><item>0</item><item>0</item><item>0</item></RigidBody.initialLinearVelocity>
+          <RigidBody.initialAngularVelocity><item>0.4</item><item>1.1</item><item>0.2</item></RigidBody.initialAngularVelocity>
+        </components:RigidBody>
+      </components>
+      <children />
+    </item>
+
+    <item name="Warped Point Light" enabled="true">
+      <transform>
+        <Transform.position><item>2</item><item>7.5</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>0.25</item><item>0.25</item><item>0.25</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/sphere.obj" />
+        <components:Material Material.shininess="16" Material.metallicFactor="0" Material.roughnessFactor="0.4" Material.unlit="true">
+          <Material.diffuse><item>0.15</item><item>0.8</item><item>1</item></Material.diffuse>
+          <Material.ambient><item>0.1</item><item>0.4</item><item>0.6</item></Material.ambient>
+          <Material.specular><item>0</item><item>0</item><item>0</item></Material.specular>
+          <Material.emissiveColor><item>0.1</item><item>0.8</item><item>1</item></Material.emissiveColor>
+        </components:Material>
+        <components:Light Light.lightType="0" Light.intensity="7" Light.range="7" Light.falloff="1.6" Light.baked="false">
+          <Light.color><item>0.15</item><item>0.72</item><item>1</item></Light.color>
+        </components:Light>
+      </components>
+      <children />
+    </item>
+
+    <item name="Warped Observer Camera" enabled="true">
+      <transform>
+        <Transform.position><item>2</item><item>6.5</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>1.57</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Camera Camera.active="false" Camera.useTransformRotation="true" Camera.fov="65" Camera.near="0.01" Camera.far="100" Camera.orthographic="false" Camera.orthographicSize="5">
+          <Camera.target><item>0</item><item>5</item><item>0</item></Camera.target>
+          <Camera.up><item>0</item><item>1</item><item>0</item></Camera.up>
+        </components:Camera>
+      </components>
+      <children />
+    </item>
+
+    <item name="Coordinate Marker High" enabled="true">
+      <transform><Transform.position><item>2</item><item>10</item><item>0</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>0.18</item><item>0.18</item><item>0.18</item></Transform.scale></transform>
+      <components><components:Mesh Mesh.file="Assets/Mesh/sphere.obj" /><components:Material Material.unlit="true"><Material.diffuse><item>0.9</item><item>0.9</item><item>1</item></Material.diffuse><Material.ambient><item>0.3</item><item>0.3</item><item>0.4</item></Material.ambient><Material.specular><item>0</item><item>0</item><item>0</item></Material.specular><Material.emissiveColor><item>0.45</item><item>0.55</item><item>1</item></Material.emissiveColor></components:Material></components><children />
+    </item>
+    <item name="Coordinate Marker Upper" enabled="true">
+      <transform><Transform.position><item>2</item><item>7.5</item><item>0</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>0.18</item><item>0.18</item><item>0.18</item></Transform.scale></transform>
+      <components><components:Mesh Mesh.file="Assets/Mesh/sphere.obj" /><components:Material Material.unlit="true"><Material.diffuse><item>0.9</item><item>0.9</item><item>1</item></Material.diffuse><Material.ambient><item>0.3</item><item>0.3</item><item>0.4</item></Material.ambient><Material.specular><item>0</item><item>0</item><item>0</item></Material.specular><Material.emissiveColor><item>0.45</item><item>0.55</item><item>1</item></Material.emissiveColor></components:Material></components><children />
+    </item>
+    <item name="Coordinate Marker Center" enabled="true">
+      <transform><Transform.position><item>2</item><item>5</item><item>0</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>0.18</item><item>0.18</item><item>0.18</item></Transform.scale></transform>
+      <components><components:Mesh Mesh.file="Assets/Mesh/sphere.obj" /><components:Material Material.unlit="true"><Material.diffuse><item>0.9</item><item>0.9</item><item>1</item></Material.diffuse><Material.ambient><item>0.3</item><item>0.3</item><item>0.4</item></Material.ambient><Material.specular><item>0</item><item>0</item><item>0</item></Material.specular><Material.emissiveColor><item>0.45</item><item>0.55</item><item>1</item></Material.emissiveColor></components:Material></components><children />
+    </item>
+    <item name="Coordinate Marker Lower" enabled="true">
+      <transform><Transform.position><item>2</item><item>2.5</item><item>0</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>0.18</item><item>0.18</item><item>0.18</item></Transform.scale></transform>
+      <components><components:Mesh Mesh.file="Assets/Mesh/sphere.obj" /><components:Material Material.unlit="true"><Material.diffuse><item>0.9</item><item>0.9</item><item>1</item></Material.diffuse><Material.ambient><item>0.3</item><item>0.3</item><item>0.4</item></Material.ambient><Material.specular><item>0</item><item>0</item><item>0</item></Material.specular><Material.emissiveColor><item>0.45</item><item>0.55</item><item>1</item></Material.emissiveColor></components:Material></components><children />
+    </item>
+    <item name="Coordinate Marker Bottom" enabled="true">
+      <transform><Transform.position><item>2</item><item>0</item><item>0</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>0.18</item><item>0.18</item><item>0.18</item></Transform.scale></transform>
+      <components><components:Mesh Mesh.file="Assets/Mesh/sphere.obj" /><components:Material Material.unlit="true"><Material.diffuse><item>0.9</item><item>0.9</item><item>1</item></Material.diffuse><Material.ambient><item>0.3</item><item>0.3</item><item>0.4</item></Material.ambient><Material.specular><item>0</item><item>0</item><item>0</item></Material.specular><Material.emissiveColor><item>0.45</item><item>0.55</item><item>1</item></Material.emissiveColor></components:Material></components><children />
+    </item>
+
+    <item name="Landing Floor" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>-2.75</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>18</item><item>0.5</item><item>18</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/cube.obj" />
+        <components:Material Material.shininess="24" Material.metallicFactor="0.12" Material.roughnessFactor="0.75">
+          <Material.diffuse><item>0.12</item><item>0.15</item><item>0.2</item></Material.diffuse>
+          <Material.ambient><item>0.03</item><item>0.04</item><item>0.06</item></Material.ambient>
+          <Material.specular><item>0.3</item><item>0.34</item><item>0.4</item></Material.specular>
+        </components:Material>
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box">
+          <PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size><item>1</item><item>1</item><item>1</item></PrimitiveObjectCollider.size>
+        </components:PrimitiveObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.useGravity="false" RigidBody.friction="0.8" RigidBody.restitution="0.15" />
+      </components>
+      <children />
+    </item>
+  </objects>
+</Scene>

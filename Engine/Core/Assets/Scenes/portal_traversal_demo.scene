@@ -156,24 +156,6 @@
         </Transform.scale>
       </transform>
       <components>
-        <components:Mesh Mesh.file="Assets/Mesh/cube.obj"></components:Mesh>
-        <components:Material Material.shininess="64" Material.metallicFactor="0.22" Material.roughnessFactor="0.3">
-          <Material.diffuse>
-            <item>0.18</item>
-            <item>0.45</item>
-            <item>0.95</item>
-          </Material.diffuse>
-          <Material.ambient>
-            <item>0.03</item>
-            <item>0.08</item>
-            <item>0.16</item>
-          </Material.ambient>
-          <Material.specular>
-            <item>0.8</item>
-            <item>0.9</item>
-            <item>1</item>
-          </Material.specular>
-        </components:Material>
         <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1">
           <PrimitiveObjectCollider.center>
             <item>0</item>
@@ -259,24 +241,6 @@
         </Transform.scale>
       </transform>
       <components>
-        <components:Mesh Mesh.file="Assets/Mesh/cube.obj"></components:Mesh>
-        <components:Material Material.shininess="64" Material.metallicFactor="0.22" Material.roughnessFactor="0.3">
-          <Material.diffuse>
-            <item>0.95</item>
-            <item>0.42</item>
-            <item>0.18</item>
-          </Material.diffuse>
-          <Material.ambient>
-            <item>0.14</item>
-            <item>0.06</item>
-            <item>0.03</item>
-          </Material.ambient>
-          <Material.specular>
-            <item>1</item>
-            <item>0.85</item>
-            <item>0.8</item>
-          </Material.specular>
-        </components:Material>
         <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="2" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="1.2" SpatialManipulator.deformationStrength="1.0">
           <SpatialManipulator.position>
             <item>0</item>

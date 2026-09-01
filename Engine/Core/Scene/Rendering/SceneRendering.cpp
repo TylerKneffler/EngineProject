@@ -321,6 +321,16 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     if (!m_boneDataMapped)
         throw std::runtime_error("Failed to create bone palette structured buffer");
 
+    m_portalApertureBuffer = bufferFactory->CreateBuffer(
+        Engine::Graphics::IGraphicsBuffer::Usage::VertexBuffer,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+        static_cast<uint64_t>(kMaxObjects) * kMaxSpatialVerticesPerObject *
+            sizeof(Engine::Model::Vertex));
+    m_portalApertureMapped = m_portalApertureBuffer
+        ? m_portalApertureBuffer->Map() : nullptr;
+    if (!m_portalApertureMapped)
+        throw std::runtime_error("Failed to create portal aperture vertex buffer");
+
     // Set up the default editor camera
     Engine::Components::Camera* editorCameraComponent = editorCamera.AddComponent<Engine::Components::Camera>();
     editorCameraComponent->useTransformRotation = false;
@@ -1223,9 +1233,45 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         context->SetStructuredBuffer(8, m_boneDataBuffer.get());
     }
 
+    const auto resolvePortalTarget = [&](Engine::Components::SpatialManipulator* source)
+        -> Engine::Components::SpatialManipulator*
+    {
+        if (!source)
+            return nullptr;
+        if (Engine::Components::SpatialManipulator* target = source->ResolveTarget())
+            return target;
+        // Support older and edit-mode scenes whose serialized link exists on
+        // only one endpoint. Connections belong to manipulators, not meshes,
+        // so inspect every scene object rather than the render draw list.
+        for (const auto& candidateObject : m_objects)
+        {
+            if (!candidateObject || candidateObject.get() == source->Owner)
+                continue;
+            auto* candidate = candidateObject->GetComponent<
+                Engine::Components::SpatialManipulator>();
+            if (candidate && candidate->ResolveTarget() == source)
+                return candidate;
+        }
+        return nullptr;
+    };
+
+    const auto isSpatialManipulatorCarrierDraw = [&](const PreparedDraw& draw)
+    {
+        if (!draw.object)
+            return false;
+        auto* manipulator =
+            draw.object->GetComponent<Engine::Components::SpatialManipulator>();
+        return manipulator && manipulator->enabled;
+    };
+
     for (const PreparedDraw& draw : preparedDraws)
     {
         if (!draw.vertexBuffer)
+            continue;
+        // Spatial manipulators are logical scene components. Meshes or
+        // materials accidentally attached to their carrier object never act
+        // as runtime visualization for portals, matrix links, or warp volumes.
+        if (isSpatialManipulatorCarrierDraw(draw))
             continue;
         context->SetPipeline(draw.pipeline);
         context->SetConstantBuffer(
@@ -1247,6 +1293,279 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         }
     }
 
+    struct PortalStencilPass
+    {
+        Engine::Components::SpatialManipulator* source = nullptr;
+        Engine::Components::SpatialManipulator* target = nullptr;
+        glm::mat4 mappedView = glm::mat4(1.f);
+        glm::vec3 mappedCameraPosition = glm::vec3(0.f);
+        float viewDepth = 0.f;
+        size_t drawOrder = 0;
+        DrawCBData apertureDrawData{};
+        ObjectGPUData apertureObjectData{};
+        UINT64 apertureConstantBufferOffset = 0;
+        uint64_t apertureVertexOffset = 0;
+        uint32_t apertureVertexCount = 0;
+    };
+
+    std::vector<PortalStencilPass> portalPasses;
+    const glm::mat4 cameraWorld = cam->Owner
+        ? cam->Owner->transform.GetWorldMatrixWithLayer()
+        : glm::mat4(1.f);
+    const glm::vec3 cameraForward = glm::normalize(glm::vec3(cameraWorld[2]));
+    const glm::vec3 cameraUp = glm::normalize(glm::vec3(cameraWorld[1]));
+    size_t portalObjectOrder = 0;
+    for (const auto& sceneObject : m_objects)
+    {
+        Engine::Core::Object* object = sceneObject.get();
+        const size_t objectOrder = portalObjectOrder++;
+        if (!object || !object->IsEnabledInHierarchy())
+            continue;
+
+        auto* manipulator =
+            object->GetComponent<Engine::Components::SpatialManipulator>();
+        if (!manipulator || !manipulator->enabled)
+            continue;
+
+        const auto mode = static_cast<Engine::Components::SpatialManipulator::ConnectionMode>(
+            manipulator->connectionMode);
+        if (mode != Engine::Components::SpatialManipulator::ConnectionMode::Portal &&
+            mode != Engine::Components::SpatialManipulator::ConnectionMode::LinkedPortal)
+            continue;
+
+        Engine::Components::SpatialManipulator* target =
+            resolvePortalTarget(manipulator);
+        if (!target || !target->enabled || !target->Owner)
+            continue;
+
+        const glm::vec3 mappedCamera =
+            manipulator->MapWorldPointThroughPortalShape(cameraPosition, *target);
+        const glm::vec3 mappedLookAt = manipulator->MapWorldPointThroughPortalShape(
+            cameraPosition + cameraForward, *target);
+        const glm::vec3 mappedUpPoint = manipulator->MapWorldPointThroughPortalShape(
+            cameraPosition + cameraUp, *target);
+        const glm::vec3 mappedForward = glm::normalize(mappedLookAt - mappedCamera);
+        glm::vec3 mappedUp = mappedUpPoint - mappedCamera;
+        mappedUp = glm::dot(mappedUp, mappedUp) <= 1e-6f
+            ? glm::vec3(0.f, 1.f, 0.f)
+            : glm::normalize(mappedUp);
+
+        PortalStencilPass pass{};
+        pass.source = manipulator;
+        pass.target = target;
+        pass.mappedCameraPosition = mappedCamera;
+        pass.mappedView = glm::lookAtLH(
+            mappedCamera, mappedCamera + mappedForward, mappedUp);
+        const std::vector<glm::vec3> aperturePoints =
+            manipulator->GetWorldPortalShapePoints();
+        glm::vec3 apertureCenter(0.f);
+        for (const glm::vec3& point : aperturePoints)
+            apertureCenter += point;
+        if (!aperturePoints.empty())
+            apertureCenter /= static_cast<float>(aperturePoints.size());
+        else
+            apertureCenter = object->transform.GetWorldPosition();
+        pass.viewDepth = glm::dot(
+            apertureCenter - cameraPosition, cameraForward);
+        // A procedural aperture uses one transient object slot. It is restored
+        // before ordinary scene rendering continues and does not require a
+        // corresponding mesh/material draw.
+        constexpr uint32_t kPortalObjectSlot = 0u;
+        pass.apertureDrawData = { kPortalObjectSlot, 0u, 0u, 0u };
+        pass.apertureConstantBufferOffset =
+            static_cast<UINT64>(kPortalObjectSlot) * kCBStride;
+        pass.apertureObjectData.world = glm::mat4(1.f);
+        pass.apertureObjectData.mvp = proj * view;
+        pass.apertureObjectData.baseColor = glm::vec4(1.f);
+        pass.apertureObjectData.ambientUnlit = { 0.f, 0.f, 0.f, 1.f };
+        pass.apertureObjectData.emissiveOcclusion = { 0.f, 0.f, 0.f, 1.f };
+        pass.apertureObjectData.materialParams = { 0.f, 1.f, 1.f, 0.f };
+        pass.apertureObjectData.viewPositionAlphaCutoff =
+            glm::vec4(cameraPosition, 0.001f);
+        pass.drawOrder = objectOrder;
+        portalPasses.push_back(pass);
+    }
+
+    // Draw far apertures first so nearer portals deterministically win where
+    // their screen-space masks overlap. Scene draw order is the final stable
+    // tie-breaker, independent of pointer values or hash iteration order.
+    std::stable_sort(portalPasses.begin(), portalPasses.end(),
+        [](const PortalStencilPass& left, const PortalStencilPass& right)
+        {
+            if (std::abs(left.viewDepth - right.viewDepth) > 1e-5f)
+                return left.viewDepth > right.viewDepth;
+            const std::string& leftName = left.source->Owner->name;
+            const std::string& rightName = right.source->Owner->name;
+            if (leftName != rightName)
+                return leftName < rightName;
+            return left.drawOrder < right.drawOrder;
+        });
+
+    auto* portalVertices = static_cast<Engine::Model::Vertex*>(
+        m_portalApertureMapped);
+    uint32_t portalVertexCursor = 0;
+    const uint32_t portalVertexCapacity =
+        kMaxObjects * kMaxSpatialVerticesPerObject;
+    for (PortalStencilPass& pass : portalPasses)
+    {
+        const std::vector<glm::vec3> points =
+            pass.source->GetWorldPortalShapePoints();
+        if (points.size() < 3)
+            continue;
+        const uint32_t required = static_cast<uint32_t>(points.size() - 2) * 3u;
+        if (portalVertexCursor + required > portalVertexCapacity)
+            break;
+
+        pass.apertureVertexOffset = static_cast<uint64_t>(portalVertexCursor) *
+            sizeof(Engine::Model::Vertex);
+        pass.apertureVertexCount = required;
+        for (size_t pointIndex = 1; pointIndex + 1 < points.size(); ++pointIndex)
+        {
+            const glm::vec3 triangle[3] = {
+                points[0], points[pointIndex], points[pointIndex + 1] };
+            for (const glm::vec3& point : triangle)
+            {
+                Engine::Model::Vertex& vertex = portalVertices[portalVertexCursor++];
+                vertex = Engine::Model::Vertex {};
+                vertex.pos[0] = point.x;
+                vertex.pos[1] = point.y;
+                vertex.pos[2] = point.z;
+            }
+        }
+    }
+
+    struct SpatialDebugPass
+    {
+        uint64_t vertexOffset = 0;
+        uint32_t vertexCount = 0;
+        glm::vec4 color { 1.f };
+    };
+    std::vector<SpatialDebugPass> spatialDebugPasses;
+    if (includeEditorVisuals && settings.portalDebugVisuals)
+    {
+        const auto appendDebugVertex = [&](const glm::vec3& worldPoint)
+        {
+            Engine::Model::Vertex& vertex = portalVertices[portalVertexCursor++];
+            vertex = Engine::Model::Vertex {};
+            vertex.pos[0] = worldPoint.x;
+            vertex.pos[1] = worldPoint.y;
+            vertex.pos[2] = worldPoint.z;
+        };
+        const auto appendDebugBox = [&, appendDebugVertex](const glm::mat4& world,
+            const glm::vec3& halfSize, const glm::vec4& color)
+        {
+            constexpr uint32_t kBoxVertexCount = 36;
+            if (portalVertexCursor + kBoxVertexCount > portalVertexCapacity)
+                return;
+            static constexpr uint8_t indices[kBoxVertexCount] = {
+                0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6,
+                0, 4, 5, 0, 5, 1, 3, 2, 6, 3, 6, 7,
+                0, 3, 7, 0, 7, 4, 1, 5, 6, 1, 6, 2 };
+            const glm::vec3 corners[8] = {
+                {-halfSize.x, -halfSize.y, -halfSize.z},
+                { halfSize.x, -halfSize.y, -halfSize.z},
+                { halfSize.x,  halfSize.y, -halfSize.z},
+                {-halfSize.x,  halfSize.y, -halfSize.z},
+                {-halfSize.x, -halfSize.y,  halfSize.z},
+                { halfSize.x, -halfSize.y,  halfSize.z},
+                { halfSize.x,  halfSize.y,  halfSize.z},
+                {-halfSize.x,  halfSize.y,  halfSize.z} };
+            SpatialDebugPass pass{};
+            pass.vertexOffset = static_cast<uint64_t>(portalVertexCursor) *
+                sizeof(Engine::Model::Vertex);
+            pass.vertexCount = kBoxVertexCount;
+            pass.color = color;
+            for (uint8_t index : indices)
+                appendDebugVertex(glm::vec3(world * glm::vec4(corners[index], 1.f)));
+            spatialDebugPasses.push_back(pass);
+        };
+        const auto appendDebugSphere = [&, appendDebugVertex](const glm::mat4& world,
+            float radius, const glm::vec4& color)
+        {
+            constexpr uint32_t kSphereVertexCount = 24;
+            if (portalVertexCursor + kSphereVertexCount > portalVertexCapacity)
+                return;
+            const glm::vec3 points[6] = {
+                { radius, 0.f, 0.f }, { -radius, 0.f, 0.f },
+                { 0.f, radius, 0.f }, { 0.f, -radius, 0.f },
+                { 0.f, 0.f, radius }, { 0.f, 0.f, -radius } };
+            static constexpr uint8_t indices[kSphereVertexCount] = {
+                2, 0, 4, 2, 4, 1, 2, 1, 5, 2, 5, 0,
+                3, 4, 0, 3, 1, 4, 3, 5, 1, 3, 0, 5 };
+            SpatialDebugPass pass{};
+            pass.vertexOffset = static_cast<uint64_t>(portalVertexCursor) *
+                sizeof(Engine::Model::Vertex);
+            pass.vertexCount = kSphereVertexCount;
+            pass.color = color;
+            for (uint8_t index : indices)
+                appendDebugVertex(glm::vec3(world * glm::vec4(points[index], 1.f)));
+            spatialDebugPasses.push_back(pass);
+        };
+
+        for (const auto& sceneObject : m_objects)
+        {
+            if (!sceneObject || !sceneObject->IsEnabledInHierarchy())
+                continue;
+            auto* manipulator = sceneObject->GetComponent<
+                Engine::Components::SpatialManipulator>();
+            if (!manipulator || !manipulator->enabled)
+                continue;
+            const auto mode = static_cast<
+                Engine::Components::SpatialManipulator::ConnectionMode>(
+                    manipulator->connectionMode);
+            if (mode == Engine::Components::SpatialManipulator::ConnectionMode::Portal ||
+                mode == Engine::Components::SpatialManipulator::ConnectionMode::LinkedPortal)
+                continue;
+
+            const glm::mat4 ownerWorld =
+                sceneObject->transform.GetWorldMatrix();
+            if (manipulator->definesWarpVolume)
+            {
+                const auto shape = static_cast<
+                    Engine::Components::SpatialManipulator::WarpVolumeShape>(
+                        manipulator->warpVolumeShape);
+                if (shape == Engine::Components::SpatialManipulator::WarpVolumeShape::Sphere)
+                {
+                    appendDebugSphere(ownerWorld,
+                        std::max(0.001f, std::abs(manipulator->warpVolumeRadius)),
+                        { 0.25f, 1.f, 0.45f, 1.f });
+                }
+                else
+                {
+                    const glm::vec3 halfSize = shape ==
+                        Engine::Components::SpatialManipulator::WarpVolumeShape::Box
+                        ? glm::max(glm::abs(manipulator->warpVolumeSize) * 0.5f,
+                            glm::vec3(0.001f))
+                        : glm::vec3(0.5f);
+                    appendDebugBox(ownerWorld, halfSize,
+                        { 0.25f, 1.f, 0.45f, 1.f });
+                }
+            }
+            else if (mode == Engine::Components::SpatialManipulator::ConnectionMode::MatrixOverlay)
+            {
+                appendDebugBox(ownerWorld * manipulator->GetOverlayMatrix(),
+                    glm::vec3(0.5f), { 0.8f, 0.35f, 1.f, 1.f });
+            }
+        }
+    }
+    if (portalVertexCursor > 0)
+        m_portalApertureBuffer->FlushMappedWrites();
+
+    const auto uploadPortalApertureData = [&](const PortalStencilPass& pass)
+    {
+        memcpy(static_cast<uint8_t*>(m_objectCBMapped) +
+            pass.apertureConstantBufferOffset,
+            &pass.apertureDrawData, sizeof(pass.apertureDrawData));
+        memcpy(static_cast<uint8_t*>(m_objectDataMapped) +
+            static_cast<size_t>(pass.apertureDrawData.objectIndex) *
+                sizeof(ObjectGPUData),
+            &pass.apertureObjectData, sizeof(pass.apertureObjectData));
+        m_objectDataBuffer->FlushMappedWrites();
+        context->SetStructuredBuffer(6, m_lightDataBuffer.get());
+        context->SetStructuredBuffer(7, m_objectDataBuffer.get());
+        context->SetStructuredBuffer(8, m_boneDataBuffer.get());
+    };
+
 #if defined(_WIN32)
     // Render linked-space view through portal aperture with a stencil mask.
     if (dynamic_cast<Engine::Renderers::D3D11GraphicsProvider*>(m_graphicsProvider))
@@ -1255,67 +1574,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             static_cast<ID3D11DeviceContext*>(context->GetNativeHandle());
         if (dx11Context)
         {
-            struct PortalStencilPass
-            {
-                const PreparedDraw* aperture = nullptr;
-                Engine::Components::SpatialManipulator* source = nullptr;
-                Engine::Components::SpatialManipulator* target = nullptr;
-                glm::mat4 mappedView = glm::mat4(1.f);
-                glm::vec3 mappedCameraPosition = glm::vec3(0.f);
-            };
-
-            PortalStencilPass portalPass{};
-            for (const PreparedDraw& draw : preparedDraws)
-            {
-                if (!draw.object || !draw.vertexBuffer || draw.vertexCount < 3)
-                    continue;
-
-                auto* manipulator =
-                    draw.object->GetComponent<Engine::Components::SpatialManipulator>();
-                if (!manipulator || !manipulator->enabled)
-                    continue;
-
-                const auto mode = static_cast<Engine::Components::SpatialManipulator::ConnectionMode>(
-                    manipulator->connectionMode);
-                if (mode != Engine::Components::SpatialManipulator::ConnectionMode::Portal &&
-                    mode != Engine::Components::SpatialManipulator::ConnectionMode::LinkedPortal)
-                    continue;
-
-                Engine::Components::SpatialManipulator* target =
-                    manipulator->ResolveTarget();
-                if (!target || !target->Owner)
-                    continue;
-
-                const glm::mat4 cameraWorld = cam->Owner
-                    ? cam->Owner->transform.GetWorldMatrixWithLayer()
-                    : glm::mat4(1.f);
-                const glm::vec3 cameraForward = glm::normalize(glm::vec3(cameraWorld[2]));
-                const glm::vec3 cameraUp = glm::normalize(glm::vec3(cameraWorld[1]));
-
-                const glm::vec3 mappedCamera =
-                    manipulator->MapWorldPointThroughPortalShape(cameraPosition, *target);
-                const glm::vec3 mappedLookAt = manipulator->MapWorldPointThroughPortalShape(
-                    cameraPosition + cameraForward, *target);
-                const glm::vec3 mappedUpPoint = manipulator->MapWorldPointThroughPortalShape(
-                    cameraPosition + cameraUp, *target);
-
-                const glm::vec3 mappedForward = glm::normalize(mappedLookAt - mappedCamera);
-                glm::vec3 mappedUp = mappedUpPoint - mappedCamera;
-                if (glm::dot(mappedUp, mappedUp) <= 1e-6f)
-                    mappedUp = glm::vec3(0.f, 1.f, 0.f);
-                else
-                    mappedUp = glm::normalize(mappedUp);
-
-                portalPass.aperture = &draw;
-                portalPass.source = manipulator;
-                portalPass.target = target;
-                portalPass.mappedCameraPosition = mappedCamera;
-                portalPass.mappedView = glm::lookAtLH(
-                    mappedCamera, mappedCamera + mappedForward, mappedUp);
-                break;
-            }
-
-            if (portalPass.aperture)
+            if (!portalPasses.empty())
             {
                 ID3D11Device* dx11Device = nullptr;
                 dx11Context->GetDevice(&dx11Device);
@@ -1374,28 +1633,41 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
                     if (stencilWriteState && stencilReadState && colorMaskOffState)
                     {
-                        constexpr UINT portalStencilRef = 1u;
                         const float blendFactor[4]{};
+                        const size_t portalCount = std::min<size_t>(
+                            portalPasses.size(), 255u);
 
-                        context->SetPipeline(portalPass.aperture->pipeline);
+                        for (size_t portalIndex = 0;
+                            portalIndex < portalCount; ++portalIndex)
+                        {
+                        const PortalStencilPass& portalPass =
+                            portalPasses[portalIndex];
+                        if (portalPass.apertureVertexCount < 3)
+                            continue;
+                        const UINT portalStencilRef =
+                            static_cast<UINT>(portalIndex + 1u);
+
+                        uploadPortalApertureData(portalPass);
+                        context->SetPipeline(m_objectDoubleSidedPipeline.get());
                         context->SetConstantBuffer(
                             0, m_objectConstantBuffer.get(),
-                            portalPass.aperture->constantBufferOffset);
+                            portalPass.apertureConstantBufferOffset);
                         context->SetVertexBuffer(
-                            0, portalPass.aperture->vertexBuffer,
-                            portalPass.aperture->vertexStride, 0);
+                            0, m_portalApertureBuffer.get(),
+                            sizeof(Engine::Model::Vertex),
+                            portalPass.apertureVertexOffset);
                         dx11Context->OMSetBlendState(colorMaskOffState.Get(),
                             blendFactor, UINT_MAX);
                         dx11Context->OMSetDepthStencilState(
                             stencilWriteState.Get(), portalStencilRef);
                         context->DrawInstanced(
-                            portalPass.aperture->vertexCount, 1, 0, 0);
+                            portalPass.apertureVertexCount, 1, 0, 0);
 
                         for (PreparedDraw& draw : preparedDraws)
                         {
                             if (!draw.object || !draw.vertexBuffer)
                                 continue;
-                            if (portalPass.source && portalPass.source->Owner == draw.object)
+                            if (isSpatialManipulatorCarrierDraw(draw))
                                 continue;
 
                             ObjectGPUData mappedData = draw.objectData;
@@ -1407,7 +1679,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                                 portalPass.mappedCameraPosition.y;
                             mappedData.viewPositionAlphaCutoff.z =
                                 portalPass.mappedCameraPosition.z;
-                            if (settings.portalDebugVisuals &&
+                            if (includeEditorVisuals &&
+                                settings.portalDebugVisuals &&
                                 settings.portalDebugTintRemoteView)
                             {
                                 mappedData.baseColor = glm::vec4(
@@ -1438,7 +1711,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                         {
                             if (!draw.object || !draw.vertexBuffer)
                                 continue;
-                            if (portalPass.source && portalPass.source->Owner == draw.object)
+                            if (isSpatialManipulatorCarrierDraw(draw))
                                 continue;
 
                             context->SetPipeline(draw.pipeline);
@@ -1456,6 +1729,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                             dx11Context->OMSetDepthStencilState(
                                 stencilReadState.Get(), portalStencilRef);
                             context->DrawInstanced(draw.vertexCount, 1, 0, 0);
+                        }
                         }
 
                         dx11Context->OMSetDepthStencilState(nullptr, 0);
@@ -1484,15 +1758,6 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 #endif
         ) && m_objectPortalStencilWritePipeline)
     {
-        struct PortalStencilPass
-        {
-            const PreparedDraw* aperture = nullptr;
-            Engine::Components::SpatialManipulator* source = nullptr;
-            Engine::Components::SpatialManipulator* target = nullptr;
-            glm::mat4 mappedView = glm::mat4(1.f);
-            glm::vec3 mappedCameraPosition = glm::vec3(0.f);
-        };
-
         auto resolveStencilReadPipeline =
             [&](Engine::Graphics::IPipelineState* base)
         {
@@ -1523,84 +1788,35 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             return base;
         };
 
-        PortalStencilPass portalPass{};
-        for (const PreparedDraw& draw : preparedDraws)
+        if (!portalPasses.empty())
         {
-            if (!draw.object || !draw.vertexBuffer || draw.vertexCount < 3)
-                continue;
-
-            auto* manipulator =
-                draw.object->GetComponent<Engine::Components::SpatialManipulator>();
-            if (!manipulator || !manipulator->enabled)
-                continue;
-
-            const auto mode = static_cast<Engine::Components::SpatialManipulator::ConnectionMode>(
-                manipulator->connectionMode);
-            if (mode != Engine::Components::SpatialManipulator::ConnectionMode::Portal &&
-                mode != Engine::Components::SpatialManipulator::ConnectionMode::LinkedPortal)
-                continue;
-
-            Engine::Components::SpatialManipulator* target =
-                manipulator->ResolveTarget();
-            if (!target || !target->Owner)
-                continue;
-
-            const glm::mat4 cameraWorld = cam->Owner
-                ? cam->Owner->transform.GetWorldMatrixWithLayer()
-                : glm::mat4(1.f);
-            const glm::vec3 cameraForward = glm::normalize(glm::vec3(cameraWorld[2]));
-            const glm::vec3 cameraUp = glm::normalize(glm::vec3(cameraWorld[1]));
-
-            const glm::vec3 mappedCamera =
-                manipulator->MapWorldPointThroughPortalShape(cameraPosition, *target);
-            const glm::vec3 mappedLookAt = manipulator->MapWorldPointThroughPortalShape(
-                cameraPosition + cameraForward, *target);
-            const glm::vec3 mappedUpPoint = manipulator->MapWorldPointThroughPortalShape(
-                cameraPosition + cameraUp, *target);
-
-            const glm::vec3 mappedForward = glm::normalize(mappedLookAt - mappedCamera);
-            glm::vec3 mappedUp = mappedUpPoint - mappedCamera;
-            if (glm::dot(mappedUp, mappedUp) <= 1e-6f)
-                mappedUp = glm::vec3(0.f, 1.f, 0.f);
-            else
-                mappedUp = glm::normalize(mappedUp);
-
-            portalPass.aperture = &draw;
-            portalPass.source = manipulator;
-            portalPass.target = target;
-            portalPass.mappedCameraPosition = mappedCamera;
-            portalPass.mappedView = glm::lookAtLH(
-                mappedCamera, mappedCamera + mappedForward, mappedUp);
-            break;
-        }
-
-        if (portalPass.aperture)
-        {
-#if defined(_WIN32)
-            if (isDx12Provider)
+            const size_t portalCount = std::min<size_t>(
+                portalPasses.size(), 255u);
+            for (size_t portalIndex = 0;
+                portalIndex < portalCount; ++portalIndex)
             {
-                if (ID3D12GraphicsCommandList* dx12CommandList =
-                    static_cast<ID3D12GraphicsCommandList*>(context->GetNativeHandle()))
-                {
-                    dx12CommandList->OMSetStencilRef(1u);
-                }
-            }
-#endif
+            const PortalStencilPass& portalPass = portalPasses[portalIndex];
+            if (portalPass.apertureVertexCount < 3)
+                continue;
+            context->SetStencilReference(
+                static_cast<uint32_t>(portalIndex + 1u));
 
+            uploadPortalApertureData(portalPass);
             context->SetPipeline(m_objectPortalStencilWritePipeline.get());
             context->SetConstantBuffer(
                 0, m_objectConstantBuffer.get(),
-                portalPass.aperture->constantBufferOffset);
+                portalPass.apertureConstantBufferOffset);
             context->SetVertexBuffer(
-                0, portalPass.aperture->vertexBuffer,
-                portalPass.aperture->vertexStride, 0);
-            context->DrawInstanced(portalPass.aperture->vertexCount, 1, 0, 0);
+                0, m_portalApertureBuffer.get(),
+                sizeof(Engine::Model::Vertex),
+                portalPass.apertureVertexOffset);
+            context->DrawInstanced(portalPass.apertureVertexCount, 1, 0, 0);
 
             for (PreparedDraw& draw : preparedDraws)
             {
                 if (!draw.object || !draw.vertexBuffer)
                     continue;
-                if (portalPass.source && portalPass.source->Owner == draw.object)
+                if (isSpatialManipulatorCarrierDraw(draw))
                     continue;
 
                 ObjectGPUData mappedData = draw.objectData;
@@ -1611,7 +1827,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     portalPass.mappedCameraPosition.y;
                 mappedData.viewPositionAlphaCutoff.z =
                     portalPass.mappedCameraPosition.z;
-                if (settings.portalDebugVisuals &&
+                if (includeEditorVisuals &&
+                    settings.portalDebugVisuals &&
                     settings.portalDebugTintRemoteView)
                 {
                     mappedData.baseColor = glm::vec4(
@@ -1642,7 +1859,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             {
                 if (!draw.object || !draw.vertexBuffer)
                     continue;
-                if (portalPass.source && portalPass.source->Owner == draw.object)
+                if (isSpatialManipulatorCarrierDraw(draw))
                     continue;
 
                 context->SetPipeline(resolveStencilReadPipeline(draw.pipeline));
@@ -1659,11 +1876,30 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     draw.vertexStride, 0);
                 context->DrawInstanced(draw.vertexCount, 1, 0, 0);
             }
+            }
         }
     }
 #endif
 
-    if (settings.portalDebugVisuals)
+    if (!portalPasses.empty())
+    {
+        for (const PreparedDraw& draw : preparedDraws)
+        {
+            memcpy(static_cast<uint8_t*>(m_objectCBMapped) +
+                draw.constantBufferOffset,
+                &draw.drawData, sizeof(draw.drawData));
+            memcpy(static_cast<uint8_t*>(m_objectDataMapped) +
+                static_cast<size_t>(draw.drawData.objectIndex) *
+                sizeof(ObjectGPUData),
+                &draw.objectData, sizeof(draw.objectData));
+        }
+        m_objectDataBuffer->FlushMappedWrites();
+        context->SetStructuredBuffer(6, m_lightDataBuffer.get());
+        context->SetStructuredBuffer(7, m_objectDataBuffer.get());
+        context->SetStructuredBuffer(8, m_boneDataBuffer.get());
+    }
+
+    if (includeEditorVisuals && settings.portalDebugVisuals)
     {
         const float debugAlpha = std::clamp(
             settings.portalDebugOverlayAlpha, 0.f, 1.f);
@@ -1674,26 +1910,15 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
         if (portalDebugPipeline)
         {
-            for (const PreparedDraw& draw : preparedDraws)
+            for (const PortalStencilPass& pass : portalPasses)
             {
-                if (!draw.object || !draw.vertexBuffer)
+                if (pass.apertureVertexCount < 3)
                     continue;
 
-                auto* manipulator =
-                    draw.object->GetComponent<Engine::Components::SpatialManipulator>();
-                if (!manipulator || !manipulator->enabled)
-                    continue;
-
-                const auto mode = static_cast<Engine::Components::SpatialManipulator::ConnectionMode>(
-                    manipulator->connectionMode);
-                if (mode != Engine::Components::SpatialManipulator::ConnectionMode::Portal &&
-                    mode != Engine::Components::SpatialManipulator::ConnectionMode::LinkedPortal)
-                    continue;
-
-                DrawCBData debugDraw = draw.drawData;
+                DrawCBData debugDraw = pass.apertureDrawData;
                 debugDraw.lightCount = 0u;
 
-                ObjectGPUData debugData = draw.objectData;
+                ObjectGPUData debugData = pass.apertureObjectData;
                 debugData.baseColor = { 0.08f, 0.95f, 1.0f, debugAlpha };
                 debugData.ambientUnlit = { 0.f, 0.f, 0.f, 1.f };
                 debugData.emissiveOcclusion = { 0.25f, 0.9f, 1.0f, 1.f };
@@ -1701,42 +1926,51 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 debugData.viewPositionAlphaCutoff.w = 0.001f;
 
                 memcpy(static_cast<uint8_t*>(m_objectCBMapped) +
-                    draw.constantBufferOffset,
+                    pass.apertureConstantBufferOffset,
                     &debugDraw, sizeof(debugDraw));
                 memcpy(static_cast<uint8_t*>(m_objectDataMapped) +
                     static_cast<size_t>(debugDraw.objectIndex) *
                     sizeof(ObjectGPUData),
                     &debugData, sizeof(debugData));
-            }
-
-            m_objectDataBuffer->FlushMappedWrites();
-            context->SetStructuredBuffer(6, m_lightDataBuffer.get());
-            context->SetStructuredBuffer(7, m_objectDataBuffer.get());
-            context->SetStructuredBuffer(8, m_boneDataBuffer.get());
-
-            for (const PreparedDraw& draw : preparedDraws)
-            {
-                if (!draw.object || !draw.vertexBuffer)
-                    continue;
-
-                auto* manipulator =
-                    draw.object->GetComponent<Engine::Components::SpatialManipulator>();
-                if (!manipulator || !manipulator->enabled)
-                    continue;
-
-                const auto mode = static_cast<Engine::Components::SpatialManipulator::ConnectionMode>(
-                    manipulator->connectionMode);
-                if (mode != Engine::Components::SpatialManipulator::ConnectionMode::Portal &&
-                    mode != Engine::Components::SpatialManipulator::ConnectionMode::LinkedPortal)
-                    continue;
-
+                m_objectDataBuffer->FlushMappedWrites();
+                context->SetStructuredBuffer(6, m_lightDataBuffer.get());
+                context->SetStructuredBuffer(7, m_objectDataBuffer.get());
+                context->SetStructuredBuffer(8, m_boneDataBuffer.get());
                 context->SetPipeline(portalDebugPipeline);
                 context->SetConstantBuffer(
                     0, m_objectConstantBuffer.get(),
-                    draw.constantBufferOffset);
-                context->SetVertexBuffer(0, draw.vertexBuffer,
-                    draw.vertexStride, 0);
-                context->DrawInstanced(draw.vertexCount, 1, 0, 0);
+                    pass.apertureConstantBufferOffset);
+                context->SetVertexBuffer(0, m_portalApertureBuffer.get(),
+                    sizeof(Engine::Model::Vertex), pass.apertureVertexOffset);
+                context->DrawInstanced(pass.apertureVertexCount, 1, 0, 0);
+            }
+
+            for (const SpatialDebugPass& pass : spatialDebugPasses)
+            {
+                if (pass.vertexCount < 3)
+                    continue;
+                DrawCBData debugDraw { 0u, 0u, 0u, 0u };
+                ObjectGPUData debugData{};
+                debugData.world = glm::mat4(1.f);
+                debugData.mvp = proj * view;
+                debugData.baseColor = glm::vec4(glm::vec3(pass.color), debugAlpha);
+                debugData.ambientUnlit = { 0.f, 0.f, 0.f, 1.f };
+                debugData.emissiveOcclusion = glm::vec4(
+                    glm::vec3(pass.color) * 0.2f, 1.f);
+                debugData.materialParams = { 0.f, 1.f, 1.f, 0.f };
+                debugData.viewPositionAlphaCutoff =
+                    glm::vec4(cameraPosition, 0.001f);
+                memcpy(m_objectCBMapped, &debugDraw, sizeof(debugDraw));
+                memcpy(m_objectDataMapped, &debugData, sizeof(debugData));
+                m_objectDataBuffer->FlushMappedWrites();
+                context->SetStructuredBuffer(6, m_lightDataBuffer.get());
+                context->SetStructuredBuffer(7, m_objectDataBuffer.get());
+                context->SetStructuredBuffer(8, m_boneDataBuffer.get());
+                context->SetPipeline(portalDebugPipeline);
+                context->SetConstantBuffer(0, m_objectConstantBuffer.get(), 0);
+                context->SetVertexBuffer(0, m_portalApertureBuffer.get(),
+                    sizeof(Engine::Model::Vertex), pass.vertexOffset);
+                context->DrawInstanced(pass.vertexCount, 1, 0, 0);
             }
         }
     }

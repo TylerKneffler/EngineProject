@@ -1,5 +1,6 @@
 #include "Transform.h"
 #include "Core/Object.h"
+#include "Core/Scene/Scene.h"
 #include <glm/gtc/matrix_transform.hpp>
 
 namespace Engine::Components
@@ -72,10 +73,12 @@ glm::mat4 Transform::GetLocalMatrixWithLayer() const
 
 glm::mat4 Transform::GetWorldMatrixWithLayer() const
 {
-    const glm::mat4 world = GetWorldMatrix();
-    if (!matrixLayer.enabled)
-        return world;
-    return matrixLayer.localToLayer * world;
+    glm::mat4 world = GetWorldMatrix();
+    if (matrixLayer.enabled)
+        world = matrixLayer.localToLayer * world;
+    if (Owner && Owner->GetScene())
+        world = Owner->GetScene()->WarpWorldMatrix(world, Owner);
+    return world;
 }
 
 glm::vec3 Transform::ApplyLocalMatrixLayer(const glm::vec3& point) const

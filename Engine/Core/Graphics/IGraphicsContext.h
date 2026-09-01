@@ -32,6 +32,9 @@ public:
 
     // Pipeline state
     virtual void SetPipeline(const IPipelineState* pipeline) = 0;
+    // Dynamic stencil reference used to isolate independent portal apertures.
+    // Pipelines still define compare/write operations and masks.
+    virtual void SetStencilReference(uint32_t) {}
 
     // Constant buffer binding
     virtual void SetConstantBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint64_t offset = 0) = 0;
