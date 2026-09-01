@@ -55,7 +55,7 @@ int main()
     assert(sourcePortal.HasCompatiblePortalShapeWith(targetPortal));
     const glm::vec3 mapped = sourcePortal.MapWorldPointThroughPortalShape(
         glm::vec3(0.25f, 0.25f, 0.f), targetPortal);
-    assert(glm::length(mapped - glm::vec3(-0.5f, 0.5f, 0.f)) < 0.05f);
+    assert(glm::length(mapped - glm::vec3(-0.25f, 0.25f, 0.f)) < 0.05f);
 
     targetPortal.portalPointCount = 3;
     assert(!sourcePortal.HasCompatiblePortalShapeWith(targetPortal));
@@ -134,13 +134,13 @@ int main()
     const glm::vec3 targetNormal(1.f, 0.f, 0.f);
     const glm::vec3 mappedNormal = glm::vec3(sourceToTarget *
         glm::vec4(sourceNormal, 0.f));
-    assert(glm::length(mappedNormal - (-2.f * targetNormal)) < 0.0002f);
+    assert(glm::length(mappedNormal - (-targetNormal)) < 0.0002f);
     const glm::vec3 mappedTangent = glm::vec3(sourceToTarget *
         glm::vec4(1.f, 0.f, 0.f, 0.f));
     const glm::vec3 mappedBitangent = glm::vec3(sourceToTarget *
         glm::vec4(0.f, 1.f, 0.f, 0.f));
-    assert(glm::length(mappedTangent - glm::vec3(0.f, 0.f, 2.f)) < 0.0002f);
-    assert(glm::length(mappedBitangent - glm::vec3(0.f, 2.f, 0.f)) < 0.0002f);
+    assert(glm::length(mappedTangent - glm::vec3(0.f, 0.f, 1.f)) < 0.0002f);
+    assert(glm::length(mappedBitangent - glm::vec3(0.f, 1.f, 0.f)) < 0.0002f);
     assert(glm::determinant(glm::mat3(sourceToTarget)) > 0.f);
 
     source->Update();

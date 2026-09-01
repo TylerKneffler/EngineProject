@@ -37,9 +37,14 @@ struct SceneSettings
 
     // Editor-only debug overlays for portals, matrix links, and warp volumes.
     bool portalDebugVisuals = false;
-    bool portalDebugWireframe = true;
+    bool portalDebugWireframe = false;
     bool portalDebugTintRemoteView = true;
     float portalDebugOverlayAlpha = 0.45f;
+    // One level renders the directly connected side. Higher values render
+    // portals visible through portals. Runtime clamps both values to hard
+    // safety limits before scheduling any work.
+    int portalRecursionDepth = 2;
+    int portalMaxViewsPerFrame = 24;
 
 };
 }

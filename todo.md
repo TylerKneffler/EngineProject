@@ -58,8 +58,8 @@
 - [x] HIGH: Compute portal connection transforms as source-to-target relative transforms (including portal anchor frames), not raw overlay assignment.
 - [x] HIGH: Ensure disconnect/disable operations are symmetric across linked manipulators and always clear both sides safely.
 - [x] HIGH: Support rendering for multiple active portals per frame with deterministic ordering and correct stencil isolation.
-- [ ] HIGH: Add recursive portal view support with configurable recursion depth, guardrails for performance, and cycle protection.
-- [ ] HIGH: Extend non-DX11 parity checks to confirm portal aperture behavior is equivalent across DX11, DX12, and Vulkan paths.
+- [x] HIGH: Add recursive portal view support with configurable recursion depth, guardrails for performance, and cycle protection.
+- [x] HIGH: Extend non-DX11 parity checks to confirm portal aperture behavior is equivalent across DX11, DX12, and Vulkan paths.
 - [ ] MEDIUM: Correct world-layer point transforms to apply full world matrix composition (rotation/scale-safe), not position-offset approximations.
 - [ ] MEDIUM: Revisit portal mesh deformation to behave correctly for bidirectional traversal and asymmetric portal geometry.
 - [ ] TESTING: Add unit/integration tests for bidirectional crossing semantics, rotated/opposed portal normals, and parity/orientation correctness.

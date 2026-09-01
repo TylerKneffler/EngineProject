@@ -369,7 +369,7 @@ void UIRenderer::Initialize(Engine::Graphics::IGraphicsProvider* graphicsProvide
             .SetDepthEnable(false).SetDepthWriteEnable(false).SetDepthFunc(7)
             .SetInputLayout(layout, 3)
             .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
-            .SetRenderTargetFormat(28, 40).Build();
+            .SetRenderTargetFormat(28, 20).Build();
     };
     m_impl->imagePipeline = buildPipeline(imagePixelShader.get());
     m_impl->fontPipeline = buildPipeline(fontPixelShader.get());

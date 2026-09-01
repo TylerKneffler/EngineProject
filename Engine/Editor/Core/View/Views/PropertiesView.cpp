@@ -165,16 +165,40 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             bool portalDebugChanged = false;
             portalDebugChanged |= ui.Checkbox("Enable Spatial Debug Visuals",
                 &m_scene->settings.portalDebugVisuals);
+            if (m_scene->settings.portalDebugVisuals)
+                ui.Label("Portal: yellow points, cyan edges/plane, magenta links, green normals");
             portalDebugChanged |= ui.Checkbox("Spatial Wireframe Overlay",
                 &m_scene->settings.portalDebugWireframe);
             portalDebugChanged |= ui.Checkbox("Tint Remote Portal View",
                 &m_scene->settings.portalDebugTintRemoteView);
             portalDebugChanged |= ui.DragFloat("Spatial Overlay Alpha",
                 &m_scene->settings.portalDebugOverlayAlpha, 0.02f, 0.f, 1.f);
+            float portalRecursionDepth = static_cast<float>(
+                m_scene->settings.portalRecursionDepth);
+            if (ui.DragFloat("Portal Recursion Depth",
+                &portalRecursionDepth, 1.f, 1.f, 8.f))
+            {
+                m_scene->settings.portalRecursionDepth = static_cast<int>(
+                    std::round(portalRecursionDepth));
+                portalDebugChanged = true;
+            }
+            float portalViewBudget = static_cast<float>(
+                m_scene->settings.portalMaxViewsPerFrame);
+            if (ui.DragFloat("Portal View Budget",
+                &portalViewBudget, 1.f, 1.f, 64.f))
+            {
+                m_scene->settings.portalMaxViewsPerFrame = static_cast<int>(
+                    std::round(portalViewBudget));
+                portalDebugChanged = true;
+            }
             if (portalDebugChanged)
             {
                 m_scene->settings.portalDebugOverlayAlpha = std::clamp(
                     m_scene->settings.portalDebugOverlayAlpha, 0.f, 1.f);
+                m_scene->settings.portalRecursionDepth = std::clamp(
+                    m_scene->settings.portalRecursionDepth, 1, 8);
+                m_scene->settings.portalMaxViewsPerFrame = std::clamp(
+                    m_scene->settings.portalMaxViewsPerFrame, 1, 64);
                 if (OnComponentsChanged)
                     OnComponentsChanged();
             }

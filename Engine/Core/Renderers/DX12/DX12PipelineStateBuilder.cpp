@@ -224,7 +224,9 @@ Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetPrimitive
 Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetRenderTargetFormat(int format, int depthFormat)
 {
     m_rtFormat = static_cast<DXGI_FORMAT>(format);
-    m_dsFormat = depthFormat >= 0 ? static_cast<DXGI_FORMAT>(depthFormat) : DXGI_FORMAT_D32_FLOAT;
+    m_dsFormat = depthFormat >= 0
+        ? static_cast<DXGI_FORMAT>(depthFormat)
+        : DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
     return *this;
 }
 

@@ -154,6 +154,7 @@ private:
     void* m_gridCBMapped = nullptr;
 
     std::unique_ptr<IPipelineState> m_skyboxPipeline;
+    std::unique_ptr<IPipelineState> m_portalSkyboxStencilReadPipeline;
     std::unique_ptr<IGraphicsBuffer> m_skyboxConstantBuffer;
     void* m_skyboxCBMapped = nullptr;
     std::shared_ptr<Engine::Components::Texture> m_defaultSkyboxTexture;
@@ -175,6 +176,8 @@ private:
     std::unique_ptr<IPipelineState> m_objectPreviewWirePipeline;
     std::unique_ptr<IPipelineState> m_objectPreviewWireDoubleSidedPipeline;
     std::unique_ptr<IPipelineState> m_objectPortalStencilWritePipeline;
+    std::unique_ptr<IPipelineState> m_objectPortalStencilIncrementPipeline;
+    std::unique_ptr<IPipelineState> m_objectPortalDepthResetPipeline;
     std::unique_ptr<IPipelineState> m_objectPortalStencilReadPipeline;
     std::unique_ptr<IPipelineState> m_objectPortalStencilReadDoubleSidedPipeline;
     std::unique_ptr<IPipelineState> m_objectPortalStencilReadBlendPipeline;
@@ -187,6 +190,8 @@ private:
     std::unique_ptr<IPipelineState> m_objectPortalStencilReadPreviewDoubleSidedPipeline;
     std::unique_ptr<IPipelineState> m_objectPortalStencilReadPreviewWirePipeline;
     std::unique_ptr<IPipelineState> m_objectPortalStencilReadPreviewWireDoubleSidedPipeline;
+    std::unique_ptr<IPipelineState> m_objectSpatialDebugPipeline;
+    std::unique_ptr<IPipelineState> m_objectSpatialDebugWirePipeline;
     std::unique_ptr<IPipelineState> m_objectOutlinePipeline;
     std::unique_ptr<IGraphicsBuffer> m_objectConstantBuffer;
     void* m_objectCBMapped = nullptr;
@@ -245,9 +250,11 @@ private:
     bool m_editorCameraModeInitialized = false;
 
     static constexpr uint32_t kMaxObjects = 64;
-    // Per-object upload budget covers either an 8-point portal fan (18
-    // vertices) or an editor-only box volume/matrix gizmo (36 vertices).
-    static constexpr uint32_t kMaxSpatialVerticesPerObject = 36;
+    // The editor diagnostic expands a linked 8-point portal pair into point
+    // markers, boundary bars, correspondence bars, and plane normals. Keep
+    // enough transient space for every logical spatial object; it is never
+    // used by runtime portal rendering.
+    static constexpr uint32_t kMaxSpatialVerticesPerObject = 1024;
     static constexpr uint32_t kMaxBonesPerObject = 256;
     static constexpr uint32_t kMaxLights =
         Engine::Model::MaxRealtimeLights;

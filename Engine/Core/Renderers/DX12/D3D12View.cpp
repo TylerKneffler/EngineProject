@@ -109,11 +109,11 @@ void D3D12View::CreateResources(void* device, uint32_t width, uint32_t height)
     d3dDevice->CreateShaderResourceView(m_texture.Get(), &srvDesc, m_srvCpu);
 
     D3D12_RESOURCE_DESC depthDesc = texDesc;
-    depthDesc.Format = DXGI_FORMAT_D32_FLOAT;
+    depthDesc.Format = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
     depthDesc.Flags  = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
 
     D3D12_CLEAR_VALUE depthClear{};
-    depthClear.Format               = DXGI_FORMAT_D32_FLOAT;
+    depthClear.Format               = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
     depthClear.DepthStencil.Depth   = 1.0f;
     depthClear.DepthStencil.Stencil = 0;
 
@@ -131,7 +131,7 @@ void D3D12View::CreateResources(void* device, uint32_t width, uint32_t height)
         ThrowIfFailed(d3dDevice->CreateDescriptorHeap(&dsvDesc, IID_PPV_ARGS(&m_dsvHeap)));
     }
     D3D12_DEPTH_STENCIL_VIEW_DESC dsvViewDesc{};
-    dsvViewDesc.Format        = DXGI_FORMAT_D32_FLOAT;
+    dsvViewDesc.Format        = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
     dsvViewDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
     d3dDevice->CreateDepthStencilView(
         m_depthBuffer.Get(), &dsvViewDesc,
@@ -169,7 +169,9 @@ void D3D12View::Render(void* cmdList,
     d3dCmdList->OMSetRenderTargets(1, &sceneRtv, FALSE, &dsv);
 
     d3dCmdList->ClearRenderTargetView(sceneRtv, m_clearColor, 0, nullptr);
-    d3dCmdList->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+    d3dCmdList->ClearDepthStencilView(
+        dsv, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
+        1.0f, 0, 0, nullptr);
 
     if (drawFn)
         drawFn(cmdList);

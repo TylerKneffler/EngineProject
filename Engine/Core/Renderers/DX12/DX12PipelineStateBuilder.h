@@ -114,7 +114,7 @@ private:
 
     D3D12_PRIMITIVE_TOPOLOGY_TYPE m_primitiveTopology = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     DXGI_FORMAT m_rtFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-    DXGI_FORMAT m_dsFormat = DXGI_FORMAT_D32_FLOAT;
+    DXGI_FORMAT m_dsFormat = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
 
     D3D12_BLEND ConvertBlendMode(int mode) const;
     D3D12_BLEND_OP ConvertBlendOp(int op) const;

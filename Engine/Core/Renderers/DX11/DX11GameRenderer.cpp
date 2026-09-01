@@ -65,7 +65,7 @@ void DX11GameRenderer::CreateTargets()
     depth.Height = m_height;
     depth.MipLevels = 1;
     depth.ArraySize = 1;
-    depth.Format = DXGI_FORMAT_D32_FLOAT;
+    depth.Format = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
     depth.SampleDesc.Count = 1;
     depth.Usage = D3D11_USAGE_DEFAULT;
     depth.BindFlags = D3D11_BIND_DEPTH_STENCIL;
@@ -91,7 +91,8 @@ void DX11GameRenderer::BeginFrame()
     m_context->RSSetViewports(1, &viewport);
     D3D11_RECT scissor{ 0, 0, static_cast<LONG>(m_width), static_cast<LONG>(m_height) };
     m_context->RSSetScissorRects(1, &scissor);
-    m_context->ClearDepthStencilView(m_dsv.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
+    m_context->ClearDepthStencilView(
+        m_dsv.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
 }
 
 void DX11GameRenderer::Clear(float r, float g, float b, float a)

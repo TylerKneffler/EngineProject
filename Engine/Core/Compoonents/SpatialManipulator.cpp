@@ -61,21 +61,6 @@ glm::vec3 ComputeCenter(const std::vector<glm::vec3>& points)
     return sum / static_cast<float>(points.size());
 }
 
-float ComputeAverageRadius(const std::vector<glm::vec3>& points,
-    const glm::vec3& center, const glm::vec3& tangent,
-    const glm::vec3& bitangent)
-{
-    if (points.empty())
-        return 1.f;
-    float sum = 0.f;
-    for (const glm::vec3& point : points)
-    {
-        const glm::vec3 delta = point - center;
-        const glm::vec2 uv(glm::dot(delta, tangent), glm::dot(delta, bitangent));
-        sum += glm::length(uv);
-    }
-    return sum / static_cast<float>(points.size());
-}
 }
 
 SpatialManipulator::SpatialManipulator()
@@ -309,7 +294,7 @@ bool SpatialManipulator::HasCompatiblePortalShapeWith(const SpatialManipulator& 
         GetClampedPortalPointCount() >= 3;
 }
 
-glm::mat4 SpatialManipulator::GetPortalWorldFrame(float& averageRadius) const
+glm::mat4 SpatialManipulator::GetPortalWorldFrame() const
 {
     const std::vector<glm::vec3> worldPoints = GetWorldPortalShapePoints();
     const glm::vec3 center = ComputeCenter(worldPoints);
@@ -340,9 +325,6 @@ glm::mat4 SpatialManipulator::GetPortalWorldFrame(float& averageRadius) const
     const glm::vec3 bitangent = SafeNormalize(glm::cross(normal, tangent),
         glm::vec3(0.f, 1.f, 0.f));
 
-    averageRadius = std::max(1e-4f, ComputeAverageRadius(worldPoints,
-        center, tangent, bitangent));
-
     glm::mat4 frame(1.f);
     frame[0] = glm::vec4(tangent, 0.f);
     frame[1] = glm::vec4(bitangent, 0.f);
@@ -354,19 +336,17 @@ glm::mat4 SpatialManipulator::GetPortalWorldFrame(float& averageRadius) const
 glm::mat4 SpatialManipulator::GetPortalWorldTransformTo(
     const SpatialManipulator& target) const
 {
-    float sourceRadius = 1.f;
-    float targetRadius = 1.f;
-    const glm::mat4 sourceFrame = GetPortalWorldFrame(sourceRadius);
-    const glm::mat4 targetFrame = target.GetPortalWorldFrame(targetRadius);
-    const float scaleRatio = targetRadius / sourceRadius;
+    const glm::mat4 sourceFrame = GetPortalWorldFrame();
+    const glm::mat4 targetFrame = target.GetPortalWorldFrame();
 
-    // Crossing a portal is a half-turn in portal-frame coordinates. Flipping
-    // tangent and normal while retaining bitangent has positive determinant,
-    // so orientations remain right-handed instead of becoming reflections.
+    // A normal portal is a rigid half-turn in portal-frame coordinates.
+    // Aperture shape controls only the visible opening; it must not silently
+    // scale or shear the connected space. Explicit scale warps belong to
+    // spatial volumes or matrix overlays.
     glm::mat4 crossing(1.f);
-    crossing[0][0] = -scaleRatio;
-    crossing[1][1] = scaleRatio;
-    crossing[2][2] = -scaleRatio;
+    crossing[0][0] = -1.f;
+    crossing[1][1] = 1.f;
+    crossing[2][2] = -1.f;
     return targetFrame * crossing * glm::inverse(sourceFrame);
 }
 
@@ -840,10 +820,8 @@ void SpatialManipulator::ApplyPortalConnection(SpatialManipulator* target)
 
     const glm::mat4 sourceToTarget = GetPortalWorldTransformTo(*target);
     const glm::mat4 targetToSource = glm::inverse(sourceToTarget);
-    float sourceRadius = 1.f;
-    float targetRadius = 1.f;
-    const glm::mat4 sourceFrame = GetPortalWorldFrame(sourceRadius);
-    const glm::mat4 targetFrame = target->GetPortalWorldFrame(targetRadius);
+    const glm::mat4 sourceFrame = GetPortalWorldFrame();
+    const glm::mat4 targetFrame = target->GetPortalWorldFrame();
 
     Owner->transform.matrixLayer.connection.enabled = true;
     Owner->transform.matrixLayer.connection.boundaryPoint = glm::vec3(sourceFrame[3]);

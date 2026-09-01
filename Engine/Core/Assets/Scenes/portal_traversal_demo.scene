@@ -268,23 +268,23 @@
             <item>-1</item>
           </SpatialManipulator.portalNormal>
           <SpatialManipulator.portalShapePoint0>
-            <item>-1.2</item>
-            <item>-1.0</item>
+            <item>-0.5</item>
+            <item>-0.5</item>
             <item>0</item>
           </SpatialManipulator.portalShapePoint0>
           <SpatialManipulator.portalShapePoint1>
-            <item>1.0</item>
-            <item>-1.1</item>
+            <item>0.5</item>
+            <item>-0.5</item>
             <item>0</item>
           </SpatialManipulator.portalShapePoint1>
           <SpatialManipulator.portalShapePoint2>
-            <item>1.4</item>
-            <item>1.2</item>
+            <item>0.5</item>
+            <item>0.5</item>
             <item>0</item>
           </SpatialManipulator.portalShapePoint2>
           <SpatialManipulator.portalShapePoint3>
-            <item>-0.9</item>
-            <item>1.0</item>
+            <item>-0.5</item>
+            <item>0.5</item>
             <item>0</item>
           </SpatialManipulator.portalShapePoint3>
         </components:SpatialManipulator>

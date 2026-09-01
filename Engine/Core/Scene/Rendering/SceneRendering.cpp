@@ -7,6 +7,7 @@
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
+#include "Core/Rendering/Portal/PortalRenderPolicy.h"
 #include "Core/Model/LightingData.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Graphics/IShader.h"
@@ -21,6 +22,8 @@
 #include <cstring>
 #include <stdexcept>
 #include <filesystem>
+#include <functional>
+#include <limits>
 #include <glm/glm.hpp>
 #include <glm/ext/matrix_transform.hpp>
 
@@ -380,25 +383,47 @@ void Scene::BuildSkyboxPipeline()
     if (!pixelShader)
         throw std::runtime_error("Failed to compile skybox pixel shader: " + shaderCompiler->GetLastError());
 
-    auto builder = pipelineFactory->CreateBuilder();
-    if (!builder)
-        throw std::runtime_error("Failed to create skybox pipeline builder");
-    m_skyboxPipeline = builder->SetVertexShader(vertexShader.get())
-        .SetPixelShader(pixelShader.get())
-        .SetFillMode(false)
-        .SetCullMode(false)
-        .SetFrontCounterClockwise(false)
-        .SetDepthClipEnable(false)
-        .SetBlendEnable(false)
-        .SetDepthEnable(false)
-        .SetDepthWriteEnable(false)
-        .SetDepthFunc(7)
-        .SetInputLayout(nullptr, 0)
-        .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
-        .SetRenderTargetFormat(28, 40)
-        .Build();
-    if (!m_skyboxPipeline)
-        throw std::runtime_error("Failed to build skybox pipeline: " + builder->GetLastError());
+    const auto buildSkyboxPipeline = [&](bool stencilClip,
+        const char* description)
+    {
+        auto builder = pipelineFactory->CreateBuilder();
+        if (!builder)
+            throw std::runtime_error(std::string("Failed to create ") +
+                description + " pipeline builder");
+        auto& state = builder->SetVertexShader(vertexShader.get())
+            .SetPixelShader(pixelShader.get())
+            .SetFillMode(false)
+            .SetCullMode(false)
+            .SetFrontCounterClockwise(false)
+            .SetDepthClipEnable(false)
+            .SetBlendEnable(false)
+            .SetDepthEnable(false)
+            .SetDepthWriteEnable(false)
+            .SetDepthFunc(7)
+            .SetInputLayout(nullptr, 0)
+            .SetPrimitiveTopology(
+                Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
+            .SetRenderTargetFormat(28, 20);
+        if (stencilClip)
+        {
+            state.SetStencilEnable(true)
+                .SetStencilReadMask(0xFF)
+                .SetStencilWriteMask(0x00)
+                .SetStencilFunc(2)
+                .SetStencilFailOp(0)
+                .SetStencilDepthFailOp(0)
+                .SetStencilPassOp(0)
+                .SetStencilRef(1);
+        }
+        auto pipeline = state.Build();
+        if (!pipeline)
+            throw std::runtime_error(std::string("Failed to build ") +
+                description + " pipeline: " + builder->GetLastError());
+        return pipeline;
+    };
+    m_skyboxPipeline = buildSkyboxPipeline(false, "skybox");
+    m_portalSkyboxStencilReadPipeline = buildSkyboxPipeline(true,
+        "portal skybox stencil read");
 
     const std::string defaultPath =
         (std::filesystem::path(ENGINE_ASSETS_PATH) / "Textures" / "Skyboxes" /
@@ -520,7 +545,7 @@ void Scene::BuildGridPipeline()
         .SetDepthFunc(3)                       // D3D12_COMPARISON_FUNC_LESS_EQUAL (0-indexed: 3)
         .SetInputLayout(nullptr, 0)            // No vertex buffer
         .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
-        .SetRenderTargetFormat(28, 40)         // DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_D32_FLOAT
+        .SetRenderTargetFormat(28, 20)         // DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_D32_FLOAT_S8X24_UINT
         .Build();
     
     if (!m_gridPipeline)
@@ -577,6 +602,8 @@ void Scene::BuildObjectPipeline()
     {
         None,
         Write,
+        Increment,
+        ResetDepth,
         Read
     };
 
@@ -621,7 +648,18 @@ void Scene::BuildObjectPipeline()
                 .SetStencilPassOp(2)
                 .SetStencilRef(1);
             break;
+        case PortalStencilMode::Increment:
+            state.SetStencilEnable(true)
+                .SetStencilReadMask(0xFF)
+                .SetStencilWriteMask(0xFF)
+                .SetStencilFunc(2)
+                .SetStencilFailOp(0)
+                .SetStencilDepthFailOp(0)
+                .SetStencilPassOp(3)
+                .SetStencilRef(1);
+            break;
         case PortalStencilMode::Read:
+        case PortalStencilMode::ResetDepth:
             state.SetStencilEnable(true)
                 .SetStencilReadMask(0xFF)
                 .SetStencilWriteMask(0x00)
@@ -638,14 +676,20 @@ void Scene::BuildObjectPipeline()
         }
 
         auto pipeline = state.SetDepthEnable(true)
-            .SetDepthWriteEnable(stencilMode == PortalStencilMode::Write
-                ? false : !blend)
-            .SetDepthFunc(stencilMode == PortalStencilMode::Write
+            .SetDepthWriteEnable(
+                stencilMode == PortalStencilMode::ResetDepth ? true :
+                stencilMode == PortalStencilMode::Write ||
+                stencilMode == PortalStencilMode::Increment
+                    ? false : !blend)
+            .SetDepthFunc(
+                stencilMode == PortalStencilMode::ResetDepth ? 7 :
+                stencilMode == PortalStencilMode::Write ||
+                stencilMode == PortalStencilMode::Increment
                 ? 3 : (blend ? 3 : 1))
             .SetInputLayout(layout, 10)
             .SetPrimitiveTopology(
                 Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
-            .SetRenderTargetFormat(28, 40)
+            .SetRenderTargetFormat(28, 20)
             .Build();
         if (!pipeline)
             throw std::runtime_error(
@@ -706,6 +750,12 @@ void Scene::BuildObjectPipeline()
     m_objectPortalStencilWritePipeline =
         buildMaterialPipeline(true, false, false, PortalStencilMode::Write,
             false, "portal stencil write");
+    m_objectPortalStencilIncrementPipeline =
+        buildMaterialPipeline(true, false, false, PortalStencilMode::Increment,
+            false, "recursive portal stencil increment");
+    m_objectPortalDepthResetPipeline =
+        buildMaterialPipeline(true, false, false, PortalStencilMode::ResetDepth,
+            false, "portal aperture depth reset");
     m_objectPortalStencilReadPipeline =
         buildMaterialPipeline(false, false, false, PortalStencilMode::Read,
             true, "portal stencil read opaque");
@@ -743,6 +793,40 @@ void Scene::BuildObjectPipeline()
         buildMaterialPipeline(true, true, true, PortalStencilMode::Read,
             true, "portal stencil read preview wire double-sided");
 
+    const auto buildSpatialDebugPipeline = [&](bool wireframe)
+    {
+        auto debugBuilder = pipelineFactory->CreateBuilder();
+        if (!debugBuilder)
+            throw std::runtime_error("Failed to create spatial debug pipeline builder");
+        auto pipeline = debugBuilder->SetVertexShader(vsShader.get())
+            .SetPixelShader(psShader.get())
+            .SetFillMode(wireframe)
+            .SetCullMode(false)
+            .SetFrontCounterClockwise(false)
+            .SetDepthClipEnable(true)
+            .SetBlendEnable(true)
+            .SetSrcBlend(4)
+            .SetDestBlend(5)
+            .SetBlendOp(0)
+            .SetSrcBlendAlpha(1)
+            .SetDestBlendAlpha(0)
+            .SetBlendOpAlpha(0)
+            .SetDepthEnable(false)
+            .SetDepthWriteEnable(false)
+            .SetDepthFunc(7)
+            .SetInputLayout(layout, 10)
+            .SetPrimitiveTopology(
+                Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
+            .SetRenderTargetFormat(28, 20)
+            .Build();
+        if (!pipeline)
+            throw std::runtime_error("Failed to build spatial debug pipeline: " +
+                debugBuilder->GetLastError());
+        return pipeline;
+    };
+    m_objectSpatialDebugPipeline = buildSpatialDebugPipeline(false);
+    m_objectSpatialDebugWirePipeline = buildSpatialDebugPipeline(true);
+
     // Build a wireframe outline pipeline for selected object highlighting.
     auto outlineBuilder = pipelineFactory->CreateBuilder();
     if (!outlineBuilder)
@@ -777,7 +861,7 @@ void Scene::BuildObjectPipeline()
         .SetDepthFunc(3)                       // D3D12_COMPARISON_FUNC_LESS_EQUAL
         .SetInputLayout(layout, 10)
         .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
-        .SetRenderTargetFormat(28, 40)
+        .SetRenderTargetFormat(28, 20)
         .Build();
     if (!m_objectOutlinePipeline)
         throw std::runtime_error("Failed to build object outline pipeline: " + outlineBuilder->GetLastError());
@@ -1297,8 +1381,6 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     {
         Engine::Components::SpatialManipulator* source = nullptr;
         Engine::Components::SpatialManipulator* target = nullptr;
-        glm::mat4 mappedView = glm::mat4(1.f);
-        glm::vec3 mappedCameraPosition = glm::vec3(0.f);
         float viewDepth = 0.f;
         size_t drawOrder = 0;
         DrawCBData apertureDrawData{};
@@ -1313,7 +1395,6 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         ? cam->Owner->transform.GetWorldMatrixWithLayer()
         : glm::mat4(1.f);
     const glm::vec3 cameraForward = glm::normalize(glm::vec3(cameraWorld[2]));
-    const glm::vec3 cameraUp = glm::normalize(glm::vec3(cameraWorld[1]));
     size_t portalObjectOrder = 0;
     for (const auto& sceneObject : m_objects)
     {
@@ -1338,24 +1419,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         if (!target || !target->enabled || !target->Owner)
             continue;
 
-        const glm::vec3 mappedCamera =
-            manipulator->MapWorldPointThroughPortalShape(cameraPosition, *target);
-        const glm::vec3 mappedLookAt = manipulator->MapWorldPointThroughPortalShape(
-            cameraPosition + cameraForward, *target);
-        const glm::vec3 mappedUpPoint = manipulator->MapWorldPointThroughPortalShape(
-            cameraPosition + cameraUp, *target);
-        const glm::vec3 mappedForward = glm::normalize(mappedLookAt - mappedCamera);
-        glm::vec3 mappedUp = mappedUpPoint - mappedCamera;
-        mappedUp = glm::dot(mappedUp, mappedUp) <= 1e-6f
-            ? glm::vec3(0.f, 1.f, 0.f)
-            : glm::normalize(mappedUp);
-
         PortalStencilPass pass{};
         pass.source = manipulator;
         pass.target = target;
-        pass.mappedCameraPosition = mappedCamera;
-        pass.mappedView = glm::lookAtLH(
-            mappedCamera, mappedCamera + mappedForward, mappedUp);
         const std::vector<glm::vec3> aperturePoints =
             manipulator->GetWorldPortalShapePoints();
         glm::vec3 apertureCenter(0.f);
@@ -1412,7 +1478,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             pass.source->GetWorldPortalShapePoints();
         if (points.size() < 3)
             continue;
-        const uint32_t required = static_cast<uint32_t>(points.size() - 2) * 3u;
+        const uint32_t required = Engine::Rendering::Portal::
+            TriangulatedApertureVertexCount(points.size());
         if (portalVertexCursor + required > portalVertexCapacity)
             break;
 
@@ -1501,6 +1568,122 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 appendDebugVertex(glm::vec3(world * glm::vec4(points[index], 1.f)));
             spatialDebugPasses.push_back(pass);
         };
+        const auto appendDebugSegment = [&, appendDebugBox](
+            const glm::vec3& start, const glm::vec3& end, float thickness,
+            const glm::vec4& color)
+        {
+            const glm::vec3 delta = end - start;
+            const float length = glm::length(delta);
+            if (length <= 1e-5f)
+                return;
+            const glm::vec3 xAxis = delta / length;
+            const glm::vec3 helper = std::abs(glm::dot(xAxis,
+                glm::vec3(0.f, 1.f, 0.f))) > 0.95f
+                ? glm::vec3(0.f, 0.f, 1.f)
+                : glm::vec3(0.f, 1.f, 0.f);
+            const glm::vec3 zAxis = glm::normalize(glm::cross(xAxis, helper));
+            const glm::vec3 yAxis = glm::normalize(glm::cross(zAxis, xAxis));
+            glm::mat4 world(1.f);
+            world[0] = glm::vec4(xAxis, 0.f);
+            world[1] = glm::vec4(yAxis, 0.f);
+            world[2] = glm::vec4(zAxis, 0.f);
+            world[3] = glm::vec4((start + end) * 0.5f, 1.f);
+            appendDebugBox(world,
+                glm::vec3(length * 0.5f, thickness, thickness), color);
+        };
+
+        // Portal connectivity is an editor-only diagnostic. The highlighted
+        // geometry is generated transiently from the logical aperture points:
+        // yellow markers are paired points, cyan bars are aperture edges,
+        // magenta bars show point-to-point mapping, and green stems show each
+        // portal plane's normal. None of it is runtime portal geometry.
+        using DebugPortalPair = std::pair<
+            const Engine::Components::SpatialManipulator*,
+            const Engine::Components::SpatialManipulator*>;
+        std::vector<DebugPortalPair> highlightedPortalPairs;
+        for (const PortalStencilPass& portalPass : portalPasses)
+        {
+            const bool alreadyHighlighted = std::any_of(
+                highlightedPortalPairs.begin(), highlightedPortalPairs.end(),
+                [&](const DebugPortalPair& pair)
+                {
+                    return (pair.first == portalPass.source &&
+                            pair.second == portalPass.target) ||
+                           (pair.first == portalPass.target &&
+                            pair.second == portalPass.source);
+                });
+            if (alreadyHighlighted)
+                continue;
+            highlightedPortalPairs.emplace_back(
+                portalPass.source, portalPass.target);
+
+            const std::vector<glm::vec3> sourcePoints =
+                portalPass.source->GetWorldPortalShapePoints();
+            const std::vector<glm::vec3> targetPoints =
+                portalPass.target->GetWorldPortalShapePoints();
+            const size_t pointCount = std::min(
+                sourcePoints.size(), targetPoints.size());
+            if (pointCount < 3)
+                continue;
+
+            float averageEdgeLength = 0.f;
+            for (size_t pointIndex = 0; pointIndex < pointCount; ++pointIndex)
+            {
+                const size_t next = (pointIndex + 1u) % pointCount;
+                averageEdgeLength += glm::length(
+                    sourcePoints[next] - sourcePoints[pointIndex]);
+                averageEdgeLength += glm::length(
+                    targetPoints[next] - targetPoints[pointIndex]);
+            }
+            averageEdgeLength /= static_cast<float>(pointCount * 2u);
+            const float markerRadius = std::clamp(
+                averageEdgeLength * 0.045f, 0.015f, 0.2f);
+            const float edgeThickness = markerRadius * 0.32f;
+            const glm::vec4 pointColor { 1.f, 0.82f, 0.12f, 1.f };
+            const glm::vec4 edgeColor { 0.05f, 0.95f, 1.f, 1.f };
+            const glm::vec4 connectionColor { 1.f, 0.2f, 0.85f, 1.f };
+            const glm::vec4 normalColor { 0.25f, 1.f, 0.35f, 1.f };
+
+            glm::vec3 sourceCenter(0.f);
+            glm::vec3 targetCenter(0.f);
+            for (size_t pointIndex = 0; pointIndex < pointCount; ++pointIndex)
+            {
+                const size_t next = (pointIndex + 1u) % pointCount;
+                sourceCenter += sourcePoints[pointIndex];
+                targetCenter += targetPoints[pointIndex];
+                appendDebugSphere(glm::translate(glm::mat4(1.f),
+                    sourcePoints[pointIndex]), markerRadius, pointColor);
+                appendDebugSphere(glm::translate(glm::mat4(1.f),
+                    targetPoints[pointIndex]), markerRadius, pointColor);
+                appendDebugSegment(sourcePoints[pointIndex], sourcePoints[next],
+                    edgeThickness, edgeColor);
+                appendDebugSegment(targetPoints[pointIndex], targetPoints[next],
+                    edgeThickness, edgeColor);
+                appendDebugSegment(sourcePoints[pointIndex],
+                    targetPoints[pointIndex], edgeThickness * 0.55f,
+                    connectionColor);
+            }
+            sourceCenter /= static_cast<float>(pointCount);
+            targetCenter /= static_cast<float>(pointCount);
+            glm::vec3 sourceNormal = glm::cross(
+                sourcePoints[1] - sourcePoints[0],
+                sourcePoints[2] - sourcePoints[0]);
+            glm::vec3 targetNormal = glm::cross(
+                targetPoints[1] - targetPoints[0],
+                targetPoints[2] - targetPoints[0]);
+            sourceNormal = glm::dot(sourceNormal, sourceNormal) > 1e-8f
+                ? glm::normalize(sourceNormal) : glm::vec3(0.f, 0.f, 1.f);
+            targetNormal = glm::dot(targetNormal, targetNormal) > 1e-8f
+                ? glm::normalize(targetNormal) : glm::vec3(0.f, 0.f, 1.f);
+            const float normalLength = std::max(
+                averageEdgeLength * 0.35f, markerRadius * 3.f);
+            appendDebugSegment(sourceCenter,
+                sourceCenter + sourceNormal * normalLength,
+                edgeThickness, normalColor);
+            appendDebugSegment(targetCenter,
+                targetCenter + targetNormal * normalLength,
+                edgeThickness, normalColor);
+        }
 
         for (const auto& sceneObject : m_objects)
         {
@@ -1551,22 +1734,163 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     if (portalVertexCursor > 0)
         m_portalApertureBuffer->FlushMappedWrites();
 
-    const auto uploadPortalApertureData = [&](const PortalStencilPass& pass)
+    const auto uploadPortalApertureData = [&](const PortalStencilPass& pass,
+        const glm::mat4& apertureView)
     {
+        ObjectGPUData apertureData = pass.apertureObjectData;
+        apertureData.mvp = proj * apertureView;
         memcpy(static_cast<uint8_t*>(m_objectCBMapped) +
             pass.apertureConstantBufferOffset,
             &pass.apertureDrawData, sizeof(pass.apertureDrawData));
         memcpy(static_cast<uint8_t*>(m_objectDataMapped) +
             static_cast<size_t>(pass.apertureDrawData.objectIndex) *
                 sizeof(ObjectGPUData),
-            &pass.apertureObjectData, sizeof(pass.apertureObjectData));
+            &apertureData, sizeof(apertureData));
         m_objectDataBuffer->FlushMappedWrites();
         context->SetStructuredBuffer(6, m_lightDataBuffer.get());
         context->SetStructuredBuffer(7, m_objectDataBuffer.get());
         context->SetStructuredBuffer(8, m_boneDataBuffer.get());
     };
+    const auto drawConnectedSkybox = [&](const glm::mat4& connectedView)
+    {
+        // The connected-space background must be written before remote objects.
+        // Without this stencil-clipped draw, pixels with no remote geometry
+        // retain the already-rendered local scene and make the portal look like
+        // a translucent overlay instead of a spatial opening.
+        if (!skybox || !skybox->GetGraphicsTexture() ||
+            !m_portalSkyboxStencilReadPipeline)
+            return;
+        SkyboxCBData skyboxData{};
+        const glm::mat4 directionOnlyView =
+            glm::mat4(glm::mat3(connectedView));
+        skyboxData.invVP = glm::inverse(proj * directionOnlyView);
+        skyboxData.displayParams = {
+            m_editorMode2D ? 1.f : 0.f,
+            std::exp2(settings.hdriExposure),
+            glm::radians(settings.hdriRotation), 0.f };
+        memcpy(m_skyboxCBMapped, &skyboxData, sizeof(skyboxData));
+        context->SetPipeline(m_portalSkyboxStencilReadPipeline.get());
+        context->SetConstantBuffer(0, m_skyboxConstantBuffer.get(), 0);
+        context->SetTexture(0, skybox->GetGraphicsTexture());
+        context->DrawInstanced(3, 1, 0, 0);
+    };
 
-#if defined(_WIN32)
+    struct PortalViewJob
+    {
+        const PortalStencilPass* portal = nullptr;
+        glm::mat4 apertureView { 1.f };
+        glm::mat4 mappedView { 1.f };
+        glm::vec3 mappedCameraPosition { 0.f };
+        uint32_t depth = 0;
+        uint32_t rootStencilBase = 1;
+    };
+    std::vector<PortalViewJob> portalViewJobs;
+    const uint32_t portalDepthLimit = static_cast<uint32_t>(
+        Engine::Rendering::Portal::ClampRecursionDepth(
+            settings.portalRecursionDepth));
+    const size_t portalViewBudget = static_cast<size_t>(
+        Engine::Rendering::Portal::ClampViewBudget(
+            settings.portalMaxViewsPerFrame));
+
+    const auto apertureVisibleInView = [&](const PortalStencilPass& pass,
+        const glm::mat4& candidateView)
+    {
+        const std::vector<glm::vec3> points =
+            pass.source->GetWorldPortalShapePoints();
+        if (points.size() < 3)
+            return false;
+        glm::vec2 minimum(std::numeric_limits<float>::max());
+        glm::vec2 maximum(std::numeric_limits<float>::lowest());
+        bool hasPointInFront = false;
+        for (const glm::vec3& point : points)
+        {
+            const glm::vec4 clip = proj * candidateView * glm::vec4(point, 1.f);
+            if (clip.w <= 1e-5f)
+                continue;
+            hasPointInFront = true;
+            const glm::vec2 ndc = glm::vec2(clip) / clip.w;
+            minimum = glm::min(minimum, ndc);
+            maximum = glm::max(maximum, ndc);
+        }
+        return hasPointInFront && maximum.x >= -1.f && minimum.x <= 1.f &&
+            maximum.y >= -1.f && minimum.y <= 1.f;
+    };
+
+    using PortalEdge = std::pair<
+        const Engine::Components::SpatialManipulator*,
+        const Engine::Components::SpatialManipulator*>;
+    std::vector<PortalEdge> portalPath;
+    uint32_t nextRootStencilBase = 1u;
+    std::function<void(const glm::mat4&, uint32_t, uint32_t)>
+        schedulePortalViews;
+    schedulePortalViews = [&](const glm::mat4& apertureView, uint32_t depth,
+                              uint32_t inheritedRootStencilBase)
+    {
+        if (depth >= portalDepthLimit || portalViewJobs.size() >= portalViewBudget)
+            return;
+        const glm::mat4 cameraWorldForView = glm::inverse(apertureView);
+        const glm::vec3 viewCameraPosition(cameraWorldForView[3]);
+        const glm::vec3 viewForward = glm::normalize(
+            glm::vec3(cameraWorldForView[2]));
+        const glm::vec3 viewUp = glm::normalize(glm::vec3(cameraWorldForView[1]));
+        for (const PortalStencilPass& pass : portalPasses)
+        {
+            if (portalViewJobs.size() >= portalViewBudget)
+                break;
+            if (pass.apertureVertexCount < 3 ||
+                !apertureVisibleInView(pass, apertureView))
+                continue;
+            const PortalEdge edge { pass.source, pass.target };
+            if (std::find(portalPath.begin(), portalPath.end(), edge) !=
+                portalPath.end())
+                continue;
+
+            uint32_t rootStencilBase = inheritedRootStencilBase;
+            if (depth == 0u)
+            {
+                if (nextRootStencilBase + portalDepthLimit - 1u > 0xFFu)
+                    break;
+                rootStencilBase = nextRootStencilBase;
+                nextRootStencilBase += portalDepthLimit;
+            }
+
+            const glm::vec3 mappedCamera =
+                pass.source->MapWorldPointThroughPortalShape(
+                    viewCameraPosition, *pass.target);
+            const glm::vec3 mappedLookAt =
+                pass.source->MapWorldPointThroughPortalShape(
+                    viewCameraPosition + viewForward, *pass.target);
+            const glm::vec3 mappedUpPoint =
+                pass.source->MapWorldPointThroughPortalShape(
+                    viewCameraPosition + viewUp, *pass.target);
+            const glm::vec3 mappedForward = glm::normalize(
+                mappedLookAt - mappedCamera);
+            glm::vec3 mappedUp = mappedUpPoint - mappedCamera;
+            mappedUp = glm::dot(mappedUp, mappedUp) <= 1e-6f
+                ? glm::vec3(0.f, 1.f, 0.f)
+                : glm::normalize(mappedUp);
+
+            PortalViewJob job{};
+            job.portal = &pass;
+            job.apertureView = apertureView;
+            job.mappedCameraPosition = mappedCamera;
+            job.mappedView = glm::lookAtLH(mappedCamera,
+                mappedCamera + mappedForward, mappedUp);
+            job.depth = depth;
+            job.rootStencilBase = rootStencilBase;
+            portalViewJobs.push_back(job);
+
+            portalPath.push_back(edge);
+            schedulePortalViews(
+                job.mappedView, depth + 1u, rootStencilBase);
+            portalPath.pop_back();
+        }
+    };
+    schedulePortalViews(view, 0u, 0u);
+
+// Retained only as a diagnostic fallback for older drivers. Normal builds use
+// the unified graphics-pipeline path below for DX11, DX12, and Vulkan.
+#if defined(_WIN32) && defined(ENGINE_USE_LEGACY_DX11_PORTAL_PATH)
     // Render linked-space view through portal aperture with a stencil mask.
     if (dynamic_cast<Engine::Renderers::D3D11GraphicsProvider*>(m_graphicsProvider))
     {
@@ -1574,7 +1898,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             static_cast<ID3D11DeviceContext*>(context->GetNativeHandle());
         if (dx11Context)
         {
-            if (!portalPasses.empty())
+            if (!portalViewJobs.empty())
             {
                 ID3D11Device* dx11Device = nullptr;
                 dx11Context->GetDevice(&dx11Device);
@@ -1582,6 +1906,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 {
                     static Microsoft::WRL::ComPtr<ID3D11DepthStencilState>
                         stencilWriteState;
+                    static Microsoft::WRL::ComPtr<ID3D11DepthStencilState>
+                        stencilIncrementState;
                     static Microsoft::WRL::ComPtr<ID3D11DepthStencilState>
                         stencilReadState;
                     static Microsoft::WRL::ComPtr<ID3D11BlendState>
@@ -1621,6 +1947,23 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                         dx11Device->CreateDepthStencilState(
                             &descriptor, &stencilReadState);
                     }
+                    if (!stencilIncrementState)
+                    {
+                        D3D11_DEPTH_STENCIL_DESC descriptor{};
+                        descriptor.DepthEnable = TRUE;
+                        descriptor.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+                        descriptor.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
+                        descriptor.StencilEnable = TRUE;
+                        descriptor.StencilReadMask = 0xFF;
+                        descriptor.StencilWriteMask = 0xFF;
+                        descriptor.FrontFace.StencilFunc = D3D11_COMPARISON_EQUAL;
+                        descriptor.FrontFace.StencilPassOp = D3D11_STENCIL_OP_INCR_SAT;
+                        descriptor.FrontFace.StencilFailOp = D3D11_STENCIL_OP_KEEP;
+                        descriptor.FrontFace.StencilDepthFailOp = D3D11_STENCIL_OP_KEEP;
+                        descriptor.BackFace = descriptor.FrontFace;
+                        dx11Device->CreateDepthStencilState(
+                            &descriptor, &stencilIncrementState);
+                    }
                     if (!colorMaskOffState)
                     {
                         D3D11_BLEND_DESC descriptor{};
@@ -1631,23 +1974,23 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     }
                     dx11Device->Release();
 
-                    if (stencilWriteState && stencilReadState && colorMaskOffState)
+                    if (stencilWriteState && stencilIncrementState &&
+                        stencilReadState && colorMaskOffState)
                     {
                         const float blendFactor[4]{};
-                        const size_t portalCount = std::min<size_t>(
-                            portalPasses.size(), 255u);
-
-                        for (size_t portalIndex = 0;
-                            portalIndex < portalCount; ++portalIndex)
+                        for (const PortalViewJob& portalJob : portalViewJobs)
                         {
-                        const PortalStencilPass& portalPass =
-                            portalPasses[portalIndex];
+                        const PortalStencilPass& portalPass = *portalJob.portal;
                         if (portalPass.apertureVertexCount < 3)
                             continue;
-                        const UINT portalStencilRef =
-                            static_cast<UINT>(portalIndex + 1u);
+                        const auto stencilStep = Engine::Rendering::Portal::
+                            StencilForDepth(
+                                Engine::Rendering::Portal::Backend::DirectX11,
+                                portalJob.depth, portalJob.rootStencilBase);
+                        const UINT portalStencilRef = stencilStep.sceneReadReference;
 
-                        uploadPortalApertureData(portalPass);
+                        uploadPortalApertureData(portalPass,
+                            portalJob.apertureView);
                         context->SetPipeline(m_objectDoubleSidedPipeline.get());
                         context->SetConstantBuffer(
                             0, m_objectConstantBuffer.get(),
@@ -1659,7 +2002,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                         dx11Context->OMSetBlendState(colorMaskOffState.Get(),
                             blendFactor, UINT_MAX);
                         dx11Context->OMSetDepthStencilState(
-                            stencilWriteState.Get(), portalStencilRef);
+                            stencilStep.writeOperation == Engine::Rendering::
+                                Portal::ApertureWriteOperation::Replace
+                                ? stencilWriteState.Get()
+                                : stencilIncrementState.Get(),
+                            stencilStep.writeReference);
                         context->DrawInstanced(
                             portalPass.apertureVertexCount, 1, 0, 0);
 
@@ -1671,14 +2018,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                                 continue;
 
                             ObjectGPUData mappedData = draw.objectData;
-                            mappedData.mvp = proj * portalPass.mappedView *
+                            mappedData.mvp = proj * portalJob.mappedView *
                                 mappedData.world;
                             mappedData.viewPositionAlphaCutoff.x =
-                                portalPass.mappedCameraPosition.x;
+                                portalJob.mappedCameraPosition.x;
                             mappedData.viewPositionAlphaCutoff.y =
-                                portalPass.mappedCameraPosition.y;
+                                portalJob.mappedCameraPosition.y;
                             mappedData.viewPositionAlphaCutoff.z =
-                                portalPass.mappedCameraPosition.z;
+                                portalJob.mappedCameraPosition.z;
                             if (includeEditorVisuals &&
                                 settings.portalDebugVisuals &&
                                 settings.portalDebugTintRemoteView)
@@ -1743,6 +2090,12 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 #endif
 
 #if defined(_WIN32) || defined(ENGINE_VULKAN_ENABLED)
+#if defined(_WIN32)
+    const bool isDx11Provider =
+        dynamic_cast<Engine::Renderers::D3D11GraphicsProvider*>(m_graphicsProvider) != nullptr;
+#else
+    const bool isDx11Provider = false;
+#endif
     const bool isDx12Provider =
         dynamic_cast<Engine::Renderers::D3D12GraphicsProvider*>(m_graphicsProvider) != nullptr;
 #if defined(ENGINE_VULKAN_ENABLED)
@@ -1752,11 +2105,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     const bool isVulkanProvider = false;
 #endif
 
-    if ((isDx12Provider
+    if ((isDx11Provider || isDx12Provider
 #if defined(ENGINE_VULKAN_ENABLED)
             || isVulkanProvider
 #endif
-        ) && m_objectPortalStencilWritePipeline)
+        ) && m_objectPortalStencilWritePipeline &&
+            m_objectPortalStencilIncrementPipeline &&
+            m_objectPortalDepthResetPipeline)
     {
         auto resolveStencilReadPipeline =
             [&](Engine::Graphics::IPipelineState* base)
@@ -1788,21 +2143,28 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             return base;
         };
 
-        if (!portalPasses.empty())
+        if (!portalViewJobs.empty())
         {
-            const size_t portalCount = std::min<size_t>(
-                portalPasses.size(), 255u);
-            for (size_t portalIndex = 0;
-                portalIndex < portalCount; ++portalIndex)
+            for (const PortalViewJob& portalJob : portalViewJobs)
             {
-            const PortalStencilPass& portalPass = portalPasses[portalIndex];
+            const PortalStencilPass& portalPass = *portalJob.portal;
             if (portalPass.apertureVertexCount < 3)
                 continue;
-            context->SetStencilReference(
-                static_cast<uint32_t>(portalIndex + 1u));
+            const auto portalBackend = isDx11Provider
+                ? Engine::Rendering::Portal::Backend::DirectX11
+                : (isDx12Provider
+                    ? Engine::Rendering::Portal::Backend::DirectX12
+                    : Engine::Rendering::Portal::Backend::Vulkan);
+            const auto stencilStep = Engine::Rendering::Portal::
+                StencilForDepth(portalBackend, portalJob.depth,
+                    portalJob.rootStencilBase);
+            context->SetStencilReference(stencilStep.writeReference);
 
-            uploadPortalApertureData(portalPass);
-            context->SetPipeline(m_objectPortalStencilWritePipeline.get());
+            uploadPortalApertureData(portalPass, portalJob.apertureView);
+            context->SetPipeline(stencilStep.writeOperation ==
+                Engine::Rendering::Portal::ApertureWriteOperation::Replace
+                ? m_objectPortalStencilWritePipeline.get()
+                : m_objectPortalStencilIncrementPipeline.get());
             context->SetConstantBuffer(
                 0, m_objectConstantBuffer.get(),
                 portalPass.apertureConstantBufferOffset);
@@ -1811,6 +2173,20 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 sizeof(Engine::Model::Vertex),
                 portalPass.apertureVertexOffset);
             context->DrawInstanced(portalPass.apertureVertexCount, 1, 0, 0);
+            context->SetStencilReference(stencilStep.sceneReadReference);
+
+            DrawCBData depthResetDrawData = portalPass.apertureDrawData;
+            depthResetDrawData.flags |= 0x80000000u;
+            memcpy(static_cast<uint8_t*>(m_objectCBMapped) +
+                portalPass.apertureConstantBufferOffset,
+                &depthResetDrawData, sizeof(depthResetDrawData));
+            context->SetPipeline(m_objectPortalDepthResetPipeline.get());
+            context->SetConstantBuffer(
+                0, m_objectConstantBuffer.get(),
+                portalPass.apertureConstantBufferOffset);
+            context->DrawInstanced(portalPass.apertureVertexCount, 1, 0, 0);
+
+            drawConnectedSkybox(portalJob.mappedView);
 
             for (PreparedDraw& draw : preparedDraws)
             {
@@ -1820,13 +2196,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     continue;
 
                 ObjectGPUData mappedData = draw.objectData;
-                mappedData.mvp = proj * portalPass.mappedView * mappedData.world;
+                mappedData.mvp = proj * portalJob.mappedView * mappedData.world;
                 mappedData.viewPositionAlphaCutoff.x =
-                    portalPass.mappedCameraPosition.x;
+                    portalJob.mappedCameraPosition.x;
                 mappedData.viewPositionAlphaCutoff.y =
-                    portalPass.mappedCameraPosition.y;
+                    portalJob.mappedCameraPosition.y;
                 mappedData.viewPositionAlphaCutoff.z =
-                    portalPass.mappedCameraPosition.z;
+                    portalJob.mappedCameraPosition.z;
                 if (includeEditorVisuals &&
                     settings.portalDebugVisuals &&
                     settings.portalDebugTintRemoteView)
@@ -1905,8 +2281,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             settings.portalDebugOverlayAlpha, 0.f, 1.f);
         Engine::Graphics::IPipelineState* portalDebugPipeline =
             settings.portalDebugWireframe
-                ? m_objectPreviewWireDoubleSidedPipeline.get()
-                : m_objectPreviewDoubleSidedPipeline.get();
+                ? m_objectSpatialDebugWirePipeline.get()
+                : m_objectSpatialDebugPipeline.get();
 
         if (portalDebugPipeline)
         {

@@ -185,7 +185,7 @@ private:
     glm::vec3 GetPortalShapePoint(int index) const;
     void SetPortalShapePoint(int index, const glm::vec3& value);
     std::vector<glm::vec3> GetPortalShapePoints() const;
-    glm::mat4 GetPortalWorldFrame(float& averageRadius) const;
+    glm::mat4 GetPortalWorldFrame() const;
     bool EnsurePointCountCompatibility(SpatialManipulator* target);
     RigidBody* ResolveTraversalTriggerBody() const;
     Mesh* ResolveMeshForObject(Engine::Core::Object* object) const;

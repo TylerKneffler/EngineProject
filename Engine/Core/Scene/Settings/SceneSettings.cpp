@@ -84,6 +84,10 @@ Engine::Serialization::JsonValue SerializeSceneSettings(const Engine::Model::Sce
         Engine::Serialization::JsonValue(settings.portalDebugTintRemoteView));
     value.Set("portalDebugOverlayAlpha",
         Engine::Serialization::JsonValue(settings.portalDebugOverlayAlpha));
+    value.Set("portalRecursionDepth",
+        Engine::Serialization::JsonValue(settings.portalRecursionDepth));
+    value.Set("portalMaxViewsPerFrame",
+        Engine::Serialization::JsonValue(settings.portalMaxViewsPerFrame));
     return value;
 }
 
@@ -146,5 +150,11 @@ void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engi
     if (const auto* portalDebugOverlayAlpha = FindField(value, "portalDebugOverlayAlpha"))
         settings.portalDebugOverlayAlpha = std::clamp(
             portalDebugOverlayAlpha->AsFloat(), 0.f, 1.f);
+    if (const auto* portalRecursionDepth = FindField(value, "portalRecursionDepth"))
+        settings.portalRecursionDepth = std::clamp(
+            portalRecursionDepth->AsInt(), 1, 8);
+    if (const auto* portalMaxViews = FindField(value, "portalMaxViewsPerFrame"))
+        settings.portalMaxViewsPerFrame = std::clamp(
+            portalMaxViews->AsInt(), 1, 64);
 }
 }

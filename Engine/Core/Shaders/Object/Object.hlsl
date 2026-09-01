@@ -110,6 +110,11 @@ void VSMain(
             localTangent = normalize(mul((float3x3)skin, localTangent));
     }
     oPos = mul(objectData.mvp, localPosition);
+    // Portal depth reset draws reuse the procedural aperture geometry but
+    // place it at the far plane, clearing local-scene depth only inside the
+    // aperture's stencil mask before the connected view is rendered.
+    if ((draw.drawFlags & 0x80000000u) != 0u)
+        oPos.z = oPos.w;
     oWorldPos = mul(objectData.world, localPosition).xyz;
     oNormal = normalize(mul((float3x3)objectData.world, localNormal));
     oUv = objectData.spriteUvRect.xy + uv * objectData.spriteUvRect.zw;
