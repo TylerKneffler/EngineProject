@@ -57,6 +57,37 @@ public:
     using ObjectPath = std::vector<std::size_t>;
     enum class ObjectPlacement { Before, AsChild, After };
 
+    // Every subsystem asks for spatial coordinates through this contract.
+    // Physics bodies still store their stable Euclidean simulation chart;
+    // Physics and raycast callers use this mapping when presenting/querying
+    // nonlinear spaces rather than silently using the render-only transform.
+    enum class SpatialQueryDomain : uint8_t
+    {
+        Rendering,
+        Physics,
+        Raycast,
+        Audio,
+        Camera,
+        Gameplay
+    };
+    struct SpatialQuery
+    {
+        SpatialQueryDomain domain = SpatialQueryDomain::Gameplay;
+        const Object* excludedOwner = nullptr;
+        bool includeWarpVolumes = true;
+    };
+    struct SpatialQuerySample
+    {
+        glm::vec3 point { 0.f };
+        glm::mat3 jacobian { 1.f };
+        bool affectedByWarpVolume = false;
+    };
+    struct SpatialRay
+    {
+        glm::vec3 origin { 0.f };
+        glm::vec3 direction { 0.f, 0.f, 1.f };
+    };
+
     Scene();
     ~Scene();
 
@@ -86,7 +117,8 @@ public:
     // and skin data.
     void PrepareRenderFrame();
     void Render(IGraphicsContext* context, float aspect,
-        Camera* cameraOverride = nullptr, bool includeEditorVisuals = true);
+        Camera* cameraOverride = nullptr, bool includeEditorVisuals = true,
+        uint32_t viewportWidth = 0u, uint32_t viewportHeight = 0u);
     void SetSelectedObject(Object* obj) { m_selectedObject = obj; }
     Object* GetSelectedObject() const { return m_selectedObject; }
     void SetPreviewObject(Object* obj) { m_previewObject = obj; }
@@ -102,9 +134,19 @@ public:
     // render from the Scene view's navigation camera.
     Camera* FindGameCamera();
 
-    // Maps the ordinary Euclidean scene chart through every active spatial
-    // volume. Matrices use the local Jacobian at their origin so position,
-    // orientation, and scale stay coherent for nonlinear warps.
+    // Maps the ordinary Euclidean scene chart through active spatial volumes.
+    // The sample Jacobian carries nonlinear orientation/scale to consumers.
+    SpatialQuerySample SampleSpatialPoint(const glm::vec3& worldPoint,
+        const SpatialQuery& query = {}) const;
+    glm::vec3 MapSpatialPoint(const glm::vec3& worldPoint,
+        const SpatialQuery& query = {}) const;
+    glm::mat4 MapSpatialMatrix(const glm::mat4& worldMatrix,
+        const SpatialQuery& query = {}) const;
+    SpatialRay MapSpatialRay(const SpatialRay& ray,
+        const SpatialQuery& query = {}) const;
+
+    // Compatibility names for existing gameplay code. New code should state
+    // its spatial intent with MapSpatialPoint/MapSpatialMatrix.
     glm::vec3 WarpWorldPoint(const glm::vec3& worldPoint,
         const Object* excludedOwner = nullptr) const;
     glm::mat4 WarpWorldMatrix(const glm::mat4& worldMatrix,

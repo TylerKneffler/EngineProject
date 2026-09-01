@@ -127,8 +127,20 @@ bool Engine::Components::RigidBody::EnsureBody()
         return false;
     }
     const glm::vec3 scale = Engine::Physics::WorldScale(*Owner);
-    const Engine::Components::Mesh* ownerMesh =
-        Owner->GetComponent<Engine::Components::Mesh>();
+    bool usesOwnerMeshCollider = false;
+    for (Engine::Core::Component* component : Owner->Components)
+    {
+        const auto* meshCollider = dynamic_cast<
+            const Engine::Components::MeshObjectCollider*>(component);
+        if (meshCollider && !meshCollider->meshReference.IsAssigned() &&
+            meshCollider->meshPath.empty())
+        {
+            usesOwnerMeshCollider = true;
+            break;
+        }
+    }
+    const Engine::Components::Mesh* ownerMesh = usesOwnerMeshCollider
+        ? Owner->GetComponent<Engine::Components::Mesh>() : nullptr;
     bool configurationMatches = m_impl->body &&
         m_impl->configurationRevision == GetConfigurationRevision() &&
         Engine::Physics::SameVector(m_impl->worldScale, scale) &&
@@ -155,6 +167,18 @@ bool Engine::Components::RigidBody::EnsureBody()
         colliderIndex == m_impl->colliders.size();
     if (configurationMatches)
         return true;
+
+    // Runtime mesh cuts and collider edits rebuild the Bullet body. Preserve
+    // its live kinematics rather than restoring authoring-time initial values;
+    // otherwise a portal traversal can correctly remap velocity and then have
+    // that remap overwritten on the following physics step.
+    const bool preserveKinematics = m_impl->body != nullptr;
+    const glm::vec3 preservedLinearVelocity = preserveKinematics
+        ? Engine::Physics::ToGlm(m_impl->body->getLinearVelocity())
+        : glm::vec3(0.f);
+    const glm::vec3 preservedAngularVelocity = preserveKinematics
+        ? Engine::Physics::ToGlm(m_impl->body->getAngularVelocity())
+        : glm::vec3(0.f);
     DestroyBody();
 
     m_impl->scene = Owner->GetScene();
@@ -278,8 +302,10 @@ bool Engine::Components::RigidBody::EnsureBody()
         m_impl->body->setCollisionFlags(m_impl->body->getCollisionFlags() |
             btCollisionObject::CF_NO_CONTACT_RESPONSE);
     ApplyBodySettings();
-    m_impl->body->setLinearVelocity(Engine::Physics::ToBullet(initialLinearVelocity));
-    m_impl->body->setAngularVelocity(Engine::Physics::ToBullet(initialAngularVelocity));
+    m_impl->body->setLinearVelocity(Engine::Physics::ToBullet(
+        preserveKinematics ? preservedLinearVelocity : initialLinearVelocity));
+    m_impl->body->setAngularVelocity(Engine::Physics::ToBullet(
+        preserveKinematics ? preservedAngularVelocity : initialAngularVelocity));
     Engine::Physics::StateFor(m_impl->scene).world->addRigidBody(m_impl->body.get(),
         static_cast<short>(collisionLayer), static_cast<short>(collisionMask));
     m_impl->configurationRevision = GetConfigurationRevision();

@@ -60,6 +60,16 @@
 - [x] HIGH: Support rendering for multiple active portals per frame with deterministic ordering and correct stencil isolation.
 - [x] HIGH: Add recursive portal view support with configurable recursion depth, guardrails for performance, and cycle protection.
 - [x] HIGH: Extend non-DX11 parity checks to confirm portal aperture behavior is equivalent across DX11, DX12, and Vulkan paths.
+- [x] CRITICAL: Move portal crossing evaluation into a post-physics traversal phase and use swept body motion/CCD so high-speed bodies cannot enter and leave an aperture between samples.
+- [x] CRITICAL: Require a swept body contact to lie inside the source aperture polygon before slicing or teleporting; do not treat the broad trigger collider as the portal opening.
+- [x] HIGH: Establish one canonical, validated portal aperture frame for rendering, clipping, traversal, and transforms; reject or repair non-planar, concave, self-intersecting, duplicate, or inconsistently wound shape points.
+- [x] HIGH: Synchronize portal mesh cuts with physics collision geometry (including restoration), and define collision/raycast behavior for an object split between connected spaces.
+- [x] HIGH: Add target-plane clipping (preferably oblique near-plane projection) and aperture scissoring to portal views so remote geometry cannot leak through the wrong side and small portals do not render the entire scene.
+- [x] HIGH: Define a unified spatial-query contract for rendering, physics, raycasts, audio, cameras, and gameplay; warp volumes must not remain render-only affine approximations.
+- [x] HIGH: Replace the policy-only backend parity check with automated DX11/DX12/Vulkan aperture render validation, including depth, stencil isolation, recursive views, and occlusion.
+- [ ] MEDIUM: Define matrix-overlay ownership and scope so a connection maps an explicit spatial region/layer and its intended contents, rather than only mutating the two manipulator-owner transforms.
+- [ ] MEDIUM: Define deterministic composition/priority rules for overlapping warp volumes and simultaneous portal-trigger ownership of the same traversing body.
+- [ ] TESTING: Add regression coverage for off-aperture crossings, asymmetric/off-center apertures, invalid polygon input, high-speed crossings, split-mesh collision/raycast behavior, and oblique portal-plane clipping.
 - [ ] MEDIUM: Correct world-layer point transforms to apply full world matrix composition (rotation/scale-safe), not position-offset approximations.
 - [ ] MEDIUM: Revisit portal mesh deformation to behave correctly for bidirectional traversal and asymmetric portal geometry.
 - [ ] TESTING: Add unit/integration tests for bidirectional crossing semantics, rotated/opposed portal normals, and parity/orientation correctness.

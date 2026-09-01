@@ -53,9 +53,18 @@ int main()
     targetPortal.portalShapePoint3 = glm::vec3(-1.f, 1.f, 0.f);
 
     assert(sourcePortal.HasCompatiblePortalShapeWith(targetPortal));
+    assert(sourcePortal.IsValidPortalAperture());
+    assert(sourcePortal.IsWorldPointInsidePortalAperture(
+        glm::vec3(0.f, 0.f, 0.f)));
+    assert(!sourcePortal.IsWorldPointInsidePortalAperture(
+        glm::vec3(0.75f, 0.f, 0.f)));
     const glm::vec3 mapped = sourcePortal.MapWorldPointThroughPortalShape(
         glm::vec3(0.25f, 0.25f, 0.f), targetPortal);
     assert(glm::length(mapped - glm::vec3(-0.25f, 0.25f, 0.f)) < 0.05f);
+
+    sourcePortal.portalShapePoint2 = glm::vec3(-0.25f, 0.f, 0.f);
+    assert(!sourcePortal.IsValidPortalAperture());
+    sourcePortal.portalShapePoint2 = glm::vec3(0.5f, 0.5f, 0.f);
 
     targetPortal.portalPointCount = 3;
     assert(!sourcePortal.HasCompatiblePortalShapeWith(targetPortal));
@@ -197,8 +206,22 @@ int main()
         outsideVolume->transform.GetWorldMatrixWithLayer()[3]);
     assert(glm::length(warpedOutside - outsideVolume->transform.position) < 0.0002f);
 
-    const glm::vec3 mappedByScene = scene.WarpWorldPoint(glm::vec3(1.f, 2.f, 0.f));
+    const glm::vec3 mappedByScene = scene.MapSpatialPoint(glm::vec3(1.f, 2.f, 0.f),
+        { Engine::Scene::Scene::SpatialQueryDomain::Gameplay });
     assert(glm::length(mappedByScene - warpedInside) < 0.0002f);
+
+    // Rendering, camera, audio, physics, raycast, and gameplay now consume
+    // one nonlinear spatial-query contract rather than separate affine paths.
+    const auto spatialSample = scene.SampleSpatialPoint(glm::vec3(1.f, 2.f, 0.f),
+        { Engine::Scene::Scene::SpatialQueryDomain::Physics });
+    assert(spatialSample.affectedByWarpVolume);
+    assert(glm::length(spatialSample.point - mappedByScene) < 0.0002f);
+    assert(glm::length(spatialSample.jacobian[0]) > 0.5f);
+    const Engine::Scene::Scene::SpatialRay mappedRay = scene.MapSpatialRay(
+        { glm::vec3(1.f, 2.f, 0.f), glm::vec3(1.f, 0.f, 0.f) },
+        { Engine::Scene::Scene::SpatialQueryDomain::Raycast });
+    assert(glm::length(mappedRay.origin - mappedByScene) < 0.0002f);
+    assert(glm::length(mappedRay.direction) > 0.999f);
 
     volume->formulaX = "sqrt(-1)";
     assert(glm::length(scene.WarpWorldPoint(glm::vec3(1.f, 2.f, 0.f)) -

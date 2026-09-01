@@ -562,6 +562,8 @@ if(NOT ENGINE_PROJECT_DIR AND
     target_include_directories(PortalBackendParityTests PRIVATE
         "${ENGINE_ROOT}/Engine")
     add_test(NAME PortalBackendApertureParity COMMAND PortalBackendParityTests)
+    set_tests_properties(PortalBackendApertureParity PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND

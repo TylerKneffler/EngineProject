@@ -291,14 +291,103 @@ std::vector<glm::vec3> SpatialManipulator::GetWorldPortalShapePoints() const
 bool SpatialManipulator::HasCompatiblePortalShapeWith(const SpatialManipulator& target) const
 {
     return GetClampedPortalPointCount() == target.GetClampedPortalPointCount() &&
-        GetClampedPortalPointCount() >= 3;
+        IsValidPortalAperture() && target.IsValidPortalAperture();
+}
+
+bool SpatialManipulator::IsValidPortalAperture(float tolerance) const
+{
+    const std::vector<glm::vec3> points = GetWorldPortalShapePoints();
+    if (points.size() < 3)
+        return false;
+
+    glm::vec3 tangent(1.f, 0.f, 0.f);
+    glm::vec3 bitangent(0.f, 1.f, 0.f);
+    glm::vec3 normal(0.f, 0.f, 1.f);
+    BuildBasis(portalNormal, tangent, bitangent, normal);
+    glm::mat4 ownerWorld(1.f);
+    if (Owner)
+        ownerWorld = Owner->transform.GetWorldMatrix();
+    const glm::mat3 ownerLinear(ownerWorld);
+    normal = SafeNormalize(glm::transpose(glm::inverse(ownerLinear)) * normal,
+        glm::vec3(0.f, 0.f, 1.f));
+    tangent = ownerLinear * tangent;
+    tangent -= normal * glm::dot(tangent, normal);
+    tangent = SafeNormalize(tangent, glm::vec3(1.f, 0.f, 0.f));
+    bitangent = SafeNormalize(glm::cross(normal, tangent), glm::vec3(0.f, 1.f, 0.f));
+
+    const glm::vec3 anchor = Owner
+        ? glm::vec3(ownerWorld * glm::vec4(portalPoint, 1.f))
+        : portalPoint;
+    const float epsilon = std::max(1e-6f, tolerance);
+    std::vector<glm::vec2> projected;
+    projected.reserve(points.size());
+    for (const glm::vec3& point : points)
+    {
+        const glm::vec3 relative = point - anchor;
+        if (std::abs(glm::dot(relative, normal)) > epsilon)
+            return false;
+        projected.emplace_back(glm::dot(relative, tangent),
+            glm::dot(relative, bitangent));
+    }
+
+    float winding = 0.f;
+    for (size_t index = 0; index < projected.size(); ++index)
+    {
+        const glm::vec2& a = projected[index];
+        const glm::vec2& b = projected[(index + 1u) % projected.size()];
+        const glm::vec2& c = projected[(index + 2u) % projected.size()];
+        const glm::vec2 edge = b - a;
+        if (glm::dot(edge, edge) <= epsilon * epsilon)
+            return false;
+        const float turn = edge.x * (c.y - b.y) - edge.y * (c.x - b.x);
+        if (std::abs(turn) <= epsilon)
+            return false;
+        if (winding == 0.f)
+            winding = turn;
+        else if (turn * winding <= 0.f)
+            return false;
+    }
+    return true;
+}
+
+bool SpatialManipulator::IsWorldPointInsidePortalAperture(
+    const glm::vec3& worldPoint, float margin) const
+{
+    if (!IsValidPortalAperture())
+        return false;
+
+    const glm::mat4 frame = GetPortalWorldFrame();
+    const glm::vec3 tangent(frame[0]);
+    const glm::vec3 bitangent(frame[1]);
+    const glm::vec3 normal(frame[2]);
+    const glm::vec3 anchor(frame[3]);
+    const glm::vec3 relative = worldPoint - anchor;
+    if (std::abs(glm::dot(relative, normal)) > std::max(0.0005f, margin))
+        return false;
+
+    const glm::vec2 point(glm::dot(relative, tangent),
+        glm::dot(relative, bitangent));
+    const std::vector<glm::vec3> worldPoints = GetWorldPortalShapePoints();
+    float winding = 0.f;
+    for (size_t index = 0; index < worldPoints.size(); ++index)
+    {
+        const glm::vec3 aWorld = worldPoints[index] - anchor;
+        const glm::vec3 bWorld = worldPoints[(index + 1u) % worldPoints.size()] - anchor;
+        const glm::vec2 a(glm::dot(aWorld, tangent), glm::dot(aWorld, bitangent));
+        const glm::vec2 b(glm::dot(bWorld, tangent), glm::dot(bWorld, bitangent));
+        const glm::vec2 edge = b - a;
+        const glm::vec2 offset = point - a;
+        const float cross = edge.x * offset.y - edge.y * offset.x;
+        if (index == 0u)
+            winding = cross >= 0.f ? 1.f : -1.f;
+        if (winding * cross < -std::max(0.f, margin) * glm::length(edge))
+            return false;
+    }
+    return true;
 }
 
 glm::mat4 SpatialManipulator::GetPortalWorldFrame() const
 {
-    const std::vector<glm::vec3> worldPoints = GetWorldPortalShapePoints();
-    const glm::vec3 center = ComputeCenter(worldPoints);
-
     glm::vec3 localTangent(1.f, 0.f, 0.f);
     glm::vec3 localBitangent(0.f, 1.f, 0.f);
     glm::vec3 localNormal(0.f, 0.f, 1.f);
@@ -329,7 +418,11 @@ glm::mat4 SpatialManipulator::GetPortalWorldFrame() const
     frame[0] = glm::vec4(tangent, 0.f);
     frame[1] = glm::vec4(bitangent, 0.f);
     frame[2] = glm::vec4(normal, 0.f);
-    frame[3] = glm::vec4(center, 1.f);
+    // The portal point is the single canonical anchor for the aperture,
+    // traversal plane, and source-to-target mapping. Shape vertices describe
+    // the opening around that anchor; their centroid must not silently move
+    // the physical crossing plane.
+    frame[3] = glm::vec4(glm::vec3(ownerWorld * glm::vec4(portalPoint, 1.f)), 1.f);
     return frame;
 }
 
@@ -440,7 +533,7 @@ void SpatialManipulator::ResetTraversalMeshDeformation(const RigidBody* traversi
     if (traversingBody->Owner && it->second.meshDeformed)
     {
         if (Mesh* mesh = ResolveMeshForObject(traversingBody->Owner))
-            if (it->second.baseVertices.size() == mesh->GetVertices().size())
+            if (!it->second.baseVertices.empty())
                 mesh->SetDeformedVertices(it->second.baseVertices);
     }
 
@@ -486,8 +579,7 @@ void SpatialManipulator::ApplyTraversalMeshDeformation(SpatialManipulator* targe
     }
 
     TraversalState& state = m_traversalStates[traversingBody];
-    if (state.lastMesh != mesh ||
-        state.baseVertices.size() != currentVertices.size())
+    if (state.lastMesh != mesh)
     {
         state.lastMesh = mesh;
         state.baseVertices = currentVertices;
@@ -510,64 +602,70 @@ void SpatialManipulator::ApplyTraversalMeshDeformation(SpatialManipulator* targe
         SafeNormalize(portalNormal, glm::vec3(0.f, 0.f, 1.f)),
         glm::vec3(0.f, 0.f, 1.f));
 
-    std::vector<Mesh::Vertex> deformed = state.baseVertices;
-    bool hasDeformation = false;
-    const float blendDistance = std::max(0.001f, traversalBlendDistance);
-    const float strength = std::max(0.f, deformationStrength);
-
-    for (size_t index = 0; index < deformed.size(); ++index)
-    {
-        const Mesh::Vertex& baseVertex = state.baseVertices[index];
-        const glm::vec3 localVertex(baseVertex.pos[0], baseVertex.pos[1], baseVertex.pos[2]);
-        const glm::vec3 worldVertex = glm::vec3(bodyWorld * glm::vec4(localVertex, 1.f));
-
-        const float signedDistance = glm::dot(worldVertex - sourceWorldPortalPoint,
-            sourceWorldPortalNormal);
-        if (signedDistance <= 0.f)
-            continue;
-
-        const float blend = Clamp01(signedDistance / blendDistance) * strength;
-        const glm::vec3 mappedWorld = MapWorldPointThroughPortalShape(worldVertex, *target);
-        const glm::vec3 blendedWorld = glm::mix(worldVertex, mappedWorld, blend);
-        const glm::vec3 blendedLocal = glm::vec3(bodyWorldInverse *
-            glm::vec4(blendedWorld, 1.f));
-
-        deformed[index].pos[0] = blendedLocal.x;
-        deformed[index].pos[1] = blendedLocal.y;
-        deformed[index].pos[2] = blendedLocal.z;
-        hasDeformation = true;
-    }
-
-    if (hasDeformation)
-    {
-        mesh->SetDeformedVertices(deformed);
-        state.meshDeformed = true;
-    }
-    else
+    const glm::mat3 bodyLinear(bodyWorld);
+    const glm::vec3 localPlanePoint = glm::vec3(bodyWorldInverse *
+        glm::vec4(sourceWorldPortalPoint, 1.f));
+    const glm::vec3 localPlaneNormal = SafeNormalize(
+        glm::transpose(bodyLinear) * sourceWorldPortalNormal,
+        glm::vec3(0.f, 0.f, 1.f));
+    auto [positiveHalf, negativeHalf] = Mesh::SliceByPlane(
+        state.baseVertices, localPlanePoint, localPlaneNormal);
+    if (positiveHalf.empty() || negativeHalf.empty())
     {
         ResetTraversalMeshDeformation(traversingBody);
+        return;
     }
+
+    const glm::mat4 portalTransform = GetPortalWorldTransformTo(*target);
+    const glm::mat3 portalRotation(portalTransform);
+    const glm::mat3 worldNormalMatrix = glm::transpose(glm::inverse(bodyLinear));
+    for (Mesh::Vertex& vertex : positiveHalf)
+    {
+        const glm::vec3 localPosition(vertex.pos[0], vertex.pos[1], vertex.pos[2]);
+        const glm::vec3 mappedWorld = glm::vec3(portalTransform *
+            bodyWorld * glm::vec4(localPosition, 1.f));
+        const glm::vec3 mappedLocal = glm::vec3(bodyWorldInverse *
+            glm::vec4(mappedWorld, 1.f));
+        vertex.pos[0] = mappedLocal.x;
+        vertex.pos[1] = mappedLocal.y;
+        vertex.pos[2] = mappedLocal.z;
+
+        const glm::vec3 localNormal(vertex.normal[0], vertex.normal[1],
+            vertex.normal[2]);
+        const glm::vec3 mappedWorldNormal = SafeNormalize(portalRotation *
+            (worldNormalMatrix * localNormal), glm::vec3(0.f, 0.f, 1.f));
+        const glm::vec3 mappedLocalNormal = SafeNormalize(
+            glm::transpose(bodyLinear) * mappedWorldNormal,
+            glm::vec3(0.f, 0.f, 1.f));
+        vertex.normal[0] = mappedLocalNormal.x;
+        vertex.normal[1] = mappedLocalNormal.y;
+        vertex.normal[2] = mappedLocalNormal.z;
+    }
+
+    negativeHalf.insert(negativeHalf.end(), positiveHalf.begin(),
+        positiveHalf.end());
+    if (mesh->SetDeformedVertices(negativeHalf))
+        state.meshDeformed = true;
 }
 
 void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target)
 {
-    if (!target)
+    if (!target || !Owner || !Owner->GetScene() ||
+        !HasCompatiblePortalShapeWith(*target))
     {
         ResetTraversalMeshDeformation();
         return;
     }
 
     RigidBody* triggerBody = ResolveTraversalTriggerBody();
-    if (!triggerBody)
-    {
-        ResetTraversalMeshDeformation();
-        return;
-    }
-
     std::unordered_set<const RigidBody*> activeBodies;
-    for (RigidBody* body : triggerBody->GetOverlappingBodies())
+    for (const auto& sceneObject : Owner->GetScene()->GetObjects())
     {
-        if (!body || !body->Owner || body->Owner == Owner)
+        if (!sceneObject)
+            continue;
+
+        RigidBody* body = sceneObject->GetComponent<RigidBody>();
+        if (!body || !body->Owner || body->Owner == Owner || body->isTrigger)
             continue;
 
         activeBodies.insert(body);
@@ -575,6 +673,14 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target)
         const glm::vec3 bodyWorldPosition = body->Owner->transform.GetWorldPosition();
         const float currentSignedDistance = ComputeSignedDistanceToPortalPlane(
             bodyWorldPosition);
+        const bool remainsInTrigger = triggerBody && triggerBody->IsOverlapping(body);
+        if (!state.hasPreviousWorldPosition)
+        {
+            state.previousWorldPosition = bodyWorldPosition;
+            state.hasPreviousWorldPosition = true;
+        }
+        const float previousSignedDistance = ComputeSignedDistanceToPortalPlane(
+            state.previousWorldPosition);
         // Crossing and re-arm thresholds intentionally differ. A body must
         // first establish a stable side, cross the plane, and then move well
         // clear before another traversal is possible. This suppresses contact
@@ -593,14 +699,17 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target)
                 state.phase = TraversalPhase::ArmedPositive;
             break;
         case TraversalPhase::ArmedNegative:
-            crossedPortalPlane = currentSignedDistance >= kCrossingDistance;
+            crossedPortalPlane = previousSignedDistance <= kCrossingDistance &&
+                currentSignedDistance >= kCrossingDistance;
             break;
         case TraversalPhase::ArmedPositive:
-            crossedPortalPlane = currentSignedDistance <= -kCrossingDistance;
+            crossedPortalPlane = previousSignedDistance >= -kCrossingDistance &&
+                currentSignedDistance <= -kCrossingDistance;
             break;
         case TraversalPhase::Cooldown:
-            if (state.waitForOverlapExit)
+            if (state.waitForOverlapExit && remainsInTrigger)
                 break;
+            state.waitForOverlapExit = false;
             if (currentSignedDistance <= -kRearmDistance)
                 state.phase = TraversalPhase::ArmedNegative;
             else if (currentSignedDistance >= kRearmDistance)
@@ -610,6 +719,20 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target)
 
         if (crossedPortalPlane)
         {
+            const float distanceDelta = currentSignedDistance - previousSignedDistance;
+            const float crossingT = std::abs(distanceDelta) > 1e-8f
+                ? Clamp01(-previousSignedDistance / distanceDelta) : 0.5f;
+            const glm::vec3 crossingPoint = glm::mix(
+                state.previousWorldPosition, bodyWorldPosition, crossingT);
+            // The trigger is merely a broad-phase optimization. The swept
+            // crossing must land in the actual logical aperture.
+            if (!IsWorldPointInsidePortalAperture(crossingPoint, 0.001f))
+                crossedPortalPlane = false;
+        }
+
+        if (crossedPortalPlane)
+        {
+            ResetTraversalMeshDeformation(body);
             const glm::mat4 portalTransform = GetPortalWorldTransformTo(*target);
             const glm::mat3 portalLinear(portalTransform);
             glm::mat3 portalRotation(1.f);
@@ -641,16 +764,32 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target)
             // sending it straight back during the same traversal sequence.
             state.phase = TraversalPhase::Cooldown;
             state.waitForOverlapExit = true;
+            state.previousWorldPosition = mappedPosition;
+            state.hasPreviousWorldPosition = true;
             TraversalState& targetState = target->m_traversalStates[body];
             targetState.phase = TraversalPhase::Cooldown;
             targetState.waitForOverlapExit = false;
+            targetState.previousWorldPosition = mappedPosition;
+            targetState.hasPreviousWorldPosition = true;
         }
 
-        if (currentSignedDistance > 0.f)
+        // A destination portal remains overlapped immediately after a
+        // teleport. Its cooldown state must never slice the same mesh again;
+        // otherwise the two endpoints repeatedly cut each other's generated
+        // vertices and the mesh grows without bound.
+        const glm::vec3 planePoint = bodyWorldPosition -
+            currentSignedDistance * glm::vec3(GetPortalWorldFrame()[2]);
+        const bool intersectsAperture = std::abs(currentSignedDistance) <= 1.f &&
+            IsWorldPointInsidePortalAperture(planePoint, 0.001f);
+        if (!crossedPortalPlane && intersectsAperture &&
+            (state.phase == TraversalPhase::ArmedNegative ||
+             state.phase == TraversalPhase::ArmedPositive))
             ApplyTraversalMeshDeformation(target, body);
-        else
+        else if (!intersectsAperture)
             ResetTraversalMeshDeformation(body);
 
+        if (!crossedPortalPlane)
+            state.previousWorldPosition = bodyWorldPosition;
     }
 
     for (auto it = m_traversalStates.begin(); it != m_traversalStates.end();)
@@ -888,7 +1027,6 @@ void SpatialManipulator::Update()
         case ConnectionMode::Portal:
         case ConnectionMode::LinkedPortal:
             ApplyPortalConnection(target);
-            UpdateTriggerTraversal(target);
             break;
         case ConnectionMode::None:
         default:
@@ -900,6 +1038,30 @@ void SpatialManipulator::Update()
     {
         ResetTraversalMeshDeformation();
     }
+}
+
+void SpatialManipulator::PostPhysicsUpdate()
+{
+    if (!enabled || definesWarpVolume)
+    {
+        ResetTraversalMeshDeformation();
+        return;
+    }
+
+    const auto mode = static_cast<ConnectionMode>(connectionMode);
+    if (mode != ConnectionMode::Portal && mode != ConnectionMode::LinkedPortal)
+    {
+        ResetTraversalMeshDeformation();
+        return;
+    }
+
+    SpatialManipulator* target = ResolveTarget();
+    if (!target || !target->enabled)
+    {
+        ResetTraversalMeshDeformation();
+        return;
+    }
+    UpdateTriggerTraversal(target);
 }
 
 bool SpatialManipulator::DrawProperties(::Engine::Editor::IEditorUi& ui)
@@ -991,11 +1153,7 @@ bool SpatialManipulator::DrawProperties(::Engine::Editor::IEditorUi& ui)
     }
 
     changed = ui.Checkbox("Auto Match Portal Point Count", &autoMatchPortalPointCount) || changed;
-    changed = ui.Checkbox("Deform Mesh On Traversal", &deformMeshOnTraversal) || changed;
-    changed = ui.DragFloat("Traversal Blend Distance", &traversalBlendDistance,
-        0.05f, 0.001f, 1000.f) || changed;
-    changed = ui.DragFloat("Deformation Strength", &deformationStrength,
-        0.05f, 0.f, 2.f) || changed;
+    changed = ui.Checkbox("Split Mesh While Crossing", &deformMeshOnTraversal) || changed;
 
     return changed;
 }

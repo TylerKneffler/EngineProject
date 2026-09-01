@@ -77,7 +77,8 @@ glm::mat4 Transform::GetWorldMatrixWithLayer() const
     if (matrixLayer.enabled)
         world = matrixLayer.localToLayer * world;
     if (Owner && Owner->GetScene())
-        world = Owner->GetScene()->WarpWorldMatrix(world, Owner);
+        world = Owner->GetScene()->MapSpatialMatrix(world,
+            { Engine::Scene::Scene::SpatialQueryDomain::Rendering, Owner });
     return world;
 }
 

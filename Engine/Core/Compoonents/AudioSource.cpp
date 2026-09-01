@@ -20,6 +20,22 @@ extern "C" {
 namespace Engine::Components
 {
 
+namespace
+{
+glm::mat4 SpatialAudioWorldMatrix(const Engine::Core::Object& object)
+{
+    glm::mat4 world = object.transform.GetWorldMatrix();
+    if (object.transform.matrixLayer.enabled)
+        world = object.transform.matrixLayer.localToLayer * world;
+    if (Engine::Scene::Scene* scene = object.GetScene())
+    {
+        world = scene->MapSpatialMatrix(world,
+            { Engine::Scene::Scene::SpatialQueryDomain::Audio, &object });
+    }
+    return world;
+}
+}
+
 #ifndef ENGINE_ASSETS_PATH
 #define ENGINE_ASSETS_PATH "Engine/Core/Assets/"
 #endif
@@ -253,7 +269,7 @@ void AudioSource::ApplySettings()
     if (Owner)
     {
         transformRevision = Owner->transform.GetWorldRevision();
-        const glm::mat4 world = Owner->transform.GetWorldMatrixWithLayer();
+        const glm::mat4 world = SpatialAudioWorldMatrix(*Owner);
         position = glm::vec3(world[3]);
         forward = SafeDirection(glm::vec3(world[2]), forward);
     }
@@ -282,7 +298,7 @@ void AudioSource::UpdateListener()
         ? nullptr : cameraObject->GetComponent<Camera>());
     if (!camera || !cameraObject) return;
 
-    const glm::mat4 world = cameraObject->transform.GetWorldMatrixWithLayer();
+    const glm::mat4 world = SpatialAudioWorldMatrix(*cameraObject);
     const glm::vec3 position(world[3]);
     glm::vec3 forward;
     glm::vec3 up;

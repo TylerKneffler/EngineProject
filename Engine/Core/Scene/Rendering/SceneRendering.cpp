@@ -24,6 +24,7 @@
 #include <filesystem>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <glm/glm.hpp>
 #include <glm/ext/matrix_transform.hpp>
 
@@ -218,6 +219,9 @@ struct ObjectGPUData
     glm::vec4 environmentSH[9]; // RGB radiance coefficients
     glm::vec4 reflectionEnvironmentParams; // exposure scale, rotation, custom enabled, reserved
     glm::vec4 reflectionEnvironmentSH[9];
+    // Enabled per portal draw through DrawCBData::flags; dot(world, plane)
+    // selects the connected half-space at the target aperture.
+    glm::vec4 portalClipPlane;
 };
 
 // Constant buffer for grid rendering
@@ -241,7 +245,7 @@ struct SkyboxCBData
 };
 
 static_assert(sizeof(DrawCBData) == 16, "Draw constants must remain small");
-static_assert(sizeof(ObjectGPUData) == 640, "Object buffer layout must match Object.hlsl");
+static_assert(sizeof(ObjectGPUData) == 656, "Object buffer layout must match Object.hlsl");
 static_assert(sizeof(Engine::Model::LightData) == 48,
     "Light buffer layout must match Object.hlsl");
 static_assert(sizeof(GridCBData) == 128, "Grid constant-buffer layout must match Grid.hlsl");
@@ -968,7 +972,8 @@ void Scene::PrepareRenderFrame()
 // ---------------------------------------------------------------------------
 
 void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
-    Engine::Components::Camera* cameraOverride, bool includeEditorVisuals)
+    Engine::Components::Camera* cameraOverride, bool includeEditorVisuals,
+    uint32_t viewportWidth, uint32_t viewportHeight)
 {
     if (!context)
     {
@@ -1816,6 +1821,51 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             maximum.y >= -1.f && minimum.y <= 1.f;
     };
 
+    const auto apertureScissorInView = [&](const PortalStencilPass& pass,
+        const glm::mat4& candidateView)
+        -> std::optional<Engine::Graphics::IGraphicsContext::ScissorRect>
+    {
+        // Stencil is the correctness boundary. This rectangle only avoids
+        // shading pixels which cannot belong to the aperture, so a partly
+        // near-clipped polygon deliberately falls back to the full viewport.
+        if (viewportWidth == 0u || viewportHeight == 0u)
+            return std::nullopt;
+        const std::vector<glm::vec3> points =
+            pass.source->GetWorldPortalShapePoints();
+        if (points.size() < 3u)
+            return std::nullopt;
+
+        glm::vec2 minimum(std::numeric_limits<float>::max());
+        glm::vec2 maximum(std::numeric_limits<float>::lowest());
+        for (const glm::vec3& point : points)
+        {
+            const glm::vec4 clip = proj * candidateView *
+                glm::vec4(point, 1.f);
+            if (clip.w <= 1e-5f)
+                return std::nullopt;
+            const glm::vec2 ndc = glm::vec2(clip) / clip.w;
+            minimum = glm::min(minimum, ndc);
+            maximum = glm::max(maximum, ndc);
+        }
+
+        const float width = static_cast<float>(viewportWidth);
+        const float height = static_cast<float>(viewportHeight);
+        const int32_t left = std::max(0, static_cast<int32_t>(std::floor(
+            (minimum.x * 0.5f + 0.5f) * width)) - 1);
+        const int32_t right = std::min(static_cast<int32_t>(viewportWidth),
+            static_cast<int32_t>(std::ceil((maximum.x * 0.5f + 0.5f) * width)) + 1);
+        // The graphics context normalizes Vulkan's inverted native viewport,
+        // so this top-left conversion is shared by DX11, DX12, and Vulkan.
+        const int32_t top = std::max(0, static_cast<int32_t>(std::floor(
+            (0.5f - maximum.y * 0.5f) * height)) - 1);
+        const int32_t bottom = std::min(static_cast<int32_t>(viewportHeight),
+            static_cast<int32_t>(std::ceil((0.5f - minimum.y * 0.5f) * height)) + 1);
+        if (left >= right || top >= bottom)
+            return Engine::Graphics::IGraphicsContext::ScissorRect { 0, 0, 0, 0 };
+        return Engine::Graphics::IGraphicsContext::ScissorRect {
+            left, top, right, bottom };
+    };
+
     using PortalEdge = std::pair<
         const Engine::Components::SpatialManipulator*,
         const Engine::Components::SpatialManipulator*>;
@@ -2150,6 +2200,22 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             const PortalStencilPass& portalPass = *portalJob.portal;
             if (portalPass.apertureVertexCount < 3)
                 continue;
+            const auto portalScissor = apertureScissorInView(portalPass,
+                portalJob.apertureView);
+            if (portalScissor)
+                context->SetScissorRect(*portalScissor);
+            const glm::mat4 targetPortalFrame =
+                portalPass.target->GetPortalWorldFrame();
+            glm::vec3 clipNormal = glm::normalize(
+                glm::vec3(targetPortalFrame[2]));
+            const glm::vec3 clipPoint(targetPortalFrame[3]);
+            if (glm::dot(portalJob.mappedCameraPosition - clipPoint,
+                clipNormal) < 0.f)
+            {
+                clipNormal = -clipNormal;
+            }
+            const glm::vec4 portalClipPlane(clipNormal,
+                -glm::dot(clipNormal, clipPoint) + 0.0005f);
             const auto portalBackend = isDx11Provider
                 ? Engine::Rendering::Portal::Backend::DirectX11
                 : (isDx12Provider
@@ -2197,6 +2263,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
                 ObjectGPUData mappedData = draw.objectData;
                 mappedData.mvp = proj * portalJob.mappedView * mappedData.world;
+                mappedData.portalClipPlane = portalClipPlane;
                 mappedData.viewPositionAlphaCutoff.x =
                     portalJob.mappedCameraPosition.x;
                 mappedData.viewPositionAlphaCutoff.y =
@@ -2252,7 +2319,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     draw.vertexStride, 0);
                 context->DrawInstanced(draw.vertexCount, 1, 0, 0);
             }
+
+            if (portalScissor)
+            {
+                context->SetScissorRect({ 0, 0,
+                    static_cast<int32_t>(viewportWidth),
+                    static_cast<int32_t>(viewportHeight) });
             }
+        }
         }
     }
 #endif

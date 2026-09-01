@@ -293,12 +293,38 @@ void Mesh::LoadFromFile(const std::string& path)
 
 bool Mesh::SetDeformedVertices(const std::vector<Vertex>& vertices)
 {
-    if (vertices.size() != m_vertices.size())
-        return false;
     const size_t byteSize = vertices.size() * sizeof(Vertex);
     if (byteSize == 0 ||
-        std::memcmp(vertices.data(), m_vertices.data(), byteSize) == 0)
+        (vertices.size() == m_vertices.size() &&
+         std::memcmp(vertices.data(), m_vertices.data(), byteSize) == 0))
         return false;
+
+    // A real portal cut adds intersection vertices, so the two clipped halves
+    // generally contain more vertices than the original mesh. Recreate the
+    // upload buffer when its size changes instead of rejecting the cut.
+    if (vertices.size() != m_vertices.size())
+    {
+        if (m_vertexBuffer)
+        {
+            if (!m_bufferFactory)
+                return false;
+            auto replacement = m_bufferFactory->CreateBuffer(
+                IGraphicsBuffer::Usage::VertexBuffer,
+                IGraphicsBuffer::AccessMode::Upload, byteSize, vertices.data());
+            if (!replacement)
+                return false;
+            m_vertexBuffer = std::move(replacement);
+        }
+        m_vertices = vertices;
+        UpdateBounds();
+        m_ready = true;
+        // Rigid bodies cache mesh-collider topology by component revision.
+        // Portal cuts may add intersection vertices, so physics must rebuild
+        // its collision/raycast representation before the next simulation step.
+        MarkConfigurationDirty();
+        return true;
+    }
+
     m_vertices = vertices;
     UpdateBounds();
     if (m_vertexBuffer)
@@ -309,6 +335,7 @@ bool Mesh::SetDeformedVertices(const std::vector<Vertex>& vertices)
             m_vertexBuffer->Unmap();
         }
     }
+    MarkConfigurationDirty();
     return true;
 }
 
@@ -544,6 +571,7 @@ void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory)
     if (!bufferFactory || m_vertices.empty())
         return;
 
+    m_bufferFactory = bufferFactory;
     const uint64_t byteSize = m_vertices.size() * sizeof(Vertex);
 
     // Create upload buffer through the graphics factory

@@ -51,6 +51,19 @@ void Scene::Update(float deltaTime)
         object->Update();
     m_audio->Update(deltaTime);
     m_physics->Step(deltaTime);
+    // Bullet has now published current-frame poses and overlap pairs. Portal
+    // traversal deliberately runs here rather than in Component::Update so a
+    // crossing is evaluated against the motion that just occurred.
+    for (const auto& object : m_objects)
+    {
+        if (!object || !object->IsEnabledInHierarchy())
+            continue;
+        if (auto* manipulator = object->GetComponent<
+            Engine::Components::SpatialManipulator>())
+        {
+            manipulator->PostPhysicsUpdate();
+        }
+    }
 }
 
 Engine::Core::Object* Scene::AddObject()

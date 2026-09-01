@@ -296,7 +296,8 @@ void SceneView::Render3D(void* cmd)
         auto* factory = m_scene->GetGraphicsProvider()->GetContextFactory();
         factory->SetCommandBuffer(cmd);
         auto ctx = factory->CreateContext();
-        m_scene->Render(ctx.get(), m_aspect);
+        m_scene->Render(ctx.get(), m_aspect, nullptr, true,
+            GetWidth(), GetHeight());
     }
 }
 }

@@ -24,12 +24,20 @@ Camera::Camera()
 glm::mat4 Camera::GetViewMatrix() const
 {
     assert(Owner && "Camera requires an owner Object with a Transform");
-    const glm::mat4 world = Owner->transform.GetWorldMatrixWithLayer();
+    glm::mat4 world = Owner->transform.GetWorldMatrix();
+    if (Owner->transform.matrixLayer.enabled)
+        world = Owner->transform.matrixLayer.localToLayer * world;
+    if (Owner->GetScene())
+    {
+        world = Owner->GetScene()->MapSpatialMatrix(world,
+            { Engine::Scene::Scene::SpatialQueryDomain::Camera, Owner });
+    }
     const glm::vec3 p = glm::vec3(world[3]);
     if (!useTransformRotation)
     {
         const glm::vec3 mappedTarget = Owner->GetScene()
-            ? Owner->GetScene()->WarpWorldPoint(target) : target;
+            ? Owner->GetScene()->MapSpatialPoint(target,
+                { Engine::Scene::Scene::SpatialQueryDomain::Camera }) : target;
         return glm::lookAtLH(p, mappedTarget, up);
     }
 

@@ -29,6 +29,7 @@ struct ObjectData
     float4 environmentSH[9];
     float4 reflectionEnvironmentParams;
     float4 reflectionEnvironmentSH[9];
+    float4 portalClipPlane;
 };
 
 struct SceneLightData
@@ -326,6 +327,12 @@ float4 PSMain(
 {
     ObjectData objectData = objects[draw.objectIndex];
     uint flags = (uint)objectData.materialParams.w;
+    // Portal views keep only the connected side of the target aperture. This
+    // avoids geometry from behind the destination plane appearing through a
+    // stencil-correct but spatially invalid portal view.
+    if (dot(objectData.portalClipPlane.xyz, objectData.portalClipPlane.xyz) > 0.0 &&
+        dot(float4(worldPos, 1.0), objectData.portalClipPlane) < 0.0)
+        clip(-1.0);
     float4 base = objectData.baseColor * vertexColor;
     float metallic = saturate(objectData.materialParams.x);
     float roughness = clamp(objectData.materialParams.y, 0.045, 1.0);

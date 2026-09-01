@@ -73,6 +73,7 @@ private:
     std::string m_filePath;
     std::vector<Vertex> m_vertices;
     std::unique_ptr<IGraphicsBuffer> m_vertexBuffer;
+    IGraphicsBufferFactory* m_bufferFactory = nullptr;
     bool m_ready = false;
     bool m_hasBounds = false;
     glm::vec3 m_boundsMin{};

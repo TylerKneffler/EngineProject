@@ -164,6 +164,12 @@ public:
     bool ContainsWorldPoint(const glm::vec3& worldPoint) const;
     glm::vec3 MapWorldPointThroughVolume(const glm::vec3& worldPoint) const;
     glm::mat4 GetPortalWorldTransformTo(const SpatialManipulator& target) const;
+    // The aperture is a simple, convex, consistently-wound planar polygon.
+    // Invalid input is never used for rendering or traversal.
+    bool IsValidPortalAperture(float tolerance = 0.0005f) const;
+    bool IsWorldPointInsidePortalAperture(const glm::vec3& worldPoint,
+        float margin = 0.f) const;
+    glm::mat4 GetPortalWorldFrame() const;
     bool HasCompatiblePortalShapeWith(const SpatialManipulator& target) const;
     std::vector<glm::vec3> GetWorldPortalShapePoints() const;
     glm::vec3 MapWorldPointThroughPortalShape(const glm::vec3& point,
@@ -177,6 +183,8 @@ public:
         const glm::vec3& localNormal,
         SpatialManipulator* other);
     void Update() override;
+    // Called by Scene after Bullet has advanced and published overlap data.
+    void PostPhysicsUpdate();
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
 
 private:
@@ -185,7 +193,6 @@ private:
     glm::vec3 GetPortalShapePoint(int index) const;
     void SetPortalShapePoint(int index, const glm::vec3& value);
     std::vector<glm::vec3> GetPortalShapePoints() const;
-    glm::mat4 GetPortalWorldFrame() const;
     bool EnsurePointCountCompatibility(SpatialManipulator* target);
     RigidBody* ResolveTraversalTriggerBody() const;
     Mesh* ResolveMeshForObject(Engine::Core::Object* object) const;
@@ -215,6 +222,8 @@ private:
         bool meshDeformed = false;
         Phase phase = Phase::Uninitialized;
         bool waitForOverlapExit = false;
+        glm::vec3 previousWorldPosition { 0.f };
+        bool hasPreviousWorldPosition = false;
     };
     std::unordered_map<const RigidBody*, TraversalState> m_traversalStates;
 };
