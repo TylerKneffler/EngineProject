@@ -27,6 +27,13 @@ glm::vec3 MapPoint(const Scene& scene, const glm::vec3& worldPoint,
     glm::vec3 mapped = worldPoint;
     if (!query.includeWarpVolumes)
         return mapped;
+
+    struct OrderedVolume
+    {
+        const Engine::Components::SpatialManipulator* manipulator = nullptr;
+        Scene::ObjectPath path;
+    };
+    std::vector<OrderedVolume> volumes;
     for (const auto& root : scene.GetObjects())
         VisitObjectTree(root.get(), [&](const Engine::Core::Object* object)
         {
@@ -38,12 +45,32 @@ glm::vec3 MapPoint(const Scene& scene, const glm::vec3& worldPoint,
             if (!manipulator || !manipulator->enabled ||
                 !manipulator->definesWarpVolume)
                 return;
+            Scene::ObjectPath path;
+            scene.TryGetObjectPath(object, path);
+            volumes.push_back({ manipulator, std::move(path) });
+        });
+    // Composition is explicit: lower priorities map first, higher priorities
+    // map last. Equal priorities use the persisted hierarchy path, so moving
+    // unrelated scene objects cannot silently change nonlinear results.
+    std::sort(volumes.begin(), volumes.end(),
+        [](const OrderedVolume& first, const OrderedVolume& second)
+        {
+            if (first.manipulator->warpPriority !=
+                second.manipulator->warpPriority)
+            {
+                return first.manipulator->warpPriority <
+                    second.manipulator->warpPriority;
+            }
+            return first.path < second.path;
+        });
+    for (const OrderedVolume& volume : volumes)
+    {
             const glm::vec3 before = mapped;
-            mapped = manipulator->MapWorldPointThroughVolume(mapped);
+            mapped = volume.manipulator->MapWorldPointThroughVolume(mapped);
             const glm::vec3 delta = mapped - before;
             affectedByWarpVolume = affectedByWarpVolume ||
                 glm::dot(delta, delta) > 1e-12f;
-        });
+    }
     return mapped;
 }
 }

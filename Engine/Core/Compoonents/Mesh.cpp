@@ -304,7 +304,7 @@ bool Mesh::SetDeformedVertices(const std::vector<Vertex>& vertices)
     // upload buffer when its size changes instead of rejecting the cut.
     if (vertices.size() != m_vertices.size())
     {
-        if (m_vertexBuffer)
+        if (m_vertexBuffer || m_bufferFactory)
         {
             if (!m_bufferFactory)
                 return false;
@@ -337,6 +337,12 @@ bool Mesh::SetDeformedVertices(const std::vector<Vertex>& vertices)
     }
     MarkConfigurationDirty();
     return true;
+}
+
+void Mesh::InitializeRuntimeCloneFrom(const Mesh& source)
+{
+    m_filePath = source.m_filePath;
+    m_bufferFactory = source.m_bufferFactory;
 }
 
 void Mesh::SetMorphData(unsigned nodeIndex, std::vector<MorphTarget> targets,

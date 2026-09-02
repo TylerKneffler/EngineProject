@@ -5,6 +5,7 @@
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Object.h"
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <cassert>
 
 int main()
@@ -22,6 +23,22 @@ int main()
 
     const glm::vec3 restored = transform.InverseApplyLocalMatrixLayer(warped);
     assert(glm::length(restored - glm::vec3(1.f, 2.f, 3.f)) < 0.0001f);
+
+    // World-layer point mapping must use the whole affine matrix. The old
+    // position-offset path happened to work for translation only but lost
+    // both rotation and scale.
+    transform.matrixLayer.localToLayer = glm::translate(glm::mat4(1.f),
+        glm::vec3(5.f, -3.f, 2.f)) * glm::rotate(glm::mat4(1.f),
+        glm::radians(90.f), glm::vec3(0.f, 0.f, 1.f)) * glm::scale(
+        glm::mat4(1.f), glm::vec3(2.f, 0.5f, 1.5f));
+    transform.matrixLayer.layerToLocal = glm::inverse(transform.matrixLayer.localToLayer);
+    const glm::vec3 worldPoint(3.f, -2.f, 4.f);
+    const glm::vec3 expectedWorldLayerPoint = glm::vec3(
+        transform.matrixLayer.localToLayer * glm::vec4(worldPoint, 1.f));
+    const glm::vec3 mappedWorldLayerPoint = transform.ApplyWorldMatrixLayer(worldPoint);
+    assert(glm::length(mappedWorldLayerPoint - expectedWorldLayerPoint) < 0.0001f);
+    assert(glm::length(transform.InverseApplyWorldMatrixLayer(mappedWorldLayerPoint) -
+        worldPoint) < 0.0001f);
 
     std::vector<Mesh::Vertex> vertices(6);
     for (size_t i = 0; i < 6; ++i)
@@ -74,6 +91,13 @@ int main()
     Engine::Core::Object* targetObject = scene.AddObject("WarpTarget");
     auto* source = sourceObject->AddComponent<SpatialManipulator>();
     auto* target = targetObject->AddComponent<SpatialManipulator>();
+    Engine::Core::Object* sourceContent = scene.AddObject("SourceOverlayContent");
+    Engine::Core::Object* targetContent = scene.AddObject("TargetOverlayContent");
+    Engine::Core::Object* unrelatedContent = scene.AddObject("UnrelatedContent");
+    assert(scene.MoveObject(sourceContent, sourceObject,
+        Engine::Scene::Scene::ObjectPlacement::AsChild));
+    assert(scene.MoveObject(targetContent, targetObject,
+        Engine::Scene::Scene::ObjectPlacement::AsChild));
 
     source->connectionMode = static_cast<int>(SpatialManipulator::ConnectionMode::MatrixOverlay);
     source->position = glm::vec3(2.f, 0.f, 0.f);
@@ -84,6 +108,15 @@ int main()
     source->Update();
     assert(sourceObject->transform.matrixLayer.enabled);
     assert(targetObject->transform.matrixLayer.enabled);
+    // A matrix link owns both declared hierarchies, not just the two carrier
+    // transforms. The unrelated object remains in the ordinary scene layer.
+    assert(sourceContent->transform.matrixLayer.enabled);
+    assert(targetContent->transform.matrixLayer.enabled);
+    assert(!unrelatedContent->transform.matrixLayer.enabled);
+    const glm::mat4 sourceScopeMatrix = target->GetOverlayMatrix() *
+        glm::inverse(source->GetOverlayMatrix());
+    assert(glm::length(glm::vec3(sourceContent->transform.matrixLayer.localToLayer[3]) -
+        glm::vec3(sourceScopeMatrix[3])) < 0.0002f);
 
     source->enabled = false;
     source->Update();
@@ -91,6 +124,8 @@ int main()
     assert(!sourceObject->transform.matrixLayer.connection.enabled);
     assert(!targetObject->transform.matrixLayer.enabled);
     assert(!targetObject->transform.matrixLayer.connection.enabled);
+    assert(!sourceContent->transform.matrixLayer.enabled);
+    assert(!targetContent->transform.matrixLayer.enabled);
     assert(sourceObject->transform.matrixLayer.localToLayer == glm::mat4(1.f));
     assert(targetObject->transform.matrixLayer.localToLayer == glm::mat4(1.f));
 
@@ -144,6 +179,16 @@ int main()
     const glm::vec3 mappedNormal = glm::vec3(sourceToTarget *
         glm::vec4(sourceNormal, 0.f));
     assert(glm::length(mappedNormal - (-targetNormal)) < 0.0002f);
+    // The virtual camera maps to the back of the target portal, then looks
+    // into its front half-space. Target clipping must retain this direction,
+    // not the mapped camera's own side of the plane.
+    const glm::vec3 sourceViewer = sourceAnchor + sourceNormal * 2.f;
+    const glm::vec3 mappedViewer = glm::vec3(sourceToTarget *
+        glm::vec4(sourceViewer, 1.f));
+    const glm::vec3 mappedLookPoint = glm::vec3(sourceToTarget *
+        glm::vec4(sourceViewer - sourceNormal, 1.f));
+    assert(glm::dot(mappedViewer - targetAnchor, targetNormal) < -1.9f);
+    assert(glm::dot(mappedLookPoint - mappedViewer, targetNormal) > 0.9f);
     const glm::vec3 mappedTangent = glm::vec3(sourceToTarget *
         glm::vec4(1.f, 0.f, 0.f, 0.f));
     const glm::vec3 mappedBitangent = glm::vec3(sourceToTarget *
@@ -210,6 +255,37 @@ int main()
         { Engine::Scene::Scene::SpatialQueryDomain::Gameplay });
     assert(glm::length(mappedByScene - warpedInside) < 0.0002f);
 
+    // Portal aperture geometry and its virtual camera ray must occupy the
+    // same rendering chart as the warped scene objects. The source endpoint
+    // is inside this nonlinear volume while the target remains outside it.
+    const glm::mat4 rawSourceFrame = source->GetPortalWorldFrame();
+    const glm::mat4 renderSourceFrame = source->GetRenderPortalWorldFrame();
+    const glm::mat4 renderTargetFrame = target->GetRenderPortalWorldFrame();
+    const glm::vec3 rawSourceAnchor(rawSourceFrame[3]);
+    const glm::vec3 expectedRenderSourceAnchor = scene.MapSpatialPoint(
+        rawSourceAnchor, { Engine::Scene::Scene::SpatialQueryDomain::Rendering,
+            sourceObject });
+    assert(glm::length(glm::vec3(renderSourceFrame[3]) -
+        expectedRenderSourceAnchor) < 0.002f);
+    assert(glm::length(glm::vec3(renderSourceFrame[3]) - rawSourceAnchor) > 0.01f);
+
+    const glm::mat4 renderSourceToTarget =
+        source->GetRenderPortalWorldTransformTo(*target);
+    const glm::vec3 mappedRenderAnchor = glm::vec3(renderSourceToTarget *
+        glm::vec4(renderSourceFrame[3]));
+    assert(glm::length(mappedRenderAnchor - glm::vec3(renderTargetFrame[3])) <
+        0.002f);
+    const glm::vec3 renderViewer = glm::vec3(renderSourceFrame[3]) +
+        glm::vec3(renderSourceFrame[2]) * 2.f;
+    const glm::vec3 mappedRenderViewer =
+        source->MapRenderWorldPointThroughPortalShape(renderViewer, *target);
+    const glm::vec3 mappedRenderForward = glm::normalize(
+        source->MapRenderWorldPointThroughPortalShape(renderViewer -
+            glm::vec3(renderSourceFrame[2]), *target) - mappedRenderViewer);
+    assert(glm::dot(mappedRenderViewer - glm::vec3(renderTargetFrame[3]),
+        glm::vec3(renderTargetFrame[2])) < -1.9f);
+    assert(glm::dot(mappedRenderForward, glm::vec3(renderTargetFrame[2])) > 0.9f);
+
     // Rendering, camera, audio, physics, raycast, and gameplay now consume
     // one nonlinear spatial-query contract rather than separate affine paths.
     const auto spatialSample = scene.SampleSpatialPoint(glm::vec3(1.f, 2.f, 0.f),
@@ -227,6 +303,28 @@ int main()
     assert(glm::length(scene.WarpWorldPoint(glm::vec3(1.f, 2.f, 0.f)) -
         glm::vec3(1.f, 2.f, 0.f)) < 0.0002f);
     volume->formulaX = "cos(a*y)*x - sin(a*y)*z";
+
+    // Overlapping volume composition is priority ordered, rather than relying
+    // on object insertion/update order. Scale and translation do not commute.
+    Engine::Scene::Scene priorityScene;
+    Engine::Core::Object* lowVolumeObject = priorityScene.AddObject("LowPriorityVolume");
+    Engine::Core::Object* highVolumeObject = priorityScene.AddObject("HighPriorityVolume");
+    auto* lowVolume = lowVolumeObject->AddComponent<SpatialManipulator>();
+    auto* highVolume = highVolumeObject->AddComponent<SpatialManipulator>();
+    lowVolume->definesWarpVolume = true;
+    highVolume->definesWarpVolume = true;
+    lowVolume->spaceWarpType = static_cast<int>(SpatialManipulator::SpaceWarpType::Affine);
+    highVolume->spaceWarpType = static_cast<int>(SpatialManipulator::SpaceWarpType::Affine);
+    lowVolume->scale = glm::vec3(2.f);
+    highVolume->position = glm::vec3(1.f, 0.f, 0.f);
+    lowVolume->warpPriority = 0;
+    highVolume->warpPriority = 10;
+    assert(glm::length(priorityScene.MapSpatialPoint(glm::vec3(1.f, 0.f, 0.f)) -
+        glm::vec3(3.f, 0.f, 0.f)) < 0.0002f);
+    lowVolume->warpPriority = 10;
+    highVolume->warpPriority = 0;
+    assert(glm::length(priorityScene.MapSpatialPoint(glm::vec3(1.f, 0.f, 0.f)) -
+        glm::vec3(4.f, 0.f, 0.f)) < 0.0002f);
 
     Engine::Scene::Scene showcase;
     assert(Engine::Serialization::SceneSerializer::Load(showcase,

@@ -11,6 +11,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace Engine::Components
@@ -61,8 +62,24 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator")
     int connectionMode = static_cast<int>(ConnectionMode::MatrixOverlay);
 
+    // Matrix overlays affect this transform hierarchy by default. Assign a
+    // Transform component to map a different explicit hierarchy instead.
+    PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator | Matrix Overlay")
+    Engine::Core::ComponentReference matrixOverlayScopeRoot { "Transform" };
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator | Matrix Overlay")
+    bool matrixOverlayIncludeChildren = true;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator | Matrix Overlay")
+    int matrixOverlayPriority = 0;
+
     PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator | Warp Volume")
     bool definesWarpVolume = false;
+
+    // Volumes compose from low to high priority. Equal priorities use the
+    // stable scene hierarchy path, never incidental update order.
+    PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator | Warp Volume")
+    int warpPriority = 0;
 
     PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator | Warp Volume")
     int warpVolumeShape = static_cast<int>(WarpVolumeShape::Infinite);
@@ -151,6 +168,24 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator", Range = "0, 2")
     float deformationStrength = 1.f;
 
+    // The solid portal rim blocks bodies which contact the aperture boundary.
+    // It deliberately has no centre plane, so a fitting body can traverse.
+    PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator | Portal", ClampMin = "0.001")
+    float portalEdgeHalfWidth = 0.04f;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator | Portal", ClampMin = "0.001")
+    float portalEdgeHalfDepth = 0.15f;
+
+    // When a linked portal is removed while a mesh is split, keep both cuts
+    // as independent scene objects instead of restoring the original mesh.
+    PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator | Portal")
+    bool materializeSplitOnDisconnect = true;
+
+    // A body can traverse at most one aperture in a post-physics frame.
+    // Higher values win; equal values use the stable scene hierarchy path.
+    PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator | Portal")
+    int portalTraversalPriority = 0;
+
     PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator")
     Engine::Core::ComponentReference meshReference { "Mesh" };
 
@@ -164,15 +199,23 @@ public:
     bool ContainsWorldPoint(const glm::vec3& worldPoint) const;
     glm::vec3 MapWorldPointThroughVolume(const glm::vec3& worldPoint) const;
     glm::mat4 GetPortalWorldTransformTo(const SpatialManipulator& target) const;
+    // Rendering has its own spatial chart: apertures and virtual camera rays
+    // must use the same active warp mapping as ordinary render objects.
+    glm::mat4 GetRenderPortalWorldTransformTo(
+        const SpatialManipulator& target) const;
     // The aperture is a simple, convex, consistently-wound planar polygon.
     // Invalid input is never used for rendering or traversal.
     bool IsValidPortalAperture(float tolerance = 0.0005f) const;
     bool IsWorldPointInsidePortalAperture(const glm::vec3& worldPoint,
         float margin = 0.f) const;
     glm::mat4 GetPortalWorldFrame() const;
+    glm::mat4 GetRenderPortalWorldFrame() const;
     bool HasCompatiblePortalShapeWith(const SpatialManipulator& target) const;
     std::vector<glm::vec3> GetWorldPortalShapePoints() const;
+    std::vector<glm::vec3> GetRenderWorldPortalShapePoints() const;
     glm::vec3 MapWorldPointThroughPortalShape(const glm::vec3& point,
+        const SpatialManipulator& target) const;
+    glm::vec3 MapRenderWorldPointThroughPortalShape(const glm::vec3& point,
         const SpatialManipulator& target) const;
     void ApplyToOwner();
     void ConnectToTarget(SpatialManipulator* target);
@@ -184,7 +227,7 @@ public:
         SpatialManipulator* other);
     void Update() override;
     // Called by Scene after Bullet has advanced and published overlap data.
-    void PostPhysicsUpdate();
+    void PostPhysicsUpdate(std::unordered_set<const RigidBody*>* claimedBodies = nullptr);
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
 
 private:
@@ -198,14 +241,20 @@ private:
     Mesh* ResolveMeshForObject(Engine::Core::Object* object) const;
     float ComputeSignedDistanceToPortalPlane(const glm::vec3& worldPoint) const;
     void ApplyTraversalMeshDeformation(SpatialManipulator* target,
-        RigidBody* traversingBody);
-    void ResetTraversalMeshDeformation(const RigidBody* traversingBody);
+        RigidBody* traversingBody, bool mapPositiveHalf);
+    void MaterializeTraversalMeshSplits(SpatialManipulator* target);
+    void ResetTraversalMeshDeformation(RigidBody* traversingBody);
     void ResetTraversalMeshDeformation();
-    void UpdateTriggerTraversal(SpatialManipulator* target);
+    void UpdateTriggerTraversal(SpatialManipulator* target,
+        std::unordered_set<const RigidBody*>* claimedBodies);
     void ClearSpatialWarpState(SpatialManipulator* target = nullptr);
     SpatialManipulator* FindReciprocalManipulator() const;
     void ApplyPortalConnection(SpatialManipulator* target);
     void ApplyMatrixConnection(SpatialManipulator* target);
+    void ClearOwnedMatrixOverlayState();
+    std::vector<Engine::Core::Object*> ResolveMatrixOverlayScope() const;
+    bool IsMatrixOverlayAuthority(const SpatialManipulator* target) const;
+    std::string GetStableSceneKey() const;
 
     struct TraversalState
     {
@@ -219,6 +268,10 @@ private:
 
         const Mesh* lastMesh = nullptr;
         std::vector<Mesh::Vertex> baseVertices;
+        std::vector<Mesh::Vertex> localMeshVertices;
+        std::vector<Mesh::Vertex> remoteMeshVertices;
+        std::vector<glm::vec3> localCollisionVertices;
+        glm::mat3 remoteLinearTransform { 1.f };
         bool meshDeformed = false;
         Phase phase = Phase::Uninitialized;
         bool waitForOverlapExit = false;
@@ -226,5 +279,6 @@ private:
         bool hasPreviousWorldPosition = false;
     };
     std::unordered_map<const RigidBody*, TraversalState> m_traversalStates;
+    std::vector<Engine::Core::Object*> m_matrixOverlayObjects;
 };
 }

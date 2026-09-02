@@ -2,6 +2,7 @@
 #include "Core/Component.h"
 #include "Core/PropertyMacros.h"
 #include <cstdint>
+#include <string>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -53,6 +54,11 @@ struct MatrixLayer
     glm::vec3 portalPoint { 0.f };
     glm::vec3 portalNormal { 0.f, 0.f, 1.f };
     MatrixLayerConnection connection;
+    // Runtime ownership for scoped matrix overlays. This is deliberately not
+    // serialized: manipulators rebuild it from their declared scopes.
+    const void* overlayOwner = nullptr;
+    int overlayPriority = 0;
+    std::string overlayOwnerKey;
 
     void SetLocalToLayer(const glm::mat4& transform)
     {

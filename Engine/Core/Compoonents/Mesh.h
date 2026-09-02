@@ -40,6 +40,9 @@ public:
     const std::vector<Vertex>& GetVertices() const { return m_vertices; }
     // Returns true only when CPU vertices, bounds, and the GPU buffer changed.
     bool SetDeformedVertices(const std::vector<Vertex>& vertices);
+    // Copies the runtime rendering context needed by a procedural mesh cut.
+    // This does not copy vertex data or authoring/morph state.
+    void InitializeRuntimeCloneFrom(const Mesh& source);
     uint32_t GetVertexStride() const { return sizeof(Vertex); }
     bool     IsReady()        const { return m_ready; }
     const std::string& GetFilePath() const { return m_filePath; }

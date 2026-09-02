@@ -1428,7 +1428,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         pass.source = manipulator;
         pass.target = target;
         const std::vector<glm::vec3> aperturePoints =
-            manipulator->GetWorldPortalShapePoints();
+            manipulator->GetRenderWorldPortalShapePoints();
         glm::vec3 apertureCenter(0.f);
         for (const glm::vec3& point : aperturePoints)
             apertureCenter += point;
@@ -1480,7 +1480,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     for (PortalStencilPass& pass : portalPasses)
     {
         const std::vector<glm::vec3> points =
-            pass.source->GetWorldPortalShapePoints();
+            pass.source->GetRenderWorldPortalShapePoints();
         if (points.size() < 3)
             continue;
         const uint32_t required = Engine::Rendering::Portal::
@@ -1623,9 +1623,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 portalPass.source, portalPass.target);
 
             const std::vector<glm::vec3> sourcePoints =
-                portalPass.source->GetWorldPortalShapePoints();
+                portalPass.source->GetRenderWorldPortalShapePoints();
             const std::vector<glm::vec3> targetPoints =
-                portalPass.target->GetWorldPortalShapePoints();
+                portalPass.target->GetRenderWorldPortalShapePoints();
             const size_t pointCount = std::min(
                 sourcePoints.size(), targetPoints.size());
             if (pointCount < 3)
@@ -1801,7 +1801,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         const glm::mat4& candidateView)
     {
         const std::vector<glm::vec3> points =
-            pass.source->GetWorldPortalShapePoints();
+            pass.source->GetRenderWorldPortalShapePoints();
         if (points.size() < 3)
             return false;
         glm::vec2 minimum(std::numeric_limits<float>::max());
@@ -1831,7 +1831,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         if (viewportWidth == 0u || viewportHeight == 0u)
             return std::nullopt;
         const std::vector<glm::vec3> points =
-            pass.source->GetWorldPortalShapePoints();
+            pass.source->GetRenderWorldPortalShapePoints();
         if (points.size() < 3u)
             return std::nullopt;
 
@@ -1905,13 +1905,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             }
 
             const glm::vec3 mappedCamera =
-                pass.source->MapWorldPointThroughPortalShape(
+                pass.source->MapRenderWorldPointThroughPortalShape(
                     viewCameraPosition, *pass.target);
             const glm::vec3 mappedLookAt =
-                pass.source->MapWorldPointThroughPortalShape(
+                pass.source->MapRenderWorldPointThroughPortalShape(
                     viewCameraPosition + viewForward, *pass.target);
             const glm::vec3 mappedUpPoint =
-                pass.source->MapWorldPointThroughPortalShape(
+                pass.source->MapRenderWorldPointThroughPortalShape(
                     viewCameraPosition + viewUp, *pass.target);
             const glm::vec3 mappedForward = glm::normalize(
                 mappedLookAt - mappedCamera);
@@ -2205,12 +2205,17 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             if (portalScissor)
                 context->SetScissorRect(*portalScissor);
             const glm::mat4 targetPortalFrame =
-                portalPass.target->GetPortalWorldFrame();
+                portalPass.target->GetRenderPortalWorldFrame();
             glm::vec3 clipNormal = glm::normalize(
                 glm::vec3(targetPortalFrame[2]));
             const glm::vec3 clipPoint(targetPortalFrame[3]);
-            if (glm::dot(portalJob.mappedCameraPosition - clipPoint,
-                clipNormal) < 0.f)
+            // The mapped camera lives on the opposite side of the target
+            // aperture and looks through it. Keep the half-space it looks
+            // towards, rather than the camera half-space: the latter hides
+            // destination ground and objects after a correct traversal.
+            const glm::vec3 mappedViewForward = glm::normalize(glm::vec3(
+                glm::inverse(portalJob.mappedView)[2]));
+            if (glm::dot(mappedViewForward, clipNormal) < 0.f)
             {
                 clipNormal = -clipNormal;
             }

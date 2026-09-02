@@ -94,15 +94,15 @@ glm::vec3 Transform::InverseApplyLocalMatrixLayer(const glm::vec3& point) const
 
 glm::vec3 Transform::ApplyWorldMatrixLayer(const glm::vec3& point) const
 {
-    const glm::vec3 local = point;
-    const glm::vec3 layered = ApplyLocalMatrixLayer(local);
-    return GetWorldPosition() + (layered - GetLocalPosition());
+    // Matrix layers live in world space at this boundary.  Treating the
+    // input as an offset from this transform's position silently drops the
+    // layer's rotation and scale (and is wrong for a rotated parent).
+    return matrixLayer.TransformPoint(point);
 }
 
 glm::vec3 Transform::InverseApplyWorldMatrixLayer(const glm::vec3& point) const
 {
-    const glm::vec3 relative = point - GetWorldPosition();
-    return InverseApplyLocalMatrixLayer(relative + GetLocalPosition());
+    return matrixLayer.InverseTransformPoint(point);
 }
 
 void Transform::AdvanceRevision(uint64_t& revision)

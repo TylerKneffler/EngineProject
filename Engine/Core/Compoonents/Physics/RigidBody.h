@@ -93,6 +93,14 @@ public:
     bool IsGrounded() const { return m_isGrounded; }
     void NotifyEditorTransformChanged();
 
+    // Runtime-only local half of a portal-split mesh. This replaces the
+    // owner's ordinary collider set while active so the dynamic body occupies
+    // only its source-space portion; the remote portion is a Physics proxy.
+    void SetPortalLocalMeshCollider(const void* instanceKey,
+        const std::vector<glm::vec3>& localVertices);
+    void ClearPortalLocalMeshCollider(const void* instanceKey);
+    bool HasPortalLocalMeshCollider() const;
+
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
@@ -112,6 +120,7 @@ private:
     void SyncBodyFromTransform();
     void SyncTransformFromBody();
     void ApplyBodySettings();
+    void* GetNativeCollisionObjectForPhysics() const;
     struct Impl;
     Impl* m_impl = nullptr;
     bool m_isColliding = false;

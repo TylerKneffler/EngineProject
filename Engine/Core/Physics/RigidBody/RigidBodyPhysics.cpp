@@ -27,6 +27,10 @@ struct Engine::Components::RigidBody::Impl
     std::vector<std::pair<const Engine::Components::Collider*, uint64_t>> colliders;
     const Engine::Components::Mesh* ownerMesh = nullptr;
     uint64_t ownerMeshRevision = 0;
+    const void* portalLocalMeshKey = nullptr;
+    std::vector<glm::vec3> portalLocalMeshVertices;
+    uint64_t portalLocalMeshRevision = 0;
+    uint64_t activePortalLocalMeshRevision = 0;
     uint64_t syncedWorldRevision = 0;
     std::unique_ptr<btCompoundShape> compound;
     std::vector<std::unique_ptr<btCollisionShape>> shapes;
@@ -143,11 +147,17 @@ bool Engine::Components::RigidBody::EnsureBody()
         ? Owner->GetComponent<Engine::Components::Mesh>() : nullptr;
     bool configurationMatches = m_impl->body &&
         m_impl->configurationRevision == GetConfigurationRevision() &&
+        m_impl->activePortalLocalMeshRevision ==
+            m_impl->portalLocalMeshRevision &&
         Engine::Physics::SameVector(m_impl->worldScale, scale) &&
         m_impl->ownerMesh == ownerMesh &&
         m_impl->ownerMeshRevision ==
             (ownerMesh ? ownerMesh->GetConfigurationRevision() : 0);
     size_t colliderIndex = 0;
+    // The active portal piece replaces the shapes used by the body, but the
+    // authored colliders still participate in configuration invalidation.
+    // Never mutate the current Bullet compound while merely checking whether
+    // it can be reused.
     for (Engine::Core::Component* component : Owner->Components)
     {
         const auto* collider =
@@ -314,6 +324,7 @@ bool Engine::Components::RigidBody::EnsureBody()
     m_impl->ownerMesh = ownerMesh;
     m_impl->ownerMeshRevision = ownerMesh
         ? ownerMesh->GetConfigurationRevision() : 0;
+    m_impl->activePortalLocalMeshRevision = m_impl->portalLocalMeshRevision;
     m_impl->colliders.clear();
     for (Engine::Core::Component* component : Owner->Components)
         if (const auto* collider =
@@ -342,6 +353,7 @@ void Engine::Components::RigidBody::DestroyBody()
     m_impl->colliders.clear();
     m_impl->ownerMesh = nullptr;
     m_impl->ownerMeshRevision = 0;
+    m_impl->activePortalLocalMeshRevision = 0;
     m_impl->currentOverlaps.clear();
     m_impl->previousOverlaps.clear();
     m_isColliding = false;
@@ -367,6 +379,11 @@ void Engine::Components::RigidBody::ApplyBodySettings()
         m_impl->body->setCcdMotionThreshold(0.f);
 }
 
+void* Engine::Components::RigidBody::GetNativeCollisionObjectForPhysics() const
+{
+    return m_impl && m_impl->body ? m_impl->body.get() : nullptr;
+}
+
 void Engine::Components::RigidBody::SyncBodyFromTransform()
 {
     if (!m_impl || !m_impl->body || !Owner) return;
@@ -385,6 +402,42 @@ void Engine::Components::RigidBody::NotifyEditorTransformChanged()
     m_editorTransformChanged = true;
     if (EnsureBody())
         SyncBodyFromTransform();
+}
+
+void Engine::Components::RigidBody::SetPortalLocalMeshCollider(
+    const void* instanceKey, const std::vector<glm::vec3>& localVertices)
+{
+    if (!instanceKey || localVertices.size() < 3u)
+    {
+        ClearPortalLocalMeshCollider(instanceKey);
+        return;
+    }
+    m_impl->portalLocalMeshKey = instanceKey;
+    m_impl->portalLocalMeshVertices = localVertices;
+    if (++m_impl->portalLocalMeshRevision == 0)
+        ++m_impl->portalLocalMeshRevision;
+    EnsureBody();
+}
+
+void Engine::Components::RigidBody::ClearPortalLocalMeshCollider(
+    const void* instanceKey)
+{
+    if (!m_impl || !m_impl->portalLocalMeshKey ||
+        (instanceKey && m_impl->portalLocalMeshKey != instanceKey))
+    {
+        return;
+    }
+    m_impl->portalLocalMeshKey = nullptr;
+    m_impl->portalLocalMeshVertices.clear();
+    if (++m_impl->portalLocalMeshRevision == 0)
+        ++m_impl->portalLocalMeshRevision;
+    EnsureBody();
+}
+
+bool Engine::Components::RigidBody::HasPortalLocalMeshCollider() const
+{
+    return m_impl && m_impl->portalLocalMeshKey &&
+        m_impl->portalLocalMeshVertices.size() >= 3u;
 }
 
 void Engine::Components::RigidBody::SyncTransformFromBody()

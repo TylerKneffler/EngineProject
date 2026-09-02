@@ -1,6 +1,9 @@
 #include "SpatialManipulator.h"
 #include "Core/Math/FormulaExpression.h"
 #include "Core/Object.h"
+#include "Core/Compoonents/Physics/Collider.h"
+#include "Core/Compoonents/Material.h"
+#include "Core/Physics/Physics.h"
 #include "Core/Scene/Scene.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include <algorithm>
@@ -8,6 +11,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <glm/gtc/quaternion.hpp>
 #include <unordered_set>
 
@@ -61,6 +65,16 @@ glm::vec3 ComputeCenter(const std::vector<glm::vec3>& points)
     return sum / static_cast<float>(points.size());
 }
 
+void VisitObjectTree(Engine::Core::Object* object,
+    const std::function<void(Engine::Core::Object*)>& visitor)
+{
+    if (!object)
+        return;
+    visitor(object);
+    for (Engine::Core::Object* child : object->Children)
+        VisitObjectTree(child, visitor);
+}
+
 }
 
 SpatialManipulator::SpatialManipulator()
@@ -71,7 +85,11 @@ SpatialManipulator::SpatialManipulator()
     RegisterField("rotation", rotation);
     RegisterField("scale", scale);
     RegisterField("connectionMode", connectionMode);
+    RegisterField("matrixOverlayScopeRoot", matrixOverlayScopeRoot);
+    RegisterField("matrixOverlayIncludeChildren", matrixOverlayIncludeChildren);
+    RegisterField("matrixOverlayPriority", matrixOverlayPriority);
     RegisterField("definesWarpVolume", definesWarpVolume);
+    RegisterField("warpPriority", warpPriority);
     RegisterField("warpVolumeShape", warpVolumeShape);
     RegisterField("warpVolumeSize", warpVolumeSize);
     RegisterField("warpVolumeRadius", warpVolumeRadius);
@@ -101,6 +119,10 @@ SpatialManipulator::SpatialManipulator()
     RegisterField("deformMeshOnTraversal", deformMeshOnTraversal);
     RegisterField("traversalBlendDistance", traversalBlendDistance);
     RegisterField("deformationStrength", deformationStrength);
+    RegisterField("portalEdgeHalfWidth", portalEdgeHalfWidth);
+    RegisterField("portalEdgeHalfDepth", portalEdgeHalfDepth);
+    RegisterField("materializeSplitOnDisconnect", materializeSplitOnDisconnect);
+    RegisterField("portalTraversalPriority", portalTraversalPriority);
     RegisterField("meshReference", meshReference);
     RegisterField("traversalTriggerBodyReference", traversalTriggerBodyReference);
     RegisterField("targetManipulator", targetManipulator);
@@ -288,6 +310,19 @@ std::vector<glm::vec3> SpatialManipulator::GetWorldPortalShapePoints() const
     return worldPoints;
 }
 
+std::vector<glm::vec3> SpatialManipulator::GetRenderWorldPortalShapePoints() const
+{
+    std::vector<glm::vec3> points = GetWorldPortalShapePoints();
+    if (!Owner || !Owner->GetScene())
+        return points;
+
+    const Engine::Scene::Scene::SpatialQuery query {
+        Engine::Scene::Scene::SpatialQueryDomain::Rendering, Owner };
+    for (glm::vec3& point : points)
+        point = Owner->GetScene()->MapSpatialPoint(point, query);
+    return points;
+}
+
 bool SpatialManipulator::HasCompatiblePortalShapeWith(const SpatialManipulator& target) const
 {
     return GetClampedPortalPointCount() == target.GetClampedPortalPointCount() &&
@@ -426,6 +461,42 @@ glm::mat4 SpatialManipulator::GetPortalWorldFrame() const
     return frame;
 }
 
+glm::mat4 SpatialManipulator::GetRenderPortalWorldFrame() const
+{
+    const glm::mat4 worldFrame = GetPortalWorldFrame();
+    if (!Owner || !Owner->GetScene())
+        return worldFrame;
+
+    const Engine::Scene::Scene::SpatialQuery query {
+        Engine::Scene::Scene::SpatialQueryDomain::Rendering, Owner };
+    const Engine::Scene::Scene::SpatialQuerySample sample =
+        Owner->GetScene()->SampleSpatialPoint(glm::vec3(worldFrame[3]), query);
+    const glm::mat3& jacobian = sample.jacobian;
+    const glm::vec3 rawTangent(worldFrame[0]);
+    const glm::vec3 rawNormal(worldFrame[2]);
+
+    glm::vec3 normal = rawNormal;
+    const float determinant = glm::determinant(jacobian);
+    if (std::isfinite(determinant) && std::abs(determinant) > 1e-7f)
+    {
+        normal = glm::transpose(glm::inverse(jacobian)) * rawNormal;
+    }
+    normal = SafeNormalize(normal, rawNormal);
+
+    glm::vec3 tangent = jacobian * rawTangent;
+    tangent -= normal * glm::dot(tangent, normal);
+    tangent = SafeNormalize(tangent, rawTangent);
+    const glm::vec3 bitangent = SafeNormalize(glm::cross(normal, tangent),
+        glm::vec3(worldFrame[1]));
+
+    glm::mat4 renderFrame(1.f);
+    renderFrame[0] = glm::vec4(tangent, 0.f);
+    renderFrame[1] = glm::vec4(bitangent, 0.f);
+    renderFrame[2] = glm::vec4(normal, 0.f);
+    renderFrame[3] = glm::vec4(sample.point, 1.f);
+    return renderFrame;
+}
+
 glm::mat4 SpatialManipulator::GetPortalWorldTransformTo(
     const SpatialManipulator& target) const
 {
@@ -443,12 +514,33 @@ glm::mat4 SpatialManipulator::GetPortalWorldTransformTo(
     return targetFrame * crossing * glm::inverse(sourceFrame);
 }
 
+glm::mat4 SpatialManipulator::GetRenderPortalWorldTransformTo(
+    const SpatialManipulator& target) const
+{
+    const glm::mat4 sourceFrame = GetRenderPortalWorldFrame();
+    const glm::mat4 targetFrame = target.GetRenderPortalWorldFrame();
+    glm::mat4 crossing(1.f);
+    crossing[0][0] = -1.f;
+    crossing[1][1] = 1.f;
+    crossing[2][2] = -1.f;
+    return targetFrame * crossing * glm::inverse(sourceFrame);
+}
+
 glm::vec3 SpatialManipulator::MapWorldPointThroughPortalShape(const glm::vec3& point,
     const SpatialManipulator& target) const
 {
     if (!HasCompatiblePortalShapeWith(target))
         return point;
     return glm::vec3(GetPortalWorldTransformTo(target) * glm::vec4(point, 1.f));
+}
+
+glm::vec3 SpatialManipulator::MapRenderWorldPointThroughPortalShape(
+    const glm::vec3& point, const SpatialManipulator& target) const
+{
+    if (!HasCompatiblePortalShapeWith(target))
+        return point;
+    return glm::vec3(GetRenderPortalWorldTransformTo(target) *
+        glm::vec4(point, 1.f));
 }
 
 bool SpatialManipulator::EnsurePointCountCompatibility(SpatialManipulator* target)
@@ -521,7 +613,7 @@ float SpatialManipulator::ComputeSignedDistanceToPortalPlane(
     return glm::dot(worldPoint - portalWorldPoint, portalWorldNormal);
 }
 
-void SpatialManipulator::ResetTraversalMeshDeformation(const RigidBody* traversingBody)
+void SpatialManipulator::ResetTraversalMeshDeformation(RigidBody* traversingBody)
 {
     if (!traversingBody)
         return;
@@ -529,6 +621,13 @@ void SpatialManipulator::ResetTraversalMeshDeformation(const RigidBody* traversi
     auto it = m_traversalStates.find(traversingBody);
     if (it == m_traversalStates.end())
         return;
+
+    // A split body owns two independent collision pieces. Remove the remote
+    // proxy before rebuilding the local dynamic body: the proxy filter holds
+    // the native owner pointer and must never observe the replaced body.
+    if (Owner && Owner->GetScene())
+        Owner->GetScene()->GetPhysics().RemovePortalMeshCollider(&it->second);
+    traversingBody->ClearPortalLocalMeshCollider(&it->second);
 
     if (traversingBody->Owner && it->second.meshDeformed)
     {
@@ -540,17 +639,20 @@ void SpatialManipulator::ResetTraversalMeshDeformation(const RigidBody* traversi
     it->second.meshDeformed = false;
     it->second.lastMesh = nullptr;
     it->second.baseVertices.clear();
+    it->second.localMeshVertices.clear();
+    it->second.remoteMeshVertices.clear();
+    it->second.localCollisionVertices.clear();
 }
 
 void SpatialManipulator::ResetTraversalMeshDeformation()
 {
     for (const auto& pair : m_traversalStates)
-        ResetTraversalMeshDeformation(pair.first);
+        ResetTraversalMeshDeformation(const_cast<RigidBody*>(pair.first));
     m_traversalStates.clear();
 }
 
 void SpatialManipulator::ApplyTraversalMeshDeformation(SpatialManipulator* target,
-    RigidBody* traversingBody)
+    RigidBody* traversingBody, bool mapPositiveHalf)
 {
     if (!deformMeshOnTraversal || !target || !Owner || !target->Owner ||
         !traversingBody || !traversingBody->Owner)
@@ -581,6 +683,9 @@ void SpatialManipulator::ApplyTraversalMeshDeformation(SpatialManipulator* targe
     TraversalState& state = m_traversalStates[traversingBody];
     if (state.lastMesh != mesh)
     {
+        if (Owner && Owner->GetScene())
+            Owner->GetScene()->GetPhysics().RemovePortalMeshCollider(&state);
+        traversingBody->ClearPortalLocalMeshCollider(&state);
         state.lastMesh = mesh;
         state.baseVertices = currentVertices;
         state.meshDeformed = false;
@@ -616,39 +721,169 @@ void SpatialManipulator::ApplyTraversalMeshDeformation(SpatialManipulator* targe
         return;
     }
 
-    const glm::mat4 portalTransform = GetPortalWorldTransformTo(*target);
-    const glm::mat3 portalRotation(portalTransform);
-    const glm::mat3 worldNormalMatrix = glm::transpose(glm::inverse(bodyLinear));
-    for (Mesh::Vertex& vertex : positiveHalf)
+    // Express the complete source-to-target mapping in the mesh's local
+    // frame. This remains correct when the body or one of its parents has
+    // rotation/non-uniform scale, unlike applying a world rotation to normals
+    // and then attempting to undo it piecemeal.
+    const glm::mat4 localToRemoteLocal = bodyWorldInverse *
+        GetPortalWorldTransformTo(*target) * bodyWorld;
+    const glm::mat3 remoteNormalMatrix = glm::transpose(glm::inverse(
+        glm::mat3(localToRemoteLocal)));
+
+    // Negative-to-positive motion exposes the positive half through the
+    // target; positive-to-negative motion exposes the negative half. Keeping
+    // this selection directional prevents reverse crossings from stretching
+    // the trailing (wrong) side of an asymmetric aperture.
+    std::vector<Mesh::Vertex>& remoteHalf = mapPositiveHalf ? positiveHalf : negativeHalf;
+    std::vector<Mesh::Vertex>& localHalf = mapPositiveHalf ? negativeHalf : positiveHalf;
+    std::vector<glm::vec3> localVertices;
+    localVertices.reserve(localHalf.size());
+    for (const Mesh::Vertex& vertex : localHalf)
+        localVertices.emplace_back(vertex.pos[0], vertex.pos[1], vertex.pos[2]);
+    std::vector<glm::vec3> remoteWorldVertices;
+    remoteWorldVertices.reserve(remoteHalf.size());
+    for (Mesh::Vertex& vertex : remoteHalf)
     {
         const glm::vec3 localPosition(vertex.pos[0], vertex.pos[1], vertex.pos[2]);
-        const glm::vec3 mappedWorld = glm::vec3(portalTransform *
-            bodyWorld * glm::vec4(localPosition, 1.f));
-        const glm::vec3 mappedLocal = glm::vec3(bodyWorldInverse *
-            glm::vec4(mappedWorld, 1.f));
+        const glm::vec3 mappedLocal = glm::vec3(localToRemoteLocal *
+            glm::vec4(localPosition, 1.f));
         vertex.pos[0] = mappedLocal.x;
         vertex.pos[1] = mappedLocal.y;
         vertex.pos[2] = mappedLocal.z;
+        remoteWorldVertices.push_back(glm::vec3(bodyWorld *
+            glm::vec4(mappedLocal, 1.f)));
 
         const glm::vec3 localNormal(vertex.normal[0], vertex.normal[1],
             vertex.normal[2]);
-        const glm::vec3 mappedWorldNormal = SafeNormalize(portalRotation *
-            (worldNormalMatrix * localNormal), glm::vec3(0.f, 0.f, 1.f));
         const glm::vec3 mappedLocalNormal = SafeNormalize(
-            glm::transpose(bodyLinear) * mappedWorldNormal,
+            remoteNormalMatrix * localNormal,
             glm::vec3(0.f, 0.f, 1.f));
         vertex.normal[0] = mappedLocalNormal.x;
         vertex.normal[1] = mappedLocalNormal.y;
         vertex.normal[2] = mappedLocalNormal.z;
     }
 
-    negativeHalf.insert(negativeHalf.end(), positiveHalf.begin(),
-        positiveHalf.end());
-    if (mesh->SetDeformedVertices(negativeHalf))
-        state.meshDeformed = true;
+    state.localMeshVertices = localHalf;
+    state.remoteMeshVertices = remoteHalf;
+    state.localCollisionVertices = localVertices;
+    state.remoteLinearTransform = glm::mat3(
+        GetPortalWorldTransformTo(*target));
+    localHalf.insert(localHalf.end(), remoteHalf.begin(), remoteHalf.end());
+    const bool meshChanged = mesh->SetDeformedVertices(localHalf);
+    state.meshDeformed = state.meshDeformed || meshChanged;
+    // Keep the dynamic owner restricted to its local, clipped triangles. The
+    // remote triangles are registered below as a separate static instance in
+    // target space; a single convex hull spanning both halves would bridge the
+    // portal and produce invalid collisions.
+    traversingBody->SetPortalLocalMeshCollider(&state, localVertices);
+    if (Owner && Owner->GetScene())
+    {
+        // The visual mesh contains a remote half expressed in the owner's
+        // local coordinates. A Bullet triangle mesh cannot span that gap as
+        // one convex hull, so register the remote half as an independent,
+        // target-space collision instance instead.
+        Owner->GetScene()->GetPhysics().SetPortalMeshCollider(&state,
+            *traversingBody, remoteWorldVertices);
+    }
 }
 
-void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target)
+void SpatialManipulator::MaterializeTraversalMeshSplits(
+    SpatialManipulator* /*target*/)
+{
+    if (!materializeSplitOnDisconnect || !Owner || !Owner->GetScene())
+        return;
+
+    Engine::Scene::Scene& scene = *Owner->GetScene();
+    for (auto& pair : m_traversalStates)
+    {
+        RigidBody* localBody = const_cast<RigidBody*>(pair.first);
+        TraversalState& state = pair.second;
+        if (!localBody || !localBody->Owner || !state.meshDeformed ||
+            state.localMeshVertices.empty() || state.remoteMeshVertices.empty() ||
+            state.localCollisionVertices.size() < 3u)
+        {
+            continue;
+        }
+
+        Mesh* localMesh = ResolveMeshForObject(localBody->Owner);
+        if (!localMesh)
+            continue;
+
+        // Keep the local object as the local cut. Its runtime collider is
+        // re-keyed to the object so ResetTraversalMeshDeformation cannot
+        // restore the old, whole-object collision hull.
+        localMesh->SetDeformedVertices(state.localMeshVertices);
+        localBody->SetPortalLocalMeshCollider(localBody,
+            state.localCollisionVertices);
+
+        Engine::Core::Object* remoteObject = scene.AddObject(
+            localBody->Owner->name + " (Portal Fragment)");
+        remoteObject->Parent = localBody->Owner->Parent;
+        if (remoteObject->Parent)
+            remoteObject->Parent->Children.push_back(remoteObject);
+        remoteObject->transform.position = localBody->Owner->transform.position;
+        remoteObject->transform.rotation = localBody->Owner->transform.rotation;
+        remoteObject->transform.scale = localBody->Owner->transform.scale;
+
+        Mesh* remoteMesh = remoteObject->AddComponent<Mesh>();
+        remoteMesh->InitializeRuntimeCloneFrom(*localMesh);
+        remoteMesh->SetDeformedVertices(state.remoteMeshVertices);
+        if (const Material* localMaterial =
+                localBody->Owner->GetComponent<Material>())
+        {
+            Material* remoteMaterial = remoteObject->AddComponent<Material>();
+            remoteMaterial->Deserialize(localMaterial->Serialize());
+        }
+        MeshObjectCollider* remoteCollider =
+            remoteObject->AddComponent<MeshObjectCollider>();
+        remoteCollider->convex = true;
+
+        RigidBody* remoteBody = remoteObject->AddComponent<RigidBody>();
+        remoteBody->bodyType = localBody->bodyType;
+        remoteBody->mass = std::max(0.001f, localBody->mass * 0.5f);
+        localBody->mass = std::max(0.001f, localBody->mass * 0.5f);
+        remoteBody->useGravity = localBody->useGravity;
+        remoteBody->gravityScale = localBody->gravityScale;
+        remoteBody->linearDamping = localBody->linearDamping;
+        remoteBody->angularDamping = localBody->angularDamping;
+        remoteBody->friction = localBody->friction;
+        remoteBody->restitution = localBody->restitution;
+        remoteBody->continuousCollision = localBody->continuousCollision;
+        remoteBody->freezePositionX = localBody->freezePositionX;
+        remoteBody->freezePositionY = localBody->freezePositionY;
+        remoteBody->freezePositionZ = localBody->freezePositionZ;
+        remoteBody->freezeRotationX = localBody->freezeRotationX;
+        remoteBody->freezeRotationY = localBody->freezeRotationY;
+        remoteBody->freezeRotationZ = localBody->freezeRotationZ;
+        remoteBody->collisionLayer = localBody->collisionLayer;
+        remoteBody->collisionMask = localBody->collisionMask;
+        remoteBody->collisionIdentifier = localBody->collisionIdentifier;
+        remoteBody->frictionBehaviors = localBody->frictionBehaviors;
+
+        const glm::mat4 localWorld = localBody->Owner->transform.GetWorldMatrix();
+        glm::mat3 localWorldBasis(localWorld);
+        for (int column = 0; column < 3; ++column)
+            localWorldBasis[column] = SafeNormalize(localWorldBasis[column],
+                glm::vec3(column == 0 ? 1.f : 0.f,
+                    column == 1 ? 1.f : 0.f,
+                    column == 2 ? 1.f : 0.f));
+        const glm::quat localWorldRotation = glm::quat_cast(localWorldBasis);
+        remoteBody->SetWorldPose(glm::vec3(localWorld[3]), localWorldRotation);
+        remoteBody->SetLinearVelocity(state.remoteLinearTransform *
+            localBody->GetLinearVelocity());
+        remoteBody->SetAngularVelocity(state.remoteLinearTransform *
+            localBody->GetAngularVelocity());
+
+        // Subsequent reset removes only the temporary remote proxy and this
+        // traversal bookkeeping; it intentionally leaves the two fragments.
+        state.meshDeformed = false;
+        state.baseVertices.clear();
+        state.lastMesh = nullptr;
+    }
+}
+
+void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target,
+    std::unordered_set<const RigidBody*>* claimedBodies)
 {
     if (!target || !Owner || !Owner->GetScene() ||
         !HasCompatiblePortalShapeWith(*target))
@@ -717,6 +952,14 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target)
             break;
         }
 
+        if (crossedPortalPlane && claimedBodies &&
+            claimedBodies->find(body) != claimedBodies->end())
+        {
+            // A higher-priority aperture already consumed this swept motion.
+            // Keep this portal's state current, but do not split or remap it.
+            crossedPortalPlane = false;
+        }
+
         if (crossedPortalPlane)
         {
             const float distanceDelta = currentSignedDistance - previousSignedDistance;
@@ -771,6 +1014,8 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target)
             targetState.waitForOverlapExit = false;
             targetState.previousWorldPosition = mappedPosition;
             targetState.hasPreviousWorldPosition = true;
+            if (claimedBodies)
+                claimedBodies->insert(body);
         }
 
         // A destination portal remains overlapped immediately after a
@@ -781,11 +1026,26 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target)
             currentSignedDistance * glm::vec3(GetPortalWorldFrame()[2]);
         const bool intersectsAperture = std::abs(currentSignedDistance) <= 1.f &&
             IsWorldPointInsidePortalAperture(planePoint, 0.001f);
-        if (!crossedPortalPlane && intersectsAperture &&
-            (state.phase == TraversalPhase::ArmedNegative ||
-             state.phase == TraversalPhase::ArmedPositive))
-            ApplyTraversalMeshDeformation(target, body);
-        else if (!intersectsAperture)
+        const float signedMotion = currentSignedDistance - previousSignedDistance;
+        const bool isArmed = state.phase == TraversalPhase::ArmedNegative ||
+            state.phase == TraversalPhase::ArmedPositive;
+        const bool movingTowardPortal =
+            (state.phase == TraversalPhase::ArmedNegative && signedMotion > 1e-5f) ||
+            (state.phase == TraversalPhase::ArmedPositive && signedMotion < -1e-5f);
+        const bool claimedByHigherPriorityPortal = claimedBodies &&
+            claimedBodies->find(body) != claimedBodies->end();
+        if (!crossedPortalPlane && intersectsAperture && isArmed &&
+            movingTowardPortal && !claimedByHigherPriorityPortal)
+        {
+            ApplyTraversalMeshDeformation(target, body, signedMotion > 0.f);
+            // Mesh deformation is an exclusive, frame-local view of a body.
+            // Without this claim two coincident apertures can each cache the
+            // other's already split vertices, leaving the mesh stretched when
+            // either side later restores its stale snapshot.
+            if (claimedBodies)
+                claimedBodies->insert(body);
+        }
+        else if (!intersectsAperture || !movingTowardPortal)
             ResetTraversalMeshDeformation(body);
 
         if (!crossedPortalPlane)
@@ -796,7 +1056,7 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target)
     {
         if (activeBodies.find(it->first) == activeBodies.end())
         {
-            ResetTraversalMeshDeformation(it->first);
+            ResetTraversalMeshDeformation(const_cast<RigidBody*>(it->first));
             it = m_traversalStates.erase(it);
         }
         else
@@ -831,15 +1091,30 @@ void SpatialManipulator::ApplyToOwner()
 
 void SpatialManipulator::ClearSpatialWarpState(SpatialManipulator* target)
 {
+    MaterializeTraversalMeshSplits(target);
     ResetTraversalMeshDeformation();
+    ClearOwnedMatrixOverlayState();
 
-    if (Owner)
+    if (Owner && Owner->GetScene())
+        Owner->GetScene()->GetPhysics().RemovePortalApertureCollider(this);
+
+    // Portal state is endpoint-local. Scoped overlays are owned separately,
+    // so do not erase an unrelated higher-priority overlay on either root.
+    if (Owner && !Owner->transform.matrixLayer.overlayOwner)
         Owner->transform.matrixLayer = MatrixLayer {};
 
     // Connection setup writes reciprocal warp state onto the target transform,
     // so disabling either endpoint must remove that state as well.
-    if (target && target->Owner)
-        target->Owner->transform.matrixLayer = MatrixLayer {};
+    if (target)
+    {
+        target->MaterializeTraversalMeshSplits(this);
+        target->ResetTraversalMeshDeformation();
+        target->ClearOwnedMatrixOverlayState();
+        if (target->Owner && target->Owner->GetScene())
+            target->Owner->GetScene()->GetPhysics().RemovePortalApertureCollider(target);
+        if (target->Owner && !target->Owner->transform.matrixLayer.overlayOwner)
+            target->Owner->transform.matrixLayer = MatrixLayer {};
+    }
 }
 
 SpatialManipulator* SpatialManipulator::FindReciprocalManipulator() const
@@ -973,24 +1248,121 @@ void SpatialManipulator::ApplyPortalConnection(SpatialManipulator* target)
     target->Owner->transform.matrixLayer.connection.boundaryNormal = glm::vec3(targetFrame[2]);
     target->Owner->transform.matrixLayer.connection.localToRemote = targetToSource;
     target->Owner->transform.matrixLayer.connection.remoteToLocal = sourceToTarget;
+
+    // Each aperture contributes only a solid rim, never a visual or physical
+    // centre face. Bullet then resolves an oversized split body against the
+    // actual polygon boundary before post-physics traversal evaluates it.
+    Owner->GetScene()->GetPhysics().SetPortalApertureCollider(this,
+        GetWorldPortalShapePoints(), glm::vec3(sourceFrame[2]),
+        portalEdgeHalfWidth, portalEdgeHalfDepth);
+    target->Owner->GetScene()->GetPhysics().SetPortalApertureCollider(target,
+        target->GetWorldPortalShapePoints(), glm::vec3(targetFrame[2]),
+        target->portalEdgeHalfWidth, target->portalEdgeHalfDepth);
 }
 
 void SpatialManipulator::ApplyMatrixConnection(SpatialManipulator* target)
 {
     if (!target || !Owner || !target->Owner)
         return;
+    if (!IsMatrixOverlayAuthority(target))
+        return;
 
-    Owner->transform.matrixLayer.connection = MatrixLayerConnection {};
-    target->Owner->transform.matrixLayer.connection = MatrixLayerConnection {};
+    ClearOwnedMatrixOverlayState();
+    const glm::mat4 sourceToTarget = target->GetOverlayMatrix() *
+        glm::inverse(GetOverlayMatrix());
+    const glm::mat4 targetToSource = glm::inverse(sourceToTarget);
+    const int priority = std::max(matrixOverlayPriority,
+        target->matrixOverlayPriority);
+    const std::string ownerKey = GetStableSceneKey();
 
-    const glm::mat4 targetMatrix = target->GetOverlayMatrix();
-    Owner->transform.matrixLayer.enabled = enabled;
-    Owner->transform.matrixLayer.localToLayer = targetMatrix;
-    Owner->transform.matrixLayer.layerToLocal = glm::inverse(targetMatrix);
+    const auto applyScope = [&](const SpatialManipulator& endpoint,
+        const glm::mat4& transform)
+    {
+        for (Engine::Core::Object* object : endpoint.ResolveMatrixOverlayScope())
+        {
+            if (!object)
+                continue;
+            MatrixLayer& layer = object->transform.matrixLayer;
+            const bool replace = layer.overlayOwner == this ||
+                !layer.enabled || !layer.overlayOwner ||
+                priority > layer.overlayPriority ||
+                (priority == layer.overlayPriority &&
+                    ownerKey < layer.overlayOwnerKey);
+            if (!replace)
+                continue;
+            layer = MatrixLayer {};
+            layer.SetLocalToLayer(transform);
+            layer.overlayOwner = this;
+            layer.overlayPriority = priority;
+            layer.overlayOwnerKey = ownerKey;
+            m_matrixOverlayObjects.push_back(object);
+        }
+    };
 
-    target->Owner->transform.matrixLayer.enabled = target->enabled;
-    target->Owner->transform.matrixLayer.localToLayer = GetOverlayMatrix();
-    target->Owner->transform.matrixLayer.layerToLocal = glm::inverse(GetOverlayMatrix());
+    // Source and target scopes are mapped by inverse relative transforms.
+    // The link itself owns this state; carrier meshes are never special.
+    applyScope(*this, sourceToTarget);
+    applyScope(*target, targetToSource);
+}
+
+void SpatialManipulator::ClearOwnedMatrixOverlayState()
+{
+    for (Engine::Core::Object* object : m_matrixOverlayObjects)
+    {
+        if (object && object->transform.matrixLayer.overlayOwner == this)
+            object->transform.matrixLayer = MatrixLayer {};
+    }
+    m_matrixOverlayObjects.clear();
+}
+
+std::vector<Engine::Core::Object*>
+SpatialManipulator::ResolveMatrixOverlayScope() const
+{
+    std::vector<Engine::Core::Object*> objects;
+    if (!Owner)
+        return objects;
+    Engine::Core::Object* root = Owner;
+    if (matrixOverlayScopeRoot.IsAssigned())
+    {
+        Transform* transform = Engine::Core::ResolveComponentReference<Transform>(
+            Owner, matrixOverlayScopeRoot);
+        if (!transform || !transform->Owner)
+            return objects;
+        root = transform->Owner;
+    }
+    if (matrixOverlayIncludeChildren)
+    {
+        VisitObjectTree(root, [&](Engine::Core::Object* object)
+        {
+            objects.push_back(object);
+        });
+    }
+    else
+    {
+        objects.push_back(root);
+    }
+    return objects;
+}
+
+bool SpatialManipulator::IsMatrixOverlayAuthority(
+    const SpatialManipulator* target) const
+{
+    if (!target)
+        return false;
+    return GetStableSceneKey() < target->GetStableSceneKey();
+}
+
+std::string SpatialManipulator::GetStableSceneKey() const
+{
+    if (!Owner || !Owner->GetScene())
+        return "~";
+    Engine::Scene::Scene::ObjectPath path;
+    if (!Owner->GetScene()->TryGetObjectPath(Owner, path))
+        return "~";
+    std::string key;
+    for (const size_t index : path)
+        key += std::to_string(index) + "/";
+    return key;
 }
 
 void SpatialManipulator::Update()
@@ -1009,6 +1381,25 @@ void SpatialManipulator::Update()
         return;
     }
 
+    const auto mode = static_cast<ConnectionMode>(connectionMode);
+    if (mode == ConnectionMode::MatrixOverlay)
+    {
+        SpatialManipulator* target = ResolveTarget();
+        if (!target || !target->enabled)
+        {
+            ClearOwnedMatrixOverlayState();
+            if (!target)
+                ApplyToOwner();
+            else
+                ClearSpatialWarpState(target);
+            return;
+        }
+        ApplyMatrixConnection(target);
+        return;
+    }
+
+    ClearOwnedMatrixOverlayState();
+
     ApplyToOwner();
 
     if (SpatialManipulator* target = ResolveTarget())
@@ -1019,11 +1410,8 @@ void SpatialManipulator::Update()
             return;
         }
 
-        switch (static_cast<ConnectionMode>(connectionMode))
+        switch (mode)
         {
-        case ConnectionMode::MatrixOverlay:
-            ApplyMatrixConnection(target);
-            break;
         case ConnectionMode::Portal:
         case ConnectionMode::LinkedPortal:
             ApplyPortalConnection(target);
@@ -1036,11 +1424,12 @@ void SpatialManipulator::Update()
     }
     else
     {
-        ResetTraversalMeshDeformation();
+        ClearSpatialWarpState();
     }
 }
 
-void SpatialManipulator::PostPhysicsUpdate()
+void SpatialManipulator::PostPhysicsUpdate(
+    std::unordered_set<const RigidBody*>* claimedBodies)
 {
     if (!enabled || definesWarpVolume)
     {
@@ -1061,7 +1450,7 @@ void SpatialManipulator::PostPhysicsUpdate()
         ResetTraversalMeshDeformation();
         return;
     }
-    UpdateTriggerTraversal(target);
+    UpdateTriggerTraversal(target, claimedBodies);
 }
 
 bool SpatialManipulator::DrawProperties(::Engine::Editor::IEditorUi& ui)
@@ -1080,10 +1469,61 @@ bool SpatialManipulator::DrawProperties(::Engine::Editor::IEditorUi& ui)
         connectionMode = mode;
         changed = true;
     }
+    if (static_cast<ConnectionMode>(connectionMode) ==
+        ConnectionMode::MatrixOverlay)
+    {
+        changed = ui.Checkbox("Overlay Scope Includes Children",
+            &matrixOverlayIncludeChildren) || changed;
+        float overlayPriority = static_cast<float>(matrixOverlayPriority);
+        if (ui.DragFloat("Overlay Priority", &overlayPriority, 1.f,
+            -100000.f, 100000.f))
+        {
+            matrixOverlayPriority = static_cast<int>(std::round(overlayPriority));
+            changed = true;
+        }
+        const char* scopeLabel = matrixOverlayScopeRoot.IsAssigned()
+            ? matrixOverlayScopeRoot.objectName.c_str()
+            : "Owner (default)";
+        ui.ValueLabel("Overlay Scope Root", scopeLabel);
+        if (ui.BeginDragDropTarget())
+        {
+            size_t payloadSize = 0;
+            const void* payload = ui.AcceptDragDropPayload(
+                "ENGINE_COMPONENT_REORDER", &payloadSize);
+            if (payload && payloadSize == sizeof(Engine::Core::Component*))
+            {
+                auto* component = *static_cast<Engine::Core::Component* const*>(
+                    payload);
+                if (auto* transform = dynamic_cast<Transform*>(component))
+                {
+                    matrixOverlayScopeRoot =
+                        Engine::Core::CaptureComponentReference(transform,
+                            "Transform");
+                    changed = true;
+                }
+            }
+            ui.EndDragDropTarget();
+        }
+        if (matrixOverlayScopeRoot.IsAssigned())
+        {
+            ui.SameLine();
+            if (ui.Button("Clear Overlay Scope"))
+            {
+                matrixOverlayScopeRoot.Clear();
+                changed = true;
+            }
+        }
+    }
 
     changed = ui.Checkbox("Defines Warp Volume", &definesWarpVolume) || changed;
     if (definesWarpVolume)
     {
+        float priority = static_cast<float>(warpPriority);
+        if (ui.DragFloat("Warp Priority", &priority, 1.f, -100000.f, 100000.f))
+        {
+            warpPriority = static_cast<int>(std::round(priority));
+            changed = true;
+        }
         static const char* volumeShapes[] = { "Infinite", "Box", "Sphere" };
         changed = ui.Combo("Warp Volume Shape", &warpVolumeShape,
             volumeShapes, 3) || changed;
@@ -1154,6 +1594,13 @@ bool SpatialManipulator::DrawProperties(::Engine::Editor::IEditorUi& ui)
 
     changed = ui.Checkbox("Auto Match Portal Point Count", &autoMatchPortalPointCount) || changed;
     changed = ui.Checkbox("Split Mesh While Crossing", &deformMeshOnTraversal) || changed;
+    float traversalPriority = static_cast<float>(portalTraversalPriority);
+    if (ui.DragFloat("Portal Traversal Priority", &traversalPriority,
+        1.f, -100000.f, 100000.f))
+    {
+        portalTraversalPriority = static_cast<int>(std::round(traversalPriority));
+        changed = true;
+    }
 
     return changed;
 }

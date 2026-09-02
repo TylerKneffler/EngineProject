@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <unordered_set>
 
 namespace Engine::Scene
 {
@@ -54,6 +55,12 @@ void Scene::Update(float deltaTime)
     // Bullet has now published current-frame poses and overlap pairs. Portal
     // traversal deliberately runs here rather than in Component::Update so a
     // crossing is evaluated against the motion that just occurred.
+    struct OrderedPortal
+    {
+        Engine::Components::SpatialManipulator* manipulator = nullptr;
+        ObjectPath path;
+    };
+    std::vector<OrderedPortal> portals;
     for (const auto& object : m_objects)
     {
         if (!object || !object->IsEnabledInHierarchy())
@@ -61,9 +68,25 @@ void Scene::Update(float deltaTime)
         if (auto* manipulator = object->GetComponent<
             Engine::Components::SpatialManipulator>())
         {
-            manipulator->PostPhysicsUpdate();
+            ObjectPath path;
+            TryGetObjectPath(object.get(), path);
+            portals.push_back({ manipulator, std::move(path) });
         }
     }
+    std::sort(portals.begin(), portals.end(),
+        [](const OrderedPortal& first, const OrderedPortal& second)
+        {
+            if (first.manipulator->portalTraversalPriority !=
+                second.manipulator->portalTraversalPriority)
+            {
+                return first.manipulator->portalTraversalPriority >
+                    second.manipulator->portalTraversalPriority;
+            }
+            return first.path < second.path;
+        });
+    std::unordered_set<const Engine::Components::RigidBody*> claimedBodies;
+    for (const OrderedPortal& portal : portals)
+        portal.manipulator->PostPhysicsUpdate(&claimedBodies);
 }
 
 Engine::Core::Object* Scene::AddObject()
