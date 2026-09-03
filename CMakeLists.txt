@@ -142,6 +142,14 @@ file(GLOB_RECURSE GAME_HEADERS CONFIGURE_DEPENDS
     "${ENGINE_ROOT}/Engine/Game/*.hpp"
     "${ENGINE_ROOT}/Engine/Game/*.inl"
 )
+file(GLOB_RECURSE SERVER_SOURCES CONFIGURE_DEPENDS
+    "${ENGINE_ROOT}/Engine/Server/*.cpp"
+)
+file(GLOB_RECURSE SERVER_HEADERS CONFIGURE_DEPENDS
+    "${ENGINE_ROOT}/Engine/Server/*.h"
+    "${ENGINE_ROOT}/Engine/Server/*.hpp"
+    "${ENGINE_ROOT}/Engine/Server/*.inl"
+)
 
 set(PROJECT_BROWSE_FILES)
 set(PROJECT_ROOT_FILES)
@@ -517,6 +525,39 @@ target_compile_definitions(Game PRIVATE
     $<$<NOT:$<BOOL:${ENGINE_PROJECT_DIR}>>:ENGINE_BUILTIN_ASSET_SCRIPTS>
 )
 set_target_properties(Game PROPERTIES
+    VS_DEBUGGER_WORKING_DIRECTORY "${ENGINE_RUNTIME_WORKING_DIRECTORY}"
+)
+
+# ---------------------------------------------------------------------------
+# Server — headless authoritative scene simulation.  This intentionally uses
+# a console subsystem and never creates a renderer/window.  It is the host
+# for deterministic scene diagnostics today and future player/session support.
+# ---------------------------------------------------------------------------
+add_executable(Server
+    ${SERVER_SOURCES}
+    ${SERVER_HEADERS}
+    ${ASSET_SOURCES}
+    ${PROJECT_BROWSE_FILES}
+)
+source_group(TREE "${ENGINE_ROOT}" FILES ${SERVER_SOURCES} ${SERVER_HEADERS})
+if(ENGINE_PROJECT_DIR)
+    source_group(TREE "${ENGINE_PROJECT_DIR}" PREFIX "Project" FILES
+        ${ASSET_SOURCES} ${PROJECT_BROWSE_FILES})
+endif()
+target_link_libraries(Server PRIVATE Engine)
+target_precompile_headers(Server REUSE_FROM Engine)
+target_include_directories(Server PRIVATE
+    ${ENGINE_ROOT}/Engine
+    ${ENGINE_ROOT}/Engine/Core/Assets
+    ${ENGINE_PROJECT_DIR}/Assets
+)
+target_compile_definitions(Server PRIVATE
+    ASSETS_PATH="${ENGINE_PROJECT_DIR}/Assets/"
+    PROJECT_FILE="${ENGINE_PROJECT_FILE}"
+    ENGINE_ASSETS_PATH="${ENGINE_COMPILED_ASSETS_PATH}"
+    $<$<NOT:$<BOOL:${ENGINE_PROJECT_DIR}>>:ENGINE_BUILTIN_ASSET_SCRIPTS>
+)
+set_target_properties(Server PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "${ENGINE_RUNTIME_WORKING_DIRECTORY}"
 )
 
