@@ -1,6 +1,6 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0"?>
 <Scene xmlns:components="urn:engine-components" version="1">
-  <settings showGrid="true" gridHalfSize="30" gridCellSize="1" gridOpacity="0.3" gridFadeDistance="120" skyboxTexture="">
+  <settings showGrid="true" gridHalfSize="30" gridCellSize="1" gridOpacity="0.3" gridFadeDistance="120" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" renderMode="0" sceneViewUiOverlay="false" portalDebugVisuals="false" portalDebugWireframe="false" portalDebugTintRemoteView="true" portalDebugOverlayAlpha="0.45" portalRecursionDepth="2" portalMaxViewsPerFrame="24">
     <gridColor>
       <item>0.38</item>
       <item>0.38</item>
@@ -52,7 +52,6 @@
       </components>
       <children />
     </item>
-
     <item name="Portal Demo Light" enabled="true">
       <transform>
         <Transform.position>
@@ -82,7 +81,6 @@
       </components>
       <children />
     </item>
-
     <item name="Portal Demo Ground" enabled="true">
       <transform>
         <Transform.position>
@@ -102,8 +100,8 @@
         </Transform.scale>
       </transform>
       <components>
-        <components:Mesh Mesh.file="Assets/Mesh/cube.obj"></components:Mesh>
-        <components:Material Material.shininess="18" Material.metallicFactor="0.08" Material.roughnessFactor="0.82">
+        <components:Mesh Mesh.file="Assets/Mesh/cube.obj" />
+        <components:Material Material.shininess="18" Material.metallicFactor="0.08" Material.roughnessFactor="0.82" Material.environmentDiffuseStrength="1" Material.reflectionStrength="1" Material.useCustomReflectionEnvironment="false" Material.reflectionEnvironmentTexture="" Material.reflectionEnvironmentExposure="0" Material.reflectionEnvironmentRotation="0" Material.baseColorAlpha="1" Material.alphaCutoff="0.5" Material.normalScale="1" Material.heightScale="0.05" Material.heightMinSteps="8" Material.heightMaxSteps="32" Material.occlusionStrength="1" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque" Material.baseColorUvSet="0" Material.metallicRoughnessUvSet="0" Material.normalUvSet="0" Material.occlusionUvSet="0" Material.emissiveUvSet="0" Material.heightUvSet="0" Material.materialAsset="" Material.baseColorTexture="" Material.metallicRoughnessTexture="" Material.normalTexture="" Material.heightTexture="" Material.occlusionTexture="" Material.emissiveTexture="">
           <Material.diffuse>
             <item>0.18</item>
             <item>0.21</item>
@@ -119,8 +117,13 @@
             <item>0.25</item>
             <item>0.25</item>
           </Material.specular>
+          <Material.emissiveColor>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </Material.emissiveColor>
         </components:Material>
-        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box">
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1">
           <PrimitiveObjectCollider.center>
             <item>0</item>
             <item>0</item>
@@ -132,11 +135,22 @@
             <item>1</item>
           </PrimitiveObjectCollider.size>
         </components:PrimitiveObjectCollider>
-        <components:RigidBody RigidBody.bodyType="Static" RigidBody.useGravity="false" RigidBody.friction="0.85" RigidBody.restitution="0"></components:RigidBody>
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.gravityScale="1" RigidBody.linearDamping="0.05" RigidBody.angularDamping="0.05" RigidBody.friction="0.85" RigidBody.restitution="0" RigidBody.isTrigger="false" RigidBody.continuousCollision="false" RigidBody.freezePositionX="false" RigidBody.freezePositionY="false" RigidBody.freezePositionZ="false" RigidBody.freezeRotationX="false" RigidBody.freezeRotationY="false" RigidBody.freezeRotationZ="false" RigidBody.collisionLayer="1" RigidBody.collisionMask="-1" RigidBody.collisionIdentifier="">
+          <RigidBody.initialLinearVelocity>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </RigidBody.initialLinearVelocity>
+          <RigidBody.initialAngularVelocity>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </RigidBody.initialAngularVelocity>
+          <RigidBody.frictionBehaviors />
+        </components:RigidBody>
       </components>
       <children />
     </item>
-
     <item name="Source Portal" enabled="true">
       <transform>
         <Transform.position>
@@ -168,8 +182,20 @@
             <item>2</item>
           </PrimitiveObjectCollider.size>
         </components:PrimitiveObjectCollider>
-        <components:RigidBody RigidBody.bodyType="Static" RigidBody.useGravity="false" RigidBody.isTrigger="true"></components:RigidBody>
-        <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="2" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="1.2" SpatialManipulator.deformationStrength="1.0">
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.gravityScale="1" RigidBody.linearDamping="0.05" RigidBody.angularDamping="0.05" RigidBody.friction="0.5" RigidBody.restitution="0" RigidBody.isTrigger="true" RigidBody.continuousCollision="false" RigidBody.freezePositionX="false" RigidBody.freezePositionY="false" RigidBody.freezePositionZ="false" RigidBody.freezeRotationX="false" RigidBody.freezeRotationY="false" RigidBody.freezeRotationZ="false" RigidBody.collisionLayer="1" RigidBody.collisionMask="-1" RigidBody.collisionIdentifier="">
+          <RigidBody.initialLinearVelocity>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </RigidBody.initialLinearVelocity>
+          <RigidBody.initialAngularVelocity>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </RigidBody.initialAngularVelocity>
+          <RigidBody.frictionBehaviors />
+        </components:RigidBody>
+        <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="2" SpatialManipulator.matrixOverlayIncludeChildren="true" SpatialManipulator.matrixOverlayPriority="0" SpatialManipulator.definesWarpVolume="false" SpatialManipulator.warpPriority="0" SpatialManipulator.warpVolumeShape="0" SpatialManipulator.warpVolumeRadius="5" SpatialManipulator.warpBoundaryFalloff="0" SpatialManipulator.spaceWarpType="0" SpatialManipulator.spiralRadiansPerUnit="0.5" SpatialManipulator.formulaX="x" SpatialManipulator.formulaY="y" SpatialManipulator.formulaZ="z" SpatialManipulator.formulaA="1" SpatialManipulator.formulaB="1" SpatialManipulator.formulaC="1" SpatialManipulator.formulaD="0" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="1.2" SpatialManipulator.deformationStrength="1" SpatialManipulator.portalEdgeHalfWidth="0.04" SpatialManipulator.portalEdgeHalfDepth="0.15" SpatialManipulator.portalCollisionCutUpdateDistance="0.05" SpatialManipulator.materializeSplitOnDisconnect="true" SpatialManipulator.portalTraversalPriority="0">
           <SpatialManipulator.position>
             <item>0</item>
             <item>0</item>
@@ -185,6 +211,17 @@
             <item>1</item>
             <item>1</item>
           </SpatialManipulator.scale>
+          <SpatialManipulator.matrixOverlayScopeRoot expectedType="Transform" objectPath="" objectName="" componentType="" componentIndex="0" />
+          <SpatialManipulator.warpVolumeSize>
+            <item>10</item>
+            <item>10</item>
+            <item>10</item>
+          </SpatialManipulator.warpVolumeSize>
+          <SpatialManipulator.spiralAxis>
+            <item>0</item>
+            <item>1</item>
+            <item>0</item>
+          </SpatialManipulator.spiralAxis>
           <SpatialManipulator.portalPoint>
             <item>0</item>
             <item>0</item>
@@ -215,13 +252,33 @@
             <item>0.5</item>
             <item>0</item>
           </SpatialManipulator.portalShapePoint3>
-          <SpatialManipulator.traversalTriggerBodyReference expectedType="RigidBody" objectPath="3" objectName="Source Portal" componentType="RigidBody" componentIndex="0" />
-          <SpatialManipulator.targetManipulator expectedType="SpatialManipulator" objectPath="4" objectName="Target Portal" componentType="SpatialManipulator" componentIndex="0" />
+          <SpatialManipulator.portalShapePoint4>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </SpatialManipulator.portalShapePoint4>
+          <SpatialManipulator.portalShapePoint5>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </SpatialManipulator.portalShapePoint5>
+          <SpatialManipulator.portalShapePoint6>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </SpatialManipulator.portalShapePoint6>
+          <SpatialManipulator.portalShapePoint7>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </SpatialManipulator.portalShapePoint7>
+          <SpatialManipulator.meshReference expectedType="Mesh" objectPath="" objectName="" componentType="" componentIndex="0" />
+          <SpatialManipulator.traversalTriggerBodyReference expectedType="RigidBody" objectPath="" objectName="Source Portal" componentType="RigidBody" componentIndex="0" />
+          <SpatialManipulator.targetManipulator expectedType="SpatialManipulator" objectPath="" objectName="Target Portal" componentType="SpatialManipulator" componentIndex="0" />
         </components:SpatialManipulator>
       </components>
       <children />
     </item>
-
     <item name="Target Portal" enabled="true">
       <transform>
         <Transform.position>
@@ -241,7 +298,7 @@
         </Transform.scale>
       </transform>
       <components>
-        <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="2" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="1.2" SpatialManipulator.deformationStrength="1.0">
+        <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="2" SpatialManipulator.matrixOverlayIncludeChildren="true" SpatialManipulator.matrixOverlayPriority="0" SpatialManipulator.definesWarpVolume="false" SpatialManipulator.warpPriority="0" SpatialManipulator.warpVolumeShape="0" SpatialManipulator.warpVolumeRadius="5" SpatialManipulator.warpBoundaryFalloff="0" SpatialManipulator.spaceWarpType="0" SpatialManipulator.spiralRadiansPerUnit="0.5" SpatialManipulator.formulaX="x" SpatialManipulator.formulaY="y" SpatialManipulator.formulaZ="z" SpatialManipulator.formulaA="1" SpatialManipulator.formulaB="1" SpatialManipulator.formulaC="1" SpatialManipulator.formulaD="0" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="1.2" SpatialManipulator.deformationStrength="1" SpatialManipulator.portalEdgeHalfWidth="0.04" SpatialManipulator.portalEdgeHalfDepth="0.15" SpatialManipulator.portalCollisionCutUpdateDistance="0.05" SpatialManipulator.materializeSplitOnDisconnect="true" SpatialManipulator.portalTraversalPriority="0">
           <SpatialManipulator.position>
             <item>0</item>
             <item>0</item>
@@ -257,6 +314,17 @@
             <item>1</item>
             <item>1</item>
           </SpatialManipulator.scale>
+          <SpatialManipulator.matrixOverlayScopeRoot expectedType="Transform" objectPath="" objectName="" componentType="" componentIndex="0" />
+          <SpatialManipulator.warpVolumeSize>
+            <item>10</item>
+            <item>10</item>
+            <item>10</item>
+          </SpatialManipulator.warpVolumeSize>
+          <SpatialManipulator.spiralAxis>
+            <item>0</item>
+            <item>1</item>
+            <item>0</item>
+          </SpatialManipulator.spiralAxis>
           <SpatialManipulator.portalPoint>
             <item>0</item>
             <item>0</item>
@@ -287,11 +355,33 @@
             <item>0.5</item>
             <item>0</item>
           </SpatialManipulator.portalShapePoint3>
+          <SpatialManipulator.portalShapePoint4>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </SpatialManipulator.portalShapePoint4>
+          <SpatialManipulator.portalShapePoint5>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </SpatialManipulator.portalShapePoint5>
+          <SpatialManipulator.portalShapePoint6>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </SpatialManipulator.portalShapePoint6>
+          <SpatialManipulator.portalShapePoint7>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </SpatialManipulator.portalShapePoint7>
+          <SpatialManipulator.meshReference expectedType="Mesh" objectPath="" objectName="" componentType="" componentIndex="0" />
+          <SpatialManipulator.traversalTriggerBodyReference expectedType="RigidBody" objectPath="" objectName="" componentType="" componentIndex="0" />
+          <SpatialManipulator.targetManipulator expectedType="" objectPath="" objectName="" componentType="" componentIndex="0" />
         </components:SpatialManipulator>
       </components>
       <children />
     </item>
-
     <item name="Traverser Cube" enabled="true">
       <transform>
         <Transform.position>
@@ -311,8 +401,8 @@
         </Transform.scale>
       </transform>
       <components>
-        <components:Mesh Mesh.file="Assets/Mesh/cube.obj"></components:Mesh>
-        <components:Material Material.shininess="36" Material.metallicFactor="0.1" Material.roughnessFactor="0.58">
+        <components:Mesh Mesh.file="Assets/Mesh/cube.obj" />
+        <components:Material Material.shininess="36" Material.metallicFactor="0.1" Material.roughnessFactor="0.58" Material.environmentDiffuseStrength="1" Material.reflectionStrength="1" Material.useCustomReflectionEnvironment="false" Material.reflectionEnvironmentTexture="" Material.reflectionEnvironmentExposure="0" Material.reflectionEnvironmentRotation="0" Material.baseColorAlpha="1" Material.alphaCutoff="0.5" Material.normalScale="1" Material.heightScale="0.05" Material.heightMinSteps="8" Material.heightMaxSteps="32" Material.occlusionStrength="1" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque" Material.baseColorUvSet="0" Material.metallicRoughnessUvSet="0" Material.normalUvSet="0" Material.occlusionUvSet="0" Material.emissiveUvSet="0" Material.heightUvSet="0" Material.materialAsset="" Material.baseColorTexture="" Material.metallicRoughnessTexture="" Material.normalTexture="" Material.heightTexture="" Material.occlusionTexture="" Material.emissiveTexture="">
           <Material.diffuse>
             <item>0.92</item>
             <item>0.93</item>
@@ -328,6 +418,11 @@
             <item>0.72</item>
             <item>0.75</item>
           </Material.specular>
+          <Material.emissiveColor>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </Material.emissiveColor>
         </components:Material>
         <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Sphere" PrimitiveObjectCollider.radius="0.35" PrimitiveObjectCollider.height="1">
           <PrimitiveObjectCollider.center>
@@ -341,17 +436,18 @@
             <item>1</item>
           </PrimitiveObjectCollider.size>
         </components:PrimitiveObjectCollider>
-        <components:RigidBody RigidBody.bodyType="Dynamic" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.linearDamping="0" RigidBody.angularDamping="0.2" RigidBody.friction="0.1" RigidBody.restitution="0" RigidBody.continuousCollision="true">
+        <components:RigidBody RigidBody.bodyType="Dynamic" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.gravityScale="1" RigidBody.linearDamping="0" RigidBody.angularDamping="0.2" RigidBody.friction="0.1" RigidBody.restitution="0" RigidBody.isTrigger="false" RigidBody.continuousCollision="true" RigidBody.freezePositionX="false" RigidBody.freezePositionY="false" RigidBody.freezePositionZ="false" RigidBody.freezeRotationX="false" RigidBody.freezeRotationY="false" RigidBody.freezeRotationZ="false" RigidBody.collisionLayer="1" RigidBody.collisionMask="-1" RigidBody.collisionIdentifier="">
           <RigidBody.initialLinearVelocity>
             <item>0</item>
             <item>0</item>
-            <item>5.5</item>
+            <item>1</item>
           </RigidBody.initialLinearVelocity>
           <RigidBody.initialAngularVelocity>
             <item>0</item>
             <item>0.8</item>
             <item>0</item>
           </RigidBody.initialAngularVelocity>
+          <RigidBody.frictionBehaviors />
         </components:RigidBody>
       </components>
       <children />

@@ -32,6 +32,20 @@ glm::vec3 SafeNormalize(const glm::vec3& value, const glm::vec3& fallback)
     return value / std::sqrt(lengthSquared);
 }
 
+bool MatricesNearlyEqual(const glm::mat4& first, const glm::mat4& second,
+    float epsilon = 1e-5f)
+{
+    for (int column = 0; column < 4; ++column)
+    {
+        for (int row = 0; row < 4; ++row)
+        {
+            if (std::abs(first[column][row] - second[column][row]) > epsilon)
+                return false;
+        }
+    }
+    return true;
+}
+
 void BuildBasis(const glm::vec3& normal, glm::vec3& tangent,
     glm::vec3& bitangent, glm::vec3& normalized)
 {
@@ -121,6 +135,7 @@ SpatialManipulator::SpatialManipulator()
     RegisterField("deformationStrength", deformationStrength);
     RegisterField("portalEdgeHalfWidth", portalEdgeHalfWidth);
     RegisterField("portalEdgeHalfDepth", portalEdgeHalfDepth);
+    RegisterField("portalCollisionCutUpdateDistance", portalCollisionCutUpdateDistance);
     RegisterField("materializeSplitOnDisconnect", materializeSplitOnDisconnect);
     RegisterField("portalTraversalPriority", portalTraversalPriority);
     RegisterField("meshReference", meshReference);
@@ -503,15 +518,14 @@ glm::mat4 SpatialManipulator::GetPortalWorldTransformTo(
     const glm::mat4 sourceFrame = GetPortalWorldFrame();
     const glm::mat4 targetFrame = target.GetPortalWorldFrame();
 
-    // A normal portal is a rigid half-turn in portal-frame coordinates.
-    // Aperture shape controls only the visible opening; it must not silently
-    // scale or shear the connected space. Explicit scale warps belong to
-    // spatial volumes or matrix overlays.
-    glm::mat4 crossing(1.f);
-    crossing[0][0] = -1.f;
-    crossing[1][1] = 1.f;
-    crossing[2][2] = -1.f;
-    return targetFrame * crossing * glm::inverse(sourceFrame);
+    // Portal anchor frames contain the authored exit orientation.  Do not add
+    // an implicit 180-degree turn here: doing so makes an otherwise aligned
+    // target look away from its connected space and forces users to rotate the
+    // source portal just to make the aperture render.  A connection is the
+    // direct relative transform from its source frame to its target frame.
+    // Aperture shape controls only the opening; scale/shear belong to explicit
+    // spatial-volume or matrix-overlay mappings.
+    return targetFrame * glm::inverse(sourceFrame);
 }
 
 glm::mat4 SpatialManipulator::GetRenderPortalWorldTransformTo(
@@ -519,11 +533,8 @@ glm::mat4 SpatialManipulator::GetRenderPortalWorldTransformTo(
 {
     const glm::mat4 sourceFrame = GetRenderPortalWorldFrame();
     const glm::mat4 targetFrame = target.GetRenderPortalWorldFrame();
-    glm::mat4 crossing(1.f);
-    crossing[0][0] = -1.f;
-    crossing[1][1] = 1.f;
-    crossing[2][2] = -1.f;
-    return targetFrame * crossing * glm::inverse(sourceFrame);
+    // Keep virtual-camera rays in the same chart as physical traversal.
+    return targetFrame * glm::inverse(sourceFrame);
 }
 
 glm::vec3 SpatialManipulator::MapWorldPointThroughPortalShape(const glm::vec3& point,
@@ -629,14 +640,8 @@ void SpatialManipulator::ResetTraversalMeshDeformation(RigidBody* traversingBody
         Owner->GetScene()->GetPhysics().RemovePortalMeshCollider(&it->second);
     traversingBody->ClearPortalLocalMeshCollider(&it->second);
 
-    if (traversingBody->Owner && it->second.meshDeformed)
-    {
-        if (Mesh* mesh = ResolveMeshForObject(traversingBody->Owner))
-            if (!it->second.baseVertices.empty())
-                mesh->SetDeformedVertices(it->second.baseVertices);
-    }
-
     it->second.meshDeformed = false;
+    it->second.hasCollisionCut = false;
     it->second.lastMesh = nullptr;
     it->second.baseVertices.clear();
     it->second.localMeshVertices.clear();
@@ -649,6 +654,25 @@ void SpatialManipulator::ResetTraversalMeshDeformation()
     for (const auto& pair : m_traversalStates)
         ResetTraversalMeshDeformation(const_cast<RigidBody*>(pair.first));
     m_traversalStates.clear();
+}
+
+void SpatialManipulator::AppendTraversalRenderInstances(
+    std::vector<TraversalRenderInstance>& output) const
+{
+    for (const auto& pair : m_traversalStates)
+    {
+        const RigidBody* body = pair.first;
+        const TraversalState& state = pair.second;
+        if (!body || !body->Owner || !state.meshDeformed || !state.lastMesh)
+            continue;
+
+        const glm::mat4 localWorld = body->Owner->transform.GetWorldMatrixWithLayer();
+        output.push_back({ body->Owner, const_cast<Mesh*>(state.lastMesh),
+            localWorld, state.localRenderClipPlane, false });
+        output.push_back({ body->Owner, const_cast<Mesh*>(state.lastMesh),
+            state.remoteRenderWorldTransform * localWorld,
+            state.remoteRenderClipPlane, true });
+    }
 }
 
 void SpatialManipulator::ApplyTraversalMeshDeformation(SpatialManipulator* target,
@@ -697,6 +721,7 @@ void SpatialManipulator::ApplyTraversalMeshDeformation(SpatialManipulator* targe
 
     const glm::mat4 bodyWorld = traversingBody->Owner->transform.GetWorldMatrix();
     const glm::mat4 bodyWorldInverse = glm::inverse(bodyWorld);
+    const glm::mat4 portalWorldTransform = GetPortalWorldTransformTo(*target);
 
     const glm::mat4 ownerWorld = Owner->transform.GetWorldMatrix();
     const glm::vec3 sourceWorldPortalPoint = glm::vec3(ownerWorld *
@@ -713,6 +738,56 @@ void SpatialManipulator::ApplyTraversalMeshDeformation(SpatialManipulator* targe
     const glm::vec3 localPlaneNormal = SafeNormalize(
         glm::transpose(bodyLinear) * sourceWorldPortalNormal,
         glm::vec3(0.f, 0.f, 1.f));
+
+    // Render the two halves directly from the original mesh buffer. The
+    // fragment shader clips each chart in world space, eliminating the old
+    // per-frame combined-mesh upload and preserving independent transforms,
+    // sort positions, shadow paths, and portal views.
+    const glm::mat4 renderPortalWorldTransform =
+        GetRenderPortalWorldTransformTo(*target);
+    const glm::mat4 renderSourceFrame = GetRenderPortalWorldFrame();
+    const glm::vec3 renderSourcePoint(renderSourceFrame[3]);
+    // GetRenderPortalWorldFrame already contains an orthonormal world-space
+    // basis.  Applying its inverse-transpose to a *world* +Z vector mixes
+    // coordinate spaces and produces an unrelated clip normal whenever a
+    // portal is rotated.  That made both chart instances disappear or overlap
+    // for rotated portals.  Start with the authored world normal, then map the
+    // complete plane through the source-to-target transform below.
+    const glm::vec3 renderSourceNormal = SafeNormalize(
+        glm::vec3(renderSourceFrame[2]), glm::vec3(0.f, 0.f, 1.f));
+    const glm::vec3 renderRemoteNormal = SafeNormalize(
+        glm::transpose(glm::inverse(glm::mat3(renderPortalWorldTransform))) *
+            renderSourceNormal,
+        glm::vec3(0.f, 0.f, 1.f));
+    const glm::vec3 localClipNormal = mapPositiveHalf
+        ? -renderSourceNormal : renderSourceNormal;
+    const glm::vec3 remoteClipNormal = mapPositiveHalf
+        ? renderRemoteNormal : -renderRemoteNormal;
+    state.remoteRenderWorldTransform = renderPortalWorldTransform;
+    state.localRenderClipPlane = glm::vec4(localClipNormal,
+        -glm::dot(localClipNormal, renderSourcePoint));
+    const glm::vec3 renderRemotePoint = glm::vec3(
+        renderPortalWorldTransform * glm::vec4(renderSourcePoint, 1.f));
+    state.remoteRenderClipPlane = glm::vec4(remoteClipNormal,
+        -glm::dot(remoteClipNormal, renderRemotePoint));
+    state.meshDeformed = true;
+
+    // A moving cut normally changes only a small amount between physics ticks.
+    // Keep the local convex hull and remote Bvh proxy alive until the cut has
+    // moved a meaningful distance, changed direction, or its portal mapping
+    // changes. Rendering remains exact every frame because it is GPU-clipped.
+    const float cutUpdateDistance = std::max(0.001f,
+        portalCollisionCutUpdateDistance);
+    const bool planeMoved = glm::length(localPlanePoint -
+        state.lastCollisionPlanePoint) >= cutUpdateDistance ||
+        glm::dot(localPlaneNormal, state.lastCollisionPlaneNormal) < 0.9995f;
+    const bool needsCollisionCut = !state.hasCollisionCut ||
+        state.mapPositiveHalf != mapPositiveHalf || planeMoved ||
+        !MatricesNearlyEqual(state.collisionRemoteWorldTransform,
+            portalWorldTransform);
+    if (!needsCollisionCut)
+        return;
+
     auto [positiveHalf, negativeHalf] = Mesh::SliceByPlane(
         state.baseVertices, localPlanePoint, localPlaneNormal);
     if (positiveHalf.empty() || negativeHalf.empty())
@@ -726,7 +801,7 @@ void SpatialManipulator::ApplyTraversalMeshDeformation(SpatialManipulator* targe
     // rotation/non-uniform scale, unlike applying a world rotation to normals
     // and then attempting to undo it piecemeal.
     const glm::mat4 localToRemoteLocal = bodyWorldInverse *
-        GetPortalWorldTransformTo(*target) * bodyWorld;
+        portalWorldTransform * bodyWorld;
     const glm::mat3 remoteNormalMatrix = glm::transpose(glm::inverse(
         glm::mat3(localToRemoteLocal)));
 
@@ -766,22 +841,18 @@ void SpatialManipulator::ApplyTraversalMeshDeformation(SpatialManipulator* targe
     state.localMeshVertices = localHalf;
     state.remoteMeshVertices = remoteHalf;
     state.localCollisionVertices = localVertices;
-    state.remoteLinearTransform = glm::mat3(
-        GetPortalWorldTransformTo(*target));
-    localHalf.insert(localHalf.end(), remoteHalf.begin(), remoteHalf.end());
-    const bool meshChanged = mesh->SetDeformedVertices(localHalf);
-    state.meshDeformed = state.meshDeformed || meshChanged;
-    // Keep the dynamic owner restricted to its local, clipped triangles. The
-    // remote triangles are registered below as a separate static instance in
-    // target space; a single convex hull spanning both halves would bridge the
-    // portal and produce invalid collisions.
+    state.remoteLinearTransform = glm::mat3(portalWorldTransform);
+    state.collisionRemoteWorldTransform = portalWorldTransform;
+    state.lastCollisionPlanePoint = localPlanePoint;
+    state.lastCollisionPlaneNormal = localPlaneNormal;
+    state.hasCollisionCut = true;
+    state.mapPositiveHalf = mapPositiveHalf;
+    // Keep the dynamic owner restricted to its local clipped triangles. The
+    // remote triangles are retained as a separate target-space Bvh instance;
+    // neither is rebuilt until the bounded cut update above requires it.
     traversingBody->SetPortalLocalMeshCollider(&state, localVertices);
     if (Owner && Owner->GetScene())
     {
-        // The visual mesh contains a remote half expressed in the owner's
-        // local coordinates. A Bullet triangle mesh cannot span that gap as
-        // one convex hull, so register the remote half as an independent,
-        // target-space collision instance instead.
         Owner->GetScene()->GetPhysics().SetPortalMeshCollider(&state,
             *traversingBody, remoteWorldVertices);
     }
@@ -1024,7 +1095,13 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target,
         // vertices and the mesh grows without bound.
         const glm::vec3 planePoint = bodyWorldPosition -
             currentSignedDistance * glm::vec3(GetPortalWorldFrame()[2]);
-        const bool intersectsAperture = std::abs(currentSignedDistance) <= 1.f &&
+        // Use the authored traversal window instead of an implicit one-unit
+        // threshold. Strength scales the distance at which visual splitting
+        // begins while retaining a small finite minimum.
+        const float deformationDistance = std::max(0.001f,
+            traversalBlendDistance * std::max(0.f, deformationStrength));
+        const bool intersectsAperture =
+            std::abs(currentSignedDistance) <= deformationDistance &&
             IsWorldPointInsidePortalAperture(planePoint, 0.001f);
         const float signedMotion = currentSignedDistance - previousSignedDistance;
         const bool isArmed = state.phase == TraversalPhase::ArmedNegative ||
@@ -1594,6 +1671,8 @@ bool SpatialManipulator::DrawProperties(::Engine::Editor::IEditorUi& ui)
 
     changed = ui.Checkbox("Auto Match Portal Point Count", &autoMatchPortalPointCount) || changed;
     changed = ui.Checkbox("Split Mesh While Crossing", &deformMeshOnTraversal) || changed;
+    changed = ui.DragFloat("Portal Collision Cut Update Distance",
+        &portalCollisionCutUpdateDistance, 0.005f, 0.001f, 1.f) || changed;
     float traversalPriority = static_cast<float>(portalTraversalPriority);
     if (ui.DragFloat("Portal Traversal Priority", &traversalPriority,
         1.f, -100000.f, 100000.f))

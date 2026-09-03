@@ -25,6 +25,7 @@
 #include <functional>
 #include <limits>
 #include <optional>
+#include <unordered_map>
 #include <glm/glm.hpp>
 #include <glm/ext/matrix_transform.hpp>
 
@@ -222,6 +223,9 @@ struct ObjectGPUData
     // Enabled per portal draw through DrawCBData::flags; dot(world, plane)
     // selects the connected half-space at the target aperture.
     glm::vec4 portalClipPlane;
+    // Independent from portal-view clipping: active traversal bodies render
+    // their local and remote chart instances from one untouched mesh buffer.
+    glm::vec4 traversalClipPlane;
 };
 
 // Constant buffer for grid rendering
@@ -245,7 +249,7 @@ struct SkyboxCBData
 };
 
 static_assert(sizeof(DrawCBData) == 16, "Draw constants must remain small");
-static_assert(sizeof(ObjectGPUData) == 656, "Object buffer layout must match Object.hlsl");
+static_assert(sizeof(ObjectGPUData) == 672, "Object buffer layout must match Object.hlsl");
 static_assert(sizeof(Engine::Model::LightData) == 48,
     "Light buffer layout must match Object.hlsl");
 static_assert(sizeof(GridCBData) == 128, "Grid constant-buffer layout must match Grid.hlsl");
@@ -891,6 +895,26 @@ void Scene::PrepareRenderFrame()
     m_lightDataBuffer->FlushMappedWrites();
 
     m_frameRenderItems.reserve(m_objects.size());
+    std::unordered_map<Engine::Core::Object*,
+        std::vector<Engine::Components::SpatialManipulator::TraversalRenderInstance>>
+        traversalRenderInstances;
+    for (const auto& object : m_objects)
+    {
+        if (!object)
+            continue;
+        if (auto* manipulator = object->GetComponent<
+                Engine::Components::SpatialManipulator>())
+        {
+            std::vector<Engine::Components::SpatialManipulator::TraversalRenderInstance>
+                instances;
+            manipulator->AppendTraversalRenderInstances(instances);
+            for (const auto& instance : instances)
+            {
+                if (instance.object)
+                    traversalRenderInstances[instance.object].push_back(instance);
+            }
+        }
+    }
     uint32_t skinPaletteSlot = 0;
     bool boneDataChanged = false;
     for (const auto& object : m_objects)
@@ -918,6 +942,17 @@ void Scene::PrepareRenderFrame()
         item.belongsToPreview = m_previewObject &&
             IsObjectOrDescendant(candidate, m_previewObject);
         item.world = candidate->transform.GetWorldMatrixWithLayer();
+        const auto splitInstances = traversalRenderInstances.find(candidate);
+        const bool hasSplitRenderInstances = !sprite &&
+            splitInstances != traversalRenderInstances.end() &&
+            !splitInstances->second.empty();
+        if (hasSplitRenderInstances)
+        {
+            // The first instance is local; each following entry represents the
+            // same authored GPU buffer in a connected spatial chart.
+            item.world = splitInstances->second.front().world;
+            item.traversalClipPlane = splitInstances->second.front().clipPlane;
+        }
 
         if (sprite)
         {
@@ -960,6 +995,16 @@ void Scene::PrepareRenderFrame()
         }
 
         m_frameRenderItems.push_back(item);
+        if (hasSplitRenderInstances)
+        {
+            for (size_t index = 1u; index < splitInstances->second.size(); ++index)
+            {
+                FrameRenderItem remoteItem = item;
+                remoteItem.world = splitInstances->second[index].world;
+                remoteItem.traversalClipPlane = splitInstances->second[index].clipPlane;
+                m_frameRenderItems.push_back(remoteItem);
+            }
+        }
     }
 
     if (boneDataChanged)
@@ -1141,6 +1186,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         }
         objectData.mvp = proj * view * world;
         objectData.world = world;
+        objectData.traversalClipPlane = renderItem->traversalClipPlane;
         objectData.spriteUvRect = { 0.f, 0.f, 1.f, 1.f };
         if (renderItem->skinJointCount > 0)
         {
@@ -2204,23 +2250,6 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 portalJob.apertureView);
             if (portalScissor)
                 context->SetScissorRect(*portalScissor);
-            const glm::mat4 targetPortalFrame =
-                portalPass.target->GetRenderPortalWorldFrame();
-            glm::vec3 clipNormal = glm::normalize(
-                glm::vec3(targetPortalFrame[2]));
-            const glm::vec3 clipPoint(targetPortalFrame[3]);
-            // The mapped camera lives on the opposite side of the target
-            // aperture and looks through it. Keep the half-space it looks
-            // towards, rather than the camera half-space: the latter hides
-            // destination ground and objects after a correct traversal.
-            const glm::vec3 mappedViewForward = glm::normalize(glm::vec3(
-                glm::inverse(portalJob.mappedView)[2]));
-            if (glm::dot(mappedViewForward, clipNormal) < 0.f)
-            {
-                clipNormal = -clipNormal;
-            }
-            const glm::vec4 portalClipPlane(clipNormal,
-                -glm::dot(clipNormal, clipPoint) + 0.0005f);
             const auto portalBackend = isDx11Provider
                 ? Engine::Rendering::Portal::Backend::DirectX11
                 : (isDx12Provider
@@ -2268,7 +2297,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
                 ObjectGPUData mappedData = draw.objectData;
                 mappedData.mvp = proj * portalJob.mappedView * mappedData.world;
-                mappedData.portalClipPlane = portalClipPlane;
+                // The stencil aperture is the only visibility boundary for a
+                // generic portal view.  Applying an extra target half-space
+                // to every scene object assumes the entire scene is already
+                // partitioned into portal-side layers; ordinary scenes are
+                // not, so that cull can erase all connected geometry and make
+                // a portal look invisible.  Traversal chart clipping remains
+                // independent in traversalClipPlane.
+                mappedData.portalClipPlane = glm::vec4(0.f);
                 mappedData.viewPositionAlphaCutoff.x =
                     portalJob.mappedCameraPosition.x;
                 mappedData.viewPositionAlphaCutoff.y =

@@ -271,6 +271,9 @@ private:
         IGraphicsBuffer* spriteVertexBuffer = nullptr;
         const Engine::Components::Texture* spriteTexture = nullptr;
         glm::mat4 world{1.f};
+        // Non-zero only for a portal-split chart instance. Object.hlsl clips
+        // against this world-space plane without modifying the mesh buffer.
+        glm::vec4 traversalClipPlane{0.f};
         glm::vec2 spriteWorldSize{1.f};
         glm::vec4 spriteUvRect{0.f, 0.f, 1.f, 1.f};
         uint32_t skinPaletteOffset = 0;

@@ -60,6 +60,8 @@ public:
     bool HasMorphTargets() const { return !m_morphTargets.empty(); }
 
     using SliceResult = std::pair<std::vector<Vertex>, std::vector<Vertex>>;
+    // Returns closed positive/negative halves. For a closed intersected mesh,
+    // the cut contour is welded and capped with triangulated planar faces.
     static SliceResult SliceByPlane(const std::vector<Vertex>& vertices,
         const glm::vec3& planePoint, const glm::vec3& planeNormal);
 

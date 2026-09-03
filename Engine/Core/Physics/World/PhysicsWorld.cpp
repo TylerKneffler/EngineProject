@@ -14,24 +14,46 @@ namespace Engine::Physics
 {
 namespace
 {
+bool SamePoints(const std::vector<glm::vec3>& first,
+    const std::vector<glm::vec3>& second)
+{
+    if (first.size() != second.size())
+        return false;
+    for (size_t index = 0; index < first.size(); ++index)
+    {
+        if (first[index].x != second[index].x ||
+            first[index].y != second[index].y ||
+            first[index].z != second[index].z)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 void AddPortalRimBox(btTriangleMesh& triangles, const glm::vec3& first,
-    const glm::vec3& second, const glm::vec3& normal, float halfWidth,
+    const glm::vec3& second, const glm::vec3& normal,
+    const glm::vec3& outward, float halfWidth,
     float halfDepth)
 {
     const glm::vec3 edge = second - first;
     const float edgeLength = glm::length(edge);
     if (edgeLength <= 1e-5f)
         return;
-    const glm::vec3 tangent = edge / edgeLength;
-    const glm::vec3 side = glm::normalize(glm::cross(normal, tangent)) *
-        std::max(halfWidth, 0.001f);
+    // The authored polygon describes the usable opening.  A symmetric box
+    // around its edge steals half its width from that opening, so a cube that
+    // exactly fits the declared aperture can never traverse.  Keep the rim
+    // wholly on the exterior, with a minute contact gap for solver stability.
+    const glm::vec3 inside = glm::normalize(outward) * 0.001f;
+    const glm::vec3 outside = glm::normalize(outward) *
+        (std::max(halfWidth, 0.001f) * 2.f + 0.001f);
     const glm::vec3 depth = glm::normalize(normal) *
         std::max(halfDepth, 0.001f);
     const std::array<glm::vec3, 8> vertices {
-        first - side - depth, second - side - depth,
-        second + side - depth, first + side - depth,
-        first - side + depth, second - side + depth,
-        second + side + depth, first + side + depth
+        first + inside - depth, second + inside - depth,
+        second + outside - depth, first + outside - depth,
+        first + inside + depth, second + inside + depth,
+        second + outside + depth, first + outside + depth
     };
     constexpr std::array<std::array<int, 3>, 12> faces {{
         {{0, 2, 1}}, {{0, 3, 2}}, {{4, 5, 6}}, {{4, 6, 7}},
@@ -53,6 +75,10 @@ struct Physics::Impl
     struct PortalMeshCollider
     {
         const Engine::Components::RigidBody* owner = nullptr;
+        std::vector<glm::vec3> vertices;
+        glm::vec3 normal { 0.f };
+        float edgeHalfWidth = 0.f;
+        float edgeHalfDepth = 0.f;
         std::unique_ptr<btTriangleMesh> triangles;
         std::unique_ptr<btBvhTriangleMeshShape> shape;
         std::unique_ptr<btCollisionObject> object;
@@ -89,6 +115,13 @@ void Physics::SetPortalMeshCollider(const void* instanceKey,
 {
     if (!m_impl || !m_impl->state || !instanceKey)
         return;
+    const auto existing = m_impl->portalMeshColliders.find(instanceKey);
+    if (existing != m_impl->portalMeshColliders.end() &&
+        existing->second.owner == &owner &&
+        SamePoints(existing->second.vertices, worldVertices))
+    {
+        return;
+    }
     RemovePortalMeshCollider(instanceKey);
     auto* ownerObject = static_cast<btCollisionObject*>(
         owner.GetNativeCollisionObjectForPhysics());
@@ -97,6 +130,7 @@ void Physics::SetPortalMeshCollider(const void* instanceKey,
 
     Impl::PortalMeshCollider collider;
     collider.owner = &owner;
+    collider.vertices = worldVertices;
     collider.triangles = std::make_unique<btTriangleMesh>();
     for (size_t index = 0; index + 2u < worldVertices.size(); index += 3u)
     {
@@ -153,17 +187,50 @@ void Physics::SetPortalApertureCollider(const void* instanceKey,
 {
     if (!m_impl || !m_impl->state || !instanceKey)
         return;
+    const glm::vec3 normalizedNormal = glm::length(worldNormal) > 1e-5f
+        ? glm::normalize(worldNormal) : glm::vec3(0.f);
+    const auto existing = m_impl->portalApertureColliders.find(instanceKey);
+    if (existing != m_impl->portalApertureColliders.end() &&
+        SamePoints(existing->second.vertices, worldPoints) &&
+        existing->second.normal.x == normalizedNormal.x &&
+        existing->second.normal.y == normalizedNormal.y &&
+        existing->second.normal.z == normalizedNormal.z &&
+        existing->second.edgeHalfWidth == edgeHalfWidth &&
+        existing->second.edgeHalfDepth == edgeHalfDepth)
+    {
+        return;
+    }
     RemovePortalApertureCollider(instanceKey);
     if (worldPoints.size() < 3u || glm::length(worldNormal) <= 1e-5f)
         return;
 
     Impl::PortalMeshCollider collider;
+    collider.vertices = worldPoints;
+    collider.normal = normalizedNormal;
+    collider.edgeHalfWidth = edgeHalfWidth;
+    collider.edgeHalfDepth = edgeHalfDepth;
     collider.triangles = std::make_unique<btTriangleMesh>();
-    const glm::vec3 normal = glm::normalize(worldNormal);
+    const glm::vec3 normal = normalizedNormal;
+    glm::vec3 centroid(0.f);
+    for (const glm::vec3& point : worldPoints)
+        centroid += point;
+    centroid /= static_cast<float>(worldPoints.size());
     for (size_t index = 0; index < worldPoints.size(); ++index)
-        AddPortalRimBox(*collider.triangles, worldPoints[index],
-            worldPoints[(index + 1u) % worldPoints.size()], normal,
+    {
+        const glm::vec3 first = worldPoints[index];
+        const glm::vec3 second = worldPoints[(index + 1u) % worldPoints.size()];
+        const glm::vec3 edge = second - first;
+        glm::vec3 outward = glm::cross(normal, edge);
+        if (glm::length(outward) <= 1e-5f)
+            continue;
+        outward = glm::normalize(outward);
+        // cross(normal, edge) points inward for the usual counter-clockwise
+        // aperture winding.  Detect winding rather than relying on it.
+        if (glm::dot(outward, centroid - (first + second) * 0.5f) > 0.f)
+            outward = -outward;
+        AddPortalRimBox(*collider.triangles, first, second, normal, outward,
             edgeHalfWidth, edgeHalfDepth);
+    }
     collider.shape = std::make_unique<btBvhTriangleMeshShape>(
         collider.triangles.get(), true);
     collider.object = std::make_unique<btCollisionObject>();

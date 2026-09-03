@@ -176,6 +176,11 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator | Portal", ClampMin = "0.001")
     float portalEdgeHalfDepth = 0.15f;
 
+    // Collision cuts are retained between small body movements. A rebuild is
+    // only needed after this much motion in the body's local cut plane.
+    PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator | Portal", ClampMin = "0.001")
+    float portalCollisionCutUpdateDistance = 0.05f;
+
     // When a linked portal is removed while a mesh is split, keep both cuts
     // as independent scene objects instead of restoring the original mesh.
     PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator | Portal")
@@ -228,6 +233,18 @@ public:
     void Update() override;
     // Called by Scene after Bullet has advanced and published overlap data.
     void PostPhysicsUpdate(std::unordered_set<const RigidBody*>* claimedBodies = nullptr);
+    // Split bodies render as two chart instances of the untouched mesh buffer;
+    // the scene applies the supplied world-space GPU clip planes per draw.
+    struct TraversalRenderInstance
+    {
+        Engine::Core::Object* object = nullptr;
+        Mesh* mesh = nullptr;
+        glm::mat4 world { 1.f };
+        glm::vec4 clipPlane { 0.f };
+        bool remote = false;
+    };
+    void AppendTraversalRenderInstances(
+        std::vector<TraversalRenderInstance>& output) const;
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
 
 private:
@@ -272,7 +289,15 @@ private:
         std::vector<Mesh::Vertex> remoteMeshVertices;
         std::vector<glm::vec3> localCollisionVertices;
         glm::mat3 remoteLinearTransform { 1.f };
+        glm::mat4 remoteRenderWorldTransform { 1.f };
+        glm::mat4 collisionRemoteWorldTransform { 1.f };
+        glm::vec4 localRenderClipPlane { 0.f };
+        glm::vec4 remoteRenderClipPlane { 0.f };
+        glm::vec3 lastCollisionPlanePoint { 0.f };
+        glm::vec3 lastCollisionPlaneNormal { 0.f, 0.f, 1.f };
         bool meshDeformed = false;
+        bool hasCollisionCut = false;
+        bool mapPositiveHalf = false;
         Phase phase = Phase::Uninitialized;
         bool waitForOverlapExit = false;
         glm::vec3 previousWorldPosition { 0.f };

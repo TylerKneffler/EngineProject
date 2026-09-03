@@ -30,6 +30,7 @@ struct ObjectData
     float4 reflectionEnvironmentParams;
     float4 reflectionEnvironmentSH[9];
     float4 portalClipPlane;
+    float4 traversalClipPlane;
 };
 
 struct SceneLightData
@@ -327,6 +328,13 @@ float4 PSMain(
 {
     ObjectData objectData = objects[draw.objectIndex];
     uint flags = (uint)objectData.materialParams.w;
+    // Split traversal instances retain their own chart clipping even while
+    // they are drawn through another portal view. This must be separate from
+    // the destination aperture plane below; overwriting either reveals both
+    // halves of a crossing object or hides the connected scene.
+    if (dot(objectData.traversalClipPlane.xyz, objectData.traversalClipPlane.xyz) > 0.0 &&
+        dot(float4(worldPos, 1.0), objectData.traversalClipPlane) < 0.0)
+        clip(-1.0);
     // Portal views keep only the connected side of the target aperture. This
     // avoids geometry from behind the destination plane appearing through a
     // stencil-correct but spatially invalid portal view.

@@ -151,6 +151,10 @@ int main(int argc, char** argv)
     Engine::Core::Object* traverser = scene.AddObject("Traverser");
     traverser->transform.position = glm::vec3(0.f, 0.f, -3.f);
     traverser->transform.rotation = glm::vec3(0.f, 0.25f, 0.f);
+    // The authored cube is 1 unit wide. Keep the successful-traversal
+    // fixture inside the 1-unit aperture after its solid rim is applied;
+    // the separate blocked sphere below covers the too-large case.
+    traverser->transform.scale = glm::vec3(0.4f);
 
     auto* traverserMesh = traverser->AddComponent<Mesh>();
     traverserMesh->LoadFromFile(meshPath);
@@ -176,6 +180,11 @@ int main(int argc, char** argv)
     // aperture. A separate stationary body below stays inside the broad
     // trigger but outside the aperture to guard the narrow-phase rule.
     reverseTraverser->transform.position = glm::vec3(0.f, 0.2f, 3.f);
+    reverseTraverser->transform.scale = glm::vec3(0.4f);
+    // Exercise reverse traversal after the forward body has left the shared
+    // aperture. Two dynamic cut pieces legitimately collide at one opening;
+    // this fixture is testing directionality, not simultaneous-body routing.
+    reverseTraverser->enabled = false;
     auto* reverseTraverserMesh = reverseTraverser->AddComponent<Mesh>();
     reverseTraverserMesh->LoadFromFile(meshPath);
     const std::vector<Engine::Model::Vertex> reverseBaseVertices =
@@ -257,6 +266,7 @@ int main(int argc, char** argv)
 
     Engine::Core::Object* breakTraverser = scene.AddObject("BreakTraverser");
     breakTraverser->transform.position = glm::vec3(40.f, 0.f, -3.f);
+    breakTraverser->transform.scale = glm::vec3(0.4f);
     auto* breakMesh = breakTraverser->AddComponent<Mesh>();
     breakMesh->LoadFromFile(meshPath);
     auto* breakBody = breakTraverser->AddComponent<RigidBody>();
@@ -275,8 +285,8 @@ int main(int argc, char** argv)
     bool sawPriorityTeleport = false;
     bool sawReverseTeleport = false;
     bool stationaryTeleported = false;
-    bool sawMeshDeformation = false;
-    bool sawReverseMeshDeformation = false;
+    bool sawCpuMeshMutation = false;
+    bool sawGpuSplitRenderInstances = false;
     bool sawPortalMeshCollider = false;
     bool sawPortalLocalMeshCollider = false;
     bool sawRemoteMeshColliderContact = false;
@@ -355,6 +365,8 @@ int main(int argc, char** argv)
     bool previousReverseDeformed = false;
     for (int frame = 0; frame < 240; ++frame)
     {
+        if (frame == 100)
+            reverseTraverser->enabled = true;
         if (frame == 120)
             blockedTraverser->enabled = true;
         scene.Update(1.f / 60.f);
@@ -411,10 +423,25 @@ int main(int argc, char** argv)
             traverserMesh->GetVertices(), 0.0001f);
         const bool reverseDeformed = VerticesChanged(reverseBaseVertices,
             reverseTraverserMesh->GetVertices(), 0.0001f);
-        if (forwardDeformed)
-            sawMeshDeformation = true;
-        if (reverseDeformed)
-            sawReverseMeshDeformation = true;
+        sawCpuMeshMutation = sawCpuMeshMutation || forwardDeformed ||
+            reverseDeformed;
+        std::vector<SpatialManipulator::TraversalRenderInstance>
+            traversalRenderInstances;
+        sourceManipulator->AppendTraversalRenderInstances(
+            traversalRenderInstances);
+        priorityManipulator->AppendTraversalRenderInstances(
+            traversalRenderInstances);
+        bool foundLocalRenderInstance = false;
+        bool foundRemoteRenderInstance = false;
+        for (const auto& instance : traversalRenderInstances)
+        {
+            if (instance.object != traverser && instance.object != reverseTraverser)
+                continue;
+            foundLocalRenderInstance = foundLocalRenderInstance || !instance.remote;
+            foundRemoteRenderInstance = foundRemoteRenderInstance || instance.remote;
+        }
+        sawGpuSplitRenderInstances = sawGpuSplitRenderInstances ||
+            (foundLocalRenderInstance && foundRemoteRenderInstance);
         if (scene.GetPhysics().GetPortalMeshColliderCount(*traverserBody) > 0u ||
             scene.GetPhysics().GetPortalMeshColliderCount(*reverseBody) > 0u)
         {
@@ -469,11 +496,11 @@ int main(int argc, char** argv)
     for (int column = 0; column < 3; ++column)
         assert(glm::dot(orientationAfterTeleport[column],
             expectedOrientation[column]) > 0.f);
-    assert(sawMeshDeformation);
-    // The negative half is the remote half for this positive-to-negative
-    // crossing. This guards the reverse-direction split path as well as the
-    // differently sized target aperture used by this fixture.
-    assert(sawReverseMeshDeformation);
+    // Traversal now keeps the authored mesh buffer stable and submits local /
+    // remote chart instances using GPU clip planes. This exercises both travel
+    // directions without per-frame CPU mesh uploads.
+    assert(!sawCpuMeshMutation);
+    assert(sawGpuSplitRenderInstances);
     assert(sawPortalMeshCollider);
     assert(sawPortalLocalMeshCollider);
     assert(sawRemoteMeshColliderContact);

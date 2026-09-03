@@ -7,6 +7,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <cassert>
+#include <cmath>
 
 int main()
 {
@@ -55,6 +56,82 @@ int main()
     assert(!split.first.empty());
     assert(!split.second.empty());
 
+    // A portal cut through a closed mesh must be closed by a weldable cap on
+    // each side, not left as the open clipped triangle stream.
+    std::vector<Mesh::Vertex> cube;
+    const auto appendFace = [&](const glm::vec3& a, const glm::vec3& b,
+        const glm::vec3& c, const glm::vec3& d, const glm::vec3& normal)
+    {
+        const glm::vec3 positions[6] = { a, b, c, a, c, d };
+        for (const glm::vec3& position : positions)
+        {
+            Mesh::Vertex vertex{};
+            vertex.pos[0] = position.x;
+            vertex.pos[1] = position.y;
+            vertex.pos[2] = position.z;
+            vertex.normal[0] = normal.x;
+            vertex.normal[1] = normal.y;
+            vertex.normal[2] = normal.z;
+            cube.push_back(vertex);
+        }
+    };
+    appendFace({ 1.f, -1.f, -1.f }, { 1.f, 1.f, -1.f },
+        { 1.f, 1.f, 1.f }, { 1.f, -1.f, 1.f }, { 1.f, 0.f, 0.f });
+    appendFace({ -1.f, -1.f, 1.f }, { -1.f, 1.f, 1.f },
+        { -1.f, 1.f, -1.f }, { -1.f, -1.f, -1.f }, { -1.f, 0.f, 0.f });
+    appendFace({ -1.f, 1.f, -1.f }, { -1.f, 1.f, 1.f },
+        { 1.f, 1.f, 1.f }, { 1.f, 1.f, -1.f }, { 0.f, 1.f, 0.f });
+    appendFace({ -1.f, -1.f, 1.f }, { -1.f, -1.f, -1.f },
+        { 1.f, -1.f, -1.f }, { 1.f, -1.f, 1.f }, { 0.f, -1.f, 0.f });
+    appendFace({ -1.f, -1.f, 1.f }, { 1.f, -1.f, 1.f },
+        { 1.f, 1.f, 1.f }, { -1.f, 1.f, 1.f }, { 0.f, 0.f, 1.f });
+    appendFace({ 1.f, -1.f, -1.f }, { -1.f, -1.f, -1.f },
+        { -1.f, 1.f, -1.f }, { 1.f, 1.f, -1.f }, { 0.f, 0.f, -1.f });
+
+    const auto cappedSplit = Mesh::SliceByPlane(cube, glm::vec3(0.f),
+        glm::vec3(1.f, 0.f, 0.f));
+    const auto countCapVertices = [](const std::vector<Mesh::Vertex>& half,
+        const glm::vec3& expectedNormal)
+    {
+        size_t count = 0;
+        for (const Mesh::Vertex& vertex : half)
+        {
+            const glm::vec3 position(vertex.pos[0], vertex.pos[1], vertex.pos[2]);
+            const glm::vec3 normal(vertex.normal[0], vertex.normal[1], vertex.normal[2]);
+            const glm::vec3 tangent(vertex.tangent[0], vertex.tangent[1], vertex.tangent[2]);
+            if (std::abs(position.x) < 0.0001f &&
+                glm::dot(normal, expectedNormal) > 0.999f)
+            {
+                assert(std::abs(glm::length(tangent) - 1.f) < 0.0001f);
+                assert(std::isfinite(vertex.uv[0]) && std::isfinite(vertex.uv[1]));
+                ++count;
+            }
+        }
+        return count;
+    };
+    assert(countCapVertices(cappedSplit.first, glm::vec3(-1.f, 0.f, 0.f)) == 6u);
+    assert(countCapVertices(cappedSplit.second, glm::vec3(1.f, 0.f, 0.f)) == 6u);
+    const auto assertCapWinding = [](const std::vector<Mesh::Vertex>& half,
+        const glm::vec3& expectedNormal)
+    {
+        size_t capTriangleCount = 0;
+        for (size_t index = 0; index + 2u < half.size(); index += 3u)
+        {
+            const glm::vec3 a(half[index].pos[0], half[index].pos[1], half[index].pos[2]);
+            const glm::vec3 b(half[index + 1u].pos[0], half[index + 1u].pos[1], half[index + 1u].pos[2]);
+            const glm::vec3 c(half[index + 2u].pos[0], half[index + 2u].pos[1], half[index + 2u].pos[2]);
+            if (std::abs(a.x) < 0.0001f && std::abs(b.x) < 0.0001f &&
+                std::abs(c.x) < 0.0001f)
+            {
+                assert(glm::dot(glm::cross(b - a, c - a), expectedNormal) > 0.001f);
+                ++capTriangleCount;
+            }
+        }
+        assert(capTriangleCount == 2u);
+    };
+    assertCapWinding(cappedSplit.first, glm::vec3(-1.f, 0.f, 0.f));
+    assertCapWinding(cappedSplit.second, glm::vec3(1.f, 0.f, 0.f));
+
     SpatialManipulator sourcePortal;
     SpatialManipulator targetPortal;
     sourcePortal.portalPoint = glm::vec3(0.f, 0.f, 0.f);
@@ -77,7 +154,8 @@ int main()
         glm::vec3(0.75f, 0.f, 0.f)));
     const glm::vec3 mapped = sourcePortal.MapWorldPointThroughPortalShape(
         glm::vec3(0.25f, 0.25f, 0.f), targetPortal);
-    assert(glm::length(mapped - glm::vec3(-0.25f, 0.25f, 0.f)) < 0.05f);
+    // Identical authored anchor frames preserve their in-plane coordinates.
+    assert(glm::length(mapped - glm::vec3(0.25f, 0.25f, 0.f)) < 0.05f);
 
     sourcePortal.portalShapePoint2 = glm::vec3(-0.25f, 0.f, 0.f);
     assert(!sourcePortal.IsValidPortalAperture());
@@ -178,22 +256,22 @@ int main()
     const glm::vec3 targetNormal(1.f, 0.f, 0.f);
     const glm::vec3 mappedNormal = glm::vec3(sourceToTarget *
         glm::vec4(sourceNormal, 0.f));
-    assert(glm::length(mappedNormal - (-targetNormal)) < 0.0002f);
-    // The virtual camera maps to the back of the target portal, then looks
-    // into its front half-space. Target clipping must retain this direction,
-    // not the mapped camera's own side of the plane.
+    assert(glm::length(mappedNormal - targetNormal) < 0.0002f);
+    // The target anchor frame explicitly defines the exit side and viewing
+    // direction, so a viewer on the source normal side maps to that same side
+    // of the target and looks back through the target aperture.
     const glm::vec3 sourceViewer = sourceAnchor + sourceNormal * 2.f;
     const glm::vec3 mappedViewer = glm::vec3(sourceToTarget *
         glm::vec4(sourceViewer, 1.f));
     const glm::vec3 mappedLookPoint = glm::vec3(sourceToTarget *
         glm::vec4(sourceViewer - sourceNormal, 1.f));
-    assert(glm::dot(mappedViewer - targetAnchor, targetNormal) < -1.9f);
-    assert(glm::dot(mappedLookPoint - mappedViewer, targetNormal) > 0.9f);
+    assert(glm::dot(mappedViewer - targetAnchor, targetNormal) > 1.9f);
+    assert(glm::dot(mappedLookPoint - mappedViewer, targetNormal) < -0.9f);
     const glm::vec3 mappedTangent = glm::vec3(sourceToTarget *
         glm::vec4(1.f, 0.f, 0.f, 0.f));
     const glm::vec3 mappedBitangent = glm::vec3(sourceToTarget *
         glm::vec4(0.f, 1.f, 0.f, 0.f));
-    assert(glm::length(mappedTangent - glm::vec3(0.f, 0.f, 1.f)) < 0.0002f);
+    assert(glm::length(mappedTangent - glm::vec3(0.f, 0.f, -1.f)) < 0.0002f);
     assert(glm::length(mappedBitangent - glm::vec3(0.f, 1.f, 0.f)) < 0.0002f);
     assert(glm::determinant(glm::mat3(sourceToTarget)) > 0.f);
 

@@ -71,3 +71,9 @@
 - [x] MEDIUM: Define deterministic composition/priority rules for overlapping warp volumes and simultaneous portal-trigger ownership of the same traversing body.
 - [x] MEDIUM: Correct world-layer point transforms to apply full world matrix composition (rotation/scale-safe), not position-offset approximations.
 - [x] MEDIUM: Revisit portal mesh deformation to behave correctly for bidirectional traversal and asymmetric portal geometry.
+- [x] CRITICAL: Generate welded, triangulated cap surfaces for portal mesh cuts, including stable cap UVs, normals, tangents, and owning-material assignment; clipped triangle halves no longer leave open seams.
+- [x] HIGH: Replace per-frame CPU split-mesh uploads with two GPU-clipped render instances (local and remote frames) that preserve independent bounds, culling, shadows, and transparency ordering during traversal.
+- [x] HIGH: Keep local/remote portal collision pieces persistent across a traversal; update transforms or bounded-rate cut data without rebuilding dynamic rigid bodies, convex hulls, and Bvh meshes every frame.
+- [ ] HIGH: Gate teleportation with a swept collision-shape-versus-inset-aperture test, using the solid rim as physical feedback rather than relying on the body centre alone.
+- [ ] MEDIUM: Support indexed meshes, explicit submeshes/material slots, skinned meshes, and morph updates in portal cuts; the current triangle-stream clipper cannot preserve all asset topology.
+- [ ] MEDIUM: Define fragment ownership for scripts, joints, children, animation, and serialization when a connection disappears while an object is split.

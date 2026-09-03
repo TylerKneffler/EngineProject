@@ -194,7 +194,28 @@ bool Engine::Components::RigidBody::EnsureBody()
     m_impl->scene = Owner->GetScene();
     m_impl->compound = std::make_unique<btCompoundShape>();
 
-    for (Engine::Core::Component* component : Owner->Components)
+    // A body that intersects a portal is represented by two independent
+    // collision pieces.  The remote piece is registered by PhysicsWorld in
+    // the connected chart; this local body must contain *only* the local cut
+    // or its original primitive/mesh collider will bridge the aperture and
+    // continue colliding on the remote side.  The old code tracked the cut
+    // revision but then rebuilt every authored collider, silently discarding
+    // the split geometry.
+    const bool hasPortalLocalPiece = m_impl->portalLocalMeshKey &&
+        m_impl->portalLocalMeshVertices.size() >= 3u;
+    if (hasPortalLocalPiece)
+    {
+        auto hull = std::make_unique<btConvexHullShape>();
+        for (const glm::vec3& vertex : m_impl->portalLocalMeshVertices)
+        {
+            hull->addPoint(btVector3(vertex.x * scale.x, vertex.y * scale.y,
+                vertex.z * scale.z), false);
+        }
+        hull->recalcLocalAabb();
+        m_impl->compound->addChildShape(btTransform::getIdentity(), hull.get());
+        m_impl->shapes.push_back(std::move(hull));
+    }
+    else for (Engine::Core::Component* component : Owner->Components)
     {
         Engine::Components::Collider* collider = dynamic_cast<Engine::Components::Collider*>(component);
         if (!collider || !collider->collisionEnabled) continue;
@@ -407,11 +428,24 @@ void Engine::Components::RigidBody::NotifyEditorTransformChanged()
 void Engine::Components::RigidBody::SetPortalLocalMeshCollider(
     const void* instanceKey, const std::vector<glm::vec3>& localVertices)
 {
+    if (!m_impl)
+        return;
     if (!instanceKey || localVertices.size() < 3u)
     {
         ClearPortalLocalMeshCollider(instanceKey);
         return;
     }
+    const bool unchanged = m_impl->portalLocalMeshKey == instanceKey &&
+        m_impl->portalLocalMeshVertices.size() == localVertices.size() &&
+        std::equal(m_impl->portalLocalMeshVertices.begin(),
+            m_impl->portalLocalMeshVertices.end(), localVertices.begin(),
+            [](const glm::vec3& first, const glm::vec3& second)
+            {
+                return first.x == second.x && first.y == second.y &&
+                    first.z == second.z;
+            });
+    if (unchanged)
+        return;
     m_impl->portalLocalMeshKey = instanceKey;
     m_impl->portalLocalMeshVertices = localVertices;
     if (++m_impl->portalLocalMeshRevision == 0)
