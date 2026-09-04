@@ -5,10 +5,13 @@
 #include "Core/Rendering/Lighting/Pipelines/Realtime/RealtimeLightingPipeline.h"
 #include "Core/Rendering/Lighting/Pipelines/Baked/BakedLightingPipeline.h"
 #include "Core/Model/SceneSettings.h"
+#include "Core/Model/MeshData.h"
 #include <glm/glm.hpp>
 #include <array>
 #include <memory>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace Engine::Physics { class Physics; }
 namespace Engine::Audio { class Audio; }
@@ -87,6 +90,14 @@ public:
         glm::vec3 origin { 0.f };
         glm::vec3 direction { 0.f, 0.f, 1.f };
     };
+    // A straight segment in one spatial chart.  A portal hit ends a segment;
+    // the following segment starts at the connected endpoint in its chart.
+    struct PortalRaySegment
+    {
+        SpatialRay ray;
+        float maxDistance = 0.f;
+        const Object* enteredPortal = nullptr;
+    };
 
     Scene();
     ~Scene();
@@ -144,6 +155,12 @@ public:
         const SpatialQuery& query = {}) const;
     SpatialRay MapSpatialRay(const SpatialRay& ray,
         const SpatialQuery& query = {}) const;
+    // Trace a finite physical-space ray across portal apertures.  This is the
+    // common primitive for gameplay queries and editor picking; callers test
+    // ordinary geometry against each returned segment in order.  Nonlinear
+    // volume integration remains a separate concern from discrete portals.
+    std::vector<PortalRaySegment> TracePortalRay(const SpatialRay& ray,
+        float maxDistance, uint32_t maxPortalHops = 8u) const;
 
     // Compatibility names for existing gameplay code. New code should state
     // its spatial intent with MapSpatialPoint/MapSpatialMatrix.
@@ -160,6 +177,13 @@ public:
     // Object management
     Object* AddObject();                     // create an empty Object owned by this scene
     Object* AddObject(const std::string& name);
+    // Includes objects queued for an end-of-frame runtime spawn.
+    Object* FindObjectByName(const std::string& name);
+    const Object* FindObjectByName(const std::string& name) const;
+    // Safe from component callbacks: destruction is committed after the
+    // current scene update finishes, so the calling component remains valid
+    // until its Update() returns.
+    void    RequestRemoveObject(Object* obj);
     void    RemoveObject(Object* obj);
     void    ClearObjects();                  // remove all objects and reset selection
     const std::vector<std::unique_ptr<Object>>& GetObjects() const { return m_objects; }
@@ -270,6 +294,10 @@ private:
         const Engine::Rendering::BakedLightingData* bakedLighting = nullptr;
         IGraphicsBuffer* spriteVertexBuffer = nullptr;
         const Engine::Components::Texture* spriteTexture = nullptr;
+        // When a mesh crosses a nonlinear warp boundary, this buffer holds
+        // the per-vertex mapped positions, normals and tangents.  It is a
+        // renderer-owned view of the authored mesh, never the mesh itself.
+        IGraphicsBuffer* warpedVertexBuffer = nullptr;
         glm::mat4 world{1.f};
         // Non-zero only for a portal-split chart instance. Object.hlsl clips
         // against this world-space plane without modifying the mesh buffer.
@@ -284,11 +312,27 @@ private:
     };
 
     std::vector<FrameRenderItem> m_frameRenderItems;
+
+    struct WarpedRenderMesh
+    {
+        std::unique_ptr<IGraphicsBuffer> vertexBuffer;
+        std::vector<Engine::Model::Vertex> vertices;
+    };
+    // Object ownership remains in m_objects; this cache only owns transient
+    // GPU upload buffers. Entries are replaced when topology changes and are
+    // pruned as objects leave the scene.
+    std::unordered_map<const Object*, WarpedRenderMesh> m_warpedRenderMeshes;
     uint32_t m_frameLightCount = 0;
     bool m_renderFramePrepared = false;
 
     // ---- Object list ----
     std::vector<std::unique_ptr<Object>> m_objects;
+    std::vector<std::unique_ptr<Object>> m_pendingObjectAdditions;
+    std::vector<Object*> m_pendingObjectRemovals;
+    bool m_isUpdating = false;
+    bool m_hasStarted = false;
+    void FlushPendingObjectAdditions();
+    void FlushPendingObjectRemovals();
     Object* m_selectedObject = nullptr;
     Object* m_previewObject = nullptr;
     bool m_editorMode2D = false;

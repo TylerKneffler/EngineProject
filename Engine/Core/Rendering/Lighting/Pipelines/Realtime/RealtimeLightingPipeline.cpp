@@ -8,7 +8,8 @@ namespace Engine::Rendering
     uint32_t RealtimeLightingPipeline::CollectLights(
         const Engine::Scene::Scene& scene,
         LightData* destination,
-        uint32_t capacity) const
+        uint32_t capacity,
+        bool mapThroughSpatialVolumes) const
     {
         if (!destination || capacity == 0)
             return 0;
@@ -25,8 +26,15 @@ namespace Engine::Rendering
             if (light->GetLightType() == Engine::Components::Light::Type::Point && light->range <= 0.f)
                 continue;
 
-            const glm::mat4 world =
-                candidate->transform.GetWorldMatrixWithLayer();
+            glm::mat4 world = candidate->transform.GetWorldMatrix();
+            if (candidate->transform.matrixLayer.enabled)
+                world = candidate->transform.matrixLayer.localToLayer * world;
+            if (mapThroughSpatialVolumes)
+            {
+                world = scene.MapSpatialMatrix(world,
+                    { Engine::Scene::Scene::SpatialQueryDomain::Rendering,
+                        candidate.get() });
+            }
             LightData data{};
             if (light->GetLightType() == Engine::Components::Light::Type::Ambient)
             {

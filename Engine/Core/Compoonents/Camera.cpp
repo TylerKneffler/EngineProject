@@ -27,15 +27,23 @@ glm::mat4 Camera::GetViewMatrix() const
     glm::mat4 world = Owner->transform.GetWorldMatrix();
     if (Owner->transform.matrixLayer.enabled)
         world = Owner->transform.matrixLayer.localToLayer * world;
+    bool useSourceWarpChart = false;
     if (Owner->GetScene())
     {
-        world = Owner->GetScene()->MapSpatialMatrix(world,
-            { Engine::Scene::Scene::SpatialQueryDomain::Camera, Owner });
+        const Engine::Scene::Scene::SpatialQuerySample cameraSample =
+            Owner->GetScene()->SampleSpatialPoint(glm::vec3(world[3]),
+                { Engine::Scene::Scene::SpatialQueryDomain::Camera, Owner });
+        useSourceWarpChart = cameraSample.affectedByWarpVolume;
+        if (!useSourceWarpChart)
+        {
+            world = Owner->GetScene()->MapSpatialMatrix(world,
+                { Engine::Scene::Scene::SpatialQueryDomain::Camera, Owner });
+        }
     }
     const glm::vec3 p = glm::vec3(world[3]);
     if (!useTransformRotation)
     {
-        const glm::vec3 mappedTarget = Owner->GetScene()
+        const glm::vec3 mappedTarget = Owner->GetScene() && !useSourceWarpChart
             ? Owner->GetScene()->MapSpatialPoint(target,
                 { Engine::Scene::Scene::SpatialQueryDomain::Camera }) : target;
         return glm::lookAtLH(p, mappedTarget, up);

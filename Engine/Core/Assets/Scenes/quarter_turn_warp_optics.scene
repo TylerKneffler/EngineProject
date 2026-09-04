@@ -1,0 +1,118 @@
+<?xml version="1.0"?>
+<Scene xmlns:components="urn:engine-components" version="1">
+  <settings showGrid="true" gridHalfSize="18" gridCellSize="1" gridOpacity="0.22" gridFadeDistance="80" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" renderMode="0" sceneViewUiOverlay="false" portalDebugVisuals="true" portalDebugWireframe="true" portalDebugTintRemoteView="false" portalDebugOverlayAlpha="0.8" portalRecursionDepth="2" portalMaxViewsPerFrame="24">
+    <gridColor><item>0.28</item><item>0.33</item><item>0.4</item></gridColor>
+    <gridOriginColor><item>0.18</item><item>0.7</item><item>0.95</item></gridOriginColor>
+    <ambientColor><item>0.035</item><item>0.045</item><item>0.07</item></ambientColor>
+  </settings>
+  <objects>
+    <item name="Quarter Turn Warp Camera" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>2</item><item>0.02</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Camera Camera.active="true" Camera.useTransformRotation="true" Camera.fov="58" Camera.near="0.01" Camera.far="100" Camera.orthographic="false" Camera.orthographicSize="5">
+          <Camera.target><item>0</item><item>2</item><item>3</item></Camera.target>
+          <Camera.up><item>0</item><item>1</item><item>0</item></Camera.up>
+        </components:Camera>
+      </components>
+      <children />
+    </item>
+    <item name="Quarter Turn Warp Volume" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>2</item><item>4.71238898</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="1" SpatialManipulator.definesWarpVolume="true" SpatialManipulator.warpPriority="0" SpatialManipulator.warpVolumeShape="1" SpatialManipulator.warpVolumeRadius="5" SpatialManipulator.warpBoundaryFalloff="0" SpatialManipulator.applyTraversalScale="false" SpatialManipulator.persistTraversalScaleOnExit="true" SpatialManipulator.spaceWarpType="2" SpatialManipulator.spiralRadiansPerUnit="0" SpatialManipulator.formulaX="a-(a-x)*cos((z+b)/a)" SpatialManipulator.formulaY="y" SpatialManipulator.formulaZ="(a-x)*sin((z+b)/a)-b" SpatialManipulator.formulaA="6" SpatialManipulator.formulaB="4.71238898" SpatialManipulator.formulaC="0" SpatialManipulator.formulaD="0" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="1" SpatialManipulator.deformationStrength="1">
+          <SpatialManipulator.position><item>0</item><item>0</item><item>0</item></SpatialManipulator.position>
+          <SpatialManipulator.rotation><item>0</item><item>0</item><item>0</item></SpatialManipulator.rotation>
+          <SpatialManipulator.scale><item>1</item><item>1</item><item>1</item></SpatialManipulator.scale>
+          <SpatialManipulator.warpVolumeSize><item>8</item><item>6</item><item>9.42477796</item></SpatialManipulator.warpVolumeSize>
+          <SpatialManipulator.spiralAxis><item>0</item><item>1</item><item>0</item></SpatialManipulator.spiralAxis>
+          <SpatialManipulator.portalPoint><item>0</item><item>0</item><item>0</item></SpatialManipulator.portalPoint>
+          <SpatialManipulator.portalNormal><item>0</item><item>0</item><item>1</item></SpatialManipulator.portalNormal>
+          <SpatialManipulator.portalShapePoint0><item>-0.5</item><item>-0.5</item><item>0</item></SpatialManipulator.portalShapePoint0>
+          <SpatialManipulator.portalShapePoint1><item>0.5</item><item>-0.5</item><item>0</item></SpatialManipulator.portalShapePoint1>
+          <SpatialManipulator.portalShapePoint2><item>0.5</item><item>0.5</item><item>0</item></SpatialManipulator.portalShapePoint2>
+          <SpatialManipulator.portalShapePoint3><item>-0.5</item><item>0.5</item><item>0</item></SpatialManipulator.portalShapePoint3>
+          <SpatialManipulator.meshReference expectedType="Mesh" objectPath="" objectName="" componentType="" componentIndex="0" />
+          <SpatialManipulator.traversalTriggerBodyReference expectedType="RigidBody" objectPath="" objectName="" componentType="" componentIndex="0" />
+          <SpatialManipulator.targetManipulator expectedType="" objectPath="" objectName="" componentType="" componentIndex="0" />
+        </components:SpatialManipulator>
+      </components>
+      <children />
+    </item>
+    <item name="Entry Cube" enabled="true">
+      <transform>
+        <Transform.position><item>-1.2</item><item>2</item><item>1</item></Transform.position>
+        <Transform.rotation><item>0.2</item><item>0.3</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>0.7</item><item>0.7</item><item>0.7</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/cube.obj" />
+        <components:Material Material.shininess="60" Material.metallicFactor="0.35" Material.roughnessFactor="0.22" Material.baseColorAlpha="1" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque">
+          <Material.diffuse><item>1</item><item>0.22</item><item>0.08</item></Material.diffuse>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Bend Sphere" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>2</item><item>4.71238898</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>0.82</item><item>0.82</item><item>0.82</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/sphere.obj" />
+        <components:Material Material.shininess="72" Material.metallicFactor="0.2" Material.roughnessFactor="0.18" Material.baseColorAlpha="1" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque">
+          <Material.diffuse><item>0.12</item><item>0.72</item><item>1</item></Material.diffuse>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Exit Cube" enabled="true">
+      <transform>
+        <Transform.position><item>1.1</item><item>2</item><item>8.3</item></Transform.position>
+        <Transform.rotation><item>0.1</item><item>-0.5</item><item>0.25</item></Transform.rotation>
+        <Transform.scale><item>0.65</item><item>0.65</item><item>0.65</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/cube.obj" />
+        <components:Material Material.shininess="65" Material.metallicFactor="0.5" Material.roughnessFactor="0.16" Material.baseColorAlpha="1" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque">
+          <Material.diffuse><item>0.96</item><item>0.82</item><item>0.1</item></Material.diffuse>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Point Light at Bend" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>3.3</item><item>4.71238898</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Light Light.lightType="0" Light.intensity="16" Light.range="12" Light.falloff="1.35" Light.baked="false">
+          <Light.color><item>0.35</item><item>0.78</item><item>1</item></Light.color>
+        </components:Light>
+      </components>
+      <children />
+    </item>
+    <item name="Exit Warm Light" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>2.5</item><item>8.6</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Light Light.lightType="0" Light.intensity="11" Light.range="10" Light.falloff="1.4" Light.baked="false">
+          <Light.color><item>1</item><item>0.38</item><item>0.08</item></Light.color>
+        </components:Light>
+      </components>
+      <children />
+    </item>
+  </objects>
+</Scene>

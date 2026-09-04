@@ -244,6 +244,26 @@ int main(int argc, char** argv)
     blockedCollider->shape = "Sphere";
     blockedCollider->radius = 0.75f;
 
+    // Its centre is inside the aperture, but its right-hand bounds overlap
+    // the rim. This must collide and must not traverse on a centre-point ray.
+    Engine::Core::Object* edgeBlockedTraverser = scene.AddObject(
+        "EdgeBlockedTraverser");
+    edgeBlockedTraverser->enabled = false;
+    edgeBlockedTraverser->transform.position = glm::vec3(0.35f, 0.f, -3.f);
+    edgeBlockedTraverser->transform.scale = glm::vec3(0.4f);
+    auto* edgeBlockedMesh = edgeBlockedTraverser->AddComponent<Mesh>();
+    edgeBlockedMesh->LoadFromFile(meshPath);
+    auto* edgeBlockedBody = edgeBlockedTraverser->AddComponent<RigidBody>();
+    edgeBlockedBody->bodyType = "Dynamic";
+    edgeBlockedBody->useGravity = false;
+    edgeBlockedBody->linearDamping = 0.f;
+    edgeBlockedBody->collisionLayer = 2;
+    edgeBlockedBody->initialLinearVelocity = glm::vec3(0.f, 0.f, 5.f);
+    auto* edgeBlockedCollider =
+        edgeBlockedTraverser->AddComponent<PrimitiveObjectCollider>();
+    edgeBlockedCollider->shape = "Box";
+    edgeBlockedCollider->size = glm::vec3(1.f);
+
     // A second portal is intentionally disconnected while its mesh is split.
     // The disconnect must leave the local cut in place and materialize the
     // remote cut as an independent mesh/collider object.
@@ -291,6 +311,8 @@ int main(int argc, char** argv)
     bool sawPortalLocalMeshCollider = false;
     bool sawRemoteMeshColliderContact = false;
     bool blockedTraverserTeleported = false;
+    bool edgeBlockedTraverserTeleported = false;
+    bool edgeBlockedTraverserHitRim = false;
     bool splitMaterialized = false;
     Engine::Core::Object* materializedFragment = nullptr;
     glm::vec3 velocityAfterTeleport(0.f);
@@ -345,7 +367,16 @@ int main(int argc, char** argv)
         WriteVec3(snapshot, reverseBody->GetAngularVelocity());
         snapshot << ",\"mesh\":";
         WriteMeshState(snapshot, *reverseTraverserMesh, reverseBaseVertices);
-        snapshot << "}}";
+        snapshot << "},\"apertureGuards\":{\"oversizedTeleported\":"
+            << (blockedTraverserTeleported ? "true" : "false")
+            << ",\"edgeCubeTeleported\":"
+            << (edgeBlockedTraverserTeleported ? "true" : "false")
+            << ",\"edgeCubeHitRim\":"
+            << (edgeBlockedTraverserHitRim ? "true" : "false")
+            << "},\"disconnect\":{\"splitMaterialized\":"
+            << (splitMaterialized ? "true" : "false")
+            << ",\"fragmentPresent\":"
+            << (materializedFragment ? "true" : "false") << "}}";
     };
 
     const glm::mat4 portalTransform =
@@ -369,6 +400,8 @@ int main(int argc, char** argv)
             reverseTraverser->enabled = true;
         if (frame == 120)
             blockedTraverser->enabled = true;
+        if (frame == 170)
+            edgeBlockedTraverser->enabled = true;
         scene.Update(1.f / 60.f);
 
         const bool beganForwardOverlap = sourcePortalBody->DidBeginOverlap(traverserBody);
@@ -403,6 +436,10 @@ int main(int argc, char** argv)
             stationaryTeleported = true;
         if (blockedTraverser->transform.GetWorldPosition().x > 6.f)
             blockedTraverserTeleported = true;
+        if (edgeBlockedTraverser->transform.GetWorldPosition().x > 6.f)
+            edgeBlockedTraverserTeleported = true;
+        edgeBlockedTraverserHitRim = edgeBlockedTraverserHitRim ||
+            edgeBlockedBody->IsColliding();
 
         if (!splitMaterialized && breakBody->HasPortalLocalMeshCollider())
         {
@@ -476,6 +513,8 @@ int main(int argc, char** argv)
     assert(sawReverseTeleport);
     assert(!stationaryTeleported);
     assert(!blockedTraverserTeleported);
+    assert(!edgeBlockedTraverserTeleported);
+    assert(edgeBlockedTraverserHitRim);
     assert(splitMaterialized);
     assert(materializedFragment);
     assert(materializedFragment->GetComponent<Mesh>());

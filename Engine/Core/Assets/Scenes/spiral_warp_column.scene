@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <Scene xmlns:components="urn:engine-components" version="1">
-  <settings showGrid="true" gridHalfSize="24" gridCellSize="1" gridOpacity="0.28" gridFadeDistance="100" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" renderMode="0" sceneViewUiOverlay="false" portalDebugVisuals="false" portalDebugWireframe="true" portalDebugTintRemoteView="true" portalDebugOverlayAlpha="0.45" portalRecursionDepth="2" portalMaxViewsPerFrame="24">
+  <settings showGrid="true" gridHalfSize="24" gridCellSize="1" gridOpacity="0.28" gridFadeDistance="100" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" renderMode="0" sceneViewUiOverlay="false" portalDebugVisuals="true" portalDebugWireframe="true" portalDebugTintRemoteView="false" portalDebugOverlayAlpha="0.8" portalRecursionDepth="2" portalMaxViewsPerFrame="24">
     <gridColor>
       <item>0.32</item>
       <item>0.36</item>

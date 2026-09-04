@@ -102,6 +102,15 @@ int main()
 
     assert(ClampRecursionDepth(-1) == kMinimumRecursionDepth);
     assert(ClampRecursionDepth(100) == kMaximumRecursionDepth);
+    assert(ClampConnectionRepeatLimit(0) ==
+        kMinimumConnectionRepeatLimit);
+    assert(ClampConnectionRepeatLimit(100) ==
+        kMaximumConnectionRepeatLimit);
+    // A repeat limit counts the direct connection as its first visit. Two
+    // visits therefore allow A -> B -> A once; the third is rejected.
+    assert(CanRepeatConnection(0u, 2));
+    assert(CanRepeatConnection(1u, 2));
+    assert(!CanRepeatConnection(2u, 2));
     assert(ClampViewBudget(0) == kMinimumViewBudget);
     assert(ClampViewBudget(1000) == kMaximumViewBudget);
 

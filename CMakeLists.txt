@@ -564,7 +564,10 @@ set_target_properties(Server PROPERTIES
 if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_ROOT}/Engine/Tests/MatrixLayerPortalTests.cpp")
     enable_testing()
-    add_executable(MatrixLayerPortalTests
+    # Regression executables are invoked explicitly by CTest/CI.  Keeping them
+    # out of the default IDE build prevents a running diagnostic from blocking
+    # Editor/Game builds by holding its own .exe open on Windows.
+    add_executable(MatrixLayerPortalTests EXCLUDE_FROM_ALL
         "${ENGINE_ROOT}/Engine/Tests/MatrixLayerPortalTests.cpp"
     )
     target_link_libraries(MatrixLayerPortalTests PRIVATE Engine)

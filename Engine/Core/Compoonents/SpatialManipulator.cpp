@@ -108,6 +108,8 @@ SpatialManipulator::SpatialManipulator()
     RegisterField("warpVolumeSize", warpVolumeSize);
     RegisterField("warpVolumeRadius", warpVolumeRadius);
     RegisterField("warpBoundaryFalloff", warpBoundaryFalloff);
+    RegisterField("applyTraversalScale", applyTraversalScale);
+    RegisterField("persistTraversalScaleOnExit", persistTraversalScaleOnExit);
     RegisterField("spaceWarpType", spaceWarpType);
     RegisterField("spiralAxis", spiralAxis);
     RegisterField("spiralRadiansPerUnit", spiralRadiansPerUnit);
@@ -642,6 +644,7 @@ void SpatialManipulator::ResetTraversalMeshDeformation(RigidBody* traversingBody
 
     it->second.meshDeformed = false;
     it->second.hasCollisionCut = false;
+    it->second.postTeleportVisual = false;
     it->second.lastMesh = nullptr;
     it->second.baseVertices.clear();
     it->second.localMeshVertices.clear();
@@ -666,7 +669,16 @@ void SpatialManipulator::AppendTraversalRenderInstances(
         if (!body || !body->Owner || !state.meshDeformed || !state.lastMesh)
             continue;
 
-        const glm::mat4 localWorld = body->Owner->transform.GetWorldMatrixWithLayer();
+        glm::mat4 localWorld = body->Owner->transform.GetWorldMatrixWithLayer();
+        if (state.postTeleportVisual)
+        {
+            // The physical owner is now in the target chart. Reconstruct its
+            // source-chart transform for the trailing half; applying the
+            // forward transform below then returns the leading half to the
+            // physical target chart.
+            localWorld = glm::inverse(state.remoteRenderWorldTransform) *
+                localWorld;
+        }
         output.push_back({ body->Owner, const_cast<Mesh*>(state.lastMesh),
             localWorld, state.localRenderClipPlane, false });
         output.push_back({ body->Owner, const_cast<Mesh*>(state.lastMesh),
@@ -865,6 +877,7 @@ void SpatialManipulator::MaterializeTraversalMeshSplits(
         return;
 
     Engine::Scene::Scene& scene = *Owner->GetScene();
+
     for (auto& pair : m_traversalStates)
     {
         RigidBody* localBody = const_cast<RigidBody*>(pair.first);
@@ -896,9 +909,42 @@ void SpatialManipulator::MaterializeTraversalMeshSplits(
         remoteObject->transform.rotation = localBody->Owner->transform.rotation;
         remoteObject->transform.scale = localBody->Owner->transform.scale;
 
+        // During traversal the remote half is kept in the source object's
+        // local frame so one GPU instance can draw it through the mapping.
+        // Once materialized it needs its own target-frame owner transform;
+        // convert vertices back to ordinary object-local coordinates first.
+        const glm::mat4 localWorld =
+            localBody->Owner->transform.GetWorldMatrix();
+        const glm::mat4 remoteWorld =
+            state.collisionRemoteWorldTransform * localWorld;
+        const glm::mat4 sourceToRemoteLocal = glm::inverse(remoteWorld) *
+            localWorld;
+        const glm::mat3 restoreRemoteNormal = glm::transpose(
+            glm::inverse(glm::mat3(sourceToRemoteLocal)));
+        std::vector<Mesh::Vertex> remoteLocalVertices =
+            state.remoteMeshVertices;
+        for (Mesh::Vertex& vertex : remoteLocalVertices)
+        {
+            const glm::vec3 mappedPosition(vertex.pos[0], vertex.pos[1],
+                vertex.pos[2]);
+            const glm::vec3 localPosition = glm::vec3(sourceToRemoteLocal *
+                glm::vec4(mappedPosition, 1.f));
+            vertex.pos[0] = localPosition.x;
+            vertex.pos[1] = localPosition.y;
+            vertex.pos[2] = localPosition.z;
+
+            const glm::vec3 mappedNormal(vertex.normal[0], vertex.normal[1],
+                vertex.normal[2]);
+            const glm::vec3 localNormal = SafeNormalize(
+                restoreRemoteNormal * mappedNormal, glm::vec3(0.f, 0.f, 1.f));
+            vertex.normal[0] = localNormal.x;
+            vertex.normal[1] = localNormal.y;
+            vertex.normal[2] = localNormal.z;
+        }
+
         Mesh* remoteMesh = remoteObject->AddComponent<Mesh>();
         remoteMesh->InitializeRuntimeCloneFrom(*localMesh);
-        remoteMesh->SetDeformedVertices(state.remoteMeshVertices);
+        remoteMesh->SetDeformedVertices(remoteLocalVertices);
         if (const Material* localMaterial =
                 localBody->Owner->GetComponent<Material>())
         {
@@ -931,15 +977,14 @@ void SpatialManipulator::MaterializeTraversalMeshSplits(
         remoteBody->collisionIdentifier = localBody->collisionIdentifier;
         remoteBody->frictionBehaviors = localBody->frictionBehaviors;
 
-        const glm::mat4 localWorld = localBody->Owner->transform.GetWorldMatrix();
-        glm::mat3 localWorldBasis(localWorld);
+        glm::mat3 remoteWorldBasis(remoteWorld);
         for (int column = 0; column < 3; ++column)
-            localWorldBasis[column] = SafeNormalize(localWorldBasis[column],
+            remoteWorldBasis[column] = SafeNormalize(remoteWorldBasis[column],
                 glm::vec3(column == 0 ? 1.f : 0.f,
                     column == 1 ? 1.f : 0.f,
                     column == 2 ? 1.f : 0.f));
-        const glm::quat localWorldRotation = glm::quat_cast(localWorldBasis);
-        remoteBody->SetWorldPose(glm::vec3(localWorld[3]), localWorldRotation);
+        const glm::quat remoteWorldRotation = glm::quat_cast(remoteWorldBasis);
+        remoteBody->SetWorldPose(glm::vec3(remoteWorld[3]), remoteWorldRotation);
         remoteBody->SetLinearVelocity(state.remoteLinearTransform *
             localBody->GetLinearVelocity());
         remoteBody->SetAngularVelocity(state.remoteLinearTransform *
@@ -987,6 +1032,27 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target,
         }
         const float previousSignedDistance = ComputeSignedDistanceToPortalPlane(
             state.previousWorldPosition);
+        // A physical teleport occurs when the body anchor crosses. Continue
+        // rendering its source/target chart pair afterwards until the body
+        // has cleared the target aperture, otherwise the trailing half pops
+        // away exactly when the anchor crosses the plane.
+        const float deformationDistance = std::max(0.001f,
+            traversalBlendDistance * std::max(0.f, deformationStrength));
+        const glm::vec3 planePoint = bodyWorldPosition -
+            currentSignedDistance * glm::vec3(GetPortalWorldFrame()[2]);
+        if (state.postTeleportVisual)
+        {
+            const bool remainsInVisualTransition =
+                std::abs(currentSignedDistance) <= deformationDistance &&
+                IsWorldPointInsidePortalAperture(planePoint, 0.001f);
+            if (!remainsInVisualTransition)
+                ResetTraversalMeshDeformation(body);
+            else
+            {
+                state.previousWorldPosition = bodyWorldPosition;
+                continue;
+            }
+        }
         // Crossing and re-arm thresholds intentionally differ. A body must
         // first establish a stable side, cross the plane, and then move well
         // clear before another traversal is possible. This suppresses contact
@@ -1046,6 +1112,16 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target,
 
         if (crossedPortalPlane)
         {
+            // A body can cross the anchor plane between two physics ticks,
+            // before a prior frame had an opportunity to create its visual
+            // split. Create one now so high-speed traversal retains the same
+            // continuous hand-off as ordinary motion.
+            if (!state.meshDeformed && deformMeshOnTraversal)
+                ApplyTraversalMeshDeformation(target, body,
+                    currentSignedDistance > previousSignedDistance);
+            const TraversalState departingVisual = state;
+            const bool retainVisualSplit = departingVisual.meshDeformed &&
+                departingVisual.lastMesh;
             ResetTraversalMeshDeformation(body);
             const glm::mat4 portalTransform = GetPortalWorldTransformTo(*target);
             const glm::mat3 portalLinear(portalTransform);
@@ -1081,6 +1157,22 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target,
             state.previousWorldPosition = mappedPosition;
             state.hasPreviousWorldPosition = true;
             TraversalState& targetState = target->m_traversalStates[body];
+            if (retainVisualSplit)
+            {
+                // Transfer only GPU visual state. Collision split instances
+                // owned by the source were removed above when the physical
+                // body was placed in the target chart.
+                targetState.lastMesh = departingVisual.lastMesh;
+                targetState.remoteRenderWorldTransform =
+                    departingVisual.remoteRenderWorldTransform;
+                targetState.localRenderClipPlane =
+                    departingVisual.localRenderClipPlane;
+                targetState.remoteRenderClipPlane =
+                    departingVisual.remoteRenderClipPlane;
+                targetState.meshDeformed = true;
+                targetState.hasCollisionCut = false;
+                targetState.postTeleportVisual = true;
+            }
             targetState.phase = TraversalPhase::Cooldown;
             targetState.waitForOverlapExit = false;
             targetState.previousWorldPosition = mappedPosition;
@@ -1093,13 +1185,9 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target,
         // teleport. Its cooldown state must never slice the same mesh again;
         // otherwise the two endpoints repeatedly cut each other's generated
         // vertices and the mesh grows without bound.
-        const glm::vec3 planePoint = bodyWorldPosition -
-            currentSignedDistance * glm::vec3(GetPortalWorldFrame()[2]);
         // Use the authored traversal window instead of an implicit one-unit
         // threshold. Strength scales the distance at which visual splitting
         // begins while retaining a small finite minimum.
-        const float deformationDistance = std::max(0.001f,
-            traversalBlendDistance * std::max(0.f, deformationStrength));
         const bool intersectsAperture =
             std::abs(currentSignedDistance) <= deformationDistance &&
             IsWorldPointInsidePortalAperture(planePoint, 0.001f);
@@ -1109,12 +1197,25 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target,
         const bool movingTowardPortal =
             (state.phase == TraversalPhase::ArmedNegative && signedMotion > 1e-5f) ||
             (state.phase == TraversalPhase::ArmedPositive && signedMotion < -1e-5f);
+        // A portal is a spatial boundary, not a movement-only trigger. A
+        // stationary body that already straddles the aperture needs the same
+        // two chart instances and local/remote collision pieces as a moving
+        // traverser. SliceByPlane below is the exact mesh intersection test;
+        // this predicate merely keeps the work scoped to the aperture.
+        const bool stationaryAtPortal = std::abs(signedMotion) <= 1e-5f;
+        const bool shouldMaintainSplit = movingTowardPortal || stationaryAtPortal;
         const bool claimedByHigherPriorityPortal = claimedBodies &&
             claimedBodies->find(body) != claimedBodies->end();
         if (!crossedPortalPlane && intersectsAperture && isArmed &&
-            movingTowardPortal && !claimedByHigherPriorityPortal)
+            shouldMaintainSplit && !claimedByHigherPriorityPortal)
         {
-            ApplyTraversalMeshDeformation(target, body, signedMotion > 0.f);
+            // With no directional sweep, retain the anchor's side locally
+            // and map the opposite half. This makes stationary cuts stable
+            // rather than choosing a side based on floating-point noise.
+            const bool mapPositiveHalf = movingTowardPortal
+                ? signedMotion > 0.f
+                : currentSignedDistance <= 0.f;
+            ApplyTraversalMeshDeformation(target, body, mapPositiveHalf);
             // Mesh deformation is an exclusive, frame-local view of a body.
             // Without this claim two coincident apertures can each cache the
             // other's already split vertices, leaving the mesh stretched when
@@ -1122,7 +1223,7 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target,
             if (claimedBodies)
                 claimedBodies->insert(body);
         }
-        else if (!intersectsAperture || !movingTowardPortal)
+        else if (!intersectsAperture || !shouldMaintainSplit)
             ResetTraversalMeshDeformation(body);
 
         if (!crossedPortalPlane)
@@ -1453,6 +1554,7 @@ void SpatialManipulator::Update()
     if (definesWarpVolume)
     {
         ResetTraversalMeshDeformation();
+        UpdateWarpVolumeTraversalScale();
         if (Owner)
             Owner->transform.matrixLayer = MatrixLayer {};
         return;
@@ -1502,6 +1604,117 @@ void SpatialManipulator::Update()
     else
     {
         ClearSpatialWarpState();
+    }
+}
+
+void SpatialManipulator::UpdateWarpVolumeTraversalScale()
+{
+    if (!applyTraversalScale || !Owner || !Owner->GetScene())
+    {
+        m_warpVolumeTraversalStates.clear();
+        return;
+    }
+
+    Engine::Scene::Scene& scene = *Owner->GetScene();
+    const glm::mat4 volumeWorld = Owner->transform.GetWorldMatrix();
+    const glm::mat4 inverseVolumeWorld = glm::inverse(volumeWorld);
+    const glm::vec3 localXAxis = SafeNormalize(
+        glm::vec3(volumeWorld[0]), glm::vec3(1.f, 0.f, 0.f));
+    const glm::vec3 localYAxis = SafeNormalize(
+        glm::vec3(volumeWorld[1]), glm::vec3(0.f, 1.f, 0.f));
+    std::unordered_set<const Engine::Core::Object*> liveObjects;
+
+    for (const std::unique_ptr<Engine::Core::Object>& root : scene.GetObjects())
+    {
+        VisitObjectTree(root.get(), [&](Engine::Core::Object* object)
+        {
+            if (!object || object == Owner || !object->enabled ||
+                !object->GetComponent<RigidBody>())
+                return;
+
+            liveObjects.insert(object);
+            const glm::vec3 worldPosition = object->transform.GetWorldPosition();
+            const glm::vec3 localPosition = glm::vec3(inverseVolumeWorld *
+                glm::vec4(worldPosition, 1.f));
+            const bool inside = ContainsWorldPoint(worldPosition);
+            WarpVolumeTraversalState& state = m_warpVolumeTraversalStates[object];
+
+            if (!state.hasPreviousPosition)
+            {
+                state.authoredScale = object->transform.scale;
+                state.persistedScale = state.authoredScale;
+                state.previousLocalPosition = localPosition;
+                state.hasPreviousPosition = true;
+                return;
+            }
+
+            if (!state.completed && !state.active && inside)
+            {
+                state.active = true;
+                state.enteredFromNegativeZ = localPosition.z >=
+                    state.previousLocalPosition.z;
+            }
+
+            if (!state.completed && state.active && inside &&
+                state.enteredFromNegativeZ)
+            {
+                const Engine::Scene::Scene::SpatialQuerySample sample =
+                    scene.SampleSpatialPoint(worldPosition,
+                        { Engine::Scene::Scene::SpatialQueryDomain::Gameplay, object });
+                const float xScale = glm::length(sample.jacobian * localXAxis);
+                const float yScale = glm::length(sample.jacobian * localYAxis);
+                const float transverseScale = std::sqrt(std::max(0.f, xScale * yScale));
+
+                if (std::isfinite(transverseScale) && transverseScale > 1e-5f)
+                {
+                    state.persistedScale = state.authoredScale / transverseScale;
+                    object->transform.scale = state.persistedScale;
+                }
+            }
+            else if (!state.completed && state.active && !inside)
+            {
+                if (!state.enteredFromNegativeZ || !persistTraversalScaleOnExit)
+                    object->transform.scale = state.authoredScale;
+                else
+                {
+                    // Sample the positive boundary rather than retaining the
+                    // last simulation tick inside it. That makes the carried
+                    // scale independent of physics frame rate.
+                    glm::vec3 exitLocalPosition = localPosition;
+                    if (static_cast<WarpVolumeShape>(warpVolumeShape) ==
+                        WarpVolumeShape::Box)
+                    {
+                        exitLocalPosition.z = std::abs(warpVolumeSize.z) * 0.5f;
+                    }
+                    const glm::vec3 exitWorldPosition = glm::vec3(volumeWorld *
+                        glm::vec4(exitLocalPosition, 1.f));
+                    const Engine::Scene::Scene::SpatialQuerySample exitSample =
+                        scene.SampleSpatialPoint(exitWorldPosition,
+                            { Engine::Scene::Scene::SpatialQueryDomain::Gameplay, object });
+                    const float exitXScale = glm::length(exitSample.jacobian * localXAxis);
+                    const float exitYScale = glm::length(exitSample.jacobian * localYAxis);
+                    const float exitTransverseScale = std::sqrt(std::max(0.f,
+                        exitXScale * exitYScale));
+                    if (std::isfinite(exitTransverseScale) && exitTransverseScale > 1e-5f)
+                        state.persistedScale = state.authoredScale / exitTransverseScale;
+                    object->transform.scale = state.persistedScale;
+                }
+
+                state.active = false;
+                state.completed = true;
+            }
+
+            state.previousLocalPosition = localPosition;
+        });
+    }
+
+    for (auto it = m_warpVolumeTraversalStates.begin();
+        it != m_warpVolumeTraversalStates.end();)
+    {
+        if (liveObjects.find(it->first) == liveObjects.end())
+            it = m_warpVolumeTraversalStates.erase(it);
+        else
+            ++it;
     }
 }
 
@@ -1613,6 +1826,14 @@ bool SpatialManipulator::DrawProperties(::Engine::Editor::IEditorUi& ui)
         if (static_cast<WarpVolumeShape>(warpVolumeShape) != WarpVolumeShape::Infinite)
             changed = ui.DragFloat("Warp Boundary Falloff", &warpBoundaryFalloff,
                 0.05f, 0.f, 100000.f) || changed;
+
+        changed = ui.Checkbox("Apply Traversal Scale", &applyTraversalScale) || changed;
+        if (applyTraversalScale)
+        {
+            changed = ui.Checkbox("Persist Scale On Positive-Z Exit",
+                &persistTraversalScaleOnExit) || changed;
+            ui.DisabledLabel("Dynamic bodies use the warp Jacobian's local X/Y scale.");
+        }
 
         static const char* warpTypes[] = { "Affine", "Spiral", "Formula" };
         changed = ui.Combo("Space Warp Type", &spaceWarpType,

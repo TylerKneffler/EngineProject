@@ -442,6 +442,14 @@ void PreferencesView::DrawDiagnosticsSection(IEditorUi& ui)
     if (ui.Checkbox("Log hierarchy interactions", &m_settings.debugHierarchyInteractions))
         NotifyChanged();
     ui.Tooltip("Logs hierarchy selection, dragging, target zones, drops, moves, and cancellations to Console.");
+
+    if (ui.Checkbox("Enable spatial rendering debug visuals",
+            &m_spatialDebugVisuals))
+    {
+        if (OnSpatialDebugVisualsChanged)
+            OnSpatialDebugVisualsChanged(m_spatialDebugVisuals);
+    }
+    ui.Tooltip("Shows editor-only yellow portal/warp points and connection lines for the active scene. This is saved with that scene and never appears in the game view.");
 }
 
 void PreferencesView::DrawEditorSection(IEditorUi& ui)

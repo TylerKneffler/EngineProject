@@ -895,6 +895,22 @@ void Scene::PrepareRenderFrame()
     m_lightDataBuffer->FlushMappedWrites();
 
     m_frameRenderItems.reserve(m_objects.size());
+    // The authored Mesh buffer cannot be changed for rendering a nonlinear
+    // volume: it may also back a collider, an editor asset, or another draw.
+    // Keep a private upload buffer for each affected object instead.
+    for (auto cache = m_warpedRenderMeshes.begin();
+         cache != m_warpedRenderMeshes.end();)
+    {
+        const bool stillInScene = std::any_of(m_objects.begin(), m_objects.end(),
+            [&](const std::unique_ptr<Engine::Core::Object>& object)
+            {
+                return object.get() == cache->first;
+            });
+        if (!stillInScene)
+            cache = m_warpedRenderMeshes.erase(cache);
+        else
+            ++cache;
+    }
     std::unordered_map<Engine::Core::Object*,
         std::vector<Engine::Components::SpatialManipulator::TraversalRenderInstance>>
         traversalRenderInstances;
@@ -952,6 +968,119 @@ void Scene::PrepareRenderFrame()
             // same authored GPU buffer in a connected spatial chart.
             item.world = splitInstances->second.front().world;
             item.traversalClipPlane = splitInstances->second.front().clipPlane;
+        }
+
+        // Map ordinary geometry at its vertices, rather than approximating a
+        // nonlinear space with the Jacobian at the object origin.  The latter
+        // visibly shears a single mesh that straddles a warp-volume boundary.
+        // Portal traversal instances already provide independently clipped
+        // source/target chart draws, so retain their specialized path.
+        const bool hasSkinnedMesh = candidate->GetComponent<
+            Engine::Components::SkinnedMesh>() != nullptr;
+        if (mesh && !sprite && !hasSplitRenderInstances && !hasSkinnedMesh &&
+            !mesh->GetVertices().empty())
+        {
+            glm::mat4 authoredWorld = candidate->transform.GetWorldMatrix();
+            if (candidate->transform.matrixLayer.enabled)
+            {
+                authoredWorld = candidate->transform.matrixLayer.localToLayer *
+                    authoredWorld;
+            }
+            const glm::mat3 authoredLinear(authoredWorld);
+            const float authoredDeterminant = glm::determinant(authoredLinear);
+            const glm::mat3 authoredNormal =
+                std::isfinite(authoredDeterminant) &&
+                std::abs(authoredDeterminant) > 1e-7f
+                    ? glm::transpose(glm::inverse(authoredLinear))
+                    : glm::mat3(1.f);
+            const SpatialQuery renderQuery {
+                SpatialQueryDomain::Rendering, candidate };
+            const SpatialQuerySample originSample = SampleSpatialPoint(
+                glm::vec3(authoredWorld[3]), renderQuery);
+            std::vector<Engine::Model::Vertex> warpedVertices;
+            warpedVertices.reserve(mesh->GetVertices().size());
+            bool affectedByWarp = originSample.affectedByWarpVolume;
+            for (const Engine::Model::Vertex& sourceVertex : mesh->GetVertices())
+            {
+                Engine::Model::Vertex warpedVertex = sourceVertex;
+                const glm::vec3 localPosition(sourceVertex.pos[0],
+                    sourceVertex.pos[1], sourceVertex.pos[2]);
+                const glm::vec3 worldPosition = glm::vec3(authoredWorld *
+                    glm::vec4(localPosition, 1.f));
+                const SpatialQuerySample sample = SampleSpatialPoint(
+                    worldPosition, renderQuery);
+                affectedByWarp = affectedByWarp || sample.affectedByWarpVolume;
+
+                const glm::vec3 localNormal(sourceVertex.normal[0],
+                    sourceVertex.normal[1], sourceVertex.normal[2]);
+                const glm::vec3 rawWorldNormal = authoredNormal * localNormal;
+                const float jacobianDeterminant = glm::determinant(sample.jacobian);
+                const glm::mat3 warpedNormalMatrix =
+                    std::isfinite(jacobianDeterminant) &&
+                    std::abs(jacobianDeterminant) > 1e-7f
+                        ? glm::transpose(glm::inverse(sample.jacobian))
+                        : glm::mat3(1.f);
+                glm::vec3 warpedNormal = warpedNormalMatrix * rawWorldNormal;
+                const float normalLength = glm::length(warpedNormal);
+                warpedNormal = normalLength > 1e-6f
+                    ? warpedNormal / normalLength : glm::vec3(0.f, 1.f, 0.f);
+
+                const glm::vec3 localTangent(sourceVertex.tangent[0],
+                    sourceVertex.tangent[1], sourceVertex.tangent[2]);
+                glm::vec3 warpedTangent = sample.jacobian *
+                    (authoredLinear * localTangent);
+                warpedTangent -= warpedNormal * glm::dot(warpedTangent,
+                    warpedNormal);
+                const float tangentLength = glm::length(warpedTangent);
+                warpedTangent = tangentLength > 1e-6f
+                    ? warpedTangent / tangentLength : glm::vec3(1.f, 0.f, 0.f);
+
+                const glm::vec3 relativePosition = sample.point - originSample.point;
+                warpedVertex.pos[0] = relativePosition.x;
+                warpedVertex.pos[1] = relativePosition.y;
+                warpedVertex.pos[2] = relativePosition.z;
+                warpedVertex.normal[0] = warpedNormal.x;
+                warpedVertex.normal[1] = warpedNormal.y;
+                warpedVertex.normal[2] = warpedNormal.z;
+                warpedVertex.tangent[0] = warpedTangent.x;
+                warpedVertex.tangent[1] = warpedTangent.y;
+                warpedVertex.tangent[2] = warpedTangent.z;
+                warpedVertices.push_back(warpedVertex);
+            }
+            if (affectedByWarp)
+            {
+                WarpedRenderMesh& cached = m_warpedRenderMeshes[candidate];
+                const size_t byteSize = warpedVertices.size() *
+                    sizeof(Engine::Model::Vertex);
+                const bool topologyChanged = cached.vertices.size() !=
+                    warpedVertices.size();
+                const bool contentsChanged = topologyChanged || cached.vertices.empty() ||
+                    std::memcmp(cached.vertices.data(), warpedVertices.data(),
+                        byteSize) != 0;
+                if (contentsChanged)
+                {
+                    if (topologyChanged || !cached.vertexBuffer)
+                    {
+                        cached.vertexBuffer = m_graphicsProvider->GetBufferFactory()
+                            ->CreateBuffer(Engine::Graphics::IGraphicsBuffer::Usage::VertexBuffer,
+                                Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+                                byteSize, warpedVertices.data());
+                    }
+                    else if (void* mapped = cached.vertexBuffer->Map())
+                    {
+                        std::memcpy(mapped, warpedVertices.data(), byteSize);
+                        cached.vertexBuffer->Unmap();
+                        cached.vertexBuffer->FlushMappedWrites();
+                    }
+                    cached.vertices = std::move(warpedVertices);
+                }
+                if (cached.vertexBuffer)
+                {
+                    item.warpedVertexBuffer = cached.vertexBuffer.get();
+                    item.world = glm::translate(glm::mat4(1.f),
+                        originSample.point);
+                }
+            }
         }
 
         if (sprite)
@@ -1054,6 +1183,45 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     }
     const glm::mat4 proj = cam->GetProjectionMatrix(aspect, m_editorMode2D);
     const glm::vec3 cameraPosition = glm::vec3(glm::inverse(view)[3]);
+    bool cameraUsesSourceWarpChart = false;
+    if (cam->Owner)
+    {
+        glm::mat4 authoredCameraWorld = cam->Owner->transform.GetWorldMatrix();
+        if (cam->Owner->transform.matrixLayer.enabled)
+        {
+            authoredCameraWorld = cam->Owner->transform.matrixLayer.localToLayer *
+                authoredCameraWorld;
+        }
+        cameraUsesSourceWarpChart = SampleSpatialPoint(
+            glm::vec3(authoredCameraWorld[3]),
+            { SpatialQueryDomain::Camera, cam->Owner }).affectedByWarpVolume;
+    }
+    // A finite nonlinear volume is a local chart. Once the camera is inside
+    // that chart, projecting its already world-warped vertices with an
+    // ordinary straight raster camera makes a curved corridor opaque at its
+    // first bend. Draw its contents in the camera's authored chart instead;
+    // the view ray then follows the volume coordinate path rather than the
+    // globally embedded curve. This is deliberately per-view, so editor and
+    // game cameras can occupy different charts in the same frame.
+    const auto sourceChartWorld = [](const FrameRenderItem& item)
+    {
+        glm::mat4 world = item.object->transform.GetWorldMatrix();
+        if (item.object->transform.matrixLayer.enabled)
+            world = item.object->transform.matrixLayer.localToLayer * world;
+        return world;
+    };
+    const auto useSourceChartMesh = [&](const FrameRenderItem& item)
+    {
+        return cameraUsesSourceWarpChart && item.mesh && !item.sprite &&
+            glm::all(glm::equal(item.traversalClipPlane, glm::vec4(0.f)));
+    };
+    // Light data is view-chart-specific. Rebuild it for every view so an
+    // inside-volume game camera cannot leave source-chart lights bound when
+    // the editor view subsequently renders the embedded chart (or vice versa).
+    m_frameLightCount = m_realtimeLightingPipeline.CollectLights(*this,
+        static_cast<Engine::Model::LightData*>(m_lightDataMapped), kMaxLights,
+        !cameraUsesSourceWarpChart);
+    m_lightDataBuffer->FlushMappedWrites();
         const bool wireframeMode =
             settings.renderMode == Engine::Model::SceneRenderMode::Wireframe;
         const bool forceUnlitMode =
@@ -1097,9 +1265,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     {
         if (!item.belongsToPreview || includeEditorVisuals)
         {
-            const glm::vec3 delta = glm::vec3(item.world[3]) - cameraPosition;
+            const glm::mat4 itemWorld = useSourceChartMesh(item)
+                ? sourceChartWorld(item) : item.world;
+            const glm::vec3 delta = glm::vec3(itemWorld[3]) - cameraPosition;
             renderObjects.push_back({ &item, glm::dot(delta, delta),
-                item.world[3].z, item.sortingLayer, item.blended });
+                itemWorld[3].z, item.sortingLayer, item.blended });
         }
     }
     std::stable_sort(renderObjects.begin(), renderObjects.end(),
@@ -1161,7 +1331,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             usesLegacyProbeBake
                 ? bakedLighting->irradiance
                 : glm::vec3(0.f);
-        glm::mat4 world = renderItem->world;
+        const bool useSourceChart = useSourceChartMesh(*renderItem);
+        glm::mat4 world = useSourceChart
+            ? sourceChartWorld(*renderItem) : renderItem->world;
         if (sprite)
         {
             if (m_editorMode2D)
@@ -1348,7 +1520,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         preparedDraw.constantBufferOffset = offset;
         preparedDraw.vertexBuffer = sprite
             ? renderItem->spriteVertexBuffer
-            : (mesh ? mesh->GetGraphicsBuffer() : nullptr);
+            : (!useSourceChart && renderItem->warpedVertexBuffer
+                ? renderItem->warpedVertexBuffer
+                : (mesh ? mesh->GetGraphicsBuffer() : nullptr));
         preparedDraw.vertexStride = sprite
             ? sprite->GetVertexStride() : mesh->GetVertexStride();
         preparedDraw.vertexCount = sprite
@@ -1467,7 +1641,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
         Engine::Components::SpatialManipulator* target =
             resolvePortalTarget(manipulator);
-        if (!target || !target->enabled || !target->Owner)
+        if (!target || !target->enabled || !target->Owner ||
+            !manipulator->HasCompatiblePortalShapeWith(*target))
             continue;
 
         PortalStencilPass pass{};
@@ -1645,9 +1820,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
         // Portal connectivity is an editor-only diagnostic. The highlighted
         // geometry is generated transiently from the logical aperture points:
-        // yellow markers are paired points, cyan bars are aperture edges,
-        // magenta bars show point-to-point mapping, and green stems show each
-        // portal plane's normal. None of it is runtime portal geometry.
+        // yellow markers identify paired points and yellow/gold bars trace
+        // aperture edges, point mappings, and normals. None of it is runtime
+        // portal geometry or a portal surface.
         using DebugPortalPair = std::pair<
             const Engine::Components::SpatialManipulator*,
             const Engine::Components::SpatialManipulator*>;
@@ -1690,10 +1865,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             const float markerRadius = std::clamp(
                 averageEdgeLength * 0.045f, 0.015f, 0.2f);
             const float edgeThickness = markerRadius * 0.32f;
-            const glm::vec4 pointColor { 1.f, 0.82f, 0.12f, 1.f };
-            const glm::vec4 edgeColor { 0.05f, 0.95f, 1.f, 1.f };
-            const glm::vec4 connectionColor { 1.f, 0.2f, 0.85f, 1.f };
-            const glm::vec4 normalColor { 0.25f, 1.f, 0.35f, 1.f };
+            const glm::vec4 pointColor { 1.f, 0.92f, 0.10f, 1.f };
+            const glm::vec4 edgeColor { 1.f, 0.76f, 0.05f, 1.f };
+            const glm::vec4 connectionColor { 1.f, 0.62f, 0.02f, 1.f };
+            const glm::vec4 normalColor { 1.f, 0.84f, 0.18f, 1.f };
 
             glm::vec3 sourceCenter(0.f);
             glm::vec3 targetCenter(0.f);
@@ -1753,6 +1928,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
             const glm::mat4 ownerWorld =
                 sceneObject->transform.GetWorldMatrix();
+            const glm::vec3 center(ownerWorld[3]);
+            const glm::vec4 warpDebugColor { 1.f, 0.78f, 0.08f, 1.f };
+            const float markerRadius = 0.08f;
             if (manipulator->definesWarpVolume)
             {
                 const auto shape = static_cast<
@@ -1762,7 +1940,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 {
                     appendDebugSphere(ownerWorld,
                         std::max(0.001f, std::abs(manipulator->warpVolumeRadius)),
-                        { 0.25f, 1.f, 0.45f, 1.f });
+                        warpDebugColor);
                 }
                 else
                 {
@@ -1772,13 +1950,27 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                             glm::vec3(0.001f))
                         : glm::vec3(0.5f);
                     appendDebugBox(ownerWorld, halfSize,
-                        { 0.25f, 1.f, 0.45f, 1.f });
+                        warpDebugColor);
                 }
+                // A volume boundary alone is difficult to associate with its
+                // mapping.  Give every warped space a yellow origin point and
+                // short local-frame lines so its placement/orientation is
+                // unambiguous in the Scene editor.
+                appendDebugSphere(glm::translate(glm::mat4(1.f), center),
+                    markerRadius, { 1.f, 0.94f, 0.18f, 1.f });
+                const float axisLength = std::clamp(
+                    manipulator->warpVolumeRadius * 0.25f, 0.35f, 1.25f);
+                appendDebugSegment(center, center + glm::vec3(ownerWorld[0]) *
+                    axisLength, markerRadius * 0.3f, warpDebugColor);
+                appendDebugSegment(center, center + glm::vec3(ownerWorld[1]) *
+                    axisLength, markerRadius * 0.3f, warpDebugColor);
+                appendDebugSegment(center, center + glm::vec3(ownerWorld[2]) *
+                    axisLength, markerRadius * 0.3f, warpDebugColor);
             }
             else if (mode == Engine::Components::SpatialManipulator::ConnectionMode::MatrixOverlay)
             {
                 appendDebugBox(ownerWorld * manipulator->GetOverlayMatrix(),
-                    glm::vec3(0.5f), { 0.8f, 0.35f, 1.f, 1.f });
+                    glm::vec3(0.5f), { 1.f, 0.72f, 0.08f, 1.f });
             }
         }
     }
@@ -1937,8 +2129,21 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 !apertureVisibleInView(pass, apertureView))
                 continue;
             const PortalEdge edge { pass.source, pass.target };
-            if (std::find(portalPath.begin(), portalPath.end(), edge) !=
-                portalPath.end())
+            const size_t priorConnectionVisits = static_cast<size_t>(
+                std::count_if(portalPath.begin(), portalPath.end(),
+                    [&](const PortalEdge& previous)
+                    {
+                        return (previous.first == edge.first &&
+                                previous.second == edge.second) ||
+                               (previous.first == edge.second &&
+                                previous.second == edge.first);
+                    }));
+            // A linked pair is allowed to repeat deliberately: with the
+            // default limit of two, looking through A shows B and then A once
+            // more. The limit prevents an unbounded A -> B -> A loop while
+            // preserving recursion through unrelated connections.
+            if (!Engine::Rendering::Portal::CanRepeatConnection(
+                priorConnectionVisits, settings.portalConnectionRepeatLimit))
                 continue;
 
             uint32_t rootStencilBase = inheritedRootStencilBase;
@@ -2116,6 +2321,12 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                             ObjectGPUData mappedData = draw.objectData;
                             mappedData.mvp = proj * portalJob.mappedView *
                                 mappedData.world;
+                            // A portal maps an ordinary world rather than a
+                            // pre-partitioned target layer. The aperture
+                            // stencil is therefore its visibility boundary;
+                            // split traversers keep their own chart boundary
+                            // in traversalClipPlane below.
+                            mappedData.portalClipPlane = glm::vec4(0.f);
                             mappedData.viewPositionAlphaCutoff.x =
                                 portalJob.mappedCameraPosition.x;
                             mappedData.viewPositionAlphaCutoff.y =
@@ -2297,13 +2508,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
                 ObjectGPUData mappedData = draw.objectData;
                 mappedData.mvp = proj * portalJob.mappedView * mappedData.world;
-                // The stencil aperture is the only visibility boundary for a
-                // generic portal view.  Applying an extra target half-space
-                // to every scene object assumes the entire scene is already
-                // partitioned into portal-side layers; ordinary scenes are
-                // not, so that cull can erase all connected geometry and make
-                // a portal look invisible.  Traversal chart clipping remains
-                // independent in traversalClipPlane.
+                // A portal maps an ordinary world rather than a pre-partitioned
+                // target layer. The stencil is the aperture boundary; applying
+                // a global target-plane cull here can erase every connected
+                // object. Traversal chart clipping remains independent in
+                // traversalClipPlane.
                 mappedData.portalClipPlane = glm::vec4(0.f);
                 mappedData.viewPositionAlphaCutoff.x =
                     portalJob.mappedCameraPosition.x;
@@ -2401,41 +2610,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
         if (portalDebugPipeline)
         {
-            for (const PortalStencilPass& pass : portalPasses)
-            {
-                if (pass.apertureVertexCount < 3)
-                    continue;
-
-                DrawCBData debugDraw = pass.apertureDrawData;
-                debugDraw.lightCount = 0u;
-
-                ObjectGPUData debugData = pass.apertureObjectData;
-                debugData.baseColor = { 0.08f, 0.95f, 1.0f, debugAlpha };
-                debugData.ambientUnlit = { 0.f, 0.f, 0.f, 1.f };
-                debugData.emissiveOcclusion = { 0.25f, 0.9f, 1.0f, 1.f };
-                debugData.materialParams.w = 0.f;
-                debugData.viewPositionAlphaCutoff.w = 0.001f;
-
-                memcpy(static_cast<uint8_t*>(m_objectCBMapped) +
-                    pass.apertureConstantBufferOffset,
-                    &debugDraw, sizeof(debugDraw));
-                memcpy(static_cast<uint8_t*>(m_objectDataMapped) +
-                    static_cast<size_t>(debugDraw.objectIndex) *
-                    sizeof(ObjectGPUData),
-                    &debugData, sizeof(debugData));
-                m_objectDataBuffer->FlushMappedWrites();
-                context->SetStructuredBuffer(6, m_lightDataBuffer.get());
-                context->SetStructuredBuffer(7, m_objectDataBuffer.get());
-                context->SetStructuredBuffer(8, m_boneDataBuffer.get());
-                context->SetPipeline(portalDebugPipeline);
-                context->SetConstantBuffer(
-                    0, m_objectConstantBuffer.get(),
-                    pass.apertureConstantBufferOffset);
-                context->SetVertexBuffer(0, m_portalApertureBuffer.get(),
-                    sizeof(Engine::Model::Vertex), pass.apertureVertexOffset);
-                context->DrawInstanced(pass.apertureVertexCount, 1, 0, 0);
-            }
-
+            // Apertures are deliberately not redrawn here. They already own
+            // the stencil-masked portal image; an editor debug fill would
+            // compete with that image in depth/blend order. SpatialDebugPass
+            // contains only the requested point and line diagnostics.
             for (const SpatialDebugPass& pass : spatialDebugPasses)
             {
                 if (pass.vertexCount < 3)

@@ -74,6 +74,13 @@
 - [x] CRITICAL: Generate welded, triangulated cap surfaces for portal mesh cuts, including stable cap UVs, normals, tangents, and owning-material assignment; clipped triangle halves no longer leave open seams.
 - [x] HIGH: Replace per-frame CPU split-mesh uploads with two GPU-clipped render instances (local and remote frames) that preserve independent bounds, culling, shadows, and transparency ordering during traversal.
 - [x] HIGH: Keep local/remote portal collision pieces persistent across a traversal; update transforms or bounded-rate cut data without rebuilding dynamic rigid bodies, convex hulls, and Bvh meshes every frame.
+- [x] HIGH: Validate portal render connections before scheduling a stencil view; an invalid or incompatible endpoint must never silently render the source camera as its own destination.
+- [x] HIGH: Clip mapped portal draws to the target-facing aperture half-space so source-side geometry behind the target cannot leak into a portal view.
+- [x] HIGH: Add finite, recursive portal-ray segmentation with aperture tests, source-to-target direction mapping, and directed-cycle protection; editor picking consumes these segments.
 - [ ] HIGH: Gate teleportation with a swept collision-shape-versus-inset-aperture test, using the solid rim as physical feedback rather than relying on the body centre alone.
+- [ ] HIGH: Define explicit portal content-region ownership (scene layer, scope root, or spatial chart) and render/query only the connected region; target-plane clipping alone cannot distinguish two independent spaces that overlap in one world chart.
+- [ ] HIGH: Expose a physics-facing portal raycast hit API and test regular, split-piece, aperture-rim, and recursive portal hits against Bullet rather than only editor bounds.
+- [ ] MEDIUM: Expose bounded adaptive nonlinear-warp ray paths to gameplay and physics queries; the current Jacobian maps only a ray's origin/tangent and cannot represent curved paths or volume-boundary crossings.
+- [ ] MEDIUM: Add GPU-frame portal render tests for DX11, DX12, and Vulkan using a scene with distinct target-side content and no authored skybox fallback.
 - [ ] MEDIUM: Support indexed meshes, explicit submeshes/material slots, skinned meshes, and morph updates in portal cuts; the current triangle-stream clipper cannot preserve all asset topology.
 - [ ] MEDIUM: Define fragment ownership for scripts, joints, children, animation, and serialization when a connection disappears while an object is split.

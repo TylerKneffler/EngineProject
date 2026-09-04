@@ -21,6 +21,19 @@ void DisconnectSpatialManipulators(Engine::Core::Object* object)
                 Engine::Components::SpatialManipulator*>(component))
             manipulator->Disconnect();
 }
+
+bool ContainsObject(const Engine::Core::Object* root,
+    const Engine::Core::Object* candidate)
+{
+    if (!root)
+        return false;
+    if (root == candidate)
+        return true;
+    for (const Engine::Core::Object* child : root->Children)
+        if (ContainsObject(child, candidate))
+            return true;
+    return false;
+}
 }
 
 Scene::Scene()
@@ -44,10 +57,12 @@ void Scene::Start()
 {
     for (const auto& object : m_objects)
         object->Start();
+    m_hasStarted = true;
 }
 
 void Scene::Update(float deltaTime)
 {
+    m_isUpdating = true;
     for (const auto& object : m_objects)
         object->Update();
     m_audio->Update(deltaTime);
@@ -87,6 +102,9 @@ void Scene::Update(float deltaTime)
     std::unordered_set<const Engine::Components::RigidBody*> claimedBodies;
     for (const OrderedPortal& portal : portals)
         portal.manipulator->PostPhysicsUpdate(&claimedBodies);
+    m_isUpdating = false;
+    FlushPendingObjectAdditions();
+    FlushPendingObjectRemovals();
 }
 
 Engine::Core::Object* Scene::AddObject()
@@ -94,7 +112,10 @@ Engine::Core::Object* Scene::AddObject()
     auto obj = std::make_unique<Engine::Core::Object>();
     Engine::Core::Object* raw = obj.get();
     raw->OwnerScene = this;
-    m_objects.push_back(std::move(obj));
+    if (m_isUpdating)
+        m_pendingObjectAdditions.push_back(std::move(obj));
+    else
+        m_objects.push_back(std::move(obj));
     return raw;
 }
 
@@ -104,6 +125,29 @@ Engine::Core::Object* Scene::AddObject(const std::string& name)
     obj->name = name;
     obj->OwnerScene = this;
     return obj;
+}
+
+Engine::Core::Object* Scene::FindObjectByName(const std::string& name)
+{
+    const Scene* constScene = this;
+    return const_cast<Engine::Core::Object*>(constScene->FindObjectByName(name));
+}
+
+const Engine::Core::Object* Scene::FindObjectByName(const std::string& name) const
+{
+    const auto findNamed = [&name](const auto& objects)
+        -> const Engine::Core::Object*
+    {
+        for (const auto& object : objects)
+        {
+            if (object && object->name == name)
+                return object.get();
+        }
+        return nullptr;
+    };
+    if (const Engine::Core::Object* object = findNamed(m_objects))
+        return object;
+    return findNamed(m_pendingObjectAdditions);
 }
 
 bool Scene::TryGetObjectPath(const Engine::Core::Object* object, ObjectPath& path) const
@@ -292,6 +336,12 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
     if (!obj)
         return;
 
+    if (m_isUpdating)
+    {
+        RequestRemoveObject(obj);
+        return;
+    }
+
     std::vector<Engine::Core::Object*> objectsToRemove;
     std::function<void(Engine::Core::Object*)> collect = [&](Engine::Core::Object* current)
     {
@@ -348,8 +398,54 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
         m_objects.end());
 }
 
+void Scene::RequestRemoveObject(Engine::Core::Object* obj)
+{
+    if (!obj || std::find(m_pendingObjectRemovals.begin(),
+            m_pendingObjectRemovals.end(), obj) != m_pendingObjectRemovals.end())
+    {
+        return;
+    }
+    m_pendingObjectRemovals.push_back(obj);
+}
+
+void Scene::FlushPendingObjectAdditions()
+{
+    for (auto& object : m_pendingObjectAdditions)
+    {
+        if (!object)
+            continue;
+        // A runtime-spawned object cannot receive Start() until all of its
+        // components have been attached by its creator. That is now true at
+        // this update boundary.
+        if (m_hasStarted)
+            object->Start();
+        m_objects.push_back(std::move(object));
+    }
+    m_pendingObjectAdditions.clear();
+}
+
+void Scene::FlushPendingObjectRemovals()
+{
+    std::vector<Engine::Core::Object*> pending;
+    pending.swap(m_pendingObjectRemovals);
+    for (Engine::Core::Object* object : pending)
+    {
+        // An earlier request can remove a parent. Do not dereference the
+        // stale child pointer; compare it only against live hierarchy nodes.
+        const bool isLive = std::any_of(m_objects.begin(), m_objects.end(),
+            [object](const std::unique_ptr<Engine::Core::Object>& root)
+            {
+                return ContainsObject(root.get(), object);
+            });
+        if (isLive)
+            RemoveObject(object);
+    }
+}
+
 void Scene::ClearObjects()
 {
+    m_pendingObjectAdditions.clear();
+    m_pendingObjectRemovals.clear();
     m_audio->Reset();
     m_physics->Reset();
     for (const auto& object : m_objects)

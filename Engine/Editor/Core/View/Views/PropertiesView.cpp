@@ -166,7 +166,7 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             portalDebugChanged |= ui.Checkbox("Enable Spatial Debug Visuals",
                 &m_scene->settings.portalDebugVisuals);
             if (m_scene->settings.portalDebugVisuals)
-                ui.Label("Portal: yellow points, cyan edges/plane, magenta links, green normals");
+                ui.Label("Portal/warp: yellow points, aperture edges, mappings, normals, and volume frames");
             portalDebugChanged |= ui.Checkbox("Spatial Wireframe Overlay",
                 &m_scene->settings.portalDebugWireframe);
             portalDebugChanged |= ui.Checkbox("Tint Remote Portal View",
@@ -182,6 +182,17 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
                     std::round(portalRecursionDepth));
                 portalDebugChanged = true;
             }
+            ui.Tooltip("Maximum total portal hops in one view path.");
+            float portalConnectionRepeatLimit = static_cast<float>(
+                m_scene->settings.portalConnectionRepeatLimit);
+            if (ui.DragFloat("Portal Link Repeat Limit",
+                &portalConnectionRepeatLimit, 1.f, 1.f, 8.f))
+            {
+                m_scene->settings.portalConnectionRepeatLimit =
+                    static_cast<int>(std::round(portalConnectionRepeatLimit));
+                portalDebugChanged = true;
+            }
+            ui.Tooltip("1 shows only the connected side; 2 shows the source once through its target. Increase with recursion depth to extend the loop.");
             float portalViewBudget = static_cast<float>(
                 m_scene->settings.portalMaxViewsPerFrame);
             if (ui.DragFloat("Portal View Budget",
@@ -197,6 +208,8 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
                     m_scene->settings.portalDebugOverlayAlpha, 0.f, 1.f);
                 m_scene->settings.portalRecursionDepth = std::clamp(
                     m_scene->settings.portalRecursionDepth, 1, 8);
+                m_scene->settings.portalConnectionRepeatLimit = std::clamp(
+                    m_scene->settings.portalConnectionRepeatLimit, 1, 8);
                 m_scene->settings.portalMaxViewsPerFrame = std::clamp(
                     m_scene->settings.portalMaxViewsPerFrame, 1, 64);
                 if (OnComponentsChanged)

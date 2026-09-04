@@ -93,6 +93,15 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator | Warp Volume", ClampMin = "0")
     float warpBoundaryFalloff = 0.f;
 
+    // Dynamic rigid bodies can carry the volume's transverse metric scale as
+    // they traverse from local -Z to +Z. This is opt-in because a warp volume
+    // normally changes spatial coordinates without changing object ownership.
+    PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator | Warp Volume")
+    bool applyTraversalScale = false;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator | Warp Volume")
+    bool persistTraversalScaleOnExit = true;
+
     PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator | Warp Volume")
     int spaceWarpType = static_cast<int>(SpaceWarpType::Affine);
 
@@ -298,12 +307,33 @@ private:
         bool meshDeformed = false;
         bool hasCollisionCut = false;
         bool mapPositiveHalf = false;
+        // After the physical body anchor has been mapped to the destination,
+        // retain the source/remote render pair until its trailing geometry has
+        // cleared the aperture. The owner transform is then in target space,
+        // so AppendTraversalRenderInstances derives the source chart using
+        // the inverse portal transform.
+        bool postTeleportVisual = false;
         Phase phase = Phase::Uninitialized;
         bool waitForOverlapExit = false;
         glm::vec3 previousWorldPosition { 0.f };
         bool hasPreviousWorldPosition = false;
     };
     std::unordered_map<const RigidBody*, TraversalState> m_traversalStates;
+
+    struct WarpVolumeTraversalState
+    {
+        glm::vec3 authoredScale { 1.f };
+        glm::vec3 persistedScale { 1.f };
+        glm::vec3 previousLocalPosition { 0.f };
+        bool hasPreviousPosition = false;
+        bool active = false;
+        bool enteredFromNegativeZ = false;
+        bool completed = false;
+    };
+
+    void UpdateWarpVolumeTraversalScale();
+    std::unordered_map<const Engine::Core::Object*, WarpVolumeTraversalState>
+        m_warpVolumeTraversalStates;
     std::vector<Engine::Core::Object*> m_matrixOverlayObjects;
 };
 }

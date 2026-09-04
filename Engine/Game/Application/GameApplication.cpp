@@ -13,6 +13,7 @@
 #include "Core/Assets/Scripts/Rotate.h"
 #include "Core/Assets/Scripts/FirstPersonController.h"
 #include "Core/Assets/Scripts/MainMenuGameManager.h"
+#include "Core/Assets/Scripts/PortalSplitAfterDelay.h"
 #include "Core/Serialization/SceneSerializer.h"
 #endif
 
@@ -26,6 +27,8 @@ void RegisterGameComponents()
     ::Engine::Serialization::RegisterComponentType<Rotate>("Rotate");
     ::Engine::Serialization::RegisterComponentType<FirstPersonController>("FirstPersonController");
     ::Engine::Serialization::RegisterComponentType<MainMenuGameManager>("MainMenuGameManager");
+    ::Engine::Serialization::RegisterComponentType<PortalSplitAfterDelay>(
+        "PortalSplitAfterDelay");
 #endif
 }
 

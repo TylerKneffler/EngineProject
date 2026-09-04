@@ -1,13 +1,17 @@
 #include "Core/Compoonents/Transform.h"
+#include "Core/Compoonents/Camera.h"
 #include "Core/Compoonents/Mesh.h"
 #include "Core/Compoonents/SpatialManipulator.h"
+#include "Core/Rendering/Lighting/Pipelines/Realtime/RealtimeLightingPipeline.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Object.h"
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <cassert>
+#include <array>
 #include <cmath>
+#include <utility>
 
 int main()
 {
@@ -275,6 +279,24 @@ int main()
     assert(glm::length(mappedBitangent - glm::vec3(0.f, 1.f, 0.f)) < 0.0002f);
     assert(glm::determinant(glm::mat3(sourceToTarget)) > 0.f);
 
+    // A query ray must stop at the source aperture, continue from the mapped
+    // target anchor, and carry its direction through the same relative frame
+    // used by rigid-body traversal and virtual cameras.
+    const auto portalRaySegments = scene.TracePortalRay(
+        { sourceAnchor - sourceNormal * 2.f, sourceNormal }, 12.f, 4u);
+    assert(portalRaySegments.size() >= 2u);
+    assert(std::abs(portalRaySegments[0].maxDistance - 2.f) < 0.002f);
+    assert(portalRaySegments[0].enteredPortal == sourceObject);
+    assert(glm::length(portalRaySegments[1].ray.direction -
+        glm::normalize(mappedNormal)) < 0.0002f);
+    assert(glm::length(portalRaySegments[1].ray.origin - targetAnchor) <
+        0.01f);
+    const auto nonTraversingRaySegments = scene.TracePortalRay(
+        { sourceAnchor - sourceNormal * 2.f, sourceNormal }, 12.f, 0u);
+    assert(nonTraversingRaySegments.size() == 1u);
+    assert(std::abs(nonTraversingRaySegments[0].maxDistance - 12.f) <
+        0.0002f);
+
     source->Update();
     const auto& sourceConnection = sourceObject->transform.matrixLayer.connection;
     const auto& targetConnection = targetObject->transform.matrixLayer.connection;
@@ -360,9 +382,12 @@ int main()
     const glm::vec3 mappedRenderForward = glm::normalize(
         source->MapRenderWorldPointThroughPortalShape(renderViewer -
             glm::vec3(renderSourceFrame[2]), *target) - mappedRenderViewer);
+    // Render-frame mapping follows the same direct anchor-frame contract as
+    // physical traversal: no implicit 180-degree flip is introduced for
+    // virtual-camera rays.
     assert(glm::dot(mappedRenderViewer - glm::vec3(renderTargetFrame[3]),
-        glm::vec3(renderTargetFrame[2])) < -1.9f);
-    assert(glm::dot(mappedRenderForward, glm::vec3(renderTargetFrame[2])) > 0.9f);
+        glm::vec3(renderTargetFrame[2])) > 1.9f);
+    assert(glm::dot(mappedRenderForward, glm::vec3(renderTargetFrame[2])) < -0.9f);
 
     // Rendering, camera, audio, physics, raycast, and gameplay now consume
     // one nonlinear spatial-query contract rather than separate affine paths.
@@ -421,6 +446,153 @@ int main()
         loadedManipulator->spaceWarpType) == SpatialManipulator::SpaceWarpType::Formula);
     assert(glm::length(glm::vec3(loadedFallingBody->transform.GetWorldMatrixWithLayer()[3]) -
         loadedFallingBody->transform.GetWorldPosition()) > 0.1f);
+
+    // The shrinking-tunnel showcase is one continuous mesh. Its inverse
+    // exponential chart must flatten both physical ends into the same optical
+    // square, which is the mapping the renderer now evaluates per vertex.
+    Engine::Scene::Scene shrinkingTunnel;
+    assert(Engine::Serialization::SceneSerializer::Load(shrinkingTunnel,
+        "Engine/Core/Assets/Scenes/smooth_shrinking_tunnel.scene", nullptr));
+    const auto renderQuery = Engine::Scene::Scene::SpatialQuery {
+        Engine::Scene::Scene::SpatialQueryDomain::Rendering };
+    const glm::vec3 opticalEntrance = shrinkingTunnel.MapSpatialPoint(
+        glm::vec3(6.f, 6.f, 0.f), renderQuery);
+    const glm::vec3 opticalExit = shrinkingTunnel.MapSpatialPoint(
+        glm::vec3(1.5f, 6.f, 30.f), renderQuery);
+    const glm::vec3 opticalExitFloor = shrinkingTunnel.MapSpatialPoint(
+        glm::vec3(0.f, 4.5f, 30.f), renderQuery);
+    assert(glm::length(opticalEntrance - glm::vec3(6.f, 6.f, 0.f)) < 0.002f);
+    assert(glm::length(opticalExit - glm::vec3(6.f, 6.f, 30.f)) < 0.002f);
+    assert(glm::length(opticalExitFloor - glm::vec3(0.f, 0.f, 30.f)) < 0.002f);
+
+    // Trace three physical geodesic samples through the tunnel. In physical
+    // space their lateral position contracts exponentially; mapping every
+    // point through the render chart produces straight, parallel optical
+    // rays. This is the same condition the per-vertex tunnel mesh satisfies.
+    constexpr float tunnelExponent = 0.046209812f;
+    for (const float opticalX : { -3.5f, 0.f, 3.5f })
+    {
+        for (int sample = 0; sample <= 30; ++sample)
+        {
+            const float z = static_cast<float>(sample);
+            const glm::vec3 physicalRayPoint(opticalX *
+                std::exp(-tunnelExponent * z), 6.f, z);
+            const glm::vec3 opticalRayPoint = shrinkingTunnel.MapSpatialPoint(
+                physicalRayPoint, renderQuery);
+            assert(glm::length(opticalRayPoint -
+                glm::vec3(opticalX, 6.f, z)) < 0.003f);
+        }
+    }
+
+    // Traversal scale is a warp-volume capability, not tunnel-scene script
+    // behavior. It carries the transverse inverse metric onto a dynamic body,
+    // samples the exact positive boundary on exit, and never rewrites mesh or
+    // morph data.
+    Engine::Core::Object* tunnelVolume = shrinkingTunnel.FindObjectByName(
+        "Smooth Shrinking Tunnel Warp");
+    Engine::Core::Object* scaleProbe = shrinkingTunnel.FindObjectByName(
+        "Persistent Scale Probe");
+    assert(tunnelVolume && scaleProbe);
+    SpatialManipulator* tunnelWarp = tunnelVolume->GetComponent<SpatialManipulator>();
+    Mesh* probeMesh = scaleProbe->GetComponent<Mesh>();
+    assert(tunnelWarp && tunnelWarp->applyTraversalScale &&
+        tunnelWarp->persistTraversalScaleOnExit && probeMesh);
+    const uint32_t sourceVertexCount = probeMesh->GetVertexCount();
+    const glm::vec3 sourceVertex(probeMesh->GetVertices()[0].pos[0],
+        probeMesh->GetVertices()[0].pos[1], probeMesh->GetVertices()[0].pos[2]);
+    Mesh::MorphTarget probeMorph;
+    probeMorph.positions.resize(sourceVertexCount, glm::vec3(0.f));
+    probeMesh->SetMorphData(0u, { std::move(probeMorph) }, { 0.65f });
+
+    tunnelWarp->Update(); // Records the probe before it enters at local -Z.
+    scaleProbe->transform.position = { 0.f, 6.f, 10.f };
+    tunnelWarp->Update();
+    assert(glm::length(scaleProbe->transform.scale - glm::vec3(
+        std::exp(-tunnelExponent * 10.f))) < 0.003f);
+
+    scaleProbe->transform.position = { 0.f, 6.f, 30.1f };
+    tunnelWarp->Update();
+    assert(glm::length(scaleProbe->transform.scale - glm::vec3(0.25f)) < 0.003f);
+    assert(probeMesh->GetVertexCount() == sourceVertexCount);
+    assert(glm::length(glm::vec3(probeMesh->GetVertices()[0].pos[0],
+        probeMesh->GetVertices()[0].pos[1], probeMesh->GetVertices()[0].pos[2]) -
+        sourceVertex) < 0.0001f);
+    assert(probeMesh->GetMorphWeights().size() == 1u &&
+        std::abs(probeMesh->GetMorphWeights()[0] - 0.65f) < 0.0001f);
+
+    // A quarter-turn formula volume maps a straight source-chart ray to a
+    // quarter circle around its center. The local ray tangent rotates from
+    // +Z at the entry to +X at the exit, which is the shared contract for
+    // rendering, camera orientation, and light placement.
+    Engine::Scene::Scene quarterTurn;
+    assert(Engine::Serialization::SceneSerializer::Load(quarterTurn,
+        "Engine/Core/Assets/Scenes/quarter_turn_warp_optics.scene", nullptr));
+    constexpr float bendRadius = 6.f;
+    constexpr float quarterTurnLength = 9.42477796f;
+    const auto warpRenderQuery = Engine::Scene::Scene::SpatialQuery {
+        Engine::Scene::Scene::SpatialQueryDomain::Rendering };
+    const glm::vec3 bendEntry = quarterTurn.MapSpatialPoint(
+        { 0.f, 2.f, 0.f }, warpRenderQuery);
+    const glm::vec3 bendMidpoint = quarterTurn.MapSpatialPoint(
+        { 0.f, 2.f, quarterTurnLength * 0.5f }, warpRenderQuery);
+    const glm::vec3 bendExit = quarterTurn.MapSpatialPoint(
+        { 0.f, 2.f, quarterTurnLength }, warpRenderQuery);
+    assert(glm::length(bendEntry - glm::vec3(0.f, 2.f, 0.f)) < 0.003f);
+    assert(glm::length(bendMidpoint - glm::vec3(
+        bendRadius * (1.f - std::sqrt(0.5f)), 2.f,
+        bendRadius * std::sqrt(0.5f))) < 0.003f);
+    assert(glm::length(bendExit - glm::vec3(bendRadius, 2.f, bendRadius)) < 0.003f);
+    for (int step = 0; step <= 16; ++step)
+    {
+        const float distance = quarterTurnLength * static_cast<float>(step) / 16.f;
+        const glm::vec3 curvePoint = quarterTurn.MapSpatialPoint(
+            { 0.f, 2.f, distance }, warpRenderQuery);
+        assert(std::abs(glm::length(glm::vec2(curvePoint.x - bendRadius,
+            curvePoint.z)) - bendRadius) < 0.004f);
+    }
+    const Engine::Scene::Scene::SpatialRay entranceRay = quarterTurn.MapSpatialRay(
+        { { 0.f, 2.f, 0.02f }, { 0.f, 0.f, 1.f } }, warpRenderQuery);
+    const Engine::Scene::Scene::SpatialRay exitRay = quarterTurn.MapSpatialRay(
+        { { 0.f, 2.f, quarterTurnLength - 0.02f }, { 0.f, 0.f, 1.f } },
+        warpRenderQuery);
+    assert(glm::dot(entranceRay.direction, glm::vec3(0.f, 0.f, 1.f)) > 0.999f);
+    assert(glm::dot(exitRay.direction, glm::vec3(1.f, 0.f, 0.f)) > 0.999f);
+
+    // Inside the volume, the camera stays in the source chart. Its forward
+    // raster ray therefore continues along +Z through the whole curved path
+    // rather than looking along the globally embedded chord at the first bend.
+    Engine::Core::Object* quarterTurnCameraObject = quarterTurn.FindObjectByName(
+        "Quarter Turn Warp Camera");
+    Engine::Components::Camera* quarterTurnCamera = quarterTurnCameraObject
+        ? quarterTurnCameraObject->GetComponent<Engine::Components::Camera>() : nullptr;
+    assert(quarterTurnCamera);
+    quarterTurnCameraObject->transform.position =
+        { 0.f, 2.f, quarterTurnLength * 0.5f };
+    const glm::mat4 sourceChartCameraWorld = glm::inverse(
+        quarterTurnCamera->GetViewMatrix());
+    assert(glm::length(glm::vec3(sourceChartCameraWorld[3]) - glm::vec3(
+        0.f, 2.f, quarterTurnLength * 0.5f)) < 0.003f);
+    assert(glm::dot(glm::normalize(glm::vec3(sourceChartCameraWorld[2])),
+        glm::vec3(0.f, 0.f, 1.f)) > 0.999f);
+
+    std::array<Engine::Model::LightData, 8> warpLights {};
+    Engine::Rendering::RealtimeLightingPipeline realtimeLights;
+    const uint32_t warpLightCount = realtimeLights.CollectLights(quarterTurn,
+        warpLights.data(), static_cast<uint32_t>(warpLights.size()));
+    assert(warpLightCount == 2u);
+    bool foundMappedBendLight = false;
+    for (uint32_t index = 0; index < warpLightCount; ++index)
+    {
+        const glm::vec3 lightPosition(warpLights[index].positionRange);
+        if (glm::length(lightPosition - glm::vec3(
+                bendRadius * (1.f - std::sqrt(0.5f)), 3.3f,
+                bendRadius * std::sqrt(0.5f))) < 0.004f)
+        {
+            foundMappedBendLight = true;
+            break;
+        }
+    }
+    assert(foundMappedBendLight);
 
     Engine::Core::Object* removableObject = scene.AddObject("RemovableLink");
     Engine::Core::Object* survivingObject = scene.AddObject("SurvivingLink");

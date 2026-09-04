@@ -159,4 +159,142 @@ Scene::SpatialRay Scene::MapSpatialRay(const SpatialRay& ray,
         glm::vec3(0.f, 0.f, 1.f);
     return mapped;
 }
+
+std::vector<Scene::PortalRaySegment> Scene::TracePortalRay(
+    const SpatialRay& ray, float maxDistance, uint32_t maxPortalHops) const
+{
+    std::vector<PortalRaySegment> segments;
+    if (!std::isfinite(maxDistance) || maxDistance <= 0.f)
+        return segments;
+
+    const float directionLength = glm::length(ray.direction);
+    if (!std::isfinite(directionLength) || directionLength <= 1e-6f)
+        return segments;
+
+    struct PortalEdge
+    {
+        const Engine::Components::SpatialManipulator* source = nullptr;
+        const Engine::Components::SpatialManipulator* target = nullptr;
+    };
+    std::vector<PortalEdge> portalPath;
+    SpatialRay current { ray.origin, ray.direction / directionLength };
+    float remainingDistance = maxDistance;
+    constexpr float kRayEpsilon = 0.001f;
+
+    const auto resolveTarget = [this](
+        const Engine::Components::SpatialManipulator* source)
+        -> const Engine::Components::SpatialManipulator*
+    {
+        if (!source)
+            return nullptr;
+        if (auto* target = source->ResolveTarget())
+            return target;
+
+        const Engine::Components::SpatialManipulator* reciprocal = nullptr;
+        for (const auto& root : GetObjects())
+        {
+            VisitObjectTree(root.get(), [&](const Engine::Core::Object* object)
+            {
+                if (!object || object == source->Owner || reciprocal)
+                    return;
+                auto* candidate = object->GetComponent<
+                    Engine::Components::SpatialManipulator>();
+                if (candidate && candidate->ResolveTarget() == source)
+                    reciprocal = candidate;
+            });
+        }
+        return reciprocal;
+    };
+
+    // Always emit the current ordinary-space segment.  Reaching the portal
+    // hop budget merely stops further remapping; it must not make the tail of
+    // a ray disappear (and a zero budget is still a valid ordinary ray).
+    for (uint32_t hop = 0u;; ++hop)
+    {
+        const Engine::Components::SpatialManipulator* nearestSource = nullptr;
+        const Engine::Components::SpatialManipulator* nearestTarget = nullptr;
+        float nearestDistance = remainingDistance;
+
+        if (hop < maxPortalHops)
+        {
+            for (const auto& root : GetObjects())
+            {
+                VisitObjectTree(root.get(), [&](const Engine::Core::Object* object)
+                {
+                    if (!object || !object->IsEnabledInHierarchy())
+                        return;
+                    auto* source = object->GetComponent<
+                        Engine::Components::SpatialManipulator>();
+                    if (!source || !source->enabled)
+                        return;
+                    const auto mode = static_cast<Engine::Components::
+                        SpatialManipulator::ConnectionMode>(source->connectionMode);
+                    if (mode != Engine::Components::SpatialManipulator::ConnectionMode::Portal &&
+                        mode != Engine::Components::SpatialManipulator::ConnectionMode::LinkedPortal)
+                        return;
+                    auto* target = resolveTarget(source);
+                    if (!target || !target->enabled || !target->Owner ||
+                        !source->HasCompatiblePortalShapeWith(*target))
+                    {
+                        return;
+                    }
+                    const PortalEdge edge { source, target };
+                    if (std::find_if(portalPath.begin(), portalPath.end(),
+                        [&](const PortalEdge& prior)
+                        {
+                            return prior.source == edge.source &&
+                                prior.target == edge.target;
+                        }) != portalPath.end())
+                    {
+                        return;
+                    }
+
+                    const glm::mat4 sourceFrame = source->GetPortalWorldFrame();
+                    const glm::vec3 planePoint(sourceFrame[3]);
+                    const glm::vec3 planeNormal = glm::normalize(
+                        glm::vec3(sourceFrame[2]));
+                    const float denominator = glm::dot(current.direction, planeNormal);
+                    if (std::abs(denominator) <= 1e-6f)
+                        return;
+                    const float distance = glm::dot(planePoint - current.origin,
+                        planeNormal) / denominator;
+                    if (!std::isfinite(distance) || distance <= kRayEpsilon ||
+                        distance >= nearestDistance)
+                    {
+                        return;
+                    }
+                    const glm::vec3 hit = current.origin + current.direction * distance;
+                    if (!source->IsWorldPointInsidePortalAperture(hit, 0.001f))
+                        return;
+                    nearestSource = source;
+                    nearestTarget = target;
+                    nearestDistance = distance;
+                });
+            }
+        }
+
+        segments.push_back({ current, nearestDistance,
+            nearestSource ? nearestSource->Owner : nullptr });
+        if (!nearestSource || !nearestTarget)
+            break;
+
+        const glm::mat4 sourceToTarget =
+            nearestSource->GetPortalWorldTransformTo(*nearestTarget);
+        const glm::vec3 sourceHit = current.origin +
+            current.direction * nearestDistance;
+        const glm::vec3 mappedDirection = glm::vec3(sourceToTarget *
+            glm::vec4(current.direction, 0.f));
+        const float mappedLength = glm::length(mappedDirection);
+        if (!std::isfinite(mappedLength) || mappedLength <= 1e-6f)
+            break;
+        current.direction = mappedDirection / mappedLength;
+        current.origin = glm::vec3(sourceToTarget * glm::vec4(sourceHit, 1.f)) +
+            current.direction * kRayEpsilon;
+        remainingDistance -= nearestDistance;
+        portalPath.push_back({ nearestSource, nearestTarget });
+        if (remainingDistance <= kRayEpsilon)
+            break;
+    }
+    return segments;
+}
 }

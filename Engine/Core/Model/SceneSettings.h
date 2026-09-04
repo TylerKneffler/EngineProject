@@ -44,6 +44,10 @@ struct SceneSettings
     // portals visible through portals. Runtime clamps both values to hard
     // safety limits before scheduling any work.
     int portalRecursionDepth = 2;
+    // Maximum visits to one linked portal pair along a recursive view path.
+    // Two shows the source scene once through its target; higher values extend
+    // that A -> B -> A loop while recursion depth remains the global limit.
+    int portalConnectionRepeatLimit = 2;
     int portalMaxViewsPerFrame = 24;
 
 };

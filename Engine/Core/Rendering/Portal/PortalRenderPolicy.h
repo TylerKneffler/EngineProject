@@ -35,6 +35,11 @@ struct StencilStep
 
 inline constexpr int kMinimumRecursionDepth = 1;
 inline constexpr int kMaximumRecursionDepth = 8;
+// A value of one permits the direct source-to-target view only. Two permits
+// source -> target -> source once, and higher values extend that linked-pair
+// loop, subject to the independent total-depth and per-frame view budgets.
+inline constexpr int kMinimumConnectionRepeatLimit = 1;
+inline constexpr int kMaximumConnectionRepeatLimit = 8;
 inline constexpr int kMinimumViewBudget = 1;
 inline constexpr int kMaximumViewBudget = 64;
 
@@ -42,6 +47,18 @@ constexpr int ClampRecursionDepth(int requested)
 {
     return std::clamp(requested, kMinimumRecursionDepth,
         kMaximumRecursionDepth);
+}
+
+constexpr int ClampConnectionRepeatLimit(int requested)
+{
+    return std::clamp(requested, kMinimumConnectionRepeatLimit,
+        kMaximumConnectionRepeatLimit);
+}
+
+constexpr bool CanRepeatConnection(std::size_t priorVisits, int requestedLimit)
+{
+    return priorVisits < static_cast<std::size_t>(
+        ClampConnectionRepeatLimit(requestedLimit));
 }
 
 constexpr int ClampViewBudget(int requested)
