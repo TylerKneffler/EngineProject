@@ -1174,6 +1174,34 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     }
 
     glm::mat4 view = cam->GetViewMatrix();
+    // Camera::GetViewMatrix uses the source chart for a camera already inside
+    // a warp volume. The editor needs an explicit opt-in for that behavior so
+    // its default view remains an accurate inspection of the embedded space.
+    if (!cameraOverride && !settings.sceneCameraWarpLookThrough &&
+        !m_editorMode2D && cam->Owner)
+    {
+        glm::mat4 embeddedWorld = cam->Owner->transform.GetWorldMatrix();
+        if (cam->Owner->transform.matrixLayer.enabled)
+        {
+            embeddedWorld = cam->Owner->transform.matrixLayer.localToLayer *
+                embeddedWorld;
+        }
+        embeddedWorld = MapSpatialMatrix(embeddedWorld,
+            { SpatialQueryDomain::Camera, cam->Owner });
+        const glm::vec3 eye = glm::vec3(embeddedWorld[3]);
+        if (!cam->useTransformRotation)
+        {
+            const glm::vec3 target = MapSpatialPoint(cam->target,
+                { SpatialQueryDomain::Camera, cam->Owner });
+            view = glm::lookAtLH(eye, target, cam->up);
+        }
+        else
+        {
+            const glm::vec3 forward = glm::normalize(glm::vec3(embeddedWorld[2]));
+            const glm::vec3 up = glm::normalize(glm::vec3(embeddedWorld[1]));
+            view = glm::lookAtLH(eye, eye + forward, up);
+        }
+    }
     if (m_editorMode2D && cam->Owner)
     {
         const glm::vec3 cameraWorld = cam->Owner->transform.GetWorldPosition();
@@ -1192,17 +1220,88 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             authoredCameraWorld = cam->Owner->transform.matrixLayer.localToLayer *
                 authoredCameraWorld;
         }
-        cameraUsesSourceWarpChart = SampleSpatialPoint(
+        const bool sourceChartAllowed = cameraOverride ||
+            settings.sceneCameraWarpLookThrough;
+        cameraUsesSourceWarpChart = sourceChartAllowed && SampleSpatialPoint(
             glm::vec3(authoredCameraWorld[3]),
             { SpatialQueryDomain::Camera, cam->Owner }).affectedByWarpVolume;
+
+        // Game views always look through a finite warp boundary from outside.
+        // The editor Scene view may do so only when Spatial Debug explicitly
+        // opts in; its normal mode stays embedded for accurate authoring.
+        if (!cameraUsesSourceWarpChart && sourceChartAllowed && !m_editorMode2D)
+        {
+            const glm::vec3 rayOrigin = glm::vec3(authoredCameraWorld[3]);
+            const glm::vec3 rayDirection = glm::normalize(
+                glm::vec3(glm::inverse(view)[2]));
+            const auto rayIntersectsVolume = [&](const Engine::Components::SpatialManipulator& volume)
+            {
+                if (!volume.Owner || !volume.definesWarpVolume || !volume.enabled)
+                    return false;
+                const glm::mat4 inverseVolume = glm::inverse(
+                    volume.Owner->transform.GetWorldMatrix());
+                const glm::vec3 origin = glm::vec3(inverseVolume *
+                    glm::vec4(rayOrigin, 1.f));
+                const glm::vec3 direction = glm::vec3(inverseVolume *
+                    glm::vec4(rayDirection, 0.f));
+                if (glm::dot(direction, direction) <= 1e-10f)
+                    return false;
+                const auto shape = static_cast<Engine::Components::SpatialManipulator::
+                    WarpVolumeShape>(volume.warpVolumeShape);
+                if (shape == Engine::Components::SpatialManipulator::WarpVolumeShape::Infinite)
+                    return true;
+                if (shape == Engine::Components::SpatialManipulator::WarpVolumeShape::Sphere)
+                {
+                    const float radius = std::max(0.001f,
+                        std::abs(volume.warpVolumeRadius));
+                    const float a = glm::dot(direction, direction);
+                    const float b = 2.f * glm::dot(origin, direction);
+                    const float c = glm::dot(origin, origin) - radius * radius;
+                    const float discriminant = b * b - 4.f * a * c;
+                    return discriminant >= 0.f &&
+                        (-b + std::sqrt(discriminant)) / (2.f * a) >= 0.f;
+                }
+
+                const glm::vec3 halfSize = glm::max(glm::abs(volume.warpVolumeSize) *
+                    0.5f, glm::vec3(0.0001f));
+                float entry = 0.f;
+                float exit = std::numeric_limits<float>::infinity();
+                for (int axis = 0; axis < 3; ++axis)
+                {
+                    if (std::abs(direction[axis]) <= 1e-7f)
+                    {
+                        if (origin[axis] < -halfSize[axis] ||
+                            origin[axis] > halfSize[axis])
+                            return false;
+                        continue;
+                    }
+                    float nearT = (-halfSize[axis] - origin[axis]) / direction[axis];
+                    float farT = (halfSize[axis] - origin[axis]) / direction[axis];
+                    if (nearT > farT)
+                        std::swap(nearT, farT);
+                    entry = std::max(entry, nearT);
+                    exit = std::min(exit, farT);
+                    if (entry > exit)
+                        return false;
+                }
+                return exit >= 0.f;
+            };
+            for (const auto& object : m_objects)
+            {
+                const auto* volume = object ? object->GetComponent<
+                    Engine::Components::SpatialManipulator>() : nullptr;
+                if (volume && rayIntersectsVolume(*volume))
+                {
+                    cameraUsesSourceWarpChart = true;
+                    break;
+                }
+            }
+        }
     }
-    // A finite nonlinear volume is a local chart. Once the camera is inside
-    // that chart, projecting its already world-warped vertices with an
-    // ordinary straight raster camera makes a curved corridor opaque at its
-    // first bend. Draw its contents in the camera's authored chart instead;
-    // the view ray then follows the volume coordinate path rather than the
-    // globally embedded curve. This is deliberately per-view, so editor and
-    // game cameras can occupy different charts in the same frame.
+    // A source-chart view continues through a finite nonlinear volume instead
+    // of projecting its already embedded bend with a straight raster camera.
+    // Editor views stay embedded unless Spatial Debug explicitly enables the
+    // Scene Camera Warp Look-Through option.
     const auto sourceChartWorld = [](const FrameRenderItem& item)
     {
         glm::mat4 world = item.object->transform.GetWorldMatrix();

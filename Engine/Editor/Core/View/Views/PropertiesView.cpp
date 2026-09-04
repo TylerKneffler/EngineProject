@@ -167,6 +167,9 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
                 &m_scene->settings.portalDebugVisuals);
             if (m_scene->settings.portalDebugVisuals)
                 ui.Label("Portal/warp: yellow points, aperture edges, mappings, normals, and volume frames");
+            portalDebugChanged |= ui.Checkbox("Scene Camera Warp Look-Through",
+                &m_scene->settings.sceneCameraWarpLookThrough);
+            ui.Tooltip("Use game-style source-chart rendering when the Scene camera looks into a warp volume. Disable to inspect the authored bent space.");
             portalDebugChanged |= ui.Checkbox("Spatial Wireframe Overlay",
                 &m_scene->settings.portalDebugWireframe);
             portalDebugChanged |= ui.Checkbox("Tint Remote Portal View",

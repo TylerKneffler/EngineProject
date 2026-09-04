@@ -37,6 +37,10 @@ struct SceneSettings
 
     // Editor-only debug overlays for portals, matrix links, and warp volumes.
     bool portalDebugVisuals = false;
+    // Lets the editor Scene camera use the game camera's source-chart
+    // look-through behavior when its ray enters a finite warp volume. Keep
+    // this off by default so the Scene camera shows the authored bent space.
+    bool sceneCameraWarpLookThrough = false;
     bool portalDebugWireframe = false;
     bool portalDebugTintRemoteView = true;
     float portalDebugOverlayAlpha = 0.45f;

@@ -78,6 +78,8 @@ Engine::Serialization::JsonValue SerializeSceneSettings(const Engine::Model::Sce
         Engine::Serialization::JsonValue(settings.sceneViewUiOverlay));
     value.Set("portalDebugVisuals",
         Engine::Serialization::JsonValue(settings.portalDebugVisuals));
+    value.Set("sceneCameraWarpLookThrough",
+        Engine::Serialization::JsonValue(settings.sceneCameraWarpLookThrough));
     value.Set("portalDebugWireframe",
         Engine::Serialization::JsonValue(settings.portalDebugWireframe));
     value.Set("portalDebugTintRemoteView",
@@ -145,6 +147,12 @@ void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engi
         settings.sceneViewUiOverlay = sceneViewUiOverlay->AsBool();
     if (const auto* portalDebugVisuals = FindField(value, "portalDebugVisuals"))
         settings.portalDebugVisuals = portalDebugVisuals->AsBool();
+    if (const auto* sceneCameraWarpLookThrough = FindField(value,
+        "sceneCameraWarpLookThrough"))
+    {
+        settings.sceneCameraWarpLookThrough =
+            sceneCameraWarpLookThrough->AsBool();
+    }
     if (const auto* portalDebugWireframe = FindField(value, "portalDebugWireframe"))
         settings.portalDebugWireframe = portalDebugWireframe->AsBool();
     if (const auto* portalDebugTintRemoteView = FindField(value, "portalDebugTintRemoteView"))

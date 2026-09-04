@@ -8,7 +8,7 @@
   <objects>
     <item name="Quarter Turn Warp Camera" enabled="true">
       <transform>
-        <Transform.position><item>0</item><item>2</item><item>0.02</item></Transform.position>
+        <Transform.position><item>0</item><item>2</item><item>-7</item></Transform.position>
         <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
         <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
       </transform>
