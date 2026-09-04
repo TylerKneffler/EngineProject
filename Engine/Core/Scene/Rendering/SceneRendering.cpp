@@ -1192,7 +1192,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         if (!cam->useTransformRotation)
         {
             const glm::vec3 target = MapSpatialPoint(cam->target,
-                { SpatialQueryDomain::Camera, cam->Owner });
+                { SpatialQueryDomain::Camera });
             view = glm::lookAtLH(eye, target, cam->up);
         }
         else
