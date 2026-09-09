@@ -241,6 +241,7 @@ void Mesh::LoadFromFile(const std::string& path)
             " (resolved to " + resolvedPath.string() + ")");
 
     std::vector<std::array<float, 3>> positions;
+    std::vector<std::array<float, 4>> colors;
     std::vector<std::array<float, 3>> normals;
     std::vector<std::array<float, 2>> texcoords;
     m_vertices.clear();
@@ -257,6 +258,13 @@ void Mesh::LoadFromFile(const std::string& path)
             std::array<float, 3> p{};
             ss >> p[0] >> p[1] >> p[2];
             positions.push_back(p);
+            // Common OBJ extension: optional RGB/RGBA values follow XYZ.
+            // Keeping these indexed with positions lets diagnostic meshes
+            // supply face colors without requiring a texture atlas.
+            std::array<float, 4> color { 1.f, 1.f, 1.f, 1.f };
+            if (ss >> color[0] >> color[1] >> color[2])
+                ss >> color[3];
+            colors.push_back(color);
         }
         else if (token == "vn")
         {
@@ -279,7 +287,9 @@ void Mesh::LoadFromFile(const std::string& path)
                 int vi = 0, vti = 0, vni = 0;
                 ParseFaceToken(tok, vi, vti, vni);
                 Vertex v{};
-                if (vi  > 0) { auto& p = positions[vi  - 1]; v.pos[0]    = p[0]; v.pos[1]    = p[1]; v.pos[2]    = p[2]; }
+                if (vi  > 0) { auto& p = positions[vi  - 1]; v.pos[0]    = p[0]; v.pos[1]    = p[1]; v.pos[2]    = p[2];
+                    const auto& color = colors[vi - 1];
+                    std::copy(color.begin(), color.end(), v.color); }
                 if (vti > 0) { auto& uv = texcoords[vti - 1]; v.uv[0] = uv[0]; v.uv[1] = uv[1]; }
                 if (vni > 0) { auto& n = normals  [vni - 1]; v.normal[0] = n[0]; v.normal[1] = n[1]; v.normal[2] = n[2]; }
                 m_vertices.push_back(v);

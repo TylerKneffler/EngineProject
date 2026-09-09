@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <Scene xmlns:components="urn:engine-components" version="1">
-  <settings showGrid="true" gridHalfSize="40" gridCellSize="1" gridOpacity="0.2" gridFadeDistance="120" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" renderMode="0" sceneViewUiOverlay="false" portalDebugVisuals="false" portalDebugWireframe="false" portalDebugTintRemoteView="false" portalDebugOverlayAlpha="0.8" portalRecursionDepth="2" portalMaxViewsPerFrame="24">
+  <settings showGrid="true" gridHalfSize="20" gridCellSize="1" gridOpacity="0.2" gridFadeDistance="60" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" renderMode="0" sceneViewUiOverlay="false" portalDebugVisuals="false" portalDebugWireframe="false" portalDebugTintRemoteView="false" portalDebugOverlayAlpha="0.8" portalRecursionDepth="2" portalMaxViewsPerFrame="24">
     <gridColor><item>0.16</item><item>0.19</item><item>0.28</item></gridColor>
     <gridOriginColor><item>0.2</item><item>0.7</item><item>0.95</item></gridOriginColor>
     <ambientColor><item>0.025</item><item>0.035</item><item>0.07</item></ambientColor>
@@ -8,13 +8,13 @@
   <objects>
     <item name="Shrinking Tunnel Camera" enabled="true">
       <transform>
-        <Transform.position><item>0</item><item>6</item><item>-14</item></Transform.position>
+        <Transform.position><item>0</item><item>4.5</item><item>-6</item></Transform.position>
         <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
         <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
       </transform>
       <components>
-        <components:Camera Camera.active="true" Camera.useTransformRotation="false" Camera.fov="64" Camera.near="0.02" Camera.far="180" Camera.orthographic="false" Camera.orthographicSize="5">
-          <Camera.target><item>0</item><item>6</item><item>15</item></Camera.target>
+        <components:Camera Camera.active="true" Camera.useTransformRotation="false" Camera.fov="64" Camera.near="0.02" Camera.far="80" Camera.orthographic="false" Camera.orthographicSize="5">
+          <Camera.target><item>0</item><item>4.5</item><item>5</item></Camera.target>
           <Camera.up><item>0</item><item>1</item><item>0</item></Camera.up>
         </components:Camera>
       </components>
@@ -22,16 +22,16 @@
     </item>
     <item name="Smooth Shrinking Tunnel Warp" enabled="true">
       <transform>
-        <Transform.position><item>0</item><item>6</item><item>15</item></Transform.position>
+        <Transform.position><item>0</item><item>4.5</item><item>5</item></Transform.position>
         <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
         <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
       </transform>
       <components>
-        <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="1" SpatialManipulator.definesWarpVolume="true" SpatialManipulator.warpPriority="0" SpatialManipulator.warpVolumeShape="1" SpatialManipulator.warpVolumeRadius="5" SpatialManipulator.warpBoundaryFalloff="0" SpatialManipulator.applyTraversalScale="true" SpatialManipulator.persistTraversalScaleOnExit="true" SpatialManipulator.spaceWarpType="2" SpatialManipulator.spiralRadiansPerUnit="0" SpatialManipulator.formulaX="x*exp(a*(z+b))" SpatialManipulator.formulaY="y*exp(a*(z+b))" SpatialManipulator.formulaZ="z" SpatialManipulator.formulaA="0.046209812" SpatialManipulator.formulaB="15" SpatialManipulator.formulaC="0" SpatialManipulator.formulaD="0" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="1" SpatialManipulator.deformationStrength="1">
+        <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="1" SpatialManipulator.definesWarpVolume="true" SpatialManipulator.warpPriority="0" SpatialManipulator.warpVolumeShape="1" SpatialManipulator.warpVolumeRadius="5" SpatialManipulator.warpBoundaryFalloff="0" SpatialManipulator.applyTraversalScale="true" SpatialManipulator.persistTraversalScaleOnExit="true" SpatialManipulator.spaceWarpType="2" SpatialManipulator.spiralRadiansPerUnit="0" SpatialManipulator.formulaX="x*exp(a*(z+b))" SpatialManipulator.formulaY="y*exp(a*(z+b))" SpatialManipulator.formulaZ="z" SpatialManipulator.formulaA="0.138629436" SpatialManipulator.formulaB="5" SpatialManipulator.formulaC="0" SpatialManipulator.formulaD="0" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="0.5" SpatialManipulator.deformationStrength="1">
           <SpatialManipulator.position><item>0</item><item>0</item><item>0</item></SpatialManipulator.position>
           <SpatialManipulator.rotation><item>0</item><item>0</item><item>0</item></SpatialManipulator.rotation>
           <SpatialManipulator.scale><item>1</item><item>1</item><item>1</item></SpatialManipulator.scale>
-          <SpatialManipulator.warpVolumeSize><item>12.4</item><item>12.4</item><item>30</item></SpatialManipulator.warpVolumeSize>
+          <SpatialManipulator.warpVolumeSize><item>9.4</item><item>9.4</item><item>10</item></SpatialManipulator.warpVolumeSize>
           <SpatialManipulator.spiralAxis><item>0</item><item>1</item><item>0</item></SpatialManipulator.spiralAxis>
         </components:SpatialManipulator>
       </components>
@@ -56,13 +56,13 @@
     </item>
     <item name="Entrance Floor" enabled="true">
       <transform>
-        <Transform.position><item>0</item><item>-0.55</item><item>-12</item></Transform.position>
+        <Transform.position><item>0</item><item>-0.55</item><item>-5</item></Transform.position>
         <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
-        <Transform.scale><item>26</item><item>1</item><item>24</item></Transform.scale>
+        <Transform.scale><item>14</item><item>1</item><item>10</item></Transform.scale>
       </transform>
       <components>
-        <components:Mesh Mesh.file="Assets/Mesh/cube.obj" />
-        <components:Material Material.shininess="20" Material.metallicFactor="0.1" Material.roughnessFactor="0.78" Material.baseColorAlpha="1" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque">
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" />
+        <components:Material Material.shininess="20" Material.metallicFactor="0.1" Material.roughnessFactor="0.78" Material.baseColorAlpha="1" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque" Material.materialAsset="Assets/Materials/diagnostic_cube.material">
           <Material.diffuse><item>0.045</item><item>0.055</item><item>0.09</item></Material.diffuse>
           <Material.ambient><item>0.01</item><item>0.015</item><item>0.03</item></Material.ambient>
           <Material.specular><item>0.13</item><item>0.16</item><item>0.24</item></Material.specular>
@@ -73,12 +73,12 @@
     </item>
     <item name="Entrance Cyan Light" enabled="true">
       <transform>
-        <Transform.position><item>0</item><item>7</item><item>-4</item></Transform.position>
+        <Transform.position><item>0</item><item>5.5</item><item>-2</item></Transform.position>
         <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
         <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
       </transform>
       <components>
-        <components:Light Light.lightType="0" Light.intensity="13" Light.range="18" Light.falloff="1.45" Light.baked="false">
+        <components:Light Light.lightType="0" Light.intensity="13" Light.range="10" Light.falloff="1.45" Light.baked="false">
           <Light.color><item>0.12</item><item>0.62</item><item>1</item></Light.color>
         </components:Light>
       </components>
@@ -86,12 +86,12 @@
     </item>
     <item name="Tunnel Violet Light" enabled="true">
       <transform>
-        <Transform.position><item>0</item><item>6</item><item>14</item></Transform.position>
+        <Transform.position><item>0</item><item>4.5</item><item>4.5</item></Transform.position>
         <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
         <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
       </transform>
       <components>
-        <components:Light Light.lightType="0" Light.intensity="11" Light.range="14" Light.falloff="1.5" Light.baked="false">
+        <components:Light Light.lightType="0" Light.intensity="11" Light.range="7" Light.falloff="1.5" Light.baked="false">
           <Light.color><item>0.52</item><item>0.18</item><item>1</item></Light.color>
         </components:Light>
       </components>
@@ -99,12 +99,12 @@
     </item>
     <item name="Exit Gold Light" enabled="true">
       <transform>
-        <Transform.position><item>0</item><item>6</item><item>29</item></Transform.position>
+        <Transform.position><item>0</item><item>4.5</item><item>9.5</item></Transform.position>
         <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
         <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
       </transform>
       <components>
-        <components:Light Light.lightType="0" Light.intensity="9" Light.range="10" Light.falloff="1.4" Light.baked="false">
+        <components:Light Light.lightType="0" Light.intensity="9" Light.range="5" Light.falloff="1.4" Light.baked="false">
           <Light.color><item>1</item><item>0.44</item><item>0.09</item></Light.color>
         </components:Light>
       </components>
@@ -112,13 +112,13 @@
     </item>
     <item name="Persistent Scale Probe" enabled="true">
       <transform>
-        <Transform.position><item>0</item><item>6</item><item>-3</item></Transform.position>
+        <Transform.position><item>0</item><item>4.5</item><item>-1.5</item></Transform.position>
         <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
         <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
       </transform>
       <components>
-        <components:Mesh Mesh.file="Assets/Mesh/cube.obj" />
-        <components:Material Material.shininess="90" Material.metallicFactor="0.58" Material.roughnessFactor="0.18" Material.baseColorAlpha="1" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque">
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" />
+        <components:Material Material.shininess="90" Material.metallicFactor="0.58" Material.roughnessFactor="0.18" Material.baseColorAlpha="1" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque" Material.materialAsset="Assets/Materials/diagnostic_cube.material">
           <Material.diffuse><item>1</item><item>0.28</item><item>0.06</item></Material.diffuse>
           <Material.ambient><item>0.18</item><item>0.025</item><item>0.004</item></Material.ambient>
           <Material.specular><item>1</item><item>0.72</item><item>0.3</item></Material.specular>
@@ -129,7 +129,7 @@
           <PrimitiveObjectCollider.size><item>1</item><item>1</item><item>1</item></PrimitiveObjectCollider.size>
         </components:PrimitiveObjectCollider>
         <components:RigidBody RigidBody.bodyType="Dynamic" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.gravityScale="1" RigidBody.linearDamping="0" RigidBody.angularDamping="0" RigidBody.friction="0.5" RigidBody.restitution="0" RigidBody.isTrigger="false" RigidBody.continuousCollision="true" RigidBody.collisionLayer="1" RigidBody.collisionMask="-1" RigidBody.collisionIdentifier="">
-          <RigidBody.initialLinearVelocity><item>0</item><item>0</item><item>6</item></RigidBody.initialLinearVelocity>
+          <RigidBody.initialLinearVelocity><item>0</item><item>0</item><item>4.5</item></RigidBody.initialLinearVelocity>
           <RigidBody.initialAngularVelocity><item>0</item><item>0</item><item>0</item></RigidBody.initialAngularVelocity>
           <RigidBody.frictionBehaviors />
         </components:RigidBody>

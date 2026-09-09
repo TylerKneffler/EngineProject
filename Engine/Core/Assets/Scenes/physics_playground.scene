@@ -100,8 +100,8 @@
         </Transform.scale>
       </transform>
       <components>
-        <components:Mesh Mesh.file="Assets/Mesh/cube.obj"></components:Mesh>
-        <components:Material Material.shininess="24" Material.metallicFactor="0.15" Material.roughnessFactor="0.75">
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj"></components:Mesh>
+        <components:Material Material.shininess="24" Material.metallicFactor="0.15" Material.roughnessFactor="0.75" Material.materialAsset="Assets/Materials/diagnostic_cube.material">
           <Material.diffuse>
             <item>0.18</item>
             <item>0.22</item>
@@ -153,8 +153,8 @@
         </Transform.scale>
       </transform>
       <components>
-        <components:Mesh Mesh.file="Assets/Mesh/cube.obj"></components:Mesh>
-        <components:Material Material.shininess="18">
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj"></components:Mesh>
+        <components:Material Material.shininess="18" Material.materialAsset="Assets/Materials/diagnostic_cube.material">
           <Material.diffuse>
             <item>0.26</item>
             <item>0.32</item>
@@ -206,8 +206,8 @@
         </Transform.scale>
       </transform>
       <components>
-        <components:Mesh Mesh.file="Assets/Mesh/cube.obj"></components:Mesh>
-        <components:Material Material.shininess="48">
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj"></components:Mesh>
+        <components:Material Material.shininess="48" Material.materialAsset="Assets/Materials/diagnostic_cube.material">
           <Material.diffuse>
             <item>0.9</item>
             <item>0.25</item>
@@ -265,8 +265,8 @@
         </Transform.scale>
       </transform>
       <components>
-        <components:Mesh Mesh.file="Assets/Mesh/cube.obj"></components:Mesh>
-        <components:Material Material.shininess="64">
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj"></components:Mesh>
+        <components:Material Material.shininess="64" Material.materialAsset="Assets/Materials/diagnostic_cube.material">
           <Material.diffuse>
             <item>0.2</item>
             <item>0.75</item>
@@ -324,8 +324,8 @@
         </Transform.scale>
       </transform>
       <components>
-        <components:Mesh Mesh.file="Assets/Mesh/cube.obj"></components:Mesh>
-        <components:Material Material.shininess="40">
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj"></components:Mesh>
+        <components:Material Material.shininess="40" Material.materialAsset="Assets/Materials/diagnostic_cube.material">
           <Material.diffuse>
             <item>0.65</item>
             <item>0.25</item>

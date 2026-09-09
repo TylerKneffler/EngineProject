@@ -132,6 +132,12 @@ int main()
     assert(!IsImmediateExitAperture(&entranceEndpoint, nullptr));
     assert(!IsImmediateExitAperture(&entranceEndpoint, &exitEndpoint));
     assert(IsImmediateExitAperture(&exitEndpoint, &exitEndpoint));
+    assert(IsTraversalInstanceVisibleInConnectedChart(
+        nullptr, &exitEndpoint));
+    assert(IsTraversalInstanceVisibleInConnectedChart(
+        &exitEndpoint, &exitEndpoint));
+    assert(!IsTraversalInstanceVisibleInConnectedChart(
+        &entranceEndpoint, &exitEndpoint));
     assert(ClampViewBudget(0) == kMinimumViewBudget);
     assert(ClampViewBudget(1000) == kMaximumViewBudget);
 

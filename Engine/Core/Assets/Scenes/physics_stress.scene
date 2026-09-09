@@ -100,8 +100,8 @@
         </Transform.scale>
       </transform>
       <components>
-        <components:Mesh Mesh.file="Assets/Mesh/cube.obj"></components:Mesh>
-        <components:Material Material.shininess="24">
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj"></components:Mesh>
+        <components:Material Material.shininess="24" Material.materialAsset="Assets/Materials/diagnostic_cube.material">
           <Material.diffuse>
             <item>0.16</item>
             <item>0.18</item>

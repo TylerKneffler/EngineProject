@@ -100,8 +100,8 @@
         </Transform.scale>
       </transform>
       <components>
-        <components:Mesh Mesh.file="Assets/Mesh/cube.obj" />
-        <components:Material Material.shininess="18" Material.metallicFactor="0.08" Material.roughnessFactor="0.82" Material.environmentDiffuseStrength="1" Material.reflectionStrength="1" Material.useCustomReflectionEnvironment="false" Material.reflectionEnvironmentTexture="" Material.reflectionEnvironmentExposure="0" Material.reflectionEnvironmentRotation="0" Material.baseColorAlpha="1" Material.alphaCutoff="0.5" Material.normalScale="1" Material.heightScale="0.05" Material.heightMinSteps="8" Material.heightMaxSteps="32" Material.occlusionStrength="1" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque" Material.baseColorUvSet="0" Material.metallicRoughnessUvSet="0" Material.normalUvSet="0" Material.occlusionUvSet="0" Material.emissiveUvSet="0" Material.heightUvSet="0" Material.materialAsset="" Material.baseColorTexture="" Material.metallicRoughnessTexture="" Material.normalTexture="" Material.heightTexture="" Material.occlusionTexture="" Material.emissiveTexture="">
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" />
+        <components:Material Material.shininess="18" Material.metallicFactor="0.08" Material.roughnessFactor="0.82" Material.environmentDiffuseStrength="1" Material.reflectionStrength="1" Material.useCustomReflectionEnvironment="false" Material.reflectionEnvironmentTexture="" Material.reflectionEnvironmentExposure="0" Material.reflectionEnvironmentRotation="0" Material.baseColorAlpha="1" Material.alphaCutoff="0.5" Material.normalScale="1" Material.heightScale="0.05" Material.heightMinSteps="8" Material.heightMaxSteps="32" Material.occlusionStrength="1" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque" Material.baseColorUvSet="0" Material.metallicRoughnessUvSet="0" Material.normalUvSet="0" Material.occlusionUvSet="0" Material.emissiveUvSet="0" Material.heightUvSet="0" Material.baseColorTexture="" Material.metallicRoughnessTexture="" Material.normalTexture="" Material.heightTexture="" Material.occlusionTexture="" Material.emissiveTexture="" Material.materialAsset="Assets/Materials/diagnostic_cube.material">
           <Material.diffuse>
             <item>0.18</item>
             <item>0.21</item>
@@ -298,6 +298,23 @@
         </Transform.scale>
       </transform>
       <components>
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1">
+          <PrimitiveObjectCollider.center>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size>
+            <item>1.4</item>
+            <item>1.4</item>
+            <item>0.8</item>
+          </PrimitiveObjectCollider.size>
+        </components:PrimitiveObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.gravityScale="1" RigidBody.linearDamping="0" RigidBody.angularDamping="0" RigidBody.friction="0" RigidBody.restitution="0" RigidBody.isTrigger="true" RigidBody.continuousCollision="false" RigidBody.freezePositionX="false" RigidBody.freezePositionY="false" RigidBody.freezePositionZ="false" RigidBody.freezeRotationX="false" RigidBody.freezeRotationY="false" RigidBody.freezeRotationZ="false" RigidBody.collisionLayer="2" RigidBody.collisionMask="-1" RigidBody.collisionIdentifier="">
+          <RigidBody.initialLinearVelocity><item>0</item><item>0</item><item>0</item></RigidBody.initialLinearVelocity>
+          <RigidBody.initialAngularVelocity><item>0</item><item>0</item><item>0</item></RigidBody.initialAngularVelocity>
+          <RigidBody.frictionBehaviors />
+        </components:RigidBody>
         <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="2" SpatialManipulator.matrixOverlayIncludeChildren="true" SpatialManipulator.matrixOverlayPriority="0" SpatialManipulator.definesWarpVolume="false" SpatialManipulator.warpPriority="0" SpatialManipulator.warpVolumeShape="0" SpatialManipulator.warpVolumeRadius="5" SpatialManipulator.warpBoundaryFalloff="0" SpatialManipulator.spaceWarpType="0" SpatialManipulator.spiralRadiansPerUnit="0.5" SpatialManipulator.formulaX="x" SpatialManipulator.formulaY="y" SpatialManipulator.formulaZ="z" SpatialManipulator.formulaA="1" SpatialManipulator.formulaB="1" SpatialManipulator.formulaC="1" SpatialManipulator.formulaD="0" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="1.2" SpatialManipulator.deformationStrength="1" SpatialManipulator.portalEdgeHalfWidth="0.04" SpatialManipulator.portalEdgeHalfDepth="0.15" SpatialManipulator.portalCollisionCutUpdateDistance="0.05" SpatialManipulator.materializeSplitOnDisconnect="true" SpatialManipulator.portalTraversalPriority="0">
           <SpatialManipulator.position>
             <item>0</item>
@@ -376,7 +393,7 @@
             <item>0</item>
           </SpatialManipulator.portalShapePoint7>
           <SpatialManipulator.meshReference expectedType="Mesh" objectPath="" objectName="" componentType="" componentIndex="0" />
-          <SpatialManipulator.traversalTriggerBodyReference expectedType="RigidBody" objectPath="" objectName="" componentType="" componentIndex="0" />
+          <SpatialManipulator.traversalTriggerBodyReference expectedType="RigidBody" objectPath="" objectName="Target Portal" componentType="RigidBody" componentIndex="0" />
           <SpatialManipulator.targetManipulator expectedType="SpatialManipulator" objectPath="" objectName="Source Portal" componentType="SpatialManipulator" componentIndex="0" />
         </components:SpatialManipulator>
       </components>
@@ -401,8 +418,8 @@
         </Transform.scale>
       </transform>
       <components>
-        <components:Mesh Mesh.file="Assets/Mesh/cube.obj" />
-        <components:Material Material.shininess="36" Material.metallicFactor="0.1" Material.roughnessFactor="0.58" Material.environmentDiffuseStrength="1" Material.reflectionStrength="1" Material.useCustomReflectionEnvironment="false" Material.reflectionEnvironmentTexture="" Material.reflectionEnvironmentExposure="0" Material.reflectionEnvironmentRotation="0" Material.baseColorAlpha="1" Material.alphaCutoff="0.5" Material.normalScale="1" Material.heightScale="0.05" Material.heightMinSteps="8" Material.heightMaxSteps="32" Material.occlusionStrength="1" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque" Material.baseColorUvSet="0" Material.metallicRoughnessUvSet="0" Material.normalUvSet="0" Material.occlusionUvSet="0" Material.emissiveUvSet="0" Material.heightUvSet="0" Material.materialAsset="" Material.baseColorTexture="" Material.metallicRoughnessTexture="" Material.normalTexture="" Material.heightTexture="" Material.occlusionTexture="" Material.emissiveTexture="">
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" />
+        <components:Material Material.shininess="36" Material.metallicFactor="0.1" Material.roughnessFactor="0.58" Material.environmentDiffuseStrength="1" Material.reflectionStrength="1" Material.useCustomReflectionEnvironment="false" Material.reflectionEnvironmentTexture="" Material.reflectionEnvironmentExposure="0" Material.reflectionEnvironmentRotation="0" Material.baseColorAlpha="1" Material.alphaCutoff="0.5" Material.normalScale="1" Material.heightScale="0.05" Material.heightMinSteps="8" Material.heightMaxSteps="32" Material.occlusionStrength="1" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque" Material.baseColorUvSet="0" Material.metallicRoughnessUvSet="0" Material.normalUvSet="0" Material.occlusionUvSet="0" Material.emissiveUvSet="0" Material.heightUvSet="0" Material.baseColorTexture="" Material.metallicRoughnessTexture="" Material.normalTexture="" Material.heightTexture="" Material.occlusionTexture="" Material.emissiveTexture="" Material.materialAsset="Assets/Materials/diagnostic_cube.material">
           <Material.diffuse>
             <item>0.92</item>
             <item>0.93</item>
@@ -449,6 +466,7 @@
           </RigidBody.initialAngularVelocity>
           <RigidBody.frictionBehaviors />
         </components:RigidBody>
+        <components:PortalTraversalRepeater PortalTraversalRepeater.sourcePortalObjectName="Source Portal" PortalTraversalRepeater.targetPortalObjectName="Target Portal" PortalTraversalRepeater.reverseClearance="4" PortalTraversalRepeater.teleportDetectionDistance="4" PortalTraversalRepeater.reverseAngularVelocity="false" />
       </components>
       <children />
     </item>

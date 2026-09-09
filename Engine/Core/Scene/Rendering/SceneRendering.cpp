@@ -82,6 +82,41 @@ namespace
         return false;
     }
 
+    void HashRevision(uint64_t& hash, uint64_t value)
+    {
+        constexpr uint64_t prime = 1099511628211ull;
+        for (unsigned byte = 0; byte < sizeof(value); ++byte)
+        {
+            hash ^= (value >> (byte * 8u)) & 0xffu;
+            hash *= prime;
+        }
+    }
+
+    struct MeshPositionKey
+    {
+        float x;
+        float y;
+        float z;
+
+        bool operator==(const MeshPositionKey& other) const
+        {
+            return x == other.x && y == other.y && z == other.z;
+        }
+    };
+
+    struct MeshPositionKeyHash
+    {
+        size_t operator()(const MeshPositionKey& value) const
+        {
+            size_t result = std::hash<float>{}(value.x);
+            result ^= std::hash<float>{}(value.y) + 0x9e3779b9u +
+                (result << 6u) + (result >> 2u);
+            result ^= std::hash<float>{}(value.z) + 0x9e3779b9u +
+                (result << 6u) + (result >> 2u);
+            return result;
+        }
+    };
+
     float SrgbToLinear(uint8_t value)
     {
         const float color = static_cast<float>(value) / 255.f;
@@ -900,6 +935,32 @@ void Scene::PrepareRenderFrame()
         kMaxLights);
     m_lightDataBuffer->FlushMappedWrites();
 
+    // Nonlinear mesh results depend on authored geometry and active warp
+    // volumes, not on camera motion. A compact signature lets both editor and
+    // runtime frames reuse static CPU deformation and its upload buffer.
+    uint64_t warpRevision = 1469598103934665603ull;
+    std::function<void(const Engine::Core::Object*)> hashWarpObjects;
+    hashWarpObjects = [&](const Engine::Core::Object* object)
+    {
+        if (!object)
+            return;
+        if (const auto* manipulator = object->GetComponent<
+                Engine::Components::SpatialManipulator>())
+        {
+            HashRevision(warpRevision,
+                static_cast<uint64_t>(reinterpret_cast<uintptr_t>(manipulator)));
+            HashRevision(warpRevision, manipulator->GetConfigurationRevision());
+            HashRevision(warpRevision, object->transform.GetWorldRevision());
+            HashRevision(warpRevision, manipulator->enabled ? 1u : 0u);
+            HashRevision(warpRevision, manipulator->definesWarpVolume ? 1u : 0u);
+            HashRevision(warpRevision, object->IsEnabledInHierarchy() ? 1u : 0u);
+        }
+        for (const Engine::Core::Object* child : object->Children)
+            hashWarpObjects(child);
+    };
+    for (const auto& object : m_objects)
+        hashWarpObjects(object.get());
+
     m_frameRenderItems.reserve(m_objects.size());
     // The authored Mesh buffer cannot be changed for rendering a nonlinear
     // volume: it may also back a collider, an editor asset, or another draw.
@@ -994,6 +1055,24 @@ void Scene::PrepareRenderFrame()
                 authoredWorld = candidate->transform.matrixLayer.localToLayer *
                     authoredWorld;
             }
+            WarpedRenderMesh& cached = m_warpedRenderMeshes[candidate];
+            const uint64_t meshRevision = mesh->GetConfigurationRevision();
+            const bool cacheValid = cached.evaluated &&
+                cached.meshRevision == meshRevision &&
+                cached.warpRevision == warpRevision &&
+                std::memcmp(&cached.authoredWorld, &authoredWorld,
+                    sizeof(authoredWorld)) == 0;
+            if (cacheValid)
+            {
+                if (cached.affectedByWarp && cached.vertexBuffer)
+                {
+                    item.warpedVertexBuffer = cached.vertexBuffer.get();
+                    item.world = glm::translate(glm::mat4(1.f),
+                        cached.mappedOrigin);
+                }
+            }
+            else
+            {
             const glm::mat3 authoredLinear(authoredWorld);
             const float authoredDeterminant = glm::determinant(authoredLinear);
             const glm::mat3 authoredNormal =
@@ -1007,6 +1086,9 @@ void Scene::PrepareRenderFrame()
                 glm::vec3(authoredWorld[3]), renderQuery);
             std::vector<Engine::Model::Vertex> warpedVertices;
             warpedVertices.reserve(mesh->GetVertices().size());
+            std::unordered_map<MeshPositionKey, SpatialQuerySample,
+                MeshPositionKeyHash> spatialSamples;
+            spatialSamples.reserve(mesh->GetVertices().size());
             bool affectedByWarp = originSample.affectedByWarpVolume;
             for (const Engine::Model::Vertex& sourceVertex : mesh->GetVertices())
             {
@@ -1015,8 +1097,14 @@ void Scene::PrepareRenderFrame()
                     sourceVertex.pos[1], sourceVertex.pos[2]);
                 const glm::vec3 worldPosition = glm::vec3(authoredWorld *
                     glm::vec4(localPosition, 1.f));
-                const SpatialQuerySample sample = SampleSpatialPoint(
-                    worldPosition, renderQuery);
+                const MeshPositionKey positionKey {
+                    localPosition.x, localPosition.y, localPosition.z };
+                auto [sampleIt, inserted] = spatialSamples.try_emplace(
+                    positionKey);
+                if (inserted)
+                    sampleIt->second = SampleSpatialPoint(worldPosition,
+                        renderQuery);
+                const SpatialQuerySample& sample = sampleIt->second;
                 affectedByWarp = affectedByWarp || sample.affectedByWarpVolume;
 
                 const glm::vec3 localNormal(sourceVertex.normal[0],
@@ -1057,7 +1145,6 @@ void Scene::PrepareRenderFrame()
             }
             if (affectedByWarp)
             {
-                WarpedRenderMesh& cached = m_warpedRenderMeshes[candidate];
                 const size_t byteSize = warpedVertices.size() *
                     sizeof(Engine::Model::Vertex);
                 const bool topologyChanged = cached.vertices.size() !=
@@ -1088,6 +1175,18 @@ void Scene::PrepareRenderFrame()
                     item.world = glm::translate(glm::mat4(1.f),
                         originSample.point);
                 }
+            }
+            else
+            {
+                cached.vertexBuffer.reset();
+                cached.vertices.clear();
+            }
+            cached.authoredWorld = authoredWorld;
+            cached.mappedOrigin = originSample.point;
+            cached.meshRevision = meshRevision;
+            cached.warpRevision = warpRevision;
+            cached.affectedByWarp = affectedByWarp;
+            cached.evaluated = true;
             }
         }
 
@@ -2279,28 +2378,6 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     };
     schedulePortalViews(view, 0u, 0u, nullptr);
 
-    const auto mapTraversalDrawIntoPortalTarget = [&]
-        (ObjectGPUData& data, const PreparedDraw& draw,
-         const PortalStencilPass& portalPass)
-    {
-        // A virtual camera already occupies the connected chart. Normal
-        // objects therefore keep their world matrix. A split traverser has
-        // two explicitly-owned charts, though: remap only its near-side piece
-        // into the connected chart, including the clipping plane. Without
-        // this, one half is evaluated in the wrong coordinates and fades out
-        // instead of joining its partner through the aperture.
-        if (draw.traversalChartPortal != portalPass.source)
-            return;
-        const glm::mat4 sourceToTarget = portalPass.source
-            ->GetRenderPortalWorldTransformTo(*portalPass.target);
-        data.world = sourceToTarget * data.world;
-        if (glm::dot(data.traversalClipPlane, data.traversalClipPlane) > 0.f)
-        {
-            data.traversalClipPlane = glm::transpose(glm::inverse(
-                sourceToTarget)) * data.traversalClipPlane;
-        }
-    };
-
     const auto connectedSpaceClipPlane = [](
         const PortalStencilPass& portalPass,
         const glm::vec3& mappedCameraPosition)
@@ -2358,8 +2435,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             portalPass, portalJob.mappedCameraPosition);
         for (const PreparedDraw& draw : preparedDraws)
         {
+            if (!Engine::Rendering::Portal::
+                IsTraversalInstanceVisibleInConnectedChart(
+                    draw.traversalChartPortal, portalPass.target))
+                continue;
             ObjectGPUData mappedData = draw.objectData;
-            mapTraversalDrawIntoPortalTarget(mappedData, draw, portalPass);
             mappedData.mvp = proj * portalJob.mappedView * mappedData.world;
             mappedData.portalClipPlane = portalClipPlane;
             mappedData.viewPositionAlphaCutoff.x =
@@ -2578,6 +2658,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                                 continue;
                             if (isSpatialManipulatorCarrierDraw(draw))
                                 continue;
+                            if (!Engine::Rendering::Portal::
+                                IsTraversalInstanceVisibleInConnectedChart(
+                                    draw.traversalChartPortal,
+                                    portalPass.target))
+                                continue;
 
                             context->SetPipeline(draw.pipeline);
                             const uint32_t drawSlot = portalJob.dataSlotBase +
@@ -2716,6 +2801,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 if (!draw.object || !draw.vertexBuffer)
                     continue;
                 if (isSpatialManipulatorCarrierDraw(draw))
+                    continue;
+                if (!Engine::Rendering::Portal::
+                    IsTraversalInstanceVisibleInConnectedChart(
+                        draw.traversalChartPortal, portalPass.target))
                     continue;
 
                 context->SetPipeline(resolveStencilReadPipeline(draw.pipeline));

@@ -24,9 +24,10 @@
     </transform>
     <components>
       <components:Mesh>
-        <Mesh.file>Assets/Mesh/cube.obj</Mesh.file>
+        <Mesh.file>Assets/Mesh/diagnostic_cube.obj</Mesh.file>
       </components:Mesh>
       <components:Material>
+        <Material.materialAsset>Assets/Materials/diagnostic_cube.material</Material.materialAsset>
         <Material.diffuse>
           <item>1</item>
           <item>0.5</item>

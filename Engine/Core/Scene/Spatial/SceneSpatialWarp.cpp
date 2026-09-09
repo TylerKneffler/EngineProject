@@ -21,19 +21,19 @@ void VisitObjectTree(const Engine::Core::Object* object,
 
 namespace
 {
-glm::vec3 MapPoint(const Scene& scene, const glm::vec3& worldPoint,
-    const Scene::SpatialQuery& query, bool& affectedByWarpVolume)
+struct OrderedVolume
 {
-    glm::vec3 mapped = worldPoint;
-    if (!query.includeWarpVolumes)
-        return mapped;
+    const Engine::Components::SpatialManipulator* manipulator = nullptr;
+    Scene::ObjectPath path;
+};
 
-    struct OrderedVolume
-    {
-        const Engine::Components::SpatialManipulator* manipulator = nullptr;
-        Scene::ObjectPath path;
-    };
+std::vector<OrderedVolume> GatherOrderedVolumes(const Scene& scene,
+    const Scene::SpatialQuery& query)
+{
     std::vector<OrderedVolume> volumes;
+    if (!query.includeWarpVolumes)
+        return volumes;
+
     for (const auto& root : scene.GetObjects())
         VisitObjectTree(root.get(), [&](const Engine::Core::Object* object)
         {
@@ -63,13 +63,20 @@ glm::vec3 MapPoint(const Scene& scene, const glm::vec3& worldPoint,
             }
             return first.path < second.path;
         });
+    return volumes;
+}
+
+glm::vec3 MapPoint(const glm::vec3& worldPoint,
+    const std::vector<OrderedVolume>& volumes, bool& affectedByWarpVolume)
+{
+    glm::vec3 mapped = worldPoint;
     for (const OrderedVolume& volume : volumes)
     {
-            const glm::vec3 before = mapped;
-            mapped = volume.manipulator->MapWorldPointThroughVolume(mapped);
-            const glm::vec3 delta = mapped - before;
-            affectedByWarpVolume = affectedByWarpVolume ||
-                glm::dot(delta, delta) > 1e-12f;
+        const glm::vec3 before = mapped;
+        mapped = volume.manipulator->MapWorldPointThroughVolume(mapped);
+        const glm::vec3 delta = mapped - before;
+        affectedByWarpVolume = affectedByWarpVolume ||
+            glm::dot(delta, delta) > 1e-12f;
     }
     return mapped;
 }
@@ -79,7 +86,8 @@ Scene::SpatialQuerySample Scene::SampleSpatialPoint(
     const glm::vec3& worldPoint, const SpatialQuery& query) const
 {
     SpatialQuerySample sample{};
-    sample.point = MapPoint(*this, worldPoint, query,
+    const std::vector<OrderedVolume> volumes = GatherOrderedVolumes(*this, query);
+    sample.point = MapPoint(worldPoint, volumes,
         sample.affectedByWarpVolume);
     if (!query.includeWarpVolumes)
         return sample;
@@ -90,10 +98,10 @@ Scene::SpatialQuerySample Scene::SampleSpatialPoint(
     for (int column = 0; column < 3; ++column)
     {
         bool endpointAffected = false;
-        const glm::vec3 endpoint = MapPoint(*this,
+        const glm::vec3 endpoint = MapPoint(
             worldPoint + glm::vec3(column == 0, column == 1, column == 2) *
                 kDerivativeStep,
-            query, endpointAffected);
+            volumes, endpointAffected);
         glm::vec3 derivative = (endpoint - sample.point) / kDerivativeStep;
         if (!std::isfinite(derivative.x) || !std::isfinite(derivative.y) ||
             !std::isfinite(derivative.z))
@@ -110,7 +118,9 @@ Scene::SpatialQuerySample Scene::SampleSpatialPoint(
 glm::vec3 Scene::MapSpatialPoint(const glm::vec3& worldPoint,
     const SpatialQuery& query) const
 {
-    return SampleSpatialPoint(worldPoint, query).point;
+    bool affectedByWarpVolume = false;
+    return MapPoint(worldPoint, GatherOrderedVolumes(*this, query),
+        affectedByWarpVolume);
 }
 
 glm::vec3 Scene::WarpWorldPoint(const glm::vec3& worldPoint,
@@ -278,18 +288,17 @@ std::vector<Scene::PortalRaySegment> Scene::TracePortalRay(
         if (!nearestSource || !nearestTarget)
             break;
 
-        const glm::mat4 sourceToTarget =
-            nearestSource->GetPortalWorldTransformTo(*nearestTarget);
         const glm::vec3 sourceHit = current.origin +
             current.direction * nearestDistance;
-        const glm::vec3 mappedDirection = glm::vec3(sourceToTarget *
-            glm::vec4(current.direction, 0.f));
+        const glm::vec3 mappedDirection =
+            nearestSource->MapWorldDirectionThroughPortalShape(sourceHit,
+                current.direction, *nearestTarget);
         const float mappedLength = glm::length(mappedDirection);
         if (!std::isfinite(mappedLength) || mappedLength <= 1e-6f)
             break;
         current.direction = mappedDirection / mappedLength;
-        current.origin = glm::vec3(sourceToTarget * glm::vec4(sourceHit, 1.f)) +
-            current.direction * kRayEpsilon;
+        current.origin = nearestSource->MapWorldPointThroughPortalShape(
+            sourceHit, *nearestTarget) + current.direction * kRayEpsilon;
         remainingDistance -= nearestDistance;
         portalPath.push_back({ nearestSource, nearestTarget });
         if (remainingDistance <= kRayEpsilon)

@@ -90,8 +90,8 @@
         <Transform.scale><item>0.5</item><item>0.5</item><item>0.5</item></Transform.scale>
       </transform>
       <components>
-        <components:Mesh Mesh.file="Assets/Mesh/cube.obj" />
-        <components:Material Material.baseColorAlpha="1" Material.metallicFactor="0.08" Material.roughnessFactor="0.42" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque">
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" />
+        <components:Material Material.baseColorAlpha="1" Material.metallicFactor="0.08" Material.roughnessFactor="0.42" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque" Material.materialAsset="Assets/Materials/diagnostic_cube.material">
           <Material.diffuse><item>0.95</item><item>0.34</item><item>0.08</item></Material.diffuse>
           <Material.emissiveColor><item>0.08</item><item>0.01</item><item>0</item></Material.emissiveColor>
         </components:Material>

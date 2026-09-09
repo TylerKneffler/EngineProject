@@ -27,8 +27,8 @@
         <Transform.scale><item>9</item><item>0.25</item><item>5</item></Transform.scale>
       </transform>
       <components>
-        <components:Mesh Mesh.file="Assets/Mesh/cube.obj" />
-        <components:Material Material.metallicFactor="0.8" Material.roughnessFactor="0.22" Material.environmentDiffuseStrength="0.2" Material.reflectionStrength="1.35">
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" />
+        <components:Material Material.metallicFactor="0.8" Material.roughnessFactor="0.22" Material.environmentDiffuseStrength="0.2" Material.reflectionStrength="1.35" Material.materialAsset="Assets/Materials/diagnostic_cube.material">
           <Material.diffuse><item>0.16</item><item>0.18</item><item>0.22</item></Material.diffuse>
           <Material.ambient><item>0</item><item>0</item><item>0</item></Material.ambient>
           <Material.specular><item>1</item><item>1</item><item>1</item></Material.specular>

@@ -74,6 +74,16 @@ constexpr bool IsImmediateExitAperture(
     return previousExit != nullptr && candidate == previousExit;
 }
 
+// Ordinary objects have no chart owner and are visible through every portal.
+// A split traversal instance already exists once in each endpoint's chart;
+// connected rendering must select the destination instance instead of mapping
+// the source instance on top of it and reconstructing the full object there.
+constexpr bool IsTraversalInstanceVisibleInConnectedChart(
+    const void* instanceChart, const void* destinationChart)
+{
+    return instanceChart == nullptr || instanceChart == destinationChart;
+}
+
 constexpr int ClampViewBudget(int requested)
 {
     return std::clamp(requested, kMinimumViewBudget, kMaximumViewBudget);

@@ -13,6 +13,7 @@
 #include <cstring>
 #include <functional>
 #include <glm/gtc/quaternion.hpp>
+#include <limits>
 #include <unordered_set>
 
 namespace Engine::Components
@@ -77,6 +78,204 @@ glm::vec3 ComputeCenter(const std::vector<glm::vec3>& points)
     for (const glm::vec3& point : points)
         sum += point;
     return sum / static_cast<float>(points.size());
+}
+
+float ComputePolygonArea(const std::vector<glm::vec3>& points)
+{
+    if (points.size() < 3u)
+        return 0.f;
+    const glm::vec3 center = ComputeCenter(points);
+    glm::vec3 twiceArea(0.f);
+    for (size_t index = 0; index < points.size(); ++index)
+    {
+        const glm::vec3 first = points[index] - center;
+        const glm::vec3 second = points[(index + 1u) % points.size()] - center;
+        twiceArea += glm::cross(first, second);
+    }
+    return 0.5f * glm::length(twiceArea);
+}
+
+float ComputeApertureScaleRatio(const std::vector<glm::vec3>& sourcePoints,
+    const std::vector<glm::vec3>& targetPoints)
+{
+    const float sourceArea = ComputePolygonArea(sourcePoints);
+    const float targetArea = ComputePolygonArea(targetPoints);
+    if (!std::isfinite(sourceArea) || !std::isfinite(targetArea) ||
+        sourceArea <= 1e-8f || targetArea <= 1e-8f)
+    {
+        return 1.f;
+    }
+    return std::sqrt(targetArea / sourceArea);
+}
+
+struct PortalPiecewiseMapping
+{
+    std::vector<glm::vec2> source;
+    std::vector<glm::vec2> target;
+    glm::vec2 sourceCenter { 0.f };
+    glm::vec2 targetCenter { 0.f };
+    glm::mat4 sourceFrame { 1.f };
+    glm::mat4 targetFrame { 1.f };
+    glm::mat4 fallback { 1.f };
+    bool valid = false;
+    bool needsPiecewise = false;
+};
+
+PortalPiecewiseMapping BuildPortalPiecewiseMapping(
+    const std::vector<glm::vec3>& sourceWorldPoints,
+    const std::vector<glm::vec3>& targetWorldPoints,
+    const glm::mat4& sourceFrame, const glm::mat4& targetFrame,
+    const glm::mat4& fallback)
+{
+    PortalPiecewiseMapping mapping;
+    mapping.sourceFrame = sourceFrame;
+    mapping.targetFrame = targetFrame;
+    mapping.fallback = fallback;
+    if (sourceWorldPoints.size() < 3u ||
+        sourceWorldPoints.size() != targetWorldPoints.size())
+    {
+        return mapping;
+    }
+
+    const glm::mat4 sourceInverse = glm::inverse(sourceFrame);
+    const glm::mat4 targetInverse = glm::inverse(targetFrame);
+    std::vector<glm::vec2> source;
+    std::vector<glm::vec2> targetAuthored;
+    source.reserve(sourceWorldPoints.size());
+    targetAuthored.reserve(targetWorldPoints.size());
+    for (const glm::vec3& point : sourceWorldPoints)
+    {
+        const glm::vec3 local(sourceInverse * glm::vec4(point, 1.f));
+        source.emplace_back(local.x, local.y);
+    }
+    for (const glm::vec3& point : targetWorldPoints)
+    {
+        const glm::vec3 local(targetInverse * glm::vec4(point, 1.f));
+        targetAuthored.emplace_back(local.x, local.y);
+    }
+
+    // Crossing reverses portal-local X, which also reverses polygon winding.
+    // Select the cyclic reversed correspondence closest to the existing
+    // similarity transform. This retains old scene orientation while giving
+    // every authored target corner a stable source partner.
+    size_t bestOffset = 0u;
+    float bestError = std::numeric_limits<float>::max();
+    for (size_t offset = 0; offset < targetAuthored.size(); ++offset)
+    {
+        float error = 0.f;
+        for (size_t index = 0; index < source.size(); ++index)
+        {
+            const glm::vec3 predictedWorld(fallback *
+                glm::vec4(sourceWorldPoints[index], 1.f));
+            const glm::vec3 predictedLocal(targetInverse *
+                glm::vec4(predictedWorld, 1.f));
+            const size_t targetIndex =
+                (offset + targetAuthored.size() - index) % targetAuthored.size();
+            const glm::vec2 delta = glm::vec2(predictedLocal) -
+                targetAuthored[targetIndex];
+            error += glm::dot(delta, delta);
+        }
+        if (error < bestError)
+        {
+            bestError = error;
+            bestOffset = offset;
+        }
+    }
+
+    mapping.source = std::move(source);
+    mapping.target.resize(targetAuthored.size());
+    float extent = 0.f;
+    float maximumError = 0.f;
+    for (size_t index = 0; index < mapping.source.size(); ++index)
+    {
+        const size_t targetIndex =
+            (bestOffset + targetAuthored.size() - index) % targetAuthored.size();
+        mapping.target[index] = targetAuthored[targetIndex];
+        mapping.sourceCenter += mapping.source[index];
+        mapping.targetCenter += mapping.target[index];
+        const glm::vec3 predictedWorld(fallback *
+            glm::vec4(sourceWorldPoints[index], 1.f));
+        maximumError = std::max(maximumError,
+            glm::length(predictedWorld - targetWorldPoints[targetIndex]));
+        extent = std::max(extent, glm::length(
+            targetWorldPoints[(targetIndex + 1u) % targetWorldPoints.size()] -
+            targetWorldPoints[targetIndex]));
+    }
+    mapping.sourceCenter /= static_cast<float>(mapping.source.size());
+    mapping.targetCenter /= static_cast<float>(mapping.target.size());
+    mapping.valid = true;
+    mapping.needsPiecewise = maximumError > std::max(0.0005f, extent * 0.0005f);
+    return mapping;
+}
+
+glm::vec3 MapPortalPointPiecewise(const glm::vec3& worldPoint,
+    const PortalPiecewiseMapping& mapping)
+{
+    if (!mapping.valid || !mapping.needsPiecewise)
+        return glm::vec3(mapping.fallback * glm::vec4(worldPoint, 1.f));
+
+    const glm::vec3 sourceLocal(glm::inverse(mapping.sourceFrame) *
+        glm::vec4(worldPoint, 1.f));
+    const glm::vec2 point(sourceLocal.x, sourceLocal.y);
+    size_t selected = 0u;
+    glm::vec3 selectedWeights(1.f, 0.f, 0.f);
+    float bestWedgeScore = -std::numeric_limits<float>::max();
+    for (size_t index = 0; index < mapping.source.size(); ++index)
+    {
+        const size_t next = (index + 1u) % mapping.source.size();
+        const glm::vec2 a = mapping.sourceCenter;
+        const glm::vec2 b = mapping.source[index];
+        const glm::vec2 c = mapping.source[next];
+        const float denominator = (b.y - c.y) * (a.x - c.x) +
+            (c.x - b.x) * (a.y - c.y);
+        if (std::abs(denominator) <= 1e-8f)
+            continue;
+        const float wa = ((b.y - c.y) * (point.x - c.x) +
+            (c.x - b.x) * (point.y - c.y)) / denominator;
+        const float wb = ((c.y - a.y) * (point.x - c.x) +
+            (a.x - c.x) * (point.y - c.y)) / denominator;
+        const float wc = 1.f - wa - wb;
+        // wb/wc define the infinite angular wedge from the centre. Allowing
+        // wa below zero extends the piecewise map continuously beyond the rim
+        // so partially crossing meshes do not clamp against the aperture.
+        const float wedgeScore = std::min(wb, wc);
+        if (wedgeScore > bestWedgeScore)
+        {
+            bestWedgeScore = wedgeScore;
+            selected = index;
+            selectedWeights = glm::vec3(wa, wb, wc);
+        }
+    }
+
+    const size_t next = (selected + 1u) % mapping.target.size();
+    const glm::vec2 targetPoint = selectedWeights.x * mapping.targetCenter +
+        selectedWeights.y * mapping.target[selected] +
+        selectedWeights.z * mapping.target[next];
+    const glm::vec2 sourceFirst = mapping.source[selected] - mapping.sourceCenter;
+    const glm::vec2 sourceSecond = mapping.source[next] - mapping.sourceCenter;
+    const glm::vec2 targetFirst = mapping.target[selected] - mapping.targetCenter;
+    const glm::vec2 targetSecond = mapping.target[next] - mapping.targetCenter;
+    const float sourceDeterminant = sourceFirst.x * sourceSecond.y -
+        sourceFirst.y * sourceSecond.x;
+    const float targetDeterminant = targetFirst.x * targetSecond.y -
+        targetFirst.y * targetSecond.x;
+    const float depthScale = std::abs(sourceDeterminant) > 1e-8f
+        ? std::sqrt(std::abs(targetDeterminant / sourceDeterminant)) : 1.f;
+    return glm::vec3(mapping.targetFrame * glm::vec4(targetPoint,
+        -sourceLocal.z * depthScale, 1.f));
+}
+
+glm::vec3 MapPortalDirectionPiecewise(const glm::vec3& origin,
+    const glm::vec3& direction, const PortalPiecewiseMapping& mapping)
+{
+    const float length = glm::length(direction);
+    if (length <= 1e-8f)
+        return glm::vec3(0.f);
+    const float sampleDistance = std::max(0.001f, length * 0.001f);
+    const glm::vec3 mappedOrigin = MapPortalPointPiecewise(origin, mapping);
+    const glm::vec3 mappedSample = MapPortalPointPiecewise(origin +
+        direction * (sampleDistance / length), mapping);
+    return (mappedSample - mappedOrigin) * (length / sampleDistance);
 }
 
 void VisitObjectTree(Engine::Core::Object* object,
@@ -523,11 +722,21 @@ glm::mat4 SpatialManipulator::GetPortalWorldTransformTo(
     // Crossing a portal reverses portal-local depth and horizontal handedness.
     // Without this half-turn, the virtual camera lands on the wrong side of
     // the target and looks away from the connected scene, so reverse views and
-    // recursive source/target reflections disappear. Scale/shear stay excluded.
+    // recursive source/target reflections disappear. Aperture size contributes
+    // a uniform metric scale; shear and aspect-ratio distortion stay excluded.
+    const float scaleRatio = GetPortalScaleRatioTo(target);
     glm::mat4 crossing(1.f);
-    crossing[0][0] = -1.f;
-    crossing[2][2] = -1.f;
+    crossing[0][0] = -scaleRatio;
+    crossing[1][1] = scaleRatio;
+    crossing[2][2] = -scaleRatio;
     return targetFrame * crossing * glm::inverse(sourceFrame);
+}
+
+float SpatialManipulator::GetPortalScaleRatioTo(
+    const SpatialManipulator& target) const
+{
+    return ComputeApertureScaleRatio(GetWorldPortalShapePoints(),
+        target.GetWorldPortalShapePoints());
 }
 
 glm::mat4 SpatialManipulator::GetRenderPortalWorldTransformTo(
@@ -535,10 +744,31 @@ glm::mat4 SpatialManipulator::GetRenderPortalWorldTransformTo(
 {
     const glm::mat4 sourceFrame = GetRenderPortalWorldFrame();
     const glm::mat4 targetFrame = target.GetRenderPortalWorldFrame();
+    const float scaleRatio = GetRenderPortalScaleRatioTo(target);
     glm::mat4 crossing(1.f);
-    crossing[0][0] = -1.f;
-    crossing[2][2] = -1.f;
+    crossing[0][0] = -scaleRatio;
+    crossing[1][1] = scaleRatio;
+    crossing[2][2] = -scaleRatio;
     return targetFrame * crossing * glm::inverse(sourceFrame);
+}
+
+float SpatialManipulator::GetRenderPortalScaleRatioTo(
+    const SpatialManipulator& target) const
+{
+    return ComputeApertureScaleRatio(GetRenderWorldPortalShapePoints(),
+        target.GetRenderWorldPortalShapePoints());
+}
+
+bool SpatialManipulator::UsesPiecewisePortalWarpTo(
+    const SpatialManipulator& target) const
+{
+    if (!HasCompatiblePortalShapeWith(target))
+        return false;
+    const PortalPiecewiseMapping mapping = BuildPortalPiecewiseMapping(
+        GetWorldPortalShapePoints(), target.GetWorldPortalShapePoints(),
+        GetPortalWorldFrame(), target.GetPortalWorldFrame(),
+        GetPortalWorldTransformTo(target));
+    return mapping.valid && mapping.needsPiecewise;
 }
 
 glm::vec3 SpatialManipulator::MapWorldPointThroughPortalShape(const glm::vec3& point,
@@ -546,7 +776,43 @@ glm::vec3 SpatialManipulator::MapWorldPointThroughPortalShape(const glm::vec3& p
 {
     if (!HasCompatiblePortalShapeWith(target))
         return point;
-    return glm::vec3(GetPortalWorldTransformTo(target) * glm::vec4(point, 1.f));
+    const glm::mat4 fallback = GetPortalWorldTransformTo(target);
+    return MapPortalPointPiecewise(point, BuildPortalPiecewiseMapping(
+        GetWorldPortalShapePoints(), target.GetWorldPortalShapePoints(),
+        GetPortalWorldFrame(), target.GetPortalWorldFrame(), fallback));
+}
+
+glm::vec3 SpatialManipulator::MapWorldDirectionThroughPortalShape(
+    const glm::vec3& origin, const glm::vec3& direction,
+    const SpatialManipulator& target) const
+{
+    if (!HasCompatiblePortalShapeWith(target))
+        return direction;
+    const glm::mat4 fallback = GetPortalWorldTransformTo(target);
+    return MapPortalDirectionPiecewise(origin, direction,
+        BuildPortalPiecewiseMapping(GetWorldPortalShapePoints(),
+            target.GetWorldPortalShapePoints(), GetPortalWorldFrame(),
+            target.GetPortalWorldFrame(), fallback));
+}
+
+glm::vec3 SpatialManipulator::MapWorldNormalThroughPortalShape(
+    const glm::vec3& origin, const glm::vec3& normal,
+    const SpatialManipulator& target) const
+{
+    if (!HasCompatiblePortalShapeWith(target))
+        return normal;
+    glm::mat3 jacobian(1.f);
+    for (int column = 0; column < 3; ++column)
+    {
+        const glm::vec3 axis(column == 0, column == 1, column == 2);
+        jacobian[column] = MapWorldDirectionThroughPortalShape(origin, axis,
+            target);
+    }
+    const float determinant = glm::determinant(jacobian);
+    if (!std::isfinite(determinant) || std::abs(determinant) <= 1e-8f)
+        return normal;
+    return SafeNormalize(glm::transpose(glm::inverse(jacobian)) * normal,
+        normal);
 }
 
 glm::vec3 SpatialManipulator::MapRenderWorldPointThroughPortalShape(
@@ -554,8 +820,25 @@ glm::vec3 SpatialManipulator::MapRenderWorldPointThroughPortalShape(
 {
     if (!HasCompatiblePortalShapeWith(target))
         return point;
-    return glm::vec3(GetRenderPortalWorldTransformTo(target) *
-        glm::vec4(point, 1.f));
+    const glm::mat4 fallback = GetRenderPortalWorldTransformTo(target);
+    return MapPortalPointPiecewise(point, BuildPortalPiecewiseMapping(
+        GetRenderWorldPortalShapePoints(),
+        target.GetRenderWorldPortalShapePoints(), GetRenderPortalWorldFrame(),
+        target.GetRenderPortalWorldFrame(), fallback));
+}
+
+glm::vec3 SpatialManipulator::MapRenderWorldDirectionThroughPortalShape(
+    const glm::vec3& origin, const glm::vec3& direction,
+    const SpatialManipulator& target) const
+{
+    if (!HasCompatiblePortalShapeWith(target))
+        return direction;
+    const glm::mat4 fallback = GetRenderPortalWorldTransformTo(target);
+    return MapPortalDirectionPiecewise(origin, direction,
+        BuildPortalPiecewiseMapping(GetRenderWorldPortalShapePoints(),
+            target.GetRenderWorldPortalShapePoints(),
+            GetRenderPortalWorldFrame(), target.GetRenderPortalWorldFrame(),
+            fallback));
 }
 
 bool SpatialManipulator::EnsurePointCountCompatibility(SpatialManipulator* target)
@@ -651,6 +934,8 @@ void SpatialManipulator::ResetTraversalMeshDeformation(RigidBody* traversingBody
     it->second.baseVertices.clear();
     it->second.localMeshVertices.clear();
     it->second.remoteMeshVertices.clear();
+    it->second.remoteRenderMesh.reset();
+    it->second.piecewiseWarp = false;
     it->second.localCollisionVertices.clear();
     it->second.localChartPortal = nullptr;
     it->second.remoteChartPortal = nullptr;
@@ -686,8 +971,11 @@ void SpatialManipulator::AppendTraversalRenderInstances(
         output.push_back({ body->Owner, const_cast<Mesh*>(state.lastMesh),
             localWorld, state.localRenderClipPlane, state.localChartPortal,
             false });
-        output.push_back({ body->Owner, const_cast<Mesh*>(state.lastMesh),
-            state.remoteRenderWorldTransform * localWorld,
+        Mesh* remoteMesh = state.piecewiseWarp && state.remoteRenderMesh
+            ? state.remoteRenderMesh.get() : const_cast<Mesh*>(state.lastMesh);
+        const glm::mat4 remoteWorld = state.piecewiseWarp
+            ? localWorld : state.remoteRenderWorldTransform * localWorld;
+        output.push_back({ body->Owner, remoteMesh, remoteWorld,
             state.remoteRenderClipPlane, state.remoteChartPortal, true });
     }
 }
@@ -741,6 +1029,7 @@ void SpatialManipulator::ApplyTraversalMeshDeformation(SpatialManipulator* targe
     const glm::mat4 bodyWorld = traversingBody->Owner->transform.GetWorldMatrix();
     const glm::mat4 bodyWorldInverse = glm::inverse(bodyWorld);
     const glm::mat4 portalWorldTransform = GetPortalWorldTransformTo(*target);
+    const bool piecewiseWarp = UsesPiecewisePortalWarpTo(*target);
 
     const glm::mat4 ownerWorld = Owner->transform.GetWorldMatrix();
     const glm::vec3 sourceWorldPortalPoint = glm::vec3(ownerWorld *
@@ -839,26 +1128,75 @@ void SpatialManipulator::ApplyTraversalMeshDeformation(SpatialManipulator* targe
     for (Mesh::Vertex& vertex : remoteHalf)
     {
         const glm::vec3 localPosition(vertex.pos[0], vertex.pos[1], vertex.pos[2]);
-        const glm::vec3 mappedLocal = glm::vec3(localToRemoteLocal *
+        const glm::vec3 sourceWorldPosition = glm::vec3(bodyWorld *
             glm::vec4(localPosition, 1.f));
+        const glm::vec3 mappedWorldPosition = piecewiseWarp
+            ? MapWorldPointThroughPortalShape(sourceWorldPosition, *target)
+            : glm::vec3(portalWorldTransform *
+                glm::vec4(sourceWorldPosition, 1.f));
+        const glm::vec3 mappedLocal = glm::vec3(bodyWorldInverse *
+            glm::vec4(mappedWorldPosition, 1.f));
         vertex.pos[0] = mappedLocal.x;
         vertex.pos[1] = mappedLocal.y;
         vertex.pos[2] = mappedLocal.z;
-        remoteWorldVertices.push_back(glm::vec3(bodyWorld *
-            glm::vec4(mappedLocal, 1.f)));
+        remoteWorldVertices.push_back(mappedWorldPosition);
 
         const glm::vec3 localNormal(vertex.normal[0], vertex.normal[1],
             vertex.normal[2]);
-        const glm::vec3 mappedLocalNormal = SafeNormalize(
-            remoteNormalMatrix * localNormal,
-            glm::vec3(0.f, 0.f, 1.f));
+        glm::vec3 mappedLocalNormal;
+        if (piecewiseWarp)
+        {
+            const glm::vec3 sourceWorldNormal = SafeNormalize(
+                glm::transpose(glm::inverse(glm::mat3(bodyWorld))) * localNormal,
+                glm::vec3(0.f, 0.f, 1.f));
+            const glm::vec3 mappedWorldNormal =
+                MapWorldNormalThroughPortalShape(sourceWorldPosition,
+                    sourceWorldNormal, *target);
+            mappedLocalNormal = SafeNormalize(glm::transpose(glm::mat3(bodyWorld)) *
+                mappedWorldNormal, glm::vec3(0.f, 0.f, 1.f));
+        }
+        else
+        {
+            mappedLocalNormal = SafeNormalize(remoteNormalMatrix * localNormal,
+                glm::vec3(0.f, 0.f, 1.f));
+        }
         vertex.normal[0] = mappedLocalNormal.x;
         vertex.normal[1] = mappedLocalNormal.y;
         vertex.normal[2] = mappedLocalNormal.z;
+        if (piecewiseWarp)
+        {
+            const glm::vec3 localTangent(vertex.tangent[0], vertex.tangent[1],
+                vertex.tangent[2]);
+            if (glm::dot(localTangent, localTangent) > 1e-8f)
+            {
+                const glm::vec3 sourceWorldTangent = glm::mat3(bodyWorld) *
+                    localTangent;
+                const glm::vec3 mappedWorldTangent =
+                    MapWorldDirectionThroughPortalShape(sourceWorldPosition,
+                        sourceWorldTangent, *target);
+                const glm::vec3 mappedLocalTangent = SafeNormalize(
+                    glm::mat3(bodyWorldInverse) * mappedWorldTangent,
+                    localTangent);
+                vertex.tangent[0] = mappedLocalTangent.x;
+                vertex.tangent[1] = mappedLocalTangent.y;
+                vertex.tangent[2] = mappedLocalTangent.z;
+            }
+        }
     }
 
     state.localMeshVertices = localHalf;
     state.remoteMeshVertices = remoteHalf;
+    state.piecewiseWarp = piecewiseWarp;
+    if (piecewiseWarp)
+    {
+        state.remoteRenderMesh = std::make_shared<Mesh>();
+        state.remoteRenderMesh->InitializeRuntimeCloneFrom(*mesh);
+        state.remoteRenderMesh->SetDeformedVertices(remoteHalf);
+    }
+    else
+    {
+        state.remoteRenderMesh.reset();
+    }
     state.localCollisionVertices = localVertices;
     state.remoteLinearTransform = glm::mat3(portalWorldTransform);
     state.collisionRemoteWorldTransform = portalWorldTransform;
@@ -1131,7 +1469,17 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target,
                 departingVisual.lastMesh;
             ResetTraversalMeshDeformation(body);
             const glm::mat4 portalTransform = GetPortalWorldTransformTo(*target);
-            const glm::mat3 portalLinear(portalTransform);
+            const bool piecewiseWarp = UsesPiecewisePortalWarpTo(*target);
+            glm::mat3 portalLinear(portalTransform);
+            if (piecewiseWarp)
+            {
+                for (int column = 0; column < 3; ++column)
+                {
+                    const glm::vec3 axis(column == 0, column == 1, column == 2);
+                    portalLinear[column] = MapWorldDirectionThroughPortalShape(
+                        bodyWorldPosition, axis, *target);
+                }
+            }
             glm::mat3 portalRotation(1.f);
             for (int column = 0; column < 3; ++column)
                 portalRotation[column] = SafeNormalize(portalLinear[column],
@@ -1143,16 +1491,103 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target,
                 bodyWorldRotation[column] = SafeNormalize(glm::vec3(bodyWorld[column]),
                     glm::vec3(column == 0, column == 1, column == 2));
 
-            const glm::vec3 mappedPosition = glm::vec3(portalTransform *
-                glm::vec4(bodyWorldPosition, 1.f));
+            const glm::vec3 mappedPosition = piecewiseWarp
+                ? MapWorldPointThroughPortalShape(bodyWorldPosition, *target)
+                : glm::vec3(portalTransform * glm::vec4(bodyWorldPosition, 1.f));
             const glm::quat mappedRotation = glm::normalize(glm::quat_cast(
                 portalRotation * bodyWorldRotation));
-            const glm::vec3 mappedLinearVelocity = portalLinear *
-                body->GetLinearVelocity();
+            const glm::vec3 mappedLinearVelocity = piecewiseWarp
+                ? MapWorldDirectionThroughPortalShape(bodyWorldPosition,
+                    body->GetLinearVelocity(), *target)
+                : portalLinear * body->GetLinearVelocity();
             const glm::vec3 mappedAngularVelocity = portalRotation *
                 body->GetAngularVelocity();
 
+            // Carry the endpoint metric into the object's persistent local
+            // scale. SetWorldPose calls EnsureBody after this write, causing
+            // Bullet to rebuild the collider at the same new scale before the
+            // mapped pose and velocities are published.
+            const float portalScaleRatio = GetPortalScaleRatioTo(*target);
+            if (!piecewiseWarp)
+                body->Owner->transform.scale *= portalScaleRatio;
             body->SetWorldPose(mappedPosition, mappedRotation);
+
+            // A non-similar endpoint pair cannot be represented by an object
+            // transform. Bake the piecewise result into the traversing mesh
+            // after choosing its target-space pose, then use that mesh as the
+            // convex runtime collider so rendering and physics retain the
+            // corner-specific deformation after the handoff.
+            if (piecewiseWarp)
+            {
+                Mesh* warpedMesh = ResolveMeshForObject(body->Owner);
+                if (warpedMesh && !warpedMesh->GetVertices().empty())
+                {
+                    std::vector<Mesh::Vertex> warpedVertices =
+                        warpedMesh->GetVertices();
+                    const glm::mat4 mappedBodyWorld =
+                        body->Owner->transform.GetWorldMatrix();
+                    const glm::mat4 mappedBodyInverse = glm::inverse(mappedBodyWorld);
+                    for (Mesh::Vertex& vertex : warpedVertices)
+                    {
+                        const glm::vec3 localPosition(vertex.pos[0], vertex.pos[1],
+                            vertex.pos[2]);
+                        const glm::vec3 oldWorldPosition(bodyWorld *
+                            glm::vec4(localPosition, 1.f));
+                        const glm::vec3 newWorldPosition =
+                            MapWorldPointThroughPortalShape(oldWorldPosition, *target);
+                        const glm::vec3 newLocalPosition(mappedBodyInverse *
+                            glm::vec4(newWorldPosition, 1.f));
+                        vertex.pos[0] = newLocalPosition.x;
+                        vertex.pos[1] = newLocalPosition.y;
+                        vertex.pos[2] = newLocalPosition.z;
+
+                        const glm::vec3 localNormal(vertex.normal[0],
+                            vertex.normal[1], vertex.normal[2]);
+                        const glm::vec3 oldWorldNormal = SafeNormalize(
+                            glm::transpose(glm::inverse(glm::mat3(bodyWorld))) *
+                                localNormal, glm::vec3(0.f, 0.f, 1.f));
+                        const glm::vec3 newWorldNormal =
+                            MapWorldNormalThroughPortalShape(oldWorldPosition,
+                                oldWorldNormal, *target);
+                        const glm::vec3 newLocalNormal = SafeNormalize(
+                            glm::transpose(glm::mat3(mappedBodyWorld)) *
+                                newWorldNormal, localNormal);
+                        vertex.normal[0] = newLocalNormal.x;
+                        vertex.normal[1] = newLocalNormal.y;
+                        vertex.normal[2] = newLocalNormal.z;
+                        const glm::vec3 localTangent(vertex.tangent[0],
+                            vertex.tangent[1], vertex.tangent[2]);
+                        if (glm::dot(localTangent, localTangent) > 1e-8f)
+                        {
+                            const glm::vec3 oldWorldTangent =
+                                glm::mat3(bodyWorld) * localTangent;
+                            const glm::vec3 newWorldTangent =
+                                MapWorldDirectionThroughPortalShape(
+                                    oldWorldPosition, oldWorldTangent, *target);
+                            const glm::vec3 newLocalTangent = SafeNormalize(
+                                glm::mat3(mappedBodyInverse) * newWorldTangent,
+                                localTangent);
+                            vertex.tangent[0] = newLocalTangent.x;
+                            vertex.tangent[1] = newLocalTangent.y;
+                            vertex.tangent[2] = newLocalTangent.z;
+                        }
+                    }
+                    warpedMesh->SetDeformedVertices(warpedVertices);
+                    for (Engine::Core::Component* component :
+                        body->Owner->Components)
+                    {
+                        if (auto* collider = dynamic_cast<Collider*>(component))
+                            collider->collisionEnabled =
+                                dynamic_cast<MeshObjectCollider*>(collider) != nullptr;
+                    }
+                    MeshObjectCollider* meshCollider =
+                        body->Owner->GetComponent<MeshObjectCollider>();
+                    if (!meshCollider)
+                        meshCollider = body->Owner->AddComponent<MeshObjectCollider>();
+                    meshCollider->collisionEnabled = true;
+                    meshCollider->convex = true;
+                }
+            }
             body->SetLinearVelocity(mappedLinearVelocity);
             body->SetAngularVelocity(mappedAngularVelocity);
 
@@ -1913,6 +2348,8 @@ bool SpatialManipulator::DrawProperties(::Engine::Editor::IEditorUi& ui)
         changed = true;
     }
 
+    if (changed)
+        MarkConfigurationDirty();
     return changed;
 }
 }

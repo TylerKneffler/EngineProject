@@ -624,6 +624,21 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_ROOT}/Engine/Tests/PortalScaleTraversalTests.cpp")
+    enable_testing()
+    add_executable(PortalScaleTraversalTests EXCLUDE_FROM_ALL
+        "${ENGINE_ROOT}/Engine/Tests/PortalScaleTraversalTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/PortalTraversalRepeater.cpp")
+    target_link_libraries(PortalScaleTraversalTests PRIVATE Engine)
+    target_include_directories(PortalScaleTraversalTests PRIVATE
+        "${ENGINE_ROOT}/Engine"
+        "${ENGINE_ROOT}/Engine/Core/Assets")
+    add_test(NAME PortalScaleTraversalRegression COMMAND PortalScaleTraversalTests)
+    set_tests_properties(PortalScaleTraversalRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_ROOT}/Engine/Tests/RotateLifecycleTests.cpp")
     enable_testing()
     add_executable(EngineLifecycleTests

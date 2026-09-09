@@ -321,6 +321,12 @@ private:
     {
         std::unique_ptr<IGraphicsBuffer> vertexBuffer;
         std::vector<Engine::Model::Vertex> vertices;
+        glm::mat4 authoredWorld { 1.f };
+        glm::vec3 mappedOrigin { 0.f };
+        uint64_t meshRevision = 0;
+        uint64_t warpRevision = 0;
+        bool evaluated = false;
+        bool affectedByWarp = false;
     };
     // Object ownership remains in m_objects; this cache only owns transient
     // GPU upload buffers. Entries are replaced when topology changes and are

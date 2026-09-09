@@ -6,6 +6,7 @@
 #include "Core/Compoonents/Transform.h"
 #include "Core/PropertyMacros.h"
 #include <array>
+#include <memory>
 #include <string>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -213,10 +214,15 @@ public:
     bool ContainsWorldPoint(const glm::vec3& worldPoint) const;
     glm::vec3 MapWorldPointThroughVolume(const glm::vec3& worldPoint) const;
     glm::mat4 GetPortalWorldTransformTo(const SpatialManipulator& target) const;
+    // Uniform linear ratio between the endpoint apertures. A body entering a
+    // smaller endpoint and leaving a larger one carries this scale with it.
+    float GetPortalScaleRatioTo(const SpatialManipulator& target) const;
     // Rendering has its own spatial chart: apertures and virtual camera rays
     // must use the same active warp mapping as ordinary render objects.
     glm::mat4 GetRenderPortalWorldTransformTo(
         const SpatialManipulator& target) const;
+    float GetRenderPortalScaleRatioTo(const SpatialManipulator& target) const;
+    bool UsesPiecewisePortalWarpTo(const SpatialManipulator& target) const;
     // The aperture is a simple, convex, consistently-wound planar polygon.
     // Invalid input is never used for rendering or traversal.
     bool IsValidPortalAperture(float tolerance = 0.0005f) const;
@@ -229,7 +235,14 @@ public:
     std::vector<glm::vec3> GetRenderWorldPortalShapePoints() const;
     glm::vec3 MapWorldPointThroughPortalShape(const glm::vec3& point,
         const SpatialManipulator& target) const;
+    glm::vec3 MapWorldDirectionThroughPortalShape(const glm::vec3& origin,
+        const glm::vec3& direction, const SpatialManipulator& target) const;
+    glm::vec3 MapWorldNormalThroughPortalShape(const glm::vec3& origin,
+        const glm::vec3& normal, const SpatialManipulator& target) const;
     glm::vec3 MapRenderWorldPointThroughPortalShape(const glm::vec3& point,
+        const SpatialManipulator& target) const;
+    glm::vec3 MapRenderWorldDirectionThroughPortalShape(
+        const glm::vec3& origin, const glm::vec3& direction,
         const SpatialManipulator& target) const;
     void ApplyToOwner();
     void ConnectToTarget(SpatialManipulator* target);
@@ -299,6 +312,7 @@ private:
         std::vector<Mesh::Vertex> baseVertices;
         std::vector<Mesh::Vertex> localMeshVertices;
         std::vector<Mesh::Vertex> remoteMeshVertices;
+        std::shared_ptr<Mesh> remoteRenderMesh;
         std::vector<glm::vec3> localCollisionVertices;
         glm::mat3 remoteLinearTransform { 1.f };
         glm::mat4 remoteRenderWorldTransform { 1.f };
@@ -318,6 +332,7 @@ private:
         // so AppendTraversalRenderInstances derives the source chart using
         // the inverse portal transform.
         bool postTeleportVisual = false;
+        bool piecewiseWarp = false;
         Phase phase = Phase::Uninitialized;
         bool waitForOverlapExit = false;
         glm::vec3 previousWorldPosition { 0.f };

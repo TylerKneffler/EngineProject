@@ -1,0 +1,317 @@
+<?xml version="1.0"?>
+<Scene xmlns:components="urn:engine-components" version="1">
+  <settings showGrid="true" gridHalfSize="34" gridCellSize="1" gridOpacity="0.18" gridFadeDistance="100" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" renderMode="0" sceneViewUiOverlay="false" portalDebugVisuals="true" portalDebugWireframe="false" portalDebugTintRemoteView="true" portalDebugOverlayAlpha="0.28" portalRecursionDepth="5" portalConnectionRepeatLimit="4" portalMaxViewsPerFrame="48">
+    <gridColor><item>0.12</item><item>0.14</item><item>0.18</item></gridColor>
+    <gridOriginColor><item>0.2</item><item>0.65</item><item>0.95</item></gridOriginColor>
+    <ambientColor><item>0.09</item><item>0.09</item><item>0.12</item></ambientColor>
+  </settings>
+  <objects>
+    <item prefab="Assets/Prefabs/CharacterCapsule.prefab" enabled="true">
+      <transform>
+        <Transform.position><item>-24</item><item>1</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+    </item>
+    <item name="Matrix Room 1 Red Shell" enabled="true">
+      <transform>
+        <Transform.position><item>-24</item><item>0</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/adjacent_door_room.obj" />
+        <components:Material Material.shininess="36" Material.metallicFactor="0.08" Material.roughnessFactor="0.72" Material.baseColorAlpha="1" Material.doubleSided="true" Material.unlit="false" Material.alphaMode="Opaque">
+          <Material.diffuse><item>0.82</item><item>0.12</item><item>0.12</item></Material.diffuse>
+          <Material.ambient><item>0.131</item><item>0.019</item><item>0.019</item></Material.ambient>
+          <Material.specular><item>0.35</item><item>0.35</item><item>0.4</item></Material.specular>
+          <Material.emissiveColor><item>0.021</item><item>0.003</item><item>0.003</item></Material.emissiveColor>
+        </components:Material>
+        <components:MeshObjectCollider MeshObjectCollider.collisionEnabled="true" MeshObjectCollider.convex="false" MeshObjectCollider.meshPath="Assets/Mesh/adjacent_door_room.obj">
+          <MeshObjectCollider.center><item>0</item><item>0</item><item>0</item></MeshObjectCollider.center>
+          <MeshObjectCollider.meshReference expectedType="Mesh" objectPath="" objectName="Matrix Room 1 Red Shell" componentType="Mesh" componentIndex="0" />
+        </components:MeshObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0.82" RigidBody.restitution="0" RigidBody.isTrigger="false" RigidBody.continuousCollision="false" RigidBody.collisionLayer="1" RigidBody.collisionMask="-1" />
+      </components>
+      <children />
+    </item>
+    <item name="Matrix Room 1 Light" enabled="true">
+      <transform>
+        <Transform.position><item>-24</item><item>3</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components><components:Light Light.lightType="0" Light.intensity="9" Light.range="9" Light.falloff="1.65" Light.baked="false"><Light.color><item>1</item><item>0.3</item><item>0.3</item></Light.color></components:Light></components>
+      <children />
+    </item>
+    <item name="Matrix Room 2 Green Shell" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>0</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/adjacent_door_room.obj" />
+        <components:Material Material.shininess="36" Material.metallicFactor="0.08" Material.roughnessFactor="0.72" Material.baseColorAlpha="1" Material.doubleSided="true" Material.unlit="false" Material.alphaMode="Opaque">
+          <Material.diffuse><item>0.12</item><item>0.68</item><item>0.22</item></Material.diffuse>
+          <Material.ambient><item>0.019</item><item>0.109</item><item>0.035</item></Material.ambient>
+          <Material.specular><item>0.35</item><item>0.35</item><item>0.4</item></Material.specular>
+          <Material.emissiveColor><item>0.003</item><item>0.017</item><item>0.006</item></Material.emissiveColor>
+        </components:Material>
+        <components:MeshObjectCollider MeshObjectCollider.collisionEnabled="true" MeshObjectCollider.convex="false" MeshObjectCollider.meshPath="Assets/Mesh/adjacent_door_room.obj">
+          <MeshObjectCollider.center><item>0</item><item>0</item><item>0</item></MeshObjectCollider.center>
+          <MeshObjectCollider.meshReference expectedType="Mesh" objectPath="" objectName="Matrix Room 2 Green Shell" componentType="Mesh" componentIndex="0" />
+        </components:MeshObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0.82" RigidBody.restitution="0" RigidBody.isTrigger="false" RigidBody.continuousCollision="false" RigidBody.collisionLayer="1" RigidBody.collisionMask="-1" />
+      </components>
+      <children />
+    </item>
+    <item name="Matrix Room 2 Light" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>3</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components><components:Light Light.lightType="0" Light.intensity="9" Light.range="9" Light.falloff="1.65" Light.baked="false"><Light.color><item>0.3</item><item>0.8600000000000001</item><item>0.4</item></Light.color></components:Light></components>
+      <children />
+    </item>
+    <item name="Matrix Room 3 Blue Shell" enabled="true">
+      <transform>
+        <Transform.position><item>24</item><item>0</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/adjacent_door_room.obj" />
+        <components:Material Material.shininess="36" Material.metallicFactor="0.08" Material.roughnessFactor="0.72" Material.baseColorAlpha="1" Material.doubleSided="true" Material.unlit="false" Material.alphaMode="Opaque">
+          <Material.diffuse><item>0.12</item><item>0.28</item><item>0.88</item></Material.diffuse>
+          <Material.ambient><item>0.019</item><item>0.045</item><item>0.141</item></Material.ambient>
+          <Material.specular><item>0.35</item><item>0.35</item><item>0.4</item></Material.specular>
+          <Material.emissiveColor><item>0.003</item><item>0.007</item><item>0.022</item></Material.emissiveColor>
+        </components:Material>
+        <components:MeshObjectCollider MeshObjectCollider.collisionEnabled="true" MeshObjectCollider.convex="false" MeshObjectCollider.meshPath="Assets/Mesh/adjacent_door_room.obj">
+          <MeshObjectCollider.center><item>0</item><item>0</item><item>0</item></MeshObjectCollider.center>
+          <MeshObjectCollider.meshReference expectedType="Mesh" objectPath="" objectName="Matrix Room 3 Blue Shell" componentType="Mesh" componentIndex="0" />
+        </components:MeshObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0.82" RigidBody.restitution="0" RigidBody.isTrigger="false" RigidBody.continuousCollision="false" RigidBody.collisionLayer="1" RigidBody.collisionMask="-1" />
+      </components>
+      <children />
+    </item>
+    <item name="Matrix Room 3 Light" enabled="true">
+      <transform>
+        <Transform.position><item>24</item><item>3</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components><components:Light Light.lightType="0" Light.intensity="9" Light.range="9" Light.falloff="1.65" Light.baked="false"><Light.color><item>0.3</item><item>0.46</item><item>1</item></Light.color></components:Light></components>
+      <children />
+    </item>
+    <item name="Matrix Room 1 West Entrance" enabled="true">
+      <transform>
+        <Transform.position><item>-28</item><item>1.7</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>1.570796</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1">
+          <PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size><item>2.4</item><item>3.4</item><item>0.7</item></PrimitiveObjectCollider.size>
+        </components:PrimitiveObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0" RigidBody.restitution="0" RigidBody.isTrigger="true" RigidBody.continuousCollision="false" RigidBody.collisionLayer="2" RigidBody.collisionMask="-1" />
+        <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="2" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="0.8" SpatialManipulator.deformationStrength="1" SpatialManipulator.portalEdgeHalfWidth="0.055" SpatialManipulator.portalEdgeHalfDepth="0.1" SpatialManipulator.portalCollisionCutUpdateDistance="0.04" SpatialManipulator.materializeSplitOnDisconnect="true" SpatialManipulator.portalTraversalPriority="0">
+          <SpatialManipulator.portalPoint><item>0</item><item>0</item><item>0</item></SpatialManipulator.portalPoint>
+          <SpatialManipulator.portalNormal><item>0</item><item>0</item><item>1</item></SpatialManipulator.portalNormal>
+          <SpatialManipulator.portalShapePoint0><item>-1.2</item><item>-1.7</item><item>0</item></SpatialManipulator.portalShapePoint0>
+          <SpatialManipulator.portalShapePoint1><item>1.2</item><item>-1.7</item><item>0</item></SpatialManipulator.portalShapePoint1>
+          <SpatialManipulator.portalShapePoint2><item>1.2</item><item>1.7</item><item>0</item></SpatialManipulator.portalShapePoint2>
+          <SpatialManipulator.portalShapePoint3><item>-1.2</item><item>1.7</item><item>0</item></SpatialManipulator.portalShapePoint3>
+          <SpatialManipulator.traversalTriggerBodyReference expectedType="RigidBody" objectPath="" objectName="Matrix Room 1 West Entrance" componentType="RigidBody" componentIndex="0" />
+          <SpatialManipulator.targetManipulator expectedType="SpatialManipulator" objectPath="" objectName="Matrix Room 3 North Exit" componentType="SpatialManipulator" componentIndex="0" />
+        </components:SpatialManipulator>
+      </components>
+      <children />
+    </item>
+    <item name="Matrix Room 1 North Exit" enabled="true">
+      <transform>
+        <Transform.position><item>-24</item><item>1.7</item><item>4</item></Transform.position>
+        <Transform.rotation><item>0</item><item>3.141593</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1">
+          <PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size><item>2.4</item><item>3.4</item><item>0.7</item></PrimitiveObjectCollider.size>
+        </components:PrimitiveObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0" RigidBody.restitution="0" RigidBody.isTrigger="true" RigidBody.continuousCollision="false" RigidBody.collisionLayer="2" RigidBody.collisionMask="-1" />
+        <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="2" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="0.8" SpatialManipulator.deformationStrength="1" SpatialManipulator.portalEdgeHalfWidth="0.055" SpatialManipulator.portalEdgeHalfDepth="0.1" SpatialManipulator.portalCollisionCutUpdateDistance="0.04" SpatialManipulator.materializeSplitOnDisconnect="true" SpatialManipulator.portalTraversalPriority="0">
+          <SpatialManipulator.portalPoint><item>0</item><item>0</item><item>0</item></SpatialManipulator.portalPoint>
+          <SpatialManipulator.portalNormal><item>0</item><item>0</item><item>1</item></SpatialManipulator.portalNormal>
+          <SpatialManipulator.portalShapePoint0><item>-1.2</item><item>-1.7</item><item>0</item></SpatialManipulator.portalShapePoint0>
+          <SpatialManipulator.portalShapePoint1><item>1.2</item><item>-1.7</item><item>0</item></SpatialManipulator.portalShapePoint1>
+          <SpatialManipulator.portalShapePoint2><item>1.2</item><item>1.7</item><item>0</item></SpatialManipulator.portalShapePoint2>
+          <SpatialManipulator.portalShapePoint3><item>-1.2</item><item>1.7</item><item>0</item></SpatialManipulator.portalShapePoint3>
+          <SpatialManipulator.traversalTriggerBodyReference expectedType="RigidBody" objectPath="" objectName="Matrix Room 1 North Exit" componentType="RigidBody" componentIndex="0" />
+          <SpatialManipulator.targetManipulator expectedType="SpatialManipulator" objectPath="" objectName="Matrix Room 2 West Entrance" componentType="SpatialManipulator" componentIndex="0" />
+        </components:SpatialManipulator>
+      </components>
+      <children />
+    </item>
+    <item name="Matrix Room 2 West Entrance" enabled="true">
+      <transform>
+        <Transform.position><item>-4</item><item>1.7</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>1.570796</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1">
+          <PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size><item>2.4</item><item>3.4</item><item>0.7</item></PrimitiveObjectCollider.size>
+        </components:PrimitiveObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0" RigidBody.restitution="0" RigidBody.isTrigger="true" RigidBody.continuousCollision="false" RigidBody.collisionLayer="2" RigidBody.collisionMask="-1" />
+        <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="2" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="0.8" SpatialManipulator.deformationStrength="1" SpatialManipulator.portalEdgeHalfWidth="0.055" SpatialManipulator.portalEdgeHalfDepth="0.1" SpatialManipulator.portalCollisionCutUpdateDistance="0.04" SpatialManipulator.materializeSplitOnDisconnect="true" SpatialManipulator.portalTraversalPriority="0">
+          <SpatialManipulator.portalPoint><item>0</item><item>0</item><item>0</item></SpatialManipulator.portalPoint>
+          <SpatialManipulator.portalNormal><item>0</item><item>0</item><item>1</item></SpatialManipulator.portalNormal>
+          <SpatialManipulator.portalShapePoint0><item>-1.2</item><item>-1.7</item><item>0</item></SpatialManipulator.portalShapePoint0>
+          <SpatialManipulator.portalShapePoint1><item>1.2</item><item>-1.7</item><item>0</item></SpatialManipulator.portalShapePoint1>
+          <SpatialManipulator.portalShapePoint2><item>1.2</item><item>1.7</item><item>0</item></SpatialManipulator.portalShapePoint2>
+          <SpatialManipulator.portalShapePoint3><item>-1.2</item><item>1.7</item><item>0</item></SpatialManipulator.portalShapePoint3>
+          <SpatialManipulator.traversalTriggerBodyReference expectedType="RigidBody" objectPath="" objectName="Matrix Room 2 West Entrance" componentType="RigidBody" componentIndex="0" />
+          <SpatialManipulator.targetManipulator expectedType="SpatialManipulator" objectPath="" objectName="Matrix Room 1 North Exit" componentType="SpatialManipulator" componentIndex="0" />
+        </components:SpatialManipulator>
+      </components>
+      <children />
+    </item>
+    <item name="Matrix Room 2 North Exit" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>1.7</item><item>4</item></Transform.position>
+        <Transform.rotation><item>0</item><item>3.141593</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1">
+          <PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size><item>2.4</item><item>3.4</item><item>0.7</item></PrimitiveObjectCollider.size>
+        </components:PrimitiveObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0" RigidBody.restitution="0" RigidBody.isTrigger="true" RigidBody.continuousCollision="false" RigidBody.collisionLayer="2" RigidBody.collisionMask="-1" />
+        <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="2" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="0.8" SpatialManipulator.deformationStrength="1" SpatialManipulator.portalEdgeHalfWidth="0.055" SpatialManipulator.portalEdgeHalfDepth="0.1" SpatialManipulator.portalCollisionCutUpdateDistance="0.04" SpatialManipulator.materializeSplitOnDisconnect="true" SpatialManipulator.portalTraversalPriority="0">
+          <SpatialManipulator.portalPoint><item>0</item><item>0</item><item>0</item></SpatialManipulator.portalPoint>
+          <SpatialManipulator.portalNormal><item>0</item><item>0</item><item>1</item></SpatialManipulator.portalNormal>
+          <SpatialManipulator.portalShapePoint0><item>-1.2</item><item>-1.7</item><item>0</item></SpatialManipulator.portalShapePoint0>
+          <SpatialManipulator.portalShapePoint1><item>1.2</item><item>-1.7</item><item>0</item></SpatialManipulator.portalShapePoint1>
+          <SpatialManipulator.portalShapePoint2><item>1.2</item><item>1.7</item><item>0</item></SpatialManipulator.portalShapePoint2>
+          <SpatialManipulator.portalShapePoint3><item>-1.2</item><item>1.7</item><item>0</item></SpatialManipulator.portalShapePoint3>
+          <SpatialManipulator.traversalTriggerBodyReference expectedType="RigidBody" objectPath="" objectName="Matrix Room 2 North Exit" componentType="RigidBody" componentIndex="0" />
+          <SpatialManipulator.targetManipulator expectedType="SpatialManipulator" objectPath="" objectName="Matrix Room 3 West Entrance" componentType="SpatialManipulator" componentIndex="0" />
+        </components:SpatialManipulator>
+      </components>
+      <children />
+    </item>
+    <item name="Matrix Room 3 West Entrance" enabled="true">
+      <transform>
+        <Transform.position><item>20</item><item>1.7</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>1.570796</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1">
+          <PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size><item>2.4</item><item>3.4</item><item>0.7</item></PrimitiveObjectCollider.size>
+        </components:PrimitiveObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0" RigidBody.restitution="0" RigidBody.isTrigger="true" RigidBody.continuousCollision="false" RigidBody.collisionLayer="2" RigidBody.collisionMask="-1" />
+        <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="2" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="0.8" SpatialManipulator.deformationStrength="1" SpatialManipulator.portalEdgeHalfWidth="0.055" SpatialManipulator.portalEdgeHalfDepth="0.1" SpatialManipulator.portalCollisionCutUpdateDistance="0.04" SpatialManipulator.materializeSplitOnDisconnect="true" SpatialManipulator.portalTraversalPriority="0">
+          <SpatialManipulator.portalPoint><item>0</item><item>0</item><item>0</item></SpatialManipulator.portalPoint>
+          <SpatialManipulator.portalNormal><item>0</item><item>0</item><item>1</item></SpatialManipulator.portalNormal>
+          <SpatialManipulator.portalShapePoint0><item>-1.2</item><item>-1.7</item><item>0</item></SpatialManipulator.portalShapePoint0>
+          <SpatialManipulator.portalShapePoint1><item>1.2</item><item>-1.7</item><item>0</item></SpatialManipulator.portalShapePoint1>
+          <SpatialManipulator.portalShapePoint2><item>1.2</item><item>1.7</item><item>0</item></SpatialManipulator.portalShapePoint2>
+          <SpatialManipulator.portalShapePoint3><item>-1.2</item><item>1.7</item><item>0</item></SpatialManipulator.portalShapePoint3>
+          <SpatialManipulator.traversalTriggerBodyReference expectedType="RigidBody" objectPath="" objectName="Matrix Room 3 West Entrance" componentType="RigidBody" componentIndex="0" />
+          <SpatialManipulator.targetManipulator expectedType="SpatialManipulator" objectPath="" objectName="Matrix Room 2 North Exit" componentType="SpatialManipulator" componentIndex="0" />
+        </components:SpatialManipulator>
+      </components>
+      <children />
+    </item>
+    <item name="Matrix Room 3 North Exit" enabled="true">
+      <transform>
+        <Transform.position><item>24</item><item>1.7</item><item>4</item></Transform.position>
+        <Transform.rotation><item>0</item><item>3.141593</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1">
+          <PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size><item>2.4</item><item>3.4</item><item>0.7</item></PrimitiveObjectCollider.size>
+        </components:PrimitiveObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0" RigidBody.restitution="0" RigidBody.isTrigger="true" RigidBody.continuousCollision="false" RigidBody.collisionLayer="2" RigidBody.collisionMask="-1" />
+        <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="2" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="0.8" SpatialManipulator.deformationStrength="1" SpatialManipulator.portalEdgeHalfWidth="0.055" SpatialManipulator.portalEdgeHalfDepth="0.1" SpatialManipulator.portalCollisionCutUpdateDistance="0.04" SpatialManipulator.materializeSplitOnDisconnect="true" SpatialManipulator.portalTraversalPriority="0">
+          <SpatialManipulator.portalPoint><item>0</item><item>0</item><item>0</item></SpatialManipulator.portalPoint>
+          <SpatialManipulator.portalNormal><item>0</item><item>0</item><item>1</item></SpatialManipulator.portalNormal>
+          <SpatialManipulator.portalShapePoint0><item>-1.2</item><item>-1.7</item><item>0</item></SpatialManipulator.portalShapePoint0>
+          <SpatialManipulator.portalShapePoint1><item>1.2</item><item>-1.7</item><item>0</item></SpatialManipulator.portalShapePoint1>
+          <SpatialManipulator.portalShapePoint2><item>1.2</item><item>1.7</item><item>0</item></SpatialManipulator.portalShapePoint2>
+          <SpatialManipulator.portalShapePoint3><item>-1.2</item><item>1.7</item><item>0</item></SpatialManipulator.portalShapePoint3>
+          <SpatialManipulator.traversalTriggerBodyReference expectedType="RigidBody" objectPath="" objectName="Matrix Room 3 North Exit" componentType="RigidBody" componentIndex="0" />
+          <SpatialManipulator.targetManipulator expectedType="SpatialManipulator" objectPath="" objectName="Matrix Room 1 West Entrance" componentType="SpatialManipulator" componentIndex="0" />
+        </components:SpatialManipulator>
+      </components>
+      <children />
+    </item>
+    <item name="Room 2 Matrix Space" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>2.5</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="1" SpatialManipulator.definesWarpVolume="true" SpatialManipulator.warpPriority="0" SpatialManipulator.warpVolumeShape="1" SpatialManipulator.warpBoundaryFalloff="0" SpatialManipulator.spaceWarpType="0">
+          <SpatialManipulator.position><item>4</item><item>0</item><item>-2.309</item></SpatialManipulator.position>
+          <SpatialManipulator.rotation><item>0</item><item>-1.047198</item><item>0</item></SpatialManipulator.rotation>
+          <SpatialManipulator.scale><item>1</item><item>1</item><item>1</item></SpatialManipulator.scale>
+          <SpatialManipulator.warpVolumeSize><item>9</item><item>6</item><item>9</item></SpatialManipulator.warpVolumeSize>
+        </components:SpatialManipulator>
+      </components>
+      <children />
+    </item>
+    <item name="Room 1 Matrix Space" enabled="true">
+      <transform>
+        <Transform.position><item>-24</item><item>2.5</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="1" SpatialManipulator.definesWarpVolume="true" SpatialManipulator.warpPriority="1" SpatialManipulator.warpVolumeShape="1" SpatialManipulator.warpBoundaryFalloff="0" SpatialManipulator.spaceWarpType="0">
+          <SpatialManipulator.position><item>20</item><item>0</item><item>-2.309</item></SpatialManipulator.position>
+          <SpatialManipulator.rotation><item>0</item><item>1.047198</item><item>0</item></SpatialManipulator.rotation>
+          <SpatialManipulator.scale><item>1</item><item>1</item><item>1</item></SpatialManipulator.scale>
+          <SpatialManipulator.warpVolumeSize><item>9</item><item>6</item><item>9</item></SpatialManipulator.warpVolumeSize>
+        </components:SpatialManipulator>
+      </components>
+      <children />
+    </item>
+    <item name="Room 3 Matrix Space" enabled="true">
+      <transform>
+        <Transform.position><item>24</item><item>2.5</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="1" SpatialManipulator.definesWarpVolume="true" SpatialManipulator.warpPriority="2" SpatialManipulator.warpVolumeShape="1" SpatialManipulator.warpBoundaryFalloff="0" SpatialManipulator.spaceWarpType="0">
+          <SpatialManipulator.position><item>-24</item><item>0</item><item>4.619</item></SpatialManipulator.position>
+          <SpatialManipulator.rotation><item>0</item><item>3.141593</item><item>0</item></SpatialManipulator.rotation>
+          <SpatialManipulator.scale><item>1</item><item>1</item><item>1</item></SpatialManipulator.scale>
+          <SpatialManipulator.warpVolumeSize><item>9</item><item>6</item><item>9</item></SpatialManipulator.warpVolumeSize>
+        </components:SpatialManipulator>
+      </components>
+      <children />
+    </item>
+    <item name="Rounded Matrix Exterior Camera" enabled="true">
+      <transform>
+        <Transform.position><item>12</item><item>11</item><item>-15</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components><components:Camera Camera.active="false" Camera.useTransformRotation="false" Camera.fov="58" Camera.near="0.02" Camera.far="140" Camera.orthographic="false" Camera.orthographicSize="5"><Camera.target><item>0</item><item>2.5</item><item>0</item></Camera.target><Camera.up><item>0</item><item>1</item><item>0</item></Camera.up></components:Camera></components>
+      <children />
+    </item>
+  </objects>
+</Scene>
