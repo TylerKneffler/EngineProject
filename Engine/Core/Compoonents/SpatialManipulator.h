@@ -250,6 +250,9 @@ public:
         Mesh* mesh = nullptr;
         glm::mat4 world { 1.f };
         glm::vec4 clipPlane { 0.f };
+        // Endpoint whose chart owns world/clipPlane. It is retained while a
+        // physical hand-off is rendered by the destination endpoint.
+        const SpatialManipulator* chartPortal = nullptr;
         bool remote = false;
     };
     void AppendTraversalRenderInstances(
@@ -302,6 +305,8 @@ private:
         glm::mat4 collisionRemoteWorldTransform { 1.f };
         glm::vec4 localRenderClipPlane { 0.f };
         glm::vec4 remoteRenderClipPlane { 0.f };
+        const SpatialManipulator* localChartPortal = nullptr;
+        const SpatialManipulator* remoteChartPortal = nullptr;
         glm::vec3 lastCollisionPlanePoint { 0.f };
         glm::vec3 lastCollisionPlaneNormal { 0.f, 0.f, 1.f };
         bool meshDeformed = false;

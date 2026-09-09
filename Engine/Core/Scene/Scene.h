@@ -22,6 +22,7 @@ namespace Engine::Components
     class Mesh;
     class Sprite;
     class Material;
+    class SpatialManipulator;
 }
 namespace Engine::Rendering { class BakedLightingData; }
 namespace Engine::Renderers { class UIRenderer; }
@@ -302,6 +303,9 @@ private:
         // Non-zero only for a portal-split chart instance. Object.hlsl clips
         // against this world-space plane without modifying the mesh buffer.
         glm::vec4 traversalClipPlane{0.f};
+        // The portal endpoint whose coordinate chart owns world and the clip
+        // plane. Portal views remap only instances in their near-side chart.
+        const Engine::Components::SpatialManipulator* traversalChartPortal = nullptr;
         glm::vec2 spriteWorldSize{1.f};
         glm::vec4 spriteUvRect{0.f, 0.f, 1.f, 1.f};
         uint32_t skinPaletteOffset = 0;
@@ -344,6 +348,16 @@ private:
     // enough transient space for every logical spatial object; it is never
     // used by runtime portal rendering.
     static constexpr uint32_t kMaxSpatialVerticesPerObject = 1024;
+    // Recorded DX12/Vulkan draws consume upload-buffer contents later, when
+    // the command list executes. Every portal view therefore owns immutable
+    // aperture, depth-reset, and connected-scene slots for the whole frame.
+    static constexpr uint32_t kMaxPortalRenderViews = 64;
+    static constexpr uint32_t kPortalRenderSlotsPerView = kMaxObjects + 2;
+    static constexpr uint32_t kMaxSpatialDebugDraws =
+        kMaxObjects * kMaxSpatialVerticesPerObject / 24;
+    static constexpr uint32_t kObjectRenderSlotCount = kMaxObjects +
+        kMaxPortalRenderViews * kPortalRenderSlotsPerView +
+        kMaxSpatialDebugDraws;
     static constexpr uint32_t kMaxBonesPerObject = 256;
     static constexpr uint32_t kMaxLights =
         Engine::Model::MaxRealtimeLights;

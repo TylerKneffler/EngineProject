@@ -61,6 +61,16 @@ constexpr bool CanRepeatConnection(std::size_t priorVisits, int requestedLimit)
         ClampConnectionRepeatLimit(requestedLimit));
 }
 
+// After crossing an entrance, its connected endpoint is the exit plane behind
+// the virtual camera boundary. It must not immediately be treated as another
+// entrance; doing so lets aligned equal-size endpoints cover the entire parent
+// view instead of revealing the portal visible across the connected space.
+constexpr bool IsImmediateExitAperture(
+    const void* candidate, const void* previousExit)
+{
+    return previousExit != nullptr && candidate == previousExit;
+}
+
 constexpr int ClampViewBudget(int requested)
 {
     return std::clamp(requested, kMinimumViewBudget, kMaximumViewBudget);

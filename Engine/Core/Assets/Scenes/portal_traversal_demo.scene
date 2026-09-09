@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <Scene xmlns:components="urn:engine-components" version="1">
-  <settings showGrid="true" gridHalfSize="30" gridCellSize="1" gridOpacity="0.3" gridFadeDistance="120" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" renderMode="0" sceneViewUiOverlay="false" portalDebugVisuals="true" portalDebugWireframe="false" portalDebugTintRemoteView="false" portalDebugOverlayAlpha="0.8" portalRecursionDepth="2" portalConnectionRepeatLimit="2" portalMaxViewsPerFrame="24">
+  <settings showGrid="true" gridHalfSize="30" gridCellSize="1" gridOpacity="0.3" gridFadeDistance="120" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" renderMode="0" sceneViewUiOverlay="false" portalDebugVisuals="true" portalDebugWireframe="true" portalDebugTintRemoteView="false" portalDebugOverlayAlpha="0.65" portalRecursionDepth="2" portalConnectionRepeatLimit="2" portalMaxViewsPerFrame="24">
     <gridColor>
       <item>0.38</item>
       <item>0.38</item>
@@ -160,7 +160,7 @@
         </Transform.position>
         <Transform.rotation>
           <item>0</item>
-          <item>0</item>
+          <item>3.141593</item>
           <item>0</item>
         </Transform.rotation>
         <Transform.scale>
@@ -288,7 +288,7 @@
         </Transform.position>
         <Transform.rotation>
           <item>0</item>
-          <item>3.141593</item>
+          <item>0</item>
           <item>0</item>
         </Transform.rotation>
         <Transform.scale>
@@ -333,7 +333,7 @@
           <SpatialManipulator.portalNormal>
             <item>0</item>
             <item>0</item>
-            <item>-1</item>
+            <item>1</item>
           </SpatialManipulator.portalNormal>
           <SpatialManipulator.portalShapePoint0>
             <item>-0.5</item>
@@ -377,7 +377,7 @@
           </SpatialManipulator.portalShapePoint7>
           <SpatialManipulator.meshReference expectedType="Mesh" objectPath="" objectName="" componentType="" componentIndex="0" />
           <SpatialManipulator.traversalTriggerBodyReference expectedType="RigidBody" objectPath="" objectName="" componentType="" componentIndex="0" />
-          <SpatialManipulator.targetManipulator expectedType="" objectPath="" objectName="" componentType="" componentIndex="0" />
+          <SpatialManipulator.targetManipulator expectedType="SpatialManipulator" objectPath="" objectName="Source Portal" componentType="SpatialManipulator" componentIndex="0" />
         </components:SpatialManipulator>
       </components>
       <children />

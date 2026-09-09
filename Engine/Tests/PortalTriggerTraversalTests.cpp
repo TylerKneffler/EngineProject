@@ -52,6 +52,19 @@ bool VerticesAlmostEqual(const std::vector<Engine::Model::Vertex>& a,
     return true;
 }
 
+bool MatricesAlmostEqual(const glm::mat4& a, const glm::mat4& b, float epsilon)
+{
+    for (int column = 0; column < 4; ++column)
+    {
+        for (int row = 0; row < 4; ++row)
+        {
+            if (std::abs(a[column][row] - b[column][row]) > epsilon)
+                return false;
+        }
+    }
+    return true;
+}
+
 glm::mat3 RotationFrom(const glm::mat4& transform)
 {
     glm::mat3 rotation(1.f);
@@ -307,6 +320,9 @@ int main(int argc, char** argv)
     bool stationaryTeleported = false;
     bool sawCpuMeshMutation = false;
     bool sawGpuSplitRenderInstances = false;
+    bool sawDistinctTraversalCharts = false;
+    bool sawContinuousSplitBeforeTeleport = false;
+    bool sawContinuousSplitAfterTeleport = false;
     bool sawPortalMeshCollider = false;
     bool sawPortalLocalMeshCollider = false;
     bool sawRemoteMeshColliderContact = false;
@@ -466,19 +482,53 @@ int main(int argc, char** argv)
             traversalRenderInstances;
         sourceManipulator->AppendTraversalRenderInstances(
             traversalRenderInstances);
+        targetManipulator->AppendTraversalRenderInstances(
+            traversalRenderInstances);
         priorityManipulator->AppendTraversalRenderInstances(
+            traversalRenderInstances);
+        priorityTarget->AppendTraversalRenderInstances(
             traversalRenderInstances);
         bool foundLocalRenderInstance = false;
         bool foundRemoteRenderInstance = false;
+        const SpatialManipulator* localChart = nullptr;
+        const SpatialManipulator* remoteChart = nullptr;
+        const SpatialManipulator::TraversalRenderInstance* localInstance = nullptr;
+        const SpatialManipulator::TraversalRenderInstance* remoteInstance = nullptr;
         for (const auto& instance : traversalRenderInstances)
         {
             if (instance.object != traverser && instance.object != reverseTraverser)
                 continue;
             foundLocalRenderInstance = foundLocalRenderInstance || !instance.remote;
             foundRemoteRenderInstance = foundRemoteRenderInstance || instance.remote;
+            if (instance.object == traverser)
+            {
+                if (instance.remote)
+                {
+                    remoteChart = instance.chartPortal;
+                    remoteInstance = &instance;
+                }
+                else
+                {
+                    localChart = instance.chartPortal;
+                    localInstance = &instance;
+                }
+            }
         }
         sawGpuSplitRenderInstances = sawGpuSplitRenderInstances ||
             (foundLocalRenderInstance && foundRemoteRenderInstance);
+        sawDistinctTraversalCharts = sawDistinctTraversalCharts ||
+            (localChart && remoteChart && localChart != remoteChart);
+        if (localInstance && remoteInstance && localChart && remoteChart &&
+            MatricesAlmostEqual(remoteInstance->world,
+                localChart->GetRenderPortalWorldTransformTo(*remoteChart) *
+                    localInstance->world,
+                0.001f))
+        {
+            if (sawTeleport)
+                sawContinuousSplitAfterTeleport = true;
+            else
+                sawContinuousSplitBeforeTeleport = true;
+        }
         if (scene.GetPhysics().GetPortalMeshColliderCount(*traverserBody) > 0u ||
             scene.GetPhysics().GetPortalMeshColliderCount(*reverseBody) > 0u)
         {
@@ -540,6 +590,9 @@ int main(int argc, char** argv)
     // directions without per-frame CPU mesh uploads.
     assert(!sawCpuMeshMutation);
     assert(sawGpuSplitRenderInstances);
+    assert(sawDistinctTraversalCharts);
+    assert(sawContinuousSplitBeforeTeleport);
+    assert(sawContinuousSplitAfterTeleport);
     assert(sawPortalMeshCollider);
     assert(sawPortalLocalMeshCollider);
     assert(sawRemoteMeshColliderContact);

@@ -158,8 +158,8 @@ int main()
         glm::vec3(0.75f, 0.f, 0.f)));
     const glm::vec3 mapped = sourcePortal.MapWorldPointThroughPortalShape(
         glm::vec3(0.25f, 0.25f, 0.f), targetPortal);
-    // Identical authored anchor frames preserve their in-plane coordinates.
-    assert(glm::length(mapped - glm::vec3(0.25f, 0.25f, 0.f)) < 0.05f);
+    // A portal crossing is a half-turn in portal-local coordinates.
+    assert(glm::length(mapped - glm::vec3(-0.25f, 0.25f, 0.f)) < 0.05f);
 
     sourcePortal.portalShapePoint2 = glm::vec3(-0.25f, 0.f, 0.f);
     assert(!sourcePortal.IsValidPortalAperture());
@@ -260,22 +260,21 @@ int main()
     const glm::vec3 targetNormal(1.f, 0.f, 0.f);
     const glm::vec3 mappedNormal = glm::vec3(sourceToTarget *
         glm::vec4(sourceNormal, 0.f));
-    assert(glm::length(mappedNormal - targetNormal) < 0.0002f);
-    // The target anchor frame explicitly defines the exit side and viewing
-    // direction, so a viewer on the source normal side maps to that same side
-    // of the target and looks back through the target aperture.
+    assert(glm::length(mappedNormal + targetNormal) < 0.0002f);
+    // A virtual viewer on the source normal side maps behind the target and
+    // continues through its aperture into the connected space.
     const glm::vec3 sourceViewer = sourceAnchor + sourceNormal * 2.f;
     const glm::vec3 mappedViewer = glm::vec3(sourceToTarget *
         glm::vec4(sourceViewer, 1.f));
     const glm::vec3 mappedLookPoint = glm::vec3(sourceToTarget *
         glm::vec4(sourceViewer - sourceNormal, 1.f));
-    assert(glm::dot(mappedViewer - targetAnchor, targetNormal) > 1.9f);
-    assert(glm::dot(mappedLookPoint - mappedViewer, targetNormal) < -0.9f);
+    assert(glm::dot(mappedViewer - targetAnchor, targetNormal) < -1.9f);
+    assert(glm::dot(mappedLookPoint - mappedViewer, targetNormal) > 0.9f);
     const glm::vec3 mappedTangent = glm::vec3(sourceToTarget *
         glm::vec4(1.f, 0.f, 0.f, 0.f));
     const glm::vec3 mappedBitangent = glm::vec3(sourceToTarget *
         glm::vec4(0.f, 1.f, 0.f, 0.f));
-    assert(glm::length(mappedTangent - glm::vec3(0.f, 0.f, -1.f)) < 0.0002f);
+    assert(glm::length(mappedTangent - glm::vec3(0.f, 0.f, 1.f)) < 0.0002f);
     assert(glm::length(mappedBitangent - glm::vec3(0.f, 1.f, 0.f)) < 0.0002f);
     assert(glm::determinant(glm::mat3(sourceToTarget)) > 0.f);
 
@@ -382,12 +381,12 @@ int main()
     const glm::vec3 mappedRenderForward = glm::normalize(
         source->MapRenderWorldPointThroughPortalShape(renderViewer -
             glm::vec3(renderSourceFrame[2]), *target) - mappedRenderViewer);
-    // Render-frame mapping follows the same direct anchor-frame contract as
-    // physical traversal: no implicit 180-degree flip is introduced for
-    // virtual-camera rays.
+    // A viewer in front of the source maps behind the target plane and looks
+    // through its opening. Rendering and physical traversal use the same
+    // portal-local half-turn.
     assert(glm::dot(mappedRenderViewer - glm::vec3(renderTargetFrame[3]),
-        glm::vec3(renderTargetFrame[2])) > 1.9f);
-    assert(glm::dot(mappedRenderForward, glm::vec3(renderTargetFrame[2])) < -0.9f);
+        glm::vec3(renderTargetFrame[2])) < -1.9f);
+    assert(glm::dot(mappedRenderForward, glm::vec3(renderTargetFrame[2])) > 0.9f);
 
     // Rendering, camera, audio, physics, raycast, and gameplay now consume
     // one nonlinear spatial-query contract rather than separate affine paths.

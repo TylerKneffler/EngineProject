@@ -112,6 +112,11 @@ void VSMain(
             localTangent = normalize(mul((float3x3)skin, localTangent));
     }
     oPos = mul(objectData.mvp, localPosition);
+    // Portal apertures are stencil masks rather than visible surfaces. Keep a
+    // mask in front of the near plane rasterizable while the camera approaches
+    // it, otherwise the connected view abruptly disappears before crossing.
+    if ((draw.drawFlags & 0x40000000u) != 0u && oPos.w > 0.0)
+        oPos.z = max(oPos.z, 0.0);
     // Portal depth reset draws reuse the procedural aperture geometry but
     // place it at the far plane, clearing local-scene depth only inside the
     // aperture's stencil mask before the connected view is rendered.

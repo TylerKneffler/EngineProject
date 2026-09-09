@@ -199,6 +199,9 @@ struct DrawCBData
     uint32_t padding;
 };
 
+constexpr uint32_t kPortalApertureNearClampFlag = 0x40000000u;
+constexpr uint32_t kPortalDepthResetFlag = 0x80000000u;
+
 // Large, indexed records live in shader-readable buffers on every backend.
 struct ObjectGPUData
 {
@@ -285,15 +288,18 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     m_skyboxConstantBuffer = bufferFactory->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::ConstantBuffer,
         Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
-        256);
+        static_cast<uint64_t>(kMaxPortalRenderViews + 1u) * kCBStride);
     if (!m_skyboxConstantBuffer)
         throw std::runtime_error("Failed to create skybox constant buffer");
     m_skyboxCBMapped = m_skyboxConstantBuffer->Map();
     if (!m_skyboxCBMapped)
         throw std::runtime_error("Failed to map skybox constant buffer");
 
-    // Engine::Core::Object constant buffer (256 * kMaxObjects bytes for per-object data)
-    const uint64_t objectCBSize = static_cast<uint64_t>(kMaxObjects) * kCBStride;
+    // Ordinary draws occupy the first kMaxObjects entries. Portal views use
+    // stable per-view ranges so deferred command buffers never observe data
+    // overwritten by a later recursive pass.
+    const uint64_t objectCBSize =
+        static_cast<uint64_t>(kObjectRenderSlotCount) * kCBStride;
     m_objectConstantBuffer = bufferFactory->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::ConstantBuffer,
         Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
@@ -307,7 +313,7 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     m_objectDataBuffer = bufferFactory->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
         Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
-        static_cast<uint64_t>(kMaxObjects) * sizeof(ObjectGPUData),
+        static_cast<uint64_t>(kObjectRenderSlotCount) * sizeof(ObjectGPUData),
         nullptr, sizeof(ObjectGPUData));
     m_objectDataMapped = m_objectDataBuffer ? m_objectDataBuffer->Map() : nullptr;
     if (!m_objectDataMapped)
@@ -968,6 +974,8 @@ void Scene::PrepareRenderFrame()
             // same authored GPU buffer in a connected spatial chart.
             item.world = splitInstances->second.front().world;
             item.traversalClipPlane = splitInstances->second.front().clipPlane;
+            item.traversalChartPortal =
+                splitInstances->second.front().chartPortal;
         }
 
         // Map ordinary geometry at its vertices, rather than approximating a
@@ -1131,6 +1139,8 @@ void Scene::PrepareRenderFrame()
                 FrameRenderItem remoteItem = item;
                 remoteItem.world = splitInstances->second[index].world;
                 remoteItem.traversalClipPlane = splitInstances->second[index].clipPlane;
+                remoteItem.traversalChartPortal =
+                    splitInstances->second[index].chartPortal;
                 m_frameRenderItems.push_back(remoteItem);
             }
         }
@@ -1398,6 +1408,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         ObjectGPUData objectData{};
         uint32_t vertexStride = 0;
         uint32_t vertexCount = 0;
+        const Engine::Components::SpatialManipulator* traversalChartPortal = nullptr;
         bool preview = false;
     };
     std::vector<PreparedDraw> preparedDraws;
@@ -1584,6 +1595,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             forceUnlitMode ? 0u : m_frameLightCount, 0u, 0u };
         preparedDraw.drawData = drawData;
         preparedDraw.objectData = objectData;
+        preparedDraw.traversalChartPortal = renderItem->traversalChartPortal;
         memcpy(static_cast<uint8_t*>(m_objectCBMapped) + offset,
             &preparedDraw.drawData, sizeof(preparedDraw.drawData));
         memcpy(static_cast<uint8_t*>(m_objectDataMapped) +
@@ -1709,7 +1721,6 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         size_t drawOrder = 0;
         DrawCBData apertureDrawData{};
         ObjectGPUData apertureObjectData{};
-        UINT64 apertureConstantBufferOffset = 0;
         uint64_t apertureVertexOffset = 0;
         uint32_t apertureVertexCount = 0;
     };
@@ -1762,9 +1773,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         // before ordinary scene rendering continues and does not require a
         // corresponding mesh/material draw.
         constexpr uint32_t kPortalObjectSlot = 0u;
-        pass.apertureDrawData = { kPortalObjectSlot, 0u, 0u, 0u };
-        pass.apertureConstantBufferOffset =
-            static_cast<UINT64>(kPortalObjectSlot) * kCBStride;
+        // Keep the stencil aperture rasterizable when it lies between the
+        // camera and its near plane. The vertex shader clamps only this
+        // procedural mask; connected scene geometry retains normal clipping.
+        pass.apertureDrawData = {
+            kPortalObjectSlot, 0u, kPortalApertureNearClampFlag, 0u };
         pass.apertureObjectData.world = glm::mat4(1.f);
         pass.apertureObjectData.mvp = proj * view;
         pass.apertureObjectData.baseColor = glm::vec4(1.f);
@@ -1830,6 +1843,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     {
         uint64_t vertexOffset = 0;
         uint32_t vertexCount = 0;
+        uint32_t dataSlot = std::numeric_limits<uint32_t>::max();
         glm::vec4 color { 1.f };
     };
     std::vector<SpatialDebugPass> spatialDebugPasses;
@@ -1984,8 +1998,16 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     edgeThickness, edgeColor);
                 appendDebugSegment(targetPoints[pointIndex], targetPoints[next],
                     edgeThickness, edgeColor);
+                const glm::vec3 mappedSourcePoint = portalPass.source
+                    ->MapRenderWorldPointThroughPortalShape(
+                        sourcePoints[pointIndex], *portalPass.target);
+                // Point indices describe each aperture's authored winding;
+                // they are not necessarily the connected correspondence. The
+                // portal half-turn reverses local X, so index-to-index bars
+                // falsely appeared crossed even while the view transform used
+                // the opposite target corner. Draw the transform itself.
                 appendDebugSegment(sourcePoints[pointIndex],
-                    targetPoints[pointIndex], edgeThickness * 0.55f,
+                    mappedSourcePoint, edgeThickness * 0.55f,
                     connectionColor);
             }
             sourceCenter /= static_cast<float>(pointCount);
@@ -2076,47 +2098,6 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     if (portalVertexCursor > 0)
         m_portalApertureBuffer->FlushMappedWrites();
 
-    const auto uploadPortalApertureData = [&](const PortalStencilPass& pass,
-        const glm::mat4& apertureView)
-    {
-        ObjectGPUData apertureData = pass.apertureObjectData;
-        apertureData.mvp = proj * apertureView;
-        memcpy(static_cast<uint8_t*>(m_objectCBMapped) +
-            pass.apertureConstantBufferOffset,
-            &pass.apertureDrawData, sizeof(pass.apertureDrawData));
-        memcpy(static_cast<uint8_t*>(m_objectDataMapped) +
-            static_cast<size_t>(pass.apertureDrawData.objectIndex) *
-                sizeof(ObjectGPUData),
-            &apertureData, sizeof(apertureData));
-        m_objectDataBuffer->FlushMappedWrites();
-        context->SetStructuredBuffer(6, m_lightDataBuffer.get());
-        context->SetStructuredBuffer(7, m_objectDataBuffer.get());
-        context->SetStructuredBuffer(8, m_boneDataBuffer.get());
-    };
-    const auto drawConnectedSkybox = [&](const glm::mat4& connectedView)
-    {
-        // The connected-space background must be written before remote objects.
-        // Without this stencil-clipped draw, pixels with no remote geometry
-        // retain the already-rendered local scene and make the portal look like
-        // a translucent overlay instead of a spatial opening.
-        if (!skybox || !skybox->GetGraphicsTexture() ||
-            !m_portalSkyboxStencilReadPipeline)
-            return;
-        SkyboxCBData skyboxData{};
-        const glm::mat4 directionOnlyView =
-            glm::mat4(glm::mat3(connectedView));
-        skyboxData.invVP = glm::inverse(proj * directionOnlyView);
-        skyboxData.displayParams = {
-            m_editorMode2D ? 1.f : 0.f,
-            std::exp2(settings.hdriExposure),
-            glm::radians(settings.hdriRotation), 0.f };
-        memcpy(m_skyboxCBMapped, &skyboxData, sizeof(skyboxData));
-        context->SetPipeline(m_portalSkyboxStencilReadPipeline.get());
-        context->SetConstantBuffer(0, m_skyboxConstantBuffer.get(), 0);
-        context->SetTexture(0, skybox->GetGraphicsTexture());
-        context->DrawInstanced(3, 1, 0, 0);
-    };
-
     struct PortalViewJob
     {
         const PortalStencilPass* portal = nullptr;
@@ -2125,6 +2106,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         glm::vec3 mappedCameraPosition { 0.f };
         uint32_t depth = 0;
         uint32_t rootStencilBase = 1;
+        uint32_t dataSlotBase = 0;
+        uint64_t skyboxConstantBufferOffset = 0;
     };
     std::vector<PortalViewJob> portalViewJobs;
     const uint32_t portalDepthLimit = static_cast<uint32_t>(
@@ -2208,10 +2191,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         const Engine::Components::SpatialManipulator*>;
     std::vector<PortalEdge> portalPath;
     uint32_t nextRootStencilBase = 1u;
-    std::function<void(const glm::mat4&, uint32_t, uint32_t)>
+    std::function<void(const glm::mat4&, uint32_t, uint32_t,
+        const Engine::Components::SpatialManipulator*)>
         schedulePortalViews;
     schedulePortalViews = [&](const glm::mat4& apertureView, uint32_t depth,
-                              uint32_t inheritedRootStencilBase)
+                              uint32_t inheritedRootStencilBase,
+                              const Engine::Components::SpatialManipulator*
+                                  previousExit)
     {
         if (depth >= portalDepthLimit || portalViewJobs.size() >= portalViewBudget)
             return;
@@ -2224,6 +2210,15 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         {
             if (portalViewJobs.size() >= portalViewBudget)
                 break;
+            // The virtual camera has just emerged behind previousExit. That
+            // aperture is the boundary of the parent connected view, not a
+            // new entrance visible in the remote room. Recursing through it
+            // immediately makes equal, aligned portals overwrite their whole
+            // parent view. Other apertures—including the original source now
+            // visible across the room—remain valid recursive entrances.
+            if (Engine::Rendering::Portal::IsImmediateExitAperture(
+                pass.source, previousExit))
+                continue;
             if (pass.apertureVertexCount < 3 ||
                 !apertureVisibleInView(pass, apertureView))
                 continue;
@@ -2282,11 +2277,179 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
             portalPath.push_back(edge);
             schedulePortalViews(
-                job.mappedView, depth + 1u, rootStencilBase);
+                job.mappedView, depth + 1u, rootStencilBase, pass.target);
             portalPath.pop_back();
         }
     };
-    schedulePortalViews(view, 0u, 0u);
+    schedulePortalViews(view, 0u, 0u, nullptr);
+
+    const auto mapTraversalDrawIntoPortalTarget = [&]
+        (ObjectGPUData& data, const PreparedDraw& draw,
+         const PortalStencilPass& portalPass)
+    {
+        // A virtual camera already occupies the connected chart. Normal
+        // objects therefore keep their world matrix. A split traverser has
+        // two explicitly-owned charts, though: remap only its near-side piece
+        // into the connected chart, including the clipping plane. Without
+        // this, one half is evaluated in the wrong coordinates and fades out
+        // instead of joining its partner through the aperture.
+        if (draw.traversalChartPortal != portalPass.source)
+            return;
+        const glm::mat4 sourceToTarget = portalPass.source
+            ->GetRenderPortalWorldTransformTo(*portalPass.target);
+        data.world = sourceToTarget * data.world;
+        if (glm::dot(data.traversalClipPlane, data.traversalClipPlane) > 0.f)
+        {
+            data.traversalClipPlane = glm::transpose(glm::inverse(
+                sourceToTarget)) * data.traversalClipPlane;
+        }
+    };
+
+    const auto connectedSpaceClipPlane = [](
+        const PortalStencilPass& portalPass,
+        const glm::vec3& mappedCameraPosition)
+    {
+        const glm::mat4 targetFrame =
+            portalPass.target->GetRenderPortalWorldFrame();
+        const glm::vec3 clipPoint(targetFrame[3]);
+        glm::vec3 clipNormal = glm::normalize(glm::vec3(targetFrame[2]));
+        // Keep the half-space beyond the exit aperture. The earlier version
+        // pointed this normal toward the virtual camera, retaining the space
+        // behind the portal and clipping the floor/scene the opening was
+        // supposed to reveal.
+        if (glm::dot(mappedCameraPosition - clipPoint, clipNormal) > 0.f)
+            clipNormal = -clipNormal;
+        return glm::vec4(clipNormal,
+            -glm::dot(clipNormal, clipPoint) - 0.0005f);
+    };
+
+    // Populate every recorded portal draw before issuing any of them. DX11
+    // copies these values as draws are submitted, while DX12/Vulkan retain GPU
+    // addresses until command execution; unique ranges satisfy both models.
+    for (size_t jobIndex = 0; jobIndex < portalViewJobs.size(); ++jobIndex)
+    {
+        PortalViewJob& portalJob = portalViewJobs[jobIndex];
+        const PortalStencilPass& portalPass = *portalJob.portal;
+        portalJob.dataSlotBase = kMaxObjects +
+            static_cast<uint32_t>(jobIndex) * kPortalRenderSlotsPerView;
+        portalJob.skyboxConstantBufferOffset =
+            static_cast<uint64_t>(jobIndex + 1u) * kCBStride;
+
+        ObjectGPUData apertureData = portalPass.apertureObjectData;
+        apertureData.mvp = proj * portalJob.apertureView;
+        const uint32_t maskSlot = portalJob.dataSlotBase;
+        const uint32_t resetSlot = maskSlot + 1u;
+        memcpy(static_cast<uint8_t*>(m_objectDataMapped) +
+            static_cast<size_t>(maskSlot) * sizeof(ObjectGPUData),
+            &apertureData, sizeof(apertureData));
+        memcpy(static_cast<uint8_t*>(m_objectDataMapped) +
+            static_cast<size_t>(resetSlot) * sizeof(ObjectGPUData),
+            &apertureData, sizeof(apertureData));
+
+        DrawCBData maskDraw = portalPass.apertureDrawData;
+        maskDraw.objectIndex = maskSlot;
+        DrawCBData resetDraw = portalPass.apertureDrawData;
+        resetDraw.objectIndex = resetSlot;
+        resetDraw.flags |= kPortalDepthResetFlag;
+        memcpy(static_cast<uint8_t*>(m_objectCBMapped) +
+            static_cast<size_t>(maskSlot) * kCBStride,
+            &maskDraw, sizeof(maskDraw));
+        memcpy(static_cast<uint8_t*>(m_objectCBMapped) +
+            static_cast<size_t>(resetSlot) * kCBStride,
+            &resetDraw, sizeof(resetDraw));
+
+        const glm::vec4 portalClipPlane = connectedSpaceClipPlane(
+            portalPass, portalJob.mappedCameraPosition);
+        for (const PreparedDraw& draw : preparedDraws)
+        {
+            ObjectGPUData mappedData = draw.objectData;
+            mapTraversalDrawIntoPortalTarget(mappedData, draw, portalPass);
+            mappedData.mvp = proj * portalJob.mappedView * mappedData.world;
+            mappedData.portalClipPlane = portalClipPlane;
+            mappedData.viewPositionAlphaCutoff.x =
+                portalJob.mappedCameraPosition.x;
+            mappedData.viewPositionAlphaCutoff.y =
+                portalJob.mappedCameraPosition.y;
+            mappedData.viewPositionAlphaCutoff.z =
+                portalJob.mappedCameraPosition.z;
+            if (includeEditorVisuals && settings.portalDebugVisuals &&
+                settings.portalDebugTintRemoteView)
+            {
+                mappedData.baseColor = glm::vec4(
+                    mappedData.baseColor.r * 0.35f,
+                    mappedData.baseColor.g * 0.70f,
+                    mappedData.baseColor.b * 1.15f,
+                    mappedData.baseColor.a);
+                mappedData.emissiveOcclusion.x += 0.05f;
+                mappedData.emissiveOcclusion.y += 0.15f;
+                mappedData.emissiveOcclusion.z += 0.2f;
+            }
+
+            const uint32_t drawSlot = portalJob.dataSlotBase + 2u +
+                draw.drawData.objectIndex;
+            DrawCBData mappedDraw = draw.drawData;
+            mappedDraw.objectIndex = drawSlot;
+            memcpy(static_cast<uint8_t*>(m_objectCBMapped) +
+                static_cast<size_t>(drawSlot) * kCBStride,
+                &mappedDraw, sizeof(mappedDraw));
+            memcpy(static_cast<uint8_t*>(m_objectDataMapped) +
+                static_cast<size_t>(drawSlot) * sizeof(ObjectGPUData),
+                &mappedData, sizeof(mappedData));
+        }
+
+        SkyboxCBData skyboxData{};
+        const glm::mat4 directionOnlyView =
+            glm::mat4(glm::mat3(portalJob.mappedView));
+        skyboxData.invVP = glm::inverse(proj * directionOnlyView);
+        skyboxData.displayParams = {
+            m_editorMode2D ? 1.f : 0.f,
+            std::exp2(settings.hdriExposure),
+            glm::radians(settings.hdriRotation), 0.f };
+        memcpy(static_cast<uint8_t*>(m_skyboxCBMapped) +
+            portalJob.skyboxConstantBufferOffset,
+            &skyboxData, sizeof(skyboxData));
+    }
+    const uint32_t debugSlotBase = kMaxObjects +
+        kMaxPortalRenderViews * kPortalRenderSlotsPerView;
+    const float debugAlpha = std::clamp(
+        settings.portalDebugOverlayAlpha, 0.f, 1.f);
+    for (size_t debugIndex = 0; debugIndex < spatialDebugPasses.size() &&
+        debugIndex < kMaxSpatialDebugDraws; ++debugIndex)
+    {
+        SpatialDebugPass& pass = spatialDebugPasses[debugIndex];
+        pass.dataSlot = debugSlotBase + static_cast<uint32_t>(debugIndex);
+        const DrawCBData debugDraw { pass.dataSlot, 0u, 0u, 0u };
+        ObjectGPUData debugData{};
+        debugData.world = glm::mat4(1.f);
+        debugData.mvp = proj * view;
+        debugData.baseColor = glm::vec4(glm::vec3(pass.color), debugAlpha);
+        debugData.ambientUnlit = { 0.f, 0.f, 0.f, 1.f };
+        debugData.emissiveOcclusion = glm::vec4(
+            glm::vec3(pass.color) * 0.2f, 1.f);
+        debugData.materialParams = { 0.f, 1.f, 1.f, 0.f };
+        debugData.viewPositionAlphaCutoff =
+            glm::vec4(cameraPosition, 0.001f);
+        memcpy(static_cast<uint8_t*>(m_objectCBMapped) +
+            static_cast<size_t>(pass.dataSlot) * kCBStride,
+            &debugDraw, sizeof(debugDraw));
+        memcpy(static_cast<uint8_t*>(m_objectDataMapped) +
+            static_cast<size_t>(pass.dataSlot) * sizeof(ObjectGPUData),
+            &debugData, sizeof(debugData));
+    }
+    if (!portalViewJobs.empty() || !spatialDebugPasses.empty())
+        m_objectDataBuffer->FlushMappedWrites();
+
+    const auto drawConnectedSkybox = [&](const PortalViewJob& portalJob)
+    {
+        if (!skybox || !skybox->GetGraphicsTexture() ||
+            !m_portalSkyboxStencilReadPipeline)
+            return;
+        context->SetPipeline(m_portalSkyboxStencilReadPipeline.get());
+        context->SetConstantBuffer(0, m_skyboxConstantBuffer.get(),
+            portalJob.skyboxConstantBufferOffset);
+        context->SetTexture(0, skybox->GetGraphicsTexture());
+        context->DrawInstanced(3, 1, 0, 0);
+    };
 
 // Retained only as a diagnostic fallback for older drivers. Normal builds use
 // the unified graphics-pipeline path below for DX11, DX12, and Vulkan.
@@ -2389,12 +2552,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                                 portalJob.depth, portalJob.rootStencilBase);
                         const UINT portalStencilRef = stencilStep.sceneReadReference;
 
-                        uploadPortalApertureData(portalPass,
-                            portalJob.apertureView);
                         context->SetPipeline(m_objectDoubleSidedPipeline.get());
                         context->SetConstantBuffer(
                             0, m_objectConstantBuffer.get(),
-                            portalPass.apertureConstantBufferOffset);
+                            static_cast<uint64_t>(portalJob.dataSlotBase) *
+                                kCBStride);
                         context->SetVertexBuffer(
                             0, m_portalApertureBuffer.get(),
                             sizeof(Engine::Model::Vertex),
@@ -2410,52 +2572,6 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                         context->DrawInstanced(
                             portalPass.apertureVertexCount, 1, 0, 0);
 
-                        for (PreparedDraw& draw : preparedDraws)
-                        {
-                            if (!draw.object || !draw.vertexBuffer)
-                                continue;
-                            if (isSpatialManipulatorCarrierDraw(draw))
-                                continue;
-
-                            ObjectGPUData mappedData = draw.objectData;
-                            mappedData.mvp = proj * portalJob.mappedView *
-                                mappedData.world;
-                            // A portal maps an ordinary world rather than a
-                            // pre-partitioned target layer. The aperture
-                            // stencil is therefore its visibility boundary;
-                            // split traversers keep their own chart boundary
-                            // in traversalClipPlane below.
-                            mappedData.portalClipPlane = glm::vec4(0.f);
-                            mappedData.viewPositionAlphaCutoff.x =
-                                portalJob.mappedCameraPosition.x;
-                            mappedData.viewPositionAlphaCutoff.y =
-                                portalJob.mappedCameraPosition.y;
-                            mappedData.viewPositionAlphaCutoff.z =
-                                portalJob.mappedCameraPosition.z;
-                            if (includeEditorVisuals &&
-                                settings.portalDebugVisuals &&
-                                settings.portalDebugTintRemoteView)
-                            {
-                                mappedData.baseColor = glm::vec4(
-                                    mappedData.baseColor.r * 0.35f,
-                                    mappedData.baseColor.g * 0.70f,
-                                    mappedData.baseColor.b * 1.15f,
-                                    mappedData.baseColor.a);
-                                mappedData.emissiveOcclusion.x += 0.05f;
-                                mappedData.emissiveOcclusion.y += 0.15f;
-                                mappedData.emissiveOcclusion.z += 0.2f;
-                            }
-
-                            memcpy(static_cast<uint8_t*>(m_objectCBMapped) +
-                                draw.constantBufferOffset,
-                                &draw.drawData, sizeof(draw.drawData));
-                            memcpy(static_cast<uint8_t*>(m_objectDataMapped) +
-                                static_cast<size_t>(draw.drawData.objectIndex) *
-                                sizeof(ObjectGPUData),
-                                &mappedData, sizeof(mappedData));
-                        }
-
-                        m_objectDataBuffer->FlushMappedWrites();
                         context->SetStructuredBuffer(6, m_lightDataBuffer.get());
                         context->SetStructuredBuffer(7, m_objectDataBuffer.get());
                         context->SetStructuredBuffer(8, m_boneDataBuffer.get());
@@ -2468,9 +2584,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                                 continue;
 
                             context->SetPipeline(draw.pipeline);
+                            const uint32_t drawSlot = portalJob.dataSlotBase +
+                                2u + draw.drawData.objectIndex;
                             context->SetConstantBuffer(
                                 0, m_objectConstantBuffer.get(),
-                                draw.constantBufferOffset);
+                                static_cast<uint64_t>(drawSlot) * kCBStride);
                             for (uint32_t textureSlot = 0;
                                 textureSlot < draw.textures.size(); ++textureSlot)
                             {
@@ -2570,14 +2688,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     portalJob.rootStencilBase);
             context->SetStencilReference(stencilStep.writeReference);
 
-            uploadPortalApertureData(portalPass, portalJob.apertureView);
             context->SetPipeline(stencilStep.writeOperation ==
                 Engine::Rendering::Portal::ApertureWriteOperation::Replace
                 ? m_objectPortalStencilWritePipeline.get()
                 : m_objectPortalStencilIncrementPipeline.get());
             context->SetConstantBuffer(
                 0, m_objectConstantBuffer.get(),
-                portalPass.apertureConstantBufferOffset);
+                static_cast<uint64_t>(portalJob.dataSlotBase) * kCBStride);
             context->SetVertexBuffer(
                 0, m_portalApertureBuffer.get(),
                 sizeof(Engine::Model::Vertex),
@@ -2585,64 +2702,15 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             context->DrawInstanced(portalPass.apertureVertexCount, 1, 0, 0);
             context->SetStencilReference(stencilStep.sceneReadReference);
 
-            DrawCBData depthResetDrawData = portalPass.apertureDrawData;
-            depthResetDrawData.flags |= 0x80000000u;
-            memcpy(static_cast<uint8_t*>(m_objectCBMapped) +
-                portalPass.apertureConstantBufferOffset,
-                &depthResetDrawData, sizeof(depthResetDrawData));
             context->SetPipeline(m_objectPortalDepthResetPipeline.get());
             context->SetConstantBuffer(
                 0, m_objectConstantBuffer.get(),
-                portalPass.apertureConstantBufferOffset);
+                static_cast<uint64_t>(portalJob.dataSlotBase + 1u) *
+                    kCBStride);
             context->DrawInstanced(portalPass.apertureVertexCount, 1, 0, 0);
 
-            drawConnectedSkybox(portalJob.mappedView);
+            drawConnectedSkybox(portalJob);
 
-            for (PreparedDraw& draw : preparedDraws)
-            {
-                if (!draw.object || !draw.vertexBuffer)
-                    continue;
-                if (isSpatialManipulatorCarrierDraw(draw))
-                    continue;
-
-                ObjectGPUData mappedData = draw.objectData;
-                mappedData.mvp = proj * portalJob.mappedView * mappedData.world;
-                // A portal maps an ordinary world rather than a pre-partitioned
-                // target layer. The stencil is the aperture boundary; applying
-                // a global target-plane cull here can erase every connected
-                // object. Traversal chart clipping remains independent in
-                // traversalClipPlane.
-                mappedData.portalClipPlane = glm::vec4(0.f);
-                mappedData.viewPositionAlphaCutoff.x =
-                    portalJob.mappedCameraPosition.x;
-                mappedData.viewPositionAlphaCutoff.y =
-                    portalJob.mappedCameraPosition.y;
-                mappedData.viewPositionAlphaCutoff.z =
-                    portalJob.mappedCameraPosition.z;
-                if (includeEditorVisuals &&
-                    settings.portalDebugVisuals &&
-                    settings.portalDebugTintRemoteView)
-                {
-                    mappedData.baseColor = glm::vec4(
-                        mappedData.baseColor.r * 0.35f,
-                        mappedData.baseColor.g * 0.70f,
-                        mappedData.baseColor.b * 1.15f,
-                        mappedData.baseColor.a);
-                    mappedData.emissiveOcclusion.x += 0.05f;
-                    mappedData.emissiveOcclusion.y += 0.15f;
-                    mappedData.emissiveOcclusion.z += 0.2f;
-                }
-
-                memcpy(static_cast<uint8_t*>(m_objectCBMapped) +
-                    draw.constantBufferOffset,
-                    &draw.drawData, sizeof(draw.drawData));
-                memcpy(static_cast<uint8_t*>(m_objectDataMapped) +
-                    static_cast<size_t>(draw.drawData.objectIndex) *
-                    sizeof(ObjectGPUData),
-                    &mappedData, sizeof(mappedData));
-            }
-
-            m_objectDataBuffer->FlushMappedWrites();
             context->SetStructuredBuffer(6, m_lightDataBuffer.get());
             context->SetStructuredBuffer(7, m_objectDataBuffer.get());
             context->SetStructuredBuffer(8, m_boneDataBuffer.get());
@@ -2655,9 +2723,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     continue;
 
                 context->SetPipeline(resolveStencilReadPipeline(draw.pipeline));
+                const uint32_t drawSlot = portalJob.dataSlotBase + 2u +
+                    draw.drawData.objectIndex;
                 context->SetConstantBuffer(
                     0, m_objectConstantBuffer.get(),
-                    draw.constantBufferOffset);
+                    static_cast<uint64_t>(drawSlot) * kCBStride);
                 for (uint32_t textureSlot = 0;
                     textureSlot < draw.textures.size(); ++textureSlot)
                 {
@@ -2700,8 +2770,6 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
     if (includeEditorVisuals && settings.portalDebugVisuals)
     {
-        const float debugAlpha = std::clamp(
-            settings.portalDebugOverlayAlpha, 0.f, 1.f);
         Engine::Graphics::IPipelineState* portalDebugPipeline =
             settings.portalDebugWireframe
                 ? m_objectSpatialDebugWirePipeline.get()
@@ -2715,27 +2783,15 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             // contains only the requested point and line diagnostics.
             for (const SpatialDebugPass& pass : spatialDebugPasses)
             {
-                if (pass.vertexCount < 3)
+                if (pass.vertexCount < 3 || pass.dataSlot ==
+                    std::numeric_limits<uint32_t>::max())
                     continue;
-                DrawCBData debugDraw { 0u, 0u, 0u, 0u };
-                ObjectGPUData debugData{};
-                debugData.world = glm::mat4(1.f);
-                debugData.mvp = proj * view;
-                debugData.baseColor = glm::vec4(glm::vec3(pass.color), debugAlpha);
-                debugData.ambientUnlit = { 0.f, 0.f, 0.f, 1.f };
-                debugData.emissiveOcclusion = glm::vec4(
-                    glm::vec3(pass.color) * 0.2f, 1.f);
-                debugData.materialParams = { 0.f, 1.f, 1.f, 0.f };
-                debugData.viewPositionAlphaCutoff =
-                    glm::vec4(cameraPosition, 0.001f);
-                memcpy(m_objectCBMapped, &debugDraw, sizeof(debugDraw));
-                memcpy(m_objectDataMapped, &debugData, sizeof(debugData));
-                m_objectDataBuffer->FlushMappedWrites();
                 context->SetStructuredBuffer(6, m_lightDataBuffer.get());
                 context->SetStructuredBuffer(7, m_objectDataBuffer.get());
                 context->SetStructuredBuffer(8, m_boneDataBuffer.get());
                 context->SetPipeline(portalDebugPipeline);
-                context->SetConstantBuffer(0, m_objectConstantBuffer.get(), 0);
+                context->SetConstantBuffer(0, m_objectConstantBuffer.get(),
+                    static_cast<uint64_t>(pass.dataSlot) * kCBStride);
                 context->SetVertexBuffer(0, m_portalApertureBuffer.get(),
                     sizeof(Engine::Model::Vertex), pass.vertexOffset);
                 context->DrawInstanced(pass.vertexCount, 1, 0, 0);

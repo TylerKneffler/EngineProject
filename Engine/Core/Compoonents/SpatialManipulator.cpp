@@ -520,14 +520,14 @@ glm::mat4 SpatialManipulator::GetPortalWorldTransformTo(
     const glm::mat4 sourceFrame = GetPortalWorldFrame();
     const glm::mat4 targetFrame = target.GetPortalWorldFrame();
 
-    // Portal anchor frames contain the authored exit orientation.  Do not add
-    // an implicit 180-degree turn here: doing so makes an otherwise aligned
-    // target look away from its connected space and forces users to rotate the
-    // source portal just to make the aperture render.  A connection is the
-    // direct relative transform from its source frame to its target frame.
-    // Aperture shape controls only the opening; scale/shear belong to explicit
-    // spatial-volume or matrix-overlay mappings.
-    return targetFrame * glm::inverse(sourceFrame);
+    // Crossing a portal reverses portal-local depth and horizontal handedness.
+    // Without this half-turn, the virtual camera lands on the wrong side of
+    // the target and looks away from the connected scene, so reverse views and
+    // recursive source/target reflections disappear. Scale/shear stay excluded.
+    glm::mat4 crossing(1.f);
+    crossing[0][0] = -1.f;
+    crossing[2][2] = -1.f;
+    return targetFrame * crossing * glm::inverse(sourceFrame);
 }
 
 glm::mat4 SpatialManipulator::GetRenderPortalWorldTransformTo(
@@ -535,8 +535,10 @@ glm::mat4 SpatialManipulator::GetRenderPortalWorldTransformTo(
 {
     const glm::mat4 sourceFrame = GetRenderPortalWorldFrame();
     const glm::mat4 targetFrame = target.GetRenderPortalWorldFrame();
-    // Keep virtual-camera rays in the same chart as physical traversal.
-    return targetFrame * glm::inverse(sourceFrame);
+    glm::mat4 crossing(1.f);
+    crossing[0][0] = -1.f;
+    crossing[2][2] = -1.f;
+    return targetFrame * crossing * glm::inverse(sourceFrame);
 }
 
 glm::vec3 SpatialManipulator::MapWorldPointThroughPortalShape(const glm::vec3& point,
@@ -650,6 +652,8 @@ void SpatialManipulator::ResetTraversalMeshDeformation(RigidBody* traversingBody
     it->second.localMeshVertices.clear();
     it->second.remoteMeshVertices.clear();
     it->second.localCollisionVertices.clear();
+    it->second.localChartPortal = nullptr;
+    it->second.remoteChartPortal = nullptr;
 }
 
 void SpatialManipulator::ResetTraversalMeshDeformation()
@@ -680,10 +684,11 @@ void SpatialManipulator::AppendTraversalRenderInstances(
                 localWorld;
         }
         output.push_back({ body->Owner, const_cast<Mesh*>(state.lastMesh),
-            localWorld, state.localRenderClipPlane, false });
+            localWorld, state.localRenderClipPlane, state.localChartPortal,
+            false });
         output.push_back({ body->Owner, const_cast<Mesh*>(state.lastMesh),
             state.remoteRenderWorldTransform * localWorld,
-            state.remoteRenderClipPlane, true });
+            state.remoteRenderClipPlane, state.remoteChartPortal, true });
     }
 }
 
@@ -717,6 +722,8 @@ void SpatialManipulator::ApplyTraversalMeshDeformation(SpatialManipulator* targe
     }
 
     TraversalState& state = m_traversalStates[traversingBody];
+    state.localChartPortal = this;
+    state.remoteChartPortal = target;
     if (state.lastMesh != mesh)
     {
         if (Owner && Owner->GetScene())
@@ -1169,6 +1176,10 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target,
                     departingVisual.localRenderClipPlane;
                 targetState.remoteRenderClipPlane =
                     departingVisual.remoteRenderClipPlane;
+                targetState.localChartPortal =
+                    departingVisual.localChartPortal;
+                targetState.remoteChartPortal =
+                    departingVisual.remoteChartPortal;
                 targetState.meshDeformed = true;
                 targetState.hasCollisionCut = false;
                 targetState.postTeleportVisual = true;

@@ -111,6 +111,11 @@ int main()
     assert(CanRepeatConnection(0u, 2));
     assert(CanRepeatConnection(1u, 2));
     assert(!CanRepeatConnection(2u, 2));
+    int entranceEndpoint = 0;
+    int exitEndpoint = 0;
+    assert(!IsImmediateExitAperture(&entranceEndpoint, nullptr));
+    assert(!IsImmediateExitAperture(&entranceEndpoint, &exitEndpoint));
+    assert(IsImmediateExitAperture(&exitEndpoint, &exitEndpoint));
     assert(ClampViewBudget(0) == kMinimumViewBudget);
     assert(ClampViewBudget(1000) == kMaximumViewBudget);
 
