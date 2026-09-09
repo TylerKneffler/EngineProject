@@ -1,9 +1,9 @@
 #include "Scripts/PortalSplitAfterDelay.h"
 
-#include "Core/Compoonents/Mesh.h"
+#include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Physics/Collider.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
-#include "Core/Compoonents/SpatialManipulator.h"
+#include "Core/Compoonents/Physics/SpatialManipulator.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"

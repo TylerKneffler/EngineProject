@@ -1,10 +1,10 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Object.h"
-#include "Core/Compoonents/SpatialManipulator.h"
+#include "Core/Compoonents/Physics/SpatialManipulator.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Physics/Collider.h"
 #include "Core/Physics/Physics.h"
-#include "Core/Compoonents/Mesh.h"
+#include "Core/Compoonents/Obj/Mesh.h"
 #include <cassert>
 #include <cmath>
 #include <cstdio>

@@ -1,7 +1,7 @@
 #include "pch.h"
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "VulkanPipelineStateBuilder.h"
-#include "Core/Compoonents/Mesh.h"
+#include "Core/Compoonents/Obj/Mesh.h"
 #include <cstring>
 
 

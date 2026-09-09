@@ -611,6 +611,19 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_ROOT}/Engine/Tests/VerticalPortalLoopTests.cpp")
+    enable_testing()
+    add_executable(VerticalPortalLoopTests EXCLUDE_FROM_ALL
+        "${ENGINE_ROOT}/Engine/Tests/VerticalPortalLoopTests.cpp")
+    target_link_libraries(VerticalPortalLoopTests PRIVATE Engine)
+    target_include_directories(VerticalPortalLoopTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME VerticalPortalLoopStress COMMAND VerticalPortalLoopTests)
+    set_tests_properties(VerticalPortalLoopStress PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_ROOT}/Engine/Tests/RotateLifecycleTests.cpp")
     enable_testing()
     add_executable(EngineLifecycleTests

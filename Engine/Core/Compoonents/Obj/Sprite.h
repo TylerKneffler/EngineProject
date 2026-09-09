@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Core/Component.h"
-#include "Core/Compoonents/Mesh.h"
+#include "Core/Compoonents/Obj/Mesh.h"
 #include <memory>
 
 namespace Engine::Components

@@ -1,9 +1,9 @@
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/Camera.h"
-#include "Core/Compoonents/Mesh.h"
-#include "Core/Compoonents/Material.h"
-#include "Core/Compoonents/SpatialManipulator.h"
-#include "Core/Compoonents/Sprite.h"
+#include "Core/Compoonents/Camera/Camera.h"
+#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Materials/Material.h"
+#include "Core/Compoonents/Physics/SpatialManipulator.h"
+#include "Core/Compoonents/Obj/Sprite.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
@@ -2124,21 +2124,12 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             pass.source->GetRenderWorldPortalShapePoints();
         if (points.size() < 3)
             return false;
-        glm::vec2 minimum(std::numeric_limits<float>::max());
-        glm::vec2 maximum(std::numeric_limits<float>::lowest());
-        bool hasPointInFront = false;
+        std::vector<glm::vec4> clipPolygon;
+        clipPolygon.reserve(points.size());
         for (const glm::vec3& point : points)
-        {
-            const glm::vec4 clip = proj * candidateView * glm::vec4(point, 1.f);
-            if (clip.w <= 1e-5f)
-                continue;
-            hasPointInFront = true;
-            const glm::vec2 ndc = glm::vec2(clip) / clip.w;
-            minimum = glm::min(minimum, ndc);
-            maximum = glm::max(maximum, ndc);
-        }
-        return hasPointInFront && maximum.x >= -1.f && minimum.x <= 1.f &&
-            maximum.y >= -1.f && minimum.y <= 1.f;
+            clipPolygon.push_back(proj * candidateView * glm::vec4(point, 1.f));
+        return Engine::Rendering::Portal::ClipApertureToViewFrustum(
+            std::move(clipPolygon)).size() >= 3u;
     };
 
     const auto apertureScissorInView = [&](const PortalStencilPass& pass,
@@ -2155,14 +2146,19 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         if (points.size() < 3u)
             return std::nullopt;
 
+        std::vector<glm::vec4> clipPolygon;
+        clipPolygon.reserve(points.size());
+        for (const glm::vec3& point : points)
+            clipPolygon.push_back(proj * candidateView * glm::vec4(point, 1.f));
+        clipPolygon = Engine::Rendering::Portal::ClipApertureToViewFrustum(
+            std::move(clipPolygon));
+        if (clipPolygon.size() < 3u)
+            return Engine::Graphics::IGraphicsContext::ScissorRect { 0, 0, 0, 0 };
+
         glm::vec2 minimum(std::numeric_limits<float>::max());
         glm::vec2 maximum(std::numeric_limits<float>::lowest());
-        for (const glm::vec3& point : points)
+        for (const glm::vec4& clip : clipPolygon)
         {
-            const glm::vec4 clip = proj * candidateView *
-                glm::vec4(point, 1.f);
-            if (clip.w <= 1e-5f)
-                return std::nullopt;
             const glm::vec2 ndc = glm::vec2(clip) / clip.w;
             minimum = glm::min(minimum, ndc);
             maximum = glm::max(maximum, ndc);

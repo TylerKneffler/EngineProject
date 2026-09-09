@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <utility>
+#include <vector>
+#include <glm/vec4.hpp>
 
 namespace Engine::Rendering::Portal
 {
@@ -81,6 +84,59 @@ constexpr uint32_t TriangulatedApertureVertexCount(std::size_t pointCount)
     return pointCount < 3
         ? 0u
         : static_cast<uint32_t>((pointCount - 2u) * 3u);
+}
+
+// Clip an ordered convex aperture polygon in homogeneous clip space. Testing
+// only vertices whose w is positive makes a portal disappear discontinuously
+// when the eye/near plane crosses it: the frustum can still intersect edges or
+// lie inside a large aperture even when none of its original corners is in
+// front. Clipping first gives visibility and scissor calculations the actual
+// on-screen polygon. Camera projections in the engine use the ZO convention.
+inline std::vector<glm::vec4> ClipApertureToViewFrustum(
+    std::vector<glm::vec4> polygon)
+{
+    const auto clipAgainst = [](std::vector<glm::vec4> input,
+                                const auto& signedDistance)
+    {
+        std::vector<glm::vec4> output;
+        if (input.empty())
+            return output;
+        output.reserve(input.size() + 2u);
+        glm::vec4 previous = input.back();
+        float previousDistance = signedDistance(previous);
+        bool previousInside = previousDistance >= 0.f;
+        for (const glm::vec4& current : input)
+        {
+            const float currentDistance = signedDistance(current);
+            const bool currentInside = currentDistance >= 0.f;
+            if (currentInside != previousInside)
+            {
+                const float denominator = previousDistance - currentDistance;
+                const float t = denominator != 0.f
+                    ? previousDistance / denominator : 0.f;
+                output.push_back(previous + t * (current - previous));
+            }
+            if (currentInside)
+                output.push_back(current);
+            previous = current;
+            previousDistance = currentDistance;
+            previousInside = currentInside;
+        }
+        return output;
+    };
+
+    polygon = clipAgainst(std::move(polygon),
+        [](const glm::vec4& p) { return p.x + p.w; });
+    polygon = clipAgainst(std::move(polygon),
+        [](const glm::vec4& p) { return p.w - p.x; });
+    polygon = clipAgainst(std::move(polygon),
+        [](const glm::vec4& p) { return p.y + p.w; });
+    polygon = clipAgainst(std::move(polygon),
+        [](const glm::vec4& p) { return p.w - p.y; });
+    polygon = clipAgainst(std::move(polygon),
+        [](const glm::vec4& p) { return p.z; });
+    return clipAgainst(std::move(polygon),
+        [](const glm::vec4& p) { return p.w - p.z; });
 }
 
 // Each top-level portal receives a disjoint stencil range. At the root, the

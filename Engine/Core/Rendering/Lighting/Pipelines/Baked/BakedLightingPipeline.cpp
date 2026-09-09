@@ -1,9 +1,9 @@
 #include "BakedLightingPipeline.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/Light.h"
-#include "Core/Compoonents/Material.h"
+#include "Core/Compoonents/Lighting/Light.h"
+#include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Materials/Texture.h"
-#include "Core/Compoonents/Mesh.h"
+#include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
 #include <algorithm>
 #include <array>

@@ -1,7 +1,7 @@
-#include "Core/Compoonents/AudioSource.h"
+#include "Core/Compoonents/Audio/AudioSource.h"
 
 #include "Core/Audio/AudioMixer.h"
-#include "Core/Compoonents/Camera.h"
+#include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Editor/UI/IEditorUi.h"

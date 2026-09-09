@@ -1,0 +1,110 @@
+<?xml version="1.0"?>
+<Scene xmlns:components="urn:engine-components" version="1">
+  <settings showGrid="true" gridHalfSize="20" gridCellSize="1" gridOpacity="0.22" gridFadeDistance="80" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" renderMode="0" sceneViewUiOverlay="false" portalDebugVisuals="true" portalDebugWireframe="true" portalDebugTintRemoteView="false" portalDebugOverlayAlpha="0.7" portalRecursionDepth="4" portalConnectionRepeatLimit="4" portalMaxViewsPerFrame="32">
+    <gridColor><item>0.30</item><item>0.32</item><item>0.36</item></gridColor>
+    <gridOriginColor><item>0.25</item><item>0.55</item><item>0.9</item></gridOriginColor>
+    <ambientColor><item>0.12</item><item>0.13</item><item>0.16</item></ambientColor>
+  </settings>
+  <objects>
+    <item name="Gravity Loop Camera" enabled="true">
+      <transform>
+        <Transform.position><item>15</item><item>7</item><item>-18</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Camera Camera.active="true" Camera.useTransformRotation="false" Camera.fov="58" Camera.near="0.01" Camera.far="250" Camera.orthographic="false" Camera.orthographicSize="5">
+          <Camera.target><item>0</item><item>6</item><item>0</item></Camera.target>
+          <Camera.up><item>0</item><item>1</item><item>0</item></Camera.up>
+        </components:Camera>
+      </components>
+      <children />
+    </item>
+    <item name="Gravity Loop Light" enabled="true">
+      <transform>
+        <Transform.position><item>5</item><item>10</item><item>-5</item></Transform.position>
+        <Transform.rotation><item>0.7</item><item>-0.5</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Light Light.lightType="1" Light.intensity="2.1" Light.range="40" Light.falloff="2" Light.baked="false">
+          <Light.color><item>1</item><item>0.94</item><item>0.82</item></Light.color>
+        </components:Light>
+      </components>
+      <children />
+    </item>
+    <item name="Floor Portal - Up" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>0</item><item>0</item></Transform.position>
+        <Transform.rotation><item>-1.570796</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1">
+          <PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size><item>6</item><item>6</item><item>1</item></PrimitiveObjectCollider.size>
+        </components:PrimitiveObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.gravityScale="1" RigidBody.linearDamping="0" RigidBody.angularDamping="0" RigidBody.friction="0" RigidBody.restitution="0" RigidBody.isTrigger="true" RigidBody.continuousCollision="false" RigidBody.collisionLayer="2" RigidBody.collisionMask="-1" />
+        <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="2" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="0.75" SpatialManipulator.deformationStrength="1" SpatialManipulator.portalEdgeHalfWidth="0.04" SpatialManipulator.portalEdgeHalfDepth="0.01" SpatialManipulator.portalCollisionCutUpdateDistance="0.05" SpatialManipulator.materializeSplitOnDisconnect="true" SpatialManipulator.portalTraversalPriority="0">
+          <SpatialManipulator.portalPoint><item>0</item><item>0</item><item>0</item></SpatialManipulator.portalPoint>
+          <SpatialManipulator.portalNormal><item>0</item><item>0</item><item>1</item></SpatialManipulator.portalNormal>
+          <SpatialManipulator.portalShapePoint0><item>-2.5</item><item>-2.5</item><item>0</item></SpatialManipulator.portalShapePoint0>
+          <SpatialManipulator.portalShapePoint1><item>2.5</item><item>-2.5</item><item>0</item></SpatialManipulator.portalShapePoint1>
+          <SpatialManipulator.portalShapePoint2><item>2.5</item><item>2.5</item><item>0</item></SpatialManipulator.portalShapePoint2>
+          <SpatialManipulator.portalShapePoint3><item>-2.5</item><item>2.5</item><item>0</item></SpatialManipulator.portalShapePoint3>
+          <SpatialManipulator.traversalTriggerBodyReference expectedType="RigidBody" objectPath="" objectName="Floor Portal - Up" componentType="RigidBody" componentIndex="0" />
+          <SpatialManipulator.targetManipulator expectedType="SpatialManipulator" objectPath="" objectName="Ceiling Portal - Down" componentType="SpatialManipulator" componentIndex="0" />
+        </components:SpatialManipulator>
+      </components>
+      <children />
+    </item>
+    <item name="Ceiling Portal - Down" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>12</item><item>0</item></Transform.position>
+        <Transform.rotation><item>1.570796</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1">
+          <PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size><item>6</item><item>6</item><item>1</item></PrimitiveObjectCollider.size>
+        </components:PrimitiveObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.gravityScale="1" RigidBody.linearDamping="0" RigidBody.angularDamping="0" RigidBody.friction="0" RigidBody.restitution="0" RigidBody.isTrigger="true" RigidBody.continuousCollision="false" RigidBody.collisionLayer="2" RigidBody.collisionMask="-1" />
+        <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="2" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="0.75" SpatialManipulator.deformationStrength="1" SpatialManipulator.portalEdgeHalfWidth="0.04" SpatialManipulator.portalEdgeHalfDepth="0.01" SpatialManipulator.portalCollisionCutUpdateDistance="0.05" SpatialManipulator.materializeSplitOnDisconnect="true" SpatialManipulator.portalTraversalPriority="0">
+          <SpatialManipulator.portalPoint><item>0</item><item>0</item><item>0</item></SpatialManipulator.portalPoint>
+          <SpatialManipulator.portalNormal><item>0</item><item>0</item><item>1</item></SpatialManipulator.portalNormal>
+          <SpatialManipulator.portalShapePoint0><item>-2.5</item><item>-2.5</item><item>0</item></SpatialManipulator.portalShapePoint0>
+          <SpatialManipulator.portalShapePoint1><item>2.5</item><item>-2.5</item><item>0</item></SpatialManipulator.portalShapePoint1>
+          <SpatialManipulator.portalShapePoint2><item>2.5</item><item>2.5</item><item>0</item></SpatialManipulator.portalShapePoint2>
+          <SpatialManipulator.portalShapePoint3><item>-2.5</item><item>2.5</item><item>0</item></SpatialManipulator.portalShapePoint3>
+          <SpatialManipulator.traversalTriggerBodyReference expectedType="RigidBody" objectPath="" objectName="Ceiling Portal - Down" componentType="RigidBody" componentIndex="0" />
+          <SpatialManipulator.targetManipulator expectedType="SpatialManipulator" objectPath="" objectName="Floor Portal - Up" componentType="SpatialManipulator" componentIndex="0" />
+        </components:SpatialManipulator>
+      </components>
+      <children />
+    </item>
+    <item name="Gravity Loop Cube" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>8</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>0.5</item><item>0.5</item><item>0.5</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/cube.obj" />
+        <components:Material Material.baseColorAlpha="1" Material.metallicFactor="0.08" Material.roughnessFactor="0.42" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque">
+          <Material.diffuse><item>0.95</item><item>0.34</item><item>0.08</item></Material.diffuse>
+          <Material.emissiveColor><item>0.08</item><item>0.01</item><item>0</item></Material.emissiveColor>
+        </components:Material>
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Sphere" PrimitiveObjectCollider.radius="0.25" PrimitiveObjectCollider.height="1">
+          <PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size><item>1</item><item>1</item><item>1</item></PrimitiveObjectCollider.size>
+        </components:PrimitiveObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Dynamic" RigidBody.mass="1" RigidBody.useGravity="true" RigidBody.gravityScale="1" RigidBody.linearDamping="0" RigidBody.angularDamping="0" RigidBody.friction="0" RigidBody.restitution="0" RigidBody.isTrigger="false" RigidBody.continuousCollision="true" RigidBody.freezePositionX="false" RigidBody.freezePositionY="false" RigidBody.freezePositionZ="false" RigidBody.freezeRotationX="true" RigidBody.freezeRotationY="true" RigidBody.freezeRotationZ="true" RigidBody.collisionLayer="1" RigidBody.collisionMask="-3">
+          <RigidBody.initialLinearVelocity><item>0</item><item>0</item><item>0</item></RigidBody.initialLinearVelocity>
+          <RigidBody.initialAngularVelocity><item>0</item><item>0</item><item>0</item></RigidBody.initialAngularVelocity>
+        </components:RigidBody>
+      </components>
+      <children />
+    </item>
+  </objects>
+</Scene>

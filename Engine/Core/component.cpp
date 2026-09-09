@@ -3,7 +3,7 @@
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Serialization/Json.h"
 #include "Core/Compoonents/Materials/Texture.h"
-#include "Core/Compoonents/Mesh.h"
+#include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Graphics/IGraphicsTexture.h"
 #include "Core/Object.h"

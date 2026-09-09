@@ -1,8 +1,8 @@
 #include "ScenePlacementAndPicking.h"
 
-#include "Core/Compoonents/Camera.h"
-#include "Core/Compoonents/Mesh.h"
-#include "Core/Compoonents/Sprite.h"
+#include "Core/Compoonents/Camera/Camera.h"
+#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Obj/Sprite.h"
 #include "Core/Scene/Scene.h"
 #include <algorithm>
 #include <cfloat>

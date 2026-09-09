@@ -1,5 +1,5 @@
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/Camera.h"
+#include "Core/Compoonents/Camera/Camera.h"
 #include <cmath>
 
 namespace Engine::Scene

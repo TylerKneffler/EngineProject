@@ -1,5 +1,5 @@
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/SpatialManipulator.h"
+#include "Core/Compoonents/Physics/SpatialManipulator.h"
 #include <algorithm>
 #include <cmath>
 #include <functional>

@@ -1,7 +1,7 @@
 #include "ModelAssetWriter.h"
 
 #include "Core/AssetRecord.h"
-#include "Core/Compoonents/Material.h"
+#include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Animation/ModelAnimation.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"

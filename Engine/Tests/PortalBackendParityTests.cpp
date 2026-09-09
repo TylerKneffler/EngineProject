@@ -100,6 +100,22 @@ int main()
     assert(TriangulatedApertureVertexCount(4) == 6u);
     assert(TriangulatedApertureVertexCount(8) == 18u);
 
+    // A portal intersecting the near plane remains visible even if its only
+    // front-facing corners are outside the side planes. The old corner-only
+    // test dropped this polygon as the camera moved through that boundary.
+    const std::vector<glm::vec4> nearCrossingAperture {
+        { -2.f, -2.f,  0.5f, 1.f },
+        {  2.f, -2.f, -0.5f, 1.f },
+        {  2.f,  2.f, -0.5f, 1.f },
+        { -2.f,  2.f,  0.5f, 1.f } };
+    assert(ClipApertureToViewFrustum(nearCrossingAperture).size() >= 3u);
+    const std::vector<glm::vec4> behindCameraAperture {
+        { -1.f, -1.f, -2.f, -1.f },
+        {  1.f, -1.f, -2.f, -1.f },
+        {  1.f,  1.f, -2.f, -1.f },
+        { -1.f,  1.f, -2.f, -1.f } };
+    assert(ClipApertureToViewFrustum(behindCameraAperture).empty());
+
     assert(ClampRecursionDepth(-1) == kMinimumRecursionDepth);
     assert(ClampRecursionDepth(100) == kMaximumRecursionDepth);
     assert(ClampConnectionRepeatLimit(0) ==

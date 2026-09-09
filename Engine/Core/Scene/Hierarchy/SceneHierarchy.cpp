@@ -1,6 +1,6 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Audio/Audio.h"
-#include "Core/Compoonents/SpatialManipulator.h"
+#include "Core/Compoonents/Physics/SpatialManipulator.h"
 #include "Core/Physics/Physics.h"
 #include "Core/Renderers/UIRenderer.h"
 #include <algorithm>

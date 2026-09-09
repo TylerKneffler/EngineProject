@@ -1,6 +1,6 @@
 #include "RealtimeLightingPipeline.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/Light.h"
+#include "Core/Compoonents/Lighting/Light.h"
 #include <glm/geometric.hpp>
 
 namespace Engine::Rendering
