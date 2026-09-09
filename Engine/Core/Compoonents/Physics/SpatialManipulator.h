@@ -4,7 +4,9 @@
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Transform.h"
+#include "Core/Physics/Spatial/SpatialTraversalState.h"
 #include "Core/PropertyMacros.h"
+#include "Core/Scene/Spatial/WarpVolume.h"
 #include <array>
 #include <memory>
 #include <string>
@@ -28,19 +30,8 @@ public:
         LinkedPortal = 3
     };
 
-    enum class WarpVolumeShape : int
-    {
-        Infinite = 0,
-        Box = 1,
-        Sphere = 2
-    };
-
-    enum class SpaceWarpType : int
-    {
-        Affine = 0,
-        Spiral = 1,
-        Formula = 2
-    };
+    using WarpVolumeShape = Engine::Scene::Spatial::WarpVolumeShape;
+    using SpaceWarpType = Engine::Scene::Spatial::SpaceWarpType;
 
     SpatialManipulator();
     ~SpatialManipulator() = default;
@@ -298,58 +289,11 @@ private:
     bool IsMatrixOverlayAuthority(const SpatialManipulator* target) const;
     std::string GetStableSceneKey() const;
 
-    struct TraversalState
-    {
-        enum class Phase
-        {
-            Uninitialized,
-            ArmedNegative,
-            ArmedPositive,
-            Cooldown
-        };
-
-        const Mesh* lastMesh = nullptr;
-        std::vector<Mesh::Vertex> baseVertices;
-        std::vector<Mesh::Vertex> localMeshVertices;
-        std::vector<Mesh::Vertex> remoteMeshVertices;
-        std::shared_ptr<Mesh> remoteRenderMesh;
-        std::vector<glm::vec3> localCollisionVertices;
-        glm::mat3 remoteLinearTransform { 1.f };
-        glm::mat4 remoteRenderWorldTransform { 1.f };
-        glm::mat4 collisionRemoteWorldTransform { 1.f };
-        glm::vec4 localRenderClipPlane { 0.f };
-        glm::vec4 remoteRenderClipPlane { 0.f };
-        const SpatialManipulator* localChartPortal = nullptr;
-        const SpatialManipulator* remoteChartPortal = nullptr;
-        glm::vec3 lastCollisionPlanePoint { 0.f };
-        glm::vec3 lastCollisionPlaneNormal { 0.f, 0.f, 1.f };
-        bool meshDeformed = false;
-        bool hasCollisionCut = false;
-        bool mapPositiveHalf = false;
-        // After the physical body anchor has been mapped to the destination,
-        // retain the source/remote render pair until its trailing geometry has
-        // cleared the aperture. The owner transform is then in target space,
-        // so AppendTraversalRenderInstances derives the source chart using
-        // the inverse portal transform.
-        bool postTeleportVisual = false;
-        bool piecewiseWarp = false;
-        Phase phase = Phase::Uninitialized;
-        bool waitForOverlapExit = false;
-        glm::vec3 previousWorldPosition { 0.f };
-        bool hasPreviousWorldPosition = false;
-    };
+    using TraversalState = Engine::Physics::Spatial::PortalTraversalState;
     std::unordered_map<const RigidBody*, TraversalState> m_traversalStates;
 
-    struct WarpVolumeTraversalState
-    {
-        glm::vec3 authoredScale { 1.f };
-        glm::vec3 persistedScale { 1.f };
-        glm::vec3 previousLocalPosition { 0.f };
-        bool hasPreviousPosition = false;
-        bool active = false;
-        bool enteredFromNegativeZ = false;
-        bool completed = false;
-    };
+    using WarpVolumeTraversalState =
+        Engine::Physics::Spatial::WarpVolumeTraversalState;
 
     void UpdateWarpVolumeTraversalScale();
     std::unordered_map<const Engine::Core::Object*, WarpVolumeTraversalState>
