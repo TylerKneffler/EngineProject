@@ -98,7 +98,7 @@ Open the repository or generated project folder directly in Visual Studio 2022. 
 - A scene skybox can drive HDRI lighting and reflections. With the Scene root
   selected, enable **Use Skybox for Lighting** and tune intensity, exposure,
   and rotation. Materials expose environment diffuse and reflection strengths.
-  `Engine/Core/Assets/Scenes/hdri_showcase.scene` demonstrates the feature.
+  `Engine/Core/Assets/Scenes/Showcases/hdri_showcase.scene` demonstrates the feature.
 - A material can override only its reflections without changing the skybox.
   Enable **Custom Reflection Environment**, assign a Radiance HDR or OpenEXR
   file to **Reflection HDRI**, then tune its strength, exposure, and rotation.
@@ -107,7 +107,7 @@ Open the repository or generated project folder directly in Visual Studio 2022. 
   volumes twist it along a configurable axis. Formula volumes define mapped
   X/Y/Z expressions from local `x`, `y`, and `z`, derived polar variables, and
   reusable parameters `a` through `d`. Finite volumes support boundary falloff.
-  `Engine/Core/Assets/Scenes/spiral_warp_column.scene` demonstrates a formulaic
+  `Engine/Core/Assets/Scenes/Spatial/spiral_warp_column.scene` demonstrates a formulaic
   falling rigid body, light, camera, and coordinate markers sharing one warp.
 - WAV, OGG/Vorbis, and MP3 files can be imported and assigned to an Audio Source.
 

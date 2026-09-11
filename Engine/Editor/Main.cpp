@@ -86,7 +86,7 @@ namespace
         settings.shadersDirectory = std::filesystem::path(ENGINE_SHADERS_PATH).string();
         settings.buildDirectory = std::filesystem::path(ENGINE_BUILD_DIR).string();
         settings.defaultScene =
-            (std::filesystem::path(ENGINE_ASSETS_PATH) / "Scenes" / "default.scene").string();
+            (std::filesystem::path(ENGINE_ASSETS_PATH) / "Scenes" / "Basics" / "default.scene").string();
         settings.viewportWidth = 1280;
         settings.viewportHeight = 720;
         settings.leftPanelWidth = 0.20f;

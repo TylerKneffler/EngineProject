@@ -16,7 +16,7 @@
   <PropertyGroup>
     <CMakeGenerator>Visual Studio 17 2022</CMakeGenerator>
     <Platform>x64</Platform>
-    <DefaultScene>Assets/Scenes/default.scene</DefaultScene>
+    <DefaultScene>Assets/Scenes/Basics/default.scene</DefaultScene>
     <ViewportWidth>1280</ViewportWidth>
     <ViewportHeight>720</ViewportHeight>
     <LeftPanelWidth>0.20</LeftPanelWidth>
@@ -25,8 +25,8 @@
     <EditorTheme>Graphite</EditorTheme>
   </PropertyGroup>
   <ItemGroup>
-    <Scene Include="Assets/Scenes/default.scene" />
-    <Scene Include="Assets/Scenes/default_2d.scene" />
+    <Scene Include="Assets/Scenes/Basics/default.scene" />
+    <Scene Include="Assets/Scenes/Basics/default_2d.scene" />
   </ItemGroup>
   <ItemGroup>
     <LeftPanelTab Include="HierarchyView" />

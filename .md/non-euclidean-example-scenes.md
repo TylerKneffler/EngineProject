@@ -6,13 +6,13 @@ This document collects potential scenes for exercising the engine's non-Euclidea
 
    Two opposite bends connected smoothly. Tests curvature continuity, camera direction recovery, lighting through multiple bends, and whether the final exit is parallel to the entrance.
 
-   Status: Implemented as `Engine/Core/Assets/Scenes/s_curve_corridor.scene`, with automated coverage in `MatrixLayerPortalTests`.
+   Status: Implemented as `Engine/Core/Assets/Scenes/Spatial/s_curve_corridor.scene`, with automated coverage in `MatrixLayerPortalTests`.
 
 2. **Impossible Staircase Loop**
 
    Four stair flights connect cyclically so continuously climbing returns to the starting room. Tests orientation accumulation, gravity handling, repeated traversal, and floating-point drift.
 
-   Status: Implemented as `Engine/Core/Assets/Scenes/impossible_staircase_loop.scene`, with automated loop-transform coverage in `ImpossibleStaircaseLoopTests`.
+   Status: Implemented as `Engine/Core/Assets/Scenes/Spatial/impossible_staircase_loop.scene`, with automated loop-transform coverage in `ImpossibleStaircaseLoopTests`.
 
 3. **Room Larger Inside**
 
