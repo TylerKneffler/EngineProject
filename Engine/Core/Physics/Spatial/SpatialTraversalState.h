@@ -66,6 +66,5 @@ public:
     bool hasPreviousPosition = false;
     bool active = false;
     bool enteredFromNegativeZ = false;
-    bool completed = false;
 };
 }

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <limits>
 
 namespace Engine::Scene
 {
@@ -121,6 +122,73 @@ glm::vec3 Scene::MapSpatialPoint(const glm::vec3& worldPoint,
     bool affectedByWarpVolume = false;
     return MapPoint(worldPoint, GatherOrderedVolumes(*this, query),
         affectedByWarpVolume);
+}
+
+bool Scene::TryUnmapSpatialPoint(const glm::vec3& mappedPoint,
+    glm::vec3& worldPoint, const SpatialQuery& query) const
+{
+    if (!std::isfinite(mappedPoint.x) || !std::isfinite(mappedPoint.y) ||
+        !std::isfinite(mappedPoint.z))
+        return false;
+
+    constexpr int kMaximumIterations = 24;
+    constexpr float kPositionTolerance = 0.0001f;
+    constexpr float kMinimumDeterminant = 1e-7f;
+    glm::vec3 estimate = mappedPoint;
+    float previousError = std::numeric_limits<float>::infinity();
+
+    for (int iteration = 0; iteration < kMaximumIterations; ++iteration)
+    {
+        const SpatialQuerySample sample = SampleSpatialPoint(estimate, query);
+        const glm::vec3 residual = sample.point - mappedPoint;
+        const float error = glm::length(residual);
+        if (std::isfinite(error) && error <= kPositionTolerance)
+        {
+            worldPoint = estimate;
+            return true;
+        }
+        const float determinant = glm::determinant(sample.jacobian);
+        if (!std::isfinite(error) || !std::isfinite(determinant) ||
+            std::abs(determinant) <= kMinimumDeterminant)
+            return false;
+
+        glm::vec3 step = glm::inverse(sample.jacobian) * residual;
+        const float stepLength = glm::length(step);
+        if (!std::isfinite(stepLength))
+            return false;
+        if (stepLength > 5.f)
+            step *= 5.f / stepLength;
+
+        // Backtracking keeps the solve stable near blended finite-volume
+        // boundaries, where the active mapping can change during an update.
+        float damping = error > previousError ? 0.5f : 1.f;
+        glm::vec3 bestEstimate = estimate;
+        float bestError = error;
+        for (int attempt = 0; attempt < 7; ++attempt)
+        {
+            const glm::vec3 candidate = estimate - step * damping;
+            const float candidateError = glm::length(
+                MapSpatialPoint(candidate, query) - mappedPoint);
+            if (std::isfinite(candidateError) && candidateError < bestError)
+            {
+                bestEstimate = candidate;
+                bestError = candidateError;
+                break;
+            }
+            damping *= 0.5f;
+        }
+        if (bestError >= error)
+            return false;
+        estimate = bestEstimate;
+        previousError = bestError;
+    }
+
+    const float finalError = glm::length(
+        MapSpatialPoint(estimate, query) - mappedPoint);
+    if (!std::isfinite(finalError) || finalError > kPositionTolerance)
+        return false;
+    worldPoint = estimate;
+    return true;
 }
 
 glm::vec3 Scene::WarpWorldPoint(const glm::vec3& worldPoint,

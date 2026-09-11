@@ -558,15 +558,14 @@ void SpatialManipulator::UpdateWarpVolumeTraversalScale()
                 return;
             }
 
-            if (!state.completed && !state.active && inside)
+            if (!state.active && inside)
             {
                 state.active = true;
                 state.enteredFromNegativeZ = localPosition.z >=
                     state.previousLocalPosition.z;
             }
 
-            if (!state.completed && state.active && inside &&
-                state.enteredFromNegativeZ)
+            if (state.active && inside)
             {
                 const Engine::Scene::Scene::SpatialQuerySample sample =
                     scene.SampleSpatialPoint(worldPosition,
@@ -581,10 +580,13 @@ void SpatialManipulator::UpdateWarpVolumeTraversalScale()
                     object->transform.scale = state.persistedScale;
                 }
             }
-            else if (!state.completed && state.active && !inside)
+            else if (state.active && !inside)
             {
                 if (!state.enteredFromNegativeZ || !persistTraversalScaleOnExit)
+                {
                     object->transform.scale = state.authoredScale;
+                    state.persistedScale = state.authoredScale;
+                }
                 else
                 {
                     // Sample the positive boundary rather than retaining the
@@ -611,7 +613,6 @@ void SpatialManipulator::UpdateWarpVolumeTraversalScale()
                 }
 
                 state.active = false;
-                state.completed = true;
             }
 
             state.previousLocalPosition = localPosition;

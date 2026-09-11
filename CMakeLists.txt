@@ -694,6 +694,52 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/MovingPortalPairTests.cpp")
+    enable_testing()
+    add_executable(MovingPortalPairTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/MovingPortalPairTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/MovingPortalPairDriver.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/PortalTraversalRepeater.cpp")
+    target_link_libraries(MovingPortalPairTests PRIVATE Engine)
+    target_include_directories(MovingPortalPairTests PRIVATE
+        "${ENGINE_ROOT}/Engine"
+        "${ENGINE_ROOT}/Engine/Core/Assets")
+    add_test(NAME MovingPortalPairRegression COMMAND MovingPortalPairTests)
+    set_tests_properties(MovingPortalPairRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/CrossingWarpVolumesTests.cpp")
+    enable_testing()
+    add_executable(CrossingWarpVolumesTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/CrossingWarpVolumesTests.cpp")
+    target_link_libraries(CrossingWarpVolumesTests PRIVATE Engine)
+    target_include_directories(CrossingWarpVolumesTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME CrossingWarpVolumesRegression
+        COMMAND CrossingWarpVolumesTests)
+    set_tests_properties(CrossingWarpVolumesRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TunnelBidirectionalTraversalTests.cpp")
+    enable_testing()
+    add_executable(TunnelBidirectionalTraversalTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/TunnelBidirectionalTraversalTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/WarpVolumeTraversalRepeater.cpp")
+    target_link_libraries(TunnelBidirectionalTraversalTests PRIVATE Engine)
+    target_include_directories(TunnelBidirectionalTraversalTests PRIVATE
+        "${ENGINE_ROOT}/Engine"
+        "${ENGINE_ROOT}/Engine/Core/Assets")
+    add_test(NAME TunnelBidirectionalTraversalRegression
+        COMMAND TunnelBidirectionalTraversalTests)
+    set_tests_properties(TunnelBidirectionalTraversalRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_ROOT}/Engine/Tests/RotateLifecycleTests.cpp")
     enable_testing()
     add_executable(EngineLifecycleTests

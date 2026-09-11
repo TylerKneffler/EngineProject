@@ -133,6 +133,7 @@
           <RigidBody.initialAngularVelocity><item>0</item><item>0</item><item>0</item></RigidBody.initialAngularVelocity>
           <RigidBody.frictionBehaviors />
         </components:RigidBody>
+        <components:WarpVolumeTraversalRepeater WarpVolumeTraversalRepeater.volumeObjectName="Smooth Shrinking Tunnel Warp" WarpVolumeTraversalRepeater.turnaroundClearance="1" />
       </components>
       <children />
     </item>

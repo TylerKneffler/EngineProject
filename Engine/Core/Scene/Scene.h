@@ -152,6 +152,11 @@ public:
         const SpatialQuery& query = {}) const;
     glm::vec3 MapSpatialPoint(const glm::vec3& worldPoint,
         const SpatialQuery& query = {}) const;
+    // Numerically inverts the fully composed spatial mapping. This is local:
+    // callers should use it only where the active charts are nonsingular and
+    // do not fold multiple source points onto the same mapped point.
+    bool TryUnmapSpatialPoint(const glm::vec3& mappedPoint,
+        glm::vec3& worldPoint, const SpatialQuery& query = {}) const;
     glm::mat4 MapSpatialMatrix(const glm::mat4& worldMatrix,
         const SpatialQuery& query = {}) const;
     SpatialRay MapSpatialRay(const SpatialRay& ray,
