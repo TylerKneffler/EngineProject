@@ -15,6 +15,7 @@ class D3D12GraphicsContext : public Engine::Graphics::IGraphicsContext
 public:
     explicit D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList);    D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList, ID3D12RootSignature* rootSig);
     void SetPipeline(const Engine::Graphics::IPipelineState* pipeline) override;
+    void SetStencilReference(uint32_t reference) override;
     void SetConstantBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint64_t offset = 0) override;
     void SetStructuredBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer) override;
     void SetVertexBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset = 0) override;

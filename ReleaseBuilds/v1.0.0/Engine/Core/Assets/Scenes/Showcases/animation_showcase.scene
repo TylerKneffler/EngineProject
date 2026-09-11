@@ -1,0 +1,204 @@
+<?xml version="1.0"?>
+<Scene xmlns:components="urn:engine-components" version="1">
+  <settings showGrid="true" gridHalfSize="20" gridCellSize="1" gridOpacity="0.35" gridFadeDistance="80" skyboxTexture="Assets/Textures/Skyboxes/editor-default-sky.png" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" renderMode="0" sceneViewUiOverlay="false">
+    <gridColor>
+      <item>0.35</item>
+      <item>0.35</item>
+      <item>0.4</item>
+    </gridColor>
+    <gridOriginColor>
+      <item>0.3</item>
+      <item>0.55</item>
+      <item>0.9</item>
+    </gridOriginColor>
+    <ambientColor>
+      <item>0.09</item>
+      <item>0.1</item>
+      <item>0.14</item>
+    </ambientColor>
+  </settings>
+  <objects>
+    <item name="Animation Camera" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>0</item>
+          <item>2.2</item>
+          <item>-6.5</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0.2</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Camera Camera.active="true" Camera.useTransformRotation="true" Camera.fov="55" Camera.near="0.01" Camera.far="150" Camera.orthographic="false" Camera.orthographicSize="5">
+          <Camera.target>
+            <item>0</item>
+            <item>1</item>
+            <item>0</item>
+          </Camera.target>
+          <Camera.up>
+            <item>0</item>
+            <item>1</item>
+            <item>0</item>
+          </Camera.up>
+        </components:Camera>
+      </components>
+      <children />
+    </item>
+    <item name="Animation Key Light" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>-2.5</item>
+          <item>4</item>
+          <item>-2</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Light Light.lightType="0" Light.intensity="7" Light.range="12" Light.falloff="1.8" Light.baked="false">
+          <Light.color>
+            <item>1</item>
+            <item>0.78</item>
+            <item>0.55</item>
+          </Light.color>
+        </components:Light>
+      </components>
+      <children />
+    </item>
+    <item name="Animation Fill Light" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>3</item>
+          <item>2</item>
+          <item>-1</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Light Light.lightType="0" Light.intensity="4" Light.range="10" Light.falloff="2" Light.baked="false">
+          <Light.color>
+            <item>0.3</item>
+            <item>0.55</item>
+            <item>1</item>
+          </Light.color>
+        </components:Light>
+      </components>
+      <children />
+    </item>
+    <item prefab="Assets/Fox/Fox.prefab">
+      <transform>
+        <Transform.position>
+          <item>-1.25</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>3.14159</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>0.045</item>
+          <item>0.045</item>
+          <item>0.045</item>
+        </Transform.scale>
+      </transform>
+    </item>
+    <item name="Cube" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>2.25</item>
+          <item>1</item>
+          <item>0</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1.25</item>
+          <item>1.25</item>
+          <item>1.25</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" />
+        <components:Material Material.shininess="32" Material.metallicFactor="0" Material.roughnessFactor="1" Material.environmentDiffuseStrength="1" Material.reflectionStrength="1" Material.useCustomReflectionEnvironment="false" Material.reflectionEnvironmentTexture="" Material.reflectionEnvironmentExposure="0" Material.reflectionEnvironmentRotation="0" Material.baseColorAlpha="1" Material.alphaCutoff="0.5" Material.normalScale="1" Material.heightScale="0.05" Material.heightMinSteps="8" Material.heightMaxSteps="32" Material.occlusionStrength="1" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque" Material.baseColorUvSet="0" Material.metallicRoughnessUvSet="0" Material.normalUvSet="0" Material.occlusionUvSet="0" Material.emissiveUvSet="0" Material.heightUvSet="0" Material.baseColorTexture="" Material.metallicRoughnessTexture="" Material.normalTexture="" Material.heightTexture="" Material.occlusionTexture="" Material.emissiveTexture="" Material.materialAsset="Assets/Materials/diagnostic_cube.material">
+          <Material.diffuse>
+            <item>1</item>
+            <item>0.5</item>
+            <item>0.1</item>
+          </Material.diffuse>
+          <Material.ambient>
+            <item>0.1</item>
+            <item>0.1</item>
+            <item>0.1</item>
+          </Material.ambient>
+          <Material.specular>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+          </Material.specular>
+          <Material.emissiveColor>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </Material.emissiveColor>
+        </components:Material>
+        <components:Rotate Rotate.speed="45">
+          <Rotate.axis>
+            <item>0</item>
+            <item>1</item>
+            <item>0</item>
+          </Rotate.axis>
+        </components:Rotate>
+      </components>
+      <children />
+    </item>
+    <item prefab="Assets/Prefabs/Slime.prefab">
+      <transform>
+        <Transform.position>
+          <item>0.75</item>
+          <item>0.9</item>
+          <item>0.5</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
+    </item>
+  </objects>
+</Scene>

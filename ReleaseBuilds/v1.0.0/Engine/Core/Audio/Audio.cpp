@@ -1,6 +1,6 @@
 #include "Core/Audio/Audio.h"
 
-#include "Core/Compoonents/AudioSource.h"
+#include "Core/Compoonents/Audio/AudioSource.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 

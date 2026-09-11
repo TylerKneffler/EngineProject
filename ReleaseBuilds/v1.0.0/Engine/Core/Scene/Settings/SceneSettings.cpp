@@ -76,6 +76,22 @@ Engine::Serialization::JsonValue SerializeSceneSettings(const Engine::Model::Sce
         Engine::Serialization::JsonValue(static_cast<int>(settings.renderMode)));
     value.Set("sceneViewUiOverlay",
         Engine::Serialization::JsonValue(settings.sceneViewUiOverlay));
+    value.Set("portalDebugVisuals",
+        Engine::Serialization::JsonValue(settings.portalDebugVisuals));
+    value.Set("sceneCameraWarpLookThrough",
+        Engine::Serialization::JsonValue(settings.sceneCameraWarpLookThrough));
+    value.Set("portalDebugWireframe",
+        Engine::Serialization::JsonValue(settings.portalDebugWireframe));
+    value.Set("portalDebugTintRemoteView",
+        Engine::Serialization::JsonValue(settings.portalDebugTintRemoteView));
+    value.Set("portalDebugOverlayAlpha",
+        Engine::Serialization::JsonValue(settings.portalDebugOverlayAlpha));
+    value.Set("portalRecursionDepth",
+        Engine::Serialization::JsonValue(settings.portalRecursionDepth));
+    value.Set("portalConnectionRepeatLimit",
+        Engine::Serialization::JsonValue(settings.portalConnectionRepeatLimit));
+    value.Set("portalMaxViewsPerFrame",
+        Engine::Serialization::JsonValue(settings.portalMaxViewsPerFrame));
     return value;
 }
 
@@ -129,5 +145,32 @@ void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engi
     }
     if (const auto* sceneViewUiOverlay = FindField(value, "sceneViewUiOverlay"))
         settings.sceneViewUiOverlay = sceneViewUiOverlay->AsBool();
+    if (const auto* portalDebugVisuals = FindField(value, "portalDebugVisuals"))
+        settings.portalDebugVisuals = portalDebugVisuals->AsBool();
+    if (const auto* sceneCameraWarpLookThrough = FindField(value,
+        "sceneCameraWarpLookThrough"))
+    {
+        settings.sceneCameraWarpLookThrough =
+            sceneCameraWarpLookThrough->AsBool();
+    }
+    if (const auto* portalDebugWireframe = FindField(value, "portalDebugWireframe"))
+        settings.portalDebugWireframe = portalDebugWireframe->AsBool();
+    if (const auto* portalDebugTintRemoteView = FindField(value, "portalDebugTintRemoteView"))
+        settings.portalDebugTintRemoteView = portalDebugTintRemoteView->AsBool();
+    if (const auto* portalDebugOverlayAlpha = FindField(value, "portalDebugOverlayAlpha"))
+        settings.portalDebugOverlayAlpha = std::clamp(
+            portalDebugOverlayAlpha->AsFloat(), 0.f, 1.f);
+    if (const auto* portalRecursionDepth = FindField(value, "portalRecursionDepth"))
+        settings.portalRecursionDepth = std::clamp(
+            portalRecursionDepth->AsInt(), 1, 8);
+    if (const auto* portalConnectionRepeatLimit = FindField(value,
+        "portalConnectionRepeatLimit"))
+    {
+        settings.portalConnectionRepeatLimit = std::clamp(
+            portalConnectionRepeatLimit->AsInt(), 1, 8);
+    }
+    if (const auto* portalMaxViews = FindField(value, "portalMaxViewsPerFrame"))
+        settings.portalMaxViewsPerFrame = std::clamp(
+            portalMaxViews->AsInt(), 1, 64);
 }
 }

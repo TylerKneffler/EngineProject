@@ -24,7 +24,7 @@
     </transform>
     <components>
       <components:SpriteAnimationManager>
-        <SpriteAnimationManager.animationFile>Engine/Core/Assets/Textures/Sprites/Slime/slime_idle.spriteanim</SpriteAnimationManager.animationFile>
+        <SpriteAnimationManager.animationFile>Assets/Textures/Sprites/Slime/slime_idle.spriteanim</SpriteAnimationManager.animationFile>
         <SpriteAnimationManager.playing>true</SpriteAnimationManager.playing>
         <SpriteAnimationManager.frame>0</SpriteAnimationManager.frame>
       </components:SpriteAnimationManager>

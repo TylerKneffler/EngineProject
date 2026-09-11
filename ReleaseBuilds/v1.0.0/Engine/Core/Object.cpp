@@ -99,6 +99,16 @@ void Object::Update()
 
 void Object::Destroy()
 {
+    // Scene objects are owned by Scene::m_objects. Deleting one directly is
+    // invalid (and especially unsafe from a component callback), because the
+    // scene may still be iterating the object/component containers. Queue the
+    // owned object and let Scene commit removal at a safe update boundary.
+    if (OwnerScene)
+    {
+        OwnerScene->RequestRemoveObject(this);
+        return;
+    }
+
     // Recursively destroy children
     for (Object* child : Children)
     {
@@ -147,26 +157,14 @@ Object* Object::FindObjectInSceneByName(const std::string& objectName)
 {
     if (!OwnerScene)
         return nullptr;
-    for (const auto& candidate : OwnerScene->GetObjects())
-    {
-        Object* object = candidate.get();
-        if (object && object->name == objectName)
-            return object;
-    }
-    return nullptr;
+    return OwnerScene->FindObjectByName(objectName);
 }
 
 const Object* Object::FindObjectInSceneByName(const std::string& objectName) const
 {
     if (!OwnerScene)
         return nullptr;
-    for (const auto& candidate : OwnerScene->GetObjects())
-    {
-        const Object* object = candidate.get();
-        if (object && object->name == objectName)
-            return object;
-    }
-    return nullptr;
+    return OwnerScene->FindObjectByName(objectName);
 }
 
 #pragma region Component management

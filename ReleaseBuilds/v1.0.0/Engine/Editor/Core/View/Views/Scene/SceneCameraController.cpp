@@ -1,6 +1,6 @@
 #include "SceneCameraController.h"
 
-#include "Core/Compoonents/Camera.h"
+#include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Scene/Scene.h"
 #include <algorithm>
 #include <cassert>
@@ -46,6 +46,22 @@ void SceneCameraController::Apply(Engine::Scene::Scene& scene,
 
     glm::vec3 eye = pos;
     glm::vec3 target = cam->target;
+    const auto isFinite = [](const glm::vec3& value)
+    {
+        return std::isfinite(value.x) && std::isfinite(value.y) &&
+            std::isfinite(value.z);
+    };
+    const float initialDistance = glm::length(target - eye);
+    if (!isFinite(eye) || !isFinite(target) ||
+        !std::isfinite(initialDistance) || initialDistance < 0.0001f)
+    {
+        // Recover cameras saved in a state produced by formerly unbounded
+        // zooming instead of feeding invalid values into the view matrix.
+        pos = { 0.f, 1.5f, -3.f };
+        cam->target = { 0.f, 0.f, 0.f };
+        eye = pos;
+        target = cam->target;
+    }
     glm::vec3 forward = glm::normalize(target - eye);
     const glm::vec3 right = glm::normalize(glm::cross(cam->up, forward));
     const glm::vec3 realUp = glm::normalize(glm::cross(forward, right));
@@ -74,24 +90,39 @@ void SceneCameraController::Apply(Engine::Scene::Scene& scene,
     if (orbitDX != 0.f || orbitDY != 0.f)
     {
         constexpr float kSensitivity = 0.005f;
-        glm::vec3 arm = eye - target;
-        arm = glm::mat3(glm::rotate(glm::mat4(1.f), orbitDX * kSensitivity,
-            glm::vec3(0.f, 1.f, 0.f))) * arm;
-        arm = glm::mat3(glm::rotate(glm::mat4(1.f), orbitDY * kSensitivity,
-            right)) * arm;
-        pos = target + arm;
-        eye = pos;
+        constexpr float kMaxVerticalLook = 0.999f;
+        const float lookDistance = glm::max(glm::length(target - eye), 0.05f);
+        const glm::vec3 worldUp = glm::normalize(cam->up);
+
+        // Turn the view direction while leaving the camera in place. The
+        // target remains a focus-distance marker for panning and zooming, but
+        // is no longer the pivot point for scene-view rotation.
+        forward = glm::mat3(glm::rotate(glm::mat4(1.f),
+            orbitDX * kSensitivity, worldUp)) * forward;
+        const glm::vec3 lookRight = glm::normalize(glm::cross(worldUp, forward));
+        const glm::vec3 pitchedForward = glm::normalize(
+            glm::mat3(glm::rotate(glm::mat4(1.f),
+                orbitDY * kSensitivity, lookRight)) * forward);
+        if (std::abs(glm::dot(pitchedForward, worldUp)) < kMaxVerticalLook)
+            forward = pitchedForward;
+
+        cam->target = eye + glm::normalize(forward) * lookDistance;
+        target = cam->target;
     }
 
     if (zoom != 0.f)
     {
-        constexpr float kZoomFactor = 0.1f;
-        constexpr float kMinDistance = 0.05f;
-        const float distance = glm::length(target - eye);
-        float step = zoom * distance * kZoomFactor;
-        step = std::min(step, distance - kMinDistance);
+        constexpr float kMoveFactor = 0.1f;
+        const float distance = glm::max(glm::length(target - eye), 0.05f);
         forward = glm::normalize(target - eye);
-        pos += forward * step;
+        const glm::vec3 movement = forward * (zoom * distance * kMoveFactor);
+        const glm::vec3 nextEye = eye + movement;
+        const glm::vec3 nextTarget = target + movement;
+        if (isFinite(nextEye) && isFinite(nextTarget))
+        {
+            pos = nextEye;
+            cam->target = nextTarget;
+        }
     }
 }
 }

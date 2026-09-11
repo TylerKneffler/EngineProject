@@ -1,8 +1,8 @@
 #include "EditorGizmoSystem.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Object.h"
-#include "Core/Compoonents/Camera.h"
-#include "Core/Compoonents/Light.h"
+#include "Core/Compoonents/Camera/Camera.h"
+#include "Core/Compoonents/Lighting/Light.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include <algorithm>

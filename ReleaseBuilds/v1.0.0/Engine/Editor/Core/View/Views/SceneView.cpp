@@ -6,8 +6,8 @@
 #include "Engine/Editor/Core/View/Templates/Common/AssetPathTemplate.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/Camera.h"
-#include "Core/Compoonents/Sprite.h"
+#include "Core/Compoonents/Camera/Camera.h"
+#include "Core/Compoonents/Obj/Sprite.h"
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Graphics/IGraphicsProvider.h"
@@ -296,7 +296,8 @@ void SceneView::Render3D(void* cmd)
         auto* factory = m_scene->GetGraphicsProvider()->GetContextFactory();
         factory->SetCommandBuffer(cmd);
         auto ctx = factory->CreateContext();
-        m_scene->Render(ctx.get(), m_aspect);
+        m_scene->Render(ctx.get(), m_aspect, nullptr, true,
+            GetWidth(), GetHeight());
     }
 }
 }

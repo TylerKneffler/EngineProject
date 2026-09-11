@@ -1,0 +1,237 @@
+#pragma once
+
+#include "Core/PropertyMacros.h"
+#include "Core/Script.h"
+#include "Core/Model/MeshData.h"
+#include <glm/glm.hpp>
+#include <cstdint>
+#include <future>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+class PerlinNoiseField;
+class MarchingCubesChunk;
+
+// Streams a square set of volumetric terrain chunks around a named viewer.
+// Every cube cell is polygonized from its twelve edge intersections. An
+// asymptotic face decider keeps ambiguous saddle cases deterministic.
+class MarchingCubesTerrain final : public Engine::Core::Script
+{
+public:
+    enum class GeometryMode : int
+    {
+        SmoothMarchingCubes = 0,
+        OrthogonalQuads = 1
+    };
+
+    MarchingCubesTerrain();
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | References")
+    std::string viewerObjectName = "Marching Cubes Camera";
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | References")
+    std::string noiseObjectName;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Streaming", ClampMin = "1")
+    float chunkSize = 16.f;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Streaming", ClampMin = "0", ClampMax = "8")
+    int viewRadiusInChunks = 1;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Streaming", ClampMin = "1", ClampMax = "16")
+    int maxChunkBuildsPerUpdate = 2;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Streaming", ClampMin = "1", ClampMax = "16")
+    int parallelChunkBuilds = 4;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Streaming", ClampMin = "1", ClampMax = "16")
+    int maxChunkCommitsPerUpdate = 4;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Streaming")
+    bool cacheUnloadedChunkMeshes = true;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Streaming", ClampMin = "0", ClampMax = "1024")
+    int unloadedMeshCacheCapacity = 128;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Resolution", ClampMin = "2", ClampMax = "48")
+    int horizontalCellsPerChunk = 12;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Resolution", ClampMin = "2", ClampMax = "48")
+    int verticalCells = 12;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Resolution", ClampMin = "1", ClampMax = "8")
+    int quadsPerAxis = 2;
+
+    // Orthogonal mode emits horizontal top quads and vertical wall quads
+    // only. Adjacent height cells never connect with a slanted surface.
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Geometry")
+    int geometryMode = static_cast<int>(GeometryMode::SmoothMarchingCubes);
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Geometry", ClampMin = "0.05")
+    float orthogonalHeightStep = 1.f;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Shape", ClampMin = "1")
+    float verticalSize = 18.f;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Shape")
+    float baseHeight = 0.f;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Shape", ClampMin = "0")
+    float heightAmplitude = 6.f;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Shape", ClampMin = "0")
+    float caveStrength = 1.4f;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Shape", ClampMin = "0.01")
+    float caveFrequencyMultiplier = 2.35f;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Shape")
+    float isoLevel = 0.f;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Rendering", ClampMin = "0.01")
+    float textureScale = 12.f;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Height Colors")
+    float lowHeightMaximum = -1.5f;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Height Colors")
+    float middleHeightMaximum = 2.5f;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Height Colors")
+    glm::vec3 lowHeightColor { 0.16f, 0.28f, 0.48f };
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Height Colors")
+    glm::vec3 middleHeightColor { 0.2f, 0.52f, 0.18f };
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Height Colors")
+    glm::vec3 highHeightColor { 0.62f, 0.58f, 0.48f };
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Physics")
+    bool generateColliders = false;
+
+    void Start() override;
+    void Update() override;
+    void OnDestroy() override;
+    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+
+    // Rebuilds the configured terrain ring immediately. This is also exposed
+    // by the custom editor UI and does not require the scene runtime to start.
+    bool GenerateTerrain();
+
+    std::size_t GetLoadedChunkCount() const { return m_chunks.size(); }
+    uint64_t GetTotalChunksBuilt() const { return m_totalChunksBuilt; }
+    uint64_t GetTotalChunksUnloaded() const { return m_totalChunksUnloaded; }
+    double GetLastStreamingMilliseconds() const { return m_lastStreamingMilliseconds; }
+    double GetMaximumStreamingMilliseconds() const { return m_maximumStreamingMilliseconds; }
+    uint64_t GetMeshCacheHits() const { return m_meshCacheHits; }
+    uint64_t GetMeshCacheMisses() const { return m_meshCacheMisses; }
+    std::size_t GetCachedChunkCount() const { return m_meshCache.size(); }
+    std::size_t GetQueuedChunkCount() const { return m_chunkQueue.size(); }
+    std::size_t GetInFlightChunkCount() const { return m_inFlightChunks.size(); }
+
+private:
+    using Vertex = Engine::Model::Vertex;
+
+    struct CachedQuadMesh
+    {
+        int quadX = 0;
+        int quadZ = 0;
+        std::vector<Vertex> vertices;
+    };
+    struct CachedChunkMesh
+    {
+        std::vector<CachedQuadMesh> quads;
+        uint64_t lastUse = 0;
+    };
+    struct GenerationSnapshot
+    {
+        float chunkSize = 16.f;
+        int horizontalCells = 12;
+        int verticalCells = 12;
+        int quadsPerAxis = 2;
+        int geometryMode = 0;
+        float orthogonalHeightStep = 1.f;
+        float verticalSize = 18.f;
+        float baseHeight = 0.f;
+        float heightAmplitude = 6.f;
+        float caveStrength = 1.4f;
+        float caveFrequencyMultiplier = 2.35f;
+        float isoLevel = 0.f;
+        float textureScale = 12.f;
+        float lowHeightMaximum = -1.5f;
+        float middleHeightMaximum = 2.5f;
+        glm::vec3 lowHeightColor{};
+        glm::vec3 middleHeightColor{};
+        glm::vec3 highHeightColor{};
+        int noiseSeed = 1337;
+        float noiseFrequency = 0.045f;
+        int noiseOctaves = 4;
+        float noiseLacunarity = 2.f;
+        float noisePersistence = 0.5f;
+        glm::vec3 noiseOffset{};
+        uint64_t configurationHash = 0;
+    };
+    struct GeneratedChunkMesh
+    {
+        int x = 0;
+        int z = 0;
+        uint64_t configurationHash = 0;
+        std::vector<CachedQuadMesh> quads;
+    };
+    struct QueuedChunk
+    {
+        int x = 0;
+        int z = 0;
+        int distanceSquared = 0;
+    };
+    struct InFlightChunk
+    {
+        int x = 0;
+        int z = 0;
+        std::future<GeneratedChunkMesh> future;
+    };
+
+    static int64_t ChunkKey(int x, int z);
+    glm::ivec2 ViewerChunk() const;
+    PerlinNoiseField* ResolveNoise() const;
+    void RefreshChunks();
+    void BuildChunk(int chunkX, int chunkZ,
+        const std::vector<CachedQuadMesh>* preparedQuads = nullptr);
+    GenerationSnapshot CaptureGenerationSnapshot(
+        const PerlinNoiseField& noise) const;
+    static GeneratedChunkMesh GenerateChunkMesh(
+        const GenerationSnapshot& snapshot, int chunkX, int chunkZ);
+    int CommitCompletedChunks(int budget);
+    bool IsChunkDesired(int x, int z) const;
+    std::vector<Vertex> BuildQuadVertices(int chunkX, int chunkZ,
+        int quadX, int quadZ, const PerlinNoiseField& noise) const;
+    std::vector<Vertex> BuildSmoothQuadVertices(int chunkX, int chunkZ,
+        int quadX, int quadZ, const PerlinNoiseField& noise) const;
+    std::vector<Vertex> BuildOrthogonalQuadVertices(int chunkX, int chunkZ,
+        int quadX, int quadZ, const PerlinNoiseField& noise) const;
+    float Density(const glm::vec3& terrainPosition,
+        const PerlinNoiseField& noise) const;
+    float OrthogonalHeight(float worldX, float worldZ,
+        const PerlinNoiseField& noise) const;
+    glm::vec3 ColorForHeight(float height) const;
+    uint64_t MeshConfigurationHash(const PerlinNoiseField& noise) const;
+    void CacheChunkMesh(int64_t key, const Engine::Core::Object& chunkObject);
+    void TrimMeshCache();
+
+    std::unordered_map<int64_t, Engine::Core::Object*> m_chunks;
+    glm::ivec2 m_viewerChunk { 0 };
+    bool m_hasViewerChunk = false;
+    std::string m_editorGenerationStatus;
+    uint64_t m_totalChunksBuilt = 0;
+    uint64_t m_totalChunksUnloaded = 0;
+    double m_lastStreamingMilliseconds = 0.0;
+    double m_maximumStreamingMilliseconds = 0.0;
+    std::unordered_map<int64_t, CachedChunkMesh> m_meshCache;
+    uint64_t m_meshCacheClock = 0;
+    uint64_t m_meshConfigurationHash = 0;
+    uint64_t m_meshCacheHits = 0;
+    uint64_t m_meshCacheMisses = 0;
+    std::vector<QueuedChunk> m_chunkQueue;
+    std::unordered_map<int64_t, InFlightChunk> m_inFlightChunks;
+};

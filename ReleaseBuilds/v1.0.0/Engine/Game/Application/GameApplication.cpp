@@ -10,9 +10,10 @@
 #include "Core/Scene/Scene.h"
 #include "Core/SceneManager.h"
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
-#include "Core/Assets/Scripts/Rotate.h"
-#include "Core/Assets/Scripts/FirstPersonController.h"
-#include "Core/Assets/Scripts/MainMenuGameManager.h"
+#include "Core/Assets/Scripts/Utilities/Rotate.h"
+#include "Core/Assets/Scripts/Controllers/FirstPersonController.h"
+#include "Core/Assets/Scripts/Gameplay/MainMenuGameManager.h"
+#include "Core/Assets/Scripts/Portals/PortalSplitAfterDelay.h"
 #include "Core/Serialization/SceneSerializer.h"
 #endif
 
@@ -26,6 +27,8 @@ void RegisterGameComponents()
     ::Engine::Serialization::RegisterComponentType<Rotate>("Rotate");
     ::Engine::Serialization::RegisterComponentType<FirstPersonController>("FirstPersonController");
     ::Engine::Serialization::RegisterComponentType<MainMenuGameManager>("MainMenuGameManager");
+    ::Engine::Serialization::RegisterComponentType<PortalSplitAfterDelay>(
+        "PortalSplitAfterDelay");
 #endif
 }
 

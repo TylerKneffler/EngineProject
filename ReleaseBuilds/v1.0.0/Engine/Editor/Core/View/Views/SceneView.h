@@ -44,7 +44,7 @@ public:
 
     // Shows the offscreen texture with letterboxing/pillarboxing based on
     // aspect ratio settings, captures mouse input, and drives the
-    // scene's editorCamera with orbit / pan / zoom.
+    // scene's editorCamera with FPS-style look / pan / zoom.
     void DrawPanel(IEditorUi& ui) override;
     Engine::Scene::Scene* GetScene() const { return m_scene; }
     void RequestFocusOnNextDraw() { m_focusOnNextDraw = true; }

@@ -13,7 +13,7 @@ namespace Engine::Game
 {
 std::string GetFallbackScenePath()
 {
-    return std::string(ENGINE_ASSETS_PATH) + "Scenes/default.scene";
+    return std::string(ENGINE_ASSETS_PATH) + "Scenes/Basics/default.scene";
 }
 
 Engine::Model::ProjectSettings LoadGameProjectSettings()

@@ -125,6 +125,60 @@ Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetDepthFunc
     return *this;
 }
 
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetStencilEnable(bool enable)
+{
+    m_stencilEnable = enable ? TRUE : FALSE;
+    return *this;
+}
+
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetStencilReadMask(uint8_t mask)
+{
+    m_stencilReadMask = mask;
+    return *this;
+}
+
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetStencilWriteMask(uint8_t mask)
+{
+    m_stencilWriteMask = mask;
+    return *this;
+}
+
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetStencilFunc(int func)
+{
+    m_stencilFunc = ConvertComparisonFunc(func);
+    return *this;
+}
+
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetStencilFailOp(int op)
+{
+    m_stencilFailOp = ConvertStencilOp(op);
+    return *this;
+}
+
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetStencilDepthFailOp(int op)
+{
+    m_stencilDepthFailOp = ConvertStencilOp(op);
+    return *this;
+}
+
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetStencilPassOp(int op)
+{
+    m_stencilPassOp = ConvertStencilOp(op);
+    return *this;
+}
+
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetStencilRef(uint32_t ref)
+{
+    m_stencilRef = ref;
+    return *this;
+}
+
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetColorWriteMask(uint8_t mask)
+{
+    m_colorWriteMask = mask;
+    return *this;
+}
+
 Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetInputLayout(const VertexElement* elements, uint32_t elementCount)
 {
     m_inputLayout.clear();
@@ -170,7 +224,9 @@ Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetPrimitive
 Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetRenderTargetFormat(int format, int depthFormat)
 {
     m_rtFormat = static_cast<DXGI_FORMAT>(format);
-    m_dsFormat = depthFormat >= 0 ? static_cast<DXGI_FORMAT>(depthFormat) : DXGI_FORMAT_D32_FLOAT;
+    m_dsFormat = depthFormat >= 0
+        ? static_cast<DXGI_FORMAT>(depthFormat)
+        : DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
     return *this;
 }
 
@@ -221,13 +277,20 @@ std::unique_ptr<Engine::Graphics::IPipelineState> D3D12PipelineStateBuilder::Bui
     psoDesc.BlendState.RenderTarget[0].DestBlendAlpha = m_destBlendAlpha;
     psoDesc.BlendState.RenderTarget[0].BlendOpAlpha = m_blendOpAlpha;
     psoDesc.BlendState.RenderTarget[0].LogicOp = D3D12_LOGIC_OP_NOOP;
-    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = m_colorWriteMask;
 
     // Depth
     psoDesc.DepthStencilState.DepthEnable = m_depthEnable;
     psoDesc.DepthStencilState.DepthWriteMask = m_depthWriteEnable ? D3D12_DEPTH_WRITE_MASK_ALL : D3D12_DEPTH_WRITE_MASK_ZERO;
     psoDesc.DepthStencilState.DepthFunc = m_depthFunc;
-    psoDesc.DepthStencilState.StencilEnable = FALSE;
+    psoDesc.DepthStencilState.StencilEnable = m_stencilEnable;
+    psoDesc.DepthStencilState.StencilReadMask = m_stencilReadMask;
+    psoDesc.DepthStencilState.StencilWriteMask = m_stencilWriteMask;
+    psoDesc.DepthStencilState.FrontFace.StencilFunc = m_stencilFunc;
+    psoDesc.DepthStencilState.FrontFace.StencilPassOp = m_stencilPassOp;
+    psoDesc.DepthStencilState.FrontFace.StencilFailOp = m_stencilFailOp;
+    psoDesc.DepthStencilState.FrontFace.StencilDepthFailOp = m_stencilDepthFailOp;
+    psoDesc.DepthStencilState.BackFace = psoDesc.DepthStencilState.FrontFace;
 
     // Input layout
     if (!m_inputLayout.empty())
@@ -305,6 +368,22 @@ D3D12_COMPARISON_FUNC D3D12PipelineStateBuilder::ConvertComparisonFunc(int func)
         case 6: return D3D12_COMPARISON_FUNC_GREATER_EQUAL;
         case 7: return D3D12_COMPARISON_FUNC_ALWAYS;
         default: return D3D12_COMPARISON_FUNC_LESS;
+    }
+}
+
+D3D12_STENCIL_OP D3D12PipelineStateBuilder::ConvertStencilOp(int op) const
+{
+    switch (op)
+    {
+        case 0: return D3D12_STENCIL_OP_KEEP;
+        case 1: return D3D12_STENCIL_OP_ZERO;
+        case 2: return D3D12_STENCIL_OP_REPLACE;
+        case 3: return D3D12_STENCIL_OP_INCR_SAT;
+        case 4: return D3D12_STENCIL_OP_DECR_SAT;
+        case 5: return D3D12_STENCIL_OP_INVERT;
+        case 6: return D3D12_STENCIL_OP_INCR;
+        case 7: return D3D12_STENCIL_OP_DECR;
+        default: return D3D12_STENCIL_OP_KEEP;
     }
 }
 

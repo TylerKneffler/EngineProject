@@ -13,8 +13,9 @@
 #include "Engine/Editor/UI/IEditorUiBackend.h"
 #include "Engine/Editor/Core/Importers/ModelImporter.h"
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
-#include "Core/Assets/Scripts/Rotate.h"
-#include "Core/Assets/Scripts/FirstPersonController.h"
+#include "Core/Assets/Scripts/Utilities/Rotate.h"
+#include "Core/Assets/Scripts/Controllers/FirstPersonController.h"
+#include "Core/Assets/Scripts/Portals/PortalSplitAfterDelay.h"
 #include "Core/Serialization/SceneSerializer.h"
 #endif
 #include <filesystem>
@@ -85,12 +86,12 @@ namespace
         settings.shadersDirectory = std::filesystem::path(ENGINE_SHADERS_PATH).string();
         settings.buildDirectory = std::filesystem::path(ENGINE_BUILD_DIR).string();
         settings.defaultScene =
-            (std::filesystem::path(ENGINE_ASSETS_PATH) / "Scenes" / "default.scene").string();
+            (std::filesystem::path(ENGINE_ASSETS_PATH) / "Scenes" / "Basics" / "default.scene").string();
         settings.viewportWidth = 1280;
         settings.viewportHeight = 720;
         settings.leftPanelWidth = 0.20f;
         settings.rightPanelWidth = 0.31f;
-        settings.leftPanelTabs = { "HierarchyView", "Assets" };
+        settings.leftPanelTabs = { "HierarchyView" };
         settings.centerPanelTabs = { "Scene", "Game" };
         settings.rightPanelTabs = { "Properties" };
         settings.renderingAPI = "DirectX11";
@@ -115,6 +116,8 @@ int WINAPI wWinMain(
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
     Engine::Serialization::RegisterComponentType<Rotate>("Rotate");
     Engine::Serialization::RegisterComponentType<FirstPersonController>("FirstPersonController");
+    Engine::Serialization::RegisterComponentType<PortalSplitAfterDelay>(
+        "PortalSplitAfterDelay");
 #endif
     HRESULT comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     WriteStartupLog("Editor startup", true);

@@ -142,6 +142,14 @@ file(GLOB_RECURSE GAME_HEADERS CONFIGURE_DEPENDS
     "${ENGINE_ROOT}/Engine/Game/*.hpp"
     "${ENGINE_ROOT}/Engine/Game/*.inl"
 )
+file(GLOB_RECURSE SERVER_SOURCES CONFIGURE_DEPENDS
+    "${ENGINE_ROOT}/Engine/Server/*.cpp"
+)
+file(GLOB_RECURSE SERVER_HEADERS CONFIGURE_DEPENDS
+    "${ENGINE_ROOT}/Engine/Server/*.h"
+    "${ENGINE_ROOT}/Engine/Server/*.hpp"
+    "${ENGINE_ROOT}/Engine/Server/*.inl"
+)
 
 set(PROJECT_BROWSE_FILES)
 set(PROJECT_ROOT_FILES)
@@ -520,12 +528,223 @@ set_target_properties(Game PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "${ENGINE_RUNTIME_WORKING_DIRECTORY}"
 )
 
+# ---------------------------------------------------------------------------
+# Server — headless authoritative scene simulation.  This intentionally uses
+# a console subsystem and never creates a renderer/window.  It is the host
+# for deterministic scene diagnostics today and future player/session support.
+# ---------------------------------------------------------------------------
+add_executable(Server
+    ${SERVER_SOURCES}
+    ${SERVER_HEADERS}
+    ${ASSET_SOURCES}
+    ${PROJECT_BROWSE_FILES}
+)
+source_group(TREE "${ENGINE_ROOT}" FILES ${SERVER_SOURCES} ${SERVER_HEADERS})
+if(ENGINE_PROJECT_DIR)
+    source_group(TREE "${ENGINE_PROJECT_DIR}" PREFIX "Project" FILES
+        ${ASSET_SOURCES} ${PROJECT_BROWSE_FILES})
+endif()
+target_link_libraries(Server PRIVATE Engine)
+target_precompile_headers(Server REUSE_FROM Engine)
+target_include_directories(Server PRIVATE
+    ${ENGINE_ROOT}/Engine
+    ${ENGINE_ROOT}/Engine/Core/Assets
+    ${ENGINE_PROJECT_DIR}/Assets
+)
+target_compile_definitions(Server PRIVATE
+    ASSETS_PATH="${ENGINE_PROJECT_DIR}/Assets/"
+    PROJECT_FILE="${ENGINE_PROJECT_FILE}"
+    ENGINE_ASSETS_PATH="${ENGINE_COMPILED_ASSETS_PATH}"
+    $<$<NOT:$<BOOL:${ENGINE_PROJECT_DIR}>>:ENGINE_BUILTIN_ASSET_SCRIPTS>
+)
+set_target_properties(Server PROPERTIES
+    VS_DEBUGGER_WORKING_DIRECTORY "${ENGINE_RUNTIME_WORKING_DIRECTORY}"
+)
+
+set(ENGINE_LOCAL_TEST_ROOT "${ENGINE_ROOT}/.local/Tests")
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/MatrixLayerPortalTests.cpp")
+    enable_testing()
+    # Regression executables are invoked explicitly by CTest/CI.  Keeping them
+    # out of the default IDE build prevents a running diagnostic from blocking
+    # Editor/Game builds by holding its own .exe open on Windows.
+    add_executable(MatrixLayerPortalTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/MatrixLayerPortalTests.cpp"
+    )
+    target_link_libraries(MatrixLayerPortalTests PRIVATE Engine)
+    target_include_directories(MatrixLayerPortalTests PRIVATE
+        "${ENGINE_ROOT}/Engine"
+    )
+    add_test(NAME MatrixLayerPortalRegression COMMAND MatrixLayerPortalTests)
+    set_tests_properties(MatrixLayerPortalRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}"
+    )
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PortalTriggerTraversalTests.cpp")
+    enable_testing()
+    add_executable(PortalTriggerTraversalTests
+        "${ENGINE_LOCAL_TEST_ROOT}/PortalTriggerTraversalTests.cpp"
+    )
+    target_link_libraries(PortalTriggerTraversalTests PRIVATE Engine)
+    target_include_directories(PortalTriggerTraversalTests PRIVATE
+        "${ENGINE_ROOT}/Engine"
+    )
+    add_test(NAME PortalTriggerTraversalRegression COMMAND PortalTriggerTraversalTests
+        "${ENGINE_ROOT}/Engine/Core/Assets/Mesh/cube.obj")
+    set_tests_properties(PortalTriggerTraversalRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}"
+    )
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PortalBackendParityTests.cpp")
+    enable_testing()
+    add_executable(PortalBackendParityTests
+        "${ENGINE_LOCAL_TEST_ROOT}/PortalBackendParityTests.cpp")
+    target_link_libraries(PortalBackendParityTests PRIVATE Engine)
+    target_include_directories(PortalBackendParityTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME PortalBackendApertureParity COMMAND PortalBackendParityTests)
+    set_tests_properties(PortalBackendApertureParity PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/VerticalPortalLoopTests.cpp")
+    enable_testing()
+    add_executable(VerticalPortalLoopTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/VerticalPortalLoopTests.cpp")
+    target_link_libraries(VerticalPortalLoopTests PRIVATE Engine)
+    target_include_directories(VerticalPortalLoopTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME VerticalPortalLoopStress COMMAND VerticalPortalLoopTests)
+    set_tests_properties(VerticalPortalLoopStress PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PortalScaleTraversalTests.cpp")
+    enable_testing()
+    add_executable(PortalScaleTraversalTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/PortalScaleTraversalTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Portals/PortalTraversalRepeater.cpp")
+    target_link_libraries(PortalScaleTraversalTests PRIVATE Engine)
+    target_include_directories(PortalScaleTraversalTests PRIVATE
+        "${ENGINE_ROOT}/Engine"
+        "${ENGINE_ROOT}/Engine/Core/Assets")
+    add_test(NAME PortalScaleTraversalRegression COMMAND PortalScaleTraversalTests)
+    set_tests_properties(PortalScaleTraversalRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/ProjectManifestTests.cpp")
+    enable_testing()
+    add_executable(ProjectManifestTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/ProjectManifestTests.cpp")
+    target_link_libraries(ProjectManifestTests PRIVATE Engine)
+    target_include_directories(ProjectManifestTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME ProjectManifestAssetClosure COMMAND ProjectManifestTests)
+    set_tests_properties(ProjectManifestAssetClosure PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/ImpossibleStaircaseLoopTests.cpp")
+    enable_testing()
+    add_executable(ImpossibleStaircaseLoopTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/ImpossibleStaircaseLoopTests.cpp")
+    target_link_libraries(ImpossibleStaircaseLoopTests PRIVATE Engine)
+    target_include_directories(ImpossibleStaircaseLoopTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME ImpossibleStaircaseLoopRegression
+        COMMAND ImpossibleStaircaseLoopTests)
+    set_tests_properties(ImpossibleStaircaseLoopRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/WarpedGravityTests.cpp")
+    enable_testing()
+    add_executable(WarpedGravityTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/WarpedGravityTests.cpp")
+    target_link_libraries(WarpedGravityTests PRIVATE Engine)
+    target_include_directories(WarpedGravityTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME WarpedGravityRegression COMMAND WarpedGravityTests)
+    set_tests_properties(WarpedGravityRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/RoomLargerInsideTests.cpp")
+    enable_testing()
+    add_executable(RoomLargerInsideTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/RoomLargerInsideTests.cpp")
+    target_link_libraries(RoomLargerInsideTests PRIVATE Engine)
+    target_include_directories(RoomLargerInsideTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME RoomLargerInsideRegression COMMAND RoomLargerInsideTests)
+    set_tests_properties(RoomLargerInsideRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/MovingPortalPairTests.cpp")
+    enable_testing()
+    add_executable(MovingPortalPairTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/MovingPortalPairTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Portals/MovingPortalPairDriver.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Portals/PortalTraversalRepeater.cpp")
+    target_link_libraries(MovingPortalPairTests PRIVATE Engine)
+    target_include_directories(MovingPortalPairTests PRIVATE
+        "${ENGINE_ROOT}/Engine"
+        "${ENGINE_ROOT}/Engine/Core/Assets")
+    add_test(NAME MovingPortalPairRegression COMMAND MovingPortalPairTests)
+    set_tests_properties(MovingPortalPairRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/CrossingWarpVolumesTests.cpp")
+    enable_testing()
+    add_executable(CrossingWarpVolumesTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/CrossingWarpVolumesTests.cpp")
+    target_link_libraries(CrossingWarpVolumesTests PRIVATE Engine)
+    target_include_directories(CrossingWarpVolumesTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME CrossingWarpVolumesRegression
+        COMMAND CrossingWarpVolumesTests)
+    set_tests_properties(CrossingWarpVolumesRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TunnelBidirectionalTraversalTests.cpp")
+    enable_testing()
+    add_executable(TunnelBidirectionalTraversalTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/TunnelBidirectionalTraversalTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Spatial/WarpVolumeTraversalRepeater.cpp")
+    target_link_libraries(TunnelBidirectionalTraversalTests PRIVATE Engine)
+    target_include_directories(TunnelBidirectionalTraversalTests PRIVATE
+        "${ENGINE_ROOT}/Engine"
+        "${ENGINE_ROOT}/Engine/Core/Assets")
+    add_test(NAME TunnelBidirectionalTraversalRegression
+        COMMAND TunnelBidirectionalTraversalTests)
+    set_tests_properties(TunnelBidirectionalTraversalRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
 if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_ROOT}/Engine/Tests/RotateLifecycleTests.cpp")
     enable_testing()
     add_executable(EngineLifecycleTests
         "${ENGINE_ROOT}/Engine/Tests/RotateLifecycleTests.cpp"
-        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Rotate.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Utilities/Rotate.cpp"
     )
     target_link_libraries(EngineLifecycleTests PRIVATE Engine)
     target_include_directories(EngineLifecycleTests PRIVATE
@@ -537,6 +756,29 @@ if(NOT ENGINE_PROJECT_DIR AND
     )
     add_test(NAME RotateDefaultSceneLifecycle COMMAND EngineLifecycleTests)
     set_tests_properties(RotateDefaultSceneLifecycle PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}"
+    )
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_ROOT}/Engine/Tests/MarchingCubesTerrainEditorTests.cpp")
+    enable_testing()
+    add_executable(MarchingCubesTerrainEditorTests EXCLUDE_FROM_ALL
+        "${ENGINE_ROOT}/Engine/Tests/MarchingCubesTerrainEditorTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/MarchingCubes/MarchingCubesChunk.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/MarchingCubes/MarchingCubesQuad.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/MarchingCubes/MarchingCubesTerrain.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/MarchingCubes/PerlinNoiseField.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/MarchingCubes/TerrainStreamingCameraDriver.cpp"
+    )
+    target_link_libraries(MarchingCubesTerrainEditorTests PRIVATE Engine)
+    target_include_directories(MarchingCubesTerrainEditorTests PRIVATE
+        "${ENGINE_ROOT}/Engine"
+        "${ENGINE_ROOT}/Engine/Core/Assets"
+    )
+    add_test(NAME MarchingCubesEditorGeneration
+        COMMAND MarchingCubesTerrainEditorTests)
+    set_tests_properties(MarchingCubesEditorGeneration PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}"
     )
 endif()

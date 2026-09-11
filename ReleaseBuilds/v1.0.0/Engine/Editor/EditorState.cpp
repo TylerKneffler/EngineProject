@@ -12,9 +12,9 @@
 #include "Core/Renderers/RendererFactory.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
-#include "Core/Compoonents/Mesh.h"
-#include "Core/Compoonents/Material.h"
-#include "Core/Compoonents/Sprite.h"
+#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Materials/Material.h"
+#include "Core/Compoonents/Obj/Sprite.h"
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
 #include "Core/AssetRecord.h"
 #include "Core/Graphics/IGraphicsProvider.h"
@@ -491,6 +491,9 @@ void EditorState::LoadSceneNow(const std::string& path)
         {
             OutputDebugStringA("[EditorState::LoadScene] Scene loaded successfully\n");
             LogStartupFailure("Scene loaded successfully: " + resolvedPath);
+            if (m_preferences)
+                m_preferences->SetSpatialDebugVisuals(
+                    m_scene->settings.portalDebugVisuals);
             m_hasUnsavedChanges = false;
             m_currentScenePath =
                 std::filesystem::path(resolvedPath).lexically_normal().string();
@@ -778,6 +781,8 @@ void EditorState::InitializePanels()
     
     OutputDebugStringA("[EditorState::InitializePanels] Calling preferences->Init\n");
     m_preferences->Init(m_projectSettings, m_projectFilePath);
+    m_preferences->SetSpatialDebugVisuals(
+        m_scene && m_scene->settings.portalDebugVisuals);
     m_preferences->OnSettingsChanged = [this]() {
         m_projectSettings = m_preferences->GetSettings();
         if (m_scene)
@@ -788,6 +793,14 @@ void EditorState::InitializePanels()
             if (auto* hierarchy = dynamic_cast<HierarchyView*>(panel.get()))
                 hierarchy->SetDebugInteractionLogging(
                     m_projectSettings.debugHierarchyInteractions);
+    };
+    m_preferences->OnSpatialDebugVisualsChanged = [this](bool enabled) {
+        if (!m_scene)
+            return;
+        m_scene->settings.portalDebugVisuals = enabled;
+        MarkSceneEdited();
+        if (m_renderer)
+            m_renderer->MarkDirty();
     };
     
     OutputDebugStringA("[EditorState::InitializePanels] Checking view factory\n");

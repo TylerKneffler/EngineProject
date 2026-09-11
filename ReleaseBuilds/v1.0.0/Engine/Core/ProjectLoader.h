@@ -37,7 +37,8 @@ private:
     void ParseEditor(const pugi::xml_node& projectNode, ProjectSettings& settings);
     void ParseRendering(const pugi::xml_node& projectNode, ProjectSettings& settings);
     void ParseAspectRatio(const pugi::xml_node& projectNode, ProjectSettings& settings);
-    void ParseDependencies(const pugi::xml_node& projectNode, ProjectSettings& settings);
+    void ParseDependencies(const pugi::xml_node& projectNode,
+        ProjectSettings& settings, const std::string& projectFilePath);
     void ParseComponents(const pugi::xml_node& projectNode, ProjectSettings& settings);
 };
 }

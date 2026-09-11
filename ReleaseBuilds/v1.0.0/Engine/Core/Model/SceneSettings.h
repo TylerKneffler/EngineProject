@@ -35,6 +35,25 @@ struct SceneSettings
     // Default stays false so scene camera reflects in-scene editing context.
     bool sceneViewUiOverlay = false;
 
+    // Editor-only debug overlays for portals, matrix links, and warp volumes.
+    bool portalDebugVisuals = false;
+    // Lets the editor Scene camera use the game camera's source-chart
+    // look-through behavior when its ray enters a finite warp volume. Keep
+    // this off by default so the Scene camera shows the authored bent space.
+    bool sceneCameraWarpLookThrough = false;
+    bool portalDebugWireframe = false;
+    bool portalDebugTintRemoteView = true;
+    float portalDebugOverlayAlpha = 0.45f;
+    // One level renders the directly connected side. Higher values render
+    // portals visible through portals. Runtime clamps both values to hard
+    // safety limits before scheduling any work.
+    int portalRecursionDepth = 2;
+    // Maximum visits to one linked portal pair along a recursive view path.
+    // Two shows the source scene once through its target; higher values extend
+    // that A -> B -> A loop while recursion depth remains the global limit.
+    int portalConnectionRepeatLimit = 2;
+    int portalMaxViewsPerFrame = 24;
+
 };
 }
 

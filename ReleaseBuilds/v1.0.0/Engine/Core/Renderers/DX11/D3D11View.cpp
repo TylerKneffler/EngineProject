@@ -47,7 +47,7 @@ void D3D11View::CreateResources(ID3D11Device* device, uint32_t width, uint32_t h
     ThrowIfFailed(device->CreateShaderResourceView(m_texture.Get(), nullptr, &m_srv));
 
     D3D11_TEXTURE2D_DESC depth = color;
-    depth.Format = DXGI_FORMAT_D32_FLOAT;
+    depth.Format = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
     depth.BindFlags = D3D11_BIND_DEPTH_STENCIL;
     ThrowIfFailed(device->CreateTexture2D(&depth, nullptr, &m_depthTexture));
     ThrowIfFailed(device->CreateDepthStencilView(m_depthTexture.Get(), nullptr, &m_dsv));
@@ -67,7 +67,8 @@ void D3D11View::Render(void* contextHandle, void* mainRtvHandle,
     D3D11_RECT scissor{ 0, 0, static_cast<LONG>(m_width), static_cast<LONG>(m_height) };
     context->RSSetScissorRects(1, &scissor);
     context->ClearRenderTargetView(target, m_clearColor);
-    context->ClearDepthStencilView(m_dsv.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
+    context->ClearDepthStencilView(
+        m_dsv.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
 
     if (drawFn) drawFn(context);
 

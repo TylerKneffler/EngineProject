@@ -1,8 +1,8 @@
 #include "ScenePlacementAndPicking.h"
 
-#include "Core/Compoonents/Camera.h"
-#include "Core/Compoonents/Mesh.h"
-#include "Core/Compoonents/Sprite.h"
+#include "Core/Compoonents/Camera/Camera.h"
+#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Obj/Sprite.h"
 #include "Core/Scene/Scene.h"
 #include <algorithm>
 #include <cfloat>
@@ -250,37 +250,65 @@ Engine::Core::Object* ScenePlacementAndPicking::PickObjectInViewport(
 
     Engine::Core::Object* best = nullptr;
     float bestDistance = FLT_MAX;
-    for (const auto& objPtr : scene.GetObjects())
+    float travelledDistance = 0.f;
+    const std::vector<Engine::Scene::Scene::PortalRaySegment> segments =
+        scene.TracePortalRay({ rayOrigin, rayDir }, 10000.f);
+    for (const Engine::Scene::Scene::PortalRaySegment& segment : segments)
     {
-        Engine::Core::Object* obj = objPtr.get();
-        if (!obj || !obj->IsEnabledInHierarchy() ||
-            (!obj->GetComponent<Engine::Components::Mesh>() &&
-            !obj->GetComponent<Engine::Components::Sprite>()))
+        for (const auto& objPtr : scene.GetObjects())
         {
-            continue;
-        }
+            Engine::Core::Object* obj = objPtr.get();
+            Engine::Components::Mesh* mesh = obj && obj->IsEnabledInHierarchy()
+                ? obj->GetComponent<Engine::Components::Mesh>() : nullptr;
+            Engine::Components::Sprite* sprite = obj && obj->IsEnabledInHierarchy()
+                ? obj->GetComponent<Engine::Components::Sprite>() : nullptr;
+            if (!obj || !obj->IsEnabledInHierarchy() ||
+                (!mesh && !sprite))
+            {
+                continue;
+            }
 
-        const glm::vec3 center = obj->transform.GetWorldPosition();
-        const float radius = glm::max(
-            glm::max(obj->transform.scale.x, obj->transform.scale.y),
-            obj->transform.scale.z) * 0.75f;
-        const glm::vec3 oc = rayOrigin - center;
-        const float a = glm::dot(rayDir, rayDir);
-        const float b = 2.f * glm::dot(oc, rayDir);
-        const float c = glm::dot(oc, oc) - (radius * radius);
-        const float discriminant = b * b - 4.f * a * c;
-        if (discriminant < 0.f)
-            continue;
+            float distance = 0.f;
+            if (mesh && mesh->HasBounds())
+            {
+                if (IntersectMeshBounds(*obj, *mesh, segment.ray.origin,
+                    segment.ray.direction, distance) &&
+                    distance < segment.maxDistance &&
+                    travelledDistance + distance < bestDistance)
+                {
+                    bestDistance = travelledDistance + distance;
+                    best = obj;
+                }
+                continue;
+            }
 
-        const float sqrtDiscriminant = std::sqrt(discriminant);
-        const float t0 = (-b - sqrtDiscriminant) / (2.f * a);
-        const float t1 = (-b + sqrtDiscriminant) / (2.f * a);
-        float distance = t0 > 0.f ? t0 : t1;
-        if (distance > 0.f && distance < bestDistance)
-        {
-            bestDistance = distance;
-            best = obj;
+            // Sprites and meshes without CPU bounds retain the coarse sphere
+            // fallback, but test it in the current portal chart segment.
+            const glm::vec3 center = obj->transform.GetWorldPosition();
+            const float radius = glm::max(
+                glm::max(obj->transform.scale.x, obj->transform.scale.y),
+                obj->transform.scale.z) * 0.75f;
+            const glm::vec3 oc = segment.ray.origin - center;
+            const float a = glm::dot(segment.ray.direction,
+                segment.ray.direction);
+            const float b = 2.f * glm::dot(oc, segment.ray.direction);
+            const float c = glm::dot(oc, oc) - (radius * radius);
+            const float discriminant = b * b - 4.f * a * c;
+            if (discriminant < 0.f)
+                continue;
+
+            const float sqrtDiscriminant = std::sqrt(discriminant);
+            const float t0 = (-b - sqrtDiscriminant) / (2.f * a);
+            const float t1 = (-b + sqrtDiscriminant) / (2.f * a);
+            distance = t0 > 0.f ? t0 : t1;
+            if (distance > 0.f && distance < segment.maxDistance &&
+                travelledDistance + distance < bestDistance)
+            {
+                bestDistance = travelledDistance + distance;
+                best = obj;
+            }
         }
+        travelledDistance += segment.maxDistance;
     }
 
     return best;

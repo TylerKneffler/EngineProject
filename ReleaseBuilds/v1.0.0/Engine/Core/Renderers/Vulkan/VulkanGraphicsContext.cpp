@@ -14,6 +14,12 @@ void VulkanGraphicsContext::SetPipeline(const Engine::Graphics::IPipelineState* 
     if (m_pipeline) vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline->GetPipeline());
 }
 
+void VulkanGraphicsContext::SetStencilReference(uint32_t reference)
+{
+    vkCmdSetStencilReference(m_commandBuffer, VK_STENCIL_FACE_FRONT_AND_BACK,
+        reference);
+}
+
 void VulkanGraphicsContext::SetConstantBuffer(uint32_t, const Engine::Graphics::IGraphicsBuffer* buffer, uint64_t offset)
 {
     if (!m_pipeline || !buffer || offset >= buffer->GetSize()) return;

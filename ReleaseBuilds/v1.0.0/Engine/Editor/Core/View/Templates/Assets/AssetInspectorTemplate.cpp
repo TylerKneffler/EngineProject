@@ -3,7 +3,7 @@
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/AssetRecord.h"
 #include "Core/Compoonents/Materials/Texture.h"
-#include "Core/Compoonents/Material.h"
+#include "Core/Compoonents/Materials/Material.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Graphics/IGraphicsTexture.h"
 #include "Core/Rendering/Sprites/SpriteAnimationAsset.h"
