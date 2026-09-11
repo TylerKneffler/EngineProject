@@ -23,6 +23,10 @@ struct ProjectSettings
     std::string cmakeGenerator;
     std::string platform;
     std::string defaultScene;
+    // Scene roots explicitly included by the project manifest. Assets contains
+    // these scenes plus their recursively discovered file dependencies.
+    std::vector<std::string> includedScenes;
+    std::vector<std::string> includedAssets;
     uint32_t viewportWidth;
     uint32_t viewportHeight;
     float leftPanelWidth;

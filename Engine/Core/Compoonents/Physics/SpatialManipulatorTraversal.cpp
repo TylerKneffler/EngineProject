@@ -478,6 +478,9 @@ void SpatialManipulator::MaterializeTraversalMeshSplits(
         localBody->mass = std::max(0.001f, localBody->mass * 0.5f);
         remoteBody->useGravity = localBody->useGravity;
         remoteBody->gravityScale = localBody->gravityScale;
+        remoteBody->gravityDirection = SafeNormalize(
+            state.remoteLinearTransform * localBody->GetGravityDirection(),
+            localBody->GetGravityDirection());
         remoteBody->linearDamping = localBody->linearDamping;
         remoteBody->angularDamping = localBody->angularDamping;
         remoteBody->friction = localBody->friction;
@@ -674,6 +677,10 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target,
                 : portalLinear * body->GetLinearVelocity();
             const glm::vec3 mappedAngularVelocity = portalRotation *
                 body->GetAngularVelocity();
+            const glm::vec3 mappedGravityDirection = piecewiseWarp
+                ? MapWorldDirectionThroughPortalShape(bodyWorldPosition,
+                    body->GetGravityDirection(), *target)
+                : portalLinear * body->GetGravityDirection();
 
             // Carry the endpoint metric into the object's persistent local
             // scale. SetWorldPose calls EnsureBody after this write, causing
@@ -682,6 +689,7 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target,
             const float portalScaleRatio = GetPortalScaleRatioTo(*target);
             if (!piecewiseWarp)
                 body->Owner->transform.scale *= portalScaleRatio;
+            body->SetGravityDirection(mappedGravityDirection);
             body->SetWorldPose(mappedPosition, mappedRotation);
 
             // A non-similar endpoint pair cannot be represented by an object

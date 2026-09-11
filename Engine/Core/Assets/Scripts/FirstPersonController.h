@@ -35,8 +35,6 @@ private:
     void SetCursorLock(bool locked);
     static bool IsKeyDown(int virtualKey);
 
-    float m_yaw = 0.f;
-    float m_pitch = 0.f;
     bool m_cursorLocked = false;
     std::chrono::steady_clock::time_point m_lastFrame;
 };

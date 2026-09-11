@@ -35,6 +35,11 @@ public:
     bool useGravity = true;
     PROPERTY(Inspector, EditAnywhere, Category = "Physics")
     float gravityScale = 1.f;
+    // Persistent world-space direction for this body's local gravity frame.
+    // Portal traversal remaps it so gravity remains coherent in the target
+    // spatial chart. Magnitude is controlled independently by gravityScale.
+    PROPERTY(Inspector, EditAnywhere, Category = "Physics")
+    glm::vec3 gravityDirection { 0.f, -1.f, 0.f };
     PROPERTY(Inspector, EditAnywhere, Category = "Physics", ClampMin = "0")
     float linearDamping = 0.05f;
     PROPERTY(Inspector, EditAnywhere, Category = "Physics", ClampMin = "0")
@@ -82,8 +87,10 @@ public:
     void SetWorldPose(const glm::vec3& worldPosition, const glm::quat& worldRotation);
     void SetLinearVelocity(const glm::vec3& velocity);
     void SetAngularVelocity(const glm::vec3& velocity);
+    void SetGravityDirection(const glm::vec3& direction);
     glm::vec3 GetLinearVelocity() const;
     glm::vec3 GetAngularVelocity() const;
+    glm::vec3 GetGravityDirection() const;
     float ResolveFrictionFor(const RigidBody* other) const;
     bool IsOverlapping(const RigidBody* other) const;
     bool DidBeginOverlap(const RigidBody* other) const;

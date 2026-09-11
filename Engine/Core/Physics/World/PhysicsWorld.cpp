@@ -368,7 +368,10 @@ void Physics::Step(float deltaTime)
             if (first)
             {
                 first->m_isColliding = true;
-                if (point.m_normalWorldOnB.y() > 0.5f) first->m_isGrounded = true;
+                const glm::vec3 firstUp = -first->GetGravityDirection();
+                if (glm::dot(Engine::Physics::ToGlm(point.m_normalWorldOnB),
+                        firstUp) > 0.5f)
+                    first->m_isGrounded = true;
                 if (first->Owner)
                     if (auto* cloth = first->Owner->GetComponent<Engine::Components::Cloth>())
                         cloth->NotifyRigidBodyCollision(
@@ -379,7 +382,10 @@ void Physics::Step(float deltaTime)
             if (second)
             {
                 second->m_isColliding = true;
-                if (-point.m_normalWorldOnB.y() > 0.5f) second->m_isGrounded = true;
+                const glm::vec3 secondUp = -second->GetGravityDirection();
+                if (glm::dot(-Engine::Physics::ToGlm(point.m_normalWorldOnB),
+                        secondUp) > 0.5f)
+                    second->m_isGrounded = true;
                 if (second->Owner)
                     if (auto* cloth = second->Owner->GetComponent<Engine::Components::Cloth>())
                         cloth->NotifyRigidBodyCollision(

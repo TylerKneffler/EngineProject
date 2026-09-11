@@ -1,6 +1,7 @@
 build/
 .vs/
 .vscode/settings.json
+.local/
 editor-startup.log
 project-build.log
 ReleaseBuilds/.staging-*/

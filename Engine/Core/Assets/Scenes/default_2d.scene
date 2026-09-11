@@ -18,7 +18,7 @@
     </ambientColor>
   </settings>
   <objects>
-    <item prefab="C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/Prefabs/Slime.prefab" enabled="true">
+    <item prefab="Assets/Prefabs/Slime.prefab" enabled="true">
       <transform>
         <Transform.position>
           <item>0</item>

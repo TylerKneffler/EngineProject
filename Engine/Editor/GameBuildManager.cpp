@@ -76,9 +76,11 @@ void GameBuildManager::StartBuild(PostBuildAction action)
             {".cpp", ".c", ".cc", ".cxx"});
         const size_t shaders = CountFiles(m_developmentSettings.shadersDirectory,
             {".hlsl", ".glsl", ".vert", ".frag", ".comp"});
-        const size_t assets = CountFiles(m_developmentSettings.assetsDirectory,
-            {".png", ".jpg", ".jpeg", ".dds", ".obj", ".fbx", ".gltf", ".glb",
-             ".wav", ".ogg", ".mp3", ".ttf", ".otf"});
+        const size_t assets = m_developmentSettings.includedAssets.empty()
+            ? CountFiles(m_developmentSettings.assetsDirectory,
+                {".png", ".jpg", ".jpeg", ".dds", ".obj", ".fbx", ".gltf", ".glb",
+                 ".wav", ".ogg", ".mp3", ".ttf", ".otf"})
+            : m_developmentSettings.includedAssets.size();
         m_console->AddLog(ConsoleView::Level::Build,
             "[Build] Starting Debug Game build: cmake configure/check, compile, and link.");
         m_console->AddLog(ConsoleView::Level::Build,
@@ -86,7 +88,10 @@ void GameBuildManager::StartBuild(PostBuildAction action)
         m_console->AddLog(ConsoleView::Level::Build,
             "[Shaders] " + std::to_string(shaders) + " shader source file(s) discovered; renderer compilation occurs at startup.");
         m_console->AddLog(ConsoleView::Level::Build,
-            "[Assets] " + std::to_string(assets) + " runtime asset file(s) discovered.");
+            "[Assets] " + std::to_string(assets) +
+            (m_developmentSettings.includedAssets.empty()
+                ? " runtime asset file(s) discovered."
+                : " manifest asset file(s), including scene dependencies."));
     }
 
     // Start the background build process

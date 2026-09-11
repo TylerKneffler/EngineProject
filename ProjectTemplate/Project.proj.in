@@ -25,6 +25,10 @@
     <EditorTheme>Graphite</EditorTheme>
   </PropertyGroup>
   <ItemGroup>
+    <Scene Include="Assets/Scenes/default.scene" />
+    <Scene Include="Assets/Scenes/default_2d.scene" />
+  </ItemGroup>
+  <ItemGroup>
     <LeftPanelTab Include="HierarchyView" />
     <CenterPanelTab Include="Scene" />
     <CenterPanelTab Include="Game" />

@@ -20,6 +20,20 @@
       </components>
       <children />
     </item>
+    <item name="Quarter Turn Exit Camera" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>2</item><item>16.42477796</item></Transform.position>
+        <Transform.rotation><item>0</item><item>3.14159265</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Camera Camera.active="false" Camera.useTransformRotation="true" Camera.fov="58" Camera.near="0.01" Camera.far="100" Camera.orthographic="false" Camera.orthographicSize="5">
+          <Camera.target><item>0</item><item>2</item><item>4.71238898</item></Camera.target>
+          <Camera.up><item>0</item><item>1</item><item>0</item></Camera.up>
+        </components:Camera>
+      </components>
+      <children />
+    </item>
     <item name="Quarter Turn Warp Volume" enabled="true">
       <transform>
         <Transform.position><item>0</item><item>2</item><item>4.71238898</item></Transform.position>
@@ -42,6 +56,22 @@
           <SpatialManipulator.meshReference expectedType="Mesh" objectPath="" objectName="" componentType="" componentIndex="0" />
           <SpatialManipulator.traversalTriggerBodyReference expectedType="RigidBody" objectPath="" objectName="" componentType="" componentIndex="0" />
           <SpatialManipulator.targetManipulator expectedType="" objectPath="" objectName="" componentType="" componentIndex="0" />
+        </components:SpatialManipulator>
+      </components>
+      <children />
+    </item>
+    <item name="Quarter Turn Exit Continuation" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>2</item><item>14.42477796</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="1" SpatialManipulator.definesWarpVolume="true" SpatialManipulator.warpPriority="1" SpatialManipulator.warpVolumeShape="1" SpatialManipulator.warpVolumeRadius="5" SpatialManipulator.warpBoundaryFalloff="0" SpatialManipulator.applyTraversalScale="false" SpatialManipulator.persistTraversalScaleOnExit="true" SpatialManipulator.spaceWarpType="0">
+          <SpatialManipulator.position><item>11</item><item>0</item><item>-8.42477796</item></SpatialManipulator.position>
+          <SpatialManipulator.rotation><item>0</item><item>1.5707963268</item><item>0</item></SpatialManipulator.rotation>
+          <SpatialManipulator.scale><item>1</item><item>1</item><item>1</item></SpatialManipulator.scale>
+          <SpatialManipulator.warpVolumeSize><item>8</item><item>6</item><item>10</item></SpatialManipulator.warpVolumeSize>
         </components:SpatialManipulator>
       </components>
       <children />
@@ -103,7 +133,7 @@
     </item>
     <item name="Exit Warm Light" enabled="true">
       <transform>
-        <Transform.position><item>0</item><item>2.5</item><item>8.6</item></Transform.position>
+        <Transform.position><item>0</item><item>2.5</item><item>11.2</item></Transform.position>
         <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
         <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
       </transform>

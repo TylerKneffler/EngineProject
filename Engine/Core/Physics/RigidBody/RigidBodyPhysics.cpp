@@ -49,6 +49,7 @@ Engine::Components::RigidBody::RigidBody() : m_impl(new Impl())
     RegisterField("mass", mass);
     RegisterField("useGravity", useGravity);
     RegisterField("gravityScale", gravityScale);
+    RegisterField("gravityDirection", gravityDirection);
     RegisterField("linearDamping", linearDamping);
     RegisterField("angularDamping", angularDamping);
     RegisterField("friction", friction);
@@ -387,7 +388,8 @@ void Engine::Components::RigidBody::ApplyBodySettings()
     m_impl->body->setDamping(std::max(0.f, linearDamping), std::max(0.f, angularDamping));
     m_impl->body->setFriction(std::clamp(friction, 0.f, 1.f));
     m_impl->body->setRestitution(std::clamp(restitution, 0.f, 1.f));
-    m_impl->body->setGravity(useGravity ? btVector3(0.f, -9.81f * gravityScale, 0.f)
+    const glm::vec3 gravity = GetGravityDirection() * (9.81f * gravityScale);
+    m_impl->body->setGravity(useGravity ? Engine::Physics::ToBullet(gravity)
                                         : btVector3(0.f, 0.f, 0.f));
     m_impl->body->setLinearFactor(btVector3(!freezePositionX, !freezePositionY, !freezePositionZ));
     m_impl->body->setAngularFactor(btVector3(!freezeRotationX, !freezeRotationY, !freezeRotationZ));
@@ -591,6 +593,20 @@ void Engine::Components::RigidBody::SetAngularVelocity(const glm::vec3& velocity
 {
     if (EnsureBody()) { m_impl->body->activate(true); m_impl->body->setAngularVelocity(Engine::Physics::ToBullet(velocity)); }
 }
+void Engine::Components::RigidBody::SetGravityDirection(const glm::vec3& direction)
+{
+    const float lengthSquared = glm::dot(direction, direction);
+    gravityDirection = std::isfinite(lengthSquared) && lengthSquared > 1e-8f
+        ? direction / std::sqrt(lengthSquared)
+        : glm::vec3(0.f, -1.f, 0.f);
+    if (m_impl && m_impl->body)
+    {
+        const glm::vec3 gravity = gravityDirection * (9.81f * gravityScale);
+        m_impl->body->setGravity(useGravity ? Engine::Physics::ToBullet(gravity)
+                                            : btVector3(0.f, 0.f, 0.f));
+        m_impl->body->activate(true);
+    }
+}
 glm::vec3 Engine::Components::RigidBody::GetLinearVelocity() const
 {
     return m_impl && m_impl->body ? Engine::Physics::ToGlm(m_impl->body->getLinearVelocity()) : glm::vec3(0.f);
@@ -598,6 +614,13 @@ glm::vec3 Engine::Components::RigidBody::GetLinearVelocity() const
 glm::vec3 Engine::Components::RigidBody::GetAngularVelocity() const
 {
     return m_impl && m_impl->body ? Engine::Physics::ToGlm(m_impl->body->getAngularVelocity()) : glm::vec3(0.f);
+}
+glm::vec3 Engine::Components::RigidBody::GetGravityDirection() const
+{
+    const float lengthSquared = glm::dot(gravityDirection, gravityDirection);
+    return std::isfinite(lengthSquared) && lengthSquared > 1e-8f
+        ? gravityDirection / std::sqrt(lengthSquared)
+        : glm::vec3(0.f, -1.f, 0.f);
 }
 
 float Engine::Components::RigidBody::ResolveFrictionFor(const RigidBody* other) const

@@ -561,14 +561,16 @@ set_target_properties(Server PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "${ENGINE_RUNTIME_WORKING_DIRECTORY}"
 )
 
+set(ENGINE_LOCAL_TEST_ROOT "${ENGINE_ROOT}/.local/Tests")
+
 if(NOT ENGINE_PROJECT_DIR AND
-   EXISTS "${ENGINE_ROOT}/Engine/Tests/MatrixLayerPortalTests.cpp")
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/MatrixLayerPortalTests.cpp")
     enable_testing()
     # Regression executables are invoked explicitly by CTest/CI.  Keeping them
     # out of the default IDE build prevents a running diagnostic from blocking
     # Editor/Game builds by holding its own .exe open on Windows.
     add_executable(MatrixLayerPortalTests EXCLUDE_FROM_ALL
-        "${ENGINE_ROOT}/Engine/Tests/MatrixLayerPortalTests.cpp"
+        "${ENGINE_LOCAL_TEST_ROOT}/MatrixLayerPortalTests.cpp"
     )
     target_link_libraries(MatrixLayerPortalTests PRIVATE Engine)
     target_include_directories(MatrixLayerPortalTests PRIVATE
@@ -581,10 +583,10 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
-   EXISTS "${ENGINE_ROOT}/Engine/Tests/PortalTriggerTraversalTests.cpp")
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PortalTriggerTraversalTests.cpp")
     enable_testing()
     add_executable(PortalTriggerTraversalTests
-        "${ENGINE_ROOT}/Engine/Tests/PortalTriggerTraversalTests.cpp"
+        "${ENGINE_LOCAL_TEST_ROOT}/PortalTriggerTraversalTests.cpp"
     )
     target_link_libraries(PortalTriggerTraversalTests PRIVATE Engine)
     target_include_directories(PortalTriggerTraversalTests PRIVATE
@@ -598,10 +600,10 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
-   EXISTS "${ENGINE_ROOT}/Engine/Tests/PortalBackendParityTests.cpp")
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PortalBackendParityTests.cpp")
     enable_testing()
     add_executable(PortalBackendParityTests
-        "${ENGINE_ROOT}/Engine/Tests/PortalBackendParityTests.cpp")
+        "${ENGINE_LOCAL_TEST_ROOT}/PortalBackendParityTests.cpp")
     target_link_libraries(PortalBackendParityTests PRIVATE Engine)
     target_include_directories(PortalBackendParityTests PRIVATE
         "${ENGINE_ROOT}/Engine")
@@ -611,10 +613,10 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
-   EXISTS "${ENGINE_ROOT}/Engine/Tests/VerticalPortalLoopTests.cpp")
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/VerticalPortalLoopTests.cpp")
     enable_testing()
     add_executable(VerticalPortalLoopTests EXCLUDE_FROM_ALL
-        "${ENGINE_ROOT}/Engine/Tests/VerticalPortalLoopTests.cpp")
+        "${ENGINE_LOCAL_TEST_ROOT}/VerticalPortalLoopTests.cpp")
     target_link_libraries(VerticalPortalLoopTests PRIVATE Engine)
     target_include_directories(VerticalPortalLoopTests PRIVATE
         "${ENGINE_ROOT}/Engine")
@@ -624,10 +626,10 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
-   EXISTS "${ENGINE_ROOT}/Engine/Tests/PortalScaleTraversalTests.cpp")
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PortalScaleTraversalTests.cpp")
     enable_testing()
     add_executable(PortalScaleTraversalTests EXCLUDE_FROM_ALL
-        "${ENGINE_ROOT}/Engine/Tests/PortalScaleTraversalTests.cpp"
+        "${ENGINE_LOCAL_TEST_ROOT}/PortalScaleTraversalTests.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/PortalTraversalRepeater.cpp")
     target_link_libraries(PortalScaleTraversalTests PRIVATE Engine)
     target_include_directories(PortalScaleTraversalTests PRIVATE
@@ -635,6 +637,59 @@ if(NOT ENGINE_PROJECT_DIR AND
         "${ENGINE_ROOT}/Engine/Core/Assets")
     add_test(NAME PortalScaleTraversalRegression COMMAND PortalScaleTraversalTests)
     set_tests_properties(PortalScaleTraversalRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/ProjectManifestTests.cpp")
+    enable_testing()
+    add_executable(ProjectManifestTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/ProjectManifestTests.cpp")
+    target_link_libraries(ProjectManifestTests PRIVATE Engine)
+    target_include_directories(ProjectManifestTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME ProjectManifestAssetClosure COMMAND ProjectManifestTests)
+    set_tests_properties(ProjectManifestAssetClosure PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/ImpossibleStaircaseLoopTests.cpp")
+    enable_testing()
+    add_executable(ImpossibleStaircaseLoopTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/ImpossibleStaircaseLoopTests.cpp")
+    target_link_libraries(ImpossibleStaircaseLoopTests PRIVATE Engine)
+    target_include_directories(ImpossibleStaircaseLoopTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME ImpossibleStaircaseLoopRegression
+        COMMAND ImpossibleStaircaseLoopTests)
+    set_tests_properties(ImpossibleStaircaseLoopRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/WarpedGravityTests.cpp")
+    enable_testing()
+    add_executable(WarpedGravityTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/WarpedGravityTests.cpp")
+    target_link_libraries(WarpedGravityTests PRIVATE Engine)
+    target_include_directories(WarpedGravityTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME WarpedGravityRegression COMMAND WarpedGravityTests)
+    set_tests_properties(WarpedGravityRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/RoomLargerInsideTests.cpp")
+    enable_testing()
+    add_executable(RoomLargerInsideTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/RoomLargerInsideTests.cpp")
+    target_link_libraries(RoomLargerInsideTests PRIVATE Engine)
+    target_include_directories(RoomLargerInsideTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME RoomLargerInsideRegression COMMAND RoomLargerInsideTests)
+    set_tests_properties(RoomLargerInsideRegression PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()
 
