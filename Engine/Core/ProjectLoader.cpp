@@ -1,5 +1,9 @@
 #include "ProjectLoader.h"
+#include <filesystem>
+#include <fstream>
 #include <pugixml.hpp>
+#include <regex>
+#include <set>
 
 // ---------------------------------------------------------------------------
 // LoadProject
@@ -33,7 +37,7 @@ ProjectLoader::ProjectSettings ProjectLoader::LoadProject(const std::string& pro
     ParseEditor(projectNode, settings);
     ParseRendering(projectNode, settings);
     ParseAspectRatio(projectNode, settings);
-    ParseDependencies(projectNode, settings);
+    ParseDependencies(projectNode, settings, projFilePath);
     ParseComponents(projectNode, settings);
 
     return settings;
@@ -321,12 +325,102 @@ void ProjectLoader::ParseAspectRatio(const pugi::xml_node& projectNode, ProjectS
 // ---------------------------------------------------------------------------
 // ParseDependencies
 // ---------------------------------------------------------------------------
-void ProjectLoader::ParseDependencies(const pugi::xml_node& projectNode, ProjectSettings& settings)
+void ProjectLoader::ParseDependencies(const pugi::xml_node& projectNode,
+    ProjectSettings& settings, const std::string& projectFilePath)
 {
-    // Placeholder for dependency parsing
-    // Currently not used in core loading logic
-    (void)projectNode;
-    (void)settings;
+    namespace fs = std::filesystem;
+    const fs::path projectRoot = fs::absolute(fs::path(projectFilePath)).parent_path();
+    std::set<std::string> included;
+    std::vector<std::pair<std::string, fs::path>> pending;
+
+    const auto normalizedManifestPath = [&projectRoot](const fs::path& path)
+    {
+        std::string generic = path.generic_string();
+        const std::string engineAssets = "Engine/Core/Assets/";
+        const size_t engineAssetsOffset = generic.find(engineAssets);
+        if (engineAssetsOffset != std::string::npos)
+            return std::string("Assets/") + generic.substr(
+                engineAssetsOffset + engineAssets.size());
+        if (path.is_absolute())
+        {
+            std::error_code error;
+            const fs::path relative = fs::relative(path, projectRoot, error);
+            if (!error && !relative.empty() &&
+                *relative.begin() != fs::path(".."))
+                generic = relative.generic_string();
+        }
+        while (generic.rfind("./", 0) == 0)
+            generic.erase(0, 2);
+        return fs::path(generic).lexically_normal().generic_string();
+    };
+
+    const auto physicalPath = [&projectRoot](const std::string& manifestPath,
+        const fs::path& referringFile)
+    {
+        fs::path reference(manifestPath);
+        if (reference.is_absolute())
+            return reference;
+        const std::string generic = reference.generic_string();
+        const fs::path projectRelative = projectRoot / reference;
+        std::error_code existsError;
+        if (fs::exists(projectRelative, existsError))
+            return projectRelative;
+        if (generic.rfind("Assets/", 0) == 0 ||
+            generic.rfind("Engine/Core/Assets/", 0) == 0)
+            return projectRelative;
+        return referringFile.empty() ? projectRelative :
+            referringFile.parent_path() / reference;
+    };
+
+    const auto enqueue = [&](const std::string& reference,
+        const fs::path& referringFile)
+    {
+        if (reference.empty())
+            return;
+        const fs::path file = physicalPath(reference, referringFile)
+            .lexically_normal();
+        const std::string manifestPath = normalizedManifestPath(file);
+        if (included.insert(manifestPath).second)
+            pending.emplace_back(manifestPath, file);
+    };
+
+    const auto includeScene = [&](const pugi::xml_node& scene)
+    {
+        const std::string path = scene.attribute("Include").value();
+        if (path.empty())
+            return;
+        const std::string manifestPath = normalizedManifestPath(path);
+        if (std::find(settings.includedScenes.begin(),
+                settings.includedScenes.end(), manifestPath) ==
+            settings.includedScenes.end())
+            settings.includedScenes.push_back(manifestPath);
+        enqueue(path, {});
+    };
+    for (auto scene : projectNode.children("Scene"))
+        includeScene(scene);
+    for (auto itemGroup : projectNode.children("ItemGroup"))
+        for (auto scene : itemGroup.children("Scene"))
+            includeScene(scene);
+
+    // Asset-bearing scene formats are deliberately text based. Extracting
+    // path-shaped values keeps the manifest independent of component types and
+    // also follows prefab, material, sprite-animation, and spritesheet chains.
+    const std::regex assetReference(
+        R"(([A-Za-z]:)?[A-Za-z0-9_./\\ -]+\.(scene|prefab|obj|fbx|gltf|glb|material|png|jpg|jpeg|dds|ktx|ktx2|hdr|exr|wav|ogg|mp3|ttf|otf|spriteanim|spritesheet|json|hlsl|glsl|vert|frag|comp))",
+        std::regex::icase);
+    for (size_t index = 0; index < pending.size(); ++index)
+    {
+        const fs::path file = pending[index].second;
+        std::ifstream input(file, std::ios::binary);
+        if (!input)
+            continue;
+        const std::string content((std::istreambuf_iterator<char>(input)),
+            std::istreambuf_iterator<char>());
+        for (std::sregex_iterator match(content.begin(), content.end(),
+                 assetReference), end; match != end; ++match)
+            enqueue((*match)[0].str(), file);
+    }
+    settings.includedAssets.assign(included.begin(), included.end());
 }
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Core/Component.h"
-#include "Core/Compoonents/Mesh.h"
+#include "Core/Compoonents/Obj/Mesh.h"
 #include <cstdint>
 #include <glm/glm.hpp>
 #include <vector>

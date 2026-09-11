@@ -159,6 +159,65 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
                 if (OnComponentsChanged)
                     OnComponentsChanged();
             }
+
+            ui.Separator();
+            ui.Label("Spatial Debug");
+            bool portalDebugChanged = false;
+            portalDebugChanged |= ui.Checkbox("Enable Spatial Debug Visuals",
+                &m_scene->settings.portalDebugVisuals);
+            if (m_scene->settings.portalDebugVisuals)
+                ui.Label("Portal/warp: yellow points, aperture edges, mappings, normals, and volume frames");
+            portalDebugChanged |= ui.Checkbox("Scene Camera Warp Look-Through",
+                &m_scene->settings.sceneCameraWarpLookThrough);
+            ui.Tooltip("Use game-style source-chart rendering when the Scene camera looks into a warp volume. Disable to inspect the authored bent space.");
+            portalDebugChanged |= ui.Checkbox("Spatial Wireframe Overlay",
+                &m_scene->settings.portalDebugWireframe);
+            portalDebugChanged |= ui.Checkbox("Tint Remote Portal View",
+                &m_scene->settings.portalDebugTintRemoteView);
+            portalDebugChanged |= ui.DragFloat("Spatial Overlay Alpha",
+                &m_scene->settings.portalDebugOverlayAlpha, 0.02f, 0.f, 1.f);
+            float portalRecursionDepth = static_cast<float>(
+                m_scene->settings.portalRecursionDepth);
+            if (ui.DragFloat("Portal Recursion Depth",
+                &portalRecursionDepth, 1.f, 1.f, 8.f))
+            {
+                m_scene->settings.portalRecursionDepth = static_cast<int>(
+                    std::round(portalRecursionDepth));
+                portalDebugChanged = true;
+            }
+            ui.Tooltip("Maximum total portal hops in one view path.");
+            float portalConnectionRepeatLimit = static_cast<float>(
+                m_scene->settings.portalConnectionRepeatLimit);
+            if (ui.DragFloat("Portal Link Repeat Limit",
+                &portalConnectionRepeatLimit, 1.f, 1.f, 8.f))
+            {
+                m_scene->settings.portalConnectionRepeatLimit =
+                    static_cast<int>(std::round(portalConnectionRepeatLimit));
+                portalDebugChanged = true;
+            }
+            ui.Tooltip("1 shows only the connected side; 2 shows the source once through its target. Increase with recursion depth to extend the loop.");
+            float portalViewBudget = static_cast<float>(
+                m_scene->settings.portalMaxViewsPerFrame);
+            if (ui.DragFloat("Portal View Budget",
+                &portalViewBudget, 1.f, 1.f, 64.f))
+            {
+                m_scene->settings.portalMaxViewsPerFrame = static_cast<int>(
+                    std::round(portalViewBudget));
+                portalDebugChanged = true;
+            }
+            if (portalDebugChanged)
+            {
+                m_scene->settings.portalDebugOverlayAlpha = std::clamp(
+                    m_scene->settings.portalDebugOverlayAlpha, 0.f, 1.f);
+                m_scene->settings.portalRecursionDepth = std::clamp(
+                    m_scene->settings.portalRecursionDepth, 1, 8);
+                m_scene->settings.portalConnectionRepeatLimit = std::clamp(
+                    m_scene->settings.portalConnectionRepeatLimit, 1, 8);
+                m_scene->settings.portalMaxViewsPerFrame = std::clamp(
+                    m_scene->settings.portalMaxViewsPerFrame, 1, 64);
+                if (OnComponentsChanged)
+                    OnComponentsChanged();
+            }
         }
         ui.EndTextWrap();
         ui.EndWindow();

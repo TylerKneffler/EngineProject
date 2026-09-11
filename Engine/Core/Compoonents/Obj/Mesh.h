@@ -40,6 +40,9 @@ public:
     const std::vector<Vertex>& GetVertices() const { return m_vertices; }
     // Returns true only when CPU vertices, bounds, and the GPU buffer changed.
     bool SetDeformedVertices(const std::vector<Vertex>& vertices);
+    // Copies the runtime rendering context needed by a procedural mesh cut.
+    // This does not copy vertex data or authoring/morph state.
+    void InitializeRuntimeCloneFrom(const Mesh& source);
     uint32_t GetVertexStride() const { return sizeof(Vertex); }
     bool     IsReady()        const { return m_ready; }
     const std::string& GetFilePath() const { return m_filePath; }
@@ -56,6 +59,12 @@ public:
     uint64_t GetMorphWeightsRevision() const;
     bool HasMorphTargets() const { return !m_morphTargets.empty(); }
 
+    using SliceResult = std::pair<std::vector<Vertex>, std::vector<Vertex>>;
+    // Returns closed positive/negative halves. For a closed intersected mesh,
+    // the cut contour is welded and capped with triangulated planar faces.
+    static SliceResult SliceByPlane(const std::vector<Vertex>& vertices,
+        const glm::vec3& planePoint, const glm::vec3& planeNormal);
+
     bool        DrawProperties(::Engine::Editor::IEditorUi& ui) override;
     JsonValue   Serialize() const override;
     void        Deserialize(const JsonValue& v) override;
@@ -69,6 +78,7 @@ private:
     std::string m_filePath;
     std::vector<Vertex> m_vertices;
     std::unique_ptr<IGraphicsBuffer> m_vertexBuffer;
+    IGraphicsBufferFactory* m_bufferFactory = nullptr;
     bool m_ready = false;
     bool m_hasBounds = false;
     glm::vec3 m_boundsMin{};

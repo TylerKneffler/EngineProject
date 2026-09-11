@@ -1,7 +1,7 @@
-#include "Core/Compoonents/AudioSource.h"
+#include "Core/Compoonents/Audio/AudioSource.h"
 
 #include "Core/Audio/AudioMixer.h"
-#include "Core/Compoonents/Camera.h"
+#include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Editor/UI/IEditorUi.h"
@@ -19,6 +19,22 @@ extern "C" {
 
 namespace Engine::Components
 {
+
+namespace
+{
+glm::mat4 SpatialAudioWorldMatrix(const Engine::Core::Object& object)
+{
+    glm::mat4 world = object.transform.GetWorldMatrix();
+    if (object.transform.matrixLayer.enabled)
+        world = object.transform.matrixLayer.localToLayer * world;
+    if (Engine::Scene::Scene* scene = object.GetScene())
+    {
+        world = scene->MapSpatialMatrix(world,
+            { Engine::Scene::Scene::SpatialQueryDomain::Audio, &object });
+    }
+    return world;
+}
+}
 
 #ifndef ENGINE_ASSETS_PATH
 #define ENGINE_ASSETS_PATH "Engine/Core/Assets/"
@@ -253,16 +269,15 @@ void AudioSource::ApplySettings()
     if (Owner)
     {
         transformRevision = Owner->transform.GetWorldRevision();
-        const glm::mat4 world = Owner->transform.GetWorldMatrix();
+        const glm::mat4 world = SpatialAudioWorldMatrix(*Owner);
         position = glm::vec3(world[3]);
         forward = SafeDirection(glm::vec3(world[2]), forward);
     }
-    if (m_impl->appliedTransformRevision != transformRevision)
-    {
-        ma_sound_set_position(&m_impl->sound, position.x, position.y, position.z);
-        ma_sound_set_direction(&m_impl->sound, forward.x, forward.y, forward.z);
-        m_impl->appliedTransformRevision = transformRevision;
-    }
+    // A containing nonlinear space can change while the source's Euclidean
+    // transform revision stays fixed, so mapped spatial audio is refreshed.
+    ma_sound_set_position(&m_impl->sound, position.x, position.y, position.z);
+    ma_sound_set_direction(&m_impl->sound, forward.x, forward.y, forward.z);
+    m_impl->appliedTransformRevision = transformRevision;
     const float clampedInner = std::clamp(coneInnerAngle, 0.f, 360.f);
     const float inner = directional ? glm::radians(clampedInner)
                                     : glm::two_pi<float>();
@@ -283,7 +298,7 @@ void AudioSource::UpdateListener()
         ? nullptr : cameraObject->GetComponent<Camera>());
     if (!camera || !cameraObject) return;
 
-    const glm::mat4 world = cameraObject->transform.GetWorldMatrix();
+    const glm::mat4 world = SpatialAudioWorldMatrix(*cameraObject);
     const glm::vec3 position(world[3]);
     glm::vec3 forward;
     glm::vec3 up;

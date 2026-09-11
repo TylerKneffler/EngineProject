@@ -12,6 +12,7 @@ public:
     D3D11GraphicsContext(ID3D11Device* device, ID3D11DeviceContext* context);
 
     void SetPipeline(const Engine::Graphics::IPipelineState* pipeline) override;
+    void SetStencilReference(uint32_t reference) override;
     void SetConstantBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint64_t offset = 0) override;
     void SetStructuredBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer) override;
     void SetVertexBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset = 0) override;
@@ -35,6 +36,8 @@ private:
     ID3D11DeviceContext* m_context = nullptr;
     std::array<Microsoft::WRL::ComPtr<ID3D11Buffer>, CONSTANT_BUFFER_SLOTS> m_constantBuffers;
     Microsoft::WRL::ComPtr<ID3D11SamplerState> m_materialSampler;
+    Microsoft::WRL::ComPtr<ID3D11DepthStencilState> m_depthStencilState;
+    uint32_t m_stencilReference = 0;
 };
 
 class D3D11GraphicsContextFactory : public Engine::Graphics::IGraphicsContextFactory

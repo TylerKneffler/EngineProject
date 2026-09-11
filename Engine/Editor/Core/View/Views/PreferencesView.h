@@ -48,6 +48,11 @@ public:
     // Callback fired when any setting is changed in the UI
     std::function<void()> OnSettingsChanged;
 
+    // Spatial diagnostics are serialized by the active scene, but exposing
+    // the switch here makes it readily available from Project Preferences.
+    void SetSpatialDebugVisuals(bool enabled) { m_spatialDebugVisuals = enabled; }
+    std::function<void(bool)> OnSpatialDebugVisualsChanged;
+
 private:
     void DrawMetadataSection(IEditorUi& ui);
     void DrawPathsSection(IEditorUi& ui);
@@ -62,6 +67,7 @@ private:
     void NotifyChanged() { if (OnSettingsChanged) OnSettingsChanged(); }
 
     bool m_isOpen = false;
+    bool m_spatialDebugVisuals = false;
     std::string m_projFilePath;
     Engine::Model::ProjectSettings m_settings;
 

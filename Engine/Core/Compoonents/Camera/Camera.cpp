@@ -1,5 +1,6 @@
 #include "Camera.h"
 #include "Core/Object.h"
+#include "Core/Scene/Scene.h"
 #include <cassert>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
@@ -23,10 +24,30 @@ Camera::Camera()
 glm::mat4 Camera::GetViewMatrix() const
 {
     assert(Owner && "Camera requires an owner Object with a Transform");
-    const glm::mat4 world = Owner->transform.GetWorldMatrix();
+    glm::mat4 world = Owner->transform.GetWorldMatrix();
+    if (Owner->transform.matrixLayer.enabled)
+        world = Owner->transform.matrixLayer.localToLayer * world;
+    bool useSourceWarpChart = false;
+    if (Owner->GetScene())
+    {
+        const Engine::Scene::Scene::SpatialQuerySample cameraSample =
+            Owner->GetScene()->SampleSpatialPoint(glm::vec3(world[3]),
+                { Engine::Scene::Scene::SpatialQueryDomain::Camera, Owner });
+        useSourceWarpChart = cameraSample.affectedByWarpVolume;
+        if (!useSourceWarpChart)
+        {
+            world = Owner->GetScene()->MapSpatialMatrix(world,
+                { Engine::Scene::Scene::SpatialQueryDomain::Camera, Owner });
+        }
+    }
     const glm::vec3 p = glm::vec3(world[3]);
     if (!useTransformRotation)
-        return glm::lookAtLH(p, target, up);
+    {
+        const glm::vec3 mappedTarget = Owner->GetScene() && !useSourceWarpChart
+            ? Owner->GetScene()->MapSpatialPoint(target,
+                { Engine::Scene::Scene::SpatialQueryDomain::Camera }) : target;
+        return glm::lookAtLH(p, mappedTarget, up);
+    }
 
     const glm::vec3 forward = glm::normalize(glm::vec3(world[2]));
     const glm::vec3 cameraUp = glm::normalize(glm::vec3(world[1]));

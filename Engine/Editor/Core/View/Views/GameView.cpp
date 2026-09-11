@@ -1,6 +1,6 @@
 #include "GameView.h"
 #include "Engine/Editor/UI/IEditorUi.h"
-#include "Core/Compoonents/Camera.h"
+#include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Graphics/IGraphicsProvider.h"
@@ -103,7 +103,8 @@ void GameView::Render3D(void* cmd)
     factory->SetCommandBuffer(cmd);
     auto ctx = factory->CreateContext();
     if (ctx)
-        m_scene->Render(ctx.get(), m_aspect, gameCamera, false);
+        m_scene->Render(ctx.get(), m_aspect, gameCamera, false,
+            GetWidth(), GetHeight());
 }
 
 // ---------------------------------------------------------------------------

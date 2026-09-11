@@ -3,6 +3,7 @@
 #include "Core/Component.h"
 #include "Core/PropertyMacros.h"
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <string>
 #include <vector>
 
@@ -34,6 +35,11 @@ public:
     bool useGravity = true;
     PROPERTY(Inspector, EditAnywhere, Category = "Physics")
     float gravityScale = 1.f;
+    // Persistent world-space direction for this body's local gravity frame.
+    // Portal traversal remaps it so gravity remains coherent in the target
+    // spatial chart. Magnitude is controlled independently by gravityScale.
+    PROPERTY(Inspector, EditAnywhere, Category = "Physics")
+    glm::vec3 gravityDirection { 0.f, -1.f, 0.f };
     PROPERTY(Inspector, EditAnywhere, Category = "Physics", ClampMin = "0")
     float linearDamping = 0.05f;
     PROPERTY(Inspector, EditAnywhere, Category = "Physics", ClampMin = "0")
@@ -77,14 +83,30 @@ public:
     void AddForce(const glm::vec3& force);
     void AddTorque(const glm::vec3& torque);
     void AddImpulse(const glm::vec3& impulse);
+    void SetWorldPosition(const glm::vec3& worldPosition);
+    void SetWorldPose(const glm::vec3& worldPosition, const glm::quat& worldRotation);
     void SetLinearVelocity(const glm::vec3& velocity);
     void SetAngularVelocity(const glm::vec3& velocity);
+    void SetGravityDirection(const glm::vec3& direction);
     glm::vec3 GetLinearVelocity() const;
     glm::vec3 GetAngularVelocity() const;
+    glm::vec3 GetGravityDirection() const;
     float ResolveFrictionFor(const RigidBody* other) const;
+    bool IsOverlapping(const RigidBody* other) const;
+    bool DidBeginOverlap(const RigidBody* other) const;
+    bool DidEndOverlap(const RigidBody* other) const;
+    std::vector<RigidBody*> GetOverlappingBodies() const;
     bool IsColliding() const { return m_isColliding; }
     bool IsGrounded() const { return m_isGrounded; }
     void NotifyEditorTransformChanged();
+
+    // Runtime-only local half of a portal-split mesh. This replaces the
+    // owner's ordinary collider set while active so the dynamic body occupies
+    // only its source-space portion; the remote portion is a Physics proxy.
+    void SetPortalLocalMeshCollider(const void* instanceKey,
+        const std::vector<glm::vec3>& localVertices);
+    void ClearPortalLocalMeshCollider(const void* instanceKey);
+    bool HasPortalLocalMeshCollider() const;
 
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
@@ -98,11 +120,14 @@ public:
 
 private:
     friend class Engine::Physics::Physics;
+    void BeginOverlapFrame();
+    void RegisterOverlap(const RigidBody* other);
     bool EnsureBody();
     void DestroyBody();
     void SyncBodyFromTransform();
     void SyncTransformFromBody();
     void ApplyBodySettings();
+    void* GetNativeCollisionObjectForPhysics() const;
     struct Impl;
     Impl* m_impl = nullptr;
     bool m_isColliding = false;

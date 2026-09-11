@@ -58,6 +58,15 @@ public:
     Engine::Graphics::IPipelineStateBuilder& SetDepthEnable(bool enable) override;
     Engine::Graphics::IPipelineStateBuilder& SetDepthWriteEnable(bool enable) override;
     Engine::Graphics::IPipelineStateBuilder& SetDepthFunc(int func) override;
+    Engine::Graphics::IPipelineStateBuilder& SetStencilEnable(bool enable) override;
+    Engine::Graphics::IPipelineStateBuilder& SetStencilReadMask(uint8_t mask) override;
+    Engine::Graphics::IPipelineStateBuilder& SetStencilWriteMask(uint8_t mask) override;
+    Engine::Graphics::IPipelineStateBuilder& SetStencilFunc(int func) override;
+    Engine::Graphics::IPipelineStateBuilder& SetStencilFailOp(int op) override;
+    Engine::Graphics::IPipelineStateBuilder& SetStencilDepthFailOp(int op) override;
+    Engine::Graphics::IPipelineStateBuilder& SetStencilPassOp(int op) override;
+    Engine::Graphics::IPipelineStateBuilder& SetStencilRef(uint32_t ref) override;
+    Engine::Graphics::IPipelineStateBuilder& SetColorWriteMask(uint8_t mask) override;
 
     Engine::Graphics::IPipelineStateBuilder& SetInputLayout(const VertexElement* elements, uint32_t elementCount) override;
     Engine::Graphics::IPipelineStateBuilder& SetPrimitiveTopology(PrimitiveTopology topology) override;
@@ -93,14 +102,24 @@ private:
     BOOL m_depthEnable = TRUE;
     BOOL m_depthWriteEnable = TRUE;
     D3D12_COMPARISON_FUNC m_depthFunc = D3D12_COMPARISON_FUNC_LESS;
+    BOOL m_stencilEnable = FALSE;
+    UINT8 m_stencilReadMask = 0xFF;
+    UINT8 m_stencilWriteMask = 0xFF;
+    D3D12_COMPARISON_FUNC m_stencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+    D3D12_STENCIL_OP m_stencilFailOp = D3D12_STENCIL_OP_KEEP;
+    D3D12_STENCIL_OP m_stencilDepthFailOp = D3D12_STENCIL_OP_KEEP;
+    D3D12_STENCIL_OP m_stencilPassOp = D3D12_STENCIL_OP_KEEP;
+    UINT m_stencilRef = 0;
+    UINT8 m_colorWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 
     D3D12_PRIMITIVE_TOPOLOGY_TYPE m_primitiveTopology = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     DXGI_FORMAT m_rtFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-    DXGI_FORMAT m_dsFormat = DXGI_FORMAT_D32_FLOAT;
+    DXGI_FORMAT m_dsFormat = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
 
     D3D12_BLEND ConvertBlendMode(int mode) const;
     D3D12_BLEND_OP ConvertBlendOp(int op) const;
     D3D12_COMPARISON_FUNC ConvertComparisonFunc(int func) const;
+    D3D12_STENCIL_OP ConvertStencilOp(int op) const;
 };
 
 // ---------------------------------------------------------------------------

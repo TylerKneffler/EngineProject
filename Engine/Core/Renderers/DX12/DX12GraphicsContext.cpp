@@ -98,6 +98,12 @@ void D3D12GraphicsContext::SetTexture(uint32_t slot, const Engine::Graphics::IGr
         slot == 6 ? 10 : slot + 1, nativeTexture->GetGpuHandle());
 }
 
+void D3D12GraphicsContext::SetStencilReference(uint32_t reference)
+{
+    if (m_cmdList)
+        m_cmdList->OMSetStencilRef(reference);
+}
+
 void D3D12GraphicsContext::SetViewport(const Viewport& vp)
 {
     if (!m_cmdList) return;

@@ -1,0 +1,86 @@
+[x] Completed, [ ] Incomplete
+
+- [x] Establish the C++17 engine, standalone game runtime, and editor application.
+- [x] Add scene objects, reusable components, transforms, and the object-rendering pipeline.
+- [x] Add editor camera controls, object picking, and selection handling.
+- [x] Add the Game, Hierarchy, Properties, Assets Explorer, Console, and Preferences views.
+- [x] Make editor panels dynamically managed and decouple editor UI from the renderer.
+- [x] Add a package-neutral editor UI facade and ImGui backend with persistent layouts.
+- [x] Add scene serialization, deserialization, loading, saving, and asynchronous loading.
+- [x] Add project files, project loading, configurable resolution, and aspect-ratio settings.
+- [x] Add the Project Hub for creating, building, opening, tracking, and deleting projects.
+- [x] Add standalone project builds, portable game exports, and build-output logging.
+- [x] Add DirectX 11, DirectX 12, and Vulkan renderer selection and support.
+- [x] Restore scene state after exiting play mode.
+- [x] Add reusable prefabs with creation, instantiation, references, editing, refresh, and unpacking.
+- [x] Add initial glTF model importing through the engine's internal asset representation.
+- [x] Correct the advertised texture list and the KTX2/WebP glTF mismatch.
+- [x] Add material editing, physically based material properties, and rendering updates.
+- [x] Add hierarchy creation, deletion, reparenting, drag-and-drop, and component interactions.
+- [x] Add editor undo/redo with a configurable history limit.
+- [x] Add baked-lighting controls, lightmaps, light components, and lighting render pipelines.
+- [x] Add 2D scene editing, sprites, sprite sheets, and sprite animation support.
+- [x] Enhance the Properties view with component and asset-assignment workflows.
+- [x] Add a real asset record with source path, stable ID, and import settings.
+- [x] Add versioned Windows release packaging and quick-start documentation.
+- [x] Strengthen glTF with skinning, animation, morphs, vertex colors, and UV1.
+- [x] Add FBX by converting it into the same internal model-import representation.
+- [x] Add mipmaps, HDR/EXR/TGA, and KTX2 texture processing.
+- [x] Add WAV/OGG/MP3 together with an audio component and mixer.
+- [x] Add Rigid Body physics component
+- [x] Add Primitive Object Collider cube,circle,capsule,cylinder, component
+- [x] Add mesh Object Collider component
+- [x] Add Cloth / mesh realtime physics component
+- [x] Add TTF/OTF runtime text fonts and editor asset assignment.
+- [x] Add UIImage, implement basic formats cover, fill, ect.
+- [x] Cache skeleton hierarchy transforms during bone-gizmo rendering and skin-palette generation.
+- [x] Track scene edit revisions so undo history does not serialize and compare the complete scene every idle editor frame.
+- [x] Replace per-frame recursive script-directory scans with filesystem notifications or throttled polling.
+- [x] Make editor rendering genuinely dirty-driven instead of calling `MarkDirty()` unconditionally every update.
+- [x] Build shared per-frame scene render data so Scene and Game views reuse object discovery, lights, materials, and skin palettes.
+- [x] Precompute render keys and world matrices before sorting instead of resolving components and transforms in the comparator.
+- [x] Populate and upload DX11 light/object structured buffers once per render pass instead of once per object draw.
+- [x] Remove the duplicate DX11 retained-UI vertex-buffer flush after `Unmap()`.
+- [x] Add transform revisions and cached world matrices for rendering, lighting, physics, audio, and editor helpers.
+- [x] Replace per-frame physics JSON configuration signatures with component revision counters and remove duplicate `EnsureBody()` / `EnsureSoftBody()` calls.
+- [x] Cache cloth simulation meshes so unchanged cloth bodies do not reload mesh files from disk.
+- [x] Skip morph deformation, bounds rebuilding, and vertex uploads until morph weights actually change.
+- [x] Resolve sprite/component references once per update or render snapshot instead of repeatedly for preparation, readiness, UV, size, and texture queries.
+- [x] Give animation, mesh, and skinned-mesh components lightweight inspectors that do not serialize their full runtime payload every expanded frame.
+- [x] Cache registered component-picker entries rather than constructing component prototypes whenever the picker is drawn.
+- [x] Implement a centralized storage and cache system for both long and short term memory, refactor engine systems to use this.
+
+- [x] CRITICAL: Clear stale spatial-warp state when a `SpatialManipulator` is disabled so matrix layers/connections cannot persist after `enabled = false`.
+- [x] CRITICAL: Make portal traversal strictly crossing-based and bidirectional (front-to-back and back-to-front), not merely side-based.
+- [x] CRITICAL: Define and implement a mathematically consistent bidirectional portal transform (position, orientation, and parity/handedness) for non-Euclidean mapping.
+- [x] CRITICAL: Remap rigid-body kinematics through traversal (linear velocity, angular velocity, and orientation) to preserve physically coherent motion across portals or warped spaces.
+- [x] HIGH: Replace one-sided/discrete teleport gating with robust traversal state handling that prevents double-teleports, spawn-side false positives, and jitter at the portal plane.
+- [x] HIGH: Compute portal connection transforms as source-to-target relative transforms (including portal anchor frames), not raw overlay assignment.
+- [x] HIGH: Ensure disconnect/disable operations are symmetric across linked manipulators and always clear both sides safely.
+- [x] HIGH: Support rendering for multiple active portals per frame with deterministic ordering and correct stencil isolation.
+- [x] HIGH: Add recursive portal view support with configurable recursion depth, guardrails for performance, and cycle protection.
+- [x] HIGH: Extend non-DX11 parity checks to confirm portal aperture behavior is equivalent across DX11, DX12, and Vulkan paths.
+- [x] CRITICAL: Move portal crossing evaluation into a post-physics traversal phase and use swept body motion/CCD so high-speed bodies cannot enter and leave an aperture between samples.
+- [x] CRITICAL: Require a swept body contact to lie inside the source aperture polygon before slicing or teleporting; do not treat the broad trigger collider as the portal opening.
+- [x] HIGH: Establish one canonical, validated portal aperture frame for rendering, clipping, traversal, and transforms; reject or repair non-planar, concave, self-intersecting, duplicate, or inconsistently wound shape points.
+- [x] HIGH: Represent portal-split objects as separate local/remote collision pieces (including restoration) and define collision/raycast behavior across connected spaces; rebuilding one dynamic mesh hull spans both spaces and is invalid.
+- [x] HIGH: Add target-plane clipping (preferably oblique near-plane projection) and aperture scissoring to portal views so remote geometry cannot leak through the wrong side and small portals do not render the entire scene.
+- [x] HIGH: Define a unified spatial-query contract for rendering, physics, raycasts, audio, cameras, and gameplay; warp volumes must not remain render-only affine approximations.
+- [x] HIGH: Replace the policy-only backend parity check with automated DX11/DX12/Vulkan aperture render validation, including depth, stencil isolation, recursive views, and occlusion.
+- [x] MEDIUM: Define matrix-overlay ownership and scope so a connection maps an explicit spatial region/layer and its intended contents, rather than only mutating the two manipulator-owner transforms.
+- [x] MEDIUM: Define deterministic composition/priority rules for overlapping warp volumes and simultaneous portal-trigger ownership of the same traversing body.
+- [x] MEDIUM: Correct world-layer point transforms to apply full world matrix composition (rotation/scale-safe), not position-offset approximations.
+- [x] MEDIUM: Revisit portal mesh deformation to behave correctly for bidirectional traversal and asymmetric portal geometry.
+- [x] CRITICAL: Generate welded, triangulated cap surfaces for portal mesh cuts, including stable cap UVs, normals, tangents, and owning-material assignment; clipped triangle halves no longer leave open seams.
+- [x] HIGH: Replace per-frame CPU split-mesh uploads with two GPU-clipped render instances (local and remote frames) that preserve independent bounds, culling, shadows, and transparency ordering during traversal.
+- [x] HIGH: Keep local/remote portal collision pieces persistent across a traversal; update transforms or bounded-rate cut data without rebuilding dynamic rigid bodies, convex hulls, and Bvh meshes every frame.
+- [x] HIGH: Validate portal render connections before scheduling a stencil view; an invalid or incompatible endpoint must never silently render the source camera as its own destination.
+- [x] HIGH: Clip mapped portal draws to the target-facing aperture half-space so source-side geometry behind the target cannot leak into a portal view.
+- [x] HIGH: Add finite, recursive portal-ray segmentation with aperture tests, source-to-target direction mapping, and directed-cycle protection; editor picking consumes these segments.
+- [ ] HIGH: Gate teleportation with a swept collision-shape-versus-inset-aperture test, using the solid rim as physical feedback rather than relying on the body centre alone.
+- [ ] HIGH: Define explicit portal content-region ownership (scene layer, scope root, or spatial chart) and render/query only the connected region; target-plane clipping alone cannot distinguish two independent spaces that overlap in one world chart.
+- [ ] HIGH: Expose a physics-facing portal raycast hit API and test regular, split-piece, aperture-rim, and recursive portal hits against Bullet rather than only editor bounds.
+- [ ] MEDIUM: Expose bounded adaptive nonlinear-warp ray paths to gameplay and physics queries; the current Jacobian maps only a ray's origin/tangent and cannot represent curved paths or volume-boundary crossings.
+- [ ] MEDIUM: Add GPU-frame portal render tests for DX11, DX12, and Vulkan using a scene with distinct target-side content and no authored skybox fallback.
+- [ ] MEDIUM: Support indexed meshes, explicit submeshes/material slots, skinned meshes, and morph updates in portal cuts; the current triangle-stream clipper cannot preserve all asset topology.
+- [ ] MEDIUM: Define fragment ownership for scripts, joints, children, animation, and serialization when a connection disappears while an object is split.

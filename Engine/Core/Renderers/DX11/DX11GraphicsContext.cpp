@@ -26,7 +26,15 @@ void D3D11GraphicsContext::SetPipeline(const Engine::Graphics::IPipelineState* s
     m_context->RSSetState(pipeline->rasterizerState.Get());
     const float blendFactor[4]{};
     m_context->OMSetBlendState(pipeline->blendState.Get(), blendFactor, UINT_MAX);
-    m_context->OMSetDepthStencilState(pipeline->depthStencilState.Get(), 0);
+    m_depthStencilState = pipeline->depthStencilState;
+    m_context->OMSetDepthStencilState(m_depthStencilState.Get(), m_stencilReference);
+}
+
+void D3D11GraphicsContext::SetStencilReference(uint32_t reference)
+{
+    m_stencilReference = reference;
+    if (m_context)
+        m_context->OMSetDepthStencilState(m_depthStencilState.Get(), reference);
 }
 
 void D3D11GraphicsContext::SetConstantBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint64_t offset)

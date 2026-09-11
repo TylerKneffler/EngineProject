@@ -52,6 +52,7 @@ bool DX12GameRenderer::Init(void* hwnd, uint32_t width, uint32_t height)
         CreateSwapChain(static_cast<HWND>(hwnd), width, height);
         CreateRTVHeap();
         CreateRenderTargets();
+        CreateDepthStencilTarget();
 
         m_rootSignature = CreateD3D12MaterialRootSignature(m_device.Get());
 
@@ -133,6 +134,8 @@ void DX12GameRenderer::Resize(uint32_t width, uint32_t height)
         m_fenceValues[i] = m_fenceValues[m_frameIndex];
     }
 
+    m_depthStencil.Reset();
+
     ThrowIfFailed(m_swapChain->ResizeBuffers(
         FRAME_COUNT, width, height,
         DXGI_FORMAT_R8G8B8A8_UNORM,
@@ -144,6 +147,7 @@ void DX12GameRenderer::Resize(uint32_t width, uint32_t height)
     m_height = height;
 
     CreateRenderTargets();
+    CreateDepthStencilTarget();
 
     m_viewport    = { 0.f, 0.f, static_cast<float>(width), static_cast<float>(height), 0.f, 1.f };
     m_scissorRect = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
@@ -223,12 +227,17 @@ void DX12GameRenderer::BeginFrame()
     //   &rtv         — pointer to CPU descriptor handle(s).
     //   FALSE        — handles are NOT contiguous in the heap
     //                  (we pass individual handles, not a range).
-    //   nullptr      — no depth-stencil view; this renderer has no depth buffer.
+    //   &dsv         — depth-stencil view used for scene depth and portal masks.
     m_commandList->RSSetViewports(1, &m_viewport);
     m_commandList->RSSetScissorRects(1, &m_scissorRect);
 
     D3D12_CPU_DESCRIPTOR_HANDLE rtv = GetCurrentRTV();
-    m_commandList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+    D3D12_CPU_DESCRIPTOR_HANDLE dsv =
+        m_dsvHeap->GetCPUDescriptorHandleForHeapStart();
+    m_commandList->OMSetRenderTargets(1, &rtv, FALSE, &dsv);
+    m_commandList->ClearDepthStencilView(
+        dsv, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
+        1.0f, 0, 0, nullptr);
 }
 
 void DX12GameRenderer::Clear(float r, float g, float b, float a)
@@ -570,6 +579,48 @@ void DX12GameRenderer::CreateRenderTargets()
         m_device->CreateRenderTargetView(m_renderTargets[i].Get(), nullptr, rtvHandle);
         rtvHandle.ptr += m_rtvDescriptorSize;
     }
+}
+
+void DX12GameRenderer::CreateDepthStencilTarget()
+{
+    if (!m_dsvHeap)
+    {
+        D3D12_DESCRIPTOR_HEAP_DESC heapDesc{};
+        heapDesc.NumDescriptors = 1;
+        heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+        heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+        ThrowIfFailed(m_device->CreateDescriptorHeap(
+            &heapDesc, IID_PPV_ARGS(&m_dsvHeap)));
+    }
+
+    D3D12_RESOURCE_DESC resourceDesc{};
+    resourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    resourceDesc.Width = m_width;
+    resourceDesc.Height = m_height;
+    resourceDesc.DepthOrArraySize = 1;
+    resourceDesc.MipLevels = 1;
+    resourceDesc.Format = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
+    resourceDesc.SampleDesc = { 1, 0 };
+    resourceDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    resourceDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
+    D3D12_HEAP_PROPERTIES heapProperties{};
+    heapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+    D3D12_CLEAR_VALUE clearValue{};
+    clearValue.Format = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
+    clearValue.DepthStencil = { 1.0f, 0 };
+    ThrowIfFailed(m_device->CreateCommittedResource(
+        &heapProperties, D3D12_HEAP_FLAG_NONE, &resourceDesc,
+        D3D12_RESOURCE_STATE_DEPTH_WRITE, &clearValue,
+        IID_PPV_ARGS(&m_depthStencil)));
+
+    D3D12_DEPTH_STENCIL_VIEW_DESC viewDesc{};
+    viewDesc.Format = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
+    viewDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+    m_device->CreateDepthStencilView(
+        m_depthStencil.Get(), &viewDesc,
+        m_dsvHeap->GetCPUDescriptorHandleForHeapStart());
 }
 
 void DX12GameRenderer::FlushGPU()

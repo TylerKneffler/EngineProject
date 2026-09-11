@@ -29,6 +29,8 @@ struct ObjectData
     float4 environmentSH[9];
     float4 reflectionEnvironmentParams;
     float4 reflectionEnvironmentSH[9];
+    float4 portalClipPlane;
+    float4 traversalClipPlane;
 };
 
 struct SceneLightData
@@ -110,6 +112,16 @@ void VSMain(
             localTangent = normalize(mul((float3x3)skin, localTangent));
     }
     oPos = mul(objectData.mvp, localPosition);
+    // Portal apertures are stencil masks rather than visible surfaces. Keep a
+    // mask in front of the near plane rasterizable while the camera approaches
+    // it, otherwise the connected view abruptly disappears before crossing.
+    if ((draw.drawFlags & 0x40000000u) != 0u && oPos.w > 0.0)
+        oPos.z = max(oPos.z, 0.0);
+    // Portal depth reset draws reuse the procedural aperture geometry but
+    // place it at the far plane, clearing local-scene depth only inside the
+    // aperture's stencil mask before the connected view is rendered.
+    if ((draw.drawFlags & 0x80000000u) != 0u)
+        oPos.z = oPos.w;
     oWorldPos = mul(objectData.world, localPosition).xyz;
     oNormal = normalize(mul((float3x3)objectData.world, localNormal));
     oUv = objectData.spriteUvRect.xy + uv * objectData.spriteUvRect.zw;
@@ -321,6 +333,19 @@ float4 PSMain(
 {
     ObjectData objectData = objects[draw.objectIndex];
     uint flags = (uint)objectData.materialParams.w;
+    // Split traversal instances retain their own chart clipping even while
+    // they are drawn through another portal view. This must be separate from
+    // the destination aperture plane below; overwriting either reveals both
+    // halves of a crossing object or hides the connected scene.
+    if (dot(objectData.traversalClipPlane.xyz, objectData.traversalClipPlane.xyz) > 0.0 &&
+        dot(float4(worldPos, 1.0), objectData.traversalClipPlane) < 0.0)
+        clip(-1.0);
+    // Portal views keep only the connected side of the target aperture. This
+    // avoids geometry from behind the destination plane appearing through a
+    // stencil-correct but spatially invalid portal view.
+    if (dot(objectData.portalClipPlane.xyz, objectData.portalClipPlane.xyz) > 0.0 &&
+        dot(float4(worldPos, 1.0), objectData.portalClipPlane) < 0.0)
+        clip(-1.0);
     float4 base = objectData.baseColor * vertexColor;
     float metallic = saturate(objectData.materialParams.x);
     float roughness = clamp(objectData.materialParams.y, 0.045, 1.0);

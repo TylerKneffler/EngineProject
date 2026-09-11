@@ -105,6 +105,7 @@ private:
     void CreateSwapChain(HWND hwnd, uint32_t width, uint32_t height);
     void CreateRTVHeap();
     void CreateRenderTargets();
+    void CreateDepthStencilTarget();
     void FlushGPU(); // wait for all GPU work to finish (used in Resize / dtor)
 
     // -- Core device objects --
@@ -152,6 +153,8 @@ private:
     ComPtr<ID3D12DescriptorHeap>      m_rtvHeap;
     ComPtr<ID3D12Resource>            m_renderTargets[FRAME_COUNT];
     uint32_t                          m_rtvDescriptorSize = 0;
+    ComPtr<ID3D12DescriptorHeap>      m_dsvHeap;
+    ComPtr<ID3D12Resource>            m_depthStencil;
 
     // -- Sync --
     // m_fence       : GPU/CPU synchronisation primitive. The GPU writes an ever-

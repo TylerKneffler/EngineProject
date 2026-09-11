@@ -1,6 +1,6 @@
 #include "AssetPreviewCache.h"
 
-#include "Core/Compoonents/Material.h"
+#include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Graphics/IGraphicsTexture.h"

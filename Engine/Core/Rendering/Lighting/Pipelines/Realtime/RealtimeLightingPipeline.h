@@ -21,6 +21,7 @@ namespace Engine::Rendering
         uint32_t CollectLights(
             const Engine::Scene::Scene& scene,
             LightData* destination,
-            uint32_t capacity) const;
+            uint32_t capacity,
+            bool mapThroughSpatialVolumes = true) const;
     };
 }

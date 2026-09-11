@@ -6,20 +6,25 @@
 #include <algorithm>
 #include <chrono>
 #include <glm/gtc/constants.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <glm/gtx/norm.hpp>
 
 namespace
 {
 constexpr float kMaxPitch = 1.55f;
 
-glm::vec3 ForwardVector(float yaw)
+glm::vec3 SafeNormalize(const glm::vec3& value, const glm::vec3& fallback)
 {
-    return glm::normalize(glm::vec3(-std::sin(yaw), 0.f, std::cos(yaw)));
+    const float lengthSquared = glm::dot(value, value);
+    return lengthSquared > 1e-8f ? value / std::sqrt(lengthSquared) : fallback;
 }
 
-glm::vec3 RightVector(float yaw)
+glm::vec3 PerpendicularForward(const glm::vec3& up)
 {
-    return glm::normalize(glm::vec3(std::cos(yaw), 0.f, std::sin(yaw)));
+    const glm::vec3 reference = std::abs(up.z) < 0.9f
+        ? glm::vec3(0.f, 0.f, 1.f) : glm::vec3(1.f, 0.f, 0.f);
+    return SafeNormalize(reference - up * glm::dot(reference, up),
+        glm::vec3(1.f, 0.f, 0.f));
 }
 
 float FrameDeltaSeconds(const std::chrono::steady_clock::time_point& lastFrame)
@@ -55,8 +60,6 @@ FirstPersonControllerRegistration g_registration;
 
 void FirstPersonController::Start()
 {
-    m_yaw = Owner ? Owner->transform.rotation.y : 0.f;
-    m_pitch = Owner ? Owner->transform.rotation.x : 0.f;
     m_lastFrame = std::chrono::steady_clock::now();
     SetCursorLock(lockCursor);
 }
@@ -96,11 +99,41 @@ void FirstPersonController::UpdateLook()
     if (deltaX == 0.f && deltaY == 0.f)
         return;
 
-    m_yaw -= deltaX * lookSensitivity;
-    m_pitch -= (invertY ? -1.f : 1.f) * deltaY * lookSensitivity;
-    m_pitch = std::clamp(m_pitch, -kMaxPitch, kMaxPitch);
+    auto* body = Owner->GetComponent<Engine::Components::RigidBody>();
+    const glm::vec3 gravityDown = body
+        ? body->GetGravityDirection() : glm::vec3(0.f, -1.f, 0.f);
+    const glm::vec3 gravityUp = -gravityDown;
+    const glm::mat4 ownerWorld = Owner->transform.GetWorldMatrix();
+    glm::vec3 forward = SafeNormalize(glm::vec3(ownerWorld[2]),
+        PerpendicularForward(gravityUp));
 
-    Owner->transform.rotation = { m_pitch, m_yaw, 0.f };
+    forward = SafeNormalize(glm::angleAxis(-deltaX * lookSensitivity,
+        gravityUp) * forward, forward);
+    glm::vec3 right = SafeNormalize(glm::cross(gravityUp, forward),
+        SafeNormalize(glm::vec3(ownerWorld[0]),
+            glm::cross(gravityUp, PerpendicularForward(gravityUp))));
+
+    const float currentPitch = std::asin(std::clamp(
+        glm::dot(forward, gravityUp), -1.f, 1.f));
+    const float pitchDelta = -(invertY ? -1.f : 1.f) * deltaY *
+        lookSensitivity;
+    const float targetPitch = std::clamp(currentPitch + pitchDelta,
+        -kMaxPitch, kMaxPitch);
+    forward = SafeNormalize(glm::angleAxis(targetPitch - currentPitch, right) *
+        forward, forward);
+    right = SafeNormalize(glm::cross(gravityUp, forward), right);
+    const glm::vec3 cameraUp = SafeNormalize(glm::cross(forward, right),
+        gravityUp);
+
+    glm::mat3 worldBasis(1.f);
+    worldBasis[0] = right;
+    worldBasis[1] = cameraUp;
+    worldBasis[2] = forward;
+    const glm::quat worldRotation = glm::normalize(glm::quat_cast(worldBasis));
+    if (body)
+        body->SetWorldPose(Owner->transform.GetWorldPosition(), worldRotation);
+    else
+        Owner->transform.rotation = glm::eulerAngles(worldRotation);
     SetCursorPos(center.x, center.y);
 }
 
@@ -115,18 +148,27 @@ void FirstPersonController::UpdateMovement(float deltaTime)
         static_cast<float>(IsKeyDown('S') || IsKeyDown(VK_DOWN));
     const float sprint = (IsKeyDown(VK_SHIFT) ? sprintMultiplier : 1.f);
 
-    const glm::vec3 forward = ForwardVector(m_yaw);
-    const glm::vec3 right = RightVector(m_yaw);
+    auto* body = Owner->GetComponent<Engine::Components::RigidBody>();
+    const glm::vec3 gravityDown = body
+        ? body->GetGravityDirection() : glm::vec3(0.f, -1.f, 0.f);
+    const glm::vec3 gravityUp = -gravityDown;
+    const glm::mat4 ownerWorld = Owner->transform.GetWorldMatrix();
+    const glm::vec3 rawForward = glm::vec3(ownerWorld[2]);
+    const glm::vec3 forward = SafeNormalize(rawForward - gravityUp *
+        glm::dot(rawForward, gravityUp), PerpendicularForward(gravityUp));
+    const glm::vec3 right = SafeNormalize(glm::cross(gravityUp, forward),
+        glm::cross(gravityUp, PerpendicularForward(gravityUp)));
     const glm::vec3 movement = (forward * moveZ + right * moveX);
 
     if (glm::length2(movement) > 0.0001f)
     {
         const glm::vec3 direction = glm::normalize(movement);
-        if (auto* body = Owner->GetComponent<Engine::Components::RigidBody>())
+        if (body)
         {
             glm::vec3 velocity = body->GetLinearVelocity();
-            velocity.x = direction.x * moveSpeed * sprint;
-            velocity.z = direction.z * moveSpeed * sprint;
+            const glm::vec3 gravityVelocity = gravityDown *
+                glm::dot(velocity, gravityDown);
+            velocity = gravityVelocity + direction * moveSpeed * sprint;
             body->SetLinearVelocity(velocity);
         }
         else
@@ -134,11 +176,10 @@ void FirstPersonController::UpdateMovement(float deltaTime)
             Owner->transform.position += direction * moveSpeed * sprint * deltaTime;
         }
     }
-    else if (auto* body = Owner->GetComponent<Engine::Components::RigidBody>())
+    else if (body)
     {
         glm::vec3 velocity = body->GetLinearVelocity();
-        velocity.x = 0.f;
-        velocity.z = 0.f;
+        velocity = gravityDown * glm::dot(velocity, gravityDown);
         body->SetLinearVelocity(velocity);
     }
 }

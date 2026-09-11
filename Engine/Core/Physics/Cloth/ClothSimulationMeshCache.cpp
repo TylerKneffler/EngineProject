@@ -1,5 +1,5 @@
 #include "Core/Physics/Cloth/ClothSimulationMeshCache.h"
-#include "Core/Compoonents/Mesh.h"
+#include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Memory/CacheStore.h"
 #include <filesystem>
 

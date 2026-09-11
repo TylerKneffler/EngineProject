@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "DX11GraphicsBuffer.h"
+#include <algorithm>
 #include <cstring>
 
 namespace Engine::Renderers
@@ -70,7 +71,13 @@ std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D11BufferFactory::CreateBuf
     {
         case Engine::Graphics::IGraphicsBuffer::Usage::ConstantBuffer:
             desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-            desc.ByteWidth = (desc.ByteWidth + 15u) & ~15u;
+            // D3D11GraphicsContext snapshots one logical record from the CPU
+            // shadow arena into its own native constant buffer at draw time.
+            // Keep this placeholder legal when the logical arena contains
+            // stable ranges for many deferred portal draws.
+            desc.ByteWidth = std::min<UINT>(
+                (desc.ByteWidth + 15u) & ~15u,
+                D3D11_REQ_CONSTANT_BUFFER_ELEMENT_COUNT * 16u);
             break;
         case Engine::Graphics::IGraphicsBuffer::Usage::VertexBuffer: desc.BindFlags = D3D11_BIND_VERTEX_BUFFER; break;
         case Engine::Graphics::IGraphicsBuffer::Usage::IndexBuffer: desc.BindFlags = D3D11_BIND_INDEX_BUFFER; break;

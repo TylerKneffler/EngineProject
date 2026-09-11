@@ -5,10 +5,13 @@
 #include "Core/Rendering/Lighting/Pipelines/Realtime/RealtimeLightingPipeline.h"
 #include "Core/Rendering/Lighting/Pipelines/Baked/BakedLightingPipeline.h"
 #include "Core/Model/SceneSettings.h"
+#include "Core/Model/MeshData.h"
 #include <glm/glm.hpp>
 #include <array>
 #include <memory>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace Engine::Physics { class Physics; }
 namespace Engine::Audio { class Audio; }
@@ -19,6 +22,7 @@ namespace Engine::Components
     class Mesh;
     class Sprite;
     class Material;
+    class SpatialManipulator;
 }
 namespace Engine::Rendering { class BakedLightingData; }
 namespace Engine::Renderers { class UIRenderer; }
@@ -57,6 +61,45 @@ public:
     using ObjectPath = std::vector<std::size_t>;
     enum class ObjectPlacement { Before, AsChild, After };
 
+    // Every subsystem asks for spatial coordinates through this contract.
+    // Physics bodies still store their stable Euclidean simulation chart;
+    // Physics and raycast callers use this mapping when presenting/querying
+    // nonlinear spaces rather than silently using the render-only transform.
+    enum class SpatialQueryDomain : uint8_t
+    {
+        Rendering,
+        Physics,
+        Raycast,
+        Audio,
+        Camera,
+        Gameplay
+    };
+    struct SpatialQuery
+    {
+        SpatialQueryDomain domain = SpatialQueryDomain::Gameplay;
+        const Object* excludedOwner = nullptr;
+        bool includeWarpVolumes = true;
+    };
+    struct SpatialQuerySample
+    {
+        glm::vec3 point { 0.f };
+        glm::mat3 jacobian { 1.f };
+        bool affectedByWarpVolume = false;
+    };
+    struct SpatialRay
+    {
+        glm::vec3 origin { 0.f };
+        glm::vec3 direction { 0.f, 0.f, 1.f };
+    };
+    // A straight segment in one spatial chart.  A portal hit ends a segment;
+    // the following segment starts at the connected endpoint in its chart.
+    struct PortalRaySegment
+    {
+        SpatialRay ray;
+        float maxDistance = 0.f;
+        const Object* enteredPortal = nullptr;
+    };
+
     Scene();
     ~Scene();
 
@@ -86,7 +129,8 @@ public:
     // and skin data.
     void PrepareRenderFrame();
     void Render(IGraphicsContext* context, float aspect,
-        Camera* cameraOverride = nullptr, bool includeEditorVisuals = true);
+        Camera* cameraOverride = nullptr, bool includeEditorVisuals = true,
+        uint32_t viewportWidth = 0u, uint32_t viewportHeight = 0u);
     void SetSelectedObject(Object* obj) { m_selectedObject = obj; }
     Object* GetSelectedObject() const { return m_selectedObject; }
     void SetPreviewObject(Object* obj) { m_previewObject = obj; }
@@ -102,6 +146,35 @@ public:
     // render from the Scene view's navigation camera.
     Camera* FindGameCamera();
 
+    // Maps the ordinary Euclidean scene chart through active spatial volumes.
+    // The sample Jacobian carries nonlinear orientation/scale to consumers.
+    SpatialQuerySample SampleSpatialPoint(const glm::vec3& worldPoint,
+        const SpatialQuery& query = {}) const;
+    glm::vec3 MapSpatialPoint(const glm::vec3& worldPoint,
+        const SpatialQuery& query = {}) const;
+    // Numerically inverts the fully composed spatial mapping. This is local:
+    // callers should use it only where the active charts are nonsingular and
+    // do not fold multiple source points onto the same mapped point.
+    bool TryUnmapSpatialPoint(const glm::vec3& mappedPoint,
+        glm::vec3& worldPoint, const SpatialQuery& query = {}) const;
+    glm::mat4 MapSpatialMatrix(const glm::mat4& worldMatrix,
+        const SpatialQuery& query = {}) const;
+    SpatialRay MapSpatialRay(const SpatialRay& ray,
+        const SpatialQuery& query = {}) const;
+    // Trace a finite physical-space ray across portal apertures.  This is the
+    // common primitive for gameplay queries and editor picking; callers test
+    // ordinary geometry against each returned segment in order.  Nonlinear
+    // volume integration remains a separate concern from discrete portals.
+    std::vector<PortalRaySegment> TracePortalRay(const SpatialRay& ray,
+        float maxDistance, uint32_t maxPortalHops = 8u) const;
+
+    // Compatibility names for existing gameplay code. New code should state
+    // its spatial intent with MapSpatialPoint/MapSpatialMatrix.
+    glm::vec3 WarpWorldPoint(const glm::vec3& worldPoint,
+        const Object* excludedOwner = nullptr) const;
+    glm::mat4 WarpWorldMatrix(const glm::mat4& worldMatrix,
+        const Object* excludedOwner = nullptr) const;
+
     // Move the editor camera to frame the given object, keeping a comfortable
     // viewing distance and looking directly at its world-space origin.
     // Pass nullptr to reset to the default startup position.
@@ -110,6 +183,13 @@ public:
     // Object management
     Object* AddObject();                     // create an empty Object owned by this scene
     Object* AddObject(const std::string& name);
+    // Includes objects queued for an end-of-frame runtime spawn.
+    Object* FindObjectByName(const std::string& name);
+    const Object* FindObjectByName(const std::string& name) const;
+    // Safe from component callbacks: destruction is committed after the
+    // current scene update finishes, so the calling component remains valid
+    // until its Update() returns.
+    void    RequestRemoveObject(Object* obj);
     void    RemoveObject(Object* obj);
     void    ClearObjects();                  // remove all objects and reset selection
     const std::vector<std::unique_ptr<Object>>& GetObjects() const { return m_objects; }
@@ -146,6 +226,7 @@ private:
     void* m_gridCBMapped = nullptr;
 
     std::unique_ptr<IPipelineState> m_skyboxPipeline;
+    std::unique_ptr<IPipelineState> m_portalSkyboxStencilReadPipeline;
     std::unique_ptr<IGraphicsBuffer> m_skyboxConstantBuffer;
     void* m_skyboxCBMapped = nullptr;
     std::shared_ptr<Engine::Components::Texture> m_defaultSkyboxTexture;
@@ -166,6 +247,23 @@ private:
     std::unique_ptr<IPipelineState> m_objectPreviewDoubleSidedPipeline;
     std::unique_ptr<IPipelineState> m_objectPreviewWirePipeline;
     std::unique_ptr<IPipelineState> m_objectPreviewWireDoubleSidedPipeline;
+    std::unique_ptr<IPipelineState> m_objectPortalStencilWritePipeline;
+    std::unique_ptr<IPipelineState> m_objectPortalStencilIncrementPipeline;
+    std::unique_ptr<IPipelineState> m_objectPortalDepthResetPipeline;
+    std::unique_ptr<IPipelineState> m_objectPortalStencilReadPipeline;
+    std::unique_ptr<IPipelineState> m_objectPortalStencilReadDoubleSidedPipeline;
+    std::unique_ptr<IPipelineState> m_objectPortalStencilReadBlendPipeline;
+    std::unique_ptr<IPipelineState> m_objectPortalStencilReadBlendDoubleSidedPipeline;
+    std::unique_ptr<IPipelineState> m_objectPortalStencilReadWirePipeline;
+    std::unique_ptr<IPipelineState> m_objectPortalStencilReadWireDoubleSidedPipeline;
+    std::unique_ptr<IPipelineState> m_objectPortalStencilReadBlendWirePipeline;
+    std::unique_ptr<IPipelineState> m_objectPortalStencilReadBlendWireDoubleSidedPipeline;
+    std::unique_ptr<IPipelineState> m_objectPortalStencilReadPreviewPipeline;
+    std::unique_ptr<IPipelineState> m_objectPortalStencilReadPreviewDoubleSidedPipeline;
+    std::unique_ptr<IPipelineState> m_objectPortalStencilReadPreviewWirePipeline;
+    std::unique_ptr<IPipelineState> m_objectPortalStencilReadPreviewWireDoubleSidedPipeline;
+    std::unique_ptr<IPipelineState> m_objectSpatialDebugPipeline;
+    std::unique_ptr<IPipelineState> m_objectSpatialDebugWirePipeline;
     std::unique_ptr<IPipelineState> m_objectOutlinePipeline;
     std::unique_ptr<IGraphicsBuffer> m_objectConstantBuffer;
     void* m_objectCBMapped = nullptr;
@@ -175,6 +273,8 @@ private:
     void* m_lightDataMapped = nullptr;
     std::unique_ptr<IGraphicsBuffer> m_boneDataBuffer;
     void* m_boneDataMapped = nullptr;
+    std::unique_ptr<IGraphicsBuffer> m_portalApertureBuffer;
+    void* m_portalApertureMapped = nullptr;
     std::unique_ptr<Engine::Renderers::UIRenderer> m_uiRenderer;
     std::unique_ptr<Engine::Physics::Physics> m_physics;
     std::unique_ptr<Engine::Audio::Audio> m_audio;
@@ -200,7 +300,17 @@ private:
         const Engine::Rendering::BakedLightingData* bakedLighting = nullptr;
         IGraphicsBuffer* spriteVertexBuffer = nullptr;
         const Engine::Components::Texture* spriteTexture = nullptr;
+        // When a mesh crosses a nonlinear warp boundary, this buffer holds
+        // the per-vertex mapped positions, normals and tangents.  It is a
+        // renderer-owned view of the authored mesh, never the mesh itself.
+        IGraphicsBuffer* warpedVertexBuffer = nullptr;
         glm::mat4 world{1.f};
+        // Non-zero only for a portal-split chart instance. Object.hlsl clips
+        // against this world-space plane without modifying the mesh buffer.
+        glm::vec4 traversalClipPlane{0.f};
+        // The portal endpoint whose coordinate chart owns world and the clip
+        // plane. Portal views remap only instances in their near-side chart.
+        const Engine::Components::SpatialManipulator* traversalChartPortal = nullptr;
         glm::vec2 spriteWorldSize{1.f};
         glm::vec4 spriteUvRect{0.f, 0.f, 1.f, 1.f};
         uint32_t skinPaletteOffset = 0;
@@ -211,17 +321,54 @@ private:
     };
 
     std::vector<FrameRenderItem> m_frameRenderItems;
+
+    struct WarpedRenderMesh
+    {
+        std::unique_ptr<IGraphicsBuffer> vertexBuffer;
+        std::vector<Engine::Model::Vertex> vertices;
+        glm::mat4 authoredWorld { 1.f };
+        glm::vec3 mappedOrigin { 0.f };
+        uint64_t meshRevision = 0;
+        uint64_t warpRevision = 0;
+        bool evaluated = false;
+        bool affectedByWarp = false;
+    };
+    // Object ownership remains in m_objects; this cache only owns transient
+    // GPU upload buffers. Entries are replaced when topology changes and are
+    // pruned as objects leave the scene.
+    std::unordered_map<const Object*, WarpedRenderMesh> m_warpedRenderMeshes;
     uint32_t m_frameLightCount = 0;
     bool m_renderFramePrepared = false;
 
     // ---- Object list ----
     std::vector<std::unique_ptr<Object>> m_objects;
+    std::vector<std::unique_ptr<Object>> m_pendingObjectAdditions;
+    std::vector<Object*> m_pendingObjectRemovals;
+    bool m_isUpdating = false;
+    bool m_hasStarted = false;
+    void FlushPendingObjectAdditions();
+    void FlushPendingObjectRemovals();
     Object* m_selectedObject = nullptr;
     Object* m_previewObject = nullptr;
     bool m_editorMode2D = false;
     bool m_editorCameraModeInitialized = false;
 
     static constexpr uint32_t kMaxObjects = 64;
+    // The editor diagnostic expands a linked 8-point portal pair into point
+    // markers, boundary bars, correspondence bars, and plane normals. Keep
+    // enough transient space for every logical spatial object; it is never
+    // used by runtime portal rendering.
+    static constexpr uint32_t kMaxSpatialVerticesPerObject = 1024;
+    // Recorded DX12/Vulkan draws consume upload-buffer contents later, when
+    // the command list executes. Every portal view therefore owns immutable
+    // aperture, depth-reset, and connected-scene slots for the whole frame.
+    static constexpr uint32_t kMaxPortalRenderViews = 64;
+    static constexpr uint32_t kPortalRenderSlotsPerView = kMaxObjects + 2;
+    static constexpr uint32_t kMaxSpatialDebugDraws =
+        kMaxObjects * kMaxSpatialVerticesPerObject / 24;
+    static constexpr uint32_t kObjectRenderSlotCount = kMaxObjects +
+        kMaxPortalRenderViews * kPortalRenderSlotsPerView +
+        kMaxSpatialDebugDraws;
     static constexpr uint32_t kMaxBonesPerObject = 256;
     static constexpr uint32_t kMaxLights =
         Engine::Model::MaxRealtimeLights;

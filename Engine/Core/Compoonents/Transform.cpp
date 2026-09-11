@@ -1,5 +1,6 @@
 #include "Transform.h"
 #include "Core/Object.h"
+#include "Core/Scene/Scene.h"
 #include <glm/gtc/matrix_transform.hpp>
 
 namespace Engine::Components
@@ -60,6 +61,48 @@ glm::vec3 Transform::GetLocalPosition() const
 glm::vec3 Transform::GetWorldPosition() const
 {
     return glm::vec3(GetWorldMatrix()[3]);
+}
+
+glm::mat4 Transform::GetLocalMatrixWithLayer() const
+{
+    const glm::mat4 base = GetLocalMatrix();
+    if (!matrixLayer.enabled)
+        return base;
+    return matrixLayer.localToLayer * base;
+}
+
+glm::mat4 Transform::GetWorldMatrixWithLayer() const
+{
+    glm::mat4 world = GetWorldMatrix();
+    if (matrixLayer.enabled)
+        world = matrixLayer.localToLayer * world;
+    if (Owner && Owner->GetScene())
+        world = Owner->GetScene()->MapSpatialMatrix(world,
+            { Engine::Scene::Scene::SpatialQueryDomain::Rendering, Owner });
+    return world;
+}
+
+glm::vec3 Transform::ApplyLocalMatrixLayer(const glm::vec3& point) const
+{
+    return matrixLayer.TransformPoint(point);
+}
+
+glm::vec3 Transform::InverseApplyLocalMatrixLayer(const glm::vec3& point) const
+{
+    return matrixLayer.InverseTransformPoint(point);
+}
+
+glm::vec3 Transform::ApplyWorldMatrixLayer(const glm::vec3& point) const
+{
+    // Matrix layers live in world space at this boundary.  Treating the
+    // input as an offset from this transform's position silently drops the
+    // layer's rotation and scale (and is wrong for a rotated parent).
+    return matrixLayer.TransformPoint(point);
+}
+
+glm::vec3 Transform::InverseApplyWorldMatrixLayer(const glm::vec3& point) const
+{
+    return matrixLayer.InverseTransformPoint(point);
 }
 
 void Transform::AdvanceRevision(uint64_t& revision)
