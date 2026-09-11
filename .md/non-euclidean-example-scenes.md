@@ -18,8 +18,6 @@ This document collects potential scenes for exercising the engine's non-Euclidea
 
    A small exterior doorway opens into a room several times larger than its exterior footprint. Tests scale transitions, collision dimensions, camera near-plane behavior, audio distance, and light range.
 
-   Status: Implemented as `Engine/Core/Assets/Scenes/room_larger_inside.scene`, with automated scene and traversal coverage in `RoomLargerInsideTests`.
-
 4. **Infinite Hallway**
 
    A short corridor repeats through hidden spatial connections. Landmarks identify each apparent repetition. Tests long-running traversal stability, recursion limits, culling, and accumulated transform error.
@@ -80,8 +78,6 @@ This document collects potential scenes for exercising the engine's non-Euclidea
 
     Connected doors translate and rotate while objects and camera rays cross them. Tests dynamic portal frames, velocity transfer, interpolation, collision rebuilding, and temporal rendering stability.
 
-    **Implemented:** `Engine/Core/Assets/Scenes/moving_portal_pair.scene` uses a deterministic, independently phased motion driver on both endpoints, an automatic rigid-body probe, moving frame geometry, and a live camera view. `MovingPortalPairRegression` samples portal rays throughout the motion, checks inverse mapping and temporal continuity, and confirms that the synchronized moving trigger transfers the probe's linear and angular velocity through the current portal frame.
-
 19. **Portal on a Moving Platform**
 
     One endpoint is attached to an elevator or rotating platform. Tests parent transforms, relative velocity, character grounding, destination motion, and object ownership during traversal.
@@ -89,8 +85,6 @@ This document collects potential scenes for exercising the engine's non-Euclidea
 20. **Crossing Warp Volumes**
 
     Two nonlinear volumes overlap, such as a bend intersecting a shrinking region. Tests deterministic priority composition, Jacobians, inverse behavior, lighting, and boundary continuity.
-
-    **Implemented:** `Engine/Core/Assets/Scenes/crossing_warp_volumes.scene` overlaps a priority-0 curved chart with a priority-10 exponential shrink chart and visualizes the result with a colored lattice and mapped light. `CrossingWarpVolumesRegression` verifies order-dependent composition, the composed Jacobian and ray direction, numerical inverse recovery, smooth finite-volume boundaries, and realtime light placement.
 
 21. **One-Way Spatial Window**
 
