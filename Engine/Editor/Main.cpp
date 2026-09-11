@@ -13,9 +13,9 @@
 #include "Engine/Editor/UI/IEditorUiBackend.h"
 #include "Engine/Editor/Core/Importers/ModelImporter.h"
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
-#include "Core/Assets/Scripts/Rotate.h"
-#include "Core/Assets/Scripts/FirstPersonController.h"
-#include "Core/Assets/Scripts/PortalSplitAfterDelay.h"
+#include "Core/Assets/Scripts/Utilities/Rotate.h"
+#include "Core/Assets/Scripts/Controllers/FirstPersonController.h"
+#include "Core/Assets/Scripts/Portals/PortalSplitAfterDelay.h"
 #include "Core/Serialization/SceneSerializer.h"
 #endif
 #include <filesystem>

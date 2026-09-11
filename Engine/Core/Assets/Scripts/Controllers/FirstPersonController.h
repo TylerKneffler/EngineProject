@@ -33,8 +33,11 @@ private:
     void UpdateLook();
     void UpdateMovement(float deltaTime);
     void SetCursorLock(bool locked);
+    static bool IsApplicationFocused();
     static bool IsKeyDown(int virtualKey);
 
     bool m_cursorLocked = false;
+    bool m_inputSuspended = false;
+    bool m_leftMouseWasDown = false;
     std::chrono::steady_clock::time_point m_lastFrame;
 };

@@ -1,5 +1,5 @@
 #define GLM_ENABLE_EXPERIMENTAL
-#include "Scripts/FirstPersonController.h"
+#include "Scripts/Controllers/FirstPersonController.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Object.h"
 #include "Core/Serialization/SceneSerializer.h"
@@ -33,6 +33,28 @@ float FrameDeltaSeconds(const std::chrono::steady_clock::time_point& lastFrame)
     const float delta = std::chrono::duration<float>(now - lastFrame).count();
     return (delta > 0.f && delta < 0.25f) ? delta : (1.f / 60.f);
 }
+
+void SetSystemCursorVisible(bool visible)
+{
+    CURSORINFO cursorInfo { sizeof(CURSORINFO) };
+    if (GetCursorInfo(&cursorInfo) &&
+        ((cursorInfo.flags & CURSOR_SHOWING) != 0) == visible)
+    {
+        return;
+    }
+    if (visible)
+    {
+        while (ShowCursor(TRUE) < 0)
+        {
+        }
+    }
+    else
+    {
+        while (ShowCursor(FALSE) >= 0)
+        {
+        }
+    }
+}
 }
 
 FirstPersonController::FirstPersonController()
@@ -61,7 +83,10 @@ FirstPersonControllerRegistration g_registration;
 void FirstPersonController::Start()
 {
     m_lastFrame = std::chrono::steady_clock::now();
-    SetCursorLock(lockCursor);
+    const bool focused = IsApplicationFocused();
+    m_inputSuspended = !focused;
+    m_leftMouseWasDown = IsKeyDown(VK_LBUTTON);
+    SetCursorLock(lockCursor && focused);
 }
 
 void FirstPersonController::Update()
@@ -71,6 +96,34 @@ void FirstPersonController::Update()
 
     const float dt = FrameDeltaSeconds(m_lastFrame);
     m_lastFrame = std::chrono::steady_clock::now();
+
+    const bool focused = IsApplicationFocused();
+    const bool leftMouseDown = IsKeyDown(VK_LBUTTON);
+    if (!focused || IsKeyDown(VK_ESCAPE))
+    {
+        m_inputSuspended = true;
+        SetCursorLock(false);
+        m_leftMouseWasDown = leftMouseDown;
+        return;
+    }
+
+    if (m_inputSuspended)
+    {
+        // Focus loss and Escape deliberately require a fresh click before the
+        // controller can own the pointer again. This prevents Alt+Tab or the
+        // Windows key from immediately snapping the cursor back on return.
+        const bool clickedAfterRelease = leftMouseDown && !m_leftMouseWasDown;
+        m_leftMouseWasDown = leftMouseDown;
+        if (!clickedAfterRelease)
+            return;
+        m_inputSuspended = false;
+        SetCursorLock(lockCursor);
+    }
+    else
+    {
+        m_leftMouseWasDown = leftMouseDown;
+    }
+
     UpdateLook();
     UpdateMovement(dt);
 }
@@ -186,15 +239,28 @@ void FirstPersonController::UpdateMovement(float deltaTime)
 
 void FirstPersonController::SetCursorLock(bool locked)
 {
+    if (m_cursorLocked == locked)
+        return;
     m_cursorLocked = locked;
     if (locked)
     {
-        ShowCursor(FALSE);
+        SetSystemCursorVisible(false);
     }
     else
     {
-        ShowCursor(TRUE);
+        SetSystemCursorVisible(true);
     }
+}
+
+bool FirstPersonController::IsApplicationFocused()
+{
+    const HWND foreground = GetForegroundWindow();
+    if (!foreground || !GetFocus())
+        return false;
+
+    DWORD foregroundProcess = 0;
+    GetWindowThreadProcessId(foreground, &foregroundProcess);
+    return foregroundProcess == GetCurrentProcessId();
 }
 
 bool FirstPersonController::IsKeyDown(int virtualKey)

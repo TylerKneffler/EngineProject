@@ -1,4 +1,4 @@
-#include "Scripts/WarpVolumeTraversalRepeater.h"
+#include "Scripts/Spatial/WarpVolumeTraversalRepeater.h"
 
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Physics/SpatialManipulator.h"

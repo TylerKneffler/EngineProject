@@ -1,4 +1,4 @@
-#include "Scripts/GeneralizedBehaviors/MarchingCubesQuad.h"
+#include "Scripts/MarchingCubes/MarchingCubesQuad.h"
 
 #include "Core/Serialization/SceneSerializer.h"
 

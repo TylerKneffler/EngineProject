@@ -63,9 +63,9 @@ public:
     // Shows the window. Must be called after setting up OnUpdate, OnResize, and WndProcHook.
     void Show();
 
-    // Enters the message loop. Blocks until WM_QUIT is received (e.g. the
-    // user closes the window or Escape is pressed). Returns the wParam value
-    // from WM_QUIT, which is conventionally used as the process exit code.
+    // Enters the message loop. Blocks until WM_QUIT is received. Escape
+    // releases input focus/cursor capture; holding it closes the application.
+    // Returns the wParam value from WM_QUIT, conventionally the exit code.
     int Run();
 
     // Per-frame callbacks wired up by the caller (typically Main.cpp).
@@ -110,6 +110,8 @@ private:
     // consistently as right-button input, even if Alt is released first.
     bool m_altLeftClickActive = false;
     bool m_focused = false;
+    bool m_escapeHeld = false;
+    ULONGLONG m_escapePressedAt = 0;
 
 };
 }

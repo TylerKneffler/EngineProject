@@ -1,4 +1,4 @@
-#include "Scripts/GeneralizedBehaviors/PerlinNoiseField.h"
+#include "Scripts/MarchingCubes/PerlinNoiseField.h"
 
 #include "Core/Serialization/SceneSerializer.h"
 #include <algorithm>

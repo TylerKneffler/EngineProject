@@ -1282,19 +1282,49 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         return;
     }
 
+    glm::mat4 authoredCameraWorld(1.f);
+    bool hasAuthoredCameraWorld = false;
+    bool cameraInsideInteriorOnlyWarp = false;
+    if (cam->Owner)
+    {
+        authoredCameraWorld = cam->Owner->transform.GetWorldMatrix();
+        if (cam->Owner->transform.matrixLayer.enabled)
+        {
+            authoredCameraWorld = cam->Owner->transform.matrixLayer.localToLayer *
+                authoredCameraWorld;
+        }
+        hasAuthoredCameraWorld = true;
+        const glm::vec3 authoredCameraPosition(authoredCameraWorld[3]);
+        std::function<void(const Engine::Core::Object*)> findContainingVolume;
+        findContainingVolume = [&](const Engine::Core::Object* object)
+        {
+            if (!object || cameraInsideInteriorOnlyWarp ||
+                !object->IsEnabledInHierarchy())
+                return;
+            const auto* volume = object->GetComponent<
+                Engine::Components::SpatialManipulator>();
+            if (volume && volume->enabled && volume->definesWarpVolume &&
+                volume->renderWarpInteriorOnly &&
+                volume->ContainsWorldPoint(authoredCameraPosition))
+            {
+                cameraInsideInteriorOnlyWarp = true;
+                return;
+            }
+            for (const Engine::Core::Object* child : object->Children)
+                findContainingVolume(child);
+        };
+        for (const auto& object : m_objects)
+            findContainingVolume(object.get());
+    }
+
     glm::mat4 view = cam->GetViewMatrix();
     // Camera::GetViewMatrix uses the source chart for a camera already inside
     // a warp volume. The editor needs an explicit opt-in for that behavior so
     // its default view remains an accurate inspection of the embedded space.
-    if (!cameraOverride && !settings.sceneCameraWarpLookThrough &&
-        !m_editorMode2D && cam->Owner)
+    if (((!cameraOverride && !settings.sceneCameraWarpLookThrough) ||
+        cameraInsideInteriorOnlyWarp) && !m_editorMode2D && cam->Owner)
     {
-        glm::mat4 embeddedWorld = cam->Owner->transform.GetWorldMatrix();
-        if (cam->Owner->transform.matrixLayer.enabled)
-        {
-            embeddedWorld = cam->Owner->transform.matrixLayer.localToLayer *
-                embeddedWorld;
-        }
+        glm::mat4 embeddedWorld = authoredCameraWorld;
         embeddedWorld = MapSpatialMatrix(embeddedWorld,
             { SpatialQueryDomain::Camera, cam->Owner });
         const glm::vec3 eye = glm::vec3(embeddedWorld[3]);
@@ -1321,24 +1351,21 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     const glm::mat4 proj = cam->GetProjectionMatrix(aspect, m_editorMode2D);
     const glm::vec3 cameraPosition = glm::vec3(glm::inverse(view)[3]);
     bool cameraUsesSourceWarpChart = false;
-    if (cam->Owner)
+    if (hasAuthoredCameraWorld)
     {
-        glm::mat4 authoredCameraWorld = cam->Owner->transform.GetWorldMatrix();
-        if (cam->Owner->transform.matrixLayer.enabled)
-        {
-            authoredCameraWorld = cam->Owner->transform.matrixLayer.localToLayer *
-                authoredCameraWorld;
-        }
         const bool sourceChartAllowed = cameraOverride ||
             settings.sceneCameraWarpLookThrough;
-        cameraUsesSourceWarpChart = sourceChartAllowed && SampleSpatialPoint(
+        cameraUsesSourceWarpChart = !cameraInsideInteriorOnlyWarp &&
+            sourceChartAllowed && SampleSpatialPoint(
             glm::vec3(authoredCameraWorld[3]),
             { SpatialQueryDomain::Camera, cam->Owner }).affectedByWarpVolume;
 
-        // Game views always look through a finite warp boundary from outside.
-        // The editor Scene view may do so only when Spatial Debug explicitly
-        // opts in; its normal mode stays embedded for accurate authoring.
-        if (!cameraUsesSourceWarpChart && sourceChartAllowed && !m_editorMode2D)
+        // A normal volume uses the source chart for game-camera look-through
+        // (and for opted-in editor views). An interior-only volume also uses
+        // physical geometry from every outside view, including Scene view,
+        // then switches to its compensated chart once the camera enters.
+        if (!cameraUsesSourceWarpChart && !cameraInsideInteriorOnlyWarp &&
+            !m_editorMode2D)
         {
             const glm::vec3 rayOrigin = glm::vec3(authoredCameraWorld[3]);
             const glm::vec3 rayDirection = glm::normalize(
@@ -1395,16 +1422,26 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 }
                 return exit >= 0.f;
             };
-            for (const auto& object : m_objects)
+            std::function<void(const Engine::Core::Object*)> findIntersectedVolume;
+            findIntersectedVolume = [&](const Engine::Core::Object* object)
             {
-                const auto* volume = object ? object->GetComponent<
-                    Engine::Components::SpatialManipulator>() : nullptr;
-                if (volume && rayIntersectsVolume(*volume))
+                if (!object || cameraUsesSourceWarpChart ||
+                    !object->IsEnabledInHierarchy())
+                    return;
+                const auto* volume = object->GetComponent<
+                    Engine::Components::SpatialManipulator>();
+                if (volume && (sourceChartAllowed ||
+                    volume->renderWarpInteriorOnly) &&
+                    rayIntersectsVolume(*volume))
                 {
                     cameraUsesSourceWarpChart = true;
-                    break;
+                    return;
                 }
-            }
+                for (const Engine::Core::Object* child : object->Children)
+                    findIntersectedVolume(child);
+            };
+            for (const auto& object : m_objects)
+                findIntersectedVolume(object.get());
         }
     }
     // A source-chart view continues through a finite nonlinear volume instead
@@ -2750,6 +2787,59 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
         if (!portalViewJobs.empty())
         {
+            // Establish every top-level aperture while the depth buffer still
+            // contains only the local scene.  Interleaving root-mask writes
+            // with connected-scene draws lets geometry rendered through an
+            // earlier portal replace local depth.  In folded layouts (such as
+            // the three-room matrix ring), a portal that was originally
+            // occluded can then pass the depth test as a second root and
+            // overwrite the legitimate recursive view.
+            //
+            // portalPasses are ordered far-to-near, so overlapping roots keep
+            // the nearest local aperture's disjoint stencil range.
+            bool usedRootScissor = false;
+            for (const PortalViewJob& portalJob : portalViewJobs)
+            {
+                if (portalJob.depth != 0u)
+                    continue;
+                const PortalStencilPass& portalPass = *portalJob.portal;
+                if (portalPass.apertureVertexCount < 3)
+                    continue;
+
+                const auto rootScissor = apertureScissorInView(portalPass,
+                    portalJob.apertureView);
+                if (rootScissor)
+                {
+                    context->SetScissorRect(*rootScissor);
+                    usedRootScissor = true;
+                }
+                const auto portalBackend = isDx11Provider
+                    ? Engine::Rendering::Portal::Backend::DirectX11
+                    : (isDx12Provider
+                        ? Engine::Rendering::Portal::Backend::DirectX12
+                        : Engine::Rendering::Portal::Backend::Vulkan);
+                const auto stencilStep = Engine::Rendering::Portal::
+                    StencilForDepth(portalBackend, portalJob.depth,
+                        portalJob.rootStencilBase);
+                context->SetPipeline(m_objectPortalStencilWritePipeline.get());
+                context->SetStencilReference(stencilStep.writeReference);
+                context->SetConstantBuffer(
+                    0, m_objectConstantBuffer.get(),
+                    static_cast<uint64_t>(portalJob.dataSlotBase) * kCBStride);
+                context->SetVertexBuffer(
+                    0, m_portalApertureBuffer.get(),
+                    sizeof(Engine::Model::Vertex),
+                    portalPass.apertureVertexOffset);
+                context->DrawInstanced(
+                    portalPass.apertureVertexCount, 1, 0, 0);
+            }
+            if (usedRootScissor)
+            {
+                context->SetScissorRect({ 0, 0,
+                    static_cast<int32_t>(viewportWidth),
+                    static_cast<int32_t>(viewportHeight) });
+            }
+
             for (const PortalViewJob& portalJob : portalViewJobs)
             {
             const PortalStencilPass& portalPass = *portalJob.portal;
@@ -2767,20 +2857,22 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             const auto stencilStep = Engine::Rendering::Portal::
                 StencilForDepth(portalBackend, portalJob.depth,
                     portalJob.rootStencilBase);
-            context->SetStencilReference(stencilStep.writeReference);
-
-            context->SetPipeline(stencilStep.writeOperation ==
-                Engine::Rendering::Portal::ApertureWriteOperation::Replace
-                ? m_objectPortalStencilWritePipeline.get()
-                : m_objectPortalStencilIncrementPipeline.get());
-            context->SetConstantBuffer(
-                0, m_objectConstantBuffer.get(),
-                static_cast<uint64_t>(portalJob.dataSlotBase) * kCBStride);
-            context->SetVertexBuffer(
-                0, m_portalApertureBuffer.get(),
-                sizeof(Engine::Model::Vertex),
-                portalPass.apertureVertexOffset);
-            context->DrawInstanced(portalPass.apertureVertexCount, 1, 0, 0);
+            // Root apertures were written together against untouched local
+            // depth above. Descendants alone modify stencil here, constrained
+            // by their inherited root range and the parent connected view.
+            if (portalJob.depth > 0u)
+            {
+                context->SetPipeline(m_objectPortalStencilIncrementPipeline.get());
+                context->SetStencilReference(stencilStep.writeReference);
+                context->SetConstantBuffer(
+                    0, m_objectConstantBuffer.get(),
+                    static_cast<uint64_t>(portalJob.dataSlotBase) * kCBStride);
+                context->SetVertexBuffer(
+                    0, m_portalApertureBuffer.get(),
+                    sizeof(Engine::Model::Vertex),
+                    portalPass.apertureVertexOffset);
+                context->DrawInstanced(portalPass.apertureVertexCount, 1, 0, 0);
+            }
             context->SetStencilReference(stencilStep.sceneReadReference);
 
             context->SetPipeline(m_objectPortalDepthResetPipeline.get());

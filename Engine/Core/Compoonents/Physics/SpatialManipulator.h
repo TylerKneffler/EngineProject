@@ -85,6 +85,13 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator | Warp Volume", ClampMin = "0")
     float warpBoundaryFalloff = 0.f;
 
+    // Use the authored (physical) geometry while the viewer is outside this
+    // volume, then switch to the compensated warp chart after the viewer
+    // enters it. This lets a physically tapered passage look tapered from the
+    // outside while retaining a constant apparent cross-section inside.
+    PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator | Warp Volume")
+    bool renderWarpInteriorOnly = false;
+
     // Dynamic rigid bodies can carry the volume's transverse metric scale as
     // they traverse from local -Z to +Z. This is opt-in because a warp volume
     // normally changes spatial coordinates without changing object ownership.

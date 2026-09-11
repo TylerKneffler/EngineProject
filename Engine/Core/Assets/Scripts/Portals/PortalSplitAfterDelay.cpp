@@ -1,4 +1,4 @@
-#include "Scripts/PortalSplitAfterDelay.h"
+#include "Scripts/Portals/PortalSplitAfterDelay.h"
 
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Physics/Collider.h"

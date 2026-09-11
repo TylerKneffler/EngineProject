@@ -630,7 +630,7 @@ if(NOT ENGINE_PROJECT_DIR AND
     enable_testing()
     add_executable(PortalScaleTraversalTests EXCLUDE_FROM_ALL
         "${ENGINE_LOCAL_TEST_ROOT}/PortalScaleTraversalTests.cpp"
-        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/PortalTraversalRepeater.cpp")
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Portals/PortalTraversalRepeater.cpp")
     target_link_libraries(PortalScaleTraversalTests PRIVATE Engine)
     target_include_directories(PortalScaleTraversalTests PRIVATE
         "${ENGINE_ROOT}/Engine"
@@ -698,8 +698,8 @@ if(NOT ENGINE_PROJECT_DIR AND
     enable_testing()
     add_executable(MovingPortalPairTests EXCLUDE_FROM_ALL
         "${ENGINE_LOCAL_TEST_ROOT}/MovingPortalPairTests.cpp"
-        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/MovingPortalPairDriver.cpp"
-        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/PortalTraversalRepeater.cpp")
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Portals/MovingPortalPairDriver.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Portals/PortalTraversalRepeater.cpp")
     target_link_libraries(MovingPortalPairTests PRIVATE Engine)
     target_include_directories(MovingPortalPairTests PRIVATE
         "${ENGINE_ROOT}/Engine"
@@ -728,7 +728,7 @@ if(NOT ENGINE_PROJECT_DIR AND
     enable_testing()
     add_executable(TunnelBidirectionalTraversalTests EXCLUDE_FROM_ALL
         "${ENGINE_LOCAL_TEST_ROOT}/TunnelBidirectionalTraversalTests.cpp"
-        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/WarpVolumeTraversalRepeater.cpp")
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Spatial/WarpVolumeTraversalRepeater.cpp")
     target_link_libraries(TunnelBidirectionalTraversalTests PRIVATE Engine)
     target_include_directories(TunnelBidirectionalTraversalTests PRIVATE
         "${ENGINE_ROOT}/Engine"
@@ -744,7 +744,7 @@ if(NOT ENGINE_PROJECT_DIR AND
     enable_testing()
     add_executable(EngineLifecycleTests
         "${ENGINE_ROOT}/Engine/Tests/RotateLifecycleTests.cpp"
-        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Rotate.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Utilities/Rotate.cpp"
     )
     target_link_libraries(EngineLifecycleTests PRIVATE Engine)
     target_include_directories(EngineLifecycleTests PRIVATE
@@ -756,6 +756,29 @@ if(NOT ENGINE_PROJECT_DIR AND
     )
     add_test(NAME RotateDefaultSceneLifecycle COMMAND EngineLifecycleTests)
     set_tests_properties(RotateDefaultSceneLifecycle PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}"
+    )
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_ROOT}/Engine/Tests/MarchingCubesTerrainEditorTests.cpp")
+    enable_testing()
+    add_executable(MarchingCubesTerrainEditorTests EXCLUDE_FROM_ALL
+        "${ENGINE_ROOT}/Engine/Tests/MarchingCubesTerrainEditorTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/MarchingCubes/MarchingCubesChunk.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/MarchingCubes/MarchingCubesQuad.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/MarchingCubes/MarchingCubesTerrain.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/MarchingCubes/PerlinNoiseField.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/MarchingCubes/TerrainStreamingCameraDriver.cpp"
+    )
+    target_link_libraries(MarchingCubesTerrainEditorTests PRIVATE Engine)
+    target_include_directories(MarchingCubesTerrainEditorTests PRIVATE
+        "${ENGINE_ROOT}/Engine"
+        "${ENGINE_ROOT}/Engine/Core/Assets"
+    )
+    add_test(NAME MarchingCubesEditorGeneration
+        COMMAND MarchingCubesTerrainEditorTests)
+    set_tests_properties(MarchingCubesEditorGeneration PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}"
     )
 endif()

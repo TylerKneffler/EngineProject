@@ -92,6 +92,7 @@ SpatialManipulator::SpatialManipulator()
     RegisterField("warpVolumeSize", warpVolumeSize);
     RegisterField("warpVolumeRadius", warpVolumeRadius);
     RegisterField("warpBoundaryFalloff", warpBoundaryFalloff);
+    RegisterField("renderWarpInteriorOnly", renderWarpInteriorOnly);
     RegisterField("applyTraversalScale", applyTraversalScale);
     RegisterField("persistTraversalScaleOnExit", persistTraversalScaleOnExit);
     RegisterField("spaceWarpType", spaceWarpType);
@@ -737,6 +738,12 @@ bool SpatialManipulator::DrawProperties(::Engine::Editor::IEditorUi& ui)
         if (static_cast<WarpVolumeShape>(warpVolumeShape) != WarpVolumeShape::Infinite)
             changed = ui.DragFloat("Warp Boundary Falloff", &warpBoundaryFalloff,
                 0.05f, 0.f, 100000.f) || changed;
+        changed = ui.Checkbox("Render Warp Only From Inside",
+            &renderWarpInteriorOnly) || changed;
+        if (renderWarpInteriorOnly)
+        {
+            ui.DisabledLabel("Outside views use physical geometry; inside views use the warp chart.");
+        }
 
         changed = ui.Checkbox("Apply Traversal Scale", &applyTraversalScale) || changed;
         if (applyTraversalScale)

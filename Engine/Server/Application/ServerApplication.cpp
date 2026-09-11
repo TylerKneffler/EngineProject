@@ -8,10 +8,11 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
-#include "Core/Assets/Scripts/FirstPersonController.h"
-#include "Core/Assets/Scripts/MainMenuGameManager.h"
-#include "Core/Assets/Scripts/PortalSplitAfterDelay.h"
-#include "Core/Assets/Scripts/Rotate.h"
+#include "Core/Assets/Scripts/Controllers/FirstPersonController.h"
+#include "Core/Assets/Scripts/Gameplay/MainMenuGameManager.h"
+#include "Core/Assets/Scripts/MarchingCubes/MarchingCubesTerrain.h"
+#include "Core/Assets/Scripts/Portals/PortalSplitAfterDelay.h"
+#include "Core/Assets/Scripts/Utilities/Rotate.h"
 #endif
 
 #include <algorithm>
@@ -288,6 +289,25 @@ void WriteObjectState(std::ostream& output, const Engine::Scene::Scene& scene,
         output << ']';
         output << '}';
     }
+
+#ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
+    if (const auto* terrain = object.GetComponent<MarchingCubesTerrain>())
+    {
+        output << ",\"terrainStreaming\":{\"loadedChunks\":"
+            << terrain->GetLoadedChunkCount()
+            << ",\"totalBuilt\":" << terrain->GetTotalChunksBuilt()
+            << ",\"totalUnloaded\":" << terrain->GetTotalChunksUnloaded()
+            << ",\"cachedChunks\":" << terrain->GetCachedChunkCount()
+            << ",\"cacheHits\":" << terrain->GetMeshCacheHits()
+            << ",\"cacheMisses\":" << terrain->GetMeshCacheMisses()
+            << ",\"queuedChunks\":" << terrain->GetQueuedChunkCount()
+            << ",\"generatingChunks\":" << terrain->GetInFlightChunkCount()
+            << ",\"lastMilliseconds\":"
+            << terrain->GetLastStreamingMilliseconds()
+            << ",\"maximumMilliseconds\":"
+            << terrain->GetMaximumStreamingMilliseconds() << '}';
+    }
+#endif
 
     WriteTraversalRenderInstances(output, scene, object);
 

@@ -3,6 +3,31 @@
 
 namespace Engine::Core
 {
+namespace
+{
+constexpr ULONGLONG kEscapeHoldToCloseMilliseconds = 1000;
+
+void ReleaseInputFocus(bool clearKeyboardFocus)
+{
+    ReleaseCapture();
+    ClipCursor(nullptr);
+    CURSORINFO cursorInfo { sizeof(CURSORINFO) };
+    if (!GetCursorInfo(&cursorInfo) ||
+        (cursorInfo.flags & CURSOR_SHOWING) == 0)
+    {
+        while (ShowCursor(TRUE) < 0)
+        {
+        }
+    }
+    if (clearKeyboardFocus)
+    {
+        // Clear keyboard focus without activating another application. A click
+        // in the engine window restores focus and lets gameplay recapture.
+        SetFocus(nullptr);
+    }
+}
+}
+
 // ---------------------------------------------------------------------------
 // Instance forwarding via GWLP_USERDATA
 //
@@ -270,7 +295,45 @@ LRESULT CALLBACK Window::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
     }
 
     if (self && msg == WM_ACTIVATEAPP)
+    {
         self->m_focused = wParam != FALSE;
+        if (!self->m_focused)
+        {
+            self->m_escapeHeld = false;
+            ReleaseInputFocus(false);
+        }
+    }
+
+    // Escape is an input-release gesture first. Handle it before the UI hook
+    // so a focused editor widget cannot consume it and leave gameplay capture
+    // active. Normal Windows key-repeat messages measure the hold without
+    // depending on asynchronous key state after capture changes.
+    if (self && (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) &&
+        wParam == VK_ESCAPE)
+    {
+        if (!self->m_escapeHeld)
+        {
+            self->m_escapeHeld = true;
+            self->m_escapePressedAt = GetTickCount64();
+            // Retain keyboard focus until key-up so a tap can be distinguished
+            // reliably from the hold-to-close gesture.
+            ReleaseInputFocus(false);
+        }
+        else if (GetTickCount64() - self->m_escapePressedAt >=
+            kEscapeHoldToCloseMilliseconds)
+        {
+            self->m_escapeHeld = false;
+            PostQuitMessage(0);
+        }
+        return 0;
+    }
+    if (self && (msg == WM_KEYUP || msg == WM_SYSKEYUP) &&
+        wParam == VK_ESCAPE)
+    {
+        self->m_escapeHeld = false;
+        ReleaseInputFocus(true);
+        return 0;
+    }
 
     if (self && self->WndProcHook)
         if (self->WndProcHook(hwnd, msg, wParam, lParam))
@@ -300,20 +363,10 @@ LRESULT CALLBACK Window::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             // clicks the X button or DestroyWindow is called). PostQuitMessage(0)
             // places WM_QUIT in the thread message queue with wParam = 0. Run()
             // detects that and returns, ending the application cleanly.
+            ReleaseInputFocus(false);
             PostQuitMessage(0);
             return 0;
 
-        case WM_KEYDOWN:
-            // VK_ESCAPE provides a quick keyboard exit for development builds.
-            // wParam holds the virtual-key code; lParam holds repeat / scan info
-            // (not needed here).
-            if (wParam == VK_ESCAPE)
-            {
-                PostQuitMessage(0);
-                return 0;
-            }
-            break;
-        
     }
 
     // DefWindowProcW provides default handling for all messages we do not
