@@ -784,6 +784,23 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_ROOT}/Engine/Tests/TerrainGenRenderedBenchmark.cpp")
+    add_executable(TerrainGenRenderedBenchmark EXCLUDE_FROM_ALL
+        "${ENGINE_ROOT}/Engine/Tests/TerrainGenRenderedBenchmark.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainChunk.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainPatch.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGen.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/PerlinNoiseField.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainStreamingCameraDriver.cpp"
+    )
+    target_link_libraries(TerrainGenRenderedBenchmark PRIVATE Engine)
+    target_include_directories(TerrainGenRenderedBenchmark PRIVATE
+        "${ENGINE_ROOT}/Engine"
+        "${ENGINE_ROOT}/Engine/Core/Assets"
+    )
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_ROOT}/Engine/Tests/TexturePipelineTests.cpp")
     enable_testing()
     add_executable(TexturePipelineTests

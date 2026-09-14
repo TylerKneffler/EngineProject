@@ -3,6 +3,7 @@
 #include "Core/PropertyMacros.h"
 #include "Core/Script.h"
 #include <glm/glm.hpp>
+#include <string>
 
 // Moves a viewer repeatedly across chunk boundaries so terrain streaming can
 // be profiled without manual input. The endpoints are authored world-space
@@ -28,6 +29,12 @@ public:
     bool moveOnStart = true;
 
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain Streaming Probe")
+    bool waitForInitialTerrain = false;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain Streaming Probe")
+    std::string terrainObjectName;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain Streaming Probe")
     bool moveInfinitely = true;
 
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain Streaming Probe")
@@ -48,4 +55,5 @@ public:
 private:
     float m_pauseRemaining = 0.f;
     bool m_towardEnd = true;
+    bool m_initialTerrainReady = false;
 };

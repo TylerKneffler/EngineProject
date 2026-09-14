@@ -367,7 +367,8 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     m_boneDataBuffer = bufferFactory->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
         Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
-        static_cast<uint64_t>(kMaxObjects) * kMaxBonesPerObject * sizeof(glm::mat4),
+        static_cast<uint64_t>(kMaxSkinnedObjects) * kMaxBonesPerObject *
+            sizeof(glm::mat4),
         nullptr, sizeof(glm::mat4));
     m_boneDataMapped = m_boneDataBuffer ? m_boneDataBuffer->Map() : nullptr;
     if (!m_boneDataMapped)
@@ -376,7 +377,7 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     m_portalApertureBuffer = bufferFactory->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::VertexBuffer,
         Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
-        static_cast<uint64_t>(kMaxObjects) * kMaxSpatialVerticesPerObject *
+        static_cast<uint64_t>(kMaxSpatialObjects) * kMaxSpatialVerticesPerObject *
             sizeof(Engine::Model::Vertex));
     m_portalApertureMapped = m_portalApertureBuffer
         ? m_portalApertureBuffer->Map() : nullptr;
@@ -939,6 +940,7 @@ void Scene::PrepareRenderFrame()
     // volumes, not on camera motion. A compact signature lets both editor and
     // runtime frames reuse static CPU deformation and its upload buffer.
     uint64_t warpRevision = 1469598103934665603ull;
+    bool hasActiveWarpVolume = false;
     std::function<void(const Engine::Core::Object*)> hashWarpObjects;
     hashWarpObjects = [&](const Engine::Core::Object* object)
     {
@@ -947,6 +949,9 @@ void Scene::PrepareRenderFrame()
         if (const auto* manipulator = object->GetComponent<
                 Engine::Components::SpatialManipulator>())
         {
+            hasActiveWarpVolume = hasActiveWarpVolume ||
+                (manipulator->enabled && manipulator->definesWarpVolume &&
+                    object->IsEnabledInHierarchy());
             HashRevision(warpRevision,
                 static_cast<uint64_t>(reinterpret_cast<uintptr_t>(manipulator)));
             HashRevision(warpRevision, manipulator->GetConfigurationRevision());
@@ -962,6 +967,8 @@ void Scene::PrepareRenderFrame()
         hashWarpObjects(object.get());
 
     m_frameRenderItems.reserve(m_objects.size());
+    if (!hasActiveWarpVolume)
+        m_warpedRenderMeshes.clear();
     // The authored Mesh buffer cannot be changed for rendering a nonlinear
     // volume: it may also back a collider, an editor asset, or another draw.
     // Keep a private upload buffer for each affected object instead.
@@ -1046,7 +1053,8 @@ void Scene::PrepareRenderFrame()
         // source/target chart draws, so retain their specialized path.
         const bool hasSkinnedMesh = candidate->GetComponent<
             Engine::Components::SkinnedMesh>() != nullptr;
-        if (mesh && !sprite && !hasSplitRenderInstances && !hasSkinnedMesh &&
+        if (hasActiveWarpVolume && mesh && !sprite &&
+            !hasSplitRenderInstances && !hasSkinnedMesh &&
             !mesh->GetVertices().empty())
         {
             glm::mat4 authoredWorld = candidate->transform.GetWorldMatrix();
@@ -1208,7 +1216,7 @@ void Scene::PrepareRenderFrame()
         }
         item.blended = item.belongsToPreview || item.blended;
 
-        if (skinPaletteSlot < kMaxObjects)
+        if (skinPaletteSlot < kMaxSkinnedObjects)
         {
             if (Engine::Components::SkinnedMesh* skinned =
                 candidate->GetComponent<Engine::Components::SkinnedMesh>())
@@ -1945,7 +1953,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         m_portalApertureMapped);
     uint32_t portalVertexCursor = 0;
     const uint32_t portalVertexCapacity =
-        kMaxObjects * kMaxSpatialVerticesPerObject;
+        kMaxSpatialObjects * kMaxSpatialVerticesPerObject;
     for (PortalStencilPass& pass : portalPasses)
     {
         const std::vector<glm::vec3> points =

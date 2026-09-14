@@ -49,6 +49,9 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Streaming", ClampMin = "1", ClampMax = "16")
     int maxChunkCommitsPerUpdate = 4;
 
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Streaming", ClampMin = "1", ClampMax = "32")
+    int maxChunkUnloadsPerUpdate = 2;
+
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Streaming")
     bool cacheUnloadedChunkMeshes = true;
 
@@ -132,6 +135,11 @@ public:
     std::size_t GetCachedChunkCount() const { return m_meshCache.size(); }
     std::size_t GetQueuedChunkCount() const { return m_chunkQueue.size(); }
     std::size_t GetInFlightChunkCount() const { return m_inFlightChunks.size(); }
+    std::size_t GetPendingChunkUnloadCount() const { return m_pendingChunkUnloadCount; }
+    bool IsChunkLoaded(int x, int z) const
+    {
+        return m_chunks.find(ChunkKey(x, z)) != m_chunks.end();
+    }
 
 private:
     using Vertex = Engine::Model::Vertex;
@@ -200,7 +208,7 @@ private:
     PerlinNoiseField* ResolveNoise() const;
     void RefreshChunks();
     void BuildChunk(int chunkX, int chunkZ,
-        const std::vector<CachedPatchMesh>* preparedPatches = nullptr);
+        std::vector<CachedPatchMesh>* preparedPatches = nullptr);
     GenerationSnapshot CaptureGenerationSnapshot(
         const PerlinNoiseField& noise) const;
     static GeneratedChunkMesh GenerateChunkMesh(
@@ -223,7 +231,7 @@ private:
         const PerlinNoiseField& noise) const;
     glm::vec3 ColorForHeight(float height) const;
     uint64_t MeshConfigurationHash(const PerlinNoiseField& noise) const;
-    void CacheChunkMesh(int64_t key, const Engine::Core::Object& chunkObject);
+    void CacheChunkMesh(int64_t key, Engine::Core::Object& chunkObject);
     void TrimMeshCache();
 
     std::unordered_map<int64_t, Engine::Core::Object*> m_chunks;
@@ -241,4 +249,5 @@ private:
     uint64_t m_meshCacheMisses = 0;
     std::vector<QueuedChunk> m_chunkQueue;
     std::unordered_map<int64_t, InFlightChunk> m_inFlightChunks;
+    std::size_t m_pendingChunkUnloadCount = 0;
 };

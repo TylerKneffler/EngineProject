@@ -51,6 +51,7 @@ TerrainGen::TerrainGen()
     RegisterField("maxChunkBuildsPerUpdate", maxChunkBuildsPerUpdate);
     RegisterField("parallelChunkBuilds", parallelChunkBuilds);
     RegisterField("maxChunkCommitsPerUpdate", maxChunkCommitsPerUpdate);
+    RegisterField("maxChunkUnloadsPerUpdate", maxChunkUnloadsPerUpdate);
     RegisterField("cacheUnloadedChunkMeshes", cacheUnloadedChunkMeshes);
     RegisterField("unloadedMeshCacheCapacity", unloadedMeshCacheCapacity);
     RegisterField("horizontalCellsPerChunk", horizontalCellsPerChunk);
@@ -132,8 +133,26 @@ void TerrainGen::Start()
     m_chunks.clear();
     for (Object* child : Owner->Children)
     {
-        if (auto* chunk = child ? child->GetComponent<TerrainChunk>() : nullptr)
-            m_chunks[ChunkKey(chunk->chunkX, chunk->chunkZ)] = child;
+        auto* chunk = child ? child->GetComponent<TerrainChunk>() : nullptr;
+        if (!chunk)
+            continue;
+        // Procedural vertex arrays are runtime data and are intentionally not
+        // serialized into a scene. The editor may nevertheless save the
+        // generated chunk/patch hierarchy. Do not register those empty shells
+        // as loaded in a standalone game or streaming will skip regeneration.
+        const bool hasRenderablePatch = std::any_of(child->Children.begin(),
+            child->Children.end(), [](Object* patchObject)
+            {
+                const auto* mesh = patchObject ? patchObject->GetComponent<
+                    Engine::Components::Mesh>() : nullptr;
+                return mesh && mesh->GetVertexCount() > 0u;
+            });
+        if (!hasRenderablePatch)
+        {
+            Owner->GetScene()->RequestRemoveObject(child);
+            continue;
+        }
+        m_chunks[ChunkKey(chunk->chunkX, chunk->chunkZ)] = child;
     }
 
     m_viewerChunk = ViewerChunk();
@@ -187,24 +206,48 @@ void TerrainGen::RefreshChunks()
         m_meshConfigurationHash = configuration;
     }
 
+    struct UnloadCandidate
+    {
+        int64_t key = 0;
+        Object* object = nullptr;
+        int distanceSquared = 0;
+    };
+    std::vector<UnloadCandidate> unloadCandidates;
     for (auto iterator = m_chunks.begin(); iterator != m_chunks.end();)
     {
-        TerrainChunk* chunk = iterator->second
-            ? iterator->second->GetComponent<TerrainChunk>() : nullptr;
-        if (!chunk || std::abs(chunk->chunkX - m_viewerChunk.x) > radius ||
-            std::abs(chunk->chunkZ - m_viewerChunk.y) > radius)
+        Object* object = iterator->second;
+        TerrainChunk* chunk = object ? object->GetComponent<TerrainChunk>() : nullptr;
+        if (!chunk)
         {
-            if (iterator->second)
-            {
-                CacheChunkMesh(iterator->first, *iterator->second);
-                Owner->GetScene()->RequestRemoveObject(iterator->second);
-            }
             iterator = m_chunks.erase(iterator);
-            ++m_totalChunksUnloaded;
+            continue;
         }
-        else
-            ++iterator;
+        const int dx = chunk->chunkX - m_viewerChunk.x;
+        const int dz = chunk->chunkZ - m_viewerChunk.y;
+        if (std::abs(dx) > radius || std::abs(dz) > radius)
+            unloadCandidates.push_back({ iterator->first, object, dx * dx + dz * dz });
+        ++iterator;
     }
+    std::sort(unloadCandidates.begin(), unloadCandidates.end(),
+        [](const UnloadCandidate& first, const UnloadCandidate& second)
+        {
+            return first.distanceSquared > second.distanceSquared;
+        });
+    const size_t unloadBudget = static_cast<size_t>(
+        std::clamp(maxChunkUnloadsPerUpdate, 1, 32));
+    const size_t unloadCount = std::min(unloadBudget, unloadCandidates.size());
+    for (size_t index = 0; index < unloadCount; ++index)
+    {
+        const UnloadCandidate& candidate = unloadCandidates[index];
+        if (candidate.object)
+        {
+            CacheChunkMesh(candidate.key, *candidate.object);
+            Owner->GetScene()->RequestRemoveObject(candidate.object);
+        }
+        m_chunks.erase(candidate.key);
+        ++m_totalChunksUnloaded;
+    }
+    m_pendingChunkUnloadCount = unloadCandidates.size() - unloadCount;
 
     int commitBudget = std::clamp(maxChunkCommitsPerUpdate, 1, 16);
     commitBudget -= CommitCompletedChunks(commitBudget);
@@ -337,17 +380,32 @@ TerrainGen::BuildSmoothSurfaceVertices(int chunkX, int chunkZ,
     const int endX = (patchX + 1) * horizontalCells / patchAxisCount;
     const int startZ = patchZ * horizontalCells / patchAxisCount;
     const int endZ = (patchZ + 1) * horizontalCells / patchAxisCount;
-    const float horizontalStep = std::max(1.f, chunkSize) /
+    const float terrainChunkSize = std::max(1.f, chunkSize);
+    const float horizontalStep = terrainChunkSize /
         static_cast<float>(horizontalCells);
     const float ySize = std::max(1.f, verticalSize);
     const float verticalStep = ySize / static_cast<float>(yCells);
     const float minimumY = -ySize * 0.5f;
     const glm::vec3 patchOrigin(
-        static_cast<float>(startX) * horizontalStep, 0.f,
-        static_cast<float>(startZ) * horizontalStep);
+        static_cast<float>(static_cast<double>(startX) * terrainChunkSize /
+            horizontalCells), 0.f,
+        static_cast<float>(static_cast<double>(startZ) * terrainChunkSize /
+            horizontalCells));
     const glm::vec3 chunkOrigin(
-        static_cast<float>(chunkX) * std::max(1.f, chunkSize), 0.f,
-        static_cast<float>(chunkZ) * std::max(1.f, chunkSize));
+        static_cast<float>(chunkX) * terrainChunkSize, 0.f,
+        static_cast<float>(chunkZ) * terrainChunkSize);
+    // Use one global integer lattice for samples shared by neighboring chunks.
+    // This avoids small density/position disagreements caused by reaching the
+    // same border through different floating-point addition paths.
+    const auto worldGridCoordinate = [horizontalCells, terrainChunkSize](
+        int chunk, int cell)
+    {
+        const int64_t globalCell = static_cast<int64_t>(chunk) *
+            horizontalCells + cell;
+        return static_cast<float>(static_cast<double>(globalCell) *
+            static_cast<double>(terrainChunkSize) /
+            static_cast<double>(horizontalCells));
+    };
 
     static constexpr int cubeCorners[8][3] = {
         { 0, 0, 0 }, { 1, 0, 0 }, { 1, 0, 1 }, { 0, 0, 1 },
@@ -358,7 +416,6 @@ TerrainGen::BuildSmoothSurfaceVertices(int chunkX, int chunkZ,
         { 4, 5 }, { 5, 6 }, { 6, 7 }, { 7, 4 },
         { 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 }
     };
-    // Corners and perimeter edges use matching cyclic order on every face.
     static constexpr int cubeFaces[6][4] = {
         { 0, 1, 2, 3 }, { 4, 5, 6, 7 }, { 0, 1, 5, 4 },
         { 1, 2, 6, 5 }, { 2, 3, 7, 6 }, { 3, 0, 4, 7 }
@@ -372,25 +429,66 @@ TerrainGen::BuildSmoothSurfaceVertices(int chunkX, int chunkZ,
     vertices.reserve(static_cast<size_t>(endX - startX) *
         static_cast<size_t>(endZ - startZ) * yCells * 18u);
 
-    const float gradientStep = std::min(horizontalStep, verticalStep) * 0.2f;
-    const auto gradient = [&](const glm::vec3& point)
+    // This cache belongs only to this new patch build. It avoids recomputing
+    // shared cell corners and derives normals from the same density field; it
+    // is unrelated to the persistent cache used when revisiting old chunks.
+    const int gridWidth = endX - startX + 3;
+    const int gridDepth = endZ - startZ + 3;
+    const int gridHeight = yCells + 3;
+    const auto gridIndex = [=](int x, int y, int z)
     {
-        const glm::vec3 x(gradientStep, 0.f, 0.f);
-        const glm::vec3 y(0.f, gradientStep, 0.f);
-        const glm::vec3 z(0.f, 0.f, gradientStep);
+        return (static_cast<size_t>(y) * gridDepth + z) * gridWidth + x;
+    };
+    std::vector<float> surfaceHeights(static_cast<size_t>(gridWidth) * gridDepth);
+    for (int z = 0; z < gridDepth; ++z)
+    {
+        for (int x = 0; x < gridWidth; ++x)
+        {
+            const float worldX = worldGridCoordinate(chunkX, startX + x - 1);
+            const float worldZ = worldGridCoordinate(chunkZ, startZ + z - 1);
+            surfaceHeights[static_cast<size_t>(z) * gridWidth + x] =
+                baseHeight + heightAmplitude * noise.SampleFractal2D(worldX, worldZ);
+        }
+    }
+    std::vector<float> densityGrid(static_cast<size_t>(gridWidth) *
+        gridDepth * gridHeight);
+    for (int y = 0; y < gridHeight; ++y)
+    {
+        const float worldY = minimumY + static_cast<float>(y - 1) * verticalStep;
+        for (int z = 0; z < gridDepth; ++z)
+        {
+            const float worldZ = worldGridCoordinate(chunkZ, startZ + z - 1);
+            for (int x = 0; x < gridWidth; ++x)
+            {
+                const float worldX = worldGridCoordinate(chunkX, startX + x - 1);
+                const float caves = caveStrength > 0.f
+                    ? caveStrength * noise.SampleFractal(glm::vec3(
+                        worldX, worldY, worldZ) *
+                        std::max(0.01f, caveFrequencyMultiplier))
+                    : 0.f;
+                densityGrid[gridIndex(x, y, z)] = worldY -
+                    surfaceHeights[static_cast<size_t>(z) * gridWidth + x] + caves;
+            }
+        }
+    }
+    const auto gradientAt = [&](int x, int y, int z)
+    {
         glm::vec3 result(
-            Density(point + x, noise) - Density(point - x, noise),
-            Density(point + y, noise) - Density(point - y, noise),
-            Density(point + z, noise) - Density(point - z, noise));
+            (densityGrid[gridIndex(x + 1, y, z)] -
+                densityGrid[gridIndex(x - 1, y, z)]) / (2.f * horizontalStep),
+            (densityGrid[gridIndex(x, y + 1, z)] -
+                densityGrid[gridIndex(x, y - 1, z)]) / (2.f * verticalStep),
+            (densityGrid[gridIndex(x, y, z + 1)] -
+                densityGrid[gridIndex(x, y, z - 1)]) / (2.f * horizontalStep));
         const float length = glm::length(result);
         return length > 0.000001f ? result / length : glm::vec3(0.f, 1.f, 0.f);
     };
 
-    const auto makeVertex = [&](const glm::vec3& terrainPosition)
+    const auto makeVertex = [&](const glm::vec3& terrainPosition,
+        const glm::vec3& normal)
     {
         Vertex vertex{};
         const glm::vec3 local = terrainPosition - chunkOrigin - patchOrigin;
-        const glm::vec3 normal = gradient(terrainPosition);
         glm::vec3 tangent = glm::vec3(1.f, 0.f, 0.f) - normal * normal.x;
         if (glm::length(tangent) < 0.0001f)
             tangent = glm::vec3(0.f, 0.f, 1.f);
@@ -407,27 +505,32 @@ TerrainGen::BuildSmoothSurfaceVertices(int chunkX, int chunkZ,
         return vertex;
     };
 
-    const auto emitPolygon = [&](std::vector<glm::vec3> polygon)
+    const auto emitPolygon = [&](const std::array<glm::vec3, 12>& polygon,
+        const std::array<glm::vec3, 12>& polygonNormals, int polygonSize)
     {
-        if (polygon.size() < 3)
+        if (polygonSize < 3)
             return;
-        glm::vec3 normal(0.f);
-        for (const glm::vec3& point : polygon)
-        {
-            normal += gradient(point);
-        }
-        normal = glm::length(normal) > 0.0001f
-            ? glm::normalize(normal) : glm::vec3(0.f, 1.f, 0.f);
-        for (size_t index = 1; index + 1 < polygon.size(); ++index)
+        glm::vec3 faceNormal(0.f);
+        for (int index = 0; index < polygonSize; ++index)
+            faceNormal += polygonNormals[index];
+        faceNormal = glm::length(faceNormal) > 0.0001f
+            ? glm::normalize(faceNormal) : glm::vec3(0.f, 1.f, 0.f);
+        for (int index = 1; index + 1 < polygonSize; ++index)
         {
             glm::vec3 first = polygon[0];
             glm::vec3 second = polygon[index];
             glm::vec3 third = polygon[index + 1];
-            if (glm::dot(glm::cross(second - first, third - first), normal) < 0.f)
+            glm::vec3 firstNormal = polygonNormals[0];
+            glm::vec3 secondNormal = polygonNormals[index];
+            glm::vec3 thirdNormal = polygonNormals[index + 1];
+            if (glm::dot(glm::cross(second - first, third - first), faceNormal) < 0.f)
+            {
                 std::swap(second, third);
-            vertices.push_back(makeVertex(first));
-            vertices.push_back(makeVertex(second));
-            vertices.push_back(makeVertex(third));
+                std::swap(secondNormal, thirdNormal);
+            }
+            vertices.push_back(makeVertex(first, firstNormal));
+            vertices.push_back(makeVertex(second, secondNormal));
+            vertices.push_back(makeVertex(third, thirdNormal));
         }
     };
 
@@ -438,33 +541,57 @@ TerrainGen::BuildSmoothSurfaceVertices(int chunkX, int chunkZ,
             for (int y = 0; y < yCells; ++y)
             {
                 std::array<glm::vec3, 8> positions{};
+                std::array<glm::vec3, 8> cornerGradients{};
                 std::array<float, 8> densities{};
                 for (int corner = 0; corner < 8; ++corner)
                 {
-                    positions[corner] = chunkOrigin + glm::vec3(
-                        static_cast<float>(x + cubeCorners[corner][0]) * horizontalStep,
+                    positions[corner] = glm::vec3(
+                        worldGridCoordinate(chunkX, x + cubeCorners[corner][0]),
                         minimumY + static_cast<float>(y + cubeCorners[corner][1]) * verticalStep,
-                        static_cast<float>(z + cubeCorners[corner][2]) * horizontalStep);
-                    densities[corner] = Density(positions[corner], noise);
+                        worldGridCoordinate(chunkZ, z + cubeCorners[corner][2]));
+                    const int gridX = x - startX + cubeCorners[corner][0] + 1;
+                    const int gridY = y + cubeCorners[corner][1] + 1;
+                    const int gridZ = z - startZ + cubeCorners[corner][2] + 1;
+                    densities[corner] = densityGrid[gridIndex(gridX, gridY, gridZ)];
+                    cornerGradients[corner] = gradientAt(gridX, gridY, gridZ);
                 }
 
                 std::array<glm::vec3, 12> intersections{};
+                std::array<glm::vec3, 12> intersectionNormals{};
                 std::array<bool, 12> activeEdges{};
                 for (int edge = 0; edge < 12; ++edge)
                 {
-                    const int first = cubeEdges[edge][0];
-                    const int second = cubeEdges[edge][1];
-                    const float firstDensity = densities[first];
-                    const float secondDensity = densities[second];
-                    if ((firstDensity < isoLevel) == (secondDensity < isoLevel))
+                    int first = cubeEdges[edge][0];
+                    int second = cubeEdges[edge][1];
+                    if ((densities[first] < isoLevel) ==
+                        (densities[second] < isoLevel))
                         continue;
-                    const float denominator = secondDensity - firstDensity;
+                    // A shared lattice edge must take the same arithmetic path
+                    // from either adjacent cell/chunk. Canonically ordering its
+                    // world-space endpoints prevents sub-pixel raster cracks.
+                    const auto pointLess = [&](int left, int right)
+                    {
+                        if (positions[left].x != positions[right].x)
+                            return positions[left].x < positions[right].x;
+                        if (positions[left].y != positions[right].y)
+                            return positions[left].y < positions[right].y;
+                        return positions[left].z < positions[right].z;
+                    };
+                    if (pointLess(second, first))
+                        std::swap(first, second);
+                    const float denominator = densities[second] - densities[first];
                     const float amount = std::abs(denominator) > 0.000001f
-                        ? std::clamp((isoLevel - firstDensity) / denominator, 0.f, 1.f)
+                        ? std::clamp((isoLevel - densities[first]) / denominator,
+                            0.f, 1.f)
                         : 0.5f;
                     activeEdges[edge] = true;
                     intersections[edge] = positions[first] +
                         (positions[second] - positions[first]) * amount;
+                    const glm::vec3 interpolatedGradient = cornerGradients[first] +
+                        (cornerGradients[second] - cornerGradients[first]) * amount;
+                    intersectionNormals[edge] = glm::length(interpolatedGradient) >
+                        0.000001f ? glm::normalize(interpolatedGradient) :
+                        glm::vec3(0.f, 1.f, 0.f);
                 }
 
                 std::array<std::array<int, 2>, 12> neighbors{};
@@ -497,15 +624,24 @@ TerrainGen::BuildSmoothSurfaceVertices(int chunkX, int chunkZ,
                     }
                     else if (crossingCount == 4)
                     {
-                        // Resolve a checkerboard face by sampling its bilinear
-                        // center. This prevents neighboring chunks from making
-                        // different choices on the shared face.
-                        float centerDensity = 0.f;
-                        for (int index = 0; index < 4; ++index)
-                            centerDensity += densities[cubeFaces[face][index]];
-                        centerDensity *= 0.25f;
+                        double centerDensity = 0.0;
+                        std::array<int, 4> orderedCorners {
+                            cubeFaces[face][0], cubeFaces[face][1],
+                            cubeFaces[face][2], cubeFaces[face][3] };
+                        std::sort(orderedCorners.begin(), orderedCorners.end(),
+                            [&](int left, int right)
+                            {
+                                if (positions[left].x != positions[right].x)
+                                    return positions[left].x < positions[right].x;
+                                if (positions[left].y != positions[right].y)
+                                    return positions[left].y < positions[right].y;
+                                return positions[left].z < positions[right].z;
+                            });
+                        for (int corner : orderedCorners)
+                            centerDensity += static_cast<double>(densities[corner]);
+                        centerDensity *= 0.25;
                         const bool centerMatchesFirst =
-                            (centerDensity < isoLevel) ==
+                            (centerDensity < static_cast<double>(isoLevel)) ==
                             (densities[cubeFaces[face][0]] < isoLevel);
                         if (centerMatchesFirst)
                         {
@@ -526,24 +662,25 @@ TerrainGen::BuildSmoothSurfaceVertices(int chunkX, int chunkZ,
                     if (!activeEdges[start] || visited[start] ||
                         neighborCounts[start] == 0)
                         continue;
-                    std::vector<glm::vec3> polygon;
-                    polygon.reserve(12);
+                    std::array<glm::vec3, 12> polygon{};
+                    std::array<glm::vec3, 12> polygonNormals{};
+                    int polygonSize = 0;
                     int previous = -1;
                     int current = start;
                     for (int step = 0; step < 12; ++step)
                     {
-                        polygon.push_back(intersections[current]);
+                        polygon[polygonSize] = intersections[current];
+                        polygonNormals[polygonSize] = intersectionNormals[current];
+                        ++polygonSize;
                         visited[current] = true;
                         const int next = neighbors[current][0] != previous
                             ? neighbors[current][0] : neighbors[current][1];
-                        if (next < 0 || next == start)
-                            break;
-                        if (visited[next])
+                        if (next < 0 || next == start || visited[next])
                             break;
                         previous = current;
                         current = next;
                     }
-                    emitPolygon(std::move(polygon));
+                    emitPolygon(polygon, polygonNormals, polygonSize);
                 }
             }
         }
@@ -668,9 +805,20 @@ int TerrainGen::CommitCompletedChunks(int budget)
         auto iterator = m_inFlightChunks.find(readyTask.key);
         if (iterator == m_inFlightChunks.end())
             continue;
-        const bool desired = IsChunkDesired(iterator->second.x,
-            iterator->second.z);
-        if (desired && committed >= budget)
+        const int chunkX = iterator->second.x;
+        const int chunkZ = iterator->second.z;
+        const bool desired = IsChunkDesired(chunkX, chunkZ);
+        const bool viewerSeed = chunkX == m_viewerChunk.x &&
+            chunkZ == m_viewerChunk.y;
+        const bool touchesLoadedChunk = viewerSeed ||
+            m_chunks.find(ChunkKey(chunkX - 1, chunkZ)) != m_chunks.end() ||
+            m_chunks.find(ChunkKey(chunkX + 1, chunkZ)) != m_chunks.end() ||
+            m_chunks.find(ChunkKey(chunkX, chunkZ - 1)) != m_chunks.end() ||
+            m_chunks.find(ChunkKey(chunkX, chunkZ + 1)) != m_chunks.end();
+        // Keep the visible terrain edge connected. A worker may finish a more
+        // distant chunk first, but exposing it before an adjacent chunk creates
+        // temporary islands and obvious gaps during streaming.
+        if (desired && (committed >= budget || !touchesLoadedChunk))
             continue;
         GeneratedChunkMesh result = iterator->second.future.get();
         m_inFlightChunks.erase(iterator);
@@ -709,23 +857,23 @@ uint64_t TerrainGen::MeshConfigurationHash(
 }
 
 void TerrainGen::CacheChunkMesh(int64_t key,
-    const Engine::Core::Object& chunkObject)
+    Engine::Core::Object& chunkObject)
 {
     if (!cacheUnloadedChunkMeshes || unloadedMeshCacheCapacity <= 0)
         return;
     CachedChunkMesh cached;
     cached.lastUse = ++m_meshCacheClock;
     cached.patches.reserve(chunkObject.Children.size());
-    for (const Object* child : chunkObject.Children)
+    for (Object* child : chunkObject.Children)
     {
         const TerrainPatch* patch = child
             ? child->GetComponent<TerrainPatch>() : nullptr;
-        const auto* mesh = child
+        auto* mesh = child
             ? child->GetComponent<Engine::Components::Mesh>() : nullptr;
         if (!patch || !mesh || mesh->GetVertices().empty())
             continue;
         cached.patches.push_back({ patch->patchX, patch->patchZ,
-            mesh->GetVertices() });
+            mesh->TakeVertices() });
     }
     if (!cached.patches.empty())
     {
@@ -1061,45 +1209,77 @@ TerrainGen::BuildHexagonVertices(int chunkX, int chunkZ,
         emitTriangle(lowA, b, a, normal);
     };
 
-    constexpr float pi = 3.14159265358979323846f;
     const int firstColumn = static_cast<int>(std::ceil(minimumX / columnSpacing));
     const int lastColumn = static_cast<int>(std::ceil(maximumX / columnSpacing));
     for (int column = firstColumn; column < lastColumn; ++column)
     {
-        const float centerX = static_cast<float>(column) * columnSpacing;
+        // Hex vertices live on an integer half-radius/half-row lattice. This
+        // makes a corner shared across a jagged chunk boundary bit-identical,
+        // regardless of which hex computes it.
+        const auto latticePoint = [&](int xUnits, int zUnits)
+        {
+            return glm::vec2(
+                static_cast<float>(static_cast<double>(xUnits) * radius * 0.5),
+                static_cast<float>(static_cast<double>(zUnits) * cellSize * 0.5));
+        };
+        const float centerX = latticePoint(column * 3, 0).x;
         if (centerX < minimumX || centerX >= maximumX)
             continue;
-        const float rowOffset = (column & 1) != 0 ? rowSpacing * 0.5f : 0.f;
+        const int columnParity = column & 1;
+        const float rowOffset = columnParity != 0 ? rowSpacing * 0.5f : 0.f;
         const int firstRow = static_cast<int>(std::ceil(
             (minimumZ - rowOffset) / rowSpacing));
         const int lastRow = static_cast<int>(std::ceil(
             (maximumZ - rowOffset) / rowSpacing));
         for (int row = firstRow; row < lastRow; ++row)
         {
-            const float centerZ = static_cast<float>(row) * rowSpacing + rowOffset;
+            const glm::vec2 centerPoint = latticePoint(column * 3,
+                row * 2 + columnParity);
+            const float centerZ = centerPoint.y;
             if (centerZ < minimumZ || centerZ >= maximumZ)
                 continue;
             const float height = SteppedHeight(centerX, centerZ, noise);
             const glm::vec3 center(centerX, height, centerZ);
             std::array<glm::vec3, 6> corners{};
+            static constexpr int cornerOffsets[6][2] = {
+                { 2, 0 }, { 1, 1 }, { -1, 1 },
+                { -2, 0 }, { -1, -1 }, { 1, -1 }
+            };
             for (int side = 0; side < 6; ++side)
             {
-                const float angle = static_cast<float>(side) * pi / 3.f;
-                corners[side] = { centerX + radius * std::cos(angle), height,
-                    centerZ + radius * std::sin(angle) };
+                const glm::vec2 point = latticePoint(
+                    column * 3 + cornerOffsets[side][0],
+                    row * 2 + columnParity + cornerOffsets[side][1]);
+                corners[side] = { point.x, height, point.y };
             }
+            static constexpr int evenNeighborOffsets[6][2] = {
+                { 1, 0 }, { 0, 1 }, { -1, 0 },
+                { -1, -1 }, { 0, -1 }, { 1, -1 }
+            };
+            static constexpr int oddNeighborOffsets[6][2] = {
+                { 1, 1 }, { 0, 1 }, { -1, 1 },
+                { -1, 0 }, { 0, -1 }, { 1, 0 }
+            };
+            static constexpr glm::vec3 sideNormals[6] = {
+                { 0.866025404f, 0.f, 0.5f }, { 0.f, 0.f, 1.f },
+                { -0.866025404f, 0.f, 0.5f },
+                { -0.866025404f, 0.f, -0.5f }, { 0.f, 0.f, -1.f },
+                { 0.866025404f, 0.f, -0.5f }
+            };
             for (int side = 0; side < 6; ++side)
             {
                 const int next = (side + 1) % 6;
                 emitTriangle(center, corners[side], corners[next],
                     { 0.f, 1.f, 0.f });
-                const float normalAngle = (static_cast<float>(side) + 0.5f) *
-                    pi / 3.f;
-                const glm::vec3 normal(std::cos(normalAngle), 0.f,
-                    std::sin(normalAngle));
+                const glm::vec3 normal = sideNormals[side];
+                const int (*neighborOffsets)[2] = columnParity != 0
+                    ? oddNeighborOffsets : evenNeighborOffsets;
+                const int neighborColumn = column + neighborOffsets[side][0];
+                const int neighborRow = row + neighborOffsets[side][1];
+                const glm::vec2 neighborCenter = latticePoint(neighborColumn * 3,
+                    neighborRow * 2 + (neighborColumn & 1));
                 const float neighborHeight = SteppedHeight(
-                    centerX + rootThree * radius * normal.x,
-                    centerZ + rootThree * radius * normal.z, noise);
+                    neighborCenter.x, neighborCenter.y, noise);
                 if (height > neighborHeight + 0.0001f)
                     emitWall(corners[side], corners[next], neighborHeight, normal);
             }
@@ -1109,7 +1289,7 @@ TerrainGen::BuildHexagonVertices(int chunkX, int chunkZ,
 }
 
 void TerrainGen::BuildChunk(int chunkX, int chunkZ,
-    const std::vector<CachedPatchMesh>* preparedPatches)
+    std::vector<CachedPatchMesh>* preparedPatches)
 {
     if (!Owner || !Owner->GetScene())
         return;
@@ -1141,11 +1321,14 @@ void TerrainGen::BuildChunk(int chunkX, int chunkZ,
         char name[64]{};
         std::snprintf(name, sizeof(name), "Chunk (%d, %d)", chunkX, chunkZ);
         chunkObject = AddChild(scene, *Owner, name);
-        chunkObject->transform.position = {
-            static_cast<float>(chunkX) * std::max(1.f, chunkSize), 0.f,
-            static_cast<float>(chunkZ) * std::max(1.f, chunkSize) };
         m_chunks[key] = chunkObject;
     }
+    // Chunk coordinates are authoritative. Reapply the local origin even for
+    // reused/editor-authored chunk objects so an old serialized transform can
+    // never change the spacing between generated meshes.
+    chunkObject->transform.position = {
+        static_cast<float>(chunkX) * std::max(1.f, chunkSize), 0.f,
+        static_cast<float>(chunkZ) * std::max(1.f, chunkSize) };
 
     TerrainChunk* chunk = EnsureComponent<TerrainChunk>(*chunkObject);
     chunk->chunkX = chunkX;
@@ -1179,17 +1362,17 @@ void TerrainGen::BuildChunk(int chunkX, int chunkZ,
             const int horizontalCells = std::clamp(horizontalCellsPerChunk, 2, 48);
             const int startX = patchX * horizontalCells / patchAxisCount;
             const int startZ = patchZ * horizontalCells / patchAxisCount;
-            const float cellSize = std::max(1.f, chunkSize) /
-                static_cast<float>(horizontalCells);
             patchObject->transform.position = {
-                static_cast<float>(startX) * cellSize, 0.f,
-                static_cast<float>(startZ) * cellSize };
+                static_cast<float>(static_cast<double>(startX) *
+                    std::max(1.f, chunkSize) / horizontalCells), 0.f,
+                static_cast<float>(static_cast<double>(startZ) *
+                    std::max(1.f, chunkSize) / horizontalCells) };
 
             TerrainPatch* patch = EnsureComponent<TerrainPatch>(*patchObject);
             patch->patchX = patchX;
             patch->patchZ = patchZ;
             std::vector<Vertex> vertices;
-            const std::vector<CachedPatchMesh>* sourcePatches = preparedPatches;
+            std::vector<CachedPatchMesh>* sourcePatches = preparedPatches;
             if (!sourcePatches && usesCachedMesh)
                 sourcePatches = &cachedChunk->second.patches;
             if (sourcePatches)
@@ -1201,14 +1384,14 @@ void TerrainGen::BuildChunk(int chunkX, int chunkZ,
                         return value.patchX == patchX && value.patchZ == patchZ;
                     });
                 if (cachedPatch != sourcePatches->end())
-                    vertices = cachedPatch->vertices;
+                    vertices = std::move(cachedPatch->vertices);
             }
             if (vertices.empty())
                 vertices = BuildPatchVertices(chunkX, chunkZ, patchX, patchZ, *noise);
             patch->triangleCount = static_cast<int>(vertices.size() / 3u);
 
             auto* mesh = EnsureComponent<Engine::Components::Mesh>(*patchObject);
-            mesh->SetDeformedVertices(vertices);
+            mesh->SetDeformedVertices(std::move(vertices));
             if (scene.GetGraphicsProvider())
                 mesh->OnAfterDeserialize(scene.GetGraphicsProvider());
 
@@ -1221,7 +1404,7 @@ void TerrainGen::BuildChunk(int chunkX, int chunkZ,
             material->roughnessFactor = 0.88f;
             material->metallicFactor = 0.f;
 
-            if (generateColliders && !vertices.empty())
+            if (generateColliders && mesh->GetVertexCount() > 0u)
             {
                 auto* collider = EnsureComponent<Engine::Components::MeshObjectCollider>(
                     *patchObject);
@@ -1267,6 +1450,7 @@ void TerrainGen::ClearTerrain()
     m_meshCacheMisses = 0;
     m_lastStreamingMilliseconds = 0.0;
     m_maximumStreamingMilliseconds = 0.0;
+    m_pendingChunkUnloadCount = 0u;
 }
 
 bool TerrainGen::GenerateTerrain()
@@ -1324,6 +1508,8 @@ bool TerrainGen::DrawProperties(::Engine::Editor::IEditorUi& ui)
     changed = ui.SliderInt("Parallel Chunk Builds", &parallelChunkBuilds, 1, 16) || changed;
     changed = ui.SliderInt("Chunk Commits Per Update",
         &maxChunkCommitsPerUpdate, 1, 16) || changed;
+    changed = ui.SliderInt("Chunk Unloads Per Update",
+        &maxChunkUnloadsPerUpdate, 1, 32) || changed;
     changed = ui.Checkbox("Cache Unloaded Chunk Meshes",
         &cacheUnloadedChunkMeshes) || changed;
     if (cacheUnloadedChunkMeshes)
@@ -1382,6 +1568,8 @@ bool TerrainGen::DrawProperties(::Engine::Editor::IEditorUi& ui)
     std::snprintf(value, sizeof(value), "%zu queued / %zu generating",
         m_chunkQueue.size(), m_inFlightChunks.size());
     ui.ValueLabel("Parallel Build Queue", value);
+    std::snprintf(value, sizeof(value), "%zu", m_pendingChunkUnloadCount);
+    ui.ValueLabel("Pending Chunk Unloads", value);
     ui.Separator();
     if (ui.Button("Generate Terrain Now"))
     {

@@ -27,7 +27,6 @@ public:
     ~PropertiesView() = default;
 
     void Init(Engine::Scene::Scene* scene) { m_scene = scene; }
-    void SetShowChildHierarchy(bool show) { m_showChildHierarchy = show; }
 
     void SetSelectedObject(Engine::Core::Object* obj)
     {
@@ -76,7 +75,6 @@ private:
     AssetInspectorTemplate m_assetInspector;
     Engine::Scene::Scene* m_scene = nullptr;
     bool m_componentPickerOpen = false;
-    bool m_showChildHierarchy = true;
     bool m_positionComponentPicker = false;
     char m_componentSearch[128]{};
     bool m_editingSkyboxTexture = false;

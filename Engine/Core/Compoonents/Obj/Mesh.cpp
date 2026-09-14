@@ -349,6 +349,50 @@ bool Mesh::SetDeformedVertices(const std::vector<Vertex>& vertices)
     return true;
 }
 
+bool Mesh::SetDeformedVertices(std::vector<Vertex>&& vertices)
+{
+    const size_t byteSize = vertices.size() * sizeof(Vertex);
+    if (byteSize == 0 ||
+        (vertices.size() == m_vertices.size() &&
+         std::memcmp(vertices.data(), m_vertices.data(), byteSize) == 0))
+        return false;
+
+    const bool sizeChanged = vertices.size() != m_vertices.size();
+    if (sizeChanged && (m_vertexBuffer || m_bufferFactory))
+    {
+        if (!m_bufferFactory)
+            return false;
+        auto replacement = m_bufferFactory->CreateBuffer(
+            IGraphicsBuffer::Usage::VertexBuffer,
+            IGraphicsBuffer::AccessMode::Upload, byteSize, vertices.data());
+        if (!replacement)
+            return false;
+        m_vertexBuffer = std::move(replacement);
+    }
+
+    m_vertices = std::move(vertices);
+    UpdateBounds();
+    m_ready = true;
+    if (!sizeChanged && m_vertexBuffer)
+    {
+        if (void* mapped = m_vertexBuffer->Map())
+        {
+            std::memcpy(mapped, m_vertices.data(), byteSize);
+            m_vertexBuffer->Unmap();
+        }
+    }
+    MarkConfigurationDirty();
+    return true;
+}
+
+std::vector<Mesh::Vertex> Mesh::TakeVertices()
+{
+    m_ready = false;
+    m_hasBounds = false;
+    MarkConfigurationDirty();
+    return std::move(m_vertices);
+}
+
 void Mesh::InitializeRuntimeCloneFrom(const Mesh& source)
 {
     m_filePath = source.m_filePath;

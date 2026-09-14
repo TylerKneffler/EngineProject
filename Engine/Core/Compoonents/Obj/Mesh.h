@@ -40,6 +40,10 @@ public:
     const std::vector<Vertex>& GetVertices() const { return m_vertices; }
     // Returns true only when CPU vertices, bounds, and the GPU buffer changed.
     bool SetDeformedVertices(const std::vector<Vertex>& vertices);
+    // Transfers ownership for newly generated meshes to avoid a full vertex copy.
+    bool SetDeformedVertices(std::vector<Vertex>&& vertices);
+    // Transfers CPU vertices out of a procedural mesh that is about to be destroyed.
+    std::vector<Vertex> TakeVertices();
     // Copies the runtime rendering context needed by a procedural mesh cut.
     // This does not copy vertex data or authoring/morph state.
     void InitializeRuntimeCloneFrom(const Mesh& source);

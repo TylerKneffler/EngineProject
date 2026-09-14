@@ -8,11 +8,138 @@
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
+#include <algorithm>
 #include <cmath>
 #include <chrono>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <thread>
+#include <map>
+
+namespace
+{
+struct QuantizedPoint
+{
+    long long x = 0;
+    long long y = 0;
+    long long z = 0;
+
+    bool operator<(const QuantizedPoint& other) const
+    {
+        if (x != other.x) return x < other.x;
+        if (y != other.y) return y < other.y;
+        return z < other.z;
+    }
+};
+
+struct QuantizedEdge
+{
+    QuantizedPoint first{};
+    QuantizedPoint second{};
+
+    bool operator<(const QuantizedEdge& other) const
+    {
+        if (first < other.first) return true;
+        if (other.first < first) return false;
+        return second < other.second;
+    }
+};
+
+QuantizedPoint Quantize(const glm::vec3& point)
+{
+    constexpr double scale = 100000.0;
+    return { std::llround(static_cast<double>(point.x) * scale),
+        std::llround(static_cast<double>(point.y) * scale),
+        std::llround(static_cast<double>(point.z) * scale) };
+}
+
+QuantizedEdge MakeEdge(const glm::vec3& first, const glm::vec3& second)
+{
+    QuantizedEdge result { Quantize(first), Quantize(second) };
+    if (result.second < result.first)
+        std::swap(result.first, result.second);
+    return result;
+}
+
+bool AuditSmoothGridTopology(Engine::Core::Object& terrainObject,
+    float chunkSize)
+{
+    struct EdgeUse { int count = 0; int orientation = 0; };
+    std::map<QuantizedEdge, EdgeUse> edgeUses;
+    for (Engine::Core::Object* chunkObject : terrainObject.Children)
+    {
+        if (!chunkObject || !chunkObject->GetComponent<TerrainChunk>())
+            continue;
+        for (Engine::Core::Object* patchObject : chunkObject->Children)
+        {
+            const auto* mesh = patchObject
+                ? patchObject->GetComponent<Engine::Components::Mesh>() : nullptr;
+            if (!mesh)
+                continue;
+            const glm::mat4 world = patchObject->transform.GetWorldMatrix();
+            const auto& vertices = mesh->GetVertices();
+            for (size_t triangle = 0; triangle + 2 < vertices.size(); triangle += 3)
+            {
+                glm::vec3 points[3]{};
+                for (int corner = 0; corner < 3; ++corner)
+                {
+                    const auto& vertex = vertices[triangle + corner];
+                    points[corner] = glm::vec3(world * glm::vec4(
+                        vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.f));
+                }
+                for (int edge = 0; edge < 3; ++edge)
+                {
+                    const QuantizedPoint from = Quantize(points[edge]);
+                    const QuantizedPoint to = Quantize(points[(edge + 1) % 3]);
+                    if (!(from < to) && !(to < from))
+                        continue;
+                    EdgeUse& use = edgeUses[MakeEdge(
+                        points[edge], points[(edge + 1) % 3])];
+                    ++use.count;
+                    use.orientation += to < from ? -1 : 1;
+                }
+            }
+        }
+    }
+
+    // A single-use edge is valid only on the outside of the generated ring.
+    // Any such edge at an internal chunk border is a real terrain crack.
+    const float outerMinimum = -chunkSize;
+    const float outerMaximum = chunkSize * 2.f;
+    for (const auto& [edge, use] : edgeUses)
+    {
+        if (use.count != 1 && use.orientation == 0)
+            continue;
+        const double inverseScale = 1.0 / 100000.0;
+        const double x0 = edge.first.x * inverseScale;
+        const double x1 = edge.second.x * inverseScale;
+        const double z0 = edge.first.z * inverseScale;
+        const double z1 = edge.second.z * inverseScale;
+        const bool outside =
+            (std::abs(x0 - outerMinimum) < 0.00002 &&
+                std::abs(x1 - outerMinimum) < 0.00002) ||
+            (std::abs(x0 - outerMaximum) < 0.00002 &&
+                std::abs(x1 - outerMaximum) < 0.00002) ||
+            (std::abs(z0 - outerMinimum) < 0.00002 &&
+                std::abs(z1 - outerMinimum) < 0.00002) ||
+            (std::abs(z0 - outerMaximum) < 0.00002 &&
+                std::abs(z1 - outerMaximum) < 0.00002);
+        if (!outside)
+        {
+            std::fprintf(stderr,
+                "Internal terrain edge is %s: (%.5f, %.5f, %.5f) to "
+                "(%.5f, %.5f, %.5f), uses=%d orientation=%d\n",
+                use.count == 1 ? "open" : "wound inconsistently",
+                x0, edge.first.y * inverseScale, z0,
+                x1, edge.second.y * inverseScale, z1,
+                use.count, use.orientation);
+            return false;
+        }
+    }
+    return true;
+}
+}
 
 int main(int argumentCount, char** arguments)
 {
@@ -62,6 +189,116 @@ int main(int argumentCount, char** arguments)
     }
     if (patchCount != 36u)
         return 4;
+    if (!AuditSmoothGridTopology(*terrainObject, terrain->chunkSize))
+        return 36;
+
+    // Procedural vertices are not serialized. Standalone loading must reject
+    // editor-saved chunk shells and regenerate their meshes and transforms.
+    Engine::Scene::Scene standaloneReloadScene;
+    if (!Engine::Serialization::SceneSerializer::Load(standaloneReloadScene,
+            "Engine/Core/Assets/Scenes/Procedural/terrain_gen.scene", nullptr))
+        return 37;
+    auto* reloadedTerrainObject = standaloneReloadScene.FindObjectByName(
+        "Base TerrainGen");
+    auto* reloadedTerrain = reloadedTerrainObject
+        ? reloadedTerrainObject->GetComponent<TerrainGen>() : nullptr;
+    if (!reloadedTerrain)
+        return 38;
+    standaloneReloadScene.Start();
+    if (reloadedTerrain->GetLoadedChunkCount() != 0u)
+        return 39;
+    bool standaloneTerrainRebuilt = false;
+    for (int update = 0; update < 5000; ++update)
+    {
+        standaloneReloadScene.Update(1.f / 60.f);
+        if (reloadedTerrain->GetLoadedChunkCount() == 9u &&
+            reloadedTerrain->GetQueuedChunkCount() == 0u &&
+            reloadedTerrain->GetInFlightChunkCount() == 0u)
+        {
+            standaloneTerrainRebuilt = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    const bool standaloneTopologyValid = standaloneTerrainRebuilt &&
+        AuditSmoothGridTopology(*reloadedTerrainObject,
+            reloadedTerrain->chunkSize);
+    if (!standaloneTerrainRebuilt ||
+        reloadedTerrainObject->Children.size() != 9u ||
+        !standaloneTopologyValid)
+    {
+        std::fprintf(stderr,
+            "Standalone shell rebuild failed: rebuilt=%d loaded=%zu children=%zu "
+            "queued=%zu inFlight=%zu topology=%d\n",
+            standaloneTerrainRebuilt ? 1 : 0,
+            reloadedTerrain->GetLoadedChunkCount(),
+            reloadedTerrainObject->Children.size(),
+            reloadedTerrain->GetQueuedChunkCount(),
+            reloadedTerrain->GetInFlightChunkCount(),
+            standaloneTopologyValid ? 1 : 0);
+        return 40;
+    }
+
+    // Smooth chunks must produce the same contour positions and normals on a
+    // shared border. Otherwise tiny cracks or lighting seams appear as the
+    // camera moves away from the origin.
+    struct BorderVertex
+    {
+        glm::vec3 position{};
+        glm::vec3 normal{};
+    };
+    const auto findChunk = [&](int x, int z)
+    {
+        for (Engine::Core::Object* chunkObject : terrainObject->Children)
+        {
+            TerrainChunk* chunk = chunkObject
+                ? chunkObject->GetComponent<TerrainChunk>() : nullptr;
+            if (chunk && chunk->chunkX == x && chunk->chunkZ == z)
+                return chunkObject;
+        }
+        return static_cast<Engine::Core::Object*>(nullptr);
+    };
+    const auto borderVertices = [](Engine::Core::Object* chunkObject,
+        float borderX)
+    {
+        std::vector<BorderVertex> result;
+        if (!chunkObject)
+            return result;
+        for (Engine::Core::Object* patchObject : chunkObject->Children)
+        {
+            const auto* mesh = patchObject
+                ? patchObject->GetComponent<Engine::Components::Mesh>() : nullptr;
+            if (!mesh)
+                continue;
+            const glm::mat4 world = patchObject->transform.GetWorldMatrix();
+            for (const auto& vertex : mesh->GetVertices())
+            {
+                const glm::vec3 position = glm::vec3(world * glm::vec4(
+                    vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.f));
+                if (std::abs(position.x - borderX) > 0.0001f)
+                    continue;
+                result.push_back({ position, glm::vec3(vertex.normal[0],
+                    vertex.normal[1], vertex.normal[2]) });
+            }
+        }
+        return result;
+    };
+    const float sharedBorderX = terrain->chunkSize;
+    const auto leftBorder = borderVertices(findChunk(0, 0), sharedBorderX);
+    const auto rightBorder = borderVertices(findChunk(1, 0), sharedBorderX);
+    if (leftBorder.empty() || rightBorder.empty())
+        return 25;
+    for (const BorderVertex& left : leftBorder)
+    {
+        const bool matches = std::any_of(rightBorder.begin(), rightBorder.end(),
+            [&](const BorderVertex& right)
+            {
+                return glm::length(left.position - right.position) < 0.000001f &&
+                    glm::length(left.normal - right.normal) < 0.002f;
+            });
+        if (!matches)
+            return 26;
+    }
 
     // Cube mode may triangulate square faces for the GPU, but every triangle
     // must lie on an axis-aligned plane and use one of the selected height
@@ -136,6 +373,7 @@ int main(int argumentCount, char** arguments)
         return 19;
 
     terrain->terrainShape = static_cast<int>(TerrainGen::TerrainShape::Hexagons);
+    terrain->viewRadiusInChunks = 1;
     if (!terrain->GenerateTerrain())
         return 20;
     const auto* hexMesh = terrainObject->Children.front()->Children.front()
@@ -153,6 +391,52 @@ int main(int argumentCount, char** arguments)
     }
     if (!foundHexSide)
         return 22;
+    struct OwnedHexCenter
+    {
+        glm::vec3 position{};
+        const Engine::Core::Object* chunk = nullptr;
+        int triangleCount = 0;
+    };
+    std::vector<OwnedHexCenter> ownedHexCenters;
+    for (Engine::Core::Object* chunkObject : terrainObject->Children)
+    {
+        for (Engine::Core::Object* patchObject : chunkObject->Children)
+        {
+            const auto* mesh = patchObject
+                ? patchObject->GetComponent<Engine::Components::Mesh>() : nullptr;
+            if (!mesh)
+                continue;
+            const glm::mat4 world = patchObject->transform.GetWorldMatrix();
+            const auto& vertices = mesh->GetVertices();
+            for (size_t triangle = 0; triangle + 2 < vertices.size(); triangle += 3)
+            {
+                if (vertices[triangle].normal[1] < 0.999f)
+                    continue;
+                const glm::vec3 center = glm::vec3(world * glm::vec4(
+                    vertices[triangle].pos[0], vertices[triangle].pos[1],
+                    vertices[triangle].pos[2], 1.f));
+                auto existing = std::find_if(ownedHexCenters.begin(),
+                    ownedHexCenters.end(), [&](const OwnedHexCenter& value)
+                    {
+                        return glm::length(value.position - center) < 0.000001f;
+                    });
+                if (existing == ownedHexCenters.end())
+                    ownedHexCenters.push_back({ center, chunkObject, 1 });
+                else
+                {
+                    if (existing->chunk != chunkObject)
+                        return 32;
+                    ++existing->triangleCount;
+                }
+            }
+        }
+    }
+    if (ownedHexCenters.empty() || std::any_of(ownedHexCenters.begin(),
+        ownedHexCenters.end(), [](const OwnedHexCenter& value)
+        {
+            return value.triangleCount != 6;
+        }))
+        return 33;
 
     terrain->terrainShape = static_cast<int>(TerrainGen::TerrainShape::Cubes);
     terrain->patchesPerAxis = 2;
@@ -215,17 +499,19 @@ int main(int argumentCount, char** arguments)
         nullptr))
         return 14;
     auto* loadedTerrainObject = performanceScene.FindObjectByName(
-        "Cube Terrain");
+        "Long Range Terrain");
     auto* loadedCameraObject = performanceScene.FindObjectByName(
-        "Cube Terrain Streaming Camera");
+        "Long Range Terrain Camera");
     auto* loadedTerrain = loadedTerrainObject
         ? loadedTerrainObject->GetComponent<TerrainGen>() : nullptr;
     auto* loadedDriver = loadedCameraObject
         ? loadedCameraObject->GetComponent<TerrainStreamingCameraDriver>() : nullptr;
     if (!loadedTerrain || !loadedCameraObject || !loadedDriver ||
         static_cast<TerrainGen::TerrainShape>(loadedTerrain->terrainShape) !=
-            TerrainGen::TerrainShape::Cubes)
+            TerrainGen::TerrainShape::SmoothSurface ||
+        loadedTerrain->chunkSize * loadedTerrain->viewRadiusInChunks < 1000.f)
         return 15;
+    loadedDriver->waitForInitialTerrain = false;
     loadedDriver->Start();
     const glm::vec3 cameraStart = loadedCameraObject->transform.position;
     loadedDriver->Update();
@@ -242,6 +528,166 @@ int main(int argumentCount, char** arguments)
             -loadedDriver->downwardLook, expectedDirection.z)),
             cameraForward) < 0.999f)
         return 16;
+
+    // Verify the production long-range resolution at its negative-coordinate
+    // starting area, where floating-point border errors are easiest to expose.
+    loadedDriver->waitForInitialTerrain = true;
+    loadedDriver->terrainObjectName = loadedTerrainObject->name;
+    loadedTerrain->ClearTerrain();
+    loadedDriver->Start();
+    const glm::vec3 waitingPosition = loadedCameraObject->transform.position;
+    loadedDriver->Update();
+    if (glm::length(loadedCameraObject->transform.position - waitingPosition) >
+        0.000001f)
+        return 34;
+    loadedTerrain->viewRadiusInChunks = 1;
+    if (!loadedTerrain->GenerateTerrain())
+        return 27;
+    loadedDriver->Update();
+    if (glm::length(loadedCameraObject->transform.position - waitingPosition) <=
+        0.000001f)
+        return 35;
+    const auto findLoadedChunk = [&](int x, int z)
+    {
+        for (Engine::Core::Object* chunkObject : loadedTerrainObject->Children)
+        {
+            TerrainChunk* chunk = chunkObject
+                ? chunkObject->GetComponent<TerrainChunk>() : nullptr;
+            if (chunk && chunk->chunkX == x && chunk->chunkZ == z)
+                return chunkObject;
+        }
+        return static_cast<Engine::Core::Object*>(nullptr);
+    };
+    const auto bordersMatch = [&](Engine::Core::Object* first,
+        Engine::Core::Object* second, float borderX)
+    {
+        const auto firstBorder = borderVertices(first, borderX);
+        const auto secondBorder = borderVertices(second, borderX);
+        if (firstBorder.empty() || secondBorder.empty())
+            return false;
+        const auto allMatch = [](const std::vector<BorderVertex>& source,
+            const std::vector<BorderVertex>& target)
+        {
+            return std::all_of(source.begin(), source.end(),
+                [&](const BorderVertex& sourceVertex)
+                {
+                    return std::any_of(target.begin(), target.end(),
+                        [&](const BorderVertex& targetVertex)
+                        {
+                            return glm::length(sourceVertex.position -
+                                targetVertex.position) < 0.000001f &&
+                                glm::length(sourceVertex.normal -
+                                    targetVertex.normal) < 0.002f;
+                        });
+                });
+        };
+        return allMatch(firstBorder, secondBorder) &&
+            allMatch(secondBorder, firstBorder);
+    };
+    if (!bordersMatch(findLoadedChunk(-6, -2), findLoadedChunk(-5, -2),
+        -640.f))
+        return 28;
+    struct BorderSegment { glm::vec3 first{}, second{}; };
+    const auto xBorderSegments = [](Engine::Core::Object* chunkObject,
+        float borderX)
+    {
+        std::vector<BorderSegment> result;
+        if (!chunkObject)
+            return result;
+        for (Engine::Core::Object* patchObject : chunkObject->Children)
+        {
+            const auto* mesh = patchObject
+                ? patchObject->GetComponent<Engine::Components::Mesh>() : nullptr;
+            if (!mesh)
+                continue;
+            const glm::mat4 world = patchObject->transform.GetWorldMatrix();
+            const auto& vertices = mesh->GetVertices();
+            for (size_t triangle = 0; triangle + 2 < vertices.size(); triangle += 3)
+            {
+                glm::vec3 points[3]{};
+                for (int corner = 0; corner < 3; ++corner)
+                    points[corner] = glm::vec3(world * glm::vec4(
+                        vertices[triangle + corner].pos[0],
+                        vertices[triangle + corner].pos[1],
+                        vertices[triangle + corner].pos[2], 1.f));
+                for (int edge = 0; edge < 3; ++edge)
+                {
+                    const glm::vec3& first = points[edge];
+                    const glm::vec3& second = points[(edge + 1) % 3];
+                    if (std::abs(first.x - borderX) <= 0.000001f &&
+                        std::abs(second.x - borderX) <= 0.000001f &&
+                        glm::length(first - second) > 0.000001f)
+                        result.push_back({ first, second });
+                }
+            }
+        }
+        return result;
+    };
+    const auto leftSegments = xBorderSegments(findLoadedChunk(-6, -2), -640.f);
+    const auto rightSegments = xBorderSegments(findLoadedChunk(-5, -2), -640.f);
+    const auto segmentMatches = [](const BorderSegment& segment,
+        const std::vector<BorderSegment>& candidates)
+    {
+        return std::any_of(candidates.begin(), candidates.end(),
+            [&](const BorderSegment& candidate)
+            {
+                const bool forward = glm::length(segment.first - candidate.first) <
+                    0.000001f && glm::length(segment.second - candidate.second) < 0.000001f;
+                const bool reverse = glm::length(segment.first - candidate.second) <
+                    0.000001f && glm::length(segment.second - candidate.first) < 0.000001f;
+                return forward || reverse;
+            });
+    };
+    if (leftSegments.empty() || rightSegments.empty() ||
+        !std::all_of(leftSegments.begin(), leftSegments.end(),
+            [&](const BorderSegment& segment)
+            {
+                return segmentMatches(segment, rightSegments);
+            }) ||
+        !std::all_of(rightSegments.begin(), rightSegments.end(),
+            [&](const BorderSegment& segment)
+            {
+                return segmentMatches(segment, leftSegments);
+            }))
+        return 31;
+    const auto zBorderVertices = [](Engine::Core::Object* chunkObject,
+        float borderZ)
+    {
+        std::vector<BorderVertex> result;
+        if (!chunkObject)
+            return result;
+        for (Engine::Core::Object* patchObject : chunkObject->Children)
+        {
+            const auto* mesh = patchObject
+                ? patchObject->GetComponent<Engine::Components::Mesh>() : nullptr;
+            if (!mesh)
+                continue;
+            const glm::mat4 world = patchObject->transform.GetWorldMatrix();
+            for (const auto& vertex : mesh->GetVertices())
+            {
+                const glm::vec3 position = glm::vec3(world * glm::vec4(
+                    vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.f));
+                if (std::abs(position.z - borderZ) <= 0.0001f)
+                    result.push_back({ position, glm::vec3(vertex.normal[0],
+                        vertex.normal[1], vertex.normal[2]) });
+            }
+        }
+        return result;
+    };
+    const auto lowerZBorder = zBorderVertices(findLoadedChunk(-6, -2), -128.f);
+    const auto upperZBorder = zBorderVertices(findLoadedChunk(-6, -1), -128.f);
+    if (lowerZBorder.empty() || upperZBorder.empty())
+        return 29;
+    for (const BorderVertex& vertex : lowerZBorder)
+    {
+        if (!std::any_of(upperZBorder.begin(), upperZBorder.end(),
+            [&](const BorderVertex& other)
+            {
+                return glm::length(vertex.position - other.position) < 0.000001f &&
+                    glm::length(vertex.normal - other.normal) < 0.002f;
+            }))
+            return 30;
+    }
 
     const uint64_t streamedBuilds = terrain->GetTotalChunksBuilt();
     const uint64_t streamedUnloads = terrain->GetTotalChunksUnloaded();
@@ -265,15 +711,23 @@ int main(int argumentCount, char** arguments)
         auto* stressOwner = stressScene.AddObject("Stress Terrain");
         stressOwner->AddComponent<PerlinNoiseField>();
         auto* stressTerrain = stressOwner->AddComponent<TerrainGen>();
+        const bool longRange = argumentCount > 3 &&
+            std::strcmp(arguments[3], "long-range") == 0;
+        const int requestedRadius = argumentCount > 4
+            ? std::clamp(std::atoi(arguments[4]), 0, 8)
+            : (longRange ? 8 : 4);
         stressTerrain->viewerObjectName = stressViewer->name;
-        stressTerrain->chunkSize = 32.f;
-        stressTerrain->viewRadiusInChunks = 4;
+        stressTerrain->chunkSize = longRange ? 128.f : 32.f;
+        stressTerrain->viewRadiusInChunks = requestedRadius;
         stressTerrain->maxChunkBuildsPerUpdate = 16;
-        stressTerrain->parallelChunkBuilds = 8;
-        stressTerrain->maxChunkCommitsPerUpdate = 4;
-        stressTerrain->horizontalCellsPerChunk = 32;
-        stressTerrain->verticalCells = 32;
-        stressTerrain->patchesPerAxis = 2;
+        stressTerrain->parallelChunkBuilds = longRange ? 4 : 8;
+        stressTerrain->maxChunkCommitsPerUpdate = longRange ? 1 : 4;
+        stressTerrain->horizontalCellsPerChunk = longRange ? 24 : 32;
+        stressTerrain->verticalCells = longRange ? 16 : 32;
+        stressTerrain->patchesPerAxis = longRange ? 1 : 2;
+        // This profile measures first-time generation, not revisiting old
+        // chunks. A large vertex cache would mix memory pressure into it.
+        stressTerrain->cacheUnloadedChunkMeshes = false;
         TerrainGen::TerrainShape stressShape = TerrainGen::TerrainShape::SmoothSurface;
         const char* stressShapeName = "smooth";
         if (argumentCount > 2 && std::strcmp(arguments[2], "cubes") == 0)
@@ -297,7 +751,9 @@ int main(int argumentCount, char** arguments)
         stressViewer->transform.position = { 0.f, 12.f, 0.f };
         stressScene.Start();
 
-        constexpr std::size_t desiredChunks = 81u;
+        const std::size_t diameter = static_cast<std::size_t>(
+            stressTerrain->viewRadiusInChunks * 2 + 1);
+        const std::size_t desiredChunks = diameter * diameter;
         const auto fillStart = std::chrono::steady_clock::now();
         while ((stressTerrain->GetLoadedChunkCount() != desiredChunks ||
             stressTerrain->GetQueuedChunkCount() != 0u ||
@@ -314,7 +770,7 @@ int main(int argumentCount, char** arguments)
         int updatesOverBudget = 0;
         std::size_t maximumMissingChunks = 0u;
         constexpr int movementFrames = 600;
-        constexpr float cameraSpeed = 96.f;
+        const float cameraSpeed = longRange ? 160.f : 96.f;
         auto nextFrame = std::chrono::steady_clock::now();
         for (int frame = 0; frame < movementFrames; ++frame)
         {
@@ -343,12 +799,31 @@ int main(int argumentCount, char** arguments)
         }
         const double drainSeconds = std::chrono::duration<double>(
             std::chrono::steady_clock::now() - drainStart).count();
+        std::size_t residentVertices = 0u;
+        for (Engine::Core::Object* chunkObject : stressOwner->Children)
+        {
+            if (!chunkObject || !chunkObject->GetComponent<TerrainChunk>())
+                continue;
+            for (Engine::Core::Object* patchObject : chunkObject->Children)
+            {
+                const auto* mesh = patchObject
+                    ? patchObject->GetComponent<Engine::Components::Mesh>() : nullptr;
+                if (mesh)
+                    residentVertices += mesh->GetVertexCount();
+            }
+        }
+        const double residentMeshMiB = static_cast<double>(residentVertices) *
+            sizeof(Engine::Model::Vertex) / (1024.0 * 1024.0);
         std::printf("stress shape=%s initial_fill_s=%.3f camera_speed=%.1f chunk_size=%.1f "
-            "radius=%d cells=32x32 worst_update_ms=%.3f over_budget=%d/%d "
-            "max_missing=%zu drain_s=%.3f built=%llu unloaded=%llu\n",
+            "radius=%d cells=%dx%d worst_update_ms=%.3f over_budget=%d/%d "
+            "max_missing=%zu drain_s=%.3f resident_chunks=%zu resident_vertices=%zu "
+            "mesh_mib=%.2f built=%llu unloaded=%llu\n",
             stressShapeName, initialFillSeconds, cameraSpeed, stressTerrain->chunkSize,
-            stressTerrain->viewRadiusInChunks, worstUpdateMs, updatesOverBudget,
+            stressTerrain->viewRadiusInChunks,
+            stressTerrain->horizontalCellsPerChunk, stressTerrain->verticalCells,
+            worstUpdateMs, updatesOverBudget,
             movementFrames, maximumMissingChunks, drainSeconds,
+            stressTerrain->GetLoadedChunkCount(), residentVertices, residentMeshMiB,
             static_cast<unsigned long long>(stressTerrain->GetTotalChunksBuilt()),
             static_cast<unsigned long long>(stressTerrain->GetTotalChunksUnloaded()));
     }

@@ -353,7 +353,12 @@ private:
     bool m_editorMode2D = false;
     bool m_editorCameraModeInitialized = false;
 
-    static constexpr uint32_t kMaxObjects = 64;
+    // Long-range terrain alone can contribute 289 patch meshes. Truncating
+    // ordinary views at 64 draws left square background holes even though the
+    // chunks and their GPU buffers had been generated successfully.
+    static constexpr uint32_t kMaxObjects = 512;
+    static constexpr uint32_t kMaxSkinnedObjects = 64;
+    static constexpr uint32_t kMaxSpatialObjects = 64;
     // The editor diagnostic expands a linked 8-point portal pair into point
     // markers, boundary bars, correspondence bars, and plane normals. Keep
     // enough transient space for every logical spatial object; it is never
@@ -365,7 +370,7 @@ private:
     static constexpr uint32_t kMaxPortalRenderViews = 64;
     static constexpr uint32_t kPortalRenderSlotsPerView = kMaxObjects + 2;
     static constexpr uint32_t kMaxSpatialDebugDraws =
-        kMaxObjects * kMaxSpatialVerticesPerObject / 24;
+        kMaxSpatialObjects * kMaxSpatialVerticesPerObject / 24;
     static constexpr uint32_t kObjectRenderSlotCount = kMaxObjects +
         kMaxPortalRenderViews * kPortalRenderSlotsPerView +
         kMaxSpatialDebugDraws;
