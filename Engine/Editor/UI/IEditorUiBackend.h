@@ -24,6 +24,7 @@ public:
     virtual void Resize(uint32_t width, uint32_t height) = 0;
     virtual void BeginInput() {}
     virtual void EndInput() {}
+    virtual void ClearFocus() {}
     virtual void BeginFrame() = 0;
     virtual bool NeedsContinuousRendering() const { return false; }
     virtual void Render(void* commandBuffer) = 0;

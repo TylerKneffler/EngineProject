@@ -11,24 +11,25 @@
 #include <vector>
 
 class PerlinNoiseField;
-class MarchingCubesChunk;
+class TerrainChunk;
 
-// Streams a square set of volumetric terrain chunks around a named viewer.
-// Every cube cell is polygonized from its twelve edge intersections. An
-// asymptotic face decider keeps ambiguous saddle cases deterministic.
-class MarchingCubesTerrain final : public Engine::Core::Script
+// Streams procedurally generated terrain chunks around a named viewer. The
+// output topology is selectable without changing the streaming pipeline.
+class TerrainGen final : public Engine::Core::Script
 {
 public:
-    enum class GeometryMode : int
+    enum class TerrainShape : int
     {
-        SmoothMarchingCubes = 0,
-        OrthogonalQuads = 1
+        SmoothSurface = 0,
+        Cubes = 1,
+        Triangles = 2,
+        Hexagons = 3
     };
 
-    MarchingCubesTerrain();
+    TerrainGen();
 
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | References")
-    std::string viewerObjectName = "Marching Cubes Camera";
+    std::string viewerObjectName = "TerrainGen Camera";
 
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | References")
     std::string noiseObjectName;
@@ -61,15 +62,13 @@ public:
     int verticalCells = 12;
 
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Resolution", ClampMin = "1", ClampMax = "8")
-    int quadsPerAxis = 2;
+    int patchesPerAxis = 2;
 
-    // Orthogonal mode emits horizontal top quads and vertical wall quads
-    // only. Adjacent height cells never connect with a slanted surface.
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Geometry")
-    int geometryMode = static_cast<int>(GeometryMode::SmoothMarchingCubes);
+    int terrainShape = static_cast<int>(TerrainShape::SmoothSurface);
 
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Geometry", ClampMin = "0.05")
-    float orthogonalHeightStep = 1.f;
+    float heightStep = 1.f;
 
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Shape", ClampMin = "1")
     float verticalSize = 18.f;
@@ -119,6 +118,10 @@ public:
     // by the custom editor UI and does not require the scene runtime to start.
     bool GenerateTerrain();
 
+    // Removes generated chunks and invalidates every cached or queued mesh.
+    // Noise/settings remain intact so GenerateTerrain can start from a clean slate.
+    void ClearTerrain();
+
     std::size_t GetLoadedChunkCount() const { return m_chunks.size(); }
     uint64_t GetTotalChunksBuilt() const { return m_totalChunksBuilt; }
     uint64_t GetTotalChunksUnloaded() const { return m_totalChunksUnloaded; }
@@ -133,15 +136,15 @@ public:
 private:
     using Vertex = Engine::Model::Vertex;
 
-    struct CachedQuadMesh
+    struct CachedPatchMesh
     {
-        int quadX = 0;
-        int quadZ = 0;
+        int patchX = 0;
+        int patchZ = 0;
         std::vector<Vertex> vertices;
     };
     struct CachedChunkMesh
     {
-        std::vector<CachedQuadMesh> quads;
+        std::vector<CachedPatchMesh> patches;
         uint64_t lastUse = 0;
     };
     struct GenerationSnapshot
@@ -149,9 +152,9 @@ private:
         float chunkSize = 16.f;
         int horizontalCells = 12;
         int verticalCells = 12;
-        int quadsPerAxis = 2;
-        int geometryMode = 0;
-        float orthogonalHeightStep = 1.f;
+        int patchesPerAxis = 2;
+        int terrainShape = 0;
+        float heightStep = 1.f;
         float verticalSize = 18.f;
         float baseHeight = 0.f;
         float heightAmplitude = 6.f;
@@ -177,7 +180,7 @@ private:
         int x = 0;
         int z = 0;
         uint64_t configurationHash = 0;
-        std::vector<CachedQuadMesh> quads;
+        std::vector<CachedPatchMesh> patches;
     };
     struct QueuedChunk
     {
@@ -197,22 +200,26 @@ private:
     PerlinNoiseField* ResolveNoise() const;
     void RefreshChunks();
     void BuildChunk(int chunkX, int chunkZ,
-        const std::vector<CachedQuadMesh>* preparedQuads = nullptr);
+        const std::vector<CachedPatchMesh>* preparedPatches = nullptr);
     GenerationSnapshot CaptureGenerationSnapshot(
         const PerlinNoiseField& noise) const;
     static GeneratedChunkMesh GenerateChunkMesh(
         const GenerationSnapshot& snapshot, int chunkX, int chunkZ);
     int CommitCompletedChunks(int budget);
     bool IsChunkDesired(int x, int z) const;
-    std::vector<Vertex> BuildQuadVertices(int chunkX, int chunkZ,
-        int quadX, int quadZ, const PerlinNoiseField& noise) const;
-    std::vector<Vertex> BuildSmoothQuadVertices(int chunkX, int chunkZ,
-        int quadX, int quadZ, const PerlinNoiseField& noise) const;
-    std::vector<Vertex> BuildOrthogonalQuadVertices(int chunkX, int chunkZ,
-        int quadX, int quadZ, const PerlinNoiseField& noise) const;
+    std::vector<Vertex> BuildPatchVertices(int chunkX, int chunkZ,
+        int patchX, int patchZ, const PerlinNoiseField& noise) const;
+    std::vector<Vertex> BuildSmoothSurfaceVertices(int chunkX, int chunkZ,
+        int patchX, int patchZ, const PerlinNoiseField& noise) const;
+    std::vector<Vertex> BuildCubeVertices(int chunkX, int chunkZ,
+        int patchX, int patchZ, const PerlinNoiseField& noise) const;
+    std::vector<Vertex> BuildTriangleVertices(int chunkX, int chunkZ,
+        int patchX, int patchZ, const PerlinNoiseField& noise) const;
+    std::vector<Vertex> BuildHexagonVertices(int chunkX, int chunkZ,
+        int patchX, int patchZ, const PerlinNoiseField& noise) const;
     float Density(const glm::vec3& terrainPosition,
         const PerlinNoiseField& noise) const;
-    float OrthogonalHeight(float worldX, float worldZ,
+    float SteppedHeight(float worldX, float worldZ,
         const PerlinNoiseField& noise) const;
     glm::vec3 ColorForHeight(float height) const;
     uint64_t MeshConfigurationHash(const PerlinNoiseField& noise) const;

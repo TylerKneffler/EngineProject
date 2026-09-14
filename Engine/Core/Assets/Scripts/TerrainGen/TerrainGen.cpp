@@ -1,8 +1,8 @@
-#include "Scripts/MarchingCubes/MarchingCubesTerrain.h"
+#include "Scripts/TerrainGen/TerrainGen.h"
 
-#include "Scripts/MarchingCubes/MarchingCubesChunk.h"
-#include "Scripts/MarchingCubes/MarchingCubesQuad.h"
-#include "Scripts/MarchingCubes/PerlinNoiseField.h"
+#include "Scripts/TerrainGen/TerrainChunk.h"
+#include "Scripts/TerrainGen/TerrainPatch.h"
+#include "Scripts/TerrainGen/PerlinNoiseField.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Physics/Collider.h"
@@ -41,9 +41,9 @@ T* EnsureComponent(Object& object)
 }
 }
 
-MarchingCubesTerrain::MarchingCubesTerrain()
+TerrainGen::TerrainGen()
 {
-    SetTypeName(COMPONENT_TYPE_NAME(MarchingCubesTerrain));
+    SetTypeName(COMPONENT_TYPE_NAME(TerrainGen));
     RegisterField("viewerObjectName", viewerObjectName);
     RegisterField("noiseObjectName", noiseObjectName);
     RegisterField("chunkSize", chunkSize);
@@ -55,9 +55,9 @@ MarchingCubesTerrain::MarchingCubesTerrain()
     RegisterField("unloadedMeshCacheCapacity", unloadedMeshCacheCapacity);
     RegisterField("horizontalCellsPerChunk", horizontalCellsPerChunk);
     RegisterField("verticalCells", verticalCells);
-    RegisterField("quadsPerAxis", quadsPerAxis);
-    RegisterField("geometryMode", geometryMode);
-    RegisterField("orthogonalHeightStep", orthogonalHeightStep);
+    RegisterField("patchesPerAxis", patchesPerAxis);
+    RegisterField("terrainShape", terrainShape);
+    RegisterField("heightStep", heightStep);
     RegisterField("verticalSize", verticalSize);
     RegisterField("baseHeight", baseHeight);
     RegisterField("heightAmplitude", heightAmplitude);
@@ -75,25 +75,25 @@ MarchingCubesTerrain::MarchingCubesTerrain()
 
 namespace
 {
-struct MarchingCubesTerrainRegistration
+struct TerrainGenRegistration
 {
-    MarchingCubesTerrainRegistration()
+    TerrainGenRegistration()
     {
-        Engine::Serialization::RegisterComponentType<MarchingCubesTerrain>(
-            "MarchingCubesTerrain");
+        Engine::Serialization::RegisterComponentType<TerrainGen>(
+            "TerrainGen");
     }
 };
-MarchingCubesTerrainRegistration g_registration;
+TerrainGenRegistration g_registration;
 }
 
-int64_t MarchingCubesTerrain::ChunkKey(int x, int z)
+int64_t TerrainGen::ChunkKey(int x, int z)
 {
     const uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(x)) << 32u) |
         static_cast<uint32_t>(z);
     return static_cast<int64_t>(key);
 }
 
-PerlinNoiseField* MarchingCubesTerrain::ResolveNoise() const
+PerlinNoiseField* TerrainGen::ResolveNoise() const
 {
     if (!Owner)
         return nullptr;
@@ -106,7 +106,7 @@ PerlinNoiseField* MarchingCubesTerrain::ResolveNoise() const
     return Owner->GetComponent<PerlinNoiseField>();
 }
 
-glm::ivec2 MarchingCubesTerrain::ViewerChunk() const
+glm::ivec2 TerrainGen::ViewerChunk() const
 {
     if (!Owner)
         return {};
@@ -124,7 +124,7 @@ glm::ivec2 MarchingCubesTerrain::ViewerChunk() const
     };
 }
 
-void MarchingCubesTerrain::Start()
+void TerrainGen::Start()
 {
     if (!Owner || !Owner->GetScene() || !ResolveNoise())
         return;
@@ -132,7 +132,7 @@ void MarchingCubesTerrain::Start()
     m_chunks.clear();
     for (Object* child : Owner->Children)
     {
-        if (auto* chunk = child ? child->GetComponent<MarchingCubesChunk>() : nullptr)
+        if (auto* chunk = child ? child->GetComponent<TerrainChunk>() : nullptr)
             m_chunks[ChunkKey(chunk->chunkX, chunk->chunkZ)] = child;
     }
 
@@ -149,7 +149,7 @@ void MarchingCubesTerrain::Start()
     }
 }
 
-void MarchingCubesTerrain::Update()
+void TerrainGen::Update()
 {
     if (!Owner || !Owner->GetScene() || !ResolveNoise())
         return;
@@ -164,7 +164,7 @@ void MarchingCubesTerrain::Update()
     RefreshChunks();
 }
 
-void MarchingCubesTerrain::OnDestroy()
+void TerrainGen::OnDestroy()
 {
     m_chunks.clear();
     m_meshCache.clear();
@@ -172,7 +172,7 @@ void MarchingCubesTerrain::OnDestroy()
     m_inFlightChunks.clear();
 }
 
-void MarchingCubesTerrain::RefreshChunks()
+void TerrainGen::RefreshChunks()
 {
     if (!Owner || !Owner->GetScene() || !m_hasViewerChunk)
         return;
@@ -189,8 +189,8 @@ void MarchingCubesTerrain::RefreshChunks()
 
     for (auto iterator = m_chunks.begin(); iterator != m_chunks.end();)
     {
-        MarchingCubesChunk* chunk = iterator->second
-            ? iterator->second->GetComponent<MarchingCubesChunk>() : nullptr;
+        TerrainChunk* chunk = iterator->second
+            ? iterator->second->GetComponent<TerrainChunk>() : nullptr;
         if (!chunk || std::abs(chunk->chunkX - m_viewerChunk.x) > radius ||
             std::abs(chunk->chunkZ - m_viewerChunk.y) > radius)
         {
@@ -294,7 +294,7 @@ void MarchingCubesTerrain::RefreshChunks()
         m_lastStreamingMilliseconds);
 }
 
-float MarchingCubesTerrain::Density(const glm::vec3& position,
+float TerrainGen::Density(const glm::vec3& position,
     const PerlinNoiseField& noise) const
 {
     const float surface = baseHeight + heightAmplitude *
@@ -307,33 +307,42 @@ float MarchingCubesTerrain::Density(const glm::vec3& position,
     return position.y - surface + caves;
 }
 
-std::vector<MarchingCubesTerrain::Vertex>
-MarchingCubesTerrain::BuildQuadVertices(int chunkX, int chunkZ,
-    int quadX, int quadZ, const PerlinNoiseField& noise) const
+std::vector<TerrainGen::Vertex>
+TerrainGen::BuildPatchVertices(int chunkX, int chunkZ,
+    int patchX, int patchZ, const PerlinNoiseField& noise) const
 {
-    return static_cast<GeometryMode>(geometryMode) == GeometryMode::OrthogonalQuads
-        ? BuildOrthogonalQuadVertices(chunkX, chunkZ, quadX, quadZ, noise)
-        : BuildSmoothQuadVertices(chunkX, chunkZ, quadX, quadZ, noise);
+    switch (static_cast<TerrainShape>(terrainShape))
+    {
+    case TerrainShape::Cubes:
+        return BuildCubeVertices(chunkX, chunkZ, patchX, patchZ, noise);
+    case TerrainShape::Triangles:
+        return BuildTriangleVertices(chunkX, chunkZ, patchX, patchZ, noise);
+    case TerrainShape::Hexagons:
+        return BuildHexagonVertices(chunkX, chunkZ, patchX, patchZ, noise);
+    case TerrainShape::SmoothSurface:
+    default:
+        return BuildSmoothSurfaceVertices(chunkX, chunkZ, patchX, patchZ, noise);
+    }
 }
 
-std::vector<MarchingCubesTerrain::Vertex>
-MarchingCubesTerrain::BuildSmoothQuadVertices(int chunkX, int chunkZ,
-    int quadX, int quadZ, const PerlinNoiseField& noise) const
+std::vector<TerrainGen::Vertex>
+TerrainGen::BuildSmoothSurfaceVertices(int chunkX, int chunkZ,
+    int patchX, int patchZ, const PerlinNoiseField& noise) const
 {
     const int horizontalCells = std::clamp(horizontalCellsPerChunk, 2, 48);
     const int yCells = std::clamp(verticalCells, 2, 48);
-    const int quadAxisCount = std::clamp(quadsPerAxis, 1,
+    const int patchAxisCount = std::clamp(patchesPerAxis, 1,
         std::min(8, horizontalCells));
-    const int startX = quadX * horizontalCells / quadAxisCount;
-    const int endX = (quadX + 1) * horizontalCells / quadAxisCount;
-    const int startZ = quadZ * horizontalCells / quadAxisCount;
-    const int endZ = (quadZ + 1) * horizontalCells / quadAxisCount;
+    const int startX = patchX * horizontalCells / patchAxisCount;
+    const int endX = (patchX + 1) * horizontalCells / patchAxisCount;
+    const int startZ = patchZ * horizontalCells / patchAxisCount;
+    const int endZ = (patchZ + 1) * horizontalCells / patchAxisCount;
     const float horizontalStep = std::max(1.f, chunkSize) /
         static_cast<float>(horizontalCells);
     const float ySize = std::max(1.f, verticalSize);
     const float verticalStep = ySize / static_cast<float>(yCells);
     const float minimumY = -ySize * 0.5f;
-    const glm::vec3 quadOrigin(
+    const glm::vec3 patchOrigin(
         static_cast<float>(startX) * horizontalStep, 0.f,
         static_cast<float>(startZ) * horizontalStep);
     const glm::vec3 chunkOrigin(
@@ -380,7 +389,7 @@ MarchingCubesTerrain::BuildSmoothQuadVertices(int chunkX, int chunkZ,
     const auto makeVertex = [&](const glm::vec3& terrainPosition)
     {
         Vertex vertex{};
-        const glm::vec3 local = terrainPosition - chunkOrigin - quadOrigin;
+        const glm::vec3 local = terrainPosition - chunkOrigin - patchOrigin;
         const glm::vec3 normal = gradient(terrainPosition);
         glm::vec3 tangent = glm::vec3(1.f, 0.f, 0.f) - normal * normal.x;
         if (glm::length(tangent) < 0.0001f)
@@ -542,17 +551,17 @@ MarchingCubesTerrain::BuildSmoothQuadVertices(int chunkX, int chunkZ,
     return vertices;
 }
 
-MarchingCubesTerrain::GenerationSnapshot
-MarchingCubesTerrain::CaptureGenerationSnapshot(
+TerrainGen::GenerationSnapshot
+TerrainGen::CaptureGenerationSnapshot(
     const PerlinNoiseField& noise) const
 {
     GenerationSnapshot snapshot;
     snapshot.chunkSize = chunkSize;
     snapshot.horizontalCells = horizontalCellsPerChunk;
     snapshot.verticalCells = verticalCells;
-    snapshot.quadsPerAxis = quadsPerAxis;
-    snapshot.geometryMode = geometryMode;
-    snapshot.orthogonalHeightStep = orthogonalHeightStep;
+    snapshot.patchesPerAxis = patchesPerAxis;
+    snapshot.terrainShape = terrainShape;
+    snapshot.heightStep = heightStep;
     snapshot.verticalSize = verticalSize;
     snapshot.baseHeight = baseHeight;
     snapshot.heightAmplitude = heightAmplitude;
@@ -575,17 +584,17 @@ MarchingCubesTerrain::CaptureGenerationSnapshot(
     return snapshot;
 }
 
-MarchingCubesTerrain::GeneratedChunkMesh
-MarchingCubesTerrain::GenerateChunkMesh(const GenerationSnapshot& snapshot,
+TerrainGen::GeneratedChunkMesh
+TerrainGen::GenerateChunkMesh(const GenerationSnapshot& snapshot,
     int chunkX, int chunkZ)
 {
-    MarchingCubesTerrain generator;
+    TerrainGen generator;
     generator.chunkSize = snapshot.chunkSize;
     generator.horizontalCellsPerChunk = snapshot.horizontalCells;
     generator.verticalCells = snapshot.verticalCells;
-    generator.quadsPerAxis = snapshot.quadsPerAxis;
-    generator.geometryMode = snapshot.geometryMode;
-    generator.orthogonalHeightStep = snapshot.orthogonalHeightStep;
+    generator.patchesPerAxis = snapshot.patchesPerAxis;
+    generator.terrainShape = snapshot.terrainShape;
+    generator.heightStep = snapshot.heightStep;
     generator.verticalSize = snapshot.verticalSize;
     generator.baseHeight = snapshot.baseHeight;
     generator.heightAmplitude = snapshot.heightAmplitude;
@@ -611,29 +620,29 @@ MarchingCubesTerrain::GenerateChunkMesh(const GenerationSnapshot& snapshot,
     result.x = chunkX;
     result.z = chunkZ;
     result.configurationHash = snapshot.configurationHash;
-    const int quadCount = std::clamp(snapshot.quadsPerAxis, 1,
+    const int patchCount = std::clamp(snapshot.patchesPerAxis, 1,
         std::min(8, std::clamp(snapshot.horizontalCells, 2, 48)));
-    result.quads.reserve(static_cast<size_t>(quadCount * quadCount));
-    for (int quadZ = 0; quadZ < quadCount; ++quadZ)
+    result.patches.reserve(static_cast<size_t>(patchCount * patchCount));
+    for (int patchZ = 0; patchZ < patchCount; ++patchZ)
     {
-        for (int quadX = 0; quadX < quadCount; ++quadX)
+        for (int patchX = 0; patchX < patchCount; ++patchX)
         {
-            result.quads.push_back({ quadX, quadZ,
-                generator.BuildQuadVertices(chunkX, chunkZ, quadX, quadZ,
+            result.patches.push_back({ patchX, patchZ,
+                generator.BuildPatchVertices(chunkX, chunkZ, patchX, patchZ,
                     noise) });
         }
     }
     return result;
 }
 
-bool MarchingCubesTerrain::IsChunkDesired(int x, int z) const
+bool TerrainGen::IsChunkDesired(int x, int z) const
 {
     const int radius = std::clamp(viewRadiusInChunks, 0, 8);
     return std::abs(x - m_viewerChunk.x) <= radius &&
         std::abs(z - m_viewerChunk.y) <= radius;
 }
 
-int MarchingCubesTerrain::CommitCompletedChunks(int budget)
+int TerrainGen::CommitCompletedChunks(int budget)
 {
     struct ReadyTask { int64_t key = 0; int distanceSquared = 0; };
     std::vector<ReadyTask> ready;
@@ -668,13 +677,13 @@ int MarchingCubesTerrain::CommitCompletedChunks(int budget)
         if (!desired || result.configurationHash != m_meshConfigurationHash ||
             m_chunks.find(readyTask.key) != m_chunks.end())
             continue;
-        BuildChunk(result.x, result.z, &result.quads);
+        BuildChunk(result.x, result.z, &result.patches);
         ++committed;
     }
     return committed;
 }
 
-uint64_t MarchingCubesTerrain::MeshConfigurationHash(
+uint64_t TerrainGen::MeshConfigurationHash(
     const PerlinNoiseField& noise) const
 {
     uint64_t hash = 1469598103934665603ull;
@@ -689,7 +698,7 @@ uint64_t MarchingCubesTerrain::MeshConfigurationHash(
     };
     const auto add = [&](const auto& value) { addBytes(&value, sizeof(value)); };
     add(chunkSize); add(horizontalCellsPerChunk); add(verticalCells);
-    add(quadsPerAxis); add(geometryMode); add(orthogonalHeightStep);
+    add(patchesPerAxis); add(terrainShape); add(heightStep);
     add(verticalSize); add(baseHeight); add(heightAmplitude); add(caveStrength);
     add(caveFrequencyMultiplier); add(isoLevel); add(textureScale);
     add(lowHeightMaximum); add(middleHeightMaximum);
@@ -699,33 +708,33 @@ uint64_t MarchingCubesTerrain::MeshConfigurationHash(
     return hash;
 }
 
-void MarchingCubesTerrain::CacheChunkMesh(int64_t key,
+void TerrainGen::CacheChunkMesh(int64_t key,
     const Engine::Core::Object& chunkObject)
 {
     if (!cacheUnloadedChunkMeshes || unloadedMeshCacheCapacity <= 0)
         return;
     CachedChunkMesh cached;
     cached.lastUse = ++m_meshCacheClock;
-    cached.quads.reserve(chunkObject.Children.size());
+    cached.patches.reserve(chunkObject.Children.size());
     for (const Object* child : chunkObject.Children)
     {
-        const MarchingCubesQuad* quad = child
-            ? child->GetComponent<MarchingCubesQuad>() : nullptr;
+        const TerrainPatch* patch = child
+            ? child->GetComponent<TerrainPatch>() : nullptr;
         const auto* mesh = child
             ? child->GetComponent<Engine::Components::Mesh>() : nullptr;
-        if (!quad || !mesh || mesh->GetVertices().empty())
+        if (!patch || !mesh || mesh->GetVertices().empty())
             continue;
-        cached.quads.push_back({ quad->quadX, quad->quadZ,
+        cached.patches.push_back({ patch->patchX, patch->patchZ,
             mesh->GetVertices() });
     }
-    if (!cached.quads.empty())
+    if (!cached.patches.empty())
     {
         m_meshCache[key] = std::move(cached);
         TrimMeshCache();
     }
 }
 
-void MarchingCubesTerrain::TrimMeshCache()
+void TerrainGen::TrimMeshCache()
 {
     const size_t capacity = static_cast<size_t>(
         std::clamp(unloadedMeshCacheCapacity, 0, 1024));
@@ -745,10 +754,10 @@ void MarchingCubesTerrain::TrimMeshCache()
     }
 }
 
-float MarchingCubesTerrain::OrthogonalHeight(float worldX, float worldZ,
+float TerrainGen::SteppedHeight(float worldX, float worldZ,
     const PerlinNoiseField& noise) const
 {
-    const float step = std::max(0.05f, orthogonalHeightStep);
+    const float step = std::max(0.05f, heightStep);
     const float rawHeight = baseHeight + heightAmplitude *
         noise.SampleFractal2D(worldX, worldZ);
     const float halfHeight = std::max(1.f, verticalSize) * 0.5f;
@@ -756,7 +765,7 @@ float MarchingCubesTerrain::OrthogonalHeight(float worldX, float worldZ,
         -halfHeight, halfHeight);
 }
 
-glm::vec3 MarchingCubesTerrain::ColorForHeight(float height) const
+glm::vec3 TerrainGen::ColorForHeight(float height) const
 {
     const float lower = std::min(lowHeightMaximum, middleHeightMaximum);
     const float upper = std::max(lowHeightMaximum, middleHeightMaximum);
@@ -767,23 +776,23 @@ glm::vec3 MarchingCubesTerrain::ColorForHeight(float height) const
     return glm::clamp(highHeightColor, glm::vec3(0.f), glm::vec3(1.f));
 }
 
-std::vector<MarchingCubesTerrain::Vertex>
-MarchingCubesTerrain::BuildOrthogonalQuadVertices(int chunkX, int chunkZ,
-    int quadX, int quadZ, const PerlinNoiseField& noise) const
+std::vector<TerrainGen::Vertex>
+TerrainGen::BuildCubeVertices(int chunkX, int chunkZ,
+    int patchX, int patchZ, const PerlinNoiseField& noise) const
 {
     const int horizontalCells = std::clamp(horizontalCellsPerChunk, 2, 48);
-    const int quadAxisCount = std::clamp(quadsPerAxis, 1,
+    const int patchAxisCount = std::clamp(patchesPerAxis, 1,
         std::min(8, horizontalCells));
-    const int startX = quadX * horizontalCells / quadAxisCount;
-    const int endX = (quadX + 1) * horizontalCells / quadAxisCount;
-    const int startZ = quadZ * horizontalCells / quadAxisCount;
-    const int endZ = (quadZ + 1) * horizontalCells / quadAxisCount;
+    const int startX = patchX * horizontalCells / patchAxisCount;
+    const int endX = (patchX + 1) * horizontalCells / patchAxisCount;
+    const int startZ = patchZ * horizontalCells / patchAxisCount;
+    const int endZ = (patchZ + 1) * horizontalCells / patchAxisCount;
     const float cellSize = std::max(1.f, chunkSize) /
         static_cast<float>(horizontalCells);
     const glm::vec3 chunkOrigin(
         static_cast<float>(chunkX) * std::max(1.f, chunkSize), 0.f,
         static_cast<float>(chunkZ) * std::max(1.f, chunkSize));
-    const glm::vec3 quadOrigin(
+    const glm::vec3 patchOrigin(
         static_cast<float>(startX) * cellSize, 0.f,
         static_cast<float>(startZ) * cellSize);
 
@@ -795,7 +804,7 @@ MarchingCubesTerrain::BuildOrthogonalQuadVertices(int chunkX, int chunkZ,
         const glm::vec3& normal)
     {
         Vertex vertex{};
-        const glm::vec3 local = terrainPosition - chunkOrigin - quadOrigin;
+        const glm::vec3 local = terrainPosition - chunkOrigin - patchOrigin;
         glm::vec3 tangent = std::abs(normal.x) < 0.9f
             ? glm::vec3(1.f, 0.f, 0.f) : glm::vec3(0.f, 0.f, 1.f);
         tangent -= normal * glm::dot(tangent, normal);
@@ -838,7 +847,7 @@ MarchingCubesTerrain::BuildOrthogonalQuadVertices(int chunkX, int chunkZ,
             const int cellX = startX + sampleX - 1;
             const int cellZ = startZ + sampleZ - 1;
             sampledHeights[static_cast<size_t>(sampleZ) * sampledWidth +
-                sampleX] = OrthogonalHeight(
+                sampleX] = SteppedHeight(
                     chunkOrigin.x + (static_cast<float>(cellX) + 0.5f) * cellSize,
                     chunkOrigin.z + (static_cast<float>(cellZ) + 0.5f) * cellSize,
                     noise);
@@ -897,8 +906,210 @@ MarchingCubesTerrain::BuildOrthogonalQuadVertices(int chunkX, int chunkZ,
     return vertices;
 }
 
-void MarchingCubesTerrain::BuildChunk(int chunkX, int chunkZ,
-    const std::vector<CachedQuadMesh>* preparedQuads)
+std::vector<TerrainGen::Vertex>
+TerrainGen::BuildTriangleVertices(int chunkX, int chunkZ,
+    int patchX, int patchZ, const PerlinNoiseField& noise) const
+{
+    const int cells = std::clamp(horizontalCellsPerChunk, 2, 48);
+    const int patchCount = std::clamp(patchesPerAxis, 1, std::min(8, cells));
+    const int startX = patchX * cells / patchCount;
+    const int endX = (patchX + 1) * cells / patchCount;
+    const int startZ = patchZ * cells / patchCount;
+    const int endZ = (patchZ + 1) * cells / patchCount;
+    const float size = std::max(1.f, chunkSize);
+    const float cellSize = size / static_cast<float>(cells);
+    const glm::vec3 chunkOrigin(
+        static_cast<float>(chunkX) * size, 0.f,
+        static_cast<float>(chunkZ) * size);
+    const glm::vec3 patchOrigin(
+        static_cast<float>(startX) * cellSize, 0.f,
+        static_cast<float>(startZ) * cellSize);
+
+    const auto surfaceHeight = [&](float x, float z)
+    {
+        const float halfHeight = std::max(1.f, verticalSize) * 0.5f;
+        return std::clamp(baseHeight + heightAmplitude *
+            noise.SampleFractal2D(x, z), -halfHeight, halfHeight);
+    };
+    const auto makeVertex = [&](const glm::vec3& point, const glm::vec3& normal)
+    {
+        Vertex vertex{};
+        const glm::vec3 local = point - chunkOrigin - patchOrigin;
+        glm::vec3 tangent = glm::vec3(1.f, 0.f, 0.f) - normal * normal.x;
+        if (glm::length(tangent) < 0.0001f)
+            tangent = glm::vec3(0.f, 0.f, 1.f);
+        tangent = glm::normalize(tangent);
+        vertex.pos[0] = local.x; vertex.pos[1] = local.y; vertex.pos[2] = local.z;
+        vertex.normal[0] = normal.x; vertex.normal[1] = normal.y;
+        vertex.normal[2] = normal.z;
+        vertex.uv[0] = point.x / std::max(0.01f, textureScale);
+        vertex.uv[1] = point.z / std::max(0.01f, textureScale);
+        vertex.tangent[0] = tangent.x; vertex.tangent[1] = tangent.y;
+        vertex.tangent[2] = tangent.z; vertex.tangent[3] = 1.f;
+        const glm::vec3 color = ColorForHeight(point.y);
+        vertex.color[0] = color.r; vertex.color[1] = color.g;
+        vertex.color[2] = color.b; vertex.color[3] = 1.f;
+        return vertex;
+    };
+
+    std::vector<Vertex> vertices;
+    vertices.reserve(static_cast<size_t>(endX - startX) *
+        static_cast<size_t>(endZ - startZ) * 6u);
+    const auto emitTriangle = [&](glm::vec3 a, glm::vec3 b, glm::vec3 c)
+    {
+        glm::vec3 normal = glm::normalize(glm::cross(b - a, c - a));
+        if (normal.y < 0.f)
+        {
+            std::swap(b, c);
+            normal = -normal;
+        }
+        vertices.push_back(makeVertex(a, normal));
+        vertices.push_back(makeVertex(b, normal));
+        vertices.push_back(makeVertex(c, normal));
+    };
+
+    for (int z = startZ; z < endZ; ++z)
+    {
+        for (int x = startX; x < endX; ++x)
+        {
+            const float x0 = chunkOrigin.x + static_cast<float>(x) * cellSize;
+            const float x1 = x0 + cellSize;
+            const float z0 = chunkOrigin.z + static_cast<float>(z) * cellSize;
+            const float z1 = z0 + cellSize;
+            const glm::vec3 p00(x0, surfaceHeight(x0, z0), z0);
+            const glm::vec3 p10(x1, surfaceHeight(x1, z0), z0);
+            const glm::vec3 p01(x0, surfaceHeight(x0, z1), z1);
+            const glm::vec3 p11(x1, surfaceHeight(x1, z1), z1);
+            // Alternating the diagonal avoids a visible directional bias.
+            if (((x + z) & 1) == 0)
+            {
+                emitTriangle(p00, p01, p11);
+                emitTriangle(p00, p11, p10);
+            }
+            else
+            {
+                emitTriangle(p00, p01, p10);
+                emitTriangle(p10, p01, p11);
+            }
+        }
+    }
+    return vertices;
+}
+
+std::vector<TerrainGen::Vertex>
+TerrainGen::BuildHexagonVertices(int chunkX, int chunkZ,
+    int patchX, int patchZ, const PerlinNoiseField& noise) const
+{
+    const int cells = std::clamp(horizontalCellsPerChunk, 2, 48);
+    const int patchCount = std::clamp(patchesPerAxis, 1, std::min(8, cells));
+    const int startX = patchX * cells / patchCount;
+    const int endX = (patchX + 1) * cells / patchCount;
+    const int startZ = patchZ * cells / patchCount;
+    const int endZ = (patchZ + 1) * cells / patchCount;
+    const float size = std::max(1.f, chunkSize);
+    const float cellSize = size / static_cast<float>(cells);
+    const float rootThree = std::sqrt(3.f);
+    const float radius = cellSize / rootThree;
+    const float columnSpacing = radius * 1.5f;
+    const float rowSpacing = cellSize;
+    const glm::vec3 chunkOrigin(
+        static_cast<float>(chunkX) * size, 0.f,
+        static_cast<float>(chunkZ) * size);
+    const glm::vec3 patchOrigin(
+        static_cast<float>(startX) * cellSize, 0.f,
+        static_cast<float>(startZ) * cellSize);
+    const float minimumX = chunkOrigin.x + static_cast<float>(startX) * cellSize;
+    const float maximumX = chunkOrigin.x + static_cast<float>(endX) * cellSize;
+    const float minimumZ = chunkOrigin.z + static_cast<float>(startZ) * cellSize;
+    const float maximumZ = chunkOrigin.z + static_cast<float>(endZ) * cellSize;
+
+    const auto makeVertex = [&](const glm::vec3& point, const glm::vec3& normal)
+    {
+        Vertex vertex{};
+        const glm::vec3 local = point - chunkOrigin - patchOrigin;
+        glm::vec3 tangent = std::abs(normal.x) < 0.9f
+            ? glm::vec3(1.f, 0.f, 0.f) : glm::vec3(0.f, 0.f, 1.f);
+        tangent = glm::normalize(tangent - normal * glm::dot(tangent, normal));
+        vertex.pos[0] = local.x; vertex.pos[1] = local.y; vertex.pos[2] = local.z;
+        vertex.normal[0] = normal.x; vertex.normal[1] = normal.y;
+        vertex.normal[2] = normal.z;
+        vertex.uv[0] = point.x / std::max(0.01f, textureScale);
+        vertex.uv[1] = point.z / std::max(0.01f, textureScale);
+        vertex.tangent[0] = tangent.x; vertex.tangent[1] = tangent.y;
+        vertex.tangent[2] = tangent.z; vertex.tangent[3] = 1.f;
+        const glm::vec3 color = ColorForHeight(point.y);
+        vertex.color[0] = color.r; vertex.color[1] = color.g;
+        vertex.color[2] = color.b; vertex.color[3] = 1.f;
+        return vertex;
+    };
+    std::vector<Vertex> vertices;
+    const auto emitTriangle = [&](glm::vec3 a, glm::vec3 b, glm::vec3 c,
+        const glm::vec3& desiredNormal)
+    {
+        if (glm::dot(glm::cross(b - a, c - a), desiredNormal) < 0.f)
+            std::swap(b, c);
+        vertices.push_back(makeVertex(a, desiredNormal));
+        vertices.push_back(makeVertex(b, desiredNormal));
+        vertices.push_back(makeVertex(c, desiredNormal));
+    };
+    const auto emitWall = [&](glm::vec3 a, glm::vec3 b, float bottom,
+        const glm::vec3& normal)
+    {
+        const glm::vec3 lowA(a.x, bottom, a.z);
+        const glm::vec3 lowB(b.x, bottom, b.z);
+        emitTriangle(lowA, lowB, b, normal);
+        emitTriangle(lowA, b, a, normal);
+    };
+
+    constexpr float pi = 3.14159265358979323846f;
+    const int firstColumn = static_cast<int>(std::ceil(minimumX / columnSpacing));
+    const int lastColumn = static_cast<int>(std::ceil(maximumX / columnSpacing));
+    for (int column = firstColumn; column < lastColumn; ++column)
+    {
+        const float centerX = static_cast<float>(column) * columnSpacing;
+        if (centerX < minimumX || centerX >= maximumX)
+            continue;
+        const float rowOffset = (column & 1) != 0 ? rowSpacing * 0.5f : 0.f;
+        const int firstRow = static_cast<int>(std::ceil(
+            (minimumZ - rowOffset) / rowSpacing));
+        const int lastRow = static_cast<int>(std::ceil(
+            (maximumZ - rowOffset) / rowSpacing));
+        for (int row = firstRow; row < lastRow; ++row)
+        {
+            const float centerZ = static_cast<float>(row) * rowSpacing + rowOffset;
+            if (centerZ < minimumZ || centerZ >= maximumZ)
+                continue;
+            const float height = SteppedHeight(centerX, centerZ, noise);
+            const glm::vec3 center(centerX, height, centerZ);
+            std::array<glm::vec3, 6> corners{};
+            for (int side = 0; side < 6; ++side)
+            {
+                const float angle = static_cast<float>(side) * pi / 3.f;
+                corners[side] = { centerX + radius * std::cos(angle), height,
+                    centerZ + radius * std::sin(angle) };
+            }
+            for (int side = 0; side < 6; ++side)
+            {
+                const int next = (side + 1) % 6;
+                emitTriangle(center, corners[side], corners[next],
+                    { 0.f, 1.f, 0.f });
+                const float normalAngle = (static_cast<float>(side) + 0.5f) *
+                    pi / 3.f;
+                const glm::vec3 normal(std::cos(normalAngle), 0.f,
+                    std::sin(normalAngle));
+                const float neighborHeight = SteppedHeight(
+                    centerX + rootThree * radius * normal.x,
+                    centerZ + rootThree * radius * normal.z, noise);
+                if (height > neighborHeight + 0.0001f)
+                    emitWall(corners[side], corners[next], neighborHeight, normal);
+            }
+        }
+    }
+    return vertices;
+}
+
+void TerrainGen::BuildChunk(int chunkX, int chunkZ,
+    const std::vector<CachedPatchMesh>* preparedPatches)
 {
     if (!Owner || !Owner->GetScene())
         return;
@@ -915,11 +1126,11 @@ void MarchingCubesTerrain::BuildChunk(int chunkX, int chunkZ,
     Scene& scene = *Owner->GetScene();
     const int64_t key = ChunkKey(chunkX, chunkZ);
     auto cachedChunk = m_meshCache.find(key);
-    const bool usesCachedMesh = !preparedQuads && cacheUnloadedChunkMeshes &&
+    const bool usesCachedMesh = !preparedPatches && cacheUnloadedChunkMeshes &&
         cachedChunk != m_meshCache.end();
     if (usesCachedMesh)
         ++m_meshCacheHits;
-    else if (!preparedQuads)
+    else if (!preparedPatches)
         ++m_meshCacheMisses;
     Object* chunkObject = nullptr;
     const auto existingChunk = m_chunks.find(key);
@@ -936,72 +1147,72 @@ void MarchingCubesTerrain::BuildChunk(int chunkX, int chunkZ,
         m_chunks[key] = chunkObject;
     }
 
-    MarchingCubesChunk* chunk = EnsureComponent<MarchingCubesChunk>(*chunkObject);
+    TerrainChunk* chunk = EnsureComponent<TerrainChunk>(*chunkObject);
     chunk->chunkX = chunkX;
     chunk->chunkZ = chunkZ;
-    const int quadAxisCount = std::clamp(quadsPerAxis, 1,
+    const int patchAxisCount = std::clamp(patchesPerAxis, 1,
         std::min(8, std::clamp(horizontalCellsPerChunk, 2, 48)));
-    chunk->quadCount = quadAxisCount * quadAxisCount;
+    chunk->patchCount = patchAxisCount * patchAxisCount;
 
-    for (int quadZ = 0; quadZ < quadAxisCount; ++quadZ)
+    for (int patchZ = 0; patchZ < patchAxisCount; ++patchZ)
     {
-        for (int quadX = 0; quadX < quadAxisCount; ++quadX)
+        for (int patchX = 0; patchX < patchAxisCount; ++patchX)
         {
-            Object* quadObject = nullptr;
+            Object* patchObject = nullptr;
             for (Object* child : chunkObject->Children)
             {
-                MarchingCubesQuad* quad = child
-                    ? child->GetComponent<MarchingCubesQuad>() : nullptr;
-                if (quad && quad->quadX == quadX && quad->quadZ == quadZ)
+                TerrainPatch* patch = child
+                    ? child->GetComponent<TerrainPatch>() : nullptr;
+                if (patch && patch->patchX == patchX && patch->patchZ == patchZ)
                 {
-                    quadObject = child;
+                    patchObject = child;
                     break;
                 }
             }
-            if (!quadObject)
+            if (!patchObject)
             {
                 char name[64]{};
-                std::snprintf(name, sizeof(name), "Quad (%d, %d)", quadX, quadZ);
-                quadObject = AddChild(scene, *chunkObject, name);
+                std::snprintf(name, sizeof(name), "Patch (%d, %d)", patchX, patchZ);
+                patchObject = AddChild(scene, *chunkObject, name);
             }
 
             const int horizontalCells = std::clamp(horizontalCellsPerChunk, 2, 48);
-            const int startX = quadX * horizontalCells / quadAxisCount;
-            const int startZ = quadZ * horizontalCells / quadAxisCount;
+            const int startX = patchX * horizontalCells / patchAxisCount;
+            const int startZ = patchZ * horizontalCells / patchAxisCount;
             const float cellSize = std::max(1.f, chunkSize) /
                 static_cast<float>(horizontalCells);
-            quadObject->transform.position = {
+            patchObject->transform.position = {
                 static_cast<float>(startX) * cellSize, 0.f,
                 static_cast<float>(startZ) * cellSize };
 
-            MarchingCubesQuad* quad = EnsureComponent<MarchingCubesQuad>(*quadObject);
-            quad->quadX = quadX;
-            quad->quadZ = quadZ;
+            TerrainPatch* patch = EnsureComponent<TerrainPatch>(*patchObject);
+            patch->patchX = patchX;
+            patch->patchZ = patchZ;
             std::vector<Vertex> vertices;
-            const std::vector<CachedQuadMesh>* sourceQuads = preparedQuads;
-            if (!sourceQuads && usesCachedMesh)
-                sourceQuads = &cachedChunk->second.quads;
-            if (sourceQuads)
+            const std::vector<CachedPatchMesh>* sourcePatches = preparedPatches;
+            if (!sourcePatches && usesCachedMesh)
+                sourcePatches = &cachedChunk->second.patches;
+            if (sourcePatches)
             {
-                const auto cachedQuad = std::find_if(
-                    sourceQuads->begin(), sourceQuads->end(),
-                    [&](const CachedQuadMesh& value)
+                const auto cachedPatch = std::find_if(
+                    sourcePatches->begin(), sourcePatches->end(),
+                    [&](const CachedPatchMesh& value)
                     {
-                        return value.quadX == quadX && value.quadZ == quadZ;
+                        return value.patchX == patchX && value.patchZ == patchZ;
                     });
-                if (cachedQuad != sourceQuads->end())
-                    vertices = cachedQuad->vertices;
+                if (cachedPatch != sourcePatches->end())
+                    vertices = cachedPatch->vertices;
             }
             if (vertices.empty())
-                vertices = BuildQuadVertices(chunkX, chunkZ, quadX, quadZ, *noise);
-            quad->triangleCount = static_cast<int>(vertices.size() / 3u);
+                vertices = BuildPatchVertices(chunkX, chunkZ, patchX, patchZ, *noise);
+            patch->triangleCount = static_cast<int>(vertices.size() / 3u);
 
-            auto* mesh = EnsureComponent<Engine::Components::Mesh>(*quadObject);
+            auto* mesh = EnsureComponent<Engine::Components::Mesh>(*patchObject);
             mesh->SetDeformedVertices(vertices);
             if (scene.GetGraphicsProvider())
                 mesh->OnAfterDeserialize(scene.GetGraphicsProvider());
 
-            auto* material = EnsureComponent<Engine::Components::Material>(*quadObject);
+            auto* material = EnsureComponent<Engine::Components::Material>(*patchObject);
             // Vertex colors carry the selected height bands. Keep the material
             // neutral so the picker values reach the shader unchanged.
             material->diffuseColor = { 1.f, 1.f, 1.f };
@@ -1013,9 +1224,9 @@ void MarchingCubesTerrain::BuildChunk(int chunkX, int chunkZ,
             if (generateColliders && !vertices.empty())
             {
                 auto* collider = EnsureComponent<Engine::Components::MeshObjectCollider>(
-                    *quadObject);
+                    *patchObject);
                 collider->convex = false;
-                auto* body = EnsureComponent<Engine::Components::RigidBody>(*quadObject);
+                auto* body = EnsureComponent<Engine::Components::RigidBody>(*patchObject);
                 body->bodyType = "Static";
                 body->useGravity = false;
             }
@@ -1026,7 +1237,39 @@ void MarchingCubesTerrain::BuildChunk(int chunkX, int chunkZ,
     ++m_totalChunksBuilt;
 }
 
-bool MarchingCubesTerrain::GenerateTerrain()
+void TerrainGen::ClearTerrain()
+{
+    // Destroying std::future instances waits for launched workers, ensuring
+    // stale results cannot be committed after the replacement terrain exists.
+    m_chunkQueue.clear();
+    m_inFlightChunks.clear();
+
+    if (Owner && Owner->GetScene())
+    {
+        Scene& scene = *Owner->GetScene();
+        const std::vector<Object*> existingChildren = Owner->Children;
+        for (Object* child : existingChildren)
+        {
+            if (child && child->GetComponent<TerrainChunk>())
+                scene.RemoveObject(child);
+        }
+    }
+
+    m_chunks.clear();
+    m_meshCache.clear();
+    m_meshConfigurationHash = 0u;
+    m_meshCacheClock = 0u;
+    m_viewerChunk = {};
+    m_hasViewerChunk = false;
+    m_totalChunksBuilt = 0;
+    m_totalChunksUnloaded = 0;
+    m_meshCacheHits = 0;
+    m_meshCacheMisses = 0;
+    m_lastStreamingMilliseconds = 0.0;
+    m_maximumStreamingMilliseconds = 0.0;
+}
+
+bool TerrainGen::GenerateTerrain()
 {
     if (!Owner || !Owner->GetScene() || !ResolveNoise())
     {
@@ -1034,27 +1277,11 @@ bool MarchingCubesTerrain::GenerateTerrain()
         return false;
     }
 
-    Scene& scene = *Owner->GetScene();
-    m_chunkQueue.clear();
-    m_inFlightChunks.clear();
-    const std::vector<Object*> existingChildren = Owner->Children;
-    for (Object* child : existingChildren)
-    {
-        if (child && child->GetComponent<MarchingCubesChunk>())
-            scene.RemoveObject(child);
-    }
-    m_chunks.clear();
-    m_meshCache.clear();
-    m_meshConfigurationHash = 0u;
-    m_meshCacheClock = 0u;
+    // Manual generation is always authoritative. Never restore geometry from
+    // the streaming cache or retain chunks made with earlier settings.
+    ClearTerrain();
     m_viewerChunk = ViewerChunk();
     m_hasViewerChunk = true;
-    m_totalChunksBuilt = 0;
-    m_totalChunksUnloaded = 0;
-    m_meshCacheHits = 0;
-    m_meshCacheMisses = 0;
-    m_lastStreamingMilliseconds = 0.0;
-    m_maximumStreamingMilliseconds = 0.0;
 
     const auto generationStart = std::chrono::steady_clock::now();
     const int radius = std::clamp(viewRadiusInChunks, 0, 8);
@@ -1073,7 +1300,7 @@ bool MarchingCubesTerrain::GenerateTerrain()
     return true;
 }
 
-bool MarchingCubesTerrain::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool TerrainGen::DrawProperties(::Engine::Editor::IEditorUi& ui)
 {
     bool changed = false;
     char viewerName[256]{};
@@ -1106,19 +1333,24 @@ bool MarchingCubesTerrain::DrawProperties(::Engine::Editor::IEditorUi& ui)
     }
     changed = ui.SliderInt("Horizontal Cells", &horizontalCellsPerChunk, 2, 48) || changed;
     changed = ui.SliderInt("Vertical Cells", &verticalCells, 2, 48) || changed;
-    changed = ui.SliderInt("Quad Batches Per Axis", &quadsPerAxis, 1, 8) || changed;
-    static const char* geometryModes[] = { "Smooth Marching Cubes", "Orthogonal Quads" };
-    changed = ui.Combo("Terrain Geometry", &geometryMode, geometryModes, 2) || changed;
-    if (static_cast<GeometryMode>(geometryMode) == GeometryMode::OrthogonalQuads)
+    changed = ui.SliderInt("Mesh Patches Per Axis", &patchesPerAxis, 1, 8) || changed;
+    static const char* terrainShapes[] = {
+        "Smooth Surface", "Cubes", "Triangles", "Hexagons"
+    };
+    changed = ui.Combo("Terrain Shape", &terrainShape, terrainShapes, 4) || changed;
+    const TerrainShape shape = static_cast<TerrainShape>(terrainShape);
+    if (shape == TerrainShape::Cubes || shape == TerrainShape::Hexagons)
     {
-        changed = ui.DragFloat("Orthogonal Height Step", &orthogonalHeightStep,
+        changed = ui.DragFloat("Height Step", &heightStep,
             0.05f, 0.05f, 100.f) || changed;
-        ui.DisabledLabel("Surfaces connect with horizontal and vertical quads only.");
+        ui.DisabledLabel(shape == TerrainShape::Cubes
+            ? "Square columns use horizontal tops and vertical walls."
+            : "Hexagonal columns use six-sided tops and exposed walls.");
     }
     changed = ui.DragFloat("Vertical Size", &verticalSize, 0.5f, 1.f, 1000.f) || changed;
     changed = ui.DragFloat("Base Height", &baseHeight, 0.1f) || changed;
     changed = ui.DragFloat("Height Amplitude", &heightAmplitude, 0.1f, 0.f, 1000.f) || changed;
-    if (static_cast<GeometryMode>(geometryMode) == GeometryMode::SmoothMarchingCubes)
+    if (shape == TerrainShape::SmoothSurface)
     {
         changed = ui.DragFloat("Cave Strength", &caveStrength, 0.05f, 0.f, 100.f) || changed;
         changed = ui.DragFloat("Cave Frequency Multiplier", &caveFrequencyMultiplier,

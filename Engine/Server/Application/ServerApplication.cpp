@@ -10,7 +10,7 @@
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
 #include "Core/Assets/Scripts/Controllers/FirstPersonController.h"
 #include "Core/Assets/Scripts/Gameplay/MainMenuGameManager.h"
-#include "Core/Assets/Scripts/MarchingCubes/MarchingCubesTerrain.h"
+#include "Core/Assets/Scripts/TerrainGen/TerrainGen.h"
 #include "Core/Assets/Scripts/Portals/PortalSplitAfterDelay.h"
 #include "Core/Assets/Scripts/Utilities/Rotate.h"
 #endif
@@ -291,7 +291,7 @@ void WriteObjectState(std::ostream& output, const Engine::Scene::Scene& scene,
     }
 
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
-    if (const auto* terrain = object.GetComponent<MarchingCubesTerrain>())
+    if (const auto* terrain = object.GetComponent<TerrainGen>())
     {
         output << ",\"terrainStreaming\":{\"loadedChunks\":"
             << terrain->GetLoadedChunkCount()

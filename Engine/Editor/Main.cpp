@@ -397,6 +397,11 @@ int WINAPI wWinMain(
     };
     window->OnInputBegin = [&]() { uiBackend->BeginInput(); };
     window->OnInputEnd = [&]() { uiBackend->EndInput(); };
+    window->OnEscapePressed = [&]()
+    {
+        uiBackend->ClearFocus();
+        renderer->MarkDirty();
+    };
     OutputDebugStringA("[Main] WndProcHook callback set\n");
 
     OutputDebugStringA("[Main] Setting OnUpdate callback...\n");

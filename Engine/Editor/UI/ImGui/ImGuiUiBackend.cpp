@@ -235,6 +235,14 @@ bool ImGuiUiBackend::HandleMessage(void* nativeWindow, uint32_t message,
 
 void ImGuiUiBackend::Resize(uint32_t, uint32_t) {}
 
+void ImGuiUiBackend::ClearFocus()
+{
+    if (!m_initialized || !ImGui::GetCurrentContext())
+        return;
+    ImGui::ClearActiveID();
+    ImGui::SetWindowFocus(nullptr);
+}
+
 void ImGuiUiBackend::BeginFrame()
 {
     if (!m_initialized) return;

@@ -6,7 +6,7 @@
     <ambientColor><item>0.14</item><item>0.17</item><item>0.13</item></ambientColor>
   </settings>
   <objects>
-    <item name="Marching Cubes Camera" enabled="true">
+    <item name="TerrainGen Camera" enabled="true">
       <transform>
         <Transform.position><item>8</item><item>11</item><item>4</item></Transform.position>
         <Transform.rotation><item>0.42</item><item>0</item><item>0</item></Transform.rotation>
@@ -34,7 +34,7 @@
       </components>
       <children />
     </item>
-    <item name="Base Marching Cubes Terrain" enabled="true">
+    <item name="Base TerrainGen" enabled="true">
       <transform>
         <Transform.position><item>0</item><item>0</item><item>0</item></Transform.position>
         <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
@@ -44,17 +44,17 @@
         <components:PerlinNoiseField PerlinNoiseField.seed="7429" PerlinNoiseField.frequency="0.042" PerlinNoiseField.octaves="5" PerlinNoiseField.lacunarity="2" PerlinNoiseField.persistence="0.52">
           <PerlinNoiseField.coordinateOffset><item>31</item><item>-17</item><item>83</item></PerlinNoiseField.coordinateOffset>
         </components:PerlinNoiseField>
-        <components:MarchingCubesTerrain MarchingCubesTerrain.viewerObjectName="Marching Cubes Camera" MarchingCubesTerrain.noiseObjectName="" MarchingCubesTerrain.chunkSize="16" MarchingCubesTerrain.viewRadiusInChunks="1" MarchingCubesTerrain.maxChunkBuildsPerUpdate="2" MarchingCubesTerrain.horizontalCellsPerChunk="12" MarchingCubesTerrain.verticalCells="12" MarchingCubesTerrain.quadsPerAxis="2" MarchingCubesTerrain.verticalSize="18" MarchingCubesTerrain.baseHeight="0" MarchingCubesTerrain.heightAmplitude="6" MarchingCubesTerrain.caveStrength="2.1" MarchingCubesTerrain.caveFrequencyMultiplier="2.35" MarchingCubesTerrain.isoLevel="0" MarchingCubesTerrain.textureScale="12" MarchingCubesTerrain.generateColliders="false" />
+        <components:TerrainGen TerrainGen.viewerObjectName="TerrainGen Camera" TerrainGen.noiseObjectName="" TerrainGen.chunkSize="16" TerrainGen.viewRadiusInChunks="1" TerrainGen.maxChunkBuildsPerUpdate="2" TerrainGen.horizontalCellsPerChunk="12" TerrainGen.verticalCells="12" TerrainGen.patchesPerAxis="2" TerrainGen.verticalSize="18" TerrainGen.baseHeight="0" TerrainGen.heightAmplitude="6" TerrainGen.caveStrength="2.1" TerrainGen.caveFrequencyMultiplier="2.35" TerrainGen.isoLevel="0" TerrainGen.textureScale="12" TerrainGen.generateColliders="false" />
       </components>
       <children>
         <item name="Chunk (0, 0)" enabled="true">
           <transform><Transform.position><item>0</item><item>0</item><item>0</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform>
-          <components><components:MarchingCubesChunk MarchingCubesChunk.chunkX="0" MarchingCubesChunk.chunkZ="0" MarchingCubesChunk.quadCount="4" /></components>
+          <components><components:TerrainChunk TerrainChunk.chunkX="0" TerrainChunk.chunkZ="0" TerrainChunk.patchCount="4" /></components>
           <children>
-            <item name="Quad (0, 0)" enabled="true"><transform><Transform.position><item>0</item><item>0</item><item>0</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform><components><components:MarchingCubesQuad MarchingCubesQuad.quadX="0" MarchingCubesQuad.quadZ="0" MarchingCubesQuad.triangleCount="0" /></components><children /></item>
-            <item name="Quad (1, 0)" enabled="true"><transform><Transform.position><item>8</item><item>0</item><item>0</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform><components><components:MarchingCubesQuad MarchingCubesQuad.quadX="1" MarchingCubesQuad.quadZ="0" MarchingCubesQuad.triangleCount="0" /></components><children /></item>
-            <item name="Quad (0, 1)" enabled="true"><transform><Transform.position><item>0</item><item>0</item><item>8</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform><components><components:MarchingCubesQuad MarchingCubesQuad.quadX="0" MarchingCubesQuad.quadZ="1" MarchingCubesQuad.triangleCount="0" /></components><children /></item>
-            <item name="Quad (1, 1)" enabled="true"><transform><Transform.position><item>8</item><item>0</item><item>8</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform><components><components:MarchingCubesQuad MarchingCubesQuad.quadX="1" MarchingCubesQuad.quadZ="1" MarchingCubesQuad.triangleCount="0" /></components><children /></item>
+            <item name="Patch (0, 0)" enabled="true"><transform><Transform.position><item>0</item><item>0</item><item>0</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform><components><components:TerrainPatch TerrainPatch.patchX="0" TerrainPatch.patchZ="0" TerrainPatch.triangleCount="0" /></components><children /></item>
+            <item name="Patch (1, 0)" enabled="true"><transform><Transform.position><item>8</item><item>0</item><item>0</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform><components><components:TerrainPatch TerrainPatch.patchX="1" TerrainPatch.patchZ="0" TerrainPatch.triangleCount="0" /></components><children /></item>
+            <item name="Patch (0, 1)" enabled="true"><transform><Transform.position><item>0</item><item>0</item><item>8</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform><components><components:TerrainPatch TerrainPatch.patchX="0" TerrainPatch.patchZ="1" TerrainPatch.triangleCount="0" /></components><children /></item>
+            <item name="Patch (1, 1)" enabled="true"><transform><Transform.position><item>8</item><item>0</item><item>8</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform><components><components:TerrainPatch TerrainPatch.patchX="1" TerrainPatch.patchZ="1" TerrainPatch.triangleCount="0" /></components><children /></item>
           </children>
         </item>
       </children>

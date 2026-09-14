@@ -761,24 +761,24 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
-   EXISTS "${ENGINE_ROOT}/Engine/Tests/MarchingCubesTerrainEditorTests.cpp")
+   EXISTS "${ENGINE_ROOT}/Engine/Tests/TerrainGenTests.cpp")
     enable_testing()
-    add_executable(MarchingCubesTerrainEditorTests EXCLUDE_FROM_ALL
-        "${ENGINE_ROOT}/Engine/Tests/MarchingCubesTerrainEditorTests.cpp"
-        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/MarchingCubes/MarchingCubesChunk.cpp"
-        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/MarchingCubes/MarchingCubesQuad.cpp"
-        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/MarchingCubes/MarchingCubesTerrain.cpp"
-        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/MarchingCubes/PerlinNoiseField.cpp"
-        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/MarchingCubes/TerrainStreamingCameraDriver.cpp"
+    add_executable(TerrainGenTests EXCLUDE_FROM_ALL
+        "${ENGINE_ROOT}/Engine/Tests/TerrainGenTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainChunk.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainPatch.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGen.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/PerlinNoiseField.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainStreamingCameraDriver.cpp"
     )
-    target_link_libraries(MarchingCubesTerrainEditorTests PRIVATE Engine)
-    target_include_directories(MarchingCubesTerrainEditorTests PRIVATE
+    target_link_libraries(TerrainGenTests PRIVATE Engine)
+    target_include_directories(TerrainGenTests PRIVATE
         "${ENGINE_ROOT}/Engine"
         "${ENGINE_ROOT}/Engine/Core/Assets"
     )
-    add_test(NAME MarchingCubesEditorGeneration
-        COMMAND MarchingCubesTerrainEditorTests)
-    set_tests_properties(MarchingCubesEditorGeneration PROPERTIES
+    add_test(NAME TerrainGenGeneration
+        COMMAND TerrainGenTests)
+    set_tests_properties(TerrainGenGeneration PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}"
     )
 endif()

@@ -1,4 +1,4 @@
-#include "Scripts/MarchingCubes/TerrainStreamingCameraDriver.h"
+#include "Scripts/TerrainGen/TerrainStreamingCameraDriver.h"
 
 #include "Core/Object.h"
 #include "Core/Serialization/SceneSerializer.h"
