@@ -1,6 +1,7 @@
 #pragma once
 #include "pch.h"
 #include <functional>
+#include <vector>
 #include "View/IEditorPanel.h"
 #include "Engine/Editor/Core/View/Templates/Assets/AssetPreviewCache.h"
 
@@ -45,8 +46,11 @@ public:
 
 private:
     void DrawCurrentDirectory(IEditorUi& ui);
+    void DrawGridDirectory(IEditorUi& ui);
     void DrawBreadcrumbs(IEditorUi& ui);
     void EnterDirectory(const std::string& path);
+    void NavigateToDirectory(const std::string& path, bool addToHistory);
+    void GoBack();
     void CreateFolder();
     void CreateScript();
     void CommitScriptRename();
@@ -64,7 +68,10 @@ private:
     Engine::Scene::Scene* m_scene = nullptr;
     AssetPreviewCache m_previewCache;
     std::string m_currentDirectory;
+    std::vector<std::string> m_backHistory;
     std::string m_selectedPath;
+    bool m_gridView = false;
+    int m_thumbnailSize = 96;
     char m_search[256]{};
     char m_scriptName[256]{};
     std::string m_scriptBasePath;

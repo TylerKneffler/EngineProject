@@ -14,7 +14,9 @@ public:
     bool BeginWindow(const char*, bool*, bool) override; void EndWindow() override;
     bool IsWindowFocused() const override;
     void PushId(const void*) override; void PushId(const char*) override; void PopId() override;
-    bool Button(const char*, float, float) override; void Label(const char*) override;
+    bool Button(const char*, float, float) override;
+    EditorUiBreadcrumbResult Breadcrumb(const char*, const char* const*, int) override;
+    void Label(const char*) override;
     void DisabledLabel(const char*) override; void ColoredLabel(const char*, EditorUiColor) override;
     void BeginTextWrap() override; void EndTextWrap() override;
     void SameLine() override; void Separator() override; void Spacing() override;
@@ -34,6 +36,8 @@ public:
     EditorUiHierarchyDropResult HierarchyBackgroundDropTarget(const char*) override;
     EditorUiObjectRowResult ObjectHeader(const void*,char*,size_t,bool*,bool) override;
     bool Selectable(const char*, bool, bool) override;
+    EditorUiAssetTileResult AssetTile(const char*, const char*, void*, bool, float) override;
+    float AvailableContentWidth() const override;
     EditorUiContextMenuResult ContextMenu(const void*,const char*,const char*,bool,const char*) override;
     EditorUiAssetCreateMenuResult AssetWindowContextMenu() override;
     EditorUiAssetItemMenuResult AssetItemContextMenu(const void*) override;

@@ -103,6 +103,18 @@ struct EditorUiTextEditResult
     bool deactivated = false;
 };
 
+struct EditorUiBreadcrumbResult
+{
+    bool clicked = false;
+    int childSelected = -1;
+};
+
+struct EditorUiAssetTileResult
+{
+    bool clicked = false;
+    bool doubleClicked = false;
+};
+
 // Package-neutral immediate UI facade used throughout Editor/Core/View.
 class IEditorUi
 {
@@ -116,6 +128,8 @@ public:
     virtual void PushId(const char* id) = 0;
     virtual void PopId() = 0;
     virtual bool Button(const char* label, float width = 0.f, float height = 0.f) = 0;
+    virtual EditorUiBreadcrumbResult Breadcrumb(const char* label,
+        const char* const* childFolders, int childFolderCount) = 0;
     virtual void Label(const char* text) = 0;
     virtual void DisabledLabel(const char* text) = 0;
     virtual void ColoredLabel(const char* text, EditorUiColor color) = 0;
@@ -151,6 +165,9 @@ public:
     virtual EditorUiObjectRowResult ObjectHeader(const void* id, char* name, size_t size,
         bool* enabled, bool lockName) = 0;
     virtual bool Selectable(const char* label, bool selected = false, bool allowDoubleClick = false) = 0;
+    virtual EditorUiAssetTileResult AssetTile(const char* label,
+        const char* fallbackIcon, void* texture, bool selected, float size) = 0;
+    virtual float AvailableContentWidth() const = 0;
     virtual EditorUiContextMenuResult ContextMenu(const void* id,
         const char* addLabel, const char* deleteLabel,
         bool objectCreationMenu = false,

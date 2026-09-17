@@ -19,6 +19,7 @@
 #include "Core/AssetRecord.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Importers/ModelImporter.h"
+#include "Engine/Editor/Core/View/Templates/Assets/AssetPreviewCache.h"
 #include <chrono>
 #include <algorithm>
 #include <cctype>
@@ -319,6 +320,8 @@ bool EditorState::SaveMainScene()
         m_currentScenePath = std::filesystem::path(destination).lexically_normal().string();
         m_hasUnsavedChanges = false;
         m_savedSceneSnapshot = m_scene->SaveToString();
+        AssetPreviewCache::CaptureScene(m_currentScenePath, *m_scene,
+            m_scene->GetGraphicsProvider());
         if (m_primaryConsole)
             m_primaryConsole->AddLog(
                 ConsoleView::Level::Info, "Scene saved: " + m_currentScenePath);
@@ -483,6 +486,13 @@ void EditorState::LoadSceneNow(const std::string& path)
         }
         return;
     }
+
+    // Loading another editor document is a hard runtime boundary. Let the
+    // host perform its normal Stop flow before this scene replaces the active
+    // graph, so Playing/Paused state and the pre-play snapshot cannot leak
+    // into the newly loaded scene.
+    if (OnSceneLoadRequested)
+        OnSceneLoadRequested(resolvedPath);
     
     // Load the scene
     try
@@ -498,6 +508,8 @@ void EditorState::LoadSceneNow(const std::string& path)
             m_currentScenePath =
                 std::filesystem::path(resolvedPath).lexically_normal().string();
             ResetHistory(true);
+            if (OnSceneLoadConfirmed)
+                OnSceneLoadConfirmed();
             
             if (m_primaryConsole)
             {

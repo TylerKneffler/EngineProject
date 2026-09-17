@@ -351,6 +351,10 @@ int WINAPI wWinMain(
         Engine::Core::SceneManager::CancelPendingSceneLoad();
         editorState->RestorePlayModeScene();
     };
+    editorState->OnSceneLoadRequested = [&](const std::string&)
+    {
+        gameBuildManager->Stop();
+    };
 
     // Frame timing
     OutputDebugStringA("[Main] Setting up frame timing...\n");
