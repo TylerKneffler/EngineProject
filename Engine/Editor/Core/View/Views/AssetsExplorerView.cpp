@@ -24,6 +24,31 @@ AssetsExplorerView::AssetsExplorerView()
 
 namespace fs = std::filesystem;
 
+namespace
+{
+class UiIdScope
+{
+public:
+    UiIdScope(IEditorUi& ui, const char* id) : m_ui(ui) { m_ui.PushId(id); }
+    ~UiIdScope() { m_ui.PopId(); }
+    UiIdScope(const UiIdScope&) = delete;
+    UiIdScope& operator=(const UiIdScope&) = delete;
+private:
+    IEditorUi& m_ui;
+};
+
+class UiTreeScope
+{
+public:
+    explicit UiTreeScope(IEditorUi& ui) : m_ui(ui) {}
+    ~UiTreeScope() { m_ui.TreePop(); }
+    UiTreeScope(const UiTreeScope&) = delete;
+    UiTreeScope& operator=(const UiTreeScope&) = delete;
+private:
+    IEditorUi& m_ui;
+};
+}
+
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
@@ -181,7 +206,7 @@ void AssetsExplorerView::DrawCurrentDirectory(IEditorUi& ui)
                     : std::string(Icons::Document) + " " +
                         entry.path().filename().string();
 
-                ui.PushId(entryPath.c_str());
+                UiIdScope idScope(ui, entryPath.c_str());
 
                 bool expanded = false;
                 bool activated = false;
@@ -194,18 +219,6 @@ void AssetsExplorerView::DrawCurrentDirectory(IEditorUi& ui)
                 }
                 else
                 {
-                    if (AssetPreviewCache::Supports(entryPath) && m_scene)
-                    {
-                        if (void* preview = m_previewCache.Get(
-                            entryPath, m_scene->GetGraphicsProvider()))
-                        {
-                            if (AssetPreviewCache::IsCircularPreview(entryPath))
-                                ui.DrawCircularImage(preview, 34.f);
-                            else
-                                ui.DrawImage(preview, 34.f, 34.f);
-                            ui.SameLine();
-                        }
-                    }
                     activated = ui.Selectable(label.c_str(), selected, true);
                 }
 
@@ -249,11 +262,10 @@ void AssetsExplorerView::DrawCurrentDirectory(IEditorUi& ui)
 
                 if (expandable && expanded)
                 {
+                    UiTreeScope treeScope(ui);
                     if (!deleted && !doubleClicked)
                         drawDirectory(entry.path());
-                    ui.TreePop();
                 }
-                ui.PopId();
             }
         };
 
@@ -317,7 +329,7 @@ void AssetsExplorerView::DrawGridDirectory(IEditorUi& ui)
                 preview = m_previewCache.Get(entryPath,
                     m_scene->GetGraphicsProvider());
 
-            ui.PushId(entryPath.c_str());
+            UiIdScope idScope(ui, entryPath.c_str());
             const EditorUiAssetTileResult tile = ui.AssetTile(
                 entry.path().filename().string().c_str(),
                 directory ? Icons::Folder : Icons::Document, preview,
@@ -357,7 +369,6 @@ void AssetsExplorerView::DrawGridDirectory(IEditorUi& ui)
             }
             if (!deleted && directory)
                 AcceptSceneObject(ui, entryPath);
-            ui.PopId();
 
             ++column;
             if (column < columns)

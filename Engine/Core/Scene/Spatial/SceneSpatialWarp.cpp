@@ -90,7 +90,12 @@ Scene::SpatialQuerySample Scene::SampleSpatialPoint(
     const std::vector<OrderedVolume> volumes = GatherOrderedVolumes(*this, query);
     sample.point = MapPoint(worldPoint, volumes,
         sample.affectedByWarpVolume);
-    if (!query.includeWarpVolumes)
+    // Preserve the exact identity transform when no volume can affect this
+    // query. Numerically differentiating identity with a 0.001 step loses
+    // precision at large coordinates (for example 0.9765625 instead of 1),
+    // which scales each separately rendered chunk around its own origin and
+    // opens multi-unit gaps between otherwise matching meshes.
+    if (!query.includeWarpVolumes || volumes.empty())
         return sample;
 
     // Differentiate the fully composed mapping, not individual volume

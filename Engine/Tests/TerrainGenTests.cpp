@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <thread>
 #include <map>
 
@@ -65,12 +66,30 @@ QuantizedEdge MakeEdge(const glm::vec3& first, const glm::vec3& second)
 bool AuditSmoothGridTopology(Engine::Core::Object& terrainObject,
     float chunkSize)
 {
-    struct EdgeUse { int count = 0; int orientation = 0; };
+    struct EdgeUse
+    {
+        int count = 0;
+        int orientation = 0;
+        int diagnosticCount = 0;
+        std::array<glm::vec3, 2> faceNormals{};
+        std::array<glm::ivec2, 2> chunkCoordinates{};
+        std::array<std::array<glm::vec3, 3>, 2> triangles{};
+    };
     std::map<QuantizedEdge, EdgeUse> edgeUses;
+    int minimumChunkX = std::numeric_limits<int>::max();
+    int maximumChunkX = std::numeric_limits<int>::lowest();
+    int minimumChunkZ = std::numeric_limits<int>::max();
+    int maximumChunkZ = std::numeric_limits<int>::lowest();
     for (Engine::Core::Object* chunkObject : terrainObject.Children)
     {
-        if (!chunkObject || !chunkObject->GetComponent<TerrainChunk>())
+        const TerrainChunk* chunk = chunkObject
+            ? chunkObject->GetComponent<TerrainChunk>() : nullptr;
+        if (!chunk)
             continue;
+        minimumChunkX = std::min(minimumChunkX, chunk->chunkX);
+        maximumChunkX = std::max(maximumChunkX, chunk->chunkX);
+        minimumChunkZ = std::min(minimumChunkZ, chunk->chunkZ);
+        maximumChunkZ = std::max(maximumChunkZ, chunk->chunkZ);
         for (Engine::Core::Object* patchObject : chunkObject->Children)
         {
             const auto* mesh = patchObject
@@ -98,6 +117,18 @@ bool AuditSmoothGridTopology(Engine::Core::Object& terrainObject,
                         points[edge], points[(edge + 1) % 3])];
                     ++use.count;
                     use.orientation += to < from ? -1 : 1;
+                    const glm::vec3 faceCross = glm::cross(
+                        points[1] - points[0], points[2] - points[0]);
+                    if (use.diagnosticCount < 2)
+                    {
+                        const int diagnostic = use.diagnosticCount++;
+                        use.faceNormals[diagnostic] = glm::length(faceCross) > 0.f
+                            ? glm::normalize(faceCross) : glm::vec3(0.f);
+                        use.chunkCoordinates[diagnostic] =
+                            { chunk->chunkX, chunk->chunkZ };
+                        use.triangles[diagnostic] =
+                            { points[0], points[1], points[2] };
+                    }
                 }
             }
         }
@@ -105,8 +136,12 @@ bool AuditSmoothGridTopology(Engine::Core::Object& terrainObject,
 
     // A single-use edge is valid only on the outside of the generated ring.
     // Any such edge at an internal chunk border is a real terrain crack.
-    const float outerMinimum = -chunkSize;
-    const float outerMaximum = chunkSize * 2.f;
+    if (minimumChunkX > maximumChunkX || minimumChunkZ > maximumChunkZ)
+        return false;
+    const float outerMinimumX = static_cast<float>(minimumChunkX) * chunkSize;
+    const float outerMaximumX = static_cast<float>(maximumChunkX + 1) * chunkSize;
+    const float outerMinimumZ = static_cast<float>(minimumChunkZ) * chunkSize;
+    const float outerMaximumZ = static_cast<float>(maximumChunkZ + 1) * chunkSize;
     for (const auto& [edge, use] : edgeUses)
     {
         if (use.count != 1 && use.orientation == 0)
@@ -117,14 +152,14 @@ bool AuditSmoothGridTopology(Engine::Core::Object& terrainObject,
         const double z0 = edge.first.z * inverseScale;
         const double z1 = edge.second.z * inverseScale;
         const bool outside =
-            (std::abs(x0 - outerMinimum) < 0.00002 &&
-                std::abs(x1 - outerMinimum) < 0.00002) ||
-            (std::abs(x0 - outerMaximum) < 0.00002 &&
-                std::abs(x1 - outerMaximum) < 0.00002) ||
-            (std::abs(z0 - outerMinimum) < 0.00002 &&
-                std::abs(z1 - outerMinimum) < 0.00002) ||
-            (std::abs(z0 - outerMaximum) < 0.00002 &&
-                std::abs(z1 - outerMaximum) < 0.00002);
+            (std::abs(x0 - outerMinimumX) < 0.00002 &&
+                std::abs(x1 - outerMinimumX) < 0.00002) ||
+            (std::abs(x0 - outerMaximumX) < 0.00002 &&
+                std::abs(x1 - outerMaximumX) < 0.00002) ||
+            (std::abs(z0 - outerMinimumZ) < 0.00002 &&
+                std::abs(z1 - outerMinimumZ) < 0.00002) ||
+            (std::abs(z0 - outerMaximumZ) < 0.00002 &&
+                std::abs(z1 - outerMaximumZ) < 0.00002);
         if (!outside)
         {
             std::fprintf(stderr,
@@ -134,16 +169,147 @@ bool AuditSmoothGridTopology(Engine::Core::Object& terrainObject,
                 x0, edge.first.y * inverseScale, z0,
                 x1, edge.second.y * inverseScale, z1,
                 use.count, use.orientation);
+            for (int source = 0; source < use.diagnosticCount; ++source)
+            {
+                const glm::vec3 normal = use.faceNormals[source];
+                const glm::ivec2 chunk = use.chunkCoordinates[source];
+                std::fprintf(stderr,
+                    "  source chunk=(%d,%d) face_normal=(%.5f,%.5f,%.5f)\n",
+                    chunk.x, chunk.y, normal.x, normal.y, normal.z);
+                const auto& triangle = use.triangles[source];
+                std::fprintf(stderr,
+                    "    triangle=(%.5f,%.5f,%.5f) (%.5f,%.5f,%.5f) "
+                    "(%.5f,%.5f,%.5f)\n",
+                    triangle[0].x, triangle[0].y, triangle[0].z,
+                    triangle[1].x, triangle[1].y, triangle[1].z,
+                    triangle[2].x, triangle[2].y, triangle[2].z);
+            }
             return false;
         }
     }
     return true;
+}
+
+struct SharedBorderAudit
+{
+    bool valid = true;
+    size_t neighborPairs = 0;
+    size_t comparedVertices = 0;
+    float maximumPositionError = 0.f;
+};
+
+SharedBorderAudit AuditSharedChunkWorldVertices(
+    Engine::Core::Object& terrainObject, float chunkSize)
+{
+    std::map<std::pair<int, int>, Engine::Core::Object*> chunks;
+    for (Engine::Core::Object* object : terrainObject.Children)
+    {
+        const TerrainChunk* chunk = object
+            ? object->GetComponent<TerrainChunk>() : nullptr;
+        if (chunk)
+            chunks[{ chunk->chunkX, chunk->chunkZ }] = object;
+    }
+
+    const auto borderVertices = [](Engine::Core::Object* chunk,
+        bool xAxis, float border)
+    {
+        std::vector<glm::vec3> result;
+        for (Engine::Core::Object* patchObject : chunk->Children)
+        {
+            const auto* mesh = patchObject
+                ? patchObject->GetComponent<Engine::Components::Mesh>() : nullptr;
+            if (!mesh)
+                continue;
+            const glm::mat4 world = patchObject->transform.GetWorldMatrix();
+            for (const auto& vertex : mesh->GetVertices())
+            {
+                const glm::vec3 position = glm::vec3(world * glm::vec4(
+                    vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.f));
+                const float coordinate = xAxis ? position.x : position.z;
+                if (std::abs(coordinate - border) <= 0.000001f)
+                    result.push_back(position);
+            }
+        }
+        return result;
+    };
+    const auto compareDirections = [](const std::vector<glm::vec3>& source,
+        const std::vector<glm::vec3>& target, SharedBorderAudit& audit)
+    {
+        if (source.empty() || target.empty())
+        {
+            audit.valid = false;
+            return;
+        }
+        for (const glm::vec3& point : source)
+        {
+            float nearest = std::numeric_limits<float>::max();
+            for (const glm::vec3& candidate : target)
+                nearest = std::min(nearest, glm::length(point - candidate));
+            audit.maximumPositionError = std::max(
+                audit.maximumPositionError, nearest);
+            ++audit.comparedVertices;
+            if (nearest > 0.000001f)
+                audit.valid = false;
+        }
+    };
+
+    SharedBorderAudit audit;
+    for (const auto& [coordinate, chunk] : chunks)
+    {
+        for (const auto& direction : {
+            std::pair<int, int>{ 1, 0 }, std::pair<int, int>{ 0, 1 } })
+        {
+            const std::pair<int, int> neighborCoordinate {
+                coordinate.first + direction.first,
+                coordinate.second + direction.second };
+            const auto neighbor = chunks.find(neighborCoordinate);
+            if (neighbor == chunks.end())
+                continue;
+            const bool xAxis = direction.first != 0;
+            const float border = static_cast<float>(xAxis
+                ? neighborCoordinate.first : neighborCoordinate.second) *
+                chunkSize;
+            const std::vector<glm::vec3> first = borderVertices(
+                chunk, xAxis, border);
+            const std::vector<glm::vec3> second = borderVertices(
+                neighbor->second, xAxis, border);
+            compareDirections(first, second, audit);
+            compareDirections(second, first, audit);
+            ++audit.neighborPairs;
+            if (!audit.valid)
+            {
+                std::fprintf(stderr,
+                    "World-space terrain border mismatch: chunks=(%d,%d) and "
+                    "(%d,%d), axis=%c border=%.5f max_error=%.9f\n",
+                    coordinate.first, coordinate.second,
+                    neighborCoordinate.first, neighborCoordinate.second,
+                    xAxis ? 'x' : 'z', border,
+                    audit.maximumPositionError);
+                return audit;
+            }
+        }
+    }
+    return audit;
 }
 }
 
 int main(int argumentCount, char** arguments)
 {
     Engine::Scene::Scene scene;
+    // Rendering calls MapSpatialMatrix even in ordinary scenes. With no warp
+    // volumes, large coordinates must retain an exact identity Jacobian;
+    // finite-differencing identity used to shrink 128-unit chunks by 3 units.
+    const glm::vec3 distantPoint(1850.666625f, -6.f, 1125.333375f);
+    const auto identitySample = scene.SampleSpatialPoint(distantPoint,
+        { Engine::Scene::Scene::SpatialQueryDomain::Rendering, nullptr });
+    const glm::mat4 distantMatrix = glm::translate(
+        glm::mat4(1.f), distantPoint);
+    const glm::mat4 mappedDistantMatrix = scene.MapSpatialMatrix(distantMatrix,
+        { Engine::Scene::Scene::SpatialQueryDomain::Rendering, nullptr });
+    if (identitySample.point != distantPoint ||
+        identitySample.jacobian != glm::mat3(1.f) ||
+        mappedDistantMatrix != distantMatrix)
+        return 43;
     Engine::Core::Object* terrainObject = scene.AddObject("Editor Terrain");
     terrainObject->AddComponent<PerlinNoiseField>();
     TerrainGen* terrain =
@@ -709,7 +875,7 @@ int main(int argumentCount, char** arguments)
         Engine::Scene::Scene stressScene;
         auto* stressViewer = stressScene.AddObject("Stress Viewer");
         auto* stressOwner = stressScene.AddObject("Stress Terrain");
-        stressOwner->AddComponent<PerlinNoiseField>();
+        auto* stressNoise = stressOwner->AddComponent<PerlinNoiseField>();
         auto* stressTerrain = stressOwner->AddComponent<TerrainGen>();
         const bool longRange = argumentCount > 3 &&
             std::strcmp(arguments[3], "long-range") == 0;
@@ -748,7 +914,26 @@ int main(int argumentCount, char** arguments)
         stressTerrain->terrainShape = static_cast<int>(stressShape);
         stressTerrain->caveStrength = 2.1f;
         stressTerrain->unloadedMeshCacheCapacity = 256;
-        stressViewer->transform.position = { 0.f, 12.f, 0.f };
+        if (longRange)
+        {
+            stressNoise->seed = 9187;
+            stressNoise->frequency = 0.035f;
+            stressNoise->octaves = 4;
+            stressNoise->lacunarity = 2.f;
+            stressNoise->persistence = 0.5f;
+            stressNoise->coordinateOffset = { 41.f, 0.f, -27.f };
+            stressTerrain->verticalSize = 96.f;
+            stressTerrain->heightAmplitude = 36.f;
+            stressTerrain->caveFrequencyMultiplier = 2.35f;
+        }
+        const int startChunkX = argumentCount > 5
+            ? std::atoi(arguments[5]) : 0;
+        const int startChunkZ = argumentCount > 6
+            ? std::atoi(arguments[6]) : 0;
+        stressViewer->transform.position = {
+            static_cast<float>(startChunkX) * stressTerrain->chunkSize,
+            12.f,
+            static_cast<float>(startChunkZ) * stressTerrain->chunkSize };
         stressScene.Start();
 
         const std::size_t diameter = static_cast<std::size_t>(
@@ -765,6 +950,17 @@ int main(int argumentCount, char** arguments)
         }
         const double initialFillSeconds = std::chrono::duration<double>(
             std::chrono::steady_clock::now() - fillStart).count();
+        const bool initialTopologyValid =
+            stressShape != TerrainGen::TerrainShape::SmoothSurface ||
+            (stressTerrain->GetLoadedChunkCount() == desiredChunks &&
+                AuditSmoothGridTopology(*stressOwner, stressTerrain->chunkSize));
+        const SharedBorderAudit initialBorderAudit =
+            stressShape == TerrainGen::TerrainShape::SmoothSurface
+                ? AuditSharedChunkWorldVertices(
+                    *stressOwner, stressTerrain->chunkSize)
+                : SharedBorderAudit{};
+        if (!initialTopologyValid || !initialBorderAudit.valid)
+            return 41;
 
         double worstUpdateMs = 0.0;
         int updatesOverBudget = 0;
@@ -799,6 +995,17 @@ int main(int argumentCount, char** arguments)
         }
         const double drainSeconds = std::chrono::duration<double>(
             std::chrono::steady_clock::now() - drainStart).count();
+        const bool finalTopologyValid =
+            stressShape != TerrainGen::TerrainShape::SmoothSurface ||
+            (stressTerrain->GetLoadedChunkCount() == desiredChunks &&
+                AuditSmoothGridTopology(*stressOwner, stressTerrain->chunkSize));
+        const SharedBorderAudit finalBorderAudit =
+            stressShape == TerrainGen::TerrainShape::SmoothSurface
+                ? AuditSharedChunkWorldVertices(
+                    *stressOwner, stressTerrain->chunkSize)
+                : SharedBorderAudit{};
+        if (!finalTopologyValid || !finalBorderAudit.valid)
+            return 42;
         std::size_t residentVertices = 0u;
         for (Engine::Core::Object* chunkObject : stressOwner->Children)
         {
@@ -817,13 +1024,17 @@ int main(int argumentCount, char** arguments)
         std::printf("stress shape=%s initial_fill_s=%.3f camera_speed=%.1f chunk_size=%.1f "
             "radius=%d cells=%dx%d worst_update_ms=%.3f over_budget=%d/%d "
             "max_missing=%zu drain_s=%.3f resident_chunks=%zu resident_vertices=%zu "
-            "mesh_mib=%.2f built=%llu unloaded=%llu\n",
+            "mesh_mib=%.2f topology=valid border_pairs=%zu "
+            "border_vertices=%zu max_border_error=%.9f built=%llu unloaded=%llu\n",
             stressShapeName, initialFillSeconds, cameraSpeed, stressTerrain->chunkSize,
             stressTerrain->viewRadiusInChunks,
             stressTerrain->horizontalCellsPerChunk, stressTerrain->verticalCells,
             worstUpdateMs, updatesOverBudget,
             movementFrames, maximumMissingChunks, drainSeconds,
             stressTerrain->GetLoadedChunkCount(), residentVertices, residentMeshMiB,
+            finalBorderAudit.neighborPairs,
+            finalBorderAudit.comparedVertices,
+            finalBorderAudit.maximumPositionError,
             static_cast<unsigned long long>(stressTerrain->GetTotalChunksBuilt()),
             static_cast<unsigned long long>(stressTerrain->GetTotalChunksUnloaded()));
     }

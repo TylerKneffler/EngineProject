@@ -8,7 +8,7 @@ struct DrawConstants
 
 struct ObjectData
 {
-    float4x4 mvp;
+    float4x4 viewProjection;
     float4x4 world;
     float4 baseColor;
     float4 ambientUnlit;
@@ -64,7 +64,8 @@ void VSMain(
         localPosition = mul(skin, localPosition);
     }
     localPosition.xyz *= 1.03;
-    oPos = mul(objectData.mvp, localPosition);
+    const float4 worldPosition = mul(objectData.world, localPosition);
+    oPos = mul(objectData.viewProjection, worldPosition);
 }
 
 float4 PSMain(float4 pos : SV_POSITION) : SV_TARGET

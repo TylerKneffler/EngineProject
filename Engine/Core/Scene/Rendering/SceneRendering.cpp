@@ -240,7 +240,11 @@ constexpr uint32_t kPortalDepthResetFlag = 0x80000000u;
 // Large, indexed records live in shader-readable buffers on every backend.
 struct ObjectGPUData
 {
-    glm::mat4 mvp;
+    // Kept separate from world so adjoining meshes transform a shared world
+    // position through exactly the same view-projection arithmetic. Baking
+    // world into this matrix per object can expose sub-pixel cracks between
+    // otherwise identical terrain borders.
+    glm::mat4 viewProjection;
     glm::mat4 world;
     glm::vec4 baseColor;
     glm::vec4 ambientUnlit;
@@ -1610,7 +1614,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             if (preparedDraw.textures[6])
                 objectData.reflectionEnvironmentParams.w = 1.f;
         }
-        objectData.mvp = proj * view * world;
+        objectData.viewProjection = proj * view;
         objectData.world = world;
         objectData.traversalClipPlane = renderItem->traversalClipPlane;
         objectData.spriteUvRect = { 0.f, 0.f, 1.f, 1.f };
@@ -1923,7 +1927,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         pass.apertureDrawData = {
             kPortalObjectSlot, 0u, kPortalApertureNearClampFlag, 0u };
         pass.apertureObjectData.world = glm::mat4(1.f);
-        pass.apertureObjectData.mvp = proj * view;
+        pass.apertureObjectData.viewProjection = proj * view;
         pass.apertureObjectData.baseColor = glm::vec4(1.f);
         pass.apertureObjectData.ambientUnlit = { 0.f, 0.f, 0.f, 1.f };
         pass.apertureObjectData.emissiveOcclusion = { 0.f, 0.f, 0.f, 1.f };
@@ -2454,7 +2458,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             static_cast<uint64_t>(jobIndex + 1u) * kCBStride;
 
         ObjectGPUData apertureData = portalPass.apertureObjectData;
-        apertureData.mvp = proj * portalJob.apertureView;
+        apertureData.viewProjection = proj * portalJob.apertureView;
         const uint32_t maskSlot = portalJob.dataSlotBase;
         const uint32_t resetSlot = maskSlot + 1u;
         memcpy(static_cast<uint8_t*>(m_objectDataMapped) +
@@ -2485,7 +2489,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     draw.traversalChartPortal, portalPass.target))
                 continue;
             ObjectGPUData mappedData = draw.objectData;
-            mappedData.mvp = proj * portalJob.mappedView * mappedData.world;
+            mappedData.viewProjection = proj * portalJob.mappedView;
             mappedData.portalClipPlane = portalClipPlane;
             mappedData.viewPositionAlphaCutoff.x =
                 portalJob.mappedCameraPosition.x;
@@ -2542,7 +2546,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         const DrawCBData debugDraw { pass.dataSlot, 0u, 0u, 0u };
         ObjectGPUData debugData{};
         debugData.world = glm::mat4(1.f);
-        debugData.mvp = proj * view;
+        debugData.viewProjection = proj * view;
         debugData.baseColor = glm::vec4(glm::vec3(pass.color), debugAlpha);
         debugData.ambientUnlit = { 0.f, 0.f, 0.f, 1.f };
         debugData.emissiveOcclusion = glm::vec4(

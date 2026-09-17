@@ -510,20 +510,53 @@ TerrainGen::BuildSmoothSurfaceVertices(int chunkX, int chunkZ,
     {
         if (polygonSize < 3)
             return;
-        glm::vec3 faceNormal(0.f);
+        std::array<glm::vec3, 12> compactPolygon{};
+        std::array<glm::vec3, 12> compactNormals{};
+        int compactSize = 0;
+        const float mergeDistance =
+            std::max(horizontalStep, verticalStep) * 0.00001f;
+        const float mergeDistanceSquared = mergeDistance * mergeDistance;
         for (int index = 0; index < polygonSize; ++index)
-            faceNormal += polygonNormals[index];
+        {
+            bool duplicate = false;
+            for (int prior = 0; prior < compactSize; ++prior)
+            {
+                const glm::vec3 delta =
+                    polygon[index] - compactPolygon[prior];
+                if (glm::dot(delta, delta) <= mergeDistanceSquared)
+                {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!duplicate)
+            {
+                compactPolygon[compactSize] = polygon[index];
+                compactNormals[compactSize] = polygonNormals[index];
+                ++compactSize;
+            }
+        }
+        if (compactSize < 3)
+            return;
+        glm::vec3 faceNormal(0.f);
+        for (int index = 0; index < compactSize; ++index)
+            faceNormal += compactNormals[index];
         faceNormal = glm::length(faceNormal) > 0.0001f
             ? glm::normalize(faceNormal) : glm::vec3(0.f, 1.f, 0.f);
-        for (int index = 1; index + 1 < polygonSize; ++index)
+        for (int index = 1; index + 1 < compactSize; ++index)
         {
-            glm::vec3 first = polygon[0];
-            glm::vec3 second = polygon[index];
-            glm::vec3 third = polygon[index + 1];
-            glm::vec3 firstNormal = polygonNormals[0];
-            glm::vec3 secondNormal = polygonNormals[index];
-            glm::vec3 thirdNormal = polygonNormals[index + 1];
-            if (glm::dot(glm::cross(second - first, third - first), faceNormal) < 0.f)
+            glm::vec3 first = compactPolygon[0];
+            glm::vec3 second = compactPolygon[index];
+            glm::vec3 third = compactPolygon[index + 1];
+            glm::vec3 firstNormal = compactNormals[0];
+            glm::vec3 secondNormal = compactNormals[index];
+            glm::vec3 thirdNormal = compactNormals[index + 1];
+            const glm::vec3 faceCross =
+                glm::cross(second - first, third - first);
+            if (glm::dot(faceCross, faceCross) <=
+                mergeDistanceSquared * mergeDistanceSquared)
+                continue;
+            if (glm::dot(faceCross, faceNormal) < 0.f)
             {
                 std::swap(second, third);
                 std::swap(secondNormal, thirdNormal);
@@ -580,10 +613,19 @@ TerrainGen::BuildSmoothSurfaceVertices(int chunkX, int chunkZ,
                     if (pointLess(second, first))
                         std::swap(first, second);
                     const float denominator = densities[second] - densities[first];
-                    const float amount = std::abs(denominator) > 0.000001f
+                    float amount = std::abs(denominator) > 0.000001f
                         ? std::clamp((isoLevel - densities[first]) / denominator,
                             0.f, 1.f)
                         : 0.5f;
+                    // Resolve near-corner crossings to the exact shared
+                    // lattice point. Otherwise incident edges can create
+                    // duplicate sliver triangles with slightly different
+                    // endpoint positions.
+                    constexpr float endpointSnap = 0.00001f;
+                    if (amount <= endpointSnap)
+                        amount = 0.f;
+                    else if (amount >= 1.f - endpointSnap)
+                        amount = 1.f;
                     activeEdges[edge] = true;
                     intersections[edge] = positions[first] +
                         (positions[second] - positions[first]) * amount;

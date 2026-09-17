@@ -8,6 +8,7 @@
 #include "Core/Object.h"
 #include "Core/Renderers/IGameRenderer.h"
 #include "Core/Renderers/RendererFactory.h"
+#include "Core/Renderers/DX11/DX11GraphicsBuffer.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Window.h"
 #include <algorithm>
@@ -15,6 +16,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <limits>
+#include <map>
 #include <numeric>
 #include <stdexcept>
 #include <vector>
@@ -42,6 +46,193 @@ double Percentile(std::vector<double> values, double percentile)
         percentile * static_cast<double>(values.size() - 1u)));
     return values[std::min(index, values.size() - 1u)];
 }
+
+struct RenderedBorderVertex
+{
+    glm::vec3 world{};
+    glm::vec4 clip{};
+    glm::vec3 ndc{};
+    glm::vec2 pixel{};
+    bool visible = false;
+};
+
+struct RenderedBorderAudit
+{
+    bool valid = true;
+    size_t neighborPairs = 0;
+    size_t comparedVertices = 0;
+    size_t visibleVertices = 0;
+    size_t uploadedVertices = 0;
+    size_t missingBuffers = 0;
+    size_t emptyBorderDirections = 0;
+    size_t unmatchedVertices = 0;
+    float maximumUploadError = 0.f;
+    float maximumWorldError = 0.f;
+    float maximumClipError = 0.f;
+    float maximumNdcError = 0.f;
+    float maximumPixelError = 0.f;
+};
+
+RenderedBorderAudit AuditRenderedChunkBorders(
+    Engine::Core::Object& terrainObject,
+    Engine::Components::Camera& camera,
+    float chunkSize, uint32_t width, uint32_t height)
+{
+    const float aspect = static_cast<float>(width) /
+        static_cast<float>(height);
+    const glm::mat4 viewProjection =
+        camera.GetProjectionMatrix(aspect, false) * camera.GetViewMatrix();
+    std::map<std::pair<int, int>, Engine::Core::Object*> chunks;
+    for (Engine::Core::Object* object : terrainObject.Children)
+    {
+        const TerrainChunk* chunk = object
+            ? object->GetComponent<TerrainChunk>() : nullptr;
+        if (chunk)
+            chunks[{ chunk->chunkX, chunk->chunkZ }] = object;
+    }
+
+    RenderedBorderAudit audit;
+    const auto collectBorder = [&](Engine::Core::Object* chunk,
+        bool xAxis, float border)
+    {
+        std::vector<RenderedBorderVertex> result;
+        for (Engine::Core::Object* patchObject : chunk->Children)
+        {
+            const auto* mesh = patchObject
+                ? patchObject->GetComponent<Engine::Components::Mesh>() : nullptr;
+            if (!mesh || !mesh->GetGraphicsBuffer())
+                continue;
+            const auto* dxBuffer = dynamic_cast<const Engine::Renderers::
+                D3D11GraphicsBuffer*>(mesh->GetGraphicsBuffer());
+            const uint8_t* uploadedBytes = dxBuffer
+                ? dxBuffer->GetShadowData() : nullptr;
+            if (!uploadedBytes || mesh->GetGraphicsBuffer()->GetSize() <
+                static_cast<uint64_t>(mesh->GetVertexCount()) *
+                    sizeof(Engine::Model::Vertex))
+            {
+                audit.valid = false;
+                ++audit.missingBuffers;
+                continue;
+            }
+            const auto* uploaded = reinterpret_cast<const Engine::Model::Vertex*>(
+                uploadedBytes);
+            const auto& cpuVertices = mesh->GetVertices();
+            const glm::mat4 authoredWorldMatrix =
+                patchObject->transform.GetWorldMatrix();
+            const glm::mat4 renderWorldMatrix =
+                patchObject->transform.GetWorldMatrixWithLayer();
+            for (size_t index = 0; index < mesh->GetVertexCount(); ++index)
+            {
+                const auto& vertex = uploaded[index];
+                const auto& cpu = cpuVertices[index];
+                const glm::vec3 uploadedPosition(
+                    vertex.pos[0], vertex.pos[1], vertex.pos[2]);
+                const glm::vec3 cpuPosition(cpu.pos[0], cpu.pos[1], cpu.pos[2]);
+                audit.maximumUploadError = std::max(audit.maximumUploadError,
+                    glm::length(uploadedPosition - cpuPosition));
+                ++audit.uploadedVertices;
+
+                // This is the Object.hlsl vertex path: uploaded local vertex,
+                // per-draw world matrix, then the shared view-projection.
+                const glm::vec4 authoredWorldPosition = authoredWorldMatrix *
+                    glm::vec4(uploadedPosition, 1.f);
+                const float coordinate = xAxis
+                    ? authoredWorldPosition.x : authoredWorldPosition.z;
+                if (std::abs(coordinate - border) > 0.000001f)
+                    continue;
+                const glm::vec4 worldPosition = renderWorldMatrix *
+                    glm::vec4(uploadedPosition, 1.f);
+                RenderedBorderVertex sample{};
+                sample.world = glm::vec3(worldPosition);
+                sample.clip = viewProjection * worldPosition;
+                if (std::abs(sample.clip.w) > 0.000001f)
+                    sample.ndc = glm::vec3(sample.clip) / sample.clip.w;
+                sample.pixel = {
+                    (sample.ndc.x * 0.5f + 0.5f) * static_cast<float>(width),
+                    (1.f - (sample.ndc.y * 0.5f + 0.5f)) *
+                        static_cast<float>(height) };
+                sample.visible = sample.clip.w > 0.f &&
+                    sample.ndc.x >= -1.f && sample.ndc.x <= 1.f &&
+                    sample.ndc.y >= -1.f && sample.ndc.y <= 1.f &&
+                    sample.ndc.z >= 0.f && sample.ndc.z <= 1.f;
+                result.push_back(sample);
+            }
+        }
+        return result;
+    };
+    const auto compareDirections = [&](const std::vector<RenderedBorderVertex>& source,
+        const std::vector<RenderedBorderVertex>& target)
+    {
+        if (source.empty() || target.empty())
+        {
+            audit.valid = false;
+            ++audit.emptyBorderDirections;
+            return;
+        }
+        for (const RenderedBorderVertex& point : source)
+        {
+            const RenderedBorderVertex* closest = nullptr;
+            float nearest = std::numeric_limits<float>::max();
+            for (const RenderedBorderVertex& candidate : target)
+            {
+                const float distance = glm::length(point.world - candidate.world);
+                if (distance < nearest)
+                {
+                    nearest = distance;
+                    closest = &candidate;
+                }
+            }
+            if (!closest)
+            {
+                audit.valid = false;
+                ++audit.unmatchedVertices;
+                continue;
+            }
+            audit.maximumWorldError = std::max(audit.maximumWorldError, nearest);
+            audit.maximumClipError = std::max(audit.maximumClipError,
+                glm::length(point.clip - closest->clip));
+            audit.maximumNdcError = std::max(audit.maximumNdcError,
+                glm::length(point.ndc - closest->ndc));
+            audit.maximumPixelError = std::max(audit.maximumPixelError,
+                glm::length(point.pixel - closest->pixel));
+            ++audit.comparedVertices;
+            if (point.visible && closest->visible)
+                ++audit.visibleVertices;
+            if (nearest > 0.000001f)
+                audit.valid = false;
+        }
+    };
+
+    for (const auto& [coordinate, chunk] : chunks)
+    {
+        for (const auto& direction : {
+            std::pair<int, int>{ 1, 0 }, std::pair<int, int>{ 0, 1 } })
+        {
+            const std::pair<int, int> neighborCoordinate {
+                coordinate.first + direction.first,
+                coordinate.second + direction.second };
+            const auto neighbor = chunks.find(neighborCoordinate);
+            if (neighbor == chunks.end())
+                continue;
+            const bool xAxis = direction.first != 0;
+            const float border = static_cast<float>(xAxis
+                ? neighborCoordinate.first : neighborCoordinate.second) *
+                chunkSize;
+            const auto first = collectBorder(chunk, xAxis, border);
+            const auto second = collectBorder(
+                neighbor->second, xAxis, border);
+            compareDirections(first, second);
+            compareDirections(second, first);
+            ++audit.neighborPairs;
+        }
+    }
+    audit.valid = audit.valid && audit.maximumUploadError == 0.f &&
+        audit.maximumWorldError <= 0.000001f &&
+        audit.maximumClipError <= 0.000001f &&
+        audit.maximumNdcError <= 0.000001f &&
+        audit.maximumPixelError <= 0.0001f;
+    return audit;
+}
 }
 
 int main(int argumentCount, char** arguments)
@@ -52,7 +243,8 @@ int main(int argumentCount, char** arguments)
             ? std::clamp(std::atoi(arguments[1]), 0, 8) : 8;
         constexpr uint32_t width = 1280;
         constexpr uint32_t height = 720;
-        constexpr int measuredFrames = 600;
+        const int measuredFrames = argumentCount > 2 &&
+            std::strcmp(arguments[2], "--audit-only") == 0 ? 1 : 600;
 
         Engine::Model::ProjectSettings settings{};
         settings.gameRenderingAPI = "DirectX11";
@@ -162,6 +354,33 @@ int main(int argumentCount, char** arguments)
                     residentVertices += mesh->GetVertexCount();
             }
         }
+        Engine::Components::Camera* renderedCamera = scene.FindGameCamera();
+        if (!renderedCamera)
+            throw std::runtime_error("Rendered border audit camera is missing");
+        const RenderedBorderAudit renderedBorderAudit =
+            AuditRenderedChunkBorders(*terrainObject, *renderedCamera,
+                terrain->chunkSize, width, height);
+        if (!renderedBorderAudit.valid)
+        {
+            std::fprintf(stderr,
+                "render border mismatch pairs=%zu vertices=%zu visible=%zu "
+                "uploaded=%zu missing_buffers=%zu empty_directions=%zu "
+                "unmatched=%zu upload=%.9f world=%.9f clip=%.9f ndc=%.9f "
+                "pixel=%.9f\n",
+                renderedBorderAudit.neighborPairs,
+                renderedBorderAudit.comparedVertices,
+                renderedBorderAudit.visibleVertices,
+                renderedBorderAudit.uploadedVertices,
+                renderedBorderAudit.missingBuffers,
+                renderedBorderAudit.emptyBorderDirections,
+                renderedBorderAudit.unmatchedVertices,
+                renderedBorderAudit.maximumUploadError,
+                renderedBorderAudit.maximumWorldError,
+                renderedBorderAudit.maximumClipError,
+                renderedBorderAudit.maximumNdcError,
+                renderedBorderAudit.maximumPixelError);
+            throw std::runtime_error("Uploaded terrain borders diverge in render space");
+        }
 
         const double averageMs = std::accumulate(frameTimes.begin(),
             frameTimes.end(), 0.0) / static_cast<double>(frameTimes.size());
@@ -174,6 +393,9 @@ int main(int argumentCount, char** arguments)
             "view_distance=%.0f fill_s=%.3f fill_worst_ms=%.3f avg_ms=%.3f "
             "p95_ms=%.3f p99_ms=%.3f worst_ms=%.3f over_budget=%d/%d "
             "max_missing=%zu viewer_missing=%d forward_missing=%d vertices=%zu "
+            "render_border_pairs=%zu render_border_vertices=%zu "
+            "visible_border_vertices=%zu upload_error=%.9f world_error=%.9f "
+            "clip_error=%.9f ndc_error=%.9f pixel_error=%.9f "
             "built=%llu unloaded=%llu\n",
             width, height, radius, desiredChunks,
             terrain->chunkSize * static_cast<float>(radius), fillSeconds,
@@ -182,6 +404,14 @@ int main(int argumentCount, char** arguments)
             *std::max_element(frameTimes.begin(), frameTimes.end()), overBudget,
             measuredFrames, maximumMissingChunks, viewerChunkMissingFrames,
             forwardChunkMissingFrames, residentVertices,
+            renderedBorderAudit.neighborPairs,
+            renderedBorderAudit.comparedVertices,
+            renderedBorderAudit.visibleVertices,
+            renderedBorderAudit.maximumUploadError,
+            renderedBorderAudit.maximumWorldError,
+            renderedBorderAudit.maximumClipError,
+            renderedBorderAudit.maximumNdcError,
+            renderedBorderAudit.maximumPixelError,
             static_cast<unsigned long long>(terrain->GetTotalChunksBuilt()),
             static_cast<unsigned long long>(terrain->GetTotalChunksUnloaded()));
         return 0;

@@ -11,7 +11,7 @@ struct DrawConstants
 
 struct ObjectData
 {
-    float4x4 mvp;
+    float4x4 viewProjection;
     float4x4 world;
     float4 baseColor;
     float4 ambientUnlit;
@@ -111,7 +111,11 @@ void VSMain(
         if (dot(localTangent, localTangent) > 0.0001)
             localTangent = normalize(mul((float3x3)skin, localTangent));
     }
-    oPos = mul(objectData.mvp, localPosition);
+    // Resolve world space first, then use the shared view-projection matrix.
+    // Adjacent terrain patches can own different transforms while still
+    // producing bit-identical clip positions along their common border.
+    float4 worldPosition = mul(objectData.world, localPosition);
+    oPos = mul(objectData.viewProjection, worldPosition);
     // Portal apertures are stencil masks rather than visible surfaces. Keep a
     // mask in front of the near plane rasterizable while the camera approaches
     // it, otherwise the connected view abruptly disappears before crossing.
@@ -122,7 +126,7 @@ void VSMain(
     // aperture's stencil mask before the connected view is rendered.
     if ((draw.drawFlags & 0x80000000u) != 0u)
         oPos.z = oPos.w;
-    oWorldPos = mul(objectData.world, localPosition).xyz;
+    oWorldPos = worldPosition.xyz;
     oNormal = normalize(mul((float3x3)objectData.world, localNormal));
     oUv = objectData.spriteUvRect.xy + uv * objectData.spriteUvRect.zw;
     oUv1 = uv1;
