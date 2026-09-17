@@ -312,7 +312,10 @@ bool Mesh::SetDeformedVertices(const std::vector<Vertex>& vertices)
     // A real portal cut adds intersection vertices, so the two clipped halves
     // generally contain more vertices than the original mesh. Recreate the
     // upload buffer when its size changes instead of rejecting the cut.
-    if (vertices.size() != m_vertices.size())
+    const bool sizeChanged = vertices.size() != m_vertices.size();
+    const bool canReuseBuffer = m_vertexBuffer &&
+        byteSize <= m_vertexBuffer->GetSize();
+    if (sizeChanged && !canReuseBuffer)
     {
         if (m_vertexBuffer || m_bufferFactory)
         {
@@ -358,7 +361,9 @@ bool Mesh::SetDeformedVertices(std::vector<Vertex>&& vertices)
         return false;
 
     const bool sizeChanged = vertices.size() != m_vertices.size();
-    if (sizeChanged && (m_vertexBuffer || m_bufferFactory))
+    const bool canReuseBuffer = m_vertexBuffer &&
+        byteSize <= m_vertexBuffer->GetSize();
+    if (sizeChanged && !canReuseBuffer && (m_vertexBuffer || m_bufferFactory))
     {
         if (!m_bufferFactory)
             return false;
@@ -373,7 +378,7 @@ bool Mesh::SetDeformedVertices(std::vector<Vertex>&& vertices)
     m_vertices = std::move(vertices);
     UpdateBounds();
     m_ready = true;
-    if (!sizeChanged && m_vertexBuffer)
+    if (m_vertexBuffer && (!sizeChanged || canReuseBuffer))
     {
         if (void* mapped = m_vertexBuffer->Map())
         {

@@ -945,8 +945,7 @@ void Scene::PrepareRenderFrame()
     // runtime frames reuse static CPU deformation and its upload buffer.
     uint64_t warpRevision = 1469598103934665603ull;
     bool hasActiveWarpVolume = false;
-    std::function<void(const Engine::Core::Object*)> hashWarpObjects;
-    hashWarpObjects = [&](const Engine::Core::Object* object)
+    const auto hashWarpObject = [&](const Engine::Core::Object* object)
     {
         if (!object)
             return;
@@ -964,11 +963,9 @@ void Scene::PrepareRenderFrame()
             HashRevision(warpRevision, manipulator->definesWarpVolume ? 1u : 0u);
             HashRevision(warpRevision, object->IsEnabledInHierarchy() ? 1u : 0u);
         }
-        for (const Engine::Core::Object* child : object->Children)
-            hashWarpObjects(child);
     };
     for (const auto& object : m_objects)
-        hashWarpObjects(object.get());
+        hashWarpObject(object.get());
 
     m_frameRenderItems.reserve(m_objects.size());
     if (!hasActiveWarpVolume)
@@ -1035,7 +1032,19 @@ void Scene::PrepareRenderFrame()
             candidate->GetComponent<Engine::Rendering::BakedLightingData>();
         item.belongsToPreview = m_previewObject &&
             IsObjectOrDescendant(candidate, m_previewObject);
-        item.world = candidate->transform.GetWorldMatrixWithLayer();
+        glm::mat4 authoredWorld = candidate->transform.GetWorldMatrix();
+        if (candidate->transform.matrixLayer.enabled)
+        {
+            authoredWorld = candidate->transform.matrixLayer.localToLayer *
+                authoredWorld;
+        }
+        // The scene walk above already established that no nonlinear mapping
+        // is active. Avoid making every terrain patch independently scan the
+        // complete scene for warp volumes on every rendered frame.
+        item.world = hasActiveWarpVolume
+            ? MapSpatialMatrix(authoredWorld,
+                { SpatialQueryDomain::Rendering, candidate })
+            : authoredWorld;
         const auto splitInstances = traversalRenderInstances.find(candidate);
         const bool hasSplitRenderInstances = !sprite &&
             splitInstances != traversalRenderInstances.end() &&
@@ -1061,12 +1070,6 @@ void Scene::PrepareRenderFrame()
             !hasSplitRenderInstances && !hasSkinnedMesh &&
             !mesh->GetVertices().empty())
         {
-            glm::mat4 authoredWorld = candidate->transform.GetWorldMatrix();
-            if (candidate->transform.matrixLayer.enabled)
-            {
-                authoredWorld = candidate->transform.matrixLayer.localToLayer *
-                    authoredWorld;
-            }
             WarpedRenderMesh& cached = m_warpedRenderMeshes[candidate];
             const uint64_t meshRevision = mesh->GetConfigurationRevision();
             const bool cacheValid = cached.evaluated &&
@@ -1516,6 +1519,48 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         int sortingLayer = 0;
         bool blended = false;
     };
+    const glm::mat4 viewProjection = proj * view;
+    const auto outsideViewFrustum = [&](const FrameRenderItem& item,
+        const glm::mat4& itemWorld)
+    {
+        if (!item.mesh || item.sprite || item.warpedVertexBuffer ||
+            !item.mesh->HasBounds() || item.traversalChartPortal)
+            return false;
+        const glm::vec3 minimum = item.mesh->GetBoundsMin();
+        const glm::vec3 maximum = item.mesh->GetBoundsMax();
+        const glm::mat4 localToClip = viewProjection * itemWorld;
+        std::array<glm::vec4, 8> corners{};
+        size_t cornerIndex = 0;
+        for (int z = 0; z < 2; ++z)
+        {
+            for (int y = 0; y < 2; ++y)
+            {
+                for (int x = 0; x < 2; ++x)
+                {
+                    corners[cornerIndex++] = localToClip * glm::vec4(
+                        x ? maximum.x : minimum.x,
+                        y ? maximum.y : minimum.y,
+                        z ? maximum.z : minimum.z, 1.f);
+                }
+            }
+        }
+        const auto allOutside = [&](const auto& predicate)
+        {
+            return std::all_of(corners.begin(), corners.end(), predicate);
+        };
+        return allOutside([](const glm::vec4& point)
+            { return point.x < -point.w; }) ||
+            allOutside([](const glm::vec4& point)
+            { return point.x > point.w; }) ||
+            allOutside([](const glm::vec4& point)
+            { return point.y < -point.w; }) ||
+            allOutside([](const glm::vec4& point)
+            { return point.y > point.w; }) ||
+            allOutside([](const glm::vec4& point)
+            { return point.z < 0.f; }) ||
+            allOutside([](const glm::vec4& point)
+            { return point.z > point.w; });
+    };
     std::vector<ViewRenderItem> renderObjects;
     renderObjects.reserve(m_frameRenderItems.size());
     for (const FrameRenderItem& item : m_frameRenderItems)
@@ -1524,6 +1569,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         {
             const glm::mat4 itemWorld = useSourceChartMesh(item)
                 ? sourceChartWorld(item) : item.world;
+            if (outsideViewFrustum(item, itemWorld))
+                continue;
             const glm::vec3 delta = glm::vec3(itemWorld[3]) - cameraPosition;
             renderObjects.push_back({ &item, glm::dot(delta, delta),
                 itemWorld[3].z, item.sortingLayer, item.blended });
@@ -1542,7 +1589,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 return !first.blended;
             return first.blended
                 ? first.cameraDistanceSquared > second.cameraDistanceSquared
-                : false;
+                : first.cameraDistanceSquared < second.cameraDistanceSquared;
         });
 
     struct PreparedDraw

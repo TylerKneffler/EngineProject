@@ -243,8 +243,10 @@ int main(int argumentCount, char** arguments)
             ? std::clamp(std::atoi(arguments[1]), 0, 8) : 8;
         constexpr uint32_t width = 1280;
         constexpr uint32_t height = 720;
-        const int measuredFrames = argumentCount > 2 &&
-            std::strcmp(arguments[2], "--audit-only") == 0 ? 1 : 600;
+        const int measuredFrames = argumentCount > 2
+            ? (std::strcmp(arguments[2], "--audit-only") == 0
+                ? 1 : std::clamp(std::atoi(arguments[2]), 1, 3600))
+            : 600;
 
         Engine::Model::ProjectSettings settings{};
         settings.gameRenderingAPI = "DirectX11";
@@ -269,18 +271,30 @@ int main(int argumentCount, char** arguments)
         if (!terrain || !driver)
             throw std::runtime_error("Terrain benchmark components are missing");
         terrain->viewRadiusInChunks = radius;
+        if (argumentCount > 3)
+            terrain->parallelChunkBuilds = std::clamp(
+                std::atoi(arguments[3]), 1, 16);
         scene.Start();
         const float traversalSpeed = driver->movementSpeed;
         driver->movementSpeed = 0.01f;
 
         ShowWindow(window.GetHWND(), SW_SHOWNOACTIVATE);
         const float aspect = static_cast<float>(width) / static_cast<float>(height);
+        bool collectStageTimings = false;
+        double pumpTotalMs = 0.0, updateTotalMs = 0.0, prepareTotalMs = 0.0;
+        double renderTotalMs = 0.0, presentTotalMs = 0.0;
+        double pumpWorstMs = 0.0, updateWorstMs = 0.0, prepareWorstMs = 0.0;
+        double renderWorstMs = 0.0, presentWorstMs = 0.0;
+        double measuredStreamingWorstMs = 0.0;
         const auto renderFrame = [&]()
         {
             const auto start = Clock::now();
             PumpWindowMessages();
+            const auto afterPump = Clock::now();
             scene.Update(1.f / 60.f);
+            const auto afterUpdate = Clock::now();
             scene.PrepareRenderFrame();
+            const auto afterPrepare = Clock::now();
             renderer->BeginFrame();
             renderer->Clear(0.1f, 0.1f, 0.1f);
             auto context = renderer->CreateFrameGraphicsContext();
@@ -289,9 +303,35 @@ int main(int argumentCount, char** arguments)
                 if (auto* camera = scene.FindGameCamera())
                     scene.Render(context.get(), aspect, camera, false);
             }
+            const auto afterRender = Clock::now();
             renderer->EndFrame();
-            return std::chrono::duration<double, std::milli>(
-                Clock::now() - start).count();
+            const auto end = Clock::now();
+            if (collectStageTimings)
+            {
+                const double pumpMs = std::chrono::duration<double, std::milli>(
+                    afterPump - start).count();
+                const double updateMs = std::chrono::duration<double, std::milli>(
+                    afterUpdate - afterPump).count();
+                const double prepareMs = std::chrono::duration<double, std::milli>(
+                    afterPrepare - afterUpdate).count();
+                const double renderMs = std::chrono::duration<double, std::milli>(
+                    afterRender - afterPrepare).count();
+                const double presentMs = std::chrono::duration<double, std::milli>(
+                    end - afterRender).count();
+                pumpTotalMs += pumpMs;
+                updateTotalMs += updateMs;
+                prepareTotalMs += prepareMs;
+                renderTotalMs += renderMs;
+                presentTotalMs += presentMs;
+                pumpWorstMs = std::max(pumpWorstMs, pumpMs);
+                updateWorstMs = std::max(updateWorstMs, updateMs);
+                prepareWorstMs = std::max(prepareWorstMs, prepareMs);
+                renderWorstMs = std::max(renderWorstMs, renderMs);
+                presentWorstMs = std::max(presentWorstMs, presentMs);
+                measuredStreamingWorstMs = std::max(measuredStreamingWorstMs,
+                    terrain->GetLastStreamingMilliseconds());
+            }
+            return std::chrono::duration<double, std::milli>(end - start).count();
         };
 
         const size_t diameter = static_cast<size_t>(radius * 2 + 1);
@@ -312,6 +352,7 @@ int main(int argumentCount, char** arguments)
         driver->movementSpeed = traversalSpeed;
         std::vector<double> frameTimes;
         frameTimes.reserve(measuredFrames);
+        collectStageTimings = true;
         size_t maximumMissingChunks = 0u;
         int viewerChunkMissingFrames = 0;
         int forwardChunkMissingFrames = 0;
@@ -396,6 +437,11 @@ int main(int argumentCount, char** arguments)
             "render_border_pairs=%zu render_border_vertices=%zu "
             "visible_border_vertices=%zu upload_error=%.9f world_error=%.9f "
             "clip_error=%.9f ndc_error=%.9f pixel_error=%.9f "
+            "pump_avg=%.3f pump_worst=%.3f update_avg=%.3f "
+            "update_worst=%.3f prepare_avg=%.3f "
+            "prepare_worst=%.3f render_avg=%.3f render_worst=%.3f "
+            "present_avg=%.3f present_worst=%.3f "
+            "terrain_stream_worst=%.3f "
             "built=%llu unloaded=%llu\n",
             width, height, radius, desiredChunks,
             terrain->chunkSize * static_cast<float>(radius), fillSeconds,
@@ -412,6 +458,12 @@ int main(int argumentCount, char** arguments)
             renderedBorderAudit.maximumClipError,
             renderedBorderAudit.maximumNdcError,
             renderedBorderAudit.maximumPixelError,
+            pumpTotalMs / measuredFrames, pumpWorstMs,
+            updateTotalMs / measuredFrames, updateWorstMs,
+            prepareTotalMs / measuredFrames, prepareWorstMs,
+            renderTotalMs / measuredFrames, renderWorstMs,
+            presentTotalMs / measuredFrames, presentWorstMs,
+            measuredStreamingWorstMs,
             static_cast<unsigned long long>(terrain->GetTotalChunksBuilt()),
             static_cast<unsigned long long>(terrain->GetTotalChunksUnloaded()));
         return 0;

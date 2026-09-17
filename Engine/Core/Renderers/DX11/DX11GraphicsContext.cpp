@@ -16,6 +16,8 @@ D3D11GraphicsContext::D3D11GraphicsContext(ID3D11Device* device, ID3D11DeviceCon
 void D3D11GraphicsContext::SetPipeline(const Engine::Graphics::IPipelineState* state)
 {
     if (!m_context || !state) return;
+    if (state == m_boundPipeline)
+        return;
     const auto* pipeline = dynamic_cast<const D3D11PipelineState*>(state);
     if (!pipeline) return;
 
@@ -28,6 +30,7 @@ void D3D11GraphicsContext::SetPipeline(const Engine::Graphics::IPipelineState* s
     m_context->OMSetBlendState(pipeline->blendState.Get(), blendFactor, UINT_MAX);
     m_depthStencilState = pipeline->depthStencilState;
     m_context->OMSetDepthStencilState(m_depthStencilState.Get(), m_stencilReference);
+    m_boundPipeline = state;
 }
 
 void D3D11GraphicsContext::SetStencilReference(uint32_t reference)
@@ -102,7 +105,13 @@ void D3D11GraphicsContext::SetTexture(uint32_t slot, const Engine::Graphics::IGr
     const uint32_t shaderSlot = slot == 6 ? 9 : slot;
     const auto* nativeTexture = dynamic_cast<const D3D11GraphicsTexture*>(texture);
     ID3D11ShaderResourceView* view = nativeTexture ? nativeTexture->GetView() : nullptr;
-    m_context->PSSetShaderResources(shaderSlot, 1, &view);
+    if (!m_textureSlotInitialized[shaderSlot] ||
+        m_boundTextureViews[shaderSlot] != view)
+    {
+        m_context->PSSetShaderResources(shaderSlot, 1, &view);
+        m_boundTextureViews[shaderSlot] = view;
+        m_textureSlotInitialized[shaderSlot] = true;
+    }
 
     if (!m_materialSampler)
     {
@@ -115,8 +124,12 @@ void D3D11GraphicsContext::SetTexture(uint32_t slot, const Engine::Graphics::IGr
         if (FAILED(m_device->CreateSamplerState(&desc, &m_materialSampler)))
             return;
     }
-    ID3D11SamplerState* sampler = m_materialSampler.Get();
-    m_context->PSSetSamplers(0, 1, &sampler);
+    if (!m_materialSamplerBound)
+    {
+        ID3D11SamplerState* sampler = m_materialSampler.Get();
+        m_context->PSSetSamplers(0, 1, &sampler);
+        m_materialSamplerBound = true;
+    }
 }
 
 void D3D11GraphicsContext::SetViewport(const Viewport& value)

@@ -35,21 +35,25 @@ std::vector<OrderedVolume> GatherOrderedVolumes(const Scene& scene,
     if (!query.includeWarpVolumes)
         return volumes;
 
-    for (const auto& root : scene.GetObjects())
-        VisitObjectTree(root.get(), [&](const Engine::Core::Object* object)
-        {
-            if (!object || object == query.excludedOwner ||
-                !object->IsEnabledInHierarchy())
-                return;
-            const auto* manipulator =
-                object->GetComponent<Engine::Components::SpatialManipulator>();
-            if (!manipulator || !manipulator->enabled ||
-                !manipulator->definesWarpVolume)
-                return;
-            Scene::ObjectPath path;
-            scene.TryGetObjectPath(object, path);
-            volumes.push_back({ manipulator, std::move(path) });
-        });
+    // Scene owns every object in one flat list; Children is a non-owning
+    // hierarchy view over the same entries. Recursing from every list entry
+    // revisits descendants once per ancestor and can apply a nested volume
+    // multiple times.
+    for (const auto& owned : scene.GetObjects())
+    {
+        const Engine::Core::Object* object = owned.get();
+        if (!object || object == query.excludedOwner ||
+            !object->IsEnabledInHierarchy())
+            continue;
+        const auto* manipulator =
+            object->GetComponent<Engine::Components::SpatialManipulator>();
+        if (!manipulator || !manipulator->enabled ||
+            !manipulator->definesWarpVolume)
+            continue;
+        Scene::ObjectPath path;
+        scene.TryGetObjectPath(object, path);
+        volumes.push_back({ manipulator, std::move(path) });
+    }
     // Composition is explicit: lower priorities map first, higher priorities
     // map last. Equal priorities use the persisted hierarchy path, so moving
     // unrelated scene objects cannot silently change nonlinear results.

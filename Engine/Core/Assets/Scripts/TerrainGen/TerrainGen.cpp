@@ -18,6 +18,9 @@
 #include <cstdio>
 #include <cstring>
 #include <thread>
+#if defined(_WIN32)
+#include <Windows.h>
+#endif
 
 namespace
 {
@@ -186,6 +189,7 @@ void TerrainGen::Update()
 void TerrainGen::OnDestroy()
 {
     m_chunks.clear();
+    m_chunkObjectPool.clear();
     m_meshCache.clear();
     m_chunkQueue.clear();
     m_inFlightChunks.clear();
@@ -242,7 +246,15 @@ void TerrainGen::RefreshChunks()
         if (candidate.object)
         {
             CacheChunkMesh(candidate.key, *candidate.object);
-            Owner->GetScene()->RequestRemoveObject(candidate.object);
+            if (candidate.object->Parent)
+            {
+                auto& siblings = candidate.object->Parent->Children;
+                siblings.erase(std::remove(siblings.begin(), siblings.end(),
+                    candidate.object), siblings.end());
+            }
+            candidate.object->Parent = nullptr;
+            candidate.object->enabled = false;
+            m_chunkObjectPool.push_back(candidate.object);
         }
         m_chunks.erase(candidate.key);
         ++m_totalChunksUnloaded;
@@ -325,6 +337,14 @@ void TerrainGen::RefreshChunks()
             task.future = std::async(std::launch::async,
                 [snapshot, x = candidate.x, z = candidate.z]()
                 {
+#if defined(_WIN32)
+                    // Terrain generation is throughput work. It must yield to
+                    // the game/render thread when all cores are occupied or
+                    // camera motion visibly hitches despite generation being
+                    // asynchronous.
+                    SetThreadPriority(GetCurrentThread(),
+                        THREAD_PRIORITY_BELOW_NORMAL);
+#endif
                     return GenerateChunkMesh(snapshot, x, z);
                 });
             m_inFlightChunks.emplace(key, std::move(task));
@@ -1362,7 +1382,19 @@ void TerrainGen::BuildChunk(int chunkX, int chunkZ,
     {
         char name[64]{};
         std::snprintf(name, sizeof(name), "Chunk (%d, %d)", chunkX, chunkZ);
-        chunkObject = AddChild(scene, *Owner, name);
+        if (!m_chunkObjectPool.empty())
+        {
+            chunkObject = m_chunkObjectPool.back();
+            m_chunkObjectPool.pop_back();
+            chunkObject->name = name;
+            chunkObject->enabled = true;
+            chunkObject->Parent = Owner;
+            Owner->Children.push_back(chunkObject);
+        }
+        else
+        {
+            chunkObject = AddChild(scene, *Owner, name);
+        }
         m_chunks[key] = chunkObject;
     }
     // Chunk coordinates are authoritative. Reapply the local origin even for
@@ -1478,9 +1510,15 @@ void TerrainGen::ClearTerrain()
             if (child && child->GetComponent<TerrainChunk>())
                 scene.RemoveObject(child);
         }
+        for (Object* pooledChunk : m_chunkObjectPool)
+        {
+            if (pooledChunk)
+                scene.RemoveObject(pooledChunk);
+        }
     }
 
     m_chunks.clear();
+    m_chunkObjectPool.clear();
     m_meshCache.clear();
     m_meshConfigurationHash = 0u;
     m_meshCacheClock = 0u;

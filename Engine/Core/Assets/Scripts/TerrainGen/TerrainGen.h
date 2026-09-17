@@ -235,6 +235,10 @@ private:
     void TrimMeshCache();
 
     std::unordered_map<int64_t, Engine::Core::Object*> m_chunks;
+    // Detached, disabled chunk hierarchies retained for normal edge-to-edge
+    // streaming. Reusing them avoids destroying live GPU resources whenever
+    // the viewer crosses a chunk boundary.
+    std::vector<Engine::Core::Object*> m_chunkObjectPool;
     glm::ivec2 m_viewerChunk { 0 };
     bool m_hasViewerChunk = false;
     std::string m_editorGenerationStatus;

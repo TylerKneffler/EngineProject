@@ -37,6 +37,12 @@ private:
     std::array<Microsoft::WRL::ComPtr<ID3D11Buffer>, CONSTANT_BUFFER_SLOTS> m_constantBuffers;
     Microsoft::WRL::ComPtr<ID3D11SamplerState> m_materialSampler;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilState> m_depthStencilState;
+    const Engine::Graphics::IPipelineState* m_boundPipeline = nullptr;
+    std::array<ID3D11ShaderResourceView*,
+        D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT> m_boundTextureViews{};
+    std::array<bool, D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT>
+        m_textureSlotInitialized{};
+    bool m_materialSamplerBound = false;
     uint32_t m_stencilReference = 0;
 };
 
