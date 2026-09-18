@@ -41,6 +41,14 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Streaming", ClampMin = "1")
     float chunkSize = 16.f;
 
+    // Logical chunk origin represented by local coordinate (0, 0). Keeping
+    // rendered/physical transforms near zero prevents large-world float loss.
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Streaming")
+    int worldOriginChunkX = 0;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Streaming")
+    int worldOriginChunkZ = 0;
+
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Streaming", ClampMin = "0", ClampMax = "8")
     int viewRadiusInChunks = 1;
 
@@ -114,7 +122,13 @@ public:
     glm::vec3 highHeightColor { 0.62f, 0.58f, 0.48f };
 
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Physics")
-    bool generateColliders = false;
+    bool generateColliders = true;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Physics", ClampMin = "0", ClampMax = "8")
+    int collisionRadiusInChunks = 0;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Physics", ClampMin = "1", ClampMax = "16")
+    int maxColliderActivationsPerUpdate = 1;
 
     void Start() override;
     void Update() override;
@@ -200,7 +214,7 @@ private:
     {
         int x = 0;
         int z = 0;
-        int distanceSquared = 0;
+        int64_t distanceSquared = 0;
     };
     struct InFlightChunk
     {
@@ -219,6 +233,7 @@ private:
     glm::ivec2 ViewerChunk() const;
     PerlinNoiseField* ResolveNoise() const;
     void RefreshChunks();
+    void RefreshColliderActivation();
     void BuildChunk(int chunkX, int chunkZ,
         std::vector<CachedPatchMesh>* preparedPatches = nullptr);
     GenerationSnapshot CaptureGenerationSnapshot(
@@ -244,7 +259,7 @@ private:
         int patchX, int patchZ, const PerlinNoiseField& noise) const;
     float Density(const glm::vec3& terrainPosition,
         const PerlinNoiseField& noise) const;
-    float SteppedHeight(float worldX, float worldZ,
+    float SteppedHeight(double worldX, double worldZ,
         const PerlinNoiseField& noise) const;
     glm::vec3 ColorForHeight(float height) const;
     uint64_t MeshConfigurationHash(const PerlinNoiseField& noise) const;

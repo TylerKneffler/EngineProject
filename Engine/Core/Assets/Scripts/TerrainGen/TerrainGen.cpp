@@ -16,7 +16,9 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <thread>
 #if defined(_WIN32)
 #include <Windows.h>
@@ -50,6 +52,8 @@ TerrainGen::TerrainGen()
     RegisterField("viewerObjectName", viewerObjectName);
     RegisterField("noiseObjectName", noiseObjectName);
     RegisterField("chunkSize", chunkSize);
+    RegisterField("worldOriginChunkX", worldOriginChunkX);
+    RegisterField("worldOriginChunkZ", worldOriginChunkZ);
     RegisterField("viewRadiusInChunks", viewRadiusInChunks);
     RegisterField("maxChunkBuildsPerUpdate", maxChunkBuildsPerUpdate);
     RegisterField("parallelChunkBuilds", parallelChunkBuilds);
@@ -75,6 +79,9 @@ TerrainGen::TerrainGen()
     RegisterField("middleHeightColor", middleHeightColor);
     RegisterField("highHeightColor", highHeightColor);
     RegisterField("generateColliders", generateColliders);
+    RegisterField("collisionRadiusInChunks", collisionRadiusInChunks);
+    RegisterField("maxColliderActivationsPerUpdate",
+        maxColliderActivationsPerUpdate);
 }
 
 TerrainGen::~TerrainGen()
@@ -127,9 +134,17 @@ glm::ivec2 TerrainGen::ViewerChunk() const
         Owner->transform.GetWorldMatrix()) * glm::vec4(
             viewer->transform.GetWorldPosition(), 1.f));
     const float size = std::max(1.f, chunkSize);
+    const auto logicalChunk = [size](int origin, float coordinate)
+    {
+        const double value = static_cast<double>(origin) +
+            std::floor(static_cast<double>(coordinate) / size);
+        return static_cast<int>(std::clamp(value,
+            static_cast<double>(std::numeric_limits<int>::lowest()),
+            static_cast<double>(std::numeric_limits<int>::max())));
+    };
     return {
-        static_cast<int>(std::floor(localPosition.x / size)),
-        static_cast<int>(std::floor(localPosition.z / size))
+        logicalChunk(worldOriginChunkX, localPosition.x),
+        logicalChunk(worldOriginChunkZ, localPosition.z)
     };
 }
 
@@ -308,7 +323,7 @@ void TerrainGen::RefreshChunks()
     {
         int64_t key = 0;
         Object* object = nullptr;
-        int distanceSquared = 0;
+        int64_t distanceSquared = 0;
     };
     std::vector<UnloadCandidate> unloadCandidates;
     for (auto iterator = m_chunks.begin(); iterator != m_chunks.end();)
@@ -320,8 +335,19 @@ void TerrainGen::RefreshChunks()
             iterator = m_chunks.erase(iterator);
             continue;
         }
-        const int dx = chunk->chunkX - m_viewerChunk.x;
-        const int dz = chunk->chunkZ - m_viewerChunk.y;
+        // Rebasing is editable, so update existing chunks as well as new ones.
+        object->transform.position = {
+            static_cast<float>((static_cast<int64_t>(chunk->chunkX) -
+                worldOriginChunkX) * static_cast<double>(
+                    std::max(1.f, chunkSize))),
+            0.f,
+            static_cast<float>((static_cast<int64_t>(chunk->chunkZ) -
+                worldOriginChunkZ) * static_cast<double>(
+                    std::max(1.f, chunkSize))) };
+        const int64_t dx = static_cast<int64_t>(chunk->chunkX) -
+            m_viewerChunk.x;
+        const int64_t dz = static_cast<int64_t>(chunk->chunkZ) -
+            m_viewerChunk.y;
         if (std::abs(dx) > radius || std::abs(dz) > radius)
             unloadCandidates.push_back({ iterator->first, object, dx * dx + dz * dz });
         ++iterator;
@@ -359,16 +385,30 @@ void TerrainGen::RefreshChunks()
     commitBudget -= CommitCompletedChunks(commitBudget);
 
     m_chunkQueue.clear();
-    for (int z = m_viewerChunk.y - radius; z <= m_viewerChunk.y + radius; ++z)
+    const int64_t minimumX = std::max<int64_t>(
+        std::numeric_limits<int>::lowest(),
+        static_cast<int64_t>(m_viewerChunk.x) - radius);
+    const int64_t maximumX = std::min<int64_t>(
+        std::numeric_limits<int>::max(),
+        static_cast<int64_t>(m_viewerChunk.x) + radius);
+    const int64_t minimumZ = std::max<int64_t>(
+        std::numeric_limits<int>::lowest(),
+        static_cast<int64_t>(m_viewerChunk.y) - radius);
+    const int64_t maximumZ = std::min<int64_t>(
+        std::numeric_limits<int>::max(),
+        static_cast<int64_t>(m_viewerChunk.y) + radius);
+    for (int64_t logicalZ = minimumZ; logicalZ <= maximumZ; ++logicalZ)
     {
-        for (int x = m_viewerChunk.x - radius; x <= m_viewerChunk.x + radius; ++x)
+        for (int64_t logicalX = minimumX; logicalX <= maximumX; ++logicalX)
         {
+            const int x = static_cast<int>(logicalX);
+            const int z = static_cast<int>(logicalZ);
             const int64_t key = ChunkKey(x, z);
             if (m_chunks.find(key) == m_chunks.end() &&
                 m_inFlightChunks.find(key) == m_inFlightChunks.end())
             {
-                const int dx = x - m_viewerChunk.x;
-                const int dz = z - m_viewerChunk.y;
+                const int64_t dx = logicalX - m_viewerChunk.x;
+                const int64_t dz = logicalZ - m_viewerChunk.y;
                 m_chunkQueue.push_back({ x, z, dx * dx + dz * dz });
             }
         }
@@ -441,6 +481,84 @@ void TerrainGen::RefreshChunks()
         std::chrono::steady_clock::now() - refreshStart).count();
     m_maximumStreamingMilliseconds = std::max(m_maximumStreamingMilliseconds,
         m_lastStreamingMilliseconds);
+    RefreshColliderActivation();
+}
+
+void TerrainGen::RefreshColliderActivation()
+{
+    const int radius = std::clamp(collisionRadiusInChunks, 0, 8);
+    struct PendingCollider
+    {
+        Engine::Components::MeshObjectCollider* collider = nullptr;
+        float distanceSquared = 0.f;
+    };
+    std::vector<PendingCollider> pending;
+    Object* viewer = viewerObjectName.empty()
+        ? nullptr : Owner->FindObjectInSceneByName(viewerObjectName);
+    if (!viewer)
+        viewer = Owner;
+    const glm::vec3 viewerPosition = viewer
+        ? viewer->transform.GetWorldPosition() : glm::vec3(0.f);
+    for (const auto& [key, chunkObject] : m_chunks)
+    {
+        (void)key;
+        TerrainChunk* chunk = chunkObject
+            ? chunkObject->GetComponent<TerrainChunk>() : nullptr;
+        if (!chunk)
+            continue;
+        const bool active = generateColliders &&
+            std::abs(static_cast<int64_t>(chunk->chunkX) - m_viewerChunk.x) <= radius &&
+            std::abs(static_cast<int64_t>(chunk->chunkZ) - m_viewerChunk.y) <= radius;
+        for (Object* patchObject : chunkObject->Children)
+        {
+            if (!patchObject)
+                continue;
+            auto* collider = patchObject->GetComponent<
+                Engine::Components::MeshObjectCollider>();
+            if (!collider && generateColliders)
+            {
+                collider = EnsureComponent<
+                    Engine::Components::MeshObjectCollider>(*patchObject);
+                collider->convex = false;
+                auto* body = EnsureComponent<Engine::Components::RigidBody>(
+                    *patchObject);
+                body->bodyType = "Static";
+                body->useGravity = false;
+            }
+            if (!collider)
+                continue;
+            if (!active && collider->collisionEnabled)
+            {
+                collider->collisionEnabled = false;
+                collider->MarkConfigurationDirty();
+            }
+            else if (active && !collider->collisionEnabled)
+            {
+                const auto* mesh = patchObject->GetComponent<
+                    Engine::Components::Mesh>();
+                glm::vec3 center = patchObject->transform.GetWorldPosition();
+                if (mesh && mesh->HasBounds())
+                {
+                    center = glm::vec3(patchObject->transform.GetWorldMatrix() *
+                        glm::vec4((mesh->GetBoundsMin() + mesh->GetBoundsMax()) *
+                            0.5f, 1.f));
+                }
+                const glm::vec2 delta(center.x - viewerPosition.x,
+                    center.z - viewerPosition.z);
+                pending.push_back({ collider, glm::dot(delta, delta) });
+            }
+        }
+    }
+    std::sort(pending.begin(), pending.end(),
+        [](const PendingCollider& first, const PendingCollider& second)
+        { return first.distanceSquared < second.distanceSquared; });
+    const size_t activationCount = std::min(pending.size(),
+        static_cast<size_t>(std::clamp(maxColliderActivationsPerUpdate, 1, 16)));
+    for (size_t index = 0; index < activationCount; ++index)
+    {
+        pending[index].collider->collisionEnabled = true;
+        pending[index].collider->MarkConfigurationDirty();
+    }
 }
 
 float TerrainGen::Density(const glm::vec3& position,
@@ -492,14 +610,15 @@ TerrainGen::BuildSmoothSurfaceVertices(int chunkX, int chunkZ,
     const float ySize = std::max(1.f, verticalSize);
     const float verticalStep = ySize / static_cast<float>(yCells);
     const float minimumY = -ySize * 0.5f;
-    const glm::vec3 patchOrigin(
-        static_cast<float>(static_cast<double>(startX) * terrainChunkSize /
-            horizontalCells), 0.f,
-        static_cast<float>(static_cast<double>(startZ) * terrainChunkSize /
-            horizontalCells));
-    const glm::vec3 chunkOrigin(
-        static_cast<float>(chunkX) * terrainChunkSize, 0.f,
-        static_cast<float>(chunkZ) * terrainChunkSize);
+    const double logicalPatchOriginX = static_cast<double>(chunkX) *
+        terrainChunkSize + static_cast<double>(startX) * terrainChunkSize /
+        horizontalCells;
+    const double logicalPatchOriginZ = static_cast<double>(chunkZ) *
+        terrainChunkSize + static_cast<double>(startZ) * terrainChunkSize /
+        horizontalCells;
+    const double uvScale = static_cast<double>(std::max(0.01f, textureScale));
+    const double uvBaseX = std::floor(logicalPatchOriginX / uvScale);
+    const double uvBaseZ = std::floor(logicalPatchOriginZ / uvScale);
     // Use one global integer lattice for samples shared by neighboring chunks.
     // This avoids small density/position disagreements caused by reaching the
     // same border through different floating-point addition paths.
@@ -508,7 +627,14 @@ TerrainGen::BuildSmoothSurfaceVertices(int chunkX, int chunkZ,
     {
         const int64_t globalCell = static_cast<int64_t>(chunk) *
             horizontalCells + cell;
-        return static_cast<float>(static_cast<double>(globalCell) *
+        return static_cast<double>(globalCell) *
+            static_cast<double>(terrainChunkSize) /
+            static_cast<double>(horizontalCells);
+    };
+    const auto localGridCoordinate = [horizontalCells, terrainChunkSize](
+        int cell, int patchStart)
+    {
+        return static_cast<float>(static_cast<double>(cell - patchStart) *
             static_cast<double>(terrainChunkSize) /
             static_cast<double>(horizontalCells));
     };
@@ -550,8 +676,8 @@ TerrainGen::BuildSmoothSurfaceVertices(int chunkX, int chunkZ,
     {
         for (int x = 0; x < gridWidth; ++x)
         {
-            const float worldX = worldGridCoordinate(chunkX, startX + x - 1);
-            const float worldZ = worldGridCoordinate(chunkZ, startZ + z - 1);
+            const double worldX = worldGridCoordinate(chunkX, startX + x - 1);
+            const double worldZ = worldGridCoordinate(chunkZ, startZ + z - 1);
             surfaceHeights[static_cast<size_t>(z) * gridWidth + x] =
                 baseHeight + heightAmplitude * noise.SampleFractal2D(worldX, worldZ);
         }
@@ -563,14 +689,15 @@ TerrainGen::BuildSmoothSurfaceVertices(int chunkX, int chunkZ,
         const float worldY = minimumY + static_cast<float>(y - 1) * verticalStep;
         for (int z = 0; z < gridDepth; ++z)
         {
-            const float worldZ = worldGridCoordinate(chunkZ, startZ + z - 1);
+            const double worldZ = worldGridCoordinate(chunkZ, startZ + z - 1);
             for (int x = 0; x < gridWidth; ++x)
             {
-                const float worldX = worldGridCoordinate(chunkX, startX + x - 1);
+                const double worldX = worldGridCoordinate(chunkX, startX + x - 1);
                 const float caves = caveStrength > 0.f
-                    ? caveStrength * noise.SampleFractal(glm::vec3(
-                        worldX, worldY, worldZ) *
-                        std::max(0.01f, caveFrequencyMultiplier))
+                    ? caveStrength * noise.SampleFractal(glm::dvec3(
+                        worldX, static_cast<double>(worldY), worldZ) *
+                        static_cast<double>(std::max(0.01f,
+                            caveFrequencyMultiplier)))
                     : 0.f;
                 densityGrid[gridIndex(x, y, z)] = worldY -
                     surfaceHeights[static_cast<size_t>(z) * gridWidth + x] + caves;
@@ -590,22 +717,24 @@ TerrainGen::BuildSmoothSurfaceVertices(int chunkX, int chunkZ,
         return length > 0.000001f ? result / length : glm::vec3(0.f, 1.f, 0.f);
     };
 
-    const auto makeVertex = [&](const glm::vec3& terrainPosition,
+    const auto makeVertex = [&](const glm::vec3& localPosition,
         const glm::vec3& normal)
     {
         Vertex vertex{};
-        const glm::vec3 local = terrainPosition - chunkOrigin - patchOrigin;
         glm::vec3 tangent = glm::vec3(1.f, 0.f, 0.f) - normal * normal.x;
         if (glm::length(tangent) < 0.0001f)
             tangent = glm::vec3(0.f, 0.f, 1.f);
         tangent = glm::normalize(tangent);
-        vertex.pos[0] = local.x; vertex.pos[1] = local.y; vertex.pos[2] = local.z;
+        vertex.pos[0] = localPosition.x; vertex.pos[1] = localPosition.y;
+        vertex.pos[2] = localPosition.z;
         vertex.normal[0] = normal.x; vertex.normal[1] = normal.y; vertex.normal[2] = normal.z;
-        vertex.uv[0] = terrainPosition.x / std::max(0.01f, textureScale);
-        vertex.uv[1] = terrainPosition.z / std::max(0.01f, textureScale);
+        vertex.uv[0] = static_cast<float>((logicalPatchOriginX +
+            static_cast<double>(localPosition.x)) / uvScale - uvBaseX);
+        vertex.uv[1] = static_cast<float>((logicalPatchOriginZ +
+            static_cast<double>(localPosition.z)) / uvScale - uvBaseZ);
         vertex.tangent[0] = tangent.x; vertex.tangent[1] = tangent.y;
         vertex.tangent[2] = tangent.z; vertex.tangent[3] = 1.f;
-        const glm::vec3 color = ColorForHeight(terrainPosition.y);
+        const glm::vec3 color = ColorForHeight(localPosition.y);
         vertex.color[0] = color.r; vertex.color[1] = color.g;
         vertex.color[2] = color.b; vertex.color[3] = 1.f;
         return vertex;
@@ -685,9 +814,9 @@ TerrainGen::BuildSmoothSurfaceVertices(int chunkX, int chunkZ,
                 for (int corner = 0; corner < 8; ++corner)
                 {
                     positions[corner] = glm::vec3(
-                        worldGridCoordinate(chunkX, x + cubeCorners[corner][0]),
+                        localGridCoordinate(x + cubeCorners[corner][0], startX),
                         minimumY + static_cast<float>(y + cubeCorners[corner][1]) * verticalStep,
-                        worldGridCoordinate(chunkZ, z + cubeCorners[corner][2]));
+                        localGridCoordinate(z + cubeCorners[corner][2], startZ));
                     const int gridX = x - startX + cubeCorners[corner][0] + 1;
                     const int gridY = y + cubeCorners[corner][1] + 1;
                     const int gridZ = z - startZ + cubeCorners[corner][2] + 1;
@@ -931,12 +1060,12 @@ bool TerrainGen::IsChunkDesired(int x, int z) const
 int TerrainGen::CommitCompletedChunks(int budget)
 {
     HarvestCompletedChunks();
-    struct ReadyTask { int64_t key = 0; int distanceSquared = 0; };
+    struct ReadyTask { int64_t key = 0; int64_t distanceSquared = 0; };
     std::vector<ReadyTask> ready;
     for (const auto& [key, result] : m_readyChunks)
     {
-        const int dx = result.x - m_viewerChunk.x;
-        const int dz = result.z - m_viewerChunk.y;
+        const int64_t dx = static_cast<int64_t>(result.x) - m_viewerChunk.x;
+        const int64_t dz = static_cast<int64_t>(result.z) - m_viewerChunk.y;
         ready.push_back({ key, dx * dx + dz * dz });
     }
     std::sort(ready.begin(), ready.end(),
@@ -1049,7 +1178,7 @@ void TerrainGen::TrimMeshCache()
     }
 }
 
-float TerrainGen::SteppedHeight(float worldX, float worldZ,
+float TerrainGen::SteppedHeight(double worldX, double worldZ,
     const PerlinNoiseField& noise) const
 {
     const float step = std::max(0.05f, heightStep);
@@ -1084,34 +1213,44 @@ TerrainGen::BuildCubeVertices(int chunkX, int chunkZ,
     const int endZ = (patchZ + 1) * horizontalCells / patchAxisCount;
     const float cellSize = std::max(1.f, chunkSize) /
         static_cast<float>(horizontalCells);
-    const glm::vec3 chunkOrigin(
-        static_cast<float>(chunkX) * std::max(1.f, chunkSize), 0.f,
-        static_cast<float>(chunkZ) * std::max(1.f, chunkSize));
-    const glm::vec3 patchOrigin(
-        static_cast<float>(startX) * cellSize, 0.f,
-        static_cast<float>(startZ) * cellSize);
+    const double size = static_cast<double>(std::max(1.f, chunkSize));
+    const double logicalPatchOriginX = static_cast<double>(chunkX) * size +
+        static_cast<double>(startX) * size / horizontalCells;
+    const double logicalPatchOriginZ = static_cast<double>(chunkZ) * size +
+        static_cast<double>(startZ) * size / horizontalCells;
+    const double uvScale = static_cast<double>(std::max(0.01f, textureScale));
+    const double uvBaseX = std::floor(logicalPatchOriginX / uvScale);
+    const double uvBaseZ = std::floor(logicalPatchOriginZ / uvScale);
+    const auto logicalCellCoordinate = [horizontalCells, size](int chunk,
+        int cell)
+    {
+        return (static_cast<int64_t>(chunk) * horizontalCells + cell) *
+            size / horizontalCells;
+    };
 
     std::vector<Vertex> vertices;
     vertices.reserve(static_cast<size_t>(endX - startX) *
         static_cast<size_t>(endZ - startZ) * 30u);
 
-    const auto makeVertex = [&](const glm::vec3& terrainPosition,
+    const auto makeVertex = [&](const glm::vec3& localPosition,
         const glm::vec3& normal)
     {
         Vertex vertex{};
-        const glm::vec3 local = terrainPosition - chunkOrigin - patchOrigin;
         glm::vec3 tangent = std::abs(normal.x) < 0.9f
             ? glm::vec3(1.f, 0.f, 0.f) : glm::vec3(0.f, 0.f, 1.f);
         tangent -= normal * glm::dot(tangent, normal);
         tangent = glm::normalize(tangent);
-        vertex.pos[0] = local.x; vertex.pos[1] = local.y; vertex.pos[2] = local.z;
+        vertex.pos[0] = localPosition.x; vertex.pos[1] = localPosition.y;
+        vertex.pos[2] = localPosition.z;
         vertex.normal[0] = normal.x; vertex.normal[1] = normal.y;
         vertex.normal[2] = normal.z;
-        vertex.uv[0] = terrainPosition.x / std::max(0.01f, textureScale);
-        vertex.uv[1] = terrainPosition.z / std::max(0.01f, textureScale);
+        vertex.uv[0] = static_cast<float>((logicalPatchOriginX +
+            localPosition.x) / uvScale - uvBaseX);
+        vertex.uv[1] = static_cast<float>((logicalPatchOriginZ +
+            localPosition.z) / uvScale - uvBaseZ);
         vertex.tangent[0] = tangent.x; vertex.tangent[1] = tangent.y;
         vertex.tangent[2] = tangent.z; vertex.tangent[3] = 1.f;
-        const glm::vec3 color = ColorForHeight(terrainPosition.y);
+        const glm::vec3 color = ColorForHeight(localPosition.y);
         vertex.color[0] = color.r; vertex.color[1] = color.g;
         vertex.color[2] = color.b; vertex.color[3] = 1.f;
         return vertex;
@@ -1143,8 +1282,10 @@ TerrainGen::BuildCubeVertices(int chunkX, int chunkZ,
             const int cellZ = startZ + sampleZ - 1;
             sampledHeights[static_cast<size_t>(sampleZ) * sampledWidth +
                 sampleX] = SteppedHeight(
-                    chunkOrigin.x + (static_cast<float>(cellX) + 0.5f) * cellSize,
-                    chunkOrigin.z + (static_cast<float>(cellZ) + 0.5f) * cellSize,
+                    logicalCellCoordinate(chunkX, cellX) + size /
+                        (2.0 * horizontalCells),
+                    logicalCellCoordinate(chunkZ, cellZ) + size /
+                        (2.0 * horizontalCells),
                     noise);
         }
     }
@@ -1168,9 +1309,9 @@ TerrainGen::BuildCubeVertices(int chunkX, int chunkZ,
     {
         for (int x = startX; x < endX; ++x)
         {
-            const float x0 = chunkOrigin.x + static_cast<float>(x) * cellSize;
+            const float x0 = static_cast<float>(x - startX) * cellSize;
             const float x1 = x0 + cellSize;
-            const float z0 = chunkOrigin.z + static_cast<float>(z) * cellSize;
+            const float z0 = static_cast<float>(z - startZ) * cellSize;
             const float z1 = z0 + cellSize;
             const float height = heightAtCell(x, z);
             emitQuad({ x0, height, z0 }, { x0, height, z1 },
@@ -1211,34 +1352,31 @@ TerrainGen::BuildTriangleVertices(int chunkX, int chunkZ,
     const int endX = (patchX + 1) * cells / patchCount;
     const int startZ = patchZ * cells / patchCount;
     const int endZ = (patchZ + 1) * cells / patchCount;
-    const float size = std::max(1.f, chunkSize);
-    const float cellSize = size / static_cast<float>(cells);
-    const glm::vec3 chunkOrigin(
-        static_cast<float>(chunkX) * size, 0.f,
-        static_cast<float>(chunkZ) * size);
-    const glm::vec3 patchOrigin(
-        static_cast<float>(startX) * cellSize, 0.f,
-        static_cast<float>(startZ) * cellSize);
+    const double size = static_cast<double>(std::max(1.f, chunkSize));
+    const float cellSize = static_cast<float>(size / cells);
+    const double logicalPatchOriginX = static_cast<double>(chunkX) * size +
+        static_cast<double>(startX) * size / cells;
+    const double logicalPatchOriginZ = static_cast<double>(chunkZ) * size +
+        static_cast<double>(startZ) * size / cells;
+    const double uvScale = static_cast<double>(std::max(0.01f, textureScale));
+    const double uvBaseX = std::floor(logicalPatchOriginX / uvScale);
+    const double uvBaseZ = std::floor(logicalPatchOriginZ / uvScale);
 
-    const auto surfaceHeight = [&](float x, float z)
-    {
-        const float halfHeight = std::max(1.f, verticalSize) * 0.5f;
-        return std::clamp(baseHeight + heightAmplitude *
-            noise.SampleFractal2D(x, z), -halfHeight, halfHeight);
-    };
     const auto makeVertex = [&](const glm::vec3& point, const glm::vec3& normal)
     {
         Vertex vertex{};
-        const glm::vec3 local = point - chunkOrigin - patchOrigin;
         glm::vec3 tangent = glm::vec3(1.f, 0.f, 0.f) - normal * normal.x;
         if (glm::length(tangent) < 0.0001f)
             tangent = glm::vec3(0.f, 0.f, 1.f);
         tangent = glm::normalize(tangent);
-        vertex.pos[0] = local.x; vertex.pos[1] = local.y; vertex.pos[2] = local.z;
+        vertex.pos[0] = point.x; vertex.pos[1] = point.y;
+        vertex.pos[2] = point.z;
         vertex.normal[0] = normal.x; vertex.normal[1] = normal.y;
         vertex.normal[2] = normal.z;
-        vertex.uv[0] = point.x / std::max(0.01f, textureScale);
-        vertex.uv[1] = point.z / std::max(0.01f, textureScale);
+        vertex.uv[0] = static_cast<float>((logicalPatchOriginX + point.x) /
+            uvScale - uvBaseX);
+        vertex.uv[1] = static_cast<float>((logicalPatchOriginZ + point.z) /
+            uvScale - uvBaseZ);
         vertex.tangent[0] = tangent.x; vertex.tangent[1] = tangent.y;
         vertex.tangent[2] = tangent.z; vertex.tangent[3] = 1.f;
         const glm::vec3 color = ColorForHeight(point.y);
@@ -1249,43 +1387,111 @@ TerrainGen::BuildTriangleVertices(int chunkX, int chunkZ,
 
     std::vector<Vertex> vertices;
     vertices.reserve(static_cast<size_t>(endX - startX) *
-        static_cast<size_t>(endZ - startZ) * 6u);
-    const auto emitTriangle = [&](glm::vec3 a, glm::vec3 b, glm::vec3 c)
+        static_cast<size_t>(endZ - startZ) * 42u);
+    const auto emitTriangle = [&](glm::vec3 a, glm::vec3 b, glm::vec3 c,
+        const glm::vec3& desiredNormal)
     {
-        glm::vec3 normal = glm::normalize(glm::cross(b - a, c - a));
-        if (normal.y < 0.f)
-        {
+        if (glm::dot(glm::cross(b - a, c - a), desiredNormal) < 0.f)
             std::swap(b, c);
-            normal = -normal;
+        vertices.push_back(makeVertex(a, desiredNormal));
+        vertices.push_back(makeVertex(b, desiredNormal));
+        vertices.push_back(makeVertex(c, desiredNormal));
+    };
+    const auto emitWall = [&](const glm::vec3& first, const glm::vec3& second,
+        float bottom, const glm::vec3& normal)
+    {
+        const glm::vec3 lowFirst(first.x, bottom, first.z);
+        const glm::vec3 lowSecond(second.x, bottom, second.z);
+        emitTriangle(lowFirst, lowSecond, second, normal);
+        emitTriangle(lowFirst, second, first, normal);
+    };
+    const auto worldCoordinate = [cells, size](int chunk, int cell)
+    {
+        const int64_t globalCell = static_cast<int64_t>(chunk) * cells + cell;
+        return static_cast<double>(globalCell) * size /
+            static_cast<double>(cells);
+    };
+    const auto sampleTriangleHeight = [&](int cellX, int cellZ, int triangle)
+    {
+        const double x0 = worldCoordinate(chunkX, cellX);
+        const double x1 = worldCoordinate(chunkX, cellX + 1);
+        const double z0 = worldCoordinate(chunkZ, cellZ);
+        const double z1 = worldCoordinate(chunkZ, cellZ + 1);
+        // The two right triangles use the p00-p11 diagonal. Sampling their
+        // centroids gives each tile one deterministic height across patch and
+        // chunk boundaries instead of bending its corners independently.
+        const double sampleX = triangle == 0
+            ? (x0 + x0 + x1) / 3.0
+            : (x0 + x1 + x1) / 3.0;
+        const double sampleZ = triangle == 0
+            ? (z0 + z1 + z1) / 3.0
+            : (z0 + z1 + z0) / 3.0;
+        return SteppedHeight(sampleX, sampleZ, noise);
+    };
+    const int sampledWidth = endX - startX + 2;
+    const int sampledDepth = endZ - startZ + 2;
+    std::vector<std::array<float, 2>> sampledHeights(
+        static_cast<size_t>(sampledWidth) * sampledDepth);
+    for (int sampleZ = 0; sampleZ < sampledDepth; ++sampleZ)
+    {
+        for (int sampleX = 0; sampleX < sampledWidth; ++sampleX)
+        {
+            const int cellX = startX + sampleX - 1;
+            const int cellZ = startZ + sampleZ - 1;
+            auto& heights = sampledHeights[
+                static_cast<size_t>(sampleZ) * sampledWidth + sampleX];
+            heights[0] = sampleTriangleHeight(cellX, cellZ, 0);
+            heights[1] = sampleTriangleHeight(cellX, cellZ, 1);
         }
-        vertices.push_back(makeVertex(a, normal));
-        vertices.push_back(makeVertex(b, normal));
-        vertices.push_back(makeVertex(c, normal));
+    }
+    const auto triangleHeight = [&](int cellX, int cellZ, int triangle)
+    {
+        const int sampleX = cellX - startX + 1;
+        const int sampleZ = cellZ - startZ + 1;
+        return sampledHeights[static_cast<size_t>(sampleZ) * sampledWidth +
+            sampleX][triangle];
+    };
+    const auto emitColumn = [&](const std::array<glm::vec3, 3>& footprint,
+        float height, const std::array<float, 3>& neighborHeights)
+    {
+        std::array<glm::vec3, 3> top = footprint;
+        for (glm::vec3& point : top)
+            point.y = height;
+        emitTriangle(top[0], top[1], top[2], { 0.f, 1.f, 0.f });
+        for (int edge = 0; edge < 3; ++edge)
+        {
+            if (height <= neighborHeights[edge] + 0.0001f)
+                continue;
+            const int next = (edge + 1) % 3;
+            glm::vec3 normal = glm::cross(top[next] - top[edge],
+                glm::vec3(0.f, 1.f, 0.f));
+            normal = glm::normalize(normal);
+            emitWall(top[edge], top[next], neighborHeights[edge], normal);
+        }
     };
 
     for (int z = startZ; z < endZ; ++z)
     {
         for (int x = startX; x < endX; ++x)
         {
-            const float x0 = chunkOrigin.x + static_cast<float>(x) * cellSize;
+            const float x0 = static_cast<float>(x - startX) * cellSize;
             const float x1 = x0 + cellSize;
-            const float z0 = chunkOrigin.z + static_cast<float>(z) * cellSize;
+            const float z0 = static_cast<float>(z - startZ) * cellSize;
             const float z1 = z0 + cellSize;
-            const glm::vec3 p00(x0, surfaceHeight(x0, z0), z0);
-            const glm::vec3 p10(x1, surfaceHeight(x1, z0), z0);
-            const glm::vec3 p01(x0, surfaceHeight(x0, z1), z1);
-            const glm::vec3 p11(x1, surfaceHeight(x1, z1), z1);
-            // Alternating the diagonal avoids a visible directional bias.
-            if (((x + z) & 1) == 0)
-            {
-                emitTriangle(p00, p01, p11);
-                emitTriangle(p00, p11, p10);
-            }
-            else
-            {
-                emitTriangle(p00, p01, p10);
-                emitTriangle(p10, p01, p11);
-            }
+            const glm::vec3 p00(x0, 0.f, z0);
+            const glm::vec3 p10(x1, 0.f, z0);
+            const glm::vec3 p01(x0, 0.f, z1);
+            const glm::vec3 p11(x1, 0.f, z1);
+            const float firstHeight = triangleHeight(x, z, 0);
+            const float secondHeight = triangleHeight(x, z, 1);
+            emitColumn({ p00, p01, p11 }, firstHeight, {
+                triangleHeight(x - 1, z, 1),
+                triangleHeight(x, z + 1, 1),
+                secondHeight });
+            emitColumn({ p00, p11, p10 }, secondHeight, {
+                firstHeight,
+                triangleHeight(x + 1, z, 0),
+                triangleHeight(x, z - 1, 0) });
         }
     }
     return vertices;
@@ -1301,100 +1507,108 @@ TerrainGen::BuildHexagonVertices(int chunkX, int chunkZ,
     const int endX = (patchX + 1) * cells / patchCount;
     const int startZ = patchZ * cells / patchCount;
     const int endZ = (patchZ + 1) * cells / patchCount;
-    const float size = std::max(1.f, chunkSize);
-    const float cellSize = size / static_cast<float>(cells);
-    const float rootThree = std::sqrt(3.f);
-    const float radius = cellSize / rootThree;
-    const float columnSpacing = radius * 1.5f;
-    const float rowSpacing = cellSize;
-    const glm::vec3 chunkOrigin(
-        static_cast<float>(chunkX) * size, 0.f,
-        static_cast<float>(chunkZ) * size);
-    const glm::vec3 patchOrigin(
-        static_cast<float>(startX) * cellSize, 0.f,
-        static_cast<float>(startZ) * cellSize);
-    const float minimumX = chunkOrigin.x + static_cast<float>(startX) * cellSize;
-    const float maximumX = chunkOrigin.x + static_cast<float>(endX) * cellSize;
-    const float minimumZ = chunkOrigin.z + static_cast<float>(startZ) * cellSize;
-    const float maximumZ = chunkOrigin.z + static_cast<float>(endZ) * cellSize;
+    const double size = static_cast<double>(std::max(1.f, chunkSize));
+    const double cellSize = size / static_cast<double>(cells);
+    const double rootThree = std::sqrt(3.0);
+    const double radius = cellSize / rootThree;
+    const double columnSpacing = radius * 1.5;
+    const double rowSpacing = cellSize;
+    const double logicalPatchOriginX = static_cast<double>(chunkX) * size +
+        static_cast<double>(startX) * cellSize;
+    const double logicalPatchOriginZ = static_cast<double>(chunkZ) * size +
+        static_cast<double>(startZ) * cellSize;
+    const double uvScale = static_cast<double>(std::max(0.01f, textureScale));
+    const double uvBaseX = std::floor(logicalPatchOriginX / uvScale);
+    const double uvBaseZ = std::floor(logicalPatchOriginZ / uvScale);
+    const double minimumX = logicalPatchOriginX;
+    const double maximumX = static_cast<double>(chunkX) * size +
+        static_cast<double>(endX) * cellSize;
+    const double minimumZ = logicalPatchOriginZ;
+    const double maximumZ = static_cast<double>(chunkZ) * size +
+        static_cast<double>(endZ) * cellSize;
 
-    const auto makeVertex = [&](const glm::vec3& point, const glm::vec3& normal)
+    const auto makeVertex = [&](const glm::dvec3& point, const glm::vec3& normal)
     {
         Vertex vertex{};
-        const glm::vec3 local = point - chunkOrigin - patchOrigin;
+        const glm::dvec3 local(point.x - logicalPatchOriginX, point.y,
+            point.z - logicalPatchOriginZ);
         glm::vec3 tangent = std::abs(normal.x) < 0.9f
             ? glm::vec3(1.f, 0.f, 0.f) : glm::vec3(0.f, 0.f, 1.f);
         tangent = glm::normalize(tangent - normal * glm::dot(tangent, normal));
-        vertex.pos[0] = local.x; vertex.pos[1] = local.y; vertex.pos[2] = local.z;
+        vertex.pos[0] = static_cast<float>(local.x);
+        vertex.pos[1] = static_cast<float>(local.y);
+        vertex.pos[2] = static_cast<float>(local.z);
         vertex.normal[0] = normal.x; vertex.normal[1] = normal.y;
         vertex.normal[2] = normal.z;
-        vertex.uv[0] = point.x / std::max(0.01f, textureScale);
-        vertex.uv[1] = point.z / std::max(0.01f, textureScale);
+        vertex.uv[0] = static_cast<float>(point.x / uvScale - uvBaseX);
+        vertex.uv[1] = static_cast<float>(point.z / uvScale - uvBaseZ);
         vertex.tangent[0] = tangent.x; vertex.tangent[1] = tangent.y;
         vertex.tangent[2] = tangent.z; vertex.tangent[3] = 1.f;
-        const glm::vec3 color = ColorForHeight(point.y);
+        const glm::vec3 color = ColorForHeight(static_cast<float>(point.y));
         vertex.color[0] = color.r; vertex.color[1] = color.g;
         vertex.color[2] = color.b; vertex.color[3] = 1.f;
         return vertex;
     };
     std::vector<Vertex> vertices;
-    const auto emitTriangle = [&](glm::vec3 a, glm::vec3 b, glm::vec3 c,
+    const auto emitTriangle = [&](glm::dvec3 a, glm::dvec3 b, glm::dvec3 c,
         const glm::vec3& desiredNormal)
     {
-        if (glm::dot(glm::cross(b - a, c - a), desiredNormal) < 0.f)
+        if (glm::dot(glm::cross(b - a, c - a),
+                glm::dvec3(desiredNormal)) < 0.0)
             std::swap(b, c);
         vertices.push_back(makeVertex(a, desiredNormal));
         vertices.push_back(makeVertex(b, desiredNormal));
         vertices.push_back(makeVertex(c, desiredNormal));
     };
-    const auto emitWall = [&](glm::vec3 a, glm::vec3 b, float bottom,
+    const auto emitWall = [&](glm::dvec3 a, glm::dvec3 b, float bottom,
         const glm::vec3& normal)
     {
-        const glm::vec3 lowA(a.x, bottom, a.z);
-        const glm::vec3 lowB(b.x, bottom, b.z);
+        const glm::dvec3 lowA(a.x, bottom, a.z);
+        const glm::dvec3 lowB(b.x, bottom, b.z);
         emitTriangle(lowA, lowB, b, normal);
         emitTriangle(lowA, b, a, normal);
     };
 
-    const int firstColumn = static_cast<int>(std::ceil(minimumX / columnSpacing));
-    const int lastColumn = static_cast<int>(std::ceil(maximumX / columnSpacing));
-    for (int column = firstColumn; column < lastColumn; ++column)
+    const int64_t firstColumn = static_cast<int64_t>(
+        std::ceil(minimumX / columnSpacing));
+    const int64_t lastColumn = static_cast<int64_t>(
+        std::ceil(maximumX / columnSpacing));
+    for (int64_t column = firstColumn; column < lastColumn; ++column)
     {
         // Hex vertices live on an integer half-radius/half-row lattice. This
         // makes a corner shared across a jagged chunk boundary bit-identical,
         // regardless of which hex computes it.
-        const auto latticePoint = [&](int xUnits, int zUnits)
+        const auto latticePoint = [&](int64_t xUnits, int64_t zUnits)
         {
-            return glm::vec2(
-                static_cast<float>(static_cast<double>(xUnits) * radius * 0.5),
-                static_cast<float>(static_cast<double>(zUnits) * cellSize * 0.5));
+            return glm::dvec2(static_cast<double>(xUnits) * radius * 0.5,
+                static_cast<double>(zUnits) * cellSize * 0.5);
         };
-        const float centerX = latticePoint(column * 3, 0).x;
+        const double centerX = latticePoint(column * 3, 0).x;
         if (centerX < minimumX || centerX >= maximumX)
             continue;
-        const int columnParity = column & 1;
-        const float rowOffset = columnParity != 0 ? rowSpacing * 0.5f : 0.f;
-        const int firstRow = static_cast<int>(std::ceil(
+        const int columnParity = static_cast<int>(column & 1);
+        const double rowOffset = columnParity != 0 ? rowSpacing * 0.5 : 0.0;
+        const int64_t firstRow = static_cast<int64_t>(std::ceil(
             (minimumZ - rowOffset) / rowSpacing));
-        const int lastRow = static_cast<int>(std::ceil(
+        const int64_t lastRow = static_cast<int64_t>(std::ceil(
             (maximumZ - rowOffset) / rowSpacing));
-        for (int row = firstRow; row < lastRow; ++row)
+        for (int64_t row = firstRow; row < lastRow; ++row)
         {
-            const glm::vec2 centerPoint = latticePoint(column * 3,
+            const glm::dvec2 centerPoint = latticePoint(column * 3,
                 row * 2 + columnParity);
-            const float centerZ = centerPoint.y;
+            const double centerZ = centerPoint.y;
             if (centerZ < minimumZ || centerZ >= maximumZ)
                 continue;
             const float height = SteppedHeight(centerX, centerZ, noise);
-            const glm::vec3 center(centerX, height, centerZ);
-            std::array<glm::vec3, 6> corners{};
+            const glm::dvec3 center(centerX, height, centerZ);
+            std::array<glm::dvec3, 6> corners{};
             static constexpr int cornerOffsets[6][2] = {
                 { 2, 0 }, { 1, 1 }, { -1, 1 },
                 { -2, 0 }, { -1, -1 }, { 1, -1 }
             };
             for (int side = 0; side < 6; ++side)
             {
-                const glm::vec2 point = latticePoint(
+                const glm::dvec2 point = latticePoint(
                     column * 3 + cornerOffsets[side][0],
                     row * 2 + columnParity + cornerOffsets[side][1]);
                 corners[side] = { point.x, height, point.y };
@@ -1421,9 +1635,9 @@ TerrainGen::BuildHexagonVertices(int chunkX, int chunkZ,
                 const glm::vec3 normal = sideNormals[side];
                 const int (*neighborOffsets)[2] = columnParity != 0
                     ? oddNeighborOffsets : evenNeighborOffsets;
-                const int neighborColumn = column + neighborOffsets[side][0];
-                const int neighborRow = row + neighborOffsets[side][1];
-                const glm::vec2 neighborCenter = latticePoint(neighborColumn * 3,
+                const int64_t neighborColumn = column + neighborOffsets[side][0];
+                const int64_t neighborRow = row + neighborOffsets[side][1];
+                const glm::dvec2 neighborCenter = latticePoint(neighborColumn * 3,
                     neighborRow * 2 + (neighborColumn & 1));
                 const float neighborHeight = SteppedHeight(
                     neighborCenter.x, neighborCenter.y, noise);
@@ -1486,8 +1700,10 @@ void TerrainGen::BuildChunk(int chunkX, int chunkZ,
     // reused/editor-authored chunk objects so an old serialized transform can
     // never change the spacing between generated meshes.
     chunkObject->transform.position = {
-        static_cast<float>(chunkX) * std::max(1.f, chunkSize), 0.f,
-        static_cast<float>(chunkZ) * std::max(1.f, chunkSize) };
+        static_cast<float>((static_cast<int64_t>(chunkX) - worldOriginChunkX) *
+            std::max(1.f, chunkSize)), 0.f,
+        static_cast<float>((static_cast<int64_t>(chunkZ) - worldOriginChunkZ) *
+            std::max(1.f, chunkSize)) };
 
     TerrainChunk* chunk = EnsureComponent<TerrainChunk>(*chunkObject);
     chunk->chunkX = chunkX;
@@ -1551,7 +1767,9 @@ void TerrainGen::BuildChunk(int chunkX, int chunkZ,
             patch->triangleCount = static_cast<int>(geometry.indices.size() / 3u);
 
             auto* mesh = EnsureComponent<Engine::Components::Mesh>(*patchObject);
-            mesh->SetTerrainGeometry(std::move(geometry), generateColliders);
+            // Physics consumes the packed indexed terrain data directly, so a
+            // collider no longer requires a second expanded vertex stream.
+            mesh->SetTerrainGeometry(std::move(geometry), false);
             if (scene.GetGraphicsProvider())
             if (!mesh->GetGraphicsBuffer())
                 mesh->OnAfterDeserialize(scene.GetGraphicsProvider());
@@ -1570,6 +1788,13 @@ void TerrainGen::BuildChunk(int chunkX, int chunkZ,
                 auto* collider = EnsureComponent<Engine::Components::MeshObjectCollider>(
                     *patchObject);
                 collider->convex = false;
+                // Activation is distance-sorted and budgeted after chunks are
+                // committed so multiple Bullet BVHs cannot hitch one frame.
+                if (collider->collisionEnabled)
+                {
+                    collider->collisionEnabled = false;
+                    collider->MarkConfigurationDirty();
+                }
                 auto* body = EnsureComponent<Engine::Components::RigidBody>(*patchObject);
                 body->bodyType = "Static";
                 body->useGravity = false;
@@ -1636,11 +1861,24 @@ bool TerrainGen::GenerateTerrain()
 
     const auto generationStart = std::chrono::steady_clock::now();
     const int radius = std::clamp(viewRadiusInChunks, 0, 8);
-    for (int z = m_viewerChunk.y - radius; z <= m_viewerChunk.y + radius; ++z)
+    const int64_t minimumX = std::max<int64_t>(
+        std::numeric_limits<int>::lowest(),
+        static_cast<int64_t>(m_viewerChunk.x) - radius);
+    const int64_t maximumX = std::min<int64_t>(
+        std::numeric_limits<int>::max(),
+        static_cast<int64_t>(m_viewerChunk.x) + radius);
+    const int64_t minimumZ = std::max<int64_t>(
+        std::numeric_limits<int>::lowest(),
+        static_cast<int64_t>(m_viewerChunk.y) - radius);
+    const int64_t maximumZ = std::min<int64_t>(
+        std::numeric_limits<int>::max(),
+        static_cast<int64_t>(m_viewerChunk.y) + radius);
+    for (int64_t z = minimumZ; z <= maximumZ; ++z)
     {
-        for (int x = m_viewerChunk.x - radius; x <= m_viewerChunk.x + radius; ++x)
-            BuildChunk(x, z);
+        for (int64_t x = minimumX; x <= maximumX; ++x)
+            BuildChunk(static_cast<int>(x), static_cast<int>(z));
     }
+    RefreshColliderActivation();
     const double milliseconds = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - generationStart).count();
     char status[160]{};
@@ -1670,6 +1908,25 @@ bool TerrainGen::DrawProperties(::Engine::Editor::IEditorUi& ui)
     }
 
     changed = ui.DragFloat("Chunk Size", &chunkSize, 0.5f, 1.f, 1000.f) || changed;
+    const auto editChunkOrigin = [&](const char* label, int& coordinate)
+    {
+        char text[32]{};
+        std::snprintf(text, sizeof(text), "%d", coordinate);
+        if (!ui.InputText(label, text, sizeof(text)))
+            return false;
+        char* end = nullptr;
+        const long long parsed = std::strtoll(text, &end, 10);
+        if (end == text || *end != '\0')
+            return false;
+        coordinate = static_cast<int>(std::clamp(parsed,
+            static_cast<long long>(std::numeric_limits<int>::lowest()),
+            static_cast<long long>(std::numeric_limits<int>::max())));
+        return true;
+    };
+    changed = editChunkOrigin("World Origin Chunk X", worldOriginChunkX) || changed;
+    changed = editChunkOrigin("World Origin Chunk Z", worldOriginChunkZ) || changed;
+    ui.DisabledLabel(
+        "Large logical coordinates are rebased near zero for stable rendering and physics.");
     changed = ui.SliderInt("View Radius (Chunks)", &viewRadiusInChunks, 0, 8) || changed;
     changed = ui.SliderInt("Launches Per Update", &maxChunkBuildsPerUpdate, 1, 16) || changed;
     changed = ui.SliderInt("Parallel Chunk Builds", &parallelChunkBuilds, 1, 16) || changed;
@@ -1692,13 +1949,16 @@ bool TerrainGen::DrawProperties(::Engine::Editor::IEditorUi& ui)
     };
     changed = ui.Combo("Terrain Shape", &terrainShape, terrainShapes, 4) || changed;
     const TerrainShape shape = static_cast<TerrainShape>(terrainShape);
-    if (shape == TerrainShape::Cubes || shape == TerrainShape::Hexagons)
+    if (shape == TerrainShape::Cubes || shape == TerrainShape::Triangles ||
+        shape == TerrainShape::Hexagons)
     {
         changed = ui.DragFloat("Height Step", &heightStep,
             0.05f, 0.05f, 100.f) || changed;
         ui.DisabledLabel(shape == TerrainShape::Cubes
             ? "Square columns use horizontal tops and vertical walls."
-            : "Hexagonal columns use six-sided tops and exposed walls.");
+            : shape == TerrainShape::Triangles
+                ? "Triangular columns use horizontal tops and vertical walls."
+                : "Hexagonal columns use six-sided tops and exposed walls.");
     }
     changed = ui.DragFloat("Vertical Size", &verticalSize, 0.5f, 1.f, 1000.f) || changed;
     changed = ui.DragFloat("Base Height", &baseHeight, 0.1f) || changed;
@@ -1717,6 +1977,15 @@ bool TerrainGen::DrawProperties(::Engine::Editor::IEditorUi& ui)
     changed = ui.ColorEdit3("Middle Height Color", &middleHeightColor.x) || changed;
     changed = ui.ColorEdit3("High Height Color", &highHeightColor.x) || changed;
     changed = ui.Checkbox("Generate Colliders", &generateColliders) || changed;
+    if (generateColliders)
+    {
+        changed = ui.SliderInt("Collision Radius (Chunks)",
+            &collisionRadiusInChunks, 0, 8) || changed;
+        changed = ui.SliderInt("Collider Activations Per Update",
+            &maxColliderActivationsPerUpdate, 1, 16) || changed;
+        ui.DisabledLabel(
+            "Each mesh patch has a collider; nearby patches activate gradually.");
+    }
 
     char value[96]{};
     std::snprintf(value, sizeof(value), "%zu", m_chunks.size());

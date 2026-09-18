@@ -5,6 +5,8 @@
 #include "Core/Assets/Scripts/TerrainGen/TerrainStreamingCameraDriver.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Physics/Collider.h"
+#include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
@@ -91,7 +93,7 @@ QuantizedEdge MakeEdge(const glm::vec3& first, const glm::vec3& second)
 }
 
 bool AuditSmoothGridTopology(Engine::Core::Object& terrainObject,
-    float chunkSize)
+    float chunkSize, int originChunkX = 0, int originChunkZ = 0)
 {
     struct EdgeUse
     {
@@ -165,10 +167,14 @@ bool AuditSmoothGridTopology(Engine::Core::Object& terrainObject,
     // Any such edge at an internal chunk border is a real terrain crack.
     if (minimumChunkX > maximumChunkX || minimumChunkZ > maximumChunkZ)
         return false;
-    const float outerMinimumX = static_cast<float>(minimumChunkX) * chunkSize;
-    const float outerMaximumX = static_cast<float>(maximumChunkX + 1) * chunkSize;
-    const float outerMinimumZ = static_cast<float>(minimumChunkZ) * chunkSize;
-    const float outerMaximumZ = static_cast<float>(maximumChunkZ + 1) * chunkSize;
+    const float outerMinimumX = static_cast<float>(
+        static_cast<int64_t>(minimumChunkX) - originChunkX) * chunkSize;
+    const float outerMaximumX = static_cast<float>(
+        static_cast<int64_t>(maximumChunkX) + 1 - originChunkX) * chunkSize;
+    const float outerMinimumZ = static_cast<float>(
+        static_cast<int64_t>(minimumChunkZ) - originChunkZ) * chunkSize;
+    const float outerMaximumZ = static_cast<float>(
+        static_cast<int64_t>(maximumChunkZ) + 1 - originChunkZ) * chunkSize;
     for (const auto& [edge, use] : edgeUses)
     {
         if (use.count != 1 && use.orientation == 0)
@@ -225,8 +231,59 @@ struct SharedBorderAudit
     float maximumPositionError = 0.f;
 };
 
+bool AuditMeshData(Engine::Core::Object& terrainObject)
+{
+    size_t meshCount = 0u;
+    size_t triangleCount = 0u;
+    for (Engine::Core::Object* chunkObject : terrainObject.Children)
+    {
+        if (!chunkObject || !chunkObject->GetComponent<TerrainChunk>())
+            continue;
+        for (Engine::Core::Object* patchObject : chunkObject->Children)
+        {
+            const auto* mesh = patchObject
+                ? patchObject->GetComponent<Engine::Components::Mesh>() : nullptr;
+            if (!mesh)
+                continue;
+            ++meshCount;
+            for (uint32_t index : mesh->GetIndices())
+            {
+                if (index >= mesh->GetTerrainVertices().size())
+                    return false;
+            }
+            const auto vertices = ExpandedVertices(*mesh);
+            if (vertices.size() % 3u != 0u)
+                return false;
+            for (size_t triangle = 0; triangle + 2u < vertices.size();
+                triangle += 3u)
+            {
+                glm::vec3 point[3]{};
+                for (int corner = 0; corner < 3; ++corner)
+                {
+                    const auto& vertex = vertices[triangle + corner];
+                    point[corner] = { vertex.pos[0], vertex.pos[1],
+                        vertex.pos[2] };
+                    for (float value : { vertex.pos[0], vertex.pos[1],
+                        vertex.pos[2], vertex.uv[0], vertex.uv[1] })
+                    {
+                        if (!std::isfinite(value))
+                            return false;
+                    }
+                }
+                const glm::vec3 area = glm::cross(point[1] - point[0],
+                    point[2] - point[0]);
+                if (glm::dot(area, area) <= 1.0e-16f)
+                    return false;
+                ++triangleCount;
+            }
+        }
+    }
+    return meshCount > 0u && triangleCount > 0u;
+}
+
 SharedBorderAudit AuditSharedChunkWorldVertices(
-    Engine::Core::Object& terrainObject, float chunkSize)
+    Engine::Core::Object& terrainObject, float chunkSize,
+    int originChunkX = 0, int originChunkZ = 0)
 {
     std::map<std::pair<int, int>, Engine::Core::Object*> chunks;
     for (Engine::Core::Object* object : terrainObject.Children)
@@ -293,9 +350,11 @@ SharedBorderAudit AuditSharedChunkWorldVertices(
             if (neighbor == chunks.end())
                 continue;
             const bool xAxis = direction.first != 0;
-            const float border = static_cast<float>(xAxis
-                ? neighborCoordinate.first : neighborCoordinate.second) *
-                chunkSize;
+            const int origin = xAxis ? originChunkX : originChunkZ;
+            const int coordinateValue = xAxis
+                ? neighborCoordinate.first : neighborCoordinate.second;
+            const float border = static_cast<float>(
+                static_cast<int64_t>(coordinateValue) - origin) * chunkSize;
             const std::vector<glm::vec3> first = borderVertices(
                 chunk, xAxis, border);
             const std::vector<glm::vec3> second = borderVertices(
@@ -560,10 +619,40 @@ int main(int argumentCount, char** arguments)
         return 18;
     const auto* triangleMesh = terrainObject->Children.front()->Children.front()
         ->GetComponent<Engine::Components::Mesh>();
-    if (!triangleMesh || DrawVertexCount(*triangleMesh) !=
-        static_cast<std::size_t>(terrain->horizontalCellsPerChunk *
-            terrain->horizontalCellsPerChunk * 6))
+    if (!triangleMesh || DrawVertexCount(*triangleMesh) == 0u ||
+        DrawVertexCount(*triangleMesh) % 3u != 0u)
         return 19;
+    std::size_t triangleTopCount = 0;
+    bool foundTriangleWall = false;
+    const auto triangleVertices = ExpandedVertices(*triangleMesh);
+    for (std::size_t index = 0; index + 2 < triangleVertices.size(); index += 3)
+    {
+        const auto& first = triangleVertices[index];
+        const auto& second = triangleVertices[index + 1];
+        const auto& third = triangleVertices[index + 2];
+        const glm::vec3 normal(first.normal[0], first.normal[1], first.normal[2]);
+        if (normal.y > 0.999f)
+        {
+            ++triangleTopCount;
+            if (std::abs(first.pos[1] - second.pos[1]) > 0.0001f ||
+                std::abs(first.pos[1] - third.pos[1]) > 0.0001f)
+                return 44;
+        }
+        else if (std::abs(normal.y) < 0.001f)
+        {
+            foundTriangleWall = true;
+        }
+        else
+        {
+            // Triangle terrain consists only of horizontal tile tops and
+            // vertical step faces. A partially-upward normal is a slope.
+            return 45;
+        }
+    }
+    const std::size_t expectedTriangleTops = static_cast<std::size_t>(
+        terrain->horizontalCellsPerChunk * terrain->horizontalCellsPerChunk * 2);
+    if (triangleTopCount != expectedTriangleTops || !foundTriangleWall)
+        return 46;
 
     terrain->terrainShape = static_cast<int>(TerrainGen::TerrainShape::Hexagons);
     terrain->viewRadiusInChunks = 1;
@@ -575,9 +664,24 @@ int main(int argumentCount, char** arguments)
     if (!hexMesh || DrawVertexCount(*hexMesh) == 0u ||
         DrawVertexCount(*hexMesh) % 3u != 0u)
         return 21;
-    for (const auto& vertex : ExpandedVertices(*hexMesh))
+    const auto hexVertices = ExpandedVertices(*hexMesh);
+    for (std::size_t triangle = 0; triangle + 2 < hexVertices.size();
+        triangle += 3)
     {
+        const auto& vertex = hexVertices[triangle];
         const glm::vec3 normal(vertex.normal[0], vertex.normal[1], vertex.normal[2]);
+        if (normal.y > 0.999f)
+        {
+            if (std::abs(vertex.pos[1] - hexVertices[triangle + 1].pos[1]) >
+                    0.0001f ||
+                std::abs(vertex.pos[1] - hexVertices[triangle + 2].pos[1]) >
+                    0.0001f)
+                return 47;
+        }
+        else if (std::abs(normal.y) >= 0.001f)
+        {
+            return 48;
+        }
         if (std::abs(normal.y) < 0.001f && std::abs(normal.x) > 0.1f &&
             std::abs(normal.z) > 0.1f)
             foundHexSide = true;
@@ -897,6 +1001,67 @@ int main(int argumentCount, char** arguments)
         return 17;
     }
 
+    // Generated terrain uses one static concave collider per mesh patch. The
+    // collider must consume packed indexed terrain directly; retaining the old
+    // expanded animation-vertex copy would undo the terrain memory reduction.
+    {
+        Engine::Scene::Scene collisionScene;
+        auto* collisionTerrainObject = collisionScene.AddObject(
+            "Collision Terrain");
+        collisionTerrainObject->AddComponent<PerlinNoiseField>();
+        auto* collisionTerrain = collisionTerrainObject->AddComponent<TerrainGen>();
+        collisionTerrain->viewerObjectName.clear();
+        collisionTerrain->viewRadiusInChunks = 0;
+        collisionTerrain->chunkSize = 16.f;
+        collisionTerrain->horizontalCellsPerChunk = 4;
+        collisionTerrain->patchesPerAxis = 2;
+        collisionTerrain->terrainShape = static_cast<int>(
+            TerrainGen::TerrainShape::Cubes);
+        collisionTerrain->baseHeight = 0.f;
+        collisionTerrain->heightAmplitude = 0.f;
+        collisionTerrain->generateColliders = true;
+        if (!collisionTerrain->GenerateTerrain())
+            return 49;
+
+        std::size_t colliderCount = 0;
+        for (Engine::Core::Object* chunkObject : collisionTerrainObject->Children)
+        {
+            for (Engine::Core::Object* patchObject : chunkObject->Children)
+            {
+                const auto* mesh = patchObject->GetComponent<
+                    Engine::Components::Mesh>();
+                const auto* collider = patchObject->GetComponent<
+                    Engine::Components::MeshObjectCollider>();
+                const auto* body = patchObject->GetComponent<
+                    Engine::Components::RigidBody>();
+                if (!mesh || !collider || !body || collider->convex ||
+                    body->bodyType != "Static" || !mesh->GetVertices().empty() ||
+                    !mesh->UsesTerrainVertexFormat())
+                    return 50;
+                ++colliderCount;
+            }
+        }
+        if (colliderCount != 4u)
+            return 51;
+
+        auto* fallingObject = collisionScene.AddObject("Terrain Collision Probe");
+        fallingObject->transform.position = { 6.f, 5.f, 6.f };
+        auto* probeCollider = fallingObject->AddComponent<
+            Engine::Components::PrimitiveObjectCollider>();
+        probeCollider->shape = "Box";
+        probeCollider->size = { 1.f, 1.f, 1.f };
+        auto* probeBody = fallingObject->AddComponent<
+            Engine::Components::RigidBody>();
+        probeBody->bodyType = "Dynamic";
+        probeBody->mass = 1.f;
+        collisionScene.Start();
+        for (int frame = 0; frame < 240; ++frame)
+            collisionScene.Update(1.f / 60.f);
+        if (fallingObject->transform.position.y < 0.4f ||
+            fallingObject->transform.position.y > 0.7f)
+            return 52;
+    }
+
     if (argumentCount > 1 && std::strcmp(arguments[1], "--stress") == 0)
     {
         Engine::Scene::Scene stressScene;
@@ -957,10 +1122,9 @@ int main(int argumentCount, char** arguments)
             ? std::atoi(arguments[5]) : 0;
         const int startChunkZ = argumentCount > 6
             ? std::atoi(arguments[6]) : 0;
-        stressViewer->transform.position = {
-            static_cast<float>(startChunkX) * stressTerrain->chunkSize,
-            12.f,
-            static_cast<float>(startChunkZ) * stressTerrain->chunkSize };
+        stressTerrain->worldOriginChunkX = startChunkX;
+        stressTerrain->worldOriginChunkZ = startChunkZ;
+        stressViewer->transform.position = { 0.f, 12.f, 0.f };
         stressScene.Start();
 
         const std::size_t diameter = static_cast<std::size_t>(
@@ -980,13 +1144,16 @@ int main(int argumentCount, char** arguments)
         const bool initialTopologyValid =
             stressShape != TerrainGen::TerrainShape::SmoothSurface ||
             (stressTerrain->GetLoadedChunkCount() == desiredChunks &&
-                AuditSmoothGridTopology(*stressOwner, stressTerrain->chunkSize));
+                AuditSmoothGridTopology(*stressOwner, stressTerrain->chunkSize,
+                    startChunkX, startChunkZ));
         const SharedBorderAudit initialBorderAudit =
             stressShape == TerrainGen::TerrainShape::SmoothSurface
                 ? AuditSharedChunkWorldVertices(
-                    *stressOwner, stressTerrain->chunkSize)
+                    *stressOwner, stressTerrain->chunkSize,
+                    startChunkX, startChunkZ)
                 : SharedBorderAudit{};
-        if (!initialTopologyValid || !initialBorderAudit.valid)
+        if (!initialTopologyValid || !initialBorderAudit.valid ||
+            !AuditMeshData(*stressOwner))
             return 41;
 
         double worstUpdateMs = 0.0;
@@ -994,6 +1161,7 @@ int main(int argumentCount, char** arguments)
         std::size_t maximumMissingChunks = 0u;
         constexpr int movementFrames = 600;
         const float cameraSpeed = longRange ? 160.f : 96.f;
+        const float initialViewerX = stressViewer->transform.position.x;
         auto nextFrame = std::chrono::steady_clock::now();
         for (int frame = 0; frame < movementFrames; ++frame)
         {
@@ -1022,16 +1190,30 @@ int main(int argumentCount, char** arguments)
         }
         const double drainSeconds = std::chrono::duration<double>(
             std::chrono::steady_clock::now() - drainStart).count();
+        const float actualTravel = stressViewer->transform.position.x -
+            initialViewerX;
+        const float expectedTravel = cameraSpeed * movementFrames / 60.f;
+        if (actualTravel < expectedTravel * 0.99f)
+        {
+            std::fprintf(stderr,
+                "Camera movement lost precision: expected=%.3f actual=%.3f "
+                "logical_origin=(%d,%d)\n",
+                expectedTravel, actualTravel, startChunkX, startChunkZ);
+            return 43;
+        }
         const bool finalTopologyValid =
             stressShape != TerrainGen::TerrainShape::SmoothSurface ||
             (stressTerrain->GetLoadedChunkCount() == desiredChunks &&
-                AuditSmoothGridTopology(*stressOwner, stressTerrain->chunkSize));
+                AuditSmoothGridTopology(*stressOwner, stressTerrain->chunkSize,
+                    startChunkX, startChunkZ));
         const SharedBorderAudit finalBorderAudit =
             stressShape == TerrainGen::TerrainShape::SmoothSurface
                 ? AuditSharedChunkWorldVertices(
-                    *stressOwner, stressTerrain->chunkSize)
+                    *stressOwner, stressTerrain->chunkSize,
+                    startChunkX, startChunkZ)
                 : SharedBorderAudit{};
-        if (!finalTopologyValid || !finalBorderAudit.valid)
+        if (!finalTopologyValid || !finalBorderAudit.valid ||
+            !AuditMeshData(*stressOwner))
             return 42;
         std::size_t residentVertices = 0u;
         std::size_t residentIndices = 0u;
@@ -1058,7 +1240,7 @@ int main(int argumentCount, char** arguments)
             "radius=%d cells=%dx%d worst_update_ms=%.3f over_budget=%d/%d "
             "max_missing=%zu drain_s=%.3f resident_chunks=%zu "
             "resident_vertices=%zu resident_indices=%zu cpu_mesh_mib=%.2f "
-            "topology=valid border_pairs=%zu "
+            "travel=%.3f logical_origin=(%d,%d) topology=valid border_pairs=%zu "
             "border_vertices=%zu max_border_error=%.9f built=%llu unloaded=%llu\n",
             stressShapeName, initialFillSeconds, cameraSpeed, stressTerrain->chunkSize,
             stressTerrain->viewRadiusInChunks,
@@ -1066,7 +1248,8 @@ int main(int argumentCount, char** arguments)
             worstUpdateMs, updatesOverBudget,
             movementFrames, maximumMissingChunks, drainSeconds,
             stressTerrain->GetLoadedChunkCount(), residentVertices,
-            residentIndices, residentMeshMiB,
+            residentIndices, residentMeshMiB, actualTravel,
+            startChunkX, startChunkZ,
             finalBorderAudit.neighborPairs,
             finalBorderAudit.comparedVertices,
             finalBorderAudit.maximumPositionError,
