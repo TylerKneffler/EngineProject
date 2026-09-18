@@ -8,6 +8,7 @@
 namespace Engine::Renderers
 {
 struct D3D12OcclusionQueryState;
+struct D3D12GpuTimingState;
 
 // ---------------------------------------------------------------------------
 // D3D12GraphicsContext — DirectX 12 command recording wrapper
@@ -18,7 +19,8 @@ public:
     explicit D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList);
     D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList,
         ID3D12RootSignature* rootSig,
-        std::shared_ptr<D3D12OcclusionQueryState> occlusionState = {});
+        std::shared_ptr<D3D12OcclusionQueryState> occlusionState = {},
+        std::shared_ptr<D3D12GpuTimingState> gpuTimings = {});
     void SetPipeline(const Engine::Graphics::IPipelineState* pipeline) override;
     void SetStencilReference(uint32_t reference) override;
     void SetConstantBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint64_t offset = 0) override;
@@ -48,6 +50,8 @@ public:
     bool IsOccluded(uint64_t objectId) override;
     void BeginOcclusionQuery(uint64_t objectId) override;
     void EndOcclusionQuery() override;
+    void BeginGpuTiming(Engine::Graphics::GpuTimingStage stage) override;
+    void EndGpuTiming(Engine::Graphics::GpuTimingStage stage) override;
 
     void TransitionResource(void* resource, ResourceState stateBefore, ResourceState stateAfter) override;
 
@@ -58,6 +62,7 @@ private:
     ID3D12RootSignature* m_rootSignature = nullptr;
     uint32_t m_indexCount = 0;
     std::shared_ptr<D3D12OcclusionQueryState> m_occlusionState;
+    std::shared_ptr<D3D12GpuTimingState> m_gpuTimings;
     uint64_t m_occlusionViewId = 0;
     uint64_t m_occlusionSceneSignature = 0;
     uint64_t m_activeOcclusionKey = 0;
@@ -79,6 +84,8 @@ public:
 
     void SetCommandBuffer(void* cmd) override;
     void PrepareFrame(uint32_t frameSlot) override;
+    void FinalizeFrame() override;
+    Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const override;
     std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateContext() override;
 
 private:
@@ -89,5 +96,6 @@ private:
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_cmdList;
     ID3D12GraphicsCommandList* m_externalCmdList = nullptr; // set via SetCommandBuffer
     std::shared_ptr<D3D12OcclusionQueryState> m_occlusionState;
+    std::shared_ptr<D3D12GpuTimingState> m_gpuTimings;
 };
 }

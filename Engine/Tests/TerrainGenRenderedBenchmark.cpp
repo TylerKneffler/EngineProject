@@ -300,6 +300,14 @@ int main(int argumentCount, char** arguments)
         uint32_t occlusionCulledMaximum = 0;
         uint64_t constantArenaWritesTotal = 0;
         uint64_t constantDiscardMapsTotal = 0;
+        std::array<double, static_cast<size_t>(
+            Engine::Graphics::GpuTimingStage::Count)> gpuStageTotalMs{};
+        uint32_t gpuTimingSamples = 0;
+        uint64_t lastGpuSampleId = 0;
+        double backendCpuSubmissionTotalMs = 0.0;
+        double backendCpuPresentationTotalMs = 0.0;
+        bool flipModelSwapChain = false;
+        uint32_t lastGpuRegionCount = 0;
         const auto renderFrame = [&]()
         {
             const auto start = Clock::now();
@@ -342,6 +350,21 @@ int main(int argumentCount, char** arguments)
                 prepareWorstMs = std::max(prepareWorstMs, prepareMs);
                 renderWorstMs = std::max(renderWorstMs, renderMs);
                 presentWorstMs = std::max(presentWorstMs, presentMs);
+                const auto telemetry = renderer->GetFrameTimingTelemetry();
+                backendCpuSubmissionTotalMs +=
+                    telemetry.cpuSubmissionMilliseconds;
+                backendCpuPresentationTotalMs +=
+                    telemetry.cpuPresentationMilliseconds;
+                flipModelSwapChain = telemetry.flipModelSwapChain;
+                lastGpuRegionCount = telemetry.gpuRegionCount;
+                if (telemetry.gpuTimingsValid &&
+                    telemetry.gpuSampleId != lastGpuSampleId)
+                {
+                    for (size_t stage = 0; stage < gpuStageTotalMs.size(); ++stage)
+                        gpuStageTotalMs[stage] += telemetry.gpuMilliseconds[stage];
+                    ++gpuTimingSamples;
+                    lastGpuSampleId = telemetry.gpuSampleId;
+                }
                 measuredStreamingWorstMs = std::max(measuredStreamingWorstMs,
                     terrain->GetLastStreamingMilliseconds());
                 const uint64_t objectUploadBytes =
@@ -531,6 +554,10 @@ int main(int argumentCount, char** arguments)
             "occlusion_culled_avg=%.2f occlusion_culled_max=%u "
             "constant_arena=%s constant_writes_avg=%.1f "
             "constant_discards_avg=%.1f "
+            "cpu_submit_avg=%.3f backend_present_avg=%.3f "
+            "gpu_terrain_avg=%.3f gpu_portal_avg=%.3f "
+            "gpu_opaque_avg=%.3f gpu_transparent_avg=%.3f "
+            "gpu_samples=%u gpu_regions=%u flip_model=%s "
             "built=%llu unloaded=%llu\n",
             renderingApi, width, height, radius, desiredChunks,
             stationaryCamera ? "true" : "false",
@@ -569,6 +596,22 @@ int main(int argumentCount, char** arguments)
                 ->UsesPersistentConstantBufferArena() ? "true" : "false",
             static_cast<double>(constantArenaWritesTotal) / measuredFrames,
             static_cast<double>(constantDiscardMapsTotal) / measuredFrames,
+            backendCpuSubmissionTotalMs / measuredFrames,
+            backendCpuPresentationTotalMs / measuredFrames,
+            gpuStageTotalMs[static_cast<size_t>(
+                Engine::Graphics::GpuTimingStage::Terrain)] /
+                std::max(1u, gpuTimingSamples),
+            gpuStageTotalMs[static_cast<size_t>(
+                Engine::Graphics::GpuTimingStage::Portal)] /
+                std::max(1u, gpuTimingSamples),
+            gpuStageTotalMs[static_cast<size_t>(
+                Engine::Graphics::GpuTimingStage::Opaque)] /
+                std::max(1u, gpuTimingSamples),
+            gpuStageTotalMs[static_cast<size_t>(
+                Engine::Graphics::GpuTimingStage::Transparent)] /
+                std::max(1u, gpuTimingSamples),
+            gpuTimingSamples, lastGpuRegionCount,
+            flipModelSwapChain ? "true" : "false",
             static_cast<unsigned long long>(terrain->GetTotalChunksBuilt()),
             static_cast<unsigned long long>(terrain->GetTotalChunksUnloaded()));
         renderer->WaitIdle();

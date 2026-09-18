@@ -4,6 +4,7 @@
 #include "DX12GraphicsBuffer.h"
 #include "DX12GraphicsTexture.h"
 #include <algorithm>
+#include <chrono>
 #include <stdexcept>
 
 // ---------------------------------------------------------------------------
@@ -109,6 +110,89 @@ struct D3D12OcclusionQueryState
     uint32_t currentSlot = UINT32_MAX;
 };
 
+struct D3D12GpuTimingState
+{
+    static constexpr uint32_t QueryCapacity = 128;
+    struct Record { Engine::Graphics::GpuTimingStage stage{}; uint32_t begin = 0; uint32_t end = 0; };
+    struct FrameSlot
+    {
+        Microsoft::WRL::ComPtr<ID3D12QueryHeap> heap;
+        Microsoft::WRL::ComPtr<ID3D12Resource> readback;
+        uint64_t* mapped = nullptr;
+        std::vector<Record> records;
+        uint32_t used = 0;
+        bool pending = false;
+    };
+    D3D12GpuTimingState(ID3D12Device* value, ID3D12CommandQueue* queue)
+        : device(value)
+    { if (queue) queue->GetTimestampFrequency(&frequency); }
+    ~D3D12GpuTimingState()
+    { for (auto& slot : slots) if (slot.readback && slot.mapped) slot.readback->Unmap(0, nullptr); }
+    bool EnsureSlot(uint32_t index)
+    {
+        if (!device) return false;
+        if (slots.size() <= index) slots.resize(index + 1u);
+        auto& slot = slots[index]; if (slot.heap) return true;
+        D3D12_QUERY_HEAP_DESC query{}; query.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP; query.Count = QueryCapacity;
+        if (FAILED(device->CreateQueryHeap(&query, IID_PPV_ARGS(&slot.heap)))) return false;
+        D3D12_HEAP_PROPERTIES heap{}; heap.Type = D3D12_HEAP_TYPE_READBACK;
+        D3D12_RESOURCE_DESC buffer{}; buffer.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        buffer.Width = uint64_t(QueryCapacity) * sizeof(uint64_t); buffer.Height = 1;
+        buffer.DepthOrArraySize = 1; buffer.MipLevels = 1; buffer.SampleDesc.Count = 1;
+        buffer.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        if (FAILED(device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &buffer,
+            D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&slot.readback)))) return false;
+        D3D12_RANGE range{0, static_cast<SIZE_T>(buffer.Width)};
+        return SUCCEEDED(slot.readback->Map(0, &range, reinterpret_cast<void**>(&slot.mapped)));
+    }
+    void Prepare(uint32_t index)
+    {
+        if (!EnsureSlot(index)) { currentSlot = UINT32_MAX; return; }
+        auto& slot = slots[index];
+        if (slot.pending && frequency)
+        {
+            telemetry.gpuMilliseconds.fill(0.0);
+            for (const auto& record : slot.records)
+                if (slot.mapped[record.end] >= slot.mapped[record.begin])
+                    telemetry.gpuMilliseconds[static_cast<size_t>(record.stage)] +=
+                        double(slot.mapped[record.end] - slot.mapped[record.begin]) * 1000.0 / double(frequency);
+            telemetry.gpuTimingsValid = true; telemetry.gpuRegionCount = static_cast<uint32_t>(slot.records.size());
+            ++telemetry.gpuSampleId;
+        }
+        slot.used = 0; slot.records.clear(); slot.pending = false;
+        currentSlot = index; active = UINT32_MAX; cpuStart = std::chrono::steady_clock::now();
+    }
+    void Begin(ID3D12GraphicsCommandList* list, Engine::Graphics::GpuTimingStage stage)
+    {
+        if (!list || currentSlot >= slots.size() || active != UINT32_MAX) return;
+        auto& slot = slots[currentSlot]; if (slot.used + 2 > QueryCapacity) return;
+        Record record{stage, slot.used++, slot.used++}; slot.records.push_back(record);
+        active = static_cast<uint32_t>(slot.records.size() - 1u);
+        list->EndQuery(slot.heap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, record.begin);
+    }
+    void End(ID3D12GraphicsCommandList* list, Engine::Graphics::GpuTimingStage stage)
+    {
+        if (!list || currentSlot >= slots.size() || active == UINT32_MAX) return;
+        auto& slot = slots[currentSlot]; auto& record = slot.records[active]; if (record.stage != stage) return;
+        list->EndQuery(slot.heap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, record.end); active = UINT32_MAX;
+    }
+    void Finalize(ID3D12GraphicsCommandList* list)
+    {
+        if (!list || currentSlot >= slots.size()) return;
+        auto& slot = slots[currentSlot];
+        if (active != UINT32_MAX) End(list, slot.records[active].stage);
+        if (slot.used) list->ResolveQueryData(slot.heap.Get(), D3D12_QUERY_TYPE_TIMESTAMP,
+            0, slot.used, slot.readback.Get(), 0);
+        slot.pending = slot.used != 0;
+        telemetry.cpuSubmissionMilliseconds = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - cpuStart).count();
+    }
+    ID3D12Device* device = nullptr; uint64_t frequency = 0; std::vector<FrameSlot> slots;
+    uint32_t currentSlot = UINT32_MAX, active = UINT32_MAX;
+    Engine::Graphics::FrameTimingTelemetry telemetry{};
+    std::chrono::steady_clock::time_point cpuStart{};
+};
+
 namespace
 {
 uint64_t D3D12OcclusionKey(uint64_t viewId, uint64_t objectId)
@@ -126,9 +210,10 @@ D3D12GraphicsContext::D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList)
 
 D3D12GraphicsContext::D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList,
     ID3D12RootSignature* rootSig,
-    std::shared_ptr<D3D12OcclusionQueryState> occlusionState)
+    std::shared_ptr<D3D12OcclusionQueryState> occlusionState,
+    std::shared_ptr<D3D12GpuTimingState> gpuTimings)
     : m_cmdList(cmdList), m_rootSignature(rootSig),
-      m_occlusionState(std::move(occlusionState))
+      m_occlusionState(std::move(occlusionState)), m_gpuTimings(std::move(gpuTimings))
 {
     // Set the root signature immediately if provided
     if (m_cmdList && m_rootSignature)
@@ -136,6 +221,11 @@ D3D12GraphicsContext::D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList,
         m_cmdList->SetGraphicsRootSignature(m_rootSignature);
     }
 }
+
+void D3D12GraphicsContext::BeginGpuTiming(Engine::Graphics::GpuTimingStage stage)
+{ if (m_gpuTimings) m_gpuTimings->Begin(m_cmdList, stage); }
+void D3D12GraphicsContext::EndGpuTiming(Engine::Graphics::GpuTimingStage stage)
+{ if (m_gpuTimings) m_gpuTimings->End(m_cmdList, stage); }
 
 bool D3D12GraphicsContext::BeginOcclusionFrame(uint64_t viewId,
     uint64_t sceneSignature)
@@ -416,7 +506,8 @@ D3D12GraphicsContextFactory::D3D12GraphicsContextFactory(
     ID3D12CommandQueue* commandQueue,
     ID3D12RootSignature* rootSignature)
     : m_device(device), m_commandQueue(commandQueue), m_rootSignature(rootSignature),
-      m_occlusionState(std::make_shared<D3D12OcclusionQueryState>(device))
+      m_occlusionState(std::make_shared<D3D12OcclusionQueryState>(device)),
+      m_gpuTimings(std::make_shared<D3D12GpuTimingState>(device, commandQueue))
 {
     // Create command allocator
     HRESULT hr = device->CreateCommandAllocator(
@@ -444,7 +535,7 @@ std::unique_ptr<Engine::Graphics::IGraphicsContext> D3D12GraphicsContextFactory:
     // otherwise fall back to the factory's own command list.
     auto* list = m_externalCmdList ? m_externalCmdList : m_cmdList.Get();
     return std::make_unique<D3D12GraphicsContext>(
-        list, m_rootSignature, m_occlusionState);
+        list, m_rootSignature, m_occlusionState, m_gpuTimings);
 }
 
 void D3D12GraphicsContextFactory::SetCommandBuffer(void* cmd)
@@ -455,5 +546,11 @@ void D3D12GraphicsContextFactory::SetCommandBuffer(void* cmd)
 void D3D12GraphicsContextFactory::PrepareFrame(uint32_t frameSlot)
 {
     if (m_occlusionState) m_occlusionState->Prepare(frameSlot);
+    if (m_gpuTimings) m_gpuTimings->Prepare(frameSlot);
 }
+
+void D3D12GraphicsContextFactory::FinalizeFrame()
+{ if (m_gpuTimings) m_gpuTimings->Finalize(m_externalCmdList ? m_externalCmdList : m_cmdList.Get()); }
+Engine::Graphics::FrameTimingTelemetry D3D12GraphicsContextFactory::GetFrameTimingTelemetry() const
+{ return m_gpuTimings ? m_gpuTimings->telemetry : Engine::Graphics::FrameTimingTelemetry{}; }
 }

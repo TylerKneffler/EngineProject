@@ -20,6 +20,8 @@ public:
     void BeginFrame() override;
     void EndFrame() override;
     std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateFrameGraphicsContext() override;
+    Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const override
+    { return m_frameTelemetry; }
 private:
     void BeginMainRenderPass(const float color[4]);
     VulkanRenderCore m_core;
@@ -27,6 +29,7 @@ private:
     VkCommandBuffer m_commandBuffer = VK_NULL_HANDLE;
     uint32_t m_width = 0, m_height = 0;
     bool m_renderPassActive = false;
+    Engine::Graphics::FrameTimingTelemetry m_frameTelemetry{};
 };
 }
 #endif

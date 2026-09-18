@@ -37,5 +37,7 @@ public:
     // Drain submitted GPU work before caller-owned scene resources are
     // destroyed. Normal frame rendering must not call this blocking method.
     virtual void WaitIdle() {}
+    virtual Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const
+    { return {}; }
 };
 }

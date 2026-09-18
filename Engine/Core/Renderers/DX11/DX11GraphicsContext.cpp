@@ -49,24 +49,151 @@ void D3D11FrameResourceState::PrepareFrame()
     discardMaps = 0;
 }
 
+D3D11GpuTimingState::D3D11GpuTimingState(ID3D11Device* timingDevice,
+    ID3D11DeviceContext* timingContext)
+    : device(timingDevice), context(timingContext)
+{
+}
+
+void D3D11GpuTimingState::PrepareFrame()
+{
+    if (!device || !context)
+        return;
+    for (Frame& frame : frames)
+    {
+        if (!frame.pending || !frame.disjoint)
+            continue;
+        D3D11_QUERY_DATA_TIMESTAMP_DISJOINT disjoint{};
+        if (context->GetData(frame.disjoint.Get(), &disjoint,
+                sizeof(disjoint), D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK)
+            continue;
+        std::array<double, static_cast<size_t>(
+            Engine::Graphics::GpuTimingStage::Count)> completed{};
+        bool available = !disjoint.Disjoint && disjoint.Frequency != 0;
+        for (uint32_t index = 0; available && index < frame.regionCount; ++index)
+        {
+            UINT64 begin = 0, end = 0;
+            Region& region = frame.regions[index];
+            available = context->GetData(region.begin.Get(), &begin,
+                sizeof(begin), D3D11_ASYNC_GETDATA_DONOTFLUSH) == S_OK &&
+                context->GetData(region.end.Get(), &end,
+                sizeof(end), D3D11_ASYNC_GETDATA_DONOTFLUSH) == S_OK;
+            if (available && end >= begin)
+                completed[static_cast<size_t>(region.stage)] +=
+                    static_cast<double>(end - begin) * 1000.0 /
+                    static_cast<double>(disjoint.Frequency);
+        }
+        if (available)
+        {
+            telemetry.gpuMilliseconds = completed;
+            ++telemetry.gpuSampleId;
+            telemetry.gpuRegionCount = frame.regionCount;
+            telemetry.gpuTimingsValid = true;
+            frame.pending = false;
+        }
+        else if (disjoint.Disjoint)
+            frame.pending = false;
+    }
+
+    frameIndex = (frameIndex + 1u) % BufferedFrames;
+    Frame& frame = frames[frameIndex];
+    if (frame.pending)
+        return;
+    if (!frame.disjoint)
+    {
+        D3D11_QUERY_DESC descriptor{};
+        descriptor.Query = D3D11_QUERY_TIMESTAMP_DISJOINT;
+        if (FAILED(device->CreateQuery(&descriptor, &frame.disjoint)))
+            return;
+    }
+    frame.regionCount = 0;
+    activeRegion = UINT32_MAX;
+    recording = true;
+    cpuSubmissionStart = std::chrono::steady_clock::now();
+    context->Begin(frame.disjoint.Get());
+}
+
+void D3D11GpuTimingState::FinalizeFrame()
+{
+    if (!recording || !context)
+        return;
+    if (activeRegion != UINT32_MAX)
+        End(frames[frameIndex].regions[activeRegion].stage);
+    context->End(frames[frameIndex].disjoint.Get());
+    frames[frameIndex].pending = true;
+    telemetry.cpuSubmissionMilliseconds =
+        std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - cpuSubmissionStart).count();
+    recording = false;
+}
+
+void D3D11GpuTimingState::Begin(Engine::Graphics::GpuTimingStage stage)
+{
+    if (!recording || !device || !context || activeRegion != UINT32_MAX)
+        return;
+    Frame& frame = frames[frameIndex];
+    if (frame.regionCount >= MaximumRegions)
+        return;
+    if (frame.regionCount == frame.regions.size())
+    {
+        D3D11_QUERY_DESC descriptor{};
+        descriptor.Query = D3D11_QUERY_TIMESTAMP;
+        Region region{};
+        if (FAILED(device->CreateQuery(&descriptor, &region.begin)) ||
+            FAILED(device->CreateQuery(&descriptor, &region.end)))
+            return;
+        frame.regions.push_back(std::move(region));
+    }
+    Region& region = frame.regions[frame.regionCount];
+    region.stage = stage;
+    activeRegion = frame.regionCount++;
+    context->End(region.begin.Get());
+}
+
+void D3D11GpuTimingState::End(Engine::Graphics::GpuTimingStage stage)
+{
+    if (!recording || !context || activeRegion == UINT32_MAX)
+        return;
+    Region& region = frames[frameIndex].regions[activeRegion];
+    if (region.stage != stage)
+        return;
+    context->End(region.end.Get());
+    activeRegion = UINT32_MAX;
+}
+
 D3D11GraphicsContextFactory::D3D11GraphicsContextFactory(
     ID3D11Device* device, ID3D11DeviceContext* context)
     : m_device(device), m_context(context),
       m_occlusionState(std::make_shared<D3D11OcclusionQueryState>()),
-      m_frameResources(std::make_shared<D3D11FrameResourceState>(device, context))
+      m_frameResources(std::make_shared<D3D11FrameResourceState>(device, context)),
+      m_gpuTimings(std::make_shared<D3D11GpuTimingState>(device, context))
 {
 }
 
 D3D11GraphicsContext::D3D11GraphicsContext(ID3D11Device* device,
     ID3D11DeviceContext* context,
     std::shared_ptr<D3D11OcclusionQueryState> occlusionState,
-    std::shared_ptr<D3D11FrameResourceState> frameResources)
+    std::shared_ptr<D3D11FrameResourceState> frameResources,
+    std::shared_ptr<D3D11GpuTimingState> gpuTimings)
     : m_device(device), m_context(context),
       m_occlusionState(std::move(occlusionState)),
-      m_frameResources(std::move(frameResources))
+      m_frameResources(std::move(frameResources)),
+      m_gpuTimings(std::move(gpuTimings))
 {
     if (m_context)
         m_context->QueryInterface(IID_PPV_ARGS(&m_context1));
+}
+
+void D3D11GraphicsContext::BeginGpuTiming(
+    Engine::Graphics::GpuTimingStage stage)
+{
+    if (m_gpuTimings) m_gpuTimings->Begin(stage);
+}
+
+void D3D11GraphicsContext::EndGpuTiming(
+    Engine::Graphics::GpuTimingStage stage)
+{
+    if (m_gpuTimings) m_gpuTimings->End(stage);
 }
 
 namespace

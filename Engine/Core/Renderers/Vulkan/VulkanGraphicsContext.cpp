@@ -4,6 +4,7 @@
 #include "VulkanGraphicsBuffer.h"
 #include "VulkanPipelineStateBuilder.h"
 #include <algorithm>
+#include <chrono>
 #include <unordered_map>
 #include <vector>
 
@@ -93,6 +94,74 @@ struct VulkanOcclusionQueryState
     uint32_t currentSlot = UINT32_MAX;
 };
 
+struct VulkanGpuTimingState
+{
+    static constexpr uint32_t QueryCapacity = 128;
+    struct Record { Engine::Graphics::GpuTimingStage stage{}; uint32_t begin = 0; uint32_t end = 0; };
+    struct FrameSlot { VkQueryPool pool = VK_NULL_HANDLE; std::vector<Record> records; std::vector<uint64_t> results; uint32_t used = 0; bool pending = false; };
+    VulkanGpuTimingState(VkDevice value, float period) : device(value), timestampPeriod(period) {}
+    ~VulkanGpuTimingState()
+    { if (device) for (auto& slot : slots) if (slot.pool) vkDestroyQueryPool(device, slot.pool, nullptr); }
+    bool EnsureSlot(uint32_t index)
+    {
+        if (!device) return false; if (slots.size() <= index) slots.resize(index + 1u);
+        auto& slot = slots[index]; if (slot.pool) return true;
+        VkQueryPoolCreateInfo info{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+        info.queryType = VK_QUERY_TYPE_TIMESTAMP; info.queryCount = QueryCapacity;
+        if (vkCreateQueryPool(device, &info, nullptr, &slot.pool) != VK_SUCCESS) return false;
+        slot.results.resize(QueryCapacity); return true;
+    }
+    void Prepare(uint32_t index, VkCommandBuffer command)
+    {
+        if (!command || !EnsureSlot(index)) { currentSlot = UINT32_MAX; return; }
+        auto& slot = slots[index];
+        if (slot.pending && slot.used && timestampPeriod > 0.f)
+        {
+            const VkResult result = vkGetQueryPoolResults(device, slot.pool, 0, slot.used,
+                VkDeviceSize(slot.used) * sizeof(uint64_t), slot.results.data(), sizeof(uint64_t), VK_QUERY_RESULT_64_BIT);
+            if (result == VK_SUCCESS)
+            {
+                telemetry.gpuMilliseconds.fill(0.0);
+                for (const auto& record : slot.records)
+                    if (slot.results[record.end] >= slot.results[record.begin])
+                        telemetry.gpuMilliseconds[static_cast<size_t>(record.stage)] +=
+                            double(slot.results[record.end] - slot.results[record.begin]) *
+                            double(timestampPeriod) / 1000000.0;
+                telemetry.gpuTimingsValid = true; telemetry.gpuRegionCount = static_cast<uint32_t>(slot.records.size());
+                ++telemetry.gpuSampleId;
+            }
+        }
+        slot.used = 0; slot.records.clear(); slot.pending = false;
+        vkCmdResetQueryPool(command, slot.pool, 0, QueryCapacity);
+        currentSlot = index; active = UINT32_MAX; cpuStart = std::chrono::steady_clock::now();
+    }
+    void Begin(VkCommandBuffer command, Engine::Graphics::GpuTimingStage stage)
+    {
+        if (!command || currentSlot >= slots.size() || active != UINT32_MAX) return;
+        auto& slot = slots[currentSlot]; if (slot.used + 2 > QueryCapacity) return;
+        Record record{stage, slot.used++, slot.used++}; slot.records.push_back(record);
+        active = static_cast<uint32_t>(slot.records.size() - 1u);
+        vkCmdWriteTimestamp(command, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, slot.pool, record.begin);
+    }
+    void End(VkCommandBuffer command, Engine::Graphics::GpuTimingStage stage)
+    {
+        if (!command || currentSlot >= slots.size() || active == UINT32_MAX) return;
+        auto& slot = slots[currentSlot]; auto& record = slot.records[active]; if (record.stage != stage) return;
+        vkCmdWriteTimestamp(command, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, slot.pool, record.end); active = UINT32_MAX;
+    }
+    void Finalize(VkCommandBuffer command)
+    {
+        if (!command || currentSlot >= slots.size()) return; auto& slot = slots[currentSlot];
+        if (active != UINT32_MAX) End(command, slot.records[active].stage);
+        slot.pending = slot.used != 0;
+        telemetry.cpuSubmissionMilliseconds = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - cpuStart).count();
+    }
+    VkDevice device = VK_NULL_HANDLE; float timestampPeriod = 0.f; std::vector<FrameSlot> slots;
+    uint32_t currentSlot = UINT32_MAX, active = UINT32_MAX;
+    Engine::Graphics::FrameTimingTelemetry telemetry{}; std::chrono::steady_clock::time_point cpuStart{};
+};
+
 namespace
 {
 uint64_t VulkanOcclusionKey(uint64_t viewId, uint64_t objectId)
@@ -103,16 +172,29 @@ uint64_t VulkanOcclusionKey(uint64_t viewId, uint64_t objectId)
 }
 }
 
-void VulkanGraphicsContextFactory::SetDevice(VkDevice device)
+void VulkanGraphicsContextFactory::SetDevice(VkDevice device, float timestampPeriod)
 {
     m_occlusionState = std::make_shared<VulkanOcclusionQueryState>(device);
+    m_gpuTimings = std::make_shared<VulkanGpuTimingState>(device, timestampPeriod);
 }
 
 void VulkanGraphicsContextFactory::PrepareFrame(uint32_t frameSlot)
 {
     if (m_occlusionState)
         m_occlusionState->Prepare(frameSlot, m_commandBuffer);
+    if (m_gpuTimings)
+        m_gpuTimings->Prepare(frameSlot, m_commandBuffer);
 }
+
+void VulkanGraphicsContextFactory::FinalizeFrame()
+{ if (m_gpuTimings) m_gpuTimings->Finalize(m_commandBuffer); }
+Engine::Graphics::FrameTimingTelemetry VulkanGraphicsContextFactory::GetFrameTimingTelemetry() const
+{ return m_gpuTimings ? m_gpuTimings->telemetry : Engine::Graphics::FrameTimingTelemetry{}; }
+
+void VulkanGraphicsContext::BeginGpuTiming(Engine::Graphics::GpuTimingStage stage)
+{ if (m_gpuTimings) m_gpuTimings->Begin(m_commandBuffer, stage); }
+void VulkanGraphicsContext::EndGpuTiming(Engine::Graphics::GpuTimingStage stage)
+{ if (m_gpuTimings) m_gpuTimings->End(m_commandBuffer, stage); }
 
 bool VulkanGraphicsContext::BeginOcclusionFrame(uint64_t viewId,
     uint64_t sceneSignature)

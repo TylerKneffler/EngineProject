@@ -1,12 +1,34 @@
 #pragma once
 #include <memory>
 #include <cstdint>
+#include <array>
+#include <chrono>
 #include "IPipelineState.h"
 #include "IGraphicsBuffer.h"
 #include "IGraphicsTexture.h"
 
 namespace Engine::Graphics
 {
+enum class GpuTimingStage : uint32_t
+{
+    Terrain,
+    Portal,
+    Opaque,
+    Transparent,
+    Count
+};
+
+struct FrameTimingTelemetry
+{
+    std::array<double, static_cast<size_t>(GpuTimingStage::Count)>
+        gpuMilliseconds{};
+    double cpuSubmissionMilliseconds = 0.0;
+    double cpuPresentationMilliseconds = 0.0;
+    uint64_t gpuSampleId = 0;
+    uint32_t gpuRegionCount = 0;
+    bool gpuTimingsValid = false;
+    bool flipModelSwapChain = false;
+};
 
 // ---------------------------------------------------------------------------
 // IGraphicsContext — Rendering command recorder
@@ -86,6 +108,11 @@ public:
     virtual void BeginOcclusionQuery(uint64_t) {}
     virtual void EndOcclusionQuery() {}
 
+    // Asynchronous GPU timestamp regions. A stage may contain multiple
+    // regions; backends aggregate completed regions without stalling.
+    virtual void BeginGpuTiming(GpuTimingStage) {}
+    virtual void EndGpuTiming(GpuTimingStage) {}
+
     // Resource barriers / state transitions
     // These are needed for render-to-texture workflows
     enum class ResourceState
@@ -128,6 +155,8 @@ public:
     // commands are recorded. Explicit APIs use this to consume completed
     // asynchronous query results and recycle that slot's query storage.
     virtual void PrepareFrame(uint32_t /*frameSlot*/) {}
+    virtual void FinalizeFrame() {}
+    virtual FrameTimingTelemetry GetFrameTimingTelemetry() const { return {}; }
     virtual bool UsesPersistentConstantBufferArena() const { return false; }
     virtual uint32_t GetConstantBufferArenaWrites() const { return 0; }
     virtual uint32_t GetConstantBufferDiscardMaps() const { return 0; }

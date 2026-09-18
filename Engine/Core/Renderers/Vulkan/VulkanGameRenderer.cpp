@@ -1,6 +1,7 @@
 #include "pch.h"
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "VulkanGameRenderer.h"
+#include <chrono>
 
 namespace Engine::Renderers
 {
@@ -59,8 +60,21 @@ void VulkanGameRenderer::EndFrame()
 {
     if (!m_commandBuffer) return;
     if (!m_renderPassActive) { const float color[] = { 0.1f, 0.1f, 0.1f, 1.0f }; BeginMainRenderPass(color); }
+    if (m_provider && m_provider->GetContextFactory())
+    {
+        auto* factory = m_provider->GetContextFactory();
+        factory->FinalizeFrame();
+        m_frameTelemetry = factory->GetFrameTimingTelemetry();
+    }
     vkCmdEndRenderPass(m_commandBuffer);
-    m_core.EndFrame(); m_commandBuffer = VK_NULL_HANDLE; m_renderPassActive = false;
+    const auto presentationStart = std::chrono::steady_clock::now();
+    m_core.EndFrame();
+    m_frameTelemetry.cpuPresentationMilliseconds =
+        std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - presentationStart).count();
+    // DXGI's flip-model designation does not apply to Vulkan swap chains.
+    m_frameTelemetry.flipModelSwapChain = false;
+    m_commandBuffer = VK_NULL_HANDLE; m_renderPassActive = false;
 }
 
 std::unique_ptr<Engine::Graphics::IGraphicsContext> VulkanGameRenderer::CreateFrameGraphicsContext()

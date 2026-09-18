@@ -6,6 +6,8 @@
 #include <array>
 #include <memory>
 #include <unordered_map>
+#include <chrono>
+#include <vector>
 
 namespace Engine::Renderers
 {
@@ -46,12 +48,45 @@ struct D3D11FrameResourceState
     uint32_t discardMaps = 0;
 };
 
+struct D3D11GpuTimingState
+{
+    static constexpr uint32_t BufferedFrames = 16;
+    static constexpr uint32_t MaximumRegions = 512;
+    struct Region
+    {
+        Engine::Graphics::GpuTimingStage stage{};
+        Microsoft::WRL::ComPtr<ID3D11Query> begin;
+        Microsoft::WRL::ComPtr<ID3D11Query> end;
+    };
+    struct Frame
+    {
+        Microsoft::WRL::ComPtr<ID3D11Query> disjoint;
+        std::vector<Region> regions;
+        uint32_t regionCount = 0;
+        bool pending = false;
+    };
+    D3D11GpuTimingState(ID3D11Device*, ID3D11DeviceContext*);
+    void PrepareFrame();
+    void FinalizeFrame();
+    void Begin(Engine::Graphics::GpuTimingStage);
+    void End(Engine::Graphics::GpuTimingStage);
+    ID3D11Device* device = nullptr;
+    ID3D11DeviceContext* context = nullptr;
+    std::array<Frame, BufferedFrames> frames;
+    uint32_t frameIndex = 0;
+    uint32_t activeRegion = UINT32_MAX;
+    bool recording = false;
+    Engine::Graphics::FrameTimingTelemetry telemetry{};
+    std::chrono::steady_clock::time_point cpuSubmissionStart{};
+};
+
 class D3D11GraphicsContext : public Engine::Graphics::IGraphicsContext
 {
 public:
     D3D11GraphicsContext(ID3D11Device* device, ID3D11DeviceContext* context,
         std::shared_ptr<D3D11OcclusionQueryState> occlusionState = {},
-        std::shared_ptr<D3D11FrameResourceState> frameResources = {});
+        std::shared_ptr<D3D11FrameResourceState> frameResources = {},
+        std::shared_ptr<D3D11GpuTimingState> gpuTimings = {});
 
     void SetPipeline(const Engine::Graphics::IPipelineState* pipeline) override;
     void SetStencilReference(uint32_t reference) override;
@@ -72,6 +107,8 @@ public:
     bool IsOccluded(uint64_t objectId) override;
     void BeginOcclusionQuery(uint64_t objectId) override;
     void EndOcclusionQuery() override;
+    void BeginGpuTiming(Engine::Graphics::GpuTimingStage stage) override;
+    void EndGpuTiming(Engine::Graphics::GpuTimingStage stage) override;
     void TransitionResource(void* resource, ResourceState stateBefore, ResourceState stateAfter) override;
     void* GetNativeHandle() const override { return m_context; }
 
@@ -89,6 +126,7 @@ private:
     uint32_t m_stencilReference = 0;
     std::shared_ptr<D3D11OcclusionQueryState> m_occlusionState;
     std::shared_ptr<D3D11FrameResourceState> m_frameResources;
+    std::shared_ptr<D3D11GpuTimingState> m_gpuTimings;
     D3D11OcclusionQueryState::Entry* m_activeOcclusionQuery = nullptr;
     uint64_t m_occlusionViewId = 0;
     uint64_t m_occlusionSceneSignature = 0;
@@ -106,7 +144,12 @@ public:
     void PrepareFrame(uint32_t) override
     {
         if (m_frameResources) m_frameResources->PrepareFrame();
+        if (m_gpuTimings) m_gpuTimings->PrepareFrame();
     }
+    void FinalizeFrame() override
+    { if (m_gpuTimings) m_gpuTimings->FinalizeFrame(); }
+    Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const override
+    { return m_gpuTimings ? m_gpuTimings->telemetry : Engine::Graphics::FrameTimingTelemetry{}; }
     bool UsesPersistentConstantBufferArena() const override
     { return m_frameResources && m_frameResources->arenaSupported; }
     uint32_t GetConstantBufferArenaWrites() const override
@@ -117,7 +160,7 @@ public:
     {
         return std::make_unique<D3D11GraphicsContext>(
             m_device, m_externalContext ? m_externalContext : m_context,
-            m_occlusionState, m_frameResources);
+            m_occlusionState, m_frameResources, m_gpuTimings);
     }
 
 private:
@@ -126,5 +169,6 @@ private:
     ID3D11DeviceContext* m_externalContext = nullptr;
     std::shared_ptr<D3D11OcclusionQueryState> m_occlusionState;
     std::shared_ptr<D3D11FrameResourceState> m_frameResources;
+    std::shared_ptr<D3D11GpuTimingState> m_gpuTimings;
 };
 }

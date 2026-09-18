@@ -1748,6 +1748,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         uint32_t indexCount = 0;
         const Engine::Components::SpatialManipulator* traversalChartPortal = nullptr;
         bool preview = false;
+        bool terrain = false;
+        bool blended = false;
         bool occlusionCandidate = false;
         uint64_t occlusionId = 0;
     };
@@ -1791,6 +1793,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         PreparedDraw preparedDraw{};
         preparedDraw.object = obj;
         preparedDraw.preview = isPreview;
+        preparedDraw.terrain = mesh && mesh->UsesTerrainVertexFormat();
+        preparedDraw.blended = sortedItem.blended;
         preparedDraw.occlusionCandidate = occlusionQueriesEnabled &&
             !wireframeMode &&
             !sortedItem.blended && !sprite &&
@@ -2093,6 +2097,16 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             context->DrawInstanced(draw.vertexCount, 1, 0, 0);
     };
 
+    std::optional<Engine::Graphics::GpuTimingStage> activeGpuStage;
+    const auto switchGpuStage = [&](Engine::Graphics::GpuTimingStage stage)
+    {
+        if (activeGpuStage && *activeGpuStage == stage)
+            return;
+        if (activeGpuStage)
+            context->EndGpuTiming(*activeGpuStage);
+        context->BeginGpuTiming(stage);
+        activeGpuStage = stage;
+    };
     for (const PreparedDraw& draw : preparedDraws)
     {
         if (!draw.vertexBuffer)
@@ -2108,6 +2122,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             ++m_lastOcclusionCulledCount;
             continue;
         }
+        switchGpuStage(draw.terrain
+            ? Engine::Graphics::GpuTimingStage::Terrain
+            : (draw.blended
+                ? Engine::Graphics::GpuTimingStage::Transparent
+                : Engine::Graphics::GpuTimingStage::Opaque));
         if (draw.occlusionCandidate)
             context->BeginOcclusionQuery(draw.occlusionId);
         context->SetPipeline(geometryPipeline(draw, draw.pipeline));
@@ -2130,6 +2149,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 0, m_objectConstantBuffer.get(), draw.constantBufferOffset);
             submitGeometry(draw);
         }
+    }
+    if (activeGpuStage)
+    {
+        context->EndGpuTiming(*activeGpuStage);
+        activeGpuStage.reset();
     }
 
     struct PortalStencilPass
@@ -3051,6 +3075,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 #endif
 
 #if defined(_WIN32) || defined(ENGINE_VULKAN_ENABLED)
+    if (!portalViewJobs.empty())
+        context->BeginGpuTiming(Engine::Graphics::GpuTimingStage::Portal);
 #if defined(_WIN32)
     const bool isDx11Provider =
         dynamic_cast<Engine::Renderers::D3D11GraphicsProvider*>(m_graphicsProvider) != nullptr;
@@ -3244,6 +3270,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         }
     }
 #endif
+
+    if (!portalViewJobs.empty())
+        context->EndGpuTiming(Engine::Graphics::GpuTimingStage::Portal);
 
     if (!portalPasses.empty())
     {
