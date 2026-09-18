@@ -33,5 +33,11 @@ public:
 
     // Get access to graphics services (shader compilation, buffer creation, pipeline building)
     virtual Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() = 0;
+
+    // Drain submitted GPU work before caller-owned scene resources are
+    // destroyed. Normal frame rendering must not call this blocking method.
+    virtual void WaitIdle() {}
+    virtual Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const
+    { return {}; }
 };
 }

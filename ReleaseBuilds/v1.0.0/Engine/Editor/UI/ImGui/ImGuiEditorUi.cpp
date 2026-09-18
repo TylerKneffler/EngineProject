@@ -16,6 +16,27 @@ void ImGuiEditorUi::PushId(const void* id){ImGui::PushID(id);}
 void ImGuiEditorUi::PushId(const char* id){ImGui::PushID(id);}
 void ImGuiEditorUi::PopId(){ImGui::PopID();}
 bool ImGuiEditorUi::Button(const char* l,float w,float h){return ImGui::Button(l,{w,h});}
+EditorUiBreadcrumbResult ImGuiEditorUi::Breadcrumb(const char* label,
+    const char* const* childFolders, int childFolderCount)
+{
+    EditorUiBreadcrumbResult result;
+    result.clicked = ImGui::Button(label);
+    if (childFolderCount <= 0)
+        return result;
+    ImGui::SameLine(0.f, 1.f);
+    if (ImGui::ArrowButton("##children", ImGuiDir_Down))
+        ImGui::OpenPopup("##breadcrumbChildren");
+    if (ImGui::BeginPopup("##breadcrumbChildren"))
+    {
+        for (int index = 0; index < childFolderCount; ++index)
+        {
+            if (ImGui::MenuItem(childFolders[index]))
+                result.childSelected = index;
+        }
+        ImGui::EndPopup();
+    }
+    return result;
+}
 void ImGuiEditorUi::Label(const char* t){ImGui::TextUnformatted(t);}
 void ImGuiEditorUi::DisabledLabel(const char* t){ImGui::TextDisabled("%s",t);}
 void ImGuiEditorUi::ColoredLabel(const char* t,EditorUiColor c){ImGui::TextColored({c.r,c.g,c.b,c.a},"%s",t);}
@@ -49,7 +70,9 @@ bool ImGuiEditorUi::DragFloat(const char*l,float*v,float s,float a,float b){retu
 bool ImGuiEditorUi::DragFloat3(const char*l,float*v,float s,float a,float b){return ImGui::DragFloat3(l,v,s,a,b);}
 bool ImGuiEditorUi::IsAnyItemActive() const{return ImGui::IsAnyItemActive();}
 bool ImGuiEditorUi::ColorEdit3(const char*l,float*v){return ImGui::ColorEdit3(l,v);} bool ImGuiEditorUi::ColorEdit4(const char*l,float*v){return ImGui::ColorEdit4(l,v);}
-bool ImGuiEditorUi::SliderInt(const char*l,int*v,int a,int b){return ImGui::SliderInt(l,v,a,b);} bool ImGuiEditorUi::InputUInt(const char*l,uint32_t*v){return ImGui::InputScalar(l,ImGuiDataType_U32,v);}
+bool ImGuiEditorUi::SliderInt(const char*l,int*v,int a,int b){return ImGui::SliderInt(l,v,a,b);}
+bool ImGuiEditorUi::SliderFloat(const char*l,float*v,float a,float b){return ImGui::SliderFloat(l,v,a,b,"%.0f units");}
+bool ImGuiEditorUi::InputUInt(const char*l,uint32_t*v){return ImGui::InputScalar(l,ImGuiDataType_U32,v);}
 void ImGuiEditorUi::ValueLabel(const char*l,const char*v){ImGui::LabelText(l,"%s",v);}
 bool ImGuiEditorUi::CollapsingHeader(const char*l,bool d){return ImGui::CollapsingHeader(l,d?ImGuiTreeNodeFlags_DefaultOpen:0);}
 bool ImGuiEditorUi::TreeNode(const void*id,const char*l,bool s,bool leaf,bool d){ImGuiTreeNodeFlags f=ImGuiTreeNodeFlags_OpenOnArrow|ImGuiTreeNodeFlags_SpanAvailWidth|(s?ImGuiTreeNodeFlags_Selected:0)|(d?ImGuiTreeNodeFlags_DefaultOpen:0);if(leaf)f|=ImGuiTreeNodeFlags_Leaf|ImGuiTreeNodeFlags_NoTreePushOnOpen;return ImGui::TreeNodeEx(id,f,"%s",l);}
@@ -257,6 +280,60 @@ EditorUiObjectRowResult ImGuiEditorUi::ObjectHeader(const void* id,char* name,si
     return result;
 }
 bool ImGuiEditorUi::Selectable(const char*l,bool s,bool d){return ImGui::Selectable(l,s,d?ImGuiSelectableFlags_AllowDoubleClick:0);}
+EditorUiAssetTileResult ImGuiEditorUi::AssetTile(const char* label,
+    const char* fallbackIcon, void* texture, bool selected, float size)
+{
+    EditorUiAssetTileResult result;
+    size = std::max(size, 48.f);
+    ImGui::BeginGroup();
+    if (selected)
+    {
+        ImGui::PushStyleColor(ImGuiCol_Button,
+            ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
+        ImGui::PushStyleColor(ImGuiCol_Border,
+            ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered));
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 2.f);
+    }
+    ImGui::Button("##assetTile", { size, size });
+    const ImVec2 minimum = ImGui::GetItemRectMin();
+    const ImVec2 maximum = ImGui::GetItemRectMax();
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    const float padding = 6.f;
+    if (texture)
+    {
+        drawList->AddImage(
+            static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(texture)),
+            { minimum.x + padding, minimum.y + padding },
+            { maximum.x - padding, maximum.y - padding });
+    }
+    else if (fallbackIcon && *fallbackIcon)
+    {
+        const float fontSize = std::min(size * 0.42f, 48.f);
+        const ImVec2 iconSize = ImGui::GetFont()->CalcTextSizeA(
+            fontSize, FLT_MAX, 0.f, fallbackIcon);
+        drawList->AddText(ImGui::GetFont(), fontSize,
+            { minimum.x + (size - iconSize.x) * 0.5f,
+              minimum.y + (size - iconSize.y) * 0.5f },
+            ImGui::GetColorU32(ImGuiCol_TextDisabled), fallbackIcon);
+    }
+    if (selected)
+    {
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor(2);
+    }
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + size);
+    ImGui::TextWrapped("%s", label);
+    ImGui::PopTextWrapPos();
+    ImGui::EndGroup();
+    result.clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
+    result.doubleClicked = ImGui::IsItemHovered() &&
+        ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+    return result;
+}
+float ImGuiEditorUi::AvailableContentWidth() const
+{
+    return ImGui::GetContentRegionAvail().x;
+}
 EditorUiContextMenuResult ImGuiEditorUi::ContextMenu(const void* id,const char* addLabel,const char* deleteLabel,bool objectCreationMenu,const char* unpackLabel)
 {
     EditorUiContextMenuResult result;

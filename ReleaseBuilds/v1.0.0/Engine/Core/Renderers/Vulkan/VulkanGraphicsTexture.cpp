@@ -110,16 +110,38 @@ VulkanTextureSystem::VulkanTextureSystem(
 
 VulkanTextureSystem::~VulkanTextureSystem()
 {
-    if (m_device)
-    {
-        vkDeviceWaitIdle(m_device);
-        VulkanDestroyImage(m_device, m_white);
-        if (m_dummyBuffer) vkDestroyBuffer(m_device, m_dummyBuffer, nullptr);
-        if (m_dummyBufferMemory) vkFreeMemory(m_device, m_dummyBufferMemory, nullptr);
-        if (m_sampler) vkDestroySampler(m_device, m_sampler, nullptr);
-        if (m_pool) vkDestroyDescriptorPool(m_device, m_pool, nullptr);
-        if (m_layout) vkDestroyDescriptorSetLayout(m_device, m_layout, nullptr);
-    }
+    Shutdown();
+}
+
+void VulkanTextureSystem::RegisterTexture(VulkanGraphicsTexture* texture)
+{
+    if (texture) m_liveTextures.insert(texture);
+}
+
+void VulkanTextureSystem::UnregisterTexture(VulkanGraphicsTexture* texture)
+{
+    m_liveTextures.erase(texture);
+}
+
+void VulkanTextureSystem::Shutdown()
+{
+    if (!m_device) return;
+    vkDeviceWaitIdle(m_device);
+    for (VulkanGraphicsTexture* texture : m_liveTextures)
+        if (texture) texture->ReleaseImage(m_device);
+    m_liveTextures.clear();
+    VulkanDestroyImage(m_device, m_white);
+    if (m_dummyBuffer) vkDestroyBuffer(m_device, m_dummyBuffer, nullptr);
+    if (m_dummyBufferMemory) vkFreeMemory(m_device, m_dummyBufferMemory, nullptr);
+    if (m_sampler) vkDestroySampler(m_device, m_sampler, nullptr);
+    if (m_pool) vkDestroyDescriptorPool(m_device, m_pool, nullptr);
+    if (m_layout) vkDestroyDescriptorSetLayout(m_device, m_layout, nullptr);
+    m_dummyBuffer = VK_NULL_HANDLE;
+    m_dummyBufferMemory = VK_NULL_HANDLE;
+    m_sampler = VK_NULL_HANDLE;
+    m_pool = VK_NULL_HANDLE;
+    m_layout = VK_NULL_HANDLE;
+    m_device = VK_NULL_HANDLE;
 }
 
 VulkanImageResource VulkanTextureSystem::Upload(
@@ -334,10 +356,27 @@ void VulkanTextureSystem::Bind(
         0, 1, &set, 0, nullptr);
 }
 
+VulkanGraphicsTexture::VulkanGraphicsTexture(
+    std::shared_ptr<VulkanTextureSystem> system, VulkanImageResource image)
+    : m_system(std::move(system)), m_image(image)
+{
+    if (m_system) m_system->RegisterTexture(this);
+}
+
+void VulkanGraphicsTexture::ReleaseImage(VkDevice device)
+{
+    if (device) VulkanDestroyImage(device, m_image);
+    m_image = {};
+}
+
 VulkanGraphicsTexture::~VulkanGraphicsTexture()
 {
     if (m_system)
-        VulkanDestroyImage(m_system->GetDevice(), m_image);
+    {
+        const VkDevice device = m_system->GetDevice();
+        m_system->UnregisterTexture(this);
+        ReleaseImage(device);
+    }
 }
 
 std::shared_ptr<Engine::Graphics::IGraphicsTexture> VulkanTextureFactory::CreateTexture2D(

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Scene xmlns:components="urn:engine-components" version="1">
+  <settings showGrid="false" gridHalfSize="160" gridCellSize="1" gridOpacity="0.1" gridFadeDistance="280" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" renderMode="0" sceneViewUiOverlay="false">
+    <gridColor><item>0.14</item><item>0.18</item><item>0.14</item></gridColor>
+    <gridOriginColor><item>0.42</item><item>0.72</item><item>0.3</item></gridOriginColor>
+    <ambientColor><item>0.18</item><item>0.2</item><item>0.17</item></ambientColor>
+  </settings>
+  <objects>
+    <item name="Long Range Terrain Camera" enabled="true">
+      <transform>
+        <Transform.position><item>-48</item><item>14</item><item>-8</item></Transform.position>
+        <Transform.rotation><item>0.55</item><item>0.35</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Camera Camera.active="true" Camera.useTransformRotation="true" Camera.fov="70" Camera.near="0.05" Camera.far="2500" Camera.orthographic="false" Camera.orthographicSize="5">
+          <Camera.target><item>0</item><item>0</item><item>0</item></Camera.target>
+          <Camera.up><item>0</item><item>1</item><item>0</item></Camera.up>
+        </components:Camera>
+        <components:TerrainStreamingCameraDriver TerrainStreamingCameraDriver.movementSpeed="160" TerrainStreamingCameraDriver.pauseAtEndpoints="0" TerrainStreamingCameraDriver.moveOnStart="true" TerrainStreamingCameraDriver.waitForInitialTerrain="true" TerrainStreamingCameraDriver.terrainObjectName="Long Range Terrain" TerrainStreamingCameraDriver.moveInfinitely="true" TerrainStreamingCameraDriver.lookInMovementDirection="true" TerrainStreamingCameraDriver.downwardLook="0.35" TerrainStreamingCameraDriver.secondsPerUpdate="0.016666667">
+          <TerrainStreamingCameraDriver.startPosition><item>-768</item><item>80</item><item>-256</item></TerrainStreamingCameraDriver.startPosition>
+          <TerrainStreamingCameraDriver.endPosition><item>1024</item><item>80</item><item>512</item></TerrainStreamingCameraDriver.endPosition>
+        </components:TerrainStreamingCameraDriver>
+      </components>
+      <children />
+    </item>
+    <item name="Long Range Terrain Sun" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>35</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0.8</item><item>-0.55</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Light Light.lightType="1" Light.intensity="2.7" Light.range="300" Light.falloff="1.5" Light.baked="false">
+          <Light.color><item>1</item><item>0.94</item><item>0.8</item></Light.color>
+        </components:Light>
+      </components>
+      <children />
+    </item>
+    <item name="Long Range Terrain" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>0</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:PerlinNoiseField PerlinNoiseField.seed="9187" PerlinNoiseField.frequency="0.035" PerlinNoiseField.octaves="4" PerlinNoiseField.lacunarity="2" PerlinNoiseField.persistence="0.5">
+          <PerlinNoiseField.coordinateOffset><item>41</item><item>0</item><item>-27</item></PerlinNoiseField.coordinateOffset>
+        </components:PerlinNoiseField>
+        <components:TerrainGen TerrainGen.viewerObjectName="Long Range Terrain Camera" TerrainGen.noiseObjectName="" TerrainGen.chunkSize="128" TerrainGen.viewRadiusInChunks="8" TerrainGen.maxChunkBuildsPerUpdate="16" TerrainGen.parallelChunkBuilds="4" TerrainGen.maxChunkCommitsPerUpdate="1" TerrainGen.maxChunkUnloadsPerUpdate="2" TerrainGen.cacheUnloadedChunkMeshes="false" TerrainGen.unloadedMeshCacheCapacity="64" TerrainGen.horizontalCellsPerChunk="24" TerrainGen.verticalCells="16" TerrainGen.patchesPerAxis="1" TerrainGen.terrainShape="0" TerrainGen.heightStep="1" TerrainGen.verticalSize="96" TerrainGen.baseHeight="0" TerrainGen.heightAmplitude="36" TerrainGen.caveStrength="2.1" TerrainGen.caveFrequencyMultiplier="2.35" TerrainGen.isoLevel="0" TerrainGen.textureScale="32" TerrainGen.lowHeightMaximum="-8" TerrainGen.middleHeightMaximum="14" TerrainGen.generateColliders="false">
+          <TerrainGen.lowHeightColor><item>0.12</item><item>0.28</item><item>0.58</item></TerrainGen.lowHeightColor>
+          <TerrainGen.middleHeightColor><item>0.18</item><item>0.58</item><item>0.2</item></TerrainGen.middleHeightColor>
+          <TerrainGen.highHeightColor><item>0.66</item><item>0.56</item><item>0.38</item></TerrainGen.highHeightColor>
+        </components:TerrainGen>
+      </components>
+      <children />
+    </item>
+  </objects>
+</Scene>

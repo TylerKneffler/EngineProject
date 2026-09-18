@@ -4,6 +4,7 @@
 #include <wrl/client.h>
 #include <d3d11.h>
 #include <dxgi.h>
+#include <dxgi1_5.h>
 
 namespace Engine::Renderers
 {
@@ -17,9 +18,12 @@ public:
     uint32_t GetHeight() const override { return m_height; }
     void Clear(float r, float g, float b, float a = 1.0f) override;
     Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override { return m_graphicsProvider.get(); }
+    void WaitIdle() override;
     void BeginFrame() override;
     void EndFrame() override;
     std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateFrameGraphicsContext() override;
+    Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const override
+    { return m_frameTelemetry; }
 
 private:
     void CreateTargets();
@@ -32,5 +36,9 @@ private:
     std::unique_ptr<D3D11GraphicsProvider> m_graphicsProvider;
     uint32_t m_width = 0;
     uint32_t m_height = 0;
+    bool m_flipModelSwapChain = false;
+    bool m_allowTearing = false;
+    UINT m_swapChainFlags = 0;
+    Engine::Graphics::FrameTimingTelemetry m_frameTelemetry{};
 };
 }

@@ -9,6 +9,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cmath>
+#include <unordered_map>
 
 namespace Engine::Components
 {
@@ -180,6 +181,9 @@ static void ParseFaceToken(const std::string& t, int& vi, int& vti, int& vni)
 void Mesh::LoadFromFile(const std::string& path)
 {
     MarkConfigurationDirty();
+    m_terrainVertices.clear();
+    m_indices.clear();
+    m_indexBuffer.reset();
     m_filePath = path;  // store for serialization
     const std::filesystem::path resolvedPath = ResolveFilePath(path);
     if (resolvedPath.filename() == "sphere.obj")
@@ -312,7 +316,13 @@ bool Mesh::SetDeformedVertices(const std::vector<Vertex>& vertices)
     // A real portal cut adds intersection vertices, so the two clipped halves
     // generally contain more vertices than the original mesh. Recreate the
     // upload buffer when its size changes instead of rejecting the cut.
-    if (vertices.size() != m_vertices.size())
+    m_terrainVertices.clear();
+    m_indices.clear();
+    m_indexBuffer.reset();
+    const bool sizeChanged = vertices.size() != m_vertices.size();
+    const bool canReuseBuffer = m_vertexBuffer &&
+        byteSize <= m_vertexBuffer->GetSize();
+    if (sizeChanged && !canReuseBuffer)
     {
         if (m_vertexBuffer || m_bufferFactory)
         {
@@ -347,6 +357,197 @@ bool Mesh::SetDeformedVertices(const std::vector<Vertex>& vertices)
     }
     MarkConfigurationDirty();
     return true;
+}
+
+bool Mesh::SetDeformedVertices(std::vector<Vertex>&& vertices)
+{
+    const size_t byteSize = vertices.size() * sizeof(Vertex);
+    if (byteSize == 0 ||
+        (vertices.size() == m_vertices.size() &&
+         std::memcmp(vertices.data(), m_vertices.data(), byteSize) == 0))
+        return false;
+
+    m_terrainVertices.clear();
+    m_indices.clear();
+    m_indexBuffer.reset();
+    const bool sizeChanged = vertices.size() != m_vertices.size();
+    const bool canReuseBuffer = m_vertexBuffer &&
+        byteSize <= m_vertexBuffer->GetSize();
+    if (sizeChanged && !canReuseBuffer && (m_vertexBuffer || m_bufferFactory))
+    {
+        if (!m_bufferFactory)
+            return false;
+        auto replacement = m_bufferFactory->CreateBuffer(
+            IGraphicsBuffer::Usage::VertexBuffer,
+            IGraphicsBuffer::AccessMode::Upload, byteSize, vertices.data());
+        if (!replacement)
+            return false;
+        m_vertexBuffer = std::move(replacement);
+    }
+
+    m_vertices = std::move(vertices);
+    UpdateBounds();
+    m_ready = true;
+    if (m_vertexBuffer && (!sizeChanged || canReuseBuffer))
+    {
+        if (void* mapped = m_vertexBuffer->Map())
+        {
+            std::memcpy(mapped, m_vertices.data(), byteSize);
+            m_vertexBuffer->Unmap();
+        }
+    }
+    MarkConfigurationDirty();
+    return true;
+}
+
+std::vector<Mesh::Vertex> Mesh::TakeVertices()
+{
+    m_ready = false;
+    m_hasBounds = false;
+    MarkConfigurationDirty();
+    return std::move(m_vertices);
+}
+
+namespace
+{
+struct TerrainVertexHash
+{
+    size_t operator()(const Engine::Model::TerrainVertex& vertex) const noexcept
+    {
+        const auto* bytes = reinterpret_cast<const uint8_t*>(&vertex);
+        size_t hash = sizeof(size_t) == 8
+            ? static_cast<size_t>(1469598103934665603ull)
+            : static_cast<size_t>(2166136261u);
+        const size_t prime = sizeof(size_t) == 8
+            ? static_cast<size_t>(1099511628211ull)
+            : static_cast<size_t>(16777619u);
+        for (size_t i = 0; i < sizeof(vertex); ++i)
+            hash = (hash ^ bytes[i]) * prime;
+        return hash;
+    }
+};
+
+struct TerrainVertexEqual
+{
+    bool operator()(const Engine::Model::TerrainVertex& first,
+        const Engine::Model::TerrainVertex& second) const noexcept
+    {
+        return std::memcmp(&first, &second, sizeof(first)) == 0;
+    }
+};
+}
+
+Mesh::TerrainMeshData Mesh::BuildIndexedTerrain(
+    const std::vector<Vertex>& vertices)
+{
+    TerrainMeshData result;
+    result.vertices.reserve(vertices.size());
+    result.indices.reserve(vertices.size());
+    std::unordered_map<TerrainVertex, uint32_t,
+        TerrainVertexHash, TerrainVertexEqual> unique;
+    unique.reserve(vertices.size());
+    for (const Vertex& source : vertices)
+    {
+        TerrainVertex packed{};
+        std::memcpy(packed.pos, source.pos, sizeof(packed.pos));
+        std::memcpy(packed.normal, source.normal, sizeof(packed.normal));
+        std::memcpy(packed.uv, source.uv, sizeof(packed.uv));
+        std::memcpy(packed.color, source.color, sizeof(packed.color));
+        const auto [iterator, inserted] = unique.emplace(
+            packed, static_cast<uint32_t>(result.vertices.size()));
+        if (inserted)
+            result.vertices.push_back(packed);
+        result.indices.push_back(iterator->second);
+    }
+    result.vertices.shrink_to_fit();
+    result.indices.shrink_to_fit();
+    return result;
+}
+
+bool Mesh::SetTerrainGeometry(TerrainMeshData&& geometry,
+    bool retainExpandedVertices)
+{
+    if (geometry.vertices.empty() || geometry.indices.empty())
+        return false;
+
+    m_terrainVertices = std::move(geometry.vertices);
+    m_indices = std::move(geometry.indices);
+    m_vertices.clear();
+    if (retainExpandedVertices)
+    {
+        m_vertices.reserve(m_indices.size());
+        for (uint32_t index : m_indices)
+        {
+            if (index >= m_terrainVertices.size())
+                continue;
+            const TerrainVertex& source = m_terrainVertices[index];
+            Vertex expanded{};
+            std::memcpy(expanded.pos, source.pos, sizeof(source.pos));
+            std::memcpy(expanded.normal, source.normal, sizeof(source.normal));
+            std::memcpy(expanded.uv, source.uv, sizeof(source.uv));
+            std::memcpy(expanded.color, source.color, sizeof(source.color));
+            m_vertices.push_back(expanded);
+        }
+    }
+
+    UpdateBounds();
+    const uint64_t vertexBytes = static_cast<uint64_t>(m_terrainVertices.size()) *
+        sizeof(TerrainVertex);
+    const uint64_t indexBytes = static_cast<uint64_t>(m_indices.size()) *
+        sizeof(uint32_t);
+    if (m_bufferFactory)
+    {
+        const auto upload = [&](std::unique_ptr<IGraphicsBuffer>& buffer,
+            IGraphicsBuffer::Usage usage, uint64_t byteCount, const void* data)
+        {
+            if (!buffer || buffer->GetSize() < byteCount)
+                buffer = m_bufferFactory->CreateBuffer(usage,
+                    IGraphicsBuffer::AccessMode::Upload, byteCount, data);
+            else if (void* mapped = buffer->Map())
+            {
+                std::memcpy(mapped, data, static_cast<size_t>(byteCount));
+                buffer->Unmap();
+            }
+            return buffer != nullptr;
+        };
+        if (!upload(m_vertexBuffer, IGraphicsBuffer::Usage::VertexBuffer,
+                vertexBytes, m_terrainVertices.data()) ||
+            !upload(m_indexBuffer, IGraphicsBuffer::Usage::IndexBuffer,
+                indexBytes, m_indices.data()))
+            return false;
+    }
+    m_ready = m_bufferFactory == nullptr || (m_vertexBuffer && m_indexBuffer);
+    MarkConfigurationDirty();
+    return true;
+}
+
+Mesh::TerrainMeshData Mesh::TakeTerrainGeometry()
+{
+    TerrainMeshData result{ std::move(m_terrainVertices), std::move(m_indices) };
+    m_vertices.clear();
+    m_ready = false;
+    m_hasBounds = false;
+    MarkConfigurationDirty();
+    return result;
+}
+
+uint64_t Mesh::GetCpuMeshMemoryBytes() const
+{
+    return static_cast<uint64_t>(m_vertices.capacity()) * sizeof(Vertex) +
+        static_cast<uint64_t>(m_terrainVertices.capacity()) * sizeof(TerrainVertex) +
+        static_cast<uint64_t>(m_indices.capacity()) * sizeof(uint32_t);
+}
+
+uint64_t Mesh::GetUploadShadowMemoryBytes() const
+{
+    return (m_vertexBuffer ? m_vertexBuffer->GetUploadShadowSize() : 0u) +
+        (m_indexBuffer ? m_indexBuffer->GetUploadShadowSize() : 0u);
+}
+
+uint64_t Mesh::GetGpuBufferMemoryBytes() const
+{
+    return (m_vertexBuffer ? m_vertexBuffer->GetSize() : 0u) +
+        (m_indexBuffer ? m_indexBuffer->GetSize() : 0u);
 }
 
 void Mesh::InitializeRuntimeCloneFrom(const Mesh& source)
@@ -415,22 +616,28 @@ uint64_t Mesh::GetMorphWeightsRevision() const
 
 void Mesh::UpdateBounds()
 {
-    m_hasBounds = !m_vertices.empty();
+    m_hasBounds = !m_terrainVertices.empty() || !m_vertices.empty();
     if (!m_hasBounds)
     {
         m_boundsMin = {};
         m_boundsMax = {};
         return;
     }
-    m_boundsMin = { m_vertices.front().pos[0], m_vertices.front().pos[1],
-        m_vertices.front().pos[2] };
+    const float* firstPosition = !m_terrainVertices.empty()
+        ? m_terrainVertices.front().pos : m_vertices.front().pos;
+    m_boundsMin = { firstPosition[0], firstPosition[1], firstPosition[2] };
     m_boundsMax = m_boundsMin;
-    for (const Vertex& vertex : m_vertices)
+    const auto includePosition = [&](const float* positionValues)
     {
-        const glm::vec3 position(vertex.pos[0], vertex.pos[1], vertex.pos[2]);
+        const glm::vec3 position(positionValues[0], positionValues[1],
+            positionValues[2]);
         m_boundsMin = glm::min(m_boundsMin, position);
         m_boundsMax = glm::max(m_boundsMax, position);
-    }
+    };
+    for (const Vertex& vertex : m_vertices)
+        includePosition(vertex.pos);
+    for (const TerrainVertex& vertex : m_terrainVertices)
+        includePosition(vertex.pos);
 }
 
 bool Mesh::SaveNativeFile(const std::string& path, const std::vector<Vertex>& vertices)
@@ -897,10 +1104,28 @@ Mesh::SliceResult Mesh::SliceByPlane(const std::vector<Vertex>& vertices,
 
 void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory)
 {
-    if (!bufferFactory || m_vertices.empty())
+    if (!bufferFactory || (m_vertices.empty() && m_terrainVertices.empty()))
         return;
 
     m_bufferFactory = bufferFactory;
+    if (!m_terrainVertices.empty())
+    {
+        const uint64_t vertexBytes = static_cast<uint64_t>(
+            m_terrainVertices.size()) * sizeof(TerrainVertex);
+        const uint64_t indexBytes = static_cast<uint64_t>(m_indices.size()) *
+            sizeof(uint32_t);
+        m_vertexBuffer = bufferFactory->CreateBuffer(
+            IGraphicsBuffer::Usage::VertexBuffer,
+            IGraphicsBuffer::AccessMode::Upload, vertexBytes,
+            m_terrainVertices.data());
+        m_indexBuffer = bufferFactory->CreateBuffer(
+            IGraphicsBuffer::Usage::IndexBuffer,
+            IGraphicsBuffer::AccessMode::Upload, indexBytes, m_indices.data());
+        if (!m_vertexBuffer || !m_indexBuffer)
+            throw std::runtime_error("Failed to create indexed terrain buffers");
+        m_ready = true;
+        return;
+    }
     const uint64_t byteSize = m_vertices.size() * sizeof(Vertex);
 
     // Create upload buffer through the graphics factory
@@ -920,8 +1145,9 @@ void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory)
 bool Mesh::DrawProperties(::Engine::Editor::IEditorUi& ui)
 {
     ui.ValueLabel("Asset", m_filePath.empty() ? "(generated mesh)" : m_filePath.c_str());
-    const std::string vertexCount = std::to_string(m_vertices.size());
-    const std::string triangleCount = std::to_string(m_vertices.size() / 3);
+    const std::string vertexCount = std::to_string(GetVertexCount());
+    const std::string triangleCount = std::to_string(
+        m_indices.empty() ? m_vertices.size() / 3 : m_indices.size() / 3);
     ui.ValueLabel("Vertices", vertexCount.c_str());
     ui.ValueLabel("Triangles", triangleCount.c_str());
     ui.ValueLabel("GPU Buffer", m_ready ? "Ready" : "Not prepared");

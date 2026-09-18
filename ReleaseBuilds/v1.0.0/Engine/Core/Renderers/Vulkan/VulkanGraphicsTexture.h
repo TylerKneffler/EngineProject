@@ -7,6 +7,7 @@
 #include <array>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 
 
 namespace Engine::Renderers
@@ -23,6 +24,9 @@ public:
         VkQueue queue,
         uint32_t queueFamily);
     ~VulkanTextureSystem();
+    void Shutdown();
+    void RegisterTexture(VulkanGraphicsTexture* texture);
+    void UnregisterTexture(VulkanGraphicsTexture* texture);
 
     std::shared_ptr<VulkanGraphicsTexture> CreateTexture(
         uint32_t width, uint32_t height, const uint8_t* rgbaPixels,
@@ -67,6 +71,7 @@ private:
     VkDeviceMemory m_dummyBufferMemory = VK_NULL_HANDLE;
     VulkanImageResource m_white;
     std::unordered_map<TextureKey, VkDescriptorSet, TextureKeyHash> m_sets;
+    std::unordered_set<VulkanGraphicsTexture*> m_liveTextures;
 };
 
 class VulkanGraphicsTexture final : public Engine::Graphics::IGraphicsTexture
@@ -74,8 +79,7 @@ class VulkanGraphicsTexture final : public Engine::Graphics::IGraphicsTexture
 public:
     VulkanGraphicsTexture(
         std::shared_ptr<VulkanTextureSystem> system,
-        VulkanImageResource image)
-        : m_system(std::move(system)), m_image(image) {}
+        VulkanImageResource image);
     ~VulkanGraphicsTexture() override;
     void* GetNativeHandle() const override
     {
@@ -84,6 +88,8 @@ public:
     VkImageView GetView() const { return m_image.view; }
 
 private:
+    friend class VulkanTextureSystem;
+    void ReleaseImage(VkDevice device);
     std::shared_ptr<VulkanTextureSystem> m_system;
     VulkanImageResource m_image;
 };

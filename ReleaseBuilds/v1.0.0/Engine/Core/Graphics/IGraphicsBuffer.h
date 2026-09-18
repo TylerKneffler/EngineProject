@@ -34,14 +34,19 @@ public:
     virtual AccessMode GetAccessMode() const = 0;
     virtual uint64_t GetSize() const = 0;
     virtual uint32_t GetElementStride() const { return 0; }
+    // Extra system-memory copy retained by a backend for deferred uploads.
+    // This is separate from both the owning mesh and the native GPU buffer.
+    virtual uint64_t GetUploadShadowSize() const { return 0; }
 
     // Map for CPU access (for Upload buffers)
     // Returns nullptr if buffer is not mappable
     virtual void* Map() = 0;
     virtual void Unmap() = 0;
-    // Makes persistently mapped writes visible when a backend uses a CPU
-    // shadow allocation (currently D3D11). Other backends are coherent.
-    virtual void FlushMappedWrites() {}
+    // Makes a written byte range visible when a backend uses a CPU shadow
+    // allocation (currently D3D11). Other backends are coherent. UINT64_MAX
+    // means the remainder of the buffer.
+    virtual void FlushMappedWrites(uint64_t = 0,
+        uint64_t = UINT64_MAX) {}
 
     // For internal use: get D3D12 GPU virtual address, Vulkan buffer, etc.
     // The actual type depends on the graphics API

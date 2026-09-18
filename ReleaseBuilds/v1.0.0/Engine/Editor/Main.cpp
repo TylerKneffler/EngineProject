@@ -351,6 +351,10 @@ int WINAPI wWinMain(
         Engine::Core::SceneManager::CancelPendingSceneLoad();
         editorState->RestorePlayModeScene();
     };
+    editorState->OnSceneLoadRequested = [&](const std::string&)
+    {
+        gameBuildManager->Stop();
+    };
 
     // Frame timing
     OutputDebugStringA("[Main] Setting up frame timing...\n");
@@ -397,6 +401,11 @@ int WINAPI wWinMain(
     };
     window->OnInputBegin = [&]() { uiBackend->BeginInput(); };
     window->OnInputEnd = [&]() { uiBackend->EndInput(); };
+    window->OnEscapePressed = [&]()
+    {
+        uiBackend->ClearFocus();
+        renderer->MarkDirty();
+    };
     OutputDebugStringA("[Main] WndProcHook callback set\n");
 
     OutputDebugStringA("[Main] Setting OnUpdate callback...\n");

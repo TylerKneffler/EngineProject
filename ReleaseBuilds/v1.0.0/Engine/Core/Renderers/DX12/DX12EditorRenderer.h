@@ -62,6 +62,7 @@ public:
     uint32_t GetHeight() const override { return m_height; }
     void Clear(float r, float g, float b, float a = 1.0f) override;
     Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override;
+    void WaitIdle() override { FlushGPU(); }
 
     // IEditorRenderer interface
     void MarkDirty() override { m_dirty = true; }

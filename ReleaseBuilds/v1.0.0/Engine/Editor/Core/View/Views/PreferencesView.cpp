@@ -7,9 +7,11 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <sstream>
 
 #ifndef ENGINE_SHADERS_PATH
 #define ENGINE_SHADERS_PATH "Engine/Core/Shaders/"
@@ -690,6 +692,103 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
     ui.SameLine(); ui.DisabledLabel("Editor Viewport Height");
 
     ui.Separator();
+    ui.Label("Distance Lighting Quality");
+    ui.DisabledLabel("Selects cheaper lighting for objects farther from the active camera.");
+    auto& distanceLighting = m_settings.distanceLighting;
+    if (ui.Checkbox("Enable Distance Lighting Quality", &distanceLighting.enabled))
+        NotifyChanged();
+    if (ui.DragFloat("Maximum Lighting Distance", &distanceLighting.maximumDistance,
+            10.f, 1.f, 100000.f))
+    {
+        distanceLighting.maximumDistance = std::max(1.f,
+            distanceLighting.maximumDistance);
+        for (auto& band : distanceLighting.bands)
+            band.endDistance = std::clamp(band.endDistance, 0.f,
+                distanceLighting.maximumDistance);
+        NotifyChanged();
+    }
+
+    const float maximumDistance = std::max(1.f,
+        distanceLighting.maximumDistance);
+    std::ostringstream distanceScale;
+    distanceScale << "0  |  " << static_cast<int>(maximumDistance * 0.25f)
+        << "  |  " << static_cast<int>(maximumDistance * 0.5f)
+        << "  |  " << static_cast<int>(maximumDistance * 0.75f)
+        << "  |  " << static_cast<int>(maximumDistance) << " units";
+    ui.DisabledLabel(distanceScale.str().c_str());
+
+    int removeBand = -1;
+    for (size_t index = 0; index < distanceLighting.bands.size(); ++index)
+    {
+        auto& band = distanceLighting.bands[index];
+        ui.PushId(&band);
+        ui.Spacing();
+        char name[64]{};
+        std::snprintf(name, sizeof(name), "%s", band.name.c_str());
+        if (ui.InputText("Quality Name", name, sizeof(name)))
+        {
+            band.name = name;
+            NotifyChanged();
+        }
+        const float startDistance = index == 0 ? 0.f
+            : distanceLighting.bands[index - 1].endDistance;
+        const float endLimit = index + 1 < distanceLighting.bands.size()
+            ? distanceLighting.bands[index + 1].endDistance
+            : maximumDistance;
+        if (ui.SliderFloat("Range End", &band.endDistance,
+                startDistance, std::max(startDistance, endLimit)))
+        {
+            band.endDistance = std::clamp(band.endDistance,
+                startDistance, std::max(startDistance, endLimit));
+            NotifyChanged();
+        }
+        if (ui.InputUInt("Maximum Realtime Lights", &band.maxRealtimeLights))
+        {
+            band.maxRealtimeLights = std::min(band.maxRealtimeLights,
+                Engine::Model::MaxRealtimeLights);
+            NotifyChanged();
+        }
+        if (ui.Checkbox("Normal Mapping", &band.normalMapping)) NotifyChanged();
+        if (ui.Checkbox("Parallax Mapping", &band.parallaxMapping)) NotifyChanged();
+        if (ui.Checkbox("Environment Diffuse", &band.environmentDiffuse)) NotifyChanged();
+        if (ui.Checkbox("Reflections", &band.reflections)) NotifyChanged();
+        ui.BeginDisabled(distanceLighting.bands.size() <= 1);
+        if (ui.Button("Remove Quality"))
+            removeBand = static_cast<int>(index);
+        ui.EndDisabled();
+        ui.PopId();
+    }
+    if (removeBand >= 0)
+    {
+        distanceLighting.bands.erase(distanceLighting.bands.begin() + removeBand);
+        NotifyChanged();
+    }
+    ui.BeginDisabled(distanceLighting.bands.size() >= 8);
+    if (ui.Button("Add Lighting Quality"))
+    {
+        Engine::Model::DistanceLightingBand band;
+        band.name = "Quality " + std::to_string(distanceLighting.bands.size() + 1);
+        band.endDistance = maximumDistance;
+        if (!distanceLighting.bands.empty())
+        {
+            auto& previous = distanceLighting.bands.back();
+            const float rangeStart = distanceLighting.bands.size() > 1
+                ? distanceLighting.bands[distanceLighting.bands.size() - 2].endDistance
+                : 0.f;
+            previous.endDistance = rangeStart +
+                (previous.endDistance - rangeStart) * 0.5f;
+            band = previous;
+            band.name = "Quality " + std::to_string(distanceLighting.bands.size() + 1);
+            band.endDistance = maximumDistance;
+        }
+        distanceLighting.bands.push_back(std::move(band));
+        NotifyChanged();
+    }
+    ui.EndDisabled();
+    ui.Tooltip("Each band applies from the previous marker to its Range End. "
+        "Baked lighting remains available; these switches reduce realtime pixel-lighting cost.");
+
+    ui.Separator();
     ui.Label("Baked Lighting");
     if (ui.InputUInt("Lightmap Resolution", &m_settings.bakedLighting.lightmapResolution))
         NotifyChanged();
@@ -854,6 +953,33 @@ bool PreferencesView::SaveSettings()
                     std::to_string(m_settings.bakedLighting.dilationPasses));
                 setBakeValue("BakedPreserveSourceEmission",
                     m_settings.bakedLighting.accumulate ? "true" : "false");
+
+                auto distanceNode = prop.child("DistanceLighting");
+                if (!distanceNode)
+                    distanceNode = prop.append_child("DistanceLighting");
+                distanceNode.remove_attributes();
+                distanceNode.append_attribute("Enabled").set_value(
+                    m_settings.distanceLighting.enabled);
+                distanceNode.append_attribute("MaximumDistance").set_value(
+                    m_settings.distanceLighting.maximumDistance);
+                while (auto bandNode = distanceNode.child("Band"))
+                    distanceNode.remove_child(bandNode);
+                for (const auto& band : m_settings.distanceLighting.bands)
+                {
+                    auto bandNode = distanceNode.append_child("Band");
+                    bandNode.append_attribute("Name").set_value(band.name.c_str());
+                    bandNode.append_attribute("EndDistance").set_value(band.endDistance);
+                    bandNode.append_attribute("MaxRealtimeLights").set_value(
+                        band.maxRealtimeLights);
+                    bandNode.append_attribute("NormalMapping").set_value(
+                        band.normalMapping);
+                    bandNode.append_attribute("ParallaxMapping").set_value(
+                        band.parallaxMapping);
+                    bandNode.append_attribute("EnvironmentDiffuse").set_value(
+                        band.environmentDiffuse);
+                    bandNode.append_attribute("Reflections").set_value(
+                        band.reflections);
+                }
             }
 
             auto modeNode = prop.child("AspectRatioMode");

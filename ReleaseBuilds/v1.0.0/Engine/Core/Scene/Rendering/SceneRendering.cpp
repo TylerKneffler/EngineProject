@@ -240,7 +240,11 @@ constexpr uint32_t kPortalDepthResetFlag = 0x80000000u;
 // Large, indexed records live in shader-readable buffers on every backend.
 struct ObjectGPUData
 {
-    glm::mat4 mvp;
+    // Kept separate from world so adjoining meshes transform a shared world
+    // position through exactly the same view-projection arithmetic. Baking
+    // world into this matrix per object can expose sub-pixel cracks between
+    // otherwise identical terrain borders.
+    glm::mat4 viewProjection;
     glm::mat4 world;
     glm::vec4 baseColor;
     glm::vec4 ambientUnlit;
@@ -348,11 +352,24 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     m_objectDataBuffer = bufferFactory->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
         Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
-        static_cast<uint64_t>(kObjectRenderSlotCount) * sizeof(ObjectGPUData),
+        static_cast<uint64_t>(kOrdinaryObjectSlotCount) * sizeof(ObjectGPUData),
         nullptr, sizeof(ObjectGPUData));
     m_objectDataMapped = m_objectDataBuffer ? m_objectDataBuffer->Map() : nullptr;
     if (!m_objectDataMapped)
         throw std::runtime_error("Failed to create object structured buffer");
+
+    // Portal recursion has a much larger worst-case record count than an
+    // ordinary view. Keep it separate so terrain-only frames never upload or
+    // invalidate the reserved portal address space.
+    m_portalObjectDataBuffer = bufferFactory->CreateBuffer(
+        Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+        static_cast<uint64_t>(kPortalObjectSlotCount) * sizeof(ObjectGPUData),
+        nullptr, sizeof(ObjectGPUData));
+    m_portalObjectDataMapped = m_portalObjectDataBuffer
+        ? m_portalObjectDataBuffer->Map() : nullptr;
+    if (!m_portalObjectDataMapped)
+        throw std::runtime_error("Failed to create portal object structured buffer");
 
     m_lightDataBuffer = bufferFactory->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
@@ -367,7 +384,8 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     m_boneDataBuffer = bufferFactory->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
         Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
-        static_cast<uint64_t>(kMaxObjects) * kMaxBonesPerObject * sizeof(glm::mat4),
+        static_cast<uint64_t>(kMaxSkinnedObjects) * kMaxBonesPerObject *
+            sizeof(glm::mat4),
         nullptr, sizeof(glm::mat4));
     m_boneDataMapped = m_boneDataBuffer ? m_boneDataBuffer->Map() : nullptr;
     if (!m_boneDataMapped)
@@ -376,8 +394,8 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     m_portalApertureBuffer = bufferFactory->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::VertexBuffer,
         Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
-        static_cast<uint64_t>(kMaxObjects) * kMaxSpatialVerticesPerObject *
-            sizeof(Engine::Model::Vertex));
+        static_cast<uint64_t>(kMaxSpatialObjects) * kMaxSpatialVerticesPerObject *
+            sizeof(Engine::Model::AnimationVertex));
     m_portalApertureMapped = m_portalApertureBuffer
         ? m_portalApertureBuffer->Map() : nullptr;
     if (!m_portalApertureMapped)
@@ -624,6 +642,12 @@ void Scene::BuildObjectPipeline()
         Engine::Graphics::IShaderCompiler::CompileProfile::VS_5_0);
     if (!vsShader)
         throw std::runtime_error("Failed to compile object vertex shader: " + shaderCompiler->GetLastError());
+    auto terrainVsShader = shaderCompiler->CompileFromFile(
+        shaderPath.c_str(), "VSTerrainMain",
+        Engine::Graphics::IShaderCompiler::CompileProfile::VS_5_0);
+    if (!terrainVsShader)
+        throw std::runtime_error("Failed to compile terrain vertex shader: " +
+            shaderCompiler->GetLastError());
 
     auto psShader = shaderCompiler->CompileFromFile(
         shaderPath.c_str(),
@@ -646,6 +670,14 @@ void Scene::BuildObjectPipeline()
         { "JOINTS",   1, 2, 0, 104, false },
         { "WEIGHTS",  1, 2, 0, 120, false },
     };
+    Engine::Graphics::IPipelineStateBuilder::VertexElement terrainLayout[] =
+    {
+        { "POSITION", 0, 6, 0,  0, false },
+        { "NORMAL",   0, 6, 0, 12, false },
+        { "TEXCOORD", 0, 16, 0, 24, false },
+        { "COLOR",    0, 2, 0, 32, false },
+    };
+    m_terrainPipelineByBase.clear();
 
     enum class PortalStencilMode
     {
@@ -656,18 +688,20 @@ void Scene::BuildObjectPipeline()
         Read
     };
 
-    auto buildMaterialPipeline = [&](bool doubleSided, bool blend,
+    auto buildMaterialPipelineVariant = [&](bool doubleSided, bool blend,
                                      bool wireframe,
                                      PortalStencilMode stencilMode,
                                      bool colorWriteEnabled,
-                                     const char* description)
+                                     const char* description,
+                                     bool terrainFormat)
     {
         auto materialBuilder = pipelineFactory->CreateBuilder();
         if (!materialBuilder)
             throw std::runtime_error(
                 std::string("Failed to create ") + description +
                 " pipeline state builder");
-        auto& state = materialBuilder->SetVertexShader(vsShader.get())
+        auto& state = materialBuilder->SetVertexShader(
+                terrainFormat ? terrainVsShader.get() : vsShader.get())
             .SetPixelShader(psShader.get())
             .SetFillMode(wireframe)
             .SetCullMode(!doubleSided)
@@ -735,7 +769,8 @@ void Scene::BuildObjectPipeline()
                 stencilMode == PortalStencilMode::Write ||
                 stencilMode == PortalStencilMode::Increment
                 ? 3 : (blend ? 3 : 1))
-            .SetInputLayout(layout, 10)
+            .SetInputLayout(terrainFormat ? terrainLayout : layout,
+                terrainFormat ? 4u : 10u)
             .SetPrimitiveTopology(
                 Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
             .SetRenderTargetFormat(28, 20)
@@ -745,6 +780,20 @@ void Scene::BuildObjectPipeline()
                 std::string("Failed to build ") + description +
                 " pipeline: " + materialBuilder->GetLastError());
         return pipeline;
+    };
+
+    auto buildMaterialPipeline = [&](bool doubleSided, bool blend,
+                                     bool wireframe,
+                                     PortalStencilMode stencilMode,
+                                     bool colorWriteEnabled,
+                                     const char* description)
+    {
+        auto base = buildMaterialPipelineVariant(doubleSided, blend,
+            wireframe, stencilMode, colorWriteEnabled, description, false);
+        auto terrain = buildMaterialPipelineVariant(doubleSided, blend,
+            wireframe, stencilMode, colorWriteEnabled, description, true);
+        m_terrainPipelineByBase.emplace(base.get(), std::move(terrain));
+        return base;
     };
 
     m_objectPipeline =
@@ -889,6 +938,12 @@ void Scene::BuildObjectPipeline()
         Engine::Graphics::IShaderCompiler::CompileProfile::VS_5_0);
     if (!outlineVsShader)
         throw std::runtime_error("Failed to compile object outline vertex shader: " + shaderCompiler->GetLastError());
+    auto terrainOutlineVsShader = shaderCompiler->CompileFromFile(
+        outlineShaderPath.c_str(), "VSTerrainMain",
+        Engine::Graphics::IShaderCompiler::CompileProfile::VS_5_0);
+    if (!terrainOutlineVsShader)
+        throw std::runtime_error("Failed to compile terrain outline vertex shader: " +
+            shaderCompiler->GetLastError());
 
     auto outlinePsShader = shaderCompiler->CompileFromFile(
         outlineShaderPath.c_str(),
@@ -914,6 +969,30 @@ void Scene::BuildObjectPipeline()
         .Build();
     if (!m_objectOutlinePipeline)
         throw std::runtime_error("Failed to build object outline pipeline: " + outlineBuilder->GetLastError());
+
+    auto terrainOutlineBuilder = pipelineFactory->CreateBuilder();
+    if (!terrainOutlineBuilder)
+        throw std::runtime_error("Failed to create terrain outline pipeline builder");
+    auto terrainOutline = terrainOutlineBuilder
+        ->SetVertexShader(terrainOutlineVsShader.get())
+        .SetPixelShader(outlinePsShader.get())
+        .SetFillMode(true)
+        .SetCullMode(false)
+        .SetFrontCounterClockwise(false)
+        .SetDepthClipEnable(true)
+        .SetBlendEnable(false)
+        .SetDepthEnable(true)
+        .SetDepthWriteEnable(false)
+        .SetDepthFunc(3)
+        .SetInputLayout(terrainLayout, 4)
+        .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
+        .SetRenderTargetFormat(28, 20)
+        .Build();
+    if (!terrainOutline)
+        throw std::runtime_error("Failed to build terrain outline pipeline: " +
+            terrainOutlineBuilder->GetLastError());
+    m_terrainPipelineByBase.emplace(m_objectOutlinePipeline.get(),
+        std::move(terrainOutline));
 }
 
 // ---------------------------------------------------------------------------
@@ -939,14 +1018,17 @@ void Scene::PrepareRenderFrame()
     // volumes, not on camera motion. A compact signature lets both editor and
     // runtime frames reuse static CPU deformation and its upload buffer.
     uint64_t warpRevision = 1469598103934665603ull;
-    std::function<void(const Engine::Core::Object*)> hashWarpObjects;
-    hashWarpObjects = [&](const Engine::Core::Object* object)
+    bool hasActiveWarpVolume = false;
+    const auto hashWarpObject = [&](const Engine::Core::Object* object)
     {
         if (!object)
             return;
         if (const auto* manipulator = object->GetComponent<
                 Engine::Components::SpatialManipulator>())
         {
+            hasActiveWarpVolume = hasActiveWarpVolume ||
+                (manipulator->enabled && manipulator->definesWarpVolume &&
+                    object->IsEnabledInHierarchy());
             HashRevision(warpRevision,
                 static_cast<uint64_t>(reinterpret_cast<uintptr_t>(manipulator)));
             HashRevision(warpRevision, manipulator->GetConfigurationRevision());
@@ -955,13 +1037,13 @@ void Scene::PrepareRenderFrame()
             HashRevision(warpRevision, manipulator->definesWarpVolume ? 1u : 0u);
             HashRevision(warpRevision, object->IsEnabledInHierarchy() ? 1u : 0u);
         }
-        for (const Engine::Core::Object* child : object->Children)
-            hashWarpObjects(child);
     };
     for (const auto& object : m_objects)
-        hashWarpObjects(object.get());
+        hashWarpObject(object.get());
 
     m_frameRenderItems.reserve(m_objects.size());
+    if (!hasActiveWarpVolume)
+        m_warpedRenderMeshes.clear();
     // The authored Mesh buffer cannot be changed for rendering a nonlinear
     // volume: it may also back a collider, an editor asset, or another draw.
     // Keep a private upload buffer for each affected object instead.
@@ -1024,7 +1106,19 @@ void Scene::PrepareRenderFrame()
             candidate->GetComponent<Engine::Rendering::BakedLightingData>();
         item.belongsToPreview = m_previewObject &&
             IsObjectOrDescendant(candidate, m_previewObject);
-        item.world = candidate->transform.GetWorldMatrixWithLayer();
+        glm::mat4 authoredWorld = candidate->transform.GetWorldMatrix();
+        if (candidate->transform.matrixLayer.enabled)
+        {
+            authoredWorld = candidate->transform.matrixLayer.localToLayer *
+                authoredWorld;
+        }
+        // The scene walk above already established that no nonlinear mapping
+        // is active. Avoid making every terrain patch independently scan the
+        // complete scene for warp volumes on every rendered frame.
+        item.world = hasActiveWarpVolume
+            ? MapSpatialMatrix(authoredWorld,
+                { SpatialQueryDomain::Rendering, candidate })
+            : authoredWorld;
         const auto splitInstances = traversalRenderInstances.find(candidate);
         const bool hasSplitRenderInstances = !sprite &&
             splitInstances != traversalRenderInstances.end() &&
@@ -1046,15 +1140,10 @@ void Scene::PrepareRenderFrame()
         // source/target chart draws, so retain their specialized path.
         const bool hasSkinnedMesh = candidate->GetComponent<
             Engine::Components::SkinnedMesh>() != nullptr;
-        if (mesh && !sprite && !hasSplitRenderInstances && !hasSkinnedMesh &&
+        if (hasActiveWarpVolume && mesh && !sprite &&
+            !hasSplitRenderInstances && !hasSkinnedMesh &&
             !mesh->GetVertices().empty())
         {
-            glm::mat4 authoredWorld = candidate->transform.GetWorldMatrix();
-            if (candidate->transform.matrixLayer.enabled)
-            {
-                authoredWorld = candidate->transform.matrixLayer.localToLayer *
-                    authoredWorld;
-            }
             WarpedRenderMesh& cached = m_warpedRenderMeshes[candidate];
             const uint64_t meshRevision = mesh->GetConfigurationRevision();
             const bool cacheValid = cached.evaluated &&
@@ -1084,15 +1173,15 @@ void Scene::PrepareRenderFrame()
                 SpatialQueryDomain::Rendering, candidate };
             const SpatialQuerySample originSample = SampleSpatialPoint(
                 glm::vec3(authoredWorld[3]), renderQuery);
-            std::vector<Engine::Model::Vertex> warpedVertices;
+            std::vector<Engine::Model::AnimationVertex> warpedVertices;
             warpedVertices.reserve(mesh->GetVertices().size());
             std::unordered_map<MeshPositionKey, SpatialQuerySample,
                 MeshPositionKeyHash> spatialSamples;
             spatialSamples.reserve(mesh->GetVertices().size());
             bool affectedByWarp = originSample.affectedByWarpVolume;
-            for (const Engine::Model::Vertex& sourceVertex : mesh->GetVertices())
+            for (const Engine::Model::AnimationVertex& sourceVertex : mesh->GetVertices())
             {
-                Engine::Model::Vertex warpedVertex = sourceVertex;
+                Engine::Model::AnimationVertex warpedVertex = sourceVertex;
                 const glm::vec3 localPosition(sourceVertex.pos[0],
                     sourceVertex.pos[1], sourceVertex.pos[2]);
                 const glm::vec3 worldPosition = glm::vec3(authoredWorld *
@@ -1146,7 +1235,7 @@ void Scene::PrepareRenderFrame()
             if (affectedByWarp)
             {
                 const size_t byteSize = warpedVertices.size() *
-                    sizeof(Engine::Model::Vertex);
+                    sizeof(Engine::Model::AnimationVertex);
                 const bool topologyChanged = cached.vertices.size() !=
                     warpedVertices.size();
                 const bool contentsChanged = topologyChanged || cached.vertices.empty() ||
@@ -1208,7 +1297,7 @@ void Scene::PrepareRenderFrame()
         }
         item.blended = item.belongsToPreview || item.blended;
 
-        if (skinPaletteSlot < kMaxObjects)
+        if (skinPaletteSlot < kMaxSkinnedObjects)
         {
             if (Engine::Components::SkinnedMesh* skinned =
                 candidate->GetComponent<Engine::Components::SkinnedMesh>())
@@ -1258,6 +1347,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     Engine::Components::Camera* cameraOverride, bool includeEditorVisuals,
     uint32_t viewportWidth, uint32_t viewportHeight)
 {
+    m_lastObjectDataUploadBytes = 0;
+    m_lastOcclusionCulledCount = 0;
     if (!context)
     {
         return;
@@ -1500,9 +1591,79 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     {
         const FrameRenderItem* source = nullptr;
         float cameraDistanceSquared = 0.f;
+        float lightingDistanceSquared = 0.f;
         float worldDepth = 0.f;
         int sortingLayer = 0;
         bool blended = false;
+    };
+    const auto nearestLightingDistanceSquared = [&](const FrameRenderItem& item,
+        const glm::mat4& itemWorld)
+    {
+        const glm::vec3 centerDelta = glm::vec3(itemWorld[3]) - cameraPosition;
+        if (!item.mesh || item.sprite || !item.mesh->HasBounds())
+            return glm::dot(centerDelta, centerDelta);
+
+        const glm::vec3 minimum = item.mesh->GetBoundsMin();
+        const glm::vec3 maximum = item.mesh->GetBoundsMax();
+        glm::vec3 worldMinimum(std::numeric_limits<float>::max());
+        glm::vec3 worldMaximum(std::numeric_limits<float>::lowest());
+        for (int z = 0; z < 2; ++z)
+            for (int y = 0; y < 2; ++y)
+                for (int x = 0; x < 2; ++x)
+                {
+                    const glm::vec3 corner = glm::vec3(itemWorld * glm::vec4(
+                        x ? maximum.x : minimum.x,
+                        y ? maximum.y : minimum.y,
+                        z ? maximum.z : minimum.z, 1.f));
+                    worldMinimum = glm::min(worldMinimum, corner);
+                    worldMaximum = glm::max(worldMaximum, corner);
+                }
+        const glm::vec3 nearest = glm::clamp(cameraPosition,
+            worldMinimum, worldMaximum);
+        const glm::vec3 delta = nearest - cameraPosition;
+        return glm::dot(delta, delta);
+    };
+    const glm::mat4 viewProjection = proj * view;
+    const auto outsideViewFrustum = [&](const FrameRenderItem& item,
+        const glm::mat4& itemWorld)
+    {
+        if (!item.mesh || item.sprite || item.warpedVertexBuffer ||
+            !item.mesh->HasBounds() || item.traversalChartPortal)
+            return false;
+        const glm::vec3 minimum = item.mesh->GetBoundsMin();
+        const glm::vec3 maximum = item.mesh->GetBoundsMax();
+        const glm::mat4 localToClip = viewProjection * itemWorld;
+        std::array<glm::vec4, 8> corners{};
+        size_t cornerIndex = 0;
+        for (int z = 0; z < 2; ++z)
+        {
+            for (int y = 0; y < 2; ++y)
+            {
+                for (int x = 0; x < 2; ++x)
+                {
+                    corners[cornerIndex++] = localToClip * glm::vec4(
+                        x ? maximum.x : minimum.x,
+                        y ? maximum.y : minimum.y,
+                        z ? maximum.z : minimum.z, 1.f);
+                }
+            }
+        }
+        const auto allOutside = [&](const auto& predicate)
+        {
+            return std::all_of(corners.begin(), corners.end(), predicate);
+        };
+        return allOutside([](const glm::vec4& point)
+            { return point.x < -point.w; }) ||
+            allOutside([](const glm::vec4& point)
+            { return point.x > point.w; }) ||
+            allOutside([](const glm::vec4& point)
+            { return point.y < -point.w; }) ||
+            allOutside([](const glm::vec4& point)
+            { return point.y > point.w; }) ||
+            allOutside([](const glm::vec4& point)
+            { return point.z < 0.f; }) ||
+            allOutside([](const glm::vec4& point)
+            { return point.z > point.w; });
     };
     std::vector<ViewRenderItem> renderObjects;
     renderObjects.reserve(m_frameRenderItems.size());
@@ -1512,8 +1673,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         {
             const glm::mat4 itemWorld = useSourceChartMesh(item)
                 ? sourceChartWorld(item) : item.world;
+            if (outsideViewFrustum(item, itemWorld))
+                continue;
             const glm::vec3 delta = glm::vec3(itemWorld[3]) - cameraPosition;
             renderObjects.push_back({ &item, glm::dot(delta, delta),
+                nearestLightingDistanceSquared(item, itemWorld),
                 itemWorld[3].z, item.sortingLayer, item.blended });
         }
     }
@@ -1530,13 +1694,50 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 return !first.blended;
             return first.blended
                 ? first.cameraDistanceSquared > second.cameraDistanceSquared
-                : false;
+                : first.cameraDistanceSquared < second.cameraDistanceSquared;
         });
+
+    // Occlusion results are deliberately tied to the exact camera and scene
+    // transforms that produced them. Any movement restores all objects to the
+    // visible state; the backend consumes only completed GPU query results and
+    // never stalls this frame waiting for an answer.
+    uint64_t occlusionSignature = 1469598103934665603ull;
+    const auto hashOcclusionBytes = [&](const void* source, size_t byteCount)
+    {
+        const auto* bytes = static_cast<const uint8_t*>(source);
+        for (size_t index = 0; index < byteCount; ++index)
+        {
+            occlusionSignature ^= bytes[index];
+            occlusionSignature *= 1099511628211ull;
+        }
+    };
+    hashOcclusionBytes(&viewProjection, sizeof(viewProjection));
+    for (const ViewRenderItem& visible : renderObjects)
+    {
+        hashOcclusionBytes(&visible.source->object,
+            sizeof(visible.source->object));
+        hashOcclusionBytes(&visible.blended, sizeof(visible.blended));
+        const glm::mat4 objectWorld = useSourceChartMesh(*visible.source)
+            ? sourceChartWorld(*visible.source) : visible.source->world;
+        hashOcclusionBytes(&objectWorld, sizeof(objectWorld));
+        if (visible.source->mesh)
+        {
+            const uint64_t revision =
+                visible.source->mesh->GetConfigurationRevision();
+            hashOcclusionBytes(&revision, sizeof(revision));
+        }
+    }
+    const uint64_t occlusionViewId =
+        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(this)) ^
+        (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(cam)) << 1u);
+    const bool occlusionQueriesEnabled = context->BeginOcclusionFrame(
+        occlusionViewId, occlusionSignature);
 
     struct PreparedDraw
     {
         Engine::Core::Object* object = nullptr;
         Engine::Graphics::IGraphicsBuffer* vertexBuffer = nullptr;
+        Engine::Graphics::IGraphicsBuffer* indexBuffer = nullptr;
         Engine::Graphics::IPipelineState* pipeline = nullptr;
         std::array<const Engine::Graphics::IGraphicsTexture*, 7> textures{};
         UINT64 constantBufferOffset = 0;
@@ -1544,8 +1745,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         ObjectGPUData objectData{};
         uint32_t vertexStride = 0;
         uint32_t vertexCount = 0;
+        uint32_t indexCount = 0;
         const Engine::Components::SpatialManipulator* traversalChartPortal = nullptr;
         bool preview = false;
+        bool terrain = false;
+        bool blended = false;
+        bool occlusionCandidate = false;
+        uint64_t occlusionId = 0;
     };
     std::vector<PreparedDraw> preparedDraws;
     preparedDraws.reserve(std::min<size_t>(renderObjects.size(), kMaxObjects));
@@ -1563,9 +1769,39 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         Engine::Components::Material* mat = renderItem->material;
         const bool belongsToPreview = renderItem->belongsToPreview;
         const bool isPreview = belongsToPreview;
+        const Engine::Model::DistanceLightingBand* lightingBand = nullptr;
+        if (m_distanceLightingSettings.enabled &&
+            !m_distanceLightingSettings.bands.empty())
+        {
+            const float distance = std::sqrt(
+                sortedItem.lightingDistanceSquared);
+            for (const auto& candidate : m_distanceLightingSettings.bands)
+            {
+                lightingBand = &candidate;
+                if (distance <= candidate.endDistance)
+                    break;
+            }
+        }
+        const bool allowNormalMapping = !lightingBand ||
+            lightingBand->normalMapping;
+        const bool allowParallaxMapping = !lightingBand ||
+            lightingBand->parallaxMapping;
+        const bool allowEnvironmentDiffuse = !lightingBand ||
+            lightingBand->environmentDiffuse;
+        const bool allowReflections = !lightingBand ||
+            lightingBand->reflections;
         PreparedDraw preparedDraw{};
         preparedDraw.object = obj;
         preparedDraw.preview = isPreview;
+        preparedDraw.terrain = mesh && mesh->UsesTerrainVertexFormat();
+        preparedDraw.blended = sortedItem.blended;
+        preparedDraw.occlusionCandidate = occlusionQueriesEnabled &&
+            !wireframeMode &&
+            !sortedItem.blended && !sprite &&
+            !renderItem->warpedVertexBuffer &&
+            !renderItem->traversalChartPortal;
+        preparedDraw.occlusionId = static_cast<uint64_t>(
+            reinterpret_cast<uintptr_t>(obj));
         const Engine::Rendering::BakedLightingData* bakedLighting =
             renderItem->bakedLighting;
         // Version 3 and later bake lighting into generated material assets.
@@ -1590,7 +1826,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         UINT64 offset = static_cast<UINT64>(slot) * kCBStride;
 
         ObjectGPUData objectData{};
-        if (settings.hdriLightingEnabled && skybox)
+        if (settings.hdriLightingEnabled && skybox &&
+            (allowEnvironmentDiffuse || allowReflections))
         {
             objectData.environmentParams = {
                 std::max(0.f, settings.hdriIntensity) *
@@ -1602,7 +1839,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             if (preparedDraw.textures[6])
                 objectData.reflectionEnvironmentParams.w = 1.f;
         }
-        objectData.mvp = proj * view * world;
+        objectData.viewProjection = proj * view;
         objectData.world = world;
         objectData.traversalClipPlane = renderItem->traversalClipPlane;
         objectData.spriteUvRect = { 0.f, 0.f, 1.f, 1.f };
@@ -1658,10 +1895,12 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             };
             prepareTexture(0, mat->baseColorTexture, 1u);
             prepareTexture(1, mat->metallicRoughnessTexture, 2u);
-            prepareTexture(2, mat->normalTexture, 4u);
+            if (allowNormalMapping)
+                prepareTexture(2, mat->normalTexture, 4u);
             prepareTexture(3, mat->occlusionTexture, 8u);
             prepareTexture(4, mat->emissiveTexture, 16u);
-            prepareTexture(5, mat->heightTexture, 64u);
+            if (allowParallaxMapping)
+                prepareTexture(5, mat->heightTexture, 64u);
             if (alphaMode == Engine::Components::MaterialAlphaMode::Mask)
                 textureFlags |= 32u;
 
@@ -1681,8 +1920,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 mat->heightScale, mat->heightMinSteps,
                 mat->heightMaxSteps, 0.f
             };
-            objectData.environmentParams.z = mat->environmentDiffuseStrength;
-            objectData.environmentParams.w = mat->reflectionStrength;
+            objectData.environmentParams.z = allowEnvironmentDiffuse
+                ? mat->environmentDiffuseStrength : 0.f;
+            objectData.environmentParams.w = allowReflections
+                ? mat->reflectionStrength : 0.f;
+            if (allowReflections)
             if (const auto reflectionSH = ResolveReflectionEnvironment(*mat))
             {
                 objectData.reflectionEnvironmentParams = {
@@ -1727,8 +1969,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 bakedLighting->lightDirection, 1.f);
         }
 
+        const uint32_t qualityLightCount = lightingBand
+            ? std::min(m_frameLightCount, lightingBand->maxRealtimeLights)
+            : m_frameLightCount;
         const DrawCBData drawData{ slot,
-            forceUnlitMode ? 0u : m_frameLightCount, 0u, 0u };
+            forceUnlitMode ? 0u : qualityLightCount, 0u, 0u };
         preparedDraw.drawData = drawData;
         preparedDraw.objectData = objectData;
         preparedDraw.traversalChartPortal = renderItem->traversalChartPortal;
@@ -1774,6 +2019,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             ? sprite->GetVertexStride() : mesh->GetVertexStride();
         preparedDraw.vertexCount = sprite
             ? sprite->GetVertexCount() : mesh->GetVertexCount();
+        const bool usesDirectMeshBuffer = !sprite && !useSourceChart &&
+            !renderItem->warpedVertexBuffer;
+        if (usesDirectMeshBuffer && mesh && mesh->GetIndexBuffer())
+        {
+            preparedDraw.indexBuffer = mesh->GetIndexBuffer();
+            preparedDraw.indexCount = mesh->GetIndexCount();
+        }
         preparedDraws.push_back(preparedDraw);
 
         ++slot;
@@ -1783,7 +2035,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     // array once, then keep structured-buffer binding free of hidden copies.
     if (!preparedDraws.empty())
     {
-        m_objectDataBuffer->FlushMappedWrites();
+        const uint64_t ordinaryBytes = static_cast<uint64_t>(
+            preparedDraws.size()) * sizeof(ObjectGPUData);
+        m_objectDataBuffer->FlushMappedWrites(0, ordinaryBytes);
+        m_lastObjectDataUploadBytes += ordinaryBytes;
         context->SetStructuredBuffer(6, m_lightDataBuffer.get());
         context->SetStructuredBuffer(7, m_objectDataBuffer.get());
         context->SetStructuredBuffer(8, m_boneDataBuffer.get());
@@ -1820,6 +2075,38 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         return manipulator && manipulator->enabled;
     };
 
+    const auto geometryPipeline = [&](const PreparedDraw& draw,
+        Engine::Graphics::IPipelineState* base)
+    {
+        if (!draw.indexBuffer)
+            return base;
+        const auto terrain = m_terrainPipelineByBase.find(base);
+        return terrain != m_terrainPipelineByBase.end()
+            ? terrain->second.get() : base;
+    };
+
+    const auto submitGeometry = [&](const PreparedDraw& draw)
+    {
+        context->SetVertexBuffer(0, draw.vertexBuffer, draw.vertexStride, 0);
+        if (draw.indexBuffer && draw.indexCount > 0u)
+        {
+            context->SetIndexBuffer(draw.indexBuffer, draw.indexCount, 0);
+            context->DrawIndexedInstanced(draw.indexCount, 1, 0, 0, 0);
+        }
+        else
+            context->DrawInstanced(draw.vertexCount, 1, 0, 0);
+    };
+
+    std::optional<Engine::Graphics::GpuTimingStage> activeGpuStage;
+    const auto switchGpuStage = [&](Engine::Graphics::GpuTimingStage stage)
+    {
+        if (activeGpuStage && *activeGpuStage == stage)
+            return;
+        if (activeGpuStage)
+            context->EndGpuTiming(*activeGpuStage);
+        context->BeginGpuTiming(stage);
+        activeGpuStage = stage;
+    };
     for (const PreparedDraw& draw : preparedDraws)
     {
         if (!draw.vertexBuffer)
@@ -1829,24 +2116,44 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         // as runtime visualization for portals, matrix links, or warp volumes.
         if (isSpatialManipulatorCarrierDraw(draw))
             continue;
-        context->SetPipeline(draw.pipeline);
+        if (draw.occlusionCandidate &&
+            context->IsOccluded(draw.occlusionId))
+        {
+            ++m_lastOcclusionCulledCount;
+            continue;
+        }
+        switchGpuStage(draw.terrain
+            ? Engine::Graphics::GpuTimingStage::Terrain
+            : (draw.blended
+                ? Engine::Graphics::GpuTimingStage::Transparent
+                : Engine::Graphics::GpuTimingStage::Opaque));
+        if (draw.occlusionCandidate)
+            context->BeginOcclusionQuery(draw.occlusionId);
+        context->SetPipeline(geometryPipeline(draw, draw.pipeline));
         context->SetConstantBuffer(
             0, m_objectConstantBuffer.get(), draw.constantBufferOffset);
         for (uint32_t textureSlot = 0; textureSlot < draw.textures.size(); ++textureSlot)
             context->SetTexture(textureSlot, draw.textures[textureSlot]);
-        context->SetVertexBuffer(0, draw.vertexBuffer, draw.vertexStride, 0);
-        context->DrawInstanced(draw.vertexCount, 1, 0, 0);
+        submitGeometry(draw);
+        if (draw.occlusionCandidate)
+            context->EndOcclusionQuery();
 
         // Draw selected object outline overlay. Structured buffers remain
         // bound across the pipeline change and do not need rebinding.
         if (includeEditorVisuals && !draw.preview &&
             draw.object == m_selectedObject && m_objectOutlinePipeline)
         {
-            context->SetPipeline(m_objectOutlinePipeline.get());
+            context->SetPipeline(geometryPipeline(
+                draw, m_objectOutlinePipeline.get()));
             context->SetConstantBuffer(
                 0, m_objectConstantBuffer.get(), draw.constantBufferOffset);
-            context->DrawInstanced(draw.vertexCount, 1, 0, 0);
+            submitGeometry(draw);
         }
+    }
+    if (activeGpuStage)
+    {
+        context->EndGpuTiming(*activeGpuStage);
+        activeGpuStage.reset();
     }
 
     struct PortalStencilPass
@@ -1915,7 +2222,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         pass.apertureDrawData = {
             kPortalObjectSlot, 0u, kPortalApertureNearClampFlag, 0u };
         pass.apertureObjectData.world = glm::mat4(1.f);
-        pass.apertureObjectData.mvp = proj * view;
+        pass.apertureObjectData.viewProjection = proj * view;
         pass.apertureObjectData.baseColor = glm::vec4(1.f);
         pass.apertureObjectData.ambientUnlit = { 0.f, 0.f, 0.f, 1.f };
         pass.apertureObjectData.emissiveOcclusion = { 0.f, 0.f, 0.f, 1.f };
@@ -1941,11 +2248,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             return left.drawOrder < right.drawOrder;
         });
 
-    auto* portalVertices = static_cast<Engine::Model::Vertex*>(
+    auto* portalVertices = static_cast<Engine::Model::AnimationVertex*>(
         m_portalApertureMapped);
     uint32_t portalVertexCursor = 0;
     const uint32_t portalVertexCapacity =
-        kMaxObjects * kMaxSpatialVerticesPerObject;
+        kMaxSpatialObjects * kMaxSpatialVerticesPerObject;
     for (PortalStencilPass& pass : portalPasses)
     {
         const std::vector<glm::vec3> points =
@@ -1958,7 +2265,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             break;
 
         pass.apertureVertexOffset = static_cast<uint64_t>(portalVertexCursor) *
-            sizeof(Engine::Model::Vertex);
+            sizeof(Engine::Model::AnimationVertex);
         pass.apertureVertexCount = required;
         for (size_t pointIndex = 1; pointIndex + 1 < points.size(); ++pointIndex)
         {
@@ -1966,8 +2273,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 points[0], points[pointIndex], points[pointIndex + 1] };
             for (const glm::vec3& point : triangle)
             {
-                Engine::Model::Vertex& vertex = portalVertices[portalVertexCursor++];
-                vertex = Engine::Model::Vertex {};
+                Engine::Model::AnimationVertex& vertex = portalVertices[portalVertexCursor++];
+                vertex = Engine::Model::AnimationVertex {};
                 vertex.pos[0] = point.x;
                 vertex.pos[1] = point.y;
                 vertex.pos[2] = point.z;
@@ -1980,6 +2287,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         uint64_t vertexOffset = 0;
         uint32_t vertexCount = 0;
         uint32_t dataSlot = std::numeric_limits<uint32_t>::max();
+        uint32_t constantBufferSlot = std::numeric_limits<uint32_t>::max();
         glm::vec4 color { 1.f };
     };
     std::vector<SpatialDebugPass> spatialDebugPasses;
@@ -1987,8 +2295,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     {
         const auto appendDebugVertex = [&](const glm::vec3& worldPoint)
         {
-            Engine::Model::Vertex& vertex = portalVertices[portalVertexCursor++];
-            vertex = Engine::Model::Vertex {};
+            Engine::Model::AnimationVertex& vertex = portalVertices[portalVertexCursor++];
+            vertex = Engine::Model::AnimationVertex {};
             vertex.pos[0] = worldPoint.x;
             vertex.pos[1] = worldPoint.y;
             vertex.pos[2] = worldPoint.z;
@@ -2014,7 +2322,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 {-halfSize.x,  halfSize.y,  halfSize.z} };
             SpatialDebugPass pass{};
             pass.vertexOffset = static_cast<uint64_t>(portalVertexCursor) *
-                sizeof(Engine::Model::Vertex);
+                sizeof(Engine::Model::AnimationVertex);
             pass.vertexCount = kBoxVertexCount;
             pass.color = color;
             for (uint8_t index : indices)
@@ -2036,7 +2344,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 3, 4, 0, 3, 1, 4, 3, 5, 1, 3, 0, 5 };
             SpatialDebugPass pass{};
             pass.vertexOffset = static_cast<uint64_t>(portalVertexCursor) *
-                sizeof(Engine::Model::Vertex);
+                sizeof(Engine::Model::AnimationVertex);
             pass.vertexCount = kSphereVertexCount;
             pass.color = color;
             for (uint8_t index : indices)
@@ -2242,7 +2550,12 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         glm::vec3 mappedCameraPosition { 0.f };
         uint32_t depth = 0;
         uint32_t rootStencilBase = 1;
+        // Constant-buffer records retain globally unique frame slots because
+        // deferred backends reference them after command recording.
         uint32_t dataSlotBase = 0;
+        // Structured portal data lives in its own compact buffer and starts
+        // at zero rather than after the ordinary-view capacity.
+        uint32_t objectDataSlotBase = 0;
         uint64_t skyboxConstantBufferOffset = 0;
     };
     std::vector<PortalViewJob> portalViewJobs;
@@ -2442,24 +2755,28 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         const PortalStencilPass& portalPass = *portalJob.portal;
         portalJob.dataSlotBase = kMaxObjects +
             static_cast<uint32_t>(jobIndex) * kPortalRenderSlotsPerView;
+        portalJob.objectDataSlotBase =
+            static_cast<uint32_t>(jobIndex) * kPortalRenderSlotsPerView;
         portalJob.skyboxConstantBufferOffset =
             static_cast<uint64_t>(jobIndex + 1u) * kCBStride;
 
         ObjectGPUData apertureData = portalPass.apertureObjectData;
-        apertureData.mvp = proj * portalJob.apertureView;
+        apertureData.viewProjection = proj * portalJob.apertureView;
         const uint32_t maskSlot = portalJob.dataSlotBase;
         const uint32_t resetSlot = maskSlot + 1u;
-        memcpy(static_cast<uint8_t*>(m_objectDataMapped) +
-            static_cast<size_t>(maskSlot) * sizeof(ObjectGPUData),
+        const uint32_t maskObjectSlot = portalJob.objectDataSlotBase;
+        const uint32_t resetObjectSlot = maskObjectSlot + 1u;
+        memcpy(static_cast<uint8_t*>(m_portalObjectDataMapped) +
+            static_cast<size_t>(maskObjectSlot) * sizeof(ObjectGPUData),
             &apertureData, sizeof(apertureData));
-        memcpy(static_cast<uint8_t*>(m_objectDataMapped) +
-            static_cast<size_t>(resetSlot) * sizeof(ObjectGPUData),
+        memcpy(static_cast<uint8_t*>(m_portalObjectDataMapped) +
+            static_cast<size_t>(resetObjectSlot) * sizeof(ObjectGPUData),
             &apertureData, sizeof(apertureData));
 
         DrawCBData maskDraw = portalPass.apertureDrawData;
-        maskDraw.objectIndex = maskSlot;
+        maskDraw.objectIndex = maskObjectSlot;
         DrawCBData resetDraw = portalPass.apertureDrawData;
-        resetDraw.objectIndex = resetSlot;
+        resetDraw.objectIndex = resetObjectSlot;
         resetDraw.flags |= kPortalDepthResetFlag;
         memcpy(static_cast<uint8_t*>(m_objectCBMapped) +
             static_cast<size_t>(maskSlot) * kCBStride,
@@ -2477,7 +2794,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     draw.traversalChartPortal, portalPass.target))
                 continue;
             ObjectGPUData mappedData = draw.objectData;
-            mappedData.mvp = proj * portalJob.mappedView * mappedData.world;
+            mappedData.viewProjection = proj * portalJob.mappedView;
             mappedData.portalClipPlane = portalClipPlane;
             mappedData.viewPositionAlphaCutoff.x =
                 portalJob.mappedCameraPosition.x;
@@ -2500,13 +2817,15 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
             const uint32_t drawSlot = portalJob.dataSlotBase + 2u +
                 draw.drawData.objectIndex;
+            const uint32_t objectDrawSlot = portalJob.objectDataSlotBase + 2u +
+                draw.drawData.objectIndex;
             DrawCBData mappedDraw = draw.drawData;
-            mappedDraw.objectIndex = drawSlot;
+            mappedDraw.objectIndex = objectDrawSlot;
             memcpy(static_cast<uint8_t*>(m_objectCBMapped) +
                 static_cast<size_t>(drawSlot) * kCBStride,
                 &mappedDraw, sizeof(mappedDraw));
-            memcpy(static_cast<uint8_t*>(m_objectDataMapped) +
-                static_cast<size_t>(drawSlot) * sizeof(ObjectGPUData),
+            memcpy(static_cast<uint8_t*>(m_portalObjectDataMapped) +
+                static_cast<size_t>(objectDrawSlot) * sizeof(ObjectGPUData),
                 &mappedData, sizeof(mappedData));
         }
 
@@ -2522,8 +2841,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             portalJob.skyboxConstantBufferOffset,
             &skyboxData, sizeof(skyboxData));
     }
-    const uint32_t debugSlotBase = kMaxObjects +
-        kMaxPortalRenderViews * kPortalRenderSlotsPerView;
+    const uint32_t debugSlotBase = kMaxObjects;
+    const uint32_t debugConstantBufferSlotBase = kMaxObjects +
+        kPortalObjectSlotCount;
     const float debugAlpha = std::clamp(
         settings.portalDebugOverlayAlpha, 0.f, 1.f);
     for (size_t debugIndex = 0; debugIndex < spatialDebugPasses.size() &&
@@ -2531,10 +2851,12 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     {
         SpatialDebugPass& pass = spatialDebugPasses[debugIndex];
         pass.dataSlot = debugSlotBase + static_cast<uint32_t>(debugIndex);
+        pass.constantBufferSlot = debugConstantBufferSlotBase +
+            static_cast<uint32_t>(debugIndex);
         const DrawCBData debugDraw { pass.dataSlot, 0u, 0u, 0u };
         ObjectGPUData debugData{};
         debugData.world = glm::mat4(1.f);
-        debugData.mvp = proj * view;
+        debugData.viewProjection = proj * view;
         debugData.baseColor = glm::vec4(glm::vec3(pass.color), debugAlpha);
         debugData.ambientUnlit = { 0.f, 0.f, 0.f, 1.f };
         debugData.emissiveOcclusion = glm::vec4(
@@ -2543,14 +2865,35 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         debugData.viewPositionAlphaCutoff =
             glm::vec4(cameraPosition, 0.001f);
         memcpy(static_cast<uint8_t*>(m_objectCBMapped) +
-            static_cast<size_t>(pass.dataSlot) * kCBStride,
+            static_cast<size_t>(pass.constantBufferSlot) * kCBStride,
             &debugDraw, sizeof(debugDraw));
         memcpy(static_cast<uint8_t*>(m_objectDataMapped) +
             static_cast<size_t>(pass.dataSlot) * sizeof(ObjectGPUData),
             &debugData, sizeof(debugData));
     }
-    if (!portalViewJobs.empty() || !spatialDebugPasses.empty())
-        m_objectDataBuffer->FlushMappedWrites();
+    if (!portalViewJobs.empty())
+    {
+        const uint64_t portalRecords =
+            static_cast<uint64_t>(portalViewJobs.size() - 1u) *
+                kPortalRenderSlotsPerView + 2u + preparedDraws.size();
+        const uint64_t portalBytes = portalRecords * sizeof(ObjectGPUData);
+        m_portalObjectDataBuffer->FlushMappedWrites(0, portalBytes);
+        m_lastObjectDataUploadBytes += portalBytes;
+        // Aperture-mask draws are the first portal commands and also index
+        // portal object data, so switch before issuing any portal work.
+        context->SetStructuredBuffer(7, m_portalObjectDataBuffer.get());
+    }
+    if (!spatialDebugPasses.empty())
+    {
+        // D3D11's discard upload replaces the buffer contents, so preserve
+        // the ordinary prefix when editor diagnostics occupy the tail.
+        const uint64_t debugRecords = static_cast<uint64_t>(kMaxObjects) +
+            std::min(spatialDebugPasses.size(),
+                static_cast<size_t>(kMaxSpatialDebugDraws));
+        const uint64_t debugBytes = debugRecords * sizeof(ObjectGPUData);
+        m_objectDataBuffer->FlushMappedWrites(0, debugBytes);
+        m_lastObjectDataUploadBytes += debugBytes;
+    }
 
     const auto drawConnectedSkybox = [&](const PortalViewJob& portalJob)
     {
@@ -2672,7 +3015,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                                 kCBStride);
                         context->SetVertexBuffer(
                             0, m_portalApertureBuffer.get(),
-                            sizeof(Engine::Model::Vertex),
+                            sizeof(Engine::Model::AnimationVertex),
                             portalPass.apertureVertexOffset);
                         dx11Context->OMSetBlendState(colorMaskOffState.Get(),
                             blendFactor, UINT_MAX);
@@ -2686,7 +3029,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                             portalPass.apertureVertexCount, 1, 0, 0);
 
                         context->SetStructuredBuffer(6, m_lightDataBuffer.get());
-                        context->SetStructuredBuffer(7, m_objectDataBuffer.get());
+                        context->SetStructuredBuffer(7,
+                            m_portalObjectDataBuffer.get());
                         context->SetStructuredBuffer(8, m_boneDataBuffer.get());
 
                         for (const PreparedDraw& draw : preparedDraws)
@@ -2701,7 +3045,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                                     portalPass.target))
                                 continue;
 
-                            context->SetPipeline(draw.pipeline);
+                            context->SetPipeline(geometryPipeline(
+                                draw, draw.pipeline));
                             const uint32_t drawSlot = portalJob.dataSlotBase +
                                 2u + draw.drawData.objectIndex;
                             context->SetConstantBuffer(
@@ -2713,11 +3058,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                                 context->SetTexture(textureSlot,
                                     draw.textures[textureSlot]);
                             }
-                            context->SetVertexBuffer(0, draw.vertexBuffer,
-                                draw.vertexStride, 0);
                             dx11Context->OMSetDepthStencilState(
                                 stencilReadState.Get(), portalStencilRef);
-                            context->DrawInstanced(draw.vertexCount, 1, 0, 0);
+                            submitGeometry(draw);
                         }
                         }
 
@@ -2732,6 +3075,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 #endif
 
 #if defined(_WIN32) || defined(ENGINE_VULKAN_ENABLED)
+    if (!portalViewJobs.empty())
+        context->BeginGpuTiming(Engine::Graphics::GpuTimingStage::Portal);
 #if defined(_WIN32)
     const bool isDx11Provider =
         dynamic_cast<Engine::Renderers::D3D11GraphicsProvider*>(m_graphicsProvider) != nullptr;
@@ -2828,7 +3173,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     static_cast<uint64_t>(portalJob.dataSlotBase) * kCBStride);
                 context->SetVertexBuffer(
                     0, m_portalApertureBuffer.get(),
-                    sizeof(Engine::Model::Vertex),
+                    sizeof(Engine::Model::AnimationVertex),
                     portalPass.apertureVertexOffset);
                 context->DrawInstanced(
                     portalPass.apertureVertexCount, 1, 0, 0);
@@ -2869,7 +3214,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     static_cast<uint64_t>(portalJob.dataSlotBase) * kCBStride);
                 context->SetVertexBuffer(
                     0, m_portalApertureBuffer.get(),
-                    sizeof(Engine::Model::Vertex),
+                    sizeof(Engine::Model::AnimationVertex),
                     portalPass.apertureVertexOffset);
                 context->DrawInstanced(portalPass.apertureVertexCount, 1, 0, 0);
             }
@@ -2885,7 +3230,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             drawConnectedSkybox(portalJob);
 
             context->SetStructuredBuffer(6, m_lightDataBuffer.get());
-            context->SetStructuredBuffer(7, m_objectDataBuffer.get());
+            context->SetStructuredBuffer(7, m_portalObjectDataBuffer.get());
             context->SetStructuredBuffer(8, m_boneDataBuffer.get());
 
             for (const PreparedDraw& draw : preparedDraws)
@@ -2899,7 +3244,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                         draw.traversalChartPortal, portalPass.target))
                     continue;
 
-                context->SetPipeline(resolveStencilReadPipeline(draw.pipeline));
+                context->SetPipeline(geometryPipeline(draw,
+                    resolveStencilReadPipeline(draw.pipeline)));
                 const uint32_t drawSlot = portalJob.dataSlotBase + 2u +
                     draw.drawData.objectIndex;
                 context->SetConstantBuffer(
@@ -2911,9 +3257,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     context->SetTexture(textureSlot,
                         draw.textures[textureSlot]);
                 }
-                context->SetVertexBuffer(0, draw.vertexBuffer,
-                    draw.vertexStride, 0);
-                context->DrawInstanced(draw.vertexCount, 1, 0, 0);
+                submitGeometry(draw);
             }
 
             if (portalScissor)
@@ -2927,6 +3271,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     }
 #endif
 
+    if (!portalViewJobs.empty())
+        context->EndGpuTiming(Engine::Graphics::GpuTimingStage::Portal);
+
     if (!portalPasses.empty())
     {
         for (const PreparedDraw& draw : preparedDraws)
@@ -2939,7 +3286,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 sizeof(ObjectGPUData),
                 &draw.objectData, sizeof(draw.objectData));
         }
-        m_objectDataBuffer->FlushMappedWrites();
+        const uint64_t restoredRecords = !spatialDebugPasses.empty()
+            ? static_cast<uint64_t>(kMaxObjects) + std::min(
+                spatialDebugPasses.size(),
+                static_cast<size_t>(kMaxSpatialDebugDraws))
+            : static_cast<uint64_t>(preparedDraws.size());
+        const uint64_t restoredBytes = restoredRecords * sizeof(ObjectGPUData);
+        m_objectDataBuffer->FlushMappedWrites(0, restoredBytes);
+        m_lastObjectDataUploadBytes += restoredBytes;
         context->SetStructuredBuffer(6, m_lightDataBuffer.get());
         context->SetStructuredBuffer(7, m_objectDataBuffer.get());
         context->SetStructuredBuffer(8, m_boneDataBuffer.get());
@@ -2968,9 +3322,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 context->SetStructuredBuffer(8, m_boneDataBuffer.get());
                 context->SetPipeline(portalDebugPipeline);
                 context->SetConstantBuffer(0, m_objectConstantBuffer.get(),
-                    static_cast<uint64_t>(pass.dataSlot) * kCBStride);
+                    static_cast<uint64_t>(pass.constantBufferSlot) * kCBStride);
                 context->SetVertexBuffer(0, m_portalApertureBuffer.get(),
-                    sizeof(Engine::Model::Vertex), pass.vertexOffset);
+                    sizeof(Engine::Model::AnimationVertex), pass.vertexOffset);
                 context->DrawInstanced(pass.vertexCount, 1, 0, 0);
             }
         }

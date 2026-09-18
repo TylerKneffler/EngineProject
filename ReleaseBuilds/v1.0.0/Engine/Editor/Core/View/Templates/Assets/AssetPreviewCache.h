@@ -5,6 +5,7 @@
 #include <string>
 
 namespace Engine::Components { class Texture; }
+namespace Engine::Scene { class Scene; }
 namespace Engine::Graphics
 {
 class IGraphicsProvider;
@@ -22,6 +23,14 @@ public:
         Engine::Graphics::IGraphicsProvider* graphicsProvider);
     void Invalidate(const std::string& path);
     void Clear();
+    // Captures the current scene through its active game camera and persists a
+    // compact derived thumbnail beside the scene file.
+    static bool CaptureScene(const std::string& path,
+        Engine::Scene::Scene& scene,
+        Engine::Graphics::IGraphicsProvider* graphicsProvider);
+    static void MovePersistentPreview(const std::string& oldPath,
+        const std::string& newPath);
+    static void RemovePersistentPreview(const std::string& path);
     static bool Supports(const std::string& path);
     static bool IsCircularPreview(const std::string& path);
 

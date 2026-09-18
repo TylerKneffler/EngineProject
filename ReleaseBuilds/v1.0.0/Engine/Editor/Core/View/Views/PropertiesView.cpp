@@ -407,26 +407,6 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             OnComponentsChanged();
     }
 
-    if (m_showChildHierarchy && !m_selectedObject->Children.empty() &&
-        ui.CollapsingHeader("Children", false))
-    {
-        std::function<void(Engine::Core::Object*)> drawChild = [&](Engine::Core::Object* child)
-        {
-            if (!child) return;
-            const bool leaf = child->Children.empty();
-            const bool open = ui.TreeNode(child, child->name.c_str(),
-                false, leaf, true);
-            if (open && !leaf)
-            {
-                for (Engine::Core::Object* grandchild : child->Children)
-                    drawChild(grandchild);
-                ui.TreePop();
-            }
-        };
-        for (Engine::Core::Object* child : m_selectedObject->Children)
-            drawChild(child);
-    }
-
     if (!assetDropPreview.empty())
     {
         ui.PushId("assetDropPreview");

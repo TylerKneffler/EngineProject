@@ -147,6 +147,9 @@ void DX12EditorRenderer::BeginFrame()
         WaitForSingleObject(m_fenceEvent, INFINITE);
     }
 
+    if (m_graphicsProvider)
+        m_graphicsProvider->GetContextFactory()->PrepareFrame(m_frameIndex);
+
     ThrowIfFailed(m_commandAllocators[m_frameIndex]->Reset());
     ThrowIfFailed(m_commandList->Reset(
         m_commandAllocators[m_frameIndex].Get(), nullptr));

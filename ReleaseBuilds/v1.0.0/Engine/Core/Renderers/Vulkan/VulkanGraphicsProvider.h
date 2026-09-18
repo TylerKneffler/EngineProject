@@ -18,6 +18,7 @@ public:
         VkRenderPass renderPass,
         VkQueue queue,
         uint32_t queueFamily);
+    ~VulkanGraphicsProvider() override;
     Engine::Graphics::IShaderCompiler* GetShaderCompiler() override { return &m_shaderCompiler; }
     Engine::Graphics::IGraphicsBufferFactory* GetBufferFactory() override { return m_bufferFactory.get(); }
     Engine::Graphics::IPipelineStateFactory* GetPipelineStateFactory() override { return m_pipelineFactory.get(); }

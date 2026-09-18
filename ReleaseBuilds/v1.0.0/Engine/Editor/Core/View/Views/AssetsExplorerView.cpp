@@ -1,6 +1,7 @@
 #include "AssetsExplorerView.h"
 #include "Engine/Editor/Core/View/Templates/Common/AssetPathTemplate.h"
 #include "Engine/Editor/UI/IEditorUi.h"
+#include "Engine/Editor/UI/EditorIcons.h"
 #include "Core/AssetRecord.h"
 #include "Core/Object.h"
 #include "Core/Serialization/SceneSerializer.h"
@@ -23,6 +24,31 @@ AssetsExplorerView::AssetsExplorerView()
 
 namespace fs = std::filesystem;
 
+namespace
+{
+class UiIdScope
+{
+public:
+    UiIdScope(IEditorUi& ui, const char* id) : m_ui(ui) { m_ui.PushId(id); }
+    ~UiIdScope() { m_ui.PopId(); }
+    UiIdScope(const UiIdScope&) = delete;
+    UiIdScope& operator=(const UiIdScope&) = delete;
+private:
+    IEditorUi& m_ui;
+};
+
+class UiTreeScope
+{
+public:
+    explicit UiTreeScope(IEditorUi& ui) : m_ui(ui) {}
+    ~UiTreeScope() { m_ui.TreePop(); }
+    UiTreeScope(const UiTreeScope&) = delete;
+    UiTreeScope& operator=(const UiTreeScope&) = delete;
+private:
+    IEditorUi& m_ui;
+};
+}
+
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
@@ -31,6 +57,7 @@ void AssetsExplorerView::Init(const std::string& assetsPath,
 {
     m_assetsPath = fs::path(assetsPath).lexically_normal().string();
     m_currentDirectory = m_assetsPath;
+    m_backHistory.clear();
     m_scene = scene;
     m_previewCache.Clear();
 }
@@ -64,16 +91,28 @@ void AssetsExplorerView::DrawPanel(IEditorUi& ui)
     if (m_currentDirectory.empty() || !fs::is_directory(m_currentDirectory))
         m_currentDirectory = m_assetsPath;
 
-    const bool atRoot = fs::path(m_currentDirectory).lexically_normal() ==
-        fs::path(m_assetsPath).lexically_normal();
-    ui.BeginDisabled(atRoot);
-    if (ui.Button("Up") && !atRoot)
-        EnterDirectory(fs::path(m_currentDirectory).parent_path().string());
+    const bool canGoBack = !m_backHistory.empty();
+    ui.BeginDisabled(!canGoBack);
+    if (ui.Button(Icons::Back) && canGoBack)
+        GoBack();
     ui.EndDisabled();
+    ui.Tooltip("Back");
     ui.SameLine();
     DrawBreadcrumbs(ui);
     AcceptSceneObject(ui, m_currentDirectory);
 
+    if (ui.Button(Icons::List))
+        m_gridView = false;
+    ui.Tooltip("List view");
+    ui.SameLine();
+    if (ui.Button(Icons::Grid))
+        m_gridView = true;
+    ui.Tooltip("Thumbnail view");
+    if (m_gridView)
+    {
+        ui.SameLine();
+        ui.SliderInt("Thumbnail size", &m_thumbnailSize, 64, 192);
+    }
     ui.InputText("##assetSearch", m_search, sizeof(m_search));
     ui.Separator();
 
@@ -111,68 +150,198 @@ void AssetsExplorerView::DrawPanel(IEditorUi& ui)
 
 void AssetsExplorerView::DrawCurrentDirectory(IEditorUi& ui)
 {
+    if (m_gridView)
+    {
+        DrawGridDirectory(ui);
+        return;
+    }
+
     try
     {
-        std::vector<fs::directory_entry> entries;
-        for (const auto& entry : fs::directory_iterator(m_currentDirectory))
+        std::string query = m_search;
+        std::transform(query.begin(), query.end(), query.begin(),
+            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+        std::function<void(const fs::path&)> drawDirectory;
+        drawDirectory = [&](const fs::path& directoryPath)
         {
-            // Repository metadata such as .gitkeep is not project content.
-            const std::string entryName = entry.path().filename().string();
-            if ((!entryName.empty() && entryName.front() == '.') ||
-                entry.path().extension() == ".meta")
-                continue;
-            std::string searchable = entryName;
-            std::string query = m_search;
-            std::transform(searchable.begin(), searchable.end(), searchable.begin(),
-                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            std::transform(query.begin(), query.end(), query.begin(),
-                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            if (!query.empty() && searchable.find(query) == std::string::npos)
-                continue;
-            entries.push_back(entry);
-        }
-
-        // Directories first, then alphabetical within each kind.
-        std::sort(entries.begin(), entries.end(),
-                  [](const fs::directory_entry& a, const fs::directory_entry& b)
-                  {
-                      if (a.is_directory() != b.is_directory())
-                          return a.is_directory();
-                      return a.path().filename().string() < b.path().filename().string();
-                  });
-
-        for (const auto& entry : entries)
-        {
-            const std::string entryPath = entry.path().string();
-            const bool selected = m_selectedPath == entryPath;
-            const bool directory = entry.is_directory();
-            const std::string label = directory
-                ? "[Folder] " + entry.path().filename().string()
-                : entry.path().filename().string();
-
-            if (!directory && AssetPreviewCache::Supports(entryPath) && m_scene)
+            std::vector<fs::directory_entry> entries;
+            for (const auto& entry : fs::directory_iterator(directoryPath))
             {
-                if (void* preview = m_previewCache.Get(
-                    entryPath, m_scene->GetGraphicsProvider()))
-                {
-                    if (AssetPreviewCache::IsCircularPreview(entryPath))
-                        ui.DrawCircularImage(preview, 34.f);
-                    else
-                        ui.DrawImage(preview, 34.f, 34.f);
-                    ui.SameLine();
-                }
+                // Repository metadata such as .gitkeep is not project content.
+                const std::string entryName = entry.path().filename().string();
+                if ((!entryName.empty() && entryName.front() == '.') ||
+                    entry.path().extension() == ".meta")
+                    continue;
+                std::string searchable = entryName;
+                std::transform(searchable.begin(), searchable.end(),
+                    searchable.begin(), [](unsigned char c)
+                    {
+                        return static_cast<char>(std::tolower(c));
+                    });
+                if (!query.empty() && searchable.find(query) == std::string::npos)
+                    continue;
+                entries.push_back(entry);
             }
 
-            if (ui.Selectable(label.c_str(), selected, true))
+            // Directories first, then alphabetical within each kind.
+            std::sort(entries.begin(), entries.end(),
+                [](const fs::directory_entry& a, const fs::directory_entry& b)
+                {
+                    if (a.is_directory() != b.is_directory())
+                        return a.is_directory();
+                    return a.path().filename().string() <
+                        b.path().filename().string();
+                });
+
+            for (const auto& entry : entries)
             {
-                SelectPath(entryPath);
-                if (ui.IsItemDoubleClicked())
+                const std::string entryPath = entry.path().string();
+                const bool selected = m_selectedPath == entryPath;
+                const bool directory = entry.is_directory();
+                const bool expandable = directory && !entry.is_symlink();
+                const std::string label = directory
+                    ? std::string(Icons::Folder) + " " +
+                        entry.path().filename().string()
+                    : std::string(Icons::Document) + " " +
+                        entry.path().filename().string();
+
+                UiIdScope idScope(ui, entryPath.c_str());
+
+                bool expanded = false;
+                bool activated = false;
+                if (directory)
+                {
+                    // The path PushId makes the constant node ID stable and unique.
+                    expanded = ui.TreeNode(reinterpret_cast<const void*>(1),
+                        label.c_str(), selected, !expandable);
+                    activated = ui.IsItemClicked();
+                }
+                else
+                {
+                    activated = ui.Selectable(label.c_str(), selected, true);
+                }
+
+                const bool doubleClicked = ui.IsItemDoubleClicked();
+                if (activated)
+                    SelectPath(entryPath);
+                if (doubleClicked)
                 {
                     if (directory)
                         EnterDirectory(entryPath);
                     else
                         OpenFile(entryPath);
                 }
+
+                const EditorUiAssetItemMenuResult menu =
+                    ui.AssetItemContextMenu(entryPath.c_str());
+                if (menu.renameRequested)
+                {
+                    m_renamePath = entryPath;
+                    strncpy_s(m_renameName,
+                        entry.path().filename().string().c_str(),
+                        sizeof(m_renameName));
+                    m_renamingAsset = true;
+                    m_focusAssetRename = true;
+                    m_error.clear();
+                }
+                bool deleted = false;
+                if (menu.deleteRequested)
+                    deleted = DeleteAssetPath(entryPath);
+
+                if (!deleted && ui.BeginDragDropSource())
+                {
+                    ui.SetDragDropPayload("ENGINE_ASSET_PATH",
+                        entryPath.c_str(), entryPath.size() + 1);
+                    ui.Label(label.c_str());
+                    ui.EndDragDropSource();
+                }
+
+                if (!deleted && directory)
+                    AcceptSceneObject(ui, entryPath);
+
+                if (expandable && expanded)
+                {
+                    UiTreeScope treeScope(ui);
+                    if (!deleted && !doubleClicked)
+                        drawDirectory(entry.path());
+                }
+            }
+        };
+
+        drawDirectory(m_currentDirectory);
+    }
+    catch (const std::exception& e)
+    {
+        m_error = "Error reading directory: " + std::string(e.what());
+    }
+}
+
+void AssetsExplorerView::EnterDirectory(const std::string& path)
+{
+    NavigateToDirectory(path, true);
+}
+
+void AssetsExplorerView::DrawGridDirectory(IEditorUi& ui)
+{
+    try
+    {
+        std::string query = m_search;
+        std::transform(query.begin(), query.end(), query.begin(),
+            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+        std::vector<fs::directory_entry> entries;
+        for (const auto& entry : fs::directory_iterator(m_currentDirectory))
+        {
+            const std::string name = entry.path().filename().string();
+            if ((!name.empty() && name.front() == '.') ||
+                entry.path().extension() == ".meta")
+                continue;
+            std::string searchable = name;
+            std::transform(searchable.begin(), searchable.end(),
+                searchable.begin(), [](unsigned char c)
+                {
+                    return static_cast<char>(std::tolower(c));
+                });
+            if (query.empty() || searchable.find(query) != std::string::npos)
+                entries.push_back(entry);
+        }
+        std::sort(entries.begin(), entries.end(),
+            [](const fs::directory_entry& first,
+                const fs::directory_entry& second)
+            {
+                if (first.is_directory() != second.is_directory())
+                    return first.is_directory();
+                return first.path().filename().string() <
+                    second.path().filename().string();
+            });
+
+        const float tileSize = static_cast<float>(m_thumbnailSize);
+        const int columns = std::max(1, static_cast<int>(
+            ui.AvailableContentWidth() / (tileSize + 18.f)));
+        int column = 0;
+        for (const auto& entry : entries)
+        {
+            const std::string entryPath = entry.path().string();
+            const bool directory = entry.is_directory();
+            void* preview = nullptr;
+            if (!directory && m_scene && AssetPreviewCache::Supports(entryPath))
+                preview = m_previewCache.Get(entryPath,
+                    m_scene->GetGraphicsProvider());
+
+            UiIdScope idScope(ui, entryPath.c_str());
+            const EditorUiAssetTileResult tile = ui.AssetTile(
+                entry.path().filename().string().c_str(),
+                directory ? Icons::Folder : Icons::Document, preview,
+                m_selectedPath == entryPath, tileSize);
+            if (tile.clicked)
+                SelectPath(entryPath);
+            if (tile.doubleClicked)
+            {
+                if (directory)
+                    EnterDirectory(entryPath);
+                else
+                    OpenFile(entryPath);
             }
 
             const EditorUiAssetItemMenuResult menu =
@@ -187,28 +356,35 @@ void AssetsExplorerView::DrawCurrentDirectory(IEditorUi& ui)
                 m_focusAssetRename = true;
                 m_error.clear();
             }
+            bool deleted = false;
             if (menu.deleteRequested)
-                DeleteAssetPath(entryPath);
+                deleted = DeleteAssetPath(entryPath);
 
-            if (ui.BeginDragDropSource())
+            if (!deleted && ui.BeginDragDropSource())
             {
                 ui.SetDragDropPayload("ENGINE_ASSET_PATH",
                     entryPath.c_str(), entryPath.size() + 1);
-                ui.Label(label.c_str());
+                ui.Label(entry.path().filename().string().c_str());
                 ui.EndDragDropSource();
             }
-
-            if (directory)
+            if (!deleted && directory)
                 AcceptSceneObject(ui, entryPath);
+
+            ++column;
+            if (column < columns)
+                ui.SameLine();
+            else
+                column = 0;
         }
     }
-    catch (const std::exception& e)
+    catch (const std::exception& exception)
     {
-        m_error = "Error reading directory: " + std::string(e.what());
+        m_error = "Error reading directory: " + std::string(exception.what());
     }
 }
 
-void AssetsExplorerView::EnterDirectory(const std::string& path)
+void AssetsExplorerView::NavigateToDirectory(const std::string& path,
+    bool addToHistory)
 {
     std::error_code error;
     const fs::path root = fs::weakly_canonical(m_assetsPath, error);
@@ -218,11 +394,29 @@ void AssetsExplorerView::EnterDirectory(const std::string& path)
     const fs::path relative = destination.lexically_relative(root);
     if (relative.empty() || (!relative.empty() && *relative.begin() == ".."))
         return;
+    const fs::path current = fs::weakly_canonical(m_currentDirectory, error);
+    if (error || current == destination)
+        return;
+    if (addToHistory && fs::is_directory(current))
+        m_backHistory.push_back(current.string());
     m_currentDirectory = destination.string();
     m_selectedPath.clear();
     m_error.clear();
     if (OnSelectionChanged)
         OnSelectionChanged({});
+}
+
+void AssetsExplorerView::GoBack()
+{
+    while (!m_backHistory.empty())
+    {
+        const std::string destination = m_backHistory.back();
+        m_backHistory.pop_back();
+        const std::string before = m_currentDirectory;
+        NavigateToDirectory(destination, false);
+        if (m_currentDirectory != before)
+            return;
+    }
 }
 
 void AssetsExplorerView::DrawBreadcrumbs(IEditorUi& ui)
@@ -236,11 +430,46 @@ void AssetsExplorerView::DrawBreadcrumbs(IEditorUi& ui)
         return;
     }
 
+    const auto drawSegment = [&](const char* label, const fs::path& folder)
+    {
+        std::vector<fs::path> childFolders;
+        std::error_code directoryError;
+        for (fs::directory_iterator iterator(folder, directoryError), end;
+            iterator != end && !directoryError; iterator.increment(directoryError))
+        {
+            if (!iterator->is_directory(directoryError))
+                continue;
+            const std::string name = iterator->path().filename().string();
+            if (!name.empty() && name.front() != '.')
+                childFolders.push_back(iterator->path());
+        }
+        std::sort(childFolders.begin(), childFolders.end(),
+            [](const fs::path& first, const fs::path& second)
+            {
+                return first.filename().string() < second.filename().string();
+            });
+        std::vector<std::string> names;
+        std::vector<const char*> items;
+        names.reserve(childFolders.size());
+        items.reserve(childFolders.size());
+        for (const fs::path& child : childFolders)
+            names.push_back(child.filename().string());
+        for (const std::string& name : names)
+            items.push_back(name.c_str());
+
+        ui.PushId(folder.string().c_str());
+        const EditorUiBreadcrumbResult result = ui.Breadcrumb(label,
+            items.data(), static_cast<int>(items.size()));
+        ui.PopId();
+        if (result.clicked)
+            EnterDirectory(folder.string());
+        else if (result.childSelected >= 0 &&
+            result.childSelected < static_cast<int>(childFolders.size()))
+            EnterDirectory(childFolders[result.childSelected].string());
+    };
+
     fs::path destination = root;
-    ui.PushId(root.string().c_str());
-    if (ui.Button("Assets"))
-        EnterDirectory(root.string());
-    ui.PopId();
+    drawSegment("Assets", destination);
 
     const fs::path relative = current.lexically_relative(root);
     if (relative.empty() || relative == ".")
@@ -252,10 +481,7 @@ void AssetsExplorerView::DrawBreadcrumbs(IEditorUi& ui)
         ui.Label("/");
         ui.SameLine();
         const std::string destinationString = destination.string();
-        ui.PushId(destinationString.c_str());
-        if (ui.Button(segment.string().c_str()))
-            EnterDirectory(destinationString);
-        ui.PopId();
+        drawSegment(segment.string().c_str(), destinationString);
     }
 }
 
@@ -539,6 +765,8 @@ void AssetsExplorerView::CommitAssetRename()
         const std::string destinationString = destination.string();
         if (OnAssetRenamed)
             OnAssetRenamed(oldPathString, destinationString);
+        AssetPreviewCache::MovePersistentPreview(oldPathString,
+            destinationString);
         SelectPath(destinationString);
     }
 
@@ -629,6 +857,7 @@ bool AssetsExplorerView::DeleteAssetPath(const std::string& path)
     }
     else
     {
+        AssetPreviewCache::RemovePersistentPreview(candidate.string());
         fs::remove(candidate, error);
         if (!error)
             fs::remove(Engine::Core::AssetRecord::SidecarPath(candidate), error);

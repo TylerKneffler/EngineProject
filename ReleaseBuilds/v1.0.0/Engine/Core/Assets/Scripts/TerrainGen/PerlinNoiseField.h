@@ -34,7 +34,10 @@ public:
     float Sample2D(float worldX, float worldZ) const;
     float SampleFractal(const glm::vec3& worldPosition) const;
     float SampleFractal2D(float worldX, float worldZ) const;
+    float SampleFractal(const glm::dvec3& worldPosition) const;
+    float SampleFractal2D(double worldX, double worldZ) const;
 
 private:
     float SampleUnit(const glm::vec3& position) const;
+    float SampleUnit(const glm::dvec3& position) const;
 };

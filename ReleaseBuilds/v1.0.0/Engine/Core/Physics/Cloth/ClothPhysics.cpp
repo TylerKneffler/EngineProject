@@ -28,7 +28,7 @@ struct Engine::Components::Cloth::Impl
     uint64_t renderMeshRevision = 0;
     uint64_t simulationMeshRevision = 0;
     glm::vec3 worldScale{};
-    std::vector<Engine::Model::Vertex> originalVertices;
+    std::vector<Engine::Model::AnimationVertex> originalVertices;
     std::vector<glm::vec3> nodeLocalPositions;
     std::vector<std::size_t> renderToNode;
     std::vector<glm::vec3> renderNodeOffsets;
@@ -109,7 +109,7 @@ bool Engine::Components::Cloth::EnsureCollisionMorph()
     m_impl->originalVertices = mesh->GetVertices();
     glm::vec3 boundsMinimum(std::numeric_limits<float>::max());
     glm::vec3 boundsMaximum(std::numeric_limits<float>::lowest());
-    for (const Engine::Model::Vertex& vertex : m_impl->originalVertices)
+    for (const Engine::Model::AnimationVertex& vertex : m_impl->originalVertices)
     {
         const glm::vec3 position(vertex.pos[0], vertex.pos[1], vertex.pos[2]);
         boundsMinimum = glm::min(boundsMinimum, position);
@@ -192,12 +192,12 @@ bool Engine::Components::Cloth::EnsureSoftBody()
         }
     };
     std::unordered_map<PositionKey, std::size_t, PositionHash> welded;
-    const std::vector<Engine::Model::Vertex>& simulationVertices = simulationMesh->GetVertices();
+    const std::vector<Engine::Model::AnimationVertex>& simulationVertices = simulationMesh->GetVertices();
     std::vector<std::size_t> simulationToNode(simulationVertices.size());
     constexpr double precision = 100000.0;
     for (std::size_t index = 0; index < simulationVertices.size(); ++index)
     {
-        const Engine::Model::Vertex& vertex = simulationVertices[index];
+        const Engine::Model::AnimationVertex& vertex = simulationVertices[index];
         const glm::vec3 position(vertex.pos[0], vertex.pos[1], vertex.pos[2]);
         const PositionKey key { std::llround(position.x * precision),
             std::llround(position.y * precision), std::llround(position.z * precision) };
@@ -216,7 +216,7 @@ bool Engine::Components::Cloth::EnsureSoftBody()
         (mesh->Owner ? mesh->Owner->transform.GetWorldMatrix() : clothWorld);
     for (std::size_t index = 0; index < m_impl->originalVertices.size(); ++index)
     {
-        const Engine::Model::Vertex& vertex = m_impl->originalVertices[index];
+        const Engine::Model::AnimationVertex& vertex = m_impl->originalVertices[index];
         const glm::vec3 renderPosition(renderToCloth * glm::vec4(
             vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.f));
         std::size_t nearest = 0;
@@ -378,7 +378,7 @@ void Engine::Components::Cloth::ApplyForces()
 void Engine::Components::Cloth::SyncMeshFromSoftBody()
 {
     if (!m_impl || !m_impl->softBody || !m_impl->mesh || !Owner) return;
-    std::vector<Engine::Model::Vertex> deformed = m_impl->originalVertices;
+    std::vector<Engine::Model::AnimationVertex> deformed = m_impl->originalVertices;
     const glm::mat4 clothWorld = Owner->transform.GetWorldMatrix();
     const glm::mat4 inverseWorld = glm::inverse(clothWorld);
     const glm::mat4 clothToRender = glm::inverse(m_impl->mesh->Owner
@@ -468,8 +468,8 @@ void Engine::Components::Cloth::UpdateCollisionMorph(float deltaTime)
         std::max(0.f, collisionMorphMaximum));
     const float expand = 1.f + squeeze *
         std::clamp(collisionMorphExpansion, 0.f, 1.f);
-    std::vector<Engine::Model::Vertex> deformed = m_impl->originalVertices;
-    for (Engine::Model::Vertex& vertex : deformed)
+    std::vector<Engine::Model::AnimationVertex> deformed = m_impl->originalVertices;
+    for (Engine::Model::AnimationVertex& vertex : deformed)
     {
         const glm::vec3 original(vertex.pos[0], vertex.pos[1], vertex.pos[2]);
         const glm::vec3 relative = original - m_impl->morphLocalCenter;

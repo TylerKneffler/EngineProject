@@ -1,4 +1,5 @@
 #include "DX12GameRenderer.h"
+#include <chrono>
 #include "DX12GraphicsContext.h"
 
 
@@ -178,6 +179,9 @@ void DX12GameRenderer::BeginFrame()
         WaitForSingleObject(m_fenceEvent, INFINITE);
     }
 
+    if (m_graphicsProvider)
+        m_graphicsProvider->GetContextFactory()->PrepareFrame(m_frameIndex);
+
     // ---- Reset command allocator and list ----
     // Now that the GPU has finished with this slot’s allocator, Reset() reclaims
     // its backing memory for new commands (without freeing the allocation). All
@@ -262,6 +266,12 @@ void DX12GameRenderer::EndFrame()
     // until it is Reset(). It MUST be closed before submission.
     // ExecuteCommandLists() enqueues the list on the GPU command queue.
     // The GPU starts executing it asynchronously; the CPU does not block here.
+    if (m_graphicsProvider && m_graphicsProvider->GetContextFactory())
+    {
+        auto* factory = m_graphicsProvider->GetContextFactory();
+        factory->FinalizeFrame();
+        m_frameTelemetry = factory->GetFrameTimingTelemetry();
+    }
     ThrowIfFailed(m_commandList->Close());
 
     ID3D12CommandList* lists[] = { m_commandList.Get() };
@@ -270,7 +280,12 @@ void DX12GameRenderer::EndFrame()
     // Present — pass ALLOW_TEARING when supported so DWM does not throttle
     // the frame rate to the monitor refresh rate in windowed mode.
     const UINT presentFlags = m_tearingSupported ? DXGI_PRESENT_ALLOW_TEARING : 0u;
+    const auto presentationStart = std::chrono::steady_clock::now();
     ThrowIfFailed(m_swapChain->Present(0, presentFlags));
+    m_frameTelemetry.cpuPresentationMilliseconds =
+        std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - presentationStart).count();
+    m_frameTelemetry.flipModelSwapChain = true;
 
     // ---- Record fence watermark and signal ----
     // Increment the global counter to produce a fresh target value, store it
@@ -307,7 +322,10 @@ Engine::Graphics::IGraphicsProvider* DX12GameRenderer::GetGraphicsProvider()
 
 std::unique_ptr<Engine::Graphics::IGraphicsContext> DX12GameRenderer::CreateFrameGraphicsContext()
 {
-    return std::make_unique<D3D12GraphicsContext>(m_commandList.Get());
+    if (!m_graphicsProvider) return nullptr;
+    auto* factory = m_graphicsProvider->GetContextFactory();
+    factory->SetCommandBuffer(m_commandList.Get());
+    return factory->CreateContext();
 }
 
 // ---------------------------------------------------------------------------

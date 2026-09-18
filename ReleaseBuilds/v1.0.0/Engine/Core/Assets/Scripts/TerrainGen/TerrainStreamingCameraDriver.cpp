@@ -1,4 +1,5 @@
-#include "Scripts/MarchingCubes/TerrainStreamingCameraDriver.h"
+#include "Scripts/TerrainGen/TerrainStreamingCameraDriver.h"
+#include "Scripts/TerrainGen/TerrainGen.h"
 
 #include "Core/Object.h"
 #include "Core/Serialization/SceneSerializer.h"
@@ -14,6 +15,8 @@ TerrainStreamingCameraDriver::TerrainStreamingCameraDriver()
     RegisterField("movementSpeed", movementSpeed);
     RegisterField("pauseAtEndpoints", pauseAtEndpoints);
     RegisterField("moveOnStart", moveOnStart);
+    RegisterField("waitForInitialTerrain", waitForInitialTerrain);
+    RegisterField("terrainObjectName", terrainObjectName);
     RegisterField("moveInfinitely", moveInfinitely);
     RegisterField("lookInMovementDirection", lookInMovementDirection);
     RegisterField("downwardLook", downwardLook);
@@ -37,6 +40,7 @@ void TerrainStreamingCameraDriver::Start()
 {
     m_pauseRemaining = 0.f;
     m_towardEnd = true;
+    m_initialTerrainReady = !waitForInitialTerrain;
     if (Owner && moveOnStart)
     {
         Owner->transform.position = startPosition;
@@ -67,6 +71,22 @@ void TerrainStreamingCameraDriver::Update()
 {
     if (!Owner || !moveOnStart)
         return;
+    if (!m_initialTerrainReady)
+    {
+        Engine::Core::Object* terrainObject = terrainObjectName.empty()
+            ? nullptr : Owner->FindObjectInSceneByName(terrainObjectName);
+        TerrainGen* terrain = terrainObject
+            ? terrainObject->GetComponent<TerrainGen>() : nullptr;
+        if (!terrain)
+            return;
+        const int diameter = std::clamp(terrain->viewRadiusInChunks, 0, 8) * 2 + 1;
+        const size_t desiredChunks = static_cast<size_t>(diameter) * diameter;
+        if (terrain->GetLoadedChunkCount() < desiredChunks ||
+            terrain->GetQueuedChunkCount() != 0u ||
+            terrain->GetInFlightChunkCount() != 0u)
+            return;
+        m_initialTerrainReady = true;
+    }
     const float deltaTime = std::clamp(secondsPerUpdate, 0.0001f, 0.25f);
     if (moveInfinitely)
     {

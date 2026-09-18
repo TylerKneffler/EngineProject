@@ -11,7 +11,7 @@ namespace Engine::Components
 class SkinnedMesh : public Engine::Core::Component
 {
 public:
-    using Vertex = Engine::Model::Vertex;
+    using Vertex = Engine::Model::AnimationVertex;
 
     SkinnedMesh();
     ComponentReference meshReference { "Mesh" };

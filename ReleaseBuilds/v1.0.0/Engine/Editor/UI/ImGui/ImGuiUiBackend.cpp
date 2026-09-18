@@ -15,6 +15,7 @@
 #include "Engine/Editor/Input/EditorKeyBindings.h"
 #include "Engine/Editor/EditorState.h"
 #include "Engine/Editor/GameBuildManager.h"
+#include <filesystem>
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "Core/Renderers/Vulkan/VulkanEditorRenderer.h"
 #endif
@@ -25,6 +26,35 @@ namespace Engine::Editor
 {
 namespace
 {
+void ConfigureEditorFonts()
+{
+    ImGuiIO& io = ImGui::GetIO();
+    io.Fonts->Clear();
+
+    ImFontConfig textConfig{};
+    textConfig.OversampleH = 2;
+    textConfig.OversampleV = 2;
+    textConfig.RasterizerDensity = 1.1f;
+    const std::filesystem::path textFont("C:/Windows/Fonts/segoeui.ttf");
+    if (std::filesystem::exists(textFont))
+        io.FontDefault = io.Fonts->AddFontFromFileTTF(
+            textFont.string().c_str(), 16.f, &textConfig);
+    if (!io.FontDefault)
+        io.FontDefault = io.Fonts->AddFontDefault();
+
+    const std::filesystem::path iconFont("C:/Windows/Fonts/segmdl2.ttf");
+    if (std::filesystem::exists(iconFont))
+    {
+        static constexpr ImWchar iconRanges[] = { 0xE700, 0xF8FF, 0 };
+        ImFontConfig iconConfig{};
+        iconConfig.MergeMode = true;
+        iconConfig.PixelSnapH = true;
+        iconConfig.GlyphMinAdvanceX = 16.f;
+        io.Fonts->AddFontFromFileTTF(iconFont.string().c_str(), 16.f,
+            &iconConfig, iconRanges);
+    }
+}
+
 #if defined(ENGINE_VULKAN_ENABLED)
 PFN_vkVoidFunction LoadVulkanFunction(const char* name, void* instance)
 {
@@ -59,6 +89,7 @@ bool ImGuiUiBackend::Initialize(void* nativeWindow, ::Engine::Renderers::IEditor
     ImGui::CreateContext();
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+    ConfigureEditorFonts();
 
     HWND window = static_cast<HWND>(nativeWindow);
     if (!ImGui_ImplWin32_Init(window))
@@ -234,6 +265,14 @@ bool ImGuiUiBackend::HandleMessage(void* nativeWindow, uint32_t message,
 }
 
 void ImGuiUiBackend::Resize(uint32_t, uint32_t) {}
+
+void ImGuiUiBackend::ClearFocus()
+{
+    if (!m_initialized || !ImGui::GetCurrentContext())
+        return;
+    ImGui::ClearActiveID();
+    ImGui::SetWindowFocus(nullptr);
+}
 
 void ImGuiUiBackend::BeginFrame()
 {

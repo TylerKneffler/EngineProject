@@ -268,31 +268,75 @@ bool Engine::Components::RigidBody::EnsureBody()
             }
             else
                 mesh = Owner->GetComponent<Engine::Components::Mesh>();
-            if (!mesh || mesh->GetVertices().empty()) continue;
+            const bool indexedTerrain = mesh &&
+                mesh->UsesTerrainVertexFormat() &&
+                !mesh->GetTerrainVertices().empty() &&
+                !mesh->GetIndices().empty();
+            if (!mesh || (mesh->GetVertices().empty() && !indexedTerrain))
+                continue;
 
             const bool convex = meshCollider->convex || Engine::Physics::IsDynamic(*this);
             if (convex)
             {
                 auto hull = std::make_unique<btConvexHullShape>();
-                for (const Engine::Model::Vertex& vertex : mesh->GetVertices())
-                    hull->addPoint(btVector3(vertex.pos[0] * scale.x,
-                        vertex.pos[1] * scale.y, vertex.pos[2] * scale.z), false);
+                if (indexedTerrain)
+                {
+                    for (const Engine::Model::TerrainVertex& vertex :
+                        mesh->GetTerrainVertices())
+                    {
+                        hull->addPoint(btVector3(vertex.pos[0] * scale.x,
+                            vertex.pos[1] * scale.y,
+                            vertex.pos[2] * scale.z), false);
+                    }
+                }
+                else
+                {
+                    for (const Engine::Model::AnimationVertex& vertex :
+                        mesh->GetVertices())
+                    {
+                        hull->addPoint(btVector3(vertex.pos[0] * scale.x,
+                            vertex.pos[1] * scale.y,
+                            vertex.pos[2] * scale.z), false);
+                    }
+                }
                 hull->recalcLocalAabb();
                 shape = std::move(hull);
             }
             else
             {
                 auto triangles = std::make_unique<btTriangleMesh>();
-                const auto& vertices = mesh->GetVertices();
-                for (std::size_t i = 0; i + 2 < vertices.size(); i += 3)
+                if (indexedTerrain)
                 {
+                    const auto& vertices = mesh->GetTerrainVertices();
+                    const auto& indices = mesh->GetIndices();
+                    const auto point = [&vertices, &scale](uint32_t index)
+                    {
+                        return btVector3(vertices[index].pos[0] * scale.x,
+                            vertices[index].pos[1] * scale.y,
+                            vertices[index].pos[2] * scale.z);
+                    };
+                    for (std::size_t i = 0; i + 2 < indices.size(); i += 3)
+                    {
+                        if (indices[i] >= vertices.size() ||
+                            indices[i + 1] >= vertices.size() ||
+                            indices[i + 2] >= vertices.size())
+                            continue;
+                        triangles->addTriangle(point(indices[i]),
+                            point(indices[i + 1]), point(indices[i + 2]));
+                    }
+                }
+                else
+                {
+                    const auto& vertices = mesh->GetVertices();
                     const auto point = [&vertices, &scale](std::size_t index)
                     {
                         return btVector3(vertices[index].pos[0] * scale.x,
                             vertices[index].pos[1] * scale.y,
                             vertices[index].pos[2] * scale.z);
                     };
-                    triangles->addTriangle(point(i), point(i + 1), point(i + 2));
+                    for (std::size_t i = 0; i + 2 < vertices.size(); i += 3)
+                        triangles->addTriangle(point(i), point(i + 1),
+                            point(i + 2));
                 }
                 shape = std::make_unique<btBvhTriangleMeshShape>(triangles.get(), true);
                 m_impl->triangleMeshes.push_back(std::move(triangles));

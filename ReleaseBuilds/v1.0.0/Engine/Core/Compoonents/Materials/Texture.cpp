@@ -308,7 +308,8 @@ bool Texture::Prepare(IGraphicsProvider* graphicsProvider)
 {
     if (!graphicsProvider)
         return false;
-    if (m_graphicsTexture && m_preparedProvider == graphicsProvider)
+    if (m_graphicsTexture && m_graphicsTexture->GetNativeHandle() &&
+        m_preparedProvider == graphicsProvider)
         return true;
     if (!Load())
         return false;

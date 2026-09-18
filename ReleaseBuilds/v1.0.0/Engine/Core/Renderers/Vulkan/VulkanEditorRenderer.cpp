@@ -44,6 +44,12 @@ void VulkanEditorRenderer::RenderIfNeeded(std::function<void()> drawFn)
     if (!m_dirty) return;
     m_dirty = false; m_commandBuffer = m_core.BeginFrame();
     if (!m_commandBuffer) { m_dirty = true; return; }
+    if (m_provider)
+    {
+        auto* factory = m_provider->GetContextFactory();
+        factory->SetCommandBuffer(reinterpret_cast<void*>(m_commandBuffer));
+        factory->PrepareFrame(m_core.GetFrameIndex());
+    }
     if (m_uiHooks.beginFrame) m_uiHooks.beginFrame();
     if (drawFn) drawFn();
     VkClearValue clear{}; clear.color = { { m_clearColor[0], m_clearColor[1], m_clearColor[2], m_clearColor[3] } };

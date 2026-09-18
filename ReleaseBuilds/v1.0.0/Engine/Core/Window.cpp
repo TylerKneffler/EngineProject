@@ -315,6 +315,8 @@ LRESULT CALLBACK Window::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         {
             self->m_escapeHeld = true;
             self->m_escapePressedAt = GetTickCount64();
+            if (self->OnEscapePressed)
+                self->OnEscapePressed();
             // Retain keyboard focus until key-up so a tap can be distinguished
             // reliably from the hold-to-close gesture.
             ReleaseInputFocus(false);

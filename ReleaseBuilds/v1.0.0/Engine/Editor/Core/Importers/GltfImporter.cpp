@@ -506,7 +506,7 @@ Engine::Model::ModelImportResult GltfImporter::Import(
                 fastgltf::copyFromAccessor<uint32_t>(asset, indexAccessor, indices.data());
                 indices = TriangleIndices(primitive, std::move(indices));
 
-                std::vector<Engine::Model::Vertex> vertices;
+                std::vector<Engine::Model::AnimationVertex> vertices;
                 vertices.reserve(indices.size());
                 ImportedPrimitiveRuntime& runtime = meshRuntime[meshIndex][primitiveIndex];
                 runtime.morphTargets.resize(primitive.targets.size());
@@ -514,7 +514,7 @@ Engine::Model::ModelImportResult GltfImporter::Import(
                 {
                     if (index >= positions.size())
                         throw std::runtime_error("Mesh index is outside the position accessor");
-                    Engine::Model::Vertex vertex{};
+                    Engine::Model::AnimationVertex vertex{};
                     vertex.pos[0] = positions[index].x();
                     vertex.pos[1] = positions[index].y();
                     vertex.pos[2] = positions[index].z();

@@ -418,7 +418,7 @@ std::vector<SurfaceTriangle> GatherGeometry(const Engine::Scene::Scene& scene)
             triangle.owner = object.get();
             for (int index = 0; index < 3; ++index)
             {
-                const Engine::Model::Vertex& vertex = vertices[offset + index];
+                const Engine::Model::AnimationVertex& vertex = vertices[offset + index];
                 triangle.positions[index] = glm::vec3(world * glm::vec4(
                     vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.f));
                 triangle.normals[index] = glm::normalize(normalMatrix * glm::vec3(

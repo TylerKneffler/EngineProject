@@ -14,7 +14,9 @@ public:
     bool BeginWindow(const char*, bool*, bool) override; void EndWindow() override;
     bool IsWindowFocused() const override;
     void PushId(const void*) override; void PushId(const char*) override; void PopId() override;
-    bool Button(const char*, float, float) override; void Label(const char*) override;
+    bool Button(const char*, float, float) override;
+    EditorUiBreadcrumbResult Breadcrumb(const char*, const char* const*, int) override;
+    void Label(const char*) override;
     void DisabledLabel(const char*) override; void ColoredLabel(const char*, EditorUiColor) override;
     void BeginTextWrap() override; void EndTextWrap() override;
     void SameLine() override; void Separator() override; void Spacing() override;
@@ -25,7 +27,9 @@ public:
     bool DragFloat(const char*, float*, float, float, float) override;
     bool DragFloat3(const char*, float*, float, float, float) override;
     bool ColorEdit3(const char*, float*) override; bool ColorEdit4(const char*, float*) override;
-    bool SliderInt(const char*, int*, int, int) override; bool InputUInt(const char*, uint32_t*) override;
+    bool SliderInt(const char*, int*, int, int) override;
+    bool SliderFloat(const char*, float*, float, float) override;
+    bool InputUInt(const char*, uint32_t*) override;
     void ValueLabel(const char*, const char*) override; bool CollapsingHeader(const char*, bool) override;
     bool TreeNode(const void*, const char*, bool, bool, bool) override; void TreePop() override;
     EditorUiObjectRowResult ObjectTreeRow(const void*,char*,size_t,bool*,bool,bool,bool,bool,int,bool,uint64_t) override;
@@ -34,6 +38,8 @@ public:
     EditorUiHierarchyDropResult HierarchyBackgroundDropTarget(const char*) override;
     EditorUiObjectRowResult ObjectHeader(const void*,char*,size_t,bool*,bool) override;
     bool Selectable(const char*, bool, bool) override;
+    EditorUiAssetTileResult AssetTile(const char*, const char*, void*, bool, float) override;
+    float AvailableContentWidth() const override;
     EditorUiContextMenuResult ContextMenu(const void*,const char*,const char*,bool,const char*) override;
     EditorUiAssetCreateMenuResult AssetWindowContextMenu() override;
     EditorUiAssetItemMenuResult AssetItemContextMenu(const void*) override;

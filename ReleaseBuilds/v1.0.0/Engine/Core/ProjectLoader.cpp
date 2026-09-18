@@ -1,4 +1,5 @@
 #include "ProjectLoader.h"
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <pugixml.hpp>
@@ -258,6 +259,42 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
         if (accumulate)
             settings.bakedLighting.accumulate =
                 std::string(accumulate.child_value()) != "false";
+
+        auto distanceLighting = prop.child("DistanceLighting");
+        if (distanceLighting)
+        {
+            settings.distanceLighting.enabled =
+                distanceLighting.attribute("Enabled").as_bool(true);
+            settings.distanceLighting.maximumDistance = std::max(1.f,
+                distanceLighting.attribute("MaximumDistance").as_float(1000.f));
+            std::vector<Engine::Model::DistanceLightingBand> bands;
+            float previousEnd = 0.f;
+            for (auto bandNode : distanceLighting.children("Band"))
+            {
+                Engine::Model::DistanceLightingBand band;
+                band.name = bandNode.attribute("Name").as_string("Quality");
+                band.endDistance = std::clamp(
+                    bandNode.attribute("EndDistance").as_float(
+                        settings.distanceLighting.maximumDistance),
+                    previousEnd, settings.distanceLighting.maximumDistance);
+                band.maxRealtimeLights = std::min<uint32_t>(
+                    bandNode.attribute("MaxRealtimeLights").as_uint(
+                        Engine::Model::MaxRealtimeLights),
+                    Engine::Model::MaxRealtimeLights);
+                band.normalMapping =
+                    bandNode.attribute("NormalMapping").as_bool(true);
+                band.parallaxMapping =
+                    bandNode.attribute("ParallaxMapping").as_bool(true);
+                band.environmentDiffuse =
+                    bandNode.attribute("EnvironmentDiffuse").as_bool(true);
+                band.reflections =
+                    bandNode.attribute("Reflections").as_bool(true);
+                previousEnd = band.endDistance;
+                bands.push_back(std::move(band));
+            }
+            if (!bands.empty())
+                settings.distanceLighting.bands = std::move(bands);
+        }
 
         if (!settings.renderingAPI.empty() || !settings.editorRenderingAPI.empty())
             break;

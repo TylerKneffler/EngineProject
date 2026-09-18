@@ -392,6 +392,24 @@ if(ENGINE_VULKAN_ENABLED)
             list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
         endforeach()
     endforeach()
+    foreach(SHADER_NAME Object ObjectOutline)
+        set(SHADER_SOURCE
+            "${ENGINE_ROOT}/Engine/Core/Shaders/${SHADER_NAME}/${SHADER_NAME}.hlsl")
+        set(SHADER_OUTPUT
+            "${VULKAN_SHADER_DIR}/${SHADER_NAME}.VSTerrainMain.VS.spv")
+        add_custom_command(
+            OUTPUT "${SHADER_OUTPUT}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${VULKAN_SHADER_DIR}"
+            COMMAND "${DXC_SPIRV_EXECUTABLE}" -spirv -fspv-target-env=vulkan1.1
+                    -fvk-use-dx-layout -fspv-entrypoint-name=VSMain
+                    -D VULKAN=1 -T vs_6_0
+                    -E VSTerrainMain -Fo "${SHADER_OUTPUT}" "${SHADER_SOURCE}"
+            DEPENDS "${SHADER_SOURCE}"
+            VERBATIM
+            COMMENT "Compiling ${SHADER_NAME}.VSTerrainMain.VS for Vulkan"
+        )
+        list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
+    endforeach()
     add_custom_target(VulkanShaders DEPENDS ${VULKAN_SHADER_OUTPUTS})
     add_dependencies(Engine VulkanShaders)
     target_link_libraries(Engine PUBLIC volk::volk Vulkan::Headers)
@@ -761,25 +779,42 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
-   EXISTS "${ENGINE_ROOT}/Engine/Tests/MarchingCubesTerrainEditorTests.cpp")
+   EXISTS "${ENGINE_ROOT}/Engine/Tests/TerrainGenTests.cpp")
     enable_testing()
-    add_executable(MarchingCubesTerrainEditorTests EXCLUDE_FROM_ALL
-        "${ENGINE_ROOT}/Engine/Tests/MarchingCubesTerrainEditorTests.cpp"
-        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/MarchingCubes/MarchingCubesChunk.cpp"
-        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/MarchingCubes/MarchingCubesQuad.cpp"
-        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/MarchingCubes/MarchingCubesTerrain.cpp"
-        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/MarchingCubes/PerlinNoiseField.cpp"
-        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/MarchingCubes/TerrainStreamingCameraDriver.cpp"
+    add_executable(TerrainGenTests EXCLUDE_FROM_ALL
+        "${ENGINE_ROOT}/Engine/Tests/TerrainGenTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainChunk.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainPatch.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGen.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/PerlinNoiseField.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainStreamingCameraDriver.cpp"
     )
-    target_link_libraries(MarchingCubesTerrainEditorTests PRIVATE Engine)
-    target_include_directories(MarchingCubesTerrainEditorTests PRIVATE
+    target_link_libraries(TerrainGenTests PRIVATE Engine)
+    target_include_directories(TerrainGenTests PRIVATE
         "${ENGINE_ROOT}/Engine"
         "${ENGINE_ROOT}/Engine/Core/Assets"
     )
-    add_test(NAME MarchingCubesEditorGeneration
-        COMMAND MarchingCubesTerrainEditorTests)
-    set_tests_properties(MarchingCubesEditorGeneration PROPERTIES
+    add_test(NAME TerrainGenGeneration
+        COMMAND TerrainGenTests)
+    set_tests_properties(TerrainGenGeneration PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}"
+    )
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_ROOT}/Engine/Tests/TerrainGenRenderedBenchmark.cpp")
+    add_executable(TerrainGenRenderedBenchmark EXCLUDE_FROM_ALL
+        "${ENGINE_ROOT}/Engine/Tests/TerrainGenRenderedBenchmark.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainChunk.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainPatch.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGen.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/PerlinNoiseField.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainStreamingCameraDriver.cpp"
+    )
+    target_link_libraries(TerrainGenRenderedBenchmark PRIVATE Engine)
+    target_include_directories(TerrainGenRenderedBenchmark PRIVATE
+        "${ENGINE_ROOT}/Engine"
+        "${ENGINE_ROOT}/Engine/Core/Assets"
     )
 endif()
 

@@ -19,6 +19,7 @@
 #include "Core/AssetRecord.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Importers/ModelImporter.h"
+#include "Engine/Editor/Core/View/Templates/Assets/AssetPreviewCache.h"
 #include <chrono>
 #include <algorithm>
 #include <cctype>
@@ -185,6 +186,7 @@ bool EditorState::Init()
     try
     {
         m_scene->Init(graphicsProvider);
+        m_scene->SetDistanceLightingSettings(m_projectSettings.distanceLighting);
         OutputDebugStringA("[EditorState] Scene initialized\n");
     }
     catch (const std::exception& e)
@@ -319,6 +321,8 @@ bool EditorState::SaveMainScene()
         m_currentScenePath = std::filesystem::path(destination).lexically_normal().string();
         m_hasUnsavedChanges = false;
         m_savedSceneSnapshot = m_scene->SaveToString();
+        AssetPreviewCache::CaptureScene(m_currentScenePath, *m_scene,
+            m_scene->GetGraphicsProvider());
         if (m_primaryConsole)
             m_primaryConsole->AddLog(
                 ConsoleView::Level::Info, "Scene saved: " + m_currentScenePath);
@@ -483,6 +487,13 @@ void EditorState::LoadSceneNow(const std::string& path)
         }
         return;
     }
+
+    // Loading another editor document is a hard runtime boundary. Let the
+    // host perform its normal Stop flow before this scene replaces the active
+    // graph, so Playing/Paused state and the pre-play snapshot cannot leak
+    // into the newly loaded scene.
+    if (OnSceneLoadRequested)
+        OnSceneLoadRequested(resolvedPath);
     
     // Load the scene
     try
@@ -498,6 +509,8 @@ void EditorState::LoadSceneNow(const std::string& path)
             m_currentScenePath =
                 std::filesystem::path(resolvedPath).lexically_normal().string();
             ResetHistory(true);
+            if (OnSceneLoadConfirmed)
+                OnSceneLoadConfirmed();
             
             if (m_primaryConsole)
             {
@@ -554,6 +567,8 @@ void EditorState::OpenPrefabStage(const std::string& path)
         prefabScene->SetEditorMode2D(
             m_projectSettings.editorMode == Engine::Model::ProjectSettings::EditorMode::TwoD);
         prefabScene->Init(m_renderer->GetGraphicsProvider());
+        prefabScene->SetDistanceLightingSettings(
+            m_projectSettings.distanceLighting);
         root = Engine::Serialization::SceneSerializer::InstantiatePrefab(
             *prefabScene, normalized, prefabScene->GetGraphicsProvider());
     }
@@ -786,8 +801,12 @@ void EditorState::InitializePanels()
     m_preferences->OnSettingsChanged = [this]() {
         m_projectSettings = m_preferences->GetSettings();
         if (m_scene)
+        {
             m_scene->SetEditorMode2D(
                 m_projectSettings.editorMode == Engine::Model::ProjectSettings::EditorMode::TwoD);
+            m_scene->SetDistanceLightingSettings(
+                m_projectSettings.distanceLighting);
+        }
         SetHistoryLimit(m_projectSettings.editorHistoryLimit);
         for (auto& panel : m_panels)
             if (auto* hierarchy = dynamic_cast<HierarchyView*>(panel.get()))

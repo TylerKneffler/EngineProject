@@ -5,36 +5,49 @@
 #include "Core/Model/MeshData.h"
 #include <glm/glm.hpp>
 #include <cstdint>
-#include <future>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
 class PerlinNoiseField;
-class MarchingCubesChunk;
+class TerrainChunk;
 
-// Streams a square set of volumetric terrain chunks around a named viewer.
-// Every cube cell is polygonized from its twelve edge intersections. An
-// asymptotic face decider keeps ambiguous saddle cases deterministic.
-class MarchingCubesTerrain final : public Engine::Core::Script
+// Streams procedurally generated terrain chunks around a named viewer. The
+// output topology is selectable without changing the streaming pipeline.
+class TerrainGen final : public Engine::Core::Script
 {
 public:
-    enum class GeometryMode : int
+    enum class TerrainShape : int
     {
-        SmoothMarchingCubes = 0,
-        OrthogonalQuads = 1
+        SmoothSurface = 0,
+        Cubes = 1,
+        Triangles = 2,
+        Hexagons = 3
     };
 
-    MarchingCubesTerrain();
+    TerrainGen();
+    ~TerrainGen() override;
 
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | References")
-    std::string viewerObjectName = "Marching Cubes Camera";
+    std::string viewerObjectName = "TerrainGen Camera";
 
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | References")
     std::string noiseObjectName;
 
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Streaming", ClampMin = "1")
     float chunkSize = 16.f;
+
+    // Logical chunk origin represented by local coordinate (0, 0). Keeping
+    // rendered/physical transforms near zero prevents large-world float loss.
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Streaming")
+    int worldOriginChunkX = 0;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Streaming")
+    int worldOriginChunkZ = 0;
 
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Streaming", ClampMin = "0", ClampMax = "8")
     int viewRadiusInChunks = 1;
@@ -47,6 +60,9 @@ public:
 
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Streaming", ClampMin = "1", ClampMax = "16")
     int maxChunkCommitsPerUpdate = 4;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Streaming", ClampMin = "1", ClampMax = "32")
+    int maxChunkUnloadsPerUpdate = 2;
 
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Streaming")
     bool cacheUnloadedChunkMeshes = true;
@@ -61,15 +77,13 @@ public:
     int verticalCells = 12;
 
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Resolution", ClampMin = "1", ClampMax = "8")
-    int quadsPerAxis = 2;
+    int patchesPerAxis = 2;
 
-    // Orthogonal mode emits horizontal top quads and vertical wall quads
-    // only. Adjacent height cells never connect with a slanted surface.
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Geometry")
-    int geometryMode = static_cast<int>(GeometryMode::SmoothMarchingCubes);
+    int terrainShape = static_cast<int>(TerrainShape::SmoothSurface);
 
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Geometry", ClampMin = "0.05")
-    float orthogonalHeightStep = 1.f;
+    float heightStep = 1.f;
 
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Shape", ClampMin = "1")
     float verticalSize = 18.f;
@@ -108,7 +122,13 @@ public:
     glm::vec3 highHeightColor { 0.62f, 0.58f, 0.48f };
 
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Physics")
-    bool generateColliders = false;
+    bool generateColliders = true;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Physics", ClampMin = "0", ClampMax = "8")
+    int collisionRadiusInChunks = 0;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Physics", ClampMin = "1", ClampMax = "16")
+    int maxColliderActivationsPerUpdate = 1;
 
     void Start() override;
     void Update() override;
@@ -118,6 +138,10 @@ public:
     // Rebuilds the configured terrain ring immediately. This is also exposed
     // by the custom editor UI and does not require the scene runtime to start.
     bool GenerateTerrain();
+
+    // Removes generated chunks and invalidates every cached or queued mesh.
+    // Noise/settings remain intact so GenerateTerrain can start from a clean slate.
+    void ClearTerrain();
 
     std::size_t GetLoadedChunkCount() const { return m_chunks.size(); }
     uint64_t GetTotalChunksBuilt() const { return m_totalChunksBuilt; }
@@ -129,19 +153,25 @@ public:
     std::size_t GetCachedChunkCount() const { return m_meshCache.size(); }
     std::size_t GetQueuedChunkCount() const { return m_chunkQueue.size(); }
     std::size_t GetInFlightChunkCount() const { return m_inFlightChunks.size(); }
+    std::size_t GetPendingChunkUnloadCount() const { return m_pendingChunkUnloadCount; }
+    bool IsChunkLoaded(int x, int z) const
+    {
+        return m_chunks.find(ChunkKey(x, z)) != m_chunks.end();
+    }
 
 private:
-    using Vertex = Engine::Model::Vertex;
+    using Vertex = Engine::Model::AnimationVertex;
+    using TerrainMeshData = Engine::Model::TerrainMeshData;
 
-    struct CachedQuadMesh
+    struct CachedPatchMesh
     {
-        int quadX = 0;
-        int quadZ = 0;
-        std::vector<Vertex> vertices;
+        int patchX = 0;
+        int patchZ = 0;
+        TerrainMeshData geometry;
     };
     struct CachedChunkMesh
     {
-        std::vector<CachedQuadMesh> quads;
+        std::vector<CachedPatchMesh> patches;
         uint64_t lastUse = 0;
     };
     struct GenerationSnapshot
@@ -149,9 +179,9 @@ private:
         float chunkSize = 16.f;
         int horizontalCells = 12;
         int verticalCells = 12;
-        int quadsPerAxis = 2;
-        int geometryMode = 0;
-        float orthogonalHeightStep = 1.f;
+        int patchesPerAxis = 2;
+        int terrainShape = 0;
+        float heightStep = 1.f;
         float verticalSize = 18.f;
         float baseHeight = 0.f;
         float heightAmplitude = 6.f;
@@ -177,49 +207,70 @@ private:
         int x = 0;
         int z = 0;
         uint64_t configurationHash = 0;
-        std::vector<CachedQuadMesh> quads;
+        uint64_t generationEpoch = 0;
+        std::vector<CachedPatchMesh> patches;
     };
     struct QueuedChunk
     {
         int x = 0;
         int z = 0;
-        int distanceSquared = 0;
+        int64_t distanceSquared = 0;
     };
     struct InFlightChunk
     {
         int x = 0;
         int z = 0;
-        std::future<GeneratedChunkMesh> future;
+    };
+    struct GenerationJob
+    {
+        GenerationSnapshot snapshot;
+        int x = 0;
+        int z = 0;
+        uint64_t generationEpoch = 0;
     };
 
     static int64_t ChunkKey(int x, int z);
     glm::ivec2 ViewerChunk() const;
     PerlinNoiseField* ResolveNoise() const;
     void RefreshChunks();
+    void RefreshColliderActivation();
     void BuildChunk(int chunkX, int chunkZ,
-        const std::vector<CachedQuadMesh>* preparedQuads = nullptr);
+        std::vector<CachedPatchMesh>* preparedPatches = nullptr);
     GenerationSnapshot CaptureGenerationSnapshot(
         const PerlinNoiseField& noise) const;
     static GeneratedChunkMesh GenerateChunkMesh(
         const GenerationSnapshot& snapshot, int chunkX, int chunkZ);
+    void EnsureWorkerPool(std::size_t workerCount);
+    void StopWorkerPool();
+    void CancelPendingGeneration();
+    void WorkerLoop();
+    void HarvestCompletedChunks();
     int CommitCompletedChunks(int budget);
     bool IsChunkDesired(int x, int z) const;
-    std::vector<Vertex> BuildQuadVertices(int chunkX, int chunkZ,
-        int quadX, int quadZ, const PerlinNoiseField& noise) const;
-    std::vector<Vertex> BuildSmoothQuadVertices(int chunkX, int chunkZ,
-        int quadX, int quadZ, const PerlinNoiseField& noise) const;
-    std::vector<Vertex> BuildOrthogonalQuadVertices(int chunkX, int chunkZ,
-        int quadX, int quadZ, const PerlinNoiseField& noise) const;
+    std::vector<Vertex> BuildPatchVertices(int chunkX, int chunkZ,
+        int patchX, int patchZ, const PerlinNoiseField& noise) const;
+    std::vector<Vertex> BuildSmoothSurfaceVertices(int chunkX, int chunkZ,
+        int patchX, int patchZ, const PerlinNoiseField& noise) const;
+    std::vector<Vertex> BuildCubeVertices(int chunkX, int chunkZ,
+        int patchX, int patchZ, const PerlinNoiseField& noise) const;
+    std::vector<Vertex> BuildTriangleVertices(int chunkX, int chunkZ,
+        int patchX, int patchZ, const PerlinNoiseField& noise) const;
+    std::vector<Vertex> BuildHexagonVertices(int chunkX, int chunkZ,
+        int patchX, int patchZ, const PerlinNoiseField& noise) const;
     float Density(const glm::vec3& terrainPosition,
         const PerlinNoiseField& noise) const;
-    float OrthogonalHeight(float worldX, float worldZ,
+    float SteppedHeight(double worldX, double worldZ,
         const PerlinNoiseField& noise) const;
     glm::vec3 ColorForHeight(float height) const;
     uint64_t MeshConfigurationHash(const PerlinNoiseField& noise) const;
-    void CacheChunkMesh(int64_t key, const Engine::Core::Object& chunkObject);
+    void CacheChunkMesh(int64_t key, Engine::Core::Object& chunkObject);
     void TrimMeshCache();
 
     std::unordered_map<int64_t, Engine::Core::Object*> m_chunks;
+    // Detached, disabled chunk hierarchies retained for normal edge-to-edge
+    // streaming. Reusing them avoids destroying live GPU resources whenever
+    // the viewer crosses a chunk boundary.
+    std::vector<Engine::Core::Object*> m_chunkObjectPool;
     glm::ivec2 m_viewerChunk { 0 };
     bool m_hasViewerChunk = false;
     std::string m_editorGenerationStatus;
@@ -234,4 +285,13 @@ private:
     uint64_t m_meshCacheMisses = 0;
     std::vector<QueuedChunk> m_chunkQueue;
     std::unordered_map<int64_t, InFlightChunk> m_inFlightChunks;
+    std::unordered_map<int64_t, GeneratedChunkMesh> m_readyChunks;
+    std::vector<std::thread> m_workerThreads;
+    std::deque<GenerationJob> m_generationJobs;
+    std::deque<GeneratedChunkMesh> m_completedChunks;
+    std::mutex m_generationMutex;
+    std::condition_variable m_generationCondition;
+    bool m_stopWorkers = false;
+    uint64_t m_generationEpoch = 1;
+    std::size_t m_pendingChunkUnloadCount = 0;
 };

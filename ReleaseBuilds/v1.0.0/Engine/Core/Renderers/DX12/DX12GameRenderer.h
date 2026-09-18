@@ -84,11 +84,14 @@ public:
     uint32_t GetHeight() const override { return m_height; }
     void Clear(float r, float g, float b, float a = 1.0f) override;
     Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override;
+    void WaitIdle() override { FlushGPU(); }
 
     // IGameRenderer interface
     void BeginFrame() override;   // reset allocator + list, transition backbuffer to RENDER_TARGET
     void EndFrame() override;     // execute list, present, signal fence
     std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateFrameGraphicsContext() override;
+    Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const override
+    { return m_frameTelemetry; }
 
     // ---------- D3D12-specific accessors (for internal use) ----------
     ID3D12Device*              GetDevice()      const { return m_device.Get(); }
@@ -191,6 +194,7 @@ private:
     // the frame rate in windowed mode — Present(0,0) alone isn't sufficient
     // because DWM can still throttle to the monitor refresh rate.
     bool m_tearingSupported = false;
+    Engine::Graphics::FrameTimingTelemetry m_frameTelemetry{};
 
     // Graphics provider for shader compilation, buffer creation, pipeline building
     std::unique_ptr<D3D12GraphicsProvider> m_graphicsProvider;
