@@ -181,7 +181,7 @@ uint64_t MeshPositionHash(const Engine::Components::Mesh& mesh)
     // Stable CPU-side fingerprint: catches an unexpected mesh upload/cut even
     // when its vertex count and bounds happen to be unchanged.
     uint64_t hash = 1469598103934665603ull;
-    for (const Engine::Model::Vertex& vertex : mesh.GetVertices())
+    for (const Engine::Model::AnimationVertex& vertex : mesh.GetVertices())
     {
         for (const float coordinate : { vertex.pos[0], vertex.pos[1], vertex.pos[2] })
         {

@@ -135,6 +135,41 @@ void VSMain(
         normalize(mul((float3x3)objectData.world, localTangent)), tangent.w);
 }
 
+// Compact indexed terrain input. Terrain has no skin, morph target, secondary
+// UV, or authored tangent stream; construct the latter from its normal.
+void VSTerrainMain(
+    float3 pos : POSITION,
+    float3 normal : NORMAL,
+    float2 uv : TEXCOORD,
+    float4 color : COLOR,
+    out float4 oPos : SV_POSITION,
+    out float3 oWorldPos : TEXCOORD2,
+    out float3 oNormal : NORMAL,
+    out float2 oUv : TEXCOORD,
+    out float2 oUv1 : TEXCOORD1,
+    out float4 oColor : COLOR,
+    out float4 oTangent : TANGENT)
+{
+    ObjectData objectData = objects[draw.objectIndex];
+    const float3 localNormal = normalize(normal);
+    const float3 referenceAxis = abs(localNormal.y) < 0.999
+        ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0);
+    const float3 localTangent = normalize(cross(referenceAxis, localNormal));
+    const float4 worldPosition = mul(objectData.world, float4(pos, 1.0));
+    oPos = mul(objectData.viewProjection, worldPosition);
+    if ((draw.drawFlags & 0x40000000u) != 0u && oPos.w > 0.0)
+        oPos.z = max(oPos.z, 0.0);
+    if ((draw.drawFlags & 0x80000000u) != 0u)
+        oPos.z = oPos.w;
+    oWorldPos = worldPosition.xyz;
+    oNormal = normalize(mul((float3x3)objectData.world, localNormal));
+    oUv = objectData.spriteUvRect.xy + uv * objectData.spriteUvRect.zw;
+    oUv1 = uv;
+    oColor = color;
+    oTangent = float4(normalize(mul((float3x3)objectData.world,
+        localTangent)), 1.0);
+}
+
 static const float PI = 3.14159265359;
 
 float3 LinearToSrgb(float3 linearColor)
@@ -465,11 +500,15 @@ float4 PSMain(
     float3 ambient = objectData.ambientUnlit.rgb *
         (base.rgb * (1.0 - metallic) + f0 * 0.25) * occlusion;
     float3 environment = 0.0;
-    if (objectData.environmentParams.x > 0.0 ||
-        objectData.reflectionEnvironmentParams.z > 0.5)
+    bool useEnvironmentDiffuse = objectData.environmentParams.x > 0.0 &&
+        objectData.environmentParams.z > 0.0;
+    bool useEnvironmentReflection = objectData.environmentParams.w > 0.0 &&
+        (objectData.environmentParams.x > 0.0 ||
+            objectData.reflectionEnvironmentParams.z > 0.5);
+    if (useEnvironmentDiffuse || useEnvironmentReflection)
     {
         float3 diffuseEnvironment = 0.0;
-        if (objectData.environmentParams.x > 0.0)
+        if (useEnvironmentDiffuse)
         {
             float3 diffuseIrradiance = EvaluateEnvironmentIrradiance(objectData, n);
             diffuseEnvironment = diffuseIrradiance * base.rgb *
@@ -477,28 +516,33 @@ float4 PSMain(
                 objectData.environmentParams.x;
         }
 
-        float3 reflectionDirection = reflect(-v, n);
-        float3 reflectedRadiance;
-        if (objectData.reflectionEnvironmentParams.w > 0.5)
-            reflectedRadiance = EvaluateDirectReflectionRadiance(
-                objectData, reflectionDirection, roughness);
-        else
+        float3 specularEnvironment = 0.0;
+        if (useEnvironmentReflection)
         {
-            float3 roughReflectionDirection = normalize(lerp(
-                reflectionDirection, n, roughness * roughness));
-            reflectedRadiance =
-                objectData.reflectionEnvironmentParams.z > 0.5
-                    ? EvaluateCustomReflectionRadiance(
-                        objectData, roughReflectionDirection)
-                    : EvaluateEnvironmentRadiance(
-                        objectData, roughReflectionDirection) *
-                        objectData.environmentParams.x;
+            float3 reflectionDirection = reflect(-v, n);
+            float3 reflectedRadiance;
+            if (objectData.reflectionEnvironmentParams.w > 0.5)
+                reflectedRadiance = EvaluateDirectReflectionRadiance(
+                    objectData, reflectionDirection, roughness);
+            else
+            {
+                float3 roughReflectionDirection = normalize(lerp(
+                    reflectionDirection, n, roughness * roughness));
+                reflectedRadiance =
+                    objectData.reflectionEnvironmentParams.z > 0.5
+                        ? EvaluateCustomReflectionRadiance(
+                            objectData, roughReflectionDirection)
+                        : EvaluateEnvironmentRadiance(
+                            objectData, roughReflectionDirection) *
+                            objectData.environmentParams.x;
+            }
+            float3 environmentFresnel = f0 +
+                (max(1.0 - roughness, f0) - f0) *
+                pow(saturate(1.0 - dot(n, v)), 5.0);
+            float roughnessAttenuation = lerp(1.0, 0.25, roughness);
+            specularEnvironment = reflectedRadiance * environmentFresnel *
+                roughnessAttenuation * objectData.environmentParams.w;
         }
-        float3 environmentFresnel = f0 + (max(1.0 - roughness, f0) - f0) *
-            pow(saturate(1.0 - dot(n, v)), 5.0);
-        float roughnessAttenuation = lerp(1.0, 0.25, roughness);
-        float3 specularEnvironment = reflectedRadiance * environmentFresnel *
-            roughnessAttenuation * objectData.environmentParams.w;
         environment = (diffuseEnvironment + specularEnvironment) * occlusion;
     }
     return EncodeOutput(

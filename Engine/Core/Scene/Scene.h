@@ -6,6 +6,7 @@
 #include "Core/Rendering/Lighting/Pipelines/Baked/BakedLightingPipeline.h"
 #include "Core/Model/SceneSettings.h"
 #include "Core/Model/MeshData.h"
+#include "Core/Model/LightingData.h"
 #include <glm/glm.hpp>
 #include <array>
 #include <memory>
@@ -131,11 +132,26 @@ public:
     void Render(IGraphicsContext* context, float aspect,
         Camera* cameraOverride = nullptr, bool includeEditorVisuals = true,
         uint32_t viewportWidth = 0u, uint32_t viewportHeight = 0u);
+    // Bytes of object records made visible to the GPU by the most recent
+    // Render call. This excludes vertex, light, and bone buffers.
+    uint64_t GetLastObjectDataUploadBytes() const
+    {
+        return m_lastObjectDataUploadBytes;
+    }
+    uint32_t GetLastOcclusionCulledCount() const
+    {
+        return m_lastOcclusionCulledCount;
+    }
     void SetSelectedObject(Object* obj) { m_selectedObject = obj; }
     Object* GetSelectedObject() const { return m_selectedObject; }
     void SetPreviewObject(Object* obj) { m_previewObject = obj; }
     void SetEditorMode2D(bool enabled);
     bool IsEditorMode2D() const { return m_editorMode2D; }
+    void SetDistanceLightingSettings(
+        const Engine::Model::DistanceLightingSettings& distanceSettings)
+    {
+        m_distanceLightingSettings = distanceSettings;
+    }
     // Pointer coordinates relative to the surface displaying the game render
     // target, used to keep embedded-view UI hit bounds aligned.
     void SetUiPointerInput(float x, float y, float viewportWidth,
@@ -265,10 +281,14 @@ private:
     std::unique_ptr<IPipelineState> m_objectSpatialDebugPipeline;
     std::unique_ptr<IPipelineState> m_objectSpatialDebugWirePipeline;
     std::unique_ptr<IPipelineState> m_objectOutlinePipeline;
+    std::unordered_map<const IPipelineState*, std::unique_ptr<IPipelineState>>
+        m_terrainPipelineByBase;
     std::unique_ptr<IGraphicsBuffer> m_objectConstantBuffer;
     void* m_objectCBMapped = nullptr;
     std::unique_ptr<IGraphicsBuffer> m_objectDataBuffer;
     void* m_objectDataMapped = nullptr;
+    std::unique_ptr<IGraphicsBuffer> m_portalObjectDataBuffer;
+    void* m_portalObjectDataMapped = nullptr;
     std::unique_ptr<IGraphicsBuffer> m_lightDataBuffer;
     void* m_lightDataMapped = nullptr;
     std::unique_ptr<IGraphicsBuffer> m_boneDataBuffer;
@@ -325,7 +345,7 @@ private:
     struct WarpedRenderMesh
     {
         std::unique_ptr<IGraphicsBuffer> vertexBuffer;
-        std::vector<Engine::Model::Vertex> vertices;
+        std::vector<Engine::Model::AnimationVertex> vertices;
         glm::mat4 authoredWorld { 1.f };
         glm::vec3 mappedOrigin { 0.f };
         uint64_t meshRevision = 0;
@@ -338,6 +358,9 @@ private:
     // pruned as objects leave the scene.
     std::unordered_map<const Object*, WarpedRenderMesh> m_warpedRenderMeshes;
     uint32_t m_frameLightCount = 0;
+    Engine::Model::DistanceLightingSettings m_distanceLightingSettings;
+    uint64_t m_lastObjectDataUploadBytes = 0;
+    uint32_t m_lastOcclusionCulledCount = 0;
     bool m_renderFramePrepared = false;
 
     // ---- Object list ----
@@ -371,9 +394,12 @@ private:
     static constexpr uint32_t kPortalRenderSlotsPerView = kMaxObjects + 2;
     static constexpr uint32_t kMaxSpatialDebugDraws =
         kMaxSpatialObjects * kMaxSpatialVerticesPerObject / 24;
+    static constexpr uint32_t kOrdinaryObjectSlotCount =
+        kMaxObjects + kMaxSpatialDebugDraws;
+    static constexpr uint32_t kPortalObjectSlotCount =
+        kMaxPortalRenderViews * kPortalRenderSlotsPerView;
     static constexpr uint32_t kObjectRenderSlotCount = kMaxObjects +
-        kMaxPortalRenderViews * kPortalRenderSlotsPerView +
-        kMaxSpatialDebugDraws;
+        kPortalObjectSlotCount + kMaxSpatialDebugDraws;
     static constexpr uint32_t kMaxBonesPerObject = 256;
     static constexpr uint32_t kMaxLights =
         Engine::Model::MaxRealtimeLights;

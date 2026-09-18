@@ -70,7 +70,9 @@ bool ImGuiEditorUi::DragFloat(const char*l,float*v,float s,float a,float b){retu
 bool ImGuiEditorUi::DragFloat3(const char*l,float*v,float s,float a,float b){return ImGui::DragFloat3(l,v,s,a,b);}
 bool ImGuiEditorUi::IsAnyItemActive() const{return ImGui::IsAnyItemActive();}
 bool ImGuiEditorUi::ColorEdit3(const char*l,float*v){return ImGui::ColorEdit3(l,v);} bool ImGuiEditorUi::ColorEdit4(const char*l,float*v){return ImGui::ColorEdit4(l,v);}
-bool ImGuiEditorUi::SliderInt(const char*l,int*v,int a,int b){return ImGui::SliderInt(l,v,a,b);} bool ImGuiEditorUi::InputUInt(const char*l,uint32_t*v){return ImGui::InputScalar(l,ImGuiDataType_U32,v);}
+bool ImGuiEditorUi::SliderInt(const char*l,int*v,int a,int b){return ImGui::SliderInt(l,v,a,b);}
+bool ImGuiEditorUi::SliderFloat(const char*l,float*v,float a,float b){return ImGui::SliderFloat(l,v,a,b,"%.0f units");}
+bool ImGuiEditorUi::InputUInt(const char*l,uint32_t*v){return ImGui::InputScalar(l,ImGuiDataType_U32,v);}
 void ImGuiEditorUi::ValueLabel(const char*l,const char*v){ImGui::LabelText(l,"%s",v);}
 bool ImGuiEditorUi::CollapsingHeader(const char*l,bool d){return ImGui::CollapsingHeader(l,d?ImGuiTreeNodeFlags_DefaultOpen:0);}
 bool ImGuiEditorUi::TreeNode(const void*id,const char*l,bool s,bool leaf,bool d){ImGuiTreeNodeFlags f=ImGuiTreeNodeFlags_OpenOnArrow|ImGuiTreeNodeFlags_SpanAvailWidth|(s?ImGuiTreeNodeFlags_Selected:0)|(d?ImGuiTreeNodeFlags_DefaultOpen:0);if(leaf)f|=ImGuiTreeNodeFlags_Leaf|ImGuiTreeNodeFlags_NoTreePushOnOpen;return ImGui::TreeNodeEx(id,f,"%s",l);}

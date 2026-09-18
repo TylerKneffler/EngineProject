@@ -45,7 +45,7 @@ std::string TexturePath(const aiMaterial* material, aiTextureType type)
 
 struct Influence { unsigned joint = 0; float weight = 0.f; };
 
-void StoreInfluences(Engine::Model::Vertex& vertex, std::vector<Influence> influences)
+void StoreInfluences(Engine::Model::AnimationVertex& vertex, std::vector<Influence> influences)
 {
     influences.erase(std::remove_if(influences.begin(), influences.end(),
         [](const Influence& value) { return value.weight <= 0.f; }), influences.end());
@@ -240,7 +240,7 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
             for (unsigned corner = 0; corner < 3; ++corner)
             {
                 const unsigned sourceIndex = face.mIndices[corner];
-                Engine::Model::Vertex vertex{};
+                Engine::Model::AnimationVertex vertex{};
                 vertex.color[0] = vertex.color[1] = vertex.color[2] = vertex.color[3] = 1.f;
                 const aiVector3D& position = source->mVertices[sourceIndex];
                 vertex.pos[0] = position.x; vertex.pos[1] = position.y; vertex.pos[2] = position.z;

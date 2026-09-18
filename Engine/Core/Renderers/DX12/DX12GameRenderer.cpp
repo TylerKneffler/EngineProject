@@ -178,6 +178,9 @@ void DX12GameRenderer::BeginFrame()
         WaitForSingleObject(m_fenceEvent, INFINITE);
     }
 
+    if (m_graphicsProvider)
+        m_graphicsProvider->GetContextFactory()->PrepareFrame(m_frameIndex);
+
     // ---- Reset command allocator and list ----
     // Now that the GPU has finished with this slot’s allocator, Reset() reclaims
     // its backing memory for new commands (without freeing the allocation). All
@@ -307,7 +310,10 @@ Engine::Graphics::IGraphicsProvider* DX12GameRenderer::GetGraphicsProvider()
 
 std::unique_ptr<Engine::Graphics::IGraphicsContext> DX12GameRenderer::CreateFrameGraphicsContext()
 {
-    return std::make_unique<D3D12GraphicsContext>(m_commandList.Get());
+    if (!m_graphicsProvider) return nullptr;
+    auto* factory = m_graphicsProvider->GetContextFactory();
+    factory->SetCommandBuffer(m_commandList.Get());
+    return factory->CreateContext();
 }
 
 // ---------------------------------------------------------------------------

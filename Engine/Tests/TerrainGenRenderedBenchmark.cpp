@@ -21,6 +21,7 @@
 #include <map>
 #include <numeric>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace
@@ -106,28 +107,30 @@ RenderedBorderAudit AuditRenderedChunkBorders(
                 D3D11GraphicsBuffer*>(mesh->GetGraphicsBuffer());
             const uint8_t* uploadedBytes = dxBuffer
                 ? dxBuffer->GetShadowData() : nullptr;
+            const uint64_t requiredBytes = static_cast<uint64_t>(
+                mesh->GetVertexCount()) * mesh->GetVertexStride();
             if (!uploadedBytes || mesh->GetGraphicsBuffer()->GetSize() <
-                static_cast<uint64_t>(mesh->GetVertexCount()) *
-                    sizeof(Engine::Model::Vertex))
+                requiredBytes)
             {
                 audit.valid = false;
                 ++audit.missingBuffers;
                 continue;
             }
-            const auto* uploaded = reinterpret_cast<const Engine::Model::Vertex*>(
-                uploadedBytes);
-            const auto& cpuVertices = mesh->GetVertices();
             const glm::mat4 authoredWorldMatrix =
                 patchObject->transform.GetWorldMatrix();
             const glm::mat4 renderWorldMatrix =
                 patchObject->transform.GetWorldMatrixWithLayer();
             for (size_t index = 0; index < mesh->GetVertexCount(); ++index)
             {
-                const auto& vertex = uploaded[index];
-                const auto& cpu = cpuVertices[index];
-                const glm::vec3 uploadedPosition(
-                    vertex.pos[0], vertex.pos[1], vertex.pos[2]);
-                const glm::vec3 cpuPosition(cpu.pos[0], cpu.pos[1], cpu.pos[2]);
+                const float* uploadedValues = reinterpret_cast<const float*>(
+                    uploadedBytes + index * mesh->GetVertexStride());
+                const float* cpuValues = mesh->UsesTerrainVertexFormat()
+                    ? mesh->GetTerrainVertices()[index].pos
+                    : mesh->GetVertices()[index].pos;
+                const glm::vec3 uploadedPosition(uploadedValues[0],
+                    uploadedValues[1], uploadedValues[2]);
+                const glm::vec3 cpuPosition(cpuValues[0], cpuValues[1],
+                    cpuValues[2]);
                 audit.maximumUploadError = std::max(audit.maximumUploadError,
                     glm::length(uploadedPosition - cpuPosition));
                 ++audit.uploadedVertices;
@@ -248,13 +251,16 @@ int main(int argumentCount, char** arguments)
                 ? 1 : std::clamp(std::atoi(arguments[2]), 1, 3600))
             : 600;
 
+        const char* renderingApi = argumentCount > 5
+            ? arguments[5] : "DirectX11";
         Engine::Model::ProjectSettings settings{};
-        settings.gameRenderingAPI = "DirectX11";
+        settings.gameRenderingAPI = renderingApi;
         Engine::Core::Window window(GetModuleHandleW(nullptr),
             L"TerrainGen Rendered Benchmark", width, height);
         auto renderer = Engine::Renderers::RendererFactory::CreateGameRenderer(settings);
         if (!renderer || !renderer->Init(window.GetHWND(), width, height))
-            throw std::runtime_error("DirectX 11 renderer initialization failed");
+            throw std::runtime_error(std::string(renderingApi) +
+                " renderer initialization failed");
 
         Engine::Scene::Scene scene;
         scene.Init(renderer->GetGraphicsProvider());
@@ -274,6 +280,8 @@ int main(int argumentCount, char** arguments)
         if (argumentCount > 3)
             terrain->parallelChunkBuilds = std::clamp(
                 std::atoi(arguments[3]), 1, 16);
+        const bool stationaryCamera = argumentCount > 4 &&
+            std::strcmp(arguments[4], "--stationary") == 0;
         scene.Start();
         const float traversalSpeed = driver->movementSpeed;
         driver->movementSpeed = 0.01f;
@@ -286,6 +294,12 @@ int main(int argumentCount, char** arguments)
         double pumpWorstMs = 0.0, updateWorstMs = 0.0, prepareWorstMs = 0.0;
         double renderWorstMs = 0.0, presentWorstMs = 0.0;
         double measuredStreamingWorstMs = 0.0;
+        uint64_t objectUploadTotalBytes = 0;
+        uint64_t objectUploadMaximumBytes = 0;
+        uint64_t occlusionCulledTotal = 0;
+        uint32_t occlusionCulledMaximum = 0;
+        uint64_t constantArenaWritesTotal = 0;
+        uint64_t constantDiscardMapsTotal = 0;
         const auto renderFrame = [&]()
         {
             const auto start = Clock::now();
@@ -330,6 +344,24 @@ int main(int argumentCount, char** arguments)
                 presentWorstMs = std::max(presentWorstMs, presentMs);
                 measuredStreamingWorstMs = std::max(measuredStreamingWorstMs,
                     terrain->GetLastStreamingMilliseconds());
+                const uint64_t objectUploadBytes =
+                    scene.GetLastObjectDataUploadBytes();
+                objectUploadTotalBytes += objectUploadBytes;
+                objectUploadMaximumBytes = std::max(
+                    objectUploadMaximumBytes, objectUploadBytes);
+                const uint32_t occlusionCulled =
+                    scene.GetLastOcclusionCulledCount();
+                occlusionCulledTotal += occlusionCulled;
+                occlusionCulledMaximum = std::max(
+                    occlusionCulledMaximum, occlusionCulled);
+                if (auto* factory = renderer->GetGraphicsProvider()
+                    ->GetContextFactory())
+                {
+                    constantArenaWritesTotal +=
+                        factory->GetConstantBufferArenaWrites();
+                    constantDiscardMapsTotal +=
+                        factory->GetConstantBufferDiscardMaps();
+                }
             }
             return std::chrono::duration<double, std::milli>(end - start).count();
         };
@@ -349,7 +381,33 @@ int main(int argumentCount, char** arguments)
         const double fillSeconds = std::chrono::duration<double>(
             Clock::now() - fillStart).count();
 
-        driver->movementSpeed = traversalSpeed;
+        // The stationary profile includes a deterministic visibility case:
+        // one opaque box completely covers a smaller box behind it. This
+        // verifies query behavior independently of terrain shape or camera
+        // placement while the normal moving profile remains unchanged.
+        if (stationaryCamera)
+        {
+            const auto addCameraRelativeCube = [&](const char* name,
+                const glm::vec3& position, const glm::vec3& scale)
+            {
+                Engine::Core::Object* object = scene.AddObject(name);
+                object->Parent = cameraObject;
+                cameraObject->Children.push_back(object);
+                object->transform.position = position;
+                object->transform.scale = scale;
+                auto* mesh = object->AddComponent<Engine::Components::Mesh>();
+                mesh->LoadFromFile("Engine/Core/Assets/Mesh/cube.obj");
+                mesh->OnAfterDeserialize(renderer->GetGraphicsProvider());
+            };
+            addCameraRelativeCube("Occlusion Test Wall",
+                { 0.f, 0.f, 10.f }, { 12.f, 12.f, 0.5f });
+            addCameraRelativeCube("Occlusion Test Hidden",
+                { 0.f, 0.f, 20.f }, { 1.f, 1.f, 1.f });
+        }
+
+        driver->movementSpeed = stationaryCamera ? 0.f : traversalSpeed;
+        if (stationaryCamera)
+            driver->moveOnStart = false;
         std::vector<double> frameTimes;
         frameTimes.reserve(measuredFrames);
         collectStageTimings = true;
@@ -383,6 +441,11 @@ int main(int argumentCount, char** arguments)
         }
 
         size_t residentVertices = 0u;
+        size_t residentIndices = 0u;
+        uint64_t cpuMeshBytes = 0u;
+        uint64_t uploadShadowBytes = 0u;
+        uint64_t gpuBufferBytes = 0u;
+        uint64_t legacyExpandedBytes = 0u;
         for (Engine::Core::Object* chunkObject : terrainObject->Children)
         {
             if (!chunkObject || !chunkObject->GetComponent<TerrainChunk>())
@@ -392,15 +455,27 @@ int main(int argumentCount, char** arguments)
                 const auto* mesh = patchObject
                     ? patchObject->GetComponent<Engine::Components::Mesh>() : nullptr;
                 if (mesh)
+                {
                     residentVertices += mesh->GetVertexCount();
+                    residentIndices += mesh->GetIndexCount();
+                    cpuMeshBytes += mesh->GetCpuMeshMemoryBytes();
+                    uploadShadowBytes += mesh->GetUploadShadowMemoryBytes();
+                    gpuBufferBytes += mesh->GetGpuBufferMemoryBytes();
+                    legacyExpandedBytes += static_cast<uint64_t>(
+                        mesh->GetIndexCount() > 0u
+                            ? mesh->GetIndexCount() : mesh->GetVertexCount()) *
+                        sizeof(Engine::Model::AnimationVertex);
+                }
             }
         }
         Engine::Components::Camera* renderedCamera = scene.FindGameCamera();
         if (!renderedCamera)
             throw std::runtime_error("Rendered border audit camera is missing");
         const RenderedBorderAudit renderedBorderAudit =
-            AuditRenderedChunkBorders(*terrainObject, *renderedCamera,
-                terrain->chunkSize, width, height);
+            std::strcmp(renderingApi, "DirectX11") == 0
+            ? AuditRenderedChunkBorders(*terrainObject, *renderedCamera,
+                terrain->chunkSize, width, height)
+            : RenderedBorderAudit{};
         if (!renderedBorderAudit.valid)
         {
             std::fprintf(stderr,
@@ -422,6 +497,11 @@ int main(int argumentCount, char** arguments)
                 renderedBorderAudit.maximumPixelError);
             throw std::runtime_error("Uploaded terrain borders diverge in render space");
         }
+        if (legacyExpandedBytes > 0u &&
+            (cpuMeshBytes * 2u >= legacyExpandedBytes ||
+                gpuBufferBytes * 2u >= legacyExpandedBytes))
+            throw std::runtime_error(
+                "Packed terrain did not reduce resident mesh memory by at least 50%");
 
         const double averageMs = std::accumulate(frameTimes.begin(),
             frameTimes.end(), 0.0) / static_cast<double>(frameTimes.size());
@@ -430,10 +510,15 @@ int main(int argumentCount, char** arguments)
             {
                 return milliseconds > 16.667;
             }));
-        std::printf("rendered api=DirectX11 resolution=%ux%u radius=%d chunks=%zu "
+        std::printf("rendered api=%s resolution=%ux%u radius=%d chunks=%zu "
+            "stationary=%s "
             "view_distance=%.0f fill_s=%.3f fill_worst_ms=%.3f avg_ms=%.3f "
             "p95_ms=%.3f p99_ms=%.3f worst_ms=%.3f over_budget=%d/%d "
-            "max_missing=%zu viewer_missing=%d forward_missing=%d vertices=%zu "
+            "max_missing=%zu viewer_missing=%d forward_missing=%d "
+            "vertices=%zu indices=%zu cpu_mesh_bytes=%llu "
+            "upload_shadow_bytes=%llu gpu_buffer_bytes=%llu "
+            "legacy_expanded_bytes=%llu cpu_mesh_mib=%.2f "
+            "upload_shadow_mib=%.2f gpu_buffer_mib=%.2f "
             "render_border_pairs=%zu render_border_vertices=%zu "
             "visible_border_vertices=%zu upload_error=%.9f world_error=%.9f "
             "clip_error=%.9f ndc_error=%.9f pixel_error=%.9f "
@@ -442,14 +527,26 @@ int main(int argumentCount, char** arguments)
             "prepare_worst=%.3f render_avg=%.3f render_worst=%.3f "
             "present_avg=%.3f present_worst=%.3f "
             "terrain_stream_worst=%.3f "
+            "object_upload_avg_bytes=%.0f object_upload_max_bytes=%llu "
+            "occlusion_culled_avg=%.2f occlusion_culled_max=%u "
+            "constant_arena=%s constant_writes_avg=%.1f "
+            "constant_discards_avg=%.1f "
             "built=%llu unloaded=%llu\n",
-            width, height, radius, desiredChunks,
+            renderingApi, width, height, radius, desiredChunks,
+            stationaryCamera ? "true" : "false",
             terrain->chunkSize * static_cast<float>(radius), fillSeconds,
             fillWorstMs, averageMs, Percentile(frameTimes, 0.95),
             Percentile(frameTimes, 0.99),
             *std::max_element(frameTimes.begin(), frameTimes.end()), overBudget,
             measuredFrames, maximumMissingChunks, viewerChunkMissingFrames,
-            forwardChunkMissingFrames, residentVertices,
+            forwardChunkMissingFrames, residentVertices, residentIndices,
+            static_cast<unsigned long long>(cpuMeshBytes),
+            static_cast<unsigned long long>(uploadShadowBytes),
+            static_cast<unsigned long long>(gpuBufferBytes),
+            static_cast<unsigned long long>(legacyExpandedBytes),
+            static_cast<double>(cpuMeshBytes) / (1024.0 * 1024.0),
+            static_cast<double>(uploadShadowBytes) / (1024.0 * 1024.0),
+            static_cast<double>(gpuBufferBytes) / (1024.0 * 1024.0),
             renderedBorderAudit.neighborPairs,
             renderedBorderAudit.comparedVertices,
             renderedBorderAudit.visibleVertices,
@@ -464,8 +561,17 @@ int main(int argumentCount, char** arguments)
             renderTotalMs / measuredFrames, renderWorstMs,
             presentTotalMs / measuredFrames, presentWorstMs,
             measuredStreamingWorstMs,
+            static_cast<double>(objectUploadTotalBytes) / measuredFrames,
+            static_cast<unsigned long long>(objectUploadMaximumBytes),
+            static_cast<double>(occlusionCulledTotal) / measuredFrames,
+            occlusionCulledMaximum,
+            renderer->GetGraphicsProvider()->GetContextFactory()
+                ->UsesPersistentConstantBufferArena() ? "true" : "false",
+            static_cast<double>(constantArenaWritesTotal) / measuredFrames,
+            static_cast<double>(constantDiscardMapsTotal) / measuredFrames,
             static_cast<unsigned long long>(terrain->GetTotalChunksBuilt()),
             static_cast<unsigned long long>(terrain->GetTotalChunksUnloaded()));
+        renderer->WaitIdle();
         return 0;
     }
     catch (const std::exception& error)

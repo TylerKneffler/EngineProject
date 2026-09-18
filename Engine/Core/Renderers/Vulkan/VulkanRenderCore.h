@@ -29,6 +29,7 @@ public:
     uint32_t GetImageCount() const { return static_cast<uint32_t>(m_images.size()); }
     uint32_t GetMinImageCount() const { return m_minImageCount; }
     VkFormat GetSwapchainFormat() const { return m_surfaceFormat.format; }
+    uint32_t GetFrameIndex() const { return m_frameIndex; }
 
 private:
     void CreateInstance();

@@ -183,7 +183,7 @@ glm::vec3 PreviewRotation(glm::vec3 value)
     return pitchRotation * yawRotation * value;
 }
 
-std::vector<Engine::Model::Vertex> LoadModelVertices(const std::string& path)
+std::vector<Engine::Model::AnimationVertex> LoadModelVertices(const std::string& path)
 {
     Assimp::Importer importer;
     const aiScene* scene = importer.ReadFile(path,
@@ -192,7 +192,7 @@ std::vector<Engine::Model::Vertex> LoadModelVertices(const std::string& path)
     if (!scene)
         return {};
 
-    std::vector<Engine::Model::Vertex> vertices;
+    std::vector<Engine::Model::AnimationVertex> vertices;
     constexpr size_t triangleLimit = 100000;
     vertices.reserve(std::min<size_t>(triangleLimit * 3, 65536));
     for (unsigned meshIndex = 0; meshIndex < scene->mNumMeshes &&
@@ -208,7 +208,7 @@ std::vector<Engine::Model::Vertex> LoadModelVertices(const std::string& path)
             for (unsigned corner = 0; corner < 3; ++corner)
             {
                 const unsigned index = face.mIndices[corner];
-                Engine::Model::Vertex vertex{};
+                Engine::Model::AnimationVertex vertex{};
                 const aiVector3D& position = mesh->mVertices[index];
                 vertex.pos[0] = position.x;
                 vertex.pos[1] = position.y;
@@ -251,7 +251,7 @@ std::string FirstPrefabMesh(const std::string& prefabPath)
 }
 
 std::vector<uint8_t> MakeMeshPreview(
-    const std::vector<Engine::Model::Vertex>& vertices)
+    const std::vector<Engine::Model::AnimationVertex>& vertices)
 {
     if (vertices.size() < 3)
         return {};
@@ -272,7 +272,7 @@ std::vector<uint8_t> MakeMeshPreview(
     const glm::vec3 light = glm::normalize(glm::vec3(-0.35f, 0.8f, 0.55f));
 
     struct Projected { float x, y, z; glm::vec3 position; };
-    const auto project = [&](const Engine::Model::Vertex& vertex)
+    const auto project = [&](const Engine::Model::AnimationVertex& vertex)
     {
         const glm::vec3 rotated = PreviewRotation(
             (glm::vec3(vertex.pos[0], vertex.pos[1], vertex.pos[2]) - center) /
@@ -370,7 +370,7 @@ std::vector<uint8_t> MakeScenePreview(Engine::Scene::Scene& scene)
             ? glm::max(material->diffuseColor, glm::vec3(0.f))
             : glm::vec3(0.45f, 0.65f, 0.9f);
         const glm::mat4 world = object->transform.GetWorldMatrixWithLayer();
-        const auto project = [&](const Engine::Model::Vertex& vertex,
+        const auto project = [&](const Engine::Model::AnimationVertex& vertex,
             Projected& result)
         {
             const glm::vec4 worldPosition = world * glm::vec4(
@@ -557,7 +557,7 @@ void* AssetPreviewCache::Get(const std::string& path,
                 {
                     std::string meshPath = extension == ".prefab"
                         ? FirstPrefabMesh(path) : path;
-                    std::vector<Engine::Model::Vertex> vertices;
+                    std::vector<Engine::Model::AnimationVertex> vertices;
                     const std::string meshExtension = Extension(meshPath);
                     if (meshExtension == ".mesh" || meshExtension == ".obj")
                     {

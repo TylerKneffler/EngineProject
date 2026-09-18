@@ -77,6 +77,15 @@ public:
         int32_t baseVertexLocation = 0,
         uint32_t startInstanceLocation = 0) = 0;
 
+    // Optional asynchronous visibility feedback. Unsupported backends retain
+    // the safe default of drawing everything. Implementations must never wait
+    // for the GPU when answering IsOccluded.
+    // Returns true when the current view is stable enough to issue queries.
+    virtual bool BeginOcclusionFrame(uint64_t, uint64_t) { return false; }
+    virtual bool IsOccluded(uint64_t) { return false; }
+    virtual void BeginOcclusionQuery(uint64_t) {}
+    virtual void EndOcclusionQuery() {}
+
     // Resource barriers / state transitions
     // These are needed for render-to-texture workflows
     enum class ResourceState
@@ -115,6 +124,13 @@ public:
     // For DX12: ID3D12GraphicsCommandList*. For Vulkan: VkCommandBuffer.
     // The default is a no-op; override in each backend.
     virtual void SetCommandBuffer(void* /*cmd*/) {}
+    // Called after the renderer's existing per-slot fence wait and before any
+    // commands are recorded. Explicit APIs use this to consume completed
+    // asynchronous query results and recycle that slot's query storage.
+    virtual void PrepareFrame(uint32_t /*frameSlot*/) {}
+    virtual bool UsesPersistentConstantBufferArena() const { return false; }
+    virtual uint32_t GetConstantBufferArenaWrites() const { return 0; }
+    virtual uint32_t GetConstantBufferDiscardMaps() const { return 0; }
     virtual std::unique_ptr<IGraphicsContext> CreateContext() = 0;
 };
 }

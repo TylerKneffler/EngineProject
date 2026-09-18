@@ -5,8 +5,11 @@
 #include "Core/Model/MeshData.h"
 #include <glm/glm.hpp>
 #include <cstdint>
-#include <future>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -27,6 +30,7 @@ public:
     };
 
     TerrainGen();
+    ~TerrainGen() override;
 
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | References")
     std::string viewerObjectName = "TerrainGen Camera";
@@ -142,13 +146,14 @@ public:
     }
 
 private:
-    using Vertex = Engine::Model::Vertex;
+    using Vertex = Engine::Model::AnimationVertex;
+    using TerrainMeshData = Engine::Model::TerrainMeshData;
 
     struct CachedPatchMesh
     {
         int patchX = 0;
         int patchZ = 0;
-        std::vector<Vertex> vertices;
+        TerrainMeshData geometry;
     };
     struct CachedChunkMesh
     {
@@ -188,6 +193,7 @@ private:
         int x = 0;
         int z = 0;
         uint64_t configurationHash = 0;
+        uint64_t generationEpoch = 0;
         std::vector<CachedPatchMesh> patches;
     };
     struct QueuedChunk
@@ -200,7 +206,13 @@ private:
     {
         int x = 0;
         int z = 0;
-        std::future<GeneratedChunkMesh> future;
+    };
+    struct GenerationJob
+    {
+        GenerationSnapshot snapshot;
+        int x = 0;
+        int z = 0;
+        uint64_t generationEpoch = 0;
     };
 
     static int64_t ChunkKey(int x, int z);
@@ -213,6 +225,11 @@ private:
         const PerlinNoiseField& noise) const;
     static GeneratedChunkMesh GenerateChunkMesh(
         const GenerationSnapshot& snapshot, int chunkX, int chunkZ);
+    void EnsureWorkerPool(std::size_t workerCount);
+    void StopWorkerPool();
+    void CancelPendingGeneration();
+    void WorkerLoop();
+    void HarvestCompletedChunks();
     int CommitCompletedChunks(int budget);
     bool IsChunkDesired(int x, int z) const;
     std::vector<Vertex> BuildPatchVertices(int chunkX, int chunkZ,
@@ -253,5 +270,13 @@ private:
     uint64_t m_meshCacheMisses = 0;
     std::vector<QueuedChunk> m_chunkQueue;
     std::unordered_map<int64_t, InFlightChunk> m_inFlightChunks;
+    std::unordered_map<int64_t, GeneratedChunkMesh> m_readyChunks;
+    std::vector<std::thread> m_workerThreads;
+    std::deque<GenerationJob> m_generationJobs;
+    std::deque<GeneratedChunkMesh> m_completedChunks;
+    std::mutex m_generationMutex;
+    std::condition_variable m_generationCondition;
+    bool m_stopWorkers = false;
+    uint64_t m_generationEpoch = 1;
     std::size_t m_pendingChunkUnloadCount = 0;
 };

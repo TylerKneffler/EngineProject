@@ -3,9 +3,11 @@
 #include <wrl/client.h>
 #include <d3d12.h>
 #include <vector>
+#include <memory>
 
 namespace Engine::Renderers
 {
+struct D3D12OcclusionQueryState;
 
 // ---------------------------------------------------------------------------
 // D3D12GraphicsContext — DirectX 12 command recording wrapper
@@ -13,7 +15,10 @@ namespace Engine::Renderers
 class D3D12GraphicsContext : public Engine::Graphics::IGraphicsContext
 {
 public:
-    explicit D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList);    D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList, ID3D12RootSignature* rootSig);
+    explicit D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList);
+    D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList,
+        ID3D12RootSignature* rootSig,
+        std::shared_ptr<D3D12OcclusionQueryState> occlusionState = {});
     void SetPipeline(const Engine::Graphics::IPipelineState* pipeline) override;
     void SetStencilReference(uint32_t reference) override;
     void SetConstantBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint64_t offset = 0) override;
@@ -39,6 +44,11 @@ public:
         int32_t baseVertexLocation = 0,
         uint32_t startInstanceLocation = 0) override;
 
+    bool BeginOcclusionFrame(uint64_t viewId, uint64_t sceneSignature) override;
+    bool IsOccluded(uint64_t objectId) override;
+    void BeginOcclusionQuery(uint64_t objectId) override;
+    void EndOcclusionQuery() override;
+
     void TransitionResource(void* resource, ResourceState stateBefore, ResourceState stateAfter) override;
 
     void* GetNativeHandle() const override { return m_cmdList; }
@@ -47,6 +57,11 @@ private:
     ID3D12GraphicsCommandList* m_cmdList;
     ID3D12RootSignature* m_rootSignature = nullptr;
     uint32_t m_indexCount = 0;
+    std::shared_ptr<D3D12OcclusionQueryState> m_occlusionState;
+    uint64_t m_occlusionViewId = 0;
+    uint64_t m_occlusionSceneSignature = 0;
+    uint64_t m_activeOcclusionKey = 0;
+    uint32_t m_activeOcclusionIndex = UINT32_MAX;
 
     D3D12_RESOURCE_STATES ConvertResourceState(ResourceState state) const;
 };
@@ -63,6 +78,7 @@ public:
         ID3D12RootSignature* rootSignature);
 
     void SetCommandBuffer(void* cmd) override;
+    void PrepareFrame(uint32_t frameSlot) override;
     std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateContext() override;
 
 private:
@@ -72,5 +88,6 @@ private:
     Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_cmdAllocator;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_cmdList;
     ID3D12GraphicsCommandList* m_externalCmdList = nullptr; // set via SetCommandBuffer
+    std::shared_ptr<D3D12OcclusionQueryState> m_occlusionState;
 };
 }

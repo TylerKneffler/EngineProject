@@ -4,6 +4,13 @@
 
 namespace Engine::Renderers
 {
+VulkanGameRenderer::~VulkanGameRenderer()
+{
+    // Provider-owned query pools, textures and buffers are destroyed before
+    // VulkanRenderCore because of member order. Finish their GPU use first.
+    m_core.WaitIdle();
+}
+
 bool VulkanGameRenderer::Init(void* hwnd, uint32_t width, uint32_t height)
 {
     m_width = width; m_height = height;
@@ -21,6 +28,12 @@ void VulkanGameRenderer::BeginFrame()
 {
     m_commandBuffer = m_core.BeginFrame();
     m_renderPassActive = false;
+    if (m_commandBuffer && m_provider)
+    {
+        auto* factory = m_provider->GetContextFactory();
+        factory->SetCommandBuffer(reinterpret_cast<void*>(m_commandBuffer));
+        factory->PrepareFrame(m_core.GetFrameIndex());
+    }
 }
 
 void VulkanGameRenderer::BeginMainRenderPass(const float color[4])

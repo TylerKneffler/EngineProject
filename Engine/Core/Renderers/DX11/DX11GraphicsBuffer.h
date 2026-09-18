@@ -21,9 +21,14 @@ public:
     AccessMode GetAccessMode() const override { return m_access; }
     uint64_t GetSize() const override { return m_size; }
     uint32_t GetElementStride() const override { return m_elementStride; }
+    uint64_t GetUploadShadowSize() const override
+    {
+        return static_cast<uint64_t>(m_shadowData.size());
+    }
     void* Map() override;
     void Unmap() override;
-    void FlushMappedWrites() override;
+    void FlushMappedWrites(uint64_t offset = 0,
+        uint64_t size = UINT64_MAX) override;
     void* GetNativeHandle() const override { return m_buffer.Get(); }
 
     ID3D11Buffer* GetBuffer() const { return m_buffer.Get(); }

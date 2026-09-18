@@ -33,10 +33,14 @@ void D3D11GraphicsBuffer::Unmap()
         FlushMappedWrites();
 }
 
-void D3D11GraphicsBuffer::FlushMappedWrites()
+void D3D11GraphicsBuffer::FlushMappedWrites(uint64_t offset, uint64_t size)
 {
-    if (m_access != AccessMode::Upload || !m_buffer || m_shadowData.empty())
+    if (m_access != AccessMode::Upload || !m_buffer || m_shadowData.empty() ||
+        offset >= m_size || size == 0)
         return;
+    const uint64_t available = m_size - offset;
+    const size_t byteCount = static_cast<size_t>(
+        size == UINT64_MAX ? available : std::min(size, available));
     Microsoft::WRL::ComPtr<ID3D11Device> device;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
     m_buffer->GetDevice(&device);
@@ -46,7 +50,8 @@ void D3D11GraphicsBuffer::FlushMappedWrites()
     D3D11_MAPPED_SUBRESOURCE mapped{};
     if (SUCCEEDED(context->Map(m_buffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
     {
-        std::memcpy(mapped.pData, m_shadowData.data(), m_shadowData.size());
+        std::memcpy(static_cast<uint8_t*>(mapped.pData) + offset,
+            m_shadowData.data() + offset, byteCount);
         context->Unmap(m_buffer.Get(), 0);
     }
 }

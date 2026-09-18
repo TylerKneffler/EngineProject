@@ -13,7 +13,9 @@ namespace Engine::Components
 class Mesh : public Engine::Core::Component
 {
 public:
-    using Vertex = Engine::Model::Vertex;
+    using Vertex = Engine::Model::AnimationVertex;
+    using TerrainVertex = Engine::Model::TerrainVertex;
+    using TerrainMeshData = Engine::Model::TerrainMeshData;
     using MorphTarget = Engine::Model::MorphTarget;
     using JsonValue = Engine::Serialization::JsonValue;
     using IGraphicsBuffer = Engine::Graphics::IGraphicsBuffer;
@@ -35,9 +37,25 @@ public:
 
     // Get the underlying graphics buffer (API-agnostic)
     IGraphicsBuffer* GetGraphicsBuffer() const { return m_vertexBuffer.get(); }
+    IGraphicsBuffer* GetIndexBuffer() const { return m_indexBuffer.get(); }
     
-    uint32_t GetVertexCount() const { return static_cast<uint32_t>(m_vertices.size()); }
+    uint32_t GetVertexCount() const
+    {
+        return static_cast<uint32_t>(m_terrainVertices.empty()
+            ? m_vertices.size() : m_terrainVertices.size());
+    }
+    uint32_t GetIndexCount() const { return static_cast<uint32_t>(m_indices.size()); }
     const std::vector<Vertex>& GetVertices() const { return m_vertices; }
+    const std::vector<TerrainVertex>& GetTerrainVertices() const
+    {
+        return m_terrainVertices;
+    }
+    const std::vector<uint32_t>& GetIndices() const { return m_indices; }
+    bool UsesTerrainVertexFormat() const { return !m_terrainVertices.empty(); }
+    static TerrainMeshData BuildIndexedTerrain(const std::vector<Vertex>& vertices);
+    bool SetTerrainGeometry(TerrainMeshData&& geometry,
+        bool retainExpandedVertices = false);
+    TerrainMeshData TakeTerrainGeometry();
     // Returns true only when CPU vertices, bounds, and the GPU buffer changed.
     bool SetDeformedVertices(const std::vector<Vertex>& vertices);
     // Transfers ownership for newly generated meshes to avoid a full vertex copy.
@@ -47,7 +65,13 @@ public:
     // Copies the runtime rendering context needed by a procedural mesh cut.
     // This does not copy vertex data or authoring/morph state.
     void InitializeRuntimeCloneFrom(const Mesh& source);
-    uint32_t GetVertexStride() const { return sizeof(Vertex); }
+    uint32_t GetVertexStride() const
+    {
+        return UsesTerrainVertexFormat() ? sizeof(TerrainVertex) : sizeof(Vertex);
+    }
+    uint64_t GetCpuMeshMemoryBytes() const;
+    uint64_t GetUploadShadowMemoryBytes() const;
+    uint64_t GetGpuBufferMemoryBytes() const;
     bool     IsReady()        const { return m_ready; }
     const std::string& GetFilePath() const { return m_filePath; }
     bool HasBounds() const { return m_hasBounds; }
@@ -81,7 +105,10 @@ private:
     void UpdateBounds();
     std::string m_filePath;
     std::vector<Vertex> m_vertices;
+    std::vector<TerrainVertex> m_terrainVertices;
+    std::vector<uint32_t> m_indices;
     std::unique_ptr<IGraphicsBuffer> m_vertexBuffer;
+    std::unique_ptr<IGraphicsBuffer> m_indexBuffer;
     IGraphicsBufferFactory* m_bufferFactory = nullptr;
     bool m_ready = false;
     bool m_hasBounds = false;

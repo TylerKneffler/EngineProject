@@ -68,6 +68,19 @@ void VSMain(
     oPos = mul(objectData.viewProjection, worldPosition);
 }
 
+void VSTerrainMain(
+    float3 pos : POSITION,
+    float3 normal : NORMAL,
+    float2 uv : TEXCOORD,
+    float4 color : COLOR,
+    out float4 oPos : SV_POSITION)
+{
+    ObjectData objectData = objects[draw.objectIndex];
+    float4 localPosition = float4(pos * 1.03, 1.0);
+    const float4 worldPosition = mul(objectData.world, localPosition);
+    oPos = mul(objectData.viewProjection, worldPosition);
+}
+
 float4 PSMain(float4 pos : SV_POSITION) : SV_TARGET
 {
     return float4(1.0, 0.85, 0.1, 1.0);

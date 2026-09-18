@@ -14,7 +14,7 @@ class SpriteAnimationManager;
 class Sprite : public Engine::Core::Component
 {
 public:
-    using Vertex = Engine::Model::Vertex;
+    using Vertex = Engine::Model::AnimationVertex;
     using IGraphicsBuffer = Engine::Graphics::IGraphicsBuffer;
 
     struct RenderData

@@ -11,13 +11,18 @@
 namespace Engine::Renderers
 {
 std::unique_ptr<Engine::Graphics::IShader> VulkanShaderCompiler::CompileFromFile(
-    const std::string& filePath, const char*, CompileProfile profile)
+    const std::string& filePath, const char* entryPoint, CompileProfile profile)
 {
     m_lastError.clear();
     std::string name = std::filesystem::path(filePath).stem().string();
     const char* stage = profile == CompileProfile::VS_5_0 ? "VS" :
                         profile == CompileProfile::PS_5_0 ? "PS" : "CS";
-    const std::string binaryName = name + "." + stage + ".spv";
+    const char* defaultEntry = profile == CompileProfile::VS_5_0
+        ? "VSMain" : (profile == CompileProfile::PS_5_0 ? "PSMain" : "CSMain");
+    const std::string entrySuffix = entryPoint &&
+        std::string(entryPoint) != defaultEntry
+        ? "." + std::string(entryPoint) : std::string{};
+    const std::string binaryName = name + entrySuffix + "." + stage + ".spv";
     std::filesystem::path binary = std::filesystem::path("VulkanShaders") / binaryName;
     if (!std::filesystem::is_regular_file(binary))
         binary = std::filesystem::path(ENGINE_VULKAN_SHADER_PATH) / binaryName;

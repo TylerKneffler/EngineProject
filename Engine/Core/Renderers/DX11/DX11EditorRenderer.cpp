@@ -98,6 +98,8 @@ void DX11EditorRenderer::RenderIfNeeded(std::function<void()> drawFn)
 {
     if (!m_dirty || !m_rtv) return;
     m_dirty = false;
+    if (m_graphicsProvider)
+        m_graphicsProvider->GetContextFactory()->PrepareFrame(0);
     ID3D11RenderTargetView* target = m_rtv.Get();
     m_context->OMSetRenderTargets(1, &target, nullptr);
     D3D11_VIEWPORT viewport{ 0.0f, 0.0f, static_cast<float>(m_width), static_cast<float>(m_height), 0.0f, 1.0f };

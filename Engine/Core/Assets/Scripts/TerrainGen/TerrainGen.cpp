@@ -77,6 +77,11 @@ TerrainGen::TerrainGen()
     RegisterField("generateColliders", generateColliders);
 }
 
+TerrainGen::~TerrainGen()
+{
+    StopWorkerPool();
+}
+
 namespace
 {
 struct TerrainGenRegistration
@@ -188,11 +193,100 @@ void TerrainGen::Update()
 
 void TerrainGen::OnDestroy()
 {
+    StopWorkerPool();
     m_chunks.clear();
     m_chunkObjectPool.clear();
     m_meshCache.clear();
     m_chunkQueue.clear();
     m_inFlightChunks.clear();
+    m_readyChunks.clear();
+}
+
+void TerrainGen::EnsureWorkerPool(std::size_t workerCount)
+{
+    workerCount = std::max<std::size_t>(1u, workerCount);
+    while (m_workerThreads.size() < workerCount)
+        m_workerThreads.emplace_back([this]() { WorkerLoop(); });
+}
+
+void TerrainGen::StopWorkerPool()
+{
+    {
+        std::lock_guard<std::mutex> lock(m_generationMutex);
+        m_stopWorkers = true;
+        m_generationJobs.clear();
+    }
+    m_generationCondition.notify_all();
+    for (std::thread& worker : m_workerThreads)
+        if (worker.joinable())
+            worker.join();
+    m_workerThreads.clear();
+    {
+        std::lock_guard<std::mutex> lock(m_generationMutex);
+        m_completedChunks.clear();
+        m_stopWorkers = false;
+    }
+}
+
+void TerrainGen::CancelPendingGeneration()
+{
+    std::lock_guard<std::mutex> lock(m_generationMutex);
+    ++m_generationEpoch;
+    if (m_generationEpoch == 0)
+        ++m_generationEpoch;
+    m_generationJobs.clear();
+    m_completedChunks.clear();
+    m_inFlightChunks.clear();
+    m_readyChunks.clear();
+}
+
+void TerrainGen::WorkerLoop()
+{
+#if defined(_WIN32)
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+#endif
+    for (;;)
+    {
+        GenerationJob job;
+        {
+            std::unique_lock<std::mutex> lock(m_generationMutex);
+            m_generationCondition.wait(lock, [this]()
+            {
+                return m_stopWorkers || !m_generationJobs.empty();
+            });
+            if (m_stopWorkers)
+                return;
+            job = std::move(m_generationJobs.front());
+            m_generationJobs.pop_front();
+        }
+        GeneratedChunkMesh result = GenerateChunkMesh(
+            job.snapshot, job.x, job.z);
+        result.generationEpoch = job.generationEpoch;
+        {
+            std::lock_guard<std::mutex> lock(m_generationMutex);
+            if (!m_stopWorkers)
+                m_completedChunks.push_back(std::move(result));
+        }
+    }
+}
+
+void TerrainGen::HarvestCompletedChunks()
+{
+    std::deque<GeneratedChunkMesh> completed;
+    {
+        std::lock_guard<std::mutex> lock(m_generationMutex);
+        completed.swap(m_completedChunks);
+    }
+    while (!completed.empty())
+    {
+        GeneratedChunkMesh result = std::move(completed.front());
+        completed.pop_front();
+        const int64_t key = ChunkKey(result.x, result.z);
+        if (result.generationEpoch != m_generationEpoch ||
+            m_inFlightChunks.find(key) == m_inFlightChunks.end())
+            continue;
+        m_readyChunks.insert_or_assign(key, std::move(result));
+    }
 }
 
 void TerrainGen::RefreshChunks()
@@ -331,23 +425,15 @@ void TerrainGen::RefreshChunks()
             m_chunkQueue.erase(candidateIterator);
             --launchBudget;
             const int64_t key = ChunkKey(candidate.x, candidate.z);
-            InFlightChunk task;
-            task.x = candidate.x;
-            task.z = candidate.z;
-            task.future = std::async(std::launch::async,
-                [snapshot, x = candidate.x, z = candidate.z]()
-                {
-#if defined(_WIN32)
-                    // Terrain generation is throughput work. It must yield to
-                    // the game/render thread when all cores are occupied or
-                    // camera motion visibly hitches despite generation being
-                    // asynchronous.
-                    SetThreadPriority(GetCurrentThread(),
-                        THREAD_PRIORITY_BELOW_NORMAL);
-#endif
-                    return GenerateChunkMesh(snapshot, x, z);
-                });
-            m_inFlightChunks.emplace(key, std::move(task));
+            EnsureWorkerPool(concurrency);
+            m_inFlightChunks.emplace(key, InFlightChunk{
+                candidate.x, candidate.z });
+            {
+                std::lock_guard<std::mutex> lock(m_generationMutex);
+                m_generationJobs.push_back({ snapshot, candidate.x,
+                    candidate.z, m_generationEpoch });
+            }
+            m_generationCondition.notify_one();
             ++m_meshCacheMisses;
         }
     }
@@ -827,8 +913,9 @@ TerrainGen::GenerateChunkMesh(const GenerationSnapshot& snapshot,
         for (int patchX = 0; patchX < patchCount; ++patchX)
         {
             result.patches.push_back({ patchX, patchZ,
-                generator.BuildPatchVertices(chunkX, chunkZ, patchX, patchZ,
-                    noise) });
+                Engine::Components::Mesh::BuildIndexedTerrain(
+                    generator.BuildPatchVertices(chunkX, chunkZ, patchX,
+                        patchZ, noise)) });
         }
     }
     return result;
@@ -843,17 +930,14 @@ bool TerrainGen::IsChunkDesired(int x, int z) const
 
 int TerrainGen::CommitCompletedChunks(int budget)
 {
+    HarvestCompletedChunks();
     struct ReadyTask { int64_t key = 0; int distanceSquared = 0; };
     std::vector<ReadyTask> ready;
-    for (auto& [key, task] : m_inFlightChunks)
+    for (const auto& [key, result] : m_readyChunks)
     {
-        if (task.future.valid() && task.future.wait_for(
-            std::chrono::milliseconds(0)) == std::future_status::ready)
-        {
-            const int dx = task.x - m_viewerChunk.x;
-            const int dz = task.z - m_viewerChunk.y;
-            ready.push_back({ key, dx * dx + dz * dz });
-        }
+        const int dx = result.x - m_viewerChunk.x;
+        const int dz = result.z - m_viewerChunk.y;
+        ready.push_back({ key, dx * dx + dz * dz });
     }
     std::sort(ready.begin(), ready.end(),
         [](const ReadyTask& first, const ReadyTask& second)
@@ -864,11 +948,11 @@ int TerrainGen::CommitCompletedChunks(int budget)
     int committed = 0;
     for (const ReadyTask& readyTask : ready)
     {
-        auto iterator = m_inFlightChunks.find(readyTask.key);
-        if (iterator == m_inFlightChunks.end())
+        auto readyIterator = m_readyChunks.find(readyTask.key);
+        if (readyIterator == m_readyChunks.end())
             continue;
-        const int chunkX = iterator->second.x;
-        const int chunkZ = iterator->second.z;
+        const int chunkX = readyIterator->second.x;
+        const int chunkZ = readyIterator->second.z;
         const bool desired = IsChunkDesired(chunkX, chunkZ);
         const bool viewerSeed = chunkX == m_viewerChunk.x &&
             chunkZ == m_viewerChunk.y;
@@ -882,8 +966,9 @@ int TerrainGen::CommitCompletedChunks(int budget)
         // temporary islands and obvious gaps during streaming.
         if (desired && (committed >= budget || !touchesLoadedChunk))
             continue;
-        GeneratedChunkMesh result = iterator->second.future.get();
-        m_inFlightChunks.erase(iterator);
+        GeneratedChunkMesh result = std::move(readyIterator->second);
+        m_readyChunks.erase(readyIterator);
+        m_inFlightChunks.erase(readyTask.key);
         if (!desired || result.configurationHash != m_meshConfigurationHash ||
             m_chunks.find(readyTask.key) != m_chunks.end())
             continue;
@@ -932,10 +1017,10 @@ void TerrainGen::CacheChunkMesh(int64_t key,
             ? child->GetComponent<TerrainPatch>() : nullptr;
         auto* mesh = child
             ? child->GetComponent<Engine::Components::Mesh>() : nullptr;
-        if (!patch || !mesh || mesh->GetVertices().empty())
+        if (!patch || !mesh || !mesh->UsesTerrainVertexFormat())
             continue;
         cached.patches.push_back({ patch->patchX, patch->patchZ,
-            mesh->TakeVertices() });
+            mesh->TakeTerrainGeometry() });
     }
     if (!cached.patches.empty())
     {
@@ -1445,7 +1530,7 @@ void TerrainGen::BuildChunk(int chunkX, int chunkZ,
             TerrainPatch* patch = EnsureComponent<TerrainPatch>(*patchObject);
             patch->patchX = patchX;
             patch->patchZ = patchZ;
-            std::vector<Vertex> vertices;
+            TerrainMeshData geometry;
             std::vector<CachedPatchMesh>* sourcePatches = preparedPatches;
             if (!sourcePatches && usesCachedMesh)
                 sourcePatches = &cachedChunk->second.patches;
@@ -1458,15 +1543,17 @@ void TerrainGen::BuildChunk(int chunkX, int chunkZ,
                         return value.patchX == patchX && value.patchZ == patchZ;
                     });
                 if (cachedPatch != sourcePatches->end())
-                    vertices = std::move(cachedPatch->vertices);
+                    geometry = std::move(cachedPatch->geometry);
             }
-            if (vertices.empty())
-                vertices = BuildPatchVertices(chunkX, chunkZ, patchX, patchZ, *noise);
-            patch->triangleCount = static_cast<int>(vertices.size() / 3u);
+            if (geometry.indices.empty())
+                geometry = Engine::Components::Mesh::BuildIndexedTerrain(
+                    BuildPatchVertices(chunkX, chunkZ, patchX, patchZ, *noise));
+            patch->triangleCount = static_cast<int>(geometry.indices.size() / 3u);
 
             auto* mesh = EnsureComponent<Engine::Components::Mesh>(*patchObject);
-            mesh->SetDeformedVertices(std::move(vertices));
+            mesh->SetTerrainGeometry(std::move(geometry), generateColliders);
             if (scene.GetGraphicsProvider())
+            if (!mesh->GetGraphicsBuffer())
                 mesh->OnAfterDeserialize(scene.GetGraphicsProvider());
 
             auto* material = EnsureComponent<Engine::Components::Material>(*patchObject);
@@ -1496,10 +1583,10 @@ void TerrainGen::BuildChunk(int chunkX, int chunkZ,
 
 void TerrainGen::ClearTerrain()
 {
-    // Destroying std::future instances waits for launched workers, ensuring
-    // stale results cannot be committed after the replacement terrain exists.
+    // In-progress workers may finish independently, but the epoch prevents
+    // their stale results from being published into replacement terrain.
     m_chunkQueue.clear();
-    m_inFlightChunks.clear();
+    CancelPendingGeneration();
 
     if (Owner && Owner->GetScene())
     {

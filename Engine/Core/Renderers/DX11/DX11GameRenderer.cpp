@@ -85,6 +85,8 @@ void DX11GameRenderer::Resize(uint32_t width, uint32_t height)
 
 void DX11GameRenderer::BeginFrame()
 {
+    if (m_graphicsProvider)
+        m_graphicsProvider->GetContextFactory()->PrepareFrame(0);
     ID3D11RenderTargetView* target = m_rtv.Get();
     m_context->OMSetRenderTargets(1, &target, m_dsv.Get());
     D3D11_VIEWPORT viewport{ 0.0f, 0.0f, static_cast<float>(m_width), static_cast<float>(m_height), 0.0f, 1.0f };
@@ -108,6 +110,21 @@ void DX11GameRenderer::EndFrame()
 
 std::unique_ptr<Engine::Graphics::IGraphicsContext> DX11GameRenderer::CreateFrameGraphicsContext()
 {
-    return std::make_unique<D3D11GraphicsContext>(m_device.Get(), m_context.Get());
+    return m_graphicsProvider && m_graphicsProvider->GetContextFactory()
+        ? m_graphicsProvider->GetContextFactory()->CreateContext()
+        : nullptr;
+}
+
+void DX11GameRenderer::WaitIdle()
+{
+    if (!m_device || !m_context) return;
+    D3D11_QUERY_DESC descriptor{};
+    descriptor.Query = D3D11_QUERY_EVENT;
+    Microsoft::WRL::ComPtr<ID3D11Query> completion;
+    if (FAILED(m_device->CreateQuery(&descriptor, &completion))) return;
+    m_context->End(completion.Get());
+    m_context->Flush();
+    while (m_context->GetData(completion.Get(), nullptr, 0, 0) == S_FALSE)
+        SwitchToThread();
 }
 }

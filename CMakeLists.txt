@@ -392,6 +392,24 @@ if(ENGINE_VULKAN_ENABLED)
             list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
         endforeach()
     endforeach()
+    foreach(SHADER_NAME Object ObjectOutline)
+        set(SHADER_SOURCE
+            "${ENGINE_ROOT}/Engine/Core/Shaders/${SHADER_NAME}/${SHADER_NAME}.hlsl")
+        set(SHADER_OUTPUT
+            "${VULKAN_SHADER_DIR}/${SHADER_NAME}.VSTerrainMain.VS.spv")
+        add_custom_command(
+            OUTPUT "${SHADER_OUTPUT}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${VULKAN_SHADER_DIR}"
+            COMMAND "${DXC_SPIRV_EXECUTABLE}" -spirv -fspv-target-env=vulkan1.1
+                    -fvk-use-dx-layout -fspv-entrypoint-name=VSMain
+                    -D VULKAN=1 -T vs_6_0
+                    -E VSTerrainMain -Fo "${SHADER_OUTPUT}" "${SHADER_SOURCE}"
+            DEPENDS "${SHADER_SOURCE}"
+            VERBATIM
+            COMMENT "Compiling ${SHADER_NAME}.VSTerrainMain.VS for Vulkan"
+        )
+        list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
+    endforeach()
     add_custom_target(VulkanShaders DEPENDS ${VULKAN_SHADER_OUTPUTS})
     add_dependencies(Engine VulkanShaders)
     target_link_libraries(Engine PUBLIC volk::volk Vulkan::Headers)

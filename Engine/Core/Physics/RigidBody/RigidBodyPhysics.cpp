@@ -274,7 +274,7 @@ bool Engine::Components::RigidBody::EnsureBody()
             if (convex)
             {
                 auto hull = std::make_unique<btConvexHullShape>();
-                for (const Engine::Model::Vertex& vertex : mesh->GetVertices())
+                for (const Engine::Model::AnimationVertex& vertex : mesh->GetVertices())
                     hull->addPoint(btVector3(vertex.pos[0] * scale.x,
                         vertex.pos[1] * scale.y, vertex.pos[2] * scale.z), false);
                 hull->recalcLocalAabb();

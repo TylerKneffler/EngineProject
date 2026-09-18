@@ -76,6 +76,7 @@ int GameApplication::Run(HINSTANCE instance)
     scene.SetEditorMode2D(
         settings.editorMode == Engine::Model::ProjectSettings::EditorMode::TwoD);
     scene.Init(renderer->GetGraphicsProvider());
+    scene.SetDistanceLightingSettings(settings.distanceLighting);
     Engine::Core::SceneManager::SetActiveScene(&scene);
     const std::string defaultScene = settings.defaultScene.empty()
         ? GetFallbackScenePath() : settings.defaultScene;
@@ -120,6 +121,8 @@ int GameApplication::Run(HINSTANCE instance)
     };
 
     window->Show();
-    return window->Run();
+    const int result = window->Run();
+    renderer->WaitIdle();
+    return result;
 }
 }

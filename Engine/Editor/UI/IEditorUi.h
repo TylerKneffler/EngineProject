@@ -150,6 +150,7 @@ public:
     virtual bool ColorEdit3(const char* label, float* color) = 0;
     virtual bool ColorEdit4(const char* label, float* color) = 0;
     virtual bool SliderInt(const char* label, int* value, int minimum, int maximum) = 0;
+    virtual bool SliderFloat(const char* label, float* value, float minimum, float maximum) = 0;
     virtual bool InputUInt(const char* label, uint32_t* value) = 0;
     virtual void ValueLabel(const char* label, const char* value) = 0;
     virtual bool CollapsingHeader(const char* label, bool defaultOpen = true) = 0;

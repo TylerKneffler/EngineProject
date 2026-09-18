@@ -17,6 +17,7 @@ public:
     uint32_t GetHeight() const override { return m_height; }
     void Clear(float r, float g, float b, float a = 1.0f) override;
     Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override { return m_graphicsProvider.get(); }
+    void WaitIdle() override;
     void BeginFrame() override;
     void EndFrame() override;
     std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateFrameGraphicsContext() override;

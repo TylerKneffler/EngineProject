@@ -44,7 +44,7 @@ struct ImportedTexture
 struct ImportedPrimitive
 {
     std::string name;
-    std::vector<Vertex> vertices;
+    std::vector<AnimationVertex> vertices;
     std::vector<MorphTarget> morphTargets;
     std::vector<float> morphWeights;
     int materialIndex = -1;
@@ -95,4 +95,3 @@ struct ModelImportResult
     std::string message;
 };
 }
-

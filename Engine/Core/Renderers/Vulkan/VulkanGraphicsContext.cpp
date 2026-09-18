@@ -4,10 +4,201 @@
 #include "VulkanGraphicsBuffer.h"
 #include "VulkanPipelineStateBuilder.h"
 #include <algorithm>
+#include <unordered_map>
+#include <vector>
 
 
 namespace Engine::Renderers
 {
+struct VulkanOcclusionQueryState
+{
+    static constexpr uint32_t QueryCapacity = 16384;
+    struct Entry
+    {
+        uint64_t viewId = 0;
+        uint64_t issueSignature = 0;
+        uint64_t lastProbeFrame = 0;
+        uint64_t lastTouchedFrame = 0;
+        bool pending = false;
+        bool occluded = false;
+    };
+    struct Record { uint64_t key = 0; uint64_t signature = 0; };
+    struct FrameSlot
+    {
+        VkQueryPool pool = VK_NULL_HANDLE;
+        std::vector<uint64_t> results;
+        std::vector<Record> records;
+        uint32_t used = 0;
+    };
+
+    explicit VulkanOcclusionQueryState(VkDevice value) : device(value) {}
+    ~VulkanOcclusionQueryState()
+    {
+        if (device)
+            for (auto& slot : slots)
+                if (slot.pool) vkDestroyQueryPool(device, slot.pool, nullptr);
+    }
+
+    bool EnsureSlot(uint32_t frameSlot)
+    {
+        if (!device) return false;
+        if (slots.size() <= frameSlot) slots.resize(frameSlot + 1u);
+        auto& slot = slots[frameSlot];
+        if (slot.pool) return true;
+        VkQueryPoolCreateInfo createInfo{ VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
+        createInfo.queryType = VK_QUERY_TYPE_OCCLUSION;
+        createInfo.queryCount = QueryCapacity;
+        if (vkCreateQueryPool(device, &createInfo, nullptr, &slot.pool) != VK_SUCCESS)
+            return false;
+        slot.results.resize(QueryCapacity);
+        return true;
+    }
+
+    void Prepare(uint32_t frameSlot, VkCommandBuffer commandBuffer)
+    {
+        if (!commandBuffer || !EnsureSlot(frameSlot))
+        {
+            currentSlot = UINT32_MAX;
+            return;
+        }
+        auto& slot = slots[frameSlot];
+        VkResult result = VK_SUCCESS;
+        if (slot.used)
+            result = vkGetQueryPoolResults(device, slot.pool, 0, slot.used,
+                VkDeviceSize(slot.used) * sizeof(uint64_t), slot.results.data(),
+                sizeof(uint64_t), VK_QUERY_RESULT_64_BIT);
+        for (uint32_t index = 0; index < slot.used; ++index)
+        {
+            const auto& record = slot.records[index];
+            const auto found = entries.find(record.key);
+            if (found == entries.end()) continue;
+            auto& entry = found->second;
+            if (entry.pending && entry.issueSignature == record.signature)
+            {
+                entry.pending = false;
+                entry.occluded = result == VK_SUCCESS && slot.results[index] == 0;
+            }
+        }
+        slot.used = 0;
+        slot.records.clear();
+        vkCmdResetQueryPool(commandBuffer, slot.pool, 0, QueryCapacity);
+        currentSlot = frameSlot;
+    }
+
+    VkDevice device = VK_NULL_HANDLE;
+    std::vector<FrameSlot> slots;
+    std::unordered_map<uint64_t, Entry> entries;
+    std::unordered_map<uint64_t, uint64_t> viewSignatures;
+    uint64_t frameIndex = 0;
+    uint32_t currentSlot = UINT32_MAX;
+};
+
+namespace
+{
+uint64_t VulkanOcclusionKey(uint64_t viewId, uint64_t objectId)
+{
+    objectId ^= viewId + 0x9e3779b97f4a7c15ull +
+        (objectId << 6u) + (objectId >> 2u);
+    return objectId;
+}
+}
+
+void VulkanGraphicsContextFactory::SetDevice(VkDevice device)
+{
+    m_occlusionState = std::make_shared<VulkanOcclusionQueryState>(device);
+}
+
+void VulkanGraphicsContextFactory::PrepareFrame(uint32_t frameSlot)
+{
+    if (m_occlusionState)
+        m_occlusionState->Prepare(frameSlot, m_commandBuffer);
+}
+
+bool VulkanGraphicsContext::BeginOcclusionFrame(uint64_t viewId,
+    uint64_t sceneSignature)
+{
+    m_occlusionViewId = viewId;
+    m_occlusionSceneSignature = sceneSignature;
+    m_activeOcclusionKey = 0;
+    m_activeOcclusionIndex = UINT32_MAX;
+    if (!m_commandBuffer || !m_occlusionState ||
+        m_occlusionState->currentSlot == UINT32_MAX)
+        return false;
+    ++m_occlusionState->frameIndex;
+    const auto previous = m_occlusionState->viewSignatures.find(viewId);
+    const bool invalidated = previous == m_occlusionState->viewSignatures.end() ||
+        previous->second != sceneSignature;
+    m_occlusionState->viewSignatures[viewId] = sceneSignature;
+    for (auto iterator = m_occlusionState->entries.begin();
+        iterator != m_occlusionState->entries.end();)
+    {
+        auto& entry = iterator->second;
+        if (entry.viewId == viewId && invalidated) entry.occluded = false;
+        const bool stale = !entry.pending && m_occlusionState->frameIndex >
+            entry.lastTouchedFrame + 600u;
+        if (stale) iterator = m_occlusionState->entries.erase(iterator);
+        else ++iterator;
+    }
+    return !invalidated;
+}
+
+bool VulkanGraphicsContext::IsOccluded(uint64_t objectId)
+{
+    if (!m_occlusionState || !m_occlusionViewId || !objectId) return false;
+    const auto found = m_occlusionState->entries.find(
+        VulkanOcclusionKey(m_occlusionViewId, objectId));
+    if (found == m_occlusionState->entries.end() ||
+        found->second.viewId != m_occlusionViewId)
+        return false;
+    auto& entry = found->second;
+    entry.lastTouchedFrame = m_occlusionState->frameIndex;
+    constexpr uint64_t reprobeInterval = 8u;
+    if (entry.occluded && m_occlusionState->frameIndex <
+        entry.lastProbeFrame + reprobeInterval)
+        return true;
+    entry.occluded = false;
+    return false;
+}
+
+void VulkanGraphicsContext::BeginOcclusionQuery(uint64_t objectId)
+{
+    m_activeOcclusionKey = 0;
+    m_activeOcclusionIndex = UINT32_MAX;
+    if (!m_commandBuffer || !m_occlusionState || !m_occlusionViewId || !objectId ||
+        m_occlusionState->currentSlot >= m_occlusionState->slots.size())
+        return;
+    auto& slot = m_occlusionState->slots[m_occlusionState->currentSlot];
+    if (!slot.pool || slot.used >= VulkanOcclusionQueryState::QueryCapacity)
+        return;
+    const uint64_t key = VulkanOcclusionKey(m_occlusionViewId, objectId);
+    auto [iterator, inserted] = m_occlusionState->entries.try_emplace(key);
+    auto& entry = iterator->second;
+    if (!inserted && entry.viewId != m_occlusionViewId) entry = {};
+    entry.viewId = m_occlusionViewId;
+    entry.lastTouchedFrame = m_occlusionState->frameIndex;
+    if (entry.pending) return;
+    m_activeOcclusionIndex = slot.used++;
+    m_activeOcclusionKey = key;
+    vkCmdBeginQuery(m_commandBuffer, slot.pool, m_activeOcclusionIndex, 0);
+    entry.lastProbeFrame = m_occlusionState->frameIndex;
+}
+
+void VulkanGraphicsContext::EndOcclusionQuery()
+{
+    if (!m_commandBuffer || !m_occlusionState ||
+        m_activeOcclusionIndex == UINT32_MAX ||
+        m_occlusionState->currentSlot >= m_occlusionState->slots.size())
+        return;
+    auto& slot = m_occlusionState->slots[m_occlusionState->currentSlot];
+    vkCmdEndQuery(m_commandBuffer, slot.pool, m_activeOcclusionIndex);
+    auto& entry = m_occlusionState->entries[m_activeOcclusionKey];
+    entry.pending = true;
+    entry.issueSignature = m_occlusionSceneSignature;
+    slot.records.push_back({ m_activeOcclusionKey, m_occlusionSceneSignature });
+    m_activeOcclusionKey = 0;
+    m_activeOcclusionIndex = UINT32_MAX;
+}
+
 void VulkanGraphicsContext::SetPipeline(const Engine::Graphics::IPipelineState* pipeline)
 {
     m_pipeline = dynamic_cast<const VulkanPipelineState*>(pipeline);

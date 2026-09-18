@@ -84,6 +84,7 @@ public:
     uint32_t GetHeight() const override { return m_height; }
     void Clear(float r, float g, float b, float a = 1.0f) override;
     Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override;
+    void WaitIdle() override { FlushGPU(); }
 
     // IGameRenderer interface
     void BeginFrame() override;   // reset allocator + list, transition backbuffer to RENDER_TARGET

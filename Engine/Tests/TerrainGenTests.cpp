@@ -20,6 +20,33 @@
 
 namespace
 {
+std::vector<Engine::Model::AnimationVertex> ExpandedVertices(
+    const Engine::Components::Mesh& mesh)
+{
+    if (!mesh.UsesTerrainVertexFormat())
+        return mesh.GetVertices();
+    std::vector<Engine::Model::AnimationVertex> result;
+    result.reserve(mesh.GetIndices().size());
+    for (uint32_t index : mesh.GetIndices())
+    {
+        if (index >= mesh.GetTerrainVertices().size())
+            continue;
+        const auto& source = mesh.GetTerrainVertices()[index];
+        Engine::Model::AnimationVertex vertex{};
+        std::copy(std::begin(source.pos), std::end(source.pos), vertex.pos);
+        std::copy(std::begin(source.normal), std::end(source.normal), vertex.normal);
+        std::copy(std::begin(source.uv), std::end(source.uv), vertex.uv);
+        std::copy(std::begin(source.color), std::end(source.color), vertex.color);
+        result.push_back(vertex);
+    }
+    return result;
+}
+
+size_t DrawVertexCount(const Engine::Components::Mesh& mesh)
+{
+    return mesh.GetIndexCount() > 0u ? mesh.GetIndexCount() : mesh.GetVertexCount();
+}
+
 struct QuantizedPoint
 {
     long long x = 0;
@@ -97,7 +124,7 @@ bool AuditSmoothGridTopology(Engine::Core::Object& terrainObject,
             if (!mesh)
                 continue;
             const glm::mat4 world = patchObject->transform.GetWorldMatrix();
-            const auto& vertices = mesh->GetVertices();
+            const auto vertices = ExpandedVertices(*mesh);
             for (size_t triangle = 0; triangle + 2 < vertices.size(); triangle += 3)
             {
                 glm::vec3 points[3]{};
@@ -221,7 +248,7 @@ SharedBorderAudit AuditSharedChunkWorldVertices(
             if (!mesh)
                 continue;
             const glm::mat4 world = patchObject->transform.GetWorldMatrix();
-            for (const auto& vertex : mesh->GetVertices())
+            for (const auto& vertex : ExpandedVertices(*mesh))
             {
                 const glm::vec3 position = glm::vec3(world * glm::vec4(
                     vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.f));
@@ -346,7 +373,7 @@ int main(int argumentCount, char** arguments)
             if (!patch || !mesh ||
                 !patchObject->GetComponent<Engine::Components::Material>() ||
                 static_cast<std::size_t>(patch->triangleCount) * 3u !=
-                    mesh->GetVertexCount())
+                    DrawVertexCount(*mesh))
             {
                 return 3;
             }
@@ -437,7 +464,7 @@ int main(int argumentCount, char** arguments)
             if (!mesh)
                 continue;
             const glm::mat4 world = patchObject->transform.GetWorldMatrix();
-            for (const auto& vertex : mesh->GetVertices())
+            for (const auto& vertex : ExpandedVertices(*mesh))
             {
                 const glm::vec3 position = glm::vec3(world * glm::vec4(
                     vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.f));
@@ -489,7 +516,7 @@ int main(int argumentCount, char** arguments)
                 ? patchObject->GetComponent<Engine::Components::Mesh>() : nullptr;
             if (!mesh)
                 return 6;
-            const auto& vertices = mesh->GetVertices();
+            const auto vertices = ExpandedVertices(*mesh);
             cubeVertexCount += vertices.size();
             for (std::size_t index = 0; index + 2 < vertices.size(); index += 3)
             {
@@ -533,7 +560,7 @@ int main(int argumentCount, char** arguments)
         return 18;
     const auto* triangleMesh = terrainObject->Children.front()->Children.front()
         ->GetComponent<Engine::Components::Mesh>();
-    if (!triangleMesh || triangleMesh->GetVertexCount() !=
+    if (!triangleMesh || DrawVertexCount(*triangleMesh) !=
         static_cast<std::size_t>(terrain->horizontalCellsPerChunk *
             terrain->horizontalCellsPerChunk * 6))
         return 19;
@@ -545,10 +572,10 @@ int main(int argumentCount, char** arguments)
     const auto* hexMesh = terrainObject->Children.front()->Children.front()
         ->GetComponent<Engine::Components::Mesh>();
     bool foundHexSide = false;
-    if (!hexMesh || hexMesh->GetVertexCount() == 0u ||
-        hexMesh->GetVertexCount() % 3u != 0u)
+    if (!hexMesh || DrawVertexCount(*hexMesh) == 0u ||
+        DrawVertexCount(*hexMesh) % 3u != 0u)
         return 21;
-    for (const auto& vertex : hexMesh->GetVertices())
+    for (const auto& vertex : ExpandedVertices(*hexMesh))
     {
         const glm::vec3 normal(vertex.normal[0], vertex.normal[1], vertex.normal[2]);
         if (std::abs(normal.y) < 0.001f && std::abs(normal.x) > 0.1f &&
@@ -573,7 +600,7 @@ int main(int argumentCount, char** arguments)
             if (!mesh)
                 continue;
             const glm::mat4 world = patchObject->transform.GetWorldMatrix();
-            const auto& vertices = mesh->GetVertices();
+            const auto vertices = ExpandedVertices(*mesh);
             for (size_t triangle = 0; triangle + 2 < vertices.size(); triangle += 3)
             {
                 if (vertices[triangle].normal[1] < 0.999f)
@@ -767,7 +794,7 @@ int main(int argumentCount, char** arguments)
             if (!mesh)
                 continue;
             const glm::mat4 world = patchObject->transform.GetWorldMatrix();
-            const auto& vertices = mesh->GetVertices();
+            const auto vertices = ExpandedVertices(*mesh);
             for (size_t triangle = 0; triangle + 2 < vertices.size(); triangle += 3)
             {
                 glm::vec3 points[3]{};
@@ -829,7 +856,7 @@ int main(int argumentCount, char** arguments)
             if (!mesh)
                 continue;
             const glm::mat4 world = patchObject->transform.GetWorldMatrix();
-            for (const auto& vertex : mesh->GetVertices())
+            for (const auto& vertex : ExpandedVertices(*mesh))
             {
                 const glm::vec3 position = glm::vec3(world * glm::vec4(
                     vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.f));
@@ -1007,6 +1034,8 @@ int main(int argumentCount, char** arguments)
         if (!finalTopologyValid || !finalBorderAudit.valid)
             return 42;
         std::size_t residentVertices = 0u;
+        std::size_t residentIndices = 0u;
+        uint64_t residentCpuBytes = 0u;
         for (Engine::Core::Object* chunkObject : stressOwner->Children)
         {
             if (!chunkObject || !chunkObject->GetComponent<TerrainChunk>())
@@ -1016,22 +1045,28 @@ int main(int argumentCount, char** arguments)
                 const auto* mesh = patchObject
                     ? patchObject->GetComponent<Engine::Components::Mesh>() : nullptr;
                 if (mesh)
+                {
                     residentVertices += mesh->GetVertexCount();
+                    residentIndices += mesh->GetIndexCount();
+                    residentCpuBytes += mesh->GetCpuMeshMemoryBytes();
+                }
             }
         }
-        const double residentMeshMiB = static_cast<double>(residentVertices) *
-            sizeof(Engine::Model::Vertex) / (1024.0 * 1024.0);
+        const double residentMeshMiB = static_cast<double>(residentCpuBytes) /
+            (1024.0 * 1024.0);
         std::printf("stress shape=%s initial_fill_s=%.3f camera_speed=%.1f chunk_size=%.1f "
             "radius=%d cells=%dx%d worst_update_ms=%.3f over_budget=%d/%d "
-            "max_missing=%zu drain_s=%.3f resident_chunks=%zu resident_vertices=%zu "
-            "mesh_mib=%.2f topology=valid border_pairs=%zu "
+            "max_missing=%zu drain_s=%.3f resident_chunks=%zu "
+            "resident_vertices=%zu resident_indices=%zu cpu_mesh_mib=%.2f "
+            "topology=valid border_pairs=%zu "
             "border_vertices=%zu max_border_error=%.9f built=%llu unloaded=%llu\n",
             stressShapeName, initialFillSeconds, cameraSpeed, stressTerrain->chunkSize,
             stressTerrain->viewRadiusInChunks,
             stressTerrain->horizontalCellsPerChunk, stressTerrain->verticalCells,
             worstUpdateMs, updatesOverBudget,
             movementFrames, maximumMissingChunks, drainSeconds,
-            stressTerrain->GetLoadedChunkCount(), residentVertices, residentMeshMiB,
+            stressTerrain->GetLoadedChunkCount(), residentVertices,
+            residentIndices, residentMeshMiB,
             finalBorderAudit.neighborPairs,
             finalBorderAudit.comparedVertices,
             finalBorderAudit.maximumPositionError,
