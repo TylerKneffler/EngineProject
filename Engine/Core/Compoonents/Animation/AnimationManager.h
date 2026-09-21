@@ -5,18 +5,22 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <chrono>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace Engine::Components
 {
+class Model;
+struct AnimationManagerScratch;
 class AnimationManager : public Engine::Core::Component
 {
 public:
     using Layer = Engine::Model::AnimationLayer;
 
     AnimationManager();
+    ~AnimationManager() override;
     ComponentReference modelReference { "Model" };
     ComponentReference animationSourceReference { "Animation" };
     std::string clip;
@@ -34,6 +38,7 @@ public:
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
 
 private:
+    Model* ResolveModel() const;
     struct RestTransform
     {
         glm::vec3 translation{};
@@ -47,5 +52,10 @@ private:
     float m_previousTime = 0.f;
     float m_fadeDuration = 0.f;
     float m_fadeElapsed = 0.f;
+    mutable Model* m_cachedModel = nullptr;
+    mutable uint64_t m_cachedStructureRevision = 0;
+    mutable uint64_t m_cachedConfigurationRevision = 0;
+    mutable bool m_modelCacheValid = false;
+    std::unique_ptr<AnimationManagerScratch> m_scratch;
 };
 }

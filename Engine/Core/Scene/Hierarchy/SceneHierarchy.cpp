@@ -116,6 +116,7 @@ Engine::Core::Object* Scene::AddObject()
         m_pendingObjectAdditions.push_back(std::move(obj));
     else
         m_objects.push_back(std::move(obj));
+    NotifyStructureChanged();
     return raw;
 }
 
@@ -328,6 +329,7 @@ bool Scene::MoveObject(
         ? std::atan2(rotation[0][1], rotation[0][0])
         : 0.f;
     object->transform.rotation = { x, y, z };
+    NotifyStructureChanged();
     return true;
 }
 
@@ -396,6 +398,7 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
                     candidate.get()) != objectsToRemove.end();
             }),
         m_objects.end());
+    NotifyStructureChanged();
 }
 
 void Scene::RequestRemoveObject(Engine::Core::Object* obj)
@@ -456,6 +459,7 @@ void Scene::ClearObjects()
     m_objects.clear();
     m_selectedObject = nullptr;
     m_previewObject = nullptr;
+    NotifyStructureChanged();
 }
 
 }

@@ -1,6 +1,7 @@
 #include "Skeleton.h"
 #include "Model.h"
 #include "Core/Object.h"
+#include "Core/Scene/Scene.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 
 namespace Engine::Components
@@ -46,6 +47,8 @@ void Skeleton::Deserialize(const JsonValue& value)
             data[j] = value["inverseBindMatrices"].ArrayAt(i).ArrayAt(j).AsFloat();
         inverseBindMatrices.push_back(matrix);
     }
+    m_modelCacheValid = false;
+    m_cachedJoints.clear();
 }
 
 bool Skeleton::DrawProperties(::Engine::Editor::IEditorUi& ui)
@@ -77,22 +80,69 @@ Skeleton::Object* Skeleton::GetHierarchyRoot() const
 
 Model* Skeleton::ResolveModel() const
 {
+    const uint64_t structureRevision = Owner && Owner->GetScene()
+        ? Owner->GetScene()->GetStructureRevision() : 0;
+    const uint64_t configurationRevision = GetConfigurationRevision();
+    if (m_modelCacheValid &&
+        m_cachedStructureRevision == structureRevision &&
+        m_cachedConfigurationRevision == configurationRevision)
+        return m_cachedModel;
+
     Model* model = modelReference.IsAssigned()
         ? Engine::Core::ResolveComponentReference<Model>(Owner, modelReference) : nullptr;
     if (!modelReference.IsAssigned())
         for (Object* current = Owner; current && !model; current = current->Parent)
             model = current->GetComponent<Model>();
-    return model;
+    m_cachedModel = model;
+    m_cachedStructureRevision = structureRevision;
+    m_cachedConfigurationRevision = configurationRevision;
+    m_modelCacheValid = true;
+    return m_cachedModel;
 }
 
-std::vector<Skeleton::Object*> Skeleton::ResolveJoints() const
+uint64_t Skeleton::JointBindingSignature() const
 {
-    std::vector<Skeleton::Object*> result;
-    result.reserve(jointNodes.size());
-    Model* model = ResolveModel();
-    if (!model) return result;
+    uint64_t signature = 1469598103934665603ull;
     for (const unsigned node : jointNodes)
-        result.push_back(model->ResolveNode(node));
-    return result;
+    {
+        signature ^= node;
+        signature *= 1099511628211ull;
+    }
+    signature ^= static_cast<uint64_t>(jointNodes.size());
+    return signature;
+}
+
+const std::vector<Skeleton::Object*>& Skeleton::ResolveJoints() const
+{
+    Model* model = ResolveModel();
+    const uint64_t modelRevision = model ? model->GetConfigurationRevision() : 0;
+    const uint64_t jointSignature = JointBindingSignature();
+    const uint64_t structureRevision = Owner && Owner->GetScene()
+        ? Owner->GetScene()->GetStructureRevision() : 0;
+    if (m_cachedJointModel == model &&
+        m_cachedModelRevision == modelRevision &&
+        m_cachedJointSignature == jointSignature &&
+        m_cachedJointStructureRevision == structureRevision &&
+        m_cachedJoints.size() == jointNodes.size())
+        return m_cachedJoints;
+
+    m_cachedJoints.assign(jointNodes.size(), nullptr);
+    if (!model)
+    {
+        m_cachedModelRevision = modelRevision;
+        m_cachedJointSignature = jointSignature;
+        m_cachedJointStructureRevision = structureRevision;
+        m_cachedJointModel = model;
+        return m_cachedJoints;
+    }
+    const std::vector<Object*>& nodes = model->ResolveNodes();
+    size_t jointIndex = 0;
+    for (const unsigned node : jointNodes)
+        m_cachedJoints[jointIndex++] = node < nodes.size() ? nodes[node] : nullptr;
+    m_cachedModelRevision = modelRevision;
+    m_cachedJointSignature = jointSignature;
+    m_cachedJointStructureRevision = structureRevision;
+    m_cachedJointModel = model;
+    return m_cachedJoints;
 }
 }

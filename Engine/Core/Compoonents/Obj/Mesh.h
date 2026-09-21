@@ -81,11 +81,20 @@ public:
     void SetMorphData(unsigned nodeIndex, std::vector<MorphTarget> targets,
         std::vector<float> weights);
     bool SetMorphWeights(const std::vector<float>& weights);
+    // Detects edits made through the mutable inspector/accessor and publishes
+    // the compact weights without rebuilding the CPU vertex stream.
+    void SyncMorphWeights();
     const std::vector<MorphTarget>& GetMorphTargets() const { return m_morphTargets; }
     const std::vector<float>& GetMorphWeights() const { return m_morphWeights; }
     std::vector<float>& GetMorphWeights() { return m_morphWeights; }
     uint64_t GetMorphWeightsRevision() const;
     bool HasMorphTargets() const { return !m_morphTargets.empty(); }
+    IGraphicsBuffer* GetMorphDeltaBuffer() const
+    { return m_morphDeltaBuffer.get(); }
+    IGraphicsBuffer* GetMorphWeightBuffer() const
+    { return m_morphWeightBuffer.get(); }
+    uint32_t GetMorphTargetCount() const
+    { return static_cast<uint32_t>(m_morphTargets.size()); }
 
     using SliceResult = std::pair<std::vector<Vertex>, std::vector<Vertex>>;
     // Returns closed positive/negative halves. For a closed intersected mesh,
@@ -102,6 +111,8 @@ public:
 private:
     void ObserveMorphWeights() const;
     void AdvanceMorphWeightsRevision() const;
+    void CreateMorphBuffers();
+    void UploadMorphWeights();
     void UpdateBounds();
     std::string m_filePath;
     std::vector<Vertex> m_vertices;
@@ -109,6 +120,8 @@ private:
     std::vector<uint32_t> m_indices;
     std::unique_ptr<IGraphicsBuffer> m_vertexBuffer;
     std::unique_ptr<IGraphicsBuffer> m_indexBuffer;
+    std::unique_ptr<IGraphicsBuffer> m_morphDeltaBuffer;
+    std::unique_ptr<IGraphicsBuffer> m_morphWeightBuffer;
     IGraphicsBufferFactory* m_bufferFactory = nullptr;
     bool m_ready = false;
     bool m_hasBounds = false;
@@ -117,6 +130,7 @@ private:
     unsigned m_morphNodeIndex = 0;
     std::vector<MorphTarget> m_morphTargets;
     std::vector<float> m_morphWeights;
+    std::vector<glm::vec4> m_packedMorphWeights;
     mutable std::vector<float> m_observedMorphWeights;
     mutable uint64_t m_morphWeightsRevision = 1;
     mutable bool m_morphWeightsObserved = false;

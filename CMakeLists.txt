@@ -819,6 +819,15 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_ROOT}/Engine/Tests/AnimationRenderingBenchmark.cpp")
+    add_executable(AnimationRenderingBenchmark EXCLUDE_FROM_ALL
+        "${ENGINE_ROOT}/Engine/Tests/AnimationRenderingBenchmark.cpp")
+    target_link_libraries(AnimationRenderingBenchmark PRIVATE Engine)
+    target_include_directories(AnimationRenderingBenchmark PRIVATE
+        "${ENGINE_ROOT}/Engine")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_ROOT}/Engine/Tests/TexturePipelineTests.cpp")
     enable_testing()
     add_executable(TexturePipelineTests

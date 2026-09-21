@@ -3,27 +3,16 @@
 #include "Model.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Object.h"
+#include "Core/Scene/Scene.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include <algorithm>
 #include <cmath>
-#include <functional>
 #include <sstream>
 
 namespace Engine::Components
 {
 namespace
 {
-Model* FindModel(Engine::Core::Object* owner,
-    const Engine::Core::ComponentReference& reference)
-{
-    Model* model = reference.IsAssigned()
-        ? Engine::Core::ResolveComponentReference<Model>(owner, reference) : nullptr;
-    if (!reference.IsAssigned())
-        for (Engine::Core::Object* current = owner; current && !model; current = current->Parent)
-            model = current->GetComponent<Model>();
-    return model;
-}
-
 glm::vec3 QuaternionEuler(const glm::quat& q)
 {
     const float sinX = 2.f * (q.w * q.x + q.y * q.z);
@@ -41,10 +30,11 @@ glm::quat EulerQuaternion(const glm::vec3& euler)
         glm::angleAxis(euler.x, glm::vec3(1.f, 0.f, 0.f)));
 }
 
-std::vector<float> Sample(const Engine::Model::AnimationChannel& channel, float time)
+void Sample(const Engine::Model::AnimationChannel& channel, float time,
+    std::vector<float>& result)
 {
-    std::vector<float> result(channel.valueWidth, 0.f);
-    if (channel.times.empty() || channel.valueWidth == 0) return result;
+    result.assign(channel.valueWidth, 0.f);
+    if (channel.times.empty() || channel.valueWidth == 0) return;
     const auto upper = std::upper_bound(channel.times.begin(), channel.times.end(), time);
     const size_t next = std::min<size_t>(upper - channel.times.begin(), channel.times.size() - 1);
     const size_t previous = next == 0 ? 0 : next - 1;
@@ -56,7 +46,7 @@ std::vector<float> Sample(const Engine::Model::AnimationChannel& channel, float 
         (channel.interpolation == Engine::Model::AnimationChannel::Interpolation::CubicSpline ? 3u : 1u);
     const size_t valueOffset = channel.interpolation == Engine::Model::AnimationChannel::Interpolation::CubicSpline
         ? channel.valueWidth : 0u;
-    if ((next + 1) * stride > channel.values.size()) return result;
+    if ((next + 1) * stride > channel.values.size()) return;
     if (channel.path == Engine::Model::AnimationChannel::Path::Rotation && channel.valueWidth == 4 &&
         channel.interpolation == Engine::Model::AnimationChannel::Interpolation::Linear)
     {
@@ -67,7 +57,11 @@ std::vector<float> Sample(const Engine::Model::AnimationChannel& channel, float 
             channel.values[next * stride], channel.values[next * stride + 1],
             channel.values[next * stride + 2]);
         const glm::quat resultRotation = glm::normalize(glm::slerp(first, second, amount));
-        return { resultRotation.x, resultRotation.y, resultRotation.z, resultRotation.w };
+        result[0] = resultRotation.x;
+        result[1] = resultRotation.y;
+        result[2] = resultRotation.z;
+        result[3] = resultRotation.w;
+        return;
     }
     for (size_t component = 0; component < channel.valueWidth; ++component)
     {
@@ -88,11 +82,11 @@ std::vector<float> Sample(const Engine::Model::AnimationChannel& channel, float 
                 (cubed - squared) * inTangent;
         }
     }
-    return result;
 }
 
 struct NodePose
 {
+    bool active = false;
     bool hasTranslation = false;
     bool hasRotation = false;
     bool hasScale = false;
@@ -102,7 +96,45 @@ struct NodePose
     glm::vec3 scale { 1.f };
     std::vector<float> weights;
 };
-using Pose = std::unordered_map<unsigned, NodePose>;
+struct ReusablePose
+{
+    std::vector<NodePose> nodes;
+    std::vector<unsigned> activeNodes;
+
+    void Reset()
+    {
+        for (const unsigned index : activeNodes)
+        {
+            NodePose& node = nodes[index];
+            node.active = false;
+            node.hasTranslation = false;
+            node.hasRotation = false;
+            node.hasScale = false;
+            node.hasWeights = false;
+        }
+        activeNodes.clear();
+    }
+
+    NodePose& Get(unsigned index)
+    {
+        if (nodes.size() <= index)
+            nodes.resize(static_cast<size_t>(index) + 1u);
+        NodePose& node = nodes[index];
+        if (!node.active)
+        {
+            node.active = true;
+            activeNodes.push_back(index);
+        }
+        return node;
+    }
+
+    const NodePose* Find(unsigned index) const
+    {
+        if (index >= nodes.size()) return nullptr;
+        const NodePose& node = nodes[index];
+        return node.active ? &node : nullptr;
+    }
+};
 
 Animation* FindAnimation(Engine::Core::Object* owner, const std::string& name)
 {
@@ -117,14 +149,20 @@ Animation* FindAnimation(Engine::Core::Object* owner, const std::string& name)
     return name.empty() ? first : nullptr;
 }
 
-Pose SampleAnimation(const Animation* animation, float time)
+void SampleAnimation(const Animation* animation, float time,
+    size_t nodeCount, ReusablePose& pose, std::vector<float>& channelValues)
 {
-    Pose pose;
-    if (!animation) return pose;
+    pose.Reset();
+    if (!animation) return;
     for (const Engine::Model::AnimationChannel& channel : animation->channels)
     {
-        const std::vector<float> sampled = Sample(channel, time);
-        NodePose& node = pose[channel.nodeIndex];
+        if (channel.nodeIndex >= nodeCount)
+            continue;
+        NodePose& node = pose.Get(channel.nodeIndex);
+        std::vector<float>& sampled =
+            channel.path == Engine::Model::AnimationChannel::Path::Weights
+                ? node.weights : channelValues;
+        Sample(channel, time, sampled);
         switch (channel.path)
         {
         case Engine::Model::AnimationChannel::Path::Translation:
@@ -137,10 +175,9 @@ Pose SampleAnimation(const Animation* animation, float time)
             if (sampled.size() >= 3) { node.hasScale = true; node.scale = { sampled[0], sampled[1], sampled[2] }; }
             break;
         case Engine::Model::AnimationChannel::Path::Weights:
-            node.hasWeights = true; node.weights = sampled; break;
+            node.hasWeights = true; break;
         }
     }
-    return pose;
 }
 
 bool IncludesNode(const AnimationManager::Layer& layer, unsigned node)
@@ -159,7 +196,16 @@ float AdvanceTime(float value, float delta, float speed, bool looping,
 }
 }
 
+struct AnimationManagerScratch
+{
+    ReusablePose basePose;
+    ReusablePose sampledPose;
+    ReusablePose finalPose;
+    std::vector<float> channelValues;
+};
+
 AnimationManager::AnimationManager()
+    : m_scratch(std::make_unique<AnimationManagerScratch>())
 {
     SetTypeName(COMPONENT_TYPE_NAME(AnimationManager));
     RegisterField("modelReference", modelReference);
@@ -171,26 +217,63 @@ AnimationManager::AnimationManager()
     RegisterField("time", time);
 }
 
+AnimationManager::~AnimationManager() = default;
+
+Model* AnimationManager::ResolveModel() const
+{
+    const uint64_t structureRevision = Owner && Owner->GetScene()
+        ? Owner->GetScene()->GetStructureRevision() : 0;
+    const uint64_t configurationRevision = GetConfigurationRevision();
+    if (m_modelCacheValid &&
+        m_cachedStructureRevision == structureRevision &&
+        m_cachedConfigurationRevision == configurationRevision)
+        return m_cachedModel;
+
+    Model* model = modelReference.IsAssigned()
+        ? Engine::Core::ResolveComponentReference<Model>(Owner, modelReference) : nullptr;
+    if (!modelReference.IsAssigned())
+        for (Engine::Core::Object* current = Owner; current && !model;
+            current = current->Parent)
+            model = current->GetComponent<Model>();
+    m_cachedModel = model;
+    m_cachedStructureRevision = structureRevision;
+    m_cachedConfigurationRevision = configurationRevision;
+    m_modelCacheValid = true;
+    return m_cachedModel;
+}
+
 void AnimationManager::Start()
 {
     m_lastTick = std::chrono::steady_clock::now();
     m_restPose.clear();
     m_restMorphs.clear();
-    Model* model = FindModel(Owner, modelReference);
+    Model* model = ResolveModel();
     if (!model) return;
-    for (unsigned index = 0; index < model->GetNodeCount(); ++index)
-        if (Engine::Core::Object* object = model->ResolveNode(index))
+    const std::vector<Engine::Core::Object*>& nodes = model->ResolveNodes();
+    for (ReusablePose* pose : { &m_scratch->basePose,
+        &m_scratch->sampledPose, &m_scratch->finalPose })
+    {
+        pose->nodes.resize(nodes.size());
+        pose->activeNodes.reserve(nodes.size());
+    }
+    for (unsigned index = 0; index < nodes.size(); ++index)
+        if (Engine::Core::Object* object = nodes[index])
             m_restPose[index] = { object->transform.position,
                 EulerQuaternion(object->transform.rotation), object->transform.scale };
-    std::function<void(Engine::Core::Object*)> captureMorphs = [&](Engine::Core::Object* object)
+    const auto captureMorphs = [&](auto&& self, Engine::Core::Object* object) -> void
     {
         if (!object) return;
         if (const auto* mesh = object->GetComponent<Mesh>();
             mesh && mesh->HasMorphTargets())
             m_restMorphs.emplace(mesh->GetMorphNodeIndex(), mesh->GetMorphWeights());
-        for (Engine::Core::Object* child : object->Children) captureMorphs(child);
+        for (Engine::Core::Object* child : object->Children) self(self, child);
     };
-    captureMorphs(model->Owner);
+    captureMorphs(captureMorphs, model->Owner);
+    for (const auto& [nodeIndex, weights] : m_restMorphs)
+        if (nodeIndex < nodes.size())
+            for (ReusablePose* pose : { &m_scratch->basePose,
+                &m_scratch->sampledPose, &m_scratch->finalPose })
+                pose->nodes[nodeIndex].weights.reserve(weights.size());
     if (clip.empty())
     {
         Animation* first = animationSourceReference.IsAssigned()
@@ -246,8 +329,15 @@ void AnimationManager::Tick(float frameDelta)
     };
     Animation* animation = resolveAnimation(clip);
     if (!animation) return;
+    Model* model = ResolveModel();
+    if (!model) return;
+    const size_t nodeCount = model->GetNodeCount();
     time = AdvanceTime(time, delta, speed, looping, animation);
-    Pose basePose = SampleAnimation(animation, time);
+    ReusablePose& basePose = m_scratch->basePose;
+    ReusablePose& sampledPose = m_scratch->sampledPose;
+    ReusablePose& finalPose = m_scratch->finalPose;
+    SampleAnimation(animation, time, nodeCount, basePose,
+        m_scratch->channelValues);
 
     if (!m_previousClip.empty() && m_fadeDuration > 0.f)
     {
@@ -255,12 +345,12 @@ void AnimationManager::Tick(float frameDelta)
         m_previousTime = AdvanceTime(m_previousTime, delta, speed, looping, previousAnimation);
         m_fadeElapsed += delta;
         const float blend = std::clamp(m_fadeElapsed / m_fadeDuration, 0.f, 1.f);
-        const Pose previousPose = SampleAnimation(previousAnimation, m_previousTime);
+        SampleAnimation(previousAnimation, m_previousTime, nodeCount,
+            sampledPose, m_scratch->channelValues);
         for (const auto& [nodeIndex, rest] : m_restPose)
         {
-            NodePose& output = basePose[nodeIndex];
-            const auto oldFound = previousPose.find(nodeIndex);
-            const NodePose* old = oldFound == previousPose.end() ? nullptr : &oldFound->second;
+            NodePose& output = basePose.Get(nodeIndex);
+            const NodePose* old = sampledPose.Find(nodeIndex);
             output.translation = glm::mix(old && old->hasTranslation ? old->translation : rest.translation,
                 output.hasTranslation ? output.translation : rest.translation, blend);
             output.rotation = glm::normalize(glm::slerp(
@@ -272,16 +362,20 @@ void AnimationManager::Tick(float frameDelta)
         }
         for (const auto& [nodeIndex, restWeights] : m_restMorphs)
         {
-            NodePose& output = basePose[nodeIndex];
-            const auto oldFound = previousPose.find(nodeIndex);
-            const std::vector<float>& oldWeights = oldFound != previousPose.end() && oldFound->second.hasWeights
-                ? oldFound->second.weights : restWeights;
-            const std::vector<float> newWeights = output.hasWeights ? output.weights : restWeights;
-            output.weights.resize(std::max(oldWeights.size(), newWeights.size()), 0.f);
+            NodePose& output = basePose.Get(nodeIndex);
+            const NodePose* old = sampledPose.Find(nodeIndex);
+            const std::vector<float>& oldWeights = old && old->hasWeights
+                ? old->weights : restWeights;
+            const bool useOutputWeights = output.hasWeights;
+            const size_t newWeightCount = useOutputWeights
+                ? output.weights.size() : restWeights.size();
+            output.weights.resize(std::max(oldWeights.size(), newWeightCount), 0.f);
             for (size_t i = 0; i < output.weights.size(); ++i)
             {
                 const float oldValue = i < oldWeights.size() ? oldWeights[i] : 0.f;
-                const float newValue = i < newWeights.size() ? newWeights[i] : 0.f;
+                const float newValue = useOutputWeights && i < newWeightCount
+                    ? output.weights[i]
+                    : (i < restWeights.size() ? restWeights[i] : 0.f);
                 output.weights[i] = oldValue + (newValue - oldValue) * blend;
             }
             output.hasWeights = true;
@@ -293,29 +387,29 @@ void AnimationManager::Tick(float frameDelta)
         }
     }
 
-    Pose finalPose;
+    finalPose.Reset();
     for (const auto& [nodeIndex, rest] : m_restPose)
     {
-        NodePose& result = finalPose[nodeIndex];
+        NodePose& result = finalPose.Get(nodeIndex);
         result.hasTranslation = result.hasRotation = result.hasScale = true;
         result.translation = rest.translation;
         result.rotation = rest.rotation;
         result.scale = rest.scale;
-        if (const auto found = basePose.find(nodeIndex); found != basePose.end())
+        if (const NodePose* found = basePose.Find(nodeIndex))
         {
-            if (found->second.hasTranslation) result.translation = found->second.translation;
-            if (found->second.hasRotation) result.rotation = found->second.rotation;
-            if (found->second.hasScale) result.scale = found->second.scale;
+            if (found->hasTranslation) result.translation = found->translation;
+            if (found->hasRotation) result.rotation = found->rotation;
+            if (found->hasScale) result.scale = found->scale;
         }
     }
     for (const auto& [nodeIndex, restWeights] : m_restMorphs)
     {
-        NodePose& result = finalPose[nodeIndex];
+        NodePose& result = finalPose.Get(nodeIndex);
         result.hasWeights = true;
         result.weights = restWeights;
-        if (const auto found = basePose.find(nodeIndex);
-            found != basePose.end() && found->second.hasWeights)
-            result.weights = found->second.weights;
+        if (const NodePose* found = basePose.Find(nodeIndex);
+            found && found->hasWeights)
+            result.weights = found->weights;
     }
 
     for (Layer& layer : layers)
@@ -324,12 +418,14 @@ void AnimationManager::Tick(float frameDelta)
         Animation* layerAnimation = resolveAnimation(layer.clip);
         if (!layerAnimation) continue;
         layer.time = AdvanceTime(layer.time, delta, layer.speed, layer.looping, layerAnimation);
-        const Pose layerPose = SampleAnimation(layerAnimation, layer.time);
+        SampleAnimation(layerAnimation, layer.time, nodeCount, sampledPose,
+            m_scratch->channelValues);
         const float layerWeight = std::clamp(layer.weight, 0.f, 1.f);
-        for (const auto& [nodeIndex, sampled] : layerPose)
+        for (const unsigned nodeIndex : sampledPose.activeNodes)
         {
+            const NodePose& sampled = sampledPose.nodes[nodeIndex];
             if (!IncludesNode(layer, nodeIndex)) continue;
-            NodePose& result = finalPose[nodeIndex];
+            NodePose& result = finalPose.Get(nodeIndex);
             if (const auto restFound = m_restPose.find(nodeIndex); restFound != m_restPose.end())
             {
                 const RestTransform& rest = restFound->second;
@@ -367,26 +463,29 @@ void AnimationManager::Tick(float frameDelta)
         }
     }
 
-    Model* model = FindModel(Owner, modelReference);
-    if (!model) return;
-    for (const auto& [nodeIndex, pose] : finalPose)
-        if (Engine::Core::Object* target = model->ResolveNode(nodeIndex))
+    const std::vector<Engine::Core::Object*>& nodes = model->ResolveNodes();
+    for (const unsigned nodeIndex : finalPose.activeNodes)
+    {
+        const NodePose& pose = finalPose.nodes[nodeIndex];
+        if (Engine::Core::Object* target = nodeIndex < nodes.size()
+            ? nodes[nodeIndex] : nullptr)
         {
             if (pose.hasTranslation) target->transform.position = pose.translation;
             if (pose.hasRotation) target->transform.rotation = QuaternionEuler(pose.rotation);
             if (pose.hasScale) target->transform.scale = pose.scale;
         }
-    std::function<void(Engine::Core::Object*)> applyMorphs = [&](Engine::Core::Object* object)
+    }
+    const auto applyMorphs = [&](auto&& self, Engine::Core::Object* object) -> void
     {
         if (!object) return;
         if (auto* mesh = object->GetComponent<Mesh>();
             mesh && mesh->HasMorphTargets())
-            if (const auto found = finalPose.find(mesh->GetMorphNodeIndex());
-                found != finalPose.end() && found->second.hasWeights)
-                mesh->SetMorphWeights(found->second.weights);
-        for (Engine::Core::Object* child : object->Children) applyMorphs(child);
+            if (const NodePose* found = finalPose.Find(mesh->GetMorphNodeIndex());
+                found && found->hasWeights)
+                mesh->SetMorphWeights(found->weights);
+        for (Engine::Core::Object* child : object->Children) self(self, child);
     };
-    applyMorphs(model->Owner);
+    applyMorphs(applyMorphs, model->Owner);
 }
 
 AnimationManager::JsonValue AnimationManager::Serialize() const

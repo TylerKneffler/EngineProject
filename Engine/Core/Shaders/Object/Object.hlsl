@@ -25,6 +25,7 @@ struct ObjectData
     float4 textureUvSets0;
     float4 textureUvSets1;
     float4 skinParams;
+    float4 morphParams; // target count, vertex count, reserved, reserved
     float4 environmentParams;
     float4 environmentSH[9];
     float4 reflectionEnvironmentParams;
@@ -45,6 +46,9 @@ struct SceneLightData
 [[vk::binding(7, 0)]] StructuredBuffer<SceneLightData> sceneLights;
 [[vk::binding(8, 0)]] StructuredBuffer<ObjectData> objects;
 [[vk::binding(9, 0)]] StructuredBuffer<float4x4> boneMatrices;
+struct MorphDelta { float4 position; float4 normal; float4 tangent; };
+[[vk::binding(11, 0)]] StructuredBuffer<MorphDelta> morphDeltas;
+[[vk::binding(12, 0)]] StructuredBuffer<float4> morphWeights;
 [[vk::binding(0, 0)]] Texture2D baseColorMap;
 [[vk::binding(1, 0)]] Texture2D metallicRoughnessMap;
 [[vk::binding(2, 0)]] Texture2D normalMap;
@@ -68,6 +72,9 @@ Texture2D environmentMap       : register(t9);
 StructuredBuffer<SceneLightData> sceneLights : register(t6);
 StructuredBuffer<ObjectData> objects : register(t7);
 StructuredBuffer<float4x4> boneMatrices : register(t8);
+struct MorphDelta { float4 position; float4 normal; float4 tangent; };
+StructuredBuffer<MorphDelta> morphDeltas : register(t10);
+StructuredBuffer<float4> morphWeights : register(t11);
 SamplerState materialSampler : register(s0);
 #endif
 
@@ -82,6 +89,7 @@ void VSMain(
     float4 weights0 : WEIGHTS0,
     float4 joints1 : JOINTS1,
     float4 weights1 : WEIGHTS1,
+    uint vertexId : SV_VertexID,
     out float4 oPos : SV_POSITION,
     out float3 oWorldPos : TEXCOORD2,
     out float3 oNormal : NORMAL,
@@ -94,6 +102,23 @@ void VSMain(
     float4 localPosition = float4(pos, 1.0);
     float3 localNormal = normal;
     float3 localTangent = tangent.xyz;
+    uint morphTargetCount = (uint)objectData.morphParams.x;
+    uint morphVertexCount = (uint)objectData.morphParams.y;
+    [loop] for (uint target = 0; target < morphTargetCount; ++target)
+    {
+        float weight = morphWeights[target >> 2][target & 3];
+        if (weight != 0.0)
+        {
+            MorphDelta delta = morphDeltas[target * morphVertexCount + vertexId];
+            localPosition.xyz += delta.position.xyz * weight;
+            localNormal += delta.normal.xyz * weight;
+            localTangent += delta.tangent.xyz * weight;
+        }
+    }
+    if (dot(localNormal, localNormal) > 0.000001)
+        localNormal = normalize(localNormal);
+    if (dot(localTangent, localTangent) > 0.000001)
+        localTangent = normalize(localTangent);
     uint jointCount = (uint)objectData.skinParams.y;
     if (jointCount > 0)
     {

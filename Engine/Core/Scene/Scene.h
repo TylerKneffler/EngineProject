@@ -142,6 +142,14 @@ public:
     {
         return m_lastOcclusionCulledCount;
     }
+    uint32_t GetLastOrdinaryDrawCount() const
+    {
+        return m_lastOrdinaryDrawCount;
+    }
+    uint32_t GetLastSkinnedObjectCount() const
+    {
+        return m_lastSkinnedObjectCount;
+    }
     void SetSelectedObject(Object* obj) { m_selectedObject = obj; }
     Object* GetSelectedObject() const { return m_selectedObject; }
     void SetPreviewObject(Object* obj) { m_previewObject = obj; }
@@ -212,6 +220,15 @@ public:
     bool TryGetObjectPath(const Object* object, ObjectPath& path) const;
     Object* FindObjectByPath(const ObjectPath& path) const;
     bool MoveObject(Object* object, Object* target, ObjectPlacement placement);
+    // Invalidates caches that retain object or component pointers. Object and
+    // component creation call this automatically; hierarchy editors should
+    // use MoveObject so cached animation bindings stay coherent.
+    uint64_t GetStructureRevision() const { return m_structureRevision; }
+    void NotifyStructureChanged()
+    {
+        if (++m_structureRevision == 0)
+            ++m_structureRevision;
+    }
 
     // Serialization — delegates to SceneSerializer.
     // Save writes the scene to a scene XML file.
@@ -293,6 +310,12 @@ private:
     void* m_lightDataMapped = nullptr;
     std::unique_ptr<IGraphicsBuffer> m_boneDataBuffer;
     void* m_boneDataMapped = nullptr;
+    // Capacity growth can occur while prior DX12/Vulkan command buffers are
+    // still in flight. Retain replaced resources for the scene lifetime so a
+    // resize never destroys storage referenced by queued GPU work.
+    std::vector<std::unique_ptr<IGraphicsBuffer>> m_retiredRenderBuffers;
+    std::unique_ptr<IGraphicsBuffer> m_emptyMorphDeltaBuffer;
+    std::unique_ptr<IGraphicsBuffer> m_emptyMorphWeightBuffer;
     std::unique_ptr<IGraphicsBuffer> m_portalApertureBuffer;
     void* m_portalApertureMapped = nullptr;
     std::unique_ptr<Engine::Renderers::UIRenderer> m_uiRenderer;
@@ -306,6 +329,8 @@ private:
     void BuildGridPipeline();
     void BuildSkyboxPipeline();
     void BuildObjectPipeline();
+    void EnsureObjectRenderCapacity(uint32_t requiredObjects);
+    void EnsureSkinPaletteCapacity(uint32_t requiredObjects);
     const Engine::Components::Texture* ResolveSkyboxTexture();
     void UpdateEnvironmentLighting(const Engine::Components::Texture* texture);
     std::shared_ptr<const std::array<glm::vec4, 9>> ResolveReflectionEnvironment(
@@ -361,6 +386,8 @@ private:
     Engine::Model::DistanceLightingSettings m_distanceLightingSettings;
     uint64_t m_lastObjectDataUploadBytes = 0;
     uint32_t m_lastOcclusionCulledCount = 0;
+    uint32_t m_lastOrdinaryDrawCount = 0;
+    uint32_t m_lastSkinnedObjectCount = 0;
     bool m_renderFramePrepared = false;
 
     // ---- Object list ----
@@ -369,6 +396,7 @@ private:
     std::vector<Object*> m_pendingObjectRemovals;
     bool m_isUpdating = false;
     bool m_hasStarted = false;
+    uint64_t m_structureRevision = 1;
     void FlushPendingObjectAdditions();
     void FlushPendingObjectRemovals();
     Object* m_selectedObject = nullptr;
@@ -379,8 +407,8 @@ private:
     // Long-range terrain alone can contribute 289 patch meshes. Truncating
     // ordinary views at 64 draws left square background holes even though the
     // chunks and their GPU buffers had been generated successfully.
-    static constexpr uint32_t kMaxObjects = 512;
-    static constexpr uint32_t kMaxSkinnedObjects = 64;
+    static constexpr uint32_t kInitialObjectCapacity = 512;
+    static constexpr uint32_t kInitialSkinnedObjectCapacity = 64;
     static constexpr uint32_t kMaxSpatialObjects = 64;
     // The editor diagnostic expands a linked 8-point portal pair into point
     // markers, boundary bars, correspondence bars, and plane normals. Keep
@@ -391,18 +419,13 @@ private:
     // the command list executes. Every portal view therefore owns immutable
     // aperture, depth-reset, and connected-scene slots for the whole frame.
     static constexpr uint32_t kMaxPortalRenderViews = 64;
-    static constexpr uint32_t kPortalRenderSlotsPerView = kMaxObjects + 2;
     static constexpr uint32_t kMaxSpatialDebugDraws =
         kMaxSpatialObjects * kMaxSpatialVerticesPerObject / 24;
-    static constexpr uint32_t kOrdinaryObjectSlotCount =
-        kMaxObjects + kMaxSpatialDebugDraws;
-    static constexpr uint32_t kPortalObjectSlotCount =
-        kMaxPortalRenderViews * kPortalRenderSlotsPerView;
-    static constexpr uint32_t kObjectRenderSlotCount = kMaxObjects +
-        kPortalObjectSlotCount + kMaxSpatialDebugDraws;
     static constexpr uint32_t kMaxBonesPerObject = 256;
     static constexpr uint32_t kMaxLights =
         Engine::Model::MaxRealtimeLights;
     static constexpr uint32_t kCBStride = 256;
+    uint32_t m_objectCapacity = kInitialObjectCapacity;
+    uint32_t m_skinnedObjectCapacity = kInitialSkinnedObjectCapacity;
 };
 }

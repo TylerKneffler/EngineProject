@@ -62,6 +62,18 @@ void Scene::SetUiPointerInput(float x, float y, float viewportWidth,
 
 namespace
 {
+    uint32_t ExpandedCapacity(uint32_t current, uint32_t required)
+    {
+        uint32_t capacity = std::max(1u, current);
+        while (capacity < required)
+        {
+            if (capacity > std::numeric_limits<uint32_t>::max() / 2u)
+                return required;
+            capacity *= 2u;
+        }
+        return capacity;
+    }
+
     std::string EngineShaderPath(const char* fileName)
     {
         const std::filesystem::path shaderFile(fileName);
@@ -258,6 +270,7 @@ struct ObjectGPUData
     glm::vec4 textureUvSets0;
     glm::vec4 textureUvSets1;
     glm::vec4 skinParams; // palette offset, joint count, reserved, reserved
+    glm::vec4 morphParams; // target count, vertex count, reserved, reserved
     glm::vec4 environmentParams; // intensity, rotation radians, diffuse, reflections
     glm::vec4 environmentSH[9]; // RGB radiance coefficients
     glm::vec4 reflectionEnvironmentParams; // exposure scale, rotation, custom enabled, reserved
@@ -291,7 +304,7 @@ struct SkyboxCBData
 };
 
 static_assert(sizeof(DrawCBData) == 16, "Draw constants must remain small");
-static_assert(sizeof(ObjectGPUData) == 672, "Object buffer layout must match Object.hlsl");
+static_assert(sizeof(ObjectGPUData) == 688, "Object buffer layout must match Object.hlsl");
 static_assert(sizeof(Engine::Model::LightData) == 48,
     "Light buffer layout must match Object.hlsl");
 static_assert(sizeof(GridCBData) == 128, "Grid constant-buffer layout must match Grid.hlsl");
@@ -334,11 +347,15 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     if (!m_skyboxCBMapped)
         throw std::runtime_error("Failed to map skybox constant buffer");
 
-    // Ordinary draws occupy the first kMaxObjects entries. Portal views use
+    // Ordinary draws occupy the first m_objectCapacity entries. Portal views use
     // stable per-view ranges so deferred command buffers never observe data
     // overwritten by a later recursive pass.
-    const uint64_t objectCBSize =
-        static_cast<uint64_t>(kObjectRenderSlotCount) * kCBStride;
+    const uint64_t portalSlotsPerView =
+        static_cast<uint64_t>(m_objectCapacity) + 2u;
+    const uint64_t portalObjectSlots =
+        static_cast<uint64_t>(kMaxPortalRenderViews) * portalSlotsPerView;
+    const uint64_t objectCBSize = (static_cast<uint64_t>(m_objectCapacity) +
+        portalObjectSlots + kMaxSpatialDebugDraws) * kCBStride;
     m_objectConstantBuffer = bufferFactory->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::ConstantBuffer,
         Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
@@ -352,7 +369,8 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     m_objectDataBuffer = bufferFactory->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
         Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
-        static_cast<uint64_t>(kOrdinaryObjectSlotCount) * sizeof(ObjectGPUData),
+        (static_cast<uint64_t>(m_objectCapacity) + kMaxSpatialDebugDraws) *
+            sizeof(ObjectGPUData),
         nullptr, sizeof(ObjectGPUData));
     m_objectDataMapped = m_objectDataBuffer ? m_objectDataBuffer->Map() : nullptr;
     if (!m_objectDataMapped)
@@ -364,7 +382,7 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     m_portalObjectDataBuffer = bufferFactory->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
         Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
-        static_cast<uint64_t>(kPortalObjectSlotCount) * sizeof(ObjectGPUData),
+        portalObjectSlots * sizeof(ObjectGPUData),
         nullptr, sizeof(ObjectGPUData));
     m_portalObjectDataMapped = m_portalObjectDataBuffer
         ? m_portalObjectDataBuffer->Map() : nullptr;
@@ -384,12 +402,25 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     m_boneDataBuffer = bufferFactory->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
         Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
-        static_cast<uint64_t>(kMaxSkinnedObjects) * kMaxBonesPerObject *
+        static_cast<uint64_t>(m_skinnedObjectCapacity) * kMaxBonesPerObject *
             sizeof(glm::mat4),
         nullptr, sizeof(glm::mat4));
     m_boneDataMapped = m_boneDataBuffer ? m_boneDataBuffer->Map() : nullptr;
     if (!m_boneDataMapped)
         throw std::runtime_error("Failed to create bone palette structured buffer");
+
+    const std::array<glm::vec4, 3> emptyMorphDelta{};
+    const glm::vec4 emptyMorphWeights(0.f);
+    m_emptyMorphDeltaBuffer = bufferFactory->CreateBuffer(
+        Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+        sizeof(emptyMorphDelta), emptyMorphDelta.data(), sizeof(emptyMorphDelta));
+    m_emptyMorphWeightBuffer = bufferFactory->CreateBuffer(
+        Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+        sizeof(emptyMorphWeights), &emptyMorphWeights, sizeof(emptyMorphWeights));
+    if (!m_emptyMorphDeltaBuffer || !m_emptyMorphWeightBuffer)
+        throw std::runtime_error("Failed to create empty morph structured buffers");
 
     m_portalApertureBuffer = bufferFactory->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::VertexBuffer,
@@ -413,6 +444,98 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     BuildObjectPipeline();
     m_uiRenderer = std::make_unique<Engine::Renderers::UIRenderer>();
     m_uiRenderer->Initialize(m_graphicsProvider);
+}
+
+void Scene::EnsureObjectRenderCapacity(uint32_t requiredObjects)
+{
+    if (requiredObjects <= m_objectCapacity)
+        return;
+    if (!m_graphicsProvider || !m_graphicsProvider->GetBufferFactory())
+        throw std::runtime_error("Cannot grow scene object buffers before graphics initialization");
+
+    const uint32_t capacity = ExpandedCapacity(m_objectCapacity, requiredObjects);
+    constexpr uint32_t kMaximumAddressableCapacity =
+        (std::numeric_limits<uint32_t>::max() - kMaxSpatialDebugDraws) /
+        (kMaxPortalRenderViews + 1u);
+    if (capacity > kMaximumAddressableCapacity)
+        throw std::runtime_error("Scene draw count exceeds portal buffer index range");
+    const uint64_t portalSlotsPerView = static_cast<uint64_t>(capacity) + 2u;
+    const uint64_t portalSlots =
+        static_cast<uint64_t>(kMaxPortalRenderViews) * portalSlotsPerView;
+    const uint64_t constantSlots = static_cast<uint64_t>(capacity) +
+        portalSlots + kMaxSpatialDebugDraws;
+    auto* factory = m_graphicsProvider->GetBufferFactory();
+    auto constantBuffer = factory->CreateBuffer(
+        Engine::Graphics::IGraphicsBuffer::Usage::ConstantBuffer,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+        constantSlots * kCBStride, nullptr, sizeof(DrawCBData));
+    auto objectBuffer = factory->CreateBuffer(
+        Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+        (static_cast<uint64_t>(capacity) + kMaxSpatialDebugDraws) *
+            sizeof(ObjectGPUData), nullptr, sizeof(ObjectGPUData));
+    auto portalBuffer = factory->CreateBuffer(
+        Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+        portalSlots * sizeof(ObjectGPUData), nullptr, sizeof(ObjectGPUData));
+    void* constantMapped = constantBuffer ? constantBuffer->Map() : nullptr;
+    void* objectMapped = objectBuffer ? objectBuffer->Map() : nullptr;
+    void* portalMapped = portalBuffer ? portalBuffer->Map() : nullptr;
+    if (!constantMapped || !objectMapped || !portalMapped)
+    {
+        if (constantMapped) constantBuffer->Unmap();
+        if (objectMapped) objectBuffer->Unmap();
+        if (portalMapped) portalBuffer->Unmap();
+        throw std::runtime_error("Failed to grow scene object buffers to " +
+            std::to_string(capacity) + " draw records");
+    }
+
+    if (m_objectConstantBuffer && m_objectCBMapped)
+        m_objectConstantBuffer->Unmap();
+    if (m_objectDataBuffer && m_objectDataMapped)
+        m_objectDataBuffer->Unmap();
+    if (m_portalObjectDataBuffer && m_portalObjectDataMapped)
+        m_portalObjectDataBuffer->Unmap();
+    if (m_objectConstantBuffer)
+        m_retiredRenderBuffers.push_back(std::move(m_objectConstantBuffer));
+    if (m_objectDataBuffer)
+        m_retiredRenderBuffers.push_back(std::move(m_objectDataBuffer));
+    if (m_portalObjectDataBuffer)
+        m_retiredRenderBuffers.push_back(std::move(m_portalObjectDataBuffer));
+    m_objectConstantBuffer = std::move(constantBuffer);
+    m_objectDataBuffer = std::move(objectBuffer);
+    m_portalObjectDataBuffer = std::move(portalBuffer);
+    m_objectCBMapped = constantMapped;
+    m_objectDataMapped = objectMapped;
+    m_portalObjectDataMapped = portalMapped;
+    m_objectCapacity = capacity;
+}
+
+void Scene::EnsureSkinPaletteCapacity(uint32_t requiredObjects)
+{
+    if (requiredObjects <= m_skinnedObjectCapacity)
+        return;
+    if (!m_graphicsProvider || !m_graphicsProvider->GetBufferFactory())
+        throw std::runtime_error("Cannot grow bone palette buffer before graphics initialization");
+
+    const uint32_t capacity = ExpandedCapacity(
+        m_skinnedObjectCapacity, requiredObjects);
+    auto buffer = m_graphicsProvider->GetBufferFactory()->CreateBuffer(
+        Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+        static_cast<uint64_t>(capacity) * kMaxBonesPerObject *
+            sizeof(glm::mat4), nullptr, sizeof(glm::mat4));
+    void* mapped = buffer ? buffer->Map() : nullptr;
+    if (!mapped)
+        throw std::runtime_error("Failed to grow bone palette buffer to " +
+            std::to_string(capacity) + " skinned objects");
+    if (m_boneDataBuffer && m_boneDataMapped)
+        m_boneDataBuffer->Unmap();
+    if (m_boneDataBuffer)
+        m_retiredRenderBuffers.push_back(std::move(m_boneDataBuffer));
+    m_boneDataBuffer = std::move(buffer);
+    m_boneDataMapped = mapped;
+    m_skinnedObjectCapacity = capacity;
 }
 
 void Scene::SetEditorMode2D(bool enabled)
@@ -1004,9 +1127,19 @@ void Scene::PrepareRenderFrame()
     m_renderFramePrepared = false;
     m_frameRenderItems.clear();
     m_frameLightCount = 0;
+    m_lastSkinnedObjectCount = 0;
 
     if (!m_graphicsProvider || !m_lightDataMapped || !m_boneDataMapped)
         return;
+    const size_t skinnedObjectCount = std::count_if(
+        m_objects.begin(), m_objects.end(), [](const auto& object)
+        {
+            return object && object->GetComponent<
+                Engine::Components::SkinnedMesh>() != nullptr;
+        });
+    if (skinnedObjectCount > std::numeric_limits<uint32_t>::max())
+        throw std::runtime_error("Skinned object count exceeds renderer index range");
+    EnsureSkinPaletteCapacity(static_cast<uint32_t>(skinnedObjectCount));
 
     m_frameLightCount = m_realtimeLightingPipeline.CollectLights(
         *this,
@@ -1297,13 +1430,14 @@ void Scene::PrepareRenderFrame()
         }
         item.blended = item.belongsToPreview || item.blended;
 
-        if (skinPaletteSlot < kMaxSkinnedObjects)
+        if (skinPaletteSlot < m_skinnedObjectCapacity)
         {
             if (Engine::Components::SkinnedMesh* skinned =
                 candidate->GetComponent<Engine::Components::SkinnedMesh>())
             {
-                std::vector<glm::mat4> palette;
-                if (skinned->BuildPalette(palette))
+                const std::vector<glm::mat4>& palette =
+                    skinned->BuildPalette();
+                if (!palette.empty())
                 {
                     const size_t count =
                         std::min<size_t>(palette.size(), kMaxBonesPerObject);
@@ -1336,6 +1470,11 @@ void Scene::PrepareRenderFrame()
 
     if (boneDataChanged)
         m_boneDataBuffer->FlushMappedWrites();
+    m_lastSkinnedObjectCount = skinPaletteSlot;
+    if (m_frameRenderItems.size() > std::numeric_limits<uint32_t>::max())
+        throw std::runtime_error("Prepared draw count exceeds renderer index range");
+    EnsureObjectRenderCapacity(
+        static_cast<uint32_t>(m_frameRenderItems.size()));
     m_renderFramePrepared = true;
 }
 
@@ -1361,6 +1500,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
     if (!m_renderFramePrepared)
         PrepareRenderFrame();
+    m_lastOrdinaryDrawCount = 0;
+    const uint32_t portalRenderSlotsPerView = m_objectCapacity + 2u;
+    const uint32_t portalObjectSlotCount =
+        kMaxPortalRenderViews * portalRenderSlotsPerView;
 
     // Scene View always uses its navigation camera. Game View supplies its
     // active scene camera explicitly, so hierarchy selection cannot hijack
@@ -1738,6 +1881,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         Engine::Core::Object* object = nullptr;
         Engine::Graphics::IGraphicsBuffer* vertexBuffer = nullptr;
         Engine::Graphics::IGraphicsBuffer* indexBuffer = nullptr;
+        Engine::Graphics::IGraphicsBuffer* morphDeltaBuffer = nullptr;
+        Engine::Graphics::IGraphicsBuffer* morphWeightBuffer = nullptr;
         Engine::Graphics::IPipelineState* pipeline = nullptr;
         std::array<const Engine::Graphics::IGraphicsTexture*, 7> textures{};
         UINT64 constantBufferOffset = 0;
@@ -1754,14 +1899,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         uint64_t occlusionId = 0;
     };
     std::vector<PreparedDraw> preparedDraws;
-    preparedDraws.reserve(std::min<size_t>(renderObjects.size(), kMaxObjects));
+    preparedDraws.reserve(renderObjects.size());
 
     UINT slot = 0;
     for (const ViewRenderItem& sortedItem : renderObjects)
     {
-        if (slot >= kMaxObjects)
-            break;
-
         const FrameRenderItem* renderItem = sortedItem.source;
         Engine::Core::Object* obj = renderItem->object;
         Engine::Components::Mesh* mesh = renderItem->mesh;
@@ -1791,6 +1933,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         const bool allowReflections = !lightingBand ||
             lightingBand->reflections;
         PreparedDraw preparedDraw{};
+        preparedDraw.morphDeltaBuffer = m_emptyMorphDeltaBuffer.get();
+        preparedDraw.morphWeightBuffer = m_emptyMorphWeightBuffer.get();
         preparedDraw.object = obj;
         preparedDraw.preview = isPreview;
         preparedDraw.terrain = mesh && mesh->UsesTerrainVertexFormat();
@@ -1848,6 +1992,17 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             objectData.skinParams = {
                 static_cast<float>(renderItem->skinPaletteOffset),
                 static_cast<float>(renderItem->skinJointCount), 0.f, 0.f };
+        }
+        const bool useGpuMorphs = mesh && !sprite && mesh->HasMorphTargets() &&
+            mesh->GetMorphDeltaBuffer() && mesh->GetMorphWeightBuffer() &&
+            (useSourceChart || !renderItem->warpedVertexBuffer);
+        if (useGpuMorphs)
+        {
+            preparedDraw.morphDeltaBuffer = mesh->GetMorphDeltaBuffer();
+            preparedDraw.morphWeightBuffer = mesh->GetMorphWeightBuffer();
+            objectData.morphParams = {
+                static_cast<float>(mesh->GetMorphTargetCount()),
+                static_cast<float>(mesh->GetVertexCount()), 0.f, 0.f };
         }
         Engine::Components::MaterialAlphaMode alphaMode = Engine::Components::MaterialAlphaMode::Opaque;
         bool doubleSided = false;
@@ -2030,6 +2185,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
         ++slot;
     }
+    m_lastOrdinaryDrawCount = static_cast<uint32_t>(preparedDraws.size());
 
     // DX11 buffers use CPU-side shadow storage. Upload the complete object
     // array once, then keep structured-buffer binding free of hidden copies.
@@ -2042,6 +2198,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         context->SetStructuredBuffer(6, m_lightDataBuffer.get());
         context->SetStructuredBuffer(7, m_objectDataBuffer.get());
         context->SetStructuredBuffer(8, m_boneDataBuffer.get());
+        context->SetStructuredBuffer(10, m_emptyMorphDeltaBuffer.get());
+        context->SetStructuredBuffer(11, m_emptyMorphWeightBuffer.get());
     }
 
     const auto resolvePortalTarget = [&](Engine::Components::SpatialManipulator* source)
@@ -2087,6 +2245,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
     const auto submitGeometry = [&](const PreparedDraw& draw)
     {
+        context->SetStructuredBuffer(10, draw.morphDeltaBuffer);
+        context->SetStructuredBuffer(11, draw.morphWeightBuffer);
         context->SetVertexBuffer(0, draw.vertexBuffer, draw.vertexStride, 0);
         if (draw.indexBuffer && draw.indexCount > 0u)
         {
@@ -2753,10 +2913,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     {
         PortalViewJob& portalJob = portalViewJobs[jobIndex];
         const PortalStencilPass& portalPass = *portalJob.portal;
-        portalJob.dataSlotBase = kMaxObjects +
-            static_cast<uint32_t>(jobIndex) * kPortalRenderSlotsPerView;
+        portalJob.dataSlotBase = m_objectCapacity +
+            static_cast<uint32_t>(jobIndex) * portalRenderSlotsPerView;
         portalJob.objectDataSlotBase =
-            static_cast<uint32_t>(jobIndex) * kPortalRenderSlotsPerView;
+            static_cast<uint32_t>(jobIndex) * portalRenderSlotsPerView;
         portalJob.skyboxConstantBufferOffset =
             static_cast<uint64_t>(jobIndex + 1u) * kCBStride;
 
@@ -2841,9 +3001,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             portalJob.skyboxConstantBufferOffset,
             &skyboxData, sizeof(skyboxData));
     }
-    const uint32_t debugSlotBase = kMaxObjects;
-    const uint32_t debugConstantBufferSlotBase = kMaxObjects +
-        kPortalObjectSlotCount;
+    const uint32_t debugSlotBase = m_objectCapacity;
+    const uint32_t debugConstantBufferSlotBase = m_objectCapacity +
+        portalObjectSlotCount;
     const float debugAlpha = std::clamp(
         settings.portalDebugOverlayAlpha, 0.f, 1.f);
     for (size_t debugIndex = 0; debugIndex < spatialDebugPasses.size() &&
@@ -2875,7 +3035,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     {
         const uint64_t portalRecords =
             static_cast<uint64_t>(portalViewJobs.size() - 1u) *
-                kPortalRenderSlotsPerView + 2u + preparedDraws.size();
+                portalRenderSlotsPerView + 2u + preparedDraws.size();
         const uint64_t portalBytes = portalRecords * sizeof(ObjectGPUData);
         m_portalObjectDataBuffer->FlushMappedWrites(0, portalBytes);
         m_lastObjectDataUploadBytes += portalBytes;
@@ -2887,7 +3047,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     {
         // D3D11's discard upload replaces the buffer contents, so preserve
         // the ordinary prefix when editor diagnostics occupy the tail.
-        const uint64_t debugRecords = static_cast<uint64_t>(kMaxObjects) +
+        const uint64_t debugRecords = static_cast<uint64_t>(m_objectCapacity) +
             std::min(spatialDebugPasses.size(),
                 static_cast<size_t>(kMaxSpatialDebugDraws));
         const uint64_t debugBytes = debugRecords * sizeof(ObjectGPUData);
@@ -3287,7 +3447,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 &draw.objectData, sizeof(draw.objectData));
         }
         const uint64_t restoredRecords = !spatialDebugPasses.empty()
-            ? static_cast<uint64_t>(kMaxObjects) + std::min(
+            ? static_cast<uint64_t>(m_objectCapacity) + std::min(
                 spatialDebugPasses.size(),
                 static_cast<size_t>(kMaxSpatialDebugDraws))
             : static_cast<uint64_t>(preparedDraws.size());

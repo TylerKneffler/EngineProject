@@ -50,6 +50,14 @@ namespace
 constexpr uint32_t kNativeMeshMagic = 0x4853454d; // "MESH"
 constexpr uint32_t kNativeMeshVersion = 4;
 constexpr float kPi = 3.14159265358979323846f;
+struct alignas(16) GpuMorphDelta
+{
+    glm::vec4 position{};
+    glm::vec4 normal{};
+    glm::vec4 tangent{};
+};
+static_assert(sizeof(GpuMorphDelta) == 48,
+    "GPU morph delta layout must match Object.hlsl");
 struct LegacyVertexV2
 {
     float pos[3], normal[3], uv[2], tangent[4];
@@ -533,21 +541,30 @@ Mesh::TerrainMeshData Mesh::TakeTerrainGeometry()
 
 uint64_t Mesh::GetCpuMeshMemoryBytes() const
 {
-    return static_cast<uint64_t>(m_vertices.capacity()) * sizeof(Vertex) +
+    uint64_t bytes = static_cast<uint64_t>(m_vertices.capacity()) * sizeof(Vertex) +
         static_cast<uint64_t>(m_terrainVertices.capacity()) * sizeof(TerrainVertex) +
         static_cast<uint64_t>(m_indices.capacity()) * sizeof(uint32_t);
+    for (const MorphTarget& target : m_morphTargets)
+        bytes += static_cast<uint64_t>(target.positions.capacity() +
+            target.normals.capacity() + target.tangents.capacity()) *
+            sizeof(glm::vec3);
+    return bytes + static_cast<uint64_t>(m_morphWeights.capacity()) * sizeof(float);
 }
 
 uint64_t Mesh::GetUploadShadowMemoryBytes() const
 {
     return (m_vertexBuffer ? m_vertexBuffer->GetUploadShadowSize() : 0u) +
-        (m_indexBuffer ? m_indexBuffer->GetUploadShadowSize() : 0u);
+        (m_indexBuffer ? m_indexBuffer->GetUploadShadowSize() : 0u) +
+        (m_morphDeltaBuffer ? m_morphDeltaBuffer->GetUploadShadowSize() : 0u) +
+        (m_morphWeightBuffer ? m_morphWeightBuffer->GetUploadShadowSize() : 0u);
 }
 
 uint64_t Mesh::GetGpuBufferMemoryBytes() const
 {
     return (m_vertexBuffer ? m_vertexBuffer->GetSize() : 0u) +
-        (m_indexBuffer ? m_indexBuffer->GetSize() : 0u);
+        (m_indexBuffer ? m_indexBuffer->GetSize() : 0u) +
+        (m_morphDeltaBuffer ? m_morphDeltaBuffer->GetSize() : 0u) +
+        (m_morphWeightBuffer ? m_morphWeightBuffer->GetSize() : 0u);
 }
 
 void Mesh::InitializeRuntimeCloneFrom(const Mesh& source)
@@ -566,6 +583,9 @@ void Mesh::SetMorphData(unsigned nodeIndex, std::vector<MorphTarget> targets,
     m_observedMorphWeights = m_morphWeights;
     m_morphWeightsObserved = true;
     AdvanceMorphWeightsRevision();
+    UpdateBounds();
+    CreateMorphBuffers();
+    MarkConfigurationDirty();
 }
 
 namespace
@@ -605,13 +625,90 @@ bool Mesh::SetMorphWeights(const std::vector<float>& weights)
     m_observedMorphWeights = m_morphWeights;
     m_morphWeightsObserved = true;
     AdvanceMorphWeightsRevision();
+    UploadMorphWeights();
+    MarkConfigurationDirty();
     return true;
+}
+
+void Mesh::SyncMorphWeights()
+{
+    const uint64_t revision = m_morphWeightsRevision;
+    ObserveMorphWeights();
+    if (revision != m_morphWeightsRevision)
+    {
+        UploadMorphWeights();
+        MarkConfigurationDirty();
+    }
 }
 
 uint64_t Mesh::GetMorphWeightsRevision() const
 {
     ObserveMorphWeights();
     return m_morphWeightsRevision;
+}
+
+void Mesh::CreateMorphBuffers()
+{
+    m_morphDeltaBuffer.reset();
+    m_morphWeightBuffer.reset();
+    m_packedMorphWeights.clear();
+    if (!m_bufferFactory || m_vertices.empty() || m_morphTargets.empty())
+        return;
+
+    const size_t vertexCount = m_vertices.size();
+    std::vector<GpuMorphDelta> deltas;
+    deltas.resize(vertexCount * m_morphTargets.size());
+    for (size_t targetIndex = 0; targetIndex < m_morphTargets.size(); ++targetIndex)
+    {
+        const MorphTarget& target = m_morphTargets[targetIndex];
+        GpuMorphDelta* destination = deltas.data() + targetIndex * vertexCount;
+        for (size_t vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex)
+        {
+            if (vertexIndex < target.positions.size())
+                destination[vertexIndex].position = glm::vec4(
+                    target.positions[vertexIndex], 0.f);
+            if (vertexIndex < target.normals.size())
+                destination[vertexIndex].normal = glm::vec4(
+                    target.normals[vertexIndex], 0.f);
+            if (vertexIndex < target.tangents.size())
+                destination[vertexIndex].tangent = glm::vec4(
+                    target.tangents[vertexIndex], 0.f);
+        }
+    }
+    m_morphDeltaBuffer = m_bufferFactory->CreateBuffer(
+        IGraphicsBuffer::Usage::ShaderResource,
+        IGraphicsBuffer::AccessMode::Upload,
+        static_cast<uint64_t>(deltas.size()) * sizeof(GpuMorphDelta),
+        deltas.data(), sizeof(GpuMorphDelta));
+
+    const size_t weightGroups = (m_morphTargets.size() + 3u) / 4u;
+    m_packedMorphWeights.assign(weightGroups, glm::vec4(0.f));
+    m_morphWeightBuffer = m_bufferFactory->CreateBuffer(
+        IGraphicsBuffer::Usage::ShaderResource,
+        IGraphicsBuffer::AccessMode::Upload,
+        static_cast<uint64_t>(m_packedMorphWeights.size()) * sizeof(glm::vec4),
+        m_packedMorphWeights.data(), sizeof(glm::vec4));
+    UploadMorphWeights();
+}
+
+void Mesh::UploadMorphWeights()
+{
+    if (!m_morphWeightBuffer)
+        return;
+    const size_t groupCount = (m_morphTargets.size() + 3u) / 4u;
+    m_packedMorphWeights.assign(groupCount, glm::vec4(0.f));
+    for (size_t index = 0; index < m_morphWeights.size() &&
+        index < m_morphTargets.size(); ++index)
+        m_packedMorphWeights[index / 4u][static_cast<glm::length_t>(index % 4u)] =
+            m_morphWeights[index];
+    if (void* mapped = m_morphWeightBuffer->Map())
+    {
+        const uint64_t byteCount = static_cast<uint64_t>(m_packedMorphWeights.size()) *
+            sizeof(glm::vec4);
+        std::memcpy(mapped, m_packedMorphWeights.data(), static_cast<size_t>(byteCount));
+        m_morphWeightBuffer->Unmap();
+        m_morphWeightBuffer->FlushMappedWrites(0, byteCount);
+    }
 }
 
 void Mesh::UpdateBounds()
@@ -638,6 +735,24 @@ void Mesh::UpdateBounds()
         includePosition(vertex.pos);
     for (const TerrainVertex& vertex : m_terrainVertices)
         includePosition(vertex.pos);
+
+    // GPU morphing no longer rebuilds bounds each frame. Expand the authored
+    // bounds once by the full signed envelope of every target so any animated
+    // position remains conservatively visible, including negative weights.
+    if (!m_morphTargets.empty() && !m_vertices.empty())
+    {
+        for (size_t vertexIndex = 0; vertexIndex < m_vertices.size(); ++vertexIndex)
+        {
+            glm::vec3 extent(0.f);
+            for (const MorphTarget& target : m_morphTargets)
+                if (vertexIndex < target.positions.size())
+                    extent += glm::abs(target.positions[vertexIndex]);
+            const glm::vec3 base(m_vertices[vertexIndex].pos[0],
+                m_vertices[vertexIndex].pos[1], m_vertices[vertexIndex].pos[2]);
+            m_boundsMin = glm::min(m_boundsMin, base - extent);
+            m_boundsMax = glm::max(m_boundsMax, base + extent);
+        }
+    }
 }
 
 bool Mesh::SaveNativeFile(const std::string& path, const std::vector<Vertex>& vertices)
@@ -1138,6 +1253,7 @@ void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory)
     if (!m_vertexBuffer)
         throw std::runtime_error("Failed to create vertex buffer");
 
+    CreateMorphBuffers();
     m_ready = true;
 }
 #pragma endregion
@@ -1179,7 +1295,9 @@ bool Mesh::DrawProperties(::Engine::Editor::IEditorUi& ui)
         }
     }
     if (changed)
-        MarkConfigurationDirty();
+    {
+        SyncMorphWeights();
+    }
     return changed;
 }
 

@@ -330,8 +330,14 @@ void VulkanGraphicsContext::SetTexture(uint32_t slot, const Engine::Graphics::IG
 
 void VulkanGraphicsContext::SetStructuredBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer)
 {
-    if (slot < 6 || slot > 8) return;
-    m_structuredBuffers[slot - 6] = dynamic_cast<const VulkanGraphicsBuffer*>(buffer);
+    size_t index = 0;
+    if (slot >= 6 && slot <= 8)
+        index = slot - 6;
+    else if (slot >= 10 && slot <= 11)
+        index = slot - 7;
+    else
+        return;
+    m_structuredBuffers[index] = dynamic_cast<const VulkanGraphicsBuffer*>(buffer);
 }
 
 void VulkanGraphicsContext::SetViewport(const Viewport& value)

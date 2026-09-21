@@ -86,6 +86,7 @@ public:
 
     // Get the scene this object belongs to
     Engine::Scene::Scene* GetScene() const { return OwnerScene; }
+    void NotifyStructureChanged();
 
     // Hierarchy lookup helpers
     Object* FindObjectInChildrenByName(const std::string& objectName,
@@ -103,6 +104,7 @@ public:
         T* component = new T(std::forward<Args>(args)...);
         component->Owner = this;
         Components.push_back(component);
+        NotifyStructureChanged();
         return component;
     }
 

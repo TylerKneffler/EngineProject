@@ -371,10 +371,11 @@ void D3D12GraphicsContext::SetIndexBuffer(const Engine::Graphics::IGraphicsBuffe
 
 void D3D12GraphicsContext::SetStructuredBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer)
 {
-    if (!buffer || !m_cmdList || slot < 6 || slot > 8) return;
+    if (!buffer || !m_cmdList ||
+        !((slot >= 6 && slot <= 8) || (slot >= 10 && slot <= 11))) return;
     const auto* structured = dynamic_cast<const D3D12GraphicsBuffer*>(buffer);
     if (!structured) return;
-    // Root parameters 7-9 are root SRVs for shader registers t6-t8.
+    // Root parameters 7-9 and 11-12 are root SRVs matching t6-t8/t10-t11.
     m_cmdList->SetGraphicsRootShaderResourceView(
         slot + 1, structured->GetGPUVirtualAddress());
 }

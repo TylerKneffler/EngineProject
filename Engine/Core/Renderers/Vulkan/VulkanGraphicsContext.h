@@ -48,7 +48,7 @@ private:
     const VulkanPipelineState* m_pipeline = nullptr;
     std::shared_ptr<VulkanTextureSystem> m_textureSystem;
     std::array<const VulkanGraphicsTexture*, 7> m_textures{};
-    std::array<const VulkanGraphicsBuffer*, 3> m_structuredBuffers{};
+    std::array<const VulkanGraphicsBuffer*, 5> m_structuredBuffers{};
     std::shared_ptr<VulkanOcclusionQueryState> m_occlusionState;
     std::shared_ptr<VulkanGpuTimingState> m_gpuTimings;
     uint64_t m_occlusionViewId = 0;

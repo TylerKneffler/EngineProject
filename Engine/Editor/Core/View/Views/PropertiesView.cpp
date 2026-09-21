@@ -389,6 +389,7 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
                 ? std::next(target)
                 : target;
             components.splice(destination, components, source);
+            m_selectedObject->NotifyStructureChanged();
             LogAssetDrop("[Properties] Moved component '" +
                 reorderSource->GetTypeName() + "' " +
                 (sourceBeforeTarget ? "down" : "up"));
@@ -401,6 +402,7 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
     {
         const std::string deletedType = componentToDelete->GetTypeName();
         m_selectedObject->Components.remove(componentToDelete);
+        m_selectedObject->NotifyStructureChanged();
         delete componentToDelete;
         LogAssetDrop("[Properties] Deleted component '" + deletedType + "'");
         if (OnComponentsChanged)

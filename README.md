@@ -197,8 +197,10 @@ The initial SDF atlas covers printable ASCII; unsupported characters render as
 
 Importing a Blender glTF/GLB or FBX creates skeleton, animation, animation-manager,
 morph-target, and skinned-mesh components automatically. The renderer performs
-skinning on the GPU on DirectX 11, DirectX 12, and Vulkan, with up to eight
-influences per vertex and 256 joints per rendered primitive.
+skinning and morph-target position/normal/tangent blending on the GPU on
+DirectX 11, DirectX 12, and Vulkan, with up to eight influences per vertex and
+256 joints per rendered primitive. Morph deltas remain in persistent structured
+buffers; animation updates only a compact packed-weight buffer.
 
 The editor routes all supported model formats through `ModelImporter`. FBX is
 decoded into the format-neutral `ImportedModel` document (nodes, primitives,
@@ -241,6 +243,22 @@ To build without Vulkan support:
 ```powershell
 cmake --preset debug -DENGINE_ENABLE_VULKAN=OFF
 ```
+
+## Animation and rendering performance benchmark
+
+The opt-in benchmark generates configurable skeletal rigs and dense meshes. It
+reports animation sampling and weight upload, skinned-component updates,
+palette generation, render preparation, CPU submission, presentation, and GPU
+opaque-pass timings.
+
+```powershell
+cmake --build build/Release --config Release --target AnimationRenderingBenchmark
+build/Release/Release/AnimationRenderingBenchmark.exe --rigs 64 --bones 64 --vertices 3000 --frames 300
+build/Release/Release/AnimationRenderingBenchmark.exe --render --rigs 8 --bones 64 --vertices 30000 --morphs 8 --frames 300 --api DirectX11
+```
+
+Use `--layers N`, `--mask-all`, and `--keys N` for animation-graph stress, or
+raise `--vertices` and `--morphs` for GPU deformation stress.
 
 ## Troubleshooting
 

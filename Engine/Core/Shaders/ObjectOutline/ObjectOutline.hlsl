@@ -22,16 +22,23 @@ struct ObjectData
     float4 textureUvSets0;
     float4 textureUvSets1;
     float4 skinParams;
+    float4 morphParams;
 };
 
 #ifdef VULKAN
 [[vk::push_constant]] DrawConstants draw;
 [[vk::binding(8, 0)]] StructuredBuffer<ObjectData> objects;
 [[vk::binding(9, 0)]] StructuredBuffer<float4x4> boneMatrices;
+struct MorphDelta { float4 position; float4 normal; float4 tangent; };
+[[vk::binding(11, 0)]] StructuredBuffer<MorphDelta> morphDeltas;
+[[vk::binding(12, 0)]] StructuredBuffer<float4> morphWeights;
 #else
 cbuffer DrawBuffer : register(b0) { DrawConstants draw; };
 StructuredBuffer<ObjectData> objects : register(t7);
 StructuredBuffer<float4x4> boneMatrices : register(t8);
+struct MorphDelta { float4 position; float4 normal; float4 tangent; };
+StructuredBuffer<MorphDelta> morphDeltas : register(t10);
+StructuredBuffer<float4> morphWeights : register(t11);
 #endif
 
 void VSMain(
@@ -45,10 +52,20 @@ void VSMain(
     float4 weights0 : WEIGHTS0,
     float4 joints1 : JOINTS1,
     float4 weights1 : WEIGHTS1,
+    uint vertexId : SV_VertexID,
     out float4 oPos : SV_POSITION)
 {
     ObjectData objectData = objects[draw.objectIndex];
     float4 localPosition = float4(pos, 1.0);
+    uint morphTargetCount = (uint)objectData.morphParams.x;
+    uint morphVertexCount = (uint)objectData.morphParams.y;
+    [loop] for (uint target = 0; target < morphTargetCount; ++target)
+    {
+        float weight = morphWeights[target >> 2][target & 3];
+        if (weight != 0.0)
+            localPosition.xyz += morphDeltas[
+                target * morphVertexCount + vertexId].position.xyz * weight;
+    }
     uint jointCount = (uint)objectData.skinParams.y;
     if (jointCount > 0)
     {

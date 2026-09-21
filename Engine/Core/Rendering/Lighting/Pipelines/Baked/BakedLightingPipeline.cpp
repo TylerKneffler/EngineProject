@@ -600,6 +600,7 @@ uint32_t BakedLightingPipeline::Clear(Engine::Scene::Scene& scene) const
             RestoreMaterial(*object, *data, scene.GetGraphicsProvider());
             delete *component;
             component = object->Components.erase(component);
+            object->NotifyStructureChanged();
             ++cleared;
         }
     }
