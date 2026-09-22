@@ -78,6 +78,7 @@ TerrainGen::TerrainGen()
     RegisterField("lowHeightColor", lowHeightColor);
     RegisterField("middleHeightColor", middleHeightColor);
     RegisterField("highHeightColor", highHeightColor);
+    RegisterField("heightColorBlend", heightColorBlend);
     RegisterField("generateColliders", generateColliders);
     RegisterField("collisionRadiusInChunks", collisionRadiusInChunks);
     RegisterField("maxColliderActivationsPerUpdate",
@@ -1024,6 +1025,7 @@ TerrainGen::CaptureGenerationSnapshot(
     snapshot.lowHeightColor = lowHeightColor;
     snapshot.middleHeightColor = middleHeightColor;
     snapshot.highHeightColor = highHeightColor;
+    snapshot.heightColorBlend = heightColorBlend;
     snapshot.noiseSeed = noise.seed;
     snapshot.noiseFrequency = noise.frequency;
     snapshot.noiseOctaves = noise.octaves;
@@ -1057,6 +1059,7 @@ TerrainGen::GenerateChunkMesh(const GenerationSnapshot& snapshot,
     generator.lowHeightColor = snapshot.lowHeightColor;
     generator.middleHeightColor = snapshot.middleHeightColor;
     generator.highHeightColor = snapshot.highHeightColor;
+    generator.heightColorBlend = snapshot.heightColorBlend;
 
     PerlinNoiseField noise;
     noise.seed = snapshot.noiseSeed;
@@ -1163,6 +1166,7 @@ uint64_t TerrainGen::MeshConfigurationHash(
     add(caveFrequencyMultiplier); add(isoLevel); add(textureScale);
     add(lowHeightMaximum); add(middleHeightMaximum);
     add(lowHeightColor); add(middleHeightColor); add(highHeightColor);
+    add(heightColorBlend);
     add(noise.seed); add(noise.frequency); add(noise.octaves);
     add(noise.lacunarity); add(noise.persistence); add(noise.coordinateOffset);
     return hash;
@@ -1250,10 +1254,11 @@ glm::vec3 TerrainGen::SmoothColorForHeight(float height) const
     if (range <= 0.0001f)
         return height <= lower ? low : high;
 
-    // Blend across 20% of the configured band range on either side of each
-    // cutoff. This keeps the named height regions recognizable while avoiding
-    // a discontinuity whose interpolation follows individual triangle fans.
-    const float halfWidth = std::max(0.001f, range * 0.2f);
+    // Keep the transition configurable and narrow by default. The former 20%
+    // half-width made both transitions consume most of the middle band and
+    // flattened the visual elevation cues on rounded terrain.
+    const float halfWidth = std::max(0.001f, range *
+        std::clamp(heightColorBlend, 0.f, 0.5f));
     const float lowToMiddle = glm::smoothstep(
         lower - halfWidth, lower + halfWidth, height);
     const float middleToHigh = glm::smoothstep(
@@ -2038,6 +2043,11 @@ bool TerrainGen::DrawProperties(::Engine::Editor::IEditorUi& ui)
     changed = ui.DragFloat("Middle Height Maximum", &middleHeightMaximum, 0.1f) || changed;
     changed = ui.ColorEdit3("Middle Height Color", &middleHeightColor.x) || changed;
     changed = ui.ColorEdit3("High Height Color", &highHeightColor.x) || changed;
+    if (shape == TerrainShape::SmoothSurface)
+    {
+        changed = ui.DragFloat("Height Color Blend", &heightColorBlend,
+            0.005f, 0.f, 0.5f) || changed;
+    }
     changed = ui.Checkbox("Generate Colliders", &generateColliders) || changed;
     if (generateColliders)
     {

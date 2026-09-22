@@ -3,7 +3,7 @@
   <settings showGrid="false" gridHalfSize="160" gridCellSize="1" gridOpacity="0.1" gridFadeDistance="280" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" renderMode="0" sceneViewUiOverlay="false">
     <gridColor><item>0.14</item><item>0.18</item><item>0.14</item></gridColor>
     <gridOriginColor><item>0.42</item><item>0.72</item><item>0.3</item></gridOriginColor>
-    <ambientColor><item>0.18</item><item>0.2</item><item>0.17</item></ambientColor>
+    <ambientColor><item>0.05</item><item>0.065</item><item>0.045</item></ambientColor>
   </settings>
   <objects>
     <item name="Long Range Terrain Camera" enabled="true">
@@ -31,7 +31,7 @@
         <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
       </transform>
       <components>
-        <components:Light Light.lightType="1" Light.intensity="2.7" Light.range="300" Light.falloff="1.5" Light.baked="false">
+        <components:Light Light.lightType="1" Light.intensity="3.4" Light.range="300" Light.falloff="1.5" Light.baked="false">
           <Light.color><item>1</item><item>0.94</item><item>0.8</item></Light.color>
         </components:Light>
       </components>
@@ -47,10 +47,10 @@
         <components:PerlinNoiseField PerlinNoiseField.seed="9187" PerlinNoiseField.frequency="0.035" PerlinNoiseField.octaves="4" PerlinNoiseField.lacunarity="2" PerlinNoiseField.persistence="0.5">
           <PerlinNoiseField.coordinateOffset><item>41</item><item>0</item><item>-27</item></PerlinNoiseField.coordinateOffset>
         </components:PerlinNoiseField>
-        <components:TerrainGen TerrainGen.viewerObjectName="Long Range Terrain Camera" TerrainGen.noiseObjectName="" TerrainGen.chunkSize="128" TerrainGen.viewRadiusInChunks="8" TerrainGen.maxChunkBuildsPerUpdate="16" TerrainGen.parallelChunkBuilds="2" TerrainGen.maxChunkCommitsPerUpdate="1" TerrainGen.maxChunkUnloadsPerUpdate="2" TerrainGen.cacheUnloadedChunkMeshes="false" TerrainGen.unloadedMeshCacheCapacity="64" TerrainGen.horizontalCellsPerChunk="24" TerrainGen.verticalCells="16" TerrainGen.patchesPerAxis="1" TerrainGen.terrainShape="0" TerrainGen.heightStep="1" TerrainGen.verticalSize="96" TerrainGen.baseHeight="0" TerrainGen.heightAmplitude="36" TerrainGen.caveStrength="2.1" TerrainGen.caveFrequencyMultiplier="2.35" TerrainGen.isoLevel="0" TerrainGen.textureScale="32" TerrainGen.lowHeightMaximum="-8" TerrainGen.middleHeightMaximum="14" TerrainGen.generateColliders="false">
-          <TerrainGen.lowHeightColor><item>0.12</item><item>0.28</item><item>0.58</item></TerrainGen.lowHeightColor>
-          <TerrainGen.middleHeightColor><item>0.18</item><item>0.58</item><item>0.2</item></TerrainGen.middleHeightColor>
-          <TerrainGen.highHeightColor><item>0.66</item><item>0.56</item><item>0.38</item></TerrainGen.highHeightColor>
+        <components:TerrainGen TerrainGen.viewerObjectName="Long Range Terrain Camera" TerrainGen.noiseObjectName="" TerrainGen.chunkSize="128" TerrainGen.viewRadiusInChunks="8" TerrainGen.maxChunkBuildsPerUpdate="16" TerrainGen.parallelChunkBuilds="2" TerrainGen.maxChunkCommitsPerUpdate="1" TerrainGen.maxChunkUnloadsPerUpdate="2" TerrainGen.cacheUnloadedChunkMeshes="false" TerrainGen.unloadedMeshCacheCapacity="64" TerrainGen.horizontalCellsPerChunk="24" TerrainGen.verticalCells="16" TerrainGen.patchesPerAxis="1" TerrainGen.terrainShape="0" TerrainGen.heightStep="1" TerrainGen.verticalSize="96" TerrainGen.baseHeight="0" TerrainGen.heightAmplitude="36" TerrainGen.caveStrength="2.1" TerrainGen.caveFrequencyMultiplier="2.35" TerrainGen.isoLevel="0" TerrainGen.textureScale="32" TerrainGen.lowHeightMaximum="-8" TerrainGen.middleHeightMaximum="14" TerrainGen.heightColorBlend="0.06" TerrainGen.generateColliders="false">
+          <TerrainGen.lowHeightColor><item>0.07</item><item>0.18</item><item>0.5</item></TerrainGen.lowHeightColor>
+          <TerrainGen.middleHeightColor><item>0.12</item><item>0.52</item><item>0.12</item></TerrainGen.middleHeightColor>
+          <TerrainGen.highHeightColor><item>0.72</item><item>0.54</item><item>0.3</item></TerrainGen.highHeightColor>
         </components:TerrainGen>
       </components>
       <children />

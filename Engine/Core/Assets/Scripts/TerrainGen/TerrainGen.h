@@ -121,6 +121,12 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Height Colors")
     glm::vec3 highHeightColor { 0.62f, 0.58f, 0.48f };
 
+    // Fraction of the low-to-high threshold range blended on either side of
+    // each boundary. A narrow default keeps elevation bands readable while
+    // retaining a smooth transition on rounded terrain.
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Height Colors", Range = "0, 0.5")
+    float heightColorBlend = 0.08f;
+
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Physics")
     bool generateColliders = true;
 
@@ -194,6 +200,7 @@ private:
         glm::vec3 lowHeightColor{};
         glm::vec3 middleHeightColor{};
         glm::vec3 highHeightColor{};
+        float heightColorBlend = 0.08f;
         int noiseSeed = 1337;
         float noiseFrequency = 0.045f;
         int noiseOctaves = 4;
