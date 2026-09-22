@@ -1,8 +1,21 @@
 cmake_minimum_required(VERSION 3.20)
+
+# Use CMake's MSVC debug-information abstraction when available.  Keeping
+# CodeView records inside each object avoids the shared compiler PDB that can
+# be corrupted when the editor's hot-reload build and another MSBuild process
+# touch the same target incrementally.  The linker still emits the normal
+# executable/library PDB used by Visual Studio.
+if(POLICY CMP0141)
+    cmake_policy(SET CMP0141 NEW)
+endif()
 project(EngineProject C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+if(MSVC)
+    set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT
+        "$<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:Embedded>")
+endif()
 
 # This CMake project can be built directly for engine development or consumed
 # by a generated game project via add_subdirectory(). Generated projects set

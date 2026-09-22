@@ -1387,7 +1387,6 @@ void Scene::PrepareRenderFrame()
                     {
                         std::memcpy(mapped, warpedVertices.data(), byteSize);
                         cached.vertexBuffer->Unmap();
-                        cached.vertexBuffer->FlushMappedWrites();
                     }
                     cached.vertices = std::move(warpedVertices);
                 }
@@ -1808,6 +1807,47 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             allOutside([](const glm::vec4& point)
             { return point.z > point.w; });
     };
+    const auto resolvePortalTarget = [&](Engine::Components::SpatialManipulator* source)
+        -> Engine::Components::SpatialManipulator*
+    {
+        if (!source)
+            return nullptr;
+        if (Engine::Components::SpatialManipulator* target = source->ResolveTarget())
+            return target;
+        // Support older and edit-mode scenes whose serialized link exists on
+        // only one endpoint. Connections belong to manipulators, not meshes,
+        // so inspect every scene object rather than the render draw list.
+        for (const auto& candidateObject : m_objects)
+        {
+            if (!candidateObject || candidateObject.get() == source->Owner)
+                continue;
+            auto* candidate = candidateObject->GetComponent<
+                Engine::Components::SpatialManipulator>();
+            if (candidate && candidate->ResolveTarget() == source)
+                return candidate;
+        }
+        return nullptr;
+    };
+    const bool hasPortalViews = std::any_of(m_objects.begin(), m_objects.end(),
+        [&](const std::unique_ptr<Engine::Core::Object>& object)
+        {
+            if (!object || !object->IsEnabledInHierarchy())
+                return false;
+            auto* portal = object->GetComponent<
+                Engine::Components::SpatialManipulator>();
+            if (!portal || !portal->enabled)
+                return false;
+            const auto mode = static_cast<Engine::Components::
+                SpatialManipulator::ConnectionMode>(portal->connectionMode);
+            if (mode != Engine::Components::SpatialManipulator::
+                    ConnectionMode::Portal &&
+                mode != Engine::Components::SpatialManipulator::
+                    ConnectionMode::LinkedPortal)
+                return false;
+            const auto* target = resolvePortalTarget(portal);
+            return target && target->enabled && target->Owner &&
+                portal->HasCompatiblePortalShapeWith(*target);
+        });
     std::vector<ViewRenderItem> renderObjects;
     renderObjects.reserve(m_frameRenderItems.size());
     for (const FrameRenderItem& item : m_frameRenderItems)
@@ -1816,7 +1856,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         {
             const glm::mat4 itemWorld = useSourceChartMesh(item)
                 ? sourceChartWorld(item) : item.world;
-            if (outsideViewFrustum(item, itemWorld))
+            // A portal camera can see objects outside the main camera's
+            // frustum. Until portal jobs have their own per-view draw lists,
+            // retain the full scene whenever a valid portal view exists.
+            if (!hasPortalViews && outsideViewFrustum(item, itemWorld))
                 continue;
             const glm::vec3 delta = glm::vec3(itemWorld[3]) - cameraPosition;
             renderObjects.push_back({ &item, glm::dot(delta, delta),
@@ -2202,28 +2245,6 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         context->SetStructuredBuffer(11, m_emptyMorphWeightBuffer.get());
     }
 
-    const auto resolvePortalTarget = [&](Engine::Components::SpatialManipulator* source)
-        -> Engine::Components::SpatialManipulator*
-    {
-        if (!source)
-            return nullptr;
-        if (Engine::Components::SpatialManipulator* target = source->ResolveTarget())
-            return target;
-        // Support older and edit-mode scenes whose serialized link exists on
-        // only one endpoint. Connections belong to manipulators, not meshes,
-        // so inspect every scene object rather than the render draw list.
-        for (const auto& candidateObject : m_objects)
-        {
-            if (!candidateObject || candidateObject.get() == source->Owner)
-                continue;
-            auto* candidate = candidateObject->GetComponent<
-                Engine::Components::SpatialManipulator>();
-            if (candidate && candidate->ResolveTarget() == source)
-                return candidate;
-        }
-        return nullptr;
-    };
-
     const auto isSpatialManipulatorCarrierDraw = [&](const PreparedDraw& draw)
     {
         if (!draw.object)
@@ -2329,10 +2350,43 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     };
 
     std::vector<PortalStencilPass> portalPasses;
-    const glm::mat4 cameraWorld = cam->Owner
-        ? cam->Owner->transform.GetWorldMatrixWithLayer()
-        : glm::mat4(1.f);
-    const glm::vec3 cameraForward = glm::normalize(glm::vec3(cameraWorld[2]));
+    // Portal geometry and virtual cameras must live in the same coordinate
+    // chart as the camera and ordinary meshes for this view. Game cameras
+    // inside a finite warp volume intentionally render its physical/source
+    // chart; editor inspection normally renders the embedded chart instead.
+    // Mixing render-chart apertures with source-chart depth makes the visible
+    // doorway receive no stencil mask (notably in the three-room matrix ring).
+    const auto activePortalPoints = [&](const Engine::Components::
+        SpatialManipulator& portal)
+    {
+        return cameraUsesSourceWarpChart
+            ? portal.GetWorldPortalShapePoints()
+            : portal.GetRenderWorldPortalShapePoints();
+    };
+    const auto activePortalFrame = [&](const Engine::Components::
+        SpatialManipulator& portal)
+    {
+        return cameraUsesSourceWarpChart
+            ? portal.GetPortalWorldFrame()
+            : portal.GetRenderPortalWorldFrame();
+    };
+    const auto mapActivePortalPoint = [&](const Engine::Components::
+        SpatialManipulator& source, const glm::vec3& point,
+        const Engine::Components::SpatialManipulator& target)
+    {
+        return cameraUsesSourceWarpChart
+            ? source.MapWorldPointThroughPortalShape(point, target)
+            : source.MapRenderWorldPointThroughPortalShape(point, target);
+    };
+    // Sort overlapping apertures in the same chart as the view.  Asking the
+    // Transform for GetWorldMatrixWithLayer() always applies the render-space
+    // warp, even when this camera deliberately uses the physical/source chart;
+    // its forward axis could therefore choose the wrong portal as the nearer
+    // root.  The inverse view is already the authoritative camera transform
+    // for both chart modes.
+    const glm::mat4 activeCameraWorld = glm::inverse(view);
+    const glm::vec3 cameraForward = glm::normalize(
+        glm::vec3(activeCameraWorld[2]));
     size_t portalObjectOrder = 0;
     for (const auto& sceneObject : m_objects)
     {
@@ -2362,7 +2416,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         pass.source = manipulator;
         pass.target = target;
         const std::vector<glm::vec3> aperturePoints =
-            manipulator->GetRenderWorldPortalShapePoints();
+            activePortalPoints(*manipulator);
         glm::vec3 apertureCenter(0.f);
         for (const glm::vec3& point : aperturePoints)
             apertureCenter += point;
@@ -2416,7 +2470,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     for (PortalStencilPass& pass : portalPasses)
     {
         const std::vector<glm::vec3> points =
-            pass.source->GetRenderWorldPortalShapePoints();
+            activePortalPoints(*pass.source);
         if (points.size() < 3)
             continue;
         const uint32_t required = Engine::Rendering::Portal::
@@ -2561,9 +2615,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 portalPass.source, portalPass.target);
 
             const std::vector<glm::vec3> sourcePoints =
-                portalPass.source->GetRenderWorldPortalShapePoints();
+                activePortalPoints(*portalPass.source);
             const std::vector<glm::vec3> targetPoints =
-                portalPass.target->GetRenderWorldPortalShapePoints();
+                activePortalPoints(*portalPass.target);
             const size_t pointCount = std::min(
                 sourcePoints.size(), targetPoints.size());
             if (pointCount < 3)
@@ -2602,9 +2656,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     edgeThickness, edgeColor);
                 appendDebugSegment(targetPoints[pointIndex], targetPoints[next],
                     edgeThickness, edgeColor);
-                const glm::vec3 mappedSourcePoint = portalPass.source
-                    ->MapRenderWorldPointThroughPortalShape(
-                        sourcePoints[pointIndex], *portalPass.target);
+                const glm::vec3 mappedSourcePoint = mapActivePortalPoint(
+                    *portalPass.source, sourcePoints[pointIndex],
+                    *portalPass.target);
                 // Point indices describe each aperture's authored winding;
                 // they are not necessarily the connected correspondence. The
                 // portal half-turn reverses local X, so index-to-index bars
@@ -2730,7 +2784,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         const glm::mat4& candidateView)
     {
         const std::vector<glm::vec3> points =
-            pass.source->GetRenderWorldPortalShapePoints();
+            activePortalPoints(*pass.source);
         if (points.size() < 3)
             return false;
         std::vector<glm::vec4> clipPolygon;
@@ -2751,7 +2805,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         if (viewportWidth == 0u || viewportHeight == 0u)
             return std::nullopt;
         const std::vector<glm::vec3> points =
-            pass.source->GetRenderWorldPortalShapePoints();
+            activePortalPoints(*pass.source);
         if (points.size() < 3u)
             return std::nullopt;
 
@@ -2854,15 +2908,12 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 nextRootStencilBase += portalDepthLimit;
             }
 
-            const glm::vec3 mappedCamera =
-                pass.source->MapRenderWorldPointThroughPortalShape(
-                    viewCameraPosition, *pass.target);
-            const glm::vec3 mappedLookAt =
-                pass.source->MapRenderWorldPointThroughPortalShape(
-                    viewCameraPosition + viewForward, *pass.target);
-            const glm::vec3 mappedUpPoint =
-                pass.source->MapRenderWorldPointThroughPortalShape(
-                    viewCameraPosition + viewUp, *pass.target);
+            const glm::vec3 mappedCamera = mapActivePortalPoint(
+                *pass.source, viewCameraPosition, *pass.target);
+            const glm::vec3 mappedLookAt = mapActivePortalPoint(
+                *pass.source, viewCameraPosition + viewForward, *pass.target);
+            const glm::vec3 mappedUpPoint = mapActivePortalPoint(
+                *pass.source, viewCameraPosition + viewUp, *pass.target);
             const glm::vec3 mappedForward = glm::normalize(
                 mappedLookAt - mappedCamera);
             glm::vec3 mappedUp = mappedUpPoint - mappedCamera;
@@ -2888,12 +2939,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     };
     schedulePortalViews(view, 0u, 0u, nullptr);
 
-    const auto connectedSpaceClipPlane = [](
+    const auto connectedSpaceClipPlane = [&activePortalFrame](
         const PortalStencilPass& portalPass,
         const glm::vec3& mappedCameraPosition)
     {
-        const glm::mat4 targetFrame =
-            portalPass.target->GetRenderPortalWorldFrame();
+        const glm::mat4 targetFrame = activePortalFrame(*portalPass.target);
         const glm::vec3 clipPoint(targetFrame[3]);
         glm::vec3 clipNormal = glm::normalize(glm::vec3(targetFrame[2]));
         // Keep the half-space beyond the exit aperture. The earlier version

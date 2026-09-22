@@ -1,6 +1,7 @@
 #pragma once
 #include "pch.h"
 #include "Core/ProjectLoader.h"
+#include "Engine/Editor/BuildTreeLock.h"
 #include <functional>
 
 namespace Engine::Editor
@@ -41,7 +42,7 @@ public:
     void Update(PlayState& outState, PostBuildAction& outAction);
 
     // ---- State Queries ----
-    bool IsBuilding() const { return m_buildProcess != nullptr; }
+    bool IsBuilding() const { return m_buildProcess != nullptr || m_buildQueued; }
     PlayState GetPlayState() const { return m_playState; }
 
     // ---- Callbacks ----
@@ -55,11 +56,16 @@ private:
     void PollBuildProcess();
     void DrainBuildPipe();
     void HandleBuildCompletion(bool success);
+    void TryStartQueuedBuild();
 
     // Build process handles
     HANDLE m_buildProcess = nullptr;
     HANDLE m_buildPipe = nullptr;
+    HANDLE m_buildJob = nullptr;
     std::string m_buildLineBuffer;
+    BuildTreeLock m_buildTreeLock;
+    bool m_buildQueued = false;
+    bool m_waitingForBuildTree = false;
 
     // State tracking
     PlayState m_playState = PlayState::Stopped;

@@ -1,5 +1,6 @@
 #pragma once
 #include "pch.h"
+#include "Engine/Editor/BuildTreeLock.h"
 #include "Engine/Editor/HotReload/ScriptFileWatcher.h"
 #include "Engine/Editor/Core/View/Views/ConsoleView.h"
 #include "Core/Scene/Scene.h"
@@ -17,7 +18,11 @@ public:
     ~EditorHotReload();
 
     void Update(bool editorFocused);
-    bool IsBusy() const { return m_process != nullptr || m_applying; }
+    bool IsBusy() const
+    {
+        return m_process != nullptr || m_applying ||
+            (m_dirty && m_waitingForBuildTree);
+    }
     std::function<void()> BeforeApply;
 
 private:
@@ -40,6 +45,8 @@ private:
     std::filesystem::path m_modulePath;
     HANDLE m_process = nullptr;
     HANDLE m_pipe = nullptr;
+    HANDLE m_processJob = nullptr;
+    BuildTreeLock m_buildTreeLock;
     std::string m_lineBuffer;
     HMODULE m_module = nullptr;
     std::filesystem::path m_loadedModulePath;
@@ -48,5 +55,6 @@ private:
     uint64_t m_generation = 0;
     bool m_dirty = false;
     bool m_applying = false;
+    bool m_waitingForBuildTree = false;
 };
 }

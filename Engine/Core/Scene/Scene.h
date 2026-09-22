@@ -107,6 +107,7 @@ public:
     // Runtime lifecycle shared by the standalone game and Editor Play mode.
     void Start();
     void Update(float deltaTime);
+    float GetDeltaTime() const { return m_deltaTime; }
     Engine::Physics::Physics& GetPhysics() { return *m_physics; }
     const Engine::Physics::Physics& GetPhysics() const { return *m_physics; }
     Engine::Audio::Audio& GetAudio() { return *m_audio; }
@@ -396,6 +397,7 @@ private:
     std::vector<Object*> m_pendingObjectRemovals;
     bool m_isUpdating = false;
     bool m_hasStarted = false;
+    float m_deltaTime = 0.f;
     uint64_t m_structureRevision = 1;
     void FlushPendingObjectAdditions();
     void FlushPendingObjectRemovals();

@@ -56,7 +56,7 @@ public:
     int maxChunkBuildsPerUpdate = 2;
 
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Streaming", ClampMin = "1", ClampMax = "16")
-    int parallelChunkBuilds = 4;
+    int parallelChunkBuilds = 2;
 
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain | Streaming", ClampMin = "1", ClampMax = "16")
     int maxChunkCommitsPerUpdate = 4;
@@ -262,6 +262,7 @@ private:
     float SteppedHeight(double worldX, double worldZ,
         const PerlinNoiseField& noise) const;
     glm::vec3 ColorForHeight(float height) const;
+    glm::vec3 SmoothColorForHeight(float height) const;
     uint64_t MeshConfigurationHash(const PerlinNoiseField& noise) const;
     void CacheChunkMesh(int64_t key, Engine::Core::Object& chunkObject);
     void TrimMeshCache();

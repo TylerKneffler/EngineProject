@@ -326,7 +326,6 @@ int WINAPI wWinMain(
         ENGINE_BUILD_DIR, PROJECT_SCRIPTS_PATH);
     hotReload->BeforeApply = [&]()
     {
-        if (gameBuildManager->IsBuilding()) gameBuildManager->CancelBuild();
         gameBuildManager->Stop();
     };
     OutputDebugStringA("[Main] GameBuildManager created\n");

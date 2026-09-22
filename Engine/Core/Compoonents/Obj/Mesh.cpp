@@ -707,7 +707,6 @@ void Mesh::UploadMorphWeights()
             sizeof(glm::vec4);
         std::memcpy(mapped, m_packedMorphWeights.data(), static_cast<size_t>(byteCount));
         m_morphWeightBuffer->Unmap();
-        m_morphWeightBuffer->FlushMappedWrites(0, byteCount);
     }
 }
 

@@ -233,6 +233,25 @@ struct SharedBorderAudit
 
 bool AuditMeshData(Engine::Core::Object& terrainObject)
 {
+    const auto* terrain = terrainObject.GetComponent<TerrainGen>();
+    const bool auditSmoothTriangleExtent = terrain &&
+        static_cast<TerrainGen::TerrainShape>(terrain->terrainShape) ==
+            TerrainGen::TerrainShape::SmoothSurface;
+    float maximumCellEdgeSquared = std::numeric_limits<float>::max();
+    if (auditSmoothTriangleExtent)
+    {
+        const float horizontalStep = std::max(1.f, terrain->chunkSize) /
+            static_cast<float>(std::clamp(
+                terrain->horizontalCellsPerChunk, 2, 48));
+        const float verticalStep = std::max(1.f, terrain->verticalSize) /
+            static_cast<float>(std::clamp(terrain->verticalCells, 2, 48));
+        const float cellDiagonalSquared = horizontalStep * horizontalStep * 2.f +
+            verticalStep * verticalStep;
+        // Allow only rounding noise beyond the diagonal of the marching cell
+        // that owns the triangle. An edge longer than this joins unrelated
+        // cells and is the characteristic horizontally stretched failure.
+        maximumCellEdgeSquared = cellDiagonalSquared * 1.0001f;
+    }
     size_t meshCount = 0u;
     size_t triangleCount = 0u;
     for (Engine::Core::Object* chunkObject : terrainObject.Children)
@@ -274,6 +293,22 @@ bool AuditMeshData(Engine::Core::Object& terrainObject)
                     point[2] - point[0]);
                 if (glm::dot(area, area) <= 1.0e-16f)
                     return false;
+                if (auditSmoothTriangleExtent)
+                {
+                    const float longestEdgeSquared = std::max({
+                        glm::dot(point[1] - point[0], point[1] - point[0]),
+                        glm::dot(point[2] - point[1], point[2] - point[1]),
+                        glm::dot(point[0] - point[2], point[0] - point[2]) });
+                    if (longestEdgeSquared > maximumCellEdgeSquared)
+                    {
+                        std::fprintf(stderr,
+                            "Stretched terrain triangle: longest_edge=%.6f "
+                            "maximum_cell_diagonal=%.6f\n",
+                            std::sqrt(longestEdgeSquared),
+                            std::sqrt(maximumCellEdgeSquared));
+                        return false;
+                    }
+                }
                 ++triangleCount;
             }
         }

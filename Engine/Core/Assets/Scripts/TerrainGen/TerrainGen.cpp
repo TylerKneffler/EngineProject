@@ -258,7 +258,10 @@ void TerrainGen::CancelPendingGeneration()
 void TerrainGen::WorkerLoop()
 {
 #if defined(_WIN32)
-    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+    // Contour generation is throughput work. Keep it below the render/update
+    // thread even when several chunks are queued, otherwise camera movement
+    // and frame preparation lose time slices while approaching a new ring.
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
 #endif
     for (;;)
     {
@@ -648,10 +651,6 @@ TerrainGen::BuildSmoothSurfaceVertices(int chunkX, int chunkZ,
         { 4, 5 }, { 5, 6 }, { 6, 7 }, { 7, 4 },
         { 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 }
     };
-    static constexpr int cubeFaces[6][4] = {
-        { 0, 1, 2, 3 }, { 4, 5, 6, 7 }, { 0, 1, 5, 4 },
-        { 1, 2, 6, 5 }, { 2, 3, 7, 6 }, { 3, 0, 4, 7 }
-    };
     static constexpr int faceEdges[6][4] = {
         { 0, 1, 2, 3 }, { 4, 5, 6, 7 }, { 0, 9, 4, 8 },
         { 1, 10, 5, 9 }, { 2, 11, 6, 10 }, { 3, 8, 7, 11 }
@@ -734,7 +733,11 @@ TerrainGen::BuildSmoothSurfaceVertices(int chunkX, int chunkZ,
             static_cast<double>(localPosition.z)) / uvScale - uvBaseZ);
         vertex.tangent[0] = tangent.x; vertex.tangent[1] = tangent.y;
         vertex.tangent[2] = tangent.z; vertex.tangent[3] = 1.f;
-        const glm::vec3 color = ColorForHeight(localPosition.y);
+        // A hard band selection at marching-surface vertices exposes the
+        // triangulation as long colored wedges when the terrain recedes from
+        // the camera. Smooth surfaces blend around each height boundary;
+        // block/column modes retain their deliberately discrete bands.
+        const glm::vec3 color = SmoothColorForHeight(localPosition.y);
         vertex.color[0] = color.r; vertex.color[1] = color.g;
         vertex.color[2] = color.b; vertex.color[3] = 1.f;
         return vertex;
@@ -901,34 +904,67 @@ TerrainGen::BuildSmoothSurfaceVertices(int chunkX, int chunkZ,
                     }
                     else if (crossingCount == 4)
                     {
-                        double centerDensity = 0.0;
-                        std::array<int, 4> orderedCorners {
-                            cubeFaces[face][0], cubeFaces[face][1],
-                            cubeFaces[face][2], cubeFaces[face][3] };
-                        std::sort(orderedCorners.begin(), orderedCorners.end(),
-                            [&](int left, int right)
-                            {
-                                if (positions[left].x != positions[right].x)
-                                    return positions[left].x < positions[right].x;
-                                if (positions[left].y != positions[right].y)
-                                    return positions[left].y < positions[right].y;
-                                return positions[left].z < positions[right].z;
-                            });
-                        for (int corner : orderedCorners)
-                            centerDensity += static_cast<double>(densities[corner]);
-                        centerDensity *= 0.25;
-                        const bool centerMatchesFirst =
-                            (centerDensity < static_cast<double>(isoLevel)) ==
-                            (densities[cubeFaces[face][0]] < isoLevel);
-                        if (centerMatchesFirst)
+                        // A saddle face has two valid contour pairings. Do
+                        // not choose one from cubeFaces[face][0]: the cell on
+                        // the other side sees the same face with a different
+                        // first corner and can choose the opposite diagonal.
+                        // Select the shorter world-equivalent pairing, with a
+                        // coordinate-canonical tie break, so adjacent cells,
+                        // patches and chunks make the identical decision.
+                        const auto distanceSquared = [&](int first, int second)
                         {
-                            connect(faceEdges[face][0], faceEdges[face][1]);
-                            connect(faceEdges[face][2], faceEdges[face][3]);
+                            const glm::vec3 delta = intersections[first] -
+                                intersections[second];
+                            return static_cast<double>(glm::dot(delta, delta));
+                        };
+                        const double firstPairingLength =
+                            distanceSquared(crossed[0], crossed[1]) +
+                            distanceSquared(crossed[2], crossed[3]);
+                        const double secondPairingLength =
+                            distanceSquared(crossed[3], crossed[0]) +
+                            distanceSquared(crossed[1], crossed[2]);
+                        const auto positionLess = [&](int first, int second)
+                        {
+                            const glm::vec3& a = intersections[first];
+                            const glm::vec3& b = intersections[second];
+                            if (a.x != b.x) return a.x < b.x;
+                            if (a.y != b.y) return a.y < b.y;
+                            return a.z < b.z;
+                        };
+                        const auto canonicalPartnerOfMinimum =
+                            [&](int firstA, int firstB, int secondA, int secondB)
+                        {
+                            std::array<std::array<int, 2>, 2> pairs {{
+                                {{ firstA, firstB }}, {{ secondA, secondB }} }};
+                            for (auto& pair : pairs)
+                                if (positionLess(pair[1], pair[0]))
+                                    std::swap(pair[0], pair[1]);
+                            if (positionLess(pairs[1][0], pairs[0][0]))
+                                std::swap(pairs[0], pairs[1]);
+                            return pairs[0][1];
+                        };
+                        constexpr double pairingEpsilon = 1e-12;
+                        bool useFirstPairing = firstPairingLength <
+                            secondPairingLength - pairingEpsilon;
+                        if (std::abs(firstPairingLength -
+                                secondPairingLength) <= pairingEpsilon)
+                        {
+                            const int firstPartner = canonicalPartnerOfMinimum(
+                                crossed[0], crossed[1], crossed[2], crossed[3]);
+                            const int secondPartner = canonicalPartnerOfMinimum(
+                                crossed[3], crossed[0], crossed[1], crossed[2]);
+                            useFirstPairing = positionLess(
+                                firstPartner, secondPartner);
+                        }
+                        if (useFirstPairing)
+                        {
+                            connect(crossed[0], crossed[1]);
+                            connect(crossed[2], crossed[3]);
                         }
                         else
                         {
-                            connect(faceEdges[face][3], faceEdges[face][0]);
-                            connect(faceEdges[face][1], faceEdges[face][2]);
+                            connect(crossed[3], crossed[0]);
+                            connect(crossed[1], crossed[2]);
                         }
                     }
                 }
@@ -1198,6 +1234,32 @@ glm::vec3 TerrainGen::ColorForHeight(float height) const
     if (height <= upper)
         return glm::clamp(middleHeightColor, glm::vec3(0.f), glm::vec3(1.f));
     return glm::clamp(highHeightColor, glm::vec3(0.f), glm::vec3(1.f));
+}
+
+glm::vec3 TerrainGen::SmoothColorForHeight(float height) const
+{
+    const float lower = std::min(lowHeightMaximum, middleHeightMaximum);
+    const float upper = std::max(lowHeightMaximum, middleHeightMaximum);
+    const glm::vec3 low = glm::clamp(
+        lowHeightColor, glm::vec3(0.f), glm::vec3(1.f));
+    const glm::vec3 middle = glm::clamp(
+        middleHeightColor, glm::vec3(0.f), glm::vec3(1.f));
+    const glm::vec3 high = glm::clamp(
+        highHeightColor, glm::vec3(0.f), glm::vec3(1.f));
+    const float range = upper - lower;
+    if (range <= 0.0001f)
+        return height <= lower ? low : high;
+
+    // Blend across 20% of the configured band range on either side of each
+    // cutoff. This keeps the named height regions recognizable while avoiding
+    // a discontinuity whose interpolation follows individual triangle fans.
+    const float halfWidth = std::max(0.001f, range * 0.2f);
+    const float lowToMiddle = glm::smoothstep(
+        lower - halfWidth, lower + halfWidth, height);
+    const float middleToHigh = glm::smoothstep(
+        upper - halfWidth, upper + halfWidth, height);
+    return glm::mix(glm::mix(low, middle, lowToMiddle),
+        high, middleToHigh);
 }
 
 std::vector<TerrainGen::Vertex>

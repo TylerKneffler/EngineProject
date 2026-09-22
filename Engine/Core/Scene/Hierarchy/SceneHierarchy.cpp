@@ -62,6 +62,7 @@ void Scene::Start()
 
 void Scene::Update(float deltaTime)
 {
+    m_deltaTime = std::max(0.f, deltaTime);
     m_isUpdating = true;
     for (const auto& object : m_objects)
         object->Update();

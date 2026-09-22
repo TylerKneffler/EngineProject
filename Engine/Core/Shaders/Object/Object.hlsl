@@ -161,7 +161,8 @@ void VSMain(
 }
 
 // Compact indexed terrain input. Terrain has no skin, morph target, secondary
-// UV, or authored tangent stream; construct the latter from its normal.
+// UV, or authored tangent stream. Its UVs are planar X/Z coordinates, so
+// reconstruct a tangent aligned with +X and project it onto the surface.
 void VSTerrainMain(
     float3 pos : POSITION,
     float3 normal : NORMAL,
@@ -177,9 +178,14 @@ void VSTerrainMain(
 {
     ObjectData objectData = objects[draw.objectIndex];
     const float3 localNormal = normalize(normal);
-    const float3 referenceAxis = abs(localNormal.y) < 0.999
-        ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0);
-    const float3 localTangent = normalize(cross(referenceAxis, localNormal));
+    float3 localTangent = float3(1.0, 0.0, 0.0) -
+        localNormal * localNormal.x;
+    if (dot(localTangent, localTangent) < 0.000001)
+    {
+        localTangent = float3(0.0, 0.0, 1.0) -
+            localNormal * localNormal.z;
+    }
+    localTangent = normalize(localTangent);
     const float4 worldPosition = mul(objectData.world, float4(pos, 1.0));
     oPos = mul(objectData.viewProjection, worldPosition);
     if ((draw.drawFlags & 0x40000000u) != 0u && oPos.w > 0.0)
@@ -191,8 +197,9 @@ void VSTerrainMain(
     oUv = objectData.spriteUvRect.xy + uv * objectData.spriteUvRect.zw;
     oUv1 = uv;
     oColor = color;
+    // cross(+Y, +X) points toward -Z, while terrain V increases toward +Z.
     oTangent = float4(normalize(mul((float3x3)objectData.world,
-        localTangent)), 1.0);
+        localTangent)), -1.0);
 }
 
 static const float PI = 3.14159265359;
