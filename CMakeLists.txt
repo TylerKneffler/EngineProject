@@ -119,6 +119,12 @@ file(GLOB_RECURSE ENGINE_SOURCES CONFIGURE_DEPENDS
 )
 # Engine/Core/Assets contains project template content, not engine code.
 list(FILTER ENGINE_SOURCES EXCLUDE REGEX "[/\\\\]Assets[/\\\\]")
+# The scene-serialization implementation was reorganized under Scene/* while
+# byte-identical compatibility copies remained at Serialization/*. Compiling
+# both paths gives MSVC colliding .obj names and duplicate definitions
+# (LNK4006); keep the structured implementation as the single source of truth.
+list(FILTER ENGINE_SOURCES EXCLUDE REGEX
+    "[/\\\\]Serialization[/\\\\]Scene(Document|Object|Prefab)SerializationBehavior\\.cpp$")
 file(GLOB_RECURSE ENGINE_HEADERS CONFIGURE_DEPENDS
     "${ENGINE_ROOT}/Engine/Core/*.h"
     "${ENGINE_ROOT}/Engine/Core/*.hpp"

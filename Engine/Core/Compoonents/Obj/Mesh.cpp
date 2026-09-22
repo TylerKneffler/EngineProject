@@ -183,6 +183,22 @@ static void ParseFaceToken(const std::string& t, int& vi, int& vti, int& vni)
     if (b > a + 1) vti = std::stoi(t.substr(a + 1, b - a - 1));
     if (b + 1 < t.size()) vni = std::stoi(t.substr(b + 1));
 }
+
+static size_t ResolveObjIndex(int index, size_t count,
+    const char* semantic, const std::string& path)
+{
+    // OBJ indices are one-based; negative values address backward from the
+    // elements defined so far. Zero is never valid.
+    const int64_t resolved = index > 0
+        ? static_cast<int64_t>(index) - 1
+        : (index < 0 ? static_cast<int64_t>(count) + index : -1);
+    if (resolved < 0 || resolved >= static_cast<int64_t>(count))
+    {
+        throw std::runtime_error("Mesh: invalid OBJ " +
+            std::string(semantic) + " index in " + path);
+    }
+    return static_cast<size_t>(resolved);
+}
 #pragma endregion
 #pragma region Mesh implementation
 
@@ -292,19 +308,42 @@ void Mesh::LoadFromFile(const std::string& path)
         }
         else if (token == "f")
         {
-            std::string t0, t1, t2;
-            ss >> t0 >> t1 >> t2;
-            for (auto& tok : { t0, t1, t2 })
+            std::vector<Vertex> faceVertices;
+            std::string faceToken;
+            while (ss >> faceToken)
             {
                 int vi = 0, vti = 0, vni = 0;
-                ParseFaceToken(tok, vi, vti, vni);
+                ParseFaceToken(faceToken, vi, vti, vni);
                 Vertex v{};
-                if (vi  > 0) { auto& p = positions[vi  - 1]; v.pos[0]    = p[0]; v.pos[1]    = p[1]; v.pos[2]    = p[2];
-                    const auto& color = colors[vi - 1];
-                    std::copy(color.begin(), color.end(), v.color); }
-                if (vti > 0) { auto& uv = texcoords[vti - 1]; v.uv[0] = uv[0]; v.uv[1] = uv[1]; }
-                if (vni > 0) { auto& n = normals  [vni - 1]; v.normal[0] = n[0]; v.normal[1] = n[1]; v.normal[2] = n[2]; }
-                m_vertices.push_back(v);
+                const size_t positionIndex = ResolveObjIndex(
+                    vi, positions.size(), "position", path);
+                const auto& p = positions[positionIndex];
+                v.pos[0] = p[0]; v.pos[1] = p[1]; v.pos[2] = p[2];
+                const auto& color = colors[positionIndex];
+                std::copy(color.begin(), color.end(), v.color);
+                if (vti != 0)
+                {
+                    const auto& uv = texcoords[ResolveObjIndex(
+                        vti, texcoords.size(), "texture-coordinate", path)];
+                    v.uv[0] = uv[0]; v.uv[1] = uv[1];
+                }
+                if (vni != 0)
+                {
+                    const auto& n = normals[ResolveObjIndex(
+                        vni, normals.size(), "normal", path)];
+                    v.normal[0] = n[0]; v.normal[1] = n[1]; v.normal[2] = n[2];
+                }
+                faceVertices.push_back(v);
+            }
+
+            // Preserve authored winding while triangulating the complete
+            // polygon. The old three-token parser discarded every vertex
+            // after the third, leaving a diagonal hole in every quad.
+            for (size_t corner = 1; corner + 1 < faceVertices.size(); ++corner)
+            {
+                m_vertices.push_back(faceVertices[0]);
+                m_vertices.push_back(faceVertices[corner]);
+                m_vertices.push_back(faceVertices[corner + 1]);
             }
         }
     }
