@@ -64,6 +64,8 @@ private:
     void DrawExportSection(IEditorUi& ui);
     void StartPortableExport();
     void UpdatePortableExport();
+    void StartVideoExport();
+    void UpdateVideoExport();
     void NotifyChanged() { if (OnSettingsChanged) OnSettingsChanged(); }
 
     bool m_isOpen = false;
@@ -87,5 +89,22 @@ private:
     std::shared_ptr<std::atomic<float>> m_exportProgress;
     std::shared_ptr<std::atomic<int>> m_exportStage;
     std::future<std::pair<bool, std::string>> m_exportFuture;
+
+    char m_videoSceneBuf[512] = {};
+    char m_videoOutputBuf[512] = "VideoExports/cinematic.mp4";
+    char m_videoCodecBuf[128] = {};
+    char m_videoPresetBuf[64] = "medium";
+    char m_videoFfmpegBuf[512] = "ffmpeg.exe";
+    uint32_t m_videoWidth = 1920;
+    uint32_t m_videoHeight = 1080;
+    uint32_t m_videoFps = 60;
+    uint32_t m_videoQuality = 75;
+    float m_videoDuration = 0.f;
+    float m_videoTimeout = 120.f;
+    int m_videoFormat = 0;
+    bool m_videoExporting = false;
+    bool m_videoExportSucceeded = false;
+    std::string m_videoExportStatus;
+    std::future<std::pair<bool, std::string>> m_videoExportFuture;
 };
 }

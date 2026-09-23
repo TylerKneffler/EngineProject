@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Scene xmlns:components="urn:engine-components" version="1">
+  <settings showGrid="true" gridHalfSize="40" gridCellSize="1" gridOpacity="0.16" gridFadeDistance="100" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" renderMode="0" sceneViewUiOverlay="false">
+    <gridColor><item>0.16</item><item>0.18</item><item>0.22</item></gridColor>
+    <gridOriginColor><item>0.42</item><item>0.62</item><item>0.9</item></gridOriginColor>
+    <ambientColor><item>0.06</item><item>0.07</item><item>0.1</item></ambientColor>
+  </settings>
+  <objects>
+    <item name="Cinematic Path" enabled="true">
+      <transform><Transform.position><item>0</item><item>0</item><item>0</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform>
+      <components><components:SplinePath SplinePath.interpolation="1" SplinePath.closed="true" SplinePath.tension="0" SplinePath.arcLengthSamplesPerSegment="32" SplinePath.includeDisabledPoints="false" /></components>
+      <children>
+        <item name="Point 1" enabled="true"><transform><Transform.position><item>-12</item><item>5</item><item>-10</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform><components /><children /></item>
+        <item name="Point 2" enabled="true"><transform><Transform.position><item>10</item><item>7</item><item>-8</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform><components /><children /></item>
+        <item name="Point 3" enabled="true"><transform><Transform.position><item>14</item><item>4</item><item>10</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform><components /><children /></item>
+        <item name="Point 4" enabled="true"><transform><Transform.position><item>-8</item><item>8</item><item>13</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform><components /><children /></item>
+      </children>
+    </item>
+    <item name="Cinematic Camera" enabled="true">
+      <transform><Transform.position><item>-12</item><item>5</item><item>-10</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform>
+      <components>
+        <components:Camera Camera.active="true" Camera.useTransformRotation="true" Camera.fov="62" Camera.near="0.05" Camera.far="300" Camera.orthographic="false" Camera.orthographicSize="5"><Camera.target><item>0</item><item>2</item><item>0</item></Camera.target><Camera.up><item>0</item><item>1</item><item>0</item></Camera.up></components:Camera>
+        <components:CameraTrack CameraTrack.pathObjectName="Cinematic Path" CameraTrack.durationSeconds="18" CameraTrack.startOffset="0" CameraTrack.playOnStart="true" CameraTrack.constantSpeed="true" CameraTrack.loop="true" CameraTrack.continuousLoop="true" CameraTrack.pingPong="false" CameraTrack.reverse="false" CameraTrack.easing="0" CameraTrack.orientation="2" CameraTrack.lookTargetObjectName="Camera Look Target"><CameraTrack.worldUp><item>0</item><item>1</item><item>0</item></CameraTrack.worldUp></components:CameraTrack>
+      </components>
+      <children />
+    </item>
+    <item name="Camera Look Target" enabled="true"><transform><Transform.position><item>0</item><item>2</item><item>1</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>2</item><item>2</item><item>2</item></Transform.scale></transform><components><components:Mesh Mesh.file="Assets/Mesh/cube.obj" /><components:Material Material.shininess="24" Material.roughnessFactor="0.72"><Material.diffuse><item>0.9</item><item>0.34</item><item>0.08</item></Material.diffuse><Material.ambient><item>0.06</item><item>0.02</item><item>0.01</item></Material.ambient></components:Material></components><children /></item>
+    <item name="Spline Follower Object" enabled="true">
+      <transform><Transform.position><item>-12</item><item>5</item><item>-10</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1.25</item><item>1.25</item><item>2.5</item></Transform.scale></transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/cube.obj" />
+        <components:Material Material.shininess="36" Material.roughnessFactor="0.5"><Material.diffuse><item>0.1</item><item>0.75</item><item>0.95</item></Material.diffuse><Material.ambient><item>0.015</item><item>0.08</item><item>0.1</item></Material.ambient></components:Material>
+        <components:SplineFollower SplineFollower.pathObjectName="Cinematic Path" SplineFollower.durationSeconds="12" SplineFollower.startOffset="0.25" SplineFollower.playOnStart="true" SplineFollower.constantSpeed="true" SplineFollower.loop="true" SplineFollower.continuousLoop="true" SplineFollower.pingPong="false" SplineFollower.reverse="false" SplineFollower.easing="0" SplineFollower.orientation="1" SplineFollower.lookTargetObjectName=""><SplineFollower.worldUp><item>0</item><item>1</item><item>0</item></SplineFollower.worldUp></components:SplineFollower>
+      </components>
+      <children />
+    </item>
+    <item name="Cinematic Sun" enabled="true"><transform><Transform.position><item>0</item><item>12</item><item>0</item></Transform.position><Transform.rotation><item>0.72</item><item>-0.55</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform><components><components:Light Light.lightType="1" Light.intensity="3" Light.range="100" Light.falloff="2" Light.baked="false"><Light.color><item>1</item><item>0.92</item><item>0.78</item></Light.color></components:Light></components><children /></item>
+  </objects>
+</Scene>

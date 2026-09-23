@@ -85,6 +85,7 @@ bool DX11GameRenderer::Init(void* hwndHandle, uint32_t width, uint32_t height)
 
 void DX11GameRenderer::CreateTargets()
 {
+    m_captureStaging.Reset();
     Microsoft::WRL::ComPtr<ID3D11Texture2D> backBuffer;
     ThrowIfFailed(m_swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer)));
     ThrowIfFailed(m_device->CreateRenderTargetView(backBuffer.Get(), nullptr, &m_rtv));
@@ -147,6 +148,41 @@ void DX11GameRenderer::EndFrame()
         std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - presentationStart).count();
     m_frameTelemetry.flipModelSwapChain = m_flipModelSwapChain;
+}
+
+bool DX11GameRenderer::CaptureFrameRGBA(std::vector<uint8_t>& pixels)
+{
+    if (!m_device || !m_context || !m_swapChain || !m_width || !m_height)
+        return false;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> backBuffer;
+    if (FAILED(m_swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer))))
+        return false;
+    D3D11_TEXTURE2D_DESC sourceDescription{};
+    backBuffer->GetDesc(&sourceDescription);
+    if (!m_captureStaging)
+    {
+        D3D11_TEXTURE2D_DESC staging = sourceDescription;
+        staging.BindFlags = 0;
+        staging.MiscFlags = 0;
+        staging.Usage = D3D11_USAGE_STAGING;
+        staging.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        if (FAILED(m_device->CreateTexture2D(&staging, nullptr,
+            &m_captureStaging)))
+            return false;
+    }
+    m_context->CopyResource(m_captureStaging.Get(), backBuffer.Get());
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    if (FAILED(m_context->Map(m_captureStaging.Get(), 0,
+        D3D11_MAP_READ, 0, &mapped)))
+        return false;
+    const size_t rowBytes = static_cast<size_t>(m_width) * 4u;
+    pixels.resize(rowBytes * m_height);
+    const auto* source = static_cast<const uint8_t*>(mapped.pData);
+    for (uint32_t row = 0; row < m_height; ++row)
+        std::memcpy(pixels.data() + static_cast<size_t>(row) * rowBytes,
+            source + static_cast<size_t>(row) * mapped.RowPitch, rowBytes);
+    m_context->Unmap(m_captureStaging.Get(), 0);
+    return true;
 }
 
 std::unique_ptr<Engine::Graphics::IGraphicsContext> DX11GameRenderer::CreateFrameGraphicsContext()

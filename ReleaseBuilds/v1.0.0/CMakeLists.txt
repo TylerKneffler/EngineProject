@@ -758,10 +758,10 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
-   EXISTS "${ENGINE_ROOT}/Engine/Tests/RotateLifecycleTests.cpp")
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/RotateLifecycleTests.cpp")
     enable_testing()
     add_executable(EngineLifecycleTests
-        "${ENGINE_ROOT}/Engine/Tests/RotateLifecycleTests.cpp"
+        "${ENGINE_LOCAL_TEST_ROOT}/RotateLifecycleTests.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Utilities/Rotate.cpp"
     )
     target_link_libraries(EngineLifecycleTests PRIVATE Engine)
@@ -779,10 +779,10 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
-   EXISTS "${ENGINE_ROOT}/Engine/Tests/TerrainGenTests.cpp")
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TerrainGenTests.cpp")
     enable_testing()
     add_executable(TerrainGenTests EXCLUDE_FROM_ALL
-        "${ENGINE_ROOT}/Engine/Tests/TerrainGenTests.cpp"
+        "${ENGINE_LOCAL_TEST_ROOT}/TerrainGenTests.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainChunk.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainPatch.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGen.cpp"
@@ -802,9 +802,9 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
-   EXISTS "${ENGINE_ROOT}/Engine/Tests/TerrainGenRenderedBenchmark.cpp")
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TerrainGenRenderedBenchmark.cpp")
     add_executable(TerrainGenRenderedBenchmark EXCLUDE_FROM_ALL
-        "${ENGINE_ROOT}/Engine/Tests/TerrainGenRenderedBenchmark.cpp"
+        "${ENGINE_LOCAL_TEST_ROOT}/TerrainGenRenderedBenchmark.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainChunk.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainPatch.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGen.cpp"
@@ -819,10 +819,10 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
-   EXISTS "${ENGINE_ROOT}/Engine/Tests/TexturePipelineTests.cpp")
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TexturePipelineTests.cpp")
     enable_testing()
     add_executable(TexturePipelineTests
-        "${ENGINE_ROOT}/Engine/Tests/TexturePipelineTests.cpp")
+        "${ENGINE_LOCAL_TEST_ROOT}/TexturePipelineTests.cpp")
     target_link_libraries(TexturePipelineTests PRIVATE Engine)
     target_include_directories(TexturePipelineTests PRIVATE "${ENGINE_ROOT}/Engine")
     add_test(NAME TextureDecodingAndMipGeneration COMMAND TexturePipelineTests
@@ -835,10 +835,10 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
-   EXISTS "${ENGINE_ROOT}/Engine/Tests/AudioPipelineTests.cpp")
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/AudioPipelineTests.cpp")
     enable_testing()
     add_executable(AudioPipelineTests
-        "${ENGINE_ROOT}/Engine/Tests/AudioPipelineTests.cpp")
+        "${ENGINE_LOCAL_TEST_ROOT}/AudioPipelineTests.cpp")
     target_link_libraries(AudioPipelineTests PRIVATE Engine)
     target_include_directories(AudioPipelineTests PRIVATE "${ENGINE_ROOT}/Engine")
     target_link_options(AudioPipelineTests PRIVATE
@@ -852,10 +852,10 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
-   EXISTS "${ENGINE_ROOT}/Engine/Tests/PhysicsPipelineTests.cpp")
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PhysicsPipelineTests.cpp")
     enable_testing()
     add_executable(PhysicsPipelineTests
-        "${ENGINE_ROOT}/Engine/Tests/PhysicsPipelineTests.cpp")
+        "${ENGINE_LOCAL_TEST_ROOT}/PhysicsPipelineTests.cpp")
     target_link_libraries(PhysicsPipelineTests PRIVATE Engine)
     target_include_directories(PhysicsPipelineTests PRIVATE "${ENGINE_ROOT}/Engine")
     target_link_options(PhysicsPipelineTests PRIVATE
@@ -867,10 +867,10 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
-   EXISTS "${ENGINE_ROOT}/Engine/Tests/UILayoutTests.cpp")
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/UILayoutTests.cpp")
     enable_testing()
     add_executable(UILayoutTests
-        "${ENGINE_ROOT}/Engine/Tests/UILayoutTests.cpp")
+        "${ENGINE_LOCAL_TEST_ROOT}/UILayoutTests.cpp")
     target_link_libraries(UILayoutTests PRIVATE Engine)
     target_include_directories(UILayoutTests PRIVATE "${ENGINE_ROOT}/Engine")
     target_link_options(UILayoutTests PRIVATE

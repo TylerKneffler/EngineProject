@@ -5,6 +5,7 @@
 #include <d3d11.h>
 #include <dxgi.h>
 #include <dxgi1_5.h>
+#include <vector>
 
 namespace Engine::Renderers
 {
@@ -25,6 +26,10 @@ public:
     Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const override
     { return m_frameTelemetry; }
 
+    // Copies the current render target before presentation. Used by the
+    // deterministic video exporter; bytes are tightly packed RGBA8 rows.
+    bool CaptureFrameRGBA(std::vector<uint8_t>& pixels);
+
 private:
     void CreateTargets();
     Microsoft::WRL::ComPtr<ID3D11Device> m_device;
@@ -33,6 +38,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_rtv;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_depthTexture;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilView> m_dsv;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> m_captureStaging;
     std::unique_ptr<D3D11GraphicsProvider> m_graphicsProvider;
     uint32_t m_width = 0;
     uint32_t m_height = 0;

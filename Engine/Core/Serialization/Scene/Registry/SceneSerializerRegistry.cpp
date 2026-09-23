@@ -27,6 +27,9 @@
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
+#include "Core/Compoonents/Path/SplinePath.h"
+#include "Core/Compoonents/Path/SplineFollower.h"
+#include "Core/Compoonents/Cinematics/CameraTrack.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
 #include <pugixml.hpp>
 #include <fstream>
@@ -182,6 +185,9 @@ void SceneSerializer::EnsureBuiltinsRegistered()
     RegisterComponentType<Engine::Components::Skeleton>();
     RegisterComponentType<Engine::Components::SkinnedMesh>();
     RegisterComponentType<Engine::Components::SpatialManipulator>();
+    RegisterComponentType<SplinePath>();
+    RegisterComponentType<SplineFollower>();
+    RegisterComponentType<CameraTrack>();
     RegisterComponentType<Engine::Rendering::BakedLightingData>();
 }
 

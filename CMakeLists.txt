@@ -161,6 +161,13 @@ file(GLOB_RECURSE GAME_HEADERS CONFIGURE_DEPENDS
     "${ENGINE_ROOT}/Engine/Game/*.hpp"
     "${ENGINE_ROOT}/Engine/Game/*.inl"
 )
+file(GLOB_RECURSE VIDEO_EXPORTER_SOURCES CONFIGURE_DEPENDS
+    "${ENGINE_ROOT}/Engine/VideoExporter/*.cpp"
+)
+file(GLOB_RECURSE VIDEO_EXPORTER_HEADERS CONFIGURE_DEPENDS
+    "${ENGINE_ROOT}/Engine/VideoExporter/*.h"
+    "${ENGINE_ROOT}/Engine/VideoExporter/*.hpp"
+)
 file(GLOB_RECURSE SERVER_SOURCES CONFIGURE_DEPENDS
     "${ENGINE_ROOT}/Engine/Server/*.cpp"
 )
@@ -566,6 +573,38 @@ set_target_properties(Game PROPERTIES
 )
 
 # ---------------------------------------------------------------------------
+# VideoExporter — deterministic offline scene renderer. It is deliberately a
+# separate executable so a video export cannot alter normal Game.exe behavior.
+# ---------------------------------------------------------------------------
+add_executable(VideoExporter
+    ${VIDEO_EXPORTER_SOURCES}
+    ${VIDEO_EXPORTER_HEADERS}
+    ${ASSET_SOURCES}
+    ${PROJECT_BROWSE_FILES}
+)
+source_group(TREE "${ENGINE_ROOT}" FILES
+    ${VIDEO_EXPORTER_SOURCES} ${VIDEO_EXPORTER_HEADERS})
+if(ENGINE_PROJECT_DIR)
+    source_group(TREE "${ENGINE_PROJECT_DIR}" PREFIX "Project" FILES
+        ${ASSET_SOURCES} ${PROJECT_BROWSE_FILES})
+endif()
+target_link_libraries(VideoExporter PRIVATE Engine shell32.lib)
+target_precompile_headers(VideoExporter REUSE_FROM Engine)
+target_include_directories(VideoExporter PRIVATE
+    ${ENGINE_ROOT}/Engine
+    ${ENGINE_ROOT}/Engine/Core/Assets
+    ${ENGINE_PROJECT_DIR}/Assets
+)
+target_compile_definitions(VideoExporter PRIVATE
+    PROJECT_FILE="${ENGINE_PROJECT_FILE}"
+    ENGINE_ASSETS_PATH="${ENGINE_COMPILED_ASSETS_PATH}"
+    $<$<NOT:$<BOOL:${ENGINE_PROJECT_DIR}>>:ENGINE_BUILTIN_ASSET_SCRIPTS>
+)
+set_target_properties(VideoExporter PROPERTIES
+    VS_DEBUGGER_WORKING_DIRECTORY "${ENGINE_RUNTIME_WORKING_DIRECTORY}"
+)
+
+# ---------------------------------------------------------------------------
 # Server — headless authoritative scene simulation.  This intentionally uses
 # a console subsystem and never creates a renderer/window.  It is the host
 # for deterministic scene diagnostics today and future player/session support.
@@ -777,10 +816,10 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
-   EXISTS "${ENGINE_ROOT}/Engine/Tests/RotateLifecycleTests.cpp")
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/RotateLifecycleTests.cpp")
     enable_testing()
     add_executable(EngineLifecycleTests
-        "${ENGINE_ROOT}/Engine/Tests/RotateLifecycleTests.cpp"
+        "${ENGINE_LOCAL_TEST_ROOT}/RotateLifecycleTests.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Utilities/Rotate.cpp"
     )
     target_link_libraries(EngineLifecycleTests PRIVATE Engine)
@@ -798,10 +837,10 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
-   EXISTS "${ENGINE_ROOT}/Engine/Tests/TerrainGenTests.cpp")
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TerrainGenTests.cpp")
     enable_testing()
     add_executable(TerrainGenTests EXCLUDE_FROM_ALL
-        "${ENGINE_ROOT}/Engine/Tests/TerrainGenTests.cpp"
+        "${ENGINE_LOCAL_TEST_ROOT}/TerrainGenTests.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainChunk.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainPatch.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGen.cpp"
@@ -821,9 +860,26 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
-   EXISTS "${ENGINE_ROOT}/Engine/Tests/TerrainGenRenderedBenchmark.cpp")
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/CameraTrackTests.cpp")
+    enable_testing()
+    add_executable(CameraTrackTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/CameraTrackTests.cpp"
+    )
+    target_link_libraries(CameraTrackTests PRIVATE Engine)
+    target_include_directories(CameraTrackTests PRIVATE
+        "${ENGINE_ROOT}/Engine"
+        "${ENGINE_ROOT}/Engine/Core/Assets"
+    )
+    add_test(NAME CameraTrackRegression COMMAND CameraTrackTests)
+    set_tests_properties(CameraTrackRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}"
+    )
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TerrainGenRenderedBenchmark.cpp")
     add_executable(TerrainGenRenderedBenchmark EXCLUDE_FROM_ALL
-        "${ENGINE_ROOT}/Engine/Tests/TerrainGenRenderedBenchmark.cpp"
+        "${ENGINE_LOCAL_TEST_ROOT}/TerrainGenRenderedBenchmark.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainChunk.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainPatch.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGen.cpp"
@@ -838,19 +894,19 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
-   EXISTS "${ENGINE_ROOT}/Engine/Tests/AnimationRenderingBenchmark.cpp")
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/AnimationRenderingBenchmark.cpp")
     add_executable(AnimationRenderingBenchmark EXCLUDE_FROM_ALL
-        "${ENGINE_ROOT}/Engine/Tests/AnimationRenderingBenchmark.cpp")
+        "${ENGINE_LOCAL_TEST_ROOT}/AnimationRenderingBenchmark.cpp")
     target_link_libraries(AnimationRenderingBenchmark PRIVATE Engine)
     target_include_directories(AnimationRenderingBenchmark PRIVATE
         "${ENGINE_ROOT}/Engine")
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
-   EXISTS "${ENGINE_ROOT}/Engine/Tests/TexturePipelineTests.cpp")
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TexturePipelineTests.cpp")
     enable_testing()
     add_executable(TexturePipelineTests
-        "${ENGINE_ROOT}/Engine/Tests/TexturePipelineTests.cpp")
+        "${ENGINE_LOCAL_TEST_ROOT}/TexturePipelineTests.cpp")
     target_link_libraries(TexturePipelineTests PRIVATE Engine)
     target_include_directories(TexturePipelineTests PRIVATE "${ENGINE_ROOT}/Engine")
     add_test(NAME TextureDecodingAndMipGeneration COMMAND TexturePipelineTests
@@ -863,10 +919,10 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
-   EXISTS "${ENGINE_ROOT}/Engine/Tests/AudioPipelineTests.cpp")
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/AudioPipelineTests.cpp")
     enable_testing()
     add_executable(AudioPipelineTests
-        "${ENGINE_ROOT}/Engine/Tests/AudioPipelineTests.cpp")
+        "${ENGINE_LOCAL_TEST_ROOT}/AudioPipelineTests.cpp")
     target_link_libraries(AudioPipelineTests PRIVATE Engine)
     target_include_directories(AudioPipelineTests PRIVATE "${ENGINE_ROOT}/Engine")
     target_link_options(AudioPipelineTests PRIVATE
@@ -880,10 +936,10 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
-   EXISTS "${ENGINE_ROOT}/Engine/Tests/PhysicsPipelineTests.cpp")
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PhysicsPipelineTests.cpp")
     enable_testing()
     add_executable(PhysicsPipelineTests
-        "${ENGINE_ROOT}/Engine/Tests/PhysicsPipelineTests.cpp")
+        "${ENGINE_LOCAL_TEST_ROOT}/PhysicsPipelineTests.cpp")
     target_link_libraries(PhysicsPipelineTests PRIVATE Engine)
     target_include_directories(PhysicsPipelineTests PRIVATE "${ENGINE_ROOT}/Engine")
     target_link_options(PhysicsPipelineTests PRIVATE
@@ -895,10 +951,10 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
-   EXISTS "${ENGINE_ROOT}/Engine/Tests/UILayoutTests.cpp")
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/UILayoutTests.cpp")
     enable_testing()
     add_executable(UILayoutTests
-        "${ENGINE_ROOT}/Engine/Tests/UILayoutTests.cpp")
+        "${ENGINE_LOCAL_TEST_ROOT}/UILayoutTests.cpp")
     target_link_libraries(UILayoutTests PRIVATE Engine)
     target_include_directories(UILayoutTests PRIVATE "${ENGINE_ROOT}/Engine")
     target_link_options(UILayoutTests PRIVATE

@@ -74,6 +74,110 @@ bool RunExportCommand(const std::wstring& command, const fs::path& workingDirect
     return exitCode == 0;
 }
 
+std::wstring QuoteCommandArgument(const std::wstring& value)
+{
+    std::wstring result = L"\"";
+    size_t slashes = 0;
+    for (wchar_t character : value)
+    {
+        if (character == L'\\')
+        {
+            ++slashes;
+            continue;
+        }
+        if (character == L'\"')
+            result.append(slashes * 2u + 1u, L'\\');
+        else
+            result.append(slashes, L'\\');
+        slashes = 0;
+        result.push_back(character);
+    }
+    result.append(slashes * 2u, L'\\');
+    result.push_back(L'\"');
+    return result;
+}
+
+struct VideoExportRequest
+{
+    std::string projectFile;
+    std::string scene;
+    std::string output;
+    std::string format;
+    std::string codec;
+    std::string preset;
+    std::string ffmpeg;
+    uint32_t width = 1920;
+    uint32_t height = 1080;
+    uint32_t fps = 60;
+    uint32_t quality = 75;
+    float duration = 0.f;
+    float timeout = 120.f;
+};
+
+std::pair<bool, std::string> BuildAndRunVideoExport(
+    const VideoExportRequest& request)
+{
+    try
+    {
+        const fs::path projectPath = fs::weakly_canonical(request.projectFile);
+        const fs::path projectRoot = projectPath.parent_path();
+        const fs::path buildDirectory = projectRoot / "build" / "VideoExport";
+        const fs::path logFile = projectRoot / "video-export.log";
+        std::ofstream(logFile, std::ios::trunc)
+            << "Building video exporter for " << projectPath.string() << '\n';
+        const std::wstring configure = L"cmake -S " +
+            QuoteCommandArgument(projectRoot.wstring()) + L" -B " +
+            QuoteCommandArgument(buildDirectory.wstring()) +
+            L" -G \"Visual Studio 17 2022\" -A x64";
+        if (!RunExportCommand(configure, projectRoot, logFile))
+            return { false, "Video-export configuration failed. See " +
+                logFile.string() };
+        const std::wstring build = L"cmake --build " +
+            QuoteCommandArgument(buildDirectory.wstring()) +
+            L" --config Release --target VideoExporter --parallel";
+        if (!RunExportCommand(build, projectRoot, logFile))
+            return { false, "Video-export build failed. See " + logFile.string() };
+
+        fs::path executable = buildDirectory / "Engine" / "Release" /
+            "VideoExporter.exe";
+        if (!fs::is_regular_file(executable))
+            executable = buildDirectory / "Release" / "VideoExporter.exe";
+        if (!fs::is_regular_file(executable))
+            return { false, "VideoExporter.exe was not produced. See " +
+                logFile.string() };
+        fs::path output = fs::path(request.output);
+        if (output.is_relative())
+            output = projectRoot / output;
+        output.replace_extension(request.format);
+        fs::create_directories(output.parent_path());
+
+        std::wostringstream command;
+        command << QuoteCommandArgument(executable.wstring())
+            << L" --project " << QuoteCommandArgument(projectPath.wstring())
+            << L" --scene " << QuoteCommandArgument(fs::path(request.scene).wstring())
+            << L" --output " << QuoteCommandArgument(output.wstring())
+            << L" --format " << QuoteCommandArgument(fs::path(request.format).wstring())
+            << L" --preset " << QuoteCommandArgument(fs::path(request.preset).wstring())
+            << L" --ffmpeg " << QuoteCommandArgument(fs::path(request.ffmpeg).wstring())
+            << L" --width " << request.width
+            << L" --height " << request.height
+            << L" --fps " << request.fps
+            << L" --quality " << request.quality
+            << L" --duration " << request.duration
+            << L" --timeout " << request.timeout;
+        if (!request.codec.empty())
+            command << L" --codec " << QuoteCommandArgument(
+                fs::path(request.codec).wstring());
+        if (!RunExportCommand(command.str(), projectRoot, logFile))
+            return { false, "Video rendering failed. See " + logFile.string() };
+        return { true, "Video ready: " + output.string() };
+    }
+    catch (const std::exception& error)
+    {
+        return { false, std::string("Video export failed: ") + error.what() };
+    }
+}
+
 void CopyRuntimeAssets(const fs::path& source, const fs::path& destination)
 {
     for (const auto& entry : fs::recursive_directory_iterator(source))
@@ -246,6 +350,11 @@ void PreferencesView::Init(const Engine::Model::ProjectSettings& settings, const
     strncpy_s(m_projectNameBuf, m_settings.name.c_str(), sizeof(m_projectNameBuf) - 1);
     strncpy_s(m_assetsPathBuf, m_settings.assetsDirectory.c_str(), sizeof(m_assetsPathBuf) - 1);
     strncpy_s(m_defaultSceneBuf, m_settings.defaultScene.c_str(), sizeof(m_defaultSceneBuf) - 1);
+    strncpy_s(m_videoSceneBuf, m_settings.defaultScene.c_str(),
+        sizeof(m_videoSceneBuf) - 1);
+    m_videoWidth = m_settings.gameWindowWidth ? m_settings.gameWindowWidth : 1920u;
+    m_videoHeight = m_settings.gameWindowHeight ? m_settings.gameWindowHeight : 1080u;
+    m_videoFps = m_settings.targetFramerate ? m_settings.targetFramerate : 60u;
 }
 
 // ---------------------------------------------------------------------------
@@ -255,6 +364,7 @@ void PreferencesView::DrawWindow(IEditorUi& ui, bool& isOpen)
 {
     if (!isOpen) return;
     UpdatePortableExport();
+    UpdateVideoExport();
     bool keybindTabVisible = false;
 
     ui.SetNextWindowRect(100, 50, 600, 700);
@@ -569,6 +679,43 @@ void PreferencesView::DrawExportSection(IEditorUi& ui)
         ui.ColoredLabel(m_exportStatus.c_str(), m_exportSucceeded
             ? EditorUiColor{.35f,.85f,.45f,1.f} : EditorUiColor{1.f,.35f,.35f,1.f});
     }
+
+
+    ui.Spacing();
+    ui.Separator();
+    ui.Label("Offline Video Export");
+    ui.Label("Renders a selected scene and its normal scene transitions at a fixed frame rate. The safety timeout always stops menus and looping scenes.");
+    ui.InputText("Starting Scene", m_videoSceneBuf, sizeof(m_videoSceneBuf));
+    ui.InputText("Output File", m_videoOutputBuf, sizeof(m_videoOutputBuf));
+    static const char* formats[] = { "MP4 (H.264)", "WebM (VP9)", "MOV (ProRes)" };
+    ui.Combo("Video Type", &m_videoFormat, formats, 3);
+    ui.InputText("Codec Override", m_videoCodecBuf, sizeof(m_videoCodecBuf));
+    ui.InputText("Encoder Preset", m_videoPresetBuf, sizeof(m_videoPresetBuf));
+    ui.InputText("FFmpeg", m_videoFfmpegBuf, sizeof(m_videoFfmpegBuf));
+    ui.InputUInt("Width", &m_videoWidth);
+    ui.InputUInt("Height", &m_videoHeight);
+    ui.InputUInt("Frames Per Second", &m_videoFps);
+    ui.InputUInt("Quality (0-100)", &m_videoQuality);
+    ui.DragFloat("Duration (0 = Camera Track)", &m_videoDuration,
+        0.25f, 0.f, 86400.f);
+    ui.DragFloat("Maximum Timeout", &m_videoTimeout,
+        1.f, 1.f, 86400.f);
+    ui.DisabledLabel("MP4 is broadly compatible; WebM is compact; MOV/ProRes is intended for editing.");
+    ui.BeginDisabled(m_videoExporting || m_projFilePath.empty());
+    if (ui.Button("Build and Render Video", 190.f, 34.f))
+        StartVideoExport();
+    ui.EndDisabled();
+    if (m_videoExporting)
+    {
+        ui.Label("Building and rendering video...");
+        ui.DisabledLabel("Details: video-export.log");
+    }
+    else if (!m_videoExportStatus.empty())
+    {
+        ui.ColoredLabel(m_videoExportStatus.c_str(), m_videoExportSucceeded
+            ? EditorUiColor{.35f,.85f,.45f,1.f}
+            : EditorUiColor{1.f,.35f,.35f,1.f});
+    }
 }
 
 void PreferencesView::StartPortableExport()
@@ -606,6 +753,56 @@ void PreferencesView::UpdatePortableExport()
     m_exporting = false;
     m_exportSucceeded = result.first;
     m_exportStatus = result.second;
+}
+
+void PreferencesView::StartVideoExport()
+{
+    if (m_videoExporting || m_projFilePath.empty())
+        return;
+    if (m_videoSceneBuf[0] == '\0' || m_videoOutputBuf[0] == '\0')
+    {
+        m_videoExportSucceeded = false;
+        m_videoExportStatus = "Choose a starting scene and output file.";
+        return;
+    }
+    m_videoWidth = std::clamp(m_videoWidth & ~1u, 2u, 7680u);
+    m_videoHeight = std::clamp(m_videoHeight & ~1u, 2u, 4320u);
+    m_videoFps = std::clamp(m_videoFps, 1u, 240u);
+    m_videoQuality = std::min(m_videoQuality, 100u);
+    m_videoDuration = std::clamp(m_videoDuration, 0.f, 86400.f);
+    m_videoTimeout = std::clamp(m_videoTimeout, 1.f, 86400.f);
+    VideoExportRequest request;
+    request.projectFile = m_projFilePath;
+    request.scene = m_videoSceneBuf;
+    request.output = m_videoOutputBuf;
+    request.format = m_videoFormat == 1 ? "webm" :
+        m_videoFormat == 2 ? "mov" : "mp4";
+    request.codec = m_videoCodecBuf;
+    request.preset = m_videoPresetBuf;
+    request.ffmpeg = m_videoFfmpegBuf;
+    request.width = m_videoWidth;
+    request.height = m_videoHeight;
+    request.fps = m_videoFps;
+    request.quality = m_videoQuality;
+    request.duration = m_videoDuration;
+    request.timeout = m_videoTimeout;
+    m_videoExporting = true;
+    m_videoExportSucceeded = false;
+    m_videoExportStatus.clear();
+    m_videoExportFuture = std::async(std::launch::async,
+        [request]() { return BuildAndRunVideoExport(request); });
+}
+
+void PreferencesView::UpdateVideoExport()
+{
+    if (!m_videoExporting || !m_videoExportFuture.valid() ||
+        m_videoExportFuture.wait_for(std::chrono::seconds(0)) !=
+            std::future_status::ready)
+        return;
+    const auto result = m_videoExportFuture.get();
+    m_videoExporting = false;
+    m_videoExportSucceeded = result.first;
+    m_videoExportStatus = result.second;
 }
 
 // ---------------------------------------------------------------------------
