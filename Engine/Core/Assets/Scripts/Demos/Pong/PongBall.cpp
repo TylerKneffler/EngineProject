@@ -120,6 +120,8 @@ void PongBall::ResolveObjects()
 
 void PongBall::ResetRound(float horizontalDirection)
 {
+    if (!m_manager)
+        ResolveObjects();
     HoldAtCenter();
     m_pendingServeDirection = horizontalDirection < 0.f ? -1.f : 1.f;
     m_serveTimer = std::max(0.f, serveDelay);
