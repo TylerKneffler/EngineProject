@@ -147,7 +147,7 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
         LogInteraction("Drop requested: '" + ObjectName(m_pendingDragged) + "' -> 'World' (root level)");
     }
     if (ui.IsItemClicked())
-        SetSelectedObject(nullptr);
+        SelectSceneRoot();
     if (worldOpen)
     {
         std::vector<Engine::Core::Object*> roots;
@@ -343,7 +343,7 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
         m_debugHoverPosition = EditorUiHierarchyDropPosition::None;
         m_debugDropDepth = -1;
     }
-    if (ui.IsWindowBackgroundClicked()) SetSelectedObject(nullptr);
+    if (ui.IsWindowBackgroundClicked()) SelectSceneRoot();
     ui.EndWindow();
 }
 
@@ -412,6 +412,16 @@ void HierarchyView::SetSelectedObject(Engine::Core::Object* obj)
     if (m_selectedObject == obj) return;
     m_selectedObject = obj;
     if (OnSelectionChanged) OnSelectionChanged(obj);
+}
+
+void HierarchyView::SelectSceneRoot()
+{
+    // This is an explicit UI selection, not merely an object deselection.
+    // Always notify so clicking World can replace an asset inspector even
+    // when the hierarchy already has no selected object.
+    m_selectedObject = nullptr;
+    if (OnSelectionChanged)
+        OnSelectionChanged(nullptr);
 }
 
 void HierarchyView::DrawObjectNode(

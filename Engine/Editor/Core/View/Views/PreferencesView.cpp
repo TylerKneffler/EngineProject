@@ -625,19 +625,6 @@ void PreferencesView::DrawEditorSection(IEditorUi& ui)
             : EditorUiColor{1.f,.55f,.30f,1.f});
     ui.Spacing();
 
-    ui.Label("Workspace Mode");
-    ui.Separator();
-    const char* editorModes[] = { "3D", "2D" };
-    int editorMode = m_settings.editorMode == Engine::Model::ProjectSettings::EditorMode::TwoD ? 1 : 0;
-    if (ui.Combo("Editor Mode", &editorMode, editorModes, 2))
-    {
-        m_settings.editorMode = editorMode == 1
-            ? Engine::Model::ProjectSettings::EditorMode::TwoD
-            : Engine::Model::ProjectSettings::EditorMode::ThreeD;
-        NotifyChanged();
-    }
-    ui.Tooltip("2D uses an orthographic camera, an XY grid, and sprite layer ordering.");
-    ui.Spacing();
     ui.Label("Undo History");
     ui.Separator();
     if (ui.InputUInt("Action Limit", &m_settings.editorHistoryLimit))
@@ -1106,11 +1093,7 @@ bool PreferencesView::SaveSettings()
 
             auto editorMode = prop.child("EditorMode");
             if (editorMode)
-                editorMode.text().set(m_settings.editorMode ==
-                    Engine::Model::ProjectSettings::EditorMode::TwoD ? "2D" : "3D");
-            else if (defaultSceneNode)
-                prop.append_child("EditorMode").text().set(m_settings.editorMode ==
-                    Engine::Model::ProjectSettings::EditorMode::TwoD ? "2D" : "3D");
+                prop.remove_child(editorMode);
 
             auto editorTheme = prop.child("EditorTheme");
             if (editorTheme)

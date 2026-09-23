@@ -436,7 +436,8 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     Engine::Components::Camera* editorCameraComponent = editorCamera.AddComponent<Engine::Components::Camera>();
     editorCameraComponent->useTransformRotation = false;
     editorCameraComponent->farPlane = 1000.f;
-    SetEditorMode2D(m_editorMode2D);
+    SetEditorMode2D(
+        settings.dimension == Engine::Model::SceneDimension::TwoD);
 
     // Build pipeline states
     BuildGridPipeline();
@@ -540,6 +541,9 @@ void Scene::EnsureSkinPaletteCapacity(uint32_t requiredObjects)
 
 void Scene::SetEditorMode2D(bool enabled)
 {
+    settings.dimension = enabled
+        ? Engine::Model::SceneDimension::TwoD
+        : Engine::Model::SceneDimension::ThreeD;
     if (m_editorCameraModeInitialized && m_editorMode2D == enabled)
         return;
     m_editorMode2D = enabled;

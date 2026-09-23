@@ -394,8 +394,6 @@ int VideoExportApplication::Run(HINSTANCE instance)
         return 6;
     }
     Engine::Scene::Scene scene;
-    scene.SetEditorMode2D(
-        settings.editorMode == Engine::Model::ProjectSettings::EditorMode::TwoD);
     scene.Init(renderer.GetGraphicsProvider());
     scene.SetDistanceLightingSettings(settings.distanceLighting);
     Engine::Core::SceneManager::SetActiveScene(&scene);

@@ -82,6 +82,19 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             ui.DisabledLabel("No scene loaded");
         else
         {
+            ui.Label("Scene Mode");
+            const char* dimensions[] = { "3D", "2D" };
+            int dimension = m_scene->settings.dimension ==
+                Engine::Model::SceneDimension::TwoD ? 1 : 0;
+            if (ui.Combo("Dimension", &dimension, dimensions, 2))
+            {
+                m_scene->SetEditorMode2D(dimension == 1);
+                if (OnComponentsChanged)
+                    OnComponentsChanged();
+            }
+            ui.Tooltip("2D uses an orthographic editor camera, an XY grid, and sprite layer ordering for this scene only.");
+            ui.Separator();
+
             ui.Label("Skybox Texture Override");
             if (!m_editingSkyboxTexture)
             {

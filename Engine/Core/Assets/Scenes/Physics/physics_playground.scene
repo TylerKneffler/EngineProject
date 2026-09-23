@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Scene xmlns:components="urn:engine-components" version="1">
-  <settings showGrid="true" gridHalfSize="20" gridCellSize="1" gridOpacity="0.3" gridFadeDistance="100" skyboxTexture="">
+  <settings dimension="0" showGrid="true" gridHalfSize="20" gridCellSize="1" gridOpacity="0.3" gridFadeDistance="100" skyboxTexture="">
     <gridColor>
       <item>0.4</item>
       <item>0.4</item>

@@ -10,7 +10,6 @@ namespace Engine::Model
 {
 struct ProjectSettings
 {
-    enum class EditorMode { ThreeD, TwoD };
     std::string name;
     std::string version;
     std::string description;
@@ -33,7 +32,6 @@ struct ProjectSettings
     float rightPanelWidth;
     bool debugHierarchyInteractions = true;
     uint32_t editorHistoryLimit = 100;
-    EditorMode editorMode = EditorMode::ThreeD;
     std::string editorTheme = "Graphite";
     std::vector<std::string> leftPanelTabs;
     std::vector<std::string> centerPanelTabs;

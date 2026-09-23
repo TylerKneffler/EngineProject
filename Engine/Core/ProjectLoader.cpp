@@ -165,17 +165,6 @@ void ProjectLoader::ParseEditor(const pugi::xml_node& projectNode, ProjectSettin
             settings.editorHistoryLimit = static_cast<uint32_t>(
                 std::min<unsigned long>(std::stoul(historyLimit.child_value()), 1000ul));
 
-        auto editorMode = prop.child("EditorMode");
-        if (editorMode)
-        {
-            std::string value = editorMode.child_value();
-            std::transform(value.begin(), value.end(), value.begin(),
-                [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
-            settings.editorMode = value == "2d" || value == "two" || value == "twod"
-                ? ProjectSettings::EditorMode::TwoD
-                : ProjectSettings::EditorMode::ThreeD;
-        }
-
         auto editorTheme = prop.child("EditorTheme");
         if (editorTheme && *editorTheme.child_value())
             settings.editorTheme = editorTheme.child_value();

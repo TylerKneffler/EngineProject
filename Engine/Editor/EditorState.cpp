@@ -169,8 +169,6 @@ bool EditorState::Init()
     m_scene = std::make_unique<Engine::Scene::Scene>();
     if (!m_scene)
         return false;
-    m_scene->SetEditorMode2D(
-        m_projectSettings.editorMode == Engine::Model::ProjectSettings::EditorMode::TwoD);
     OutputDebugStringA("[EditorState] Scene created\n");
     
     OutputDebugStringA("[EditorState] Initializing scene...\n");
@@ -564,8 +562,7 @@ void EditorState::OpenPrefabStage(const std::string& path)
     Engine::Core::Object* root = nullptr;
     try
     {
-        prefabScene->SetEditorMode2D(
-            m_projectSettings.editorMode == Engine::Model::ProjectSettings::EditorMode::TwoD);
+        prefabScene->SetEditorMode2D(m_scene->IsEditorMode2D());
         prefabScene->Init(m_renderer->GetGraphicsProvider());
         prefabScene->SetDistanceLightingSettings(
             m_projectSettings.distanceLighting);
@@ -802,8 +799,6 @@ void EditorState::InitializePanels()
         m_projectSettings = m_preferences->GetSettings();
         if (m_scene)
         {
-            m_scene->SetEditorMode2D(
-                m_projectSettings.editorMode == Engine::Model::ProjectSettings::EditorMode::TwoD);
             m_scene->SetDistanceLightingSettings(
                 m_projectSettings.distanceLighting);
         }

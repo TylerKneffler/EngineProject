@@ -12,8 +12,17 @@ enum class SceneRenderMode
     Wireframe = 2
 };
 
+enum class SceneDimension
+{
+    ThreeD = 0,
+    TwoD = 1
+};
+
 struct SceneSettings
 {
+    // Dimensional editing and rendering behavior belongs to the scene so one
+    // project can freely contain both 2D and 3D scenes.
+    SceneDimension dimension = SceneDimension::ThreeD;
     bool showGrid = true;
     int gridHalfSize = 10;
     float gridCellSize = 1.f;

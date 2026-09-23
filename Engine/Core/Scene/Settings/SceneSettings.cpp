@@ -59,6 +59,8 @@ namespace
 Engine::Serialization::JsonValue SerializeSceneSettings(const Engine::Model::SceneSettings& settings)
 {
     Engine::Serialization::JsonValue value = Engine::Serialization::JsonValue::MakeObject();
+    value.Set("dimension",
+        Engine::Serialization::JsonValue(static_cast<int>(settings.dimension)));
     value.Set("showGrid", Engine::Serialization::JsonValue(settings.showGrid));
     value.Set("gridHalfSize", Engine::Serialization::JsonValue(settings.gridHalfSize));
     value.Set("gridCellSize", Engine::Serialization::JsonValue(settings.gridCellSize));
@@ -99,6 +101,12 @@ void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engi
 {
     if (!value.IsObject())
         return;
+    if (const auto* dimension = FindField(value, "dimension"))
+    {
+        settings.dimension = dimension->AsInt() == 1
+            ? Engine::Model::SceneDimension::TwoD
+            : Engine::Model::SceneDimension::ThreeD;
+    }
     if (const auto* showGrid = FindField(value, "showGrid"))
         settings.showGrid = showGrid->AsBool();
     if (const auto* gridHalfSize = FindField(value, "gridHalfSize"))

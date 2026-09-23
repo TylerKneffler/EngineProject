@@ -52,6 +52,7 @@ private:
     enum class PendingPrefabAction { None, Apply, ApplyAll, Revert, Unpack };
     void DrawObjectNode(IEditorUi& ui, Engine::Core::Object* obj, int depth,
         bool lastSibling, uint64_t ancestorGuideMask = 0);
+    void SelectSceneRoot();
     void LogInteraction(const std::string& message) const;
     void CopySelection();
     void PasteClipboard();

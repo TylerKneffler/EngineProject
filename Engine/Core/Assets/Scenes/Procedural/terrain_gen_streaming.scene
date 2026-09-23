@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Scene xmlns:components="urn:engine-components" version="1">
-  <settings showGrid="false" gridHalfSize="160" gridCellSize="1" gridOpacity="0.1" gridFadeDistance="280" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" renderMode="0" sceneViewUiOverlay="false">
+  <settings dimension="0" showGrid="false" gridHalfSize="160" gridCellSize="1" gridOpacity="0.1" gridFadeDistance="280" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" renderMode="0" sceneViewUiOverlay="false">
     <gridColor><item>0.14</item><item>0.18</item><item>0.14</item></gridColor>
     <gridOriginColor><item>0.42</item><item>0.72</item><item>0.3</item></gridOriginColor>
     <ambientColor><item>0.05</item><item>0.065</item><item>0.045</item></ambientColor>
