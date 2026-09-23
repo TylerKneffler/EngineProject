@@ -38,6 +38,19 @@ struct EditorUiViewportInput
 
 enum class EditorUiHierarchyDropPosition { None, Before, AsChild, After };
 
+enum class EditorUiObjectIcon
+{
+    Object,
+    Light,
+    Camera,
+    Audio,
+    Mesh,
+    Sprite,
+    Physics,
+    UserInterface,
+    Transform
+};
+
 struct EditorUiHierarchyDropResult
 {
     EditorUiHierarchyDropPosition position = EditorUiHierarchyDropPosition::None;
@@ -136,6 +149,8 @@ public:
     virtual void BeginTextWrap() = 0;
     virtual void EndTextWrap() = 0;
     virtual void SameLine() = 0;
+    // Continues the current row with an item group aligned to the right edge.
+    virtual void SameLineRight(float) { SameLine(); }
     virtual void Separator() = 0;
     virtual void Spacing() = 0;
     virtual void Indent(float width = 0.f) = 0;
@@ -154,9 +169,12 @@ public:
     virtual bool InputUInt(const char* label, uint32_t* value) = 0;
     virtual void ValueLabel(const char* label, const char* value) = 0;
     virtual bool CollapsingHeader(const char* label, bool defaultOpen = true) = 0;
+    virtual bool ComponentHeader(EditorUiObjectIcon, const char* label,
+        bool defaultOpen = true) { return CollapsingHeader(label, defaultOpen); }
     virtual bool TreeNode(const void* id, const char* label, bool selected, bool leaf, bool defaultOpen = false) = 0;
     virtual void TreePop() = 0;
-    virtual EditorUiObjectRowResult ObjectTreeRow(const void* id, char* name, size_t size,
+    virtual EditorUiObjectRowResult ObjectTreeRow(const void* id,
+        EditorUiObjectIcon icon, char* name, size_t size,
         bool* enabled, bool selected, bool leaf, bool lockName,
         bool enabledInHierarchy, int hierarchyDepth, bool lastSibling,
         uint64_t ancestorGuideMask) = 0;

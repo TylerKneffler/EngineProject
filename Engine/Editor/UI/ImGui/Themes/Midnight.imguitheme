@@ -1,13 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ImGuiTheme name="Midnight" version="1">
   <Style Alpha="1" DisabledAlpha="0.5"
-         WindowPaddingX="11" WindowPaddingY="10" WindowRounding="7" WindowBorderSize="1"
-         ChildRounding="6" ChildBorderSize="1" PopupRounding="7" PopupBorderSize="1"
-         FramePaddingX="9" FramePaddingY="5" FrameRounding="6" FrameBorderSize="0"
+         WindowPaddingX="10" WindowPaddingY="10" WindowRounding="5" WindowBorderSize="1" WindowBorderHoverPadding="4"
+         ChildRounding="4" ChildBorderSize="1" PopupRounding="5" PopupBorderSize="1"
+         FramePaddingX="8" FramePaddingY="5" FrameRounding="4" FrameBorderSize="0"
          ItemSpacingX="9" ItemSpacingY="7" ItemInnerSpacingX="6" ItemInnerSpacingY="4"
          CellPaddingX="7" CellPaddingY="5" IndentSpacing="21"
-         ScrollbarSize="13" ScrollbarRounding="7" GrabMinSize="11" GrabRounding="6"
-         TabRounding="6" TabBorderSize="0" TabBarBorderSize="1" />
+         ScrollbarSize="13" ScrollbarRounding="5" ScrollbarPadding="2" GrabMinSize="10" GrabRounding="4"
+         ImageRounding="4" ImageBorderSize="1"
+         TabRounding="4" TabBorderSize="0" TabBarBorderSize="1" TabBarOverlineSize="2"
+         TreeLinesSize="1" TreeLinesRounding="3" MenuItemRounding="3"
+         DragDropTargetRounding="4" DragDropTargetBorderSize="2" DragDropTargetPadding="3"
+         SeparatorSize="1" DockingSeparatorSize="1"
+         HoverStationaryDelay="0.08" HoverDelayShort="0.12" HoverDelayNormal="0.32" />
   <Colors>
     <Color name="Text" r="0.86" g="0.89" b="0.98" a="1" />
     <Color name="TextDisabled" r="0.45" g="0.48" b="0.60" a="1" />
@@ -26,6 +31,9 @@
     <Color name="ScrollbarGrab" r="0.20" g="0.21" b="0.33" a="1" />
     <Color name="ScrollbarGrabHovered" r="0.30" g="0.29" b="0.48" a="1" />
     <Color name="ScrollbarGrabActive" r="0.40" g="0.38" b="0.62" a="1" />
+    <Color name="ResizeGrip" r="0.18" g="0.20" b="0.31" a="0.35" />
+    <Color name="ResizeGripHovered" r="0.65" g="0.49" b="1" a="0.72" />
+    <Color name="ResizeGripActive" r="0.70" g="0.54" b="1" a="0.95" />
     <Color name="CheckMark" r="0.65" g="0.49" b="1" a="1" />
     <Color name="SliderGrab" r="0.50" g="0.36" b="0.86" a="1" />
     <Color name="SliderGrabActive" r="0.70" g="0.54" b="1" a="1" />
@@ -44,6 +52,11 @@
     <Color name="TabSelectedOverline" r="0.65" g="0.49" b="1" a="1" />
     <Color name="DockingPreview" r="0.65" g="0.49" b="1" a="0.7" />
     <Color name="TextSelectedBg" r="0.47" g="0.32" b="0.78" a="0.5" />
+    <Color name="TableHeaderBg" r="0.085" g="0.09" b="0.145" a="1" />
+    <Color name="TableBorderStrong" r="0.22" g="0.23" b="0.36" a="1" />
+    <Color name="TableBorderLight" r="0.14" g="0.15" b="0.24" a="1" />
+    <Color name="TableRowBg" r="0" g="0" b="0" a="0" />
+    <Color name="TableRowBgAlt" r="0.24" g="0.19" b="0.38" a="0.18" />
     <Color name="DragDropTarget" r="0.72" g="0.58" b="1" a="1" />
     <Color name="NavCursor" r="0.72" g="0.58" b="1" a="1" />
     <Color name="ModalWindowDimBg" r="0.01" g="0.01" b="0.025" a="0.76" />

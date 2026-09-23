@@ -39,5 +39,11 @@ private:
     bool m_cursorLocked = false;
     bool m_inputSuspended = false;
     bool m_leftMouseWasDown = false;
+    bool m_hasLastCursorPosition = false;
+    POINT m_lastCursorPosition{};
+    bool m_hasLookForward = false;
+    glm::vec3 m_lookForward { 0.f, 0.f, 1.f };
+    bool m_hasBodyFrame = false;
+    glm::mat3 m_lastBodyBasis { 1.f };
     std::chrono::steady_clock::time_point m_lastFrame;
 };

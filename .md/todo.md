@@ -101,3 +101,61 @@
 - [ ] MEDIUM: Remove duplicate per-frame light collection/upload and cache reusable render scratch storage, opaque sort data, component lookups, and no-portal fast paths to reduce complete scene scans and transient allocations.
 - [x] MEDIUM: Add non-blocking DX11 GPU timestamp telemetry for terrain, portal, opaque, and transparent work. Report CPU submission and presentation separately, use a flip-discard/tearing swap chain when supported, and retain a legacy swap-chain fallback.
 - [x] MEDIUM: Extend non-blocking GPU timestamp telemetry to DX12 and Vulkan. Report command submission and API presentation time separately, retain unavailable telemetry when a queue lacks timestamp support, and never report CPU time as GPU execution. Direct platform scanout timing remains unavailable because the current DXGI/Vulkan swap-chain paths do not expose it.
+
+## Offline video export
+
+### Deterministic simulation
+
+- [ ] CRITICAL: Introduce a deterministic export clock shared by gameplay, cinematics, skeletal animation, sprite animation, particles, physics, and audio.
+- [ ] CRITICAL: Replace wall-clock timing in export-relevant components with scene or export delta time.
+- [ ] HIGH: Render an explicit frame at `t = 0` before advancing the simulation.
+- [ ] HIGH: Add repeatability tests that compare multiple exports of the same scene.
+
+### Higher-quality physics
+
+- [ ] CRITICAL: Separate output frame rate from physics simulation rate.
+- [ ] HIGH: Add an export physics-rate setting, such as 120 Hz or 240 Hz, with accumulator-based substeps.
+- [ ] HIGH: Expose export-specific maximum substeps and rigid-body solver iterations.
+- [ ] MEDIUM: Expose continuous-collision detection and contact/constraint quality controls.
+- [ ] MEDIUM: Expose cloth and other deformable-simulation iteration controls.
+- [ ] HIGH: Verify that physics produces equivalent results at different output frame rates.
+
+### Higher-quality rendering
+
+- [ ] HIGH: Separate encoder quality from render quality in the exporter and editor UI.
+- [ ] HIGH: Add an off-screen export render target instead of relying on the game swap chain.
+- [ ] HIGH: Add selectable spatial supersampling or MSAA with downsampling.
+- [ ] HIGH: Add temporal accumulation and configurable samples per output frame.
+- [ ] HIGH: Add subframe sampling and shutter controls for motion blur.
+- [ ] MEDIUM: Add export-specific shadow, lighting, reflection, and post-processing quality settings.
+- [ ] HIGH: Add linear FP16 or FP32 render targets and genuine HDR/high-bit-depth output.
+- [ ] MEDIUM: Add asynchronous GPU readback to reduce capture stalls.
+
+### Simulation caching
+
+- [ ] HIGH: Add a simulation-bake pass before final rendering.
+- [ ] HIGH: Cache rigid-body transforms, cloth/deformable state, particles, and animation state per frame or subframe.
+- [ ] MEDIUM: Allow cached simulation to be reused when changing cameras, lighting, render settings, or codecs.
+- [ ] MEDIUM: Store enough metadata to detect stale or incompatible caches.
+
+### Output and recovery
+
+- [ ] HIGH: Support PNG and EXR image-sequence output.
+- [ ] HIGH: Write an export manifest containing frame range, settings, and completion state.
+- [ ] HIGH: Resume interrupted exports and rerender selected or missing frames.
+- [ ] MEDIUM: Encode completed image sequences as a separate final step.
+- [ ] MEDIUM: Preserve the current direct-to-FFmpeg path as a fast optional mode.
+
+### Audio
+
+- [ ] HIGH: Render audio against the deterministic export clock.
+- [ ] HIGH: Support offline audio output and synchronization with video frames.
+- [ ] HIGH: Mux rendered audio into MP4, WebM, and MOV outputs instead of always passing `-an` to FFmpeg.
+
+### Validation
+
+- [ ] HIGH: Test exact frame counts and timestamps for common and fractional frame rates.
+- [ ] HIGH: Test camera-track completion and scene transitions.
+- [ ] MEDIUM: Test long-render interruption, resume, and failed-frame recovery.
+- [ ] HIGH: Test color conversion and bit depth for SDR, HDR, H.264, VP9, and ProRes outputs.
+- [ ] HIGH: Test audio/video synchronization over long exports.

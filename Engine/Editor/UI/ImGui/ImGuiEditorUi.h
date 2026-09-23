@@ -19,7 +19,9 @@ public:
     void Label(const char*) override;
     void DisabledLabel(const char*) override; void ColoredLabel(const char*, EditorUiColor) override;
     void BeginTextWrap() override; void EndTextWrap() override;
-    void SameLine() override; void Separator() override; void Spacing() override;
+    void SameLine() override;
+    void SameLineRight(float width) override;
+    void Separator() override; void Spacing() override;
     void Indent(float) override; void Unindent(float) override;
     bool Checkbox(const char*, bool*) override; bool InputText(const char*, char*, size_t) override;
     bool InputTextSubmit(const char*, char*, size_t) override;
@@ -31,8 +33,9 @@ public:
     bool SliderFloat(const char*, float*, float, float) override;
     bool InputUInt(const char*, uint32_t*) override;
     void ValueLabel(const char*, const char*) override; bool CollapsingHeader(const char*, bool) override;
+    bool ComponentHeader(EditorUiObjectIcon, const char*, bool) override;
     bool TreeNode(const void*, const char*, bool, bool, bool) override; void TreePop() override;
-    EditorUiObjectRowResult ObjectTreeRow(const void*,char*,size_t,bool*,bool,bool,bool,bool,int,bool,uint64_t) override;
+    EditorUiObjectRowResult ObjectTreeRow(const void*,EditorUiObjectIcon,char*,size_t,bool*,bool,bool,bool,bool,int,bool,uint64_t) override;
     void ObjectTreePop() override;
     EditorUiHierarchyDropResult HierarchyDropTarget(const char*) override;
     EditorUiHierarchyDropResult HierarchyBackgroundDropTarget(const char*) override;

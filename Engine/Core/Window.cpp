@@ -7,6 +7,14 @@ namespace
 {
 constexpr ULONGLONG kEscapeHoldToCloseMilliseconds = 1000;
 
+bool IsClientMouseButtonDown(UINT message)
+{
+    return message == WM_LBUTTONDOWN || message == WM_LBUTTONDBLCLK ||
+        message == WM_RBUTTONDOWN || message == WM_RBUTTONDBLCLK ||
+        message == WM_MBUTTONDOWN || message == WM_MBUTTONDBLCLK ||
+        message == WM_XBUTTONDOWN || message == WM_XBUTTONDBLCLK;
+}
+
 void ReleaseInputFocus(bool clearKeyboardFocus)
 {
     ReleaseCapture();
@@ -273,6 +281,14 @@ LRESULT CALLBACK Window::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             self->m_altLeftClickActive = false;
         }
     }
+
+    // Escape deliberately clears native keyboard focus so gameplay releases
+    // its input lock. ImGui consumes client clicks before DefWindowProc gets a
+    // chance to restore that focus, which can leave a visually focused Game
+    // panel with GetFocus() still null. Restore the HWND first so the same
+    // click that refocuses the Game view can resume controller input.
+    if (self && IsClientMouseButtonDown(msg) && GetFocus() != hwnd)
+        SetFocus(hwnd);
     
     if (self && msg == WM_DROPFILES)
     {

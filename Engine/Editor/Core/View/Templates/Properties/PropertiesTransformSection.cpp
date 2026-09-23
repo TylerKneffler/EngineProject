@@ -1,5 +1,6 @@
 #include "Engine/Editor/Core/View/Views/PropertiesView.h"
 #include "Engine/Editor/UI/IEditorUi.h"
+#include "Engine/Editor/UI/EditorComponentIcons.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Serialization/SceneSerializer.h"
 
@@ -19,7 +20,8 @@ void PropertiesView::DrawTransform(IEditorUi& ui)
         m_deferredTransformPrefabRoot = nullptr;
     }
 
-    const bool transformOpen = ui.CollapsingHeader("Transform");
+    const bool transformOpen = ui.ComponentHeader(
+        ComponentIconForType("Transform"), "Transform");
     EditorUiContextMenuResult menu;
     if (prefabRoot)
         HandlePrefabMenu(ui.PrefabOverrideMenu(&t,

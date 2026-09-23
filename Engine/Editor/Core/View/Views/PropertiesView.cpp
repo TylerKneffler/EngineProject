@@ -1,6 +1,7 @@
 #include "PropertiesView.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Compoonents/Materials/Texture.h"
+#include "Engine/Editor/UI/EditorComponentIcons.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Component.h"
 #include "Core/Graphics/IGraphicsTexture.h"
@@ -310,7 +311,8 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         std::string componentType = component->GetTypeName();
         if (componentType.empty()) componentType = "Component";
         
-        const bool componentOpen = ui.CollapsingHeader(componentType.c_str());
+        const bool componentOpen = ui.ComponentHeader(
+            ComponentIconForType(componentType), componentType.c_str());
         Engine::Core::Object* componentPrefabRoot = m_selectedObject->GetPrefabInstanceRoot();
         const bool componentEditable = componentPrefabRoot == nullptr;
         // Bind the menu to the header before drag/drop helpers replace the

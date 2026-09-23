@@ -1,6 +1,7 @@
 #include "HierarchyView.h"
 #include "Engine/Editor/Core/PrimitiveObjectFactory.h"
 #include "Engine/Editor/UI/IEditorUi.h"
+#include "Engine/Editor/UI/EditorComponentIcons.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Object.h"
 #include "Core/Compoonents/Materials/Material.h"
@@ -39,6 +40,29 @@ std::string ObjectName(const Engine::Core::Object* object)
 {
     if (!object) return "World";
     return object->name.empty() ? "(unnamed)" : object->name;
+}
+
+EditorUiObjectIcon ObjectIcon(const Engine::Core::Object& object)
+{
+    bool hasPhysics = false;
+    bool hasMesh = false;
+    for (const Engine::Core::Component* component : object.Components)
+    {
+        if (!component)
+            continue;
+        const EditorUiObjectIcon icon =
+            ComponentIconForType(component->GetTypeName());
+        if (icon == EditorUiObjectIcon::Light) return icon;
+        if (icon == EditorUiObjectIcon::Camera) return icon;
+        if (icon == EditorUiObjectIcon::Audio) return icon;
+        if (icon == EditorUiObjectIcon::Sprite) return icon;
+        if (icon == EditorUiObjectIcon::UserInterface) return icon;
+        if (icon == EditorUiObjectIcon::Mesh) hasMesh = true;
+        if (icon == EditorUiObjectIcon::Physics) hasPhysics = true;
+    }
+    if (hasMesh) return EditorUiObjectIcon::Mesh;
+    if (hasPhysics) return EditorUiObjectIcon::Physics;
+    return EditorUiObjectIcon::Object;
 }
 
 bool CanMoveInPrefabContext(Engine::Scene::Scene* scene, Engine::Core::Object* object, Engine::Core::Object* target,
@@ -399,7 +423,8 @@ void HierarchyView::DrawObjectNode(
     char name[256]; strncpy_s(name, obj->name.c_str(), sizeof(name));
     bool enabled = obj->enabled;
     const EditorUiObjectRowResult row = ui.ObjectTreeRow(
-        obj, name, sizeof(name), &enabled, obj == m_selectedObject,
+        obj, ObjectIcon(*obj), name, sizeof(name), &enabled,
+        obj == m_selectedObject,
         !hasChildren, false,
         obj->IsEnabledInHierarchy(),
         depth, lastSibling, ancestorGuideMask);

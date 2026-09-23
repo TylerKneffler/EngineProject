@@ -234,7 +234,8 @@ std::string FirstPrefabMesh(const std::string& prefabPath)
         return {};
     const std::string contents((std::istreambuf_iterator<char>(input)), {});
     static const std::regex meshPattern(
-        "\\\"file\\\"\\s*:\\s*\\\"([^\\\"]+\\.(?:mesh|obj))\\\"",
+        "(?:\\\"file\\\"\\s*:\\s*\\\"|<Mesh\\.file>\\s*)"
+        "([^\\\"<]+\\.(?:mesh|obj|gltf|glb))",
         std::regex::icase);
     std::smatch match;
     if (!std::regex_search(contents, match, meshPattern) || match.size() < 2)
@@ -243,11 +244,35 @@ std::string FirstPrefabMesh(const std::string& prefabPath)
     for (size_t position = 0;
         (position = result.find("\\\\", position)) != std::string::npos;)
         result.replace(position, 2, "\\");
-    if (std::filesystem::exists(result))
-        return result;
-    const std::filesystem::path adjacent =
-        std::filesystem::path(prefabPath).parent_path() / result;
-    return std::filesystem::exists(adjacent) ? adjacent.string() : result;
+    std::filesystem::path reference(result);
+    if (std::filesystem::exists(reference))
+        return reference.string();
+
+    const std::filesystem::path prefab(prefabPath);
+    const std::filesystem::path adjacent = prefab.parent_path() / reference;
+    if (std::filesystem::exists(adjacent))
+        return adjacent.string();
+
+    // Serialized asset references are rooted at the project's Assets folder.
+    // Find that ancestor so both project assets and Engine/Core/Assets resolve.
+    for (std::filesystem::path ancestor = prefab.parent_path();
+        !ancestor.empty(); ancestor = ancestor.parent_path())
+    {
+        std::string name = ancestor.filename().string();
+        std::transform(name.begin(), name.end(), name.begin(),
+            [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+        if (name == "assets")
+        {
+            const std::filesystem::path projectRelative =
+                ancestor.parent_path() / reference;
+            if (std::filesystem::exists(projectRelative))
+                return projectRelative.string();
+            break;
+        }
+        if (ancestor == ancestor.root_path())
+            break;
+    }
+    return {};
 }
 
 std::vector<uint8_t> MakeMeshPreview(
@@ -491,10 +516,10 @@ std::shared_ptr<Engine::Graphics::IGraphicsTexture> Upload(
 bool AssetPreviewCache::Supports(const std::string& path)
 {
     const std::string extension = Extension(path);
-    static constexpr std::array<const char*, 16> supported{
+    static constexpr std::array<const char*, 18> supported{
         ".material", ".mat", ".hdr", ".exr", ".png", ".jpg", ".jpeg",
         ".bmp", ".dds", ".tga", ".ktx2", ".obj", ".fbx", ".mesh",
-        ".prefab", ".scene" };
+        ".gltf", ".glb", ".prefab", ".scene" };
     return std::find(supported.begin(), supported.end(), extension) != supported.end();
 }
 
@@ -552,7 +577,8 @@ void* AssetPreviewCache::Get(const std::string& path,
                 const bool highDynamicRange =
                     extension == ".hdr" || extension == ".exr";
                 const bool model = extension == ".obj" || extension == ".fbx" ||
-                    extension == ".mesh" || extension == ".prefab";
+                    extension == ".mesh" || extension == ".gltf" ||
+                    extension == ".glb" || extension == ".prefab";
                 if (model)
                 {
                     std::string meshPath = extension == ".prefab"

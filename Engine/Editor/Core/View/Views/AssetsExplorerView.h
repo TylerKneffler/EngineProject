@@ -71,7 +71,6 @@ private:
     std::vector<std::string> m_backHistory;
     std::string m_selectedPath;
     bool m_gridView = false;
-    int m_thumbnailSize = 96;
     char m_search[256]{};
     char m_scriptName[256]{};
     std::string m_scriptBasePath;

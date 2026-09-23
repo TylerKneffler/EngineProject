@@ -1,5 +1,6 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #include "Scripts/Controllers/FirstPersonController.h"
+#include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Object.h"
 #include "Core/Serialization/SceneSerializer.h"
@@ -83,6 +84,8 @@ FirstPersonControllerRegistration g_registration;
 void FirstPersonController::Start()
 {
     m_lastFrame = std::chrono::steady_clock::now();
+    m_hasLookForward = false;
+    m_hasBodyFrame = false;
     const bool focused = IsApplicationFocused();
     m_inputSuspended = !focused;
     m_leftMouseWasDown = IsKeyDown(VK_LBUTTON);
@@ -98,7 +101,12 @@ void FirstPersonController::Update()
     m_lastFrame = std::chrono::steady_clock::now();
 
     const bool focused = IsApplicationFocused();
-    const bool leftMouseDown = IsKeyDown(VK_LBUTTON);
+    // Read both bits in one call. The transition bit preserves a quick
+    // down/up click even when the window message queue is fully drained before
+    // this update, while the high bit still tracks a held button.
+    const SHORT leftMouseState = GetAsyncKeyState(VK_LBUTTON);
+    const bool leftMouseDown = (leftMouseState & 0x8000) != 0;
+    const bool leftMousePressed = (leftMouseState & 0x0001) != 0;
     if (!focused || IsKeyDown(VK_ESCAPE))
     {
         m_inputSuspended = true;
@@ -112,7 +120,8 @@ void FirstPersonController::Update()
         // Focus loss and Escape deliberately require a fresh click before the
         // controller can own the pointer again. This prevents Alt+Tab or the
         // Windows key from immediately snapping the cursor back on return.
-        const bool clickedAfterRelease = leftMouseDown && !m_leftMouseWasDown;
+        const bool clickedAfterRelease = leftMousePressed ||
+            (leftMouseDown && !m_leftMouseWasDown);
         m_leftMouseWasDown = leftMouseDown;
         if (!clickedAfterRelease)
             return;
@@ -125,6 +134,8 @@ void FirstPersonController::Update()
     }
 
     UpdateLook();
+    if (m_inputSuspended)
+        return;
     UpdateMovement(dt);
 }
 
@@ -137,31 +148,81 @@ void FirstPersonController::UpdateLook()
     if (!foreground)
         return;
 
-    RECT rect{};
-    if (!GetClientRect(foreground, &rect))
+    RECT windowRect{};
+    if (!GetWindowRect(foreground, &windowRect))
         return;
-
-    POINT center{ rect.right / 2, rect.bottom / 2 };
-    ClientToScreen(foreground, &center);
 
     POINT cursor{};
-    GetCursorPos(&cursor);
-
-    const float deltaX = static_cast<float>(cursor.x - center.x);
-    const float deltaY = static_cast<float>(cursor.y - center.y);
-    if (deltaX == 0.f && deltaY == 0.f)
+    if (!GetCursorPos(&cursor))
         return;
+
+    // Keep the pointer hidden while it is over the editor and reveal it after
+    // it crosses the window edge. Merely crossing the edge must not release
+    // gameplay focus: the user may move back in without interrupting control.
+    // A click or other activation outside the editor changes native focus;
+    // the focused check at the start of Update then suspends gameplay.
+    const bool pointerInsideEditor = PtInRect(&windowRect, cursor) != FALSE;
+    SetSystemCursorVisible(!pointerInsideEditor);
+
+    if (!m_hasLastCursorPosition)
+    {
+        m_lastCursorPosition = cursor;
+        m_hasLastCursorPosition = true;
+        return;
+    }
+
+    const float deltaX = static_cast<float>(cursor.x - m_lastCursorPosition.x);
+    const float deltaY = static_cast<float>(cursor.y - m_lastCursorPosition.y);
+    m_lastCursorPosition = cursor;
 
     auto* body = Owner->GetComponent<Engine::Components::RigidBody>();
     const glm::vec3 gravityDown = body
         ? body->GetGravityDirection() : glm::vec3(0.f, -1.f, 0.f);
     const glm::vec3 gravityUp = -gravityDown;
     const glm::mat4 ownerWorld = Owner->transform.GetWorldMatrix();
-    glm::vec3 forward = SafeNormalize(glm::vec3(ownerWorld[2]),
-        PerpendicularForward(gravityUp));
+    const glm::vec3 worldPosition = glm::vec3(ownerWorld[3]);
+    Engine::Components::Camera* camera =
+        Owner->GetComponent<Engine::Components::Camera>();
+    if (!m_hasLookForward)
+    {
+        m_lookForward = camera && !camera->useTransformRotation
+            ? SafeNormalize(camera->target - worldPosition,
+                SafeNormalize(glm::vec3(ownerWorld[2]),
+                    PerpendicularForward(gravityUp)))
+            : SafeNormalize(glm::vec3(ownerWorld[2]),
+                PerpendicularForward(gravityUp));
+        m_hasLookForward = true;
+    }
 
-    forward = SafeNormalize(glm::angleAxis(-deltaX * lookSensitivity,
-        gravityUp) * forward, forward);
+    // Portal traversal intentionally remaps the body's whole gravity frame
+    // after controller update. Carry that external frame change into the
+    // stored view direction on the following tick. Ordinary collision
+    // impulses cannot enter this path because the capsule's rotation is
+    // locked and the controller publishes the same upright basis each frame.
+    if (body)
+    {
+        const glm::vec3 currentBodyForward = SafeNormalize(
+            glm::vec3(ownerWorld[2]) - gravityUp *
+                glm::dot(glm::vec3(ownerWorld[2]), gravityUp),
+            PerpendicularForward(gravityUp));
+        const glm::vec3 currentBodyRight = SafeNormalize(
+            glm::cross(gravityUp, currentBodyForward),
+            glm::cross(gravityUp, PerpendicularForward(gravityUp)));
+        glm::mat3 currentBodyBasis(1.f);
+        currentBodyBasis[0] = currentBodyRight;
+        currentBodyBasis[1] = gravityUp;
+        currentBodyBasis[2] = currentBodyForward;
+        if (m_hasBodyFrame)
+            m_lookForward = SafeNormalize(
+                currentBodyBasis * glm::transpose(m_lastBodyBasis) *
+                    m_lookForward,
+                currentBodyForward);
+    }
+    glm::vec3 forward = m_lookForward;
+
+    if (deltaX != 0.f)
+        forward = SafeNormalize(glm::angleAxis(-deltaX * lookSensitivity,
+            gravityUp) * forward, forward);
     glm::vec3 right = SafeNormalize(glm::cross(gravityUp, forward),
         SafeNormalize(glm::vec3(ownerWorld[0]),
             glm::cross(gravityUp, PerpendicularForward(gravityUp))));
@@ -172,22 +233,43 @@ void FirstPersonController::UpdateLook()
         lookSensitivity;
     const float targetPitch = std::clamp(currentPitch + pitchDelta,
         -kMaxPitch, kMaxPitch);
-    forward = SafeNormalize(glm::angleAxis(targetPitch - currentPitch, right) *
-        forward, forward);
+    if (deltaY != 0.f)
+        forward = SafeNormalize(glm::angleAxis(targetPitch - currentPitch, right) *
+            forward, forward);
     right = SafeNormalize(glm::cross(gravityUp, forward), right);
     const glm::vec3 cameraUp = SafeNormalize(glm::cross(forward, right),
         gravityUp);
+    m_lookForward = forward;
 
+    // Pitch changes the view only. Keep the physical capsule aligned to its
+    // gravity frame so stair and ledge contacts cannot roll or spin it.
+    const glm::vec3 bodyForward = SafeNormalize(forward - gravityUp *
+        glm::dot(forward, gravityUp), PerpendicularForward(gravityUp));
+    const glm::vec3 bodyRight = SafeNormalize(
+        glm::cross(gravityUp, bodyForward), right);
     glm::mat3 worldBasis(1.f);
-    worldBasis[0] = right;
-    worldBasis[1] = cameraUp;
-    worldBasis[2] = forward;
+    worldBasis[0] = bodyRight;
+    worldBasis[1] = gravityUp;
+    worldBasis[2] = bodyForward;
     const glm::quat worldRotation = glm::normalize(glm::quat_cast(worldBasis));
     if (body)
-        body->SetWorldPose(Owner->transform.GetWorldPosition(), worldRotation);
+    {
+        body->SetWorldPose(worldPosition, worldRotation);
+        body->SetAngularVelocity(glm::vec3(0.f));
+        m_lastBodyBasis = worldBasis;
+        m_hasBodyFrame = true;
+    }
     else
         Owner->transform.rotation = glm::eulerAngles(worldRotation);
-    SetCursorPos(center.x, center.y);
+
+    if (camera)
+    {
+        camera->useTransformRotation = false;
+        // Camera::target is a world-space point. Keep it distant so movement
+        // performed later in the physics tick cannot noticeably bend the view.
+        camera->target = worldPosition + forward * 1000.f;
+        camera->up = cameraUp;
+    }
 }
 
 void FirstPersonController::UpdateMovement(float deltaTime)
@@ -244,10 +326,12 @@ void FirstPersonController::SetCursorLock(bool locked)
     m_cursorLocked = locked;
     if (locked)
     {
+        m_hasLastCursorPosition = GetCursorPos(&m_lastCursorPosition) != FALSE;
         SetSystemCursorVisible(false);
     }
     else
     {
+        m_hasLastCursorPosition = false;
         SetSystemCursorVisible(true);
     }
 }
