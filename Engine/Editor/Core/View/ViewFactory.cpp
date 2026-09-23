@@ -42,6 +42,24 @@ bool ViewFactory::IsSingleton(const std::string& typeName)
     return kSingletonTypes.count(typeName) > 0;
 }
 
+void ViewFactory::AssignLowestAvailableTitle(const std::string& typeName,
+    IEditorPanel* panel)
+{
+    if (!panel)
+        return;
+
+    auto& liveSlots = m_liveTitleSlots[typeName];
+    int slot = 1;
+    while (liveSlots.count(slot) != 0)
+        ++slot;
+
+    liveSlots.insert(slot);
+    m_panelTitleSlots[panel] = { typeName, slot };
+    panel->SetTitle(slot == 1
+        ? typeName
+        : typeName + " " + std::to_string(slot));
+}
+
 // ---------------------------------------------------------------------------
 // NotifyPanelRemoved — clear the singleton entry when a panel is destroyed.
 // ---------------------------------------------------------------------------
@@ -52,9 +70,22 @@ void ViewFactory::NotifyPanelRemoved(IEditorPanel* panel)
         if (it->second == panel)
         {
             m_singletonInstances.erase(it);
-            return;
+            break;
         }
     }
+
+    const auto titleSlot = m_panelTitleSlots.find(panel);
+    if (titleSlot == m_panelTitleSlots.end())
+        return;
+
+    const auto liveSlots = m_liveTitleSlots.find(titleSlot->second.first);
+    if (liveSlots != m_liveTitleSlots.end())
+    {
+        liveSlots->second.erase(titleSlot->second.second);
+        if (liveSlots->second.empty())
+            m_liveTitleSlots.erase(liveSlots);
+    }
+    m_panelTitleSlots.erase(titleSlot);
 }
 
 // ---------------------------------------------------------------------------
@@ -90,7 +121,7 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
 
         auto view = std::make_unique<SceneView>();
         view->SetViewBackend(m_renderer->CreateViewBackend());
-        view->SetTitle("Scene " + std::to_string(++m_sceneCount));
+        AssignLowestAvailableTitle(typeName, view.get());
         view->SetDefaultDockArea(EditorPanelDockArea::MainDocument);
         view->Init(deviceHandle, w, h, cpu, gpu, slot, m_scene, m_settings);
         view->OnFocused = OnMainDocumentFocused;
@@ -115,7 +146,7 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
 
         auto view = std::make_unique<GameView>();
         view->SetViewBackend(m_renderer->CreateViewBackend());
-        view->SetTitle("Game " + std::to_string(++m_gameCount));
+        AssignLowestAvailableTitle(typeName, view.get());
         view->SetDefaultDockArea(EditorPanelDockArea::MainDocument);
         view->Init(deviceHandle, w, h, cpu, gpu, slot, m_scene, m_settings);
         view->OnFocused = OnMainDocumentFocused;
@@ -125,7 +156,7 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
     if (typeName == "Hierarchy")
     {
         auto view = std::make_unique<HierarchyView>();
-        view->SetTitle("Hierarchy " + std::to_string(++m_hierarchyCount));
+        AssignLowestAvailableTitle(typeName, view.get());
         view->SetDefaultDockArea(EditorPanelDockArea::LeftSidebar);
         view->Init(m_scene);
         view->OnFocused = OnMainDocumentFocused;
@@ -147,7 +178,7 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
     if (typeName == "Properties")
     {
         auto view = std::make_unique<PropertiesView>();
-        view->SetTitle("Properties " + std::to_string(++m_propertiesCount));
+        AssignLowestAvailableTitle(typeName, view.get());
         view->SetDefaultDockArea(EditorPanelDockArea::RightSidebar);
         view->Init(m_scene);
         view->OnFocused = OnMainDocumentFocused;
@@ -163,7 +194,7 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
     if (typeName == "Assets")
     {
         auto view = std::make_unique<AssetsExplorerView>();
-        view->SetTitle("Assets " + std::to_string(++m_assetsCount));
+        AssignLowestAvailableTitle(typeName, view.get());
         view->SetDefaultDockArea(EditorPanelDockArea::BottomPanel);
         view->Init(m_settings.assetsDirectory, m_scene);
         if (OnSceneRequested)
@@ -180,7 +211,7 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
     if (typeName == "Console")
     {
         auto view = std::make_unique<ConsoleView>();
-        view->SetTitle("Console " + std::to_string(++m_consoleCount));
+        AssignLowestAvailableTitle(typeName, view.get());
         view->SetDefaultDockArea(EditorPanelDockArea::BottomPanel);
         view->SetProblemStore(m_problemStore);
         m_singletonInstances[typeName] = view.get();
@@ -190,7 +221,7 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
     if (typeName == "Terminal")
     {
         auto view = std::make_unique<TerminalView>();
-        view->SetTitle("Terminal " + std::to_string(++m_terminalCount));
+        AssignLowestAvailableTitle(typeName, view.get());
         view->SetDefaultDockArea(EditorPanelDockArea::BottomPanel);
         view->Init(std::filesystem::current_path().string());
         m_singletonInstances[typeName] = view.get();
@@ -200,7 +231,7 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
     if (typeName == "Problems")
     {
         auto view = std::make_unique<ProblemsView>(m_problemStore);
-        view->SetTitle("Problems " + std::to_string(++m_problemsCount));
+        AssignLowestAvailableTitle(typeName, view.get());
         view->SetDefaultDockArea(EditorPanelDockArea::BottomPanel);
         m_singletonInstances[typeName] = view.get();
         return view;

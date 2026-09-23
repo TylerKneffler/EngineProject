@@ -8,6 +8,7 @@
 namespace Engine::Components
 {
 class PrimitiveObjectCollider;
+class UIObject;
 class UIText;
 }
 
@@ -29,6 +30,12 @@ public:
     std::string scoreTextName = "Score";
     PROPERTY(Inspector, EditAnywhere, Category = "Pong | Objects")
     std::string statusTextName = "Status";
+    PROPERTY(Inspector, EditAnywhere, Category = "Pong | Objects")
+    std::string controlsTextName = "Controls";
+    PROPERTY(Inspector, EditAnywhere, Category = "Pong | Objects")
+    std::string menuTitleName = "Menu Title";
+    PROPERTY(Inspector, EditAnywhere, Category = "Pong | Objects")
+    std::string menuBodyName = "Menu Body";
 
     PROPERTY(Inspector, EditAnywhere, Category = "Pong | Gameplay", ClampMin = "0.1")
     float paddleSpeed = 7.5f;
@@ -57,6 +64,13 @@ public:
 
 private:
     void ResolveObjects();
+    void EnterMenu();
+    void StartMatch();
+    void UpdateMenu(bool confirmPressed, bool upPressed, bool downPressed,
+        bool leftPressed, bool rightPressed);
+    void RefreshMenu();
+    void SetMenuVisible(bool visible);
+    void SetHudVisible(bool visible);
     void ResetMatch();
     void ResetRound(float horizontalDirection);
     void UpdatePaddles(float deltaTime);
@@ -66,6 +80,7 @@ private:
     void ScorePoint(bool leftPlayerScored);
     void RefreshHud();
     static bool IsKeyDown(int virtualKey);
+    bool KeyPressed(int virtualKey);
     static glm::vec2 ColliderHalfSize(const Engine::Core::Object* object,
         const glm::vec2& fallback);
 
@@ -74,12 +89,23 @@ private:
     Engine::Core::Object* m_ball = nullptr;
     Engine::Components::UIText* m_scoreText = nullptr;
     Engine::Components::UIText* m_statusText = nullptr;
+    Engine::Components::UIText* m_controlsText = nullptr;
+    Engine::Components::UIText* m_menuTitleText = nullptr;
+    Engine::Components::UIText* m_menuBodyText = nullptr;
+    Engine::Components::UIObject* m_scoreLayout = nullptr;
+    Engine::Components::UIObject* m_statusLayout = nullptr;
+    Engine::Components::UIObject* m_controlsLayout = nullptr;
+    Engine::Components::UIObject* m_menuTitleLayout = nullptr;
+    Engine::Components::UIObject* m_menuBodyLayout = nullptr;
     glm::vec2 m_ballVelocity { 0.f };
     float m_serveTimer = 0.f;
     float m_pendingServeDirection = 1.f;
     int m_leftScore = 0;
     int m_rightScore = 0;
     int m_serveIndex = 0;
+    int m_menuSelection = 0;
+    enum class GameState { Menu, Playing, GameOver };
+    GameState m_state = GameState::Menu;
+    bool m_keyWasDown[256] {};
     bool m_matchOver = false;
-    bool m_restartWasDown = false;
 };

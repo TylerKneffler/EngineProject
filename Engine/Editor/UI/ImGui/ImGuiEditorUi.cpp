@@ -897,25 +897,33 @@ void ImGuiEditorUi::DockWindowToArea(const char* title,EditorPanelDockArea area)
         ImGuiWindow* window=ImGui::FindWindowByName(name);
         return window&&window->DockNode?window->DockNode->ID:0;
     };
+    auto nodeForViewType=[&](const char* baseName)->ImGuiID{
+        if(ImGuiID node=nodeForWindow(baseName))return node;
+        for(int slot=2;slot<=32;++slot){
+            const std::string numbered=std::string(baseName)+" "+std::to_string(slot);
+            if(ImGuiID node=nodeForWindow(numbered.c_str()))return node;
+        }
+        return 0;
+    };
 
     ImGuiID targetNode=0;
     switch(area)
     {
     case EditorPanelDockArea::MainDocument:
-        targetNode=nodeForWindow("Scene 1");
-        if(!targetNode)targetNode=nodeForWindow("Game 1");
+        targetNode=nodeForViewType("Scene");
+        if(!targetNode)targetNode=nodeForViewType("Game");
         break;
     case EditorPanelDockArea::LeftSidebar:
-        targetNode=nodeForWindow("Hierarchy 1");
-        if(!targetNode)targetNode=nodeForWindow("Assets 1");
+        targetNode=nodeForWindow("Hierarchy");
+        if(!targetNode)targetNode=nodeForWindow("Assets");
         break;
     case EditorPanelDockArea::RightSidebar:
-        targetNode=nodeForWindow("Properties 1");
+        targetNode=nodeForWindow("Properties");
         break;
     case EditorPanelDockArea::BottomPanel:
-        targetNode=nodeForWindow("Console 1");
-        if(!targetNode)targetNode=nodeForWindow("Problems 1");
-        if(!targetNode)targetNode=nodeForWindow("Terminal 1");
+        targetNode=nodeForWindow("Console");
+        if(!targetNode)targetNode=nodeForWindow("Problems");
+        if(!targetNode)targetNode=nodeForWindow("Terminal");
         break;
     default:
         break;

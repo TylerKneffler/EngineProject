@@ -1,6 +1,7 @@
 #include "Scripts/Demos/PongGameController.h"
 
 #include "Core/Compoonents/Physics/Collider.h"
+#include "Core/Compoonents/UI/UIObject.h"
 #include "Core/Compoonents/UI/UIText.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
@@ -16,6 +17,9 @@ PongGameController::PongGameController()
     RegisterField("ballName", ballName);
     RegisterField("scoreTextName", scoreTextName);
     RegisterField("statusTextName", statusTextName);
+    RegisterField("controlsTextName", controlsTextName);
+    RegisterField("menuTitleName", menuTitleName);
+    RegisterField("menuBodyName", menuBodyName);
     RegisterField("paddleSpeed", paddleSpeed);
     RegisterField("ballSpeed", ballSpeed);
     RegisterField("speedGainPerHit", speedGainPerHit);
@@ -46,6 +50,7 @@ void PongGameController::Start()
 {
     ResolveObjects();
     ResetMatch();
+    EnterMenu();
 }
 
 void PongGameController::Update()
@@ -59,15 +64,42 @@ void PongGameController::Update()
 
     const float deltaTime = std::clamp(Owner->GetScene()->GetDeltaTime(),
         0.f, 0.05f);
-    const bool restartDown = IsKeyDown(VK_SPACE) || IsKeyDown(VK_RETURN);
-    if (m_matchOver)
+    const bool enterPressed = KeyPressed(VK_RETURN);
+    const bool spacePressed = KeyPressed(VK_SPACE);
+    const bool confirmPressed = enterPressed || spacePressed;
+    const bool escapePressed = KeyPressed(VK_ESCAPE);
+    const bool arrowUpPressed = KeyPressed(VK_UP);
+    const bool wPressed = KeyPressed('W');
+    const bool arrowDownPressed = KeyPressed(VK_DOWN);
+    const bool sPressed = KeyPressed('S');
+    const bool arrowLeftPressed = KeyPressed(VK_LEFT);
+    const bool aPressed = KeyPressed('A');
+    const bool arrowRightPressed = KeyPressed(VK_RIGHT);
+    const bool dPressed = KeyPressed('D');
+    const bool upPressed = arrowUpPressed || wPressed;
+    const bool downPressed = arrowDownPressed || sPressed;
+    const bool leftPressed = arrowLeftPressed || aPressed;
+    const bool rightPressed = arrowRightPressed || dPressed;
+
+    if (m_state == GameState::Menu)
     {
-        if (restartDown && !m_restartWasDown)
-            ResetMatch();
-        m_restartWasDown = restartDown;
+        UpdateMenu(confirmPressed, upPressed, downPressed, leftPressed,
+            rightPressed);
         return;
     }
-    m_restartWasDown = restartDown;
+    if (m_state == GameState::GameOver)
+    {
+        if (confirmPressed)
+            StartMatch();
+        else if (escapePressed)
+            EnterMenu();
+        return;
+    }
+    if (escapePressed)
+    {
+        EnterMenu();
+        return;
+    }
 
     UpdatePaddles(deltaTime);
     if (m_serveTimer > 0.f)
@@ -99,10 +131,133 @@ void PongGameController::ResolveObjects()
         FindObjectInSceneByName(scoreTextName);
     Engine::Core::Object* statusObject =
         FindObjectInSceneByName(statusTextName);
+    Engine::Core::Object* controlsObject =
+        FindObjectInSceneByName(controlsTextName);
+    Engine::Core::Object* menuTitleObject =
+        FindObjectInSceneByName(menuTitleName);
+    Engine::Core::Object* menuBodyObject =
+        FindObjectInSceneByName(menuBodyName);
     m_scoreText = scoreObject
         ? scoreObject->GetComponent<Engine::Components::UIText>() : nullptr;
     m_statusText = statusObject
         ? statusObject->GetComponent<Engine::Components::UIText>() : nullptr;
+    m_controlsText = controlsObject
+        ? controlsObject->GetComponent<Engine::Components::UIText>() : nullptr;
+    m_menuTitleText = menuTitleObject
+        ? menuTitleObject->GetComponent<Engine::Components::UIText>() : nullptr;
+    m_menuBodyText = menuBodyObject
+        ? menuBodyObject->GetComponent<Engine::Components::UIText>() : nullptr;
+    m_scoreLayout = scoreObject
+        ? scoreObject->GetComponent<Engine::Components::UIObject>() : nullptr;
+    m_statusLayout = statusObject
+        ? statusObject->GetComponent<Engine::Components::UIObject>() : nullptr;
+    m_controlsLayout = controlsObject
+        ? controlsObject->GetComponent<Engine::Components::UIObject>() : nullptr;
+    m_menuTitleLayout = menuTitleObject
+        ? menuTitleObject->GetComponent<Engine::Components::UIObject>() : nullptr;
+    m_menuBodyLayout = menuBodyObject
+        ? menuBodyObject->GetComponent<Engine::Components::UIObject>() : nullptr;
+}
+
+void PongGameController::EnterMenu()
+{
+    m_state = GameState::Menu;
+    m_matchOver = false;
+    m_ballVelocity = glm::vec2(0.f);
+    if (m_ball)
+        m_ball->transform.position = glm::vec3(0.f, 0.f,
+            m_ball->transform.position.z);
+    if (m_statusText)
+    {
+        m_statusText->text.clear();
+        m_statusText->MarkConfigurationDirty();
+    }
+    SetHudVisible(false);
+    SetMenuVisible(true);
+    RefreshMenu();
+}
+
+void PongGameController::StartMatch()
+{
+    SetMenuVisible(false);
+    SetHudVisible(true);
+    m_state = GameState::Playing;
+    ResetMatch();
+}
+
+void PongGameController::UpdateMenu(bool confirmPressed, bool upPressed,
+    bool downPressed, bool leftPressed, bool rightPressed)
+{
+    if (upPressed)
+        m_menuSelection = (m_menuSelection + 2) % 3;
+    if (downPressed)
+        m_menuSelection = (m_menuSelection + 1) % 3;
+
+    const bool adjust = leftPressed || rightPressed ||
+        (confirmPressed && m_menuSelection != 0);
+    if (adjust && m_menuSelection == 1)
+        rightPaddleAi = !rightPaddleAi;
+    else if (adjust && m_menuSelection == 2)
+    {
+        constexpr int scoreLimits[] = { 5, 11, 15 };
+        int index = 0;
+        for (int i = 0; i < 3; ++i)
+        {
+            if (winningScore == scoreLimits[i])
+                index = i;
+        }
+        index = (index + (leftPressed ? 2 : 1)) % 3;
+        winningScore = scoreLimits[index];
+    }
+    else if (confirmPressed && m_menuSelection == 0)
+    {
+        StartMatch();
+        return;
+    }
+    RefreshMenu();
+}
+
+void PongGameController::RefreshMenu()
+{
+    if (m_menuTitleText)
+    {
+        m_menuTitleText->text = "PONG";
+        m_menuTitleText->MarkConfigurationDirty();
+    }
+    if (!m_menuBodyText)
+        return;
+    const char* markers[] = { "  ", "  ", "  " };
+    markers[m_menuSelection] = "> ";
+    m_menuBodyText->text = std::string(markers[0]) + "PLAY\n\n" +
+        markers[1] + "OPPONENT   " +
+        (rightPaddleAi ? "CPU" : "2 PLAYER") + "\n\n" +
+        markers[2] + "FIRST TO   " + std::to_string(winningScore) +
+        "\n\nW/S SELECT   A/D CHANGE   ENTER OK";
+    m_menuBodyText->MarkConfigurationDirty();
+}
+
+void PongGameController::SetMenuVisible(bool visible)
+{
+    for (Engine::Components::UIObject* layout :
+        { m_menuTitleLayout, m_menuBodyLayout })
+    {
+        if (!layout)
+            continue;
+        layout->visible = visible;
+        layout->MarkConfigurationDirty();
+    }
+}
+
+void PongGameController::SetHudVisible(bool visible)
+{
+    for (Engine::Components::UIObject* layout :
+        { m_scoreLayout, m_statusLayout, m_controlsLayout })
+    {
+        if (!layout)
+            continue;
+        layout->visible = visible;
+        layout->MarkConfigurationDirty();
+    }
 }
 
 void PongGameController::ResetMatch()
@@ -256,14 +411,15 @@ void PongGameController::ScorePoint(bool leftPlayerScored)
         m_rightScore >= std::max(1, winningScore))
     {
         m_matchOver = true;
+        m_state = GameState::GameOver;
         m_ballVelocity = glm::vec2(0.f);
         m_ball->transform.position.x = 0.f;
         m_ball->transform.position.y = 0.f;
         if (m_statusText)
         {
             m_statusText->text = m_leftScore > m_rightScore
-                ? "PLAYER 1 WINS  -  SPACE TO RESTART"
-                : "PLAYER 2 WINS  -  SPACE TO RESTART";
+                ? "PLAYER 1 WINS\n\nENTER REPLAY   ESC MENU"
+                : "PLAYER 2 WINS\n\nENTER REPLAY   ESC MENU";
             m_statusText->MarkConfigurationDirty();
         }
         return;
@@ -278,11 +434,28 @@ void PongGameController::RefreshHud()
     m_scoreText->text = std::to_string(m_leftScore) + "     " +
         std::to_string(m_rightScore);
     m_scoreText->MarkConfigurationDirty();
+    if (m_controlsText)
+    {
+        m_controlsText->text = rightPaddleAi
+            ? "W / S     ESC MENU"
+            : "W / S     UP / DOWN     ESC MENU";
+        m_controlsText->MarkConfigurationDirty();
+    }
 }
 
 bool PongGameController::IsKeyDown(int virtualKey)
 {
     return (GetAsyncKeyState(virtualKey) & 0x8000) != 0;
+}
+
+bool PongGameController::KeyPressed(int virtualKey)
+{
+    if (virtualKey < 0 || virtualKey >= 256)
+        return false;
+    const bool down = IsKeyDown(virtualKey);
+    const bool pressed = down && !m_keyWasDown[virtualKey];
+    m_keyWasDown[virtualKey] = down;
+    return pressed;
 }
 
 glm::vec2 PongGameController::ColliderHalfSize(
