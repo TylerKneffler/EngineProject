@@ -29,9 +29,11 @@ private:
     bool DrawSceneUiOverlayToggle(IEditorUi& ui,
         const EditorUiViewportInput& input,
         Engine::Scene::Scene* scene);
+    bool DrawOrientationGizmo(IEditorUi& ui,
+        const EditorUiViewportInput& input,
+        Engine::Scene::Scene* scene);
 
     EditorTransformTool m_transformTool = EditorTransformTool::Translate;
-    bool m_transformToolbarExpanded = false;
     bool m_renderModeExpanded = false;
 };
 }

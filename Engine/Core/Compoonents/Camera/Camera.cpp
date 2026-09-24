@@ -10,15 +10,15 @@ namespace Engine::Components
 Camera::Camera()
 {
     SetTypeName(COMPONENT_TYPE_NAME(Camera));
-    RegisterField("active", active);
-    RegisterField("useTransformRotation", useTransformRotation);
-    RegisterField("fov", fov);
-    RegisterField("near", nearPlane);
-    RegisterField("far", farPlane);
-    RegisterField("orthographic", orthographic);
-    RegisterField("orthographicSize", orthographicSize);
-    RegisterField("target", target);
-    RegisterField("up", up);
+    RegisterField("active", active, "General");
+    RegisterField("useTransformRotation", useTransformRotation, "General");
+    RegisterField("fov", fov, "Projection");
+    RegisterField("near", nearPlane, "Projection");
+    RegisterField("far", farPlane, "Projection");
+    RegisterField("orthographic", orthographic, "Projection");
+    RegisterField("orthographicSize", orthographicSize, "Projection");
+    RegisterField("target", target, "View");
+    RegisterField("up", up, "View");
 }
 
 glm::mat4 Camera::GetViewMatrix() const

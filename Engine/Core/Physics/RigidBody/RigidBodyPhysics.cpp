@@ -45,28 +45,28 @@ Engine::Components::RigidBody::RigidBody() : m_impl(new Impl())
 {
     SetTypeName("RigidBody");
     singlecomponent = true;
-    RegisterField("bodyType", bodyType);
-    RegisterField("mass", mass);
-    RegisterField("useGravity", useGravity);
-    RegisterField("gravityScale", gravityScale);
-    RegisterField("gravityDirection", gravityDirection);
-    RegisterField("linearDamping", linearDamping);
-    RegisterField("angularDamping", angularDamping);
-    RegisterField("friction", friction);
-    RegisterField("restitution", restitution);
-    RegisterField("isTrigger", isTrigger);
-    RegisterField("continuousCollision", continuousCollision);
-    RegisterField("initialLinearVelocity", initialLinearVelocity);
-    RegisterField("initialAngularVelocity", initialAngularVelocity);
-    RegisterField("freezePositionX", freezePositionX);
-    RegisterField("freezePositionY", freezePositionY);
-    RegisterField("freezePositionZ", freezePositionZ);
-    RegisterField("freezeRotationX", freezeRotationX);
-    RegisterField("freezeRotationY", freezeRotationY);
-    RegisterField("freezeRotationZ", freezeRotationZ);
-    RegisterField("collisionLayer", collisionLayer);
-    RegisterField("collisionMask", collisionMask);
-    RegisterField("collisionIdentifier", collisionIdentifier);
+    RegisterField("bodyType", bodyType, "Body");
+    RegisterField("mass", mass, "Body");
+    RegisterField("useGravity", useGravity, "Forces");
+    RegisterField("gravityScale", gravityScale, "Forces");
+    RegisterField("gravityDirection", gravityDirection, "Forces");
+    RegisterField("linearDamping", linearDamping, "Forces");
+    RegisterField("angularDamping", angularDamping, "Forces");
+    RegisterField("friction", friction, "Material");
+    RegisterField("restitution", restitution, "Material");
+    RegisterField("isTrigger", isTrigger, "Collision");
+    RegisterField("continuousCollision", continuousCollision, "Collision");
+    RegisterField("initialLinearVelocity", initialLinearVelocity, "Initial Velocity", false);
+    RegisterField("initialAngularVelocity", initialAngularVelocity, "Initial Velocity", false);
+    RegisterField("freezePositionX", freezePositionX, "Constraints", false);
+    RegisterField("freezePositionY", freezePositionY, "Constraints", false);
+    RegisterField("freezePositionZ", freezePositionZ, "Constraints", false);
+    RegisterField("freezeRotationX", freezeRotationX, "Constraints", false);
+    RegisterField("freezeRotationY", freezeRotationY, "Constraints", false);
+    RegisterField("freezeRotationZ", freezeRotationZ, "Constraints", false);
+    RegisterField("collisionLayer", collisionLayer, "Filtering", false);
+    RegisterField("collisionMask", collisionMask, "Filtering", false);
+    RegisterField("collisionIdentifier", collisionIdentifier, "Filtering", false);
 }
 
 bool Engine::Components::RigidBody::IsOverlapping(const RigidBody* other) const
@@ -740,51 +740,55 @@ bool Engine::Components::RigidBody::DrawProperties(
 {
     bool changed = Component::DrawProperties(ui);
     ui.Separator();
-    ui.Label("Friction Behaviors");
-    ui.DisabledLabel("Specific Name/Identifier rules override the All fallback.");
-    std::size_t removeIndex = frictionBehaviors.size();
-    static const char* modes[] = { "All", "Name", "Identifier" };
-    for (std::size_t index = 0; index < frictionBehaviors.size(); ++index)
+    if (ui.PropertyGroupHeader("Friction Behaviors", false))
     {
-        FrictionBehavior& behavior = frictionBehaviors[index];
-        ui.PushId(&behavior);
-        int selected = Engine::Physics::Lower(behavior.match) == "name" ? 1
-            : Engine::Physics::Lower(behavior.match) == "identifier" ? 2 : 0;
-        if (ui.Combo("Match", &selected, modes, 3))
+        ui.Indent(12.f);
+        ui.DisabledLabel("Specific Name/Identifier rules override the All fallback.");
+        std::size_t removeIndex = frictionBehaviors.size();
+        static const char* modes[] = { "All", "Name", "Identifier" };
+        for (std::size_t index = 0; index < frictionBehaviors.size(); ++index)
         {
-            behavior.match = modes[selected];
+            FrictionBehavior& behavior = frictionBehaviors[index];
+            ui.PushId(&behavior);
+            int selected = Engine::Physics::Lower(behavior.match) == "name" ? 1
+                : Engine::Physics::Lower(behavior.match) == "identifier" ? 2 : 0;
+            if (ui.Combo("Match", &selected, modes, 3))
+            {
+                behavior.match = modes[selected];
+                changed = true;
+            }
+            char target[256]{};
+            std::strncpy(target, behavior.target.c_str(), sizeof(target) - 1);
+            ui.BeginDisabled(selected == 0);
+            if (ui.InputText("Target", target, sizeof(target)))
+            {
+                behavior.target = target;
+                changed = true;
+            }
+            ui.EndDisabled();
+            if (ui.DragFloat("Friction", &behavior.friction, 0.01f, 0.f, 1.f))
+            {
+                behavior.friction = std::clamp(behavior.friction, 0.f, 1.f);
+                changed = true;
+            }
+            if (ui.Checkbox("Enabled", &behavior.enabled))
+                changed = true;
+            if (ui.Button("Remove"))
+                removeIndex = index;
+            ui.Separator();
+            ui.PopId();
+        }
+        if (removeIndex < frictionBehaviors.size())
+        {
+            frictionBehaviors.erase(frictionBehaviors.begin() + removeIndex);
             changed = true;
         }
-        char target[256]{};
-        std::strncpy(target, behavior.target.c_str(), sizeof(target) - 1);
-        ui.BeginDisabled(selected == 0);
-        if (ui.InputText("Target", target, sizeof(target)))
+        if (ui.Button("Add Friction Behavior"))
         {
-            behavior.target = target;
+            frictionBehaviors.emplace_back();
             changed = true;
         }
-        ui.EndDisabled();
-        if (ui.DragFloat("Friction", &behavior.friction, 0.01f, 0.f, 1.f))
-        {
-            behavior.friction = std::clamp(behavior.friction, 0.f, 1.f);
-            changed = true;
-        }
-        if (ui.Checkbox("Enabled", &behavior.enabled))
-            changed = true;
-        if (ui.Button("Remove"))
-            removeIndex = index;
-        ui.Separator();
-        ui.PopId();
-    }
-    if (removeIndex < frictionBehaviors.size())
-    {
-        frictionBehaviors.erase(frictionBehaviors.begin() + removeIndex);
-        changed = true;
-    }
-    if (ui.Button("Add Friction Behavior"))
-    {
-        frictionBehaviors.emplace_back();
-        changed = true;
+        ui.Unindent(12.f);
     }
     if (changed)
         MarkConfigurationDirty();

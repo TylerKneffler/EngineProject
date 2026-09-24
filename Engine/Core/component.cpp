@@ -56,6 +56,37 @@ static bool IsCompatiblePathAsset(const std::string& property,
     return true;
 }
 
+static std::string HumanizePropertyName(const std::string& name)
+{
+    std::string result;
+    result.reserve(name.size() + 8);
+    for (std::size_t index = 0; index < name.size(); ++index)
+    {
+        const unsigned char current = static_cast<unsigned char>(name[index]);
+        if (current == '_' || current == '-')
+        {
+            if (!result.empty() && result.back() != ' ')
+                result.push_back(' ');
+            continue;
+        }
+        const bool upper = std::isupper(current) != 0;
+        const bool previousLowerOrDigit = index > 0 &&
+            (std::islower(static_cast<unsigned char>(name[index - 1])) != 0 ||
+             std::isdigit(static_cast<unsigned char>(name[index - 1])) != 0);
+        const bool acronymBoundary = upper && index > 0 && index + 1 < name.size() &&
+            std::isupper(static_cast<unsigned char>(name[index - 1])) != 0 &&
+            std::islower(static_cast<unsigned char>(name[index + 1])) != 0;
+        if (upper && (previousLowerOrDigit || acronymBoundary) &&
+            !result.empty() && result.back() != ' ')
+            result.push_back(' ');
+        result.push_back(static_cast<char>(current));
+    }
+    if (!result.empty())
+        result[0] = static_cast<char>(std::toupper(
+            static_cast<unsigned char>(result[0])));
+    return result;
+}
+
 // ---------------------------------------------------------------------------
 // Component::DrawProperties — Generic interactive property editor
 //
@@ -95,6 +126,9 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
     // Create a mutable copy for editing
     JsonValue editedData = originalData;
     bool modified = false;
+    std::string currentGroup;
+    bool currentGroupOpen = true;
+    bool groupIndented = false;
     
     // Display interactive controls for each property
     for (size_t i = 0; i < originalData.ObjectSize(); ++i)
@@ -104,13 +138,35 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
         
         // Skip the "type" field (it's the component name)
         if (key == "type") continue;
-        
-        // Format key for display (capitalize first letter, add spaces)
-        std::string displayName = key;
-        if (!displayName.empty())
+
+        const auto editorMetadata = std::find_if(m_editorFieldMetadata.begin(),
+            m_editorFieldMetadata.end(), [&key](const EditorFieldMetadata& field)
+            {
+                return field.name == key;
+            });
+        const std::string group = editorMetadata != m_editorFieldMetadata.end()
+            ? editorMetadata->group : std::string{};
+        if (group != currentGroup)
         {
-            displayName[0] = static_cast<char>(toupper(displayName[0]));
+            if (groupIndented)
+            {
+                ui.Unindent(12.f);
+                groupIndented = false;
+            }
+            currentGroup = group;
+            currentGroupOpen = group.empty() || ui.PropertyGroupHeader(
+                group.c_str(), editorMetadata == m_editorFieldMetadata.end() ||
+                    editorMetadata->groupDefaultOpen);
+            if (currentGroupOpen && !group.empty())
+            {
+                ui.Indent(12.f);
+                groupIndented = true;
+            }
         }
+        if (!currentGroupOpen)
+            continue;
+
+        const std::string displayName = HumanizePropertyName(key);
         
         // Create appropriate control based on value type
         if (value.IsString())
@@ -594,6 +650,9 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
         }
     }
     
+    if (groupIndented)
+        ui.Unindent(12.f);
+
     // If any property was modified, deserialize the edited data back to the component
     if (modified)
     {

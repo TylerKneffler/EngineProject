@@ -14,6 +14,7 @@ PongUI::PongUI()
     RegisterField("controlsTextName", controlsTextName);
     RegisterField("menuTitleName", menuTitleName);
     RegisterField("menuBodyName", menuBodyName);
+    RegisterField("menuBackgroundName", menuBackgroundName);
 }
 
 namespace
@@ -48,6 +49,10 @@ void PongUI::ResolveObjects()
     resolve(controlsTextName, m_controlsText, m_controlsLayout);
     resolve(menuTitleName, m_menuTitleText, m_menuTitleLayout);
     resolve(menuBodyName, m_menuBodyText, m_menuBodyLayout);
+    Engine::Core::Object* menuBackground =
+        FindObjectInSceneByName(menuBackgroundName);
+    m_menuBackgroundLayout = menuBackground
+        ? menuBackground->GetComponent<Engine::Components::UIObject>() : nullptr;
 }
 
 void PongUI::ShowMenu(int selection, bool aiOpponent, int scoreLimit)
@@ -121,6 +126,7 @@ void PongUI::SetStatus(const std::string& text)
 
 void PongUI::SetMenuVisible(bool visible)
 {
+    SetVisible(m_menuBackgroundLayout, visible);
     SetVisible(m_menuTitleLayout, visible);
     SetVisible(m_menuBodyLayout, visible);
 }

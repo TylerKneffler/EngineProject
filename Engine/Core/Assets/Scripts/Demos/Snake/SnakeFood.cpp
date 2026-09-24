@@ -12,6 +12,7 @@ SnakeFood::SnakeFood()
     RegisterField("maximumX", maximumX);
     RegisterField("minimumY", minimumY);
     RegisterField("maximumY", maximumY);
+    RegisterField("cellSize", cellSize);
 }
 
 namespace
@@ -49,8 +50,10 @@ bool SnakeFood::Respawn(const std::vector<glm::ivec2>& blockedCells)
             minimumY + index / width);
         if (IsBlocked(cell, blockedCells))
             continue;
-        Owner->transform.position.x = static_cast<float>(cell.x);
-        Owner->transform.position.y = static_cast<float>(cell.y);
+        Owner->transform.position.x = static_cast<float>(cell.x) * cellSize;
+        Owner->transform.position.y = static_cast<float>(cell.y) * cellSize;
+        Owner->transform.scale.x = cellSize * 0.72f;
+        Owner->transform.scale.y = cellSize * 0.72f;
         Owner->enabled = true;
         return true;
     }
@@ -62,8 +65,10 @@ glm::ivec2 SnakeFood::GetGridPosition() const
 {
     if (!Owner)
         return glm::ivec2(0);
-    return glm::ivec2(static_cast<int>(std::round(Owner->transform.position.x)),
-        static_cast<int>(std::round(Owner->transform.position.y)));
+    const float safeCellSize = std::max(0.01f, cellSize);
+    return glm::ivec2(
+        static_cast<int>(std::round(Owner->transform.position.x / safeCellSize)),
+        static_cast<int>(std::round(Owner->transform.position.y / safeCellSize)));
 }
 
 bool SnakeFood::IsBlocked(const glm::ivec2& cell,

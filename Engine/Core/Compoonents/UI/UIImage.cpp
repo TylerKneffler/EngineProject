@@ -42,14 +42,14 @@ UIImage::UIImage()
 {
     SetTypeName(COMPONENT_TYPE_NAME(UIImage));
     singlecomponent = true;
-    RegisterField("sourcePath", sourcePath);
-    RegisterField("fitMode", fitMode);
-    RegisterField("color", color);
-    RegisterField("alpha", alpha);
-    RegisterField("fillAmount", fillAmount);
-    RegisterField("fillDirection", fillDirection);
-    RegisterField("flipX", flipX);
-    RegisterField("flipY", flipY);
+    RegisterField("sourcePath", sourcePath, "Source");
+    RegisterField("fitMode", fitMode, "Source");
+    RegisterField("color", color, "Appearance");
+    RegisterField("alpha", alpha, "Appearance");
+    RegisterField("fillAmount", fillAmount, "Fill", false);
+    RegisterField("fillDirection", fillDirection, "Fill", false);
+    RegisterField("flipX", flipX, "Fill", false);
+    RegisterField("flipY", flipY, "Fill", false);
 }
 
 void UIImage::Deserialize(const JsonValue& value)

@@ -472,12 +472,14 @@ void UIRenderer::Render(Engine::Scene::Scene& scene,
             if (!object || !object->IsEnabledInHierarchy()) continue;
             auto* layout = object->GetComponent<Engine::Components::UIObject>();
             auto* image = object->GetComponent<Engine::Components::UIImage>();
+            const bool solidColorImage = image && image->sourcePath.empty();
             if (!layout || !image || !layout->visible ||
-                image->fillAmount <= 0.f || !image->Prepare(m_impl->provider))
+                image->fillAmount <= 0.f ||
+                (!solidColorImage && !image->Prepare(m_impl->provider)))
                 continue;
             const Engine::Components::Texture* texture = image->GetTexture();
-            if (!texture || !texture->GetGraphicsTexture() ||
-                texture->GetWidth() == 0 || texture->GetHeight() == 0)
+            if (!solidColorImage && (!texture || !texture->GetGraphicsTexture() ||
+                texture->GetWidth() == 0 || texture->GetHeight() == 0))
                 continue;
 
             Engine::Components::Canvas* canvas = nullptr;
@@ -499,7 +501,8 @@ void UIRenderer::Render(Engine::Scene::Scene& scene,
             std::string fit = image->fitMode;
             std::transform(fit.begin(), fit.end(), fit.begin(),
                 [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
-            const float sourceAspect = static_cast<float>(texture->GetWidth()) /
+            const float sourceAspect = solidColorImage ? 1.f :
+                static_cast<float>(texture->GetWidth()) /
                 static_cast<float>(texture->GetHeight());
             const float targetAspect = rect.height > 0.f ? rect.width / rect.height : sourceAspect;
             if (fit == "contain")
@@ -575,8 +578,10 @@ void UIRenderer::Render(Engine::Scene::Scene& scene,
             const uint32_t first = static_cast<uint32_t>(vertices.size());
             AddQuad(vertices, x0, y0, x1, y1, u0, v0, u1, v1,
                 glm::vec4(image->color, std::clamp(image->alpha, 0.f, 1.f)), canvasSize);
-            auto* graphicsTexture = const_cast<Engine::Graphics::IGraphicsTexture*>(
-                texture->GetGraphicsTexture());
+            auto* graphicsTexture = solidColorImage
+                ? m_impl->whiteTexture.get()
+                : const_cast<Engine::Graphics::IGraphicsTexture*>(
+                    texture->GetGraphicsTexture());
             if (!segments.empty() && !segments.back().fontSdf &&
                 segments.back().texture == graphicsTexture &&
                 segments.back().firstVertex + segments.back().vertexCount == first)

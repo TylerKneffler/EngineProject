@@ -226,22 +226,56 @@ bool ImGuiEditorUi::SliderFloat(const char*l,float*v,float a,float b){return ImG
 bool ImGuiEditorUi::InputUInt(const char*l,uint32_t*v){return ImGui::InputScalar(l,ImGuiDataType_U32,v);}
 void ImGuiEditorUi::ValueLabel(const char*l,const char*v){ImGui::LabelText(l,"%s",v);}
 bool ImGuiEditorUi::CollapsingHeader(const char*l,bool d){return ImGui::CollapsingHeader(l,d?ImGuiTreeNodeFlags_DefaultOpen:0);}
+bool ImGuiEditorUi::PropertyGroupHeader(const char* label,bool defaultOpen)
+{
+    const ImGuiStyle& style=ImGui::GetStyle();
+    const ImVec4 background=ImGui::GetStyleColorVec4(ImGuiCol_FrameBg);
+    const ImVec4 header=ImGui::GetStyleColorVec4(ImGuiCol_Header);
+    const ImVec4 hovered=ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+        {style.FramePadding.x,2.f});
+    ImGui::PushStyleColor(ImGuiCol_Header,ImLerp(background,header,.45f));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered,
+        ImLerp(background,hovered,.68f));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive,
+        ImLerp(background,hovered,.82f));
+    const bool open=ImGui::CollapsingHeader(label,
+        defaultOpen?ImGuiTreeNodeFlags_DefaultOpen:0);
+    ImGui::PopStyleColor(3);
+    ImGui::PopStyleVar();
+    return open;
+}
 bool ImGuiEditorUi::ComponentHeader(EditorUiObjectIcon icon,const char* label,
     bool defaultOpen)
 {
     ImGui::PushID(label);
+    const ImGuiStyle& style=ImGui::GetStyle();
+    const ImVec4 header=ImGui::GetStyleColorVec4(ImGuiCol_Header);
+    const ImVec4 accent=ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+        {style.FramePadding.x,style.FramePadding.y+3.f});
+    ImGui::PushStyleColor(ImGuiCol_Header,ImLerp(header,accent,.10f));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered,ImLerp(
+        ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered),accent,.14f));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive,ImLerp(
+        ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive),accent,.18f));
     const ImGuiTreeNodeFlags flags=defaultOpen?ImGuiTreeNodeFlags_DefaultOpen:0;
     const bool open=ImGui::CollapsingHeader("##componentHeader",flags);
     const ImVec2 minimum=ImGui::GetItemRectMin();
     const ImVec2 maximum=ImGui::GetItemRectMax();
     const float hover=AnimateInteraction(ImGui::GetItemID(),ImGui::IsItemHovered(),12.f);
-    const float iconSize=16.f;
+    ImGui::PopStyleColor(3);
+    ImGui::PopStyleVar();
+    const float iconSize=18.f;
     const float iconLeft=minimum.x+ImGui::GetFontSize()+
         ImGui::GetStyle().FramePadding.x*1.5f;
     const ImVec2 center{iconLeft+iconSize*.5f,(minimum.y+maximum.y)*.5f};
     const ImVec4 iconColor=ImLerp(ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled),
         ImGui::GetStyleColorVec4(ImGuiCol_CheckMark),hover);
     ImDrawList* draw=ImGui::GetWindowDrawList();
+    draw->AddRectFilled({minimum.x,minimum.y},{minimum.x+3.f,maximum.y},
+        ImGui::GetColorU32(ImLerp(header,accent,.55f)),style.FrameRounding,
+        ImDrawFlags_RoundCornersLeft);
     DrawObjectIcon(draw,icon,center,.92f+hover*.08f,
         ImGui::GetColorU32(iconColor));
     const ImVec2 textSize=ImGui::CalcTextSize(label);

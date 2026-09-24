@@ -1321,7 +1321,7 @@ bool Mesh::DrawProperties(::Engine::Editor::IEditorUi& ui)
     ui.ValueLabel("Morph Targets", morphCount.c_str());
     bool changed = false;
     if (!m_morphWeights.empty() &&
-        ui.CollapsingHeader("Morph Weights", false))
+        ui.PropertyGroupHeader("Morph Weights", false))
     {
         for (size_t index = 0; index < m_morphWeights.size(); ++index)
         {

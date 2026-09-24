@@ -7,10 +7,10 @@ Canvas::Canvas()
 {
     SetTypeName(COMPONENT_TYPE_NAME(Canvas));
     singlecomponent = true;
-    RegisterField("referenceResolution", referenceResolution);
-    RegisterField("scaleMode", scaleMode);
-    RegisterField("matchWidthOrHeight", matchWidthOrHeight);
-    RegisterField("sortingOrder", sortingOrder);
+    RegisterField("referenceResolution", referenceResolution, "Scaling");
+    RegisterField("scaleMode", scaleMode, "Scaling");
+    RegisterField("matchWidthOrHeight", matchWidthOrHeight, "Scaling");
+    RegisterField("sortingOrder", sortingOrder, "Ordering");
 }
 
 glm::vec2 Canvas::GetLogicalSize(float viewportAspect) const

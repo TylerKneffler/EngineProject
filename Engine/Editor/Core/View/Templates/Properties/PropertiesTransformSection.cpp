@@ -2,6 +2,7 @@
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Engine/Editor/UI/EditorComponentIcons.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
+#include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
 
 namespace Engine::Editor
@@ -36,7 +37,23 @@ void PropertiesView::DrawTransform(IEditorUi& ui)
     }
     if (transformOpen)
     {
-        const bool transformChanged = t.DrawProperties(ui);
+        bool transformChanged = false;
+        if (m_scene && m_scene->IsEditorMode2D())
+        {
+            // In a 2D scene X/Y are spatial axes while Z is only the painter's
+            // ordering value.  Present that model directly instead of exposing
+            // three misleading 3D vector controls.
+            transformChanged |= ui.DragFloat("Position X", &t.position.x, 0.01f);
+            transformChanged |= ui.DragFloat("Position Y", &t.position.y, 0.01f);
+            transformChanged |= ui.DragFloat("Draw Order", &t.position.z, 0.01f);
+            transformChanged |= ui.DragFloat("Rotation", &t.rotation.z, 0.01f);
+            transformChanged |= ui.DragFloat("Scale X", &t.scale.x, 0.01f);
+            transformChanged |= ui.DragFloat("Scale Y", &t.scale.y, 0.01f);
+        }
+        else
+        {
+            transformChanged = t.DrawProperties(ui);
+        }
         if (transformChanged)
         {
             if (auto* body =

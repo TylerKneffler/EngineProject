@@ -169,6 +169,8 @@ public:
     virtual bool InputUInt(const char* label, uint32_t* value) = 0;
     virtual void ValueLabel(const char* label, const char* value) = 0;
     virtual bool CollapsingHeader(const char* label, bool defaultOpen = true) = 0;
+    virtual bool PropertyGroupHeader(const char* label,
+        bool defaultOpen = true) { return CollapsingHeader(label, defaultOpen); }
     virtual bool ComponentHeader(EditorUiObjectIcon, const char* label,
         bool defaultOpen = true) { return CollapsingHeader(label, defaultOpen); }
     virtual bool TreeNode(const void* id, const char* label, bool selected, bool leaf, bool defaultOpen = false) = 0;

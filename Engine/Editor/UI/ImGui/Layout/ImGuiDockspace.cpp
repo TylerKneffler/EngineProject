@@ -14,47 +14,34 @@ void ImGuiDockspace::Draw()
     ImGuiDockNode* root = ImGui::DockBuilderGetNode(dockspaceId);
     if (root != nullptr && !root->IsLeafNode())
     {
-        // Version older saved layouts from the former "Name 1" convention
-        // without discarding the user's custom dock arrangement.
-        const auto migrateLegacyName = [](const char* currentName,
-            const char* legacyName)
+        if (!m_startupMigrationComplete)
         {
-            ImGuiWindow* current = ImGui::FindWindowByName(currentName);
-            if (!current || current->DockNode)
-                return;
-            ImGuiWindowSettings* legacy = ImGui::FindWindowSettingsByID(
-                ImHashStr(legacyName));
-            if (legacy && legacy->DockId != 0 &&
-                ImGui::DockBuilderGetNode(legacy->DockId))
+            // Seed names from older layouts once. Checking saved settings,
+            // rather than the live DockNode, distinguishes a genuinely old
+            // layout from a current window that the user just undocked.
+            const auto migrateLegacyName = [](const char* currentName,
+                const char* legacyName)
             {
-                ImGui::DockBuilderDockWindow(currentName, legacy->DockId);
-            }
-        };
-        migrateLegacyName("Scene", "Scene 1");
-        migrateLegacyName("Game", "Game 1");
-        migrateLegacyName("Hierarchy", "Hierarchy 1");
-        migrateLegacyName("Properties", "Properties 1");
-        migrateLegacyName("Assets", "Assets 1");
-        migrateLegacyName("Console", "Console 1");
-        migrateLegacyName("Problems", "Problems 1");
-        migrateLegacyName("Terminal", "Terminal 1");
-
-        // Add bottom-panel tabs introduced after a user's layout was saved.
-        ImGuiWindow* console = ImGui::FindWindowByName("Console");
-        ImGuiWindow* terminal = ImGui::FindWindowByName("Terminal");
-        ImGuiWindow* problems = ImGui::FindWindowByName("Problems");
-        ImGuiWindow* assets = ImGui::FindWindowByName("Assets");
-        ImGuiWindow* hierarchy = ImGui::FindWindowByName("Hierarchy");
-        if (console && console->DockNode && terminal && !terminal->DockNode)
-            ImGui::DockBuilderDockWindow("Terminal", console->DockNode->ID);
-        if (console && console->DockNode && problems && !problems->DockNode)
-            ImGui::DockBuilderDockWindow("Problems", console->DockNode->ID);
-        // Migrate the former default where Assets shared the left hierarchy
-        // stack. Custom placements elsewhere are left untouched.
-        if (console && console->DockNode && assets && assets->DockNode &&
-            hierarchy && hierarchy->DockNode &&
-            assets->DockNode == hierarchy->DockNode)
-            ImGui::DockBuilderDockWindow("Assets", console->DockNode->ID);
+                if (ImGui::FindWindowSettingsByID(ImHashStr(currentName)))
+                    return;
+                ImGuiWindowSettings* legacy = ImGui::FindWindowSettingsByID(
+                    ImHashStr(legacyName));
+                if (legacy && legacy->DockId != 0 &&
+                    ImGui::DockBuilderGetNode(legacy->DockId))
+                {
+                    ImGui::DockBuilderDockWindow(currentName, legacy->DockId);
+                }
+            };
+            migrateLegacyName("Scene", "Scene 1");
+            migrateLegacyName("Game", "Game 1");
+            migrateLegacyName("Hierarchy", "Hierarchy 1");
+            migrateLegacyName("Properties", "Properties 1");
+            migrateLegacyName("Assets", "Assets 1");
+            migrateLegacyName("Console", "Console 1");
+            migrateLegacyName("Problems", "Problems 1");
+            migrateLegacyName("Terminal", "Terminal 1");
+            m_startupMigrationComplete = true;
+        }
         return;
     }
 
@@ -81,5 +68,6 @@ void ImGuiDockspace::Draw()
     ImGui::DockBuilderDockWindow("Terminal", centerBottom);
     ImGui::DockBuilderDockWindow("Properties", right);
     ImGui::DockBuilderFinish(dockspaceId);
+    m_startupMigrationComplete = true;
 }
 }

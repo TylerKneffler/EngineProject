@@ -18,6 +18,8 @@ public:
     int minimumY = -3;
     PROPERTY(Inspector, EditAnywhere, Category = "Snake | Board")
     int maximumY = 3;
+    PROPERTY(Inspector, EditAnywhere, Category = "Snake | Board", ClampMin = "0.01")
+    float cellSize = 1.f;
 
     void Start() override;
     bool Respawn(const std::vector<glm::ivec2>& blockedCells);

@@ -93,7 +93,7 @@ bool DrawPrefabFields(IEditorUi& ui, pugi::xml_node parent,
         }
         else if (children > 0)
         {
-            if (ui.CollapsingHeader(label.c_str(), false))
+            if (ui.PropertyGroupHeader(label.c_str(), false))
                 changed = DrawPrefabFields(ui, node, id) || changed;
         }
         else
@@ -247,13 +247,17 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
         if (const auto record = Engine::Core::AssetRecord::Load(m_selectedPath))
         {
             ui.Separator();
-            ui.Label("Asset Record");
-            ui.ValueLabel("Stable ID", record->id.c_str());
-            ui.ValueLabel("Source", record->sourcePath.c_str());
-            for (const auto& [name, setting] : record->importSettings)
+            if (ui.PropertyGroupHeader("Asset Record", false))
             {
-                const std::string value = ImportSettingText(setting);
-                ui.ValueLabel(name.c_str(), value.c_str());
+                ui.Indent(12.f);
+                ui.ValueLabel("Stable ID", record->id.c_str());
+                ui.ValueLabel("Source", record->sourcePath.c_str());
+                for (const auto& [name, setting] : record->importSettings)
+                {
+                    const std::string value = ImportSettingText(setting);
+                    ui.ValueLabel(name.c_str(), value.c_str());
+                }
+                ui.Unindent(12.f);
             }
         }
     }
@@ -267,36 +271,175 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
     if (extension == ".material" || extension == ".mat")
     {
         ui.Separator();
-        ui.Label("Material Preview");
         Engine::Graphics::IGraphicsProvider* graphics =
             scene ? scene->GetGraphicsProvider() : nullptr;
-        if (void* handle = m_previewCache.Get(m_selectedPath, graphics))
-            ui.DrawCircularImage(handle, 192.f,
-                { 0.45f, 0.5f, 0.58f, 1.f });
-        else
-            ui.DisabledLabel("[Material preview unavailable]");
+        if (ui.PropertyGroupHeader("Material Preview"))
+        {
+            ui.Indent(12.f);
+            if (void* handle = m_previewCache.Get(m_selectedPath, graphics))
+                ui.DrawCircularImage(handle, 192.f,
+                    { 0.45f, 0.5f, 0.58f, 1.f });
+            else
+                ui.DisabledLabel("[Material preview unavailable]");
+            ui.Unindent(12.f);
+        }
 
         Engine::Components::Material material;
         if (material.LoadFromFile(m_selectedPath))
         {
             bool changed = false;
-            changed |= ui.Checkbox("Custom Reflection Environment",
-                &material.useCustomReflectionEnvironment);
-            char environmentPath[512]{};
-            strncpy_s(environmentPath, sizeof(environmentPath),
-                material.reflectionEnvironmentTexture.c_str(), _TRUNCATE);
-            if (ui.InputText("Reflection HDRI", environmentPath,
-                sizeof(environmentPath)))
+            const auto editTexture = [&](const char* label,
+                const std::shared_ptr<Engine::Components::Texture>& texture,
+                const auto& setter)
             {
-                material.SetReflectionEnvironmentTexture(environmentPath);
-                changed = true;
+                char value[512]{};
+                const std::string current = texture
+                    ? texture->GetFilePath() : std::string{};
+                strncpy_s(value, sizeof(value), current.c_str(), _TRUNCATE);
+                bool textureChanged = false;
+                if (ui.InputText(label, value, sizeof(value)))
+                {
+                    setter(std::string(value));
+                    textureChanged = true;
+                }
+                if (ui.BeginDragDropTarget())
+                {
+                    size_t payloadSize = 0;
+                    const void* payload = ui.AcceptDragDropPayload(
+                        "ENGINE_ASSET_PATH", &payloadSize);
+                    if (payload && payloadSize > 0)
+                    {
+                        const char* bytes = static_cast<const char*>(payload);
+                        size_t length = 0;
+                        while (length < payloadSize && bytes[length] != '\0')
+                            ++length;
+                        const std::string droppedPath(bytes, length);
+                        if (IsTextureAssetExtension(
+                            LowerAssetExtension(droppedPath)))
+                        {
+                            setter(droppedPath);
+                            textureChanged = true;
+                        }
+                    }
+                    ui.EndDragDropTarget();
+                }
+                return textureChanged;
+            };
+
+            if (ui.PropertyGroupHeader("Colors"))
+            {
+                ui.Indent(12.f);
+                changed |= ui.ColorEdit3("Base Color", &material.diffuseColor.x);
+                changed |= ui.ColorEdit3("Emissive", &material.emissiveColor.x);
+                changed |= ui.ColorEdit3("Ambient", &material.ambientColor.x);
+                changed |= ui.ColorEdit3("Specular", &material.specularColor.x);
+                ui.Unindent(12.f);
             }
-            changed |= ui.DragFloat("Reflection Strength",
-                &material.reflectionStrength, 0.02f, 0.f, 4.f);
-            changed |= ui.DragFloat("Reflection Exposure (EV)",
-                &material.reflectionEnvironmentExposure, 0.05f, -16.f, 16.f);
-            changed |= ui.DragFloat("Reflection Rotation",
-                &material.reflectionEnvironmentRotation, 0.5f, -360.f, 360.f);
+            if (ui.PropertyGroupHeader("Surface"))
+            {
+                ui.Indent(12.f);
+                changed |= ui.DragFloat("Metallic", &material.metallicFactor,
+                    0.01f, 0.f, 1.f);
+                changed |= ui.DragFloat("Roughness", &material.roughnessFactor,
+                    0.01f, 0.045f, 1.f);
+                changed |= ui.DragFloat("Shininess", &material.shininess,
+                    0.5f, 1.f, 256.f);
+                changed |= ui.DragFloat("Environment Diffuse",
+                    &material.environmentDiffuseStrength, 0.02f, 0.f, 4.f);
+                changed |= ui.DragFloat("Occlusion Strength",
+                    &material.occlusionStrength, 0.01f, 0.f, 1.f);
+                changed |= ui.Checkbox("Unlit", &material.unlit);
+                changed |= ui.Checkbox("Double Sided", &material.doubleSided);
+                static const char* alphaModes[] = { "Opaque", "Mask", "Blend" };
+                int alphaMode = material.GetAlphaMode() ==
+                    Engine::Components::MaterialAlphaMode::Mask ? 1 :
+                    material.GetAlphaMode() ==
+                    Engine::Components::MaterialAlphaMode::Blend ? 2 : 0;
+                if (ui.Combo("Alpha Mode", &alphaMode, alphaModes, 3))
+                {
+                    material.alphaMode = alphaModes[alphaMode];
+                    changed = true;
+                }
+                changed |= ui.DragFloat("Base Color Alpha",
+                    &material.baseColorAlpha, 0.01f, 0.f, 1.f);
+                if (alphaMode == 1)
+                    changed |= ui.DragFloat("Alpha Cutoff",
+                        &material.alphaCutoff, 0.01f, 0.f, 1.f);
+                ui.Unindent(12.f);
+            }
+            if (ui.PropertyGroupHeader("Textures"))
+            {
+                ui.Indent(12.f);
+                changed |= editTexture("Base Color Texture", material.baseColorTexture,
+                    [&](const std::string& value) { material.SetBaseColorTexture(value); });
+                changed |= editTexture("Metallic / Roughness Texture",
+                    material.metallicRoughnessTexture,
+                    [&](const std::string& value) { material.SetMetallicRoughnessTexture(value); });
+                changed |= editTexture("Normal Texture", material.normalTexture,
+                    [&](const std::string& value) { material.SetNormalTexture(value); });
+                changed |= editTexture("Height Texture", material.heightTexture,
+                    [&](const std::string& value) { material.SetHeightTexture(value); });
+                changed |= editTexture("Occlusion Texture", material.occlusionTexture,
+                    [&](const std::string& value) { material.SetOcclusionTexture(value); });
+                changed |= editTexture("Emissive Texture", material.emissiveTexture,
+                    [&](const std::string& value) { material.SetEmissiveTexture(value); });
+                ui.DisabledLabel("Texture assets can be dragged directly onto these fields.");
+                ui.Unindent(12.f);
+            }
+            if (ui.PropertyGroupHeader("Reflections"))
+            {
+                ui.Indent(12.f);
+                changed |= ui.DragFloat("Reflection Strength",
+                    &material.reflectionStrength, 0.02f, 0.f, 4.f);
+                changed |= ui.Checkbox("Custom Reflection Environment",
+                    &material.useCustomReflectionEnvironment);
+                char environmentPath[512]{};
+                strncpy_s(environmentPath, sizeof(environmentPath),
+                    material.reflectionEnvironmentTexture.c_str(), _TRUNCATE);
+                if (ui.InputText("Reflection HDRI", environmentPath,
+                    sizeof(environmentPath)))
+                {
+                    material.SetReflectionEnvironmentTexture(environmentPath);
+                    changed = true;
+                }
+                changed |= ui.DragFloat("Exposure (EV)",
+                    &material.reflectionEnvironmentExposure, 0.05f, -16.f, 16.f);
+                changed |= ui.DragFloat("Rotation",
+                    &material.reflectionEnvironmentRotation, 0.5f, -360.f, 360.f);
+                ui.Unindent(12.f);
+            }
+            if (ui.PropertyGroupHeader("Advanced", false))
+            {
+                ui.Indent(12.f);
+                changed |= ui.DragFloat("Normal Scale", &material.normalScale,
+                    0.01f, 0.f, 2.f);
+                changed |= ui.DragFloat("Height Scale", &material.heightScale,
+                    0.001f, 0.f, 0.2f);
+                changed |= ui.DragFloat("Height Min Steps", &material.heightMinSteps,
+                    1.f, 4.f, 64.f);
+                changed |= ui.DragFloat("Height Max Steps", &material.heightMaxSteps,
+                    1.f, 4.f, 64.f);
+                float uvSets[] = {
+                    static_cast<float>(material.baseColorUvSet),
+                    static_cast<float>(material.metallicRoughnessUvSet),
+                    static_cast<float>(material.normalUvSet),
+                    static_cast<float>(material.heightUvSet),
+                    static_cast<float>(material.occlusionUvSet),
+                    static_cast<float>(material.emissiveUvSet)
+                };
+                const char* uvLabels[] = { "Base Color UV", "Metallic / Roughness UV",
+                    "Normal UV", "Height UV", "Occlusion UV", "Emissive UV" };
+                for (int index = 0; index < 6; ++index)
+                    if (ui.DragFloat(uvLabels[index], &uvSets[index], 1.f, 0.f, 1.f))
+                        changed = true;
+                material.baseColorUvSet = static_cast<int>(uvSets[0]);
+                material.metallicRoughnessUvSet = static_cast<int>(uvSets[1]);
+                material.normalUvSet = static_cast<int>(uvSets[2]);
+                material.heightUvSet = static_cast<int>(uvSets[3]);
+                material.occlusionUvSet = static_cast<int>(uvSets[4]);
+                material.emissiveUvSet = static_cast<int>(uvSets[5]);
+                ui.Unindent(12.f);
+            }
             if (changed)
             {
                 material.Validate();
@@ -368,7 +511,9 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
             return;
         }
         ui.Separator();
-        ui.Label("Sprite Animation");
+        if (!ui.PropertyGroupHeader("Sprite Animation"))
+            return;
+        ui.Indent(12.f);
         char sheet[512]{};
         strncpy_s(sheet, sizeof(sheet), asset.spriteSheetFile.c_str(), _TRUNCATE);
         if (ui.InputText("Sprite Sheet", sheet, sizeof(sheet)))
@@ -400,6 +545,7 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
             asset.Save();
             if (OnContentsChanged) OnContentsChanged(m_selectedPath);
         }
+        ui.Unindent(12.f);
         return;
     }
 

@@ -25,6 +25,8 @@ public:
     std::string menuTitleName = "Snake Menu Title";
     PROPERTY(Inspector, EditAnywhere, Category = "Snake | UI")
     std::string menuBodyName = "Snake Menu Body";
+    PROPERTY(Inspector, EditAnywhere, Category = "Snake | UI")
+    std::string menuBackgroundName = "Snake Menu Background";
 
     void Start() override;
     void ShowMenu(int selection, int speedIndex, int highScore);
@@ -48,4 +50,5 @@ private:
     Engine::Components::UIObject* m_controlsLayout = nullptr;
     Engine::Components::UIObject* m_menuTitleLayout = nullptr;
     Engine::Components::UIObject* m_menuBodyLayout = nullptr;
+    Engine::Components::UIObject* m_menuBackgroundLayout = nullptr;
 };

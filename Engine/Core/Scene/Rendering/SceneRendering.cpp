@@ -629,6 +629,12 @@ void Scene::BuildSkyboxPipeline()
 
 const Engine::Components::Texture* Scene::ResolveSkyboxTexture()
 {
+    // A 2D scene has no surrounding environment.  Let the render target's
+    // clear colour be its flat, edge-to-edge background instead of projecting
+    // either the authored panorama or the editor's fallback skybox.
+    if (settings.dimension == Engine::Model::SceneDimension::TwoD)
+        return nullptr;
+
     if (settings.skyboxTexture.empty())
         return m_defaultSkyboxTexture.get();
 

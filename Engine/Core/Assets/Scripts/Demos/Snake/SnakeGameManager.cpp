@@ -21,6 +21,7 @@ SnakeGameManager::SnakeGameManager()
     RegisterField("maximumX", maximumX);
     RegisterField("minimumY", minimumY);
     RegisterField("maximumY", maximumY);
+    RegisterField("cellSize", cellSize);
 }
 
 namespace
@@ -193,8 +194,10 @@ void SnakeGameManager::ApplyBodyTransforms()
     if (m_headObject && !m_body.empty())
     {
         m_headObject->enabled = true;
-        m_headObject->transform.position.x = static_cast<float>(m_body[0].x);
-        m_headObject->transform.position.y = static_cast<float>(m_body[0].y);
+        m_headObject->transform.position.x = static_cast<float>(m_body[0].x) * cellSize;
+        m_headObject->transform.position.y = static_cast<float>(m_body[0].y) * cellSize;
+        m_headObject->transform.scale.x = cellSize * 0.84f;
+        m_headObject->transform.scale.y = cellSize * 0.84f;
     }
     for (size_t index = 0; index < m_segments.size(); ++index)
     {
@@ -203,8 +206,10 @@ void SnakeGameManager::ApplyBodyTransforms()
         segment->enabled = bodyIndex < m_body.size();
         if (!segment->enabled)
             continue;
-        segment->transform.position.x = static_cast<float>(m_body[bodyIndex].x);
-        segment->transform.position.y = static_cast<float>(m_body[bodyIndex].y);
+        segment->transform.position.x = static_cast<float>(m_body[bodyIndex].x) * cellSize;
+        segment->transform.position.y = static_cast<float>(m_body[bodyIndex].y) * cellSize;
+        segment->transform.scale.x = cellSize * 0.78f;
+        segment->transform.scale.y = cellSize * 0.78f;
     }
 }
 

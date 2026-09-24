@@ -25,6 +25,8 @@ public:
     std::string menuTitleName = "Menu Title";
     PROPERTY(Inspector, EditAnywhere, Category = "Pong | UI")
     std::string menuBodyName = "Menu Body";
+    PROPERTY(Inspector, EditAnywhere, Category = "Pong | UI")
+    std::string menuBackgroundName = "Menu Background";
 
     void Start() override;
     void ShowMenu(int selection, bool aiOpponent, int scoreLimit);
@@ -49,4 +51,5 @@ private:
     Engine::Components::UIObject* m_controlsLayout = nullptr;
     Engine::Components::UIObject* m_menuTitleLayout = nullptr;
     Engine::Components::UIObject* m_menuBodyLayout = nullptr;
+    Engine::Components::UIObject* m_menuBackgroundLayout = nullptr;
 };

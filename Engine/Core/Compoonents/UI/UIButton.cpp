@@ -8,12 +8,12 @@ UIButton::UIButton()
 {
     SetTypeName(COMPONENT_TYPE_NAME(UIButton));
     singlecomponent = true;
-    RegisterField("interactable", interactable);
-    RegisterField("normalColor", normalColor);
-    RegisterField("hoverColor", hoverColor);
-    RegisterField("pressedColor", pressedColor);
-    RegisterField("disabledColor", disabledColor);
-    RegisterField("alpha", alpha);
+    RegisterField("interactable", interactable, "Interaction");
+    RegisterField("normalColor", normalColor, "State Colors");
+    RegisterField("hoverColor", hoverColor, "State Colors");
+    RegisterField("pressedColor", pressedColor, "State Colors");
+    RegisterField("disabledColor", disabledColor, "State Colors");
+    RegisterField("alpha", alpha, "Appearance");
 }
 
 void UIButton::UpdateInteraction(bool hovered, bool mouseDown)

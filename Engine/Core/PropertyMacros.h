@@ -44,7 +44,9 @@
 //   - EditAnywhere: Can be edited in all contexts
 //   - EditDefaultsOnly: Only editable on archetypes
 //   - VisibleAnywhere: Visible but not editable (read-only)
-//   - Category: Groups properties (e.g., Category = "Movement")
+//   - Category: Documents the intended group (e.g., Category = "Movement").
+//     Pass the same name as RegisterField's third argument to render that
+//     category as a collapsible inspector section.
 //   - Range: Hints for slider ranges (e.g., Range = "0.0, 100.0")
 // ---------------------------------------------------------------------------
 

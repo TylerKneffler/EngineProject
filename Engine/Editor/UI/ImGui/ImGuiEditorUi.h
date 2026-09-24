@@ -33,6 +33,7 @@ public:
     bool SliderFloat(const char*, float*, float, float) override;
     bool InputUInt(const char*, uint32_t*) override;
     void ValueLabel(const char*, const char*) override; bool CollapsingHeader(const char*, bool) override;
+    bool PropertyGroupHeader(const char*, bool) override;
     bool ComponentHeader(EditorUiObjectIcon, const char*, bool) override;
     bool TreeNode(const void*, const char*, bool, bool, bool) override; void TreePop() override;
     EditorUiObjectRowResult ObjectTreeRow(const void*,EditorUiObjectIcon,char*,size_t,bool*,bool,bool,bool,bool,int,bool,uint64_t) override;
