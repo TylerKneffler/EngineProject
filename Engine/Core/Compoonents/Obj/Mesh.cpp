@@ -17,6 +17,7 @@ Mesh::Mesh()
 {
     SetTypeName(COMPONENT_TYPE_NAME(Mesh));
     RegisterField("file", m_filePath);
+    RegisterField("useLightProbes",useLightProbes,"Lighting");
 }
 
 #ifndef ENGINE_ASSETS_PATH
@@ -1320,6 +1321,7 @@ bool Mesh::DrawProperties(::Engine::Editor::IEditorUi& ui)
     const std::string morphCount = std::to_string(m_morphTargets.size());
     ui.ValueLabel("Morph Targets", morphCount.c_str());
     bool changed = false;
+    changed=ui.Checkbox("Use Light Probes",&useLightProbes)||changed;
     if (!m_morphWeights.empty() &&
         ui.PropertyGroupHeader("Morph Weights", false))
     {

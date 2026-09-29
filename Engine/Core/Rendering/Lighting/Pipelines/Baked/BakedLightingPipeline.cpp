@@ -1,6 +1,7 @@
 #include "BakedLightingPipeline.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Lighting/Light.h"
+#include "Core/Compoonents/Lighting/LightProbe.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Compoonents/Obj/Mesh.h"
@@ -214,6 +215,30 @@ glm::vec3 EvaluateLighting(const glm::vec3& position, glm::vec3 normal,
                 (contribution.r + contribution.g + contribution.b);
     }
     return result;
+}
+
+Engine::Components::ProbeLightingSample BakeProbeSample(
+    const glm::vec3& position,const std::vector<BakeLight>& lights,
+    const std::vector<SurfaceTriangle>& geometry,float shadowBias)
+{
+    static constexpr glm::vec3 directions[6]={{1.f,0.f,0.f},{-1.f,0.f,0.f},
+        {0.f,1.f,0.f},{0.f,-1.f,0.f},{0.f,0.f,1.f},{0.f,0.f,-1.f}};
+    Engine::Components::ProbeLightingSample sample{};
+    glm::vec3 weightedDirection(0.f);
+    for(const glm::vec3& normal:directions)
+    {
+        glm::vec3 directionContribution(0.f);
+        sample.irradiance+=EvaluateLighting(position,normal,lights,geometry,
+            std::numeric_limits<size_t>::max(),shadowBias,
+            &directionContribution);
+        weightedDirection+=directionContribution;
+    }
+    sample.irradiance/=6.f;
+    sample.directionalIrradiance=sample.irradiance;
+    sample.direction=glm::dot(weightedDirection,weightedDirection)>.000001f
+        ?glm::normalize(weightedDirection):glm::vec3(0.f,1.f,0.f);
+    sample.valid=true;
+    return sample;
 }
 
 float Edge(const glm::vec2& a, const glm::vec2& b, const glm::vec2& p)
@@ -460,6 +485,15 @@ Engine::Model::BakeResult BakedLightingPipeline::Bake(Engine::Scene::Scene& scen
             settings.lightmapResolution, 32u, 2048u);
         settings.shadowBias = std::clamp(settings.shadowBias, 0.00001f, 0.1f);
         settings.dilationPasses = std::min(settings.dilationPasses, 32u);
+        // A failed or empty re-bake must never leave stale samples active.
+        for(const auto& object:scene.GetObjects())
+        {
+            if(auto* probe=object->GetComponent<Engine::Components::LightProbe>())
+                probe->valid=false;
+            if(auto* group=object->GetComponent<
+                Engine::Components::LightProbeGroup>())
+                group->valid=false;
+        }
         std::vector<BakeLight> lights;
         for (const auto& object : scene.GetObjects())
         {
@@ -504,10 +538,54 @@ Engine::Model::BakeResult BakedLightingPipeline::Bake(Engine::Scene::Scene& scen
                 RestoreMaterial(*object, *data, scene.GetGraphicsProvider());
 
         const std::vector<SurfaceTriangle> geometry = GatherGeometry(scene);
+        uint32_t probeCount=0;
+        for(const auto& object:scene.GetObjects())
+        {
+            if(!object->IsEnabledInHierarchy()) continue;
+            if(auto* probe=object->GetComponent<Engine::Components::LightProbe>())
+            {
+                const auto sample=BakeProbeSample(
+                    object->transform.GetWorldPosition(),lights,geometry,
+                    settings.shadowBias);
+                probe->irradiance=sample.irradiance;
+                probe->directionalIrradiance=sample.directionalIrradiance;
+                probe->lightDirection=sample.direction;
+                probe->valid=true;
+                ++probeCount;
+            }
+            if(auto* group=object->GetComponent<
+                Engine::Components::LightProbeGroup>())
+            {
+                group->ResizeSamples();
+                const glm::mat4 world=object->transform.GetWorldMatrix();
+                for(int z=0;z<group->countZ;++z)
+                for(int y=0;y<group->countY;++y)
+                for(int x=0;x<group->countX;++x)
+                {
+                    const size_t index=static_cast<size_t>(x)+
+                        static_cast<size_t>(group->countX)*(
+                        static_cast<size_t>(y)+
+                        static_cast<size_t>(group->countY)*
+                        static_cast<size_t>(z));
+                    const glm::vec3 position=glm::vec3(world*glm::vec4(
+                        group->LocalSamplePosition(x,y,z),1.f));
+                    const auto sample=BakeProbeSample(position,lights,geometry,
+                        settings.shadowBias);
+                    group->irradiance[index]=sample.irradiance;
+                    group->directionalIrradiance[index]=
+                        sample.directionalIrradiance;
+                    group->lightDirections[index]=sample.direction;
+                }
+                group->valid=true;
+                probeCount+=static_cast<uint32_t>(group->SampleCount());
+            }
+        }
         for (const auto& object : scene.GetObjects())
         {
             const Engine::Components::Mesh* mesh = object->GetComponent<Engine::Components::Mesh>();
             if (!mesh || !object->IsEnabledInHierarchy())
+                continue;
+            if(mesh->useLightProbes)
                 continue;
             Engine::Components::Material* source = object->GetComponent<Engine::Components::Material>();
             if (!source)
@@ -572,7 +650,8 @@ Engine::Model::BakeResult BakedLightingPipeline::Bake(Engine::Scene::Scene& scen
         result.bakedLightCount = static_cast<uint32_t>(lights.size());
         result.message = "Baked " + std::to_string(result.bakedLightCount) +
             " light(s) into " + std::to_string(result.receiverCount) +
-            " generated material/lightmap pair(s) under " +
+            " generated material/lightmap pair(s) and " +
+            std::to_string(probeCount)+" probe sample(s) under " +
             PortablePath(root) + ".";
     }
     catch (const std::exception& error)
@@ -588,6 +667,10 @@ uint32_t BakedLightingPipeline::Clear(Engine::Scene::Scene& scene) const
     uint32_t cleared = 0;
     for (const auto& object : scene.GetObjects())
     {
+        if(auto* probe=object->GetComponent<Engine::Components::LightProbe>())
+            probe->valid=false;
+        if(auto* group=object->GetComponent<Engine::Components::LightProbeGroup>())
+            group->valid=false;
         for (auto component = object->Components.begin();
             component != object->Components.end();)
         {

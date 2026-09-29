@@ -82,6 +82,8 @@ struct EditorUiContextMenuResult
 {
     bool addRequested = false;
     bool addSpriteRequested = false;
+    bool addLightProbeRequested = false;
+    bool addLightProbeGroupRequested = false;
     std::string primitive3D;
     bool unpackRequested = false;
     bool deleteRequested = false;

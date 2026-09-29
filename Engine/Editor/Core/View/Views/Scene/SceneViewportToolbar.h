@@ -4,6 +4,7 @@
 #include "Engine/Editor/UI/IEditorUi.h"
 
 namespace Engine::Scene { class Scene; }
+namespace Engine::Core { class Object; }
 
 namespace Engine::Editor
 {
@@ -16,6 +17,11 @@ public:
     EditorTransformTool GetTransformTool() const
     {
         return m_transformTool;
+    }
+
+    bool IsTransformDragging() const
+    {
+        return m_cubeDragObject != nullptr;
     }
 
 private:
@@ -35,5 +41,14 @@ private:
 
     EditorTransformTool m_transformTool = EditorTransformTool::Translate;
     bool m_renderModeExpanded = false;
+    Engine::Core::Object* m_cubeDragObject = nullptr;
+    int m_cubeDragAxis = -1;
+    EditorTransformTool m_cubeDragTool = EditorTransformTool::Translate;
+    EditorUiVec2 m_cubeDragStartMouse{};
+    EditorUiVec2 m_cubeDragScreenDirection{};
+    glm::vec3 m_cubeDragStartPosition{};
+    glm::vec3 m_cubeDragStartRotation{};
+    glm::vec3 m_cubeDragStartScale{1.f};
+    float m_cubeDragWorldUnitsPerPixel = 0.f;
 };
 }

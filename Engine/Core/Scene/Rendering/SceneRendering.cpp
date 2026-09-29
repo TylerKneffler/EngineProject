@@ -7,6 +7,7 @@
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
+#include "Core/Compoonents/Lighting/LightProbe.h"
 #include "Core/Rendering/Portal/PortalRenderPolicy.h"
 #include "Core/Model/LightingData.h"
 #include "Core/Graphics/IGraphicsProvider.h"
@@ -2472,11 +2473,18 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         // Keep the component values for inspection, but do not add them again
         // at runtime or the baked result would be double-lit.
         const bool usesLegacyProbeBake = bakedLighting && bakedLighting->valid &&
-            bakedLighting->version < 3;
+            bakedLighting->version < 3 && !(mesh&&mesh->useLightProbes);
+        const bool usesInterpolatedProbes=mesh&&mesh->useLightProbes;
+        const Engine::Components::ProbeLightingSample probeLighting =
+            (usesInterpolatedProbes||!bakedLighting||!bakedLighting->valid)
+                ? Engine::Components::SampleLightProbes(*this,
+                    glm::vec3(renderItem->world[3]))
+                : Engine::Components::ProbeLightingSample{};
         const glm::vec3 bakedIrradiance =
             usesLegacyProbeBake
                 ? bakedLighting->irradiance
-                : glm::vec3(0.f);
+                : (probeLighting.valid
+                    ? probeLighting.irradiance : glm::vec3(0.f));
         const bool useSourceChart = useSourceChartMesh(*renderItem);
         glm::mat4 world = useSourceChart
             ? sourceChartWorld(*renderItem) : renderItem->world;
@@ -2673,6 +2681,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 bakedLighting->directionalIrradiance, 0.f);
             objectData.bakedLightDirection = glm::vec4(
                 bakedLighting->lightDirection, 1.f);
+        }
+        else if(probeLighting.valid)
+        {
+            objectData.bakedDirectional=glm::vec4(
+                probeLighting.directionalIrradiance,0.f);
+            objectData.bakedLightDirection=glm::vec4(
+                probeLighting.direction,1.f);
         }
 
         const uint32_t qualityLightCount = beyondLightingDistance ? 0u :

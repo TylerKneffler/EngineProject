@@ -1,12 +1,15 @@
 #include "SceneViewportToolbar.h"
 
 #include "SceneCameraController.h"
+#include "Core/Object.h"
 #include "Core/Compoonents/Camera/Camera.h"
+#include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Scene/Scene.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <glm/geometric.hpp>
+#include <glm/gtc/matrix_inverse.hpp>
 
 namespace Engine::Editor
 {
@@ -57,6 +60,51 @@ float DistanceToSegment(EditorUiVec2 point,EditorUiVec2 a,EditorUiVec2 b)
     const float x=a.x+dx*parameter-point.x;
     const float y=a.y+dy*parameter-point.y;
     return std::sqrt(x*x+y*y);
+}
+
+EditorUiVec2 Add(EditorUiVec2 a,EditorUiVec2 b)
+{
+    return {a.x+b.x,a.y+b.y};
+}
+
+EditorUiVec2 Subtract(EditorUiVec2 a,EditorUiVec2 b)
+{
+    return {a.x-b.x,a.y-b.y};
+}
+
+EditorUiVec2 Multiply(EditorUiVec2 value,float scale)
+{
+    return {value.x*scale,value.y*scale};
+}
+
+float Dot(EditorUiVec2 a,EditorUiVec2 b)
+{
+    return a.x*b.x+a.y*b.y;
+}
+
+float Length(EditorUiVec2 value)
+{
+    return std::sqrt(Dot(value,value));
+}
+
+bool SceneContains(const Engine::Scene::Scene& scene,
+    const Engine::Core::Object* object)
+{
+    for(const auto& candidate:scene.GetObjects())
+        if(candidate.get()==object)
+            return true;
+    return false;
+}
+
+void DrawBoxHandle(IEditorUi& ui,EditorUiVec2 center,float half,
+    EditorUiColor color)
+{
+    const EditorUiVec2 a{center.x-half,center.y-half};
+    const EditorUiVec2 b{center.x+half,center.y-half};
+    const EditorUiVec2 c{center.x+half,center.y+half};
+    const EditorUiVec2 d{center.x-half,center.y+half};
+    ui.DrawViewportTriangle(a,b,c,color);
+    ui.DrawViewportTriangle(a,c,d,color);
 }
 
 EditorUiColor FaceColor(int axis,int sign,bool hovered)
@@ -168,10 +216,21 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
 {
     if(!scene||scene->IsEditorMode2D()||input.available.x<150.f||
         input.available.y<120.f)
+    {
+        m_cubeDragObject=nullptr;
+        m_cubeDragAxis=-1;
         return false;
+    }
     auto* camera=scene->editorCamera.GetComponent<Engine::Components::Camera>();
     if(!camera)
         return false;
+
+    if(m_cubeDragObject&&(!SceneContains(*scene,m_cubeDragObject)||
+        input.leftReleased||!input.leftDown))
+    {
+        m_cubeDragObject=nullptr;
+        m_cubeDragAxis=-1;
+    }
 
     const glm::vec3 eye=scene->editorCamera.transform.position;
     glm::vec3 forward=camera->target-eye;
@@ -184,8 +243,8 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
     right=glm::normalize(right);
     const glm::vec3 up=glm::normalize(glm::cross(forward,right));
     const glm::vec3 cameraDirection=-forward;
-    const EditorUiVec2 center{input.available.x-54.f,50.f};
-    constexpr float cubeScale=27.f;
+    const EditorUiVec2 center{input.available.x-62.f,58.f};
+    constexpr float cubeScale=24.f;
     constexpr glm::vec3 vertices[8]={
         {-1.f,-1.f,-1.f},{1.f,-1.f,-1.f},{1.f,1.f,-1.f},{-1.f,1.f,-1.f},
         {-1.f,-1.f,1.f},{1.f,-1.f,1.f},{1.f,1.f,1.f},{-1.f,1.f,1.f}
@@ -247,7 +306,88 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
         {cornerDistance=distance;hoveredCorner=corner;}
     }
 
-    ui.DrawViewportCircle(center,45.f,{0.055f,0.065f,0.085f,.82f},true);
+    Engine::Core::Object* selected=scene->GetSelectedObject();
+    constexpr glm::vec3 worldAxes[3]={{1.f,0.f,0.f},{0.f,1.f,0.f},
+        {0.f,0.f,1.f}};
+    constexpr EditorUiColor axisColors[3]={{.95f,.20f,.18f,1.f},
+        {.25f,.85f,.30f,1.f},{.22f,.48f,1.f,1.f}};
+    constexpr EditorUiColor hoverColor{1.f,.82f,.16f,1.f};
+    EditorUiVec2 handleDirections[3]{};
+    EditorUiVec2 handleStarts[3]{};
+    EditorUiVec2 handleEnds[3]{};
+    int hoveredHandle=-1;
+    float closestHandleDistance=8.f;
+    EditorUiVec2 hoveredDragDirection{};
+    if(selected&&m_transformTool!=EditorTransformTool::Hand)
+    {
+        constexpr EditorUiVec2 fallbackDirections[3]={{1.f,0.f},{0.f,-1.f},
+            {-.70710678f,.70710678f}};
+        for(int axis=0;axis<3;++axis)
+        {
+            EditorUiVec2 direction{glm::dot(worldAxes[axis],right),
+                -glm::dot(worldAxes[axis],up)};
+            const float directionLength=Length(direction);
+            direction=directionLength>.16f
+                ?Multiply(direction,1.f/directionLength)
+                :fallbackDirections[axis];
+            handleDirections[axis]=direction;
+            handleStarts[axis]=Add(center,Multiply(direction,29.f));
+            handleEnds[axis]=Add(center,Multiply(direction,53.f));
+        }
+
+        if(m_transformTool==EditorTransformTool::Rotate)
+        {
+            constexpr int segments=64;
+            constexpr float radius=47.f;
+            for(int axis=0;axis<3;++axis)
+            {
+                const glm::vec3 basisA=worldAxes[(axis+1)%3];
+                const glm::vec3 basisB=worldAxes[(axis+2)%3];
+                EditorUiVec2 previous{};
+                for(int segment=0;segment<=segments;++segment)
+                {
+                    constexpr float twoPi=6.28318530718f;
+                    const float angle=twoPi*static_cast<float>(segment)/segments;
+                    const glm::vec3 point=basisA*std::cos(angle)+
+                        basisB*std::sin(angle);
+                    const EditorUiVec2 current{center.x+glm::dot(point,right)*radius,
+                        center.y-glm::dot(point,up)*radius};
+                    if(segment>0)
+                    {
+                        const float distance=DistanceToSegment(
+                            input.mousePosInViewport,previous,current);
+                        if(distance<closestHandleDistance)
+                        {
+                            closestHandleDistance=distance;
+                            hoveredHandle=axis;
+                            const EditorUiVec2 tangent=Subtract(current,previous);
+                            const float tangentLength=Length(tangent);
+                            if(tangentLength>.001f)
+                                hoveredDragDirection=Multiply(tangent,
+                                    1.f/tangentLength);
+                        }
+                    }
+                    previous=current;
+                }
+            }
+        }
+        else
+        {
+            for(int axis=0;axis<3;++axis)
+            {
+                const float distance=DistanceToSegment(input.mousePosInViewport,
+                    handleStarts[axis],handleEnds[axis]);
+                if(distance<closestHandleDistance)
+                {
+                    closestHandleDistance=distance;
+                    hoveredHandle=axis;
+                    hoveredDragDirection=handleDirections[axis];
+                }
+            }
+        }
+    }
+
+    ui.DrawViewportCircle(center,56.f,{0.055f,0.065f,0.085f,.82f},true);
     for(int index=0;index<6;++index)
     {
         const Face& face=faces[index];
@@ -278,6 +418,68 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
         ui.DrawViewportCircle(projected[hoveredCorner],7.f,
             {1.f,.82f,.16f,1.f},true);
 
+    if(selected&&m_transformTool!=EditorTransformTool::Hand)
+    {
+        const char* labels[3]={"X","Y","Z"};
+        if(m_transformTool==EditorTransformTool::Rotate)
+        {
+            constexpr int segments=64;
+            constexpr float radius=47.f;
+            for(int axis=0;axis<3;++axis)
+            {
+                const glm::vec3 basisA=worldAxes[(axis+1)%3];
+                const glm::vec3 basisB=worldAxes[(axis+2)%3];
+                const EditorUiColor color=axis==hoveredHandle||
+                    (m_cubeDragObject&&axis==m_cubeDragAxis)
+                    ?hoverColor:axisColors[axis];
+                EditorUiVec2 previous{};
+                for(int segment=0;segment<=segments;++segment)
+                {
+                    constexpr float twoPi=6.28318530718f;
+                    const float angle=twoPi*static_cast<float>(segment)/segments;
+                    const glm::vec3 point=basisA*std::cos(angle)+
+                        basisB*std::sin(angle);
+                    const EditorUiVec2 current{center.x+glm::dot(point,right)*radius,
+                        center.y-glm::dot(point,up)*radius};
+                    if(segment>0)
+                    {
+                        ui.DrawViewportLine(previous,current,
+                            {.025f,.03f,.04f,.96f},5.f);
+                        ui.DrawViewportLine(previous,current,color,2.5f);
+                    }
+                    previous=current;
+                }
+            }
+        }
+        else
+        {
+            for(int axis=0;axis<3;++axis)
+            {
+                const EditorUiColor color=axis==hoveredHandle||
+                    (m_cubeDragObject&&axis==m_cubeDragAxis)
+                    ?hoverColor:axisColors[axis];
+                ui.DrawViewportLine(handleStarts[axis],handleEnds[axis],
+                    {.025f,.03f,.04f,.96f},6.f);
+                ui.DrawViewportLine(handleStarts[axis],handleEnds[axis],color,3.f);
+                if(m_transformTool==EditorTransformTool::Translate)
+                {
+                    const EditorUiVec2 perpendicular{
+                        -handleDirections[axis].y,handleDirections[axis].x};
+                    const EditorUiVec2 arrowBase=Subtract(handleEnds[axis],
+                        Multiply(handleDirections[axis],10.f));
+                    ui.DrawViewportTriangle(handleEnds[axis],
+                        Add(arrowBase,Multiply(perpendicular,5.f)),
+                        Subtract(arrowBase,Multiply(perpendicular,5.f)),color);
+                }
+                else
+                    DrawBoxHandle(ui,handleEnds[axis],5.f,color);
+                ui.DrawViewportText(Add(handleEnds[axis],
+                    Multiply(EditorUiVec2{-handleDirections[axis].y,
+                        handleDirections[axis].x},6.f)),labels[axis],color);
+            }
+        }
+    }
+
     const bool projectionHovered=input.mousePosInViewport.x>=center.x-28.f&&
         input.mousePosInViewport.x<=center.x+28.f&&
         input.mousePosInViewport.y>=center.y+43.f&&
@@ -287,8 +489,57 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
         projectionHovered?EditorUiColor{1.f,.82f,.16f,1.f}:
             EditorUiColor{.82f,.86f,.94f,.95f});
 
+    if(m_cubeDragObject&&input.leftDown)
+    {
+        const float pixels=Dot(Subtract(input.mousePosInViewport,
+            m_cubeDragStartMouse),m_cubeDragScreenDirection);
+        if(m_cubeDragTool==EditorTransformTool::Translate)
+        {
+            const glm::vec3 worldDelta=worldAxes[m_cubeDragAxis]*pixels*
+                m_cubeDragWorldUnitsPerPixel;
+            glm::vec3 localDelta=worldDelta;
+            if(m_cubeDragObject->Parent)
+            {
+                const glm::mat4 parentWorld=
+                    m_cubeDragObject->Parent->transform.GetWorldMatrix();
+                if(std::abs(glm::determinant(parentWorld))>.000001f)
+                    localDelta=glm::vec3(glm::inverse(parentWorld)*
+                        glm::vec4(worldDelta,0.f));
+            }
+            m_cubeDragObject->transform.position=
+                m_cubeDragStartPosition+localDelta;
+        }
+        else if(m_cubeDragTool==EditorTransformTool::Rotate)
+            m_cubeDragObject->transform.rotation[m_cubeDragAxis]=
+                m_cubeDragStartRotation[m_cubeDragAxis]+pixels*.01f;
+        else if(m_cubeDragTool==EditorTransformTool::Scale)
+            m_cubeDragObject->transform.scale[m_cubeDragAxis]=std::max(.001f,
+                m_cubeDragStartScale[m_cubeDragAxis]+pixels*.01f);
+        if(auto* body=m_cubeDragObject->GetComponent<
+            Engine::Components::RigidBody>())
+            body->NotifyEditorTransformChanged();
+        return true;
+    }
+
     if(!input.rawLeftClicked)
         return false;
+    if(selected&&hoveredHandle>=0&&
+        Length(hoveredDragDirection)>.5f)
+    {
+        m_cubeDragObject=selected;
+        m_cubeDragAxis=hoveredHandle;
+        m_cubeDragTool=m_transformTool;
+        m_cubeDragStartMouse=input.mousePosInViewport;
+        m_cubeDragScreenDirection=hoveredDragDirection;
+        m_cubeDragStartPosition=selected->transform.position;
+        m_cubeDragStartRotation=selected->transform.rotation;
+        m_cubeDragStartScale=selected->transform.scale;
+        const float objectDistance=glm::length(
+            selected->transform.GetWorldPosition()-eye);
+        m_cubeDragWorldUnitsPerPixel=std::clamp(objectDistance*.003f,
+            .0025f,.25f);
+        return true;
+    }
     if(projectionHovered)
     {
         camera->orthographic=!camera->orthographic;

@@ -25,6 +25,11 @@ public:
     Mesh();
     ~Mesh() = default;
 
+    // Use interpolated baked probes instead of a surface lightmap. Enable for
+    // movable meshes and characters that travel through a probe volume.
+    PROPERTY(Inspector,EditAnywhere,Category="Lighting")
+    bool useLightProbes=false;
+
     // Load vertex data from a triangulated OBJ file (CPU side only).
     void LoadFromFile(const std::string& path);
     // Resolves portable Assets/... paths against bundled sandbox assets.

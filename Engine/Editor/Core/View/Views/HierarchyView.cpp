@@ -8,6 +8,7 @@
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Obj/Sprite.h"
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
+#include "Core/Compoonents/Lighting/LightProbe.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "../Focus/WindowFocusHandler.h"
@@ -116,12 +117,15 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
     const EditorUiContextMenuResult worldMenu =
         ui.ContextMenu(this, "Create", nullptr, true);
     if (worldMenu.addRequested || !worldMenu.primitive3D.empty() ||
-        worldMenu.addSpriteRequested)
+        worldMenu.addSpriteRequested || worldMenu.addLightProbeRequested ||
+        worldMenu.addLightProbeGroupRequested)
     {
         m_pendingAddParent = nullptr;
         m_pendingAddType = !worldMenu.primitive3D.empty() ? PendingAddType::Primitive3D
             : (worldMenu.addSpriteRequested ? PendingAddType::Sprite
-                : PendingAddType::Empty);
+            : (worldMenu.addLightProbeRequested ? PendingAddType::LightProbe
+            : (worldMenu.addLightProbeGroupRequested
+                ? PendingAddType::LightProbeGroup : PendingAddType::Empty)));
         m_pendingPrimitive3D = worldMenu.primitive3D;
         m_hasPendingAdd = true;
     }
@@ -217,6 +221,16 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
                     created->AddComponent<Engine::Components::SpriteAnimationManager>();
                 Engine::Components::Sprite* sprite = created->AddComponent<Engine::Components::Sprite>();
                 sprite->SetAnimationManager(manager);
+            }
+            else if(m_pendingAddType==PendingAddType::LightProbe)
+            {
+                created=m_scene->AddObject("Light Probe");
+                created->AddComponent<Engine::Components::LightProbe>();
+            }
+            else if(m_pendingAddType==PendingAddType::LightProbeGroup)
+            {
+                created=m_scene->AddObject("Light Probe Volume");
+                created->AddComponent<Engine::Components::LightProbeGroup>();
             }
             else
             {
@@ -479,12 +493,15 @@ void HierarchyView::DrawObjectNode(
     else
         menu = ui.ContextMenu(obj, "Create",
             deletable ? "Delete Object" : nullptr, true);
-    if (menu.addRequested || !menu.primitive3D.empty() || menu.addSpriteRequested)
+    if (menu.addRequested || !menu.primitive3D.empty() || menu.addSpriteRequested ||
+        menu.addLightProbeRequested || menu.addLightProbeGroupRequested)
     {
         m_pendingAddParent = obj;
         m_pendingAddType = !menu.primitive3D.empty() ? PendingAddType::Primitive3D
             : (menu.addSpriteRequested ? PendingAddType::Sprite
-                : PendingAddType::Empty);
+            : (menu.addLightProbeRequested ? PendingAddType::LightProbe
+            : (menu.addLightProbeGroupRequested
+                ? PendingAddType::LightProbeGroup : PendingAddType::Empty)));
         m_pendingPrimitive3D = menu.primitive3D;
         m_hasPendingAdd = true;
     }

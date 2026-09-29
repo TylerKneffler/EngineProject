@@ -8,7 +8,8 @@ namespace Engine::Editor
 inline EditorUiObjectIcon ComponentIconForType(std::string_view type)
 {
     if (type == "Transform") return EditorUiObjectIcon::Transform;
-    if (type == "Light") return EditorUiObjectIcon::Light;
+    if (type == "Light" || type == "LightProbe" || type == "LightProbeGroup")
+        return EditorUiObjectIcon::Light;
     if (type == "Camera" || type == "CameraTrack")
         return EditorUiObjectIcon::Camera;
     if (type == "AudioSource") return EditorUiObjectIcon::Audio;

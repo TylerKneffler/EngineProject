@@ -3,6 +3,7 @@
 #include "Core/Object.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Lighting/Light.h"
+#include "Core/Compoonents/Lighting/LightProbe.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include <algorithm>
@@ -137,6 +138,21 @@ void DrawCameraIcon(IEditorUi& ui, EditorUiVec2 center, bool selected)
     ui.DrawViewportTriangle({ center.x + 4.f, center.y - 3.f },
         { center.x + 10.f, center.y - 6.f },
         { center.x + 10.f, center.y + 6.f }, color);
+}
+
+void DrawProbeIcon(IEditorUi& ui,EditorUiVec2 center,bool selected,bool volume)
+{
+    const EditorUiColor color=volume
+        ?EditorUiColor{.75f,.42f,1.f,1.f}
+        :EditorUiColor{1.f,.78f,.18f,1.f};
+    if(selected)
+        ui.DrawViewportCircle(center,12.f,{1.f,1.f,1.f,.9f},false,2.f);
+    ui.DrawViewportCircle(center,volume?7.f:6.f,kOutline,true);
+    ui.DrawViewportCircle(center,volume?5.f:4.f,color,true);
+    ui.DrawViewportLine({center.x-10.f,center.y},
+        {center.x+10.f,center.y},color,1.5f);
+    ui.DrawViewportLine({center.x,center.y-10.f},
+        {center.x,center.y+10.f},color,1.5f);
 }
 
 void DrawBoxHandle(IEditorUi& ui,EditorUiVec2 center,float half,
@@ -306,7 +322,10 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
             continue;
         const bool hasLight = object->GetComponent<Engine::Components::Light>() != nullptr;
         const bool hasCamera = object->GetComponent<Engine::Components::Camera>() != nullptr;
-        if (!hasLight && !hasCamera)
+        const auto* probe=object->GetComponent<Engine::Components::LightProbe>();
+        const auto* probeGroup=object->GetComponent<
+            Engine::Components::LightProbeGroup>();
+        if (!hasLight && !hasCamera && !probe && !probeGroup)
             continue;
 
         EditorUiVec2 center{};
@@ -315,8 +334,50 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
             continue;
         if (hasLight)
             DrawLightIcon(ui, center, object == selected);
-        else
+        else if(hasCamera)
             DrawCameraIcon(ui, center, object == selected);
+        else
+            DrawProbeIcon(ui,center,object==selected,probeGroup!=nullptr);
+
+        if(probeGroup&&object==selected)
+        {
+            const glm::mat4 world=object->transform.GetWorldMatrix();
+            const glm::vec3 half=glm::max(glm::abs(probeGroup->size)*.5f,
+                glm::vec3(.005f));
+            const glm::vec3 corners[8]={{-half.x,-half.y,-half.z},
+                {half.x,-half.y,-half.z},{half.x,half.y,-half.z},
+                {-half.x,half.y,-half.z},{-half.x,-half.y,half.z},
+                {half.x,-half.y,half.z},{half.x,half.y,half.z},
+                {-half.x,half.y,half.z}};
+            EditorUiVec2 screens[8]{};
+            bool visible[8]{};
+            for(int corner=0;corner<8;++corner)
+                visible[corner]=ProjectPoint(viewProjection,
+                    glm::vec3(world*glm::vec4(corners[corner],1.f)),
+                    input.available,screens[corner]);
+            constexpr int edges[12][2]={{0,1},{1,2},{2,3},{3,0},
+                {4,5},{5,6},{6,7},{7,4},{0,4},{1,5},{2,6},{3,7}};
+            for(const auto& edge:edges)
+                if(visible[edge[0]]&&visible[edge[1]])
+                    ui.DrawViewportLine(screens[edge[0]],screens[edge[1]],
+                        {.75f,.42f,1.f,.9f},1.5f);
+
+            const int stepX=std::max(1,probeGroup->countX/8);
+            const int stepY=std::max(1,probeGroup->countY/8);
+            const int stepZ=std::max(1,probeGroup->countZ/8);
+            for(int z=0;z<probeGroup->countZ;z+=stepZ)
+            for(int y=0;y<probeGroup->countY;y+=stepY)
+            for(int x=0;x<probeGroup->countX;x+=stepX)
+            {
+                EditorUiVec2 sampleScreen{};
+                if(ProjectPoint(viewProjection,glm::vec3(world*glm::vec4(
+                    probeGroup->LocalSamplePosition(x,y,z),1.f)),
+                    input.available,sampleScreen))
+                    ui.DrawViewportCircle(sampleScreen,2.25f,
+                        probeGroup->valid?EditorUiColor{1.f,.78f,.18f,.9f}:
+                        EditorUiColor{.55f,.42f,.65f,.8f},true);
+            }
+        }
 
         const float distance = Length(Subtract(input.mousePosInViewport, center));
         if (distance <= 14.f && distance < iconHitDistance)

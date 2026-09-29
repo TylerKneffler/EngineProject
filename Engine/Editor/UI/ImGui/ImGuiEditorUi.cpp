@@ -606,6 +606,11 @@ EditorUiContextMenuResult ImGuiEditorUi::ContextMenu(const void* id,const char* 
                         result.addSpriteRequested=ImGui::MenuItem("Sprite");
                         ImGui::EndMenu();
                     }
+                    if(ImGui::BeginMenu("Lighting")){
+                        result.addLightProbeRequested=ImGui::MenuItem("Light Probe");
+                        result.addLightProbeGroupRequested=ImGui::MenuItem("Light Probe Volume");
+                        ImGui::EndMenu();
+                    }
                     ImGui::EndMenu();
                 }
             }else result.addRequested=ImGui::MenuItem(addLabel);
