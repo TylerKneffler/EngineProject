@@ -11,10 +11,6 @@ Status convention:
 
 ## Next priorities
 
-These are the highest-value correctness and architecture tasks still open.
-
-- [ ] HIGH: Give the video exporter an off-screen render target and asynchronous readback instead of capturing the DX11 game swap chain.
-
 ## Implemented foundation
 
 ### Runtime, projects, and editor
@@ -155,6 +151,7 @@ These are the highest-value correctness and architecture tasks still open.
 #### Deterministic simulation
 
 - [x] Route every existing export-relevant update through the explicit scene/export clock and remove wall-clock animation and script timing.
+- [X] HIGH: Give the video exporter an off-screen render target and asynchronous readback instead of capturing the DX11 game swap chain.
 - [ ] HIGH: Render an explicit frame at `t = 0` before advancing simulation.
 - [ ] HIGH: Add repeatability tests that compare multiple exports of the same scene.
 
