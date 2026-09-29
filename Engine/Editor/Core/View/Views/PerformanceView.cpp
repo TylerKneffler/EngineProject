@@ -359,6 +359,10 @@ void PerformanceView::DrawMetric(IEditorUi& ui, const char* id, const char* titl
                 << "  " << std::fixed << std::setprecision(1)
                 << segments[index].percentage << '%';
             ui.Progress(segments[index].percentage / 100.f, overlay.str().c_str());
+            const std::string detail = std::string(
+                segments[index].label ? segments[index].label : "Usage") +
+                ": " + std::to_string(segments[index].percentage) + "%";
+            ui.Tooltip(detail.c_str());
         }
     }
     if (m_visualMode == 2 || m_visualMode == 3)

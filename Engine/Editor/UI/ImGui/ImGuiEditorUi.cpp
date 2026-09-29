@@ -871,9 +871,57 @@ void ImGuiEditorUi::PercentageGrid(const char* id,
         draw->AddRectFilled(minimum,maximum,color,cell*.16f);
         draw->AddRect(minimum,maximum,border,cell*.16f);
     }
+    int hoveredCell=-1;
     if(ImGui::IsItemHovered())
     {
+        const ImVec2 mouse=ImGui::GetIO().MousePos;
+        const float localX=mouse.x-origin.x;
+        const float localY=mouse.y-origin.y;
+        const int column=static_cast<int>(localX/(cell+gap));
+        const int visualRow=static_cast<int>(localY/(cell+gap));
+        if(column>=0&&column<10&&visualRow>=0&&visualRow<10&&
+            localX-column*(cell+gap)<=cell&&localY-visualRow*(cell+gap)<=cell)
+        {
+            hoveredCell=(9-visualRow)*10+column;
+            const ImVec2 minimum{origin.x+column*(cell+gap),
+                origin.y+visualRow*(cell+gap)};
+            const ImVec2 maximum{minimum.x+cell,minimum.y+cell};
+            draw->AddRect(minimum,maximum,
+                ImGui::GetColorU32(ImGuiCol_Text),cell*.16f,0,2.f);
+        }
+
         ImGui::BeginTooltip();
+        if(hoveredCell>=0)
+        {
+            ImGui::Text("Cell %d  |  %d%% - %d%%",hoveredCell+1,
+                hoveredCell,hoveredCell+1);
+            ImGui::TextDisabled("Occupied %.1f%% of this cell",
+                std::clamp(fills[hoveredCell].coverage,0.f,1.f)*100.f);
+            float segmentStart=0.f;
+            for(size_t index=0;index<segmentCount&&segmentStart<100.f;++index)
+            {
+                const float amount=std::clamp(segments[index].percentage,
+                    0.f,100.f-segmentStart);
+                const float segmentEnd=segmentStart+amount;
+                const float overlap=std::max(0.f,
+                    std::min(segmentEnd,static_cast<float>(hoveredCell+1))-
+                    std::max(segmentStart,static_cast<float>(hoveredCell)));
+                if(overlap>0.f)
+                {
+                    const EditorUiColor& value=segments[index].color;
+                    ImGui::ColorButton("##cellLegend",
+                        {value.r,value.g,value.b,value.a},
+                        ImGuiColorEditFlags_NoTooltip|ImGuiColorEditFlags_NoDragDrop,
+                        {9.f,9.f});
+                    ImGui::SameLine();
+                    ImGui::Text("%s  %.2f%% overall (%.0f%% of cell)",
+                        segments[index].label?segments[index].label:"Usage",
+                        overlap,overlap*100.f);
+                }
+                segmentStart=segmentEnd;
+            }
+            ImGui::Separator();
+        }
         float total=0.f;
         for(size_t index=0;index<segmentCount;++index)
         {
@@ -905,9 +953,9 @@ void ImGuiEditorUi::UsageHistory(const char* id,const float* values,size_t count
         const float y=origin.y+height*line/4.f;
         draw->AddLine({origin.x,y},{origin.x+width,y},grid);
     }
+    const ImU32 plot=ImGui::ColorConvertFloat4ToU32({color.r,color.g,color.b,color.a});
     if(values&&count>1&&maximum>minimum)
     {
-        const ImU32 plot=ImGui::ColorConvertFloat4ToU32({color.r,color.g,color.b,color.a});
         for(size_t index=1;index<count;++index)
         {
             const float first=std::clamp((values[index-1]-minimum)/(maximum-minimum),0.f,1.f);
@@ -920,7 +968,26 @@ void ImGuiEditorUi::UsageHistory(const char* id,const float* values,size_t count
     }
     draw->AddRect(origin,{origin.x+width,origin.y+height},grid,3.f);
     if(ImGui::IsItemHovered()&&values&&count)
-        ImGui::SetTooltip("Current %.1f   Range %.0f-%.0f",values[count-1],minimum,maximum);
+    {
+        const float localX=std::clamp(ImGui::GetIO().MousePos.x-origin.x,0.f,width);
+        const size_t sample=count>1?std::min(count-1,static_cast<size_t>(std::round(
+            localX/width*static_cast<float>(count-1)))):0;
+        const float x=count>1?origin.x+width*static_cast<float>(sample)/
+            static_cast<float>(count-1):origin.x+width;
+        const float normalized=maximum>minimum?std::clamp(
+            (values[sample]-minimum)/(maximum-minimum),0.f,1.f):0.f;
+        const float y=origin.y+height*(1.f-normalized);
+        draw->AddLine({x,origin.y},{x,origin.y+height},
+            ImGui::GetColorU32(ImGuiCol_TextDisabled),1.f);
+        draw->AddCircleFilled({x,y},4.f,plot);
+        draw->AddCircle({x,y},4.f,ImGui::GetColorU32(ImGuiCol_Text),0,1.5f);
+        ImGui::BeginTooltip();
+        ImGui::Text("Sample %zu of %zu",sample+1,count);
+        ImGui::Text("Value %.2f",values[sample]);
+        ImGui::TextDisabled("Current %.2f  |  Range %.0f - %.0f",
+            values[count-1],minimum,maximum);
+        ImGui::EndTooltip();
+    }
 }
 void ImGuiEditorUi::DrawImage(void*tex,float w,float h){ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(tex)),{w,h});}
 void ImGuiEditorUi::DrawCircularImage(void* tex,float diameter,EditorUiColor border)
