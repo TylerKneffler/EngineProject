@@ -1879,7 +1879,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         std::min(kMaxLights,
             m_distanceLightingSettings.maximumRealtimeLights),
         !cameraUsesSourceWarpChart, &m_realtimeShadowSettings,
-        &shadowSelection);
+        &shadowSelection, &cameraPosition);
 
     const uint32_t clusterTileSize = std::clamp(
         m_distanceLightingSettings.clusterTileSize, 16u, 256u);
@@ -2999,6 +2999,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 {
                     if (!draw.castsShadow || !draw.vertexBuffer ||
                         isSpatialManipulatorCarrierDraw(draw) ||
+                        !IsObjectInSpatialRegion(draw.object,
+                            entry.contentScopeRoot) ||
                         !Engine::Rendering::Portal::
                             IsTraversalInstanceVisibleInConnectedChart(
                                 draw.traversalChartPortal, entry.targetChart))
@@ -3509,6 +3511,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     struct PortalViewJob
     {
         const PortalStencilPass* portal = nullptr;
+        const Engine::Core::Object* contentScopeRoot = nullptr;
         glm::mat4 apertureView { 1.f };
         glm::mat4 mappedView { 1.f };
         glm::vec3 mappedCameraPosition { 0.f };
@@ -3630,13 +3633,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         uint32_t depth = 0;
         uint32_t inheritedRootStencilBase = 0;
         const Engine::Components::SpatialManipulator* previousExit = nullptr;
+        const Engine::Core::Object* contentScopeRoot = nullptr;
         size_t parentJobIndex = std::numeric_limits<size_t>::max();
         std::vector<glm::vec2> visibleScreenRegion;
         std::vector<PortalEdge> path;
     };
     uint32_t nextRootStencilBase = 1u;
     std::vector<PortalScheduleNode> scheduleQueue;
-    scheduleQueue.push_back({ view, 0u, 0u, nullptr,
+    scheduleQueue.push_back({ view, 0u, 0u, nullptr, nullptr,
         std::numeric_limits<size_t>::max(),
         { {-1.f, -1.f}, {1.f, -1.f}, {1.f, 1.f}, {-1.f, 1.f} }, {} });
     size_t scheduleCursor = 0u;
@@ -3668,6 +3672,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             // visible across the room—remain valid recursive entrances.
             if (Engine::Rendering::Portal::IsImmediateExitAperture(
                 pass.source, node.previousExit))
+                continue;
+            if (!IsObjectInSpatialRegion(pass.source->Owner,
+                node.contentScopeRoot))
                 continue;
             if (pass.apertureVertexCount < 3)
                 continue;
@@ -3750,6 +3757,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
             PortalViewJob job{};
             job.portal = &pass;
+            job.contentScopeRoot =
+                pass.target->ResolvePortalContentScopeRoot();
             job.apertureView = effectiveApertureView;
             job.mappedCameraPosition = mappedCamera;
             job.mappedView = glm::lookAtLH(mappedCamera,
@@ -3788,6 +3797,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             child.depth = depth + 1u;
             child.inheritedRootStencilBase = rootStencilBase;
             child.previousExit = pass.target;
+            child.contentScopeRoot = job.contentScopeRoot;
             child.parentJobIndex = jobIndex;
             child.visibleScreenRegion = std::move(visibleScreenRegion);
             child.path = node.path;
@@ -3905,6 +3915,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 found->ownerCamera = cam;
             }
             found->targetChart = job.portal->target;
+            found->contentScopeRoot = job.contentScopeRoot;
             found->view = job.mappedView;
             found->cameraPosition = job.mappedCameraPosition;
             found->depth = job.depth;
@@ -3976,6 +3987,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             portalPass, portalJob.mappedCameraPosition);
         for (const PreparedDraw& draw : preparedDraws)
         {
+            if (!IsObjectInSpatialRegion(draw.object,
+                portalJob.contentScopeRoot))
+                continue;
             if (!Engine::Rendering::Portal::
                 IsTraversalInstanceVisibleInConnectedChart(
                     draw.traversalChartPortal, portalPass.target))
@@ -4104,6 +4118,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
     const auto drawConnectedSkybox = [&](const PortalViewJob& portalJob)
     {
+        // A scoped spatial region owns only its explicit hierarchy. Falling
+        // back to the scene-global skybox would leak content from outside the
+        // connected chart and hide missing region content.
+        if (portalJob.contentScopeRoot)
+            return;
         if (!skybox || !skybox->GetGraphicsTexture() ||
             !m_portalSkyboxStencilReadPipeline)
             return;
@@ -4259,6 +4278,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                             if (!draw.object || !draw.vertexBuffer)
                                 continue;
                             if (isSpatialManipulatorCarrierDraw(draw))
+                                continue;
+                            if (!IsObjectInSpatialRegion(draw.object,
+                                portalJob.contentScopeRoot))
                                 continue;
                             if (!Engine::Rendering::Portal::
                                 IsTraversalInstanceVisibleInConnectedChart(
@@ -4468,6 +4490,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 if (!draw.object || !draw.vertexBuffer)
                     continue;
                 if (isSpatialManipulatorCarrierDraw(draw))
+                    continue;
+                if (!IsObjectInSpatialRegion(draw.object,
+                    portalJob.contentScopeRoot))
                     continue;
                 if (!Engine::Rendering::Portal::
                     IsTraversalInstanceVisibleInConnectedChart(

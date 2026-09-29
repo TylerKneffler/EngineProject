@@ -24,6 +24,7 @@ namespace Engine::Rendering
             uint32_t capacity,
             bool mapThroughSpatialVolumes = true,
             const Engine::Model::RealtimeShadowSettings* shadowSettings = nullptr,
-            Engine::Model::RealtimeShadowSelection* shadowSelection = nullptr) const;
+            Engine::Model::RealtimeShadowSelection* shadowSelection = nullptr,
+            const glm::vec3* importancePosition = nullptr) const;
     };
 }

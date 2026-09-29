@@ -13,12 +13,7 @@ Status convention:
 
 These are the highest-value correctness and architecture tasks still open.
 
-- [ ] HIGH: Define explicit portal content-region ownership through a scene layer, scope root, or spatial chart, then restrict rendering and queries to the connected region.wall-clock paths were removed; no particle runtime currently exists.
 - [ ] HIGH: Give the video exporter an off-screen render target and asynchronous readback instead of capturing the DX11 game swap chain.
-- [ ] HIGH: Add crack-free distance-based terrain LOD with deterministic shared borders or transition meshes, followed by material-compatible terrain batching or indirect submission.
-- [ ] HIGH: Add deterministic light importance sorting for global/portal fallback lists so irrelevant first-in-scene lights cannot displace visible lights.
-- [ ] HIGH: Add shadow and lighting diagnostics: atlas/cascade views, selected light, caster/triangle counts, cluster occupancy/overflow, allocations, and non-blocking GPU timings.
-- [ ] HIGH: Expand visual regression coverage to portal frames and shadow failure cases such as acne, peter-panning, seams, shimmer, far fade, thin geometry, reversed winding, and large coordinates.
 
 ## Implemented foundation
 
@@ -61,6 +56,7 @@ These are the highest-value correctness and architecture tasks still open.
 - [x] Persistent local/remote split render instances, separate collision pieces, welded cap generation, restoration, and bounded rebuild behavior.
 - [x] Unified rendering/physics/raycast/audio/camera/gameplay spatial-query contract and finite recursive portal-ray segmentation used by editor picking.
 - [x] HIGH: Gate portal teleportation with a swept collision-shape-versus-inset-aperture test. Use the solid rim as physical feedback instead of testing only the rigid-body centre.
+- [x] HIGH: Define explicit portal content-region ownership through a scene layer, scope root, or spatial chart, then restrict rendering and queries to the connected region.
 
 ### Directional shadows and realtime lighting
 
@@ -74,6 +70,7 @@ These are the highest-value correctness and architecture tasks still open.
 - [x] GGX importance-filtered HDR environment mip generation and a generated split-sum BRDF integration LUT across DX11, DX12, and Vulkan.
 - [x] Serialized None/ACES/Reinhard output operators and exposure applied consistently in the current material/sky shader path.
 - [x] Fixed-timestep DX11/DX12/Vulkan GPU image tests for directional shadows, alpha masks, skinning, morphs, terrain, moving casters, and bounded backend parity. Tests wait for terrain generation and skip when a required backend is unavailable.
+- [x] HIGH: Add deterministic light importance sorting for global/portal fallback lists so irrelevant first-in-scene lights cannot displace visible lights.
 
 ### Video export baseline
 

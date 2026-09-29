@@ -393,6 +393,11 @@ int VideoExportApplication::Run(HINSTANCE instance)
         std::cerr << "Could not initialize the DirectX 11 export renderer.\n";
         return 6;
     }
+    if (!renderer.EnableOffscreenExport(3u))
+    {
+        std::cerr << "Could not create the off-screen export target or readback queue.\n";
+        return 6;
+    }
     Engine::Scene::Scene scene;
     scene.Init(renderer.GetGraphicsProvider());
     scene.SetRealtimeShadowSettings(settings.realtimeShadows);
@@ -427,6 +432,15 @@ int VideoExportApplication::Run(HINSTANCE instance)
     bool success = true;
     uint64_t framesWritten = 0;
     std::vector<uint8_t> pixels;
+    const auto consumeReadback = [&](bool wait)
+    {
+        if (!renderer.ReadExportFrameRGBA(pixels, wait))
+            return !wait;
+        if (!encoder.Write(pixels))
+            return false;
+        ++framesWritten;
+        return true;
+    };
     for (uint64_t frame = 0; frame < frameLimit; ++frame)
     {
         scene.UpdateFixedFrame();
@@ -445,16 +459,17 @@ int VideoExportApplication::Run(HINSTANCE instance)
         if (context && camera)
             scene.Render(context.get(), static_cast<float>(options.width) /
                 static_cast<float>(options.height), camera, false);
-        if (!renderer.CaptureFrameRGBA(pixels) || !encoder.Write(pixels))
+        renderer.EndFrame();
+        if (!consumeReadback(false) ||
+            (renderer.GetPendingExportFrameCount() >=
+                renderer.GetExportReadbackCapacity() &&
+                !consumeReadback(true)))
         {
-            std::cerr << "Frame capture or FFmpeg pipe failed at frame "
+            std::cerr << "Asynchronous frame readback or FFmpeg pipe failed at frame "
                 << frame << ".\n";
             success = false;
-            renderer.EndFrame();
             break;
         }
-        renderer.EndFrame();
-        ++framesWritten;
 
         CameraTrack* track = camera && camera->Owner
             ? camera->Owner->GetComponent<CameraTrack>() : nullptr;
@@ -462,6 +477,14 @@ int VideoExportApplication::Run(HINSTANCE instance)
         if (options.durationSeconds <= 0.f && sawCameraTrack && track &&
             track->IsFinished())
             break;
+    }
+    while (success && renderer.GetPendingExportFrameCount() > 0u)
+    {
+        if (!consumeReadback(true))
+        {
+            std::cerr << "Could not drain the asynchronous export readback queue.\n";
+            success = false;
+        }
     }
     renderer.WaitIdle();
     success = encoder.Finish(true) && success;

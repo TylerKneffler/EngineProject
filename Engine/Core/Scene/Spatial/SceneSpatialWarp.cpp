@@ -251,6 +251,7 @@ std::vector<Scene::PortalRaySegment> Scene::TracePortalRay(
     };
     std::vector<PortalEdge> portalPath;
     SpatialRay current { ray.origin, ray.direction / directionLength };
+    const Object* currentContentScopeRoot = nullptr;
     float remainingDistance = maxDistance;
     constexpr float kRayEpsilon = 0.001f;
 
@@ -294,6 +295,8 @@ std::vector<Scene::PortalRaySegment> Scene::TracePortalRay(
             {
                 const Engine::Core::Object* object = owned.get();
                 if (!object || !object->IsEnabledInHierarchy())
+                    continue;
+                if (!IsObjectInSpatialRegion(object, currentContentScopeRoot))
                     continue;
                 auto* source = object->GetComponent<
                     Engine::Components::SpatialManipulator>();
@@ -345,7 +348,8 @@ std::vector<Scene::PortalRaySegment> Scene::TracePortalRay(
         }
 
         segments.push_back({ current, nearestDistance,
-            nearestSource ? nearestSource->Owner : nullptr });
+            nearestSource ? nearestSource->Owner : nullptr,
+            currentContentScopeRoot });
         if (!nearestSource || !nearestTarget)
             break;
 
@@ -360,11 +364,24 @@ std::vector<Scene::PortalRaySegment> Scene::TracePortalRay(
         current.direction = mappedDirection / mappedLength;
         current.origin = nearestSource->MapWorldPointThroughPortalShape(
             sourceHit, *nearestTarget) + current.direction * kRayEpsilon;
+        currentContentScopeRoot =
+            nearestTarget->ResolvePortalContentScopeRoot();
         remainingDistance -= nearestDistance;
         portalPath.push_back({ nearestSource, nearestTarget });
         if (remainingDistance <= kRayEpsilon)
             break;
     }
     return segments;
+}
+
+bool Scene::IsObjectInSpatialRegion(const Object* object,
+    const Object* contentScopeRoot)
+{
+    if (!contentScopeRoot)
+        return true;
+    for (const Object* current = object; current; current = current->Parent)
+        if (current == contentScopeRoot)
+            return true;
+    return false;
 }
 }

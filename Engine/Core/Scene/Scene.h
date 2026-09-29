@@ -105,6 +105,9 @@ public:
         SpatialRay ray;
         float maxDistance = 0.f;
         const Object* enteredPortal = nullptr;
+        // Null means the legacy scene-wide chart. Otherwise geometry/query
+        // candidates must belong to this root hierarchy.
+        const Object* contentScopeRoot = nullptr;
     };
 
     Scene();
@@ -212,6 +215,8 @@ public:
     // volume integration remains a separate concern from discrete portals.
     std::vector<PortalRaySegment> TracePortalRay(const SpatialRay& ray,
         float maxDistance, uint32_t maxPortalHops = 8u) const;
+    static bool IsObjectInSpatialRegion(const Object* object,
+        const Object* contentScopeRoot);
 
     // Compatibility names for existing gameplay code. New code should state
     // its spatial intent with MapSpatialPoint/MapSpatialMatrix.
@@ -330,6 +335,7 @@ private:
         uint64_t key = 0;
         const Engine::Components::Camera* ownerCamera = nullptr;
         const Engine::Components::SpatialManipulator* targetChart = nullptr;
+        const Object* contentScopeRoot = nullptr;
         glm::mat4 view { 1.f };
         glm::vec3 cameraPosition { 0.f };
         uint32_t depth = 0;

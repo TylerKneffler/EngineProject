@@ -97,6 +97,15 @@ bool SpatialManipulator::HasCompatiblePortalShapeWith(const SpatialManipulator& 
         IsValidPortalAperture() && target.IsValidPortalAperture();
 }
 
+Engine::Core::Object* SpatialManipulator::ResolvePortalContentScopeRoot() const
+{
+    if (!Owner || !portalContentScopeRoot.IsAssigned())
+        return nullptr;
+    Transform* transform = Engine::Core::ResolveComponentReference<Transform>(
+        Owner, portalContentScopeRoot);
+    return transform ? transform->Owner : nullptr;
+}
+
 bool SpatialManipulator::IsValidPortalAperture(float tolerance) const
 {
     return Engine::Scene::Spatial::PortalAperture::IsValid(
