@@ -75,6 +75,7 @@ public:
 
     // ---- Callbacks wired into newly created panels ----
     std::function<void(Engine::Core::Object*)>           OnSelectionChanged;  // HierarchyView
+    std::function<void(const std::vector<Engine::Core::Object*>&)> OnSelectionSetChanged;
     std::function<void()>                  OnMainDocumentFocused;
     std::function<void(Engine::Core::Object*)>           OnObjectSelected;    // SceneView click selection
     std::function<void(Engine::Core::Object*)>           OnObjectCreated;     // SceneView context creation

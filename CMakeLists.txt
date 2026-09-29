@@ -393,7 +393,7 @@ target_compile_definitions(Engine PUBLIC
 if(ENGINE_VULKAN_ENABLED)
     set(VULKAN_SHADER_DIR "${CMAKE_BINARY_DIR}/VulkanShaders")
     set(VULKAN_SHADER_OUTPUTS)
-    foreach(SHADER_NAME Grid Object ObjectOutline Skybox UI UIFont)
+    foreach(SHADER_NAME Grid Object ObjectOutline Skybox UI UIFont PostProcess)
         foreach(STAGE VS PS)
             if(STAGE STREQUAL "VS")
                 set(SHADER_PROFILE vs_6_0)
@@ -962,4 +962,28 @@ if(NOT ENGINE_PROJECT_DIR AND
     add_test(NAME RetainedUILayoutAndSerialization COMMAND UILayoutTests)
     set_tests_properties(RetainedUILayoutAndSerialization PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+# Cross-backend, fixed-timestep GPU image regressions. The test returns CTest's
+# skip code when any required renderer is unavailable, rather than weakening a
+# three-way parity run into partial coverage.
+if(WIN32 AND NOT ENGINE_PROJECT_DIR)
+    enable_testing()
+    add_executable(RenderBackendParityTests
+        "${ENGINE_ROOT}/Engine/Tests/Rendering/RenderBackendParityTests.cpp"
+        ${ASSET_SOURCES})
+    target_link_libraries(RenderBackendParityTests PRIVATE
+        Engine dwmapi.lib gdi32.lib)
+    target_include_directories(RenderBackendParityTests PRIVATE
+        "${ENGINE_ROOT}/Engine"
+        "${ENGINE_ROOT}/Engine/Core/Assets")
+    target_precompile_headers(RenderBackendParityTests REUSE_FROM Engine)
+    target_link_options(RenderBackendParityTests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/INCREMENTAL:NO>)
+    add_test(NAME RenderBackendFeatureParity COMMAND RenderBackendParityTests)
+    set_tests_properties(RenderBackendFeatureParity PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}"
+        SKIP_RETURN_CODE 77
+        TIMEOUT 300
+        LABELS "gpu;render;parity")
 endif()

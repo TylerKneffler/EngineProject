@@ -34,12 +34,14 @@ public:
     void DrawPanel(IEditorUi& ui) override;
 
     Engine::Core::Object* GetSelectedObject() const  { return m_selectedObject; }
+    const std::vector<Engine::Core::Object*>& GetSelectedObjects() const { return m_selectedObjects; }
     void    SetSelectedObject(Engine::Core::Object* obj);
     void RequestDeleteSelectedObject();
     void SetDebugInteractionLogging(bool enabled);
 
     // Fires whenever the selected object changes (including deselect → nullptr).
     std::function<void(Engine::Core::Object*)> OnSelectionChanged;
+    std::function<void(const std::vector<Engine::Core::Object*>&)> OnSelectionSetChanged;
 
     // Fires when the user double-clicks an object — editor should frame it in the scene view.
     std::function<void(Engine::Core::Object*)> OnFocusObject;
@@ -56,9 +58,12 @@ private:
     void LogInteraction(const std::string& message) const;
     void CopySelection();
     void PasteClipboard();
+    void NotifySelectionChanged();
 
     Engine::Scene::Scene*  m_scene          = nullptr;
     Engine::Core::Object* m_selectedObject = nullptr;
+    Engine::Core::Object* m_selectionAnchor = nullptr;
+    std::vector<Engine::Core::Object*> m_selectedObjects;
     Engine::Core::Object* m_pendingDragged = nullptr;
     Engine::Core::Object* m_pendingTarget = nullptr;
     Engine::Core::Object* m_pendingAddParent = nullptr;

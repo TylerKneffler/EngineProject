@@ -1,161 +1,201 @@
-[x] Completed, [ ] Incomplete
+# Engine roadmap
 
-- [x] Establish the C++17 engine, standalone game runtime, and editor application.
-- [x] Add scene objects, reusable components, transforms, and the object-rendering pipeline.
-- [x] Add editor camera controls, object picking, and selection handling.
-- [x] Add the Game, Hierarchy, Properties, Assets Explorer, Console, and Preferences views.
-- [x] Make editor panels dynamically managed and decouple editor UI from the renderer.
-- [x] Add a package-neutral editor UI facade and ImGui backend with persistent layouts.
-- [x] Add scene serialization, deserialization, loading, saving, and asynchronous loading.
-- [x] Add project files, project loading, configurable resolution, and aspect-ratio settings.
-- [x] Add the Project Hub for creating, building, opening, tracking, and deleting projects.
-- [x] Add standalone project builds, portable game exports, and build-output logging.
-- [x] Add DirectX 11, DirectX 12, and Vulkan renderer selection and support.
-- [x] Restore scene state after exiting play mode.
-- [x] Add reusable prefabs with creation, instantiation, references, editing, refresh, and unpacking.
-- [x] Add initial glTF model importing through the engine's internal asset representation.
-- [x] Correct the advertised texture list and the KTX2/WebP glTF mismatch.
-- [x] Add material editing, physically based material properties, and rendering updates.
-- [x] Add hierarchy creation, deletion, reparenting, drag-and-drop, and component interactions.
-- [x] Add editor undo/redo with a configurable history limit.
-- [x] Add baked-lighting controls, lightmaps, light components, and lighting render pipelines.
-- [x] Add 2D scene editing, sprites, sprite sheets, and sprite animation support.
-- [x] Enhance the Properties view with component and asset-assignment workflows.
-- [x] Add a real asset record with source path, stable ID, and import settings.
-- [x] Add versioned Windows release packaging and quick-start documentation.
-- [x] Strengthen glTF with skinning, animation, morphs, vertex colors, and UV1.
-- [x] Add FBX by converting it into the same internal model-import representation.
-- [x] Add mipmaps, HDR/EXR/TGA, and KTX2 texture processing.
-- [x] Add WAV/OGG/MP3 together with an audio component and mixer.
-- [x] Add Rigid Body physics component
-- [x] Add Primitive Object Collider cube,circle,capsule,cylinder, component
-- [x] Add mesh Object Collider component
-- [x] Add Cloth / mesh realtime physics component
-- [x] Add TTF/OTF runtime text fonts and editor asset assignment.
-- [x] Add UIImage, implement basic formats cover, fill, ect.
-- [x] Cache skeleton hierarchy transforms during bone-gizmo rendering and skin-palette generation.
-- [x] Track scene edit revisions so undo history does not serialize and compare the complete scene every idle editor frame.
-- [x] Replace per-frame recursive script-directory scans with filesystem notifications or throttled polling.
-- [x] Make editor rendering genuinely dirty-driven instead of calling `MarkDirty()` unconditionally every update.
-- [x] Build shared per-frame scene render data so Scene and Game views reuse object discovery, lights, materials, and skin palettes.
-- [x] Precompute render keys and world matrices before sorting instead of resolving components and transforms in the comparator.
-- [x] Populate and upload DX11 light/object structured buffers once per render pass instead of once per object draw.
-- [x] Remove the duplicate DX11 retained-UI vertex-buffer flush after `Unmap()`.
-- [x] Add transform revisions and cached world matrices for rendering, lighting, physics, audio, and editor helpers.
-- [x] Replace per-frame physics JSON configuration signatures with component revision counters and remove duplicate `EnsureBody()` / `EnsureSoftBody()` calls.
-- [x] Cache cloth simulation meshes so unchanged cloth bodies do not reload mesh files from disk.
-- [x] Skip morph deformation, bounds rebuilding, and vertex uploads until morph weights actually change.
-- [x] Resolve sprite/component references once per update or render snapshot instead of repeatedly for preparation, readiness, UV, size, and texture queries.
-- [x] Give animation, mesh, and skinned-mesh components lightweight inspectors that do not serialize their full runtime payload every expanded frame.
-- [x] Cache registered component-picker entries rather than constructing component prototypes whenever the picker is drawn.
-- [x] Implement a centralized storage and cache system for both long and short term memory, refactor engine systems to use this.
-- [x] Add a configurable Release-mode animation/rendering benchmark covering rig, bone, keyframe, layer, mask, morph-target, vertex, object-count, CPU-stage, and GPU-stage stress.
-- [x] CRITICAL: Move morph-target blending and normal/tangent deformation to persistent GPU buffers. Morph deltas are uploaded once, frame updates upload only packed weights, and conservative morph envelopes keep GPU-deformed geometry correctly frustum-visible. The active 300k-vertex/four-target DX11 benchmark dropped from 43.24 ms to 4.88 ms per frame and from 42.64 ms to effectively zero CPU morph work; morph and non-morph paths also run on DX12 and Vulkan.
-- [x] HIGH: Cache resolved animation-node and skeleton-joint pointers. Models now decode child-index paths into revision-aware pointer arrays once; animation ticks reuse that array, skeletons retain their resolved joint array, and skinned meshes cache model/mesh/skeleton bindings until scene structure or component configuration changes.
-- [x] HIGH: Reuse animation samples, pose storage, resolved-joint arrays, and skin palettes. Animation managers now retain dense base/sample/final pose arenas and channel-value buffers, skinned meshes own reusable palettes returned by reference, GPU morphing eliminates CPU morph scratch vertices, and the legacy influence-upgrade path moves its completed vertex buffer into `Mesh::SetDeformedVertices`. The 8-rig/256-bone Release benchmark dropped from 1.209 ms to 0.708 ms average CPU time, with animation work falling from 0.739 ms to 0.264 ms.
-- [x] HIGH: Replace the fixed 64-skinned-object and 512-ordinary-draw limits with geometrically growing object, portal, constant, and bone-palette buffers. Growth preserves queued backend resources and reports allocation/index failures explicitly. A 600-rig/600-skinned-object render now submits all 600 draws and palettes on DX11, DX12, and Vulkan (412,800 object bytes, exactly 600 records) instead of truncating at 512/64.
-- [ ] MEDIUM: Replace linear animation-layer node-mask searches with indexed bitsets and avoid resampling a complete clip independently for layers that can share channel samples.
+Last audited against the codebase: 2026-09-29.
 
-- [x] CRITICAL: Clear stale spatial-warp state when a `SpatialManipulator` is disabled so matrix layers/connections cannot persist after `enabled = false`.
-- [x] CRITICAL: Make portal traversal strictly crossing-based and bidirectional (front-to-back and back-to-front), not merely side-based.
-- [x] CRITICAL: Define and implement a mathematically consistent bidirectional portal transform (position, orientation, and parity/handedness) for non-Euclidean mapping.
-- [x] CRITICAL: Remap rigid-body kinematics through traversal (linear velocity, angular velocity, and orientation) to preserve physically coherent motion across portals or warped spaces.
-- [x] HIGH: Replace one-sided/discrete teleport gating with robust traversal state handling that prevents double-teleports, spawn-side false positives, and jitter at the portal plane.
-- [x] HIGH: Compute portal connection transforms as source-to-target relative transforms (including portal anchor frames), not raw overlay assignment.
-- [x] HIGH: Ensure disconnect/disable operations are symmetric across linked manipulators and always clear both sides safely.
-- [x] HIGH: Support rendering for multiple active portals per frame with deterministic ordering and correct stencil isolation.
-- [x] HIGH: Add recursive portal view support with configurable recursion depth, guardrails for performance, and cycle protection.
-- [x] HIGH: Extend non-DX11 parity checks to confirm portal aperture behavior is equivalent across DX11, DX12, and Vulkan paths.
-- [x] CRITICAL: Move portal crossing evaluation into a post-physics traversal phase and use swept body motion/CCD so high-speed bodies cannot enter and leave an aperture between samples.
-- [x] CRITICAL: Require a swept body contact to lie inside the source aperture polygon before slicing or teleporting; do not treat the broad trigger collider as the portal opening.
-- [x] HIGH: Establish one canonical, validated portal aperture frame for rendering, clipping, traversal, and transforms; reject or repair non-planar, concave, self-intersecting, duplicate, or inconsistently wound shape points.
-- [x] HIGH: Represent portal-split objects as separate local/remote collision pieces (including restoration) and define collision/raycast behavior across connected spaces; rebuilding one dynamic mesh hull spans both spaces and is invalid.
-- [x] HIGH: Add target-plane clipping (preferably oblique near-plane projection) and aperture scissoring to portal views so remote geometry cannot leak through the wrong side and small portals do not render the entire scene.
-- [x] HIGH: Define a unified spatial-query contract for rendering, physics, raycasts, audio, cameras, and gameplay; warp volumes must not remain render-only affine approximations.
-- [x] HIGH: Replace the policy-only backend parity check with automated DX11/DX12/Vulkan aperture render validation, including depth, stencil isolation, recursive views, and occlusion.
-- [x] MEDIUM: Define matrix-overlay ownership and scope so a connection maps an explicit spatial region/layer and its intended contents, rather than only mutating the two manipulator-owner transforms.
-- [x] MEDIUM: Define deterministic composition/priority rules for overlapping warp volumes and simultaneous portal-trigger ownership of the same traversing body.
-- [x] MEDIUM: Correct world-layer point transforms to apply full world matrix composition (rotation/scale-safe), not position-offset approximations.
-- [x] MEDIUM: Revisit portal mesh deformation to behave correctly for bidirectional traversal and asymmetric portal geometry.
-- [x] CRITICAL: Generate welded, triangulated cap surfaces for portal mesh cuts, including stable cap UVs, normals, tangents, and owning-material assignment; clipped triangle halves no longer leave open seams.
-- [x] HIGH: Replace per-frame CPU split-mesh uploads with two GPU-clipped render instances (local and remote frames) that preserve independent bounds, culling, shadows, and transparency ordering during traversal.
-- [x] HIGH: Keep local/remote portal collision pieces persistent across a traversal; update transforms or bounded-rate cut data without rebuilding dynamic rigid bodies, convex hulls, and Bvh meshes every frame.
-- [x] HIGH: Validate portal render connections before scheduling a stencil view; an invalid or incompatible endpoint must never silently render the source camera as its own destination.
-- [x] HIGH: Clip mapped portal draws to the target-facing aperture half-space so source-side geometry behind the target cannot leak into a portal view.
-- [x] HIGH: Add finite, recursive portal-ray segmentation with aperture tests, source-to-target direction mapping, and directed-cycle protection; editor picking consumes these segments.
-- [x] CRITICAL: Upload only the used range of the object structured buffer. Split ordinary-view and portal-view storage so a normal terrain frame does not upload the full 36,138-record / 23.16 MiB portal-capacity allocation; record uploaded bytes in the benchmark.
-- [x] HIGH: Add conservative asynchronous DX11 GPU occlusion culling after frustum culling. Fully covered opaque meshes stop submitting expensive draws without blocking for query results; partially visible meshes remain rendered, camera/scene changes invalidate hidden results, and hidden meshes are periodically retested.
-- [x] MEDIUM: Add equivalent non-blocking occlusion queries to the DX12 and Vulkan contexts. Both backends recycle per-frame query storage only after their existing frame fence completes, never add a render-thread wait, invalidate stale visibility after camera/scene changes, periodically retest hidden meshes, and safely draw when a result is unavailable.
-- [x] HIGH: Fix the Vulkan rendered-terrain shutdown crash. Drain submitted GPU work before scene teardown, explicitly shut down the shared texture system while `VkDevice` is valid, and invalidate cached texture wrappers so delayed asset-cache destruction cannot call Vulkan through a dead device. The Vulkan rendered benchmark now exits cleanly with occlusion active.
-- [x] HIGH: Persist DX11 per-frame graphics resources instead of recreating them with each graphics context. Supported D3D11.1 devices use a shared 4 MiB constant-buffer arena with offset binding, one `WRITE_DISCARD` at frame start, and `WRITE_NO_OVERWRITE` for later draws; older devices retain persistent per-slot fallback buffers. The material sampler is provider-owned and reused.
-- [x] HIGH: Add a packed, indexed terrain vertex format that omits unused skinning, secondary-UV, and morph fields. Report CPU mesh, upload-shadow, and GPU-buffer memory independently and substantially reduce the current approximately 229 MiB per full vertex-data copy.
-- [ ] HIGH: Gate teleportation with a swept collision-shape-versus-inset-aperture test, using the solid rim as physical feedback rather than relying on the body centre alone.
-- [ ] HIGH: Define explicit portal content-region ownership (scene layer, scope root, or spatial chart) and render/query only the connected region; target-plane clipping alone cannot distinguish two independent spaces that overlap in one world chart.
-- [ ] HIGH: Expose a physics-facing portal raycast hit API and test regular, split-piece, aperture-rim, and recursive portal hits against Bullet rather than only editor bounds.
-- [ ] MEDIUM: Expose bounded adaptive nonlinear-warp ray paths to gameplay and physics queries; the current Jacobian maps only a ray's origin/tangent and cannot represent curved paths or volume-boundary crossings.
-- [ ] MEDIUM: Add GPU-frame portal render tests for DX11, DX12, and Vulkan using a scene with distinct target-side content and no authored skybox fallback.
-- [ ] MEDIUM: Support indexed meshes, explicit submeshes/material slots, skinned meshes, and morph updates in portal cuts; the current triangle-stream clipper cannot preserve all asset topology.
-- [ ] MEDIUM: Define fragment ownership for scripts, joints, children, animation, and serialization when a connection disappears while an object is split.
-- [ ] HIGH: Add crack-free distance-based terrain LOD with deterministic shared borders or transition meshes. Far chunks must not retain the same cell density as chunks near the viewer, and topology/border audits must pass across mixed LOD levels.
-- [ ] HIGH: Batch terrain rendering by compatible material and pipeline, using instancing, indirect submission, or combined draw ranges so visible chunks do not each require a complete constant-buffer, texture-slot, vertex-buffer, and draw-call sequence.
-- [ ] MEDIUM: Remove duplicate per-frame light collection/upload and cache reusable render scratch storage, opaque sort data, component lookups, and no-portal fast paths to reduce complete scene scans and transient allocations.
-- [x] MEDIUM: Add non-blocking DX11 GPU timestamp telemetry for terrain, portal, opaque, and transparent work. Report CPU submission and presentation separately, use a flip-discard/tearing swap chain when supported, and retain a legacy swap-chain fallback.
-- [x] MEDIUM: Extend non-blocking GPU timestamp telemetry to DX12 and Vulkan. Report command submission and API presentation time separately, retain unavailable telemetry when a queue lacks timestamp support, and never report CPU time as GPU execution. Direct platform scanout timing remains unavailable because the current DXGI/Vulkan swap-chain paths do not expose it.
+Status convention:
 
-## Offline video export
+- `[x]` Implemented and present in the repository.
+- `[ ]` Not implemented or not complete enough to meet the stated acceptance criteria.
+- `[ ] PARTIAL` Useful infrastructure exists, but the complete feature or validation target is still missing.
+- `DEFERRED` Intentionally blocked on a prerequisite or product decision.
 
-### Deterministic simulation
+## Next priorities
 
-- [ ] CRITICAL: Introduce a deterministic export clock shared by gameplay, cinematics, skeletal animation, sprite animation, particles, physics, and audio.
-- [ ] CRITICAL: Replace wall-clock timing in export-relevant components with scene or export delta time.
-- [ ] HIGH: Render an explicit frame at `t = 0` before advancing the simulation.
+These are the highest-value correctness and architecture tasks still open.
+
+- [ ] CRITICAL: Replace the policy-only portal parity test with actual DX11, DX12, and Vulkan GPU-frame validation covering aperture depth/stencil isolation, recursive views, occlusion, and distinct target-side content without a skybox fallback.
+- [ ] HIGH: Move regression and benchmark sources out of ignored `.local/Tests` into `Engine/Tests`, then make their fixtures and CTest registration reproducible on a clean checkout.
+- [ ] HIGH: Gate portal teleportation with a swept collision-shape-versus-inset-aperture test. Use the solid rim as physical feedback instead of testing only the rigid-body centre.
+- [ ] HIGH: Define explicit portal content-region ownership through a scene layer, scope root, or spatial chart, then restrict rendering and queries to the connected region.
+- [x] Scene lighting renders to linear FP16 targets on DX11, DX12, and Vulkan. A dedicated fullscreen composition pass applies exposure, tone mapping, and final sRGB encoding for game output and editor views.
+- [ ] CRITICAL: Introduce one deterministic export clock used by gameplay, skeletal animation, sprite animation, physics, cloth, camera tracks, particles, and audio. Remove export-relevant wall-clock updates.
+- [ ] HIGH: Give the video exporter an off-screen render target and asynchronous readback instead of capturing the DX11 game swap chain.
+- [ ] HIGH: Add crack-free distance-based terrain LOD with deterministic shared borders or transition meshes, followed by material-compatible terrain batching or indirect submission.
+- [ ] HIGH: Add deterministic light importance sorting for global/portal fallback lists so irrelevant first-in-scene lights cannot displace visible lights.
+- [ ] HIGH: Add shadow and lighting diagnostics: atlas/cascade views, selected light, caster/triangle counts, cluster occupancy/overflow, allocations, and non-blocking GPU timings.
+- [ ] HIGH: Expand visual regression coverage to portal frames and shadow failure cases such as acne, peter-panning, seams, shimmer, far fade, thin geometry, reversed winding, and large coordinates.
+
+## Implemented foundation
+
+### Runtime, projects, and editor
+
+- [x] C++17 engine library, standalone game runtime, editor application, project files, project loading, project hub, standalone builds, portable exports, versioned Windows packages, and quick-start documentation.
+- [x] Scene objects, transforms, reusable components, lifecycle dispatch, scene serialization/deserialization, synchronous and asynchronous scene loading, scene switching, and play-mode scene restoration.
+- [x] Game, Scene, Hierarchy, Properties, Assets, Console, Preferences, Terminal, and Problems views with dynamically managed panels, persistent ImGui layouts, and a package-neutral editor UI facade.
+- [x] Editor camera controls, object picking, hierarchy creation/deletion/reparenting, drag-and-drop, prefab workflows, component workflows, and configurable undo/redo history.
+- [x] Hierarchy Ctrl-toggle and Shift-range multi-selection. The Properties view shows common components, displays mixed values as `-`, and broadcasts edits to every selected object.
+- [x] Asset records with source paths, stable IDs, import settings, browser assignment workflows, and throttled/filesystem-notified script refresh instead of recursive scanning every frame.
+- [x] DX11, DX12, and Vulkan renderer selection for editor and game hosts, including startup probing and DX11 editor fallback.
+
+### Assets, animation, UI, audio, and physics
+
+- [x] glTF import through the engine model representation, including skinning, animation, morph targets, vertex colors, UV1, and FBX conversion into the same representation.
+- [x] Materials and PBR inputs, alpha modes, normal/height/occlusion/emissive textures, HDR/EXR/TGA/KTX2 processing, mip generation, and corrected advertised texture support.
+- [x] Semantic texture color spaces: base-color and emissive textures use sRGB; metallic/roughness, normal, height, occlusion, light/environment data remain linear on DX11, DX12, and Vulkan.
+- [x] GPU morph blending with persistent delta/weight buffers and conservative bounds on all three renderers.
+- [x] Cached animation-node/joint bindings, reusable pose/sample/palette storage, revision-aware skeleton bindings, and dynamically growing ordinary/skinned/bone buffers instead of fixed 512/64 limits.
+- [x] 2D scene editing, sprites, sprite sheets, sprite animation, retained UI layout, UIImage modes, and runtime TTF/OTF text.
+- [x] WAV/OGG/MP3 decoding, audio components, mixing, and spatial audio integration.
+- [x] Rigid bodies, primitive and mesh colliders, cloth/soft-body simulation, cached cloth meshes, component revision-based rebuilds, and physics/editor transform synchronization.
+
+### Rendering and performance
+
+- [x] Dirty-driven editor rendering, scene edit revisions, cached transform/world matrices, shared per-frame Scene/Game render discovery, precomputed render keys, and cached component-picker entries.
+- [x] Persistent and range-bounded light/object/bone uploads, DX11 persistent constant-buffer arena support, deferred-safe DX12/Vulkan growth, and used-range object uploads separated from portal capacity.
+- [x] Packed indexed terrain vertices with separate CPU, upload-shadow, and GPU memory reporting.
+- [x] Non-blocking frustum/occlusion behavior on DX11, DX12, and Vulkan, including deferred query recycling and conservative fallback when results are unavailable.
+- [x] Non-blocking GPU timestamp telemetry for terrain, portal, opaque, and transparent stages on DX11, DX12, and Vulkan, with CPU submission/presentation reported separately.
+- [x] Central cache storage used by textures and reusable simulation resources; Vulkan texture-system shutdown drains GPU work and invalidates wrappers before device destruction.
+- [ ] PARTIAL: Release animation/rendering and rendered-terrain benchmarks exist only under ignored `.local/Tests`; move the benchmark sources and fixtures into the tracked test tree before treating them as repository coverage.
+
+### Portals and spatial mapping
+
+- [x] Symmetric portal connection/disable handling, canonical validated aperture frames, source-to-target relative transforms, bidirectional crossing, parity-aware pose mapping, and rigid-body velocity/orientation remapping.
+- [x] Post-physics swept traversal with aperture contact tests, anti-jitter traversal state, deterministic overlapping-volume ownership, and matrix-overlay ownership/priority rules.
+- [x] Multiple stencil-isolated portal views, recursive views with cycle limits, scissoring, target-plane clipping, mapped cameras, and connection validation.
+- [x] Persistent local/remote split render instances, separate collision pieces, welded cap generation, restoration, and bounded rebuild behavior.
+- [x] Unified rendering/physics/raycast/audio/camera/gameplay spatial-query contract and finite recursive portal-ray segmentation used by editor picking.
+- [ ] PARTIAL: Portal policy/math regressions for stencil references, aperture clipping, recursion limits, and screen polygons exist only under ignored `.local/Tests`; move them into the tracked test tree. GPU portal parity also remains unverified because neither that test nor the general renderer parity suite renders a portal fixture.
+
+### Directional shadows and realtime lighting
+
+- [x] Directional light replacement for the legacy Ambient type with backward-compatible serialization.
+- [x] Serialized per-light shadow controls and project-wide shadow/cascade/PCF/distance/portal policies exposed in the editor.
+- [x] Reusable one-to-four-cascade directional shadow atlas with practical splits, transition blending, texel snapping, tile-safe PCF, receiver-normal bias, and far-distance fade.
+- [x] Matching DX11, DX12, and Vulkan depth targets, transitions, descriptors, depth passes, resource reuse, and deferred-safe shadow draw data.
+- [x] Shadow casters support static meshes, alpha masks, double-sided materials, GPU skinning, GPU morphs, terrain, matrix layers, spatial mappings, and portal-view atlas policies.
+- [x] Deterministic directional-shadow selection and GPU data for shadow indices, cascade matrices/splits, bias, filter scale, and shadow strength.
+- [x] CPU-built Forward+ clustered light lists for main views with configurable tiles, logarithmic depth slices, caps, matching shader consumption, and safe global-list portal fallback.
+- [x] GGX importance-filtered HDR environment mip generation and a generated split-sum BRDF integration LUT across DX11, DX12, and Vulkan.
+- [x] Serialized None/ACES/Reinhard output operators and exposure applied consistently in the current material/sky shader path.
+- [x] Fixed-timestep DX11/DX12/Vulkan GPU image tests for directional shadows, alpha masks, skinning, morphs, terrain, moving casters, and bounded backend parity. Tests wait for terrain generation and skip when a required backend is unavailable.
+
+### Video export baseline
+
+- [x] Direct-to-FFmpeg DX11 export for MP4, WebM, and MOV with fixed output rate, fixed scene update delta, configurable dimensions/duration/codec/quality, camera-track completion, and synchronous RGBA capture.
+- [ ] PARTIAL: A fixed `Scene::Update()` delta exists, but animation, sprite animation, first-person control, moving portals, and other components still contain wall-clock paths; exports are therefore not fully deterministic.
+
+## Active backlog
+
+### Animation and general render performance
+
+- [ ] MEDIUM: Replace linear animation-layer node-mask searches with indexed bitsets and share compatible channel samples between layers.
+- [ ] MEDIUM: Remove duplicate per-frame light collection/upload and retain reusable scene scratch arrays, opaque sort storage, component lookup results, and no-portal fast paths.
+- [ ] HIGH: Complete mixed-LOD terrain border audits, then batch compatible terrain draws using instancing, indirect submission, or combined ranges.
+
+### Portal correctness and tooling
+
+- [ ] HIGH: Expose a Bullet-backed portal raycast-hit API and test regular objects, split pieces, aperture rims, and recursive portal hits.
+- [ ] MEDIUM: Add bounded adaptive nonlinear-warp ray paths for gameplay/physics; a single origin/tangent Jacobian cannot represent curved paths or volume-boundary crossings.
+- [ ] MEDIUM: Support indexed meshes, submeshes/material slots, skinned meshes, and morph changes in CPU portal cuts. The current triangle-stream clipper cannot preserve all imported topology.
+- [ ] MEDIUM: Define ownership of scripts, joints, children, animation, and serialization when a connection disappears while an object remains split.
+
+### Shadows
+
+- [ ] MEDIUM: Define realtime/baked mixed-lighting behavior so static receivers do not double-shadow while dynamic objects retain realtime shadows.
+- [ ] HIGH: Add shadow debug views for atlases, cascades, bounds, selected lights, caster counts, and occupancy.
+- [ ] MEDIUM: Add shadow telemetry for CPU submission, GPU time, draw/triangle counts, allocation size, and static-cache reuse.
+- [ ] HIGH: Add visual regressions for shadow bias, cascade seams, shimmer, far fade, thin/reversed geometry, large coordinates, portals, and spatially mapped casters/lights.
+- [ ] HIGH: Stress maximum realtime lights and shadow budgets; verify deterministic degradation without stalls or per-frame resource churn.
+- [ ] MEDIUM: Document supported shadow types, quality controls, costs, and known limitations in the README.
+
+### Light model and scalability
+
+- [ ] HIGH: Add spot lights with range attenuation, inner/outer cone angles, serialization, editor gizmos, PBR evaluation, and shadow policy.
+- [ ] MEDIUM: Add practical rectangular or disk area lights using LTC or another documented approximation.
+- [ ] HIGH: Add camera-aware deterministic importance sorting for bounded fallback light lists.
+- [ ] HIGH: Move Forward+ list construction to GPU compute, report overflow, and allocate deferred-safe per-portal-view cluster buffers.
+- [ ] HIGH: Define physical light units and inverse-square attenuation with a smooth range cutoff and compatibility mode.
+- [ ] MEDIUM: Add per-object light layers/channel masks.
+- [ ] MEDIUM: Add directional/spot cookies and optional IES profiles.
+- [ ] MEDIUM: Add Kelvin temperature input with RGB override and consistent intensity/exposure behavior.
+
+### Image-based lighting, reflections, and indirect lighting
+
+- [ ] HIGH: Convert equirectangular HDRIs into cached cubemaps with diffuse irradiance and prefiltered specular products.
+- [ ] HIGH: Add local box/sphere reflection probes with priorities, influence volumes, box projection, blending, baking, runtime selection, and debug views.
+- [ ] HIGH: Add scene reflection-probe capture with recursion safeguards.
+- [ ] MEDIUM: Add SSR with hierarchical depth tracing, roughness-aware resolve, temporal stabilization, edge fading, and probe/HDRI fallback.
+- [ ] HIGH: Add SSAO/GTAO with normal/depth-aware denoising and temporal stability.
+- [ ] HIGH: Add baked irradiance probes/light-probe volumes for dynamic objects.
+- [ ] MEDIUM: Add probe interpolation, visibility/leak prevention, relocation/classification, debug visualization, and deterministic out-of-volume fallback.
+- [ ] MEDIUM: Evaluate DDGI only after static probe infrastructure exists and has explicit budgets/fallbacks.
+- [ ] MEDIUM: Allow emissive materials to contribute to baked/probe indirect lighting; ordinary realtime emissive remains non-illuminating.
+- [ ] MEDIUM: Add bent-normal/visibility data for environment diffuse and specular occlusion.
+
+### HDR, exposure, atmosphere, and materials
+
+- [x] Linear FP16 scene color and a configurable composition pass replace UNORM scene lighting and in-material output transforms across DX11, DX12, and Vulkan.
+- [ ] HIGH: Add manual/automatic exposure with luminance metering, adaptation rates, limits, and deterministic editor/export overrides.
+- [ ] MEDIUM: Add bloom sourced from unclipped HDR luminance.
+- [ ] MEDIUM: Add SDR/HDR display color management: paper white, peak luminance, gamut mapping, and swap-chain capability checks.
+- [ ] MEDIUM: Add linear-space height/distance fog consistently to main, portal, reflection, and transparent rendering.
+- [ ] MEDIUM: Add bounded froxel volumetric fog with light/shadow injection and temporal reprojection.
+- [ ] LOW: Add atmospheric sky/sun scattering with authored HDRI fallback.
+- [ ] HIGH: Add energy-compensated multiple scattering for rough metallic/specular BRDFs.
+- [ ] MEDIUM: Add clear-coat, sheen, anisotropy, transmission, and IOR lobes incrementally.
+- [ ] HIGH: Define a lit transparent-material path with lights, reflections, fog, and shadows beyond simple back-to-front blending.
+- [ ] MEDIUM: Add scene-color/depth refraction with thickness/absorption and safe portal fallbacks.
+- [ ] MEDIUM: Add decals for localized material and lighting detail.
+
+### Lighting quality, diagnostics, and validation
+
+- [ ] HIGH: Add per-feature lighting presets with explicit costs instead of coupling unrelated work only through distance bands.
+- [ ] HIGH: Add debug modes for diffuse/specular, normals, roughness, metallic, direct/indirect light, emissive, AO, probes, clusters, luminance, and overdraw.
+- [ ] MEDIUM: Add GPU telemetry for cluster construction, occupancy/overflow, reflections, AO/GI, and HDR post-processing.
+- [ ] HIGH: Add reference scenes and cross-backend comparisons for every light type, BRDF extremes, HDRI/IBL, probes, AO, transparency, exposure, and portal/spatial rendering.
+- [ ] PARTIAL: General parity tolerances exist for the current shadow/animation/terrain fixtures; define per-feature tolerances and add NaN, binding-hazard, black-frame, stale-data, and fallback assertions.
+- [ ] MEDIUM: Document lighting architecture, coordinate/unit conventions, feature compatibility, performance tiers, and fallback behavior.
+
+### Offline video export
+
+#### Deterministic simulation
+
+- [ ] CRITICAL: Route every export-relevant update through an explicit export clock and remove wall-clock animation/script timing.
+- [ ] HIGH: Render an explicit frame at `t = 0` before advancing simulation.
 - [ ] HIGH: Add repeatability tests that compare multiple exports of the same scene.
 
-### Higher-quality physics
+#### Physics quality
 
 - [ ] CRITICAL: Separate output frame rate from physics simulation rate.
-- [ ] HIGH: Add an export physics-rate setting, such as 120 Hz or 240 Hz, with accumulator-based substeps.
-- [ ] HIGH: Expose export-specific maximum substeps and rigid-body solver iterations.
-- [ ] MEDIUM: Expose continuous-collision detection and contact/constraint quality controls.
-- [ ] MEDIUM: Expose cloth and other deformable-simulation iteration controls.
-- [ ] HIGH: Verify that physics produces equivalent results at different output frame rates.
+- [ ] HIGH: Add an export physics rate, accumulator substeps, maximum substeps, and rigid-body solver iterations.
+- [ ] MEDIUM: Expose CCD/contact quality and cloth/deformable iteration controls.
+- [ ] HIGH: Verify equivalent physics outcomes across output frame rates.
 
-### Higher-quality rendering
+#### Rendering quality and readback
 
-- [ ] HIGH: Separate encoder quality from render quality in the exporter and editor UI.
-- [ ] HIGH: Add an off-screen export render target instead of relying on the game swap chain.
-- [ ] HIGH: Add selectable spatial supersampling or MSAA with downsampling.
-- [ ] HIGH: Add temporal accumulation and configurable samples per output frame.
-- [ ] HIGH: Add subframe sampling and shutter controls for motion blur.
-- [ ] MEDIUM: Add export-specific shadow, lighting, reflection, and post-processing quality settings.
-- [ ] HIGH: Add linear FP16 or FP32 render targets and genuine HDR/high-bit-depth output.
-- [ ] MEDIUM: Add asynchronous GPU readback to reduce capture stalls.
+- [ ] HIGH: Separate encoder quality from render quality in CLI/editor settings.
+- [ ] HIGH: Add an off-screen export render target and asynchronous GPU readback.
+- [ ] HIGH: Add spatial supersampling/MSAA, temporal accumulation, samples per frame, subframe sampling, and shutter controls.
+- [ ] MEDIUM: Add export-specific shadow, lighting, reflection, and post-process quality.
+- [ ] HIGH: Add FP16/FP32 render targets and genuine HDR/high-bit-depth output.
 
-### Simulation caching
+#### Caching, output, and recovery
 
-- [ ] HIGH: Add a simulation-bake pass before final rendering.
-- [ ] HIGH: Cache rigid-body transforms, cloth/deformable state, particles, and animation state per frame or subframe.
-- [ ] MEDIUM: Allow cached simulation to be reused when changing cameras, lighting, render settings, or codecs.
-- [ ] MEDIUM: Store enough metadata to detect stale or incompatible caches.
+- [ ] HIGH: Add a simulation bake/cache for rigid bodies, cloth, particles, and animation with compatibility metadata and reuse across camera/lighting changes.
+- [ ] HIGH: Support PNG and EXR image sequences.
+- [ ] HIGH: Write an export manifest with frame range/settings/completion state and resume missing or selected frames.
+- [ ] MEDIUM: Encode completed sequences as a separate final step while preserving direct-to-FFmpeg as the fast path.
 
-### Output and recovery
+#### Audio and validation
 
-- [ ] HIGH: Support PNG and EXR image-sequence output.
-- [ ] HIGH: Write an export manifest containing frame range, settings, and completion state.
-- [ ] HIGH: Resume interrupted exports and rerender selected or missing frames.
-- [ ] MEDIUM: Encode completed image sequences as a separate final step.
-- [ ] MEDIUM: Preserve the current direct-to-FFmpeg path as a fast optional mode.
-
-### Audio
-
-- [ ] HIGH: Render audio against the deterministic export clock.
-- [ ] HIGH: Support offline audio output and synchronization with video frames.
-- [ ] HIGH: Mux rendered audio into MP4, WebM, and MOV outputs instead of always passing `-an` to FFmpeg.
-
-### Validation
-
-- [ ] HIGH: Test exact frame counts and timestamps for common and fractional frame rates.
-- [ ] HIGH: Test camera-track completion and scene transitions.
+- [ ] HIGH: Render audio against the export clock, write offline audio, maintain synchronization, and mux it into MP4/WebM/MOV instead of using `-an`.
+- [ ] HIGH: Test exact frame counts/timestamps for integer and fractional frame rates, camera-track completion, and scene transitions.
 - [ ] MEDIUM: Test long-render interruption, resume, and failed-frame recovery.
-- [ ] HIGH: Test color conversion and bit depth for SDR, HDR, H.264, VP9, and ProRes outputs.
-- [ ] HIGH: Test audio/video synchronization over long exports.
+- [ ] HIGH: Test SDR/HDR color conversion and bit depth for H.264, VP9, ProRes, PNG, and EXR.
+- [ ] HIGH: Test long-duration audio/video synchronization.
+
+## Deferred feature gates
+
+- [ ] DEFERRED: Point-light shadows. First add texture arrays/cubemaps and comparison samplers, accept the six-face cost, define radial depth, culling, and a strict per-frame budget, then add point-shadow regression coverage.
+- [ ] DEFERRED: Dynamic diffuse GI. Reconsider only after static irradiance probes, visibility/leak handling, diagnostics, and explicit GPU budgets are in place.

@@ -155,6 +155,9 @@ public:
     virtual void Spacing() = 0;
     virtual void Indent(float width = 0.f) = 0;
     virtual void Unindent(float width = 0.f) = 0;
+    // Marks the next value widget as representing differing values across a
+    // multi-selection. Backends should render a dash until the user edits it.
+    virtual void SetNextItemMixedValue(bool) {}
     virtual bool Checkbox(const char* label, bool* value) = 0;
     virtual bool InputText(const char* label, char* buffer, size_t size) = 0;
     virtual bool InputTextSubmit(const char* label, char* buffer, size_t size) = 0;
@@ -209,6 +212,8 @@ public:
     virtual bool CopyShortcutPressed() const = 0;
     virtual bool PasteShortcutPressed() const = 0;
     virtual bool DeleteShortcutPressed() const = 0;
+    virtual bool IsMultiSelectModifierDown() const { return false; }
+    virtual bool IsRangeSelectModifierDown() const { return false; }
     virtual bool BeginDragDropSource() = 0;
     virtual void SetDragDropPayload(const char* type, const void* data, size_t size) = 0;
     virtual void EndDragDropSource() = 0;

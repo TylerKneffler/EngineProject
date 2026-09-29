@@ -498,7 +498,8 @@ int WINAPI wWinMain(
                 void* rtvHandle = renderer->GetCurrentRenderTargetHandle();
                 
                 view->Render(cmdList, rtvHandle,
-                    [view](void* cmd) { view->Render3D(cmd); });
+                    [view](void* cmd) { view->Render3D(cmd); },
+                    [view](void* cmd) { view->RenderShadow3D(cmd); });
             }
 
             // Render UI

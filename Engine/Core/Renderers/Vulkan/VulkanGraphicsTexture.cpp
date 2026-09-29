@@ -29,7 +29,7 @@ VulkanTextureSystem::VulkanTextureSystem(
       m_queue(queue),
       m_queueFamily(queueFamily)
 {
-    VkDescriptorSetLayoutBinding bindings[13]{};
+    VkDescriptorSetLayoutBinding bindings[17]{};
     for (uint32_t binding = 0; binding < 6; ++binding)
     {
         bindings[binding].binding = binding;
@@ -60,6 +60,21 @@ VulkanTextureSystem::VulkanTextureSystem(
         bindings[binding].descriptorCount = 1;
         bindings[binding].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     }
+    bindings[13].binding = 13;
+    bindings[13].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    bindings[13].descriptorCount = 1;
+    bindings[13].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    bindings[14].binding = 14;
+    bindings[14].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    bindings[14].descriptorCount = 1;
+    bindings[14].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    for (uint32_t binding = 15; binding < 17; ++binding)
+    {
+        bindings[binding].binding = binding;
+        bindings[binding].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        bindings[binding].descriptorCount = 1;
+        bindings[binding].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
     VkDescriptorSetLayoutCreateInfo layoutInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
     layoutInfo.bindingCount = ARRAYSIZE(bindings);
@@ -68,9 +83,9 @@ VulkanTextureSystem::VulkanTextureSystem(
         m_device, &layoutInfo, nullptr, &m_layout), "vkCreateDescriptorSetLayout");
 
     VkDescriptorPoolSize sizes[3]{
-        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 7 * 512 },
+        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 9 * 512 },
         { VK_DESCRIPTOR_TYPE_SAMPLER, 512 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 5 * 512 }
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 7 * 512 }
     };
     VkDescriptorPoolCreateInfo poolInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
@@ -284,11 +299,85 @@ std::shared_ptr<VulkanGraphicsTexture> VulkanTextureSystem::CreateTexture(
         shared_from_this(), Upload(width, height, rgbaPixels, mipLevels, format, srgb));
 }
 
+std::shared_ptr<VulkanGraphicsTexture> VulkanTextureSystem::CreateDepthTexture(
+    uint32_t width, uint32_t height)
+{
+    if (!width || !height) return nullptr;
+    VulkanImageResource depth = VulkanCreateImage(m_physicalDevice, m_device,
+        width, height, VK_FORMAT_D32_SFLOAT_S8_UINT,
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        VK_IMAGE_ASPECT_DEPTH_BIT);
+    VulkanImageResource color = VulkanCreateImage(m_physicalDevice, m_device,
+        width, height, VK_FORMAT_R8G8B8A8_UNORM,
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
+
+    VkAttachmentDescription attachments[2]{};
+    attachments[0].format = VK_FORMAT_R8G8B8A8_UNORM;
+    attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
+    attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    attachments[1].format = VK_FORMAT_D32_SFLOAT_S8_UINT;
+    attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
+    attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachments[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    attachments[1].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    VkAttachmentReference colorRef{ 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+    VkAttachmentReference depthRef{ 1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &colorRef;
+    subpass.pDepthStencilAttachment = &depthRef;
+    VkSubpassDependency dependencies[2]{};
+    dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependencies[0].dstSubpass = 0;
+    dependencies[0].srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    dependencies[0].dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+        VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    dependencies[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    dependencies[0].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    dependencies[1].srcSubpass = 0;
+    dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+    dependencies[1].srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    dependencies[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    dependencies[1].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    dependencies[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    VkRenderPassCreateInfo passInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+    passInfo.attachmentCount = 2;
+    passInfo.pAttachments = attachments;
+    passInfo.subpassCount = 1;
+    passInfo.pSubpasses = &subpass;
+    passInfo.dependencyCount = 2;
+    passInfo.pDependencies = dependencies;
+    VkRenderPass renderPass = VK_NULL_HANDLE;
+    VkCheck(vkCreateRenderPass(m_device, &passInfo, nullptr, &renderPass),
+        "vkCreateRenderPass(shadow)");
+    VkImageView views[] = { color.view, depth.view };
+    VkFramebufferCreateInfo framebufferInfo{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+    framebufferInfo.renderPass = renderPass;
+    framebufferInfo.attachmentCount = 2;
+    framebufferInfo.pAttachments = views;
+    framebufferInfo.width = width;
+    framebufferInfo.height = height;
+    framebufferInfo.layers = 1;
+    VkFramebuffer framebuffer = VK_NULL_HANDLE;
+    VkCheck(vkCreateFramebuffer(m_device, &framebufferInfo, nullptr, &framebuffer),
+        "vkCreateFramebuffer(shadow)");
+    auto texture = std::make_shared<VulkanGraphicsTexture>(shared_from_this(), depth);
+    texture->SetDepthTargetResources(color, renderPass, framebuffer, width, height);
+    return texture;
+}
+
 void VulkanTextureSystem::Bind(
     VkCommandBuffer commands,
     VkPipelineLayout pipelineLayout,
-    const std::array<const VulkanGraphicsTexture*, 7>& textures,
-    const std::array<const VulkanGraphicsBuffer*, 5>& buffers)
+    const std::array<const VulkanGraphicsTexture*, 9>& textures,
+    const std::array<const VulkanGraphicsBuffer*, 7>& buffers)
 {
     TextureKey key{};
     for (size_t index = 0; index < textures.size(); ++index)
@@ -311,8 +400,8 @@ void VulkanTextureSystem::Bind(
         VkCheck(vkAllocateDescriptorSets(m_device, &allocate, &set),
             "vkAllocateDescriptorSets(material)");
 
-        VkDescriptorImageInfo images[7]{};
-        VkWriteDescriptorSet writes[13]{};
+        VkDescriptorImageInfo images[9]{};
+        VkWriteDescriptorSet writes[17]{};
         for (uint32_t index = 0; index < 6; ++index)
         {
             images[index].imageView =
@@ -333,6 +422,22 @@ void VulkanTextureSystem::Bind(
         writes[10].descriptorCount = 1;
         writes[10].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
         writes[10].pImageInfo = &images[6];
+        images[7].imageView = textures[7] ? textures[7]->GetView() : m_white.view;
+        images[7].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        writes[13] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        writes[13].dstSet = set;
+        writes[13].dstBinding = 13;
+        writes[13].descriptorCount = 1;
+        writes[13].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        writes[13].pImageInfo = &images[7];
+        images[8].imageView = textures[8] ? textures[8]->GetView() : m_white.view;
+        images[8].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        writes[14] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        writes[14].dstSet = set;
+        writes[14].dstBinding = 14;
+        writes[14].descriptorCount = 1;
+        writes[14].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        writes[14].pImageInfo = &images[8];
         VkDescriptorImageInfo samplerInfo{};
         samplerInfo.sampler = m_sampler;
         writes[6] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
@@ -341,10 +446,11 @@ void VulkanTextureSystem::Bind(
         writes[6].descriptorCount = 1;
         writes[6].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
         writes[6].pImageInfo = &samplerInfo;
-        VkDescriptorBufferInfo bufferInfos[5]{};
-        for (uint32_t index = 0; index < 5; ++index)
+        VkDescriptorBufferInfo bufferInfos[7]{};
+        for (uint32_t index = 0; index < 7; ++index)
         {
-            const uint32_t binding = index < 3 ? index + 7 : index + 8;
+            const uint32_t binding = index < 3 ? index + 7 :
+                (index < 5 ? index + 8 : index + 10);
             bufferInfos[index].buffer =
                 buffers[index] ? buffers[index]->GetBuffer() : m_dummyBuffer;
             bufferInfos[index].range =
@@ -373,8 +479,25 @@ VulkanGraphicsTexture::VulkanGraphicsTexture(
 
 void VulkanGraphicsTexture::ReleaseImage(VkDevice device)
 {
+    if (device && m_framebuffer) vkDestroyFramebuffer(device, m_framebuffer, nullptr);
+    if (device && m_renderPass) vkDestroyRenderPass(device, m_renderPass, nullptr);
+    if (device) VulkanDestroyImage(device, m_depthColor);
     if (device) VulkanDestroyImage(device, m_image);
+    m_framebuffer = VK_NULL_HANDLE;
+    m_renderPass = VK_NULL_HANDLE;
+    m_depthColor = {};
     m_image = {};
+}
+
+void VulkanGraphicsTexture::SetDepthTargetResources(VulkanImageResource color,
+    VkRenderPass renderPass, VkFramebuffer framebuffer,
+    uint32_t width, uint32_t height)
+{
+    m_depthColor = color;
+    m_renderPass = renderPass;
+    m_framebuffer = framebuffer;
+    m_width = width;
+    m_height = height;
 }
 
 VulkanGraphicsTexture::~VulkanGraphicsTexture()
@@ -398,6 +521,12 @@ std::shared_ptr<Engine::Graphics::IGraphicsTexture> VulkanTextureFactory::Create
     return m_system
         ? m_system->CreateTexture(width, height, rgbaPixels, mipLevels, format, srgb)
         : nullptr;
+}
+
+std::shared_ptr<Engine::Graphics::IGraphicsTexture>
+VulkanTextureFactory::CreateDepthTexture2D(uint32_t width, uint32_t height)
+{
+    return m_system ? m_system->CreateDepthTexture(width, height) : nullptr;
 }
 }
 #endif

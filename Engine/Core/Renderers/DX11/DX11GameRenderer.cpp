@@ -100,6 +100,7 @@ void DX11GameRenderer::CreateTargets()
     depth.BindFlags = D3D11_BIND_DEPTH_STENCIL;
     ThrowIfFailed(m_device->CreateTexture2D(&depth, nullptr, &m_depthTexture));
     ThrowIfFailed(m_device->CreateDepthStencilView(m_depthTexture.Get(), nullptr, &m_dsv));
+    m_postProcess.Create(m_device.Get(), m_width, m_height);
 }
 
 void DX11GameRenderer::Resize(uint32_t width, uint32_t height)
@@ -117,8 +118,7 @@ void DX11GameRenderer::BeginFrame()
 {
     if (m_graphicsProvider)
         m_graphicsProvider->GetContextFactory()->PrepareFrame(0);
-    ID3D11RenderTargetView* target = m_rtv.Get();
-    m_context->OMSetRenderTargets(1, &target, m_dsv.Get());
+    m_postProcess.BindScene(m_context.Get(), m_dsv.Get(), m_clearColor);
     D3D11_VIEWPORT viewport{ 0.0f, 0.0f, static_cast<float>(m_width), static_cast<float>(m_height), 0.0f, 1.0f };
     m_context->RSSetViewports(1, &viewport);
     D3D11_RECT scissor{ 0, 0, static_cast<LONG>(m_width), static_cast<LONG>(m_height) };
@@ -130,11 +130,13 @@ void DX11GameRenderer::BeginFrame()
 void DX11GameRenderer::Clear(float r, float g, float b, float a)
 {
     const float color[4] = { r, g, b, a };
-    m_context->ClearRenderTargetView(m_rtv.Get(), color);
+    memcpy(m_clearColor, color, sizeof(color));
+    m_postProcess.BindScene(m_context.Get(), m_dsv.Get(), m_clearColor);
 }
 
 void DX11GameRenderer::EndFrame()
 {
+    m_postProcess.Compose(m_context.Get(), m_rtv.Get());
     if (m_graphicsProvider && m_graphicsProvider->GetContextFactory())
     {
         auto* factory = m_graphicsProvider->GetContextFactory();

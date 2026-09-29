@@ -20,6 +20,7 @@ Material::Material()
     RegisterField("alphaMode", alphaMode, "Surface");
     RegisterField("alphaCutoff", alphaCutoff, "Surface");
     RegisterField("doubleSided", doubleSided, "Surface");
+    RegisterField("castsShadows", castsShadows, "Shadows");
     RegisterField("unlit", unlit, "Surface");
     RegisterField("metallicFactor", metallicFactor, "PBR");
     RegisterField("roughnessFactor", roughnessFactor, "PBR");
@@ -97,6 +98,7 @@ bool Material::LoadFromFile(const std::string& path)
         reflectionEnvironmentTexture.clear();
         reflectionEnvironmentExposure = 0.f;
         reflectionEnvironmentRotation = 0.f;
+        castsShadows = true;
         diffuseColor = from3(root["baseColor"], diffuseColor);
         ambientColor = from3(root["ambientColor"], ambientColor);
         specularColor = from3(root["specularColor"], specularColor);
@@ -118,6 +120,7 @@ bool Material::LoadFromFile(const std::string& path)
         if (root.Has("heightMaxSteps")) heightMaxSteps = root["heightMaxSteps"].AsFloat();
         if (root.Has("occlusionStrength")) occlusionStrength = root["occlusionStrength"].AsFloat();
         if (root.Has("doubleSided")) doubleSided = root["doubleSided"].AsBool();
+        if (root.Has("castsShadows")) castsShadows = root["castsShadows"].AsBool();
         if (root.Has("unlit")) unlit = root["unlit"].AsBool();
         if (root.Has("baseColorUvSet")) baseColorUvSet = root["baseColorUvSet"].AsInt();
         if (root.Has("metallicRoughnessUvSet")) metallicRoughnessUvSet = root["metallicRoughnessUvSet"].AsInt();
@@ -175,6 +178,7 @@ bool Material::SaveToFile(const std::string& path) const
     root.Set("heightMaxSteps", JsonValue(heightMaxSteps));
     root.Set("occlusionStrength", JsonValue(occlusionStrength));
     root.Set("doubleSided", JsonValue(doubleSided));
+    root.Set("castsShadows", JsonValue(castsShadows));
     root.Set("unlit", JsonValue(unlit));
     root.Set("baseColorUvSet", JsonValue(baseColorUvSet));
     root.Set("metallicRoughnessUvSet", JsonValue(metallicRoughnessUvSet));

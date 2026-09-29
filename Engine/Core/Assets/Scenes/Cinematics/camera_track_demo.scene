@@ -34,6 +34,6 @@
       </components>
       <children />
     </item>
-    <item name="Cinematic Sun" enabled="true"><transform><Transform.position><item>0</item><item>12</item><item>0</item></Transform.position><Transform.rotation><item>0.72</item><item>-0.55</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform><components><components:Light Light.lightType="1" Light.intensity="3" Light.range="100" Light.falloff="2" Light.baked="false"><Light.color><item>1</item><item>0.92</item><item>0.78</item></Light.color></components:Light></components><children /></item>
+    <item name="Cinematic Sun" enabled="true"><transform><Transform.position><item>0</item><item>12</item><item>0</item></Transform.position><Transform.rotation><item>0.72</item><item>-0.55</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform><components><components:Light Light.lightType="1" Light.intensity="3" Light.range="100" Light.falloff="2" Light.baked="false" Light.castsShadows="true" Light.shadowStrength="1" Light.shadowDepthBias="0.0015" Light.shadowNormalBias="0.01" Light.shadowResolutionScale="1" Light.shadowFilterScale="1"><Light.color><item>1</item><item>0.92</item><item>0.78</item></Light.color></components:Light></components><children /></item>
   </objects>
 </Scene>

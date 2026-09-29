@@ -42,6 +42,7 @@ struct ProjectSettings
     glm::vec4 clearColor;
     uint32_t targetFramerate;
     Engine::Model::BakedLightingSettings bakedLighting;
+    Engine::Model::RealtimeShadowSettings realtimeShadows;
     Engine::Model::DistanceLightingSettings distanceLighting;
     enum class AspectRatioMode { Free, Locked, Hardcoded };
     AspectRatioMode aspectRatioMode = AspectRatioMode::Locked;

@@ -13,7 +13,10 @@ public:
     enum class Type : int
     {
         Point = 0,
-        Ambient = 1
+        Directional = 1,
+        // Source compatibility for scripts built against the old name. The
+        // serialized value is unchanged, so existing scenes load as Directional.
+        Ambient = Directional
     };
 
     Light();
@@ -40,10 +43,30 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Light")
     bool baked = false;
 
+    // Realtime raster-shadow authoring state. Existing scenes deserialize to
+    // false so adding the feature does not silently increase rendering cost.
+    PROPERTY(Inspector, EditAnywhere, Category = "Light | Shadows")
+    bool castsShadows = false;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Light | Shadows", Range = "0.0, 1.0")
+    float shadowStrength = 1.f;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Light | Shadows", Range = "0.0, 0.05")
+    float shadowDepthBias = 0.0015f;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Light | Shadows", Range = "0.0, 0.1")
+    float shadowNormalBias = 0.01f;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Light | Shadows", Range = "0.25, 1.0")
+    float shadowResolutionScale = 1.f;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Light | Shadows", Range = "0.0, 1.0")
+    float shadowFilterScale = 1.f;
+
     Type GetLightType() const
     {
-        return lightType == static_cast<int>(Type::Ambient)
-            ? Type::Ambient : Type::Point;
+        return lightType == static_cast<int>(Type::Directional)
+            ? Type::Directional : Type::Point;
     }
 
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;

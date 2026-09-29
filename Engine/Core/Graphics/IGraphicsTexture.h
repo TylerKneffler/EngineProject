@@ -35,6 +35,12 @@ public:
         uint32_t mipLevels,
         GraphicsTextureFormat format,
         bool srgb = true) = 0;
+
+    // Creates a depth texture that can be used both as a depth-only render
+    // target and as a pixel-shader resource. Backends that have not yet
+    // implemented offscreen depth rendering return nullptr.
+    virtual std::shared_ptr<IGraphicsTexture> CreateDepthTexture2D(
+        uint32_t, uint32_t) { return nullptr; }
 };
 }
 

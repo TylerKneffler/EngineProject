@@ -54,6 +54,10 @@ public:
     // Called by the Properties panel to draw editable properties in the editor.
     // Returns true when an editor control changed serialized component data.
     virtual bool DrawProperties(::Engine::Editor::IEditorUi& ui);
+    // Draws the generic serialized inspector for matching components in a
+    // multi-selection and applies each edited field to every target.
+    bool DrawPropertiesMulti(::Engine::Editor::IEditorUi& ui,
+        const std::vector<Component*>& targets);
 
     // Runtime systems use this monotonically increasing value to rebuild
     // derived state only after configuration changes. Scripts that mutate
@@ -100,6 +104,8 @@ protected:
     }
 
 private:
+    bool IsEditorValueMixed(const std::string& key,
+        const JsonValue& value) const;
     struct SerializedField
     {
         std::string name;
@@ -164,5 +170,6 @@ private:
     std::vector<EditorFieldMetadata> m_editorFieldMetadata;
     std::string m_typeName = "Component";
     uint64_t m_configurationRevision = 1;
+    const std::vector<Component*>* m_multiEditTargets = nullptr;
 };
 }

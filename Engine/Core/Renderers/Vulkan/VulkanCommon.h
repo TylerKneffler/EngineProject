@@ -37,6 +37,7 @@ struct VulkanViewDeviceContext
     VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
     VkDevice device = VK_NULL_HANDLE;
     VkRenderPass renderPass = VK_NULL_HANDLE;
+    VkRenderPass compositionRenderPass = VK_NULL_HANDLE;
     std::function<void*(VkSampler, VkImageView, VkImageLayout)> registerUiTexture;
     std::function<void(void*)> unregisterUiTexture;
 };

@@ -1,6 +1,6 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0"?>
 <Scene xmlns:components="urn:engine-components" version="1">
-  <settings dimension="0" showGrid="true" gridHalfSize="15" gridCellSize="1" gridOpacity="0.25" gridFadeDistance="80" skyboxTexture="">
+  <settings dimension="0" showGrid="true" gridHalfSize="15" gridCellSize="1" gridOpacity="0.25" gridFadeDistance="80" skyboxEnabled="true" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" renderMode="0" sceneViewUiOverlay="false" portalDebugVisuals="false" sceneCameraWarpLookThrough="false" portalDebugWireframe="false" portalDebugTintRemoteView="true" portalDebugOverlayAlpha="0.45" portalRecursionDepth="2" portalConnectionRepeatLimit="2" portalMaxViewsPerFrame="24">
     <gridColor>
       <item>0.3</item>
       <item>0.3</item>
@@ -71,7 +71,7 @@
         </Transform.scale>
       </transform>
       <components>
-        <components:Light Light.lightType="1" Light.intensity="0.7" Light.range="20" Light.falloff="2" Light.baked="false">
+        <components:Light Light.lightType="1" Light.intensity="0.7" Light.range="20" Light.falloff="2" Light.baked="false" Light.castsShadows="true" Light.shadowStrength="1" Light.shadowDepthBias="0.0015" Light.shadowNormalBias="0.01" Light.shadowResolutionScale="1" Light.shadowFilterScale="1">
           <Light.color>
             <item>0.45</item>
             <item>0.58</item>
@@ -100,7 +100,7 @@
         </Transform.scale>
       </transform>
       <components>
-        <components:Light Light.lightType="0" Light.intensity="10" Light.range="7" Light.falloff="2" Light.baked="false">
+        <components:Light Light.lightType="0" Light.intensity="10" Light.range="7" Light.falloff="2" Light.baked="false" Light.castsShadows="false" Light.shadowStrength="1" Light.shadowDepthBias="0.0015" Light.shadowNormalBias="0.01" Light.shadowResolutionScale="1" Light.shadowFilterScale="1">
           <Light.color>
             <item>1</item>
             <item>0.12</item>
@@ -129,7 +129,7 @@
         </Transform.scale>
       </transform>
       <components>
-        <components:Light Light.lightType="0" Light.intensity="10" Light.range="7" Light.falloff="2" Light.baked="false">
+        <components:Light Light.lightType="0" Light.intensity="10" Light.range="7" Light.falloff="2" Light.baked="false" Light.castsShadows="false" Light.shadowStrength="1" Light.shadowDepthBias="0.0015" Light.shadowNormalBias="0.01" Light.shadowResolutionScale="1" Light.shadowFilterScale="1">
           <Light.color>
             <item>0.05</item>
             <item>0.3</item>
@@ -158,7 +158,7 @@
         </Transform.scale>
       </transform>
       <components>
-        <components:Light Light.lightType="0" Light.intensity="8" Light.range="8" Light.falloff="1.6" Light.baked="false">
+        <components:Light Light.lightType="0" Light.intensity="8" Light.range="8" Light.falloff="1.6" Light.baked="false" Light.castsShadows="false" Light.shadowStrength="1" Light.shadowDepthBias="0.0015" Light.shadowNormalBias="0.01" Light.shadowResolutionScale="1" Light.shadowFilterScale="1">
           <Light.color>
             <item>1</item>
             <item>0.65</item>
@@ -187,8 +187,8 @@
         </Transform.scale>
       </transform>
       <components>
-        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj"></components:Mesh>
-        <components:Material Material.shininess="72" Material.metallicFactor="0.45" Material.roughnessFactor="0.3" Material.materialAsset="Assets/Materials/diagnostic_cube.material">
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" />
+        <components:Material Material.shininess="72" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.alphaCutoff="0.5" Material.doubleSided="false" Material.castsShadows="true" Material.unlit="false" Material.metallicFactor="0.45" Material.roughnessFactor="0.3" Material.environmentDiffuseStrength="1" Material.occlusionStrength="1" Material.reflectionStrength="1" Material.useCustomReflectionEnvironment="false" Material.reflectionEnvironmentTexture="" Material.reflectionEnvironmentExposure="0" Material.reflectionEnvironmentRotation="0" Material.normalScale="1" Material.heightScale="0.05" Material.heightMinSteps="8" Material.heightMaxSteps="32" Material.baseColorUvSet="0" Material.metallicRoughnessUvSet="0" Material.normalUvSet="0" Material.occlusionUvSet="0" Material.emissiveUvSet="0" Material.heightUvSet="0" Material.materialAsset="" Material.baseColorTexture="" Material.metallicRoughnessTexture="" Material.normalTexture="" Material.heightTexture="" Material.occlusionTexture="" Material.emissiveTexture="">
           <Material.diffuse>
             <item>0.1</item>
             <item>0.11</item>
@@ -204,6 +204,11 @@
             <item>0.7</item>
             <item>0.75</item>
           </Material.specular>
+          <Material.emissiveColor>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </Material.emissiveColor>
         </components:Material>
       </components>
       <children />
@@ -213,7 +218,7 @@
         <Transform.position>
           <item>-2.2</item>
           <item>0.8</item>
-          <item>0</item>
+          <item>-0.19</item>
         </Transform.position>
         <Transform.rotation>
           <item>0.15</item>
@@ -227,8 +232,8 @@
         </Transform.scale>
       </transform>
       <components>
-        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj"></components:Mesh>
-        <components:Material Material.shininess="8" Material.metallicFactor="0" Material.roughnessFactor="0.9" Material.materialAsset="Assets/Materials/diagnostic_cube.material">
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" />
+        <components:Material Material.shininess="8" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.alphaCutoff="0.5" Material.doubleSided="false" Material.castsShadows="false" Material.unlit="false" Material.metallicFactor="0" Material.roughnessFactor="0.9" Material.environmentDiffuseStrength="1" Material.occlusionStrength="1" Material.reflectionStrength="1" Material.useCustomReflectionEnvironment="false" Material.reflectionEnvironmentTexture="" Material.reflectionEnvironmentExposure="0" Material.reflectionEnvironmentRotation="0" Material.normalScale="1" Material.heightScale="0.05" Material.heightMinSteps="8" Material.heightMaxSteps="32" Material.baseColorUvSet="0" Material.metallicRoughnessUvSet="0" Material.normalUvSet="0" Material.occlusionUvSet="0" Material.emissiveUvSet="0" Material.heightUvSet="0" Material.materialAsset="" Material.baseColorTexture="" Material.metallicRoughnessTexture="" Material.normalTexture="" Material.heightTexture="" Material.occlusionTexture="" Material.emissiveTexture="">
           <Material.diffuse>
             <item>0.82</item>
             <item>0.82</item>
@@ -244,6 +249,11 @@
             <item>0.2</item>
             <item>0.2</item>
           </Material.specular>
+          <Material.emissiveColor>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </Material.emissiveColor>
         </components:Material>
       </components>
       <children />
@@ -253,7 +263,7 @@
         <Transform.position>
           <item>0</item>
           <item>1.1</item>
-          <item>0.5</item>
+          <item>-1.5</item>
         </Transform.position>
         <Transform.rotation>
           <item>0.25</item>
@@ -267,8 +277,8 @@
         </Transform.scale>
       </transform>
       <components>
-        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj"></components:Mesh>
-        <components:Material Material.shininess="128" Material.metallicFactor="1" Material.roughnessFactor="0.12" Material.materialAsset="Assets/Materials/diagnostic_cube.material">
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" />
+        <components:Material Material.shininess="128" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.alphaCutoff="0.5" Material.doubleSided="false" Material.castsShadows="true" Material.unlit="false" Material.metallicFactor="1" Material.roughnessFactor="0.12" Material.environmentDiffuseStrength="1" Material.occlusionStrength="1" Material.reflectionStrength="1" Material.useCustomReflectionEnvironment="false" Material.reflectionEnvironmentTexture="" Material.reflectionEnvironmentExposure="0" Material.reflectionEnvironmentRotation="0" Material.normalScale="1" Material.heightScale="0.05" Material.heightMinSteps="8" Material.heightMaxSteps="32" Material.baseColorUvSet="0" Material.metallicRoughnessUvSet="0" Material.normalUvSet="0" Material.occlusionUvSet="0" Material.emissiveUvSet="0" Material.heightUvSet="0" Material.materialAsset="" Material.baseColorTexture="" Material.metallicRoughnessTexture="" Material.normalTexture="" Material.heightTexture="" Material.occlusionTexture="" Material.emissiveTexture="">
           <Material.diffuse>
             <item>0.55</item>
             <item>0.58</item>
@@ -284,6 +294,11 @@
             <item>1</item>
             <item>1</item>
           </Material.specular>
+          <Material.emissiveColor>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </Material.emissiveColor>
         </components:Material>
         <components:Rotate Rotate.speed="18">
           <Rotate.axis>
@@ -314,8 +329,8 @@
         </Transform.scale>
       </transform>
       <components>
-        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj"></components:Mesh>
-        <components:Material Material.shininess="36" Material.metallicFactor="0.8" Material.roughnessFactor="0.55" Material.materialAsset="Assets/Materials/diagnostic_cube.material">
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" />
+        <components:Material Material.shininess="36" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.alphaCutoff="0.5" Material.doubleSided="false" Material.castsShadows="true" Material.unlit="false" Material.metallicFactor="0.8" Material.roughnessFactor="0.55" Material.environmentDiffuseStrength="1" Material.occlusionStrength="1" Material.reflectionStrength="1" Material.useCustomReflectionEnvironment="false" Material.reflectionEnvironmentTexture="" Material.reflectionEnvironmentExposure="0" Material.reflectionEnvironmentRotation="0" Material.normalScale="1" Material.heightScale="0.05" Material.heightMinSteps="8" Material.heightMaxSteps="32" Material.baseColorUvSet="0" Material.metallicRoughnessUvSet="0" Material.normalUvSet="0" Material.occlusionUvSet="0" Material.emissiveUvSet="0" Material.heightUvSet="0" Material.materialAsset="" Material.baseColorTexture="" Material.metallicRoughnessTexture="" Material.normalTexture="" Material.heightTexture="" Material.occlusionTexture="" Material.emissiveTexture="">
           <Material.diffuse>
             <item>0.9</item>
             <item>0.55</item>
@@ -331,6 +346,11 @@
             <item>0.8</item>
             <item>0.35</item>
           </Material.specular>
+          <Material.emissiveColor>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </Material.emissiveColor>
         </components:Material>
       </components>
       <children />

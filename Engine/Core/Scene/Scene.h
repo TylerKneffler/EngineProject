@@ -27,7 +27,12 @@ namespace Engine::Components
 }
 namespace Engine::Rendering { class BakedLightingData; }
 namespace Engine::Renderers { class UIRenderer; }
-namespace Engine::Graphics { class IGraphicsProvider; class IGraphicsContext; }
+namespace Engine::Graphics
+{
+    class IGraphicsProvider;
+    class IGraphicsContext;
+    class IGraphicsTexture;
+}
 
 // Forward declarations
 // ---------------------------------------------------------------------------
@@ -132,7 +137,8 @@ public:
     void PrepareRenderFrame();
     void Render(IGraphicsContext* context, float aspect,
         Camera* cameraOverride = nullptr, bool includeEditorVisuals = true,
-        uint32_t viewportWidth = 0u, uint32_t viewportHeight = 0u);
+          uint32_t viewportWidth = 0u, uint32_t viewportHeight = 0u,
+          bool shadowOnly = false);
     // Bytes of object records made visible to the GPU by the most recent
     // Render call. This excludes vertex, light, and bone buffers.
     uint64_t GetLastObjectDataUploadBytes() const
@@ -160,6 +166,11 @@ public:
         const Engine::Model::DistanceLightingSettings& distanceSettings)
     {
         m_distanceLightingSettings = distanceSettings;
+    }
+    void SetRealtimeShadowSettings(
+        const Engine::Model::RealtimeShadowSettings& shadowSettings)
+    {
+        m_realtimeShadowSettings = shadowSettings;
     }
     // Pointer coordinates relative to the surface displaying the game render
     // target, used to keep embedded-view UI hit bounds aligned.
@@ -299,12 +310,49 @@ private:
     std::unique_ptr<IPipelineState> m_objectSpatialDebugPipeline;
     std::unique_ptr<IPipelineState> m_objectSpatialDebugWirePipeline;
     std::unique_ptr<IPipelineState> m_objectOutlinePipeline;
+    std::unique_ptr<IPipelineState> m_directionalShadowPipeline;
+    std::unique_ptr<IPipelineState> m_directionalShadowDoubleSidedPipeline;
     std::unordered_map<const IPipelineState*, std::unique_ptr<IPipelineState>>
         m_terrainPipelineByBase;
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_directionalShadowMap;
+    uint32_t m_directionalShadowResolution = 0;
+    struct PortalShadowCacheEntry
+    {
+        uint64_t key = 0;
+        const Engine::Components::Camera* ownerCamera = nullptr;
+        const Engine::Components::SpatialManipulator* targetChart = nullptr;
+        glm::mat4 view { 1.f };
+        glm::vec3 cameraPosition { 0.f };
+        uint32_t depth = 0;
+        float screenArea = 0.f;
+        uint64_t touchedGeneration = 0;
+        std::shared_ptr<Engine::Graphics::IGraphicsTexture> atlas;
+        uint32_t atlasResolution = 0;
+        std::unique_ptr<IGraphicsBuffer> constantBuffer;
+        void* constantMapped = nullptr;
+        std::unique_ptr<IGraphicsBuffer> objectBuffer;
+        void* objectMapped = nullptr;
+        uint32_t bufferCapacity = 0;
+        std::array<glm::mat4, 4> viewProjections{
+            glm::mat4(1.f), glm::mat4(1.f), glm::mat4(1.f), glm::mat4(1.f) };
+        glm::vec4 cascadeSplits { 0.f };
+        glm::vec4 cascadeData { 0.f };
+        glm::vec4 cameraData { 0.f };
+        bool rendered = false;
+        bool selected = false;
+    };
+    std::vector<PortalShadowCacheEntry> m_portalShadowCache;
+    uint64_t m_portalShadowGeneration = 0;
+    std::vector<std::shared_ptr<Engine::Graphics::IGraphicsTexture>>
+        m_retiredShadowTextures;
     std::unique_ptr<IGraphicsBuffer> m_objectConstantBuffer;
     void* m_objectCBMapped = nullptr;
     std::unique_ptr<IGraphicsBuffer> m_objectDataBuffer;
     void* m_objectDataMapped = nullptr;
+    std::unique_ptr<IGraphicsBuffer> m_shadowConstantBuffer;
+    void* m_shadowCBMapped = nullptr;
+    std::unique_ptr<IGraphicsBuffer> m_shadowObjectDataBuffer;
+    void* m_shadowObjectDataMapped = nullptr;
     std::unique_ptr<IGraphicsBuffer> m_portalObjectDataBuffer;
     void* m_portalObjectDataMapped = nullptr;
     std::unique_ptr<IGraphicsBuffer> m_lightDataBuffer;
@@ -317,6 +365,13 @@ private:
     std::vector<std::unique_ptr<IGraphicsBuffer>> m_retiredRenderBuffers;
     std::unique_ptr<IGraphicsBuffer> m_emptyMorphDeltaBuffer;
     std::unique_ptr<IGraphicsBuffer> m_emptyMorphWeightBuffer;
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_brdfIntegrationLut;
+    std::unique_ptr<IGraphicsBuffer> m_clusterHeaderBuffer;
+    std::unique_ptr<IGraphicsBuffer> m_clusterLightIndexBuffer;
+    void* m_clusterHeaderMapped = nullptr;
+    void* m_clusterLightIndexMapped = nullptr;
+    uint32_t m_clusterHeaderCapacity = 0;
+    uint32_t m_clusterLightIndexCapacity = 0;
     std::unique_ptr<IGraphicsBuffer> m_portalApertureBuffer;
     void* m_portalApertureMapped = nullptr;
     std::unique_ptr<Engine::Renderers::UIRenderer> m_uiRenderer;
@@ -384,6 +439,7 @@ private:
     // pruned as objects leave the scene.
     std::unordered_map<const Object*, WarpedRenderMesh> m_warpedRenderMeshes;
     uint32_t m_frameLightCount = 0;
+    Engine::Model::RealtimeShadowSettings m_realtimeShadowSettings;
     Engine::Model::DistanceLightingSettings m_distanceLightingSettings;
     uint64_t m_lastObjectDataUploadBytes = 0;
     uint32_t m_lastOcclusionCulledCount = 0;

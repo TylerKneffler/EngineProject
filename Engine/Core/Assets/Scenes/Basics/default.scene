@@ -71,7 +71,7 @@
         </Transform.scale>
       </transform>
       <components>
-        <components:Light Light.lightType="0" Light.intensity="1.9" Light.range="9.91" Light.falloff="1.4" Light.baked="false">
+        <components:Light Light.lightType="1" Light.intensity="1.9" Light.range="9.91" Light.falloff="1.4" Light.baked="false" Light.castsShadows="true" Light.shadowStrength="1" Light.shadowDepthBias="0.0015" Light.shadowNormalBias="0.01" Light.shadowResolutionScale="1" Light.shadowFilterScale="1">
           <Light.color>
             <item>1</item>
             <item>0.95</item>

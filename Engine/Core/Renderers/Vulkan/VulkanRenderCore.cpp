@@ -12,6 +12,7 @@ VulkanRenderCore::~VulkanRenderCore()
     if (m_device) vkDeviceWaitIdle(m_device);
     DestroySwapchain();
     if (m_offscreenRenderPass) vkDestroyRenderPass(m_device, m_offscreenRenderPass, nullptr);
+    if (m_compositionRenderPass) vkDestroyRenderPass(m_device, m_compositionRenderPass, nullptr);
     for (uint32_t i = 0; i < FRAME_COUNT; ++i)
     {
         if (m_imageAvailable[i]) vkDestroySemaphore(m_device, m_imageAvailable[i], nullptr);
@@ -45,6 +46,8 @@ bool VulkanRenderCore::Init(HWND hwnd, uint32_t width, uint32_t height, bool mai
         CreateCommandResources();
         CreateSyncResources();
         m_offscreenRenderPass = CreateRenderPass(
+            VK_FORMAT_R16G16B16A16_SFLOAT, true, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_compositionRenderPass = CreateRenderPass(
             VK_FORMAT_R8G8B8A8_UNORM, true, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         CreateSwapchain();
         return true;

@@ -372,25 +372,65 @@ void D3D12GraphicsContext::SetIndexBuffer(const Engine::Graphics::IGraphicsBuffe
 void D3D12GraphicsContext::SetStructuredBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer)
 {
     if (!buffer || !m_cmdList ||
-        !((slot >= 6 && slot <= 8) || (slot >= 10 && slot <= 11))) return;
+        !((slot >= 6 && slot <= 8) || (slot >= 10 && slot <= 11) ||
+          (slot >= 14 && slot <= 15))) return;
     const auto* structured = dynamic_cast<const D3D12GraphicsBuffer*>(buffer);
     if (!structured) return;
     // Root parameters 7-9 and 11-12 are root SRVs matching t6-t8/t10-t11.
+    const uint32_t rootParameter = slot + 1;
     m_cmdList->SetGraphicsRootShaderResourceView(
-        slot + 1, structured->GetGPUVirtualAddress());
+        rootParameter, structured->GetGPUVirtualAddress());
 }
 
 void D3D12GraphicsContext::SetTexture(uint32_t slot, const Engine::Graphics::IGraphicsTexture* texture)
 {
-    if (!m_cmdList || slot >= 7)
+    if (!m_cmdList || slot >= 9)
         return;
     const auto* nativeTexture = dynamic_cast<const D3D12GraphicsTexture*>(texture);
     if (!nativeTexture)
         return;
     ID3D12DescriptorHeap* heaps[] = { nativeTexture->GetHeap() };
     m_cmdList->SetDescriptorHeaps(1, heaps);
+    const uint32_t rootParameter = slot == 6 ? 10 :
+        (slot == 7 ? 13 : (slot == 8 ? 14 : slot + 1));
     m_cmdList->SetGraphicsRootDescriptorTable(
-        slot == 6 ? 10 : slot + 1, nativeTexture->GetGpuHandle());
+        rootParameter, nativeTexture->GetGpuHandle());
+}
+
+bool D3D12GraphicsContext::BeginDepthOnlyPass(
+    const Engine::Graphics::IGraphicsTexture* texture, float clearDepth)
+{
+    if (!m_cmdList || m_activeDepthTarget) return false;
+    auto* depth = dynamic_cast<D3D12GraphicsTexture*>(
+        const_cast<Engine::Graphics::IGraphicsTexture*>(texture));
+    if (!depth || !depth->IsDepthTarget()) return false;
+    D3D12_RESOURCE_BARRIER barrier{};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Transition.pResource = static_cast<ID3D12Resource*>(depth->GetNativeHandle());
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    m_cmdList->ResourceBarrier(1, &barrier);
+    const auto dsv = depth->GetDsvHandle();
+    m_cmdList->OMSetRenderTargets(0, nullptr, FALSE, &dsv);
+    m_cmdList->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH,
+        clearDepth, 0, 0, nullptr);
+    m_activeDepthTarget = depth;
+    return true;
+}
+
+void D3D12GraphicsContext::EndDepthOnlyPass()
+{
+    if (!m_cmdList || !m_activeDepthTarget) return;
+    D3D12_RESOURCE_BARRIER barrier{};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Transition.pResource = static_cast<ID3D12Resource*>(
+        m_activeDepthTarget->GetNativeHandle());
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    m_cmdList->ResourceBarrier(1, &barrier);
+    m_activeDepthTarget = nullptr;
 }
 
 void D3D12GraphicsContext::SetStencilReference(uint32_t reference)

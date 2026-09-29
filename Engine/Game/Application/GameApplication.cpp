@@ -74,6 +74,7 @@ int GameApplication::Run(HINSTANCE instance)
 
     ::Engine::Scene::Scene scene;
     scene.Init(renderer->GetGraphicsProvider());
+    scene.SetRealtimeShadowSettings(settings.realtimeShadows);
     scene.SetDistanceLightingSettings(settings.distanceLighting);
     Engine::Core::SceneManager::SetActiveScene(&scene);
     const std::string defaultScene = settings.defaultScene.empty()
@@ -107,12 +108,15 @@ int GameApplication::Run(HINSTANCE instance)
         scene.PrepareRenderFrame();
 
         renderer->BeginFrame();
-        renderer->Clear(0.1f, 0.1f, 0.1f);
         const float aspect = static_cast<float>(window->GetWidth()) /
             static_cast<float>(window->GetHeight());
         std::unique_ptr<Engine::Graphics::IGraphicsContext> graphicsContext =
             renderer->CreateFrameGraphicsContext();
         Engine::Components::Camera* gameCamera = scene.FindGameCamera();
+        if (graphicsContext && gameCamera)
+            scene.Render(graphicsContext.get(), aspect, gameCamera, false,
+                window->GetWidth(), window->GetHeight(), true);
+        renderer->Clear(0.1f, 0.1f, 0.1f);
         if (graphicsContext && gameCamera)
             scene.Render(graphicsContext.get(), aspect, gameCamera, false);
         renderer->EndFrame();

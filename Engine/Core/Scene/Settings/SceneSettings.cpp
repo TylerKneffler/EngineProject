@@ -75,6 +75,9 @@ Engine::Serialization::JsonValue SerializeSceneSettings(const Engine::Model::Sce
     value.Set("hdriIntensity", Engine::Serialization::JsonValue(settings.hdriIntensity));
     value.Set("hdriExposure", Engine::Serialization::JsonValue(settings.hdriExposure));
     value.Set("hdriRotation", Engine::Serialization::JsonValue(settings.hdriRotation));
+    value.Set("toneMapping",
+        Engine::Serialization::JsonValue(static_cast<int>(settings.toneMapping)));
+    value.Set("outputExposure", Engine::Serialization::JsonValue(settings.outputExposure));
     value.Set("renderMode",
         Engine::Serialization::JsonValue(static_cast<int>(settings.renderMode)));
     value.Set("sceneViewUiOverlay",
@@ -140,6 +143,14 @@ void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engi
         settings.hdriExposure = std::clamp(exposure->AsFloat(), -16.f, 16.f);
     if (const auto* rotation = FindField(value, "hdriRotation"))
         settings.hdriRotation = rotation->AsFloat();
+    if (const auto* toneMapping = FindField(value, "toneMapping"))
+    {
+        settings.toneMapping = static_cast<Engine::Model::ToneMappingOperator>(
+            std::clamp(toneMapping->AsInt(), 0, 2));
+    }
+    if (const auto* outputExposure = FindField(value, "outputExposure"))
+        settings.outputExposure = std::clamp(
+            outputExposure->AsFloat(), -16.f, 16.f);
     if (const auto* renderMode = FindField(value, "renderMode"))
     {
         const int mode = renderMode->AsInt();

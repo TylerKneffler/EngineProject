@@ -30,6 +30,13 @@ struct ObjectData
     float4 environmentSH[9];
     float4 reflectionEnvironmentParams;
     float4 reflectionEnvironmentSH[9];
+    float4x4 shadowViewProjections[4];
+    float4 shadowParams;
+    float4 shadowCascadeSplits;
+    float4 shadowCascadeData;
+    float4 shadowCameraData;
+    float4 lightingClusterParams;
+    float4 lightingCameraData;
     float4 portalClipPlane;
     float4 traversalClipPlane;
 };
@@ -56,6 +63,10 @@ struct MorphDelta { float4 position; float4 normal; float4 tangent; };
 [[vk::binding(4, 0)]] Texture2D emissiveMap;
 [[vk::binding(5, 0)]] Texture2D heightMap;
 [[vk::binding(10, 0)]] Texture2D environmentMap;
+[[vk::binding(13, 0)]] Texture2D<float> shadowMap;
+[[vk::binding(14, 0)]] Texture2D brdfIntegrationLut;
+[[vk::binding(15, 0)]] StructuredBuffer<uint2> clusteredLightGrid;
+[[vk::binding(16, 0)]] StructuredBuffer<uint> clusteredLightIndices;
 [[vk::binding(6, 0)]] SamplerState materialSampler;
 #else
 cbuffer DrawBuffer : register(b0)
@@ -69,6 +80,10 @@ Texture2D occlusionMap         : register(t3);
 Texture2D emissiveMap          : register(t4);
 Texture2D heightMap            : register(t5);
 Texture2D environmentMap       : register(t9);
+Texture2D<float> shadowMap      : register(t12);
+Texture2D brdfIntegrationLut    : register(t13);
+StructuredBuffer<uint2> clusteredLightGrid : register(t14);
+StructuredBuffer<uint> clusteredLightIndices : register(t15);
 StructuredBuffer<SceneLightData> sceneLights : register(t6);
 StructuredBuffer<ObjectData> objects : register(t7);
 StructuredBuffer<float4x4> boneMatrices : register(t8);
@@ -204,22 +219,6 @@ void VSTerrainMain(
 
 static const float PI = 3.14159265359;
 
-float3 LinearToSrgb(float3 linearColor)
-{
-    linearColor = max(linearColor, 0.0);
-    float3 lower = linearColor * 12.92;
-    float3 upper = 1.055 * pow(linearColor, 1.0 / 2.4) - 0.055;
-    return lerp(lower, upper, step(0.0031308, linearColor));
-}
-
-float4 EncodeOutput(float3 linearColor, float alpha)
-{
-    // Scene and game color targets are UNORM on every backend. Material
-    // textures are sampled as sRGB and lighting is evaluated in linear space,
-    // so encode once here before the target is displayed or presented.
-    return float4(LinearToSrgb(linearColor), alpha);
-}
-
 float DistributionGGX(float3 n, float3 h, float roughness)
 {
     float alpha = roughness * roughness;
@@ -310,10 +309,9 @@ float3 EvaluateDirectReflectionRadiance(
         acos(clamp(direction.y, -1.0, 1.0)) * 0.3183098862);
     uint width = 0, height = 0, mipLevels = 1;
     environmentMap.GetDimensions(0, width, height, mipLevels);
-    // The generated panorama mips are box-filtered rather than GGX
-    // prefiltered. Squared roughness preserves crisp low-roughness reflections
-    // and still selects progressively softer levels for rough materials.
-    const float lod = roughness * roughness * max((float)mipLevels - 1.0, 0.0);
+    // Float environment mip levels are deterministically GGX-prefiltered on
+    // import. Linear roughness selects the matching convolution width.
+    const float lod = roughness * max((float)mipLevels - 1.0, 0.0);
     const float exposure = customEnvironment
         ? objectData.reflectionEnvironmentParams.x
         : objectData.environmentParams.x;
@@ -390,6 +388,100 @@ float2 ParallaxOcclusionUv(
     float interpolation = abs(depthDifference) > 0.00001
         ? saturate(afterDepth / depthDifference) : 0.0;
     return lerp(currentUv, previousUv, interpolation);
+}
+
+float SampleDirectionalShadowCascade(ObjectData objectData,
+    uint cascade, float3 biasedPosition)
+{
+    float4 lightClip = mul(objectData.shadowViewProjections[cascade],
+        float4(biasedPosition, 1.0));
+    if (lightClip.w <= 0.0)
+        return 1.0;
+    float3 projected = lightClip.xyz / lightClip.w;
+    float2 shadowUv = float2(projected.x * 0.5 + 0.5,
+        0.5 - projected.y * 0.5);
+    if (projected.z <= 0.0 || projected.z >= 1.0 ||
+        any(shadowUv <= 0.0) || any(shadowUv >= 1.0))
+        return 1.0;
+
+    uint width = 0, height = 0;
+    shadowMap.GetDimensions(width, height);
+    uint cascadeCount = clamp((uint)objectData.shadowCascadeData.x, 1u, 4u);
+    uint tileWidth = cascadeCount > 1u ? width / 2u : width;
+    uint tileHeight = cascadeCount > 1u ? height / 2u : height;
+    int2 tileOrigin = cascadeCount > 1u
+        ? int2((cascade & 1u) * tileWidth, (cascade >> 1u) * tileHeight)
+        : int2(0, 0);
+    int radius = clamp((int)objectData.shadowParams.w, 0, 4);
+    int2 center = tileOrigin + int2(
+        shadowUv * float2(tileWidth, tileHeight));
+    int2 tileMaximum = tileOrigin + int2(
+        (int)tileWidth - 1, (int)tileHeight - 1);
+    float litSamples = 0.0;
+    float sampleCount = 0.0;
+    [loop] for (int y = -4; y <= 4; ++y)
+    [loop] for (int x = -4; x <= 4; ++x)
+    {
+        if (abs(x) > radius || abs(y) > radius)
+            continue;
+        int2 coordinate = clamp(center + int2(x, y),
+            tileOrigin, tileMaximum);
+        float storedDepth = shadowMap.Load(int3(coordinate, 0));
+        litSamples += projected.z - objectData.shadowParams.x <= storedDepth
+            ? 1.0 : 0.0;
+        sampleCount += 1.0;
+    }
+    return litSamples / max(sampleCount, 1.0);
+}
+
+float EvaluateDirectionalShadow(ObjectData objectData, SceneLightData light,
+    float3 worldPosition, float3 surfaceNormal, float3 lightDirection)
+{
+    if (light.params.z < 0.0 || light.params.w <= 0.0)
+        return 1.0;
+
+    float normalFacing = saturate(dot(surfaceNormal, lightDirection));
+    float3 biasedPosition = worldPosition + surfaceNormal *
+        objectData.shadowParams.y * (1.0 - normalFacing);
+    uint cascadeCount = clamp((uint)objectData.shadowCascadeData.x, 1u, 4u);
+    float viewDistance = max(0.0, dot(
+        worldPosition - objectData.viewPositionAlphaCutoff.xyz,
+        objectData.shadowCameraData.xyz));
+    if (viewDistance >= objectData.shadowCascadeData.w)
+        return 1.0;
+    uint cascade = 0u;
+    if (cascadeCount > 1u && viewDistance > objectData.shadowCascadeSplits.x)
+        cascade = 1u;
+    if (cascadeCount > 2u && viewDistance > objectData.shadowCascadeSplits.y)
+        cascade = 2u;
+    if (cascadeCount > 3u && viewDistance > objectData.shadowCascadeSplits.z)
+        cascade = 3u;
+
+    float filtered = SampleDirectionalShadowCascade(
+        objectData, cascade, biasedPosition);
+    if (cascade + 1u < cascadeCount)
+    {
+        float previousSplit = cascade == 0u ? objectData.shadowCameraData.w :
+            objectData.shadowCascadeSplits[cascade - 1u];
+        float boundary = objectData.shadowCascadeSplits[cascade];
+        float blendWidth = max((boundary - previousSplit) *
+            objectData.shadowCascadeData.z, 0.0001);
+        float cascadeBlend = saturate(
+            (viewDistance - (boundary - blendWidth)) / blendWidth);
+        if (cascadeBlend > 0.0)
+        {
+            float nextFiltered = SampleDirectionalShadowCascade(
+                objectData, cascade + 1u, biasedPosition);
+            filtered = lerp(filtered, nextFiltered, cascadeBlend);
+        }
+    }
+    float farFadeWidth = max(objectData.shadowCascadeData.w *
+        objectData.shadowCascadeData.z, 0.0001);
+    float farFade = saturate((viewDistance -
+        (objectData.shadowCascadeData.w - farFadeWidth)) / farFadeWidth);
+    filtered = lerp(filtered, 1.0, farFade);
+    return lerp(1.0, filtered,
+        saturate(light.params.w * objectData.shadowParams.z));
 }
 
 float4 PSMain(
@@ -485,14 +577,40 @@ float4 PSMain(
         clip(base.a - objectData.viewPositionAlphaCutoff.w);
 
     if (objectData.ambientUnlit.w > 0.5)
-        return EncodeOutput(base.rgb + emissive, base.a);
+        return float4(base.rgb + emissive, base.a);
 
     float3 n = normalize(normal);
     float3 v = viewDirection;
     float3 directLight = 0.0;
-    [loop]
-    for (uint index = 0; index < draw.lightCount; ++index)
+    uint lightListOffset = 0u;
+    uint lightIterationCount = draw.lightCount;
+    const bool clusteredLighting = (draw.drawFlags & 1u) != 0u;
+    if (clusteredLighting)
     {
+        uint tileSize = max((uint)objectData.lightingClusterParams.x, 1u);
+        uint tilesX = max((uint)objectData.lightingClusterParams.y, 1u);
+        uint tilesY = max((uint)objectData.lightingClusterParams.z, 1u);
+        uint depthSlices = max((uint)objectData.lightingClusterParams.w, 1u);
+        uint tileX = min((uint)pos.x / tileSize, tilesX - 1u);
+        uint tileY = min((uint)pos.y / tileSize, tilesY - 1u);
+        float viewDepth = max(0.001,
+            dot(worldPos - objectData.viewPositionAlphaCutoff.xyz,
+                objectData.lightingCameraData.xyz));
+        float nearPlane = max(objectData.shadowCameraData.w, 0.001);
+        uint depthSlice = min((uint)max(0.0,
+            log2(viewDepth / nearPlane) * objectData.lightingCameraData.w),
+            depthSlices - 1u);
+        uint cluster = depthSlice * tilesX * tilesY + tileY * tilesX + tileX;
+        uint2 header = clusteredLightGrid[cluster];
+        lightListOffset = header.x;
+        lightIterationCount = min(header.y, draw.lightCount);
+    }
+    [loop]
+    for (uint iteration = 0; iteration < lightIterationCount; ++iteration)
+    {
+        uint index = clusteredLighting
+            ? clusteredLightIndices[lightListOffset + iteration]
+            : iteration;
         SceneLightData light = sceneLights[index];
         float3 lightDirection;
         float attenuation = 1.0;
@@ -514,6 +632,8 @@ float4 PSMain(
         float nDotL = saturate(dot(n, lightDirection));
         float3 radiance = light.colorIntensity.rgb *
             light.colorIntensity.w * attenuation;
+        radiance *= EvaluateDirectionalShadow(
+            objectData, light, worldPos, n, lightDirection);
         directLight += EvaluatePbrBrdf(
             base.rgb, metallic, roughness, n, v, lightDirection) *
             radiance * nDotL;
@@ -568,15 +688,15 @@ float4 PSMain(
                             objectData, roughReflectionDirection) *
                             objectData.environmentParams.x;
             }
-            float3 environmentFresnel = f0 +
-                (max(1.0 - roughness, f0) - f0) *
-                pow(saturate(1.0 - dot(n, v)), 5.0);
-            float roughnessAttenuation = lerp(1.0, 0.25, roughness);
-            specularEnvironment = reflectedRadiance * environmentFresnel *
-                roughnessAttenuation * objectData.environmentParams.w;
+            float2 integratedBrdf = brdfIntegrationLut.SampleLevel(
+                materialSampler,
+                float2(saturate(dot(n, v)), roughness), 0.0).rg;
+            specularEnvironment = reflectedRadiance *
+                (f0 * integratedBrdf.x + integratedBrdf.y) *
+                objectData.environmentParams.w;
         }
         environment = (diffuseEnvironment + specularEnvironment) * occlusion;
     }
-    return EncodeOutput(
-        ambient + environment + directLight + bakedDirect + emissive, base.a);
+    return float4(ambient + environment + directLight + bakedDirect + emissive,
+        base.a);
 }

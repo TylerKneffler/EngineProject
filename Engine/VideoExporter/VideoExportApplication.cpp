@@ -395,6 +395,7 @@ int VideoExportApplication::Run(HINSTANCE instance)
     }
     Engine::Scene::Scene scene;
     scene.Init(renderer.GetGraphicsProvider());
+    scene.SetRealtimeShadowSettings(settings.realtimeShadows);
     scene.SetDistanceLightingSettings(settings.distanceLighting);
     Engine::Core::SceneManager::SetActiveScene(&scene);
     Engine::Core::SceneManager::SetDefaultScenePath(scenePath);
@@ -431,11 +432,15 @@ int VideoExportApplication::Run(HINSTANCE instance)
         Engine::Core::SceneManager::ProcessPendingSceneLoad();
         scene.PrepareRenderFrame();
         renderer.BeginFrame();
-        renderer.Clear(settings.clearColor.r, settings.clearColor.g,
-            settings.clearColor.b, settings.clearColor.a);
         std::unique_ptr<Engine::Graphics::IGraphicsContext> context =
             renderer.CreateFrameGraphicsContext();
         Engine::Components::Camera* camera = scene.FindGameCamera();
+        if (context && camera)
+            scene.Render(context.get(), static_cast<float>(options.width) /
+                static_cast<float>(options.height), camera, false,
+                options.width, options.height, true);
+        renderer.Clear(settings.clearColor.r, settings.clearColor.g,
+            settings.clearColor.b, settings.clearColor.a);
         if (context && camera)
             scene.Render(context.get(), static_cast<float>(options.width) /
                 static_cast<float>(options.height), camera, false);

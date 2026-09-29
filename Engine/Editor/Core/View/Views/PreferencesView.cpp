@@ -891,6 +891,43 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
                 distanceLighting.maximumDistance);
         NotifyChanged();
     }
+    if (ui.InputUInt("Maximum Realtime Lights",
+            &distanceLighting.maximumRealtimeLights))
+    {
+        distanceLighting.maximumRealtimeLights = std::min(
+            distanceLighting.maximumRealtimeLights,
+            Engine::Model::MaxRealtimeLights);
+        NotifyChanged();
+    }
+    ui.Tooltip("Global upload and shader-loop cap. Zero disables realtime direct lights.");
+    if (ui.Checkbox("Forward+ Clustered Lighting",
+            &distanceLighting.clusteredLighting))
+        NotifyChanged();
+    if (distanceLighting.clusteredLighting)
+    {
+        if (ui.InputUInt("Cluster Tile Size", &distanceLighting.clusterTileSize))
+        {
+            distanceLighting.clusterTileSize = std::clamp<uint32_t>(
+                distanceLighting.clusterTileSize, 16u, 256u);
+            NotifyChanged();
+        }
+        if (ui.InputUInt("Cluster Depth Slices",
+                &distanceLighting.clusterDepthSlices))
+        {
+            distanceLighting.clusterDepthSlices = std::clamp<uint32_t>(
+                distanceLighting.clusterDepthSlices, 1u, 64u);
+            NotifyChanged();
+        }
+        if (ui.InputUInt("Maximum Lights Per Cluster",
+                &distanceLighting.maximumLightsPerCluster))
+        {
+            distanceLighting.maximumLightsPerCluster = std::clamp<uint32_t>(
+                distanceLighting.maximumLightsPerCluster, 1u,
+                Engine::Model::MaxRealtimeLights);
+            NotifyChanged();
+        }
+        ui.Tooltip("Smaller tiles and more depth slices reject more lights but increase cluster-list memory and CPU construction work.");
+    }
 
     const float maximumDistance = std::max(1.f,
         distanceLighting.maximumDistance);
@@ -936,6 +973,20 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
         if (ui.Checkbox("Parallax Mapping", &band.parallaxMapping)) NotifyChanged();
         if (ui.Checkbox("Environment Diffuse", &band.environmentDiffuse)) NotifyChanged();
         if (ui.Checkbox("Reflections", &band.reflections)) NotifyChanged();
+        if (ui.Checkbox("Realtime Shadows", &band.realtimeShadows)) NotifyChanged();
+        if (band.realtimeShadows)
+        {
+            if (ui.SliderFloat("Shadow Distance Scale",
+                    &band.shadowDistanceScale, 0.f, 1.f))
+                NotifyChanged();
+            if (ui.InputUInt("Maximum Shadow PCF Radius",
+                    &band.maximumShadowPcfRadius))
+            {
+                band.maximumShadowPcfRadius = std::min<uint32_t>(
+                    band.maximumShadowPcfRadius, 4u);
+                NotifyChanged();
+            }
+        }
         ui.BeginDisabled(distanceLighting.bands.size() <= 1);
         if (ui.Button("Remove Quality"))
             removeBand = static_cast<int>(index);
@@ -990,6 +1041,88 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
     if (ui.Checkbox("Preserve Source Emission",
             &m_settings.bakedLighting.accumulate))
         NotifyChanged();
+
+    ui.Separator();
+    ui.Label("Realtime Shadows");
+    auto& shadows = m_settings.realtimeShadows;
+    if (ui.Checkbox("Enable Realtime Shadows", &shadows.enabled))
+        NotifyChanged();
+    if (ui.InputUInt("Directional Shadow Light Budget", &shadows.maximumShadowedLights))
+    {
+        shadows.maximumShadowedLights = std::clamp<uint32_t>(
+            shadows.maximumShadowedLights, 0u, 1u);
+        NotifyChanged();
+    }
+    ui.Tooltip("Zero disables the directional shadow atlas; the current renderer supports one shadow-casting directional light.");
+    if (ui.InputUInt("Directional Atlas Resolution", &shadows.directionalResolution))
+    {
+        shadows.directionalResolution = std::clamp<uint32_t>(
+            shadows.directionalResolution, 256u, 8192u);
+        NotifyChanged();
+    }
+    if (ui.InputUInt("Directional Cascades", &shadows.directionalCascadeCount))
+    {
+        shadows.directionalCascadeCount = std::clamp<uint32_t>(
+            shadows.directionalCascadeCount, 1u, 4u);
+        NotifyChanged();
+    }
+    if (ui.DragFloat("Directional Shadow Distance",
+            &shadows.directionalDistance, 1.f, 1.f, 100000.f))
+        NotifyChanged();
+    if (ui.InputUInt("Shadow PCF Radius", &shadows.pcfRadius))
+    {
+        shadows.pcfRadius = std::min<uint32_t>(shadows.pcfRadius, 4u);
+        NotifyChanged();
+    }
+    if (ui.SliderFloat("Cascade Split Distribution",
+            &shadows.cascadeSplitLambda, 0.f, 1.f))
+        NotifyChanged();
+    ui.Tooltip("Zero distributes cascades uniformly; one concentrates resolution near the camera.");
+    if (ui.SliderFloat("Cascade Transition Width",
+            &shadows.cascadeTransitionFraction, 0.f, 0.3f))
+        NotifyChanged();
+    ui.Tooltip("Wider transitions hide seams but sample two cascades over a larger screen region.");
+    const char* portalShadowPolicies[] = {
+        "Reuse Main Atlas", "Budgeted View Atlases", "Atlas Per Portal View" };
+    int portalShadowPolicy = static_cast<int>(shadows.portalPolicy);
+    if (ui.Combo("Portal Shadow Policy", &portalShadowPolicy,
+        portalShadowPolicies, 3))
+    {
+        shadows.portalPolicy = static_cast<Engine::Model::PortalShadowPolicy>(
+            std::clamp(portalShadowPolicy, 0, 2));
+        NotifyChanged();
+    }
+    if (shadows.portalPolicy != Engine::Model::PortalShadowPolicy::ReuseMain)
+    {
+        if (ui.InputUInt("Portal Atlas Resolution",
+            &shadows.portalAtlasResolution))
+        {
+            shadows.portalAtlasResolution = std::clamp<uint32_t>(
+                shadows.portalAtlasResolution, 256u, 4096u);
+            NotifyChanged();
+        }
+        if (ui.InputUInt("Portal Shadow Cascades",
+            &shadows.portalCascadeCount))
+        {
+            shadows.portalCascadeCount = std::clamp<uint32_t>(
+                shadows.portalCascadeCount, 1u, 4u);
+            NotifyChanged();
+        }
+    }
+    if (shadows.portalPolicy == Engine::Model::PortalShadowPolicy::Budgeted &&
+        ui.InputUInt("Portal Shadow View Budget", &shadows.portalViewBudget))
+    {
+        shadows.portalViewBudget = std::clamp<uint32_t>(
+            shadows.portalViewBudget, 1u, 64u);
+        NotifyChanged();
+    }
+    if (shadows.portalPolicy == Engine::Model::PortalShadowPolicy::ReuseMain)
+        ui.DisabledLabel("Lowest cost. Transformed or distant portal views may sample an inaccurate main-view atlas.");
+    else if (shadows.portalPolicy == Engine::Model::PortalShadowPolicy::Budgeted)
+        ui.DisabledLabel("Recommended. Shallow, large on-screen portals receive view-specific atlases first.");
+    else
+        ui.DisabledLabel("Highest quality and cost. Every scheduled recursive portal view receives an atlas.");
+    ui.DisabledLabel("One cascade uses the full atlas; two to four cascades use 2x2 tiles on DirectX 11, DirectX 12, and Vulkan.");
 }
 
 // ---------------------------------------------------------------------------
@@ -1134,6 +1267,36 @@ bool PreferencesView::SaveSettings()
                 setBakeValue("BakedPreserveSourceEmission",
                     m_settings.bakedLighting.accumulate ? "true" : "false");
 
+                auto shadowNode = prop.child("RealtimeShadows");
+                if (!shadowNode)
+                    shadowNode = prop.append_child("RealtimeShadows");
+                shadowNode.remove_attributes();
+                shadowNode.append_attribute("Enabled").set_value(
+                    m_settings.realtimeShadows.enabled);
+                shadowNode.append_attribute("MaximumLights").set_value(
+                    m_settings.realtimeShadows.maximumShadowedLights);
+                shadowNode.append_attribute("DirectionalResolution").set_value(
+                    m_settings.realtimeShadows.directionalResolution);
+                shadowNode.append_attribute("DirectionalCascades").set_value(
+                    m_settings.realtimeShadows.directionalCascadeCount);
+                shadowNode.append_attribute("DirectionalDistance").set_value(
+                    m_settings.realtimeShadows.directionalDistance);
+                shadowNode.append_attribute("PcfRadius").set_value(
+                    m_settings.realtimeShadows.pcfRadius);
+                shadowNode.append_attribute("CascadeSplitLambda").set_value(
+                    m_settings.realtimeShadows.cascadeSplitLambda);
+                shadowNode.append_attribute("CascadeTransitionFraction").set_value(
+                    m_settings.realtimeShadows.cascadeTransitionFraction);
+                shadowNode.append_attribute("PortalPolicy").set_value(
+                    static_cast<uint32_t>(
+                        m_settings.realtimeShadows.portalPolicy));
+                shadowNode.append_attribute("PortalAtlasResolution").set_value(
+                    m_settings.realtimeShadows.portalAtlasResolution);
+                shadowNode.append_attribute("PortalCascades").set_value(
+                    m_settings.realtimeShadows.portalCascadeCount);
+                shadowNode.append_attribute("PortalViewBudget").set_value(
+                    m_settings.realtimeShadows.portalViewBudget);
+
                 auto distanceNode = prop.child("DistanceLighting");
                 if (!distanceNode)
                     distanceNode = prop.append_child("DistanceLighting");
@@ -1142,6 +1305,16 @@ bool PreferencesView::SaveSettings()
                     m_settings.distanceLighting.enabled);
                 distanceNode.append_attribute("MaximumDistance").set_value(
                     m_settings.distanceLighting.maximumDistance);
+                distanceNode.append_attribute("MaximumRealtimeLights").set_value(
+                    m_settings.distanceLighting.maximumRealtimeLights);
+                distanceNode.append_attribute("ClusteredLighting").set_value(
+                    m_settings.distanceLighting.clusteredLighting);
+                distanceNode.append_attribute("ClusterTileSize").set_value(
+                    m_settings.distanceLighting.clusterTileSize);
+                distanceNode.append_attribute("ClusterDepthSlices").set_value(
+                    m_settings.distanceLighting.clusterDepthSlices);
+                distanceNode.append_attribute("MaximumLightsPerCluster").set_value(
+                    m_settings.distanceLighting.maximumLightsPerCluster);
                 while (auto bandNode = distanceNode.child("Band"))
                     distanceNode.remove_child(bandNode);
                 for (const auto& band : m_settings.distanceLighting.bands)
@@ -1159,6 +1332,12 @@ bool PreferencesView::SaveSettings()
                         band.environmentDiffuse);
                     bandNode.append_attribute("Reflections").set_value(
                         band.reflections);
+                    bandNode.append_attribute("RealtimeShadows").set_value(
+                        band.realtimeShadows);
+                    bandNode.append_attribute("ShadowDistanceScale").set_value(
+                        band.shadowDistanceScale);
+                    bandNode.append_attribute("MaximumShadowPcfRadius").set_value(
+                        band.maximumShadowPcfRadius);
                 }
             }
 

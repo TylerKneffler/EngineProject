@@ -163,6 +163,8 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
         view->SetDebugInteractionLogging(m_settings.debugHierarchyInteractions);
         if (OnSelectionChanged)
             view->OnSelectionChanged = OnSelectionChanged;
+        if (OnSelectionSetChanged)
+            view->OnSelectionSetChanged = OnSelectionSetChanged;
         if (OnFocusObject)
             view->OnFocusObject = OnFocusObject;
         if (OnHierarchyChanged)

@@ -196,7 +196,10 @@ void ImGuiEditorUi::SameLineRight(float width)
 void ImGuiEditorUi::Separator(){ImGui::Separator();} void ImGuiEditorUi::Spacing(){ImGui::Spacing();}
 void ImGuiEditorUi::Indent(float width){ImGui::Indent(width);}
 void ImGuiEditorUi::Unindent(float width){ImGui::Unindent(width);}
-bool ImGuiEditorUi::Checkbox(const char*l,bool*v){return ImGui::Checkbox(l,v);} bool ImGuiEditorUi::InputText(const char*l,char*b,size_t s){if(l&&l[0]=='#'&&l[1]=='#')ImGui::SetNextItemWidth(-FLT_MIN);return ImGui::InputText(l,b,s);}
+void ImGuiEditorUi::SetNextItemMixedValue(bool mixed){m_nextItemMixed=mixed;}
+bool ImGuiEditorUi::ConsumeMixedValue(){const bool mixed=m_nextItemMixed;m_nextItemMixed=false;return mixed;}
+bool ImGuiEditorUi::Checkbox(const char*l,bool*v){const bool mixed=ConsumeMixedValue();if(mixed)ImGui::PushItemFlag(ImGuiItemFlags_MixedValue,true);const bool changed=ImGui::Checkbox(l,v);if(mixed)ImGui::PopItemFlag();return changed;}
+bool ImGuiEditorUi::InputText(const char*l,char*b,size_t s){const bool mixed=ConsumeMixedValue();if(l&&l[0]=='#'&&l[1]=='#')ImGui::SetNextItemWidth(-FLT_MIN);if(!mixed)return ImGui::InputText(l,b,s);std::vector<char> display(s,0);strncpy_s(display.data(),s,"-",_TRUNCATE);const bool changed=ImGui::InputText(l,display.data(),s);if(changed)strncpy_s(b,s,display.data(),_TRUNCATE);return changed;}
 bool ImGuiEditorUi::InputTextSubmit(const char*l,char*b,size_t s){if(l&&l[0]=='#'&&l[1]=='#')ImGui::SetNextItemWidth(-FLT_MIN);return ImGui::InputText(l,b,s,ImGuiInputTextFlags_EnterReturnsTrue);}
 void ImGuiEditorUi::ReadOnlyTextBlock(const char* label,const char* text,bool scrollToBottom,float reservedBottom)
 {
@@ -217,14 +220,14 @@ void ImGuiEditorUi::ReadOnlyTextBlock(const char* label,const char* text,bool sc
             }
     }
 }
-bool ImGuiEditorUi::DragFloat(const char*l,float*v,float s,float a,float b){return ImGui::DragFloat(l,v,s,a,b);}
-bool ImGuiEditorUi::DragFloat3(const char*l,float*v,float s,float a,float b){return ImGui::DragFloat3(l,v,s,a,b);}
+bool ImGuiEditorUi::DragFloat(const char*l,float*v,float s,float a,float b){const bool mixed=ConsumeMixedValue();return ImGui::DragFloat(l,v,s,a,b,mixed?"-":"%.3f");}
+bool ImGuiEditorUi::DragFloat3(const char*l,float*v,float s,float a,float b){const bool mixed=ConsumeMixedValue();return ImGui::DragFloat3(l,v,s,a,b,mixed?"-":"%.3f");}
 bool ImGuiEditorUi::IsAnyItemActive() const{return ImGui::IsAnyItemActive();}
-bool ImGuiEditorUi::ColorEdit3(const char*l,float*v){return ImGui::ColorEdit3(l,v);} bool ImGuiEditorUi::ColorEdit4(const char*l,float*v){return ImGui::ColorEdit4(l,v);}
+bool ImGuiEditorUi::ColorEdit3(const char*l,float*v){if(ConsumeMixedValue())return ImGui::DragFloat3(l,v,.01f,0.f,1.f,"-");return ImGui::ColorEdit3(l,v);} bool ImGuiEditorUi::ColorEdit4(const char*l,float*v){if(ConsumeMixedValue())return ImGui::DragFloat4(l,v,.01f,0.f,1.f,"-");return ImGui::ColorEdit4(l,v);}
 bool ImGuiEditorUi::SliderInt(const char*l,int*v,int a,int b){return ImGui::SliderInt(l,v,a,b);}
 bool ImGuiEditorUi::SliderFloat(const char*l,float*v,float a,float b){return ImGui::SliderFloat(l,v,a,b,"%.0f units");}
 bool ImGuiEditorUi::InputUInt(const char*l,uint32_t*v){return ImGui::InputScalar(l,ImGuiDataType_U32,v);}
-void ImGuiEditorUi::ValueLabel(const char*l,const char*v){ImGui::LabelText(l,"%s",v);}
+void ImGuiEditorUi::ValueLabel(const char*l,const char*v){ImGui::LabelText(l,"%s",ConsumeMixedValue()?"-":v);}
 bool ImGuiEditorUi::CollapsingHeader(const char*l,bool d){return ImGui::CollapsingHeader(l,d?ImGuiTreeNodeFlags_DefaultOpen:0);}
 bool ImGuiEditorUi::PropertyGroupHeader(const char* label,bool defaultOpen)
 {
@@ -681,6 +684,8 @@ bool ImGuiEditorUi::DeleteShortcutPressed()const
     if(EditorKeyBindings::Get().IsCapturing()||ImGui::GetIO().WantTextInput)return false;
     return ImGui::IsKeyPressed(ImGuiKey_Delete,false)||ImGui::IsKeyPressed(ImGuiKey_Backspace,false);
 }
+bool ImGuiEditorUi::IsMultiSelectModifierDown()const{return ImGui::GetIO().KeyCtrl;}
+bool ImGuiEditorUi::IsRangeSelectModifierDown()const{return ImGui::GetIO().KeyShift;}
 bool ImGuiEditorUi::BeginDragDropSource(){
     const ImVec2 minimum=ImGui::GetItemRectMin(),maximum=ImGui::GetItemRectMax();
     ImDrawList* rowDrawList=ImGui::GetWindowDrawList();

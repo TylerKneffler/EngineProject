@@ -45,8 +45,114 @@ void RevealFileInExplorer(const std::string& path)
 void PropertiesView::SetSelectedAsset(const std::string& path)
 {
     m_selectedObject = nullptr;
+    m_selectedObjects.clear();
     m_assetInspector.Select(path);
 }
+
+void PropertiesView::DrawMultiSelection(IEditorUi& ui)
+{
+    const std::string title = std::to_string(m_selectedObjects.size()) +
+        " Objects (Multi-Selection)";
+    ui.Label(title.c_str());
+
+    bool sameName = true;
+    bool sameEnabled = true;
+    const std::string firstName = m_selectedObjects.front()->name;
+    const bool firstEnabled = m_selectedObjects.front()->enabled;
+    for (Engine::Core::Object* object : m_selectedObjects)
+    {
+        sameName &= object->name == firstName;
+        sameEnabled &= object->enabled == firstEnabled;
+    }
+
+    char name[256];
+    strncpy_s(name, sameName ? firstName.c_str() : "-", sizeof(name));
+    ui.SetNextItemMixedValue(!sameName);
+    if (ui.InputText("Name", name, sizeof(name)))
+    {
+        for (Engine::Core::Object* object : m_selectedObjects)
+        {
+            object->name = name;
+            object->InvalidatePrefabOverrideCache();
+        }
+        if (OnComponentsChanged) OnComponentsChanged();
+    }
+
+    bool enabled = firstEnabled;
+    ui.SetNextItemMixedValue(!sameEnabled);
+    if (ui.Checkbox("Enabled", &enabled))
+    {
+        for (Engine::Core::Object* object : m_selectedObjects)
+        {
+            enabled ? object->Enabled() : object->Disabled();
+            object->InvalidatePrefabOverrideCache();
+        }
+        if (OnComponentsChanged) OnComponentsChanged();
+    }
+
+    ui.Separator();
+    ui.Indent(16.f);
+
+    std::vector<Engine::Core::Component*> transforms;
+    transforms.reserve(m_selectedObjects.size());
+    for (Engine::Core::Object* object : m_selectedObjects)
+        transforms.push_back(&object->transform);
+    if (ui.ComponentHeader(ComponentIconForType("Transform"), "Transform"))
+    {
+        if (transforms.front()->DrawPropertiesMulti(ui, transforms))
+        {
+            for (Engine::Core::Object* object : m_selectedObjects)
+            {
+                object->transform.MarkDirty();
+                if (auto* body = object->GetComponent<Engine::Components::RigidBody>())
+                    body->NotifyEditorTransformChanged();
+                object->InvalidatePrefabOverrideCache();
+            }
+            if (OnComponentsChanged) OnComponentsChanged();
+        }
+    }
+
+    std::unordered_map<std::string, size_t> occurrences;
+    for (Engine::Core::Component* component : m_selectedObjects.front()->Components)
+    {
+        if (!component) continue;
+        const std::string type = component->GetTypeName();
+        const size_t wantedOccurrence = occurrences[type]++;
+        std::vector<Engine::Core::Component*> common{ component };
+        for (size_t objectIndex = 1; objectIndex < m_selectedObjects.size(); ++objectIndex)
+        {
+            size_t occurrence = 0;
+            Engine::Core::Component* match = nullptr;
+            for (Engine::Core::Component* candidate : m_selectedObjects[objectIndex]->Components)
+            {
+                if (candidate && candidate->GetTypeName() == type)
+                {
+                    if (occurrence == wantedOccurrence) { match = candidate; break; }
+                    ++occurrence;
+                }
+            }
+            if (!match) { common.clear(); break; }
+            common.push_back(match);
+        }
+        if (common.empty()) continue;
+
+        ui.PushId(component);
+        if (ui.ComponentHeader(ComponentIconForType(type), type.c_str()) &&
+            component->DrawPropertiesMulti(ui, common))
+        {
+            for (Engine::Core::Object* object : m_selectedObjects)
+            {
+                if (auto* body = object->GetComponent<Engine::Components::RigidBody>())
+                    body->NotifyEditorTransformChanged();
+                object->InvalidatePrefabOverrideCache();
+            }
+            if (OnComponentsChanged) OnComponentsChanged();
+        }
+        ui.PopId();
+    }
+    ui.Unindent(16.f);
+}
+
 void PropertiesView::DrawPanel(IEditorUi& ui)
 {
     if (m_skyboxRevealPending &&
@@ -178,6 +284,20 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             }
 
             ui.Separator();
+            ui.Label("Output Tone Mapping");
+            const char* toneMappingOperators[] = { "None", "ACES", "Reinhard" };
+            int toneMapping = static_cast<int>(m_scene->settings.toneMapping);
+            bool outputChanged = ui.Combo("Operator", &toneMapping,
+                toneMappingOperators, 3);
+            if (outputChanged)
+                m_scene->settings.toneMapping = static_cast<
+                    Engine::Model::ToneMappingOperator>(toneMapping);
+            outputChanged |= ui.DragFloat("Output Exposure (EV)",
+                &m_scene->settings.outputExposure, 0.05f, -16.f, 16.f);
+            if (outputChanged && OnComponentsChanged)
+                OnComponentsChanged();
+
+            ui.Separator();
             ui.Label("Spatial Debug");
             bool portalDebugChanged = false;
             portalDebugChanged |= ui.Checkbox("Enable Spatial Debug Visuals",
@@ -236,6 +356,13 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
                     OnComponentsChanged();
             }
         }
+        ui.EndTextWrap();
+        ui.EndWindow();
+        return;
+    }
+    if (m_selectedObjects.size() > 1)
+    {
+        DrawMultiSelection(ui);
         ui.EndTextWrap();
         ui.EndWindow();
         return;

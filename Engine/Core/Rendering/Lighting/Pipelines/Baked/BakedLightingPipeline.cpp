@@ -179,7 +179,7 @@ glm::vec3 EvaluateLighting(const glm::vec3& position, glm::vec3 normal,
     glm::vec3 result(0.f);
     for (const BakeLight& light : lights)
     {
-        if (light.type == Engine::Components::Light::Type::Ambient)
+        if (light.type == Engine::Components::Light::Type::Directional)
         {
             const float diffuse = std::max(0.f, glm::dot(normal, light.direction));
             if (!Occluded(position, normal, light.direction,
@@ -471,7 +471,7 @@ Engine::Model::BakeResult BakedLightingPipeline::Bake(Engine::Scene::Scene& scen
             if (light->GetLightType() == Engine::Components::Light::Type::Point && light->range <= 0.f)
                 continue;
             const glm::mat4 lightWorld = object->transform.GetWorldMatrixWithLayer();
-            const glm::vec3 direction = light->GetLightType() == Engine::Components::Light::Type::Ambient
+            const glm::vec3 direction = light->GetLightType() == Engine::Components::Light::Type::Directional
                 ? -glm::normalize(glm::vec3(lightWorld[2]))
                 : glm::vec3(0.f, 1.f, 0.f);
             lights.push_back({ glm::vec3(lightWorld[3]), light->color,

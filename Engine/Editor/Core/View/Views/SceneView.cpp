@@ -300,4 +300,15 @@ void SceneView::Render3D(void* cmd)
             GetWidth(), GetHeight());
     }
 }
+
+void SceneView::RenderShadow3D(void* cmd)
+{
+    if (!m_scene || !m_scene->GetGraphicsProvider()) return;
+    auto* factory = m_scene->GetGraphicsProvider()->GetContextFactory();
+    factory->SetCommandBuffer(cmd);
+    auto ctx = factory->CreateContext();
+    if (ctx)
+        m_scene->Render(ctx.get(), m_aspect, nullptr, false,
+            GetWidth(), GetHeight(), true);
+}
 }

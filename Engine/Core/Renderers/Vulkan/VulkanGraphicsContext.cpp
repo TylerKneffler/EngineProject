@@ -328,6 +328,32 @@ void VulkanGraphicsContext::SetTexture(uint32_t slot, const Engine::Graphics::IG
         m_textures[slot] = dynamic_cast<const VulkanGraphicsTexture*>(texture);
 }
 
+bool VulkanGraphicsContext::BeginDepthOnlyPass(
+    const Engine::Graphics::IGraphicsTexture* texture, float clearDepth)
+{
+    if (!m_commandBuffer || m_activeDepthTarget) return false;
+    auto* depth = dynamic_cast<const VulkanGraphicsTexture*>(texture);
+    if (!depth || !depth->IsDepthTarget()) return false;
+    VkClearValue clears[2]{};
+    clears[1].depthStencil = { clearDepth, 0 };
+    VkRenderPassBeginInfo begin{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+    begin.renderPass = depth->GetRenderPass();
+    begin.framebuffer = depth->GetFramebuffer();
+    begin.renderArea.extent = { depth->GetWidth(), depth->GetHeight() };
+    begin.clearValueCount = 2;
+    begin.pClearValues = clears;
+    vkCmdBeginRenderPass(m_commandBuffer, &begin, VK_SUBPASS_CONTENTS_INLINE);
+    m_activeDepthTarget = depth;
+    return true;
+}
+
+void VulkanGraphicsContext::EndDepthOnlyPass()
+{
+    if (!m_commandBuffer || !m_activeDepthTarget) return;
+    vkCmdEndRenderPass(m_commandBuffer);
+    m_activeDepthTarget = nullptr;
+}
+
 void VulkanGraphicsContext::SetStructuredBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer)
 {
     size_t index = 0;
@@ -335,6 +361,8 @@ void VulkanGraphicsContext::SetStructuredBuffer(uint32_t slot, const Engine::Gra
         index = slot - 6;
     else if (slot >= 10 && slot <= 11)
         index = slot - 7;
+    else if (slot >= 14 && slot <= 15)
+        index = slot - 9;
     else
         return;
     m_structuredBuffers[index] = dynamic_cast<const VulkanGraphicsBuffer*>(buffer);

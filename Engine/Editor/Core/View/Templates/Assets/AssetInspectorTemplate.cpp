@@ -350,6 +350,7 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
                     &material.occlusionStrength, 0.01f, 0.f, 1.f);
                 changed |= ui.Checkbox("Unlit", &material.unlit);
                 changed |= ui.Checkbox("Double Sided", &material.doubleSided);
+                changed |= ui.Checkbox("Cast Shadows", &material.castsShadows);
                 static const char* alphaModes[] = { "Opaque", "Mask", "Blend" };
                 int alphaMode = material.GetAlphaMode() ==
                     Engine::Components::MaterialAlphaMode::Mask ? 1 :

@@ -443,9 +443,10 @@ void D3D11GraphicsContext::SetTexture(uint32_t slot, const Engine::Graphics::IGr
 {
     if (!m_device || !m_context || slot >= D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT)
         return;
-    // Logical texture slot 6 is the reflection panorama. Object shaders keep
-    // t6-t8 available for structured scene buffers, so bind it at t9.
-    const uint32_t shaderSlot = slot == 6 ? 9 : slot;
+    // Logical texture slots 6 and 7 are the reflection panorama and shadow
+    // map. Object shaders reserve t6-t8/t10-t11 for structured scene buffers.
+    const uint32_t shaderSlot = slot == 6 ? 9 :
+        (slot == 7 ? 12 : (slot == 8 ? 13 : slot));
     const auto* nativeTexture = dynamic_cast<const D3D11GraphicsTexture*>(texture);
     ID3D11ShaderResourceView* view = nativeTexture ? nativeTexture->GetView() : nullptr;
     if (!m_textureSlotInitialized[shaderSlot] ||
@@ -463,6 +464,60 @@ void D3D11GraphicsContext::SetTexture(uint32_t slot, const Engine::Graphics::IGr
         m_context->PSSetSamplers(0, 1, &sampler);
         m_materialSamplerBound = true;
     }
+}
+
+bool D3D11GraphicsContext::BeginDepthOnlyPass(
+    const Engine::Graphics::IGraphicsTexture* texture, float clearDepth)
+{
+    if (!m_context || m_depthOnlyPassActive)
+        return false;
+    const auto* nativeTexture = dynamic_cast<const D3D11GraphicsTexture*>(texture);
+    if (!nativeTexture || !nativeTexture->GetDepthView())
+        return false;
+
+    m_context->OMGetRenderTargets(1,
+        m_savedRenderTarget.ReleaseAndGetAddressOf(),
+        m_savedDepthTarget.ReleaseAndGetAddressOf());
+    UINT viewportCount = 0;
+    m_context->RSGetViewports(&viewportCount, nullptr);
+    m_savedViewports.resize(viewportCount);
+    if (viewportCount)
+        m_context->RSGetViewports(&viewportCount, m_savedViewports.data());
+    UINT scissorCount = 0;
+    m_context->RSGetScissorRects(&scissorCount, nullptr);
+    m_savedScissors.resize(scissorCount);
+    if (scissorCount)
+        m_context->RSGetScissorRects(&scissorCount, m_savedScissors.data());
+
+    ID3D11ShaderResourceView* nullView = nullptr;
+    m_context->PSSetShaderResources(12, 1, &nullView);
+    m_boundTextureViews[12] = nullptr;
+    m_textureSlotInitialized[12] = true;
+    ID3D11DepthStencilView* depthView = nativeTexture->GetDepthView();
+    m_context->OMSetRenderTargets(0, nullptr, depthView);
+    m_context->ClearDepthStencilView(depthView, D3D11_CLEAR_DEPTH,
+        std::clamp(clearDepth, 0.f, 1.f), 0);
+    m_depthOnlyPassActive = true;
+    return true;
+}
+
+void D3D11GraphicsContext::EndDepthOnlyPass()
+{
+    if (!m_context || !m_depthOnlyPassActive)
+        return;
+    ID3D11RenderTargetView* renderTarget = m_savedRenderTarget.Get();
+    m_context->OMSetRenderTargets(1, &renderTarget, m_savedDepthTarget.Get());
+    if (!m_savedViewports.empty())
+        m_context->RSSetViewports(static_cast<UINT>(m_savedViewports.size()),
+            m_savedViewports.data());
+    if (!m_savedScissors.empty())
+        m_context->RSSetScissorRects(static_cast<UINT>(m_savedScissors.size()),
+            m_savedScissors.data());
+    m_savedRenderTarget.Reset();
+    m_savedDepthTarget.Reset();
+    m_savedViewports.clear();
+    m_savedScissors.clear();
+    m_depthOnlyPassActive = false;
 }
 
 void D3D11GraphicsContext::SetViewport(const Viewport& value)

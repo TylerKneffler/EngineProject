@@ -249,6 +249,43 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
             settings.bakedLighting.accumulate =
                 std::string(accumulate.child_value()) != "false";
 
+        auto realtimeShadows = prop.child("RealtimeShadows");
+        if (realtimeShadows)
+        {
+            settings.realtimeShadows.enabled =
+                realtimeShadows.attribute("Enabled").as_bool(true);
+            settings.realtimeShadows.maximumShadowedLights = std::clamp<uint32_t>(
+                realtimeShadows.attribute("MaximumLights").as_uint(1u), 0u, 1u);
+            settings.realtimeShadows.directionalResolution = std::clamp<uint32_t>(
+                realtimeShadows.attribute("DirectionalResolution").as_uint(2048u),
+                256u, 8192u);
+            settings.realtimeShadows.directionalCascadeCount = std::clamp<uint32_t>(
+                realtimeShadows.attribute("DirectionalCascades").as_uint(4u),
+                1u, 4u);
+            settings.realtimeShadows.directionalDistance = std::clamp(
+                realtimeShadows.attribute("DirectionalDistance").as_float(150.f),
+                1.f, 100000.f);
+            settings.realtimeShadows.pcfRadius = std::min<uint32_t>(
+                realtimeShadows.attribute("PcfRadius").as_uint(1u), 4u);
+            settings.realtimeShadows.cascadeSplitLambda = std::clamp(
+                realtimeShadows.attribute("CascadeSplitLambda").as_float(0.65f),
+                0.f, 1.f);
+            settings.realtimeShadows.cascadeTransitionFraction = std::clamp(
+                realtimeShadows.attribute("CascadeTransitionFraction").as_float(0.1f),
+                0.f, 0.3f);
+            settings.realtimeShadows.portalPolicy = static_cast<
+                Engine::Model::PortalShadowPolicy>(std::min<uint32_t>(
+                    realtimeShadows.attribute("PortalPolicy").as_uint(0u), 2u));
+            settings.realtimeShadows.portalAtlasResolution = std::clamp<uint32_t>(
+                realtimeShadows.attribute("PortalAtlasResolution").as_uint(1024u),
+                256u, 4096u);
+            settings.realtimeShadows.portalCascadeCount = std::clamp<uint32_t>(
+                realtimeShadows.attribute("PortalCascades").as_uint(2u), 1u, 4u);
+            settings.realtimeShadows.portalViewBudget = std::clamp<uint32_t>(
+                realtimeShadows.attribute("PortalViewBudget").as_uint(2u), 1u,
+                64u);
+        }
+
         auto distanceLighting = prop.child("DistanceLighting");
         if (distanceLighting)
         {
@@ -256,6 +293,23 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
                 distanceLighting.attribute("Enabled").as_bool(true);
             settings.distanceLighting.maximumDistance = std::max(1.f,
                 distanceLighting.attribute("MaximumDistance").as_float(1000.f));
+            settings.distanceLighting.maximumRealtimeLights =
+                std::min<uint32_t>(distanceLighting.attribute(
+                    "MaximumRealtimeLights").as_uint(
+                        Engine::Model::MaxRealtimeLights),
+                    Engine::Model::MaxRealtimeLights);
+            settings.distanceLighting.clusteredLighting =
+                distanceLighting.attribute("ClusteredLighting").as_bool(true);
+            settings.distanceLighting.clusterTileSize = std::clamp<uint32_t>(
+                distanceLighting.attribute("ClusterTileSize").as_uint(64u),
+                16u, 256u);
+            settings.distanceLighting.clusterDepthSlices = std::clamp<uint32_t>(
+                distanceLighting.attribute("ClusterDepthSlices").as_uint(16u),
+                1u, 64u);
+            settings.distanceLighting.maximumLightsPerCluster =
+                std::clamp<uint32_t>(distanceLighting.attribute(
+                    "MaximumLightsPerCluster").as_uint(32u), 1u,
+                    Engine::Model::MaxRealtimeLights);
             std::vector<Engine::Model::DistanceLightingBand> bands;
             float previousEnd = 0.f;
             for (auto bandNode : distanceLighting.children("Band"))
@@ -278,6 +332,14 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
                     bandNode.attribute("EnvironmentDiffuse").as_bool(true);
                 band.reflections =
                     bandNode.attribute("Reflections").as_bool(true);
+                band.realtimeShadows =
+                    bandNode.attribute("RealtimeShadows").as_bool(true);
+                band.shadowDistanceScale = std::clamp(
+                    bandNode.attribute("ShadowDistanceScale").as_float(1.f),
+                    0.f, 1.f);
+                band.maximumShadowPcfRadius = std::min<uint32_t>(
+                    bandNode.attribute("MaximumShadowPcfRadius").as_uint(4u),
+                    4u);
                 previousEnd = band.endDistance;
                 bands.push_back(std::move(band));
             }

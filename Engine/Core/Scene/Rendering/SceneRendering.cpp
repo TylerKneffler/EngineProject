@@ -14,6 +14,7 @@
 #include "Core/Graphics/IPipelineState.h"
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Graphics/IGraphicsContext.h"
+#include "Core/Graphics/PostProcess.h"
 #include "Core/Memory/CacheStore.h"
 #include "Core/Renderers/UIRenderer.h"
 #include <algorithm>
@@ -24,9 +25,11 @@
 #include <filesystem>
 #include <functional>
 #include <limits>
+#include <numeric>
 #include <optional>
 #include <unordered_map>
 #include <glm/glm.hpp>
+#include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 
 #if defined(_WIN32)
@@ -230,6 +233,87 @@ namespace
                         ProjectEnvironment(texture));
                 });
     }
+
+    float RadicalInverseVdc(uint32_t bits)
+    {
+        bits = (bits << 16u) | (bits >> 16u);
+        bits = ((bits & 0x55555555u) << 1u) |
+            ((bits & 0xaaaaaaaau) >> 1u);
+        bits = ((bits & 0x33333333u) << 2u) |
+            ((bits & 0xccccccccu) >> 2u);
+        bits = ((bits & 0x0f0f0f0fu) << 4u) |
+            ((bits & 0xf0f0f0f0u) >> 4u);
+        bits = ((bits & 0x00ff00ffu) << 8u) |
+            ((bits & 0xff00ff00u) >> 8u);
+        return static_cast<float>(bits) * 2.3283064365386963e-10f;
+    }
+
+    glm::vec2 IntegrateBrdf(float noV, float roughness)
+    {
+        constexpr uint32_t sampleCount = 256u;
+        constexpr float twoPi = 6.28318530717958647692f;
+        const glm::vec3 normal(0.f, 0.f, 1.f);
+        const glm::vec3 view(std::sqrt(std::max(0.f, 1.f - noV * noV)),
+            0.f, noV);
+        float scale = 0.f;
+        float bias = 0.f;
+        const float alpha = roughness * roughness;
+        const float alphaSquared = alpha * alpha;
+        const float geometryK = alpha * 0.5f;
+        for (uint32_t sample = 0; sample < sampleCount; ++sample)
+        {
+            const float xiX = static_cast<float>(sample) /
+                static_cast<float>(sampleCount);
+            const float xiY = RadicalInverseVdc(sample);
+            const float phi = twoPi * xiX;
+            const float cosTheta = std::sqrt(std::max(0.f,
+                (1.f - xiY) /
+                (1.f + (alphaSquared - 1.f) * xiY)));
+            const float sinTheta = std::sqrt(std::max(0.f,
+                1.f - cosTheta * cosTheta));
+            const glm::vec3 halfVector(
+                std::cos(phi) * sinTheta,
+                std::sin(phi) * sinTheta,
+                cosTheta);
+            const glm::vec3 light = glm::normalize(
+                2.f * glm::dot(view, halfVector) * halfVector - view);
+            const float noL = std::max(light.z, 0.f);
+            const float noH = std::max(halfVector.z, 0.f);
+            const float voH = std::max(glm::dot(view, halfVector), 0.f);
+            if (noL <= 0.f || noH <= 0.f || voH <= 0.f)
+                continue;
+            const float gv = noV /
+                (noV * (1.f - geometryK) + geometryK);
+            const float gl = noL /
+                (noL * (1.f - geometryK) + geometryK);
+            const float visibility = gv * gl * voH /
+                std::max(noH * noV, 0.00001f);
+            const float fresnel = std::pow(1.f - voH, 5.f);
+            scale += (1.f - fresnel) * visibility;
+            bias += fresnel * visibility;
+        }
+        return glm::vec2(scale, bias) / static_cast<float>(sampleCount);
+    }
+
+    std::vector<float> GenerateBrdfIntegrationLut(uint32_t resolution)
+    {
+        std::vector<float> pixels(static_cast<size_t>(resolution) *
+            resolution * 4u, 0.f);
+        for (uint32_t y = 0; y < resolution; ++y)
+        for (uint32_t x = 0; x < resolution; ++x)
+        {
+            const float noV = (static_cast<float>(x) + 0.5f) /
+                static_cast<float>(resolution);
+            const float roughness = (static_cast<float>(y) + 0.5f) /
+                static_cast<float>(resolution);
+            const glm::vec2 integrated = IntegrateBrdf(noV, roughness);
+            const size_t offset = (static_cast<size_t>(y) * resolution + x) * 4u;
+            pixels[offset] = integrated.x;
+            pixels[offset + 1u] = integrated.y;
+            pixels[offset + 3u] = 1.f;
+        }
+        return pixels;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -248,6 +332,7 @@ struct DrawCBData
 
 constexpr uint32_t kPortalApertureNearClampFlag = 0x40000000u;
 constexpr uint32_t kPortalDepthResetFlag = 0x80000000u;
+constexpr uint32_t kClusteredLightingFlag = 0x00000001u;
 
 // Large, indexed records live in shader-readable buffers on every backend.
 struct ObjectGPUData
@@ -275,6 +360,19 @@ struct ObjectGPUData
     glm::vec4 environmentSH[9]; // RGB radiance coefficients
     glm::vec4 reflectionEnvironmentParams; // exposure scale, rotation, custom enabled, reserved
     glm::vec4 reflectionEnvironmentSH[9];
+    glm::mat4 shadowViewProjections[4];
+    // depth bias, normal/slope bias, strength, PCF radius
+    glm::vec4 shadowParams;
+    // View-distance end for each directional cascade.
+    glm::vec4 shadowCascadeSplits;
+    // cascade count, atlas tile scale, boundary blend fraction, max distance
+    glm::vec4 shadowCascadeData;
+    // Camera forward direction and near distance used for cascade selection.
+    glm::vec4 shadowCameraData;
+    // tile size, tiles X, tiles Y, depth slices
+    glm::vec4 lightingClusterParams;
+    // camera forward, logarithmic depth scale
+    glm::vec4 lightingCameraData;
     // Enabled per portal draw through DrawCBData::flags; dot(world, plane)
     // selects the connected half-space at the target aperture.
     glm::vec4 portalClipPlane;
@@ -304,7 +402,7 @@ struct SkyboxCBData
 };
 
 static_assert(sizeof(DrawCBData) == 16, "Draw constants must remain small");
-static_assert(sizeof(ObjectGPUData) == 688, "Object buffer layout must match Object.hlsl");
+static_assert(sizeof(ObjectGPUData) == 1040, "Object buffer layout must match Object.hlsl");
 static_assert(sizeof(Engine::Model::LightData) == 48,
     "Light buffer layout must match Object.hlsl");
 static_assert(sizeof(GridCBData) == 128, "Grid constant-buffer layout must match Grid.hlsl");
@@ -376,6 +474,23 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     if (!m_objectDataMapped)
         throw std::runtime_error("Failed to create object structured buffer");
 
+    m_shadowConstantBuffer = bufferFactory->CreateBuffer(
+        Engine::Graphics::IGraphicsBuffer::Usage::ConstantBuffer,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+        static_cast<uint64_t>(m_objectCapacity) * 4u * kCBStride,
+        nullptr, sizeof(DrawCBData));
+    m_shadowCBMapped = m_shadowConstantBuffer
+        ? m_shadowConstantBuffer->Map() : nullptr;
+    m_shadowObjectDataBuffer = bufferFactory->CreateBuffer(
+        Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+        static_cast<uint64_t>(m_objectCapacity) * 4u * sizeof(ObjectGPUData),
+        nullptr, sizeof(ObjectGPUData));
+    m_shadowObjectDataMapped = m_shadowObjectDataBuffer
+        ? m_shadowObjectDataBuffer->Map() : nullptr;
+    if (!m_shadowCBMapped || !m_shadowObjectDataMapped)
+        throw std::runtime_error("Failed to create directional shadow buffers");
+
     // Portal recursion has a much larger worst-case record count than an
     // ordinary view. Keep it separate so terrain-only frames never upload or
     // invalidate the reserved portal address space.
@@ -421,6 +536,17 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
         sizeof(emptyMorphWeights), &emptyMorphWeights, sizeof(emptyMorphWeights));
     if (!m_emptyMorphDeltaBuffer || !m_emptyMorphWeightBuffer)
         throw std::runtime_error("Failed to create empty morph structured buffers");
+
+    constexpr uint32_t brdfLutResolution = 128u;
+    const std::vector<float> brdfLut = GenerateBrdfIntegrationLut(
+        brdfLutResolution);
+    auto* textureFactory = m_graphicsProvider->GetTextureFactory();
+    m_brdfIntegrationLut = textureFactory ? textureFactory->CreateTexture2D(
+        brdfLutResolution, brdfLutResolution,
+        reinterpret_cast<const uint8_t*>(brdfLut.data()), 1u,
+        Engine::Graphics::GraphicsTextureFormat::Rgba32Float, false) : nullptr;
+    if (!m_brdfIntegrationLut)
+        throw std::runtime_error("Failed to create split-sum BRDF integration LUT");
 
     m_portalApertureBuffer = bufferFactory->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::VertexBuffer,
@@ -479,14 +605,31 @@ void Scene::EnsureObjectRenderCapacity(uint32_t requiredObjects)
         Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
         Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
         portalSlots * sizeof(ObjectGPUData), nullptr, sizeof(ObjectGPUData));
+    auto shadowConstantBuffer = factory->CreateBuffer(
+        Engine::Graphics::IGraphicsBuffer::Usage::ConstantBuffer,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+        static_cast<uint64_t>(capacity) * 4u * kCBStride,
+        nullptr, sizeof(DrawCBData));
+    auto shadowObjectBuffer = factory->CreateBuffer(
+        Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+        static_cast<uint64_t>(capacity) * 4u * sizeof(ObjectGPUData),
+        nullptr, sizeof(ObjectGPUData));
     void* constantMapped = constantBuffer ? constantBuffer->Map() : nullptr;
     void* objectMapped = objectBuffer ? objectBuffer->Map() : nullptr;
     void* portalMapped = portalBuffer ? portalBuffer->Map() : nullptr;
-    if (!constantMapped || !objectMapped || !portalMapped)
+    void* shadowConstantMapped = shadowConstantBuffer
+        ? shadowConstantBuffer->Map() : nullptr;
+    void* shadowObjectMapped = shadowObjectBuffer
+        ? shadowObjectBuffer->Map() : nullptr;
+    if (!constantMapped || !objectMapped || !portalMapped ||
+        !shadowConstantMapped || !shadowObjectMapped)
     {
         if (constantMapped) constantBuffer->Unmap();
         if (objectMapped) objectBuffer->Unmap();
         if (portalMapped) portalBuffer->Unmap();
+        if (shadowConstantMapped) shadowConstantBuffer->Unmap();
+        if (shadowObjectMapped) shadowObjectBuffer->Unmap();
         throw std::runtime_error("Failed to grow scene object buffers to " +
             std::to_string(capacity) + " draw records");
     }
@@ -497,18 +640,30 @@ void Scene::EnsureObjectRenderCapacity(uint32_t requiredObjects)
         m_objectDataBuffer->Unmap();
     if (m_portalObjectDataBuffer && m_portalObjectDataMapped)
         m_portalObjectDataBuffer->Unmap();
+    if (m_shadowConstantBuffer && m_shadowCBMapped)
+        m_shadowConstantBuffer->Unmap();
+    if (m_shadowObjectDataBuffer && m_shadowObjectDataMapped)
+        m_shadowObjectDataBuffer->Unmap();
     if (m_objectConstantBuffer)
         m_retiredRenderBuffers.push_back(std::move(m_objectConstantBuffer));
     if (m_objectDataBuffer)
         m_retiredRenderBuffers.push_back(std::move(m_objectDataBuffer));
     if (m_portalObjectDataBuffer)
         m_retiredRenderBuffers.push_back(std::move(m_portalObjectDataBuffer));
+    if (m_shadowConstantBuffer)
+        m_retiredRenderBuffers.push_back(std::move(m_shadowConstantBuffer));
+    if (m_shadowObjectDataBuffer)
+        m_retiredRenderBuffers.push_back(std::move(m_shadowObjectDataBuffer));
     m_objectConstantBuffer = std::move(constantBuffer);
     m_objectDataBuffer = std::move(objectBuffer);
     m_portalObjectDataBuffer = std::move(portalBuffer);
+    m_shadowConstantBuffer = std::move(shadowConstantBuffer);
+    m_shadowObjectDataBuffer = std::move(shadowObjectBuffer);
     m_objectCBMapped = constantMapped;
     m_objectDataMapped = objectMapped;
     m_portalObjectDataMapped = portalMapped;
+    m_shadowCBMapped = shadowConstantMapped;
+    m_shadowObjectDataMapped = shadowObjectMapped;
     m_objectCapacity = capacity;
 }
 
@@ -597,7 +752,7 @@ void Scene::BuildSkyboxPipeline()
             .SetInputLayout(nullptr, 0)
             .SetPrimitiveTopology(
                 Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
-            .SetRenderTargetFormat(28, 20);
+            .SetRenderTargetFormat(10, 20);
         if (stencilClip)
         {
             state.SetStencilEnable(true)
@@ -746,7 +901,7 @@ void Scene::BuildGridPipeline()
         .SetDepthFunc(3)                       // D3D12_COMPARISON_FUNC_LESS_EQUAL (0-indexed: 3)
         .SetInputLayout(nullptr, 0)            // No vertex buffer
         .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
-        .SetRenderTargetFormat(28, 20)         // DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_D32_FLOAT_S8X24_UINT
+        .SetRenderTargetFormat(10, 20)         // DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_D32_FLOAT_S8X24_UINT
         .Build();
     
     if (!m_gridPipeline)
@@ -907,7 +1062,7 @@ void Scene::BuildObjectPipeline()
                 terrainFormat ? 4u : 10u)
             .SetPrimitiveTopology(
                 Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
-            .SetRenderTargetFormat(28, 20)
+            .SetRenderTargetFormat(10, 20)
             .Build();
         if (!pipeline)
             throw std::runtime_error(
@@ -944,6 +1099,16 @@ void Scene::BuildObjectPipeline()
         buildMaterialPipeline(true, true, false, PortalStencilMode::None,
             true,
             "blended double-sided material");
+
+    // Reuse the complete object vertex path so the shadow pass inherits the
+    // same world, terrain, skinning, and morph transforms as visible geometry.
+    // Color writes are disabled; PSMain still preserves alpha-mask cutouts.
+    m_directionalShadowPipeline =
+        buildMaterialPipeline(false, false, false, PortalStencilMode::None,
+            false, "directional shadow caster");
+    m_directionalShadowDoubleSidedPipeline =
+        buildMaterialPipeline(true, false, false, PortalStencilMode::None,
+            false, "double-sided directional shadow caster");
 
     m_objectWirePipeline =
         buildMaterialPipeline(false, false, true, PortalStencilMode::None,
@@ -1049,7 +1214,7 @@ void Scene::BuildObjectPipeline()
             .SetInputLayout(layout, 10)
             .SetPrimitiveTopology(
                 Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
-            .SetRenderTargetFormat(28, 20)
+            .SetRenderTargetFormat(10, 20)
             .Build();
         if (!pipeline)
             throw std::runtime_error("Failed to build spatial debug pipeline: " +
@@ -1099,7 +1264,7 @@ void Scene::BuildObjectPipeline()
         .SetDepthFunc(3)                       // D3D12_COMPARISON_FUNC_LESS_EQUAL
         .SetInputLayout(layout, 10)
         .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
-        .SetRenderTargetFormat(28, 20)
+        .SetRenderTargetFormat(10, 20)
         .Build();
     if (!m_objectOutlinePipeline)
         throw std::runtime_error("Failed to build object outline pipeline: " + outlineBuilder->GetLastError());
@@ -1120,7 +1285,7 @@ void Scene::BuildObjectPipeline()
         .SetDepthFunc(3)
         .SetInputLayout(terrainLayout, 4)
         .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
-        .SetRenderTargetFormat(28, 20)
+        .SetRenderTargetFormat(10, 20)
         .Build();
     if (!terrainOutline)
         throw std::runtime_error("Failed to build terrain outline pipeline: " +
@@ -1155,7 +1320,8 @@ void Scene::PrepareRenderFrame()
     m_frameLightCount = m_realtimeLightingPipeline.CollectLights(
         *this,
         static_cast<Engine::Model::LightData*>(m_lightDataMapped),
-        kMaxLights);
+        std::min(kMaxLights,
+            m_distanceLightingSettings.maximumRealtimeLights));
     m_lightDataBuffer->FlushMappedWrites();
 
     // Nonlinear mesh results depend on authored geometry and active warp
@@ -1494,7 +1660,7 @@ void Scene::PrepareRenderFrame()
 
 void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     Engine::Components::Camera* cameraOverride, bool includeEditorVisuals,
-    uint32_t viewportWidth, uint32_t viewportHeight)
+    uint32_t viewportWidth, uint32_t viewportHeight, bool shadowOnly)
 {
     m_lastObjectDataUploadBytes = 0;
     m_lastOcclusionCulledCount = 0;
@@ -1507,6 +1673,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     {
         return;
     }
+
+    if (!shadowOnly)
+        Engine::Graphics::SetPostProcessSettings({
+            std::exp2(std::clamp(settings.outputExposure, -16.f, 16.f)),
+            static_cast<uint32_t>(settings.toneMapping) });
 
     if (!m_renderFramePrepared)
         PrepareRenderFrame();
@@ -1702,18 +1873,307 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     // Light data is view-chart-specific. Rebuild it for every view so an
     // inside-volume game camera cannot leave source-chart lights bound when
     // the editor view subsequently renders the embedded chart (or vice versa).
+    Engine::Model::RealtimeShadowSelection shadowSelection{};
     m_frameLightCount = m_realtimeLightingPipeline.CollectLights(*this,
-        static_cast<Engine::Model::LightData*>(m_lightDataMapped), kMaxLights,
-        !cameraUsesSourceWarpChart);
+        static_cast<Engine::Model::LightData*>(m_lightDataMapped),
+        std::min(kMaxLights,
+            m_distanceLightingSettings.maximumRealtimeLights),
+        !cameraUsesSourceWarpChart, &m_realtimeShadowSettings,
+        &shadowSelection);
+
+    const uint32_t clusterTileSize = std::clamp(
+        m_distanceLightingSettings.clusterTileSize, 16u, 256u);
+    const uint32_t clusterTilesX = viewportWidth > 0u
+        ? (viewportWidth + clusterTileSize - 1u) / clusterTileSize : 0u;
+    const uint32_t clusterTilesY = viewportHeight > 0u
+        ? (viewportHeight + clusterTileSize - 1u) / clusterTileSize : 0u;
+    const uint32_t clusterDepthSlices = std::clamp(
+        m_distanceLightingSettings.clusterDepthSlices, 1u, 64u);
+    const uint32_t maximumLightsPerCluster = std::clamp(
+        m_distanceLightingSettings.maximumLightsPerCluster, 1u,
+        Engine::Model::MaxRealtimeLights);
+    const uint64_t clusterCount64 = static_cast<uint64_t>(clusterTilesX) *
+        clusterTilesY * clusterDepthSlices;
+    const bool clusteredLightingEnabled = !shadowOnly &&
+        m_distanceLightingSettings.clusteredLighting &&
+        m_frameLightCount > 0u && clusterCount64 > 0u &&
+        clusterCount64 <= std::numeric_limits<uint32_t>::max();
+    const float clusterNear = std::max(0.001f, cam->nearPlane);
+    const float clusterFar = std::max(clusterNear + 0.001f, cam->farPlane);
+    const float clusterLogScale = static_cast<float>(clusterDepthSlices) /
+        std::max(std::log2(clusterFar / clusterNear), 0.0001f);
+    if (clusteredLightingEnabled)
+    {
+        const uint32_t clusterCount = static_cast<uint32_t>(clusterCount64);
+        const uint64_t indexCount64 = static_cast<uint64_t>(clusterCount) *
+            maximumLightsPerCluster;
+        if (indexCount64 > std::numeric_limits<uint32_t>::max())
+            throw std::runtime_error("Forward+ cluster index capacity overflow");
+        const uint32_t indexCount = static_cast<uint32_t>(indexCount64);
+        auto* bufferFactory = m_graphicsProvider->GetBufferFactory();
+        const auto ensureClusterBuffer = [&](std::unique_ptr<IGraphicsBuffer>& buffer,
+            void*& mapped, uint32_t& capacity, uint32_t required,
+            uint32_t stride, const char* description)
+        {
+            if (capacity >= required && buffer && mapped)
+                return;
+            const uint32_t expanded = ExpandedCapacity(capacity, required);
+            auto replacement = bufferFactory->CreateBuffer(
+                Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
+                Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+                static_cast<uint64_t>(expanded) * stride, nullptr, stride);
+            void* replacementMapped = replacement ? replacement->Map() : nullptr;
+            if (!replacementMapped)
+                throw std::runtime_error(std::string("Failed to allocate ") +
+                    description);
+            if (buffer && mapped)
+                buffer->Unmap();
+            if (buffer)
+                m_retiredRenderBuffers.push_back(std::move(buffer));
+            buffer = std::move(replacement);
+            mapped = replacementMapped;
+            capacity = expanded;
+        };
+        ensureClusterBuffer(m_clusterHeaderBuffer, m_clusterHeaderMapped,
+            m_clusterHeaderCapacity, clusterCount, sizeof(glm::uvec2),
+            "Forward+ cluster headers");
+        ensureClusterBuffer(m_clusterLightIndexBuffer, m_clusterLightIndexMapped,
+            m_clusterLightIndexCapacity, indexCount, sizeof(uint32_t),
+            "Forward+ cluster light indices");
+
+        std::vector<glm::uvec2> headers(clusterCount);
+        std::vector<uint32_t> indices(indexCount, 0u);
+        for (uint32_t cluster = 0; cluster < clusterCount; ++cluster)
+            headers[cluster].x = cluster * maximumLightsPerCluster;
+        const auto depthSlice = [&](float depth)
+        {
+            const float normalized = std::log2(std::max(depth, clusterNear) /
+                clusterNear) * clusterLogScale;
+            return std::min(clusterDepthSlices - 1u,
+                static_cast<uint32_t>(std::max(0.f, normalized)));
+        };
+        const auto appendLight = [&](uint32_t cluster, uint32_t light)
+        {
+            glm::uvec2& header = headers[cluster];
+            if (header.y < maximumLightsPerCluster)
+                indices[header.x + header.y++] = light;
+        };
+        const auto* lights = static_cast<const Engine::Model::LightData*>(
+            m_lightDataMapped);
+        for (uint32_t lightIndex = 0; lightIndex < m_frameLightCount; ++lightIndex)
+        {
+            const auto& light = lights[lightIndex];
+            if (light.params.y > 0.5f)
+            {
+                for (uint32_t cluster = 0; cluster < clusterCount; ++cluster)
+                    appendLight(cluster, lightIndex);
+                continue;
+            }
+            const glm::vec4 viewPosition = view * glm::vec4(
+                glm::vec3(light.positionRange), 1.f);
+            const float range = std::max(0.f, light.positionRange.w);
+            if (viewPosition.z + range < clusterNear ||
+                viewPosition.z - range > clusterFar)
+                continue;
+            const glm::vec4 clip = proj * viewPosition;
+            if (std::abs(clip.w) < 0.0001f)
+                continue;
+            const glm::vec2 ndc = glm::vec2(clip) / clip.w;
+            const float radiusPixels = std::abs(proj[1][1]) * range /
+                std::max(viewPosition.z, clusterNear) *
+                static_cast<float>(viewportHeight) * 0.5f;
+            const float centerX = (ndc.x * 0.5f + 0.5f) * viewportWidth;
+            const float centerY = (1.f - (ndc.y * 0.5f + 0.5f)) * viewportHeight;
+            const int32_t minTileX = std::clamp(static_cast<int32_t>(
+                std::floor((centerX - radiusPixels) / clusterTileSize)),
+                0, static_cast<int32_t>(clusterTilesX) - 1);
+            const int32_t maxTileX = std::clamp(static_cast<int32_t>(
+                std::floor((centerX + radiusPixels) / clusterTileSize)),
+                0, static_cast<int32_t>(clusterTilesX) - 1);
+            const int32_t minTileY = std::clamp(static_cast<int32_t>(
+                std::floor((centerY - radiusPixels) / clusterTileSize)),
+                0, static_cast<int32_t>(clusterTilesY) - 1);
+            const int32_t maxTileY = std::clamp(static_cast<int32_t>(
+                std::floor((centerY + radiusPixels) / clusterTileSize)),
+                0, static_cast<int32_t>(clusterTilesY) - 1);
+            const uint32_t minSlice = depthSlice(viewPosition.z - range);
+            const uint32_t maxSlice = depthSlice(viewPosition.z + range);
+            for (uint32_t slice = minSlice; slice <= maxSlice; ++slice)
+            for (int32_t tileY = minTileY; tileY <= maxTileY; ++tileY)
+            for (int32_t tileX = minTileX; tileX <= maxTileX; ++tileX)
+            {
+                const uint32_t cluster = slice * clusterTilesX * clusterTilesY +
+                    static_cast<uint32_t>(tileY) * clusterTilesX +
+                    static_cast<uint32_t>(tileX);
+                appendLight(cluster, lightIndex);
+            }
+        }
+        std::memcpy(m_clusterHeaderMapped, headers.data(),
+            headers.size() * sizeof(glm::uvec2));
+        std::memcpy(m_clusterLightIndexMapped, indices.data(),
+            indices.size() * sizeof(uint32_t));
+        m_clusterHeaderBuffer->FlushMappedWrites(0,
+            headers.size() * sizeof(glm::uvec2));
+        m_clusterLightIndexBuffer->FlushMappedWrites(0,
+            indices.size() * sizeof(uint32_t));
+    }
+
+    if (shadowSelection.valid)
+    {
+        const uint32_t resolution = std::clamp(static_cast<uint32_t>(
+            static_cast<float>(m_realtimeShadowSettings.directionalResolution) *
+            shadowSelection.resolutionScale), 256u, 8192u);
+        if (!m_directionalShadowMap ||
+            m_directionalShadowResolution != resolution)
+        {
+            auto* textureFactory = m_graphicsProvider->GetTextureFactory();
+            m_directionalShadowMap = textureFactory
+                ? textureFactory->CreateDepthTexture2D(resolution, resolution)
+                : nullptr;
+            m_directionalShadowResolution = m_directionalShadowMap
+                ? resolution : 0u;
+        }
+        if (!m_directionalShadowMap)
+        {
+            auto* lights = static_cast<Engine::Model::LightData*>(
+                m_lightDataMapped);
+            lights[shadowSelection.lightIndex].params.z = -1.f;
+            lights[shadowSelection.lightIndex].params.w = 0.f;
+            shadowSelection.valid = false;
+        }
+    }
     m_lightDataBuffer->FlushMappedWrites();
         const bool wireframeMode =
             settings.renderMode == Engine::Model::SceneRenderMode::Wireframe;
         const bool forceUnlitMode =
             settings.renderMode == Engine::Model::SceneRenderMode::Unlit;
 
+    struct ShadowCascadeSet
+    {
+        std::array<glm::mat4, 4> viewProjections{
+            glm::mat4(1.f), glm::mat4(1.f), glm::mat4(1.f), glm::mat4(1.f) };
+        glm::vec4 splits { 0.f };
+        glm::vec4 data { 0.f };
+        glm::vec4 cameraData { 0.f };
+        uint32_t count = 1u;
+    };
+    const auto buildShadowCascades = [&](const glm::mat4& cascadeView,
+        uint32_t atlasResolution,
+        uint32_t requestedCascadeCount)
+    {
+        ShadowCascadeSet result{};
+        const float shadowDistance = std::clamp(
+            m_realtimeShadowSettings.directionalDistance, 1.f, 100000.f);
+        result.count = std::clamp(requestedCascadeCount, 1u, 4u);
+        const float cameraNear = std::max(0.001f, cam->nearPlane);
+        const float cameraFar = std::max(cameraNear + 0.001f, cam->farPlane);
+        const float cascadeFar = std::min(cameraFar,
+            std::max(cameraNear + 0.001f, shadowDistance));
+        const float splitLambda = std::clamp(
+            m_realtimeShadowSettings.cascadeSplitLambda, 0.f, 1.f);
+        for (uint32_t cascade = 0; cascade < result.count; ++cascade)
+        {
+            const float fraction = static_cast<float>(cascade + 1u) /
+                static_cast<float>(result.count);
+            const float logarithmic = cameraNear * std::pow(
+                cascadeFar / cameraNear, fraction);
+            const float uniform = cameraNear +
+                (cascadeFar - cameraNear) * fraction;
+            result.splits[cascade] = glm::mix(
+                uniform, logarithmic, splitLambda);
+        }
+        for (uint32_t cascade = result.count; cascade < 4u; ++cascade)
+            result.splits[cascade] = cascadeFar;
+
+        const glm::vec3 directionToLight = glm::normalize(
+            shadowSelection.directionToLight);
+        const glm::vec3 up = std::abs(directionToLight.y) > 0.98f
+            ? glm::vec3(0.f, 0.f, 1.f) : glm::vec3(0.f, 1.f, 0.f);
+        const glm::mat4 lightOrientation = glm::lookAtLH(
+            glm::vec3(0.f), -directionToLight, up);
+        const glm::mat4 inverseViewProjection = glm::inverse(
+            proj * cascadeView);
+        std::array<glm::vec3, 4> frustumNear{};
+        std::array<glm::vec3, 4> frustumFar{};
+        for (uint32_t corner = 0; corner < 4u; ++corner)
+        {
+            const float x = (corner & 1u) ? 1.f : -1.f;
+            const float y = (corner & 2u) ? 1.f : -1.f;
+            glm::vec4 nearPoint = inverseViewProjection *
+                glm::vec4(x, y, 0.f, 1.f);
+            glm::vec4 farPoint = inverseViewProjection *
+                glm::vec4(x, y, 1.f, 1.f);
+            frustumNear[corner] = glm::vec3(nearPoint) / nearPoint.w;
+            frustumFar[corner] = glm::vec3(farPoint) / farPoint.w;
+        }
+
+        float previousSplit = cameraNear;
+        const uint32_t tileResolution = result.count > 1u
+            ? std::max(1u, atlasResolution / 2u) : atlasResolution;
+        for (uint32_t cascade = 0; cascade < result.count; ++cascade)
+        {
+            const float split = result.splits[cascade];
+            const float nearFactor = std::clamp(
+                (previousSplit - cameraNear) / (cameraFar - cameraNear), 0.f, 1.f);
+            const float farFactor = std::clamp(
+                (split - cameraNear) / (cameraFar - cameraNear), 0.f, 1.f);
+            std::array<glm::vec3, 8> corners{};
+            glm::vec3 center(0.f);
+            for (uint32_t corner = 0; corner < 4u; ++corner)
+            {
+                const glm::vec3 ray = frustumFar[corner] - frustumNear[corner];
+                corners[corner] = frustumNear[corner] + ray * nearFactor;
+                corners[corner + 4u] = frustumNear[corner] + ray * farFactor;
+                center += corners[corner] + corners[corner + 4u];
+            }
+            center *= 1.f / 8.f;
+            float radius = 0.001f;
+            for (const glm::vec3& corner : corners)
+                radius = std::max(radius, glm::length(corner - center));
+            // Quantizing the radius prevents tiny floating-point changes from
+            // resizing the projection as the camera moves.
+            radius = std::ceil(radius * 16.f) / 16.f;
+            glm::vec3 snappedCenter = glm::vec3(
+                lightOrientation * glm::vec4(center, 1.f));
+            const float worldUnitsPerTexel = (radius * 2.f) /
+                static_cast<float>(tileResolution);
+            snappedCenter.x = std::round(snappedCenter.x / worldUnitsPerTexel) *
+                worldUnitsPerTexel;
+            snappedCenter.y = std::round(snappedCenter.y / worldUnitsPerTexel) *
+                worldUnitsPerTexel;
+            const glm::vec3 stabilizedCenter = glm::vec3(
+                glm::inverse(lightOrientation) * glm::vec4(snappedCenter, 1.f));
+            const glm::vec3 lightEye = stabilizedCenter +
+                directionToLight * shadowDistance;
+            const glm::mat4 lightView = glm::lookAtLH(
+                lightEye, stabilizedCenter, up);
+            const glm::mat4 lightProjection = glm::orthoLH_ZO(
+                -radius, radius, -radius, radius,
+                0.1f, shadowDistance * 2.f);
+            result.viewProjections[cascade] = lightProjection * lightView;
+            previousSplit = split;
+        }
+        result.data = {
+            static_cast<float>(result.count), result.count > 1u ? 0.5f : 1.f,
+            std::clamp(m_realtimeShadowSettings.cascadeTransitionFraction,
+                0.f, 0.3f), result.splits[result.count - 1u] };
+        result.cameraData = glm::vec4(glm::normalize(glm::vec3(
+            glm::inverse(cascadeView)[2])), cameraNear);
+        return result;
+    };
+
+    ShadowCascadeSet mainShadowCascades{};
+    if (shadowSelection.valid)
+        mainShadowCascades = buildShadowCascades(view,
+            m_directionalShadowResolution,
+            m_realtimeShadowSettings.directionalCascadeCount);
+    const auto& shadowViewProjections = mainShadowCascades.viewProjections;
+    const glm::vec4 shadowCascadeSplits = mainShadowCascades.splits;
+    const uint32_t shadowCascadeCount = mainShadowCascades.count;
+
     const Engine::Components::Texture* skybox = ResolveSkyboxTexture();
     UpdateEnvironmentLighting(skybox);
-    if (skybox && skybox->GetGraphicsTexture() && m_skyboxPipeline)
+    if (!shadowOnly && skybox && skybox->GetGraphicsTexture() && m_skyboxPipeline)
     {
         SkyboxCBData skyboxData{};
         // A skybox represents direction only. Excluding camera translation
@@ -1933,7 +2393,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         Engine::Graphics::IGraphicsBuffer* morphDeltaBuffer = nullptr;
         Engine::Graphics::IGraphicsBuffer* morphWeightBuffer = nullptr;
         Engine::Graphics::IPipelineState* pipeline = nullptr;
-        std::array<const Engine::Graphics::IGraphicsTexture*, 7> textures{};
+        std::array<const Engine::Graphics::IGraphicsTexture*, 9> textures{};
         UINT64 constantBufferOffset = 0;
         DrawCBData drawData{};
         ObjectGPUData objectData{};
@@ -1944,6 +2404,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         bool preview = false;
         bool terrain = false;
         bool blended = false;
+        bool castsShadow = false;
+        bool doubleSided = false;
         bool occlusionCandidate = false;
         uint64_t occlusionId = 0;
     };
@@ -1961,11 +2423,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         const bool belongsToPreview = renderItem->belongsToPreview;
         const bool isPreview = belongsToPreview;
         const Engine::Model::DistanceLightingBand* lightingBand = nullptr;
+        bool beyondLightingDistance = false;
         if (m_distanceLightingSettings.enabled &&
             !m_distanceLightingSettings.bands.empty())
         {
             const float distance = std::sqrt(
                 sortedItem.lightingDistanceSquared);
+            beyondLightingDistance = distance >
+                m_distanceLightingSettings.maximumDistance;
             for (const auto& candidate : m_distanceLightingSettings.bands)
             {
                 lightingBand = &candidate;
@@ -1973,21 +2438,27 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     break;
             }
         }
-        const bool allowNormalMapping = !lightingBand ||
-            lightingBand->normalMapping;
-        const bool allowParallaxMapping = !lightingBand ||
-            lightingBand->parallaxMapping;
-        const bool allowEnvironmentDiffuse = !lightingBand ||
-            lightingBand->environmentDiffuse;
-        const bool allowReflections = !lightingBand ||
-            lightingBand->reflections;
+        const bool allowNormalMapping = !beyondLightingDistance &&
+            (!lightingBand || lightingBand->normalMapping);
+        const bool allowParallaxMapping = !beyondLightingDistance &&
+            (!lightingBand || lightingBand->parallaxMapping);
+        const bool allowEnvironmentDiffuse = !beyondLightingDistance &&
+            (!lightingBand || lightingBand->environmentDiffuse);
+        const bool allowReflections = !beyondLightingDistance &&
+            (!lightingBand || lightingBand->reflections);
+        const bool allowRealtimeShadows = !beyondLightingDistance &&
+            (!lightingBand || lightingBand->realtimeShadows);
         PreparedDraw preparedDraw{};
         preparedDraw.morphDeltaBuffer = m_emptyMorphDeltaBuffer.get();
         preparedDraw.morphWeightBuffer = m_emptyMorphWeightBuffer.get();
+        preparedDraw.textures[8] = m_brdfIntegrationLut.get();
         preparedDraw.object = obj;
         preparedDraw.preview = isPreview;
         preparedDraw.terrain = mesh && mesh->UsesTerrainVertexFormat();
         preparedDraw.blended = sortedItem.blended;
+        preparedDraw.castsShadow = shadowSelection.valid && mesh && !sprite &&
+            !sortedItem.blended && !belongsToPreview &&
+            (!mat || mat->castsShadows);
         preparedDraw.occlusionCandidate = occlusionQueriesEnabled &&
             !wireframeMode &&
             !sortedItem.blended && !sprite &&
@@ -2019,6 +2490,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         UINT64 offset = static_cast<UINT64>(slot) * kCBStride;
 
         ObjectGPUData objectData{};
+        objectData.lightingClusterParams = glm::vec4(
+            static_cast<float>(clusterTileSize),
+            static_cast<float>(clusterTilesX),
+            static_cast<float>(clusterTilesY),
+            static_cast<float>(clusterDepthSlices));
+        objectData.lightingCameraData = glm::vec4(glm::normalize(glm::vec3(
+            glm::inverse(view)[2])), clusterLogScale);
+        objectData.shadowCameraData.w = clusterNear;
         if (settings.hdriLightingEnabled && skybox &&
             (allowEnvironmentDiffuse || allowReflections))
         {
@@ -2161,6 +2640,29 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             objectData.viewPositionAlphaCutoff = glm::vec4(
                 cameraPosition, 0.5f);
         }
+        preparedDraw.doubleSided = doubleSided;
+        if (shadowSelection.valid)
+        {
+            std::copy(shadowViewProjections.begin(),
+                shadowViewProjections.end(), objectData.shadowViewProjections);
+            objectData.shadowParams = {
+                shadowSelection.depthBias,
+                shadowSelection.normalBias,
+                allowRealtimeShadows ? 1.f : 0.f,
+                static_cast<float>(std::min(
+                    std::min(m_realtimeShadowSettings.pcfRadius,
+                        lightingBand
+                            ? lightingBand->maximumShadowPcfRadius : 4u),
+                    static_cast<uint32_t>(std::round(4.f *
+                        shadowSelection.filterScale)))) };
+            objectData.shadowCascadeSplits = shadowCascadeSplits;
+            objectData.shadowCascadeData = mainShadowCascades.data;
+            objectData.shadowCascadeData.w *= lightingBand
+                ? std::clamp(lightingBand->shadowDistanceScale, 0.f, 1.f)
+                : 1.f;
+            objectData.shadowCameraData = mainShadowCascades.cameraData;
+            preparedDraw.textures[7] = m_directionalShadowMap.get();
+        }
         if (isPreview)
             objectData.baseColor.a *= 0.45f;
             if (forceUnlitMode)
@@ -2173,11 +2675,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 bakedLighting->lightDirection, 1.f);
         }
 
-        const uint32_t qualityLightCount = lightingBand
-            ? std::min(m_frameLightCount, lightingBand->maxRealtimeLights)
-            : m_frameLightCount;
+        const uint32_t qualityLightCount = beyondLightingDistance ? 0u :
+            (lightingBand
+                ? std::min(m_frameLightCount, lightingBand->maxRealtimeLights)
+                : m_frameLightCount);
         const DrawCBData drawData{ slot,
-            forceUnlitMode ? 0u : qualityLightCount, 0u, 0u };
+            forceUnlitMode ? 0u : qualityLightCount,
+            clusteredLightingEnabled ? kClusteredLightingFlag : 0u, 0u };
         preparedDraw.drawData = drawData;
         preparedDraw.objectData = objectData;
         preparedDraw.traversalChartPortal = renderItem->traversalChartPortal;
@@ -2249,6 +2753,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         context->SetStructuredBuffer(8, m_boneDataBuffer.get());
         context->SetStructuredBuffer(10, m_emptyMorphDeltaBuffer.get());
         context->SetStructuredBuffer(11, m_emptyMorphWeightBuffer.get());
+        if (clusteredLightingEnabled)
+        {
+            context->SetStructuredBuffer(14, m_clusterHeaderBuffer.get());
+            context->SetStructuredBuffer(15, m_clusterLightIndexBuffer.get());
+        }
     }
 
     const auto isSpatialManipulatorCarrierDraw = [&](const PreparedDraw& draw)
@@ -2283,6 +2792,241 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         else
             context->DrawInstanced(draw.vertexCount, 1, 0, 0);
     };
+
+    // Render the selected realtime directional light into its depth map during
+    // the explicit pre-view phase. This keeps Vulkan render passes unnested and
+    // lets DX12 bind a depth-only target without reconstructing prior OM state.
+    if (shadowOnly && shadowSelection.valid && m_directionalShadowPipeline &&
+        context->BeginDepthOnlyPass(m_directionalShadowMap.get(), 1.f))
+    {
+        for (uint32_t cascade = 0; cascade < shadowCascadeCount; ++cascade)
+        {
+            for (const PreparedDraw& draw : preparedDraws)
+            {
+                const uint32_t recordIndex = cascade * m_objectCapacity +
+                    draw.drawData.objectIndex;
+                ObjectGPUData shadowData = draw.objectData;
+                shadowData.viewProjection = shadowViewProjections[cascade];
+                shadowData.materialParams.w = static_cast<float>(
+                    static_cast<uint32_t>(shadowData.materialParams.w) &
+                    (1u | 32u));
+                shadowData.ambientUnlit.w = 1.f;
+                shadowData.environmentParams = glm::vec4(0.f);
+                std::memcpy(static_cast<uint8_t*>(m_shadowObjectDataMapped) +
+                    static_cast<size_t>(recordIndex) * sizeof(ObjectGPUData),
+                    &shadowData, sizeof(ObjectGPUData));
+                DrawCBData shadowDraw = draw.drawData;
+                shadowDraw.objectIndex = recordIndex;
+                shadowDraw.lightCount = 0;
+                shadowDraw.flags &= ~kClusteredLightingFlag;
+                std::memcpy(static_cast<uint8_t*>(m_shadowCBMapped) +
+                    static_cast<uint64_t>(recordIndex) * kCBStride,
+                    &shadowDraw, sizeof(shadowDraw));
+            }
+        }
+        const uint64_t shadowBytes = static_cast<uint64_t>(shadowCascadeCount) *
+            m_objectCapacity * sizeof(ObjectGPUData);
+        m_shadowObjectDataBuffer->FlushMappedWrites(0, shadowBytes);
+        context->SetStructuredBuffer(6, m_lightDataBuffer.get());
+        context->SetStructuredBuffer(7, m_shadowObjectDataBuffer.get());
+        context->SetStructuredBuffer(8, m_boneDataBuffer.get());
+
+        const uint32_t tileResolution = shadowCascadeCount > 1u
+            ? m_directionalShadowResolution / 2u
+            : m_directionalShadowResolution;
+        for (uint32_t cascade = 0; cascade < shadowCascadeCount; ++cascade)
+        {
+            const uint32_t tileX = shadowCascadeCount > 1u
+                ? cascade & 1u : 0u;
+            const uint32_t tileY = shadowCascadeCount > 1u
+                ? cascade >> 1u : 0u;
+            context->SetViewport({
+                static_cast<float>(tileX * tileResolution),
+                static_cast<float>(tileY * tileResolution),
+                static_cast<float>(tileResolution),
+                static_cast<float>(tileResolution), 0.f, 1.f });
+            context->SetScissorRect({
+                static_cast<int32_t>(tileX * tileResolution),
+                static_cast<int32_t>(tileY * tileResolution),
+                static_cast<int32_t>((tileX + 1u) * tileResolution),
+                static_cast<int32_t>((tileY + 1u) * tileResolution) });
+            for (const PreparedDraw& draw : preparedDraws)
+            {
+                if (!draw.castsShadow || !draw.vertexBuffer ||
+                    isSpatialManipulatorCarrierDraw(draw))
+                    continue;
+                Engine::Graphics::IPipelineState* shadowPipeline =
+                    draw.doubleSided
+                        ? m_directionalShadowDoubleSidedPipeline.get()
+                        : m_directionalShadowPipeline.get();
+                context->SetPipeline(geometryPipeline(draw, shadowPipeline));
+                const uint32_t recordIndex = cascade * m_objectCapacity +
+                    draw.drawData.objectIndex;
+                context->SetConstantBuffer(0, m_shadowConstantBuffer.get(),
+                    static_cast<uint64_t>(recordIndex) * kCBStride);
+                for (uint32_t textureSlot = 0;
+                    textureSlot < draw.textures.size(); ++textureSlot)
+                {
+                    if (textureSlot != 7u)
+                        context->SetTexture(textureSlot, draw.textures[textureSlot]);
+                }
+                submitGeometry(draw);
+            }
+        }
+        context->EndDepthOnlyPass();
+
+    }
+
+    if (shadowOnly && shadowSelection.valid &&
+        m_realtimeShadowSettings.portalPolicy !=
+            Engine::Model::PortalShadowPolicy::ReuseMain)
+    {
+        auto* bufferFactory = m_graphicsProvider->GetBufferFactory();
+        auto* textureFactory = m_graphicsProvider->GetTextureFactory();
+        const uint32_t portalResolution = std::clamp(static_cast<uint32_t>(
+            static_cast<float>(m_realtimeShadowSettings.portalAtlasResolution) *
+            shadowSelection.resolutionScale), 256u, 4096u);
+        const uint32_t portalCascadeCount = std::clamp(
+            m_realtimeShadowSettings.portalCascadeCount, 1u, 4u);
+        for (PortalShadowCacheEntry& entry : m_portalShadowCache)
+        {
+            if (entry.ownerCamera != cam || !entry.targetChart ||
+                !entry.selected)
+                continue;
+            if (!entry.atlas || entry.atlasResolution != portalResolution)
+            {
+                if (entry.atlas)
+                    m_retiredShadowTextures.push_back(std::move(entry.atlas));
+                entry.atlas = textureFactory
+                    ? textureFactory->CreateDepthTexture2D(
+                        portalResolution, portalResolution)
+                    : nullptr;
+                entry.atlasResolution = entry.atlas ? portalResolution : 0u;
+                entry.rendered = false;
+            }
+            if (entry.bufferCapacity != m_objectCapacity)
+            {
+                if (entry.constantBuffer && entry.constantMapped)
+                    entry.constantBuffer->Unmap();
+                if (entry.objectBuffer && entry.objectMapped)
+                    entry.objectBuffer->Unmap();
+                if (entry.constantBuffer)
+                    m_retiredRenderBuffers.push_back(
+                        std::move(entry.constantBuffer));
+                if (entry.objectBuffer)
+                    m_retiredRenderBuffers.push_back(
+                        std::move(entry.objectBuffer));
+                entry.constantBuffer = bufferFactory->CreateBuffer(
+                    Engine::Graphics::IGraphicsBuffer::Usage::ConstantBuffer,
+                    Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+                    static_cast<uint64_t>(m_objectCapacity) * 4u * kCBStride,
+                    nullptr, sizeof(DrawCBData));
+                entry.objectBuffer = bufferFactory->CreateBuffer(
+                    Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
+                    Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+                    static_cast<uint64_t>(m_objectCapacity) * 4u *
+                        sizeof(ObjectGPUData), nullptr, sizeof(ObjectGPUData));
+                entry.constantMapped = entry.constantBuffer
+                    ? entry.constantBuffer->Map() : nullptr;
+                entry.objectMapped = entry.objectBuffer
+                    ? entry.objectBuffer->Map() : nullptr;
+                entry.bufferCapacity = entry.constantMapped && entry.objectMapped
+                    ? m_objectCapacity : 0u;
+                entry.rendered = false;
+            }
+            if (!entry.atlas || !entry.constantMapped || !entry.objectMapped)
+                continue;
+
+            const ShadowCascadeSet portalCascades = buildShadowCascades(
+                entry.view, portalResolution,
+                portalCascadeCount);
+            entry.viewProjections = portalCascades.viewProjections;
+            entry.cascadeSplits = portalCascades.splits;
+            entry.cascadeData = portalCascades.data;
+            entry.cameraData = portalCascades.cameraData;
+            for (uint32_t cascade = 0; cascade < portalCascades.count; ++cascade)
+            {
+                for (const PreparedDraw& draw : preparedDraws)
+                {
+                    const uint32_t recordIndex = cascade * m_objectCapacity +
+                        draw.drawData.objectIndex;
+                    ObjectGPUData shadowData = draw.objectData;
+                    shadowData.viewProjection =
+                        portalCascades.viewProjections[cascade];
+                    shadowData.materialParams.w = static_cast<float>(
+                        static_cast<uint32_t>(shadowData.materialParams.w) &
+                        (1u | 32u));
+                    shadowData.ambientUnlit.w = 1.f;
+                    shadowData.environmentParams = glm::vec4(0.f);
+                    std::memcpy(static_cast<uint8_t*>(entry.objectMapped) +
+                        static_cast<size_t>(recordIndex) * sizeof(ObjectGPUData),
+                        &shadowData, sizeof(shadowData));
+                    DrawCBData shadowDraw = draw.drawData;
+                    shadowDraw.objectIndex = recordIndex;
+                    shadowDraw.lightCount = 0;
+                    shadowDraw.flags &= ~kClusteredLightingFlag;
+                    std::memcpy(static_cast<uint8_t*>(entry.constantMapped) +
+                        static_cast<uint64_t>(recordIndex) * kCBStride,
+                        &shadowDraw, sizeof(shadowDraw));
+                }
+            }
+            entry.objectBuffer->FlushMappedWrites(0,
+                static_cast<uint64_t>(portalCascades.count) *
+                    m_objectCapacity * sizeof(ObjectGPUData));
+            if (!context->BeginDepthOnlyPass(entry.atlas.get(), 1.f))
+                continue;
+            context->SetStructuredBuffer(6, m_lightDataBuffer.get());
+            context->SetStructuredBuffer(7, entry.objectBuffer.get());
+            context->SetStructuredBuffer(8, m_boneDataBuffer.get());
+            const uint32_t tileResolution = portalCascades.count > 1u
+                ? portalResolution / 2u : portalResolution;
+            for (uint32_t cascade = 0; cascade < portalCascades.count; ++cascade)
+            {
+                const uint32_t tileX = portalCascades.count > 1u
+                    ? cascade & 1u : 0u;
+                const uint32_t tileY = portalCascades.count > 1u
+                    ? cascade >> 1u : 0u;
+                context->SetViewport({ static_cast<float>(tileX * tileResolution),
+                    static_cast<float>(tileY * tileResolution),
+                    static_cast<float>(tileResolution),
+                    static_cast<float>(tileResolution), 0.f, 1.f });
+                context->SetScissorRect({
+                    static_cast<int32_t>(tileX * tileResolution),
+                    static_cast<int32_t>(tileY * tileResolution),
+                    static_cast<int32_t>((tileX + 1u) * tileResolution),
+                    static_cast<int32_t>((tileY + 1u) * tileResolution) });
+                for (const PreparedDraw& draw : preparedDraws)
+                {
+                    if (!draw.castsShadow || !draw.vertexBuffer ||
+                        isSpatialManipulatorCarrierDraw(draw) ||
+                        !Engine::Rendering::Portal::
+                            IsTraversalInstanceVisibleInConnectedChart(
+                                draw.traversalChartPortal, entry.targetChart))
+                        continue;
+                    Engine::Graphics::IPipelineState* shadowPipeline =
+                        draw.doubleSided
+                            ? m_directionalShadowDoubleSidedPipeline.get()
+                            : m_directionalShadowPipeline.get();
+                    context->SetPipeline(geometryPipeline(draw, shadowPipeline));
+                    const uint32_t recordIndex = cascade * m_objectCapacity +
+                        draw.drawData.objectIndex;
+                    context->SetConstantBuffer(0, entry.constantBuffer.get(),
+                        static_cast<uint64_t>(recordIndex) * kCBStride);
+                    for (uint32_t textureSlot = 0;
+                        textureSlot < draw.textures.size(); ++textureSlot)
+                        if (textureSlot != 7u)
+                            context->SetTexture(
+                                textureSlot, draw.textures[textureSlot]);
+                    submitGeometry(draw);
+                }
+            }
+            context->EndDepthOnlyPass();
+            entry.rendered = true;
+        }
+    }
+
+    if (shadowOnly)
+        return;
 
     std::optional<Engine::Graphics::GpuTimingStage> activeGpuStage;
     const auto switchGpuStage = [&](Engine::Graphics::GpuTimingStage stage)
@@ -2778,6 +3522,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         // at zero rather than after the ordinary-view capacity.
         uint32_t objectDataSlotBase = 0;
         uint64_t skyboxConstantBufferOffset = 0;
+        uint64_t shadowKey = 0;
+        float screenArea = 0.f;
+        size_t shadowCacheIndex = std::numeric_limits<size_t>::max();
     };
     std::vector<PortalViewJob> portalViewJobs;
     const uint32_t portalDepthLimit = static_cast<uint32_t>(
@@ -3010,6 +3757,29 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             job.depth = depth;
             job.rootStencilBase = rootStencilBase;
             job.parentJobIndex = node.parentJobIndex;
+            job.shadowKey = 1469598103934665603ull;
+            HashRevision(job.shadowKey, static_cast<uint64_t>(
+                reinterpret_cast<uintptr_t>(cam)));
+            for (const auto& pathEdge : node.path)
+            {
+                HashRevision(job.shadowKey, static_cast<uint64_t>(
+                    reinterpret_cast<uintptr_t>(pathEdge.first)));
+                HashRevision(job.shadowKey, static_cast<uint64_t>(
+                    reinterpret_cast<uintptr_t>(pathEdge.second)));
+            }
+            HashRevision(job.shadowKey, static_cast<uint64_t>(
+                reinterpret_cast<uintptr_t>(pass.source)));
+            HashRevision(job.shadowKey, static_cast<uint64_t>(
+                reinterpret_cast<uintptr_t>(pass.target)));
+            for (size_t pointIndex = 0; pointIndex < visibleScreenRegion.size();
+                ++pointIndex)
+            {
+                const glm::vec2& first = visibleScreenRegion[pointIndex];
+                const glm::vec2& second = visibleScreenRegion[
+                    (pointIndex + 1u) % visibleScreenRegion.size()];
+                job.screenArea += first.x * second.y - first.y * second.x;
+            }
+            job.screenArea = std::abs(job.screenArea) * 0.5f;
             const size_t jobIndex = portalViewJobs.size();
             portalViewJobs.push_back(job);
 
@@ -3065,6 +3835,84 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             for (const size_t jobIndex : depthFirstOrder)
                 orderedJobs.push_back(std::move(portalViewJobs[jobIndex]));
             portalViewJobs = std::move(orderedJobs);
+        }
+    }
+
+    for (PortalShadowCacheEntry& entry : m_portalShadowCache)
+        if (entry.ownerCamera == cam)
+            entry.selected = false;
+    ++m_portalShadowGeneration;
+    for (auto iterator = m_portalShadowCache.begin();
+        iterator != m_portalShadowCache.end();)
+    {
+        const bool stale = m_portalShadowGeneration >
+            iterator->touchedGeneration + 120u;
+        if (!stale)
+        {
+            ++iterator;
+            continue;
+        }
+        if (iterator->constantBuffer && iterator->constantMapped)
+            iterator->constantBuffer->Unmap();
+        if (iterator->objectBuffer && iterator->objectMapped)
+            iterator->objectBuffer->Unmap();
+        if (iterator->constantBuffer)
+            m_retiredRenderBuffers.push_back(
+                std::move(iterator->constantBuffer));
+        if (iterator->objectBuffer)
+            m_retiredRenderBuffers.push_back(
+                std::move(iterator->objectBuffer));
+        if (iterator->atlas)
+            m_retiredShadowTextures.push_back(std::move(iterator->atlas));
+        iterator = m_portalShadowCache.erase(iterator);
+    }
+    if (m_realtimeShadowSettings.portalPolicy !=
+        Engine::Model::PortalShadowPolicy::ReuseMain)
+    {
+        std::vector<size_t> selectedJobs(portalViewJobs.size());
+        std::iota(selectedJobs.begin(), selectedJobs.end(), 0u);
+        std::stable_sort(selectedJobs.begin(), selectedJobs.end(),
+            [&](size_t leftIndex, size_t rightIndex)
+            {
+                const PortalViewJob& left = portalViewJobs[leftIndex];
+                const PortalViewJob& right = portalViewJobs[rightIndex];
+                if (left.depth != right.depth)
+                    return left.depth < right.depth;
+                if (std::abs(left.screenArea - right.screenArea) > 1e-6f)
+                    return left.screenArea > right.screenArea;
+                return left.shadowKey < right.shadowKey;
+            });
+        if (m_realtimeShadowSettings.portalPolicy ==
+            Engine::Model::PortalShadowPolicy::Budgeted)
+        {
+            selectedJobs.resize(std::min(selectedJobs.size(),
+                static_cast<size_t>(std::clamp(
+                    m_realtimeShadowSettings.portalViewBudget, 1u, 64u))));
+        }
+        for (const size_t jobIndex : selectedJobs)
+        {
+            PortalViewJob& job = portalViewJobs[jobIndex];
+            auto found = std::find_if(m_portalShadowCache.begin(),
+                m_portalShadowCache.end(), [&](const PortalShadowCacheEntry& entry)
+                {
+                    return entry.ownerCamera == cam && entry.key == job.shadowKey;
+                });
+            if (found == m_portalShadowCache.end())
+            {
+                m_portalShadowCache.emplace_back();
+                found = std::prev(m_portalShadowCache.end());
+                found->key = job.shadowKey;
+                found->ownerCamera = cam;
+            }
+            found->targetChart = job.portal->target;
+            found->view = job.mappedView;
+            found->cameraPosition = job.mappedCameraPosition;
+            found->depth = job.depth;
+            found->screenArea = job.screenArea;
+            found->touchedGeneration = m_portalShadowGeneration;
+            found->selected = true;
+            job.shadowCacheIndex = static_cast<size_t>(
+                std::distance(m_portalShadowCache.begin(), found));
         }
     }
 
@@ -3141,6 +3989,25 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 portalJob.mappedCameraPosition.y;
             mappedData.viewPositionAlphaCutoff.z =
                 portalJob.mappedCameraPosition.z;
+            if (portalJob.shadowCacheIndex < m_portalShadowCache.size())
+            {
+                const PortalShadowCacheEntry& portalShadow =
+                    m_portalShadowCache[portalJob.shadowCacheIndex];
+                if (portalShadow.rendered && portalShadow.atlas)
+                {
+                    const float shadowDistanceScale = mainShadowCascades.data.w > 0.f
+                        ? std::clamp(mappedData.shadowCascadeData.w /
+                            mainShadowCascades.data.w, 0.f, 1.f)
+                        : 1.f;
+                    std::copy(portalShadow.viewProjections.begin(),
+                        portalShadow.viewProjections.end(),
+                        mappedData.shadowViewProjections);
+                    mappedData.shadowCascadeSplits = portalShadow.cascadeSplits;
+                    mappedData.shadowCascadeData = portalShadow.cascadeData;
+                    mappedData.shadowCascadeData.w *= shadowDistanceScale;
+                    mappedData.shadowCameraData = portalShadow.cameraData;
+                }
+            }
             if (includeEditorVisuals && settings.portalDebugVisuals &&
                 settings.portalDebugTintRemoteView)
             {
@@ -3160,6 +4027,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 draw.drawData.objectIndex;
             DrawCBData mappedDraw = draw.drawData;
             mappedDraw.objectIndex = objectDrawSlot;
+            mappedDraw.flags &= ~kClusteredLightingFlag;
             memcpy(static_cast<uint8_t*>(m_objectCBMapped) +
                 static_cast<size_t>(drawSlot) * kCBStride,
                 &mappedDraw, sizeof(mappedDraw));
@@ -3244,6 +4112,20 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             portalJob.skyboxConstantBufferOffset);
         context->SetTexture(0, skybox->GetGraphicsTexture());
         context->DrawInstanced(3, 1, 0, 0);
+    };
+    const auto portalTexture = [&](const PortalViewJob& portalJob,
+        const PreparedDraw& draw, uint32_t textureSlot)
+        -> const Engine::Graphics::IGraphicsTexture*
+    {
+        if (textureSlot == 7u &&
+            portalJob.shadowCacheIndex < m_portalShadowCache.size())
+        {
+            const PortalShadowCacheEntry& shadow =
+                m_portalShadowCache[portalJob.shadowCacheIndex];
+            if (shadow.rendered && shadow.atlas)
+                return shadow.atlas.get();
+        }
+        return draw.textures[textureSlot];
     };
 
 // Retained only as a diagnostic fallback for older drivers. Normal builds use
@@ -3395,7 +4277,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                                 textureSlot < draw.textures.size(); ++textureSlot)
                             {
                                 context->SetTexture(textureSlot,
-                                    draw.textures[textureSlot]);
+                                    portalTexture(portalJob, draw, textureSlot));
                             }
                             dx11Context->OMSetDepthStencilState(
                                 stencilReadState.Get(), portalStencilRef);
@@ -3603,7 +4485,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     textureSlot < draw.textures.size(); ++textureSlot)
                 {
                     context->SetTexture(textureSlot,
-                        draw.textures[textureSlot]);
+                        portalTexture(portalJob, draw, textureSlot));
                 }
                 submitGeometry(draw);
             }

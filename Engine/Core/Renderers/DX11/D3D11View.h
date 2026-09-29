@@ -2,6 +2,7 @@
 #include "../IView.h"
 #include <wrl/client.h>
 #include <d3d11.h>
+#include "DX11PostProcess.h"
 
 namespace Engine::Renderers
 {
@@ -12,7 +13,8 @@ public:
               void* srvCpu, void* srvGpu, uint32_t srvSlotIndex = 0) override;
     void Resize(void* device, uint32_t width, uint32_t height) override;
     void Render(void* context, void* mainRtv,
-                std::function<void(void*)> drawFn = nullptr) override;
+                std::function<void(void*)> drawFn = nullptr,
+                std::function<void(void*)> preDrawFn = nullptr) override;
     void SetClearColor(float r, float g, float b, float a = 1.0f) override
     {
         m_clearColor[0] = r; m_clearColor[1] = g;
@@ -32,6 +34,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_srv;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_depthTexture;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilView> m_dsv;
+    DX11PostProcess m_postProcess;
     uint32_t m_srvSlotIndex = 0;
     uint32_t m_width = 0;
     uint32_t m_height = 0;

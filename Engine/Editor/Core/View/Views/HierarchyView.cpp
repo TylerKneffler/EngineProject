@@ -184,14 +184,20 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
     if (m_pendingDelete)
     {
         const std::string deletedName = ObjectName(m_pendingDelete);
-        Engine::Core::Object* deletedPrefabRoot = m_pendingDelete->GetPrefabInstanceRoot();
-        bool deletesSelection = false;
-        for (Engine::Core::Object* current = m_selectedObject; current; current = current->Parent)
-            if (current == m_pendingDelete)
-                deletesSelection = true;
-        if (deletesSelection)
-            SetSelectedObject(deletedPrefabRoot != m_pendingDelete
-                ? deletedPrefabRoot : nullptr);
+        const auto isDeleted = [this](Engine::Core::Object* selected)
+        {
+            for (Engine::Core::Object* current = selected; current; current = current->Parent)
+                if (current == m_pendingDelete) return true;
+            return false;
+        };
+        const auto newEnd = std::remove_if(m_selectedObjects.begin(),
+            m_selectedObjects.end(), isDeleted);
+        if (newEnd != m_selectedObjects.end())
+        {
+            m_selectedObjects.erase(newEnd, m_selectedObjects.end());
+            m_selectedObject = m_selectedObjects.empty() ? nullptr : m_selectedObjects.back();
+            NotifySelectionChanged();
+        }
         m_scene->RemoveObject(m_pendingDelete);
         LogInteraction("Deleted '" + deletedName + "' and its child hierarchy");
         m_pendingDelete = nullptr;
@@ -409,9 +415,18 @@ void HierarchyView::LogInteraction(const std::string& message) const
 
 void HierarchyView::SetSelectedObject(Engine::Core::Object* obj)
 {
-    if (m_selectedObject == obj) return;
+    if (m_selectedObject == obj && m_selectedObjects.size() == (obj ? 1u : 0u)) return;
     m_selectedObject = obj;
-    if (OnSelectionChanged) OnSelectionChanged(obj);
+    m_selectionAnchor = obj;
+    m_selectedObjects.clear();
+    if (obj) m_selectedObjects.push_back(obj);
+    NotifySelectionChanged();
+}
+
+void HierarchyView::NotifySelectionChanged()
+{
+    if (OnSelectionSetChanged) OnSelectionSetChanged(m_selectedObjects);
+    else if (OnSelectionChanged) OnSelectionChanged(m_selectedObject);
 }
 
 void HierarchyView::SelectSceneRoot()
@@ -420,8 +435,9 @@ void HierarchyView::SelectSceneRoot()
     // Always notify so clicking World can replace an asset inspector even
     // when the hierarchy already has no selected object.
     m_selectedObject = nullptr;
-    if (OnSelectionChanged)
-        OnSelectionChanged(nullptr);
+    m_selectionAnchor = nullptr;
+    m_selectedObjects.clear();
+    NotifySelectionChanged();
 }
 
 void HierarchyView::DrawObjectNode(
@@ -434,7 +450,7 @@ void HierarchyView::DrawObjectNode(
     bool enabled = obj->enabled;
     const EditorUiObjectRowResult row = ui.ObjectTreeRow(
         obj, ObjectIcon(*obj), name, sizeof(name), &enabled,
-        obj == m_selectedObject,
+        std::find(m_selectedObjects.begin(), m_selectedObjects.end(), obj) != m_selectedObjects.end(),
         !hasChildren, false,
         obj->IsEnabledInHierarchy(),
         depth, lastSibling, ancestorGuideMask);
@@ -487,7 +503,48 @@ void HierarchyView::DrawObjectNode(
     }
     if ((row.nameChanged || row.enabledChanged) && OnHierarchyChanged)
         OnHierarchyChanged();
-    if (row.clicked) { SetSelectedObject(obj); LogInteraction("Selected '" + ObjectName(obj) + "'"); }
+    if (row.clicked)
+    {
+        if (ui.IsRangeSelectModifierDown() && m_selectionAnchor && m_scene)
+        {
+            std::vector<Engine::Core::Object*> ordered;
+            std::function<void(Engine::Core::Object*)> appendHierarchy =
+                [&](Engine::Core::Object* current)
+                {
+                    ordered.push_back(current);
+                    for (Engine::Core::Object* child : current->Children)
+                        appendHierarchy(child);
+                };
+            for (const auto& candidate : m_scene->GetObjects())
+                if (!candidate->Parent) appendHierarchy(candidate.get());
+            const auto anchor = std::find(ordered.begin(), ordered.end(), m_selectionAnchor);
+            const auto clicked = std::find(ordered.begin(), ordered.end(), obj);
+            if (anchor != ordered.end() && clicked != ordered.end())
+            {
+                const auto first = anchor < clicked ? anchor : clicked;
+                const auto last = anchor < clicked ? clicked : anchor;
+                m_selectedObjects.assign(first, std::next(last));
+                m_selectedObject = obj;
+                NotifySelectionChanged();
+            }
+            else
+                SetSelectedObject(obj);
+        }
+        else if (ui.IsMultiSelectModifierDown())
+        {
+            const auto selected = std::find(m_selectedObjects.begin(), m_selectedObjects.end(), obj);
+            if (selected == m_selectedObjects.end())
+                m_selectedObjects.push_back(obj);
+            else
+                m_selectedObjects.erase(selected);
+            m_selectedObject = m_selectedObjects.empty() ? nullptr : m_selectedObjects.back();
+            m_selectionAnchor = obj;
+            NotifySelectionChanged();
+        }
+        else
+            SetSelectedObject(obj);
+        LogInteraction("Selected '" + ObjectName(obj) + "'");
+    }
     if (row.doubleClicked) { SetSelectedObject(obj); LogInteraction("Focused '" + ObjectName(obj) + "'"); if (OnFocusObject) OnFocusObject(obj); }
     if (row.dragActive)
     {

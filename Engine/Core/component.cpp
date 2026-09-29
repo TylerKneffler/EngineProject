@@ -126,6 +126,14 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
     // Create a mutable copy for editing
     JsonValue editedData = originalData;
     bool modified = false;
+    std::vector<std::string> modifiedKeys;
+    const auto markModified = [&](const std::string& key)
+    {
+        modified = true;
+        if (std::find(modifiedKeys.begin(), modifiedKeys.end(), key) ==
+            modifiedKeys.end())
+            modifiedKeys.push_back(key);
+    };
     std::string currentGroup;
     bool currentGroupOpen = true;
     bool groupIndented = false;
@@ -167,11 +175,12 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
             continue;
 
         const std::string displayName = HumanizePropertyName(key);
+        const bool mixedValue = IsEditorValueMixed(key, value);
         
         // Create appropriate control based on value type
         if (value.IsString())
         {
-            const std::string& stringValue = value.AsString();
+            const std::string stringValue = mixedValue ? "-" : value.AsString();
             
             // Detect file/path properties by name heuristics
             bool isFilePath = (key.find("file") != std::string::npos || key.find("File") != std::string::npos ||
@@ -358,7 +367,7 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
                         if (ui.Button("Apply", 60.f, 0.f))
                         {
                             editedData.Set(key, JsonValue(s_editingProperty[stateKey]));
-                            modified = true;
+                            markModified(key);
                             s_editingProperty.erase(stateKey);
                         }
                         
@@ -399,7 +408,7 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
                         if (IsCompatiblePathAsset(key, droppedPath))
                         {
                             editedData.Set(key, JsonValue(droppedPath));
-                            modified = true;
+                            markModified(key);
                         }
                     }
                     ui.EndDragDropTarget();
@@ -422,7 +431,7 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
                         if (auto* droppedMesh = dynamic_cast<Engine::Components::Mesh*>(component))
                         {
                             editedData.Set(key, JsonValue(droppedMesh->GetFilePath()));
-                            modified = true;
+                            markModified(key);
                         }
                     }
                     ui.EndDragDropTarget();
@@ -435,16 +444,18 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
                 // Regular string property - make editable
                 char buffer[256];
                 strncpy_s(buffer, sizeof(buffer), stringValue.c_str(), _TRUNCATE);
+                ui.SetNextItemMixedValue(mixedValue);
                 if (ui.InputText(displayName.c_str(), buffer, sizeof(buffer)))
                 {
                     editedData.Set(key, JsonValue(std::string(buffer)));
-                    modified = true;
+                    markModified(key);
                 }
             }
         }
         else if (value.IsNumber())
         {
             float floatVal = value.AsFloat();
+            ui.SetNextItemMixedValue(mixedValue);
             
             // Heuristics for appropriate ranges
             if (key == "metallicFactor" || key == "roughnessFactor" ||
@@ -455,7 +466,7 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
                 if (ui.DragFloat(displayName.c_str(), &floatVal, 0.01f, 0.f, 1.f))
                 {
                     editedData.Set(key, JsonValue(floatVal));
-                    modified = true;
+                    markModified(key);
                 }
             }
             else if (key == "normalScale")
@@ -463,7 +474,7 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
                 if (ui.DragFloat(displayName.c_str(), &floatVal, 0.01f, 0.f, 2.f))
                 {
                     editedData.Set(key, JsonValue(floatVal));
-                    modified = true;
+                    markModified(key);
                 }
             }
             else if (key == "heightScale")
@@ -471,7 +482,7 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
                 if (ui.DragFloat(displayName.c_str(), &floatVal, 0.001f, 0.f, 0.2f))
                 {
                     editedData.Set(key, JsonValue(floatVal));
-                    modified = true;
+                    markModified(key);
                 }
             }
             else if (key == "heightMinSteps" || key == "heightMaxSteps")
@@ -479,7 +490,7 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
                 if (ui.DragFloat(displayName.c_str(), &floatVal, 1.f, 4.f, 64.f))
                 {
                     editedData.Set(key, JsonValue(floatVal));
-                    modified = true;
+                    markModified(key);
                 }
             }
             else if (key.find("fov") != std::string::npos || key.find("FOV") != std::string::npos)
@@ -487,7 +498,7 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
                 if (ui.DragFloat(displayName.c_str(), &floatVal, 0.5f, 1.f, 179.f))
                 {
                     editedData.Set(key, JsonValue(floatVal));
-                    modified = true;
+                    markModified(key);
                 }
             }
             else if (key.find("near") != std::string::npos || key.find("Near") != std::string::npos)
@@ -495,7 +506,7 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
                 if (ui.DragFloat(displayName.c_str(), &floatVal, 0.001f, 0.001f, 10.f))
                 {
                     editedData.Set(key, JsonValue(floatVal));
-                    modified = true;
+                    markModified(key);
                 }
             }
             else if (key.find("far") != std::string::npos || key.find("Far") != std::string::npos)
@@ -503,7 +514,7 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
                 if (ui.DragFloat(displayName.c_str(), &floatVal, 1.f, 1.f, 10000.f))
                 {
                     editedData.Set(key, JsonValue(floatVal));
-                    modified = true;
+                    markModified(key);
                 }
             }
             else if (key.find("shininess") != std::string::npos)
@@ -511,7 +522,7 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
                 if (ui.DragFloat(displayName.c_str(), &floatVal, 0.5f, 1.f, 256.f))
                 {
                     editedData.Set(key, JsonValue(floatVal));
-                    modified = true;
+                    markModified(key);
                 }
             }
             else if (key.find("speed") != std::string::npos)
@@ -519,7 +530,7 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
                 if (ui.DragFloat(displayName.c_str(), &floatVal, 0.5f, -360.f, 360.f))
                 {
                     editedData.Set(key, JsonValue(floatVal));
-                    modified = true;
+                    markModified(key);
                 }
             }
             else
@@ -528,17 +539,18 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
                 if (ui.DragFloat(displayName.c_str(), &floatVal, 0.01f))
                 {
                     editedData.Set(key, JsonValue(floatVal));
-                    modified = true;
+                    markModified(key);
                 }
             }
         }
         else if (value.IsBool())
         {
             bool boolVal = value.AsBool();
+            ui.SetNextItemMixedValue(mixedValue);
             if (ui.Checkbox(displayName.c_str(), &boolVal))
             {
                 editedData.Set(key, JsonValue(boolVal));
-                modified = true;
+                markModified(key);
             }
         }
         else if (value.IsArray() && value.ArraySize() == 3)
@@ -551,6 +563,7 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
             };
             
             bool changed = false;
+            ui.SetNextItemMixedValue(mixedValue);
             
             // Detect color properties (names containing color/diffuse/ambient/specular/emissive)
             if (key.find("color") != std::string::npos || key.find("Color") != std::string::npos ||
@@ -596,13 +609,14 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
                     .Push(JsonValue(vec3[1]))
                     .Push(JsonValue(vec3[2]));
                 editedData.Set(key, newVec);
-                modified = true;
+                markModified(key);
             }
         }
         else if (value.IsArray())
         {
             char buffer[64];
             snprintf(buffer, sizeof(buffer), "[%zu items]", value.ArraySize());
+            ui.SetNextItemMixedValue(mixedValue);
             ui.ValueLabel(displayName.c_str(), buffer);
         }
         else if (value.IsObject())
@@ -615,6 +629,7 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
                     ? reference.objectName + " / " + reference.componentType
                     : std::string("(default: ") +
                         (reference.expectedType.empty() ? "component" : reference.expectedType) + ")";
+                ui.SetNextItemMixedValue(mixedValue);
                 ui.ValueLabel(displayName.c_str(), assignedLabel.c_str());
                 if (ui.BeginDragDropTarget())
                 {
@@ -629,7 +644,7 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
                         {
                             editedData.Set(key, ToJson(CaptureComponentReference(
                                 component, reference.expectedType)));
-                            modified = true;
+                            markModified(key);
                         }
                     }
                     ui.EndDragDropTarget();
@@ -641,12 +656,15 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
                     {
                         reference.Clear();
                         editedData.Set(key, ToJson(reference));
-                        modified = true;
+                        markModified(key);
                     }
                 }
             }
             else
+            {
+                ui.SetNextItemMixedValue(mixedValue);
                 ui.ValueLabel(displayName.c_str(), "{object}");
+            }
         }
     }
     
@@ -657,8 +675,47 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
     if (modified)
     {
         Deserialize(editedData);
+        if (m_multiEditTargets)
+        {
+            for (Component* target : *m_multiEditTargets)
+            {
+                if (!target || target == this)
+                    continue;
+                JsonValue targetData = target->Serialize();
+                for (const std::string& key : modifiedKeys)
+                    targetData.Set(key, editedData[key]);
+                target->Deserialize(targetData);
+            }
+        }
     }
     return modified;
+}
+
+bool Component::DrawPropertiesMulti(::Engine::Editor::IEditorUi& ui,
+    const std::vector<Component*>& targets)
+{
+    m_multiEditTargets = &targets;
+    const bool changed = Component::DrawProperties(ui);
+    m_multiEditTargets = nullptr;
+    return changed;
+}
+
+bool Component::IsEditorValueMixed(const std::string& key,
+    const JsonValue& value) const
+{
+    if (!m_multiEditTargets || m_multiEditTargets->size() < 2)
+        return false;
+    const std::string serialized = Engine::Serialization::JsonWrite(value);
+    for (const Component* target : *m_multiEditTargets)
+    {
+        if (!target)
+            return true;
+        const JsonValue data = target->Serialize();
+        if (!data.Has(key) ||
+            Engine::Serialization::JsonWrite(data[key]) != serialized)
+            return true;
+    }
+    return false;
 }
 
 Component::JsonValue Component::Serialize() const

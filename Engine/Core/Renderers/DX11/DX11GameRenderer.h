@@ -1,6 +1,7 @@
 #pragma once
 #include "../IGameRenderer.h"
 #include "DX11GraphicsProvider.h"
+#include "DX11PostProcess.h"
 #include <wrl/client.h>
 #include <d3d11.h>
 #include <dxgi.h>
@@ -39,6 +40,8 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_depthTexture;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilView> m_dsv;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_captureStaging;
+    DX11PostProcess m_postProcess;
+    float m_clearColor[4] = { 0.1f, 0.1f, 0.1f, 1.0f };
     std::unique_ptr<D3D11GraphicsProvider> m_graphicsProvider;
     uint32_t m_width = 0;
     uint32_t m_height = 0;

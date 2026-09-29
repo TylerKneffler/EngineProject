@@ -41,6 +41,7 @@ public:
     // Issues the editor-camera scene draw into cmd each frame.
     // cmd: opaque graphics command list handle (cast internally to ID3D12GraphicsCommandList*)
     void Render3D(void* cmd) override;
+    void RenderShadow3D(void* cmd) override;
 
     // Shows the offscreen texture with letterboxing/pillarboxing based on
     // aspect ratio settings, captures mouse input, and drives the

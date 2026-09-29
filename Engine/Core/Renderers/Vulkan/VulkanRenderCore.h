@@ -23,6 +23,7 @@ public:
     uint32_t GetQueueFamily() const { return m_queueFamily; }
     VkRenderPass GetMainRenderPass() const { return m_mainRenderPass; }
     VkRenderPass GetOffscreenRenderPass() const { return m_offscreenRenderPass; }
+    VkRenderPass GetCompositionRenderPass() const { return m_compositionRenderPass; }
     VkFramebuffer GetCurrentFramebuffer() const { return m_framebuffers[m_imageIndex]; }
     VkCommandBuffer GetCurrentCommandBuffer() const { return m_currentCommandBuffer; }
     VkExtent2D GetExtent() const { return m_extent; }
@@ -62,6 +63,7 @@ private:
     std::vector<VkFramebuffer> m_framebuffers;
     VkRenderPass m_mainRenderPass = VK_NULL_HANDLE;
     VkRenderPass m_offscreenRenderPass = VK_NULL_HANDLE;
+    VkRenderPass m_compositionRenderPass = VK_NULL_HANDLE;
     VkCommandPool m_commandPool = VK_NULL_HANDLE;
     static constexpr uint32_t FRAME_COUNT = 2;
     VkCommandBuffer m_commandBuffers[FRAME_COUNT]{};

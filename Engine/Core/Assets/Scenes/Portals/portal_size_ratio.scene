@@ -27,7 +27,7 @@
         <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
       </transform>
       <components>
-        <components:Light Light.lightType="1" Light.intensity="2" Light.range="40" Light.falloff="2" Light.baked="false">
+        <components:Light Light.lightType="1" Light.intensity="2" Light.range="40" Light.falloff="2" Light.baked="false" Light.castsShadows="true" Light.shadowStrength="1" Light.shadowDepthBias="0.0015" Light.shadowNormalBias="0.01" Light.shadowResolutionScale="1" Light.shadowFilterScale="1">
           <Light.color><item>1</item><item>0.94</item><item>0.82</item></Light.color>
         </components:Light>
       </components>

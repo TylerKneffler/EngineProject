@@ -18,6 +18,13 @@ enum class SceneDimension
     TwoD = 1
 };
 
+enum class ToneMappingOperator
+{
+    None = 0,
+    Aces = 1,
+    Reinhard = 2
+};
+
 struct SceneSettings
 {
     // Dimensional editing and rendering behavior belongs to the scene so one
@@ -40,6 +47,8 @@ struct SceneSettings
     float hdriIntensity = 1.f;
     float hdriExposure = 0.f;
     float hdriRotation = 0.f;
+    ToneMappingOperator toneMapping = ToneMappingOperator::Aces;
+    float outputExposure = 0.f;
     SceneRenderMode renderMode = SceneRenderMode::Lit;
     // When true, SceneView also shows game-style screen-space UI composition.
     // Default stays false so scene camera reflects in-scene editing context.
