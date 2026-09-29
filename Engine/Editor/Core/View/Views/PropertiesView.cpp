@@ -96,6 +96,9 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             ui.Separator();
 
             ui.Label("Skybox Texture Override");
+            if (ui.Checkbox("Render Skybox", &m_scene->settings.skyboxEnabled) &&
+                OnComponentsChanged)
+                OnComponentsChanged();
             if (!m_editingSkyboxTexture)
             {
                 const Engine::Components::Texture* skybox =

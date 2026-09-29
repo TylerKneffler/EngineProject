@@ -632,7 +632,8 @@ const Engine::Components::Texture* Scene::ResolveSkyboxTexture()
     // A 2D scene has no surrounding environment.  Let the render target's
     // clear colour be its flat, edge-to-edge background instead of projecting
     // either the authored panorama or the editor's fallback skybox.
-    if (settings.dimension == Engine::Model::SceneDimension::TwoD)
+    if (settings.dimension == Engine::Model::SceneDimension::TwoD ||
+        !settings.skyboxEnabled)
         return nullptr;
 
     if (settings.skyboxTexture.empty())
@@ -1610,60 +1611,55 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         if (!cameraUsesSourceWarpChart && !cameraInsideInteriorOnlyWarp &&
             !m_editorMode2D)
         {
-            const glm::vec3 rayOrigin = glm::vec3(authoredCameraWorld[3]);
-            const glm::vec3 rayDirection = glm::normalize(
-                glm::vec3(glm::inverse(view)[2]));
-            const auto rayIntersectsVolume = [&](const Engine::Components::SpatialManipulator& volume)
+            const auto volumeIntersectsView = [&](const Engine::Components::SpatialManipulator& volume)
             {
                 if (!volume.Owner || !volume.definesWarpVolume || !volume.enabled)
-                    return false;
-                const glm::mat4 inverseVolume = glm::inverse(
-                    volume.Owner->transform.GetWorldMatrix());
-                const glm::vec3 origin = glm::vec3(inverseVolume *
-                    glm::vec4(rayOrigin, 1.f));
-                const glm::vec3 direction = glm::vec3(inverseVolume *
-                    glm::vec4(rayDirection, 0.f));
-                if (glm::dot(direction, direction) <= 1e-10f)
                     return false;
                 const auto shape = static_cast<Engine::Components::SpatialManipulator::
                     WarpVolumeShape>(volume.warpVolumeShape);
                 if (shape == Engine::Components::SpatialManipulator::WarpVolumeShape::Infinite)
                     return true;
-                if (shape == Engine::Components::SpatialManipulator::WarpVolumeShape::Sphere)
+                // Chart selection used to test only the center camera ray.
+                // A volume entering from a side of the viewport consequently
+                // stayed in the wrong chart until it crossed screen center.
+                // Conservatively test the volume's local bounds against all
+                // six homogeneous frustum planes instead. False positives are
+                // harmless (they retain the physical chart slightly longer),
+                // while false negatives cause visible chart popping.
+                const float radius = std::max(0.001f,
+                    std::abs(volume.warpVolumeRadius));
+                const glm::vec3 halfSize = shape == Engine::Components::
+                        SpatialManipulator::WarpVolumeShape::Sphere
+                    ? glm::vec3(radius)
+                    : glm::max(glm::abs(volume.warpVolumeSize) * 0.5f,
+                        glm::vec3(0.0001f));
+                const glm::mat4 localToClip = proj * view *
+                    volume.Owner->transform.GetWorldMatrix();
+                std::array<glm::vec4, 8> corners{};
+                size_t cornerIndex = 0;
+                for (int z = 0; z < 2; ++z)
+                    for (int y = 0; y < 2; ++y)
+                        for (int x = 0; x < 2; ++x)
+                            corners[cornerIndex++] = localToClip * glm::vec4(
+                                x ? halfSize.x : -halfSize.x,
+                                y ? halfSize.y : -halfSize.y,
+                                z ? halfSize.z : -halfSize.z, 1.f);
+                const auto allOutside = [&](const auto& predicate)
                 {
-                    const float radius = std::max(0.001f,
-                        std::abs(volume.warpVolumeRadius));
-                    const float a = glm::dot(direction, direction);
-                    const float b = 2.f * glm::dot(origin, direction);
-                    const float c = glm::dot(origin, origin) - radius * radius;
-                    const float discriminant = b * b - 4.f * a * c;
-                    return discriminant >= 0.f &&
-                        (-b + std::sqrt(discriminant)) / (2.f * a) >= 0.f;
-                }
-
-                const glm::vec3 halfSize = glm::max(glm::abs(volume.warpVolumeSize) *
-                    0.5f, glm::vec3(0.0001f));
-                float entry = 0.f;
-                float exit = std::numeric_limits<float>::infinity();
-                for (int axis = 0; axis < 3; ++axis)
-                {
-                    if (std::abs(direction[axis]) <= 1e-7f)
-                    {
-                        if (origin[axis] < -halfSize[axis] ||
-                            origin[axis] > halfSize[axis])
-                            return false;
-                        continue;
-                    }
-                    float nearT = (-halfSize[axis] - origin[axis]) / direction[axis];
-                    float farT = (halfSize[axis] - origin[axis]) / direction[axis];
-                    if (nearT > farT)
-                        std::swap(nearT, farT);
-                    entry = std::max(entry, nearT);
-                    exit = std::min(exit, farT);
-                    if (entry > exit)
-                        return false;
-                }
-                return exit >= 0.f;
+                    return std::all_of(corners.begin(), corners.end(), predicate);
+                };
+                return !(allOutside([](const glm::vec4& point)
+                        { return point.x < -point.w; }) ||
+                    allOutside([](const glm::vec4& point)
+                        { return point.x > point.w; }) ||
+                    allOutside([](const glm::vec4& point)
+                        { return point.y < -point.w; }) ||
+                    allOutside([](const glm::vec4& point)
+                        { return point.y > point.w; }) ||
+                    allOutside([](const glm::vec4& point)
+                        { return point.z < 0.f; }) ||
+                    allOutside([](const glm::vec4& point)
+                        { return point.z > point.w; }));
             };
             std::function<void(const Engine::Core::Object*)> findIntersectedVolume;
             findIntersectedVolume = [&](const Engine::Core::Object* object)
@@ -1675,7 +1671,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     Engine::Components::SpatialManipulator>();
                 if (volume && (sourceChartAllowed ||
                     volume->renderWarpInteriorOnly) &&
-                    rayIntersectsVolume(*volume))
+                    volumeIntersectsView(*volume))
                 {
                     cameraUsesSourceWarpChart = true;
                     return;
@@ -2774,6 +2770,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         glm::vec3 mappedCameraPosition { 0.f };
         uint32_t depth = 0;
         uint32_t rootStencilBase = 1;
+        size_t parentJobIndex = std::numeric_limits<size_t>::max();
         // Constant-buffer records retain globally unique frame slots because
         // deferred backends reference them after command recording.
         uint32_t dataSlotBase = 0;
@@ -2790,19 +2787,39 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         Engine::Rendering::Portal::ClampViewBudget(
             settings.portalMaxViewsPerFrame));
 
-    const auto apertureVisibleInView = [&](const PortalStencilPass& pass,
+    const auto apertureRegionInView = [&](const PortalStencilPass& pass,
         const glm::mat4& candidateView)
     {
         const std::vector<glm::vec3> points =
             activePortalPoints(*pass.source);
         if (points.size() < 3)
-            return false;
+            return std::vector<glm::vec2>{};
+        const glm::mat4 candidateCameraWorld = glm::inverse(candidateView);
+        const glm::mat4 sourceFrame = activePortalFrame(*pass.source);
+        const float cameraPlaneDistance = glm::dot(
+            glm::vec3(candidateCameraWorld[3]) - glm::vec3(sourceFrame[3]),
+            glm::vec3(sourceFrame[2]));
+        // A camera exactly on an aperture plane has no well-defined source
+        // side, and every aperture vertex projects with w=0. Do not feed that
+        // singular polygon into recursive scheduling; physical traversal will
+        // select the connected chart as soon as the camera body departs.
+        if (std::abs(cameraPlaneDistance) <= 1e-5f)
+            return std::vector<glm::vec2>{};
         std::vector<glm::vec4> clipPolygon;
         clipPolygon.reserve(points.size());
         for (const glm::vec3& point : points)
             clipPolygon.push_back(proj * candidateView * glm::vec4(point, 1.f));
-        return Engine::Rendering::Portal::ClipApertureToViewFrustum(
-            std::move(clipPolygon)).size() >= 3u;
+        clipPolygon = Engine::Rendering::Portal::ClipApertureToViewFrustum(
+            std::move(clipPolygon));
+        std::vector<glm::vec2> screenPolygon;
+        screenPolygon.reserve(clipPolygon.size());
+        for (const glm::vec4& point : clipPolygon)
+        {
+            if (point.w <= 1e-6f || !std::isfinite(point.w))
+                return std::vector<glm::vec2>{};
+            screenPolygon.push_back(glm::vec2(point) / point.w);
+        }
+        return screenPolygon;
     };
 
     const auto apertureScissorInView = [&](const PortalStencilPass& pass,
@@ -2832,6 +2849,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         glm::vec2 maximum(std::numeric_limits<float>::lowest());
         for (const glm::vec4& clip : clipPolygon)
         {
+            if (clip.w <= 1e-6f || !std::isfinite(clip.w))
+                return std::nullopt;
             const glm::vec2 ndc = glm::vec2(clip) / clip.w;
             minimum = glm::min(minimum, ndc);
             maximum = glm::max(maximum, ndc);
@@ -2858,18 +2877,33 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     using PortalEdge = std::pair<
         const Engine::Components::SpatialManipulator*,
         const Engine::Components::SpatialManipulator*>;
-    std::vector<PortalEdge> portalPath;
-    uint32_t nextRootStencilBase = 1u;
-    std::function<void(const glm::mat4&, uint32_t, uint32_t,
-        const Engine::Components::SpatialManipulator*)>
-        schedulePortalViews;
-    schedulePortalViews = [&](const glm::mat4& apertureView, uint32_t depth,
-                              uint32_t inheritedRootStencilBase,
-                              const Engine::Components::SpatialManipulator*
-                                  previousExit)
+    struct PortalScheduleNode
     {
+        glm::mat4 apertureView { 1.f };
+        uint32_t depth = 0;
+        uint32_t inheritedRootStencilBase = 0;
+        const Engine::Components::SpatialManipulator* previousExit = nullptr;
+        size_t parentJobIndex = std::numeric_limits<size_t>::max();
+        std::vector<glm::vec2> visibleScreenRegion;
+        std::vector<PortalEdge> path;
+    };
+    uint32_t nextRootStencilBase = 1u;
+    std::vector<PortalScheduleNode> scheduleQueue;
+    scheduleQueue.push_back({ view, 0u, 0u, nullptr,
+        std::numeric_limits<size_t>::max(),
+        { {-1.f, -1.f}, {1.f, -1.f}, {1.f, 1.f}, {-1.f, 1.f} }, {} });
+    size_t scheduleCursor = 0u;
+    // Keep every visible root aperture before spending the remaining budget
+    // on recursion. A depth-first walk allowed one early portal chain to
+    // starve later roots, making them vanish as traversal order changed.
+    while (scheduleCursor < scheduleQueue.size() &&
+        portalViewJobs.size() < portalViewBudget)
+    {
+        PortalScheduleNode node = std::move(scheduleQueue[scheduleCursor++]);
+        const glm::mat4& apertureView = node.apertureView;
+        const uint32_t depth = node.depth;
         if (depth >= portalDepthLimit || portalViewJobs.size() >= portalViewBudget)
-            return;
+            continue;
         const glm::mat4 cameraWorldForView = glm::inverse(apertureView);
         const glm::vec3 viewCameraPosition(cameraWorldForView[3]);
         const glm::vec3 viewForward = glm::normalize(
@@ -2886,14 +2920,50 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             // parent view. Other apertures—including the original source now
             // visible across the room—remain valid recursive entrances.
             if (Engine::Rendering::Portal::IsImmediateExitAperture(
-                pass.source, previousExit))
+                pass.source, node.previousExit))
                 continue;
-            if (pass.apertureVertexCount < 3 ||
-                !apertureVisibleInView(pass, apertureView))
+            if (pass.apertureVertexCount < 3)
+                continue;
+
+            glm::mat4 effectiveApertureView = apertureView;
+            glm::vec3 effectiveCameraPosition = viewCameraPosition;
+            const glm::mat4 sourceFrame = activePortalFrame(*pass.source);
+            const glm::vec3 sourcePlanePoint(sourceFrame[3]);
+            const glm::vec3 sourcePlaneNormal = glm::normalize(
+                glm::vec3(sourceFrame[2]));
+            const float cameraPlaneDistance = glm::dot(
+                viewCameraPosition - sourcePlanePoint, sourcePlaneNormal);
+            const float cameraFacing = glm::dot(viewForward, sourcePlaneNormal);
+            // At the aperture plane its vertices all project with w=0, so a
+            // finite stencil polygon does not exist. If the eye is inside the
+            // opening and looking through it, choose that connected chart and
+            // offset only the render view onto the source side. Keeping the
+            // aperture beyond the near plane yields a stable full-screen mask
+            // without moving the physical camera or weakening target clipping.
+            if (std::abs(cameraPlaneDistance) <= 1e-5f &&
+                std::abs(cameraFacing) > 0.1f &&
+                pass.source->IsWorldPointInsidePortalAperture(
+                    viewCameraPosition, 0.f))
+            {
+                const float renderSeparation = std::max(
+                    0.002f, cam->nearPlane * 1.05f /
+                        std::abs(cameraFacing));
+                effectiveCameraPosition -= sourcePlaneNormal *
+                    (cameraFacing > 0.f ? renderSeparation : -renderSeparation);
+                glm::mat4 effectiveCameraWorld = cameraWorldForView;
+                effectiveCameraWorld[3] = glm::vec4(
+                    effectiveCameraPosition, 1.f);
+                effectiveApertureView = glm::inverse(effectiveCameraWorld);
+            }
+            std::vector<glm::vec2> visibleScreenRegion =
+                Engine::Rendering::Portal::IntersectConvexScreenPolygons(
+                    apertureRegionInView(pass, effectiveApertureView),
+                    node.visibleScreenRegion);
+            if (visibleScreenRegion.size() < 3u)
                 continue;
             const PortalEdge edge { pass.source, pass.target };
             const size_t priorConnectionVisits = static_cast<size_t>(
-                std::count_if(portalPath.begin(), portalPath.end(),
+                std::count_if(node.path.begin(), node.path.end(),
                     [&](const PortalEdge& previous)
                     {
                         return (previous.first == edge.first &&
@@ -2909,7 +2979,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 priorConnectionVisits, settings.portalConnectionRepeatLimit))
                 continue;
 
-            uint32_t rootStencilBase = inheritedRootStencilBase;
+            uint32_t rootStencilBase = node.inheritedRootStencilBase;
             if (depth == 0u)
             {
                 if (nextRootStencilBase + portalDepthLimit - 1u > 0xFFu)
@@ -2919,11 +2989,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             }
 
             const glm::vec3 mappedCamera = mapActivePortalPoint(
-                *pass.source, viewCameraPosition, *pass.target);
+                *pass.source, effectiveCameraPosition, *pass.target);
             const glm::vec3 mappedLookAt = mapActivePortalPoint(
-                *pass.source, viewCameraPosition + viewForward, *pass.target);
+                *pass.source, effectiveCameraPosition + viewForward, *pass.target);
             const glm::vec3 mappedUpPoint = mapActivePortalPoint(
-                *pass.source, viewCameraPosition + viewUp, *pass.target);
+                *pass.source, effectiveCameraPosition + viewUp, *pass.target);
             const glm::vec3 mappedForward = glm::normalize(
                 mappedLookAt - mappedCamera);
             glm::vec3 mappedUp = mappedUpPoint - mappedCamera;
@@ -2933,21 +3003,70 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
             PortalViewJob job{};
             job.portal = &pass;
-            job.apertureView = apertureView;
+            job.apertureView = effectiveApertureView;
             job.mappedCameraPosition = mappedCamera;
             job.mappedView = glm::lookAtLH(mappedCamera,
                 mappedCamera + mappedForward, mappedUp);
             job.depth = depth;
             job.rootStencilBase = rootStencilBase;
+            job.parentJobIndex = node.parentJobIndex;
+            const size_t jobIndex = portalViewJobs.size();
             portalViewJobs.push_back(job);
 
-            portalPath.push_back(edge);
-            schedulePortalViews(
-                job.mappedView, depth + 1u, rootStencilBase, pass.target);
-            portalPath.pop_back();
+            PortalScheduleNode child{};
+            child.apertureView = job.mappedView;
+            child.depth = depth + 1u;
+            child.inheritedRootStencilBase = rootStencilBase;
+            child.previousExit = pass.target;
+            child.parentJobIndex = jobIndex;
+            child.visibleScreenRegion = std::move(visibleScreenRegion);
+            child.path = node.path;
+            child.path.push_back(edge);
+            scheduleQueue.push_back(std::move(child));
         }
-    };
-    schedulePortalViews(view, 0u, 0u, nullptr);
+    }
+
+    // Breadth-first discovery protects visible root portals from exhausting
+    // the frame budget, but stencil recursion itself must execute depth-first.
+    // Sibling apertures use the same depth value; rendering a sibling before
+    // an earlier branch's descendants leaves that value in unrelated pixels
+    // and lets the descendant mask leak into (or be rejected by) the sibling.
+    // Reorder only after the fair set of jobs has been selected.
+    if (portalViewJobs.size() > 1u)
+    {
+        const size_t noParent = std::numeric_limits<size_t>::max();
+        std::vector<std::vector<size_t>> childJobs(portalViewJobs.size());
+        std::vector<size_t> rootJobs;
+        rootJobs.reserve(portalViewJobs.size());
+        for (size_t jobIndex = 0; jobIndex < portalViewJobs.size(); ++jobIndex)
+        {
+            const size_t parentIndex = portalViewJobs[jobIndex].parentJobIndex;
+            if (parentIndex == noParent)
+                rootJobs.push_back(jobIndex);
+            else if (parentIndex < childJobs.size())
+                childJobs[parentIndex].push_back(jobIndex);
+        }
+
+        std::vector<size_t> depthFirstOrder;
+        depthFirstOrder.reserve(portalViewJobs.size());
+        std::function<void(size_t)> appendSubtree = [&](size_t jobIndex)
+        {
+            depthFirstOrder.push_back(jobIndex);
+            for (const size_t childIndex : childJobs[jobIndex])
+                appendSubtree(childIndex);
+        };
+        for (const size_t rootIndex : rootJobs)
+            appendSubtree(rootIndex);
+
+        if (depthFirstOrder.size() == portalViewJobs.size())
+        {
+            std::vector<PortalViewJob> orderedJobs;
+            orderedJobs.reserve(portalViewJobs.size());
+            for (const size_t jobIndex : depthFirstOrder)
+                orderedJobs.push_back(std::move(portalViewJobs[jobIndex]));
+            portalViewJobs = std::move(orderedJobs);
+        }
+    }
 
     const auto connectedSpaceClipPlane = [&activePortalFrame](
         const PortalStencilPass& portalPass,
@@ -3445,6 +3564,15 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 0, m_objectConstantBuffer.get(),
                 static_cast<uint64_t>(portalJob.dataSlotBase + 1u) *
                     kCBStride);
+            // Root masks are established in a separate pre-pass, so the
+            // currently bound aperture can belong to another root. Always
+            // rebind the matching geometry before resetting depth; otherwise
+            // a different portal's polygon punches skybox-coloured wedges
+            // through local and connected geometry near the aperture edge.
+            context->SetVertexBuffer(
+                0, m_portalApertureBuffer.get(),
+                sizeof(Engine::Model::AnimationVertex),
+                portalPass.apertureVertexOffset);
             context->DrawInstanced(portalPass.apertureVertexCount, 1, 0, 0);
 
             drawConnectedSkybox(portalJob);

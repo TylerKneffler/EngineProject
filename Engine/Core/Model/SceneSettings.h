@@ -31,6 +31,7 @@ struct SceneSettings
     glm::vec3 gridColor = glm::vec3(0.45f, 0.45f, 0.45f);
     glm::vec3 gridOriginColor = glm::vec3(0.30f, 0.50f, 0.80f);
     glm::vec3 ambientColor = glm::vec3(0.12f, 0.12f, 0.12f);
+    bool skyboxEnabled = true;
     std::string skyboxTexture;
     // The equirectangular sky texture can also drive image-based diffuse
     // lighting and reflections. Exposure is measured in EV and rotation in

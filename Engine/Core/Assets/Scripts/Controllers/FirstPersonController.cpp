@@ -148,32 +148,38 @@ void FirstPersonController::UpdateLook()
     if (!foreground)
         return;
 
-    RECT windowRect{};
-    if (!GetWindowRect(foreground, &windowRect))
+    RECT clientRect{};
+    if (!GetClientRect(foreground, &clientRect))
+        return;
+
+    POINT lookAnchor {
+        (clientRect.left + clientRect.right) / 2,
+        (clientRect.top + clientRect.bottom) / 2
+    };
+    if (!ClientToScreen(foreground, &lookAnchor))
         return;
 
     POINT cursor{};
     if (!GetCursorPos(&cursor))
         return;
 
-    // Keep the pointer hidden while it is over the editor and reveal it after
-    // it crosses the window edge. Merely crossing the edge must not release
-    // gameplay focus: the user may move back in without interrupting control.
-    // A click or other activation outside the editor changes native focus;
-    // the focused check at the start of Update then suspends gameplay.
-    const bool pointerInsideEditor = PtInRect(&windowRect, cursor) != FALSE;
-    SetSystemCursorVisible(!pointerInsideEditor);
-
     if (!m_hasLastCursorPosition)
     {
-        m_lastCursorPosition = cursor;
+        SetCursorPos(lookAnchor.x, lookAnchor.y);
+        m_lastCursorPosition = lookAnchor;
         m_hasLastCursorPosition = true;
         return;
     }
 
-    const float deltaX = static_cast<float>(cursor.x - m_lastCursorPosition.x);
-    const float deltaY = static_cast<float>(cursor.y - m_lastCursorPosition.y);
-    m_lastCursorPosition = cursor;
+    // Polling an absolute cursor eventually produces no movement at a monitor
+    // edge. Treat the client centre as a relative-input anchor and restore it
+    // after every sample, giving mouse-look an unlimited range while capture
+    // is active. Focus loss still releases capture in Update().
+    const float deltaX = static_cast<float>(cursor.x - lookAnchor.x);
+    const float deltaY = static_cast<float>(cursor.y - lookAnchor.y);
+    SetCursorPos(lookAnchor.x, lookAnchor.y);
+    m_lastCursorPosition = lookAnchor;
+    SetSystemCursorVisible(false);
 
     auto* body = Owner->GetComponent<Engine::Components::RigidBody>();
     const glm::vec3 gravityDown = body
@@ -220,8 +226,10 @@ void FirstPersonController::UpdateLook()
     }
     glm::vec3 forward = m_lookForward;
 
+    // Windows cursor X grows to the right. A positive rotation around the
+    // gravity-up axis turns the engine's +Z forward direction to the right.
     if (deltaX != 0.f)
-        forward = SafeNormalize(glm::angleAxis(-deltaX * lookSensitivity,
+        forward = SafeNormalize(glm::angleAxis(deltaX * lookSensitivity,
             gravityUp) * forward, forward);
     glm::vec3 right = SafeNormalize(glm::cross(gravityUp, forward),
         SafeNormalize(glm::vec3(ownerWorld[0]),
@@ -229,7 +237,10 @@ void FirstPersonController::UpdateLook()
 
     const float currentPitch = std::asin(std::clamp(
         glm::dot(forward, gravityUp), -1.f, 1.f));
-    const float pitchDelta = -(invertY ? -1.f : 1.f) * deltaY *
+    // Screen Y grows downward. Around the camera-right axis, a negative
+    // rotation looks up, so the raw delta already provides conventional
+    // mouse-look. Flip it only when the explicit Invert Y option is enabled.
+    const float pitchDelta = (invertY ? -1.f : 1.f) * deltaY *
         lookSensitivity;
     const float targetPitch = std::clamp(currentPitch + pitchDelta,
         -kMaxPitch, kMaxPitch);
@@ -326,7 +337,21 @@ void FirstPersonController::SetCursorLock(bool locked)
     m_cursorLocked = locked;
     if (locked)
     {
-        m_hasLastCursorPosition = GetCursorPos(&m_lastCursorPosition) != FALSE;
+        HWND foreground = GetForegroundWindow();
+        RECT clientRect{};
+        if (foreground && GetClientRect(foreground, &clientRect))
+        {
+            POINT center {
+                (clientRect.left + clientRect.right) / 2,
+                (clientRect.top + clientRect.bottom) / 2
+            };
+            if (ClientToScreen(foreground, &center))
+            {
+                SetCursorPos(center.x, center.y);
+                m_lastCursorPosition = center;
+                m_hasLastCursorPosition = true;
+            }
+        }
         SetSystemCursorVisible(false);
     }
     else

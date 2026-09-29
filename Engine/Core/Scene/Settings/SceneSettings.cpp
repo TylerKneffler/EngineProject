@@ -69,6 +69,7 @@ Engine::Serialization::JsonValue SerializeSceneSettings(const Engine::Model::Sce
     value.Set("gridColor", Vec3ToJson(settings.gridColor));
     value.Set("gridOriginColor", Vec3ToJson(settings.gridOriginColor));
     value.Set("ambientColor", Vec3ToJson(settings.ambientColor));
+    value.Set("skyboxEnabled", Engine::Serialization::JsonValue(settings.skyboxEnabled));
     value.Set("skyboxTexture", Engine::Serialization::JsonValue(settings.skyboxTexture));
     value.Set("hdriLightingEnabled", Engine::Serialization::JsonValue(settings.hdriLightingEnabled));
     value.Set("hdriIntensity", Engine::Serialization::JsonValue(settings.hdriIntensity));
@@ -123,6 +124,10 @@ void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engi
         settings.gridOriginColor = Vec3FromJson(*gridOriginColor, settings.gridOriginColor);
     if (const auto* ambientColor = FindField(value, "ambientColor"))
         settings.ambientColor = Vec3FromJson(*ambientColor, settings.ambientColor);
+    if (const auto* skyboxEnabled = FindField(value, "skyboxEnabled"))
+        settings.skyboxEnabled = skyboxEnabled->AsBool();
+    else
+        settings.skyboxEnabled = true;
     if (const auto* skyboxTexture = FindField(value, "skyboxTexture"))
         settings.skyboxTexture = skyboxTexture->AsString();
     else

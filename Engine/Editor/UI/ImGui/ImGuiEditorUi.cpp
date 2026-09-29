@@ -684,7 +684,14 @@ bool ImGuiEditorUi::DeleteShortcutPressed()const
 bool ImGuiEditorUi::BeginDragDropSource(){
     const ImVec2 minimum=ImGui::GetItemRectMin(),maximum=ImGui::GetItemRectMax();
     ImDrawList* rowDrawList=ImGui::GetWindowDrawList();
-    if(!ImGui::BeginDragDropSource())return false;
+    // Composite widgets such as AssetTile finish with EndGroup(). ImGui gives
+    // that group a zero ID whenever none of its children is the active item.
+    // If another control in the same window is held (for example the asset
+    // list/grid toggle), probing the group as a drag source otherwise asserts.
+    // ImGui's supported null-ID path derives a temporary ID from the group's
+    // rectangle and still returns false unless this item is actually dragged.
+    if(!ImGui::BeginDragDropSource(
+        ImGuiDragDropFlags_SourceAllowNullID))return false;
     // Keep the source row visible as the item being moved while ImGui's
     // standard preview tooltip follows the pointer.
     rowDrawList->AddRectFilled(minimum,maximum,IM_COL32(90,160,255,55));

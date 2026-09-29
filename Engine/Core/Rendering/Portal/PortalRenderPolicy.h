@@ -1,10 +1,12 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <utility>
 #include <vector>
+#include <glm/vec2.hpp>
 #include <glm/vec4.hpp>
 
 namespace Engine::Rendering::Portal
@@ -147,6 +149,68 @@ inline std::vector<glm::vec4> ClipApertureToViewFrustum(
         [](const glm::vec4& p) { return p.z; });
     return clipAgainst(std::move(polygon),
         [](const glm::vec4& p) { return p.w - p.z; });
+}
+
+// Intersect two convex screen-space polygons. Portal apertures are validated
+// as convex before rendering, and perspective projection preserves that
+// property after homogeneous frustum clipping. Carrying this intersection
+// down the recursion tree prevents portals elsewhere in the virtual camera's
+// frustum from consuming jobs when they are outside an ancestor aperture.
+inline std::vector<glm::vec2> IntersectConvexScreenPolygons(
+    std::vector<glm::vec2> subject, const std::vector<glm::vec2>& clipPolygon)
+{
+    if (subject.size() < 3u || clipPolygon.size() < 3u)
+        return {};
+
+    float signedArea = 0.f;
+    for (size_t index = 0; index < clipPolygon.size(); ++index)
+    {
+        const glm::vec2& first = clipPolygon[index];
+        const glm::vec2& second =
+            clipPolygon[(index + 1u) % clipPolygon.size()];
+        signedArea += first.x * second.y - first.y * second.x;
+    }
+    const float winding = signedArea >= 0.f ? 1.f : -1.f;
+    const auto edgeDistance = [winding](const glm::vec2& point,
+        const glm::vec2& first, const glm::vec2& second)
+    {
+        const glm::vec2 edge = second - first;
+        const glm::vec2 offset = point - first;
+        return winding * (edge.x * offset.y - edge.y * offset.x);
+    };
+
+    for (size_t edgeIndex = 0; edgeIndex < clipPolygon.size(); ++edgeIndex)
+    {
+        const glm::vec2 first = clipPolygon[edgeIndex];
+        const glm::vec2 second =
+            clipPolygon[(edgeIndex + 1u) % clipPolygon.size()];
+        std::vector<glm::vec2> output;
+        if (subject.empty())
+            return output;
+        output.reserve(subject.size() + 2u);
+        glm::vec2 previous = subject.back();
+        float previousDistance = edgeDistance(previous, first, second);
+        bool previousInside = previousDistance >= -1e-6f;
+        for (const glm::vec2& current : subject)
+        {
+            const float currentDistance = edgeDistance(current, first, second);
+            const bool currentInside = currentDistance >= -1e-6f;
+            if (currentInside != previousInside)
+            {
+                const float denominator = previousDistance - currentDistance;
+                const float amount = std::abs(denominator) > 1e-8f
+                    ? previousDistance / denominator : 0.f;
+                output.push_back(previous + amount * (current - previous));
+            }
+            if (currentInside)
+                output.push_back(current);
+            previous = current;
+            previousDistance = currentDistance;
+            previousInside = currentInside;
+        }
+        subject = std::move(output);
+    }
+    return subject;
 }
 
 // Each top-level portal receives a disjoint stencil range. At the root, the
