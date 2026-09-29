@@ -23,6 +23,7 @@ Status convention:
 - [x] Asset records with source paths, stable IDs, import settings, browser assignment workflows, and throttled/filesystem-notified script refresh instead of recursive scanning every frame.
 - [x] DX11, DX12, and Vulkan renderer selection for editor and game hosts, including startup probing and DX11 editor fallback.
 - [x] One deterministic scene/export clock now drives gameplay, skeletal and sprite animation, physics, cloth, camera tracks, moving portals, controller movement, and audio transport. Export-relevant
+
 ### Assets, animation, UI, audio, and physics
 
 - [x] glTF import through the engine model representation, including skinning, animation, morph targets, vertex colors, UV1, and FBX conversion into the same representation.

@@ -129,6 +129,7 @@ void ImGuiMainMenu::DrawViewsMenu(EditorState& state) const
     if (ImGui::MenuItem("Console")) OpenPanel(state, "Console");
     if (ImGui::MenuItem("Problems")) OpenPanel(state, "Problems");
     if (ImGui::MenuItem("Terminal")) OpenPanel(state, "Terminal");
+    if (ImGui::MenuItem("Performance")) OpenPanel(state, "Performance");
     ImGui::EndMenu();
 }
 

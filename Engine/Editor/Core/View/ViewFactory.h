@@ -8,6 +8,7 @@
 #include "Views/ConsoleView.h"
 #include "Views/TerminalView.h"
 #include "Views/ProblemsView.h"
+#include "Views/PerformanceView.h"
 #include "Core/Renderers/IEditorRenderer.h"
 #include "Core/Scene/Scene.h"
 #include "Core/ProjectLoader.h"
@@ -48,7 +49,7 @@ public:
                 const Engine::Model::ProjectSettings& settings);
 
     // Create a new panel by type name.
-    // Supported names: "Scene", "Game", "Hierarchy", "Properties", "Assets", "Console", "Terminal", "Problems"
+    // Supported names include the document views and all utility panels.
     // Returns nullptr if the type name is unknown or if no SRV slot is available for a 3-D view.
     std::unique_ptr<IEditorPanel> Create(const std::string& typeName);
 

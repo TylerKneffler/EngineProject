@@ -8,7 +8,8 @@ namespace Engine::Editor
 // ---------------------------------------------------------------------------
 const std::unordered_set<std::string> ViewFactory::kSingletonTypes =
 {
-    "Hierarchy", "Properties", "Assets", "Console", "Terminal", "Problems"
+    "Hierarchy", "Properties", "Assets", "Console", "Terminal", "Problems",
+    "Performance"
 };
 
 // ---------------------------------------------------------------------------
@@ -233,6 +234,15 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
     if (typeName == "Problems")
     {
         auto view = std::make_unique<ProblemsView>(m_problemStore);
+        AssignLowestAvailableTitle(typeName, view.get());
+        view->SetDefaultDockArea(EditorPanelDockArea::BottomPanel);
+        m_singletonInstances[typeName] = view.get();
+        return view;
+    }
+
+    if (typeName == "Performance")
+    {
+        auto view = std::make_unique<PerformanceView>();
         AssignLowestAvailableTitle(typeName, view.get());
         view->SetDefaultDockArea(EditorPanelDockArea::BottomPanel);
         m_singletonInstances[typeName] = view.get();

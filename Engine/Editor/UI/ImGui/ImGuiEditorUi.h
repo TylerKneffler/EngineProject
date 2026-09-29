@@ -76,6 +76,11 @@ public:
     void BeginDisabled(bool) override; void EndDisabled() override;
     bool Combo(const char*, int*, const char* const*, int) override;
     void Tooltip(const char*) override; void Progress(float, const char*) override;
+    void PercentageGrid(const char*, const EditorUiPercentageSegment*, size_t,
+        float) override;
+    void UsageHistory(const char*, const float*, size_t, float, float,
+        EditorUiColor, float, float) override;
+    float FrameRate() const override;
     void DrawImage(void*, float, float) override;
     void DrawCircularImage(void*, float, EditorUiColor) override;
     EditorUiViewportInput Viewport(void*, float, EditorUiColor) override;

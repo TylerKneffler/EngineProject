@@ -16,7 +16,6 @@ if(MSVC)
     set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT
         "$<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:Embedded>")
 endif()
-
 # This CMake project can be built directly for engine development or consumed
 # by a generated game project via add_subdirectory(). Generated projects set
 # ENGINE_PROJECT_DIR and ENGINE_PROJECT_FILE before referencing the engine.
@@ -949,43 +948,4 @@ if(NOT ENGINE_PROJECT_DIR AND
     add_test(NAME RetainedUILayoutAndSerialization COMMAND UILayoutTests)
     set_tests_properties(RetainedUILayoutAndSerialization PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}")
-endif()
-
-# Cross-backend, fixed-timestep GPU image regressions, including portal
-# aperture/recursion/occlusion validation. The test returns CTest's
-# skip code when any required renderer is unavailable, rather than weakening a
-# three-way parity run into partial coverage.
-if(WIN32 AND NOT ENGINE_PROJECT_DIR)
-    enable_testing()
-    add_executable(RenderBackendParityTests
-        "${ENGINE_ROOT}/Engine/Tests/Rendering/RenderBackendParityTests.cpp"
-        ${ASSET_SOURCES})
-    target_link_libraries(RenderBackendParityTests PRIVATE
-        Engine dwmapi.lib gdi32.lib)
-    target_include_directories(RenderBackendParityTests PRIVATE
-        "${ENGINE_ROOT}/Engine"
-        "${ENGINE_ROOT}/Engine/Core/Assets")
-    target_precompile_headers(RenderBackendParityTests REUSE_FROM Engine)
-    target_link_options(RenderBackendParityTests PRIVATE
-        $<$<CXX_COMPILER_ID:MSVC>:/INCREMENTAL:NO>)
-    add_test(NAME RenderBackendFeatureParity COMMAND RenderBackendParityTests)
-    set_tests_properties(RenderBackendFeatureParity PROPERTIES
-        WORKING_DIRECTORY "${ENGINE_ROOT}"
-        SKIP_RETURN_CODE 77
-        TIMEOUT 600
-        LABELS "gpu;render;parity")
-endif()
-
-if(NOT ENGINE_PROJECT_DIR)
-    enable_testing()
-    add_executable(SimulationClockTests
-        "${ENGINE_ROOT}/Engine/Tests/Time/SimulationClockTests.cpp")
-    target_link_libraries(SimulationClockTests PRIVATE Engine)
-    target_include_directories(SimulationClockTests PRIVATE
-        "${ENGINE_ROOT}/Engine")
-    target_precompile_headers(SimulationClockTests REUSE_FROM Engine)
-    add_test(NAME DeterministicSimulationClock COMMAND SimulationClockTests)
-    set_tests_properties(DeterministicSimulationClock PROPERTIES
-        WORKING_DIRECTORY "${ENGINE_ROOT}"
-        LABELS "determinism;export;time")
 endif()

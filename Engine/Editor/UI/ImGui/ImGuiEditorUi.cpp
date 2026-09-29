@@ -807,6 +807,121 @@ void ImGuiEditorUi::BeginDisabled(bool d){ImGui::BeginDisabled(d);} void ImGuiEd
 bool ImGuiEditorUi::Combo(const char*l,int*s,const char*const*i,int c){return ImGui::Combo(l,s,i,c);}
 void ImGuiEditorUi::Tooltip(const char*t){if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("%s",t);}
 void ImGuiEditorUi::Progress(float f,const char*o){ImGui::ProgressBar(f,{-1,0},o);}
+void ImGuiEditorUi::PercentageGrid(const char* id,
+    const EditorUiPercentageSegment* segments,size_t segmentCount,float requestedWidth)
+{
+    const float width=requestedWidth>0.f?requestedWidth:ImGui::GetContentRegionAvail().x;
+    const float gap=2.f;
+    const float cell=std::max(2.f,(width-gap*9.f)/10.f);
+    const float actualWidth=cell*10.f+gap*9.f;
+    const float height=actualWidth;
+    const ImVec2 origin=ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton(id,{actualWidth,height});
+    ImDrawList* draw=ImGui::GetWindowDrawList();
+    const ImU32 empty=ImGui::GetColorU32(ImGuiCol_FrameBg);
+    const ImU32 border=ImGui::GetColorU32(ImGuiCol_Border);
+    struct CellFill
+    {
+        float r=0.f,g=0.f,b=0.f,a=0.f;
+        float coverage=0.f;
+    };
+    std::array<CellFill,100> fills{};
+    float cursor=0.f;
+    for(size_t segment=0;segment<segmentCount&&cursor<100.f;++segment)
+    {
+        const float amount=std::clamp(segments[segment].percentage,0.f,100.f-cursor);
+        const float end=cursor+amount;
+        const int first=std::clamp(static_cast<int>(std::floor(cursor)),0,99);
+        const int last=std::clamp(static_cast<int>(std::ceil(end))-1,0,99);
+        for(int index=first;index<=last&&amount>0.f;++index)
+        {
+            const float overlap=std::max(0.f,std::min(end,static_cast<float>(index+1))-
+                std::max(cursor,static_cast<float>(index)));
+            CellFill& fill=fills[index];
+            fill.r+=segments[segment].color.r*overlap;
+            fill.g+=segments[segment].color.g*overlap;
+            fill.b+=segments[segment].color.b*overlap;
+            fill.a+=segments[segment].color.a*overlap;
+            fill.coverage+=overlap;
+        }
+        cursor=end;
+    }
+    const ImVec4 background=ImGui::GetStyleColorVec4(ImGuiCol_FrameBg);
+    for(int index=0;index<100;++index)
+    {
+        const int row=9-index/10;
+        const int column=index%10;
+        const ImVec2 minimum{origin.x+column*(cell+gap),origin.y+row*(cell+gap)};
+        const ImVec2 maximum{minimum.x+cell,minimum.y+cell};
+        ImU32 color=empty;
+        const CellFill& fill=fills[index];
+        if(fill.coverage>0.f)
+        {
+            const float coverage=std::clamp(fill.coverage,0.f,1.f);
+            const float inverse=1.f-coverage;
+            // A partially occupied cell fades continuously from its normal
+            // background. Category boundaries blend by their share of the cell.
+            color=ImGui::ColorConvertFloat4ToU32({
+                background.x*inverse+fill.r,
+                background.y*inverse+fill.g,
+                background.z*inverse+fill.b,
+                background.w*inverse+fill.a
+            });
+        }
+        draw->AddRectFilled(minimum,maximum,color,cell*.16f);
+        draw->AddRect(minimum,maximum,border,cell*.16f);
+    }
+    if(ImGui::IsItemHovered())
+    {
+        ImGui::BeginTooltip();
+        float total=0.f;
+        for(size_t index=0;index<segmentCount;++index)
+        {
+            total+=std::max(0.f,segments[index].percentage);
+            const EditorUiColor& value=segments[index].color;
+            ImGui::ColorButton("##legend",{value.r,value.g,value.b,value.a},
+                ImGuiColorEditFlags_NoTooltip|ImGuiColorEditFlags_NoDragDrop,{9.f,9.f});
+            ImGui::SameLine();
+            ImGui::Text("%s  %.1f%%",segments[index].label?segments[index].label:"Usage",
+                segments[index].percentage);
+        }
+        if(segmentCount>1)ImGui::TextDisabled("Combined: %.1f%%",std::min(total,100.f));
+        ImGui::TextDisabled("10 x 10  |  1%% per cell");
+        ImGui::EndTooltip();
+    }
+}
+float ImGuiEditorUi::FrameRate() const{return ImGui::GetIO().Framerate;}
+void ImGuiEditorUi::UsageHistory(const char* id,const float* values,size_t count,
+    float minimum,float maximum,EditorUiColor color,float requestedWidth,float height)
+{
+    const float width=requestedWidth>0.f?requestedWidth:ImGui::GetContentRegionAvail().x;
+    const ImVec2 origin=ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton(id,{width,height});
+    ImDrawList* draw=ImGui::GetWindowDrawList();
+    draw->AddRectFilled(origin,{origin.x+width,origin.y+height},ImGui::GetColorU32(ImGuiCol_FrameBg),3.f);
+    const ImU32 grid=ImGui::GetColorU32(ImGuiCol_Border);
+    for(int line=1;line<4;++line)
+    {
+        const float y=origin.y+height*line/4.f;
+        draw->AddLine({origin.x,y},{origin.x+width,y},grid);
+    }
+    if(values&&count>1&&maximum>minimum)
+    {
+        const ImU32 plot=ImGui::ColorConvertFloat4ToU32({color.r,color.g,color.b,color.a});
+        for(size_t index=1;index<count;++index)
+        {
+            const float first=std::clamp((values[index-1]-minimum)/(maximum-minimum),0.f,1.f);
+            const float second=std::clamp((values[index]-minimum)/(maximum-minimum),0.f,1.f);
+            const float x0=origin.x+width*static_cast<float>(index-1)/static_cast<float>(count-1);
+            const float x1=origin.x+width*static_cast<float>(index)/static_cast<float>(count-1);
+            draw->AddLine({x0,origin.y+height*(1.f-first)},
+                {x1,origin.y+height*(1.f-second)},plot,2.f);
+        }
+    }
+    draw->AddRect(origin,{origin.x+width,origin.y+height},grid,3.f);
+    if(ImGui::IsItemHovered()&&values&&count)
+        ImGui::SetTooltip("Current %.1f   Range %.0f-%.0f",values[count-1],minimum,maximum);
+}
 void ImGuiEditorUi::DrawImage(void*tex,float w,float h){ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(tex)),{w,h});}
 void ImGuiEditorUi::DrawCircularImage(void* tex,float diameter,EditorUiColor border)
 {

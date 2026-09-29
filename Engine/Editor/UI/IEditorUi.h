@@ -16,6 +16,12 @@ namespace Engine::Editor
 
 struct EditorUiVec2 { float x = 0.f, y = 0.f; };
 struct EditorUiColor { float r = 1.f, g = 1.f, b = 1.f, a = 1.f; };
+struct EditorUiPercentageSegment
+{
+    const char* label = nullptr;
+    float percentage = 0.f;
+    EditorUiColor color{};
+};
 struct EditorUiViewportInput
 {
     EditorUiVec2 available;
@@ -246,6 +252,15 @@ public:
     virtual bool Combo(const char* label, int* selected, const char* const* items, int count) = 0;
     virtual void Tooltip(const char* text) = 0;
     virtual void Progress(float fraction, const char* overlay = nullptr) = 0;
+    // Draws a reusable 10x10 percentage grid (1% per cell). Segments are laid
+    // out in order so neighboring cells form category blocks.
+    virtual void PercentageGrid(const char* id,
+        const EditorUiPercentageSegment* segments, size_t segmentCount,
+        float width = 0.f) = 0;
+    virtual void UsageHistory(const char* id, const float* values, size_t count,
+        float minimum, float maximum, EditorUiColor color,
+        float width = 0.f, float height = 72.f) = 0;
+    virtual float FrameRate() const = 0;
     virtual void DrawImage(void* texture, float width, float height) = 0;
     // Draws a square texture as a circular item while preserving normal ImGui
     // hover/click/drag-drop behavior for the preview.
