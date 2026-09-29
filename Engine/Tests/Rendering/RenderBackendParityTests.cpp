@@ -2,6 +2,8 @@
 #include "Core/Compoonents/Lighting/Light.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Physics/RigidBody.h"
+#include "Core/Compoonents/Physics/SpatialManipulator.h"
 #include "Core/Model/ProjectSettings.h"
 #include "Core/Renderers/IGameRenderer.h"
 #include "Core/Renderers/RendererFactory.h"
@@ -14,6 +16,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -36,6 +39,8 @@ struct ScenarioResult
     uint32_t ordinaryDraws = 0;
     uint32_t skinnedObjects = 0;
 };
+
+using SceneConfiguration = std::function<void(Engine::Scene::Scene&)>;
 
 void PumpMessages()
 {
@@ -100,12 +105,12 @@ double LuminanceVariance(const Image& image)
 }
 
 void SaveDiagnostic(const Image& image, const std::string& backend,
-    const std::string& scenePath)
+    const std::string& scenePath, const std::string& variant)
 {
     std::filesystem::create_directories(".local/TestResults/render-parity");
     const std::string scene = std::filesystem::path(scenePath).stem().string();
     std::ofstream output(".local/TestResults/render-parity/" + scene + "-" +
-        backend + ".ppm", std::ios::binary);
+        variant + "-" + backend + ".ppm", std::ios::binary);
     output << "P6\n" << Width << ' ' << Height << "\n255\n";
     for (size_t offset = 0; offset < image.bgra.size(); offset += 4u)
     {
@@ -145,6 +150,56 @@ Difference Compare(const Image& first, const Image& second)
     }
     return { static_cast<double>(total) / channelCount,
         static_cast<double>(maximum), static_cast<double>(large) / channelCount };
+}
+
+struct RegionDifference
+{
+    double changedFraction = 0.0;
+    double boundingFraction = 0.0;
+    double changedLuminanceVariance = 0.0;
+};
+
+RegionDifference CompareRegion(const Image& first, const Image& second)
+{
+    if (first.bgra.size() != second.bgra.size() || first.bgra.empty())
+        throw std::runtime_error("Portal captures have incompatible sizes");
+    uint32_t minX = Width, minY = Height, maxX = 0u, maxY = 0u;
+    uint64_t changed = 0u;
+    double sum = 0.0, squared = 0.0;
+    for (uint32_t y = 0; y < Height; ++y)
+    {
+        for (uint32_t x = 0; x < Width; ++x)
+        {
+            const size_t offset = (static_cast<size_t>(y) * Width + x) * 4u;
+            const int db = std::abs(static_cast<int>(first.bgra[offset]) -
+                static_cast<int>(second.bgra[offset]));
+            const int dg = std::abs(static_cast<int>(first.bgra[offset + 1u]) -
+                static_cast<int>(second.bgra[offset + 1u]));
+            const int dr = std::abs(static_cast<int>(first.bgra[offset + 2u]) -
+                static_cast<int>(second.bgra[offset + 2u]));
+            if (std::max({ db, dg, dr }) <= 12)
+                continue;
+            minX = std::min(minX, x); minY = std::min(minY, y);
+            maxX = std::max(maxX, x); maxY = std::max(maxY, y);
+            const double luminance = first.bgra[offset + 2u] * 0.2126 +
+                first.bgra[offset + 1u] * 0.7152 + first.bgra[offset] * 0.0722;
+            sum += luminance;
+            squared += luminance * luminance;
+            ++changed;
+        }
+    }
+    RegionDifference result;
+    const double pixelCount = static_cast<double>(Width) * Height;
+    result.changedFraction = static_cast<double>(changed) / pixelCount;
+    if (changed != 0u)
+    {
+        result.boundingFraction = static_cast<double>(maxX - minX + 1u) *
+            (maxY - minY + 1u) / pixelCount;
+        const double mean = sum / static_cast<double>(changed);
+        result.changedLuminanceVariance =
+            squared / static_cast<double>(changed) - mean * mean;
+    }
+    return result;
 }
 
 void Require(bool condition, const std::string& message)
@@ -196,7 +251,8 @@ Engine::Core::Object* AddAlphaMaskAndMorphFixture(Engine::Scene::Scene& scene,
 
 ScenarioResult RenderScenario(const std::string& backend,
     const std::string& scenePath, bool configureLightingFixture,
-    bool captureOutput = true)
+    bool captureOutput = true, const std::string& variant = "default",
+    const SceneConfiguration& configureScene = {})
 {
     Engine::Model::ProjectSettings settings{};
     settings.gameRenderingAPI = backend;
@@ -216,6 +272,8 @@ ScenarioResult RenderScenario(const std::string& backend,
     scene.SetRealtimeShadowSettings(settings.realtimeShadows);
     scene.SetDistanceLightingSettings(settings.distanceLighting);
     Require(scene.Load(scenePath), "Could not load render fixture: " + scenePath);
+    if (configureScene)
+        configureScene(scene);
     Engine::Core::Object* movingCaster = configureLightingFixture
         ? AddAlphaMaskAndMorphFixture(scene, renderer->GetGraphicsProvider())
         : nullptr;
@@ -273,10 +331,62 @@ ScenarioResult RenderScenario(const std::string& backend,
     const Difference captureDifference = Compare(firstCapture, result.image);
     Require(captureDifference.mean <= 1.0,
         backend + " client capture was not stable after GPU idle");
-    SaveDiagnostic(result.image, backend, scenePath);
+    SaveDiagnostic(result.image, backend, scenePath, variant);
     Require(LuminanceVariance(result.image) > 16.0,
         backend + " produced a blank or uncapturable frame for " + scenePath);
     return result;
+}
+
+void SetPortalsEnabled(Engine::Scene::Scene& scene, bool enabled)
+{
+    for (const auto& object : scene.GetObjects())
+        if (auto* portal = object->GetComponent<
+            Engine::Components::SpatialManipulator>())
+            portal->enabled = enabled;
+}
+
+void ConfigurePortalOccluder(Engine::Scene::Scene& scene)
+{
+    Engine::Core::Object* wall = scene.FindObjectByName("Scale Test Cube");
+    Require(wall != nullptr, "Portal occlusion fixture has no mesh");
+    wall->transform.position = { 7.f, 4.f, -8.f };
+    wall->transform.rotation = { 0.f, 0.f, 0.f };
+    wall->transform.scale = { 20.f, 20.f, 1.f };
+    wall->transform.MarkDirty();
+    if (auto* rigidBody = wall->GetComponent<Engine::Components::RigidBody>())
+    {
+        rigidBody->bodyType = "Static";
+        rigidBody->initialLinearVelocity = glm::vec3(0.f);
+        rigidBody->initialAngularVelocity = glm::vec3(0.f);
+    }
+}
+
+void RequirePortalFrameValidation(const std::string& backend,
+    const ScenarioResult& visible, const ScenarioResult& disabled,
+    const ScenarioResult& shallow, const ScenarioResult& recursive,
+    const ScenarioResult& occluded, const ScenarioResult& occludedDisabled)
+{
+    const RegionDifference aperture = CompareRegion(visible.image, disabled.image);
+    std::printf("portal aperture %s: changed=%.4f bounds=%.4f variance=%.2f\n",
+        backend.c_str(), aperture.changedFraction, aperture.boundingFraction,
+        aperture.changedLuminanceVariance);
+    Require(aperture.changedFraction >= 0.001 && aperture.changedFraction <= 0.30,
+        backend + " portal output was absent or escaped its aperture");
+    Require(aperture.boundingFraction <= 0.45,
+        backend + " portal depth/stencil mask affected too much of the frame");
+    Require(aperture.changedLuminanceVariance >= 20.0,
+        backend + " portal did not show distinct target-side content");
+
+    const RegionDifference recursion = CompareRegion(recursive.image, shallow.image);
+    Require(recursion.changedFraction >= 0.00005,
+        backend + " recursive portal depth produced no nested-view pixels");
+    Require(recursion.changedFraction <= aperture.boundingFraction + 0.01,
+        backend + " recursive portal view escaped the root aperture");
+
+    const RegionDifference hidden = CompareRegion(
+        occluded.image, occludedDisabled.image);
+    Require(hidden.changedFraction <= 0.0005,
+        backend + " portal remote view leaked through occluding geometry");
 }
 
 void RequireParity(const char* scenario, const ScenarioResult& reference,
@@ -320,14 +430,33 @@ int main()
                 RenderScenario(backend,
                     "Engine/Core/Assets/Scenes/Showcases/lighting_showcase.scene",
                     true, false);
+                std::printf("Smoke rendering recursive portals with %s...\n",
+                    backend.c_str());
+                std::fflush(stdout);
+                RenderScenario(backend,
+                    "Engine/Core/Assets/Scenes/Portals/portal_size_ratio.scene",
+                    false, false, "portal-smoke",
+                    [](Engine::Scene::Scene& scene)
+                    {
+                        scene.settings.portalRecursionDepth = 4;
+                        scene.settings.portalConnectionRepeatLimit = 4;
+                    });
             }
-            std::puts("FP16 composition smoke test passed on all backends.");
+            std::puts("FP16 composition and recursive portal smoke tests passed on all backends.");
             return 0;
         }
 
         std::array<ScenarioResult, 3> lighting;
         std::array<ScenarioResult, 3> animation;
         std::array<ScenarioResult, 3> terrain;
+        std::array<ScenarioResult, 3> portalVisible;
+        std::array<ScenarioResult, 3> portalDisabled;
+        std::array<ScenarioResult, 3> portalShallow;
+        std::array<ScenarioResult, 3> portalRecursive;
+        std::array<ScenarioResult, 3> portalOccluded;
+        std::array<ScenarioResult, 3> portalOccludedDisabled;
+        constexpr const char* portalScene =
+            "Engine/Core/Assets/Scenes/Portals/portal_size_ratio.scene";
         for (size_t backend = 0; backend < backends.size(); ++backend)
         {
             std::printf("Rendering parity fixtures with %s...\n",
@@ -339,8 +468,42 @@ int main()
                 "Engine/Core/Assets/Scenes/Showcases/animation_showcase.scene", false);
             terrain[backend] = RenderScenario(backends[backend],
                 "Engine/Core/Assets/Scenes/Procedural/terrain_gen.scene", false);
+            portalVisible[backend] = RenderScenario(backends[backend], portalScene,
+                false, true, "portal-visible");
+            portalDisabled[backend] = RenderScenario(backends[backend], portalScene,
+                false, true, "portal-disabled", [](Engine::Scene::Scene& scene)
+                {
+                    SetPortalsEnabled(scene, false);
+                });
+            portalShallow[backend] = RenderScenario(backends[backend], portalScene,
+                false, true, "portal-depth-1", [](Engine::Scene::Scene& scene)
+                {
+                    scene.settings.portalRecursionDepth = 1;
+                });
+            portalRecursive[backend] = RenderScenario(backends[backend], portalScene,
+                false, true, "portal-depth-4", [](Engine::Scene::Scene& scene)
+                {
+                    scene.settings.portalRecursionDepth = 4;
+                    scene.settings.portalConnectionRepeatLimit = 4;
+                });
+            portalOccluded[backend] = RenderScenario(backends[backend], portalScene,
+                false, true, "portal-occluded", [](Engine::Scene::Scene& scene)
+                {
+                    ConfigurePortalOccluder(scene);
+                });
+            portalOccludedDisabled[backend] = RenderScenario(backends[backend],
+                portalScene, false, true, "portal-occluded-disabled",
+                [](Engine::Scene::Scene& scene)
+                {
+                    ConfigurePortalOccluder(scene);
+                    SetPortalsEnabled(scene, false);
+                });
             Require(animation[backend].skinnedObjects > 0u,
                 backends[backend] + " did not render the skinned animation fixture");
+            RequirePortalFrameValidation(backends[backend], portalVisible[backend],
+                portalDisabled[backend], portalShallow[backend],
+                portalRecursive[backend], portalOccluded[backend],
+                portalOccludedDisabled[backend]);
         }
         for (size_t backend = 1; backend < backends.size(); ++backend)
         {
@@ -350,6 +513,12 @@ int main()
                 backends[backend]);
             RequireParity("terrain", terrain[0], terrain[backend],
                 backends[backend]);
+            RequireParity("portal-visible", portalVisible[0],
+                portalVisible[backend], backends[backend]);
+            RequireParity("portal-recursive", portalRecursive[0],
+                portalRecursive[backend], backends[backend]);
+            RequireParity("portal-occluded", portalOccluded[0],
+                portalOccluded[backend], backends[backend]);
         }
         std::puts("Point-shadow render case: NOT SUPPORTED (directional-only shipped scope)");
         return 0;

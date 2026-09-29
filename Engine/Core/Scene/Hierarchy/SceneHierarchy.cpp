@@ -55,6 +55,8 @@ Scene::~Scene()
 
 void Scene::Start()
 {
+    m_clock.Reset();
+    m_deltaTime = 0.f;
     for (const auto& object : m_objects)
         object->Start();
     m_hasStarted = true;
@@ -62,12 +64,12 @@ void Scene::Start()
 
 void Scene::Update(float deltaTime)
 {
-    m_deltaTime = std::max(0.f, deltaTime);
+    m_deltaTime = m_clock.Advance(deltaTime);
     m_isUpdating = true;
     for (const auto& object : m_objects)
         object->Update();
-    m_audio->Update(deltaTime);
-    m_physics->Step(deltaTime);
+    m_audio->Update(m_deltaTime);
+    m_physics->Step(m_deltaTime);
     // Bullet has now published current-frame poses and overlap pairs. Portal
     // traversal deliberately runs here rather than in Component::Update so a
     // crossing is evaluated against the motion that just occurred.
@@ -106,6 +108,13 @@ void Scene::Update(float deltaTime)
     m_isUpdating = false;
     FlushPendingObjectAdditions();
     FlushPendingObjectRemovals();
+}
+
+void Scene::UpdateFixedFrame()
+{
+    if (!m_clock.IsFixedStep())
+        throw std::logic_error("UpdateFixedFrame requires a configured fixed time step");
+    Update(0.f);
 }
 
 Engine::Core::Object* Scene::AddObject()

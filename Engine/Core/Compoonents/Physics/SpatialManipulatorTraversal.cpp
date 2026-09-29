@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cstring>
 #include <glm/gtc/quaternion.hpp>
+#include <limits>
 #include <unordered_set>
 
 namespace Engine::Components
@@ -40,6 +41,77 @@ bool MatricesNearlyEqual(const glm::mat4& first, const glm::mat4& second,
             if (std::abs(first[column][row] - second[column][row]) > epsilon)
                 return false;
         }
+    }
+    return true;
+}
+
+void CaptureCollisionEnvelope(RigidBody& body,
+    Engine::Physics::Spatial::PortalTraversalState& state)
+{
+    if (state.hasCollisionEnvelope || !body.Owner)
+        return;
+    glm::vec3 worldMinimum(0.f);
+    glm::vec3 worldMaximum(0.f);
+    if (!body.GetWorldCollisionBounds(worldMinimum, worldMaximum))
+        return;
+    const glm::mat4 worldInverse = glm::inverse(
+        body.Owner->transform.GetWorldMatrix());
+    glm::vec3 localMinimum(std::numeric_limits<float>::max());
+    glm::vec3 localMaximum(std::numeric_limits<float>::lowest());
+    for (int corner = 0; corner < 8; ++corner)
+    {
+        const glm::vec3 worldPoint {
+            (corner & 1) ? worldMaximum.x : worldMinimum.x,
+            (corner & 2) ? worldMaximum.y : worldMinimum.y,
+            (corner & 4) ? worldMaximum.z : worldMinimum.z };
+        const glm::vec3 localPoint(worldInverse * glm::vec4(worldPoint, 1.f));
+        localMinimum = glm::min(localMinimum, localPoint);
+        localMaximum = glm::max(localMaximum, localPoint);
+    }
+    state.collisionLocalCenter = (localMinimum + localMaximum) * 0.5f;
+    state.collisionLocalHalfExtents =
+        glm::max((localMaximum - localMinimum) * 0.5f, glm::vec3(0.f));
+    state.hasCollisionEnvelope = true;
+}
+
+bool CollisionEnvelopeFitsAperture(const SpatialManipulator& portal,
+    const Engine::Physics::Spatial::PortalTraversalState& state,
+    const glm::mat4& bodyWorld, const glm::vec3& crossingPoint)
+{
+    if (!state.hasCollisionEnvelope)
+        return false;
+    const glm::mat4 frame = portal.GetPortalWorldFrame();
+    const glm::vec3 tangent(frame[0]);
+    const glm::vec3 bitangent(frame[1]);
+    const glm::vec3 normal(frame[2]);
+    const glm::vec3 anchor(frame[3]);
+    const glm::mat3 bodyLinear(bodyWorld);
+    glm::vec3 footprintCenter = crossingPoint +
+        bodyLinear * state.collisionLocalCenter;
+    footprintCenter -= normal * glm::dot(footprintCenter - anchor, normal);
+
+    float tangentRadius = 0.f;
+    float bitangentRadius = 0.f;
+    for (int axis = 0; axis < 3; ++axis)
+    {
+        const glm::vec3 halfAxis = bodyLinear[axis] *
+            state.collisionLocalHalfExtents[axis];
+        tangentRadius += std::abs(glm::dot(halfAxis, tangent));
+        bitangentRadius += std::abs(glm::dot(halfAxis, bitangent));
+    }
+    // The generated solid rim overlaps the logical aperture by 5 mm. Keep a
+    // matching clearance so a body accepted for teleport cannot already be
+    // penetrating that rim due to numerical tolerance.
+    constexpr float kRimClearance = 0.006f;
+    tangentRadius += kRimClearance;
+    bitangentRadius += kRimClearance;
+    for (int corner = 0; corner < 4; ++corner)
+    {
+        const glm::vec3 support = footprintCenter +
+            ((corner & 1) ? tangentRadius : -tangentRadius) * tangent +
+            ((corner & 2) ? bitangentRadius : -bitangentRadius) * bitangent;
+        if (!portal.IsWorldPointInsidePortalAperture(support, 0.001f))
+            return false;
     }
     return true;
 }
@@ -542,6 +614,7 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target,
 
         activeBodies.insert(body);
         TraversalState& state = m_traversalStates[body];
+        CaptureCollisionEnvelope(*body, state);
         const glm::vec3 bodyWorldPosition = body->Owner->transform.GetWorldPosition();
         const float currentSignedDistance = ComputeSignedDistanceToPortalPlane(
             bodyWorldPosition);
@@ -659,9 +732,12 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target,
                 ? planePoint
                 : glm::mix(state.previousWorldPosition, bodyWorldPosition,
                     crossingT);
-            // The trigger is merely a broad-phase optimization. The swept
-            // crossing must land in the actual logical aperture.
-            if (!IsWorldPointInsidePortalAperture(crossingPoint, 0.001f))
+            // The trigger is merely a broad-phase optimization. The body's
+            // complete conservative footprint must fit inside the aperture at
+            // the swept crossing time; otherwise the solid rim remains the
+            // physical response and teleportation is rejected.
+            if (!CollisionEnvelopeFitsAperture(*this, state,
+                body->Owner->transform.GetWorldMatrix(), crossingPoint))
                 crossedPortalPlane = false;
         }
 

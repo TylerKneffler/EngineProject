@@ -404,6 +404,8 @@ int VideoExportApplication::Run(HINSTANCE instance)
         std::cerr << "Could not load scene: " << scenePath << '\n';
         return 7;
     }
+    const double fixedDelta = 1.0 / static_cast<double>(options.fps);
+    scene.SetFixedTimeStep(fixedDelta);
     scene.Start();
 
     std::string encoderError;
@@ -415,7 +417,6 @@ int VideoExportApplication::Run(HINSTANCE instance)
         return 8;
     }
 
-    const float fixedDelta = 1.f / static_cast<float>(options.fps);
     const uint64_t maximumFrames = static_cast<uint64_t>(std::ceil(
         options.timeoutSeconds * options.fps));
     const uint64_t requestedFrames = options.durationSeconds > 0.f
@@ -428,7 +429,7 @@ int VideoExportApplication::Run(HINSTANCE instance)
     std::vector<uint8_t> pixels;
     for (uint64_t frame = 0; frame < frameLimit; ++frame)
     {
-        scene.Update(fixedDelta);
+        scene.UpdateFixedFrame();
         Engine::Core::SceneManager::ProcessPendingSceneLoad();
         scene.PrepareRenderFrame();
         renderer.BeginFrame();

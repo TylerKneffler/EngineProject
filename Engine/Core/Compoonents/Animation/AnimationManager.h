@@ -4,7 +4,6 @@
 #include "Core/Model/AnimationData.h"
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
-#include <chrono>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -45,7 +44,6 @@ private:
         glm::quat rotation { 1.f, 0.f, 0.f, 0.f };
         glm::vec3 scale { 1.f };
     };
-    std::chrono::steady_clock::time_point m_lastTick{};
     std::unordered_map<unsigned, RestTransform> m_restPose;
     std::unordered_map<unsigned, std::vector<float>> m_restMorphs;
     std::string m_previousClip;

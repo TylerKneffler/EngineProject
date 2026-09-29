@@ -676,19 +676,6 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
-   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PortalBackendParityTests.cpp")
-    enable_testing()
-    add_executable(PortalBackendParityTests
-        "${ENGINE_LOCAL_TEST_ROOT}/PortalBackendParityTests.cpp")
-    target_link_libraries(PortalBackendParityTests PRIVATE Engine)
-    target_include_directories(PortalBackendParityTests PRIVATE
-        "${ENGINE_ROOT}/Engine")
-    add_test(NAME PortalBackendApertureParity COMMAND PortalBackendParityTests)
-    set_tests_properties(PortalBackendApertureParity PROPERTIES
-        WORKING_DIRECTORY "${ENGINE_ROOT}")
-endif()
-
-if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/VerticalPortalLoopTests.cpp")
     enable_testing()
     add_executable(VerticalPortalLoopTests EXCLUDE_FROM_ALL
@@ -964,7 +951,8 @@ if(NOT ENGINE_PROJECT_DIR AND
         WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()
 
-# Cross-backend, fixed-timestep GPU image regressions. The test returns CTest's
+# Cross-backend, fixed-timestep GPU image regressions, including portal
+# aperture/recursion/occlusion validation. The test returns CTest's
 # skip code when any required renderer is unavailable, rather than weakening a
 # three-way parity run into partial coverage.
 if(WIN32 AND NOT ENGINE_PROJECT_DIR)
@@ -984,6 +972,20 @@ if(WIN32 AND NOT ENGINE_PROJECT_DIR)
     set_tests_properties(RenderBackendFeatureParity PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}"
         SKIP_RETURN_CODE 77
-        TIMEOUT 300
+        TIMEOUT 600
         LABELS "gpu;render;parity")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR)
+    enable_testing()
+    add_executable(SimulationClockTests
+        "${ENGINE_ROOT}/Engine/Tests/Time/SimulationClockTests.cpp")
+    target_link_libraries(SimulationClockTests PRIVATE Engine)
+    target_include_directories(SimulationClockTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    target_precompile_headers(SimulationClockTests REUSE_FROM Engine)
+    add_test(NAME DeterministicSimulationClock COMMAND SimulationClockTests)
+    set_tests_properties(DeterministicSimulationClock PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}"
+        LABELS "determinism;export;time")
 endif()

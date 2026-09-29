@@ -3,9 +3,9 @@
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Object.h"
+#include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include <algorithm>
-#include <chrono>
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtx/norm.hpp>
@@ -26,13 +26,6 @@ glm::vec3 PerpendicularForward(const glm::vec3& up)
         ? glm::vec3(0.f, 0.f, 1.f) : glm::vec3(1.f, 0.f, 0.f);
     return SafeNormalize(reference - up * glm::dot(reference, up),
         glm::vec3(1.f, 0.f, 0.f));
-}
-
-float FrameDeltaSeconds(const std::chrono::steady_clock::time_point& lastFrame)
-{
-    const auto now = std::chrono::steady_clock::now();
-    const float delta = std::chrono::duration<float>(now - lastFrame).count();
-    return (delta > 0.f && delta < 0.25f) ? delta : (1.f / 60.f);
 }
 
 void SetSystemCursorVisible(bool visible)
@@ -83,7 +76,6 @@ FirstPersonControllerRegistration g_registration;
 
 void FirstPersonController::Start()
 {
-    m_lastFrame = std::chrono::steady_clock::now();
     m_hasLookForward = false;
     m_hasBodyFrame = false;
     const bool focused = IsApplicationFocused();
@@ -97,8 +89,8 @@ void FirstPersonController::Update()
     if (!Owner)
         return;
 
-    const float dt = FrameDeltaSeconds(m_lastFrame);
-    m_lastFrame = std::chrono::steady_clock::now();
+    const float dt = Owner->GetScene()
+        ? Owner->GetScene()->GetDeltaTime() : 0.f;
 
     const bool focused = IsApplicationFocused();
     // Read both bits in one call. The transition bit preserves a quick

@@ -451,6 +451,22 @@ void* Engine::Components::RigidBody::GetNativeCollisionObjectForPhysics() const
     return m_impl && m_impl->body ? m_impl->body.get() : nullptr;
 }
 
+bool Engine::Components::RigidBody::GetWorldCollisionBounds(
+    glm::vec3& minimum, glm::vec3& maximum) const
+{
+    if (!m_impl || !m_impl->body || !m_impl->body->getCollisionShape())
+        return false;
+    btVector3 bulletMinimum;
+    btVector3 bulletMaximum;
+    m_impl->body->getCollisionShape()->getAabb(
+        m_impl->body->getWorldTransform(), bulletMinimum, bulletMaximum);
+    minimum = Engine::Physics::ToGlm(bulletMinimum);
+    maximum = Engine::Physics::ToGlm(bulletMaximum);
+    return std::isfinite(minimum.x) && std::isfinite(minimum.y) &&
+        std::isfinite(minimum.z) && std::isfinite(maximum.x) &&
+        std::isfinite(maximum.y) && std::isfinite(maximum.z);
+}
+
 void Engine::Components::RigidBody::SyncBodyFromTransform()
 {
     if (!m_impl || !m_impl->body || !Owner) return;

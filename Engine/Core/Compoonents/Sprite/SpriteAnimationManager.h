@@ -3,7 +3,6 @@
 #include "Core/Component.h"
 #include "Core/Rendering/Sprites/SpriteAnimationAsset.h"
 #include "Core/Rendering/Sprites/SpriteSheetAsset.h"
-#include <chrono>
 #include <memory>
 
 namespace Engine::Components
@@ -48,6 +47,6 @@ private:
     std::shared_ptr<Texture> m_texture;
     std::string m_loadedAnimationPath;
     std::string m_loadedImagePath;
-    std::chrono::steady_clock::time_point m_lastFrameTime{};
+    float m_frameElapsed = 0.f;
 };
 }

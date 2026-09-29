@@ -2,7 +2,6 @@
 
 #include "Core/PropertyMacros.h"
 #include "Core/Script.h"
-#include <chrono>
 #include <glm/glm.hpp>
 #include <string>
 
@@ -58,5 +57,4 @@ private:
     glm::vec3 m_targetBaseRotation { 0.f };
     float m_elapsedSeconds = 0.f;
     bool m_haveBaseFrames = false;
-    std::chrono::steady_clock::time_point m_lastFrame;
 };

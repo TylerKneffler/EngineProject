@@ -244,7 +244,6 @@ Model* AnimationManager::ResolveModel() const
 
 void AnimationManager::Start()
 {
-    m_lastTick = std::chrono::steady_clock::now();
     m_restPose.clear();
     m_restMorphs.clear();
     Model* model = ResolveModel();
@@ -305,12 +304,8 @@ void AnimationManager::Play(const std::string& clipName, float fadeSeconds)
 
 void AnimationManager::Update()
 {
-    const auto now = std::chrono::steady_clock::now();
-    if (m_lastTick.time_since_epoch().count() == 0) m_lastTick = now;
-    const float frameDelta = std::min(
-        std::chrono::duration<float>(now - m_lastTick).count(), 0.1f);
-    m_lastTick = now;
-    Tick(frameDelta);
+    Tick(Owner && Owner->GetScene()
+        ? Owner->GetScene()->GetDeltaTime() : 0.f);
 }
 
 void AnimationManager::Tick(float frameDelta)

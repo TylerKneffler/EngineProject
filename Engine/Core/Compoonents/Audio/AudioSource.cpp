@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <cmath>
 #include <filesystem>
 
 extern "C" {
@@ -51,6 +52,9 @@ struct AudioSource::Impl
     std::string loadedBus;
     int oggSampleRate = 0;
     uint64_t appliedTransformRevision = 0;
+    bool transportPlaying = false;
+    double deterministicStartTime = 0.0;
+    double deterministicOffset = 0.0;
 };
 
 namespace
@@ -173,12 +177,22 @@ void AudioSource::Unload()
     m_impl->loadedBus.clear();
     m_impl->oggSampleRate = 0;
     m_impl->appliedTransformRevision = 0;
+    m_impl->transportPlaying = false;
+    m_impl->deterministicStartTime = 0.0;
+    m_impl->deterministicOffset = 0.0;
 }
 
 bool AudioSource::Play()
 {
     if (!EnsureLoaded()) return false;
     ApplySettings();
+    m_impl->transportPlaying = true;
+    if (UsesDeterministicClock())
+    {
+        m_impl->deterministicStartTime = Owner->GetScene()->GetElapsedTime();
+        SynchronizeToSceneClock();
+        return true;
+    }
     if (ma_sound_at_end(&m_impl->sound))
         ma_sound_seek_to_pcm_frame(&m_impl->sound, 0);
     return ma_sound_start(&m_impl->sound) == MA_SUCCESS;
@@ -187,19 +201,37 @@ bool AudioSource::Play()
 void AudioSource::Pause()
 {
     if (m_impl && m_impl->soundInitialized)
+    {
+        if (UsesDeterministicClock())
+        {
+            SynchronizeToSceneClock();
+            ma_uint64 cursor = 0;
+            ma_uint32 sampleRate = 0;
+            if (ma_sound_get_cursor_in_pcm_frames(&m_impl->sound, &cursor) == MA_SUCCESS &&
+                ma_sound_get_data_format(&m_impl->sound, nullptr, nullptr,
+                    &sampleRate, nullptr, 0) == MA_SUCCESS && sampleRate > 0)
+                m_impl->deterministicOffset = static_cast<double>(cursor) / sampleRate;
+        }
+        m_impl->transportPlaying = false;
         ma_sound_stop(&m_impl->sound);
+    }
 }
 
 void AudioSource::Stop()
 {
     Pause();
     if (m_impl && m_impl->soundInitialized)
+    {
+        m_impl->deterministicOffset = 0.0;
         ma_sound_seek_to_pcm_frame(&m_impl->sound, 0);
+    }
 }
 
 bool AudioSource::IsPlaying() const
 {
-    return m_impl && m_impl->soundInitialized && ma_sound_is_playing(&m_impl->sound);
+    return m_impl && m_impl->soundInitialized &&
+        (UsesDeterministicClock() ? m_impl->transportPlaying
+                                  : ma_sound_is_playing(&m_impl->sound));
 }
 
 bool AudioSource::DrawProperties(::Engine::Editor::IEditorUi& ui)
@@ -229,8 +261,48 @@ void AudioSource::Update()
     const bool wasPlaying = IsPlaying();
     if (!EnsureLoaded()) return;
     ApplySettings();
+    if (UsesDeterministicClock())
+    {
+        if (m_impl->transportPlaying)
+            SynchronizeToSceneClock();
+        return;
+    }
     if (wasPlaying && !IsPlaying() && !ma_sound_at_end(&m_impl->sound))
         ma_sound_start(&m_impl->sound);
+}
+
+bool AudioSource::UsesDeterministicClock() const
+{
+    return Owner && Owner->GetScene() && Owner->GetScene()->GetClock().IsFixedStep();
+}
+
+void AudioSource::SynchronizeToSceneClock()
+{
+    if (!m_impl || !m_impl->soundInitialized || !UsesDeterministicClock())
+        return;
+    ma_uint32 sampleRate = 0;
+    ma_uint64 length = 0;
+    if (ma_sound_get_data_format(&m_impl->sound, nullptr, nullptr, &sampleRate,
+            nullptr, 0) != MA_SUCCESS || sampleRate == 0 ||
+        ma_sound_get_length_in_pcm_frames(&m_impl->sound, &length) != MA_SUCCESS ||
+        length == 0)
+        return;
+    const double elapsed = std::max(0.0,
+        Owner->GetScene()->GetElapsedTime() - m_impl->deterministicStartTime);
+    double sourceSeconds = m_impl->deterministicOffset + elapsed *
+        static_cast<double>(std::max(0.01f, pitch));
+    const double lengthSeconds = static_cast<double>(length) / sampleRate;
+    if (loop)
+        sourceSeconds = std::fmod(sourceSeconds, lengthSeconds);
+    else if (sourceSeconds >= lengthSeconds)
+    {
+        sourceSeconds = lengthSeconds;
+        m_impl->transportPlaying = false;
+    }
+    const ma_uint64 frame = std::min(length,
+        static_cast<ma_uint64>(sourceSeconds * sampleRate));
+    ma_sound_stop(&m_impl->sound);
+    ma_sound_seek_to_pcm_frame(&m_impl->sound, frame);
 }
 
 void AudioSource::Disabled() { Stop(); }

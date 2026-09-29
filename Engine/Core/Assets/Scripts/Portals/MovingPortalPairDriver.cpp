@@ -2,6 +2,7 @@
 #include "Scripts/Portals/MovingPortalPairDriver.h"
 
 #include "Core/Object.h"
+#include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include <algorithm>
 #include <cmath>
@@ -88,23 +89,16 @@ void MovingPortalPairDriver::RecaptureBaseFrames()
 void MovingPortalPairDriver::Start()
 {
     m_elapsedSeconds = 0.f;
-    m_lastFrame = std::chrono::steady_clock::now();
     RecaptureBaseFrames();
     ApplyAtTime(0.f);
 }
 
 void MovingPortalPairDriver::Update()
 {
-    const auto now = std::chrono::steady_clock::now();
     if (!playAutomatically)
-    {
-        m_lastFrame = now;
         return;
-    }
-    float delta = std::chrono::duration<float>(now - m_lastFrame).count();
-    m_lastFrame = now;
-    if (!(delta > 0.f && delta < 0.25f))
-        delta = 1.f / 60.f;
+    const float delta = Owner && Owner->GetScene()
+        ? Owner->GetScene()->GetDeltaTime() : 0.f;
     m_elapsedSeconds += delta;
     ApplyAtTime(m_elapsedSeconds);
 }

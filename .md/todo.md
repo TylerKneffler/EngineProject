@@ -13,12 +13,7 @@ Status convention:
 
 These are the highest-value correctness and architecture tasks still open.
 
-- [ ] CRITICAL: Replace the policy-only portal parity test with actual DX11, DX12, and Vulkan GPU-frame validation covering aperture depth/stencil isolation, recursive views, occlusion, and distinct target-side content without a skybox fallback.
-- [ ] HIGH: Move regression and benchmark sources out of ignored `.local/Tests` into `Engine/Tests`, then make their fixtures and CTest registration reproducible on a clean checkout.
-- [ ] HIGH: Gate portal teleportation with a swept collision-shape-versus-inset-aperture test. Use the solid rim as physical feedback instead of testing only the rigid-body centre.
-- [ ] HIGH: Define explicit portal content-region ownership through a scene layer, scope root, or spatial chart, then restrict rendering and queries to the connected region.
-- [x] Scene lighting renders to linear FP16 targets on DX11, DX12, and Vulkan. A dedicated fullscreen composition pass applies exposure, tone mapping, and final sRGB encoding for game output and editor views.
-- [ ] CRITICAL: Introduce one deterministic export clock used by gameplay, skeletal animation, sprite animation, physics, cloth, camera tracks, particles, and audio. Remove export-relevant wall-clock updates.
+- [ ] HIGH: Define explicit portal content-region ownership through a scene layer, scope root, or spatial chart, then restrict rendering and queries to the connected region.wall-clock paths were removed; no particle runtime currently exists.
 - [ ] HIGH: Give the video exporter an off-screen render target and asynchronous readback instead of capturing the DX11 game swap chain.
 - [ ] HIGH: Add crack-free distance-based terrain LOD with deterministic shared borders or transition meshes, followed by material-compatible terrain batching or indirect submission.
 - [ ] HIGH: Add deterministic light importance sorting for global/portal fallback lists so irrelevant first-in-scene lights cannot displace visible lights.
@@ -36,7 +31,7 @@ These are the highest-value correctness and architecture tasks still open.
 - [x] Hierarchy Ctrl-toggle and Shift-range multi-selection. The Properties view shows common components, displays mixed values as `-`, and broadcasts edits to every selected object.
 - [x] Asset records with source paths, stable IDs, import settings, browser assignment workflows, and throttled/filesystem-notified script refresh instead of recursive scanning every frame.
 - [x] DX11, DX12, and Vulkan renderer selection for editor and game hosts, including startup probing and DX11 editor fallback.
-
+- [x] One deterministic scene/export clock now drives gameplay, skeletal and sprite animation, physics, cloth, camera tracks, moving portals, controller movement, and audio transport. Export-relevant
 ### Assets, animation, UI, audio, and physics
 
 - [x] glTF import through the engine model representation, including skinning, animation, morph targets, vertex colors, UV1, and FBX conversion into the same representation.
@@ -56,7 +51,7 @@ These are the highest-value correctness and architecture tasks still open.
 - [x] Non-blocking frustum/occlusion behavior on DX11, DX12, and Vulkan, including deferred query recycling and conservative fallback when results are unavailable.
 - [x] Non-blocking GPU timestamp telemetry for terrain, portal, opaque, and transparent stages on DX11, DX12, and Vulkan, with CPU submission/presentation reported separately.
 - [x] Central cache storage used by textures and reusable simulation resources; Vulkan texture-system shutdown drains GPU work and invalidates wrappers before device destruction.
-- [ ] PARTIAL: Release animation/rendering and rendered-terrain benchmarks exist only under ignored `.local/Tests`; move the benchmark sources and fixtures into the tracked test tree before treating them as repository coverage.
+- [x] Scene lighting renders to linear FP16 targets on DX11, DX12, and Vulkan. A dedicated fullscreen composition pass applies exposure, tone mapping, and final sRGB encoding for game output and editor views.
 
 ### Portals and spatial mapping
 
@@ -65,7 +60,7 @@ These are the highest-value correctness and architecture tasks still open.
 - [x] Multiple stencil-isolated portal views, recursive views with cycle limits, scissoring, target-plane clipping, mapped cameras, and connection validation.
 - [x] Persistent local/remote split render instances, separate collision pieces, welded cap generation, restoration, and bounded rebuild behavior.
 - [x] Unified rendering/physics/raycast/audio/camera/gameplay spatial-query contract and finite recursive portal-ray segmentation used by editor picking.
-- [ ] PARTIAL: Portal policy/math regressions for stencil references, aperture clipping, recursion limits, and screen polygons exist only under ignored `.local/Tests`; move them into the tracked test tree. GPU portal parity also remains unverified because neither that test nor the general renderer parity suite renders a portal fixture.
+- [x] HIGH: Gate portal teleportation with a swept collision-shape-versus-inset-aperture test. Use the solid rim as physical feedback instead of testing only the rigid-body centre.
 
 ### Directional shadows and realtime lighting
 
@@ -83,7 +78,7 @@ These are the highest-value correctness and architecture tasks still open.
 ### Video export baseline
 
 - [x] Direct-to-FFmpeg DX11 export for MP4, WebM, and MOV with fixed output rate, fixed scene update delta, configurable dimensions/duration/codec/quality, camera-track completion, and synchronous RGBA capture.
-- [ ] PARTIAL: A fixed `Scene::Update()` delta exists, but animation, sprite animation, first-person control, moving portals, and other components still contain wall-clock paths; exports are therefore not fully deterministic.
+- [x] The exporter configures the scene clock before `Start()` and advances integer-indexed fixed frames; animation, sprite animation, first-person control, moving portals, physics, cloth, camera tracks, gameplay, and audio consume that clock.
 
 ## Active backlog
 
@@ -95,6 +90,7 @@ These are the highest-value correctness and architecture tasks still open.
 
 ### Portal correctness and tooling
 
+- [x] CRITICAL: Replace the policy-only portal parity test with actual DX11, DX12, and Vulkan GPU-frame validation covering aperture depth/stencil isolation, recursive views, occlusion, and distinct target-side content without a skybox fallback.
 - [ ] HIGH: Expose a Bullet-backed portal raycast-hit API and test regular objects, split pieces, aperture rims, and recursive portal hits.
 - [ ] MEDIUM: Add bounded adaptive nonlinear-warp ray paths for gameplay/physics; a single origin/tangent Jacobian cannot represent curved paths or volume-boundary crossings.
 - [ ] MEDIUM: Support indexed meshes, submeshes/material slots, skinned meshes, and morph changes in CPU portal cuts. The current triangle-stream clipper cannot preserve all imported topology.
@@ -161,7 +157,7 @@ These are the highest-value correctness and architecture tasks still open.
 
 #### Deterministic simulation
 
-- [ ] CRITICAL: Route every export-relevant update through an explicit export clock and remove wall-clock animation/script timing.
+- [x] Route every existing export-relevant update through the explicit scene/export clock and remove wall-clock animation and script timing.
 - [ ] HIGH: Render an explicit frame at `t = 0` before advancing simulation.
 - [ ] HIGH: Add repeatability tests that compare multiple exports of the same scene.
 

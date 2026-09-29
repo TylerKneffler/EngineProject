@@ -7,6 +7,7 @@
 #include "Core/Model/SceneSettings.h"
 #include "Core/Model/MeshData.h"
 #include "Core/Model/LightingData.h"
+#include "Core/Time/SimulationClock.h"
 #include <glm/glm.hpp>
 #include <array>
 #include <memory>
@@ -112,7 +113,15 @@ public:
     // Runtime lifecycle shared by the standalone game and Editor Play mode.
     void Start();
     void Update(float deltaTime);
+    // Advances exactly one configured fixed frame. Offline exporters use this
+    // instead of supplying or sampling wall-clock deltas.
+    void UpdateFixedFrame();
+    void SetFixedTimeStep(double seconds) { m_clock.SetFixedStep(seconds); }
+    void UseVariableTimeStep() { m_clock.UseVariableStep(); }
     float GetDeltaTime() const { return m_deltaTime; }
+    double GetElapsedTime() const { return m_clock.GetElapsedTime(); }
+    uint64_t GetFrameIndex() const { return m_clock.GetFrameIndex(); }
+    const Engine::Time::SimulationClock& GetClock() const { return m_clock; }
     Engine::Physics::Physics& GetPhysics() { return *m_physics; }
     const Engine::Physics::Physics& GetPhysics() const { return *m_physics; }
     Engine::Audio::Audio& GetAudio() { return *m_audio; }
@@ -454,6 +463,7 @@ private:
     bool m_isUpdating = false;
     bool m_hasStarted = false;
     float m_deltaTime = 0.f;
+    Engine::Time::SimulationClock m_clock;
     uint64_t m_structureRevision = 1;
     void FlushPendingObjectAdditions();
     void FlushPendingObjectRemovals();

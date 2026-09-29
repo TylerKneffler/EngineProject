@@ -54,6 +54,11 @@ public:
     bool waitForOverlapExit = false;
     glm::vec3 previousWorldPosition { 0.f };
     bool hasPreviousWorldPosition = false;
+    // Conservative pre-split collision envelope in object-local space. The
+    // active Bullet shape may later contain only one portal-clipped half.
+    glm::vec3 collisionLocalCenter { 0.f };
+    glm::vec3 collisionLocalHalfExtents { 0.f };
+    bool hasCollisionEnvelope = false;
 };
 
 // Per-object metric state for opt-in scale persistence through a warp volume.
