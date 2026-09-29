@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <Scene xmlns:components="urn:engine-components" version="1">
-  <settings showGrid="true" gridHalfSize="24" gridCellSize="1" gridOpacity="0.25" gridFadeDistance="90" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" renderMode="0" sceneViewUiOverlay="false" portalDebugVisuals="true" portalDebugWireframe="true" portalDebugTintRemoteView="false" portalDebugOverlayAlpha="0.7" portalRecursionDepth="4" portalConnectionRepeatLimit="4" portalMaxViewsPerFrame="32">
+  <settings dimension="0" showGrid="true" gridHalfSize="24" gridCellSize="1" gridOpacity="0.25" gridFadeDistance="90" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" renderMode="0" sceneViewUiOverlay="false" portalDebugVisuals="true" portalDebugWireframe="true" portalDebugTintRemoteView="false" portalDebugOverlayAlpha="0.7" portalRecursionDepth="4" portalConnectionRepeatLimit="4" portalMaxViewsPerFrame="32">
     <gridColor><item>0.3</item><item>0.32</item><item>0.36</item></gridColor>
     <gridOriginColor><item>0.25</item><item>0.55</item><item>0.9</item></gridOriginColor>
     <ambientColor><item>0.14</item><item>0.14</item><item>0.17</item></ambientColor>
@@ -27,7 +27,7 @@
         <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
       </transform>
       <components>
-        <components:Light Light.lightType="1" Light.intensity="2" Light.range="40" Light.falloff="2" Light.baked="false">
+        <components:Light Light.lightType="1" Light.intensity="2" Light.range="40" Light.falloff="2" Light.baked="false" Light.castsShadows="true" Light.shadowStrength="1" Light.shadowDepthBias="0.0015" Light.shadowNormalBias="0.01" Light.shadowResolutionScale="1" Light.shadowFilterScale="1">
           <Light.color><item>1</item><item>0.94</item><item>0.82</item></Light.color>
         </components:Light>
       </components>

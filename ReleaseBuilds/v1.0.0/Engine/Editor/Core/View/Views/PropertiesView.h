@@ -30,6 +30,13 @@ public:
 
     void SetSelectedObject(Engine::Core::Object* obj)
     {
+        SetSelectedObjects(obj
+            ? std::vector<Engine::Core::Object*>{ obj }
+            : std::vector<Engine::Core::Object*>{});
+    }
+    void SetSelectedObjects(const std::vector<Engine::Core::Object*>& objects)
+    {
+        Engine::Core::Object* obj = objects.empty() ? nullptr : objects.back();
         if (obj != m_selectedObject)
         {
             if (m_deferredTransformPrefabRoot)
@@ -39,6 +46,7 @@ public:
             m_componentSearch[0] = '\0';
             m_editingSkyboxTexture = false;
         }
+        m_selectedObjects = objects;
         m_selectedObject = obj;
         m_assetInspector.Clear();
     }
@@ -59,6 +67,7 @@ public:
 
 private:
     void DrawTransform(IEditorUi& ui);
+    void DrawMultiSelection(IEditorUi& ui);
     std::string HandleWindowAssetDrop(IEditorUi& ui);
     bool AddComponentFromAsset(const std::string& path, std::string& message);
     bool AddRegisteredComponent(const std::string& typeName, std::string& message);
@@ -71,6 +80,7 @@ private:
     void LogAssetDrop(const std::string& message, bool error = false) const;
 
     Engine::Core::Object* m_selectedObject = nullptr;
+    std::vector<Engine::Core::Object*> m_selectedObjects;
     Engine::Core::Object* m_deferredTransformPrefabRoot = nullptr;
     AssetInspectorTemplate m_assetInspector;
     Engine::Scene::Scene* m_scene = nullptr;

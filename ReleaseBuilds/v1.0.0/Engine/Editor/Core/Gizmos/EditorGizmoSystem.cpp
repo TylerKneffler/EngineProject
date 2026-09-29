@@ -3,6 +3,7 @@
 #include "Core/Object.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Lighting/Light.h"
+#include "Core/Compoonents/Lighting/LightProbe.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include <algorithm>
@@ -137,6 +138,39 @@ void DrawCameraIcon(IEditorUi& ui, EditorUiVec2 center, bool selected)
     ui.DrawViewportTriangle({ center.x + 4.f, center.y - 3.f },
         { center.x + 10.f, center.y - 6.f },
         { center.x + 10.f, center.y + 6.f }, color);
+}
+
+void DrawProbeIcon(IEditorUi& ui,EditorUiVec2 center,bool selected,bool volume)
+{
+    const EditorUiColor color=volume
+        ?EditorUiColor{.75f,.42f,1.f,1.f}
+        :EditorUiColor{1.f,.78f,.18f,1.f};
+    if(selected)
+        ui.DrawViewportCircle(center,12.f,{1.f,1.f,1.f,.9f},false,2.f);
+    ui.DrawViewportCircle(center,volume?7.f:6.f,kOutline,true);
+    ui.DrawViewportCircle(center,volume?5.f:4.f,color,true);
+    ui.DrawViewportLine({center.x-10.f,center.y},
+        {center.x+10.f,center.y},color,1.5f);
+    ui.DrawViewportLine({center.x,center.y-10.f},
+        {center.x,center.y+10.f},color,1.5f);
+}
+
+void DrawBoxHandle(IEditorUi& ui,EditorUiVec2 center,float half,
+    EditorUiColor color)
+{
+    const EditorUiVec2 topLeft{center.x-half,center.y-half};
+    const EditorUiVec2 topRight{center.x+half,center.y-half};
+    const EditorUiVec2 bottomRight{center.x+half,center.y+half};
+    const EditorUiVec2 bottomLeft{center.x-half,center.y+half};
+    ui.DrawViewportTriangle(topLeft,topRight,bottomRight,kOutline);
+    ui.DrawViewportTriangle(topLeft,bottomRight,bottomLeft,kOutline);
+    const float inset=1.5f;
+    ui.DrawViewportTriangle({topLeft.x+inset,topLeft.y+inset},
+        {topRight.x-inset,topRight.y+inset},
+        {bottomRight.x-inset,bottomRight.y-inset},color);
+    ui.DrawViewportTriangle({topLeft.x+inset,topLeft.y+inset},
+        {bottomRight.x-inset,bottomRight.y-inset},
+        {bottomLeft.x+inset,bottomLeft.y-inset},color);
 }
 
 bool SceneContains(const Engine::Scene::Scene& scene, const Engine::Core::Object* object)
@@ -288,7 +322,10 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
             continue;
         const bool hasLight = object->GetComponent<Engine::Components::Light>() != nullptr;
         const bool hasCamera = object->GetComponent<Engine::Components::Camera>() != nullptr;
-        if (!hasLight && !hasCamera)
+        const auto* probe=object->GetComponent<Engine::Components::LightProbe>();
+        const auto* probeGroup=object->GetComponent<
+            Engine::Components::LightProbeGroup>();
+        if (!hasLight && !hasCamera && !probe && !probeGroup)
             continue;
 
         EditorUiVec2 center{};
@@ -297,8 +334,50 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
             continue;
         if (hasLight)
             DrawLightIcon(ui, center, object == selected);
-        else
+        else if(hasCamera)
             DrawCameraIcon(ui, center, object == selected);
+        else
+            DrawProbeIcon(ui,center,object==selected,probeGroup!=nullptr);
+
+        if(probeGroup&&object==selected)
+        {
+            const glm::mat4 world=object->transform.GetWorldMatrix();
+            const glm::vec3 half=glm::max(glm::abs(probeGroup->size)*.5f,
+                glm::vec3(.005f));
+            const glm::vec3 corners[8]={{-half.x,-half.y,-half.z},
+                {half.x,-half.y,-half.z},{half.x,half.y,-half.z},
+                {-half.x,half.y,-half.z},{-half.x,-half.y,half.z},
+                {half.x,-half.y,half.z},{half.x,half.y,half.z},
+                {-half.x,half.y,half.z}};
+            EditorUiVec2 screens[8]{};
+            bool visible[8]{};
+            for(int corner=0;corner<8;++corner)
+                visible[corner]=ProjectPoint(viewProjection,
+                    glm::vec3(world*glm::vec4(corners[corner],1.f)),
+                    input.available,screens[corner]);
+            constexpr int edges[12][2]={{0,1},{1,2},{2,3},{3,0},
+                {4,5},{5,6},{6,7},{7,4},{0,4},{1,5},{2,6},{3,7}};
+            for(const auto& edge:edges)
+                if(visible[edge[0]]&&visible[edge[1]])
+                    ui.DrawViewportLine(screens[edge[0]],screens[edge[1]],
+                        {.75f,.42f,1.f,.9f},1.5f);
+
+            const int stepX=std::max(1,probeGroup->countX/8);
+            const int stepY=std::max(1,probeGroup->countY/8);
+            const int stepZ=std::max(1,probeGroup->countZ/8);
+            for(int z=0;z<probeGroup->countZ;z+=stepZ)
+            for(int y=0;y<probeGroup->countY;y+=stepY)
+            for(int x=0;x<probeGroup->countX;x+=stepX)
+            {
+                EditorUiVec2 sampleScreen{};
+                if(ProjectPoint(viewProjection,glm::vec3(world*glm::vec4(
+                    probeGroup->LocalSamplePosition(x,y,z),1.f)),
+                    input.available,sampleScreen))
+                    ui.DrawViewportCircle(sampleScreen,2.25f,
+                        probeGroup->valid?EditorUiColor{1.f,.78f,.18f,.9f}:
+                        EditorUiColor{.55f,.42f,.65f,.8f},true);
+            }
+        }
 
         const float distance = Length(Subtract(input.mousePosInViewport, center));
         if (distance <= 14.f && distance < iconHitDistance)
@@ -312,6 +391,7 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         (!selectedPrefabRoot || selected == selectedPrefabRoot ||
             visibleSkeletonJoints.find(selected) != visibleSkeletonJoints.end());
     int hoveredAxis = -1;
+    EditorUiVec2 hoveredDragDirection{};
     EditorUiVec2 originScreen{};
     EditorUiVec2 axisEnds[3]{};
     float axisScale = 0.f;
@@ -332,52 +412,126 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
             rotation[0], rotation[1], rotation[2]
         };
         float closestDistance = FLT_MAX;
-        for (int axis = 0; axis < 3; ++axis)
+        if(tool!=EditorTransformTool::Rotate)
         {
-            axisVisible[axis] = ProjectPoint(viewProjection,
-                selectedPosition + axes[axis] * axisScale,
-                input.available, axisEnds[axis]);
-            if (!axisVisible[axis])
-                continue;
-            float parameter = 0.f;
-            const float distance = DistanceToSegment(input.mousePosInViewport,
-                originScreen, axisEnds[axis], parameter);
-            if (parameter >= 0.18f && distance <= 8.f && distance < closestDistance)
+            for (int axis = 0; axis < 3; ++axis)
             {
-                hoveredAxis = axis;
-                closestDistance = distance;
+                axisVisible[axis] = ProjectPoint(viewProjection,
+                    selectedPosition + axes[axis] * axisScale,
+                    input.available, axisEnds[axis]);
+                if (!axisVisible[axis])
+                    continue;
+                float parameter = 0.f;
+                const float distance = DistanceToSegment(input.mousePosInViewport,
+                    originScreen, axisEnds[axis], parameter);
+                if (parameter >= 0.18f && distance <= 8.f && distance < closestDistance)
+                {
+                    hoveredAxis = axis;
+                    closestDistance = distance;
+                    const EditorUiVec2 direction=Subtract(axisEnds[axis],originScreen);
+                    const float length=Length(direction);
+                    if(length>0.001f)
+                        hoveredDragDirection=Multiply(direction,1.f/length);
+                }
             }
         }
 
         const EditorUiColor colors[3] = { kXColor, kYColor, kZColor };
         const char* labels[3] = { "X", "Y", "Z" };
         ui.DrawViewportCircle(originScreen, 4.f, kOutline, true);
-        for (int axis = 0; axis < 3; ++axis)
+        if(tool==EditorTransformTool::Rotate)
         {
-            if (!axisVisible[axis])
-                continue;
-            const EditorUiVec2 difference = Subtract(axisEnds[axis], originScreen);
-            const float screenLength = Length(difference);
-            if (screenLength < 7.f)
-                continue;
-            const EditorUiVec2 direction = Multiply(difference, 1.f / screenLength);
-            const EditorUiVec2 perpendicular{ -direction.y, direction.x };
-            const EditorUiColor color = axis == hoveredAxis || axis == m_dragAxis
-                ? kHoverColor : colors[axis];
-            ui.DrawViewportLine(originScreen, axisEnds[axis], kOutline, 6.f);
-            ui.DrawViewportLine(originScreen, axisEnds[axis], color, 3.f);
-            if (tool == EditorTransformTool::Translate)
-                ui.DrawViewportTriangle(axisEnds[axis],
-                    Add(Subtract(axisEnds[axis], Multiply(direction, 11.f)),
-                        Multiply(perpendicular, 5.f)),
-                    Subtract(Subtract(axisEnds[axis], Multiply(direction, 11.f)),
-                        Multiply(perpendicular, 5.f)), color);
-            else
-                ui.DrawViewportCircle(axisEnds[axis],
-                    tool == EditorTransformTool::Scale ? 5.f : 7.f,
-                    color, tool == EditorTransformTool::Scale, 2.f);
-            ui.DrawViewportText(Add(axisEnds[axis], Multiply(perpendicular, 7.f)),
-                labels[axis], color);
+            constexpr int segments=64;
+            for(int axis=0;axis<3;++axis)
+            {
+                const glm::vec3 basisA=axes[(axis+1)%3];
+                const glm::vec3 basisB=axes[(axis+2)%3];
+                EditorUiVec2 previous{};
+                bool previousVisible=false;
+                for(int segment=0;segment<=segments;++segment)
+                {
+                    constexpr float twoPi=6.28318530718f;
+                    const float angle=twoPi*static_cast<float>(segment)/segments;
+                    EditorUiVec2 current{};
+                    const bool currentVisible=ProjectPoint(viewProjection,
+                        selectedPosition+(basisA*std::cos(angle)+
+                            basisB*std::sin(angle))*axisScale*.78f,
+                        input.available,current);
+                    if(previousVisible&&currentVisible)
+                    {
+                        float parameter=0.f;
+                        const float distance=DistanceToSegment(
+                            input.mousePosInViewport,previous,current,parameter);
+                        if(distance<=7.f&&distance<closestDistance)
+                        {
+                            hoveredAxis=axis;
+                            closestDistance=distance;
+                            const EditorUiVec2 tangent=Subtract(current,previous);
+                            const float tangentLength=Length(tangent);
+                            if(tangentLength>.001f)
+                                hoveredDragDirection=Multiply(tangent,
+                                    1.f/tangentLength);
+                        }
+                    }
+                    previous=current;
+                    previousVisible=currentVisible;
+                }
+            }
+            for(int axis=0;axis<3;++axis)
+            {
+                const glm::vec3 basisA=axes[(axis+1)%3];
+                const glm::vec3 basisB=axes[(axis+2)%3];
+                const EditorUiColor color=axis==hoveredAxis||axis==m_dragAxis
+                    ?kHoverColor:colors[axis];
+                EditorUiVec2 previous{};
+                bool previousVisible=false;
+                for(int segment=0;segment<=segments;++segment)
+                {
+                    constexpr float twoPi=6.28318530718f;
+                    const float angle=twoPi*static_cast<float>(segment)/segments;
+                    EditorUiVec2 current{};
+                    const bool currentVisible=ProjectPoint(viewProjection,
+                        selectedPosition+(basisA*std::cos(angle)+
+                            basisB*std::sin(angle))*axisScale*.78f,
+                        input.available,current);
+                    if(previousVisible&&currentVisible)
+                    {
+                        ui.DrawViewportLine(previous,current,kOutline,5.f);
+                        ui.DrawViewportLine(previous,current,color,
+                            axis==hoveredAxis?3.f:2.f);
+                    }
+                    previous=current;
+                    previousVisible=currentVisible;
+                }
+            }
+        }
+        else
+        {
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                if (!axisVisible[axis])
+                    continue;
+                const EditorUiVec2 difference = Subtract(axisEnds[axis], originScreen);
+                const float screenLength = Length(difference);
+                if (screenLength < 7.f)
+                    continue;
+                const EditorUiVec2 direction = Multiply(difference, 1.f / screenLength);
+                const EditorUiVec2 perpendicular{ -direction.y, direction.x };
+                const EditorUiColor color = axis == hoveredAxis || axis == m_dragAxis
+                    ? kHoverColor : colors[axis];
+                ui.DrawViewportLine(originScreen, axisEnds[axis], kOutline, 6.f);
+                ui.DrawViewportLine(originScreen, axisEnds[axis], color, 3.f);
+                if (tool == EditorTransformTool::Translate)
+                    ui.DrawViewportTriangle(axisEnds[axis],
+                        Add(Subtract(axisEnds[axis], Multiply(direction, 11.f)),
+                            Multiply(perpendicular, 5.f)),
+                        Subtract(Subtract(axisEnds[axis], Multiply(direction, 11.f)),
+                            Multiply(perpendicular, 5.f)), color);
+                else
+                    DrawBoxHandle(ui,axisEnds[axis],6.f,color);
+                ui.DrawViewportText(Add(axisEnds[axis], Multiply(perpendicular, 7.f)),
+                    labels[axis], color);
+            }
         }
     }
 
@@ -415,9 +569,8 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
     }
     else if (input.hovered && input.leftClicked && selected && hoveredAxis >= 0)
     {
-        const EditorUiVec2 screenAxis = Subtract(axisEnds[hoveredAxis], originScreen);
-        const float screenLength = Length(screenAxis);
-        if (screenLength >= 7.f)
+        const float screenLength = Length(hoveredDragDirection);
+        if (screenLength >= .9f)
         {
             const glm::mat3 rotation = WorldRotation(*selected);
             const glm::vec3 axes[3] = {
@@ -430,8 +583,12 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
             m_dragStartLocalScale = selected->transform.scale;
             m_dragWorldAxis = axes[hoveredAxis];
             m_dragStartMouse = input.mousePosInViewport;
-            m_dragScreenDirection = Multiply(screenAxis, 1.f / screenLength);
-            m_dragWorldUnitsPerPixel = axisScale / screenLength;
+            m_dragScreenDirection = Multiply(hoveredDragDirection,
+                1.f / screenLength);
+            const float projectedAxisLength=tool==EditorTransformTool::Rotate
+                ?1.f:Length(Subtract(axisEnds[hoveredAxis],originScreen));
+            m_dragWorldUnitsPerPixel = tool==EditorTransformTool::Rotate
+                ?0.f:axisScale/std::max(projectedAxisLength,1.f);
             m_dragTool = tool;
             result.transformDragging = true;
             result.consumedClick = true;

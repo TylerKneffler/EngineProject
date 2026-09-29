@@ -136,6 +136,7 @@ void D3D12View::CreateResources(void* device, uint32_t width, uint32_t height)
     d3dDevice->CreateDepthStencilView(
         m_depthBuffer.Get(), &dsvViewDesc,
         m_dsvHeap->GetCPUDescriptorHandleForHeapStart());
+    m_postProcess.Create(d3dDevice, width, height);
 }
 
 // ---------------------------------------------------------------------------
@@ -143,10 +144,13 @@ void D3D12View::CreateResources(void* device, uint32_t width, uint32_t height)
 // ---------------------------------------------------------------------------
 void D3D12View::Render(void* cmdList,
                        void* mainRtv,
-                       std::function<void(void*)> drawFn)
+                       std::function<void(void*)> drawFn,
+                       std::function<void(void*)> preDrawFn)
 {
     auto* d3dCmdList = static_cast<ID3D12GraphicsCommandList*>(cmdList);
     auto mainRtvHandle = *static_cast<D3D12_CPU_DESCRIPTOR_HANDLE*>(mainRtv);
+
+    if (preDrawFn) preDrawFn(cmdList);
     
     D3D12_RESOURCE_BARRIER toRtv{};
     toRtv.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -166,15 +170,15 @@ void D3D12View::Render(void* cmdList,
 
     d3dCmdList->RSSetViewports(1, &vp);
     d3dCmdList->RSSetScissorRects(1, &sr);
-    d3dCmdList->OMSetRenderTargets(1, &sceneRtv, FALSE, &dsv);
-
-    d3dCmdList->ClearRenderTargetView(sceneRtv, m_clearColor, 0, nullptr);
+    m_postProcess.BindScene(d3dCmdList, dsv, m_clearColor);
     d3dCmdList->ClearDepthStencilView(
         dsv, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
         1.0f, 0, 0, nullptr);
 
     if (drawFn)
         drawFn(cmdList);
+
+    m_postProcess.Compose(d3dCmdList, sceneRtv);
 
     D3D12_RESOURCE_BARRIER toSrv{};
     toSrv.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;

@@ -1,10 +1,13 @@
 #pragma once
 #include "../IGameRenderer.h"
 #include "DX11GraphicsProvider.h"
+#include "DX11PostProcess.h"
 #include <wrl/client.h>
 #include <d3d11.h>
 #include <dxgi.h>
 #include <dxgi1_5.h>
+#include <vector>
+#include <cstddef>
 
 namespace Engine::Renderers
 {
@@ -25,6 +28,14 @@ public:
     Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const override
     { return m_frameTelemetry; }
 
+    // Legacy synchronous swap-chain capture retained for diagnostics. Video
+    // export uses the off-screen asynchronous queue below.
+    bool CaptureFrameRGBA(std::vector<uint8_t>& pixels);
+    bool EnableOffscreenExport(uint32_t readbackQueueDepth = 3u);
+    bool ReadExportFrameRGBA(std::vector<uint8_t>& pixels, bool wait);
+    size_t GetPendingExportFrameCount() const { return m_exportPendingCount; }
+    size_t GetExportReadbackCapacity() const { return m_exportReadbacks.size(); }
+
 private:
     void CreateTargets();
     Microsoft::WRL::ComPtr<ID3D11Device> m_device;
@@ -33,6 +44,21 @@ private:
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_rtv;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_depthTexture;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilView> m_dsv;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> m_captureStaging;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> m_exportTexture;
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_exportRtv;
+    struct ExportReadbackSlot
+    {
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> staging;
+        Microsoft::WRL::ComPtr<ID3D11Query> completion;
+        bool pending = false;
+    };
+    std::vector<ExportReadbackSlot> m_exportReadbacks;
+    size_t m_exportSubmitIndex = 0u;
+    size_t m_exportReadIndex = 0u;
+    size_t m_exportPendingCount = 0u;
+    DX11PostProcess m_postProcess;
+    float m_clearColor[4] = { 0.1f, 0.1f, 0.1f, 1.0f };
     std::unique_ptr<D3D11GraphicsProvider> m_graphicsProvider;
     uint32_t m_width = 0;
     uint32_t m_height = 0;

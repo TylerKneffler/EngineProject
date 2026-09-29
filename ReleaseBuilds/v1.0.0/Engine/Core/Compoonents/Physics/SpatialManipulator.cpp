@@ -125,6 +125,7 @@ SpatialManipulator::SpatialManipulator()
     RegisterField("portalCollisionCutUpdateDistance", portalCollisionCutUpdateDistance);
     RegisterField("materializeSplitOnDisconnect", materializeSplitOnDisconnect);
     RegisterField("portalTraversalPriority", portalTraversalPriority);
+    RegisterField("portalContentScopeRoot", portalContentScopeRoot);
     RegisterField("meshReference", meshReference);
     RegisterField("traversalTriggerBodyReference", traversalTriggerBodyReference);
     RegisterField("targetManipulator", targetManipulator);
@@ -818,6 +819,37 @@ bool SpatialManipulator::DrawProperties(::Engine::Editor::IEditorUi& ui)
     {
         portalTraversalPriority = static_cast<int>(std::round(traversalPriority));
         changed = true;
+    }
+    const char* contentScopeLabel = portalContentScopeRoot.IsAssigned()
+        ? portalContentScopeRoot.objectName.c_str() : "Whole Scene (legacy)";
+    ui.ValueLabel("Portal Content Scope Root", contentScopeLabel);
+    if (ui.BeginDragDropTarget())
+    {
+        size_t payloadSize = 0;
+        const void* payload = ui.AcceptDragDropPayload(
+            "ENGINE_COMPONENT_REORDER", &payloadSize);
+        if (payload && payloadSize == sizeof(Engine::Core::Component*))
+        {
+            auto* component = *static_cast<Engine::Core::Component* const*>(
+                payload);
+            if (auto* transform = dynamic_cast<Transform*>(component))
+            {
+                portalContentScopeRoot =
+                    Engine::Core::CaptureComponentReference(transform,
+                        "Transform");
+                changed = true;
+            }
+        }
+        ui.EndDragDropTarget();
+    }
+    if (portalContentScopeRoot.IsAssigned())
+    {
+        ui.SameLine();
+        if (ui.Button("Clear Portal Content Scope"))
+        {
+            portalContentScopeRoot.Clear();
+            changed = true;
+        }
     }
 
     if (changed)

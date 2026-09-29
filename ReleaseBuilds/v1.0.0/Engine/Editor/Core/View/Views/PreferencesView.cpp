@@ -74,6 +74,110 @@ bool RunExportCommand(const std::wstring& command, const fs::path& workingDirect
     return exitCode == 0;
 }
 
+std::wstring QuoteCommandArgument(const std::wstring& value)
+{
+    std::wstring result = L"\"";
+    size_t slashes = 0;
+    for (wchar_t character : value)
+    {
+        if (character == L'\\')
+        {
+            ++slashes;
+            continue;
+        }
+        if (character == L'\"')
+            result.append(slashes * 2u + 1u, L'\\');
+        else
+            result.append(slashes, L'\\');
+        slashes = 0;
+        result.push_back(character);
+    }
+    result.append(slashes * 2u, L'\\');
+    result.push_back(L'\"');
+    return result;
+}
+
+struct VideoExportRequest
+{
+    std::string projectFile;
+    std::string scene;
+    std::string output;
+    std::string format;
+    std::string codec;
+    std::string preset;
+    std::string ffmpeg;
+    uint32_t width = 1920;
+    uint32_t height = 1080;
+    uint32_t fps = 60;
+    uint32_t quality = 75;
+    float duration = 0.f;
+    float timeout = 120.f;
+};
+
+std::pair<bool, std::string> BuildAndRunVideoExport(
+    const VideoExportRequest& request)
+{
+    try
+    {
+        const fs::path projectPath = fs::weakly_canonical(request.projectFile);
+        const fs::path projectRoot = projectPath.parent_path();
+        const fs::path buildDirectory = projectRoot / "build" / "VideoExport";
+        const fs::path logFile = projectRoot / "video-export.log";
+        std::ofstream(logFile, std::ios::trunc)
+            << "Building video exporter for " << projectPath.string() << '\n';
+        const std::wstring configure = L"cmake -S " +
+            QuoteCommandArgument(projectRoot.wstring()) + L" -B " +
+            QuoteCommandArgument(buildDirectory.wstring()) +
+            L" -G \"Visual Studio 17 2022\" -A x64";
+        if (!RunExportCommand(configure, projectRoot, logFile))
+            return { false, "Video-export configuration failed. See " +
+                logFile.string() };
+        const std::wstring build = L"cmake --build " +
+            QuoteCommandArgument(buildDirectory.wstring()) +
+            L" --config Release --target VideoExporter --parallel";
+        if (!RunExportCommand(build, projectRoot, logFile))
+            return { false, "Video-export build failed. See " + logFile.string() };
+
+        fs::path executable = buildDirectory / "Engine" / "Release" /
+            "VideoExporter.exe";
+        if (!fs::is_regular_file(executable))
+            executable = buildDirectory / "Release" / "VideoExporter.exe";
+        if (!fs::is_regular_file(executable))
+            return { false, "VideoExporter.exe was not produced. See " +
+                logFile.string() };
+        fs::path output = fs::path(request.output);
+        if (output.is_relative())
+            output = projectRoot / output;
+        output.replace_extension(request.format);
+        fs::create_directories(output.parent_path());
+
+        std::wostringstream command;
+        command << QuoteCommandArgument(executable.wstring())
+            << L" --project " << QuoteCommandArgument(projectPath.wstring())
+            << L" --scene " << QuoteCommandArgument(fs::path(request.scene).wstring())
+            << L" --output " << QuoteCommandArgument(output.wstring())
+            << L" --format " << QuoteCommandArgument(fs::path(request.format).wstring())
+            << L" --preset " << QuoteCommandArgument(fs::path(request.preset).wstring())
+            << L" --ffmpeg " << QuoteCommandArgument(fs::path(request.ffmpeg).wstring())
+            << L" --width " << request.width
+            << L" --height " << request.height
+            << L" --fps " << request.fps
+            << L" --quality " << request.quality
+            << L" --duration " << request.duration
+            << L" --timeout " << request.timeout;
+        if (!request.codec.empty())
+            command << L" --codec " << QuoteCommandArgument(
+                fs::path(request.codec).wstring());
+        if (!RunExportCommand(command.str(), projectRoot, logFile))
+            return { false, "Video rendering failed. See " + logFile.string() };
+        return { true, "Video ready: " + output.string() };
+    }
+    catch (const std::exception& error)
+    {
+        return { false, std::string("Video export failed: ") + error.what() };
+    }
+}
+
 void CopyRuntimeAssets(const fs::path& source, const fs::path& destination)
 {
     for (const auto& entry : fs::recursive_directory_iterator(source))
@@ -246,6 +350,11 @@ void PreferencesView::Init(const Engine::Model::ProjectSettings& settings, const
     strncpy_s(m_projectNameBuf, m_settings.name.c_str(), sizeof(m_projectNameBuf) - 1);
     strncpy_s(m_assetsPathBuf, m_settings.assetsDirectory.c_str(), sizeof(m_assetsPathBuf) - 1);
     strncpy_s(m_defaultSceneBuf, m_settings.defaultScene.c_str(), sizeof(m_defaultSceneBuf) - 1);
+    strncpy_s(m_videoSceneBuf, m_settings.defaultScene.c_str(),
+        sizeof(m_videoSceneBuf) - 1);
+    m_videoWidth = m_settings.gameWindowWidth ? m_settings.gameWindowWidth : 1920u;
+    m_videoHeight = m_settings.gameWindowHeight ? m_settings.gameWindowHeight : 1080u;
+    m_videoFps = m_settings.targetFramerate ? m_settings.targetFramerate : 60u;
 }
 
 // ---------------------------------------------------------------------------
@@ -255,6 +364,7 @@ void PreferencesView::DrawWindow(IEditorUi& ui, bool& isOpen)
 {
     if (!isOpen) return;
     UpdatePortableExport();
+    UpdateVideoExport();
     bool keybindTabVisible = false;
 
     ui.SetNextWindowRect(100, 50, 600, 700);
@@ -515,19 +625,6 @@ void PreferencesView::DrawEditorSection(IEditorUi& ui)
             : EditorUiColor{1.f,.55f,.30f,1.f});
     ui.Spacing();
 
-    ui.Label("Workspace Mode");
-    ui.Separator();
-    const char* editorModes[] = { "3D", "2D" };
-    int editorMode = m_settings.editorMode == Engine::Model::ProjectSettings::EditorMode::TwoD ? 1 : 0;
-    if (ui.Combo("Editor Mode", &editorMode, editorModes, 2))
-    {
-        m_settings.editorMode = editorMode == 1
-            ? Engine::Model::ProjectSettings::EditorMode::TwoD
-            : Engine::Model::ProjectSettings::EditorMode::ThreeD;
-        NotifyChanged();
-    }
-    ui.Tooltip("2D uses an orthographic camera, an XY grid, and sprite layer ordering.");
-    ui.Spacing();
     ui.Label("Undo History");
     ui.Separator();
     if (ui.InputUInt("Action Limit", &m_settings.editorHistoryLimit))
@@ -569,6 +666,43 @@ void PreferencesView::DrawExportSection(IEditorUi& ui)
         ui.ColoredLabel(m_exportStatus.c_str(), m_exportSucceeded
             ? EditorUiColor{.35f,.85f,.45f,1.f} : EditorUiColor{1.f,.35f,.35f,1.f});
     }
+
+
+    ui.Spacing();
+    ui.Separator();
+    ui.Label("Offline Video Export");
+    ui.Label("Renders a selected scene and its normal scene transitions at a fixed frame rate. The safety timeout always stops menus and looping scenes.");
+    ui.InputText("Starting Scene", m_videoSceneBuf, sizeof(m_videoSceneBuf));
+    ui.InputText("Output File", m_videoOutputBuf, sizeof(m_videoOutputBuf));
+    static const char* formats[] = { "MP4 (H.264)", "WebM (VP9)", "MOV (ProRes)" };
+    ui.Combo("Video Type", &m_videoFormat, formats, 3);
+    ui.InputText("Codec Override", m_videoCodecBuf, sizeof(m_videoCodecBuf));
+    ui.InputText("Encoder Preset", m_videoPresetBuf, sizeof(m_videoPresetBuf));
+    ui.InputText("FFmpeg", m_videoFfmpegBuf, sizeof(m_videoFfmpegBuf));
+    ui.InputUInt("Width", &m_videoWidth);
+    ui.InputUInt("Height", &m_videoHeight);
+    ui.InputUInt("Frames Per Second", &m_videoFps);
+    ui.InputUInt("Quality (0-100)", &m_videoQuality);
+    ui.DragFloat("Duration (0 = Camera Track)", &m_videoDuration,
+        0.25f, 0.f, 86400.f);
+    ui.DragFloat("Maximum Timeout", &m_videoTimeout,
+        1.f, 1.f, 86400.f);
+    ui.DisabledLabel("MP4 is broadly compatible; WebM is compact; MOV/ProRes is intended for editing.");
+    ui.BeginDisabled(m_videoExporting || m_projFilePath.empty());
+    if (ui.Button("Build and Render Video", 190.f, 34.f))
+        StartVideoExport();
+    ui.EndDisabled();
+    if (m_videoExporting)
+    {
+        ui.Label("Building and rendering video...");
+        ui.DisabledLabel("Details: video-export.log");
+    }
+    else if (!m_videoExportStatus.empty())
+    {
+        ui.ColoredLabel(m_videoExportStatus.c_str(), m_videoExportSucceeded
+            ? EditorUiColor{.35f,.85f,.45f,1.f}
+            : EditorUiColor{1.f,.35f,.35f,1.f});
+    }
 }
 
 void PreferencesView::StartPortableExport()
@@ -606,6 +740,56 @@ void PreferencesView::UpdatePortableExport()
     m_exporting = false;
     m_exportSucceeded = result.first;
     m_exportStatus = result.second;
+}
+
+void PreferencesView::StartVideoExport()
+{
+    if (m_videoExporting || m_projFilePath.empty())
+        return;
+    if (m_videoSceneBuf[0] == '\0' || m_videoOutputBuf[0] == '\0')
+    {
+        m_videoExportSucceeded = false;
+        m_videoExportStatus = "Choose a starting scene and output file.";
+        return;
+    }
+    m_videoWidth = std::clamp(m_videoWidth & ~1u, 2u, 7680u);
+    m_videoHeight = std::clamp(m_videoHeight & ~1u, 2u, 4320u);
+    m_videoFps = std::clamp(m_videoFps, 1u, 240u);
+    m_videoQuality = std::min(m_videoQuality, 100u);
+    m_videoDuration = std::clamp(m_videoDuration, 0.f, 86400.f);
+    m_videoTimeout = std::clamp(m_videoTimeout, 1.f, 86400.f);
+    VideoExportRequest request;
+    request.projectFile = m_projFilePath;
+    request.scene = m_videoSceneBuf;
+    request.output = m_videoOutputBuf;
+    request.format = m_videoFormat == 1 ? "webm" :
+        m_videoFormat == 2 ? "mov" : "mp4";
+    request.codec = m_videoCodecBuf;
+    request.preset = m_videoPresetBuf;
+    request.ffmpeg = m_videoFfmpegBuf;
+    request.width = m_videoWidth;
+    request.height = m_videoHeight;
+    request.fps = m_videoFps;
+    request.quality = m_videoQuality;
+    request.duration = m_videoDuration;
+    request.timeout = m_videoTimeout;
+    m_videoExporting = true;
+    m_videoExportSucceeded = false;
+    m_videoExportStatus.clear();
+    m_videoExportFuture = std::async(std::launch::async,
+        [request]() { return BuildAndRunVideoExport(request); });
+}
+
+void PreferencesView::UpdateVideoExport()
+{
+    if (!m_videoExporting || !m_videoExportFuture.valid() ||
+        m_videoExportFuture.wait_for(std::chrono::seconds(0)) !=
+            std::future_status::ready)
+        return;
+    const auto result = m_videoExportFuture.get();
+    m_videoExporting = false;
+    m_videoExportSucceeded = result.first;
+    m_videoExportStatus = result.second;
 }
 
 // ---------------------------------------------------------------------------
@@ -707,6 +891,43 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
                 distanceLighting.maximumDistance);
         NotifyChanged();
     }
+    if (ui.InputUInt("Maximum Realtime Lights",
+            &distanceLighting.maximumRealtimeLights))
+    {
+        distanceLighting.maximumRealtimeLights = std::min(
+            distanceLighting.maximumRealtimeLights,
+            Engine::Model::MaxRealtimeLights);
+        NotifyChanged();
+    }
+    ui.Tooltip("Global upload and shader-loop cap. Zero disables realtime direct lights.");
+    if (ui.Checkbox("Forward+ Clustered Lighting",
+            &distanceLighting.clusteredLighting))
+        NotifyChanged();
+    if (distanceLighting.clusteredLighting)
+    {
+        if (ui.InputUInt("Cluster Tile Size", &distanceLighting.clusterTileSize))
+        {
+            distanceLighting.clusterTileSize = std::clamp<uint32_t>(
+                distanceLighting.clusterTileSize, 16u, 256u);
+            NotifyChanged();
+        }
+        if (ui.InputUInt("Cluster Depth Slices",
+                &distanceLighting.clusterDepthSlices))
+        {
+            distanceLighting.clusterDepthSlices = std::clamp<uint32_t>(
+                distanceLighting.clusterDepthSlices, 1u, 64u);
+            NotifyChanged();
+        }
+        if (ui.InputUInt("Maximum Lights Per Cluster",
+                &distanceLighting.maximumLightsPerCluster))
+        {
+            distanceLighting.maximumLightsPerCluster = std::clamp<uint32_t>(
+                distanceLighting.maximumLightsPerCluster, 1u,
+                Engine::Model::MaxRealtimeLights);
+            NotifyChanged();
+        }
+        ui.Tooltip("Smaller tiles and more depth slices reject more lights but increase cluster-list memory and CPU construction work.");
+    }
 
     const float maximumDistance = std::max(1.f,
         distanceLighting.maximumDistance);
@@ -752,6 +973,20 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
         if (ui.Checkbox("Parallax Mapping", &band.parallaxMapping)) NotifyChanged();
         if (ui.Checkbox("Environment Diffuse", &band.environmentDiffuse)) NotifyChanged();
         if (ui.Checkbox("Reflections", &band.reflections)) NotifyChanged();
+        if (ui.Checkbox("Realtime Shadows", &band.realtimeShadows)) NotifyChanged();
+        if (band.realtimeShadows)
+        {
+            if (ui.SliderFloat("Shadow Distance Scale",
+                    &band.shadowDistanceScale, 0.f, 1.f))
+                NotifyChanged();
+            if (ui.InputUInt("Maximum Shadow PCF Radius",
+                    &band.maximumShadowPcfRadius))
+            {
+                band.maximumShadowPcfRadius = std::min<uint32_t>(
+                    band.maximumShadowPcfRadius, 4u);
+                NotifyChanged();
+            }
+        }
         ui.BeginDisabled(distanceLighting.bands.size() <= 1);
         if (ui.Button("Remove Quality"))
             removeBand = static_cast<int>(index);
@@ -806,6 +1041,88 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
     if (ui.Checkbox("Preserve Source Emission",
             &m_settings.bakedLighting.accumulate))
         NotifyChanged();
+
+    ui.Separator();
+    ui.Label("Realtime Shadows");
+    auto& shadows = m_settings.realtimeShadows;
+    if (ui.Checkbox("Enable Realtime Shadows", &shadows.enabled))
+        NotifyChanged();
+    if (ui.InputUInt("Directional Shadow Light Budget", &shadows.maximumShadowedLights))
+    {
+        shadows.maximumShadowedLights = std::clamp<uint32_t>(
+            shadows.maximumShadowedLights, 0u, 1u);
+        NotifyChanged();
+    }
+    ui.Tooltip("Zero disables the directional shadow atlas; the current renderer supports one shadow-casting directional light.");
+    if (ui.InputUInt("Directional Atlas Resolution", &shadows.directionalResolution))
+    {
+        shadows.directionalResolution = std::clamp<uint32_t>(
+            shadows.directionalResolution, 256u, 8192u);
+        NotifyChanged();
+    }
+    if (ui.InputUInt("Directional Cascades", &shadows.directionalCascadeCount))
+    {
+        shadows.directionalCascadeCount = std::clamp<uint32_t>(
+            shadows.directionalCascadeCount, 1u, 4u);
+        NotifyChanged();
+    }
+    if (ui.DragFloat("Directional Shadow Distance",
+            &shadows.directionalDistance, 1.f, 1.f, 100000.f))
+        NotifyChanged();
+    if (ui.InputUInt("Shadow PCF Radius", &shadows.pcfRadius))
+    {
+        shadows.pcfRadius = std::min<uint32_t>(shadows.pcfRadius, 4u);
+        NotifyChanged();
+    }
+    if (ui.SliderFloat("Cascade Split Distribution",
+            &shadows.cascadeSplitLambda, 0.f, 1.f))
+        NotifyChanged();
+    ui.Tooltip("Zero distributes cascades uniformly; one concentrates resolution near the camera.");
+    if (ui.SliderFloat("Cascade Transition Width",
+            &shadows.cascadeTransitionFraction, 0.f, 0.3f))
+        NotifyChanged();
+    ui.Tooltip("Wider transitions hide seams but sample two cascades over a larger screen region.");
+    const char* portalShadowPolicies[] = {
+        "Reuse Main Atlas", "Budgeted View Atlases", "Atlas Per Portal View" };
+    int portalShadowPolicy = static_cast<int>(shadows.portalPolicy);
+    if (ui.Combo("Portal Shadow Policy", &portalShadowPolicy,
+        portalShadowPolicies, 3))
+    {
+        shadows.portalPolicy = static_cast<Engine::Model::PortalShadowPolicy>(
+            std::clamp(portalShadowPolicy, 0, 2));
+        NotifyChanged();
+    }
+    if (shadows.portalPolicy != Engine::Model::PortalShadowPolicy::ReuseMain)
+    {
+        if (ui.InputUInt("Portal Atlas Resolution",
+            &shadows.portalAtlasResolution))
+        {
+            shadows.portalAtlasResolution = std::clamp<uint32_t>(
+                shadows.portalAtlasResolution, 256u, 4096u);
+            NotifyChanged();
+        }
+        if (ui.InputUInt("Portal Shadow Cascades",
+            &shadows.portalCascadeCount))
+        {
+            shadows.portalCascadeCount = std::clamp<uint32_t>(
+                shadows.portalCascadeCount, 1u, 4u);
+            NotifyChanged();
+        }
+    }
+    if (shadows.portalPolicy == Engine::Model::PortalShadowPolicy::Budgeted &&
+        ui.InputUInt("Portal Shadow View Budget", &shadows.portalViewBudget))
+    {
+        shadows.portalViewBudget = std::clamp<uint32_t>(
+            shadows.portalViewBudget, 1u, 64u);
+        NotifyChanged();
+    }
+    if (shadows.portalPolicy == Engine::Model::PortalShadowPolicy::ReuseMain)
+        ui.DisabledLabel("Lowest cost. Transformed or distant portal views may sample an inaccurate main-view atlas.");
+    else if (shadows.portalPolicy == Engine::Model::PortalShadowPolicy::Budgeted)
+        ui.DisabledLabel("Recommended. Shallow, large on-screen portals receive view-specific atlases first.");
+    else
+        ui.DisabledLabel("Highest quality and cost. Every scheduled recursive portal view receives an atlas.");
+    ui.DisabledLabel("One cascade uses the full atlas; two to four cascades use 2x2 tiles on DirectX 11, DirectX 12, and Vulkan.");
 }
 
 // ---------------------------------------------------------------------------
@@ -909,11 +1226,7 @@ bool PreferencesView::SaveSettings()
 
             auto editorMode = prop.child("EditorMode");
             if (editorMode)
-                editorMode.text().set(m_settings.editorMode ==
-                    Engine::Model::ProjectSettings::EditorMode::TwoD ? "2D" : "3D");
-            else if (defaultSceneNode)
-                prop.append_child("EditorMode").text().set(m_settings.editorMode ==
-                    Engine::Model::ProjectSettings::EditorMode::TwoD ? "2D" : "3D");
+                prop.remove_child(editorMode);
 
             auto editorTheme = prop.child("EditorTheme");
             if (editorTheme)
@@ -954,6 +1267,36 @@ bool PreferencesView::SaveSettings()
                 setBakeValue("BakedPreserveSourceEmission",
                     m_settings.bakedLighting.accumulate ? "true" : "false");
 
+                auto shadowNode = prop.child("RealtimeShadows");
+                if (!shadowNode)
+                    shadowNode = prop.append_child("RealtimeShadows");
+                shadowNode.remove_attributes();
+                shadowNode.append_attribute("Enabled").set_value(
+                    m_settings.realtimeShadows.enabled);
+                shadowNode.append_attribute("MaximumLights").set_value(
+                    m_settings.realtimeShadows.maximumShadowedLights);
+                shadowNode.append_attribute("DirectionalResolution").set_value(
+                    m_settings.realtimeShadows.directionalResolution);
+                shadowNode.append_attribute("DirectionalCascades").set_value(
+                    m_settings.realtimeShadows.directionalCascadeCount);
+                shadowNode.append_attribute("DirectionalDistance").set_value(
+                    m_settings.realtimeShadows.directionalDistance);
+                shadowNode.append_attribute("PcfRadius").set_value(
+                    m_settings.realtimeShadows.pcfRadius);
+                shadowNode.append_attribute("CascadeSplitLambda").set_value(
+                    m_settings.realtimeShadows.cascadeSplitLambda);
+                shadowNode.append_attribute("CascadeTransitionFraction").set_value(
+                    m_settings.realtimeShadows.cascadeTransitionFraction);
+                shadowNode.append_attribute("PortalPolicy").set_value(
+                    static_cast<uint32_t>(
+                        m_settings.realtimeShadows.portalPolicy));
+                shadowNode.append_attribute("PortalAtlasResolution").set_value(
+                    m_settings.realtimeShadows.portalAtlasResolution);
+                shadowNode.append_attribute("PortalCascades").set_value(
+                    m_settings.realtimeShadows.portalCascadeCount);
+                shadowNode.append_attribute("PortalViewBudget").set_value(
+                    m_settings.realtimeShadows.portalViewBudget);
+
                 auto distanceNode = prop.child("DistanceLighting");
                 if (!distanceNode)
                     distanceNode = prop.append_child("DistanceLighting");
@@ -962,6 +1305,16 @@ bool PreferencesView::SaveSettings()
                     m_settings.distanceLighting.enabled);
                 distanceNode.append_attribute("MaximumDistance").set_value(
                     m_settings.distanceLighting.maximumDistance);
+                distanceNode.append_attribute("MaximumRealtimeLights").set_value(
+                    m_settings.distanceLighting.maximumRealtimeLights);
+                distanceNode.append_attribute("ClusteredLighting").set_value(
+                    m_settings.distanceLighting.clusteredLighting);
+                distanceNode.append_attribute("ClusterTileSize").set_value(
+                    m_settings.distanceLighting.clusterTileSize);
+                distanceNode.append_attribute("ClusterDepthSlices").set_value(
+                    m_settings.distanceLighting.clusterDepthSlices);
+                distanceNode.append_attribute("MaximumLightsPerCluster").set_value(
+                    m_settings.distanceLighting.maximumLightsPerCluster);
                 while (auto bandNode = distanceNode.child("Band"))
                     distanceNode.remove_child(bandNode);
                 for (const auto& band : m_settings.distanceLighting.bands)
@@ -979,6 +1332,12 @@ bool PreferencesView::SaveSettings()
                         band.environmentDiffuse);
                     bandNode.append_attribute("Reflections").set_value(
                         band.reflections);
+                    bandNode.append_attribute("RealtimeShadows").set_value(
+                        band.realtimeShadows);
+                    bandNode.append_attribute("ShadowDistanceScale").set_value(
+                        band.shadowDistanceScale);
+                    bandNode.append_attribute("MaximumShadowPcfRadius").set_value(
+                        band.maximumShadowPcfRadius);
                 }
             }
 

@@ -199,6 +199,13 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator | Portal")
     int portalTraversalPriority = 0;
 
+    // Optional explicit ownership root for the spatial region visible after
+    // a viewer exits through this endpoint. Unassigned preserves the legacy
+    // scene-wide chart; assigned restricts portal rendering and queries to
+    // this transform hierarchy.
+    PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator | Portal")
+    Engine::Core::ComponentReference portalContentScopeRoot { "Transform" };
+
     PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator")
     Engine::Core::ComponentReference meshReference { "Mesh" };
 
@@ -229,6 +236,7 @@ public:
     glm::mat4 GetPortalWorldFrame() const;
     glm::mat4 GetRenderPortalWorldFrame() const;
     bool HasCompatiblePortalShapeWith(const SpatialManipulator& target) const;
+    Engine::Core::Object* ResolvePortalContentScopeRoot() const;
     std::vector<glm::vec3> GetWorldPortalShapePoints() const;
     std::vector<glm::vec3> GetRenderWorldPortalShapePoints() const;
     glm::vec3 MapWorldPointThroughPortalShape(const glm::vec3& point,

@@ -303,8 +303,9 @@ std::unique_ptr<Engine::Graphics::IPipelineState> D3D12PipelineStateBuilder::Bui
     psoDesc.PrimitiveTopologyType = m_primitiveTopology;
 
     // Render targets
-    psoDesc.NumRenderTargets = 1;
-    psoDesc.RTVFormats[0] = m_rtFormat;
+    psoDesc.NumRenderTargets = m_colorWriteMask == 0 ? 0 : 1;
+    if (psoDesc.NumRenderTargets)
+        psoDesc.RTVFormats[0] = m_rtFormat;
     psoDesc.DSVFormat = m_dsFormat;
 
     psoDesc.SampleDesc.Count = 1;

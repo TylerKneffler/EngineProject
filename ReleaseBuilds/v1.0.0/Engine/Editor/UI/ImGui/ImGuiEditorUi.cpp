@@ -8,6 +8,139 @@
 
 namespace Engine::Editor
 {
+namespace
+{
+struct InteractionAnimation
+{
+    float value = 0.f;
+    int lastFrame = 0;
+};
+
+float AnimateInteraction(ImGuiID id, bool active, float speed = 14.f)
+{
+    static std::unordered_map<ImGuiID, InteractionAnimation> animations;
+    static int lastCleanupFrame = -1;
+    InteractionAnimation& animation = animations[id];
+    animation.lastFrame = ImGui::GetFrameCount();
+    const float target = active ? 1.f : 0.f;
+    const float blend = 1.f - std::exp(-speed * ImGui::GetIO().DeltaTime);
+    animation.value = ImLerp(animation.value, target, blend);
+
+    if ((ImGui::GetFrameCount() % 240) == 0 &&
+        lastCleanupFrame != ImGui::GetFrameCount())
+    {
+        lastCleanupFrame = ImGui::GetFrameCount();
+        for (auto iterator = animations.begin(); iterator != animations.end();)
+            if (iterator->second.lastFrame + 240 < ImGui::GetFrameCount())
+                iterator = animations.erase(iterator);
+            else
+                ++iterator;
+    }
+    return animation.value;
+}
+
+void DrawObjectIcon(ImDrawList* draw, EditorUiObjectIcon icon,
+    ImVec2 center, float scale, ImU32 color)
+{
+    const float radius = 5.5f * scale;
+    const float line = 1.35f;
+    switch (icon)
+    {
+    case EditorUiObjectIcon::Light:
+        draw->AddCircle({ center.x, center.y - 1.5f * scale },
+            3.1f * scale, color, 12, line);
+        draw->AddLine({ center.x - 2.f * scale, center.y + 2.f * scale },
+            { center.x + 2.f * scale, center.y + 2.f * scale }, color, line);
+        draw->AddLine({ center.x - 1.5f * scale, center.y + 4.f * scale },
+            { center.x + 1.5f * scale, center.y + 4.f * scale }, color, line);
+        for (int ray = 0; ray < 5; ++ray)
+        {
+            const float angle = -2.75f + ray * 1.375f;
+            const ImVec2 direction{ std::cos(angle), std::sin(angle) };
+            draw->AddLine({ center.x + direction.x * 4.5f * scale,
+                            center.y - 1.5f * scale + direction.y * 4.5f * scale },
+                { center.x + direction.x * 6.f * scale,
+                  center.y - 1.5f * scale + direction.y * 6.f * scale }, color, line);
+        }
+        break;
+    case EditorUiObjectIcon::Camera:
+        draw->AddRect({ center.x - radius, center.y - 3.8f * scale },
+            { center.x + 2.f * scale, center.y + 3.8f * scale }, color,
+            1.5f * scale, 0, line);
+        draw->AddTriangle({ center.x + 2.f * scale, center.y - 2.5f * scale },
+            { center.x + radius, center.y - 4.5f * scale },
+            { center.x + radius, center.y + 4.5f * scale }, color, line);
+        break;
+    case EditorUiObjectIcon::Audio:
+        draw->AddTriangleFilled({ center.x - radius, center.y - 2.f * scale },
+            { center.x - 2.f * scale, center.y - 2.f * scale },
+            { center.x + 1.f * scale, center.y - radius }, color);
+        draw->AddTriangleFilled({ center.x - radius, center.y + 2.f * scale },
+            { center.x - 2.f * scale, center.y + 2.f * scale },
+            { center.x + 1.f * scale, center.y + radius }, color);
+        draw->PathArcTo(center, 3.5f * scale, -.75f, .75f, 8);
+        draw->PathStroke(color, 0, line);
+        draw->PathArcTo(center, 6.f * scale, -.75f, .75f, 8);
+        draw->PathStroke(color, 0, line);
+        break;
+    case EditorUiObjectIcon::Mesh:
+    {
+        const ImVec2 top{ center.x, center.y - radius };
+        const ImVec2 left{ center.x - radius, center.y - 2.f * scale };
+        const ImVec2 right{ center.x + radius, center.y - 2.f * scale };
+        const ImVec2 bottom{ center.x, center.y + radius };
+        draw->AddLine(top, left, color, line); draw->AddLine(top, right, color, line);
+        draw->AddLine(left, bottom, color, line); draw->AddLine(right, bottom, color, line);
+        draw->AddLine(top, { center.x, center.y }, color, line);
+        draw->AddLine(left, { center.x, center.y }, color, line);
+        draw->AddLine(right, { center.x, center.y }, color, line);
+        draw->AddLine({ center.x, center.y }, bottom, color, line);
+        break;
+    }
+    case EditorUiObjectIcon::Sprite:
+        draw->AddRect({ center.x - radius, center.y - radius * .8f },
+            { center.x + radius, center.y + radius * .8f }, color, 1.f, 0, line);
+        draw->AddCircleFilled({ center.x + 2.8f * scale, center.y - 2.2f * scale },
+            1.2f * scale, color);
+        draw->AddTriangle({ center.x - 4.5f * scale, center.y + 3.5f * scale },
+            { center.x - 1.f * scale, center.y },
+            { center.x + 4.5f * scale, center.y + 3.5f * scale }, color, line);
+        break;
+    case EditorUiObjectIcon::Physics:
+        draw->AddCircle(center, radius, color, 14, line);
+        draw->AddCircleFilled(center, 1.6f * scale, color);
+        draw->AddLine({ center.x - radius, center.y },
+            { center.x + radius, center.y }, color, line);
+        break;
+    case EditorUiObjectIcon::UserInterface:
+        draw->AddRect({ center.x - radius, center.y - radius * .8f },
+            { center.x + radius, center.y + radius * .8f }, color, 1.f, 0, line);
+        draw->AddLine({ center.x - radius, center.y - 2.f * scale },
+            { center.x + radius, center.y - 2.f * scale }, color, line);
+        draw->AddCircleFilled({ center.x - 3.5f * scale, center.y - 4.f * scale },
+            .7f * scale, color);
+        break;
+    case EditorUiObjectIcon::Transform:
+        draw->AddLine({ center.x - radius, center.y },
+            { center.x + radius, center.y }, color, line);
+        draw->AddLine({ center.x, center.y - radius },
+            { center.x, center.y + radius }, color, line);
+        draw->AddTriangleFilled({ center.x + radius, center.y },
+            { center.x + 2.5f * scale, center.y - 2.f * scale },
+            { center.x + 2.5f * scale, center.y + 2.f * scale }, color);
+        draw->AddTriangleFilled({ center.x, center.y - radius },
+            { center.x - 2.f * scale, center.y - 2.5f * scale },
+            { center.x + 2.f * scale, center.y - 2.5f * scale }, color);
+        break;
+    default:
+        draw->AddRectFilled({ center.x - 4.2f * scale, center.y - 4.2f * scale },
+            { center.x + 4.2f * scale, center.y + 4.2f * scale }, color,
+            1.4f * scale);
+        break;
+    }
+}
+}
+
 void ImGuiEditorUi::SetNextWindowRect(float x,float y,float w,float h){ ImGui::SetNextWindowPos({x,y},ImGuiCond_FirstUseEver); ImGui::SetNextWindowSize({w,h},ImGuiCond_FirstUseEver); }
 bool ImGuiEditorUi::BeginWindow(const char* t,bool* o,bool p){ if(p) ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,{0,0}); bool r=ImGui::Begin(t,o); if(p) ImGui::PopStyleVar(); return r; }
 void ImGuiEditorUi::EndWindow(){ImGui::End();}
@@ -15,26 +148,36 @@ bool ImGuiEditorUi::IsWindowFocused() const{return ImGui::IsWindowFocused(ImGuiF
 void ImGuiEditorUi::PushId(const void* id){ImGui::PushID(id);}
 void ImGuiEditorUi::PushId(const char* id){ImGui::PushID(id);}
 void ImGuiEditorUi::PopId(){ImGui::PopID();}
-bool ImGuiEditorUi::Button(const char* l,float w,float h){return ImGui::Button(l,{w,h});}
+bool ImGuiEditorUi::Button(const char* label,float width,float height)
+{
+    const bool pressed=ImGui::Button(label,{width,height});
+    const float hover=AnimateInteraction(ImGui::GetItemID(),ImGui::IsItemHovered());
+    if(hover>.01f){
+        ImVec4 accent=ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
+        accent.w*=hover*.8f;
+        ImGui::GetWindowDrawList()->AddRect(ImGui::GetItemRectMin(),
+            ImGui::GetItemRectMax(),ImGui::GetColorU32(accent),
+            ImGui::GetStyle().FrameRounding,0,1.f+hover);
+    }
+    return pressed;
+}
 EditorUiBreadcrumbResult ImGuiEditorUi::Breadcrumb(const char* label,
     const char* const* childFolders, int childFolderCount)
 {
+    (void)childFolders;
+    (void)childFolderCount;
     EditorUiBreadcrumbResult result;
-    result.clicked = ImGui::Button(label);
-    if (childFolderCount <= 0)
-        return result;
-    ImGui::SameLine(0.f, 1.f);
-    if (ImGui::ArrowButton("##children", ImGuiDir_Down))
-        ImGui::OpenPopup("##breadcrumbChildren");
-    if (ImGui::BeginPopup("##breadcrumbChildren"))
-    {
-        for (int index = 0; index < childFolderCount; ++index)
-        {
-            if (ImGui::MenuItem(childFolders[index]))
-                result.childSelected = index;
-        }
-        ImGui::EndPopup();
-    }
+    const ImVec2 position = ImGui::GetCursorScreenPos();
+    const ImVec2 size = ImGui::CalcTextSize(label);
+    ImGui::InvisibleButton("##breadcrumb", size);
+    const bool hovered = ImGui::IsItemHovered();
+    result.clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
+    const ImU32 color = ImGui::GetColorU32(hovered
+        ? ImGuiCol_Text : ImGuiCol_TextDisabled);
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    drawList->AddText(position, color, label);
+    drawList->AddLine({ position.x, position.y + size.y + 1.f },
+        { position.x + size.x, position.y + size.y + 1.f }, color, 1.f);
     return result;
 }
 void ImGuiEditorUi::Label(const char* t){ImGui::TextUnformatted(t);}
@@ -42,10 +185,21 @@ void ImGuiEditorUi::DisabledLabel(const char* t){ImGui::TextDisabled("%s",t);}
 void ImGuiEditorUi::ColoredLabel(const char* t,EditorUiColor c){ImGui::TextColored({c.r,c.g,c.b,c.a},"%s",t);}
 void ImGuiEditorUi::BeginTextWrap(){ImGui::PushTextWrapPos(0.f);}
 void ImGuiEditorUi::EndTextWrap(){ImGui::PopTextWrapPos();}
-void ImGuiEditorUi::SameLine(){ImGui::SameLine();} void ImGuiEditorUi::Separator(){ImGui::Separator();} void ImGuiEditorUi::Spacing(){ImGui::Spacing();}
+void ImGuiEditorUi::SameLine(){ImGui::SameLine();}
+void ImGuiEditorUi::SameLineRight(float width)
+{
+    const float right = ImGui::GetWindowContentRegionMax().x;
+    const float previousRight = ImGui::GetItemRectMax().x -
+        ImGui::GetWindowPos().x + ImGui::GetStyle().ItemSpacing.x;
+    ImGui::SameLine(std::max(previousRight, right - width));
+}
+void ImGuiEditorUi::Separator(){ImGui::Separator();} void ImGuiEditorUi::Spacing(){ImGui::Spacing();}
 void ImGuiEditorUi::Indent(float width){ImGui::Indent(width);}
 void ImGuiEditorUi::Unindent(float width){ImGui::Unindent(width);}
-bool ImGuiEditorUi::Checkbox(const char*l,bool*v){return ImGui::Checkbox(l,v);} bool ImGuiEditorUi::InputText(const char*l,char*b,size_t s){if(l&&l[0]=='#'&&l[1]=='#')ImGui::SetNextItemWidth(-FLT_MIN);return ImGui::InputText(l,b,s);}
+void ImGuiEditorUi::SetNextItemMixedValue(bool mixed){m_nextItemMixed=mixed;}
+bool ImGuiEditorUi::ConsumeMixedValue(){const bool mixed=m_nextItemMixed;m_nextItemMixed=false;return mixed;}
+bool ImGuiEditorUi::Checkbox(const char*l,bool*v){const bool mixed=ConsumeMixedValue();if(mixed)ImGui::PushItemFlag(ImGuiItemFlags_MixedValue,true);const bool changed=ImGui::Checkbox(l,v);if(mixed)ImGui::PopItemFlag();return changed;}
+bool ImGuiEditorUi::InputText(const char*l,char*b,size_t s){const bool mixed=ConsumeMixedValue();if(l&&l[0]=='#'&&l[1]=='#')ImGui::SetNextItemWidth(-FLT_MIN);if(!mixed)return ImGui::InputText(l,b,s);std::vector<char> display(s,0);strncpy_s(display.data(),s,"-",_TRUNCATE);const bool changed=ImGui::InputText(l,display.data(),s);if(changed)strncpy_s(b,s,display.data(),_TRUNCATE);return changed;}
 bool ImGuiEditorUi::InputTextSubmit(const char*l,char*b,size_t s){if(l&&l[0]=='#'&&l[1]=='#')ImGui::SetNextItemWidth(-FLT_MIN);return ImGui::InputText(l,b,s,ImGuiInputTextFlags_EnterReturnsTrue);}
 void ImGuiEditorUi::ReadOnlyTextBlock(const char* label,const char* text,bool scrollToBottom,float reservedBottom)
 {
@@ -66,18 +220,80 @@ void ImGuiEditorUi::ReadOnlyTextBlock(const char* label,const char* text,bool sc
             }
     }
 }
-bool ImGuiEditorUi::DragFloat(const char*l,float*v,float s,float a,float b){return ImGui::DragFloat(l,v,s,a,b);}
-bool ImGuiEditorUi::DragFloat3(const char*l,float*v,float s,float a,float b){return ImGui::DragFloat3(l,v,s,a,b);}
+bool ImGuiEditorUi::DragFloat(const char*l,float*v,float s,float a,float b){const bool mixed=ConsumeMixedValue();return ImGui::DragFloat(l,v,s,a,b,mixed?"-":"%.3f");}
+bool ImGuiEditorUi::DragFloat3(const char*l,float*v,float s,float a,float b){const bool mixed=ConsumeMixedValue();return ImGui::DragFloat3(l,v,s,a,b,mixed?"-":"%.3f");}
 bool ImGuiEditorUi::IsAnyItemActive() const{return ImGui::IsAnyItemActive();}
-bool ImGuiEditorUi::ColorEdit3(const char*l,float*v){return ImGui::ColorEdit3(l,v);} bool ImGuiEditorUi::ColorEdit4(const char*l,float*v){return ImGui::ColorEdit4(l,v);}
+bool ImGuiEditorUi::ColorEdit3(const char*l,float*v){if(ConsumeMixedValue())return ImGui::DragFloat3(l,v,.01f,0.f,1.f,"-");return ImGui::ColorEdit3(l,v);} bool ImGuiEditorUi::ColorEdit4(const char*l,float*v){if(ConsumeMixedValue())return ImGui::DragFloat4(l,v,.01f,0.f,1.f,"-");return ImGui::ColorEdit4(l,v);}
 bool ImGuiEditorUi::SliderInt(const char*l,int*v,int a,int b){return ImGui::SliderInt(l,v,a,b);}
 bool ImGuiEditorUi::SliderFloat(const char*l,float*v,float a,float b){return ImGui::SliderFloat(l,v,a,b,"%.0f units");}
 bool ImGuiEditorUi::InputUInt(const char*l,uint32_t*v){return ImGui::InputScalar(l,ImGuiDataType_U32,v);}
-void ImGuiEditorUi::ValueLabel(const char*l,const char*v){ImGui::LabelText(l,"%s",v);}
+void ImGuiEditorUi::ValueLabel(const char*l,const char*v){ImGui::LabelText(l,"%s",ConsumeMixedValue()?"-":v);}
 bool ImGuiEditorUi::CollapsingHeader(const char*l,bool d){return ImGui::CollapsingHeader(l,d?ImGuiTreeNodeFlags_DefaultOpen:0);}
+bool ImGuiEditorUi::PropertyGroupHeader(const char* label,bool defaultOpen)
+{
+    const ImGuiStyle& style=ImGui::GetStyle();
+    const ImVec4 background=ImGui::GetStyleColorVec4(ImGuiCol_FrameBg);
+    const ImVec4 header=ImGui::GetStyleColorVec4(ImGuiCol_Header);
+    const ImVec4 hovered=ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+        {style.FramePadding.x,2.f});
+    ImGui::PushStyleColor(ImGuiCol_Header,ImLerp(background,header,.45f));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered,
+        ImLerp(background,hovered,.68f));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive,
+        ImLerp(background,hovered,.82f));
+    const bool open=ImGui::CollapsingHeader(label,
+        defaultOpen?ImGuiTreeNodeFlags_DefaultOpen:0);
+    ImGui::PopStyleColor(3);
+    ImGui::PopStyleVar();
+    return open;
+}
+bool ImGuiEditorUi::ComponentHeader(EditorUiObjectIcon icon,const char* label,
+    bool defaultOpen)
+{
+    ImGui::PushID(label);
+    const ImGuiStyle& style=ImGui::GetStyle();
+    const ImVec4 header=ImGui::GetStyleColorVec4(ImGuiCol_Header);
+    const ImVec4 accent=ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+        {style.FramePadding.x,style.FramePadding.y+3.f});
+    ImGui::PushStyleColor(ImGuiCol_Header,ImLerp(header,accent,.10f));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered,ImLerp(
+        ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered),accent,.14f));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive,ImLerp(
+        ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive),accent,.18f));
+    const ImGuiTreeNodeFlags flags=defaultOpen?ImGuiTreeNodeFlags_DefaultOpen:0;
+    const bool open=ImGui::CollapsingHeader("##componentHeader",flags);
+    const ImVec2 minimum=ImGui::GetItemRectMin();
+    const ImVec2 maximum=ImGui::GetItemRectMax();
+    const float hover=AnimateInteraction(ImGui::GetItemID(),ImGui::IsItemHovered(),12.f);
+    ImGui::PopStyleColor(3);
+    ImGui::PopStyleVar();
+    const float iconSize=18.f;
+    const float iconLeft=minimum.x+ImGui::GetFontSize()+
+        ImGui::GetStyle().FramePadding.x*1.5f;
+    const ImVec2 center{iconLeft+iconSize*.5f,(minimum.y+maximum.y)*.5f};
+    const ImVec4 iconColor=ImLerp(ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled),
+        ImGui::GetStyleColorVec4(ImGuiCol_CheckMark),hover);
+    ImDrawList* draw=ImGui::GetWindowDrawList();
+    draw->AddRectFilled({minimum.x,minimum.y},{minimum.x+3.f,maximum.y},
+        ImGui::GetColorU32(ImLerp(header,accent,.55f)),style.FrameRounding,
+        ImDrawFlags_RoundCornersLeft);
+    DrawObjectIcon(draw,icon,center,.92f+hover*.08f,
+        ImGui::GetColorU32(iconColor));
+    const ImVec2 textSize=ImGui::CalcTextSize(label);
+    draw->AddText({iconLeft+iconSize+4.f,
+        minimum.y+(maximum.y-minimum.y-textSize.y)*.5f},
+        ImGui::GetColorU32(ImGuiCol_Text),label);
+    ImGui::PopID();
+    return open;
+}
 bool ImGuiEditorUi::TreeNode(const void*id,const char*l,bool s,bool leaf,bool d){ImGuiTreeNodeFlags f=ImGuiTreeNodeFlags_OpenOnArrow|ImGuiTreeNodeFlags_SpanAvailWidth|(s?ImGuiTreeNodeFlags_Selected:0)|(d?ImGuiTreeNodeFlags_DefaultOpen:0);if(leaf)f|=ImGuiTreeNodeFlags_Leaf|ImGuiTreeNodeFlags_NoTreePushOnOpen;return ImGui::TreeNodeEx(id,f,"%s",l);}
 void ImGuiEditorUi::TreePop(){ImGui::TreePop();}
-EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,char* name,size_t size,bool* enabled,bool selected,bool leaf,bool lockName,bool enabledInHierarchy,int hierarchyDepth,bool lastSibling,uint64_t ancestorGuideMask)
+EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,
+    EditorUiObjectIcon icon,char* name,size_t size,bool* enabled,bool selected,
+    bool leaf,bool lockName,bool enabledInHierarchy,int hierarchyDepth,
+    bool lastSibling,uint64_t ancestorGuideMask)
 {
     EditorUiObjectRowResult result;
     (void)size;
@@ -98,6 +314,8 @@ EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,char* name,s
     if(leaf)flags|=ImGuiTreeNodeFlags_Leaf|ImGuiTreeNodeFlags_NoTreePushOnOpen;
     ImGui::SetNextItemAllowOverlap();
     result.open=ImGui::TreeNodeEx("##object",flags,"");
+    const bool rowHovered=ImGui::IsItemHovered();
+    const float hover=AnimateInteraction(ImGui::GetItemID(),rowHovered,12.f);
     if(hasChildren)
         openState->second=result.open;
     const ImVec2 rowMinimum=ImGui::GetItemRectMin();
@@ -108,6 +326,12 @@ EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,char* name,s
     ImVec4 guideColor=ImGui::GetStyleColorVec4(ImGuiCol_Separator);
     guideColor.w*=.7f;
     ImDrawList* hierarchyDraw=ImGui::GetWindowDrawList();
+    if(hover>.01f){
+        ImVec4 hoverColor=ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered);
+        hoverColor.w*=hover*.32f;
+        hierarchyDraw->AddRectFilled(rowMinimum,rowMaximum,
+            ImGui::GetColorU32(hoverColor),ImGui::GetStyle().FrameRounding);
+    }
     for(int level=0;level<hierarchyDepth;++level){
         if(level<64&&(ancestorGuideMask&(uint64_t{1}<<level))){
             const float x=branchX-static_cast<float>(hierarchyDepth-level)*hierarchyIndent;
@@ -158,6 +382,16 @@ EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,char* name,s
     result.enabledChanged=ImGui::Checkbox("##enabled",enabled);
     result.clicked=result.clicked||ImGui::IsItemClicked();
     ImGui::SameLine(0.f,4.f);
+    const float iconWidth=18.f;
+    const ImVec2 iconMinimum=ImGui::GetCursorScreenPos();
+    ImGui::Dummy({iconWidth,ImGui::GetFrameHeight()});
+    result.clicked=result.clicked||ImGui::IsItemClicked();
+    const ImVec4 iconColor=ImLerp(ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled),
+        ImGui::GetStyleColorVec4(ImGuiCol_CheckMark),hover);
+    DrawObjectIcon(ImGui::GetWindowDrawList(),icon,
+        {iconMinimum.x+iconWidth*.5f,iconMinimum.y+ImGui::GetFrameHeight()*.5f},
+        .92f+hover*.08f,ImGui::GetColorU32(iconColor));
+    ImGui::SameLine(0.f,3.f);
     const char* display=name[0]?name:"(unnamed)";
     const ImVec2 textMin=ImGui::GetCursorScreenPos();
     const ImVec2 textMax={
@@ -295,6 +529,8 @@ EditorUiAssetTileResult ImGuiEditorUi::AssetTile(const char* label,
         ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 2.f);
     }
     ImGui::Button("##assetTile", { size, size });
+    const float hover = AnimateInteraction(ImGui::GetItemID(),
+        ImGui::IsItemHovered(), 12.f);
     const ImVec2 minimum = ImGui::GetItemRectMin();
     const ImVec2 maximum = ImGui::GetItemRectMax();
     ImDrawList* drawList = ImGui::GetWindowDrawList();
@@ -308,13 +544,24 @@ EditorUiAssetTileResult ImGuiEditorUi::AssetTile(const char* label,
     }
     else if (fallbackIcon && *fallbackIcon)
     {
-        const float fontSize = std::min(size * 0.42f, 48.f);
+        const ImVec2 nativeSize = ImGui::CalcTextSize(fallbackIcon);
+        const float fitWidth = nativeSize.x > 0.f
+            ? ImGui::GetFontSize() * (size - padding * 2.f) / nativeSize.x
+            : ImGui::GetFontSize();
+        const float fontSize = std::min({ size * 0.42f, 48.f, fitWidth });
         const ImVec2 iconSize = ImGui::GetFont()->CalcTextSizeA(
             fontSize, FLT_MAX, 0.f, fallbackIcon);
         drawList->AddText(ImGui::GetFont(), fontSize,
             { minimum.x + (size - iconSize.x) * 0.5f,
               minimum.y + (size - iconSize.y) * 0.5f },
             ImGui::GetColorU32(ImGuiCol_TextDisabled), fallbackIcon);
+    }
+    if (hover > .01f)
+    {
+        ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
+        accent.w *= hover * .85f;
+        drawList->AddRect(minimum, maximum, ImGui::GetColorU32(accent),
+            ImGui::GetStyle().FrameRounding, 0, 1.f + hover);
     }
     if (selected)
     {
@@ -357,6 +604,11 @@ EditorUiContextMenuResult ImGuiEditorUi::ContextMenu(const void* id,const char* 
                     }
                     if(ImGui::BeginMenu("2D")){
                         result.addSpriteRequested=ImGui::MenuItem("Sprite");
+                        ImGui::EndMenu();
+                    }
+                    if(ImGui::BeginMenu("Lighting")){
+                        result.addLightProbeRequested=ImGui::MenuItem("Light Probe");
+                        result.addLightProbeGroupRequested=ImGui::MenuItem("Light Probe Volume");
                         ImGui::EndMenu();
                     }
                     ImGui::EndMenu();
@@ -437,10 +689,19 @@ bool ImGuiEditorUi::DeleteShortcutPressed()const
     if(EditorKeyBindings::Get().IsCapturing()||ImGui::GetIO().WantTextInput)return false;
     return ImGui::IsKeyPressed(ImGuiKey_Delete,false)||ImGui::IsKeyPressed(ImGuiKey_Backspace,false);
 }
+bool ImGuiEditorUi::IsMultiSelectModifierDown()const{return ImGui::GetIO().KeyCtrl;}
+bool ImGuiEditorUi::IsRangeSelectModifierDown()const{return ImGui::GetIO().KeyShift;}
 bool ImGuiEditorUi::BeginDragDropSource(){
     const ImVec2 minimum=ImGui::GetItemRectMin(),maximum=ImGui::GetItemRectMax();
     ImDrawList* rowDrawList=ImGui::GetWindowDrawList();
-    if(!ImGui::BeginDragDropSource())return false;
+    // Composite widgets such as AssetTile finish with EndGroup(). ImGui gives
+    // that group a zero ID whenever none of its children is the active item.
+    // If another control in the same window is held (for example the asset
+    // list/grid toggle), probing the group as a drag source otherwise asserts.
+    // ImGui's supported null-ID path derives a temporary ID from the group's
+    // rectangle and still returns false unless this item is actually dragged.
+    if(!ImGui::BeginDragDropSource(
+        ImGuiDragDropFlags_SourceAllowNullID))return false;
     // Keep the source row visible as the item being moved while ImGui's
     // standard preview tooltip follows the pointer.
     rowDrawList->AddRectFilled(minimum,maximum,IM_COL32(90,160,255,55));
@@ -551,6 +812,188 @@ void ImGuiEditorUi::BeginDisabled(bool d){ImGui::BeginDisabled(d);} void ImGuiEd
 bool ImGuiEditorUi::Combo(const char*l,int*s,const char*const*i,int c){return ImGui::Combo(l,s,i,c);}
 void ImGuiEditorUi::Tooltip(const char*t){if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("%s",t);}
 void ImGuiEditorUi::Progress(float f,const char*o){ImGui::ProgressBar(f,{-1,0},o);}
+void ImGuiEditorUi::PercentageGrid(const char* id,
+    const EditorUiPercentageSegment* segments,size_t segmentCount,float requestedWidth)
+{
+    const float width=requestedWidth>0.f?requestedWidth:ImGui::GetContentRegionAvail().x;
+    const float gap=2.f;
+    const float cell=std::max(2.f,(width-gap*9.f)/10.f);
+    const float actualWidth=cell*10.f+gap*9.f;
+    const float height=actualWidth;
+    const ImVec2 origin=ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton(id,{actualWidth,height});
+    ImDrawList* draw=ImGui::GetWindowDrawList();
+    const ImU32 empty=ImGui::GetColorU32(ImGuiCol_FrameBg);
+    const ImU32 border=ImGui::GetColorU32(ImGuiCol_Border);
+    struct CellFill
+    {
+        float r=0.f,g=0.f,b=0.f,a=0.f;
+        float coverage=0.f;
+    };
+    std::array<CellFill,100> fills{};
+    float cursor=0.f;
+    for(size_t segment=0;segment<segmentCount&&cursor<100.f;++segment)
+    {
+        const float amount=std::clamp(segments[segment].percentage,0.f,100.f-cursor);
+        const float end=cursor+amount;
+        const int first=std::clamp(static_cast<int>(std::floor(cursor)),0,99);
+        const int last=std::clamp(static_cast<int>(std::ceil(end))-1,0,99);
+        for(int index=first;index<=last&&amount>0.f;++index)
+        {
+            const float overlap=std::max(0.f,std::min(end,static_cast<float>(index+1))-
+                std::max(cursor,static_cast<float>(index)));
+            CellFill& fill=fills[index];
+            fill.r+=segments[segment].color.r*overlap;
+            fill.g+=segments[segment].color.g*overlap;
+            fill.b+=segments[segment].color.b*overlap;
+            fill.a+=segments[segment].color.a*overlap;
+            fill.coverage+=overlap;
+        }
+        cursor=end;
+    }
+    const ImVec4 background=ImGui::GetStyleColorVec4(ImGuiCol_FrameBg);
+    for(int index=0;index<100;++index)
+    {
+        const int row=9-index/10;
+        const int column=index%10;
+        const ImVec2 minimum{origin.x+column*(cell+gap),origin.y+row*(cell+gap)};
+        const ImVec2 maximum{minimum.x+cell,minimum.y+cell};
+        ImU32 color=empty;
+        const CellFill& fill=fills[index];
+        if(fill.coverage>0.f)
+        {
+            const float coverage=std::clamp(fill.coverage,0.f,1.f);
+            const float inverse=1.f-coverage;
+            // A partially occupied cell fades continuously from its normal
+            // background. Category boundaries blend by their share of the cell.
+            color=ImGui::ColorConvertFloat4ToU32({
+                background.x*inverse+fill.r,
+                background.y*inverse+fill.g,
+                background.z*inverse+fill.b,
+                background.w*inverse+fill.a
+            });
+        }
+        draw->AddRectFilled(minimum,maximum,color,cell*.16f);
+        draw->AddRect(minimum,maximum,border,cell*.16f);
+    }
+    int hoveredCell=-1;
+    if(ImGui::IsItemHovered())
+    {
+        const ImVec2 mouse=ImGui::GetIO().MousePos;
+        const float localX=mouse.x-origin.x;
+        const float localY=mouse.y-origin.y;
+        const int column=static_cast<int>(localX/(cell+gap));
+        const int visualRow=static_cast<int>(localY/(cell+gap));
+        if(column>=0&&column<10&&visualRow>=0&&visualRow<10&&
+            localX-column*(cell+gap)<=cell&&localY-visualRow*(cell+gap)<=cell)
+        {
+            hoveredCell=(9-visualRow)*10+column;
+            const ImVec2 minimum{origin.x+column*(cell+gap),
+                origin.y+visualRow*(cell+gap)};
+            const ImVec2 maximum{minimum.x+cell,minimum.y+cell};
+            draw->AddRect(minimum,maximum,
+                ImGui::GetColorU32(ImGuiCol_Text),cell*.16f,0,2.f);
+        }
+
+        ImGui::BeginTooltip();
+        if(hoveredCell>=0)
+        {
+            ImGui::Text("Cell %d  |  %d%% - %d%%",hoveredCell+1,
+                hoveredCell,hoveredCell+1);
+            ImGui::TextDisabled("Occupied %.1f%% of this cell",
+                std::clamp(fills[hoveredCell].coverage,0.f,1.f)*100.f);
+            float segmentStart=0.f;
+            for(size_t index=0;index<segmentCount&&segmentStart<100.f;++index)
+            {
+                const float amount=std::clamp(segments[index].percentage,
+                    0.f,100.f-segmentStart);
+                const float segmentEnd=segmentStart+amount;
+                const float overlap=std::max(0.f,
+                    std::min(segmentEnd,static_cast<float>(hoveredCell+1))-
+                    std::max(segmentStart,static_cast<float>(hoveredCell)));
+                if(overlap>0.f)
+                {
+                    const EditorUiColor& value=segments[index].color;
+                    ImGui::ColorButton("##cellLegend",
+                        {value.r,value.g,value.b,value.a},
+                        ImGuiColorEditFlags_NoTooltip|ImGuiColorEditFlags_NoDragDrop,
+                        {9.f,9.f});
+                    ImGui::SameLine();
+                    ImGui::Text("%s  %.2f%% overall (%.0f%% of cell)",
+                        segments[index].label?segments[index].label:"Usage",
+                        overlap,overlap*100.f);
+                }
+                segmentStart=segmentEnd;
+            }
+            ImGui::Separator();
+        }
+        float total=0.f;
+        for(size_t index=0;index<segmentCount;++index)
+        {
+            total+=std::max(0.f,segments[index].percentage);
+            const EditorUiColor& value=segments[index].color;
+            ImGui::ColorButton("##legend",{value.r,value.g,value.b,value.a},
+                ImGuiColorEditFlags_NoTooltip|ImGuiColorEditFlags_NoDragDrop,{9.f,9.f});
+            ImGui::SameLine();
+            ImGui::Text("%s  %.1f%%",segments[index].label?segments[index].label:"Usage",
+                segments[index].percentage);
+        }
+        if(segmentCount>1)ImGui::TextDisabled("Combined: %.1f%%",std::min(total,100.f));
+        ImGui::TextDisabled("10 x 10  |  1%% per cell");
+        ImGui::EndTooltip();
+    }
+}
+float ImGuiEditorUi::FrameRate() const{return ImGui::GetIO().Framerate;}
+void ImGuiEditorUi::UsageHistory(const char* id,const float* values,size_t count,
+    float minimum,float maximum,EditorUiColor color,float requestedWidth,float height)
+{
+    const float width=requestedWidth>0.f?requestedWidth:ImGui::GetContentRegionAvail().x;
+    const ImVec2 origin=ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton(id,{width,height});
+    ImDrawList* draw=ImGui::GetWindowDrawList();
+    draw->AddRectFilled(origin,{origin.x+width,origin.y+height},ImGui::GetColorU32(ImGuiCol_FrameBg),3.f);
+    const ImU32 grid=ImGui::GetColorU32(ImGuiCol_Border);
+    for(int line=1;line<4;++line)
+    {
+        const float y=origin.y+height*line/4.f;
+        draw->AddLine({origin.x,y},{origin.x+width,y},grid);
+    }
+    const ImU32 plot=ImGui::ColorConvertFloat4ToU32({color.r,color.g,color.b,color.a});
+    if(values&&count>1&&maximum>minimum)
+    {
+        for(size_t index=1;index<count;++index)
+        {
+            const float first=std::clamp((values[index-1]-minimum)/(maximum-minimum),0.f,1.f);
+            const float second=std::clamp((values[index]-minimum)/(maximum-minimum),0.f,1.f);
+            const float x0=origin.x+width*static_cast<float>(index-1)/static_cast<float>(count-1);
+            const float x1=origin.x+width*static_cast<float>(index)/static_cast<float>(count-1);
+            draw->AddLine({x0,origin.y+height*(1.f-first)},
+                {x1,origin.y+height*(1.f-second)},plot,2.f);
+        }
+    }
+    draw->AddRect(origin,{origin.x+width,origin.y+height},grid,3.f);
+    if(ImGui::IsItemHovered()&&values&&count)
+    {
+        const float localX=std::clamp(ImGui::GetIO().MousePos.x-origin.x,0.f,width);
+        const size_t sample=count>1?std::min(count-1,static_cast<size_t>(std::round(
+            localX/width*static_cast<float>(count-1)))):0;
+        const float x=count>1?origin.x+width*static_cast<float>(sample)/
+            static_cast<float>(count-1):origin.x+width;
+        const float normalized=maximum>minimum?std::clamp(
+            (values[sample]-minimum)/(maximum-minimum),0.f,1.f):0.f;
+        const float y=origin.y+height*(1.f-normalized);
+        draw->AddLine({x,origin.y},{x,origin.y+height},
+            ImGui::GetColorU32(ImGuiCol_TextDisabled),1.f);
+        draw->AddCircleFilled({x,y},4.f,plot);
+        draw->AddCircle({x,y},4.f,ImGui::GetColorU32(ImGuiCol_Text),0,1.5f);
+        ImGui::BeginTooltip();
+        ImGui::Text("Sample %zu of %zu",sample+1,count);
+        ImGui::Text("Value %.2f",values[sample]);
+        ImGui::TextDisabled("Current %.2f  |  Range %.0f - %.0f",
+            values[count-1],minimum,maximum);
+        ImGui::EndTooltip();
+    }
+}
 void ImGuiEditorUi::DrawImage(void*tex,float w,float h){ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(tex)),{w,h});}
 void ImGuiEditorUi::DrawCircularImage(void* tex,float diameter,EditorUiColor border)
 {
@@ -687,25 +1130,33 @@ void ImGuiEditorUi::DockWindowToArea(const char* title,EditorPanelDockArea area)
         ImGuiWindow* window=ImGui::FindWindowByName(name);
         return window&&window->DockNode?window->DockNode->ID:0;
     };
+    auto nodeForViewType=[&](const char* baseName)->ImGuiID{
+        if(ImGuiID node=nodeForWindow(baseName))return node;
+        for(int slot=2;slot<=32;++slot){
+            const std::string numbered=std::string(baseName)+" "+std::to_string(slot);
+            if(ImGuiID node=nodeForWindow(numbered.c_str()))return node;
+        }
+        return 0;
+    };
 
     ImGuiID targetNode=0;
     switch(area)
     {
     case EditorPanelDockArea::MainDocument:
-        targetNode=nodeForWindow("Scene 1");
-        if(!targetNode)targetNode=nodeForWindow("Game 1");
+        targetNode=nodeForViewType("Scene");
+        if(!targetNode)targetNode=nodeForViewType("Game");
         break;
     case EditorPanelDockArea::LeftSidebar:
-        targetNode=nodeForWindow("Hierarchy 1");
-        if(!targetNode)targetNode=nodeForWindow("Assets 1");
+        targetNode=nodeForWindow("Hierarchy");
+        if(!targetNode)targetNode=nodeForWindow("Assets");
         break;
     case EditorPanelDockArea::RightSidebar:
-        targetNode=nodeForWindow("Properties 1");
+        targetNode=nodeForWindow("Properties");
         break;
     case EditorPanelDockArea::BottomPanel:
-        targetNode=nodeForWindow("Console 1");
-        if(!targetNode)targetNode=nodeForWindow("Problems 1");
-        if(!targetNode)targetNode=nodeForWindow("Terminal 1");
+        targetNode=nodeForWindow("Console");
+        if(!targetNode)targetNode=nodeForWindow("Problems");
+        if(!targetNode)targetNode=nodeForWindow("Terminal");
         break;
     default:
         break;

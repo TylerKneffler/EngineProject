@@ -2,24 +2,10 @@
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
 #include <algorithm>
 #include <cmath>
-#include <functional>
 #include <limits>
 
 namespace Engine::Scene
 {
-namespace
-{
-void VisitObjectTree(const Engine::Core::Object* object,
-    const std::function<void(const Engine::Core::Object*)>& visitor)
-{
-    if (!object)
-        return;
-    visitor(object);
-    for (const Engine::Core::Object* child : object->Children)
-        VisitObjectTree(child, visitor);
-}
-}
-
 namespace
 {
 struct OrderedVolume
@@ -265,6 +251,7 @@ std::vector<Scene::PortalRaySegment> Scene::TracePortalRay(
     };
     std::vector<PortalEdge> portalPath;
     SpatialRay current { ray.origin, ray.direction / directionLength };
+    const Object* currentContentScopeRoot = nullptr;
     float remainingDistance = maxDistance;
     constexpr float kRayEpsilon = 0.001f;
 
@@ -278,17 +265,17 @@ std::vector<Scene::PortalRaySegment> Scene::TracePortalRay(
             return target;
 
         const Engine::Components::SpatialManipulator* reciprocal = nullptr;
-        for (const auto& root : GetObjects())
+        // Scene owns every hierarchy node in one flat list. Walking Children
+        // from every entry would revisit a descendant once per ancestor.
+        for (const auto& owned : GetObjects())
         {
-            VisitObjectTree(root.get(), [&](const Engine::Core::Object* object)
-            {
-                if (!object || object == source->Owner || reciprocal)
-                    return;
-                auto* candidate = object->GetComponent<
-                    Engine::Components::SpatialManipulator>();
-                if (candidate && candidate->ResolveTarget() == source)
-                    reciprocal = candidate;
-            });
+            const Engine::Core::Object* object = owned.get();
+            if (!object || object == source->Owner || reciprocal)
+                continue;
+            auto* candidate = object->GetComponent<
+                Engine::Components::SpatialManipulator>();
+            if (candidate && candidate->ResolveTarget() == source)
+                reciprocal = candidate;
         }
         return reciprocal;
     };
@@ -304,26 +291,27 @@ std::vector<Scene::PortalRaySegment> Scene::TracePortalRay(
 
         if (hop < maxPortalHops)
         {
-            for (const auto& root : GetObjects())
+            for (const auto& owned : GetObjects())
             {
-                VisitObjectTree(root.get(), [&](const Engine::Core::Object* object)
-                {
-                    if (!object || !object->IsEnabledInHierarchy())
-                        return;
-                    auto* source = object->GetComponent<
-                        Engine::Components::SpatialManipulator>();
-                    if (!source || !source->enabled)
-                        return;
+                const Engine::Core::Object* object = owned.get();
+                if (!object || !object->IsEnabledInHierarchy())
+                    continue;
+                if (!IsObjectInSpatialRegion(object, currentContentScopeRoot))
+                    continue;
+                auto* source = object->GetComponent<
+                    Engine::Components::SpatialManipulator>();
+                if (!source || !source->enabled)
+                    continue;
                     const auto mode = static_cast<Engine::Components::
                         SpatialManipulator::ConnectionMode>(source->connectionMode);
                     if (mode != Engine::Components::SpatialManipulator::ConnectionMode::Portal &&
                         mode != Engine::Components::SpatialManipulator::ConnectionMode::LinkedPortal)
-                        return;
+                        continue;
                     auto* target = resolveTarget(source);
                     if (!target || !target->enabled || !target->Owner ||
                         !source->HasCompatiblePortalShapeWith(*target))
                     {
-                        return;
+                        continue;
                     }
                     const PortalEdge edge { source, target };
                     if (std::find_if(portalPath.begin(), portalPath.end(),
@@ -333,7 +321,7 @@ std::vector<Scene::PortalRaySegment> Scene::TracePortalRay(
                                 prior.target == edge.target;
                         }) != portalPath.end())
                     {
-                        return;
+                        continue;
                     }
 
                     const glm::mat4 sourceFrame = source->GetPortalWorldFrame();
@@ -342,26 +330,26 @@ std::vector<Scene::PortalRaySegment> Scene::TracePortalRay(
                         glm::vec3(sourceFrame[2]));
                     const float denominator = glm::dot(current.direction, planeNormal);
                     if (std::abs(denominator) <= 1e-6f)
-                        return;
+                        continue;
                     const float distance = glm::dot(planePoint - current.origin,
                         planeNormal) / denominator;
                     if (!std::isfinite(distance) || distance <= kRayEpsilon ||
                         distance >= nearestDistance)
                     {
-                        return;
+                        continue;
                     }
                     const glm::vec3 hit = current.origin + current.direction * distance;
                     if (!source->IsWorldPointInsidePortalAperture(hit, 0.001f))
-                        return;
+                        continue;
                     nearestSource = source;
                     nearestTarget = target;
                     nearestDistance = distance;
-                });
             }
         }
 
         segments.push_back({ current, nearestDistance,
-            nearestSource ? nearestSource->Owner : nullptr });
+            nearestSource ? nearestSource->Owner : nullptr,
+            currentContentScopeRoot });
         if (!nearestSource || !nearestTarget)
             break;
 
@@ -376,11 +364,24 @@ std::vector<Scene::PortalRaySegment> Scene::TracePortalRay(
         current.direction = mappedDirection / mappedLength;
         current.origin = nearestSource->MapWorldPointThroughPortalShape(
             sourceHit, *nearestTarget) + current.direction * kRayEpsilon;
+        currentContentScopeRoot =
+            nearestTarget->ResolvePortalContentScopeRoot();
         remainingDistance -= nearestDistance;
         portalPath.push_back({ nearestSource, nearestTarget });
         if (remainingDistance <= kRayEpsilon)
             break;
     }
     return segments;
+}
+
+bool Scene::IsObjectInSpatialRegion(const Object* object,
+    const Object* contentScopeRoot)
+{
+    if (!contentScopeRoot)
+        return true;
+    for (const Object* current = object; current; current = current->Parent)
+        if (current == contentScopeRoot)
+            return true;
+    return false;
 }
 }

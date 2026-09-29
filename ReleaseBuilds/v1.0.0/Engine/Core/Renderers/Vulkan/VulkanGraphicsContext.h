@@ -29,6 +29,9 @@ public:
     void SetVertexBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset = 0) override;
     void SetIndexBuffer(const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t indexCount, uint64_t offset = 0) override;
     void SetTexture(uint32_t slot, const Engine::Graphics::IGraphicsTexture* texture) override;
+    bool BeginDepthOnlyPass(const Engine::Graphics::IGraphicsTexture* texture,
+        float clearDepth = 1.f) override;
+    void EndDepthOnlyPass() override;
     void SetViewport(const Viewport& viewport) override;
     void SetScissorRect(const ScissorRect& rect) override;
     void Clear(float, float, float, float, float = 1.0f) override {}
@@ -47,14 +50,15 @@ private:
     VkCommandBuffer m_commandBuffer;
     const VulkanPipelineState* m_pipeline = nullptr;
     std::shared_ptr<VulkanTextureSystem> m_textureSystem;
-    std::array<const VulkanGraphicsTexture*, 7> m_textures{};
-    std::array<const VulkanGraphicsBuffer*, 3> m_structuredBuffers{};
+    std::array<const VulkanGraphicsTexture*, 9> m_textures{};
+    std::array<const VulkanGraphicsBuffer*, 7> m_structuredBuffers{};
     std::shared_ptr<VulkanOcclusionQueryState> m_occlusionState;
     std::shared_ptr<VulkanGpuTimingState> m_gpuTimings;
     uint64_t m_occlusionViewId = 0;
     uint64_t m_occlusionSceneSignature = 0;
     uint64_t m_activeOcclusionKey = 0;
     uint32_t m_activeOcclusionIndex = UINT32_MAX;
+    const VulkanGraphicsTexture* m_activeDepthTarget = nullptr;
 };
 
 class VulkanGraphicsContextFactory : public Engine::Graphics::IGraphicsContextFactory

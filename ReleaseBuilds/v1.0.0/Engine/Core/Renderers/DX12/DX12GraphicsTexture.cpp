@@ -178,4 +178,58 @@ std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D12TextureFactory::CreateT
     return std::make_shared<D3D12GraphicsTexture>(
         std::move(texture), m_heap, gpu);
 }
+
+std::shared_ptr<Engine::Graphics::IGraphicsTexture>
+D3D12TextureFactory::CreateDepthTexture2D(uint32_t width, uint32_t height)
+{
+    if (!m_device || !m_heap || !width || !height ||
+        m_nextDescriptor >= kMaxTextures)
+        return nullptr;
+
+    D3D12_RESOURCE_DESC desc{};
+    desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    desc.Width = width;
+    desc.Height = height;
+    desc.DepthOrArraySize = 1;
+    desc.MipLevels = 1;
+    desc.Format = DXGI_FORMAT_R32_TYPELESS;
+    desc.SampleDesc.Count = 1;
+    desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+    D3D12_CLEAR_VALUE clear{};
+    clear.Format = DXGI_FORMAT_D32_FLOAT;
+    clear.DepthStencil.Depth = 1.f;
+    const auto heapProperties = HeapProperties(D3D12_HEAP_TYPE_DEFAULT);
+    Microsoft::WRL::ComPtr<ID3D12Resource> texture;
+    if (FAILED(m_device->CreateCommittedResource(&heapProperties,
+        D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+        &clear, IID_PPV_ARGS(&texture))))
+        return nullptr;
+
+    D3D12_CPU_DESCRIPTOR_HANDLE cpu = m_heap->GetCPUDescriptorHandleForHeapStart();
+    D3D12_GPU_DESCRIPTOR_HANDLE gpu = m_heap->GetGPUDescriptorHandleForHeapStart();
+    cpu.ptr += static_cast<SIZE_T>(m_nextDescriptor) * m_descriptorSize;
+    gpu.ptr += static_cast<UINT64>(m_nextDescriptor) * m_descriptorSize;
+    ++m_nextDescriptor;
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
+    srv.Format = DXGI_FORMAT_R32_FLOAT;
+    srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srv.Texture2D.MipLevels = 1;
+    m_device->CreateShaderResourceView(texture.Get(), &srv, cpu);
+
+    D3D12_DESCRIPTOR_HEAP_DESC dsvDesc{};
+    dsvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+    dsvDesc.NumDescriptors = 1;
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> dsvHeap;
+    if (FAILED(m_device->CreateDescriptorHeap(&dsvDesc, IID_PPV_ARGS(&dsvHeap))))
+        return nullptr;
+    D3D12_DEPTH_STENCIL_VIEW_DESC dsv{};
+    dsv.Format = DXGI_FORMAT_D32_FLOAT;
+    dsv.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+    m_device->CreateDepthStencilView(texture.Get(), &dsv,
+        dsvHeap->GetCPUDescriptorHandleForHeapStart());
+    return std::make_shared<D3D12GraphicsTexture>(
+        std::move(texture), m_heap, gpu, std::move(dsvHeap));
+}
 }

@@ -29,8 +29,14 @@ void* D3D11GraphicsBuffer::Map()
 
 void D3D11GraphicsBuffer::Unmap()
 {
-    if (m_usage == Usage::VertexBuffer)
-        FlushMappedWrites();
+    // Map() exposes the CPU shadow for every upload-buffer usage.  Callers
+    // reasonably expect Unmap() to publish those writes regardless of whether
+    // the buffer contains vertices, indices, constants, or structured data.
+    // Restricting this to vertex buffers left reused terrain index buffers on
+    // the GPU with their previous chunk's topology: new vertices were then
+    // connected by stale indices, producing long stretched triangles along
+    // streamed chunk edges.
+    FlushMappedWrites();
 }
 
 void D3D11GraphicsBuffer::FlushMappedWrites(uint64_t offset, uint64_t size)
@@ -38,9 +44,13 @@ void D3D11GraphicsBuffer::FlushMappedWrites(uint64_t offset, uint64_t size)
     if (m_access != AccessMode::Upload || !m_buffer || m_shadowData.empty() ||
         offset >= m_size || size == 0)
         return;
-    const uint64_t available = m_size - offset;
-    const size_t byteCount = static_cast<size_t>(
-        size == UINT64_MAX ? available : std::min(size, available));
+    // D3D11_MAP_WRITE_DISCARD invalidates the complete native resource, not
+    // merely the byte range requested by the caller.  The range still guards
+    // empty/out-of-bounds flushes above, but a successful discard must restore
+    // the entire CPU shadow.  Copying only [offset, offset + size) caused later
+    // partial updates (morph weights, portal records, and editor debug tails)
+    // to leave every untouched byte in the GPU buffer undefined.
+    const size_t byteCount = static_cast<size_t>(m_size);
     Microsoft::WRL::ComPtr<ID3D11Device> device;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
     m_buffer->GetDevice(&device);
@@ -50,8 +60,7 @@ void D3D11GraphicsBuffer::FlushMappedWrites(uint64_t offset, uint64_t size)
     D3D11_MAPPED_SUBRESOURCE mapped{};
     if (SUCCEEDED(context->Map(m_buffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
     {
-        std::memcpy(static_cast<uint8_t*>(mapped.pData) + offset,
-            m_shadowData.data() + offset, byteCount);
+        std::memcpy(mapped.pData, m_shadowData.data(), byteCount);
         context->Unmap(m_buffer.Get(), 0);
     }
 }

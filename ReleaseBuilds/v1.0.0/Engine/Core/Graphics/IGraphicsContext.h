@@ -72,6 +72,14 @@ public:
     // texture support may retain the default no-op.
     virtual void SetTexture(uint32_t, const IGraphicsTexture*) {}
 
+    // Temporarily replaces the active framebuffer with a depth-only target.
+    // EndDepthOnlyPass restores the framebuffer, viewport, and scissor that
+    // were active when the pass began. False means the backend cannot render
+    // this pass and callers must retain unshadowed lighting.
+    virtual bool BeginDepthOnlyPass(const IGraphicsTexture*, float = 1.f)
+    { return false; }
+    virtual void EndDepthOnlyPass() {}
+
     // Viewport and scissor
     struct Viewport
     {

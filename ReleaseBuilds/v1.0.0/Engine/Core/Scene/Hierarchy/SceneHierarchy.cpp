@@ -55,6 +55,8 @@ Scene::~Scene()
 
 void Scene::Start()
 {
+    m_clock.Reset();
+    m_deltaTime = 0.f;
     for (const auto& object : m_objects)
         object->Start();
     m_hasStarted = true;
@@ -62,11 +64,12 @@ void Scene::Start()
 
 void Scene::Update(float deltaTime)
 {
+    m_deltaTime = m_clock.Advance(deltaTime);
     m_isUpdating = true;
     for (const auto& object : m_objects)
         object->Update();
-    m_audio->Update(deltaTime);
-    m_physics->Step(deltaTime);
+    m_audio->Update(m_deltaTime);
+    m_physics->Step(m_deltaTime);
     // Bullet has now published current-frame poses and overlap pairs. Portal
     // traversal deliberately runs here rather than in Component::Update so a
     // crossing is evaluated against the motion that just occurred.
@@ -107,6 +110,13 @@ void Scene::Update(float deltaTime)
     FlushPendingObjectRemovals();
 }
 
+void Scene::UpdateFixedFrame()
+{
+    if (!m_clock.IsFixedStep())
+        throw std::logic_error("UpdateFixedFrame requires a configured fixed time step");
+    Update(0.f);
+}
+
 Engine::Core::Object* Scene::AddObject()
 {
     auto obj = std::make_unique<Engine::Core::Object>();
@@ -116,6 +126,7 @@ Engine::Core::Object* Scene::AddObject()
         m_pendingObjectAdditions.push_back(std::move(obj));
     else
         m_objects.push_back(std::move(obj));
+    NotifyStructureChanged();
     return raw;
 }
 
@@ -328,6 +339,7 @@ bool Scene::MoveObject(
         ? std::atan2(rotation[0][1], rotation[0][0])
         : 0.f;
     object->transform.rotation = { x, y, z };
+    NotifyStructureChanged();
     return true;
 }
 
@@ -396,6 +408,7 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
                     candidate.get()) != objectsToRemove.end();
             }),
         m_objects.end());
+    NotifyStructureChanged();
 }
 
 void Scene::RequestRemoveObject(Engine::Core::Object* obj)
@@ -456,6 +469,7 @@ void Scene::ClearObjects()
     m_objects.clear();
     m_selectedObject = nullptr;
     m_previewObject = nullptr;
+    NotifyStructureChanged();
 }
 
 }

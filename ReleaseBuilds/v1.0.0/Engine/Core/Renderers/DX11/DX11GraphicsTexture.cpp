@@ -46,4 +46,44 @@ std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D11TextureFactory::CreateT
         return nullptr;
     return std::make_shared<D3D11GraphicsTexture>(std::move(texture), std::move(view));
 }
+
+std::shared_ptr<Engine::Graphics::IGraphicsTexture>
+D3D11TextureFactory::CreateDepthTexture2D(uint32_t width, uint32_t height)
+{
+    if (!m_device || !width || !height)
+        return nullptr;
+
+    D3D11_TEXTURE2D_DESC desc{};
+    desc.Width = width;
+    desc.Height = height;
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_R32_TYPELESS;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_DEFAULT;
+    desc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+    if (FAILED(m_device->CreateTexture2D(&desc, nullptr, &texture)))
+        return nullptr;
+
+    D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
+    dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
+    dsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+    Microsoft::WRL::ComPtr<ID3D11DepthStencilView> depthView;
+    if (FAILED(m_device->CreateDepthStencilView(
+            texture.Get(), &dsvDesc, &depthView)))
+        return nullptr;
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+    srvDesc.Format = DXGI_FORMAT_R32_FLOAT;
+    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Texture2D.MipLevels = 1;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> view;
+    if (FAILED(m_device->CreateShaderResourceView(texture.Get(), &srvDesc, &view)))
+        return nullptr;
+
+    return std::make_shared<D3D11GraphicsTexture>(
+        std::move(texture), std::move(view), std::move(depthView));
+}
 }

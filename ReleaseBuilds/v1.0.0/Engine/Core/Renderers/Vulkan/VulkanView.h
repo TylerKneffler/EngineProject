@@ -2,6 +2,7 @@
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "../IView.h"
 #include "VulkanCommon.h"
+#include "VulkanPostProcess.h"
 
 namespace Engine::Renderers
 {
@@ -13,7 +14,8 @@ public:
               void* srvCpu, void* srvGpu, uint32_t slot = 0) override;
     void Resize(void* deviceContext, uint32_t width, uint32_t height) override;
     void Render(void* commandBuffer, void* mainTarget,
-                std::function<void(void*)> drawFn = nullptr) override;
+                std::function<void(void*)> drawFn = nullptr,
+                std::function<void(void*)> preDrawFn = nullptr) override;
     void SetClearColor(float r, float g, float b, float a = 1.0f) override
     {
         m_clearColor[0] = r; m_clearColor[1] = g;
@@ -31,11 +33,13 @@ private:
     VulkanImageResource m_color;
     VulkanImageResource m_depth;
     VkFramebuffer m_framebuffer = VK_NULL_HANDLE;
+    VulkanPostProcess m_postProcess;
     VkSampler m_sampler = VK_NULL_HANDLE;
     void* m_uiTexture = nullptr;
     uint32_t m_width = 0, m_height = 0, m_slot = 0;
     float m_aspect = 1.0f;
     float m_clearColor[4] = { 0.0f, 0.0f, 0.502f, 1.0f };
+    bool m_postInitialized = false;
 };
 }
 #endif

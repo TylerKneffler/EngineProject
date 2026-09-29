@@ -1,5 +1,6 @@
 #include "Model.h"
 #include "Core/Object.h"
+#include "Core/Scene/Scene.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include <algorithm>
 #include <sstream>
@@ -45,26 +46,54 @@ void Model::BindNode(unsigned index, Object* object)
     if (!Owner || !object) return;
     if (m_nodePaths.size() <= index) m_nodePaths.resize(index + 1);
     m_nodePaths[index] = RelativePath(Owner, object);
+    m_resolvedNodes.clear();
+    m_cachedStructureRevision = 0;
+    MarkConfigurationDirty();
 }
 
 Model::Object* Model::ResolveNode(unsigned index) const
 {
-    if (!Owner || index >= m_nodePaths.size()) return nullptr;
-    Object* object = Owner;
-    std::istringstream input(m_nodePaths[index]);
-    std::string part;
-    try
+    const std::vector<Object*>& nodes = ResolveNodes();
+    return index < nodes.size() ? nodes[index] : nullptr;
+}
+
+const std::vector<Model::Object*>& Model::ResolveNodes() const
+{
+    const uint64_t revision = Owner && Owner->GetScene()
+        ? Owner->GetScene()->GetStructureRevision() : 0;
+    if (m_resolvedNodes.size() != m_nodePaths.size() ||
+        m_cachedStructureRevision != revision)
+        RefreshNodeCache();
+    return m_resolvedNodes;
+}
+
+void Model::RefreshNodeCache() const
+{
+    m_resolvedNodes.assign(m_nodePaths.size(), nullptr);
+    for (size_t index = 0; Owner && index < m_nodePaths.size(); ++index)
     {
-        while (std::getline(input, part, '.'))
+        Object* object = Owner;
+        std::istringstream input(m_nodePaths[index]);
+        std::string part;
+        try
         {
-            if (part.empty()) continue;
-            const size_t child = static_cast<size_t>(std::stoull(part));
-            if (child >= object->Children.size()) return nullptr;
-            object = object->Children[child];
+            while (std::getline(input, part, '.'))
+            {
+                if (part.empty()) continue;
+                const size_t child = static_cast<size_t>(std::stoull(part));
+                if (child >= object->Children.size())
+                {
+                    object = nullptr;
+                    break;
+                }
+                object = object->Children[child];
+            }
         }
+        catch (...) { object = nullptr; }
+        m_resolvedNodes[index] = object;
     }
-    catch (...) { return nullptr; }
-    return object;
+    m_cachedStructureRevision = Owner && Owner->GetScene()
+        ? Owner->GetScene()->GetStructureRevision() : 0;
 }
 
 Model::JsonValue Model::Serialize() const
@@ -79,6 +108,8 @@ void Model::Deserialize(const JsonValue& value)
 {
     Component::Deserialize(value);
     m_nodePaths.clear();
+    m_resolvedNodes.clear();
+    m_cachedStructureRevision = 0;
     const JsonValue& paths = value["nodePaths"];
     for (size_t i = 0; i < paths.ArraySize(); ++i)
         m_nodePaths.push_back(paths.ArrayAt(i).AsString());

@@ -326,7 +326,6 @@ int WINAPI wWinMain(
         ENGINE_BUILD_DIR, PROJECT_SCRIPTS_PATH);
     hotReload->BeforeApply = [&]()
     {
-        if (gameBuildManager->IsBuilding()) gameBuildManager->CancelBuild();
         gameBuildManager->Stop();
     };
     OutputDebugStringA("[Main] GameBuildManager created\n");
@@ -499,7 +498,8 @@ int WINAPI wWinMain(
                 void* rtvHandle = renderer->GetCurrentRenderTargetHandle();
                 
                 view->Render(cmdList, rtvHandle,
-                    [view](void* cmd) { view->Render3D(cmd); });
+                    [view](void* cmd) { view->Render3D(cmd); },
+                    [view](void* cmd) { view->RenderShadow3D(cmd); });
             }
 
             // Render UI

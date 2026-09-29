@@ -1,6 +1,7 @@
 #include "SpatialManipulator.h"
 
 #include "Core/Object.h"
+#include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Physics/Collider.h"
 #include "Core/Physics/Physics.h"
@@ -11,6 +12,7 @@
 #include <cstdio>
 #include <cstring>
 #include <glm/gtc/quaternion.hpp>
+#include <limits>
 #include <unordered_set>
 
 namespace Engine::Components
@@ -39,6 +41,77 @@ bool MatricesNearlyEqual(const glm::mat4& first, const glm::mat4& second,
             if (std::abs(first[column][row] - second[column][row]) > epsilon)
                 return false;
         }
+    }
+    return true;
+}
+
+void CaptureCollisionEnvelope(RigidBody& body,
+    Engine::Physics::Spatial::PortalTraversalState& state)
+{
+    if (state.hasCollisionEnvelope || !body.Owner)
+        return;
+    glm::vec3 worldMinimum(0.f);
+    glm::vec3 worldMaximum(0.f);
+    if (!body.GetWorldCollisionBounds(worldMinimum, worldMaximum))
+        return;
+    const glm::mat4 worldInverse = glm::inverse(
+        body.Owner->transform.GetWorldMatrix());
+    glm::vec3 localMinimum(std::numeric_limits<float>::max());
+    glm::vec3 localMaximum(std::numeric_limits<float>::lowest());
+    for (int corner = 0; corner < 8; ++corner)
+    {
+        const glm::vec3 worldPoint {
+            (corner & 1) ? worldMaximum.x : worldMinimum.x,
+            (corner & 2) ? worldMaximum.y : worldMinimum.y,
+            (corner & 4) ? worldMaximum.z : worldMinimum.z };
+        const glm::vec3 localPoint(worldInverse * glm::vec4(worldPoint, 1.f));
+        localMinimum = glm::min(localMinimum, localPoint);
+        localMaximum = glm::max(localMaximum, localPoint);
+    }
+    state.collisionLocalCenter = (localMinimum + localMaximum) * 0.5f;
+    state.collisionLocalHalfExtents =
+        glm::max((localMaximum - localMinimum) * 0.5f, glm::vec3(0.f));
+    state.hasCollisionEnvelope = true;
+}
+
+bool CollisionEnvelopeFitsAperture(const SpatialManipulator& portal,
+    const Engine::Physics::Spatial::PortalTraversalState& state,
+    const glm::mat4& bodyWorld, const glm::vec3& crossingPoint)
+{
+    if (!state.hasCollisionEnvelope)
+        return false;
+    const glm::mat4 frame = portal.GetPortalWorldFrame();
+    const glm::vec3 tangent(frame[0]);
+    const glm::vec3 bitangent(frame[1]);
+    const glm::vec3 normal(frame[2]);
+    const glm::vec3 anchor(frame[3]);
+    const glm::mat3 bodyLinear(bodyWorld);
+    glm::vec3 footprintCenter = crossingPoint +
+        bodyLinear * state.collisionLocalCenter;
+    footprintCenter -= normal * glm::dot(footprintCenter - anchor, normal);
+
+    float tangentRadius = 0.f;
+    float bitangentRadius = 0.f;
+    for (int axis = 0; axis < 3; ++axis)
+    {
+        const glm::vec3 halfAxis = bodyLinear[axis] *
+            state.collisionLocalHalfExtents[axis];
+        tangentRadius += std::abs(glm::dot(halfAxis, tangent));
+        bitangentRadius += std::abs(glm::dot(halfAxis, bitangent));
+    }
+    // The generated solid rim overlaps the logical aperture by 5 mm. Keep a
+    // matching clearance so a body accepted for teleport cannot already be
+    // penetrating that rim due to numerical tolerance.
+    constexpr float kRimClearance = 0.006f;
+    tangentRadius += kRimClearance;
+    bitangentRadius += kRimClearance;
+    for (int corner = 0; corner < 4; ++corner)
+    {
+        const glm::vec3 support = footprintCenter +
+            ((corner & 1) ? tangentRadius : -tangentRadius) * tangent +
+            ((corner & 2) ? bitangentRadius : -bitangentRadius) * bitangent;
+        if (!portal.IsWorldPointInsidePortalAperture(support, 0.001f))
+            return false;
     }
     return true;
 }
@@ -541,10 +614,12 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target,
 
         activeBodies.insert(body);
         TraversalState& state = m_traversalStates[body];
+        CaptureCollisionEnvelope(*body, state);
         const glm::vec3 bodyWorldPosition = body->Owner->transform.GetWorldPosition();
         const float currentSignedDistance = ComputeSignedDistanceToPortalPlane(
             bodyWorldPosition);
         const bool remainsInTrigger = triggerBody && triggerBody->IsOverlapping(body);
+        const bool firstTraversalObservation = !state.hasPreviousWorldPosition;
         if (!state.hasPreviousWorldPosition)
         {
             state.previousWorldPosition = bodyWorldPosition;
@@ -582,10 +657,41 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target,
         using TraversalPhase = TraversalState::Phase;
 
         bool crossedPortalPlane = false;
+        const float signedMotion = currentSignedDistance - previousSignedDistance;
+        const glm::vec3 worldPortalNormal = SafeNormalize(
+            glm::vec3(GetPortalWorldFrame()[2]), glm::vec3(0.f, 0.f, 1.f));
+        const float signedVelocity = glm::dot(
+            body->GetLinearVelocity(), worldPortalNormal);
         switch (state.phase)
         {
         case TraversalPhase::Uninitialized:
-            if (currentSignedDistance <= -kRearmDistance)
+            // An object may be spawned, placed, or restored exactly on the
+            // aperture plane. It has no historical side to arm from. Once it
+            // departs through an overlapping aperture, use its normal motion
+            // as that missing history; otherwise it can pass the plane before
+            // reaching the re-arm distance and fall through the open doorway.
+            if (previousSignedDistance <= kCrossingDistance &&
+                currentSignedDistance >= kCrossingDistance &&
+                signedMotion > 1e-6f)
+            {
+                crossedPortalPlane = true;
+            }
+            else if (previousSignedDistance >= -kCrossingDistance &&
+                currentSignedDistance <= -kCrossingDistance &&
+                signedMotion < -1e-6f)
+            {
+                crossedPortalPlane = true;
+            }
+            else if (firstTraversalObservation &&
+                std::abs(currentSignedDistance) <= deformationDistance &&
+                ((currentSignedDistance >= kCrossingDistance &&
+                    signedVelocity > 1e-5f) ||
+                 (currentSignedDistance <= -kCrossingDistance &&
+                    signedVelocity < -1e-5f)))
+            {
+                crossedPortalPlane = true;
+            }
+            else if (currentSignedDistance <= -kRearmDistance)
                 state.phase = TraversalPhase::ArmedNegative;
             else if (currentSignedDistance >= kRearmDistance)
                 state.phase = TraversalPhase::ArmedPositive;
@@ -622,11 +728,16 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target,
             const float distanceDelta = currentSignedDistance - previousSignedDistance;
             const float crossingT = std::abs(distanceDelta) > 1e-8f
                 ? Clamp01(-previousSignedDistance / distanceDelta) : 0.5f;
-            const glm::vec3 crossingPoint = glm::mix(
-                state.previousWorldPosition, bodyWorldPosition, crossingT);
-            // The trigger is merely a broad-phase optimization. The swept
-            // crossing must land in the actual logical aperture.
-            if (!IsWorldPointInsidePortalAperture(crossingPoint, 0.001f))
+            const glm::vec3 crossingPoint = firstTraversalObservation
+                ? planePoint
+                : glm::mix(state.previousWorldPosition, bodyWorldPosition,
+                    crossingT);
+            // The trigger is merely a broad-phase optimization. The body's
+            // complete conservative footprint must fit inside the aperture at
+            // the swept crossing time; otherwise the solid rim remains the
+            // physical response and teleportation is rejected.
+            if (!CollisionEnvelopeFitsAperture(*this, state,
+                body->Owner->transform.GetWorldMatrix(), crossingPoint))
                 crossedPortalPlane = false;
         }
 
@@ -666,7 +777,7 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target,
                 bodyWorldRotation[column] = SafeNormalize(glm::vec3(bodyWorld[column]),
                     glm::vec3(column == 0, column == 1, column == 2));
 
-            const glm::vec3 mappedPosition = piecewiseWarp
+            glm::vec3 mappedPosition = piecewiseWarp
                 ? MapWorldPointThroughPortalShape(bodyWorldPosition, *target)
                 : glm::vec3(portalTransform * glm::vec4(bodyWorldPosition, 1.f));
             const glm::quat mappedRotation = glm::normalize(glm::quat_cast(
@@ -682,6 +793,57 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target,
                     body->GetGravityDirection(), *target)
                 : portalLinear * body->GetGravityDirection();
 
+            // A discrete physics step can place the anchor numerically on the
+            // source plane. The exact map is then also on the target plane,
+            // which is ambiguous to both reciprocal traversal and portal-view
+            // clipping. Preserve ordinary swept overshoot, but give this
+            // singular case a small separation on the side it is exiting.
+            constexpr float kExitPlaneSeparation = 0.002f;
+            const glm::mat4 targetFrame = target->GetPortalWorldFrame();
+            const glm::vec3 targetPlanePoint(targetFrame[3]);
+            const glm::vec3 targetPlaneNormal = SafeNormalize(
+                glm::vec3(targetFrame[2]), glm::vec3(0.f, 0.f, 1.f));
+            const float mappedPlaneDistance = glm::dot(
+                mappedPosition - targetPlanePoint, targetPlaneNormal);
+            if (std::abs(mappedPlaneDistance) < kExitPlaneSeparation)
+            {
+                const float mappedNormalVelocity = glm::dot(
+                    mappedLinearVelocity, targetPlaneNormal);
+                const float exitSign = std::abs(mappedNormalVelocity) > 1e-6f
+                    ? (mappedNormalVelocity > 0.f ? 1.f : -1.f)
+                    : (signedMotion > 0.f ? -1.f : 1.f);
+                mappedPosition += targetPlaneNormal *
+                    (exitSign * kExitPlaneSeparation - mappedPlaneDistance);
+            }
+
+            // Camera targets are world-space state and the controller runs
+            // before this post-physics traversal. Remap them in the same
+            // handoff as the body; otherwise one rendered frame uses the new
+            // body position with a target left in the source room, producing
+            // a conspicuous view snap before the controller catches up.
+            Camera* attachedCamera = body->Owner->GetComponent<Camera>();
+            glm::vec3 mappedCameraForward(0.f);
+            glm::vec3 mappedCameraUp(0.f);
+            float cameraTargetDistance = 1.f;
+            const bool remapCameraTarget = attachedCamera &&
+                !attachedCamera->useTransformRotation;
+            if (remapCameraTarget)
+            {
+                const glm::vec3 cameraForward = attachedCamera->target -
+                    bodyWorldPosition;
+                cameraTargetDistance = std::max(glm::length(cameraForward),
+                    1.f);
+                mappedCameraForward = piecewiseWarp
+                    ? MapWorldDirectionThroughPortalShape(bodyWorldPosition,
+                        SafeNormalize(cameraForward,
+                            glm::vec3(bodyWorld[2])), *target)
+                    : portalLinear * cameraForward;
+                mappedCameraUp = piecewiseWarp
+                    ? MapWorldDirectionThroughPortalShape(bodyWorldPosition,
+                        attachedCamera->up, *target)
+                    : portalLinear * attachedCamera->up;
+            }
+
             // Carry the endpoint metric into the object's persistent local
             // scale. SetWorldPose calls EnsureBody after this write, causing
             // Bullet to rebuild the collider at the same new scale before the
@@ -691,6 +853,14 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target,
                 body->Owner->transform.scale *= portalScaleRatio;
             body->SetGravityDirection(mappedGravityDirection);
             body->SetWorldPose(mappedPosition, mappedRotation);
+            if (remapCameraTarget)
+            {
+                attachedCamera->target = mappedPosition + SafeNormalize(
+                    mappedCameraForward, glm::vec3(mappedRotation *
+                        glm::vec3(0.f, 0.f, 1.f))) * cameraTargetDistance;
+                attachedCamera->up = SafeNormalize(mappedCameraUp,
+                    glm::vec3(mappedRotation * glm::vec3(0.f, 1.f, 0.f)));
+            }
 
             // A non-similar endpoint pair cannot be represented by an object
             // transform. Bake the piecewise result into the traversing mesh
@@ -817,7 +987,6 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target,
         const bool intersectsAperture =
             std::abs(currentSignedDistance) <= deformationDistance &&
             IsWorldPointInsidePortalAperture(planePoint, 0.001f);
-        const float signedMotion = currentSignedDistance - previousSignedDistance;
         const bool isArmed = state.phase == TraversalPhase::ArmedNegative ||
             state.phase == TraversalPhase::ArmedPositive;
         const bool movingTowardPortal =

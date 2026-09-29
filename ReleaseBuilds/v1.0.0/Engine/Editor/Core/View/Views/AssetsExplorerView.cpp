@@ -26,6 +26,26 @@ namespace fs = std::filesystem;
 
 namespace
 {
+constexpr float AssetThumbnailSize = 96.f;
+
+std::string AssetTypeBadge(const fs::path& path)
+{
+    std::string extension = path.extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+        [](unsigned char value) { return static_cast<char>(std::toupper(value)); });
+    if (!extension.empty() && extension.front() == '.')
+        extension.erase(extension.begin());
+    if (extension == "SCENE") return "SCN";
+    if (extension == "PREFAB") return "PFB";
+    if (extension == "MATERIAL") return "MAT";
+    if (extension == "SPRITEANIM") return "ANIM";
+    if (extension == "SPRITESHEET") return "SPR";
+    if (extension == "CPP" || extension == "CC" || extension == "CXX")
+        return "C++";
+    if (extension.empty()) return Icons::Document;
+    return extension.size() <= 5 ? extension : extension.substr(0, 5);
+}
+
 class UiIdScope
 {
 public:
@@ -101,6 +121,7 @@ void AssetsExplorerView::DrawPanel(IEditorUi& ui)
     DrawBreadcrumbs(ui);
     AcceptSceneObject(ui, m_currentDirectory);
 
+    ui.SameLineRight(51.f);
     if (ui.Button(Icons::List))
         m_gridView = false;
     ui.Tooltip("List view");
@@ -108,11 +129,6 @@ void AssetsExplorerView::DrawPanel(IEditorUi& ui)
     if (ui.Button(Icons::Grid))
         m_gridView = true;
     ui.Tooltip("Thumbnail view");
-    if (m_gridView)
-    {
-        ui.SameLine();
-        ui.SliderInt("Thumbnail size", &m_thumbnailSize, 64, 192);
-    }
     ui.InputText("##assetSearch", m_search, sizeof(m_search));
     ui.Separator();
 
@@ -316,7 +332,7 @@ void AssetsExplorerView::DrawGridDirectory(IEditorUi& ui)
                     second.path().filename().string();
             });
 
-        const float tileSize = static_cast<float>(m_thumbnailSize);
+        const float tileSize = AssetThumbnailSize;
         const int columns = std::max(1, static_cast<int>(
             ui.AvailableContentWidth() / (tileSize + 18.f)));
         int column = 0;
@@ -328,11 +344,13 @@ void AssetsExplorerView::DrawGridDirectory(IEditorUi& ui)
             if (!directory && m_scene && AssetPreviewCache::Supports(entryPath))
                 preview = m_previewCache.Get(entryPath,
                     m_scene->GetGraphicsProvider());
+            const std::string fallback = directory
+                ? std::string(Icons::Folder) : AssetTypeBadge(entry.path());
 
             UiIdScope idScope(ui, entryPath.c_str());
             const EditorUiAssetTileResult tile = ui.AssetTile(
                 entry.path().filename().string().c_str(),
-                directory ? Icons::Folder : Icons::Document, preview,
+                fallback.c_str(), preview,
                 m_selectedPath == entryPath, tileSize);
             if (tile.clicked)
                 SelectPath(entryPath);
@@ -432,40 +450,11 @@ void AssetsExplorerView::DrawBreadcrumbs(IEditorUi& ui)
 
     const auto drawSegment = [&](const char* label, const fs::path& folder)
     {
-        std::vector<fs::path> childFolders;
-        std::error_code directoryError;
-        for (fs::directory_iterator iterator(folder, directoryError), end;
-            iterator != end && !directoryError; iterator.increment(directoryError))
-        {
-            if (!iterator->is_directory(directoryError))
-                continue;
-            const std::string name = iterator->path().filename().string();
-            if (!name.empty() && name.front() != '.')
-                childFolders.push_back(iterator->path());
-        }
-        std::sort(childFolders.begin(), childFolders.end(),
-            [](const fs::path& first, const fs::path& second)
-            {
-                return first.filename().string() < second.filename().string();
-            });
-        std::vector<std::string> names;
-        std::vector<const char*> items;
-        names.reserve(childFolders.size());
-        items.reserve(childFolders.size());
-        for (const fs::path& child : childFolders)
-            names.push_back(child.filename().string());
-        for (const std::string& name : names)
-            items.push_back(name.c_str());
-
         ui.PushId(folder.string().c_str());
-        const EditorUiBreadcrumbResult result = ui.Breadcrumb(label,
-            items.data(), static_cast<int>(items.size()));
+        const EditorUiBreadcrumbResult result = ui.Breadcrumb(label, nullptr, 0);
         ui.PopId();
         if (result.clicked)
             EnterDirectory(folder.string());
-        else if (result.childSelected >= 0 &&
-            result.childSelected < static_cast<int>(childFolders.size()))
-            EnterDirectory(childFolders[result.childSelected].string());
     };
 
     fs::path destination = root;
@@ -478,7 +467,7 @@ void AssetsExplorerView::DrawBreadcrumbs(IEditorUi& ui)
     {
         destination /= segment;
         ui.SameLine();
-        ui.Label("/");
+        ui.DisabledLabel("/");
         ui.SameLine();
         const std::string destinationString = destination.string();
         drawSegment(segment.string().c_str(), destinationString);

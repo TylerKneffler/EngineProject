@@ -10,6 +10,7 @@
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Lighting/Light.h"
+#include "Core/Compoonents/Lighting/LightProbe.h"
 #include "Core/Compoonents/Obj/Sprite.h"
 #include "Core/Compoonents/Audio/AudioSource.h"
 #include "Core/Compoonents/Physics/Collider.h"
@@ -27,6 +28,9 @@
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
+#include "Core/Compoonents/Path/SplinePath.h"
+#include "Core/Compoonents/Path/SplineFollower.h"
+#include "Core/Compoonents/Cinematics/CameraTrack.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
 #include <pugixml.hpp>
 #include <fstream>
@@ -164,6 +168,8 @@ void SceneSerializer::EnsureBuiltinsRegistered()
     RegisterComponentType<Engine::Components::Material>();
     RegisterComponentType<Engine::Components::Camera>();
     RegisterComponentType<Engine::Components::Light>();
+    RegisterComponentType<Engine::Components::LightProbe>();
+    RegisterComponentType<Engine::Components::LightProbeGroup>();
     RegisterComponentType<Engine::Components::Sprite>();
     RegisterComponentType<Engine::Components::AudioSource>();
     RegisterComponentType<Engine::Components::RigidBody>();
@@ -182,6 +188,9 @@ void SceneSerializer::EnsureBuiltinsRegistered()
     RegisterComponentType<Engine::Components::Skeleton>();
     RegisterComponentType<Engine::Components::SkinnedMesh>();
     RegisterComponentType<Engine::Components::SpatialManipulator>();
+    RegisterComponentType<SplinePath>();
+    RegisterComponentType<SplineFollower>();
+    RegisterComponentType<CameraTrack>();
     RegisterComponentType<Engine::Rendering::BakedLightingData>();
 }
 

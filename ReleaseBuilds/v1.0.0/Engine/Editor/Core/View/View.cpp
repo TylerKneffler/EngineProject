@@ -39,10 +39,11 @@ void View::Resize(void* device, uint32_t width, uint32_t height)
 // Render — delegate to D3D12View
 // ---------------------------------------------------------------------------
 void View::Render(void* cmdList, void* mainRtv,
-                  std::function<void(void*)> drawFn)
+                  std::function<void(void*)> drawFn,
+                  std::function<void(void*)> preDrawFn)
 {
     if (m_viewBackend)
-        m_viewBackend->Render(cmdList, mainRtv, drawFn);
+        m_viewBackend->Render(cmdList, mainRtv, drawFn, preDrawFn);
 }
 
 void View::SetClearColor(float r, float g, float b, float a)

@@ -8,5 +8,10 @@ class ImGuiDockspace
 {
 public:
     void Draw();
+
+private:
+    // Compatibility work may seed a restored dock tree once, but must never
+    // run again after the user starts rearranging windows.
+    bool m_startupMigrationComplete = false;
 };
 }

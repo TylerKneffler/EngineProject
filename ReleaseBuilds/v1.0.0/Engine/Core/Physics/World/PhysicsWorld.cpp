@@ -40,11 +40,13 @@ void AddPortalRimBox(btTriangleMesh& triangles, const glm::vec3& first,
     const float edgeLength = glm::length(edge);
     if (edgeLength <= 1e-5f)
         return;
-    // The authored polygon describes the usable opening.  A symmetric box
-    // around its edge steals half its width from that opening, so a cube that
-    // exactly fits the declared aperture can never traverse.  Keep the rim
-    // wholly on the exterior, with a minute contact gap for solver stability.
-    const glm::vec3 inside = glm::normalize(outward) * 0.001f;
+    // The authored polygon describes the usable opening. A symmetric box
+    // around its edge steals half its width from that opening, so keep almost
+    // all of the rim on the exterior. Let it overlap the opening by only five
+    // millimetres, however: a separation here can become a real collision
+    // seam where the generated rim meets an independently triangulated room
+    // floor or wall, allowing a capsule to slip out beside the portal.
+    const glm::vec3 inside = -glm::normalize(outward) * 0.005f;
     const glm::vec3 outside = glm::normalize(outward) *
         (std::max(halfWidth, 0.001f) * 2.f + 0.001f);
     const glm::vec3 depth = glm::normalize(normal) *

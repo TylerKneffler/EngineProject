@@ -3,6 +3,7 @@
 #include "../IGameRenderer.h"
 #include "VulkanRenderCore.h"
 #include "VulkanGraphicsProvider.h"
+#include "VulkanPostProcess.h"
 
 namespace Engine::Renderers
 {
@@ -29,6 +30,8 @@ private:
     VkCommandBuffer m_commandBuffer = VK_NULL_HANDLE;
     uint32_t m_width = 0, m_height = 0;
     bool m_renderPassActive = false;
+    VulkanPostProcess m_postProcess;
+    float m_clearColor[4] = { 0.1f, 0.1f, 0.1f, 1.0f };
     Engine::Graphics::FrameTimingTelemetry m_frameTelemetry{};
 };
 }

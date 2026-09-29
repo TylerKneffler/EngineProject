@@ -32,19 +32,22 @@ public:
         uint32_t width, uint32_t height, const uint8_t* rgbaPixels,
         uint32_t mipLevels, Engine::Graphics::GraphicsTextureFormat format,
         bool srgb = true);
+    std::shared_ptr<VulkanGraphicsTexture> CreateDepthTexture(
+        uint32_t width, uint32_t height);
     void Bind(
         VkCommandBuffer commands,
         VkPipelineLayout pipelineLayout,
-        const std::array<const VulkanGraphicsTexture*, 7>& textures,
-        const std::array<const VulkanGraphicsBuffer*, 3>& buffers);
+        const std::array<const VulkanGraphicsTexture*, 9>& textures,
+        const std::array<const VulkanGraphicsBuffer*, 7>& buffers);
     VkDescriptorSetLayout GetDescriptorSetLayout() const { return m_layout; }
     VkDevice GetDevice() const { return m_device; }
+    VkPhysicalDevice GetPhysicalDevice() const { return m_physicalDevice; }
 
 private:
     struct TextureKey
     {
-        std::array<VkImageView, 7> views{};
-        std::array<VkBuffer, 3> buffers{};
+        std::array<VkImageView, 9> views{};
+        std::array<VkBuffer, 7> buffers{};
         bool operator==(const TextureKey& other) const
         {
             return views == other.views && buffers == other.buffers;
@@ -86,12 +89,25 @@ public:
         return reinterpret_cast<void*>(m_image.image);
     }
     VkImageView GetView() const { return m_image.view; }
+    bool IsDepthTarget() const { return m_framebuffer != VK_NULL_HANDLE; }
+    VkRenderPass GetRenderPass() const { return m_renderPass; }
+    VkFramebuffer GetFramebuffer() const { return m_framebuffer; }
+    uint32_t GetWidth() const { return m_width; }
+    uint32_t GetHeight() const { return m_height; }
+    void SetDepthTargetResources(VulkanImageResource color,
+        VkRenderPass renderPass, VkFramebuffer framebuffer,
+        uint32_t width, uint32_t height);
 
 private:
     friend class VulkanTextureSystem;
     void ReleaseImage(VkDevice device);
     std::shared_ptr<VulkanTextureSystem> m_system;
     VulkanImageResource m_image;
+    VulkanImageResource m_depthColor;
+    VkRenderPass m_renderPass = VK_NULL_HANDLE;
+    VkFramebuffer m_framebuffer = VK_NULL_HANDLE;
+    uint32_t m_width = 0;
+    uint32_t m_height = 0;
 };
 
 class VulkanTextureFactory final : public Engine::Graphics::IGraphicsTextureFactory
@@ -103,6 +119,8 @@ public:
         uint32_t width, uint32_t height, const uint8_t* rgbaPixels,
         uint32_t mipLevels, Engine::Graphics::GraphicsTextureFormat format,
         bool srgb = true) override;
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> CreateDepthTexture2D(
+        uint32_t width, uint32_t height) override;
 
 private:
     std::shared_ptr<VulkanTextureSystem> m_system;

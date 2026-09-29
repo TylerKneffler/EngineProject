@@ -51,27 +51,31 @@ void D3D11View::CreateResources(ID3D11Device* device, uint32_t width, uint32_t h
     depth.BindFlags = D3D11_BIND_DEPTH_STENCIL;
     ThrowIfFailed(device->CreateTexture2D(&depth, nullptr, &m_depthTexture));
     ThrowIfFailed(device->CreateDepthStencilView(m_depthTexture.Get(), nullptr, &m_dsv));
+    m_postProcess.Create(device, width, height);
 }
 
 void D3D11View::Render(void* contextHandle, void* mainRtvHandle,
-                       std::function<void(void*)> drawFn)
+                       std::function<void(void*)> drawFn,
+                       std::function<void(void*)> preDrawFn)
 {
     auto* context = static_cast<ID3D11DeviceContext*>(contextHandle);
     auto* mainRtv = static_cast<ID3D11RenderTargetView*>(mainRtvHandle);
     if (!context || !mainRtv || !m_rtv) return;
 
+    if (preDrawFn) preDrawFn(contextHandle);
+
     ID3D11RenderTargetView* target = m_rtv.Get();
-    context->OMSetRenderTargets(1, &target, m_dsv.Get());
     D3D11_VIEWPORT viewport{ 0.0f, 0.0f, static_cast<float>(m_width), static_cast<float>(m_height), 0.0f, 1.0f };
     context->RSSetViewports(1, &viewport);
     D3D11_RECT scissor{ 0, 0, static_cast<LONG>(m_width), static_cast<LONG>(m_height) };
     context->RSSetScissorRects(1, &scissor);
-    context->ClearRenderTargetView(target, m_clearColor);
+    m_postProcess.BindScene(context, m_dsv.Get(), m_clearColor);
     context->ClearDepthStencilView(
         m_dsv.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
 
     if (drawFn) drawFn(context);
 
+    m_postProcess.Compose(context, target);
     context->OMSetRenderTargets(1, &mainRtv, nullptr);
 }
 }

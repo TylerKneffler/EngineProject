@@ -42,6 +42,7 @@ public:
     // Issues the game-camera scene draw into cmd each frame.
     // cmd: opaque graphics command list handle (cast internally to ID3D12GraphicsCommandList*)
     void Render3D(void* cmd) override;
+    void RenderShadow3D(void* cmd) override;
 
     // Defines the Game panel showing the game-camera render output.
     void DrawPanel(IEditorUi& ui) override;

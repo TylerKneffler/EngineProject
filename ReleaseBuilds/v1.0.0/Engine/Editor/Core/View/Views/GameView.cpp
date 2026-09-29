@@ -107,6 +107,21 @@ void GameView::Render3D(void* cmd)
             GetWidth(), GetHeight());
 }
 
+void GameView::RenderShadow3D(void* cmd)
+{
+    if (!m_scene || !m_scene->GetGraphicsProvider()) return;
+    Engine::Components::Camera* camera = m_scene->FindGameCamera();
+    if (!camera)
+        camera = m_scene->editorCamera.GetComponent<Engine::Components::Camera>();
+    if (!camera) return;
+    auto* factory = m_scene->GetGraphicsProvider()->GetContextFactory();
+    factory->SetCommandBuffer(cmd);
+    auto ctx = factory->CreateContext();
+    if (ctx)
+        m_scene->Render(ctx.get(), m_aspect, camera, false,
+            GetWidth(), GetHeight(), true);
+}
+
 // ---------------------------------------------------------------------------
 // CalculateGameViewport
 // ---------------------------------------------------------------------------

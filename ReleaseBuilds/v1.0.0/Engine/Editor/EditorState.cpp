@@ -169,8 +169,6 @@ bool EditorState::Init()
     m_scene = std::make_unique<Engine::Scene::Scene>();
     if (!m_scene)
         return false;
-    m_scene->SetEditorMode2D(
-        m_projectSettings.editorMode == Engine::Model::ProjectSettings::EditorMode::TwoD);
     OutputDebugStringA("[EditorState] Scene created\n");
     
     OutputDebugStringA("[EditorState] Initializing scene...\n");
@@ -186,6 +184,7 @@ bool EditorState::Init()
     try
     {
         m_scene->Init(graphicsProvider);
+        m_scene->SetRealtimeShadowSettings(m_projectSettings.realtimeShadows);
         m_scene->SetDistanceLightingSettings(m_projectSettings.distanceLighting);
         OutputDebugStringA("[EditorState] Scene initialized\n");
     }
@@ -564,9 +563,10 @@ void EditorState::OpenPrefabStage(const std::string& path)
     Engine::Core::Object* root = nullptr;
     try
     {
-        prefabScene->SetEditorMode2D(
-            m_projectSettings.editorMode == Engine::Model::ProjectSettings::EditorMode::TwoD);
+        prefabScene->SetEditorMode2D(m_scene->IsEditorMode2D());
         prefabScene->Init(m_renderer->GetGraphicsProvider());
+        prefabScene->SetRealtimeShadowSettings(
+            m_projectSettings.realtimeShadows);
         prefabScene->SetDistanceLightingSettings(
             m_projectSettings.distanceLighting);
         root = Engine::Serialization::SceneSerializer::InstantiatePrefab(
@@ -802,8 +802,8 @@ void EditorState::InitializePanels()
         m_projectSettings = m_preferences->GetSettings();
         if (m_scene)
         {
-            m_scene->SetEditorMode2D(
-                m_projectSettings.editorMode == Engine::Model::ProjectSettings::EditorMode::TwoD);
+            m_scene->SetRealtimeShadowSettings(
+                m_projectSettings.realtimeShadows);
             m_scene->SetDistanceLightingSettings(
                 m_projectSettings.distanceLighting);
         }
@@ -1087,6 +1087,19 @@ void EditorState::WireupCallbacks()
         {
             OutputDebugStringA("[EditorState] WARNING: Properties view is null\n");
         }
+        MarkHistorySelectionChanged();
+    };
+    m_viewFactory->OnSelectionSetChanged = [this](
+        const std::vector<Engine::Core::Object*>& objects) {
+        Engine::Core::Object* active = objects.empty() ? nullptr : objects.back();
+        OutputDebugStringA(("[EditorState] Selection set changed: " +
+            std::to_string(objects.size()) + " object(s)\n").c_str());
+        if (Engine::Scene::Scene* scene = GetActiveDocumentScene())
+            scene->SetSelectedObject(active);
+        if (m_primaryAssets)
+            m_primaryAssets->SetSelectedPath({});
+        if (m_primaryProperties)
+            m_primaryProperties->SetSelectedObjects(objects);
         MarkHistorySelectionChanged();
     };
 

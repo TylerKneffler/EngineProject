@@ -54,6 +54,10 @@ public:
     // Called by the Properties panel to draw editable properties in the editor.
     // Returns true when an editor control changed serialized component data.
     virtual bool DrawProperties(::Engine::Editor::IEditorUi& ui);
+    // Draws the generic serialized inspector for matching components in a
+    // multi-selection and applies each edited field to every target.
+    bool DrawPropertiesMulti(::Engine::Editor::IEditorUi& ui,
+        const std::vector<Component*>& targets);
 
     // Runtime systems use this monotonically increasing value to rebuild
     // derived state only after configuration changes. Scripts that mutate
@@ -75,22 +79,45 @@ public:
 protected:
     void SetTypeName(const char* typeName) { m_typeName = typeName ? typeName : "Component"; }
 
+    // editorGroup places this field in a named collapsible section in the
+    // generic inspector. Leave it null/empty for the original flat layout.
     template<typename T>
-    void RegisterField(const char* name, T& member)
+    void RegisterField(const char* name, T& member,
+        const char* editorGroup = nullptr, bool groupDefaultOpen = true)
     {
         m_serializedFields.push_back({
             name,
             [&member]() -> JsonValue { return ToJson(member); },
             [&member](const JsonValue& value) { FromJson(value, member); }
         });
+        RegisterEditorFieldGroup(name, editorGroup, groupDefaultOpen);
+    }
+
+    // Supplies inspector grouping for fields emitted by an overridden
+    // Serialize(), such as Material texture paths.
+    void RegisterEditorFieldGroup(const char* name, const char* editorGroup,
+        bool groupDefaultOpen = true)
+    {
+        if (!name || !editorGroup || !editorGroup[0])
+            return;
+        m_editorFieldMetadata.push_back({ name, editorGroup, groupDefaultOpen });
     }
 
 private:
+    bool IsEditorValueMixed(const std::string& key,
+        const JsonValue& value) const;
     struct SerializedField
     {
         std::string name;
         std::function<JsonValue()> write;
         std::function<void(const JsonValue&)> read;
+    };
+
+    struct EditorFieldMetadata
+    {
+        std::string name;
+        std::string group;
+        bool groupDefaultOpen = true;
     };
 
     static JsonValue ToJson(const std::string& value) { return JsonValue(value); }
@@ -140,7 +167,9 @@ private:
     }
 
     std::vector<SerializedField> m_serializedFields;
+    std::vector<EditorFieldMetadata> m_editorFieldMetadata;
     std::string m_typeName = "Component";
     uint64_t m_configurationRevision = 1;
+    const std::vector<Component*>* m_multiEditTargets = nullptr;
 };
 }

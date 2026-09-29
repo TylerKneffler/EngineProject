@@ -47,6 +47,12 @@
     <BakedShadowBias>0.002</BakedShadowBias>
     <BakedDilationPasses>4</BakedDilationPasses>
     <BakedPreserveSourceEmission>true</BakedPreserveSourceEmission>
+    <RealtimeShadows Enabled="true" MaximumLights="1" DirectionalResolution="2048" DirectionalCascades="4" DirectionalDistance="150" PcfRadius="1" CascadeSplitLambda="0.65" CascadeTransitionFraction="0.1" PortalPolicy="0" PortalAtlasResolution="1024" PortalCascades="2" PortalViewBudget="2" />
+    <DistanceLighting Enabled="true" MaximumDistance="1000" MaximumRealtimeLights="64" ClusteredLighting="true" ClusterTileSize="64" ClusterDepthSlices="16" MaximumLightsPerCluster="32">
+      <Band Name="High" EndDistance="250" MaxRealtimeLights="64" NormalMapping="true" ParallaxMapping="true" EnvironmentDiffuse="true" Reflections="true" RealtimeShadows="true" ShadowDistanceScale="1" MaximumShadowPcfRadius="4" />
+      <Band Name="Medium" EndDistance="600" MaxRealtimeLights="8" NormalMapping="true" ParallaxMapping="false" EnvironmentDiffuse="true" Reflections="false" RealtimeShadows="true" ShadowDistanceScale="0.65" MaximumShadowPcfRadius="1" />
+      <Band Name="Low" EndDistance="1000" MaxRealtimeLights="2" NormalMapping="false" ParallaxMapping="false" EnvironmentDiffuse="false" Reflections="false" RealtimeShadows="false" ShadowDistanceScale="0" MaximumShadowPcfRadius="0" />
+    </DistanceLighting>
   </PropertyGroup>
   <PropertyGroup>
     <AspectRatioMode>Free</AspectRatioMode>

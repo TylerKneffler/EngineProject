@@ -83,6 +83,11 @@ public:
     
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Properties")
     bool      doubleSided { false };
+
+    // Opaque and masked mesh materials cast realtime shadows by default.
+    // Blended materials remain excluded by the shadow pipeline.
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Shadows")
+    bool      castsShadows { true };
     
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Properties")
     bool      unlit { false };

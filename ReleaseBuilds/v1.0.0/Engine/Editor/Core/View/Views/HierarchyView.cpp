@@ -1,12 +1,14 @@
 #include "HierarchyView.h"
 #include "Engine/Editor/Core/PrimitiveObjectFactory.h"
 #include "Engine/Editor/UI/IEditorUi.h"
+#include "Engine/Editor/UI/EditorComponentIcons.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Object.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Obj/Sprite.h"
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
+#include "Core/Compoonents/Lighting/LightProbe.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "../Focus/WindowFocusHandler.h"
@@ -39,6 +41,29 @@ std::string ObjectName(const Engine::Core::Object* object)
 {
     if (!object) return "World";
     return object->name.empty() ? "(unnamed)" : object->name;
+}
+
+EditorUiObjectIcon ObjectIcon(const Engine::Core::Object& object)
+{
+    bool hasPhysics = false;
+    bool hasMesh = false;
+    for (const Engine::Core::Component* component : object.Components)
+    {
+        if (!component)
+            continue;
+        const EditorUiObjectIcon icon =
+            ComponentIconForType(component->GetTypeName());
+        if (icon == EditorUiObjectIcon::Light) return icon;
+        if (icon == EditorUiObjectIcon::Camera) return icon;
+        if (icon == EditorUiObjectIcon::Audio) return icon;
+        if (icon == EditorUiObjectIcon::Sprite) return icon;
+        if (icon == EditorUiObjectIcon::UserInterface) return icon;
+        if (icon == EditorUiObjectIcon::Mesh) hasMesh = true;
+        if (icon == EditorUiObjectIcon::Physics) hasPhysics = true;
+    }
+    if (hasMesh) return EditorUiObjectIcon::Mesh;
+    if (hasPhysics) return EditorUiObjectIcon::Physics;
+    return EditorUiObjectIcon::Object;
 }
 
 bool CanMoveInPrefabContext(Engine::Scene::Scene* scene, Engine::Core::Object* object, Engine::Core::Object* target,
@@ -92,12 +117,15 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
     const EditorUiContextMenuResult worldMenu =
         ui.ContextMenu(this, "Create", nullptr, true);
     if (worldMenu.addRequested || !worldMenu.primitive3D.empty() ||
-        worldMenu.addSpriteRequested)
+        worldMenu.addSpriteRequested || worldMenu.addLightProbeRequested ||
+        worldMenu.addLightProbeGroupRequested)
     {
         m_pendingAddParent = nullptr;
         m_pendingAddType = !worldMenu.primitive3D.empty() ? PendingAddType::Primitive3D
             : (worldMenu.addSpriteRequested ? PendingAddType::Sprite
-                : PendingAddType::Empty);
+            : (worldMenu.addLightProbeRequested ? PendingAddType::LightProbe
+            : (worldMenu.addLightProbeGroupRequested
+                ? PendingAddType::LightProbeGroup : PendingAddType::Empty)));
         m_pendingPrimitive3D = worldMenu.primitive3D;
         m_hasPendingAdd = true;
     }
@@ -123,7 +151,7 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
         LogInteraction("Drop requested: '" + ObjectName(m_pendingDragged) + "' -> 'World' (root level)");
     }
     if (ui.IsItemClicked())
-        SetSelectedObject(nullptr);
+        SelectSceneRoot();
     if (worldOpen)
     {
         std::vector<Engine::Core::Object*> roots;
@@ -160,14 +188,20 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
     if (m_pendingDelete)
     {
         const std::string deletedName = ObjectName(m_pendingDelete);
-        Engine::Core::Object* deletedPrefabRoot = m_pendingDelete->GetPrefabInstanceRoot();
-        bool deletesSelection = false;
-        for (Engine::Core::Object* current = m_selectedObject; current; current = current->Parent)
-            if (current == m_pendingDelete)
-                deletesSelection = true;
-        if (deletesSelection)
-            SetSelectedObject(deletedPrefabRoot != m_pendingDelete
-                ? deletedPrefabRoot : nullptr);
+        const auto isDeleted = [this](Engine::Core::Object* selected)
+        {
+            for (Engine::Core::Object* current = selected; current; current = current->Parent)
+                if (current == m_pendingDelete) return true;
+            return false;
+        };
+        const auto newEnd = std::remove_if(m_selectedObjects.begin(),
+            m_selectedObjects.end(), isDeleted);
+        if (newEnd != m_selectedObjects.end())
+        {
+            m_selectedObjects.erase(newEnd, m_selectedObjects.end());
+            m_selectedObject = m_selectedObjects.empty() ? nullptr : m_selectedObjects.back();
+            NotifySelectionChanged();
+        }
         m_scene->RemoveObject(m_pendingDelete);
         LogInteraction("Deleted '" + deletedName + "' and its child hierarchy");
         m_pendingDelete = nullptr;
@@ -187,6 +221,16 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
                     created->AddComponent<Engine::Components::SpriteAnimationManager>();
                 Engine::Components::Sprite* sprite = created->AddComponent<Engine::Components::Sprite>();
                 sprite->SetAnimationManager(manager);
+            }
+            else if(m_pendingAddType==PendingAddType::LightProbe)
+            {
+                created=m_scene->AddObject("Light Probe");
+                created->AddComponent<Engine::Components::LightProbe>();
+            }
+            else if(m_pendingAddType==PendingAddType::LightProbeGroup)
+            {
+                created=m_scene->AddObject("Light Probe Volume");
+                created->AddComponent<Engine::Components::LightProbeGroup>();
             }
             else
             {
@@ -319,7 +363,7 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
         m_debugHoverPosition = EditorUiHierarchyDropPosition::None;
         m_debugDropDepth = -1;
     }
-    if (ui.IsWindowBackgroundClicked()) SetSelectedObject(nullptr);
+    if (ui.IsWindowBackgroundClicked()) SelectSceneRoot();
     ui.EndWindow();
 }
 
@@ -385,9 +429,29 @@ void HierarchyView::LogInteraction(const std::string& message) const
 
 void HierarchyView::SetSelectedObject(Engine::Core::Object* obj)
 {
-    if (m_selectedObject == obj) return;
+    if (m_selectedObject == obj && m_selectedObjects.size() == (obj ? 1u : 0u)) return;
     m_selectedObject = obj;
-    if (OnSelectionChanged) OnSelectionChanged(obj);
+    m_selectionAnchor = obj;
+    m_selectedObjects.clear();
+    if (obj) m_selectedObjects.push_back(obj);
+    NotifySelectionChanged();
+}
+
+void HierarchyView::NotifySelectionChanged()
+{
+    if (OnSelectionSetChanged) OnSelectionSetChanged(m_selectedObjects);
+    else if (OnSelectionChanged) OnSelectionChanged(m_selectedObject);
+}
+
+void HierarchyView::SelectSceneRoot()
+{
+    // This is an explicit UI selection, not merely an object deselection.
+    // Always notify so clicking World can replace an asset inspector even
+    // when the hierarchy already has no selected object.
+    m_selectedObject = nullptr;
+    m_selectionAnchor = nullptr;
+    m_selectedObjects.clear();
+    NotifySelectionChanged();
 }
 
 void HierarchyView::DrawObjectNode(
@@ -399,7 +463,8 @@ void HierarchyView::DrawObjectNode(
     char name[256]; strncpy_s(name, obj->name.c_str(), sizeof(name));
     bool enabled = obj->enabled;
     const EditorUiObjectRowResult row = ui.ObjectTreeRow(
-        obj, name, sizeof(name), &enabled, obj == m_selectedObject,
+        obj, ObjectIcon(*obj), name, sizeof(name), &enabled,
+        std::find(m_selectedObjects.begin(), m_selectedObjects.end(), obj) != m_selectedObjects.end(),
         !hasChildren, false,
         obj->IsEnabledInHierarchy(),
         depth, lastSibling, ancestorGuideMask);
@@ -428,12 +493,15 @@ void HierarchyView::DrawObjectNode(
     else
         menu = ui.ContextMenu(obj, "Create",
             deletable ? "Delete Object" : nullptr, true);
-    if (menu.addRequested || !menu.primitive3D.empty() || menu.addSpriteRequested)
+    if (menu.addRequested || !menu.primitive3D.empty() || menu.addSpriteRequested ||
+        menu.addLightProbeRequested || menu.addLightProbeGroupRequested)
     {
         m_pendingAddParent = obj;
         m_pendingAddType = !menu.primitive3D.empty() ? PendingAddType::Primitive3D
             : (menu.addSpriteRequested ? PendingAddType::Sprite
-                : PendingAddType::Empty);
+            : (menu.addLightProbeRequested ? PendingAddType::LightProbe
+            : (menu.addLightProbeGroupRequested
+                ? PendingAddType::LightProbeGroup : PendingAddType::Empty)));
         m_pendingPrimitive3D = menu.primitive3D;
         m_hasPendingAdd = true;
     }
@@ -452,7 +520,48 @@ void HierarchyView::DrawObjectNode(
     }
     if ((row.nameChanged || row.enabledChanged) && OnHierarchyChanged)
         OnHierarchyChanged();
-    if (row.clicked) { SetSelectedObject(obj); LogInteraction("Selected '" + ObjectName(obj) + "'"); }
+    if (row.clicked)
+    {
+        if (ui.IsRangeSelectModifierDown() && m_selectionAnchor && m_scene)
+        {
+            std::vector<Engine::Core::Object*> ordered;
+            std::function<void(Engine::Core::Object*)> appendHierarchy =
+                [&](Engine::Core::Object* current)
+                {
+                    ordered.push_back(current);
+                    for (Engine::Core::Object* child : current->Children)
+                        appendHierarchy(child);
+                };
+            for (const auto& candidate : m_scene->GetObjects())
+                if (!candidate->Parent) appendHierarchy(candidate.get());
+            const auto anchor = std::find(ordered.begin(), ordered.end(), m_selectionAnchor);
+            const auto clicked = std::find(ordered.begin(), ordered.end(), obj);
+            if (anchor != ordered.end() && clicked != ordered.end())
+            {
+                const auto first = anchor < clicked ? anchor : clicked;
+                const auto last = anchor < clicked ? clicked : anchor;
+                m_selectedObjects.assign(first, std::next(last));
+                m_selectedObject = obj;
+                NotifySelectionChanged();
+            }
+            else
+                SetSelectedObject(obj);
+        }
+        else if (ui.IsMultiSelectModifierDown())
+        {
+            const auto selected = std::find(m_selectedObjects.begin(), m_selectedObjects.end(), obj);
+            if (selected == m_selectedObjects.end())
+                m_selectedObjects.push_back(obj);
+            else
+                m_selectedObjects.erase(selected);
+            m_selectedObject = m_selectedObjects.empty() ? nullptr : m_selectedObjects.back();
+            m_selectionAnchor = obj;
+            NotifySelectionChanged();
+        }
+        else
+            SetSelectedObject(obj);
+        LogInteraction("Selected '" + ObjectName(obj) + "'");
+    }
     if (row.doubleClicked) { SetSelectedObject(obj); LogInteraction("Focused '" + ObjectName(obj) + "'"); if (OnFocusObject) OnFocusObject(obj); }
     if (row.dragActive)
     {

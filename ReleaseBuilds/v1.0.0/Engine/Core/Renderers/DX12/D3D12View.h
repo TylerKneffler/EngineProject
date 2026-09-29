@@ -3,6 +3,7 @@
 #include <wrl/client.h>
 #include <d3d12.h>
 #include <functional>
+#include "DX12PostProcess.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -29,7 +30,8 @@ public:
     void Resize(void* device, uint32_t width, uint32_t height) override;
 
     void Render(void* cmdList, void* mainRtv,
-                std::function<void(void*)> drawFn = nullptr) override;
+                std::function<void(void*)> drawFn = nullptr,
+                std::function<void(void*)> preDrawFn = nullptr) override;
 
     void SetClearColor(float r, float g, float b, float a = 1.0f) override
     {
@@ -54,6 +56,7 @@ private:
     ComPtr<ID3D12DescriptorHeap> m_rtvHeap;     // 1-slot non-shader-visible RTV heap
     ComPtr<ID3D12Resource>       m_depthBuffer; // depth buffer for 3-D rendering
     ComPtr<ID3D12DescriptorHeap> m_dsvHeap;     // 1-slot non-shader-visible DSV heap
+    DX12PostProcess m_postProcess;
 
     D3D12_CPU_DESCRIPTOR_HANDLE  m_srvCpu{};
     D3D12_GPU_DESCRIPTOR_HANDLE  m_srvGpu{};

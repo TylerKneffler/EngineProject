@@ -44,7 +44,8 @@ public:
     // mainRtv: opaque main render target handle
     // drawFn: callback for scene rendering
     void Render(void* cmdList, void* mainRtv,
-                std::function<void(void*)> drawFn = nullptr);
+                std::function<void(void*)> drawFn = nullptr,
+                std::function<void(void*)> preDrawFn = nullptr);
 
     void SetClearColor(float r, float g, float b, float a = 1.0f);
 
@@ -63,6 +64,7 @@ public:
     // Render3D — implemented by subclasses to record scene rendering commands
     // cmd: opaque graphics command list handle
     virtual void Render3D(void* cmd) = 0;
+    virtual void RenderShadow3D(void* cmd) = 0;
 
 protected:
 private:

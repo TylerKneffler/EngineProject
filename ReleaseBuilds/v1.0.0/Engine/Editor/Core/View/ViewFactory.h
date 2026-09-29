@@ -8,6 +8,7 @@
 #include "Views/ConsoleView.h"
 #include "Views/TerminalView.h"
 #include "Views/ProblemsView.h"
+#include "Views/PerformanceView.h"
 #include "Core/Renderers/IEditorRenderer.h"
 #include "Core/Scene/Scene.h"
 #include "Core/ProjectLoader.h"
@@ -26,7 +27,8 @@ namespace Engine::Editor
 // shader-visible heap. Callers must call FreeSrvSlot() before destroying a
 // 3-D view so the slot can be reused.
 //
-// All panel types are numbered sequentially per-type ("Scene 1", "Scene 2", …).
+// The first live panel of a type uses the plain name ("Scene"). Additional
+// instances use the lowest available suffix ("Scene 2", "Scene 3", ...).
 //
 // Usage:
 //   ViewFactory factory(renderer.get(), &scene, settings);
@@ -47,7 +49,7 @@ public:
                 const Engine::Model::ProjectSettings& settings);
 
     // Create a new panel by type name.
-    // Supported names: "Scene", "Game", "Hierarchy", "Properties", "Assets", "Console", "Terminal", "Problems"
+    // Supported names include the document views and all utility panels.
     // Returns nullptr if the type name is unknown or if no SRV slot is available for a 3-D view.
     std::unique_ptr<IEditorPanel> Create(const std::string& typeName);
 
@@ -74,6 +76,7 @@ public:
 
     // ---- Callbacks wired into newly created panels ----
     std::function<void(Engine::Core::Object*)>           OnSelectionChanged;  // HierarchyView
+    std::function<void(const std::vector<Engine::Core::Object*>&)> OnSelectionSetChanged;
     std::function<void()>                  OnMainDocumentFocused;
     std::function<void(Engine::Core::Object*)>           OnObjectSelected;    // SceneView click selection
     std::function<void(Engine::Core::Object*)>           OnObjectCreated;     // SceneView context creation
@@ -96,6 +99,9 @@ public:
     std::function<void(Engine::Core::Object*, const std::string&)> OnPrefabCreated;
 
 private:
+    void AssignLowestAvailableTitle(const std::string& typeName,
+        IEditorPanel* panel);
+
     ::Engine::Renderers::IEditorRenderer* m_renderer = nullptr;
     Engine::Scene::Scene*           m_scene    = nullptr;
     Engine::Model::ProjectSettings     m_settings;
@@ -109,14 +115,10 @@ private:
     // Set of type names that are restricted to one live instance at a time.
     static const std::unordered_set<std::string> kSingletonTypes;
 
-    // Per-type instance counters for title generation.
-    int m_sceneCount      = 0;
-    int m_gameCount       = 0;
-    int m_hierarchyCount  = 0;
-    int m_propertiesCount = 0;
-    int m_assetsCount     = 0;
-    int m_consoleCount    = 0;
-    int m_terminalCount   = 0;
-    int m_problemsCount   = 0;
+    // Live title slots are released by NotifyPanelRemoved. Slot 1 is rendered
+    // without a suffix; subsequent slots use their numeric suffix.
+    std::unordered_map<std::string, std::unordered_set<int>> m_liveTitleSlots;
+    std::unordered_map<IEditorPanel*, std::pair<std::string, int>>
+        m_panelTitleSlots;
 };
 }

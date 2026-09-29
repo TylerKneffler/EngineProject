@@ -1,6 +1,7 @@
 #include "PropertiesView.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Compoonents/Materials/Texture.h"
+#include "Engine/Editor/UI/EditorComponentIcons.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Component.h"
 #include "Core/Graphics/IGraphicsTexture.h"
@@ -44,8 +45,114 @@ void RevealFileInExplorer(const std::string& path)
 void PropertiesView::SetSelectedAsset(const std::string& path)
 {
     m_selectedObject = nullptr;
+    m_selectedObjects.clear();
     m_assetInspector.Select(path);
 }
+
+void PropertiesView::DrawMultiSelection(IEditorUi& ui)
+{
+    const std::string title = std::to_string(m_selectedObjects.size()) +
+        " Objects (Multi-Selection)";
+    ui.Label(title.c_str());
+
+    bool sameName = true;
+    bool sameEnabled = true;
+    const std::string firstName = m_selectedObjects.front()->name;
+    const bool firstEnabled = m_selectedObjects.front()->enabled;
+    for (Engine::Core::Object* object : m_selectedObjects)
+    {
+        sameName &= object->name == firstName;
+        sameEnabled &= object->enabled == firstEnabled;
+    }
+
+    char name[256];
+    strncpy_s(name, sameName ? firstName.c_str() : "-", sizeof(name));
+    ui.SetNextItemMixedValue(!sameName);
+    if (ui.InputText("Name", name, sizeof(name)))
+    {
+        for (Engine::Core::Object* object : m_selectedObjects)
+        {
+            object->name = name;
+            object->InvalidatePrefabOverrideCache();
+        }
+        if (OnComponentsChanged) OnComponentsChanged();
+    }
+
+    bool enabled = firstEnabled;
+    ui.SetNextItemMixedValue(!sameEnabled);
+    if (ui.Checkbox("Enabled", &enabled))
+    {
+        for (Engine::Core::Object* object : m_selectedObjects)
+        {
+            enabled ? object->Enabled() : object->Disabled();
+            object->InvalidatePrefabOverrideCache();
+        }
+        if (OnComponentsChanged) OnComponentsChanged();
+    }
+
+    ui.Separator();
+    ui.Indent(16.f);
+
+    std::vector<Engine::Core::Component*> transforms;
+    transforms.reserve(m_selectedObjects.size());
+    for (Engine::Core::Object* object : m_selectedObjects)
+        transforms.push_back(&object->transform);
+    if (ui.ComponentHeader(ComponentIconForType("Transform"), "Transform"))
+    {
+        if (transforms.front()->DrawPropertiesMulti(ui, transforms))
+        {
+            for (Engine::Core::Object* object : m_selectedObjects)
+            {
+                object->transform.MarkDirty();
+                if (auto* body = object->GetComponent<Engine::Components::RigidBody>())
+                    body->NotifyEditorTransformChanged();
+                object->InvalidatePrefabOverrideCache();
+            }
+            if (OnComponentsChanged) OnComponentsChanged();
+        }
+    }
+
+    std::unordered_map<std::string, size_t> occurrences;
+    for (Engine::Core::Component* component : m_selectedObjects.front()->Components)
+    {
+        if (!component) continue;
+        const std::string type = component->GetTypeName();
+        const size_t wantedOccurrence = occurrences[type]++;
+        std::vector<Engine::Core::Component*> common{ component };
+        for (size_t objectIndex = 1; objectIndex < m_selectedObjects.size(); ++objectIndex)
+        {
+            size_t occurrence = 0;
+            Engine::Core::Component* match = nullptr;
+            for (Engine::Core::Component* candidate : m_selectedObjects[objectIndex]->Components)
+            {
+                if (candidate && candidate->GetTypeName() == type)
+                {
+                    if (occurrence == wantedOccurrence) { match = candidate; break; }
+                    ++occurrence;
+                }
+            }
+            if (!match) { common.clear(); break; }
+            common.push_back(match);
+        }
+        if (common.empty()) continue;
+
+        ui.PushId(component);
+        if (ui.ComponentHeader(ComponentIconForType(type), type.c_str()) &&
+            component->DrawPropertiesMulti(ui, common))
+        {
+            for (Engine::Core::Object* object : m_selectedObjects)
+            {
+                if (auto* body = object->GetComponent<Engine::Components::RigidBody>())
+                    body->NotifyEditorTransformChanged();
+                object->InvalidatePrefabOverrideCache();
+            }
+            if (OnComponentsChanged) OnComponentsChanged();
+        }
+        ui.PopId();
+    }
+    ui.Unindent(16.f);
+}
+
 void PropertiesView::DrawPanel(IEditorUi& ui)
 {
     if (m_skyboxRevealPending &&
@@ -81,7 +188,23 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             ui.DisabledLabel("No scene loaded");
         else
         {
+            ui.Label("Scene Mode");
+            const char* dimensions[] = { "3D", "2D" };
+            int dimension = m_scene->settings.dimension ==
+                Engine::Model::SceneDimension::TwoD ? 1 : 0;
+            if (ui.Combo("Dimension", &dimension, dimensions, 2))
+            {
+                m_scene->SetEditorMode2D(dimension == 1);
+                if (OnComponentsChanged)
+                    OnComponentsChanged();
+            }
+            ui.Tooltip("2D uses an orthographic editor camera, an XY grid, and sprite layer ordering for this scene only.");
+            ui.Separator();
+
             ui.Label("Skybox Texture Override");
+            if (ui.Checkbox("Render Skybox", &m_scene->settings.skyboxEnabled) &&
+                OnComponentsChanged)
+                OnComponentsChanged();
             if (!m_editingSkyboxTexture)
             {
                 const Engine::Components::Texture* skybox =
@@ -161,6 +284,20 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             }
 
             ui.Separator();
+            ui.Label("Output Tone Mapping");
+            const char* toneMappingOperators[] = { "None", "ACES", "Reinhard" };
+            int toneMapping = static_cast<int>(m_scene->settings.toneMapping);
+            bool outputChanged = ui.Combo("Operator", &toneMapping,
+                toneMappingOperators, 3);
+            if (outputChanged)
+                m_scene->settings.toneMapping = static_cast<
+                    Engine::Model::ToneMappingOperator>(toneMapping);
+            outputChanged |= ui.DragFloat("Output Exposure (EV)",
+                &m_scene->settings.outputExposure, 0.05f, -16.f, 16.f);
+            if (outputChanged && OnComponentsChanged)
+                OnComponentsChanged();
+
+            ui.Separator();
             ui.Label("Spatial Debug");
             bool portalDebugChanged = false;
             portalDebugChanged |= ui.Checkbox("Enable Spatial Debug Visuals",
@@ -219,6 +356,13 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
                     OnComponentsChanged();
             }
         }
+        ui.EndTextWrap();
+        ui.EndWindow();
+        return;
+    }
+    if (m_selectedObjects.size() > 1)
+    {
+        DrawMultiSelection(ui);
         ui.EndTextWrap();
         ui.EndWindow();
         return;
@@ -310,7 +454,8 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         std::string componentType = component->GetTypeName();
         if (componentType.empty()) componentType = "Component";
         
-        const bool componentOpen = ui.CollapsingHeader(componentType.c_str());
+        const bool componentOpen = ui.ComponentHeader(
+            ComponentIconForType(componentType), componentType.c_str());
         Engine::Core::Object* componentPrefabRoot = m_selectedObject->GetPrefabInstanceRoot();
         const bool componentEditable = componentPrefabRoot == nullptr;
         // Bind the menu to the header before drag/drop helpers replace the
@@ -389,6 +534,7 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
                 ? std::next(target)
                 : target;
             components.splice(destination, components, source);
+            m_selectedObject->NotifyStructureChanged();
             LogAssetDrop("[Properties] Moved component '" +
                 reorderSource->GetTypeName() + "' " +
                 (sourceBeforeTarget ? "down" : "up"));
@@ -401,6 +547,7 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
     {
         const std::string deletedType = componentToDelete->GetTypeName();
         m_selectedObject->Components.remove(componentToDelete);
+        m_selectedObject->NotifyStructureChanged();
         delete componentToDelete;
         LogAssetDrop("[Properties] Deleted component '" + deletedType + "'");
         if (OnComponentsChanged)

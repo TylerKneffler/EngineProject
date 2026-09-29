@@ -2,6 +2,7 @@
 #include "pch.h"
 #include "../IGameRenderer.h"
 #include "DX12GraphicsProvider.h"
+#include "DX12PostProcess.h"
 #include <memory>
 
 namespace Engine::Renderers
@@ -158,6 +159,8 @@ private:
     uint32_t                          m_rtvDescriptorSize = 0;
     ComPtr<ID3D12DescriptorHeap>      m_dsvHeap;
     ComPtr<ID3D12Resource>            m_depthStencil;
+    DX12PostProcess                   m_postProcess;
+    float m_clearColor[4] = { 0.1f, 0.1f, 0.1f, 1.0f };
 
     // -- Sync --
     // m_fence       : GPU/CPU synchronisation primitive. The GPU writes an ever-

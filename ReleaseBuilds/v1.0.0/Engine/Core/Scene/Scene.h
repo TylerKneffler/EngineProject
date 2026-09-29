@@ -7,6 +7,7 @@
 #include "Core/Model/SceneSettings.h"
 #include "Core/Model/MeshData.h"
 #include "Core/Model/LightingData.h"
+#include "Core/Time/SimulationClock.h"
 #include <glm/glm.hpp>
 #include <array>
 #include <memory>
@@ -27,7 +28,12 @@ namespace Engine::Components
 }
 namespace Engine::Rendering { class BakedLightingData; }
 namespace Engine::Renderers { class UIRenderer; }
-namespace Engine::Graphics { class IGraphicsProvider; class IGraphicsContext; }
+namespace Engine::Graphics
+{
+    class IGraphicsProvider;
+    class IGraphicsContext;
+    class IGraphicsTexture;
+}
 
 // Forward declarations
 // ---------------------------------------------------------------------------
@@ -99,6 +105,9 @@ public:
         SpatialRay ray;
         float maxDistance = 0.f;
         const Object* enteredPortal = nullptr;
+        // Null means the legacy scene-wide chart. Otherwise geometry/query
+        // candidates must belong to this root hierarchy.
+        const Object* contentScopeRoot = nullptr;
     };
 
     Scene();
@@ -107,6 +116,15 @@ public:
     // Runtime lifecycle shared by the standalone game and Editor Play mode.
     void Start();
     void Update(float deltaTime);
+    // Advances exactly one configured fixed frame. Offline exporters use this
+    // instead of supplying or sampling wall-clock deltas.
+    void UpdateFixedFrame();
+    void SetFixedTimeStep(double seconds) { m_clock.SetFixedStep(seconds); }
+    void UseVariableTimeStep() { m_clock.UseVariableStep(); }
+    float GetDeltaTime() const { return m_deltaTime; }
+    double GetElapsedTime() const { return m_clock.GetElapsedTime(); }
+    uint64_t GetFrameIndex() const { return m_clock.GetFrameIndex(); }
+    const Engine::Time::SimulationClock& GetClock() const { return m_clock; }
     Engine::Physics::Physics& GetPhysics() { return *m_physics; }
     const Engine::Physics::Physics& GetPhysics() const { return *m_physics; }
     Engine::Audio::Audio& GetAudio() { return *m_audio; }
@@ -131,7 +149,8 @@ public:
     void PrepareRenderFrame();
     void Render(IGraphicsContext* context, float aspect,
         Camera* cameraOverride = nullptr, bool includeEditorVisuals = true,
-        uint32_t viewportWidth = 0u, uint32_t viewportHeight = 0u);
+          uint32_t viewportWidth = 0u, uint32_t viewportHeight = 0u,
+          bool shadowOnly = false);
     // Bytes of object records made visible to the GPU by the most recent
     // Render call. This excludes vertex, light, and bone buffers.
     uint64_t GetLastObjectDataUploadBytes() const
@@ -142,6 +161,14 @@ public:
     {
         return m_lastOcclusionCulledCount;
     }
+    uint32_t GetLastOrdinaryDrawCount() const
+    {
+        return m_lastOrdinaryDrawCount;
+    }
+    uint32_t GetLastSkinnedObjectCount() const
+    {
+        return m_lastSkinnedObjectCount;
+    }
     void SetSelectedObject(Object* obj) { m_selectedObject = obj; }
     Object* GetSelectedObject() const { return m_selectedObject; }
     void SetPreviewObject(Object* obj) { m_previewObject = obj; }
@@ -151,6 +178,11 @@ public:
         const Engine::Model::DistanceLightingSettings& distanceSettings)
     {
         m_distanceLightingSettings = distanceSettings;
+    }
+    void SetRealtimeShadowSettings(
+        const Engine::Model::RealtimeShadowSettings& shadowSettings)
+    {
+        m_realtimeShadowSettings = shadowSettings;
     }
     // Pointer coordinates relative to the surface displaying the game render
     // target, used to keep embedded-view UI hit bounds aligned.
@@ -183,6 +215,8 @@ public:
     // volume integration remains a separate concern from discrete portals.
     std::vector<PortalRaySegment> TracePortalRay(const SpatialRay& ray,
         float maxDistance, uint32_t maxPortalHops = 8u) const;
+    static bool IsObjectInSpatialRegion(const Object* object,
+        const Object* contentScopeRoot);
 
     // Compatibility names for existing gameplay code. New code should state
     // its spatial intent with MapSpatialPoint/MapSpatialMatrix.
@@ -212,6 +246,15 @@ public:
     bool TryGetObjectPath(const Object* object, ObjectPath& path) const;
     Object* FindObjectByPath(const ObjectPath& path) const;
     bool MoveObject(Object* object, Object* target, ObjectPlacement placement);
+    // Invalidates caches that retain object or component pointers. Object and
+    // component creation call this automatically; hierarchy editors should
+    // use MoveObject so cached animation bindings stay coherent.
+    uint64_t GetStructureRevision() const { return m_structureRevision; }
+    void NotifyStructureChanged()
+    {
+        if (++m_structureRevision == 0)
+            ++m_structureRevision;
+    }
 
     // Serialization — delegates to SceneSerializer.
     // Save writes the scene to a scene XML file.
@@ -281,18 +324,69 @@ private:
     std::unique_ptr<IPipelineState> m_objectSpatialDebugPipeline;
     std::unique_ptr<IPipelineState> m_objectSpatialDebugWirePipeline;
     std::unique_ptr<IPipelineState> m_objectOutlinePipeline;
+    std::unique_ptr<IPipelineState> m_directionalShadowPipeline;
+    std::unique_ptr<IPipelineState> m_directionalShadowDoubleSidedPipeline;
     std::unordered_map<const IPipelineState*, std::unique_ptr<IPipelineState>>
         m_terrainPipelineByBase;
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_directionalShadowMap;
+    uint32_t m_directionalShadowResolution = 0;
+    struct PortalShadowCacheEntry
+    {
+        uint64_t key = 0;
+        const Engine::Components::Camera* ownerCamera = nullptr;
+        const Engine::Components::SpatialManipulator* targetChart = nullptr;
+        const Object* contentScopeRoot = nullptr;
+        glm::mat4 view { 1.f };
+        glm::vec3 cameraPosition { 0.f };
+        uint32_t depth = 0;
+        float screenArea = 0.f;
+        uint64_t touchedGeneration = 0;
+        std::shared_ptr<Engine::Graphics::IGraphicsTexture> atlas;
+        uint32_t atlasResolution = 0;
+        std::unique_ptr<IGraphicsBuffer> constantBuffer;
+        void* constantMapped = nullptr;
+        std::unique_ptr<IGraphicsBuffer> objectBuffer;
+        void* objectMapped = nullptr;
+        uint32_t bufferCapacity = 0;
+        std::array<glm::mat4, 4> viewProjections{
+            glm::mat4(1.f), glm::mat4(1.f), glm::mat4(1.f), glm::mat4(1.f) };
+        glm::vec4 cascadeSplits { 0.f };
+        glm::vec4 cascadeData { 0.f };
+        glm::vec4 cameraData { 0.f };
+        bool rendered = false;
+        bool selected = false;
+    };
+    std::vector<PortalShadowCacheEntry> m_portalShadowCache;
+    uint64_t m_portalShadowGeneration = 0;
+    std::vector<std::shared_ptr<Engine::Graphics::IGraphicsTexture>>
+        m_retiredShadowTextures;
     std::unique_ptr<IGraphicsBuffer> m_objectConstantBuffer;
     void* m_objectCBMapped = nullptr;
     std::unique_ptr<IGraphicsBuffer> m_objectDataBuffer;
     void* m_objectDataMapped = nullptr;
+    std::unique_ptr<IGraphicsBuffer> m_shadowConstantBuffer;
+    void* m_shadowCBMapped = nullptr;
+    std::unique_ptr<IGraphicsBuffer> m_shadowObjectDataBuffer;
+    void* m_shadowObjectDataMapped = nullptr;
     std::unique_ptr<IGraphicsBuffer> m_portalObjectDataBuffer;
     void* m_portalObjectDataMapped = nullptr;
     std::unique_ptr<IGraphicsBuffer> m_lightDataBuffer;
     void* m_lightDataMapped = nullptr;
     std::unique_ptr<IGraphicsBuffer> m_boneDataBuffer;
     void* m_boneDataMapped = nullptr;
+    // Capacity growth can occur while prior DX12/Vulkan command buffers are
+    // still in flight. Retain replaced resources for the scene lifetime so a
+    // resize never destroys storage referenced by queued GPU work.
+    std::vector<std::unique_ptr<IGraphicsBuffer>> m_retiredRenderBuffers;
+    std::unique_ptr<IGraphicsBuffer> m_emptyMorphDeltaBuffer;
+    std::unique_ptr<IGraphicsBuffer> m_emptyMorphWeightBuffer;
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_brdfIntegrationLut;
+    std::unique_ptr<IGraphicsBuffer> m_clusterHeaderBuffer;
+    std::unique_ptr<IGraphicsBuffer> m_clusterLightIndexBuffer;
+    void* m_clusterHeaderMapped = nullptr;
+    void* m_clusterLightIndexMapped = nullptr;
+    uint32_t m_clusterHeaderCapacity = 0;
+    uint32_t m_clusterLightIndexCapacity = 0;
     std::unique_ptr<IGraphicsBuffer> m_portalApertureBuffer;
     void* m_portalApertureMapped = nullptr;
     std::unique_ptr<Engine::Renderers::UIRenderer> m_uiRenderer;
@@ -306,6 +400,8 @@ private:
     void BuildGridPipeline();
     void BuildSkyboxPipeline();
     void BuildObjectPipeline();
+    void EnsureObjectRenderCapacity(uint32_t requiredObjects);
+    void EnsureSkinPaletteCapacity(uint32_t requiredObjects);
     const Engine::Components::Texture* ResolveSkyboxTexture();
     void UpdateEnvironmentLighting(const Engine::Components::Texture* texture);
     std::shared_ptr<const std::array<glm::vec4, 9>> ResolveReflectionEnvironment(
@@ -358,9 +454,12 @@ private:
     // pruned as objects leave the scene.
     std::unordered_map<const Object*, WarpedRenderMesh> m_warpedRenderMeshes;
     uint32_t m_frameLightCount = 0;
+    Engine::Model::RealtimeShadowSettings m_realtimeShadowSettings;
     Engine::Model::DistanceLightingSettings m_distanceLightingSettings;
     uint64_t m_lastObjectDataUploadBytes = 0;
     uint32_t m_lastOcclusionCulledCount = 0;
+    uint32_t m_lastOrdinaryDrawCount = 0;
+    uint32_t m_lastSkinnedObjectCount = 0;
     bool m_renderFramePrepared = false;
 
     // ---- Object list ----
@@ -369,6 +468,9 @@ private:
     std::vector<Object*> m_pendingObjectRemovals;
     bool m_isUpdating = false;
     bool m_hasStarted = false;
+    float m_deltaTime = 0.f;
+    Engine::Time::SimulationClock m_clock;
+    uint64_t m_structureRevision = 1;
     void FlushPendingObjectAdditions();
     void FlushPendingObjectRemovals();
     Object* m_selectedObject = nullptr;
@@ -379,8 +481,8 @@ private:
     // Long-range terrain alone can contribute 289 patch meshes. Truncating
     // ordinary views at 64 draws left square background holes even though the
     // chunks and their GPU buffers had been generated successfully.
-    static constexpr uint32_t kMaxObjects = 512;
-    static constexpr uint32_t kMaxSkinnedObjects = 64;
+    static constexpr uint32_t kInitialObjectCapacity = 512;
+    static constexpr uint32_t kInitialSkinnedObjectCapacity = 64;
     static constexpr uint32_t kMaxSpatialObjects = 64;
     // The editor diagnostic expands a linked 8-point portal pair into point
     // markers, boundary bars, correspondence bars, and plane normals. Keep
@@ -391,18 +493,13 @@ private:
     // the command list executes. Every portal view therefore owns immutable
     // aperture, depth-reset, and connected-scene slots for the whole frame.
     static constexpr uint32_t kMaxPortalRenderViews = 64;
-    static constexpr uint32_t kPortalRenderSlotsPerView = kMaxObjects + 2;
     static constexpr uint32_t kMaxSpatialDebugDraws =
         kMaxSpatialObjects * kMaxSpatialVerticesPerObject / 24;
-    static constexpr uint32_t kOrdinaryObjectSlotCount =
-        kMaxObjects + kMaxSpatialDebugDraws;
-    static constexpr uint32_t kPortalObjectSlotCount =
-        kMaxPortalRenderViews * kPortalRenderSlotsPerView;
-    static constexpr uint32_t kObjectRenderSlotCount = kMaxObjects +
-        kPortalObjectSlotCount + kMaxSpatialDebugDraws;
     static constexpr uint32_t kMaxBonesPerObject = 256;
     static constexpr uint32_t kMaxLights =
         Engine::Model::MaxRealtimeLights;
     static constexpr uint32_t kCBStride = 256;
+    uint32_t m_objectCapacity = kInitialObjectCapacity;
+    uint32_t m_skinnedObjectCapacity = kInitialSkinnedObjectCapacity;
 };
 }

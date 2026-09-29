@@ -12,8 +12,24 @@ enum class SceneRenderMode
     Wireframe = 2
 };
 
+enum class SceneDimension
+{
+    ThreeD = 0,
+    TwoD = 1
+};
+
+enum class ToneMappingOperator
+{
+    None = 0,
+    Aces = 1,
+    Reinhard = 2
+};
+
 struct SceneSettings
 {
+    // Dimensional editing and rendering behavior belongs to the scene so one
+    // project can freely contain both 2D and 3D scenes.
+    SceneDimension dimension = SceneDimension::ThreeD;
     bool showGrid = true;
     int gridHalfSize = 10;
     float gridCellSize = 1.f;
@@ -22,6 +38,7 @@ struct SceneSettings
     glm::vec3 gridColor = glm::vec3(0.45f, 0.45f, 0.45f);
     glm::vec3 gridOriginColor = glm::vec3(0.30f, 0.50f, 0.80f);
     glm::vec3 ambientColor = glm::vec3(0.12f, 0.12f, 0.12f);
+    bool skyboxEnabled = true;
     std::string skyboxTexture;
     // The equirectangular sky texture can also drive image-based diffuse
     // lighting and reflections. Exposure is measured in EV and rotation in
@@ -30,6 +47,8 @@ struct SceneSettings
     float hdriIntensity = 1.f;
     float hdriExposure = 0.f;
     float hdriRotation = 0.f;
+    ToneMappingOperator toneMapping = ToneMappingOperator::Aces;
+    float outputExposure = 0.f;
     SceneRenderMode renderMode = SceneRenderMode::Lit;
     // When true, SceneView also shows game-style screen-space UI composition.
     // Default stays false so scene camera reflects in-scene editing context.

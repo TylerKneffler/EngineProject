@@ -54,6 +54,7 @@ bool DX12GameRenderer::Init(void* hwnd, uint32_t width, uint32_t height)
         CreateRTVHeap();
         CreateRenderTargets();
         CreateDepthStencilTarget();
+        m_postProcess.Create(m_device.Get(), width, height);
 
         m_rootSignature = CreateD3D12MaterialRootSignature(m_device.Get());
 
@@ -149,6 +150,7 @@ void DX12GameRenderer::Resize(uint32_t width, uint32_t height)
 
     CreateRenderTargets();
     CreateDepthStencilTarget();
+    m_postProcess.Create(m_device.Get(), width, height);
 
     m_viewport    = { 0.f, 0.f, static_cast<float>(width), static_cast<float>(height), 0.f, 1.f };
     m_scissorRect = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
@@ -235,10 +237,9 @@ void DX12GameRenderer::BeginFrame()
     m_commandList->RSSetViewports(1, &m_viewport);
     m_commandList->RSSetScissorRects(1, &m_scissorRect);
 
-    D3D12_CPU_DESCRIPTOR_HANDLE rtv = GetCurrentRTV();
     D3D12_CPU_DESCRIPTOR_HANDLE dsv =
         m_dsvHeap->GetCPUDescriptorHandleForHeapStart();
-    m_commandList->OMSetRenderTargets(1, &rtv, FALSE, &dsv);
+    m_postProcess.BindScene(m_commandList.Get(), dsv, m_clearColor);
     m_commandList->ClearDepthStencilView(
         dsv, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
         1.0f, 0, 0, nullptr);
@@ -251,12 +252,13 @@ void DX12GameRenderer::Clear(float r, float g, float b, float a)
     // rects” — clear the entire surface. This erases any content left over
     // from the previous frame. Call after BeginFrame() and before any draws.
     const float color[4] = { r, g, b, a };
-    D3D12_CPU_DESCRIPTOR_HANDLE rtv = GetCurrentRTV();
-    m_commandList->ClearRenderTargetView(rtv, color, 0, nullptr);
+    memcpy(m_clearColor, color, sizeof(color));
+    m_postProcess.ClearScene(m_commandList.Get(), m_clearColor);
 }
 
 void DX12GameRenderer::EndFrame()
 {
+    m_postProcess.Compose(m_commandList.Get(), GetCurrentRTV());
     // NOTE: The RENDER_TARGET → PRESENT barrier is NOT recorded here.
     // RenderOverlay() calls ReleaseWrappedResources which issues that barrier
     // via the D3D11On12 device's command list, submitted with Flush().

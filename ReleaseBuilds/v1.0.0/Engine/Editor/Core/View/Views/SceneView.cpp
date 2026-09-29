@@ -9,6 +9,7 @@
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Obj/Sprite.h"
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
+#include "Core/Compoonents/Lighting/LightProbe.h"
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "../Focus/WindowFocusHandler.h"
@@ -97,7 +98,9 @@ void SceneView::DrawPanel(IEditorUi& ui)
     const EditorUiContextMenuResult createMenu =
         ui.ContextMenu(this, "Create", nullptr, true);
     if (m_scene && (createMenu.addRequested ||
-        !createMenu.primitive3D.empty() || createMenu.addSpriteRequested))
+        !createMenu.primitive3D.empty() || createMenu.addSpriteRequested ||
+        createMenu.addLightProbeRequested ||
+        createMenu.addLightProbeGroupRequested))
     {
         Engine::Core::Object* created = nullptr;
         glm::vec3 placement(0.f);
@@ -117,6 +120,16 @@ void SceneView::DrawPanel(IEditorUi& ui)
                 Engine::Components::Sprite* sprite =
                     created->AddComponent<Engine::Components::Sprite>();
                 sprite->SetAnimationManager(manager);
+            }
+            else if(createMenu.addLightProbeRequested)
+            {
+                created=m_scene->AddObject("Light Probe");
+                created->AddComponent<Engine::Components::LightProbe>();
+            }
+            else if(createMenu.addLightProbeGroupRequested)
+            {
+                created=m_scene->AddObject("Light Probe Volume");
+                created->AddComponent<Engine::Components::LightProbeGroup>();
             }
             else
                 created = m_scene->AddObject("GameObject");
@@ -147,7 +160,8 @@ void SceneView::DrawPanel(IEditorUi& ui)
         ? m_gizmos.DrawAndHandle(*m_scene, ui, gizmoInput, transformTool)
         : EditorGizmoResult{};
     if (OnGizmoInteraction)
-        OnGizmoInteraction(gizmoResult.transformDragging);
+        OnGizmoInteraction(gizmoResult.transformDragging ||
+            m_toolbar.IsTransformDragging());
     if (gizmoResult.selectionRequested && OnObjectSelected)
         OnObjectSelected(gizmoResult.selectedObject);
     bool prefabDragObserved = false;
@@ -299,5 +313,16 @@ void SceneView::Render3D(void* cmd)
         m_scene->Render(ctx.get(), m_aspect, nullptr, true,
             GetWidth(), GetHeight());
     }
+}
+
+void SceneView::RenderShadow3D(void* cmd)
+{
+    if (!m_scene || !m_scene->GetGraphicsProvider()) return;
+    auto* factory = m_scene->GetGraphicsProvider()->GetContextFactory();
+    factory->SetCommandBuffer(cmd);
+    auto ctx = factory->CreateContext();
+    if (ctx)
+        m_scene->Render(ctx.get(), m_aspect, nullptr, false,
+            GetWidth(), GetHeight(), true);
 }
 }

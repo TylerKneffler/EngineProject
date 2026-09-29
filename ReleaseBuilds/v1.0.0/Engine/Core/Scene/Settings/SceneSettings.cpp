@@ -59,6 +59,8 @@ namespace
 Engine::Serialization::JsonValue SerializeSceneSettings(const Engine::Model::SceneSettings& settings)
 {
     Engine::Serialization::JsonValue value = Engine::Serialization::JsonValue::MakeObject();
+    value.Set("dimension",
+        Engine::Serialization::JsonValue(static_cast<int>(settings.dimension)));
     value.Set("showGrid", Engine::Serialization::JsonValue(settings.showGrid));
     value.Set("gridHalfSize", Engine::Serialization::JsonValue(settings.gridHalfSize));
     value.Set("gridCellSize", Engine::Serialization::JsonValue(settings.gridCellSize));
@@ -67,11 +69,15 @@ Engine::Serialization::JsonValue SerializeSceneSettings(const Engine::Model::Sce
     value.Set("gridColor", Vec3ToJson(settings.gridColor));
     value.Set("gridOriginColor", Vec3ToJson(settings.gridOriginColor));
     value.Set("ambientColor", Vec3ToJson(settings.ambientColor));
+    value.Set("skyboxEnabled", Engine::Serialization::JsonValue(settings.skyboxEnabled));
     value.Set("skyboxTexture", Engine::Serialization::JsonValue(settings.skyboxTexture));
     value.Set("hdriLightingEnabled", Engine::Serialization::JsonValue(settings.hdriLightingEnabled));
     value.Set("hdriIntensity", Engine::Serialization::JsonValue(settings.hdriIntensity));
     value.Set("hdriExposure", Engine::Serialization::JsonValue(settings.hdriExposure));
     value.Set("hdriRotation", Engine::Serialization::JsonValue(settings.hdriRotation));
+    value.Set("toneMapping",
+        Engine::Serialization::JsonValue(static_cast<int>(settings.toneMapping)));
+    value.Set("outputExposure", Engine::Serialization::JsonValue(settings.outputExposure));
     value.Set("renderMode",
         Engine::Serialization::JsonValue(static_cast<int>(settings.renderMode)));
     value.Set("sceneViewUiOverlay",
@@ -99,6 +105,12 @@ void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engi
 {
     if (!value.IsObject())
         return;
+    if (const auto* dimension = FindField(value, "dimension"))
+    {
+        settings.dimension = dimension->AsInt() == 1
+            ? Engine::Model::SceneDimension::TwoD
+            : Engine::Model::SceneDimension::ThreeD;
+    }
     if (const auto* showGrid = FindField(value, "showGrid"))
         settings.showGrid = showGrid->AsBool();
     if (const auto* gridHalfSize = FindField(value, "gridHalfSize"))
@@ -115,6 +127,10 @@ void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engi
         settings.gridOriginColor = Vec3FromJson(*gridOriginColor, settings.gridOriginColor);
     if (const auto* ambientColor = FindField(value, "ambientColor"))
         settings.ambientColor = Vec3FromJson(*ambientColor, settings.ambientColor);
+    if (const auto* skyboxEnabled = FindField(value, "skyboxEnabled"))
+        settings.skyboxEnabled = skyboxEnabled->AsBool();
+    else
+        settings.skyboxEnabled = true;
     if (const auto* skyboxTexture = FindField(value, "skyboxTexture"))
         settings.skyboxTexture = skyboxTexture->AsString();
     else
@@ -127,6 +143,14 @@ void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engi
         settings.hdriExposure = std::clamp(exposure->AsFloat(), -16.f, 16.f);
     if (const auto* rotation = FindField(value, "hdriRotation"))
         settings.hdriRotation = rotation->AsFloat();
+    if (const auto* toneMapping = FindField(value, "toneMapping"))
+    {
+        settings.toneMapping = static_cast<Engine::Model::ToneMappingOperator>(
+            std::clamp(toneMapping->AsInt(), 0, 2));
+    }
+    if (const auto* outputExposure = FindField(value, "outputExposure"))
+        settings.outputExposure = std::clamp(
+            outputExposure->AsFloat(), -16.f, 16.f);
     if (const auto* renderMode = FindField(value, "renderMode"))
     {
         const int mode = renderMode->AsInt();

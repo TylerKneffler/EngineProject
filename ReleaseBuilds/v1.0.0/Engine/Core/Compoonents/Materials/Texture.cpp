@@ -19,6 +19,8 @@
 #include <cmath>
 #include <cstring>
 #include <memory>
+#include <glm/glm.hpp>
+#include <glm/geometric.hpp>
 
 namespace Engine::Components
 {
@@ -110,6 +112,126 @@ void GenerateMipChain(std::vector<uint8_t>& pixels, uint32_t width,
         sourceOffset = targetOffset;
         sourceWidth = targetWidth;
         sourceHeight = targetHeight;
+    }
+}
+
+float RadicalInverseVdc(uint32_t bits)
+{
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xaaaaaaaau) >> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xccccccccu) >> 2u);
+    bits = ((bits & 0x0f0f0f0fu) << 4u) | ((bits & 0xf0f0f0f0u) >> 4u);
+    bits = ((bits & 0x00ff00ffu) << 8u) | ((bits & 0xff00ff00u) >> 8u);
+    return static_cast<float>(bits) * 2.3283064365386963e-10f;
+}
+
+glm::vec3 ReadFloatPanorama(const std::vector<uint8_t>& pixels,
+    uint32_t width, uint32_t height, const glm::vec3& direction)
+{
+    constexpr float inverseTwoPi = 0.15915494309189535f;
+    constexpr float inversePi = 0.3183098861837907f;
+    float u = 0.5f + std::atan2(direction.z, direction.x) * inverseTwoPi;
+    u -= std::floor(u);
+    const float v = std::acos(std::clamp(direction.y, -1.f, 1.f)) * inversePi;
+    const uint32_t x = std::min(width - 1u,
+        static_cast<uint32_t>(u * static_cast<float>(width)));
+    const uint32_t y = std::min(height - 1u,
+        static_cast<uint32_t>(v * static_cast<float>(height)));
+    const size_t offset = (static_cast<size_t>(y) * width + x) * 16u;
+    glm::vec3 value{};
+    std::memcpy(&value.x, pixels.data() + offset, sizeof(float));
+    std::memcpy(&value.y, pixels.data() + offset + 4u, sizeof(float));
+    std::memcpy(&value.z, pixels.data() + offset + 8u, sizeof(float));
+    return glm::max(value, glm::vec3(0.f));
+}
+
+void PrefilterGgxEnvironmentMips(std::vector<uint8_t>& pixels,
+    uint32_t width, uint32_t height, uint32_t mipLevels)
+{
+    if (!width || !height || mipLevels < 2u)
+        return;
+    constexpr uint32_t sampleCount = 64u;
+    constexpr float twoPi = 6.28318530717958647692f;
+    uint32_t uploadBaseMip = 0u;
+    uint32_t uploadWidth = width;
+    uint32_t uploadHeight = height;
+    while (std::max(uploadWidth, uploadHeight) > 2048u &&
+        uploadBaseMip + 1u < mipLevels)
+    {
+        uploadWidth = std::max(1u, uploadWidth / 2u);
+        uploadHeight = std::max(1u, uploadHeight / 2u);
+        ++uploadBaseMip;
+    }
+    size_t mipOffset = static_cast<size_t>(width) * height * 16u;
+    uint32_t mipWidth = width;
+    uint32_t mipHeight = height;
+    for (uint32_t mip = 1u; mip < mipLevels; ++mip)
+    {
+        mipWidth = std::max(1u, mipWidth / 2u);
+        mipHeight = std::max(1u, mipHeight / 2u);
+        const size_t mipBytes = static_cast<size_t>(mipWidth) * mipHeight * 16u;
+        if (mipWidth <= 512u)
+        {
+            const float roughness = static_cast<float>(
+                mip > uploadBaseMip ? mip - uploadBaseMip : 0u) /
+                static_cast<float>(std::max(1u,
+                    mipLevels - uploadBaseMip - 1u));
+            const float alpha = std::max(roughness * roughness, 0.001f);
+            const float alphaSquared = alpha * alpha;
+            for (uint32_t y = 0; y < mipHeight; ++y)
+            for (uint32_t x = 0; x < mipWidth; ++x)
+            {
+                const float u = (static_cast<float>(x) + 0.5f) /
+                    static_cast<float>(mipWidth);
+                const float v = (static_cast<float>(y) + 0.5f) /
+                    static_cast<float>(mipHeight);
+                const float phi = (u - 0.5f) * twoPi;
+                const float theta = v * 3.14159265358979323846f;
+                const glm::vec3 normal(std::sin(theta) * std::cos(phi),
+                    std::cos(theta), std::sin(theta) * std::sin(phi));
+                const glm::vec3 tangent = std::abs(normal.y) < 0.999f
+                    ? glm::normalize(glm::cross(glm::vec3(0.f, 1.f, 0.f), normal))
+                    : glm::vec3(1.f, 0.f, 0.f);
+                const glm::vec3 bitangent = glm::cross(normal, tangent);
+                glm::vec3 radiance(0.f);
+                float weight = 0.f;
+                for (uint32_t sample = 0; sample < sampleCount; ++sample)
+                {
+                    const float xiX = static_cast<float>(sample) /
+                        static_cast<float>(sampleCount);
+                    const float xiY = RadicalInverseVdc(sample);
+                    const float samplePhi = twoPi * xiX;
+                    const float cosTheta = std::sqrt(std::max(0.f,
+                        (1.f - xiY) /
+                        (1.f + (alphaSquared - 1.f) * xiY)));
+                    const float sinTheta = std::sqrt(std::max(0.f,
+                        1.f - cosTheta * cosTheta));
+                    const glm::vec3 halfVector = glm::normalize(
+                        tangent * (std::cos(samplePhi) * sinTheta) +
+                        bitangent * (std::sin(samplePhi) * sinTheta) +
+                        normal * cosTheta);
+                    const glm::vec3 light = glm::normalize(
+                        2.f * glm::dot(normal, halfVector) * halfVector - normal);
+                    const float noL = std::max(glm::dot(normal, light), 0.f);
+                    if (noL > 0.f)
+                    {
+                        radiance += ReadFloatPanorama(
+                            pixels, width, height, light) * noL;
+                        weight += noL;
+                    }
+                }
+                radiance /= std::max(weight, 0.0001f);
+                const size_t offset = mipOffset +
+                    (static_cast<size_t>(y) * mipWidth + x) * 16u;
+                const float alphaChannel = 1.f;
+                std::memcpy(pixels.data() + offset, &radiance.x, sizeof(float));
+                std::memcpy(pixels.data() + offset + 4u, &radiance.y, sizeof(float));
+                std::memcpy(pixels.data() + offset + 8u, &radiance.z, sizeof(float));
+                std::memcpy(pixels.data() + offset + 12u,
+                    &alphaChannel, sizeof(float));
+            }
+        }
+        mipOffset += mipBytes;
     }
 }
 }
@@ -282,6 +404,9 @@ bool Texture::Load()
     {
         m_mipLevels = FullMipCount(m_width, m_height);
         GenerateMipChain(m_pixels, m_width, m_height, m_format, m_srgb);
+        if (m_format == GraphicsTextureFormat::Rgba32Float)
+            PrefilterGgxEnvironmentMips(
+                m_pixels, m_width, m_height, m_mipLevels);
     }
     else
     {

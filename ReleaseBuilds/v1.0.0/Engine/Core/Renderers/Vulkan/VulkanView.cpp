@@ -44,11 +44,19 @@ void VulkanView::CreateResources(uint32_t width, uint32_t height)
         VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
     VkImageView attachments[] = { m_color.view, m_depth.view };
     VkFramebufferCreateInfo framebufferInfo{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
-    framebufferInfo.renderPass = m_context.renderPass;
+    framebufferInfo.renderPass = m_context.compositionRenderPass;
     framebufferInfo.attachmentCount = ARRAYSIZE(attachments);
     framebufferInfo.pAttachments = attachments;
     framebufferInfo.width = width; framebufferInfo.height = height; framebufferInfo.layers = 1;
     VkCheck(vkCreateFramebuffer(m_context.device, &framebufferInfo, nullptr, &m_framebuffer), "vkCreateFramebuffer(view)");
+    if (!m_postInitialized)
+    {
+        m_postProcess.Init(m_context.physicalDevice, m_context.device,
+            m_context.renderPass, m_context.compositionRenderPass, width, height);
+        m_postInitialized = true;
+    }
+    else
+        m_postProcess.Resize(width, height);
     if (m_context.registerUiTexture)
         m_uiTexture = m_context.registerUiTexture(
             m_sampler, m_color.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -64,22 +72,18 @@ void VulkanView::DestroyResources()
     m_uiTexture = nullptr; m_framebuffer = VK_NULL_HANDLE;
 }
 
-void VulkanView::Render(void* commandBuffer, void*, std::function<void(void*)> drawFn)
+void VulkanView::Render(void* commandBuffer, void*,
+    std::function<void(void*)> drawFn,
+    std::function<void(void*)> preDrawFn)
 {
     VkCommandBuffer command = reinterpret_cast<VkCommandBuffer>(commandBuffer);
-    VkClearValue clears[2]{};
-    clears[0].color = { { m_clearColor[0], m_clearColor[1],
-        m_clearColor[2], m_clearColor[3] } };
-    clears[1].depthStencil = { 1.0f, 0 };
-    VkRenderPassBeginInfo begin{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
-    begin.renderPass = m_context.renderPass; begin.framebuffer = m_framebuffer;
-    begin.renderArea.extent = { m_width, m_height }; begin.clearValueCount = 2; begin.pClearValues = clears;
-    vkCmdBeginRenderPass(command, &begin, VK_SUBPASS_CONTENTS_INLINE);
-    VkViewport viewport{ 0.0f, static_cast<float>(m_height), static_cast<float>(m_width), -static_cast<float>(m_height), 0.0f, 1.0f };
-    VkRect2D scissor{ { 0, 0 }, { m_width, m_height } };
-    vkCmdSetViewport(command, 0, 1, &viewport); vkCmdSetScissor(command, 0, 1, &scissor);
+    if (preDrawFn) preDrawFn(commandBuffer);
+    m_postProcess.BeginScene(command, m_clearColor);
     if (drawFn) drawFn(commandBuffer);
-    vkCmdEndRenderPass(command);
+    m_postProcess.EndScene(command);
+    m_postProcess.BeginComposition(command, m_framebuffer,
+        m_width, m_height, m_clearColor);
+    m_postProcess.EndComposition(command);
 }
 }
 #endif

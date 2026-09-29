@@ -7,6 +7,7 @@
 
 namespace Engine::Renderers
 {
+class D3D12GraphicsTexture;
 struct D3D12OcclusionQueryState;
 struct D3D12GpuTimingState;
 
@@ -28,6 +29,9 @@ public:
     void SetVertexBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset = 0) override;
     void SetIndexBuffer(const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t indexCount, uint64_t offset = 0) override;
     void SetTexture(uint32_t slot, const Engine::Graphics::IGraphicsTexture* texture) override;
+    bool BeginDepthOnlyPass(const Engine::Graphics::IGraphicsTexture* texture,
+        float clearDepth = 1.f) override;
+    void EndDepthOnlyPass() override;
 
     void SetViewport(const Viewport& vp) override;
     void SetScissorRect(const ScissorRect& rect) override;
@@ -67,6 +71,7 @@ private:
     uint64_t m_occlusionSceneSignature = 0;
     uint64_t m_activeOcclusionKey = 0;
     uint32_t m_activeOcclusionIndex = UINT32_MAX;
+    D3D12GraphicsTexture* m_activeDepthTarget = nullptr;
 
     D3D12_RESOURCE_STATES ConvertResourceState(ResourceState state) const;
 };

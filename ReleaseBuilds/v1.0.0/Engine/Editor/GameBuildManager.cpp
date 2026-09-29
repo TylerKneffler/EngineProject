@@ -15,7 +15,7 @@ namespace Engine::Editor
 #endif
 
 // Forward declaration
-static HANDLE StartGameBuild(HANDLE& outReadPipe);
+static HANDLE StartGameBuild(HANDLE& outReadPipe, HANDLE& outJob);
 
 namespace
 {
@@ -47,11 +47,14 @@ GameBuildManager::~GameBuildManager()
     // Ensure the build process is cleaned up
     if (m_buildProcess)
     {
-        TerminateProcess(m_buildProcess, 1);
+        if (m_buildJob) TerminateJobObject(m_buildJob, 1);
+        else TerminateProcess(m_buildProcess, 1);
         CloseHandle(m_buildProcess);
     }
+    if (m_buildJob) CloseHandle(m_buildJob);
     if (m_buildPipe)
         CloseHandle(m_buildPipe);
+    m_buildTreeLock.Release();
 }
 
 // ---------------------------------------------------------------------------
@@ -59,7 +62,7 @@ GameBuildManager::~GameBuildManager()
 // ---------------------------------------------------------------------------
 void GameBuildManager::StartBuild(PostBuildAction action)
 {
-    if (m_buildProcess)
+    if (IsBuilding())
         return; // Already building
 
     if (!ValidateRendererPrerequisites())
@@ -94,24 +97,43 @@ void GameBuildManager::StartBuild(PostBuildAction action)
                 : " manifest asset file(s), including scene dependencies."));
     }
 
-    // Start the background build process
-    m_buildProcess = StartGameBuild(m_buildPipe);
+    m_playState = PlayState::Building;
+    m_postBuildAction = action;
+    m_buildLineBuffer.clear();
+    m_buildQueued = true;
+    m_waitingForBuildTree = false;
+    if (OnBuildStart) OnBuildStart();
+    TryStartQueuedBuild();
+}
+
+void GameBuildManager::TryStartQueuedBuild()
+{
+    if (!m_buildQueued) return;
+    if (!m_buildTreeLock.TryAcquire(ENGINE_BUILD_DIR))
+    {
+        if (!m_waitingForBuildTree && m_console)
+            m_console->AddLog(ConsoleView::Level::Build,
+                "[Build] Waiting for script compilation to release the build tree...");
+        m_waitingForBuildTree = true;
+        return;
+    }
+
+    m_waitingForBuildTree = false;
+    m_buildProcess = StartGameBuild(m_buildPipe, m_buildJob);
     if (m_buildProcess)
     {
-        m_playState = PlayState::Building;
-        m_postBuildAction = action;
-        m_buildLineBuffer.clear();
-        if (OnBuildStart)
-            OnBuildStart();
+        m_buildQueued = false;
+        return;
     }
-    else
-    {
-        m_playState = PlayState::BuildFailed;
-        if (m_console)
-            m_console->AddLog(ConsoleView::Level::Error,
-                "[Build] Could not start the CMake build process.");
-        if (OnBuildComplete) OnBuildComplete(false);
-    }
+
+    m_buildQueued = false;
+    m_buildTreeLock.Release();
+    m_playState = PlayState::BuildFailed;
+    m_postBuildAction = PostBuildAction::Nothing;
+    if (m_console)
+        m_console->AddLog(ConsoleView::Level::Error,
+            "[Build] Could not start the CMake build process.");
+    if (OnBuildComplete) OnBuildComplete(false);
 }
 
 void GameBuildManager::PlayInEditor()
@@ -177,12 +199,21 @@ bool GameBuildManager::ValidateRendererPrerequisites()
 // ---------------------------------------------------------------------------
 void GameBuildManager::CancelBuild()
 {
-    if (!m_buildProcess)
+    if (!IsBuilding())
         return;
 
-    TerminateProcess(m_buildProcess, 1);
-    CloseHandle(m_buildProcess);
-    m_buildProcess = nullptr;
+    if (m_buildProcess)
+    {
+        if (m_buildJob) TerminateJobObject(m_buildJob, 1);
+        else TerminateProcess(m_buildProcess, 1);
+        CloseHandle(m_buildProcess);
+        m_buildProcess = nullptr;
+    }
+    if (m_buildJob)
+    {
+        CloseHandle(m_buildJob);
+        m_buildJob = nullptr;
+    }
 
     if (m_buildPipe)
     {
@@ -191,6 +222,9 @@ void GameBuildManager::CancelBuild()
     }
 
     m_buildLineBuffer.clear();
+    m_buildQueued = false;
+    m_waitingForBuildTree = false;
+    m_buildTreeLock.Release();
     m_playState = PlayState::Stopped;
     m_postBuildAction = PostBuildAction::Nothing;
 
@@ -269,6 +303,7 @@ void GameBuildManager::Update(PlayState& outState, PostBuildAction& outAction)
 {
     if (m_playState == PlayState::Building)
     {
+        TryStartQueuedBuild();
         DrainBuildPipe();
         PollBuildProcess();
     }
@@ -331,6 +366,12 @@ void GameBuildManager::PollBuildProcess()
     GetExitCodeProcess(m_buildProcess, &exitCode);
     CloseHandle(m_buildProcess);
     m_buildProcess = nullptr;
+    if (m_buildJob)
+    {
+        CloseHandle(m_buildJob);
+        m_buildJob = nullptr;
+    }
+    m_buildTreeLock.Release();
 
     // Flush any remaining partial line from the pipe.
     if (!m_buildLineBuffer.empty() && m_console)
@@ -393,9 +434,10 @@ void GameBuildManager::HandleBuildCompletion(bool success)
 // ---------------------------------------------------------------------------
 // StartGameBuild (from Main.cpp)
 // ---------------------------------------------------------------------------
-static HANDLE StartGameBuild(HANDLE& outReadPipe)
+static HANDLE StartGameBuild(HANDLE& outReadPipe, HANDLE& outJob)
 {
     outReadPipe = nullptr;
+    outJob = nullptr;
 
     SECURITY_ATTRIBUTES sa{};
     sa.nLength        = sizeof(sa);
@@ -423,7 +465,7 @@ static HANDLE StartGameBuild(HANDLE& outReadPipe)
 
     if (!CreateProcessA(nullptr, buf.data(),
                         nullptr, nullptr, TRUE,
-                        CREATE_NO_WINDOW,
+                        CREATE_NO_WINDOW | CREATE_SUSPENDED,
                         nullptr, nullptr, &si, &pi))
     {
         CloseHandle(hRead);
@@ -431,9 +473,27 @@ static HANDLE StartGameBuild(HANDLE& outReadPipe)
         return nullptr;
     }
 
+    HANDLE job = CreateJobObjectW(nullptr, nullptr);
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (!job || !SetInformationJobObject(job, JobObjectExtendedLimitInformation,
+        &limits, sizeof(limits)) || !AssignProcessToJobObject(job, pi.hProcess))
+    {
+        TerminateProcess(pi.hProcess, 1);
+        if (job) CloseHandle(job);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        CloseHandle(hRead);
+        CloseHandle(hWrite);
+        return nullptr;
+    }
+
+    ResumeThread(pi.hThread);
+
     CloseHandle(hWrite);
     CloseHandle(pi.hThread);
     outReadPipe = hRead;
+    outJob = job;
     return pi.hProcess;
 }
 }

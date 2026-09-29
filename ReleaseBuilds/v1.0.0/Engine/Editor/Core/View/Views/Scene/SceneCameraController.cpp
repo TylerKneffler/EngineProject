@@ -10,6 +10,26 @@
 
 namespace Engine::Editor
 {
+void SceneCameraController::SnapToDirection(Engine::Scene::Scene& scene,
+    const glm::vec3& cameraDirection)
+{
+    Engine::Components::Camera* camera =
+        scene.editorCamera.GetComponent<Engine::Components::Camera>();
+    if (!camera || glm::length(cameraDirection) < 0.0001f)
+        return;
+
+    const glm::vec3 direction = glm::normalize(cameraDirection);
+    const float distance = std::max(glm::length(
+        scene.editorCamera.transform.position - camera->target), 0.25f);
+    scene.editorCamera.transform.position = camera->target + direction * distance;
+    // Looking straight down the Y axis requires a non-parallel up vector.
+    // Keeping +Z toward the top of top/bottom views also makes those views
+    // stable and predictable when repeatedly snapping between faces.
+    camera->up = std::abs(direction.y) > 0.98f
+        ? glm::vec3(0.f, 0.f, direction.y > 0.f ? 1.f : -1.f)
+        : glm::vec3(0.f, 1.f, 0.f);
+}
+
 void SceneCameraController::Apply(Engine::Scene::Scene& scene,
     float panDX, float panDY,
     float orbitDX, float orbitDY,

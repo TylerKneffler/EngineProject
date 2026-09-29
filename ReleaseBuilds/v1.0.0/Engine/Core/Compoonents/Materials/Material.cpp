@@ -11,35 +11,43 @@ namespace Engine::Components
 Material::Material()
 {
     SetTypeName(COMPONENT_TYPE_NAME(Material));
-    RegisterField("diffuse", diffuseColor);
-    RegisterField("ambient", ambientColor);
-    RegisterField("specular", specularColor);
-    RegisterField("shininess", shininess);
-    RegisterField("metallicFactor", metallicFactor);
-    RegisterField("roughnessFactor", roughnessFactor);
-    RegisterField("environmentDiffuseStrength", environmentDiffuseStrength);
-    RegisterField("reflectionStrength", reflectionStrength);
-    RegisterField("useCustomReflectionEnvironment", useCustomReflectionEnvironment);
-    RegisterField("reflectionEnvironmentTexture", reflectionEnvironmentTexture);
-    RegisterField("reflectionEnvironmentExposure", reflectionEnvironmentExposure);
-    RegisterField("reflectionEnvironmentRotation", reflectionEnvironmentRotation);
-    RegisterField("baseColorAlpha", baseColorAlpha);
-    RegisterField("alphaCutoff", alphaCutoff);
-    RegisterField("normalScale", normalScale);
-    RegisterField("heightScale", heightScale);
-    RegisterField("heightMinSteps", heightMinSteps);
-    RegisterField("heightMaxSteps", heightMaxSteps);
-    RegisterField("occlusionStrength", occlusionStrength);
-    RegisterField("doubleSided", doubleSided);
-    RegisterField("unlit", unlit);
-    RegisterField("alphaMode", alphaMode);
-    RegisterField("emissiveColor", emissiveColor);
-    RegisterField("baseColorUvSet", baseColorUvSet);
-    RegisterField("metallicRoughnessUvSet", metallicRoughnessUvSet);
-    RegisterField("normalUvSet", normalUvSet);
-    RegisterField("occlusionUvSet", occlusionUvSet);
-    RegisterField("emissiveUvSet", emissiveUvSet);
-    RegisterField("heightUvSet", heightUvSet);
+    RegisterField("diffuse", diffuseColor, "Colors");
+    RegisterField("ambient", ambientColor, "Colors");
+    RegisterField("specular", specularColor, "Colors");
+    RegisterField("emissiveColor", emissiveColor, "Colors");
+    RegisterField("shininess", shininess, "Surface");
+    RegisterField("baseColorAlpha", baseColorAlpha, "Surface");
+    RegisterField("alphaMode", alphaMode, "Surface");
+    RegisterField("alphaCutoff", alphaCutoff, "Surface");
+    RegisterField("doubleSided", doubleSided, "Surface");
+    RegisterField("castsShadows", castsShadows, "Shadows");
+    RegisterField("unlit", unlit, "Surface");
+    RegisterField("metallicFactor", metallicFactor, "PBR");
+    RegisterField("roughnessFactor", roughnessFactor, "PBR");
+    RegisterField("environmentDiffuseStrength", environmentDiffuseStrength, "PBR");
+    RegisterField("occlusionStrength", occlusionStrength, "PBR");
+    RegisterField("reflectionStrength", reflectionStrength, "Reflections");
+    RegisterField("useCustomReflectionEnvironment", useCustomReflectionEnvironment, "Reflections");
+    RegisterField("reflectionEnvironmentTexture", reflectionEnvironmentTexture, "Reflections");
+    RegisterField("reflectionEnvironmentExposure", reflectionEnvironmentExposure, "Reflections");
+    RegisterField("reflectionEnvironmentRotation", reflectionEnvironmentRotation, "Reflections");
+    RegisterField("normalScale", normalScale, "Height and Normal", false);
+    RegisterField("heightScale", heightScale, "Height and Normal", false);
+    RegisterField("heightMinSteps", heightMinSteps, "Height and Normal", false);
+    RegisterField("heightMaxSteps", heightMaxSteps, "Height and Normal", false);
+    RegisterField("baseColorUvSet", baseColorUvSet, "Texture Coordinates", false);
+    RegisterField("metallicRoughnessUvSet", metallicRoughnessUvSet, "Texture Coordinates", false);
+    RegisterField("normalUvSet", normalUvSet, "Texture Coordinates", false);
+    RegisterField("occlusionUvSet", occlusionUvSet, "Texture Coordinates", false);
+    RegisterField("emissiveUvSet", emissiveUvSet, "Texture Coordinates", false);
+    RegisterField("heightUvSet", heightUvSet, "Texture Coordinates", false);
+    RegisterEditorFieldGroup("materialAsset", "Asset Link", false);
+    RegisterEditorFieldGroup("baseColorTexture", "Textures");
+    RegisterEditorFieldGroup("metallicRoughnessTexture", "Textures");
+    RegisterEditorFieldGroup("normalTexture", "Textures");
+    RegisterEditorFieldGroup("heightTexture", "Textures");
+    RegisterEditorFieldGroup("occlusionTexture", "Textures");
+    RegisterEditorFieldGroup("emissiveTexture", "Textures");
 }
 
 namespace
@@ -90,6 +98,7 @@ bool Material::LoadFromFile(const std::string& path)
         reflectionEnvironmentTexture.clear();
         reflectionEnvironmentExposure = 0.f;
         reflectionEnvironmentRotation = 0.f;
+        castsShadows = true;
         diffuseColor = from3(root["baseColor"], diffuseColor);
         ambientColor = from3(root["ambientColor"], ambientColor);
         specularColor = from3(root["specularColor"], specularColor);
@@ -111,6 +120,7 @@ bool Material::LoadFromFile(const std::string& path)
         if (root.Has("heightMaxSteps")) heightMaxSteps = root["heightMaxSteps"].AsFloat();
         if (root.Has("occlusionStrength")) occlusionStrength = root["occlusionStrength"].AsFloat();
         if (root.Has("doubleSided")) doubleSided = root["doubleSided"].AsBool();
+        if (root.Has("castsShadows")) castsShadows = root["castsShadows"].AsBool();
         if (root.Has("unlit")) unlit = root["unlit"].AsBool();
         if (root.Has("baseColorUvSet")) baseColorUvSet = root["baseColorUvSet"].AsInt();
         if (root.Has("metallicRoughnessUvSet")) metallicRoughnessUvSet = root["metallicRoughnessUvSet"].AsInt();
@@ -168,6 +178,7 @@ bool Material::SaveToFile(const std::string& path) const
     root.Set("heightMaxSteps", JsonValue(heightMaxSteps));
     root.Set("occlusionStrength", JsonValue(occlusionStrength));
     root.Set("doubleSided", JsonValue(doubleSided));
+    root.Set("castsShadows", JsonValue(castsShadows));
     root.Set("unlit", JsonValue(unlit));
     root.Set("baseColorUvSet", JsonValue(baseColorUvSet));
     root.Set("metallicRoughnessUvSet", JsonValue(metallicRoughnessUvSet));

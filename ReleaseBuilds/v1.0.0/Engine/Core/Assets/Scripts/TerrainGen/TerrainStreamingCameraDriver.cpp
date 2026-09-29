@@ -2,6 +2,7 @@
 #include "Scripts/TerrainGen/TerrainGen.h"
 
 #include "Core/Object.h"
+#include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include <algorithm>
 #include <cmath>
@@ -87,7 +88,10 @@ void TerrainStreamingCameraDriver::Update()
             return;
         m_initialTerrainReady = true;
     }
-    const float deltaTime = std::clamp(secondsPerUpdate, 0.0001f, 0.25f);
+    const float sceneDeltaTime = Owner->GetScene()
+        ? Owner->GetScene()->GetDeltaTime() : 0.f;
+    const float deltaTime = std::clamp(sceneDeltaTime > 0.f
+        ? sceneDeltaTime : secondsPerUpdate, 0.0001f, 0.25f);
     if (moveInfinitely)
     {
         glm::vec3 direction = endPosition - startPosition;

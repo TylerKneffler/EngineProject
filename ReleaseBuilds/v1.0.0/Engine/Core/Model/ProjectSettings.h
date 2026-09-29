@@ -10,7 +10,6 @@ namespace Engine::Model
 {
 struct ProjectSettings
 {
-    enum class EditorMode { ThreeD, TwoD };
     std::string name;
     std::string version;
     std::string description;
@@ -33,7 +32,6 @@ struct ProjectSettings
     float rightPanelWidth;
     bool debugHierarchyInteractions = true;
     uint32_t editorHistoryLimit = 100;
-    EditorMode editorMode = EditorMode::ThreeD;
     std::string editorTheme = "Graphite";
     std::vector<std::string> leftPanelTabs;
     std::vector<std::string> centerPanelTabs;
@@ -44,6 +42,7 @@ struct ProjectSettings
     glm::vec4 clearColor;
     uint32_t targetFramerate;
     Engine::Model::BakedLightingSettings bakedLighting;
+    Engine::Model::RealtimeShadowSettings realtimeShadows;
     Engine::Model::DistanceLightingSettings distanceLighting;
     enum class AspectRatioMode { Free, Locked, Hardcoded };
     AspectRatioMode aspectRatioMode = AspectRatioMode::Locked;

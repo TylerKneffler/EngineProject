@@ -18,7 +18,8 @@ bool VulkanEditorRenderer::Init(void* hwnd, uint32_t width, uint32_t height)
     {
         m_width = width; m_height = height;
         if (!m_core.Init(static_cast<HWND>(hwnd), width, height, false)) return false;
-        m_viewContext = { m_core.GetPhysicalDevice(), m_core.GetDevice(), m_core.GetOffscreenRenderPass() };
+        m_viewContext = { m_core.GetPhysicalDevice(), m_core.GetDevice(),
+            m_core.GetOffscreenRenderPass(), m_core.GetCompositionRenderPass() };
         m_provider = std::make_unique<VulkanGraphicsProvider>(
             m_core.GetPhysicalDevice(), m_core.GetDevice(), m_core.GetOffscreenRenderPass(),
             m_core.GetQueue(), m_core.GetQueueFamily());

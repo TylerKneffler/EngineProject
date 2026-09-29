@@ -4,24 +4,24 @@ namespace Engine::Components
 {
 Collider::Collider()
 {
-    RegisterField("collisionEnabled", collisionEnabled);
-    RegisterField("center", center);
+    RegisterField("collisionEnabled", collisionEnabled, "General");
+    RegisterField("center", center, "General");
 }
 
 PrimitiveObjectCollider::PrimitiveObjectCollider()
 {
     SetTypeName(COMPONENT_TYPE_NAME(PrimitiveObjectCollider));
-    RegisterField("shape", shape);
-    RegisterField("size", size);
-    RegisterField("radius", radius);
-    RegisterField("height", height);
+    RegisterField("shape", shape, "Shape");
+    RegisterField("size", size, "Shape");
+    RegisterField("radius", radius, "Shape");
+    RegisterField("height", height, "Shape");
 }
 
 MeshObjectCollider::MeshObjectCollider()
 {
     SetTypeName(COMPONENT_TYPE_NAME(MeshObjectCollider));
-    RegisterField("meshReference", meshReference);
-    RegisterField("meshPath", meshPath);
-    RegisterField("convex", convex);
+    RegisterField("meshReference", meshReference, "Mesh");
+    RegisterField("meshPath", meshPath, "Mesh");
+    RegisterField("convex", convex, "Mesh");
 }
 }

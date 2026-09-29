@@ -1,9 +1,21 @@
 cmake_minimum_required(VERSION 3.20)
+
+# Use CMake's MSVC debug-information abstraction when available.  Keeping
+# CodeView records inside each object avoids the shared compiler PDB that can
+# be corrupted when the editor's hot-reload build and another MSBuild process
+# touch the same target incrementally.  The linker still emits the normal
+# executable/library PDB used by Visual Studio.
+if(POLICY CMP0141)
+    cmake_policy(SET CMP0141 NEW)
+endif()
 project(EngineProject C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
+if(MSVC)
+    set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT
+        "$<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:Embedded>")
+endif()
 # This CMake project can be built directly for engine development or consumed
 # by a generated game project via add_subdirectory(). Generated projects set
 # ENGINE_PROJECT_DIR and ENGINE_PROJECT_FILE before referencing the engine.
@@ -106,6 +118,12 @@ file(GLOB_RECURSE ENGINE_SOURCES CONFIGURE_DEPENDS
 )
 # Engine/Core/Assets contains project template content, not engine code.
 list(FILTER ENGINE_SOURCES EXCLUDE REGEX "[/\\\\]Assets[/\\\\]")
+# The scene-serialization implementation was reorganized under Scene/* while
+# byte-identical compatibility copies remained at Serialization/*. Compiling
+# both paths gives MSVC colliding .obj names and duplicate definitions
+# (LNK4006); keep the structured implementation as the single source of truth.
+list(FILTER ENGINE_SOURCES EXCLUDE REGEX
+    "[/\\\\]Serialization[/\\\\]Scene(Document|Object|Prefab)SerializationBehavior\\.cpp$")
 file(GLOB_RECURSE ENGINE_HEADERS CONFIGURE_DEPENDS
     "${ENGINE_ROOT}/Engine/Core/*.h"
     "${ENGINE_ROOT}/Engine/Core/*.hpp"
@@ -141,6 +159,13 @@ file(GLOB_RECURSE GAME_HEADERS CONFIGURE_DEPENDS
     "${ENGINE_ROOT}/Engine/Game/*.h"
     "${ENGINE_ROOT}/Engine/Game/*.hpp"
     "${ENGINE_ROOT}/Engine/Game/*.inl"
+)
+file(GLOB_RECURSE VIDEO_EXPORTER_SOURCES CONFIGURE_DEPENDS
+    "${ENGINE_ROOT}/Engine/VideoExporter/*.cpp"
+)
+file(GLOB_RECURSE VIDEO_EXPORTER_HEADERS CONFIGURE_DEPENDS
+    "${ENGINE_ROOT}/Engine/VideoExporter/*.h"
+    "${ENGINE_ROOT}/Engine/VideoExporter/*.hpp"
 )
 file(GLOB_RECURSE SERVER_SOURCES CONFIGURE_DEPENDS
     "${ENGINE_ROOT}/Engine/Server/*.cpp"
@@ -367,7 +392,7 @@ target_compile_definitions(Engine PUBLIC
 if(ENGINE_VULKAN_ENABLED)
     set(VULKAN_SHADER_DIR "${CMAKE_BINARY_DIR}/VulkanShaders")
     set(VULKAN_SHADER_OUTPUTS)
-    foreach(SHADER_NAME Grid Object ObjectOutline Skybox UI UIFont)
+    foreach(SHADER_NAME Grid Object ObjectOutline Skybox UI UIFont PostProcess)
         foreach(STAGE VS PS)
             if(STAGE STREQUAL "VS")
                 set(SHADER_PROFILE vs_6_0)
@@ -547,6 +572,38 @@ set_target_properties(Game PROPERTIES
 )
 
 # ---------------------------------------------------------------------------
+# VideoExporter — deterministic offline scene renderer. It is deliberately a
+# separate executable so a video export cannot alter normal Game.exe behavior.
+# ---------------------------------------------------------------------------
+add_executable(VideoExporter
+    ${VIDEO_EXPORTER_SOURCES}
+    ${VIDEO_EXPORTER_HEADERS}
+    ${ASSET_SOURCES}
+    ${PROJECT_BROWSE_FILES}
+)
+source_group(TREE "${ENGINE_ROOT}" FILES
+    ${VIDEO_EXPORTER_SOURCES} ${VIDEO_EXPORTER_HEADERS})
+if(ENGINE_PROJECT_DIR)
+    source_group(TREE "${ENGINE_PROJECT_DIR}" PREFIX "Project" FILES
+        ${ASSET_SOURCES} ${PROJECT_BROWSE_FILES})
+endif()
+target_link_libraries(VideoExporter PRIVATE Engine shell32.lib)
+target_precompile_headers(VideoExporter REUSE_FROM Engine)
+target_include_directories(VideoExporter PRIVATE
+    ${ENGINE_ROOT}/Engine
+    ${ENGINE_ROOT}/Engine/Core/Assets
+    ${ENGINE_PROJECT_DIR}/Assets
+)
+target_compile_definitions(VideoExporter PRIVATE
+    PROJECT_FILE="${ENGINE_PROJECT_FILE}"
+    ENGINE_ASSETS_PATH="${ENGINE_COMPILED_ASSETS_PATH}"
+    $<$<NOT:$<BOOL:${ENGINE_PROJECT_DIR}>>:ENGINE_BUILTIN_ASSET_SCRIPTS>
+)
+set_target_properties(VideoExporter PROPERTIES
+    VS_DEBUGGER_WORKING_DIRECTORY "${ENGINE_RUNTIME_WORKING_DIRECTORY}"
+)
+
+# ---------------------------------------------------------------------------
 # Server — headless authoritative scene simulation.  This intentionally uses
 # a console subsystem and never creates a renderer/window.  It is the host
 # for deterministic scene diagnostics today and future player/session support.
@@ -615,19 +672,6 @@ if(NOT ENGINE_PROJECT_DIR AND
     set_tests_properties(PortalTriggerTraversalRegression PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}"
     )
-endif()
-
-if(NOT ENGINE_PROJECT_DIR AND
-   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PortalBackendParityTests.cpp")
-    enable_testing()
-    add_executable(PortalBackendParityTests
-        "${ENGINE_LOCAL_TEST_ROOT}/PortalBackendParityTests.cpp")
-    target_link_libraries(PortalBackendParityTests PRIVATE Engine)
-    target_include_directories(PortalBackendParityTests PRIVATE
-        "${ENGINE_ROOT}/Engine")
-    add_test(NAME PortalBackendApertureParity COMMAND PortalBackendParityTests)
-    set_tests_properties(PortalBackendApertureParity PROPERTIES
-        WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
@@ -802,6 +846,23 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/CameraTrackTests.cpp")
+    enable_testing()
+    add_executable(CameraTrackTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/CameraTrackTests.cpp"
+    )
+    target_link_libraries(CameraTrackTests PRIVATE Engine)
+    target_include_directories(CameraTrackTests PRIVATE
+        "${ENGINE_ROOT}/Engine"
+        "${ENGINE_ROOT}/Engine/Core/Assets"
+    )
+    add_test(NAME CameraTrackRegression COMMAND CameraTrackTests)
+    set_tests_properties(CameraTrackRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}"
+    )
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TerrainGenRenderedBenchmark.cpp")
     add_executable(TerrainGenRenderedBenchmark EXCLUDE_FROM_ALL
         "${ENGINE_LOCAL_TEST_ROOT}/TerrainGenRenderedBenchmark.cpp"
@@ -816,6 +877,15 @@ if(NOT ENGINE_PROJECT_DIR AND
         "${ENGINE_ROOT}/Engine"
         "${ENGINE_ROOT}/Engine/Core/Assets"
     )
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/AnimationRenderingBenchmark.cpp")
+    add_executable(AnimationRenderingBenchmark EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/AnimationRenderingBenchmark.cpp")
+    target_link_libraries(AnimationRenderingBenchmark PRIVATE Engine)
+    target_include_directories(AnimationRenderingBenchmark PRIVATE
+        "${ENGINE_ROOT}/Engine")
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND

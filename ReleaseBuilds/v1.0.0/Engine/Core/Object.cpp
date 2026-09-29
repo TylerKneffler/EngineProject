@@ -66,6 +66,12 @@ Object::~Object()
     Components.clear();
 }
 
+void Object::NotifyStructureChanged()
+{
+    if (OwnerScene)
+        OwnerScene->NotifyStructureChanged();
+}
+
 #pragma region Lifecycle methods
 void Object::Enabled()
 {

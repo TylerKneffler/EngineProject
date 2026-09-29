@@ -1,6 +1,7 @@
 #include "SpriteAnimationManager.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Graphics/IGraphicsProvider.h"
+#include "Core/Scene/Scene.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include <algorithm>
 #include <cstring>
@@ -36,28 +37,38 @@ bool SpriteAnimationManager::LoadFromFile(const std::string& path)
 
 void SpriteAnimationManager::Start()
 {
-    m_lastFrameTime = std::chrono::steady_clock::now();
+    m_frameElapsed = 0.f;
 }
 
 void SpriteAnimationManager::Update()
 {
     const SpriteSheetAnimation* current = CurrentAnimation();
     if (!playing || m_asset.speed <= 0.f || !current || current->frames.size() < 2)
-        return;
-    const auto now = std::chrono::steady_clock::now();
-    if (m_lastFrameTime.time_since_epoch().count() == 0)
-        m_lastFrameTime = now;
-    const SpriteSheetFrame* currentFrame = GetCurrentFrame();
-    const float duration = (currentFrame ? currentFrame->duration : 0.1f) / m_asset.speed;
-    if (std::chrono::duration<float>(now - m_lastFrameTime).count() < duration)
-        return;
-    m_lastFrameTime = now;
-    ++frame;
-    if (frame >= static_cast<int>(current->frames.size()))
     {
-        frame = m_asset.loop ? 0 : static_cast<int>(current->frames.size()) - 1;
-        if (!m_asset.loop)
-            playing = false;
+        m_frameElapsed = 0.f;
+        return;
+    }
+    m_frameElapsed += Owner && Owner->GetScene()
+        ? Owner->GetScene()->GetDeltaTime() : 0.f;
+    uint32_t advances = 0;
+    while (playing && advances++ < 100000u)
+    {
+        const SpriteSheetFrame* currentFrame = GetCurrentFrame();
+        const float duration = std::max(0.000001f,
+            (currentFrame ? currentFrame->duration : 0.1f) / m_asset.speed);
+        if (m_frameElapsed < duration)
+            break;
+        m_frameElapsed -= duration;
+        ++frame;
+        if (frame >= static_cast<int>(current->frames.size()))
+        {
+            frame = m_asset.loop ? 0 : static_cast<int>(current->frames.size()) - 1;
+            if (!m_asset.loop)
+            {
+                playing = false;
+                m_frameElapsed = 0.f;
+            }
+        }
     }
     SelectTexture();
 }

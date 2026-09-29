@@ -46,7 +46,8 @@ public:
     // mainRtv: opaque main render target handle (restored after rendering)
     // drawFn: callback function invoked between clear and transition operations
     virtual void Render(void* cmdList, void* mainRtv,
-                        std::function<void(void*)> drawFn = nullptr) = 0;
+                        std::function<void(void*)> drawFn = nullptr,
+                        std::function<void(void*)> preDrawFn = nullptr) = 0;
 
     // Configure the colour used when clearing this offscreen view.
     virtual void SetClearColor(float r, float g, float b, float a = 1.0f) = 0;

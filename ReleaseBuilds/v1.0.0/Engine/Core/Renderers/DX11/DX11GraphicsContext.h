@@ -95,6 +95,9 @@ public:
     void SetVertexBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset = 0) override;
     void SetIndexBuffer(const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t indexCount, uint64_t offset = 0) override;
     void SetTexture(uint32_t slot, const Engine::Graphics::IGraphicsTexture* texture) override;
+    bool BeginDepthOnlyPass(const Engine::Graphics::IGraphicsTexture* texture,
+        float clearDepth = 1.f) override;
+    void EndDepthOnlyPass() override;
     void SetViewport(const Viewport& vp) override;
     void SetScissorRect(const ScissorRect& rect) override;
     void Clear(float r, float g, float b, float a, float depth = 1.0f) override;
@@ -124,6 +127,11 @@ private:
         m_textureSlotInitialized{};
     bool m_materialSamplerBound = false;
     uint32_t m_stencilReference = 0;
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_savedRenderTarget;
+    Microsoft::WRL::ComPtr<ID3D11DepthStencilView> m_savedDepthTarget;
+    std::vector<D3D11_VIEWPORT> m_savedViewports;
+    std::vector<D3D11_RECT> m_savedScissors;
+    bool m_depthOnlyPassActive = false;
     std::shared_ptr<D3D11OcclusionQueryState> m_occlusionState;
     std::shared_ptr<D3D11FrameResourceState> m_frameResources;
     std::shared_ptr<D3D11GpuTimingState> m_gpuTimings;

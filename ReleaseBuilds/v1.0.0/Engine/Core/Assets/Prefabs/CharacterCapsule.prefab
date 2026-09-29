@@ -104,7 +104,7 @@
         <RigidBody.freezePositionY>false</RigidBody.freezePositionY>
         <RigidBody.freezePositionZ>false</RigidBody.freezePositionZ>
         <RigidBody.freezeRotationX>true</RigidBody.freezeRotationX>
-        <RigidBody.freezeRotationY>false</RigidBody.freezeRotationY>
+        <RigidBody.freezeRotationY>true</RigidBody.freezeRotationY>
         <RigidBody.freezeRotationZ>true</RigidBody.freezeRotationZ>
         <RigidBody.collisionLayer>1</RigidBody.collisionLayer>
         <RigidBody.collisionMask>-1</RigidBody.collisionMask>

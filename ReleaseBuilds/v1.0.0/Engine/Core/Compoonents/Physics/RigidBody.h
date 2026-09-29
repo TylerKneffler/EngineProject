@@ -96,6 +96,10 @@ public:
     bool DidBeginOverlap(const RigidBody* other) const;
     bool DidEndOverlap(const RigidBody* other) const;
     std::vector<RigidBody*> GetOverlappingBodies() const;
+    // Conservative bounds of the complete active Bullet collision shape.
+    // Portal traversal samples this before replacing the shape with a split
+    // half so aperture fit checks retain the original body footprint.
+    bool GetWorldCollisionBounds(glm::vec3& minimum, glm::vec3& maximum) const;
     bool IsColliding() const { return m_isColliding; }
     bool IsGrounded() const { return m_isGrounded; }
     void NotifyEditorTransformChanged();

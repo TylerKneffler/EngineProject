@@ -20,10 +20,13 @@ EditorHotReload::~EditorHotReload()
 {
     if (m_process)
     {
-        TerminateProcess(m_process, 1);
+        if (m_processJob) TerminateJobObject(m_processJob, 1);
+        else TerminateProcess(m_process, 1);
         CloseHandle(m_process);
     }
+    if (m_processJob) CloseHandle(m_processJob);
     if (m_pipe) CloseHandle(m_pipe);
+    m_buildTreeLock.Release();
     // The scene can still contain objects whose virtual functions live in the
     // module. Windows will release it with the process after EditorState dies.
 }
@@ -51,6 +54,16 @@ void EditorHotReload::Update(bool editorFocused)
 
 void EditorHotReload::StartCompile()
 {
+    if (!m_buildTreeLock.TryAcquire(m_buildDirectory))
+    {
+        if (!m_waitingForBuildTree)
+            Log(ConsoleView::Level::Build,
+                "Script changes queued until the current game build finishes.");
+        m_waitingForBuildTree = true;
+        return;
+    }
+    m_waitingForBuildTree = false;
+
     SECURITY_ATTRIBUTES security{};
     security.nLength = sizeof(security);
     security.bInheritHandle = TRUE;
@@ -61,6 +74,7 @@ void EditorHotReload::StartCompile()
         if (m_pipe) CloseHandle(m_pipe);
         if (writePipe) CloseHandle(writePipe);
         m_pipe = nullptr;
+        m_buildTreeLock.Release();
         Log(ConsoleView::Level::Error, "Could not start script compiler output capture.");
         return;
     }
@@ -76,15 +90,38 @@ void EditorHotReload::StartCompile()
     startup.hStdError = writePipe;
     PROCESS_INFORMATION process{};
     const BOOL started = CreateProcessA(nullptr, buffer.data(), nullptr, nullptr,
-        TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process);
-    CloseHandle(writePipe);
+        TRUE, CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, nullptr, &startup, &process);
     if (!started)
     {
+        CloseHandle(writePipe);
         CloseHandle(m_pipe);
         m_pipe = nullptr;
+        m_buildTreeLock.Release();
         Log(ConsoleView::Level::Error, "Could not start script compiler.");
         return;
     }
+
+    m_processJob = CreateJobObjectW(nullptr, nullptr);
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (!m_processJob || !SetInformationJobObject(m_processJob,
+        JobObjectExtendedLimitInformation, &limits, sizeof(limits)) ||
+        !AssignProcessToJobObject(m_processJob, process.hProcess))
+    {
+        TerminateProcess(process.hProcess, 1);
+        if (m_processJob) CloseHandle(m_processJob);
+        m_processJob = nullptr;
+        CloseHandle(process.hProcess);
+        CloseHandle(process.hThread);
+        CloseHandle(writePipe);
+        CloseHandle(m_pipe);
+        m_pipe = nullptr;
+        m_buildTreeLock.Release();
+        Log(ConsoleView::Level::Error, "Could not isolate the script compiler process.");
+        return;
+    }
+    ResumeThread(process.hThread);
+    CloseHandle(writePipe);
     CloseHandle(process.hThread);
     m_process = process.hProcess;
     m_lineBuffer.clear();
@@ -126,6 +163,11 @@ void EditorHotReload::PollCompile()
     GetExitCodeProcess(m_process, &exitCode);
     CloseHandle(m_process);
     m_process = nullptr;
+    if (m_processJob)
+    {
+        CloseHandle(m_processJob);
+        m_processJob = nullptr;
+    }
     if (!m_lineBuffer.empty())
     {
         Log(ConsoleView::Level::Build, m_lineBuffer);
@@ -135,6 +177,7 @@ void EditorHotReload::PollCompile()
 
     if (exitCode != 0)
     {
+        m_buildTreeLock.Release();
         Log(ConsoleView::Level::Error,
             "Script compilation failed; the last working scripts are still active.");
         m_editorState.SetLoadingOverlay(false);
@@ -145,6 +188,7 @@ void EditorHotReload::PollCompile()
     m_applying = true;
     const bool applied = ApplyModule();
     m_applying = false;
+    m_buildTreeLock.Release();
     m_editorState.SetLoadingOverlay(false);
     Log(applied ? ConsoleView::Level::Info : ConsoleView::Level::Error,
         applied ? "Scripts compiled and loaded." :

@@ -67,7 +67,13 @@ bool Detail::SceneDocumentBehavior::DeserializeScene(Engine::Scene::Scene& scene
     // Clear existing scene content
     scene.ClearObjects();
 
+    // Older scene files predate per-scene dimensional mode. Reset this field
+    // before reading so loading a legacy scene after a 2D scene cannot inherit
+    // the previous document's mode.
+    scene.settings.dimension = Engine::Model::SceneDimension::ThreeD;
     Engine::Scene::DeserializeSceneSettings(scene.settings, root["settings"]);
+    scene.SetEditorMode2D(scene.settings.dimension ==
+        Engine::Model::SceneDimension::TwoD);
 
     // Top-level objects
     const JsonValue& objects = root["objects"];

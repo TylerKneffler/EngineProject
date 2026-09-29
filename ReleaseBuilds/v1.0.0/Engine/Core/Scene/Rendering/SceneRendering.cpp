@@ -7,6 +7,7 @@
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
+#include "Core/Compoonents/Lighting/LightProbe.h"
 #include "Core/Rendering/Portal/PortalRenderPolicy.h"
 #include "Core/Model/LightingData.h"
 #include "Core/Graphics/IGraphicsProvider.h"
@@ -14,6 +15,7 @@
 #include "Core/Graphics/IPipelineState.h"
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Graphics/IGraphicsContext.h"
+#include "Core/Graphics/PostProcess.h"
 #include "Core/Memory/CacheStore.h"
 #include "Core/Renderers/UIRenderer.h"
 #include <algorithm>
@@ -24,9 +26,11 @@
 #include <filesystem>
 #include <functional>
 #include <limits>
+#include <numeric>
 #include <optional>
 #include <unordered_map>
 #include <glm/glm.hpp>
+#include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 
 #if defined(_WIN32)
@@ -62,6 +66,18 @@ void Scene::SetUiPointerInput(float x, float y, float viewportWidth,
 
 namespace
 {
+    uint32_t ExpandedCapacity(uint32_t current, uint32_t required)
+    {
+        uint32_t capacity = std::max(1u, current);
+        while (capacity < required)
+        {
+            if (capacity > std::numeric_limits<uint32_t>::max() / 2u)
+                return required;
+            capacity *= 2u;
+        }
+        return capacity;
+    }
+
     std::string EngineShaderPath(const char* fileName)
     {
         const std::filesystem::path shaderFile(fileName);
@@ -218,6 +234,87 @@ namespace
                         ProjectEnvironment(texture));
                 });
     }
+
+    float RadicalInverseVdc(uint32_t bits)
+    {
+        bits = (bits << 16u) | (bits >> 16u);
+        bits = ((bits & 0x55555555u) << 1u) |
+            ((bits & 0xaaaaaaaau) >> 1u);
+        bits = ((bits & 0x33333333u) << 2u) |
+            ((bits & 0xccccccccu) >> 2u);
+        bits = ((bits & 0x0f0f0f0fu) << 4u) |
+            ((bits & 0xf0f0f0f0u) >> 4u);
+        bits = ((bits & 0x00ff00ffu) << 8u) |
+            ((bits & 0xff00ff00u) >> 8u);
+        return static_cast<float>(bits) * 2.3283064365386963e-10f;
+    }
+
+    glm::vec2 IntegrateBrdf(float noV, float roughness)
+    {
+        constexpr uint32_t sampleCount = 256u;
+        constexpr float twoPi = 6.28318530717958647692f;
+        const glm::vec3 normal(0.f, 0.f, 1.f);
+        const glm::vec3 view(std::sqrt(std::max(0.f, 1.f - noV * noV)),
+            0.f, noV);
+        float scale = 0.f;
+        float bias = 0.f;
+        const float alpha = roughness * roughness;
+        const float alphaSquared = alpha * alpha;
+        const float geometryK = alpha * 0.5f;
+        for (uint32_t sample = 0; sample < sampleCount; ++sample)
+        {
+            const float xiX = static_cast<float>(sample) /
+                static_cast<float>(sampleCount);
+            const float xiY = RadicalInverseVdc(sample);
+            const float phi = twoPi * xiX;
+            const float cosTheta = std::sqrt(std::max(0.f,
+                (1.f - xiY) /
+                (1.f + (alphaSquared - 1.f) * xiY)));
+            const float sinTheta = std::sqrt(std::max(0.f,
+                1.f - cosTheta * cosTheta));
+            const glm::vec3 halfVector(
+                std::cos(phi) * sinTheta,
+                std::sin(phi) * sinTheta,
+                cosTheta);
+            const glm::vec3 light = glm::normalize(
+                2.f * glm::dot(view, halfVector) * halfVector - view);
+            const float noL = std::max(light.z, 0.f);
+            const float noH = std::max(halfVector.z, 0.f);
+            const float voH = std::max(glm::dot(view, halfVector), 0.f);
+            if (noL <= 0.f || noH <= 0.f || voH <= 0.f)
+                continue;
+            const float gv = noV /
+                (noV * (1.f - geometryK) + geometryK);
+            const float gl = noL /
+                (noL * (1.f - geometryK) + geometryK);
+            const float visibility = gv * gl * voH /
+                std::max(noH * noV, 0.00001f);
+            const float fresnel = std::pow(1.f - voH, 5.f);
+            scale += (1.f - fresnel) * visibility;
+            bias += fresnel * visibility;
+        }
+        return glm::vec2(scale, bias) / static_cast<float>(sampleCount);
+    }
+
+    std::vector<float> GenerateBrdfIntegrationLut(uint32_t resolution)
+    {
+        std::vector<float> pixels(static_cast<size_t>(resolution) *
+            resolution * 4u, 0.f);
+        for (uint32_t y = 0; y < resolution; ++y)
+        for (uint32_t x = 0; x < resolution; ++x)
+        {
+            const float noV = (static_cast<float>(x) + 0.5f) /
+                static_cast<float>(resolution);
+            const float roughness = (static_cast<float>(y) + 0.5f) /
+                static_cast<float>(resolution);
+            const glm::vec2 integrated = IntegrateBrdf(noV, roughness);
+            const size_t offset = (static_cast<size_t>(y) * resolution + x) * 4u;
+            pixels[offset] = integrated.x;
+            pixels[offset + 1u] = integrated.y;
+            pixels[offset + 3u] = 1.f;
+        }
+        return pixels;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -236,6 +333,7 @@ struct DrawCBData
 
 constexpr uint32_t kPortalApertureNearClampFlag = 0x40000000u;
 constexpr uint32_t kPortalDepthResetFlag = 0x80000000u;
+constexpr uint32_t kClusteredLightingFlag = 0x00000001u;
 
 // Large, indexed records live in shader-readable buffers on every backend.
 struct ObjectGPUData
@@ -258,10 +356,24 @@ struct ObjectGPUData
     glm::vec4 textureUvSets0;
     glm::vec4 textureUvSets1;
     glm::vec4 skinParams; // palette offset, joint count, reserved, reserved
+    glm::vec4 morphParams; // target count, vertex count, reserved, reserved
     glm::vec4 environmentParams; // intensity, rotation radians, diffuse, reflections
     glm::vec4 environmentSH[9]; // RGB radiance coefficients
     glm::vec4 reflectionEnvironmentParams; // exposure scale, rotation, custom enabled, reserved
     glm::vec4 reflectionEnvironmentSH[9];
+    glm::mat4 shadowViewProjections[4];
+    // depth bias, normal/slope bias, strength, PCF radius
+    glm::vec4 shadowParams;
+    // View-distance end for each directional cascade.
+    glm::vec4 shadowCascadeSplits;
+    // cascade count, atlas tile scale, boundary blend fraction, max distance
+    glm::vec4 shadowCascadeData;
+    // Camera forward direction and near distance used for cascade selection.
+    glm::vec4 shadowCameraData;
+    // tile size, tiles X, tiles Y, depth slices
+    glm::vec4 lightingClusterParams;
+    // camera forward, logarithmic depth scale
+    glm::vec4 lightingCameraData;
     // Enabled per portal draw through DrawCBData::flags; dot(world, plane)
     // selects the connected half-space at the target aperture.
     glm::vec4 portalClipPlane;
@@ -291,7 +403,7 @@ struct SkyboxCBData
 };
 
 static_assert(sizeof(DrawCBData) == 16, "Draw constants must remain small");
-static_assert(sizeof(ObjectGPUData) == 672, "Object buffer layout must match Object.hlsl");
+static_assert(sizeof(ObjectGPUData) == 1040, "Object buffer layout must match Object.hlsl");
 static_assert(sizeof(Engine::Model::LightData) == 48,
     "Light buffer layout must match Object.hlsl");
 static_assert(sizeof(GridCBData) == 128, "Grid constant-buffer layout must match Grid.hlsl");
@@ -334,11 +446,15 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     if (!m_skyboxCBMapped)
         throw std::runtime_error("Failed to map skybox constant buffer");
 
-    // Ordinary draws occupy the first kMaxObjects entries. Portal views use
+    // Ordinary draws occupy the first m_objectCapacity entries. Portal views use
     // stable per-view ranges so deferred command buffers never observe data
     // overwritten by a later recursive pass.
-    const uint64_t objectCBSize =
-        static_cast<uint64_t>(kObjectRenderSlotCount) * kCBStride;
+    const uint64_t portalSlotsPerView =
+        static_cast<uint64_t>(m_objectCapacity) + 2u;
+    const uint64_t portalObjectSlots =
+        static_cast<uint64_t>(kMaxPortalRenderViews) * portalSlotsPerView;
+    const uint64_t objectCBSize = (static_cast<uint64_t>(m_objectCapacity) +
+        portalObjectSlots + kMaxSpatialDebugDraws) * kCBStride;
     m_objectConstantBuffer = bufferFactory->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::ConstantBuffer,
         Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
@@ -352,11 +468,29 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     m_objectDataBuffer = bufferFactory->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
         Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
-        static_cast<uint64_t>(kOrdinaryObjectSlotCount) * sizeof(ObjectGPUData),
+        (static_cast<uint64_t>(m_objectCapacity) + kMaxSpatialDebugDraws) *
+            sizeof(ObjectGPUData),
         nullptr, sizeof(ObjectGPUData));
     m_objectDataMapped = m_objectDataBuffer ? m_objectDataBuffer->Map() : nullptr;
     if (!m_objectDataMapped)
         throw std::runtime_error("Failed to create object structured buffer");
+
+    m_shadowConstantBuffer = bufferFactory->CreateBuffer(
+        Engine::Graphics::IGraphicsBuffer::Usage::ConstantBuffer,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+        static_cast<uint64_t>(m_objectCapacity) * 4u * kCBStride,
+        nullptr, sizeof(DrawCBData));
+    m_shadowCBMapped = m_shadowConstantBuffer
+        ? m_shadowConstantBuffer->Map() : nullptr;
+    m_shadowObjectDataBuffer = bufferFactory->CreateBuffer(
+        Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+        static_cast<uint64_t>(m_objectCapacity) * 4u * sizeof(ObjectGPUData),
+        nullptr, sizeof(ObjectGPUData));
+    m_shadowObjectDataMapped = m_shadowObjectDataBuffer
+        ? m_shadowObjectDataBuffer->Map() : nullptr;
+    if (!m_shadowCBMapped || !m_shadowObjectDataMapped)
+        throw std::runtime_error("Failed to create directional shadow buffers");
 
     // Portal recursion has a much larger worst-case record count than an
     // ordinary view. Keep it separate so terrain-only frames never upload or
@@ -364,7 +498,7 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     m_portalObjectDataBuffer = bufferFactory->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
         Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
-        static_cast<uint64_t>(kPortalObjectSlotCount) * sizeof(ObjectGPUData),
+        portalObjectSlots * sizeof(ObjectGPUData),
         nullptr, sizeof(ObjectGPUData));
     m_portalObjectDataMapped = m_portalObjectDataBuffer
         ? m_portalObjectDataBuffer->Map() : nullptr;
@@ -384,12 +518,36 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     m_boneDataBuffer = bufferFactory->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
         Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
-        static_cast<uint64_t>(kMaxSkinnedObjects) * kMaxBonesPerObject *
+        static_cast<uint64_t>(m_skinnedObjectCapacity) * kMaxBonesPerObject *
             sizeof(glm::mat4),
         nullptr, sizeof(glm::mat4));
     m_boneDataMapped = m_boneDataBuffer ? m_boneDataBuffer->Map() : nullptr;
     if (!m_boneDataMapped)
         throw std::runtime_error("Failed to create bone palette structured buffer");
+
+    const std::array<glm::vec4, 3> emptyMorphDelta{};
+    const glm::vec4 emptyMorphWeights(0.f);
+    m_emptyMorphDeltaBuffer = bufferFactory->CreateBuffer(
+        Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+        sizeof(emptyMorphDelta), emptyMorphDelta.data(), sizeof(emptyMorphDelta));
+    m_emptyMorphWeightBuffer = bufferFactory->CreateBuffer(
+        Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+        sizeof(emptyMorphWeights), &emptyMorphWeights, sizeof(emptyMorphWeights));
+    if (!m_emptyMorphDeltaBuffer || !m_emptyMorphWeightBuffer)
+        throw std::runtime_error("Failed to create empty morph structured buffers");
+
+    constexpr uint32_t brdfLutResolution = 128u;
+    const std::vector<float> brdfLut = GenerateBrdfIntegrationLut(
+        brdfLutResolution);
+    auto* textureFactory = m_graphicsProvider->GetTextureFactory();
+    m_brdfIntegrationLut = textureFactory ? textureFactory->CreateTexture2D(
+        brdfLutResolution, brdfLutResolution,
+        reinterpret_cast<const uint8_t*>(brdfLut.data()), 1u,
+        Engine::Graphics::GraphicsTextureFormat::Rgba32Float, false) : nullptr;
+    if (!m_brdfIntegrationLut)
+        throw std::runtime_error("Failed to create split-sum BRDF integration LUT");
 
     m_portalApertureBuffer = bufferFactory->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::VertexBuffer,
@@ -405,7 +563,8 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     Engine::Components::Camera* editorCameraComponent = editorCamera.AddComponent<Engine::Components::Camera>();
     editorCameraComponent->useTransformRotation = false;
     editorCameraComponent->farPlane = 1000.f;
-    SetEditorMode2D(m_editorMode2D);
+    SetEditorMode2D(
+        settings.dimension == Engine::Model::SceneDimension::TwoD);
 
     // Build pipeline states
     BuildGridPipeline();
@@ -415,8 +574,132 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     m_uiRenderer->Initialize(m_graphicsProvider);
 }
 
+void Scene::EnsureObjectRenderCapacity(uint32_t requiredObjects)
+{
+    if (requiredObjects <= m_objectCapacity)
+        return;
+    if (!m_graphicsProvider || !m_graphicsProvider->GetBufferFactory())
+        throw std::runtime_error("Cannot grow scene object buffers before graphics initialization");
+
+    const uint32_t capacity = ExpandedCapacity(m_objectCapacity, requiredObjects);
+    constexpr uint32_t kMaximumAddressableCapacity =
+        (std::numeric_limits<uint32_t>::max() - kMaxSpatialDebugDraws) /
+        (kMaxPortalRenderViews + 1u);
+    if (capacity > kMaximumAddressableCapacity)
+        throw std::runtime_error("Scene draw count exceeds portal buffer index range");
+    const uint64_t portalSlotsPerView = static_cast<uint64_t>(capacity) + 2u;
+    const uint64_t portalSlots =
+        static_cast<uint64_t>(kMaxPortalRenderViews) * portalSlotsPerView;
+    const uint64_t constantSlots = static_cast<uint64_t>(capacity) +
+        portalSlots + kMaxSpatialDebugDraws;
+    auto* factory = m_graphicsProvider->GetBufferFactory();
+    auto constantBuffer = factory->CreateBuffer(
+        Engine::Graphics::IGraphicsBuffer::Usage::ConstantBuffer,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+        constantSlots * kCBStride, nullptr, sizeof(DrawCBData));
+    auto objectBuffer = factory->CreateBuffer(
+        Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+        (static_cast<uint64_t>(capacity) + kMaxSpatialDebugDraws) *
+            sizeof(ObjectGPUData), nullptr, sizeof(ObjectGPUData));
+    auto portalBuffer = factory->CreateBuffer(
+        Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+        portalSlots * sizeof(ObjectGPUData), nullptr, sizeof(ObjectGPUData));
+    auto shadowConstantBuffer = factory->CreateBuffer(
+        Engine::Graphics::IGraphicsBuffer::Usage::ConstantBuffer,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+        static_cast<uint64_t>(capacity) * 4u * kCBStride,
+        nullptr, sizeof(DrawCBData));
+    auto shadowObjectBuffer = factory->CreateBuffer(
+        Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+        static_cast<uint64_t>(capacity) * 4u * sizeof(ObjectGPUData),
+        nullptr, sizeof(ObjectGPUData));
+    void* constantMapped = constantBuffer ? constantBuffer->Map() : nullptr;
+    void* objectMapped = objectBuffer ? objectBuffer->Map() : nullptr;
+    void* portalMapped = portalBuffer ? portalBuffer->Map() : nullptr;
+    void* shadowConstantMapped = shadowConstantBuffer
+        ? shadowConstantBuffer->Map() : nullptr;
+    void* shadowObjectMapped = shadowObjectBuffer
+        ? shadowObjectBuffer->Map() : nullptr;
+    if (!constantMapped || !objectMapped || !portalMapped ||
+        !shadowConstantMapped || !shadowObjectMapped)
+    {
+        if (constantMapped) constantBuffer->Unmap();
+        if (objectMapped) objectBuffer->Unmap();
+        if (portalMapped) portalBuffer->Unmap();
+        if (shadowConstantMapped) shadowConstantBuffer->Unmap();
+        if (shadowObjectMapped) shadowObjectBuffer->Unmap();
+        throw std::runtime_error("Failed to grow scene object buffers to " +
+            std::to_string(capacity) + " draw records");
+    }
+
+    if (m_objectConstantBuffer && m_objectCBMapped)
+        m_objectConstantBuffer->Unmap();
+    if (m_objectDataBuffer && m_objectDataMapped)
+        m_objectDataBuffer->Unmap();
+    if (m_portalObjectDataBuffer && m_portalObjectDataMapped)
+        m_portalObjectDataBuffer->Unmap();
+    if (m_shadowConstantBuffer && m_shadowCBMapped)
+        m_shadowConstantBuffer->Unmap();
+    if (m_shadowObjectDataBuffer && m_shadowObjectDataMapped)
+        m_shadowObjectDataBuffer->Unmap();
+    if (m_objectConstantBuffer)
+        m_retiredRenderBuffers.push_back(std::move(m_objectConstantBuffer));
+    if (m_objectDataBuffer)
+        m_retiredRenderBuffers.push_back(std::move(m_objectDataBuffer));
+    if (m_portalObjectDataBuffer)
+        m_retiredRenderBuffers.push_back(std::move(m_portalObjectDataBuffer));
+    if (m_shadowConstantBuffer)
+        m_retiredRenderBuffers.push_back(std::move(m_shadowConstantBuffer));
+    if (m_shadowObjectDataBuffer)
+        m_retiredRenderBuffers.push_back(std::move(m_shadowObjectDataBuffer));
+    m_objectConstantBuffer = std::move(constantBuffer);
+    m_objectDataBuffer = std::move(objectBuffer);
+    m_portalObjectDataBuffer = std::move(portalBuffer);
+    m_shadowConstantBuffer = std::move(shadowConstantBuffer);
+    m_shadowObjectDataBuffer = std::move(shadowObjectBuffer);
+    m_objectCBMapped = constantMapped;
+    m_objectDataMapped = objectMapped;
+    m_portalObjectDataMapped = portalMapped;
+    m_shadowCBMapped = shadowConstantMapped;
+    m_shadowObjectDataMapped = shadowObjectMapped;
+    m_objectCapacity = capacity;
+}
+
+void Scene::EnsureSkinPaletteCapacity(uint32_t requiredObjects)
+{
+    if (requiredObjects <= m_skinnedObjectCapacity)
+        return;
+    if (!m_graphicsProvider || !m_graphicsProvider->GetBufferFactory())
+        throw std::runtime_error("Cannot grow bone palette buffer before graphics initialization");
+
+    const uint32_t capacity = ExpandedCapacity(
+        m_skinnedObjectCapacity, requiredObjects);
+    auto buffer = m_graphicsProvider->GetBufferFactory()->CreateBuffer(
+        Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+        static_cast<uint64_t>(capacity) * kMaxBonesPerObject *
+            sizeof(glm::mat4), nullptr, sizeof(glm::mat4));
+    void* mapped = buffer ? buffer->Map() : nullptr;
+    if (!mapped)
+        throw std::runtime_error("Failed to grow bone palette buffer to " +
+            std::to_string(capacity) + " skinned objects");
+    if (m_boneDataBuffer && m_boneDataMapped)
+        m_boneDataBuffer->Unmap();
+    if (m_boneDataBuffer)
+        m_retiredRenderBuffers.push_back(std::move(m_boneDataBuffer));
+    m_boneDataBuffer = std::move(buffer);
+    m_boneDataMapped = mapped;
+    m_skinnedObjectCapacity = capacity;
+}
+
 void Scene::SetEditorMode2D(bool enabled)
 {
+    settings.dimension = enabled
+        ? Engine::Model::SceneDimension::TwoD
+        : Engine::Model::SceneDimension::ThreeD;
     if (m_editorCameraModeInitialized && m_editorMode2D == enabled)
         return;
     m_editorMode2D = enabled;
@@ -470,7 +753,7 @@ void Scene::BuildSkyboxPipeline()
             .SetInputLayout(nullptr, 0)
             .SetPrimitiveTopology(
                 Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
-            .SetRenderTargetFormat(28, 20);
+            .SetRenderTargetFormat(10, 20);
         if (stencilClip)
         {
             state.SetStencilEnable(true)
@@ -502,6 +785,13 @@ void Scene::BuildSkyboxPipeline()
 
 const Engine::Components::Texture* Scene::ResolveSkyboxTexture()
 {
+    // A 2D scene has no surrounding environment.  Let the render target's
+    // clear colour be its flat, edge-to-edge background instead of projecting
+    // either the authored panorama or the editor's fallback skybox.
+    if (settings.dimension == Engine::Model::SceneDimension::TwoD ||
+        !settings.skyboxEnabled)
+        return nullptr;
+
     if (settings.skyboxTexture.empty())
         return m_defaultSkyboxTexture.get();
 
@@ -612,7 +902,7 @@ void Scene::BuildGridPipeline()
         .SetDepthFunc(3)                       // D3D12_COMPARISON_FUNC_LESS_EQUAL (0-indexed: 3)
         .SetInputLayout(nullptr, 0)            // No vertex buffer
         .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
-        .SetRenderTargetFormat(28, 20)         // DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_D32_FLOAT_S8X24_UINT
+        .SetRenderTargetFormat(10, 20)         // DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_D32_FLOAT_S8X24_UINT
         .Build();
     
     if (!m_gridPipeline)
@@ -773,7 +1063,7 @@ void Scene::BuildObjectPipeline()
                 terrainFormat ? 4u : 10u)
             .SetPrimitiveTopology(
                 Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
-            .SetRenderTargetFormat(28, 20)
+            .SetRenderTargetFormat(10, 20)
             .Build();
         if (!pipeline)
             throw std::runtime_error(
@@ -810,6 +1100,16 @@ void Scene::BuildObjectPipeline()
         buildMaterialPipeline(true, true, false, PortalStencilMode::None,
             true,
             "blended double-sided material");
+
+    // Reuse the complete object vertex path so the shadow pass inherits the
+    // same world, terrain, skinning, and morph transforms as visible geometry.
+    // Color writes are disabled; PSMain still preserves alpha-mask cutouts.
+    m_directionalShadowPipeline =
+        buildMaterialPipeline(false, false, false, PortalStencilMode::None,
+            false, "directional shadow caster");
+    m_directionalShadowDoubleSidedPipeline =
+        buildMaterialPipeline(true, false, false, PortalStencilMode::None,
+            false, "double-sided directional shadow caster");
 
     m_objectWirePipeline =
         buildMaterialPipeline(false, false, true, PortalStencilMode::None,
@@ -915,7 +1215,7 @@ void Scene::BuildObjectPipeline()
             .SetInputLayout(layout, 10)
             .SetPrimitiveTopology(
                 Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
-            .SetRenderTargetFormat(28, 20)
+            .SetRenderTargetFormat(10, 20)
             .Build();
         if (!pipeline)
             throw std::runtime_error("Failed to build spatial debug pipeline: " +
@@ -965,7 +1265,7 @@ void Scene::BuildObjectPipeline()
         .SetDepthFunc(3)                       // D3D12_COMPARISON_FUNC_LESS_EQUAL
         .SetInputLayout(layout, 10)
         .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
-        .SetRenderTargetFormat(28, 20)
+        .SetRenderTargetFormat(10, 20)
         .Build();
     if (!m_objectOutlinePipeline)
         throw std::runtime_error("Failed to build object outline pipeline: " + outlineBuilder->GetLastError());
@@ -986,7 +1286,7 @@ void Scene::BuildObjectPipeline()
         .SetDepthFunc(3)
         .SetInputLayout(terrainLayout, 4)
         .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
-        .SetRenderTargetFormat(28, 20)
+        .SetRenderTargetFormat(10, 20)
         .Build();
     if (!terrainOutline)
         throw std::runtime_error("Failed to build terrain outline pipeline: " +
@@ -1004,14 +1304,25 @@ void Scene::PrepareRenderFrame()
     m_renderFramePrepared = false;
     m_frameRenderItems.clear();
     m_frameLightCount = 0;
+    m_lastSkinnedObjectCount = 0;
 
     if (!m_graphicsProvider || !m_lightDataMapped || !m_boneDataMapped)
         return;
+    const size_t skinnedObjectCount = std::count_if(
+        m_objects.begin(), m_objects.end(), [](const auto& object)
+        {
+            return object && object->GetComponent<
+                Engine::Components::SkinnedMesh>() != nullptr;
+        });
+    if (skinnedObjectCount > std::numeric_limits<uint32_t>::max())
+        throw std::runtime_error("Skinned object count exceeds renderer index range");
+    EnsureSkinPaletteCapacity(static_cast<uint32_t>(skinnedObjectCount));
 
     m_frameLightCount = m_realtimeLightingPipeline.CollectLights(
         *this,
         static_cast<Engine::Model::LightData*>(m_lightDataMapped),
-        kMaxLights);
+        std::min(kMaxLights,
+            m_distanceLightingSettings.maximumRealtimeLights));
     m_lightDataBuffer->FlushMappedWrites();
 
     // Nonlinear mesh results depend on authored geometry and active warp
@@ -1254,7 +1565,6 @@ void Scene::PrepareRenderFrame()
                     {
                         std::memcpy(mapped, warpedVertices.data(), byteSize);
                         cached.vertexBuffer->Unmap();
-                        cached.vertexBuffer->FlushMappedWrites();
                     }
                     cached.vertices = std::move(warpedVertices);
                 }
@@ -1297,13 +1607,14 @@ void Scene::PrepareRenderFrame()
         }
         item.blended = item.belongsToPreview || item.blended;
 
-        if (skinPaletteSlot < kMaxSkinnedObjects)
+        if (skinPaletteSlot < m_skinnedObjectCapacity)
         {
             if (Engine::Components::SkinnedMesh* skinned =
                 candidate->GetComponent<Engine::Components::SkinnedMesh>())
             {
-                std::vector<glm::mat4> palette;
-                if (skinned->BuildPalette(palette))
+                const std::vector<glm::mat4>& palette =
+                    skinned->BuildPalette();
+                if (!palette.empty())
                 {
                     const size_t count =
                         std::min<size_t>(palette.size(), kMaxBonesPerObject);
@@ -1336,6 +1647,11 @@ void Scene::PrepareRenderFrame()
 
     if (boneDataChanged)
         m_boneDataBuffer->FlushMappedWrites();
+    m_lastSkinnedObjectCount = skinPaletteSlot;
+    if (m_frameRenderItems.size() > std::numeric_limits<uint32_t>::max())
+        throw std::runtime_error("Prepared draw count exceeds renderer index range");
+    EnsureObjectRenderCapacity(
+        static_cast<uint32_t>(m_frameRenderItems.size()));
     m_renderFramePrepared = true;
 }
 
@@ -1345,7 +1661,7 @@ void Scene::PrepareRenderFrame()
 
 void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     Engine::Components::Camera* cameraOverride, bool includeEditorVisuals,
-    uint32_t viewportWidth, uint32_t viewportHeight)
+    uint32_t viewportWidth, uint32_t viewportHeight, bool shadowOnly)
 {
     m_lastObjectDataUploadBytes = 0;
     m_lastOcclusionCulledCount = 0;
@@ -1359,8 +1675,17 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         return;
     }
 
+    if (!shadowOnly)
+        Engine::Graphics::SetPostProcessSettings({
+            std::exp2(std::clamp(settings.outputExposure, -16.f, 16.f)),
+            static_cast<uint32_t>(settings.toneMapping) });
+
     if (!m_renderFramePrepared)
         PrepareRenderFrame();
+    m_lastOrdinaryDrawCount = 0;
+    const uint32_t portalRenderSlotsPerView = m_objectCapacity + 2u;
+    const uint32_t portalObjectSlotCount =
+        kMaxPortalRenderViews * portalRenderSlotsPerView;
 
     // Scene View always uses its navigation camera. Game View supplies its
     // active scene camera explicitly, so hierarchy selection cannot hijack
@@ -1458,60 +1783,55 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         if (!cameraUsesSourceWarpChart && !cameraInsideInteriorOnlyWarp &&
             !m_editorMode2D)
         {
-            const glm::vec3 rayOrigin = glm::vec3(authoredCameraWorld[3]);
-            const glm::vec3 rayDirection = glm::normalize(
-                glm::vec3(glm::inverse(view)[2]));
-            const auto rayIntersectsVolume = [&](const Engine::Components::SpatialManipulator& volume)
+            const auto volumeIntersectsView = [&](const Engine::Components::SpatialManipulator& volume)
             {
                 if (!volume.Owner || !volume.definesWarpVolume || !volume.enabled)
-                    return false;
-                const glm::mat4 inverseVolume = glm::inverse(
-                    volume.Owner->transform.GetWorldMatrix());
-                const glm::vec3 origin = glm::vec3(inverseVolume *
-                    glm::vec4(rayOrigin, 1.f));
-                const glm::vec3 direction = glm::vec3(inverseVolume *
-                    glm::vec4(rayDirection, 0.f));
-                if (glm::dot(direction, direction) <= 1e-10f)
                     return false;
                 const auto shape = static_cast<Engine::Components::SpatialManipulator::
                     WarpVolumeShape>(volume.warpVolumeShape);
                 if (shape == Engine::Components::SpatialManipulator::WarpVolumeShape::Infinite)
                     return true;
-                if (shape == Engine::Components::SpatialManipulator::WarpVolumeShape::Sphere)
+                // Chart selection used to test only the center camera ray.
+                // A volume entering from a side of the viewport consequently
+                // stayed in the wrong chart until it crossed screen center.
+                // Conservatively test the volume's local bounds against all
+                // six homogeneous frustum planes instead. False positives are
+                // harmless (they retain the physical chart slightly longer),
+                // while false negatives cause visible chart popping.
+                const float radius = std::max(0.001f,
+                    std::abs(volume.warpVolumeRadius));
+                const glm::vec3 halfSize = shape == Engine::Components::
+                        SpatialManipulator::WarpVolumeShape::Sphere
+                    ? glm::vec3(radius)
+                    : glm::max(glm::abs(volume.warpVolumeSize) * 0.5f,
+                        glm::vec3(0.0001f));
+                const glm::mat4 localToClip = proj * view *
+                    volume.Owner->transform.GetWorldMatrix();
+                std::array<glm::vec4, 8> corners{};
+                size_t cornerIndex = 0;
+                for (int z = 0; z < 2; ++z)
+                    for (int y = 0; y < 2; ++y)
+                        for (int x = 0; x < 2; ++x)
+                            corners[cornerIndex++] = localToClip * glm::vec4(
+                                x ? halfSize.x : -halfSize.x,
+                                y ? halfSize.y : -halfSize.y,
+                                z ? halfSize.z : -halfSize.z, 1.f);
+                const auto allOutside = [&](const auto& predicate)
                 {
-                    const float radius = std::max(0.001f,
-                        std::abs(volume.warpVolumeRadius));
-                    const float a = glm::dot(direction, direction);
-                    const float b = 2.f * glm::dot(origin, direction);
-                    const float c = glm::dot(origin, origin) - radius * radius;
-                    const float discriminant = b * b - 4.f * a * c;
-                    return discriminant >= 0.f &&
-                        (-b + std::sqrt(discriminant)) / (2.f * a) >= 0.f;
-                }
-
-                const glm::vec3 halfSize = glm::max(glm::abs(volume.warpVolumeSize) *
-                    0.5f, glm::vec3(0.0001f));
-                float entry = 0.f;
-                float exit = std::numeric_limits<float>::infinity();
-                for (int axis = 0; axis < 3; ++axis)
-                {
-                    if (std::abs(direction[axis]) <= 1e-7f)
-                    {
-                        if (origin[axis] < -halfSize[axis] ||
-                            origin[axis] > halfSize[axis])
-                            return false;
-                        continue;
-                    }
-                    float nearT = (-halfSize[axis] - origin[axis]) / direction[axis];
-                    float farT = (halfSize[axis] - origin[axis]) / direction[axis];
-                    if (nearT > farT)
-                        std::swap(nearT, farT);
-                    entry = std::max(entry, nearT);
-                    exit = std::min(exit, farT);
-                    if (entry > exit)
-                        return false;
-                }
-                return exit >= 0.f;
+                    return std::all_of(corners.begin(), corners.end(), predicate);
+                };
+                return !(allOutside([](const glm::vec4& point)
+                        { return point.x < -point.w; }) ||
+                    allOutside([](const glm::vec4& point)
+                        { return point.x > point.w; }) ||
+                    allOutside([](const glm::vec4& point)
+                        { return point.y < -point.w; }) ||
+                    allOutside([](const glm::vec4& point)
+                        { return point.y > point.w; }) ||
+                    allOutside([](const glm::vec4& point)
+                        { return point.z < 0.f; }) ||
+                    allOutside([](const glm::vec4& point)
+                        { return point.z > point.w; }));
             };
             std::function<void(const Engine::Core::Object*)> findIntersectedVolume;
             findIntersectedVolume = [&](const Engine::Core::Object* object)
@@ -1523,7 +1843,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     Engine::Components::SpatialManipulator>();
                 if (volume && (sourceChartAllowed ||
                     volume->renderWarpInteriorOnly) &&
-                    rayIntersectsVolume(*volume))
+                    volumeIntersectsView(*volume))
                 {
                     cameraUsesSourceWarpChart = true;
                     return;
@@ -1554,18 +1874,307 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     // Light data is view-chart-specific. Rebuild it for every view so an
     // inside-volume game camera cannot leave source-chart lights bound when
     // the editor view subsequently renders the embedded chart (or vice versa).
+    Engine::Model::RealtimeShadowSelection shadowSelection{};
     m_frameLightCount = m_realtimeLightingPipeline.CollectLights(*this,
-        static_cast<Engine::Model::LightData*>(m_lightDataMapped), kMaxLights,
-        !cameraUsesSourceWarpChart);
+        static_cast<Engine::Model::LightData*>(m_lightDataMapped),
+        std::min(kMaxLights,
+            m_distanceLightingSettings.maximumRealtimeLights),
+        !cameraUsesSourceWarpChart, &m_realtimeShadowSettings,
+        &shadowSelection, &cameraPosition);
+
+    const uint32_t clusterTileSize = std::clamp(
+        m_distanceLightingSettings.clusterTileSize, 16u, 256u);
+    const uint32_t clusterTilesX = viewportWidth > 0u
+        ? (viewportWidth + clusterTileSize - 1u) / clusterTileSize : 0u;
+    const uint32_t clusterTilesY = viewportHeight > 0u
+        ? (viewportHeight + clusterTileSize - 1u) / clusterTileSize : 0u;
+    const uint32_t clusterDepthSlices = std::clamp(
+        m_distanceLightingSettings.clusterDepthSlices, 1u, 64u);
+    const uint32_t maximumLightsPerCluster = std::clamp(
+        m_distanceLightingSettings.maximumLightsPerCluster, 1u,
+        Engine::Model::MaxRealtimeLights);
+    const uint64_t clusterCount64 = static_cast<uint64_t>(clusterTilesX) *
+        clusterTilesY * clusterDepthSlices;
+    const bool clusteredLightingEnabled = !shadowOnly &&
+        m_distanceLightingSettings.clusteredLighting &&
+        m_frameLightCount > 0u && clusterCount64 > 0u &&
+        clusterCount64 <= std::numeric_limits<uint32_t>::max();
+    const float clusterNear = std::max(0.001f, cam->nearPlane);
+    const float clusterFar = std::max(clusterNear + 0.001f, cam->farPlane);
+    const float clusterLogScale = static_cast<float>(clusterDepthSlices) /
+        std::max(std::log2(clusterFar / clusterNear), 0.0001f);
+    if (clusteredLightingEnabled)
+    {
+        const uint32_t clusterCount = static_cast<uint32_t>(clusterCount64);
+        const uint64_t indexCount64 = static_cast<uint64_t>(clusterCount) *
+            maximumLightsPerCluster;
+        if (indexCount64 > std::numeric_limits<uint32_t>::max())
+            throw std::runtime_error("Forward+ cluster index capacity overflow");
+        const uint32_t indexCount = static_cast<uint32_t>(indexCount64);
+        auto* bufferFactory = m_graphicsProvider->GetBufferFactory();
+        const auto ensureClusterBuffer = [&](std::unique_ptr<IGraphicsBuffer>& buffer,
+            void*& mapped, uint32_t& capacity, uint32_t required,
+            uint32_t stride, const char* description)
+        {
+            if (capacity >= required && buffer && mapped)
+                return;
+            const uint32_t expanded = ExpandedCapacity(capacity, required);
+            auto replacement = bufferFactory->CreateBuffer(
+                Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
+                Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+                static_cast<uint64_t>(expanded) * stride, nullptr, stride);
+            void* replacementMapped = replacement ? replacement->Map() : nullptr;
+            if (!replacementMapped)
+                throw std::runtime_error(std::string("Failed to allocate ") +
+                    description);
+            if (buffer && mapped)
+                buffer->Unmap();
+            if (buffer)
+                m_retiredRenderBuffers.push_back(std::move(buffer));
+            buffer = std::move(replacement);
+            mapped = replacementMapped;
+            capacity = expanded;
+        };
+        ensureClusterBuffer(m_clusterHeaderBuffer, m_clusterHeaderMapped,
+            m_clusterHeaderCapacity, clusterCount, sizeof(glm::uvec2),
+            "Forward+ cluster headers");
+        ensureClusterBuffer(m_clusterLightIndexBuffer, m_clusterLightIndexMapped,
+            m_clusterLightIndexCapacity, indexCount, sizeof(uint32_t),
+            "Forward+ cluster light indices");
+
+        std::vector<glm::uvec2> headers(clusterCount);
+        std::vector<uint32_t> indices(indexCount, 0u);
+        for (uint32_t cluster = 0; cluster < clusterCount; ++cluster)
+            headers[cluster].x = cluster * maximumLightsPerCluster;
+        const auto depthSlice = [&](float depth)
+        {
+            const float normalized = std::log2(std::max(depth, clusterNear) /
+                clusterNear) * clusterLogScale;
+            return std::min(clusterDepthSlices - 1u,
+                static_cast<uint32_t>(std::max(0.f, normalized)));
+        };
+        const auto appendLight = [&](uint32_t cluster, uint32_t light)
+        {
+            glm::uvec2& header = headers[cluster];
+            if (header.y < maximumLightsPerCluster)
+                indices[header.x + header.y++] = light;
+        };
+        const auto* lights = static_cast<const Engine::Model::LightData*>(
+            m_lightDataMapped);
+        for (uint32_t lightIndex = 0; lightIndex < m_frameLightCount; ++lightIndex)
+        {
+            const auto& light = lights[lightIndex];
+            if (light.params.y > 0.5f)
+            {
+                for (uint32_t cluster = 0; cluster < clusterCount; ++cluster)
+                    appendLight(cluster, lightIndex);
+                continue;
+            }
+            const glm::vec4 viewPosition = view * glm::vec4(
+                glm::vec3(light.positionRange), 1.f);
+            const float range = std::max(0.f, light.positionRange.w);
+            if (viewPosition.z + range < clusterNear ||
+                viewPosition.z - range > clusterFar)
+                continue;
+            const glm::vec4 clip = proj * viewPosition;
+            if (std::abs(clip.w) < 0.0001f)
+                continue;
+            const glm::vec2 ndc = glm::vec2(clip) / clip.w;
+            const float radiusPixels = std::abs(proj[1][1]) * range /
+                std::max(viewPosition.z, clusterNear) *
+                static_cast<float>(viewportHeight) * 0.5f;
+            const float centerX = (ndc.x * 0.5f + 0.5f) * viewportWidth;
+            const float centerY = (1.f - (ndc.y * 0.5f + 0.5f)) * viewportHeight;
+            const int32_t minTileX = std::clamp(static_cast<int32_t>(
+                std::floor((centerX - radiusPixels) / clusterTileSize)),
+                0, static_cast<int32_t>(clusterTilesX) - 1);
+            const int32_t maxTileX = std::clamp(static_cast<int32_t>(
+                std::floor((centerX + radiusPixels) / clusterTileSize)),
+                0, static_cast<int32_t>(clusterTilesX) - 1);
+            const int32_t minTileY = std::clamp(static_cast<int32_t>(
+                std::floor((centerY - radiusPixels) / clusterTileSize)),
+                0, static_cast<int32_t>(clusterTilesY) - 1);
+            const int32_t maxTileY = std::clamp(static_cast<int32_t>(
+                std::floor((centerY + radiusPixels) / clusterTileSize)),
+                0, static_cast<int32_t>(clusterTilesY) - 1);
+            const uint32_t minSlice = depthSlice(viewPosition.z - range);
+            const uint32_t maxSlice = depthSlice(viewPosition.z + range);
+            for (uint32_t slice = minSlice; slice <= maxSlice; ++slice)
+            for (int32_t tileY = minTileY; tileY <= maxTileY; ++tileY)
+            for (int32_t tileX = minTileX; tileX <= maxTileX; ++tileX)
+            {
+                const uint32_t cluster = slice * clusterTilesX * clusterTilesY +
+                    static_cast<uint32_t>(tileY) * clusterTilesX +
+                    static_cast<uint32_t>(tileX);
+                appendLight(cluster, lightIndex);
+            }
+        }
+        std::memcpy(m_clusterHeaderMapped, headers.data(),
+            headers.size() * sizeof(glm::uvec2));
+        std::memcpy(m_clusterLightIndexMapped, indices.data(),
+            indices.size() * sizeof(uint32_t));
+        m_clusterHeaderBuffer->FlushMappedWrites(0,
+            headers.size() * sizeof(glm::uvec2));
+        m_clusterLightIndexBuffer->FlushMappedWrites(0,
+            indices.size() * sizeof(uint32_t));
+    }
+
+    if (shadowSelection.valid)
+    {
+        const uint32_t resolution = std::clamp(static_cast<uint32_t>(
+            static_cast<float>(m_realtimeShadowSettings.directionalResolution) *
+            shadowSelection.resolutionScale), 256u, 8192u);
+        if (!m_directionalShadowMap ||
+            m_directionalShadowResolution != resolution)
+        {
+            auto* textureFactory = m_graphicsProvider->GetTextureFactory();
+            m_directionalShadowMap = textureFactory
+                ? textureFactory->CreateDepthTexture2D(resolution, resolution)
+                : nullptr;
+            m_directionalShadowResolution = m_directionalShadowMap
+                ? resolution : 0u;
+        }
+        if (!m_directionalShadowMap)
+        {
+            auto* lights = static_cast<Engine::Model::LightData*>(
+                m_lightDataMapped);
+            lights[shadowSelection.lightIndex].params.z = -1.f;
+            lights[shadowSelection.lightIndex].params.w = 0.f;
+            shadowSelection.valid = false;
+        }
+    }
     m_lightDataBuffer->FlushMappedWrites();
         const bool wireframeMode =
             settings.renderMode == Engine::Model::SceneRenderMode::Wireframe;
         const bool forceUnlitMode =
             settings.renderMode == Engine::Model::SceneRenderMode::Unlit;
 
+    struct ShadowCascadeSet
+    {
+        std::array<glm::mat4, 4> viewProjections{
+            glm::mat4(1.f), glm::mat4(1.f), glm::mat4(1.f), glm::mat4(1.f) };
+        glm::vec4 splits { 0.f };
+        glm::vec4 data { 0.f };
+        glm::vec4 cameraData { 0.f };
+        uint32_t count = 1u;
+    };
+    const auto buildShadowCascades = [&](const glm::mat4& cascadeView,
+        uint32_t atlasResolution,
+        uint32_t requestedCascadeCount)
+    {
+        ShadowCascadeSet result{};
+        const float shadowDistance = std::clamp(
+            m_realtimeShadowSettings.directionalDistance, 1.f, 100000.f);
+        result.count = std::clamp(requestedCascadeCount, 1u, 4u);
+        const float cameraNear = std::max(0.001f, cam->nearPlane);
+        const float cameraFar = std::max(cameraNear + 0.001f, cam->farPlane);
+        const float cascadeFar = std::min(cameraFar,
+            std::max(cameraNear + 0.001f, shadowDistance));
+        const float splitLambda = std::clamp(
+            m_realtimeShadowSettings.cascadeSplitLambda, 0.f, 1.f);
+        for (uint32_t cascade = 0; cascade < result.count; ++cascade)
+        {
+            const float fraction = static_cast<float>(cascade + 1u) /
+                static_cast<float>(result.count);
+            const float logarithmic = cameraNear * std::pow(
+                cascadeFar / cameraNear, fraction);
+            const float uniform = cameraNear +
+                (cascadeFar - cameraNear) * fraction;
+            result.splits[cascade] = glm::mix(
+                uniform, logarithmic, splitLambda);
+        }
+        for (uint32_t cascade = result.count; cascade < 4u; ++cascade)
+            result.splits[cascade] = cascadeFar;
+
+        const glm::vec3 directionToLight = glm::normalize(
+            shadowSelection.directionToLight);
+        const glm::vec3 up = std::abs(directionToLight.y) > 0.98f
+            ? glm::vec3(0.f, 0.f, 1.f) : glm::vec3(0.f, 1.f, 0.f);
+        const glm::mat4 lightOrientation = glm::lookAtLH(
+            glm::vec3(0.f), -directionToLight, up);
+        const glm::mat4 inverseViewProjection = glm::inverse(
+            proj * cascadeView);
+        std::array<glm::vec3, 4> frustumNear{};
+        std::array<glm::vec3, 4> frustumFar{};
+        for (uint32_t corner = 0; corner < 4u; ++corner)
+        {
+            const float x = (corner & 1u) ? 1.f : -1.f;
+            const float y = (corner & 2u) ? 1.f : -1.f;
+            glm::vec4 nearPoint = inverseViewProjection *
+                glm::vec4(x, y, 0.f, 1.f);
+            glm::vec4 farPoint = inverseViewProjection *
+                glm::vec4(x, y, 1.f, 1.f);
+            frustumNear[corner] = glm::vec3(nearPoint) / nearPoint.w;
+            frustumFar[corner] = glm::vec3(farPoint) / farPoint.w;
+        }
+
+        float previousSplit = cameraNear;
+        const uint32_t tileResolution = result.count > 1u
+            ? std::max(1u, atlasResolution / 2u) : atlasResolution;
+        for (uint32_t cascade = 0; cascade < result.count; ++cascade)
+        {
+            const float split = result.splits[cascade];
+            const float nearFactor = std::clamp(
+                (previousSplit - cameraNear) / (cameraFar - cameraNear), 0.f, 1.f);
+            const float farFactor = std::clamp(
+                (split - cameraNear) / (cameraFar - cameraNear), 0.f, 1.f);
+            std::array<glm::vec3, 8> corners{};
+            glm::vec3 center(0.f);
+            for (uint32_t corner = 0; corner < 4u; ++corner)
+            {
+                const glm::vec3 ray = frustumFar[corner] - frustumNear[corner];
+                corners[corner] = frustumNear[corner] + ray * nearFactor;
+                corners[corner + 4u] = frustumNear[corner] + ray * farFactor;
+                center += corners[corner] + corners[corner + 4u];
+            }
+            center *= 1.f / 8.f;
+            float radius = 0.001f;
+            for (const glm::vec3& corner : corners)
+                radius = std::max(radius, glm::length(corner - center));
+            // Quantizing the radius prevents tiny floating-point changes from
+            // resizing the projection as the camera moves.
+            radius = std::ceil(radius * 16.f) / 16.f;
+            glm::vec3 snappedCenter = glm::vec3(
+                lightOrientation * glm::vec4(center, 1.f));
+            const float worldUnitsPerTexel = (radius * 2.f) /
+                static_cast<float>(tileResolution);
+            snappedCenter.x = std::round(snappedCenter.x / worldUnitsPerTexel) *
+                worldUnitsPerTexel;
+            snappedCenter.y = std::round(snappedCenter.y / worldUnitsPerTexel) *
+                worldUnitsPerTexel;
+            const glm::vec3 stabilizedCenter = glm::vec3(
+                glm::inverse(lightOrientation) * glm::vec4(snappedCenter, 1.f));
+            const glm::vec3 lightEye = stabilizedCenter +
+                directionToLight * shadowDistance;
+            const glm::mat4 lightView = glm::lookAtLH(
+                lightEye, stabilizedCenter, up);
+            const glm::mat4 lightProjection = glm::orthoLH_ZO(
+                -radius, radius, -radius, radius,
+                0.1f, shadowDistance * 2.f);
+            result.viewProjections[cascade] = lightProjection * lightView;
+            previousSplit = split;
+        }
+        result.data = {
+            static_cast<float>(result.count), result.count > 1u ? 0.5f : 1.f,
+            std::clamp(m_realtimeShadowSettings.cascadeTransitionFraction,
+                0.f, 0.3f), result.splits[result.count - 1u] };
+        result.cameraData = glm::vec4(glm::normalize(glm::vec3(
+            glm::inverse(cascadeView)[2])), cameraNear);
+        return result;
+    };
+
+    ShadowCascadeSet mainShadowCascades{};
+    if (shadowSelection.valid)
+        mainShadowCascades = buildShadowCascades(view,
+            m_directionalShadowResolution,
+            m_realtimeShadowSettings.directionalCascadeCount);
+    const auto& shadowViewProjections = mainShadowCascades.viewProjections;
+    const glm::vec4 shadowCascadeSplits = mainShadowCascades.splits;
+    const uint32_t shadowCascadeCount = mainShadowCascades.count;
+
     const Engine::Components::Texture* skybox = ResolveSkyboxTexture();
     UpdateEnvironmentLighting(skybox);
-    if (skybox && skybox->GetGraphicsTexture() && m_skyboxPipeline)
+    if (!shadowOnly && skybox && skybox->GetGraphicsTexture() && m_skyboxPipeline)
     {
         SkyboxCBData skyboxData{};
         // A skybox represents direction only. Excluding camera translation
@@ -1665,6 +2274,47 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             allOutside([](const glm::vec4& point)
             { return point.z > point.w; });
     };
+    const auto resolvePortalTarget = [&](Engine::Components::SpatialManipulator* source)
+        -> Engine::Components::SpatialManipulator*
+    {
+        if (!source)
+            return nullptr;
+        if (Engine::Components::SpatialManipulator* target = source->ResolveTarget())
+            return target;
+        // Support older and edit-mode scenes whose serialized link exists on
+        // only one endpoint. Connections belong to manipulators, not meshes,
+        // so inspect every scene object rather than the render draw list.
+        for (const auto& candidateObject : m_objects)
+        {
+            if (!candidateObject || candidateObject.get() == source->Owner)
+                continue;
+            auto* candidate = candidateObject->GetComponent<
+                Engine::Components::SpatialManipulator>();
+            if (candidate && candidate->ResolveTarget() == source)
+                return candidate;
+        }
+        return nullptr;
+    };
+    const bool hasPortalViews = std::any_of(m_objects.begin(), m_objects.end(),
+        [&](const std::unique_ptr<Engine::Core::Object>& object)
+        {
+            if (!object || !object->IsEnabledInHierarchy())
+                return false;
+            auto* portal = object->GetComponent<
+                Engine::Components::SpatialManipulator>();
+            if (!portal || !portal->enabled)
+                return false;
+            const auto mode = static_cast<Engine::Components::
+                SpatialManipulator::ConnectionMode>(portal->connectionMode);
+            if (mode != Engine::Components::SpatialManipulator::
+                    ConnectionMode::Portal &&
+                mode != Engine::Components::SpatialManipulator::
+                    ConnectionMode::LinkedPortal)
+                return false;
+            const auto* target = resolvePortalTarget(portal);
+            return target && target->enabled && target->Owner &&
+                portal->HasCompatiblePortalShapeWith(*target);
+        });
     std::vector<ViewRenderItem> renderObjects;
     renderObjects.reserve(m_frameRenderItems.size());
     for (const FrameRenderItem& item : m_frameRenderItems)
@@ -1673,7 +2323,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         {
             const glm::mat4 itemWorld = useSourceChartMesh(item)
                 ? sourceChartWorld(item) : item.world;
-            if (outsideViewFrustum(item, itemWorld))
+            // A portal camera can see objects outside the main camera's
+            // frustum. Until portal jobs have their own per-view draw lists,
+            // retain the full scene whenever a valid portal view exists.
+            if (!hasPortalViews && outsideViewFrustum(item, itemWorld))
                 continue;
             const glm::vec3 delta = glm::vec3(itemWorld[3]) - cameraPosition;
             renderObjects.push_back({ &item, glm::dot(delta, delta),
@@ -1738,8 +2391,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         Engine::Core::Object* object = nullptr;
         Engine::Graphics::IGraphicsBuffer* vertexBuffer = nullptr;
         Engine::Graphics::IGraphicsBuffer* indexBuffer = nullptr;
+        Engine::Graphics::IGraphicsBuffer* morphDeltaBuffer = nullptr;
+        Engine::Graphics::IGraphicsBuffer* morphWeightBuffer = nullptr;
         Engine::Graphics::IPipelineState* pipeline = nullptr;
-        std::array<const Engine::Graphics::IGraphicsTexture*, 7> textures{};
+        std::array<const Engine::Graphics::IGraphicsTexture*, 9> textures{};
         UINT64 constantBufferOffset = 0;
         DrawCBData drawData{};
         ObjectGPUData objectData{};
@@ -1750,18 +2405,17 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         bool preview = false;
         bool terrain = false;
         bool blended = false;
+        bool castsShadow = false;
+        bool doubleSided = false;
         bool occlusionCandidate = false;
         uint64_t occlusionId = 0;
     };
     std::vector<PreparedDraw> preparedDraws;
-    preparedDraws.reserve(std::min<size_t>(renderObjects.size(), kMaxObjects));
+    preparedDraws.reserve(renderObjects.size());
 
     UINT slot = 0;
     for (const ViewRenderItem& sortedItem : renderObjects)
     {
-        if (slot >= kMaxObjects)
-            break;
-
         const FrameRenderItem* renderItem = sortedItem.source;
         Engine::Core::Object* obj = renderItem->object;
         Engine::Components::Mesh* mesh = renderItem->mesh;
@@ -1770,11 +2424,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         const bool belongsToPreview = renderItem->belongsToPreview;
         const bool isPreview = belongsToPreview;
         const Engine::Model::DistanceLightingBand* lightingBand = nullptr;
+        bool beyondLightingDistance = false;
         if (m_distanceLightingSettings.enabled &&
             !m_distanceLightingSettings.bands.empty())
         {
             const float distance = std::sqrt(
                 sortedItem.lightingDistanceSquared);
+            beyondLightingDistance = distance >
+                m_distanceLightingSettings.maximumDistance;
             for (const auto& candidate : m_distanceLightingSettings.bands)
             {
                 lightingBand = &candidate;
@@ -1782,19 +2439,27 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     break;
             }
         }
-        const bool allowNormalMapping = !lightingBand ||
-            lightingBand->normalMapping;
-        const bool allowParallaxMapping = !lightingBand ||
-            lightingBand->parallaxMapping;
-        const bool allowEnvironmentDiffuse = !lightingBand ||
-            lightingBand->environmentDiffuse;
-        const bool allowReflections = !lightingBand ||
-            lightingBand->reflections;
+        const bool allowNormalMapping = !beyondLightingDistance &&
+            (!lightingBand || lightingBand->normalMapping);
+        const bool allowParallaxMapping = !beyondLightingDistance &&
+            (!lightingBand || lightingBand->parallaxMapping);
+        const bool allowEnvironmentDiffuse = !beyondLightingDistance &&
+            (!lightingBand || lightingBand->environmentDiffuse);
+        const bool allowReflections = !beyondLightingDistance &&
+            (!lightingBand || lightingBand->reflections);
+        const bool allowRealtimeShadows = !beyondLightingDistance &&
+            (!lightingBand || lightingBand->realtimeShadows);
         PreparedDraw preparedDraw{};
+        preparedDraw.morphDeltaBuffer = m_emptyMorphDeltaBuffer.get();
+        preparedDraw.morphWeightBuffer = m_emptyMorphWeightBuffer.get();
+        preparedDraw.textures[8] = m_brdfIntegrationLut.get();
         preparedDraw.object = obj;
         preparedDraw.preview = isPreview;
         preparedDraw.terrain = mesh && mesh->UsesTerrainVertexFormat();
         preparedDraw.blended = sortedItem.blended;
+        preparedDraw.castsShadow = shadowSelection.valid && mesh && !sprite &&
+            !sortedItem.blended && !belongsToPreview &&
+            (!mat || mat->castsShadows);
         preparedDraw.occlusionCandidate = occlusionQueriesEnabled &&
             !wireframeMode &&
             !sortedItem.blended && !sprite &&
@@ -1808,11 +2473,18 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         // Keep the component values for inspection, but do not add them again
         // at runtime or the baked result would be double-lit.
         const bool usesLegacyProbeBake = bakedLighting && bakedLighting->valid &&
-            bakedLighting->version < 3;
+            bakedLighting->version < 3 && !(mesh&&mesh->useLightProbes);
+        const bool usesInterpolatedProbes=mesh&&mesh->useLightProbes;
+        const Engine::Components::ProbeLightingSample probeLighting =
+            (usesInterpolatedProbes||!bakedLighting||!bakedLighting->valid)
+                ? Engine::Components::SampleLightProbes(*this,
+                    glm::vec3(renderItem->world[3]))
+                : Engine::Components::ProbeLightingSample{};
         const glm::vec3 bakedIrradiance =
             usesLegacyProbeBake
                 ? bakedLighting->irradiance
-                : glm::vec3(0.f);
+                : (probeLighting.valid
+                    ? probeLighting.irradiance : glm::vec3(0.f));
         const bool useSourceChart = useSourceChartMesh(*renderItem);
         glm::mat4 world = useSourceChart
             ? sourceChartWorld(*renderItem) : renderItem->world;
@@ -1826,6 +2498,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         UINT64 offset = static_cast<UINT64>(slot) * kCBStride;
 
         ObjectGPUData objectData{};
+        objectData.lightingClusterParams = glm::vec4(
+            static_cast<float>(clusterTileSize),
+            static_cast<float>(clusterTilesX),
+            static_cast<float>(clusterTilesY),
+            static_cast<float>(clusterDepthSlices));
+        objectData.lightingCameraData = glm::vec4(glm::normalize(glm::vec3(
+            glm::inverse(view)[2])), clusterLogScale);
+        objectData.shadowCameraData.w = clusterNear;
         if (settings.hdriLightingEnabled && skybox &&
             (allowEnvironmentDiffuse || allowReflections))
         {
@@ -1848,6 +2528,17 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             objectData.skinParams = {
                 static_cast<float>(renderItem->skinPaletteOffset),
                 static_cast<float>(renderItem->skinJointCount), 0.f, 0.f };
+        }
+        const bool useGpuMorphs = mesh && !sprite && mesh->HasMorphTargets() &&
+            mesh->GetMorphDeltaBuffer() && mesh->GetMorphWeightBuffer() &&
+            (useSourceChart || !renderItem->warpedVertexBuffer);
+        if (useGpuMorphs)
+        {
+            preparedDraw.morphDeltaBuffer = mesh->GetMorphDeltaBuffer();
+            preparedDraw.morphWeightBuffer = mesh->GetMorphWeightBuffer();
+            objectData.morphParams = {
+                static_cast<float>(mesh->GetMorphTargetCount()),
+                static_cast<float>(mesh->GetVertexCount()), 0.f, 0.f };
         }
         Engine::Components::MaterialAlphaMode alphaMode = Engine::Components::MaterialAlphaMode::Opaque;
         bool doubleSided = false;
@@ -1957,6 +2648,29 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             objectData.viewPositionAlphaCutoff = glm::vec4(
                 cameraPosition, 0.5f);
         }
+        preparedDraw.doubleSided = doubleSided;
+        if (shadowSelection.valid)
+        {
+            std::copy(shadowViewProjections.begin(),
+                shadowViewProjections.end(), objectData.shadowViewProjections);
+            objectData.shadowParams = {
+                shadowSelection.depthBias,
+                shadowSelection.normalBias,
+                allowRealtimeShadows ? 1.f : 0.f,
+                static_cast<float>(std::min(
+                    std::min(m_realtimeShadowSettings.pcfRadius,
+                        lightingBand
+                            ? lightingBand->maximumShadowPcfRadius : 4u),
+                    static_cast<uint32_t>(std::round(4.f *
+                        shadowSelection.filterScale)))) };
+            objectData.shadowCascadeSplits = shadowCascadeSplits;
+            objectData.shadowCascadeData = mainShadowCascades.data;
+            objectData.shadowCascadeData.w *= lightingBand
+                ? std::clamp(lightingBand->shadowDistanceScale, 0.f, 1.f)
+                : 1.f;
+            objectData.shadowCameraData = mainShadowCascades.cameraData;
+            preparedDraw.textures[7] = m_directionalShadowMap.get();
+        }
         if (isPreview)
             objectData.baseColor.a *= 0.45f;
             if (forceUnlitMode)
@@ -1968,12 +2682,21 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             objectData.bakedLightDirection = glm::vec4(
                 bakedLighting->lightDirection, 1.f);
         }
+        else if(probeLighting.valid)
+        {
+            objectData.bakedDirectional=glm::vec4(
+                probeLighting.directionalIrradiance,0.f);
+            objectData.bakedLightDirection=glm::vec4(
+                probeLighting.direction,1.f);
+        }
 
-        const uint32_t qualityLightCount = lightingBand
-            ? std::min(m_frameLightCount, lightingBand->maxRealtimeLights)
-            : m_frameLightCount;
+        const uint32_t qualityLightCount = beyondLightingDistance ? 0u :
+            (lightingBand
+                ? std::min(m_frameLightCount, lightingBand->maxRealtimeLights)
+                : m_frameLightCount);
         const DrawCBData drawData{ slot,
-            forceUnlitMode ? 0u : qualityLightCount, 0u, 0u };
+            forceUnlitMode ? 0u : qualityLightCount,
+            clusteredLightingEnabled ? kClusteredLightingFlag : 0u, 0u };
         preparedDraw.drawData = drawData;
         preparedDraw.objectData = objectData;
         preparedDraw.traversalChartPortal = renderItem->traversalChartPortal;
@@ -2030,6 +2753,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
         ++slot;
     }
+    m_lastOrdinaryDrawCount = static_cast<uint32_t>(preparedDraws.size());
 
     // DX11 buffers use CPU-side shadow storage. Upload the complete object
     // array once, then keep structured-buffer binding free of hidden copies.
@@ -2042,29 +2766,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         context->SetStructuredBuffer(6, m_lightDataBuffer.get());
         context->SetStructuredBuffer(7, m_objectDataBuffer.get());
         context->SetStructuredBuffer(8, m_boneDataBuffer.get());
-    }
-
-    const auto resolvePortalTarget = [&](Engine::Components::SpatialManipulator* source)
-        -> Engine::Components::SpatialManipulator*
-    {
-        if (!source)
-            return nullptr;
-        if (Engine::Components::SpatialManipulator* target = source->ResolveTarget())
-            return target;
-        // Support older and edit-mode scenes whose serialized link exists on
-        // only one endpoint. Connections belong to manipulators, not meshes,
-        // so inspect every scene object rather than the render draw list.
-        for (const auto& candidateObject : m_objects)
+        context->SetStructuredBuffer(10, m_emptyMorphDeltaBuffer.get());
+        context->SetStructuredBuffer(11, m_emptyMorphWeightBuffer.get());
+        if (clusteredLightingEnabled)
         {
-            if (!candidateObject || candidateObject.get() == source->Owner)
-                continue;
-            auto* candidate = candidateObject->GetComponent<
-                Engine::Components::SpatialManipulator>();
-            if (candidate && candidate->ResolveTarget() == source)
-                return candidate;
+            context->SetStructuredBuffer(14, m_clusterHeaderBuffer.get());
+            context->SetStructuredBuffer(15, m_clusterLightIndexBuffer.get());
         }
-        return nullptr;
-    };
+    }
 
     const auto isSpatialManipulatorCarrierDraw = [&](const PreparedDraw& draw)
     {
@@ -2087,6 +2796,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
     const auto submitGeometry = [&](const PreparedDraw& draw)
     {
+        context->SetStructuredBuffer(10, draw.morphDeltaBuffer);
+        context->SetStructuredBuffer(11, draw.morphWeightBuffer);
         context->SetVertexBuffer(0, draw.vertexBuffer, draw.vertexStride, 0);
         if (draw.indexBuffer && draw.indexCount > 0u)
         {
@@ -2096,6 +2807,243 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         else
             context->DrawInstanced(draw.vertexCount, 1, 0, 0);
     };
+
+    // Render the selected realtime directional light into its depth map during
+    // the explicit pre-view phase. This keeps Vulkan render passes unnested and
+    // lets DX12 bind a depth-only target without reconstructing prior OM state.
+    if (shadowOnly && shadowSelection.valid && m_directionalShadowPipeline &&
+        context->BeginDepthOnlyPass(m_directionalShadowMap.get(), 1.f))
+    {
+        for (uint32_t cascade = 0; cascade < shadowCascadeCount; ++cascade)
+        {
+            for (const PreparedDraw& draw : preparedDraws)
+            {
+                const uint32_t recordIndex = cascade * m_objectCapacity +
+                    draw.drawData.objectIndex;
+                ObjectGPUData shadowData = draw.objectData;
+                shadowData.viewProjection = shadowViewProjections[cascade];
+                shadowData.materialParams.w = static_cast<float>(
+                    static_cast<uint32_t>(shadowData.materialParams.w) &
+                    (1u | 32u));
+                shadowData.ambientUnlit.w = 1.f;
+                shadowData.environmentParams = glm::vec4(0.f);
+                std::memcpy(static_cast<uint8_t*>(m_shadowObjectDataMapped) +
+                    static_cast<size_t>(recordIndex) * sizeof(ObjectGPUData),
+                    &shadowData, sizeof(ObjectGPUData));
+                DrawCBData shadowDraw = draw.drawData;
+                shadowDraw.objectIndex = recordIndex;
+                shadowDraw.lightCount = 0;
+                shadowDraw.flags &= ~kClusteredLightingFlag;
+                std::memcpy(static_cast<uint8_t*>(m_shadowCBMapped) +
+                    static_cast<uint64_t>(recordIndex) * kCBStride,
+                    &shadowDraw, sizeof(shadowDraw));
+            }
+        }
+        const uint64_t shadowBytes = static_cast<uint64_t>(shadowCascadeCount) *
+            m_objectCapacity * sizeof(ObjectGPUData);
+        m_shadowObjectDataBuffer->FlushMappedWrites(0, shadowBytes);
+        context->SetStructuredBuffer(6, m_lightDataBuffer.get());
+        context->SetStructuredBuffer(7, m_shadowObjectDataBuffer.get());
+        context->SetStructuredBuffer(8, m_boneDataBuffer.get());
+
+        const uint32_t tileResolution = shadowCascadeCount > 1u
+            ? m_directionalShadowResolution / 2u
+            : m_directionalShadowResolution;
+        for (uint32_t cascade = 0; cascade < shadowCascadeCount; ++cascade)
+        {
+            const uint32_t tileX = shadowCascadeCount > 1u
+                ? cascade & 1u : 0u;
+            const uint32_t tileY = shadowCascadeCount > 1u
+                ? cascade >> 1u : 0u;
+            context->SetViewport({
+                static_cast<float>(tileX * tileResolution),
+                static_cast<float>(tileY * tileResolution),
+                static_cast<float>(tileResolution),
+                static_cast<float>(tileResolution), 0.f, 1.f });
+            context->SetScissorRect({
+                static_cast<int32_t>(tileX * tileResolution),
+                static_cast<int32_t>(tileY * tileResolution),
+                static_cast<int32_t>((tileX + 1u) * tileResolution),
+                static_cast<int32_t>((tileY + 1u) * tileResolution) });
+            for (const PreparedDraw& draw : preparedDraws)
+            {
+                if (!draw.castsShadow || !draw.vertexBuffer ||
+                    isSpatialManipulatorCarrierDraw(draw))
+                    continue;
+                Engine::Graphics::IPipelineState* shadowPipeline =
+                    draw.doubleSided
+                        ? m_directionalShadowDoubleSidedPipeline.get()
+                        : m_directionalShadowPipeline.get();
+                context->SetPipeline(geometryPipeline(draw, shadowPipeline));
+                const uint32_t recordIndex = cascade * m_objectCapacity +
+                    draw.drawData.objectIndex;
+                context->SetConstantBuffer(0, m_shadowConstantBuffer.get(),
+                    static_cast<uint64_t>(recordIndex) * kCBStride);
+                for (uint32_t textureSlot = 0;
+                    textureSlot < draw.textures.size(); ++textureSlot)
+                {
+                    if (textureSlot != 7u)
+                        context->SetTexture(textureSlot, draw.textures[textureSlot]);
+                }
+                submitGeometry(draw);
+            }
+        }
+        context->EndDepthOnlyPass();
+
+    }
+
+    if (shadowOnly && shadowSelection.valid &&
+        m_realtimeShadowSettings.portalPolicy !=
+            Engine::Model::PortalShadowPolicy::ReuseMain)
+    {
+        auto* bufferFactory = m_graphicsProvider->GetBufferFactory();
+        auto* textureFactory = m_graphicsProvider->GetTextureFactory();
+        const uint32_t portalResolution = std::clamp(static_cast<uint32_t>(
+            static_cast<float>(m_realtimeShadowSettings.portalAtlasResolution) *
+            shadowSelection.resolutionScale), 256u, 4096u);
+        const uint32_t portalCascadeCount = std::clamp(
+            m_realtimeShadowSettings.portalCascadeCount, 1u, 4u);
+        for (PortalShadowCacheEntry& entry : m_portalShadowCache)
+        {
+            if (entry.ownerCamera != cam || !entry.targetChart ||
+                !entry.selected)
+                continue;
+            if (!entry.atlas || entry.atlasResolution != portalResolution)
+            {
+                if (entry.atlas)
+                    m_retiredShadowTextures.push_back(std::move(entry.atlas));
+                entry.atlas = textureFactory
+                    ? textureFactory->CreateDepthTexture2D(
+                        portalResolution, portalResolution)
+                    : nullptr;
+                entry.atlasResolution = entry.atlas ? portalResolution : 0u;
+                entry.rendered = false;
+            }
+            if (entry.bufferCapacity != m_objectCapacity)
+            {
+                if (entry.constantBuffer && entry.constantMapped)
+                    entry.constantBuffer->Unmap();
+                if (entry.objectBuffer && entry.objectMapped)
+                    entry.objectBuffer->Unmap();
+                if (entry.constantBuffer)
+                    m_retiredRenderBuffers.push_back(
+                        std::move(entry.constantBuffer));
+                if (entry.objectBuffer)
+                    m_retiredRenderBuffers.push_back(
+                        std::move(entry.objectBuffer));
+                entry.constantBuffer = bufferFactory->CreateBuffer(
+                    Engine::Graphics::IGraphicsBuffer::Usage::ConstantBuffer,
+                    Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+                    static_cast<uint64_t>(m_objectCapacity) * 4u * kCBStride,
+                    nullptr, sizeof(DrawCBData));
+                entry.objectBuffer = bufferFactory->CreateBuffer(
+                    Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
+                    Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+                    static_cast<uint64_t>(m_objectCapacity) * 4u *
+                        sizeof(ObjectGPUData), nullptr, sizeof(ObjectGPUData));
+                entry.constantMapped = entry.constantBuffer
+                    ? entry.constantBuffer->Map() : nullptr;
+                entry.objectMapped = entry.objectBuffer
+                    ? entry.objectBuffer->Map() : nullptr;
+                entry.bufferCapacity = entry.constantMapped && entry.objectMapped
+                    ? m_objectCapacity : 0u;
+                entry.rendered = false;
+            }
+            if (!entry.atlas || !entry.constantMapped || !entry.objectMapped)
+                continue;
+
+            const ShadowCascadeSet portalCascades = buildShadowCascades(
+                entry.view, portalResolution,
+                portalCascadeCount);
+            entry.viewProjections = portalCascades.viewProjections;
+            entry.cascadeSplits = portalCascades.splits;
+            entry.cascadeData = portalCascades.data;
+            entry.cameraData = portalCascades.cameraData;
+            for (uint32_t cascade = 0; cascade < portalCascades.count; ++cascade)
+            {
+                for (const PreparedDraw& draw : preparedDraws)
+                {
+                    const uint32_t recordIndex = cascade * m_objectCapacity +
+                        draw.drawData.objectIndex;
+                    ObjectGPUData shadowData = draw.objectData;
+                    shadowData.viewProjection =
+                        portalCascades.viewProjections[cascade];
+                    shadowData.materialParams.w = static_cast<float>(
+                        static_cast<uint32_t>(shadowData.materialParams.w) &
+                        (1u | 32u));
+                    shadowData.ambientUnlit.w = 1.f;
+                    shadowData.environmentParams = glm::vec4(0.f);
+                    std::memcpy(static_cast<uint8_t*>(entry.objectMapped) +
+                        static_cast<size_t>(recordIndex) * sizeof(ObjectGPUData),
+                        &shadowData, sizeof(shadowData));
+                    DrawCBData shadowDraw = draw.drawData;
+                    shadowDraw.objectIndex = recordIndex;
+                    shadowDraw.lightCount = 0;
+                    shadowDraw.flags &= ~kClusteredLightingFlag;
+                    std::memcpy(static_cast<uint8_t*>(entry.constantMapped) +
+                        static_cast<uint64_t>(recordIndex) * kCBStride,
+                        &shadowDraw, sizeof(shadowDraw));
+                }
+            }
+            entry.objectBuffer->FlushMappedWrites(0,
+                static_cast<uint64_t>(portalCascades.count) *
+                    m_objectCapacity * sizeof(ObjectGPUData));
+            if (!context->BeginDepthOnlyPass(entry.atlas.get(), 1.f))
+                continue;
+            context->SetStructuredBuffer(6, m_lightDataBuffer.get());
+            context->SetStructuredBuffer(7, entry.objectBuffer.get());
+            context->SetStructuredBuffer(8, m_boneDataBuffer.get());
+            const uint32_t tileResolution = portalCascades.count > 1u
+                ? portalResolution / 2u : portalResolution;
+            for (uint32_t cascade = 0; cascade < portalCascades.count; ++cascade)
+            {
+                const uint32_t tileX = portalCascades.count > 1u
+                    ? cascade & 1u : 0u;
+                const uint32_t tileY = portalCascades.count > 1u
+                    ? cascade >> 1u : 0u;
+                context->SetViewport({ static_cast<float>(tileX * tileResolution),
+                    static_cast<float>(tileY * tileResolution),
+                    static_cast<float>(tileResolution),
+                    static_cast<float>(tileResolution), 0.f, 1.f });
+                context->SetScissorRect({
+                    static_cast<int32_t>(tileX * tileResolution),
+                    static_cast<int32_t>(tileY * tileResolution),
+                    static_cast<int32_t>((tileX + 1u) * tileResolution),
+                    static_cast<int32_t>((tileY + 1u) * tileResolution) });
+                for (const PreparedDraw& draw : preparedDraws)
+                {
+                    if (!draw.castsShadow || !draw.vertexBuffer ||
+                        isSpatialManipulatorCarrierDraw(draw) ||
+                        !IsObjectInSpatialRegion(draw.object,
+                            entry.contentScopeRoot) ||
+                        !Engine::Rendering::Portal::
+                            IsTraversalInstanceVisibleInConnectedChart(
+                                draw.traversalChartPortal, entry.targetChart))
+                        continue;
+                    Engine::Graphics::IPipelineState* shadowPipeline =
+                        draw.doubleSided
+                            ? m_directionalShadowDoubleSidedPipeline.get()
+                            : m_directionalShadowPipeline.get();
+                    context->SetPipeline(geometryPipeline(draw, shadowPipeline));
+                    const uint32_t recordIndex = cascade * m_objectCapacity +
+                        draw.drawData.objectIndex;
+                    context->SetConstantBuffer(0, entry.constantBuffer.get(),
+                        static_cast<uint64_t>(recordIndex) * kCBStride);
+                    for (uint32_t textureSlot = 0;
+                        textureSlot < draw.textures.size(); ++textureSlot)
+                        if (textureSlot != 7u)
+                            context->SetTexture(
+                                textureSlot, draw.textures[textureSlot]);
+                    submitGeometry(draw);
+                }
+            }
+            context->EndDepthOnlyPass();
+            entry.rendered = true;
+        }
+    }
+
+    if (shadowOnly)
+        return;
 
     std::optional<Engine::Graphics::GpuTimingStage> activeGpuStage;
     const auto switchGpuStage = [&](Engine::Graphics::GpuTimingStage stage)
@@ -2169,10 +3117,43 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     };
 
     std::vector<PortalStencilPass> portalPasses;
-    const glm::mat4 cameraWorld = cam->Owner
-        ? cam->Owner->transform.GetWorldMatrixWithLayer()
-        : glm::mat4(1.f);
-    const glm::vec3 cameraForward = glm::normalize(glm::vec3(cameraWorld[2]));
+    // Portal geometry and virtual cameras must live in the same coordinate
+    // chart as the camera and ordinary meshes for this view. Game cameras
+    // inside a finite warp volume intentionally render its physical/source
+    // chart; editor inspection normally renders the embedded chart instead.
+    // Mixing render-chart apertures with source-chart depth makes the visible
+    // doorway receive no stencil mask (notably in the three-room matrix ring).
+    const auto activePortalPoints = [&](const Engine::Components::
+        SpatialManipulator& portal)
+    {
+        return cameraUsesSourceWarpChart
+            ? portal.GetWorldPortalShapePoints()
+            : portal.GetRenderWorldPortalShapePoints();
+    };
+    const auto activePortalFrame = [&](const Engine::Components::
+        SpatialManipulator& portal)
+    {
+        return cameraUsesSourceWarpChart
+            ? portal.GetPortalWorldFrame()
+            : portal.GetRenderPortalWorldFrame();
+    };
+    const auto mapActivePortalPoint = [&](const Engine::Components::
+        SpatialManipulator& source, const glm::vec3& point,
+        const Engine::Components::SpatialManipulator& target)
+    {
+        return cameraUsesSourceWarpChart
+            ? source.MapWorldPointThroughPortalShape(point, target)
+            : source.MapRenderWorldPointThroughPortalShape(point, target);
+    };
+    // Sort overlapping apertures in the same chart as the view.  Asking the
+    // Transform for GetWorldMatrixWithLayer() always applies the render-space
+    // warp, even when this camera deliberately uses the physical/source chart;
+    // its forward axis could therefore choose the wrong portal as the nearer
+    // root.  The inverse view is already the authoritative camera transform
+    // for both chart modes.
+    const glm::mat4 activeCameraWorld = glm::inverse(view);
+    const glm::vec3 cameraForward = glm::normalize(
+        glm::vec3(activeCameraWorld[2]));
     size_t portalObjectOrder = 0;
     for (const auto& sceneObject : m_objects)
     {
@@ -2202,7 +3183,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         pass.source = manipulator;
         pass.target = target;
         const std::vector<glm::vec3> aperturePoints =
-            manipulator->GetRenderWorldPortalShapePoints();
+            activePortalPoints(*manipulator);
         glm::vec3 apertureCenter(0.f);
         for (const glm::vec3& point : aperturePoints)
             apertureCenter += point;
@@ -2256,7 +3237,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     for (PortalStencilPass& pass : portalPasses)
     {
         const std::vector<glm::vec3> points =
-            pass.source->GetRenderWorldPortalShapePoints();
+            activePortalPoints(*pass.source);
         if (points.size() < 3)
             continue;
         const uint32_t required = Engine::Rendering::Portal::
@@ -2401,9 +3382,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 portalPass.source, portalPass.target);
 
             const std::vector<glm::vec3> sourcePoints =
-                portalPass.source->GetRenderWorldPortalShapePoints();
+                activePortalPoints(*portalPass.source);
             const std::vector<glm::vec3> targetPoints =
-                portalPass.target->GetRenderWorldPortalShapePoints();
+                activePortalPoints(*portalPass.target);
             const size_t pointCount = std::min(
                 sourcePoints.size(), targetPoints.size());
             if (pointCount < 3)
@@ -2442,9 +3423,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     edgeThickness, edgeColor);
                 appendDebugSegment(targetPoints[pointIndex], targetPoints[next],
                     edgeThickness, edgeColor);
-                const glm::vec3 mappedSourcePoint = portalPass.source
-                    ->MapRenderWorldPointThroughPortalShape(
-                        sourcePoints[pointIndex], *portalPass.target);
+                const glm::vec3 mappedSourcePoint = mapActivePortalPoint(
+                    *portalPass.source, sourcePoints[pointIndex],
+                    *portalPass.target);
                 // Point indices describe each aperture's authored winding;
                 // they are not necessarily the connected correspondence. The
                 // portal half-turn reverses local X, so index-to-index bars
@@ -2545,11 +3526,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     struct PortalViewJob
     {
         const PortalStencilPass* portal = nullptr;
+        const Engine::Core::Object* contentScopeRoot = nullptr;
         glm::mat4 apertureView { 1.f };
         glm::mat4 mappedView { 1.f };
         glm::vec3 mappedCameraPosition { 0.f };
         uint32_t depth = 0;
         uint32_t rootStencilBase = 1;
+        size_t parentJobIndex = std::numeric_limits<size_t>::max();
         // Constant-buffer records retain globally unique frame slots because
         // deferred backends reference them after command recording.
         uint32_t dataSlotBase = 0;
@@ -2557,6 +3540,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         // at zero rather than after the ordinary-view capacity.
         uint32_t objectDataSlotBase = 0;
         uint64_t skyboxConstantBufferOffset = 0;
+        uint64_t shadowKey = 0;
+        float screenArea = 0.f;
+        size_t shadowCacheIndex = std::numeric_limits<size_t>::max();
     };
     std::vector<PortalViewJob> portalViewJobs;
     const uint32_t portalDepthLimit = static_cast<uint32_t>(
@@ -2566,19 +3552,39 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         Engine::Rendering::Portal::ClampViewBudget(
             settings.portalMaxViewsPerFrame));
 
-    const auto apertureVisibleInView = [&](const PortalStencilPass& pass,
+    const auto apertureRegionInView = [&](const PortalStencilPass& pass,
         const glm::mat4& candidateView)
     {
         const std::vector<glm::vec3> points =
-            pass.source->GetRenderWorldPortalShapePoints();
+            activePortalPoints(*pass.source);
         if (points.size() < 3)
-            return false;
+            return std::vector<glm::vec2>{};
+        const glm::mat4 candidateCameraWorld = glm::inverse(candidateView);
+        const glm::mat4 sourceFrame = activePortalFrame(*pass.source);
+        const float cameraPlaneDistance = glm::dot(
+            glm::vec3(candidateCameraWorld[3]) - glm::vec3(sourceFrame[3]),
+            glm::vec3(sourceFrame[2]));
+        // A camera exactly on an aperture plane has no well-defined source
+        // side, and every aperture vertex projects with w=0. Do not feed that
+        // singular polygon into recursive scheduling; physical traversal will
+        // select the connected chart as soon as the camera body departs.
+        if (std::abs(cameraPlaneDistance) <= 1e-5f)
+            return std::vector<glm::vec2>{};
         std::vector<glm::vec4> clipPolygon;
         clipPolygon.reserve(points.size());
         for (const glm::vec3& point : points)
             clipPolygon.push_back(proj * candidateView * glm::vec4(point, 1.f));
-        return Engine::Rendering::Portal::ClipApertureToViewFrustum(
-            std::move(clipPolygon)).size() >= 3u;
+        clipPolygon = Engine::Rendering::Portal::ClipApertureToViewFrustum(
+            std::move(clipPolygon));
+        std::vector<glm::vec2> screenPolygon;
+        screenPolygon.reserve(clipPolygon.size());
+        for (const glm::vec4& point : clipPolygon)
+        {
+            if (point.w <= 1e-6f || !std::isfinite(point.w))
+                return std::vector<glm::vec2>{};
+            screenPolygon.push_back(glm::vec2(point) / point.w);
+        }
+        return screenPolygon;
     };
 
     const auto apertureScissorInView = [&](const PortalStencilPass& pass,
@@ -2591,7 +3597,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         if (viewportWidth == 0u || viewportHeight == 0u)
             return std::nullopt;
         const std::vector<glm::vec3> points =
-            pass.source->GetRenderWorldPortalShapePoints();
+            activePortalPoints(*pass.source);
         if (points.size() < 3u)
             return std::nullopt;
 
@@ -2608,6 +3614,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         glm::vec2 maximum(std::numeric_limits<float>::lowest());
         for (const glm::vec4& clip : clipPolygon)
         {
+            if (clip.w <= 1e-6f || !std::isfinite(clip.w))
+                return std::nullopt;
             const glm::vec2 ndc = glm::vec2(clip) / clip.w;
             minimum = glm::min(minimum, ndc);
             maximum = glm::max(maximum, ndc);
@@ -2634,18 +3642,34 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     using PortalEdge = std::pair<
         const Engine::Components::SpatialManipulator*,
         const Engine::Components::SpatialManipulator*>;
-    std::vector<PortalEdge> portalPath;
-    uint32_t nextRootStencilBase = 1u;
-    std::function<void(const glm::mat4&, uint32_t, uint32_t,
-        const Engine::Components::SpatialManipulator*)>
-        schedulePortalViews;
-    schedulePortalViews = [&](const glm::mat4& apertureView, uint32_t depth,
-                              uint32_t inheritedRootStencilBase,
-                              const Engine::Components::SpatialManipulator*
-                                  previousExit)
+    struct PortalScheduleNode
     {
+        glm::mat4 apertureView { 1.f };
+        uint32_t depth = 0;
+        uint32_t inheritedRootStencilBase = 0;
+        const Engine::Components::SpatialManipulator* previousExit = nullptr;
+        const Engine::Core::Object* contentScopeRoot = nullptr;
+        size_t parentJobIndex = std::numeric_limits<size_t>::max();
+        std::vector<glm::vec2> visibleScreenRegion;
+        std::vector<PortalEdge> path;
+    };
+    uint32_t nextRootStencilBase = 1u;
+    std::vector<PortalScheduleNode> scheduleQueue;
+    scheduleQueue.push_back({ view, 0u, 0u, nullptr, nullptr,
+        std::numeric_limits<size_t>::max(),
+        { {-1.f, -1.f}, {1.f, -1.f}, {1.f, 1.f}, {-1.f, 1.f} }, {} });
+    size_t scheduleCursor = 0u;
+    // Keep every visible root aperture before spending the remaining budget
+    // on recursion. A depth-first walk allowed one early portal chain to
+    // starve later roots, making them vanish as traversal order changed.
+    while (scheduleCursor < scheduleQueue.size() &&
+        portalViewJobs.size() < portalViewBudget)
+    {
+        PortalScheduleNode node = std::move(scheduleQueue[scheduleCursor++]);
+        const glm::mat4& apertureView = node.apertureView;
+        const uint32_t depth = node.depth;
         if (depth >= portalDepthLimit || portalViewJobs.size() >= portalViewBudget)
-            return;
+            continue;
         const glm::mat4 cameraWorldForView = glm::inverse(apertureView);
         const glm::vec3 viewCameraPosition(cameraWorldForView[3]);
         const glm::vec3 viewForward = glm::normalize(
@@ -2662,14 +3686,53 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             // parent view. Other apertures—including the original source now
             // visible across the room—remain valid recursive entrances.
             if (Engine::Rendering::Portal::IsImmediateExitAperture(
-                pass.source, previousExit))
+                pass.source, node.previousExit))
                 continue;
-            if (pass.apertureVertexCount < 3 ||
-                !apertureVisibleInView(pass, apertureView))
+            if (!IsObjectInSpatialRegion(pass.source->Owner,
+                node.contentScopeRoot))
+                continue;
+            if (pass.apertureVertexCount < 3)
+                continue;
+
+            glm::mat4 effectiveApertureView = apertureView;
+            glm::vec3 effectiveCameraPosition = viewCameraPosition;
+            const glm::mat4 sourceFrame = activePortalFrame(*pass.source);
+            const glm::vec3 sourcePlanePoint(sourceFrame[3]);
+            const glm::vec3 sourcePlaneNormal = glm::normalize(
+                glm::vec3(sourceFrame[2]));
+            const float cameraPlaneDistance = glm::dot(
+                viewCameraPosition - sourcePlanePoint, sourcePlaneNormal);
+            const float cameraFacing = glm::dot(viewForward, sourcePlaneNormal);
+            // At the aperture plane its vertices all project with w=0, so a
+            // finite stencil polygon does not exist. If the eye is inside the
+            // opening and looking through it, choose that connected chart and
+            // offset only the render view onto the source side. Keeping the
+            // aperture beyond the near plane yields a stable full-screen mask
+            // without moving the physical camera or weakening target clipping.
+            if (std::abs(cameraPlaneDistance) <= 1e-5f &&
+                std::abs(cameraFacing) > 0.1f &&
+                pass.source->IsWorldPointInsidePortalAperture(
+                    viewCameraPosition, 0.f))
+            {
+                const float renderSeparation = std::max(
+                    0.002f, cam->nearPlane * 1.05f /
+                        std::abs(cameraFacing));
+                effectiveCameraPosition -= sourcePlaneNormal *
+                    (cameraFacing > 0.f ? renderSeparation : -renderSeparation);
+                glm::mat4 effectiveCameraWorld = cameraWorldForView;
+                effectiveCameraWorld[3] = glm::vec4(
+                    effectiveCameraPosition, 1.f);
+                effectiveApertureView = glm::inverse(effectiveCameraWorld);
+            }
+            std::vector<glm::vec2> visibleScreenRegion =
+                Engine::Rendering::Portal::IntersectConvexScreenPolygons(
+                    apertureRegionInView(pass, effectiveApertureView),
+                    node.visibleScreenRegion);
+            if (visibleScreenRegion.size() < 3u)
                 continue;
             const PortalEdge edge { pass.source, pass.target };
             const size_t priorConnectionVisits = static_cast<size_t>(
-                std::count_if(portalPath.begin(), portalPath.end(),
+                std::count_if(node.path.begin(), node.path.end(),
                     [&](const PortalEdge& previous)
                     {
                         return (previous.first == edge.first &&
@@ -2685,7 +3748,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 priorConnectionVisits, settings.portalConnectionRepeatLimit))
                 continue;
 
-            uint32_t rootStencilBase = inheritedRootStencilBase;
+            uint32_t rootStencilBase = node.inheritedRootStencilBase;
             if (depth == 0u)
             {
                 if (nextRootStencilBase + portalDepthLimit - 1u > 0xFFu)
@@ -2694,15 +3757,12 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 nextRootStencilBase += portalDepthLimit;
             }
 
-            const glm::vec3 mappedCamera =
-                pass.source->MapRenderWorldPointThroughPortalShape(
-                    viewCameraPosition, *pass.target);
-            const glm::vec3 mappedLookAt =
-                pass.source->MapRenderWorldPointThroughPortalShape(
-                    viewCameraPosition + viewForward, *pass.target);
-            const glm::vec3 mappedUpPoint =
-                pass.source->MapRenderWorldPointThroughPortalShape(
-                    viewCameraPosition + viewUp, *pass.target);
+            const glm::vec3 mappedCamera = mapActivePortalPoint(
+                *pass.source, effectiveCameraPosition, *pass.target);
+            const glm::vec3 mappedLookAt = mapActivePortalPoint(
+                *pass.source, effectiveCameraPosition + viewForward, *pass.target);
+            const glm::vec3 mappedUpPoint = mapActivePortalPoint(
+                *pass.source, effectiveCameraPosition + viewUp, *pass.target);
             const glm::vec3 mappedForward = glm::normalize(
                 mappedLookAt - mappedCamera);
             glm::vec3 mappedUp = mappedUpPoint - mappedCamera;
@@ -2712,28 +3772,181 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
             PortalViewJob job{};
             job.portal = &pass;
-            job.apertureView = apertureView;
+            job.contentScopeRoot =
+                pass.target->ResolvePortalContentScopeRoot();
+            job.apertureView = effectiveApertureView;
             job.mappedCameraPosition = mappedCamera;
             job.mappedView = glm::lookAtLH(mappedCamera,
                 mappedCamera + mappedForward, mappedUp);
             job.depth = depth;
             job.rootStencilBase = rootStencilBase;
+            job.parentJobIndex = node.parentJobIndex;
+            job.shadowKey = 1469598103934665603ull;
+            HashRevision(job.shadowKey, static_cast<uint64_t>(
+                reinterpret_cast<uintptr_t>(cam)));
+            for (const auto& pathEdge : node.path)
+            {
+                HashRevision(job.shadowKey, static_cast<uint64_t>(
+                    reinterpret_cast<uintptr_t>(pathEdge.first)));
+                HashRevision(job.shadowKey, static_cast<uint64_t>(
+                    reinterpret_cast<uintptr_t>(pathEdge.second)));
+            }
+            HashRevision(job.shadowKey, static_cast<uint64_t>(
+                reinterpret_cast<uintptr_t>(pass.source)));
+            HashRevision(job.shadowKey, static_cast<uint64_t>(
+                reinterpret_cast<uintptr_t>(pass.target)));
+            for (size_t pointIndex = 0; pointIndex < visibleScreenRegion.size();
+                ++pointIndex)
+            {
+                const glm::vec2& first = visibleScreenRegion[pointIndex];
+                const glm::vec2& second = visibleScreenRegion[
+                    (pointIndex + 1u) % visibleScreenRegion.size()];
+                job.screenArea += first.x * second.y - first.y * second.x;
+            }
+            job.screenArea = std::abs(job.screenArea) * 0.5f;
+            const size_t jobIndex = portalViewJobs.size();
             portalViewJobs.push_back(job);
 
-            portalPath.push_back(edge);
-            schedulePortalViews(
-                job.mappedView, depth + 1u, rootStencilBase, pass.target);
-            portalPath.pop_back();
+            PortalScheduleNode child{};
+            child.apertureView = job.mappedView;
+            child.depth = depth + 1u;
+            child.inheritedRootStencilBase = rootStencilBase;
+            child.previousExit = pass.target;
+            child.contentScopeRoot = job.contentScopeRoot;
+            child.parentJobIndex = jobIndex;
+            child.visibleScreenRegion = std::move(visibleScreenRegion);
+            child.path = node.path;
+            child.path.push_back(edge);
+            scheduleQueue.push_back(std::move(child));
         }
-    };
-    schedulePortalViews(view, 0u, 0u, nullptr);
+    }
 
-    const auto connectedSpaceClipPlane = [](
+    // Breadth-first discovery protects visible root portals from exhausting
+    // the frame budget, but stencil recursion itself must execute depth-first.
+    // Sibling apertures use the same depth value; rendering a sibling before
+    // an earlier branch's descendants leaves that value in unrelated pixels
+    // and lets the descendant mask leak into (or be rejected by) the sibling.
+    // Reorder only after the fair set of jobs has been selected.
+    if (portalViewJobs.size() > 1u)
+    {
+        const size_t noParent = std::numeric_limits<size_t>::max();
+        std::vector<std::vector<size_t>> childJobs(portalViewJobs.size());
+        std::vector<size_t> rootJobs;
+        rootJobs.reserve(portalViewJobs.size());
+        for (size_t jobIndex = 0; jobIndex < portalViewJobs.size(); ++jobIndex)
+        {
+            const size_t parentIndex = portalViewJobs[jobIndex].parentJobIndex;
+            if (parentIndex == noParent)
+                rootJobs.push_back(jobIndex);
+            else if (parentIndex < childJobs.size())
+                childJobs[parentIndex].push_back(jobIndex);
+        }
+
+        std::vector<size_t> depthFirstOrder;
+        depthFirstOrder.reserve(portalViewJobs.size());
+        std::function<void(size_t)> appendSubtree = [&](size_t jobIndex)
+        {
+            depthFirstOrder.push_back(jobIndex);
+            for (const size_t childIndex : childJobs[jobIndex])
+                appendSubtree(childIndex);
+        };
+        for (const size_t rootIndex : rootJobs)
+            appendSubtree(rootIndex);
+
+        if (depthFirstOrder.size() == portalViewJobs.size())
+        {
+            std::vector<PortalViewJob> orderedJobs;
+            orderedJobs.reserve(portalViewJobs.size());
+            for (const size_t jobIndex : depthFirstOrder)
+                orderedJobs.push_back(std::move(portalViewJobs[jobIndex]));
+            portalViewJobs = std::move(orderedJobs);
+        }
+    }
+
+    for (PortalShadowCacheEntry& entry : m_portalShadowCache)
+        if (entry.ownerCamera == cam)
+            entry.selected = false;
+    ++m_portalShadowGeneration;
+    for (auto iterator = m_portalShadowCache.begin();
+        iterator != m_portalShadowCache.end();)
+    {
+        const bool stale = m_portalShadowGeneration >
+            iterator->touchedGeneration + 120u;
+        if (!stale)
+        {
+            ++iterator;
+            continue;
+        }
+        if (iterator->constantBuffer && iterator->constantMapped)
+            iterator->constantBuffer->Unmap();
+        if (iterator->objectBuffer && iterator->objectMapped)
+            iterator->objectBuffer->Unmap();
+        if (iterator->constantBuffer)
+            m_retiredRenderBuffers.push_back(
+                std::move(iterator->constantBuffer));
+        if (iterator->objectBuffer)
+            m_retiredRenderBuffers.push_back(
+                std::move(iterator->objectBuffer));
+        if (iterator->atlas)
+            m_retiredShadowTextures.push_back(std::move(iterator->atlas));
+        iterator = m_portalShadowCache.erase(iterator);
+    }
+    if (m_realtimeShadowSettings.portalPolicy !=
+        Engine::Model::PortalShadowPolicy::ReuseMain)
+    {
+        std::vector<size_t> selectedJobs(portalViewJobs.size());
+        std::iota(selectedJobs.begin(), selectedJobs.end(), 0u);
+        std::stable_sort(selectedJobs.begin(), selectedJobs.end(),
+            [&](size_t leftIndex, size_t rightIndex)
+            {
+                const PortalViewJob& left = portalViewJobs[leftIndex];
+                const PortalViewJob& right = portalViewJobs[rightIndex];
+                if (left.depth != right.depth)
+                    return left.depth < right.depth;
+                if (std::abs(left.screenArea - right.screenArea) > 1e-6f)
+                    return left.screenArea > right.screenArea;
+                return left.shadowKey < right.shadowKey;
+            });
+        if (m_realtimeShadowSettings.portalPolicy ==
+            Engine::Model::PortalShadowPolicy::Budgeted)
+        {
+            selectedJobs.resize(std::min(selectedJobs.size(),
+                static_cast<size_t>(std::clamp(
+                    m_realtimeShadowSettings.portalViewBudget, 1u, 64u))));
+        }
+        for (const size_t jobIndex : selectedJobs)
+        {
+            PortalViewJob& job = portalViewJobs[jobIndex];
+            auto found = std::find_if(m_portalShadowCache.begin(),
+                m_portalShadowCache.end(), [&](const PortalShadowCacheEntry& entry)
+                {
+                    return entry.ownerCamera == cam && entry.key == job.shadowKey;
+                });
+            if (found == m_portalShadowCache.end())
+            {
+                m_portalShadowCache.emplace_back();
+                found = std::prev(m_portalShadowCache.end());
+                found->key = job.shadowKey;
+                found->ownerCamera = cam;
+            }
+            found->targetChart = job.portal->target;
+            found->contentScopeRoot = job.contentScopeRoot;
+            found->view = job.mappedView;
+            found->cameraPosition = job.mappedCameraPosition;
+            found->depth = job.depth;
+            found->screenArea = job.screenArea;
+            found->touchedGeneration = m_portalShadowGeneration;
+            found->selected = true;
+            job.shadowCacheIndex = static_cast<size_t>(
+                std::distance(m_portalShadowCache.begin(), found));
+        }
+    }
+
+    const auto connectedSpaceClipPlane = [&activePortalFrame](
         const PortalStencilPass& portalPass,
         const glm::vec3& mappedCameraPosition)
     {
-        const glm::mat4 targetFrame =
-            portalPass.target->GetRenderPortalWorldFrame();
+        const glm::mat4 targetFrame = activePortalFrame(*portalPass.target);
         const glm::vec3 clipPoint(targetFrame[3]);
         glm::vec3 clipNormal = glm::normalize(glm::vec3(targetFrame[2]));
         // Keep the half-space beyond the exit aperture. The earlier version
@@ -2753,10 +3966,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     {
         PortalViewJob& portalJob = portalViewJobs[jobIndex];
         const PortalStencilPass& portalPass = *portalJob.portal;
-        portalJob.dataSlotBase = kMaxObjects +
-            static_cast<uint32_t>(jobIndex) * kPortalRenderSlotsPerView;
+        portalJob.dataSlotBase = m_objectCapacity +
+            static_cast<uint32_t>(jobIndex) * portalRenderSlotsPerView;
         portalJob.objectDataSlotBase =
-            static_cast<uint32_t>(jobIndex) * kPortalRenderSlotsPerView;
+            static_cast<uint32_t>(jobIndex) * portalRenderSlotsPerView;
         portalJob.skyboxConstantBufferOffset =
             static_cast<uint64_t>(jobIndex + 1u) * kCBStride;
 
@@ -2789,6 +4002,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             portalPass, portalJob.mappedCameraPosition);
         for (const PreparedDraw& draw : preparedDraws)
         {
+            if (!IsObjectInSpatialRegion(draw.object,
+                portalJob.contentScopeRoot))
+                continue;
             if (!Engine::Rendering::Portal::
                 IsTraversalInstanceVisibleInConnectedChart(
                     draw.traversalChartPortal, portalPass.target))
@@ -2802,6 +4018,25 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 portalJob.mappedCameraPosition.y;
             mappedData.viewPositionAlphaCutoff.z =
                 portalJob.mappedCameraPosition.z;
+            if (portalJob.shadowCacheIndex < m_portalShadowCache.size())
+            {
+                const PortalShadowCacheEntry& portalShadow =
+                    m_portalShadowCache[portalJob.shadowCacheIndex];
+                if (portalShadow.rendered && portalShadow.atlas)
+                {
+                    const float shadowDistanceScale = mainShadowCascades.data.w > 0.f
+                        ? std::clamp(mappedData.shadowCascadeData.w /
+                            mainShadowCascades.data.w, 0.f, 1.f)
+                        : 1.f;
+                    std::copy(portalShadow.viewProjections.begin(),
+                        portalShadow.viewProjections.end(),
+                        mappedData.shadowViewProjections);
+                    mappedData.shadowCascadeSplits = portalShadow.cascadeSplits;
+                    mappedData.shadowCascadeData = portalShadow.cascadeData;
+                    mappedData.shadowCascadeData.w *= shadowDistanceScale;
+                    mappedData.shadowCameraData = portalShadow.cameraData;
+                }
+            }
             if (includeEditorVisuals && settings.portalDebugVisuals &&
                 settings.portalDebugTintRemoteView)
             {
@@ -2821,6 +4056,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 draw.drawData.objectIndex;
             DrawCBData mappedDraw = draw.drawData;
             mappedDraw.objectIndex = objectDrawSlot;
+            mappedDraw.flags &= ~kClusteredLightingFlag;
             memcpy(static_cast<uint8_t*>(m_objectCBMapped) +
                 static_cast<size_t>(drawSlot) * kCBStride,
                 &mappedDraw, sizeof(mappedDraw));
@@ -2841,9 +4077,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             portalJob.skyboxConstantBufferOffset,
             &skyboxData, sizeof(skyboxData));
     }
-    const uint32_t debugSlotBase = kMaxObjects;
-    const uint32_t debugConstantBufferSlotBase = kMaxObjects +
-        kPortalObjectSlotCount;
+    const uint32_t debugSlotBase = m_objectCapacity;
+    const uint32_t debugConstantBufferSlotBase = m_objectCapacity +
+        portalObjectSlotCount;
     const float debugAlpha = std::clamp(
         settings.portalDebugOverlayAlpha, 0.f, 1.f);
     for (size_t debugIndex = 0; debugIndex < spatialDebugPasses.size() &&
@@ -2875,7 +4111,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     {
         const uint64_t portalRecords =
             static_cast<uint64_t>(portalViewJobs.size() - 1u) *
-                kPortalRenderSlotsPerView + 2u + preparedDraws.size();
+                portalRenderSlotsPerView + 2u + preparedDraws.size();
         const uint64_t portalBytes = portalRecords * sizeof(ObjectGPUData);
         m_portalObjectDataBuffer->FlushMappedWrites(0, portalBytes);
         m_lastObjectDataUploadBytes += portalBytes;
@@ -2887,7 +4123,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     {
         // D3D11's discard upload replaces the buffer contents, so preserve
         // the ordinary prefix when editor diagnostics occupy the tail.
-        const uint64_t debugRecords = static_cast<uint64_t>(kMaxObjects) +
+        const uint64_t debugRecords = static_cast<uint64_t>(m_objectCapacity) +
             std::min(spatialDebugPasses.size(),
                 static_cast<size_t>(kMaxSpatialDebugDraws));
         const uint64_t debugBytes = debugRecords * sizeof(ObjectGPUData);
@@ -2897,6 +4133,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
     const auto drawConnectedSkybox = [&](const PortalViewJob& portalJob)
     {
+        // A scoped spatial region owns only its explicit hierarchy. Falling
+        // back to the scene-global skybox would leak content from outside the
+        // connected chart and hide missing region content.
+        if (portalJob.contentScopeRoot)
+            return;
         if (!skybox || !skybox->GetGraphicsTexture() ||
             !m_portalSkyboxStencilReadPipeline)
             return;
@@ -2905,6 +4146,20 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             portalJob.skyboxConstantBufferOffset);
         context->SetTexture(0, skybox->GetGraphicsTexture());
         context->DrawInstanced(3, 1, 0, 0);
+    };
+    const auto portalTexture = [&](const PortalViewJob& portalJob,
+        const PreparedDraw& draw, uint32_t textureSlot)
+        -> const Engine::Graphics::IGraphicsTexture*
+    {
+        if (textureSlot == 7u &&
+            portalJob.shadowCacheIndex < m_portalShadowCache.size())
+        {
+            const PortalShadowCacheEntry& shadow =
+                m_portalShadowCache[portalJob.shadowCacheIndex];
+            if (shadow.rendered && shadow.atlas)
+                return shadow.atlas.get();
+        }
+        return draw.textures[textureSlot];
     };
 
 // Retained only as a diagnostic fallback for older drivers. Normal builds use
@@ -3039,6 +4294,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                                 continue;
                             if (isSpatialManipulatorCarrierDraw(draw))
                                 continue;
+                            if (!IsObjectInSpatialRegion(draw.object,
+                                portalJob.contentScopeRoot))
+                                continue;
                             if (!Engine::Rendering::Portal::
                                 IsTraversalInstanceVisibleInConnectedChart(
                                     draw.traversalChartPortal,
@@ -3056,7 +4314,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                                 textureSlot < draw.textures.size(); ++textureSlot)
                             {
                                 context->SetTexture(textureSlot,
-                                    draw.textures[textureSlot]);
+                                    portalTexture(portalJob, draw, textureSlot));
                             }
                             dx11Context->OMSetDepthStencilState(
                                 stencilReadState.Get(), portalStencilRef);
@@ -3225,6 +4483,15 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 0, m_objectConstantBuffer.get(),
                 static_cast<uint64_t>(portalJob.dataSlotBase + 1u) *
                     kCBStride);
+            // Root masks are established in a separate pre-pass, so the
+            // currently bound aperture can belong to another root. Always
+            // rebind the matching geometry before resetting depth; otherwise
+            // a different portal's polygon punches skybox-coloured wedges
+            // through local and connected geometry near the aperture edge.
+            context->SetVertexBuffer(
+                0, m_portalApertureBuffer.get(),
+                sizeof(Engine::Model::AnimationVertex),
+                portalPass.apertureVertexOffset);
             context->DrawInstanced(portalPass.apertureVertexCount, 1, 0, 0);
 
             drawConnectedSkybox(portalJob);
@@ -3238,6 +4505,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 if (!draw.object || !draw.vertexBuffer)
                     continue;
                 if (isSpatialManipulatorCarrierDraw(draw))
+                    continue;
+                if (!IsObjectInSpatialRegion(draw.object,
+                    portalJob.contentScopeRoot))
                     continue;
                 if (!Engine::Rendering::Portal::
                     IsTraversalInstanceVisibleInConnectedChart(
@@ -3255,7 +4525,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     textureSlot < draw.textures.size(); ++textureSlot)
                 {
                     context->SetTexture(textureSlot,
-                        draw.textures[textureSlot]);
+                        portalTexture(portalJob, draw, textureSlot));
                 }
                 submitGeometry(draw);
             }
@@ -3287,7 +4557,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 &draw.objectData, sizeof(draw.objectData));
         }
         const uint64_t restoredRecords = !spatialDebugPasses.empty()
-            ? static_cast<uint64_t>(kMaxObjects) + std::min(
+            ? static_cast<uint64_t>(m_objectCapacity) + std::min(
                 spatialDebugPasses.size(),
                 static_cast<size_t>(kMaxSpatialDebugDraws))
             : static_cast<uint64_t>(preparedDraws.size());

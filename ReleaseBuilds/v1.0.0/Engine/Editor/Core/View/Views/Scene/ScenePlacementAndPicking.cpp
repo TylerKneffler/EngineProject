@@ -267,6 +267,11 @@ Engine::Core::Object* ScenePlacementAndPicking::PickObjectInViewport(
             {
                 continue;
             }
+            if (!Engine::Scene::Scene::IsObjectInSpatialRegion(
+                obj, segment.contentScopeRoot))
+            {
+                continue;
+            }
 
             float distance = 0.f;
             if (mesh && mesh->HasBounds())
