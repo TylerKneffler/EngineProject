@@ -27,7 +27,11 @@ namespace Engine::Components
     class SpatialManipulator;
     class SkinnedMesh;
 }
-namespace Engine::Rendering { class BakedLightingData; }
+namespace Engine::Rendering
+{
+    class BakedLightingData;
+    class EnvironmentMap;
+}
 namespace Engine::Renderers { class UIRenderer; }
 namespace Engine::Graphics
 {
@@ -346,6 +350,7 @@ private:
     std::string m_loadedSkyboxPath;
     std::string m_environmentLightingPath;
     std::array<glm::vec4, 9> m_environmentSH{};
+    std::shared_ptr<Engine::Rendering::EnvironmentMap> m_environmentMap;
 
     std::unique_ptr<IPipelineState> m_objectPipeline;
     std::unique_ptr<IPipelineState> m_objectDoubleSidedPipeline;
@@ -460,7 +465,7 @@ private:
     void EnsureSkinPaletteCapacity(uint32_t requiredObjects);
     const Engine::Components::Texture* ResolveSkyboxTexture();
     void UpdateEnvironmentLighting(const Engine::Components::Texture* texture);
-    std::shared_ptr<const std::array<glm::vec4, 9>> ResolveReflectionEnvironment(
+    std::shared_ptr<Engine::Rendering::EnvironmentMap> ResolveReflectionEnvironment(
         const Engine::Components::Material& material);
 
     struct FrameRenderItem

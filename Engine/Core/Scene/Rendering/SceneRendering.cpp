@@ -7,6 +7,7 @@
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
+#include "Core/Rendering/Lighting/EnvironmentMap.h"
 #include "Core/Compoonents/Lighting/LightProbe.h"
 #include "Core/Rendering/Portal/PortalRenderPolicy.h"
 #include "Core/Model/LightingData.h"
@@ -818,13 +819,15 @@ void Scene::UpdateEnvironmentLighting(const Engine::Components::Texture* texture
         return;
 
     m_environmentLightingPath = path;
-    const auto projection = texture
-        ? CachedEnvironmentProjection(*texture) : nullptr;
-    m_environmentSH = projection
-        ? *projection : std::array<glm::vec4, 9>{};
+    m_environmentMap = texture
+        ? Engine::Rendering::EnvironmentMap::Acquire(*texture) : nullptr;
+    if (m_environmentMap)
+        m_environmentMap->Prepare(m_graphicsProvider);
+    m_environmentSH = m_environmentMap
+        ? m_environmentMap->GetRadianceSH() : std::array<glm::vec4, 9>{};
 }
 
-std::shared_ptr<const std::array<glm::vec4, 9>>
+std::shared_ptr<Engine::Rendering::EnvironmentMap>
 Scene::ResolveReflectionEnvironment(
     const Engine::Components::Material& material)
 {
@@ -832,7 +835,11 @@ Scene::ResolveReflectionEnvironment(
         !material.reflectionEnvironmentMap ||
         !material.reflectionEnvironmentMap->HasPixels())
         return nullptr;
-    return CachedEnvironmentProjection(*material.reflectionEnvironmentMap);
+    auto environment = Engine::Rendering::EnvironmentMap::Acquire(
+        *material.reflectionEnvironmentMap);
+    if (environment)
+        environment->Prepare(m_graphicsProvider);
+    return environment;
 }
 
 // ---------------------------------------------------------------------------
@@ -2587,7 +2594,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 glm::radians(settings.hdriRotation), 1.f, 1.f };
             std::copy(m_environmentSH.begin(), m_environmentSH.end(),
                 objectData.environmentSH);
-            preparedDraw.textures[6] = skybox->GetGraphicsTexture();
+            preparedDraw.textures[6] = m_environmentMap
+                ? m_environmentMap->GetSpecularTexture() : nullptr;
             if (preparedDraw.textures[6])
                 objectData.reflectionEnvironmentParams.w = 1.f;
         }
@@ -2689,19 +2697,19 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             objectData.environmentParams.w = allowReflections
                 ? mat->reflectionStrength : 0.f;
             if (allowReflections)
-            if (const auto reflectionSH = ResolveReflectionEnvironment(*mat))
+            if (const auto reflectionEnvironment = ResolveReflectionEnvironment(*mat))
             {
                 objectData.reflectionEnvironmentParams = {
                     std::exp2(std::clamp(mat->reflectionEnvironmentExposure,
                         -16.f, 16.f)),
                     glm::radians(mat->reflectionEnvironmentRotation), 1.f, 0.f };
-                std::copy(reflectionSH->begin(), reflectionSH->end(),
+                const auto& reflectionSH = reflectionEnvironment->GetRadianceSH();
+                std::copy(reflectionSH.begin(), reflectionSH.end(),
                     objectData.reflectionEnvironmentSH);
-                if (mat->reflectionEnvironmentMap &&
-                    mat->reflectionEnvironmentMap->GetGraphicsTexture())
+                if (reflectionEnvironment->GetSpecularTexture())
                 {
                     preparedDraw.textures[6] =
-                        mat->reflectionEnvironmentMap->GetGraphicsTexture();
+                        reflectionEnvironment->GetSpecularTexture();
                     objectData.reflectionEnvironmentParams.w = 1.f;
                 }
             }

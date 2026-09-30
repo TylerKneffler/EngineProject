@@ -3,6 +3,7 @@
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Graphics/IGraphicsTexture.h"
 #include "Core/Memory/CacheStore.h"
+#include "Core/Rendering/Lighting/EnvironmentMap.h"
 
 #include <Windows.h>
 #include <wincodec.h>
@@ -250,6 +251,7 @@ std::shared_ptr<Texture> Texture::Acquire(const std::string& path, bool srgb)
 
 void Texture::Invalidate(const std::string& path)
 {
+    Engine::Rendering::EnvironmentMap::Invalidate(path);
     Engine::Memory::CacheStore::Get().Erase("Lighting.EnvironmentSH",
         Engine::Memory::CacheStore::PathKey(path));
     for (const bool srgb : { false, true })
@@ -404,9 +406,6 @@ bool Texture::Load()
     {
         m_mipLevels = FullMipCount(m_width, m_height);
         GenerateMipChain(m_pixels, m_width, m_height, m_format, m_srgb);
-        if (m_format == GraphicsTextureFormat::Rgba32Float)
-            PrefilterGgxEnvironmentMips(
-                m_pixels, m_width, m_height, m_mipLevels);
     }
     else
     {
@@ -419,6 +418,7 @@ bool Texture::Load()
 
 void Texture::Reload()
 {
+    Engine::Rendering::EnvironmentMap::Invalidate(m_filePath);
     Engine::Memory::CacheStore::Get().Erase("Lighting.EnvironmentSH",
         Engine::Memory::CacheStore::PathKey(m_filePath));
     m_pixels.clear();

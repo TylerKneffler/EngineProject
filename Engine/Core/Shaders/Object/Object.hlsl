@@ -332,6 +332,57 @@ float3 EvaluateCustomReflectionRadiance(ObjectData objectData, float3 direction)
     return max(radiance, 0.0) * objectData.reflectionEnvironmentParams.x;
 }
 
+float2 CubeAtlasUv(float3 direction, float lod, uint atlasWidth)
+{
+    float3 absoluteDirection = abs(direction);
+    float2 local;
+    uint face;
+    if (absoluteDirection.x >= absoluteDirection.y &&
+        absoluteDirection.x >= absoluteDirection.z)
+    {
+        if (direction.x >= 0.0)
+        {
+            face = 0;
+            local = float2(-direction.z, direction.y) / absoluteDirection.x;
+        }
+        else
+        {
+            face = 1;
+            local = float2(direction.z, direction.y) / absoluteDirection.x;
+        }
+    }
+    else if (absoluteDirection.y >= absoluteDirection.z)
+    {
+        if (direction.y >= 0.0)
+        {
+            face = 2;
+            local = float2(direction.x, -direction.z) / absoluteDirection.y;
+        }
+        else
+        {
+            face = 3;
+            local = float2(direction.x, direction.z) / absoluteDirection.y;
+        }
+    }
+    else if (direction.z >= 0.0)
+    {
+        face = 4;
+        local = float2(direction.x, direction.y) / absoluteDirection.z;
+    }
+    else
+    {
+        face = 5;
+        local = float2(-direction.x, direction.y) / absoluteDirection.z;
+    }
+    local = float2(local.x * 0.5 + 0.5, 0.5 - local.y * 0.5);
+    const float baseFaceSize = max((float)atlasWidth / 3.0, 1.0);
+    const float faceSize = max(baseFaceSize / exp2(floor(lod)), 1.0);
+    const float inset = 0.5 / faceSize;
+    local = clamp(local, inset, 1.0 - inset);
+    return (float2((float)(face % 3), (float)(face / 3)) + local) /
+        float2(3.0, 2.0);
+}
+
 float3 EvaluateDirectReflectionRadiance(
     ObjectData objectData, float3 direction, float roughness)
 {
@@ -341,14 +392,11 @@ float3 EvaluateDirectReflectionRadiance(
         ? objectData.reflectionEnvironmentParams.y
         : objectData.environmentParams.y;
     direction = RotateEnvironmentDirection(direction, rotation);
-    const float2 uv = float2(
-        0.5 + atan2(direction.z, direction.x) * 0.1591549431,
-        acos(clamp(direction.y, -1.0, 1.0)) * 0.3183098862);
     uint width = 0, height = 0, mipLevels = 1;
     environmentMap.GetDimensions(0, width, height, mipLevels);
-    // Float environment mip levels are deterministically GGX-prefiltered on
-    // import. Linear roughness selects the matching convolution width.
+    // The cached 3x2 cubemap atlas stores one GGX convolution per mip.
     const float lod = roughness * max((float)mipLevels - 1.0, 0.0);
+    const float2 uv = CubeAtlasUv(direction, lod, width);
     const float exposure = customEnvironment
         ? objectData.reflectionEnvironmentParams.x
         : objectData.environmentParams.x;
