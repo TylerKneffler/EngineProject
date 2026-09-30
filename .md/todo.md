@@ -106,39 +106,10 @@ Status convention:
 ### Image-based lighting, reflections, and indirect lighting
 
 - [ ] HIGH: Convert equirectangular HDRIs into cached cubemaps with diffuse irradiance and prefiltered specular products.
-- [ ] HIGH: Add local box/sphere reflection probes with priorities, influence volumes, box projection, blending, baking, runtime selection, and debug views.
-- [ ] HIGH: Add scene reflection-probe capture with recursion safeguards.
-- [ ] MEDIUM: Add SSR with hierarchical depth tracing, roughness-aware resolve, temporal stabilization, edge fading, and probe/HDRI fallback.
-- [ ] HIGH: Add SSAO/GTAO with normal/depth-aware denoising and temporal stability.
-- [ ] HIGH: Add baked irradiance probes/light-probe volumes for dynamic objects.
-- [ ] MEDIUM: Add probe interpolation, visibility/leak prevention, relocation/classification, debug visualization, and deterministic out-of-volume fallback.
-- [ ] MEDIUM: Evaluate DDGI only after static probe infrastructure exists and has explicit budgets/fallbacks.
-- [ ] MEDIUM: Allow emissive materials to contribute to baked/probe indirect lighting; ordinary realtime emissive remains non-illuminating.
-- [ ] MEDIUM: Add bent-normal/visibility data for environment diffuse and specular occlusion.
 
 ### HDR, exposure, atmosphere, and materials
 
 - [x] Linear FP16 scene color and a configurable composition pass replace UNORM scene lighting and in-material output transforms across DX11, DX12, and Vulkan.
-- [ ] HIGH: Add manual/automatic exposure with luminance metering, adaptation rates, limits, and deterministic editor/export overrides.
-- [ ] MEDIUM: Add bloom sourced from unclipped HDR luminance.
-- [ ] MEDIUM: Add SDR/HDR display color management: paper white, peak luminance, gamut mapping, and swap-chain capability checks.
-- [ ] MEDIUM: Add linear-space height/distance fog consistently to main, portal, reflection, and transparent rendering.
-- [ ] MEDIUM: Add bounded froxel volumetric fog with light/shadow injection and temporal reprojection.
-- [ ] LOW: Add atmospheric sky/sun scattering with authored HDRI fallback.
-- [ ] HIGH: Add energy-compensated multiple scattering for rough metallic/specular BRDFs.
-- [ ] MEDIUM: Add clear-coat, sheen, anisotropy, transmission, and IOR lobes incrementally.
-- [ ] HIGH: Define a lit transparent-material path with lights, reflections, fog, and shadows beyond simple back-to-front blending.
-- [ ] MEDIUM: Add scene-color/depth refraction with thickness/absorption and safe portal fallbacks.
-- [ ] MEDIUM: Add decals for localized material and lighting detail.
-
-### Lighting quality, diagnostics, and validation
-
-- [ ] HIGH: Add per-feature lighting presets with explicit costs instead of coupling unrelated work only through distance bands.
-- [ ] HIGH: Add debug modes for diffuse/specular, normals, roughness, metallic, direct/indirect light, emissive, AO, probes, clusters, luminance, and overdraw.
-- [ ] MEDIUM: Add GPU telemetry for cluster construction, occupancy/overflow, reflections, AO/GI, and HDR post-processing.
-- [ ] HIGH: Add reference scenes and cross-backend comparisons for every light type, BRDF extremes, HDRI/IBL, probes, AO, transparency, exposure, and portal/spatial rendering.
-- [ ] PARTIAL: General parity tolerances exist for the current shadow/animation/terrain fixtures; define per-feature tolerances and add NaN, binding-hazard, black-frame, stale-data, and fallback assertions.
-- [ ] MEDIUM: Document lighting architecture, coordinate/unit conventions, feature compatibility, performance tiers, and fallback behavior.
 
 ### Offline video export
 
