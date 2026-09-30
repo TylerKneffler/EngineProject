@@ -6,7 +6,9 @@
 #include "Core/Scene/Scene.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include <algorithm>
+#include <cstdint>
 #include <cmath>
+#include <cstring>
 #include <sstream>
 
 namespace Engine::Components
@@ -180,12 +182,6 @@ void SampleAnimation(const Animation* animation, float time,
     }
 }
 
-bool IncludesNode(const AnimationManager::Layer& layer, unsigned node)
-{
-    return layer.nodeMask.empty() ||
-        std::find(layer.nodeMask.begin(), layer.nodeMask.end(), node) != layer.nodeMask.end();
-}
-
 float AdvanceTime(float value, float delta, float speed, bool looping,
     const Animation* animation)
 {
@@ -198,11 +194,86 @@ float AdvanceTime(float value, float delta, float speed, bool looping,
 
 struct AnimationManagerScratch
 {
+    struct LayerMaskCache
+    {
+        size_t nodeCount = 0;
+        std::vector<unsigned> source;
+        std::vector<uint64_t> words;
+        bool includesAll = true;
+
+        bool Matches(const AnimationManager::Layer& layer,
+            size_t targetNodeCount) const
+        {
+            return nodeCount == targetNodeCount && source == layer.nodeMask;
+        }
+
+        void Rebuild(const AnimationManager::Layer& layer,
+            size_t targetNodeCount)
+        {
+            nodeCount = targetNodeCount;
+            source = layer.nodeMask;
+            includesAll = source.empty();
+            words.assign((targetNodeCount + 63u) / 64u, 0u);
+            if (includesAll)
+                return;
+            for (const unsigned node : source)
+                if (node < targetNodeCount)
+                    words[node / 64u] |= 1ull << (node % 64u);
+        }
+
+        bool Includes(unsigned node) const
+        {
+            if (includesAll)
+                return true;
+            return node < nodeCount &&
+                (words[node / 64u] & (1ull << (node % 64u))) != 0u;
+        }
+    };
+
+    struct SampleCacheEntry
+    {
+        const Animation* animation = nullptr;
+        float time = 0.f;
+        size_t nodeCount = 0;
+        ReusablePose pose;
+    };
+
     ReusablePose basePose;
-    ReusablePose sampledPose;
     ReusablePose finalPose;
     std::vector<float> channelValues;
+    std::vector<LayerMaskCache> layerMasks;
+    std::vector<SampleCacheEntry> sampleCache;
+    size_t sampleCacheUsed = 0;
 };
+
+namespace
+{
+const ReusablePose& CachedSample(AnimationManagerScratch& scratch,
+    const Animation* animation, float time, size_t nodeCount)
+{
+    for (size_t index = 0; index < scratch.sampleCacheUsed; ++index)
+    {
+        AnimationManagerScratch::SampleCacheEntry& entry =
+            scratch.sampleCache[index];
+        if (entry.animation == animation && entry.nodeCount == nodeCount &&
+            std::memcmp(&entry.time, &time, sizeof(time)) == 0)
+            return entry.pose;
+    }
+
+    if (scratch.sampleCache.size() <= scratch.sampleCacheUsed)
+        scratch.sampleCache.emplace_back();
+    AnimationManagerScratch::SampleCacheEntry& entry =
+        scratch.sampleCache[scratch.sampleCacheUsed++];
+    entry.animation = animation;
+    entry.time = time;
+    entry.nodeCount = nodeCount;
+    entry.pose.nodes.resize(nodeCount);
+    entry.pose.activeNodes.reserve(nodeCount);
+    SampleAnimation(animation, time, nodeCount, entry.pose,
+        scratch.channelValues);
+    return entry.pose;
+}
+}
 
 AnimationManager::AnimationManager()
     : m_scratch(std::make_unique<AnimationManagerScratch>())
@@ -250,7 +321,7 @@ void AnimationManager::Start()
     if (!model) return;
     const std::vector<Engine::Core::Object*>& nodes = model->ResolveNodes();
     for (ReusablePose* pose : { &m_scratch->basePose,
-        &m_scratch->sampledPose, &m_scratch->finalPose })
+        &m_scratch->finalPose })
     {
         pose->nodes.resize(nodes.size());
         pose->activeNodes.reserve(nodes.size());
@@ -271,7 +342,7 @@ void AnimationManager::Start()
     for (const auto& [nodeIndex, weights] : m_restMorphs)
         if (nodeIndex < nodes.size())
             for (ReusablePose* pose : { &m_scratch->basePose,
-                &m_scratch->sampledPose, &m_scratch->finalPose })
+                &m_scratch->finalPose })
                 pose->nodes[nodeIndex].weights.reserve(weights.size());
     if (clip.empty())
     {
@@ -329,8 +400,8 @@ void AnimationManager::Tick(float frameDelta)
     const size_t nodeCount = model->GetNodeCount();
     time = AdvanceTime(time, delta, speed, looping, animation);
     ReusablePose& basePose = m_scratch->basePose;
-    ReusablePose& sampledPose = m_scratch->sampledPose;
     ReusablePose& finalPose = m_scratch->finalPose;
+    m_scratch->sampleCacheUsed = 0;
     SampleAnimation(animation, time, nodeCount, basePose,
         m_scratch->channelValues);
 
@@ -340,12 +411,12 @@ void AnimationManager::Tick(float frameDelta)
         m_previousTime = AdvanceTime(m_previousTime, delta, speed, looping, previousAnimation);
         m_fadeElapsed += delta;
         const float blend = std::clamp(m_fadeElapsed / m_fadeDuration, 0.f, 1.f);
-        SampleAnimation(previousAnimation, m_previousTime, nodeCount,
-            sampledPose, m_scratch->channelValues);
+        const ReusablePose& previousPose = CachedSample(*m_scratch,
+            previousAnimation, m_previousTime, nodeCount);
         for (const auto& [nodeIndex, rest] : m_restPose)
         {
             NodePose& output = basePose.Get(nodeIndex);
-            const NodePose* old = sampledPose.Find(nodeIndex);
+            const NodePose* old = previousPose.Find(nodeIndex);
             output.translation = glm::mix(old && old->hasTranslation ? old->translation : rest.translation,
                 output.hasTranslation ? output.translation : rest.translation, blend);
             output.rotation = glm::normalize(glm::slerp(
@@ -358,7 +429,7 @@ void AnimationManager::Tick(float frameDelta)
         for (const auto& [nodeIndex, restWeights] : m_restMorphs)
         {
             NodePose& output = basePose.Get(nodeIndex);
-            const NodePose* old = sampledPose.Find(nodeIndex);
+            const NodePose* old = previousPose.Find(nodeIndex);
             const std::vector<float>& oldWeights = old && old->hasWeights
                 ? old->weights : restWeights;
             const bool useOutputWeights = output.hasWeights;
@@ -407,19 +478,29 @@ void AnimationManager::Tick(float frameDelta)
             result.weights = found->weights;
     }
 
-    for (Layer& layer : layers)
+    m_scratch->layerMasks.resize(layers.size());
+    for (size_t layerIndex = 0; layerIndex < layers.size(); ++layerIndex)
     {
+        Layer& layer = layers[layerIndex];
         if (!layer.enabled || layer.weight <= 0.f) continue;
         Animation* layerAnimation = resolveAnimation(layer.clip);
         if (!layerAnimation) continue;
         layer.time = AdvanceTime(layer.time, delta, layer.speed, layer.looping, layerAnimation);
-        SampleAnimation(layerAnimation, layer.time, nodeCount, sampledPose,
-            m_scratch->channelValues);
+        AnimationManagerScratch::LayerMaskCache& mask =
+            m_scratch->layerMasks[layerIndex];
+        if (!mask.Matches(layer, nodeCount))
+            mask.Rebuild(layer, nodeCount);
+        const ReusablePose& layerPose =
+            layerAnimation == animation &&
+            std::memcmp(&layer.time, &time, sizeof(time)) == 0
+                ? basePose
+                : CachedSample(*m_scratch, layerAnimation, layer.time,
+                    nodeCount);
         const float layerWeight = std::clamp(layer.weight, 0.f, 1.f);
-        for (const unsigned nodeIndex : sampledPose.activeNodes)
+        for (const unsigned nodeIndex : layerPose.activeNodes)
         {
-            const NodePose& sampled = sampledPose.nodes[nodeIndex];
-            if (!IncludesNode(layer, nodeIndex)) continue;
+            const NodePose& sampled = layerPose.nodes[nodeIndex];
+            if (!mask.Includes(nodeIndex)) continue;
             NodePose& result = finalPose.Get(nodeIndex);
             if (const auto restFound = m_restPose.find(nodeIndex); restFound != m_restPose.end())
             {

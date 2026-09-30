@@ -1,6 +1,9 @@
 #include "Light.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include <algorithm>
+#include <cstring>
+#include <cstdio>
+#include <cstdlib>
 
 namespace Engine::Components
 {
@@ -12,6 +15,13 @@ Light::Light()
     RegisterField("intensity", intensity);
     RegisterField("range", range);
     RegisterField("falloff", falloff);
+    RegisterField("intensityMode", intensityMode);
+    RegisterField("innerConeAngle", innerConeAngle);
+    RegisterField("outerConeAngle", outerConeAngle);
+    RegisterField("lightingChannels", lightingChannels);
+    RegisterField("cookieTexture", cookieTexture);
+    RegisterField("iesProfileTexture", iesProfileTexture);
+    RegisterField("cookieScale", cookieScale);
     RegisterField("baked", baked);
     RegisterField("castsShadows", castsShadows, "Shadows");
     RegisterField("shadowStrength", shadowStrength, "Shadows");
@@ -24,24 +34,70 @@ Light::Light()
 bool Light::DrawProperties(::Engine::Editor::IEditorUi& ui)
 {
     bool changed = false;
-    const char* types[] = { "Point", "Directional" };
-    if (ui.Combo("Type", &lightType, types, 2))
+    const char* types[] = { "Point", "Directional", "Spot" };
+    if (ui.Combo("Type", &lightType, types, 3))
     {
-        lightType = lightType == static_cast<int>(Type::Directional)
-            ? static_cast<int>(Type::Directional)
-            : static_cast<int>(Type::Point);
+        lightType = std::clamp(lightType, static_cast<int>(Type::Point),
+            static_cast<int>(Type::Spot));
         changed = true;
     }
 
     changed = ui.ColorEdit3("Color", &color.x) || changed;
-    changed = ui.DragFloat("Intensity", &intensity, 0.05f, 0.f, 100.f) || changed;
-    if (GetLightType() == Type::Point)
+    char channels[16]{};
+    std::snprintf(channels, sizeof(channels), "0x%08X",
+        static_cast<unsigned>(lightingChannels));
+    if (ui.InputText("Lighting channels", channels, sizeof(channels)))
+    {
+        lightingChannels = static_cast<int>(std::strtoul(channels, nullptr, 0));
+        changed = true;
+    }
+    const char* units[] = { "Compatibility", "Physical" };
+    changed = ui.Combo("Units / attenuation", &intensityMode, units, 2) || changed;
+    intensityMode = std::clamp(intensityMode, 0, 1);
+    const bool physical = GetIntensityMode() == IntensityMode::Physical;
+    const char* intensityLabel = physical
+        ? (GetLightType() == Type::Directional ? "Illuminance (lux)" : "Flux (lumens)")
+        : "Intensity";
+    changed = ui.DragFloat(intensityLabel, &intensity, physical ? 1.f : 0.05f,
+        0.f, physical ? 100000.f : 100.f) || changed;
+    if (GetLightType() != Type::Directional)
     {
         changed = ui.DragFloat("Range", &range, 0.1f, 0.01f, 1000.f) || changed;
-        changed = ui.DragFloat("Falloff", &falloff, 0.05f, 0.1f, 8.f) || changed;
+        if (!physical)
+            changed = ui.DragFloat("Falloff", &falloff, 0.05f, 0.1f, 8.f) || changed;
+        else
+            ui.DisabledLabel("Inverse-square attenuation with a smooth range cutoff.");
+        if (GetLightType() == Type::Spot)
+        {
+            changed = ui.DragFloat("Inner cone (degrees)", &innerConeAngle,
+                0.25f, 0.f, 89.f) || changed;
+            changed = ui.DragFloat("Outer cone (degrees)", &outerConeAngle,
+                0.25f, 0.1f, 89.f) || changed;
+            outerConeAngle = std::clamp(outerConeAngle, 0.1f, 89.f);
+            innerConeAngle = std::clamp(innerConeAngle, 0.f, outerConeAngle);
+            ui.DisabledLabel("Direction follows the object's local +Z axis.");
+        }
+        char cookie[512]{};
+        std::snprintf(cookie, sizeof(cookie), "%s", cookieTexture.c_str());
+        if (ui.InputText("Cookie texture", cookie, sizeof(cookie)))
+        { cookieTexture = cookie; changed = true; }
+        char ies[512]{};
+        std::snprintf(ies, sizeof(ies), "%s", iesProfileTexture.c_str());
+        if (ui.InputText("IES profile texture", ies, sizeof(ies)))
+        { iesProfileTexture = ies; changed = true; }
+        changed = ui.DragFloat("Cookie scale", &cookieScale, 0.01f,
+            0.001f, 1000.f) || changed;
     }
     else
+    {
         ui.DisabledLabel("Direction uses the object's rotation; position is ignored.");
+        char cookie[512]{};
+        std::snprintf(cookie, sizeof(cookie), "%s", cookieTexture.c_str());
+        if (ui.InputText("Cookie texture", cookie, sizeof(cookie)))
+        { cookieTexture = cookie; changed = true; }
+        changed = ui.DragFloat("Cookie scale", &cookieScale, 0.01f,
+            0.001f, 1000.f) || changed;
+    }
 
     int selectedMode = baked ? 1 : 0;
     const char* modes[] = { "Realtime", "Baked" };
@@ -76,8 +132,10 @@ bool Light::DrawProperties(::Engine::Editor::IEditorUi& ui)
             ui.DisabledLabel("Directional realtime shadow maps render on DirectX 11, DirectX 12, and Vulkan.");
         }
     }
+    else if (GetLightType() == Type::Spot)
+        ui.DisabledLabel("Spot shadow policy: unshadowed; does not consume the directional atlas budget.");
     else
-        ui.DisabledLabel("Point-light cubemap shadows are not yet supported.");
+        ui.DisabledLabel("Point shadow policy: unshadowed; cubemap shadows are not yet supported.");
     return changed;
 }
 }

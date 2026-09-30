@@ -638,6 +638,20 @@ set_target_properties(Server PROPERTIES
 
 set(ENGINE_LOCAL_TEST_ROOT "${ENGINE_ROOT}/.local/Tests")
 
+if(NOT ENGINE_PROJECT_DIR AND WIN32)
+    enable_testing()
+    add_executable(ShadowRegressionTests
+        "${ENGINE_ROOT}/Tests/ShadowRegressionTests.cpp")
+    target_link_libraries(ShadowRegressionTests PRIVATE Engine)
+    target_include_directories(ShadowRegressionTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME ShadowVisualAndBudgetRegression
+        COMMAND ShadowRegressionTests)
+    set_tests_properties(ShadowVisualAndBudgetRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}"
+        TIMEOUT 180)
+endif()
+
 if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/MatrixLayerPortalTests.cpp")
     enable_testing()
@@ -670,6 +684,22 @@ if(NOT ENGINE_PROJECT_DIR AND
     add_test(NAME PortalTriggerTraversalRegression COMMAND PortalTriggerTraversalTests
         "${ENGINE_ROOT}/Engine/Core/Assets/Mesh/cube.obj")
     set_tests_properties(PortalTriggerTraversalRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}"
+    )
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PortalRaycastTests.cpp")
+    enable_testing()
+    add_executable(PortalRaycastTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/PortalRaycastTests.cpp"
+    )
+    target_link_libraries(PortalRaycastTests PRIVATE Engine)
+    target_include_directories(PortalRaycastTests PRIVATE
+        "${ENGINE_ROOT}/Engine"
+    )
+    add_test(NAME PortalRaycastRegression COMMAND PortalRaycastTests)
+    set_tests_properties(PortalRaycastRegression PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}"
     )
 endif()

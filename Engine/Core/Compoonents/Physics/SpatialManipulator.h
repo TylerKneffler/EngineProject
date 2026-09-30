@@ -189,8 +189,12 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator | Portal", ClampMin = "0.001")
     float portalCollisionCutUpdateDistance = 0.05f;
 
-    // When a linked portal is removed while a mesh is split, keep both cuts
-    // as independent scene objects instead of restoring the original mesh.
+    // When a connection disappears while a mesh is split, keep both cuts as
+    // serializable scene objects. The original/local object exclusively owns
+    // scripts, children, joints, skeleton and animation controllers. The
+    // remote object is a geometry/material/rigid-body fragment. Animated
+    // geometry is frozen at the disconnect pose to avoid duplicated behavior
+    // and double deformation.
     PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator | Portal")
     bool materializeSplitOnDisconnect = true;
 

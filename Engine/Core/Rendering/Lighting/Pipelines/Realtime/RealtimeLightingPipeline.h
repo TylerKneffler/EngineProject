@@ -3,6 +3,9 @@
 #include "Core/Rendering/Lighting/Pipelines/ILightingPipeline.h"
 #include "Core/Model/LightingData.h"
 #include <cstdint>
+#include <memory>
+#include <array>
+#include <string>
 
 namespace Engine::Scene { class Scene; }
 
@@ -12,6 +15,9 @@ namespace Engine::Rendering
     {
     public:
         using LightData = Engine::Model::LightData;
+
+        RealtimeLightingPipeline();
+        ~RealtimeLightingPipeline();
 
         LightingPipelineKind GetKind() const override
         {
@@ -25,6 +31,12 @@ namespace Engine::Rendering
             bool mapThroughSpatialVolumes = true,
             const Engine::Model::RealtimeShadowSettings* shadowSettings = nullptr,
             Engine::Model::RealtimeShadowSelection* shadowSelection = nullptr,
-            const glm::vec3* importancePosition = nullptr) const;
+            const glm::vec3* importancePosition = nullptr,
+            std::array<std::string, 4>* cookieTextures = nullptr,
+            std::array<std::string, 4>* iesProfiles = nullptr) const;
+
+    private:
+        struct Scratch;
+        mutable std::unique_ptr<Scratch> m_scratch;
     };
 }

@@ -22,6 +22,7 @@ Material::Material()
     RegisterField("doubleSided", doubleSided, "Surface");
     RegisterField("castsShadows", castsShadows, "Shadows");
     RegisterField("unlit", unlit, "Surface");
+    RegisterField("lightingChannels", lightingChannels, "Lighting");
     RegisterField("metallicFactor", metallicFactor, "PBR");
     RegisterField("roughnessFactor", roughnessFactor, "PBR");
     RegisterField("environmentDiffuseStrength", environmentDiffuseStrength, "PBR");
@@ -52,6 +53,10 @@ Material::Material()
 
 namespace
 {
+#ifndef ENGINE_ASSETS_PATH
+#define ENGINE_ASSETS_PATH "Engine/Core/Assets/"
+#endif
+
     Engine::Serialization::JsonValue J3(const glm::vec3& v)
     {
         return Engine::Serialization::JsonValue::MakeArray()
@@ -74,11 +79,26 @@ namespace
         const std::filesystem::path requested(texturePath);
         if (requested.is_absolute() || std::filesystem::exists(requested))
             return requested.lexically_normal().generic_string();
+        const std::filesystem::path projectAssets("Assets");
+        const std::filesystem::path relativeAsset =
+            requested.lexically_relative(projectAssets);
+        if (!relativeAsset.empty() && *relativeAsset.begin() != "..")
+        {
+            const std::filesystem::path engineAsset =
+                std::filesystem::path(ENGINE_ASSETS_PATH) / relativeAsset;
+            if (std::filesystem::exists(engineAsset))
+                return engineAsset.lexically_normal().generic_string();
+        }
         const std::filesystem::path besideMaterial =
             std::filesystem::path(materialPath).parent_path() / requested;
         if (std::filesystem::exists(besideMaterial))
             return besideMaterial.lexically_normal().generic_string();
         return requested.lexically_normal().generic_string();
+    }
+
+    std::string ResolveTexturePath(const std::string& texturePath)
+    {
+        return ResolveTexturePath({}, texturePath);
     }
 }
 
@@ -122,6 +142,7 @@ bool Material::LoadFromFile(const std::string& path)
         if (root.Has("doubleSided")) doubleSided = root["doubleSided"].AsBool();
         if (root.Has("castsShadows")) castsShadows = root["castsShadows"].AsBool();
         if (root.Has("unlit")) unlit = root["unlit"].AsBool();
+        if (root.Has("lightingChannels")) lightingChannels = root["lightingChannels"].AsInt();
         if (root.Has("baseColorUvSet")) baseColorUvSet = root["baseColorUvSet"].AsInt();
         if (root.Has("metallicRoughnessUvSet")) metallicRoughnessUvSet = root["metallicRoughnessUvSet"].AsInt();
         if (root.Has("normalUvSet")) normalUvSet = root["normalUvSet"].AsInt();
@@ -180,6 +201,7 @@ bool Material::SaveToFile(const std::string& path) const
     root.Set("doubleSided", JsonValue(doubleSided));
     root.Set("castsShadows", JsonValue(castsShadows));
     root.Set("unlit", JsonValue(unlit));
+    root.Set("lightingChannels", JsonValue(lightingChannels));
     root.Set("baseColorUvSet", JsonValue(baseColorUvSet));
     root.Set("metallicRoughnessUvSet", JsonValue(metallicRoughnessUvSet));
     root.Set("normalUvSet", JsonValue(normalUvSet));
@@ -206,38 +228,45 @@ std::string Material::TexturePath(const std::shared_ptr<Texture>& texture)
 
 void Material::SetBaseColorTexture(const std::string& path)
 {
-    baseColorTexture = path.empty() ? nullptr : Texture::Acquire(path, true);
+    baseColorTexture = path.empty() ? nullptr :
+        Texture::Acquire(ResolveTexturePath(path), true);
 }
 
 void Material::SetMetallicRoughnessTexture(const std::string& path)
 {
-    metallicRoughnessTexture = path.empty() ? nullptr : Texture::Acquire(path, false);
+    metallicRoughnessTexture = path.empty() ? nullptr :
+        Texture::Acquire(ResolveTexturePath(path), false);
 }
 
 void Material::SetNormalTexture(const std::string& path)
 {
-    normalTexture = path.empty() ? nullptr : Texture::Acquire(path, false);
+    normalTexture = path.empty() ? nullptr :
+        Texture::Acquire(ResolveTexturePath(path), false);
 }
 
 void Material::SetHeightTexture(const std::string& path)
 {
-    heightTexture = path.empty() ? nullptr : Texture::Acquire(path, false);
+    heightTexture = path.empty() ? nullptr :
+        Texture::Acquire(ResolveTexturePath(path), false);
 }
 
 void Material::SetOcclusionTexture(const std::string& path)
 {
-    occlusionTexture = path.empty() ? nullptr : Texture::Acquire(path, false);
+    occlusionTexture = path.empty() ? nullptr :
+        Texture::Acquire(ResolveTexturePath(path), false);
 }
 
 void Material::SetEmissiveTexture(const std::string& path)
 {
-    emissiveTexture = path.empty() ? nullptr : Texture::Acquire(path, true);
+    emissiveTexture = path.empty() ? nullptr :
+        Texture::Acquire(ResolveTexturePath(path), true);
 }
 
 void Material::SetReflectionEnvironmentTexture(const std::string& path)
 {
-    reflectionEnvironmentTexture = path;
-    reflectionEnvironmentMap = path.empty() ? nullptr : Texture::Acquire(path, false);
+    reflectionEnvironmentTexture = ResolveTexturePath(path);
+    reflectionEnvironmentMap = reflectionEnvironmentTexture.empty() ? nullptr :
+        Texture::Acquire(reflectionEnvironmentTexture, false);
 }
 
 void Material::PrepareTextures(IGraphicsProvider* graphicsProvider)

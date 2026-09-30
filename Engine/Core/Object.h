@@ -22,6 +22,9 @@ public:
 
     std::string name;
     bool enabled = true;
+    // Runtime-derived objects participate normally in update/render/physics
+    // but are omitted from authored scene and prefab serialization.
+    bool runtimeOnly = false;
     Transform transform;
 
     Object*             Parent = nullptr;

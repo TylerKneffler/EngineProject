@@ -110,7 +110,7 @@
       </components>
       <children />
     </item>
-    <item prefab="Assets/Fox/Fox.prefab">
+    <item prefab="Assets/Prefabs/Fox/Fox.prefab">
       <transform>
         <Transform.position>
           <item>-1.25</item>

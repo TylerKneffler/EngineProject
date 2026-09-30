@@ -6,6 +6,8 @@
 #include <chrono>
 #include <deque>
 
+namespace Engine::Scene { class Scene; }
+
 namespace Engine::Editor
 {
 struct PerformanceCoreLoad
@@ -46,7 +48,7 @@ struct PerformanceHardware
 class PerformanceView final : public IEditorPanel
 {
 public:
-    PerformanceView();
+    explicit PerformanceView(Engine::Scene::Scene* scene);
     ~PerformanceView() override;
     void DrawPanel(IEditorUi& ui) override;
 
@@ -56,6 +58,7 @@ private:
     void DrawOverview(IEditorUi& ui, float frameRate);
     void DrawCoreGrid(IEditorUi& ui);
     void DrawHardware(IEditorUi& ui);
+    void DrawShadows(IEditorUi& ui);
     void DrawMetric(IEditorUi& ui, const char* id, const char* title,
         const EditorUiPercentageSegment* segments, size_t count,
         const std::deque<float>& history, EditorUiColor historyColor);
@@ -70,5 +73,6 @@ private:
     std::deque<float> m_gpuMemoryHistory;
     std::deque<float> m_frameHistory;
     int m_visualMode = 0;
+    Engine::Scene::Scene* m_scene = nullptr;
 };
 }

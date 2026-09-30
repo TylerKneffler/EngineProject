@@ -29,6 +29,19 @@
             "problemMatcher": "$msCompile"
         },
         {
+            "label": "CMake: Build Editor Debug",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build", "--preset", "debug",
+                "--target", "Editor",
+                "--parallel"
+            ],
+            "group": "build",
+            "presentation": { "reveal": "always", "panel": "shared" },
+            "problemMatcher": "$msCompile"
+        },
+        {
             "label": "CMake: Configure (Release)",
             "type": "shell",
             "command": "cmake",
@@ -102,7 +115,7 @@
             "options": {
                 "cwd": "${workspaceFolder}"
             },
-            "dependsOn": "CMake: Build Debug",
+            "dependsOn": "CMake: Build Editor Debug",
             "dependsOrder": "sequence",
             "group": "build",
             "presentation": {
@@ -120,7 +133,7 @@
             "options": {
                 "cwd": "${workspaceFolder}"
             },
-            "dependsOn": "CMake: Build Debug",
+            "dependsOn": "CMake: Build Editor Debug",
             "dependsOrder": "sequence",
             "presentation": {
                 "reveal": "always",

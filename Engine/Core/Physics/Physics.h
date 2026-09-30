@@ -1,10 +1,12 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <glm/glm.hpp>
 #include <vector>
 
 namespace Engine::Scene { class Scene; }
+namespace Engine::Core { class Object; }
 namespace Engine::Components { class RigidBody; }
 
 namespace Engine::Physics
@@ -12,6 +14,23 @@ namespace Engine::Physics
 class Physics
 {
 public:
+    enum class RaycastHitKind : uint8_t
+    {
+        RigidBody,
+        PortalSplitPiece,
+        PortalApertureRim
+    };
+    struct RaycastHit
+    {
+        RaycastHitKind kind = RaycastHitKind::RigidBody;
+        Engine::Core::Object* object = nullptr;
+        Engine::Components::RigidBody* rigidBody = nullptr;
+        const void* instanceKey = nullptr;
+        glm::vec3 point { 0.f };
+        glm::vec3 normal { 0.f, 1.f, 0.f };
+        float distance = 0.f;
+    };
+
     explicit Physics(Engine::Scene::Scene& scene);
     ~Physics();
 
@@ -42,6 +61,12 @@ public:
         const glm::vec3& worldNormal, float edgeHalfWidth,
         float edgeHalfDepth);
     void RemovePortalApertureCollider(const void* instanceKey);
+
+    // Returns every Bullet hit in ascending distance order. Portal-aware
+    // callers use this primitive for each straight chart segment.
+    std::vector<RaycastHit> RaycastAll(const glm::vec3& origin,
+        const glm::vec3& direction, float maxDistance,
+        uint32_t collisionMask = ~0u) const;
 
     // Internal bridge for physics components; keeps Bullet types out of the
     // engine-facing header.

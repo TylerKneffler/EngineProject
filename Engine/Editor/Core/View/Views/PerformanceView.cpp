@@ -1,5 +1,6 @@
 #include "PerformanceView.h"
 #include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Scene/Scene.h"
 #include <pdh.h>
 #include <pdhmsg.h>
 #include <psapi.h>
@@ -310,8 +311,8 @@ private:
     ComPtr<IDXGIAdapter3> m_adapter;
 };
 
-PerformanceView::PerformanceView()
-    : m_sampler(std::make_unique<Sampler>())
+PerformanceView::PerformanceView(Engine::Scene::Scene* scene)
+    : m_sampler(std::make_unique<Sampler>()), m_scene(scene)
 {
     SetCursorBehaviorOnFocus(CursorBehaviorOnFocus::Visible);
     m_hardware = m_sampler->Hardware();
@@ -495,6 +496,142 @@ void PerformanceView::DrawHardware(IEditorUi& ui)
         FormatBytes(m_hardware.sharedVideoMemory).c_str());
 }
 
+void PerformanceView::DrawShadows(IEditorUi& ui)
+{
+    if (!m_scene)
+    {
+        ui.DisabledLabel("No active scene is available.");
+        return;
+    }
+
+    const Engine::Scene::Scene::ShadowDebugSnapshot& shadow =
+        m_scene->GetShadowDebugSnapshot();
+    ui.ValueLabel("Realtime shadows", shadow.enabled ? "Enabled" : "Disabled");
+    if (!shadow.enabled)
+    {
+        ui.DisabledLabel("Enable realtime shadows in project preferences to collect diagnostics.");
+        return;
+    }
+
+    ui.Separator();
+    ui.Label("Selected shadow light");
+    if (!shadow.hasSelectedLight)
+    {
+        ui.DisabledLabel("No eligible realtime directional light was selected.");
+    }
+    else
+    {
+        ui.ValueLabel("Light", shadow.selectedLight.c_str());
+        std::ostringstream direction;
+        direction << std::fixed << std::setprecision(3)
+            << shadow.directionToLight.x << ", "
+            << shadow.directionToLight.y << ", "
+            << shadow.directionToLight.z;
+        ui.ValueLabel("Direction to light", direction.str().c_str());
+    }
+
+    ui.Separator();
+    ui.Label("Directional shadow atlas");
+    if (!shadow.hasSelectedLight || !shadow.atlasResolution ||
+        !shadow.cascadeCount)
+    {
+        ui.DisabledLabel("No directional shadow atlas is allocated.");
+    }
+    else
+    {
+        const std::string resolution = std::to_string(shadow.atlasResolution) +
+            " x " + std::to_string(shadow.atlasResolution);
+        ui.ValueLabel("Resolution", resolution.c_str());
+        const uint32_t tileCount = shadow.cascadeCount == 1u ? 1u : 4u;
+        const float occupancy = 100.f * static_cast<float>(
+            shadow.cascadeCount) / static_cast<float>(tileCount);
+        std::ostringstream occupancyText;
+        occupancyText << std::fixed << std::setprecision(0) << occupancy
+            << "% (" << shadow.cascadeCount << " / " << tileCount
+            << " tiles)";
+        ui.ValueLabel("Occupancy", occupancyText.str().c_str());
+        ui.ValueLabel("Allocation generation",
+            std::to_string(shadow.atlasAllocationGeneration).c_str());
+
+        constexpr std::array<EditorUiColor, 4> cascadeColors{{
+            { .18f, .72f, 1.f, 1.f }, { .30f, .84f, .48f, 1.f },
+            { .96f, .68f, .22f, 1.f }, { .90f, .34f, .52f, 1.f }
+        }};
+        const int columns = tileCount == 1u ? 1 : 2;
+        if (ui.BeginTable("##shadowAtlas", columns))
+        {
+            for (uint32_t tile = 0; tile < tileCount; ++tile)
+            {
+                ui.TableNextColumn();
+                if (tile < shadow.cascadeCount)
+                {
+                    const std::string title = "Cascade " +
+                        std::to_string(tile + 1u);
+                    ui.Label(title.c_str());
+                    const EditorUiPercentageSegment segment[] = {
+                        { title.c_str(), 100.f, cascadeColors[tile] }
+                    };
+                    const std::string id = "##shadowTile" +
+                        std::to_string(tile);
+                    ui.PercentageGrid(id.c_str(), segment, 1u, 72.f);
+                }
+                else
+                {
+                    ui.DisabledLabel("Unused tile");
+                    ui.Spacing();
+                }
+            }
+            ui.EndTable();
+        }
+    }
+
+    ui.Separator();
+    ui.Label("Cascade bounds");
+    if (!shadow.cascadeCount)
+        ui.DisabledLabel("No cascade bounds are available.");
+    for (uint32_t cascade = 0; cascade < shadow.cascadeCount; ++cascade)
+    {
+        std::ostringstream label;
+        label << "Cascade " << cascade + 1u << "  0-" << std::fixed
+            << std::setprecision(2) << shadow.cascadeSplits[cascade];
+        ui.Label(label.str().c_str());
+        const glm::vec3& center = shadow.cascadeCenters[cascade];
+        std::ostringstream bounds;
+        bounds << "Center (" << std::fixed << std::setprecision(2)
+            << center.x << ", " << center.y << ", " << center.z
+            << ")  Radius " << shadow.cascadeRadii[cascade]
+            << "  Diameter " << shadow.cascadeRadii[cascade] * 2.f;
+        ui.DisabledLabel(bounds.str().c_str());
+    }
+
+    ui.Separator();
+    ui.Label("Shadow workload");
+    ui.ValueLabel("Unique eligible casters",
+        std::to_string(shadow.casterCount).c_str());
+    ui.ValueLabel("Main cascade caster draws",
+        std::to_string(shadow.submittedCasterDrawCount).c_str());
+    ui.ValueLabel("Static baked receivers",
+        std::to_string(shadow.bakedReceiverCount).c_str());
+    ui.ValueLabel("Dynamic realtime receivers",
+        std::to_string(shadow.dynamicReceiverCount).c_str());
+    ui.DisabledLabel("Baked receivers skip realtime shadow sampling but remain realtime casters for dynamic objects.");
+
+    ui.Separator();
+    ui.Label("Portal shadow atlases");
+    ui.ValueLabel("Allocated / rendered",
+        (std::to_string(shadow.portalAtlasCount) + " / " +
+            std::to_string(shadow.renderedPortalAtlasCount)).c_str());
+    if (shadow.portalAtlasResolution)
+    {
+        const std::string portalResolution =
+            std::to_string(shadow.portalAtlasResolution) + " x " +
+            std::to_string(shadow.portalAtlasResolution);
+        ui.ValueLabel("Per-view resolution", portalResolution.c_str());
+    }
+    else
+        ui.DisabledLabel("Portal views reuse the main directional atlas.");
+}
+
 void PerformanceView::DrawPanel(IEditorUi& ui)
 {
     if (!ui.BeginWindow(m_title.c_str(), &m_open))
@@ -519,6 +656,11 @@ void PerformanceView::DrawPanel(IEditorUi& ui)
         if (ui.BeginTab("Hardware"))
         {
             DrawHardware(ui);
+            ui.EndTab();
+        }
+        if (ui.BeginTab("Shadows"))
+        {
+            DrawShadows(ui);
             ui.EndTab();
         }
         ui.EndTabBar();

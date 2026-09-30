@@ -214,8 +214,8 @@ bool SceneViewportToolbar::Draw(IEditorUi& ui,
 bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
     const EditorUiViewportInput& input,Engine::Scene::Scene* scene)
 {
-    if(!scene||scene->IsEditorMode2D()||input.available.x<150.f||
-        input.available.y<120.f)
+    if(!scene||scene->IsEditorMode2D()||input.available.x<90.f||
+        input.available.y<70.f)
     {
         m_cubeDragObject=nullptr;
         m_cubeDragAxis=-1;
@@ -243,8 +243,9 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
     right=glm::normalize(right);
     const glm::vec3 up=glm::normalize(glm::cross(forward,right));
     const glm::vec3 cameraDirection=-forward;
-    const EditorUiVec2 center{input.available.x-62.f,58.f};
-    constexpr float cubeScale=24.f;
+    constexpr float gizmoScale=.5f;
+    const EditorUiVec2 center{input.available.x-31.f,29.f};
+    constexpr float cubeScale=24.f*gizmoScale;
     constexpr glm::vec3 vertices[8]={
         {-1.f,-1.f,-1.f},{1.f,-1.f,-1.f},{1.f,1.f,-1.f},{-1.f,1.f,-1.f},
         {-1.f,-1.f,1.f},{1.f,-1.f,1.f},{1.f,1.f,1.f},{-1.f,1.f,1.f}
@@ -281,7 +282,7 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
     constexpr int edges[12][2]={{0,1},{1,2},{2,3},{3,0},{4,5},{5,6},
         {6,7},{7,4},{0,4},{1,5},{2,6},{3,7}};
     int hoveredEdge=-1;
-    float edgeDistance=6.f;
+    float edgeDistance=5.f;
     for(int edge=0;edge<12;++edge)
     {
         const glm::vec3 midpoint=(vertices[edges[edge][0]]+
@@ -294,7 +295,7 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
         {edgeDistance=distance;hoveredEdge=edge;}
     }
     int hoveredCorner=-1;
-    float cornerDistance=8.f;
+    float cornerDistance=6.f;
     for(int corner=0;corner<8;++corner)
     {
         if(glm::dot(vertices[corner],cameraDirection)<=-0.001f)
@@ -316,7 +317,7 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
     EditorUiVec2 handleStarts[3]{};
     EditorUiVec2 handleEnds[3]{};
     int hoveredHandle=-1;
-    float closestHandleDistance=8.f;
+    float closestHandleDistance=6.f;
     EditorUiVec2 hoveredDragDirection{};
     if(selected&&m_transformTool!=EditorTransformTool::Hand)
     {
@@ -331,14 +332,14 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
                 ?Multiply(direction,1.f/directionLength)
                 :fallbackDirections[axis];
             handleDirections[axis]=direction;
-            handleStarts[axis]=Add(center,Multiply(direction,29.f));
-            handleEnds[axis]=Add(center,Multiply(direction,53.f));
+            handleStarts[axis]=Add(center,Multiply(direction,29.f*gizmoScale));
+            handleEnds[axis]=Add(center,Multiply(direction,53.f*gizmoScale));
         }
 
         if(m_transformTool==EditorTransformTool::Rotate)
         {
             constexpr int segments=64;
-            constexpr float radius=47.f;
+            constexpr float radius=47.f*gizmoScale;
             for(int axis=0;axis<3;++axis)
             {
                 const glm::vec3 basisA=worldAxes[(axis+1)%3];
@@ -387,7 +388,8 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
         }
     }
 
-    ui.DrawViewportCircle(center,56.f,{0.055f,0.065f,0.085f,.82f},true);
+    ui.DrawViewportCircle(center,56.f*gizmoScale,
+        {0.055f,0.065f,0.085f,.82f},true);
     for(int index=0;index<6;++index)
     {
         const Face& face=faces[index];
@@ -401,7 +403,7 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
             projected[face.index[3]],color);
         for(int side=0;side<4;++side)
             ui.DrawViewportLine(projected[face.index[side]],
-                projected[face.index[(side+1)%4]],{.04f,.05f,.07f,.95f},1.5f);
+                projected[face.index[(side+1)%4]],{.04f,.05f,.07f,.95f},1.f);
         EditorUiVec2 label{};
         for(int vertex:face.index)
         {label.x+=projected[vertex].x*.25f;label.y+=projected[vertex].y*.25f;}
@@ -413,9 +415,9 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
     }
     if(hoveredEdge>=0)
         ui.DrawViewportLine(projected[edges[hoveredEdge][0]],
-            projected[edges[hoveredEdge][1]],{1.f,.82f,.16f,1.f},4.f);
+            projected[edges[hoveredEdge][1]],{1.f,.82f,.16f,1.f},2.f);
     if(hoveredCorner>=0)
-        ui.DrawViewportCircle(projected[hoveredCorner],7.f,
+        ui.DrawViewportCircle(projected[hoveredCorner],3.5f,
             {1.f,.82f,.16f,1.f},true);
 
     if(selected&&m_transformTool!=EditorTransformTool::Hand)
@@ -424,7 +426,7 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
         if(m_transformTool==EditorTransformTool::Rotate)
         {
             constexpr int segments=64;
-            constexpr float radius=47.f;
+            constexpr float radius=47.f*gizmoScale;
             for(int axis=0;axis<3;++axis)
             {
                 const glm::vec3 basisA=worldAxes[(axis+1)%3];
@@ -444,8 +446,8 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
                     if(segment>0)
                     {
                         ui.DrawViewportLine(previous,current,
-                            {.025f,.03f,.04f,.96f},5.f);
-                        ui.DrawViewportLine(previous,current,color,2.5f);
+                            {.025f,.03f,.04f,.96f},2.5f);
+                        ui.DrawViewportLine(previous,current,color,1.25f);
                     }
                     previous=current;
                 }
@@ -459,32 +461,32 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
                     (m_cubeDragObject&&axis==m_cubeDragAxis)
                     ?hoverColor:axisColors[axis];
                 ui.DrawViewportLine(handleStarts[axis],handleEnds[axis],
-                    {.025f,.03f,.04f,.96f},6.f);
-                ui.DrawViewportLine(handleStarts[axis],handleEnds[axis],color,3.f);
+                    {.025f,.03f,.04f,.96f},3.f);
+                ui.DrawViewportLine(handleStarts[axis],handleEnds[axis],color,1.5f);
                 if(m_transformTool==EditorTransformTool::Translate)
                 {
                     const EditorUiVec2 perpendicular{
                         -handleDirections[axis].y,handleDirections[axis].x};
                     const EditorUiVec2 arrowBase=Subtract(handleEnds[axis],
-                        Multiply(handleDirections[axis],10.f));
+                        Multiply(handleDirections[axis],5.f));
                     ui.DrawViewportTriangle(handleEnds[axis],
-                        Add(arrowBase,Multiply(perpendicular,5.f)),
-                        Subtract(arrowBase,Multiply(perpendicular,5.f)),color);
+                        Add(arrowBase,Multiply(perpendicular,2.5f)),
+                        Subtract(arrowBase,Multiply(perpendicular,2.5f)),color);
                 }
                 else
-                    DrawBoxHandle(ui,handleEnds[axis],5.f,color);
+                    DrawBoxHandle(ui,handleEnds[axis],2.5f,color);
                 ui.DrawViewportText(Add(handleEnds[axis],
                     Multiply(EditorUiVec2{-handleDirections[axis].y,
-                        handleDirections[axis].x},6.f)),labels[axis],color);
+                        handleDirections[axis].x},3.f)),labels[axis],color);
             }
         }
     }
 
-    const bool projectionHovered=input.mousePosInViewport.x>=center.x-28.f&&
-        input.mousePosInViewport.x<=center.x+28.f&&
-        input.mousePosInViewport.y>=center.y+43.f&&
-        input.mousePosInViewport.y<=center.y+61.f;
-    ui.DrawViewportText({center.x-24.f,center.y+45.f},
+    const bool projectionHovered=input.mousePosInViewport.x>=center.x-15.f&&
+        input.mousePosInViewport.x<=center.x+15.f&&
+        input.mousePosInViewport.y>=center.y+21.5f&&
+        input.mousePosInViewport.y<=center.y+30.5f;
+    ui.DrawViewportText({center.x-12.f,center.y+22.5f},
         camera->orthographic?"Ortho":"Persp",
         projectionHovered?EditorUiColor{1.f,.82f,.16f,1.f}:
             EditorUiColor{.82f,.86f,.94f,.95f});

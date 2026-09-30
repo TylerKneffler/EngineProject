@@ -380,6 +380,7 @@ struct ObjectGPUData
     // Independent from portal-view clipping: active traversal bodies render
     // their local and remote chart instances from one untouched mesh buffer.
     glm::vec4 traversalClipPlane;
+    glm::uvec4 lightingChannels{ 0xffffffffu, 0u, 0u, 0u };
 };
 
 // Constant buffer for grid rendering
@@ -403,8 +404,8 @@ struct SkyboxCBData
 };
 
 static_assert(sizeof(DrawCBData) == 16, "Draw constants must remain small");
-static_assert(sizeof(ObjectGPUData) == 1040, "Object buffer layout must match Object.hlsl");
-static_assert(sizeof(Engine::Model::LightData) == 48,
+static_assert(sizeof(ObjectGPUData) == 1056, "Object buffer layout must match Object.hlsl");
+static_assert(sizeof(Engine::Model::LightData) == 128,
     "Light buffer layout must match Object.hlsl");
 static_assert(sizeof(GridCBData) == 128, "Grid constant-buffer layout must match Grid.hlsl");
 static_assert(sizeof(SkyboxCBData) == 80, "Skybox constant-buffer layout must match Skybox.hlsl");
@@ -1308,49 +1309,65 @@ void Scene::PrepareRenderFrame()
 
     if (!m_graphicsProvider || !m_lightDataMapped || !m_boneDataMapped)
         return;
-    const size_t skinnedObjectCount = std::count_if(
-        m_objects.begin(), m_objects.end(), [](const auto& object)
+
+    m_frameComponentLookupScratch.clear();
+    m_frameComponentLookupScratch.reserve(m_objects.size());
+    m_frameSpatialManipulatorScratch.clear();
+    m_frameSpatialManipulatorScratch.reserve(m_objects.size());
+    size_t skinnedObjectCount = 0;
+    for (const auto& object : m_objects)
+    {
+        FrameComponentLookup lookup{};
+        lookup.object = object.get();
+        if (lookup.object)
         {
-            return object && object->GetComponent<
-                Engine::Components::SkinnedMesh>() != nullptr;
-        });
+            lookup.mesh = lookup.object->GetComponent<
+                Engine::Components::Mesh>();
+            lookup.sprite = lookup.object->GetComponent<
+                Engine::Components::Sprite>();
+            lookup.material = lookup.object->GetComponent<
+                Engine::Components::Material>();
+            lookup.spatialManipulator = lookup.object->GetComponent<
+                Engine::Components::SpatialManipulator>();
+            lookup.skinnedMesh = lookup.object->GetComponent<
+                Engine::Components::SkinnedMesh>();
+            lookup.bakedLighting = lookup.object->GetComponent<
+                Engine::Rendering::BakedLightingData>();
+            if (lookup.spatialManipulator)
+                m_frameSpatialManipulatorScratch.push_back(
+                    lookup.spatialManipulator);
+            if (lookup.skinnedMesh)
+                ++skinnedObjectCount;
+        }
+        m_frameComponentLookupScratch.push_back(lookup);
+    }
     if (skinnedObjectCount > std::numeric_limits<uint32_t>::max())
         throw std::runtime_error("Skinned object count exceeds renderer index range");
     EnsureSkinPaletteCapacity(static_cast<uint32_t>(skinnedObjectCount));
-
-    m_frameLightCount = m_realtimeLightingPipeline.CollectLights(
-        *this,
-        static_cast<Engine::Model::LightData*>(m_lightDataMapped),
-        std::min(kMaxLights,
-            m_distanceLightingSettings.maximumRealtimeLights));
-    m_lightDataBuffer->FlushMappedWrites();
 
     // Nonlinear mesh results depend on authored geometry and active warp
     // volumes, not on camera motion. A compact signature lets both editor and
     // runtime frames reuse static CPU deformation and its upload buffer.
     uint64_t warpRevision = 1469598103934665603ull;
     bool hasActiveWarpVolume = false;
-    const auto hashWarpObject = [&](const Engine::Core::Object* object)
+    for (const FrameComponentLookup& lookup : m_frameComponentLookupScratch)
     {
-        if (!object)
-            return;
-        if (const auto* manipulator = object->GetComponent<
-                Engine::Components::SpatialManipulator>())
-        {
-            hasActiveWarpVolume = hasActiveWarpVolume ||
-                (manipulator->enabled && manipulator->definesWarpVolume &&
-                    object->IsEnabledInHierarchy());
-            HashRevision(warpRevision,
-                static_cast<uint64_t>(reinterpret_cast<uintptr_t>(manipulator)));
-            HashRevision(warpRevision, manipulator->GetConfigurationRevision());
-            HashRevision(warpRevision, object->transform.GetWorldRevision());
-            HashRevision(warpRevision, manipulator->enabled ? 1u : 0u);
-            HashRevision(warpRevision, manipulator->definesWarpVolume ? 1u : 0u);
-            HashRevision(warpRevision, object->IsEnabledInHierarchy() ? 1u : 0u);
-        }
-    };
-    for (const auto& object : m_objects)
-        hashWarpObject(object.get());
+        if (!lookup.object || !lookup.spatialManipulator)
+            continue;
+        const auto* manipulator = lookup.spatialManipulator;
+        hasActiveWarpVolume = hasActiveWarpVolume ||
+            (manipulator->enabled && manipulator->definesWarpVolume &&
+                lookup.object->IsEnabledInHierarchy());
+        HashRevision(warpRevision,
+            static_cast<uint64_t>(reinterpret_cast<uintptr_t>(manipulator)));
+        HashRevision(warpRevision, manipulator->GetConfigurationRevision());
+        HashRevision(warpRevision,
+            lookup.object->transform.GetWorldRevision());
+        HashRevision(warpRevision, manipulator->enabled ? 1u : 0u);
+        HashRevision(warpRevision, manipulator->definesWarpVolume ? 1u : 0u);
+        HashRevision(warpRevision,
+            lookup.object->IsEnabledInHierarchy() ? 1u : 0u);
+    }
 
     m_frameRenderItems.reserve(m_objects.size());
     if (!hasActiveWarpVolume)
@@ -1374,12 +1391,11 @@ void Scene::PrepareRenderFrame()
     std::unordered_map<Engine::Core::Object*,
         std::vector<Engine::Components::SpatialManipulator::TraversalRenderInstance>>
         traversalRenderInstances;
-    for (const auto& object : m_objects)
+    for (const FrameComponentLookup& lookup : m_frameComponentLookupScratch)
     {
-        if (!object)
+        if (!lookup.object)
             continue;
-        if (auto* manipulator = object->GetComponent<
-                Engine::Components::SpatialManipulator>())
+        if (auto* manipulator = lookup.spatialManipulator)
         {
             std::vector<Engine::Components::SpatialManipulator::TraversalRenderInstance>
                 instances;
@@ -1393,13 +1409,13 @@ void Scene::PrepareRenderFrame()
     }
     uint32_t skinPaletteSlot = 0;
     bool boneDataChanged = false;
-    for (const auto& object : m_objects)
+    for (const FrameComponentLookup& lookup : m_frameComponentLookupScratch)
     {
-        Engine::Core::Object* candidate = object.get();
-        Engine::Components::Mesh* mesh =
-            candidate->GetComponent<Engine::Components::Mesh>();
-        Engine::Components::Sprite* sprite =
-            candidate->GetComponent<Engine::Components::Sprite>();
+        Engine::Core::Object* candidate = lookup.object;
+        if (!candidate)
+            continue;
+        Engine::Components::Mesh* mesh = lookup.mesh;
+        Engine::Components::Sprite* sprite = lookup.sprite;
         Engine::Components::Sprite::RenderData spriteData;
         const bool spriteReady = sprite &&
             sprite->PrepareRenderData(m_graphicsProvider, spriteData);
@@ -1412,9 +1428,10 @@ void Scene::PrepareRenderFrame()
         item.object = candidate;
         item.mesh = mesh;
         item.sprite = sprite;
-        item.material = candidate->GetComponent<Engine::Components::Material>();
-        item.bakedLighting =
-            candidate->GetComponent<Engine::Rendering::BakedLightingData>();
+        item.material = lookup.material;
+        item.spatialManipulator = lookup.spatialManipulator;
+        item.skinnedMesh = lookup.skinnedMesh;
+        item.bakedLighting = lookup.bakedLighting;
         item.belongsToPreview = m_previewObject &&
             IsObjectOrDescendant(candidate, m_previewObject);
         glm::mat4 authoredWorld = candidate->transform.GetWorldMatrix();
@@ -1449,8 +1466,7 @@ void Scene::PrepareRenderFrame()
         // visibly shears a single mesh that straddles a warp-volume boundary.
         // Portal traversal instances already provide independently clipped
         // source/target chart draws, so retain their specialized path.
-        const bool hasSkinnedMesh = candidate->GetComponent<
-            Engine::Components::SkinnedMesh>() != nullptr;
+        const bool hasSkinnedMesh = lookup.skinnedMesh != nullptr;
         if (hasActiveWarpVolume && mesh && !sprite &&
             !hasSplitRenderInstances && !hasSkinnedMesh &&
             !mesh->GetVertices().empty())
@@ -1609,8 +1625,8 @@ void Scene::PrepareRenderFrame()
 
         if (skinPaletteSlot < m_skinnedObjectCapacity)
         {
-            if (Engine::Components::SkinnedMesh* skinned =
-                candidate->GetComponent<Engine::Components::SkinnedMesh>())
+            if (mesh && !mesh->IsPortalPoseSnapshot())
+            if (Engine::Components::SkinnedMesh* skinned = lookup.skinnedMesh)
             {
                 const std::vector<glm::mat4>& palette =
                     skinned->BuildPalette();
@@ -1665,6 +1681,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 {
     m_lastObjectDataUploadBytes = 0;
     m_lastOcclusionCulledCount = 0;
+    m_shadowDebugSnapshot = {};
     if (!context)
     {
         return;
@@ -1875,12 +1892,34 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     // inside-volume game camera cannot leave source-chart lights bound when
     // the editor view subsequently renders the embedded chart (or vice versa).
     Engine::Model::RealtimeShadowSelection shadowSelection{};
+    std::array<std::string, 4> cookiePaths{};
+    std::array<std::string, 4> iesPaths{};
     m_frameLightCount = m_realtimeLightingPipeline.CollectLights(*this,
         static_cast<Engine::Model::LightData*>(m_lightDataMapped),
         std::min(kMaxLights,
             m_distanceLightingSettings.maximumRealtimeLights),
         !cameraUsesSourceWarpChart, &m_realtimeShadowSettings,
-        &shadowSelection, &cameraPosition);
+        &shadowSelection, &cameraPosition, &cookiePaths, &iesPaths);
+    std::array<std::shared_ptr<Engine::Components::Texture>, 8> photometryTextures{};
+    for (size_t index = 0; index < cookiePaths.size(); ++index)
+    {
+        if (!cookiePaths[index].empty())
+        {
+            photometryTextures[index] = Engine::Components::Texture::Acquire(
+                cookiePaths[index], false);
+            photometryTextures[index]->Prepare(m_graphicsProvider);
+        }
+        if (!iesPaths[index].empty())
+        {
+            photometryTextures[index + 4u] = Engine::Components::Texture::Acquire(
+                iesPaths[index], false);
+            photometryTextures[index + 4u]->Prepare(m_graphicsProvider);
+        }
+    }
+    for (uint32_t index = 0; index < photometryTextures.size(); ++index)
+        context->SetTexture(16u + index, photometryTextures[index]
+            ? photometryTextures[index]->GetGraphicsTexture() : nullptr);
+    m_shadowDebugSnapshot.enabled = m_realtimeShadowSettings.enabled;
 
     const uint32_t clusterTileSize = std::clamp(
         m_distanceLightingSettings.clusterTileSize, 16u, 256u);
@@ -1942,8 +1981,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             m_clusterLightIndexCapacity, indexCount, sizeof(uint32_t),
             "Forward+ cluster light indices");
 
-        std::vector<glm::uvec2> headers(clusterCount);
-        std::vector<uint32_t> indices(indexCount, 0u);
+        m_clusterHeaderScratch.assign(clusterCount, glm::uvec2(0u));
+        m_clusterLightIndexScratch.assign(indexCount, 0u);
+        std::vector<glm::uvec2>& headers = m_clusterHeaderScratch;
+        std::vector<uint32_t>& indices = m_clusterLightIndexScratch;
         for (uint32_t cluster = 0; cluster < clusterCount; ++cluster)
             headers[cluster].x = cluster * maximumLightsPerCluster;
         const auto depthSlice = [&](float depth)
@@ -1964,7 +2005,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         for (uint32_t lightIndex = 0; lightIndex < m_frameLightCount; ++lightIndex)
         {
             const auto& light = lights[lightIndex];
-            if (light.params.y > 0.5f)
+            if (std::abs(light.params.y - 1.f) < 0.25f)
             {
                 for (uint32_t cluster = 0; cluster < clusterCount; ++cluster)
                     appendLight(cluster, lightIndex);
@@ -2033,6 +2074,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 : nullptr;
             m_directionalShadowResolution = m_directionalShadowMap
                 ? resolution : 0u;
+            if (m_directionalShadowMap)
+                ++m_directionalShadowAllocationGeneration;
         }
         if (!m_directionalShadowMap)
         {
@@ -2044,6 +2087,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         }
     }
     m_lightDataBuffer->FlushMappedWrites();
+    m_shadowDebugSnapshot.hasSelectedLight = shadowSelection.valid;
+    m_shadowDebugSnapshot.selectedLight = shadowSelection.stableLightKey;
+    m_shadowDebugSnapshot.directionToLight =
+        shadowSelection.directionToLight;
+    m_shadowDebugSnapshot.atlasResolution = shadowSelection.valid
+        ? m_directionalShadowResolution : 0u;
+    m_shadowDebugSnapshot.atlasAllocationGeneration =
+        m_directionalShadowAllocationGeneration;
         const bool wireframeMode =
             settings.renderMode == Engine::Model::SceneRenderMode::Wireframe;
         const bool forceUnlitMode =
@@ -2056,6 +2107,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         glm::vec4 splits { 0.f };
         glm::vec4 data { 0.f };
         glm::vec4 cameraData { 0.f };
+        std::array<glm::vec3, 4> centers{};
+        std::array<float, 4> radii{};
         uint32_t count = 1u;
     };
     const auto buildShadowCascades = [&](const glm::mat4& cascadeView,
@@ -2144,6 +2197,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 worldUnitsPerTexel;
             const glm::vec3 stabilizedCenter = glm::vec3(
                 glm::inverse(lightOrientation) * glm::vec4(snappedCenter, 1.f));
+            result.centers[cascade] = stabilizedCenter;
+            result.radii[cascade] = radius;
             const glm::vec3 lightEye = stabilizedCenter +
                 directionToLight * shadowDistance;
             const glm::mat4 lightView = glm::lookAtLH(
@@ -2171,6 +2226,15 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     const auto& shadowViewProjections = mainShadowCascades.viewProjections;
     const glm::vec4 shadowCascadeSplits = mainShadowCascades.splits;
     const uint32_t shadowCascadeCount = mainShadowCascades.count;
+    if (shadowSelection.valid)
+    {
+        m_shadowDebugSnapshot.atlasResolution =
+            m_directionalShadowResolution;
+        m_shadowDebugSnapshot.cascadeCount = shadowCascadeCount;
+        m_shadowDebugSnapshot.cascadeSplits = shadowCascadeSplits;
+        m_shadowDebugSnapshot.cascadeCenters = mainShadowCascades.centers;
+        m_shadowDebugSnapshot.cascadeRadii = mainShadowCascades.radii;
+    }
 
     const Engine::Components::Texture* skybox = ResolveSkyboxTexture();
     UpdateEnvironmentLighting(skybox);
@@ -2196,15 +2260,6 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     // Opaque and masked materials render first. Blended materials render
     // back-to-front with depth writes disabled. Build the complete view sort
     // key once so the comparator performs field comparisons only.
-    struct ViewRenderItem
-    {
-        const FrameRenderItem* source = nullptr;
-        float cameraDistanceSquared = 0.f;
-        float lightingDistanceSquared = 0.f;
-        float worldDepth = 0.f;
-        int sortingLayer = 0;
-        bool blended = false;
-    };
     const auto nearestLightingDistanceSquared = [&](const FrameRenderItem& item,
         const glm::mat4& itemWorld)
     {
@@ -2284,25 +2339,23 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         // Support older and edit-mode scenes whose serialized link exists on
         // only one endpoint. Connections belong to manipulators, not meshes,
         // so inspect every scene object rather than the render draw list.
-        for (const auto& candidateObject : m_objects)
+        for (Engine::Components::SpatialManipulator* candidate :
+            m_frameSpatialManipulatorScratch)
         {
-            if (!candidateObject || candidateObject.get() == source->Owner)
+            if (!candidate || candidate->Owner == source->Owner)
                 continue;
-            auto* candidate = candidateObject->GetComponent<
-                Engine::Components::SpatialManipulator>();
-            if (candidate && candidate->ResolveTarget() == source)
+            if (candidate->ResolveTarget() == source)
                 return candidate;
         }
         return nullptr;
     };
-    const bool hasPortalViews = std::any_of(m_objects.begin(), m_objects.end(),
-        [&](const std::unique_ptr<Engine::Core::Object>& object)
+    const bool hasPortalViews = std::any_of(
+        m_frameSpatialManipulatorScratch.begin(),
+        m_frameSpatialManipulatorScratch.end(),
+        [&](Engine::Components::SpatialManipulator* portal)
         {
-            if (!object || !object->IsEnabledInHierarchy())
-                return false;
-            auto* portal = object->GetComponent<
-                Engine::Components::SpatialManipulator>();
-            if (!portal || !portal->enabled)
+            if (!portal || !portal->Owner ||
+                !portal->Owner->IsEnabledInHierarchy() || !portal->enabled)
                 return false;
             const auto mode = static_cast<Engine::Components::
                 SpatialManipulator::ConnectionMode>(portal->connectionMode);
@@ -2315,7 +2368,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             return target && target->enabled && target->Owner &&
                 portal->HasCompatiblePortalShapeWith(*target);
         });
-    std::vector<ViewRenderItem> renderObjects;
+    std::vector<ViewRenderItem>& renderObjects = m_viewRenderItemScratch;
+    renderObjects.clear();
     renderObjects.reserve(m_frameRenderItems.size());
     for (const FrameRenderItem& item : m_frameRenderItems)
     {
@@ -2326,7 +2380,12 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             // A portal camera can see objects outside the main camera's
             // frustum. Until portal jobs have their own per-view draw lists,
             // retain the full scene whenever a valid portal view exists.
-            if (!hasPortalViews && outsideViewFrustum(item, itemWorld))
+            // The directional-light pass must retain off-screen casters. A
+            // caster outside the camera frustum can still project a shadow
+            // into a visible cascade, which is especially noticeable on the
+            // large, curved triangles of streamed terrain.
+            if (!shadowOnly && !hasPortalViews &&
+                outsideViewFrustum(item, itemWorld))
                 continue;
             const glm::vec3 delta = glm::vec3(itemWorld[3]) - cameraPosition;
             renderObjects.push_back({ &item, glm::dot(delta, delta),
@@ -2402,6 +2461,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         uint32_t vertexCount = 0;
         uint32_t indexCount = 0;
         const Engine::Components::SpatialManipulator* traversalChartPortal = nullptr;
+        const Engine::Components::SpatialManipulator* spatialManipulator = nullptr;
         bool preview = false;
         bool terrain = false;
         bool blended = false;
@@ -2421,6 +2481,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         Engine::Components::Mesh* mesh = renderItem->mesh;
         Engine::Components::Sprite* sprite = renderItem->sprite;
         Engine::Components::Material* mat = renderItem->material;
+        const Engine::Rendering::BakedLightingData* bakedLighting =
+            renderItem->bakedLighting;
         const bool belongsToPreview = renderItem->belongsToPreview;
         const bool isPreview = belongsToPreview;
         const Engine::Model::DistanceLightingBand* lightingBand = nullptr;
@@ -2447,13 +2509,23 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             (!lightingBand || lightingBand->environmentDiffuse);
         const bool allowReflections = !beyondLightingDistance &&
             (!lightingBand || lightingBand->reflections);
-        const bool allowRealtimeShadows = !beyondLightingDistance &&
+        // Mixed-lighting contract: a valid bake owns shadowing on a static
+        // receiver. It still participates in the caster pass below, allowing
+        // dynamic receivers to retain realtime shadows from static geometry.
+        const bool bakedStaticReceiver = bakedLighting && bakedLighting->valid;
+        const bool allowRealtimeShadows = !bakedStaticReceiver &&
+            !beyondLightingDistance &&
             (!lightingBand || lightingBand->realtimeShadows);
+        if (bakedStaticReceiver)
+            ++m_shadowDebugSnapshot.bakedReceiverCount;
+        else
+            ++m_shadowDebugSnapshot.dynamicReceiverCount;
         PreparedDraw preparedDraw{};
         preparedDraw.morphDeltaBuffer = m_emptyMorphDeltaBuffer.get();
         preparedDraw.morphWeightBuffer = m_emptyMorphWeightBuffer.get();
         preparedDraw.textures[8] = m_brdfIntegrationLut.get();
         preparedDraw.object = obj;
+        preparedDraw.spatialManipulator = renderItem->spatialManipulator;
         preparedDraw.preview = isPreview;
         preparedDraw.terrain = mesh && mesh->UsesTerrainVertexFormat();
         preparedDraw.blended = sortedItem.blended;
@@ -2467,8 +2539,6 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             !renderItem->traversalChartPortal;
         preparedDraw.occlusionId = static_cast<uint64_t>(
             reinterpret_cast<uintptr_t>(obj));
-        const Engine::Rendering::BakedLightingData* bakedLighting =
-            renderItem->bakedLighting;
         // Version 3 and later bake lighting into generated material assets.
         // Keep the component values for inspection, but do not add them again
         // at runtime or the baked result would be double-lit.
@@ -2498,6 +2568,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         UINT64 offset = static_cast<UINT64>(slot) * kCBStride;
 
         ObjectGPUData objectData{};
+        objectData.lightingChannels.x = mat
+            ? static_cast<uint32_t>(mat->lightingChannels) : 0xffffffffu;
         objectData.lightingClusterParams = glm::vec4(
             static_cast<float>(clusterTileSize),
             static_cast<float>(clusterTilesX),
@@ -2529,7 +2601,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 static_cast<float>(renderItem->skinPaletteOffset),
                 static_cast<float>(renderItem->skinJointCount), 0.f, 0.f };
         }
-        const bool useGpuMorphs = mesh && !sprite && mesh->HasMorphTargets() &&
+        const bool useGpuMorphs = mesh && !sprite &&
+            !mesh->IsPortalPoseSnapshot() && mesh->HasMorphTargets() &&
             mesh->GetMorphDeltaBuffer() && mesh->GetMorphWeightBuffer() &&
             (useSourceChart || !renderItem->warpedVertexBuffer);
         if (useGpuMorphs)
@@ -2665,9 +2738,15 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                         shadowSelection.filterScale)))) };
             objectData.shadowCascadeSplits = shadowCascadeSplits;
             objectData.shadowCascadeData = mainShadowCascades.data;
-            objectData.shadowCascadeData.w *= lightingBand
-                ? std::clamp(lightingBand->shadowDistanceScale, 0.f, 1.f)
-                : 1.f;
+            // Terrain patches are subdivisions of one continuous surface.
+            // Applying an object-level lighting band to each patch creates
+            // chunk-shaped shadow cutoffs even though the cascade already
+            // performs a smooth per-pixel distance fade.
+            objectData.shadowCascadeData.w *= preparedDraw.terrain
+                ? 1.f
+                : (lightingBand
+                    ? std::clamp(lightingBand->shadowDistanceScale, 0.f, 1.f)
+                    : 1.f);
             objectData.shadowCameraData = mainShadowCascades.cameraData;
             preparedDraw.textures[7] = m_directionalShadowMap.get();
         }
@@ -2754,6 +2833,15 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         ++slot;
     }
     m_lastOrdinaryDrawCount = static_cast<uint32_t>(preparedDraws.size());
+    m_shadowDebugSnapshot.casterCount = static_cast<uint32_t>(std::count_if(
+        preparedDraws.begin(), preparedDraws.end(),
+        [&](const PreparedDraw& draw)
+        {
+            return draw.castsShadow && draw.vertexBuffer &&
+                !(draw.spatialManipulator && draw.spatialManipulator->enabled);
+        }));
+    m_shadowDebugSnapshot.submittedCasterDrawCount =
+        m_shadowDebugSnapshot.casterCount * shadowCascadeCount;
 
     // DX11 buffers use CPU-side shadow storage. Upload the complete object
     // array once, then keep structured-buffer binding free of hidden copies.
@@ -2777,11 +2865,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
     const auto isSpatialManipulatorCarrierDraw = [&](const PreparedDraw& draw)
     {
-        if (!draw.object)
-            return false;
-        auto* manipulator =
-            draw.object->GetComponent<Engine::Components::SpatialManipulator>();
-        return manipulator && manipulator->enabled;
+        return draw.spatialManipulator && draw.spatialManipulator->enabled;
     };
 
     const auto geometryPipeline = [&](const PreparedDraw& draw,
@@ -3042,8 +3126,28 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         }
     }
 
+    const auto updatePortalShadowDebug = [&]()
+    {
+        m_shadowDebugSnapshot.portalAtlasCount = 0;
+        m_shadowDebugSnapshot.renderedPortalAtlasCount = 0;
+        for (const PortalShadowCacheEntry& entry : m_portalShadowCache)
+        {
+            if (entry.atlas)
+                ++m_shadowDebugSnapshot.portalAtlasCount;
+            if (entry.atlas && entry.rendered)
+                ++m_shadowDebugSnapshot.renderedPortalAtlasCount;
+        }
+        m_shadowDebugSnapshot.portalAtlasResolution =
+            m_realtimeShadowSettings.portalPolicy ==
+                Engine::Model::PortalShadowPolicy::ReuseMain
+                ? 0u : m_realtimeShadowSettings.portalAtlasResolution;
+    };
+
     if (shadowOnly)
+    {
+        updatePortalShadowDebug();
         return;
+    }
 
     std::optional<Engine::Graphics::GpuTimingStage> activeGpuStage;
     const auto switchGpuStage = [&](Engine::Graphics::GpuTimingStage stage)
@@ -3155,15 +3259,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     const glm::vec3 cameraForward = glm::normalize(
         glm::vec3(activeCameraWorld[2]));
     size_t portalObjectOrder = 0;
-    for (const auto& sceneObject : m_objects)
+    for (Engine::Components::SpatialManipulator* manipulator :
+        m_frameSpatialManipulatorScratch)
     {
-        Engine::Core::Object* object = sceneObject.get();
         const size_t objectOrder = portalObjectOrder++;
+        Engine::Core::Object* object = manipulator ? manipulator->Owner : nullptr;
         if (!object || !object->IsEnabledInHierarchy())
             continue;
-
-        auto* manipulator =
-            object->GetComponent<Engine::Components::SpatialManipulator>();
         if (!manipulator || !manipulator->enabled)
             continue;
 
@@ -3457,12 +3559,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 edgeThickness, normalColor);
         }
 
-        for (const auto& sceneObject : m_objects)
+        for (Engine::Components::SpatialManipulator* manipulator :
+            m_frameSpatialManipulatorScratch)
         {
+            Engine::Core::Object* sceneObject = manipulator
+                ? manipulator->Owner : nullptr;
             if (!sceneObject || !sceneObject->IsEnabledInHierarchy())
                 continue;
-            auto* manipulator = sceneObject->GetComponent<
-                Engine::Components::SpatialManipulator>();
             if (!manipulator || !manipulator->enabled)
                 continue;
             const auto mode = static_cast<
@@ -3655,9 +3758,12 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     };
     uint32_t nextRootStencilBase = 1u;
     std::vector<PortalScheduleNode> scheduleQueue;
-    scheduleQueue.push_back({ view, 0u, 0u, nullptr, nullptr,
-        std::numeric_limits<size_t>::max(),
-        { {-1.f, -1.f}, {1.f, -1.f}, {1.f, 1.f}, {-1.f, 1.f} }, {} });
+    if (!portalPasses.empty())
+    {
+        scheduleQueue.push_back({ view, 0u, 0u, nullptr, nullptr,
+            std::numeric_limits<size_t>::max(),
+            { {-1.f, -1.f}, {1.f, -1.f}, {1.f, 1.f}, {-1.f, 1.f} }, {} });
+    }
     size_t scheduleCursor = 0u;
     // Keep every visible root aperture before spending the remaining budget
     // on recursion. A depth-first walk allowed one early portal chain to
@@ -4634,6 +4740,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     // fullscreen composition that anchors to the active viewport.
     if (m_uiRenderer && (!includeEditorVisuals || settings.sceneViewUiOverlay))
         m_uiRenderer->Render(*this, context, aspect);
+    updatePortalShadowDebug();
 }
 
 }

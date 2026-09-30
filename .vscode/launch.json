@@ -11,7 +11,7 @@
             "cwd": "${workspaceFolder}",
             "environment": [],
             "console": "internalConsole",
-            "preLaunchTask": "CMake: Build Debug"
+            "preLaunchTask": "CMake: Build Editor Debug"
         }
     ]
 }

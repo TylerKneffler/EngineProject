@@ -8,6 +8,10 @@ namespace Engine::Rendering
 
 // Persistent source/generated asset mapping written by BakedLightingPipeline.
 // The source snapshot makes inline and prefab materials safely reversible.
+// A valid component also defines a static mixed-lighting receiver: baked
+// occlusion is authoritative on that surface, so it does not sample realtime
+// shadow maps. It remains a realtime caster so dynamic receivers still see
+// its shadow. Objects without valid baked data are dynamic receivers.
 class BakedLightingData final : public Engine::Core::Component
 {
 public:

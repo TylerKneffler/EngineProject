@@ -14576,14 +14576,14 @@
           </Transform.scale>
         </transform>
         <components>
-          <components:Mesh Mesh.file="C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/Fox/Meshes/fox1 1_1.mesh" />
+          <components:Mesh Mesh.file="Assets/Prefabs/Fox/Meshes/fox1 1_1.mesh" />
           <components:SkinnedMesh SkinnedMesh.skinIndex="0">
             <SkinnedMesh.meshReference expectedType="Mesh" objectPath="" objectName="" componentType="" componentIndex="0" />
             <SkinnedMesh.skeletonReference expectedType="Skeleton" objectPath="" objectName="" componentType="" componentIndex="0" />
             <SkinnedMesh.joints />
             <SkinnedMesh.weights />
           </components:SkinnedMesh>
-          <components:Material Material.shininess="32" Material.metallicFactor="0" Material.roughnessFactor="0.58" Material.baseColorAlpha="1" Material.alphaCutoff="0.5" Material.normalScale="1" Material.heightScale="0.05" Material.heightMinSteps="8" Material.heightMaxSteps="32" Material.occlusionStrength="1" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque" Material.baseColorUvSet="0" Material.metallicRoughnessUvSet="0" Material.normalUvSet="0" Material.occlusionUvSet="0" Material.emissiveUvSet="0" Material.heightUvSet="0" Material.materialAsset="C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/Fox/Materials/fox_material 1.material" Material.baseColorTexture="C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/Fox/Textures/Texture 1 1.png" Material.metallicRoughnessTexture="" Material.normalTexture="" Material.heightTexture="" Material.occlusionTexture="" Material.emissiveTexture="">
+          <components:Material Material.shininess="32" Material.metallicFactor="0" Material.roughnessFactor="0.58" Material.baseColorAlpha="1" Material.alphaCutoff="0.5" Material.normalScale="1" Material.heightScale="0.05" Material.heightMinSteps="8" Material.heightMaxSteps="32" Material.occlusionStrength="1" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque" Material.baseColorUvSet="0" Material.metallicRoughnessUvSet="0" Material.normalUvSet="0" Material.occlusionUvSet="0" Material.emissiveUvSet="0" Material.heightUvSet="0" Material.materialAsset="Assets/Prefabs/Fox/Materials/fox_material 1.material" Material.baseColorTexture="Assets/Prefabs/Fox/Textures/Texture 1 1.png" Material.metallicRoughnessTexture="" Material.normalTexture="" Material.heightTexture="" Material.occlusionTexture="" Material.emissiveTexture="">
             <Material.diffuse>
               <item>1</item>
               <item>1</item>

@@ -2,6 +2,7 @@
 
 #include "Core/Object.h"
 #include "Core/Compoonents/Camera/Camera.h"
+#include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Physics/Collider.h"
 #include "Core/Physics/Physics.h"
@@ -247,7 +248,12 @@ void SpatialManipulator::ApplyTraversalMeshDeformation(SpatialManipulator* targe
         return;
     }
 
-    const std::vector<Mesh::Vertex>& currentVertices = mesh->GetVertices();
+    const SkinnedMesh* skinned =
+        traversingBody->Owner->GetComponent<SkinnedMesh>();
+    const std::vector<glm::mat4>* skinPalette = skinned
+        ? &skinned->BuildPalette() : nullptr;
+    const std::vector<Mesh::Vertex> currentVertices =
+        mesh->BuildPortalCutTriangleStream(skinPalette);
     if (currentVertices.empty())
     {
         ResetTraversalMeshDeformation(traversingBody);
@@ -266,7 +272,7 @@ void SpatialManipulator::ApplyTraversalMeshDeformation(SpatialManipulator* targe
         state.baseVertices = currentVertices;
         state.meshDeformed = false;
     }
-    else if (!state.meshDeformed)
+    else if (!state.meshDeformed || mesh->HasMorphTargets() || skinned)
     {
         state.baseVertices = currentVertices;
     }
@@ -335,6 +341,7 @@ void SpatialManipulator::ApplyTraversalMeshDeformation(SpatialManipulator* targe
         state.lastCollisionPlanePoint) >= cutUpdateDistance ||
         glm::dot(localPlaneNormal, state.lastCollisionPlaneNormal) < 0.9995f;
     const bool needsCollisionCut = !state.hasCollisionCut ||
+        mesh->HasMorphTargets() || skinned ||
         state.mapPositiveHalf != mapPositiveHalf || planeMoved ||
         !MatricesNearlyEqual(state.collisionRemoteWorldTransform,
             portalWorldTransform);
@@ -487,11 +494,16 @@ void SpatialManipulator::MaterializeTraversalMeshSplits(
         // re-keyed to the object so ResetTraversalMeshDeformation cannot
         // restore the old, whole-object collision hull.
         localMesh->SetDeformedVertices(state.localMeshVertices);
+        localMesh->SetPortalPoseSnapshot(true);
         localBody->SetPortalLocalMeshCollider(localBody,
             state.localCollisionVertices);
 
         Engine::Core::Object* remoteObject = scene.AddObject(
             localBody->Owner->name + " (Portal Fragment)");
+        // The remote half is derived runtime state. Saving the scene retains
+        // the authored original (and all of its behavioral ownership) rather
+        // than duplicating scripts or persisting half of an animation rig.
+        remoteObject->runtimeOnly = true;
         remoteObject->Parent = localBody->Owner->Parent;
         if (remoteObject->Parent)
             remoteObject->Parent->Children.push_back(remoteObject);
@@ -535,6 +547,7 @@ void SpatialManipulator::MaterializeTraversalMeshSplits(
         Mesh* remoteMesh = remoteObject->AddComponent<Mesh>();
         remoteMesh->InitializeRuntimeCloneFrom(*localMesh);
         remoteMesh->SetDeformedVertices(remoteLocalVertices);
+        remoteMesh->SetPortalPoseSnapshot(true);
         if (const Material* localMaterial =
                 localBody->Owner->GetComponent<Material>())
         {

@@ -91,6 +91,9 @@ public:
     
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Properties")
     bool      unlit { false };
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Lighting")
+    int       lightingChannels { -1 };
     
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Properties")
     std::string alphaMode { "Opaque" };

@@ -337,7 +337,8 @@ JsonValue SceneObjectBehavior::SerializeObject(
     // Children (recursive)
     JsonValue children = JsonValue::MakeArray();
     for (const Engine::Core::Object* child : obj.Children)
-        children.Push(SerializeObject(*child, true));
+        if (child && !child->runtimeOnly)
+            children.Push(SerializeObject(*child, true));
     node.Set("children", std::move(children));
 
     return node;
@@ -560,7 +561,7 @@ JsonValue SceneObjectBehavior::SerializeScene(const Engine::Scene::Scene& scene)
     // Objects — only root-level (no parent)
     JsonValue objects = JsonValue::MakeArray();
     for (const auto& obj : scene.GetObjects())
-        if (obj->Parent == nullptr)
+        if (obj->Parent == nullptr && !obj->runtimeOnly)
             objects.Push(SerializeObject(*obj));
     root.Set("objects", std::move(objects));
 

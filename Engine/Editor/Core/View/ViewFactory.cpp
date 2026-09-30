@@ -242,7 +242,7 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
 
     if (typeName == "Performance")
     {
-        auto view = std::make_unique<PerformanceView>();
+        auto view = std::make_unique<PerformanceView>(m_scene);
         AssignLowestAvailableTitle(typeName, view.get());
         view->SetDefaultDockArea(EditorPanelDockArea::BottomPanel);
         m_singletonInstances[typeName] = view.get();

@@ -39,6 +39,7 @@ struct ObjectData
     float4 lightingCameraData;
     float4 portalClipPlane;
     float4 traversalClipPlane;
+    uint4 lightingChannels;
 };
 
 struct SceneLightData
@@ -46,6 +47,11 @@ struct SceneLightData
     float4 positionRange;
     float4 colorIntensity;
     float4 params;
+    float4 directionCone;
+    float4 attenuation;
+    float4 cookieRight;
+    float4 cookieUp;
+    float4 photometry;
 };
 
 #ifdef VULKAN
@@ -67,6 +73,14 @@ struct MorphDelta { float4 position; float4 normal; float4 tangent; };
 [[vk::binding(14, 0)]] Texture2D brdfIntegrationLut;
 [[vk::binding(15, 0)]] StructuredBuffer<uint2> clusteredLightGrid;
 [[vk::binding(16, 0)]] StructuredBuffer<uint> clusteredLightIndices;
+[[vk::binding(17, 0)]] Texture2D cookie0;
+[[vk::binding(18, 0)]] Texture2D cookie1;
+[[vk::binding(19, 0)]] Texture2D cookie2;
+[[vk::binding(20, 0)]] Texture2D cookie3;
+[[vk::binding(21, 0)]] Texture2D ies0;
+[[vk::binding(22, 0)]] Texture2D ies1;
+[[vk::binding(23, 0)]] Texture2D ies2;
+[[vk::binding(24, 0)]] Texture2D ies3;
 [[vk::binding(6, 0)]] SamplerState materialSampler;
 #else
 cbuffer DrawBuffer : register(b0)
@@ -84,6 +98,10 @@ Texture2D<float> shadowMap      : register(t12);
 Texture2D brdfIntegrationLut    : register(t13);
 StructuredBuffer<uint2> clusteredLightGrid : register(t14);
 StructuredBuffer<uint> clusteredLightIndices : register(t15);
+Texture2D cookie0 : register(t16); Texture2D cookie1 : register(t17);
+Texture2D cookie2 : register(t18); Texture2D cookie3 : register(t19);
+Texture2D ies0 : register(t20); Texture2D ies1 : register(t21);
+Texture2D ies2 : register(t22); Texture2D ies3 : register(t23);
 StructuredBuffer<SceneLightData> sceneLights : register(t6);
 StructuredBuffer<ObjectData> objects : register(t7);
 StructuredBuffer<float4x4> boneMatrices : register(t8);
@@ -92,6 +110,25 @@ StructuredBuffer<MorphDelta> morphDeltas : register(t10);
 StructuredBuffer<float4> morphWeights : register(t11);
 SamplerState materialSampler : register(s0);
 #endif
+
+float SampleCookie(uint index, float2 uv)
+{
+    if (index == 1u) return cookie0.Sample(materialSampler, uv).r;
+    if (index == 2u) return cookie1.Sample(materialSampler, uv).r;
+    if (index == 3u) return cookie2.Sample(materialSampler, uv).r;
+    if (index == 4u) return cookie3.Sample(materialSampler, uv).r;
+    return 1.0;
+}
+
+float SampleIes(uint index, float cosine)
+{
+    float2 uv = float2(acos(clamp(cosine, -1.0, 1.0)) / 3.14159265, 0.5);
+    if (index == 1u) return ies0.Sample(materialSampler, uv).r;
+    if (index == 2u) return ies1.Sample(materialSampler, uv).r;
+    if (index == 3u) return ies2.Sample(materialSampler, uv).r;
+    if (index == 4u) return ies3.Sample(materialSampler, uv).r;
+    return 1.0;
+}
 
 void VSMain(
     float3 pos : POSITION,
@@ -612,9 +649,12 @@ float4 PSMain(
             ? clusteredLightIndices[lightListOffset + iteration]
             : iteration;
         SceneLightData light = sceneLights[index];
+        if ((objectData.lightingChannels.x & asuint(light.attenuation.z)) == 0u)
+            continue;
         float3 lightDirection;
         float attenuation = 1.0;
-        if (light.params.y > 0.5)
+        bool directional = abs(light.params.y - 1.0) < 0.25;
+        if (directional)
         {
             lightDirection = normalize(light.positionRange.xyz);
         }
@@ -624,11 +664,55 @@ float4 PSMain(
             float distanceToLight = length(toLight);
             lightDirection = distanceToLight > 0.0001
                 ? toLight / distanceToLight : float3(0.0, 1.0, 0.0);
-            float rangeAttenuation = saturate(
-                1.0 - distanceToLight / max(light.positionRange.w, 0.0001));
-            attenuation = pow(
-                rangeAttenuation, max(light.params.x, 0.1));
+            float normalizedDistance = distanceToLight /
+                max(light.positionRange.w, 0.0001);
+            if (light.attenuation.y > 0.5)
+            {
+                float smoothCutoff = saturate(1.0 -
+                    normalizedDistance * normalizedDistance *
+                    normalizedDistance * normalizedDistance);
+                attenuation = smoothCutoff * smoothCutoff /
+                    max(distanceToLight * distanceToLight, 0.01);
+            }
+            else
+                attenuation = pow(saturate(1.0 - normalizedDistance),
+                    max(light.params.x, 0.1));
+
+            if (light.params.y > 1.5)
+            {
+                float cosine = dot(-lightDirection,
+                    normalize(light.directionCone.xyz));
+                attenuation *= smoothstep(light.directionCone.w,
+                    max(light.attenuation.x, light.directionCone.w + 0.0001),
+                    cosine);
+            }
         }
+        uint cookieIndex = (uint)light.photometry.x;
+        uint iesIndex = (uint)light.photometry.y;
+        if (cookieIndex != 0u && light.params.y > 0.5)
+        {
+            float2 cookieUv;
+            if (directional)
+                cookieUv = float2(dot(worldPos, light.cookieRight.xyz),
+                    dot(worldPos, light.cookieUp.xyz)) /
+                    max(light.photometry.z, 0.001) + 0.5;
+            else
+            {
+                float3 fromLight = worldPos - light.positionRange.xyz;
+                float forward = max(dot(fromLight,
+                    normalize(light.directionCone.xyz)), 0.0001);
+                float coneRadius = forward * sqrt(max(1.0 /
+                    max(light.directionCone.w * light.directionCone.w, 0.0001) - 1.0, 0.0));
+                cookieUv = float2(dot(fromLight, light.cookieRight.xyz),
+                    dot(fromLight, light.cookieUp.xyz)) /
+                    max(2.0 * coneRadius * light.photometry.z, 0.0001) + 0.5;
+                if (any(cookieUv < 0.0) || any(cookieUv > 1.0)) attenuation = 0.0;
+            }
+            attenuation *= SampleCookie(cookieIndex, cookieUv);
+        }
+        if (iesIndex != 0u && light.params.y > 1.5)
+            attenuation *= SampleIes(iesIndex, dot(-lightDirection,
+                normalize(light.directionCone.xyz)));
         float nDotL = saturate(dot(n, lightDirection));
         float3 radiance = light.colorIntensity.rgb *
             light.colorIntensity.w * attenuation;

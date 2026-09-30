@@ -39,5 +39,5 @@
     "occlusionUvSet": 0,
     "emissiveUvSet": 0,
     "heightUvSet": 0,
-    "baseColorTexture": "C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/Fox/Textures/Texture 1 1.png"
+    "baseColorTexture": "Assets/Prefabs/Fox/Textures/Texture 1 1.png"
 }

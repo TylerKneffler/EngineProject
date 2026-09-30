@@ -8,6 +8,7 @@
 #include "Core/Model/MeshData.h"
 #include "Core/Model/LightingData.h"
 #include "Core/Time/SimulationClock.h"
+#include "Core/Physics/Physics.h"
 #include <glm/glm.hpp>
 #include <array>
 #include <memory>
@@ -15,7 +16,6 @@
 #include <unordered_map>
 #include <vector>
 
-namespace Engine::Physics { class Physics; }
 namespace Engine::Audio { class Audio; }
 namespace Engine::Components
 {
@@ -25,6 +25,7 @@ namespace Engine::Components
     class Sprite;
     class Material;
     class SpatialManipulator;
+    class SkinnedMesh;
 }
 namespace Engine::Rendering { class BakedLightingData; }
 namespace Engine::Renderers { class UIRenderer; }
@@ -98,6 +99,20 @@ public:
         glm::vec3 origin { 0.f };
         glm::vec3 direction { 0.f, 0.f, 1.f };
     };
+    struct SpatialRayPathSettings
+    {
+        float curvatureTolerance = 0.01f;
+        float maximumSourceStep = 1.f;
+        uint32_t maximumSegments = 64u;
+        uint32_t maximumSubdivisionDepth = 8u;
+    };
+    struct SpatialRayPathSegment
+    {
+        glm::vec3 start { 0.f };
+        glm::vec3 end { 0.f };
+        float sourceDistanceStart = 0.f;
+        float sourceDistanceEnd = 0.f;
+    };
     // A straight segment in one spatial chart.  A portal hit ends a segment;
     // the following segment starts at the connected endpoint in its chart.
     struct PortalRaySegment
@@ -108,6 +123,12 @@ public:
         // Null means the legacy scene-wide chart. Otherwise geometry/query
         // candidates must belong to this root hierarchy.
         const Object* contentScopeRoot = nullptr;
+    };
+    struct PortalRaycastHit
+    {
+        Engine::Physics::Physics::RaycastHit physicsHit;
+        float distance = 0.f;
+        uint32_t portalHops = 0;
     };
 
     Scene();
@@ -169,6 +190,31 @@ public:
     {
         return m_lastSkinnedObjectCount;
     }
+    uint32_t GetLastRealtimeLightCount() const { return m_frameLightCount; }
+    struct ShadowDebugSnapshot
+    {
+        bool enabled = false;
+        bool hasSelectedLight = false;
+        std::string selectedLight;
+        glm::vec3 directionToLight { 0.f, 1.f, 0.f };
+        uint32_t atlasResolution = 0;
+        uint64_t atlasAllocationGeneration = 0;
+        uint32_t cascadeCount = 0;
+        glm::vec4 cascadeSplits { 0.f };
+        std::array<glm::vec3, 4> cascadeCenters{};
+        std::array<float, 4> cascadeRadii{};
+        uint32_t casterCount = 0;
+        uint32_t submittedCasterDrawCount = 0;
+        uint32_t bakedReceiverCount = 0;
+        uint32_t dynamicReceiverCount = 0;
+        uint32_t portalAtlasCount = 0;
+        uint32_t renderedPortalAtlasCount = 0;
+        uint32_t portalAtlasResolution = 0;
+    };
+    const ShadowDebugSnapshot& GetShadowDebugSnapshot() const
+    {
+        return m_shadowDebugSnapshot;
+    }
     void SetSelectedObject(Object* obj) { m_selectedObject = obj; }
     Object* GetSelectedObject() const { return m_selectedObject; }
     void SetPreviewObject(Object* obj) { m_previewObject = obj; }
@@ -209,12 +255,19 @@ public:
         const SpatialQuery& query = {}) const;
     SpatialRay MapSpatialRay(const SpatialRay& ray,
         const SpatialQuery& query = {}) const;
+    std::vector<SpatialRayPathSegment> TraceSpatialRayPath(
+        const SpatialRay& ray, float maxDistance,
+        const SpatialQuery& query = { SpatialQueryDomain::Raycast },
+        const SpatialRayPathSettings& settings = {}) const;
     // Trace a finite physical-space ray across portal apertures.  This is the
     // common primitive for gameplay queries and editor picking; callers test
     // ordinary geometry against each returned segment in order.  Nonlinear
     // volume integration remains a separate concern from discrete portals.
     std::vector<PortalRaySegment> TracePortalRay(const SpatialRay& ray,
         float maxDistance, uint32_t maxPortalHops = 8u) const;
+    bool RaycastPortals(const SpatialRay& ray, float maxDistance,
+        PortalRaycastHit& hit, uint32_t maxPortalHops = 8u,
+        uint32_t collisionMask = ~0u) const;
     static bool IsObjectInSpatialRegion(const Object* object,
         const Object* contentScopeRoot);
 
@@ -330,6 +383,7 @@ private:
         m_terrainPipelineByBase;
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_directionalShadowMap;
     uint32_t m_directionalShadowResolution = 0;
+    uint64_t m_directionalShadowAllocationGeneration = 0;
     struct PortalShadowCacheEntry
     {
         uint64_t key = 0;
@@ -387,6 +441,8 @@ private:
     void* m_clusterLightIndexMapped = nullptr;
     uint32_t m_clusterHeaderCapacity = 0;
     uint32_t m_clusterLightIndexCapacity = 0;
+    std::vector<glm::uvec2> m_clusterHeaderScratch;
+    std::vector<uint32_t> m_clusterLightIndexScratch;
     std::unique_ptr<IGraphicsBuffer> m_portalApertureBuffer;
     void* m_portalApertureMapped = nullptr;
     std::unique_ptr<Engine::Renderers::UIRenderer> m_uiRenderer;
@@ -413,6 +469,8 @@ private:
         Engine::Components::Mesh* mesh = nullptr;
         Engine::Components::Sprite* sprite = nullptr;
         Engine::Components::Material* material = nullptr;
+        Engine::Components::SpatialManipulator* spatialManipulator = nullptr;
+        Engine::Components::SkinnedMesh* skinnedMesh = nullptr;
         const Engine::Rendering::BakedLightingData* bakedLighting = nullptr;
         IGraphicsBuffer* spriteVertexBuffer = nullptr;
         const Engine::Components::Texture* spriteTexture = nullptr;
@@ -438,6 +496,31 @@ private:
 
     std::vector<FrameRenderItem> m_frameRenderItems;
 
+    struct FrameComponentLookup
+    {
+        Object* object = nullptr;
+        Engine::Components::Mesh* mesh = nullptr;
+        Engine::Components::Sprite* sprite = nullptr;
+        Engine::Components::Material* material = nullptr;
+        Engine::Components::SpatialManipulator* spatialManipulator = nullptr;
+        Engine::Components::SkinnedMesh* skinnedMesh = nullptr;
+        const Engine::Rendering::BakedLightingData* bakedLighting = nullptr;
+    };
+    std::vector<FrameComponentLookup> m_frameComponentLookupScratch;
+    std::vector<Engine::Components::SpatialManipulator*>
+        m_frameSpatialManipulatorScratch;
+
+    struct ViewRenderItem
+    {
+        const FrameRenderItem* source = nullptr;
+        float cameraDistanceSquared = 0.f;
+        float lightingDistanceSquared = 0.f;
+        float worldDepth = 0.f;
+        int sortingLayer = 0;
+        bool blended = false;
+    };
+    std::vector<ViewRenderItem> m_viewRenderItemScratch;
+
     struct WarpedRenderMesh
     {
         std::unique_ptr<IGraphicsBuffer> vertexBuffer;
@@ -460,6 +543,7 @@ private:
     uint32_t m_lastOcclusionCulledCount = 0;
     uint32_t m_lastOrdinaryDrawCount = 0;
     uint32_t m_lastSkinnedObjectCount = 0;
+    ShadowDebugSnapshot m_shadowDebugSnapshot;
     bool m_renderFramePrepared = false;
 
     // ---- Object list ----

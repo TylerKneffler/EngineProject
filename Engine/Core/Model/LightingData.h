@@ -83,14 +83,25 @@ namespace Engine::Model
     {
         glm::vec4 positionRange{};
         glm::vec4 colorIntensity{};
-        // x = falloff, y = directional flag, z = shadow map index (-1 when
+        // x = legacy falloff, y = type (0 point, 1 directional, 2 spot),
+        // z = shadow map index (-1 when
         // unshadowed), w = shadow strength. Object.hlsl currently ignores z/w
         // until the shadow sampling pass is connected.
         glm::vec4 params{ 0.f, 0.f, -1.f, 0.f };
+        // xyz = direction emitted by a spot, w = cosine of its outer cone.
+        glm::vec4 directionCone{ 0.f, 0.f, 1.f, -1.f };
+        // x = cosine inner cone, y = physical attenuation flag.
+        glm::vec4 attenuation{ 1.f, 0.f, 0.f, 0.f };
+        // Local cookie axes and projection metadata. photometry.x/y are
+        // one-based cookie/IES table indices; z is cookie scale.
+        glm::vec4 cookieRight{ 1.f, 0.f, 0.f, 0.f };
+        glm::vec4 cookieUp{ 0.f, 1.f, 0.f, 0.f };
+        glm::vec4 photometry{};
     };
 
     struct RealtimeShadowSelection
     {
+        std::string stableLightKey;
         glm::vec3 directionToLight{ 0.f, 1.f, 0.f };
         float depthBias = 0.0015f;
         float normalBias = 0.01f;

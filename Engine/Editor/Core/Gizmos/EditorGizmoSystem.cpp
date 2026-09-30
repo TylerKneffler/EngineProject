@@ -115,6 +115,38 @@ void DrawLightIcon(IEditorUi& ui, EditorUiVec2 center, bool selected)
     }
 }
 
+void DrawSpotGizmo(IEditorUi& ui, const glm::mat4& viewProjection,
+    const EditorUiVec2& viewport, const Engine::Core::Object& object,
+    const Engine::Components::Light& light)
+{
+    const glm::mat4 world = object.transform.GetWorldMatrix();
+    const glm::vec3 origin(world[3]);
+    const glm::vec3 direction = glm::normalize(glm::vec3(world[2]));
+    const glm::vec3 right = glm::normalize(glm::vec3(world[0]));
+    const glm::vec3 up = glm::normalize(glm::vec3(world[1]));
+    const float length = std::max(light.range, 0.01f);
+    const float radius = std::tan(glm::radians(std::clamp(
+        light.outerConeAngle, 0.1f, 89.f))) * length;
+    const glm::vec3 center = origin + direction * length;
+    const glm::vec3 rim[4] = { center + right * radius, center + up * radius,
+        center - right * radius, center - up * radius };
+    EditorUiVec2 originScreen{}, rimScreen[4]{};
+    if (!ProjectPoint(viewProjection, origin, viewport, originScreen)) return;
+    bool visible[4]{};
+    for (int index = 0; index < 4; ++index)
+    {
+        visible[index] = ProjectPoint(viewProjection, rim[index], viewport,
+            rimScreen[index]);
+        if (visible[index])
+            ui.DrawViewportLine(originScreen, rimScreen[index],
+                { 1.f, 0.72f, 0.16f, 0.8f }, 1.25f);
+    }
+    for (int index = 0; index < 4; ++index)
+        if (visible[index] && visible[(index + 1) % 4])
+            ui.DrawViewportLine(rimScreen[index], rimScreen[(index + 1) % 4],
+                { 1.f, 0.72f, 0.16f, 0.8f }, 1.25f);
+}
+
 void DrawCameraIcon(IEditorUi& ui, EditorUiVec2 center, bool selected)
 {
     const EditorUiColor color{ 0.25f, 0.82f, 1.f, 1.f };
@@ -320,7 +352,8 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         Engine::Core::Object* object = objectPointer.get();
         if (!object || !object->IsEnabledInHierarchy())
             continue;
-        const bool hasLight = object->GetComponent<Engine::Components::Light>() != nullptr;
+        const auto* light = object->GetComponent<Engine::Components::Light>();
+        const bool hasLight = light != nullptr;
         const bool hasCamera = object->GetComponent<Engine::Components::Camera>() != nullptr;
         const auto* probe=object->GetComponent<Engine::Components::LightProbe>();
         const auto* probeGroup=object->GetComponent<
@@ -333,7 +366,13 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
             input.available, center))
             continue;
         if (hasLight)
+        {
             DrawLightIcon(ui, center, object == selected);
+            if (object == selected && light->GetLightType() ==
+                Engine::Components::Light::Type::Spot)
+                DrawSpotGizmo(ui, viewProjection, input.available, *object,
+                    *light);
+        }
         else if(hasCamera)
             DrawCameraIcon(ui, center, object == selected);
         else

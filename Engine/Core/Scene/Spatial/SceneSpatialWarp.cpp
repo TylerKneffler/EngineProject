@@ -233,6 +233,82 @@ Scene::SpatialRay Scene::MapSpatialRay(const SpatialRay& ray,
     return mapped;
 }
 
+std::vector<Scene::SpatialRayPathSegment> Scene::TraceSpatialRayPath(
+    const SpatialRay& ray, float maxDistance, const SpatialQuery& query,
+    const SpatialRayPathSettings& pathSettings) const
+{
+    std::vector<SpatialRayPathSegment> result;
+    const float directionLength = glm::length(ray.direction);
+    if (!std::isfinite(maxDistance) || maxDistance <= 0.f ||
+        !std::isfinite(directionLength) || directionLength <= 1e-6f ||
+        pathSettings.maximumSegments == 0u)
+        return result;
+
+    const glm::vec3 direction = ray.direction / directionLength;
+    const float maximumStep = std::max(0.001f,
+        pathSettings.maximumSourceStep);
+    const float tolerance = std::max(0.00001f,
+        pathSettings.curvatureTolerance);
+    const uint32_t baseSteps = std::max(1u, static_cast<uint32_t>(
+        std::ceil(maxDistance / maximumStep)));
+
+    struct Sample
+    {
+        float distance = 0.f;
+        SpatialQuerySample mapped;
+    };
+    const auto sampleAt = [&](float distance)
+    {
+        return Sample { distance, SampleSpatialPoint(
+            ray.origin + direction * distance, query) };
+    };
+    const auto appendAdaptive = [&](const auto& recurse, const Sample& first,
+        const Sample& second, uint32_t depth) -> void
+    {
+        if (result.size() >= pathSettings.maximumSegments)
+            return;
+        const Sample middle = sampleAt((first.distance + second.distance) * 0.5f);
+        const glm::vec3 chordMiddle =
+            (first.mapped.point + second.mapped.point) * 0.5f;
+        const bool activeSetChanged = first.mapped.affectedByWarpVolume !=
+                middle.mapped.affectedByWarpVolume ||
+            middle.mapped.affectedByWarpVolume !=
+                second.mapped.affectedByWarpVolume;
+        const bool curved = glm::length(middle.mapped.point - chordMiddle) >
+            tolerance;
+        if (depth < pathSettings.maximumSubdivisionDepth &&
+            (curved || activeSetChanged))
+        {
+            recurse(recurse, first, middle, depth + 1u);
+            recurse(recurse, middle, second, depth + 1u);
+            return;
+        }
+        result.push_back({ first.mapped.point, second.mapped.point,
+            first.distance, second.distance });
+    };
+
+    Sample first = sampleAt(0.f);
+    for (uint32_t step = 0u; step < baseSteps &&
+        result.size() < pathSettings.maximumSegments; ++step)
+    {
+        const float distance = maxDistance * static_cast<float>(step + 1u) /
+            static_cast<float>(baseSteps);
+        const Sample second = sampleAt(distance);
+        appendAdaptive(appendAdaptive, first, second, 0u);
+        first = second;
+    }
+    // The segment cap is a hard gameplay bound. If subdivision consumed the
+    // budget, extend the last chord to the mapped endpoint so callers still
+    // receive a complete, conservatively approximated path.
+    if (!result.empty() && result.back().sourceDistanceEnd < maxDistance)
+    {
+        const Sample end = sampleAt(maxDistance);
+        result.back().end = end.mapped.point;
+        result.back().sourceDistanceEnd = maxDistance;
+    }
+    return result;
+}
+
 std::vector<Scene::PortalRaySegment> Scene::TracePortalRay(
     const SpatialRay& ray, float maxDistance, uint32_t maxPortalHops) const
 {
@@ -372,6 +448,52 @@ std::vector<Scene::PortalRaySegment> Scene::TracePortalRay(
             break;
     }
     return segments;
+}
+
+bool Scene::RaycastPortals(const SpatialRay& ray, float maxDistance,
+    PortalRaycastHit& hit, uint32_t maxPortalHops,
+    uint32_t collisionMask) const
+{
+    hit = {};
+    float traversedDistance = 0.f;
+    const auto segments = TracePortalRay(ray, maxDistance, maxPortalHops);
+    for (uint32_t segmentIndex = 0;
+        segmentIndex < static_cast<uint32_t>(segments.size()); ++segmentIndex)
+    {
+        const PortalRaySegment& segment = segments[segmentIndex];
+        const auto spatialPath = TraceSpatialRayPath(segment.ray,
+            segment.maxDistance, { SpatialQueryDomain::Raycast });
+        for (const SpatialRayPathSegment& pathSegment : spatialPath)
+        {
+            const glm::vec3 chord = pathSegment.end - pathSegment.start;
+            const float chordLength = glm::length(chord);
+            if (chordLength <= 1e-6f)
+                continue;
+            const auto candidates = m_physics->RaycastAll(pathSegment.start,
+                chord / chordLength, chordLength, collisionMask);
+            for (const auto& candidate : candidates)
+            {
+                // Remote split pieces explicitly live in the queried chart
+                // even though their logical owner remains in its original
+                // hierarchy.
+                if (candidate.kind != Engine::Physics::Physics::RaycastHitKind::
+                        PortalSplitPiece && candidate.object &&
+                    !IsObjectInSpatialRegion(candidate.object,
+                        segment.contentScopeRoot))
+                    continue;
+                const float fraction = std::clamp(
+                    candidate.distance / chordLength, 0.f, 1.f);
+                hit.physicsHit = candidate;
+                hit.distance = traversedDistance +
+                    glm::mix(pathSegment.sourceDistanceStart,
+                        pathSegment.sourceDistanceEnd, fraction);
+                hit.portalHops = segmentIndex;
+                return true;
+            }
+        }
+        traversedDistance += segment.maxDistance;
+    }
+    return false;
 }
 
 bool Scene::IsObjectInSpatialRegion(const Object* object,

@@ -1254,6 +1254,93 @@ Mesh::SliceResult Mesh::SliceByPlane(const std::vector<Vertex>& vertices,
     return { front, back };
 }
 
+std::vector<Mesh::Vertex> Mesh::BuildPortalCutTriangleStream(
+    const std::vector<glm::mat4>* skinPalette) const
+{
+    std::vector<Vertex> deformed = m_vertices;
+    for (size_t targetIndex = 0; targetIndex < m_morphTargets.size() &&
+        targetIndex < m_morphWeights.size(); ++targetIndex)
+    {
+        const float weight = m_morphWeights[targetIndex];
+        const MorphTarget& target = m_morphTargets[targetIndex];
+        if (std::abs(weight) <= 1e-7f) continue;
+        for (size_t index = 0; index < deformed.size(); ++index)
+        {
+            Vertex& vertex = deformed[index];
+            if (index < target.positions.size())
+            {
+                vertex.pos[0] += target.positions[index].x * weight;
+                vertex.pos[1] += target.positions[index].y * weight;
+                vertex.pos[2] += target.positions[index].z * weight;
+            }
+            if (index < target.normals.size())
+            {
+                vertex.normal[0] += target.normals[index].x * weight;
+                vertex.normal[1] += target.normals[index].y * weight;
+                vertex.normal[2] += target.normals[index].z * weight;
+            }
+            if (index < target.tangents.size())
+            {
+                vertex.tangent[0] += target.tangents[index].x * weight;
+                vertex.tangent[1] += target.tangents[index].y * weight;
+                vertex.tangent[2] += target.tangents[index].z * weight;
+            }
+        }
+    }
+    if (skinPalette && !skinPalette->empty())
+    {
+        for (Vertex& vertex : deformed)
+        {
+            glm::mat4 skin(0.f);
+            for (int influence = 0; influence < 4; ++influence)
+            {
+                const uint32_t joint0 = static_cast<uint32_t>(vertex.joints0[influence]);
+                const uint32_t joint1 = static_cast<uint32_t>(vertex.joints1[influence]);
+                if (joint0 < skinPalette->size())
+                    skin += (*skinPalette)[joint0] * vertex.weights0[influence];
+                if (joint1 < skinPalette->size())
+                    skin += (*skinPalette)[joint1] * vertex.weights1[influence];
+            }
+            const glm::vec4 position = skin * glm::vec4(
+                vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.f);
+            glm::vec3 normal = glm::mat3(skin) * glm::vec3(
+                vertex.normal[0], vertex.normal[1], vertex.normal[2]);
+            glm::vec3 tangent = glm::mat3(skin) * glm::vec3(
+                vertex.tangent[0], vertex.tangent[1], vertex.tangent[2]);
+            if (glm::length(normal) > 1e-7f) normal = glm::normalize(normal);
+            if (glm::length(tangent) > 1e-7f) tangent = glm::normalize(tangent);
+            vertex.pos[0] = position.x; vertex.pos[1] = position.y;
+            vertex.pos[2] = position.z;
+            vertex.normal[0] = normal.x; vertex.normal[1] = normal.y;
+            vertex.normal[2] = normal.z;
+            vertex.tangent[0] = tangent.x; vertex.tangent[1] = tangent.y;
+            vertex.tangent[2] = tangent.z;
+        }
+    }
+    if (m_indices.empty()) return deformed;
+    std::vector<Vertex> triangles;
+    triangles.reserve(m_indices.size());
+    for (uint32_t index : m_indices)
+        if (index < deformed.size()) triangles.push_back(deformed[index]);
+    return triangles;
+}
+
+bool Mesh::SetIndexedGeometry(std::vector<Vertex> vertices,
+    std::vector<uint32_t> indices)
+{
+    if (vertices.empty() || indices.empty() || indices.size() % 3u != 0u ||
+        std::any_of(indices.begin(), indices.end(), [&](uint32_t index)
+            { return index >= vertices.size(); }))
+        return false;
+    m_vertices = std::move(vertices);
+    m_indices = std::move(indices);
+    m_terrainVertices.clear();
+    MarkConfigurationDirty();
+    UpdateBounds();
+    if (m_bufferFactory) CreateBuffer(m_bufferFactory);
+    return true;
+}
+
 #pragma region DX12 buffer creation and rendering
 
 void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory)

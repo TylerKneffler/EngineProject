@@ -56,6 +56,8 @@ public:
         return m_terrainVertices;
     }
     const std::vector<uint32_t>& GetIndices() const { return m_indices; }
+    std::vector<Vertex> BuildPortalCutTriangleStream(
+        const std::vector<glm::mat4>* skinPalette = nullptr) const;
     bool UsesTerrainVertexFormat() const { return !m_terrainVertices.empty(); }
     static TerrainMeshData BuildIndexedTerrain(const std::vector<Vertex>& vertices);
     bool SetTerrainGeometry(TerrainMeshData&& geometry,
@@ -65,6 +67,10 @@ public:
     bool SetDeformedVertices(const std::vector<Vertex>& vertices);
     // Transfers ownership for newly generated meshes to avoid a full vertex copy.
     bool SetDeformedVertices(std::vector<Vertex>&& vertices);
+    // Installs an authored indexed surface without expanding shared vertices.
+    // Portal cuts expand only their transient CPU snapshot.
+    bool SetIndexedGeometry(std::vector<Vertex> vertices,
+        std::vector<uint32_t> indices);
     // Transfers CPU vertices out of a procedural mesh that is about to be destroyed.
     std::vector<Vertex> TakeVertices();
     // Copies the runtime rendering context needed by a procedural mesh cut.
@@ -94,6 +100,8 @@ public:
     std::vector<float>& GetMorphWeights() { return m_morphWeights; }
     uint64_t GetMorphWeightsRevision() const;
     bool HasMorphTargets() const { return !m_morphTargets.empty(); }
+    void SetPortalPoseSnapshot(bool value) { m_portalPoseSnapshot = value; }
+    bool IsPortalPoseSnapshot() const { return m_portalPoseSnapshot; }
     IGraphicsBuffer* GetMorphDeltaBuffer() const
     { return m_morphDeltaBuffer.get(); }
     IGraphicsBuffer* GetMorphWeightBuffer() const
@@ -139,5 +147,6 @@ private:
     mutable std::vector<float> m_observedMorphWeights;
     mutable uint64_t m_morphWeightsRevision = 1;
     mutable bool m_morphWeightsObserved = false;
+    bool m_portalPoseSnapshot = false;
 };
 }

@@ -78,37 +78,30 @@ Status convention:
 
 ### Animation and general render performance
 
-- [ ] MEDIUM: Replace linear animation-layer node-mask searches with indexed bitsets and share compatible channel samples between layers.
-- [ ] MEDIUM: Remove duplicate per-frame light collection/upload and retain reusable scene scratch arrays, opaque sort storage, component lookup results, and no-portal fast paths.
-- [ ] HIGH: Complete mixed-LOD terrain border audits, then batch compatible terrain draws using instancing, indirect submission, or combined ranges.
+- [x] MEDIUM: Replace linear animation-layer node-mask searches with indexed bitsets and share compatible channel samples between layers.
+- [x] MEDIUM: Remove duplicate per-frame light collection/upload and retain reusable scene scratch arrays, opaque sort storage, component lookup results, and no-portal fast paths.
 
 ### Portal correctness and tooling
 
 - [x] CRITICAL: Replace the policy-only portal parity test with actual DX11, DX12, and Vulkan GPU-frame validation covering aperture depth/stencil isolation, recursive views, occlusion, and distinct target-side content without a skybox fallback.
-- [ ] HIGH: Expose a Bullet-backed portal raycast-hit API and test regular objects, split pieces, aperture rims, and recursive portal hits.
-- [ ] MEDIUM: Add bounded adaptive nonlinear-warp ray paths for gameplay/physics; a single origin/tangent Jacobian cannot represent curved paths or volume-boundary crossings.
-- [ ] MEDIUM: Support indexed meshes, submeshes/material slots, skinned meshes, and morph changes in CPU portal cuts. The current triangle-stream clipper cannot preserve all imported topology.
-- [ ] MEDIUM: Define ownership of scripts, joints, children, animation, and serialization when a connection disappears while an object remains split.
+- [x] HIGH: Expose a Bullet-backed portal raycast-hit API and test regular objects, split pieces, aperture rims, and recursive portal hits.
+- [x] MEDIUM: Add bounded adaptive nonlinear-warp ray paths for gameplay/physics; a single origin/tangent Jacobian cannot represent curved paths or volume-boundary crossings.
+- [x] MEDIUM: Support indexed meshes, submeshes/material slots, skinned meshes, and morph changes in CPU portal cuts. The current triangle-stream clipper cannot preserve all imported topology.
+- [x] MEDIUM: Define ownership of scripts, joints, children, animation, and serialization when a connection disappears while an object remains split.
 
 ### Shadows
 
-- [ ] MEDIUM: Define realtime/baked mixed-lighting behavior so static receivers do not double-shadow while dynamic objects retain realtime shadows.
-- [ ] HIGH: Add shadow debug views for atlases, cascades, bounds, selected lights, caster counts, and occupancy.
-- [ ] MEDIUM: Add shadow telemetry for CPU submission, GPU time, draw/triangle counts, allocation size, and static-cache reuse.
-- [ ] HIGH: Add visual regressions for shadow bias, cascade seams, shimmer, far fade, thin/reversed geometry, large coordinates, portals, and spatially mapped casters/lights.
-- [ ] HIGH: Stress maximum realtime lights and shadow budgets; verify deterministic degradation without stalls or per-frame resource churn.
-- [ ] MEDIUM: Document supported shadow types, quality controls, costs, and known limitations in the README.
+- [x] MEDIUM: Define realtime/baked mixed-lighting behavior so static receivers do not double-shadow while dynamic objects retain realtime shadows.
+- [x] HIGH: Add shadow debug views for atlases, cascades, bounds, selected lights, caster counts, and occupancy in the Performance window.
+- [x] HIGH: Add visual regressions for shadow bias, cascade seams, shimmer, far fade, thin/reversed geometry, large coordinates, portals, and spatially mapped casters/lights.
+- [x] HIGH: Stress maximum realtime lights and shadow budgets; verify deterministic degradation without stalls or per-frame resource churn.
 
 ### Light model and scalability
 
-- [ ] HIGH: Add spot lights with range attenuation, inner/outer cone angles, serialization, editor gizmos, PBR evaluation, and shadow policy.
-- [ ] MEDIUM: Add practical rectangular or disk area lights using LTC or another documented approximation.
-- [ ] HIGH: Add camera-aware deterministic importance sorting for bounded fallback light lists.
-- [ ] HIGH: Move Forward+ list construction to GPU compute, report overflow, and allocate deferred-safe per-portal-view cluster buffers.
-- [ ] HIGH: Define physical light units and inverse-square attenuation with a smooth range cutoff and compatibility mode.
-- [ ] MEDIUM: Add per-object light layers/channel masks.
-- [ ] MEDIUM: Add directional/spot cookies and optional IES profiles.
-- [ ] MEDIUM: Add Kelvin temperature input with RGB override and consistent intensity/exposure behavior.
+- [x] HIGH: Add spot lights with range attenuation, inner/outer cone angles, serialization, editor gizmos, PBR evaluation, and shadow policy.
+- [x] HIGH: Define physical light units and inverse-square attenuation with a smooth range cutoff and compatibility mode.
+- [x] MEDIUM: Add per-object light layers/channel masks.
+- [x] MEDIUM: Add directional/spot cookies and optional IES profiles.
 
 ### Image-based lighting, reflections, and indirect lighting
 
