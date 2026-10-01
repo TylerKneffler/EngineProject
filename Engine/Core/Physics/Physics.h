@@ -37,8 +37,17 @@ public:
     Physics(const Physics&) = delete;
     Physics& operator=(const Physics&) = delete;
 
-    void Step(float deltaTime);
+    void Step(double deltaTime);
     void Reset();
+
+    // Uses an engine-owned accumulator and advances Bullet in identical fixed
+    // quanta regardless of how often output frames are sampled.
+    void ConfigureFixedStep(double seconds, uint32_t maximumSubsteps,
+        uint32_t solverIterations);
+    double GetFixedStep() const;
+    uint32_t GetMaximumSubsteps() const;
+    uint32_t GetSolverIterations() const;
+    uint32_t GetLastSubstepCount() const;
 
     // Runtime-only portal collision instances. They represent the remote
     // portion of a mesh while an object is split across a connection. The

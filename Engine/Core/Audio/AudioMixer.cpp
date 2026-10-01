@@ -5,6 +5,7 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <cstdint>
 
 namespace Engine::Audio
 {
@@ -12,6 +13,7 @@ struct AudioMixer::Impl
 {
     ma_engine engine{};
     bool initialized = false;
+    bool offline = false;
     float masterVolume = 1.f;
     std::unordered_map<std::string, float> busVolumes;
     std::unordered_map<std::string, std::unique_ptr<ma_sound_group>> buses;
@@ -56,6 +58,38 @@ AudioMixer::~AudioMixer()
 bool AudioMixer::IsAvailable() const
 {
     return m_impl && m_impl->initialized;
+}
+
+bool AudioMixer::ConfigureOffline(uint32_t sampleRate, uint32_t channels)
+{
+    if (!m_impl || sampleRate == 0u || channels == 0u) return false;
+    std::lock_guard<std::mutex> lock(m_impl->mutex);
+    m_impl->offline = false;
+    if (m_impl->initialized)
+    {
+        for (auto& [name, group] : m_impl->buses)
+            ma_sound_group_uninit(group.get());
+        m_impl->buses.clear();
+        ma_engine_uninit(&m_impl->engine);
+        m_impl->initialized = false;
+    }
+    ma_engine_config config = ma_engine_config_init();
+    config.noDevice = MA_TRUE;
+    config.sampleRate = sampleRate;
+    config.channels = channels;
+    m_impl->initialized = ma_engine_init(&config, &m_impl->engine) == MA_SUCCESS;
+    m_impl->offline = m_impl->initialized;
+    if (m_impl->initialized)
+        ma_engine_set_volume(&m_impl->engine, m_impl->masterVolume);
+    return m_impl->offline;
+}
+
+bool AudioMixer::ReadOfflineFrames(float* samples, uint64_t frameCount)
+{
+    if (!m_impl || !m_impl->offline || (!samples && frameCount != 0u))
+        return false;
+    return ma_engine_read_pcm_frames(&m_impl->engine, samples, frameCount,
+        nullptr) == MA_SUCCESS;
 }
 
 void AudioMixer::SetMasterVolume(float volume)

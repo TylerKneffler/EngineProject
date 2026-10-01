@@ -14,6 +14,7 @@ public:
 
     void Update(float deltaTime);
     void Reset();
+    void SynchronizeToTime(double sceneTime);
 
 private:
     Engine::Scene::Scene* m_scene = nullptr;

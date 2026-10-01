@@ -31,8 +31,13 @@ public:
     // Legacy synchronous swap-chain capture retained for diagnostics. Video
     // export uses the off-screen asynchronous queue below.
     bool CaptureFrameRGBA(std::vector<uint8_t>& pixels);
-    bool EnableOffscreenExport(uint32_t readbackQueueDepth = 3u);
+    bool EnableOffscreenExport(uint32_t outputWidth, uint32_t outputHeight,
+        uint32_t msaaSamples = 1u, uint32_t readbackQueueDepth = 3u,
+        bool hdrOutput = false, uint32_t hdrBits = 16u,
+        bool linearOutput = false);
+    void BeginExportFrame(uint32_t samplesPerFrame);
     bool ReadExportFrameRGBA(std::vector<uint8_t>& pixels, bool wait);
+    bool ReadExportFrameFloatRGBA(std::vector<float>& pixels, bool wait);
     size_t GetPendingExportFrameCount() const { return m_exportPendingCount; }
     size_t GetExportReadbackCapacity() const { return m_exportReadbacks.size(); }
 
@@ -62,6 +67,14 @@ private:
     std::unique_ptr<D3D11GraphicsProvider> m_graphicsProvider;
     uint32_t m_width = 0;
     uint32_t m_height = 0;
+    uint32_t m_exportWidth = 0;
+    uint32_t m_exportHeight = 0;
+    uint32_t m_msaaSamples = 1u;
+    bool m_exportHdr = false;
+    bool m_exportLinear = false;
+    uint32_t m_hdrBits = 16u;
+    uint32_t m_temporalSampleTarget = 1u;
+    uint32_t m_temporalSamplesAccumulated = 0u;
     bool m_flipModelSwapChain = false;
     bool m_allowTearing = false;
     UINT m_swapChainFlags = 0;

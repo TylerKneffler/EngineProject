@@ -278,7 +278,14 @@ bool AudioSource::UsesDeterministicClock() const
 
 void AudioSource::SynchronizeToSceneClock()
 {
-    if (!m_impl || !m_impl->soundInitialized || !UsesDeterministicClock())
+    if (!Owner || !Owner->GetScene()) return;
+    SynchronizeToTime(Owner->GetScene()->GetElapsedTime());
+}
+
+void AudioSource::SynchronizeToTime(double sceneTime)
+{
+    if (!m_impl || !m_impl->soundInitialized || !UsesDeterministicClock() ||
+        !m_impl->transportPlaying)
         return;
     ma_uint32 sampleRate = 0;
     ma_uint64 length = 0;
@@ -288,7 +295,7 @@ void AudioSource::SynchronizeToSceneClock()
         length == 0)
         return;
     const double elapsed = std::max(0.0,
-        Owner->GetScene()->GetElapsedTime() - m_impl->deterministicStartTime);
+        sceneTime - m_impl->deterministicStartTime);
     double sourceSeconds = m_impl->deterministicOffset + elapsed *
         static_cast<double>(std::max(0.01f, pitch));
     const double lengthSeconds = static_cast<double>(length) / sampleRate;
@@ -301,8 +308,16 @@ void AudioSource::SynchronizeToSceneClock()
     }
     const ma_uint64 frame = std::min(length,
         static_cast<ma_uint64>(sourceSeconds * sampleRate));
-    ma_sound_stop(&m_impl->sound);
-    ma_sound_seek_to_pcm_frame(&m_impl->sound, frame);
+    ma_uint64 currentFrame = 0u;
+    const bool cursorAvailable = ma_sound_get_cursor_in_pcm_frames(
+        &m_impl->sound, &currentFrame) == MA_SUCCESS;
+    if (!cursorAvailable || currentFrame != frame)
+    {
+        ma_sound_stop(&m_impl->sound);
+        ma_sound_seek_to_pcm_frame(&m_impl->sound, frame);
+    }
+    if (frame < length && !ma_sound_is_playing(&m_impl->sound))
+        ma_sound_start(&m_impl->sound);
 }
 
 void AudioSource::Disabled() { Stop(); }

@@ -36,6 +36,11 @@ public:
 class LightProbeGroup final : public Engine::Core::Component
 {
 public:
+    // Probe payload is CPU-side baked lighting data. Keep the estimate next to
+    // the sampling API so editor diagnostics and bake budgets use the same
+    // accounting (three RGB vectors per probe).
+    static constexpr size_t BytesPerProbe() { return sizeof(glm::vec3) * 3u; }
+    static constexpr size_t MaximumProbeCount() { return 32768u; }
     LightProbeGroup();
 
     PROPERTY(Inspector,EditAnywhere,Category="Probe Volume")
@@ -53,6 +58,7 @@ public:
     bool valid=false;
 
     size_t SampleCount() const;
+    size_t EstimatedStorageBytes() const { return SampleCount() * BytesPerProbe(); }
     glm::vec3 LocalSamplePosition(int x,int y,int z) const;
     void ResizeSamples();
     bool SampleAt(const glm::vec3& worldPosition,

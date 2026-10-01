@@ -69,7 +69,9 @@ void Scene::Update(float deltaTime)
     for (const auto& object : m_objects)
         object->Update();
     m_audio->Update(m_deltaTime);
-    m_physics->Step(m_deltaTime);
+    const double physicsDelta = m_clock.IsFixedStep()
+        ? m_clock.GetFixedStep() : static_cast<double>(m_deltaTime);
+    m_physics->Step(physicsDelta);
     // Bullet has now published current-frame poses and overlap pairs. Portal
     // traversal deliberately runs here rather than in Component::Update so a
     // crossing is evaluated against the motion that just occurred.

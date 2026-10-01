@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "DX11GameRenderer.h"
+#include "Core/Graphics/PostProcess.h"
 #include <chrono>
 
 namespace Engine::Renderers
@@ -99,12 +100,13 @@ void DX11GameRenderer::CreateTargets()
     depth.MipLevels = 1;
     depth.ArraySize = 1;
     depth.Format = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
-    depth.SampleDesc.Count = 1;
+    depth.SampleDesc.Count = m_msaaSamples;
     depth.Usage = D3D11_USAGE_DEFAULT;
     depth.BindFlags = D3D11_BIND_DEPTH_STENCIL;
     ThrowIfFailed(m_device->CreateTexture2D(&depth, nullptr, &m_depthTexture));
     ThrowIfFailed(m_device->CreateDepthStencilView(m_depthTexture.Get(), nullptr, &m_dsv));
-    m_postProcess.Create(m_device.Get(), m_width, m_height);
+    m_postProcess.Create(m_device.Get(), m_width, m_height, m_msaaSamples,
+        m_hdrBits);
 }
 
 void DX11GameRenderer::Resize(uint32_t width, uint32_t height)
@@ -140,9 +142,43 @@ void DX11GameRenderer::Clear(float r, float g, float b, float a)
 
 void DX11GameRenderer::EndFrame()
 {
+    const bool temporalFrame = m_temporalSampleTarget > 1u;
+    if (temporalFrame)
+    {
+        m_postProcess.AccumulateScene(m_context.Get(),
+            1.f / static_cast<float>(m_temporalSampleTarget));
+        ++m_temporalSamplesAccumulated;
+        if (m_temporalSamplesAccumulated < m_temporalSampleTarget)
+        {
+            if (m_graphicsProvider && m_graphicsProvider->GetContextFactory())
+            {
+                auto* factory = m_graphicsProvider->GetContextFactory();
+                factory->FinalizeFrame();
+                m_frameTelemetry = factory->GetFrameTimingTelemetry();
+            }
+            m_frameTelemetry.cpuPresentationMilliseconds = 0.0;
+            m_frameTelemetry.flipModelSwapChain = m_flipModelSwapChain;
+            return;
+        }
+    }
     ID3D11RenderTargetView* output = m_exportRtv
         ? m_exportRtv.Get() : m_rtv.Get();
-    m_postProcess.Compose(m_context.Get(), output);
+    if (m_exportRtv)
+    {
+        D3D11_VIEWPORT viewport{ 0.f, 0.f,
+            static_cast<float>(m_exportWidth),
+            static_cast<float>(m_exportHeight), 0.f, 1.f };
+        m_context->RSSetViewports(1, &viewport);
+    }
+    if (m_exportHdr)
+    {
+        auto postProcess = Engine::Graphics::GetPostProcessSettings();
+        postProcess.toneMapping = m_exportLinear ? 5u : 3u;
+        Engine::Graphics::SetPostProcessSettings(postProcess);
+    }
+    m_postProcess.Compose(m_context.Get(), output, temporalFrame);
+    m_temporalSampleTarget = 1u;
+    m_temporalSamplesAccumulated = 0u;
     if (m_graphicsProvider && m_graphicsProvider->GetContextFactory())
     {
         auto* factory = m_graphicsProvider->GetContextFactory();
@@ -175,17 +211,68 @@ void DX11GameRenderer::EndFrame()
     m_frameTelemetry.flipModelSwapChain = m_flipModelSwapChain;
 }
 
-bool DX11GameRenderer::EnableOffscreenExport(uint32_t readbackQueueDepth)
+void DX11GameRenderer::BeginExportFrame(uint32_t samplesPerFrame)
 {
-    if (!m_device || !m_context || !m_width || !m_height)
+    if (!m_exportTexture)
+        throw std::logic_error("Export render target is not enabled");
+    m_temporalSampleTarget = std::clamp(samplesPerFrame, 1u, 64u);
+    m_temporalSamplesAccumulated = 0u;
+    if (m_temporalSampleTarget > 1u)
+        m_postProcess.ClearAccumulation(m_context.Get());
+}
+
+bool DX11GameRenderer::EnableOffscreenExport(uint32_t outputWidth,
+    uint32_t outputHeight, uint32_t msaaSamples, uint32_t readbackQueueDepth,
+    bool hdrOutput, uint32_t hdrBits, bool linearOutput)
+{
+    if (!m_device || !m_context || !m_width || !m_height ||
+        !outputWidth || !outputHeight)
         return false;
+    if (msaaSamples != 1u && msaaSamples != 2u && msaaSamples != 4u && msaaSamples != 8u)
+        return false;
+    m_msaaSamples = msaaSamples;
+    m_exportWidth = outputWidth;
+    m_exportHeight = outputHeight;
+    m_exportHdr = hdrOutput;
+    m_exportLinear = linearOutput;
+    m_hdrBits = hdrBits >= 32u ? 32u : 16u;
+    if (m_msaaSamples > 1u)
+    {
+        UINT qualityLevels = 0;
+        UINT depthQualityLevels = 0;
+        if (FAILED(m_device->CheckMultisampleQualityLevels(
+            (m_hdrBits == 32u ? DXGI_FORMAT_R32G32B32A32_FLOAT
+                : DXGI_FORMAT_R16G16B16A16_FLOAT),
+                m_msaaSamples, &qualityLevels)) ||
+            qualityLevels == 0u ||
+            FAILED(m_device->CheckMultisampleQualityLevels(
+                DXGI_FORMAT_D32_FLOAT_S8X24_UINT, m_msaaSamples,
+                &depthQualityLevels)) || depthQualityLevels == 0u)
+        {
+            m_msaaSamples = 1u;
+            return false;
+        }
+        m_dsv.Reset(); m_depthTexture.Reset();
+        D3D11_TEXTURE2D_DESC depth{};
+        depth.Width = m_width; depth.Height = m_height; depth.MipLevels = 1;
+        depth.ArraySize = 1; depth.Format = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
+        depth.SampleDesc.Count = m_msaaSamples; depth.Usage = D3D11_USAGE_DEFAULT;
+        depth.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+        if (FAILED(m_device->CreateTexture2D(&depth, nullptr, &m_depthTexture)) ||
+            FAILED(m_device->CreateDepthStencilView(m_depthTexture.Get(), nullptr, &m_dsv)))
+            return false;
+    }
+    m_postProcess.Create(m_device.Get(), m_width, m_height, m_msaaSamples,
+        m_hdrBits);
     readbackQueueDepth = std::clamp(readbackQueueDepth, 2u, 8u);
     D3D11_TEXTURE2D_DESC output{};
-    output.Width = m_width;
-    output.Height = m_height;
+    output.Width = m_exportWidth;
+    output.Height = m_exportHeight;
     output.MipLevels = 1;
     output.ArraySize = 1;
-    output.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    output.Format = m_exportHdr ? (m_hdrBits == 32u
+        ? DXGI_FORMAT_R32G32B32A32_FLOAT : DXGI_FORMAT_R16G16B16A16_FLOAT)
+        : DXGI_FORMAT_R8G8B8A8_UNORM;
     output.SampleDesc.Count = 1;
     output.Usage = D3D11_USAGE_DEFAULT;
     output.BindFlags = D3D11_BIND_RENDER_TARGET;
@@ -240,12 +327,151 @@ bool DX11GameRenderer::ReadExportFrameRGBA(
     if (FAILED(m_context->Map(slot.staging.Get(), 0,
         D3D11_MAP_READ, 0, &mapped)))
         return false;
-    const size_t rowBytes = static_cast<size_t>(m_width) * 4u;
-    pixels.resize(rowBytes * m_height);
+    const size_t rowBytes = static_cast<size_t>(m_exportWidth) *
+        (m_exportHdr ? 8u : 4u);
+    pixels.resize(rowBytes * m_exportHeight);
     const auto* source = static_cast<const uint8_t*>(mapped.pData);
-    for (uint32_t row = 0; row < m_height; ++row)
-        std::memcpy(pixels.data() + static_cast<size_t>(row) * rowBytes,
-            source + static_cast<size_t>(row) * mapped.RowPitch, rowBytes);
+    if (!m_exportHdr)
+    {
+        for (uint32_t row = 0; row < m_exportHeight; ++row)
+            std::memcpy(pixels.data() + static_cast<size_t>(row) * rowBytes,
+                source + static_cast<size_t>(row) * mapped.RowPitch, rowBytes);
+    }
+    else
+    {
+        const auto halfToFloat = [](uint16_t half)
+        {
+            const uint32_t sign = static_cast<uint32_t>(half & 0x8000u) << 16u;
+            int32_t exponent = static_cast<int32_t>((half >> 10u) & 0x1fu);
+            uint32_t mantissa = half & 0x3ffu;
+            uint32_t bits = 0;
+            if (exponent == 0u)
+            {
+                if (mantissa == 0u) bits = sign;
+                else
+                {
+                    exponent = 1u;
+                    while ((mantissa & 0x400u) == 0u)
+                    { mantissa <<= 1u; --exponent; }
+                    bits = sign | (static_cast<uint32_t>(exponent + 112) << 23u) |
+                        ((mantissa & 0x3ffu) << 13u);
+                }
+            }
+            else if (exponent == 31u)
+                bits = sign | 0x7f800000u | (mantissa << 13u);
+            else
+                bits = sign | (static_cast<uint32_t>(exponent + 112) << 23u) |
+                    (mantissa << 13u);
+            float value = 0.f;
+            std::memcpy(&value, &bits, sizeof(value));
+            return value;
+        };
+        for (uint32_t row = 0; row < m_exportHeight; ++row)
+        {
+            const auto* input = static_cast<const uint8_t*>(
+                source + static_cast<size_t>(row) * mapped.RowPitch);
+            auto* output = pixels.data() +
+                static_cast<size_t>(row) * rowBytes;
+            for (uint32_t column = 0; column < m_exportWidth; ++column)
+            {
+                for (uint32_t channel = 0; channel < 4u; ++channel)
+                {
+                    float channelValue = 0.f;
+                    if (m_hdrBits == 32u)
+                        std::memcpy(&channelValue, input +
+                            (column * 4u + channel) * sizeof(float), sizeof(float));
+                    else
+                    {
+                        uint16_t half = 0;
+                        std::memcpy(&half, input +
+                            (column * 4u + channel) * sizeof(uint16_t), sizeof(half));
+                        channelValue = halfToFloat(half);
+                    }
+                    const float value = std::clamp(channelValue, 0.f, 1.f);
+                    const uint16_t encoded = static_cast<uint16_t>(
+                        std::lround(value * 65535.f));
+                    std::memcpy(output + (column * 4u + channel) *
+                        sizeof(encoded), &encoded, sizeof(encoded));
+                }
+            }
+        }
+    }
+    m_context->Unmap(slot.staging.Get(), 0);
+    slot.pending = false;
+    m_exportReadIndex = (m_exportReadIndex + 1u) % m_exportReadbacks.size();
+    --m_exportPendingCount;
+    return true;
+}
+
+bool DX11GameRenderer::ReadExportFrameFloatRGBA(
+    std::vector<float>& pixels, bool wait)
+{
+    if (!m_exportHdr || !m_context || m_exportPendingCount == 0u ||
+        m_exportReadbacks.empty())
+        return false;
+    ExportReadbackSlot& slot = m_exportReadbacks[m_exportReadIndex];
+    if (!slot.pending)
+        return false;
+    HRESULT status = m_context->GetData(slot.completion.Get(), nullptr, 0,
+        wait ? 0u : D3D11_ASYNC_GETDATA_DONOTFLUSH);
+    while (wait && status == S_FALSE)
+    {
+        SwitchToThread();
+        status = m_context->GetData(slot.completion.Get(), nullptr, 0, 0u);
+    }
+    if (status != S_OK)
+        return false;
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    if (FAILED(m_context->Map(slot.staging.Get(), 0,
+        D3D11_MAP_READ, 0, &mapped)))
+        return false;
+    pixels.resize(static_cast<size_t>(m_exportWidth) * m_exportHeight * 4u);
+    const auto* source = static_cast<const uint8_t*>(mapped.pData);
+    const auto halfToFloat = [](uint16_t half)
+    {
+        const uint32_t sign = static_cast<uint32_t>(half & 0x8000u) << 16u;
+        int32_t exponent = static_cast<int32_t>((half >> 10u) & 0x1fu);
+        uint32_t mantissa = half & 0x3ffu;
+        uint32_t bits = 0;
+        if (exponent == 0)
+        {
+            if (!mantissa) bits = sign;
+            else
+            {
+                exponent = 1;
+                while ((mantissa & 0x400u) == 0u)
+                { mantissa <<= 1u; --exponent; }
+                bits = sign | (static_cast<uint32_t>(exponent + 112) << 23u) |
+                    ((mantissa & 0x3ffu) << 13u);
+            }
+        }
+        else if (exponent == 31)
+            bits = sign | 0x7f800000u | (mantissa << 13u);
+        else
+            bits = sign | (static_cast<uint32_t>(exponent + 112) << 23u) |
+                (mantissa << 13u);
+        float value = 0.f;
+        std::memcpy(&value, &bits, sizeof(value));
+        return value;
+    };
+    for (uint32_t row = 0; row < m_exportHeight; ++row)
+    {
+        const uint8_t* rowSource = source +
+            static_cast<size_t>(row) * mapped.RowPitch;
+        for (uint32_t column = 0; column < m_exportWidth * 4u; ++column)
+        {
+            if (m_hdrBits == 32u)
+                std::memcpy(&pixels[static_cast<size_t>(row) * m_exportWidth * 4u + column],
+                    rowSource + column * sizeof(float), sizeof(float));
+            else
+            {
+                uint16_t half = 0;
+                std::memcpy(&half, rowSource + column * sizeof(half), sizeof(half));
+                pixels[static_cast<size_t>(row) * m_exportWidth * 4u + column] =
+                    halfToFloat(half);
+            }
+        }
+    }
     m_context->Unmap(slot.staging.Get(), 0);
     slot.pending = false;
     m_exportReadIndex = (m_exportReadIndex + 1u) % m_exportReadbacks.size();

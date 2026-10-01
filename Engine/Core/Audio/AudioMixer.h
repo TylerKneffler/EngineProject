@@ -1,6 +1,7 @@
 #pragma once
 
 #include <glm/glm.hpp>
+#include <cstdint>
 #include <string>
 
 namespace Engine::Audio
@@ -13,6 +14,8 @@ public:
     static AudioMixer& Get();
 
     bool IsAvailable() const;
+    bool ConfigureOffline(uint32_t sampleRate, uint32_t channels);
+    bool ReadOfflineFrames(float* samples, uint64_t frameCount);
     void SetMasterVolume(float volume);
     float GetMasterVolume() const;
     void SetBusVolume(const std::string& bus, float volume);

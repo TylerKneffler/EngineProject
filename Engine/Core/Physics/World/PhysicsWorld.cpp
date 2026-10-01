@@ -8,6 +8,7 @@
 #include <array>
 #include <memory>
 #include <cmath>
+#include <stdexcept>
 #include <unordered_map>
 #include <vector>
 
@@ -75,6 +76,11 @@ struct Physics::Impl
         : scene(&owner), state(std::make_unique<PhysicsWorldState>()) {}
     Engine::Scene::Scene* scene = nullptr;
     std::unique_ptr<PhysicsWorldState> state;
+    double fixedStepSeconds = 1.0 / 60.0;
+    double accumulatorSeconds = 0.0;
+    uint32_t maximumSubsteps = 6u;
+    uint32_t solverIterations = 10u;
+    uint32_t lastSubstepCount = 0u;
     struct PortalMeshCollider
     {
         const Engine::Components::RigidBody* owner = nullptr;
@@ -93,6 +99,29 @@ struct Physics::Impl
 Physics::Physics(Engine::Scene::Scene& scene) : m_impl(new Impl(scene)) {}
 Physics::~Physics() { delete m_impl; }
 void* Physics::GetInternalState() { return m_impl ? m_impl->state.get() : nullptr; }
+
+void Physics::ConfigureFixedStep(double seconds, uint32_t maximumSubsteps,
+    uint32_t solverIterations)
+{
+    if (!std::isfinite(seconds) || seconds <= 0.0)
+        throw std::invalid_argument(
+            "A physics fixed step must be finite and positive");
+    if (maximumSubsteps == 0u || solverIterations == 0u)
+        throw std::invalid_argument(
+            "Physics substeps and solver iterations must be positive");
+    m_impl->fixedStepSeconds = seconds;
+    m_impl->maximumSubsteps = maximumSubsteps;
+    m_impl->solverIterations = solverIterations;
+    m_impl->accumulatorSeconds = 0.0;
+    m_impl->lastSubstepCount = 0u;
+    m_impl->state->world->getSolverInfo().m_numIterations =
+        static_cast<int>(solverIterations);
+}
+
+double Physics::GetFixedStep() const { return m_impl->fixedStepSeconds; }
+uint32_t Physics::GetMaximumSubsteps() const { return m_impl->maximumSubsteps; }
+uint32_t Physics::GetSolverIterations() const { return m_impl->solverIterations; }
+uint32_t Physics::GetLastSubstepCount() const { return m_impl->lastSubstepCount; }
 
 void Physics::RemovePortalMeshCollider(const void* instanceKey)
 {
@@ -355,7 +384,7 @@ PhysicsWorldState::PhysicsWorldState()
     softBodyInfo.m_sparsesdf.Initialize();
 }
 
-void Physics::Step(float deltaTime)
+void Physics::Step(double deltaTime)
 {
     Engine::Scene::Scene& scene = *m_impl->scene;
     std::vector<Engine::Components::RigidBody*> bodies;
@@ -370,7 +399,6 @@ void Physics::Step(float deltaTime)
                 body->BeginOverlapFrame();
                 if (body->EnsureBody())
                 {
-                    body->ApplyBodySettings();
                     if (!Engine::Physics::IsDynamic(*body) ||
                         body->m_editorTransformChanged)
                         body->SyncBodyFromTransform();
@@ -387,10 +415,42 @@ void Physics::Step(float deltaTime)
                     cloth->ApplyForces();
                 }
             }
-    if (bodies.empty() && clothBodies.empty()) return;
+    m_impl->lastSubstepCount = 0u;
+    if (bodies.empty() && clothBodies.empty())
+    {
+        m_impl->accumulatorSeconds = 0.0;
+        return;
+    }
 
     Engine::Physics::PhysicsWorldState& physics = *m_impl->state;
-    physics.world->stepSimulation(std::clamp(deltaTime, 0.f, 0.1f), 6, 1.f / 60.f);
+    physics.world->getSolverInfo().m_numIterations =
+        static_cast<int>(m_impl->solverIterations);
+    const double boundedDelta = std::clamp(
+        std::isfinite(deltaTime) ? deltaTime : 0.0, 0.0,
+        m_impl->fixedStepSeconds * m_impl->maximumSubsteps);
+    m_impl->accumulatorSeconds = std::min(
+        m_impl->accumulatorSeconds + boundedDelta,
+        m_impl->fixedStepSeconds * m_impl->maximumSubsteps);
+    const double epsilon = m_impl->fixedStepSeconds * 1e-9;
+    while (m_impl->lastSubstepCount < m_impl->maximumSubsteps &&
+        m_impl->accumulatorSeconds + epsilon >= m_impl->fixedStepSeconds)
+    {
+        // Reapply live settings at simulation cadence, not output cadence.
+        // Besides making runtime edits visible, this prevents calls such as
+        // setAngularFactor/updateInertiaTensor from making contact outcomes
+        // depend on how fixed physics steps were grouped into video frames.
+        for (Engine::Components::RigidBody* body : bodies)
+            body->ApplyBodySettings();
+        const btScalar step = static_cast<btScalar>(m_impl->fixedStepSeconds);
+        // maxSubSteps = 0 disables Bullet's float accumulator. The engine's
+        // double accumulator above makes chunking independent of output FPS.
+        physics.world->stepSimulation(step, 0, step);
+        m_impl->accumulatorSeconds -= m_impl->fixedStepSeconds;
+        if (m_impl->accumulatorSeconds < 0.0 &&
+            m_impl->accumulatorSeconds > -epsilon)
+            m_impl->accumulatorSeconds = 0.0;
+        ++m_impl->lastSubstepCount;
+    }
 
     for (Engine::Components::RigidBody* body : bodies)
     {
@@ -464,7 +524,7 @@ void Physics::Step(float deltaTime)
     }
     for (Engine::Components::Cloth* cloth : clothBodies)
         if (cloth->collisionMorph)
-            cloth->UpdateCollisionMorph(deltaTime);
+            cloth->UpdateCollisionMorph(static_cast<float>(boundedDelta));
 }
 
 void Physics::Reset()
@@ -483,5 +543,9 @@ void Physics::Reset()
             m_impl->state->world->removeCollisionObject(pair.second.object.get());
     m_impl->portalApertureColliders.clear();
     m_impl->state = std::make_unique<Engine::Physics::PhysicsWorldState>();
+    m_impl->state->world->getSolverInfo().m_numIterations =
+        static_cast<int>(m_impl->solverIterations);
+    m_impl->accumulatorSeconds = 0.0;
+    m_impl->lastSubstepCount = 0u;
 }
 }

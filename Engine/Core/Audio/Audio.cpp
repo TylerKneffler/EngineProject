@@ -4,6 +4,8 @@
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 
+#include <vector>
+
 namespace Engine::Audio
 {
 Audio::Audio(Engine::Scene::Scene& scene) : m_scene(&scene) {}
@@ -14,8 +16,15 @@ void Audio::Update(float)
 
     Engine::Components::AudioSource* fallback = nullptr;
     Engine::Components::AudioSource* assigned = nullptr;
+    std::vector<Engine::Core::Object*> pending;
     for (const auto& object : m_scene->GetObjects())
+        pending.push_back(object.get());
+    while (!pending.empty())
     {
+        Engine::Core::Object* object = pending.back();
+        pending.pop_back();
+        pending.insert(pending.end(), object->Children.begin(),
+            object->Children.end());
         if (!object->IsEnabledInHierarchy()) continue;
         for (Engine::Core::Component* component : object->Components)
         {
@@ -40,9 +49,36 @@ void Audio::Update(float)
 void Audio::Reset()
 {
     if (!m_scene) return;
+    std::vector<Engine::Core::Object*> pending;
     for (const auto& object : m_scene->GetObjects())
+        pending.push_back(object.get());
+    while (!pending.empty())
+    {
+        Engine::Core::Object* object = pending.back();
+        pending.pop_back();
+        pending.insert(pending.end(), object->Children.begin(),
+            object->Children.end());
         for (Engine::Core::Component* component : object->Components)
             if (auto* source = dynamic_cast<Engine::Components::AudioSource*>(component))
                 source->Stop();
+    }
+}
+
+void Audio::SynchronizeToTime(double sceneTime)
+{
+    if (!m_scene) return;
+    std::vector<Engine::Core::Object*> pending;
+    for (const auto& object : m_scene->GetObjects())
+        pending.push_back(object.get());
+    while (!pending.empty())
+    {
+        Engine::Core::Object* object = pending.back();
+        pending.pop_back();
+        pending.insert(pending.end(), object->Children.begin(),
+            object->Children.end());
+        for (Engine::Core::Component* component : object->Components)
+            if (auto* source = dynamic_cast<Engine::Components::AudioSource*>(component))
+                source->SynchronizeToTime(sceneTime);
+    }
 }
 }

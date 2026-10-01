@@ -109,7 +109,21 @@ struct VideoExportRequest
     uint32_t width = 1920;
     uint32_t height = 1080;
     uint32_t fps = 60;
-    uint32_t quality = 75;
+    uint32_t physicsFps = 120;
+    uint32_t maximumPhysicsSubsteps = 8;
+    uint32_t physicsSolverIterations = 10;
+    uint32_t encoderQuality = 75;
+    uint32_t renderQuality = 1;
+    uint32_t msaaSamples = 1;
+    uint32_t exportQuality = 0;
+    uint32_t toneMapping = 1;
+    float exposure = 1.f;
+    bool hdrOutput = false;
+    uint32_t hdrPrecision = 16;
+    uint32_t samplesPerFrame = 1;
+    float shutter = 0.5f;
+    bool subframeSampling = true;
+    bool simulationCache = false;
     float duration = 0.f;
     float timeout = 120.f;
 };
@@ -148,8 +162,17 @@ std::pair<bool, std::string> BuildAndRunVideoExport(
         fs::path output = fs::path(request.output);
         if (output.is_relative())
             output = projectRoot / output;
-        output.replace_extension(request.format);
-        fs::create_directories(output.parent_path());
+        const bool imageSequence = request.format == "png" || request.format == "exr";
+        if (imageSequence)
+        {
+            output.replace_extension();
+            fs::create_directories(output);
+        }
+        else
+        {
+            output.replace_extension(request.format);
+            fs::create_directories(output.parent_path());
+        }
 
         std::wostringstream command;
         command << QuoteCommandArgument(executable.wstring())
@@ -162,9 +185,24 @@ std::pair<bool, std::string> BuildAndRunVideoExport(
             << L" --width " << request.width
             << L" --height " << request.height
             << L" --fps " << request.fps
-            << L" --quality " << request.quality
+            << L" --physics-fps " << request.physicsFps
+            << L" --max-physics-substeps " << request.maximumPhysicsSubsteps
+            << L" --physics-solver-iterations " << request.physicsSolverIterations
+            << L" --encoder-quality " << request.encoderQuality
+            << L" --render-quality " << request.renderQuality
+            << L" --msaa " << request.msaaSamples
+            << L" --export-quality " << request.exportQuality
+            << L" --export-exposure " << request.exposure
+            << L" --export-tone-map " << request.toneMapping
+            << L" --samples-per-frame " << request.samplesPerFrame
+            << L" --subframe-sampling " << (request.subframeSampling ? 1 : 0)
+            << L" --shutter " << request.shutter
             << L" --duration " << request.duration
             << L" --timeout " << request.timeout;
+        if (request.simulationCache)
+            command << L" --simulation-cache";
+        if (request.hdrOutput)
+            command << L" --hdr-precision " << request.hdrPrecision;
         if (!request.codec.empty())
             command << L" --codec " << QuoteCommandArgument(
                 fs::path(request.codec).wstring());
@@ -673,16 +711,39 @@ void PreferencesView::DrawExportSection(IEditorUi& ui)
     ui.Label("Offline Video Export");
     ui.Label("Renders a selected scene and its normal scene transitions at a fixed frame rate. The safety timeout always stops menus and looping scenes.");
     ui.InputText("Starting Scene", m_videoSceneBuf, sizeof(m_videoSceneBuf));
-    ui.InputText("Output File", m_videoOutputBuf, sizeof(m_videoOutputBuf));
-    static const char* formats[] = { "MP4 (H.264)", "WebM (VP9)", "MOV (ProRes)" };
-    ui.Combo("Video Type", &m_videoFormat, formats, 3);
+    ui.InputText("Output File / Sequence Directory", m_videoOutputBuf, sizeof(m_videoOutputBuf));
+    static const char* formats[] = { "MP4 (H.264)", "WebM (VP9)",
+        "MOV (ProRes)", "PNG Sequence", "EXR Sequence" };
+    ui.Combo("Output Type", &m_videoFormat, formats, 5);
     ui.InputText("Codec Override", m_videoCodecBuf, sizeof(m_videoCodecBuf));
     ui.InputText("Encoder Preset", m_videoPresetBuf, sizeof(m_videoPresetBuf));
     ui.InputText("FFmpeg", m_videoFfmpegBuf, sizeof(m_videoFfmpegBuf));
     ui.InputUInt("Width", &m_videoWidth);
     ui.InputUInt("Height", &m_videoHeight);
     ui.InputUInt("Frames Per Second", &m_videoFps);
-    ui.InputUInt("Quality (0-100)", &m_videoQuality);
+    ui.InputUInt("Physics Steps Per Second", &m_videoPhysicsFps);
+    ui.InputUInt("Maximum Physics Substeps", &m_videoMaximumPhysicsSubsteps);
+    ui.InputUInt("Physics Solver Iterations", &m_videoPhysicsSolverIterations);
+    ui.DisabledLabel("Physics is stepped independently; keep max substeps at least physics rate / output FPS.");
+    ui.InputUInt("Encoder Quality (0-100)", &m_videoEncoderQuality);
+    ui.InputUInt("Render Scale (1-4x)", &m_videoRenderQuality);
+    ui.InputUInt("MSAA Samples (1/2/4/8)", &m_videoMsaaSamples);
+    ui.InputUInt("Export Quality (0=Project, 1=Low, 2=Medium, 3=High)",
+        &m_videoExportQuality);
+    ui.InputUInt("Tone Map (0=None, 1=ACES, 2=Reinhard)",
+        &m_videoToneMapping);
+    ui.DragFloat("Export Exposure", &m_videoExposure, 0.05f, 0.f, 64.f);
+    ui.Checkbox("HDR10 / PQ Output", &m_videoHdrOutput);
+    ui.InputUInt("HDR Intermediate Precision (16 or 32)",
+        &m_videoHdrPrecision);
+    ui.InputUInt("Temporal Samples Per Frame (1-64)",
+        &m_videoSamplesPerFrame);
+    ui.Checkbox("Subframe Temporal Sampling", &m_videoSubframeSampling);
+    ui.Checkbox("Cache / Reuse Simulation Bake", &m_videoSimulationCache);
+    ui.DisabledLabel("Fixed-duration only; caches rigid bodies, cloth, and animated meshes. Particle systems and animated camera tracks are not cached.");
+    ui.DragFloat("Shutter (fraction of frame)", &m_videoShutter,
+        0.01f, 0.01f, 1.f);
+    ui.DisabledLabel("Temporal samples are averaged in linear HDR space; subframe simulation adds export time.");
     ui.DragFloat("Duration (0 = Camera Track)", &m_videoDuration,
         0.25f, 0.f, 86400.f);
     ui.DragFloat("Maximum Timeout", &m_videoTimeout,
@@ -755,7 +816,24 @@ void PreferencesView::StartVideoExport()
     m_videoWidth = std::clamp(m_videoWidth & ~1u, 2u, 7680u);
     m_videoHeight = std::clamp(m_videoHeight & ~1u, 2u, 4320u);
     m_videoFps = std::clamp(m_videoFps, 1u, 240u);
-    m_videoQuality = std::min(m_videoQuality, 100u);
+    m_videoPhysicsFps = std::clamp(m_videoPhysicsFps, 1u, 1000u);
+    m_videoMaximumPhysicsSubsteps = std::clamp(
+        m_videoMaximumPhysicsSubsteps, 1u, 1024u);
+    m_videoMaximumPhysicsSubsteps = std::max(
+        m_videoMaximumPhysicsSubsteps,
+        (m_videoPhysicsFps + m_videoFps - 1u) / m_videoFps);
+    m_videoPhysicsSolverIterations = std::clamp(
+        m_videoPhysicsSolverIterations, 1u, 256u);
+    m_videoEncoderQuality = std::min(m_videoEncoderQuality, 100u);
+    m_videoRenderQuality = std::clamp(m_videoRenderQuality, 1u, 4u);
+    m_videoMsaaSamples = m_videoMsaaSamples >= 8u ? 8u :
+        m_videoMsaaSamples >= 4u ? 4u : m_videoMsaaSamples >= 2u ? 2u : 1u;
+    m_videoExportQuality = std::min(m_videoExportQuality, 3u);
+    m_videoToneMapping = std::min(m_videoToneMapping, 2u);
+    m_videoExposure = std::clamp(m_videoExposure, 0.f, 64.f);
+    m_videoHdrPrecision = m_videoHdrPrecision >= 32u ? 32u : 16u;
+    m_videoSamplesPerFrame = std::clamp(m_videoSamplesPerFrame, 1u, 64u);
+    m_videoShutter = std::clamp(m_videoShutter, 0.01f, 1.f);
     m_videoDuration = std::clamp(m_videoDuration, 0.f, 86400.f);
     m_videoTimeout = std::clamp(m_videoTimeout, 1.f, 86400.f);
     VideoExportRequest request;
@@ -763,14 +841,29 @@ void PreferencesView::StartVideoExport()
     request.scene = m_videoSceneBuf;
     request.output = m_videoOutputBuf;
     request.format = m_videoFormat == 1 ? "webm" :
-        m_videoFormat == 2 ? "mov" : "mp4";
+        m_videoFormat == 2 ? "mov" : m_videoFormat == 3 ? "png" :
+        m_videoFormat == 4 ? "exr" : "mp4";
     request.codec = m_videoCodecBuf;
     request.preset = m_videoPresetBuf;
     request.ffmpeg = m_videoFfmpegBuf;
     request.width = m_videoWidth;
     request.height = m_videoHeight;
     request.fps = m_videoFps;
-    request.quality = m_videoQuality;
+    request.physicsFps = m_videoPhysicsFps;
+    request.maximumPhysicsSubsteps = m_videoMaximumPhysicsSubsteps;
+    request.physicsSolverIterations = m_videoPhysicsSolverIterations;
+    request.encoderQuality = m_videoEncoderQuality;
+    request.renderQuality = m_videoRenderQuality;
+    request.msaaSamples = m_videoMsaaSamples;
+    request.exportQuality = m_videoExportQuality;
+    request.toneMapping = m_videoToneMapping;
+    request.exposure = m_videoExposure;
+    request.hdrOutput = m_videoHdrOutput && m_videoFormat != 3;
+    request.hdrPrecision = m_videoHdrPrecision;
+    request.samplesPerFrame = m_videoSamplesPerFrame;
+    request.subframeSampling = m_videoSubframeSampling;
+    request.simulationCache = m_videoSimulationCache;
+    request.shutter = m_videoShutter;
     request.duration = m_videoDuration;
     request.timeout = m_videoTimeout;
     m_videoExporting = true;

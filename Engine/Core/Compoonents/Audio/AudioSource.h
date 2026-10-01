@@ -71,6 +71,7 @@ private:
     void UpdateListener();
     bool UsesDeterministicClock() const;
     void SynchronizeToSceneClock();
+    void SynchronizeToTime(double sceneTime);
 
     struct Impl;
     Impl* m_impl = nullptr;

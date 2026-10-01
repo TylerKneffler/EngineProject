@@ -185,6 +185,13 @@ bool LightProbeGroup::DrawProperties(::Engine::Editor::IEditorUi& ui)
         "Probe layout changed or is unbaked. Run Lighting > Bake Lighting.");
     const std::string count=std::to_string(SampleCount());
     ui.ValueLabel("Probe Count",count.c_str());
+    const size_t bytes=EstimatedStorageBytes();
+    char memory[96]{};
+    std::snprintf(memory,sizeof(memory),"%.2f MiB (CPU baked cache)",
+        static_cast<double>(bytes)/(1024.0*1024.0));
+    ui.ValueLabel("Estimated Probe Memory",memory);
+    if(bytes>1024u*1024u)
+        ui.DisabledLabel("Large probe volume: consider reducing grid density.");
     return changed;
 }
 

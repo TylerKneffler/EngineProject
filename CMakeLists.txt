@@ -592,6 +592,7 @@ target_precompile_headers(VideoExporter REUSE_FROM Engine)
 target_include_directories(VideoExporter PRIVATE
     ${ENGINE_ROOT}/Engine
     ${ENGINE_ROOT}/Engine/Core/Assets
+    ${tinyexr_SOURCE_DIR}
     ${ENGINE_PROJECT_DIR}/Assets
 )
 target_compile_definitions(VideoExporter PRIVATE
@@ -638,10 +639,11 @@ set_target_properties(Server PROPERTIES
 
 set(ENGINE_LOCAL_TEST_ROOT "${ENGINE_ROOT}/.local/Tests")
 
-if(NOT ENGINE_PROJECT_DIR AND WIN32)
+if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/ShadowRegressionTests.cpp")
     enable_testing()
     add_executable(ShadowRegressionTests
-        "${ENGINE_ROOT}/Tests/ShadowRegressionTests.cpp")
+        "${ENGINE_LOCAL_TEST_ROOT}/ShadowRegressionTests.cpp")
     target_link_libraries(ShadowRegressionTests PRIVATE Engine)
     target_include_directories(ShadowRegressionTests PRIVATE
         "${ENGINE_ROOT}/Engine")
@@ -650,6 +652,35 @@ if(NOT ENGINE_PROJECT_DIR AND WIN32)
     set_tests_properties(ShadowVisualAndBudgetRegression PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}"
         TIMEOUT 180)
+
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/VideoExportRepeatabilityTests.cpp")
+    enable_testing()
+    add_executable(VideoExportRepeatabilityTests
+        "${ENGINE_LOCAL_TEST_ROOT}/VideoExportRepeatabilityTests.cpp")
+    target_link_libraries(VideoExportRepeatabilityTests PRIVATE Engine)
+    target_include_directories(VideoExportRepeatabilityTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME VideoExportFrameRepeatability
+        COMMAND VideoExportRepeatabilityTests
+            "${ENGINE_ROOT}/Engine/Core/Assets/Scenes/Cinematics/camera_track_demo.scene")
+    set_tests_properties(VideoExportFrameRepeatability PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}"
+        TIMEOUT 180)
+endif()
+
+if(EXISTS "${ENGINE_LOCAL_TEST_ROOT}/ExportFrameRateTests.cpp")
+    enable_testing()
+    add_executable(ExportFrameRateTests
+        "${ENGINE_LOCAL_TEST_ROOT}/ExportFrameRateTests.cpp")
+    target_include_directories(ExportFrameRateTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME ExportIntegerAndFractionalFrameRates
+        COMMAND ExportFrameRateTests)
+    set_tests_properties(ExportIntegerAndFractionalFrameRates PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
@@ -949,6 +980,22 @@ if(NOT ENGINE_PROJECT_DIR AND
         "${ENGINE_ROOT}/Engine/Core/Assets/Audio/TestTone.mp3")
     set_tests_properties(AudioDecodingMixingAndSerialization PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/OfflineAudioExportTests.cpp")
+    enable_testing()
+    add_executable(OfflineAudioExportTests
+        "${ENGINE_LOCAL_TEST_ROOT}/OfflineAudioExportTests.cpp")
+    target_link_libraries(OfflineAudioExportTests PRIVATE Engine)
+    target_include_directories(OfflineAudioExportTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME OfflineAudioSceneClockAndPCM
+        COMMAND OfflineAudioExportTests
+            "${ENGINE_ROOT}/Engine/Core/Assets/Audio/TestTone.wav")
+    set_tests_properties(OfflineAudioSceneClockAndPCM PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}"
+        TIMEOUT 30)
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
