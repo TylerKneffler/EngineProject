@@ -13,6 +13,7 @@ public:
     void SetNextWindowRect(float x, float y, float width, float height) override;
     bool BeginWindow(const char*, bool*, bool) override; void EndWindow() override;
     bool IsWindowFocused() const override;
+    void WindowTitleTooltip(const char*) override;
     void PushId(const void*) override; void PushId(const char*) override; void PopId() override;
     bool Button(const char*, float, float) override;
     EditorUiBreadcrumbResult Breadcrumb(const char*, const char* const*, int) override;

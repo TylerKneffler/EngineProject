@@ -236,6 +236,45 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
             }
         }
 
+        // Mark skeletal nodes after the complete Object hierarchy exists.
+        // Palette order remains on Skeleton; AnimationBone parentage follows imported
+        // node ancestry, including non-joint helper nodes between bones.
+        for (size_t skinIndex = 0; skinIndex < model.skins.size(); ++skinIndex)
+        {
+            const std::vector<unsigned>& joints =
+                model.skins[skinIndex].jointNodes;
+            std::unordered_map<unsigned, int> paletteByNode;
+            for (size_t palette = 0; palette < joints.size(); ++palette)
+                paletteByNode[joints[palette]] = static_cast<int>(palette);
+            for (size_t palette = 0; palette < joints.size(); ++palette)
+            {
+                const unsigned nodeIndex = joints[palette];
+                if (nodeIndex >= objects.size() || !objects[nodeIndex])
+                    continue;
+                int parentPalette = -1;
+                int parent = model.nodes[nodeIndex].parent;
+                while (parent >= 0 &&
+                    static_cast<size_t>(parent) < model.nodes.size())
+                {
+                    const auto found = paletteByNode.find(
+                        static_cast<unsigned>(parent));
+                    if (found != paletteByNode.end())
+                    {
+                        parentPalette = found->second;
+                        break;
+                    }
+                    parent = model.nodes[static_cast<size_t>(parent)].parent;
+                }
+                Engine::Components::AnimationBone* bone = objects[nodeIndex]
+                    ->AddComponent<Engine::Components::AnimationBone>();
+                bone->skinIndex = static_cast<unsigned>(skinIndex);
+                bone->nodeIndex = nodeIndex;
+                bone->paletteIndex = static_cast<int>(palette);
+                bone->parentPaletteIndex = parentPalette;
+                bone->hierarchyRoot = parentPalette < 0;
+            }
+        }
+
         const fs::path prefabPath = output / (output.filename().string() + ".prefab");
         if (!Engine::Serialization::SceneSerializer::SavePrefab(*root, prefabPath.string()))
             throw std::runtime_error("Could not save prefab");

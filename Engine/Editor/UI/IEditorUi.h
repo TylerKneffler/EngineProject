@@ -145,6 +145,7 @@ public:
     virtual bool BeginWindow(const char* title, bool* open, bool noPadding = false) = 0;
     virtual void EndWindow() = 0;
     virtual bool IsWindowFocused() const { return false; }
+    virtual void WindowTitleTooltip(const char*) {}
     virtual void PushId(const void* id) = 0;
     virtual void PushId(const char* id) = 0;
     virtual void PopId() = 0;

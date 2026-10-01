@@ -1,6 +1,7 @@
 #include "Core/Physics/Physics.h"
 #include "Core/Compoonents/Physics/Cloth.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
+#include "Core/Compoonents/Animation/IKBone.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Physics/Internal/PhysicsInternal.h"
@@ -389,6 +390,7 @@ void Physics::Step(double deltaTime)
     Engine::Scene::Scene& scene = *m_impl->scene;
     std::vector<Engine::Components::RigidBody*> bodies;
     std::vector<Engine::Components::Cloth*> clothBodies;
+    std::vector<Engine::Components::IKBone*> ikBones;
     for (const auto& object : scene.GetObjects())
         for (Engine::Core::Component* component : object->Components)
             if (auto* body = dynamic_cast<Engine::Components::RigidBody*>(component))
@@ -415,8 +417,22 @@ void Physics::Step(double deltaTime)
                     cloth->ApplyForces();
                 }
             }
+            else if (auto* bone = dynamic_cast<
+                    Engine::Components::IKBone*>(component))
+                ikBones.push_back(bone);
+    for (Engine::Components::IKBone* bone : ikBones)
+        bone->AdvanceActivation(static_cast<float>(deltaTime));
+    for (Engine::Components::IKBone* bone : ikBones)
+        bone->RemoveInvalidConstraint();
+    for (Engine::Components::IKBone* bone : ikBones)
+        if (!bone->WantsSimulation())
+            bone->DestroyBody(true);
+    for (Engine::Components::IKBone* bone : ikBones)
+        bone->EnsureBody();
+    for (Engine::Components::IKBone* bone : ikBones)
+        bone->EnsureConstraint();
     m_impl->lastSubstepCount = 0u;
-    if (bodies.empty() && clothBodies.empty())
+    if (bodies.empty() && clothBodies.empty() && ikBones.empty())
     {
         m_impl->accumulatorSeconds = 0.0;
         return;
@@ -461,6 +477,8 @@ void Physics::Step(double deltaTime)
     for (Engine::Components::Cloth* cloth : clothBodies)
         if (!cloth->collisionMorph && cloth->IsSimulating())
             cloth->SyncMeshFromSoftBody();
+    for (Engine::Components::IKBone* bone : ikBones)
+        bone->SyncBoneFromBody();
 
     const int manifoldCount = physics.dispatcher->getNumManifolds();
     for (int index = 0; index < manifoldCount; ++index)
@@ -534,6 +552,10 @@ void Physics::Reset()
         for (Engine::Core::Component* component : object->Components)
             if (auto* body = dynamic_cast<Engine::Components::RigidBody*>(component)) body->DestroyBody();
             else if (auto* cloth = dynamic_cast<Engine::Components::Cloth*>(component)) cloth->DestroySoftBody(true);
+            else if (auto* bone = dynamic_cast<Engine::Components::IKBone*>(component)) bone->DestroyConstraint(true);
+    for (const auto& object : scene.GetObjects())
+        for (Engine::Core::Component* component : object->Components)
+            if (auto* bone = dynamic_cast<Engine::Components::IKBone*>(component)) bone->DestroyBody(true);
     for (const auto& pair : m_impl->portalMeshColliders)
         if (pair.second.object)
             m_impl->state->world->removeCollisionObject(pair.second.object.get());

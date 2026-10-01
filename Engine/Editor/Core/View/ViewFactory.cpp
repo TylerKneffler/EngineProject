@@ -203,6 +203,7 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
         if (OnSceneRequested)
         view->OnSceneRequested = OnSceneRequested;
         view->OnPrefabRequested = OnPrefabRequested;
+        view->OnAssetDocumentRequested = OnAssetDocumentRequested;
         view->OnSelectionChanged = OnAssetSelected;
         view->OnAssetRenamed = OnAssetRenamed;
         view->OnAssetContentsChanged = OnAssetContentsChanged;

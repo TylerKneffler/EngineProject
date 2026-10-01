@@ -724,6 +724,49 @@ Engine::Model::ModelImportResult GltfImporter::Import(
 
         ::Engine::Components::Model* modelComponent =
             prefabRoot->AddComponent<::Engine::Components::Model>();
+        struct BoneBinding
+        {
+            unsigned skin = 0;
+            unsigned node = 0;
+            int palette = -1;
+            int parentPalette = -1;
+        };
+        std::vector<int> parentNodes(asset.nodes.size(), -1);
+        for (size_t parentIndex = 0; parentIndex < asset.nodes.size();
+            ++parentIndex)
+            for (size_t childIndex : asset.nodes[parentIndex].children)
+                if (childIndex < parentNodes.size())
+                    parentNodes[childIndex] = static_cast<int>(parentIndex);
+        std::vector<std::vector<BoneBinding>> boneBindings(asset.nodes.size());
+        for (size_t skinIndex = 0; skinIndex < asset.skins.size(); ++skinIndex)
+        {
+            const auto& joints = asset.skins[skinIndex].joints;
+            std::unordered_map<size_t, int> paletteByNode;
+            for (size_t palette = 0; palette < joints.size(); ++palette)
+                paletteByNode[joints[palette]] = static_cast<int>(palette);
+            for (size_t palette = 0; palette < joints.size(); ++palette)
+            {
+                const size_t nodeIndex = joints[palette];
+                if (nodeIndex >= boneBindings.size())
+                    continue;
+                int parentPalette = -1;
+                for (int parent = parentNodes[nodeIndex]; parent >= 0;
+                    parent = parentNodes[static_cast<size_t>(parent)])
+                {
+                    const auto found = paletteByNode.find(
+                        static_cast<size_t>(parent));
+                    if (found != paletteByNode.end())
+                    {
+                        parentPalette = found->second;
+                        break;
+                    }
+                }
+                boneBindings[nodeIndex].push_back({
+                    static_cast<unsigned>(skinIndex),
+                    static_cast<unsigned>(nodeIndex),
+                    static_cast<int>(palette), parentPalette });
+            }
+        }
         std::function<void(size_t, Engine::Core::Object*)> importNode =
             [&](size_t nodeIndex, Engine::Core::Object* parent)
         {
@@ -731,6 +774,16 @@ Engine::Model::ModelImportResult GltfImporter::Import(
             Engine::Core::Object* object = AddChild(prefabScene, parent,
                 SafeName(node.name, "Node " + std::to_string(nodeIndex + 1)));
             modelComponent->BindNode(static_cast<unsigned>(nodeIndex), object);
+            for (const BoneBinding& binding : boneBindings[nodeIndex])
+            {
+                Engine::Components::AnimationBone* bone =
+                    object->AddComponent<Engine::Components::AnimationBone>();
+                bone->skinIndex = binding.skin;
+                bone->nodeIndex = binding.node;
+                bone->paletteIndex = binding.palette;
+                bone->parentPaletteIndex = binding.parentPalette;
+                bone->hierarchyRoot = binding.parentPalette < 0;
+            }
             if (const auto* trs = std::get_if<fastgltf::TRS>(&node.transform))
             {
                 object->transform.position = {

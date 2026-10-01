@@ -29,10 +29,14 @@ void ImGuiPanelHost::DrawPanels(EditorState& state)
     // Asset callbacks may request panels to be added. Apply those requests only
     // after traversal, because push_back can invalidate this vector's iterators.
     state.ProcessPendingPrefabStageOpen();
+    state.ProcessPendingSceneAssetDocumentOpens();
+    state.ProcessPendingAssetDocumentOpens();
 
     // The prefab scene tab is its own document window. Shared hierarchy and
     // properties panels retarget based on focused document.
     state.HandlePrefabPanelClosures();
+    state.HandleSceneAssetDocumentClosures();
+    state.HandleAssetDocumentClosures();
 
     ViewFactory* factory = state.GetViewFactory();
     for (auto it = panels.begin(); it != panels.end();)

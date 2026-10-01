@@ -405,6 +405,11 @@ int WINAPI wWinMain(
         uiBackend->ClearFocus();
         renderer->MarkDirty();
     };
+    window->OnApplicationFocusLost = [&]()
+    {
+        uiBackend->ClearFocus();
+        renderer->MarkDirty();
+    };
     OutputDebugStringA("[Main] WndProcHook callback set\n");
 
     OutputDebugStringA("[Main] Setting OnUpdate callback...\n");

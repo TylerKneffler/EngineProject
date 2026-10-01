@@ -5,8 +5,6 @@ namespace Engine::Core
 {
 namespace
 {
-constexpr ULONGLONG kEscapeHoldToCloseMilliseconds = 1000;
-
 bool IsClientMouseButtonDown(UINT message)
 {
     return message == WM_LBUTTONDOWN || message == WM_LBUTTONDBLCLK ||
@@ -317,31 +315,22 @@ LRESULT CALLBACK Window::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         {
             self->m_escapeHeld = false;
             ReleaseInputFocus(false);
+            if (self->OnApplicationFocusLost)
+                self->OnApplicationFocusLost();
         }
     }
 
-    // Escape is an input-release gesture first. Handle it before the UI hook
-    // so a focused editor widget cannot consume it and leave gameplay capture
-    // active. Normal Windows key-repeat messages measure the hold without
-    // depending on asynchronous key state after capture changes.
+    // Escape always releases gameplay input before the UI hook so a focused
+    // editor widget cannot consume it and leave the Game view capturing input.
     if (self && (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) &&
         wParam == VK_ESCAPE)
     {
         if (!self->m_escapeHeld)
         {
             self->m_escapeHeld = true;
-            self->m_escapePressedAt = GetTickCount64();
             if (self->OnEscapePressed)
                 self->OnEscapePressed();
-            // Retain keyboard focus until key-up so a tap can be distinguished
-            // reliably from the hold-to-close gesture.
             ReleaseInputFocus(false);
-        }
-        else if (GetTickCount64() - self->m_escapePressedAt >=
-            kEscapeHoldToCloseMilliseconds)
-        {
-            self->m_escapeHeld = false;
-            PostQuitMessage(0);
         }
         return 0;
     }

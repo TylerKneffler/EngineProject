@@ -71,6 +71,8 @@ void SceneView::DrawPanel(IEditorUi& ui)
 
     // Remove inner padding so the texture fills the panel edge-to-edge.
     const bool windowVisible = ui.BeginWindow(m_title.c_str(), &m_open, true);
+    if (!m_documentPath.empty())
+        ui.WindowTitleTooltip(m_documentPath.c_str());
     if (ui.IsWindowFocused() && OnFocused) OnFocused();
     if (!windowVisible)
     {
@@ -94,9 +96,11 @@ void SceneView::DrawPanel(IEditorUi& ui)
     panDX = input.keyPanDX;
     panDY = input.keyPanDY;
     dolly = input.keyDolly;
-    const bool overlayConsumedClick = m_toolbar.Draw(ui, input, m_scene);
-    const EditorUiContextMenuResult createMenu =
-        ui.ContextMenu(this, "Create", nullptr, true);
+    const bool overlayConsumedClick = AllowObjectTransform
+        ? m_toolbar.Draw(ui, input, m_scene) : false;
+    const EditorUiContextMenuResult createMenu = AllowObjectCreation
+        ? ui.ContextMenu(this, "Create", nullptr, true)
+        : EditorUiContextMenuResult{};
     if (m_scene && (createMenu.addRequested ||
         !createMenu.primitive3D.empty() || createMenu.addSpriteRequested ||
         createMenu.addLightProbeRequested ||
@@ -156,16 +160,17 @@ void SceneView::DrawPanel(IEditorUi& ui)
     const EditorTransformTool transformTool = m_toolbar.GetTransformTool();
     if (overlayConsumedClick || transformTool == EditorTransformTool::Hand)
         gizmoInput.leftClicked = false;
-    const EditorGizmoResult gizmoResult = m_scene
+    const EditorGizmoResult gizmoResult = m_scene && AllowObjectTransform
         ? m_gizmos.DrawAndHandle(*m_scene, ui, gizmoInput, transformTool)
         : EditorGizmoResult{};
     if (OnGizmoInteraction)
         OnGizmoInteraction(gizmoResult.transformDragging ||
             m_toolbar.IsTransformDragging());
-    if (gizmoResult.selectionRequested && OnObjectSelected)
+    if (gizmoResult.selectionRequested && OnObjectSelected &&
+        (!CanSelectObject || CanSelectObject(gizmoResult.selectedObject)))
         OnObjectSelected(gizmoResult.selectedObject);
     bool prefabDragObserved = false;
-    if (ui.BeginDragDropTarget())
+    if (AllowAssetDrops && ui.BeginDragDropTarget())
     {
         const EditorUiDragDropPayloadResult payload =
             ui.InspectDragDropPayload("ENGINE_ASSET_PATH");
@@ -214,7 +219,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
                         OnAssetPreviewCommitted(placed, placedPath);
                 }
             }
-            else if (payload.delivered && OnAssetDropped)
+            else if (AllowAssetDrops && payload.delivered && OnAssetDropped)
                 OnAssetDropped(path);
         }
         ui.EndDragDropTarget();
@@ -282,6 +287,8 @@ void SceneView::DrawPanel(IEditorUi& ui)
         }
     }
 
+    if (OnDrawDocumentTools)
+        OnDrawDocumentTools(ui);
     ui.EndWindow();
 
     if (m_scene)

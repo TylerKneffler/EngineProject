@@ -448,6 +448,21 @@ bool Mesh::SetDeformedVertices(std::vector<Vertex>&& vertices)
     return true;
 }
 
+bool Mesh::SetAuthoredVertices(std::vector<Vertex> vertices)
+{
+    if (vertices.empty() || vertices.size() % 3u != 0u)
+        return false;
+    m_terrainVertices.clear();
+    m_indices.clear();
+    m_indexBuffer.reset();
+    m_vertices = std::move(vertices);
+    MarkConfigurationDirty();
+    UpdateBounds();
+    if (m_bufferFactory)
+        CreateBuffer(m_bufferFactory);
+    return true;
+}
+
 std::vector<Mesh::Vertex> Mesh::TakeVertices()
 {
     m_ready = false;

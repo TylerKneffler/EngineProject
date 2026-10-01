@@ -87,6 +87,7 @@ public:
     std::function<void(const std::string&)> OnHierarchyInteraction;
     std::function<void(const std::string&)> OnSceneRequested;   // AssetsExplorerView
     std::function<void(const std::string&)> OnPrefabRequested;  // AssetsExplorerView
+    std::function<void(const std::string&, const std::string&)> OnAssetDocumentRequested;
     std::function<void(const std::string&)> OnAssetSelected;    // AssetsExplorerView
     std::function<void(const std::string&)> OnAssetDropped;     // SceneView
     std::function<Engine::Core::Object*(const std::string&)> OnAssetPreviewRequested;

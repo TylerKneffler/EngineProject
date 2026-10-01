@@ -67,6 +67,10 @@ public:
     bool SetDeformedVertices(const std::vector<Vertex>& vertices);
     // Transfers ownership for newly generated meshes to avoid a full vertex copy.
     bool SetDeformedVertices(std::vector<Vertex>&& vertices);
+    // Installs authored triangle-list geometry independently of runtime
+    // deformation state. This validates topology, updates bounds/revision,
+    // and recreates the GPU buffer when this mesh is already resident.
+    bool SetAuthoredVertices(std::vector<Vertex> vertices);
     // Installs an authored indexed surface without expanding shared vertices.
     // Portal cuts expand only their transient CPU snapshot.
     bool SetIndexedGeometry(std::vector<Vertex> vertices,

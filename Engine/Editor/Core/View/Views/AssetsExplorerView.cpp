@@ -10,6 +10,8 @@
 #include <filesystem>
 #include <fstream>
 #include <shellapi.h>
+#include <unordered_map>
+#include <pugixml.hpp>
 
 namespace Engine::Editor
 {
@@ -27,6 +29,44 @@ namespace fs = std::filesystem;
 namespace
 {
 constexpr float AssetThumbnailSize = 96.f;
+
+const std::unordered_map<std::string, std::string>& AssetEditorRegistry()
+{
+    // The key is the lowercased extension. Editor identifiers stay independent
+    // from the visible filename and are reusable for every document of a type.
+    static const std::unordered_map<std::string, std::string> registry = {
+        { ".material", "Material Editor" }, { ".mat", "Material Editor" },
+        { ".scene", "Scene Editor" },
+        { ".prefab", "Object Editor" },
+        { ".png", "Texture Editor" }, { ".jpg", "Texture Editor" },
+        { ".jpeg", "Texture Editor" }, { ".bmp", "Texture Editor" },
+        { ".tga", "Texture Editor" }, { ".dds", "Texture Editor" },
+        { ".ktx2", "Texture Editor" }, { ".hdr", "Texture Editor" },
+        { ".exr", "Texture Editor" }, { ".tif", "Texture Editor" },
+        { ".tiff", "Texture Editor" }, { ".gif", "Texture Editor" },
+        { ".wav", "Audio Editor" }, { ".ogg", "Audio Editor" },
+        { ".mp3", "Audio Editor" }, { ".flac", "Audio Editor" },
+        { ".aac", "Audio Editor" }, { ".m4a", "Audio Editor" },
+        { ".ttf", "Font Editor" }, { ".otf", "Font Editor" },
+        { ".spriteanim", "Sprite Animation Editor" },
+        { ".spritesheet", "Sprite Sheet Editor" },
+        { ".anim", "Animation Editor" }, { ".animation", "Animation Editor" },
+        { ".skeleton", "Skeleton Editor" },
+        { ".mesh", "Mesh Editor" }, { ".obj", "Mesh Editor" },
+        { ".ply", "Mesh Editor" }, { ".stl", "Mesh Editor" },
+        { ".fbx", "Model Editor" }, { ".gltf", "Model Editor" },
+        { ".glb", "Model Editor" }, { ".h", "Script Editor" },
+        { ".hpp", "Script Editor" }, { ".cpp", "Script Editor" },
+        { ".cc", "Script Editor" }, { ".cxx", "Script Editor" },
+        { ".inl", "Script Editor" }, { ".cs", "Script Editor" },
+        { ".c", "Script Editor" }, { ".m", "Script Editor" },
+        { ".mm", "Script Editor" }, { ".py", "Script Editor" },
+        { ".lua", "Script Editor" }, { ".js", "Script Editor" },
+        { ".ts", "Script Editor" }, { ".sh", "Script Editor" },
+        { ".ps1", "Script Editor" }
+    };
+    return registry;
+}
 
 std::string AssetTypeBadge(const fs::path& path)
 {
@@ -922,22 +962,32 @@ bool AssetsExplorerView::AcceptSceneObject(IEditorUi& ui, const std::string& dir
 // ---------------------------------------------------------------------------
 void AssetsExplorerView::OpenFile(const std::string& filePath)
 {
-    // Check if this is a scene file
     const std::string extension =
         Engine::Editor::LowerAssetExtension(filePath);
-    if (extension == ".scene" || extension == ".xml")
+    if (extension == ".xml")
     {
-        // Trigger the scene load callback
-        if (OnSceneRequested)
+        pugi::xml_document document;
+        if (document.load_file(filePath.c_str()))
         {
-            OnSceneRequested(filePath);
+            const std::string root = document.document_element().name();
+            if (root == "Scene" && OnAssetDocumentRequested)
+            {
+                OnAssetDocumentRequested(filePath, "Scene Editor");
+                return;
+            }
+            if (root == "Prefab" && OnAssetDocumentRequested)
+            {
+                OnAssetDocumentRequested(filePath, "Object Editor");
+                return;
+            }
         }
-        return;
+        // XML without a recognized engine document root remains available to
+        // the operating-system file association.
     }
-    if (extension == ".prefab")
+    const auto editor = AssetEditorRegistry().find(extension);
+    if (editor != AssetEditorRegistry().end() && OnAssetDocumentRequested)
     {
-        if (OnPrefabRequested)
-            OnPrefabRequested(filePath);
+        OnAssetDocumentRequested(filePath, editor->second);
         return;
     }
 

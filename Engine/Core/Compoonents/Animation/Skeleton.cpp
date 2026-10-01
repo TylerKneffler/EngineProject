@@ -1,4 +1,5 @@
 #include "Skeleton.h"
+#include "AnimationBone.h"
 #include "Model.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
@@ -74,6 +75,9 @@ Skeleton::Object* Skeleton::FindNode(unsigned index) const
 
 Skeleton::Object* Skeleton::GetHierarchyRoot() const
 {
+    const std::vector<AnimationBone*>& roots = ResolveRootBones();
+    if (roots.size() == 1 && roots.front() && roots.front()->Owner)
+        return roots.front()->Owner;
     Model* model = ResolveModel();
     return model ? model->Owner : Owner;
 }
@@ -144,5 +148,32 @@ const std::vector<Skeleton::Object*>& Skeleton::ResolveJoints() const
     m_cachedJointStructureRevision = structureRevision;
     m_cachedJointModel = model;
     return m_cachedJoints;
+}
+
+const std::vector<AnimationBone*>& Skeleton::ResolveBones() const
+{
+    const std::vector<Object*>& joints = ResolveJoints();
+    m_cachedBones.assign(joints.size(), nullptr);
+    for (size_t palette = 0; palette < joints.size(); ++palette)
+        if (Object* joint = joints[palette])
+            for (Engine::Core::Component* component : joint->Components)
+                if (auto* bone = dynamic_cast<AnimationBone*>(component);
+                    bone && bone->skinIndex == skinIndex &&
+                    (bone->paletteIndex < 0 ||
+                        bone->paletteIndex == static_cast<int>(palette)))
+                {
+                    m_cachedBones[palette] = bone;
+                    break;
+                }
+    return m_cachedBones;
+}
+
+const std::vector<AnimationBone*>& Skeleton::ResolveRootBones() const
+{
+    m_cachedRootBones.clear();
+    for (AnimationBone* bone : ResolveBones())
+        if (bone && !bone->GetParentBone())
+            m_cachedRootBones.push_back(bone);
+    return m_cachedRootBones;
 }
 }

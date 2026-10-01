@@ -36,6 +36,7 @@ public:
     // Callback when a scene file is requested to load
     std::function<void(const std::string&)> OnSceneRequested;
     std::function<void(const std::string&)> OnPrefabRequested;
+    std::function<void(const std::string&, const std::string&)> OnAssetDocumentRequested;
     std::function<void(const std::string&)> OnSelectionChanged;
     std::function<void(const std::string&, const std::string&)> OnAssetRenamed;
     std::function<void(const std::string&)> OnAssetContentsChanged;

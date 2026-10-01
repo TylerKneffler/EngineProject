@@ -114,8 +114,9 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
     m_dropObservedThisFrame = false;
     const bool worldOpen = ui.TreeNode(
         this, "World", m_selectedObject == nullptr, false, true);
-    const EditorUiContextMenuResult worldMenu =
-        ui.ContextMenu(this, "Create", nullptr, true);
+    const EditorUiContextMenuResult worldMenu = m_objectFilter
+        ? EditorUiContextMenuResult{}
+        : ui.ContextMenu(this, "Create", nullptr, true);
     if (worldMenu.addRequested || !worldMenu.primitive3D.empty() ||
         worldMenu.addSpriteRequested || worldMenu.addLightProbeRequested ||
         worldMenu.addLightProbeGroupRequested)
@@ -129,8 +130,9 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
         m_pendingPrimitive3D = worldMenu.primitive3D;
         m_hasPendingAdd = true;
     }
-    const EditorUiHierarchyDropResult worldDrop =
-        ui.HierarchyDropTarget("ENGINE_SCENE_OBJECT");
+    const EditorUiHierarchyDropResult worldDrop = m_objectFilter
+        ? EditorUiHierarchyDropResult{}
+        : ui.HierarchyDropTarget("ENGINE_SCENE_OBJECT");
     if (worldDrop.position != EditorUiHierarchyDropPosition::None &&
         (m_debugHoverTarget != nullptr || m_debugHoverPosition != worldDrop.position))
     {
@@ -264,8 +266,9 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
         m_hasPendingAdd = false;
         if (created && OnHierarchyChanged) OnHierarchyChanged();
     }
-    const EditorUiHierarchyDropResult backgroundDrop =
-        ui.HierarchyBackgroundDropTarget("ENGINE_SCENE_OBJECT");
+    const EditorUiHierarchyDropResult backgroundDrop = m_objectFilter
+        ? EditorUiHierarchyDropResult{}
+        : ui.HierarchyBackgroundDropTarget("ENGINE_SCENE_OBJECT");
     if (!m_dropObservedThisFrame &&
         backgroundDrop.position != EditorUiHierarchyDropPosition::None)
     {
@@ -458,6 +461,13 @@ void HierarchyView::DrawObjectNode(
     IEditorUi& ui, Engine::Core::Object* obj, int depth, bool lastSibling,
     uint64_t ancestorGuideMask)
 {
+    if (m_objectFilter && !m_objectFilter(obj))
+    {
+        for (size_t index = 0; index < obj->Children.size(); ++index)
+            DrawObjectNode(ui, obj->Children[index], depth,
+                index + 1 == obj->Children.size(), ancestorGuideMask);
+        return;
+    }
     const bool hasChildren = !obj->Children.empty();
     Engine::Core::Object* prefabRoot = obj->GetPrefabInstanceRoot();
     char name[256]; strncpy_s(name, obj->name.c_str(), sizeof(name));
@@ -490,7 +500,7 @@ void HierarchyView::DrawObjectNode(
         if (m_pendingPrefabAction != PendingPrefabAction::None)
             m_pendingPrefabRoot = prefabRoot;
     }
-    else
+    else if (!m_objectFilter)
         menu = ui.ContextMenu(obj, "Create",
             deletable ? "Delete Object" : nullptr, true);
     if (menu.addRequested || !menu.primitive3D.empty() || menu.addSpriteRequested ||

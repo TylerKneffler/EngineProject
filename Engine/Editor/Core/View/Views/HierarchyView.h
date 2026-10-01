@@ -38,6 +38,8 @@ public:
     void    SetSelectedObject(Engine::Core::Object* obj);
     void RequestDeleteSelectedObject();
     void SetDebugInteractionLogging(bool enabled);
+    void SetObjectFilter(std::function<bool(const Engine::Core::Object*)> filter)
+    { m_objectFilter = std::move(filter); }
 
     // Fires whenever the selected object changes (including deselect → nullptr).
     std::function<void(Engine::Core::Object*)> OnSelectionChanged;
@@ -86,5 +88,6 @@ private:
     int m_debugDropDepth = -1;
     std::string m_objectClipboard;
     ::Engine::Scene::Scene::ObjectPath m_clipboardSourcePath;
+    std::function<bool(const Engine::Core::Object*)> m_objectFilter;
 };
 }

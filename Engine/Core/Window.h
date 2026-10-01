@@ -64,7 +64,7 @@ public:
     void Show();
 
     // Enters the message loop. Blocks until WM_QUIT is received. Escape
-    // releases input focus/cursor capture; holding it closes the application.
+    // releases input focus/cursor capture. Use the close button or Alt+F4 to exit.
     // Returns the wParam value from WM_QUIT, conventionally the exit code.
     int Run();
 
@@ -77,6 +77,7 @@ public:
     std::function<void()> OnInputBegin;
     std::function<void()> OnInputEnd;
     std::function<void()> OnEscapePressed;
+    std::function<void()> OnApplicationFocusLost;
     std::function<void(uint32_t w, uint32_t h)> OnResize;
     std::function<void(const std::vector<std::string>&)> OnFilesDropped;
     std::function<bool(HWND, UINT, WPARAM, LPARAM)> WndProcHook;
@@ -112,7 +113,6 @@ private:
     bool m_altLeftClickActive = false;
     bool m_focused = false;
     bool m_escapeHeld = false;
-    ULONGLONG m_escapePressedAt = 0;
 
 };
 }

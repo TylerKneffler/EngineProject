@@ -9,8 +9,13 @@
 #include <functional>
 #include <deque>
 #include <cstdint>
+#include <unordered_set>
+#include <unordered_map>
 
 namespace Engine::Core { class Window; }
+namespace Engine::Components { class Mesh; }
+namespace Engine::Components { class Material; }
+namespace Engine::Components { class Skeleton; }
 
 namespace Engine::Editor
 {
@@ -22,6 +27,7 @@ class PropertiesView;
 class HierarchyView;
 class AssetsExplorerView;
 class SceneView;
+class AssetDocumentView;
 
 // ---------------------------------------------------------------------------
 // EditorState — Encapsulates all editor application state
@@ -49,15 +55,8 @@ public:
     const std::vector<std::unique_ptr<IEditorPanel>>& GetPanels() const { return m_panels; }
 
     // ---- Save/Load State ----
-    bool HasUnsavedChanges() const
-    {
-        return m_hasUnsavedChanges || m_prefabHasUnsavedChanges;
-    }
-    bool HasActiveDocumentUnsavedChanges() const
-    {
-        return m_prefabDocumentFocused && !m_activePrefabPath.empty()
-            ? m_prefabHasUnsavedChanges : m_hasUnsavedChanges;
-    }
+    bool HasUnsavedChanges() const;
+    bool HasActiveDocumentUnsavedChanges() const;
     void SetHasUnsavedChanges(bool dirty) { m_hasUnsavedChanges = dirty; }
 
     void SaveScene();
@@ -72,7 +71,14 @@ public:
     void ProcessPendingPrefabStageOpen();
     void ClosePrefabStage();
     void HandlePrefabPanelClosures();
-    bool IsEditingPrefab() const { return !m_activePrefabPath.empty(); }
+    void QueueAssetDocumentOpen(const std::string& path,
+        const std::string& editorType);
+    void ProcessPendingAssetDocumentOpens();
+    void HandleAssetDocumentClosures();
+    void QueueSceneAssetDocumentOpen(const std::string& path);
+    void ProcessPendingSceneAssetDocumentOpens();
+    void HandleSceneAssetDocumentClosures();
+    bool IsEditingPrefab() const;
     std::string GetActiveDocumentName() const;
     void BakeLighting();
     void ClearBakedLighting();
@@ -92,8 +98,8 @@ public:
     void TrackSceneChanges(bool allowHistory = true, bool editInProgress = false);
     void Undo();
     void Redo();
-    bool CanUndo() const { return m_hasPendingHistoryEdit || !m_undoHistory.empty(); }
-    bool CanRedo() const { return !m_redoHistory.empty(); }
+    bool CanUndo() const;
+    bool CanRedo() const;
     void SetHistoryLimit(uint32_t limit);
     void ResetSceneEditInProgress() { m_sceneEditInProgress = false; }
     void ReportSceneEditInProgress(bool active)
@@ -143,6 +149,55 @@ private:
     void LoadSceneNow(const std::string& path);
     void RemovePrefabPanels();
     void SetPrefabDocumentFocused(bool focused);
+    void SetPrefabDirty(bool dirty);
+    void RefreshPrefabDocumentTitle();
+    void SetActiveAssetDocument(AssetDocumentView* document);
+    struct SceneAssetDocument
+    {
+        std::string path;
+        std::string identity;
+        bool prefab = false;
+        bool meshStage = false;
+        bool modelStage = false;
+        bool skeletonStage = false;
+        std::string stageDataPath;
+        Engine::Components::Mesh* mesh = nullptr;
+        Engine::Core::Object* subject = nullptr;
+        std::unordered_set<Engine::Core::Object*> selectableObjects;
+        std::unordered_set<Engine::Core::Object*> skeletonMeshObjects;
+        std::unordered_map<Engine::Core::Object*, bool> originalEnabledState;
+        struct GhostMaterialState
+        {
+            Engine::Components::Material* material = nullptr;
+            float alpha = 1.f;
+            std::string alphaMode;
+            bool castsShadows = true;
+        };
+        std::vector<GhostMaterialState> ghostMaterialStates;
+        Engine::Components::Skeleton* skeleton = nullptr;
+        bool showSkeletonMesh = true;
+        std::string meshSavePath;
+        std::unique_ptr<Engine::Scene::Scene> scene;
+        SceneView* view = nullptr;
+        std::string baseline;
+        std::string savedSnapshot;
+        std::deque<std::string> undo;
+        std::deque<std::string> redo;
+        bool dirty = false;
+        uint32_t selectedVertex = 0;
+        uint32_t selectedInfluence = 0;
+    };
+    void SetActiveSceneAssetDocument(SceneAssetDocument* document);
+    bool SaveSceneAssetDocument(SceneAssetDocument& document);
+    std::string CaptureSceneAssetDocumentSnapshot(
+        SceneAssetDocument& document);
+    bool RestoreSceneAssetDocumentSnapshot(SceneAssetDocument& document,
+        const std::string& snapshot);
+    void ApplySkeletonStageVisibility(SceneAssetDocument& document);
+    void RestoreSkeletonStageVisibility(SceneAssetDocument& document);
+    void RebuildSkeletonStageContext(SceneAssetDocument& document);
+    void RefreshSceneAssetDocumentTitle(SceneAssetDocument& document);
+    void RefreshSceneDocumentTitle();
     Engine::Scene::Scene* GetActiveDocumentScene() const;
 
     // Core objects
@@ -160,6 +215,11 @@ private:
     PropertiesView* m_primaryProperties = nullptr;
     AssetsExplorerView* m_primaryAssets = nullptr;
     SceneView* m_prefabSceneView = nullptr;
+    std::vector<AssetDocumentView*> m_assetDocuments;
+    AssetDocumentView* m_activeAssetDocument = nullptr;
+    std::vector<std::unique_ptr<SceneAssetDocument>> m_sceneAssetDocuments;
+    std::deque<std::string> m_pendingSceneAssetDocuments;
+    SceneAssetDocument* m_activeSceneAssetDocument = nullptr;
 
     // State
     Engine::Model::ProjectSettings m_projectSettings;
@@ -167,6 +227,7 @@ private:
     std::string m_currentScenePath;
     std::string m_activePrefabPath;
     std::string m_pendingPrefabPath;
+    std::deque<std::pair<std::string, std::string>> m_pendingAssetDocuments;
     bool m_prefabHasUnsavedChanges = false;
     bool m_prefabDocumentFocused = false;
     bool m_hasUnsavedChanges = false;

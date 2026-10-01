@@ -48,6 +48,7 @@ public:
     // scene's editorCamera with FPS-style look / pan / zoom.
     void DrawPanel(IEditorUi& ui) override;
     Engine::Scene::Scene* GetScene() const { return m_scene; }
+    void SetDocumentPath(std::string path) { m_documentPath = std::move(path); }
     void RequestFocusOnNextDraw() { m_focusOnNextDraw = true; }
     std::function<void(const std::string&)> OnAssetDropped;
     std::function<Engine::Core::Object*(const std::string&)> OnAssetPreviewRequested;
@@ -57,12 +58,18 @@ public:
     std::function<void(Engine::Core::Object*)> OnObjectCreated;
     std::function<void()> OnDeleteSelectionRequested;
     std::function<void(bool)> OnGizmoInteraction;
+    std::function<void(IEditorUi&)> OnDrawDocumentTools;
+    std::function<bool(const Engine::Core::Object*)> CanSelectObject;
+    bool AllowObjectCreation = true;
+    bool AllowAssetDrops = true;
+    bool AllowObjectTransform = true;
 
 private:
     void CancelPrefabPreview();
 
     // Calculates the game viewport size and position based on aspect ratio mode
     Engine::Scene::Scene* m_scene = nullptr; // non-owning; set via Init()
+    std::string m_documentPath;
     
     // Aspect ratio settings
     Engine::Model::ProjectSettings::AspectRatioMode m_aspectRatioMode = Engine::Model::ProjectSettings::AspectRatioMode::Locked;

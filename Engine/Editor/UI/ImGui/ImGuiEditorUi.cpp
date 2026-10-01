@@ -145,6 +145,11 @@ void ImGuiEditorUi::SetNextWindowRect(float x,float y,float w,float h){ ImGui::S
 bool ImGuiEditorUi::BeginWindow(const char* t,bool* o,bool p){ if(p) ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,{0,0}); bool r=ImGui::Begin(t,o); if(p) ImGui::PopStyleVar(); return r; }
 void ImGuiEditorUi::EndWindow(){ImGui::End();}
 bool ImGuiEditorUi::IsWindowFocused() const{return ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);}
+void ImGuiEditorUi::WindowTitleTooltip(const char* text)
+{
+    if (text && ImGui::IsWindowHovered())
+        ImGui::SetTooltip("%s", text);
+}
 void ImGuiEditorUi::PushId(const void* id){ImGui::PushID(id);}
 void ImGuiEditorUi::PushId(const char* id){ImGui::PushID(id);}
 void ImGuiEditorUi::PopId(){ImGui::PopID();}

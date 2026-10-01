@@ -7,6 +7,7 @@
 
 namespace Engine::Components
 {
+class AnimationBone;
 class Skeleton : public Engine::Core::Component
 {
 public:
@@ -21,6 +22,10 @@ public:
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
     Object* GetHierarchyRoot() const;
     const std::vector<Object*>& ResolveJoints() const;
+    // AnimationBone components are returned in skinning-palette order. Root bones are
+    // returned in object-hierarchy order and are independent of palette order.
+    const std::vector<AnimationBone*>& ResolveBones() const;
+    const std::vector<AnimationBone*>& ResolveRootBones() const;
     Object* FindNode(unsigned index) const;
     class Model* ResolveModel() const;
 
@@ -35,5 +40,7 @@ private:
     mutable uint64_t m_cachedJointStructureRevision = 0;
     mutable Model* m_cachedJointModel = nullptr;
     mutable bool m_modelCacheValid = false;
+    mutable std::vector<AnimationBone*> m_cachedBones;
+    mutable std::vector<AnimationBone*> m_cachedRootBones;
 };
 }
