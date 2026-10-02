@@ -42,6 +42,12 @@ struct EditorUiViewportInput
     float keyDolly = 0.f;
 };
 
+struct EditorUiUvMapResult
+{
+    bool coordinatesChanged = false;
+    bool selectionChanged = false;
+};
+
 enum class EditorUiHierarchyDropPosition { None, Before, AsChild, After };
 
 enum class EditorUiObjectIcon
@@ -143,6 +149,17 @@ public:
     virtual ~IEditorUi() = default;
     virtual void SetNextWindowRect(float x, float y, float width, float height) = 0;
     virtual bool BeginWindow(const char* title, bool* open, bool noPadding = false) = 0;
+    // Starts a transient panel over the current viewport without reserving layout space.
+    virtual bool BeginViewportOverlay(const char* id, float width, float height) = 0;
+    // Draws rotated tabs attached to the viewport's right edge.
+    virtual int ViewportSideTabs(const char* id, const char* const* labels,
+        int count, int active, float panelWidth) = 0;
+    // Compact controls across the top of the viewport; EndViewportHeader ends it.
+    virtual bool BeginViewportHeader(const char* id, float width) = 0;
+    virtual bool EndViewportHeader() = 0;
+    virtual bool BeginViewportHeaderDropdown(const char* id,
+        const char* preview, float width, float maxHeight) = 0;
+    virtual void EndViewportHeaderDropdown() = 0;
     virtual void EndWindow() = 0;
     virtual bool IsWindowFocused() const { return false; }
     virtual void WindowTitleTooltip(const char*) {}
@@ -253,6 +270,7 @@ public:
     virtual void BeginDisabled(bool disabled = true) = 0;
     virtual void EndDisabled() = 0;
     virtual bool Combo(const char* label, int* selected, const char* const* items, int count) = 0;
+    virtual void SetNextItemWidth(float width) = 0;
     virtual void Tooltip(const char* text) = 0;
     virtual void Progress(float fraction, const char* overlay = nullptr) = 0;
     // Draws a reusable 10x10 percentage grid (1% per cell). Segments are laid
@@ -278,6 +296,11 @@ public:
         EditorUiColor color, bool filled = true, float thickness = 1.f) = 0;
     virtual void DrawViewportText(EditorUiVec2 position, const char* text,
         EditorUiColor color) = 0;
+    virtual EditorUiUvMapResult UvMapEditor(const char*, float*, size_t,
+        const uint32_t*, size_t, int*, float)
+    {
+        return {};
+    }
     virtual void FocusWindow(const char* title) = 0;
 };
 }

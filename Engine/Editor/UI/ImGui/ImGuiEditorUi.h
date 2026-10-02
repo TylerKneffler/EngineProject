@@ -12,6 +12,12 @@ class ImGuiEditorUi final : public IEditorUi
 public:
     void SetNextWindowRect(float x, float y, float width, float height) override;
     bool BeginWindow(const char*, bool*, bool) override; void EndWindow() override;
+    bool BeginViewportOverlay(const char*, float, float) override;
+    int ViewportSideTabs(const char*, const char* const*, int, int, float) override;
+    bool BeginViewportHeader(const char*, float) override;
+    bool EndViewportHeader() override;
+    bool BeginViewportHeaderDropdown(const char*, const char*, float, float) override;
+    void EndViewportHeaderDropdown() override;
     bool IsWindowFocused() const override;
     void WindowTitleTooltip(const char*) override;
     void PushId(const void*) override; void PushId(const char*) override; void PopId() override;
@@ -76,6 +82,7 @@ public:
     void CancelKeyBindingCapture() override;
     void BeginDisabled(bool) override; void EndDisabled() override;
     bool Combo(const char*, int*, const char* const*, int) override;
+    void SetNextItemWidth(float) override;
     void Tooltip(const char*) override; void Progress(float, const char*) override;
     void PercentageGrid(const char*, const EditorUiPercentageSegment*, size_t,
         float) override;
@@ -89,6 +96,8 @@ public:
     void DrawViewportTriangle(EditorUiVec2, EditorUiVec2, EditorUiVec2, EditorUiColor) override;
     void DrawViewportCircle(EditorUiVec2, float, EditorUiColor, bool, float) override;
     void DrawViewportText(EditorUiVec2, const char*, EditorUiColor) override;
+    EditorUiUvMapResult UvMapEditor(const char*, float*, size_t,
+        const uint32_t*, size_t, int*, float) override;
     void FocusWindow(const char*) override;
     void DockWindowToArea(const char* title, EditorPanelDockArea area);
 private:

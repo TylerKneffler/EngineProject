@@ -86,7 +86,7 @@ bool CanMoveInPrefabContext(Engine::Scene::Scene* scene, Engine::Core::Object* o
 
 void HierarchyView::RequestDeleteSelectedObject()
 {
-    if (!m_selectedObject)
+    if (!m_allowDelete || !m_selectedObject)
         return;
     if (Engine::Core::Object* prefabRoot = m_selectedObject->GetPrefabInstanceRoot())
         m_pendingDelete = prefabRoot;
@@ -109,7 +109,7 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
     const bool deleteRequested = ui.DeleteShortcutPressed();
     if (copyRequested) CopySelection();
     if (pasteRequested) PasteClipboard();
-    if (deleteRequested) RequestDeleteSelectedObject();
+    if (deleteRequested && m_allowDelete) RequestDeleteSelectedObject();
     m_dragObservedThisFrame = false;
     m_dropObservedThisFrame = false;
     const bool worldOpen = ui.TreeNode(
@@ -296,7 +296,8 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
     {
         const std::string sourceName = ObjectName(m_pendingDragged);
         const std::string targetName = ObjectName(m_pendingTarget);
-        const bool moved = CanMoveInPrefabContext(
+        const bool moved = (!m_objectFilter || m_allowFilteredReparent) &&
+            CanMoveInPrefabContext(
             m_scene, m_pendingDragged, m_pendingTarget, m_pendingPlacement) &&
             m_scene->MoveObject(
                 m_pendingDragged, m_pendingTarget, m_pendingPlacement);
@@ -343,7 +344,8 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
             LogInteraction("Release recovered at last valid target: '" + sourceName +
                 "' -> '" + targetName + "' (" + PlacementName(m_debugHoverPosition) +
                 ", depth " + std::to_string(m_debugDropDepth) + ")");
-            const bool moved = CanMoveInPrefabContext(
+            const bool moved = (!m_objectFilter || m_allowFilteredReparent) &&
+                CanMoveInPrefabContext(
                 m_scene, m_debugDragSource, resolvedTarget, placement) &&
                 m_scene->MoveObject(
                     m_debugDragSource, resolvedTarget, placement);
@@ -472,16 +474,31 @@ void HierarchyView::DrawObjectNode(
     Engine::Core::Object* prefabRoot = obj->GetPrefabInstanceRoot();
     char name[256]; strncpy_s(name, obj->name.c_str(), sizeof(name));
     bool enabled = obj->enabled;
+    const bool readOnlySkeletonRow = m_objectFilter &&
+        m_allowSkeletonContextActions;
     const EditorUiObjectRowResult row = ui.ObjectTreeRow(
-        obj, ObjectIcon(*obj), name, sizeof(name), &enabled,
+        obj, ObjectIcon(*obj), name, sizeof(name),
+        readOnlySkeletonRow ? nullptr : &enabled,
         std::find(m_selectedObjects.begin(), m_selectedObjects.end(), obj) != m_selectedObjects.end(),
-        !hasChildren, false,
+        !hasChildren, readOnlySkeletonRow,
         obj->IsEnabledInHierarchy(),
         depth, lastSibling, ancestorGuideMask);
     const bool editableHierarchy = prefabRoot == nullptr;
     const bool deletable = editableHierarchy || prefabRoot == obj;
     EditorUiContextMenuResult menu;
-    if (prefabRoot)
+    if (m_objectFilter && m_allowSkeletonContextActions)
+    {
+        // These actions only change the editor selection. Imported model
+        // hierarchy is deliberately not structurally editable here because
+        // its serialized node bindings may use child-index paths.
+        menu = ui.ContextMenu(obj, "Focus Bone", "Focus Skeleton Root", false);
+        if (menu.addRequested)
+            SetSelectedObject(obj);
+        if (menu.deleteRequested && m_filteredContextRoot)
+            SetSelectedObject(m_filteredContextRoot);
+        menu = {};
+    }
+    else if (prefabRoot)
     {
         const EditorUiPrefabMenuResult prefabMenu = ui.PrefabOverrideMenu(obj,
             Engine::Serialization::SceneSerializer::HasPrefabOverrides(*prefabRoot, true));
@@ -500,9 +517,15 @@ void HierarchyView::DrawObjectNode(
         if (m_pendingPrefabAction != PendingPrefabAction::None)
             m_pendingPrefabRoot = prefabRoot;
     }
-    else if (!m_objectFilter)
-        menu = ui.ContextMenu(obj, "Create",
-            deletable ? "Delete Object" : nullptr, true);
+    else if (!m_objectFilter || m_allowFilteredContextActions)
+    {
+        const bool canDelete = m_objectFilter
+            ? (m_allowFilteredContextActions && obj != m_filteredContextRoot)
+            : deletable;
+        menu = ui.ContextMenu(obj,
+            m_objectFilter ? "Add Child" : "Create",
+            canDelete ? "Delete Object" : nullptr, true);
+    }
     if (menu.addRequested || !menu.primitive3D.empty() || menu.addSpriteRequested ||
         menu.addLightProbeRequested || menu.addLightProbeGroupRequested)
     {

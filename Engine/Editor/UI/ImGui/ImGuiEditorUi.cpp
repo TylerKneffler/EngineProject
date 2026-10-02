@@ -5,11 +5,22 @@
 #include "Engine/Editor/Input/EditorKeyBindings.h"
 #include "imgui.h"
 #include "imgui_internal.h"
+#include <algorithm>
+#include <string>
 
 namespace Engine::Editor
 {
 namespace
 {
+constexpr float viewportTabWidth = 36.f;
+
+float ViewportToolsTop(const EditorUiVec2& minimum,
+    const EditorUiVec2& maximum)
+{
+    const float viewportHeight = std::max(0.f, maximum.y - minimum.y);
+    return minimum.y + std::min(80.f, std::max(8.f, viewportHeight * 0.22f));
+}
+
 struct InteractionAnimation
 {
     float value = 0.f;
@@ -143,6 +154,152 @@ void DrawObjectIcon(ImDrawList* draw, EditorUiObjectIcon icon,
 
 void ImGuiEditorUi::SetNextWindowRect(float x,float y,float w,float h){ ImGui::SetNextWindowPos({x,y},ImGuiCond_FirstUseEver); ImGui::SetNextWindowSize({w,h},ImGuiCond_FirstUseEver); }
 bool ImGuiEditorUi::BeginWindow(const char* t,bool* o,bool p){ if(p) ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,{0,0}); bool r=ImGui::Begin(t,o); if(p) ImGui::PopStyleVar(); return r; }
+bool ImGuiEditorUi::BeginViewportOverlay(const char* id, float width, float height)
+{
+    const float availableWidth = std::max(0.f,
+        m_viewportScreenMax.x - m_viewportScreenMin.x - viewportTabWidth - 16.f);
+    const float panelTop = ViewportToolsTop(m_viewportScreenMin, m_viewportScreenMax);
+    const float availableHeight = std::max(0.f,
+        m_viewportScreenMax.y - panelTop - 8.f);
+    const float panelWidth = std::min(width, availableWidth);
+    const float panelMaxHeight = std::min(height, availableHeight);
+    ImGui::SetNextWindowPos({m_viewportScreenMax.x - panelWidth, panelTop},
+        ImGuiCond_Always);
+    ImGui::SetNextWindowSizeConstraints({panelWidth, 0.f},
+        {panelWidth, panelMaxHeight});
+    ImGui::SetNextWindowBgAlpha(0.94f);
+    return ImGui::Begin(id, nullptr, ImGuiWindowFlags_NoTitleBar |
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking |
+        ImGuiWindowFlags_AlwaysAutoResize);
+}
+int ImGuiEditorUi::ViewportSideTabs(const char*, const char* const* labels,
+    int count, int active, float panelWidth)
+{
+    int selected = active;
+    const float panelTop = ViewportToolsTop(m_viewportScreenMin, m_viewportScreenMax);
+    const float availableHeight = std::max(0.f, m_viewportScreenMax.y - panelTop - 8.f);
+    const float availableWidth = std::max(0.f,
+        m_viewportScreenMax.x - m_viewportScreenMin.x - viewportTabWidth - 16.f);
+    const float actualPanelWidth = std::min(panelWidth, availableWidth);
+    if (count <= 0 || availableHeight <= 0.f ||
+        m_viewportScreenMax.x - m_viewportScreenMin.x < viewportTabWidth)
+        return selected;
+
+    const ImVec2 mouse = ImGui::GetIO().MousePos;
+    const bool windowHovered = ImGui::IsWindowHovered();
+    const float hitX = m_viewportScreenMax.x - viewportTabWidth -
+        (active >= 0 ? actualPanelWidth : 0.f);
+    float hitY = panelTop;
+    for (int i = 0; i < count; ++i)
+    {
+        const char* label = labels && labels[i] ? labels[i] : "?";
+        const float remainingHeight = m_viewportScreenMax.y - hitY - 8.f;
+        if (remainingHeight <= 0.f)
+            break;
+        const float tabHeight = std::min(remainingHeight,
+            std::max(82.f, ImGui::CalcTextSize(label).x + 24.f));
+        if (windowHovered && mouse.x >= hitX &&
+            mouse.x < hitX + viewportTabWidth && mouse.y >= hitY &&
+            mouse.y < hitY + tabHeight &&
+            ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+            selected = active == i ? -1 : i;
+        hitY += tabHeight + ImGui::GetStyle().ItemSpacing.y;
+    }
+
+    const float tabX = m_viewportScreenMax.x - viewportTabWidth -
+        (selected >= 0 ? actualPanelWidth : 0.f);
+    float tabY = panelTop;
+    for (int i = 0; i < count; ++i)
+    {
+        const char* label = labels && labels[i] ? labels[i] : "?";
+        const float remainingHeight = m_viewportScreenMax.y - tabY - 8.f;
+        if (remainingHeight <= 0.f)
+            break;
+        const ImVec2 tabSize{viewportTabWidth, std::min(remainingHeight,
+            std::max(82.f, ImGui::CalcTextSize(label).x + 24.f))};
+        const ImVec2 tabMin{tabX, tabY};
+        const ImVec2 tabMax{tabX + tabSize.x, tabY + tabSize.y};
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        const ImU32 background = ImGui::GetColorU32(selected == i
+            ? ImGuiCol_TabActive : ImGuiCol_Tab);
+        draw->AddRectFilled(tabMin, tabMax, background, 5.f,
+            ImDrawFlags_RoundCornersLeft);
+        draw->AddLine({tabMin.x + 1.f, tabMin.y + 7.f},
+            {tabMin.x + 1.f, tabMax.y - 7.f},
+            ImGui::GetColorU32(selected == i ? ImGuiCol_CheckMark
+                : ImGuiCol_Border), 2.f);
+        ImFont* font = ImGui::GetFont();
+        const float fontSize = ImGui::GetFontSize();
+        const ImVec2 textSize = font->CalcTextSizeA(fontSize, FLT_MAX, 0.f, label);
+        const ImVec2 center{(tabMin.x + tabMax.x) * 0.5f,
+            (tabMin.y + tabMax.y) * 0.5f};
+        const int firstVertex = draw->VtxBuffer.Size;
+        draw->AddText(font, fontSize,
+            {center.x - textSize.x * 0.5f, center.y - textSize.y * 0.5f},
+            ImGui::GetColorU32(selected == i ? ImGuiCol_CheckMark
+                : ImGuiCol_Text), label);
+        for (int vertex = firstVertex; vertex < draw->VtxBuffer.Size; ++vertex)
+        {
+            ImVec2& position = draw->VtxBuffer[vertex].pos;
+            const float x = position.x - center.x;
+            const float y = position.y - center.y;
+            position = {center.x + y, center.y - x};
+        }
+        tabY += tabSize.y + ImGui::GetStyle().ItemSpacing.y;
+    }
+    return selected;
+}
+bool ImGuiEditorUi::BeginViewportHeader(const char* id, float width)
+{
+    const float viewportWidth = std::max(0.f,
+        m_viewportScreenMax.x - m_viewportScreenMin.x);
+    const bool belowSceneTools = viewportWidth < 660.f;
+    const float leftReserve = belowSceneTools ? 8.f : 284.f;
+    const float rightReserve = belowSceneTools ? 8.f : 62.f;
+    const float availableWidth = viewportWidth - leftReserve - rightReserve;
+    if (availableWidth < 120.f)
+        return false;
+
+    const float headerWidth = std::min(width, availableWidth);
+    ImGui::SetNextWindowPos({m_viewportScreenMax.x - rightReserve - headerWidth,
+        m_viewportScreenMin.y + (belowSceneTools ? 48.f : 6.f)},
+        ImGuiCond_Always);
+    ImGui::SetNextWindowSizeConstraints({headerWidth, 0.f},
+        {headerWidth, 48.f});
+    ImGui::SetNextWindowBgAlpha(0.92f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {8.f, 6.f});
+    const bool visible = ImGui::Begin(id, nullptr,
+        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoScrollbar |
+        ImGuiWindowFlags_NoScrollWithMouse |
+        ImGuiWindowFlags_AlwaysAutoResize);
+    ImGui::PopStyleVar();
+    if (!visible)
+        ImGui::End();
+    return visible;
+}
+bool ImGuiEditorUi::EndViewportHeader()
+{
+    const bool clicked = ImGui::IsWindowHovered() &&
+        ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+    ImGui::End();
+    return clicked;
+}
+bool ImGuiEditorUi::BeginViewportHeaderDropdown(const char* id,
+    const char* preview, float width, float maxHeight)
+{
+    const float popupWidth = std::min(300.f, std::max(120.f,
+        m_viewportScreenMax.x - m_viewportScreenMin.x - 16.f));
+    const float popupHeight = std::min(maxHeight, std::max(100.f,
+        m_viewportScreenMax.y - ImGui::GetCursorScreenPos().y - 40.f));
+    ImGui::SetNextItemWidth(width);
+    ImGui::SetNextWindowSizeConstraints({popupWidth, 0.f},
+        {popupWidth, popupHeight});
+    return ImGui::BeginCombo(id, preview, ImGuiComboFlags_HeightLargest);
+}
+void ImGuiEditorUi::EndViewportHeaderDropdown(){ImGui::EndCombo();}
 void ImGuiEditorUi::EndWindow(){ImGui::End();}
 bool ImGuiEditorUi::IsWindowFocused() const{return ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);}
 void ImGuiEditorUi::WindowTitleTooltip(const char* text)
@@ -384,7 +541,10 @@ EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,
         ImGui::EndDragDropSource();
     }
     ImGui::SameLine(0.f,2.f);
-    result.enabledChanged=ImGui::Checkbox("##enabled",enabled);
+    if(enabled)
+        result.enabledChanged=ImGui::Checkbox("##enabled",enabled);
+    else
+        ImGui::Dummy({ImGui::GetFrameHeight(),ImGui::GetFrameHeight()});
     result.clicked=result.clicked||ImGui::IsItemClicked();
     ImGui::SameLine(0.f,4.f);
     const float iconWidth=18.f;
@@ -815,6 +975,7 @@ bool ImGuiEditorUi::KeyBindingInput(const char* id,const char* display,std::stri
 void ImGuiEditorUi::CancelKeyBindingCapture(){m_bindingCaptureId=0;EditorKeyBindings::Get().SetCapturing(false);}
 void ImGuiEditorUi::BeginDisabled(bool d){ImGui::BeginDisabled(d);} void ImGuiEditorUi::EndDisabled(){ImGui::EndDisabled();}
 bool ImGuiEditorUi::Combo(const char*l,int*s,const char*const*i,int c){return ImGui::Combo(l,s,i,c);}
+void ImGuiEditorUi::SetNextItemWidth(float width){ImGui::SetNextItemWidth(width);}
 void ImGuiEditorUi::Tooltip(const char*t){if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("%s",t);}
 void ImGuiEditorUi::Progress(float f,const char*o){ImGui::ProgressBar(f,{-1,0},o);}
 void ImGuiEditorUi::PercentageGrid(const char* id,
@@ -1125,6 +1286,114 @@ void ImGuiEditorUi::DrawViewportCircle(EditorUiVec2 center,float radius,EditorUi
 void ImGuiEditorUi::DrawViewportText(EditorUiVec2 position,const char* text,EditorUiColor color)
 {
     ImDrawList* draw=ImGui::GetWindowDrawList();draw->PushClipRect({m_viewportScreenMin.x,m_viewportScreenMin.y},{m_viewportScreenMax.x,m_viewportScreenMax.y},true);draw->AddText({m_viewportScreenMin.x+position.x,m_viewportScreenMin.y+position.y},ViewportColor(color),text?text:"");draw->PopClipRect();
+}
+EditorUiUvMapResult ImGuiEditorUi::UvMapEditor(const char* id, float* uvPairs,
+    size_t vertexCount, const uint32_t* indices, size_t indexCount,
+    int* selectedVertex, float size)
+{
+    EditorUiUvMapResult result;
+    if (!uvPairs || !selectedVertex || vertexCount == 0)
+        return result;
+    size = std::max(size, 96.f);
+    ImGui::PushID(id ? id : "UVMap");
+    ImGui::TextUnformatted("UV Map (U/V in 0..1; drag the selected vertex)");
+    const ImVec2 canvasSize(size, size);
+    ImGui::InvisibleButton("##UVMapCanvas", canvasSize);
+    const ImVec2 minimum = ImGui::GetItemRectMin();
+    const ImVec2 maximum = ImGui::GetItemRectMax();
+    const bool hovered = ImGui::IsItemHovered();
+    const ImVec2 mouse = ImGui::GetIO().MousePos;
+    const auto pointFor = [&](size_t vertex)
+    {
+        const float u = uvPairs[vertex * 2];
+        const float v = uvPairs[vertex * 2 + 1];
+        return ImVec2(minimum.x + std::clamp(u, 0.f, 1.f) * size,
+            minimum.y + (1.f - std::clamp(v, 0.f, 1.f)) * size);
+    };
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    draw->PushClipRect(minimum, maximum, true);
+    draw->AddRectFilled(minimum, maximum, ImGui::GetColorU32(ImGuiCol_FrameBg));
+    const ImU32 gridColor = ImGui::GetColorU32(ImGuiCol_Border);
+    for (int division = 0; division <= 10; ++division)
+    {
+        const float fraction = static_cast<float>(division) / 10.f;
+        const float x = minimum.x + fraction * size;
+        const float y = minimum.y + fraction * size;
+        draw->AddLine({ x, minimum.y }, { x, maximum.y }, gridColor);
+        draw->AddLine({ minimum.x, y }, { maximum.x, y }, gridColor);
+    }
+    draw->AddRect(minimum, maximum, ImGui::GetColorU32(ImGuiCol_Border));
+    const size_t drawVertexCount = std::min<size_t>(vertexCount, 100000);
+    const size_t elementCount = indices && indexCount
+        ? indexCount : drawVertexCount;
+    const size_t triangleCount = std::min<size_t>(elementCount / 3, 100000);
+    const ImU32 edgeColor = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+    const auto drawTriangle = [&](uint32_t first, uint32_t second, uint32_t third)
+    {
+        if (first >= drawVertexCount || second >= drawVertexCount ||
+            third >= drawVertexCount)
+            return;
+        draw->AddLine(pointFor(first), pointFor(second), edgeColor);
+        draw->AddLine(pointFor(second), pointFor(third), edgeColor);
+        draw->AddLine(pointFor(third), pointFor(first), edgeColor);
+    };
+    for (size_t triangle = 0; triangle < triangleCount; ++triangle)
+    {
+        const size_t base = triangle * 3;
+        drawTriangle(indices && indexCount ? indices[base]
+                : static_cast<uint32_t>(base),
+            indices && indexCount ? indices[base + 1]
+                : static_cast<uint32_t>(base + 1),
+            indices && indexCount ? indices[base + 2]
+                : static_cast<uint32_t>(base + 2));
+    }
+    const size_t selectableCount = std::min<size_t>(vertexCount, 100000);
+    if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+    {
+        float nearestDistanceSquared = 100.f;
+        int nearest = -1;
+        for (size_t vertex = 0; vertex < selectableCount; ++vertex)
+        {
+            const ImVec2 point = pointFor(vertex);
+            const float dx = point.x - mouse.x;
+            const float dy = point.y - mouse.y;
+            const float distanceSquared = dx * dx + dy * dy;
+            if (distanceSquared <= nearestDistanceSquared)
+            {
+                nearestDistanceSquared = distanceSquared;
+                nearest = static_cast<int>(vertex);
+            }
+        }
+        if (nearest >= 0 && nearest != *selectedVertex)
+        {
+            *selectedVertex = nearest;
+            result.selectionChanged = true;
+        }
+    }
+    if (*selectedVertex >= 0 &&
+        static_cast<size_t>(*selectedVertex) < selectableCount)
+    {
+        if (hovered && ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
+            ImGui::IsItemActive())
+        {
+            const float u = std::clamp((mouse.x - minimum.x) / size, 0.f, 1.f);
+            const float v = std::clamp(1.f - (mouse.y - minimum.y) / size,
+                0.f, 1.f);
+            float& oldU = uvPairs[static_cast<size_t>(*selectedVertex) * 2];
+            float& oldV = uvPairs[static_cast<size_t>(*selectedVertex) * 2 + 1];
+            if (oldU != u || oldV != v)
+            {
+                oldU = u;
+                oldV = v;
+                result.coordinatesChanged = true;
+            }
+        }
+        draw->AddCircleFilled(pointFor(static_cast<size_t>(*selectedVertex)),
+            5.f, ImGui::GetColorU32(ImGuiCol_PlotHistogram));
+    }
+    draw->PopClipRect();
+    ImGui::PopID();
+    return result;
 }
 void ImGuiEditorUi::FocusWindow(const char*t){ImGui::SetWindowFocus(t);}
 void ImGuiEditorUi::DockWindowToArea(const char* title,EditorPanelDockArea area)

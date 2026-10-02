@@ -196,9 +196,11 @@ void DrawGridIcon(IEditorUi& ui, EditorUiVec2 center,
 }
 
 bool SceneViewportToolbar::Draw(IEditorUi& ui,
-    const EditorUiViewportInput& input, Engine::Scene::Scene* scene)
+    const EditorUiViewportInput& input, Engine::Scene::Scene* scene,
+    bool allowTransformTools)
 {
-    const bool toolbarConsumedClick = DrawTransformToolbar(ui, input);
+    const bool toolbarConsumedClick = allowTransformTools
+        ? DrawTransformToolbar(ui, input) : false;
     const bool gridToggleConsumedClick = DrawGridToggle(ui, input, scene);
     const bool renderModeConsumedClick =
         DrawRenderModeMenu(ui, input, scene);

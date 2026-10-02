@@ -88,6 +88,9 @@ public:
     uint64_t GetUploadShadowMemoryBytes() const;
     uint64_t GetGpuBufferMemoryBytes() const;
     bool     IsReady()        const { return m_ready; }
+    // Transient editor-stage visibility; never serialized into the asset.
+    bool IsEditorVisible() const { return m_editorVisible; }
+    void SetEditorVisible(bool visible) { m_editorVisible = visible; }
     const std::string& GetFilePath() const { return m_filePath; }
     bool HasBounds() const { return m_hasBounds; }
     const glm::vec3& GetBoundsMin() const { return m_boundsMin; }
@@ -141,6 +144,7 @@ private:
     std::unique_ptr<IGraphicsBuffer> m_morphWeightBuffer;
     IGraphicsBufferFactory* m_bufferFactory = nullptr;
     bool m_ready = false;
+    bool m_editorVisible = true;
     bool m_hasBounds = false;
     glm::vec3 m_boundsMin{};
     glm::vec3 m_boundsMax{};

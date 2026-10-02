@@ -43,6 +43,7 @@ public:
     // cmd: opaque graphics command list handle (cast internally to ID3D12GraphicsCommandList*)
     void Render3D(void* cmd) override;
     void RenderShadow3D(void* cmd) override;
+    void SetScene(Engine::Scene::Scene* scene) { m_scene = scene; }
 
     // Defines the Game panel showing the game-camera render output.
     void DrawPanel(IEditorUi& ui) override;

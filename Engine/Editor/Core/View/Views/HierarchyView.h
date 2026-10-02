@@ -40,6 +40,11 @@ public:
     void SetDebugInteractionLogging(bool enabled);
     void SetObjectFilter(std::function<bool(const Engine::Core::Object*)> filter)
     { m_objectFilter = std::move(filter); }
+    void SetAllowDelete(bool allow) { m_allowDelete = allow; }
+    void SetFilteredObjectContextActions(bool allow, Engine::Core::Object* root)
+    { m_allowFilteredContextActions = allow; m_filteredContextRoot = root; }
+    void SetSkeletonContextActions(bool allow, Engine::Core::Object* root)
+    { m_allowSkeletonContextActions = allow; m_filteredContextRoot = root; }
 
     // Fires whenever the selected object changes (including deselect → nullptr).
     std::function<void(Engine::Core::Object*)> OnSelectionChanged;
@@ -89,5 +94,10 @@ private:
     std::string m_objectClipboard;
     ::Engine::Scene::Scene::ObjectPath m_clipboardSourcePath;
     std::function<bool(const Engine::Core::Object*)> m_objectFilter;
+    bool m_allowDelete = true;
+    bool m_allowFilteredContextActions = false;
+    bool m_allowFilteredReparent = false;
+    bool m_allowSkeletonContextActions = false;
+    Engine::Core::Object* m_filteredContextRoot = nullptr;
 };
 }

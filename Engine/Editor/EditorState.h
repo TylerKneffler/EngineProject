@@ -9,13 +9,16 @@
 #include <functional>
 #include <deque>
 #include <cstdint>
+#include <chrono>
 #include <unordered_set>
 #include <unordered_map>
 
 namespace Engine::Core { class Window; }
 namespace Engine::Components { class Mesh; }
+namespace Engine::Components { class Sprite; }
 namespace Engine::Components { class Material; }
 namespace Engine::Components { class Skeleton; }
+namespace Engine::Components { class AnimationManager; }
 
 namespace Engine::Editor
 {
@@ -28,6 +31,7 @@ class HierarchyView;
 class AssetsExplorerView;
 class SceneView;
 class AssetDocumentView;
+class IEditorUi;
 
 // ---------------------------------------------------------------------------
 // EditorState — Encapsulates all editor application state
@@ -160,12 +164,17 @@ private:
         bool meshStage = false;
         bool modelStage = false;
         bool skeletonStage = false;
+        bool objectStage = false;
+        bool showChildHierarchy = true;
         std::string stageDataPath;
         Engine::Components::Mesh* mesh = nullptr;
         Engine::Core::Object* subject = nullptr;
+        Engine::Core::Object* propertiesProjection = nullptr;
         std::unordered_set<Engine::Core::Object*> selectableObjects;
         std::unordered_set<Engine::Core::Object*> skeletonMeshObjects;
         std::unordered_map<Engine::Core::Object*, bool> originalEnabledState;
+        std::unordered_map<Engine::Components::Mesh*, bool> originalMeshVisibility;
+        std::unordered_map<Engine::Components::Sprite*, bool> originalSpriteVisibility;
         struct GhostMaterialState
         {
             Engine::Components::Material* material = nullptr;
@@ -176,9 +185,17 @@ private:
         std::vector<GhostMaterialState> ghostMaterialStates;
         Engine::Components::Skeleton* skeleton = nullptr;
         bool showSkeletonMesh = true;
+        Engine::Components::AnimationManager* previewAnimationManager = nullptr;
+        bool previewAnimation = false;
+        std::chrono::steady_clock::time_point lastPreviewTick{};
+        std::string previewRestoreSnapshot;
         std::string meshSavePath;
         std::unique_ptr<Engine::Scene::Scene> scene;
         SceneView* view = nullptr;
+        std::function<void(IEditorUi&)> objectStageTools;
+        std::function<void(IEditorUi&)> meshStageTools;
+        std::function<void(IEditorUi&)> skeletonStageTools;
+        int assetToolsTab = -1;
         std::string baseline;
         std::string savedSnapshot;
         std::deque<std::string> undo;
@@ -196,6 +213,10 @@ private:
     void ApplySkeletonStageVisibility(SceneAssetDocument& document);
     void RestoreSkeletonStageVisibility(SceneAssetDocument& document);
     void RebuildSkeletonStageContext(SceneAssetDocument& document);
+    void RebuildObjectStageContext(SceneAssetDocument& document);
+    void ApplyObjectStageVisibility(SceneAssetDocument& document);
+    void ApplyMeshStageVisibility(SceneAssetDocument& document);
+    void StopSkeletonAnimationPreview(SceneAssetDocument& document);
     void RefreshSceneAssetDocumentTitle(SceneAssetDocument& document);
     void RefreshSceneDocumentTitle();
     Engine::Scene::Scene* GetActiveDocumentScene() const;

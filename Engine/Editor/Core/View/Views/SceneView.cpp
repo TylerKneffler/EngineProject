@@ -96,8 +96,8 @@ void SceneView::DrawPanel(IEditorUi& ui)
     panDX = input.keyPanDX;
     panDY = input.keyPanDY;
     dolly = input.keyDolly;
-    const bool overlayConsumedClick = AllowObjectTransform
-        ? m_toolbar.Draw(ui, input, m_scene) : false;
+    const bool overlayConsumedClick = m_toolbar.Draw(ui, input, m_scene,
+        AllowObjectTransform);
     const EditorUiContextMenuResult createMenu = AllowObjectCreation
         ? ui.ContextMenu(this, "Create", nullptr, true)
         : EditorUiContextMenuResult{};
@@ -226,6 +226,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
     }
     if (!prefabDragObserved)
         CancelPrefabPreview();
+    bool selectSceneObject = false;
     EditorUiVec2 size = input.available;
     if (size.x > 0.f && size.y > 0.f)
     {
@@ -252,8 +253,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
                 transformTool != EditorTransformTool::Hand &&
                 !gizmoResult.consumedClick &&
                 !input.rightDown && !input.middleDown && OnObjectSelected)
-                OnObjectSelected(ScenePlacementAndPicking::PickObjectInViewport(
-                    *m_scene, input.mousePosInViewport, input.available));
+                selectSceneObject = true;
 
             EditorUiVec2 d = input.mouseDelta;
 
@@ -287,8 +287,11 @@ void SceneView::DrawPanel(IEditorUi& ui)
         }
     }
 
-    if (OnDrawDocumentTools)
-        OnDrawDocumentTools(ui);
+    const bool documentToolsConsumedClick = OnDrawDocumentTools
+        ? OnDrawDocumentTools(ui) : false;
+    if (selectSceneObject && !documentToolsConsumedClick)
+        OnObjectSelected(ScenePlacementAndPicking::PickObjectInViewport(
+            *m_scene, input.mousePosInViewport, input.available));
     ui.EndWindow();
 
     if (m_scene)

@@ -12,7 +12,7 @@ class SceneViewportToolbar
 {
 public:
     bool Draw(IEditorUi& ui, const EditorUiViewportInput& input,
-        Engine::Scene::Scene* scene);
+        Engine::Scene::Scene* scene, bool allowTransformTools = true);
 
     EditorTransformTool GetTransformTool() const
     {

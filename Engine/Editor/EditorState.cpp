@@ -8,6 +8,7 @@
 #include "Core/View/Views/PropertiesView.h"
 #include "Core/View/Views/HierarchyView.h"
 #include "Core/View/Views/SceneView.h"
+#include "Core/View/Views/GameView.h"
 #include "Core/View/Views/AssetDocumentView.h"
 #include "Core/Window.h"
 #include "Core/Renderers/RendererFactory.h"
@@ -18,6 +19,10 @@
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/AnimationBone.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
+#include "Core/Compoonents/Animation/AnimationManager.h"
+#include "Core/Compoonents/Animation/Animation.h"
+#include "Core/Compoonents/Animation/Model.h"
+#include "Core/Compoonents/Transform.h"
 #include "Core/Compoonents/Obj/Sprite.h"
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
 #include "Core/AssetRecord.h"
@@ -31,6 +36,7 @@
 #include <fstream>
 #include <cstring>
 #include <commdlg.h>
+#include <glm/gtc/matrix_inverse.hpp>
 
 namespace Engine::Editor
 {
@@ -786,13 +792,16 @@ void EditorState::QueueSceneAssetDocumentOpen(const std::string& path)
     if (path.empty())
         return;
     const std::string identity = AssetPathIdentity(path);
-    for (const auto& document : m_sceneAssetDocuments)
-        if (document && document->identity == identity)
-        {
-            document->view->SetOpen(true);
-            SetActiveSceneAssetDocument(document.get());
-            return;
-        }
+    // Scene files use the persistent Scene view; other scene-backed assets
+    // keep separate document tabs.
+    if (std::filesystem::path(identity).extension() != ".scene")
+        for (const auto& document : m_sceneAssetDocuments)
+            if (document && document->identity == identity)
+            {
+                document->view->SetOpen(true);
+                SetActiveSceneAssetDocument(document.get());
+                return;
+            }
     for (const std::string& pending : m_pendingSceneAssetDocuments)
         if (AssetPathIdentity(pending) == identity)
             return;
@@ -807,6 +816,42 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
         m_pendingSceneAssetDocuments.pop_front();
         const std::string normalized = NormalizeAssetPath(path);
         const std::string identity = AssetPathIdentity(normalized);
+        std::string extension = std::filesystem::path(normalized).extension().string();
+        std::transform(extension.begin(), extension.end(), extension.begin(),
+            [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+        if (extension == ".scene")
+        {
+            if (m_currentScenePath.empty() ||
+                AssetPathIdentity(m_currentScenePath) != identity)
+                RequestSceneLoad(normalized);
+            SetActiveSceneAssetDocument(nullptr);
+            bool foundSceneView = false;
+            for (auto& panel : m_panels)
+                if (auto* sceneView = dynamic_cast<SceneView*>(panel.get());
+                    sceneView && sceneView->GetScene() == m_scene.get())
+                {
+                    sceneView->SetOpen(true);
+                    sceneView->RequestFocusOnNextDraw();
+                    foundSceneView = true;
+                    break;
+                }
+            if (!foundSceneView && m_viewFactory)
+                if (auto sceneView = m_viewFactory->Create("Scene"))
+                {
+                    sceneView->OnFocused = [this]()
+                    {
+                        SetActiveSceneAssetDocument(nullptr);
+                        SetPrefabDocumentFocused(false);
+                    };
+                    if (auto* createdSceneView = dynamic_cast<SceneView*>(
+                        sceneView.get()))
+                        createdSceneView->RequestFocusOnNextDraw();
+                    m_panels.push_back(std::move(sceneView));
+                    RefreshSceneDocumentTitle();
+                }
+            if (m_renderer) m_renderer->MarkDirty();
+            continue;
+        }
         auto existing = std::find_if(m_sceneAssetDocuments.begin(),
             m_sceneAssetDocuments.end(), [&](const auto& document)
             {
@@ -822,9 +867,6 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
         auto document = std::make_unique<SceneAssetDocument>();
         document->path = normalized;
         document->identity = identity;
-        std::string extension = std::filesystem::path(normalized).extension().string();
-        std::transform(extension.begin(), extension.end(), extension.begin(),
-            [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
         document->prefab = extension == ".prefab";
         document->meshStage = extension == ".mesh" || extension == ".obj";
         document->modelStage = ModelImporter::SupportsExtension(extension);
@@ -902,11 +944,20 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
         {
             loaded = document->scene->Load(normalized);
         }
-        if (loaded && document->prefab)
+        // Prefab documents use the regular scene editing controls for now.
+        // Keep the specialized object/skeleton stages for model assets only.
+        if (loaded && document->prefab && document->modelStage)
+        {
             RebuildSkeletonStageContext(*document);
+            if (!document->skeletonStage)
+                RebuildObjectStageContext(*document);
+        }
+        if (loaded && document->meshStage)
+            ApplyMeshStageVisibility(*document);
         if (document->skeletonStage && !document->selectableObjects.empty())
         {
-            if (!document->selectableObjects.contains(document->subject))
+            if (document->selectableObjects.find(document->subject) ==
+                document->selectableObjects.end())
                 document->subject = *document->selectableObjects.begin();
             document->scene->SetSelectedObject(document->subject);
         }
@@ -937,8 +988,24 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
         view->OnObjectSelected = [this, raw](Engine::Core::Object* object)
         {
             if (raw->skeletonStage && object &&
-                !raw->selectableObjects.contains(object))
+                raw->selectableObjects.find(object) ==
+                    raw->selectableObjects.end())
                 return;
+            if (raw->objectStage && object)
+            {
+                bool inFocusedGraph = false;
+                for (Engine::Core::Object* current = object; current;
+                    current = current->Parent)
+                    if (current == raw->subject)
+                    {
+                        inFocusedGraph = true;
+                        break;
+                    }
+                if (!inFocusedGraph || (!raw->showChildHierarchy &&
+                    object != raw->subject))
+                    return;
+            }
+            raw->propertiesProjection = nullptr;
             raw->scene->SetSelectedObject(object);
             if (m_primaryHierarchy) m_primaryHierarchy->SetSelectedObject(object);
             if (m_primaryProperties) m_primaryProperties->SetSelectedObject(object);
@@ -976,26 +1043,403 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
         };
         view->CanSelectObject = [raw](const Engine::Core::Object* object)
         {
-            return !raw->skeletonStage || !object ||
-                raw->selectableObjects.contains(
-                    const_cast<Engine::Core::Object*>(object));
-        };
-        if (raw->skeletonStage)
-            view->OnDrawDocumentTools = [raw](IEditorUi& ui)
+            if (!object) return true;
+            if (raw->skeletonStage)
+                return raw->selectableObjects.find(
+                    const_cast<Engine::Core::Object*>(object)) !=
+                    raw->selectableObjects.end();
+            if (raw->meshStage)
+                return object == raw->subject;
+            if (raw->objectStage)
             {
-                ui.Separator();
-                ui.ColoredLabel("Skeleton Edit Stage", { 0.35f, 0.75f, 1.f, 1.f });
-                const std::string count = std::to_string(raw->selectableObjects.size());
-                ui.ValueLabel("Editable joints", count.c_str());
-                ui.DisabledLabel("Joint hierarchy is filtered to this skeleton.");
+                if (!raw->showChildHierarchy && object != raw->subject)
+                    return false;
+                for (const Engine::Core::Object* current = object; current;
+                    current = current->Parent)
+                    if (current == raw->subject) return true;
+                return false;
+            }
+            return true;
+        };
+        const auto drawAssetFocusPicker = [this, raw](IEditorUi& ui)
+        {
+            if (!raw->prefab)
+                return;
+            std::vector<Engine::Components::Mesh*> meshes;
+            Engine::Components::Skeleton* skeleton = nullptr;
+            for (const auto& object : raw->scene->GetObjects())
+            {
+                if (!object) continue;
+                for (Engine::Core::Component* component : object->Components)
+                {
+                    if (auto* mesh = dynamic_cast<Engine::Components::Mesh*>(component);
+                        mesh && !mesh->GetVertices().empty())
+                        meshes.push_back(mesh);
+                    if (auto* candidate = dynamic_cast<Engine::Components::Skeleton*>(component))
+                        skeleton = candidate;
+                }
+            }
+            std::vector<const char*> choices{ "Object" };
+            const int objectMode = 0;
+            int meshMode = -1;
+            int skeletonMode = -1;
+            if (!meshes.empty())
+            {
+                meshMode = static_cast<int>(choices.size());
+                choices.push_back("Mesh");
+            }
+            if (skeleton)
+            {
+                skeletonMode = static_cast<int>(choices.size());
+                choices.push_back("Skeleton");
+            }
+            int selectedMode = raw->meshStage ? meshMode
+                : (raw->skeletonStage ? skeletonMode : objectMode);
+            if (selectedMode < 0) selectedMode = objectMode;
+            if (ui.Combo("Mode", &selectedMode, choices.data(),
+                static_cast<int>(choices.size())))
+            {
+                if (raw->previewAnimation)
+                    StopSkeletonAnimationPreview(*raw);
+                RestoreSkeletonStageVisibility(*raw);
+                raw->meshStage = false;
+                raw->objectStage = false;
+                raw->skeletonStage = false;
+                raw->propertiesProjection = nullptr;
+                raw->selectedVertex = 0;
+                if (selectedMode == meshMode && meshMode >= 0)
+                {
+                    raw->mesh = meshes.front();
+                    raw->subject = raw->mesh->Owner;
+                    raw->meshStage = raw->subject != nullptr;
+                    raw->meshSavePath = raw->mesh->GetFilePath();
+                    if (raw->meshSavePath.empty())
+                        raw->meshSavePath = (std::filesystem::path(raw->path).parent_path() /
+                            (raw->subject->name + ".mesh")).string();
+                    raw->scene->SetSelectedObject(raw->subject);
+                    ApplyMeshStageVisibility(*raw);
+                }
+                else if (selectedMode == skeletonMode && skeletonMode >= 0)
+                    RebuildSkeletonStageContext(*raw);
+                else
+                    RebuildObjectStageContext(*raw);
+                if (raw->view)
+                {
+                    raw->view->AllowObjectCreation = false;
+                    raw->view->AllowAssetDrops = false;
+                    raw->view->AllowObjectTransform = !raw->meshStage;
+                }
+                SetActiveSceneAssetDocument(raw);
+                if (m_renderer) m_renderer->MarkDirty();
+            }
+        };
+        if (raw->prefab && raw->modelStage)
+            raw->objectStageTools = [this, raw](IEditorUi& ui)
+            {
+                if (!raw->objectStage) return;
+                ui.ColoredLabel("Object Edit Stage", { 0.35f, 0.75f, 1.f, 1.f });
+                if (ui.Checkbox("Include child hierarchy", &raw->showChildHierarchy))
+                {
+                    ApplyObjectStageVisibility(*raw);
+                    if (!raw->showChildHierarchy)
+                    {
+                        raw->scene->SetSelectedObject(raw->subject);
+                        if (m_primaryHierarchy)
+                            m_primaryHierarchy->SetSelectedObject(raw->subject);
+                        if (m_primaryProperties)
+                            m_primaryProperties->SetSelectedObject(raw->subject);
+                    }
+                    if (m_renderer) m_renderer->MarkDirty();
+                }
             };
-        if (raw->meshStage)
+        if (raw->prefab && raw->modelStage && raw->skeleton)
         {
             view->AllowObjectCreation = false;
             view->AllowAssetDrops = false;
-            view->AllowObjectTransform = false;
-            view->OnDrawDocumentTools = [this, raw](IEditorUi& ui)
+            raw->skeletonStageTools = [this, raw](IEditorUi& ui)
             {
+                if (raw->objectStage)
+                {
+                    ui.ColoredLabel("Object Edit Stage",
+                        { 0.35f, 0.75f, 1.f, 1.f });
+                    if (ui.Checkbox("Include child hierarchy",
+                        &raw->showChildHierarchy))
+                    {
+                        ApplyObjectStageVisibility(*raw);
+                        if (!raw->showChildHierarchy)
+                        {
+                            raw->scene->SetSelectedObject(raw->subject);
+                            if (m_primaryHierarchy)
+                                m_primaryHierarchy->SetSelectedObject(raw->subject);
+                            if (m_primaryProperties)
+                                m_primaryProperties->SetSelectedObject(raw->subject);
+                        }
+                        if (m_renderer) m_renderer->MarkDirty();
+                    }
+                    return;
+                }
+                if (!raw->skeletonStage) return;
+                ui.ColoredLabel("Skeleton Edit Stage", { 0.35f, 0.75f, 1.f, 1.f });
+                const std::string count = std::to_string(raw->selectableObjects.size());
+                ui.ValueLabel("Editable joints", count.c_str());
+                std::vector<Engine::Core::Object*> dependencyTargets;
+                std::vector<std::string> dependencyLabels;
+                const auto addDependencyTarget = [&](Engine::Core::Object* object,
+                    const std::string& role)
+                {
+                    if (!object || std::find(dependencyTargets.begin(),
+                        dependencyTargets.end(), object) != dependencyTargets.end())
+                        return;
+                    dependencyTargets.push_back(object);
+                    dependencyLabels.push_back(role + ": " + object->name);
+                };
+                Engine::Components::Model* rigModel = raw->skeleton
+                    ? raw->skeleton->ResolveModel() : nullptr;
+                addDependencyTarget(rigModel ? rigModel->Owner : nullptr, "Model");
+                for (Engine::Core::Object* ghost : raw->skeletonMeshObjects)
+                    addDependencyTarget(ghost, "Skinned mesh");
+                std::vector<const char*> dependencyNames;
+                dependencyNames.push_back("Selected bone");
+                for (const std::string& label : dependencyLabels)
+                    dependencyNames.push_back(label.c_str());
+                int dependencySelection = 0;
+                for (size_t index = 0; index < dependencyTargets.size(); ++index)
+                    if (dependencyTargets[index] == raw->propertiesProjection)
+                        dependencySelection = static_cast<int>(index + 1);
+                if (ui.Combo("Properties target", &dependencySelection,
+                    dependencyNames.data(), static_cast<int>(dependencyNames.size())))
+                {
+                    raw->propertiesProjection = dependencySelection > 0
+                        ? dependencyTargets[static_cast<size_t>(dependencySelection - 1)]
+                        : nullptr;
+                    if (m_primaryProperties)
+                        m_primaryProperties->SetSelectedObject(
+                            raw->propertiesProjection ? raw->propertiesProjection
+                                : raw->scene->GetSelectedObject());
+                }
+                if (rigModel && rigModel->Owner &&
+                    !rigModel->Owner->GetComponent<
+                        Engine::Components::AnimationManager>() &&
+                    ui.Button("Add Animation Manager Dependency"))
+                {
+                    rigModel->Owner->AddComponent<
+                        Engine::Components::AnimationManager>();
+                    raw->propertiesProjection = rigModel->Owner;
+                    if (m_primaryProperties)
+                        m_primaryProperties->SetSelectedObject(rigModel->Owner);
+                    const std::string current =
+                        CaptureSceneAssetDocumentSnapshot(*raw);
+                    if (raw->baseline != current)
+                    {
+                        if (m_historyLimit > 0)
+                        {
+                            if (raw->undo.size() >= m_historyLimit)
+                                raw->undo.pop_front();
+                            raw->undo.push_back(raw->baseline);
+                        }
+                        raw->redo.clear();
+                        raw->baseline = current;
+                        raw->dirty = raw->baseline != raw->savedSnapshot;
+                        RefreshSceneAssetDocumentTitle(*raw);
+                    }
+                }
+                if (!raw->skeletonMeshObjects.empty() &&
+                    ui.Checkbox("Show associated skinned mesh (ghost)",
+                        &raw->showSkeletonMesh))
+                {
+                    ApplySkeletonStageVisibility(*raw);
+                    if (m_renderer) m_renderer->MarkDirty();
+                }
+                ui.BeginDisabled(raw->previewAnimation);
+                if (raw->skeleton && ui.Checkbox("Show bone overlays",
+                    &raw->skeleton->showBones) && m_renderer)
+                    m_renderer->MarkDirty();
+                ui.EndDisabled();
+                bool preview = raw->previewAnimation;
+                if (ui.Checkbox("Preview animation", &preview))
+                {
+                    if (preview)
+                    {
+                        Engine::Components::AnimationManager* manager = nullptr;
+                        if (raw->skeleton)
+                            if (Engine::Components::Model* model =
+                                raw->skeleton->ResolveModel())
+                                manager = model->Owner
+                                    ? model->Owner->GetComponent<
+                                        Engine::Components::AnimationManager>()
+                                    : nullptr;
+                        if (!manager)
+                            for (const auto& object : raw->scene->GetObjects())
+                                if (object && (manager = object->GetComponent<
+                                    Engine::Components::AnimationManager>()))
+                                    break;
+                        if (manager)
+                        {
+                            raw->previewRestoreSnapshot =
+                                CaptureSceneAssetDocumentSnapshot(*raw);
+                            raw->previewAnimationManager = manager;
+                            raw->previewAnimation = true;
+                            manager->playing = true;
+                            raw->lastPreviewTick =
+                                std::chrono::steady_clock::now();
+                        }
+                        else if (m_primaryConsole)
+                            m_primaryConsole->AddLog(ConsoleView::Level::Warning,
+                                "This skeleton has no AnimationManager to preview.");
+                    }
+                    else
+                        StopSkeletonAnimationPreview(*raw);
+                }
+                if (raw->previewAnimation && raw->previewAnimationManager)
+                {
+                    const auto now = std::chrono::steady_clock::now();
+                    const float delta = std::chrono::duration<float>(
+                        now - raw->lastPreviewTick).count();
+                    raw->lastPreviewTick = now;
+                    raw->previewAnimationManager->Tick(delta);
+                    if (m_renderer) m_renderer->MarkDirty();
+                }
+                Engine::Components::AnimationManager* manager =
+                    raw->previewAnimationManager;
+                if (!manager && raw->skeleton)
+                    if (Engine::Components::Model* model =
+                        raw->skeleton->ResolveModel())
+                        manager = model->Owner ? model->Owner->GetComponent<
+                            Engine::Components::AnimationManager>() : nullptr;
+                if (manager)
+                {
+                    std::vector<Engine::Components::Animation*> clips;
+                    for (const auto& object : raw->scene->GetObjects())
+                        if (object)
+                            for (Engine::Core::Component* component : object->Components)
+                                if (auto* animation = dynamic_cast<
+                                    Engine::Components::Animation*>(component))
+                                    clips.push_back(animation);
+                    std::vector<const char*> clipNames;
+                    int selectedClip = 0;
+                    for (size_t i = 0; i < clips.size(); ++i)
+                    {
+                        clipNames.push_back(clips[i]->clipName.c_str());
+                        if (clips[i]->clipName == manager->clip)
+                            selectedClip = static_cast<int>(i);
+                    }
+                    ui.BeginDisabled(!raw->previewAnimation);
+                    if (!clipNames.empty() && ui.Combo("Animation clip",
+                        &selectedClip, clipNames.data(),
+                        static_cast<int>(clipNames.size())))
+                        manager->Play(clips[static_cast<size_t>(selectedClip)]->clipName, 0.f);
+                    ui.Checkbox("Playing", &manager->playing);
+                    ui.Checkbox("Loop", &manager->looping);
+                    ui.DragFloat("Playback speed", &manager->speed, 0.05f,
+                        -10.f, 10.f);
+                    float clipDuration = 0.f;
+                    if (selectedClip >= 0 &&
+                        static_cast<size_t>(selectedClip) < clips.size())
+                        clipDuration = clips[static_cast<size_t>(selectedClip)]->duration;
+                    if (clipDuration > 0.f)
+                        ui.SliderFloat("Time", &manager->time, 0.f, clipDuration);
+                    ui.EndDisabled();
+                }
+                ui.BeginDisabled(raw->previewAnimation);
+                if (ui.Button("Apply Rest Pose"))
+                {
+                    Engine::Components::Model* model = raw->skeleton
+                        ? raw->skeleton->ResolveModel() : nullptr;
+                    Engine::Components::Transform* modelTransform = model && model->Owner
+                        ? &model->Owner->transform : nullptr;
+                    const auto& joints = raw->skeleton
+                        ? raw->skeleton->ResolveJoints()
+                        : std::vector<Engine::Core::Object*>{};
+                    bool valid = raw->skeleton && modelTransform &&
+                        !joints.empty() && joints.size() ==
+                            raw->skeleton->jointNodes.size();
+                    std::vector<glm::mat4> inverseBindMatrices;
+                    if (valid)
+                    {
+                        const glm::mat4 modelWorld = modelTransform->GetWorldMatrix();
+                        const float modelDeterminant = glm::determinant(modelWorld);
+                        valid = std::isfinite(modelDeterminant) &&
+                            std::abs(modelDeterminant) > 1e-8f;
+                        const glm::mat4 inverseModel = valid
+                            ? glm::inverse(modelWorld) : glm::mat4(1.f);
+                        for (Engine::Core::Object* joint : joints)
+                        {
+                            if (!joint) { valid = false; break; }
+                            const glm::mat4 jointInModel = inverseModel *
+                                joint->transform.GetWorldMatrix();
+                            const float determinant = glm::determinant(jointInModel);
+                            if (!std::isfinite(determinant) ||
+                                std::abs(determinant) <= 1e-8f)
+                            {
+                                valid = false;
+                                break;
+                            }
+                            inverseBindMatrices.push_back(glm::inverse(jointInModel));
+                        }
+                    }
+                    if (valid)
+                    {
+                        raw->skeleton->inverseBindMatrices =
+                            std::move(inverseBindMatrices);
+                        if (m_renderer) m_renderer->MarkDirty();
+                    }
+                    else if (m_primaryConsole)
+                        m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                            "Cannot apply rest pose: a model or valid joint transform is missing.");
+                }
+                ui.EndDisabled();
+                ui.DisabledLabel("Joint hierarchy is filtered to this skeleton.");
+            };
+        }
+        if (raw->meshStage || raw->prefab)
+        {
+            view->AllowObjectCreation = false;
+            view->AllowAssetDrops = false;
+            view->AllowObjectTransform = !raw->meshStage;
+            raw->meshStageTools = [this, raw](IEditorUi& ui)
+            {
+                if (!raw->meshStage) return;
+                std::vector<Engine::Components::Mesh*> meshes;
+                for (const auto& object : raw->scene->GetObjects())
+                    if (object)
+                        for (Engine::Core::Component* component : object->Components)
+                            if (auto* mesh = dynamic_cast<Engine::Components::Mesh*>(component);
+                                mesh && !mesh->GetVertices().empty())
+                                meshes.push_back(mesh);
+                if (meshes.size() > 1)
+                {
+                    std::vector<std::string> meshLabels;
+                    std::vector<const char*> meshNames;
+                    int selectedMesh = 0;
+                    for (size_t index = 0; index < meshes.size(); ++index)
+                    {
+                        const std::string label = (meshes[index]->Owner
+                            ? meshes[index]->Owner->name : std::string("Mesh")) +
+                            " [" + std::to_string(index + 1) + "]";
+                        meshLabels.push_back(label);
+                        if (meshes[index] == raw->mesh)
+                            selectedMesh = static_cast<int>(index);
+                    }
+                    for (const std::string& label : meshLabels)
+                        meshNames.push_back(label.c_str());
+                    if (ui.Combo("Mesh", &selectedMesh, meshNames.data(),
+                        static_cast<int>(meshNames.size())) && selectedMesh >= 0 &&
+                        static_cast<size_t>(selectedMesh) < meshes.size())
+                    {
+                        raw->mesh = meshes[static_cast<size_t>(selectedMesh)];
+                        raw->subject = raw->mesh->Owner;
+                        raw->selectedVertex = 0;
+                        raw->meshSavePath = raw->mesh->GetFilePath();
+                        if (raw->meshSavePath.empty())
+                            raw->meshSavePath =
+                                (std::filesystem::path(raw->path).parent_path() /
+                                    (raw->subject->name + ".mesh")).string();
+                        raw->scene->SetSelectedObject(raw->subject);
+                        ApplyMeshStageVisibility(*raw);
+                        SetActiveSceneAssetDocument(raw);
+                        if (m_renderer) m_renderer->MarkDirty();
+                    }
+                }
                 if (!raw->mesh || raw->mesh->GetVertices().empty())
                 {
                     ui.ColoredLabel("Mesh has no editable triangle-list vertices.",
@@ -1004,7 +1448,6 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
                 }
                 std::vector<Engine::Components::Mesh::Vertex> vertices =
                     raw->mesh->GetVertices();
-                ui.Separator();
                 ui.ColoredLabel("Mesh Edit Stage", { 0.35f, 0.75f, 1.f, 1.f });
                 ui.ValueLabel("Save target", raw->meshSavePath.c_str());
                 const std::string count = std::to_string(vertices.size());
@@ -1019,6 +1462,38 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
                 changed |= ui.DragFloat("UV U", &vertex.uv[0], 0.005f);
                 changed |= ui.DragFloat("UV V", &vertex.uv[1], 0.005f);
                 changed |= ui.ColorEdit4("Vertex Color", vertex.color);
+                std::vector<float> uvPairs;
+                uvPairs.reserve(vertices.size() * 2);
+                for (const auto& item : vertices)
+                {
+                    uvPairs.push_back(item.uv[0]);
+                    uvPairs.push_back(item.uv[1]);
+                }
+                const auto& indices = raw->mesh->GetIndices();
+                const EditorUiUvMapResult uvResult = ui.UvMapEditor(
+                    "MeshUVMap", uvPairs.data(), vertices.size(),
+                    indices.data(), indices.size(), &selected, 280.f);
+                if (selected >= 0)
+                    raw->selectedVertex = static_cast<uint32_t>(selected);
+                const EditorUiContextMenuResult uvContext = ui.ContextMenu(
+                    raw, "Reset Selected UV", nullptr, false);
+                if (uvContext.addRequested && raw->selectedVertex < vertices.size())
+                {
+                    vertices[raw->selectedVertex].uv[0] = 0.5f;
+                    vertices[raw->selectedVertex].uv[1] = 0.5f;
+                    uvPairs[static_cast<size_t>(raw->selectedVertex) * 2] = 0.5f;
+                    uvPairs[static_cast<size_t>(raw->selectedVertex) * 2 + 1] = 0.5f;
+                    changed = true;
+                }
+                if (uvResult.coordinatesChanged)
+                {
+                    for (size_t index = 0; index < vertices.size(); ++index)
+                    {
+                        vertices[index].uv[0] = uvPairs[index * 2];
+                        vertices[index].uv[1] = uvPairs[index * 2 + 1];
+                    }
+                    changed = true;
+                }
                 int selectedInfluence = static_cast<int>(
                     std::min(raw->selectedInfluence, 7u));
                 if (ui.SliderInt("Skin influence", &selectedInfluence, 0, 7))
@@ -1052,6 +1527,91 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
                     SaveSceneAssetDocument(*raw);
             };
         }
+        if (raw->prefab && raw->modelStage)
+            view->OnDrawDocumentTools = [this, raw, drawAssetFocusPicker](IEditorUi& ui)
+            {
+                ui.PushId(raw);
+                const std::string headerId = "##AssetHeader:" + raw->identity;
+                if (!ui.BeginViewportHeader(headerId.c_str(), 380.f))
+                {
+                    ui.PopId();
+                    return false;
+                }
+                const float contentWidth = ui.AvailableContentWidth();
+                ui.SetNextItemWidth(contentWidth >= 280.f ? 100.f : 72.f);
+                drawAssetFocusPicker(ui);
+                ui.SameLine();
+                const float toolsWidth = std::clamp(
+                    ui.AvailableContentWidth() - 62.f, 88.f, 130.f);
+                const char* toolsLabel = raw->meshStage ? "Mesh Tools"
+                    : (raw->skeletonStage ? "Skeleton Tools" : "Object Tools");
+                if (ui.BeginViewportHeaderDropdown("##AssetStageTools",
+                    toolsLabel, toolsWidth, 320.f))
+                {
+                    if (raw->objectStage && raw->objectStageTools)
+                        raw->objectStageTools(ui);
+                    else if (raw->meshStage && raw->meshStageTools)
+                        raw->meshStageTools(ui);
+                    else if (raw->skeletonStage && raw->skeletonStageTools)
+                        raw->skeletonStageTools(ui);
+                    ui.EndViewportHeaderDropdown();
+                }
+                ui.SameLine();
+                if (ui.AvailableContentWidth() >= 54.f && ui.Button("Save"))
+                    SaveSceneAssetDocument(*raw);
+                const bool consumedClick = ui.EndViewportHeader();
+                ui.PopId();
+                return consumedClick;
+            };
+        else if (raw->prefab)
+            view->OnDrawDocumentTools = [this, raw](IEditorUi& ui)
+            {
+                ui.PushId(raw);
+                const std::string headerId = "##PrefabHeader:" + raw->identity;
+                if (!ui.BeginViewportHeader(headerId.c_str(), 90.f))
+                {
+                    ui.PopId();
+                    return false;
+                }
+                if (ui.AvailableContentWidth() >= 54.f && ui.Button("Save"))
+                    SaveSceneAssetDocument(*raw);
+                const bool consumedClick = ui.EndViewportHeader();
+                ui.PopId();
+                return consumedClick;
+            };
+        else if (raw->meshStage)
+            view->OnDrawDocumentTools = [this, raw](IEditorUi& ui)
+            {
+                ui.PushId(raw);
+                const std::string headerId = "##MeshHeader:" + raw->identity;
+                if (!ui.BeginViewportHeader(headerId.c_str(), 300.f))
+                {
+                    ui.PopId();
+                    return false;
+                }
+                ui.Label("Mesh");
+                ui.SameLine();
+                const float toolsWidth = std::min(150.f,
+                    std::max(100.f, ui.AvailableContentWidth() - 70.f));
+                if (ui.BeginViewportHeaderDropdown("##MeshStageTools",
+                    "Mesh Tools", toolsWidth, 320.f))
+                {
+                    if (raw->meshStageTools)
+                        raw->meshStageTools(ui);
+                    ui.EndViewportHeaderDropdown();
+                }
+                ui.SameLine();
+                if (ui.AvailableContentWidth() >= 54.f && ui.Button("Save"))
+                    SaveSceneAssetDocument(*raw);
+                const bool consumedClick = ui.EndViewportHeader();
+                ui.PopId();
+                return consumedClick;
+            };
+        if (raw->objectStage)
+        {
+            view->AllowObjectCreation = false;
+            view->AllowAssetDrops = false;
+        }
         view->RequestFocusOnNextDraw();
         m_panels.push_back(std::move(view));
         m_sceneAssetDocuments.push_back(std::move(document));
@@ -1065,27 +1625,63 @@ void EditorState::SetActiveSceneAssetDocument(SceneAssetDocument* document)
     m_activeAssetDocument = nullptr;
     m_prefabDocumentFocused = document && document->prefab;
     const auto scene = document ? document->scene.get() : m_scene.get();
+    for (auto& panel : m_panels)
+        if (auto* gameView = dynamic_cast<GameView*>(panel.get()))
+            gameView->SetScene(scene);
     if (m_primaryHierarchy)
     {
         m_primaryHierarchy->Init(scene);
-        m_primaryHierarchy->SetObjectFilter(document && document->skeletonStage
+        m_primaryHierarchy->SetObjectFilter(document &&
+            (document->skeletonStage || document->meshStage || document->objectStage)
             ? std::function<bool(const Engine::Core::Object*)>(
                 [document](const Engine::Core::Object* object)
                 {
-                    return document->selectableObjects.contains(
-                        const_cast<Engine::Core::Object*>(object));
+                    return document->meshStage
+                        ? object == document->subject
+                        : (document->objectStage
+                            ? (object == document->subject ||
+                                (document->showChildHierarchy && [&]()
+                                {
+                                    for (const Engine::Core::Object* current = object;
+                                        current; current = current->Parent)
+                                        if (current == document->subject) return true;
+                                    return false;
+                                }()))
+                            : document->selectableObjects.find(
+                            const_cast<Engine::Core::Object*>(object)) !=
+                            document->selectableObjects.end());
                 })
             : std::function<bool(const Engine::Core::Object*)>{});
+        m_primaryHierarchy->SetAllowDelete(!document ||
+            (!document->meshStage && !document->skeletonStage &&
+                !document->objectStage));
+        m_primaryHierarchy->SetFilteredObjectContextActions(document &&
+            document->objectStage && !document->modelStage,
+            document ? document->subject : nullptr);
+        m_primaryHierarchy->SetSkeletonContextActions(document &&
+            document->skeletonStage,
+            document ? document->subject : nullptr);
         Engine::Core::Object* selected = scene ? scene->GetSelectedObject() : nullptr;
+        if (document && document->meshStage && selected != document->subject)
+            selected = document->subject;
+        if (document && document->objectStage && !document->showChildHierarchy &&
+            selected != document->subject)
+            selected = document->subject;
         if (document && document->skeletonStage && selected &&
-            !document->selectableObjects.contains(selected))
+            document->selectableObjects.find(selected) ==
+                document->selectableObjects.end())
             selected = document->subject;
         m_primaryHierarchy->SetSelectedObject(selected);
     }
     if (m_primaryProperties)
     {
         m_primaryProperties->Init(scene);
-        m_primaryProperties->SetSelectedObject(scene ? scene->GetSelectedObject() : nullptr);
+        m_primaryProperties->SetAllowComponentStructureEdits(!document ||
+            (!document->meshStage && !document->skeletonStage));
+        m_primaryProperties->SetSelectedObject(document &&
+            document->propertiesProjection
+            ? document->propertiesProjection
+            : (scene ? scene->GetSelectedObject() : nullptr));
         m_primaryProperties->SetSelectedAsset("");
     }
     if (m_renderer) m_renderer->MarkDirty();
@@ -1104,6 +1700,10 @@ bool EditorState::SaveSceneAssetDocument(SceneAssetDocument& document)
     bool saved = false;
     const std::string stageSavePath = document.stageDataPath.empty()
         ? document.path : document.stageDataPath;
+    if (document.previewAnimation)
+        StopSkeletonAnimationPreview(document);
+    if (document.skeletonStage || document.objectStage)
+        RestoreSkeletonStageVisibility(document);
     if (document.meshStage && document.mesh)
         saved = Engine::Components::Mesh::SaveNativeFile(
             document.meshSavePath, document.mesh->GetVertices());
@@ -1121,6 +1721,10 @@ bool EditorState::SaveSceneAssetDocument(SceneAssetDocument& document)
     }
     else if (document.scene)
         saved = document.scene->Save(document.path);
+    if (document.skeletonStage)
+        ApplySkeletonStageVisibility(document);
+    else if (document.objectStage)
+        ApplyObjectStageVisibility(document);
     if (!saved)
     {
         if (m_primaryConsole)
@@ -1153,12 +1757,15 @@ bool EditorState::SaveSceneAssetDocument(SceneAssetDocument& document)
 std::string EditorState::CaptureSceneAssetDocumentSnapshot(
     SceneAssetDocument& document)
 {
-    if (document.skeletonStage)
+    if (document.skeletonStage || document.objectStage)
     {
         RestoreSkeletonStageVisibility(document);
         const std::string snapshot = document.scene
             ? document.scene->SaveToString() : std::string{};
-        ApplySkeletonStageVisibility(document);
+        if (document.skeletonStage)
+            ApplySkeletonStageVisibility(document);
+        else
+            ApplyObjectStageVisibility(document);
         return snapshot;
     }
     if (!document.meshStage || !document.mesh)
@@ -1177,6 +1784,8 @@ bool EditorState::RestoreSceneAssetDocumentSnapshot(
             return false;
         if (document.skeletonStage)
             RebuildSkeletonStageContext(document);
+        else if (document.objectStage)
+            RebuildObjectStageContext(document);
         return true;
     }
     if (!document.mesh || snapshot.empty() ||
@@ -1216,7 +1825,26 @@ void EditorState::ApplySkeletonStageVisibility(SceneAssetDocument& document)
         {
             const auto original = document.originalEnabledState.find(object.get());
             object->enabled = original != document.originalEnabledState.end() &&
-                original->second && visible.contains(object.get());
+                original->second && visible.find(object.get()) != visible.end();
+            for (Engine::Core::Component* component : object->Components)
+            {
+                if (auto* mesh = dynamic_cast<Engine::Components::Mesh*>(component))
+                {
+                    if (!document.originalMeshVisibility.count(mesh))
+                        document.originalMeshVisibility.emplace(mesh,
+                            mesh->IsEditorVisible());
+                    const bool associatedGhost = document.showSkeletonMesh &&
+                        document.skeletonMeshObjects.count(object.get()) != 0;
+                    mesh->SetEditorVisible(associatedGhost);
+                }
+                if (auto* sprite = dynamic_cast<Engine::Components::Sprite*>(component))
+                {
+                    if (!document.originalSpriteVisibility.count(sprite))
+                        document.originalSpriteVisibility.emplace(sprite,
+                            sprite->IsEditorVisible());
+                    sprite->SetEditorVisible(false);
+                }
+            }
         }
 
     if (document.ghostMaterialStates.empty())
@@ -1250,6 +1878,12 @@ void EditorState::RestoreSkeletonStageVisibility(SceneAssetDocument& document)
             state.material->alphaMode = state.alphaMode;
             state.material->castsShadows = state.castsShadows;
         }
+    for (const auto& [mesh, visible] : document.originalMeshVisibility)
+        if (mesh) mesh->SetEditorVisible(visible);
+    document.originalMeshVisibility.clear();
+    for (const auto& [sprite, visible] : document.originalSpriteVisibility)
+        if (sprite) sprite->SetEditorVisible(visible);
+    document.originalSpriteVisibility.clear();
 }
 
 void EditorState::RebuildSkeletonStageContext(SceneAssetDocument& document)
@@ -1293,10 +1927,171 @@ void EditorState::RebuildSkeletonStageContext(SceneAssetDocument& document)
                     document.skeletonMeshObjects.insert(object.get());
             }
     if (!document.selectableObjects.empty() &&
-        !document.selectableObjects.contains(document.subject))
+        document.selectableObjects.find(document.subject) ==
+            document.selectableObjects.end())
         document.subject = *document.selectableObjects.begin();
     document.scene->SetSelectedObject(document.subject);
     ApplySkeletonStageVisibility(document);
+}
+
+void EditorState::RebuildObjectStageContext(SceneAssetDocument& document)
+{
+    document.objectStage = false;
+    document.originalEnabledState.clear();
+    document.ghostMaterialStates.clear();
+    if (!document.scene || !document.prefab || document.skeletonStage)
+        return;
+    Engine::Core::Object* root = nullptr;
+    for (const auto& object : document.scene->GetObjects())
+        if (object && !object->Parent)
+        {
+            if (root) return;
+            root = object.get();
+        }
+    if (!root) return;
+    document.objectStage = true;
+    document.subject = root;
+    document.scene->SetSelectedObject(root);
+    ApplyObjectStageVisibility(document);
+}
+
+void EditorState::ApplyObjectStageVisibility(SceneAssetDocument& document)
+{
+    if (!document.scene || !document.objectStage || !document.subject)
+        return;
+    if (document.originalEnabledState.empty())
+        for (const auto& object : document.scene->GetObjects())
+            if (object)
+                document.originalEnabledState.emplace(object.get(), object->enabled);
+    std::unordered_set<Engine::Core::Object*> visible;
+    visible.insert(document.subject);
+    if (document.showChildHierarchy)
+    {
+        std::vector<Engine::Core::Object*> pending(
+            document.subject->Children.begin(), document.subject->Children.end());
+        while (!pending.empty())
+        {
+            Engine::Core::Object* child = pending.back();
+            pending.pop_back();
+            if (!child || !visible.insert(child).second) continue;
+            pending.insert(pending.end(), child->Children.begin(), child->Children.end());
+        }
+    }
+    for (const auto& object : document.scene->GetObjects())
+        if (object)
+        {
+            const auto original = document.originalEnabledState.find(object.get());
+            object->enabled = original != document.originalEnabledState.end() &&
+                original->second && visible.find(object.get()) != visible.end();
+            for (Engine::Core::Component* component : object->Components)
+            {
+                if (auto* mesh = dynamic_cast<Engine::Components::Mesh*>(component))
+                {
+                    if (!document.originalMeshVisibility.count(mesh))
+                        document.originalMeshVisibility.emplace(mesh,
+                            mesh->IsEditorVisible());
+                    mesh->SetEditorVisible(visible.count(object.get()) != 0);
+                }
+                if (auto* sprite = dynamic_cast<Engine::Components::Sprite*>(component))
+                {
+                    if (!document.originalSpriteVisibility.count(sprite))
+                        document.originalSpriteVisibility.emplace(sprite,
+                            sprite->IsEditorVisible());
+                    sprite->SetEditorVisible(visible.count(object.get()) != 0);
+                }
+            }
+        }
+}
+
+void EditorState::ApplyMeshStageVisibility(SceneAssetDocument& document)
+{
+    if (!document.scene || !document.meshStage || !document.mesh ||
+        !document.subject)
+        return;
+    if (document.originalEnabledState.empty())
+        for (const auto& object : document.scene->GetObjects())
+            if (object)
+                document.originalEnabledState.emplace(object.get(), object->enabled);
+    std::unordered_set<Engine::Core::Object*> visible;
+    for (Engine::Core::Object* current = document.subject; current;
+        current = current->Parent)
+        visible.insert(current);
+    for (Engine::Core::Component* component : document.subject->Components)
+        if (auto* skinned = dynamic_cast<Engine::Components::SkinnedMesh*>(component))
+        {
+            Engine::Components::Skeleton* bound =
+                skinned->skeletonReference.IsAssigned()
+                ? Engine::Core::ResolveComponentReference<
+                    Engine::Components::Skeleton>(skinned->Owner,
+                        skinned->skeletonReference)
+                : nullptr;
+            if (!bound)
+                for (const auto& candidate : document.scene->GetObjects())
+                    if (candidate)
+                        if (auto* skeleton = candidate->GetComponent<
+                            Engine::Components::Skeleton>(); skeleton &&
+                            skeleton->skinIndex == skinned->skinIndex)
+                        {
+                            bound = skeleton;
+                            break;
+                        }
+            if (!bound) continue;
+            document.skeleton = bound;
+            for (Engine::Components::AnimationBone* bone : bound->ResolveBones())
+                if (bone && bone->Owner)
+                    for (Engine::Core::Object* current = bone->Owner; current;
+                        current = current->Parent)
+                        visible.insert(current);
+        }
+    for (const auto& object : document.scene->GetObjects())
+        if (object)
+        {
+            const auto original = document.originalEnabledState.find(object.get());
+            object->enabled = original != document.originalEnabledState.end() &&
+                original->second && visible.count(object.get()) != 0;
+            for (Engine::Core::Component* component : object->Components)
+            {
+                if (auto* mesh = dynamic_cast<Engine::Components::Mesh*>(component))
+                {
+                    if (!document.originalMeshVisibility.count(mesh))
+                        document.originalMeshVisibility.emplace(mesh,
+                            mesh->IsEditorVisible());
+                    mesh->SetEditorVisible(mesh == document.mesh);
+                }
+                if (auto* sprite = dynamic_cast<Engine::Components::Sprite*>(component))
+                {
+                    if (!document.originalSpriteVisibility.count(sprite))
+                        document.originalSpriteVisibility.emplace(sprite,
+                            sprite->IsEditorVisible());
+                    sprite->SetEditorVisible(false);
+                }
+            }
+        }
+}
+
+void EditorState::StopSkeletonAnimationPreview(SceneAssetDocument& document)
+{
+    if (!document.previewAnimation) return;
+    document.previewAnimation = false;
+    document.previewAnimationManager = nullptr;
+    const std::string snapshot = std::move(document.previewRestoreSnapshot);
+    document.previewRestoreSnapshot.clear();
+    if (!snapshot.empty())
+        RestoreSceneAssetDocumentSnapshot(document, snapshot);
+    if (m_activeSceneAssetDocument == &document)
+    {
+        if (m_primaryHierarchy)
+        {
+            m_primaryHierarchy->Init(document.scene.get());
+            m_primaryHierarchy->SetSelectedObject(document.subject);
+        }
+        if (m_primaryProperties)
+        {
+            m_primaryProperties->Init(document.scene.get());
+            m_primaryProperties->SetSelectedObject(document.subject);
+        }
+    }
+    if (m_renderer) m_renderer->MarkDirty();
 }
 
 void EditorState::HandleSceneAssetDocumentClosures()
@@ -1624,11 +2419,7 @@ void EditorState::InitializePanels()
         auto gamePanel = m_viewFactory->Create("Game");
         if (gamePanel)
         {
-            gamePanel->OnFocused = [this]()
-            {
-                SetActiveSceneAssetDocument(nullptr);
-                SetPrefabDocumentFocused(false);
-            };
+            gamePanel->OnFocused = []() {};
             m_panels.push_back(std::move(gamePanel));
         }
         else OutputDebugStringA("[EditorState::InitializePanels] WARNING: Game panel is null\n");
@@ -1881,7 +2672,8 @@ void EditorState::WireupCallbacks()
         refresh(m_scene.get());
         refresh(m_prefabScene.get());
         for (const auto& document : m_sceneAssetDocuments)
-            if (document) refresh(document->scene.get());
+            if (document && !document->meshStage && !document->skeletonStage)
+                refresh(document->scene.get());
     };
 
     // Wire up selection changed callback (for hierarchy -> properties)
@@ -1971,7 +2763,46 @@ void EditorState::WireupCallbacks()
     };
     m_viewFactory->OnHierarchyChanged = [this]() {
         if (m_activeSceneAssetDocument)
+        {
+            SceneAssetDocument& document = *m_activeSceneAssetDocument;
+            if (document.objectStage || document.skeletonStage)
+            {
+                std::unordered_set<Engine::Core::Object*> liveObjects;
+                for (const auto& object : document.scene->GetObjects())
+                    if (object)
+                    {
+                        liveObjects.insert(object.get());
+                        const bool inFocusGraph = document.objectStage && [&]()
+                        {
+                            for (Engine::Core::Object* current = object.get();
+                                current; current = current->Parent)
+                                if (current == document.subject) return true;
+                            return false;
+                        }();
+                        const bool editableSubject =
+                            document.selectableObjects.find(object.get()) !=
+                                document.selectableObjects.end() || inFocusGraph;
+                        if (!editableSubject) continue;
+                        auto state = document.originalEnabledState.find(object.get());
+                        if (state == document.originalEnabledState.end())
+                            document.originalEnabledState.emplace(
+                                object.get(), object->enabled);
+                        else if (document.skeletonStage ||
+                            (document.objectStage && document.showChildHierarchy) ||
+                            object.get() == document.subject)
+                            state->second = object->enabled;
+                    }
+                for (auto state = document.originalEnabledState.begin();
+                    state != document.originalEnabledState.end();)
+                    if (liveObjects.find(state->first) == liveObjects.end())
+                        state = document.originalEnabledState.erase(state);
+                    else
+                        ++state;
+                if (document.objectStage)
+                    ApplyObjectStageVisibility(document);
+            }
             m_renderer->MarkDirty();
+        }
         else if (m_prefabDocumentFocused)
             SetPrefabDirty(true);
         else
@@ -2236,31 +3067,30 @@ Engine::Scene::Scene* EditorState::GetActiveDocumentScene() const
 
 void EditorState::SetPrefabDocumentFocused(bool focused)
 {
-    m_activeAssetDocument = nullptr;
     const bool nextFocused = focused && m_prefabScene && m_prefabSceneView;
+    const bool contextChanged = m_prefabDocumentFocused != nextFocused ||
+        m_activeAssetDocument != nullptr ||
+        (nextFocused && m_activeSceneAssetDocument != nullptr);
+    m_activeAssetDocument = nullptr;
     if (nextFocused)
         m_activeSceneAssetDocument = nullptr;
     m_prefabDocumentFocused = nextFocused;
+    if (!contextChanged)
+        return;
     Engine::Scene::Scene* activeScene = GetActiveDocumentScene();
+    Engine::Core::Object* selected = activeScene
+        ? activeScene->GetSelectedObject() : nullptr;
 
     if (m_primaryHierarchy)
     {
         m_primaryHierarchy->Init(activeScene);
-        m_primaryHierarchy->SetSelectedObject(nullptr);
+        m_primaryHierarchy->SetSelectedObject(selected);
     }
     if (m_primaryProperties)
     {
         m_primaryProperties->Init(activeScene);
-        m_primaryProperties->SetSelectedObject(nullptr);
+        m_primaryProperties->SetSelectedObject(selected);
         m_primaryProperties->SetSelectedAsset("");
-    }
-    if (activeScene)
-    {
-        Engine::Core::Object* selected = activeScene->GetSelectedObject();
-        if (m_primaryHierarchy)
-            m_primaryHierarchy->SetSelectedObject(selected);
-        if (m_primaryProperties)
-            m_primaryProperties->SetSelectedObject(selected);
     }
     if (m_renderer)
         m_renderer->MarkDirty();
@@ -2331,6 +3161,8 @@ void EditorState::TrackSceneChanges(bool allowHistory, bool editInProgress)
 {
     if (m_activeSceneAssetDocument && m_activeSceneAssetDocument->scene)
     {
+        if (m_activeSceneAssetDocument->previewAnimation)
+            return;
         if (!allowHistory || editInProgress)
             return;
         SceneAssetDocument& document = *m_activeSceneAssetDocument;

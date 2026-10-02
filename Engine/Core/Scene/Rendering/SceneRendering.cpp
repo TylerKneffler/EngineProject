@@ -1322,10 +1322,10 @@ void Scene::PrepareRenderFrame()
         Engine::Components::Mesh* mesh = lookup.mesh;
         Engine::Components::Sprite* sprite = lookup.sprite;
         Engine::Components::Sprite::RenderData spriteData;
-        const bool spriteReady = sprite &&
+        const bool spriteReady = sprite && sprite->IsEditorVisible() &&
             sprite->PrepareRenderData(m_graphicsProvider, spriteData);
         const bool renderable = spriteReady ||
-            (mesh && mesh->IsReady());
+            (mesh && mesh->IsReady() && mesh->IsEditorVisible());
         if (!candidate->IsEnabledInHierarchy() || !renderable)
             continue;
 

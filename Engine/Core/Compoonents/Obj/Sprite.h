@@ -49,6 +49,9 @@ public:
     bool PrepareRenderData(IGraphicsProvider* graphicsProvider, RenderData& data);
     bool Prepare(IGraphicsProvider* graphicsProvider);
     bool IsReady() const;
+    // Transient editor-stage visibility; never serialized into the asset.
+    bool IsEditorVisible() const { return m_editorVisible; }
+    void SetEditorVisible(bool visible) { m_editorVisible = visible; }
     IGraphicsBuffer* GetGraphicsBuffer() const { return m_vertexBuffer.get(); }
     uint32_t GetVertexCount() const { return 6; }
     uint32_t GetVertexStride() const { return sizeof(Vertex); }
@@ -60,6 +63,7 @@ private:
     SpriteAnimationManager* ResolveAnimationManager() const;
 
     mutable SpriteAnimationManager* m_animationManager = nullptr;
+    bool m_editorVisible = true;
     std::unique_ptr<IGraphicsBuffer> m_vertexBuffer;
 };
 }

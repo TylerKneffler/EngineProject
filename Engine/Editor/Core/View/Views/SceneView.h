@@ -58,7 +58,7 @@ public:
     std::function<void(Engine::Core::Object*)> OnObjectCreated;
     std::function<void()> OnDeleteSelectionRequested;
     std::function<void(bool)> OnGizmoInteraction;
-    std::function<void(IEditorUi&)> OnDrawDocumentTools;
+    std::function<bool(IEditorUi&)> OnDrawDocumentTools;
     std::function<bool(const Engine::Core::Object*)> CanSelectObject;
     bool AllowObjectCreation = true;
     bool AllowAssetDrops = true;

@@ -367,7 +367,8 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         ui.EndWindow();
         return;
     }
-    const std::string assetDropPreview = HandleWindowAssetDrop(ui);
+    const std::string assetDropPreview = m_allowComponentStructureEdits
+        ? HandleWindowAssetDrop(ui) : std::string{};
     Engine::Core::Object* prefabRoot = m_selectedObject->GetPrefabInstanceRoot();
     const bool hasPrefabOverrides = prefabRoot &&
         Engine::Serialization::SceneSerializer::HasPrefabOverrides(*prefabRoot, true);
@@ -464,7 +465,7 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         if (componentPrefabRoot)
             HandlePrefabMenu(ui.PrefabOverrideMenu(component,
                 Engine::Serialization::SceneSerializer::HasPrefabOverrides(*componentPrefabRoot, true)));
-        else
+        else if (m_allowComponentStructureEdits)
             menu = ui.ContextMenu(component, "Add Component",
                 "Delete Component", false);
         if (menu.addRequested)
@@ -475,7 +476,8 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         }
         if (menu.deleteRequested)
             componentToDelete = component;
-        if (componentEditable && ui.BeginDragDropSource())
+        if (m_allowComponentStructureEdits && componentEditable &&
+            ui.BeginDragDropSource())
         {
             Engine::Core::Component* payload = component;
             ui.SetDragDropPayload(
@@ -483,7 +485,8 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             ui.Label(componentType.c_str());
             ui.EndDragDropSource();
         }
-        if (componentEditable && ui.BeginDragDropTarget())
+        if (m_allowComponentStructureEdits && componentEditable &&
+            ui.BeginDragDropTarget())
         {
             size_t payloadSize = 0;
             const void* payload = ui.AcceptDragDropPayload(

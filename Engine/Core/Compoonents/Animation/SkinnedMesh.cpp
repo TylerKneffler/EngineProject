@@ -15,7 +15,13 @@ void SkinnedMesh::ResolveBindings() const
     const uint64_t structureRevision = Owner && Owner->GetScene()
         ? Owner->GetScene()->GetStructureRevision() : 0;
     const uint64_t configurationRevision = GetConfigurationRevision();
-    if (m_bindingCacheValid &&
+    // Prefab components can run OnAfterDeserialize before the complete parent
+    // hierarchy has been attached. Scene structure revisions do not always
+    // change for that assembly step, so do not keep an unresolved binding as a
+    // permanent cache hit.
+    const bool bindingsResolved = m_cachedMesh &&
+        (skinIndex < 0 || m_cachedSkeleton);
+    if (m_bindingCacheValid && bindingsResolved &&
         m_cachedStructureRevision == structureRevision &&
         m_cachedConfigurationRevision == configurationRevision &&
         m_cachedSkinIndex == skinIndex)

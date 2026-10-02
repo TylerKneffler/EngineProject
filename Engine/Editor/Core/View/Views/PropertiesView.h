@@ -27,6 +27,8 @@ public:
     ~PropertiesView() = default;
 
     void Init(Engine::Scene::Scene* scene) { m_scene = scene; }
+    void SetAllowComponentStructureEdits(bool allow)
+    { m_allowComponentStructureEdits = allow; }
 
     void SetSelectedObject(Engine::Core::Object* obj)
     {
@@ -88,6 +90,7 @@ private:
     bool m_positionComponentPicker = false;
     char m_componentSearch[128]{};
     bool m_editingSkyboxTexture = false;
+    bool m_allowComponentStructureEdits = true;
     char m_skyboxTextureEdit[512]{};
     bool m_skyboxRevealPending = false;
     std::chrono::steady_clock::time_point m_skyboxRevealRequestedAt{};

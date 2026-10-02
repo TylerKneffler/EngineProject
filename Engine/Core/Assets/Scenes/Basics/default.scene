@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <Scene xmlns:components="urn:engine-components" version="1">
-  <settings dimension="0" showGrid="true" gridHalfSize="10" gridCellSize="1" gridOpacity="0.4" gridFadeDistance="80" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" renderMode="0" sceneViewUiOverlay="false">
+  <settings dimension="0" showGrid="true" gridHalfSize="10" gridCellSize="1" gridOpacity="0.4" gridFadeDistance="80" skyboxEnabled="true" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" toneMapping="1" outputExposure="0" renderMode="0" sceneViewUiOverlay="false" portalDebugVisuals="false" sceneCameraWarpLookThrough="false" portalDebugWireframe="false" portalDebugTintRemoteView="true" portalDebugOverlayAlpha="0.45" portalRecursionDepth="2" portalConnectionRepeatLimit="2" portalMaxViewsPerFrame="24">
     <gridColor>
       <item>0.45</item>
       <item>0.45</item>
@@ -71,7 +71,7 @@
         </Transform.scale>
       </transform>
       <components>
-        <components:Light Light.lightType="1" Light.intensity="1.9" Light.range="9.91" Light.falloff="1.4" Light.baked="false" Light.castsShadows="true" Light.shadowStrength="1" Light.shadowDepthBias="0.0015" Light.shadowNormalBias="0.01" Light.shadowResolutionScale="1" Light.shadowFilterScale="1">
+        <components:Light Light.lightType="1" Light.intensity="1.9" Light.range="9.91" Light.falloff="1.4" Light.intensityMode="0" Light.innerConeAngle="25" Light.outerConeAngle="35" Light.lightingChannels="-1" Light.cookieTexture="" Light.iesProfileTexture="" Light.cookieScale="1" Light.baked="false" Light.castsShadows="true" Light.shadowStrength="1" Light.shadowDepthBias="0.0015" Light.shadowNormalBias="0.01" Light.shadowResolutionScale="1" Light.shadowFilterScale="1">
           <Light.color>
             <item>1</item>
             <item>0.95</item>
