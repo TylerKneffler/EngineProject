@@ -38,6 +38,9 @@ void PropertiesView::DrawTransform(IEditorUi& ui)
     if (transformOpen)
     {
         bool transformChanged = false;
+        const glm::vec3 previousPosition = t.position;
+        const glm::vec3 previousRotation = t.rotation;
+        const glm::vec3 previousScale = t.scale;
         if (m_scene && m_scene->IsEditorMode2D())
         {
             // In a 2D scene X/Y are spatial axes while Z is only the painter's
@@ -56,6 +59,14 @@ void PropertiesView::DrawTransform(IEditorUi& ui)
         }
         if (transformChanged)
         {
+            uint8_t channels = 0;
+            if (t.position != previousPosition)
+                channels |= Engine::Components::Transform::EditorPosition;
+            if (t.rotation != previousRotation)
+                channels |= Engine::Components::Transform::EditorRotation;
+            if (t.scale != previousScale)
+                channels |= Engine::Components::Transform::EditorScale;
+            t.NotifyEditorTransformChanged(channels);
             if (auto* body =
                 m_selectedObject->GetComponent<Engine::Components::RigidBody>())
                 body->NotifyEditorTransformChanged();
@@ -67,6 +78,9 @@ void PropertiesView::DrawTransform(IEditorUi& ui)
                 m_deferredTransformPrefabRoot = prefabRoot;
             if (OnComponentsChanged) OnComponentsChanged();
         }
+        if (t.HasEditorOverride() &&
+            ui.Button("Resume Animation and Physics"))
+            t.ClearEditorOverride();
     }
 }
 }

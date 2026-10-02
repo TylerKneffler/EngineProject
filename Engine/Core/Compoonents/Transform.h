@@ -99,6 +99,13 @@ struct MatrixLayer
 class Transform : public Engine::Core::Component
 {
 public:
+    enum EditorChannel : uint8_t
+    {
+        EditorPosition = 1u,
+        EditorRotation = 2u,
+        EditorScale = 4u,
+        EditorAll = EditorPosition | EditorRotation | EditorScale
+    };
     Transform();
     Transform(const Transform& other);
     Transform& operator=(const Transform& other);
@@ -128,6 +135,10 @@ public:
     uint64_t GetLocalRevision() const;
     uint64_t GetWorldRevision() const;
     void MarkDirty();
+    void NotifyEditorTransformChanged(uint8_t channels = EditorAll);
+    bool HasEditorOverride(uint8_t channels = EditorAll) const
+    { return (m_editorOverrideChannels & channels) != 0; }
+    void ClearEditorOverride() { m_editorOverrideChannels = 0; }
 
     glm::vec3 GetWorldPosition() const;
     glm::vec3 GetLocalPosition() const;
@@ -153,5 +164,6 @@ private:
     mutable uint64_t m_worldRevision = 1;
     mutable bool m_localCacheInitialized = false;
     mutable bool m_worldCacheInitialized = false;
+    uint8_t m_editorOverrideChannels = 0;
 };
 }

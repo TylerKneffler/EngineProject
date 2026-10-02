@@ -83,6 +83,8 @@ private:
     bool WantsSimulation() const;
     bool EnsureBody();
     bool EnsureConstraint();
+    bool HasManualEditInHierarchy() const;
+    void SyncBodyFromBone();
     void RemoveInvalidConstraint();
     void SyncBoneFromBody();
     void DestroyConstraint(bool removeFromWorld = true);

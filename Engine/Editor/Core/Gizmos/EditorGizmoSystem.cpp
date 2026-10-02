@@ -600,6 +600,12 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         else if (m_dragTool == EditorTransformTool::Scale)
             m_dragObject->transform.scale[m_dragAxis] = std::max(0.001f,
                 m_dragStartLocalScale[m_dragAxis] + pixels * 0.01f);
+        const uint8_t channel = m_dragTool == EditorTransformTool::Translate
+            ? Engine::Components::Transform::EditorPosition
+            : m_dragTool == EditorTransformTool::Rotate
+                ? Engine::Components::Transform::EditorRotation
+                : Engine::Components::Transform::EditorScale;
+        m_dragObject->transform.NotifyEditorTransformChanged(channel);
         if (auto* body =
             m_dragObject->GetComponent<Engine::Components::RigidBody>())
             body->NotifyEditorTransformChanged();

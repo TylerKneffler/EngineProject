@@ -546,9 +546,16 @@ void AnimationManager::Tick(float frameDelta)
         if (Engine::Core::Object* target = nodeIndex < nodes.size()
             ? nodes[nodeIndex] : nullptr)
         {
-            if (pose.hasTranslation) target->transform.position = pose.translation;
-            if (pose.hasRotation) target->transform.rotation = QuaternionEuler(pose.rotation);
-            if (pose.hasScale) target->transform.scale = pose.scale;
+            using Transform = Engine::Components::Transform;
+            if (pose.hasTranslation &&
+                !target->transform.HasEditorOverride(Transform::EditorPosition))
+                target->transform.position = pose.translation;
+            if (pose.hasRotation &&
+                !target->transform.HasEditorOverride(Transform::EditorRotation))
+                target->transform.rotation = QuaternionEuler(pose.rotation);
+            if (pose.hasScale &&
+                !target->transform.HasEditorOverride(Transform::EditorScale))
+                target->transform.scale = pose.scale;
         }
     }
     const auto applyMorphs = [&](auto&& self, Engine::Core::Object* object) -> void

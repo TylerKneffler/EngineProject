@@ -58,6 +58,9 @@ void Scene::Start()
     m_clock.Reset();
     m_deltaTime = 0.f;
     for (const auto& object : m_objects)
+        if (object)
+            object->transform.ClearEditorOverride();
+    for (const auto& object : m_objects)
         object->Start();
     m_hasStarted = true;
 }

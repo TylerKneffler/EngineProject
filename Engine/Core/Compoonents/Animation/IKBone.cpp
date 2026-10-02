@@ -1,6 +1,7 @@
 #include "IKBone.h"
 
 #include "Core/Compoonents/Animation/AnimationBone.h"
+#include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Object.h"
 #include "Core/Physics/Internal/PhysicsInternal.h"
 #include "Core/Scene/Scene.h"
@@ -292,16 +293,105 @@ void IKBone::RemoveInvalidConstraint()
         DestroyConstraint(true);
 }
 
+bool IKBone::HasManualEditInHierarchy() const
+{
+    for (const Object* object = Owner; object; object = object->Parent)
+        if (object->transform.HasEditorOverride(
+                object == Owner
+                    ? Transform::EditorPosition | Transform::EditorRotation
+                    : Transform::EditorAll))
+            return true;
+    return false;
+}
+
+void IKBone::SyncBodyFromBone()
+{
+    if (!m_impl->body || !Owner || !HasManualEditInHierarchy())
+        return;
+    const glm::mat4 boneMatrix = Owner->transform.GetWorldMatrix();
+    const btTransform simulatedBoneWorld =
+        m_impl->body->getWorldTransform() * m_impl->bodyToBone;
+    bool inheritedOverride = false;
+    for (const Object* ancestor = Owner->Parent; ancestor;
+        ancestor = ancestor->Parent)
+        inheritedOverride = inheritedOverride ||
+            ancestor->transform.HasEditorOverride();
+    const bool overridePosition = inheritedOverride ||
+        Owner->transform.HasEditorOverride(Transform::EditorPosition);
+    const bool overrideRotation = inheritedOverride ||
+        Owner->transform.HasEditorOverride(Transform::EditorRotation);
+    const btQuaternion simulatedRotation = simulatedBoneWorld.getRotation();
+    const glm::quat simulatedGlmRotation(simulatedRotation.w(),
+        simulatedRotation.x(), simulatedRotation.y(), simulatedRotation.z());
+    const btTransform boneWorld = RigidTransform(
+        overridePosition ? glm::vec3(boneMatrix[3])
+            : Engine::Physics::ToGlm(simulatedBoneWorld.getOrigin()),
+        overrideRotation ? MatrixRotation(boneMatrix) : simulatedGlmRotation);
+    const btTransform bodyWorld = boneWorld * m_impl->bodyToBone.inverse();
+    m_impl->body->setWorldTransform(bodyWorld);
+    m_impl->body->setInterpolationWorldTransform(bodyWorld);
+    if (m_impl->motionState)
+        m_impl->motionState->setWorldTransform(bodyWorld);
+    if (overridePosition)
+        m_impl->body->setLinearVelocity(btVector3(0.f, 0.f, 0.f));
+    if (overrideRotation)
+        m_impl->body->setAngularVelocity(btVector3(0.f, 0.f, 0.f));
+    m_impl->body->activate(true);
+    if (m_impl->world)
+        m_impl->world->updateSingleAabb(m_impl->body.get());
+}
+
 void IKBone::SyncBoneFromBody()
 {
     if (!m_impl->body || !Owner)
         return;
+    const bool overridePosition = Owner->transform.HasEditorOverride(
+        Transform::EditorPosition);
+    const bool overrideRotation = Owner->transform.HasEditorOverride(
+        Transform::EditorRotation);
     const float influence = std::clamp(weight, 0.f, 1.f);
     if (influence <= 0.f)
         return;
     const btTransform boneWorld = m_impl->body->getWorldTransform() *
         m_impl->bodyToBone;
     const glm::mat4 desiredWorld = GlmTransform(boneWorld);
+    // The first simulated joint carries the whole character. Keep the rig
+    // origin with that joint so the object transform, root joint, and mesh
+    // travel with the ragdoll instead of remaining at the spawn position.
+    AnimationBone* hierarchyBone = Owner->GetComponent<AnimationBone>();
+    AnimationBone* parentBone = hierarchyBone
+        ? hierarchyBone->GetParentBone() : nullptr;
+    if (hierarchyBone &&
+        (hierarchyBone->hierarchyRoot ||
+            (parentBone && parentBone->hierarchyRoot)) &&
+        !FindParentIKBone())
+    {
+        for (Object* ancestor = Owner->Parent; ancestor;
+            ancestor = ancestor->Parent)
+        {
+            if (ancestor->transform.HasEditorOverride(Transform::EditorPosition))
+                break;
+            if (auto* skeleton = ancestor->GetComponent<Skeleton>();
+                skeleton && skeleton->skinIndex == hierarchyBone->skinIndex)
+            {
+                const glm::vec3 currentBonePosition =
+                    Owner->transform.GetWorldPosition();
+                const glm::vec3 rootWorldPosition =
+                    ancestor->transform.GetWorldPosition();
+                const glm::vec3 desiredRootWorldPosition =
+                    rootWorldPosition +
+                    (glm::vec3(desiredWorld[3]) - currentBonePosition) * influence;
+                const glm::mat4 rootParentWorld = ancestor->Parent
+                    ? ancestor->Parent->transform.GetWorldMatrix()
+                    : glm::mat4(1.f);
+                ancestor->transform.position = glm::vec3(
+                    glm::inverse(rootParentWorld) *
+                    glm::vec4(desiredRootWorldPosition, 1.f));
+                ancestor->transform.MarkDirty();
+                break;
+            }
+        }
+    }
     const glm::mat4 parentWorld = Owner->Parent
         ? Owner->Parent->transform.GetWorldMatrix() : glm::mat4(1.f);
     const glm::mat4 local = glm::inverse(parentWorld) * desiredWorld;
@@ -313,10 +403,12 @@ void IKBone::SyncBoneFromBody()
         const glm::quat animationRotation = glm::normalize(
             glm::quat(Owner->transform.rotation));
         const glm::quat simulatedRotation = glm::normalize(rotation);
-        Owner->transform.position = glm::mix(
-            Owner->transform.position, translation, influence);
-        Owner->transform.rotation = glm::eulerAngles(glm::normalize(
-            glm::slerp(animationRotation, simulatedRotation, influence)));
+        if (!overridePosition)
+            Owner->transform.position = glm::mix(
+                Owner->transform.position, translation, influence);
+        if (!overrideRotation)
+            Owner->transform.rotation = glm::eulerAngles(glm::normalize(
+                glm::slerp(animationRotation, simulatedRotation, influence)));
         Owner->transform.MarkDirty();
     }
 }

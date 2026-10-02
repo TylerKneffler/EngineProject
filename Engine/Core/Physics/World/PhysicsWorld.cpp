@@ -431,6 +431,8 @@ void Physics::Step(double deltaTime)
         bone->EnsureBody();
     for (Engine::Components::IKBone* bone : ikBones)
         bone->EnsureConstraint();
+    for (Engine::Components::IKBone* bone : ikBones)
+        bone->SyncBodyFromBone();
     m_impl->lastSubstepCount = 0u;
     if (bodies.empty() && clothBodies.empty() && ikBones.empty())
     {

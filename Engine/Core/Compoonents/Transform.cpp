@@ -117,6 +117,12 @@ void Transform::MarkDirty()
     m_localCacheInitialized = false;
 }
 
+void Transform::NotifyEditorTransformChanged(uint8_t channels)
+{
+    MarkDirty();
+    m_editorOverrideChannels |= channels;
+}
+
 void Transform::UpdateLocalCache() const
 {
     const bool valuesChanged = m_localCacheInitialized &&

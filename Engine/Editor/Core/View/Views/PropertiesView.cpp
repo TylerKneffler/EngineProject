@@ -95,21 +95,44 @@ void PropertiesView::DrawMultiSelection(IEditorUi& ui)
 
     std::vector<Engine::Core::Component*> transforms;
     transforms.reserve(m_selectedObjects.size());
+    std::vector<glm::vec3> previousPositions, previousRotations, previousScales;
+    previousPositions.reserve(m_selectedObjects.size());
+    previousRotations.reserve(m_selectedObjects.size());
+    previousScales.reserve(m_selectedObjects.size());
     for (Engine::Core::Object* object : m_selectedObjects)
+    {
         transforms.push_back(&object->transform);
+        previousPositions.push_back(object->transform.position);
+        previousRotations.push_back(object->transform.rotation);
+        previousScales.push_back(object->transform.scale);
+    }
     if (ui.ComponentHeader(ComponentIconForType("Transform"), "Transform"))
     {
         if (transforms.front()->DrawPropertiesMulti(ui, transforms))
         {
-            for (Engine::Core::Object* object : m_selectedObjects)
+            for (size_t index = 0; index < m_selectedObjects.size(); ++index)
             {
-                object->transform.MarkDirty();
+                Engine::Core::Object* object = m_selectedObjects[index];
+                uint8_t channels = 0;
+                if (object->transform.position != previousPositions[index])
+                    channels |= Engine::Components::Transform::EditorPosition;
+                if (object->transform.rotation != previousRotations[index])
+                    channels |= Engine::Components::Transform::EditorRotation;
+                if (object->transform.scale != previousScales[index])
+                    channels |= Engine::Components::Transform::EditorScale;
+                object->transform.NotifyEditorTransformChanged(channels);
                 if (auto* body = object->GetComponent<Engine::Components::RigidBody>())
                     body->NotifyEditorTransformChanged();
                 object->InvalidatePrefabOverrideCache();
             }
             if (OnComponentsChanged) OnComponentsChanged();
         }
+        if (std::any_of(m_selectedObjects.begin(), m_selectedObjects.end(),
+                [](const Engine::Core::Object* object)
+                { return object->transform.HasEditorOverride(); }) &&
+            ui.Button("Resume Animation and Physics"))
+            for (Engine::Core::Object* object : m_selectedObjects)
+                object->transform.ClearEditorOverride();
     }
 
     std::unordered_map<std::string, size_t> occurrences;

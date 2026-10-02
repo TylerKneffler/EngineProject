@@ -519,6 +519,12 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
         else if(m_cubeDragTool==EditorTransformTool::Scale)
             m_cubeDragObject->transform.scale[m_cubeDragAxis]=std::max(.001f,
                 m_cubeDragStartScale[m_cubeDragAxis]+pixels*.01f);
+        const uint8_t channel = m_cubeDragTool == EditorTransformTool::Translate
+            ? Engine::Components::Transform::EditorPosition
+            : m_cubeDragTool == EditorTransformTool::Rotate
+                ? Engine::Components::Transform::EditorRotation
+                : Engine::Components::Transform::EditorScale;
+        m_cubeDragObject->transform.NotifyEditorTransformChanged(channel);
         if(auto* body=m_cubeDragObject->GetComponent<
             Engine::Components::RigidBody>())
             body->NotifyEditorTransformChanged();

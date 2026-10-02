@@ -1,6 +1,7 @@
 #include "ScenePlacementAndPicking.h"
 
 #include "Core/Compoonents/Camera/Camera.h"
+#include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Obj/Sprite.h"
 #include "Core/Scene/Scene.h"
@@ -91,6 +92,55 @@ bool IntersectMeshBounds(const Engine::Core::Object& object,
 
     distance = nearDistance > 0.f ? nearDistance : farDistance;
     return distance > 0.f;
+}
+
+bool IntersectSkinnedMesh(const Engine::Core::Object& object,
+    const Engine::Components::Mesh& mesh,
+    const Engine::Components::SkinnedMesh& skinned,
+    const glm::vec3& rayOrigin, const glm::vec3& rayDirection,
+    float& distance)
+{
+    const std::vector<glm::mat4>& palette = skinned.BuildPalette();
+    if (palette.empty())
+        return IntersectMeshBounds(object, mesh, rayOrigin, rayDirection,
+            distance);
+
+    const glm::mat4 inverseWorld = glm::inverse(object.transform.GetWorldMatrix());
+    const glm::vec3 origin = glm::vec3(inverseWorld * glm::vec4(rayOrigin, 1.f));
+    const glm::vec3 direction = glm::vec3(inverseWorld * glm::vec4(rayDirection, 0.f));
+    const std::vector<Engine::Components::Mesh::Vertex> triangles =
+        mesh.BuildPortalCutTriangleStream(&palette);
+    float nearest = FLT_MAX;
+    for (size_t i = 0; i + 2 < triangles.size(); i += 3)
+    {
+        const auto position = [](const Engine::Components::Mesh::Vertex& vertex)
+        {
+            return glm::vec3(vertex.pos[0], vertex.pos[1], vertex.pos[2]);
+        };
+        const glm::vec3 a = position(triangles[i]);
+        const glm::vec3 edge1 = position(triangles[i + 1]) - a;
+        const glm::vec3 edge2 = position(triangles[i + 2]) - a;
+        const glm::vec3 p = glm::cross(direction, edge2);
+        const float determinant = glm::dot(edge1, p);
+        if (std::abs(determinant) < 0.000001f)
+            continue;
+        const float inverseDeterminant = 1.f / determinant;
+        const glm::vec3 offset = origin - a;
+        const float u = glm::dot(offset, p) * inverseDeterminant;
+        if (u < 0.f || u > 1.f)
+            continue;
+        const glm::vec3 q = glm::cross(offset, edge1);
+        const float v = glm::dot(direction, q) * inverseDeterminant;
+        if (v < 0.f || u + v > 1.f)
+            continue;
+        const float hit = glm::dot(edge2, q) * inverseDeterminant;
+        if (hit > 0.f && hit < nearest)
+            nearest = hit;
+    }
+    if (nearest == FLT_MAX)
+        return false;
+    distance = nearest;
+    return true;
 }
 }
 
@@ -276,13 +326,20 @@ Engine::Core::Object* ScenePlacementAndPicking::PickObjectInViewport(
             float distance = 0.f;
             if (mesh && mesh->HasBounds())
             {
-                if (IntersectMeshBounds(*obj, *mesh, segment.ray.origin,
-                    segment.ray.direction, distance) &&
+                const auto* skinned =
+                    obj->GetComponent<Engine::Components::SkinnedMesh>();
+                const bool hit = skinned
+                    ? IntersectSkinnedMesh(*obj, *mesh, *skinned,
+                        segment.ray.origin, segment.ray.direction, distance)
+                    : IntersectMeshBounds(*obj, *mesh, segment.ray.origin,
+                        segment.ray.direction, distance);
+                if (hit &&
                     distance < segment.maxDistance &&
                     travelledDistance + distance < bestDistance)
                 {
                     bestDistance = travelledDistance + distance;
-                    best = obj;
+                    best = skinned && obj->GetPrefabInstanceRoot()
+                        ? obj->GetPrefabInstanceRoot() : obj;
                 }
                 continue;
             }
