@@ -684,38 +684,8 @@ bool SpatialManipulator::DrawProperties(::Engine::Editor::IEditorUi& ui)
             matrixOverlayPriority = static_cast<int>(std::round(overlayPriority));
             changed = true;
         }
-        const char* scopeLabel = matrixOverlayScopeRoot.IsAssigned()
-            ? matrixOverlayScopeRoot.objectName.c_str()
-            : "Owner (default)";
-        ui.ValueLabel("Overlay Scope Root", scopeLabel);
-        if (ui.BeginDragDropTarget())
-        {
-            size_t payloadSize = 0;
-            const void* payload = ui.AcceptDragDropPayload(
-                "ENGINE_COMPONENT_REORDER", &payloadSize);
-            if (payload && payloadSize == sizeof(Engine::Core::Component*))
-            {
-                auto* component = *static_cast<Engine::Core::Component* const*>(
-                    payload);
-                if (auto* transform = dynamic_cast<Transform*>(component))
-                {
-                    matrixOverlayScopeRoot =
-                        Engine::Core::CaptureComponentReference(transform,
-                            "Transform");
-                    changed = true;
-                }
-            }
-            ui.EndDragDropTarget();
-        }
-        if (matrixOverlayScopeRoot.IsAssigned())
-        {
-            ui.SameLine();
-            if (ui.Button("Clear Overlay Scope"))
-            {
-                matrixOverlayScopeRoot.Clear();
-                changed = true;
-            }
-        }
+        changed = DrawReferenceProperty(ui, "matrixOverlayScopeRoot",
+            "Overlay Scope Root", matrixOverlayScopeRoot) || changed;
     }
 
     changed = ui.Checkbox("Defines Warp Volume", &definesWarpVolume) || changed;
@@ -820,36 +790,25 @@ bool SpatialManipulator::DrawProperties(::Engine::Editor::IEditorUi& ui)
         portalTraversalPriority = static_cast<int>(std::round(traversalPriority));
         changed = true;
     }
-    const char* contentScopeLabel = portalContentScopeRoot.IsAssigned()
-        ? portalContentScopeRoot.objectName.c_str() : "Whole Scene (legacy)";
-    ui.ValueLabel("Portal Content Scope Root", contentScopeLabel);
-    if (ui.BeginDragDropTarget())
+    changed = DrawReferenceProperty(ui, "portalContentScopeRoot",
+        "Portal Content Scope Root", portalContentScopeRoot,
+        nullptr, "Whole Scene") || changed;
+    changed = DrawReferenceProperty(ui, "meshReference", "Traversal Mesh",
+        meshReference) || changed;
+    changed = DrawReferenceProperty(ui, "traversalTriggerBodyReference",
+        "Traversal Trigger Body", traversalTriggerBodyReference) || changed;
+    Engine::Core::ComponentReference selectedTarget = targetManipulator;
+    if (selectedTarget.expectedType.empty())
+        selectedTarget.expectedType = "SpatialManipulator";
+    if (DrawReferenceProperty(ui, "targetManipulator", "Target Manipulator",
+        selectedTarget, nullptr, "None"))
     {
-        size_t payloadSize = 0;
-        const void* payload = ui.AcceptDragDropPayload(
-            "ENGINE_COMPONENT_REORDER", &payloadSize);
-        if (payload && payloadSize == sizeof(Engine::Core::Component*))
-        {
-            auto* component = *static_cast<Engine::Core::Component* const*>(
-                payload);
-            if (auto* transform = dynamic_cast<Transform*>(component))
-            {
-                portalContentScopeRoot =
-                    Engine::Core::CaptureComponentReference(transform,
-                        "Transform");
-                changed = true;
-            }
-        }
-        ui.EndDragDropTarget();
-    }
-    if (portalContentScopeRoot.IsAssigned())
-    {
-        ui.SameLine();
-        if (ui.Button("Clear Portal Content Scope"))
-        {
-            portalContentScopeRoot.Clear();
-            changed = true;
-        }
+        if (!selectedTarget.IsAssigned())
+            Disconnect();
+        else if (auto* target = Engine::Core::ResolveComponentReference<
+            SpatialManipulator>(Owner, selectedTarget))
+            ConnectToTarget(target);
+        changed = true;
     }
 
     if (changed)

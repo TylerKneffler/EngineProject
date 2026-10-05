@@ -31,8 +31,14 @@ public:
     glm::vec3 size { 1.f };
     PROPERTY(Inspector, EditAnywhere, Category = "Collider", ClampMin = "0.001")
     float radius = 0.5f;
-    PROPERTY(Inspector, EditAnywhere, Category = "Collider", ClampMin = "0.001")
+    PROPERTY(Inspector, EditAnywhere, Category = "Collider", ClampMin = "0")
     float height = 1.f;
+    // For an AnimationBone, align a capsule or cylinder from this bone to a
+    // direct child. Zero height uses the current bone-to-child distance.
+    PROPERTY(Inspector, EditAnywhere, Category = "Collider")
+    bool alignToBoneChild = false;
+    PROPERTY(Inspector, EditAnywhere, Category = "Collider")
+    std::string childBone;
 };
 
 class MeshObjectCollider final : public Collider
@@ -47,7 +53,8 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Collider")
     std::string meshPath;
     // Convex shapes support dynamic bodies. Concave triangle meshes are
-    // intended for Static/Kinematic rigid bodies.
+    // intended for Static/Kinematic rigid bodies. A Skeleton's WholeMesh
+    // mode uses the animated triangle surface regardless of this setting.
     PROPERTY(Inspector, EditAnywhere, Category = "Collider")
     bool convex = true;
 };

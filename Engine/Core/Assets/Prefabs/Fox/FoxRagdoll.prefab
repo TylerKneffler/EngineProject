@@ -19,7 +19,7 @@
       </Transform.scale>
     </transform>
     <components>
-      <components:Skeleton Skeleton.showBones="true" Skeleton.skinIndex="0">
+      <components:Skeleton Skeleton.showBones="true" Skeleton.skinIndex="0" Skeleton.colliderMode="WholeMesh">
         <Skeleton.modelReference expectedType="Model" objectPath="" objectName="" componentType="" componentIndex="0" />
         <Skeleton.joints>
           <item>2</item>
@@ -482,6 +482,10 @@
           </item>
         </Skeleton.inverseBindMatrices>
       </components:Skeleton>
+      <components:MeshObjectCollider MeshObjectCollider.collisionEnabled="true" MeshObjectCollider.convex="false">
+        <MeshObjectCollider.meshReference expectedType="Mesh" objectPath="" objectName="fox" componentType="Mesh" componentIndex="0" />
+      </components:MeshObjectCollider>
+      <components:RigidBody RigidBody.bodyType="Kinematic" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0.8" RigidBody.restitution="0" />
       <components:Animation Animation.name="Survey" Animation.duration="3.41667">
         <Animation.channels>
           <item node="8" path="1" interpolation="0" width="4">
@@ -14071,7 +14075,7 @@
                     <item>1</item>
                   </Transform.scale>
                 </transform>
-                <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="3" AnimationBone.paletteIndex="1" AnimationBone.parentPaletteIndex="0" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.childBone="b_Hip_01" IKBone.shape="Capsule" IKBone.length="0" IKBone.radius="0.22" IKBone.mass="1.0" IKBone.connectToParent="false" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"><IKBone.initialAngularVelocity><item>0.25</item><item>0</item><item>1.4</item></IKBone.initialAngularVelocity></components:IKBone></components>
+                <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="3" AnimationBone.paletteIndex="1" AnimationBone.parentPaletteIndex="0" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.mass="1.0" IKBone.connectToParent="false" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"><IKBone.initialAngularVelocity><item>0.25</item><item>0</item><item>1.4</item></IKBone.initialAngularVelocity></components:IKBone><components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Capsule" PrimitiveObjectCollider.radius="0.22" PrimitiveObjectCollider.height="0" PrimitiveObjectCollider.alignToBoneChild="true" PrimitiveObjectCollider.childBone="b_Hip_01" /></components>
                 <children>
                   <item name="b_Hip_01" enabled="true">
                     <transform>
@@ -14091,7 +14095,7 @@
                         <item>1</item>
                       </Transform.scale>
                     </transform>
-                    <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="4" AnimationBone.paletteIndex="2" AnimationBone.parentPaletteIndex="1" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.childBone="b_Spine01_02" IKBone.shape="Capsule" IKBone.length="0" IKBone.radius="0.20" IKBone.mass="0.8" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone></components>
+                    <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="4" AnimationBone.paletteIndex="2" AnimationBone.parentPaletteIndex="1" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.mass="0.8" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone><components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Capsule" PrimitiveObjectCollider.radius="0.20" PrimitiveObjectCollider.height="0" PrimitiveObjectCollider.alignToBoneChild="true" PrimitiveObjectCollider.childBone="b_Spine01_02" /></components>
                     <children>
                       <item name="b_Spine01_02" enabled="true">
                         <transform>
@@ -14111,7 +14115,7 @@
                             <item>1</item>
                           </Transform.scale>
                         </transform>
-                        <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="5" AnimationBone.paletteIndex="3" AnimationBone.parentPaletteIndex="2" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.childBone="b_Spine02_03" IKBone.shape="Capsule" IKBone.length="0" IKBone.radius="0.19" IKBone.mass="0.7" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone></components>
+                        <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="5" AnimationBone.paletteIndex="3" AnimationBone.parentPaletteIndex="2" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.mass="0.7" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone><components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Capsule" PrimitiveObjectCollider.radius="0.19" PrimitiveObjectCollider.height="0" PrimitiveObjectCollider.alignToBoneChild="true" PrimitiveObjectCollider.childBone="b_Spine02_03" /></components>
                         <children>
                           <item name="b_Spine02_03" enabled="true">
                             <transform>
@@ -14131,7 +14135,7 @@
                                 <item>1</item>
                               </Transform.scale>
                             </transform>
-                            <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="6" AnimationBone.paletteIndex="4" AnimationBone.parentPaletteIndex="3" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.childBone="b_Neck_04" IKBone.shape="Capsule" IKBone.length="0" IKBone.radius="0.20" IKBone.mass="0.8" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone></components>
+                            <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="6" AnimationBone.paletteIndex="4" AnimationBone.parentPaletteIndex="3" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.mass="0.8" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone><components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Capsule" PrimitiveObjectCollider.radius="0.20" PrimitiveObjectCollider.height="0" PrimitiveObjectCollider.alignToBoneChild="true" PrimitiveObjectCollider.childBone="b_Neck_04" /></components>
                             <children>
                               <item name="b_Neck_04" enabled="true">
                                 <transform>
@@ -14151,7 +14155,7 @@
                                     <item>1</item>
                                   </Transform.scale>
                                 </transform>
-                                <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="7" AnimationBone.paletteIndex="5" AnimationBone.parentPaletteIndex="4" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.childBone="b_Head_05" IKBone.shape="Capsule" IKBone.length="0" IKBone.radius="0.16" IKBone.mass="0.45" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone></components>
+                                <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="7" AnimationBone.paletteIndex="5" AnimationBone.parentPaletteIndex="4" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.mass="0.45" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone><components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Capsule" PrimitiveObjectCollider.radius="0.16" PrimitiveObjectCollider.height="0" PrimitiveObjectCollider.alignToBoneChild="true" PrimitiveObjectCollider.childBone="b_Head_05" /></components>
                                 <children>
                                   <item name="b_Head_05" enabled="true">
                                     <transform>
@@ -14171,7 +14175,7 @@
                                         <item>1</item>
                                       </Transform.scale>
                                     </transform>
-                                    <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="8" AnimationBone.paletteIndex="6" AnimationBone.parentPaletteIndex="5" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.shape="Sphere" IKBone.length="0" IKBone.radius="0.24" IKBone.mass="0.55" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone></components>
+                                    <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="8" AnimationBone.paletteIndex="6" AnimationBone.parentPaletteIndex="5" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.mass="0.55" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone><components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Sphere" PrimitiveObjectCollider.radius="0.24" PrimitiveObjectCollider.height="0" PrimitiveObjectCollider.alignToBoneChild="false" PrimitiveObjectCollider.childBone="" /></components>
                                     <children />
                                   </item>
                                 </children>
@@ -14194,7 +14198,7 @@
                                     <item>1</item>
                                   </Transform.scale>
                                 </transform>
-                                <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="9" AnimationBone.paletteIndex="7" AnimationBone.parentPaletteIndex="4" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.childBone="b_RightForeArm_07" IKBone.shape="Capsule" IKBone.length="0" IKBone.radius="0.13" IKBone.mass="0.35" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone></components>
+                                <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="9" AnimationBone.paletteIndex="7" AnimationBone.parentPaletteIndex="4" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.mass="0.35" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone><components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Capsule" PrimitiveObjectCollider.radius="0.13" PrimitiveObjectCollider.height="0" PrimitiveObjectCollider.alignToBoneChild="true" PrimitiveObjectCollider.childBone="b_RightForeArm_07" /></components>
                                 <children>
                                   <item name="b_RightForeArm_07" enabled="true">
                                     <transform>
@@ -14214,7 +14218,7 @@
                                         <item>1</item>
                                       </Transform.scale>
                                     </transform>
-                                    <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="10" AnimationBone.paletteIndex="8" AnimationBone.parentPaletteIndex="7" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.childBone="b_RightHand_08" IKBone.shape="Capsule" IKBone.length="0" IKBone.radius="0.11" IKBone.mass="0.28" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone></components>
+                                    <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="10" AnimationBone.paletteIndex="8" AnimationBone.parentPaletteIndex="7" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.mass="0.28" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone><components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Capsule" PrimitiveObjectCollider.radius="0.11" PrimitiveObjectCollider.height="0" PrimitiveObjectCollider.alignToBoneChild="true" PrimitiveObjectCollider.childBone="b_RightHand_08" /></components>
                                     <children>
                                       <item name="b_RightHand_08" enabled="true">
                                         <transform>
@@ -14234,7 +14238,7 @@
                                             <item>1</item>
                                           </Transform.scale>
                                         </transform>
-                                        <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="11" AnimationBone.paletteIndex="9" AnimationBone.parentPaletteIndex="8" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.shape="Sphere" IKBone.length="0" IKBone.radius="0.14" IKBone.mass="0.18" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone></components>
+                                        <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="11" AnimationBone.paletteIndex="9" AnimationBone.parentPaletteIndex="8" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.mass="0.18" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone><components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Sphere" PrimitiveObjectCollider.radius="0.14" PrimitiveObjectCollider.height="0" PrimitiveObjectCollider.alignToBoneChild="false" PrimitiveObjectCollider.childBone="" /></components>
                                         <children />
                                       </item>
                                     </children>
@@ -14259,7 +14263,7 @@
                                     <item>1</item>
                                   </Transform.scale>
                                 </transform>
-                                <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="12" AnimationBone.paletteIndex="10" AnimationBone.parentPaletteIndex="4" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.childBone="b_LeftForeArm_010" IKBone.shape="Capsule" IKBone.length="0" IKBone.radius="0.13" IKBone.mass="0.35" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone></components>
+                                <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="12" AnimationBone.paletteIndex="10" AnimationBone.parentPaletteIndex="4" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.mass="0.35" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone><components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Capsule" PrimitiveObjectCollider.radius="0.13" PrimitiveObjectCollider.height="0" PrimitiveObjectCollider.alignToBoneChild="true" PrimitiveObjectCollider.childBone="b_LeftForeArm_010" /></components>
                                 <children>
                                   <item name="b_LeftForeArm_010" enabled="true">
                                     <transform>
@@ -14279,7 +14283,7 @@
                                         <item>1</item>
                                       </Transform.scale>
                                     </transform>
-                                    <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="13" AnimationBone.paletteIndex="11" AnimationBone.parentPaletteIndex="10" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.childBone="b_LeftHand_011" IKBone.shape="Capsule" IKBone.length="0" IKBone.radius="0.11" IKBone.mass="0.28" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone></components>
+                                    <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="13" AnimationBone.paletteIndex="11" AnimationBone.parentPaletteIndex="10" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.mass="0.28" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone><components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Capsule" PrimitiveObjectCollider.radius="0.11" PrimitiveObjectCollider.height="0" PrimitiveObjectCollider.alignToBoneChild="true" PrimitiveObjectCollider.childBone="b_LeftHand_011" /></components>
                                     <children>
                                       <item name="b_LeftHand_011" enabled="true">
                                         <transform>
@@ -14299,7 +14303,7 @@
                                             <item>1</item>
                                           </Transform.scale>
                                         </transform>
-                                        <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="14" AnimationBone.paletteIndex="12" AnimationBone.parentPaletteIndex="11" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.shape="Sphere" IKBone.length="0" IKBone.radius="0.14" IKBone.mass="0.18" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone></components>
+                                        <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="14" AnimationBone.paletteIndex="12" AnimationBone.parentPaletteIndex="11" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.mass="0.18" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone><components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Sphere" PrimitiveObjectCollider.radius="0.14" PrimitiveObjectCollider.height="0" PrimitiveObjectCollider.alignToBoneChild="false" PrimitiveObjectCollider.childBone="" /></components>
                                         <children />
                                       </item>
                                     </children>
@@ -14328,7 +14332,7 @@
                             <item>1</item>
                           </Transform.scale>
                         </transform>
-                        <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="15" AnimationBone.paletteIndex="13" AnimationBone.parentPaletteIndex="2" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.childBone="b_Tail02_013" IKBone.shape="Capsule" IKBone.length="0" IKBone.radius="0.13" IKBone.mass="0.28" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone></components>
+                        <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="15" AnimationBone.paletteIndex="13" AnimationBone.parentPaletteIndex="2" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.mass="0.28" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone><components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Capsule" PrimitiveObjectCollider.radius="0.13" PrimitiveObjectCollider.height="0" PrimitiveObjectCollider.alignToBoneChild="true" PrimitiveObjectCollider.childBone="b_Tail02_013" /></components>
                         <children>
                           <item name="b_Tail02_013" enabled="true">
                             <transform>
@@ -14348,7 +14352,7 @@
                                 <item>1</item>
                               </Transform.scale>
                             </transform>
-                            <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="16" AnimationBone.paletteIndex="14" AnimationBone.parentPaletteIndex="13" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.childBone="b_Tail03_014" IKBone.shape="Capsule" IKBone.length="0" IKBone.radius="0.12" IKBone.mass="0.24" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone></components>
+                            <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="16" AnimationBone.paletteIndex="14" AnimationBone.parentPaletteIndex="13" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.mass="0.24" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone><components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Capsule" PrimitiveObjectCollider.radius="0.12" PrimitiveObjectCollider.height="0" PrimitiveObjectCollider.alignToBoneChild="true" PrimitiveObjectCollider.childBone="b_Tail03_014" /></components>
                             <children>
                               <item name="b_Tail03_014" enabled="true">
                                 <transform>
@@ -14368,7 +14372,7 @@
                                     <item>1</item>
                                   </Transform.scale>
                                 </transform>
-                                <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="17" AnimationBone.paletteIndex="15" AnimationBone.parentPaletteIndex="14" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.shape="Sphere" IKBone.length="0" IKBone.radius="0.14" IKBone.mass="0.16" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone></components>
+                                <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="17" AnimationBone.paletteIndex="15" AnimationBone.parentPaletteIndex="14" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.mass="0.16" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone><components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Sphere" PrimitiveObjectCollider.radius="0.14" PrimitiveObjectCollider.height="0" PrimitiveObjectCollider.alignToBoneChild="false" PrimitiveObjectCollider.childBone="" /></components>
                                 <children />
                               </item>
                             </children>
@@ -14394,7 +14398,7 @@
                           </Transform.scale>
                         </transform>
                         <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="18" AnimationBone.paletteIndex="16" AnimationBone.parentPaletteIndex="2" AnimationBone.hierarchyRoot="false" />
-                          <components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.childBone="b_LeftLeg02_016" IKBone.shape="Capsule" IKBone.length="0" IKBone.radius="0.15" IKBone.mass="0.45" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone>
+                          <components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.mass="0.45" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone><components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Capsule" PrimitiveObjectCollider.radius="0.15" PrimitiveObjectCollider.height="0" PrimitiveObjectCollider.alignToBoneChild="true" PrimitiveObjectCollider.childBone="b_LeftLeg02_016" />
                         </components>
                         <children>
                           <item name="b_LeftLeg02_016" enabled="true">
@@ -14415,7 +14419,7 @@
                                 <item>1</item>
                               </Transform.scale>
                             </transform>
-                            <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="19" AnimationBone.paletteIndex="17" AnimationBone.parentPaletteIndex="16" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.childBone="b_LeftFoot01_017" IKBone.shape="Capsule" IKBone.length="0" IKBone.radius="0.13" IKBone.mass="0.36" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone></components>
+                            <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="19" AnimationBone.paletteIndex="17" AnimationBone.parentPaletteIndex="16" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.mass="0.36" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone><components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Capsule" PrimitiveObjectCollider.radius="0.13" PrimitiveObjectCollider.height="0" PrimitiveObjectCollider.alignToBoneChild="true" PrimitiveObjectCollider.childBone="b_LeftFoot01_017" /></components>
                             <children>
                               <item name="b_LeftFoot01_017" enabled="true">
                                 <transform>
@@ -14435,7 +14439,7 @@
                                     <item>1</item>
                                   </Transform.scale>
                                 </transform>
-                                <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="20" AnimationBone.paletteIndex="18" AnimationBone.parentPaletteIndex="17" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.childBone="b_LeftFoot02_018" IKBone.shape="Capsule" IKBone.length="0" IKBone.radius="0.11" IKBone.mass="0.25" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone></components>
+                                <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="20" AnimationBone.paletteIndex="18" AnimationBone.parentPaletteIndex="17" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.mass="0.25" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone><components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Capsule" PrimitiveObjectCollider.radius="0.11" PrimitiveObjectCollider.height="0" PrimitiveObjectCollider.alignToBoneChild="true" PrimitiveObjectCollider.childBone="b_LeftFoot02_018" /></components>
                                 <children>
                                   <item name="b_LeftFoot02_018" enabled="true">
                                     <transform>
@@ -14455,7 +14459,7 @@
                                         <item>1</item>
                                       </Transform.scale>
                                     </transform>
-                                    <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="21" AnimationBone.paletteIndex="19" AnimationBone.parentPaletteIndex="18" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.shape="Sphere" IKBone.length="0" IKBone.radius="0.14" IKBone.mass="0.18" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone></components>
+                                    <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="21" AnimationBone.paletteIndex="19" AnimationBone.parentPaletteIndex="18" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.mass="0.18" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone><components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Sphere" PrimitiveObjectCollider.radius="0.14" PrimitiveObjectCollider.height="0" PrimitiveObjectCollider.alignToBoneChild="false" PrimitiveObjectCollider.childBone="" /></components>
                                     <children />
                                   </item>
                                 </children>
@@ -14483,7 +14487,7 @@
                           </Transform.scale>
                         </transform>
                         <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="22" AnimationBone.paletteIndex="20" AnimationBone.parentPaletteIndex="2" AnimationBone.hierarchyRoot="false" />
-                          <components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.childBone="b_RightLeg02_020" IKBone.shape="Capsule" IKBone.length="0" IKBone.radius="0.15" IKBone.mass="0.45" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone>
+                          <components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.mass="0.45" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone><components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Capsule" PrimitiveObjectCollider.radius="0.15" PrimitiveObjectCollider.height="0" PrimitiveObjectCollider.alignToBoneChild="true" PrimitiveObjectCollider.childBone="b_RightLeg02_020" />
                         </components>
                         <children>
                           <item name="b_RightLeg02_020" enabled="true">
@@ -14504,7 +14508,7 @@
                                 <item>1</item>
                               </Transform.scale>
                             </transform>
-                            <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="23" AnimationBone.paletteIndex="21" AnimationBone.parentPaletteIndex="20" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.childBone="b_RightFoot01_021" IKBone.shape="Capsule" IKBone.length="0" IKBone.radius="0.13" IKBone.mass="0.36" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone></components>
+                            <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="23" AnimationBone.paletteIndex="21" AnimationBone.parentPaletteIndex="20" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.mass="0.36" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone><components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Capsule" PrimitiveObjectCollider.radius="0.13" PrimitiveObjectCollider.height="0" PrimitiveObjectCollider.alignToBoneChild="true" PrimitiveObjectCollider.childBone="b_RightFoot01_021" /></components>
                             <children>
                               <item name="b_RightFoot01_021" enabled="true">
                                 <transform>
@@ -14524,7 +14528,7 @@
                                     <item>1</item>
                                   </Transform.scale>
                                 </transform>
-                                <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="24" AnimationBone.paletteIndex="22" AnimationBone.parentPaletteIndex="21" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.childBone="b_RightFoot02_022" IKBone.shape="Capsule" IKBone.length="0" IKBone.radius="0.11" IKBone.mass="0.25" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone></components>
+                                <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="24" AnimationBone.paletteIndex="22" AnimationBone.parentPaletteIndex="21" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.mass="0.25" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone><components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Capsule" PrimitiveObjectCollider.radius="0.11" PrimitiveObjectCollider.height="0" PrimitiveObjectCollider.alignToBoneChild="true" PrimitiveObjectCollider.childBone="b_RightFoot02_022" /></components>
                                 <children>
                                   <item name="b_RightFoot02_022" enabled="true">
                                     <transform>
@@ -14544,7 +14548,7 @@
                                         <item>1</item>
                                       </Transform.scale>
                                     </transform>
-                                    <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="25" AnimationBone.paletteIndex="23" AnimationBone.parentPaletteIndex="22" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.shape="Sphere" IKBone.length="0" IKBone.radius="0.14" IKBone.mass="0.18" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone></components>
+                                    <components><components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="25" AnimationBone.paletteIndex="23" AnimationBone.parentPaletteIndex="22" AnimationBone.hierarchyRoot="false" /><components:IKBone IKBone.weight="1" IKBone.simulate="true" IKBone.activationDelay="1.25" IKBone.mass="0.18" IKBone.connectToParent="true" IKBone.jointType="ConeTwist" IKBone.swingLimit="0.85" IKBone.twistLimit="0.5"></components:IKBone><components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Sphere" PrimitiveObjectCollider.radius="0.14" PrimitiveObjectCollider.height="0" PrimitiveObjectCollider.alignToBoneChild="false" PrimitiveObjectCollider.childBone="" /></components>
                                     <children />
                                   </item>
                                 </children>

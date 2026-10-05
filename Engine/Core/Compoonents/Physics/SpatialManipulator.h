@@ -217,7 +217,7 @@ public:
     Engine::Core::ComponentReference traversalTriggerBodyReference { "RigidBody" };
 
     PROPERTY(Inspector, EditAnywhere, Category = "Spatial Manipulator")
-    Engine::Core::ComponentReference targetManipulator;
+    Engine::Core::ComponentReference targetManipulator { "SpatialManipulator" };
 
     glm::mat4 GetOverlayMatrix() const;
     bool ContainsWorldPoint(const glm::vec3& worldPoint) const;

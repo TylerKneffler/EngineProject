@@ -13,6 +13,7 @@
 #include <string>
 #include <map>
 #include <filesystem>
+#include <unordered_set>
 #include <Windows.h>
 #include <commdlg.h>
 
@@ -25,6 +26,344 @@ namespace Engine::Core
 
 // State tracking for property editing
 static std::map<std::string, std::string> s_editingProperty;  // componentPtr+key -> "editing"
+struct ReferenceSearchState
+{
+    bool open = false;
+    char query[256]{};
+    std::vector<std::string> assets;
+};
+static std::map<std::string, ReferenceSearchState> s_referenceSearch;
+static std::string s_editorAssetDirectory;
+static bool IsCompatiblePathAsset(const std::string& property,
+    const std::string& path);
+
+void Component::SetEditorAssetDirectory(const std::string& path)
+{
+    s_editorAssetDirectory = path;
+    s_referenceSearch.clear();
+}
+
+void Component::ClearEditorReferenceSearches()
+{
+    s_referenceSearch.clear();
+}
+
+static std::string LowerText(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(),
+        [](unsigned char character)
+        { return static_cast<char>(std::tolower(character)); });
+    return value;
+}
+
+static std::string ObjectHierarchyPath(const Object* object)
+{
+    std::vector<std::string> names;
+    for (const Object* current = object; current; current = current->Parent)
+        names.push_back(current->name.empty() ? "(unnamed)" : current->name);
+    std::string path;
+    for (auto it = names.rbegin(); it != names.rend(); ++it)
+    {
+        if (!path.empty()) path += " / ";
+        path += *it;
+    }
+    return path;
+}
+
+static std::string ComponentReferenceLabel(const Component* component)
+{
+    if (!component || !component->Owner) return "(missing component)";
+    const std::string owner = ObjectHierarchyPath(component->Owner);
+    if (component == &component->Owner->transform)
+        return owner;
+    int index = 0;
+    for (const Component* candidate : component->Owner->Components)
+    {
+        if (candidate == component) break;
+        if (candidate && candidate->GetTypeName() == component->GetTypeName())
+            ++index;
+    }
+    return owner + " / " + component->GetTypeName() +
+        (index ? " #" + std::to_string(index + 1) : "");
+}
+
+static std::vector<std::string> FindAssetReferences(const std::string& key)
+{
+    namespace fs = std::filesystem;
+    std::vector<std::string> assets;
+    std::unordered_set<std::string> visitedRoots;
+    std::error_code engineError;
+    const fs::path engineRoot = fs::weakly_canonical(
+        fs::path(ENGINE_ASSETS_PATH), engineError);
+    const fs::path roots[] = { s_editorAssetDirectory, "Assets",
+        ENGINE_ASSETS_PATH };
+    for (const fs::path& root : roots)
+    {
+        if (root.empty()) continue;
+        std::error_code error;
+        const fs::path absolute = fs::weakly_canonical(root, error);
+        if (error || !fs::is_directory(absolute, error) ||
+            !visitedRoots.insert(LowerText(absolute.string())).second)
+            continue;
+        fs::recursive_directory_iterator it(absolute,
+            fs::directory_options::skip_permission_denied, error), end;
+        for (; !error && it != end && assets.size() < 30000u;
+            it.increment(error))
+        {
+            if (it->is_regular_file(error) &&
+                IsCompatiblePathAsset(key, it->path().string()))
+            {
+                const fs::path relative = it->path().lexically_relative(
+                    absolute);
+                fs::path stored = it->path();
+                if (!engineError && absolute == engineRoot)
+                    stored = fs::path("Assets") / relative;
+                else if (!root.is_absolute())
+                    stored = root / relative;
+                else
+                {
+                    std::error_code relativeError;
+                    const fs::path fromWorkingDirectory = fs::relative(
+                        it->path(), fs::current_path(), relativeError);
+                    if (!relativeError && !fromWorkingDirectory.empty() &&
+                        *fromWorkingDirectory.begin() != "..")
+                        stored = fromWorkingDirectory;
+                }
+                assets.push_back(stored.generic_string());
+            }
+            error.clear();
+        }
+    }
+    std::sort(assets.begin(), assets.end());
+    assets.erase(std::unique(assets.begin(), assets.end()), assets.end());
+    return assets;
+}
+
+bool Component::DrawAssetPathPicker(::Engine::Editor::IEditorUi& ui,
+    const void* context, const char* fieldKey, const char* label,
+    const char* assetKind, std::string& path)
+{
+    const std::string stateKey = std::to_string(
+        reinterpret_cast<uintptr_t>(context)) + "_" + fieldKey;
+    ReferenceSearchState& search = s_referenceSearch[stateKey];
+    const std::string filter = assetKind ? assetKind : fieldKey;
+    bool changed = false;
+    ui.PushId(fieldKey);
+    ui.ValueLabel(label, path.empty() ? "(none)" : path.c_str());
+    if (ui.IsItemHovered() && !path.empty())
+        ui.Tooltip(path.c_str());
+    if (ui.BeginDragDropTarget())
+    {
+        size_t size = 0;
+        const void* data = ui.AcceptDragDropPayload("ENGINE_ASSET_PATH", &size);
+        if (data && size > 0)
+        {
+            const char* bytes = static_cast<const char*>(data);
+            size_t length = 0;
+            while (length < size && bytes[length] != '\0') ++length;
+            const std::string dropped(bytes, length);
+            if (IsCompatiblePathAsset(filter, dropped))
+            {
+                path = dropped;
+                changed = true;
+            }
+        }
+        ui.EndDragDropTarget();
+    }
+    ui.SameLineRight(52.f);
+    if (ui.Button("...##assetSearch", 24.f))
+    {
+        search.open = !search.open;
+        if (search.open)
+            search.assets = FindAssetReferences(filter);
+        else
+            search.assets.clear();
+    }
+    if (ui.IsItemHovered()) ui.Tooltip("Search assets");
+    ui.SameLine();
+    ui.BeginDisabled(path.empty());
+    if (ui.Button("x##clearAsset", 20.f))
+    {
+        path.clear();
+        changed = true;
+    }
+    ui.EndDisabled();
+    if (ui.IsItemHovered()) ui.Tooltip("Clear path");
+    if (search.open)
+    {
+        ui.InputText("Find asset", search.query, sizeof(search.query));
+        const std::string query = LowerText(search.query);
+        size_t matches = 0;
+        for (const std::string& asset : search.assets)
+        {
+            if (!query.empty() && LowerText(asset).find(query) ==
+                std::string::npos)
+                continue;
+            ++matches;
+            if (matches > 30u) continue;
+            ui.PushId(asset.c_str());
+            if (ui.Selectable(asset.c_str(), asset == path))
+            {
+                path = asset;
+                search.open = false;
+                search.assets.clear();
+                changed = true;
+                ui.PopId();
+                break;
+            }
+            ui.PopId();
+        }
+        if (matches > 30u)
+            ui.DisabledLabel("More assets match. Refine the search.");
+        else if (matches == 0u)
+            ui.DisabledLabel("No matching assets in the project or engine folders.");
+    }
+    ui.PopId();
+    return changed;
+}
+
+bool Component::DrawReferenceProperty(::Engine::Editor::IEditorUi& ui,
+    const char* fieldKey, const char* label, ComponentReference& reference,
+    const Component* defaultTarget, const char* defaultDescription)
+{
+    const std::string key = fieldKey ? fieldKey : label;
+    const std::string stateKey = std::to_string(
+        reinterpret_cast<uintptr_t>(this)) + "_" + key;
+    ReferenceSearchState& search = s_referenceSearch[stateKey];
+    Component* resolved = reference.IsAssigned()
+        ? ResolveComponentReferenceRaw(Owner, reference) : nullptr;
+    if (!reference.IsAssigned() && !defaultTarget &&
+        !defaultDescription && Owner)
+    {
+        if (reference.expectedType == "Transform")
+            defaultTarget = &Owner->transform;
+        else
+            for (Component* candidate : Owner->Components)
+                if (candidate && candidate->GetTypeName() ==
+                    reference.expectedType)
+                {
+                    defaultTarget = candidate;
+                    break;
+                }
+    }
+    const std::string targetLabel = resolved
+        ? ComponentReferenceLabel(resolved)
+        : reference.IsAssigned()
+            ? "(missing) " + reference.objectName + " / " +
+                reference.componentType
+            : defaultDescription
+                ? "(default) " + std::string(defaultDescription)
+                : defaultTarget
+                ? "(default) " + ComponentReferenceLabel(defaultTarget)
+                : "(default: " + (reference.expectedType.empty()
+                ? std::string("component") : reference.expectedType) + ")";
+    bool changed = false;
+    ui.PushId(key.c_str());
+    ui.ValueLabel(label, targetLabel.c_str());
+    if (ui.IsItemHovered() && reference.IsAssigned())
+        ui.Tooltip(targetLabel.c_str());
+    if (ui.BeginDragDropTarget())
+    {
+        size_t size = 0;
+        const void* data = ui.AcceptDragDropPayload(
+            "ENGINE_COMPONENT_REORDER", &size);
+        if (data && size == sizeof(Component*))
+        {
+            auto* component = *static_cast<Component* const*>(data);
+            if (component && Owner && component->Owner &&
+                component->Owner->GetScene() == Owner->GetScene() &&
+                (reference.expectedType.empty() ||
+                    component->GetTypeName() == reference.expectedType))
+            {
+                reference = CaptureComponentReference(component,
+                    reference.expectedType);
+                changed = true;
+            }
+        }
+        if (reference.expectedType == "Transform")
+        {
+            size = 0;
+            data = ui.AcceptDragDropPayload("ENGINE_SCENE_OBJECT", &size);
+            if (data && size == sizeof(Object*))
+            {
+                auto* object = *static_cast<Object* const*>(data);
+                if (object && Owner && object->GetScene() == Owner->GetScene())
+                {
+                    reference = CaptureComponentReference(
+                        &object->transform, "Transform");
+                    changed = true;
+                }
+            }
+        }
+        ui.EndDragDropTarget();
+    }
+    ui.SameLineRight(52.f);
+    if (ui.Button("...##sceneSearch", 24.f))
+        search.open = !search.open;
+    if (ui.IsItemHovered()) ui.Tooltip("Search scene");
+    if (reference.IsAssigned())
+    {
+        ui.SameLine();
+        if (ui.Button("x##clearReference", 20.f))
+        {
+            reference.Clear();
+            changed = true;
+        }
+        if (ui.IsItemHovered()) ui.Tooltip("Clear reference");
+    }
+    if (search.open)
+    {
+        ui.InputText("Find object or component", search.query,
+            sizeof(search.query));
+        if (Owner && Owner->GetScene())
+        {
+            const std::string query = LowerText(search.query);
+            size_t matches = 0;
+            bool selected = false;
+            for (const auto& object : Owner->GetScene()->GetObjects())
+            {
+                std::vector<Component*> candidates;
+                if (reference.expectedType == "Transform")
+                    candidates.push_back(&object->transform);
+                else
+                    for (Component* candidate : object->Components)
+                        if (candidate && (reference.expectedType.empty() ||
+                            candidate->GetTypeName() == reference.expectedType))
+                            candidates.push_back(candidate);
+                for (Component* candidate : candidates)
+                {
+                    const std::string candidateLabel =
+                        ComponentReferenceLabel(candidate);
+                    if (!query.empty() && LowerText(candidateLabel).find(query)
+                        == std::string::npos)
+                        continue;
+                    ++matches;
+                    if (matches > 30u) continue;
+                    ui.PushId(candidate);
+                    if (ui.Selectable(candidateLabel.c_str(),
+                        candidate == resolved))
+                    {
+                        reference = CaptureComponentReference(candidate,
+                            reference.expectedType);
+                        search.open = false;
+                        changed = selected = true;
+                    }
+                    ui.PopId();
+                    if (selected) break;
+                }
+                if (selected) break;
+            }
+            if (matches > 30u)
+                ui.DisabledLabel("More scene targets match. Refine the search.");
+            else if (matches == 0u)
+                ui.DisabledLabel("No matching scene targets.");
+        }
+        else
+            ui.DisabledLabel("This component is not in a scene.");
+    }
+    ui.PopId();
+    return changed;
+}
 
 static std::string LowerExtension(const std::string& path)
 {
@@ -53,6 +392,12 @@ static bool IsCompatiblePathAsset(const std::string& property,
             extension == ".jpeg" || extension == ".bmp" ||
             extension == ".dds" || extension == ".tga" ||
             extension == ".hdr" || extension == ".exr" || extension == ".ktx2";
+    if (name.find("scene") != std::string::npos)
+        return extension == ".scene";
+    if (name.find("prefab") != std::string::npos)
+        return extension == ".prefab";
+    if (name.find("material") != std::string::npos)
+        return extension == ".material" || extension == ".mat";
     return true;
 }
 
@@ -437,6 +782,59 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
                     ui.EndDragDropTarget();
                 }
 
+                ReferenceSearchState& assetSearch = s_referenceSearch[stateKey];
+                ui.SameLineRight(52.f);
+                if (ui.Button("...##assetSearch", 24.f))
+                {
+                    assetSearch.open = !assetSearch.open;
+                    if (assetSearch.open)
+                        assetSearch.assets = FindAssetReferences(key);
+                    else
+                        assetSearch.assets.clear();
+                }
+                if (ui.IsItemHovered()) ui.Tooltip("Search assets");
+                ui.SameLine();
+                ui.BeginDisabled(stringValue.empty());
+                if (ui.Button("x##clearAsset", 20.f))
+                {
+                    editedData.Set(key, JsonValue(std::string{}));
+                    markModified(key);
+                    s_editingProperty.erase(stateKey);
+                }
+                ui.EndDisabled();
+                if (ui.IsItemHovered()) ui.Tooltip("Clear path");
+                if (assetSearch.open)
+                {
+                    ui.InputText("Find asset", assetSearch.query,
+                        sizeof(assetSearch.query));
+                    const std::string query = LowerText(assetSearch.query);
+                    size_t matches = 0;
+                    for (const std::string& asset : assetSearch.assets)
+                    {
+                        if (!query.empty() &&
+                            LowerText(asset).find(query) == std::string::npos)
+                            continue;
+                        ++matches;
+                        if (matches > 30u) continue;
+                        ui.PushId(asset.c_str());
+                        if (ui.Selectable(asset.c_str()))
+                        {
+                            editedData.Set(key, JsonValue(asset));
+                            markModified(key);
+                            s_editingProperty.erase(stateKey);
+                            assetSearch.open = false;
+                            assetSearch.assets.clear();
+                            ui.PopId();
+                            break;
+                        }
+                        ui.PopId();
+                    }
+                    if (matches > 30u)
+                        ui.DisabledLabel("More assets match. Refine the search.");
+                    else if (matches == 0u)
+                        ui.DisabledLabel("No matching assets in the project or engine folders.");
+                }
+
                 ui.PopId();
             }
             else
@@ -625,39 +1023,12 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
             {
                 ComponentReference reference;
                 FromJson(value, reference);
-                const std::string assignedLabel = reference.IsAssigned()
-                    ? reference.objectName + " / " + reference.componentType
-                    : std::string("(default: ") +
-                        (reference.expectedType.empty() ? "component" : reference.expectedType) + ")";
                 ui.SetNextItemMixedValue(mixedValue);
-                ui.ValueLabel(displayName.c_str(), assignedLabel.c_str());
-                if (ui.BeginDragDropTarget())
+                if (DrawReferenceProperty(ui, key.c_str(),
+                    displayName.c_str(), reference))
                 {
-                    size_t payloadSize = 0;
-                    const void* payload = ui.AcceptDragDropPayload(
-                        "ENGINE_COMPONENT_REORDER", &payloadSize);
-                    if (payload && payloadSize == sizeof(Component*))
-                    {
-                        Component* component = *static_cast<Component* const*>(payload);
-                        if (component && (reference.expectedType.empty() ||
-                            component->GetTypeName() == reference.expectedType))
-                        {
-                            editedData.Set(key, ToJson(CaptureComponentReference(
-                                component, reference.expectedType)));
-                            markModified(key);
-                        }
-                    }
-                    ui.EndDragDropTarget();
-                }
-                if (reference.IsAssigned())
-                {
-                    ui.SameLine();
-                    if (ui.Button((std::string("Clear##") + key).c_str()))
-                    {
-                        reference.Clear();
-                        editedData.Set(key, ToJson(reference));
-                        markModified(key);
-                    }
+                    editedData.Set(key, ToJson(reference));
+                    markModified(key);
                 }
             }
             else

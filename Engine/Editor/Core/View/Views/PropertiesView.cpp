@@ -284,6 +284,14 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
                 if (ui.Button("Cancel"))
                     m_editingSkyboxTexture = false;
             }
+            if (Engine::Core::Component::DrawAssetPathPicker(ui, m_scene,
+                "sceneSkyboxTexture", "Skybox Texture", "texture",
+                m_scene->settings.skyboxTexture))
+            {
+                m_editingSkyboxTexture = false;
+                if (OnComponentsChanged)
+                    OnComponentsChanged();
+            }
 
             ui.Separator();
             ui.Label("HDRI Environment");
@@ -442,6 +450,7 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
     if (prefabRoot && prefabRoot->Prefab)
     {
         const std::string prefabPath = prefabRoot->Prefab->GetPath();
+        ui.ValueLabel("Prefab Asset", prefabPath.c_str());
         ui.BeginDisabled(!OnPrefabRequested);
         if (ui.Button("Edit Prefab") && OnPrefabRequested)
             OnPrefabRequested(prefabPath);

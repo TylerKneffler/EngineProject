@@ -180,6 +180,8 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
 
     if (typeName == "Properties")
     {
+        Engine::Core::Component::SetEditorAssetDirectory(
+            m_settings.assetsDirectory);
         auto view = std::make_unique<PropertiesView>();
         AssignLowestAvailableTitle(typeName, view.get());
         view->SetDefaultDockArea(EditorPanelDockArea::RightSidebar);

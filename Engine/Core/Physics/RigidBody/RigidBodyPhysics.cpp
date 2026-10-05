@@ -2,6 +2,8 @@
 #include "Core/Compoonents/Physics/Collider.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Animation/Skeleton.h"
+#include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Physics/Internal/PhysicsInternal.h"
@@ -27,6 +29,11 @@ struct Engine::Components::RigidBody::Impl
     std::vector<std::pair<const Engine::Components::Collider*, uint64_t>> colliders;
     const Engine::Components::Mesh* ownerMesh = nullptr;
     uint64_t ownerMeshRevision = 0;
+    const Engine::Components::Mesh* animatedMesh = nullptr;
+    uint64_t animatedMeshRevision = 0;
+    std::vector<glm::vec3> animatedVertices;
+    const Engine::Components::Skeleton* colliderSkeleton = nullptr;
+    uint64_t colliderSkeletonRevision = 0;
     const void* portalLocalMeshKey = nullptr;
     std::vector<glm::vec3> portalLocalMeshVertices;
     uint64_t portalLocalMeshRevision = 0;
@@ -132,6 +139,75 @@ bool Engine::Components::RigidBody::EnsureBody()
         return false;
     }
     const glm::vec3 scale = Engine::Physics::WorldScale(*Owner);
+    // A whole-mesh Skeleton uses the selected MeshObjectCollider as one
+    // kinematic collision surface. Build its CPU pose before the Bullet step.
+    const MeshObjectCollider* selectedMeshCollider = nullptr;
+    const MeshObjectCollider* animatedCollider = nullptr;
+    const Skeleton* colliderSkeleton = nullptr;
+    const Mesh* animatedMesh = nullptr;
+    std::vector<Mesh::Vertex> animatedStream;
+    std::vector<glm::vec3> animatedPositions;
+    for (Object* ancestor = Owner; ancestor && !colliderSkeleton;
+        ancestor = ancestor->Parent)
+        if (auto* skeleton = ancestor->GetComponent<Skeleton>())
+        {
+            auto* selected = skeleton->ResolveMeshCollider();
+            if (selected && selected->Owner == Owner &&
+                (skeleton->UsesWholeMeshCollider() ||
+                    skeleton->meshColliderReference.IsAssigned()))
+            {
+                colliderSkeleton = skeleton;
+                selectedMeshCollider = selected;
+                if (skeleton->UsesWholeMeshCollider() &&
+                    selected->collisionEnabled)
+                    animatedCollider = selected;
+            }
+        }
+    // Component references may point outside the skeleton's object subtree.
+    if (!colliderSkeleton && Owner->GetComponent<MeshObjectCollider>())
+        for (const auto& object : Owner->GetScene()->GetObjects())
+            if (auto* skeleton = object->GetComponent<Skeleton>();
+                skeleton && skeleton->meshColliderReference.IsAssigned())
+            {
+                auto* selected = skeleton->ResolveMeshCollider();
+                if (!selected || selected->Owner != Owner) continue;
+                colliderSkeleton = skeleton;
+                selectedMeshCollider = selected;
+                if (skeleton->UsesWholeMeshCollider() &&
+                    selected->collisionEnabled)
+                    animatedCollider = selected;
+                break;
+            }
+    if (animatedCollider)
+    {
+        // A deforming concave triangle surface cannot be a dynamic Bullet
+        // rigid body. Whole-mesh mode requires a kinematic (or static) body.
+        if (Engine::Physics::IsDynamic(*this))
+        {
+            DestroyBody();
+            return false;
+        }
+        if (animatedCollider->meshReference.IsAssigned())
+            animatedMesh = Engine::Core::ResolveComponentReference<Mesh>(
+                Owner, animatedCollider->meshReference);
+        else if (animatedCollider->meshPath.empty())
+            animatedMesh = Owner->GetComponent<Mesh>();
+        if (animatedMesh && animatedMesh->Owner &&
+            !animatedMesh->GetVertices().empty())
+        {
+            const auto* skin = animatedMesh->Owner->GetComponent<SkinnedMesh>();
+            const std::vector<glm::mat4>* palette = skin
+                ? &skin->BuildPalette() : nullptr;
+            animatedStream = animatedMesh->BuildPortalCutTriangleStream(palette);
+            const glm::mat4 meshToBody = glm::inverse(
+                Owner->transform.GetWorldMatrix()) *
+                animatedMesh->Owner->transform.GetWorldMatrix();
+            animatedPositions.reserve(animatedStream.size());
+            for (const Mesh::Vertex& vertex : animatedStream)
+                animatedPositions.emplace_back(meshToBody * glm::vec4(
+                    vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.f));
+        }
+    }
     bool usesOwnerMeshCollider = false;
     for (Engine::Core::Component* component : Owner->Components)
     {
@@ -153,7 +229,17 @@ bool Engine::Components::RigidBody::EnsureBody()
         Engine::Physics::SameVector(m_impl->worldScale, scale) &&
         m_impl->ownerMesh == ownerMesh &&
         m_impl->ownerMeshRevision ==
-            (ownerMesh ? ownerMesh->GetConfigurationRevision() : 0);
+            (ownerMesh ? ownerMesh->GetConfigurationRevision() : 0) &&
+        m_impl->animatedMesh == animatedMesh &&
+        m_impl->animatedMeshRevision == (animatedMesh
+            ? animatedMesh->GetConfigurationRevision() : 0) &&
+        m_impl->colliderSkeleton == colliderSkeleton &&
+        m_impl->colliderSkeletonRevision == (colliderSkeleton
+            ? colliderSkeleton->GetConfigurationRevision() : 0) &&
+        m_impl->animatedVertices.size() == animatedPositions.size() &&
+        std::equal(m_impl->animatedVertices.begin(),
+            m_impl->animatedVertices.end(), animatedPositions.begin(),
+            Engine::Physics::SameVector);
     size_t colliderIndex = 0;
     // The active portal piece replaces the shapes used by the body, but the
     // authored colliders still participate in configuration invalidation.
@@ -220,6 +306,10 @@ bool Engine::Components::RigidBody::EnsureBody()
     {
         Engine::Components::Collider* collider = dynamic_cast<Engine::Components::Collider*>(component);
         if (!collider || !collider->collisionEnabled) continue;
+        if (colliderSkeleton && colliderSkeleton->UsesWholeMeshCollider() &&
+            selectedMeshCollider && collider != selectedMeshCollider) continue;
+        if (collider == selectedMeshCollider && colliderSkeleton &&
+            !colliderSkeleton->UsesWholeMeshCollider()) continue;
         btTransform child;
         child.setIdentity();
         child.setOrigin(Engine::Physics::ToBullet(collider->center * scale));
@@ -268,6 +358,8 @@ bool Engine::Components::RigidBody::EnsureBody()
             }
             else
                 mesh = Owner->GetComponent<Engine::Components::Mesh>();
+            const bool useAnimated = meshCollider == animatedCollider &&
+                !animatedPositions.empty();
             const bool indexedTerrain = mesh &&
                 mesh->UsesTerrainVertexFormat() &&
                 !mesh->GetTerrainVertices().empty() &&
@@ -275,11 +367,18 @@ bool Engine::Components::RigidBody::EnsureBody()
             if (!mesh || (mesh->GetVertices().empty() && !indexedTerrain))
                 continue;
 
-            const bool convex = meshCollider->convex || Engine::Physics::IsDynamic(*this);
+            const bool convex = (meshCollider->convex && !useAnimated) ||
+                Engine::Physics::IsDynamic(*this);
             if (convex)
             {
                 auto hull = std::make_unique<btConvexHullShape>();
-                if (indexedTerrain)
+                if (useAnimated)
+                {
+                    for (const glm::vec3& vertex : animatedPositions)
+                        hull->addPoint(btVector3(vertex.x * scale.x,
+                            vertex.y * scale.y, vertex.z * scale.z), false);
+                }
+                else if (indexedTerrain)
                 {
                     for (const Engine::Model::TerrainVertex& vertex :
                         mesh->GetTerrainVertices())
@@ -305,7 +404,23 @@ bool Engine::Components::RigidBody::EnsureBody()
             else
             {
                 auto triangles = std::make_unique<btTriangleMesh>();
-                if (indexedTerrain)
+                if (useAnimated)
+                {
+                    for (std::size_t i = 0; i + 2 < animatedPositions.size();
+                        i += 3)
+                    {
+                        const auto point = [&animatedPositions, &scale](
+                            std::size_t index)
+                        {
+                            const glm::vec3& vertex = animatedPositions[index];
+                            return btVector3(vertex.x * scale.x,
+                                vertex.y * scale.y, vertex.z * scale.z);
+                        };
+                        triangles->addTriangle(point(i), point(i + 1),
+                            point(i + 2));
+                    }
+                }
+                else if (indexedTerrain)
                 {
                     const auto& vertices = mesh->GetTerrainVertices();
                     const auto& indices = mesh->GetIndices();
@@ -390,6 +505,13 @@ bool Engine::Components::RigidBody::EnsureBody()
     m_impl->ownerMesh = ownerMesh;
     m_impl->ownerMeshRevision = ownerMesh
         ? ownerMesh->GetConfigurationRevision() : 0;
+    m_impl->animatedMesh = animatedMesh;
+    m_impl->animatedMeshRevision = animatedMesh
+        ? animatedMesh->GetConfigurationRevision() : 0;
+    m_impl->animatedVertices = std::move(animatedPositions);
+    m_impl->colliderSkeleton = colliderSkeleton;
+    m_impl->colliderSkeletonRevision = colliderSkeleton
+        ? colliderSkeleton->GetConfigurationRevision() : 0;
     m_impl->activePortalLocalMeshRevision = m_impl->portalLocalMeshRevision;
     m_impl->colliders.clear();
     for (Engine::Core::Component* component : Owner->Components)
@@ -418,6 +540,11 @@ void Engine::Components::RigidBody::DestroyBody()
     m_impl->worldScale = {};
     m_impl->colliders.clear();
     m_impl->ownerMesh = nullptr;
+    m_impl->animatedMesh = nullptr;
+    m_impl->animatedMeshRevision = 0;
+    m_impl->animatedVertices.clear();
+    m_impl->colliderSkeleton = nullptr;
+    m_impl->colliderSkeletonRevision = 0;
     m_impl->ownerMeshRevision = 0;
     m_impl->activePortalLocalMeshRevision = 0;
     m_impl->currentOverlaps.clear();

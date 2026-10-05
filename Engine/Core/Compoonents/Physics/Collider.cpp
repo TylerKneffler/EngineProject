@@ -15,6 +15,8 @@ PrimitiveObjectCollider::PrimitiveObjectCollider()
     RegisterField("size", size, "Shape");
     RegisterField("radius", radius, "Shape");
     RegisterField("height", height, "Shape");
+    RegisterField("alignToBoneChild", alignToBoneChild, "Shape");
+    RegisterField("childBone", childBone, "Shape");
 }
 
 MeshObjectCollider::MeshObjectCollider()

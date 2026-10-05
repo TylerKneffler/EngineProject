@@ -1307,15 +1307,23 @@ std::vector<Mesh::Vertex> Mesh::BuildPortalCutTriangleStream(
         for (Vertex& vertex : deformed)
         {
             glm::mat4 skin(0.f);
+            float totalWeight = 0.f;
             for (int influence = 0; influence < 4; ++influence)
             {
                 const uint32_t joint0 = static_cast<uint32_t>(vertex.joints0[influence]);
                 const uint32_t joint1 = static_cast<uint32_t>(vertex.joints1[influence]);
                 if (joint0 < skinPalette->size())
+                {
                     skin += (*skinPalette)[joint0] * vertex.weights0[influence];
+                    totalWeight += vertex.weights0[influence];
+                }
                 if (joint1 < skinPalette->size())
+                {
                     skin += (*skinPalette)[joint1] * vertex.weights1[influence];
+                    totalWeight += vertex.weights1[influence];
+                }
             }
+            if (totalWeight <= 1e-7f) continue;
             const glm::vec4 position = skin * glm::vec4(
                 vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.f);
             glm::vec3 normal = glm::mat3(skin) * glm::vec3(

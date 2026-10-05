@@ -36,36 +36,13 @@ void Sprite::OnAfterDeserialize(IGraphicsProvider* graphicsProvider)
 bool Sprite::DrawProperties(::Engine::Editor::IEditorUi& ui)
 {
     bool changed = false;
-    SpriteAnimationManager* manager = ResolveAnimationManager();
-    const std::string managerLabel = manager && manager->Owner
-        ? manager->Owner->name + " / " + manager->GetTypeName()
-        : "(default: same-object SpriteAnimationManager)";
-    ui.ValueLabel("Animation Manager", managerLabel.c_str());
-    if (ui.BeginDragDropTarget())
+    if (DrawReferenceProperty(ui, "animationManagerReference",
+        "Animation Manager", animationManagerReference))
     {
-        size_t size = 0;
-        const void* data = ui.AcceptDragDropPayload("ENGINE_COMPONENT_REORDER", &size);
-        if (data && size == sizeof(Component*))
-        {
-            Component* component = *static_cast<Component* const*>(data);
-            auto* dropped = dynamic_cast<SpriteAnimationManager*>(component);
-            if (dropped)
-            {
-                SetAnimationManager(dropped);
-                changed = true;
-            }
-        }
-        ui.EndDragDropTarget();
-    }
-    if (animationManagerReference.IsAssigned())
-    {
-        ui.SameLine();
-        if (ui.Button("Clear"))
-        {
-            animationManagerReference.Clear();
-            m_animationManager = nullptr;
-            changed = true;
-        }
+        m_animationManager = nullptr;
+        SpriteAnimationManager* manager = ResolveAnimationManager();
+        animationManager = manager ? manager->GetTypeName() : std::string{};
+        changed = true;
     }
     changed = ui.SliderInt("Sorting Layer", &sortingLayer, -1000, 1000) || changed;
     changed = ui.DragFloat("Pixels Per Unit", &pixelsPerUnit, 0.5f, 0.01f, 10000.f) || changed;

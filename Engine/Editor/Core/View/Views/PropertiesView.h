@@ -41,6 +41,7 @@ public:
         Engine::Core::Object* obj = objects.empty() ? nullptr : objects.back();
         if (obj != m_selectedObject)
         {
+            Engine::Core::Component::ClearEditorReferenceSearches();
             if (m_deferredTransformPrefabRoot)
                 m_deferredTransformPrefabRoot->PrefabOverrideCacheValid = false;
             m_deferredTransformPrefabRoot = nullptr;

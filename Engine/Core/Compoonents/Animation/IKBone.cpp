@@ -2,6 +2,7 @@
 
 #include "Core/Compoonents/Animation/AnimationBone.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
+#include "Core/Compoonents/Physics/Collider.h"
 #include "Core/Object.h"
 #include "Core/Physics/Internal/PhysicsInternal.h"
 #include "Core/Scene/Scene.h"
@@ -72,6 +73,8 @@ struct IKBone::Impl
     std::unique_ptr<btTypedConstraint> constraint;
     IKBone* constraintParent = nullptr;
     btTransform bodyToBone;
+    const PrimitiveObjectCollider* collider = nullptr;
+    uint64_t colliderRevision = 0;
 };
 
 IKBone::IKBone() : m_impl(new Impl())
@@ -81,10 +84,7 @@ IKBone::IKBone() : m_impl(new Impl())
     RegisterField("simulate", simulate, "IK Bone");
     RegisterField("activationDelay", activationDelay, "IK Bone");
     RegisterField("weight", weight, "IK Bone");
-    RegisterField("childBone", childBone, "IK Bone | Collider");
-    RegisterField("shape", shape, "IK Bone | Collider");
-    RegisterField("length", length, "IK Bone | Collider");
-    RegisterField("radius", radius, "IK Bone | Collider");
+    RegisterField("colliderReference", colliderReference, "IK Bone | Collider");
     RegisterField("mass", mass, "IK Bone | Body");
     RegisterField("friction", friction, "IK Bone | Body");
     RegisterField("linearDamping", linearDamping, "IK Bone | Body");
@@ -127,11 +127,18 @@ void IKBone::AdvanceActivation(float deltaTime)
 
 bool IKBone::WantsSimulation() const
 {
-    return simulate && Owner && Owner->IsEnabledInHierarchy() &&
-        m_elapsed >= std::max(activationDelay, 0.f);
+    if (!simulate || !Owner || !Owner->IsEnabledInHierarchy() ||
+        m_elapsed < std::max(activationDelay, 0.f)) return false;
+    const AnimationBone* bone = Owner->GetComponent<AnimationBone>();
+    for (Object* ancestor = Owner; ancestor; ancestor = ancestor->Parent)
+        if (auto* skeleton = ancestor->GetComponent<Skeleton>();
+            skeleton && bone && skeleton->skinIndex == bone->skinIndex)
+            return !skeleton->UsesWholeMeshCollider();
+    return true;
 }
 
-Engine::Core::Object* IKBone::FindSegmentChild() const
+Engine::Core::Object* IKBone::FindSegmentChild(
+    const std::string& childName) const
 {
     if (!Owner)
         return nullptr;
@@ -140,8 +147,8 @@ Engine::Core::Object* IKBone::FindSegmentChild() const
         return nullptr;
     for (AnimationBone* child : hierarchyBone->GetChildBones())
         if (child && child->Owner &&
-            ((!childBone.empty() && child->Owner->name == childBone) ||
-                (childBone.empty() && child->Owner->GetComponent<IKBone>())))
+            ((!childName.empty() && child->Owner->name == childName) ||
+                (childName.empty() && child->Owner->GetComponent<IKBone>())))
             return child->Owner;
     return nullptr;
 }
@@ -161,16 +168,38 @@ IKBone* IKBone::FindParentIKBone() const
 
 bool IKBone::EnsureBody()
 {
-    if (IsSimulating() || !WantsSimulation() || !Owner ||
+    if (!WantsSimulation() || !Owner ||
         !Owner->GetScene() || !Owner->GetComponent<AnimationBone>())
         return IsSimulating();
+
+    PrimitiveObjectCollider* collider = colliderReference.IsAssigned()
+        ? Engine::Core::ResolveComponentReference<PrimitiveObjectCollider>(
+            Owner, colliderReference) : nullptr;
+    if (!colliderReference.IsAssigned())
+        for (Component* component : Owner->Components)
+            if (auto* candidate = dynamic_cast<PrimitiveObjectCollider*>(component);
+                candidate && candidate->collisionEnabled)
+            {
+                collider = candidate;
+                break;
+            }
+    if (!collider || collider->Owner != Owner || !collider->collisionEnabled)
+    {
+        if (IsSimulating()) DestroyBody();
+        return false;
+    }
+    if (IsSimulating() && m_impl->collider == collider &&
+        m_impl->colliderRevision == collider->GetConfigurationRevision())
+        return true;
+    if (IsSimulating()) DestroyBody();
 
     const glm::mat4 boneMatrix = Owner->transform.GetWorldMatrix();
     const glm::vec3 bonePosition(boneMatrix[3]);
     const glm::quat boneRotation = MatrixRotation(boneMatrix);
-    Engine::Core::Object* segmentChild = FindSegmentChild();
+    Engine::Core::Object* segmentChild = collider->alignToBoneChild
+        ? FindSegmentChild(collider->childBone) : nullptr;
     glm::vec3 direction = boneRotation * glm::vec3(1.f, 0.f, 0.f);
-    float segmentLength = std::max(length, 0.f);
+    float segmentLength = std::max(collider->height, 0.f);
     if (segmentChild)
     {
         const glm::vec3 childPosition = segmentChild->transform.GetWorldPosition();
@@ -183,17 +212,32 @@ bool IKBone::EnsureBody()
         }
     }
 
-    const float bodyRadius = std::max(radius, 0.001f);
-    const bool sphere = Lower(shape) == "sphere" || segmentLength <= 0.001f;
-    const glm::vec3 center = sphere ? bonePosition :
-        bonePosition + direction * segmentLength * 0.5f;
-    const glm::quat bodyRotation = sphere ? boneRotation : glm::normalize(
-        glm::rotation(glm::vec3(0.f, 1.f, 0.f), direction));
+    const std::string shape = Lower(collider->shape);
+    const float bodyRadius = std::max(collider->radius, 0.001f);
+    const bool sphere = shape == "sphere" || shape == "circle" ||
+        (shape == "capsule" && segmentLength <= 0.001f);
+    const bool alongChild = collider->alignToBoneChild && !sphere &&
+        (shape == "capsule" || shape == "cylinder");
+    const glm::vec3 center = bonePosition +
+        boneRotation * collider->center +
+        (alongChild ? direction * segmentLength * 0.5f : glm::vec3(0.f));
+    const glm::quat bodyRotation = alongChild ? glm::normalize(
+        glm::rotation(glm::vec3(0.f, 1.f, 0.f), direction)) : boneRotation;
     const btTransform bodyWorld = RigidTransform(center, bodyRotation);
     const btTransform boneWorld = RigidTransform(bonePosition, boneRotation);
 
     if (sphere)
         m_impl->shape = std::make_unique<btSphereShape>(bodyRadius);
+    else if (shape == "cylinder")
+        m_impl->shape = std::make_unique<btCylinderShape>(btVector3(
+            bodyRadius, std::max(segmentLength, 0.001f) * 0.5f, bodyRadius));
+    else if (shape == "box" || shape == "cube")
+    {
+        const glm::vec3 halfSize = glm::max(glm::abs(collider->size) * 0.5f,
+            glm::vec3(0.0005f));
+        m_impl->shape = std::make_unique<btBoxShape>(
+            Engine::Physics::ToBullet(halfSize));
+    }
     else
         m_impl->shape = std::make_unique<btCapsuleShape>(bodyRadius,
             std::max(segmentLength - bodyRadius * 2.f, 0.001f));
@@ -215,6 +259,8 @@ bool IKBone::EnsureBody()
     m_impl->bodyToBone = bodyWorld.inverse() * boneWorld;
     m_impl->world = Engine::Physics::StateFor(Owner->GetScene()).world.get();
     m_impl->world->addRigidBody(m_impl->body.get());
+    m_impl->collider = collider;
+    m_impl->colliderRevision = collider->GetConfigurationRevision();
     return true;
 }
 
@@ -446,6 +492,8 @@ void IKBone::DestroyBody(bool removeFromWorld)
     m_impl->body.reset();
     m_impl->motionState.reset();
     m_impl->shape.reset();
+    m_impl->collider = nullptr;
+    m_impl->colliderRevision = 0;
     m_impl->world = nullptr;
 }
 

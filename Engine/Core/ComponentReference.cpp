@@ -47,6 +47,8 @@ ComponentReference CaptureComponentReference(const Component* component,
     if (component->Owner->GetScene()->TryGetObjectPath(component->Owner, path))
         result.objectPath = EncodePath(path);
 
+    if (component == &component->Owner->transform)
+        return result;
     for (Component* candidate : component->Owner->Components)
     {
         if (candidate == component) break;
@@ -76,6 +78,9 @@ Component* ResolveComponentReferenceRaw(Object* context,
         if (!target) target = pathTarget;
     }
     if (!target) return nullptr;
+
+    if (reference.componentType == "Transform")
+        return &target->transform;
 
     int index = 0;
     for (Component* component : target->Components)

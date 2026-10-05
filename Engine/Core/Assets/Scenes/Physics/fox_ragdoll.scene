@@ -61,5 +61,18 @@
         <Transform.scale><item>0.045</item><item>0.045</item><item>0.045</item></Transform.scale>
       </transform>
     </item>
+    <item name="Fox Mesh Contact Probe" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>8</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>0.3</item><item>0.3</item><item>0.3</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" />
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Sphere" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1" />
+        <components:RigidBody RigidBody.bodyType="Dynamic" RigidBody.mass="0.5" RigidBody.useGravity="true" RigidBody.friction="0.6" RigidBody.restitution="0" />
+      </components>
+      <children />
+    </item>
   </objects>
 </Scene>

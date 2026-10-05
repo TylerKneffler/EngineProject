@@ -719,6 +719,17 @@ if(NOT ENGINE_PROJECT_DIR AND
     )
 endif()
 
+if(NOT ENGINE_PROJECT_DIR)
+    enable_testing()
+    add_executable(FoxWholeMeshTests EXCLUDE_FROM_ALL
+        "${ENGINE_ROOT}/Engine/Tests/FoxWholeMeshTests.cpp")
+    target_link_libraries(FoxWholeMeshTests PRIVATE Engine)
+    target_include_directories(FoxWholeMeshTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME FoxWholeMeshRegression COMMAND FoxWholeMeshTests)
+    set_tests_properties(FoxWholeMeshRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
 if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PortalRaycastTests.cpp")
     enable_testing()

@@ -26,17 +26,10 @@ public:
     // bone's local pose with the simulated pose; values between blend them.
     PROPERTY(Inspector, EditAnywhere, Category = "IK Bone", Range = "0, 1")
     float weight = 1.f;
-    // Capsule follows this direct child bone. Empty selects the first child
-    // that also has an IKBone component.
+    // Reference an enabled PrimitiveObjectCollider on this bone. Empty selects
+    // the first enabled primitive collider on this bone.
     PROPERTY(Inspector, EditAnywhere, Category = "IK Bone | Collider")
-    std::string childBone;
-    PROPERTY(Inspector, EditAnywhere, Category = "IK Bone | Collider")
-    std::string shape = "Capsule"; // Capsule or Sphere
-    // Zero capsule length derives it from this bone to childBone.
-    PROPERTY(Inspector, EditAnywhere, Category = "IK Bone | Collider", ClampMin = "0")
-    float length = 0.f;
-    PROPERTY(Inspector, EditAnywhere, Category = "IK Bone | Collider", ClampMin = "0.001")
-    float radius = 0.1f;
+    ComponentReference colliderReference { "PrimitiveObjectCollider" };
 
     PROPERTY(Inspector, EditAnywhere, Category = "IK Bone | Body", ClampMin = "0.001")
     float mass = 0.5f;
@@ -90,7 +83,7 @@ private:
     void DestroyConstraint(bool removeFromWorld = true);
     void DestroyBody(bool removeFromWorld = true);
     IKBone* FindParentIKBone() const;
-    Engine::Core::Object* FindSegmentChild() const;
+    Engine::Core::Object* FindSegmentChild(const std::string& childName) const;
 
     struct Impl;
     Impl* m_impl = nullptr;

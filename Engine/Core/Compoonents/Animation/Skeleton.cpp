@@ -3,6 +3,8 @@
 #include "Model.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Compoonents/Physics/Collider.h"
+#include "Core/Compoonents/Physics/RigidBody.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 
 namespace Engine::Components
@@ -11,6 +13,8 @@ Skeleton::Skeleton()
 {
     SetTypeName(COMPONENT_TYPE_NAME(Skeleton));
     RegisterField("modelReference", modelReference);
+    RegisterField("colliderMode", colliderMode, "Collision");
+    RegisterField("meshColliderReference", meshColliderReference, "Collision");
     RegisterField("showBones", showBones);
 }
 
@@ -54,17 +58,56 @@ void Skeleton::Deserialize(const JsonValue& value)
 
 bool Skeleton::DrawProperties(::Engine::Editor::IEditorUi& ui)
 {
+    bool changed = false;
+    changed = DrawReferenceProperty(ui, "modelReference", "Model",
+        modelReference, ResolveModel()) || changed;
+    const bool wholeMesh = UsesWholeMeshCollider();
+    if (ui.Button(wholeMesh ? "Collision: Whole Mesh" : "Collision: Per Bone"))
+    {
+        colliderMode = wholeMesh ? "PerBone" : "WholeMesh";
+        changed = true;
+    }
+    if (UsesWholeMeshCollider())
+    {
+        changed = DrawReferenceProperty(ui, "meshColliderReference",
+            "Mesh Collider", meshColliderReference) || changed;
+        MeshObjectCollider* collider = ResolveMeshCollider();
+        if (!collider)
+            ui.DisabledLabel("Assign a MeshObjectCollider to enable whole-mesh collision.");
+        else if (!collider->Owner ||
+            !collider->Owner->GetComponent<RigidBody>())
+            ui.DisabledLabel("Add a Kinematic RigidBody to the collider object.");
+        else if (collider->Owner->GetComponent<RigidBody>()->bodyType == "Dynamic")
+            ui.DisabledLabel("Whole-mesh collision requires a Kinematic or Static body.");
+        else
+            ui.DisabledLabel("Mesh collider uses the current skin and morph pose.");
+    }
     const char* label = showBones ? "Hide Bones in Scene" : "Show Bones in Scene";
     if (ui.Button(label))
     {
         showBones = !showBones;
-        return true;
+        changed = true;
     }
     const std::string skin = std::to_string(skinIndex);
     const std::string bones = std::to_string(jointNodes.size());
     ui.ValueLabel("Skin", skin.c_str());
     ui.ValueLabel("Bones", bones.c_str());
-    return false;
+    if (changed) MarkConfigurationDirty();
+    return changed;
+}
+
+bool Skeleton::UsesWholeMeshCollider() const
+{
+    return colliderMode == "WholeMesh";
+}
+
+MeshObjectCollider* Skeleton::ResolveMeshCollider() const
+{
+    if (!Owner) return nullptr;
+    return meshColliderReference.IsAssigned()
+        ? Engine::Core::ResolveComponentReference<MeshObjectCollider>(
+            Owner, meshColliderReference)
+        : Owner->GetComponent<MeshObjectCollider>();
 }
 
 Skeleton::Object* Skeleton::FindNode(unsigned index) const

@@ -3,16 +3,22 @@
 #include "Core/Component.h"
 #include <cstdint>
 #include <glm/glm.hpp>
+#include <string>
 #include <vector>
 
 namespace Engine::Components
 {
 class AnimationBone;
+class MeshObjectCollider;
 class Skeleton : public Engine::Core::Component
 {
 public:
     Skeleton();
     ComponentReference modelReference { "Model" };
+    // PerBone uses collider components referenced by IKBone. WholeMesh uses
+    // one MeshObjectCollider on the skeleton root's RigidBody.
+    std::string colliderMode = "PerBone";
+    ComponentReference meshColliderReference { "MeshObjectCollider" };
     bool showBones = true;
     unsigned skinIndex = 0;
     std::vector<unsigned> jointNodes;
@@ -28,6 +34,8 @@ public:
     const std::vector<AnimationBone*>& ResolveRootBones() const;
     Object* FindNode(unsigned index) const;
     class Model* ResolveModel() const;
+    MeshObjectCollider* ResolveMeshCollider() const;
+    bool UsesWholeMeshCollider() const;
 
 private:
     uint64_t JointBindingSignature() const;

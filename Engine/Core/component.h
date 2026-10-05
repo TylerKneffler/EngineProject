@@ -54,10 +54,22 @@ public:
     // Called by the Properties panel to draw editable properties in the editor.
     // Returns true when an editor control changed serialized component data.
     virtual bool DrawProperties(::Engine::Editor::IEditorUi& ui);
+    // Shared scene target control for custom inspectors.
+    bool DrawReferenceProperty(::Engine::Editor::IEditorUi& ui,
+        const char* fieldKey, const char* label,
+        ComponentReference& reference,
+        const Component* defaultTarget = nullptr,
+        const char* defaultDescription = nullptr);
     // Draws the generic serialized inspector for matching components in a
     // multi-selection and applies each edited field to every target.
     bool DrawPropertiesMulti(::Engine::Editor::IEditorUi& ui,
         const std::vector<Component*>& targets);
+    // The generic reference picker searches the active project's asset folder.
+    static void SetEditorAssetDirectory(const std::string& path);
+    static void ClearEditorReferenceSearches();
+    static bool DrawAssetPathPicker(::Engine::Editor::IEditorUi& ui,
+        const void* context, const char* fieldKey, const char* label,
+        const char* assetKind, std::string& path);
 
     // Runtime systems use this monotonically increasing value to rebuild
     // derived state only after configuration changes. Scripts that mutate

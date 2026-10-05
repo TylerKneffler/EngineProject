@@ -58,39 +58,11 @@ SkinnedMesh::SkinnedMesh()
 bool SkinnedMesh::DrawProperties(::Engine::Editor::IEditorUi& ui)
 {
     bool changed = false;
+    changed = DrawReferenceProperty(ui, "meshReference", "Mesh",
+        meshReference) || changed;
     Mesh* mesh = Owner ? (meshReference.IsAssigned()
         ? Engine::Core::ResolveComponentReference<Mesh>(Owner, meshReference)
         : Owner->GetComponent<Mesh>()) : nullptr;
-    const std::string meshLabel = mesh && mesh->Owner
-        ? mesh->Owner->name + " / Mesh"
-        : "(default: same-object Mesh)";
-    ui.PushId("SkinnedMesh.MeshReference");
-    ui.ValueLabel("Mesh", meshLabel.c_str());
-    if (ui.BeginDragDropTarget())
-    {
-        size_t size = 0;
-        const void* data = ui.AcceptDragDropPayload(
-            "ENGINE_COMPONENT_REORDER", &size);
-        if (data && size == sizeof(Component*))
-            if (auto* dropped = dynamic_cast<Mesh*>(
-                *static_cast<Component* const*>(data)))
-            {
-                meshReference = Engine::Core::CaptureComponentReference(
-                    dropped, "Mesh");
-                changed = true;
-            }
-        ui.EndDragDropTarget();
-    }
-    if (meshReference.IsAssigned())
-    {
-        ui.SameLine();
-        if (ui.Button("Clear"))
-        {
-            meshReference.Clear();
-            changed = true;
-        }
-    }
-    ui.PopId();
 
     Skeleton* skeleton = Owner && skeletonReference.IsAssigned()
         ? Engine::Core::ResolveComponentReference<Skeleton>(
@@ -105,36 +77,8 @@ bool SkinnedMesh::DrawProperties(::Engine::Editor::IEditorUi& ui)
                     skeleton = candidate;
                     break;
                 }
-    const std::string skeletonLabel = skeleton && skeleton->Owner
-        ? skeleton->Owner->name + " / Skeleton"
-        : "(automatic: matching ancestor skin)";
-    ui.PushId("SkinnedMesh.SkeletonReference");
-    ui.ValueLabel("Skeleton", skeletonLabel.c_str());
-    if (ui.BeginDragDropTarget())
-    {
-        size_t size = 0;
-        const void* data = ui.AcceptDragDropPayload(
-            "ENGINE_COMPONENT_REORDER", &size);
-        if (data && size == sizeof(Component*))
-            if (auto* dropped = dynamic_cast<Skeleton*>(
-                *static_cast<Component* const*>(data)))
-            {
-                skeletonReference = Engine::Core::CaptureComponentReference(
-                    dropped, "Skeleton");
-                changed = true;
-            }
-        ui.EndDragDropTarget();
-    }
-    if (skeletonReference.IsAssigned())
-    {
-        ui.SameLine();
-        if (ui.Button("Clear"))
-        {
-            skeletonReference.Clear();
-            changed = true;
-        }
-    }
-    ui.PopId();
+    changed = DrawReferenceProperty(ui, "skeletonReference", "Skeleton",
+        skeletonReference, skeleton) || changed;
 
     float editedSkin = static_cast<float>(skinIndex);
     if (ui.DragFloat("Skin Index", &editedSkin, 1.f, -1.f, 10000.f))

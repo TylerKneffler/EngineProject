@@ -136,6 +136,12 @@ while dropping a compatible component header assigns an override from the same o
 another scene object. **Clear** returns to the default. References serialize with
 the scene and retain both hierarchy and object-name information so ordinary object
 renames or hierarchy moves can still resolve when one identity remains valid.
+The field shows the resolved object's hierarchy path and component type, or marks
+a missing target. The compact **...** button beside the reference opens a scene
+search for compatible objects and components by
+name or path; Transform references also accept objects dragged from the hierarchy.
+File and texture path fields use the same **...** button to search project and
+engine asset folders. The adjacent **x** clears an assigned reference or path.
 
 This is used by Sprite animation managers, audio listener cameras, skinned-mesh
 mesh/morph/skeleton inputs, animation hierarchy/source inputs, mesh colliders, and
@@ -151,6 +157,20 @@ same object. **PrimitiveObjectCollider** supports `Box`/`Cube`, `Sphere`/`Circle
 scene object, then `meshPath`, then the same-object Mesh default. Drag a Mesh
 component header onto Mesh Reference to override the default. Convex colliders support
 dynamic bodies; concave triangle meshes are used by static and kinematic bodies.
+
+For a ragdoll, set **Skeleton > Collision** to `PerBone` (the default). Each
+`IKBone` reads an enabled `PrimitiveObjectCollider` on its own bone object, or
+its explicit Collider Reference. The collider owns its shape, radius, size,
+height, and center. `Align To Bone Child` aligns capsules and cylinders toward
+the named child; height `0` derives the bone-to-child distance.
+
+For one collision surface, set the Skeleton to `WholeMesh` and assign a
+`MeshObjectCollider`. Put a `Kinematic` RigidBody on that collider's object and
+set its Mesh Reference to the skinned Mesh (which may be on a child object).
+The collider is rebuilt from the current morph and skin pose before physics;
+the skeleton's IKBone bodies are disabled in this mode. This is more expensive
+than bone primitives and does not support a dynamic ragdoll body. The selected
+mesh collider is inactive while the skeleton is in `PerBone` mode.
 
 Rigid bodies expose mass, gravity scale, linear/angular damping, friction,
 restitution, triggers, continuous collision detection, initial velocities,
