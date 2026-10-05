@@ -12,6 +12,7 @@
 #include "Core/Assets/Scripts/Gameplay/MainMenuGameManager.h"
 #include "Core/Assets/Scripts/TerrainGen/TerrainGen.h"
 #include "Core/Assets/Scripts/Portals/PortalSplitAfterDelay.h"
+#include "Core/Assets/Scripts/Physics/FoxRagdollBlend.h"
 #include "Core/Assets/Scripts/Utilities/Rotate.h"
 #endif
 
@@ -48,6 +49,8 @@ void RegisterServerComponents()
         "MainMenuGameManager");
     Engine::Serialization::RegisterComponentType<PortalSplitAfterDelay>(
         "PortalSplitAfterDelay");
+    Engine::Serialization::RegisterComponentType<FoxRagdollBlend>(
+        "FoxRagdollBlend");
 #endif
 }
 

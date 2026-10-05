@@ -637,7 +637,7 @@ set_target_properties(Server PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "${ENGINE_RUNTIME_WORKING_DIRECTORY}"
 )
 
-set(ENGINE_LOCAL_TEST_ROOT "${ENGINE_ROOT}/.local/Tests")
+set(ENGINE_LOCAL_TEST_ROOT "${ENGINE_ROOT}/.local/tests")
 
 if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/ShadowRegressionTests.cpp")
@@ -719,14 +719,26 @@ if(NOT ENGINE_PROJECT_DIR AND
     )
 endif()
 
-if(NOT ENGINE_PROJECT_DIR)
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/FoxWholeMeshTests.cpp" AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/FoxRagdollBlendTests.cpp")
     enable_testing()
     add_executable(FoxWholeMeshTests EXCLUDE_FROM_ALL
-        "${ENGINE_ROOT}/Engine/Tests/FoxWholeMeshTests.cpp")
+        "${ENGINE_LOCAL_TEST_ROOT}/FoxWholeMeshTests.cpp")
     target_link_libraries(FoxWholeMeshTests PRIVATE Engine)
     target_include_directories(FoxWholeMeshTests PRIVATE "${ENGINE_ROOT}/Engine")
     add_test(NAME FoxWholeMeshRegression COMMAND FoxWholeMeshTests)
     set_tests_properties(FoxWholeMeshRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+    add_executable(FoxRagdollBlendTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/FoxRagdollBlendTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Physics/FoxRagdollBlend.cpp")
+    target_link_libraries(FoxRagdollBlendTests PRIVATE Engine)
+    target_include_directories(FoxRagdollBlendTests PRIVATE
+        "${ENGINE_ROOT}/Engine"
+        "${ENGINE_ROOT}/Engine/Core/Assets")
+    add_test(NAME FoxRagdollBlendRegression COMMAND FoxRagdollBlendTests)
+    set_tests_properties(FoxRagdollBlendRegression PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()
 

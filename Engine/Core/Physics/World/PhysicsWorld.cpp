@@ -421,8 +421,6 @@ void Physics::Step(double deltaTime)
                     Engine::Components::IKBone*>(component))
                 ikBones.push_back(bone);
     for (Engine::Components::IKBone* bone : ikBones)
-        bone->AdvanceActivation(static_cast<float>(deltaTime));
-    for (Engine::Components::IKBone* bone : ikBones)
         bone->RemoveInvalidConstraint();
     for (Engine::Components::IKBone* bone : ikBones)
         if (!bone->WantsSimulation())

@@ -172,6 +172,13 @@ the skeleton's IKBone bodies are disabled in this mode. This is more expensive
 than bone primitives and does not support a dynamic ragdoll body. The selected
 mesh collider is inactive while the skeleton is in `PerBone` mode.
 
+The `fox_ragdoll.scene` demo has a `FoxRagdollBlend` controller. It plays the
+animation for 1.25 seconds, then blends the simulated bone pose from 0% to 100%
+over 2.5 seconds. Select the controller to see its current phase and IK
+influence. The bone components contain the physics setup; the controller owns
+the handoff timing. `fox_whole_mesh.scene` retains the animated mesh collider
+demo with a falling contact probe.
+
 Rigid bodies expose mass, gravity scale, linear/angular damping, friction,
 restitution, triggers, continuous collision detection, initial velocities,
 collision layer/mask, and per-axis position/rotation locks. Runtime scripts can

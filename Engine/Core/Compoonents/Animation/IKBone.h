@@ -20,12 +20,6 @@ public:
 
     PROPERTY(Inspector, EditAnywhere, Category = "IK Bone")
     bool simulate = true;
-    PROPERTY(Inspector, EditAnywhere, Category = "IK Bone", ClampMin = "0")
-    float activationDelay = 0.f;
-    // Zero leaves the animation pose unchanged. One fully replaces this
-    // bone's local pose with the simulated pose; values between blend them.
-    PROPERTY(Inspector, EditAnywhere, Category = "IK Bone", Range = "0, 1")
-    float weight = 1.f;
     // Reference an enabled PrimitiveObjectCollider on this bone. Empty selects
     // the first enabled primitive collider on this bone.
     PROPERTY(Inspector, EditAnywhere, Category = "IK Bone | Collider")
@@ -66,13 +60,14 @@ public:
 
     bool IsSimulating() const;
     void ResetSimulation();
-    void Start() override;
+    // Runtime pose blend supplied by the caller.
+    void SetInfluence(float value);
+    float GetInfluence() const { return m_influence; }
     void Disabled() override;
     void OnDestroy() override;
 
 private:
     friend class Engine::Physics::Physics;
-    void AdvanceActivation(float deltaTime);
     bool WantsSimulation() const;
     bool EnsureBody();
     bool EnsureConstraint();
@@ -87,6 +82,6 @@ private:
 
     struct Impl;
     Impl* m_impl = nullptr;
-    float m_elapsed = 0.f;
+    float m_influence = 1.f;
 };
 }

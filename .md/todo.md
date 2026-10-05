@@ -11,21 +11,6 @@ Status convention:
 
 ## Asset editing
 
-### Editor documents and isolated stages
-
-- [x] Route supported assets through internal document editors selected by normalized extension and, where needed, probed asset type; preserve OS associations for unsupported types.
-- [x] Name document tabs/windows from the opened filename including extension; use normalized canonical paths for hidden identity and save target, expose paths in tooltips, allow same-named files from different folders, and show dirty markers.
-- [x] Separate reusable panel names from document titles and give each document its own dirty state, undo/redo history, save strategy, selection, and dependency refresh path.
-- [x] Open scene/prefab documents, individual mesh documents, and imported model skeleton documents in independent transient editing scenes. Object child-hierarchy and Skeleton ghost visibility can be toggled; imported model documents can switch between Object and Skeleton focus.
-- [ ] Complete Asset Stage generalization: add Mesh focus switching within imported models; define and enforce each mode's minimum camera, lighting, material, skinning, and deformation dependencies; verify unrelated attachments never render and unrelated objects are never selectable across supported asset types.
-- [x] Object mode edits an isolated prefab/object root with an Include child hierarchy toggle. For non-imported prefabs, Hierarchy context actions can add children and delete non-root descendants; viewport/world creation and external asset drops are disabled. Imported model hierarchy mutation remains disabled to protect node bindings.
-- [x] Mesh mode displays one mesh, edits per-vertex position/UV/color and normalized skin influences, exposes its material component in Properties, and saves native `.mesh` data (OBJ edits save to a sibling `.mesh`).
-- [x] Mesh view provides a 2D UV island/wire preview with vertex picking, direct UV dragging, and a context action to reset the selected vertex UV.
-- [x] Skeleton mode filters hierarchy and selection to bones; supports a non-selectable associated skinned-mesh ghost, bone overlays, Apply Rest Pose, and temporary animation preview with clip selection, playback, looping, speed, scrubbing, and snapshot restoration on stop.
-- [x] `SceneView` accepts document-scoped selection, creation, drop, transform, and tool-drawing controls; Hierarchy and Properties use the focused document/selection.
-- [ ] Add safe Skeleton-stage context actions, editable dependency projections in Properties, and focused-stage component/dependency creation without admitting unrelated objects or invalidating model bindings.
-- [x] Keep `AssetPreviewCache` thumbnail-only. Interactive single-asset editing reuses the independent `SceneView` document path rather than adding a second viewport implementation.
-
 ### Mesh authoring
 
 - [ ] Add a dedicated Mesh Edit stage with vertex, edge, and face selection; box/lasso selection; transforms with snapping and configurable pivots; extrude, inset, bevel, loop cut, weld, split, delete, duplicate, bridge, and fill operations; and undo/redo.

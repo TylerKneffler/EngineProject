@@ -16,6 +16,7 @@
 #include "Core/Assets/Scripts/Utilities/Rotate.h"
 #include "Core/Assets/Scripts/Controllers/FirstPersonController.h"
 #include "Core/Assets/Scripts/Portals/PortalSplitAfterDelay.h"
+#include "Core/Assets/Scripts/Physics/FoxRagdollBlend.h"
 #include "Core/Serialization/SceneSerializer.h"
 #endif
 #include <filesystem>
@@ -118,6 +119,8 @@ int WINAPI wWinMain(
     Engine::Serialization::RegisterComponentType<FirstPersonController>("FirstPersonController");
     Engine::Serialization::RegisterComponentType<PortalSplitAfterDelay>(
         "PortalSplitAfterDelay");
+    Engine::Serialization::RegisterComponentType<FoxRagdollBlend>(
+        "FoxRagdollBlend");
 #endif
     HRESULT comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     WriteStartupLog("Editor startup", true);

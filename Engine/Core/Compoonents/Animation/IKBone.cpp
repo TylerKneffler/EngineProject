@@ -82,8 +82,6 @@ IKBone::IKBone() : m_impl(new Impl())
     SetTypeName(COMPONENT_TYPE_NAME(IKBone));
     singlecomponent = true;
     RegisterField("simulate", simulate, "IK Bone");
-    RegisterField("activationDelay", activationDelay, "IK Bone");
-    RegisterField("weight", weight, "IK Bone");
     RegisterField("colliderReference", colliderReference, "IK Bone | Collider");
     RegisterField("mass", mass, "IK Bone | Body");
     RegisterField("friction", friction, "IK Bone | Body");
@@ -114,21 +112,14 @@ IKBone::~IKBone()
     delete m_impl;
 }
 
-void IKBone::Start()
+void IKBone::SetInfluence(float value)
 {
-    m_elapsed = 0.f;
-}
-
-void IKBone::AdvanceActivation(float deltaTime)
-{
-    if (simulate && !IsSimulating())
-        m_elapsed += std::max(deltaTime, 0.f);
+    m_influence = std::clamp(value, 0.f, 1.f);
 }
 
 bool IKBone::WantsSimulation() const
 {
-    if (!simulate || !Owner || !Owner->IsEnabledInHierarchy() ||
-        m_elapsed < std::max(activationDelay, 0.f)) return false;
+    if (!simulate || !Owner || !Owner->IsEnabledInHierarchy()) return false;
     const AnimationBone* bone = Owner->GetComponent<AnimationBone>();
     for (Object* ancestor = Owner; ancestor; ancestor = ancestor->Parent)
         if (auto* skeleton = ancestor->GetComponent<Skeleton>();
@@ -395,7 +386,7 @@ void IKBone::SyncBoneFromBody()
         Transform::EditorPosition);
     const bool overrideRotation = Owner->transform.HasEditorOverride(
         Transform::EditorRotation);
-    const float influence = std::clamp(weight, 0.f, 1.f);
+    const float influence = m_influence;
     if (influence <= 0.f)
         return;
     const btTransform boneWorld = m_impl->body->getWorldTransform() *
@@ -501,7 +492,6 @@ void IKBone::ResetSimulation()
 {
     DestroyConstraint();
     DestroyBody();
-    m_elapsed = 0.f;
 }
 
 void IKBone::Disabled()

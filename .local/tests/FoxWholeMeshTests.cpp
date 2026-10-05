@@ -13,7 +13,7 @@ int main()
     using namespace Engine::Components;
     Engine::Scene::Scene scene;
     if (!Engine::Serialization::SceneSerializer::Load(scene,
-            "Engine/Core/Assets/Scenes/Physics/fox_ragdoll.scene", nullptr))
+            "Engine/Core/Assets/Scenes/Physics/fox_whole_mesh.scene", nullptr))
         return 1;
     auto* fox = scene.FindObjectByName("Fox");
     auto* skeleton = fox ? fox->GetComponent<Skeleton>() : nullptr;

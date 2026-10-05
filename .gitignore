@@ -1,7 +1,13 @@
 build/
 .vs/
 .vscode/settings.json
-.local/
+/AGENTS.md
+.local/*
+!.local/tests/
+.local/tests/**
+!.local/tests/FoxWholeMeshTests.cpp
+!.local/tests/FoxRagdollBlendTests.cpp
+build
 editor-startup.log
 project-build.log
 ReleaseBuilds/.staging-*/

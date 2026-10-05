@@ -14,6 +14,7 @@
 #include "Core/Assets/Scripts/Controllers/FirstPersonController.h"
 #include "Core/Assets/Scripts/Gameplay/MainMenuGameManager.h"
 #include "Core/Assets/Scripts/Portals/PortalSplitAfterDelay.h"
+#include "Core/Assets/Scripts/Physics/FoxRagdollBlend.h"
 #include "Core/Serialization/SceneSerializer.h"
 #endif
 
@@ -29,6 +30,8 @@ void RegisterGameComponents()
     ::Engine::Serialization::RegisterComponentType<MainMenuGameManager>("MainMenuGameManager");
     ::Engine::Serialization::RegisterComponentType<PortalSplitAfterDelay>(
         "PortalSplitAfterDelay");
+    ::Engine::Serialization::RegisterComponentType<FoxRagdollBlend>(
+        "FoxRagdollBlend");
 #endif
 }
 
