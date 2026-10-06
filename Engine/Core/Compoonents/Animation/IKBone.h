@@ -9,6 +9,7 @@ namespace Engine::Physics { class Physics; }
 
 namespace Engine::Components
 {
+class RigidBody;
 // One independently authored rigid segment of an animated skeleton. Attach it
 // directly to an AnimationBone object. A collection of IKBone components forms a
 // ragdoll; no separate ragdoll controller or generated bone list is required.
@@ -20,6 +21,10 @@ public:
 
     PROPERTY(Inspector, EditAnywhere, Category = "IK Bone")
     bool simulate = true;
+    // Drive the skin pose in MeshCollider mode without using this segment for
+    // collision contacts. The skeleton's mesh body owns world contacts.
+    PROPERTY(Inspector, EditAnywhere, Category = "IK Bone")
+    bool poseOnlyWithMeshCollider = false;
     // Reference an enabled PrimitiveObjectCollider on this bone. Empty selects
     // the first enabled primitive collider on this bone.
     PROPERTY(Inspector, EditAnywhere, Category = "IK Bone | Collider")
@@ -49,8 +54,9 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "IK Bone | Joint", Range = "0, 3.14159")
     float hingeLimit = 1.2f;
     // Spring joints return toward the authored pose captured when simulation
-    // starts. Stiffness is torque per radian; damping is Bullet's normalized
-    // damping ratio (zero is undamped, one is strongly damped).
+    // starts. Mesh-collider contact response also uses these values when this
+    // bone has a Spring joint. Stiffness is torque per radian; damping is a
+    // normalized ratio (zero is undamped, one is strongly damped).
     PROPERTY(Inspector, EditAnywhere, Category = "IK Bone | Joint | Spring", ClampMin = "0")
     float springStiffness = 20.f;
     PROPERTY(Inspector, EditAnywhere, Category = "IK Bone | Joint | Spring", Range = "0, 1")
@@ -59,6 +65,8 @@ public:
     bool collideWithParent = false;
 
     bool IsSimulating() const;
+    bool GetContactSeparation(const RigidBody* other,
+        float& deepestSeparation) const;
     void ResetSimulation();
     // Runtime pose blend supplied by the caller.
     void SetInfluence(float value);
@@ -69,6 +77,7 @@ public:
 private:
     friend class Engine::Physics::Physics;
     bool WantsSimulation() const;
+    bool UsesMeshColliderPoseOnly() const;
     bool EnsureBody();
     bool EnsureConstraint();
     bool HasManualEditInHierarchy() const;

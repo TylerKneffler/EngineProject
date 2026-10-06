@@ -720,15 +720,18 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
-   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/FoxWholeMeshTests.cpp" AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/FoxMeshColliderTests.cpp" AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/FoxRagdollBlendTests.cpp")
     enable_testing()
-    add_executable(FoxWholeMeshTests EXCLUDE_FROM_ALL
-        "${ENGINE_LOCAL_TEST_ROOT}/FoxWholeMeshTests.cpp")
-    target_link_libraries(FoxWholeMeshTests PRIVATE Engine)
-    target_include_directories(FoxWholeMeshTests PRIVATE "${ENGINE_ROOT}/Engine")
-    add_test(NAME FoxWholeMeshRegression COMMAND FoxWholeMeshTests)
-    set_tests_properties(FoxWholeMeshRegression PROPERTIES
+    add_executable(FoxMeshColliderTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/FoxMeshColliderTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Physics/FoxRagdollBlend.cpp")
+    target_link_libraries(FoxMeshColliderTests PRIVATE Engine)
+    target_include_directories(FoxMeshColliderTests PRIVATE
+        "${ENGINE_ROOT}/Engine"
+        "${ENGINE_ROOT}/Engine/Core/Assets")
+    add_test(NAME FoxMeshColliderRegression COMMAND FoxMeshColliderTests)
+    set_tests_properties(FoxMeshColliderRegression PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}")
     add_executable(FoxRagdollBlendTests EXCLUDE_FROM_ALL
         "${ENGINE_LOCAL_TEST_ROOT}/FoxRagdollBlendTests.cpp"

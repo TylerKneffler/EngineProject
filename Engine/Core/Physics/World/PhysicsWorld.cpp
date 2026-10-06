@@ -1,7 +1,9 @@
 #include "Core/Physics/Physics.h"
 #include "Core/Compoonents/Physics/Cloth.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
+#include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include "Core/Compoonents/Animation/IKBone.h"
+#include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Physics/Internal/PhysicsInternal.h"
@@ -388,6 +390,23 @@ PhysicsWorldState::PhysicsWorldState()
 void Physics::Step(double deltaTime)
 {
     Engine::Scene::Scene& scene = *m_impl->scene;
+    std::vector<Engine::Components::MeshObjectCollider*> meshColliders;
+    for (const auto& object : scene.GetObjects())
+        for (Engine::Core::Component* component : object->Components)
+            if (auto* collider = dynamic_cast<
+                    Engine::Components::MeshObjectCollider*>(component))
+            {
+                collider->BeginContactFrame();
+                meshColliders.push_back(collider);
+            }
+    // Animation updates objects before this step. Restore the previous
+    // pose-only IK result before a deforming mesh collider samples the
+    // skin, so the collision hull matches the pose that is rendered.
+    for (const auto& object : scene.GetObjects())
+        for (Engine::Core::Component* component : object->Components)
+            if (auto* bone = dynamic_cast<Engine::Components::IKBone*>(component);
+                bone && bone->UsesMeshColliderPoseOnly() && bone->IsSimulating())
+                bone->SyncBoneFromBody();
     std::vector<Engine::Components::RigidBody*> bodies;
     std::vector<Engine::Components::Cloth*> clothBodies;
     std::vector<Engine::Components::IKBone*> ikBones;
@@ -518,11 +537,20 @@ void Physics::Step(double deltaTime)
                         firstUp) > 0.5f)
                     first->m_isGrounded = true;
                 if (first->Owner)
+                {
+                    if (auto* mesh = first->Owner->GetComponent<
+                            Engine::Components::MeshObjectCollider>();
+                        mesh && mesh->IsActiveForBody(first))
+                        mesh->RecordContact(second,
+                            Engine::Physics::ToGlm(point.getPositionWorldOnA()),
+                            Engine::Physics::ToGlm(point.m_normalWorldOnB),
+                            point.getDistance(), point.getAppliedImpulse());
                     if (auto* cloth = first->Owner->GetComponent<Engine::Components::Cloth>())
                         cloth->NotifyRigidBodyCollision(
                             Engine::Physics::ToGlm(point.m_normalWorldOnB),
                             Engine::Physics::ToGlm(point.getPositionWorldOnA()),
                             point.getAppliedImpulse());
+                }
             }
             if (second)
             {
@@ -532,14 +560,32 @@ void Physics::Step(double deltaTime)
                         secondUp) > 0.5f)
                     second->m_isGrounded = true;
                 if (second->Owner)
+                {
+                    if (auto* mesh = second->Owner->GetComponent<
+                            Engine::Components::MeshObjectCollider>();
+                        mesh && mesh->IsActiveForBody(second))
+                        mesh->RecordContact(first,
+                            Engine::Physics::ToGlm(point.getPositionWorldOnB()),
+                            -Engine::Physics::ToGlm(point.m_normalWorldOnB),
+                            point.getDistance(), point.getAppliedImpulse());
                     if (auto* cloth = second->Owner->GetComponent<Engine::Components::Cloth>())
                         cloth->NotifyRigidBodyCollision(
                             -Engine::Physics::ToGlm(point.m_normalWorldOnB),
                             Engine::Physics::ToGlm(point.getPositionWorldOnB()),
                             point.getAppliedImpulse());
+                }
             }
         }
     }
+    for (Engine::Components::MeshObjectCollider* collider : meshColliders)
+        collider->ResolveContactSurfaces();
+    if (m_impl->lastSubstepCount > 0)
+        for (const auto& object : scene.GetObjects())
+            for (Engine::Core::Component* component : object->Components)
+                if (auto* skeleton = dynamic_cast<
+                        Engine::Components::Skeleton*>(component))
+                    skeleton->ApplyMeshContactResponse(static_cast<float>(
+                        m_impl->lastSubstepCount * m_impl->fixedStepSeconds));
     for (Engine::Components::Cloth* cloth : clothBodies)
         if (cloth->collisionMorph)
             cloth->UpdateCollisionMorph(static_cast<float>(boundedDelta));
@@ -548,6 +594,16 @@ void Physics::Step(double deltaTime)
 void Physics::Reset()
 {
     Engine::Scene::Scene& scene = *m_impl->scene;
+    for (const auto& object : scene.GetObjects())
+        for (Engine::Core::Component* component : object->Components)
+            if (auto* skeleton = dynamic_cast<
+                    Engine::Components::Skeleton*>(component))
+                skeleton->ResetMeshContactResponse();
+    for (const auto& object : scene.GetObjects())
+        for (Engine::Core::Component* component : object->Components)
+            if (auto* collider = dynamic_cast<
+                    Engine::Components::MeshObjectCollider*>(component))
+                collider->BeginContactFrame();
     for (const auto& object : scene.GetObjects())
         for (Engine::Core::Component* component : object->Components)
             if (auto* body = dynamic_cast<Engine::Components::RigidBody*>(component)) body->DestroyBody();

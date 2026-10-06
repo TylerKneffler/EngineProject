@@ -4,7 +4,8 @@
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Compoonents/Materials/Material.h"
-#include "Core/Compoonents/Physics/Collider.h"
+#include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
+#include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include "Core/Physics/Physics.h"
 #include "Core/Scene/Scene.h"
 #include <algorithm>

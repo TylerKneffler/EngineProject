@@ -19,7 +19,7 @@
       </Transform.scale>
     </transform>
     <components>
-      <components:Skeleton Skeleton.showBones="true" Skeleton.skinIndex="0" Skeleton.colliderMode="WholeMesh">
+      <components:Skeleton Skeleton.showBones="true" Skeleton.skinIndex="0" Skeleton.colliderMode="MeshCollider">
         <Skeleton.modelReference expectedType="Model" objectPath="" objectName="" componentType="" componentIndex="0" />
         <Skeleton.joints>
           <item>2</item>

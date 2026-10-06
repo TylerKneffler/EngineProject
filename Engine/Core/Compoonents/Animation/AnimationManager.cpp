@@ -283,6 +283,7 @@ AnimationManager::AnimationManager()
     RegisterField("animationSourceReference", animationSourceReference);
     RegisterField("clip", clip);
     RegisterField("playing", playing);
+    RegisterField("holdCurrentPoseWhenStopped", holdCurrentPoseWhenStopped);
     RegisterField("looping", looping);
     RegisterField("speed", speed);
     RegisterField("time", time);
@@ -381,6 +382,8 @@ void AnimationManager::Update()
 
 void AnimationManager::Tick(float frameDelta)
 {
+    if (!playing && holdCurrentPoseWhenStopped)
+        return;
     if (m_restPose.empty()) Start();
     frameDelta = std::max(frameDelta, 0.f);
     const float delta = playing ? frameDelta : 0.f;

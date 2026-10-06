@@ -164,20 +164,23 @@ its explicit Collider Reference. The collider owns its shape, radius, size,
 height, and center. `Align To Bone Child` aligns capsules and cylinders toward
 the named child; height `0` derives the bone-to-child distance.
 
-For one collision surface, set the Skeleton to `WholeMesh` and assign a
+For one collision surface, set the Skeleton to `MeshCollider` and assign a
 `MeshObjectCollider`. Put a `Kinematic` RigidBody on that collider's object and
 set its Mesh Reference to the skinned Mesh (which may be on a child object).
-The collider is rebuilt from the current morph and skin pose before physics;
-the skeleton's IKBone bodies are disabled in this mode. This is more expensive
-than bone primitives and does not support a dynamic ragdoll body. The selected
-mesh collider is inactive while the skeleton is in `PerBone` mode.
+The collider follows the current morph and skin pose. Static and kinematic
+bodies can use the triangle mesh; dynamic bodies use a convex hull. In this
+mode the mesh owns world contacts, while the skeleton distributes mapped
+contact impulses to weighted bones as bounded pose changes. Bone contact
+bends persist; animation and IK can change the underlying pose, while a bone
+with a Spring joint can recover its contact bend. The selected mesh collider
+is inactive in `PerBone` mode.
 
 The `fox_ragdoll.scene` demo has a `FoxRagdollBlend` controller. It plays the
 animation for 1.25 seconds, then blends the simulated bone pose from 0% to 100%
 over 2.5 seconds. Select the controller to see its current phase and IK
 influence. The bone components contain the physics setup; the controller owns
-the handoff timing. `fox_whole_mesh.scene` retains the animated mesh collider
-demo with a falling contact probe.
+the handoff timing. `fox_mesh_collider.scene` demonstrates the animated mesh
+collider, a falling contact probe, and bone response after impact.
 
 Rigid bodies expose mass, gravity scale, linear/angular damping, friction,
 restitution, triggers, continuous collision detection, initial velocities,

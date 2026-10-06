@@ -170,6 +170,12 @@ const std::vector<glm::mat4>& SkinnedMesh::BuildPalette() const
     return m_palette;
 }
 
+Skeleton* SkinnedMesh::ResolveSkeleton() const
+{
+    ResolveBindings();
+    return m_cachedSkeleton;
+}
+
 SkinnedMesh::JsonValue SkinnedMesh::Serialize() const
 {
     JsonValue result = Component::Serialize().Set("skinIndex", JsonValue(skinIndex));

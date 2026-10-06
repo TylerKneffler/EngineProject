@@ -3,6 +3,12 @@ build/
 .vscode/settings.json
 /AGENTS.md
 .local/
+!.local/
+.local/*
+!.local/tests/
+.local/tests/*
+!.local/tests/FoxRagdollBlendTests.cpp
+!.local/tests/FoxMeshColliderTests.cpp
 build
 editor-startup.log
 project-build.log

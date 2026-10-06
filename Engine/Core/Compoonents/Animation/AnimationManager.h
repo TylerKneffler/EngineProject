@@ -24,6 +24,9 @@ public:
     ComponentReference animationSourceReference { "Animation" };
     std::string clip;
     bool playing = true;
+    // Keep the current skeletal transforms when playback stops, including
+    // an IK-blended pose authored by another component.
+    bool holdCurrentPoseWhenStopped = false;
     bool looping = true;
     float speed = 1.f;
     float time = 0.f;

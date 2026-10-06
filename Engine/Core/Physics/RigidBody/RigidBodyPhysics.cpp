@@ -1,5 +1,6 @@
 #include "Core/Physics/Physics.h"
-#include "Core/Compoonents/Physics/Collider.h"
+#include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
+#include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
@@ -139,8 +140,8 @@ bool Engine::Components::RigidBody::EnsureBody()
         return false;
     }
     const glm::vec3 scale = Engine::Physics::WorldScale(*Owner);
-    // A whole-mesh Skeleton uses the selected MeshObjectCollider as one
-    // kinematic collision surface. Build its CPU pose before the Bullet step.
+    // A mesh-collider Skeleton uses the selected MeshObjectCollider as one
+    // collision surface. Dynamic bodies use a convex hull of its current pose.
     const MeshObjectCollider* selectedMeshCollider = nullptr;
     const MeshObjectCollider* animatedCollider = nullptr;
     const Skeleton* colliderSkeleton = nullptr;
@@ -152,13 +153,11 @@ bool Engine::Components::RigidBody::EnsureBody()
         if (auto* skeleton = ancestor->GetComponent<Skeleton>())
         {
             auto* selected = skeleton->ResolveMeshCollider();
-            if (selected && selected->Owner == Owner &&
-                (skeleton->UsesWholeMeshCollider() ||
-                    skeleton->meshColliderReference.IsAssigned()))
+            if (selected && selected->Owner == Owner)
             {
                 colliderSkeleton = skeleton;
                 selectedMeshCollider = selected;
-                if (skeleton->UsesWholeMeshCollider() &&
+                if (skeleton->UsesMeshCollider() &&
                     selected->collisionEnabled)
                     animatedCollider = selected;
             }
@@ -173,20 +172,13 @@ bool Engine::Components::RigidBody::EnsureBody()
                 if (!selected || selected->Owner != Owner) continue;
                 colliderSkeleton = skeleton;
                 selectedMeshCollider = selected;
-                if (skeleton->UsesWholeMeshCollider() &&
+                if (skeleton->UsesMeshCollider() &&
                     selected->collisionEnabled)
                     animatedCollider = selected;
                 break;
             }
     if (animatedCollider)
     {
-        // A deforming concave triangle surface cannot be a dynamic Bullet
-        // rigid body. Whole-mesh mode requires a kinematic (or static) body.
-        if (Engine::Physics::IsDynamic(*this))
-        {
-            DestroyBody();
-            return false;
-        }
         if (animatedCollider->meshReference.IsAssigned())
             animatedMesh = Engine::Core::ResolveComponentReference<Mesh>(
                 Owner, animatedCollider->meshReference);
@@ -306,10 +298,10 @@ bool Engine::Components::RigidBody::EnsureBody()
     {
         Engine::Components::Collider* collider = dynamic_cast<Engine::Components::Collider*>(component);
         if (!collider || !collider->collisionEnabled) continue;
-        if (colliderSkeleton && colliderSkeleton->UsesWholeMeshCollider() &&
+        if (colliderSkeleton && colliderSkeleton->UsesMeshCollider() &&
             selectedMeshCollider && collider != selectedMeshCollider) continue;
         if (collider == selectedMeshCollider && colliderSkeleton &&
-            !colliderSkeleton->UsesWholeMeshCollider()) continue;
+            !colliderSkeleton->UsesMeshCollider()) continue;
         btTransform child;
         child.setIdentity();
         child.setOrigin(Engine::Physics::ToBullet(collider->center * scale));

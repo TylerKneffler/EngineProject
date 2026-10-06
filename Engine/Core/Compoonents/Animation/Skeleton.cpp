@@ -1,20 +1,49 @@
 #include "Skeleton.h"
 #include "AnimationBone.h"
+#include "IKBone.h"
 #include "Model.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/Physics/Collider.h"
+#include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
+#include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Engine/Editor/UI/IEditorUi.h"
+#include <algorithm>
+#include <cctype>
+#include <cmath>
 
 namespace Engine::Components
 {
+namespace
+{
+std::string LowerJointType(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(),
+        [](unsigned char character) { return static_cast<char>(
+            std::tolower(character)); });
+    return value;
+}
+
+void ClampJointAxis(float& angle, float& velocity, float limit)
+{
+    const float bounded = std::clamp(angle, -std::max(limit, 0.f),
+        std::max(limit, 0.f));
+    if (angle != bounded && velocity * angle > 0.f)
+        velocity = 0.f;
+    angle = bounded;
+}
+}
+
 Skeleton::Skeleton()
 {
     SetTypeName(COMPONENT_TYPE_NAME(Skeleton));
     RegisterField("modelReference", modelReference);
     RegisterField("colliderMode", colliderMode, "Collision");
     RegisterField("meshColliderReference", meshColliderReference, "Collision");
+    RegisterField("meshContactResponseEnabled", meshContactResponseEnabled, "Collision | Bone Response");
+    RegisterField("meshContactResponseStrength", meshContactResponseStrength, "Collision | Bone Response");
+    RegisterField("meshContactDamping", meshContactDamping, "Collision | Bone Response");
+    RegisterField("meshContactMaxBend", meshContactMaxBend, "Collision | Bone Response");
     RegisterField("showBones", showBones);
 }
 
@@ -54,6 +83,7 @@ void Skeleton::Deserialize(const JsonValue& value)
     }
     m_modelCacheValid = false;
     m_cachedJoints.clear();
+    ResetMeshContactResponse();
 }
 
 bool Skeleton::DrawProperties(::Engine::Editor::IEditorUi& ui)
@@ -61,26 +91,37 @@ bool Skeleton::DrawProperties(::Engine::Editor::IEditorUi& ui)
     bool changed = false;
     changed = DrawReferenceProperty(ui, "modelReference", "Model",
         modelReference, ResolveModel()) || changed;
-    const bool wholeMesh = UsesWholeMeshCollider();
-    if (ui.Button(wholeMesh ? "Collision: Whole Mesh" : "Collision: Per Bone"))
+    const bool meshColliderMode = UsesMeshCollider();
+    if (ui.Button(meshColliderMode ? "Collision: Mesh Collider" : "Collision: Per Bone"))
     {
-        colliderMode = wholeMesh ? "PerBone" : "WholeMesh";
+        colliderMode = meshColliderMode ? "PerBone" : "MeshCollider";
         changed = true;
     }
-    if (UsesWholeMeshCollider())
+    if (UsesMeshCollider())
     {
         changed = DrawReferenceProperty(ui, "meshColliderReference",
             "Mesh Collider", meshColliderReference) || changed;
         MeshObjectCollider* collider = ResolveMeshCollider();
         if (!collider)
-            ui.DisabledLabel("Assign a MeshObjectCollider to enable whole-mesh collision.");
+            ui.DisabledLabel("Assign a MeshObjectCollider to enable mesh collision.");
         else if (!collider->Owner ||
             !collider->Owner->GetComponent<RigidBody>())
             ui.DisabledLabel("Add a Kinematic RigidBody to the collider object.");
         else if (collider->Owner->GetComponent<RigidBody>()->bodyType == "Dynamic")
-            ui.DisabledLabel("Whole-mesh collision requires a Kinematic or Static body.");
+            ui.DisabledLabel("Dynamic mesh collision uses a convex hull of the current pose.");
         else
             ui.DisabledLabel("Mesh collider uses the current skin and morph pose.");
+        changed = ui.Checkbox("Bone Contact Response",
+            &meshContactResponseEnabled) || changed;
+        if (meshContactResponseEnabled)
+        {
+            changed = ui.DragFloat("Contact Strength",
+                &meshContactResponseStrength, 0.1f, 0.f, 100.f) || changed;
+            changed = ui.DragFloat("Contact Damping",
+                &meshContactDamping, 0.1f, 0.f, 100.f) || changed;
+            changed = ui.DragFloat("Maximum Bend (Radians)",
+                &meshContactMaxBend, 0.01f, 0.f, 1.57f) || changed;
+        }
     }
     const char* label = showBones ? "Hide Bones in Scene" : "Show Bones in Scene";
     if (ui.Button(label))
@@ -96,9 +137,139 @@ bool Skeleton::DrawProperties(::Engine::Editor::IEditorUi& ui)
     return changed;
 }
 
-bool Skeleton::UsesWholeMeshCollider() const
+bool Skeleton::UsesMeshCollider() const
 {
-    return colliderMode == "WholeMesh";
+    return colliderMode == "MeshCollider";
+}
+
+void Skeleton::ResetMeshContactResponse()
+{
+    m_contactBoneStates.clear();
+}
+
+void Skeleton::ApplyMeshContactResponse(float stepSeconds)
+{
+    MeshObjectCollider* collider = UsesMeshCollider()
+        ? ResolveMeshCollider() : nullptr;
+    RigidBody* rootBody = collider && collider->Owner
+        ? collider->Owner->GetComponent<RigidBody>() : nullptr;
+    if (!meshContactResponseEnabled || !collider || !collider->collisionEnabled ||
+        !rootBody)
+    {
+        ResetMeshContactResponse();
+        return;
+    }
+    if (!std::isfinite(stepSeconds) || stepSeconds <= 0.f) return;
+    const float dt = std::min(stepSeconds, 0.1f);
+    const auto& bones = ResolveBones();
+    for (auto it = m_contactBoneStates.begin();
+        it != m_contactBoneStates.end();)
+        if (std::find(bones.begin(), bones.end(), it->first) == bones.end())
+            it = m_contactBoneStates.erase(it);
+        else
+            ++it;
+    for (AnimationBone* bone : bones)
+        if (bone && bone->Owner)
+        {
+            auto [it, inserted] = m_contactBoneStates.try_emplace(bone);
+            const glm::quat current(bone->Owner->transform.rotation);
+            // Animation or IK may have written a new pose since the last
+            // physics step. Treat it as the new base while retaining the
+            // accumulated contact bend.
+            if (inserted || !it->second.hasAppliedPose ||
+                std::abs(glm::dot(current,
+                    it->second.lastAppliedRotation)) < 0.99999f)
+                it->second.baseRotation = current;
+        }
+
+    for (const MeshObjectCollider::Contact& contact : collider->GetContacts())
+    {
+        if (!contact.surfaceMapped || contact.normalImpulse <= 0.f) continue;
+        const glm::vec3 force = contact.normalWorld *
+            std::min(contact.normalImpulse, 5.f);
+        for (uint8_t index = 0; index < contact.boneWeightCount; ++index)
+        {
+            const MeshObjectCollider::BoneWeight& influence =
+                contact.boneWeights[index];
+            AnimationBone* bone = influence.bone;
+            if (!bone || !bone->Owner || influence.weight <= 0.f ||
+                std::find(bones.begin(), bones.end(), bone) == bones.end())
+                continue;
+            const glm::vec3 arm = contact.surfacePointWorld -
+                bone->Owner->transform.GetWorldPosition();
+            glm::vec3 torque = glm::cross(arm, force);
+            if (bone->Owner->Parent)
+                torque = glm::mat3(glm::inverse(
+                    bone->Owner->Parent->transform.GetWorldMatrix())) * torque;
+            if (!std::isfinite(torque.x) || !std::isfinite(torque.y) ||
+                !std::isfinite(torque.z))
+                continue;
+            m_contactBoneStates[bone].angularVelocity +=
+                torque * influence.weight *
+                std::max(meshContactResponseStrength, 0.f);
+        }
+    }
+
+    for (auto& [bone, state] : m_contactBoneStates)
+    {
+        if (!bone || !bone->Owner) continue;
+        const float speed = glm::length(state.angularVelocity);
+        if (speed > 8.f)
+            state.angularVelocity *= 8.f / speed;
+        float spring = 0.f;
+        float damping = std::max(meshContactDamping, 0.f);
+        IKBone* joint = bone->Owner->GetComponent<IKBone>();
+        const bool hasParentJoint = joint && joint->connectToParent &&
+            bone->GetParentBone();
+        const std::string jointType = hasParentJoint
+            ? LowerJointType(joint->jointType) : std::string();
+        if (jointType == "spring" && !joint->IsSimulating())
+        {
+            spring = std::max(joint->springStiffness, 0.f);
+            damping = std::max(damping, 2.f * std::sqrt(spring) *
+                std::clamp(joint->springDamping, 0.f, 1.f));
+        }
+        state.angularVelocity -= spring * state.offset * dt;
+        state.angularVelocity *= std::exp(-damping * dt);
+        state.offset += state.angularVelocity * dt;
+        if (jointType == "fixed")
+        {
+            state.offset = glm::vec3(0.f);
+            state.angularVelocity = glm::vec3(0.f);
+        }
+        else if (jointType == "hinge")
+        {
+            ClampJointAxis(state.offset.x, state.angularVelocity.x, 0.f);
+            ClampJointAxis(state.offset.y, state.angularVelocity.y, 0.f);
+            ClampJointAxis(state.offset.z, state.angularVelocity.z,
+                joint->hingeLimit);
+        }
+        else if (hasParentJoint)
+        {
+            ClampJointAxis(state.offset.x, state.angularVelocity.x,
+                joint->twistLimit);
+            ClampJointAxis(state.offset.y, state.angularVelocity.y,
+                joint->swingLimit);
+            ClampJointAxis(state.offset.z, state.angularVelocity.z,
+                joint->swingLimit);
+        }
+        const float limit = std::max(meshContactMaxBend, 0.f);
+        const float bend = glm::length(state.offset);
+        if (bend > limit && bend > 0.f)
+        {
+            state.offset *= limit / bend;
+            state.angularVelocity *= 0.5f;
+        }
+        const float appliedBend = glm::length(state.offset);
+        const glm::quat bendRotation = appliedBend > 1e-6f
+            ? glm::angleAxis(appliedBend, state.offset / appliedBend)
+            : glm::quat(1.f, 0.f, 0.f, 0.f);
+        state.lastAppliedRotation = glm::normalize(
+            bendRotation * state.baseRotation);
+        state.hasAppliedPose = true;
+        bone->Owner->transform.rotation = glm::eulerAngles(
+            state.lastAppliedRotation);
+    }
 }
 
 MeshObjectCollider* Skeleton::ResolveMeshCollider() const

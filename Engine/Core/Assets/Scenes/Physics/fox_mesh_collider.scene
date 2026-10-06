@@ -74,5 +74,16 @@
       </components>
       <children />
     </item>
+    <item name="Fox Mesh Collider Blend Controller" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>0</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:FoxRagdollBlend FoxRagdollBlend.foxObjectName="Fox" FoxRagdollBlend.animationSeconds="1.25" FoxRagdollBlend.blendSeconds="2.5" FoxRagdollBlend.meshColliderDuringAnimation="true" FoxRagdollBlend.meshColliderAfterBlend="true" />
+      </components>
+      <children />
+    </item>
   </objects>
 </Scene>

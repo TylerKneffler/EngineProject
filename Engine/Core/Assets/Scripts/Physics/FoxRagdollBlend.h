@@ -4,8 +4,8 @@
 #include "Core/PropertyMacros.h"
 #include <string>
 
-// Controller for the fox physics scene. Animation owns the pose first; after
-// the hold, the per-bone physics pose gradually takes over.
+// Runs animation, then blends into gravity-driven per-bone IK. A scene can
+// hand the final pose to a dynamic mesh-collider body instead of keeping IK.
 class FoxRagdollBlend final : public Engine::Core::Script
 {
 public:
@@ -17,6 +17,10 @@ public:
     float animationSeconds = 1.25f;
     PROPERTY(Inspector, EditAnywhere, Category = "Fox Ragdoll", ClampMin = "0")
     float blendSeconds = 2.5f;
+    PROPERTY(Inspector, EditAnywhere, Category = "Fox Ragdoll")
+    bool meshColliderDuringAnimation = false;
+    PROPERTY(Inspector, EditAnywhere, Category = "Fox Ragdoll")
+    bool meshColliderAfterBlend = false;
 
     void Start() override;
     void Update() override;
@@ -28,4 +32,6 @@ private:
     float m_elapsed = 0.f;
     float m_influence = 0.f;
     bool m_configured = false;
+    bool m_blending = false;
+    bool m_finished = false;
 };

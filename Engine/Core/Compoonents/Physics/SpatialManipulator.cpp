@@ -1,6 +1,7 @@
 #include "SpatialManipulator.h"
 #include "Core/Object.h"
-#include "Core/Compoonents/Physics/Collider.h"
+#include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
+#include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include "Core/Physics/Physics.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Scene/Spatial/WarpVolume.h"

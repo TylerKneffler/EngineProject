@@ -2,7 +2,9 @@
 
 #include "Core/Compoonents/Animation/AnimationBone.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
-#include "Core/Compoonents/Physics/Collider.h"
+#include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
+#include "Core/Compoonents/Physics/MeshObjectCollider.h"
+#include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Object.h"
 #include "Core/Physics/Internal/PhysicsInternal.h"
 #include "Core/Scene/Scene.h"
@@ -75,6 +77,9 @@ struct IKBone::Impl
     btTransform bodyToBone;
     const PrimitiveObjectCollider* collider = nullptr;
     uint64_t colliderRevision = 0;
+    bool poseOnlyCollision = false;
+    bool poseOnlyAnchor = false;
+    glm::vec3 poseRootPosition { 0.f };
 };
 
 IKBone::IKBone() : m_impl(new Impl())
@@ -82,6 +87,7 @@ IKBone::IKBone() : m_impl(new Impl())
     SetTypeName(COMPONENT_TYPE_NAME(IKBone));
     singlecomponent = true;
     RegisterField("simulate", simulate, "IK Bone");
+    RegisterField("poseOnlyWithMeshCollider", poseOnlyWithMeshCollider, "IK Bone");
     RegisterField("colliderReference", colliderReference, "IK Bone | Collider");
     RegisterField("mass", mass, "IK Bone | Body");
     RegisterField("friction", friction, "IK Bone | Body");
@@ -124,8 +130,19 @@ bool IKBone::WantsSimulation() const
     for (Object* ancestor = Owner; ancestor; ancestor = ancestor->Parent)
         if (auto* skeleton = ancestor->GetComponent<Skeleton>();
             skeleton && bone && skeleton->skinIndex == bone->skinIndex)
-            return !skeleton->UsesWholeMeshCollider();
+            return !skeleton->UsesMeshCollider() || poseOnlyWithMeshCollider;
     return true;
+}
+
+bool IKBone::UsesMeshColliderPoseOnly() const
+{
+    if (!poseOnlyWithMeshCollider || !Owner) return false;
+    const AnimationBone* bone = Owner->GetComponent<AnimationBone>();
+    for (Object* ancestor = Owner; ancestor; ancestor = ancestor->Parent)
+        if (auto* skeleton = ancestor->GetComponent<Skeleton>();
+            skeleton && bone && skeleton->skinIndex == bone->skinIndex)
+            return skeleton->UsesMeshCollider();
+    return false;
 }
 
 Engine::Core::Object* IKBone::FindSegmentChild(
@@ -179,8 +196,12 @@ bool IKBone::EnsureBody()
         if (IsSimulating()) DestroyBody();
         return false;
     }
+    const bool poseOnlyCollision = UsesMeshColliderPoseOnly();
+    const bool poseOnlyAnchor = poseOnlyCollision && !FindParentIKBone();
     if (IsSimulating() && m_impl->collider == collider &&
-        m_impl->colliderRevision == collider->GetConfigurationRevision())
+        m_impl->colliderRevision == collider->GetConfigurationRevision() &&
+        m_impl->poseOnlyCollision == poseOnlyCollision &&
+        m_impl->poseOnlyAnchor == poseOnlyAnchor)
         return true;
     if (IsSimulating()) DestroyBody();
 
@@ -233,12 +254,19 @@ bool IKBone::EnsureBody()
         m_impl->shape = std::make_unique<btCapsuleShape>(bodyRadius,
             std::max(segmentLength - bodyRadius * 2.f, 0.001f));
     btVector3 inertia(0.f, 0.f, 0.f);
-    const float bodyMass = std::max(mass, 0.001f);
-    m_impl->shape->calculateLocalInertia(bodyMass, inertia);
+    const float bodyMass = poseOnlyAnchor ? 0.f : std::max(mass, 0.001f);
+    if (bodyMass > 0.f)
+        m_impl->shape->calculateLocalInertia(bodyMass, inertia);
     m_impl->motionState = std::make_unique<btDefaultMotionState>(bodyWorld);
     btRigidBody::btRigidBodyConstructionInfo info(bodyMass,
         m_impl->motionState.get(), m_impl->shape.get(), inertia);
     m_impl->body = std::make_unique<btRigidBody>(info);
+    if (poseOnlyAnchor)
+    {
+        m_impl->body->setCollisionFlags(m_impl->body->getCollisionFlags() |
+            btCollisionObject::CF_KINEMATIC_OBJECT);
+        m_impl->body->setActivationState(DISABLE_DEACTIVATION);
+    }
     m_impl->body->setDamping(std::clamp(linearDamping, 0.f, 1.f),
         std::clamp(angularDamping, 0.f, 1.f));
     m_impl->body->setFriction(std::clamp(friction, 0.f, 1.f));
@@ -249,9 +277,24 @@ bool IKBone::EnsureBody()
     m_impl->body->setActivationState(DISABLE_DEACTIVATION);
     m_impl->bodyToBone = bodyWorld.inverse() * boneWorld;
     m_impl->world = Engine::Physics::StateFor(Owner->GetScene()).world.get();
-    m_impl->world->addRigidBody(m_impl->body.get());
+    if (poseOnlyCollision)
+    {
+        m_impl->world->addRigidBody(m_impl->body.get(), 0, 0);
+        m_impl->body->setGravity(btVector3(0.f, 0.f, 0.f));
+        for (Object* ancestor = Owner; ancestor; ancestor = ancestor->Parent)
+            if (auto* skeleton = ancestor->GetComponent<Skeleton>();
+                skeleton && skeleton->UsesMeshCollider())
+            {
+                m_impl->poseRootPosition = ancestor->transform.GetWorldPosition();
+                break;
+            }
+    }
+    else
+        m_impl->world->addRigidBody(m_impl->body.get());
     m_impl->collider = collider;
     m_impl->colliderRevision = collider->GetConfigurationRevision();
+    m_impl->poseOnlyCollision = poseOnlyCollision;
+    m_impl->poseOnlyAnchor = poseOnlyAnchor;
     return true;
 }
 
@@ -343,7 +386,8 @@ bool IKBone::HasManualEditInHierarchy() const
 
 void IKBone::SyncBodyFromBone()
 {
-    if (!m_impl->body || !Owner || !HasManualEditInHierarchy())
+    if (!m_impl->body || !Owner ||
+        (!m_impl->poseOnlyAnchor && !HasManualEditInHierarchy()))
         return;
     const glm::mat4 boneMatrix = Owner->transform.GetWorldMatrix();
     const btTransform simulatedBoneWorld =
@@ -353,9 +397,9 @@ void IKBone::SyncBodyFromBone()
         ancestor = ancestor->Parent)
         inheritedOverride = inheritedOverride ||
             ancestor->transform.HasEditorOverride();
-    const bool overridePosition = inheritedOverride ||
+    const bool overridePosition = m_impl->poseOnlyAnchor || inheritedOverride ||
         Owner->transform.HasEditorOverride(Transform::EditorPosition);
-    const bool overrideRotation = inheritedOverride ||
+    const bool overrideRotation = m_impl->poseOnlyAnchor || inheritedOverride ||
         Owner->transform.HasEditorOverride(Transform::EditorRotation);
     const btQuaternion simulatedRotation = simulatedBoneWorld.getRotation();
     const glm::quat simulatedGlmRotation(simulatedRotation.w(),
@@ -369,9 +413,9 @@ void IKBone::SyncBodyFromBone()
     m_impl->body->setInterpolationWorldTransform(bodyWorld);
     if (m_impl->motionState)
         m_impl->motionState->setWorldTransform(bodyWorld);
-    if (overridePosition)
+    if (overridePosition && !m_impl->poseOnlyAnchor)
         m_impl->body->setLinearVelocity(btVector3(0.f, 0.f, 0.f));
-    if (overrideRotation)
+    if (overrideRotation && !m_impl->poseOnlyAnchor)
         m_impl->body->setAngularVelocity(btVector3(0.f, 0.f, 0.f));
     m_impl->body->activate(true);
     if (m_impl->world)
@@ -382,6 +426,31 @@ void IKBone::SyncBoneFromBody()
 {
     if (!m_impl->body || !Owner)
         return;
+    if (m_impl->poseOnlyAnchor)
+        return;
+    if (m_impl->poseOnlyCollision)
+        for (Object* ancestor = Owner; ancestor; ancestor = ancestor->Parent)
+            if (auto* skeleton = ancestor->GetComponent<Skeleton>();
+                skeleton && skeleton->UsesMeshCollider())
+            {
+                const glm::vec3 rootPosition =
+                    ancestor->transform.GetWorldPosition();
+                const glm::vec3 delta = rootPosition - m_impl->poseRootPosition;
+                if (glm::dot(delta, delta) > 0.f)
+                {
+                    btTransform transform = m_impl->body->getWorldTransform();
+                    transform.setOrigin(transform.getOrigin() +
+                        Engine::Physics::ToBullet(delta));
+                    m_impl->body->setWorldTransform(transform);
+                    m_impl->body->setInterpolationWorldTransform(transform);
+                    if (m_impl->motionState)
+                        m_impl->motionState->setWorldTransform(transform);
+                    if (m_impl->world)
+                        m_impl->world->updateSingleAabb(m_impl->body.get());
+                }
+                m_impl->poseRootPosition = rootPosition;
+                break;
+            }
     const bool overridePosition = Owner->transform.HasEditorOverride(
         Transform::EditorPosition);
     const bool overrideRotation = Owner->transform.HasEditorOverride(
@@ -398,7 +467,7 @@ void IKBone::SyncBoneFromBody()
     AnimationBone* hierarchyBone = Owner->GetComponent<AnimationBone>();
     AnimationBone* parentBone = hierarchyBone
         ? hierarchyBone->GetParentBone() : nullptr;
-    if (hierarchyBone &&
+    if (hierarchyBone && !UsesMeshColliderPoseOnly() &&
         (hierarchyBone->hierarchyRoot ||
             (parentBone && parentBone->hierarchyRoot)) &&
         !FindParentIKBone())
@@ -453,6 +522,36 @@ void IKBone::SyncBoneFromBody()
 bool IKBone::IsSimulating() const
 {
     return m_impl && static_cast<bool>(m_impl->body);
+}
+
+bool IKBone::GetContactSeparation(const RigidBody* other,
+    float& deepestSeparation) const
+{
+    if (!IsSimulating() || !m_impl->world || !other) return false;
+    bool found = false;
+    btDispatcher* dispatcher = m_impl->world->getDispatcher();
+    for (int index = 0; index < dispatcher->getNumManifolds(); ++index)
+    {
+        const btPersistentManifold* manifold =
+            dispatcher->getManifoldByIndexInternal(index);
+        const btCollisionObject* first =
+            static_cast<const btCollisionObject*>(manifold->getBody0());
+        const btCollisionObject* second =
+            static_cast<const btCollisionObject*>(manifold->getBody1());
+        const btCollisionObject* counterpart = first == m_impl->body.get()
+            ? second : second == m_impl->body.get() ? first : nullptr;
+        if (!counterpart || counterpart->getUserPointer() != other) continue;
+        for (int contact = 0; contact < manifold->getNumContacts(); ++contact)
+        {
+            const float separation = manifold->getContactPoint(contact)
+                .getDistance();
+            if (separation > 0.f) continue;
+            deepestSeparation = found
+                ? std::min(deepestSeparation, separation) : separation;
+            found = true;
+        }
+    }
+    return found;
 }
 
 void IKBone::DestroyConstraint(bool removeFromWorld)
