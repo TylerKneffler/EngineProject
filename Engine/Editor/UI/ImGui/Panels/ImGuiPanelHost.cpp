@@ -29,6 +29,7 @@ void ImGuiPanelHost::DrawPanels(EditorState& state)
     // Asset callbacks may request panels to be added. Apply those requests only
     // after traversal, because push_back can invalidate this vector's iterators.
     state.ProcessPendingPrefabStageOpen();
+    state.ProcessPendingEditToolsOpen();
     state.ProcessPendingSceneAssetDocumentOpens();
     state.ProcessPendingAssetDocumentOpens();
 

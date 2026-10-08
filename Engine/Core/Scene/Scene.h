@@ -231,6 +231,13 @@ public:
     { m_editorSelectedMesh = mesh; }
     Engine::Components::Mesh* GetEditorSelectedMesh() const
     { return m_editorSelectedMesh; }
+    void SetEditorMeshEditPose(bool enabled)
+    {
+        if (m_editorMeshEditPose == enabled) return;
+        m_editorMeshEditPose = enabled;
+        m_renderFramePrepared = false;
+    }
+    bool IsEditorMeshEditPose() const { return m_editorMeshEditPose; }
     void SetPreviewObject(Object* obj) { m_previewObject = obj; }
     void SetEditorMode2D(bool enabled);
     bool IsEditorMode2D() const { return m_editorMode2D; }
@@ -576,6 +583,7 @@ private:
     void FlushPendingObjectRemovals();
     Object* m_selectedObject = nullptr;
     Engine::Components::Mesh* m_editorSelectedMesh = nullptr;
+    bool m_editorMeshEditPose = false;
     Object* m_previewObject = nullptr;
     bool m_editorMode2D = false;
     bool m_editorCameraModeInitialized = false;

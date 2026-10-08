@@ -98,7 +98,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
     panDY = input.keyPanDY;
     dolly = input.keyDolly;
     const bool overlayConsumedClick = m_toolbar.Draw(ui, input, m_scene,
-        AllowObjectTransform);
+        true, AllowObjectTransform);
     const EditorUiContextMenuResult createMenu = AllowObjectCreation
         ? ui.ContextMenu(this, "Create", nullptr, true)
         : EditorUiContextMenuResult{};
@@ -290,7 +290,13 @@ void SceneView::DrawPanel(IEditorUi& ui)
 
     const bool documentToolsConsumedClick = OnDrawDocumentTools
         ? OnDrawDocumentTools(ui) : false;
-    if (selectSceneObject && !documentToolsConsumedClick)
+    EditorUiViewportInput meshInput = input;
+    if (documentToolsConsumedClick || overlayConsumedClick)
+        meshInput.leftClicked = false;
+    const bool meshConsumedClick = OnMeshViewportInput
+        ? OnMeshViewportInput(ui, meshInput, transformTool) : false;
+    if (selectSceneObject && !documentToolsConsumedClick &&
+        !meshConsumedClick && AllowObjectTransform)
         OnObjectSelected(ScenePlacementAndPicking::PickObjectInViewport(
             *m_scene, input.mousePosInViewport, input.available));
     ui.EndWindow();

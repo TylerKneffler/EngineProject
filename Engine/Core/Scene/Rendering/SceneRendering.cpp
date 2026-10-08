@@ -1234,8 +1234,8 @@ void Scene::PrepareRenderFrame()
                 Engine::Components::Material>();
             lookup.spatialManipulator = lookup.object->GetComponent<
                 Engine::Components::SpatialManipulator>();
-            lookup.skinnedMesh = lookup.object->GetComponent<
-                Engine::Components::SkinnedMesh>();
+            lookup.skinnedMesh = m_editorMeshEditPose ? nullptr :
+                lookup.object->GetComponent<Engine::Components::SkinnedMesh>();
             lookup.bakedLighting = lookup.object->GetComponent<
                 Engine::Rendering::BakedLightingData>();
             if (lookup.spatialManipulator)
@@ -2509,7 +2509,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 static_cast<float>(renderItem->skinPaletteOffset),
                 static_cast<float>(renderItem->skinJointCount), 0.f, 0.f };
         }
-        const bool useGpuMorphs = mesh && !sprite &&
+        const bool useGpuMorphs = !m_editorMeshEditPose && mesh && !sprite &&
             !mesh->IsPortalPoseSnapshot() && mesh->HasMorphTargets() &&
             mesh->GetMorphDeltaBuffer() && mesh->GetMorphWeightBuffer() &&
             (useSourceChart || !renderItem->warpedVertexBuffer);

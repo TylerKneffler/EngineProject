@@ -13,9 +13,8 @@ Status convention:
 
 ### Mesh authoring
 
-- [ ] Add a dedicated Mesh Edit stage with vertex, edge, and face selection; box/lasso selection; transforms with snapping and configurable pivots; extrude, inset, bevel, loop cut, weld, split, delete, duplicate, bridge, and fill operations; and undo/redo.
-- [ ] Extend the existing basic UV preview/editor with per-face material-slot assignment, vertex-color painting, and overlays for normals, tangents, seams, non-manifold edges, and degenerate triangles.
-- [ ] Share mesh vertex selection with skin-weight editing so geometry and influences operate on one authoritative asset rather than temporary copies.
+- [x] Add a dedicated Mesh Edit stage with vertex, edge, and face selection; box/lasso selection; transforms with snapping and configurable pivots; extrude, inset, bevel, loop cut, weld, split, delete, duplicate, bridge, and fill operations; and undo/redo.
+- [x] Expose Mesh Edit mode in scene and prefab views with one hierarchy-driven active mesh, a searchable Mesh Tools panel, vertex/edge/face modes, move, extrude, inset, edge split, face delete, shared-asset save, and undo/redo.
 - [x] Add an authored-geometry transaction separate from runtime `SetDeformedVertices`. It validates topology and attributes, persists indexed native mesh data, updates bounds/GPU resources and authored revisions, atomically saves, refreshes dependents, and retains indexed undo data. This is the canonical mesh validation and persistence task.
 
 ## Deferred feature gates

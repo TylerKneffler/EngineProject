@@ -486,6 +486,27 @@ bool Mesh::SetAuthoredVertices(std::vector<Vertex> vertices)
     return true;
 }
 
+bool Mesh::UpdateAuthoredVertices(std::vector<Vertex> vertices)
+{
+    if (vertices.size() != m_vertices.size() || !m_terrainVertices.empty() ||
+        !ValidateAuthoredGeometry(vertices, m_indices)) return false;
+    const size_t byteSize = vertices.size() * sizeof(Vertex);
+    if (m_vertexBuffer)
+    {
+        if (byteSize > m_vertexBuffer->GetSize()) return false;
+        void* mapped = m_vertexBuffer->Map();
+        if (!mapped) return false;
+        std::memcpy(mapped, vertices.data(), byteSize);
+        m_vertexBuffer->Unmap();
+    }
+    m_vertices = std::move(vertices);
+    ++m_authoredGeometryRevision;
+    MarkConfigurationDirty();
+    UpdateBounds();
+    if (!m_vertexBuffer && m_bufferFactory) CreateBuffer(m_bufferFactory);
+    return true;
+}
+
 void Mesh::SetAuthoredFilePath(std::string path)
 {
     if (m_filePath == path) return;

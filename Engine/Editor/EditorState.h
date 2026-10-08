@@ -4,6 +4,8 @@
 #include "Core/ProjectLoader.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Renderers/IEditorRenderer.h"
+#include "UI/IEditorUi.h"
+#include "Core/Gizmos/EditorGizmoSystem.h"
 #include <memory>
 #include <vector>
 #include <functional>
@@ -12,6 +14,7 @@
 #include <chrono>
 #include <unordered_set>
 #include <unordered_map>
+#include <utility>
 
 namespace Engine::Core { class Window; }
 namespace Engine::Components { class Mesh; }
@@ -73,6 +76,7 @@ public:
     const std::string& GetPendingSceneLoadPath() const { return m_sceneToLoad; }
     void OpenPrefabStage(const std::string& path);
     void ProcessPendingPrefabStageOpen();
+    void ProcessPendingEditToolsOpen();
     void ClosePrefabStage();
     void HandlePrefabPanelClosures();
     void QueueAssetDocumentOpen(const std::string& path,
@@ -128,10 +132,43 @@ public:
 private:
     struct MeshEditSession
     {
+        struct EdgeCache
+        {
+            const Engine::Components::Mesh* mesh = nullptr;
+            size_t vertexCount = 0;
+            std::vector<uint32_t> indices;
+            std::vector<std::pair<uint32_t, uint32_t>> edges;
+        };
         bool enabled = false;
         Engine::Components::Mesh* activeMesh = nullptr;
         int selectionMode = 0; // vertex, edge, face
         uint32_t selectedElement = 0;
+        std::vector<uint32_t> selectedElements;
+        std::shared_ptr<EdgeCache> edgeCache;
+        int selectionTool = 0; // click, box, lasso
+        int pivotMode = 0;
+        float rotate[3]{};
+        float scale[3]{ 1.f, 1.f, 1.f };
+        float customPivot[3]{};
+        float snapStep = 0.f;
+        float rotationSnap = 0.f;
+        float scaleSnap = 0.f;
+        float bevelWidth = .15f;
+        std::string toolError;
+        bool selecting = false;
+        EditorUiVec2 selectionStart{};
+        std::vector<EditorUiVec2> lasso;
+        bool gizmoDragging = false;
+        bool gizmoChanged = false;
+        int gizmoAxis = -1;
+        EditorTransformTool gizmoTool = EditorTransformTool::Translate;
+        EditorUiVec2 gizmoStartMouse{};
+        EditorUiVec2 gizmoScreenDirection{};
+        float gizmoUnitsPerPixel = 0.f;
+        float gizmoLastPixels = 0.f;
+        std::vector<std::pair<uint32_t, std::array<float, 3>>>
+            gizmoStartPositions;
+        std::string gizmoBeforeSnapshot;
         std::string savePath;
         std::string baseline;
         std::string savedSnapshot;
@@ -151,8 +188,17 @@ private:
     void SetMeshEditMode(Engine::Scene::Scene* scene,
         MeshEditSession& session, bool enabled);
     void DrawMeshEditTools(IEditorUi& ui);
+    const std::vector<std::pair<uint32_t, uint32_t>>& CachedMeshEdges(
+        MeshEditSession& session, const Engine::Components::Mesh& mesh);
+    bool HandleMeshViewport(IEditorUi& ui,
+        const EditorUiViewportInput& input, Engine::Scene::Scene* scene,
+        MeshEditSession& session, EditorTransformTool tool);
+    void DrawEditTools(IEditorUi& ui);
+    void DrawObjectEditTools(IEditorUi& ui);
     bool SaveMeshEditSession(MeshEditSession& session);
     bool SavePendingMeshEdits();
+    void InvalidateMeshEditPointers();
+    bool ApplyMeshHistory(bool redo);
     void InitializePanels();
     void WireupCallbacks();
     Engine::Core::Object* InstantiateAsset(const std::string& path, bool recordChange = true);
@@ -264,7 +310,6 @@ private:
     PropertiesView* m_primaryProperties = nullptr;
     AssetsExplorerView* m_primaryAssets = nullptr;
     SceneView* m_prefabSceneView = nullptr;
-    IEditorPanel* m_meshToolsPanel = nullptr;
     std::vector<AssetDocumentView*> m_assetDocuments;
     AssetDocumentView* m_activeAssetDocument = nullptr;
     std::vector<std::unique_ptr<SceneAssetDocument>> m_sceneAssetDocuments;
@@ -272,6 +317,7 @@ private:
     SceneAssetDocument* m_activeSceneAssetDocument = nullptr;
     MeshEditSession m_mainMeshEdit;
     MeshEditSession m_prefabMeshEdit;
+    bool m_pendingEditToolsOpen = false;
     std::unordered_map<std::string, MeshEditSession> m_meshEditCache;
 
     // State

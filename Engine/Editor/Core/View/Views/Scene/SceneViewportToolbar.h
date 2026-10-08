@@ -12,7 +12,8 @@ class SceneViewportToolbar
 {
 public:
     bool Draw(IEditorUi& ui, const EditorUiViewportInput& input,
-        Engine::Scene::Scene* scene, bool allowTransformTools = true);
+        Engine::Scene::Scene* scene, bool allowTransformTools = true,
+        bool allowObjectTransform = true);
 
     EditorTransformTool GetTransformTool() const
     {
@@ -37,7 +38,7 @@ private:
         Engine::Scene::Scene* scene);
     bool DrawOrientationGizmo(IEditorUi& ui,
         const EditorUiViewportInput& input,
-        Engine::Scene::Scene* scene);
+        Engine::Scene::Scene* scene, bool allowObjectTransform);
 
     EditorTransformTool m_transformTool = EditorTransformTool::Translate;
     bool m_renderModeExpanded = false;

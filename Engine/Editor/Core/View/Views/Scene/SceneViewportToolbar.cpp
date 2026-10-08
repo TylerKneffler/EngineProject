@@ -197,7 +197,7 @@ void DrawGridIcon(IEditorUi& ui, EditorUiVec2 center,
 
 bool SceneViewportToolbar::Draw(IEditorUi& ui,
     const EditorUiViewportInput& input, Engine::Scene::Scene* scene,
-    bool allowTransformTools)
+    bool allowTransformTools, bool allowObjectTransform)
 {
     const bool toolbarConsumedClick = allowTransformTools
         ? DrawTransformToolbar(ui, input) : false;
@@ -207,15 +207,21 @@ bool SceneViewportToolbar::Draw(IEditorUi& ui,
     const bool sceneUiOverlayConsumedClick =
         DrawSceneUiOverlayToggle(ui, input, scene);
     const bool orientationConsumedClick=
-        DrawOrientationGizmo(ui,input,scene);
+        DrawOrientationGizmo(ui,input,scene,allowObjectTransform);
     return toolbarConsumedClick || gridToggleConsumedClick ||
         renderModeConsumedClick || sceneUiOverlayConsumedClick ||
         orientationConsumedClick;
 }
 
 bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
-    const EditorUiViewportInput& input,Engine::Scene::Scene* scene)
+    const EditorUiViewportInput& input,Engine::Scene::Scene* scene,
+    bool allowObjectTransform)
 {
+    if (!allowObjectTransform)
+    {
+        m_cubeDragObject = nullptr;
+        m_cubeDragAxis = -1;
+    }
     if(!scene||scene->IsEditorMode2D()||input.available.x<90.f||
         input.available.y<70.f)
     {
@@ -309,7 +315,8 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
         {cornerDistance=distance;hoveredCorner=corner;}
     }
 
-    Engine::Core::Object* selected=scene->GetSelectedObject();
+    Engine::Core::Object* selected=allowObjectTransform
+        ? scene->GetSelectedObject() : nullptr;
     constexpr glm::vec3 worldAxes[3]={{1.f,0.f,0.f},{0.f,1.f,0.f},
         {0.f,0.f,1.f}};
     constexpr EditorUiColor axisColors[3]={{.95f,.20f,.18f,1.f},
