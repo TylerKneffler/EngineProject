@@ -1547,16 +1547,12 @@ bool EditorState::HandleSkeletonViewport(IEditorUi& ui,
                         source[i].pos[0], source[i].pos[1],
                         source[i].pos[2], 1.f));
                 float nearestDistance = INFINITY;
-                uint32_t targetFace[3]{ UINT32_MAX, UINT32_MAX, UINT32_MAX };
-                glm::vec3 targetBarycentric{};
-                for (size_t face = 0; face + 2 < indexCount; face += 3)
+                float bestInfluence = -1.f;
+                size_t targetFaceIndex = SIZE_MAX;
+                for (size_t face = 0; face < topology.faces.size(); ++face)
                 {
-                    const uint32_t a = indices.empty()
-                        ? static_cast<uint32_t>(face) : indices[face];
-                    const uint32_t b = indices.empty()
-                        ? static_cast<uint32_t>(face + 1) : indices[face + 1];
-                    const uint32_t c = indices.empty()
-                        ? static_cast<uint32_t>(face + 2) : indices[face + 2];
+                    const auto& tri = topology.faces[face];
+                    const uint32_t a = tri[0], b = tri[1], c = tri[2];
                     if (a >= source.size() || b >= source.size() ||
                         c >= source.size()) continue;
                     const glm::vec3 centroid = (worldVertices[a] +
@@ -1569,18 +1565,47 @@ bool EditorState::HandleSkeletonViewport(IEditorUi& ui,
                         worldVertices[c]);
                     const float distance = glm::length(
                         closest.point - mirrorCenter);
-                    if (distance < nearestDistance)
+                    const float influence = (BoneWeight(source[a],
+                        session.mirrorBoneIndex) + BoneWeight(source[b],
+                            session.mirrorBoneIndex) + BoneWeight(source[c],
+                                session.mirrorBoneIndex)) / 3.f;
+                    const float tieTolerance = std::max(1e-4f,
+                        worldRadius * .02f);
+                    if (distance < nearestDistance - tieTolerance ||
+                        (std::abs(distance - nearestDistance) <= tieTolerance &&
+                            influence > bestInfluence))
                     {
                         nearestDistance = distance;
-                        targetFace[0] = a; targetFace[1] = b;
-                        targetFace[2] = c;
-                        targetBarycentric = closest.barycentric;
+                        bestInfluence = influence;
+                        targetFaceIndex = face;
                     }
                 }
-                if (nearestDistance <= std::max(worldRadius * 2.f,
+                if (targetFaceIndex != SIZE_MAX &&
+                    nearestDistance <= std::max(worldRadius * 2.f,
                         targetFrame.length * .25f))
                 {
-                    mirrorReady = true;
+                    const auto worldDistance = [&](const glm::vec3& offset)
+                    {
+                        return session.brushShape == 0 ? glm::length(offset)
+                            : std::max({ std::abs(glm::dot(offset,
+                                    targetFrame.x)),
+                                std::abs(glm::dot(offset, targetFrame.y)),
+                                std::abs(glm::dot(offset, targetFrame.z)) });
+                    };
+                    const auto targetVisible = [&](size_t face,
+                        const MirrorWeightPaint::TrianglePoint&)
+                    {
+                        const auto& tri = topology.faces[face];
+                        const glm::vec3 centroid = (worldVertices[tri[0]] +
+                            worldVertices[tri[1]] + worldVertices[tri[2]]) / 3.f;
+                        return MirrorWeightPaint::DistanceToBone(targetFrame,
+                            centroid) < MirrorWeightPaint::DistanceToBone(
+                                sourceFrame, centroid);
+                    };
+                    const auto targetCoverage = WeightPaintSurface::Coverage(
+                        topology, worldVertices, targetFaceIndex, mirrorCenter,
+                        worldRadius, worldDistance, falloffAt, targetVisible);
+                    bool reachesTarget = false;
                     std::vector<float> targetOriginal(source.size());
                     for (size_t i = 0; i < source.size(); ++i)
                         targetOriginal[i] = BoneWeight(source[i],
@@ -1591,22 +1616,14 @@ bool EditorState::HandleSkeletonViewport(IEditorUi& ui,
                                 worldVertices[i]) >
                             MirrorWeightPaint::DistanceToBone(sourceFrame,
                                 worldVertices[i])) continue;
-                        const glm::vec3 offset = worldVertices[i] - mirrorCenter;
-                        const float distance = session.brushShape == 0
-                            ? glm::length(offset)
-                            : std::max({ std::abs(glm::dot(offset,
-                                    targetFrame.x)),
-                                std::abs(glm::dot(offset, targetFrame.y)),
-                                std::abs(glm::dot(offset, targetFrame.z)) });
-                        float falloff = falloffAt(distance, worldRadius);
-                        for (int corner = 0; corner < 3; ++corner)
-                            if (targetFace[corner] == i)
-                                falloff = std::max(falloff,
-                                    .5f * targetBarycentric[corner]);
-                        paintVertex(i, session.mirrorBoneIndex, falloff,
+                        reachesTarget = reachesTarget || targetCoverage[i] > 0.f;
+                        paintVertex(i, session.mirrorBoneIndex,
+                            targetCoverage[i],
                             targetOriginal);
                     }
-                    session.error.clear();
+                    mirrorReady = reachesTarget;
+                    session.error = mirrorReady ? std::string{} :
+                        "The mirrored brush does not reach the target surface.";
                 }
                 else session.error = "No mesh surface was found at the mirrored brush position.";
             }

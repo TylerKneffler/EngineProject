@@ -4,6 +4,7 @@
 #include "Editor/Core/View/Templates/EditModes/Skeleton/SkinBindingWeights.h"
 #include "Editor/Core/View/Templates/EditModes/Skeleton/WeightInfluence.h"
 #include "Editor/Core/View/Templates/EditModes/Skeleton/MirrorWeightPaint.h"
+#include "Editor/Core/View/Templates/EditModes/Skeleton/WeightPaintSurface.h"
 #include "Core/Compoonents/Animation/AnimationBone.h"
 #include "Core/Compoonents/Animation/AnimationManager.h"
 #include "Core/Compoonents/Animation/Model.h"
@@ -76,6 +77,40 @@ int main()
             Near(triangle.point.y, 2.f) && Near(triangle.point.z, 0.f));
         CHECK(Near(triangle.barycentric.x + triangle.barycentric.y +
             triangle.barycentric.z, 1.f));
+    }
+    {
+        namespace Surface = Engine::Editor::WeightPaintSurface;
+        // Two connected faces share an edge; the third face occupies the
+        // same screen area but has separate vertices (an overlapping layer).
+        const std::vector<glm::vec3> positions{
+            { 0.f, 0.f, 0.f }, { 10.f, 0.f, 0.f },
+            { 0.f, 10.f, 0.f }, { 10.f, 10.f, 0.f },
+            { 0.f, 0.f, 0.f }, { 10.f, 0.f, 0.f },
+            { 0.f, 10.f, 0.f } };
+        const auto topology = Surface::BuildTopology(
+            { 0, 1, 2, 1, 3, 2, 4, 5, 6 }, positions.size());
+        const auto metric = [](const glm::vec3& offset)
+        { return glm::length(glm::vec2(offset)); };
+        const auto hard = [](float distance, float radius)
+        { return distance <= radius ? 1.f : 0.f; };
+        const auto visible = [](size_t,
+            const Engine::Editor::MirrorWeightPaint::TrianglePoint&)
+        { return true; };
+        const auto sparse = Surface::Coverage(topology, positions, 0,
+            { 3.f, 3.f, 0.f }, .5f, metric, hard, visible);
+        CHECK(sparse[0] > 0.f && sparse[1] > 0.f && sparse[2] > 0.f);
+        CHECK(sparse[4] == 0.f && sparse[5] == 0.f && sparse[6] == 0.f);
+        const auto acrossEdge = Surface::Coverage(topology, positions, 0,
+            { 7.f, 5.f, 0.f }, 6.f, metric, hard, visible);
+        CHECK(acrossEdge[3] > 0.f);
+        CHECK(acrossEdge[4] == 0.f && acrossEdge[5] == 0.f &&
+            acrossEdge[6] == 0.f);
+        const auto occluded = Surface::Coverage(topology, positions, 0,
+            { 7.f, 5.f, 0.f }, 6.f, metric, hard,
+            [](size_t face,
+                const Engine::Editor::MirrorWeightPaint::TrianglePoint&)
+            { return face != 1; });
+        CHECK(occluded[3] == 0.f);
     }
 
     const auto path = std::filesystem::temp_directory_path() /

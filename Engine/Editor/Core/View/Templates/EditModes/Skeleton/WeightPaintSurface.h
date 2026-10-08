@@ -87,7 +87,8 @@ std::vector<float> Coverage(const Topology& topology,
             const uint32_t vertex = corners[corner];
             coverage[vertex] = std::max(coverage[vertex],
                 std::max(falloff(metric(positions[vertex] - center), radius),
-                    .5f * faceFalloff * nearest.barycentric[corner]));
+                    .5f * faceFalloff * nearest.barycentric[
+                        static_cast<int>(corner)]));
         }
         for (uint32_t neighbor : topology.neighbors[face])
             if (!visited[neighbor])
