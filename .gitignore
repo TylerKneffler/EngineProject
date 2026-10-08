@@ -12,6 +12,9 @@ build/
 !.local/tests/FoxProceduralWalkTests.cpp
 !.local/tests/PhysicsAdapterTests.cpp
 !.local/tests/MeshAuthoringTests.cpp
+!.local/tests/WeightInfluenceTests.cpp
+!.local/tests/SkinBindingWeightsTests.cpp
+!.local/tests/SkeletonAuthoringRegressionTests.cpp
 build
 editor-startup.log
 project-build.log

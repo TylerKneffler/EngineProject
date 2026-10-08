@@ -147,6 +147,23 @@ This is used by Sprite animation managers, audio listener cameras, skinned-mesh
 mesh/morph/skeleton inputs, animation hierarchy/source inputs, mesh colliders, and
 Cloth simulation/render meshes.
 
+### Skin binding
+
+In a scene or prefab's **Skeleton** mode, choose **Skin Binding** to select a mesh
+and bind it to the active skeleton. **Bind / rebind preserving weights** keeps
+existing influences; when switching rigs it maps joints by object identity or
+unique bone name and reports missing or ambiguous matches. **Generate initial
+weights and bind** assigns each vertex to its four closest joints in the mesh's
+bind space. Use the diagnostics to find unweighted vertices, missing joints, and
+weights that do not sum to one; **Repair** removes invalid influences and fills
+unweighted vertices from the nearest joint. Enter comma-separated vertex IDs or
+ranges to assign them fully to the selected bone, or use a retained Mesh Edit
+vertex selection. **Save binding and weights** writes the scene or prefab and
+the authored `.mesh` asset. Regenerating or remapping a file-backed mesh writes
+a separate sibling `.mesh` asset, leaving existing references to the original
+weights intact. Rebinding does not retarget animation clips; the
+editor reports when clips may still refer to the original rig.
+
 ### Physics
 
 Rigid-body motion and collision use separate components. Add a **RigidBody** for

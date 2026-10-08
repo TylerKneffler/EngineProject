@@ -7,6 +7,7 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -26,15 +27,20 @@ int main()
     auto* floorA = scene.FindObjectByName("Walk Floor A");
     auto* floorB = scene.FindObjectByName("Walk Floor B");
     auto* lowRise = scene.FindObjectByName("Low Walk Rise");
+    auto* highRise = scene.FindObjectByName("High Walk Rise");
+    auto* unevenRise = scene.FindObjectByName("Uneven Walk Rise");
     auto* walker = controller
         ? controller->GetComponent<FoxProceduralWalk>() : nullptr;
+    auto* footIK = controller
+        ? controller->GetComponent<GroundedFootIK>() : nullptr;
     auto* animation = fox ? fox->GetComponent<AnimationManager>() : nullptr;
     auto* body = fox ? fox->GetComponent<RigidBody>() : nullptr;
     auto* foot = fox ? fox->FindObjectInChildrenByName(
         "b_RightHand_08") : nullptr;
     if (!fox || !controller || !camera || !floorA || !floorB ||
-        !lowRise || !walker || !animation || !body || !foot ||
-        controller->GetComponent<GroundedFootIK>()) return 2;
+        !lowRise || !highRise || !unevenRise || !walker || !footIK ||
+        !animation || !body || !foot)
+        return 2;
     const auto* walkClip = animation->FindClip("Walk");
     if (animation->clips.size() != 3 ||
         animation->GetAvailableClips().size() != 3 ||
@@ -96,6 +102,10 @@ int main()
     };
     float lowArrivalError = 100.f, highArrivalError = 100.f;
     float unevenArrivalError = 100.f;
+    const std::array<Engine::Core::Object*, 3> rises {
+        lowRise, highRise, unevenRise
+    };
+    std::array<float, 3> bestPawHeightError { 100.f, 100.f, 100.f };
     for (int frame = 0; frame < 360; ++frame)
     {
         const auto begin = std::chrono::steady_clock::now();
@@ -112,20 +122,40 @@ int main()
             glm::distance(relativeFoot, firstRelativeFoot));
         minRootY = std::min(minRootY, root.y);
         maxRootY = std::max(maxRootY, root.y);
+        for (unsigned riseIndex = 0; riseIndex < rises.size(); ++riseIndex)
+        {
+            const auto* rise = rises[riseIndex];
+            const glm::vec3 center = rise->transform.GetWorldPosition();
+            const glm::vec3 size = rise->transform.scale;
+            const float top = center.y + size.y * 0.5f;
+            for (unsigned pawIndex = 0; pawIndex < 4; ++pawIndex)
+            {
+                const auto* paw = footIK->GetLeg(pawIndex).foot;
+                const auto& leg = footIK->GetLeg(pawIndex);
+                const glm::vec3 position = paw->transform.GetWorldPosition();
+                if (leg.planted && leg.supportBody &&
+                    leg.supportBody->Owner == rise &&
+                    std::abs(position.x - center.x) < size.x * 0.5f &&
+                    std::abs(position.z - center.z) < size.z * 0.5f)
+                    bestPawHeightError[riseIndex] = std::min(
+                        bestPawHeightError[riseIndex],
+                        std::abs(position.y - top));
+            }
+        }
         if (frame == 119)
+        {
             lowArrivalError = std::abs(root.z -
                 lowRise->transform.GetWorldPosition().z);
+        }
         if (frame == 239)
         {
-            auto* rise = scene.FindObjectByName("High Walk Rise");
-            if (rise) highArrivalError = std::abs(root.z -
-                rise->transform.GetWorldPosition().z);
+            highArrivalError = std::abs(root.z -
+                highRise->transform.GetWorldPosition().z);
         }
         if (frame == 359)
         {
-            auto* rise = scene.FindObjectByName("Uneven Walk Rise");
-            if (rise) unevenArrivalError = std::abs(root.z -
-                rise->transform.GetWorldPosition().z);
+            unevenArrivalError = std::abs(root.z -
+                unevenRise->transform.GetWorldPosition().z);
         }
     }
     const glm::vec3 afterCourse = fox->transform.GetWorldPosition();
@@ -159,20 +189,36 @@ int main()
     const float secondRootZ = fox->transform.GetWorldPosition().z;
     const float secondFloorBZ = floorB->transform.GetWorldPosition().z;
     std::fprintf(stderr,
-        "Fox walk without IK: travel=%.2f rootZ=%.2f animatedFootMotion=%.3f rootY=%.3f..%.3f phaseError=%.5f update=%.2fms\n",
+        "Fox walk with foot IK: travel=%.2f rootZ=%.2f animatedFootMotion=%.3f rootY=%.3f..%.3f phaseError=%.5f update=%.2fms\n",
         walker->GetTravel(), afterCourse.z, maxRelativeFootMotion,
         minRootY, maxRootY, maxCyclePhaseError,
         updateMilliseconds / 300.0);
+    std::fprintf(stderr,
+        "Fox paw height errors on platforms: %.3f %.3f %.3f\n",
+        bestPawHeightError[0], bestPawHeightError[1],
+        bestPawHeightError[2]);
+    std::fprintf(stderr, "Fox foot IK: plants=%llu,%llu,%llu,%llu\n",
+        static_cast<unsigned long long>(footIK->GetLeg(0).plantSequence),
+        static_cast<unsigned long long>(footIK->GetLeg(1).plantSequence),
+        static_cast<unsigned long long>(footIK->GetLeg(2).plantSequence),
+        static_cast<unsigned long long>(footIK->GetLeg(3).plantSequence));
     const bool coursePassed = animation->playing &&
         animation->clip == "Walk" && body->bodyType == "Kinematic" &&
         std::abs(walker->GetGaitPeriod() -
             walkDuration / animation->speed) < 0.001f &&
         maxCyclePhaseError < 0.01f && maxRelativeFootMotion > 0.05f &&
-        maxRootY - minRootY > 0.05f &&
+        maxRootY - minRootY < 0.01f &&
         afterCourse.z < initial.z - 8.f &&
         camera->transform.GetWorldPosition().z < cameraInitial.z - 34.f &&
         lowArrivalError < 0.02f && highArrivalError < 0.02f &&
         unevenArrivalError < 0.02f && firstRiseAfterPass < -18.f &&
+        bestPawHeightError[0] < 0.08f &&
+        bestPawHeightError[1] < 0.08f &&
+        bestPawHeightError[2] < 0.08f &&
+        footIK->GetLeg(0).plantSequence > 1 &&
+        footIK->GetLeg(1).plantSequence > 1 &&
+        footIK->GetLeg(2).plantSequence > 1 &&
+        footIK->GetLeg(3).plantSequence > 1 &&
         repeatedRootZ < -34.f && repeatedFloorAZ < -90.f &&
         floorHasBounds && repeatedRootZ > floorMin.z + 2.f &&
         repeatedRootZ < floorMax.z - 2.f &&
@@ -203,14 +249,15 @@ int main()
     auto* normalFloor = normalScene.FindObjectByName("Walk Floor A");
     auto* normalWalker = normalController
         ? normalController->GetComponent<FoxProceduralWalk>() : nullptr;
+    auto* normalFootIK = normalController
+        ? normalController->GetComponent<GroundedFootIK>() : nullptr;
     auto* normalAnimation = normalFox
         ? normalFox->GetComponent<AnimationManager>() : nullptr;
     auto* plantedFoot = normalFox
         ? normalFox->FindObjectInChildrenByName("b_RightFoot02_022")
         : nullptr;
     if (!normalFox || !normalRise || !normalCamera || !normalFloor ||
-        !normalWalker || !normalAnimation || !plantedFoot ||
-        normalController->GetComponent<GroundedFootIK>())
+        !normalWalker || !normalFootIK || !normalAnimation || !plantedFoot)
         return 4;
     normalScene.Start();
     const float cameraStartZ = normalCamera->transform.GetWorldPosition().z;

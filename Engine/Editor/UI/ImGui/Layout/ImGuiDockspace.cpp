@@ -47,7 +47,10 @@ void ImGuiDockspace::Draw()
 
     ImGui::DockBuilderRemoveNode(dockspaceId);
     ImGui::DockBuilderAddNode(dockspaceId, ImGuiDockNodeFlags_DockSpace);
-    ImGui::DockBuilderSetNodeSize(dockspaceId, ImGui::GetMainViewport()->Size);
+    ImGui::DockBuilderSetNodePos(dockspaceId,
+        ImGui::GetMainViewport()->WorkPos);
+    ImGui::DockBuilderSetNodeSize(dockspaceId,
+        ImGui::GetMainViewport()->WorkSize);
 
     ImGuiID left, center, right;
     ImGui::DockBuilderSplitNode(

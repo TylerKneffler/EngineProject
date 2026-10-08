@@ -19,6 +19,8 @@ public:
     {
         return m_transformTool;
     }
+    void SetTransformTool(EditorTransformTool tool) { m_transformTool = tool; }
+    void SetSceneToolsVisible(bool visible) { m_sceneToolsVisible = visible; }
 
     bool IsTransformDragging() const
     {
@@ -41,6 +43,7 @@ private:
         Engine::Scene::Scene* scene, bool allowObjectTransform);
 
     EditorTransformTool m_transformTool = EditorTransformTool::Translate;
+    bool m_sceneToolsVisible = true;
     bool m_renderModeExpanded = false;
     Engine::Core::Object* m_cubeDragObject = nullptr;
     int m_cubeDragAxis = -1;

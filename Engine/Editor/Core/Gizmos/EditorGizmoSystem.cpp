@@ -322,6 +322,27 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         camera->GetProjectionMatrix(input.available.x / input.available.y) *
         camera->GetViewMatrix();
     Engine::Core::Object* selected = scene.GetSelectedObject();
+    const Engine::Components::Skeleton* selectedSkeleton = nullptr;
+    if (m_boneEditing && selected)
+        for (const auto& owner : scene.GetObjects())
+        {
+            if (!owner || selectedSkeleton) continue;
+            for (auto* component : owner->Components)
+                if (auto* skeleton = dynamic_cast<Engine::Components::Skeleton*>(component))
+                {
+                    const auto& joints = skeleton->ResolveJoints();
+                    if (std::find(joints.begin(), joints.end(), selected) != joints.end())
+                    { selectedSkeleton = skeleton; break; }
+                }
+        }
+    const bool editingBone = selectedSkeleton != nullptr;
+    glm::vec3 transformPivot = WorldPosition(selected);
+    if (editingBone && m_bonePivotMode == 1 && selected->Parent)
+        transformPivot = WorldPosition(selected->Parent);
+    else if (editingBone && m_bonePivotMode == 2 && selectedSkeleton->GetHierarchyRoot())
+        transformPivot = WorldPosition(selectedSkeleton->GetHierarchyRoot());
+    else if (editingBone && m_bonePivotMode == 3)
+        transformPivot = m_boneCustomPivot;
     Engine::Core::Object* selectedPrefabRoot = selected
         ? selected->GetPrefabInstanceRoot() : nullptr;
 
@@ -487,7 +508,8 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
 
     const bool selectedTransformEditable = selected &&
         (!selectedPrefabRoot || selected == selectedPrefabRoot ||
-            visibleSkeletonJoints.find(selected) != visibleSkeletonJoints.end());
+            visibleSkeletonJoints.find(selected) != visibleSkeletonJoints.end() ||
+            editingBone);
     int hoveredAxis = -1;
     EditorUiVec2 hoveredDragDirection{};
     EditorUiVec2 originScreen{};
@@ -496,12 +518,11 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
     bool axisVisible[3]{};
     if (selectedTransformEditable && tool != EditorTransformTool::Hand &&
         ProjectPoint(viewProjection,
-        WorldPosition(selected), input.available, originScreen))
+        transformPivot, input.available, originScreen))
     {
         const glm::vec3 cameraPosition =
             glm::vec3(scene.editorCamera.transform.GetWorldMatrix()[3]);
-        const glm::vec3 selectedPosition =
-            WorldPosition(selected);
+        const glm::vec3 selectedPosition = transformPivot;
         axisScale = std::clamp(glm::length(
             selectedPosition - cameraPosition) * 0.18f,
             0.35f, 8.f);
@@ -639,8 +660,12 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
             input.mousePosInViewport, m_dragStartMouse), m_dragScreenDirection);
         if (m_dragTool == EditorTransformTool::Translate)
         {
+            float distance = pixels * m_dragWorldUnitsPerPixel;
+            if (m_dragWasBone && m_boneTranslationSnap > 0.f)
+                distance = std::round(distance / m_boneTranslationSnap) *
+                    m_boneTranslationSnap;
             const glm::vec3 worldDelta =
-                m_dragWorldAxis * pixels * m_dragWorldUnitsPerPixel;
+                m_dragWorldAxis * distance;
             glm::vec3 localDelta = worldDelta;
             if (m_dragObject->Parent)
             {
@@ -654,16 +679,63 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
                 m_dragStartLocalPosition + localDelta;
         }
         else if (m_dragTool == EditorTransformTool::Rotate)
+        {
+            float angle = pixels * 0.01f;
+            if (m_dragWasBone && m_boneRotationSnap > 0.f)
+            {
+                const float step = glm::radians(m_boneRotationSnap);
+                angle = std::round(angle / step) * step;
+            }
             m_dragObject->transform.rotation[m_dragAxis] =
-                m_dragStartLocalRotation[m_dragAxis] + pixels * 0.01f;
+                m_dragStartLocalRotation[m_dragAxis] + angle;
+            if (m_dragWasBone && m_bonePivotMode != 0)
+            {
+                const glm::vec3 rotated = m_dragPivotWorld +
+                    glm::vec3(glm::rotate(glm::mat4(1.f), angle,
+                        m_dragWorldAxis) * glm::vec4(
+                            m_dragStartWorldPosition - m_dragPivotWorld, 0.f));
+                const glm::mat4 parentWorld = m_dragObject->Parent
+                    ? m_dragObject->Parent->transform.GetWorldMatrix()
+                    : glm::mat4(1.f);
+                if (std::abs(glm::determinant(parentWorld)) > 0.000001f)
+                    m_dragObject->transform.position = glm::vec3(
+                        glm::inverse(parentWorld) * glm::vec4(rotated, 1.f));
+            }
+        }
         else if (m_dragTool == EditorTransformTool::Scale)
+        {
+            float change = pixels * 0.01f;
+            if (m_dragWasBone && m_boneScaleSnap > 0.f)
+                change = std::round(change / m_boneScaleSnap) * m_boneScaleSnap;
             m_dragObject->transform.scale[m_dragAxis] = std::max(0.001f,
-                m_dragStartLocalScale[m_dragAxis] + pixels * 0.01f);
+                m_dragStartLocalScale[m_dragAxis] + change);
+            if (m_dragWasBone && m_bonePivotMode != 0 &&
+                std::abs(m_dragStartLocalScale[m_dragAxis]) > 0.000001f)
+            {
+                const glm::vec3 offset = m_dragStartWorldPosition -
+                    m_dragPivotWorld;
+                const float ratio = m_dragObject->transform.scale[m_dragAxis] /
+                    m_dragStartLocalScale[m_dragAxis];
+                const glm::vec3 newWorld = m_dragStartWorldPosition +
+                    m_dragWorldAxis * glm::dot(offset, m_dragWorldAxis) *
+                    (ratio - 1.f);
+                const glm::mat4 parentWorld = m_dragObject->Parent
+                    ? m_dragObject->Parent->transform.GetWorldMatrix()
+                    : glm::mat4(1.f);
+                if (std::abs(glm::determinant(parentWorld)) > 0.000001f)
+                    m_dragObject->transform.position = glm::vec3(
+                        glm::inverse(parentWorld) * glm::vec4(newWorld, 1.f));
+            }
+        }
         const uint8_t channel = m_dragTool == EditorTransformTool::Translate
             ? Engine::Components::Transform::EditorPosition
             : m_dragTool == EditorTransformTool::Rotate
-                ? Engine::Components::Transform::EditorRotation
-                : Engine::Components::Transform::EditorScale;
+                ? static_cast<uint8_t>(Engine::Components::Transform::EditorRotation |
+                    (m_dragWasBone && m_bonePivotMode != 0
+                        ? Engine::Components::Transform::EditorPosition : 0))
+                : static_cast<uint8_t>(Engine::Components::Transform::EditorScale |
+                    (m_dragWasBone && m_bonePivotMode != 0
+                        ? Engine::Components::Transform::EditorPosition : 0));
         m_dragObject->transform.NotifyEditorTransformChanged(channel);
         if (auto* body =
             m_dragObject->GetComponent<Engine::Components::RigidBody>())
@@ -681,6 +753,9 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
                 rotation[0], rotation[1], rotation[2]
             };
             m_dragObject = selected;
+            m_dragWasBone = editingBone;
+            m_dragPivotWorld = transformPivot;
+            m_dragStartWorldPosition = WorldPosition(selected);
             m_dragAxis = hoveredAxis;
             m_dragStartLocalPosition = selected->transform.position;
             m_dragStartLocalRotation = selected->transform.rotation;

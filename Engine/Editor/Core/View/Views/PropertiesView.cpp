@@ -452,27 +452,6 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
     {
         const std::string prefabPath = prefabRoot->Prefab->GetPath();
         ui.ValueLabel("Prefab Asset", prefabPath.c_str());
-        ui.BeginDisabled(!OnPrefabRequested);
-        if (ui.Button("Edit Prefab") && OnPrefabRequested)
-            OnPrefabRequested(prefabPath);
-        ui.EndDisabled();
-        ui.SameLine();
-        ui.BeginDisabled(!hasPrefabOverrides);
-        if (ui.Button("Apply Overrides"))
-            ApplySelectedPrefabOverrides(false);
-        ui.SameLine();
-        if (ui.Button("Apply All"))
-            ApplySelectedPrefabOverrides(true);
-        ui.SameLine();
-        if (ui.Button("Revert"))
-            RevertSelectedPrefabOverrides();
-        ui.EndDisabled();
-        ui.SameLine();
-        if (ui.Button("Unpack Prefab"))
-        {
-            UnpackSelectedPrefab();
-            prefabRoot = nullptr;
-        }
     }
     
     // Draw all components with accordion views

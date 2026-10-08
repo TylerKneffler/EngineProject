@@ -199,13 +199,14 @@ bool SceneViewportToolbar::Draw(IEditorUi& ui,
     const EditorUiViewportInput& input, Engine::Scene::Scene* scene,
     bool allowTransformTools, bool allowObjectTransform)
 {
-    const bool toolbarConsumedClick = allowTransformTools
+    const bool toolbarConsumedClick = m_sceneToolsVisible && allowTransformTools
         ? DrawTransformToolbar(ui, input) : false;
-    const bool gridToggleConsumedClick = DrawGridToggle(ui, input, scene);
+    const bool gridToggleConsumedClick = m_sceneToolsVisible &&
+        DrawGridToggle(ui, input, scene);
     const bool renderModeConsumedClick =
-        DrawRenderModeMenu(ui, input, scene);
+        m_sceneToolsVisible && DrawRenderModeMenu(ui, input, scene);
     const bool sceneUiOverlayConsumedClick =
-        DrawSceneUiOverlayToggle(ui, input, scene);
+        m_sceneToolsVisible && DrawSceneUiOverlayToggle(ui, input, scene);
     const bool orientationConsumedClick=
         DrawOrientationGizmo(ui,input,scene,allowObjectTransform);
     return toolbarConsumedClick || gridToggleConsumedClick ||
@@ -584,13 +585,13 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
 bool SceneViewportToolbar::DrawTransformToolbar(IEditorUi& ui,
     const EditorUiViewportInput& input)
 {
-    if (input.available.x < 164.f || input.available.y < 44.f)
+    if (input.available.x < 164.f || input.available.y < 90.f)
         return false;
 
     constexpr float scale = .72f;
     constexpr float radius = 16.f;
     constexpr float spacing = 38.f;
-    constexpr float padding = 10.f;
+    constexpr float padding = 54.f;
     constexpr EditorTransformTool tools[] = {
         EditorTransformTool::Hand,
         EditorTransformTool::Translate,
@@ -600,7 +601,7 @@ bool SceneViewportToolbar::DrawTransformToolbar(IEditorUi& ui,
     bool consumed = false;
     for (int index = 0; index < 4; ++index)
     {
-        const EditorUiVec2 center{padding+radius+
+        const EditorUiVec2 center{10.f+radius+
             spacing*static_cast<float>(index),padding+radius};
         const bool hovered = Contains(input.mousePosInViewport, center, radius);
         if (input.rawLeftClicked && hovered)
@@ -626,14 +627,14 @@ bool SceneViewportToolbar::DrawTransformToolbar(IEditorUi& ui,
 bool SceneViewportToolbar::DrawGridToggle(IEditorUi& ui,
     const EditorUiViewportInput& input, Engine::Scene::Scene* scene)
 {
-    if (!scene || input.available.x < 202.f || input.available.y < 44.f)
+    if (!scene || input.available.x < 202.f || input.available.y < 90.f)
         return false;
 
     constexpr float scale = .72f;
     constexpr float radius = 16.f;
     constexpr float spacing = 38.f;
-    constexpr float padding = 10.f;
-    const EditorUiVec2 center{padding+radius+spacing*4.f,padding+radius};
+    constexpr float padding = 54.f;
+    const EditorUiVec2 center{10.f+radius+spacing*4.f,padding+radius};
     if (center.x + radius > input.available.x)
         return false;
 
@@ -661,15 +662,15 @@ bool SceneViewportToolbar::DrawGridToggle(IEditorUi& ui,
 bool SceneViewportToolbar::DrawRenderModeMenu(IEditorUi& ui,
     const EditorUiViewportInput& input, Engine::Scene::Scene* scene)
 {
-    if (!scene || input.available.x < 240.f || input.available.y < 44.f)
+    if (!scene || input.available.x < 240.f || input.available.y < 90.f)
         return false;
 
     constexpr float scale = .72f;
     constexpr float radius = 16.f;
     constexpr float spacing = 38.f;
-    constexpr float padding = 10.f;
+    constexpr float padding = 54.f;
     const EditorUiVec2 center{
-        padding + radius + spacing * 5.f,
+        10.f + radius + spacing * 5.f,
         padding + radius
     };
     if (center.x + radius > input.available.x)
@@ -736,15 +737,15 @@ bool SceneViewportToolbar::DrawRenderModeMenu(IEditorUi& ui,
 bool SceneViewportToolbar::DrawSceneUiOverlayToggle(IEditorUi& ui,
     const EditorUiViewportInput& input, Engine::Scene::Scene* scene)
 {
-    if (!scene || input.available.x < 278.f || input.available.y < 44.f)
+    if (!scene || input.available.x < 278.f || input.available.y < 90.f)
         return false;
 
     constexpr float scale = .72f;
     constexpr float radius = 16.f;
     constexpr float spacing = 38.f;
-    constexpr float padding = 10.f;
+    constexpr float padding = 54.f;
     const EditorUiVec2 center{
-        padding + radius + spacing * 6.f,
+        10.f + radius + spacing * 6.f,
         padding + radius
     };
     if (center.x + radius > input.available.x)

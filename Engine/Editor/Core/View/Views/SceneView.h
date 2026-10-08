@@ -5,6 +5,7 @@
 #include "Core/ProjectLoader.h"
 #include "Engine/Editor/Core/Gizmos/EditorGizmoSystem.h"
 #include "Scene/SceneViewportToolbar.h"
+#include "Engine/Editor/Core/View/Templates/EditModes/ViewportModeTemplate.h"
 
 namespace Engine::Editor
 {
@@ -48,6 +49,19 @@ public:
     // scene's editorCamera with FPS-style look / pan / zoom.
     void DrawPanel(IEditorUi& ui) override;
     Engine::Scene::Scene* GetScene() const { return m_scene; }
+    void SetEditMode(SceneEditMode mode) { m_editMode = mode; }
+    SceneEditMode GetEditMode() const { return m_editMode; }
+    EditorTransformTool GetTransformTool() const
+    { return m_toolbar.GetTransformTool(); }
+    void SetTransformTool(EditorTransformTool tool)
+    { m_toolbar.SetTransformTool(tool); }
+    void SetBoneTransformSettings(int pivotMode, const glm::vec3& customPivot,
+        float translationSnap, float rotationSnapDegrees, float scaleSnap)
+    {
+        m_gizmos.SetBoneTransformSettings(pivotMode, customPivot,
+            translationSnap, rotationSnapDegrees, scaleSnap);
+    }
+    bool UseGlobalToolbar = false;
     void SetDocumentPath(std::string path) { m_documentPath = std::move(path); }
     void RequestFocusOnNextDraw() { m_focusOnNextDraw = true; }
     std::function<void(const std::string&)> OnAssetDropped;
@@ -86,6 +100,7 @@ private:
     std::string m_prefabPreviewPath;
     bool m_prefabPreviewHasPlacement = false;
     bool m_focusOnNextDraw = false;
+    SceneEditMode m_editMode = SceneEditMode::Object;
     EditorGizmoSystem m_gizmos;
     SceneViewportToolbar m_toolbar;
 };

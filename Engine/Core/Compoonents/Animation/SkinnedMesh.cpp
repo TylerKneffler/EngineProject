@@ -166,7 +166,8 @@ const std::vector<glm::mat4>& SkinnedMesh::BuildPalette() const
         if (Object* joint = resolvedJoints[i])
             m_palette[i] = inverseMesh * joint->transform.GetWorldMatrix() *
                 (i < skeleton->inverseBindMatrices.size()
-                    ? skeleton->inverseBindMatrices[i] : glm::mat4(1.f));
+                    ? skeleton->inverseBindMatrices[i] : glm::mat4(1.f)) *
+                bindMeshToModel;
     return m_palette;
 }
 
@@ -179,6 +180,11 @@ Skeleton* SkinnedMesh::ResolveSkeleton() const
 SkinnedMesh::JsonValue SkinnedMesh::Serialize() const
 {
     JsonValue result = Component::Serialize().Set("skinIndex", JsonValue(skinIndex));
+    JsonValue bindTransform = JsonValue::MakeArray();
+    const float* matrixData = &bindMeshToModel[0][0];
+    for (size_t i = 0; i < 16; ++i)
+        bindTransform.Push(JsonValue(matrixData[i]));
+    result.Set("bindMeshToModel", std::move(bindTransform));
     JsonValue serializedJoints = JsonValue::MakeArray();
     JsonValue serializedWeights = JsonValue::MakeArray();
     for (size_t i = 0; i < joints.size(); ++i)
@@ -200,6 +206,13 @@ void SkinnedMesh::Deserialize(const JsonValue& value)
 {
     Component::Deserialize(value);
     skinIndex = value["skinIndex"].AsInt();
+    bindMeshToModel = glm::mat4(1.f);
+    if (value["bindMeshToModel"].ArraySize() == 16)
+    {
+        float* matrixData = &bindMeshToModel[0][0];
+        for (size_t i = 0; i < 16; ++i)
+            matrixData[i] = value["bindMeshToModel"].ArrayAt(i).AsFloat();
+    }
     joints.clear();
     weights.clear();
     for (size_t i = 0; i < value["joints"].ArraySize(); ++i)

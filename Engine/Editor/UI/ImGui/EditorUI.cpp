@@ -14,8 +14,9 @@ EditorUI::EditorUI(EditorState* state)
 void EditorUI::Render(PlayState playState)
 {
     if (!m_state) return;
-    m_dockspace.Draw();
     m_mainMenu.Draw(*m_state, playState, m_gameBuildManager);
+    m_panelHost.DrawToolbar(*m_state, playState, m_gameBuildManager);
+    m_dockspace.Draw();
     m_panelHost.Draw(*m_state);
     m_sceneLoadWarningPopup.Draw(*m_state);
     if (m_state->IsLoadingOverlayVisible())

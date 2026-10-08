@@ -19,6 +19,9 @@ public:
     ComponentReference meshReference { "Mesh" };
     ComponentReference skeletonReference { "Skeleton" };
     int skinIndex = -1;
+    // Captures the mesh's bind transform relative to the model root. Legacy
+    // imported skins default to identity for backward compatibility.
+    glm::mat4 bindMeshToModel { 1.f };
     std::vector<glm::uvec4> joints;
     std::vector<glm::vec4> weights;
     void Start() override;

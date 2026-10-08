@@ -327,16 +327,14 @@ bool ImGuiEditorUi::BeginViewportHeader(const char* id, float width)
 {
     const float viewportWidth = std::max(0.f,
         m_viewportScreenMax.x - m_viewportScreenMin.x);
-    const bool belowSceneTools = viewportWidth < 660.f;
-    const float leftReserve = belowSceneTools ? 8.f : 284.f;
-    const float rightReserve = belowSceneTools ? 8.f : 62.f;
-    const float availableWidth = viewportWidth - leftReserve - rightReserve;
+    // Keep the mode selector in the top left; the view cube owns the right.
+    const float availableWidth = viewportWidth - 8.f - 70.f;
     if (availableWidth < 120.f)
         return false;
 
     const float headerWidth = std::min(width, availableWidth);
-    ImGui::SetNextWindowPos({m_viewportScreenMax.x - rightReserve - headerWidth,
-        m_viewportScreenMin.y + (belowSceneTools ? 48.f : 6.f)},
+    ImGui::SetNextWindowPos({m_viewportScreenMin.x + 8.f,
+        m_viewportScreenMin.y + 6.f},
         ImGuiCond_Always);
     ImGui::SetNextWindowSizeConstraints({headerWidth, 0.f},
         {headerWidth, 48.f});
@@ -667,7 +665,13 @@ EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,
         ImGui::GetWindowPos().x+ImGui::GetWindowContentRegionMax().x,textMax.y};
     ImGui::GetWindowDrawList()->AddLine(
         contentMin,contentMax,ImGui::GetColorU32(separatorColor),1.f);
-    ImGui::Dummy({std::max(ImGui::GetContentRegionAvail().x,1.f),ImGui::GetFrameHeight()});
+    // Keep the name hit target on the same line as the arrow and checkbox.
+    // A new-line dummy here used to add a second, empty row to every object.
+    ImGui::InvisibleButton("##name",
+        {std::max(ImGui::GetContentRegionAvail().x,1.f),ImGui::GetFrameHeight()});
+    result.clicked=result.clicked||ImGui::IsItemClicked();
+    result.doubleClicked=result.doubleClicked||
+        (ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left));
     if(!enabledInHierarchy&&!result.dragActive){
         // Effective hierarchy disablement is visual only. The checkbox still
         // reflects and edits this object's own saved enabled state.

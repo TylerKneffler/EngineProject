@@ -31,6 +31,16 @@ struct EditorGizmoResult
 class EditorGizmoSystem
 {
 public:
+    void SetBoneEditing(bool enabled) { m_boneEditing = enabled; }
+    void SetBoneTransformSettings(int pivotMode, const glm::vec3& customPivot,
+        float translationSnap, float rotationSnapDegrees, float scaleSnap)
+    {
+        m_bonePivotMode = pivotMode;
+        m_boneCustomPivot = customPivot;
+        m_boneTranslationSnap = translationSnap;
+        m_boneRotationSnap = rotationSnapDegrees;
+        m_boneScaleSnap = scaleSnap;
+    }
     EditorGizmoResult DrawAndHandle(
         Engine::Scene::Scene& scene, IEditorUi& ui,
         const EditorUiViewportInput& input, EditorTransformTool tool);
@@ -39,6 +49,15 @@ public:
         const EditorUiViewportInput& input, int selectedPaletteIndex);
 
 private:
+    bool m_boneEditing = false;
+    int m_bonePivotMode = 0;
+    glm::vec3 m_boneCustomPivot{};
+    float m_boneTranslationSnap = 0.f;
+    float m_boneRotationSnap = 0.f;
+    float m_boneScaleSnap = 0.f;
+    glm::vec3 m_dragPivotWorld{};
+    glm::vec3 m_dragStartWorldPosition{};
+    bool m_dragWasBone = false;
     Engine::Core::Object* m_dragObject = nullptr;
     int m_dragAxis = -1;
     glm::vec3 m_dragStartLocalPosition{};

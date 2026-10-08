@@ -15,6 +15,7 @@ class Model : public Engine::Core::Component
 public:
     Model();
     void BindNode(unsigned index, Object* object);
+    void UnbindNode(unsigned index);
     Object* ResolveNode(unsigned index) const;
     const std::vector<Object*>& ResolveNodes() const;
     size_t GetNodeCount() const { return m_nodePaths.size(); }

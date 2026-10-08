@@ -1,9 +1,9 @@
 #include "Scripts/Physics/FoxProceduralWalk.h"
 #include "Core/Compoonents/Animation/AnimationManager.h"
 #include "Core/Compoonents/Animation/IKBone.h"
+#include "Core/Compoonents/Animation/GroundedFootIK.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
-#include "Core/Physics/Physics.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
@@ -26,6 +26,14 @@ constexpr std::array<const char*, 4> footNames {
     "b_RightHand_08", "b_LeftHand_011",
     "b_RightFoot02_022", "b_LeftFoot02_018"
 };
+constexpr std::array<const char*, 4> upperNames {
+    "b_RightUpperArm_06", "b_LeftUpperArm_09",
+    "b_RightLeg01_019", "b_LeftLeg01_015"
+};
+constexpr std::array<const char*, 4> lowerNames {
+    "b_RightForeArm_07", "b_LeftForeArm_010",
+    "b_RightFoot01_021", "b_LeftFoot01_017"
+};
 constexpr std::array<const char*, 5> courseNames {
     "Walk Floor A", "Walk Floor B", "Low Walk Rise",
     "High Walk Rise", "Uneven Walk Rise"
@@ -42,7 +50,6 @@ FoxProceduralWalk::FoxProceduralWalk()
     RegisterField("strideDistance", strideDistance, "Fox Walk");
     RegisterField("cameraFollowDelayDistance", cameraFollowDelayDistance,
         "Fox Walk");
-    RegisterField("bodyClearance", bodyClearance, "Fox Walk");
     RegisterField("obstacleRepeatDistance", obstacleRepeatDistance, "Fox Walk");
     RegisterField("floorTileLength", floorTileLength, "Fox Walk");
 }
@@ -104,7 +111,6 @@ void FoxProceduralWalk::Start()
     m_travel = 0.f;
     m_clipDuration = m_gaitPeriod = 0.f;
     m_lastStrideDistance = std::max(strideDistance, 0.01f);
-    m_heightCalibrated = false;
     if (!Resolve()) return;
     m_startRoot = m_fox->transform.GetWorldPosition();
     m_forward = glm::quat(m_fox->transform.rotation) *
@@ -114,7 +120,16 @@ void FoxProceduralWalk::Start()
         ? glm::normalize(m_forward) : glm::vec3(0.f, 0.f, -1.f);
     ResolveCourse();
     if (m_camera) m_startCamera = m_camera->transform.GetWorldPosition();
-    m_smoothedRootY = m_startRoot.y;
+    if (auto* footIK = Owner->GetComponent<
+        Engine::Components::GroundedFootIK>())
+    {
+        footIK->Clear();
+        for (unsigned index = 0; index < 4; ++index)
+            footIK->SetLeg(index,
+                m_fox->FindObjectInChildrenByName(upperNames[index]),
+                m_fox->FindObjectInChildrenByName(lowerNames[index]),
+                m_feet[index]);
+    }
     if (auto* skeleton = m_fox->GetComponent<Engine::Components::Skeleton>())
     {
         skeleton->colliderMode = "MeshCollider";
@@ -179,46 +194,19 @@ void FoxProceduralWalk::Update()
     }
     RecycleCourse();
     glm::vec3 nextRoot = m_startRoot + m_forward * m_travel;
-    nextRoot.y = m_smoothedRootY;
     m_fox->transform.position = nextRoot;
     if (m_camera)
         m_camera->transform.position = m_startCamera + m_forward *
             std::max(m_travel - std::max(cameraFollowDelayDistance, 0.f), 0.f);
 
-    // Calibrate to the animated foot positions, then keep the body above the
-    // highest support under its feet. The root remains kinematic.
-    float feetY = 0.f, highestGroundY = -1000.f;
-    unsigned groundCount = 0;
-    for (unsigned index = 0; index < 4; ++index)
+    if (auto* footIK = Owner->GetComponent<
+        Engine::Components::GroundedFootIK>())
     {
-        const auto* foot = m_feet[index];
-        if (!foot) continue;
-        const glm::vec3 position = foot->transform.GetWorldPosition();
-        feetY += position.y;
-        const auto hits = scene->GetPhysics().RaycastAll(
-            position + glm::vec3(0.f, 2.f, 0.f),
-            glm::vec3(0.f, -1.f, 0.f), 4.5f);
-        for (const auto& hit : hits)
-            if (hit.rigidBody && hit.object != m_fox &&
-                hit.rigidBody->bodyType != "Dynamic" && hit.normal.y > 0.45f)
-            {
-                highestGroundY = std::max(highestGroundY, hit.point.y);
-                ++groundCount;
-                break;
-            }
+        const float cycle = m_travel / distancePerCycle;
+        const std::array<float, 4> phases {
+            cycle, cycle + 0.5f, cycle + 0.5f, cycle
+        };
+        footIK->Solve(*m_fox, phases, 0.55f, 0.22f,
+            0.03f, 1.f, dt);
     }
-    if (!m_heightCalibrated)
-    {
-        m_rootAboveFeet = m_fox->transform.GetWorldPosition().y - feetY / 4.f;
-        m_heightCalibrated = true;
-    }
-    if (groundCount)
-    {
-        const float desired = highestGroundY + m_rootAboveFeet +
-            std::max(bodyClearance, 0.f);
-        const float blend = 1.f - std::exp(-10.f * dt);
-        m_smoothedRootY = glm::mix(m_smoothedRootY, desired, blend);
-        nextRoot.y = m_smoothedRootY;
-    }
-    m_fox->transform.position = nextRoot;
 }

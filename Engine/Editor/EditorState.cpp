@@ -9,6 +9,7 @@
 #include "Core/View/Views/HierarchyView.h"
 #include "Core/View/Views/SceneView.h"
 #include "Core/View/Views/GameView.h"
+#include "Core/View/Templates/EditModes/ViewportModeTemplate.h"
 #include "Core/View/Views/AssetDocumentView.h"
 #include "Core/Window.h"
 #include "Core/Renderers/RendererFactory.h"
@@ -30,6 +31,8 @@
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Importers/ModelImporter.h"
 #include "Core/MeshEditGeometry.h"
+#include "Core/MeshEditSnapshot.h"
+#include "Core/SnapshotHistory.h"
 #include "Engine/Editor/Core/View/Templates/Assets/AssetPreviewCache.h"
 #include <chrono>
 #include <algorithm>
@@ -46,87 +49,6 @@
 
 namespace Engine::Editor
 {
-namespace
-{
-class EditToolsPanel final : public IEditorPanel
-{
-public:
-    std::function<void(IEditorUi&)> DrawTools;
-    EditToolsPanel()
-    {
-        SetTitle("Edit Tools");
-        SetDefaultDockArea(EditorPanelDockArea::RightSidebar);
-        SetOpen(false);
-    }
-    void DrawPanel(IEditorUi& ui) override
-    {
-        if (!ui.BeginWindow(m_title.c_str(), &m_open))
-        {
-            ui.EndWindow();
-            return;
-        }
-        if (ui.IsWindowFocused() && OnFocused) OnFocused();
-        if (DrawTools) DrawTools(ui);
-        ui.EndWindow();
-    }
-};
-
-std::string CaptureMeshSnapshot(const Engine::Components::Mesh& mesh)
-{
-    const auto& vertices = mesh.GetVertices();
-    const auto& indices = mesh.GetIndices();
-    const uint32_t counts[]{ static_cast<uint32_t>(vertices.size()),
-        static_cast<uint32_t>(indices.size()) };
-    std::string result(reinterpret_cast<const char*>(counts), sizeof(counts));
-    result.append(reinterpret_cast<const char*>(vertices.data()),
-        vertices.size() * sizeof(Engine::Components::Mesh::Vertex));
-    result.append(reinterpret_cast<const char*>(indices.data()),
-        indices.size() * sizeof(uint32_t));
-    return result;
-}
-
-bool RestoreMeshSnapshot(Engine::Components::Mesh& mesh,
-    const std::string& snapshot)
-{
-    using Vertex = Engine::Components::Mesh::Vertex;
-    if (snapshot.size() < sizeof(uint32_t) * 2) return false;
-    uint32_t counts[2]{};
-    std::memcpy(counts, snapshot.data(), sizeof(counts));
-    const size_t vertexBytes = static_cast<size_t>(counts[0]) * sizeof(Vertex);
-    const size_t indexBytes = static_cast<size_t>(counts[1]) * sizeof(uint32_t);
-    if (!counts[0] || vertexBytes > snapshot.size() - sizeof(counts) ||
-        indexBytes != snapshot.size() - sizeof(counts) - vertexBytes)
-        return false;
-    std::vector<Vertex> vertices(counts[0]);
-    std::vector<uint32_t> indices(counts[1]);
-    std::memcpy(vertices.data(), snapshot.data() + sizeof(counts), vertexBytes);
-    std::memcpy(indices.data(), snapshot.data() + sizeof(counts) + vertexBytes,
-        indexBytes);
-    return indices.empty()
-        ? mesh.SetAuthoredVertices(std::move(vertices))
-        : mesh.SetIndexedGeometry(std::move(vertices), std::move(indices));
-}
-
-struct ViewportModeControl
-{
-    bool changed = false;
-    bool showSave = false;
-};
-
-ViewportModeControl DrawViewportModeControl(IEditorUi& ui, int& mode)
-{
-    const float available = ui.AvailableContentWidth();
-    const bool compact = available < 125.f;
-    const bool showSave = available >= 175.f;
-    ui.SetNextItemWidth(std::max(48.f,
-        available - (compact ? 0.f : 47.f) - (showSave ? 56.f : 0.f)));
-    const char* choices[]{ "Object", "Mesh", "Skeleton" };
-    const bool changed = ui.Combo(compact ? "##Mode" : "Mode",
-        &mode, choices, 3);
-    if (compact) ui.Tooltip("Editor mode");
-    return { changed, showSave };
-}
-}
 namespace
 {
     void LogStartupFailure(const std::string& message)
@@ -482,115 +404,16 @@ void EditorState::SetMeshEditMode(Engine::Scene::Scene* scene,
     for (const auto& panel : m_panels)
         if (auto* view = dynamic_cast<SceneView*>(panel.get());
             view && view->GetScene() == scene)
+        {
             view->AllowObjectTransform = !enabled;
+            view->SetEditMode(enabled ? SceneEditMode::Mesh :
+                SceneEditMode::Object);
+        }
     if (enabled) SyncMeshEditSelection(scene, session);
-    m_pendingEditToolsOpen = true;
     if (m_renderer) m_renderer->MarkDirty();
 }
 
-void EditorState::DrawEditTools(IEditorUi& ui)
-{
-    if (m_activeAssetDocument)
-    {
-        ui.DisabledLabel("Select a Scene or Prefab document for edit tools.");
-        return;
-    }
-    if (m_activeSceneAssetDocument)
-    {
-        SceneAssetDocument& document = *m_activeSceneAssetDocument;
-        if (document.skeletonEdit.enabled)
-        {
-            ui.ColoredLabel("Skeleton Mode", { .35f, .75f, 1.f, 1.f });
-            DrawSkeletonEditTools(ui);
-            return;
-        }
-        if (document.meshStage && document.meshStageTools)
-        {
-            ui.ColoredLabel("Mesh Mode", { .35f, .75f, 1.f, 1.f });
-            if (document.meshEdit.enabled)
-            {
-                DrawMeshEditTools(ui);
-                ui.Separator();
-                ui.ColoredLabel("Vertex attributes and UV", { .35f, .75f, 1.f, 1.f });
-            }
-            document.meshStageTools(ui);
-            return;
-        }
-        if (document.skeletonStage && document.skeletonStageTools)
-        {
-            ui.ColoredLabel("Skeleton Mode", { .35f, .75f, 1.f, 1.f });
-            document.skeletonStageTools(ui);
-            return;
-        }
-        if (document.objectStage && document.objectStageTools)
-        {
-            ui.ColoredLabel("Object Mode", { .35f, .75f, 1.f, 1.f });
-            document.objectStageTools(ui);
-            ui.Separator();
-            DrawObjectEditTools(ui);
-            return;
-        }
-    }
-    if (SkeletonEditSession* skeleton = ActiveSkeletonEditSession();
-        skeleton && skeleton->enabled)
-    {
-        ui.ColoredLabel("Skeleton Mode", { .35f, .75f, 1.f, 1.f });
-        DrawSkeletonEditTools(ui);
-    }
-    else if (MeshEditSession* edit = ActiveMeshEditSession();
-        edit && edit->enabled)
-    {
-        ui.ColoredLabel("Mesh Mode", { .35f, .75f, 1.f, 1.f });
-        DrawMeshEditTools(ui);
-    }
-    else
-    {
-        ui.ColoredLabel("Object Mode", { .35f, .75f, 1.f, 1.f });
-        DrawObjectEditTools(ui);
-    }
-}
 
-void EditorState::DrawObjectEditTools(IEditorUi& ui)
-{
-    Engine::Scene::Scene* scene = GetActiveDocumentScene();
-    Engine::Core::Object* object = scene ? scene->GetSelectedObject() : nullptr;
-    if (!object)
-    {
-        ui.DisabledLabel("Select an object in the hierarchy.");
-        return;
-    }
-    ui.ValueLabel("Selected object", object->name.c_str());
-    auto& transform = object->transform;
-    const glm::vec3 previousPosition = transform.position;
-    const glm::vec3 previousRotation = transform.rotation;
-    const glm::vec3 previousScale = transform.scale;
-    bool changed = ui.DragFloat3("Position", &transform.position.x, .01f);
-    changed |= ui.DragFloat3("Rotation", &transform.rotation.x, .01f);
-    changed |= ui.DragFloat3("Scale", &transform.scale.x, .01f);
-    if (!changed) return;
-    uint8_t channels = 0;
-    if (transform.position != previousPosition)
-        channels |= Engine::Components::Transform::EditorPosition;
-    if (transform.rotation != previousRotation)
-        channels |= Engine::Components::Transform::EditorRotation;
-    if (transform.scale != previousScale)
-        channels |= Engine::Components::Transform::EditorScale;
-    transform.NotifyEditorTransformChanged(channels);
-    if (auto* body = object->GetComponent<Engine::Components::RigidBody>())
-        body->NotifyEditorTransformChanged();
-    if (Engine::Core::Object* prefabRoot = object->GetPrefabInstanceRoot())
-        prefabRoot->PrefabOverrideCacheValid = false;
-    if (m_activeSceneAssetDocument)
-    {
-        m_activeSceneAssetDocument->dirty = true;
-        RefreshSceneAssetDocumentTitle(*m_activeSceneAssetDocument);
-    }
-    else if (scene == m_prefabScene.get())
-        SetPrefabDirty(true);
-    else
-        MarkSceneEdited();
-    if (m_renderer) m_renderer->MarkDirty();
-}
 
 const std::vector<std::pair<uint32_t, uint32_t>>&
 EditorState::CachedMeshEdges(MeshEditSession& session,
@@ -617,216 +440,6 @@ EditorState::CachedMeshEdges(MeshEditSession& session,
     return session.edgeCache->edges;
 }
 
-void EditorState::DrawMeshEditTools(IEditorUi& ui)
-{
-    MeshEditSession* session = ActiveMeshEditSession();
-    Engine::Scene::Scene* scene = GetActiveDocumentScene();
-    if (!session || !session->enabled || !scene)
-    {
-        ui.DisabledLabel("Choose Mesh in a Scene or Prefab mode selector.");
-        return;
-    }
-    SyncMeshEditSelection(scene, *session);
-    Engine::Components::Mesh* mesh = session->activeMesh;
-    if (!mesh)
-    {
-        ui.DisabledLabel("Select an object with a mesh in the hierarchy.");
-        return;
-    }
-    ui.ValueLabel("Active mesh", mesh->Owner ? mesh->Owner->name.c_str() : "Mesh");
-    ui.ValueLabel("Shared asset", session->savePath.empty()
-        ? "Save the scene to choose a mesh path" : session->savePath.c_str());
-    ui.SearchInput("Find tool", session->search, sizeof(session->search),
-        "Search mesh tools");
-    const char* modes[]{ "Vertex", "Edge", "Face" };
-    if (ui.Combo("Selection", &session->selectionMode, modes, 3))
-    {
-        session->selectedElement = 0;
-        session->selectedElements = { 0 };
-        session->gizmoDragging = false;
-        session->gizmoStartPositions.clear();
-    }
-    const char* selectionTools[]{ "Click", "Box", "Lasso" };
-    ui.Combo("Select with", &session->selectionTool, selectionTools, 3);
-    ui.DisabledLabel("Drag in viewport; Ctrl toggles selection.");
-    const std::string selectionCount = std::to_string(
-        session->selectedElements.size());
-    ui.ValueLabel("Selected", selectionCount.c_str());
-    std::optional<MeshEditGeometry> geometry;
-    const auto draft = [&]() -> MeshEditGeometry&
-    {
-        if (!geometry) geometry = MeshEditGeometry::FromMesh(*mesh);
-        return *geometry;
-    };
-    const auto& storedIndices = mesh->GetIndices();
-    const uint32_t count = session->selectionMode == 0
-        ? static_cast<uint32_t>(mesh->GetVertices().size())
-        : (session->selectionMode == 1
-            ? static_cast<uint32_t>(CachedMeshEdges(*session, *mesh).size())
-            : static_cast<uint32_t>((storedIndices.empty()
-                ? mesh->GetVertices().size() : storedIndices.size()) / 3));
-    if (count)
-    {
-        session->selectedElement = std::min<uint32_t>(
-            session->selectedElement, count - 1);
-        int selected = static_cast<int>(std::min<uint32_t>(
-            session->selectedElement, count - 1));
-        if (count > 1 && ui.SliderInt("Element", &selected, 0,
-            static_cast<int>(count - 1)))
-        {
-            session->selectedElement = static_cast<uint32_t>(selected);
-            session->selectedElements = { session->selectedElement };
-        }
-    }
-    if (!session->toolError.empty()) ui.DisabledLabel(session->toolError.c_str());
-    ui.Separator();
-    const auto matches = [&](const char* name)
-    {
-        std::string filter(session->search), label(name);
-        std::transform(filter.begin(), filter.end(), filter.begin(),
-            [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-        std::transform(label.begin(), label.end(), label.begin(),
-            [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-        return label.find(filter) != std::string::npos;
-    };
-    const auto apply = [&](MeshEditGeometry&& edit)
-    {
-        if (!Engine::Components::Mesh::ValidateAuthoredGeometry(
-                edit.vertices, edit.indices)) return false;
-        const uint32_t nextCount = session->selectionMode == 0
-            ? static_cast<uint32_t>(edit.vertices.size())
-            : (session->selectionMode == 1 ? edit.EdgeCount() : edit.FaceCount());
-        const std::string before = CaptureMeshSnapshot(*mesh);
-        if (!mesh->SetIndexedGeometry(std::move(edit.vertices),
-                std::move(edit.indices))) return false;
-        if (!session->savePath.empty())
-            mesh->SetAuthoredFilePath(session->savePath);
-        session->selectedElements.erase(std::remove_if(
-            session->selectedElements.begin(), session->selectedElements.end(),
-            [nextCount](uint32_t id) { return id >= nextCount; }),
-            session->selectedElements.end());
-        if (nextCount)
-            session->selectedElement = std::min(session->selectedElement,
-                nextCount - 1);
-        if (m_historyLimit > 0 && session->undo.size() >= m_historyLimit)
-            session->undo.pop_front();
-        if (m_historyLimit > 0) session->undo.push_back(before);
-        session->redo.clear();
-        session->baseline = CaptureMeshSnapshot(*mesh);
-        session->dirty = session->baseline != session->savedSnapshot;
-        if (!session->savePath.empty())
-        {
-            MeshEditSession cached = *session;
-            cached.activeMesh = nullptr;
-            m_meshEditCache[AssetPathIdentity(session->savePath)] =
-                std::move(cached);
-        }
-        if (m_renderer) m_renderer->MarkDirty();
-        return true;
-    };
-    const auto selected = [&]()
-    {
-        return session->selectedElements;
-    };
-    const auto run = [&](const char* error, bool success)
-    {
-        if (success && geometry && apply(std::move(*geometry)))
-            session->toolError.clear();
-        else session->toolError = error;
-    };
-    if (matches("Undo") && ui.Button("Undo mesh edit"))
-        ApplyMeshHistory(false);
-    if (matches("Redo") && ui.Button("Redo mesh edit"))
-        ApplyMeshHistory(true);
-    if (count && matches("Transform"))
-    {
-        ui.DragFloat3("Translate", session->move, .01f);
-        ui.DragFloat3("Rotate degrees", session->rotate, 1.f);
-        ui.DragFloat3("Scale", session->scale, .01f);
-        const char* pivots[]{ "Median", "Bounds", "Origin", "Custom" };
-        ui.Combo("Pivot", &session->pivotMode, pivots, 4);
-        if (session->pivotMode == 3)
-            ui.DragFloat3("Custom pivot", session->customPivot, .01f);
-        ui.DragFloat("Translation snap (0 off)", &session->snapStep, .01f);
-        ui.DragFloat("Rotation snap (0 off)", &session->rotationSnap, 1.f);
-        ui.DragFloat("Scale snap (0 off)", &session->scaleSnap, .01f);
-        if (ui.Button("Transform selection"))
-        {
-            run("Select a valid element and use positive scale values.",
-                draft().TransformSelection(session->selectionMode, selected(),
-                    { session->move[0], session->move[1], session->move[2] },
-                    { session->rotate[0], session->rotate[1], session->rotate[2] },
-                    { session->scale[0], session->scale[1], session->scale[2] },
-                    session->pivotMode,
-                    { session->customPivot[0], session->customPivot[1],
-                        session->customPivot[2] }, session->snapStep,
-                    session->rotationSnap, session->scaleSnap));
-        }
-    }
-    if (mesh->HasMorphTargets())
-        ui.DisabledLabel("Topology tools require a mesh without morph targets.");
-    else if (session->selectionMode == 1 && count && matches("Split edge"))
-    {
-        if (ui.Button("Split edge"))
-            run("Select an edge to split.", draft().SplitEdge(session->selectedElement));
-    }
-    else if (session->selectionMode == 2 && count)
-    {
-        if (matches("Extrude face"))
-        {
-            ui.DragFloat("Extrude distance", &session->extrudeDistance, .01f);
-            if (ui.Button("Extrude face"))
-                run("Select a nondegenerate face and a nonzero distance.",
-                    draft().ExtrudeFace(session->selectedElement,
-                        session->extrudeDistance));
-        }
-        if (matches("Inset face"))
-        {
-            ui.SliderFloat("Inset amount", &session->insetAmount, .01f, .95f);
-            if (ui.Button("Inset face"))
-                run("Select a face and an inset between 0 and 1.",
-                    draft().InsetFace(session->selectedElement,
-                        session->insetAmount));
-        }
-    }
-    if (!mesh->HasMorphTargets() && count)
-    {
-        if (session->selectionMode == 1)
-        {
-            if (matches("Bevel edge"))
-            {
-                ui.SliderFloat("Bevel width", &session->bevelWidth, .01f, .49f);
-                if (ui.Button("Bevel edge"))
-                    run("Bevel requires an interior edge shared by two faces.",
-                        draft().BevelEdge(session->selectedElement,
-                            session->bevelWidth));
-            }
-            if (matches("Loop cut") && ui.Button("Loop cut"))
-                run("Loop cut requires a planar quad strip edge.",
-                    draft().LoopCut(session->selectedElement));
-            if (matches("Fill boundary") && ui.Button("Fill boundary"))
-                run("Fill requires a selected convex planar boundary loop.",
-                    draft().FillBoundary(selected()));
-            if (matches("Bridge boundaries") && ui.Button("Bridge boundaries"))
-                run("Bridge requires two selected boundary loops of equal size.",
-                    draft().BridgeBoundaries(selected()));
-        }
-        if (session->selectionMode == 0 && matches("Weld vertices") &&
-            ui.Button("Weld vertices"))
-            run("Weld requires at least two selected vertices and a remaining face.",
-                draft().WeldVertices(selected()));
-        if (session->selectionMode == 2 && matches("Duplicate faces") &&
-            ui.Button("Duplicate faces"))
-            run("Select faces to duplicate.", draft().DuplicateFaces(selected(),
-                { session->move[0], session->move[1], session->move[2] }));
-        if (matches("Delete selection") && ui.Button("Delete selection"))
-            run("Delete must leave at least one face in the mesh.",
-                draft().DeleteSelection(session->selectionMode, selected()));
-    }
-    ui.Separator();
-    if (ui.Button(session->dirty ? "Save Mesh *" : "Save Mesh"))
-        SaveMeshEditSession(*session);
-}
 
 bool EditorState::HandleMeshViewport(IEditorUi& ui,
     const EditorUiViewportInput& input, Engine::Scene::Scene* scene,
@@ -1446,20 +1059,17 @@ bool EditorState::ApplyMeshHistory(bool redo)
     MeshEditSession* session = ActiveMeshEditSession();
     Engine::Scene::Scene* scene = GetActiveDocumentScene();
     SkeletonEditSession* skeleton = ActiveSkeletonEditSession();
-    const bool paint = skeleton && skeleton->enabled && skeleton->submode == 1;
+    const bool paint = skeleton && skeleton->enabled;
     if (!session || (!session->enabled && !paint) || !scene) return false;
     if (session->enabled) SyncMeshEditSelection(scene, *session);
     else if (paint && !session->activeMesh)
         session->activeMesh = skeleton->mesh;
-    auto& source = redo ? session->redo : session->undo;
-    auto& destination = redo ? session->undo : session->redo;
-    if (!session->activeMesh || source.empty()) return false;
-    const std::string target = source.back();
-    if (!RestoreMeshSnapshot(*session->activeMesh, target)) return false;
-    source.pop_back();
-    destination.push_back(session->baseline);
-    session->baseline = target;
-    session->dirty = target != session->savedSnapshot;
+    if (!session->activeMesh ||
+        !StepMeshSnapshotHistory(*session->activeMesh, redo,
+            session->undo, session->redo, session->baseline)) return false;
+    session->dirty = session->baseline != session->savedSnapshot;
+    if (m_activeSceneAssetDocument)
+        RefreshSceneAssetDocumentTitle(*m_activeSceneAssetDocument);
     if (!session->savePath.empty())
     {
         MeshEditSession cached = *session;
@@ -2048,6 +1658,7 @@ void EditorState::OpenPrefabStage(const std::string& path)
             : HandleMeshViewport(ui, input, m_prefabScene.get(),
                 m_prefabMeshEdit, tool);
     };
+    m_prefabSceneView->UseGlobalToolbar = true;
     m_prefabSceneView->OnDrawDocumentTools = [this](IEditorUi& ui)
     {
         if (!ui.BeginViewportHeader("##PrefabEditMode", 230.f)) return false;
@@ -2076,7 +1687,11 @@ void EditorState::OpenPrefabStage(const std::string& path)
         const bool consumed = ui.EndViewportHeader();
         return consumed;
     };
-    sceneView->OnFocused = [this]() { SetPrefabDocumentFocused(true); };
+    sceneView->OnFocused = [this]()
+    {
+        m_gameViewFocused = false;
+        SetPrefabDocumentFocused(true);
+    };
     sceneView->RequestFocusOnNextDraw();
     m_panels.push_back(std::move(sceneView));
     m_activePrefabPath = normalized;
@@ -2101,22 +1716,6 @@ void EditorState::ProcessPendingPrefabStageOpen()
     std::string path = std::move(m_pendingPrefabPath);
     m_pendingPrefabPath.clear();
     OpenPrefabStage(path);
-}
-
-void EditorState::ProcessPendingEditToolsOpen()
-{
-    if (!m_pendingEditToolsOpen) return;
-    m_pendingEditToolsOpen = false;
-    for (const auto& panel : m_panels)
-        if (auto* meshTools = dynamic_cast<EditToolsPanel*>(panel.get()))
-        {
-            meshTools->SetOpen(true);
-            return;
-        }
-    auto meshTools = std::make_unique<EditToolsPanel>();
-    meshTools->DrawTools = [this](IEditorUi& ui) { DrawEditTools(ui); };
-    meshTools->SetOpen(true);
-    m_panels.push_back(std::move(meshTools));
 }
 
 void EditorState::QueueAssetDocumentOpen(const std::string& path,
@@ -2364,6 +1963,10 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
         }
         SceneAssetDocument* raw = document.get();
         raw->view = view.get();
+        view->UseGlobalToolbar = true;
+        view->SetEditMode(raw->skeletonEdit.enabled
+            ? SceneEditMode::Skeleton : (raw->meshEdit.enabled
+                ? SceneEditMode::Mesh : SceneEditMode::Object));
         raw->view->SetDocumentPath(normalized);
         view->OnMeshViewportInput = [this, raw](IEditorUi& ui,
             const EditorUiViewportInput& input, EditorTransformTool tool)
@@ -2375,7 +1978,11 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
                     raw->meshEdit, tool);
         };
         RefreshSceneAssetDocumentTitle(*raw);
-        view->OnFocused = [this, raw]() { SetActiveSceneAssetDocument(raw); };
+        view->OnFocused = [this, raw]()
+        {
+            m_gameViewFocused = false;
+            SetActiveSceneAssetDocument(raw);
+        };
         view->OnObjectSelected = [this, raw](Engine::Core::Object* object)
         {
             if (raw->skeletonStage && object &&
@@ -2528,34 +2135,23 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
                     raw->view->AllowAssetDrops = false;
                     raw->view->AllowObjectTransform = !raw->meshStage &&
                         (!raw->skeletonStage || raw->skeletonEdit.submode == 0);
+                    raw->view->SetEditMode(raw->skeletonStage
+                        ? SceneEditMode::Skeleton : (raw->meshStage
+                            ? SceneEditMode::Mesh : SceneEditMode::Object));
                 }
                 if (raw->skeletonStage)
                     SyncSkeletonEditSelection(raw->scene.get(),
                         raw->skeletonEdit);
                 else raw->scene->SetEditorWeightPaint(nullptr, -1);
                 SetActiveSceneAssetDocument(raw, true);
-                m_pendingEditToolsOpen = true;
                 if (m_renderer) m_renderer->MarkDirty();
             }
         };
+        raw->focusPicker = drawAssetFocusPicker;
         if (raw->prefab && raw->modelStage)
             raw->objectStageTools = [this, raw](IEditorUi& ui)
             {
-                if (!raw->objectStage) return;
-                ui.ColoredLabel("Object Edit Stage", { 0.35f, 0.75f, 1.f, 1.f });
-                if (ui.Checkbox("Include child hierarchy", &raw->showChildHierarchy))
-                {
-                    ApplyObjectStageVisibility(*raw);
-                    if (!raw->showChildHierarchy)
-                    {
-                        raw->scene->SetSelectedObject(raw->subject);
-                        if (m_primaryHierarchy)
-                            m_primaryHierarchy->SetSelectedObject(raw->subject);
-                        if (m_primaryProperties)
-                            m_primaryProperties->SetSelectedObject(raw->subject);
-                    }
-                    if (m_renderer) m_renderer->MarkDirty();
-                }
+                DrawObjectStageTools(ui, *raw);
             };
         if (raw->prefab && raw->modelStage && raw->skeleton)
         {
@@ -2571,139 +2167,7 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
             view->AllowObjectTransform = !raw->meshStage;
             raw->meshStageTools = [this, raw](IEditorUi& ui)
             {
-                if (!raw->meshStage) return;
-                std::vector<Engine::Components::Mesh*> meshes;
-                for (const auto& object : raw->scene->GetObjects())
-                    if (object)
-                        for (Engine::Core::Component* component : object->Components)
-                            if (auto* mesh = dynamic_cast<Engine::Components::Mesh*>(component);
-                                mesh && !mesh->GetVertices().empty())
-                                meshes.push_back(mesh);
-                if (meshes.size() > 1)
-                {
-                    std::vector<std::string> meshLabels;
-                    std::vector<const char*> meshNames;
-                    int selectedMesh = 0;
-                    for (size_t index = 0; index < meshes.size(); ++index)
-                    {
-                        const std::string label = (meshes[index]->Owner
-                            ? meshes[index]->Owner->name : std::string("Mesh")) +
-                            " [" + std::to_string(index + 1) + "]";
-                        meshLabels.push_back(label);
-                        if (meshes[index] == raw->mesh)
-                            selectedMesh = static_cast<int>(index);
-                    }
-                    for (const std::string& label : meshLabels)
-                        meshNames.push_back(label.c_str());
-                    if (ui.Combo("Mesh", &selectedMesh, meshNames.data(),
-                        static_cast<int>(meshNames.size())) && selectedMesh >= 0 &&
-                        static_cast<size_t>(selectedMesh) < meshes.size())
-                    {
-                        raw->mesh = meshes[static_cast<size_t>(selectedMesh)];
-                        raw->subject = raw->mesh->Owner;
-                        raw->selectedVertex = 0;
-                        raw->meshSavePath = raw->mesh->GetFilePath();
-                        if (raw->meshSavePath.empty())
-                            raw->meshSavePath =
-                                (std::filesystem::path(raw->path).parent_path() /
-                                    (raw->subject->name + ".mesh")).string();
-                        raw->scene->SetSelectedObject(raw->subject);
-                        ApplyMeshStageVisibility(*raw);
-                        SetActiveSceneAssetDocument(raw, true);
-                        if (m_renderer) m_renderer->MarkDirty();
-                    }
-                }
-                if (!raw->mesh || raw->mesh->GetVertices().empty())
-                {
-                    ui.ColoredLabel("Mesh has no editable triangle-list vertices.",
-                        { 1.f, 0.6f, 0.25f, 1.f });
-                    return;
-                }
-                std::vector<Engine::Components::Mesh::Vertex> vertices =
-                    raw->mesh->GetVertices();
-                ui.ColoredLabel("Mesh Edit Stage", { 0.35f, 0.75f, 1.f, 1.f });
-                ui.ValueLabel("Save target", raw->meshSavePath.c_str());
-                const std::string count = std::to_string(vertices.size());
-                ui.ValueLabel("Triangle-list vertices", count.c_str());
-                int selected = static_cast<int>(std::min<uint32_t>(
-                    raw->selectedVertex, static_cast<uint32_t>(vertices.size() - 1)));
-                if (vertices.size() > 1 && ui.SliderInt("Vertex", &selected, 0,
-                    static_cast<int>(vertices.size() - 1)))
-                    raw->selectedVertex = static_cast<uint32_t>(selected);
-                auto& vertex = vertices[raw->selectedVertex];
-                bool changed = ui.DragFloat3("Position", vertex.pos, 0.01f);
-                changed |= ui.DragFloat("UV U", &vertex.uv[0], 0.005f);
-                changed |= ui.DragFloat("UV V", &vertex.uv[1], 0.005f);
-                changed |= ui.ColorEdit4("Vertex Color", vertex.color);
-                std::vector<float> uvPairs;
-                uvPairs.reserve(vertices.size() * 2);
-                for (const auto& item : vertices)
-                {
-                    uvPairs.push_back(item.uv[0]);
-                    uvPairs.push_back(item.uv[1]);
-                }
-                const auto& indices = raw->mesh->GetIndices();
-                const EditorUiUvMapResult uvResult = ui.UvMapEditor(
-                    "MeshUVMap", uvPairs.data(), vertices.size(),
-                    indices.data(), indices.size(), &selected, 280.f);
-                if (selected >= 0)
-                    raw->selectedVertex = static_cast<uint32_t>(selected);
-                const EditorUiContextMenuResult uvContext = ui.ContextMenu(
-                    raw, "Reset Selected UV", nullptr, false);
-                if (uvContext.addRequested && raw->selectedVertex < vertices.size())
-                {
-                    vertices[raw->selectedVertex].uv[0] = 0.5f;
-                    vertices[raw->selectedVertex].uv[1] = 0.5f;
-                    uvPairs[static_cast<size_t>(raw->selectedVertex) * 2] = 0.5f;
-                    uvPairs[static_cast<size_t>(raw->selectedVertex) * 2 + 1] = 0.5f;
-                    changed = true;
-                }
-                if (uvResult.coordinatesChanged)
-                {
-                    for (size_t index = 0; index < vertices.size(); ++index)
-                    {
-                        vertices[index].uv[0] = uvPairs[index * 2];
-                        vertices[index].uv[1] = uvPairs[index * 2 + 1];
-                    }
-                    changed = true;
-                }
-                int selectedInfluence = static_cast<int>(
-                    std::min(raw->selectedInfluence, 7u));
-                if (ui.SliderInt("Skin influence", &selectedInfluence, 0, 7))
-                    raw->selectedInfluence = static_cast<uint32_t>(selectedInfluence);
-                const uint32_t influenceIndex = raw->selectedInfluence % 4u;
-                float* joint = raw->selectedInfluence < 4u
-                    ? &vertex.joints0[influenceIndex]
-                    : &vertex.joints1[influenceIndex];
-                float* weight = raw->selectedInfluence < 4u
-                    ? &vertex.weights0[influenceIndex]
-                    : &vertex.weights1[influenceIndex];
-                changed |= ui.DragFloat("Joint palette index", joint, 1.f, 0.f, 255.f);
-                changed |= ui.SliderFloat("Influence weight", weight, 0.f, 1.f);
-                if (changed)
-                {
-                    float total = 0.f;
-                    for (float value : vertex.weights0) total += value;
-                    for (float value : vertex.weights1) total += value;
-                    if (total > 0.f)
-                    {
-                        for (float& value : vertex.weights0) value /= total;
-                        for (float& value : vertex.weights1) value /= total;
-                    }
-                }
-                if (changed)
-                {
-                    const bool applied = indices.empty()
-                        ? raw->mesh->SetAuthoredVertices(std::move(vertices))
-                        : raw->mesh->SetIndexedGeometry(std::move(vertices),
-                            std::vector<uint32_t>(indices));
-                    if (applied && m_renderer) m_renderer->MarkDirty();
-                    if (!applied && m_primaryConsole)
-                        m_primaryConsole->AddLog(ConsoleView::Level::Error,
-                            "Mesh edit rejected: invalid geometry or attributes.");
-                }
-                if (ui.Button("Save Mesh"))
-                    SaveSceneAssetDocument(*raw);
+                DrawMeshStageTools(ui, *raw);
             };
         }
         if (raw->prefab && raw->modelStage)
@@ -3057,6 +2521,7 @@ bool EditorState::RestoreSceneAssetDocumentSnapshot(
         if (!document.scene || !document.scene->LoadFromString(snapshot))
             return false;
         document.skeletonEdit.skeleton = nullptr;
+        document.skeletonEdit.bindingMesh = nullptr;
         document.skeletonEdit.mesh = nullptr;
         document.skeletonEdit.adjacency.reset();
         document.skeletonEdit.observedBindTransforms.clear();
@@ -3465,6 +2930,7 @@ void EditorState::ProcessPendingAssetDocumentOpens()
 
 void EditorState::SetActiveAssetDocument(AssetDocumentView* document)
 {
+    m_gameViewFocused = false;
     SetPrefabDocumentFocused(false);
     SetActiveSceneAssetDocument(nullptr);
     m_activeAssetDocument = document;
@@ -3630,6 +3096,7 @@ void EditorState::RestorePlayModeScene()
     if (m_scene->LoadFromString(m_playModeSceneSnapshot))
     {
         m_mainSkeletonEdit.skeleton = nullptr;
+        m_mainSkeletonEdit.bindingMesh = nullptr;
         m_mainSkeletonEdit.mesh = nullptr;
         m_mainSkeletonEdit.adjacency.reset();
         m_mainSkeletonEdit.observedBindTransforms.clear();
@@ -3723,6 +3190,7 @@ void EditorState::InitializePanels()
         {
             if (auto* mainSceneView = dynamic_cast<SceneView*>(scenePanel.get()))
             {
+                mainSceneView->UseGlobalToolbar = true;
                 mainSceneView->OnMeshViewportInput = [this](IEditorUi& ui,
                     const EditorUiViewportInput& input, EditorTransformTool tool)
                 {
@@ -3765,6 +3233,7 @@ void EditorState::InitializePanels()
             }
             scenePanel->OnFocused = [this]()
             {
+                m_gameViewFocused = false;
                 SetActiveSceneAssetDocument(nullptr);
                 SetPrefabDocumentFocused(false);
             };
@@ -3776,7 +3245,7 @@ void EditorState::InitializePanels()
         auto gamePanel = m_viewFactory->Create("Game");
         if (gamePanel)
         {
-            gamePanel->OnFocused = []() {};
+            gamePanel->OnFocused = [this]() { m_gameViewFocused = true; };
             m_panels.push_back(std::move(gamePanel));
         }
         else OutputDebugStringA("[EditorState::InitializePanels] WARNING: Game panel is null\n");
@@ -3785,7 +3254,6 @@ void EditorState::InitializePanels()
         auto hierarchyPanel = m_viewFactory->Create("Hierarchy");
         if (hierarchyPanel)
         {
-            hierarchyPanel->OnFocused = [this]() {};
             if (auto* hierarchy = dynamic_cast<HierarchyView*>(hierarchyPanel.get()))
             {
                 m_primaryHierarchy = hierarchy;
@@ -3804,7 +3272,6 @@ void EditorState::InitializePanels()
         {
             OutputDebugStringA("[EditorState::InitializePanels] Storing properties pointer\n");
             m_primaryProperties = static_cast<PropertiesView*>(properties.get());
-            properties->OnFocused = [this]() {};
             m_panels.push_back(std::move(properties));
         }
         
@@ -3835,7 +3302,6 @@ void EditorState::InitializePanels()
         if (terminal)
             m_panels.push_back(std::move(terminal));
     }
-    m_pendingEditToolsOpen = true;
     RefreshSceneDocumentTitle();
     OutputDebugStringA("[EditorState::InitializePanels] Complete\n");
 }
@@ -4531,6 +3997,15 @@ void EditorState::TrackSceneChanges(bool allowHistory, bool editInProgress)
                 document.undo.pop_front();
             if (m_historyLimit > 0)
                 document.undo.push_back(document.baseline);
+            if (document.skeletonEdit.enabled)
+            {
+                auto& skeleton = document.skeletonEdit;
+                RecordSkeletonHistory(skeleton,
+                    skeleton.pendingBindingMeshHistory
+                        ? SkeletonEditSession::HistoryKind::Binding
+                        : SkeletonEditSession::HistoryKind::Scene);
+                skeleton.pendingBindingMeshHistory = false;
+            }
             document.redo.clear();
             document.baseline = std::move(current);
             document.dirty = document.baseline != document.savedSnapshot;
@@ -4604,7 +4079,17 @@ void EditorState::CommitPendingHistoryEdit()
         return;
     if (m_historyLimit > 0 &&
         m_pendingHistoryBefore.scene != m_historyBaseline.scene)
+    {
         m_undoHistory.push_back(std::move(m_pendingHistoryBefore));
+        if (m_mainSkeletonEdit.enabled)
+        {
+            RecordSkeletonHistory(m_mainSkeletonEdit,
+                m_mainSkeletonEdit.pendingBindingMeshHistory
+                    ? SkeletonEditSession::HistoryKind::Binding
+                    : SkeletonEditSession::HistoryKind::Scene);
+            m_mainSkeletonEdit.pendingBindingMeshHistory = false;
+        }
+    }
     m_pendingHistoryBefore = {};
     m_hasPendingHistoryEdit = false;
     TrimHistory();
@@ -4612,15 +4097,15 @@ void EditorState::CommitPendingHistoryEdit()
 
 void EditorState::Undo()
 {
+    if (ApplySkeletonHistory(false)) return;
     if (ApplyMeshHistory(false)) return;
     if (m_activeSceneAssetDocument)
     {
         SceneAssetDocument& document = *m_activeSceneAssetDocument;
-        if (document.undo.empty()) return;
-        document.redo.push_back(document.baseline);
-        document.baseline = std::move(document.undo.back());
-        document.undo.pop_back();
-        RestoreSceneAssetDocumentSnapshot(document, document.baseline);
+        if (!StepSnapshotHistory(false, document.undo, document.redo,
+            document.baseline, [&](const std::string& snapshot)
+            { return RestoreSceneAssetDocumentSnapshot(document, snapshot); }))
+            return;
         document.dirty = document.baseline != document.savedSnapshot;
         RefreshSceneAssetDocumentTitle(document);
         if (m_primaryHierarchy) m_primaryHierarchy->SetSelectedObject(nullptr);
@@ -4651,16 +4136,15 @@ void EditorState::Undo()
 
 void EditorState::Redo()
 {
+    if (ApplySkeletonHistory(true)) return;
     if (ApplyMeshHistory(true)) return;
     if (m_activeSceneAssetDocument)
     {
         SceneAssetDocument& document = *m_activeSceneAssetDocument;
-        if (document.redo.empty()) return;
-        if (m_historyLimit > 0)
-            document.undo.push_back(document.baseline);
-        document.baseline = std::move(document.redo.back());
-        document.redo.pop_back();
-        RestoreSceneAssetDocumentSnapshot(document, document.baseline);
+        if (!StepSnapshotHistory(true, document.undo, document.redo,
+            document.baseline, [&](const std::string& snapshot)
+            { return RestoreSceneAssetDocumentSnapshot(document, snapshot); }))
+            return;
         document.dirty = document.baseline != document.savedSnapshot;
         RefreshSceneAssetDocumentTitle(document);
         if (m_primaryHierarchy) m_primaryHierarchy->SetSelectedObject(nullptr);
@@ -4696,6 +4180,7 @@ bool EditorState::CanUndo() const
         ? &m_activeSceneAssetDocument->skeletonEdit
         : (m_prefabDocumentFocused && m_prefabScene
             ? &m_prefabSkeletonEdit : &m_mainSkeletonEdit);
+    if (skeleton->enabled && !skeleton->undoOrder.empty()) return true;
     if ((edit->enabled || (skeleton->enabled && skeleton->submode == 1)) &&
         !edit->undo.empty()) return true;
     return m_activeSceneAssetDocument ? !m_activeSceneAssetDocument->undo.empty()
@@ -4713,6 +4198,7 @@ bool EditorState::CanRedo() const
         ? &m_activeSceneAssetDocument->skeletonEdit
         : (m_prefabDocumentFocused && m_prefabScene
             ? &m_prefabSkeletonEdit : &m_mainSkeletonEdit);
+    if (skeleton->enabled && !skeleton->redoOrder.empty()) return true;
     if ((edit->enabled || (skeleton->enabled && skeleton->submode == 1)) &&
         !edit->redo.empty()) return true;
     return m_activeSceneAssetDocument ? !m_activeSceneAssetDocument->redo.empty()
@@ -4732,6 +4218,7 @@ void EditorState::ApplyHistoryEntry(
         return;
     }
     m_mainSkeletonEdit.skeleton = nullptr;
+    m_mainSkeletonEdit.bindingMesh = nullptr;
     m_mainSkeletonEdit.mesh = nullptr;
     m_mainSkeletonEdit.adjacency.reset();
     m_mainSkeletonEdit.observedBindTransforms.clear();
@@ -4769,9 +4256,19 @@ void EditorState::ResetHistory(bool sceneIsSaved)
 void EditorState::SetHistoryLimit(uint32_t limit)
 {
     m_historyLimit = std::min(limit, 1000u);
+    const auto trimSkeleton = [&](SkeletonEditSession& session)
+    {
+        while (session.undoOrder.size() > m_historyLimit)
+            session.undoOrder.pop_front();
+        while (session.redoOrder.size() > m_historyLimit)
+            session.redoOrder.pop_front();
+    };
+    trimSkeleton(m_mainSkeletonEdit);
+    trimSkeleton(m_prefabSkeletonEdit);
     for (auto& document : m_sceneAssetDocuments)
         if (document)
         {
+            trimSkeleton(document->skeletonEdit);
             while (document->undo.size() > m_historyLimit)
                 document->undo.pop_front();
             while (document->redo.size() > m_historyLimit)

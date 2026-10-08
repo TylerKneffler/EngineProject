@@ -2,6 +2,9 @@
 #include "SceneView.h"
 #include "Scene/SceneCameraController.h"
 #include "Scene/ScenePlacementAndPicking.h"
+#include "Engine/Editor/Core/View/Templates/EditModes/Object/ObjectViewportTemplate.h"
+#include "Engine/Editor/Core/View/Templates/EditModes/Mesh/MeshViewportTemplate.h"
+#include "Engine/Editor/Core/View/Templates/EditModes/Skeleton/SkeletonViewportTemplate.h"
 #include "Engine/Editor/Core/PrimitiveObjectFactory.h"
 #include "Engine/Editor/Core/View/Templates/Common/AssetPathTemplate.h"
 #include "Engine/Editor/UI/IEditorUi.h"
@@ -98,8 +101,23 @@ void SceneView::DrawPanel(IEditorUi& ui)
     panDX = input.keyPanDX;
     panDY = input.keyPanDY;
     dolly = input.keyDolly;
-    const bool overlayConsumedClick = m_toolbar.Draw(ui, input, m_scene,
-        true, AllowObjectTransform);
+    bool overlayConsumedClick = false;
+    m_toolbar.SetSceneToolsVisible(!UseGlobalToolbar);
+    switch (m_editMode)
+    {
+    case SceneEditMode::Mesh:
+        overlayConsumedClick = MeshViewportTemplate::Draw(ui, input,
+            m_scene, m_toolbar);
+        break;
+    case SceneEditMode::Skeleton:
+        overlayConsumedClick = SkeletonViewportTemplate::Draw(ui, input,
+            m_scene, m_toolbar, AllowObjectTransform);
+        break;
+    default:
+        overlayConsumedClick = ObjectViewportTemplate::Draw(ui, input,
+            m_scene, m_toolbar, AllowObjectTransform);
+        break;
+    }
     const EditorUiContextMenuResult createMenu = AllowObjectCreation
         ? ui.ContextMenu(this, "Create", nullptr, true)
         : EditorUiContextMenuResult{};
@@ -162,6 +180,8 @@ void SceneView::DrawPanel(IEditorUi& ui)
     const EditorTransformTool transformTool = m_toolbar.GetTransformTool();
     if (overlayConsumedClick || transformTool == EditorTransformTool::Hand)
         gizmoInput.leftClicked = false;
+    m_gizmos.SetBoneEditing(m_editMode == SceneEditMode::Skeleton &&
+        AllowObjectTransform);
     const EditorGizmoResult gizmoResult = m_scene && AllowObjectTransform
         ? m_gizmos.DrawAndHandle(*m_scene, ui, gizmoInput, transformTool)
         : EditorGizmoResult{};
@@ -289,7 +309,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
         }
     }
 
-    const bool documentToolsConsumedClick = OnDrawDocumentTools
+    const bool documentToolsConsumedClick = !UseGlobalToolbar && OnDrawDocumentTools
         ? OnDrawDocumentTools(ui) : false;
     EditorUiViewportInput meshInput = input;
     if (documentToolsConsumedClick || overlayConsumedClick)

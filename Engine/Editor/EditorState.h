@@ -6,6 +6,7 @@
 #include "Core/Renderers/IEditorRenderer.h"
 #include "UI/IEditorUi.h"
 #include "Core/Gizmos/EditorGizmoSystem.h"
+#include "Core/View/Templates/EditModes/Skeleton/WeightPaintSurface.h"
 #include <memory>
 #include <vector>
 #include <functional>
@@ -42,6 +43,19 @@ class IEditorUi;
 class EditorState
 {
 public:
+    struct ToolbarVisibility
+    {
+        bool editMode = true;
+        bool playControls = true;
+        bool save = true;
+        bool undoRedo = true;
+        bool modeTools = true;
+        bool transformTools = true;
+        bool sceneDisplay = true;
+        bool toolDetails = true;
+        bool prefabActions = true;
+    };
+
     EditorState(HINSTANCE hInstance, const Engine::Model::ProjectSettings& projectSettings,
         std::string projectFilePath);
     ~EditorState();
@@ -76,7 +90,11 @@ public:
     const std::string& GetPendingSceneLoadPath() const { return m_sceneToLoad; }
     void OpenPrefabStage(const std::string& path);
     void ProcessPendingPrefabStageOpen();
-    void ProcessPendingEditToolsOpen();
+    void DrawGlobalToolbar(IEditorUi& ui);
+    void DrawToolbarTools(IEditorUi& ui);
+    float GetGlobalToolbarHeight() const;
+    bool HasToolbarToolRow() const;
+    ToolbarVisibility& GetToolbarVisibility() { return m_toolbarVisibility; }
     void ClosePrefabStage();
     void HandlePrefabPanelClosures();
     void QueueAssetDocumentOpen(const std::string& path,
@@ -193,7 +211,7 @@ private:
     bool HandleMeshViewport(IEditorUi& ui,
         const EditorUiViewportInput& input, Engine::Scene::Scene* scene,
         MeshEditSession& session, EditorTransformTool tool);
-    void DrawEditTools(IEditorUi& ui);
+    struct SkeletonEditSession;
     void DrawObjectEditTools(IEditorUi& ui);
     bool SaveMeshEditSession(MeshEditSession& session);
     bool SavePendingMeshEdits();
@@ -209,19 +227,32 @@ private:
             std::vector<std::vector<uint32_t>> neighbors;
         };
         bool enabled = false;
-        int submode = 0; // 0 bone edit, 1 weight paint
+        int submode = 0; // bone edit, weight paint, skin binding
         int boneTool = 0; // edit, add, remove
+        char boneName[128]{};
+        int reparentBoneIndex = -1;
+        int pivotMode = 0; // joint, parent, skeleton root, custom world point
+        float customPivot[3]{};
+        float translationSnap = 0.f;
+        float rotationSnap = 0.f;
+        float scaleSnap = 0.f;
         int brushOperation = 0; // add, subtract, replace, smooth
         int brushShape = 0; // circle, square
         int brushFalloff = 0; // hard, linear, smooth
         float brushRadius = 40.f;
         float brushHardness = 0.5f;
         float brushStrength = 0.35f;
-        float brushTarget = 1.f;
+        float brushPaintWeight = 1.f;
+        std::vector<bool> lockedBones;
         std::shared_ptr<WeightAdjacencyCache> adjacency;
+        std::shared_ptr<WeightPaintSurface::Topology> surfaceTopology;
         Engine::Components::Skeleton* skeleton = nullptr;
         Engine::Components::Mesh* mesh = nullptr;
+        Engine::Components::Mesh* bindingMesh = nullptr;
         int boneIndex = -1;
+        int mirrorBoneIndex = -1; // -1 disables paired-bone painting
+        char bindingVertexIds[256]{};
+        std::string bindingStatus;
         Engine::Core::Object* observedSelection = nullptr;
         uint64_t observedStructureRevision = 0;
         int observedSubmode = -1;
@@ -230,6 +261,27 @@ private:
         bool strokeChanged = false;
         EditorUiVec2 lastPaintPosition{};
         std::string strokeBefore;
+        enum class HistoryKind { Scene, Mesh, Binding };
+        struct HistoryAction
+        {
+            struct AssetEdit
+            {
+                ::Engine::Scene::Scene::ObjectPath beforePath;
+                ::Engine::Scene::Scene::ObjectPath afterPath;
+                std::string savePath;
+                std::string before;
+                std::string after;
+            };
+            HistoryKind kind = HistoryKind::Scene;
+            ::Engine::Scene::Scene::ObjectPath meshPath;
+            std::string meshSavePath;
+            std::vector<AssetEdit> assetEdits;
+        };
+        std::deque<HistoryAction> undoOrder;
+        std::deque<HistoryAction> redoOrder;
+        bool pendingBindingMeshHistory = false;
+        std::vector<HistoryAction::AssetEdit> pendingAssetEdits;
+        ::Engine::Scene::Scene::ObjectPath historyMeshPath;
         std::string error;
     };
     SkeletonEditSession* ActiveSkeletonEditSession();
@@ -243,8 +295,13 @@ private:
         const EditorUiViewportInput& input, Engine::Scene::Scene* scene,
         SkeletonEditSession& session);
     void FinishSkeletonPaintStroke(SkeletonEditSession& session);
+    void RecordSkeletonHistory(SkeletonEditSession& session,
+        SkeletonEditSession::HistoryKind kind);
+    bool ApplySkeletonHistory(bool redo);
     void RefreshSkeletonBindPose(SkeletonEditSession& session);
     bool ApplySkeletonBoneAction(Engine::Scene::Scene* scene,
+        SkeletonEditSession& session, int action);
+    bool ApplySkinBindingAction(Engine::Scene::Scene* scene,
         SkeletonEditSession& session, int action);
     void CommitSkeletonEdit(Engine::Scene::Scene* scene);
     void InitializePanels();
@@ -313,6 +370,7 @@ private:
         std::string meshSavePath;
         std::unique_ptr<Engine::Scene::Scene> scene;
         SceneView* view = nullptr;
+        std::function<void(IEditorUi&)> focusPicker;
         std::function<void(IEditorUi&)> objectStageTools;
         std::function<void(IEditorUi&)> meshStageTools;
         std::function<void(IEditorUi&)> skeletonStageTools;
@@ -327,6 +385,8 @@ private:
         MeshEditSession meshEdit;
         SkeletonEditSession skeletonEdit;
     };
+    void DrawObjectStageTools(IEditorUi& ui, SceneAssetDocument& document);
+    void DrawMeshStageTools(IEditorUi& ui, SceneAssetDocument& document);
     void SetActiveSceneAssetDocument(SceneAssetDocument* document,
         bool refresh = false);
     bool SaveSceneAssetDocument(SceneAssetDocument& document);
@@ -369,7 +429,6 @@ private:
     MeshEditSession m_prefabMeshEdit;
     SkeletonEditSession m_mainSkeletonEdit;
     SkeletonEditSession m_prefabSkeletonEdit;
-    bool m_pendingEditToolsOpen = false;
     std::unordered_map<std::string, MeshEditSession> m_meshEditCache;
 
     // State
@@ -400,6 +459,15 @@ private:
     bool m_assetPreviewActive = false;
     bool m_sceneEditInProgress = false;
     bool m_mainSceneGizmoWasActive = false;
+    bool m_gameViewFocused = false;
+    ToolbarVisibility m_toolbarVisibility;
+    std::string m_toolbarPopupTool;
+    Engine::Scene::Scene* m_toolbarPopupScene = nullptr;
+    int m_toolbarPopupMode = 0;
+    std::string m_toolbarDirectTool;
+    char m_meshToolbarSearch[64]{};
+    Engine::Scene::Scene* m_meshToolbarScene = nullptr;
+    int m_meshToolbarSelectionMode = 0;
     uint64_t m_sceneEditRevision = 0;
     uint64_t m_historyCapturedRevision = 0;
     bool m_historySelectionDirty = false;

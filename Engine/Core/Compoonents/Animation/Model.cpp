@@ -51,6 +51,15 @@ void Model::BindNode(unsigned index, Object* object)
     MarkConfigurationDirty();
 }
 
+void Model::UnbindNode(unsigned index)
+{
+    if (index >= m_nodePaths.size()) return;
+    m_nodePaths[index] = "!";
+    m_resolvedNodes.clear();
+    m_cachedStructureRevision = 0;
+    MarkConfigurationDirty();
+}
+
 Model::Object* Model::ResolveNode(unsigned index) const
 {
     const std::vector<Object*>& nodes = ResolveNodes();
@@ -72,6 +81,7 @@ void Model::RefreshNodeCache() const
     m_resolvedNodes.assign(m_nodePaths.size(), nullptr);
     for (size_t index = 0; Owner && index < m_nodePaths.size(); ++index)
     {
+        if (m_nodePaths[index] == "!") continue;
         Object* object = Owner;
         std::istringstream input(m_nodePaths[index]);
         std::string part;

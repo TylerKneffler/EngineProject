@@ -34,8 +34,8 @@ void ImGuiMainMenu::Draw(EditorState& state, PlayState playState,
         ImGui::EndMenu();
     }
     DrawViewsMenu(state);
+    DrawToolbarMenu(state);
     DrawRenderingMenu(state, playState);
-    DrawPlayControls(playState, buildManager);
     ImGui::EndMainMenuBar();
 }
 
@@ -133,56 +133,21 @@ void ImGuiMainMenu::DrawViewsMenu(EditorState& state) const
     ImGui::EndMenu();
 }
 
-void ImGuiMainMenu::DrawPlayControls(
-    PlayState playState, GameBuildManager* buildManager) const
+void ImGuiMainMenu::DrawToolbarMenu(EditorState& state) const
 {
-    constexpr float buttonWidth = 72.f;
-    constexpr float doubleButtonWidth = buttonWidth * 2.f + 6.f;
-    const float barWidth = ImGui::GetWindowWidth();
-
-    if (playState == PlayState::Stopped || playState == PlayState::BuildFailed)
-    {
-        ImGui::SetCursorPosX((barWidth - buttonWidth) * 0.5f);
-        const ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
-        ImGui::PushStyleColor(ImGuiCol_Button,
-            {accent.x * .50f, accent.y * .50f, accent.z * .50f, 1.f});
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
-            {accent.x * .75f, accent.y * .75f, accent.z * .75f, 1.f});
-        const bool start = ImGui::Button("Play", {buttonWidth, 0.f});
-        ImGui::PopStyleColor(2);
-        if (start && buildManager)
-            buildManager->PlayInEditor();
-        if (playState == PlayState::BuildFailed)
-        {
-            ImGui::SameLine();
-            ImGui::TextColored({1.f, 0.3f, 0.3f, 1.f}, "Build failed");
-        }
-    }
-    else if (playState == PlayState::Building)
-    {
-        static const char* spinner[] = {"|", "/", "-", "\\"};
-        const int frame = static_cast<int>(ImGui::GetTime() * 8.0) % 4;
-        ImGui::SetCursorPosX((barWidth - 120.f) * 0.5f);
-        ImGui::Text("Building... %s", spinner[frame]);
-    }
-    else if (playState == PlayState::Playing)
-    {
-        ImGui::SetCursorPosX((barWidth - doubleButtonWidth) * 0.5f);
-        if (ImGui::Button("Pause", {buttonWidth, 0.f}) && buildManager)
-            buildManager->Pause();
-        ImGui::SameLine(0.f, 6.f);
-        if (ImGui::Button("Stop", {buttonWidth, 0.f}) && buildManager)
-            buildManager->Stop();
-    }
-    else if (playState == PlayState::Paused)
-    {
-        ImGui::SetCursorPosX((barWidth - doubleButtonWidth) * 0.5f);
-        if (ImGui::Button("Resume", {buttonWidth, 0.f}) && buildManager)
-            buildManager->Resume();
-        ImGui::SameLine(0.f, 6.f);
-        if (ImGui::Button("Stop", {buttonWidth, 0.f}) && buildManager)
-            buildManager->Stop();
-    }
+    if (!ImGui::BeginMenu("Toolbar")) return;
+    EditorState::ToolbarVisibility& visible = state.GetToolbarVisibility();
+    ImGui::MenuItem("Play Controls", nullptr, &visible.playControls);
+    ImGui::MenuItem("Edit Mode", nullptr, &visible.editMode);
+    ImGui::MenuItem("Save", nullptr, &visible.save);
+    ImGui::MenuItem("Undo / Redo", nullptr, &visible.undoRedo);
+    ImGui::MenuItem("Mode Tools", nullptr, &visible.modeTools);
+    ImGui::MenuItem("Transform Tools", nullptr, &visible.transformTools);
+    ImGui::MenuItem("Scene Display", nullptr, &visible.sceneDisplay);
+    ImGui::MenuItem("Prefab Actions", nullptr, &visible.prefabActions);
+    ImGui::Separator();
+    ImGui::MenuItem("Edit Tools", nullptr, &visible.toolDetails);
+    ImGui::EndMenu();
 }
 
 void ImGuiMainMenu::OpenPanel(EditorState& state, const char* type) const

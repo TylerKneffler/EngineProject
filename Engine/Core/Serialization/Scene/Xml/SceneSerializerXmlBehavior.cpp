@@ -123,6 +123,14 @@ JsonValue SceneXmlBehavior::ReadNode(const pugi::xml_node& node)
 {
     const std::string name = node.name();
     const std::string fieldName = StripOwnedPrefix(name);
+    // Legacy model node paths were written as plain <item> text. A path such
+    // as "2.0" looks numeric, but its dot separates child indices.
+    if (name == SceneXml::ArrayItem && node.parent() &&
+        StripOwnedPrefix(node.parent().name()) == "nodePaths")
+        return JsonValue(std::string(node.child_value()));
+    if (const auto type = node.attribute("_valueType");
+        type && std::string(type.value()) == "string")
+        return JsonValue(std::string(node.child_value()));
     std::string namespacePrefix;
     std::string localName;
     const bool isQualified =
@@ -280,6 +288,8 @@ void SceneXmlBehavior::WriteNode(pugi::xml_node node, const JsonValue& value)
         break;
     }
     case JsonValue::Type::String:
+        if (!ParseScalarText(value.AsString()).IsString())
+            node.append_attribute("_valueType").set_value("string");
         node.text().set(value.AsString().c_str());
         break;
     case JsonValue::Type::Array:

@@ -652,6 +652,42 @@ if(NOT ENGINE_PROJECT_DIR AND
         WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()
 
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/WeightInfluenceTests.cpp")
+    enable_testing()
+    add_executable(WeightInfluenceTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/WeightInfluenceTests.cpp")
+    target_link_libraries(WeightInfluenceTests PRIVATE Engine)
+    target_include_directories(WeightInfluenceTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME WeightInfluenceRegression COMMAND WeightInfluenceTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/SkinBindingWeightsTests.cpp")
+    enable_testing()
+    add_executable(SkinBindingWeightsTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/SkinBindingWeightsTests.cpp")
+    target_link_libraries(SkinBindingWeightsTests PRIVATE Engine)
+    target_include_directories(SkinBindingWeightsTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME SkinBindingWeightsRegression COMMAND SkinBindingWeightsTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/SkeletonAuthoringRegressionTests.cpp")
+    enable_testing()
+    add_executable(SkeletonAuthoringRegressionTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/SkeletonAuthoringRegressionTests.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/SkeletonBindPose.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/MeshEditSnapshot.cpp")
+    target_link_libraries(SkeletonAuthoringRegressionTests PRIVATE Engine)
+    target_include_directories(SkeletonAuthoringRegressionTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME SkeletonAuthoringRegression COMMAND
+        SkeletonAuthoringRegressionTests)
+    set_tests_properties(SkeletonAuthoringRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
 if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PhysicsAdapterTests.cpp")
     enable_testing()

@@ -81,9 +81,9 @@
     </item>
     <item name="Low Walk Rise" enabled="true">
       <transform>
-        <Transform.position><item>-0.65</item><item>0.06</item><item>-4</item></Transform.position>
+        <Transform.position><item>-0.65</item><item>0.15</item><item>-4</item></Transform.position>
         <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
-        <Transform.scale><item>2.8</item><item>0.12</item><item>2.2</item></Transform.scale>
+        <Transform.scale><item>2.8</item><item>0.3</item><item>2.2</item></Transform.scale>
       </transform>
       <components>
         <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" />
@@ -94,9 +94,9 @@
     </item>
     <item name="High Walk Rise" enabled="true">
       <transform>
-        <Transform.position><item>0.65</item><item>0.12</item><item>-8</item></Transform.position>
+        <Transform.position><item>0.65</item><item>0.25</item><item>-8</item></Transform.position>
         <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
-        <Transform.scale><item>2.8</item><item>0.24</item><item>2.4</item></Transform.scale>
+        <Transform.scale><item>2.8</item><item>0.5</item><item>2.4</item></Transform.scale>
       </transform>
       <components>
         <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" />
@@ -107,9 +107,9 @@
     </item>
     <item name="Uneven Walk Rise" enabled="true">
       <transform>
-        <Transform.position><item>-0.4</item><item>0.09</item><item>-12</item></Transform.position>
+        <Transform.position><item>-0.4</item><item>0.2</item><item>-12</item></Transform.position>
         <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
-        <Transform.scale><item>2.4</item><item>0.18</item><item>2.8</item></Transform.scale>
+        <Transform.scale><item>2.4</item><item>0.4</item><item>2.8</item></Transform.scale>
       </transform>
       <components>
         <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" />
@@ -125,7 +125,8 @@
         <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
       </transform>
       <components>
-        <components:FoxProceduralWalk FoxProceduralWalk.foxObjectName="Fox" FoxProceduralWalk.cameraObjectName="Walk Camera" FoxProceduralWalk.animationClip="Walk" FoxProceduralWalk.forwardSpeed="2.67" FoxProceduralWalk.strideDistance="2.7" FoxProceduralWalk.cameraFollowDelayDistance="2" FoxProceduralWalk.bodyClearance="0.2" FoxProceduralWalk.obstacleRepeatDistance="16" FoxProceduralWalk.floorTileLength="48" />
+        <components:FoxProceduralWalk FoxProceduralWalk.foxObjectName="Fox" FoxProceduralWalk.cameraObjectName="Walk Camera" FoxProceduralWalk.animationClip="Walk" FoxProceduralWalk.forwardSpeed="2.67" FoxProceduralWalk.strideDistance="2.7" FoxProceduralWalk.cameraFollowDelayDistance="2" FoxProceduralWalk.obstacleRepeatDistance="16" FoxProceduralWalk.floorTileLength="48" />
+        <components:GroundedFootIK />
       </components>
       <children />
     </item>
