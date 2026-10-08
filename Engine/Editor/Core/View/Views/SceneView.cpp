@@ -71,6 +71,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
 
     // Remove inner padding so the texture fills the panel edge-to-edge.
     const bool windowVisible = ui.BeginWindow(m_title.c_str(), &m_open, true);
+    SetPanelVisible(windowVisible);
     if (!m_documentPath.empty())
         ui.WindowTitleTooltip(m_documentPath.c_str());
     if (ui.IsWindowFocused() && OnFocused) OnFocused();

@@ -483,15 +483,19 @@ int WINAPI wWinMain(
                     continue;
                 if (auto* sceneView = dynamic_cast<Engine::Editor::SceneView*>(panel.get()))
                 {
+                    if (!sceneView->IsRenderVisible()) continue;
                     if (Engine::Scene::Scene* panelScene = sceneView->GetScene())
                         if (preparedScenes.insert(panelScene).second)
                             panelScene->PrepareRenderFrame();
                     continue;
                 }
                 if (auto* gameView = dynamic_cast<Engine::Editor::GameView*>(panel.get()))
+                {
+                    if (!gameView->IsRenderVisible()) continue;
                     if (Engine::Scene::Scene* panelScene = gameView->GetScene())
                         if (preparedScenes.insert(panelScene).second)
                             panelScene->PrepareRenderFrame();
+                }
             }
 
             // Render 3D panels
@@ -500,7 +504,7 @@ int WINAPI wWinMain(
                 if (!panel) continue;
                 if (!panel->NeedsRender() || !panel->IsOpen()) continue;
                 Engine::Editor::View* view = dynamic_cast<Engine::Editor::View*>(panel.get());
-                if (!view) continue;
+                if (!view || !view->IsRenderVisible()) continue;
                 
                 void* cmdList = renderer->GetCurrentCommandBuffer();
                 void* rtvHandle = renderer->GetCurrentRenderTargetHandle();
@@ -512,6 +516,15 @@ int WINAPI wWinMain(
 
             // Render UI
             uiBackend->DrawEditor(*editorState, playState, gameBuildManager.get());
+            for (auto& panel : editorState->GetPanels())
+                if (auto* view = dynamic_cast<Engine::Editor::View*>(panel.get()))
+                {
+                    if (!view->ConsumeVisibilityChanged()) continue;
+                    // The tab switch happened during UI drawing, after the
+                    // offscreen passes. Render the newly visible tab next frame.
+                    renderer->MarkDirty();
+                    break;
+                }
         });
 
         // Avoid spinning the editor loop while idle. Window input wakes this

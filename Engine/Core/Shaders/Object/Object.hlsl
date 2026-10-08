@@ -208,6 +208,28 @@ void VSMain(
     oUv = objectData.spriteUvRect.xy + uv * objectData.spriteUvRect.zw;
     oUv1 = uv1;
     oColor = color;
+    if (objectData.morphParams.z > 0.0)
+    {
+        uint selectedJoint = (uint)objectData.morphParams.z - 1u;
+        float weight = 0.0;
+        [unroll] for (uint influence = 0; influence < 4; ++influence)
+        {
+            if ((uint)joints0[influence] == selectedJoint)
+                weight += weights0[influence];
+            if ((uint)joints1[influence] == selectedJoint)
+                weight += weights1[influence];
+        }
+        weight = saturate(weight);
+        float3 heat = weight < 0.3333
+            ? lerp(float3(0.70, 0.70, 0.70), float3(0.13, 0.45, 1.0),
+                weight * 3.0)
+            : (weight < 0.6667
+                ? lerp(float3(0.13, 0.45, 1.0), float3(1.0, 0.92, 0.12),
+                    (weight - 0.3333) * 3.0)
+                : lerp(float3(1.0, 0.92, 0.12), float3(1.0, 0.12, 0.08),
+                    (weight - 0.6667) * 3.0));
+        oColor = float4(heat, 1.0);
+    }
     oTangent = float4(
         normalize(mul((float3x3)objectData.world, localTangent)), tangent.w);
 }

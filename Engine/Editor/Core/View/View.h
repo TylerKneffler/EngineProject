@@ -23,8 +23,16 @@ public:
     // Inject graphics backend implementation created by the renderer.
     void SetViewBackend(std::unique_ptr<::Engine::Renderers::IView> viewBackend);
 
-    // NeedsRender always returns true for graphics-backed views.
+    // A graphics-backed panel owns an offscreen target even while its docked
+    // tab is hidden. Rendering can skip the hidden target separately.
     bool NeedsRender() const override { return true; }
+    bool IsRenderVisible() const { return m_panelVisible; }
+    bool ConsumeVisibilityChanged()
+    {
+        const bool changed = m_visibilityChanged;
+        m_visibilityChanged = false;
+        return changed;
+    }
 
     // Initialize offscreen rendering resources
     // device: opaque graphics device handle
@@ -67,7 +75,14 @@ public:
     virtual void RenderShadow3D(void* cmd) = 0;
 
 protected:
+    void SetPanelVisible(bool visible)
+    {
+        if (m_panelVisible != visible) m_visibilityChanged = true;
+        m_panelVisible = visible;
+    }
 private:
+    bool m_panelVisible = true;
+    bool m_visibilityChanged = false;
     std::unique_ptr<::Engine::Renderers::IView> m_viewBackend;  // Graphics API implementation
 };
 }

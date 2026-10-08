@@ -2295,7 +2295,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             const glm::vec3 delta = glm::vec3(itemWorld[3]) - cameraPosition;
             renderObjects.push_back({ &item, glm::dot(delta, delta),
                 nearestLightingDistanceSquared(item, itemWorld),
-                itemWorld[3].z, item.sortingLayer, item.blended });
+                itemWorld[3].z, item.sortingLayer,
+                item.blended && !(includeEditorVisuals &&
+                    item.mesh == m_editorWeightPaintMesh) });
         }
     }
     std::stable_sort(renderObjects.begin(), renderObjects.end(),
@@ -2628,6 +2630,21 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             objectData.materialParams = { 0.f, 1.f, 1.f, 0.f };
             objectData.viewPositionAlphaCutoff = glm::vec4(
                 cameraPosition, 0.5f);
+        }
+        if (includeEditorVisuals && mesh == m_editorWeightPaintMesh &&
+            m_editorWeightPaintBone >= 0)
+        {
+            // The visualization is transient GPU state. Authored materials,
+            // textures, vertex colors, and mesh data remain untouched.
+            preparedDraw.textures.fill(nullptr);
+            objectData.baseColor = { 0.65f, 0.65f, 0.65f, 1.f };
+            objectData.ambientUnlit = { 0.f, 0.f, 0.f, 1.f };
+            objectData.emissiveOcclusion = { 0.f, 0.f, 0.f, 1.f };
+            objectData.materialParams = { 0.f, 1.f, 1.f, 0.f };
+            objectData.morphParams.z = static_cast<float>(m_editorWeightPaintBone + 1);
+            objectData.environmentParams.z = 0.f;
+            objectData.environmentParams.w = 0.f;
+            alphaMode = Engine::Components::MaterialAlphaMode::Opaque;
         }
         preparedDraw.doubleSided = doubleSided;
         if (shadowSelection.valid)
@@ -3101,6 +3118,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         // Draw selected object outline overlay. Structured buffers remain
         // bound across the pipeline change and do not need rebinding.
         if (includeEditorVisuals && !draw.preview &&
+            draw.mesh != m_editorWeightPaintMesh &&
             (m_editorSelectedMesh ? draw.mesh == m_editorSelectedMesh
                 : draw.object == m_selectedObject) && m_objectOutlinePipeline)
         {

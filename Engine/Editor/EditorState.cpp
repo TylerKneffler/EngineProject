@@ -120,9 +120,9 @@ ViewportModeControl DrawViewportModeControl(IEditorUi& ui, int& mode)
     const bool showSave = available >= 175.f;
     ui.SetNextItemWidth(std::max(48.f,
         available - (compact ? 0.f : 47.f) - (showSave ? 56.f : 0.f)));
-    const char* choices[]{ "Object", "Mesh" };
+    const char* choices[]{ "Object", "Mesh", "Skeleton" };
     const bool changed = ui.Combo(compact ? "##Mode" : "Mode",
-        &mode, choices, 2);
+        &mode, choices, 3);
     if (compact) ui.Tooltip("Editor mode");
     return { changed, showSave };
 }
@@ -498,6 +498,12 @@ void EditorState::DrawEditTools(IEditorUi& ui)
     if (m_activeSceneAssetDocument)
     {
         SceneAssetDocument& document = *m_activeSceneAssetDocument;
+        if (document.skeletonEdit.enabled)
+        {
+            ui.ColoredLabel("Skeleton Mode", { .35f, .75f, 1.f, 1.f });
+            DrawSkeletonEditTools(ui);
+            return;
+        }
         if (document.meshStage && document.meshStageTools)
         {
             ui.ColoredLabel("Mesh Mode", { .35f, .75f, 1.f, 1.f });
@@ -525,7 +531,13 @@ void EditorState::DrawEditTools(IEditorUi& ui)
             return;
         }
     }
-    if (MeshEditSession* edit = ActiveMeshEditSession();
+    if (SkeletonEditSession* skeleton = ActiveSkeletonEditSession();
+        skeleton && skeleton->enabled)
+    {
+        ui.ColoredLabel("Skeleton Mode", { .35f, .75f, 1.f, 1.f });
+        DrawSkeletonEditTools(ui);
+    }
+    else if (MeshEditSession* edit = ActiveMeshEditSession();
         edit && edit->enabled)
     {
         ui.ColoredLabel("Mesh Mode", { .35f, .75f, 1.f, 1.f });
@@ -1433,8 +1445,12 @@ bool EditorState::ApplyMeshHistory(bool redo)
 {
     MeshEditSession* session = ActiveMeshEditSession();
     Engine::Scene::Scene* scene = GetActiveDocumentScene();
-    if (!session || !session->enabled || !scene) return false;
-    SyncMeshEditSelection(scene, *session);
+    SkeletonEditSession* skeleton = ActiveSkeletonEditSession();
+    const bool paint = skeleton && skeleton->enabled && skeleton->submode == 1;
+    if (!session || (!session->enabled && !paint) || !scene) return false;
+    if (session->enabled) SyncMeshEditSelection(scene, *session);
+    else if (paint && !session->activeMesh)
+        session->activeMesh = skeleton->mesh;
     auto& source = redo ? session->redo : session->undo;
     auto& destination = redo ? session->undo : session->redo;
     if (!session->activeMesh || source.empty()) return false;
@@ -1574,8 +1590,13 @@ void EditorState::SaveScene()
         return;
     }
 
+    if (SkeletonEditSession* skeleton = ActiveSkeletonEditSession())
+        FinishSkeletonPaintStroke(*skeleton);
+
     if (MeshEditSession* meshEdit = ActiveMeshEditSession();
-        meshEdit && meshEdit->enabled && meshEdit->dirty &&
+        meshEdit && (meshEdit->enabled ||
+            (ActiveSkeletonEditSession() &&
+                ActiveSkeletonEditSession()->enabled)) && meshEdit->dirty &&
         !SaveMeshEditSession(*meshEdit))
         return;
     if (!SavePendingMeshEdits()) return;
@@ -1887,7 +1908,10 @@ void EditorState::LoadSceneNow(const std::string& path)
         if (m_scene->Load(resolvedPath))
         {
             m_mainMeshEdit = {};
+            m_mainSkeletonEdit = {};
             m_scene->SetEditorSelectedMesh(nullptr);
+            m_scene->SetEditorWeightPaint(nullptr, -1);
+            m_scene->SetEditorMeshEditPose(false);
             OutputDebugStringA("[EditorState::LoadScene] Scene loaded successfully\n");
             LogStartupFailure("Scene loaded successfully: " + resolvedPath);
             if (m_preferences)
@@ -2017,16 +2041,33 @@ void EditorState::OpenPrefabStage(const std::string& path)
     };
     m_prefabSceneView->OnMeshViewportInput = [this](IEditorUi& ui,
         const EditorUiViewportInput& input, EditorTransformTool tool)
-    { return HandleMeshViewport(ui, input, m_prefabScene.get(), m_prefabMeshEdit, tool); };
+    {
+        return m_prefabSkeletonEdit.enabled
+            ? HandleSkeletonViewport(ui, input, m_prefabScene.get(),
+                m_prefabSkeletonEdit)
+            : HandleMeshViewport(ui, input, m_prefabScene.get(),
+                m_prefabMeshEdit, tool);
+    };
     m_prefabSceneView->OnDrawDocumentTools = [this](IEditorUi& ui)
     {
         if (!ui.BeginViewportHeader("##PrefabEditMode", 230.f)) return false;
-        int mode = m_prefabMeshEdit.enabled ? 1 : 0;
+        int mode = m_prefabSkeletonEdit.enabled ? 2
+            : (m_prefabMeshEdit.enabled ? 1 : 0);
         const ViewportModeControl controls = DrawViewportModeControl(ui, mode);
         if (controls.changed)
+        {
+            SetPrefabDocumentFocused(true);
+            SetSkeletonEditMode(m_prefabScene.get(), m_prefabSkeletonEdit,
+                m_prefabMeshEdit, false);
             SetMeshEditMode(m_prefabScene.get(), m_prefabMeshEdit, mode == 1);
+            if (mode == 2)
+                SetSkeletonEditMode(m_prefabScene.get(), m_prefabSkeletonEdit,
+                    m_prefabMeshEdit, true);
+        }
         if (m_prefabMeshEdit.enabled)
             SyncMeshEditSelection(m_prefabScene.get(), m_prefabMeshEdit);
+        if (m_prefabSkeletonEdit.enabled)
+            SyncSkeletonEditSelection(m_prefabScene.get(), m_prefabSkeletonEdit);
         if (controls.showSave)
         {
             ui.SameLine();
@@ -2281,6 +2322,13 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
             RebuildSkeletonStageContext(*document);
             if (!document->skeletonStage)
                 RebuildObjectStageContext(*document);
+            else
+            {
+                document->skeletonEdit.enabled = true;
+                document->scene->SetEditorMeshEditPose(true);
+                SyncSkeletonEditSelection(document->scene.get(),
+                    document->skeletonEdit);
+            }
         }
         if (loaded && document->meshStage)
         {
@@ -2319,7 +2367,13 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
         raw->view->SetDocumentPath(normalized);
         view->OnMeshViewportInput = [this, raw](IEditorUi& ui,
             const EditorUiViewportInput& input, EditorTransformTool tool)
-        { return HandleMeshViewport(ui, input, raw->scene.get(), raw->meshEdit, tool); };
+        {
+            return raw->skeletonEdit.enabled
+                ? HandleSkeletonViewport(ui, input, raw->scene.get(),
+                    raw->skeletonEdit)
+                : HandleMeshViewport(ui, input, raw->scene.get(),
+                    raw->meshEdit, tool);
+        };
         RefreshSceneAssetDocumentTitle(*raw);
         view->OnFocused = [this, raw]() { SetActiveSceneAssetDocument(raw); };
         view->OnObjectSelected = [this, raw](Engine::Core::Object* object)
@@ -2436,6 +2490,7 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
             if (ui.Combo("Mode", &selectedMode, choices.data(),
                 static_cast<int>(choices.size())))
             {
+                FinishSkeletonPaintStroke(raw->skeletonEdit);
                 if (raw->previewAnimation)
                     StopSkeletonAnimationPreview(*raw);
                 RestoreSkeletonStageVisibility(*raw);
@@ -2461,14 +2516,24 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
                 else
                     RebuildObjectStageContext(*raw);
                 raw->meshEdit.enabled = raw->meshStage;
-                raw->scene->SetEditorMeshEditPose(raw->meshStage);
+                raw->skeletonEdit.enabled = raw->skeletonStage;
+                raw->skeletonEdit.painting = false;
+                raw->skeletonEdit.observedSubmode = -1;
+                raw->scene->SetEditorSelectedMesh(nullptr);
+                raw->scene->SetEditorMeshEditPose(raw->meshStage ||
+                    raw->skeletonStage);
                 if (raw->view)
                 {
                     raw->view->AllowObjectCreation = false;
                     raw->view->AllowAssetDrops = false;
-                    raw->view->AllowObjectTransform = !raw->meshStage;
+                    raw->view->AllowObjectTransform = !raw->meshStage &&
+                        (!raw->skeletonStage || raw->skeletonEdit.submode == 0);
                 }
-                SetActiveSceneAssetDocument(raw);
+                if (raw->skeletonStage)
+                    SyncSkeletonEditSelection(raw->scene.get(),
+                        raw->skeletonEdit);
+                else raw->scene->SetEditorWeightPaint(nullptr, -1);
+                SetActiveSceneAssetDocument(raw, true);
                 m_pendingEditToolsOpen = true;
                 if (m_renderer) m_renderer->MarkDirty();
             }
@@ -2496,234 +2561,8 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
         {
             view->AllowObjectCreation = false;
             view->AllowAssetDrops = false;
-            raw->skeletonStageTools = [this, raw](IEditorUi& ui)
-            {
-                if (raw->objectStage)
-                {
-                    ui.ColoredLabel("Object Edit Stage",
-                        { 0.35f, 0.75f, 1.f, 1.f });
-                    if (ui.Checkbox("Include child hierarchy",
-                        &raw->showChildHierarchy))
-                    {
-                        ApplyObjectStageVisibility(*raw);
-                        if (!raw->showChildHierarchy)
-                        {
-                            raw->scene->SetSelectedObject(raw->subject);
-                            if (m_primaryHierarchy)
-                                m_primaryHierarchy->SetSelectedObject(raw->subject);
-                            if (m_primaryProperties)
-                                m_primaryProperties->SetSelectedObject(raw->subject);
-                        }
-                        if (m_renderer) m_renderer->MarkDirty();
-                    }
-                    return;
-                }
-                if (!raw->skeletonStage) return;
-                ui.ColoredLabel("Skeleton Edit Stage", { 0.35f, 0.75f, 1.f, 1.f });
-                const std::string count = std::to_string(raw->selectableObjects.size());
-                ui.ValueLabel("Editable joints", count.c_str());
-                std::vector<Engine::Core::Object*> dependencyTargets;
-                std::vector<std::string> dependencyLabels;
-                const auto addDependencyTarget = [&](Engine::Core::Object* object,
-                    const std::string& role)
-                {
-                    if (!object || std::find(dependencyTargets.begin(),
-                        dependencyTargets.end(), object) != dependencyTargets.end())
-                        return;
-                    dependencyTargets.push_back(object);
-                    dependencyLabels.push_back(role + ": " + object->name);
-                };
-                Engine::Components::Model* rigModel = raw->skeleton
-                    ? raw->skeleton->ResolveModel() : nullptr;
-                addDependencyTarget(rigModel ? rigModel->Owner : nullptr, "Model");
-                for (Engine::Core::Object* ghost : raw->skeletonMeshObjects)
-                    addDependencyTarget(ghost, "Skinned mesh");
-                std::vector<const char*> dependencyNames;
-                dependencyNames.push_back("Selected bone");
-                for (const std::string& label : dependencyLabels)
-                    dependencyNames.push_back(label.c_str());
-                int dependencySelection = 0;
-                for (size_t index = 0; index < dependencyTargets.size(); ++index)
-                    if (dependencyTargets[index] == raw->propertiesProjection)
-                        dependencySelection = static_cast<int>(index + 1);
-                if (ui.Combo("Properties target", &dependencySelection,
-                    dependencyNames.data(), static_cast<int>(dependencyNames.size())))
-                {
-                    raw->propertiesProjection = dependencySelection > 0
-                        ? dependencyTargets[static_cast<size_t>(dependencySelection - 1)]
-                        : nullptr;
-                    if (m_primaryProperties)
-                        m_primaryProperties->SetSelectedObject(
-                            raw->propertiesProjection ? raw->propertiesProjection
-                                : raw->scene->GetSelectedObject());
-                }
-                if (rigModel && rigModel->Owner &&
-                    !rigModel->Owner->GetComponent<
-                        Engine::Components::AnimationManager>() &&
-                    ui.Button("Add Animation Manager Dependency"))
-                {
-                    rigModel->Owner->AddComponent<
-                        Engine::Components::AnimationManager>();
-                    raw->propertiesProjection = rigModel->Owner;
-                    if (m_primaryProperties)
-                        m_primaryProperties->SetSelectedObject(rigModel->Owner);
-                    const std::string current =
-                        CaptureSceneAssetDocumentSnapshot(*raw);
-                    if (raw->baseline != current)
-                    {
-                        if (m_historyLimit > 0)
-                        {
-                            if (raw->undo.size() >= m_historyLimit)
-                                raw->undo.pop_front();
-                            raw->undo.push_back(raw->baseline);
-                        }
-                        raw->redo.clear();
-                        raw->baseline = current;
-                        raw->dirty = raw->baseline != raw->savedSnapshot;
-                        RefreshSceneAssetDocumentTitle(*raw);
-                    }
-                }
-                if (!raw->skeletonMeshObjects.empty() &&
-                    ui.Checkbox("Show associated skinned mesh (ghost)",
-                        &raw->showSkeletonMesh))
-                {
-                    ApplySkeletonStageVisibility(*raw);
-                    if (m_renderer) m_renderer->MarkDirty();
-                }
-                ui.BeginDisabled(raw->previewAnimation);
-                if (raw->skeleton && ui.Checkbox("Show bone overlays",
-                    &raw->skeleton->showBones) && m_renderer)
-                    m_renderer->MarkDirty();
-                ui.EndDisabled();
-                bool preview = raw->previewAnimation;
-                if (ui.Checkbox("Preview animation", &preview))
-                {
-                    if (preview)
-                    {
-                        Engine::Components::AnimationManager* manager = nullptr;
-                        if (raw->skeleton)
-                            if (Engine::Components::Model* model =
-                                raw->skeleton->ResolveModel())
-                                manager = model->Owner
-                                    ? model->Owner->GetComponent<
-                                        Engine::Components::AnimationManager>()
-                                    : nullptr;
-                        if (!manager)
-                            for (const auto& object : raw->scene->GetObjects())
-                                if (object && (manager = object->GetComponent<
-                                    Engine::Components::AnimationManager>()))
-                                    break;
-                        if (manager)
-                        {
-                            raw->previewRestoreSnapshot =
-                                CaptureSceneAssetDocumentSnapshot(*raw);
-                            raw->previewAnimationManager = manager;
-                            raw->previewAnimation = true;
-                            manager->playing = true;
-                            raw->lastPreviewTick =
-                                std::chrono::steady_clock::now();
-                        }
-                        else if (m_primaryConsole)
-                            m_primaryConsole->AddLog(ConsoleView::Level::Warning,
-                                "This skeleton has no AnimationManager to preview.");
-                    }
-                    else
-                        StopSkeletonAnimationPreview(*raw);
-                }
-                if (raw->previewAnimation && raw->previewAnimationManager)
-                {
-                    const auto now = std::chrono::steady_clock::now();
-                    const float delta = std::chrono::duration<float>(
-                        now - raw->lastPreviewTick).count();
-                    raw->lastPreviewTick = now;
-                    raw->previewAnimationManager->Tick(delta);
-                    if (m_renderer) m_renderer->MarkDirty();
-                }
-                Engine::Components::AnimationManager* manager =
-                    raw->previewAnimationManager;
-                if (!manager && raw->skeleton)
-                    if (Engine::Components::Model* model =
-                        raw->skeleton->ResolveModel())
-                        manager = model->Owner ? model->Owner->GetComponent<
-                            Engine::Components::AnimationManager>() : nullptr;
-                if (manager)
-                {
-                    const auto clips = manager->GetAvailableClips();
-                    std::vector<const char*> clipNames;
-                    int selectedClip = 0;
-                    for (size_t i = 0; i < clips.size(); ++i)
-                    {
-                        clipNames.push_back(clips[i]->clipName.c_str());
-                        if (clips[i]->clipName == manager->clip)
-                            selectedClip = static_cast<int>(i);
-                    }
-                    ui.BeginDisabled(!raw->previewAnimation);
-                    if (!clipNames.empty() && ui.Combo("Animation clip",
-                        &selectedClip, clipNames.data(),
-                        static_cast<int>(clipNames.size())))
-                        manager->Play(clips[static_cast<size_t>(selectedClip)]->clipName, 0.f);
-                    ui.Checkbox("Playing", &manager->playing);
-                    ui.Checkbox("Loop", &manager->looping);
-                    ui.DragFloat("Playback speed", &manager->speed, 0.05f,
-                        -10.f, 10.f);
-                    float clipDuration = 0.f;
-                    if (selectedClip >= 0 &&
-                        static_cast<size_t>(selectedClip) < clips.size())
-                        clipDuration = clips[static_cast<size_t>(selectedClip)]->duration;
-                    if (clipDuration > 0.f)
-                        ui.SliderFloat("Time", &manager->time, 0.f, clipDuration);
-                    ui.EndDisabled();
-                }
-                ui.BeginDisabled(raw->previewAnimation);
-                if (ui.Button("Apply Rest Pose"))
-                {
-                    Engine::Components::Model* model = raw->skeleton
-                        ? raw->skeleton->ResolveModel() : nullptr;
-                    Engine::Components::Transform* modelTransform = model && model->Owner
-                        ? &model->Owner->transform : nullptr;
-                    const auto& joints = raw->skeleton
-                        ? raw->skeleton->ResolveJoints()
-                        : std::vector<Engine::Core::Object*>{};
-                    bool valid = raw->skeleton && modelTransform &&
-                        !joints.empty() && joints.size() ==
-                            raw->skeleton->jointNodes.size();
-                    std::vector<glm::mat4> inverseBindMatrices;
-                    if (valid)
-                    {
-                        const glm::mat4 modelWorld = modelTransform->GetWorldMatrix();
-                        const float modelDeterminant = glm::determinant(modelWorld);
-                        valid = std::isfinite(modelDeterminant) &&
-                            std::abs(modelDeterminant) > 1e-8f;
-                        const glm::mat4 inverseModel = valid
-                            ? glm::inverse(modelWorld) : glm::mat4(1.f);
-                        for (Engine::Core::Object* joint : joints)
-                        {
-                            if (!joint) { valid = false; break; }
-                            const glm::mat4 jointInModel = inverseModel *
-                                joint->transform.GetWorldMatrix();
-                            const float determinant = glm::determinant(jointInModel);
-                            if (!std::isfinite(determinant) ||
-                                std::abs(determinant) <= 1e-8f)
-                            {
-                                valid = false;
-                                break;
-                            }
-                            inverseBindMatrices.push_back(glm::inverse(jointInModel));
-                        }
-                    }
-                    if (valid)
-                    {
-                        raw->skeleton->inverseBindMatrices =
-                            std::move(inverseBindMatrices);
-                        if (m_renderer) m_renderer->MarkDirty();
-                    }
-                    else if (m_primaryConsole)
-                        m_primaryConsole->AddLog(ConsoleView::Level::Error,
-                            "Cannot apply rest pose: a model or valid joint transform is missing.");
-                }
-                ui.EndDisabled();
-                ui.DisabledLabel("Joint hierarchy is filtered to this skeleton.");
-            };
+            raw->skeletonStageTools = [this](IEditorUi& ui)
+            { DrawSkeletonEditTools(ui); };
         }
         if (raw->meshStage || raw->prefab)
         {
@@ -2770,7 +2609,7 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
                                     (raw->subject->name + ".mesh")).string();
                         raw->scene->SetSelectedObject(raw->subject);
                         ApplyMeshStageVisibility(*raw);
-                        SetActiveSceneAssetDocument(raw);
+                        SetActiveSceneAssetDocument(raw, true);
                         if (m_renderer) m_renderer->MarkDirty();
                     }
                 }
@@ -2913,12 +2752,24 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
                     ui.PopId();
                     return false;
                 }
-                int mode = raw->meshEdit.enabled ? 1 : 0;
+                int mode = raw->skeletonEdit.enabled ? 2
+                    : (raw->meshEdit.enabled ? 1 : 0);
                 const ViewportModeControl controls = DrawViewportModeControl(ui, mode);
                 if (controls.changed)
+                {
+                    SetSkeletonEditMode(raw->scene.get(), raw->skeletonEdit,
+                        raw->meshEdit, false);
                     SetMeshEditMode(raw->scene.get(), raw->meshEdit, mode == 1);
+                    if (mode == 2)
+                        SetSkeletonEditMode(raw->scene.get(), raw->skeletonEdit,
+                            raw->meshEdit, true);
+                    SetActiveSceneAssetDocument(raw, true);
+                }
                 if (raw->meshEdit.enabled)
                     SyncMeshEditSelection(raw->scene.get(), raw->meshEdit);
+                if (raw->skeletonEdit.enabled)
+                    SyncSkeletonEditSelection(raw->scene.get(),
+                        raw->skeletonEdit);
                 if (controls.showSave)
                 {
                     ui.SameLine();
@@ -2937,12 +2788,24 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
                     ui.PopId();
                     return false;
                 }
-                int mode = raw->meshEdit.enabled ? 1 : 0;
+                int mode = raw->skeletonEdit.enabled ? 2
+                    : (raw->meshEdit.enabled ? 1 : 0);
                 const ViewportModeControl controls = DrawViewportModeControl(ui, mode);
                 if (controls.changed)
+                {
+                    SetSkeletonEditMode(raw->scene.get(), raw->skeletonEdit,
+                        raw->meshEdit, false);
                     SetMeshEditMode(raw->scene.get(), raw->meshEdit, mode == 1);
+                    if (mode == 2)
+                        SetSkeletonEditMode(raw->scene.get(), raw->skeletonEdit,
+                            raw->meshEdit, true);
+                    SetActiveSceneAssetDocument(raw, true);
+                }
                 if (raw->meshEdit.enabled)
                     SyncMeshEditSelection(raw->scene.get(), raw->meshEdit);
+                if (raw->skeletonEdit.enabled)
+                    SyncSkeletonEditSelection(raw->scene.get(),
+                        raw->skeletonEdit);
                 if (controls.showSave)
                 {
                     ui.SameLine();
@@ -2992,8 +2855,13 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
     }
 }
 
-void EditorState::SetActiveSceneAssetDocument(SceneAssetDocument* document)
+void EditorState::SetActiveSceneAssetDocument(SceneAssetDocument* document,
+    bool refresh)
 {
+    if (!refresh && m_activeSceneAssetDocument == document &&
+        !m_activeAssetDocument &&
+        m_prefabDocumentFocused == (document && document->prefab))
+        return;
     m_activeSceneAssetDocument = document;
     m_activeAssetDocument = nullptr;
     m_prefabDocumentFocused = document && document->prefab;
@@ -3064,12 +2932,13 @@ void EditorState::RefreshSceneAssetDocumentTitle(SceneAssetDocument& document)
 {
     if (!document.view) return;
     std::string title = std::filesystem::path(document.path).filename().string();
-    if (document.dirty) title += " *";
+    if (document.dirty || document.meshEdit.dirty) title += " *";
     document.view->SetTitle(title + "###SceneAssetDocument:" + document.identity);
 }
 
 bool EditorState::SaveSceneAssetDocument(SceneAssetDocument& document)
 {
+    FinishSkeletonPaintStroke(document.skeletonEdit);
     if (document.meshEdit.dirty &&
         !SaveMeshEditSession(document.meshEdit)) return false;
     if (!SavePendingMeshEdits()) return false;
@@ -3187,6 +3056,13 @@ bool EditorState::RestoreSceneAssetDocumentSnapshot(
     {
         if (!document.scene || !document.scene->LoadFromString(snapshot))
             return false;
+        document.skeletonEdit.skeleton = nullptr;
+        document.skeletonEdit.mesh = nullptr;
+        document.skeletonEdit.adjacency.reset();
+        document.skeletonEdit.observedBindTransforms.clear();
+        document.scene->SetEditorWeightPaint(nullptr, -1);
+        document.scene->SetEditorMeshEditPose(document.meshEdit.enabled ||
+            document.skeletonEdit.enabled);
         if (document.skeletonStage)
             RebuildSkeletonStageContext(document);
         else if (document.objectStage)
@@ -3447,7 +3323,8 @@ void EditorState::ApplyMeshStageVisibility(SceneAssetDocument& document)
                     if (candidate)
                         if (auto* skeleton = candidate->GetComponent<
                             Engine::Components::Skeleton>(); skeleton &&
-                            skeleton->skinIndex == skinned->skinIndex)
+                            skinned->skinIndex >= 0 && skeleton->skinIndex ==
+                                static_cast<unsigned>(skinned->skinIndex))
                         {
                             bound = skeleton;
                             break;
@@ -3659,6 +3536,7 @@ void EditorState::ClosePrefabStage()
     RemovePrefabPanels();
     m_prefabScene.reset();
     m_prefabMeshEdit = {};
+    m_prefabSkeletonEdit = {};
     m_activePrefabPath.clear();
     SetPrefabDirty(false);
     if (m_primaryConsole)
@@ -3714,6 +3592,8 @@ void EditorState::CapturePlayModeScene()
     if (!m_scene || !m_playModeSceneSnapshot.empty())
         return;
 
+    FinishSkeletonPaintStroke(m_mainSkeletonEdit);
+
     // Finish any editor interaction before establishing the immutable play
     // baseline. Runtime changes must never enter the undo history.
     TrackSceneChanges(true, false);
@@ -3749,11 +3629,28 @@ void EditorState::RestorePlayModeScene()
 
     if (m_scene->LoadFromString(m_playModeSceneSnapshot))
     {
+        m_mainSkeletonEdit.skeleton = nullptr;
+        m_mainSkeletonEdit.mesh = nullptr;
+        m_mainSkeletonEdit.adjacency.reset();
+        m_mainSkeletonEdit.observedBindTransforms.clear();
+        m_mainSkeletonEdit.observedSubmode = -1;
+        m_mainMeshEdit.activeMesh = nullptr;
+        m_scene->SetEditorWeightPaint(nullptr, -1);
+        m_scene->SetEditorMeshEditPose(m_mainMeshEdit.enabled ||
+            m_mainSkeletonEdit.enabled);
         m_hasUnsavedChanges = m_prePlayHasUnsavedChanges;
         RefreshSceneDocumentTitle();
         SelectObject(m_prePlayHadObjectSelection
             ? m_scene->FindObjectByPath(m_prePlaySelectionPath)
             : nullptr);
+        if (m_mainSkeletonEdit.enabled)
+        {
+            SyncSkeletonEditSelection(m_scene.get(), m_mainSkeletonEdit);
+            if (m_mainMeshEdit.dirty && m_mainSkeletonEdit.mesh &&
+                RestoreMeshSnapshot(*m_mainSkeletonEdit.mesh,
+                    m_mainMeshEdit.baseline))
+                m_mainMeshEdit.activeMesh = m_mainSkeletonEdit.mesh;
+        }
         m_historyBaseline = CaptureHistoryEntry();
         m_historyCapturedRevision = m_sceneEditRevision;
         m_historySelectionDirty = false;
@@ -3828,17 +3725,35 @@ void EditorState::InitializePanels()
             {
                 mainSceneView->OnMeshViewportInput = [this](IEditorUi& ui,
                     const EditorUiViewportInput& input, EditorTransformTool tool)
-                { return HandleMeshViewport(ui, input, m_scene.get(), m_mainMeshEdit, tool); };
+                {
+                    return m_mainSkeletonEdit.enabled
+                        ? HandleSkeletonViewport(ui, input, m_scene.get(),
+                            m_mainSkeletonEdit)
+                        : HandleMeshViewport(ui, input, m_scene.get(),
+                            m_mainMeshEdit, tool);
+                };
                 mainSceneView->OnDrawDocumentTools = [this](IEditorUi& ui)
                 {
                     if (!ui.BeginViewportHeader("##SceneEditMode", 230.f))
                         return false;
-                    int mode = m_mainMeshEdit.enabled ? 1 : 0;
+                    int mode = m_mainSkeletonEdit.enabled ? 2
+                        : (m_mainMeshEdit.enabled ? 1 : 0);
                     const ViewportModeControl controls = DrawViewportModeControl(ui, mode);
                     if (controls.changed)
+                    {
+                        SetActiveSceneAssetDocument(nullptr);
+                        SetPrefabDocumentFocused(false);
+                        SetSkeletonEditMode(m_scene.get(), m_mainSkeletonEdit,
+                            m_mainMeshEdit, false);
                         SetMeshEditMode(m_scene.get(), m_mainMeshEdit, mode == 1);
+                        if (mode == 2)
+                            SetSkeletonEditMode(m_scene.get(), m_mainSkeletonEdit,
+                                m_mainMeshEdit, true);
+                    }
                     if (m_mainMeshEdit.enabled)
                         SyncMeshEditSelection(m_scene.get(), m_mainMeshEdit);
+                    if (m_mainSkeletonEdit.enabled)
+                        SyncSkeletonEditSelection(m_scene.get(), m_mainSkeletonEdit);
                     if (controls.showSave)
                     {
                         ui.SameLine();
@@ -4697,8 +4612,7 @@ void EditorState::CommitPendingHistoryEdit()
 
 void EditorState::Undo()
 {
-    if (MeshEditSession* edit = ActiveMeshEditSession();
-        edit && edit->enabled && ApplyMeshHistory(false)) return;
+    if (ApplyMeshHistory(false)) return;
     if (m_activeSceneAssetDocument)
     {
         SceneAssetDocument& document = *m_activeSceneAssetDocument;
@@ -4737,8 +4651,7 @@ void EditorState::Undo()
 
 void EditorState::Redo()
 {
-    if (MeshEditSession* edit = ActiveMeshEditSession();
-        edit && edit->enabled && ApplyMeshHistory(true)) return;
+    if (ApplyMeshHistory(true)) return;
     if (m_activeSceneAssetDocument)
     {
         SceneAssetDocument& document = *m_activeSceneAssetDocument;
@@ -4779,7 +4692,12 @@ bool EditorState::CanUndo() const
         ? &m_activeSceneAssetDocument->meshEdit
         : (m_prefabDocumentFocused && m_prefabScene
             ? &m_prefabMeshEdit : &m_mainMeshEdit);
-    if (edit->enabled && !edit->undo.empty()) return true;
+    const SkeletonEditSession* skeleton = m_activeSceneAssetDocument
+        ? &m_activeSceneAssetDocument->skeletonEdit
+        : (m_prefabDocumentFocused && m_prefabScene
+            ? &m_prefabSkeletonEdit : &m_mainSkeletonEdit);
+    if ((edit->enabled || (skeleton->enabled && skeleton->submode == 1)) &&
+        !edit->undo.empty()) return true;
     return m_activeSceneAssetDocument ? !m_activeSceneAssetDocument->undo.empty()
         : m_activeAssetDocument ? m_activeAssetDocument->CanUndo()
         : (m_hasPendingHistoryEdit || !m_undoHistory.empty());
@@ -4791,7 +4709,12 @@ bool EditorState::CanRedo() const
         ? &m_activeSceneAssetDocument->meshEdit
         : (m_prefabDocumentFocused && m_prefabScene
             ? &m_prefabMeshEdit : &m_mainMeshEdit);
-    if (edit->enabled && !edit->redo.empty()) return true;
+    const SkeletonEditSession* skeleton = m_activeSceneAssetDocument
+        ? &m_activeSceneAssetDocument->skeletonEdit
+        : (m_prefabDocumentFocused && m_prefabScene
+            ? &m_prefabSkeletonEdit : &m_mainSkeletonEdit);
+    if ((edit->enabled || (skeleton->enabled && skeleton->submode == 1)) &&
+        !edit->redo.empty()) return true;
     return m_activeSceneAssetDocument ? !m_activeSceneAssetDocument->redo.empty()
         : m_activeAssetDocument ? m_activeAssetDocument->CanRedo()
         : !m_redoHistory.empty();
@@ -4808,6 +4731,13 @@ void EditorState::ApplyHistoryEntry(
                 std::string(operation) + " failed to restore the scene.");
         return;
     }
+    m_mainSkeletonEdit.skeleton = nullptr;
+    m_mainSkeletonEdit.mesh = nullptr;
+    m_mainSkeletonEdit.adjacency.reset();
+    m_mainSkeletonEdit.observedBindTransforms.clear();
+    m_scene->SetEditorWeightPaint(nullptr, -1);
+    m_scene->SetEditorMeshEditPose(m_mainMeshEdit.enabled ||
+        m_mainSkeletonEdit.enabled);
 
     SelectObject(entry.hasSelection
         ? m_scene->FindObjectByPath(entry.selectionPath) : nullptr);

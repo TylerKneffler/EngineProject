@@ -238,6 +238,14 @@ public:
         m_renderFramePrepared = false;
     }
     bool IsEditorMeshEditPose() const { return m_editorMeshEditPose; }
+    void SetEditorWeightPaint(Engine::Components::Mesh* mesh, int bone)
+    {
+        if (m_editorWeightPaintMesh == mesh && m_editorWeightPaintBone == bone)
+            return;
+        m_editorWeightPaintMesh = mesh;
+        m_editorWeightPaintBone = bone;
+        m_renderFramePrepared = false;
+    }
     void SetPreviewObject(Object* obj) { m_previewObject = obj; }
     void SetEditorMode2D(bool enabled);
     bool IsEditorMode2D() const { return m_editorMode2D; }
@@ -584,6 +592,8 @@ private:
     Object* m_selectedObject = nullptr;
     Engine::Components::Mesh* m_editorSelectedMesh = nullptr;
     bool m_editorMeshEditPose = false;
+    Engine::Components::Mesh* m_editorWeightPaintMesh = nullptr;
+    int m_editorWeightPaintBone = -1;
     Object* m_previewObject = nullptr;
     bool m_editorMode2D = false;
     bool m_editorCameraModeInitialized = false;

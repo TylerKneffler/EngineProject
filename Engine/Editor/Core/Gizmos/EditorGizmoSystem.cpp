@@ -214,7 +214,7 @@ bool SceneContains(const Engine::Scene::Scene& scene, const Engine::Core::Object
 }
 
 void DrawBoneShape(IEditorUi& ui, EditorUiVec2 root, EditorUiVec2 tip,
-    bool selected)
+    bool selected, float opacity = 1.f)
 {
     const EditorUiVec2 difference = Subtract(tip, root);
     const float length = Length(difference);
@@ -226,22 +226,81 @@ void DrawBoneShape(IEditorUi& ui, EditorUiVec2 root, EditorUiVec2 tip,
         Multiply(direction, std::clamp(length * 0.22f, 5.f, 22.f)));
     const EditorUiVec2 first = Add(shoulder, Multiply(perpendicular, width));
     const EditorUiVec2 second = Subtract(shoulder, Multiply(perpendicular, width));
-    const EditorUiColor fill = selected
+    EditorUiColor fill = selected
         ? EditorUiColor{ 1.f, 0.72f, 0.16f, 0.75f }
         : EditorUiColor{ 0.35f, 0.78f, 1.f, 0.58f };
-    const EditorUiColor line = selected
+    EditorUiColor line = selected
         ? kHoverColor : EditorUiColor{ 0.45f, 0.86f, 1.f, 1.f };
+    EditorUiColor outline = kOutline;
+    fill.a *= opacity;
+    line.a *= opacity;
+    outline.a *= opacity;
     ui.DrawViewportTriangle(root, first, tip, fill);
     ui.DrawViewportTriangle(root, tip, second, fill);
-    ui.DrawViewportLine(root, first, kOutline, 4.f);
-    ui.DrawViewportLine(first, tip, kOutline, 4.f);
-    ui.DrawViewportLine(tip, second, kOutline, 4.f);
-    ui.DrawViewportLine(second, root, kOutline, 4.f);
+    ui.DrawViewportLine(root, first, outline, 4.f);
+    ui.DrawViewportLine(first, tip, outline, 4.f);
+    ui.DrawViewportLine(tip, second, outline, 4.f);
+    ui.DrawViewportLine(second, root, outline, 4.f);
     ui.DrawViewportLine(root, first, line, 1.5f);
     ui.DrawViewportLine(first, tip, line, 1.5f);
     ui.DrawViewportLine(tip, second, line, 1.5f);
     ui.DrawViewportLine(second, root, line, 1.5f);
 }
+}
+
+void EditorGizmoSystem::DrawSkeletonOverlay(
+    Engine::Scene::Scene& scene,
+    const Engine::Components::Skeleton& skeleton, IEditorUi& ui,
+    const EditorUiViewportInput& input, int selectedPaletteIndex)
+{
+    const auto* camera = scene.editorCamera.GetComponent<
+        Engine::Components::Camera>();
+    if (!camera || input.available.x <= 1.f || input.available.y <= 1.f)
+        return;
+    const auto& joints = skeleton.ResolveJoints();
+    if (joints.empty()) return;
+    const glm::mat4 viewProjection = camera->GetProjectionMatrix(
+        input.available.x / input.available.y) * camera->GetViewMatrix();
+    const std::unordered_set<Engine::Core::Object*> jointSet(
+        joints.begin(), joints.end());
+
+    // Draw the selected segment last so its normal opacity stays legible
+    // where several projected bones overlap.
+    for (int pass = 0; pass < 2; ++pass)
+        for (size_t index = 0; index < joints.size(); ++index)
+        {
+            auto* joint = joints[index];
+            if (!joint) continue;
+            const bool selected = static_cast<int>(index) ==
+                selectedPaletteIndex;
+            if (selected != (pass == 1)) continue;
+            const float opacity = selected ? 1.f : .22f;
+            EditorUiVec2 tip{};
+            if (!ProjectPoint(viewProjection, WorldPosition(joint),
+                    input.available, tip)) continue;
+            auto* parent = joint->Parent;
+            while (parent && jointSet.find(parent) == jointSet.end())
+                parent = parent->Parent;
+            if (parent)
+            {
+                EditorUiVec2 root{};
+                if (!ProjectPoint(viewProjection, WorldPosition(parent),
+                        input.available, root)) continue;
+                DrawBoneShape(ui, root, tip, selected, opacity);
+            }
+            else
+            {
+                EditorUiColor outline = kOutline;
+                EditorUiColor fill = selected ? kHoverColor :
+                    EditorUiColor{ .45f, .86f, 1.f, 1.f };
+                outline.a *= opacity;
+                fill.a *= opacity;
+                ui.DrawViewportCircle(tip, selected ? 7.f : 5.f,
+                    outline, true);
+                ui.DrawViewportCircle(tip, selected ? 5.f : 3.5f,
+                    fill, true);
+            }
+        }
 }
 
 EditorGizmoResult EditorGizmoSystem::DrawAndHandle(

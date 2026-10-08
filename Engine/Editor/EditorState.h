@@ -199,6 +199,54 @@ private:
     bool SavePendingMeshEdits();
     void InvalidateMeshEditPointers();
     bool ApplyMeshHistory(bool redo);
+    struct SkeletonEditSession
+    {
+        struct WeightAdjacencyCache
+        {
+            const Engine::Components::Mesh* mesh = nullptr;
+            size_t vertexCount = 0;
+            std::vector<uint32_t> indices;
+            std::vector<std::vector<uint32_t>> neighbors;
+        };
+        bool enabled = false;
+        int submode = 0; // 0 bone edit, 1 weight paint
+        int boneTool = 0; // edit, add, remove
+        int brushOperation = 0; // add, subtract, replace, smooth
+        int brushShape = 0; // circle, square
+        int brushFalloff = 0; // hard, linear, smooth
+        float brushRadius = 40.f;
+        float brushHardness = 0.5f;
+        float brushStrength = 0.35f;
+        float brushTarget = 1.f;
+        std::shared_ptr<WeightAdjacencyCache> adjacency;
+        Engine::Components::Skeleton* skeleton = nullptr;
+        Engine::Components::Mesh* mesh = nullptr;
+        int boneIndex = -1;
+        Engine::Core::Object* observedSelection = nullptr;
+        uint64_t observedStructureRevision = 0;
+        int observedSubmode = -1;
+        std::vector<glm::mat4> observedBindTransforms;
+        bool painting = false;
+        bool strokeChanged = false;
+        EditorUiVec2 lastPaintPosition{};
+        std::string strokeBefore;
+        std::string error;
+    };
+    SkeletonEditSession* ActiveSkeletonEditSession();
+    void SetSkeletonEditMode(Engine::Scene::Scene* scene,
+        SkeletonEditSession& session, MeshEditSession& meshSession,
+        bool enabled);
+    void SyncSkeletonEditSelection(Engine::Scene::Scene* scene,
+        SkeletonEditSession& session);
+    void DrawSkeletonEditTools(IEditorUi& ui);
+    bool HandleSkeletonViewport(IEditorUi& ui,
+        const EditorUiViewportInput& input, Engine::Scene::Scene* scene,
+        SkeletonEditSession& session);
+    void FinishSkeletonPaintStroke(SkeletonEditSession& session);
+    void RefreshSkeletonBindPose(SkeletonEditSession& session);
+    bool ApplySkeletonBoneAction(Engine::Scene::Scene* scene,
+        SkeletonEditSession& session, int action);
+    void CommitSkeletonEdit(Engine::Scene::Scene* scene);
     void InitializePanels();
     void WireupCallbacks();
     Engine::Core::Object* InstantiateAsset(const std::string& path, bool recordChange = true);
@@ -277,8 +325,10 @@ private:
         uint32_t selectedVertex = 0;
         uint32_t selectedInfluence = 0;
         MeshEditSession meshEdit;
+        SkeletonEditSession skeletonEdit;
     };
-    void SetActiveSceneAssetDocument(SceneAssetDocument* document);
+    void SetActiveSceneAssetDocument(SceneAssetDocument* document,
+        bool refresh = false);
     bool SaveSceneAssetDocument(SceneAssetDocument& document);
     std::string CaptureSceneAssetDocumentSnapshot(
         SceneAssetDocument& document);
@@ -317,6 +367,8 @@ private:
     SceneAssetDocument* m_activeSceneAssetDocument = nullptr;
     MeshEditSession m_mainMeshEdit;
     MeshEditSession m_prefabMeshEdit;
+    SkeletonEditSession m_mainSkeletonEdit;
+    SkeletonEditSession m_prefabSkeletonEdit;
     bool m_pendingEditToolsOpen = false;
     std::unordered_map<std::string, MeshEditSession> m_meshEditCache;
 

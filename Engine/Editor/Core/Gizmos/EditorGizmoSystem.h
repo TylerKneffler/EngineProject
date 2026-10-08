@@ -4,6 +4,7 @@
 #include <glm/glm.hpp>
 
 namespace Engine::Core { class Object; }
+namespace Engine::Components { class Skeleton; }
 namespace Engine::Scene { class Scene; }
 
 namespace Engine::Editor
@@ -33,6 +34,9 @@ public:
     EditorGizmoResult DrawAndHandle(
         Engine::Scene::Scene& scene, IEditorUi& ui,
         const EditorUiViewportInput& input, EditorTransformTool tool);
+    static void DrawSkeletonOverlay(Engine::Scene::Scene& scene,
+        const Engine::Components::Skeleton& skeleton, IEditorUi& ui,
+        const EditorUiViewportInput& input, int selectedPaletteIndex);
 
 private:
     Engine::Core::Object* m_dragObject = nullptr;
