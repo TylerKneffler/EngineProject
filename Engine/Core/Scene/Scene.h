@@ -1,4 +1,5 @@
 #pragma once
+#include <glm/gtc/quaternion.hpp>
 #include "Core/Object.h"
 #include "Core/Graphics/IPipelineState.h"
 #include "Core/Graphics/IGraphicsBuffer.h"
@@ -11,6 +12,7 @@
 #include "Core/Physics/Physics.h"
 #include <glm/glm.hpp>
 #include <array>
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -135,7 +137,11 @@ public:
         uint32_t portalHops = 0;
     };
 
+    using PhysicsAdapterFactory = std::function<
+        std::unique_ptr<Engine::Physics::IPhysicsAdapter>(Scene&)>;
     Scene();
+    // Selects the scene's physics implementation after scene members exist.
+    explicit Scene(PhysicsAdapterFactory physicsAdapterFactory);
     ~Scene();
 
     // Runtime lifecycle shared by the standalone game and Editor Play mode.
@@ -221,6 +227,10 @@ public:
     }
     void SetSelectedObject(Object* obj) { m_selectedObject = obj; }
     Object* GetSelectedObject() const { return m_selectedObject; }
+    void SetEditorSelectedMesh(Engine::Components::Mesh* mesh)
+    { m_editorSelectedMesh = mesh; }
+    Engine::Components::Mesh* GetEditorSelectedMesh() const
+    { return m_editorSelectedMesh; }
     void SetPreviewObject(Object* obj) { m_previewObject = obj; }
     void SetEditorMode2D(bool enabled);
     bool IsEditorMode2D() const { return m_editorMode2D; }
@@ -286,6 +296,8 @@ public:
     // viewing distance and looking directly at its world-space origin.
     // Pass nullptr to reset to the default startup position.
     void FocusEditorCamera(Object* obj);
+    void UpdateEditorCameraFollow();
+    void StopEditorCameraFollow();
 
     // Object management
     Object* AddObject();                     // create an empty Object owned by this scene
@@ -563,9 +575,13 @@ private:
     void FlushPendingObjectAdditions();
     void FlushPendingObjectRemovals();
     Object* m_selectedObject = nullptr;
+    Engine::Components::Mesh* m_editorSelectedMesh = nullptr;
     Object* m_previewObject = nullptr;
     bool m_editorMode2D = false;
     bool m_editorCameraModeInitialized = false;
+    Object* m_editorCameraFollowTarget = nullptr;
+    glm::vec3 m_editorCameraFollowPosition { 0.f };
+    glm::quat m_editorCameraFollowRotation { 1.f, 0.f, 0.f, 0.f };
 
     // Long-range terrain alone can contribute 289 patch meshes. Truncating
     // ordinary views at 64 draws left square background holes even though the

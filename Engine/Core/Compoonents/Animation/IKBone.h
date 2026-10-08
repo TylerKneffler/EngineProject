@@ -3,13 +3,16 @@
 #include "Core/Component.h"
 #include "Core/PropertyMacros.h"
 #include <glm/glm.hpp>
+#include <memory>
 #include <string>
 
-namespace Engine::Physics { class Physics; }
+namespace Engine::Physics { class Physics; class BulletPhysicsAdapter; }
+namespace Engine::Physics { struct PhysicsComponentState; }
 
 namespace Engine::Components
 {
 class RigidBody;
+class Skeleton;
 // One independently authored rigid segment of an animated skeleton. Attach it
 // directly to an AnimationBone object. A collection of IKBone components forms a
 // ragdoll; no separate ragdoll controller or generated bone list is required.
@@ -38,6 +41,12 @@ public:
     float linearDamping = 0.08f;
     PROPERTY(Inspector, EditAnywhere, Category = "IK Bone | Body", Range = "0, 1")
     float angularDamping = 0.18f;
+    // Used while this body drives a mesh-collider skeleton after its root
+    // becomes dynamic. Keeps the hidden joint chain from coasting forever.
+    PROPERTY(Inspector, EditAnywhere, Category = "IK Bone | Body")
+    float meshPoseLinearDamping = 0.8f;
+    PROPERTY(Inspector, EditAnywhere, Category = "IK Bone | Body")
+    float meshPoseAngularDamping = 1.f;
     PROPERTY(Inspector, EditAnywhere, Category = "IK Bone | Body")
     glm::vec3 initialLinearVelocity { 0.f };
     PROPERTY(Inspector, EditAnywhere, Category = "IK Bone | Body")
@@ -65,6 +74,7 @@ public:
     bool collideWithParent = false;
 
     bool IsSimulating() const;
+    bool IsUsingSkinnedCollider() const;
     bool GetContactSeparation(const RigidBody* other,
         float& deepestSeparation) const;
     void ResetSimulation();
@@ -76,20 +86,35 @@ public:
 
 private:
     friend class Engine::Physics::Physics;
+    friend class Engine::Physics::BulletPhysicsAdapter;
+    friend class Skeleton;
     bool WantsSimulation() const;
     bool UsesMeshColliderPoseOnly() const;
     bool EnsureBody();
     bool EnsureConstraint();
     bool HasManualEditInHierarchy() const;
     void SyncBodyFromBone();
+    void ApplyLiveBodySettings();
+    void ApplyGroundedPoseGravity();
     void RemoveInvalidConstraint();
     void SyncBoneFromBody();
+    glm::vec3 ApplyMeshContactTorque(const glm::vec3& torqueImpulse,
+        float limitPerMass);
+    glm::vec3 NativeApplyMeshContactTorque(const glm::vec3& torqueImpulse,
+        float limitPerMass);
     void DestroyConstraint(bool removeFromWorld = true);
     void DestroyBody(bool removeFromWorld = true);
+    void NativeResetSimulation();
+    bool NativeIsSimulating() const;
+    bool NativeIsUsingSkinnedCollider() const;
+    bool NativeGetContactSeparation(const RigidBody* other,
+        float& deepestSeparation) const;
     IKBone* FindParentIKBone() const;
     Engine::Core::Object* FindSegmentChild(const std::string& childName) const;
 
     struct Impl;
+    static std::unique_ptr<Engine::Physics::PhysicsComponentState> MakeBulletState();
+    void BindBulletState(Engine::Physics::PhysicsComponentState* state);
     Impl* m_impl = nullptr;
     float m_influence = 1.f;
 };

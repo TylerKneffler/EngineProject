@@ -2,12 +2,16 @@
 
 #include "Core/Compoonents/Animation/AnimationBone.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
+#include "Core/Compoonents/Animation/SkinnedMesh.h"
+#include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
 #include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Object.h"
 #include "Core/Physics/Internal/PhysicsInternal.h"
+#include "Core/Physics/IPhysicsAdapter.h"
 #include "Core/Scene/Scene.h"
+#include <BulletCollision/CollisionShapes/btShapeHull.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
@@ -15,6 +19,7 @@
 #include <glm/gtx/quaternion.hpp>
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <memory>
 
 namespace Engine::Components
@@ -66,7 +71,7 @@ glm::mat4 GlmTransform(const btTransform& transform)
 }
 }
 
-struct IKBone::Impl
+struct IKBone::Impl final : Engine::Physics::PhysicsComponentState
 {
     btDynamicsWorld* world = nullptr;
     std::unique_ptr<btCollisionShape> shape;
@@ -79,10 +84,21 @@ struct IKBone::Impl
     uint64_t colliderRevision = 0;
     bool poseOnlyCollision = false;
     bool poseOnlyAnchor = false;
-    glm::vec3 poseRootPosition { 0.f };
+    bool fittedSkinnedCollider = false;
+    btTransform poseRootWorld;
 };
 
-IKBone::IKBone() : m_impl(new Impl())
+std::unique_ptr<Engine::Physics::PhysicsComponentState> IKBone::MakeBulletState()
+{
+    return std::make_unique<Impl>();
+}
+
+void IKBone::BindBulletState(Engine::Physics::PhysicsComponentState* state)
+{
+    m_impl = static_cast<Impl*>(state);
+}
+
+IKBone::IKBone()
 {
     SetTypeName(COMPONENT_TYPE_NAME(IKBone));
     singlecomponent = true;
@@ -93,6 +109,10 @@ IKBone::IKBone() : m_impl(new Impl())
     RegisterField("friction", friction, "IK Bone | Body");
     RegisterField("linearDamping", linearDamping, "IK Bone | Body");
     RegisterField("angularDamping", angularDamping, "IK Bone | Body");
+    RegisterField("meshPoseLinearDamping", meshPoseLinearDamping,
+        "IK Bone | Body");
+    RegisterField("meshPoseAngularDamping", meshPoseAngularDamping,
+        "IK Bone | Body");
     RegisterField("initialLinearVelocity", initialLinearVelocity,
         "IK Bone | Body");
     RegisterField("initialAngularVelocity", initialAngularVelocity,
@@ -113,9 +133,13 @@ IKBone::IKBone() : m_impl(new Impl())
 
 IKBone::~IKBone()
 {
-    DestroyConstraint();
-    DestroyBody();
-    delete m_impl;
+    if (Owner && Owner->GetScene())
+        Owner->GetScene()->GetPhysics().DestroyIKBone(*this);
+    else
+    {
+        DestroyConstraint();
+        DestroyBody();
+    }
 }
 
 void IKBone::SetInfluence(float value)
@@ -204,6 +228,7 @@ bool IKBone::EnsureBody()
         m_impl->poseOnlyAnchor == poseOnlyAnchor)
         return true;
     if (IsSimulating()) DestroyBody();
+    m_impl->fittedSkinnedCollider = false;
 
     const glm::mat4 boneMatrix = Owner->transform.GetWorldMatrix();
     const glm::vec3 bonePosition(boneMatrix[3]);
@@ -253,6 +278,78 @@ bool IKBone::EnsureBody()
     else
         m_impl->shape = std::make_unique<btCapsuleShape>(bodyRadius,
             std::max(segmentLength - bodyRadius * 2.f, 0.001f));
+    if (!poseOnlyCollision && collider->fitToSkinnedMesh)
+    {
+        Skeleton* skeleton = nullptr;
+        for (Object* ancestor = Owner; ancestor; ancestor = ancestor->Parent)
+            if (auto* candidate = ancestor->GetComponent<Skeleton>();
+                candidate && candidate->skinIndex ==
+                    Owner->GetComponent<AnimationBone>()->skinIndex)
+            {
+                skeleton = candidate;
+                break;
+            }
+        MeshObjectCollider* meshCollider = skeleton
+            ? skeleton->ResolveMeshCollider() : nullptr;
+        Mesh* mesh = meshCollider && meshCollider->Owner &&
+            meshCollider->meshReference.IsAssigned()
+            ? Engine::Core::ResolveComponentReference<Mesh>(
+                meshCollider->Owner, meshCollider->meshReference) : nullptr;
+        SkinnedMesh* skin = mesh && mesh->Owner
+            ? mesh->Owner->GetComponent<SkinnedMesh>() : nullptr;
+        if (mesh && skin && skin->ResolveSkeleton() == skeleton)
+        {
+            const unsigned paletteIndex =
+                Owner->GetComponent<AnimationBone>()->paletteIndex;
+            const glm::mat4 meshWorld =
+                mesh->Owner->transform.GetWorldMatrix();
+            const auto vertices = mesh->BuildPortalCutTriangleStream(
+                &skin->BuildPalette());
+            btConvexHullShape cloud;
+            unsigned included = 0;
+            for (const Mesh::Vertex& vertex : vertices)
+            {
+                float influence = 0.f;
+                for (int index = 0; index < 4; ++index)
+                {
+                    if (std::abs(vertex.joints0[index] -
+                            static_cast<float>(paletteIndex)) < 0.5f)
+                        influence += vertex.weights0[index];
+                    if (std::abs(vertex.joints1[index] -
+                            static_cast<float>(paletteIndex)) < 0.5f)
+                        influence += vertex.weights1[index];
+                }
+                if (influence < 0.15f) continue;
+                const glm::vec3 worldPoint(meshWorld * glm::vec4(
+                    vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.f));
+                if (!std::isfinite(worldPoint.x) ||
+                    !std::isfinite(worldPoint.y) ||
+                    !std::isfinite(worldPoint.z))
+                    continue;
+                cloud.addPoint(bodyWorld.inverse() *
+                    Engine::Physics::ToBullet(worldPoint), false);
+                ++included;
+            }
+            if (included >= 4)
+            {
+                cloud.recalcLocalAabb();
+                btShapeHull reduced(&cloud);
+                if (reduced.buildHull(cloud.getMargin()) &&
+                    reduced.numVertices() >= 4)
+                {
+                    auto hull = std::make_unique<btConvexHullShape>();
+                    for (int index = 0; index < reduced.numVertices();
+                        ++index)
+                        hull->addPoint(reduced.getVertexPointer()[index],
+                            false);
+                    hull->setMargin(0.03f);
+                    hull->recalcLocalAabb();
+                    m_impl->shape = std::move(hull);
+                    m_impl->fittedSkinnedCollider = true;
+                }
+            }
+        }
+    }
     btVector3 inertia(0.f, 0.f, 0.f);
     const float bodyMass = poseOnlyAnchor ? 0.f : std::max(mass, 0.001f);
     if (bodyMass > 0.f)
@@ -285,7 +382,9 @@ bool IKBone::EnsureBody()
             if (auto* skeleton = ancestor->GetComponent<Skeleton>();
                 skeleton && skeleton->UsesMeshCollider())
             {
-                m_impl->poseRootPosition = ancestor->transform.GetWorldPosition();
+                const glm::mat4 rootMatrix = ancestor->transform.GetWorldMatrix();
+                m_impl->poseRootWorld = RigidTransform(
+                    glm::vec3(rootMatrix[3]), MatrixRotation(rootMatrix));
                 break;
             }
     }
@@ -422,6 +521,73 @@ void IKBone::SyncBodyFromBone()
         m_impl->world->updateSingleAabb(m_impl->body.get());
 }
 
+void IKBone::ApplyLiveBodySettings()
+{
+    if (!m_impl->body) return;
+    bool dynamicMeshRoot = false;
+    Skeleton* meshSkeleton = nullptr;
+    if (m_impl->poseOnlyCollision)
+        for (Object* ancestor = Owner; ancestor; ancestor = ancestor->Parent)
+            if (auto* skeleton = ancestor->GetComponent<Skeleton>();
+                skeleton && skeleton->UsesMeshCollider())
+            {
+                meshSkeleton = skeleton;
+                if (auto* root = ancestor->GetComponent<RigidBody>())
+                    dynamicMeshRoot = root->bodyType == "Dynamic";
+                break;
+            }
+    m_impl->body->setDamping(std::clamp(dynamicMeshRoot
+        ? meshPoseLinearDamping : linearDamping, 0.f, 1.f),
+        std::clamp(dynamicMeshRoot
+            ? meshPoseAngularDamping : angularDamping, 0.f, 1.f));
+    m_impl->body->setFriction(std::clamp(friction, 0.f, 1.f));
+    if (dynamicMeshRoot && meshSkeleton && m_impl->constraint)
+    {
+        const float maxBend = std::max(
+            meshSkeleton->meshContactMaxBend, 0.f);
+        if (auto* cone = dynamic_cast<btConeTwistConstraint*>(
+                m_impl->constraint.get()))
+            cone->setLimit(std::min(swingLimit, maxBend),
+                std::min(swingLimit, maxBend),
+                std::min(twistLimit, maxBend));
+        else if (auto* hinge = dynamic_cast<btHingeConstraint*>(
+                m_impl->constraint.get()))
+        {
+            const float limit = std::min(hingeLimit, maxBend);
+            hinge->setLimit(-limit, limit);
+        }
+        else if (auto* spring = dynamic_cast<
+                btGeneric6DofSpring2Constraint*>(m_impl->constraint.get()))
+        {
+            const float swing = std::min(swingLimit, maxBend);
+            const float twist = std::min(twistLimit, maxBend);
+            spring->setAngularLowerLimit(btVector3(-twist, -swing, -swing));
+            spring->setAngularUpperLimit(btVector3(twist, swing, swing));
+        }
+    }
+}
+
+void IKBone::ApplyGroundedPoseGravity()
+{
+    if (!m_impl->body || !m_impl->poseOnlyCollision) return;
+    glm::vec3 gravity(0.f);
+    if (!m_impl->poseOnlyAnchor)
+        for (Object* ancestor = Owner; ancestor; ancestor = ancestor->Parent)
+            if (auto* skeleton = ancestor->GetComponent<Skeleton>();
+                skeleton && skeleton->UsesMeshCollider())
+            {
+                if (auto* root = ancestor->GetComponent<RigidBody>();
+                    root && root->bodyType == "Dynamic" &&
+                    root->useGravity && root->IsGrounded())
+                    gravity = root->GetGravityDirection() *
+                        (9.81f * std::max(root->gravityScale, 0.f) *
+                            std::max(skeleton->meshIKGroundedGravityScale,
+                                0.f));
+                break;
+            }
+    m_impl->body->setGravity(Engine::Physics::ToBullet(gravity));
+}
+
 void IKBone::SyncBoneFromBody()
 {
     if (!m_impl->body || !Owner)
@@ -433,22 +599,28 @@ void IKBone::SyncBoneFromBody()
             if (auto* skeleton = ancestor->GetComponent<Skeleton>();
                 skeleton && skeleton->UsesMeshCollider())
             {
-                const glm::vec3 rootPosition =
-                    ancestor->transform.GetWorldPosition();
-                const glm::vec3 delta = rootPosition - m_impl->poseRootPosition;
-                if (glm::dot(delta, delta) > 0.f)
+                const glm::mat4 rootMatrix = ancestor->transform.GetWorldMatrix();
+                const btTransform rootWorld = RigidTransform(
+                    glm::vec3(rootMatrix[3]), MatrixRotation(rootMatrix));
+                const btTransform delta = rootWorld *
+                    m_impl->poseRootWorld.inverse();
+                if (delta.getOrigin().length2() > btScalar(1e-12) ||
+                    btFabs(delta.getRotation().getAngle()) > btScalar(1e-6))
                 {
-                    btTransform transform = m_impl->body->getWorldTransform();
-                    transform.setOrigin(transform.getOrigin() +
-                        Engine::Physics::ToBullet(delta));
+                    const btTransform transform = delta *
+                        m_impl->body->getWorldTransform();
                     m_impl->body->setWorldTransform(transform);
                     m_impl->body->setInterpolationWorldTransform(transform);
+                    m_impl->body->setLinearVelocity(btMatrix3x3(
+                        delta.getRotation()) * m_impl->body->getLinearVelocity());
+                    m_impl->body->setAngularVelocity(btMatrix3x3(
+                        delta.getRotation()) * m_impl->body->getAngularVelocity());
                     if (m_impl->motionState)
                         m_impl->motionState->setWorldTransform(transform);
                     if (m_impl->world)
                         m_impl->world->updateSingleAabb(m_impl->body.get());
                 }
-                m_impl->poseRootPosition = rootPosition;
+                m_impl->poseRootWorld = rootWorld;
                 break;
             }
     const bool overridePosition = Owner->transform.HasEditorOverride(
@@ -519,12 +691,68 @@ void IKBone::SyncBoneFromBody()
     }
 }
 
+glm::vec3 IKBone::ApplyMeshContactTorque(
+    const glm::vec3& torqueImpulse, float limitPerMass)
+{
+    if (Owner && Owner->GetScene())
+        return Owner->GetScene()->GetPhysics().ApplyIKBoneMeshContactTorque(
+            *this, torqueImpulse, limitPerMass);
+    return NativeApplyMeshContactTorque(torqueImpulse, limitPerMass);
+}
+
+glm::vec3 IKBone::NativeApplyMeshContactTorque(
+    const glm::vec3& torqueImpulse, float limitPerMass)
+{
+    if (!m_impl || !m_impl->body || !m_impl->poseOnlyCollision ||
+        m_impl->poseOnlyAnchor)
+        return glm::vec3(0.f);
+    const float magnitude = glm::length(torqueImpulse);
+    if (!std::isfinite(magnitude) || magnitude <= 0.f)
+        return glm::vec3(0.f);
+    const float limit = std::max(limitPerMass, 0.f) *
+        std::max(mass, 0.1f);
+    const glm::vec3 applied = torqueImpulse *
+        std::min(1.f, limit / magnitude);
+    m_impl->body->applyTorqueImpulse(Engine::Physics::ToBullet(applied));
+    m_impl->body->activate(true);
+    return applied;
+}
+
 bool IKBone::IsSimulating() const
+{
+    if (Owner && Owner->GetScene())
+        return Owner->GetScene()->GetPhysics().IsIKBoneSimulating(*this);
+    return NativeIsSimulating();
+}
+
+bool IKBone::IsUsingSkinnedCollider() const
+{
+    if (Owner && Owner->GetScene())
+        return Owner->GetScene()->GetPhysics()
+            .IsIKBoneUsingSkinnedCollider(*this);
+    return NativeIsUsingSkinnedCollider();
+}
+
+bool IKBone::GetContactSeparation(const RigidBody* other,
+    float& deepestSeparation) const
+{
+    if (Owner && Owner->GetScene())
+        return Owner->GetScene()->GetPhysics()
+            .GetIKBoneContactSeparation(*this, other, deepestSeparation);
+    return NativeGetContactSeparation(other, deepestSeparation);
+}
+
+bool IKBone::NativeIsSimulating() const
 {
     return m_impl && static_cast<bool>(m_impl->body);
 }
 
-bool IKBone::GetContactSeparation(const RigidBody* other,
+bool IKBone::NativeIsUsingSkinnedCollider() const
+{
+    return m_impl && m_impl->body && m_impl->fittedSkinnedCollider;
+}
+
+bool IKBone::NativeGetContactSeparation(const RigidBody* other,
     float& deepestSeparation) const
 {
     if (!IsSimulating() || !m_impl->world || !other) return false;
@@ -575,7 +803,8 @@ void IKBone::DestroyBody(bool removeFromWorld)
         for (const auto& object : Owner->GetScene()->GetObjects())
             for (Engine::Core::Component* component : object->Components)
                 if (auto* child = dynamic_cast<IKBone*>(component);
-                    child && child->m_impl->constraintParent == this)
+                    child && child->m_impl &&
+                    child->m_impl->constraintParent == this)
                     child->DestroyConstraint(true);
     if (removeFromWorld && m_impl->world && m_impl->body)
         m_impl->world->removeRigidBody(m_impl->body.get());
@@ -584,10 +813,18 @@ void IKBone::DestroyBody(bool removeFromWorld)
     m_impl->shape.reset();
     m_impl->collider = nullptr;
     m_impl->colliderRevision = 0;
+    m_impl->fittedSkinnedCollider = false;
     m_impl->world = nullptr;
 }
 
 void IKBone::ResetSimulation()
+{
+    if (Owner && Owner->GetScene())
+        Owner->GetScene()->GetPhysics().ResetIKBone(*this);
+    else NativeResetSimulation();
+}
+
+void IKBone::NativeResetSimulation()
 {
     DestroyConstraint();
     DestroyBody();
@@ -595,13 +832,14 @@ void IKBone::ResetSimulation()
 
 void IKBone::Disabled()
 {
-    DestroyConstraint();
-    DestroyBody();
+    if (Owner && Owner->GetScene())
+        Owner->GetScene()->GetPhysics().DestroyIKBone(*this);
+    else
+    {
+        DestroyConstraint();
+        DestroyBody();
+    }
 }
 
-void IKBone::OnDestroy()
-{
-    DestroyConstraint();
-    DestroyBody();
-}
+void IKBone::OnDestroy() { Disabled(); }
 }

@@ -24,7 +24,6 @@
 #include "Core/Compoonents/UI/UIText.h"
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
 #include "Core/Compoonents/Animation/Model.h"
-#include "Core/Compoonents/Animation/Animation.h"
 #include "Core/Compoonents/Animation/AnimationManager.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/AnimationBone.h"
@@ -186,7 +185,6 @@ void SceneSerializer::EnsureBuiltinsRegistered()
     RegisterComponentType<Engine::Components::UIText>();
     RegisterComponentType<Engine::Components::SpriteAnimationManager>();
     RegisterComponentType<Engine::Components::Model>();
-    RegisterComponentType<Engine::Components::Animation>();
     RegisterComponentType<Engine::Components::AnimationManager>();
     RegisterComponentType<Engine::Components::Skeleton>();
     RegisterComponentType<Engine::Components::AnimationBone>();

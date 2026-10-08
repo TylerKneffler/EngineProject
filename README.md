@@ -163,24 +163,54 @@ For a ragdoll, set **Skeleton > Collision** to `PerBone` (the default). Each
 its explicit Collider Reference. The collider owns its shape, radius, size,
 height, and center. `Align To Bone Child` aligns capsules and cylinders toward
 the named child; height `0` derives the bone-to-child distance.
+Enable `Fit To Skinned Mesh` to build a reduced convex proxy from the owning
+bone's weighted skinned vertices when simulation starts. It falls back to the
+authored primitive when no usable weighted surface is available. The bundled
+per-bone fox uses this setting so its visible tail and body remain above the
+ground in the regression scene.
 
 For one collision surface, set the Skeleton to `MeshCollider` and assign a
 `MeshObjectCollider`. Put a `Kinematic` RigidBody on that collider's object and
 set its Mesh Reference to the skinned Mesh (which may be on a child object).
 The collider follows the current morph and skin pose. Static and kinematic
-bodies can use the triangle mesh; dynamic bodies use a convex hull. In this
-mode the mesh owns world contacts, while the skeleton distributes mapped
-contact impulses to weighted bones as bounded pose changes. Bone contact
-bends persist; animation and IK can change the underlying pose, while a bone
-with a Spring joint can recover its contact bend. The selected mesh collider
-is inactive in `PerBone` mode.
+bodies can use the triangle mesh; the animated kinematic triangle BVH refits
+without rebuilding its Bullet body. Dynamic bodies use a convex hull that
+refits in place as bones move. In this mode the root body owns world motion
+and mesh contacts. After the animation handoff, pose-only `IKBone` Bullet bodies remain
+active and drive the skinned bones through their joint constraints. The
+skeleton maps mesh contacts through skin weights to bounded bone torque
+impulses and sends the opposite angular impulse to the root. Ground-supported
+bone gravity and live damping let the chain bend and settle. The bone physics
+shapes do not make external world contacts in this mode. The selected mesh
+collider is inactive in `PerBone` mode. The top IK body follows the root
+kinematically, so linear momentum exchange between the root and joints is
+still approximate.
+`MeshObjectCollider::GetContacts()` reports one snapshot per physics update;
+normal impulses and their world-space vectors accumulate across its fixed
+substeps. Each contact includes a quantized body-local identity and the number
+of substeps that observed it.
 
 The `fox_ragdoll.scene` demo has a `FoxRagdollBlend` controller. It plays the
 animation for 1.25 seconds, then blends the simulated bone pose from 0% to 100%
 over 2.5 seconds. Select the controller to see its current phase and IK
 influence. The bone components contain the physics setup; the controller owns
-the handoff timing. `fox_mesh_collider.scene` demonstrates the animated mesh
-collider, a falling contact probe, and bone response after impact.
+the handoff timing. `fox_ragdoll_mesh.scene` uses the whole mesh collider during
+animation, then hands off to articulated hulls fitted from the weighted skinned
+mesh. The bone hulls collide independently with the floor, so the fox can
+collapse on landing. A falling contact probe is also included.
+
+`fox_procedural_walk.scene` plays the fox's authored Walk clip with one clip cycle
+per `strideDistance` of root travel. The scene uses a 2.7-unit stride and 2.67
+units/second forward speed, calibrated to the clip's low-paw travel. Clip speed
+follows distance even when forward speed changes. Its `FoxProceduralWalk` scene
+controller moves the fox forward; the camera waits for two units of fox travel
+before following, and floor tiles and raised surfaces recycle only after the
+fox passes them. Ground rays
+under the four animated paws adjust only the fox's root height. The Walk clip
+supplies all leg motion; this scene has no foot IK. The skinned mesh collider
+and kinematic root body remain active. Tune walk speed, stride distance, and
+body clearance on the controller. Bone rigid body simulation stays off during
+this driven walk so it does not overwrite the animated pose.
 
 Rigid bodies expose mass, gravity scale, linear/angular damping, friction,
 restitution, triggers, continuous collision detection, initial velocities,
@@ -238,6 +268,10 @@ materials, skins, morphs, and clips), and every import produces the same
 engine-native `.prefab`, `.mesh`, and `.material` references. Use
 `--import-model` for headless imports; the older `--import-gltf` spelling
 remains available for compatibility.
+
+Imported clips are stored as `AnimationClip` data in the Animation Manager.
+The Properties panel lists clips there and lets you select the active clip.
+The bundled fox prefabs store their Survey, Walk, and Run clips in the manager.
 
 Call `AnimationManager::Play("Run", 0.2f)` to crossfade the base clip. Add
 `AnimationManager::Layer` entries for override or additive animation. A layer's

@@ -186,6 +186,8 @@ public:
     virtual void SetNextItemMixedValue(bool) {}
     virtual bool Checkbox(const char* label, bool* value) = 0;
     virtual bool InputText(const char* label, char* buffer, size_t size) = 0;
+    virtual bool SearchInput(const char* label, char* buffer, size_t size,
+        const char*) { return InputText(label, buffer, size); }
     virtual bool InputTextSubmit(const char* label, char* buffer, size_t size) = 0;
     virtual void ReadOnlyTextBlock(const char* label, const char* text,
         bool scrollToBottom = false, float reservedBottom = 0.f) = 0;
@@ -208,7 +210,7 @@ public:
         EditorUiObjectIcon icon, char* name, size_t size,
         bool* enabled, bool selected, bool leaf, bool lockName,
         bool enabledInHierarchy, int hierarchyDepth, bool lastSibling,
-        uint64_t ancestorGuideMask) = 0;
+        uint64_t ancestorGuideMask, bool expandForFilter = false) = 0;
     virtual void ObjectTreePop() = 0;
     virtual EditorUiHierarchyDropResult HierarchyDropTarget(const char* type) = 0;
     virtual EditorUiHierarchyDropResult HierarchyBackgroundDropTarget(const char* type) = 0;

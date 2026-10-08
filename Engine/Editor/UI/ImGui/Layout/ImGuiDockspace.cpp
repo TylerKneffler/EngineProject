@@ -57,7 +57,7 @@ void ImGuiDockspace::Draw()
 
     ImGuiID centerTop, centerBottom;
     ImGui::DockBuilderSplitNode(
-        center, ImGuiDir_Down, 0.25f, &centerBottom, &centerTop);
+        center, ImGuiDir_Down, 0.30f, &centerBottom, &centerTop);
 
     ImGui::DockBuilderDockWindow("Hierarchy", left);
     ImGui::DockBuilderDockWindow("Scene", centerTop);

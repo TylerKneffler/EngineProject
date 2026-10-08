@@ -639,6 +639,32 @@ set_target_properties(Server PROPERTIES
 
 set(ENGINE_LOCAL_TEST_ROOT "${ENGINE_ROOT}/.local/tests")
 
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/MeshAuthoringTests.cpp")
+    enable_testing()
+    add_executable(MeshAuthoringTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/MeshAuthoringTests.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/MeshEditGeometry.cpp")
+    target_link_libraries(MeshAuthoringTests PRIVATE Engine)
+    target_include_directories(MeshAuthoringTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME MeshAuthoringRegression COMMAND MeshAuthoringTests)
+    set_tests_properties(MeshAuthoringRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PhysicsAdapterTests.cpp")
+    enable_testing()
+    add_executable(PhysicsAdapterTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/PhysicsAdapterTests.cpp")
+    target_link_libraries(PhysicsAdapterTests PRIVATE Engine)
+    target_include_directories(PhysicsAdapterTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME PhysicsAdapterDispatch COMMAND PhysicsAdapterTests)
+    set_tests_properties(PhysicsAdapterDispatch PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 30)
+endif()
+
 if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/ShadowRegressionTests.cpp")
     enable_testing()
@@ -742,6 +768,21 @@ if(NOT ENGINE_PROJECT_DIR AND
         "${ENGINE_ROOT}/Engine/Core/Assets")
     add_test(NAME FoxRagdollBlendRegression COMMAND FoxRagdollBlendTests)
     set_tests_properties(FoxRagdollBlendRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/FoxProceduralWalkTests.cpp")
+    enable_testing()
+    add_executable(FoxProceduralWalkTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/FoxProceduralWalkTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Physics/FoxProceduralWalk.cpp")
+    target_link_libraries(FoxProceduralWalkTests PRIVATE Engine)
+    target_include_directories(FoxProceduralWalkTests PRIVATE
+        "${ENGINE_ROOT}/Engine"
+        "${ENGINE_ROOT}/Engine/Core/Assets")
+    add_test(NAME FoxProceduralWalkRegression COMMAND FoxProceduralWalkTests)
+    set_tests_properties(FoxProceduralWalkRegression PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()
 

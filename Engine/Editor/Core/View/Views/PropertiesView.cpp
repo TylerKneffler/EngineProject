@@ -3,6 +3,7 @@
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Engine/Editor/UI/EditorComponentIcons.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
+#include "Core/Compoonents/Animation/AnimationManager.h"
 #include "Core/Component.h"
 #include "Core/Graphics/IGraphicsTexture.h"
 #include "Core/Scene/Scene.h"
@@ -601,7 +602,7 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
 
     ui.Separator();
     ui.BeginDisabled(!CanEditSelectedObject());
-    if (ui.Button("Add Component"))
+    if (ui.Button("Add Component", ui.AvailableContentWidth()))
     {
         m_componentPickerOpen = true;
         m_positionComponentPicker = true;

@@ -94,18 +94,37 @@ void DrawObjectIcon(ImDrawList* draw, EditorUiObjectIcon icon,
         draw->PathArcTo(center, 6.f * scale, -.75f, .75f, 8);
         draw->PathStroke(color, 0, line);
         break;
+    case EditorUiObjectIcon::Object:
     case EditorUiObjectIcon::Mesh:
     {
-        const ImVec2 top{ center.x, center.y - radius };
-        const ImVec2 left{ center.x - radius, center.y - 2.f * scale };
-        const ImVec2 right{ center.x + radius, center.y - 2.f * scale };
-        const ImVec2 bottom{ center.x, center.y + radius };
-        draw->AddLine(top, left, color, line); draw->AddLine(top, right, color, line);
-        draw->AddLine(left, bottom, color, line); draw->AddLine(right, bottom, color, line);
-        draw->AddLine(top, { center.x, center.y }, color, line);
-        draw->AddLine(left, { center.x, center.y }, color, line);
-        draw->AddLine(right, { center.x, center.y }, color, line);
-        draw->AddLine({ center.x, center.y }, bottom, color, line);
+        const ImVec2 back{ center.x, center.y - 5.f * scale };
+        const ImVec2 leftTop{ center.x - 5.f * scale,
+            center.y - 2.f * scale };
+        const ImVec2 frontTop{ center.x, center.y + 1.f * scale };
+        const ImVec2 rightTop{ center.x + 5.f * scale,
+            center.y - 2.f * scale };
+        const ImVec2 leftBottom{ leftTop.x, leftTop.y + 5.f * scale };
+        const ImVec2 frontBottom{ frontTop.x,
+            frontTop.y + 5.f * scale };
+        const ImVec2 rightBottom{ rightTop.x,
+            rightTop.y + 5.f * scale };
+        const ImU32 rgb = color & 0x00FFFFFFu;
+        const unsigned alpha = color >> 24;
+        draw->AddQuadFilled(back, leftTop, frontTop, rightTop,
+            rgb | ((alpha * 3u / 10u) << 24));
+        draw->AddQuadFilled(leftTop, frontTop, frontBottom, leftBottom,
+            rgb | ((alpha * 2u / 10u) << 24));
+        draw->AddQuadFilled(frontTop, rightTop, rightBottom, frontBottom,
+            rgb | ((alpha / 10u) << 24));
+        draw->AddLine(back, leftTop, color, line);
+        draw->AddLine(back, rightTop, color, line);
+        draw->AddLine(leftTop, frontTop, color, line);
+        draw->AddLine(frontTop, rightTop, color, line);
+        draw->AddLine(leftTop, leftBottom, color, line);
+        draw->AddLine(frontTop, frontBottom, color, line);
+        draw->AddLine(rightTop, rightBottom, color, line);
+        draw->AddLine(leftBottom, frontBottom, color, line);
+        draw->AddLine(frontBottom, rightBottom, color, line);
         break;
     }
     case EditorUiObjectIcon::Sprite:
@@ -150,10 +169,64 @@ void DrawObjectIcon(ImDrawList* draw, EditorUiObjectIcon icon,
         break;
     }
 }
+
+template<typename DrawControl>
+bool InspectorField(const char* label, DrawControl&& drawControl)
+{
+    const char* windowName = ImGui::GetCurrentWindow()->Name;
+    const bool inspector = std::strncmp(windowName, "Properties", 10) == 0 &&
+        (windowName[10] == '\0' || windowName[10] == ' ');
+    if (!inspector || !label || label[0] == '#')
+        return drawControl(label);
+
+    const float rowStart = ImGui::GetCursorPosX();
+    const float rowWidth = ImGui::GetWindowContentRegionMax().x - rowStart;
+    const float labelWidth = ImGui::CalcTextSize(label).x;
+    if (rowWidth < 190.f || labelWidth > rowWidth * .40f)
+        return drawControl(label);
+
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(label);
+    ImGui::SameLine(0.f, 0.f);
+    ImGui::SetCursorPosX(rowStart + rowWidth * .44f);
+    ImGui::PushID(label);
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    const bool changed = drawControl("##value");
+    ImGui::PopID();
+    return changed;
+}
 }
 
 void ImGuiEditorUi::SetNextWindowRect(float x,float y,float w,float h){ ImGui::SetNextWindowPos({x,y},ImGuiCond_FirstUseEver); ImGui::SetNextWindowSize({w,h},ImGuiCond_FirstUseEver); }
-bool ImGuiEditorUi::BeginWindow(const char* t,bool* o,bool p){ if(p) ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,{0,0}); bool r=ImGui::Begin(t,o); if(p) ImGui::PopStyleVar(); return r; }
+bool ImGuiEditorUi::BeginWindow(const char* title, bool* open, bool noPadding)
+{
+    ImGuiContext* context = ImGui::GetCurrentContext();
+    if (!(context->NextWindowData.HasFlags & ImGuiNextWindowDataFlags_HasSize))
+    {
+        ImGuiWindow* window = ImGui::FindWindowByName(title);
+        ImGuiWindowSettings* settings = ImGui::FindWindowSettingsByID(ImHashStr(title));
+        const bool docked = window ? window->DockNode != nullptr
+            : settings && settings->DockId != 0 &&
+                ImGui::DockBuilderGetNode(settings->DockId) != nullptr;
+        const ImVec2 savedSize = window ? window->SizeFull
+            : settings ? ImVec2(static_cast<float>(settings->Size.x),
+                static_cast<float>(settings->Size.y)) : ImVec2(0.f, 0.f);
+        if (!docked && ((!window && !settings) ||
+                savedSize.x < 64.f || savedSize.y < 64.f))
+        {
+            const ImVec2 workSize = ImGui::GetMainViewport()->WorkSize;
+            if (workSize.x > 0.f && workSize.y > 0.f)
+                ImGui::SetNextWindowSize({ workSize.x * 0.9f, workSize.y * 0.9f },
+                    ImGuiCond_Always);
+        }
+    }
+    if (noPadding)
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, { 0.f, 0.f });
+    const bool visible = ImGui::Begin(title, open);
+    if (noPadding)
+        ImGui::PopStyleVar();
+    return visible;
+}
 bool ImGuiEditorUi::BeginViewportOverlay(const char* id, float width, float height)
 {
     const float availableWidth = std::max(0.f,
@@ -360,9 +433,15 @@ void ImGuiEditorUi::Indent(float width){ImGui::Indent(width);}
 void ImGuiEditorUi::Unindent(float width){ImGui::Unindent(width);}
 void ImGuiEditorUi::SetNextItemMixedValue(bool mixed){m_nextItemMixed=mixed;}
 bool ImGuiEditorUi::ConsumeMixedValue(){const bool mixed=m_nextItemMixed;m_nextItemMixed=false;return mixed;}
-bool ImGuiEditorUi::Checkbox(const char*l,bool*v){const bool mixed=ConsumeMixedValue();if(mixed)ImGui::PushItemFlag(ImGuiItemFlags_MixedValue,true);const bool changed=ImGui::Checkbox(l,v);if(mixed)ImGui::PopItemFlag();return changed;}
-bool ImGuiEditorUi::InputText(const char*l,char*b,size_t s){const bool mixed=ConsumeMixedValue();if(l&&l[0]=='#'&&l[1]=='#')ImGui::SetNextItemWidth(-FLT_MIN);if(!mixed)return ImGui::InputText(l,b,s);std::vector<char> display(s,0);strncpy_s(display.data(),s,"-",_TRUNCATE);const bool changed=ImGui::InputText(l,display.data(),s);if(changed)strncpy_s(b,s,display.data(),_TRUNCATE);return changed;}
-bool ImGuiEditorUi::InputTextSubmit(const char*l,char*b,size_t s){if(l&&l[0]=='#'&&l[1]=='#')ImGui::SetNextItemWidth(-FLT_MIN);return ImGui::InputText(l,b,s,ImGuiInputTextFlags_EnterReturnsTrue);}
+bool ImGuiEditorUi::Checkbox(const char*l,bool*v){const bool mixed=ConsumeMixedValue();if(mixed)ImGui::PushItemFlag(ImGuiItemFlags_MixedValue,true);const bool changed=InspectorField(l,[&](const char* id){return ImGui::Checkbox(id,v);});if(mixed)ImGui::PopItemFlag();return changed;}
+bool ImGuiEditorUi::InputText(const char*l,char*b,size_t s){const bool mixed=ConsumeMixedValue();if(l&&l[0]=='#'&&l[1]=='#')ImGui::SetNextItemWidth(-FLT_MIN);if(!mixed)return InspectorField(l,[&](const char* id){return ImGui::InputText(id,b,s);});std::vector<char> display(s,0);strncpy_s(display.data(),s,"-",_TRUNCATE);const bool changed=InspectorField(l,[&](const char* id){return ImGui::InputText(id,display.data(),s);});if(changed)strncpy_s(b,s,display.data(),_TRUNCATE);return changed;}
+bool ImGuiEditorUi::SearchInput(const char* label,char* buffer,size_t size,
+    const char* hint)
+{
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    return ImGui::InputTextWithHint(label,hint,buffer,size);
+}
+bool ImGuiEditorUi::InputTextSubmit(const char*l,char*b,size_t s){if(l&&l[0]=='#'&&l[1]=='#')ImGui::SetNextItemWidth(-FLT_MIN);return InspectorField(l,[&](const char* id){return ImGui::InputText(id,b,s,ImGuiInputTextFlags_EnterReturnsTrue);});}
 void ImGuiEditorUi::ReadOnlyTextBlock(const char* label,const char* text,bool scrollToBottom,float reservedBottom)
 {
     const char* value=text?text:"";
@@ -382,14 +461,15 @@ void ImGuiEditorUi::ReadOnlyTextBlock(const char* label,const char* text,bool sc
             }
     }
 }
-bool ImGuiEditorUi::DragFloat(const char*l,float*v,float s,float a,float b){const bool mixed=ConsumeMixedValue();return ImGui::DragFloat(l,v,s,a,b,mixed?"-":"%.3f");}
-bool ImGuiEditorUi::DragFloat3(const char*l,float*v,float s,float a,float b){const bool mixed=ConsumeMixedValue();return ImGui::DragFloat3(l,v,s,a,b,mixed?"-":"%.3f");}
+bool ImGuiEditorUi::DragFloat(const char*l,float*v,float s,float a,float b){const bool mixed=ConsumeMixedValue();return InspectorField(l,[&](const char* id){return ImGui::DragFloat(id,v,s,a,b,mixed?"-":"%.3f");});}
+bool ImGuiEditorUi::DragFloat3(const char*l,float*v,float s,float a,float b){const bool mixed=ConsumeMixedValue();return InspectorField(l,[&](const char* id){return ImGui::DragFloat3(id,v,s,a,b,mixed?"-":"%.3f");});}
 bool ImGuiEditorUi::IsAnyItemActive() const{return ImGui::IsAnyItemActive();}
-bool ImGuiEditorUi::ColorEdit3(const char*l,float*v){if(ConsumeMixedValue())return ImGui::DragFloat3(l,v,.01f,0.f,1.f,"-");return ImGui::ColorEdit3(l,v);} bool ImGuiEditorUi::ColorEdit4(const char*l,float*v){if(ConsumeMixedValue())return ImGui::DragFloat4(l,v,.01f,0.f,1.f,"-");return ImGui::ColorEdit4(l,v);}
-bool ImGuiEditorUi::SliderInt(const char*l,int*v,int a,int b){return ImGui::SliderInt(l,v,a,b);}
-bool ImGuiEditorUi::SliderFloat(const char*l,float*v,float a,float b){return ImGui::SliderFloat(l,v,a,b,"%.0f units");}
-bool ImGuiEditorUi::InputUInt(const char*l,uint32_t*v){return ImGui::InputScalar(l,ImGuiDataType_U32,v);}
-void ImGuiEditorUi::ValueLabel(const char*l,const char*v){ImGui::LabelText(l,"%s",ConsumeMixedValue()?"-":v);}
+bool ImGuiEditorUi::ColorEdit3(const char*l,float*v){const bool mixed=ConsumeMixedValue();return InspectorField(l,[&](const char* id){return mixed?ImGui::DragFloat3(id,v,.01f,0.f,1.f,"-"):ImGui::ColorEdit3(id,v);});}
+bool ImGuiEditorUi::ColorEdit4(const char*l,float*v){const bool mixed=ConsumeMixedValue();return InspectorField(l,[&](const char* id){return mixed?ImGui::DragFloat4(id,v,.01f,0.f,1.f,"-"):ImGui::ColorEdit4(id,v);});}
+bool ImGuiEditorUi::SliderInt(const char*l,int*v,int a,int b){return InspectorField(l,[&](const char* id){return ImGui::SliderInt(id,v,a,b);});}
+bool ImGuiEditorUi::SliderFloat(const char*l,float*v,float a,float b){return InspectorField(l,[&](const char* id){return ImGui::SliderFloat(id,v,a,b,"%.0f units");});}
+bool ImGuiEditorUi::InputUInt(const char*l,uint32_t*v){return InspectorField(l,[&](const char* id){return ImGui::InputScalar(id,ImGuiDataType_U32,v);});}
+void ImGuiEditorUi::ValueLabel(const char*l,const char*v){const char* value=ConsumeMixedValue()?"-":v;InspectorField(l,[&](const char* id){ImGui::LabelText(id,"%s",value);return false;});}
 bool ImGuiEditorUi::CollapsingHeader(const char*l,bool d){return ImGui::CollapsingHeader(l,d?ImGuiTreeNodeFlags_DefaultOpen:0);}
 bool ImGuiEditorUi::PropertyGroupHeader(const char* label,bool defaultOpen)
 {
@@ -397,15 +477,19 @@ bool ImGuiEditorUi::PropertyGroupHeader(const char* label,bool defaultOpen)
     const ImVec4 background=ImGui::GetStyleColorVec4(ImGuiCol_FrameBg);
     const ImVec4 header=ImGui::GetStyleColorVec4(ImGuiCol_Header);
     const ImVec4 hovered=ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered);
+    ImGui::Spacing();
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
-        {style.FramePadding.x,2.f});
-    ImGui::PushStyleColor(ImGuiCol_Header,ImLerp(background,header,.45f));
+        {style.FramePadding.x+2.f,style.FramePadding.y+3.f});
+    ImGui::PushStyleColor(ImGuiCol_Header,ImLerp(background,header,.6f));
     ImGui::PushStyleColor(ImGuiCol_HeaderHovered,
         ImLerp(background,hovered,.68f));
     ImGui::PushStyleColor(ImGuiCol_HeaderActive,
         ImLerp(background,hovered,.82f));
     const bool open=ImGui::CollapsingHeader(label,
         defaultOpen?ImGuiTreeNodeFlags_DefaultOpen:0);
+    ImGui::GetWindowDrawList()->AddRect(ImGui::GetItemRectMin(),
+        ImGui::GetItemRectMax(),ImGui::GetColorU32(ImGuiCol_Border),
+        std::max(style.FrameRounding,3.f));
     ImGui::PopStyleColor(3);
     ImGui::PopStyleVar();
     return open;
@@ -415,15 +499,17 @@ bool ImGuiEditorUi::ComponentHeader(EditorUiObjectIcon icon,const char* label,
 {
     ImGui::PushID(label);
     const ImGuiStyle& style=ImGui::GetStyle();
+    ImGui::Spacing();
+    const ImVec4 background=ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
     const ImVec4 header=ImGui::GetStyleColorVec4(ImGuiCol_Header);
     const ImVec4 accent=ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
-        {style.FramePadding.x,style.FramePadding.y+3.f});
-    ImGui::PushStyleColor(ImGuiCol_Header,ImLerp(header,accent,.10f));
-    ImGui::PushStyleColor(ImGuiCol_HeaderHovered,ImLerp(
-        ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered),accent,.14f));
-    ImGui::PushStyleColor(ImGuiCol_HeaderActive,ImLerp(
-        ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive),accent,.18f));
+        {style.FramePadding.x+4.f,style.FramePadding.y+5.f});
+    ImGui::PushStyleColor(ImGuiCol_Header,ImLerp(background,header,.55f));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered,
+        ImLerp(background,ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered),.78f));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive,
+        ImLerp(background,ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive),.85f));
     const ImGuiTreeNodeFlags flags=defaultOpen?ImGuiTreeNodeFlags_DefaultOpen:0;
     const bool open=ImGui::CollapsingHeader("##componentHeader",flags);
     const ImVec2 minimum=ImGui::GetItemRectMin();
@@ -431,20 +517,28 @@ bool ImGuiEditorUi::ComponentHeader(EditorUiObjectIcon icon,const char* label,
     const float hover=AnimateInteraction(ImGui::GetItemID(),ImGui::IsItemHovered(),12.f);
     ImGui::PopStyleColor(3);
     ImGui::PopStyleVar();
-    const float iconSize=18.f;
+    const float iconSize=16.f;
     const float iconLeft=minimum.x+ImGui::GetFontSize()+
-        ImGui::GetStyle().FramePadding.x*1.5f;
+        style.FramePadding.x*2.f;
     const ImVec2 center{iconLeft+iconSize*.5f,(minimum.y+maximum.y)*.5f};
     const ImVec4 iconColor=ImLerp(ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled),
-        ImGui::GetStyleColorVec4(ImGuiCol_CheckMark),hover);
+        accent,.55f+hover*.35f);
     ImDrawList* draw=ImGui::GetWindowDrawList();
-    draw->AddRectFilled({minimum.x,minimum.y},{minimum.x+3.f,maximum.y},
-        ImGui::GetColorU32(ImLerp(header,accent,.55f)),style.FrameRounding,
+    const float rounding=std::max(style.FrameRounding,4.f);
+    draw->AddRect(minimum,maximum,
+        ImGui::GetColorU32(ImLerp(ImGui::GetStyleColorVec4(ImGuiCol_Border),
+            accent,hover*.3f)),rounding,0,1.f);
+    draw->AddRectFilled({minimum.x+1.f,minimum.y+1.f},
+        {minimum.x+4.f,maximum.y-1.f},
+        ImGui::GetColorU32(ImLerp(header,accent,.7f)),rounding,
         ImDrawFlags_RoundCornersLeft);
+    draw->AddRectFilled({iconLeft-3.f,center.y-10.f},
+        {iconLeft+iconSize+3.f,center.y+10.f},
+        ImGui::GetColorU32(ImLerp(background,accent,.16f)),3.f);
     DrawObjectIcon(draw,icon,center,.92f+hover*.08f,
         ImGui::GetColorU32(iconColor));
     const ImVec2 textSize=ImGui::CalcTextSize(label);
-    draw->AddText({iconLeft+iconSize+4.f,
+    draw->AddText({iconLeft+iconSize+12.f,
         minimum.y+(maximum.y-minimum.y-textSize.y)*.5f},
         ImGui::GetColorU32(ImGuiCol_Text),label);
     ImGui::PopID();
@@ -455,7 +549,7 @@ void ImGuiEditorUi::TreePop(){ImGui::TreePop();}
 EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,
     EditorUiObjectIcon icon,char* name,size_t size,bool* enabled,bool selected,
     bool leaf,bool lockName,bool enabledInHierarchy,int hierarchyDepth,
-    bool lastSibling,uint64_t ancestorGuideMask)
+    bool lastSibling,uint64_t ancestorGuideMask,bool expandForFilter)
 {
     EditorUiObjectRowResult result;
     (void)size;
@@ -468,7 +562,7 @@ EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,
         openState->second=true;
     m_objectHadChildren[id]=hasChildren;
     if(hasChildren)
-        ImGui::SetNextItemOpen(openState->second,ImGuiCond_Always);
+        ImGui::SetNextItemOpen(expandForFilter || openState->second,ImGuiCond_Always);
     ImGuiTreeNodeFlags flags=ImGuiTreeNodeFlags_OpenOnArrow|
         ImGuiTreeNodeFlags_SpanAvailWidth|ImGuiTreeNodeFlags_FramePadding|
         ImGuiTreeNodeFlags_AllowOverlap|
@@ -478,7 +572,7 @@ EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,
     result.open=ImGui::TreeNodeEx("##object",flags,"");
     const bool rowHovered=ImGui::IsItemHovered();
     const float hover=AnimateInteraction(ImGui::GetItemID(),rowHovered,12.f);
-    if(hasChildren)
+    if(hasChildren && !expandForFilter)
         openState->second=result.open;
     const ImVec2 rowMinimum=ImGui::GetItemRectMin();
     const ImVec2 rowMaximum=ImGui::GetItemRectMax();
@@ -666,10 +760,13 @@ EditorUiObjectRowResult ImGuiEditorUi::ObjectHeader(const void* id,char* name,si
 {
     EditorUiObjectRowResult result;
     ImGui::PushID(id);
-    ImGui::TextUnformatted("Object");
-    ImGui::Separator();
+    const ImVec4 accent=ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
+    ImGui::TextColored(accent,"OBJECT");
+    ImGui::SameLine();
+    ImGui::TextDisabled("  /  Inspector");
+    ImGui::Spacing();
     const float available=ImGui::GetContentRegionAvail().x;
-    ImGui::SetNextItemWidth(available>110.f?available-100.f:available*0.65f);
+    ImGui::SetNextItemWidth(available>125.f?available-110.f:available*0.62f);
     ImGui::BeginDisabled(lockName);
     result.nameChanged=ImGui::InputText("##name",name,size);
     ImGui::EndDisabled();
@@ -974,7 +1071,14 @@ bool ImGuiEditorUi::KeyBindingInput(const char* id,const char* display,std::stri
 }
 void ImGuiEditorUi::CancelKeyBindingCapture(){m_bindingCaptureId=0;EditorKeyBindings::Get().SetCapturing(false);}
 void ImGuiEditorUi::BeginDisabled(bool d){ImGui::BeginDisabled(d);} void ImGuiEditorUi::EndDisabled(){ImGui::EndDisabled();}
-bool ImGuiEditorUi::Combo(const char*l,int*s,const char*const*i,int c){return ImGui::Combo(l,s,i,c);}
+bool ImGuiEditorUi::Combo(const char*l,int*s,const char*const*i,int c)
+{
+    const ImGuiStyle& style=ImGui::GetStyle();
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,{style.FramePadding.x,2.f});
+    const bool changed=InspectorField(l,[&](const char* id){return ImGui::Combo(id,s,i,c);});
+    ImGui::PopStyleVar();
+    return changed;
+}
 void ImGuiEditorUi::SetNextItemWidth(float width){ImGui::SetNextItemWidth(width);}
 void ImGuiEditorUi::Tooltip(const char*t){if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))ImGui::SetTooltip("%s",t);}
 void ImGuiEditorUi::Progress(float f,const char*o){ImGui::ProgressBar(f,{-1,0},o);}

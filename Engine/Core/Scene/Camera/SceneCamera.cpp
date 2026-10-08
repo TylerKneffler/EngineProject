@@ -4,6 +4,20 @@
 
 namespace Engine::Scene
 {
+namespace
+{
+glm::quat WorldRotation(const Engine::Core::Object& object)
+{
+    glm::mat3 basis(object.transform.GetWorldMatrix());
+    for (int column = 0; column < 3; ++column)
+    {
+        const float length = glm::length(basis[column]);
+        if (length > 0.0001f)
+            basis[column] /= length;
+    }
+    return glm::normalize(glm::quat_cast(basis));
+}
+}
 
 Scene::Camera* Scene::FindGameCamera()
 {
@@ -16,12 +30,16 @@ Scene::Camera* Scene::FindGameCamera()
 
 void Scene::FocusEditorCamera(Object* obj)
 {
+    m_editorCameraFollowTarget = obj;
     Camera* cam = editorCamera.GetComponent<Camera>();
     if (!cam)
         return;
 
     const glm::vec3 targetPos =
-        obj ? obj->transform.position : glm::vec3(0.f);
+        obj ? obj->transform.GetWorldPosition() : glm::vec3(0.f);
+    m_editorCameraFollowPosition = targetPos;
+    if (obj)
+        m_editorCameraFollowRotation = WorldRotation(*obj);
     if (m_editorMode2D)
     {
         editorCamera.transform.position.x = targetPos.x;
@@ -44,6 +62,30 @@ void Scene::FocusEditorCamera(Object* obj)
 
     editorCamera.transform.position = targetPos + oldDir * (kDistance / oldLen);
     cam->target = targetPos;
+}
+
+void Scene::UpdateEditorCameraFollow()
+{
+    if (!m_editorCameraFollowTarget)
+        return;
+
+    const glm::vec3 current = m_editorCameraFollowTarget->transform.GetWorldPosition();
+    const glm::quat rotation = WorldRotation(*m_editorCameraFollowTarget);
+    const glm::quat change = rotation * glm::inverse(m_editorCameraFollowRotation);
+    editorCamera.transform.position = current +
+        change * (editorCamera.transform.position - m_editorCameraFollowPosition);
+    if (Camera* cam = editorCamera.GetComponent<Camera>())
+    {
+        cam->target = current + change * (cam->target - m_editorCameraFollowPosition);
+        cam->up = change * cam->up;
+    }
+    m_editorCameraFollowPosition = current;
+    m_editorCameraFollowRotation = rotation;
+}
+
+void Scene::StopEditorCameraFollow()
+{
+    m_editorCameraFollowTarget = nullptr;
 }
 
 }

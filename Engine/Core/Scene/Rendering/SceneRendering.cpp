@@ -2353,6 +2353,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     struct PreparedDraw
     {
         Engine::Core::Object* object = nullptr;
+        Engine::Components::Mesh* mesh = nullptr;
         Engine::Graphics::IGraphicsBuffer* vertexBuffer = nullptr;
         Engine::Graphics::IGraphicsBuffer* indexBuffer = nullptr;
         Engine::Graphics::IGraphicsBuffer* morphDeltaBuffer = nullptr;
@@ -2430,6 +2431,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         preparedDraw.morphWeightBuffer = m_emptyMorphWeightBuffer.get();
         preparedDraw.textures[8] = m_brdfIntegrationLut.get();
         preparedDraw.object = obj;
+        preparedDraw.mesh = mesh;
         preparedDraw.spatialManipulator = renderItem->spatialManipulator;
         preparedDraw.preview = isPreview;
         preparedDraw.terrain = mesh && mesh->UsesTerrainVertexFormat();
@@ -3099,7 +3101,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         // Draw selected object outline overlay. Structured buffers remain
         // bound across the pipeline change and do not need rebinding.
         if (includeEditorVisuals && !draw.preview &&
-            draw.object == m_selectedObject && m_objectOutlinePipeline)
+            (m_editorSelectedMesh ? draw.mesh == m_editorSelectedMesh
+                : draw.object == m_selectedObject) && m_objectOutlinePipeline)
         {
             context->SetPipeline(geometryPipeline(
                 draw, m_objectOutlinePipeline.get()));

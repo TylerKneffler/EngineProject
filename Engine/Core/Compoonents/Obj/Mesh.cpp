@@ -9,7 +9,13 @@
 #include <cstring>
 #include <cstdio>
 #include <cmath>
+#include <chrono>
+#include <limits>
 #include <unordered_map>
+#ifdef _WIN32
+#define NOMINMAX
+#include <Windows.h>
+#endif
 
 namespace Engine::Components
 {
@@ -49,7 +55,7 @@ std::string Mesh::ResolveFilePath(const std::string& path)
 namespace
 {
 constexpr uint32_t kNativeMeshMagic = 0x4853454d; // "MESH"
-constexpr uint32_t kNativeMeshVersion = 4;
+constexpr uint32_t kNativeMeshVersion = 5;
 constexpr float kPi = 3.14159265358979323846f;
 struct alignas(16) GpuMorphDelta
 {
@@ -206,6 +212,7 @@ static size_t ResolveObjIndex(int index, size_t count,
 void Mesh::LoadFromFile(const std::string& path)
 {
     MarkConfigurationDirty();
+    ++m_authoredGeometryRevision;
     m_terrainVertices.clear();
     m_indices.clear();
     m_indexBuffer.reset();
@@ -228,8 +235,15 @@ void Mesh::LoadFromFile(const std::string& path)
         native.read(reinterpret_cast<char*>(&version), sizeof(version));
         native.read(reinterpret_cast<char*>(&count), sizeof(count));
         if (!native || magic != kNativeMeshMagic ||
-            (version != 2 && version != 3 && version != kNativeMeshVersion))
+            (version != 2 && version != 3 && version != 4 &&
+                version != kNativeMeshVersion))
             throw std::runtime_error("Mesh: invalid native mesh: " + path);
+        uint32_t indexCount = 0;
+        if (version == 5)
+            native.read(reinterpret_cast<char*>(&indexCount), sizeof(indexCount));
+        if (!native || count == 0 || count > 100000000u ||
+            indexCount > 300000000u)
+            throw std::runtime_error("Mesh: invalid native mesh size: " + path);
         m_vertices.assign(count, Vertex{});
         if (version == 2)
         {
@@ -257,8 +271,16 @@ void Mesh::LoadFromFile(const std::string& path)
         else
             native.read(reinterpret_cast<char*>(m_vertices.data()),
                 static_cast<std::streamsize>(m_vertices.size() * sizeof(Vertex)));
+        if (version == 5)
+        {
+            m_indices.resize(indexCount);
+            native.read(reinterpret_cast<char*>(m_indices.data()),
+                static_cast<std::streamsize>(m_indices.size() * sizeof(uint32_t)));
+        }
         if (!native)
             throw std::runtime_error("Mesh: truncated native mesh: " + path);
+        if (!ValidateAuthoredGeometry(m_vertices, m_indices))
+            throw std::runtime_error("Mesh: invalid native mesh geometry: " + path);
         UpdateBounds();
         m_ready = false;
         return;
@@ -450,17 +472,25 @@ bool Mesh::SetDeformedVertices(std::vector<Vertex>&& vertices)
 
 bool Mesh::SetAuthoredVertices(std::vector<Vertex> vertices)
 {
-    if (vertices.empty() || vertices.size() % 3u != 0u)
+    if (!ValidateAuthoredGeometry(vertices, {}))
         return false;
     m_terrainVertices.clear();
     m_indices.clear();
     m_indexBuffer.reset();
     m_vertices = std::move(vertices);
+    ++m_authoredGeometryRevision;
     MarkConfigurationDirty();
     UpdateBounds();
     if (m_bufferFactory)
         CreateBuffer(m_bufferFactory);
     return true;
+}
+
+void Mesh::SetAuthoredFilePath(std::string path)
+{
+    if (m_filePath == path) return;
+    m_filePath = std::move(path);
+    MarkConfigurationDirty();
 }
 
 std::vector<Mesh::Vertex> Mesh::TakeVertices()
@@ -809,18 +839,92 @@ void Mesh::UpdateBounds()
     }
 }
 
-bool Mesh::SaveNativeFile(const std::string& path, const std::vector<Vertex>& vertices)
+bool Mesh::ValidateAuthoredGeometry(const std::vector<Vertex>& vertices,
+    const std::vector<uint32_t>& indices)
 {
-    std::ofstream file(path, std::ios::binary);
-    if (!file)
+    if (vertices.empty() || vertices.size() > UINT32_MAX ||
+        indices.size() > UINT32_MAX ||
+        (indices.empty() ? vertices.size() % 3u : indices.size() % 3u) != 0u)
         return false;
+    for (const Vertex& vertex : vertices)
+    {
+        const auto finite = [](const float* values, size_t count)
+        {
+            for (size_t i = 0; i < count; ++i)
+                if (!std::isfinite(values[i])) return false;
+            return true;
+        };
+        if (!finite(vertex.pos, 3) || !finite(vertex.normal, 3) ||
+            !finite(vertex.uv, 2) || !finite(vertex.tangent, 4) ||
+            !finite(vertex.uv1, 2) || !finite(vertex.color, 4) ||
+            !finite(vertex.joints0, 4) || !finite(vertex.weights0, 4) ||
+            !finite(vertex.joints1, 4) || !finite(vertex.weights1, 4))
+            return false;
+        for (float value : vertex.weights0)
+            if (value < 0.f) return false;
+        for (float value : vertex.weights1)
+            if (value < 0.f) return false;
+        for (float value : vertex.joints0)
+            if (value < 0.f || std::floor(value) != value) return false;
+        for (float value : vertex.joints1)
+            if (value < 0.f || std::floor(value) != value) return false;
+    }
+    for (uint32_t index : indices)
+        if (index >= vertices.size()) return false;
+    return true;
+}
+
+bool Mesh::SaveNativeFile(const std::string& path,
+    const std::vector<Vertex>& vertices)
+{
+    return SaveNativeFile(path, vertices, {});
+}
+
+bool Mesh::SaveNativeFile(const std::string& path,
+    const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
+{
+    if (!ValidateAuthoredGeometry(vertices, indices)) return false;
+    const std::filesystem::path target(path);
+    const std::filesystem::path temporary = target.string() + ".tmp." +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
+    if (!file) return false;
     const uint32_t count = static_cast<uint32_t>(vertices.size());
+    const uint32_t indexCount = static_cast<uint32_t>(indices.size());
     file.write(reinterpret_cast<const char*>(&kNativeMeshMagic), sizeof(kNativeMeshMagic));
     file.write(reinterpret_cast<const char*>(&kNativeMeshVersion), sizeof(kNativeMeshVersion));
     file.write(reinterpret_cast<const char*>(&count), sizeof(count));
+    file.write(reinterpret_cast<const char*>(&indexCount), sizeof(indexCount));
     file.write(reinterpret_cast<const char*>(vertices.data()),
         static_cast<std::streamsize>(vertices.size() * sizeof(Vertex)));
-    return file.good();
+    file.write(reinterpret_cast<const char*>(indices.data()),
+        static_cast<std::streamsize>(indices.size() * sizeof(uint32_t)));
+    file.flush();
+    const bool written = file.good();
+    file.close();
+    bool replaced = false;
+    if (written)
+    {
+#ifdef _WIN32
+        const std::wstring source = temporary.wstring();
+        const std::wstring destination = target.wstring();
+        replaced = std::filesystem::exists(target)
+            ? ReplaceFileW(destination.c_str(), source.c_str(), nullptr,
+                REPLACEFILE_IGNORE_MERGE_ERRORS, nullptr, nullptr) != 0
+            : MoveFileExW(source.c_str(), destination.c_str(),
+                MOVEFILE_WRITE_THROUGH) != 0;
+#else
+        std::error_code renameError;
+        std::filesystem::rename(temporary, target, renameError);
+        replaced = !renameError;
+#endif
+    }
+    if (!replaced)
+    {
+        std::error_code removeError;
+        std::filesystem::remove(temporary, removeError);
+    }
+    return replaced;
 }
 
 namespace
@@ -1351,13 +1455,12 @@ std::vector<Mesh::Vertex> Mesh::BuildPortalCutTriangleStream(
 bool Mesh::SetIndexedGeometry(std::vector<Vertex> vertices,
     std::vector<uint32_t> indices)
 {
-    if (vertices.empty() || indices.empty() || indices.size() % 3u != 0u ||
-        std::any_of(indices.begin(), indices.end(), [&](uint32_t index)
-            { return index >= vertices.size(); }))
+    if (indices.empty() || !ValidateAuthoredGeometry(vertices, indices))
         return false;
     m_vertices = std::move(vertices);
     m_indices = std::move(indices);
     m_terrainVertices.clear();
+    ++m_authoredGeometryRevision;
     MarkConfigurationDirty();
     UpdateBounds();
     if (m_bufferFactory) CreateBuffer(m_bufferFactory);
@@ -1403,6 +1506,17 @@ void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory)
         throw std::runtime_error("Failed to create vertex buffer");
 
     CreateMorphBuffers();
+    if (!m_indices.empty())
+    {
+        const uint64_t indexBytes = static_cast<uint64_t>(m_indices.size()) *
+            sizeof(uint32_t);
+        m_indexBuffer = bufferFactory->CreateBuffer(
+            IGraphicsBuffer::Usage::IndexBuffer,
+            IGraphicsBuffer::AccessMode::Upload, indexBytes, m_indices.data());
+        if (!m_indexBuffer)
+            throw std::runtime_error("Failed to create mesh index buffer");
+    }
+    else m_indexBuffer.reset();
     m_ready = true;
 }
 #pragma endregion

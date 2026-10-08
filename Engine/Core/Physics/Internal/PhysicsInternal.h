@@ -39,6 +39,15 @@ public:
         bool needBroadphaseCollision(btBroadphaseProxy* first,
             btBroadphaseProxy* second) const override
         {
+            // Preserve Bullet's ordinary collision groups and masks before
+            // applying portal-specific exclusions. Pose-only IK bodies use
+            // group/mask zero and must never collide with the mesh root.
+            if (!first || !second ||
+                !(first->m_collisionFilterGroup &
+                    second->m_collisionFilterMask) ||
+                !(second->m_collisionFilterGroup &
+                    first->m_collisionFilterMask))
+                return false;
             const auto* firstObject = static_cast<const btCollisionObject*>(
                 first ? first->m_clientObject : nullptr);
             const auto* secondObject = static_cast<const btCollisionObject*>(

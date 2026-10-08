@@ -3,8 +3,8 @@
 #include <vector>
 #include <string>
 
-// Serializable animation channel data. Sampling and playback live in the
-// animation components, not in this model type.
+// Serializable animation channel data. Sampling and playback live in
+// AnimationManager, not in this model type.
 namespace Engine::Model
 {
 struct AnimationChannel

@@ -2,6 +2,7 @@
 
 #include "Core/Component.h"
 #include "Core/Model/AnimationData.h"
+#include "Core/Model/AnimationClip.h"
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <memory>
@@ -21,7 +22,6 @@ public:
     AnimationManager();
     ~AnimationManager() override;
     ComponentReference modelReference { "Model" };
-    ComponentReference animationSourceReference { "Animation" };
     std::string clip;
     bool playing = true;
     // Keep the current skeletal transforms when playback stops, including
@@ -30,7 +30,10 @@ public:
     bool looping = true;
     float speed = 1.f;
     float time = 0.f;
+    std::vector<Engine::Model::AnimationClip> clips;
     std::vector<Layer> layers;
+    const Engine::Model::AnimationClip* FindClip(const std::string& name = {}) const;
+    std::vector<const Engine::Model::AnimationClip*> GetAvailableClips() const;
     void Start() override;
     void Update() override;
     void Tick(float deltaSeconds);

@@ -169,7 +169,8 @@ void AssetsExplorerView::DrawPanel(IEditorUi& ui)
     if (ui.Button(Icons::Grid))
         m_gridView = true;
     ui.Tooltip("Thumbnail view");
-    ui.InputText("##assetSearch", m_search, sizeof(m_search));
+    ui.SearchInput("##assetSearch", m_search, sizeof(m_search),
+        "Search assets...");
     ui.Separator();
 
     if (!m_error.empty())

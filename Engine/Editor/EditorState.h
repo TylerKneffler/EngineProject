@@ -126,6 +126,33 @@ public:
     void UpdateDeltaTime();
 
 private:
+    struct MeshEditSession
+    {
+        bool enabled = false;
+        Engine::Components::Mesh* activeMesh = nullptr;
+        int selectionMode = 0; // vertex, edge, face
+        uint32_t selectedElement = 0;
+        std::string savePath;
+        std::string baseline;
+        std::string savedSnapshot;
+        std::deque<std::string> undo;
+        std::deque<std::string> redo;
+        bool dirty = false;
+        char search[96]{};
+        float move[3]{};
+        float extrudeDistance = 0.25f;
+        float insetAmount = 0.2f;
+    };
+    MeshEditSession* ActiveMeshEditSession();
+    Engine::Components::Mesh* ResolveMeshForSelection(
+        Engine::Core::Object* selected) const;
+    void SyncMeshEditSelection(Engine::Scene::Scene* scene,
+        MeshEditSession& session);
+    void SetMeshEditMode(Engine::Scene::Scene* scene,
+        MeshEditSession& session, bool enabled);
+    void DrawMeshEditTools(IEditorUi& ui);
+    bool SaveMeshEditSession(MeshEditSession& session);
+    bool SavePendingMeshEdits();
     void InitializePanels();
     void WireupCallbacks();
     Engine::Core::Object* InstantiateAsset(const std::string& path, bool recordChange = true);
@@ -203,6 +230,7 @@ private:
         bool dirty = false;
         uint32_t selectedVertex = 0;
         uint32_t selectedInfluence = 0;
+        MeshEditSession meshEdit;
     };
     void SetActiveSceneAssetDocument(SceneAssetDocument* document);
     bool SaveSceneAssetDocument(SceneAssetDocument& document);
@@ -236,11 +264,15 @@ private:
     PropertiesView* m_primaryProperties = nullptr;
     AssetsExplorerView* m_primaryAssets = nullptr;
     SceneView* m_prefabSceneView = nullptr;
+    IEditorPanel* m_meshToolsPanel = nullptr;
     std::vector<AssetDocumentView*> m_assetDocuments;
     AssetDocumentView* m_activeAssetDocument = nullptr;
     std::vector<std::unique_ptr<SceneAssetDocument>> m_sceneAssetDocuments;
     std::deque<std::string> m_pendingSceneAssetDocuments;
     SceneAssetDocument* m_activeSceneAssetDocument = nullptr;
+    MeshEditSession m_mainMeshEdit;
+    MeshEditSession m_prefabMeshEdit;
+    std::unordered_map<std::string, MeshEditSession> m_meshEditCache;
 
     // State
     Engine::Model::ProjectSettings m_projectSettings;

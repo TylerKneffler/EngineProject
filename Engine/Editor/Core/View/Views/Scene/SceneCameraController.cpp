@@ -44,6 +44,8 @@ void SceneCameraController::Apply(Engine::Scene::Scene& scene,
     Engine::Components::Camera* cam =
         scene.editorCamera.GetComponent<Engine::Components::Camera>();
     assert(cam && "Scene editorCamera must have a Camera component");
+    if (panDX != 0.f || panDY != 0.f || dolly != 0.f)
+        scene.StopEditorCameraFollow();
     glm::vec3& pos = scene.editorCamera.transform.position;
 
     if (scene.IsEditorMode2D())

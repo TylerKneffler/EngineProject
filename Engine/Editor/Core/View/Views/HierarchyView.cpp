@@ -1,7 +1,6 @@
 #include "HierarchyView.h"
 #include "Engine/Editor/Core/PrimitiveObjectFactory.h"
 #include "Engine/Editor/UI/IEditorUi.h"
-#include "Engine/Editor/UI/EditorComponentIcons.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Object.h"
 #include "Core/Compoonents/Materials/Material.h"
@@ -12,6 +11,7 @@
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "../Focus/WindowFocusHandler.h"
+#include <cctype>
 
 namespace Engine::Editor
 {
@@ -41,29 +41,6 @@ std::string ObjectName(const Engine::Core::Object* object)
 {
     if (!object) return "World";
     return object->name.empty() ? "(unnamed)" : object->name;
-}
-
-EditorUiObjectIcon ObjectIcon(const Engine::Core::Object& object)
-{
-    bool hasPhysics = false;
-    bool hasMesh = false;
-    for (const Engine::Core::Component* component : object.Components)
-    {
-        if (!component)
-            continue;
-        const EditorUiObjectIcon icon =
-            ComponentIconForType(component->GetTypeName());
-        if (icon == EditorUiObjectIcon::Light) return icon;
-        if (icon == EditorUiObjectIcon::Camera) return icon;
-        if (icon == EditorUiObjectIcon::Audio) return icon;
-        if (icon == EditorUiObjectIcon::Sprite) return icon;
-        if (icon == EditorUiObjectIcon::UserInterface) return icon;
-        if (icon == EditorUiObjectIcon::Mesh) hasMesh = true;
-        if (icon == EditorUiObjectIcon::Physics) hasPhysics = true;
-    }
-    if (hasMesh) return EditorUiObjectIcon::Mesh;
-    if (hasPhysics) return EditorUiObjectIcon::Physics;
-    return EditorUiObjectIcon::Object;
 }
 
 bool CanMoveInPrefabContext(Engine::Scene::Scene* scene, Engine::Core::Object* object, Engine::Core::Object* target,
@@ -104,6 +81,22 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
         return;
     }
     if (!m_scene) { ui.DisabledLabel("No scene loaded"); ui.EndWindow(); return; }
+    ui.DisabledLabel("SCENE HIERARCHY");
+    if (!m_objectFilter)
+    {
+        ui.SameLineRight(28.f);
+        if (ui.Button("+", 28.f))
+        {
+            m_pendingAddParent = nullptr;
+            m_pendingAddType = PendingAddType::Empty;
+            m_hasPendingAdd = true;
+        }
+        ui.Tooltip("Create empty object");
+    }
+    ui.SearchInput("##hierarchySearch", m_search, sizeof(m_search),
+        "Search objects...");
+    m_searchMatches.clear();
+    ui.Separator();
     const bool copyRequested = ui.CopyShortcutPressed();
     const bool pasteRequested = ui.PasteShortcutPressed();
     const bool deleteRequested = ui.DeleteShortcutPressed();
@@ -459,10 +452,32 @@ void HierarchyView::SelectSceneRoot()
     NotifySelectionChanged();
 }
 
+bool HierarchyView::MatchesSearch(const Engine::Core::Object* object) const
+{
+    if (m_search[0] == '\0')
+        return true;
+    if (const auto cached = m_searchMatches.find(object);
+        cached != m_searchMatches.end())
+        return cached->second;
+    const std::string query(m_search);
+    const auto found = std::search(object->name.begin(), object->name.end(),
+        query.begin(), query.end(), [](unsigned char left, unsigned char right)
+        {
+            return std::tolower(left) == std::tolower(right);
+        });
+    const bool matches = found != object->name.end() ||
+        std::any_of(object->Children.begin(), object->Children.end(),
+        [this](const Engine::Core::Object* child) { return MatchesSearch(child); });
+    m_searchMatches.emplace(object, matches);
+    return matches;
+}
+
 void HierarchyView::DrawObjectNode(
     IEditorUi& ui, Engine::Core::Object* obj, int depth, bool lastSibling,
     uint64_t ancestorGuideMask)
 {
+    if (!MatchesSearch(obj))
+        return;
     if (m_objectFilter && !m_objectFilter(obj))
     {
         for (size_t index = 0; index < obj->Children.size(); ++index)
@@ -477,12 +492,12 @@ void HierarchyView::DrawObjectNode(
     const bool readOnlySkeletonRow = m_objectFilter &&
         m_allowSkeletonContextActions;
     const EditorUiObjectRowResult row = ui.ObjectTreeRow(
-        obj, ObjectIcon(*obj), name, sizeof(name),
+        obj, EditorUiObjectIcon::Object, name, sizeof(name),
         readOnlySkeletonRow ? nullptr : &enabled,
         std::find(m_selectedObjects.begin(), m_selectedObjects.end(), obj) != m_selectedObjects.end(),
         !hasChildren, readOnlySkeletonRow,
         obj->IsEnabledInHierarchy(),
-        depth, lastSibling, ancestorGuideMask);
+        depth, lastSibling, ancestorGuideMask, m_search[0] != '\0');
     const bool editableHierarchy = prefabRoot == nullptr;
     const bool deletable = editableHierarchy || prefabRoot == obj;
     EditorUiContextMenuResult menu;

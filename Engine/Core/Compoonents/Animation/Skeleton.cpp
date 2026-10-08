@@ -32,6 +32,19 @@ void ClampJointAxis(float& angle, float& velocity, float limit)
         velocity = 0.f;
     angle = bounded;
 }
+
+glm::vec3 ParentLocalTorque(const Engine::Core::Object* bone,
+    const glm::vec3& worldTorque)
+{
+    if (!bone || !bone->Parent) return worldTorque;
+    glm::mat3 basis(bone->Parent->transform.GetWorldMatrix());
+    for (int column = 0; column < 3; ++column)
+    {
+        const float length = glm::length(basis[column]);
+        if (length > 1e-6f) basis[column] /= length;
+    }
+    return glm::transpose(basis) * worldTorque;
+}
 }
 
 Skeleton::Skeleton()
@@ -44,6 +57,15 @@ Skeleton::Skeleton()
     RegisterField("meshContactResponseStrength", meshContactResponseStrength, "Collision | Bone Response");
     RegisterField("meshContactDamping", meshContactDamping, "Collision | Bone Response");
     RegisterField("meshContactMaxBend", meshContactMaxBend, "Collision | Bone Response");
+    RegisterField("meshImpactImpulseThreshold", meshImpactImpulseThreshold,
+        "Collision | Bone Response");
+    RegisterField("meshIKGroundedGravityScale", meshIKGroundedGravityScale,
+        "Collision | Bone Response");
+    RegisterField("meshIKTorqueLimitPerMass", meshIKTorqueLimitPerMass,
+        "Collision | Bone Response");
+    RegisterField("meshRagdollEnabled", meshRagdollEnabled, "Collision | Bone Response");
+    RegisterField("meshRagdollGravityStrength", meshRagdollGravityStrength,
+        "Collision | Bone Response");
     RegisterField("showBones", showBones);
 }
 
@@ -92,7 +114,10 @@ bool Skeleton::DrawProperties(::Engine::Editor::IEditorUi& ui)
     changed = DrawReferenceProperty(ui, "modelReference", "Model",
         modelReference, ResolveModel()) || changed;
     const bool meshColliderMode = UsesMeshCollider();
-    if (ui.Button(meshColliderMode ? "Collision: Mesh Collider" : "Collision: Per Bone"))
+    const bool skinnedBoneHulls = colliderMode == "SkinnedBoneHulls";
+    if (ui.Button(meshColliderMode ? "Collision: Mesh Collider"
+            : skinnedBoneHulls ? "Collision: Skinned Bone Hulls"
+                : "Collision: Per Bone"))
     {
         colliderMode = meshColliderMode ? "PerBone" : "MeshCollider";
         changed = true;
@@ -115,12 +140,23 @@ bool Skeleton::DrawProperties(::Engine::Editor::IEditorUi& ui)
             &meshContactResponseEnabled) || changed;
         if (meshContactResponseEnabled)
         {
+            changed = ui.Checkbox("Articulated Gravity",
+                &meshRagdollEnabled) || changed;
+            if (meshRagdollEnabled)
+                changed = ui.DragFloat("Pose Fallback Gravity",
+                    &meshRagdollGravityStrength, 0.1f, 0.f, 20.f) || changed;
             changed = ui.DragFloat("Contact Strength",
                 &meshContactResponseStrength, 0.1f, 0.f, 100.f) || changed;
             changed = ui.DragFloat("Contact Damping",
                 &meshContactDamping, 0.1f, 0.f, 100.f) || changed;
             changed = ui.DragFloat("Maximum Bend (Radians)",
                 &meshContactMaxBend, 0.01f, 0.f, 1.57f) || changed;
+            changed = ui.DragFloat("Impact Impulse Threshold",
+                &meshImpactImpulseThreshold, 0.01f, 0.f, 10.f) || changed;
+            changed = ui.DragFloat("IK Grounded Gravity Scale",
+                &meshIKGroundedGravityScale, 0.001f, 0.f, 1.f) || changed;
+            changed = ui.DragFloat("IK Torque Limit Per Mass",
+                &meshIKTorqueLimitPerMass, 0.001f, 0.f, 1.f) || changed;
         }
     }
     const char* label = showBones ? "Hide Bones in Scene" : "Show Bones in Scene";
@@ -145,6 +181,7 @@ bool Skeleton::UsesMeshCollider() const
 void Skeleton::ResetMeshContactResponse()
 {
     m_contactBoneStates.clear();
+    m_meshIKTorqueEvents = 0;
 }
 
 void Skeleton::ApplyMeshContactResponse(float stepSeconds)
@@ -171,6 +208,13 @@ void Skeleton::ApplyMeshContactResponse(float stepSeconds)
     for (AnimationBone* bone : bones)
         if (bone && bone->Owner)
         {
+            if (auto* joint = bone->Owner->GetComponent<IKBone>();
+                joint && joint->IsSimulating() &&
+                joint->UsesMeshColliderPoseOnly())
+            {
+                m_contactBoneStates.erase(bone);
+                continue;
+            }
             auto [it, inserted] = m_contactBoneStates.try_emplace(bone);
             const glm::quat current(bone->Owner->transform.rotation);
             // Animation or IK may have written a new pose since the last
@@ -182,11 +226,48 @@ void Skeleton::ApplyMeshContactResponse(float stepSeconds)
                 it->second.baseRotation = current;
         }
 
+    if (meshRagdollEnabled && rootBody->bodyType == "Dynamic" &&
+        rootBody->useGravity)
+        for (AnimationBone* bone : bones)
+        {
+            if (!bone || !bone->Owner || !bone->GetParentBone()) continue;
+            IKBone* joint = bone->Owner->GetComponent<IKBone>();
+            if (!joint || !joint->connectToParent || joint->IsSimulating())
+                continue;
+            const glm::vec3 pivot = bone->Owner->transform.GetWorldPosition();
+            glm::vec3 arm(0.f);
+            unsigned childCount = 0;
+            for (AnimationBone* child : bone->GetChildBones())
+                if (child && child->Owner)
+                {
+                    arm += child->Owner->transform.GetWorldPosition() - pivot;
+                    ++childCount;
+                }
+            if (childCount)
+                arm *= 0.5f / childCount;
+            else if (bone->GetParentBone()->Owner)
+                arm = (pivot - bone->GetParentBone()->Owner->transform.GetWorldPosition()) * 0.5f;
+            const glm::vec3 gravity = rootBody->GetGravityDirection() *
+                (9.81f * std::max(rootBody->gravityScale, 0.f) *
+                    std::max(joint->mass, 0.f));
+            const glm::vec3 torque = ParentLocalTorque(bone->Owner,
+                glm::cross(arm, gravity));
+            if (std::isfinite(torque.x) && std::isfinite(torque.y) &&
+                std::isfinite(torque.z))
+                m_contactBoneStates[bone].angularVelocity += torque *
+                    (std::max(meshRagdollGravityStrength, 0.f) * dt);
+        }
+
+    glm::vec3 rootReaction(0.f);
     for (const MeshObjectCollider::Contact& contact : collider->GetContacts())
     {
         if (!contact.surfaceMapped || contact.normalImpulse <= 0.f) continue;
-        const glm::vec3 force = contact.normalWorld *
-            std::min(contact.normalImpulse, 5.f);
+        glm::vec3 force = contact.impulseWorld;
+        const float impulseLength = glm::length(force);
+        const float impulseLimit = 5.f *
+            std::max<unsigned>(contact.substepSamples, 1u);
+        if (impulseLength > impulseLimit && impulseLength > 0.f)
+            force *= impulseLimit / impulseLength;
         for (uint8_t index = 0; index < contact.boneWeightCount; ++index)
         {
             const MeshObjectCollider::BoneWeight& influence =
@@ -197,10 +278,26 @@ void Skeleton::ApplyMeshContactResponse(float stepSeconds)
                 continue;
             const glm::vec3 arm = contact.surfacePointWorld -
                 bone->Owner->transform.GetWorldPosition();
-            glm::vec3 torque = glm::cross(arm, force);
-            if (bone->Owner->Parent)
-                torque = glm::mat3(glm::inverse(
-                    bone->Owner->Parent->transform.GetWorldMatrix())) * torque;
+            const glm::vec3 worldTorque = glm::cross(arm, force);
+            if (auto* joint = bone->Owner->GetComponent<IKBone>();
+                joint && joint->IsSimulating() &&
+                joint->UsesMeshColliderPoseOnly())
+            {
+                if (contact.normalImpulse <=
+                    std::max(meshImpactImpulseThreshold, 0.f) *
+                        std::max<unsigned>(contact.substepSamples, 1u))
+                    continue;
+                const glm::vec3 applied = joint->ApplyMeshContactTorque(worldTorque *
+                    influence.weight *
+                    std::max(meshContactResponseStrength, 0.f),
+                    std::max(meshIKTorqueLimitPerMass, 0.f));
+                rootReaction -= applied;
+                if (glm::dot(applied, applied) > 0.f)
+                    ++m_meshIKTorqueEvents;
+                continue;
+            }
+            const glm::vec3 torque = ParentLocalTorque(bone->Owner,
+                worldTorque);
             if (!std::isfinite(torque.x) || !std::isfinite(torque.y) ||
                 !std::isfinite(torque.z))
                 continue;
@@ -209,6 +306,9 @@ void Skeleton::ApplyMeshContactResponse(float stepSeconds)
                 std::max(meshContactResponseStrength, 0.f);
         }
     }
+    if (rootBody->bodyType == "Dynamic" &&
+        glm::dot(rootReaction, rootReaction) > 0.f)
+        rootBody->AddAngularImpulse(rootReaction);
 
     for (auto& [bone, state] : m_contactBoneStates)
     {

@@ -80,7 +80,8 @@ void SceneView::DrawPanel(IEditorUi& ui)
         ui.EndWindow();
         return;
     }
-    if (ui.DeleteShortcutPressed() && OnDeleteSelectionRequested)
+    if (AllowObjectTransform && ui.DeleteShortcutPressed() &&
+        OnDeleteSelectionRequested)
         OnDeleteSelectionRequested();
 
     float panDX = 0.f, panDY = 0.f;
@@ -317,6 +318,7 @@ void SceneView::Render3D(void* cmd)
 {
     if (m_scene)
     {
+        m_scene->UpdateEditorCameraFollow();
         auto* factory = m_scene->GetGraphicsProvider()->GetContextFactory();
         factory->SetCommandBuffer(cmd);
         auto ctx = factory->CreateContext();

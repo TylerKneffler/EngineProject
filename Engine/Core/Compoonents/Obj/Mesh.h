@@ -35,6 +35,10 @@ public:
     // Resolves portable Assets/... paths against bundled sandbox assets.
     static std::string ResolveFilePath(const std::string& path);
     static bool SaveNativeFile(const std::string& path, const std::vector<Vertex>& vertices);
+    static bool SaveNativeFile(const std::string& path,
+        const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
+    static bool ValidateAuthoredGeometry(const std::vector<Vertex>& vertices,
+        const std::vector<uint32_t>& indices);
 
     // Create a graphics buffer from loaded vertex data.
     // bufferFactory: creates GPU vertex buffers (API-agnostic)
@@ -56,6 +60,7 @@ public:
         return m_terrainVertices;
     }
     const std::vector<uint32_t>& GetIndices() const { return m_indices; }
+    uint64_t GetAuthoredGeometryRevision() const { return m_authoredGeometryRevision; }
     std::vector<Vertex> BuildPortalCutTriangleStream(
         const std::vector<glm::mat4>* skinPalette = nullptr) const;
     bool UsesTerrainVertexFormat() const { return !m_terrainVertices.empty(); }
@@ -92,6 +97,7 @@ public:
     bool IsEditorVisible() const { return m_editorVisible; }
     void SetEditorVisible(bool visible) { m_editorVisible = visible; }
     const std::string& GetFilePath() const { return m_filePath; }
+    void SetAuthoredFilePath(std::string path);
     bool HasBounds() const { return m_hasBounds; }
     const glm::vec3& GetBoundsMin() const { return m_boundsMin; }
     const glm::vec3& GetBoundsMax() const { return m_boundsMax; }
@@ -138,6 +144,7 @@ private:
     std::vector<Vertex> m_vertices;
     std::vector<TerrainVertex> m_terrainVertices;
     std::vector<uint32_t> m_indices;
+    uint64_t m_authoredGeometryRevision = 1;
     std::unique_ptr<IGraphicsBuffer> m_vertexBuffer;
     std::unique_ptr<IGraphicsBuffer> m_indexBuffer;
     std::unique_ptr<IGraphicsBuffer> m_morphDeltaBuffer;

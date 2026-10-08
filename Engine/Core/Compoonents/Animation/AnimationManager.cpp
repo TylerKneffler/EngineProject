@@ -1,5 +1,4 @@
 #include "AnimationManager.h"
-#include "Animation.h"
 #include "Model.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Object.h"
@@ -138,20 +137,7 @@ struct ReusablePose
     }
 };
 
-Animation* FindAnimation(Engine::Core::Object* owner, const std::string& name)
-{
-    if (!owner) return nullptr;
-    Animation* first = nullptr;
-    for (Engine::Core::Component* component : owner->Components)
-        if (auto* animation = dynamic_cast<Animation*>(component))
-        {
-            if (!first) first = animation;
-            if (!name.empty() && animation->clipName == name) return animation;
-        }
-    return name.empty() ? first : nullptr;
-}
-
-void SampleAnimation(const Animation* animation, float time,
+void SampleAnimation(const Engine::Model::AnimationClip* animation, float time,
     size_t nodeCount, ReusablePose& pose, std::vector<float>& channelValues)
 {
     pose.Reset();
@@ -183,7 +169,7 @@ void SampleAnimation(const Animation* animation, float time,
 }
 
 float AdvanceTime(float value, float delta, float speed, bool looping,
-    const Animation* animation)
+    const Engine::Model::AnimationClip* animation)
 {
     value += delta * speed;
     if (!animation || animation->duration <= 0.f) return value;
@@ -232,7 +218,7 @@ struct AnimationManagerScratch
 
     struct SampleCacheEntry
     {
-        const Animation* animation = nullptr;
+        const Engine::Model::AnimationClip* animation = nullptr;
         float time = 0.f;
         size_t nodeCount = 0;
         ReusablePose pose;
@@ -249,7 +235,7 @@ struct AnimationManagerScratch
 namespace
 {
 const ReusablePose& CachedSample(AnimationManagerScratch& scratch,
-    const Animation* animation, float time, size_t nodeCount)
+    const Engine::Model::AnimationClip* animation, float time, size_t nodeCount)
 {
     for (size_t index = 0; index < scratch.sampleCacheUsed; ++index)
     {
@@ -280,8 +266,6 @@ AnimationManager::AnimationManager()
 {
     SetTypeName(COMPONENT_TYPE_NAME(AnimationManager));
     RegisterField("modelReference", modelReference);
-    RegisterField("animationSourceReference", animationSourceReference);
-    RegisterField("clip", clip);
     RegisterField("playing", playing);
     RegisterField("holdCurrentPoseWhenStopped", holdCurrentPoseWhenStopped);
     RegisterField("looping", looping);
@@ -290,6 +274,24 @@ AnimationManager::AnimationManager()
 }
 
 AnimationManager::~AnimationManager() = default;
+
+const Engine::Model::AnimationClip* AnimationManager::FindClip(
+    const std::string& name) const
+{
+    for (const auto& candidate : clips)
+        if (name.empty() || candidate.clipName == name)
+            return &candidate;
+    return nullptr;
+}
+
+std::vector<const Engine::Model::AnimationClip*>
+AnimationManager::GetAvailableClips() const
+{
+    std::vector<const Engine::Model::AnimationClip*> result;
+    result.reserve(clips.size());
+    for (const auto& candidate : clips) result.push_back(&candidate);
+    return result;
+}
 
 Model* AnimationManager::ResolveModel() const
 {
@@ -347,9 +349,7 @@ void AnimationManager::Start()
                 pose->nodes[nodeIndex].weights.reserve(weights.size());
     if (clip.empty())
     {
-        Animation* first = animationSourceReference.IsAssigned()
-            ? Engine::Core::ResolveComponentReference<Animation>(Owner, animationSourceReference)
-            : FindAnimation(Owner, {});
+        const auto* first = FindClip();
         if (first) clip = first->clipName;
     }
 }
@@ -388,15 +388,8 @@ void AnimationManager::Tick(float frameDelta)
     frameDelta = std::max(frameDelta, 0.f);
     const float delta = playing ? frameDelta : 0.f;
     const auto resolveAnimation = [this](const std::string& clipName)
-    {
-        Animation* assigned = animationSourceReference.IsAssigned()
-            ? Engine::Core::ResolveComponentReference<Animation>(Owner, animationSourceReference) : nullptr;
-        if (animationSourceReference.IsAssigned())
-            return assigned && (clipName.empty() || assigned->clipName == clipName)
-                ? assigned : nullptr;
-        return FindAnimation(Owner, clipName);
-    };
-    Animation* animation = resolveAnimation(clip);
+    { return FindClip(clipName); };
+    const Engine::Model::AnimationClip* animation = resolveAnimation(clip);
     if (!animation) return;
     Model* model = ResolveModel();
     if (!model) return;
@@ -410,7 +403,8 @@ void AnimationManager::Tick(float frameDelta)
 
     if (!m_previousClip.empty() && m_fadeDuration > 0.f)
     {
-        Animation* previousAnimation = resolveAnimation(m_previousClip);
+        const Engine::Model::AnimationClip* previousAnimation =
+            resolveAnimation(m_previousClip);
         m_previousTime = AdvanceTime(m_previousTime, delta, speed, looping, previousAnimation);
         m_fadeElapsed += delta;
         const float blend = std::clamp(m_fadeElapsed / m_fadeDuration, 0.f, 1.f);
@@ -486,7 +480,8 @@ void AnimationManager::Tick(float frameDelta)
     {
         Layer& layer = layers[layerIndex];
         if (!layer.enabled || layer.weight <= 0.f) continue;
-        Animation* layerAnimation = resolveAnimation(layer.clip);
+        const Engine::Model::AnimationClip* layerAnimation =
+            resolveAnimation(layer.clip);
         if (!layerAnimation) continue;
         layer.time = AdvanceTime(layer.time, delta, layer.speed, layer.looping, layerAnimation);
         AnimationManagerScratch::LayerMaskCache& mask =
@@ -577,6 +572,11 @@ void AnimationManager::Tick(float frameDelta)
 AnimationManager::JsonValue AnimationManager::Serialize() const
 {
     JsonValue result = Component::Serialize();
+    result.Set("clip", JsonValue(clip));
+    JsonValue serializedClips = JsonValue::MakeArray();
+    for (const auto& item : clips)
+        serializedClips.Push(item.Serialize());
+    result.Set("clips", std::move(serializedClips));
     JsonValue serializedLayers = JsonValue::MakeArray();
     for (const Layer& layer : layers)
     {
@@ -595,6 +595,16 @@ AnimationManager::JsonValue AnimationManager::Serialize() const
 void AnimationManager::Deserialize(const JsonValue& value)
 {
     Component::Deserialize(value);
+    clip = value["clip"].AsString();
+    clips.clear();
+    const JsonValue& serializedClips = value["clips"];
+    clips.reserve(serializedClips.ArraySize());
+    for (size_t i = 0; i < serializedClips.ArraySize(); ++i)
+    {
+        Engine::Model::AnimationClip item;
+        item.Deserialize(serializedClips.ArrayAt(i));
+        clips.push_back(std::move(item));
+    }
     layers.clear();
     const JsonValue& serializedLayers = value["layers"];
     for (size_t i = 0; i < serializedLayers.ArraySize(); ++i)
@@ -617,8 +627,42 @@ void AnimationManager::Deserialize(const JsonValue& value)
 bool AnimationManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
 {
     bool changed = Component::DrawProperties(ui);
-    ui.Separator();
-    ui.Label("Animation Layers");
+    const auto available = GetAvailableClips();
+    if (!available.empty())
+    {
+        std::vector<const char*> names;
+        names.reserve(available.size());
+        int selected = 0;
+        for (size_t index = 0; index < available.size(); ++index)
+        {
+            names.push_back(available[index]->clipName.c_str());
+            if (available[index]->clipName == clip)
+                selected = static_cast<int>(index);
+        }
+        if (ui.Combo("Active Animation", &selected, names.data(),
+            static_cast<int>(names.size())))
+        {
+            Play(available[static_cast<size_t>(selected)]->clipName, 0.f);
+            changed = true;
+        }
+    }
+    const std::string animationsLabel = "Animations (" +
+        std::to_string(available.size()) + ")";
+    if (ui.PropertyGroupHeader(animationsLabel.c_str(), false))
+    {
+        if (available.empty()) ui.DisabledLabel("No animation clips");
+        for (const auto* item : available)
+        {
+            const std::string summary = std::to_string(item->channels.size()) +
+                " channels  |  " + std::to_string(item->duration).substr(0, 5) +
+                " s";
+            ui.ValueLabel(item->clipName.c_str(), summary.c_str());
+        }
+    }
+    const std::string layersLabel = "Layers (" +
+        std::to_string(layers.size()) + ")";
+    if (!ui.PropertyGroupHeader(layersLabel.c_str(), false))
+        return changed;
     size_t removeIndex = layers.size();
     for (size_t index = 0; index < layers.size(); ++index)
     {
@@ -671,7 +715,7 @@ bool AnimationManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
     if (ui.Button("Add Layer"))
     {
         Layer layer;
-        if (Animation* animation = FindAnimation(Owner, {}))
+        if (const auto* animation = FindClip())
             layer.clip = animation->clipName;
         layers.push_back(std::move(layer));
         changed = true;

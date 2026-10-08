@@ -32,6 +32,7 @@ public:
     void Indent(float) override; void Unindent(float) override;
     void SetNextItemMixedValue(bool mixed) override;
     bool Checkbox(const char*, bool*) override; bool InputText(const char*, char*, size_t) override;
+    bool SearchInput(const char*, char*, size_t, const char*) override;
     bool InputTextSubmit(const char*, char*, size_t) override;
     void ReadOnlyTextBlock(const char*, const char*, bool, float) override;
     bool DragFloat(const char*, float*, float, float, float) override;
@@ -44,7 +45,7 @@ public:
     bool PropertyGroupHeader(const char*, bool) override;
     bool ComponentHeader(EditorUiObjectIcon, const char*, bool) override;
     bool TreeNode(const void*, const char*, bool, bool, bool) override; void TreePop() override;
-    EditorUiObjectRowResult ObjectTreeRow(const void*,EditorUiObjectIcon,char*,size_t,bool*,bool,bool,bool,bool,int,bool,uint64_t) override;
+    EditorUiObjectRowResult ObjectTreeRow(const void*,EditorUiObjectIcon,char*,size_t,bool*,bool,bool,bool,bool,int,bool,uint64_t,bool) override;
     void ObjectTreePop() override;
     EditorUiHierarchyDropResult HierarchyDropTarget(const char*) override;
     EditorUiHierarchyDropResult HierarchyBackgroundDropTarget(const char*) override;

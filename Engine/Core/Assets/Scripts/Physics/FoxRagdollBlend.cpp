@@ -33,6 +33,21 @@ FoxRagdollBlend::FoxRagdollBlend()
     RegisterField("meshColliderDuringAnimation", meshColliderDuringAnimation,
         "Fox Ragdoll");
     RegisterField("meshColliderAfterBlend", meshColliderAfterBlend, "Fox Ragdoll");
+    RegisterField("skinnedBoneHullsAfterBlend", skinnedBoneHullsAfterBlend,
+        "Fox Ragdoll");
+    RegisterField("meshContactStrength", meshContactStrength, "Fox Ragdoll");
+    RegisterField("meshContactMaxBend", meshContactMaxBend, "Fox Ragdoll");
+    RegisterField("meshRagdollMaxBend", meshRagdollMaxBend, "Fox Ragdoll");
+    RegisterField("meshRagdollGravityStrength", meshRagdollGravityStrength,
+        "Fox Ragdoll");
+    RegisterField("meshRagdollBoneAngularDamping",
+        meshRagdollBoneAngularDamping, "Fox Ragdoll");
+    RegisterField("meshRagdollBoneGravityScale",
+        meshRagdollBoneGravityScale, "Fox Ragdoll");
+    RegisterField("meshRagdollContactTorqueLimit",
+        meshRagdollContactTorqueLimit, "Fox Ragdoll");
+    RegisterField("meshRagdollImpactThreshold",
+        meshRagdollImpactThreshold, "Fox Ragdoll");
 }
 
 bool FoxRagdollBlend::ConfigureFox()
@@ -44,6 +59,14 @@ bool FoxRagdollBlend::ConfigureFox()
 
     skeleton->colliderMode = meshColliderDuringAnimation || meshColliderAfterBlend
         ? "MeshCollider" : "PerBone";
+    if (meshColliderAfterBlend)
+    {
+        skeleton->meshRagdollEnabled = false;
+        skeleton->meshContactResponseStrength =
+            std::max(meshContactStrength, 0.f);
+        skeleton->meshContactMaxBend =
+            std::max(meshContactMaxBend, 0.f);
+    }
     skeleton->MarkConfigurationDirty();
     auto* body = fox->GetComponent<Engine::Components::RigidBody>();
     if (!body) return false;
@@ -101,7 +124,8 @@ void FoxRagdollBlend::Update()
     {
         if (!meshColliderAfterBlend)
         {
-            skeleton->colliderMode = "PerBone";
+            skeleton->colliderMode = skinnedBoneHullsAfterBlend
+                ? "SkinnedBoneHulls" : "PerBone";
             skeleton->MarkConfigurationDirty();
         }
         m_blending = true;
@@ -120,15 +144,32 @@ void FoxRagdollBlend::Update()
         }
         if (meshColliderAfterBlend)
         {
+            if (skeleton)
+            {
+                skeleton->meshRagdollEnabled = true;
+                skeleton->meshRagdollGravityStrength =
+                    std::max(meshRagdollGravityStrength, 0.f);
+                skeleton->meshContactMaxBend =
+                    std::max(meshRagdollMaxBend, 0.f);
+                skeleton->meshIKGroundedGravityScale =
+                    std::clamp(meshRagdollBoneGravityScale, 0.f, 1.f);
+                skeleton->meshIKTorqueLimitPerMass =
+                    std::max(meshRagdollContactTorqueLimit, 0.f);
+                skeleton->meshImpactImpulseThreshold =
+                    std::max(meshRagdollImpactThreshold, 0.f);
+            }
             for (auto* bone : fox->GetComponentsInChildren<Engine::Components::IKBone>())
-                bone->simulate = false;
+                bone->meshPoseAngularDamping =
+                    std::clamp(meshRagdollBoneAngularDamping, 0.f, 1.f);
             if (auto* body = fox->GetComponent<Engine::Components::RigidBody>())
             {
                 body->bodyType = "Dynamic";
                 body->useGravity = true;
-                body->freezeRotationX = true;
-                body->freezeRotationY = true;
-                body->freezeRotationZ = true;
+                body->freezeRotationX = false;
+                body->freezeRotationY = false;
+                body->freezeRotationZ = false;
+                body->angularDamping = 0.9f;
+                body->continuousCollision = true;
                 body->MarkConfigurationDirty();
             }
         }
@@ -141,10 +182,12 @@ bool FoxRagdollBlend::DrawProperties(Engine::Editor::IEditorUi& ui)
     const bool changed = Engine::Core::Component::DrawProperties(ui);
     const char* phase = m_elapsed < std::max(animationSeconds, 0.f)
         ? "Animation" : m_influence < 1.f ? "Animation + IK"
-            : meshColliderAfterBlend ? "Mesh-collider physics" : "IK physics";
+            : meshColliderAfterBlend ? "Mesh pose physics"
+                : skinnedBoneHullsAfterBlend ? "Skinned mesh ragdoll"
+                    : "IK physics";
     char influence[32];
     std::snprintf(influence, sizeof(influence), "%.0f%%", m_influence * 100.f);
     ui.ValueLabel("Phase", phase);
-    ui.ValueLabel("IK Influence", influence);
+    ui.ValueLabel("Bone Blend", influence);
     return changed;
 }

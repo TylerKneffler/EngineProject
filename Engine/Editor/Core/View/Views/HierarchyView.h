@@ -94,6 +94,9 @@ private:
     std::string m_objectClipboard;
     ::Engine::Scene::Scene::ObjectPath m_clipboardSourcePath;
     std::function<bool(const Engine::Core::Object*)> m_objectFilter;
+    char m_search[128]{};
+    mutable std::unordered_map<const Engine::Core::Object*, bool> m_searchMatches;
+    bool MatchesSearch(const Engine::Core::Object* object) const;
     bool m_allowDelete = true;
     bool m_allowFilteredContextActions = false;
     bool m_allowFilteredReparent = false;

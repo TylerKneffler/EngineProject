@@ -9,6 +9,9 @@ build/
 .local/tests/*
 !.local/tests/FoxRagdollBlendTests.cpp
 !.local/tests/FoxMeshColliderTests.cpp
+!.local/tests/FoxProceduralWalkTests.cpp
+!.local/tests/PhysicsAdapterTests.cpp
+!.local/tests/MeshAuthoringTests.cpp
 build
 editor-startup.log
 project-build.log

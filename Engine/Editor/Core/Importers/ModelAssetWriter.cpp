@@ -180,17 +180,19 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
             skeleton->jointNodes = model.skins[index].jointNodes;
             skeleton->inverseBindMatrices = model.skins[index].inverseBindMatrices;
         }
-        for (const Engine::Model::ImportedAnimation& imported : model.animations)
-        {
-            Engine::Components::Animation* animation = root->AddComponent<Engine::Components::Animation>();
-            animation->clipName = imported.name;
-            animation->duration = imported.duration;
-            animation->channels = imported.channels;
-        }
         if (!model.animations.empty())
         {
             Engine::Components::AnimationManager* manager = root->AddComponent<Engine::Components::AnimationManager>();
             manager->clip = model.animations.front().name;
+            manager->clips.reserve(model.animations.size());
+            for (const Engine::Model::ImportedAnimation& imported : model.animations)
+            {
+                Engine::Model::AnimationClip animation;
+                animation.clipName = imported.name;
+                animation.duration = imported.duration;
+                animation.channels = imported.channels;
+                manager->clips.push_back(std::move(animation));
+            }
         }
 
         ::Engine::Components::Model* modelComponent =

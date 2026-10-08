@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Scene xmlns:components="urn:engine-components" version="1">
+  <settings dimension="0" showGrid="true" gridHalfSize="20" gridCellSize="1" gridOpacity="0.3" gridFadeDistance="100" skyboxTexture="Assets/Textures/Skyboxes/editor-default-sky.png">
+    <gridColor><item>0.4</item><item>0.4</item><item>0.4</item></gridColor>
+    <gridOriginColor><item>0.25</item><item>0.5</item><item>0.85</item></gridOriginColor>
+    <ambientColor><item>0.12</item><item>0.13</item><item>0.16</item></ambientColor>
+  </settings>
+  <objects>
+    <item name="Walk Camera" enabled="true">
+      <transform>
+        <Transform.position><item>9</item><item>5.5</item><item>-9</item></Transform.position>
+        <Transform.rotation><item>0.24</item><item>-0.55</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Camera Camera.active="true" Camera.useTransformRotation="true" Camera.fov="55" Camera.near="0.01" Camera.far="150" Camera.orthographic="false" Camera.orthographicSize="5">
+          <Camera.target><item>0</item><item>0.8</item><item>-6</item></Camera.target>
+          <Camera.up><item>0</item><item>1</item><item>0</item></Camera.up>
+        </components:Camera>
+      </components>
+      <children />
+    </item>
+    <item name="Ragdoll Sun" enabled="true">
+      <transform>
+        <Transform.position><item>-3</item><item>7</item><item>-4</item></Transform.position>
+        <Transform.rotation><item>0.65</item><item>-0.6</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Light Light.lightType="1" Light.intensity="2" Light.range="30" Light.falloff="2" Light.baked="false" Light.castsShadows="true" Light.shadowStrength="1" Light.shadowDepthBias="0.0015" Light.shadowNormalBias="0.01" Light.shadowResolutionScale="1" Light.shadowFilterScale="1">
+          <Light.color><item>1</item><item>0.9</item><item>0.76</item></Light.color>
+        </components:Light>
+      </components>
+      <children />
+    </item>
+    <item name="Walk Floor A" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>-0.15</item><item>-8</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>16</item><item>0.3</item><item>48</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" />
+        <components:Material Material.shininess="20" Material.metallicFactor="0.05" Material.roughnessFactor="0.8" Material.materialAsset="Assets/Materials/diagnostic_cube.material">
+          <Material.diffuse><item>0.2</item><item>0.24</item><item>0.3</item></Material.diffuse>
+          <Material.ambient><item>0.04</item><item>0.05</item><item>0.07</item></Material.ambient>
+          <Material.specular><item>0.25</item><item>0.25</item><item>0.28</item></Material.specular>
+        </components:Material>
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1">
+          <PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size><item>1</item><item>1</item><item>1</item></PrimitiveObjectCollider.size>
+        </components:PrimitiveObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0.85" RigidBody.restitution="0" />
+      </components>
+      <children />
+    </item>
+    <item name="Walk Floor B" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>-0.15</item><item>-56</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>16</item><item>0.3</item><item>48</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" />
+        <components:Material Material.shininess="20" Material.metallicFactor="0.05" Material.roughnessFactor="0.8" Material.materialAsset="Assets/Materials/diagnostic_cube.material">
+          <Material.diffuse><item>0.2</item><item>0.24</item><item>0.3</item></Material.diffuse>
+          <Material.ambient><item>0.04</item><item>0.05</item><item>0.07</item></Material.ambient>
+          <Material.specular><item>0.25</item><item>0.25</item><item>0.28</item></Material.specular>
+        </components:Material>
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" />
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.useGravity="false" RigidBody.friction="0.85" />
+      </components>
+      <children />
+    </item>
+    <item prefab="Assets/Prefabs/Fox/FoxRagdoll.prefab">
+      <transform>
+        <Transform.position><item>0</item><item>-0.07</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>3.14159</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>0.045</item><item>0.045</item><item>0.045</item></Transform.scale>
+      </transform>
+    </item>
+    <item name="Low Walk Rise" enabled="true">
+      <transform>
+        <Transform.position><item>-0.65</item><item>0.06</item><item>-4</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>2.8</item><item>0.12</item><item>2.2</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" />
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" />
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.useGravity="false" />
+      </components>
+      <children />
+    </item>
+    <item name="High Walk Rise" enabled="true">
+      <transform>
+        <Transform.position><item>0.65</item><item>0.12</item><item>-8</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>2.8</item><item>0.24</item><item>2.4</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" />
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" />
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.useGravity="false" />
+      </components>
+      <children />
+    </item>
+    <item name="Uneven Walk Rise" enabled="true">
+      <transform>
+        <Transform.position><item>-0.4</item><item>0.09</item><item>-12</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>2.4</item><item>0.18</item><item>2.8</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" />
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" />
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.useGravity="false" />
+      </components>
+      <children />
+    </item>
+    <item name="Fox Procedural Walk Controller" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>0</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:FoxProceduralWalk FoxProceduralWalk.foxObjectName="Fox" FoxProceduralWalk.cameraObjectName="Walk Camera" FoxProceduralWalk.animationClip="Walk" FoxProceduralWalk.forwardSpeed="2.67" FoxProceduralWalk.strideDistance="2.7" FoxProceduralWalk.cameraFollowDelayDistance="2" FoxProceduralWalk.bodyClearance="0.2" FoxProceduralWalk.obstacleRepeatDistance="16" FoxProceduralWalk.floorTileLength="48" />
+      </components>
+      <children />
+    </item>
+  </objects>
+</Scene>

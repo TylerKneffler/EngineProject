@@ -3,7 +3,11 @@
 #include "Core/Component.h"
 #include "Core/PropertyMacros.h"
 #include <glm/glm.hpp>
+#include <memory>
 #include <string>
+
+namespace Engine::Physics { class Physics; class BulletPhysicsAdapter; }
+namespace Engine::Physics { struct PhysicsComponentState; }
 
 namespace Engine::Components
 {
@@ -46,7 +50,7 @@ public:
     bool selfCollision = false;
 
     // Uses rigid-body contacts to squash and recover the rendered mesh without
-    // creating a second, competing Bullet soft body on the same object.
+    // creating a second, competing soft body on the same object.
     PROPERTY(Inspector, EditAnywhere, Category = "Cloth | Collision Morph")
     bool collisionMorph = false;
     PROPERTY(Inspector, EditAnywhere, Category = "Cloth | Collision Morph", ClampMin = "0")
@@ -79,6 +83,7 @@ public:
 
 private:
     friend class Engine::Physics::Physics;
+    friend class Engine::Physics::BulletPhysicsAdapter;
     bool EnsureSoftBody();
     bool EnsureCollisionMorph();
     void DestroySoftBody(bool restoreMesh);
@@ -88,8 +93,12 @@ private:
     void NotifyRigidBodyCollision(const glm::vec3& worldNormal,
         const glm::vec3& worldPoint, float impulse);
     void UpdateCollisionMorph(float deltaTime);
+    void NativeResetSimulation();
+    bool NativeIsSimulating() const;
 
     struct Impl;
+    static std::unique_ptr<Engine::Physics::PhysicsComponentState> MakeBulletState();
+    void BindBulletState(Engine::Physics::PhysicsComponentState* state);
     Impl* m_impl = nullptr;
 };
 }

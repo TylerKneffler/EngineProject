@@ -136,14 +136,21 @@ void ImGuiMainMenu::DrawViewsMenu(EditorState& state) const
 void ImGuiMainMenu::DrawPlayControls(
     PlayState playState, GameBuildManager* buildManager) const
 {
-    constexpr float buttonWidth = 60.f;
-    constexpr float doubleButtonWidth = buttonWidth * 2.f + 4.f;
+    constexpr float buttonWidth = 72.f;
+    constexpr float doubleButtonWidth = buttonWidth * 2.f + 6.f;
     const float barWidth = ImGui::GetWindowWidth();
 
     if (playState == PlayState::Stopped || playState == PlayState::BuildFailed)
     {
         ImGui::SetCursorPosX((barWidth - buttonWidth) * 0.5f);
-        if (ImGui::Button("Play", {buttonWidth, 0.f}) && buildManager)
+        const ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
+        ImGui::PushStyleColor(ImGuiCol_Button,
+            {accent.x * .50f, accent.y * .50f, accent.z * .50f, 1.f});
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+            {accent.x * .75f, accent.y * .75f, accent.z * .75f, 1.f});
+        const bool start = ImGui::Button("Play", {buttonWidth, 0.f});
+        ImGui::PopStyleColor(2);
+        if (start && buildManager)
             buildManager->PlayInEditor();
         if (playState == PlayState::BuildFailed)
         {
@@ -163,7 +170,7 @@ void ImGuiMainMenu::DrawPlayControls(
         ImGui::SetCursorPosX((barWidth - doubleButtonWidth) * 0.5f);
         if (ImGui::Button("Pause", {buttonWidth, 0.f}) && buildManager)
             buildManager->Pause();
-        ImGui::SameLine(0.f, 4.f);
+        ImGui::SameLine(0.f, 6.f);
         if (ImGui::Button("Stop", {buttonWidth, 0.f}) && buildManager)
             buildManager->Stop();
     }
@@ -172,7 +179,7 @@ void ImGuiMainMenu::DrawPlayControls(
         ImGui::SetCursorPosX((barWidth - doubleButtonWidth) * 0.5f);
         if (ImGui::Button("Resume", {buttonWidth, 0.f}) && buildManager)
             buildManager->Resume();
-        ImGui::SameLine(0.f, 4.f);
+        ImGui::SameLine(0.f, 6.f);
         if (ImGui::Button("Stop", {buttonWidth, 0.f}) && buildManager)
             buildManager->Stop();
     }

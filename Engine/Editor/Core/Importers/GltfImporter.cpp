@@ -653,11 +653,14 @@ Engine::Model::ModelImportResult GltfImporter::Import(
             }
         }
 
+        Engine::Components::AnimationManager* manager = asset.animations.empty()
+            ? nullptr : prefabRoot->AddComponent<Engine::Components::AnimationManager>();
+        if (manager) manager->clips.reserve(asset.animations.size());
         for (size_t animationIndex = 0; animationIndex < asset.animations.size(); ++animationIndex)
         {
             const auto& importedAnimation = asset.animations[animationIndex];
-            Engine::Components::Animation* animation = prefabRoot->AddComponent<Engine::Components::Animation>();
-            animation->clipName = importedAnimation.name.empty()
+            Engine::Model::AnimationClip animation;
+            animation.clipName = importedAnimation.name.empty()
                 ? "Animation " + std::to_string(animationIndex + 1)
                 : std::string(importedAnimation.name);
             for (const auto& importedChannel : importedAnimation.channels)
@@ -691,7 +694,7 @@ Engine::Model::ModelImportResult GltfImporter::Import(
                 }
                 channel.times.resize(inputAccessor.count);
                 fastgltf::copyFromAccessor<float>(asset, inputAccessor, channel.times.data());
-                if (!channel.times.empty()) animation->duration = std::max(animation->duration, channel.times.back());
+                if (!channel.times.empty()) animation.duration = std::max(animation.duration, channel.times.back());
                 if (channel.path == Engine::Model::AnimationChannel::Path::Weights)
                 {
                     channel.values.resize(outputAccessor.count);
@@ -713,14 +716,11 @@ Engine::Model::ModelImportResult GltfImporter::Import(
                     for (const auto& value : values)
                         channel.values.insert(channel.values.end(), { value.x(), value.y(), value.z() });
                 }
-                animation->channels.push_back(std::move(channel));
+                animation.channels.push_back(std::move(channel));
             }
+            manager->clips.push_back(std::move(animation));
         }
-        if (!asset.animations.empty())
-        {
-            Engine::Components::AnimationManager* manager = prefabRoot->AddComponent<Engine::Components::AnimationManager>();
-            manager->clip = prefabRoot->GetComponent<Engine::Components::Animation>()->clipName;
-        }
+        if (manager) manager->clip = manager->clips.front().clipName;
 
         ::Engine::Components::Model* modelComponent =
             prefabRoot->AddComponent<::Engine::Components::Model>();

@@ -2,6 +2,7 @@
 #include "Core/Audio/Audio.h"
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
 #include "Core/Physics/Physics.h"
+#include "Core/Physics/IPhysicsAdapter.h"
 #include "Core/Renderers/UIRenderer.h"
 #include <algorithm>
 #include <cmath>
@@ -37,9 +38,16 @@ bool ContainsObject(const Engine::Core::Object* root,
 }
 
 Scene::Scene()
-    : m_physics(std::make_unique<Engine::Physics::Physics>(*this))
-    , m_audio(std::make_unique<Engine::Audio::Audio>(*this))
+    : Scene([](Scene& owner)
+        { return Engine::Physics::CreateBulletPhysicsAdapter(owner); })
 {
+}
+
+Scene::Scene(PhysicsAdapterFactory physicsAdapterFactory)
+{
+    m_physics = std::make_unique<Engine::Physics::Physics>(
+        *this, physicsAdapterFactory ? physicsAdapterFactory(*this) : nullptr);
+    m_audio = std::make_unique<Engine::Audio::Audio>(*this);
 }
 
 Scene::~Scene()
@@ -370,6 +378,10 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
     };
     collect(obj);
 
+    if (std::find(objectsToRemove.begin(), objectsToRemove.end(),
+            m_editorCameraFollowTarget) != objectsToRemove.end())
+        StopEditorCameraFollow();
+
     // Sever external links while every endpoint and hierarchy path is still
     // valid. Component destructors then only need to clear local state.
     for (Engine::Core::Object* object : objectsToRemove)
@@ -401,6 +413,7 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
         m_previewObject = nullptr;
     }
 
+    m_editorSelectedMesh = nullptr;
     m_objects.erase(
         std::remove_if(
             m_objects.begin(),
@@ -473,6 +486,7 @@ void Scene::ClearObjects()
             object->OwnerScene = nullptr;
     m_objects.clear();
     m_selectedObject = nullptr;
+    m_editorSelectedMesh = nullptr;
     m_previewObject = nullptr;
     NotifyStructureChanged();
 }

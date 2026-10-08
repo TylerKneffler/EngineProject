@@ -19,7 +19,7 @@ inline EditorUiObjectIcon ComponentIconForType(std::string_view type)
         type == "UIText" || type == "UIButton")
         return EditorUiObjectIcon::UserInterface;
     if (type == "Mesh" || type == "Model" || type == "SkinnedMesh" ||
-        type == "Material" || type == "Animation" ||
+        type == "Material" ||
         type == "AnimationManager" || type == "Skeleton")
         return EditorUiObjectIcon::Mesh;
     if (type == "RigidBody" || type == "Cloth" ||

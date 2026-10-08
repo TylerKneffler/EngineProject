@@ -10,6 +10,7 @@ PrimitiveObjectCollider::PrimitiveObjectCollider()
     RegisterField("radius", radius, "Shape");
     RegisterField("height", height, "Shape");
     RegisterField("alignToBoneChild", alignToBoneChild, "Shape");
+    RegisterField("fitToSkinnedMesh", fitToSkinnedMesh, "Shape");
     RegisterField("childBone", childBone, "Shape");
 }
 }

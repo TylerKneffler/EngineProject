@@ -1,4 +1,5 @@
 #include "Core/Physics/Physics.h"
+#include "Core/Physics/IPhysicsAdapter.h"
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
 #include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
@@ -16,16 +17,16 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
 namespace Engine::Components
 {
-struct Engine::Components::RigidBody::Impl
+struct Engine::Components::RigidBody::Impl final : Engine::Physics::PhysicsComponentState
 {
     Engine::Scene::Scene* scene = nullptr;
     uint64_t configurationRevision = 0;
+    uint64_t bodyGeneration = 0;
     glm::vec3 worldScale{};
     std::vector<std::pair<const Engine::Components::Collider*, uint64_t>> colliders;
     const Engine::Components::Mesh* ownerMesh = nullptr;
@@ -45,11 +46,21 @@ struct Engine::Components::RigidBody::Impl
     std::vector<std::unique_ptr<btTriangleMesh>> triangleMeshes;
     std::unique_ptr<btDefaultMotionState> motionState;
     std::unique_ptr<btRigidBody> body;
-    std::unordered_set<const Engine::Components::RigidBody*> currentOverlaps;
-    std::unordered_set<const Engine::Components::RigidBody*> previousOverlaps;
 };
 
-Engine::Components::RigidBody::RigidBody() : m_impl(new Impl())
+std::unique_ptr<Engine::Physics::PhysicsComponentState>
+Engine::Components::RigidBody::MakeBulletState()
+{
+    return std::make_unique<Impl>();
+}
+
+void Engine::Components::RigidBody::BindBulletState(
+    Engine::Physics::PhysicsComponentState* state)
+{
+    m_impl = static_cast<Impl*>(state);
+}
+
+Engine::Components::RigidBody::RigidBody()
 {
     SetTypeName("RigidBody");
     singlecomponent = true;
@@ -79,57 +90,54 @@ Engine::Components::RigidBody::RigidBody() : m_impl(new Impl())
 
 bool Engine::Components::RigidBody::IsOverlapping(const RigidBody* other) const
 {
-    if (!m_impl || !other)
+    if (!other)
         return false;
-    return m_impl->currentOverlaps.find(other) != m_impl->currentOverlaps.end();
+    return m_currentOverlaps.find(other) != m_currentOverlaps.end();
 }
 
 bool Engine::Components::RigidBody::DidBeginOverlap(const RigidBody* other) const
 {
-    if (!m_impl || !other)
+    if (!other)
         return false;
-    return m_impl->currentOverlaps.find(other) != m_impl->currentOverlaps.end() &&
-        m_impl->previousOverlaps.find(other) == m_impl->previousOverlaps.end();
+    return m_currentOverlaps.find(other) != m_currentOverlaps.end() &&
+        m_previousOverlaps.find(other) == m_previousOverlaps.end();
 }
 
 bool Engine::Components::RigidBody::DidEndOverlap(const RigidBody* other) const
 {
-    if (!m_impl || !other)
+    if (!other)
         return false;
-    return m_impl->currentOverlaps.find(other) == m_impl->currentOverlaps.end() &&
-        m_impl->previousOverlaps.find(other) != m_impl->previousOverlaps.end();
+    return m_currentOverlaps.find(other) == m_currentOverlaps.end() &&
+        m_previousOverlaps.find(other) != m_previousOverlaps.end();
 }
 
 std::vector<Engine::Components::RigidBody*> Engine::Components::RigidBody::GetOverlappingBodies() const
 {
     std::vector<Engine::Components::RigidBody*> overlaps;
-    if (!m_impl)
-        return overlaps;
-    overlaps.reserve(m_impl->currentOverlaps.size());
-    for (const Engine::Components::RigidBody* body : m_impl->currentOverlaps)
+    overlaps.reserve(m_currentOverlaps.size());
+    for (const Engine::Components::RigidBody* body : m_currentOverlaps)
         overlaps.push_back(const_cast<Engine::Components::RigidBody*>(body));
     return overlaps;
 }
 
 void Engine::Components::RigidBody::BeginOverlapFrame()
 {
-    if (!m_impl)
-        return;
-    m_impl->previousOverlaps = m_impl->currentOverlaps;
-    m_impl->currentOverlaps.clear();
+    m_previousOverlaps = m_currentOverlaps;
+    m_currentOverlaps.clear();
 }
 
 void Engine::Components::RigidBody::RegisterOverlap(const RigidBody* other)
 {
-    if (!m_impl || !other || other == this)
+    if (!other || other == this)
         return;
-    m_impl->currentOverlaps.insert(other);
+    m_currentOverlaps.insert(other);
 }
 
 Engine::Components::RigidBody::~RigidBody()
 {
-    DestroyBody();
-    delete m_impl;
+    if (Owner && Owner->GetScene())
+        Owner->GetScene()->GetPhysics().DestroyRigidBody(*this);
+    else DestroyBody();
 }
 
 bool Engine::Components::RigidBody::EnsureBody()
@@ -214,11 +222,24 @@ bool Engine::Components::RigidBody::EnsureBody()
     }
     const Engine::Components::Mesh* ownerMesh = usesOwnerMeshCollider
         ? Owner->GetComponent<Engine::Components::Mesh>() : nullptr;
+    const bool animatedGeometryMatches =
+        m_impl->animatedVertices.size() == animatedPositions.size() &&
+        std::equal(m_impl->animatedVertices.begin(),
+            m_impl->animatedVertices.end(), animatedPositions.begin(),
+            Engine::Physics::SameVector);
+    const auto sameScale = [](float first, float second)
+    {
+        return std::abs(first - second) <= 1e-6f *
+            std::max({ 1.f, std::abs(first), std::abs(second) });
+    };
+    const bool worldScaleMatches = sameScale(m_impl->worldScale.x, scale.x) &&
+        sameScale(m_impl->worldScale.y, scale.y) &&
+        sameScale(m_impl->worldScale.z, scale.z);
     bool configurationMatches = m_impl->body &&
         m_impl->configurationRevision == GetConfigurationRevision() &&
         m_impl->activePortalLocalMeshRevision ==
             m_impl->portalLocalMeshRevision &&
-        Engine::Physics::SameVector(m_impl->worldScale, scale) &&
+        worldScaleMatches &&
         m_impl->ownerMesh == ownerMesh &&
         m_impl->ownerMeshRevision ==
             (ownerMesh ? ownerMesh->GetConfigurationRevision() : 0) &&
@@ -227,11 +248,7 @@ bool Engine::Components::RigidBody::EnsureBody()
             ? animatedMesh->GetConfigurationRevision() : 0) &&
         m_impl->colliderSkeleton == colliderSkeleton &&
         m_impl->colliderSkeletonRevision == (colliderSkeleton
-            ? colliderSkeleton->GetConfigurationRevision() : 0) &&
-        m_impl->animatedVertices.size() == animatedPositions.size() &&
-        std::equal(m_impl->animatedVertices.begin(),
-            m_impl->animatedVertices.end(), animatedPositions.begin(),
-            Engine::Physics::SameVector);
+            ? colliderSkeleton->GetConfigurationRevision() : 0);
     size_t colliderIndex = 0;
     // The active portal piece replaces the shapes used by the body, but the
     // authored colliders still participate in configuration invalidation.
@@ -255,7 +272,110 @@ bool Engine::Components::RigidBody::EnsureBody()
     configurationMatches = configurationMatches &&
         colliderIndex == m_impl->colliders.size();
     if (configurationMatches)
-        return true;
+    {
+        if (animatedGeometryMatches) return true;
+        // Kinematic skinned triangle meshes retain their Bullet body while
+        // animation changes vertex positions. Refit the existing BVH instead
+        // of tearing down the body (and all of its contact state) each step.
+        if (Engine::Physics::IsKinematic(*this) && animatedCollider &&
+            !animatedPositions.empty() && m_impl->shapes.size() == 1 &&
+            m_impl->triangleMeshes.size() == 1 && m_impl->compound &&
+            m_impl->compound->getNumChildShapes() == 1)
+            if (auto* bvh = dynamic_cast<btBvhTriangleMeshShape*>(
+                    m_impl->shapes.front().get()))
+            {
+                btTriangleMesh* triangleMesh =
+                    m_impl->triangleMeshes.front().get();
+                auto& indexed = triangleMesh->getIndexedMeshArray();
+                if (triangleMesh->getUse4componentVertices() &&
+                    indexed.size() == 1 &&
+                    indexed[0].m_numVertices ==
+                        static_cast<int>(animatedPositions.size()) &&
+                    indexed[0].m_vertexStride == sizeof(btVector3))
+                {
+                    unsigned char* vertices = const_cast<unsigned char*>(
+                        indexed[0].m_vertexBase);
+                    btVector3 minimum(BT_LARGE_FLOAT, BT_LARGE_FLOAT,
+                        BT_LARGE_FLOAT);
+                    btVector3 maximum(-BT_LARGE_FLOAT, -BT_LARGE_FLOAT,
+                        -BT_LARGE_FLOAT);
+                    for (size_t index = 0;
+                        index < animatedPositions.size(); ++index)
+                    {
+                        const glm::vec3& point = animatedPositions[index];
+                        const btVector3 vertex(point.x * scale.x,
+                            point.y * scale.y, point.z * scale.z);
+                        *reinterpret_cast<btVector3*>(vertices +
+                            index * indexed[0].m_vertexStride) = vertex;
+                        minimum.setMin(vertex);
+                        maximum.setMax(vertex);
+                    }
+                    bvh->refitTree(minimum, maximum);
+                    m_impl->compound->recalculateLocalAabb();
+                    auto* world = Engine::Physics::StateFor(
+                        m_impl->scene).world.get();
+                    world->updateSingleAabb(m_impl->body.get());
+                    btDispatcher* dispatcher = world->getDispatcher();
+                    for (int manifoldIndex = 0;
+                        manifoldIndex < dispatcher->getNumManifolds();
+                        ++manifoldIndex)
+                    {
+                        btPersistentManifold* manifold =
+                            dispatcher->getManifoldByIndexInternal(
+                                manifoldIndex);
+                        if (manifold->getBody0() == m_impl->body.get() ||
+                            manifold->getBody1() == m_impl->body.get())
+                            dispatcher->clearManifold(manifold);
+                    }
+                    m_impl->animatedVertices = std::move(animatedPositions);
+                    return true;
+                }
+            }
+        // A skinned dynamic convex hull can change every fixed step. Keep its
+        // Bullet body and velocity while refitting the hull. Contact points
+        // are invalidated below because their old surface positions are stale.
+        if (Engine::Physics::IsDynamic(*this) && animatedCollider &&
+            !animatedPositions.empty() && m_impl->shapes.size() == 1 &&
+            m_impl->compound && m_impl->compound->getNumChildShapes() == 1)
+            if (auto* hull = dynamic_cast<btConvexHullShape*>(
+                    m_impl->shapes.front().get());
+                hull && hull->getNumPoints() ==
+                    static_cast<int>(animatedPositions.size()))
+            {
+                btVector3* points = hull->getUnscaledPoints();
+                for (size_t index = 0; index < animatedPositions.size(); ++index)
+                {
+                    const glm::vec3& vertex = animatedPositions[index];
+                    points[index] = btVector3(vertex.x * scale.x,
+                        vertex.y * scale.y, vertex.z * scale.z);
+                }
+                hull->recalcLocalAabb();
+                m_impl->compound->recalculateLocalAabb();
+                btVector3 inertia(0.f, 0.f, 0.f);
+                const btScalar bodyMass = std::max(0.001f, mass);
+                m_impl->compound->calculateLocalInertia(bodyMass, inertia);
+                m_impl->body->setMassProps(bodyMass, inertia);
+                m_impl->body->updateInertiaTensor();
+                auto* world = Engine::Physics::StateFor(m_impl->scene).world.get();
+                world->updateSingleAabb(m_impl->body.get());
+                // Bullet keeps contact points across steps. A refitted skin
+                // can move its support vertices while those old points still
+                // appear valid, allowing new low vertices through a floor.
+                btDispatcher* dispatcher = world->getDispatcher();
+                for (int manifoldIndex = 0;
+                    manifoldIndex < dispatcher->getNumManifolds();
+                    ++manifoldIndex)
+                {
+                    btPersistentManifold* manifold =
+                        dispatcher->getManifoldByIndexInternal(manifoldIndex);
+                    if (manifold->getBody0() == m_impl->body.get() ||
+                        manifold->getBody1() == m_impl->body.get())
+                        dispatcher->clearManifold(manifold);
+                }
+                m_impl->animatedVertices = std::move(animatedPositions);
+                return true;
+            }
+    }
 
     // Runtime mesh cuts and collider edits rebuild the Bullet body. Preserve
     // its live kinematics rather than restoring authoring-time initial values;
@@ -472,6 +592,7 @@ bool Engine::Components::RigidBody::EnsureBody()
     btRigidBody::btRigidBodyConstructionInfo info(bodyMass, m_impl->motionState.get(),
         m_impl->compound.get(), inertia);
     m_impl->body = std::make_unique<btRigidBody>(info);
+    ++m_impl->bodyGeneration;
     m_impl->body->setUserPointer(this);
     m_impl->body->setCollisionFlags(m_impl->body->getCollisionFlags() |
         btCollisionObject::CF_CUSTOM_MATERIAL_CALLBACK);
@@ -516,6 +637,10 @@ bool Engine::Components::RigidBody::EnsureBody()
 
 void Engine::Components::RigidBody::DestroyBody()
 {
+    m_currentOverlaps.clear();
+    m_previousOverlaps.clear();
+    m_isColliding = false;
+    m_isGrounded = false;
     if (!m_impl) return;
     if (m_impl->body && m_impl->scene)
     {
@@ -539,10 +664,6 @@ void Engine::Components::RigidBody::DestroyBody()
     m_impl->colliderSkeletonRevision = 0;
     m_impl->ownerMeshRevision = 0;
     m_impl->activePortalLocalMeshRevision = 0;
-    m_impl->currentOverlaps.clear();
-    m_impl->previousOverlaps.clear();
-    m_isColliding = false;
-    m_isGrounded = false;
 }
 
 void Engine::Components::RigidBody::ApplyBodySettings()
@@ -570,7 +691,7 @@ void* Engine::Components::RigidBody::GetNativeCollisionObjectForPhysics() const
     return m_impl && m_impl->body ? m_impl->body.get() : nullptr;
 }
 
-bool Engine::Components::RigidBody::GetWorldCollisionBounds(
+bool Engine::Components::RigidBody::NativeGetWorldCollisionBounds(
     glm::vec3& minimum, glm::vec3& maximum) const
 {
     if (!m_impl || !m_impl->body || !m_impl->body->getCollisionShape())
@@ -586,6 +707,27 @@ bool Engine::Components::RigidBody::GetWorldCollisionBounds(
         std::isfinite(maximum.y) && std::isfinite(maximum.z);
 }
 
+bool Engine::Components::RigidBody::NativeGetWorldMeshHullVertex(
+    size_t index, glm::vec3& position) const
+{
+    if (!m_impl || !m_impl->body || !m_impl->compound) return false;
+    if (m_impl->compound->getNumChildShapes() != 1) return false;
+    const auto* hull = dynamic_cast<const btConvexHullShape*>(
+        m_impl->compound->getChildShape(0));
+    if (!hull || index >= static_cast<size_t>(hull->getNumPoints()))
+        return false;
+    const btVector3 world = m_impl->body->getWorldTransform() *
+        m_impl->compound->getChildTransform(0) *
+        hull->getUnscaledPoints()[index];
+    position = Engine::Physics::ToGlm(world);
+    return true;
+}
+
+uint64_t Engine::Components::RigidBody::NativeGetPhysicsBodyGeneration() const
+{
+    return m_impl ? m_impl->bodyGeneration : 0;
+}
+
 void Engine::Components::RigidBody::SyncBodyFromTransform()
 {
     if (!m_impl || !m_impl->body || !Owner) return;
@@ -599,14 +741,14 @@ void Engine::Components::RigidBody::SyncBodyFromTransform()
     m_impl->syncedWorldRevision = worldRevision;
 }
 
-void Engine::Components::RigidBody::NotifyEditorTransformChanged()
+void Engine::Components::RigidBody::NativeNotifyEditorTransformChanged()
 {
     m_editorTransformChanged = true;
     if (EnsureBody())
         SyncBodyFromTransform();
 }
 
-void Engine::Components::RigidBody::SetPortalLocalMeshCollider(
+void Engine::Components::RigidBody::NativeSetPortalLocalMeshCollider(
     const void* instanceKey, const std::vector<glm::vec3>& localVertices)
 {
     if (!m_impl)
@@ -634,7 +776,7 @@ void Engine::Components::RigidBody::SetPortalLocalMeshCollider(
     EnsureBody();
 }
 
-void Engine::Components::RigidBody::ClearPortalLocalMeshCollider(
+void Engine::Components::RigidBody::NativeClearPortalLocalMeshCollider(
     const void* instanceKey)
 {
     if (!m_impl || !m_impl->portalLocalMeshKey ||
@@ -649,7 +791,7 @@ void Engine::Components::RigidBody::ClearPortalLocalMeshCollider(
     EnsureBody();
 }
 
-bool Engine::Components::RigidBody::HasPortalLocalMeshCollider() const
+bool Engine::Components::RigidBody::NativeHasPortalLocalMeshCollider() const
 {
     return m_impl && m_impl->portalLocalMeshKey &&
         m_impl->portalLocalMeshVertices.size() >= 3u;
@@ -684,22 +826,167 @@ void Engine::Components::RigidBody::SyncTransformFromBody()
 void Engine::Components::RigidBody::Start() {}
 void Engine::Components::RigidBody::Update() {}
 void Engine::Components::RigidBody::Enabled() {}
-void Engine::Components::RigidBody::Disabled() { DestroyBody(); }
-void Engine::Components::RigidBody::OnDestroy() { DestroyBody(); }
+void Engine::Components::RigidBody::Disabled()
+{
+    if (Owner && Owner->GetScene())
+        Owner->GetScene()->GetPhysics().DestroyRigidBody(*this);
+    else DestroyBody();
+}
+void Engine::Components::RigidBody::OnDestroy() { Disabled(); }
 
-void Engine::Components::RigidBody::AddForce(const glm::vec3& force)
+namespace
+{
+Engine::Physics::Physics* PhysicsFor(
+    const Engine::Components::RigidBody& body)
+{
+    return body.Owner && body.Owner->GetScene()
+        ? &body.Owner->GetScene()->GetPhysics() : nullptr;
+}
+}
+
+void Engine::Components::RigidBody::AddForce(const glm::vec3& value)
+{
+    if (auto* adapter = PhysicsFor(*this))
+        adapter->ApplyRigidBodyAction(*this,
+            Engine::Physics::RigidBodyAction::AddForce, value, {});
+    else NativeAddForce(value);
+}
+void Engine::Components::RigidBody::AddTorque(const glm::vec3& value)
+{
+    if (auto* adapter = PhysicsFor(*this))
+        adapter->ApplyRigidBodyAction(*this,
+            Engine::Physics::RigidBodyAction::AddTorque, value, {});
+    else NativeAddTorque(value);
+}
+void Engine::Components::RigidBody::AddImpulse(const glm::vec3& value)
+{
+    if (auto* adapter = PhysicsFor(*this))
+        adapter->ApplyRigidBodyAction(*this,
+            Engine::Physics::RigidBodyAction::AddImpulse, value, {});
+    else NativeAddImpulse(value);
+}
+void Engine::Components::RigidBody::AddAngularImpulse(const glm::vec3& value)
+{
+    if (auto* adapter = PhysicsFor(*this))
+        adapter->ApplyRigidBodyAction(*this,
+            Engine::Physics::RigidBodyAction::AddAngularImpulse, value, {});
+    else NativeAddAngularImpulse(value);
+}
+void Engine::Components::RigidBody::SetWorldPosition(const glm::vec3& value)
+{
+    if (auto* adapter = PhysicsFor(*this))
+        adapter->ApplyRigidBodyAction(*this,
+            Engine::Physics::RigidBodyAction::SetWorldPosition, value, {});
+    else NativeSetWorldPosition(value);
+}
+void Engine::Components::RigidBody::SetWorldPose(
+    const glm::vec3& value, const glm::quat& rotation)
+{
+    if (auto* adapter = PhysicsFor(*this))
+        adapter->ApplyRigidBodyAction(*this,
+            Engine::Physics::RigidBodyAction::SetWorldPose, value, rotation);
+    else NativeSetWorldPose(value, rotation);
+}
+void Engine::Components::RigidBody::SetLinearVelocity(const glm::vec3& value)
+{
+    if (auto* adapter = PhysicsFor(*this))
+        adapter->ApplyRigidBodyAction(*this,
+            Engine::Physics::RigidBodyAction::SetLinearVelocity, value, {});
+    else NativeSetLinearVelocity(value);
+}
+void Engine::Components::RigidBody::SetAngularVelocity(const glm::vec3& value)
+{
+    if (auto* adapter = PhysicsFor(*this))
+        adapter->ApplyRigidBodyAction(*this,
+            Engine::Physics::RigidBodyAction::SetAngularVelocity, value, {});
+    else NativeSetAngularVelocity(value);
+}
+void Engine::Components::RigidBody::SetGravityDirection(const glm::vec3& value)
+{
+    if (auto* adapter = PhysicsFor(*this))
+        adapter->ApplyRigidBodyAction(*this,
+            Engine::Physics::RigidBodyAction::SetGravityDirection, value, {});
+    else NativeSetGravityDirection(value);
+}
+glm::vec3 Engine::Components::RigidBody::GetLinearVelocity() const
+{
+    if (auto* adapter = PhysicsFor(*this))
+        return adapter->ReadRigidBodyVector(*this,
+            Engine::Physics::RigidBodyVector::LinearVelocity);
+    return NativeGetLinearVelocity();
+}
+glm::vec3 Engine::Components::RigidBody::GetAngularVelocity() const
+{
+    if (auto* adapter = PhysicsFor(*this))
+        return adapter->ReadRigidBodyVector(*this,
+            Engine::Physics::RigidBodyVector::AngularVelocity);
+    return NativeGetAngularVelocity();
+}
+
+bool Engine::Components::RigidBody::GetWorldCollisionBounds(
+    glm::vec3& minimum, glm::vec3& maximum) const
+{
+    if (auto* adapter = PhysicsFor(*this))
+        return adapter->GetRigidBodyBounds(*this, minimum, maximum);
+    return NativeGetWorldCollisionBounds(minimum, maximum);
+}
+bool Engine::Components::RigidBody::GetWorldMeshHullVertex(
+    size_t index, glm::vec3& position) const
+{
+    if (auto* adapter = PhysicsFor(*this))
+        return adapter->GetRigidBodyHullVertex(*this, index, position);
+    return NativeGetWorldMeshHullVertex(index, position);
+}
+uint64_t Engine::Components::RigidBody::GetPhysicsBodyGeneration() const
+{
+    if (auto* adapter = PhysicsFor(*this))
+        return adapter->GetRigidBodyGeneration(*this);
+    return NativeGetPhysicsBodyGeneration();
+}
+void Engine::Components::RigidBody::NotifyEditorTransformChanged()
+{
+    if (auto* adapter = PhysicsFor(*this))
+        adapter->NotifyRigidBodyTransformChanged(*this);
+    else NativeNotifyEditorTransformChanged();
+}
+void Engine::Components::RigidBody::SetPortalLocalMeshCollider(
+    const void* key, const std::vector<glm::vec3>& vertices)
+{
+    if (auto* adapter = PhysicsFor(*this))
+        adapter->SetPortalLocalMeshCollider(*this, key, vertices);
+    else NativeSetPortalLocalMeshCollider(key, vertices);
+}
+void Engine::Components::RigidBody::ClearPortalLocalMeshCollider(
+    const void* key)
+{
+    if (auto* adapter = PhysicsFor(*this))
+        adapter->ClearPortalLocalMeshCollider(*this, key);
+    else NativeClearPortalLocalMeshCollider(key);
+}
+bool Engine::Components::RigidBody::HasPortalLocalMeshCollider() const
+{
+    if (auto* adapter = PhysicsFor(*this))
+        return adapter->HasPortalLocalMeshCollider(*this);
+    return NativeHasPortalLocalMeshCollider();
+}
+
+void Engine::Components::RigidBody::NativeAddForce(const glm::vec3& force)
 {
     if (EnsureBody()) { m_impl->body->activate(true); m_impl->body->applyCentralForce(Engine::Physics::ToBullet(force)); }
 }
-void Engine::Components::RigidBody::AddTorque(const glm::vec3& torque)
+void Engine::Components::RigidBody::NativeAddTorque(const glm::vec3& torque)
 {
     if (EnsureBody()) { m_impl->body->activate(true); m_impl->body->applyTorque(Engine::Physics::ToBullet(torque)); }
 }
-void Engine::Components::RigidBody::AddImpulse(const glm::vec3& impulse)
+void Engine::Components::RigidBody::NativeAddImpulse(const glm::vec3& impulse)
 {
     if (EnsureBody()) { m_impl->body->activate(true); m_impl->body->applyCentralImpulse(Engine::Physics::ToBullet(impulse)); }
 }
-void Engine::Components::RigidBody::SetWorldPosition(const glm::vec3& worldPosition)
+void Engine::Components::RigidBody::NativeAddAngularImpulse(const glm::vec3& impulse)
+{
+    if (EnsureBody()) { m_impl->body->activate(true); m_impl->body->applyTorqueImpulse(Engine::Physics::ToBullet(impulse)); }
+}
+void Engine::Components::RigidBody::NativeSetWorldPosition(const glm::vec3& worldPosition)
 {
     if (!Owner)
         return;
@@ -727,7 +1014,7 @@ void Engine::Components::RigidBody::SetWorldPosition(const glm::vec3& worldPosit
 
     m_impl->syncedWorldRevision = Owner->transform.GetWorldRevision();
 }
-void Engine::Components::RigidBody::SetWorldPose(const glm::vec3& worldPosition,
+void Engine::Components::RigidBody::NativeSetWorldPose(const glm::vec3& worldPosition,
     const glm::quat& worldRotation)
 {
     if (!Owner)
@@ -764,15 +1051,15 @@ void Engine::Components::RigidBody::SetWorldPose(const glm::vec3& worldPosition,
 
     m_impl->syncedWorldRevision = Owner->transform.GetWorldRevision();
 }
-void Engine::Components::RigidBody::SetLinearVelocity(const glm::vec3& velocity)
+void Engine::Components::RigidBody::NativeSetLinearVelocity(const glm::vec3& velocity)
 {
     if (EnsureBody()) { m_impl->body->activate(true); m_impl->body->setLinearVelocity(Engine::Physics::ToBullet(velocity)); }
 }
-void Engine::Components::RigidBody::SetAngularVelocity(const glm::vec3& velocity)
+void Engine::Components::RigidBody::NativeSetAngularVelocity(const glm::vec3& velocity)
 {
     if (EnsureBody()) { m_impl->body->activate(true); m_impl->body->setAngularVelocity(Engine::Physics::ToBullet(velocity)); }
 }
-void Engine::Components::RigidBody::SetGravityDirection(const glm::vec3& direction)
+void Engine::Components::RigidBody::NativeSetGravityDirection(const glm::vec3& direction)
 {
     const float lengthSquared = glm::dot(direction, direction);
     gravityDirection = std::isfinite(lengthSquared) && lengthSquared > 1e-8f
@@ -786,11 +1073,11 @@ void Engine::Components::RigidBody::SetGravityDirection(const glm::vec3& directi
         m_impl->body->activate(true);
     }
 }
-glm::vec3 Engine::Components::RigidBody::GetLinearVelocity() const
+glm::vec3 Engine::Components::RigidBody::NativeGetLinearVelocity() const
 {
     return m_impl && m_impl->body ? Engine::Physics::ToGlm(m_impl->body->getLinearVelocity()) : glm::vec3(0.f);
 }
-glm::vec3 Engine::Components::RigidBody::GetAngularVelocity() const
+glm::vec3 Engine::Components::RigidBody::NativeGetAngularVelocity() const
 {
     return m_impl && m_impl->body ? Engine::Physics::ToGlm(m_impl->body->getAngularVelocity()) : glm::vec3(0.f);
 }

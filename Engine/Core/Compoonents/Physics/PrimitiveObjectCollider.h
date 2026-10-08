@@ -23,6 +23,10 @@ public:
     // direct child. Zero height uses the current bone-to-child distance.
     PROPERTY(Inspector, EditAnywhere, Category = "Collider")
     bool alignToBoneChild = false;
+    // In per-bone ragdolls, derive a convex proxy from skinned vertices
+    // influenced by the owning AnimationBone instead of the authored shape.
+    PROPERTY(Inspector, EditAnywhere, Category = "Collider")
+    bool fitToSkinnedMesh = false;
     PROPERTY(Inspector, EditAnywhere, Category = "Collider")
     std::string childBone;
 };

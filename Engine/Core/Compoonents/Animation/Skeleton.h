@@ -17,8 +17,8 @@ class Skeleton : public Engine::Core::Component
 public:
     Skeleton();
     ComponentReference modelReference { "Model" };
-    // PerBone uses collider components referenced by IKBone. MeshCollider uses
-    // one MeshObjectCollider on the skeleton root's RigidBody.
+    // PerBone uses IKBone colliders. MeshCollider uses one root collider.
+    // SkinnedBoneHulls uses IKBone colliders fitted to skin-weighted mesh.
     std::string colliderMode = "PerBone";
     ComponentReference meshColliderReference { "MeshObjectCollider" };
     // Add a bounded pose response to mapped contacts on a mesh-collider body.
@@ -27,6 +27,13 @@ public:
     float meshContactResponseStrength = 8.f;
     float meshContactDamping = 7.f;
     float meshContactMaxBend = 0.35f;
+    float meshImpactImpulseThreshold = 0.5f;
+    float meshIKGroundedGravityScale = 0.02f;
+    float meshIKTorqueLimitPerMass = 0.015f;
+    // Fallback pose solver for joints without active pose-only IK bodies.
+    // The root body owns translation and floor response; bones only rotate.
+    bool meshRagdollEnabled = false;
+    float meshRagdollGravityStrength = 3.f;
     bool showBones = true;
     unsigned skinIndex = 0;
     std::vector<unsigned> jointNodes;
@@ -46,6 +53,7 @@ public:
     bool UsesMeshCollider() const;
     void ApplyMeshContactResponse(float stepSeconds);
     void ResetMeshContactResponse();
+    uint64_t GetMeshIKTorqueEvents() const { return m_meshIKTorqueEvents; }
 
 private:
     struct ContactBoneState
@@ -57,6 +65,7 @@ private:
         bool hasAppliedPose = false;
     };
     std::unordered_map<AnimationBone*, ContactBoneState> m_contactBoneStates;
+    uint64_t m_meshIKTorqueEvents = 0;
     uint64_t JointBindingSignature() const;
     mutable Model* m_cachedModel = nullptr;
     mutable std::vector<Object*> m_cachedJoints;

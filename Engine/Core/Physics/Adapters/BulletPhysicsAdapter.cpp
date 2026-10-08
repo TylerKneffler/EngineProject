@@ -1,4 +1,4 @@
-#include "Core/Physics/Physics.h"
+#include "Core/Physics/Adapters/BulletPhysicsAdapter.h"
 #include "Core/Compoonents/Physics/Cloth.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Physics/MeshObjectCollider.h"
@@ -9,6 +9,7 @@
 #include "Core/Physics/Internal/PhysicsInternal.h"
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <memory>
 #include <cmath>
 #include <stdexcept>
@@ -34,6 +35,26 @@ bool SamePoints(const std::vector<glm::vec3>& first,
         }
     }
     return true;
+}
+
+uint64_t ContactIdentity(const btManifoldPoint& point,
+    const btCollisionObject* other)
+{
+    uint64_t hash = 1469598103934665603ull;
+    const auto mix = [&hash](uint64_t value)
+    {
+        hash ^= value;
+        hash *= 1099511628211ull;
+    };
+    mix(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(other)));
+    // Bullet's local manifold positions survive root translation and
+    // rotation. Quantization groups small contact-point drift across steps.
+    for (const btVector3& local : { point.m_localPointA,
+        point.m_localPointB })
+        for (int axis = 0; axis < 3; ++axis)
+            mix(static_cast<uint64_t>(static_cast<int64_t>(
+                std::llround(local[axis] * 100.f))));
+    return hash;
 }
 
 void AddPortalRimBox(btTriangleMesh& triangles, const glm::vec3& first,
@@ -73,7 +94,7 @@ void AddPortalRimBox(btTriangleMesh& triangles, const glm::vec3& first,
 }
 }
 
-struct Physics::Impl
+struct BulletPhysicsAdapter::Impl
 {
     explicit Impl(Engine::Scene::Scene& owner)
         : scene(&owner), state(std::make_unique<PhysicsWorldState>()) {}
@@ -99,11 +120,193 @@ struct Physics::Impl
     std::unordered_map<const void*, PortalMeshCollider> portalApertureColliders;
 };
 
-Physics::Physics(Engine::Scene::Scene& scene) : m_impl(new Impl(scene)) {}
-Physics::~Physics() { delete m_impl; }
-void* Physics::GetInternalState() { return m_impl ? m_impl->state.get() : nullptr; }
+BulletPhysicsAdapter::BulletPhysicsAdapter(Engine::Scene::Scene& scene) : m_impl(new Impl(scene)) {}
+BulletPhysicsAdapter::~BulletPhysicsAdapter() { delete m_impl; }
+PhysicsWorldState* BulletPhysicsAdapter::GetInternalState()
+{
+    return m_impl ? m_impl->state.get() : nullptr;
+}
 
-void Physics::ConfigureFixedStep(double seconds, uint32_t maximumSubsteps,
+std::unique_ptr<IPhysicsAdapter> CreateBulletPhysicsAdapter(
+    Engine::Scene::Scene& scene)
+{
+    return std::make_unique<BulletPhysicsAdapter>(scene);
+}
+
+void BulletPhysicsAdapter::EnsureRigidBodyState(
+    Engine::Components::RigidBody& body)
+{
+    if (m_componentStates.find(&body) != m_componentStates.end())
+        return;
+    auto state = Engine::Components::RigidBody::MakeBulletState();
+    body.BindBulletState(state.get());
+    m_componentStates.emplace(&body, std::move(state));
+}
+
+void BulletPhysicsAdapter::EnsureClothState(Engine::Components::Cloth& cloth)
+{
+    if (m_componentStates.find(&cloth) != m_componentStates.end())
+        return;
+    auto state = Engine::Components::Cloth::MakeBulletState();
+    cloth.BindBulletState(state.get());
+    m_componentStates.emplace(&cloth, std::move(state));
+}
+
+void BulletPhysicsAdapter::EnsureIKBoneState(Engine::Components::IKBone& bone)
+{
+    if (m_componentStates.find(&bone) != m_componentStates.end())
+        return;
+    auto state = Engine::Components::IKBone::MakeBulletState();
+    bone.BindBulletState(state.get());
+    m_componentStates.emplace(&bone, std::move(state));
+}
+
+void BulletPhysicsAdapter::ApplyRigidBodyAction(
+    Engine::Components::RigidBody& body, RigidBodyAction action,
+    const glm::vec3& value, const glm::quat& rotation)
+{
+    EnsureRigidBodyState(body);
+    switch (action)
+    {
+    case RigidBodyAction::AddForce: body.NativeAddForce(value); break;
+    case RigidBodyAction::AddTorque: body.NativeAddTorque(value); break;
+    case RigidBodyAction::AddImpulse: body.NativeAddImpulse(value); break;
+    case RigidBodyAction::AddAngularImpulse: body.NativeAddAngularImpulse(value); break;
+    case RigidBodyAction::SetWorldPosition: body.NativeSetWorldPosition(value); break;
+    case RigidBodyAction::SetWorldPose: body.NativeSetWorldPose(value, rotation); break;
+    case RigidBodyAction::SetLinearVelocity: body.NativeSetLinearVelocity(value); break;
+    case RigidBodyAction::SetAngularVelocity: body.NativeSetAngularVelocity(value); break;
+    case RigidBodyAction::SetGravityDirection: body.NativeSetGravityDirection(value); break;
+    }
+}
+
+glm::vec3 BulletPhysicsAdapter::ReadRigidBodyVector(
+    const Engine::Components::RigidBody& body, RigidBodyVector value) const
+{
+    switch (value)
+    {
+    case RigidBodyVector::LinearVelocity: return body.NativeGetLinearVelocity();
+    case RigidBodyVector::AngularVelocity: return body.NativeGetAngularVelocity();
+    }
+    return glm::vec3(0.f);
+}
+
+bool BulletPhysicsAdapter::GetRigidBodyBounds(
+    const Engine::Components::RigidBody& body,
+    glm::vec3& minimum, glm::vec3& maximum) const
+{
+    return body.NativeGetWorldCollisionBounds(minimum, maximum);
+}
+
+bool BulletPhysicsAdapter::GetRigidBodyHullVertex(
+    const Engine::Components::RigidBody& body, size_t index,
+    glm::vec3& position) const
+{
+    return body.NativeGetWorldMeshHullVertex(index, position);
+}
+
+uint64_t BulletPhysicsAdapter::GetRigidBodyGeneration(
+    const Engine::Components::RigidBody& body) const
+{
+    return body.NativeGetPhysicsBodyGeneration();
+}
+
+void BulletPhysicsAdapter::NotifyRigidBodyTransformChanged(
+    Engine::Components::RigidBody& body)
+{
+    EnsureRigidBodyState(body);
+    body.NativeNotifyEditorTransformChanged();
+}
+
+void BulletPhysicsAdapter::SetPortalLocalMeshCollider(
+    Engine::Components::RigidBody& body, const void* key,
+    const std::vector<glm::vec3>& vertices)
+{
+    EnsureRigidBodyState(body);
+    body.NativeSetPortalLocalMeshCollider(key, vertices);
+}
+
+void BulletPhysicsAdapter::ClearPortalLocalMeshCollider(
+    Engine::Components::RigidBody& body, const void* key)
+{
+    body.NativeClearPortalLocalMeshCollider(key);
+}
+
+bool BulletPhysicsAdapter::HasPortalLocalMeshCollider(
+    const Engine::Components::RigidBody& body) const
+{
+    return body.NativeHasPortalLocalMeshCollider();
+}
+
+void BulletPhysicsAdapter::DestroyRigidBody(Engine::Components::RigidBody& body)
+{
+    body.DestroyBody();
+    body.BindBulletState(nullptr);
+    m_componentStates.erase(&body);
+}
+
+bool BulletPhysicsAdapter::IsClothSimulating(
+    const Engine::Components::Cloth& cloth) const
+{
+    return cloth.NativeIsSimulating();
+}
+
+void BulletPhysicsAdapter::ResetCloth(Engine::Components::Cloth& cloth)
+{
+    EnsureClothState(cloth);
+    cloth.NativeResetSimulation();
+}
+
+void BulletPhysicsAdapter::DestroyCloth(Engine::Components::Cloth& cloth)
+{
+    cloth.DestroySoftBody(true);
+    cloth.BindBulletState(nullptr);
+    m_componentStates.erase(&cloth);
+}
+
+bool BulletPhysicsAdapter::IsIKBoneSimulating(
+    const Engine::Components::IKBone& bone) const
+{
+    return bone.NativeIsSimulating();
+}
+
+bool BulletPhysicsAdapter::IsIKBoneUsingSkinnedCollider(
+    const Engine::Components::IKBone& bone) const
+{
+    return bone.NativeIsUsingSkinnedCollider();
+}
+
+bool BulletPhysicsAdapter::GetIKBoneContactSeparation(
+    const Engine::Components::IKBone& bone,
+    const Engine::Components::RigidBody* other,
+    float& separation) const
+{
+    return bone.NativeGetContactSeparation(other, separation);
+}
+
+glm::vec3 BulletPhysicsAdapter::ApplyIKBoneMeshContactTorque(
+    Engine::Components::IKBone& bone,
+    const glm::vec3& torqueImpulse, float limitPerMass)
+{
+    EnsureIKBoneState(bone);
+    return bone.NativeApplyMeshContactTorque(torqueImpulse, limitPerMass);
+}
+
+void BulletPhysicsAdapter::ResetIKBone(Engine::Components::IKBone& bone)
+{
+    EnsureIKBoneState(bone);
+    bone.NativeResetSimulation();
+}
+
+void BulletPhysicsAdapter::DestroyIKBone(Engine::Components::IKBone& bone)
+{
+    bone.DestroyConstraint();
+    bone.DestroyBody();
+    bone.BindBulletState(nullptr);
+    m_componentStates.erase(&bone);
+}
+
+void BulletPhysicsAdapter::ConfigureFixedStep(double seconds, uint32_t maximumSubsteps,
     uint32_t solverIterations)
 {
     if (!std::isfinite(seconds) || seconds <= 0.0)
@@ -121,12 +324,12 @@ void Physics::ConfigureFixedStep(double seconds, uint32_t maximumSubsteps,
         static_cast<int>(solverIterations);
 }
 
-double Physics::GetFixedStep() const { return m_impl->fixedStepSeconds; }
-uint32_t Physics::GetMaximumSubsteps() const { return m_impl->maximumSubsteps; }
-uint32_t Physics::GetSolverIterations() const { return m_impl->solverIterations; }
-uint32_t Physics::GetLastSubstepCount() const { return m_impl->lastSubstepCount; }
+double BulletPhysicsAdapter::GetFixedStep() const { return m_impl->fixedStepSeconds; }
+uint32_t BulletPhysicsAdapter::GetMaximumSubsteps() const { return m_impl->maximumSubsteps; }
+uint32_t BulletPhysicsAdapter::GetSolverIterations() const { return m_impl->solverIterations; }
+uint32_t BulletPhysicsAdapter::GetLastSubstepCount() const { return m_impl->lastSubstepCount; }
 
-void Physics::RemovePortalMeshCollider(const void* instanceKey)
+void BulletPhysicsAdapter::RemovePortalMeshCollider(const void* instanceKey)
 {
     if (!m_impl || !instanceKey)
         return;
@@ -144,7 +347,7 @@ void Physics::RemovePortalMeshCollider(const void* instanceKey)
     m_impl->portalMeshColliders.erase(found);
 }
 
-void Physics::SetPortalMeshCollider(const void* instanceKey,
+void BulletPhysicsAdapter::SetPortalMeshCollider(const void* instanceKey,
     const Engine::Components::RigidBody& owner,
     const std::vector<glm::vec3>& worldVertices)
 {
@@ -188,7 +391,7 @@ void Physics::SetPortalMeshCollider(const void* instanceKey,
     m_impl->portalMeshColliders.emplace(instanceKey, std::move(collider));
 }
 
-size_t Physics::GetPortalMeshColliderCount(
+size_t BulletPhysicsAdapter::GetPortalMeshColliderCount(
     const Engine::Components::RigidBody& owner) const
 {
     if (!m_impl)
@@ -200,7 +403,7 @@ size_t Physics::GetPortalMeshColliderCount(
     return count;
 }
 
-void Physics::RemovePortalApertureCollider(const void* instanceKey)
+void BulletPhysicsAdapter::RemovePortalApertureCollider(const void* instanceKey)
 {
     if (!m_impl || !instanceKey)
         return;
@@ -216,7 +419,7 @@ void Physics::RemovePortalApertureCollider(const void* instanceKey)
     m_impl->portalApertureColliders.erase(found);
 }
 
-void Physics::SetPortalApertureCollider(const void* instanceKey,
+void BulletPhysicsAdapter::SetPortalApertureCollider(const void* instanceKey,
     const std::vector<glm::vec3>& worldPoints, const glm::vec3& worldNormal,
     float edgeHalfWidth, float edgeHalfDepth)
 {
@@ -278,7 +481,7 @@ void Physics::SetPortalApertureCollider(const void* instanceKey,
     m_impl->portalApertureColliders.emplace(instanceKey, std::move(collider));
 }
 
-std::vector<Physics::RaycastHit> Physics::RaycastAll(
+std::vector<BulletPhysicsAdapter::RaycastHit> BulletPhysicsAdapter::RaycastAll(
     const glm::vec3& origin, const glm::vec3& direction, float maxDistance,
     uint32_t collisionMask) const
 {
@@ -344,8 +547,11 @@ std::vector<Physics::RaycastHit> Physics::RaycastAll(
 
 PhysicsWorldState& StateFor(Engine::Scene::Scene* scene)
 {
-    return *static_cast<PhysicsWorldState*>(
-        scene->GetPhysics().GetInternalState());
+    auto& physics = scene->GetPhysics();
+    auto* bullet = dynamic_cast<BulletPhysicsAdapter*>(&physics.GetAdapter());
+    if (!bullet || !bullet->GetInternalState())
+        throw std::logic_error("Bullet physics component requires the Bullet adapter");
+    return *bullet->GetInternalState();
 }
 }
 
@@ -387,7 +593,7 @@ PhysicsWorldState::PhysicsWorldState()
     softBodyInfo.m_sparsesdf.Initialize();
 }
 
-void Physics::Step(double deltaTime)
+void BulletPhysicsAdapter::Step(double deltaTime)
 {
     Engine::Scene::Scene& scene = *m_impl->scene;
     std::vector<Engine::Components::MeshObjectCollider*> meshColliders;
@@ -414,6 +620,7 @@ void Physics::Step(double deltaTime)
         for (Engine::Core::Component* component : object->Components)
             if (auto* body = dynamic_cast<Engine::Components::RigidBody*>(component))
             {
+                EnsureRigidBodyState(*body);
                 bodies.push_back(body);
                 body->m_isColliding = false;
                 body->m_isGrounded = false;
@@ -427,6 +634,7 @@ void Physics::Step(double deltaTime)
             }
             else if (auto* cloth = dynamic_cast<Engine::Components::Cloth*>(component))
             {
+                EnsureClothState(*cloth);
                 clothBodies.push_back(cloth);
                 if (cloth->collisionMorph)
                     cloth->EnsureCollisionMorph();
@@ -438,7 +646,10 @@ void Physics::Step(double deltaTime)
             }
             else if (auto* bone = dynamic_cast<
                     Engine::Components::IKBone*>(component))
+            {
+                EnsureIKBoneState(*bone);
                 ikBones.push_back(bone);
+            }
     for (Engine::Components::IKBone* bone : ikBones)
         bone->RemoveInvalidConstraint();
     for (Engine::Components::IKBone* bone : ikBones)
@@ -467,6 +678,91 @@ void Physics::Step(double deltaTime)
         m_impl->accumulatorSeconds + boundedDelta,
         m_impl->fixedStepSeconds * m_impl->maximumSubsteps);
     const double epsilon = m_impl->fixedStepSeconds * 1e-9;
+    const auto recordSubstepContacts = [&]()
+    {
+        const int manifoldCount = physics.dispatcher->getNumManifolds();
+        for (int index = 0; index < manifoldCount; ++index)
+        {
+            btPersistentManifold* manifold = physics.dispatcher->getManifoldByIndexInternal(index);
+            auto* first = static_cast<Engine::Components::RigidBody*>(manifold->getBody0()->getUserPointer());
+            auto* second = static_cast<Engine::Components::RigidBody*>(manifold->getBody1()->getUserPointer());
+
+            bool hasPenetratingContact = false;
+            for (int contact = 0; contact < manifold->getNumContacts(); ++contact)
+            {
+                const btManifoldPoint& point = manifold->getContactPoint(contact);
+                if (point.getDistance() <= 0.f)
+                {
+                    hasPenetratingContact = true;
+                    break;
+                }
+            }
+            if (hasPenetratingContact)
+            {
+                if (first && second)
+                {
+                    first->RegisterOverlap(second);
+                    second->RegisterOverlap(first);
+                }
+            }
+
+            for (int contact = 0; contact < manifold->getNumContacts(); ++contact)
+            {
+                const btManifoldPoint& point = manifold->getContactPoint(contact);
+                if (point.getDistance() > 0.f) continue;
+                if (first)
+                {
+                    first->m_isColliding = true;
+                    const glm::vec3 firstUp = -first->GetGravityDirection();
+                    if (glm::dot(Engine::Physics::ToGlm(point.m_normalWorldOnB),
+                            firstUp) > 0.5f)
+                        first->m_isGrounded = true;
+                    if (first->Owner)
+                    {
+                        if (auto* mesh = first->Owner->GetComponent<
+                                Engine::Components::MeshObjectCollider>();
+                            mesh && mesh->IsActiveForBody(first))
+                            mesh->RecordContact(second,
+                                ContactIdentity(point, manifold->getBody1()),
+                                m_impl->lastSubstepCount,
+                                Engine::Physics::ToGlm(point.getPositionWorldOnA()),
+                                Engine::Physics::ToGlm(point.m_normalWorldOnB),
+                                point.getDistance(), point.getAppliedImpulse());
+                        if (auto* cloth = first->Owner->GetComponent<Engine::Components::Cloth>())
+                            cloth->NotifyRigidBodyCollision(
+                                Engine::Physics::ToGlm(point.m_normalWorldOnB),
+                                Engine::Physics::ToGlm(point.getPositionWorldOnA()),
+                                point.getAppliedImpulse());
+                    }
+                }
+                if (second)
+                {
+                    second->m_isColliding = true;
+                    const glm::vec3 secondUp = -second->GetGravityDirection();
+                    if (glm::dot(-Engine::Physics::ToGlm(point.m_normalWorldOnB),
+                            secondUp) > 0.5f)
+                        second->m_isGrounded = true;
+                    if (second->Owner)
+                    {
+                        if (auto* mesh = second->Owner->GetComponent<
+                                Engine::Components::MeshObjectCollider>();
+                            mesh && mesh->IsActiveForBody(second))
+                            mesh->RecordContact(first,
+                                ContactIdentity(point, manifold->getBody0()),
+                                m_impl->lastSubstepCount,
+                                Engine::Physics::ToGlm(point.getPositionWorldOnB()),
+                                -Engine::Physics::ToGlm(point.m_normalWorldOnB),
+                                point.getDistance(), point.getAppliedImpulse());
+                        if (auto* cloth = second->Owner->GetComponent<Engine::Components::Cloth>())
+                            cloth->NotifyRigidBodyCollision(
+                                -Engine::Physics::ToGlm(point.m_normalWorldOnB),
+                                Engine::Physics::ToGlm(point.getPositionWorldOnB()),
+                                point.getAppliedImpulse());
+                    }
+                }
+            }
+        }
+    };
     while (m_impl->lastSubstepCount < m_impl->maximumSubsteps &&
         m_impl->accumulatorSeconds + epsilon >= m_impl->fixedStepSeconds)
     {
@@ -476,10 +772,15 @@ void Physics::Step(double deltaTime)
         // depend on how fixed physics steps were grouped into video frames.
         for (Engine::Components::RigidBody* body : bodies)
             body->ApplyBodySettings();
+        for (Engine::Components::IKBone* bone : ikBones)
+            bone->ApplyLiveBodySettings();
         const btScalar step = static_cast<btScalar>(m_impl->fixedStepSeconds);
         // maxSubSteps = 0 disables Bullet's float accumulator. The engine's
         // double accumulator above makes chunking independent of output FPS.
         physics.world->stepSimulation(step, 0, step);
+        recordSubstepContacts();
+        for (Engine::Components::IKBone* bone : ikBones)
+            bone->ApplyGroundedPoseGravity();
         m_impl->accumulatorSeconds -= m_impl->fixedStepSeconds;
         if (m_impl->accumulatorSeconds < 0.0 &&
             m_impl->accumulatorSeconds > -epsilon)
@@ -499,84 +800,6 @@ void Physics::Step(double deltaTime)
     for (Engine::Components::IKBone* bone : ikBones)
         bone->SyncBoneFromBody();
 
-    const int manifoldCount = physics.dispatcher->getNumManifolds();
-    for (int index = 0; index < manifoldCount; ++index)
-    {
-        btPersistentManifold* manifold = physics.dispatcher->getManifoldByIndexInternal(index);
-        auto* first = static_cast<Engine::Components::RigidBody*>(manifold->getBody0()->getUserPointer());
-        auto* second = static_cast<Engine::Components::RigidBody*>(manifold->getBody1()->getUserPointer());
-
-        bool hasPenetratingContact = false;
-        for (int contact = 0; contact < manifold->getNumContacts(); ++contact)
-        {
-            const btManifoldPoint& point = manifold->getContactPoint(contact);
-            if (point.getDistance() <= 0.f)
-            {
-                hasPenetratingContact = true;
-                break;
-            }
-        }
-        if (hasPenetratingContact)
-        {
-            if (first && second)
-            {
-                first->RegisterOverlap(second);
-                second->RegisterOverlap(first);
-            }
-        }
-
-        for (int contact = 0; contact < manifold->getNumContacts(); ++contact)
-        {
-            const btManifoldPoint& point = manifold->getContactPoint(contact);
-            if (point.getDistance() > 0.f) continue;
-            if (first)
-            {
-                first->m_isColliding = true;
-                const glm::vec3 firstUp = -first->GetGravityDirection();
-                if (glm::dot(Engine::Physics::ToGlm(point.m_normalWorldOnB),
-                        firstUp) > 0.5f)
-                    first->m_isGrounded = true;
-                if (first->Owner)
-                {
-                    if (auto* mesh = first->Owner->GetComponent<
-                            Engine::Components::MeshObjectCollider>();
-                        mesh && mesh->IsActiveForBody(first))
-                        mesh->RecordContact(second,
-                            Engine::Physics::ToGlm(point.getPositionWorldOnA()),
-                            Engine::Physics::ToGlm(point.m_normalWorldOnB),
-                            point.getDistance(), point.getAppliedImpulse());
-                    if (auto* cloth = first->Owner->GetComponent<Engine::Components::Cloth>())
-                        cloth->NotifyRigidBodyCollision(
-                            Engine::Physics::ToGlm(point.m_normalWorldOnB),
-                            Engine::Physics::ToGlm(point.getPositionWorldOnA()),
-                            point.getAppliedImpulse());
-                }
-            }
-            if (second)
-            {
-                second->m_isColliding = true;
-                const glm::vec3 secondUp = -second->GetGravityDirection();
-                if (glm::dot(-Engine::Physics::ToGlm(point.m_normalWorldOnB),
-                        secondUp) > 0.5f)
-                    second->m_isGrounded = true;
-                if (second->Owner)
-                {
-                    if (auto* mesh = second->Owner->GetComponent<
-                            Engine::Components::MeshObjectCollider>();
-                        mesh && mesh->IsActiveForBody(second))
-                        mesh->RecordContact(first,
-                            Engine::Physics::ToGlm(point.getPositionWorldOnB()),
-                            -Engine::Physics::ToGlm(point.m_normalWorldOnB),
-                            point.getDistance(), point.getAppliedImpulse());
-                    if (auto* cloth = second->Owner->GetComponent<Engine::Components::Cloth>())
-                        cloth->NotifyRigidBodyCollision(
-                            -Engine::Physics::ToGlm(point.m_normalWorldOnB),
-                            Engine::Physics::ToGlm(point.getPositionWorldOnB()),
-                            point.getAppliedImpulse());
-                }
-            }
-        }
-    }
     for (Engine::Components::MeshObjectCollider* collider : meshColliders)
         collider->ResolveContactSurfaces();
     if (m_impl->lastSubstepCount > 0)
@@ -591,7 +814,7 @@ void Physics::Step(double deltaTime)
             cloth->UpdateCollisionMorph(static_cast<float>(boundedDelta));
 }
 
-void Physics::Reset()
+void BulletPhysicsAdapter::Reset()
 {
     Engine::Scene::Scene& scene = *m_impl->scene;
     for (const auto& object : scene.GetObjects())
@@ -623,6 +846,15 @@ void Physics::Reset()
     m_impl->state = std::make_unique<Engine::Physics::PhysicsWorldState>();
     m_impl->state->world->getSolverInfo().m_numIterations =
         static_cast<int>(m_impl->solverIterations);
+    for (const auto& object : scene.GetObjects())
+        for (Engine::Core::Component* component : object->Components)
+            if (auto* body = dynamic_cast<Engine::Components::RigidBody*>(component))
+                body->BindBulletState(nullptr);
+            else if (auto* cloth = dynamic_cast<Engine::Components::Cloth*>(component))
+                cloth->BindBulletState(nullptr);
+            else if (auto* bone = dynamic_cast<Engine::Components::IKBone*>(component))
+                bone->BindBulletState(nullptr);
+    m_componentStates.clear();
     m_impl->accumulatorSeconds = 0.0;
     m_impl->lastSubstepCount = 0u;
 }

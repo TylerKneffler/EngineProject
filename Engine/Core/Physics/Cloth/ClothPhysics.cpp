@@ -1,4 +1,5 @@
 #include "Core/Physics/Physics.h"
+#include "Core/Physics/IPhysicsAdapter.h"
 #include "Core/Compoonents/Physics/Cloth.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Obj/Mesh.h"
@@ -17,7 +18,7 @@
 
 namespace Engine::Components
 {
-struct Engine::Components::Cloth::Impl
+struct Engine::Components::Cloth::Impl final : Engine::Physics::PhysicsComponentState
 {
     Engine::Scene::Scene* scene = nullptr;
     Engine::Components::Mesh* mesh = nullptr; // Render target owned by the object.
@@ -39,7 +40,19 @@ struct Engine::Components::Cloth::Impl
     float morphAmount = 0.f;
 };
 
-Engine::Components::Cloth::Cloth() : m_impl(new Impl())
+std::unique_ptr<Engine::Physics::PhysicsComponentState>
+Engine::Components::Cloth::MakeBulletState()
+{
+    return std::make_unique<Impl>();
+}
+
+void Engine::Components::Cloth::BindBulletState(
+    Engine::Physics::PhysicsComponentState* state)
+{
+    m_impl = static_cast<Impl*>(state);
+}
+
+Engine::Components::Cloth::Cloth()
 {
     SetTypeName("Cloth");
     singlecomponent = true;
@@ -69,11 +82,19 @@ Engine::Components::Cloth::Cloth() : m_impl(new Impl())
 
 Engine::Components::Cloth::~Cloth()
 {
-    DestroySoftBody(true);
-    delete m_impl;
+    if (Owner && Owner->GetScene())
+        Owner->GetScene()->GetPhysics().DestroyCloth(*this);
+    else DestroySoftBody(true);
 }
 
 bool Engine::Components::Cloth::IsSimulating() const
+{
+    if (Owner && Owner->GetScene())
+        return Owner->GetScene()->GetPhysics().IsClothSimulating(*this);
+    return NativeIsSimulating();
+}
+
+bool Engine::Components::Cloth::NativeIsSimulating() const
 {
     return m_impl && (m_impl->softBody != nullptr ||
         (collisionMorph && m_impl->mesh != nullptr));
@@ -500,6 +521,13 @@ void Engine::Components::Cloth::UpdateCollisionMorph(float deltaTime)
 
 void Engine::Components::Cloth::ResetSimulation()
 {
+    if (Owner && Owner->GetScene())
+        Owner->GetScene()->GetPhysics().ResetCloth(*this);
+    else NativeResetSimulation();
+}
+
+void Engine::Components::Cloth::NativeResetSimulation()
+{
     DestroySoftBody(true);
     if (collisionMorph) EnsureCollisionMorph();
     else EnsureSoftBody();
@@ -507,7 +535,12 @@ void Engine::Components::Cloth::ResetSimulation()
 void Engine::Components::Cloth::Start() {}
 void Engine::Components::Cloth::Update() {}
 void Engine::Components::Cloth::Enabled() {}
-void Engine::Components::Cloth::Disabled() { DestroySoftBody(true); }
-void Engine::Components::Cloth::OnDestroy() { DestroySoftBody(true); }
+void Engine::Components::Cloth::Disabled()
+{
+    if (Owner && Owner->GetScene())
+        Owner->GetScene()->GetPhysics().DestroyCloth(*this);
+    else DestroySoftBody(true);
+}
+void Engine::Components::Cloth::OnDestroy() { Disabled(); }
 
 }

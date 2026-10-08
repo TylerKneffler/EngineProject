@@ -20,7 +20,6 @@
 #include "Core/Compoonents/Animation/AnimationBone.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Compoonents/Animation/AnimationManager.h"
-#include "Core/Compoonents/Animation/Animation.h"
 #include "Core/Compoonents/Animation/Model.h"
 #include "Core/Compoonents/Transform.h"
 #include "Core/Compoonents/Obj/Sprite.h"
@@ -28,6 +27,7 @@
 #include "Core/AssetRecord.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Importers/ModelImporter.h"
+#include "Core/MeshEditGeometry.h"
 #include "Engine/Editor/Core/View/Templates/Assets/AssetPreviewCache.h"
 #include <chrono>
 #include <algorithm>
@@ -40,6 +40,67 @@
 
 namespace Engine::Editor
 {
+namespace
+{
+class MeshToolsPanel final : public IEditorPanel
+{
+public:
+    std::function<void(IEditorUi&)> DrawTools;
+    MeshToolsPanel()
+    {
+        SetTitle("Mesh Tools");
+        SetDefaultDockArea(EditorPanelDockArea::RightSidebar);
+        SetOpen(false);
+    }
+    void DrawPanel(IEditorUi& ui) override
+    {
+        if (!ui.BeginWindow(m_title.c_str(), &m_open))
+        {
+            ui.EndWindow();
+            return;
+        }
+        if (ui.IsWindowFocused() && OnFocused) OnFocused();
+        if (DrawTools) DrawTools(ui);
+        ui.EndWindow();
+    }
+};
+
+std::string CaptureMeshSnapshot(const Engine::Components::Mesh& mesh)
+{
+    const auto& vertices = mesh.GetVertices();
+    const auto& indices = mesh.GetIndices();
+    const uint32_t counts[]{ static_cast<uint32_t>(vertices.size()),
+        static_cast<uint32_t>(indices.size()) };
+    std::string result(reinterpret_cast<const char*>(counts), sizeof(counts));
+    result.append(reinterpret_cast<const char*>(vertices.data()),
+        vertices.size() * sizeof(Engine::Components::Mesh::Vertex));
+    result.append(reinterpret_cast<const char*>(indices.data()),
+        indices.size() * sizeof(uint32_t));
+    return result;
+}
+
+bool RestoreMeshSnapshot(Engine::Components::Mesh& mesh,
+    const std::string& snapshot)
+{
+    using Vertex = Engine::Components::Mesh::Vertex;
+    if (snapshot.size() < sizeof(uint32_t) * 2) return false;
+    uint32_t counts[2]{};
+    std::memcpy(counts, snapshot.data(), sizeof(counts));
+    const size_t vertexBytes = static_cast<size_t>(counts[0]) * sizeof(Vertex);
+    const size_t indexBytes = static_cast<size_t>(counts[1]) * sizeof(uint32_t);
+    if (!counts[0] || vertexBytes > snapshot.size() - sizeof(counts) ||
+        indexBytes != snapshot.size() - sizeof(counts) - vertexBytes)
+        return false;
+    std::vector<Vertex> vertices(counts[0]);
+    std::vector<uint32_t> indices(counts[1]);
+    std::memcpy(vertices.data(), snapshot.data() + sizeof(counts), vertexBytes);
+    std::memcpy(indices.data(), snapshot.data() + sizeof(counts) + vertexBytes,
+        indexBytes);
+    return indices.empty()
+        ? mesh.SetAuthoredVertices(std::move(vertices))
+        : mesh.SetIndexedGeometry(std::move(vertices), std::move(indices));
+}
+}
 namespace
 {
     void LogStartupFailure(const std::string& message)
@@ -137,8 +198,12 @@ bool EditorState::HasUnsavedChanges() const
 {
     if (m_hasUnsavedChanges || m_prefabHasUnsavedChanges)
         return true;
+    if (m_mainMeshEdit.dirty || m_prefabMeshEdit.dirty)
+        return true;
+    for (const auto& [path, edit] : m_meshEditCache)
+        if (edit.dirty) return true;
     for (const auto& document : m_sceneAssetDocuments)
-        if (document && document->dirty)
+        if (document && (document->dirty || document->meshEdit.dirty))
             return true;
     for (AssetDocumentView* document : m_assetDocuments)
         if (document && document->IsDirty())
@@ -149,12 +214,13 @@ bool EditorState::HasUnsavedChanges() const
 bool EditorState::HasActiveDocumentUnsavedChanges() const
 {
     if (m_activeSceneAssetDocument)
-        return m_activeSceneAssetDocument->dirty;
+        return m_activeSceneAssetDocument->dirty ||
+            m_activeSceneAssetDocument->meshEdit.dirty;
     if (m_prefabDocumentFocused && !m_activePrefabPath.empty())
-        return m_prefabHasUnsavedChanges;
+        return m_prefabHasUnsavedChanges || m_prefabMeshEdit.dirty;
     if (m_activeAssetDocument)
         return m_activeAssetDocument->IsDirty();
-    return m_hasUnsavedChanges;
+    return m_hasUnsavedChanges || m_mainMeshEdit.dirty;
 }
 
 bool EditorState::IsEditingPrefab() const
@@ -280,6 +346,349 @@ void EditorState::InitializeUiState()
 // ---------------------------------------------------------------------------
 // EditorState::SaveScene
 // ---------------------------------------------------------------------------
+EditorState::MeshEditSession* EditorState::ActiveMeshEditSession()
+{
+    if (m_activeSceneAssetDocument)
+        return &m_activeSceneAssetDocument->meshEdit;
+    if (m_prefabDocumentFocused && m_prefabScene)
+        return &m_prefabMeshEdit;
+    return &m_mainMeshEdit;
+}
+
+Engine::Components::Mesh* EditorState::ResolveMeshForSelection(
+    Engine::Core::Object* selected) const
+{
+    if (!selected) return nullptr;
+    // Preorder traversal chooses the selected object's first mesh, then the
+    // highest mesh in its child hierarchy, in the same order as Hierarchy.
+    std::vector<Engine::Core::Object*> pending{ selected };
+    while (!pending.empty())
+    {
+        Engine::Core::Object* object = pending.back();
+        pending.pop_back();
+        for (Engine::Core::Component* component : object->Components)
+            if (auto* mesh = dynamic_cast<Engine::Components::Mesh*>(component);
+                mesh && !mesh->GetVertices().empty())
+                return mesh;
+        for (auto it = object->Children.rbegin(); it != object->Children.rend();
+            ++it)
+            pending.push_back(*it);
+    }
+    return nullptr;
+}
+
+void EditorState::SyncMeshEditSelection(Engine::Scene::Scene* scene,
+    MeshEditSession& session)
+{
+    if (!scene || !session.enabled) return;
+    Engine::Components::Mesh* mesh = ResolveMeshForSelection(
+        scene->GetSelectedObject());
+    if (session.activeMesh != mesh)
+    {
+        if (session.dirty && !session.savePath.empty())
+        {
+            MeshEditSession cached = session;
+            cached.activeMesh = nullptr;
+            m_meshEditCache[AssetPathIdentity(session.savePath)] =
+                std::move(cached);
+        }
+        session.activeMesh = mesh;
+        session.selectedElement = 0;
+        session.undo.clear();
+        session.redo.clear();
+        session.baseline = mesh ? CaptureMeshSnapshot(*mesh) : std::string{};
+        session.savedSnapshot = session.baseline;
+        session.dirty = false;
+        session.savePath = mesh ? mesh->GetFilePath() : std::string{};
+        if (mesh && !session.savePath.empty())
+        {
+            std::filesystem::path native(session.savePath);
+            native.replace_extension(".mesh");
+            session.savePath = native.string();
+        }
+        if (mesh && session.savePath.empty())
+        {
+            const std::string source = scene == m_prefabScene.get()
+                ? m_activePrefabPath
+                : (scene == m_scene.get() ? m_currentScenePath
+                    : (m_activeSceneAssetDocument
+                        ? m_activeSceneAssetDocument->path : std::string{}));
+            if (!source.empty())
+                session.savePath = (std::filesystem::path(source).parent_path() /
+                    ((mesh->Owner ? mesh->Owner->name : std::string("Mesh")) +
+                        ".mesh")).string();
+        }
+        if (mesh && !session.savePath.empty())
+            if (auto found = m_meshEditCache.find(
+                    AssetPathIdentity(session.savePath));
+                found != m_meshEditCache.end())
+            {
+                const bool enabled = session.enabled;
+                session = found->second;
+                session.enabled = enabled;
+                session.activeMesh = mesh;
+                RestoreMeshSnapshot(*mesh, session.baseline);
+            }
+        if (m_renderer) m_renderer->MarkDirty();
+    }
+    scene->SetEditorSelectedMesh(mesh);
+}
+
+void EditorState::SetMeshEditMode(Engine::Scene::Scene* scene,
+    MeshEditSession& session, bool enabled)
+{
+    session.enabled = enabled;
+    if (scene) scene->SetEditorSelectedMesh(nullptr);
+    for (const auto& panel : m_panels)
+        if (auto* view = dynamic_cast<SceneView*>(panel.get());
+            view && view->GetScene() == scene)
+            view->AllowObjectTransform = !enabled;
+    if (enabled)
+    {
+        SyncMeshEditSelection(scene, session);
+        if (m_meshToolsPanel) m_meshToolsPanel->SetOpen(true);
+    }
+    if (m_renderer) m_renderer->MarkDirty();
+}
+
+void EditorState::DrawMeshEditTools(IEditorUi& ui)
+{
+    MeshEditSession* session = ActiveMeshEditSession();
+    Engine::Scene::Scene* scene = GetActiveDocumentScene();
+    if (!session || !session->enabled || !scene)
+    {
+        ui.DisabledLabel("Choose Mesh in a Scene or Prefab mode selector.");
+        return;
+    }
+    SyncMeshEditSelection(scene, *session);
+    Engine::Components::Mesh* mesh = session->activeMesh;
+    if (!mesh)
+    {
+        ui.DisabledLabel("Select an object with a mesh in the hierarchy.");
+        return;
+    }
+    ui.ValueLabel("Active mesh", mesh->Owner ? mesh->Owner->name.c_str() : "Mesh");
+    ui.ValueLabel("Shared asset", session->savePath.empty()
+        ? "Save the scene to choose a mesh path" : session->savePath.c_str());
+    ui.SearchInput("Find tool", session->search, sizeof(session->search),
+        "Search mesh tools");
+    const char* modes[]{ "Vertex", "Edge", "Face" };
+    ui.Combo("Selection", &session->selectionMode, modes, 3);
+    MeshEditGeometry geometry = MeshEditGeometry::FromMesh(*mesh);
+    const uint32_t count = session->selectionMode == 0
+        ? static_cast<uint32_t>(geometry.vertices.size())
+        : (session->selectionMode == 1 ? geometry.EdgeCount()
+            : geometry.FaceCount());
+    if (count)
+    {
+        int selected = static_cast<int>(std::min<uint32_t>(
+            session->selectedElement, count - 1));
+        if (count > 1 && ui.SliderInt("Element", &selected, 0,
+            static_cast<int>(count - 1)))
+            session->selectedElement = static_cast<uint32_t>(selected);
+    }
+    ui.Separator();
+    const auto matches = [&](const char* name)
+    {
+        std::string filter(session->search), label(name);
+        std::transform(filter.begin(), filter.end(), filter.begin(),
+            [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        std::transform(label.begin(), label.end(), label.begin(),
+            [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        return label.find(filter) != std::string::npos;
+    };
+    const auto apply = [&](MeshEditGeometry&& edit)
+    {
+        if (!Engine::Components::Mesh::ValidateAuthoredGeometry(
+                edit.vertices, edit.indices)) return;
+        const std::string before = CaptureMeshSnapshot(*mesh);
+        if (!mesh->SetIndexedGeometry(std::move(edit.vertices),
+                std::move(edit.indices))) return;
+        if (!session->savePath.empty())
+            mesh->SetAuthoredFilePath(session->savePath);
+        if (m_historyLimit > 0 && session->undo.size() >= m_historyLimit)
+            session->undo.pop_front();
+        if (m_historyLimit > 0) session->undo.push_back(before);
+        session->redo.clear();
+        session->baseline = CaptureMeshSnapshot(*mesh);
+        session->dirty = session->baseline != session->savedSnapshot;
+        if (!session->savePath.empty())
+        {
+            MeshEditSession cached = *session;
+            cached.activeMesh = nullptr;
+            m_meshEditCache[AssetPathIdentity(session->savePath)] =
+                std::move(cached);
+        }
+        if (m_renderer) m_renderer->MarkDirty();
+    };
+    if (matches("Undo") && ui.Button("Undo mesh edit") &&
+        !session->undo.empty())
+    {
+        session->redo.push_back(session->baseline);
+        const std::string previous = session->undo.back();
+        session->undo.pop_back();
+        if (RestoreMeshSnapshot(*mesh, previous))
+        {
+            session->baseline = previous;
+            session->dirty = previous != session->savedSnapshot;
+            if (m_renderer) m_renderer->MarkDirty();
+        }
+    }
+    if (matches("Redo") && ui.Button("Redo mesh edit") &&
+        !session->redo.empty())
+    {
+        session->undo.push_back(session->baseline);
+        const std::string next = session->redo.back();
+        session->redo.pop_back();
+        if (RestoreMeshSnapshot(*mesh, next))
+        {
+            session->baseline = next;
+            session->dirty = next != session->savedSnapshot;
+            if (m_renderer) m_renderer->MarkDirty();
+        }
+    }
+    if (session->selectionMode == 0 && count && matches("Move vertex"))
+    {
+        ui.DragFloat3("Move by", session->move, .01f);
+        if (ui.Button("Move vertex"))
+        {
+            auto& vertex = geometry.vertices[session->selectedElement];
+            for (int axis = 0; axis < 3; ++axis)
+                vertex.pos[axis] += session->move[axis];
+            apply(std::move(geometry));
+            std::fill(std::begin(session->move), std::end(session->move), 0.f);
+        }
+    }
+    if (mesh->HasMorphTargets())
+        ui.DisabledLabel("Topology tools require a mesh without morph targets.");
+    else if (session->selectionMode == 1 && count && matches("Split edge"))
+    {
+        if (ui.Button("Split edge") &&
+            geometry.SplitEdge(session->selectedElement))
+            apply(std::move(geometry));
+    }
+    else if (session->selectionMode == 2 && count)
+    {
+        if (matches("Extrude face"))
+        {
+            ui.DragFloat("Extrude distance", &session->extrudeDistance, .01f);
+            if (ui.Button("Extrude face") &&
+                geometry.ExtrudeFace(session->selectedElement,
+                    session->extrudeDistance))
+                apply(std::move(geometry));
+        }
+        if (matches("Inset face"))
+        {
+            ui.SliderFloat("Inset amount", &session->insetAmount, .01f, .95f);
+            if (ui.Button("Inset face") &&
+                geometry.InsetFace(session->selectedElement,
+                    session->insetAmount))
+                apply(std::move(geometry));
+        }
+        if (matches("Delete face") && ui.Button("Delete face") &&
+            geometry.DeleteFace(session->selectedElement))
+            apply(std::move(geometry));
+    }
+    ui.Separator();
+    if (ui.Button(session->dirty ? "Save Mesh *" : "Save Mesh"))
+        SaveMeshEditSession(*session);
+}
+
+bool EditorState::SaveMeshEditSession(MeshEditSession& session)
+{
+    if (session.activeMesh && session.savePath.empty() &&
+        &session == &m_mainMeshEdit && m_currentScenePath.empty())
+        SaveMainScene();
+    if (session.activeMesh && session.savePath.empty())
+    {
+        const std::string source = &session == &m_mainMeshEdit
+            ? m_currentScenePath : (&session == &m_prefabMeshEdit
+                ? m_activePrefabPath : std::string{});
+        if (!source.empty())
+            session.savePath = (std::filesystem::path(source).parent_path() /
+                ((session.activeMesh->Owner
+                    ? session.activeMesh->Owner->name : std::string("Mesh")) +
+                    ".mesh")).string();
+    }
+    if (!session.activeMesh || session.savePath.empty())
+    {
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                "Save the scene or prefab before saving a generated mesh.");
+        return false;
+    }
+    Engine::Components::Mesh* mesh = session.activeMesh;
+    if (!Engine::Components::Mesh::SaveNativeFile(session.savePath,
+            mesh->GetVertices(), mesh->GetIndices()))
+    {
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                "Could not save mesh asset: " + session.savePath);
+        return false;
+    }
+    mesh->SetAuthoredFilePath(session.savePath);
+    session.baseline = CaptureMeshSnapshot(*mesh);
+    session.savedSnapshot = session.baseline;
+    session.dirty = false;
+    MeshEditSession cached = session;
+    cached.activeMesh = nullptr;
+    m_meshEditCache[AssetPathIdentity(session.savePath)] = std::move(cached);
+    Engine::Scene::Scene* scene = &session == &m_mainMeshEdit
+        ? m_scene.get() : (&session == &m_prefabMeshEdit
+            ? m_prefabScene.get() : nullptr);
+    if (!scene)
+        for (const auto& document : m_sceneAssetDocuments)
+            if (document && &document->meshEdit == &session)
+            {
+                scene = document->scene.get();
+                break;
+            }
+    if (scene)
+        scene->SetEditorSelectedMesh(nullptr);
+    if (m_viewFactory && m_viewFactory->OnAssetContentsChanged)
+        m_viewFactory->OnAssetContentsChanged(session.savePath);
+    session.activeMesh = nullptr;
+    if (m_renderer) m_renderer->MarkDirty();
+    return true;
+}
+
+bool EditorState::SavePendingMeshEdits()
+{
+    for (auto& [identity, edit] : m_meshEditCache)
+    {
+        if (!edit.dirty) continue;
+        Engine::Components::Mesh geometry;
+        if (edit.savePath.empty() ||
+            !RestoreMeshSnapshot(geometry, edit.baseline) ||
+            !Engine::Components::Mesh::SaveNativeFile(edit.savePath,
+                geometry.GetVertices(), geometry.GetIndices()))
+        {
+            if (m_primaryConsole)
+                m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                    "Could not save pending mesh: " + edit.savePath);
+            return false;
+        }
+        edit.savedSnapshot = edit.baseline;
+        edit.dirty = false;
+        const auto markSaved = [&](MeshEditSession& session)
+        {
+            if (AssetPathIdentity(session.savePath) != identity) return;
+            session.savedSnapshot = session.baseline;
+            session.dirty = false;
+            session.activeMesh = nullptr;
+        };
+        markSaved(m_mainMeshEdit);
+        markSaved(m_prefabMeshEdit);
+        for (const auto& document : m_sceneAssetDocuments)
+            if (document) markSaved(document->meshEdit);
+        if (m_scene) m_scene->SetEditorSelectedMesh(nullptr);
+        if (m_prefabScene) m_prefabScene->SetEditorSelectedMesh(nullptr);
+        if (m_viewFactory && m_viewFactory->OnAssetContentsChanged)
+            m_viewFactory->OnAssetContentsChanged(edit.savePath);
+    }
+    return true;
+}
+
 void EditorState::SaveScene()
 {
     if (!m_playModeSceneSnapshot.empty())
@@ -289,6 +698,12 @@ void EditorState::SaveScene()
                 "Scenes cannot be saved during Play mode. Stop the game first.");
         return;
     }
+
+    if (MeshEditSession* meshEdit = ActiveMeshEditSession();
+        meshEdit && meshEdit->enabled && meshEdit->dirty &&
+        !SaveMeshEditSession(*meshEdit))
+        return;
+    if (!SavePendingMeshEdits()) return;
 
     if (m_activeSceneAssetDocument)
     {
@@ -415,12 +830,14 @@ void EditorState::SaveAll()
         return;
     }
 
+    if (!SavePendingMeshEdits()) return;
+
     for (AssetDocumentView* document : m_assetDocuments)
         if (document && document->IsDirty())
             document->Save();
 
     for (auto& document : m_sceneAssetDocuments)
-        if (document && document->dirty)
+        if (document && (document->dirty || document->meshEdit.dirty))
             SaveSceneAssetDocument(*document);
 
     if (!m_activePrefabPath.empty())
@@ -470,7 +887,7 @@ std::string EditorState::GetActiveDocumentName() const
 
     std::string prefabName =
         std::filesystem::path(m_activePrefabPath).filename().string();
-    if (m_prefabHasUnsavedChanges)
+    if (m_prefabHasUnsavedChanges || m_prefabMeshEdit.dirty)
         prefabName += " *";
 
     return sceneName + " | " + prefabName;
@@ -720,6 +1137,20 @@ void EditorState::OpenPrefabStage(const std::string& path)
     m_prefabSceneView->OnGizmoInteraction = [this](bool active)
     {
         if (active) SetPrefabDirty(true);
+    };
+    m_prefabSceneView->OnDrawDocumentTools = [this](IEditorUi& ui)
+    {
+        if (!ui.BeginViewportHeader("##PrefabEditMode", 230.f)) return false;
+        int mode = m_prefabMeshEdit.enabled ? 1 : 0;
+        const char* choices[]{ "Object", "Mesh" };
+        if (ui.Combo("Mode", &mode, choices, 2))
+            SetMeshEditMode(m_prefabScene.get(), m_prefabMeshEdit, mode == 1);
+        if (m_prefabMeshEdit.enabled)
+            SyncMeshEditSelection(m_prefabScene.get(), m_prefabMeshEdit);
+        ui.SameLine();
+        if (ui.Button("Save")) SaveScene();
+        const bool consumed = ui.EndViewportHeader();
+        return consumed;
     };
     sceneView->OnFocused = [this]() { SetPrefabDocumentFocused(true); };
     sceneView->RequestFocusOnNextDraw();
@@ -1308,13 +1739,7 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
                             Engine::Components::AnimationManager>() : nullptr;
                 if (manager)
                 {
-                    std::vector<Engine::Components::Animation*> clips;
-                    for (const auto& object : raw->scene->GetObjects())
-                        if (object)
-                            for (Engine::Core::Component* component : object->Components)
-                                if (auto* animation = dynamic_cast<
-                                    Engine::Components::Animation*>(component))
-                                    clips.push_back(animation);
+                    const auto clips = manager->GetAvailableClips();
                     std::vector<const char*> clipNames;
                     int selectedClip = 0;
                     for (size_t i = 0; i < clips.size(); ++i)
@@ -1520,8 +1945,14 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
                 }
                 if (changed)
                 {
-                    raw->mesh->SetAuthoredVertices(std::move(vertices));
-                    if (m_renderer) m_renderer->MarkDirty();
+                    const bool applied = indices.empty()
+                        ? raw->mesh->SetAuthoredVertices(std::move(vertices))
+                        : raw->mesh->SetIndexedGeometry(std::move(vertices),
+                            std::vector<uint32_t>(indices));
+                    if (applied && m_renderer) m_renderer->MarkDirty();
+                    if (!applied && m_primaryConsole)
+                        m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                            "Mesh edit rejected: invalid geometry or attributes.");
                 }
                 if (ui.Button("Save Mesh"))
                     SaveSceneAssetDocument(*raw);
@@ -1568,16 +1999,44 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
             {
                 ui.PushId(raw);
                 const std::string headerId = "##PrefabHeader:" + raw->identity;
-                if (!ui.BeginViewportHeader(headerId.c_str(), 90.f))
+                if (!ui.BeginViewportHeader(headerId.c_str(), 230.f))
                 {
                     ui.PopId();
                     return false;
                 }
+                int mode = raw->meshEdit.enabled ? 1 : 0;
+                const char* choices[]{ "Object", "Mesh" };
+                if (ui.Combo("Mode", &mode, choices, 2))
+                    SetMeshEditMode(raw->scene.get(), raw->meshEdit, mode == 1);
+                if (raw->meshEdit.enabled)
+                    SyncMeshEditSelection(raw->scene.get(), raw->meshEdit);
+                ui.SameLine();
                 if (ui.AvailableContentWidth() >= 54.f && ui.Button("Save"))
                     SaveSceneAssetDocument(*raw);
                 const bool consumedClick = ui.EndViewportHeader();
                 ui.PopId();
                 return consumedClick;
+            };
+        else if (!raw->meshStage)
+            view->OnDrawDocumentTools = [this, raw](IEditorUi& ui)
+            {
+                ui.PushId(raw);
+                if (!ui.BeginViewportHeader("##SceneAssetEditMode", 230.f))
+                {
+                    ui.PopId();
+                    return false;
+                }
+                int mode = raw->meshEdit.enabled ? 1 : 0;
+                const char* choices[]{ "Object", "Mesh" };
+                if (ui.Combo("Mode", &mode, choices, 2))
+                    SetMeshEditMode(raw->scene.get(), raw->meshEdit, mode == 1);
+                if (raw->meshEdit.enabled)
+                    SyncMeshEditSelection(raw->scene.get(), raw->meshEdit);
+                ui.SameLine();
+                if (ui.Button("Save")) SaveSceneAssetDocument(*raw);
+                const bool consumed = ui.EndViewportHeader();
+                ui.PopId();
+                return consumed;
             };
         else if (raw->meshStage)
             view->OnDrawDocumentTools = [this, raw](IEditorUi& ui)
@@ -1697,6 +2156,9 @@ void EditorState::RefreshSceneAssetDocumentTitle(SceneAssetDocument& document)
 
 bool EditorState::SaveSceneAssetDocument(SceneAssetDocument& document)
 {
+    if (document.meshEdit.dirty &&
+        !SaveMeshEditSession(document.meshEdit)) return false;
+    if (!SavePendingMeshEdits()) return false;
     bool saved = false;
     const std::string stageSavePath = document.stageDataPath.empty()
         ? document.path : document.stageDataPath;
@@ -1706,7 +2168,8 @@ bool EditorState::SaveSceneAssetDocument(SceneAssetDocument& document)
         RestoreSkeletonStageVisibility(document);
     if (document.meshStage && document.mesh)
         saved = Engine::Components::Mesh::SaveNativeFile(
-            document.meshSavePath, document.mesh->GetVertices());
+            document.meshSavePath, document.mesh->GetVertices(),
+            document.mesh->GetIndices());
     else if (document.scene && document.prefab)
     {
         Engine::Core::Object* root = nullptr;
@@ -1751,6 +2214,27 @@ bool EditorState::SaveSceneAssetDocument(SceneAssetDocument& document)
     if (document.meshStage && m_viewFactory &&
         m_viewFactory->OnAssetContentsChanged)
         m_viewFactory->OnAssetContentsChanged(document.meshSavePath);
+    if (document.meshStage)
+    {
+        // Skeleton stages retain live component pointers, so the general scene
+        // reload callback intentionally skips them. Refresh matching meshes in
+        // place after the replacement file becomes visible.
+        for (const auto& other : m_sceneAssetDocuments)
+            if (other && other.get() != &document && other->skeletonStage &&
+                other->scene)
+                for (const auto& object : other->scene->GetObjects())
+                    if (object)
+                        for (Engine::Core::Component* component : object->Components)
+                            if (auto* mesh = dynamic_cast<Engine::Components::Mesh*>(
+                                    component);
+                                mesh && AssetPathIdentity(mesh->GetFilePath()) ==
+                                    AssetPathIdentity(document.meshSavePath))
+                            {
+                                mesh->LoadFromFile(mesh->GetFilePath());
+                                if (auto* provider = other->scene->GetGraphicsProvider())
+                                    mesh->CreateBuffer(provider->GetBufferFactory());
+                            }
+    }
     return true;
 }
 
@@ -1771,8 +2255,15 @@ std::string EditorState::CaptureSceneAssetDocumentSnapshot(
     if (!document.meshStage || !document.mesh)
         return document.scene ? document.scene->SaveToString() : std::string{};
     const auto& vertices = document.mesh->GetVertices();
-    return std::string(reinterpret_cast<const char*>(vertices.data()),
+    const auto& indices = document.mesh->GetIndices();
+    const uint32_t counts[] = { static_cast<uint32_t>(vertices.size()),
+        static_cast<uint32_t>(indices.size()) };
+    std::string snapshot(reinterpret_cast<const char*>(counts), sizeof(counts));
+    snapshot.append(reinterpret_cast<const char*>(vertices.data()),
         vertices.size() * sizeof(Engine::Components::Mesh::Vertex));
+    snapshot.append(reinterpret_cast<const char*>(indices.data()),
+        indices.size() * sizeof(uint32_t));
+    return snapshot;
 }
 
 bool EditorState::RestoreSceneAssetDocumentSnapshot(
@@ -1788,13 +2279,25 @@ bool EditorState::RestoreSceneAssetDocumentSnapshot(
             RebuildObjectStageContext(document);
         return true;
     }
-    if (!document.mesh || snapshot.empty() ||
-        snapshot.size() % sizeof(Engine::Components::Mesh::Vertex) != 0)
+    if (!document.mesh || snapshot.size() < 2 * sizeof(uint32_t))
         return false;
-    std::vector<Engine::Components::Mesh::Vertex> vertices(
-        snapshot.size() / sizeof(Engine::Components::Mesh::Vertex));
-    std::memcpy(vertices.data(), snapshot.data(), snapshot.size());
-    return document.mesh->SetAuthoredVertices(std::move(vertices));
+    uint32_t counts[2]{};
+    std::memcpy(counts, snapshot.data(), sizeof(counts));
+    const size_t vertexBytes = static_cast<size_t>(counts[0]) *
+        sizeof(Engine::Components::Mesh::Vertex);
+    const size_t indexBytes = static_cast<size_t>(counts[1]) * sizeof(uint32_t);
+    if (counts[0] == 0 || vertexBytes > snapshot.size() - sizeof(counts) ||
+        indexBytes != snapshot.size() - sizeof(counts) - vertexBytes)
+        return false;
+    std::vector<Engine::Components::Mesh::Vertex> vertices(counts[0]);
+    std::vector<uint32_t> indices(counts[1]);
+    std::memcpy(vertices.data(), snapshot.data() + sizeof(counts), vertexBytes);
+    std::memcpy(indices.data(), snapshot.data() + sizeof(counts) + vertexBytes,
+        indexBytes);
+    return indices.empty()
+        ? document.mesh->SetAuthoredVertices(std::move(vertices))
+        : document.mesh->SetIndexedGeometry(std::move(vertices),
+            std::move(indices));
 }
 
 void EditorState::ApplySkeletonStageVisibility(SceneAssetDocument& document)
@@ -2100,7 +2603,7 @@ void EditorState::HandleSceneAssetDocumentClosures()
     {
         SceneAssetDocument* document = it->get();
         if (!document || document->view->IsOpen()) { ++it; continue; }
-        if (document->dirty)
+        if (document->dirty || document->meshEdit.dirty)
         {
             document->view->SetOpen(true);
             if (m_primaryConsole)
@@ -2241,6 +2744,7 @@ void EditorState::ClosePrefabStage()
     SetPrefabDocumentFocused(false);
     RemovePrefabPanels();
     m_prefabScene.reset();
+    m_prefabMeshEdit = {};
     m_activePrefabPath.clear();
     SetPrefabDirty(false);
     if (m_primaryConsole)
@@ -2406,6 +2910,22 @@ void EditorState::InitializePanels()
         auto scenePanel = m_viewFactory->Create("Scene");
         if (scenePanel)
         {
+            if (auto* mainSceneView = dynamic_cast<SceneView*>(scenePanel.get()))
+                mainSceneView->OnDrawDocumentTools = [this](IEditorUi& ui)
+                {
+                    if (!ui.BeginViewportHeader("##SceneEditMode", 230.f))
+                        return false;
+                    int mode = m_mainMeshEdit.enabled ? 1 : 0;
+                    const char* choices[]{ "Object", "Mesh" };
+                    if (ui.Combo("Mode", &mode, choices, 2))
+                        SetMeshEditMode(m_scene.get(), m_mainMeshEdit, mode == 1);
+                    if (m_mainMeshEdit.enabled)
+                        SyncMeshEditSelection(m_scene.get(), m_mainMeshEdit);
+                    ui.SameLine();
+                    if (ui.Button("Save")) SaveScene();
+                    const bool consumed = ui.EndViewportHeader();
+                    return consumed;
+                };
             scenePanel->OnFocused = [this]()
             {
                 SetActiveSceneAssetDocument(nullptr);
@@ -2414,6 +2934,11 @@ void EditorState::InitializePanels()
             m_panels.push_back(std::move(scenePanel));
         }
         else OutputDebugStringA("[EditorState::InitializePanels] WARNING: Scene panel is null\n");
+
+        auto meshTools = std::make_unique<MeshToolsPanel>();
+        meshTools->DrawTools = [this](IEditorUi& ui) { DrawMeshEditTools(ui); };
+        m_meshToolsPanel = meshTools.get();
+        m_panels.push_back(std::move(meshTools));
         
         OutputDebugStringA("[EditorState::InitializePanels] Creating Game view\n");
         auto gamePanel = m_viewFactory->Create("Game");
