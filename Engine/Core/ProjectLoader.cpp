@@ -494,7 +494,7 @@ void ProjectLoader::ParseDependencies(const pugi::xml_node& projectNode,
     // path-shaped values keeps the manifest independent of component types and
     // also follows prefab, material, sprite-animation, and spritesheet chains.
     const std::regex assetReference(
-        R"(([A-Za-z]:)?[A-Za-z0-9_./\\ -]+\.(scene|prefab|obj|fbx|gltf|glb|material|png|jpg|jpeg|dds|ktx|ktx2|hdr|exr|wav|ogg|mp3|ttf|otf|spriteanim|spritesheet|json|hlsl|glsl|vert|frag|comp))",
+        R"(([A-Za-z]:)?[A-Za-z0-9_./\\ -]+\.(scene|prefab|rig|obj|fbx|gltf|glb|material|png|jpg|jpeg|dds|ktx|ktx2|hdr|exr|wav|ogg|mp3|ttf|otf|spriteanim|spritesheet|json|hlsl|glsl|vert|frag|comp))",
         std::regex::icase);
     for (size_t index = 0; index < pending.size(); ++index)
     {

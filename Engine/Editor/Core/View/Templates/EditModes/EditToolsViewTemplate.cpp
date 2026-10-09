@@ -33,96 +33,102 @@ bool ToolbarIconButton(ImWchar codepoint, const char* glyph,
 {
     const std::string label = ToolbarIconLabel(codepoint, glyph,
         suffix, id, fallback);
-    const bool clicked = ImGui::Button(label.c_str());
+    const std::string display = label.substr(0, label.find("##"));
+    const ImVec2 textSize = ImGui::CalcTextSize(display.c_str());
+    const float width = std::max(24.f, textSize.x +
+        ImGui::GetStyle().FramePadding.x * 2.f);
+    const std::string buttonId = std::string("##") + id;
+    const bool clicked = ImGui::Button(buttonId.c_str(), {width, 20.f});
+    const ImVec2 minimum = ImGui::GetItemRectMin();
+    const ImVec2 maximum = ImGui::GetItemRectMax();
+    ImGui::GetWindowDrawList()->AddText(
+        {minimum.x + (maximum.x - minimum.x - textSize.x) * .5f,
+         minimum.y + (maximum.y - minimum.y - textSize.y) * .5f - 1.f},
+        ImGui::GetColorU32(ImGuiCol_Text), display.c_str());
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("%s", tooltip);
     return clicked;
 }
+
+float ToolbarButtonWidth(const char* label)
+{
+    return std::max(24.f, ImGui::CalcTextSize(label).x +
+        ImGui::GetStyle().FramePadding.x * 2.f);
+}
+
+struct ToolbarRow
+{
+    bool singleRow;
+    bool* overflow;
+    bool previous = false;
+    bool hidden = false;
+
+    bool Next(float width)
+    {
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float right = ImGui::GetWindowPos().x +
+            ImGui::GetWindowContentRegionMax().x;
+        const float x = previous ? ImGui::GetItemRectMax().x +
+            style.ItemSpacing.x : ImGui::GetCursorScreenPos().x;
+        if (singleRow && (hidden || x + width > right))
+        {
+            hidden = true;
+            if (overflow) *overflow = true;
+            return false;
+        }
+        if (previous && (singleRow || x + width <= right))
+            ImGui::SameLine();
+        previous = true;
+        return true;
+    }
+};
 }
 
 float EditorState::GetGlobalToolbarHeight() const
 {
-    const float playWidth = m_toolbarVisibility.playControls ? 150.f : 0.f;
-    if (m_gameViewFocused)
-    {
-        const float width = std::max(180.f,
-            ImGui::GetMainViewport()->WorkSize.x - 24.f);
-        return 10.f + 28.f * std::max(1,
-            static_cast<int>(std::ceil((90.f + playWidth) / width)));
-    }
-    if (m_activeAssetDocument)
-    {
-        const float width = std::max(180.f,
-            ImGui::GetMainViewport()->WorkSize.x - 24.f);
-        const float contentWidth = 120.f + playWidth +
-            (m_toolbarVisibility.save ? 110.f : 0.f) +
-            (m_toolbarVisibility.undoRedo ? 80.f : 0.f);
-        return 10.f + 28.f * std::max(1,
-            static_cast<int>(std::ceil(contentWidth / width)));
-    }
-    const MeshEditSession& mesh = m_activeSceneAssetDocument
-        ? m_activeSceneAssetDocument->meshEdit
-        : m_prefabDocumentFocused ? m_prefabMeshEdit : m_mainMeshEdit;
-    const SkeletonEditSession& skeleton = m_activeSceneAssetDocument
-        ? m_activeSceneAssetDocument->skeletonEdit
-        : m_prefabDocumentFocused ? m_prefabSkeletonEdit : m_mainSkeletonEdit;
-    const float width = std::max(220.f,
-        ImGui::GetMainViewport()->WorkSize.x - 24.f);
-    const float topWidth = 120.f + playWidth +
-        (m_toolbarVisibility.editMode ? 115.f : 0.f) +
-        (m_toolbarVisibility.save ? 115.f : 0.f) +
-        (m_toolbarVisibility.undoRedo ? 80.f : 0.f) +
-        (m_toolbarVisibility.modeTools
-            ? (skeleton.enabled ? 300.f : mesh.enabled ? 170.f : 0.f)
-            : 0.f) +
-        (m_toolbarVisibility.transformTools ? 300.f : 0.f) +
-        (m_toolbarVisibility.sceneDisplay ? 265.f : 0.f);
-    Engine::Scene::Scene* scene = GetActiveDocumentScene();
-    Engine::Core::Object* selected = scene ? scene->GetSelectedObject() : nullptr;
-    Engine::Core::Object* prefabRoot = selected
-        ? selected->GetPrefabInstanceRoot() : nullptr;
-    const float prefabWidth = m_toolbarVisibility.prefabActions &&
-        prefabRoot && prefabRoot->Prefab ? 420.f : 0.f;
-    const int topRows = std::max(1, static_cast<int>(std::ceil(
-        (topWidth + prefabWidth) / width)));
-    const float topHeight = 10.f + topRows * 28.f;
-    if (!m_toolbarVisibility.toolDetails) return topHeight;
-    const float toolWidth = mesh.enabled
-        ? (m_activeSceneAssetDocument && m_activeSceneAssetDocument->meshStage
-            ? 410.f : 210.f) : skeleton.enabled ? 550.f :
-        m_activeSceneAssetDocument && m_activeSceneAssetDocument->meshStage
-            ? 300.f : 250.f;
-    const int rows = std::max(1, static_cast<int>(std::ceil(
-        toolWidth / width)));
-    return topHeight + rows * 27.f + 8.f;
+    return 34.f;
 }
 
-bool EditorState::HasToolbarToolRow() const
+bool EditorState::HasToolbarSection(ToolbarSection section) const
 {
-    return m_toolbarVisibility.toolDetails && !m_gameViewFocused &&
-        !m_activeAssetDocument && GetActiveDocumentScene();
+    if (m_gameViewFocused) return false;
+    if (m_activeAssetDocument)
+        return section == ToolbarSection::File ? m_toolbarVisibility.save :
+            section == ToolbarSection::Edit && m_toolbarVisibility.undoRedo;
+    Engine::Scene::Scene* scene = GetActiveDocumentScene();
+    if (!scene) return false;
+    switch (section)
+    {
+    case ToolbarSection::File: return m_toolbarVisibility.save;
+    case ToolbarSection::Edit: return m_toolbarVisibility.undoRedo;
+    case ToolbarSection::Mode:
+        return m_toolbarVisibility.editMode || m_toolbarVisibility.modeTools;
+    case ToolbarSection::Tools: return m_toolbarVisibility.toolDetails;
+    case ToolbarSection::Transform: return m_toolbarVisibility.transformTools;
+    case ToolbarSection::View: return m_toolbarVisibility.sceneDisplay;
+    case ToolbarSection::Prefab:
+    {
+        Engine::Core::Object* selected = scene->GetSelectedObject();
+        Engine::Core::Object* root = selected
+            ? selected->GetPrefabInstanceRoot() : nullptr;
+        return m_toolbarVisibility.prefabActions && root && root->Prefab;
+    }
+    }
+    return false;
 }
 
-void EditorState::DrawToolbarTools(IEditorUi& ui)
+void EditorState::DrawToolbarTools(IEditorUi& ui, bool singleRow,
+    bool* overflow)
 {
     if (!m_toolbarVisibility.toolDetails || m_gameViewFocused ||
         m_activeAssetDocument) return;
     Engine::Scene::Scene* scene = GetActiveDocumentScene();
     if (!scene) return;
 
-    bool previousItem = false;
+    ToolbarRow row{singleRow, overflow};
     const auto button = [&](const char* label)
     {
-        const ImGuiStyle& style = ImGui::GetStyle();
-        const float width = ImGui::CalcTextSize(label).x +
-            style.FramePadding.x * 2.f;
-        const float right = ImGui::GetWindowPos().x +
-            ImGui::GetWindowContentRegionMax().x;
-        if (previousItem && ImGui::GetItemRectMax().x +
-            style.ItemSpacing.x + width <= right)
-            ImGui::SameLine();
-        previousItem = true;
-        return ImGui::SmallButton(label);
+        return row.Next(ToolbarButtonWidth(label)) && ImGui::SmallButton(label);
     };
     const auto iconButton = [&](ImWchar codepoint, const char* glyph,
         const char* suffix, const char* id, const char* fallback,
@@ -130,10 +136,8 @@ void EditorState::DrawToolbarTools(IEditorUi& ui)
     {
         const std::string label = ToolbarIconLabel(codepoint, glyph,
             suffix, id, fallback);
-        const bool clicked = button(label.c_str());
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            ImGui::SetTooltip("%s", tooltip);
-        return clicked;
+        return row.Next(ToolbarButtonWidth(label.c_str())) &&
+            ToolbarIconButton(codepoint, glyph, suffix, id, fallback, tooltip);
     };
     MeshEditSession* mesh = ActiveMeshEditSession();
     SkeletonEditSession* skeleton = ActiveSkeletonEditSession();
@@ -152,15 +156,9 @@ void EditorState::DrawToolbarTools(IEditorUi& ui)
     const auto showError = [&](const char* message)
     {
         if (!message || !*message) return;
-        const ImGuiStyle& style = ImGui::GetStyle();
-        const float right = ImGui::GetWindowPos().x +
-            ImGui::GetWindowContentRegionMax().x;
-        if (previousItem && ImGui::GetItemRectMax().x +
-            style.ItemSpacing.x + 12.f <= right)
-            ImGui::SameLine();
+        if (!row.Next(12.f)) return;
         ImGui::TextColored({1.f, .55f, .3f, 1.f}, "!");
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", message);
-        previousItem = true;
     };
     if (skeleton && skeleton->enabled)
     {
@@ -317,6 +315,9 @@ void EditorState::DrawToolbarTools(IEditorUi& ui)
             open("Hierarchy...", "Hierarchy");
     }
 
+    if (CanOpenAnimationForSelection() && button("Animation Editor"))
+        OpenAnimationForSelection();
+
     if (ImGui::IsPopupOpen("##ToolbarToolPopup"))
     {
         ImGui::SetNextWindowSizeConstraints({290.f, 0.f}, {460.f, 650.f});
@@ -353,54 +354,54 @@ void EditorState::DrawToolbarTools(IEditorUi& ui)
             ImGui::EndPopup();
         }
     }
-    else m_toolbarPopupTool.clear();
 }
 
-void EditorState::DrawGlobalToolbar(IEditorUi& ui)
+void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
+    bool singleRow, bool* overflow)
 {
+    if (overflow) *overflow = false;
     if (m_gameViewFocused)
     {
         m_toolbarPopupTool.clear();
         m_toolbarPopupScene = nullptr;
-        ui.Label("Game view");
         return;
     }
     if (m_activeAssetDocument)
     {
         m_toolbarPopupTool.clear();
         m_toolbarPopupScene = nullptr;
-        ui.Label("Asset document");
-        if (m_toolbarVisibility.save)
+        ToolbarRow row{singleRow, overflow};
+        if (section == ToolbarSection::File && m_toolbarVisibility.save)
         {
             ImGui::BeginDisabled(!m_playModeSceneSnapshot.empty());
-            const float right = ImGui::GetWindowPos().x +
-                ImGui::GetWindowContentRegionMax().x;
-            if (ImGui::GetItemRectMax().x + 36.f <= right)
-                ui.SameLine();
-            if (ToolbarIconButton(0xE74E, u8"\uE74E", "",
+            const std::string save = ToolbarIconLabel(0xE74E, u8"\uE74E",
+                "", "SaveAsset", "Save Asset");
+            if (row.Next(ToolbarButtonWidth(save.c_str())) &&
+                ToolbarIconButton(0xE74E, u8"\uE74E", "",
                 "SaveAsset", "Save Asset", "Save Asset")) SaveScene();
-            if (ImGui::GetItemRectMax().x + 70.f <= right)
-                ui.SameLine();
-            if (ToolbarIconButton(0xE74E, u8"\uE74E", " All",
+            const std::string saveAll = ToolbarIconLabel(0xE74E, u8"\uE74E",
+                " All", "SaveAllAssets", "Save All");
+            if (row.Next(ToolbarButtonWidth(saveAll.c_str())) &&
+                ToolbarIconButton(0xE74E, u8"\uE74E", " All",
                 "SaveAllAssets", "Save All", "Save All")) SaveAll();
             ImGui::EndDisabled();
         }
-        if (m_toolbarVisibility.undoRedo)
+        if (section == ToolbarSection::Edit && m_toolbarVisibility.undoRedo)
         {
-            const float right = ImGui::GetWindowPos().x +
-                ImGui::GetWindowContentRegionMax().x;
-            if (ImGui::GetItemRectMax().x + 36.f <= right)
-                ui.SameLine();
             ImGui::BeginDisabled(!CanUndo() ||
                 !m_playModeSceneSnapshot.empty());
-            if (ToolbarIconButton(0xE7A7, u8"\uE7A7", "",
+            const std::string undo = ToolbarIconLabel(0xE7A7, u8"\uE7A7",
+                "", "UndoAsset", "Undo");
+            if (row.Next(ToolbarButtonWidth(undo.c_str())) &&
+                ToolbarIconButton(0xE7A7, u8"\uE7A7", "",
                 "UndoAsset", "Undo", "Undo")) Undo();
             ImGui::EndDisabled();
-            if (ImGui::GetItemRectMax().x + 36.f <= right)
-                ui.SameLine();
             ImGui::BeginDisabled(!CanRedo() ||
                 !m_playModeSceneSnapshot.empty());
-            if (ToolbarIconButton(0xE7A6, u8"\uE7A6", "",
+            const std::string redo = ToolbarIconLabel(0xE7A6, u8"\uE7A6",
+                "", "RedoAsset", "Redo");
+            if (row.Next(ToolbarButtonWidth(redo.c_str())) &&
+                ToolbarIconButton(0xE7A6, u8"\uE7A6", "",
                 "RedoAsset", "Redo", "Redo")) Redo();
             ImGui::EndDisabled();
         }
@@ -418,9 +419,11 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui)
             if (auto* candidate = dynamic_cast<SceneView*>(panel.get());
                 candidate && candidate->GetScene() == scene)
             { view = candidate; break; }
-    if (!view || !view->UseGlobalToolbar)
+    if (!view || !view->UseGlobalToolbar) return;
+
+    if (section == ToolbarSection::Tools)
     {
-        ui.Label("Document tools are in the active viewport");
+        DrawToolbarTools(ui, singleRow, overflow);
         return;
     }
 
@@ -430,28 +433,20 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui)
     SkeletonEditSession& skeleton = m_activeSceneAssetDocument
         ? m_activeSceneAssetDocument->skeletonEdit
         : m_prefabDocumentFocused ? m_prefabSkeletonEdit : m_mainSkeletonEdit;
-    ui.Label(m_activeSceneAssetDocument ? "Document" :
-        m_prefabDocumentFocused ? "Prefab" : "Scene");
-    const auto nextItem = [&](float width)
-    {
-        const ImGuiStyle& style = ImGui::GetStyle();
-        const float right = ImGui::GetWindowPos().x +
-            ImGui::GetWindowContentRegionMax().x;
-        if (ImGui::GetItemRectMax().x + style.ItemSpacing.x + width <= right)
-            ui.SameLine();
-    };
-    nextItem(105.f);
-    if (m_toolbarVisibility.editMode && m_activeSceneAssetDocument &&
+    ToolbarRow row{singleRow, overflow};
+    const bool showEditMode = section == ToolbarSection::Mode &&
+        m_toolbarVisibility.editMode && row.Next(105.f);
+    if (showEditMode && m_activeSceneAssetDocument &&
         m_activeSceneAssetDocument->modelStage &&
         m_activeSceneAssetDocument->focusPicker)
     {
         ui.SetNextItemWidth(105.f);
         m_activeSceneAssetDocument->focusPicker(ui);
     }
-    else if (m_toolbarVisibility.editMode && m_activeSceneAssetDocument &&
+    else if (showEditMode && m_activeSceneAssetDocument &&
         m_activeSceneAssetDocument->meshStage)
         ui.Label("Mesh");
-    else if (m_toolbarVisibility.editMode)
+    else if (showEditMode)
     {
         int mode = skeleton.enabled ? 2 : mesh.enabled ? 1 : 0;
         const char* modes[]{ "Object", "Mesh", "Skeleton" };
@@ -464,7 +459,7 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui)
         }
         ui.Tooltip("Edit mode");
     }
-    if (m_toolbarVisibility.save)
+    if (section == ToolbarSection::File && m_toolbarVisibility.save)
     {
         ImGui::BeginDisabled(!m_playModeSceneSnapshot.empty());
         const char* saveLabel = m_activeSceneAssetDocument &&
@@ -472,31 +467,39 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui)
             (m_prefabDocumentFocused ||
                 (m_activeSceneAssetDocument && m_activeSceneAssetDocument->prefab))
                 ? "Save Prefab" : "Save Scene";
-        nextItem(36.f);
-        if (ToolbarIconButton(0xE74E, u8"\uE74E", "",
+        const std::string save = ToolbarIconLabel(0xE74E, u8"\uE74E",
+            "", "SaveCurrent", saveLabel);
+        if (row.Next(ToolbarButtonWidth(save.c_str())) &&
+            ToolbarIconButton(0xE74E, u8"\uE74E", "",
             "SaveCurrent", saveLabel, saveLabel))
         {
             if (m_activeSceneAssetDocument)
                 SaveSceneAssetDocument(*m_activeSceneAssetDocument);
             else SaveScene();
         }
-        nextItem(70.f);
-        if (ToolbarIconButton(0xE74E, u8"\uE74E", " All",
+        const std::string saveAll = ToolbarIconLabel(0xE74E, u8"\uE74E",
+            " All", "SaveAll", "Save All");
+        if (row.Next(ToolbarButtonWidth(saveAll.c_str())) &&
+            ToolbarIconButton(0xE74E, u8"\uE74E", " All",
             "SaveAll", "Save All", "Save All")) SaveAll();
         ImGui::EndDisabled();
     }
-    if (m_toolbarVisibility.undoRedo)
+    if (section == ToolbarSection::Edit && m_toolbarVisibility.undoRedo)
     {
-        nextItem(36.f);
         ImGui::BeginDisabled(!CanUndo() ||
             !m_playModeSceneSnapshot.empty());
-        if (ToolbarIconButton(0xE7A7, u8"\uE7A7", "",
+        const std::string undo = ToolbarIconLabel(0xE7A7, u8"\uE7A7",
+            "", "UndoDocument", "Undo");
+        if (row.Next(ToolbarButtonWidth(undo.c_str())) &&
+            ToolbarIconButton(0xE7A7, u8"\uE7A7", "",
             "UndoDocument", "Undo", "Undo")) Undo();
         ImGui::EndDisabled();
-        nextItem(36.f);
         ImGui::BeginDisabled(!CanRedo() ||
             !m_playModeSceneSnapshot.empty());
-        if (ToolbarIconButton(0xE7A6, u8"\uE7A6", "",
+        const std::string redo = ToolbarIconLabel(0xE7A6, u8"\uE7A6",
+            "", "RedoDocument", "Redo");
+        if (row.Next(ToolbarButtonWidth(redo.c_str())) &&
+            ToolbarIconButton(0xE7A6, u8"\uE7A6", "",
             "RedoDocument", "Redo", "Redo")) Redo();
         ImGui::EndDisabled();
     }
@@ -504,29 +507,33 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui)
     Engine::Core::Object* selectedObject = scene->GetSelectedObject();
     Engine::Core::Object* prefabRoot = selectedObject
         ? selectedObject->GetPrefabInstanceRoot() : nullptr;
-    if (m_toolbarVisibility.prefabActions && prefabRoot && prefabRoot->Prefab)
+    if (section == ToolbarSection::Prefab && m_toolbarVisibility.prefabActions && prefabRoot && prefabRoot->Prefab)
     {
         ImGui::BeginDisabled(!m_playModeSceneSnapshot.empty());
         const bool hasOverrides =
             Engine::Serialization::SceneSerializer::HasPrefabOverrides(
                 *prefabRoot, true);
-        nextItem(36.f);
-        if (ToolbarIconButton(0xE70F, u8"\uE70F", "",
+        const std::string edit = ToolbarIconLabel(0xE70F, u8"\uE70F",
+            "", "EditPrefab", "Edit Prefab");
+        if (row.Next(ToolbarButtonWidth(edit.c_str())) &&
+            ToolbarIconButton(0xE70F, u8"\uE70F", "",
             "EditPrefab", "Edit Prefab", "Edit Prefab"))
             QueueSceneAssetDocumentOpen(prefabRoot->Prefab->GetPath());
         ui.BeginDisabled(!hasOverrides);
-        nextItem(125.f);
-        if (ui.Button("Apply Overrides") &&
+        if (row.Next(ToolbarButtonWidth("Apply Overrides")) &&
+            ui.Button("Apply Overrides") &&
             Engine::Serialization::SceneSerializer::ApplyPrefabOverridesToAsset(
                 *prefabRoot, false, scene->GetGraphicsProvider()))
             MarkSceneEdited();
-        nextItem(80.f);
-        if (ui.Button("Apply All") &&
+        if (row.Next(ToolbarButtonWidth("Apply All")) &&
+            ui.Button("Apply All") &&
             Engine::Serialization::SceneSerializer::ApplyPrefabOverridesToAsset(
                 *prefabRoot, true, scene->GetGraphicsProvider()))
             MarkSceneEdited();
-        nextItem(36.f);
-        if (ToolbarIconButton(0xE72C, u8"\uE72C", "",
+        const std::string revert = ToolbarIconLabel(0xE72C, u8"\uE72C",
+            "", "RevertPrefab", "Revert");
+        if (row.Next(ToolbarButtonWidth(revert.c_str())) &&
+            ToolbarIconButton(0xE72C, u8"\uE72C", "",
             "RevertPrefab", "Revert", "Revert prefab overrides"))
         {
             SelectObject(prefabRoot);
@@ -535,8 +542,8 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui)
                 MarkSceneEdited();
         }
         ui.EndDisabled();
-        nextItem(115.f);
-        if (ui.Button("Unpack Prefab"))
+        if (row.Next(ToolbarButtonWidth("Unpack Prefab")) &&
+            ui.Button("Unpack Prefab"))
         {
             prefabRoot->Prefab.reset();
             prefabRoot->PrefabSourceSnapshot.clear();
@@ -545,64 +552,74 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui)
         ImGui::EndDisabled();
     }
 
-    if (m_toolbarVisibility.modeTools && skeleton.enabled)
+    if (section == ToolbarSection::Mode && m_toolbarVisibility.modeTools && skeleton.enabled)
     {
-        nextItem(110.f);
         const char* submodes[]{ "Bones", "Weight Paint" };
         int submode = skeleton.submode;
-        ui.SetNextItemWidth(110.f);
-        if (ui.Combo("##GlobalSkeletonTool", &submode, submodes, 2))
+        if (row.Next(110.f))
         {
-            FinishSkeletonPaintStroke(skeleton);
-            scene->SetEditorWeightPaint(nullptr, -1);
-            skeleton.submode = submode;
-            view->AllowObjectTransform = submode == 0 &&
-                skeleton.boneTool == 0;
-            SyncSkeletonEditSelection(scene, skeleton);
+            ui.SetNextItemWidth(110.f);
+            if (ui.Combo("##GlobalSkeletonTool", &submode, submodes, 2))
+            {
+                FinishSkeletonPaintStroke(skeleton);
+                scene->SetEditorWeightPaint(nullptr, -1);
+                skeleton.submode = submode;
+                view->AllowObjectTransform = submode == 0 &&
+                    skeleton.boneTool == 0;
+                SyncSkeletonEditSelection(scene, skeleton);
+            }
+            ui.Tooltip("Skeleton tool");
         }
-        ui.Tooltip("Skeleton tool");
         if (skeleton.submode == 1)
         {
-            nextItem(100.f);
             const char* brushes[]{ "Add", "Subtract", "Replace", "Smooth",
                 "Normalize" };
-            ui.SetNextItemWidth(100.f);
-            ui.Combo("##GlobalWeightBrush", &skeleton.brushOperation,
-                brushes, 5);
-            ui.Tooltip("Weight paint operation");
-            if (ui.AvailableContentWidth() > 190.f)
+            if (row.Next(100.f))
             {
-                nextItem(80.f);
-                ui.SetNextItemWidth(80.f);
-                ui.SliderFloat("##GlobalBrushSize", &skeleton.brushRadius,
-                    2.f, 250.f);
-                ui.Tooltip("Brush size in pixels");
+                ui.SetNextItemWidth(100.f);
+                ui.Combo("##GlobalWeightBrush", &skeleton.brushOperation,
+                    brushes, 5);
+                ui.Tooltip("Weight paint operation");
+            }
+            if (singleRow || ui.AvailableContentWidth() > 190.f)
+            {
+                if (row.Next(80.f))
+                {
+                    ui.SetNextItemWidth(80.f);
+                    ui.SliderFloat("##GlobalBrushSize", &skeleton.brushRadius,
+                        2.f, 250.f);
+                    ui.Tooltip("Brush size in pixels");
+                }
             }
         }
     }
-    else if (m_toolbarVisibility.modeTools && mesh.enabled)
+    else if (section == ToolbarSection::Mode && m_toolbarVisibility.modeTools && mesh.enabled)
     {
-        nextItem(80.f);
         const char* elements[]{ "Vertex", "Edge", "Face" };
-        ui.SetNextItemWidth(80.f);
-        if (ui.Combo("##GlobalMeshElement", &mesh.selectionMode,
-            elements, 3))
+        if (row.Next(80.f))
         {
-            mesh.selectedElement = 0;
-            mesh.selectedElements = { 0 };
-            mesh.gizmoDragging = false;
-            mesh.gizmoStartPositions.clear();
+            ui.SetNextItemWidth(80.f);
+            if (ui.Combo("##GlobalMeshElement", &mesh.selectionMode,
+                elements, 3))
+            {
+                mesh.selectedElement = 0;
+                mesh.selectedElements = { 0 };
+                mesh.gizmoDragging = false;
+                mesh.gizmoStartPositions.clear();
+            }
+            ui.Tooltip("Mesh element");
         }
-        ui.Tooltip("Mesh element");
-        nextItem(70.f);
         const char* selectionTools[]{ "Click", "Box", "Lasso" };
-        ui.SetNextItemWidth(70.f);
-        ui.Combo("##GlobalSelectionTool", &mesh.selectionTool,
-            selectionTools, 3);
-        ui.Tooltip("Selection tool");
+        if (row.Next(70.f))
+        {
+            ui.SetNextItemWidth(70.f);
+            ui.Combo("##GlobalSelectionTool", &mesh.selectionTool,
+                selectionTools, 3);
+            ui.Tooltip("Selection tool");
+        }
     }
-    if (m_toolbarVisibility.transformTools &&
-        ui.AvailableContentWidth() > 340.f)
+    if (section == ToolbarSection::Transform && m_toolbarVisibility.transformTools &&
+        (singleRow || ui.AvailableContentWidth() > 340.f))
     {
         const EditorTransformTool tools[]{ EditorTransformTool::Hand,
             EditorTransformTool::Translate, EditorTransformTool::Rotate,
@@ -610,49 +627,57 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui)
         const char* toolNames[]{ "Hand", "Move", "Rotate", "Scale" };
         for (int index = 0; index < 4; ++index)
         {
-            nextItem(75.f);
             const bool selected = view->GetTransformTool() == tools[index];
             const std::string label = std::string(toolNames[index]) +
                 (selected ? " *" : "");
-            if (ui.Button(label.c_str())) view->SetTransformTool(tools[index]);
+            if (row.Next(ToolbarButtonWidth(label.c_str())) &&
+                ui.Button(label.c_str()))
+                view->SetTransformTool(tools[index]);
         }
     }
-    else if (m_toolbarVisibility.transformTools)
+    else if (section == ToolbarSection::Transform && m_toolbarVisibility.transformTools)
     {
-        nextItem(100.f);
         const char* tools[]{ "Hand", "Move", "Rotate", "Scale" };
         int tool = view->GetTransformTool() == EditorTransformTool::Hand ? 0
             : view->GetTransformTool() == EditorTransformTool::Translate ? 1
             : view->GetTransformTool() == EditorTransformTool::Rotate ? 2 : 3;
-        ui.SetNextItemWidth(100.f);
-        if (ui.Combo("##GlobalTransformTool", &tool, tools, 4))
+        if (row.Next(100.f))
         {
-            const EditorTransformTool values[]{ EditorTransformTool::Hand,
-                EditorTransformTool::Translate, EditorTransformTool::Rotate,
-                EditorTransformTool::Scale };
-            view->SetTransformTool(values[tool]);
+            ui.SetNextItemWidth(100.f);
+            if (ui.Combo("##GlobalTransformTool", &tool, tools, 4))
+            {
+                const EditorTransformTool values[]{ EditorTransformTool::Hand,
+                    EditorTransformTool::Translate, EditorTransformTool::Rotate,
+                    EditorTransformTool::Scale };
+                view->SetTransformTool(values[tool]);
+            }
+            ui.Tooltip("Transform tool");
         }
-        ui.Tooltip("Transform tool");
     }
-    if (m_toolbarVisibility.sceneDisplay)
+    if (section == ToolbarSection::View && m_toolbarVisibility.sceneDisplay)
     {
-        nextItem(55.f);
-        if (ui.Button(scene->settings.showGrid ? "Grid *" : "Grid"))
+        const char* gridLabel = scene->settings.showGrid ? "Grid *" : "Grid";
+        if (row.Next(ToolbarButtonWidth(gridLabel)) && ui.Button(gridLabel))
             scene->settings.showGrid = !scene->settings.showGrid;
-        nextItem(95.f);
         int renderMode = static_cast<int>(scene->settings.renderMode);
         const char* renderNames[]{ "Lit", "Unlit", "Wireframe" };
-        ui.SetNextItemWidth(95.f);
-        if (ui.Combo("##GlobalRenderMode", &renderMode, renderNames, 3))
-            scene->settings.renderMode =
-                static_cast<Engine::Model::SceneRenderMode>(renderMode);
-        ui.Tooltip("Scene render mode");
-        nextItem(100.f);
-        if (ui.Button(scene->settings.sceneViewUiOverlay
-            ? "UI Overlay *" : "UI Overlay"))
-            scene->settings.sceneViewUiOverlay =
-                !scene->settings.sceneViewUiOverlay;
-        ui.Tooltip("Show scene UI in the editor viewport");
+        if (row.Next(95.f))
+        {
+            ui.SetNextItemWidth(95.f);
+            if (ui.Combo("##GlobalRenderMode", &renderMode, renderNames, 3))
+                scene->settings.renderMode =
+                    static_cast<Engine::Model::SceneRenderMode>(renderMode);
+            ui.Tooltip("Scene render mode");
+        }
+        const char* overlayLabel = scene->settings.sceneViewUiOverlay
+            ? "UI Overlay *" : "UI Overlay";
+        if (row.Next(ToolbarButtonWidth(overlayLabel)))
+        {
+            if (ui.Button(overlayLabel))
+                scene->settings.sceneViewUiOverlay =
+                    !scene->settings.sceneViewUiOverlay;
+            ui.Tooltip("Show scene UI in the editor viewport");
+        }
     }
 }
 

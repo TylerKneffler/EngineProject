@@ -1,5 +1,6 @@
 #pragma once
 #include "Core/Model/ProjectSettings.h"
+#include "Core/Model/AnimationClip.h"
 #include "pch.h"
 #include "Core/ProjectLoader.h"
 #include "Core/Scene/Scene.h"
@@ -35,6 +36,8 @@ class HierarchyView;
 class AssetsExplorerView;
 class SceneView;
 class AssetDocumentView;
+class AnimationView;
+class AnimationTimelineView;
 class IEditorUi;
 
 // ---------------------------------------------------------------------------
@@ -55,6 +58,8 @@ public:
         bool toolDetails = true;
         bool prefabActions = true;
     };
+
+    enum class ToolbarSection { File, Edit, Mode, Tools, Transform, View, Prefab };
 
     EditorState(HINSTANCE hInstance, const Engine::Model::ProjectSettings& projectSettings,
         std::string projectFilePath);
@@ -90,10 +95,12 @@ public:
     const std::string& GetPendingSceneLoadPath() const { return m_sceneToLoad; }
     void OpenPrefabStage(const std::string& path);
     void ProcessPendingPrefabStageOpen();
-    void DrawGlobalToolbar(IEditorUi& ui);
-    void DrawToolbarTools(IEditorUi& ui);
+    void DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section, bool singleRow,
+        bool* overflow = nullptr);
+    void DrawToolbarTools(IEditorUi& ui, bool singleRow,
+        bool* overflow = nullptr);
     float GetGlobalToolbarHeight() const;
-    bool HasToolbarToolRow() const;
+    bool HasToolbarSection(ToolbarSection section) const;
     ToolbarVisibility& GetToolbarVisibility() { return m_toolbarVisibility; }
     void ClosePrefabStage();
     void HandlePrefabPanelClosures();
@@ -104,6 +111,12 @@ public:
     void QueueSceneAssetDocumentOpen(const std::string& path);
     void ProcessPendingSceneAssetDocumentOpens();
     void HandleSceneAssetDocumentClosures();
+      void QueueAnimationDocumentOpen(const std::string& path,
+          size_t rigIndex = 0);
+    bool CanOpenAnimationForSelection() const;
+    void OpenAnimationForSelection();
+    void ProcessPendingAnimationDocumentOpens();
+    void HandleAnimationDocumentClosures();
     bool IsEditingPrefab() const;
     std::string GetActiveDocumentName() const;
     void BakeLighting();
@@ -320,7 +333,8 @@ private:
     void MarkSceneEdited();
     void MarkHistorySelectionChanged()
     {
-        m_historySelectionDirty = true;
+        if (!m_activeAnimationDocument)
+            m_historySelectionDirty = true;
         if (m_renderer) m_renderer->MarkDirty();
     }
     void ApplyHistoryEntry(HistoryEntry entry, const char* operation);
@@ -385,6 +399,74 @@ private:
         MeshEditSession meshEdit;
         SkeletonEditSession skeletonEdit;
     };
+    struct AnimationDocument
+    {
+        struct RigTrack
+        {
+            size_t index = 0;
+            std::string name;
+            std::string path;
+            std::vector<std::string> boundMeshes;
+            Engine::Components::Skeleton* sourceSkeleton = nullptr;
+            Engine::Components::Skeleton* poseSkeleton = nullptr;
+            Engine::Components::AnimationManager* sourceManager = nullptr;
+            Engine::Components::AnimationManager* poseManager = nullptr;
+            int clipIndex = -1;
+            int selectedBone = -1;
+            bool selected = false;
+        };
+        std::vector<RigTrack> tracks;
+          struct RigAsset
+          {
+              std::string path;
+              std::string label;
+              size_t rigIndex = 0;
+          };
+        std::string path;
+        std::string identity;
+          size_t rigIndex = 0;
+          std::string rigName;
+          std::string rigPath;
+          std::vector<std::string> boundMeshNames;
+          std::vector<RigAsset> rigAssets;
+          char rigSearch[128]{};
+        std::unique_ptr<Engine::Scene::Scene> sourceScene;
+        std::unique_ptr<Engine::Scene::Scene> poseScene;
+        Engine::Core::Object* sourceRoot = nullptr;
+        Engine::Components::AnimationManager* sourceManager = nullptr;
+        Engine::Components::AnimationManager* poseManager = nullptr;
+        Engine::Components::Skeleton* poseSkeleton = nullptr;
+        AnimationView* view = nullptr;
+        AnimationTimelineView* timeline = nullptr;
+        int clipIndex = -1;
+        int selectedBone = -1;
+        int frame = 0;
+        int timelineStartFrame = 0;
+        int framesPerSecond = 30;
+        float playheadSeconds = 0.f;
+        bool playing = false;
+        bool autoKey = false;
+        bool gizmoWasActive = false;
+        bool poseControlEditPending = false;
+        bool dirty = false;
+        std::string savedSnapshot;
+        std::deque<std::vector<Engine::Model::AnimationClip>> undo;
+        std::deque<std::vector<Engine::Model::AnimationClip>> redo;
+        char newClipName[128]{};
+        std::string error;
+    };
+    void SetActiveAnimationDocument(AnimationDocument* document);
+    void FocusAnimationRig(AnimationDocument& document, size_t index);
+    std::pair<std::string, size_t> SelectedAnimationRig() const;
+    void DrawAnimationTimeline(IEditorUi& ui, AnimationDocument& document);
+    void SampleAnimationDocument(AnimationDocument& document);
+    bool AddAnimationKey(AnimationDocument& document);
+    void RecordAnimationEdit(AnimationDocument& document,
+        std::vector<Engine::Model::AnimationClip> before);
+    bool SaveAnimationDocument(AnimationDocument& document);
+    bool StepAnimationHistory(AnimationDocument& document, bool redo);
+    void RefreshAnimationDocumentTitle(AnimationDocument& document);
+      void ScanAnimationRigAssets(AnimationDocument& document);
     void DrawObjectStageTools(IEditorUi& ui, SceneAssetDocument& document);
     void DrawMeshStageTools(IEditorUi& ui, SceneAssetDocument& document);
     void SetActiveSceneAssetDocument(SceneAssetDocument* document,
@@ -425,6 +507,9 @@ private:
     std::vector<std::unique_ptr<SceneAssetDocument>> m_sceneAssetDocuments;
     std::deque<std::string> m_pendingSceneAssetDocuments;
     SceneAssetDocument* m_activeSceneAssetDocument = nullptr;
+    std::vector<std::unique_ptr<AnimationDocument>> m_animationDocuments;
+      std::deque<std::pair<std::string, size_t>> m_pendingAnimationDocuments;
+    AnimationDocument* m_activeAnimationDocument = nullptr;
     MeshEditSession m_mainMeshEdit;
     MeshEditSession m_prefabMeshEdit;
     SkeletonEditSession m_mainSkeletonEdit;

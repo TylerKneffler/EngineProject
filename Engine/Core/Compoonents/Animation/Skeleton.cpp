@@ -7,10 +7,12 @@
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
 #include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
+#include "Core/Model/RigAsset.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <stdexcept>
 
 namespace Engine::Components
 {
@@ -67,6 +69,7 @@ Skeleton::Skeleton()
     RegisterField("meshRagdollGravityStrength", meshRagdollGravityStrength,
         "Collision | Bone Response");
     RegisterField("showBones", showBones);
+    RegisterField("rigPath", rigPath);
 }
 
 Skeleton::JsonValue Skeleton::Serialize() const
@@ -102,6 +105,18 @@ void Skeleton::Deserialize(const JsonValue& value)
         for (size_t j = 0; j < 16; ++j)
             data[j] = value["inverseBindMatrices"].ArrayAt(i).ArrayAt(j).AsFloat();
         inverseBindMatrices.push_back(matrix);
+    }
+    if (jointNodes.empty() && !rigPath.empty())
+    {
+        auto rig = Engine::Model::RigAsset::Load(rigPath);
+        if (!rig || rig->skinIndex != skinIndex)
+            throw std::runtime_error("Missing or incompatible rig asset: " +
+                rigPath);
+        for (const auto& joint : rig->joints)
+        {
+            jointNodes.push_back(joint.nodeIndex);
+            inverseBindMatrices.push_back(joint.inverseBind);
+        }
     }
     m_modelCacheValid = false;
     m_cachedJoints.clear();

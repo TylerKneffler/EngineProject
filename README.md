@@ -290,6 +290,24 @@ Imported clips are stored as `AnimationClip` data in the Animation Manager.
 The Properties panel lists clips there and lets you select the active clip.
 The bundled fox prefabs store their Survey, Walk, and Run clips in the manager.
 
+To author clips, open a model or skinned prefab in the editor, switch to
+Skeleton mode, select its skeleton, a bone, or a bound skinned mesh, and choose
+**Open Animation Editor**. The editor shows the selected rig and every mesh
+bound to it. In the Timeline, **Scan Assets** lists rigged prefabs in the
+project Assets directory; **Search rig assets** filters the list so another
+rig can be opened. Imported model sources use their generated prefab for
+animation editing. Skeletal imports also generate a `.rig` file for each skin
+with its joint identities, inverse bind matrices, and bound mesh names. The
+prefab's Skeleton and Animation Manager reference those files; older prefabs
+gain a `.rig` file when their animation is saved. Rig-backed prefabs store
+joint and inverse-bind data in the `.rig` file; the bundled Fox prefabs use
+this format. The 3D viewport poses a
+separate preview scene; the docked Timeline shows bones, frames, and keyframes.
+Create or select a clip, scrub to a frame, move a bone in the viewport or edit
+its pose values, then choose **Add / Replace Keyframe**. **Auto Key** records a
+key when a viewport manipulation ends. **Save Clip + Rig** writes the animation
+channels and rig asset without writing preview pose transforms or skin weights.
+
 Call `AnimationManager::Play("Run", 0.2f)` to crossfade the base clip. Add
 `AnimationManager::Layer` entries for override or additive animation. A layer's
 `nodeMask` restricts it to the listed imported `ModelNode::nodeIndex` values; an

@@ -408,11 +408,16 @@ void EditorState::SyncSkeletonEditSelection(Engine::Scene::Scene* scene,
     session.observedSubmode = session.submode;
     const int previousBoneIndex = session.boneIndex;
     Engine::Components::Skeleton* chosen = nullptr;
-    for (Engine::Core::Object* parent = selected; parent && !chosen;
-        parent = parent->Parent)
-        for (auto* component : parent->Components)
-            if (auto* skeleton = dynamic_cast<Engine::Components::Skeleton*>(component))
-            { chosen = skeleton; break; }
+    if (selected)
+        for (auto* component : selected->Components)
+            if (auto* skin = dynamic_cast<Engine::Components::SkinnedMesh*>(component))
+            { chosen = skin->ResolveSkeleton(); break; }
+    if (!chosen)
+        for (Engine::Core::Object* parent = selected; parent && !chosen;
+            parent = parent->Parent)
+            for (auto* component : parent->Components)
+                if (auto* skeleton = dynamic_cast<Engine::Components::Skeleton*>(component))
+                { chosen = skeleton; break; }
     // A rig's model root and its joint hierarchy need not contain the
     // Skeleton component. Resolve a selected joint from the palette itself.
     if (selected && (!chosen || chosen->Owner != selected))

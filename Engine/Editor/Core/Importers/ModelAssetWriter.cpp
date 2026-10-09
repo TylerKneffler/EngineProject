@@ -3,6 +3,7 @@
 #include "Core/AssetRecord.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Animation/ModelAnimation.h"
+#include "Core/Model/RigAsset.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
@@ -278,6 +279,25 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
         }
 
         const fs::path prefabPath = output / (output.filename().string() + ".prefab");
+        auto* manager = root->GetComponent<Engine::Components::AnimationManager>();
+        for (auto* component : root->Components)
+            if (auto* skeleton = dynamic_cast<Engine::Components::Skeleton*>(component))
+            {
+                const fs::path rigPath = output /
+                    (output.filename().string() + "_skin_" +
+                     std::to_string(skeleton->skinIndex) + ".rig");
+                auto rig = Engine::Model::RigAsset::Capture(scene,
+                    *skeleton);
+                rig.prefabPath = prefabPath.generic_string();
+                if (!rig.Save(rigPath.string()))
+                    throw std::runtime_error("Could not save rig: " + rigPath.string());
+                skeleton->rigPath = rigPath.generic_string();
+                if (manager) manager->rigPaths.push_back(skeleton->rigPath);
+                Engine::Core::AssetRecord::Ensure(rigPath, source,
+                    { { "importer", std::string("model-rig") },
+                      { "skinIndex", static_cast<double>(skeleton->skinIndex) } });
+            }
+
         if (!Engine::Serialization::SceneSerializer::SavePrefab(*root, prefabPath.string()))
             throw std::runtime_error("Could not save prefab");
         Engine::Core::AssetRecord::Ensure(prefabPath, source,

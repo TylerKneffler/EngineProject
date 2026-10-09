@@ -3,6 +3,7 @@
 #include "Core/Component.h"
 #include "Core/Model/AnimationData.h"
 #include "Core/Model/AnimationClip.h"
+#include "Core/Model/RigAsset.h"
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <memory>
@@ -31,6 +32,8 @@ public:
     float speed = 1.f;
     float time = 0.f;
     std::vector<Engine::Model::AnimationClip> clips;
+    std::vector<std::string> rigPaths;
+    std::vector<Engine::Model::RigAsset> LoadRigAssets() const;
     std::vector<Layer> layers;
     const Engine::Model::AnimationClip* FindClip(const std::string& name = {}) const;
     std::vector<const Engine::Model::AnimationClip*> GetAvailableClips() const;

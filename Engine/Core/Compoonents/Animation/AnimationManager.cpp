@@ -293,6 +293,15 @@ AnimationManager::GetAvailableClips() const
     return result;
 }
 
+std::vector<Engine::Model::RigAsset> AnimationManager::LoadRigAssets() const
+{
+    std::vector<Engine::Model::RigAsset> result;
+    for (const auto& path : rigPaths)
+        if (auto rig = Engine::Model::RigAsset::Load(path))
+            result.push_back(std::move(*rig));
+    return result;
+}
+
 Model* AnimationManager::ResolveModel() const
 {
     const uint64_t structureRevision = Owner && Owner->GetScene()
@@ -579,6 +588,10 @@ AnimationManager::JsonValue AnimationManager::Serialize() const
     for (const auto& item : clips)
         serializedClips.Push(item.Serialize());
     result.Set("clips", std::move(serializedClips));
+    JsonValue serializedRigs = JsonValue::MakeArray();
+    for (const auto& path : rigPaths)
+        serializedRigs.Push(JsonValue(path));
+    result.Set("rigPaths", std::move(serializedRigs));
     JsonValue serializedLayers = JsonValue::MakeArray();
     for (const Layer& layer : layers)
     {
@@ -599,6 +612,9 @@ void AnimationManager::Deserialize(const JsonValue& value)
     Component::Deserialize(value);
     clip = value["clip"].AsString();
     clips.clear();
+    rigPaths.clear();
+    for (size_t i = 0; i < value["rigPaths"].ArraySize(); ++i)
+        rigPaths.push_back(value["rigPaths"].ArrayAt(i).AsString());
     const JsonValue& serializedClips = value["clips"];
     clips.reserve(serializedClips.ArraySize());
     for (size_t i = 0; i < serializedClips.ArraySize(); ++i)

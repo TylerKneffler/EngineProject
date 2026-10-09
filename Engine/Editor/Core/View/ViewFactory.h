@@ -1,6 +1,7 @@
 #pragma once
 #include "pch.h"
 #include "Views/SceneView.h"
+#include "Views/AnimationView.h"
 #include "Views/GameView.h"
 #include "Views/HierarchyView.h"
 #include "Views/PropertiesView.h"
@@ -59,6 +60,8 @@ public:
     std::unique_ptr<SceneView> CreateSceneView(
         Engine::Scene::Scene* scene, const std::string& title,
         EditorPanelDockArea defaultDockArea = EditorPanelDockArea::MainDocument);
+    std::unique_ptr<AnimationView> CreateAnimationView(
+        Engine::Scene::Scene* scene, const std::string& title);
 
     // Returns false when no SRV slots remain for 3-D views (Scene / Game).
     bool CanCreate3DView() const { return m_renderer && m_renderer->CanAllocateSrvSlot(); }

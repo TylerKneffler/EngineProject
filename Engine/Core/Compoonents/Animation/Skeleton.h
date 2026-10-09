@@ -35,6 +35,8 @@ public:
     bool meshRagdollEnabled = false;
     float meshRagdollGravityStrength = 3.f;
     bool showBones = true;
+    // Optional standalone rig description generated beside the prefab.
+    std::string rigPath;
     unsigned skinIndex = 0;
     std::vector<unsigned> jointNodes;
     std::vector<glm::mat4> inverseBindMatrices;

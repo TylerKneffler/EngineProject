@@ -10,6 +10,7 @@
 #include "Engine/Editor/Core/View/Views/AssetsExplorerView.h"
 #include "imgui.h"
 #include "imgui_internal.h"
+#include <algorithm>
 
 namespace Engine::Editor
 {
@@ -42,8 +43,128 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
         ImGui::GetMainViewport(), ImGuiDir_Up,
         state.GetGlobalToolbarHeight(), flags))
     {
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.f, 2.f));
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        const float available = ImGui::GetContentRegionAvail().x;
+        const float playWidth = state.GetToolbarVisibility().playControls
+            ? 145.f : 0.f;
+        const float sideWidth = std::max(0.f, (available - playWidth) * .5f - 5.f);
+        static float sectionWidths[]{ 105.f, 90.f, 200.f, 180.f,
+            220.f, 180.f, 165.f };
+        static bool sectionOverflow[7]{};
+        static const char* names[]{ "File", "Edit", "Mode", "Tools",
+            "Transform", "View", "Prefab" };
+        static const EditorState::ToolbarSection sections[]{
+            EditorState::ToolbarSection::File,
+            EditorState::ToolbarSection::Edit,
+            EditorState::ToolbarSection::Mode,
+            EditorState::ToolbarSection::Tools,
+            EditorState::ToolbarSection::Transform,
+            EditorState::ToolbarSection::View,
+            EditorState::ToolbarSection::Prefab };
+        const auto drawSide = [&](const int* indices, int count, float x)
+        {
+            if (!count) return;
+            float total = 0.f;
+            for (int i = 0; i < count; ++i)
+                total += sectionWidths[indices[i]];
+            float cursor = x;
+            for (int i = 0; i < count; ++i)
+            {
+                const int index = indices[i];
+                const float width = i == count - 1
+                    ? x + sideWidth - cursor
+                    : sideWidth * sectionWidths[index] / total;
+                if (width < 33.f) { cursor += width; continue; }
+                ImGui::PushID(index);
+                if (i)
+                    ImGui::GetWindowDrawList()->AddLine(
+                        ImVec2(cursor + 2.f, origin.y + 2.f),
+                        ImVec2(cursor + 2.f, origin.y + 21.f),
+                        ImGui::GetColorU32(ImGuiCol_Separator));
+                ImGui::SetCursorScreenPos(ImVec2(cursor + 7.f, origin.y));
+                const bool reserveArrow = sectionOverflow[index];
+                const float contentWidth = std::max(1.f,
+                    width - (reserveArrow ? 34.f : 14.f));
+                bool overflow = false;
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(1.f, 1.f));
+                if (ImGui::BeginChild("SectionContents", ImVec2(contentWidth, 23.f),
+                    false, ImGuiWindowFlags_NoScrollbar |
+                        ImGuiWindowFlags_NoScrollWithMouse))
+                    state.DrawGlobalToolbar(m_ui, sections[index], true, &overflow);
+                ImGui::EndChild();
+                ImGui::PopStyleVar();
+                sectionOverflow[index] = overflow;
+                if (reserveArrow && overflow)
+                {
+                    ImGui::SetCursorScreenPos(ImVec2(cursor + width - 23.f,
+                        origin.y + 2.f));
+                    const ImVec2 arrowSize(14.f, 18.f);
+                    if (ImGui::InvisibleButton("SectionToolsButton", arrowSize))
+                        ImGui::OpenPopup("SectionTools");
+                    const ImVec2 minimum = ImGui::GetItemRectMin();
+                    if (ImGui::IsItemHovered())
+                    {
+                        ImGui::GetWindowDrawList()->AddRectFilled(minimum,
+                            ImGui::GetItemRectMax(),
+                            ImGui::GetColorU32(ImGuiCol_ButtonHovered), 3.f);
+                        ImGui::SetTooltip("More %s tools", names[index]);
+                    }
+                    ImGui::GetWindowDrawList()->AddTriangleFilled(
+                        ImVec2(minimum.x + 4.f, minimum.y + 7.f),
+                        ImVec2(minimum.x + 10.f, minimum.y + 7.f),
+                        ImVec2(minimum.x + 7.f, minimum.y + 10.f),
+                        ImGui::GetColorU32(ImGuiCol_Text));
+                }
+                if (i + 1 < count)
+                {
+                    ImGui::SetCursorScreenPos(ImVec2(cursor + width - 6.f, origin.y));
+                    ImGui::InvisibleButton("SectionResize", ImVec2(6.f, 23.f));
+                    if (ImGui::IsItemHovered() || ImGui::IsItemActive())
+                        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+                    if (ImGui::IsItemActive())
+                    {
+                        const float scale = total / std::max(1.f, sideWidth);
+                        const float delta = ImGui::GetIO().MouseDelta.x * scale;
+                        const int next = indices[i + 1];
+                        if (sectionWidths[index] + delta >= 34.f &&
+                            sectionWidths[next] - delta >= 34.f)
+                        {
+                            sectionWidths[index] += delta;
+                            sectionWidths[next] -= delta;
+                        }
+                    }
+                }
+                if (ImGui::IsPopupOpen("SectionTools"))
+                    ImGui::SetNextWindowSize(ImVec2(index == 3 ? 540.f :
+                        index == 6 ? 480.f : 360.f, 0.f), ImGuiCond_Appearing);
+                if (ImGui::BeginPopup("SectionTools"))
+                {
+                    ImGui::TextUnformatted(names[index]);
+                    ImGui::Separator();
+                    state.DrawGlobalToolbar(m_ui, sections[index], false);
+                    ImGui::EndPopup();
+                }
+                ImGui::PopID();
+                cursor += width;
+            }
+        };
+        int left[4]{};
+        int right[3]{};
+        int leftCount = 0;
+        int rightCount = 0;
+        for (int i = 0; i < 7; ++i)
+            if (state.HasToolbarSection(sections[i]))
+            {
+                if (i < 4) left[leftCount++] = i;
+                else right[rightCount++] = i;
+            }
+        drawSide(left, leftCount, origin.x);
+        drawSide(right, rightCount, origin.x + available - sideWidth);
         if (state.GetToolbarVisibility().playControls)
         {
+            ImGui::SetCursorScreenPos(ImVec2(origin.x + (available - playWidth) * .5f,
+                origin.y));
             const bool canPlay = buildManager &&
                 (playState == PlayState::Stopped ||
                     playState == PlayState::BuildFailed ||
@@ -73,15 +194,8 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
             if (ImGui::SmallButton("Stop##ToolbarStop"))
                 buildManager->Stop();
             ImGui::EndDisabled();
-            if (ImGui::GetContentRegionAvail().x >= 100.f)
-                ImGui::SameLine();
         }
-        state.DrawGlobalToolbar(m_ui);
-        if (state.HasToolbarToolRow())
-        {
-            ImGui::Separator();
-            state.DrawToolbarTools(m_ui);
-        }
+        ImGui::PopStyleVar();
         ImGui::End();
     }
 }
@@ -114,12 +228,14 @@ void ImGuiPanelHost::DrawPanels(EditorState& state)
     // after traversal, because push_back can invalidate this vector's iterators.
     state.ProcessPendingPrefabStageOpen();
     state.ProcessPendingSceneAssetDocumentOpens();
+    state.ProcessPendingAnimationDocumentOpens();
     state.ProcessPendingAssetDocumentOpens();
 
     // The prefab scene tab is its own document window. Shared hierarchy and
     // properties panels retarget based on focused document.
     state.HandlePrefabPanelClosures();
     state.HandleSceneAssetDocumentClosures();
+    state.HandleAnimationDocumentClosures();
     state.HandleAssetDocumentClosures();
 
     ViewFactory* factory = state.GetViewFactory();

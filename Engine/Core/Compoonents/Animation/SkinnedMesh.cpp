@@ -185,6 +185,7 @@ SkinnedMesh::JsonValue SkinnedMesh::Serialize() const
     for (size_t i = 0; i < 16; ++i)
         bindTransform.Push(JsonValue(matrixData[i]));
     result.Set("bindMeshToModel", std::move(bindTransform));
+    if (joints.empty() && weights.empty()) return result;
     JsonValue serializedJoints = JsonValue::MakeArray();
     JsonValue serializedWeights = JsonValue::MakeArray();
     for (size_t i = 0; i < joints.size(); ++i)

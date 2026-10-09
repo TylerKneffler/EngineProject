@@ -153,6 +153,8 @@ bool EditorState::HasUnsavedChanges() const
     for (const auto& document : m_sceneAssetDocuments)
         if (document && (document->dirty || document->meshEdit.dirty))
             return true;
+    for (const auto& document : m_animationDocuments)
+        if (document && document->dirty) return true;
     for (AssetDocumentView* document : m_assetDocuments)
         if (document && document->IsDirty())
             return true;
@@ -161,6 +163,8 @@ bool EditorState::HasUnsavedChanges() const
 
 bool EditorState::HasActiveDocumentUnsavedChanges() const
 {
+    if (m_activeAnimationDocument)
+        return m_activeAnimationDocument->dirty;
     if (m_activeSceneAssetDocument)
         return m_activeSceneAssetDocument->dirty ||
             m_activeSceneAssetDocument->meshEdit.dirty;
@@ -173,7 +177,8 @@ bool EditorState::HasActiveDocumentUnsavedChanges() const
 
 bool EditorState::IsEditingPrefab() const
 {
-    return (m_activeSceneAssetDocument && m_activeSceneAssetDocument->prefab) ||
+    return m_activeAnimationDocument ||
+        (m_activeSceneAssetDocument && m_activeSceneAssetDocument->prefab) ||
         (!m_activePrefabPath.empty() && m_prefabDocumentFocused);
 }
 
@@ -1200,6 +1205,12 @@ void EditorState::SaveScene()
         return;
     }
 
+    if (m_activeAnimationDocument)
+    {
+        SaveAnimationDocument(*m_activeAnimationDocument);
+        return;
+    }
+
     if (SkeletonEditSession* skeleton = ActiveSkeletonEditSession())
         FinishSkeletonPaintStroke(*skeleton);
 
@@ -1346,6 +1357,10 @@ void EditorState::SaveAll()
         if (document && (document->dirty || document->meshEdit.dirty))
             SaveSceneAssetDocument(*document);
 
+    for (auto& document : m_animationDocuments)
+        if (document && document->dirty)
+            SaveAnimationDocument(*document);
+
     if (!m_activePrefabPath.empty())
     {
         const bool previousFocus = m_prefabDocumentFocused;
@@ -1369,6 +1384,13 @@ void EditorState::SaveAll()
 
 std::string EditorState::GetActiveDocumentName() const
 {
+    if (m_activeAnimationDocument)
+    {
+        std::string title = "Animation: " + std::filesystem::path(
+            m_activeAnimationDocument->path).filename().string();
+        if (m_activeAnimationDocument->dirty) title += " *";
+        return title;
+    }
     if (m_activeSceneAssetDocument)
     {
         std::string title = std::filesystem::path(
@@ -2324,9 +2346,11 @@ void EditorState::SetActiveSceneAssetDocument(SceneAssetDocument* document,
 {
     if (!refresh && m_activeSceneAssetDocument == document &&
         !m_activeAssetDocument &&
+        !m_activeAnimationDocument &&
         m_prefabDocumentFocused == (document && document->prefab))
         return;
     m_activeSceneAssetDocument = document;
+    m_activeAnimationDocument = nullptr;
     m_activeAssetDocument = nullptr;
     m_prefabDocumentFocused = document && document->prefab;
     const auto scene = document ? document->scene.get() : m_scene.get();
@@ -3436,6 +3460,7 @@ void EditorState::WireupCallbacks()
                 }();
                 if (lowerExtension != ".scene" &&
                     lowerExtension != ".prefab" &&
+                    lowerExtension != ".rig" &&
                     lowerExtension != ".xml")
                     continue;
 
@@ -3586,7 +3611,11 @@ void EditorState::WireupCallbacks()
             scene->FocusEditorCamera(obj);
     };
     m_viewFactory->OnHierarchyChanged = [this]() {
-        if (m_activeSceneAssetDocument)
+        if (m_activeAnimationDocument)
+        {
+            if (m_renderer) m_renderer->MarkDirty();
+        }
+        else if (m_activeSceneAssetDocument)
         {
             SceneAssetDocument& document = *m_activeSceneAssetDocument;
             if (document.objectStage || document.skeletonStage)
@@ -3636,7 +3665,9 @@ void EditorState::WireupCallbacks()
         }
     };
     m_viewFactory->OnPropertiesChanged = [this]() {
-        if (m_activeSceneAssetDocument)
+        if (m_activeAnimationDocument)
+            m_renderer->MarkDirty();
+        else if (m_activeSceneAssetDocument)
             m_renderer->MarkDirty();
         else if (m_prefabDocumentFocused)
             SetPrefabDirty(true);
@@ -3882,6 +3913,8 @@ Engine::Core::Object* EditorState::InstantiateAsset(const std::string& path, boo
 
 Engine::Scene::Scene* EditorState::GetActiveDocumentScene() const
 {
+    if (m_activeAnimationDocument && m_activeAnimationDocument->poseScene)
+        return m_activeAnimationDocument->poseScene.get();
     if (m_activeSceneAssetDocument && m_activeSceneAssetDocument->scene)
         return m_activeSceneAssetDocument->scene.get();
     if (m_prefabDocumentFocused && m_prefabScene)
@@ -3894,8 +3927,10 @@ void EditorState::SetPrefabDocumentFocused(bool focused)
     const bool nextFocused = focused && m_prefabScene && m_prefabSceneView;
     const bool contextChanged = m_prefabDocumentFocused != nextFocused ||
         m_activeAssetDocument != nullptr ||
+        m_activeAnimationDocument != nullptr ||
         (nextFocused && m_activeSceneAssetDocument != nullptr);
     m_activeAssetDocument = nullptr;
+    m_activeAnimationDocument = nullptr;
     if (nextFocused)
         m_activeSceneAssetDocument = nullptr;
     m_prefabDocumentFocused = nextFocused;
@@ -3983,6 +4018,7 @@ void EditorState::MarkSceneEdited()
 
 void EditorState::TrackSceneChanges(bool allowHistory, bool editInProgress)
 {
+    if (m_activeAnimationDocument) return;
     if (m_activeSceneAssetDocument && m_activeSceneAssetDocument->scene)
     {
         if (m_activeSceneAssetDocument->previewAnimation)
@@ -4097,6 +4133,8 @@ void EditorState::CommitPendingHistoryEdit()
 
 void EditorState::Undo()
 {
+    if (m_activeAnimationDocument)
+    { StepAnimationHistory(*m_activeAnimationDocument, false); return; }
     if (ApplySkeletonHistory(false)) return;
     if (ApplyMeshHistory(false)) return;
     if (m_activeSceneAssetDocument)
@@ -4136,6 +4174,8 @@ void EditorState::Undo()
 
 void EditorState::Redo()
 {
+    if (m_activeAnimationDocument)
+    { StepAnimationHistory(*m_activeAnimationDocument, true); return; }
     if (ApplySkeletonHistory(true)) return;
     if (ApplyMeshHistory(true)) return;
     if (m_activeSceneAssetDocument)
@@ -4172,6 +4212,8 @@ void EditorState::Redo()
 
 bool EditorState::CanUndo() const
 {
+    if (m_activeAnimationDocument)
+        return !m_activeAnimationDocument->undo.empty();
     const MeshEditSession* edit = m_activeSceneAssetDocument
         ? &m_activeSceneAssetDocument->meshEdit
         : (m_prefabDocumentFocused && m_prefabScene
@@ -4190,6 +4232,8 @@ bool EditorState::CanUndo() const
 
 bool EditorState::CanRedo() const
 {
+    if (m_activeAnimationDocument)
+        return !m_activeAnimationDocument->redo.empty();
     const MeshEditSession* edit = m_activeSceneAssetDocument
         ? &m_activeSceneAssetDocument->meshEdit
         : (m_prefabDocumentFocused && m_prefabScene

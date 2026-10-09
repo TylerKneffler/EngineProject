@@ -276,4 +276,20 @@ std::unique_ptr<SceneView> ViewFactory::CreateSceneView(
     view->OnDeleteSelectionRequested = OnDeleteSelectionRequested;
     return view;
 }
+
+std::unique_ptr<AnimationView> ViewFactory::CreateAnimationView(
+    Engine::Scene::Scene* scene, const std::string& title)
+{
+    if (!scene || !m_renderer || !CanCreate3DView()) return nullptr;
+    void* deviceHandle = m_renderer->GetNativeDeviceHandle();
+    if (!deviceHandle) return nullptr;
+    auto [handles, slot] = m_renderer->AllocateSrvSlot();
+    auto view = std::make_unique<AnimationView>();
+    view->SetViewBackend(m_renderer->CreateViewBackend());
+    view->SetTitle(title);
+    view->SetDefaultDockArea(EditorPanelDockArea::MainDocument);
+    view->Init(deviceHandle, 1280, 720, handles.first, handles.second,
+        slot, scene, m_settings);
+    return view;
+}
 }

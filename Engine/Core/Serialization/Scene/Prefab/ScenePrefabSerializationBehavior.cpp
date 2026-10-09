@@ -24,6 +24,7 @@
 #include "Core/Compoonents/Animation/AnimationManager.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
+#include "Core/Model/RigAsset.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
 #include <pugixml.hpp>
 #include <fstream>
@@ -41,13 +42,73 @@
 
 namespace Engine::Serialization
 {
+namespace
+{
+bool SaveRigAssets(const Engine::Core::Object& object,
+    const std::string& prefabPath)
+{
+    for (const auto* component : object.Components)
+        if (const auto* skeleton = dynamic_cast<const
+                Engine::Components::Skeleton*>(component);
+            skeleton && !skeleton->rigPath.empty())
+        {
+            const auto* scene = object.GetScene();
+            if (!scene) return false;
+            auto rig = Engine::Model::RigAsset::Capture(*scene, *skeleton);
+            std::filesystem::path referencedPrefab(prefabPath);
+            const std::filesystem::path storedRig(skeleton->rigPath);
+            if (storedRig.is_relative() && !storedRig.parent_path().empty())
+            {
+                const auto rigDirectory = std::filesystem::path(
+                    Engine::Components::Mesh::ResolveFilePath(
+                        storedRig.parent_path().string()));
+                const auto prefabDirectory = std::filesystem::path(
+                    Engine::Components::Mesh::ResolveFilePath(
+                        referencedPrefab.parent_path().string()));
+                std::error_code directoryError;
+                if (std::filesystem::equivalent(rigDirectory,
+                        prefabDirectory, directoryError) && !directoryError)
+                    referencedPrefab = storedRig.parent_path() /
+                        referencedPrefab.filename();
+            }
+            rig.prefabPath = referencedPrefab.generic_string();
+            if (!rig.Save(skeleton->rigPath)) return false;
+        }
+    for (const auto* child : object.Children)
+        if (child && !child->Prefab && !SaveRigAssets(*child, prefabPath))
+            return false;
+    return true;
+}
+
+void RemoveRigBackedInlineData(JsonValue& object)
+{
+    auto& components = object["components"];
+    for (size_t i = 0; i < components.ArraySize(); ++i)
+    {
+        auto& component = components.ArrayAt(i);
+        if (component["type"].AsString() == "Skeleton" &&
+            !component["rigPath"].AsString().empty())
+        {
+            component.Erase("joints");
+            component.Erase("inverseBindMatrices");
+        }
+    }
+    auto& children = object["children"];
+    for (size_t i = 0; i < children.ArraySize(); ++i)
+        if (children.ArrayAt(i)["components"].IsArray())
+            RemoveRigBackedInlineData(children.ArrayAt(i));
+}
+}
+
 bool SceneSerializer::SavePrefab(const Engine::Core::Object& object, const std::string& path,
     bool preserveRootTransform)
 {
+    if (!SaveRigAssets(object, path)) return false;
     JsonValue root = JsonValue::MakeObject();
     root.Set("version", JsonValue(1));
     root.Set("type", JsonValue(std::string("prefab")));
     JsonValue objectNode = Detail::SceneObjectBehavior::SerializeObject(object, false);
+    RemoveRigBackedInlineData(objectNode);
     if (preserveRootTransform && std::filesystem::is_regular_file(path))
     {
         try

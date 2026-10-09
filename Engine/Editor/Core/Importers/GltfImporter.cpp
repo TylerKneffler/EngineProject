@@ -4,6 +4,7 @@
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Animation/ModelAnimation.h"
+#include "Core/Model/RigAsset.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
@@ -865,6 +866,23 @@ Engine::Model::ModelImportResult GltfImporter::Import(
         }
 
         const fs::path prefabPath = output / (modelName + ".prefab");
+        for (auto* component : prefabRoot->Components)
+            if (auto* skeleton = dynamic_cast<Engine::Components::Skeleton*>(component))
+            {
+                const fs::path rigPath = output / (modelName + "_skin_" +
+                    std::to_string(skeleton->skinIndex) + ".rig");
+                auto rig = Engine::Model::RigAsset::Capture(prefabScene,
+                    *skeleton);
+                rig.prefabPath = prefabPath.generic_string();
+                if (!rig.Save(rigPath.string()))
+                    throw std::runtime_error("Could not save rig: " + rigPath.string());
+                skeleton->rigPath = rigPath.generic_string();
+                if (manager) manager->rigPaths.push_back(skeleton->rigPath);
+                Engine::Core::AssetRecord::Ensure(rigPath, source,
+                    { { "importer", std::string("gltf-rig") },
+                      { "skinIndex", static_cast<double>(skeleton->skinIndex) } });
+            }
+
         if (!Engine::Serialization::SceneSerializer::SavePrefab(*prefabRoot, prefabPath.string()))
             throw std::runtime_error("Could not save prefab: " + prefabPath.string());
         Engine::Core::AssetRecord::Ensure(prefabPath, source,

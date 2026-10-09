@@ -1,6 +1,7 @@
 #include "Editor/Core/SkeletonBindPose.h"
 #include "Editor/Core/MeshEditSnapshot.h"
 #include "Editor/Core/SnapshotHistory.h"
+#include "Editor/Core/AnimationClipEditing.h"
 #include "Editor/Core/View/Templates/EditModes/Skeleton/SkinBindingWeights.h"
 #include "Editor/Core/View/Templates/EditModes/Skeleton/WeightInfluence.h"
 #include "Editor/Core/View/Templates/EditModes/Skeleton/MirrorWeightPaint.h"
@@ -11,15 +12,19 @@
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Model/RigAsset.h"
 #include "Core/ComponentReference.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <deque>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <glm/gtc/matrix_inverse.hpp>
 
 #define CHECK(condition) do { if (!(condition)) { \
@@ -117,11 +122,13 @@ int main()
         ("skeleton-authoring-" + std::to_string(
             std::chrono::steady_clock::now().time_since_epoch().count()) +
             ".mesh");
+    const auto rigPath = path.parent_path() / (path.stem().string() + ".rig");
     struct RemoveTemp
     {
         std::filesystem::path path;
         ~RemoveTemp() { std::error_code ignored; std::filesystem::remove(path, ignored); }
     } cleanup{ path };
+    RemoveTemp removeRig{ rigPath };
     std::vector<Mesh::Vertex> vertices(3);
     vertices[0].pos[0] = -1.f;
     vertices[1].pos[0] = 1.f;
@@ -207,7 +214,51 @@ int main()
     channel.times = { 0.f, 1.f };
     channel.values = { 0.f, 2.f, 0.f, 0.f, 4.f, 0.f };
     clip.channels.push_back(channel);
+    {
+        namespace Keys = Engine::Editor::AnimationClipEditing;
+        Engine::Model::AnimationClip authored = clip;
+        CHECK(Keys::UpsertBonePose(authored, 1, .5f,
+            { 0.f, 3.f, 0.f }, glm::quat(glm::vec3(0.f, .4f, 0.f)),
+            { 1.f, 1.f, 1.f }));
+        CHECK(Keys::IsKeyed(authored, 1, .5f));
+        CHECK(Keys::NearestKeyTime(authored, 1, .51f, .02f) == .5f);
+        CHECK(Keys::KeyTimes(authored, 1).size() == 3);
+        CHECK(authored.channels.size() == 3);
+        CHECK(authored.channels[0].times ==
+            std::vector<float>({ 0.f, .5f, 1.f }));
+        CHECK(Near(authored.channels[0].values[4], 3.f));
+        CHECK(Keys::UpsertBonePose(authored, 1, .5f,
+            { 0.f, 3.5f, 0.f }, glm::quat(glm::vec3(0.f, .4f, 0.f)),
+            { 1.f, 1.f, 1.f }));
+        CHECK(authored.channels[0].times.size() == 3);
+        CHECK(Near(authored.channels[0].values[4], 3.5f));
+        Engine::Model::AnimationClip roundtrip;
+        roundtrip.Deserialize(authored.Serialize());
+        CHECK(Keys::IsKeyed(roundtrip, 1, .5f));
+        CHECK(Keys::DeleteBoneKey(roundtrip, 1, .5f));
+        CHECK(!Keys::IsKeyed(roundtrip, 1, .5f));
+        CHECK(roundtrip.channels[0].times.size() == 2);
+    }
     animation->clips.push_back(clip);
+    {
+        auto captured = Engine::Model::RigAsset::Capture(scene, *skeleton);
+        CHECK(captured.skinIndex == 3);
+        CHECK(captured.joints.size() == 2);
+        CHECK(captured.joints[1].nodeIndex == 1);
+        CHECK(captured.joints[1].name == "Elbow");
+        CHECK(!captured.meshNames.empty());
+        captured.prefabPath = "Assets/Prefabs/Rig.prefab";
+        CHECK(captured.Save(rigPath.string()));
+        auto loaded = Engine::Model::RigAsset::Load(rigPath.string());
+        CHECK(loaded && loaded->joints.size() == 2);
+        CHECK(loaded->prefabPath == captured.prefabPath);
+        CHECK(loaded->joints[1].parentNodeIndex == 0);
+        CHECK(loaded->meshNames == captured.meshNames);
+        skeleton->rigPath = rigPath.string();
+        animation->rigPaths.push_back(rigPath.string());
+        CHECK(animation->LoadRigAssets().size() == 1);
+        CHECK(animation->Serialize()["rigPaths"].ArraySize() == 1);
+    }
     animation->clip = "Bend";
     animation->looping = false;
     animation->Start();
@@ -221,6 +272,71 @@ int main()
     animation->Tick(.25f);
     CHECK(Near(elbow->transform.position.y, 2.f));
     for (const auto& matrix : skin->BuildPalette()) CHECK(Identity(matrix));
+
+    // The Animation Editor previews a clone. Sampling and pose edits in the
+    // clone must leave the source bind transform and inverse bind unchanged.
+    {
+        Scene posePreview;
+        CHECK(Serializer::SceneSerializer::LoadFromString(
+            posePreview, scene.SaveToString(), nullptr));
+        auto* previewRig = posePreview.FindObjectByName("Rig");
+        auto* previewElbow = posePreview.FindObjectByName("Elbow");
+        CHECK(previewRig && previewElbow);
+        auto* previewAnimation = previewRig->GetComponent<AnimationManager>();
+        CHECK(previewAnimation);
+        previewAnimation->playing = false;
+        previewAnimation->holdCurrentPoseWhenStopped = false;
+        previewAnimation->looping = false;
+        previewAnimation->Start();
+        previewAnimation->time = .5f;
+        previewAnimation->Tick(0.f);
+        CHECK(Near(previewElbow->transform.position.y, 3.f));
+        CHECK(Near(elbow->transform.position.y, 2.f));
+        CHECK(Identity(skin->BuildPalette()[0]));
+    }
+    {
+        const auto prefabPath = path.parent_path() /
+            (path.stem().string() + ".prefab");
+        struct RemovePrefab
+        {
+            std::filesystem::path path;
+            ~RemovePrefab()
+            { std::error_code ignored; std::filesystem::remove(path, ignored); }
+        } removePrefab{ prefabPath };
+        Engine::Model::AnimationClip authored = clip;
+        authored.clipName = "Authored";
+        CHECK(Engine::Editor::AnimationClipEditing::UpsertBonePose(
+            authored, 1, .5f, { 0.f, 3.5f, 0.f },
+            glm::quat(glm::vec3(0.f, .4f, 0.f)), { 1.f, 1.f, 1.f }));
+        animation->clips.push_back(authored);
+        const glm::mat4 sourceBind = skeleton->inverseBindMatrices[1];
+        CHECK(Serializer::SceneSerializer::SavePrefab(*rig,
+            prefabPath.string()));
+        CHECK(skeleton->Serialize().Has("joints"));
+        std::ifstream savedPrefab(prefabPath);
+        const std::string prefabText(
+            std::istreambuf_iterator<char>{ savedPrefab }, {});
+        CHECK(prefabText.find("Skeleton.joints") == std::string::npos);
+        CHECK(prefabText.find("Skeleton.inverseBindMatrices") ==
+            std::string::npos);
+        Scene reloadedPrefab;
+        auto* restoredRoot = Serializer::SceneSerializer::InstantiatePrefab(
+            reloadedPrefab, prefabPath.string(), nullptr);
+        CHECK(restoredRoot);
+        auto* restoredManager = restoredRoot->GetComponent<AnimationManager>();
+        auto* restoredSkeleton = restoredRoot->GetComponent<Skeleton>();
+        CHECK(restoredManager && restoredSkeleton);
+        CHECK(restoredSkeleton->rigPath == rigPath.string());
+        CHECK(restoredManager->LoadRigAssets().size() == 1);
+        const auto* restoredClip = restoredManager->FindClip("Authored");
+        CHECK(restoredClip);
+        CHECK(Engine::Editor::AnimationClipEditing::IsKeyed(
+            *restoredClip, 1, .5f));
+        CHECK(restoredSkeleton->inverseBindMatrices[1] == sourceBind);
+        CHECK(Near(reloadedPrefab.FindObjectByName("Elbow")
+            ->transform.position.y, 2.f));
+        CHECK(Near(elbow->transform.position.y, 2.f));
+    }
 
     // Weight Paint uses the same static pose, even while weights change.
     scene.SetEditorWeightPaint(mesh, 1);
@@ -359,5 +475,106 @@ int main()
         weightUndo, weightRedo, weightBaseline));
     CHECK(Engine::Editor::CaptureMeshSnapshot(*loadedMesh) == assignedWeights);
     CHECK(weightUndo.back() == "invalid mesh snapshot");
+
+    // Two skins can share one model root without their mesh bindings crossing.
+    {
+        Scene multi;
+        auto* root = multi.AddObject("Two Rigs");
+        auto* sharedModel = root->AddComponent<Model>();
+        auto* first = root->AddComponent<Skeleton>();
+        auto* second = root->AddComponent<Skeleton>();
+        first->skinIndex = 0;
+        second->skinIndex = 1;
+        first->jointNodes = { 0 };
+        second->jointNodes = { 1 };
+        first->inverseBindMatrices = { glm::mat4(1.f) };
+        second->inverseBindMatrices = { glm::mat4(1.f) };
+        auto* left = multi.AddObject("Left Joint");
+        auto* right = multi.AddObject("Right Joint");
+        CHECK(multi.MoveObject(left, root, Scene::ObjectPlacement::AsChild));
+        CHECK(multi.MoveObject(right, root, Scene::ObjectPlacement::AsChild));
+        sharedModel->BindNode(0, left);
+        sharedModel->BindNode(1, right);
+        for (int index = 0; index < 2; ++index)
+        {
+            auto* object = multi.AddObject(index == 0 ? "Left Mesh" : "Right Mesh");
+            CHECK(multi.MoveObject(object, root,
+                Scene::ObjectPlacement::AsChild));
+            auto* bound = object->AddComponent<SkinnedMesh>();
+            bound->skinIndex = index;
+            bound->skeletonReference = Engine::Core::CaptureComponentReference(
+                index == 0 ? first : second, "Skeleton");
+            CHECK(bound->ResolveSkeleton() ==
+                (index == 0 ? first : second));
+        }
+        auto leftRig = Engine::Model::RigAsset::Capture(multi, *first);
+        auto rightRig = Engine::Model::RigAsset::Capture(multi, *second);
+        CHECK(leftRig.rigIndex == 0 && rightRig.rigIndex == 1);
+        CHECK(leftRig.meshNames == std::vector<std::string>{ "Left Mesh" });
+        CHECK(rightRig.meshNames == std::vector<std::string>{ "Right Mesh" });
+        Scene restored;
+        CHECK(Serializer::SceneSerializer::LoadFromString(
+            restored, multi.SaveToString(), nullptr));
+        auto* restoredRoot = restored.FindObjectByName("Two Rigs");
+        CHECK(restoredRoot && restoredRoot->Components.size() >= 3);
+        int skeletonCount = 0;
+        for (auto* component : restoredRoot->Components)
+            if (dynamic_cast<Skeleton*>(component)) ++skeletonCount;
+        CHECK(skeletonCount == 2);
+        auto* restoredRight = restored.FindObjectByName("Right Mesh");
+        CHECK(restoredRight && restoredRight->GetComponent<SkinnedMesh>());
+        CHECK(restoredRight->GetComponent<SkinnedMesh>()
+            ->ResolveSkeleton()->skinIndex == 1);
+    }
+
+    // Bundled scenes instantiate these prefabs, so their rig files must load
+    // without the removed inline joint and inverse-bind arrays.
+    for (const char* name : { "Fox", "FoxRagdoll" })
+    {
+        const std::string prefab = std::string(
+            "Engine/Core/Assets/Prefabs/Fox/") + name + ".prefab";
+        Scene bundle;
+        auto* root = Serializer::SceneSerializer::InstantiatePrefab(
+            bundle, prefab, nullptr);
+        CHECK(root);
+        auto* boundSkeleton = root->GetComponent<Skeleton>();
+        auto* boundManager = root->GetComponent<AnimationManager>();
+        CHECK(boundSkeleton && boundManager);
+        CHECK(!boundSkeleton->rigPath.empty());
+        auto rigAsset = Engine::Model::RigAsset::Load(boundSkeleton->rigPath);
+        CHECK(rigAsset && !rigAsset->meshNames.empty());
+        CHECK(boundSkeleton->jointNodes.size() == rigAsset->joints.size());
+        CHECK(boundSkeleton->inverseBindMatrices.size() ==
+            rigAsset->joints.size());
+        CHECK(std::find(boundManager->rigPaths.begin(),
+            boundManager->rigPaths.end(), boundSkeleton->rigPath) !=
+            boundManager->rigPaths.end());
+        bool hasBoundMesh = false;
+        for (const auto& object : bundle.GetObjects())
+            if (object)
+                if (auto* bound = object->GetComponent<SkinnedMesh>();
+                    bound && bound->ResolveSkeleton() == boundSkeleton)
+                    hasBoundMesh = true;
+        CHECK(hasBoundMesh);
+    }
+    for (const char* scenePath : {
+            "Engine/Core/Assets/Scenes/Physics/fox_procedural_walk.scene",
+            "Engine/Core/Assets/Scenes/Portals/animated_fox_portal_test.scene",
+            "Engine/Core/Assets/Scenes/Showcases/animation_showcase.scene",
+            "Engine/Core/Assets/Scenes/Physics/fox_ragdoll.scene",
+            "Engine/Core/Assets/Scenes/Physics/fox_ragdoll_mesh.scene" })
+    {
+        Scene bundledScene;
+        CHECK(Serializer::SceneSerializer::Load(
+            bundledScene, scenePath, nullptr));
+        bool hasRig = false;
+        for (const auto& object : bundledScene.GetObjects())
+            if (object)
+                if (auto* bundledSkeleton = object->GetComponent<Skeleton>();
+                    bundledSkeleton && !bundledSkeleton->rigPath.empty() &&
+                    !bundledSkeleton->ResolveJoints().empty())
+                    hasRig = true;
+        CHECK(hasRig);
+    }
     return 0;
 }
