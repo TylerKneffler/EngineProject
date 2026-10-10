@@ -208,7 +208,8 @@ FetchContent_MakeAvailable(glm)
 FetchContent_Declare(
     imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG        docking
+    # Pin the docking revision: newer/older branch tips can change ImGuiStyle fields.
+    GIT_TAG        83f668625ad45364de71d385aeb6a5dd04bee02e
 )
 FetchContent_MakeAvailable(imgui)
 
