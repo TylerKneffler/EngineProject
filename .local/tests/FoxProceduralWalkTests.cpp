@@ -89,7 +89,13 @@ int main()
     glm::vec3 firstRelativeFoot(0.f);
     float maxRelativeFootMotion = 0.f;
     float minRootY = initial.y, maxRootY = initial.y;
+    float maxBodyTilt = 0.f;
+    float deepestPawPenetration = 0.f;
+    float worstPenetrationRatio = 0.f;
     float maxCyclePhaseError = 0.f;
+    std::array<double, 4> poseToIKPercentSum {};
+    std::array<float, 4> poseToIKPercentMax {};
+    std::array<int, 4> poseToIKPeakFrame {};
     double updateMilliseconds = 0.0;
     const auto trackPhase = [&]()
     {
@@ -114,6 +120,16 @@ int main()
             updateMilliseconds += std::chrono::duration<double,
                 std::milli>(std::chrono::steady_clock::now() - begin).count();
         trackPhase();
+        for (unsigned pawIndex = 0; pawIndex < 4; ++pawIndex)
+        {
+            const float percent = footIK->GetLeg(pawIndex).lastPoseToIKPercent;
+            poseToIKPercentSum[pawIndex] += percent;
+            if (percent > poseToIKPercentMax[pawIndex])
+            {
+                poseToIKPercentMax[pawIndex] = percent;
+                poseToIKPeakFrame[pawIndex] = frame;
+            }
+        }
         const glm::vec3 root = fox->transform.GetWorldPosition();
         const glm::vec3 relativeFoot =
             foot->transform.GetWorldPosition() - root;
@@ -122,6 +138,9 @@ int main()
             glm::distance(relativeFoot, firstRelativeFoot));
         minRootY = std::min(minRootY, root.y);
         maxRootY = std::max(maxRootY, root.y);
+        maxBodyTilt = std::max(maxBodyTilt, std::acos(std::clamp(
+            (glm::quat(fox->transform.rotation) *
+                glm::vec3(0.f, 1.f, 0.f)).y, -1.f, 1.f)));
         for (unsigned riseIndex = 0; riseIndex < rises.size(); ++riseIndex)
         {
             const auto* rise = rises[riseIndex];
@@ -133,6 +152,15 @@ int main()
                 const auto* paw = footIK->GetLeg(pawIndex).foot;
                 const auto& leg = footIK->GetLeg(pawIndex);
                 const glm::vec3 position = paw->transform.GetWorldPosition();
+                if (std::abs(position.x - center.x) < size.x * 0.45f &&
+                    std::abs(position.z - center.z) < size.z * 0.45f)
+                {
+                    deepestPawPenetration = std::max(
+                        deepestPawPenetration, top - position.y);
+                    worstPenetrationRatio = std::max(
+                        worstPenetrationRatio,
+                        (top - position.y) / size.y);
+                }
                 if (leg.planted && leg.supportBody &&
                     leg.supportBody->Owner == rise &&
                     std::abs(position.x - center.x) < size.x * 0.5f &&
@@ -197,6 +225,23 @@ int main()
         "Fox paw height errors on platforms: %.3f %.3f %.3f\n",
         bestPawHeightError[0], bestPawHeightError[1],
         bestPawHeightError[2]);
+    std::fprintf(stderr,
+        "Fox body tilt=%.3f paw penetration=%.3f (%.2f%% of rise)\n",
+        maxBodyTilt, deepestPawPenetration,
+        worstPenetrationRatio * 100.f);
+    std::fprintf(stderr,
+        "Fox animated pose to IK paw displacement (%% of leg length): "
+        "front R %.2f avg/%.2f max (frame %d), "
+        "front L %.2f/%.2f (%d), rear R %.2f/%.2f (%d), "
+        "rear L %.2f/%.2f (%d)\n",
+        poseToIKPercentSum[0] / 360.0, poseToIKPercentMax[0],
+        poseToIKPeakFrame[0],
+        poseToIKPercentSum[1] / 360.0, poseToIKPercentMax[1],
+        poseToIKPeakFrame[1],
+        poseToIKPercentSum[2] / 360.0, poseToIKPercentMax[2],
+        poseToIKPeakFrame[2],
+        poseToIKPercentSum[3] / 360.0, poseToIKPercentMax[3],
+        poseToIKPeakFrame[3]);
     std::fprintf(stderr, "Fox foot IK: plants=%llu,%llu,%llu,%llu\n",
         static_cast<unsigned long long>(footIK->GetLeg(0).plantSequence),
         static_cast<unsigned long long>(footIK->GetLeg(1).plantSequence),
@@ -207,7 +252,8 @@ int main()
         std::abs(walker->GetGaitPeriod() -
             walkDuration / animation->speed) < 0.001f &&
         maxCyclePhaseError < 0.01f && maxRelativeFootMotion > 0.05f &&
-        maxRootY - minRootY < 0.01f &&
+        maxRootY - minRootY > 0.2f && maxBodyTilt > 0.05f &&
+        worstPenetrationRatio < 0.01f &&
         afterCourse.z < initial.z - 8.f &&
         camera->transform.GetWorldPosition().z < cameraInitial.z - 34.f &&
         lowArrivalError < 0.02f && highArrivalError < 0.02f &&
@@ -219,6 +265,10 @@ int main()
         footIK->GetLeg(1).plantSequence > 1 &&
         footIK->GetLeg(2).plantSequence > 1 &&
         footIK->GetLeg(3).plantSequence > 1 &&
+        footIK->GetLeg(0).plantSequence < 40 &&
+        footIK->GetLeg(1).plantSequence < 40 &&
+        footIK->GetLeg(2).plantSequence < 40 &&
+        footIK->GetLeg(3).plantSequence < 40 &&
         repeatedRootZ < -34.f && repeatedFloorAZ < -90.f &&
         floorHasBounds && repeatedRootZ > floorMin.z + 2.f &&
         repeatedRootZ < floorMax.z - 2.f &&
@@ -313,6 +363,38 @@ int main()
         std::min(phaseDifference, 1.f - phaseDifference) < 0.01f &&
         std::abs(normalAnimation->speed * normalWalker->strideDistance /
             walkDuration - 1.335f) < 0.001f;
+    Engine::Scene::Scene wiggleScene, stillScene;
+    if (!Engine::Serialization::SceneSerializer::Load(wiggleScene,
+            "Engine/Core/Assets/Scenes/Physics/fox_procedural_walk.scene",
+            nullptr) ||
+        !Engine::Serialization::SceneSerializer::Load(stillScene,
+            "Engine/Core/Assets/Scenes/Physics/fox_procedural_walk.scene",
+            nullptr)) return 5;
+    auto* movingFox = wiggleScene.FindObjectByName("Fox");
+    auto* stillFox = stillScene.FindObjectByName("Fox");
+    auto* movingTail = movingFox ? movingFox->FindObjectInChildrenByName(
+        "b_Tail02_013") : nullptr;
+    auto* stillTail = stillFox ? stillFox->FindObjectInChildrenByName(
+        "b_Tail02_013") : nullptr;
+    if (!movingTail || !stillTail) return 5;
+    for (auto* bone : stillFox->GetComponentsInChildren<IKBone>())
+        bone->wiggleEnabled = false;
+    wiggleScene.Start();
+    stillScene.Start();
+    float maxWiggleDifference = 0.f;
+    for (int frame = 0; frame < 90; ++frame)
+    {
+        wiggleScene.Update(1.f / 60.f);
+        stillScene.Update(1.f / 60.f);
+        const glm::quat moving(movingTail->transform.rotation);
+        const glm::quat still(stillTail->transform.rotation);
+        const float angle = 2.f * std::acos(std::clamp(
+            std::abs(glm::dot(moving, still)), 0.f, 1.f));
+        if (!std::isfinite(angle)) return 5;
+        maxWiggleDifference = std::max(maxWiggleDifference, angle);
+    }
+    std::fprintf(stderr, "Fox tail wiggle offset=%.3f rad\n",
+        maxWiggleDifference);
     return coursePassed && pausePassed && normalArrival &&
-        speedChangePassed ? 0 : 3;
+        speedChangePassed && maxWiggleDifference > 0.005f ? 0 : 3;
 }

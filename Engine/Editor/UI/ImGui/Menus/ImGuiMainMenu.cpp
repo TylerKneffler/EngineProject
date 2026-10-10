@@ -37,6 +37,35 @@ void ImGuiMainMenu::Draw(EditorState& state, PlayState playState,
     DrawToolbarMenu(state);
     DrawRenderingMenu(state, playState);
     ImGui::EndMainMenuBar();
+    if (m_openNewAnimationPopup)
+    {
+        ImGui::OpenPopup("New Animation");
+        m_openNewAnimationPopup = false;
+    }
+    if (ImGui::BeginPopupModal("New Animation", nullptr,
+            ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::TextUnformatted("Create an animation for the selected rig.");
+        if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+        const bool submitted = ImGui::InputTextWithHint("##AnimationName",
+            "Animation name (optional)", m_newAnimationName,
+            sizeof(m_newAnimationName),
+            ImGuiInputTextFlags_EnterReturnsTrue);
+        if (submitted || ImGui::Button("Create"))
+        {
+            if (state.CreateAnimationClip(m_newAnimationName))
+                ImGui::CloseCurrentPopup();
+            else
+                m_newAnimationError = state.CanCreateAnimationClip()
+                    ? "An animation with this name already exists."
+                    : "Open an animation rig first.";
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+        if (!m_newAnimationError.empty())
+            ImGui::TextDisabled("%s", m_newAnimationError.c_str());
+        ImGui::EndPopup();
+    }
 }
 
 void ImGuiMainMenu::DrawRenderingMenu(
@@ -67,6 +96,18 @@ void ImGuiMainMenu::DrawFileMenu(EditorState& state, PlayState playState,
 {
     if (!ImGui::BeginMenu("File")) return;
     const bool busy = IsBusy(playState);
+    if (ImGui::BeginMenu("New"))
+    {
+        if (ImGui::MenuItem("Animation...", nullptr, false,
+                !busy && state.CanCreateAnimationClip()))
+        {
+            m_newAnimationName[0] = '\0';
+            m_newAnimationError.clear();
+            m_openNewAnimationPopup = true;
+        }
+        ImGui::EndMenu();
+    }
+    ImGui::Separator();
     if (busy) ImGui::BeginDisabled();
     EditorKeyBindings& keybinds = EditorKeyBindings::Get();
     const std::string undoShortcut = keybinds.ShortcutLabel(EditorCommand::Undo);
@@ -120,8 +161,7 @@ void ImGuiMainMenu::DrawViewsMenu(EditorState& state) const
     if (no3D) ImGui::BeginDisabled();
     if (ImGui::MenuItem("Scene")) OpenPanel(state, "Scene");
     if (ImGui::MenuItem("Game")) OpenPanel(state, "Game");
-    if (ImGui::MenuItem("Animation Editor", nullptr, false,
-        state.CanOpenAnimationForSelection()))
+    if (ImGui::MenuItem("Animation Editor"))
         state.OpenAnimationForSelection();
     if (no3D) ImGui::EndDisabled();
 

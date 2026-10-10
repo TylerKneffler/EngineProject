@@ -3,6 +3,7 @@
 #include "Core/Component.h"
 #include "Core/PropertyMacros.h"
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <memory>
 #include <string>
 
@@ -70,6 +71,18 @@ public:
     float springStiffness = 20.f;
     PROPERTY(Inspector, EditAnywhere, Category = "IK Bone | Joint | Spring", Range = "0, 1")
     float springDamping = 0.5f;
+    // Secondary motion follows the animated pose while the rigid body is inactive.
+    PROPERTY(Inspector, EditAnywhere, Category = "IK Bone | Wiggle")
+    bool wiggleEnabled = false;
+    PROPERTY(Inspector, EditAnywhere, Category = "IK Bone | Wiggle", ClampMin = "0")
+    float wiggleStiffness = 35.f;
+    PROPERTY(Inspector, EditAnywhere, Category = "IK Bone | Wiggle", ClampMin = "0")
+    float wiggleDamping = 8.f;
+    PROPERTY(Inspector, EditAnywhere, Category = "IK Bone | Wiggle", Range = "0, 3.14159")
+    float wiggleMaxAngle = 0.45f;
+    // Used if the bone has no child joint. Units match the authored skeleton.
+    PROPERTY(Inspector, EditAnywhere, Category = "IK Bone | Wiggle", ClampMin = "0.001")
+    float wiggleTipLength = 1.f;
     PROPERTY(Inspector, EditAnywhere, Category = "IK Bone | Joint")
     bool collideWithParent = false;
 
@@ -98,6 +111,8 @@ private:
     void ApplyGroundedPoseGravity();
     void RemoveInvalidConstraint();
     void SyncBoneFromBody();
+    void ApplyWiggle(float stepSeconds);
+    void ResetWiggle();
     glm::vec3 ApplyMeshContactTorque(const glm::vec3& torqueImpulse,
         float limitPerMass);
     glm::vec3 NativeApplyMeshContactTorque(const glm::vec3& torqueImpulse,
@@ -117,5 +132,10 @@ private:
     void BindBulletState(Engine::Physics::PhysicsComponentState* state);
     Impl* m_impl = nullptr;
     float m_influence = 1.f;
+    glm::vec3 m_wiggleTip { 0.f };
+    glm::vec3 m_wiggleVelocity { 0.f };
+    glm::quat m_wiggleBaseRotation { 1.f, 0.f, 0.f, 0.f };
+    glm::quat m_wiggleAppliedRotation { 1.f, 0.f, 0.f, 0.f };
+    bool m_wiggleInitialized = false;
 };
 }

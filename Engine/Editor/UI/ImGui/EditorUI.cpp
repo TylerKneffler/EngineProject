@@ -15,9 +15,10 @@ void EditorUI::Render(PlayState playState)
 {
     if (!m_state) return;
     m_mainMenu.Draw(*m_state, playState, m_gameBuildManager);
-    m_panelHost.DrawToolbar(*m_state, playState, m_gameBuildManager);
+    m_panelHost.ReserveToolbar(*m_state);
     m_dockspace.Draw();
     m_panelHost.Draw(*m_state);
+    m_panelHost.DrawToolbar(*m_state, playState, m_gameBuildManager);
     m_sceneLoadWarningPopup.Draw(*m_state);
     if (m_state->IsLoadingOverlayVisible())
     {

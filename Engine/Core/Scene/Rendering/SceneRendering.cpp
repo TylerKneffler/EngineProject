@@ -4636,16 +4636,22 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     // Draw scene helpers (grid) after opaque objects so blending works correctly
     if (includeEditorVisuals && settings.showGrid && m_gridPipeline)
     {
-        const glm::mat4 vp = proj * view;
-        const glm::vec3& cp = cam->Owner->transform.position;
-
         // Prepare grid constant buffer data
         GridCBData gridData{};
-        gridData.invVP = glm::inverse(vp);
-        gridData.cameraPos = { cp.x, cp.y, cp.z };
+        // Reconstruct grid rays relative to the camera. Inverting a matrix
+        // with a large camera translation loses precision near the horizon.
+        gridData.invVP = glm::inverse(proj * glm::mat4(glm::mat3(view)));
+        gridData.cameraPos = cameraPosition;
         gridData.cellSize = settings.gridCellSize;
         gridData.gridColor = { settings.gridColor.x, settings.gridColor.y, settings.gridColor.z, settings.gridOpacity };
-        gridData.axisColor = { settings.gridOriginColor.x, settings.gridOriginColor.y, settings.gridOriginColor.z, 1.f };
+        // One zoom level for the whole plane keeps the grid's hierarchy
+        // stable as the camera moves. The shader uses axisColor.a for it.
+        const float gridBaseSpacing = std::max(std::abs(settings.gridCellSize), 0.000001f);
+        const float gridZoomLevel = m_editorMode2D ? 0.f : std::clamp(
+            std::log10(std::max(std::abs(cameraPosition.y) / gridBaseSpacing,
+                0.000001f)), -6.f, 8.f);
+        gridData.axisColor = { settings.gridOriginColor.x, settings.gridOriginColor.y,
+            settings.gridOriginColor.z, gridZoomLevel };
         gridData.fadeDistance = settings.gridFadeDistance;
         gridData.nearPlane = cam->nearPlane;
         gridData.farPlane = cam->farPlane;

@@ -113,7 +113,11 @@ void FoxProceduralWalk::Start()
     m_lastStrideDistance = std::max(strideDistance, 0.01f);
     if (!Resolve()) return;
     m_startRoot = m_fox->transform.GetWorldPosition();
-    m_forward = glm::quat(m_fox->transform.rotation) *
+    m_startRotation = glm::quat(m_fox->transform.rotation);
+    m_bodyHeight = m_startRoot.y;
+    m_bodyUp = glm::vec3(0.f, 1.f, 0.f);
+    m_startGroundHeight = 0.f;
+    m_forward = m_startRotation *
         glm::vec3(0.f, 0.f, 1.f);
     m_forward.y = 0.f;
     m_forward = glm::length(m_forward) > 1e-5f
@@ -123,6 +127,9 @@ void FoxProceduralWalk::Start()
     if (auto* footIK = Owner->GetComponent<
         Engine::Components::GroundedFootIK>())
     {
+        glm::vec3 ground;
+        if (footIK->SampleGround(m_startRoot, *m_fox, ground))
+            m_startGroundHeight = ground.y;
         footIK->Clear();
         for (unsigned index = 0; index < 4; ++index)
             footIK->SetLeg(index,
@@ -195,6 +202,7 @@ void FoxProceduralWalk::Update()
     RecycleCourse();
     glm::vec3 nextRoot = m_startRoot + m_forward * m_travel;
     m_fox->transform.position = nextRoot;
+    m_fox->transform.rotation = glm::eulerAngles(m_startRotation);
     if (m_camera)
         m_camera->transform.position = m_startCamera + m_forward *
             std::max(m_travel - std::max(cameraFollowDelayDistance, 0.f), 0.f);
@@ -202,11 +210,70 @@ void FoxProceduralWalk::Update()
     if (auto* footIK = Owner->GetComponent<
         Engine::Components::GroundedFootIK>())
     {
+        // Sample under all four animated paw positions before posing the
+        // body. The front/rear and left/right differences describe the
+        // terrain under the fox, including steps that its hips must climb.
+        std::array<glm::vec3, 4> pawPositions;
+        std::array<float, 4> heights;
+        for (unsigned index = 0; index < m_feet.size(); ++index)
+        {
+            pawPositions[index] = m_feet[index]->transform.GetWorldPosition();
+            glm::vec3 ground;
+            heights[index] = footIK->SampleGround(
+                glm::vec3(pawPositions[index].x, m_startRoot.y,
+                    pawPositions[index].z), *m_fox, ground)
+                ? ground.y : m_startGroundHeight;
+        }
+        const glm::vec3 right = glm::normalize(glm::cross(
+            m_forward, glm::vec3(0.f, 1.f, 0.f)));
+        const auto averageAxis = [&](unsigned first, unsigned second,
+            const glm::vec3& axis)
+        {
+            return 0.5f * (glm::dot(pawPositions[first], axis) +
+                glm::dot(pawPositions[second], axis));
+        };
+        const float front = 0.5f * (heights[0] + heights[1]);
+        const float rear = 0.5f * (heights[2] + heights[3]);
+        const float rightHeight = 0.5f * (heights[0] + heights[2]);
+        const float leftHeight = 0.5f * (heights[1] + heights[3]);
+        const float length = std::max(averageAxis(0, 1, m_forward) -
+            averageAxis(2, 3, m_forward), 0.25f);
+        const float width = std::max(averageAxis(0, 2, right) -
+            averageAxis(1, 3, right), 0.25f);
+        const float meanHeight = 0.25f * (heights[0] + heights[1] +
+            heights[2] + heights[3]);
+        const float highest = *std::max_element(heights.begin(),
+            heights.end());
+        // Bias the torso toward the highest support so the rising paw has
+        // enough reach before all four legs are on a step.
+        const float rise = glm::mix(meanHeight, highest, 0.5f) -
+            m_startGroundHeight;
+        const float foreSlope = std::clamp((front - rear) / length,
+            -0.55f, 0.55f);
+        const float sideSlope = std::clamp((rightHeight - leftHeight) /
+            width, -0.4f, 0.4f);
+        const glm::vec3 targetUp = glm::normalize(
+            glm::vec3(0.f, 1.f, 0.f) - m_forward * foreSlope -
+            right * sideSlope);
+        const float response = 1.f - std::exp(-7.f * dt);
+        m_bodyHeight = glm::mix(m_bodyHeight, m_startRoot.y + rise,
+            response);
+        m_bodyUp = glm::normalize(glm::mix(m_bodyUp, targetUp, response));
+        nextRoot.y = m_bodyHeight;
+        m_fox->transform.position = nextRoot;
+        const glm::vec3 tiltAxis = glm::cross(
+            glm::vec3(0.f, 1.f, 0.f), m_bodyUp);
+        const float tilt = glm::length(tiltAxis);
+        const glm::quat tiltRotation = tilt > 1e-6f
+            ? glm::angleAxis(std::atan2(tilt, m_bodyUp.y),
+                tiltAxis / tilt)
+            : glm::quat(1.f, 0.f, 0.f, 0.f);
+        m_fox->transform.rotation = glm::eulerAngles(
+            tiltRotation * m_startRotation);
         const float cycle = m_travel / distancePerCycle;
         const std::array<float, 4> phases {
             cycle, cycle + 0.5f, cycle + 0.5f, cycle
         };
-        footIK->Solve(*m_fox, phases, 0.55f, 0.22f,
-            0.03f, 1.f, dt);
+        footIK->Solve(*m_fox, phases, 0.55f, 0.03f, 1.f, dt);
     }
 }

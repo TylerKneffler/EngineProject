@@ -15,7 +15,9 @@ enum class PlayState;
 class ImGuiPanelHost
 {
 public:
+    static void RegisterToolbarSettings();
     void Draw(EditorState& state);
+    void ReserveToolbar(EditorState& state);
     void DrawToolbar(EditorState& state, PlayState playState,
         GameBuildManager* buildManager);
 

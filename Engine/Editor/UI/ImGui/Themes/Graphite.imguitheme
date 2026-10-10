@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ImGuiTheme name="Graphite" version="1">
   <Style Alpha="1" DisabledAlpha="0.55"
-         WindowPaddingX="12" WindowPaddingY="11" WindowRounding="6" WindowBorderSize="1" WindowBorderHoverPadding="4"
+         WindowPaddingX="8" WindowPaddingY="7" WindowRounding="6" WindowBorderSize="1" WindowBorderHoverPadding="4"
          ChildRounding="4" ChildBorderSize="1" PopupRounding="5" PopupBorderSize="1"
-         FramePaddingX="9" FramePaddingY="6" FrameRounding="4" FrameBorderSize="1"
-         ItemSpacingX="9" ItemSpacingY="8" ItemInnerSpacingX="7" ItemInnerSpacingY="5"
-         CellPaddingX="6" CellPaddingY="4" IndentSpacing="20"
+         FramePaddingX="6" FramePaddingY="4" FrameRounding="4" FrameBorderSize="1"
+         ItemSpacingX="6" ItemSpacingY="5" ItemInnerSpacingX="5" ItemInnerSpacingY="3"
+         CellPaddingX="5" CellPaddingY="3" IndentSpacing="16"
          ScrollbarSize="13" ScrollbarRounding="5" ScrollbarPadding="2" GrabMinSize="10" GrabRounding="4"
          ImageRounding="4" ImageBorderSize="1"
          TabRounding="5" TabBorderSize="0" TabBarBorderSize="1" TabBarOverlineSize="3"

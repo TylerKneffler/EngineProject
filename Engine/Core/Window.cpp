@@ -76,6 +76,12 @@ Window::Window(HINSTANCE hInstance, const wchar_t* title, uint32_t width, uint32
     wc.lpfnWndProc   = WndProc;
     wc.hInstance     = hInstance;
     wc.hCursor       = LoadCursor(nullptr, IDC_ARROW);
+    // Resource 1 is supplied by the executable when an .ico is configured.
+    // Use the standard application icon for builds without one.
+    wc.hIcon         = LoadIconW(hInstance, MAKEINTRESOURCEW(1));
+    if (!wc.hIcon)
+        wc.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    wc.hIconSm = wc.hIcon;
     wc.lpszClassName = className;
     RegisterClassExW(&wc);
 

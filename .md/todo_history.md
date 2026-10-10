@@ -2,6 +2,13 @@
 
 - `[x]` Implemented and present in the repository.
 
+## 2026-10-09 Animation Editor performance
+
+- [x] Cache compatible clip mappings and per-bone key times, and cull timeline rows and key markers outside the visible area.
+- [x] Reuse preview clips during playback and scrubbing, updating playhead times and layer weights in place.
+- [x] Filter cached rig assets while searching; rescan after asset changes or an explicit refresh.
+- [x] Commit clip-duration drags as one undo entry when the drag ends.
+
 - [x] C++17 engine library, standalone game runtime, editor application, project files, project loading, project hub, standalone builds, portable exports, versioned Windows packages, and quick-start documentation.
 - [x] Scene objects, transforms, reusable components, lifecycle dispatch, scene serialization/deserialization, synchronous and asynchronous scene loading, scene switching, and play-mode scene restoration.
 - [x] Game, Scene, Hierarchy, Properties, Assets, Console, Preferences, Terminal, and Problems views with dynamically managed panels, persistent ImGui layouts, and a package-neutral editor UI facade.
@@ -107,3 +114,13 @@
 - [x] Select a second bone for mirrored strokes, map the brush through both bones' orientations and normalized lengths, keep lateral brush size unchanged, and record both sides in one stroke.
 - [x] Add skin binding tools to assign or rebind a mesh to a skeleton, generate initial weights, assign selected vertices to bones, inspect and repair unweighted vertices or missing joints, and save/reload the authored skeleton and weights. Keep shared mesh references and existing animation joint references valid, or report mappings that require repair.
 - [x] Add regression tests for save/reload, hierarchy edits, skin binding, weight operations, and undo/redo, including the static default-pose view in Skeleton Edit and Weight Paint.
+- [x] Build a separate Animation Editor for posing the skeleton and creating or editing animation clips. Keep its pose transforms and timeline separate from the Skeleton Edit bind pose and skin weights.
+- [x] Open Animation Editor from an explicitly selected skeleton or skinned mesh. Resolve that rig's model, Animation Manager, and all meshes bound to its skeleton; show the chosen rig in the editor. Support prefabs with multiple rigs without silently choosing the first skeleton or manager.
+- [x] Search the project Assets directory from the Animation Editor for rigged prefabs and open a chosen rig. Generate standalone `.rig` assets on skeletal model import or animation save, and reference them from Skeleton and Animation Manager components.
+- [x] Move bundled skeletal prefab bind data into `.rig` assets and load those rigs through scene prefab references; stop writing duplicate inline joint and inverse-bind arrays for rig-backed prefabs.
+- [x] Validate a clip's referenced bones against the selected rig before previewing or editing it. Allow clips that key only some bones. Report missing or ambiguous bone mappings and require repair before applying unresolved channels; do not treat matching node indices alone as proof that clips from different models are compatible.
+- [x] Add regression tests for explicit rig selection, multiple rigs in one prefab, sparse bone channels, incompatible clip mappings, and mapping repair across save/reload.
+- [x] Cache timeline clip mappings and per-bone key times until clip data or rig bindings change. Cull off-screen rows and key markers so paused-editor work scales with the visible timeline.
+- [x] Cache compatible preview clips instead of copying and remapping clip data on every playback or scrub sample. Update only playhead times and layer weights per frame.
+- [x] Filter the cached rig asset list while typing in the Animation Editor search field. Refresh the asset scan only when project assets change or the user requests it.
+- [x] Record one undo entry when a clip-duration drag ends, avoiding a full clip copy and scene serialization on every drag update.

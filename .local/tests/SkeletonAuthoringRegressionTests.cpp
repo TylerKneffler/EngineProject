@@ -2,6 +2,8 @@
 #include "Editor/Core/MeshEditSnapshot.h"
 #include "Editor/Core/SnapshotHistory.h"
 #include "Editor/Core/AnimationClipEditing.h"
+#include "Editor/Core/AnimationClipMapping.h"
+#include "Editor/Core/AnimationRigSelection.h"
 #include "Editor/Core/View/Templates/EditModes/Skeleton/SkinBindingWeights.h"
 #include "Editor/Core/View/Templates/EditModes/Skeleton/WeightInfluence.h"
 #include "Editor/Core/View/Templates/EditModes/Skeleton/MirrorWeightPaint.h"
@@ -149,6 +151,8 @@ int main()
     auto* skeleton = rig->AddComponent<Skeleton>();
     skeleton->modelReference =
         Engine::Core::CaptureComponentReference(model, "Model");
+    CHECK(Engine::Editor::AnimationRigSelection::ExplicitRig(rig) ==
+        skeleton);
     skeleton->skinIndex = 3;
     auto* shoulder = scene.AddObject("Shoulder");
     CHECK(scene.MoveObject(shoulder, rig, Scene::ObjectPlacement::AsChild));
@@ -215,6 +219,17 @@ int main()
     channel.values = { 0.f, 2.f, 0.f, 0.f, 4.f, 0.f };
     clip.channels.push_back(channel);
     {
+        namespace Mapping = Engine::Editor::AnimationClipMapping;
+        const auto bones = Mapping::RigBones(*skeleton);
+        CHECK(bones.size() == 2);
+        auto sparse = clip;
+        sparse.channels[0].targetPath = Mapping::NodePath(*model, 1);
+        const auto mapped = Mapping::Inspect(sparse, bones,
+            Mapping::ModelBones(*model));
+        CHECK(mapped.issues.empty());
+        CHECK(mapped.compatibleChannels == std::vector<size_t>{ 0 });
+    }
+    {
         namespace Keys = Engine::Editor::AnimationClipEditing;
         Engine::Model::AnimationClip authored = clip;
         CHECK(Keys::UpsertBonePose(authored, 1, .5f,
@@ -232,9 +247,15 @@ int main()
             { 1.f, 1.f, 1.f }));
         CHECK(authored.channels[0].times.size() == 3);
         CHECK(Near(authored.channels[0].values[4], 3.5f));
+        CHECK(Keys::UpsertBonePose(authored, 1, .337f,
+            { 0.f, 2.8f, 0.f }, glm::quat(glm::vec3(0.f, .2f, 0.f)),
+            { 1.f, 1.f, 1.f }));
+        CHECK(Keys::IsKeyed(authored, 1, .337f));
         Engine::Model::AnimationClip roundtrip;
         roundtrip.Deserialize(authored.Serialize());
         CHECK(Keys::IsKeyed(roundtrip, 1, .5f));
+        CHECK(Keys::IsKeyed(roundtrip, 1, .337f));
+        CHECK(Keys::DeleteBoneKey(roundtrip, 1, .337f));
         CHECK(Keys::DeleteBoneKey(roundtrip, 1, .5f));
         CHECK(!Keys::IsKeyed(roundtrip, 1, .5f));
         CHECK(roundtrip.channels[0].times.size() == 2);
@@ -507,16 +528,113 @@ int main()
             CHECK(bound->ResolveSkeleton() ==
                 (index == 0 ? first : second));
         }
+        CHECK(Engine::Editor::AnimationRigSelection::ExplicitRig(root) ==
+            nullptr);
+        CHECK(Engine::Editor::AnimationRigSelection::ExplicitRig(
+            multi.FindObjectByName("Left Mesh")) == first);
+        CHECK(Engine::Editor::AnimationRigSelection::ExplicitRig(
+            multi.FindObjectByName("Right Mesh")) == second);
         auto leftRig = Engine::Model::RigAsset::Capture(multi, *first);
         auto rightRig = Engine::Model::RigAsset::Capture(multi, *second);
         CHECK(leftRig.rigIndex == 0 && rightRig.rigIndex == 1);
         CHECK(leftRig.meshNames == std::vector<std::string>{ "Left Mesh" });
         CHECK(rightRig.meshNames == std::vector<std::string>{ "Right Mesh" });
+        namespace Mapping = Engine::Editor::AnimationClipMapping;
+        const auto firstBones = Mapping::RigBones(*first);
+        const auto secondBones = Mapping::RigBones(*second);
+        const auto modelBones = Mapping::ModelBones(*sharedModel);
+        CHECK(firstBones.size() == 1 && secondBones.size() == 1);
+        Engine::Model::AnimationClip sparseClip;
+        sparseClip.clipName = "Sparse Left";
+        Engine::Model::AnimationChannel sparseChannel;
+        sparseChannel.nodeIndex = 0;
+        sparseChannel.targetPath = firstBones[0].path;
+        sparseChannel.times = { 0.f };
+        sparseChannel.values = { 1.f, 0.f, 0.f };
+        sparseClip.channels.push_back(sparseChannel);
+        const auto leftMapping = Mapping::Inspect(sparseClip,
+            firstBones, modelBones);
+        const auto rightMapping = Mapping::Inspect(sparseClip,
+            secondBones, modelBones);
+        CHECK(leftMapping.issues.empty() &&
+            leftMapping.compatibleChannels == std::vector<size_t>{ 0 });
+        CHECK(rightMapping.issues.empty() &&
+            rightMapping.compatibleChannels.empty());
+        CHECK(Mapping::CompatibleClip(sparseClip, rightMapping)
+            .channels.empty());
+        auto incompatible = sparseClip;
+        incompatible.channels[0].targetPath = "Foreign/Left Joint";
+        CHECK(Mapping::Inspect(incompatible, firstBones, modelBones)
+            .issues[0].kind == Mapping::IssueKind::Missing);
+        incompatible.channels[0].targetPath = firstBones[0].path;
+        incompatible.channels[0].nodeIndex = 1;
+        CHECK(Mapping::Inspect(incompatible, firstBones, modelBones)
+            .issues[0].kind == Mapping::IssueKind::IndexMismatch);
+        auto ambiguous = sparseClip;
+        auto duplicateNodes = modelBones;
+        duplicateNodes.push_back({ 9, firstBones[0].path });
+        CHECK(Mapping::Inspect(ambiguous, firstBones, duplicateNodes)
+            .issues[0].kind == Mapping::IssueKind::Ambiguous);
+        auto legacy = sparseClip;
+        legacy.channels[0].targetPath.clear();
+        CHECK(Mapping::Inspect(legacy, firstBones, modelBones)
+            .issues[0].kind == Mapping::IssueKind::Unidentified);
+        CHECK(Mapping::Repair(incompatible, 0, firstBones[0]));
+        CHECK(Mapping::Inspect(incompatible, firstBones, modelBones)
+            .issues.empty());
+        auto* manager = root->AddComponent<AnimationManager>();
+        manager->modelReference = Engine::Core::CaptureComponentReference(
+            sharedModel, "Model");
+        Engine::Model::AnimationClip restClip;
+        restClip.clipName = "Rest";
+        restClip.duration = 1.f;
+        manager->clips.push_back(restClip);
+        for (unsigned node = 0; node < 2; ++node)
+        {
+            Engine::Model::AnimationClip rigClip;
+            rigClip.clipName = node == 0 ? "Left Action" : "Right Action";
+            rigClip.duration = 1.f;
+            Engine::Model::AnimationChannel rigChannel;
+            rigChannel.nodeIndex = node;
+            rigChannel.path = Engine::Model::AnimationChannel::Path::Translation;
+            rigChannel.times = { 0.f };
+            rigChannel.values = { node == 0 ? 1.f : 2.f, 0.f, 0.f };
+            rigClip.channels.push_back(rigChannel);
+            manager->clips.push_back(rigClip);
+            AnimationManager::Layer layer;
+            layer.clip = rigClip.clipName;
+            layer.nodeMask = { node };
+            manager->layers.push_back(layer);
+        }
+        manager->clip = "Rest";
+        manager->playing = false;
+        manager->Start();
+        manager->Tick(0.f);
+        CHECK(std::abs(left->transform.position.x - 1.f) < .0001f);
+        CHECK(std::abs(right->transform.position.x - 2.f) < .0001f);
+        // A shared preview playhead must loop each selected rig at its own
+        // clip duration, even while a longer clip is still in progress.
+        manager->clips[1].duration = 4.f;
+        manager->clips[2].channels[0].times = { 0.f, 1.f };
+        manager->clips[2].channels[0].values = {
+            2.f, 0.f, 0.f, 3.f, 0.f, 0.f };
+        manager->layers[0].time = manager->layers[1].time = 3.25f;
+        manager->Tick(0.f);
+        CHECK(std::abs(manager->layers[0].time - 3.25f) < .0001f);
+        CHECK(std::abs(manager->layers[1].time - .25f) < .0001f);
+        CHECK(std::abs(right->transform.position.x - 2.25f) < .0001f);
         Scene restored;
         CHECK(Serializer::SceneSerializer::LoadFromString(
             restored, multi.SaveToString(), nullptr));
         auto* restoredRoot = restored.FindObjectByName("Two Rigs");
         CHECK(restoredRoot && restoredRoot->Components.size() >= 3);
+        auto* restoredAnimation = restoredRoot->GetComponent<AnimationManager>();
+        CHECK(restoredAnimation && restoredAnimation->clips.size() == 3);
+        CHECK(restoredAnimation->layers.size() == 2);
+        CHECK(restoredAnimation->layers[0].nodeMask ==
+            std::vector<unsigned>{ 0 });
+        CHECK(restoredAnimation->layers[1].nodeMask ==
+            std::vector<unsigned>{ 1 });
         int skeletonCount = 0;
         for (auto* component : restoredRoot->Components)
             if (dynamic_cast<Skeleton*>(component)) ++skeletonCount;
@@ -525,6 +643,23 @@ int main()
         CHECK(restoredRight && restoredRight->GetComponent<SkinnedMesh>());
         CHECK(restoredRight->GetComponent<SkinnedMesh>()
             ->ResolveSkeleton()->skinIndex == 1);
+        manager->clips.push_back(incompatible);
+        Scene repairedReload;
+        CHECK(Serializer::SceneSerializer::LoadFromString(
+            repairedReload, multi.SaveToString(), nullptr));
+        auto* repairedRoot = repairedReload.FindObjectByName("Two Rigs");
+        CHECK(repairedRoot);
+        auto* repairedManager = repairedRoot->GetComponent<AnimationManager>();
+        auto* repairedSkeleton = repairedRoot->GetComponent<Skeleton>();
+        CHECK(repairedManager && repairedSkeleton);
+        const auto* repairedClip = repairedManager->FindClip(
+            incompatible.clipName);
+        CHECK(repairedClip && repairedClip->channels[0].targetPath ==
+            firstBones[0].path);
+        CHECK(Mapping::Inspect(*repairedClip,
+            Mapping::RigBones(*repairedSkeleton),
+            Mapping::ModelBones(*repairedSkeleton->ResolveModel()))
+            .issues.empty());
     }
 
     // Bundled scenes instantiate these prefabs, so their rig files must load

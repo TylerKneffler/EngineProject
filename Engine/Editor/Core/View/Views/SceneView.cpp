@@ -16,6 +16,8 @@
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "../Focus/WindowFocusHandler.h"
+#include "imgui.h"
+#include <algorithm>
 
 namespace Engine::Editor
 {
@@ -92,6 +94,17 @@ void SceneView::DrawPanel(IEditorUi& ui)
     float orbitDX = 0.f, orbitDY = 0.f;
     float zoom = 0.f;
     float dolly = 0.f;
+
+    if (OnDrawBottomPanel)
+    {
+        const float available = ImGui::GetContentRegionAvail().y;
+        BottomPanelHeight = std::clamp(BottomPanelHeight, 130.f,
+            std::max(130.f, available - 120.f));
+        ImGui::BeginChild("##SceneViewportArea",
+            { 0.f, std::max(100.f, available - BottomPanelHeight - 8.f) },
+            false, ImGuiWindowFlags_NoScrollbar |
+                ImGuiWindowFlags_NoScrollWithMouse);
+    }
 
     const float targetAspect = m_aspectRatioMode == Engine::Model::ProjectSettings::AspectRatioMode::Free ? 0.f :
         (m_aspectRatioMode == Engine::Model::ProjectSettings::AspectRatioMode::Locked ? m_gameAspectRatio :
@@ -320,6 +333,18 @@ void SceneView::DrawPanel(IEditorUi& ui)
         !meshConsumedClick && AllowObjectTransform)
         OnObjectSelected(ScenePlacementAndPicking::PickObjectInViewport(
             *m_scene, input.mousePosInViewport, input.available));
+    if (OnDrawBottomPanel)
+    {
+        ImGui::EndChild();
+        ImGui::InvisibleButton("##AnimationPanelSplitter", { -1.f, 7.f });
+        if (ImGui::IsItemHovered() || ImGui::IsItemActive())
+            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+        if (ImGui::IsItemActive())
+            BottomPanelHeight -= ImGui::GetIO().MouseDelta.y;
+        ImGui::BeginChild("##SceneBottomPanel", { 0.f, 0.f }, false);
+        OnDrawBottomPanel(ui);
+        ImGui::EndChild();
+    }
     ui.EndWindow();
 
     if (m_scene)

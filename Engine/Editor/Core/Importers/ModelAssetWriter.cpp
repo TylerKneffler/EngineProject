@@ -1,4 +1,5 @@
 #include "ModelAssetWriter.h"
+#include "Core/AnimationClipMapping.h"
 
 #include "Core/AssetRecord.h"
 #include "Core/Compoonents/Materials/Material.h"
@@ -298,6 +299,11 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
                       { "skinIndex", static_cast<double>(skeleton->skinIndex) } });
             }
 
+        if (manager)
+            for (auto& clip : manager->clips)
+                for (auto& channel : clip.channels)
+                    channel.targetPath = AnimationClipMapping::NodePath(
+                        *modelComponent, channel.nodeIndex);
         if (!Engine::Serialization::SceneSerializer::SavePrefab(*root, prefabPath.string()))
             throw std::runtime_error("Could not save prefab");
         Engine::Core::AssetRecord::Ensure(prefabPath, source,

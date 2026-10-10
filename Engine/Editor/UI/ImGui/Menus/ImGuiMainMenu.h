@@ -1,4 +1,5 @@
 #pragma once
+#include <string>
 
 namespace Engine::Editor
 {
@@ -20,5 +21,8 @@ private:
     void DrawToolbarMenu(EditorState& state) const;
     void DrawRenderingMenu(EditorState& state, PlayState playState) const;
     void OpenPanel(EditorState& state, const char* type) const;
+    mutable bool m_openNewAnimationPopup = false;
+    mutable char m_newAnimationName[128]{};
+    mutable std::string m_newAnimationError;
 };
 }

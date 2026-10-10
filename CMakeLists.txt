@@ -373,6 +373,7 @@ target_link_libraries(Engine PUBLIC
     d3d11.lib 
     d2d1.lib 
     dwrite.lib
+    gdiplus.lib
     windowscodecs.lib
     glm::glm
     pugixml
@@ -478,6 +479,27 @@ endif()
 # ---------------------------------------------------------------------------
 # Editor — primary executable (hosts the game view)
 # ---------------------------------------------------------------------------
+# Optional .ico resources. Resource ID 1 is used by Core::Window.
+set(ENGINE_EDITOR_ICON "" CACHE STRING "Editor.exe .ico file, relative to the project root")
+set(ENGINE_GAME_ICON "" CACHE STRING "Game.exe .ico file, relative to the project root")
+function(engine_add_executable_icon target icon_path)
+    if(NOT icon_path)
+        return()
+    endif()
+    cmake_path(ABSOLUTE_PATH icon_path BASE_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        NORMALIZE OUTPUT_VARIABLE absolute_icon)
+    if(NOT EXISTS "${absolute_icon}")
+        message(FATAL_ERROR "${target} icon does not exist: ${absolute_icon}")
+    endif()
+    if(NOT absolute_icon MATCHES "\\.ico$")
+        message(FATAL_ERROR "${target} icon must be an .ico file: ${absolute_icon}")
+    endif()
+    file(TO_CMAKE_PATH "${absolute_icon}" icon_resource_path)
+    set(icon_resource "${CMAKE_CURRENT_BINARY_DIR}/${target}Icon.rc")
+    file(WRITE "${icon_resource}" "1 ICON \"${icon_resource_path}\"\n")
+    target_sources(${target} PRIVATE "${icon_resource}")
+endfunction()
+
 add_executable(Editor WIN32
     ${EDITOR_SOURCES}
     ${EDITOR_HEADERS}
@@ -486,6 +508,7 @@ add_executable(Editor WIN32
     ${PROJECT_BROWSE_FILES}
     ${PROJECT_ROOT_FILES}
 )
+engine_add_executable_icon(Editor "${ENGINE_EDITOR_ICON}")
 
 # Project scripts are also built as a reloadable module. The editor loads a
 # versioned copy so this canonical output remains writable on the next edit.
@@ -549,6 +572,7 @@ add_executable(Game WIN32
     ${ASSET_SOURCES}
     ${PROJECT_BROWSE_FILES}
 )
+engine_add_executable_icon(Game "${ENGINE_GAME_ICON}")
 source_group(TREE "${ENGINE_ROOT}" FILES ${GAME_SOURCES} ${GAME_HEADERS})
 if(ENGINE_PROJECT_DIR)
     source_group(TREE "${ENGINE_PROJECT_DIR}" PREFIX "Project" FILES

@@ -10,6 +10,7 @@
 #include "imgui.h"
 #include <algorithm>
 #include <cctype>
+#include <cfloat>
 #include <cmath>
 #include <string_view>
 
@@ -31,20 +32,39 @@ bool ToolbarIconButton(ImWchar codepoint, const char* glyph,
     const char* suffix, const char* id, const char* fallback,
     const char* tooltip)
 {
-    const std::string label = ToolbarIconLabel(codepoint, glyph,
-        suffix, id, fallback);
-    const std::string display = label.substr(0, label.find("##"));
-    const ImVec2 textSize = ImGui::CalcTextSize(display.c_str());
-    const float width = std::max(24.f, textSize.x +
+    constexpr float iconSize = 13.f;
+    ImFont* font = ImGui::GetFont();
+    const bool hasIcon = font->IsGlyphInFont(codepoint);
+    const ImVec2 iconExtent = hasIcon
+        ? font->CalcTextSizeA(iconSize, FLT_MAX, 0.f, glyph)
+        : ImGui::CalcTextSize(fallback);
+    const ImVec2 suffixExtent = hasIcon && suffix[0]
+        ? ImGui::CalcTextSize(suffix) : ImVec2{};
+    const float contentWidth = iconExtent.x + suffixExtent.x;
+    const float width = std::max(28.f, contentWidth +
         ImGui::GetStyle().FramePadding.x * 2.f);
     const std::string buttonId = std::string("##") + id;
     const bool clicked = ImGui::Button(buttonId.c_str(), {width, 20.f});
     const ImVec2 minimum = ImGui::GetItemRectMin();
     const ImVec2 maximum = ImGui::GetItemRectMax();
-    ImGui::GetWindowDrawList()->AddText(
-        {minimum.x + (maximum.x - minimum.x - textSize.x) * .5f,
-         minimum.y + (maximum.y - minimum.y - textSize.y) * .5f - 1.f},
-        ImGui::GetColorU32(ImGuiCol_Text), display.c_str());
+    const float x = minimum.x + (maximum.x - minimum.x - contentWidth) * .5f;
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    const ImU32 color = ImGui::GetColorU32(ImGuiCol_Text);
+    if (hasIcon)
+    {
+        drawList->AddText(font, iconSize,
+            {x, minimum.y + (maximum.y - minimum.y - iconExtent.y) * .5f},
+            color, glyph);
+        if (suffix[0])
+            drawList->AddText(
+                {x + iconExtent.x,
+                 minimum.y + (maximum.y - minimum.y - suffixExtent.y) * .5f},
+                color, suffix);
+    }
+    else
+        drawList->AddText(
+            {x, minimum.y + (maximum.y - minimum.y - iconExtent.y) * .5f},
+            color, fallback);
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("%s", tooltip);
     return clicked;
@@ -52,7 +72,7 @@ bool ToolbarIconButton(ImWchar codepoint, const char* glyph,
 
 float ToolbarButtonWidth(const char* label)
 {
-    return std::max(24.f, ImGui::CalcTextSize(label).x +
+    return std::max(28.f, ImGui::CalcTextSize(label).x +
         ImGui::GetStyle().FramePadding.x * 2.f);
 }
 
@@ -86,23 +106,49 @@ struct ToolbarRow
 
 float EditorState::GetGlobalToolbarHeight() const
 {
-    return 34.f;
+    return 36.f;
+}
+
+SceneView* EditorState::GetGlobalToolbarSceneView() const
+{
+    Engine::Scene::Scene* scene = GetActiveDocumentScene();
+    if (!scene) return nullptr;
+    SceneView* view = nullptr;
+    if (m_activeSceneAssetDocument)
+        view = m_activeSceneAssetDocument->view;
+    else if (m_prefabDocumentFocused)
+        view = m_prefabSceneView;
+    else
+        for (const auto& panel : m_panels)
+            if (auto* candidate = dynamic_cast<SceneView*>(panel.get());
+                candidate && candidate->GetScene() == scene)
+            { view = candidate; break; }
+    return view && view->IsOpen() && view->UseGlobalToolbar ? view : nullptr;
 }
 
 bool EditorState::HasToolbarSection(ToolbarSection section) const
 {
     if (m_gameViewFocused) return false;
+    if (m_activeAnimationDocument)
+        return section == ToolbarSection::Mode;
     if (m_activeAssetDocument)
         return section == ToolbarSection::File ? m_toolbarVisibility.save :
             section == ToolbarSection::Edit && m_toolbarVisibility.undoRedo;
     Engine::Scene::Scene* scene = GetActiveDocumentScene();
-    if (!scene) return false;
+    if (!scene || !GetGlobalToolbarSceneView()) return false;
+    const MeshEditSession& mesh = m_activeSceneAssetDocument
+        ? m_activeSceneAssetDocument->meshEdit
+        : m_prefabDocumentFocused ? m_prefabMeshEdit : m_mainMeshEdit;
+    const SkeletonEditSession& skeleton = m_activeSceneAssetDocument
+        ? m_activeSceneAssetDocument->skeletonEdit
+        : m_prefabDocumentFocused ? m_prefabSkeletonEdit : m_mainSkeletonEdit;
     switch (section)
     {
     case ToolbarSection::File: return m_toolbarVisibility.save;
     case ToolbarSection::Edit: return m_toolbarVisibility.undoRedo;
     case ToolbarSection::Mode:
-        return m_toolbarVisibility.editMode || m_toolbarVisibility.modeTools;
+        return m_toolbarVisibility.editMode ||
+            (m_toolbarVisibility.modeTools && (mesh.enabled || skeleton.enabled));
     case ToolbarSection::Tools: return m_toolbarVisibility.toolDetails;
     case ToolbarSection::Transform: return m_toolbarVisibility.transformTools;
     case ToolbarSection::View: return m_toolbarVisibility.sceneDisplay;
@@ -117,6 +163,68 @@ bool EditorState::HasToolbarSection(ToolbarSection section) const
     return false;
 }
 
+float EditorState::GetToolbarSectionMinimumWidth(ToolbarSection section) const
+{
+    if (m_activeAnimationDocument)
+        return section == ToolbarSection::Mode ? 280.f : 0.f;
+    float controlWidth = 0.f;
+    switch (section)
+    {
+    case ToolbarSection::File:
+    {
+        const char* fallback = m_activeAssetDocument ? "Save Asset" :
+            m_activeSceneAssetDocument && m_activeSceneAssetDocument->meshStage
+                ? "Save Mesh" : m_prefabDocumentFocused ||
+                (m_activeSceneAssetDocument && m_activeSceneAssetDocument->prefab)
+                ? "Save Prefab" : "Save Scene";
+        const std::string label = ToolbarIconLabel(0xE74E, u8"\uE74E", "",
+            "MinimumSave", fallback);
+        controlWidth = ToolbarButtonWidth(label.c_str());
+        break;
+    }
+    case ToolbarSection::Edit:
+    {
+        const std::string label = ToolbarIconLabel(0xE7A7, u8"\uE7A7", "",
+            "MinimumUndo", "Undo");
+        controlWidth = ToolbarButtonWidth(label.c_str());
+        break;
+    }
+    case ToolbarSection::Mode: controlWidth = 105.f; break;
+    case ToolbarSection::Tools:
+    {
+        const MeshEditSession& mesh = m_activeSceneAssetDocument
+            ? m_activeSceneAssetDocument->meshEdit
+            : m_prefabDocumentFocused ? m_prefabMeshEdit : m_mainMeshEdit;
+        const SkeletonEditSession& skeleton = m_activeSceneAssetDocument
+            ? m_activeSceneAssetDocument->skeletonEdit
+            : m_prefabDocumentFocused ? m_prefabSkeletonEdit : m_mainSkeletonEdit;
+        const char* first = skeleton.enabled
+            ? (skeleton.submode == 0 ? "Bone..." : "Brush...")
+            : mesh.enabled ? "Mesh Tools..."
+            : m_activeSceneAssetDocument && m_activeSceneAssetDocument->meshStage
+                ? "Vertex Attributes..." : "Transform...";
+        controlWidth = ToolbarButtonWidth(first);
+        break;
+    }
+    case ToolbarSection::Transform:
+        controlWidth = ToolbarButtonWidth("Hand *") +
+            ImGui::GetStyle().ItemSpacing.x + ToolbarButtonWidth("Move");
+        break;
+    case ToolbarSection::View:
+        controlWidth = ToolbarButtonWidth("Grid *");
+        break;
+    case ToolbarSection::Prefab:
+    {
+        const std::string label = ToolbarIconLabel(0xE70F, u8"\uE70F", "",
+            "MinimumPrefab", "Edit Prefab");
+        controlWidth = ToolbarButtonWidth(label.c_str());
+        break;
+    }
+    }
+    // Seven pixels precede the child, and its handle and padding use 25 more.
+    return controlWidth + 34.f;
+}
+
 void EditorState::DrawToolbarTools(IEditorUi& ui, bool singleRow,
     bool* overflow)
 {
@@ -128,7 +236,8 @@ void EditorState::DrawToolbarTools(IEditorUi& ui, bool singleRow,
     ToolbarRow row{singleRow, overflow};
     const auto button = [&](const char* label)
     {
-        return row.Next(ToolbarButtonWidth(label)) && ImGui::SmallButton(label);
+        return row.Next(ToolbarButtonWidth(label)) &&
+            ImGui::Button(label, {0.f, 20.f});
     };
     const auto iconButton = [&](ImWchar codepoint, const char* glyph,
         const char* suffix, const char* id, const char* fallback,
@@ -157,6 +266,7 @@ void EditorState::DrawToolbarTools(IEditorUi& ui, bool singleRow,
     {
         if (!message || !*message) return;
         if (!row.Next(12.f)) return;
+        ImGui::AlignTextToFramePadding();
         ImGui::TextColored({1.f, .55f, .3f, 1.f}, "!");
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", message);
     };
@@ -360,6 +470,12 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
     bool singleRow, bool* overflow)
 {
     if (overflow) *overflow = false;
+    if (m_activeAnimationDocument)
+    {
+        if (section == ToolbarSection::Mode)
+            DrawAnimationRigToolbar(ui, *m_activeAnimationDocument);
+        return;
+    }
     if (m_gameViewFocused)
     {
         m_toolbarPopupTool.clear();
@@ -409,17 +525,8 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
     }
     Engine::Scene::Scene* scene = GetActiveDocumentScene();
     if (!scene) return;
-    SceneView* view = nullptr;
-    if (m_activeSceneAssetDocument)
-        view = m_activeSceneAssetDocument->view;
-    else if (m_prefabDocumentFocused)
-        view = m_prefabSceneView;
-    else
-        for (const auto& panel : m_panels)
-            if (auto* candidate = dynamic_cast<SceneView*>(panel.get());
-                candidate && candidate->GetScene() == scene)
-            { view = candidate; break; }
-    if (!view || !view->UseGlobalToolbar) return;
+    SceneView* view = GetGlobalToolbarSceneView();
+    if (!view) return;
 
     if (section == ToolbarSection::Tools)
     {
@@ -445,7 +552,10 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
     }
     else if (showEditMode && m_activeSceneAssetDocument &&
         m_activeSceneAssetDocument->meshStage)
+    {
+        ImGui::AlignTextToFramePadding();
         ui.Label("Mesh");
+    }
     else if (showEditMode)
     {
         int mode = skeleton.enabled ? 2 : mesh.enabled ? 1 : 0;

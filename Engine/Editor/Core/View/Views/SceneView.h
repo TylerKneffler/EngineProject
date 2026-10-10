@@ -73,12 +73,14 @@ public:
     std::function<void()> OnDeleteSelectionRequested;
     std::function<void(bool)> OnGizmoInteraction;
     std::function<bool(IEditorUi&)> OnDrawDocumentTools;
+    std::function<void(IEditorUi&)> OnDrawBottomPanel;
     std::function<bool(IEditorUi&, const EditorUiViewportInput&,
         EditorTransformTool)> OnMeshViewportInput;
     std::function<bool(const Engine::Core::Object*)> CanSelectObject;
     bool AllowObjectCreation = true;
     bool AllowAssetDrops = true;
     bool AllowObjectTransform = true;
+    float BottomPanelHeight = 420.f;
 
 private:
     void CancelPrefabPreview();

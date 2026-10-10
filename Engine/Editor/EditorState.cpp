@@ -1386,6 +1386,8 @@ std::string EditorState::GetActiveDocumentName() const
 {
     if (m_activeAnimationDocument)
     {
+        if (m_activeAnimationDocument->path.empty())
+            return "Animation Editor";
         std::string title = "Animation: " + std::filesystem::path(
             m_activeAnimationDocument->path).filename().string();
         if (m_activeAnimationDocument->dirty) title += " *";
@@ -3496,6 +3498,8 @@ void EditorState::WireupCallbacks()
     };
 
     m_viewFactory->OnAssetContentsChanged = [this](const std::string&) {
+        for (auto& document : m_animationDocuments)
+            document->rigAssetsDirty = true;
         auto refresh = [this](Engine::Scene::Scene* scene)
         {
             if (!scene) return;

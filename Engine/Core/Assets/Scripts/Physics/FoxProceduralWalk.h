@@ -3,6 +3,7 @@
 #include "Core/Script.h"
 #include "Core/PropertyMacros.h"
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <array>
 #include <string>
 
@@ -61,6 +62,10 @@ private:
     float m_lastStrideDistance = 0.f;
     glm::vec3 m_startRoot { 0.f };
     glm::vec3 m_forward { 0.f, 0.f, -1.f };
+    glm::quat m_startRotation { 1.f, 0.f, 0.f, 0.f };
+    float m_startGroundHeight = 0.f;
+    float m_bodyHeight = 0.f;
+    glm::vec3 m_bodyUp { 0.f, 1.f, 0.f };
     glm::vec3 m_startCamera { 0.f };
     std::array<CourseBody, 5> m_course;
 };

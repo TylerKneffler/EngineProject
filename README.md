@@ -1,35 +1,18 @@
 # EngineProject
 
-EngineProject is a C++17 Windows game engine with a package-neutral editor UI, scene serialization, a standalone game runtime, and support for DirectX 11, DirectX 12, and Vulkan renderers.
+A C++17 game engine and editor for Windows x64. It includes scene editing and serialization, C++ gameplay scripts, physics, audio, animation, and DirectX 11, DirectX 12, and Vulkan renderers. The editor can run the bundled Engine Sandbox or create a separate game project.
 
-## Quick start — release build
+## Start with a packaged build
 
-No manual compilation is required to run the packaged Windows x64 editor:
+1. Download the [current Windows x64 ZIP (v1.0.0)](ReleaseBuilds/EngineProject-v1.0.0-windows-x64.zip?raw=1). Browse [all packaged builds](ReleaseBuilds/) for other versions.
+2. Extract the ZIP and keep the complete `v1.0.0` folder together.
+3. Run `Editor.exe` inside that folder.
 
-1. [Download EngineProject v1.0.0 for Windows x64](ReleaseBuilds/EngineProject-v1.0.0-windows-x64.zip?raw=1).
-2. Extract the complete `v1.0.0` folder from the ZIP.
-3. Run `Editor.exe` from inside that folder.
+The packaged editor needs no compiler or CMake. DirectX 11 is the default. You can choose DirectX 12 or Vulkan in **File > Project Preferences > Rendering**; Vulkan needs a supported GPU and driver. The folder also contains `Game.exe` for the standalone sandbox. To build C++ project scripts, install the development tools below.
 
-Keep the extracted folder together because `Engine/`, `ProjectTemplate/`,
-`VulkanShaders/`, and `imgui.ini` are runtime and tooling dependencies. DirectX
-11 is the default renderer; DirectX 12 and Vulkan can be selected in Project
-Preferences. Vulkan requires a supported GPU and current driver.
+## Build from source
 
-The prebuilt editor does not require Visual Studio or CMake just to run. Creating
-projects is supported, but compiling project C++ scripts or rebuilding the engine
-requires the development tools listed below. All downloadable builds are under
-[`ReleaseBuilds/`](ReleaseBuilds/).
-
-## Requirements
-
-- Windows 10 or 11
-- Visual Studio 2022 with **Desktop development with C++**
-- CMake 3.20+
-- Git and an internet connection for the first build
-
-DirectX is included with Windows. Vulkan build dependencies are downloaded automatically; running Vulkan requires a supported GPU and current driver.
-
-## Build and start the engine
+Requirements: Windows 10 or 11, Visual Studio 2022 with **Desktop development with C++** (including the Windows SDK), CMake 3.20+, Git, and network access for the first CMake configure. CMake downloads the third-party sources listed below.
 
 ```powershell
 git clone https://github.com/TylerKneffler/EngineProject.git
@@ -39,331 +22,164 @@ cmake --build --preset debug --target Editor --parallel
 .\build\Debug\Debug\Editor.exe
 ```
 
-The first build may take a few minutes while dependencies download.
-
-Maintainers can produce a new versioned folder and download ZIP with the VS Code
-task **Engine: Package Versioned Release**. The task prompts for a version and
-writes both artifacts under `ReleaseBuilds/`.
-
-When started from the engine repository, the Editor opens **Engine Sandbox** using `Engine/Core/Assets`. This allows F5 and direct engine testing without creating a project.
-
-## Create or open a project
-
-Open the Project Hub from the engine repository with:
+Opening the editor from the repository starts **Engine Sandbox** with `Engine/Core/Assets`. Use F5 to play the current scene. To open the Project Hub explicitly:
 
 ```powershell
 .\build\Debug\Debug\Editor.exe --project-hub
 ```
 
-Outside the engine repository, starting the Editor without a project also opens the Project Hub. It can:
-
-- Create, build, and open a new project.
-- Open recent or existing `.proj` files.
-- Remove projects from the recent list.
-- Permanently delete generated projects after confirmation.
-
-Project creation runs in the background and displays setup progress. Build output is saved as `project-build.log` in the project folder.
-
-Each new project contains its own `Assets/` directory and an `Open <Project Name> Editor.lnk` shortcut. Double-click the shortcut to reopen the project.
-
-## Build a project manually
-
-Run these commands from the generated project folder:
+The Project Hub creates or opens a project and provides a shortcut in each generated project folder. That folder owns its `Assets/` content and `.proj` file. From a generated project folder, you can also build and run manually:
 
 ```powershell
 cmake --preset debug
 cmake --build --preset debug --parallel
-```
-
-Start the project Editor or standalone game:
-
-```powershell
 .\build\Debug\Engine\Debug\Editor.exe
 .\build\Debug\Engine\Debug\Game.exe
 ```
 
-For a distributable build, open **File > Project Preferences > Export** and select **Build Portable Export**. The packaged game is written to the project's `Export/` folder with its assets, settings, and shaders. Build details are saved in `export-build.log`.
+Set `-DENGINE_ENABLE_VULKAN=OFF` on the configure command if you only need DirectX. For a distributable game, use **File > Project Preferences > Export > Build Portable Export** in the project editor. Build output and startup diagnostics are written to `project-build.log` and `editor-startup.log` in the project folder.
 
-Open the repository or generated project folder directly in Visual Studio 2022. Visual Studio detects `CMakePresets.json`, and the generated solution remains in `build/Debug`. The CMake project sets `Editor` as the startup target. VS Code provides **Engine: Start Editor** and **Engine: Open Project Hub** tasks.
+## Engine graphs and game loop
 
-## Assets
+### Startup appearance and Windows icons
 
-- `Engine/Core/Assets/` contains engine-owned starter content.
-- A new project receives a copy in its own `Assets/` directory.
-- Add project scenes, meshes, textures, and C++ scripts only to the project's `Assets/` directory.
-- Store asset paths relative to the project root, such as `Assets/Mesh/player.obj`.
-- Textures generate a complete mip chain on load. PNG, JPEG, BMP, DDS, TGA,
-  Radiance HDR, OpenEXR, and KTX2 are supported; HDR/EXR remain floating-point
-  through upload, and Basis Universal KTX2 images are transcoded by libktx.
-- A scene skybox can drive HDRI lighting and reflections. With the Scene root
-  selected, enable **Use Skybox for Lighting** and tune intensity, exposure,
-  and rotation. Materials expose environment diffuse and reflection strengths.
-  `Engine/Core/Assets/Scenes/Showcases/hdri_showcase.scene` demonstrates the feature.
-- A material can override only its reflections without changing the skybox.
-  Enable **Custom Reflection Environment**, assign a Radiance HDR or OpenEXR
-  file to **Reflection HDRI**, then tune its strength, exposure, and rotation.
-- `SpatialManipulator` can define an infinite, box, or sphere warp volume.
-  Affine volumes translate, rotate, or scale their coordinate chart; spiral
-  volumes twist it along a configurable axis. Formula volumes define mapped
-  X/Y/Z expressions from local `x`, `y`, and `z`, derived polar variables, and
-  reusable parameters `a` through `d`. Finite volumes support boundary falloff.
-  `Engine/Core/Assets/Scenes/Spatial/spiral_warp_column.scene` demonstrates a formulaic
-  falling rigid body, light, camera, and coordinate markers sharing one warp.
-- WAV, OGG/Vorbis, and MP3 files can be imported and assigned to an Audio Source.
+Editor and Game show a native splash while their renderer, interface, and startup
+scene initialize. The splash has a background, a dark text overlay, and a
+progress bar that advances as startup stages finish. Without artwork it uses a
+blue gradient. To customize the backgrounds, add these optional PNG files:
 
-### Audio sources
-
-Add an **AudioSource** from an object's **Add Component** menu and assign its
-`audioPath`. Enable `playOnStart` or use the component's **Play** button; scripts
-can trigger the same voice with `audioSource->Play()`, then `Pause()` or `Stop()`.
-`loop`, `volume`, and `pitch` apply per source. Enable `spatial` for camera-relative
-3D audio and tune `minDistance`, `maxDistance`, `rolloff`, `dopplerFactor`, and the
-attenuation model (`Inverse`, `Linear`, `Exponential`, or `None`). Enable
-`directional` to use the object's local +Z direction and configure its inner and
-outer cone angles/gain. Sources route through a named bus such as `SFX`, whose
-level can be controlled with `AudioMixer::Get().SetBusVolume("SFX", 0.8f)`; the
-master level uses `SetMasterVolume()`.
-
-Each Scene owns its `Audio` coordinator, which selects and updates one listener
-after component updates. `AudioMixer` remains process-wide because it owns the
-single output device and named buses.
-
-### Component references
-
-Inspector component-reference fields behave like Unity object fields. Their empty
-state uses the documented conventional component (usually one on the same object),
-while dropping a compatible component header assigns an override from the same or
-another scene object. **Clear** returns to the default. References serialize with
-the scene and retain both hierarchy and object-name information so ordinary object
-renames or hierarchy moves can still resolve when one identity remains valid.
-The field shows the resolved object's hierarchy path and component type, or marks
-a missing target. The compact **...** button beside the reference opens a scene
-search for compatible objects and components by
-name or path; Transform references also accept objects dragged from the hierarchy.
-File and texture path fields use the same **...** button to search project and
-engine asset folders. The adjacent **x** clears an assigned reference or path.
-
-This is used by Sprite animation managers, audio listener cameras, skinned-mesh
-mesh/morph/skeleton inputs, animation hierarchy/source inputs, mesh colliders, and
-Cloth simulation/render meshes.
-
-### Skin binding
-
-In a scene or prefab's **Skeleton** mode, choose **Skin Binding** to select a mesh
-and bind it to the active skeleton. **Bind / rebind preserving weights** keeps
-existing influences; when switching rigs it maps joints by object identity or
-unique bone name and reports missing or ambiguous matches. **Generate initial
-weights and bind** assigns each vertex to its four closest joints in the mesh's
-bind space. Use the diagnostics to find unweighted vertices, missing joints, and
-weights that do not sum to one; **Repair** removes invalid influences and fills
-unweighted vertices from the nearest joint. Enter comma-separated vertex IDs or
-ranges to assign them fully to the selected bone, or use a retained Mesh Edit
-vertex selection. **Save binding and weights** writes the scene or prefab and
-the authored `.mesh` asset. Regenerating or remapping a file-backed mesh writes
-a separate sibling `.mesh` asset, leaving existing references to the original
-weights intact. Rebinding does not retarget animation clips; the
-editor reports when clips may still refer to the original rig.
-
-### Physics
-
-Rigid-body motion and collision use separate components. Add a **RigidBody** for
-`Dynamic`, `Kinematic`, or `Static` motion, then add one or more colliders to the
-same object. **PrimitiveObjectCollider** supports `Box`/`Cube`, `Sphere`/`Circle`,
-`Capsule`, and `Cylinder`, with configurable center and dimensions.
-**MeshObjectCollider** accepts an independent Mesh component reference from any
-scene object, then `meshPath`, then the same-object Mesh default. Drag a Mesh
-component header onto Mesh Reference to override the default. Convex colliders support
-dynamic bodies; concave triangle meshes are used by static and kinematic bodies.
-
-For a ragdoll, set **Skeleton > Collision** to `PerBone` (the default). Each
-`IKBone` reads an enabled `PrimitiveObjectCollider` on its own bone object, or
-its explicit Collider Reference. The collider owns its shape, radius, size,
-height, and center. `Align To Bone Child` aligns capsules and cylinders toward
-the named child; height `0` derives the bone-to-child distance.
-Enable `Fit To Skinned Mesh` to build a reduced convex proxy from the owning
-bone's weighted skinned vertices when simulation starts. It falls back to the
-authored primitive when no usable weighted surface is available. The bundled
-per-bone fox uses this setting so its visible tail and body remain above the
-ground in the regression scene.
-
-For one collision surface, set the Skeleton to `MeshCollider` and assign a
-`MeshObjectCollider`. Put a `Kinematic` RigidBody on that collider's object and
-set its Mesh Reference to the skinned Mesh (which may be on a child object).
-The collider follows the current morph and skin pose. Static and kinematic
-bodies can use the triangle mesh; the animated kinematic triangle BVH refits
-without rebuilding its Bullet body. Dynamic bodies use a convex hull that
-refits in place as bones move. In this mode the root body owns world motion
-and mesh contacts. After the animation handoff, pose-only `IKBone` Bullet bodies remain
-active and drive the skinned bones through their joint constraints. The
-skeleton maps mesh contacts through skin weights to bounded bone torque
-impulses and sends the opposite angular impulse to the root. Ground-supported
-bone gravity and live damping let the chain bend and settle. The bone physics
-shapes do not make external world contacts in this mode. The selected mesh
-collider is inactive in `PerBone` mode. The top IK body follows the root
-kinematically, so linear momentum exchange between the root and joints is
-still approximate.
-`MeshObjectCollider::GetContacts()` reports one snapshot per physics update;
-normal impulses and their world-space vectors accumulate across its fixed
-substeps. Each contact includes a quantized body-local identity and the number
-of substeps that observed it.
-
-The `fox_ragdoll.scene` demo has a `FoxRagdollBlend` controller. It plays the
-animation for 1.25 seconds, then blends the simulated bone pose from 0% to 100%
-over 2.5 seconds. Select the controller to see its current phase and IK
-influence. The bone components contain the physics setup; the controller owns
-the handoff timing. `fox_ragdoll_mesh.scene` uses the whole mesh collider during
-animation, then hands off to articulated hulls fitted from the weighted skinned
-mesh. The bone hulls collide independently with the floor, so the fox can
-collapse on landing. A falling contact probe is also included.
-
-`fox_procedural_walk.scene` plays the fox's authored Walk clip with one clip cycle
-per `strideDistance` of root travel. The scene uses a 2.7-unit stride and 2.67
-units/second forward speed, calibrated to the clip's low-paw travel. Clip speed
-follows distance even when forward speed changes. Its `FoxProceduralWalk` scene
-controller moves the fox forward; the camera waits for two units of fox travel
-before following, and floor tiles and raised surfaces recycle only after the
-fox passes them. Ground rays
-under the four animated paws adjust only the fox's root height. The Walk clip
-supplies all leg motion; this scene has no foot IK. The skinned mesh collider
-and kinematic root body remain active. Tune walk speed, stride distance, and
-body clearance on the controller. Bone rigid body simulation stays off during
-this driven walk so it does not overwrite the animated pose.
-
-Rigid bodies expose mass, gravity scale, linear/angular damping, friction,
-restitution, triggers, continuous collision detection, initial velocities,
-collision layer/mask, and per-axis position/rotation locks. Runtime scripts can
-call `AddForce()`, `AddTorque()`, `AddImpulse()`, `SetLinearVelocity()`, and query
-`IsColliding()` or `IsGrounded()`. Physics advances during Editor Play and in the
-standalone Game runtime; edit-mode transforms are not simulated.
-The owning Scene advances its `Physics` instance through `Scene::Update()`.
-
-Add **Cloth** to an object with a triangle Mesh to deform that render mesh in real
-time. Cloth has independent Simulation Mesh and Render Mesh component references,
-so a different object or lower-detail triangle cage can drive the visible mesh;
-empty references preserve the same-object default. `meshPath` remains available
-as an asset-only simulation source. Cloth supports mass,
-stretch/bending stiffness, damping, drag,
-friction, gravity scaling, solver iterations, rigid-body collision, optional
-self-collision, and directional wind. `pinMode` can hold the mesh's `Top`,
-`Bottom`, `Left`, or `Right` boundary in object space; `None` leaves it fully
-free. `pinThreshold` controls how wide that pinned boundary is. The original
-render mesh is restored when play stops or the component is removed, and scripts
-can call `ResetSimulation()` after changing its setup.
-
-### Native screen UI
-
-Screen UI uses retained scene components and is rendered by the engine after the
-3D scene. Add **Canvas** to a root object, then add child objects with **UIObject**
-and **UIText**. An optional UIObject on the Canvas root can arrange its immediate
-children as a `Row` or `Column`; nested UIObjects build the rest of the hierarchy.
-
-UIObject provides top-left-origin anchors, pivot, anchored position, size delta,
-minimum/maximum size, margin, padding, flex growth, spacing, clipping, visibility,
-and z-order. Row/Column containers support start/center/end/space-between
-justification and start/center/end/stretch alignment. Canvas supports constant
-logical sizing or scale-with-screen behavior against a configurable reference
-resolution.
-
-UIText provides size, RGBA color, horizontal/vertical alignment, word wrapping,
-line spacing, and visible/clip/ellipsis overflow. Leave Font Path empty to use the
-Windows UI-font fallback, or assign a `.ttf`/`.otf` file through the inspector.
-The initial SDF atlas covers printable ASCII; unsupported characters render as
-`?`. The same components render in the editor scene view and standalone game.
-
-### Imported animated characters
-
-Importing a Blender glTF/GLB or FBX creates skeleton, animation, animation-manager,
-morph-target, and skinned-mesh components automatically. The renderer performs
-skinning and morph-target position/normal/tangent blending on the GPU on
-DirectX 11, DirectX 12, and Vulkan, with up to eight influences per vertex and
-256 joints per rendered primitive. Morph deltas remain in persistent structured
-buffers; animation updates only a compact packed-weight buffer.
-
-The editor routes all supported model formats through `ModelImporter`. FBX is
-decoded into the format-neutral `ImportedModel` document (nodes, primitives,
-materials, skins, morphs, and clips), and every import produces the same
-engine-native `.prefab`, `.mesh`, and `.material` references. Use
-`--import-model` for headless imports; the older `--import-gltf` spelling
-remains available for compatibility.
-
-Imported clips are stored as `AnimationClip` data in the Animation Manager.
-The Properties panel lists clips there and lets you select the active clip.
-The bundled fox prefabs store their Survey, Walk, and Run clips in the manager.
-
-To author clips, open a model or skinned prefab in the editor, switch to
-Skeleton mode, select its skeleton, a bone, or a bound skinned mesh, and choose
-**Open Animation Editor**. The editor shows the selected rig and every mesh
-bound to it. In the Timeline, **Scan Assets** lists rigged prefabs in the
-project Assets directory; **Search rig assets** filters the list so another
-rig can be opened. Imported model sources use their generated prefab for
-animation editing. Skeletal imports also generate a `.rig` file for each skin
-with its joint identities, inverse bind matrices, and bound mesh names. The
-prefab's Skeleton and Animation Manager reference those files; older prefabs
-gain a `.rig` file when their animation is saved. Rig-backed prefabs store
-joint and inverse-bind data in the `.rig` file; the bundled Fox prefabs use
-this format. The 3D viewport poses a
-separate preview scene; the docked Timeline shows bones, frames, and keyframes.
-Create or select a clip, scrub to a frame, move a bone in the viewport or edit
-its pose values, then choose **Add / Replace Keyframe**. **Auto Key** records a
-key when a viewport manipulation ends. **Save Clip + Rig** writes the animation
-channels and rig asset without writing preview pose transforms or skin weights.
-
-Call `AnimationManager::Play("Run", 0.2f)` to crossfade the base clip. Add
-`AnimationManager::Layer` entries for override or additive animation. A layer's
-`nodeMask` restricts it to the listed imported `ModelNode::nodeIndex` values; an
-empty mask affects the full character. Layers can also be edited on the
-Animation Manager component in the Properties panel.
-
-## Renderers
-
-Choose the editor and game renderers under **File > Project Preferences > Rendering**:
-
-- DirectX 11
-- DirectX 12
-- Vulkan
-
-Unavailable renderers are disabled and show the reason. Restart the Editor after changing its renderer.
-
-## Editor UI backends
-
-The editor UI lives under `Engine/Editor/UI/ImGui`. `IEditorUi` is the shared
-widget/layout facade used by every panel in `Engine/Editor/Core/View`, while
-`IEditorUiBackend` owns ImGui lifecycle, input, and frame submission. Engine
-renderers expose package-neutral frame and texture callbacks; `Engine/Core`
-does not include or link the UI library.
-
-```powershell
-cmake --preset debug
-cmake --build --preset debug
+```text
+Assets/Startup/Editor.png
+Assets/Startup/Game.png
 ```
 
-To build without Vulkan support:
+For the bundled Engine Sandbox, place them under `Engine/Core/Assets/Startup/`.
+The images are stretched to the 640 × 360 splash canvas. The colors, overlay,
+text, and progress bar are drawn in `Engine/Core/Startup/StartupSplash.cpp`.
+
+Set executable icons at configure time with `.ico` files (relative paths are
+resolved from the top-level project directory):
 
 ```powershell
-cmake --preset debug -DENGINE_ENABLE_VULKAN=OFF
+cmake --preset debug -DENGINE_EDITOR_ICON=Assets/Startup/Editor.ico -DENGINE_GAME_ICON=Assets/Startup/Game.ico
+cmake --build --preset debug --target Editor Game --parallel
 ```
 
-## Animation and rendering performance benchmark
+The icon is embedded into each EXE and used by its native window. If an icon
+path is omitted, Windows uses the default application icon. Reconfigure and
+rebuild after changing an `.ico` file.
 
-The opt-in benchmark generates configurable skeletal rigs and dense meshes. It
-reports animation sampling and weight upload, skinned-component updates,
-palette generation, render preparation, CPU submission, presentation, and GPU
-opaque-pass timings.
+### Startup
 
-```powershell
-cmake --build build/Release --config Release --target AnimationRenderingBenchmark
-build/Release/Release/AnimationRenderingBenchmark.exe --rigs 64 --bones 64 --vertices 3000 --frames 300
-build/Release/Release/AnimationRenderingBenchmark.exe --render --rigs 8 --bones 64 --vertices 30000 --morphs 8 --frames 300 --api DirectX11
+```text
+[Editor.exe / Game.exe]
+          |
+          v
+[Load Project Settings]
+          |
+          v
+[Create Win32 Window + Selected Renderer]
+          |
+          v
+[Create / Load Scene]
+          |
+          v
+[Game: Start Objects / Editor: Wait for Play]
+          |
+          v
+[Enter Window::Run]
 ```
 
-Use `--layers N`, `--mask-all`, and `--keys N` for animation-graph stress, or
-raise `--vertices` and `--morphs` for GPU deformation stress.
+### Frame loop
 
-## Troubleshooting
+```text
+[Input Begin] -> [Drain Win32 Messages] -> [Input End] -> [Apply Pending Resize]
+                                                           |
+                                                           v
+                                               [OnUpdate: Calculate Delta Time]
+                                                           |
+                              +----------------------------+------------------+
+                              |                                               |
+                              v                                               v
+                    [Game / Editor Play]                               [Editor Edit Mode]
+                              |                                               |
+                              v                                               v
+                      [Scene::Update]                              [Editor Background Work]
+                              |                                               |
+                              +-----------------------+-----------------------+
+                                                      |
+                                                      v
+                                        [Prepare and Render Frame]
+                                                      |
+                                                      v
+                                        [Present / Wait if Editor Idle]
+                                                      |
+                                                      +----> back to [Input Begin]
+```
 
-- **Build failed:** Check `project-build.log` in the project folder.
-- **Editor failed to start:** Check `editor-startup.log` in the project folder.
-- **Dependencies failed to download:** Check the network connection and rerun CMake.
-- **Assets or shaders are missing:** Start the project Editor from the project folder or use its generated shortcut.
-- **Renderer unavailable:** Update Windows and the GPU driver.
-- **Corrupted incremental build:** Close the Editor and Visual Studio, delete the project's `build/` directory, then configure and build again.
+The standalone game renders every frame. The editor updates the scene only in Play mode and renders when its frame is marked dirty.
+
+### Scene update
+
+```text
+[Scene::Update(deltaTime)]
+           |
+           v
+[Advance Scene Clock]
+           |
+           v
+[Update Objects, Components, and Scripts]
+           |
+           v
+[Update Scene Audio]
+           |
+           v
+[Step Scene Physics]
+           |
+           v
+[Process Portal Traversal After Physics]
+           |
+           v
+[Flush Pending Object Changes]
+```
+
+### Render path
+
+```text
+[Prepare Scene Render Data]
+           |
+           v
+     <Game or Editor?>
+       |           |
+      Game       Editor
+       |           |
+       v           v
+[Select Camera] [Render Visible Scene / Game Panels]
+       |           |
+       v           v
+[Render Scene] [Draw Editor UI with ImGui]
+       |           |
+       +-----+-----+
+             |
+             v
+     [Present Frame]
+```
+
+Core scene and component code lives in `Engine/Core/`; the editor, standalone game, and built-in demo scripts live in `Engine/Editor/`, `Engine/Game/`, and `Engine/Core/Assets/Scripts/`. See the [detailed system graphs](.md/engine-system-graph.md) and [feature guide](.md/feature-guide.md).
+
+## Third-party libraries and includes
+
+CMake retrieves these dependencies with `FetchContent`; their versions and options are defined in [CMakeLists.txt](CMakeLists.txt). No separate manual install is needed for the source build.
+
+| Dependency | Used for |
+| --- | --- |
+| [GLM](https://github.com/g-truc/glm) | Math types and transforms |
+| [Dear ImGui](https://github.com/ocornut/imgui) | Editor UI |
+| [pugixml](https://github.com/zeux/pugixml) | XML parsing |
+| [fastgltf](https://github.com/spnda/fastgltf) and [Assimp](https://github.com/assimp/assimp) | glTF/GLB and FBX import |
+| [stb_image](https://github.com/nothings/stb) (from Assimp), [TinyEXR](https://github.com/syoyo/tinyexr), and [KTX-Software](https://github.com/KhronosGroup/KTX-Software) | Texture decoding and KTX2/BasisU |
+| [miniaudio](https://github.com/mackron/miniaudio) and its `stb_vorbis` extra | Audio playback, mixing, and decoding |
+| [Bullet](https://github.com/bulletphysics/bullet3) | Rigid-body and cloth physics |
+| [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers), [volk](https://github.com/zeux/volk), and [DirectX Shader Compiler](https://github.com/microsoft/DirectXShaderCompiler) | Optional Vulkan renderer and SPIR-V shaders |
+
+The Windows SDK supplies Win32 and DirectX headers and libraries. The DirectX 11 and 12 renderers use those system libraries.

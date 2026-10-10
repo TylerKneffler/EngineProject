@@ -475,9 +475,8 @@ bool ImGuiEditorUi::PropertyGroupHeader(const char* label,bool defaultOpen)
     const ImVec4 background=ImGui::GetStyleColorVec4(ImGuiCol_FrameBg);
     const ImVec4 header=ImGui::GetStyleColorVec4(ImGuiCol_Header);
     const ImVec4 hovered=ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered);
-    ImGui::Spacing();
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
-        {style.FramePadding.x+2.f,style.FramePadding.y+3.f});
+        {style.FramePadding.x+1.f,style.FramePadding.y+1.f});
     ImGui::PushStyleColor(ImGuiCol_Header,ImLerp(background,header,.6f));
     ImGui::PushStyleColor(ImGuiCol_HeaderHovered,
         ImLerp(background,hovered,.68f));
@@ -497,12 +496,11 @@ bool ImGuiEditorUi::ComponentHeader(EditorUiObjectIcon icon,const char* label,
 {
     ImGui::PushID(label);
     const ImGuiStyle& style=ImGui::GetStyle();
-    ImGui::Spacing();
     const ImVec4 background=ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
     const ImVec4 header=ImGui::GetStyleColorVec4(ImGuiCol_Header);
     const ImVec4 accent=ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
-        {style.FramePadding.x+4.f,style.FramePadding.y+5.f});
+        {style.FramePadding.x+2.f,style.FramePadding.y+1.f});
     ImGui::PushStyleColor(ImGuiCol_Header,ImLerp(background,header,.55f));
     ImGui::PushStyleColor(ImGuiCol_HeaderHovered,
         ImLerp(background,ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered),.78f));
@@ -517,7 +515,7 @@ bool ImGuiEditorUi::ComponentHeader(EditorUiObjectIcon icon,const char* label,
     ImGui::PopStyleVar();
     const float iconSize=16.f;
     const float iconLeft=minimum.x+ImGui::GetFontSize()+
-        style.FramePadding.x*2.f;
+        style.FramePadding.x;
     const ImVec2 center{iconLeft+iconSize*.5f,(minimum.y+maximum.y)*.5f};
     const ImVec4 iconColor=ImLerp(ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled),
         accent,.55f+hover*.35f);
@@ -530,13 +528,13 @@ bool ImGuiEditorUi::ComponentHeader(EditorUiObjectIcon icon,const char* label,
         {minimum.x+4.f,maximum.y-1.f},
         ImGui::GetColorU32(ImLerp(header,accent,.7f)),rounding,
         ImDrawFlags_RoundCornersLeft);
-    draw->AddRectFilled({iconLeft-3.f,center.y-10.f},
-        {iconLeft+iconSize+3.f,center.y+10.f},
+    draw->AddRectFilled({iconLeft-2.f,center.y-9.f},
+        {iconLeft+iconSize+2.f,center.y+9.f},
         ImGui::GetColorU32(ImLerp(background,accent,.16f)),3.f);
     DrawObjectIcon(draw,icon,center,.92f+hover*.08f,
         ImGui::GetColorU32(iconColor));
     const ImVec2 textSize=ImGui::CalcTextSize(label);
-    draw->AddText({iconLeft+iconSize+12.f,
+    draw->AddText({iconLeft+iconSize+8.f,
         minimum.y+(maximum.y-minimum.y-textSize.y)*.5f},
         ImGui::GetColorU32(ImGuiCol_Text),label);
     ImGui::PopID();
@@ -764,11 +762,6 @@ EditorUiObjectRowResult ImGuiEditorUi::ObjectHeader(const void* id,char* name,si
 {
     EditorUiObjectRowResult result;
     ImGui::PushID(id);
-    const ImVec4 accent=ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
-    ImGui::TextColored(accent,"OBJECT");
-    ImGui::SameLine();
-    ImGui::TextDisabled("  /  Inspector");
-    ImGui::Spacing();
     const float available=ImGui::GetContentRegionAvail().x;
     ImGui::SetNextItemWidth(available>125.f?available-110.f:available*0.62f);
     ImGui::BeginDisabled(lockName);

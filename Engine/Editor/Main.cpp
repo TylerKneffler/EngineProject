@@ -1,4 +1,5 @@
 #include "Core/Window.h"
+#include "Core/Startup/StartupSplash.h"
 #include "Core/ProjectLoader.h"
 #include "Core/SceneManager.h"
 #include "Core/Renderers/IEditorRenderer.h"
@@ -261,10 +262,16 @@ int WINAPI wWinMain(
         }
     }
 
+    const auto startupBackground =
+        (std::filesystem::path(projectSettings.assetsDirectory) / "Startup" / "Editor.png").wstring();
+    Engine::Core::StartupSplash splash(hInstance, L"Engine Editor", startupBackground);
+    splash.SetProgress(0.10f, L"Creating editor window...");
+
     // Create editor state and UI
     OutputDebugStringA("[Main] Creating EditorState...\n");
     auto editorState = std::make_unique<Engine::Editor::EditorState>(
         hInstance, projectSettings, projectFile);
+    splash.SetProgress(0.25f, L"Initializing renderer and scene...");
     OutputDebugStringA("[Main] EditorState created, calling Init...\n");
     if (!editorState->Init())
     {
@@ -288,6 +295,7 @@ int WINAPI wWinMain(
             return 1;
     }
     WriteStartupLog("Editor initialized successfully");
+    splash.SetProgress(0.55f, L"Preparing editor interface...");
     OutputDebugStringA("[Main] EditorState initialized\n");
 
     Engine::Core::Window* window = editorState->GetWindow();
@@ -313,6 +321,7 @@ int WINAPI wWinMain(
         [&]() { uiBackend->EndFrame(); }
     });
     editorState->InitializeUiState();
+    splash.SetProgress(0.75f, L"Loading startup scene...");
 
     // Load default scene if specified
     if (!projectSettings.defaultScene.empty())
@@ -320,6 +329,7 @@ int WINAPI wWinMain(
         OutputDebugStringA(("[Main] Loading default scene: " + projectSettings.defaultScene + "\n").c_str());
         editorState->LoadScene(projectSettings.defaultScene);
     }
+    splash.SetProgress(0.90f, L"Finishing startup...");
 
     OutputDebugStringA("[Main] Creating GameBuildManager...\n");
     auto gameBuildManager = std::make_unique<Engine::Editor::GameBuildManager>(
@@ -538,7 +548,12 @@ int WINAPI wWinMain(
 
     // Now that all callbacks are set up, show the window
     OutputDebugStringA("[Main] Showing window...\n");
+    splash.SetProgress(1.0f, L"Ready");
+    splash.HoldAboveMainWindow();
     window->Show();
+    renderer->MarkDirty();
+    window->OnUpdate();
+    splash.Close();
     OutputDebugStringA("[Main] Window shown, entering message loop...\n");
 
     int result = window->Run();

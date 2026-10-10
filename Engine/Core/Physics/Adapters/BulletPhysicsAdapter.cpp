@@ -812,11 +812,32 @@ void BulletPhysicsAdapter::Step(double deltaTime)
     for (Engine::Components::Cloth* cloth : clothBodies)
         if (cloth->collisionMorph)
             cloth->UpdateCollisionMorph(static_cast<float>(boundedDelta));
+    // Secondary bone motion follows the final animated, IK, and physics pose.
+    // Solve parents first even when scene objects were inserted out of order.
+    std::stable_sort(ikBones.begin(), ikBones.end(),
+        [](const auto* first, const auto* second)
+        {
+            const auto depth = [](const auto* bone)
+            {
+                unsigned result = 0;
+                for (auto* parent = bone->Owner->Parent; parent;
+                    parent = parent->Parent)
+                    ++result;
+                return result;
+            };
+            return depth(first) < depth(second);
+        });
+    for (Engine::Components::IKBone* bone : ikBones)
+        bone->ApplyWiggle(static_cast<float>(boundedDelta));
 }
 
 void BulletPhysicsAdapter::Reset()
 {
     Engine::Scene::Scene& scene = *m_impl->scene;
+    for (const auto& object : scene.GetObjects())
+        for (Engine::Core::Component* component : object->Components)
+            if (auto* bone = dynamic_cast<Engine::Components::IKBone*>(component))
+                bone->ResetWiggle();
     for (const auto& object : scene.GetObjects())
         for (Engine::Core::Component* component : object->Components)
             if (auto* skeleton = dynamic_cast<

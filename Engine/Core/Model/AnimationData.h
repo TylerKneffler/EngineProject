@@ -12,6 +12,9 @@ struct AnimationChannel
     enum class Path { Translation, Rotation, Scale, Weights };
     enum class Interpolation { Linear, Step, CubicSpline };
     unsigned nodeIndex = 0;
+    // Name path from the model root. Numeric indices alone are not a
+    // portable bone identity when a clip is used with another model.
+    std::string targetPath;
     Path path = Path::Translation;
     Interpolation interpolation = Interpolation::Linear;
     unsigned valueWidth = 3;

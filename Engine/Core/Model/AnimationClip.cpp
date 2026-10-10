@@ -27,11 +27,13 @@ Engine::Serialization::JsonValue AnimationClip::Serialize() const
 {
     JsonValue value = JsonValue::MakeObject()
         .Set("name", JsonValue(clipName))
-        .Set("duration", JsonValue(duration));
+        .Set("duration", JsonValue(duration))
+        .Set("looping", JsonValue(looping));
     JsonValue serializedChannels = JsonValue::MakeArray();
     for (const auto& channel : channels)
         serializedChannels.Push(JsonValue::MakeObject()
             .Set("node", JsonValue(static_cast<int>(channel.nodeIndex)))
+            .Set("targetPath", JsonValue(channel.targetPath))
             .Set("path", JsonValue(static_cast<int>(channel.path)))
             .Set("interpolation", JsonValue(static_cast<int>(channel.interpolation)))
             .Set("width", JsonValue(static_cast<int>(channel.valueWidth)))
@@ -44,6 +46,7 @@ void AnimationClip::Deserialize(const JsonValue& value)
 {
     clipName = value["name"].AsString();
     duration = value["duration"].AsFloat();
+    looping = !value.Has("looping") || value["looping"].AsBool();
     channels.clear();
     const JsonValue& list = value["channels"];
     channels.reserve(list.ArraySize());
@@ -52,6 +55,8 @@ void AnimationClip::Deserialize(const JsonValue& value)
         const JsonValue& item = list.ArrayAt(i);
         AnimationChannel channel;
         channel.nodeIndex = static_cast<unsigned>(item["node"].AsInt());
+        if (item.Has("targetPath"))
+            channel.targetPath = item["targetPath"].AsString();
         channel.path = static_cast<AnimationChannel::Path>(item["path"].AsInt());
         channel.interpolation = static_cast<AnimationChannel::Interpolation>(
             item["interpolation"].AsInt());

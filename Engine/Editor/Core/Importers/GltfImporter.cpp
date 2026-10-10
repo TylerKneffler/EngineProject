@@ -1,4 +1,5 @@
 #include "GltfImporter.h"
+#include "Core/AnimationClipMapping.h"
 
 #include "Core/AssetRecord.h"
 #include "Core/Compoonents/Materials/Material.h"
@@ -883,6 +884,11 @@ Engine::Model::ModelImportResult GltfImporter::Import(
                       { "skinIndex", static_cast<double>(skeleton->skinIndex) } });
             }
 
+        if (manager)
+            for (auto& clip : manager->clips)
+                for (auto& channel : clip.channels)
+                    channel.targetPath = AnimationClipMapping::NodePath(
+                        *modelComponent, channel.nodeIndex);
         if (!Engine::Serialization::SceneSerializer::SavePrefab(*prefabRoot, prefabPath.string()))
             throw std::runtime_error("Could not save prefab: " + prefabPath.string());
         Engine::Core::AssetRecord::Ensure(prefabPath, source,

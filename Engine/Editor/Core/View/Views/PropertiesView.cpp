@@ -2,6 +2,7 @@
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Engine/Editor/UI/EditorComponentIcons.h"
+#include "Engine/Editor/UI/EditorIcons.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Animation/AnimationManager.h"
 #include "Core/Component.h"
@@ -92,7 +93,7 @@ void PropertiesView::DrawMultiSelection(IEditorUi& ui)
     }
 
     ui.Separator();
-    ui.Indent(16.f);
+    ui.Indent(8.f);
 
     std::vector<Engine::Core::Component*> transforms;
     transforms.reserve(m_selectedObjects.size());
@@ -174,7 +175,7 @@ void PropertiesView::DrawMultiSelection(IEditorUi& ui)
         }
         ui.PopId();
     }
-    ui.Unindent(16.f);
+    ui.Unindent(8.f);
 }
 
 void PropertiesView::DrawPanel(IEditorUi& ui)
@@ -195,6 +196,13 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         return;
     }
     ui.BeginTextWrap();
+    const auto drawContext = OnDrawContext;
+    if (drawContext && drawContext(ui))
+    {
+        ui.EndTextWrap();
+        ui.EndWindow();
+        return;
+    }
     if (m_assetInspector.HasSelection())
     {
         m_assetInspector.OnRenamed = OnAssetRenamed;
@@ -435,7 +443,6 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
     }
     if (!prefabRoot)
     {
-        ui.DisabledLabel("Scene-only object");
         ui.ValueLabel("Owner", m_selectedObject->Parent
             ? m_selectedObject->Parent->name.c_str() : "Scene Root");
     }
@@ -443,7 +450,7 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         ui.ColoredLabel("Linked Prefab", { 0.35f, 0.7f, 1.f, 1.f });
     
     ui.Separator();
-    ui.Indent(16.f);
+    ui.Indent(8.f);
     
     // Draw Engine::Components::Transform (always present, not in Components list)
     DrawTransform(ui);
@@ -579,16 +586,17 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         ui.PopId();
     }
 
-    ui.Separator();
     ui.BeginDisabled(!CanEditSelectedObject());
-    if (ui.Button("Add Component", ui.AvailableContentWidth()))
+    const std::string addComponentLabel = std::string(Icons::Add) +
+        " Add Component";
+    if (ui.Button(addComponentLabel.c_str()))
     {
         m_componentPickerOpen = true;
         m_positionComponentPicker = true;
         m_componentSearch[0] = '\0';
     }
     ui.EndDisabled();
-    ui.Unindent(16.f);
+    ui.Unindent(8.f);
 
     ui.EndTextWrap();
     ui.EndWindow();

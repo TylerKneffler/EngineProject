@@ -16,6 +16,8 @@
 #include <chrono>
 #include <unordered_set>
 #include <unordered_map>
+#include <map>
+#include <tuple>
 #include <utility>
 
 namespace Engine::Core { class Window; }
@@ -37,7 +39,6 @@ class AssetsExplorerView;
 class SceneView;
 class AssetDocumentView;
 class AnimationView;
-class AnimationTimelineView;
 class IEditorUi;
 
 // ---------------------------------------------------------------------------
@@ -101,6 +102,7 @@ public:
         bool* overflow = nullptr);
     float GetGlobalToolbarHeight() const;
     bool HasToolbarSection(ToolbarSection section) const;
+    float GetToolbarSectionMinimumWidth(ToolbarSection section) const;
     ToolbarVisibility& GetToolbarVisibility() { return m_toolbarVisibility; }
     void ClosePrefabStage();
     void HandlePrefabPanelClosures();
@@ -115,6 +117,8 @@ public:
           size_t rigIndex = 0);
     bool CanOpenAnimationForSelection() const;
     void OpenAnimationForSelection();
+    bool CanCreateAnimationClip() const;
+    bool CreateAnimationClip(const std::string& name);
     void ProcessPendingAnimationDocumentOpens();
     void HandleAnimationDocumentClosures();
     bool IsEditingPrefab() const;
@@ -403,6 +407,12 @@ private:
     {
         struct RigTrack
         {
+            struct ClipLayer
+            {
+                int clipIndex = -1;
+                float weight = 1.f;
+                bool expanded = true;
+            };
             size_t index = 0;
             std::string name;
             std::string path;
@@ -412,6 +422,9 @@ private:
             Engine::Components::AnimationManager* sourceManager = nullptr;
             Engine::Components::AnimationManager* poseManager = nullptr;
             int clipIndex = -1;
+            float weight = 1.f;
+            bool expanded = true;
+            std::vector<ClipLayer> stackedClips;
             int selectedBone = -1;
             bool selected = false;
         };
@@ -430,6 +443,23 @@ private:
           std::vector<std::string> boundMeshNames;
           std::vector<RigAsset> rigAssets;
           char rigSearch[128]{};
+        bool rigAssetsDirty = true;
+        struct CachedClip
+        {
+            Engine::Model::AnimationClip compatible;
+            bool mappingReady = true;
+            std::unordered_map<unsigned, std::vector<float>> keyTimes;
+        };
+        using ClipCacheKey = std::tuple<
+            const Engine::Components::AnimationManager*,
+            const Engine::Components::Skeleton*, int>;
+        std::map<ClipCacheKey, CachedClip> clipCache;
+        std::unordered_map<const Engine::Components::AnimationManager*,
+            std::string> previewLayouts;
+        uint64_t clipRevision = 0;
+        std::vector<Engine::Model::AnimationClip> durationDragBefore;
+        int durationDragClip = -1;
+        bool durationDragChanged = false;
         std::unique_ptr<Engine::Scene::Scene> sourceScene;
         std::unique_ptr<Engine::Scene::Scene> poseScene;
         Engine::Core::Object* sourceRoot = nullptr;
@@ -437,14 +467,14 @@ private:
         Engine::Components::AnimationManager* poseManager = nullptr;
         Engine::Components::Skeleton* poseSkeleton = nullptr;
         AnimationView* view = nullptr;
-        AnimationTimelineView* timeline = nullptr;
         int clipIndex = -1;
         int selectedBone = -1;
-        int frame = 0;
-        int timelineStartFrame = 0;
-        int framesPerSecond = 30;
+        int repairIssueChannel = -1;
+        int repairBoneIndex = 0;
         float playheadSeconds = 0.f;
+        float timelinePixelsPerSecond = 110.f;
         bool playing = false;
+        bool playheadDragging = false;
         bool autoKey = false;
         bool gizmoWasActive = false;
         bool poseControlEditPending = false;
@@ -452,15 +482,25 @@ private:
         std::string savedSnapshot;
         std::deque<std::vector<Engine::Model::AnimationClip>> undo;
         std::deque<std::vector<Engine::Model::AnimationClip>> redo;
-        char newClipName[128]{};
         std::string error;
     };
     void SetActiveAnimationDocument(AnimationDocument* document);
     void FocusAnimationRig(AnimationDocument& document, size_t index);
     std::pair<std::string, size_t> SelectedAnimationRig() const;
     void DrawAnimationTimeline(IEditorUi& ui, AnimationDocument& document);
+    void DrawAnimationRigToolbar(IEditorUi& ui,
+        AnimationDocument& document);
+    void DrawAnimationProperties(IEditorUi& ui,
+        AnimationDocument& document);
+    void DrawAnimationMappingRepair(IEditorUi& ui,
+        AnimationDocument& document);
+    void DrawAnimationGraph(AnimationDocument& document,
+        float duration);
     void SampleAnimationDocument(AnimationDocument& document);
-    bool AddAnimationKey(AnimationDocument& document);
+    AnimationDocument::CachedClip& CachedAnimationClip(
+        AnimationDocument& document, AnimationDocument::RigTrack& track,
+        int clipIndex);
+    bool AddAnimationKey(AnimationDocument& document, bool exactTime = false);
     void RecordAnimationEdit(AnimationDocument& document,
         std::vector<Engine::Model::AnimationClip> before);
     bool SaveAnimationDocument(AnimationDocument& document);
@@ -486,6 +526,7 @@ private:
     void RefreshSceneAssetDocumentTitle(SceneAssetDocument& document);
     void RefreshSceneDocumentTitle();
     Engine::Scene::Scene* GetActiveDocumentScene() const;
+    SceneView* GetGlobalToolbarSceneView() const;
 
     // Core objects
     std::unique_ptr<::Engine::Core::Window> m_window;

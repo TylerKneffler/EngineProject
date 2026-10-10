@@ -405,7 +405,8 @@ void AnimationManager::Tick(float frameDelta)
     Model* model = ResolveModel();
     if (!model) return;
     const size_t nodeCount = model->GetNodeCount();
-    time = AdvanceTime(time, delta, speed, looping, animation);
+    time = AdvanceTime(time, delta, speed,
+        looping && animation->looping, animation);
     ReusablePose& basePose = m_scratch->basePose;
     ReusablePose& finalPose = m_scratch->finalPose;
     m_scratch->sampleCacheUsed = 0;
@@ -416,7 +417,9 @@ void AnimationManager::Tick(float frameDelta)
     {
         const Engine::Model::AnimationClip* previousAnimation =
             resolveAnimation(m_previousClip);
-        m_previousTime = AdvanceTime(m_previousTime, delta, speed, looping, previousAnimation);
+        m_previousTime = AdvanceTime(m_previousTime, delta, speed,
+            looping && (!previousAnimation || previousAnimation->looping),
+            previousAnimation);
         m_fadeElapsed += delta;
         const float blend = std::clamp(m_fadeElapsed / m_fadeDuration, 0.f, 1.f);
         const ReusablePose& previousPose = CachedSample(*m_scratch,
@@ -494,7 +497,8 @@ void AnimationManager::Tick(float frameDelta)
         const Engine::Model::AnimationClip* layerAnimation =
             resolveAnimation(layer.clip);
         if (!layerAnimation) continue;
-        layer.time = AdvanceTime(layer.time, delta, layer.speed, layer.looping, layerAnimation);
+        layer.time = AdvanceTime(layer.time, delta, layer.speed,
+            layer.looping && layerAnimation->looping, layerAnimation);
         AnimationManagerScratch::LayerMaskCache& mask =
             m_scratch->layerMasks[layerIndex];
         if (!mask.Matches(layer, nodeCount))

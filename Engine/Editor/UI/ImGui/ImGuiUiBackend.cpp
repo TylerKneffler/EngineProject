@@ -87,6 +87,7 @@ bool ImGuiUiBackend::Initialize(void* nativeWindow, ::Engine::Renderers::IEditor
     Shutdown();
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
+    ImGuiPanelHost::RegisterToolbarSettings();
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
     ConfigureEditorFonts();

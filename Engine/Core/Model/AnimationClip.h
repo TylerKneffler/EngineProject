@@ -12,6 +12,7 @@ struct AnimationClip
 {
     std::string clipName;
     float duration = 0.f;
+    bool looping = true;
     std::vector<AnimationChannel> channels;
 
     Engine::Serialization::JsonValue Serialize() const;

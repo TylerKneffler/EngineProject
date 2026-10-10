@@ -26,7 +26,8 @@ public:
     PropertiesView();
     ~PropertiesView() = default;
 
-    void Init(Engine::Scene::Scene* scene) { m_scene = scene; }
+    void Init(Engine::Scene::Scene* scene)
+    { m_scene = scene; OnDrawContext = {}; }
     void SetAllowComponentStructureEdits(bool allow)
     { m_allowComponentStructureEdits = allow; }
 
@@ -67,6 +68,9 @@ public:
     std::function<void(const std::string&, const std::string&)> OnAssetRenamed;
     std::function<void(const std::string&)> OnAssetContentsChanged;
     std::function<void(const std::string&)> OnPrefabRequested;
+    // Document-specific controls shown above the selected object's fields.
+    // Return true to use the entire panel for the document controls.
+    std::function<bool(IEditorUi&)> OnDrawContext;
 
 private:
     void DrawTransform(IEditorUi& ui);

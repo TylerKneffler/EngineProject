@@ -3,12 +3,14 @@
 #include "Game/Startup/GameProjectStartup.h"
 #include "Game/Startup/RendererStartup.h"
 #include "Core/Window.h"
+#include "Core/Startup/StartupSplash.h"
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Renderers/RendererFactory.h"
 #include "Core/Renderers/IGameRenderer.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/SceneManager.h"
+#include <filesystem>
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
 #include "Core/Assets/Scripts/Utilities/Rotate.h"
 #include "Core/Assets/Scripts/Controllers/FirstPersonController.h"
@@ -69,11 +71,21 @@ int GameApplication::Run(HINSTANCE instance)
     if (!SelectStartupRenderer(settings))
         return 0;
 
+    const auto startupBackground =
+        (std::filesystem::path(settings.assetsDirectory) / "Startup" / "Game.png").wstring();
+    ::Engine::Core::StartupSplash splash(instance,
+        settings.name.empty() ? L"Game" : std::filesystem::path(settings.name).wstring(),
+        startupBackground);
+    splash.SetProgress(0.15f, L"Creating game window...");
+
     auto window = std::make_unique<::Engine::Core::Window>(instance, L"Game",
         settings.viewportWidth, settings.viewportHeight);
+    splash.SetProgress(0.35f, L"Initializing renderer...");
     std::unique_ptr<::Engine::Renderers::IGameRenderer> renderer = CreateRenderer(settings, *window);
     if (!renderer)
         return 1;
+
+    splash.SetProgress(0.60f, L"Loading scene...");
 
     ::Engine::Scene::Scene scene;
     scene.Init(renderer->GetGraphicsProvider());
@@ -87,6 +99,7 @@ int GameApplication::Run(HINSTANCE instance)
         scene.Load(GetFallbackScenePath());
 
     scene.Start();
+    splash.SetProgress(0.90f, L"Starting game...");
 
     LARGE_INTEGER performanceFrequency{};
     LARGE_INTEGER lastCounter{};
@@ -125,7 +138,11 @@ int GameApplication::Run(HINSTANCE instance)
         renderer->EndFrame();
     };
 
+    splash.SetProgress(1.0f, L"Ready");
+    splash.HoldAboveMainWindow();
     window->Show();
+    window->OnUpdate();
+    splash.Close();
     const int result = window->Run();
     renderer->WaitIdle();
     return result;

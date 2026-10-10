@@ -127,6 +127,11 @@ IKBone::IKBone()
         "IK Bone | Joint | Spring");
     RegisterField("springDamping", springDamping,
         "IK Bone | Joint | Spring");
+    RegisterField("wiggleEnabled", wiggleEnabled, "IK Bone | Wiggle");
+    RegisterField("wiggleStiffness", wiggleStiffness, "IK Bone | Wiggle");
+    RegisterField("wiggleDamping", wiggleDamping, "IK Bone | Wiggle");
+    RegisterField("wiggleMaxAngle", wiggleMaxAngle, "IK Bone | Wiggle");
+    RegisterField("wiggleTipLength", wiggleTipLength, "IK Bone | Wiggle");
     RegisterField("collideWithParent", collideWithParent,
         "IK Bone | Joint");
 }
@@ -145,6 +150,103 @@ IKBone::~IKBone()
 void IKBone::SetInfluence(float value)
 {
     m_influence = std::clamp(value, 0.f, 1.f);
+}
+
+void IKBone::ResetWiggle()
+{
+    if (m_wiggleInitialized && Owner &&
+        std::abs(glm::dot(glm::normalize(glm::quat(
+            Owner->transform.rotation)), m_wiggleAppliedRotation)) > 0.99999f)
+        Owner->transform.rotation = glm::eulerAngles(m_wiggleBaseRotation);
+    m_wiggleInitialized = false;
+    m_wiggleVelocity = glm::vec3(0.f);
+}
+
+void IKBone::ApplyWiggle(float stepSeconds)
+{
+    if (!Owner || !wiggleEnabled || !Owner->IsEnabledInHierarchy() ||
+        IsSimulating() || Owner->transform.HasEditorOverride(
+            Transform::EditorRotation))
+    {
+        ResetWiggle();
+        return;
+    }
+
+    // AnimationManager writes the target pose before physics. If a bone has no
+    // rotation channel, remove our previous result before sampling its target.
+    glm::quat base = glm::normalize(glm::quat(Owner->transform.rotation));
+    if (m_wiggleInitialized &&
+        std::abs(glm::dot(base, m_wiggleAppliedRotation)) > 0.99999f)
+    {
+        base = m_wiggleBaseRotation;
+        Owner->transform.rotation = glm::eulerAngles(base);
+    }
+
+    glm::vec3 localTip(std::max(wiggleTipLength, 0.001f), 0.f, 0.f);
+    if (auto* bone = Owner->GetComponent<AnimationBone>())
+        for (AnimationBone* child : bone->GetChildBones())
+            if (child && child->Owner &&
+                glm::length(child->Owner->transform.position) > 0.001f)
+            {
+                localTip = child->Owner->transform.position;
+                break;
+            }
+    const glm::mat4 targetMatrix = Owner->transform.GetWorldMatrix();
+    const glm::vec3 pivot(targetMatrix[3]);
+    const glm::vec3 target = glm::vec3(targetMatrix *
+        glm::vec4(localTip, 1.f));
+    const float length = glm::length(target - pivot);
+    if (length < 0.001f) return;
+
+    if (!m_wiggleInitialized || stepSeconds <= 0.f ||
+        glm::length(m_wiggleTip - target) > length * 4.f)
+    {
+        m_wiggleTip = target;
+        m_wiggleVelocity = glm::vec3(0.f);
+        m_wiggleInitialized = true;
+    }
+    else
+    {
+        const float dt = std::clamp(stepSeconds, 0.f, 0.1f);
+        const int steps = std::max(1, static_cast<int>(std::ceil(dt / 0.008f)));
+        const float substep = dt / steps;
+        for (int i = 0; i < steps; ++i)
+        {
+            m_wiggleVelocity += (target - m_wiggleTip) *
+                std::max(wiggleStiffness, 0.f) * substep;
+            m_wiggleVelocity *= std::exp(-std::max(wiggleDamping, 0.f) *
+                substep);
+            m_wiggleTip += m_wiggleVelocity * substep;
+        }
+    }
+
+    const glm::vec3 targetDirection = glm::normalize(target - pivot);
+    glm::vec3 simulatedDirection = m_wiggleTip - pivot;
+    if (glm::length(simulatedDirection) < 0.001f)
+        simulatedDirection = targetDirection;
+    else
+        simulatedDirection = glm::normalize(simulatedDirection);
+    const float angle = std::acos(std::clamp(glm::dot(targetDirection,
+        simulatedDirection), -1.f, 1.f));
+    const float limit = std::clamp(wiggleMaxAngle, 0.f, 3.14159f);
+    if (angle > limit && angle > 0.f)
+    {
+        simulatedDirection = glm::normalize(glm::mix(targetDirection,
+            simulatedDirection, limit / angle));
+        m_wiggleVelocity *= 0.5f;
+    }
+    m_wiggleTip = pivot + simulatedDirection * length;
+
+    const glm::quat worldBend = glm::rotation(targetDirection,
+        simulatedDirection);
+    const glm::quat parentRotation = Owner->Parent
+        ? MatrixRotation(Owner->Parent->transform.GetWorldMatrix())
+        : glm::quat(1.f, 0.f, 0.f, 0.f);
+    const glm::quat worldBase = MatrixRotation(targetMatrix);
+    m_wiggleBaseRotation = base;
+    m_wiggleAppliedRotation = glm::normalize(glm::inverse(parentRotation) *
+        worldBend * worldBase);
+    Owner->transform.rotation = glm::eulerAngles(m_wiggleAppliedRotation);
 }
 
 bool IKBone::WantsSimulation() const
@@ -832,6 +934,7 @@ void IKBone::NativeResetSimulation()
 
 void IKBone::Disabled()
 {
+    ResetWiggle();
     if (Owner && Owner->GetScene())
         Owner->GetScene()->GetPhysics().DestroyIKBone(*this);
     else
