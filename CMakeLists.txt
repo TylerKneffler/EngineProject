@@ -205,6 +205,8 @@ FetchContent_MakeAvailable(glm)
 # IMGUI — Git library
 # ---------------------------------------------------------------------------
 
+# Let an existing checkout fetch the pinned revision when it changes.
+set(FETCHCONTENT_UPDATES_DISCONNECTED OFF)
 FetchContent_Declare(
     imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
@@ -212,6 +214,7 @@ FetchContent_Declare(
     GIT_TAG        83f668625ad45364de71d385aeb6a5dd04bee02e
 )
 FetchContent_MakeAvailable(imgui)
+set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
 
 set(IMGUI_SOURCES
     ${imgui_SOURCE_DIR}/imgui.cpp
