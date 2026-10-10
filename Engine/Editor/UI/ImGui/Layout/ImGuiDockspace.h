@@ -2,12 +2,14 @@
 
 namespace Engine::Editor
 {
+enum class EditorPanelDockArea;
 // Owns creation of ImGui's default editor dock tree. ImGui itself persists
 // later user changes through imgui.ini.
 class ImGuiDockspace
 {
 public:
     void Draw();
+    static void DockWindowToArea(const char* title, EditorPanelDockArea area);
 
 private:
     // Compatibility work may seed a restored dock tree once, but must never

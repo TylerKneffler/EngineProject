@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "ImGuiEditorUi.h"
+#include "Layout/ImGuiDockspace.h"
 #include "Engine/Editor/Core/View/IEditorPanel.h"
 #include "Engine/Editor/Core/PrimitiveObjectFactory.h"
 #include "Engine/Editor/Input/EditorKeyBindings.h"
@@ -1497,47 +1498,8 @@ EditorUiUvMapResult ImGuiEditorUi::UvMapEditor(const char* id, float* uvPairs,
     return result;
 }
 void ImGuiEditorUi::FocusWindow(const char*t){ImGui::SetWindowFocus(t);}
-void ImGuiEditorUi::DockWindowToArea(const char* title,EditorPanelDockArea area)
+void ImGuiEditorUi::DockWindowToArea(const char* title, EditorPanelDockArea area)
 {
-    if(!title||!title[0]||area==EditorPanelDockArea::None)return;
-
-    auto nodeForWindow=[&](const char* name)->ImGuiID{
-        ImGuiWindow* window=ImGui::FindWindowByName(name);
-        return window&&window->DockNode?window->DockNode->ID:0;
-    };
-    auto nodeForViewType=[&](const char* baseName)->ImGuiID{
-        if(ImGuiID node=nodeForWindow(baseName))return node;
-        for(int slot=2;slot<=32;++slot){
-            const std::string numbered=std::string(baseName)+" "+std::to_string(slot);
-            if(ImGuiID node=nodeForWindow(numbered.c_str()))return node;
-        }
-        return 0;
-    };
-
-    ImGuiID targetNode=0;
-    switch(area)
-    {
-    case EditorPanelDockArea::MainDocument:
-        targetNode=nodeForViewType("Scene");
-        if(!targetNode)targetNode=nodeForViewType("Game");
-        break;
-    case EditorPanelDockArea::LeftSidebar:
-        targetNode=nodeForWindow("Hierarchy");
-        if(!targetNode)targetNode=nodeForWindow("Assets");
-        break;
-    case EditorPanelDockArea::RightSidebar:
-        targetNode=nodeForWindow("Properties");
-        break;
-    case EditorPanelDockArea::BottomPanel:
-        targetNode=nodeForWindow("Console");
-        if(!targetNode)targetNode=nodeForWindow("Problems");
-        if(!targetNode)targetNode=nodeForWindow("Terminal");
-        break;
-    default:
-        break;
-    }
-
-    if(targetNode)
-        ImGui::DockBuilderDockWindow(title,targetNode);
+    ImGuiDockspace::DockWindowToArea(title, area);
 }
 }

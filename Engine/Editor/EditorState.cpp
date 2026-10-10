@@ -2970,15 +2970,19 @@ void EditorState::RefreshSceneDocumentTitle()
         ? "Untitled.scene"
         : std::filesystem::path(m_currentScenePath).filename().string();
     const std::string title = filename +
-        (m_hasUnsavedChanges ? " *" : "") + "###SceneDocument:" +
-        (m_currentScenePath.empty()
-            ? std::string("untitled") : AssetPathIdentity(m_currentScenePath));
+        (m_hasUnsavedChanges ? " *" : "");
     for (const auto& panel : m_panels)
         if (auto* sceneView = dynamic_cast<SceneView*>(panel.get());
             sceneView && sceneView->GetScene() == m_scene.get())
         {
             sceneView->SetDocumentPath(m_currentScenePath);
-            sceneView->SetTitle(title);
+            // The main viewport survives scene changes. Keep its window ID
+            // (including the slot for additional views) so docking survives too.
+            const std::string& previousTitle = sceneView->GetTitle();
+            const size_t idStart = previousTitle.find("###");
+            const std::string windowId = idStart == std::string::npos
+                ? "###" + previousTitle : previousTitle.substr(idStart);
+            sceneView->SetTitle(title + windowId);
         }
 }
 
