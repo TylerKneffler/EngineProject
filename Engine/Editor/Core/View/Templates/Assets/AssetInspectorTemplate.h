@@ -4,6 +4,8 @@
 #include <memory>
 #include <string>
 #include "AssetPreviewCache.h"
+#include "Core/Model/AnimationClipAsset.h"
+#include <optional>
 
 namespace Engine::Scene { class Scene; }
 namespace Engine::Components { class Texture; }
@@ -28,12 +30,14 @@ public:
 
     std::function<void(const std::string&, const std::string&)> OnRenamed;
     std::function<void(const std::string&)> OnContentsChanged;
+    std::function<void(const std::string&)> OnOpenAnimation;
 
 private:
     std::string m_selectedPath;
     std::string m_renameError;
     char m_nameEdit[512]{};
     std::shared_ptr<::Engine::Components::Texture> m_texturePreview;
+    std::optional<Engine::Model::AnimationClipAsset> m_animationPreview;
     AssetPreviewCache m_previewCache;
 };
 }

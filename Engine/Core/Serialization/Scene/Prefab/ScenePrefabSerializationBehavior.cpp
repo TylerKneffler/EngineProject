@@ -55,6 +55,8 @@ bool SaveRigAssets(const Engine::Core::Object& object,
             const auto* scene = object.GetScene();
             if (!scene) return false;
             auto rig = Engine::Model::RigAsset::Capture(*scene, *skeleton);
+            if (auto existing = Engine::Model::RigAsset::Load(skeleton->rigPath))
+                rig.animationPaths = std::move(existing->animationPaths);
             std::filesystem::path referencedPrefab(prefabPath);
             const std::filesystem::path storedRig(skeleton->rigPath);
             if (storedRig.is_relative() && !storedRig.parent_path().empty())

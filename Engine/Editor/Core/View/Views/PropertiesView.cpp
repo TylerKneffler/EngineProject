@@ -207,6 +207,7 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
     {
         m_assetInspector.OnRenamed = OnAssetRenamed;
         m_assetInspector.OnContentsChanged = OnAssetContentsChanged;
+        m_assetInspector.OnOpenAnimation = OnOpenAnimation;
         m_assetInspector.Draw(ui, m_scene);
         ui.EndTextWrap();
         ui.EndWindow();

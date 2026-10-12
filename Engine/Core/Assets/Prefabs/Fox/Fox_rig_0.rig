@@ -559,5 +559,10 @@
   ],
   "meshes": [
     "fox"
+  ],
+  "animations": [
+    "Assets/Prefabs/Fox/Fox_rig_0_Survey_1.anim",
+    "Assets/Prefabs/Fox/Fox_rig_0_Walk_2.anim",
+    "Assets/Prefabs/Fox/Fox_rig_0_Run_3.anim"
   ]
 }

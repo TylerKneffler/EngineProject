@@ -67,6 +67,7 @@ public:
     std::function<void(const std::string&, bool)> OnAssetDropLog;
     std::function<void(const std::string&, const std::string&)> OnAssetRenamed;
     std::function<void(const std::string&)> OnAssetContentsChanged;
+    std::function<void(const std::string&)> OnOpenAnimation;
     std::function<void(const std::string&)> OnPrefabRequested;
     // Document-specific controls shown above the selected object's fields.
     // Return true to use the entire panel for the document controls.

@@ -9,6 +9,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace Engine::Components
@@ -34,6 +35,7 @@ public:
     std::vector<Engine::Model::AnimationClip> clips;
     std::vector<std::string> rigPaths;
     std::vector<Engine::Model::RigAsset> LoadRigAssets() const;
+    void RefreshRigClips(bool remap = true);
     std::vector<Layer> layers;
     const Engine::Model::AnimationClip* FindClip(const std::string& name = {}) const;
     std::vector<const Engine::Model::AnimationClip*> GetAvailableClips() const;
@@ -64,5 +66,6 @@ private:
     mutable uint64_t m_cachedConfigurationRevision = 0;
     mutable bool m_modelCacheValid = false;
     std::unique_ptr<AnimationManagerScratch> m_scratch;
+    std::unordered_set<std::string> m_externalClipNames;
 };
 }

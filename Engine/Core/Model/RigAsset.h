@@ -27,6 +27,7 @@ struct RigAsset
     std::string prefabPath;
     std::vector<Joint> joints;
     std::vector<std::string> meshNames;
+    std::vector<std::string> animationPaths;
 
     static RigAsset Capture(const Engine::Scene::Scene& scene,
         const Engine::Components::Skeleton& skeleton);

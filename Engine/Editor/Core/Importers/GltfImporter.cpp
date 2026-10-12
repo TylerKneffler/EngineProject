@@ -6,6 +6,7 @@
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Animation/ModelAnimation.h"
 #include "Core/Model/RigAsset.h"
+#include "AnimationAssetWriter.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
@@ -867,6 +868,11 @@ Engine::Model::ModelImportResult GltfImporter::Import(
         }
 
         const fs::path prefabPath = output / (modelName + ".prefab");
+        if (manager)
+            for (auto& clip : manager->clips)
+                for (auto& channel : clip.channels)
+                    channel.targetPath = AnimationClipMapping::NodePath(
+                        *modelComponent, channel.nodeIndex);
         for (auto* component : prefabRoot->Components)
             if (auto* skeleton = dynamic_cast<Engine::Components::Skeleton*>(component))
             {
@@ -875,6 +881,9 @@ Engine::Model::ModelImportResult GltfImporter::Import(
                 auto rig = Engine::Model::RigAsset::Capture(prefabScene,
                     *skeleton);
                 rig.prefabPath = prefabPath.generic_string();
+                if (manager)
+                    WriteImportedAnimations(rig, *manager, *modelComponent,
+                        rigPath, prefabPath, source);
                 if (!rig.Save(rigPath.string()))
                     throw std::runtime_error("Could not save rig: " + rigPath.string());
                 skeleton->rigPath = rigPath.generic_string();
@@ -884,11 +893,7 @@ Engine::Model::ModelImportResult GltfImporter::Import(
                       { "skinIndex", static_cast<double>(skeleton->skinIndex) } });
             }
 
-        if (manager)
-            for (auto& clip : manager->clips)
-                for (auto& channel : clip.channels)
-                    channel.targetPath = AnimationClipMapping::NodePath(
-                        *modelComponent, channel.nodeIndex);
+        if (manager) manager->RefreshRigClips();
         if (!Engine::Serialization::SceneSerializer::SavePrefab(*prefabRoot, prefabPath.string()))
             throw std::runtime_error("Could not save prefab: " + prefabPath.string());
         Engine::Core::AssetRecord::Ensure(prefabPath, source,

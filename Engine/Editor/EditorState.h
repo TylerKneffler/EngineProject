@@ -117,6 +117,7 @@ public:
     void HandleSceneAssetDocumentClosures();
       void QueueAnimationDocumentOpen(const std::string& path,
           size_t rigIndex = 0);
+    void QueueAnimationAssetOpen(const std::string& path);
     bool CanOpenAnimationForSelection() const;
     void OpenAnimationForSelection();
     bool CanCreateAnimationClip() const;
@@ -498,6 +499,7 @@ private:
           size_t rigIndex = 0;
           std::string rigName;
           std::string rigPath;
+        std::string animationAssetToAdd;
           std::vector<std::string> boundMeshNames;
           std::vector<RigAsset> rigAssets;
           char rigSearch[128]{};
@@ -553,6 +555,8 @@ private:
         std::string error;
     };
     void SetActiveAnimationDocument(AnimationDocument* document);
+    void SelectAnimationDocumentClip(AnimationDocument& document,
+        const std::string& clipName, size_t rigIndex);
     void FocusAnimationRig(AnimationDocument& document, size_t index);
     std::pair<std::string, size_t> SelectedAnimationRig() const;
     void DrawAnimationTimeline(IEditorUi& ui, AnimationDocument& document);
@@ -618,6 +622,7 @@ private:
     SceneAssetDocument* m_activeSceneAssetDocument = nullptr;
     std::vector<std::unique_ptr<AnimationDocument>> m_animationDocuments;
       std::deque<std::pair<std::string, size_t>> m_pendingAnimationDocuments;
+    std::unordered_map<std::string, std::string> m_pendingAnimationClipSelections;
     AnimationDocument* m_activeAnimationDocument = nullptr;
     MeshEditSession m_mainMeshEdit;
     MeshEditSession m_prefabMeshEdit;

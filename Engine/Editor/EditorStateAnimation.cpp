@@ -16,10 +16,12 @@
 #include "Core/Compoonents/Animation/Model.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
+#include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Transform.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/ComponentReference.h"
 #include "Core/Model/RigAsset.h"
+#include "Core/Model/AnimationClipAsset.h"
 #include "Core/Object.h"
 #include "Core/Prefab/PrefabAsset.h"
 #include "imgui.h"
@@ -136,7 +138,10 @@ std::vector<std::string> BoundMeshNames(Engine::Scene::Scene& scene,
 }
 
 std::string RigIdentity(const std::string& path, size_t rigIndex)
-{ return AnimationIdentity(path) + "#rig=" + std::to_string(rigIndex); }
+{
+    return AnimationIdentity(Engine::Components::Mesh::ResolveFilePath(path)) +
+        "#rig=" + std::to_string(rigIndex);
+}
 
 bool RigMatchesSkeleton(const Engine::Model::RigAsset& rig,
     Engine::Components::Skeleton& skeleton)
@@ -377,6 +382,13 @@ void EditorState::QueueAnimationDocumentOpen(const std::string& path,
             document->view->SetOpen(true);
             if (rigIndex != static_cast<size_t>(-1))
                 FocusAnimationRig(*document, rigIndex);
+            if (auto requested = m_pendingAnimationClipSelections.find(identity);
+                requested != m_pendingAnimationClipSelections.end())
+            {
+                SelectAnimationDocumentClip(*document, requested->second,
+                    rigIndex);
+                m_pendingAnimationClipSelections.erase(requested);
+            }
             SetActiveAnimationDocument(document.get());
             return;
         }
@@ -384,6 +396,73 @@ void EditorState::QueueAnimationDocumentOpen(const std::string& path,
         if ((pending.first.empty() ? "__EmptyAnimationEditor__" :
                 AnimationIdentity(pending.first)) == identity) return;
     m_pendingAnimationDocuments.emplace_back(path, rigIndex);
+}
+
+void EditorState::QueueAnimationAssetOpen(const std::string& path)
+{
+    const auto asset = Engine::Model::AnimationClipAsset::Load(path);
+    if (!asset)
+    {
+        if (m_primaryConsole) m_primaryConsole->AddLog(ConsoleView::Level::Error,
+            "Could not read animation asset: " + path);
+        return;
+    }
+    std::string prefab = asset->previewPrefab;
+    size_t rigIndex = asset->previewRig;
+    if (prefab.empty())
+    {
+        const auto assets = m_projectSettings.assetsDirectory.empty()
+            ? std::filesystem::path("Assets")
+            : std::filesystem::path(m_projectSettings.assetsDirectory);
+        std::error_code error;
+        for (std::filesystem::recursive_directory_iterator it(assets,
+                std::filesystem::directory_options::skip_permission_denied,
+                error), end;
+            it != end && !error; it.increment(error))
+            if (it->is_regular_file(error) &&
+                LowerText(it->path().extension().string()) == ".rig")
+                if (auto rig = Engine::Model::RigAsset::Load(
+                        it->path().string()))
+                    if (std::any_of(rig->animationPaths.begin(),
+                            rig->animationPaths.end(), [&](const auto& item)
+                            { return AnimationIdentity(item) ==
+                                AnimationIdentity(path); }))
+                    {
+                        prefab = rig->prefabPath;
+                        rigIndex = rig->rigIndex;
+                        break;
+                    }
+    }
+    if (prefab.empty())
+    {
+        if (m_primaryConsole) m_primaryConsole->AddLog(ConsoleView::Level::Error,
+            "Assign this animation to a rig before opening it: " + path);
+        return;
+    }
+    m_pendingAnimationClipSelections[AnimationIdentity(prefab)] =
+        asset->clip.clipName;
+    QueueAnimationDocumentOpen(prefab, rigIndex);
+}
+
+void EditorState::SelectAnimationDocumentClip(AnimationDocument& document,
+    const std::string& clipName, size_t rigIndex)
+{
+    for (auto& track : document.tracks)
+        if (track.index == rigIndex)
+            for (size_t index = 0; index < track.sourceManager->clips.size(); ++index)
+                if (track.sourceManager->clips[index].clipName == clipName)
+                {
+                    track.clipIndex = static_cast<int>(index);
+                    track.stackedClips.clear();
+                    if (document.rigIndex != rigIndex)
+                        FocusAnimationRig(document, rigIndex);
+                    document.clipIndex = track.clipIndex;
+                    document.playheadSeconds = 0.f;
+                    document.selectedKeys.clear();
+                    SampleAnimationDocument(document);
+                    return;
+                }
+    document.error = "Animation is not referenced by this rig: " + clipName;
 }
 
 void EditorState::ProcessPendingAnimationDocumentOpens()
@@ -474,6 +553,7 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
                 Engine::Core::CaptureComponentReference(
                     sourceSkeleton->ResolveModel(), "Model");
         }
+        document->sourceManager->RefreshRigClips();
         document->savedSnapshot = document->sourceScene->SaveToString();
         document->poseScene = std::make_unique<Engine::Scene::Scene>();
         document->poseScene->Init(m_renderer->GetGraphicsProvider());
@@ -498,6 +578,7 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
                 sourceRig);
             auto* poseManager = ManagerForRig(*document->poseScene, poseRig);
             if (!sourceManager || !poseManager) continue;
+            sourceManager->RefreshRigClips();
             AnimationDocument::RigTrack track;
             track.index = index;
             track.name = sourceRig->Owner->name;
@@ -509,6 +590,12 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
             track.sourceManager = sourceManager;
             track.poseManager = poseManager;
             track.clipIndex = sourceManager->clips.empty() ? -1 : 0;
+            for (size_t clip = 0; clip < sourceManager->clips.size(); ++clip)
+                if (sourceManager->clips[clip].clipName == sourceManager->clip)
+                {
+                    track.clipIndex = static_cast<int>(clip);
+                    break;
+                }
             track.selectedBone = poseRig->ResolveJoints().empty() ? -1 : 0;
             track.selected = selectAll || index == initialRig;
             document->tracks.push_back(std::move(track));
@@ -528,8 +615,17 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
             track.poseManager->layers.clear();
             track.poseManager->Start();
         }
-        if (!document->sourceManager->clips.empty())
-            document->clipIndex = 0;
+        for (const auto& track : document->tracks)
+            if (track.index == initialRig)
+            { document->clipIndex = track.clipIndex; break; }
+        if (auto requested = m_pendingAnimationClipSelections.find(
+                document->identity);
+            requested != m_pendingAnimationClipSelections.end())
+        {
+            SelectAnimationDocumentClip(*document, requested->second,
+                initialRig);
+            m_pendingAnimationClipSelections.erase(requested);
+        }
         const auto& joints = document->poseSkeleton->ResolveJoints();
         if (!joints.empty() && joints[0])
         {
@@ -1086,11 +1182,73 @@ bool EditorState::SaveAnimationDocument(AnimationDocument& document)
         rigPath = destination.generic_string();
     }
     latestSkeleton->rigPath = rigPath;
+    auto rig = Engine::Model::RigAsset::Capture(latest, *latestSkeleton);
+    rig.prefabPath = document.path;
+    const auto previousRig = Engine::Model::RigAsset::Load(rigPath);
+    std::vector<std::string> animationPaths;
+    for (size_t index = 0; index < document.sourceManager->clips.size(); ++index)
+    {
+        auto animation = document.sourceManager->clips[index];
+        for (auto& channel : animation.channels)
+            if (channel.targetPath.empty())
+                channel.targetPath = AnimationClipMapping::NodePath(
+                    *latestModel, channel.nodeIndex);
+        std::string animationPath;
+        if (previousRig)
+            for (const auto& candidate : previousRig->animationPaths)
+                if (auto existing = Engine::Model::AnimationClipAsset::Load(candidate);
+                    existing && existing->clip.clipName == animation.clipName)
+                { animationPath = candidate; break; }
+        if (animationPath.empty())
+        {
+            std::string safeName = animation.clipName;
+            for (char& character : safeName)
+                if (!std::isalnum(static_cast<unsigned char>(character)) &&
+                    character != '-' && character != '_') character = '_';
+            if (safeName.empty()) safeName = "Animation";
+            const std::string stem = std::filesystem::path(rigPath).stem()
+                .string() + "_" + safeName + "_" +
+                std::to_string(index + 1);
+            for (size_t suffix = 0;; ++suffix)
+            {
+                const auto candidate = std::filesystem::path(rigPath)
+                    .parent_path() / (stem + (suffix == 0 ? "" :
+                        "_" + std::to_string(suffix)) + ".anim");
+                if (!std::filesystem::exists(candidate))
+                { animationPath = candidate.generic_string(); break; }
+            }
+        }
+        Engine::Model::AnimationClipAsset asset;
+        if (auto existing = Engine::Model::AnimationClipAsset::Load(animationPath))
+            asset = std::move(*existing);
+        asset.clip = std::move(animation);
+        if (asset.previewPrefab.empty())
+        {
+            asset.previewPrefab = document.path;
+            asset.previewRig = document.rigIndex;
+        }
+        if (asset.baseSkeleton.empty())
+            asset.baseSkeleton = Engine::Model::AnimationClipAsset::
+                CaptureBaseSkeleton(*latestModel);
+        if (!asset.Save(animationPath))
+        {
+            document.error = "Could not save animation asset: " + animationPath;
+            return false;
+        }
+        animationPaths.push_back(std::move(animationPath));
+    }
+    rig.animationPaths = std::move(animationPaths);
+    if (!rig.Save(rigPath))
+    {
+        document.error = "Could not save rig animation references.";
+        return false;
+    }
     if (std::find(latestManager->rigPaths.begin(),
             latestManager->rigPaths.end(), rigPath) ==
         latestManager->rigPaths.end())
         latestManager->rigPaths.push_back(rigPath);
     latestManager->clips = document.sourceManager->clips;
+    latestManager->RefreshRigClips();
     if (latestManager->clip.empty() && !latestManager->clips.empty())
         latestManager->clip = latestManager->clips.front().clipName;
     root->Prefab.reset();
@@ -1107,6 +1265,7 @@ bool EditorState::SaveAnimationDocument(AnimationDocument& document)
             document.sourceManager->rigPaths.end(), rigPath) ==
         document.sourceManager->rigPaths.end())
         document.sourceManager->rigPaths.push_back(rigPath);
+    document.sourceManager->RefreshRigClips();
     document.rigPath = rigPath;
     for (auto& track : document.tracks)
         if (track.index == document.rigIndex)
@@ -1200,6 +1359,7 @@ void EditorState::ScanAnimationRigAssets(AnimationDocument& document)
     document.rigAssets.clear();
     document.rigAssetsDirty = false;
     std::unordered_set<std::string> seen;
+    std::vector<std::filesystem::path> rigPaths;
     const std::filesystem::path assets =
         m_projectSettings.assetsDirectory.empty()
             ? std::filesystem::path("Assets")
@@ -1220,21 +1380,7 @@ void EditorState::ScanAnimationRigAssets(AnimationDocument& document)
             LowerText(it->path().extension().string());
         if (extension == ".rig")
         {
-            auto rig = Engine::Model::RigAsset::Load(it->path().string());
-            if (!rig || rig->prefabPath.empty()) continue;
-            Engine::Scene::Scene candidate;
-            if (!Engine::Serialization::SceneSerializer::InstantiatePrefab(
-                    candidate, rig->prefabPath, nullptr)) continue;
-            auto* skeleton = RigAt(candidate, rig->rigIndex);
-            if (!skeleton || !RigMatchesSkeleton(*rig, *skeleton)) continue;
-            const std::string identity = RigIdentity(rig->prefabPath,
-                rig->rigIndex);
-            if (!seen.insert(identity).second) continue;
-            document.rigAssets.push_back({ rig->prefabPath,
-                it->path().filename().string() + " / " +
-                    skeleton->Owner->name + " (" +
-                    std::to_string(rig->meshNames.size()) +
-                    " bound meshes)", rig->rigIndex });
+            rigPaths.push_back(it->path());
             continue;
         }
         if (extension != ".prefab") continue;
@@ -1259,6 +1405,28 @@ void EditorState::ScanAnimationRigAssets(AnimationDocument& document)
             if (seen.insert(RigIdentity(path, rig)).second)
                 document.rigAssets.push_back({ path, std::move(label), rig });
         }
+    }
+    // A rig can point to a prefab through a portable Assets/... path. Add it
+    // only if the prefab scan did not already find that same rig.
+    for (const auto& rigPath : rigPaths)
+    {
+        auto rig = Engine::Model::RigAsset::Load(rigPath.string());
+        if (!rig || rig->prefabPath.empty()) continue;
+        const std::string identity = RigIdentity(rig->prefabPath,
+            rig->rigIndex);
+        if (seen.find(identity) != seen.end()) continue;
+        Engine::Scene::Scene candidate;
+        if (!Engine::Serialization::SceneSerializer::InstantiatePrefab(
+                candidate, rig->prefabPath, nullptr)) continue;
+        auto* skeleton = RigAt(candidate, rig->rigIndex);
+        if (!skeleton || !RigMatchesSkeleton(*rig, *skeleton)) continue;
+        seen.insert(identity);
+        document.rigAssets.push_back({ rig->prefabPath,
+            std::filesystem::path(rig->prefabPath).filename().string() +
+                " / " + skeleton->Owner->name + " (" +
+                std::to_string(rig->meshNames.size()) +
+                " bound meshes) / " + rigPath.filename().string(),
+            rig->rigIndex });
     }
     std::sort(document.rigAssets.begin(), document.rigAssets.end(),
         [](const auto& left, const auto& right)
@@ -1414,9 +1582,8 @@ void EditorState::DrawAnimationRigToolbar(IEditorUi& ui,
             continue;
         ImGui::PushID(&asset);
         if (ImGui::Selectable(asset.label.c_str(),
-                AnimationIdentity(asset.path) ==
-                    AnimationIdentity(document.path) &&
-                asset.rigIndex == document.rigIndex))
+                RigIdentity(asset.path, asset.rigIndex) ==
+                    RigIdentity(document.path, document.rigIndex)))
         {
             QueueAnimationDocumentOpen(asset.path, asset.rigIndex);
             if (document.path.empty() && document.view &&
@@ -1439,13 +1606,6 @@ void EditorState::DrawAnimationProperties(IEditorUi& ui,
         return;
     }
     auto& clips = document.sourceManager->clips;
-    if (clips.empty())
-    {
-        ui.DisabledLabel("Create a clip to begin posing and keyframing bones.");
-        if (!document.error.empty()) ui.ColoredLabel(document.error.c_str(),
-            { 1.f, .5f, .35f, 1.f });
-        return;
-    }
     if (ImGui::CollapsingHeader("Rig details"))
     {
         const std::string rigLabel = document.rigName + " / " +
@@ -1461,6 +1621,85 @@ void EditorState::DrawAnimationProperties(IEditorUi& ui,
                     document.boundMeshNames[index].c_str());
     }
     ui.Separator();
+    Engine::Core::Component::DrawAssetPathPicker(ui, &document,
+        "animationAssetToAdd", "Animation asset", "animation",
+        document.animationAssetToAdd);
+    ui.SameLine();
+    if (ui.Button("Add to rig"))
+    {
+        const auto asset = Engine::Model::AnimationClipAsset::Load(
+            document.animationAssetToAdd);
+        auto rig = Engine::Model::RigAsset::Load(document.rigPath);
+        if (!rig)
+            document.error = "Save this rig before adding animation assets.";
+        else if (!asset)
+            document.error = "Choose a valid animation asset.";
+        else if (std::find(rig->animationPaths.begin(),
+                rig->animationPaths.end(), document.animationAssetToAdd) !=
+                rig->animationPaths.end())
+            document.error = "Animation is already referenced by this rig.";
+        else if (std::any_of(clips.begin(), clips.end(),
+                [&](const auto& clip)
+                { return clip.clipName == asset->clip.clipName; }))
+            document.error = "An animation with this name already exists on the rig.";
+        else
+        {
+            auto* model = document.poseSkeleton->ResolveModel();
+            auto mapped = asset->clip;
+            bool compatible = model != nullptr;
+            if (model)
+            {
+                const auto nodes = AnimationClipMapping::ModelBones(*model);
+                for (auto& channel : mapped.channels)
+                {
+                    const auto found = std::find_if(nodes.begin(), nodes.end(),
+                        [&](const auto& node)
+                        { return node.path == channel.targetPath; });
+                    if (channel.targetPath.empty() || found == nodes.end())
+                    { compatible = false; break; }
+                    channel.nodeIndex = found->nodeIndex;
+                }
+            }
+            if (!compatible)
+                document.error = "Animation channels do not match this rig.";
+            else
+            {
+                rig->animationPaths.push_back(document.animationAssetToAdd);
+                if (!rig->Save(document.rigPath))
+                    document.error = "Could not save rig animation reference.";
+                else
+                {
+                    document.sourceManager->RefreshRigClips();
+                    for (auto& track : document.tracks)
+                        if (track.index == document.rigIndex)
+                            for (size_t index = 0;
+                                index < track.sourceManager->clips.size(); ++index)
+                                if (track.sourceManager->clips[index].clipName ==
+                                    mapped.clipName)
+                                { track.clipIndex = static_cast<int>(index); break; }
+                    document.clipIndex = [&]()
+                    {
+                        for (const auto& track : document.tracks)
+                            if (track.index == document.rigIndex)
+                                return track.clipIndex;
+                        return -1;
+                    }();
+                    document.animationAssetToAdd.clear();
+                    document.error.clear();
+                    ++document.clipRevision;
+                    document.clipCache.clear();
+                    SampleAnimationDocument(document);
+                }
+            }
+        }
+    }
+    if (clips.empty())
+    {
+        ui.DisabledLabel("Create a clip or add an animation asset to this rig.");
+        if (!document.error.empty()) ui.ColoredLabel(document.error.c_str(),
+            { 1.f, .5f, .35f, 1.f });
+        return;
+    }
     DrawAnimationMappingRepair(ui, document);
     const std::string saveLabel = std::string(Icons::Save) +
         " Save Selected Rigs";
@@ -1594,6 +1833,82 @@ void EditorState::DrawAnimationTimeline(IEditorUi& ui,
     ImGui::SetNextItemWidth(150.f);
     ImGui::SliderFloat("Zoom", &document.timelinePixelsPerSecond,
         35.f, 320.f, "%.0f px/s");
+    for (auto& track : document.tracks)
+    {
+        if (!track.selected || !track.sourceManager) continue;
+        const auto& available = track.sourceManager->clips;
+        if (available.empty()) continue;
+        ImGui::PushID(&track);
+        if (document.tracks.size() > 1)
+            ImGui::TextUnformatted(track.name.c_str());
+        const char* baseName = track.clipIndex >= 0 &&
+            track.clipIndex < static_cast<int>(available.size())
+                ? available[track.clipIndex].clipName.c_str() : "Choose animation";
+        ImGui::SetNextItemWidth(220.f);
+        if (ImGui::BeginCombo("Base animation", baseName))
+        {
+            for (int index = 0; index < static_cast<int>(available.size()); ++index)
+                if (ImGui::Selectable(available[index].clipName.c_str(),
+                        index == track.clipIndex))
+                {
+                    track.clipIndex = index;
+                    track.stackedClips.erase(std::remove_if(
+                        track.stackedClips.begin(), track.stackedClips.end(),
+                        [index](const auto& layer)
+                        { return layer.clipIndex == index; }),
+                        track.stackedClips.end());
+                    if (document.rigIndex != track.index)
+                        FocusAnimationRig(document, track.index);
+                    document.clipIndex = index;
+                    document.playheadSeconds = 0.f;
+                    document.repairIssueChannel = -1;
+                    document.selectedKeys.clear();
+                    SampleAnimationDocument(document);
+                }
+            ImGui::EndCombo();
+        }
+        ImGui::SameLine();
+        if (ImGui::BeginCombo("Add stacked animation", "+ Add"))
+        {
+            bool hasOption = false;
+            for (int index = 0; index < static_cast<int>(available.size()); ++index)
+            {
+                if (index == track.clipIndex || std::any_of(
+                        track.stackedClips.begin(), track.stackedClips.end(),
+                        [index](const auto& layer)
+                        { return layer.clipIndex == index; })) continue;
+                hasOption = true;
+                if (ImGui::Selectable(available[index].clipName.c_str()))
+                {
+                    track.stackedClips.push_back({ index, 1.f });
+                    SampleAnimationDocument(document);
+                }
+            }
+            if (!hasOption) ImGui::TextDisabled("No other animations");
+            ImGui::EndCombo();
+        }
+        for (size_t layer = 0; layer < track.stackedClips.size(); ++layer)
+        {
+            const int index = track.stackedClips[layer].clipIndex;
+            if (index < 0 || index >= static_cast<int>(available.size()))
+                continue;
+            ImGui::PushID(static_cast<int>(layer));
+            ImGui::Text("Stacked: %s", available[index].clipName.c_str());
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Remove"))
+            {
+                track.stackedClips.erase(track.stackedClips.begin() + layer);
+                document.selectedKeys.clear();
+                if (document.rigIndex == track.index)
+                    document.clipIndex = track.clipIndex;
+                SampleAnimationDocument(document);
+                ImGui::PopID();
+                break;
+            }
+            ImGui::PopID();
+        }
+        ImGui::PopID();
+    }
     ImGui::TextDisabled("Double-click: key | Drag: move | Right-drag: select | Delete: remove");
     const bool hasVisibleAnimation = std::any_of(document.tracks.begin(),
         document.tracks.end(), [](const auto& track)
@@ -1607,8 +1922,18 @@ void EditorState::DrawAnimationTimeline(IEditorUi& ui,
     float timelineDuration = .01f;
     for (const auto& track : document.tracks)
         if (track.selected)
-            for (const auto& clip : track.sourceManager->clips)
-                timelineDuration = std::max(timelineDuration, clip.duration);
+        {
+            const auto& available = track.sourceManager->clips;
+            const auto includeClip = [&](int index)
+            {
+                if (index >= 0 && index < static_cast<int>(available.size()))
+                    timelineDuration = std::max(timelineDuration,
+                        available[index].duration);
+            };
+            includeClip(track.clipIndex);
+            for (const auto& layer : track.stackedClips)
+                includeClip(layer.clipIndex);
+        }
     DrawAnimationGraph(document, timelineDuration);
 }
 
@@ -1667,12 +1992,22 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
                     nullptr, clipIndex });
             }
         };
-        for (int index = 0; index < static_cast<int>(clips.size()); ++index)
+        if (track.clipIndex >= 0 &&
+            track.clipIndex < static_cast<int>(clips.size()))
         {
-            bool& expanded = track.expandedClips.try_emplace(index,
-                index == track.clipIndex).first->second;
-            appendClip(index, expanded);
+            bool& expanded = track.expandedClips.try_emplace(
+                track.clipIndex, true).first->second;
+            appendClip(track.clipIndex, expanded);
         }
+        for (const auto& layer : track.stackedClips)
+            if (layer.clipIndex >= 0 &&
+                layer.clipIndex < static_cast<int>(clips.size()) &&
+                layer.clipIndex != track.clipIndex)
+            {
+                bool& expanded = track.expandedClips.try_emplace(
+                    layer.clipIndex, true).first->second;
+                appendClip(layer.clipIndex, expanded);
+            }
     }
     float rowTotalHeight = 0.f;
     for (auto& row : rows)
@@ -1771,8 +2106,6 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
 
     const float visibleTop = ImGui::GetWindowPos().y;
     const float visibleBottom = visibleTop + ImGui::GetWindowHeight();
-    AnimationDocument::RigTrack* addLayerTo = nullptr;
-    int addClipIndex = -1;
     AnimationDocument::RigTrack* removeLayerFrom = nullptr;
     size_t removeLayerIndex = 0;
     AnimationDocument::RigTrack* editedTrack = nullptr;
@@ -1847,8 +2180,8 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
         ImGui::TextDisabled("Local time %.2f / %.2f s", localTime,
             clipLength);
         if (primary) ImGui::BeginDisabled();
-        if (ImGui::Button(primary ? "Primary animation" :
-                isStacked ? "Remove from stack" : "Stack in preview"))
+        if (ImGui::Button(primary ? "Base animation" :
+                "Remove stacked animation"))
         {
             if (isStacked)
             {
@@ -1856,32 +2189,14 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
                 removeLayerIndex = static_cast<size_t>(
                     stacked - row.track->stackedClips.begin());
             }
-            else
-            {
-                addLayerTo = row.track;
-                addClipIndex = clipIndex;
-            }
         }
         if (primary) ImGui::EndDisabled();
     };
     const auto activateClip = [&](Row& row)
     {
-        const bool changed = document.rigIndex != row.track->index ||
-            row.track->clipIndex != row.clipIndex;
         if (document.rigIndex != row.track->index)
             FocusAnimationRig(document, row.track->index);
-        if (row.track->clipIndex != row.clipIndex)
-        {
-            row.track->clipIndex = row.clipIndex;
-            auto& layers = row.track->stackedClips;
-            layers.erase(std::remove_if(layers.begin(), layers.end(),
-                [&](const auto& layer)
-                { return layer.clipIndex == row.clipIndex; }), layers.end());
-            document.playheadSeconds = 0.f;
-            document.repairIssueChannel = -1;
-        }
         document.clipIndex = row.clipIndex;
-        if (changed) SampleAnimationDocument(document);
     };
     using TimelineKey = AnimationDocument::TimelineKey;
     struct KeyVisual
@@ -2335,14 +2650,8 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
     {
         removeLayerFrom->stackedClips.erase(
             removeLayerFrom->stackedClips.begin() + removeLayerIndex);
+        document.selectedKeys.clear();
         document.clipIndex = removeLayerFrom->clipIndex;
-        SampleAnimationDocument(document);
-    }
-    if (addLayerTo)
-    {
-        AnimationDocument::RigTrack::ClipLayer layer;
-        layer.clipIndex = addClipIndex;
-        addLayerTo->stackedClips.push_back(layer);
         SampleAnimationDocument(document);
     }
     const float playheadX = timeX +

@@ -8,6 +8,7 @@
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Graphics/IGraphicsTexture.h"
 #include "Core/Memory/CacheStore.h"
+#include "Core/Model/RigAsset.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 
@@ -188,6 +189,45 @@ std::vector<uint8_t> MakeEnvironmentPreview(
     return pixels;
 }
 
+std::vector<uint8_t> MakeImagePreview(
+    const Engine::Components::Texture& image)
+{
+    const uint32_t width = image.GetWidth();
+    const uint32_t height = image.GetHeight();
+    const auto& source = image.GetPixels();
+    if (!width || !height || source.size() <
+        static_cast<size_t>(width) * height * 4 ||
+        image.GetFormat() != Engine::Graphics::GraphicsTextureFormat::Rgba8)
+        return {};
+
+    std::vector<uint8_t> pixels(PreviewSize * PreviewSize * 4, 255);
+    const float scale = std::min(static_cast<float>(PreviewSize) / width,
+        static_cast<float>(PreviewSize) / height);
+    const uint32_t drawWidth = std::max(1u, static_cast<uint32_t>(width * scale));
+    const uint32_t drawHeight = std::max(1u, static_cast<uint32_t>(height * scale));
+    const uint32_t left = (PreviewSize - drawWidth) / 2;
+    const uint32_t top = (PreviewSize - drawHeight) / 2;
+    for (uint32_t y = 0; y < PreviewSize; ++y)
+    for (uint32_t x = 0; x < PreviewSize; ++x)
+    {
+        const size_t target = (static_cast<size_t>(y) * PreviewSize + x) * 4;
+        const uint8_t background = ((x / 8 + y / 8) & 1) ? 78 : 95;
+        pixels[target] = pixels[target + 1] = pixels[target + 2] = background;
+        if (x < left || y < top || x >= left + drawWidth ||
+            y >= top + drawHeight) continue;
+        const uint32_t sourceX = std::min(width - 1,
+            static_cast<uint32_t>((x - left) / scale));
+        const uint32_t sourceY = std::min(height - 1,
+            static_cast<uint32_t>((y - top) / scale));
+        const size_t origin = (static_cast<size_t>(sourceY) * width + sourceX) * 4;
+        const float alpha = source[origin + 3] / 255.f;
+        for (size_t channel = 0; channel < 3; ++channel)
+            pixels[target + channel] = static_cast<uint8_t>(
+                source[origin + channel] * alpha + background * (1.f - alpha));
+    }
+    return pixels;
+}
+
 std::vector<uint8_t> MakeMaterialPreview(const Engine::Components::Material& material)
 {
     std::vector<uint8_t> pixels(PreviewSize * PreviewSize * 4, 0);
@@ -294,8 +334,7 @@ std::string FirstPrefabMesh(const std::string& prefabPath)
         return {};
     const std::string contents((std::istreambuf_iterator<char>(input)), {});
     static const std::regex meshPattern(
-        "(?:\\\"file\\\"\\s*:\\s*\\\"|<Mesh\\.file>\\s*)"
-        "([^\\\"<]+\\.(?:mesh|obj|gltf|glb))",
+        R"((?:Mesh\.file\s*=\s*"|<Mesh\.file>\s*|"file"\s*:\s*")([^"<]+\.(?:mesh|obj|fbx|gltf|glb)))",
         std::regex::icase);
     std::smatch match;
     if (!std::regex_search(contents, match, meshPattern) || match.size() < 2)
@@ -305,8 +344,10 @@ std::string FirstPrefabMesh(const std::string& prefabPath)
         (position = result.find("\\\\", position)) != std::string::npos;)
         result.replace(position, 2, "\\");
     std::filesystem::path reference(result);
-    if (std::filesystem::exists(reference))
-        return reference.string();
+    const std::filesystem::path resolved =
+        Engine::Components::Mesh::ResolveFilePath(result);
+    if (std::filesystem::exists(resolved))
+        return resolved.string();
 
     const std::filesystem::path prefab(prefabPath);
     const std::filesystem::path adjacent = prefab.parent_path() / reference;
@@ -576,10 +617,11 @@ std::shared_ptr<Engine::Graphics::IGraphicsTexture> Upload(
 bool AssetPreviewCache::Supports(const std::string& path)
 {
     const std::string extension = Extension(path);
-    static constexpr std::array<const char*, 19> supported{
+    static constexpr std::array<const char*, 25> supported{
         ".material", ".mat", ".hdr", ".exr", ".png", ".jpg", ".jpeg",
-        ".bmp", ".dds", ".tga", ".ktx2", ".obj", ".fbx", ".mesh",
-        ".gltf", ".glb", ".prefab", ".scene", ".brush" };
+        ".bmp", ".dds", ".tga", ".ktx2", ".gif", ".tif", ".tiff",
+        ".obj", ".fbx", ".mesh", ".gltf", ".glb", ".ply", ".stl",
+        ".prefab", ".scene", ".brush", ".rig" };
     return std::find(supported.begin(), supported.end(), extension) != supported.end();
 }
 
@@ -605,12 +647,16 @@ void* AssetPreviewCache::Get(const std::string& path,
     if (entry && entry->provider == graphicsProvider &&
         entry->writeTime == writeTime)
     {
+        if (!entry->linkedPath.empty())
+            return Get(entry->linkedPath, graphicsProvider);
         const auto* texture = entry->generated
             ? entry->generated.get()
             : (entry->source ? entry->source->GetGraphicsTexture() : nullptr);
         return texture ? texture->GetNativeHandle() : nullptr;
     }
 
+    if (entry && entry->writeTime != writeTime)
+        Engine::Components::Texture::Invalidate(path);
     cache.Erase(PreviewCacheDomain, key);
     entry = cache.GetOrCreate<Entry>(Engine::Memory::CacheLifetime::ShortTerm,
         PreviewCacheDomain, key, [&]()
@@ -625,6 +671,21 @@ void* AssetPreviewCache::Get(const std::string& path,
                 if (material.LoadFromFile(path))
                     created->generated = Upload(graphicsProvider,
                         MakeMaterialPreview(material));
+            }
+            else if (extension == ".rig")
+            {
+                const auto rig = Engine::Model::RigAsset::Load(path);
+                if (rig && !rig->prefabPath.empty())
+                {
+                    std::filesystem::path prefab =
+                        Engine::Components::Mesh::ResolveFilePath(rig->prefabPath);
+                    if (!std::filesystem::exists(prefab))
+                        prefab = std::filesystem::path(path).parent_path() /
+                            rig->prefabPath;
+                    if (std::filesystem::exists(prefab) &&
+                        Extension(prefab.string()) == ".prefab")
+                        created->linkedPath = prefab.string();
+                }
             }
             else if (extension == ".brush")
             {
@@ -646,7 +707,8 @@ void* AssetPreviewCache::Get(const std::string& path,
                     extension == ".hdr" || extension == ".exr";
                 const bool model = extension == ".obj" || extension == ".fbx" ||
                     extension == ".mesh" || extension == ".gltf" ||
-                    extension == ".glb" || extension == ".prefab";
+                    extension == ".glb" || extension == ".ply" ||
+                    extension == ".stl" || extension == ".prefab";
                 if (model)
                 {
                     std::string meshPath = extension == ".prefab"
@@ -680,11 +742,17 @@ void* AssetPreviewCache::Get(const std::string& path,
                                 MakeEnvironmentPreview(*created->source));
                     }
                     else
-                        created->source->Prepare(graphicsProvider);
+                    {
+                        if (created->source->Load())
+                            created->generated = Upload(graphicsProvider,
+                                MakeImagePreview(*created->source));
+                    }
                 }
             }
             return created;
         }, std::chrono::seconds(30));
+    if (entry && !entry->linkedPath.empty())
+        return Get(entry->linkedPath, graphicsProvider);
     const auto* texture = entry && entry->generated
         ? entry->generated.get()
         : (entry && entry->source ? entry->source->GetGraphicsTexture() : nullptr);

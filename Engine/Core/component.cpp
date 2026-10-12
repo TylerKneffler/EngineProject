@@ -396,6 +396,8 @@ static bool IsCompatiblePathAsset(const std::string& property,
         return extension == ".scene";
     if (name.find("prefab") != std::string::npos)
         return extension == ".prefab";
+    if (name.find("animation") != std::string::npos)
+        return extension == ".anim" || extension == ".animation";
     if (name.find("material") != std::string::npos)
         return extension == ".material" || extension == ".mat";
     return true;

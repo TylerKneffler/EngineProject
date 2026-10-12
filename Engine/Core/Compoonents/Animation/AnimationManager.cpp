@@ -1,6 +1,7 @@
 #include "AnimationManager.h"
 #include "Model.h"
 #include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Model/AnimationClipAsset.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Engine/Editor/UI/IEditorUi.h"
@@ -302,6 +303,68 @@ std::vector<Engine::Model::RigAsset> AnimationManager::LoadRigAssets() const
     return result;
 }
 
+void AnimationManager::RefreshRigClips(bool remap)
+{
+    clips.erase(std::remove_if(clips.begin(), clips.end(),
+        [&](const auto& item)
+        { return m_externalClipNames.count(item.clipName) != 0; }), clips.end());
+    m_externalClipNames.clear();
+    Model* model = remap && Owner ? ResolveModel() : nullptr;
+    std::unordered_map<std::string, unsigned> targetNodes;
+    if (model && model->Owner)
+    {
+        const auto& nodes = model->ResolveNodes();
+        for (size_t index = 0; index < nodes.size(); ++index)
+        {
+            std::vector<std::string> names;
+            auto* current = nodes[index];
+            for (; current && current != model->Owner;
+                current = current->Parent)
+                names.push_back(current->name);
+            if (current != model->Owner) continue;
+            if (names.empty())
+            {
+                targetNodes["."] = static_cast<unsigned>(index);
+                continue;
+            }
+            std::string path;
+            for (auto it = names.rbegin(); it != names.rend(); ++it)
+            {
+                if (!path.empty()) path += '/';
+                path += *it;
+            }
+            if (!path.empty()) targetNodes[path] =
+                static_cast<unsigned>(index);
+        }
+    }
+    for (const auto& rig : LoadRigAssets())
+        for (const auto& path : rig.animationPaths)
+            if (auto asset = Engine::Model::AnimationClipAsset::Load(path))
+            {
+                if (model)
+                {
+                    auto& channels = asset->clip.channels;
+                    channels.erase(std::remove_if(channels.begin(), channels.end(),
+                        [&](auto& channel)
+                        {
+                            if (channel.targetPath.empty())
+                                return channel.nodeIndex >= model->GetNodeCount();
+                            const auto found = targetNodes.find(channel.targetPath);
+                            if (found == targetNodes.end()) return true;
+                            channel.nodeIndex = found->second;
+                            return false;
+                        }), channels.end());
+                }
+                auto found = std::find_if(clips.begin(), clips.end(),
+                    [&](const auto& item)
+                    { return item.clipName == asset->clip.clipName; });
+                const std::string name = asset->clip.clipName;
+                if (found == clips.end()) clips.push_back(std::move(asset->clip));
+                else *found = std::move(asset->clip);
+                m_externalClipNames.insert(name);
+            }
+}
+
 Model* AnimationManager::ResolveModel() const
 {
     const uint64_t structureRevision = Owner && Owner->GetScene()
@@ -327,6 +390,7 @@ Model* AnimationManager::ResolveModel() const
 
 void AnimationManager::Start()
 {
+    RefreshRigClips();
     m_restPose.clear();
     m_restMorphs.clear();
     Model* model = ResolveModel();
@@ -590,7 +654,8 @@ AnimationManager::JsonValue AnimationManager::Serialize() const
     result.Set("clip", JsonValue(clip));
     JsonValue serializedClips = JsonValue::MakeArray();
     for (const auto& item : clips)
-        serializedClips.Push(item.Serialize());
+        if (!m_externalClipNames.count(item.clipName))
+            serializedClips.Push(item.Serialize());
     result.Set("clips", std::move(serializedClips));
     JsonValue serializedRigs = JsonValue::MakeArray();
     for (const auto& path : rigPaths)
@@ -616,6 +681,7 @@ void AnimationManager::Deserialize(const JsonValue& value)
     Component::Deserialize(value);
     clip = value["clip"].AsString();
     clips.clear();
+    m_externalClipNames.clear();
     rigPaths.clear();
     for (size_t i = 0; i < value["rigPaths"].ArraySize(); ++i)
         rigPaths.push_back(value["rigPaths"].ArrayAt(i).AsString());
@@ -627,6 +693,7 @@ void AnimationManager::Deserialize(const JsonValue& value)
         item.Deserialize(serializedClips.ArrayAt(i));
         clips.push_back(std::move(item));
     }
+    RefreshRigClips(false);
     layers.clear();
     const JsonValue& serializedLayers = value["layers"];
     for (size_t i = 0; i < serializedLayers.ArraySize(); ++i)

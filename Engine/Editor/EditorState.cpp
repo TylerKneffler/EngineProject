@@ -2293,6 +2293,11 @@ void EditorState::QueueAssetDocumentOpen(const std::string& path,
         QueueSceneAssetDocumentOpen(path);
         return;
     }
+    if (editorType == "Animation Editor")
+    {
+        QueueAnimationAssetOpen(path);
+        return;
+    }
     const std::string identity = AssetPathIdentity(path);
     for (AssetDocumentView* document : m_assetDocuments)
         if (document && AssetPathIdentity(document->GetPath()) == identity)
@@ -3901,6 +3906,9 @@ void EditorState::WireupCallbacks()
             m_primaryAssets->SetSelectedPath(assetPath);
         MarkHistorySelectionChanged();
     };
+    if (m_primaryProperties)
+        m_primaryProperties->OnOpenAnimation = [this](const std::string& path)
+        { QueueAnimationAssetOpen(path); };
 
     m_viewFactory->OnAssetRenamed = [this](const std::string& oldPath,
         const std::string& newPath) {
@@ -3961,14 +3969,29 @@ void EditorState::WireupCallbacks()
             error);
         if (!error && std::filesystem::exists(assetsDirectory))
         {
-            const std::vector<std::string> oldCandidates = {
+            std::vector<std::string> oldCandidates = {
                 oldNormalized,
                 std::filesystem::path(oldNormalized).make_preferred().string()
             };
-            const std::vector<std::string> newCandidates = {
+            std::vector<std::string> newCandidates = {
                 newNormalized,
                 std::filesystem::path(newNormalized).make_preferred().string()
             };
+            const auto oldRelative = std::filesystem::path(oldNormalized)
+                .lexically_relative(assetsDirectory.parent_path());
+            const auto newRelative = std::filesystem::path(newNormalized)
+                .lexically_relative(assetsDirectory.parent_path());
+            if (!oldRelative.empty() && !newRelative.empty() &&
+                *oldRelative.begin() != ".." &&
+                *newRelative.begin() != "..")
+            {
+                oldCandidates.push_back(oldRelative.generic_string());
+                newCandidates.push_back(newRelative.generic_string());
+                oldCandidates.push_back(std::filesystem::path(oldRelative)
+                    .make_preferred().string());
+                newCandidates.push_back(std::filesystem::path(newRelative)
+                    .make_preferred().string());
+            }
 
             for (const auto& entry :
                 std::filesystem::recursive_directory_iterator(assetsDirectory,
@@ -3993,6 +4016,8 @@ void EditorState::WireupCallbacks()
                 if (lowerExtension != ".scene" &&
                     lowerExtension != ".prefab" &&
                     lowerExtension != ".rig" &&
+                    lowerExtension != ".anim" &&
+                    lowerExtension != ".animation" &&
                     lowerExtension != ".xml")
                     continue;
 

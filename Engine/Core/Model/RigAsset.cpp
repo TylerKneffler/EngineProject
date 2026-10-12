@@ -104,6 +104,10 @@ bool RigAsset::Save(const std::string& path) const
     for (const auto& name : meshNames)
         meshes.Push(Engine::Serialization::JsonValue(name));
     root.Set("meshes", std::move(meshes));
+    auto animations = Engine::Serialization::JsonValue::MakeArray();
+    for (const auto& animation : animationPaths)
+        animations.Push(Engine::Serialization::JsonValue(animation));
+    root.Set("animations", std::move(animations));
     std::filesystem::path target(path);
     if (!target.parent_path().empty())
         target = std::filesystem::path(
@@ -170,6 +174,9 @@ std::optional<RigAsset> RigAsset::Load(const std::string& path)
         if (result.joints.empty()) return std::nullopt;
         for (size_t i = 0; i < root["meshes"].ArraySize(); ++i)
             result.meshNames.push_back(root["meshes"].ArrayAt(i).AsString());
+        for (size_t i = 0; i < root["animations"].ArraySize(); ++i)
+            result.animationPaths.push_back(
+                root["animations"].ArrayAt(i).AsString());
         return result;
     }
     catch (...) { return std::nullopt; }

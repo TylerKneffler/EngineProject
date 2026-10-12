@@ -146,6 +146,9 @@ void AssetInspectorTemplate::Select(const std::string& path)
     m_selectedPath = path;
     m_renameError.clear();
     m_texturePreview.reset();
+    const std::string extension = LowerAssetExtension(path);
+    m_animationPreview = extension == ".anim" || extension == ".animation"
+        ? Engine::Model::AnimationClipAsset::Load(path) : std::nullopt;
     const std::string name = std::filesystem::path(path).filename().string();
     strncpy_s(m_nameEdit, sizeof(m_nameEdit), name.c_str(), _TRUNCATE);
 }
@@ -155,6 +158,7 @@ void AssetInspectorTemplate::Clear()
     m_selectedPath.clear();
     m_renameError.clear();
     m_texturePreview.reset();
+    m_animationPreview.reset();
 }
 
 void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
@@ -225,6 +229,24 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
     const std::string extension = LowerAssetExtension(m_selectedPath);
     ui.ValueLabel("Type", directory ? "Folder" :
         (extension.empty() ? "Generic file" : extension.c_str()));
+    if (!directory && (extension == ".anim" || extension == ".animation") &&
+        ui.Button("Open Animation Editor") && OnOpenAnimation)
+        OnOpenAnimation(m_selectedPath);
+    if (!directory && (extension == ".anim" || extension == ".animation"))
+    {
+        if (m_animationPreview)
+        {
+            ui.ValueLabel("Clip", m_animationPreview->clip.clipName.c_str());
+            const std::string duration = std::to_string(
+                m_animationPreview->clip.duration) + " s";
+            ui.ValueLabel("Duration", duration.c_str());
+            const std::string bones = std::to_string(
+                m_animationPreview->baseSkeleton.size());
+            ui.ValueLabel("Base skeleton nodes", bones.c_str());
+        }
+        else ui.ColoredLabel("Invalid animation asset",
+            { 1.f, .35f, .35f, 1.f });
+    }
     if (!directory && extension == ".brush")
     {
         Paint::BrushPreset preset;
