@@ -259,6 +259,31 @@ int main()
         CHECK(Keys::DeleteBoneKey(roundtrip, 1, .5f));
         CHECK(!Keys::IsKeyed(roundtrip, 1, .5f));
         CHECK(roundtrip.channels[0].times.size() == 2);
+        auto moved = authored;
+        CHECK(Keys::MoveKeys(moved, { { 1, .5f }, { 1, .337f } }, .8f));
+        CHECK(Keys::IsKeyed(moved, 1, 1.3f));
+        CHECK(Keys::IsKeyed(moved, 1, 1.137f));
+        CHECK(!Keys::IsKeyed(moved, 1, .5f));
+        CHECK(Near(moved.channels[0].values[10], 3.5f));
+        CHECK(moved.duration >= 1.3f);
+        auto collision = authored;
+        CHECK(!Keys::MoveKeys(collision, { { 1, .5f } }, .5f));
+        CHECK(collision.channels[0].times == authored.channels[0].times);
+        auto spline = authored;
+        auto& splineChannel = spline.channels[0];
+        splineChannel.interpolation = Engine::Model::AnimationChannel::Interpolation::CubicSpline;
+        splineChannel.values.clear();
+        for (size_t i = 0; i < splineChannel.times.size(); ++i)
+            for (int block = 0; block < 3; ++block)
+                for (int component = 0; component < 3; ++component)
+                    splineChannel.values.push_back(static_cast<float>(100 * i + 10 * block + component));
+        CHECK(Keys::MoveKeys(spline, { { 1, .337f } }, .8f));
+        CHECK(spline.channels[0].times.size() == 4);
+        CHECK(Near(spline.channels[0].times[0], 0.f));
+        CHECK(Near(spline.channels[0].times[1], .5f));
+        CHECK(Near(spline.channels[0].times[2], 1.f));
+        CHECK(Near(spline.channels[0].times[3], 1.137f));
+        CHECK(Near(spline.channels[0].values[27], 100.f));
     }
     animation->clips.push_back(clip);
     {

@@ -15,6 +15,12 @@ build/
 !.local/tests/WeightInfluenceTests.cpp
 !.local/tests/SkinBindingWeightsTests.cpp
 !.local/tests/SkeletonAuthoringRegressionTests.cpp
+!.local/tests/ShadowRegressionTests.cpp
+!.local/tests/VideoExportRepeatabilityTests.cpp
+!.local/tests/BrushPresetTests.cpp
+!.local/tests/WeightPaintBucketTests.cpp
+!.local/tests/ImagePaintTests.cpp
+!.local/tests/VertexColorPaintTests.cpp
 build
 editor-startup.log
 project-build.log

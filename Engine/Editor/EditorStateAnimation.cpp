@@ -650,7 +650,11 @@ void EditorState::SetActiveAnimationDocument(AnimationDocument* document)
         SetActiveSceneAssetDocument(nullptr, true);
         return;
     }
-    if (m_activeAnimationDocument == document) return;
+    if (m_activeAnimationDocument == document)
+    {
+        m_gameViewFocused = false;
+        return;
+    }
     m_activeAnimationDocument = document;
     m_activeSceneAssetDocument = nullptr;
     m_activeAssetDocument = nullptr;
@@ -693,6 +697,50 @@ void EditorState::SetActiveAnimationDocument(AnimationDocument* document)
         };
     }
     if (m_renderer) m_renderer->MarkDirty();
+}
+
+bool EditorState::IsAnimationEditorFocused() const
+{
+    return m_activeAnimationDocument && !m_gameViewFocused;
+}
+
+bool EditorState::IsAnimationPlaying() const
+{
+    return IsAnimationEditorFocused() && m_activeAnimationDocument->playing;
+}
+
+bool EditorState::CanToggleAnimationPlayback() const
+{
+    if (!IsAnimationEditorFocused()) return false;
+    const AnimationDocument& document = *m_activeAnimationDocument;
+    return document.sourceManager && document.clipIndex >= 0 &&
+        document.clipIndex < static_cast<int>(document.sourceManager->clips.size());
+}
+
+bool EditorState::CanStopAnimationPlayback() const
+{
+    return IsAnimationEditorFocused() &&
+        (m_activeAnimationDocument->playing ||
+            m_activeAnimationDocument->playbackStarted ||
+            m_activeAnimationDocument->playheadSeconds > 0.f);
+}
+
+void EditorState::ToggleAnimationPlayback()
+{
+    if (!CanToggleAnimationPlayback()) return;
+    AnimationDocument& document = *m_activeAnimationDocument;
+    document.playing = !document.playing;
+    document.playbackStarted = true;
+}
+
+void EditorState::StopAnimationPlayback()
+{
+    if (!CanStopAnimationPlayback()) return;
+    AnimationDocument& document = *m_activeAnimationDocument;
+    document.playing = false;
+    document.playbackStarted = false;
+    document.playheadSeconds = 0.f;
+    SampleAnimationDocument(document);
 }
 
 EditorState::AnimationDocument::CachedClip& EditorState::CachedAnimationClip(
@@ -971,6 +1019,7 @@ bool EditorState::StepAnimationHistory(AnimationDocument& document, bool redo)
     target.push_back(document.sourceManager->clips);
     document.sourceManager->clips = std::move(source.back());
     source.pop_back();
+    document.selectedKeys.clear();
     ++document.clipRevision;
     document.clipCache.clear();
     document.previewLayouts.clear();
@@ -1390,135 +1439,6 @@ void EditorState::DrawAnimationProperties(IEditorUi& ui,
         return;
     }
     auto& clips = document.sourceManager->clips;
-    if (!clips.empty())
-    {
-        std::vector<const char*> names;
-        names.reserve(clips.size());
-        for (const auto& clip : clips) names.push_back(clip.clipName.c_str());
-        const auto drawClipSettings = [&](int index)
-        {
-            auto& selectedClip = clips[index];
-            float length = selectedClip.duration;
-            const bool lengthChanged = ui.DragFloat("Length (seconds)",
-                &length, .01f, .01f, 3600.f);
-            if (ImGui::IsItemActivated())
-            {
-                document.durationDragBefore = clips;
-                document.durationDragClip = index;
-                document.durationDragChanged = false;
-            }
-            if (lengthChanged)
-            {
-                if (document.durationDragBefore.empty())
-                {
-                    document.durationDragBefore = clips;
-                    document.durationDragClip = index;
-                }
-                const float next = std::max({ .01f, length,
-                    LastKeyTime(selectedClip) });
-                if (next != selectedClip.duration)
-                {
-                    selectedClip.duration = next;
-                    document.durationDragChanged = true;
-                    ++document.clipRevision;
-                    document.clipCache.clear();
-                    document.previewLayouts.clear();
-                    SampleAnimationDocument(document);
-                }
-            }
-            if (ImGui::IsItemDeactivated() &&
-                document.durationDragClip == index)
-            {
-                if (document.durationDragChanged)
-                    RecordAnimationEdit(document,
-                        std::move(document.durationDragBefore));
-                document.durationDragBefore.clear();
-                document.durationDragClip = -1;
-                document.durationDragChanged = false;
-            }
-            bool loop = selectedClip.looping;
-            if (ui.Checkbox("Loop", &loop))
-            {
-                auto before = clips;
-                selectedClip.looping = loop;
-                RecordAnimationEdit(document, std::move(before));
-            }
-            const float clipLength = std::max(selectedClip.duration, .01f);
-            const float localTime = selectedClip.looping
-                ? std::fmod(std::max(document.playheadSeconds, 0.f),
-                    clipLength)
-                : std::min(std::max(document.playheadSeconds, 0.f),
-                    clipLength);
-            ImGui::TextDisabled("Local time %.2f / %.2f s",
-                localTime, clipLength);
-        };
-        if (document.clipIndex < 0 ||
-            document.clipIndex >= static_cast<int>(clips.size()))
-            document.clipIndex = 0;
-        auto* focusedTrack = static_cast<AnimationDocument::RigTrack*>(nullptr);
-        for (auto& track : document.tracks)
-            if (track.index == document.rigIndex)
-            { focusedTrack = &track; break; }
-        int& primaryClip = focusedTrack
-            ? focusedTrack->clipIndex : document.clipIndex;
-        primaryClip = std::clamp(primaryClip, 0,
-            static_cast<int>(clips.size()) - 1);
-        if (ui.Combo("Clip", &primaryClip, names.data(),
-                static_cast<int>(names.size())))
-        {
-            document.clipIndex = primaryClip;
-            document.playheadSeconds = 0.f;
-            document.repairIssueChannel = -1;
-            SampleAnimationDocument(document);
-        }
-        if (document.clipIndex != primaryClip)
-            ui.DisabledLabel((std::string("Editing: ") +
-                names[document.clipIndex]).c_str());
-        for (auto& track : document.tracks)
-            if (track.index == document.rigIndex)
-            {
-                if (ImGui::SliderFloat("Weight", &track.weight,
-                        0.f, 1.f, "%.2f"))
-                    SampleAnimationDocument(document);
-                drawClipSettings(track.clipIndex);
-                ImGui::TextUnformatted("Stacked animations");
-                for (size_t layerIndex = 0;
-                    layerIndex < track.stackedClips.size();)
-                {
-                    ImGui::PushID(static_cast<int>(layerIndex));
-                    auto& layer = track.stackedClips[layerIndex];
-                    layer.clipIndex = std::clamp(layer.clipIndex, 0,
-                        static_cast<int>(names.size()) - 1);
-                    if (ui.Combo("Animation", &layer.clipIndex,
-                            names.data(), static_cast<int>(names.size())))
-                        SampleAnimationDocument(document);
-                    if (ImGui::SliderFloat("Weight", &layer.weight,
-                            0.f, 1.f, "%.2f"))
-                        SampleAnimationDocument(document);
-                    drawClipSettings(layer.clipIndex);
-                    bool removed = ui.Button("Remove animation");
-                    ImGui::PopID();
-                    if (removed)
-                    {
-                        track.stackedClips.erase(
-                            track.stackedClips.begin() + layerIndex);
-                        document.clipIndex = track.clipIndex;
-                        SampleAnimationDocument(document);
-                    }
-                    else ++layerIndex;
-                }
-                if (ui.Button("+ Stack animation"))
-                {
-                    AnimationDocument::RigTrack::ClipLayer layer;
-                    layer.clipIndex = clips.size() > 1
-                        ? (document.clipIndex + 1) % clips.size()
-                        : document.clipIndex;
-                    track.stackedClips.push_back(layer);
-                    SampleAnimationDocument(document);
-                }
-                break;
-            }
-    }
     if (clips.empty())
     {
         ui.DisabledLabel("Create a clip to begin posing and keyframing bones.");
@@ -1662,10 +1582,6 @@ void EditorState::DrawAnimationTimeline(IEditorUi& ui,
         }
         SampleAnimationDocument(document);
     }
-    if (ui.Button(document.playing ? Icons::Pause : Icons::Play))
-        document.playing = !document.playing;
-    ui.Tooltip(document.playing ? "Pause animation" : "Play animation");
-    ui.SameLine();
     if (ui.Button("Key Selected Bone"))
     {
         document.playing = false;
@@ -1678,7 +1594,12 @@ void EditorState::DrawAnimationTimeline(IEditorUi& ui,
     ImGui::SetNextItemWidth(150.f);
     ImGui::SliderFloat("Zoom", &document.timelinePixelsPerSecond,
         35.f, 320.f, "%.0f px/s");
-    if (clips.empty())
+    ImGui::TextDisabled("Double-click: key | Drag: move | Right-drag: select | Delete: remove");
+    const bool hasVisibleAnimation = std::any_of(document.tracks.begin(),
+        document.tracks.end(), [](const auto& track)
+        { return track.selected && track.sourceManager &&
+            !track.sourceManager->clips.empty(); });
+    if (!hasVisibleAnimation)
     {
         ui.DisabledLabel("Use File > New > Animation to create a clip.");
         return;
@@ -1686,18 +1607,8 @@ void EditorState::DrawAnimationTimeline(IEditorUi& ui,
     float timelineDuration = .01f;
     for (const auto& track : document.tracks)
         if (track.selected)
-        {
-            const auto includeClip = [&](int index)
-            {
-                if (index >= 0 && index < static_cast<int>(
-                        track.sourceManager->clips.size()))
-                    timelineDuration = std::max(timelineDuration,
-                        track.sourceManager->clips[index].duration);
-            };
-            includeClip(track.clipIndex);
-            for (const auto& layer : track.stackedClips)
-                includeClip(layer.clipIndex);
-        }
+            for (const auto& clip : track.sourceManager->clips)
+                timelineDuration = std::max(timelineDuration, clip.duration);
     DrawAnimationGraph(document, timelineDuration);
 }
 
@@ -1706,9 +1617,9 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
 {
     struct Row
     {
+        enum class Kind { Header, Bone } kind = Kind::Header;
         AnimationDocument::RigTrack* track = nullptr;
         Engine::Core::Object* joint = nullptr;
-        Engine::Components::AnimationBone* bone = nullptr;
         Engine::Model::AnimationClip* clip = nullptr;
         const std::unordered_map<unsigned, std::vector<float>>* keyTimes = nullptr;
         bool mappingReady = true;
@@ -1716,6 +1627,8 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
         unsigned nodeIndex = 0;
         bool* expanded = nullptr;
         int clipIndex = -1;
+        float height = 25.f;
+        float offset = 0.f;
     };
     std::vector<Row> rows;
     for (auto& track : document.tracks)
@@ -1736,8 +1649,8 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
                 mappingReady = cached.mappingReady;
                 keyTimes = &cached.keyTimes;
             }
-            rows.push_back({ &track, nullptr, nullptr, clip,
-                keyTimes, mappingReady, 0, 0, &expanded, clipIndex });
+            rows.push_back({ Row::Kind::Header, &track, nullptr, clip,
+                keyTimes, mappingReady, 0, 0, &expanded, clipIndex, 28.f });
             if (!expanded) return;
             const auto& joints = track.poseSkeleton->ResolveJoints();
             for (size_t boneIndex = 0; boneIndex < joints.size(); ++boneIndex)
@@ -1749,34 +1662,38 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
                 const unsigned nodeIndex = bone ? bone->nodeIndex :
                     boneIndex < track.poseSkeleton->jointNodes.size()
                         ? track.poseSkeleton->jointNodes[boneIndex] : 0;
-                rows.push_back({ &track, joint, bone, clip,
+                rows.push_back({ Row::Kind::Bone, &track, joint, clip,
                     keyTimes, mappingReady, boneIndex, nodeIndex,
                     nullptr, clipIndex });
             }
         };
-        appendClip(track.clipIndex, track.expanded);
-        for (auto& layer : track.stackedClips)
-            appendClip(layer.clipIndex, layer.expanded);
+        for (int index = 0; index < static_cast<int>(clips.size()); ++index)
+        {
+            bool& expanded = track.expandedClips.try_emplace(index,
+                index == track.clipIndex).first->second;
+            appendClip(index, expanded);
+        }
     }
-    constexpr float labelWidth = 180.f;
+    float rowTotalHeight = 0.f;
+    for (auto& row : rows)
+    {
+        row.offset = rowTotalHeight;
+        rowTotalHeight += row.height;
+    }
+    constexpr float labelWidth = 292.f;
     constexpr float rulerHeight = 30.f;
-    constexpr float rowHeight = 25.f;
     const float pixelsPerSecond = document.timelinePixelsPerSecond;
     const float seconds = std::max({ 5.f, duration + 1.f,
         document.playheadSeconds + 1.f });
     const float canvasWidth = std::max(ImGui::GetContentRegionAvail().x,
         labelWidth + seconds * pixelsPerSecond + 24.f);
-    const float canvasHeight = rulerHeight +
-        static_cast<float>(rows.size()) * rowHeight + 4.f;
+    const float canvasHeight = rulerHeight + rowTotalHeight + 4.f;
     const float graphHeight = std::max(1.f,
         ImGui::GetContentRegionAvail().y - ImGui::GetStyle().ItemSpacing.y);
     if (!ImGui::BeginChild("##AnimationGraph", { 0.f, graphHeight }, true,
             ImGuiWindowFlags_HorizontalScrollbar))
     { ImGui::EndChild(); return; }
-    ImGui::InvisibleButton("##AnimationCanvas",
-        { canvasWidth, std::max(canvasHeight, graphHeight - 8.f) },
-        ImGuiButtonFlags_MouseButtonLeft |
-            ImGuiButtonFlags_MouseButtonRight);
+    ImGui::Dummy({ canvasWidth, std::max(canvasHeight, graphHeight - 8.f) });
     const ImVec2 origin = ImGui::GetItemRectMin();
     const float timeX = origin.x + labelWidth;
     const float pinnedX = origin.x + ImGui::GetScrollX();
@@ -1816,7 +1733,7 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
         { labelRight, origin.y + rulerHeight },
         ImGui::GetColorU32(ImGuiCol_FrameBg));
     draw->AddText({ pinnedX + 9.f, origin.y + 5.f },
-        ImGui::GetColorU32(ImGuiCol_TextDisabled), "Rig / bone");
+        ImGui::GetColorU32(ImGuiCol_TextDisabled), "Animation / bone");
 
     const ImVec2 mouse = ImGui::GetIO().MousePos;
     const bool hovered = ImGui::IsItemHovered();
@@ -1828,25 +1745,18 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
     {
         return std::clamp((x - timeX) / pixelsPerSecond, 0.f, seconds);
     };
-    const float markerX = timeX +
-        document.playheadSeconds * pixelsPerSecond;
     const bool onRuler = mouse.y >= origin.y &&
         mouse.y < origin.y + rulerHeight;
-    const bool onPlayhead = mouse.y >= origin.y && mouse.y < bottomY &&
-        std::abs(mouse.x - markerX) <= 8.f;
-    if (hovered && mouse.x >= labelRight &&
-        (onRuler || onPlayhead))
+    if (hovered && mouse.x >= labelRight && onRuler)
         ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
-    if (leftClicked && mouse.x >= labelRight &&
-        (onRuler || onPlayhead))
+    if (leftClicked && mouse.x >= labelRight && onRuler)
     {
         document.playheadDragging = true;
         document.playing = false;
     }
     if (document.playheadDragging)
     {
-        if (!ImGui::IsItemActive() ||
-            !ImGui::IsMouseDown(ImGuiMouseButton_Left))
+        if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
             document.playheadDragging = false;
         else
         {
@@ -1861,31 +1771,189 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
 
     const float visibleTop = ImGui::GetWindowPos().y;
     const float visibleBottom = visibleTop + ImGui::GetWindowHeight();
-    const size_t firstRow = static_cast<size_t>(std::clamp(
-        std::floor((visibleTop - origin.y - rulerHeight) / rowHeight),
-        0.f, static_cast<float>(rows.size())));
-    const size_t lastRow = static_cast<size_t>(std::clamp(
-        std::ceil((visibleBottom - origin.y - rulerHeight) / rowHeight),
-        0.f, static_cast<float>(rows.size())));
-    for (size_t index = firstRow; index < lastRow; ++index)
+    AnimationDocument::RigTrack* addLayerTo = nullptr;
+    int addClipIndex = -1;
+    AnimationDocument::RigTrack* removeLayerFrom = nullptr;
+    size_t removeLayerIndex = 0;
+    AnimationDocument::RigTrack* editedTrack = nullptr;
+    std::vector<Engine::Model::AnimationClip> editBefore;
+    bool refreshClipCache = false;
+    const auto drawClipProperties = [&](Row& row)
+    {
+        auto& clips = row.track->sourceManager->clips;
+        const int clipIndex = row.clipIndex;
+        const bool primary = row.track->clipIndex == clipIndex;
+        auto stacked = std::find_if(row.track->stackedClips.begin(),
+            row.track->stackedClips.end(), [&](const auto& layer)
+            { return layer.clipIndex == clipIndex; });
+        const bool isStacked = stacked != row.track->stackedClips.end();
+        ImGui::TextDisabled("Preview: %s", primary ? "Primary animation"
+            : isStacked ? "Stacked animation" : "Available");
+        float inactiveWeight = 0.f;
+        float& weight = primary ? row.track->weight
+            : isStacked ? stacked->weight : inactiveWeight;
+        ImGui::BeginDisabled(!primary && !isStacked);
+        if (ImGui::SliderFloat("Weight", &weight, 0.f, 1.f, "%.2f"))
+            SampleAnimationDocument(document);
+        ImGui::EndDisabled();
+        auto& clip = clips[clipIndex];
+        float length = clip.duration;
+        const bool lengthChanged = ImGui::DragFloat("Length (seconds)",
+            &length, .01f, .01f, 3600.f, "%.2f s");
+        if (ImGui::IsItemActivated())
+        {
+            document.durationDragBefore = clips;
+            document.durationDragClip = clipIndex;
+            document.durationDragChanged = false;
+        }
+        if (lengthChanged)
+        {
+            if (document.durationDragBefore.empty())
+            {
+                document.durationDragBefore = clips;
+                document.durationDragClip = clipIndex;
+            }
+            const float next = std::max({ .01f, length, LastKeyTime(clip) });
+            if (next != clip.duration)
+            {
+                clip.duration = next;
+                document.durationDragChanged = true;
+                refreshClipCache = true;
+            }
+        }
+        if (ImGui::IsItemDeactivated() &&
+            document.durationDragClip == clipIndex)
+        {
+            if (document.durationDragChanged)
+            {
+                editedTrack = row.track;
+                editBefore = std::move(document.durationDragBefore);
+            }
+            document.durationDragBefore.clear();
+            document.durationDragClip = -1;
+            document.durationDragChanged = false;
+        }
+        bool loop = clip.looping;
+        if (ImGui::Checkbox("Loop", &loop))
+        {
+            editBefore = clips;
+            editedTrack = row.track;
+            clip.looping = loop;
+        }
+        const float clipLength = std::max(clip.duration, .01f);
+        const float localTime = clip.looping
+            ? std::fmod(std::max(document.playheadSeconds, 0.f), clipLength)
+            : std::min(std::max(document.playheadSeconds, 0.f), clipLength);
+        ImGui::TextDisabled("Local time %.2f / %.2f s", localTime,
+            clipLength);
+        if (primary) ImGui::BeginDisabled();
+        if (ImGui::Button(primary ? "Primary animation" :
+                isStacked ? "Remove from stack" : "Stack in preview"))
+        {
+            if (isStacked)
+            {
+                removeLayerFrom = row.track;
+                removeLayerIndex = static_cast<size_t>(
+                    stacked - row.track->stackedClips.begin());
+            }
+            else
+            {
+                addLayerTo = row.track;
+                addClipIndex = clipIndex;
+            }
+        }
+        if (primary) ImGui::EndDisabled();
+    };
+    const auto activateClip = [&](Row& row)
+    {
+        const bool changed = document.rigIndex != row.track->index ||
+            row.track->clipIndex != row.clipIndex;
+        if (document.rigIndex != row.track->index)
+            FocusAnimationRig(document, row.track->index);
+        if (row.track->clipIndex != row.clipIndex)
+        {
+            row.track->clipIndex = row.clipIndex;
+            auto& layers = row.track->stackedClips;
+            layers.erase(std::remove_if(layers.begin(), layers.end(),
+                [&](const auto& layer)
+                { return layer.clipIndex == row.clipIndex; }), layers.end());
+            document.playheadSeconds = 0.f;
+            document.repairIssueChannel = -1;
+        }
+        document.clipIndex = row.clipIndex;
+        if (changed) SampleAnimationDocument(document);
+    };
+    using TimelineKey = AnimationDocument::TimelineKey;
+    struct KeyVisual
+    {
+        Row* row = nullptr;
+        float time = 0.f;
+        float x = 0.f;
+        float y = 0.f;
+        std::vector<TimelineKey> keys;
+    };
+    std::vector<KeyVisual> keyVisuals;
+    const auto sameKey = [](const TimelineKey& a, const TimelineKey& b)
+    {
+        return a.rigIndex == b.rigIndex && a.clipIndex == b.clipIndex &&
+            a.nodeIndex == b.nodeIndex && std::abs(a.time - b.time) <= 1e-4f;
+    };
+    const auto isSelected = [&](const TimelineKey& key)
+    {
+        return std::any_of(document.selectedKeys.begin(),
+            document.selectedKeys.end(), [&](const TimelineKey& selected)
+            { return sameKey(key, selected); });
+    };
+    const auto drawKey = [&](Row& row, float center, float time,
+        std::vector<TimelineKey> keys, ImU32 color)
+    {
+        const bool selected = std::any_of(keys.begin(), keys.end(), isSelected);
+        float shownTime = time;
+        if (document.keyDragging && selected &&
+            std::all_of(keys.begin(), keys.end(), isSelected))
+            shownTime += document.keyDragDelta;
+        const float x = timeX + shownTime * pixelsPerSecond;
+        if (x < labelRight - 8.f || x > origin.x + canvasWidth + 8.f)
+            return;
+        if (selected)
+            draw->AddCircleFilled({ x, center }, 10.f,
+                IM_COL32(255, 225, 125, 95));
+        draw->AddQuadFilled({ x, center - 6.f },
+            { x + 6.f, center }, { x, center + 6.f },
+            { x - 6.f, center }, selected
+                ? IM_COL32(255, 226, 135, 255) : color);
+        if (selected)
+            draw->AddCircle({ x, center }, 8.f,
+                IM_COL32(255, 245, 195, 255), 0, 1.5f);
+        keyVisuals.push_back({ &row, time, x, center, std::move(keys) });
+    };
+    for (size_t index = 0; index < rows.size(); ++index)
     {
         Row& row = rows[index];
-        const float top = origin.y + rulerHeight + index * rowHeight;
-        const float center = top + rowHeight * .5f;
+        const float top = origin.y + rulerHeight + row.offset;
+        const float bottom = top + row.height;
+        if (row.kind != Row::Kind::Header &&
+            (bottom < visibleTop || top > visibleBottom)) continue;
+        const float center = top + row.height * .5f;
         const ImVec4 rigColor = RigTimelineColor(row.track->index);
         const ImU32 color = ImGui::GetColorU32(rigColor);
         const bool mouseInRow = hovered && mouse.y >= top &&
-            mouse.y < top + rowHeight;
-        if (!row.joint)
+            mouse.y < bottom;
+        if (row.kind == Row::Kind::Header)
         {
             draw->AddRectFilled({ origin.x, top },
-                { origin.x + canvasWidth, top + rowHeight },
+                { origin.x + canvasWidth, bottom },
                 ImGui::GetColorU32(RigTimelineTint(rigColor, .42f)));
             draw->AddRectFilled({ pinnedX, top },
-                { labelRight, top + rowHeight },
-                ImGui::GetColorU32(RigTimelineTint(rigColor, .72f)));
-            const std::string label = row.track->name + " / " +
-                (row.clip ? row.clip->clipName : "No clip");
+                { labelRight, bottom },
+                ImGui::GetColorU32(RigTimelineTint(rigColor,
+                    row.track->clipIndex == row.clipIndex ? .72f : .42f)));
+            const std::string label = row.clip
+                ? row.clip->clipName : "No animation";
+            const std::string rigLabel = row.track->name;
+            const ImVec2 rigSize = ImGui::CalcTextSize(rigLabel.c_str());
+            const bool showRig = rigSize.x < labelWidth * .35f;
+            const float cogX = labelRight - 27.f;
             const ImVec2 arrowCenter{ pinnedX + 12.f, center };
             if (*row.expanded)
                 draw->AddTriangleFilled(
@@ -1897,93 +1965,385 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
                     { arrowCenter.x - 3.f, arrowCenter.y - 5.f },
                     { arrowCenter.x - 3.f, arrowCenter.y + 5.f },
                     { arrowCenter.x + 4.f, arrowCenter.y }, color);
-            draw->AddText({ pinnedX + 24.f, top + 4.f }, color,
+            draw->PushClipRect({ pinnedX + 24.f, top },
+                { std::max(pinnedX + 25.f,
+                    cogX - (showRig ? rigSize.x : 0.f) - 12.f),
+                    bottom }, true);
+            draw->AddText({ pinnedX + 25.f, top + 5.f }, color,
                 label.c_str());
+            draw->PopClipRect();
+            if (showRig)
+                draw->AddText({ cogX - rigSize.x - 5.f, top + 5.f },
+                    ImGui::GetColorU32(ImGuiCol_TextDisabled),
+                    rigLabel.c_str());
+            if (mouseInRow && mouse.x < cogX)
+                ImGui::SetTooltip("%s / %s", label.c_str(),
+                    rigLabel.c_str());
             if (mouseInRow && leftClicked &&
-                !document.playheadDragging)
+                mouse.x < cogX && !document.playheadDragging)
             {
-                if (mouse.x < pinnedX + 24.f)
-                    *row.expanded = !*row.expanded;
-                else
-                {
+                activateClip(row);
+                *row.expanded = !*row.expanded;
+            }
+            ImGui::PushID(row.track);
+            ImGui::PushID(row.clipIndex);
+            ImGui::SetCursorScreenPos({ cogX, top + 3.f });
+            if (ImGui::Button(Icons::Settings, { 22.f, 22.f }))
+            {
+                if (document.rigIndex != row.track->index)
                     FocusAnimationRig(document, row.track->index);
-                    document.clipIndex = row.clipIndex;
+                ImGui::OpenPopup("##AnimationProperties");
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Animation properties");
+            ImGui::SetNextWindowSize({ 320.f, 0.f }, ImGuiCond_Appearing);
+            if (ImGui::BeginPopup("##AnimationProperties"))
+            {
+                // Clip properties stay available while the bone rows are collapsed.
+                ImGui::TextUnformatted(label.c_str());
+                ImGui::Separator();
+                drawClipProperties(row);
+                ImGui::EndPopup();
+            }
+            ImGui::PopID();
+            ImGui::PopID();
+            if (row.keyTimes)
+            {
+                std::vector<std::pair<float, TimelineKey>> all;
+                for (const auto& [node, times] : *row.keyTimes)
+                    for (float time : times)
+                        all.push_back({ time, { row.track->index,
+                            row.clipIndex, node, time } });
+                std::sort(all.begin(), all.end(), [](const auto& a,
+                    const auto& b) { return a.first < b.first; });
+                for (size_t first = 0; first < all.size();)
+                {
+                    size_t last = first + 1;
+                    std::vector<TimelineKey> group{ all[first].second };
+                    while (last < all.size() &&
+                        std::abs(all[last].first - all[first].first) <= 1e-4f)
+                        group.push_back(all[last++].second);
+                    drawKey(row, center, all[first].first,
+                        std::move(group), color);
+                    first = last;
                 }
             }
             continue;
         }
         if (index % 2 == 0)
             draw->AddRectFilled({ origin.x, top },
-                { origin.x + canvasWidth, top + rowHeight },
+                { origin.x + canvasWidth, bottom },
                 IM_COL32(130, 140, 160, 13));
         const bool activeBone = document.rigIndex == row.track->index &&
             document.selectedBone == static_cast<int>(row.boneIndex);
         if (activeBone)
             draw->AddRectFilled({ origin.x, top },
-                { origin.x + canvasWidth, top + rowHeight },
+                { origin.x + canvasWidth, bottom },
                 ImGui::GetColorU32(RigTimelineTint(rigColor, .25f)));
-        draw->AddLine({ origin.x, top + rowHeight },
-            { origin.x + canvasWidth, top + rowHeight },
+        draw->AddLine({ origin.x, bottom },
+            { origin.x + canvasWidth, bottom },
             IM_COL32(150, 160, 175, 28));
 
         const auto times = row.keyTimes
             ? row.keyTimes->find(row.nodeIndex)
             : std::unordered_map<unsigned, std::vector<float>>::const_iterator{};
-        std::optional<float> hitKey;
         if (row.keyTimes && times != row.keyTimes->end())
         for (auto time = std::lower_bound(times->second.begin(),
                  times->second.end(), visibleStart - 8.f / pixelsPerSecond);
              time != times->second.end() &&
                  *time <= visibleEnd + 8.f / pixelsPerSecond; ++time)
         {
-            const float keyTime = *time;
-            const float x = timeX + keyTime * pixelsPerSecond;
-            draw->AddQuadFilled({ x, center - 6.f },
-                { x + 6.f, center }, { x, center + 6.f },
-                { x - 6.f, center }, color);
-            if (mouseInRow && mouse.x >= labelRight &&
-                std::abs(mouse.x - x) <= 8.f)
-                hitKey = keyTime;
+            drawKey(row, center, *time,
+                { { row.track->index, row.clipIndex,
+                    row.nodeIndex, *time } }, color);
         }
         draw->AddRectFilled({ pinnedX, top },
-            { labelRight, top + rowHeight },
+            { labelRight, bottom },
             ImGui::GetColorU32(ImGuiCol_WindowBg));
         draw->AddText({ pinnedX + 12.f, top + 4.f },
             activeBone ? color : ImGui::GetColorU32(ImGuiCol_Text),
             row.joint->name.c_str());
-        if (mouseInRow && hitKey)
-            ImGui::SetTooltip("%s / %s: %.3f s", row.track->name.c_str(),
-                row.joint->name.c_str(), *hitKey);
-        if (document.playheadDragging || !mouseInRow ||
-            (!leftClicked && !rightClicked)) continue;
-        FocusAnimationRig(document, row.track->index);
-        document.clipIndex = row.clipIndex;
-        document.selectedBone = static_cast<int>(row.boneIndex);
-        document.poseScene->SetSelectedObject(row.joint);
-        if (m_primaryHierarchy) m_primaryHierarchy->SetSelectedObject(row.joint);
-        if (m_primaryProperties) m_primaryProperties->SetSelectedObject(row.joint);
-        if (mouse.x < labelRight) continue;
-        document.playing = false;
-        if (hitKey)
+        if (mouseInRow && mouse.x < labelRight && leftClicked &&
+            !document.playheadDragging)
         {
-            document.playheadSeconds = *hitKey;
-            if (rightClicked && row.clip && row.mappingReady)
+            activateClip(row);
+            document.selectedBone = static_cast<int>(row.boneIndex);
+            document.poseScene->SetSelectedObject(row.joint);
+            if (m_primaryHierarchy) m_primaryHierarchy->SetSelectedObject(row.joint);
+            if (m_primaryProperties) m_primaryProperties->SetSelectedObject(row.joint);
+        }
+    }
+    const auto addSelection = [&](const TimelineKey& key)
+    {
+        if (!isSelected(key)) document.selectedKeys.push_back(key);
+    };
+    const auto findRow = [&](float y) -> Row*
+    {
+        for (Row& row : rows)
+        {
+            const float top = origin.y + rulerHeight + row.offset;
+            if (y >= top && y < top + row.height) return &row;
+        }
+        return nullptr;
+    };
+    KeyVisual* hit = nullptr;
+    for (KeyVisual& visual : keyVisuals)
+        if (mouse.x >= labelRight && std::abs(mouse.x - visual.x) <= 8.f &&
+            std::abs(mouse.y - visual.y) <= visual.row->height * .5f &&
+            (!hit || std::abs(mouse.x - visual.x) <
+                std::abs(mouse.x - hit->x))) hit = &visual;
+    const bool additive = ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeyShift;
+    if (rightClicked && mouse.x >= labelRight && !onRuler)
+    {
+        document.marqueeActive = true;
+        document.marqueeStartX = mouse.x;
+        document.marqueeStartY = mouse.y;
+        document.marqueeAdditive = additive;
+    }
+    if (document.marqueeActive)
+    {
+        const float minX = std::min(document.marqueeStartX, mouse.x);
+        const float maxX = std::max(document.marqueeStartX, mouse.x);
+        const float minY = std::min(document.marqueeStartY, mouse.y);
+        const float maxY = std::max(document.marqueeStartY, mouse.y);
+        if (ImGui::IsMouseDown(ImGuiMouseButton_Right))
+        {
+            draw->AddRectFilled({ minX, minY }, { maxX, maxY },
+                IM_COL32(100, 160, 255, 48));
+            draw->AddRect({ minX, minY }, { maxX, maxY },
+                IM_COL32(130, 185, 255, 220));
+        }
+        else
+        {
+            if (!document.marqueeAdditive) document.selectedKeys.clear();
+            const size_t rig = [&]()
             {
-                auto before = row.track->sourceManager->clips;
-                if (AnimationClipEditing::DeleteBoneKey(*row.clip,
-                        row.nodeIndex, *hitKey))
+                for (const KeyVisual& visual : keyVisuals)
+                    if (visual.x >= minX && visual.x <= maxX &&
+                        visual.y >= minY && visual.y <= maxY)
+                        return visual.row->track->index;
+                return static_cast<size_t>(-1);
+            }();
+            if (rig != static_cast<size_t>(-1))
+            {
+                if (!document.selectedKeys.empty() &&
+                    document.selectedKeys.front().rigIndex != rig)
+                    document.selectedKeys.clear();
+                for (const KeyVisual& visual : keyVisuals)
+                    if (visual.row->track->index == rig &&
+                        visual.x >= minX && visual.x <= maxX &&
+                        visual.y >= minY && visual.y <= maxY)
+                        for (const TimelineKey& key : visual.keys)
+                            addSelection(key);
+            }
+            document.marqueeActive = false;
+        }
+    }
+    if (leftClicked && mouse.x >= labelRight && !onRuler &&
+        !document.marqueeActive && !document.playheadDragging)
+    {
+        Row* row = findRow(mouse.y);
+        if (hit && hit->row->mappingReady &&
+            !(ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) &&
+                hit->row->kind == Row::Kind::Header))
+        {
+            activateClip(*hit->row);
+            if (hit->row->kind == Row::Kind::Bone)
+            {
+                document.selectedBone = static_cast<int>(hit->row->boneIndex);
+                document.poseScene->SetSelectedObject(hit->row->joint);
+                if (m_primaryHierarchy)
+                    m_primaryHierarchy->SetSelectedObject(hit->row->joint);
+                if (m_primaryProperties)
+                    m_primaryProperties->SetSelectedObject(hit->row->joint);
+            }
+            const bool alreadySelected = std::any_of(hit->keys.begin(),
+                hit->keys.end(), isSelected);
+            if (!additive && !alreadySelected)
+                document.selectedKeys.clear();
+            if (!document.selectedKeys.empty() &&
+                document.selectedKeys.front().rigIndex !=
+                    hit->row->track->index)
+                document.selectedKeys.clear();
+            for (const TimelineKey& key : hit->keys)
+            {
+                if (additive && isSelected(key))
+                    document.selectedKeys.erase(std::remove_if(
+                        document.selectedKeys.begin(),
+                        document.selectedKeys.end(),
+                        [&](const TimelineKey& item)
+                        { return sameKey(item, key); }),
+                        document.selectedKeys.end());
+                else addSelection(key);
+            }
+            document.keyPressX = mouse.x;
+            document.keyPressActive = true;
+            document.keyDragging = false;
+            document.keyDragDelta = 0.f;
+            document.playheadSeconds = hit->time;
+            document.playing = false;
+            SampleAnimationDocument(document);
+        }
+        else if (row && row->clip && row->mappingReady &&
+            ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+        {
+            activateClip(*row);
+            document.playheadSeconds = hit ? hit->time : timeAt(mouse.x);
+            document.playing = false;
+            SampleAnimationDocument(document);
+            auto* model = row->track->poseSkeleton->ResolveModel();
+            if (model)
+            {
+                auto before = row->track->sourceManager->clips;
+                auto& clip = row->track->sourceManager->clips[row->clipIndex];
+                const auto& joints = row->track->poseSkeleton->ResolveJoints();
+                bool keyed = false;
+                for (size_t boneIndex = 0; boneIndex < joints.size(); ++boneIndex)
                 {
-                    RecordAnimationEdit(document, std::move(before));
-                    break;
+                    if (row->kind == Row::Kind::Bone &&
+                        boneIndex != row->boneIndex) continue;
+                    auto* joint = joints[boneIndex];
+                    if (!joint) continue;
+                    auto* bone = joint->GetComponent<
+                        Engine::Components::AnimationBone>();
+                    if (!bone && boneIndex >=
+                        row->track->poseSkeleton->jointNodes.size()) continue;
+                    const unsigned node = bone ? bone->nodeIndex :
+                        row->track->poseSkeleton->jointNodes[boneIndex];
+                    const auto& transform = joint->transform;
+                    if (!AnimationClipEditing::UpsertBonePose(clip, node,
+                            document.playheadSeconds, transform.position,
+                            glm::quat(transform.rotation), transform.scale))
+                        continue;
+                    const std::string targetPath =
+                        AnimationClipMapping::NodePath(*model, node);
+                    for (auto& channel : clip.channels)
+                        if (channel.nodeIndex == node &&
+                            channel.targetPath.empty())
+                            channel.targetPath = targetPath;
+                    keyed = true;
+                }
+                if (keyed) RecordAnimationEdit(document, std::move(before));
+            }
+        }
+        else if (row && !additive) document.selectedKeys.clear();
+    }
+    if (document.keyPressActive)
+    {
+        if (ImGui::IsMouseDown(ImGuiMouseButton_Left))
+        {
+            if (std::abs(mouse.x - document.keyPressX) > 3.f)
+                document.keyDragging = true;
+            if (document.keyDragging && !document.selectedKeys.empty())
+            {
+                float earliest = document.selectedKeys.front().time;
+                for (const TimelineKey& key : document.selectedKeys)
+                    earliest = std::min(earliest, key.time);
+                document.keyDragDelta = std::max(-earliest,
+                    (mouse.x - document.keyPressX) / pixelsPerSecond);
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+            }
+        }
+        else
+        {
+            if (document.keyDragging &&
+                std::abs(document.keyDragDelta) > 1e-5f &&
+                !document.selectedKeys.empty())
+            {
+                const size_t rig = document.selectedKeys.front().rigIndex;
+                auto track = std::find_if(document.tracks.begin(),
+                    document.tracks.end(), [&](const auto& candidate)
+                    { return candidate.index == rig; });
+                if (track != document.tracks.end())
+                {
+                    auto before = track->sourceManager->clips;
+                    auto moved = before;
+                    bool valid = true;
+                    for (size_t clipIndex = 0; clipIndex < moved.size(); ++clipIndex)
+                    {
+                        std::vector<AnimationClipEditing::KeyRef> keys;
+                        for (const TimelineKey& key : document.selectedKeys)
+                            if (key.rigIndex == rig &&
+                                key.clipIndex == static_cast<int>(clipIndex))
+                                keys.push_back({ key.nodeIndex, key.time });
+                        if (!keys.empty() && !AnimationClipEditing::MoveKeys(
+                                moved[clipIndex], keys,
+                                document.keyDragDelta)) valid = false;
+                    }
+                    if (valid)
+                    {
+                        track->sourceManager->clips = std::move(moved);
+                        if (document.rigIndex != rig)
+                            FocusAnimationRig(document, rig);
+                        for (TimelineKey& key : document.selectedKeys)
+                            key.time += document.keyDragDelta;
+                        document.playheadSeconds = std::max(0.f,
+                            document.playheadSeconds + document.keyDragDelta);
+                        RecordAnimationEdit(document, std::move(before));
+                    }
                 }
             }
-            else if (leftClicked) SampleAnimationDocument(document);
+            document.keyPressActive = false;
+            document.keyDragging = false;
+            document.keyDragDelta = 0.f;
         }
-        else if (leftClicked && row.clip)
+    }
+    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+        !ImGui::GetIO().WantTextInput &&
+        !document.selectedKeys.empty() &&
+        (ImGui::IsKeyPressed(ImGuiKey_Delete) ||
+            ImGui::IsKeyPressed(ImGuiKey_Backspace)))
+    {
+        const size_t rig = document.selectedKeys.front().rigIndex;
+        auto track = std::find_if(document.tracks.begin(),
+            document.tracks.end(), [&](const auto& candidate)
+            { return candidate.index == rig; });
+        if (track != document.tracks.end())
         {
-            document.playheadSeconds = timeAt(mouse.x);
-            AddAnimationKey(document, true);
+            auto before = track->sourceManager->clips;
+            bool removed = false;
+            for (const TimelineKey& key : document.selectedKeys)
+                if (key.rigIndex == rig && key.clipIndex >= 0 &&
+                    key.clipIndex < static_cast<int>(
+                        track->sourceManager->clips.size()))
+                    removed |= AnimationClipEditing::DeleteBoneKey(
+                        track->sourceManager->clips[key.clipIndex],
+                        key.nodeIndex, key.time);
+            if (removed)
+            {
+                if (document.rigIndex != rig) FocusAnimationRig(document, rig);
+                document.selectedKeys.clear();
+                RecordAnimationEdit(document, std::move(before));
+            }
         }
+    }
+    if (editedTrack)
+    {
+        if (document.rigIndex != editedTrack->index)
+            FocusAnimationRig(document, editedTrack->index);
+        RecordAnimationEdit(document, std::move(editBefore));
+    }
+    else if (refreshClipCache)
+    {
+        ++document.clipRevision;
+        document.clipCache.clear();
+        document.previewLayouts.clear();
+        SampleAnimationDocument(document);
+    }
+    if (removeLayerFrom && removeLayerIndex <
+            removeLayerFrom->stackedClips.size())
+    {
+        removeLayerFrom->stackedClips.erase(
+            removeLayerFrom->stackedClips.begin() + removeLayerIndex);
+        document.clipIndex = removeLayerFrom->clipIndex;
+        SampleAnimationDocument(document);
+    }
+    if (addLayerTo)
+    {
+        AnimationDocument::RigTrack::ClipLayer layer;
+        layer.clipIndex = addClipIndex;
+        addLayerTo->stackedClips.push_back(layer);
+        SampleAnimationDocument(document);
     }
     const float playheadX = timeX +
         document.playheadSeconds * pixelsPerSecond;

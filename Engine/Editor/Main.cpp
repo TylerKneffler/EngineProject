@@ -546,11 +546,16 @@ int WINAPI wWinMain(
     };
     OutputDebugStringA("[Main] OnUpdate callback set\n");
 
-    // Now that all callbacks are set up, show the window
+    // Draw the first frame before exposing the native window. The initial
+    // editor layout can take time, and an unpainted window appears blank.
+    splash.SetProgress(0.95f, L"Drawing editor...");
+    renderer->MarkDirty();
+    window->OnUpdate();
     OutputDebugStringA("[Main] Showing window...\n");
-    splash.SetProgress(1.0f, L"Ready");
     splash.HoldAboveMainWindow();
     window->Show();
+    // A hidden swap chain can report occlusion and discard its first Present.
+    // Present once more after showing before removing the splash.
     renderer->MarkDirty();
     window->OnUpdate();
     splash.Close();

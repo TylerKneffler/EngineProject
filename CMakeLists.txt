@@ -716,6 +716,51 @@ if(NOT ENGINE_PROJECT_DIR AND
         WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()
 
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/BrushPresetTests.cpp")
+    enable_testing()
+    add_executable(BrushPresetTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/BrushPresetTests.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Paint/BrushPreset.cpp")
+    target_link_libraries(BrushPresetTests PRIVATE pugixml)
+    target_include_directories(BrushPresetTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME BrushPresetRegression COMMAND BrushPresetTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/WeightPaintBucketTests.cpp")
+    enable_testing()
+    add_executable(WeightPaintBucketTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/WeightPaintBucketTests.cpp")
+    target_link_libraries(WeightPaintBucketTests PRIVATE Engine)
+    target_include_directories(WeightPaintBucketTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME WeightPaintBucketRegression COMMAND WeightPaintBucketTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/ImagePaintTests.cpp")
+    enable_testing()
+    add_executable(ImagePaintTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/ImagePaintTests.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Paint/PngPaintWriter.cpp")
+    target_link_libraries(ImagePaintTests PRIVATE Engine)
+    target_include_directories(ImagePaintTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME ImagePaintRegression COMMAND ImagePaintTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/VertexColorPaintTests.cpp")
+    enable_testing()
+    add_executable(VertexColorPaintTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/VertexColorPaintTests.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/MeshEditSnapshot.cpp")
+    target_link_libraries(VertexColorPaintTests PRIVATE Engine)
+    target_include_directories(VertexColorPaintTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME VertexColorPaintRegression COMMAND VertexColorPaintTests)
+endif()
+
 if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PhysicsAdapterTests.cpp")
     enable_testing()

@@ -54,6 +54,7 @@ private:
     void GoBack();
     void CreateFolder();
     void CreateScript();
+    void CreateBrush();
     void CommitScriptRename();
     void CommitAssetRename();
     bool MoveAssetPath(const std::string& sourcePath,

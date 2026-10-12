@@ -2,6 +2,7 @@
 #include "Engine/Editor/Core/View/Templates/Common/AssetPathTemplate.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Engine/Editor/UI/EditorIcons.h"
+#include "Engine/Editor/Core/Paint/BrushPreset.h"
 #include "Core/AssetRecord.h"
 #include "Core/Object.h"
 #include "Core/Serialization/SceneSerializer.h"
@@ -171,6 +172,8 @@ void AssetsExplorerView::DrawPanel(IEditorUi& ui)
     ui.Tooltip("Thumbnail view");
     ui.SearchInput("##assetSearch", m_search, sizeof(m_search),
         "Search assets...");
+    ui.SameLine();
+    if (ui.Button("New brush")) CreateBrush();
     ui.Separator();
 
     if (!m_error.empty())
@@ -609,6 +612,19 @@ void ReplaceAll(std::string& text, const std::string& from,
         position += to.size();
     }
 }
+}
+
+void AssetsExplorerView::CreateBrush()
+{
+    fs::path path = fs::path(m_currentDirectory) / "New Brush.brush";
+    for (unsigned suffix = 2; fs::exists(path); ++suffix)
+        path = fs::path(m_currentDirectory) /
+            ("New Brush " + std::to_string(suffix) + ".brush");
+    Paint::BrushPreset preset;
+    preset.name = path.stem().string();
+    if (!Paint::SaveBrushPreset(path, preset, m_error)) return;
+    SelectPath(path.string());
+    if (OnAssetContentsChanged) OnAssetContentsChanged(path.string());
 }
 
 void AssetsExplorerView::CreateScript()

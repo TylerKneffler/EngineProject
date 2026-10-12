@@ -10,7 +10,10 @@
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Engine/Editor/Core/View/Templates/EditModes/Skeleton/SkinBindingWeights.h"
+#include "Engine/Editor/Core/Paint/BrushPreset.h"
+#include "Engine/Editor/Core/Paint/BrushPreview.h"
 #include <algorithm>
+#include <filesystem>
 
 namespace Engine::Editor
 {
@@ -74,8 +77,9 @@ void EditorState::DrawSkeletonEditTools(IEditorUi& ui)
         for (const auto& panel : m_panels)
             if (auto* view = dynamic_cast<SceneView*>(panel.get());
                 view && view->GetScene() == scene)
-                view->AllowObjectTransform = session->submode == 0 &&
-                    session->boneTool == 0;
+                view->AllowObjectTransform =
+                    (session->submode == 0 && session->boneTool == 0) ||
+                    (session->submode == 1 && session->paintTool == 0);
         SyncSkeletonEditSelection(scene, *session);
     }
     auto* skeleton = session->skeleton;
@@ -289,16 +293,168 @@ void EditorState::DrawSkeletonEditTools(IEditorUi& ui)
             "Normalize" };
         const char* shapes[]{ "Circle", "Square" };
         const char* falloffs[]{ "Hard", "Linear", "Smooth" };
-        ui.Combo("Brush", &session->brushOperation, operations, 5);
-        ui.Combo("Shape", &session->brushShape, shapes, 2);
-        ui.Combo("Feather", &session->brushFalloff, falloffs, 3);
-        ui.SliderFloat("Size (pixels)", &session->brushRadius, 2.f, 250.f);
-        if (session->brushFalloff != 0)
-            ui.SliderFloat("Hardness", &session->brushHardness, 0.f, 1.f);
-        if (session->brushOperation <= 2)
+        Paint::BrushPreset preview;
+        preview.shape = session->brushShape;
+        preview.falloff = session->brushFalloff;
+        preview.hardness = session->brushHardness;
+        Paint::DrawBrushPreview(preview);
+        namespace fs = std::filesystem;
+        const fs::path assetsDirectory = fs::path(
+            m_projectSettings.assetsDirectory.empty() ? "Assets" :
+                m_projectSettings.assetsDirectory);
+        const fs::path brushDirectory = assetsDirectory / "Brushes";
+        std::vector<fs::path> presetPaths;
+        std::error_code brushError;
+        if (fs::is_directory(assetsDirectory, brushError))
+            for (fs::recursive_directory_iterator it(assetsDirectory,
+                    fs::directory_options::skip_permission_denied, brushError), end;
+                !brushError && it != end; it.increment(brushError))
+                if (it->is_regular_file() && it->path().extension() == ".brush")
+                    presetPaths.push_back(it->path());
+        std::sort(presetPaths.begin(), presetPaths.end());
+        std::vector<std::string> presetLabels{ "Custom" };
+        int presetChoice = 0;
+        for (const auto& path : presetPaths)
+        {
+            presetLabels.push_back(path.lexically_relative(assetsDirectory).string());
+            if (path.string() == session->brushPresetPath)
+                presetChoice = static_cast<int>(presetLabels.size()) - 1;
+        }
+        std::vector<const char*> presetNames;
+        for (const auto& label : presetLabels)
+            presetNames.push_back(label.c_str());
+        if (ui.Combo("Brush preset", &presetChoice, presetNames.data(),
+            static_cast<int>(presetNames.size())))
+        {
+            FinishSkeletonPaintStroke(*session);
+            if (presetChoice == 0) session->brushPresetPath.clear();
+            else
+            {
+                Paint::BrushPreset preset;
+                if (Paint::LoadBrushPreset(presetPaths[presetChoice - 1],
+                    preset, session->error))
+                {
+                    session->brushPresetPath = presetPaths[presetChoice - 1].string();
+                    session->brushShape = preset.shape;
+                    session->brushFalloff = preset.falloff;
+                    session->brushRadius = preset.size;
+                    session->brushHardness = preset.hardness;
+                    session->brushStrength = preset.strength;
+                    session->brushOpacity = preset.opacity;
+                    session->brushFlow = preset.flow;
+                    session->brushSpacing = preset.spacing;
+                    session->brushRotation = preset.rotation;
+                    session->brushScatter = preset.scatter;
+                    session->brushPressureSize = preset.pressureSize;
+                    session->brushPressureStrength = preset.pressureStrength;
+                    session->brushTipPath = preset.tipPath;
+                    const size_t nameLength = std::min(preset.name.size(),
+                        sizeof(session->brushPresetName) - 1);
+                    std::copy_n(preset.name.data(), nameLength,
+                        session->brushPresetName);
+                    session->brushPresetName[nameLength] = 0;
+                }
+            }
+        }
+        ui.InputText("Preset name", session->brushPresetName,
+            sizeof(session->brushPresetName));
+        const auto savePreset = [&](bool duplicate)
+        {
+            Paint::BrushPreset preset;
+            preset.name = session->brushPresetName;
+            preset.tipPath = session->brushTipPath;
+            preset.shape = session->brushShape;
+            preset.falloff = session->brushFalloff;
+            preset.size = session->brushRadius;
+            preset.hardness = session->brushHardness;
+            preset.strength = session->brushStrength;
+            preset.opacity = session->brushOpacity;
+            preset.flow = session->brushFlow;
+            preset.spacing = session->brushSpacing;
+            preset.rotation = session->brushRotation;
+            preset.scatter = session->brushScatter;
+            preset.pressureSize = session->brushPressureSize;
+            preset.pressureStrength = session->brushPressureStrength;
+            fs::create_directories(brushDirectory, brushError);
+            if (brushError)
+            { session->error = brushError.message(); return; }
+            fs::path path = session->brushPresetPath;
+            if (duplicate || path.empty())
+            {
+                std::string base = preset.name;
+                for (char& ch : base)
+                    if (ch == '/' || ch == '\\' || ch == ':' || ch == '*' ||
+                        ch == '?' || ch == '"' || ch == '<' || ch == '>' || ch == '|')
+                        ch = '_';
+                path = brushDirectory / (base + ".brush");
+                for (int suffix = 2; fs::exists(path); ++suffix)
+                    path = brushDirectory /
+                        (base + " " + std::to_string(suffix) + ".brush");
+            }
+            if (Paint::SaveBrushPreset(path, preset, session->error))
+                session->brushPresetPath = path.string();
+        };
+        if (ui.Button("Create brush asset")) savePreset(true);
+        if (!session->brushPresetPath.empty() &&
+            ui.Button("Save brush asset")) savePreset(false);
+        if (!session->brushPresetPath.empty() &&
+            ui.Button("Duplicate brush asset")) savePreset(true);
+        const char* paintTools[]{ "Cursor", "Brush", "Eraser", "Bucket" };
+        int activePaintTool = session->paintTool;
+        if (ui.Combo("Paint tool", &activePaintTool, paintTools, 4))
+        {
+            FinishSkeletonPaintStroke(*session);
+            session->paintTool = activePaintTool;
+            for (const auto& panel : m_panels)
+                if (auto* view = dynamic_cast<SceneView*>(panel.get());
+                    view && view->GetScene() == scene)
+                    view->AllowObjectTransform = activePaintTool == 0;
+        }
+        if (session->paintTool == 1)
+            ui.Combo("Brush", &session->brushOperation, operations, 5);
+        if (session->paintTool == 1 || session->paintTool == 2)
+        {
+            ui.Combo("Shape", &session->brushShape, shapes, 2);
+            ui.Combo("Feather", &session->brushFalloff, falloffs, 3);
+            ui.SliderFloat("Size (pixels)", &session->brushRadius, 2.f, 250.f);
+            if (session->brushFalloff != 0)
+                ui.SliderFloat("Hardness", &session->brushHardness, 0.f, 1.f);
+        }
+        if (session->paintTool == 3)
+        {
+            ui.SliderFloat("Bucket tolerance", &session->bucketTolerance,
+                0.f, 1.f);
+            ui.SliderFloat("Bucket opacity", &session->bucketOpacity,
+                0.f, 1.f);
+            ui.SliderFloat("Fill weight", &session->brushPaintWeight,
+                0.f, 1.f);
+            ui.DisabledLabel("Bucket fills connected faces with similar starting weights.");
+            if (session->mirrorBoneIndex >= 0)
+                ui.DisabledLabel("Turn off mirror paint before using Bucket.");
+        }
+        else if (session->paintTool == 1 && session->brushOperation <= 2)
             ui.SliderFloat("Paint weight", &session->brushPaintWeight, 0.f, 1.f);
-        ui.SliderFloat("Brush strength", &session->brushStrength, .01f, 1.f);
-        ui.DisabledLabel("Drag on the gray mesh to paint this bone's heat map.");
+        if (session->paintTool == 1 || session->paintTool == 2)
+        {
+            ui.SliderFloat("Brush strength", &session->brushStrength, .01f, 1.f);
+            ui.SliderFloat("Opacity", &session->brushOpacity, 0.f, 1.f);
+            ui.SliderFloat("Flow", &session->brushFlow, 0.f, 1.f);
+            ui.SliderFloat("Spacing (diameter)", &session->brushSpacing,
+                .01f, 1.f);
+            if (session->brushShape == 1)
+                ui.SliderFloat("Rotation (degrees)", &session->brushRotation,
+                    -180.f, 180.f);
+            ui.SliderFloat("Scatter", &session->brushScatter, 0.f, 1.f);
+        }
+        if (session->paintTool != 3 && !session->brushTipPath.empty())
+            ui.ColoredLabel("Image tips are not supported by weight paint yet; strokes are blocked.",
+                { 1.f, .6f, .25f, 1.f });
+        if (session->paintTool == 2)
+            ui.DisabledLabel("Erase redistributes weight to other unlocked bones.");
+        else if (session->paintTool == 3)
+            ui.DisabledLabel("Click a mesh surface to fill its connected region.");
+        else if (session->paintTool == 1)
+            ui.DisabledLabel("Drag on the gray mesh to paint this bone's heat map.");
         MeshEditSession* edit = ActiveMeshEditSession();
         if (!toolbarPopup && edit &&
             ui.Button(edit->dirty ? "Save weights *" : "Save weights"))

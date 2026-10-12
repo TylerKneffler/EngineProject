@@ -1,6 +1,8 @@
 #include "AssetInspectorTemplate.h"
 #include "Engine/Editor/Core/View/Templates/Common/AssetPathTemplate.h"
 #include "Engine/Editor/UI/IEditorUi.h"
+#include "Engine/Editor/Core/Paint/BrushPreset.h"
+#include "Engine/Editor/Core/Paint/BrushPreview.h"
 #include "Core/AssetRecord.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Compoonents/Materials/Material.h"
@@ -223,6 +225,61 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
     const std::string extension = LowerAssetExtension(m_selectedPath);
     ui.ValueLabel("Type", directory ? "Folder" :
         (extension.empty() ? "Generic file" : extension.c_str()));
+    if (!directory && extension == ".brush")
+    {
+        Paint::BrushPreset preset;
+        std::string presetError;
+        if (!Paint::LoadBrushPreset(path, preset, presetError))
+        {
+            ui.ColoredLabel(presetError.c_str(), { 1.f, .35f, .35f, 1.f });
+            return;
+        }
+        ui.Separator();
+        Paint::DrawBrushPreview(preset, 112.f);
+        ui.ValueLabel("Brush preview", preset.shape == 0 ?
+            "Round tip" : "Square tip");
+        bool changed = false;
+        char name[128]{};
+        std::copy_n(preset.name.data(),
+            std::min(preset.name.size(), sizeof(name) - 1), name);
+        if (ui.InputText("Brush name", name, sizeof(name)))
+        { preset.name = name; changed = true; }
+        const char* shapes[]{ "Circle", "Square" };
+        const char* falloffs[]{ "Hard", "Linear", "Smooth" };
+        changed = ui.Combo("Shape", &preset.shape, shapes, 2) || changed;
+        changed = ui.Combo("Falloff", &preset.falloff, falloffs, 3) || changed;
+        changed = ui.SliderFloat("Size", &preset.size, 2.f, 250.f) || changed;
+        changed = ui.SliderFloat("Hardness", &preset.hardness, 0.f, 1.f) || changed;
+        changed = ui.SliderFloat("Strength", &preset.strength, 0.f, 1.f) || changed;
+        changed = ui.SliderFloat("Opacity", &preset.opacity, 0.f, 1.f) || changed;
+        changed = ui.SliderFloat("Flow", &preset.flow, 0.f, 1.f) || changed;
+        changed = ui.SliderFloat("Spacing", &preset.spacing, 0.f, 1.f) || changed;
+        changed = ui.SliderFloat("Rotation", &preset.rotation, -180.f, 180.f) || changed;
+        changed = ui.SliderFloat("Scatter", &preset.scatter, 0.f, 1.f) || changed;
+        changed = ui.SliderFloat("Pressure size", &preset.pressureSize, 0.f, 1.f) || changed;
+        changed = ui.SliderFloat("Pressure strength", &preset.pressureStrength, 0.f, 1.f) || changed;
+        char tipPath[512]{};
+        std::copy_n(preset.tipPath.data(),
+            std::min(preset.tipPath.size(), sizeof(tipPath) - 1), tipPath);
+        if (ui.InputText("Image tip asset path", tipPath, sizeof(tipPath)))
+        { preset.tipPath = tipPath; changed = true; }
+        if (!preset.tipPath.empty())
+        {
+            auto* graphics = scene ? scene->GetGraphicsProvider() : nullptr;
+            if (void* handle = m_previewCache.Get(preset.tipPath, graphics))
+                ui.DrawImage(handle, 112.f, 112.f);
+            else ui.DisabledLabel("Image tip preview unavailable.");
+        }
+        if (changed)
+        {
+            if (Paint::SaveBrushPreset(path, preset, presetError))
+            {
+                if (OnContentsChanged) OnContentsChanged(m_selectedPath);
+            }
+            else ui.ColoredLabel(presetError.c_str(), { 1.f, .35f, .35f, 1.f });
+        }
+        return;
+    }
     if (directory)
     {
         std::size_t entries = 0;

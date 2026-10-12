@@ -190,6 +190,7 @@ void ImGuiMainMenu::DrawToolbarMenu(EditorState& state) const
     ImGui::MenuItem("Prefab Actions", nullptr, &visible.prefabActions);
     ImGui::Separator();
     ImGui::MenuItem("Edit Tools", nullptr, &visible.toolDetails);
+    ImGui::MenuItem("Paint Tools", nullptr, &visible.paintTools);
     ImGui::EndMenu();
 }
 

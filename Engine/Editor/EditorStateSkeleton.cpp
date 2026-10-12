@@ -15,8 +15,10 @@
 #include "Core/View/Templates/EditModes/Skeleton/WeightInfluence.h"
 #include "Core/View/Templates/EditModes/Skeleton/SkinBindingWeights.h"
 #include "Core/View/Templates/EditModes/Skeleton/MirrorWeightPaint.h"
+#include "Core/View/Templates/EditModes/Skeleton/WeightPaintBucket.h"
 #include "Core/SkeletonBindPose.h"
 #include "Core/MeshEditSnapshot.h"
+#include "Core/Paint/PaintInput.h"
 #include "Core/SnapshotHistory.h"
 #include <algorithm>
 #include <charconv>
@@ -164,7 +166,8 @@ void EditorState::SetSkeletonEditMode(Engine::Scene::Scene* scene,
             view && view->GetScene() == scene)
         {
             view->AllowObjectTransform = !enabled ||
-                (session.submode == 0 && session.boneTool == 0);
+                (session.submode == 0 && session.boneTool == 0) ||
+                (session.submode == 1 && session.paintTool == 0);
             view->SetEditMode(enabled ? SceneEditMode::Skeleton :
                 SceneEditMode::Object);
         }
@@ -1215,6 +1218,16 @@ bool EditorState::HandleSkeletonViewport(IEditorUi& ui,
     if (session.submode != 1 || !session.mesh || session.boneIndex < 0 ||
         input.available.x < 1.f || input.available.y < 1.f)
         return false;
+    if (session.paintTool == 0)
+    {
+        FinishSkeletonPaintStroke(session);
+        return false;
+    }
+    if (session.paintTool == 3 && session.mirrorBoneIndex >= 0)
+    {
+        session.error = "Bucket fill does not support mirrored bones yet.";
+        return false;
+    }
     auto* camera = scene->editorCamera.GetComponent<Engine::Components::Camera>();
     if (session.boneIndex < static_cast<int>(session.lockedBones.size()) &&
         session.lockedBones[session.boneIndex]) return false;
@@ -1232,22 +1245,31 @@ bool EditorState::HandleSkeletonViewport(IEditorUi& ui,
         }
     }
     if (!camera || !session.mesh->Owner) return false;
+    if (session.paintTool != 3 && !session.brushTipPath.empty())
+    {
+        session.error = "This brush needs image-tip support; no stroke was applied.";
+        return false;
+    }
     const auto& source = session.mesh->GetVertices();
     if (source.empty()) return false;
-    const float radius = std::max(session.brushRadius, 2.f);
-    const auto mouse = input.mousePosInViewport;
-    if (session.brushShape == 0)
+    const float radius = std::max(session.brushRadius *
+        Paint::PressureScale(session.brushPressureSize), 2.f);
+    const auto cursor = input.mousePosInViewport;
+    auto mouse = cursor;
+    if (session.paintTool == 3)
+        ui.DrawViewportCircle(cursor, 5.f, { 1.f, .9f, .3f, .95f }, false);
+    else if (session.brushShape == 0)
     {
-        ui.DrawViewportCircle(mouse, radius, { 0.f, 0.f, 0.f, .8f }, false);
-        ui.DrawViewportCircle(mouse, radius - 1.f,
+        ui.DrawViewportCircle(cursor, radius, { 0.f, 0.f, 0.f, .8f }, false);
+        ui.DrawViewportCircle(cursor, radius - 1.f,
             { 1.f, .9f, .3f, .95f }, false);
     }
     else
     {
-        const EditorUiVec2 a{ mouse.x - radius, mouse.y - radius };
-        const EditorUiVec2 b{ mouse.x + radius, mouse.y - radius };
-        const EditorUiVec2 c{ mouse.x + radius, mouse.y + radius };
-        const EditorUiVec2 d{ mouse.x - radius, mouse.y + radius };
+        const EditorUiVec2 a{ cursor.x - radius, cursor.y - radius };
+        const EditorUiVec2 b{ cursor.x + radius, cursor.y - radius };
+        const EditorUiVec2 c{ cursor.x + radius, cursor.y + radius };
+        const EditorUiVec2 d{ cursor.x - radius, cursor.y + radius };
         const EditorUiColor line{ 1.f, .9f, .3f, .95f };
         ui.DrawViewportLine(a, b, line, 1.f);
         ui.DrawViewportLine(b, c, line, 1.f);
@@ -1302,10 +1324,27 @@ bool EditorState::HandleSkeletonViewport(IEditorUi& ui,
             }
         }
     }
-    if (std::hypot(mouse.x - session.lastPaintPosition.x,
-        mouse.y - session.lastPaintPosition.y) < std::max(1.f, radius * .08f))
+    if (session.paintTool != 3 &&
+        std::hypot(cursor.x - session.lastPaintPosition.x,
+        cursor.y - session.lastPaintPosition.y) <
+        std::max(1.f, radius * 2.f * session.brushSpacing))
         return true;
-    session.lastPaintPosition = mouse;
+    session.lastPaintPosition = cursor;
+    if (session.paintTool != 3 && session.brushScatter > 0.f)
+    {
+        // A coordinate hash keeps a stroke repeatable across save/reload and
+        // avoids depending on the global random generator.
+        uint32_t seed = static_cast<uint32_t>(std::lround(cursor.x)) * 1664525u ^
+            static_cast<uint32_t>(std::lround(cursor.y)) * 1013904223u;
+        seed ^= seed >> 16; seed *= 2246822519u; seed ^= seed >> 13;
+        const float angle = static_cast<float>(seed & 0xffffu) *
+            (6.28318530718f / 65536.f);
+        const float distance = radius * session.brushScatter *
+            static_cast<float>((seed >> 16) & 0xffffu) / 65535.f;
+        mouse.x += std::cos(angle) * distance;
+        mouse.y += std::sin(angle) * distance;
+        ui.DrawViewportCircle(mouse, 3.f, { 1.f, .4f, .2f, 1.f }, false);
+    }
     const glm::mat4 projection = camera->GetProjectionMatrix(
         input.available.x / input.available.y) * camera->GetViewMatrix() *
         session.mesh->Owner->transform.GetWorldMatrix();
@@ -1360,8 +1399,41 @@ bool EditorState::HandleSkeletonViewport(IEditorUi& ui,
     std::vector<float> original(source.size());
     for (size_t i = 0; i < source.size(); ++i)
         original[i] = BoneWeight(source[i], session.boneIndex);
+    if (session.paintTool == 3)
+    {
+        auto& topologyCache = session.surfaceTopology;
+        if (!topologyCache || topologyCache->vertexCount != source.size() ||
+            topologyCache->indices != indices)
+            topologyCache = std::make_shared<WeightPaintSurface::Topology>(
+                WeightPaintSurface::BuildTopology(indices, source.size()));
+        const auto filled = WeightPaintBucket::ConnectedVertices(
+            *topologyCache, original, hitFaceIndex, session.bucketTolerance);
+        std::vector<Engine::Components::Mesh::Vertex> vertices(source);
+        bool changed = false;
+        for (uint32_t index : filled)
+        {
+            const float target = original[index] +
+                (session.brushPaintWeight - original[index]) *
+                session.bucketOpacity;
+            changed = WeightInfluence::Set(vertices[index], session.boneIndex,
+                target, session.lockedBones) || changed;
+        }
+        if (changed && session.mesh->UpdateAuthoredVertices(std::move(vertices)))
+        {
+            session.strokeChanged = true;
+            if (MeshEditSession* edit = ActiveMeshEditSession())
+            {
+                edit->dirty = true;
+                if (m_activeSceneAssetDocument)
+                    RefreshSceneAssetDocumentTitle(*m_activeSceneAssetDocument);
+            }
+            if (m_renderer) m_renderer->MarkDirty();
+        }
+        FinishSkeletonPaintStroke(session);
+        return true;
+    }
     const std::vector<std::vector<uint32_t>>* neighbors = nullptr;
-    if (session.brushOperation == 3)
+    if (session.paintTool == 1 && session.brushOperation == 3)
     {
         auto& cache = session.adjacency;
         if (!cache || cache->mesh != session.mesh ||
@@ -1408,9 +1480,11 @@ bool EditorState::HandleSkeletonViewport(IEditorUi& ui,
         const std::vector<float>& initial)
     {
         if (falloff <= 0.f) return;
-        const float opacity = session.brushStrength * falloff;
+        const float opacity = session.brushStrength * session.brushOpacity *
+            session.brushFlow * falloff *
+            Paint::PressureScale(session.brushPressureStrength);
         float target = initial[index];
-        switch (session.brushOperation)
+        switch (session.paintTool == 2 ? 5 : session.brushOperation)
         {
         case 0: target += (std::max(target, session.brushPaintWeight) -
             target) * opacity; break;
@@ -1436,6 +1510,7 @@ bool EditorState::HandleSkeletonViewport(IEditorUi& ui,
                     initial[index], session.lockedBones) || changed;
             return;
         }
+        case 5: target *= 1.f - opacity; break;
         }
         if (std::abs(target - initial[index]) < 1e-5f) return;
         changed = WeightInfluence::Set(vertices[index], bone,
@@ -1499,9 +1574,14 @@ bool EditorState::HandleSkeletonViewport(IEditorUi& ui,
     };
     const auto screenDistance = [&](const glm::vec3& offset)
     {
-        return session.brushShape == 0
-            ? std::hypot(offset.x, offset.y)
-            : std::max(std::abs(offset.x), std::abs(offset.y));
+        if (session.brushShape == 0)
+            return std::hypot(offset.x, offset.y);
+        const float angle = glm::radians(session.brushRotation);
+        const float x = std::cos(angle) * offset.x +
+            std::sin(angle) * offset.y;
+        const float y = -std::sin(angle) * offset.x +
+            std::cos(angle) * offset.y;
+        return std::max(std::abs(x), std::abs(y));
     };
     const auto sourceCoverage = WeightPaintSurface::Coverage(topology,
         screenPositions, hitFaceIndex, { mouse.x, mouse.y, 0.f }, radius,

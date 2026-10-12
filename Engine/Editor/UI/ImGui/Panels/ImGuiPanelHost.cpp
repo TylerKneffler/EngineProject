@@ -61,10 +61,10 @@ bool TransportButton(const char* id, TransportIcon icon)
 
 struct ToolbarLayout
 {
-    float widths[7]{ 105.f, 90.f, 200.f, 180.f, 220.f, 180.f, 165.f };
+    float widths[8]{ 105.f, 90.f, 200.f, 180.f, 220.f, 180.f, 165.f, 240.f };
     float singleSectionFill[2]{ 1.f, 1.f };
-    int order[7]{ 0, 1, 2, 3, 4, 5, 6 };
-    int side[7]{ 0, 0, 0, 0, 1, 1, 1 };
+    int order[8]{ 0, 1, 2, 3, 7, 4, 5, 6 };
+    int side[8]{ 0, 0, 0, 0, 1, 1, 1, 1 };
 };
 
 ToolbarLayout g_toolbarLayout;
@@ -79,39 +79,70 @@ void ToolbarSettingsReadLine(ImGuiContext*, ImGuiSettingsHandler*, void* entry,
     const char* line)
 {
     auto& layout = *static_cast<ToolbarLayout*>(entry);
-    int order[7]{};
+    int order[8]{};
+    if (sscanf_s(line, "Order=%d,%d,%d,%d,%d,%d,%d,%d", &order[0], &order[1],
+        &order[2], &order[3], &order[4], &order[5], &order[6], &order[7]) == 8)
+    {
+        bool seen[8]{};
+        bool valid = true;
+        for (int index : order)
+            if (index < 0 || index >= 8 || seen[index]) valid = false;
+            else seen[index] = true;
+        if (valid)
+            for (int i = 0; i < 8; ++i) layout.order[i] = order[i];
+        return;
+    }
     if (sscanf_s(line, "Order=%d,%d,%d,%d,%d,%d,%d", &order[0], &order[1],
         &order[2], &order[3], &order[4], &order[5], &order[6]) == 7)
     {
         bool seen[7]{};
         bool valid = true;
-        for (int index : order)
-            if (index < 0 || index >= 7 || seen[index]) valid = false;
-            else seen[index] = true;
+        for (int i = 0; i < 7; ++i)
+            if (order[i] < 0 || order[i] >= 7 || seen[order[i]]) valid = false;
+            else seen[order[i]] = true;
         if (valid)
+        {
             for (int i = 0; i < 7; ++i) layout.order[i] = order[i];
+            layout.order[7] = 7;
+        }
         return;
     }
-    int side[7]{};
-    if (sscanf_s(line, "Side=%d,%d,%d,%d,%d,%d,%d", &side[0], &side[1],
-        &side[2], &side[3], &side[4], &side[5], &side[6]) == 7)
+    int side[8]{};
+    if (sscanf_s(line, "Side=%d,%d,%d,%d,%d,%d,%d,%d", &side[0], &side[1],
+        &side[2], &side[3], &side[4], &side[5], &side[6], &side[7]) == 8)
     {
         bool valid = true;
         for (int value : side) valid &= value == 0 || value == 1;
         if (valid)
-            for (int i = 0; i < 7; ++i) layout.side[i] = side[i];
+            for (int i = 0; i < 8; ++i) layout.side[i] = side[i];
         return;
     }
-    float widths[7]{};
-    if (sscanf_s(line, "Widths=%f,%f,%f,%f,%f,%f,%f", &widths[0],
+    if (sscanf_s(line, "Side=%d,%d,%d,%d,%d,%d,%d", &side[0], &side[1],
+        &side[2], &side[3], &side[4], &side[5], &side[6]) == 7)
+    {
+        for (int i = 0; i < 7; ++i)
+            if (side[i] == 0 || side[i] == 1) layout.side[i] = side[i];
+        return;
+    }
+    float widths[8]{};
+    if (sscanf_s(line, "Widths=%f,%f,%f,%f,%f,%f,%f,%f", &widths[0],
         &widths[1], &widths[2], &widths[3], &widths[4], &widths[5],
-        &widths[6]) == 7)
+        &widths[6], &widths[7]) == 8)
     {
         bool valid = true;
         for (float width : widths)
             valid &= std::isfinite(width) && width >= 32.f && width <= 10000.f;
         if (valid)
-            for (int i = 0; i < 7; ++i) layout.widths[i] = widths[i];
+            for (int i = 0; i < 8; ++i) layout.widths[i] = widths[i];
+        return;
+    }
+    if (sscanf_s(line, "Widths=%f,%f,%f,%f,%f,%f,%f", &widths[0],
+        &widths[1], &widths[2], &widths[3], &widths[4], &widths[5],
+        &widths[6]) == 7)
+    {
+        for (int i = 0; i < 7; ++i)
+            if (std::isfinite(widths[i]) && widths[i] >= 32.f &&
+                widths[i] <= 10000.f) layout.widths[i] = widths[i];
         return;
     }
     float fill[2]{};
@@ -130,17 +161,17 @@ void ToolbarSettingsWriteAll(ImGuiContext*, ImGuiSettingsHandler* handler,
 {
     const auto& layout = *static_cast<ToolbarLayout*>(handler->UserData);
     output->appendf("[Toolbar][Main]\n"
-        "Order=%d,%d,%d,%d,%d,%d,%d\n"
-        "Side=%d,%d,%d,%d,%d,%d,%d\n"
-        "Widths=%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n"
+        "Order=%d,%d,%d,%d,%d,%d,%d,%d\n"
+        "Side=%d,%d,%d,%d,%d,%d,%d,%d\n"
+        "Widths=%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n"
         "Fill=%.3f,%.3f\n\n",
         layout.order[0], layout.order[1], layout.order[2], layout.order[3],
-        layout.order[4], layout.order[5], layout.order[6],
+        layout.order[4], layout.order[5], layout.order[6], layout.order[7],
         layout.side[0], layout.side[1], layout.side[2], layout.side[3],
-        layout.side[4], layout.side[5], layout.side[6],
+        layout.side[4], layout.side[5], layout.side[6], layout.side[7],
         layout.widths[0], layout.widths[1], layout.widths[2],
         layout.widths[3], layout.widths[4], layout.widths[5],
-        layout.widths[6], layout.singleSectionFill[0],
+        layout.widths[6], layout.widths[7], layout.singleSectionFill[0],
         layout.singleSectionFill[1]);
 }
 
@@ -206,7 +237,7 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
         static int dragMode = 0; // 1: resize, 2: reorder
         static ImVec2 dragStart{};
         static const char* names[]{ "File", "Edit", "Mode", "Tools",
-            "Transform", "View", "Prefab" };
+            "Transform", "View", "Prefab", "Paint" };
         static const EditorState::ToolbarSection sections[]{
             EditorState::ToolbarSection::File,
             EditorState::ToolbarSection::Edit,
@@ -214,16 +245,17 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
             EditorState::ToolbarSection::Tools,
             EditorState::ToolbarSection::Transform,
             EditorState::ToolbarSection::View,
-            EditorState::ToolbarSection::Prefab };
+            EditorState::ToolbarSection::Prefab,
+            EditorState::ToolbarSection::Paint };
         struct SectionRect { int index; float x; float width; };
-        SectionRect sectionRects[2][7]{};
+        SectionRect sectionRects[2][8]{};
         int rectCounts[2]{};
         const auto drawSide = [&](const int* indices, int count, float x,
             int side)
         {
             if (!count) return;
             float total = 0.f;
-            float minimums[7]{};
+            float minimums[8]{};
             float minimumTotal = 0.f;
             for (int i = 0; i < count; ++i)
             {
@@ -365,11 +397,11 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
                 cursor += width;
             }
         };
-        int left[7]{};
-        int right[7]{};
+        int left[8]{};
+        int right[8]{};
         int leftCount = 0;
         int rightCount = 0;
-        for (int position = 0; position < 7; ++position)
+        for (int position = 0; position < 8; ++position)
         {
             const int index = sectionOrder[position];
             if (state.HasToolbarSection(sections[index]))
@@ -384,7 +416,7 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
         {
             const int targetSide = ImGui::GetIO().MousePos.x <
                 origin.x + available * .5f ? 0 : 1;
-            SectionRect candidates[7]{};
+            SectionRect candidates[8]{};
             int candidateCount = 0;
             for (int i = 0; i < rectCounts[targetSide]; ++i)
                 if (sectionRects[targetSide][i].index != draggingSection)
@@ -407,10 +439,10 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
                     ? candidates[slot].index : -1;
                 const int after = slot == candidateCount && candidateCount
                     ? candidates[candidateCount - 1].index : -1;
-                int reordered[7]{};
+                int reordered[8]{};
                 int output = 0;
                 bool inserted = false;
-                for (int position = 0; position < 7; ++position)
+                for (int position = 0; position < 8; ++position)
                 {
                     const int index = sectionOrder[position];
                     if (index == draggingSection) continue;
@@ -427,7 +459,7 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
                     }
                 }
                 if (!inserted) reordered[output++] = draggingSection;
-                for (int position = 0; position < 7; ++position)
+                for (int position = 0; position < 8; ++position)
                     sectionOrder[position] = reordered[position];
                 sectionSide[draggingSection] = targetSide;
                 ImGui::MarkIniSettingsDirty();
@@ -442,36 +474,48 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
         {
             ImGui::SetCursorScreenPos(ImVec2(origin.x + (available - playWidth) * .5f,
                 origin.y + 1.f));
-            const bool canToggle = buildManager &&
+            const bool animationFocused = state.IsAnimationEditorFocused();
+            const bool animationPlaying = state.IsAnimationPlaying();
+            const bool canToggle = animationFocused
+                ? state.CanToggleAnimationPlayback() : buildManager &&
                 (playState == PlayState::Stopped ||
                     playState == PlayState::BuildFailed ||
                     playState == PlayState::Playing ||
                     playState == PlayState::Paused);
             ImGui::BeginDisabled(!canToggle);
-            const TransportIcon toggleIcon = playState == PlayState::Playing
+            const TransportIcon toggleIcon = animationPlaying ||
+                (!animationFocused && playState == PlayState::Playing)
                 ? TransportIcon::Pause : TransportIcon::Play;
             if (TransportButton("##ToolbarPlayPause", toggleIcon))
             {
-                if (playState == PlayState::Paused) buildManager->Resume();
+                if (animationFocused) state.ToggleAnimationPlayback();
+                else if (playState == PlayState::Paused) buildManager->Resume();
                 else if (playState == PlayState::Playing) buildManager->Pause();
                 else buildManager->PlayInEditor();
             }
             ImGui::EndDisabled();
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                ImGui::SetTooltip("%s", playState == PlayState::Playing
+                ImGui::SetTooltip("%s", animationFocused
+                    ? (animationPlaying ? "Pause animation" : "Play animation")
+                    : playState == PlayState::Playing
                     ? "Pause" : playState == PlayState::Paused
                     ? "Resume" : playState == PlayState::Building
                     ? "Building project" : playState == PlayState::BuildFailed
                     ? "Last build failed; play to retry" : "Play in editor");
             ImGui::SameLine();
-            ImGui::BeginDisabled(!buildManager ||
-                (playState != PlayState::Playing &&
+            ImGui::BeginDisabled(animationFocused
+                ? !state.CanStopAnimationPlayback()
+                : !buildManager || (playState != PlayState::Playing &&
                     playState != PlayState::Paused));
             if (TransportButton("##ToolbarStop", TransportIcon::Stop))
-                buildManager->Stop();
+            {
+                if (animationFocused) state.StopAnimationPlayback();
+                else buildManager->Stop();
+            }
             ImGui::EndDisabled();
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                ImGui::SetTooltip("Stop");
+                ImGui::SetTooltip("%s", animationFocused
+                    ? "Stop animation" : "Stop");
         }
         ImGui::PopStyleVar();
     }

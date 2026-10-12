@@ -76,6 +76,9 @@ Window::Window(HINSTANCE hInstance, const wchar_t* title, uint32_t width, uint32
     wc.lpfnWndProc   = WndProc;
     wc.hInstance     = hInstance;
     wc.hCursor       = LoadCursor(nullptr, IDC_ARROW);
+    // If Windows paints before the swap chain is visible, use the same dark
+    // fallback as the renderer instead of flashing an empty white client area.
+    wc.hbrBackground = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
     // Resource 1 is supplied by the executable when an .ico is configured.
     // Use the standard application icon for builds without one.
     wc.hIcon         = LoadIconW(hInstance, MAKEINTRESOURCEW(1));

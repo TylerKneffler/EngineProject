@@ -138,9 +138,12 @@ int GameApplication::Run(HINSTANCE instance)
         renderer->EndFrame();
     };
 
-    splash.SetProgress(1.0f, L"Ready");
+    // Keep the native window hidden until it has a rendered frame to show.
+    splash.SetProgress(0.95f, L"Drawing game...");
+    window->OnUpdate();
     splash.HoldAboveMainWindow();
     window->Show();
+    // Hidden swap chains may discard Present, so submit a visible frame too.
     window->OnUpdate();
     splash.Close();
     const int result = window->Run();

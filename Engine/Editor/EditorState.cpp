@@ -34,6 +34,7 @@
 #include "Core/MeshEditSnapshot.h"
 #include "Core/SnapshotHistory.h"
 #include "Engine/Editor/Core/View/Templates/Assets/AssetPreviewCache.h"
+#include "Engine/Editor/Core/Paint/PaintInput.h"
 #include <chrono>
 #include <algorithm>
 #include <cctype>
@@ -339,6 +340,7 @@ void EditorState::SyncMeshEditSelection(Engine::Scene::Scene* scene,
         scene->GetSelectedObject());
     if (session.activeMesh != mesh)
     {
+        FinishVertexPaintStroke(session);
         if (session.dirty && !session.savePath.empty())
         {
             MeshEditSession cached = session;
@@ -400,6 +402,7 @@ void EditorState::SyncMeshEditSelection(Engine::Scene::Scene* scene,
 void EditorState::SetMeshEditMode(Engine::Scene::Scene* scene,
     MeshEditSession& session, bool enabled)
 {
+    if (!enabled) FinishVertexPaintStroke(session);
     session.enabled = enabled;
     if (scene)
     {
@@ -446,6 +449,28 @@ EditorState::CachedMeshEdges(MeshEditSession& session,
 }
 
 
+void EditorState::FinishVertexPaintStroke(MeshEditSession& session)
+{
+    if (!session.vertexPainting) return;
+    session.vertexPainting = false;
+    if (!session.vertexStrokeChanged || !session.activeMesh) return;
+    if (m_historyLimit > 0 && session.undo.size() >= m_historyLimit)
+        session.undo.pop_front();
+    if (m_historyLimit > 0)
+        session.undo.push_back(std::move(session.vertexStrokeBefore));
+    session.redo.clear();
+    session.baseline = CaptureMeshSnapshot(*session.activeMesh);
+    session.dirty = session.baseline != session.savedSnapshot;
+    if (!session.savePath.empty())
+    {
+        MeshEditSession cached = session;
+        cached.activeMesh = nullptr;
+        m_meshEditCache[AssetPathIdentity(session.savePath)] =
+            std::move(cached);
+    }
+    session.vertexStrokeChanged = false;
+}
+
 bool EditorState::HandleMeshViewport(IEditorUi& ui,
     const EditorUiViewportInput& input, Engine::Scene::Scene* scene,
     MeshEditSession& session, EditorTransformTool tool)
@@ -456,6 +481,9 @@ bool EditorState::HandleMeshViewport(IEditorUi& ui,
     auto* mesh = session.activeMesh;
     auto* camera = scene->editorCamera.GetComponent<Engine::Components::Camera>();
     if (!mesh || !mesh->Owner || !camera) return false;
+    if ((!session.vertexPaintMode || session.vertexPaintTool == 0) &&
+        session.vertexPainting)
+        FinishVertexPaintStroke(session);
     const auto& vertices = mesh->GetVertices();
     const auto& storedIndices = mesh->GetIndices();
     std::vector<uint32_t> implicitIndices;
@@ -483,6 +511,162 @@ bool EditorState::HandleMeshViewport(IEditorUi& ui,
         if (ndc.z < 0.f || ndc.z > 1.f) continue;
         points[i] = { { (ndc.x * .5f + .5f) * input.available.x,
             (.5f - ndc.y * .5f) * input.available.y }, ndc.z, true };
+    }
+    if (session.vertexPaintMode && session.vertexPaintTool != 0)
+    {
+        const auto cursor = input.mousePosInViewport;
+        const float radius = std::max(2.f, session.vertexBrush.size * .5f *
+            Paint::PressureScale(session.vertexBrush.pressureSize));
+        if (session.vertexPaintTool != 0)
+            ui.DrawViewportCircle(cursor, session.vertexPaintTool == 3 ? 5.f :
+                radius, { 1.f, .85f, .25f, .95f }, false);
+        if (session.vertexPaintTool == 0 || input.leftReleased ||
+            !input.leftDown)
+        {
+            FinishVertexPaintStroke(session);
+            return session.vertexPaintTool != 0;
+        }
+        if (!input.hovered || input.rightDown || input.middleDown)
+            return true;
+        if (session.vertexPaintTool != 3 &&
+            (!session.vertexBrush.tipPath.empty() ||
+            session.vertexBrush.shape != 0 ||
+            session.vertexBrush.rotation != 0.f ||
+            session.vertexBrush.scatter != 0.f ||
+            session.vertexBrush.falloff < 0 ||
+            session.vertexBrush.falloff > 2))
+        {
+            session.toolError = "This preset uses tip, shape, rotation, or scatter settings unsupported by vertex paint.";
+            return true;
+        }
+        float hitDepth = 2.f;
+        uint32_t hitFace = UINT32_MAX;
+        for (uint32_t face = 0; face < faceCount; ++face)
+        {
+            const auto& a = points[indices[face * 3]];
+            const auto& b = points[indices[face * 3 + 1]];
+            const auto& c = points[indices[face * 3 + 2]];
+            if (!a.valid || !b.valid || !c.valid) continue;
+            const float denominator = (b.screen.y - c.screen.y) *
+                (a.screen.x - c.screen.x) + (c.screen.x - b.screen.x) *
+                (a.screen.y - c.screen.y);
+            if (std::abs(denominator) < 1e-5f) continue;
+            const float u = ((b.screen.y - c.screen.y) *
+                (cursor.x - c.screen.x) + (c.screen.x - b.screen.x) *
+                (cursor.y - c.screen.y)) / denominator;
+            const float v = ((c.screen.y - a.screen.y) *
+                (cursor.x - c.screen.x) + (a.screen.x - c.screen.x) *
+                (cursor.y - c.screen.y)) / denominator;
+            if (u < 0.f || v < 0.f || u + v > 1.f) continue;
+            const float depth = u * a.depth + v * b.depth +
+                (1.f - u - v) * c.depth;
+            if (depth < hitDepth) { hitDepth = depth; hitFace = face; }
+        }
+        if (hitFace == UINT32_MAX ||
+            (!session.vertexPainting && !input.leftClicked)) return true;
+        if (session.vertexPaintTool == 3 && !input.leftClicked) return true;
+        const float spacing = std::max(1.f,
+            session.vertexBrush.size * session.vertexBrush.spacing);
+        if (session.vertexPainting && session.vertexPaintTool != 3 &&
+            std::hypot(cursor.x - session.lastVertexPaintPosition.x,
+                cursor.y - session.lastVertexPaintPosition.y) < spacing)
+            return true;
+        if (!session.vertexPainting)
+        {
+            session.vertexPainting = true;
+            session.vertexStrokeChanged = false;
+            session.vertexStrokeBefore = CaptureMeshSnapshot(*mesh);
+        }
+        session.lastVertexPaintPosition = cursor;
+        auto painted = vertices;
+        bool changed = false;
+        const float opacity = std::clamp(session.vertexBrush.strength *
+            session.vertexBrush.opacity * session.vertexBrush.flow *
+            Paint::PressureScale(session.vertexBrush.pressureStrength),
+            0.f, 1.f);
+        const float hardness = std::clamp(session.vertexBrush.hardness, 0.f, 1.f);
+        if (session.vertexPaintTool == 3)
+        {
+            uint32_t seed = indices[hitFace * 3];
+            float nearest = INFINITY;
+            for (int corner = 0; corner < 3; ++corner)
+            {
+                const uint32_t id = indices[hitFace * 3 + corner];
+                const float distance = std::hypot(
+                    points[id].screen.x - cursor.x,
+                    points[id].screen.y - cursor.y);
+                if (distance < nearest) { nearest = distance; seed = id; }
+            }
+            std::vector<std::vector<uint32_t>> neighbors(painted.size());
+            for (size_t face = 0; face + 2 < indices.size(); face += 3)
+                for (int corner = 0; corner < 3; ++corner)
+                {
+                    const uint32_t a = indices[face + corner];
+                    const uint32_t b = indices[face + (corner + 1) % 3];
+                    neighbors[a].push_back(b);
+                    neighbors[b].push_back(a);
+                }
+            const auto initial = painted[seed];
+            std::vector<uint8_t> visited(painted.size(), 0);
+            std::vector<uint32_t> queue{ seed };
+            visited[seed] = 1;
+            for (size_t head = 0; head < queue.size(); ++head)
+            {
+                const uint32_t id = queue[head];
+                bool matching = true;
+                for (int channel = 0; channel < 4; ++channel)
+                    matching &= std::abs(vertices[id].color[channel] -
+                        initial.color[channel]) <=
+                        session.vertexBucketTolerance;
+                if (!matching) continue;
+                for (int channel = 0; channel < 4; ++channel)
+                {
+                    float& value = painted[id].color[channel];
+                    const float result = value +
+                        (session.vertexPaintColor[channel] - value) * opacity;
+                    changed |= std::abs(result - value) > 1e-6f;
+                    value = result;
+                }
+                for (uint32_t neighbor : neighbors[id])
+                    if (!visited[neighbor])
+                    { visited[neighbor] = 1; queue.push_back(neighbor); }
+            }
+        }
+        else for (size_t i = 0; i < painted.size(); ++i)
+        {
+            if (!points[i].valid || points[i].depth > hitDepth + .025f)
+                continue;
+            const float distance = std::hypot(points[i].screen.x - cursor.x,
+                points[i].screen.y - cursor.y) / radius;
+            if (distance > 1.f) continue;
+            float falloff = distance <= hardness ? 1.f :
+                hardness >= 1.f ? 0.f :
+                (1.f - distance) / (1.f - hardness);
+            if (session.vertexBrush.falloff == 0)
+                falloff = distance <= hardness ? 1.f : 0.f;
+            else if (session.vertexBrush.falloff == 2)
+                falloff = falloff * falloff * (3.f - 2.f * falloff);
+            const float amount = opacity * falloff;
+            for (int channel = 0; channel < 4; ++channel)
+            {
+                const float target = session.vertexPaintTool == 2 ? 1.f :
+                    session.vertexPaintColor[channel];
+                float& value = painted[i].color[channel];
+                const float result = std::clamp(value +
+                    (target - value) * amount, 0.f, 1.f);
+                changed |= std::abs(result - value) > 1e-6f;
+                value = result;
+            }
+        }
+        if (changed && mesh->SetIndexedGeometry(std::move(painted),
+            std::vector<uint32_t>(indices)))
+        {
+            session.vertexStrokeChanged = true;
+            session.toolError.clear();
+            if (m_renderer) m_renderer->MarkDirty();
+        }
+        if (session.vertexPaintTool == 3) FinishVertexPaintStroke(session);
+        return true;
     }
     struct Candidate { EditorUiVec2 screen{}; float depth = 0.f; bool valid = false; };
     std::vector<Candidate> candidates;
@@ -1062,6 +1246,7 @@ bool EditorState::HandleMeshViewport(IEditorUi& ui,
 bool EditorState::ApplyMeshHistory(bool redo)
 {
     MeshEditSession* session = ActiveMeshEditSession();
+    if (session) FinishVertexPaintStroke(*session);
     Engine::Scene::Scene* scene = GetActiveDocumentScene();
     SkeletonEditSession* skeleton = ActiveSkeletonEditSession();
     const bool paint = skeleton && skeleton->enabled;
@@ -1087,6 +1272,7 @@ bool EditorState::ApplyMeshHistory(bool redo)
 
 bool EditorState::SaveMeshEditSession(MeshEditSession& session)
 {
+    FinishVertexPaintStroke(session);
     if (session.activeMesh && session.savePath.empty() &&
         &session == &m_mainMeshEdit && m_currentScenePath.empty())
         SaveMainScene();

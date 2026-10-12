@@ -145,4 +145,75 @@ inline bool DeleteBoneKey(Clip& clip, unsigned node, float time)
     }
     return removed;
 }
+
+struct KeyRef
+{
+    unsigned node = 0;
+    float time = 0.f;
+};
+
+// Move complete value blocks, including the tangents of cubic spline keys.
+// Reject collisions instead of silently replacing another key.
+inline bool MoveKeys(Clip& clip, const std::vector<KeyRef>& keys, float delta)
+{
+    if (keys.empty() || !std::isfinite(delta) || std::abs(delta) < 1e-6f)
+        return false;
+    for (const KeyRef& key : keys)
+    {
+        const float target = key.time + delta;
+        if (!std::isfinite(target) || target < 0.f) return false;
+        for (float existing : KeyTimes(clip, key.node))
+            if (std::abs(existing - target) <= 1e-4f &&
+                std::none_of(keys.begin(), keys.end(), [&](const KeyRef& moving)
+                { return moving.node == key.node &&
+                    std::abs(moving.time - existing) <= 1e-4f; }))
+                return false;
+    }
+    Clip moved = clip;
+    bool changed = false;
+    for (Channel& channel : moved.channels)
+    {
+        if (channel.path == Channel::Path::Weights) continue;
+        const size_t stride = channel.valueWidth *
+            (channel.interpolation == Channel::Interpolation::CubicSpline ? 3u : 1u);
+        if (!stride || channel.values.size() != channel.times.size() * stride)
+            return false;
+        std::vector<bool> selected(channel.times.size(), false);
+        for (size_t i = 0; i < channel.times.size(); ++i)
+            for (const KeyRef& key : keys)
+                if (key.node == channel.nodeIndex &&
+                    std::abs(key.time - channel.times[i]) <= 1e-4f)
+                { selected[i] = true; changed = true; break; }
+        for (size_t i = 0; i < channel.times.size(); ++i)
+        {
+            if (!selected[i]) continue;
+            const float target = channel.times[i] + delta;
+            if (!std::isfinite(target) || target < 0.f) return false;
+            for (size_t j = 0; j < channel.times.size(); ++j)
+                if (!selected[j] && std::abs(channel.times[j] - target) <= 1e-4f)
+                    return false;
+            channel.times[i] = target;
+        }
+        std::vector<size_t> order(channel.times.size());
+        for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+        std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b)
+            { return channel.times[a] < channel.times[b]; });
+        std::vector<float> times, values;
+        times.reserve(order.size());
+        values.reserve(channel.values.size());
+        for (size_t i : order)
+        {
+            times.push_back(channel.times[i]);
+            values.insert(values.end(), channel.values.begin() + i * stride,
+                channel.values.begin() + (i + 1) * stride);
+        }
+        channel.times = std::move(times);
+        channel.values = std::move(values);
+    }
+    if (!changed) return false;
+    for (const KeyRef& key : keys)
+        moved.duration = std::max(moved.duration, key.time + delta);
+    clip = std::move(moved);
+    return true;
+}
 }

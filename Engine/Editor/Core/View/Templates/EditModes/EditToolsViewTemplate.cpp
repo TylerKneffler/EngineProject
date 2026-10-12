@@ -1,4 +1,6 @@
 #include "pch.h"
+#include "Engine/Editor/Core/View/Views/AssetDocumentView.h"
+#include "Engine/Editor/Core/Paint/BrushPreview.h"
 #include "Engine/Editor/EditorState.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Engine/Editor/Core/View/Views/SceneView.h"
@@ -133,7 +135,9 @@ bool EditorState::HasToolbarSection(ToolbarSection section) const
         return section == ToolbarSection::Mode;
     if (m_activeAssetDocument)
         return section == ToolbarSection::File ? m_toolbarVisibility.save :
-            section == ToolbarSection::Edit && m_toolbarVisibility.undoRedo;
+            section == ToolbarSection::Edit ? m_toolbarVisibility.undoRedo :
+            section == ToolbarSection::Paint && m_toolbarVisibility.paintTools &&
+                m_activeAssetDocument->CanPaintImage();
     Engine::Scene::Scene* scene = GetActiveDocumentScene();
     if (!scene || !GetGlobalToolbarSceneView()) return false;
     const MeshEditSession& mesh = m_activeSceneAssetDocument
@@ -149,7 +153,12 @@ bool EditorState::HasToolbarSection(ToolbarSection section) const
     case ToolbarSection::Mode:
         return m_toolbarVisibility.editMode ||
             (m_toolbarVisibility.modeTools && (mesh.enabled || skeleton.enabled));
-    case ToolbarSection::Tools: return m_toolbarVisibility.toolDetails;
+    case ToolbarSection::Tools:
+        return m_toolbarVisibility.toolDetails &&
+            !(skeleton.enabled && skeleton.submode == 1);
+    case ToolbarSection::Paint:
+        return m_toolbarVisibility.paintTools &&
+            ((skeleton.enabled && skeleton.submode == 1) || mesh.enabled);
     case ToolbarSection::Transform: return m_toolbarVisibility.transformTools;
     case ToolbarSection::View: return m_toolbarVisibility.sceneDisplay;
     case ToolbarSection::Prefab:
@@ -167,6 +176,8 @@ float EditorState::GetToolbarSectionMinimumWidth(ToolbarSection section) const
 {
     if (m_activeAnimationDocument)
         return section == ToolbarSection::Mode ? 280.f : 0.f;
+    if (m_activeAssetDocument && section == ToolbarSection::Paint)
+        return 190.f;
     float controlWidth = 0.f;
     switch (section)
     {
@@ -190,6 +201,19 @@ float EditorState::GetToolbarSectionMinimumWidth(ToolbarSection section) const
         break;
     }
     case ToolbarSection::Mode: controlWidth = 105.f; break;
+    case ToolbarSection::Paint:
+    {
+        const MeshEditSession& mesh = m_activeSceneAssetDocument
+            ? m_activeSceneAssetDocument->meshEdit
+            : m_prefabDocumentFocused ? m_prefabMeshEdit : m_mainMeshEdit;
+        controlWidth = mesh.enabled ?
+            ToolbarButtonWidth(mesh.vertexPaintMode ? "Leave Paint" :
+                "Paint Vertices") + 85.f + ToolbarButtonWidth("Paint...") +
+                2.f * ImGui::GetStyle().ItemSpacing.x :
+            82.f + ImGui::GetStyle().ItemSpacing.x +
+                ToolbarButtonWidth("Paint...");
+        break;
+    }
     case ToolbarSection::Tools:
     {
         const MeshEditSession& mesh = m_activeSceneAssetDocument
@@ -487,6 +511,12 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
         m_toolbarPopupTool.clear();
         m_toolbarPopupScene = nullptr;
         ToolbarRow row{singleRow, overflow};
+        if (section == ToolbarSection::Paint && m_toolbarVisibility.paintTools)
+        {
+            m_activeAssetDocument->DrawPaintToolbar(ui,
+                m_projectSettings.assetsDirectory, singleRow, overflow);
+            return;
+        }
         if (section == ToolbarSection::File && m_toolbarVisibility.save)
         {
             ImGui::BeginDisabled(!m_playModeSceneSnapshot.empty());
@@ -541,6 +571,230 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
         ? m_activeSceneAssetDocument->skeletonEdit
         : m_prefabDocumentFocused ? m_prefabSkeletonEdit : m_mainSkeletonEdit;
     ToolbarRow row{singleRow, overflow};
+    if (section == ToolbarSection::Paint && mesh.enabled &&
+        m_toolbarVisibility.paintTools &&
+        !(skeleton.enabled && skeleton.submode == 1))
+    {
+        if (row.Next(ToolbarButtonWidth(mesh.vertexPaintMode ?
+                "Leave Paint" : "Paint Vertices")) &&
+            ImGui::Button(mesh.vertexPaintMode ? "Leave Paint" : "Paint Vertices",
+                {0.f, 20.f}))
+        {
+            FinishVertexPaintStroke(mesh);
+            mesh.vertexPaintMode = !mesh.vertexPaintMode;
+            mesh.vertexPaintTool = mesh.vertexPaintMode ? 1 : 0;
+            view->AllowObjectTransform = !mesh.vertexPaintMode;
+        }
+        if (!mesh.vertexPaintMode) return;
+        const char* tools[]{ "Cursor", "Brush", "Eraser", "Bucket" };
+        if (row.Next(85.f))
+        {
+            ui.SetNextItemWidth(85.f);
+            int selectedTool = mesh.vertexPaintTool;
+            if (ui.Combo("##VertexPaintTool", &selectedTool, tools, 4))
+            {
+                FinishVertexPaintStroke(mesh);
+                mesh.vertexPaintTool = selectedTool;
+                view->AllowObjectTransform = selectedTool == 0;
+            }
+        }
+        if (row.Next(ToolbarButtonWidth("Paint...")) &&
+            ImGui::Button("Paint...", {0.f, 20.f}))
+            ImGui::OpenPopup("##VertexPaintOptions");
+        if (mesh.vertexPaintTool == 1 || mesh.vertexPaintTool == 2)
+            if (row.Next(70.f))
+            {
+                ui.SetNextItemWidth(70.f);
+                ui.SliderFloat("##VertexPaintSize", &mesh.vertexBrush.size,
+                    2.f, 250.f);
+            }
+        if (ImGui::BeginPopup("##VertexPaintOptions"))
+        {
+            ImGui::TextUnformatted("Vertex Paint Options");
+            ImGui::Separator();
+            Paint::DrawBrushPreview(mesh.vertexBrush);
+            namespace fs = std::filesystem;
+            const fs::path root = m_projectSettings.assetsDirectory.empty() ?
+                fs::path("Assets") : fs::path(m_projectSettings.assetsDirectory);
+            std::vector<fs::path> paths;
+            std::error_code error;
+            if (fs::is_directory(root, error))
+                for (fs::recursive_directory_iterator it(root,
+                        fs::directory_options::skip_permission_denied,
+                        error), end; !error && it != end; it.increment(error))
+                    if (it->is_regular_file() &&
+                        it->path().extension() == ".brush")
+                        paths.push_back(it->path());
+            std::sort(paths.begin(), paths.end());
+            std::vector<std::string> labels{ "Custom" };
+            int choice = 0;
+            for (const auto& path : paths)
+            {
+                labels.push_back(path.lexically_relative(root).string());
+                if (path.string() == mesh.vertexBrushPresetPath)
+                    choice = static_cast<int>(labels.size()) - 1;
+            }
+            std::vector<const char*> names;
+            for (const auto& label : labels) names.push_back(label.c_str());
+            if (ui.Combo("Brush preset", &choice, names.data(),
+                static_cast<int>(names.size())))
+            {
+                if (choice == 0) mesh.vertexBrushPresetPath.clear();
+                else
+                {
+                    Paint::BrushPreset loaded;
+                    if (Paint::LoadBrushPreset(paths[choice - 1], loaded,
+                        mesh.toolError))
+                    {
+                        mesh.vertexBrush = std::move(loaded);
+                        mesh.vertexBrushPresetPath = paths[choice - 1].string();
+                    }
+                }
+            }
+            char presetName[128]{};
+            const size_t nameLength = std::min(mesh.vertexBrush.name.size(),
+                sizeof(presetName) - 1);
+            std::copy_n(mesh.vertexBrush.name.data(), nameLength, presetName);
+            if (ui.InputText("Preset name", presetName, sizeof(presetName)))
+                mesh.vertexBrush.name = presetName;
+            const auto savePreset = [&](bool duplicate)
+            {
+                const fs::path directory = root / "Brushes";
+                std::error_code createError;
+                fs::create_directories(directory, createError);
+                if (createError)
+                { mesh.toolError = createError.message(); return; }
+                fs::path path = mesh.vertexBrushPresetPath;
+                if (duplicate || path.empty())
+                {
+                    std::string base = mesh.vertexBrush.name.empty() ?
+                        "Brush" : mesh.vertexBrush.name;
+                    for (char& ch : base)
+                        if (ch == '/' || ch == '\\' || ch == ':' || ch == '*' ||
+                            ch == '?' || ch == '"' || ch == '<' || ch == '>' ||
+                            ch == '|') ch = '_';
+                    path = directory / (base + ".brush");
+                    for (int suffix = 2; fs::exists(path); ++suffix)
+                        path = directory /
+                            (base + " " + std::to_string(suffix) + ".brush");
+                }
+                if (Paint::SaveBrushPreset(path, mesh.vertexBrush,
+                    mesh.toolError)) mesh.vertexBrushPresetPath = path.string();
+            };
+            if (ui.Button("Create brush asset")) savePreset(true);
+            if (!mesh.vertexBrushPresetPath.empty() &&
+                ui.Button("Save brush asset")) savePreset(false);
+            if (!mesh.vertexBrushPresetPath.empty() &&
+                ui.Button("Duplicate brush asset")) savePreset(true);
+            ui.ColorEdit4("Paint color", mesh.vertexPaintColor);
+            if (mesh.vertexPaintTool == 3)
+                ui.SliderFloat("Color tolerance",
+                    &mesh.vertexBucketTolerance, 0.f, 1.f);
+            ui.SliderFloat("Size", &mesh.vertexBrush.size, 2.f, 250.f);
+            ui.SliderFloat("Hardness", &mesh.vertexBrush.hardness, 0.f, 1.f);
+            ui.SliderFloat("Strength", &mesh.vertexBrush.strength, 0.f, 1.f);
+            ui.SliderFloat("Opacity", &mesh.vertexBrush.opacity, 0.f, 1.f);
+            ui.SliderFloat("Flow", &mesh.vertexBrush.flow, 0.f, 1.f);
+            ui.SliderFloat("Spacing", &mesh.vertexBrush.spacing, 0.f, 1.f);
+            ui.SliderFloat("Pressure size", &mesh.vertexBrush.pressureSize,
+                0.f, 1.f);
+            ui.SliderFloat("Pressure strength",
+                &mesh.vertexBrush.pressureStrength, 0.f, 1.f);
+            if (!mesh.vertexBrush.tipPath.empty() ||
+                mesh.vertexBrush.shape != 0 ||
+                mesh.vertexBrush.rotation != 0.f ||
+                mesh.vertexBrush.scatter != 0.f ||
+                mesh.vertexBrush.falloff < 0 ||
+                mesh.vertexBrush.falloff > 2)
+                ui.ColoredLabel("This preset has unsupported vertex paint settings; brush strokes are blocked.",
+                    {1.f, .6f, .3f, 1.f});
+            if (!mesh.toolError.empty())
+                ui.ColoredLabel(mesh.toolError.c_str(), {1.f, .4f, .3f, 1.f});
+            ImGui::EndPopup();
+        }
+        return;
+    }
+    if (section == ToolbarSection::Paint && skeleton.enabled &&
+        skeleton.submode == 1 && m_toolbarVisibility.paintTools)
+    {
+        const char* tools[]{ "Cursor", "Brush", "Eraser", "Bucket" };
+        if (row.Next(82.f))
+        {
+            ui.SetNextItemWidth(82.f);
+            int activeTool = skeleton.paintTool;
+            if (ui.Combo("##GlobalPaintTool", &activeTool, tools, 4))
+            {
+                FinishSkeletonPaintStroke(skeleton);
+                skeleton.paintTool = activeTool;
+                view->AllowObjectTransform = activeTool == 0;
+            }
+            ui.Tooltip("Switch between object selection and weight painting");
+        }
+        if (row.Next(ToolbarButtonWidth("Paint...")) &&
+            ImGui::Button("Paint...", {0.f, 20.f}))
+        {
+            m_toolbarPopupTool = "Brush Settings";
+            m_toolbarPopupScene = scene;
+            m_toolbarPopupMode = 2;
+            ImGui::OpenPopup("##ToolbarToolPopup");
+        }
+        if (skeleton.paintTool == 1)
+        {
+            const char* brushes[]{ "Add", "Subtract", "Replace", "Smooth",
+                "Normalize" };
+            if (row.Next(94.f))
+            {
+                ui.SetNextItemWidth(94.f);
+                ui.Combo("##GlobalWeightBrush", &skeleton.brushOperation,
+                    brushes, 5);
+                ui.Tooltip("Weight paint operation");
+            }
+            if (row.Next(65.f))
+            {
+                ui.SetNextItemWidth(65.f);
+                ui.SliderFloat("##GlobalBrushSize", &skeleton.brushRadius,
+                    2.f, 250.f);
+                ui.Tooltip("Brush size in pixels");
+            }
+        }
+        else if (skeleton.paintTool == 2 && row.Next(65.f))
+        {
+            ui.SetNextItemWidth(65.f);
+            ui.SliderFloat("##GlobalEraserSize", &skeleton.brushRadius,
+                2.f, 250.f);
+            ui.Tooltip("Eraser size in pixels");
+        }
+        else if (skeleton.paintTool == 3 && row.Next(74.f))
+        {
+            ui.SetNextItemWidth(74.f);
+            ui.SliderFloat("##GlobalBucketTolerance",
+                &skeleton.bucketTolerance, 0.f, 1.f);
+            ui.Tooltip("Bucket tolerance for connected surface weights");
+        }
+        if (m_toolbarVisibility.save && mesh.dirty &&
+            row.Next(ToolbarButtonWidth("Save *")) &&
+            ImGui::Button("Save *", {0.f, 20.f}))
+        {
+            FinishSkeletonPaintStroke(skeleton);
+            SaveMeshEditSession(mesh);
+        }
+        if (ImGui::IsPopupOpen("##ToolbarToolPopup"))
+        {
+            ImGui::SetNextWindowSizeConstraints({290.f, 0.f},
+                {460.f, 650.f});
+            constexpr ImGuiWindowFlags popupFlags = ImGuiWindowFlags_NoDocking |
+                ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                ImGuiWindowFlags_AlwaysAutoResize;
+            if (ImGui::BeginPopup("##ToolbarToolPopup", popupFlags))
+            {
+                ImGui::TextUnformatted("Paint Options");
+                ImGui::Separator();
+                DrawSkeletonEditTools(ui);
+                ImGui::EndPopup();
+            }
+        }
+        return;
+    }
     const bool showEditMode = section == ToolbarSection::Mode &&
         m_toolbarVisibility.editMode && row.Next(105.f);
     if (showEditMode && m_activeSceneAssetDocument &&
@@ -674,33 +928,12 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
                 FinishSkeletonPaintStroke(skeleton);
                 scene->SetEditorWeightPaint(nullptr, -1);
                 skeleton.submode = submode;
-                view->AllowObjectTransform = submode == 0 &&
-                    skeleton.boneTool == 0;
+                view->AllowObjectTransform = (submode == 0 &&
+                    skeleton.boneTool == 0) ||
+                    (submode == 1 && skeleton.paintTool == 0);
                 SyncSkeletonEditSelection(scene, skeleton);
             }
             ui.Tooltip("Skeleton tool");
-        }
-        if (skeleton.submode == 1)
-        {
-            const char* brushes[]{ "Add", "Subtract", "Replace", "Smooth",
-                "Normalize" };
-            if (row.Next(100.f))
-            {
-                ui.SetNextItemWidth(100.f);
-                ui.Combo("##GlobalWeightBrush", &skeleton.brushOperation,
-                    brushes, 5);
-                ui.Tooltip("Weight paint operation");
-            }
-            if (singleRow || ui.AvailableContentWidth() > 190.f)
-            {
-                if (row.Next(80.f))
-                {
-                    ui.SetNextItemWidth(80.f);
-                    ui.SliderFloat("##GlobalBrushSize", &skeleton.brushRadius,
-                        2.f, 250.f);
-                    ui.Tooltip("Brush size in pixels");
-                }
-            }
         }
     }
     else if (section == ToolbarSection::Mode && m_toolbarVisibility.modeTools && mesh.enabled)

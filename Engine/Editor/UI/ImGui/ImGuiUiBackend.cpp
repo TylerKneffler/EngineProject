@@ -14,6 +14,7 @@
 #include "Engine/Editor/UI/ImGui/EditorUI.h"
 #include "Engine/Editor/Input/EditorKeyBindings.h"
 #include "Engine/Editor/EditorState.h"
+#include "Engine/Editor/Core/Paint/PaintInput.h"
 #include "Engine/Editor/GameBuildManager.h"
 #include <filesystem>
 #if defined(ENGINE_VULKAN_ENABLED)
@@ -239,6 +240,16 @@ void ImGuiUiBackend::DrawEditor(EditorState& state, PlayState playState,
             buildManager->StartBuild(PostBuildAction::PlayInEditor);
         if (historyAvailable && keybinds.Pressed(EditorCommand::BuildStandalone))
             buildManager->StartBuild(PostBuildAction::LaunchStandalone);
+    }
+    if (state.IsAnimationEditorFocused())
+    {
+        if (keybinds.Pressed(EditorCommand::Stop))
+            state.StopAnimationPlayback();
+        else if (keybinds.Pressed(EditorCommand::PlayPause))
+            state.ToggleAnimationPlayback();
+    }
+    else if (buildManager)
+    {
         if (keybinds.Pressed(EditorCommand::Stop) &&
             (playState == PlayState::Playing || playState == PlayState::Paused))
             buildManager->Stop();
@@ -260,6 +271,16 @@ void ImGuiUiBackend::DrawEditor(EditorState& state, PlayState playState,
 bool ImGuiUiBackend::HandleMessage(void* nativeWindow, uint32_t message,
     uintptr_t wParam, intptr_t lParam)
 {
+    if (message == WM_POINTERDOWN || message == WM_POINTERUPDATE)
+    {
+        POINTER_PEN_INFO pen{};
+        if (GetPointerPenInfo(GET_POINTERID_WPARAM(wParam), &pen))
+            Paint::penPressure.store(std::clamp(pen.pressure / 1024.f,
+                0.f, 1.f));
+    }
+    else if (message == WM_POINTERUP || message == WM_POINTERLEAVE ||
+        message == WM_CAPTURECHANGED)
+        Paint::penPressure.store(1.f);
     return m_initialized && ::ImGui_ImplWin32_WndProcHandler(
         static_cast<HWND>(nativeWindow), message,
         static_cast<WPARAM>(wParam), static_cast<LPARAM>(lParam)) != 0;

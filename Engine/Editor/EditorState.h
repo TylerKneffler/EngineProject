@@ -8,6 +8,7 @@
 #include "UI/IEditorUi.h"
 #include "Core/Gizmos/EditorGizmoSystem.h"
 #include "Core/View/Templates/EditModes/Skeleton/WeightPaintSurface.h"
+#include "Core/Paint/BrushPreset.h"
 #include <memory>
 #include <vector>
 #include <functional>
@@ -57,10 +58,11 @@ public:
         bool transformTools = true;
         bool sceneDisplay = true;
         bool toolDetails = true;
+        bool paintTools = true;
         bool prefabActions = true;
     };
 
-    enum class ToolbarSection { File, Edit, Mode, Tools, Transform, View, Prefab };
+    enum class ToolbarSection { File, Edit, Mode, Tools, Transform, View, Prefab, Paint };
 
     EditorState(HINSTANCE hInstance, const Engine::Model::ProjectSettings& projectSettings,
         std::string projectFilePath);
@@ -121,6 +123,12 @@ public:
     bool CreateAnimationClip(const std::string& name);
     void ProcessPendingAnimationDocumentOpens();
     void HandleAnimationDocumentClosures();
+    bool IsAnimationEditorFocused() const;
+    bool IsAnimationPlaying() const;
+    bool CanToggleAnimationPlayback() const;
+    bool CanStopAnimationPlayback() const;
+    void ToggleAnimationPlayback();
+    void StopAnimationPlayback();
     bool IsEditingPrefab() const;
     std::string GetActiveDocumentName() const;
     void BakeLighting();
@@ -176,6 +184,16 @@ private:
         };
         bool enabled = false;
         Engine::Components::Mesh* activeMesh = nullptr;
+        bool vertexPaintMode = false;
+        int vertexPaintTool = 0; // cursor, brush, eraser, bucket
+        float vertexPaintColor[4]{ 1.f, .2f, .1f, 1.f };
+        float vertexBucketTolerance = .05f;
+        Paint::BrushPreset vertexBrush;
+        std::string vertexBrushPresetPath;
+        bool vertexPainting = false;
+        bool vertexStrokeChanged = false;
+        std::string vertexStrokeBefore;
+        EditorUiVec2 lastVertexPaintPosition{ -10000.f, -10000.f };
         int selectionMode = 0; // vertex, edge, face
         uint32_t selectedElement = 0;
         std::vector<uint32_t> selectedElements;
@@ -228,6 +246,7 @@ private:
     bool HandleMeshViewport(IEditorUi& ui,
         const EditorUiViewportInput& input, Engine::Scene::Scene* scene,
         MeshEditSession& session, EditorTransformTool tool);
+    void FinishVertexPaintStroke(MeshEditSession& session);
     struct SkeletonEditSession;
     void DrawObjectEditTools(IEditorUi& ui);
     bool SaveMeshEditSession(MeshEditSession& session);
@@ -253,13 +272,26 @@ private:
         float translationSnap = 0.f;
         float rotationSnap = 0.f;
         float scaleSnap = 0.f;
-        int brushOperation = 0; // add, subtract, replace, smooth
+        int brushOperation = 0; // add, subtract, replace, smooth, normalize
+        int paintTool = 1; // cursor, brush, eraser, bucket
+        float bucketTolerance = .05f;
+        float bucketOpacity = 1.f;
         int brushShape = 0; // circle, square
         int brushFalloff = 0; // hard, linear, smooth
         float brushRadius = 40.f;
         float brushHardness = 0.5f;
         float brushStrength = 0.35f;
         float brushPaintWeight = 1.f;
+        float brushOpacity = 1.f;
+        float brushFlow = 1.f;
+        float brushSpacing = .08f;
+        float brushRotation = 0.f;
+        float brushScatter = 0.f;
+        float brushPressureSize = 0.f;
+        float brushPressureStrength = 0.f;
+        std::string brushTipPath;
+        std::string brushPresetPath;
+        char brushPresetName[128] = "Round";
         std::vector<bool> lockedBones;
         std::shared_ptr<WeightAdjacencyCache> adjacency;
         std::shared_ptr<WeightPaintSurface::Topology> surfaceTopology;
@@ -405,13 +437,19 @@ private:
     };
     struct AnimationDocument
     {
+        struct TimelineKey
+        {
+            size_t rigIndex = 0;
+            int clipIndex = -1;
+            unsigned nodeIndex = 0;
+            float time = 0.f;
+        };
         struct RigTrack
         {
             struct ClipLayer
             {
                 int clipIndex = -1;
                 float weight = 1.f;
-                bool expanded = true;
             };
             size_t index = 0;
             std::string name;
@@ -423,7 +461,7 @@ private:
             Engine::Components::AnimationManager* poseManager = nullptr;
             int clipIndex = -1;
             float weight = 1.f;
-            bool expanded = true;
+            std::unordered_map<int, bool> expandedClips;
             std::vector<ClipLayer> stackedClips;
             int selectedBone = -1;
             bool selected = false;
@@ -474,7 +512,17 @@ private:
         float playheadSeconds = 0.f;
         float timelinePixelsPerSecond = 110.f;
         bool playing = false;
+        bool playbackStarted = false;
         bool playheadDragging = false;
+        std::vector<TimelineKey> selectedKeys;
+        float keyPressX = 0.f;
+        float keyDragDelta = 0.f;
+        bool keyPressActive = false;
+        bool keyDragging = false;
+        bool marqueeActive = false;
+        float marqueeStartX = 0.f;
+        float marqueeStartY = 0.f;
+        bool marqueeAdditive = false;
         bool autoKey = false;
         bool gizmoWasActive = false;
         bool poseControlEditPending = false;

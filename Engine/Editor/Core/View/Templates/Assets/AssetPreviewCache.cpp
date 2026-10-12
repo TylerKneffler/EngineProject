@@ -1,4 +1,5 @@
 #include "AssetPreviewCache.h"
+#include "Engine/Editor/Core/Paint/BrushPreset.h"
 
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Materials/Texture.h"
@@ -30,6 +31,37 @@ constexpr uint32_t PreviewSize = 128;
 constexpr float Pi = 3.14159265358979323846f;
 constexpr const char* PreviewCacheDomain = "Editor.AssetPreview";
 constexpr uint32_t ScenePreviewMagic = 0x56525053; // "SPRV"
+
+std::vector<uint8_t> MakeBrushPreview(const Paint::BrushPreset& brush)
+{
+    std::vector<uint8_t> pixels(PreviewSize * PreviewSize * 4, 255);
+    for (uint32_t y = 0; y < PreviewSize; ++y)
+    for (uint32_t x = 0; x < PreviewSize; ++x)
+    {
+        const float px = (x + .5f - PreviewSize * .5f) /
+            (PreviewSize * .43f);
+        const float py = (y + .5f - PreviewSize * .5f) /
+            (PreviewSize * .43f);
+        const float angle = brush.rotation * .01745329252f;
+        const float rotatedX = px * std::cos(angle) + py * std::sin(angle);
+        const float rotatedY = py * std::cos(angle) - px * std::sin(angle);
+        const float distance = brush.shape == 1 ?
+            std::max(std::abs(rotatedX), std::abs(rotatedY)) :
+            std::hypot(px, py);
+        const float hardness = std::clamp(brush.hardness, 0.f, 1.f);
+        float amount = distance <= hardness ? 1.f :
+            distance >= 1.f || hardness >= 1.f ? 0.f :
+            (1.f - distance) / (1.f - hardness);
+        if (brush.falloff == 0) amount = distance <= hardness ? 1.f : 0.f;
+        else if (brush.falloff == 2)
+            amount = amount * amount * (3.f - 2.f * amount);
+        const uint8_t value = static_cast<uint8_t>(std::lround(
+            62.f + 180.f * amount));
+        const size_t pixel = (static_cast<size_t>(y) * PreviewSize + x) * 4;
+        pixels[pixel] = pixels[pixel + 1] = pixels[pixel + 2] = value;
+    }
+    return pixels;
+}
 
 std::filesystem::path ScenePreviewPath(const std::string& scenePath)
 {
@@ -516,10 +548,10 @@ std::shared_ptr<Engine::Graphics::IGraphicsTexture> Upload(
 bool AssetPreviewCache::Supports(const std::string& path)
 {
     const std::string extension = Extension(path);
-    static constexpr std::array<const char*, 18> supported{
+    static constexpr std::array<const char*, 19> supported{
         ".material", ".mat", ".hdr", ".exr", ".png", ".jpg", ".jpeg",
         ".bmp", ".dds", ".tga", ".ktx2", ".obj", ".fbx", ".mesh",
-        ".gltf", ".glb", ".prefab", ".scene" };
+        ".gltf", ".glb", ".prefab", ".scene", ".brush" };
     return std::find(supported.begin(), supported.end(), extension) != supported.end();
 }
 
@@ -565,6 +597,14 @@ void* AssetPreviewCache::Get(const std::string& path,
                 if (material.LoadFromFile(path))
                     created->generated = Upload(graphicsProvider,
                         MakeMaterialPreview(material));
+            }
+            else if (extension == ".brush")
+            {
+                Paint::BrushPreset brush;
+                std::string brushError;
+                if (Paint::LoadBrushPreset(path, brush, brushError))
+                    created->generated = Upload(graphicsProvider,
+                        MakeBrushPreview(brush));
             }
             else if (extension == ".scene")
             {
