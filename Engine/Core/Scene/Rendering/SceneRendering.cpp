@@ -279,6 +279,9 @@ struct ObjectGPUData
     // their local and remote chart instances from one untouched mesh buffer.
     glm::vec4 traversalClipPlane;
     glm::uvec4 lightingChannels{ 0xffffffffu, 0u, 0u, 0u };
+    glm::vec4 subsurfaceColorWeight{ 0.f }; // RGB color, enabled weight
+    glm::vec4 subsurfaceRadiusThickness{ 0.f }; // RGB scene units, thickness in scene units
+    glm::vec4 subsurfaceTransmission{ 0.f }; // x = transmitted-light weight
 };
 
 // Constant buffer for grid rendering
@@ -302,7 +305,7 @@ struct SkyboxCBData
 };
 
 static_assert(sizeof(DrawCBData) == 16, "Draw constants must remain small");
-static_assert(sizeof(ObjectGPUData) == 1056, "Object buffer layout must match Object.hlsl");
+static_assert(sizeof(ObjectGPUData) == 1104, "Object buffer layout must match Object.hlsl");
 static_assert(sizeof(Engine::Model::LightData) == 128,
     "Light buffer layout must match Object.hlsl");
 static_assert(sizeof(GridCBData) == 128, "Grid constant-buffer layout must match Grid.hlsl");
@@ -2362,7 +2365,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         Engine::Graphics::IGraphicsBuffer* morphDeltaBuffer = nullptr;
         Engine::Graphics::IGraphicsBuffer* morphWeightBuffer = nullptr;
         Engine::Graphics::IPipelineState* pipeline = nullptr;
-        std::array<const Engine::Graphics::IGraphicsTexture*, 9> textures{};
+        std::array<const Engine::Graphics::IGraphicsTexture*, 10> textures{};
         UINT64 constantBufferOffset = 0;
         DrawCBData drawData{};
         ObjectGPUData objectData{};
@@ -2506,13 +2509,17 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         objectData.world = world;
         objectData.traversalClipPlane = renderItem->traversalClipPlane;
         objectData.spriteUvRect = { 0.f, 0.f, 1.f, 1.f };
-        if (renderItem->skinJointCount > 0)
+        const bool useSoftSurface = !m_editorMeshEditPose && mesh &&
+            mesh->GetPosedVertexBuffer() &&
+            !mesh->IsPortalPoseSnapshot() &&
+            (useSourceChart || !renderItem->warpedVertexBuffer);
+        if (renderItem->skinJointCount > 0 && !useSoftSurface)
         {
             objectData.skinParams = {
                 static_cast<float>(renderItem->skinPaletteOffset),
                 static_cast<float>(renderItem->skinJointCount), 0.f, 0.f };
         }
-        const bool useGpuMorphs = !m_editorMeshEditPose && mesh && !sprite &&
+        const bool useGpuMorphs = !useSoftSurface && !m_editorMeshEditPose && mesh && !sprite &&
             !mesh->IsPortalPoseSnapshot() && mesh->HasMorphTargets() &&
             mesh->GetMorphDeltaBuffer() && mesh->GetMorphWeightBuffer() &&
             (useSourceChart || !renderItem->warpedVertexBuffer);
@@ -2574,6 +2581,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 prepareTexture(2, mat->normalTexture, 4u);
             prepareTexture(3, mat->occlusionTexture, 8u);
             prepareTexture(4, mat->emissiveTexture, 16u);
+            if (mat->subsurfaceEnabled && mat->subsurfaceWeight > 0.f &&
+                !mat->unlit && alphaMode != Engine::Components::MaterialAlphaMode::Blend)
+                prepareTexture(9, mat->subsurfaceThicknessTexture, 128u);
             if (allowParallaxMapping)
                 prepareTexture(5, mat->heightTexture, 64u);
             if (alphaMode == Engine::Components::MaterialAlphaMode::Mask)
@@ -2589,6 +2599,17 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 mat->metallicFactor, mat->roughnessFactor, mat->normalScale,
                 static_cast<float>(textureFlags)
             };
+            // Blended and unlit materials opt out. A metallic-roughness map can
+            // still suppress scattering per pixel in the shader.
+            if (mat->subsurfaceEnabled && !mat->unlit &&
+                alphaMode != Engine::Components::MaterialAlphaMode::Blend)
+            {
+                objectData.subsurfaceColorWeight = glm::vec4(
+                    mat->subsurfaceColor, mat->subsurfaceWeight);
+                objectData.subsurfaceRadiusThickness = glm::vec4(
+                    mat->subsurfaceRadius, mat->subsurfaceThickness);
+                objectData.subsurfaceTransmission.x = mat->subsurfaceTransmission;
+            }
             objectData.viewPositionAlphaCutoff = glm::vec4(
                 cameraPosition, mat->alphaCutoff);
             objectData.parallaxParams = {
@@ -2742,7 +2763,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             ? renderItem->spriteVertexBuffer
             : (!useSourceChart && renderItem->warpedVertexBuffer
                 ? renderItem->warpedVertexBuffer
-                : (mesh ? mesh->GetGraphicsBuffer() : nullptr));
+                : (mesh ? (useSoftSurface ? mesh->GetPosedVertexBuffer()
+                    : mesh->GetGraphicsBuffer()) : nullptr));
         preparedDraw.vertexStride = sprite
             ? sprite->GetVertexStride() : mesh->GetVertexStride();
         preparedDraw.vertexCount = sprite

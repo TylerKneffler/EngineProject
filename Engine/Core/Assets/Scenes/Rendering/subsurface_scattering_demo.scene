@@ -1,0 +1,371 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Scene xmlns:components="urn:engine-components" version="1">
+  <settings dimension="0" showGrid="false" skyboxEnabled="false" toneMapping="1" outputExposure="0">
+    <ambientColor>
+      <item>0.035</item><item>0.03</item><item>0.035</item>
+    </ambientColor>
+  </settings>
+  <objects>
+    <item name="SSS Camera" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>0</item>
+          <item>2.4</item>
+          <item>-8</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0.13</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Camera Camera.active="true" Camera.useTransformRotation="true" Camera.fov="48" Camera.near="0.01" Camera.far="100">
+          <Camera.target>
+          <item>0</item>
+          <item>1.4</item>
+          <item>0</item>
+          </Camera.target>
+          <Camera.up>
+          <item>0</item>
+          <item>1</item>
+          <item>0</item>
+          </Camera.up>
+        </components:Camera>
+      </components>
+      <children />
+    </item>
+    <item name="Shadowed Directional Key" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>-3.2</item>
+          <item>4</item>
+          <item>-3</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0.65</item>
+          <item>-0.5</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Light Light.lightType="1" Light.intensity="1.5" Light.range="12" Light.falloff="2" Light.castsShadows="true">
+          <Light.color>
+          <item>1</item>
+          <item>0.88</item>
+          <item>0.78</item>
+          </Light.color>
+        </components:Light>
+      </components>
+      <children />
+    </item>
+    <item name="Warm Back Light" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>0</item>
+          <item>2.8</item>
+          <item>3</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Light Light.lightType="0" Light.intensity="35" Light.range="12" Light.falloff="2" Light.castsShadows="false">
+          <Light.color>
+          <item>1</item>
+          <item>0.46</item>
+          <item>0.28</item>
+          </Light.color>
+        </components:Light>
+      </components>
+      <children />
+    </item>
+    <item name="Cool Fill Light" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>3</item>
+          <item>3</item>
+          <item>-2</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Light Light.lightType="0" Light.intensity="10" Light.range="12" Light.falloff="2" Light.castsShadows="false">
+          <Light.color>
+          <item>0.3</item>
+          <item>0.53</item>
+          <item>1</item>
+          </Light.color>
+        </components:Light>
+      </components>
+      <children />
+    </item>
+    <item name="SSS Off Control" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>-2.25</item>
+          <item>1.35</item>
+          <item>0</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>2</item>
+          <item>2</item>
+          <item>2</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/sphere.obj" />
+        <components:Material Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="0.43" Material.unlit="false" Material.castsShadows="true" Material.subsurfaceEnabled="false" Material.subsurfaceWeight="0" Material.subsurfaceThickness="0" Material.subsurfaceTransmission="0">
+          <Material.diffuse>
+          <item>0.88</item>
+          <item>0.49</item>
+          <item>0.41</item>
+          </Material.diffuse>
+          <Material.subsurfaceRadius>
+          <item>0.004</item>
+          <item>0.002</item>
+          <item>0.001</item>
+          </Material.subsurfaceRadius>
+          <Material.subsurfaceColor>
+          <item>1</item>
+          <item>0.45</item>
+          <item>0.35</item>
+          </Material.subsurfaceColor>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="SSS Short Radius" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>0</item>
+          <item>1.35</item>
+          <item>0</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>2</item>
+          <item>2</item>
+          <item>2</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/sphere.obj" />
+        <components:Material Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="0.43" Material.unlit="false" Material.castsShadows="true" Material.subsurfaceEnabled="true" Material.subsurfaceWeight="0.85" Material.subsurfaceThickness="0" Material.subsurfaceTransmission="0">
+          <Material.diffuse>
+          <item>0.88</item>
+          <item>0.49</item>
+          <item>0.41</item>
+          </Material.diffuse>
+          <Material.subsurfaceRadius>
+          <item>0.012</item>
+          <item>0.006</item>
+          <item>0.003</item>
+          </Material.subsurfaceRadius>
+          <Material.subsurfaceColor>
+          <item>1</item>
+          <item>0.55</item>
+          <item>0.42</item>
+          </Material.subsurfaceColor>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="SSS Broad Red Radius" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>2.25</item>
+          <item>1.35</item>
+          <item>0</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>2</item>
+          <item>2</item>
+          <item>2</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/sphere.obj" />
+        <components:Material Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="0.43" Material.unlit="false" Material.castsShadows="true" Material.subsurfaceEnabled="true" Material.subsurfaceWeight="0.85" Material.subsurfaceThickness="0" Material.subsurfaceTransmission="0">
+          <Material.diffuse>
+          <item>0.88</item>
+          <item>0.49</item>
+          <item>0.41</item>
+          </Material.diffuse>
+          <Material.subsurfaceRadius>
+          <item>0.08</item>
+          <item>0.028</item>
+          <item>0.009</item>
+          </Material.subsurfaceRadius>
+          <Material.subsurfaceColor>
+          <item>1</item>
+          <item>0.55</item>
+          <item>0.42</item>
+          </Material.subsurfaceColor>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Painted Thin Ear" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>0.7</item>
+          <item>3.05</item>
+          <item>0.2</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>-0.3</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>0.8</item>
+          <item>1.4</item>
+          <item>0.12</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/sphere.obj" />
+        <components:Material Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="0.43" Material.unlit="false" Material.castsShadows="true" Material.subsurfaceEnabled="true" Material.subsurfaceWeight="1" Material.subsurfaceThickness="0.15" Material.subsurfaceTransmission="0.9" Material.subsurfaceThicknessTexture="Assets/Textures/sss_thickness_ear.png">
+          <Material.diffuse>
+          <item>0.84</item>
+          <item>0.45</item>
+          <item>0.39</item>
+          </Material.diffuse>
+          <Material.subsurfaceRadius>
+          <item>0.085</item>
+          <item>0.035</item>
+          <item>0.014</item>
+          </Material.subsurfaceRadius>
+          <Material.subsurfaceColor>
+          <item>1</item>
+          <item>0.35</item>
+          <item>0.25</item>
+          </Material.subsurfaceColor>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Thick Transmission Control" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>-0.7</item>
+          <item>3.05</item>
+          <item>0.2</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0.3</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>0.8</item>
+          <item>1.4</item>
+          <item>0.28</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/sphere.obj" />
+        <components:Material Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="0.43" Material.unlit="false" Material.castsShadows="true" Material.subsurfaceEnabled="true" Material.subsurfaceWeight="1" Material.subsurfaceThickness="0.15" Material.subsurfaceTransmission="0.9">
+          <Material.diffuse>
+          <item>0.84</item>
+          <item>0.45</item>
+          <item>0.39</item>
+          </Material.diffuse>
+          <Material.subsurfaceRadius>
+          <item>0.085</item>
+          <item>0.035</item>
+          <item>0.014</item>
+          </Material.subsurfaceRadius>
+          <Material.subsurfaceColor>
+          <item>1</item>
+          <item>0.35</item>
+          <item>0.25</item>
+          </Material.subsurfaceColor>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Neutral Floor" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>0</item>
+          <item>-0.1</item>
+          <item>0</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>8</item>
+          <item>0.2</item>
+          <item>4</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/cube.obj" />
+        <components:Material Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="0.43" Material.unlit="false" Material.castsShadows="true" Material.subsurfaceEnabled="false" Material.subsurfaceWeight="0" Material.subsurfaceThickness="0" Material.subsurfaceTransmission="0">
+          <Material.diffuse>
+          <item>0.1</item>
+          <item>0.11</item>
+          <item>0.13</item>
+          </Material.diffuse>
+          <Material.subsurfaceRadius>
+          <item>0.004</item>
+          <item>0.002</item>
+          <item>0.001</item>
+          </Material.subsurfaceRadius>
+          <Material.subsurfaceColor>
+          <item>1</item>
+          <item>0.45</item>
+          <item>0.35</item>
+          </Material.subsurfaceColor>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+  </objects>
+</Scene>

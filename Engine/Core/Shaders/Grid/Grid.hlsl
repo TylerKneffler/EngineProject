@@ -75,11 +75,12 @@ struct GridPixel
     float depth : SV_DEPTH;
 };
 
-float GridCoverage(float2 planePosition, float spacing)
+float GridCoverage(float2 planePosition, float spacing, float strokeWidth)
 {
     float2 coord = planePosition / spacing;
     float2 width = max(fwidth(coord), 0.0001);
-    float2 lineDistance = abs(frac(coord - 0.5) - 0.5) / width;
+    float2 lineDistance = abs(frac(coord - 0.5) - 0.5) /
+        (width * strokeWidth);
     // Suppress a scale once its lines approach a pixel apart. This also
     // prevents the most distant grid from turning into a solid plane.
     float visibility = 1.0 - smoothstep(0.25, 0.5,
@@ -122,19 +123,30 @@ GridPixel PSMain(float4 svPos : SV_POSITION,
     float coarseSpacing = fineSpacing * 10.0;
     float superSpacing = coarseSpacing * 10.0;
     float gridA;
+    float edgeA = 0.0;
     if (mode2D > 0.5)
     {
-        gridA = GridCoverage(planePosition, baseSpacing);
+        gridA = GridCoverage(planePosition, baseSpacing, 1.0);
     }
     else
     {
-        float fineA = GridCoverage(planePosition, fineSpacing) *
+        float fineA = GridCoverage(planePosition, fineSpacing, 1.0) *
             (0.35 * (1.0 - blend));
-        float coarseA = GridCoverage(planePosition, coarseSpacing) *
+        float coarseA = GridCoverage(planePosition, coarseSpacing, 1.0) *
             lerp(0.8, 0.35, blend);
-        float superA = GridCoverage(planePosition, superSpacing) *
+        float superA = GridCoverage(planePosition, superSpacing, 1.0) *
             (0.8 * blend);
         gridA = max(fineA, max(coarseA, superA));
+
+        // A dark edge keeps even light authored lines visible over a bright
+        // viewport. Use the same LOD weights so it fades with the grid.
+        float fineEdge = GridCoverage(planePosition, fineSpacing, 2.5) *
+            (0.35 * (1.0 - blend));
+        float coarseEdge = GridCoverage(planePosition, coarseSpacing, 2.5) *
+            lerp(0.8, 0.35, blend);
+        float superEdge = GridCoverage(planePosition, superSpacing, 2.5) *
+            (0.8 * blend);
+        edgeA = max(fineEdge, max(coarseEdge, superEdge));
     }
 
     // Keep the authored distance as the start of the fade, then let lines
@@ -147,7 +159,9 @@ GridPixel PSMain(float4 svPos : SV_POSITION,
     float fade = 1.0 - smoothstep(adaptiveFadeDistance,
         adaptiveFadeDistance * 4.0, dist);
 
-    float alpha = gridA * fade * gridColor.a;
+    float centerAlpha = gridA * fade * gridColor.a;
+    float edgeAlpha = edgeA * fade * saturate(gridColor.a * 1.5);
+    float alpha = max(centerAlpha, edgeAlpha);
     // Empty cells and fully faded lines must leave the scene color and alpha
     // untouched when the viewport is composited over the editor background.
     if (alpha <= 0.0) discard;
@@ -156,7 +170,10 @@ GridPixel PSMain(float4 svPos : SV_POSITION,
     float2 axDeriv = fwidth(planePosition);
     float  xAxis   = clamp(1.0 - abs(planePosition.y) / (axDeriv.y * 2.0), 0.0, 1.0);
     float  zAxis   = clamp(1.0 - abs(planePosition.x) / (axDeriv.x * 2.0), 0.0, 1.0);
-    float3 color   = lerp(gridColor.rgb, axisColor.rgb, saturate(xAxis + zAxis));
+    float3 lineColor = lerp(gridColor.rgb, axisColor.rgb,
+        saturate(xAxis + zAxis));
+    float3 color = lerp(float3(0.03, 0.04, 0.06), lineColor,
+        saturate(gridA / max(edgeA, 0.0001)));
 
     // Write the depth of the reconstructed world-space plane rather than the
     // fullscreen triangle's far depth. This keeps grid/object intersections

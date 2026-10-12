@@ -61,8 +61,18 @@ public:
     }
     const std::vector<uint32_t>& GetIndices() const { return m_indices; }
     uint64_t GetAuthoredGeometryRevision() const { return m_authoredGeometryRevision; }
+    std::vector<Vertex> BuildPosedVertices(
+        const std::vector<glm::mat4>* skinPalette = nullptr,
+        bool includeSurfaceOffsets = true) const;
     std::vector<Vertex> BuildPortalCutTriangleStream(
         const std::vector<glm::mat4>* skinPalette = nullptr) const;
+    // Posed-space displacement is transient and never enters the authored stream.
+    void SetSurfaceOffsets(std::vector<glm::vec3> offsets,
+        const std::vector<glm::mat4>* skinPalette);
+    void ClearSurfaceOffsets();
+    IGraphicsBuffer* GetPosedVertexBuffer() const { return m_posedVertexBuffer.get(); }
+    bool HasSurfaceOffsets() const { return !m_surfaceOffsets.empty(); }
+    const std::vector<glm::vec3>& GetSurfaceOffsets() const { return m_surfaceOffsets; }
     bool UsesTerrainVertexFormat() const { return !m_terrainVertices.empty(); }
     static TerrainMeshData BuildIndexedTerrain(const std::vector<Vertex>& vertices);
     bool SetTerrainGeometry(TerrainMeshData&& geometry,
@@ -149,6 +159,8 @@ private:
     std::vector<uint32_t> m_indices;
     uint64_t m_authoredGeometryRevision = 1;
     std::unique_ptr<IGraphicsBuffer> m_vertexBuffer;
+    std::unique_ptr<IGraphicsBuffer> m_posedVertexBuffer;
+    std::vector<glm::vec3> m_surfaceOffsets;
     std::unique_ptr<IGraphicsBuffer> m_indexBuffer;
     std::unique_ptr<IGraphicsBuffer> m_morphDeltaBuffer;
     std::unique_ptr<IGraphicsBuffer> m_morphWeightBuffer;

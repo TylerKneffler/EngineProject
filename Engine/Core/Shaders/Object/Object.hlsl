@@ -40,6 +40,9 @@ struct ObjectData
     float4 portalClipPlane;
     float4 traversalClipPlane;
     uint4 lightingChannels;
+    float4 subsurfaceColorWeight;
+    float4 subsurfaceRadiusThickness;
+    float4 subsurfaceTransmission;
 };
 
 struct SceneLightData
@@ -81,6 +84,7 @@ struct MorphDelta { float4 position; float4 normal; float4 tangent; };
 [[vk::binding(22, 0)]] Texture2D ies1;
 [[vk::binding(23, 0)]] Texture2D ies2;
 [[vk::binding(24, 0)]] Texture2D ies3;
+[[vk::binding(25, 0)]] Texture2D subsurfaceThicknessMap;
 [[vk::binding(6, 0)]] SamplerState materialSampler;
 #else
 cbuffer DrawBuffer : register(b0)
@@ -102,6 +106,7 @@ Texture2D cookie0 : register(t16); Texture2D cookie1 : register(t17);
 Texture2D cookie2 : register(t18); Texture2D cookie3 : register(t19);
 Texture2D ies0 : register(t20); Texture2D ies1 : register(t21);
 Texture2D ies2 : register(t22); Texture2D ies3 : register(t23);
+Texture2D subsurfaceThicknessMap : register(t24);
 StructuredBuffer<SceneLightData> sceneLights : register(t6);
 StructuredBuffer<ObjectData> objects : register(t7);
 StructuredBuffer<float4x4> boneMatrices : register(t8);
@@ -498,7 +503,7 @@ float2 ParallaxOcclusionUv(
 }
 
 float SampleDirectionalShadowCascade(ObjectData objectData,
-    uint cascade, float3 biasedPosition)
+    uint cascade, float3 biasedPosition, int pcfRadius)
 {
     float4 lightClip = mul(objectData.shadowViewProjections[cascade],
         float4(biasedPosition, 1.0));
@@ -519,11 +524,18 @@ float SampleDirectionalShadowCascade(ObjectData objectData,
     int2 tileOrigin = cascadeCount > 1u
         ? int2((cascade & 1u) * tileWidth, (cascade >> 1u) * tileHeight)
         : int2(0, 0);
-    int radius = clamp((int)objectData.shadowParams.w, 0, 4);
+    int radius = clamp(pcfRadius, 0, 4);
     int2 center = tileOrigin + int2(
         shadowUv * float2(tileWidth, tileHeight));
     int2 tileMaximum = tileOrigin + int2(
         (int)tileWidth - 1, (int)tileHeight - 1);
+    if (radius == 0)
+    {
+        float storedDepth = shadowMap.Load(int3(
+            clamp(center, tileOrigin, tileMaximum), 0));
+        return projected.z - objectData.shadowParams.x <= storedDepth
+            ? 1.0 : 0.0;
+    }
     float litSamples = 0.0;
     float sampleCount = 0.0;
     [loop] for (int y = -4; y <= 4; ++y)
@@ -542,7 +554,8 @@ float SampleDirectionalShadowCascade(ObjectData objectData,
 }
 
 float EvaluateDirectionalShadow(ObjectData objectData, SceneLightData light,
-    float3 worldPosition, float3 surfaceNormal, float3 lightDirection)
+    float3 worldPosition, float3 surfaceNormal, float3 lightDirection,
+    int pcfRadius)
 {
     if (light.params.z < 0.0 || light.params.w <= 0.0)
         return 1.0;
@@ -565,7 +578,7 @@ float EvaluateDirectionalShadow(ObjectData objectData, SceneLightData light,
         cascade = 3u;
 
     float filtered = SampleDirectionalShadowCascade(
-        objectData, cascade, biasedPosition);
+        objectData, cascade, biasedPosition, pcfRadius);
     if (cascade + 1u < cascadeCount)
     {
         float previousSplit = cascade == 0u ? objectData.shadowCameraData.w :
@@ -578,7 +591,7 @@ float EvaluateDirectionalShadow(ObjectData objectData, SceneLightData light,
         if (cascadeBlend > 0.0)
         {
             float nextFiltered = SampleDirectionalShadowCascade(
-                objectData, cascade + 1u, biasedPosition);
+                objectData, cascade + 1u, biasedPosition, pcfRadius);
             filtered = lerp(filtered, nextFiltered, cascadeBlend);
         }
     }
@@ -589,6 +602,48 @@ float EvaluateDirectionalShadow(ObjectData objectData, SceneLightData light,
     filtered = lerp(filtered, 1.0, farFade);
     return lerp(1.0, filtered,
         saturate(light.params.w * objectData.shadowParams.z));
+}
+
+float EvaluateSubsurfaceShadowChannel(ObjectData objectData,
+    SceneLightData light, float3 position, float3 geometryNormal,
+    float3 lightDirection, float3 tangent, float radius,
+    float centerShadow)
+{
+    if (radius <= 0.00001)
+        return centerShadow;
+    float3 offset = tangent * radius;
+    return (centerShadow * 2.0 +
+        EvaluateDirectionalShadow(objectData, light, position + offset,
+            geometryNormal, lightDirection, 0) +
+        EvaluateDirectionalShadow(objectData, light, position - offset,
+            geometryNormal, lightDirection, 0)) * 0.25;
+}
+
+// Integrate incident directional light at neighboring points on a local
+// tangent plane. Each RGB channel samples its authored scene-unit radius.
+float3 EvaluateSubsurfaceShadow(ObjectData objectData,
+    SceneLightData light, float3 position, float3 geometryNormal,
+    float3 lightDirection, float3 scatteringRadius, float centerShadow)
+{
+    if (abs(light.params.y - 1.0) >= 0.25 ||
+        light.params.z < 0.0 || light.params.w <= 0.0)
+        return centerShadow.xxx;
+    float3 axis = abs(geometryNormal.z) < 0.9
+        ? float3(0.0, 0.0, 1.0) : float3(0.0, 1.0, 0.0);
+    float3 projectedLight = lightDirection - geometryNormal *
+        dot(geometryNormal, lightDirection);
+    float3 tangent = dot(projectedLight, projectedLight) > 0.0001
+        ? normalize(projectedLight) : normalize(cross(geometryNormal, axis));
+    return float3(
+        EvaluateSubsurfaceShadowChannel(objectData, light, position,
+            geometryNormal, lightDirection, tangent,
+            scatteringRadius.r, centerShadow),
+        EvaluateSubsurfaceShadowChannel(objectData, light, position,
+            geometryNormal, lightDirection, tangent,
+            scatteringRadius.g, centerShadow),
+        EvaluateSubsurfaceShadowChannel(objectData, light, position,
+            geometryNormal, lightDirection, tangent,
+            scatteringRadius.b, centerShadow));
 }
 
 float4 PSMain(
@@ -656,6 +711,10 @@ float4 PSMain(
 
     if (flags & 1u)
         base *= baseColorMap.Sample(materialSampler, baseUv);
+    float subsurfaceThickness = objectData.subsurfaceRadiusThickness.w;
+    if ((flags & 128u) && objectData.subsurfaceColorWeight.w > 0.0)
+        subsurfaceThickness *= subsurfaceThicknessMap.Sample(
+            materialSampler, baseUv).r;
     if (flags & 2u)
     {
         float4 mr = metallicRoughnessMap.Sample(materialSampler, metallicRoughnessUv);
@@ -712,8 +771,7 @@ float4 PSMain(
         lightListOffset = header.x;
         lightIterationCount = min(header.y, draw.lightCount);
     }
-    [loop]
-    for (uint iteration = 0; iteration < lightIterationCount; ++iteration)
+    [loop] for (uint iteration = 0; iteration < lightIterationCount; ++iteration)
     {
         uint index = clusteredLighting
             ? clusteredLightIndices[lightListOffset + iteration]
@@ -786,11 +844,37 @@ float4 PSMain(
         float nDotL = saturate(dot(n, lightDirection));
         float3 radiance = light.colorIntensity.rgb *
             light.colorIntensity.w * attenuation;
-        radiance *= EvaluateDirectionalShadow(
-            objectData, light, worldPos, n, lightDirection);
+        float centerShadow = EvaluateDirectionalShadow(
+            objectData, light, worldPos, n, lightDirection,
+            (int)objectData.shadowParams.w);
         directLight += EvaluatePbrBrdf(
             base.rgb, metallic, roughness, n, v, lightDirection) *
-            radiance * nDotL;
+            radiance * centerShadow * nDotL;
+        float scatteringWeight = objectData.subsurfaceColorWeight.w;
+        if (scatteringWeight > 0.0)
+        {
+            float3 radius = max(objectData.subsurfaceRadiusThickness.rgb, 0.0);
+            float3 wrap = radius / (radius + 0.01);
+            float3 wrappedNdotL = saturate((dot(geometryNormal,
+                lightDirection) + wrap) / (1.0 + wrap));
+            float3 halfDirection = normalize(v + lightDirection);
+            float3 f0 = lerp(float3(0.04, 0.04, 0.04), base.rgb, metallic);
+            float3 diffuse = (1.0 - FresnelSchlick(
+                saturate(dot(halfDirection, v)), f0)) *
+                (1.0 - metallic) * base.rgb / PI;
+            float3 tint = saturate(objectData.subsurfaceColorWeight.rgb);
+            float3 diffusedShadow = EvaluateSubsurfaceShadow(objectData,
+                light, worldPos, geometryNormal, lightDirection,
+                radius, centerShadow);
+            directLight += diffuse * radiance * scatteringWeight *
+                (tint * wrappedNdotL * diffusedShadow -
+                    nDotL * centerShadow);
+            float3 transmission = exp(-max(subsurfaceThickness, 0.0) /
+                max(radius, 0.000001));
+            directLight += diffuse * radiance * centerShadow * tint * transmission *
+                scatteringWeight * saturate(objectData.subsurfaceTransmission.x) *
+                saturate(-dot(geometryNormal, lightDirection));
+        }
     }
 
     float3 bakedDirect = 0.0;

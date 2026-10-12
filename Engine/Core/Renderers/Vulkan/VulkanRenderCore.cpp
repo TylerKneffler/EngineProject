@@ -11,6 +11,7 @@ VulkanRenderCore::~VulkanRenderCore()
     if (!m_instance) return;
     if (m_device) vkDeviceWaitIdle(m_device);
     DestroySwapchain();
+    if (m_mainRenderPass) vkDestroyRenderPass(m_device, m_mainRenderPass, nullptr);
     if (m_offscreenRenderPass) vkDestroyRenderPass(m_device, m_offscreenRenderPass, nullptr);
     if (m_compositionRenderPass) vkDestroyRenderPass(m_device, m_compositionRenderPass, nullptr);
     for (uint32_t i = 0; i < FRAME_COUNT; ++i)
@@ -249,7 +250,10 @@ void VulkanRenderCore::CreateSwapchain()
     m_images.resize(imageCount);
     vkGetSwapchainImagesKHR(m_device, m_swapchain, &imageCount, m_images.data());
 
-    m_mainRenderPass = CreateRenderPass(m_surfaceFormat.format, m_mainDepth, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    // The post-process pipeline and its composition commands use this render pass.
+    // Swapchain recreation must retain the handle for their lifetime.
+    if (!m_mainRenderPass)
+        m_mainRenderPass = CreateRenderPass(m_surfaceFormat.format, m_mainDepth, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
     m_imageViews.resize(imageCount);
     m_framebuffers.resize(imageCount);
     if (m_mainDepth) m_depthImages.resize(imageCount);
@@ -288,10 +292,9 @@ void VulkanRenderCore::DestroySwapchain()
     for (auto framebuffer : m_framebuffers) if (framebuffer) vkDestroyFramebuffer(m_device, framebuffer, nullptr);
     for (auto& depth : m_depthImages) VulkanDestroyImage(m_device, depth);
     for (auto view : m_imageViews) if (view) vkDestroyImageView(m_device, view, nullptr);
-    if (m_mainRenderPass) vkDestroyRenderPass(m_device, m_mainRenderPass, nullptr);
     if (m_swapchain) vkDestroySwapchainKHR(m_device, m_swapchain, nullptr);
     m_framebuffers.clear(); m_depthImages.clear(); m_imageViews.clear(); m_images.clear();
-    m_mainRenderPass = VK_NULL_HANDLE; m_swapchain = VK_NULL_HANDLE;
+    m_swapchain = VK_NULL_HANDLE;
 }
 
 void VulkanRenderCore::Resize(uint32_t width, uint32_t height)

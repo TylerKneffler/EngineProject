@@ -23,6 +23,23 @@ struct ObjectData
     float4 textureUvSets1;
     float4 skinParams;
     float4 morphParams;
+    float4 environmentParams;
+    float4 environmentSH[9];
+    float4 reflectionEnvironmentParams;
+    float4 reflectionEnvironmentSH[9];
+    float4x4 shadowViewProjections[4];
+    float4 shadowParams;
+    float4 shadowCascadeSplits;
+    float4 shadowCascadeData;
+    float4 shadowCameraData;
+    float4 lightingClusterParams;
+    float4 lightingCameraData;
+    float4 portalClipPlane;
+    float4 traversalClipPlane;
+    uint4 lightingChannels;
+    float4 subsurfaceColorWeight;
+    float4 subsurfaceRadiusThickness;
+    float4 subsurfaceTransmission;
 };
 
 #ifdef VULKAN

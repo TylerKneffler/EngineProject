@@ -444,6 +444,26 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
                 ui.DisabledLabel("Texture assets can be dragged directly onto these fields.");
                 ui.Unindent(12.f);
             }
+            if (ui.PropertyGroupHeader("Subsurface"))
+            {
+                ui.Indent(12.f);
+                changed |= ui.Checkbox("Enable", &material.subsurfaceEnabled);
+                changed |= ui.DragFloat("Weight", &material.subsurfaceWeight,
+                    0.01f, 0.f, 1.f);
+                changed |= ui.DragFloat3("RGB Radius (scene units)",
+                    &material.subsurfaceRadius.x, 0.001f, 0.f, 1.f);
+                changed |= ui.ColorEdit3("Scattering Color",
+                    &material.subsurfaceColor.x);
+                changed |= ui.DragFloat("Thickness (scene units)",
+                    &material.subsurfaceThickness, 0.001f, 0.f, 1.f);
+                changed |= ui.DragFloat("Transmission",
+                    &material.subsurfaceTransmission, 0.01f, 0.f, 1.f);
+                changed |= editTexture("Thickness Texture",
+                    material.subsurfaceThicknessTexture,
+                    [&](const std::string& value)
+                    { material.SetSubsurfaceThicknessTexture(value); });
+                ui.Unindent(12.f);
+            }
             if (ui.PropertyGroupHeader("Reflections"))
             {
                 ui.Indent(12.f);

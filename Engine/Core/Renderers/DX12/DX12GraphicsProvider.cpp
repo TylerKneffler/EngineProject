@@ -7,8 +7,8 @@ namespace Engine::Renderers
 Microsoft::WRL::ComPtr<ID3D12RootSignature>
 CreateD3D12MaterialRootSignature(ID3D12Device* device)
 {
-    D3D12_DESCRIPTOR_RANGE ranges[9]{};
-    D3D12_ROOT_PARAMETER parameters[17]{};
+    D3D12_DESCRIPTOR_RANGE ranges[18]{};
+    D3D12_ROOT_PARAMETER parameters[26]{};
     parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
     parameters[0].Descriptor.ShaderRegister = 0;
     parameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
@@ -64,6 +64,28 @@ CreateD3D12MaterialRootSignature(ID3D12Device* device)
         parameters[index + 15].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
         parameters[index + 15].Descriptor.ShaderRegister = index + 14;
         parameters[index + 15].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    }
+    ranges[9].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    ranges[9].NumDescriptors = 1;
+    ranges[9].BaseShaderRegister = 24;
+    ranges[9].OffsetInDescriptorsFromTableStart = 0;
+    parameters[17].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    parameters[17].DescriptorTable.NumDescriptorRanges = 1;
+    parameters[17].DescriptorTable.pDescriptorRanges = &ranges[9];
+    parameters[17].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    for (UINT index = 0; index < 8; ++index)
+    {
+        ranges[10 + index].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+        ranges[10 + index].NumDescriptors = 1;
+        ranges[10 + index].BaseShaderRegister = 16 + index;
+        ranges[10 + index].OffsetInDescriptorsFromTableStart = 0;
+        parameters[18 + index].ParameterType =
+            D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        parameters[18 + index].DescriptorTable.NumDescriptorRanges = 1;
+        parameters[18 + index].DescriptorTable.pDescriptorRanges =
+            &ranges[10 + index];
+        parameters[18 + index].ShaderVisibility =
+            D3D12_SHADER_VISIBILITY_PIXEL;
     }
 
     D3D12_STATIC_SAMPLER_DESC sampler{};

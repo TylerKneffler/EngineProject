@@ -42,6 +42,26 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "0.0, 1.0")
     float     roughnessFactor { 1.f };
 
+    // Forward-shader preview of subsurface lighting. Radius is authored in
+    // scene units; a future screen-space diffusion pass can use the same data.
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Subsurface")
+    bool subsurfaceEnabled { false };
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Subsurface", Range = "0.0, 1.0")
+    float subsurfaceWeight { 0.f };
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Subsurface")
+    glm::vec3 subsurfaceRadius { 0.004f, 0.002f, 0.001f };
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Subsurface")
+    glm::vec3 subsurfaceColor { 1.f, 0.45f, 0.35f };
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Subsurface", Range = "0.0, 1.0")
+    float subsurfaceThickness { 0.f };
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Subsurface", Range = "0.0, 1.0")
+    float subsurfaceTransmission { 0.f };
+
     PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "0.0, 4.0")
     float     environmentDiffuseStrength { 1.f };
 
@@ -106,6 +126,7 @@ public:
     std::shared_ptr<Texture> heightTexture;
     std::shared_ptr<Texture> occlusionTexture;
     std::shared_ptr<Texture> emissiveTexture;
+    std::shared_ptr<Texture> subsurfaceThicknessTexture;
     std::shared_ptr<Texture> reflectionEnvironmentMap;
     int baseColorUvSet = 0;
     int metallicRoughnessUvSet = 0;
@@ -124,6 +145,7 @@ public:
     void SetHeightTexture(const std::string& path);
     void SetOcclusionTexture(const std::string& path);
     void SetEmissiveTexture(const std::string& path);
+    void SetSubsurfaceThicknessTexture(const std::string& path);
     void SetReflectionEnvironmentTexture(const std::string& path);
     void PrepareTextures(IGraphicsProvider* graphicsProvider);
     MaterialAlphaMode GetAlphaMode() const;

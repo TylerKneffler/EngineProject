@@ -50,7 +50,7 @@ private:
     VkCommandBuffer m_commandBuffer;
     const VulkanPipelineState* m_pipeline = nullptr;
     std::shared_ptr<VulkanTextureSystem> m_textureSystem;
-    std::array<const VulkanGraphicsTexture*, 9> m_textures{};
+    std::array<const VulkanGraphicsTexture*, 24> m_textures{};
     std::array<const VulkanGraphicsBuffer*, 7> m_structuredBuffers{};
     std::shared_ptr<VulkanOcclusionQueryState> m_occlusionState;
     std::shared_ptr<VulkanGpuTimingState> m_gpuTimings;

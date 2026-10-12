@@ -124,7 +124,6 @@
 - [x] Cache compatible preview clips instead of copying and remapping clip data on every playback or scrub sample. Update only playhead times and layer weights per frame.
 - [x] Filter the cached rig asset list while typing in the Animation Editor search field. Refresh the asset scan only when project assets change or the user requests it.
 - [x] Record one undo entry when a clip-duration drag ends, avoiding a full clip copy and scene serialization on every drag update.
-
 - [x] Build reusable brush assets and richer surface/weight painting controls in the editor.
   - [x] Add a separate Paint section to the main editor toolbar with Cursor, Brush, Eraser, and Bucket selection; Cursor can return to viewport selection.
   - [x] Add project `.brush` assets that can be created in Assets, edited in the asset inspector, and loaded, saved, or duplicated from the weight paint toolbar. Keep preset settings separate from bone, paint weight, and mirror target.
@@ -153,3 +152,9 @@
     - [x] Document a manual Blender brush conversion path that recommends retaining source `.blend` files in project Assets.
     - [x] **Optional:** Import `.abr` packs and map their supported settings with explicit unsupported-setting reports. A direct `.blend` importer is also optional while the documented conversion path is available.
   - [x] **Required with new paint modes:** Add focused tests for mesh texture strokes across repeating UV seams, saved-result reload and pixel-history restoration, Alpha Lock, UV unwrap, and imported preset behavior. PNG, vertex color, preset serialization, and weight bucket regression tests already exist. Use [Blender weight paint brushes](https://docs.blender.org/manual/en/latest/sculpt_paint/weight_paint/brushes.html), [Blender brush asset management](https://docs.blender.org/manual/en/5.0/sculpt_paint/brush/brush_management.html), and [Photoshop brush imports](https://helpx.adobe.com/photoshop/desktop/apply-painting-techniques/brushes-presets/import-brushes-brush-packs.html) as feature and format references.
+- [x] Add localized stretch and compression for skinned mesh surfaces, driven by bone motion and mapped collision impulses. Preserve skin weights, cap deformation, and restore the current animated shape after impacts. See [research and acceptance criteria](skinned-soft-tissue-research.md).
+  - [x] **Required foundation:** Add post-physics evaluation and a transient per-vertex deformation path after morphing/skinning; keep CPU contact/portal geometry equivalent to rendered geometry and leave authored mesh data intact.
+  - [x] **Required response:** Bind a reusable soft-tissue component to the skinned surface; support pose-driven strain, mapped collision impulses, response masks, damping, displacement/strain caps, and clean reset/rebind.
+  - [x] **Required verification:** Test impact localization, rest-contact stability, decay to the moving animated pose, preserved weights/topology, CPU/GPU parity, portal behavior, and fixed-step stability.
+    - [x] Automated surface, scene-impact, moving-pose decay, skin-binding, and portal traversal regression tests pass.
+    - [x] Render the deformed demo scene on DX11, DX12, and Vulkan; compare the CPU posed stream with the uploaded vertex stream and portal triangle stream.

@@ -858,7 +858,8 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
             // Heuristics for appropriate ranges
             if (key == "metallicFactor" || key == "roughnessFactor" ||
                 key == "baseColorAlpha" || key == "alphaCutoff" ||
-                key == "occlusionStrength" || key == "alpha" ||
+                key == "occlusionStrength" || key == "subsurfaceWeight" ||
+                key == "subsurfaceTransmission" || key == "alpha" ||
                 key == "fillAmount")
             {
                 if (ui.DragFloat(displayName.c_str(), &floatVal, 0.01f, 0.f, 1.f))

@@ -28,6 +28,7 @@
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/AnimationBone.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
+#include "Core/Compoonents/Animation/SoftTissueSurface.h"
 #include "Core/Compoonents/Animation/IKBone.h"
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
 #include "Core/Compoonents/Path/SplinePath.h"
@@ -189,6 +190,7 @@ void SceneSerializer::EnsureBuiltinsRegistered()
     RegisterComponentType<Engine::Components::Skeleton>();
     RegisterComponentType<Engine::Components::AnimationBone>();
     RegisterComponentType<Engine::Components::SkinnedMesh>();
+    RegisterComponentType<Engine::Components::SoftTissueSurface>();
     RegisterComponentType<Engine::Components::IKBone>();
     RegisterComponentType<Engine::Components::SpatialManipulator>();
     RegisterComponentType<SplinePath>();

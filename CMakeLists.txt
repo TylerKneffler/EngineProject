@@ -668,6 +668,22 @@ set_target_properties(Server PROPERTIES
 set(ENGINE_LOCAL_TEST_ROOT "${ENGINE_ROOT}/.local/tests")
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/SubsurfaceMaterialTests.cpp")
+    enable_testing()
+    add_executable(SubsurfaceMaterialTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/SubsurfaceMaterialTests.cpp")
+    target_link_libraries(SubsurfaceMaterialTests PRIVATE Engine)
+    if(WIN32)
+        target_link_libraries(SubsurfaceMaterialTests PRIVATE d3dcompiler)
+    endif()
+    target_include_directories(SubsurfaceMaterialTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME SubsurfaceMaterialRegression COMMAND SubsurfaceMaterialTests)
+    set_tests_properties(SubsurfaceMaterialRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/MeshAuthoringTests.cpp")
     enable_testing()
     add_executable(MeshAuthoringTests EXCLUDE_FROM_ALL
@@ -698,6 +714,46 @@ if(NOT ENGINE_PROJECT_DIR AND
     target_link_libraries(SkinBindingWeightsTests PRIVATE Engine)
     target_include_directories(SkinBindingWeightsTests PRIVATE "${ENGINE_ROOT}/Engine")
     add_test(NAME SkinBindingWeightsRegression COMMAND SkinBindingWeightsTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/SoftTissueSurfaceTests.cpp")
+    enable_testing()
+    add_executable(SoftTissueSurfaceTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/SoftTissueSurfaceTests.cpp")
+    target_link_libraries(SoftTissueSurfaceTests PRIVATE Engine)
+    target_include_directories(SoftTissueSurfaceTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME SoftTissueSurfaceRegression COMMAND SoftTissueSurfaceTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/SoftTissueDemoSceneTests.cpp")
+    enable_testing()
+    add_executable(SoftTissueDemoSceneTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/SoftTissueDemoSceneTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Physics/FoxRagdollBlend.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Physics/SoftTissueDemoDriver.cpp")
+    target_link_libraries(SoftTissueDemoSceneTests PRIVATE Engine)
+    target_include_directories(SoftTissueDemoSceneTests PRIVATE
+        "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Core/Assets")
+    add_test(NAME SoftTissueDemoSceneRegression COMMAND SoftTissueDemoSceneTests)
+    set_tests_properties(SoftTissueDemoSceneRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/SoftTissueRenderTests.cpp")
+    enable_testing()
+    add_executable(SoftTissueRenderTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/SoftTissueRenderTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Physics/FoxRagdollBlend.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Physics/SoftTissueDemoDriver.cpp")
+    target_link_libraries(SoftTissueRenderTests PRIVATE Engine)
+    target_include_directories(SoftTissueRenderTests PRIVATE
+        "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Core/Assets")
+    add_test(NAME SoftTissueRenderRegression COMMAND SoftTissueRenderTests)
+    set_tests_properties(SoftTissueRenderRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND

@@ -446,7 +446,7 @@ void D3D11GraphicsContext::SetTexture(uint32_t slot, const Engine::Graphics::IGr
     // Logical texture slots 6 and 7 are the reflection panorama and shadow
     // map. Object shaders reserve t6-t8/t10-t11 for structured scene buffers.
     const uint32_t shaderSlot = slot == 6 ? 9 :
-        (slot == 7 ? 12 : (slot == 8 ? 13 : slot));
+        (slot == 7 ? 12 : (slot == 8 ? 13 : (slot == 9 ? 24 : slot)));
     const auto* nativeTexture = dynamic_cast<const D3D11GraphicsTexture*>(texture);
     ID3D11ShaderResourceView* view = nativeTexture ? nativeTexture->GetView() : nullptr;
     if (!m_textureSlotInitialized[shaderSlot] ||

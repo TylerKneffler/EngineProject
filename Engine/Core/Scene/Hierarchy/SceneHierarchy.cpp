@@ -1,6 +1,8 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Audio/Audio.h"
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
+#include "Core/Compoonents/Animation/SoftTissueSurface.h"
+#include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Physics/Physics.h"
 #include "Core/Physics/IPhysicsAdapter.h"
 #include "Core/Renderers/UIRenderer.h"
@@ -118,6 +120,20 @@ void Scene::Update(float deltaTime)
     std::unordered_set<const Engine::Components::RigidBody*> claimedBodies;
     for (const OrderedPortal& portal : portals)
         portal.manipulator->PostPhysicsUpdate(&claimedBodies);
+    // Contacts and final bone/portal poses are available only after physics.
+    for (const auto& object : m_objects)
+        if (object && object->IsEnabledInHierarchy())
+            for (Engine::Core::Component* component : object->Components)
+                if (auto* tissue = dynamic_cast<Engine::Components::SoftTissueSurface*>(component))
+                {
+                    for (const auto* body : claimedBodies)
+                        if (body && tissue->IsBoundUnder(body->Owner))
+                        {
+                            tissue->Reset();
+                            break;
+                        }
+                    tissue->PostPhysicsUpdate(static_cast<float>(physicsDelta));
+                }
     m_isUpdating = false;
     FlushPendingObjectAdditions();
     FlushPendingObjectRemovals();

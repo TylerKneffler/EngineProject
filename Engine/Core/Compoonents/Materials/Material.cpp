@@ -25,6 +25,12 @@ Material::Material()
     RegisterField("lightingChannels", lightingChannels, "Lighting");
     RegisterField("metallicFactor", metallicFactor, "PBR");
     RegisterField("roughnessFactor", roughnessFactor, "PBR");
+    RegisterField("subsurfaceEnabled", subsurfaceEnabled, "Subsurface");
+    RegisterField("subsurfaceWeight", subsurfaceWeight, "Subsurface");
+    RegisterField("subsurfaceRadius", subsurfaceRadius, "Subsurface");
+    RegisterField("subsurfaceColor", subsurfaceColor, "Subsurface");
+    RegisterField("subsurfaceThickness", subsurfaceThickness, "Subsurface");
+    RegisterField("subsurfaceTransmission", subsurfaceTransmission, "Subsurface");
     RegisterField("environmentDiffuseStrength", environmentDiffuseStrength, "PBR");
     RegisterField("occlusionStrength", occlusionStrength, "PBR");
     RegisterField("reflectionStrength", reflectionStrength, "Reflections");
@@ -49,6 +55,7 @@ Material::Material()
     RegisterEditorFieldGroup("heightTexture", "Textures");
     RegisterEditorFieldGroup("occlusionTexture", "Textures");
     RegisterEditorFieldGroup("emissiveTexture", "Textures");
+    RegisterEditorFieldGroup("subsurfaceThicknessTexture", "Subsurface");
 }
 
 namespace
@@ -113,12 +120,19 @@ bool Material::LoadFromFile(const std::string& path)
         heightTexture.reset();
         occlusionTexture.reset();
         emissiveTexture.reset();
+        subsurfaceThicknessTexture.reset();
         reflectionEnvironmentMap.reset();
         useCustomReflectionEnvironment = false;
         reflectionEnvironmentTexture.clear();
         reflectionEnvironmentExposure = 0.f;
         reflectionEnvironmentRotation = 0.f;
         castsShadows = true;
+        subsurfaceEnabled = false;
+        subsurfaceWeight = 0.f;
+        subsurfaceRadius = { 0.004f, 0.002f, 0.001f };
+        subsurfaceColor = { 1.f, 0.45f, 0.35f };
+        subsurfaceThickness = 0.f;
+        subsurfaceTransmission = 0.f;
         diffuseColor = from3(root["baseColor"], diffuseColor);
         ambientColor = from3(root["ambientColor"], ambientColor);
         specularColor = from3(root["specularColor"], specularColor);
@@ -126,6 +140,12 @@ bool Material::LoadFromFile(const std::string& path)
         if (root.Has("shininess")) shininess = root["shininess"].AsFloat();
         if (root.Has("metallic")) metallicFactor = root["metallic"].AsFloat();
         if (root.Has("roughness")) roughnessFactor = root["roughness"].AsFloat();
+        if (root.Has("subsurfaceEnabled")) subsurfaceEnabled = root["subsurfaceEnabled"].AsBool();
+        if (root.Has("subsurfaceWeight")) subsurfaceWeight = root["subsurfaceWeight"].AsFloat();
+        subsurfaceRadius = from3(root["subsurfaceRadius"], subsurfaceRadius);
+        subsurfaceColor = from3(root["subsurfaceColor"], subsurfaceColor);
+        if (root.Has("subsurfaceThickness")) subsurfaceThickness = root["subsurfaceThickness"].AsFloat();
+        if (root.Has("subsurfaceTransmission")) subsurfaceTransmission = root["subsurfaceTransmission"].AsFloat();
         if (root.Has("environmentDiffuseStrength")) environmentDiffuseStrength = root["environmentDiffuseStrength"].AsFloat();
         if (root.Has("reflectionStrength")) reflectionStrength = root["reflectionStrength"].AsFloat();
         if (root.Has("useCustomReflectionEnvironment")) useCustomReflectionEnvironment = root["useCustomReflectionEnvironment"].AsBool();
@@ -161,6 +181,8 @@ bool Material::LoadFromFile(const std::string& path)
             ResolveTexturePath(path, root["occlusionTexture"].AsString()));
         if (root.Has("emissiveTexture")) SetEmissiveTexture(
             ResolveTexturePath(path, root["emissiveTexture"].AsString()));
+        if (root.Has("subsurfaceThicknessTexture")) SetSubsurfaceThicknessTexture(
+            ResolveTexturePath(path, root["subsurfaceThicknessTexture"].AsString()));
         if (root.Has("reflectionEnvironmentTexture")) SetReflectionEnvironmentTexture(
             ResolveTexturePath(path, root["reflectionEnvironmentTexture"].AsString()));
         Validate();
@@ -184,6 +206,12 @@ bool Material::SaveToFile(const std::string& path) const
     root.Set("shininess", JsonValue(shininess));
     root.Set("metallic", JsonValue(metallicFactor));
     root.Set("roughness", JsonValue(roughnessFactor));
+    root.Set("subsurfaceEnabled", JsonValue(subsurfaceEnabled));
+    root.Set("subsurfaceWeight", JsonValue(subsurfaceWeight));
+    root.Set("subsurfaceRadius", J3(subsurfaceRadius));
+    root.Set("subsurfaceColor", J3(subsurfaceColor));
+    root.Set("subsurfaceThickness", JsonValue(subsurfaceThickness));
+    root.Set("subsurfaceTransmission", JsonValue(subsurfaceTransmission));
     root.Set("environmentDiffuseStrength", JsonValue(environmentDiffuseStrength));
     root.Set("reflectionStrength", JsonValue(reflectionStrength));
     root.Set("useCustomReflectionEnvironment", JsonValue(useCustomReflectionEnvironment));
@@ -214,6 +242,8 @@ bool Material::SaveToFile(const std::string& path) const
     if (heightTexture) root.Set("heightTexture", JsonValue(TexturePath(heightTexture)));
     if (occlusionTexture) root.Set("occlusionTexture", JsonValue(TexturePath(occlusionTexture)));
     if (emissiveTexture) root.Set("emissiveTexture", JsonValue(TexturePath(emissiveTexture)));
+    if (subsurfaceThicknessTexture) root.Set("subsurfaceThicknessTexture",
+        JsonValue(TexturePath(subsurfaceThicknessTexture)));
     std::ofstream file(path);
     if (!file)
         return false;
@@ -262,6 +292,12 @@ void Material::SetEmissiveTexture(const std::string& path)
         Texture::Acquire(ResolveTexturePath(path), true);
 }
 
+void Material::SetSubsurfaceThicknessTexture(const std::string& path)
+{
+    subsurfaceThicknessTexture = path.empty() ? nullptr :
+        Texture::Acquire(ResolveTexturePath(path), false);
+}
+
 void Material::SetReflectionEnvironmentTexture(const std::string& path)
 {
     reflectionEnvironmentTexture = ResolveTexturePath(path);
@@ -277,7 +313,8 @@ void Material::PrepareTextures(IGraphicsProvider* graphicsProvider)
         SetReflectionEnvironmentTexture(reflectionEnvironmentTexture);
     for (const auto& texture : {
         baseColorTexture, metallicRoughnessTexture, normalTexture,
-        heightTexture, occlusionTexture, emissiveTexture })
+        heightTexture, occlusionTexture, emissiveTexture,
+        subsurfaceThicknessTexture })
         if (texture)
             texture->Prepare(graphicsProvider);
     // Diffuse environment lighting uses the CPU-side SH projection, while
@@ -305,6 +342,11 @@ void Material::Validate()
 {
     metallicFactor = std::clamp(metallicFactor, 0.f, 1.f);
     roughnessFactor = std::clamp(roughnessFactor, 0.045f, 1.f);
+    subsurfaceWeight = std::clamp(subsurfaceWeight, 0.f, 1.f);
+    subsurfaceRadius = glm::clamp(subsurfaceRadius, glm::vec3(0.f), glm::vec3(1.f));
+    subsurfaceColor = glm::clamp(subsurfaceColor, glm::vec3(0.f), glm::vec3(1.f));
+    subsurfaceThickness = std::clamp(subsurfaceThickness, 0.f, 1.f);
+    subsurfaceTransmission = std::clamp(subsurfaceTransmission, 0.f, 1.f);
     environmentDiffuseStrength = std::clamp(environmentDiffuseStrength, 0.f, 4.f);
     reflectionStrength = std::clamp(reflectionStrength, 0.f, 4.f);
     reflectionEnvironmentExposure = std::clamp(
@@ -340,6 +382,8 @@ Material::JsonValue Material::Serialize() const
     value.Set("heightTexture", JsonValue(TexturePath(heightTexture)));
     value.Set("occlusionTexture", JsonValue(TexturePath(occlusionTexture)));
     value.Set("emissiveTexture", JsonValue(TexturePath(emissiveTexture)));
+    value.Set("subsurfaceThicknessTexture",
+        JsonValue(TexturePath(subsurfaceThicknessTexture)));
     value.Set("reflectionEnvironmentTexture", JsonValue(reflectionEnvironmentTexture));
     return value;
 }
@@ -361,6 +405,8 @@ void Material::Deserialize(const JsonValue& value)
         SetOcclusionTexture(value["occlusionTexture"].AsString());
     if (value.Has("emissiveTexture"))
         SetEmissiveTexture(value["emissiveTexture"].AsString());
+    if (value.Has("subsurfaceThicknessTexture"))
+        SetSubsurfaceThicknessTexture(value["subsurfaceThicknessTexture"].AsString());
     if (value.Has("reflectionEnvironmentTexture"))
         SetReflectionEnvironmentTexture(value["reflectionEnvironmentTexture"].AsString());
     Validate();

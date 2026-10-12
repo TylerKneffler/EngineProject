@@ -29,7 +29,7 @@ VulkanTextureSystem::VulkanTextureSystem(
       m_queue(queue),
       m_queueFamily(queueFamily)
 {
-    VkDescriptorSetLayoutBinding bindings[17]{};
+    VkDescriptorSetLayoutBinding bindings[26]{};
     for (uint32_t binding = 0; binding < 6; ++binding)
     {
         bindings[binding].binding = binding;
@@ -75,6 +75,18 @@ VulkanTextureSystem::VulkanTextureSystem(
         bindings[binding].descriptorCount = 1;
         bindings[binding].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     }
+    bindings[17].binding = 25;
+    bindings[17].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    bindings[17].descriptorCount = 1;
+    bindings[17].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    for (uint32_t index = 0; index < 8; ++index)
+    {
+        bindings[18 + index].binding = 17 + index;
+        bindings[18 + index].descriptorType =
+            VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        bindings[18 + index].descriptorCount = 1;
+        bindings[18 + index].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
     VkDescriptorSetLayoutCreateInfo layoutInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
     layoutInfo.bindingCount = ARRAYSIZE(bindings);
@@ -83,7 +95,7 @@ VulkanTextureSystem::VulkanTextureSystem(
         m_device, &layoutInfo, nullptr, &m_layout), "vkCreateDescriptorSetLayout");
 
     VkDescriptorPoolSize sizes[3]{
-        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 9 * 512 },
+        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 18 * 512 },
         { VK_DESCRIPTOR_TYPE_SAMPLER, 512 },
         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 7 * 512 }
     };
@@ -376,7 +388,7 @@ std::shared_ptr<VulkanGraphicsTexture> VulkanTextureSystem::CreateDepthTexture(
 void VulkanTextureSystem::Bind(
     VkCommandBuffer commands,
     VkPipelineLayout pipelineLayout,
-    const std::array<const VulkanGraphicsTexture*, 9>& textures,
+    const std::array<const VulkanGraphicsTexture*, 24>& textures,
     const std::array<const VulkanGraphicsBuffer*, 7>& buffers)
 {
     TextureKey key{};
@@ -400,8 +412,8 @@ void VulkanTextureSystem::Bind(
         VkCheck(vkAllocateDescriptorSets(m_device, &allocate, &set),
             "vkAllocateDescriptorSets(material)");
 
-        VkDescriptorImageInfo images[9]{};
-        VkWriteDescriptorSet writes[17]{};
+        VkDescriptorImageInfo images[18]{};
+        VkWriteDescriptorSet writes[26]{};
         for (uint32_t index = 0; index < 6; ++index)
         {
             images[index].imageView =
@@ -438,6 +450,30 @@ void VulkanTextureSystem::Bind(
         writes[14].descriptorCount = 1;
         writes[14].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
         writes[14].pImageInfo = &images[8];
+        images[9].imageView = textures[9] ? textures[9]->GetView() : m_white.view;
+        images[9].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        writes[17] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        writes[17].dstSet = set;
+        writes[17].dstBinding = 25;
+        writes[17].descriptorCount = 1;
+        writes[17].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        writes[17].pImageInfo = &images[9];
+        for (uint32_t index = 0; index < 8; ++index)
+        {
+            const uint32_t slot = 16 + index;
+            const uint32_t writeIndex = 18 + index;
+            images[10 + index].imageView = textures[slot]
+                ? textures[slot]->GetView() : m_white.view;
+            images[10 + index].imageLayout =
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            writes[writeIndex] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            writes[writeIndex].dstSet = set;
+            writes[writeIndex].dstBinding = 17 + index;
+            writes[writeIndex].descriptorCount = 1;
+            writes[writeIndex].descriptorType =
+                VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+            writes[writeIndex].pImageInfo = &images[10 + index];
+        }
         VkDescriptorImageInfo samplerInfo{};
         samplerInfo.sampler = m_sampler;
         writes[6] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };

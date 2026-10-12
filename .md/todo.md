@@ -11,7 +11,7 @@ Paint priority: **Required** completes the advertised mesh texture paint workflo
 
 ## Next priorities
 
-- [ ] Add localized stretch and compression for skinned mesh surfaces, driven by bone motion and mapped collision impulses. Preserve skin weights, cap deformation, and restore the authored shape after impacts.
+- [ ] **Important, independent material feature:** Add subsurface scattering for skin and other translucent surfaces, with linear-light diffuse scattering, RGB radius, thickness/transmission, and backend/performance checks. See [rendering requirements](skinned-soft-tissue-research.md#separate-feature-subsurface-scattering-and-layered-skin-material).
 
 ## Deferred feature gates
 

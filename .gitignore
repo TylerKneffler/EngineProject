@@ -14,6 +14,12 @@ build/
 !.local/tests/MeshAuthoringTests.cpp
 !.local/tests/WeightInfluenceTests.cpp
 !.local/tests/SkinBindingWeightsTests.cpp
+!.local/tests/SoftTissueSurfaceTests.cpp
+!.local/tests/SoftTissueDemoSceneTests.cpp
+!.local/tests/SoftTissueRenderTests.cpp
+!.local/tests/SubsurfaceMaterialTests.cpp
+!.local/tests/PortalRaycastTests.cpp
+!.local/tests/PortalScaleTraversalTests.cpp
 !.local/tests/SkeletonAuthoringRegressionTests.cpp
 !.local/tests/ShadowRegressionTests.cpp
 !.local/tests/VideoExportRepeatabilityTests.cpp

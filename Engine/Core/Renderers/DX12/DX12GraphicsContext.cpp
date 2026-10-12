@@ -384,15 +384,15 @@ void D3D12GraphicsContext::SetStructuredBuffer(uint32_t slot, const Engine::Grap
 
 void D3D12GraphicsContext::SetTexture(uint32_t slot, const Engine::Graphics::IGraphicsTexture* texture)
 {
-    if (!m_cmdList || slot >= 9)
+    if (!m_cmdList || (slot >= 10 && (slot < 16 || slot >= 24)))
         return;
     const auto* nativeTexture = dynamic_cast<const D3D12GraphicsTexture*>(texture);
     if (!nativeTexture)
         return;
     ID3D12DescriptorHeap* heaps[] = { nativeTexture->GetHeap() };
     m_cmdList->SetDescriptorHeaps(1, heaps);
-    const uint32_t rootParameter = slot == 6 ? 10 :
-        (slot == 7 ? 13 : (slot == 8 ? 14 : slot + 1));
+    const uint32_t rootParameter = slot >= 16 ? slot + 2 : slot == 6 ? 10 :
+        (slot == 7 ? 13 : (slot == 8 ? 14 : (slot == 9 ? 17 : slot + 1)));
     m_cmdList->SetGraphicsRootDescriptorTable(
         rootParameter, nativeTexture->GetGpuHandle());
 }

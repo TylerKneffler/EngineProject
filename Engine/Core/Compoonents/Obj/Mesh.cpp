@@ -211,6 +211,7 @@ static size_t ResolveObjIndex(int index, size_t count,
 
 void Mesh::LoadFromFile(const std::string& path)
 {
+    ClearSurfaceOffsets();
     MarkConfigurationDirty();
     ++m_authoredGeometryRevision;
     m_terrainVertices.clear();
@@ -382,6 +383,7 @@ bool Mesh::SetDeformedVertices(const std::vector<Vertex>& vertices)
         (vertices.size() == m_vertices.size() &&
          std::memcmp(vertices.data(), m_vertices.data(), byteSize) == 0))
         return false;
+    ClearSurfaceOffsets();
 
     // A real portal cut adds intersection vertices, so the two clipped halves
     // generally contain more vertices than the original mesh. Recreate the
@@ -436,6 +438,7 @@ bool Mesh::SetDeformedVertices(std::vector<Vertex>&& vertices)
         (vertices.size() == m_vertices.size() &&
          std::memcmp(vertices.data(), m_vertices.data(), byteSize) == 0))
         return false;
+    ClearSurfaceOffsets();
 
     m_terrainVertices.clear();
     m_indices.clear();
@@ -474,6 +477,7 @@ bool Mesh::SetAuthoredVertices(std::vector<Vertex> vertices)
 {
     if (!ValidateAuthoredGeometry(vertices, {}))
         return false;
+    ClearSurfaceOffsets();
     m_terrainVertices.clear();
     m_indices.clear();
     m_indexBuffer.reset();
@@ -499,6 +503,7 @@ bool Mesh::UpdateAuthoredVertices(std::vector<Vertex> vertices)
         std::memcpy(mapped, vertices.data(), byteSize);
         m_vertexBuffer->Unmap();
     }
+    ClearSurfaceOffsets();
     m_vertices = std::move(vertices);
     ++m_authoredGeometryRevision;
     MarkConfigurationDirty();
@@ -516,6 +521,7 @@ void Mesh::SetAuthoredFilePath(std::string path)
 
 std::vector<Mesh::Vertex> Mesh::TakeVertices()
 {
+    ClearSurfaceOffsets();
     m_ready = false;
     m_hasBounds = false;
     MarkConfigurationDirty();
@@ -581,6 +587,7 @@ Mesh::TerrainMeshData Mesh::BuildIndexedTerrain(
 bool Mesh::SetTerrainGeometry(TerrainMeshData&& geometry,
     bool retainExpandedVertices)
 {
+    ClearSurfaceOffsets();
     if (geometry.vertices.empty() || geometry.indices.empty())
         return false;
 
@@ -637,6 +644,7 @@ bool Mesh::SetTerrainGeometry(TerrainMeshData&& geometry,
 
 Mesh::TerrainMeshData Mesh::TakeTerrainGeometry()
 {
+    ClearSurfaceOffsets();
     TerrainMeshData result{ std::move(m_terrainVertices), std::move(m_indices) };
     m_vertices.clear();
     m_ready = false;
@@ -654,12 +662,14 @@ uint64_t Mesh::GetCpuMeshMemoryBytes() const
         bytes += static_cast<uint64_t>(target.positions.capacity() +
             target.normals.capacity() + target.tangents.capacity()) *
             sizeof(glm::vec3);
-    return bytes + static_cast<uint64_t>(m_morphWeights.capacity()) * sizeof(float);
+    return bytes + static_cast<uint64_t>(m_morphWeights.capacity()) * sizeof(float) +
+        static_cast<uint64_t>(m_surfaceOffsets.capacity()) * sizeof(glm::vec3);
 }
 
 uint64_t Mesh::GetUploadShadowMemoryBytes() const
 {
     return (m_vertexBuffer ? m_vertexBuffer->GetUploadShadowSize() : 0u) +
+        (m_posedVertexBuffer ? m_posedVertexBuffer->GetUploadShadowSize() : 0u) +
         (m_indexBuffer ? m_indexBuffer->GetUploadShadowSize() : 0u) +
         (m_morphDeltaBuffer ? m_morphDeltaBuffer->GetUploadShadowSize() : 0u) +
         (m_morphWeightBuffer ? m_morphWeightBuffer->GetUploadShadowSize() : 0u);
@@ -668,6 +678,7 @@ uint64_t Mesh::GetUploadShadowMemoryBytes() const
 uint64_t Mesh::GetGpuBufferMemoryBytes() const
 {
     return (m_vertexBuffer ? m_vertexBuffer->GetSize() : 0u) +
+        (m_posedVertexBuffer ? m_posedVertexBuffer->GetSize() : 0u) +
         (m_indexBuffer ? m_indexBuffer->GetSize() : 0u) +
         (m_morphDeltaBuffer ? m_morphDeltaBuffer->GetSize() : 0u) +
         (m_morphWeightBuffer ? m_morphWeightBuffer->GetSize() : 0u);
@@ -1394,8 +1405,9 @@ Mesh::SliceResult Mesh::SliceByPlane(const std::vector<Vertex>& vertices,
     return { front, back };
 }
 
-std::vector<Mesh::Vertex> Mesh::BuildPortalCutTriangleStream(
-    const std::vector<glm::mat4>* skinPalette) const
+std::vector<Mesh::Vertex> Mesh::BuildPosedVertices(
+    const std::vector<glm::mat4>* skinPalette,
+    bool includeSurfaceOffsets) const
 {
     std::vector<Vertex> deformed = m_vertices;
     for (size_t targetIndex = 0; targetIndex < m_morphTargets.size() &&
@@ -1465,6 +1477,59 @@ std::vector<Mesh::Vertex> Mesh::BuildPortalCutTriangleStream(
             vertex.tangent[2] = tangent.z;
         }
     }
+    if (includeSurfaceOffsets && m_surfaceOffsets.size() == deformed.size())
+    {
+        for (size_t index = 0; index < deformed.size(); ++index)
+        {
+            const glm::vec3 position(deformed[index].pos[0],
+                deformed[index].pos[1], deformed[index].pos[2]);
+            const glm::vec3 moved = position + m_surfaceOffsets[index];
+            deformed[index].pos[0] = moved.x;
+            deformed[index].pos[1] = moved.y;
+            deformed[index].pos[2] = moved.z;
+        }
+        std::vector<glm::vec3> accumulated(deformed.size(), glm::vec3(0.f));
+        const size_t triangleCount = m_indices.empty() ? deformed.size() / 3
+            : m_indices.size() / 3;
+        for (size_t triangle = 0; triangle < triangleCount; ++triangle)
+        {
+            const size_t a = m_indices.empty() ? triangle * 3 : m_indices[triangle * 3];
+            const size_t b = m_indices.empty() ? triangle * 3 + 1 : m_indices[triangle * 3 + 1];
+            const size_t c = m_indices.empty() ? triangle * 3 + 2 : m_indices[triangle * 3 + 2];
+            if (a >= deformed.size() || b >= deformed.size() || c >= deformed.size()) continue;
+            const auto point = [&](size_t i) { return glm::vec3(
+                deformed[i].pos[0], deformed[i].pos[1], deformed[i].pos[2]); };
+            const glm::vec3 normal = glm::cross(point(b) - point(a), point(c) - point(a));
+            accumulated[a] += normal;
+            accumulated[b] += normal;
+            accumulated[c] += normal;
+        }
+        for (size_t i = 0; i < deformed.size(); ++i)
+            if (glm::dot(accumulated[i], accumulated[i]) > 1e-12f)
+            {
+                const glm::vec3 normal = glm::normalize(accumulated[i]);
+                deformed[i].normal[0] = normal.x;
+                deformed[i].normal[1] = normal.y;
+                deformed[i].normal[2] = normal.z;
+                glm::vec3 tangent(deformed[i].tangent[0], deformed[i].tangent[1],
+                    deformed[i].tangent[2]);
+                tangent -= normal * glm::dot(normal, tangent);
+                if (glm::dot(tangent, tangent) > 1e-12f)
+                {
+                    tangent = glm::normalize(tangent);
+                    deformed[i].tangent[0] = tangent.x;
+                    deformed[i].tangent[1] = tangent.y;
+                    deformed[i].tangent[2] = tangent.z;
+                }
+            }
+    }
+    return deformed;
+}
+
+std::vector<Mesh::Vertex> Mesh::BuildPortalCutTriangleStream(
+    const std::vector<glm::mat4>* skinPalette) const
+{
+    std::vector<Vertex> deformed = BuildPosedVertices(skinPalette);
     if (m_indices.empty()) return deformed;
     std::vector<Vertex> triangles;
     triangles.reserve(m_indices.size());
@@ -1473,11 +1538,47 @@ std::vector<Mesh::Vertex> Mesh::BuildPortalCutTriangleStream(
     return triangles;
 }
 
+void Mesh::SetSurfaceOffsets(std::vector<glm::vec3> offsets,
+    const std::vector<glm::mat4>* skinPalette)
+{
+    if (offsets.size() != m_vertices.size() || offsets.empty())
+    {
+        ClearSurfaceOffsets();
+        return;
+    }
+    m_surfaceOffsets = std::move(offsets);
+    if (!m_bufferFactory) return;
+    std::vector<Vertex> posed = BuildPosedVertices(skinPalette);
+    const uint64_t bytes = posed.size() * sizeof(Vertex);
+    if (!m_posedVertexBuffer || m_posedVertexBuffer->GetSize() != bytes)
+        m_posedVertexBuffer = m_bufferFactory->CreateBuffer(
+            IGraphicsBuffer::Usage::VertexBuffer,
+            IGraphicsBuffer::AccessMode::Upload, bytes, posed.data());
+    else if (void* mapped = m_posedVertexBuffer->Map())
+    {
+        std::memcpy(mapped, posed.data(), static_cast<size_t>(bytes));
+        m_posedVertexBuffer->Unmap();
+        m_posedVertexBuffer->FlushMappedWrites();
+    }
+    else
+        m_posedVertexBuffer = m_bufferFactory->CreateBuffer(
+            IGraphicsBuffer::Usage::VertexBuffer,
+            IGraphicsBuffer::AccessMode::Upload, bytes, posed.data());
+    if (!m_posedVertexBuffer) m_surfaceOffsets.clear();
+}
+
+void Mesh::ClearSurfaceOffsets()
+{
+    m_surfaceOffsets.clear();
+    m_posedVertexBuffer.reset();
+}
+
 bool Mesh::SetIndexedGeometry(std::vector<Vertex> vertices,
     std::vector<uint32_t> indices)
 {
     if (indices.empty() || !ValidateAuthoredGeometry(vertices, indices))
         return false;
+    ClearSurfaceOffsets();
     m_vertices = std::move(vertices);
     m_indices = std::move(indices);
     m_terrainVertices.clear();
