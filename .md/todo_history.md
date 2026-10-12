@@ -124,3 +124,32 @@
 - [x] Cache compatible preview clips instead of copying and remapping clip data on every playback or scrub sample. Update only playhead times and layer weights per frame.
 - [x] Filter the cached rig asset list while typing in the Animation Editor search field. Refresh the asset scan only when project assets change or the user requests it.
 - [x] Record one undo entry when a clip-duration drag ends, avoiding a full clip copy and scene serialization on every drag update.
+
+- [x] Build reusable brush assets and richer surface/weight painting controls in the editor.
+  - [x] Add a separate Paint section to the main editor toolbar with Cursor, Brush, Eraser, and Bucket selection; Cursor can return to viewport selection.
+  - [x] Add project `.brush` assets that can be created in Assets, edited in the asset inspector, and loaded, saved, or duplicated from the weight paint toolbar. Keep preset settings separate from bone, paint weight, and mirror target.
+  - [x] Apply weight brush size, hardness/falloff, strength, opacity, flow, spacing, square rotation, and scatter. Add eraser and connected-face bucket fill with tolerance and opacity, preserving locked-bone and normalization rules.
+  - [x] Test preset save/reload and invalid settings, connected bucket regions, and locked-bone erasure. The Debug Editor build and focused tests pass.
+  - [x] Add a paint mode for both mesh surfaces and image assets (starting with `.png`): paint vertex colors or texture targets on meshes, and open image files as editable 2D canvases for drawing. Provide visible stroke preview, undo/redo, and save/reload for both targets.
+    - [x] Open PNG assets as editable canvases with Cursor, Brush, Eraser, and Bucket in the editor Paint header; show a brush outline, save strokes to the PNG, and reload pixels during undo/redo.
+    - [x] Load, create, save, and duplicate shared `.brush` assets from the PNG paint toolbar.
+    - [x] Test deterministic PNG stamping, erasure, connected fill, and encoded PNG reload.
+    - [x] Paint vertex colors directly on a mesh with Brush, Eraser, and connected Bucket tools, a viewport brush outline, shared mesh undo/redo, and Save Mesh persistence.
+    - [x] Verify vertex color snapshot undo/redo and native mesh save/reload with a focused test.
+    - [x] **Required:** Paint a mesh texture target directly on the surface, using its selected UV set and respecting texture wrap at UV boundaries. Include target selection, stroke preview, undo/redo, and save/reload so this meets the parent paint-mode criteria.
+    - [x] **Important:** Add mesh UV unwrap with seams and island packing; keep the existing manual UV editor for adjustments. Texture painting can use authored UVs before unwrap exists.
+  - [x] Share the preset library across weight paint, mesh paint, and image asset paint, with graphical brush previews in Assets and the paint toolbar.
+    - [x] Share `.brush` presets across weight, vertex color, and PNG paint; show graphical analytic tip previews in Assets and their paint toolbars.
+    - [x] **Required:** Use shared `.brush` presets in mesh texture painting; apply supported settings and report unsupported ones before a stroke.
+    - [x] **Optional:** Apply imported image tips in mesh texture painting and preview them in Assets, where only analytic tip previews are currently shown.
+  - [x] Apply image tips and pen pressure, and add smear and average behaviors plus further symmetry/masking controls. Bucket mirroring is still unsupported.
+    - [x] Add Blur, Smear, and Average to PNG image painting.
+    - [x] Apply image tip alpha or opaque luminance to PNG Brush, Eraser, Smear, and Average strokes; preview tip images in the brush inspector and PNG toolbar.
+    - [x] Add PNG X/Y mirror placement and Alpha Lock for non-bucket strokes; report unsupported bucket mirroring.
+    - [x] Map Windows pen pressure to size and strength responses in PNG, vertex color, and weight paint.
+    - [x] **Optional:** Apply image tips to weight and vertex painting, and add mesh paint symmetry and masking. Keep unsupported-tip warnings until each mode implements them. Consider bucket mirroring separately.
+  - [x] Import image brush tips and Photoshop `.abr` brush packs as project brush assets. Investigate Blender `.blend` brush assets and provide a direct importer or documented Blender export/conversion path. Preview imported brushes, map supported settings, and report unsupported settings without silently changing the stroke. Keep imported source files and reusable presets in the project Assets workflow.
+    - [x] Import an image tip from the PNG paint toolbar into `Assets/Brushes/Tips`, preview it, and apply its alpha to PNG paint strokes.
+    - [x] Document a manual Blender brush conversion path that recommends retaining source `.blend` files in project Assets.
+    - [x] **Optional:** Import `.abr` packs and map their supported settings with explicit unsupported-setting reports. A direct `.blend` importer is also optional while the documented conversion path is available.
+  - [x] **Required with new paint modes:** Add focused tests for mesh texture strokes across repeating UV seams, saved-result reload and pixel-history restoration, Alpha Lock, UV unwrap, and imported preset behavior. PNG, vertex color, preset serialization, and weight bucket regression tests already exist. Use [Blender weight paint brushes](https://docs.blender.org/manual/en/latest/sculpt_paint/weight_paint/brushes.html), [Blender brush asset management](https://docs.blender.org/manual/en/5.0/sculpt_paint/brush/brush_management.html), and [Photoshop brush imports](https://helpx.adobe.com/photoshop/desktop/apply-painting-techniques/brushes-presets/import-brushes-brush-packs.html) as feature and format references.

@@ -6,6 +6,7 @@
 #include "Core/Object.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/MeshEditGeometry.h"
+#include "Engine/Editor/Core/Paint/MeshUvUnwrap.h"
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -176,6 +177,32 @@ void EditorState::DrawMeshEditTools(IEditorUi& ui)
         ApplyMeshHistory(false);
     if (matches("Redo") && ui.Button("Redo mesh edit"))
         ApplyMeshHistory(true);
+    if (matches("UV unwrap"))
+    {
+        const char* sets[]{ "UV 0", "UV 1" };
+        const char* seams[]{ "Hard angles", "Hard angles + selected edges" };
+        ui.Combo("UV set", &session->unwrapUvSet, sets, 2);
+        ui.Combo("Seams", &session->unwrapSeamMode, seams, 2);
+        ui.SliderFloat("Seam angle", &session->unwrapSeamAngle, 1.f, 180.f);
+        if (session->unwrapSeamMode == 1 && session->selectionMode != 1)
+            ui.DisabledLabel("Choose Edge selection to mark additional seams.");
+        if (mesh->HasMorphTargets())
+            ui.DisabledLabel("UV unwrap requires a mesh without morph targets.");
+        else if (ui.Button("Unwrap and pack islands"))
+        {
+            std::vector<std::pair<uint32_t, uint32_t>> marked;
+            if (session->unwrapSeamMode == 1 && session->selectionMode == 1)
+            {
+                const auto& edges = CachedMeshEdges(*session, *mesh);
+                for (uint32_t id : session->selectedElements)
+                    if (id < edges.size()) marked.push_back(edges[id]);
+            }
+            MeshEditGeometry& edit = draft();
+            run("Could not unwrap this mesh. Check for degenerate faces.",
+                Paint::UnwrapMeshUv(edit.vertices, edit.indices,
+                    session->unwrapUvSet, session->unwrapSeamAngle, marked));
+        }
+    }
     if (count && matches("Transform"))
     {
         ui.DragFloat3("Translate", session->move, .01f);
@@ -331,6 +358,11 @@ void EditorState::DrawMeshStageTools(IEditorUi& ui,
                     raw->mesh->GetVertices();
                 ui.ColoredLabel(uvMapOnly ? "UV Map" : "Vertex Attributes",
                     { 0.35f, 0.75f, 1.f, 1.f });
+                if (uvMapOnly)
+                {
+                    const char* uvSets[]{ "UV 0", "UV 1" };
+                    ui.Combo("UV set", &raw->uvMapSet, uvSets, 2);
+                }
                 ui.ValueLabel("Save target", raw->meshSavePath.c_str());
                 const std::string count = std::to_string(vertices.size());
                 ui.ValueLabel("Triangle-list vertices", count.c_str());
@@ -341,11 +373,12 @@ void EditorState::DrawMeshStageTools(IEditorUi& ui,
                         static_cast<int>(vertices.size() - 1));
                 raw->selectedVertex = static_cast<uint32_t>(selected);
                 auto& vertex = vertices[raw->selectedVertex];
+                float* editedUv = raw->uvMapSet == 0 ? vertex.uv : vertex.uv1;
                 bool changed = false;
                 if (!uvMapOnly)
                     changed |= ui.DragFloat3("Position", vertex.pos, 0.01f);
-                changed |= ui.DragFloat("UV U", &vertex.uv[0], 0.005f);
-                changed |= ui.DragFloat("UV V", &vertex.uv[1], 0.005f);
+                changed |= ui.DragFloat("UV U", &editedUv[0], 0.005f);
+                changed |= ui.DragFloat("UV V", &editedUv[1], 0.005f);
                 if (!uvMapOnly)
                     changed |= ui.ColorEdit4("Vertex Color", vertex.color);
                 const auto& indices = raw->mesh->GetIndices();
@@ -355,8 +388,9 @@ void EditorState::DrawMeshStageTools(IEditorUi& ui,
                 uvPairs.reserve(vertices.size() * 2);
                 for (const auto& item : vertices)
                 {
-                    uvPairs.push_back(item.uv[0]);
-                    uvPairs.push_back(item.uv[1]);
+                    const float* uv = raw->uvMapSet == 0 ? item.uv : item.uv1;
+                    uvPairs.push_back(uv[0]);
+                    uvPairs.push_back(uv[1]);
                 }
                 const EditorUiUvMapResult uvResult = ui.UvMapEditor(
                     "MeshUVMap", uvPairs.data(), vertices.size(),
@@ -367,8 +401,11 @@ void EditorState::DrawMeshStageTools(IEditorUi& ui,
                     raw, "Reset Selected UV", nullptr, false);
                 if (uvContext.addRequested && raw->selectedVertex < vertices.size())
                 {
-                    vertices[raw->selectedVertex].uv[0] = 0.5f;
-                    vertices[raw->selectedVertex].uv[1] = 0.5f;
+                    float* uv = raw->uvMapSet == 0
+                        ? vertices[raw->selectedVertex].uv
+                        : vertices[raw->selectedVertex].uv1;
+                    uv[0] = 0.5f;
+                    uv[1] = 0.5f;
                     uvPairs[static_cast<size_t>(raw->selectedVertex) * 2] = 0.5f;
                     uvPairs[static_cast<size_t>(raw->selectedVertex) * 2 + 1] = 0.5f;
                     changed = true;
@@ -377,8 +414,10 @@ void EditorState::DrawMeshStageTools(IEditorUi& ui,
                 {
                     for (size_t index = 0; index < vertices.size(); ++index)
                     {
-                        vertices[index].uv[0] = uvPairs[index * 2];
-                        vertices[index].uv[1] = uvPairs[index * 2 + 1];
+                        float* uv = raw->uvMapSet == 0
+                            ? vertices[index].uv : vertices[index].uv1;
+                        uv[0] = uvPairs[index * 2];
+                        uv[1] = uvPairs[index * 2 + 1];
                     }
                     changed = true;
                 }

@@ -7,6 +7,8 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Object.h"
 #include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Materials/Material.h"
+#include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Prefab/PrefabAsset.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "imgui.h"
@@ -208,7 +210,7 @@ float EditorState::GetToolbarSectionMinimumWidth(ToolbarSection section) const
             : m_prefabDocumentFocused ? m_prefabMeshEdit : m_mainMeshEdit;
         controlWidth = mesh.enabled ?
             ToolbarButtonWidth(mesh.vertexPaintMode ? "Leave Paint" :
-                "Paint Vertices") + 85.f + ToolbarButtonWidth("Paint...") +
+                "Paint Mesh") + 85.f + ToolbarButtonWidth("Paint...") +
                 2.f * ImGui::GetStyle().ItemSpacing.x :
             82.f + ImGui::GetStyle().ItemSpacing.x +
                 ToolbarButtonWidth("Paint...");
@@ -430,6 +432,7 @@ void EditorState::DrawToolbarTools(IEditorUi& ui, bool singleRow,
         if (m_activeSceneAssetDocument &&
             m_activeSceneAssetDocument->meshStage)
             open("UV Map...", "UV Map");
+        open("UV unwrap...", "UV unwrap");
         showError(mesh->toolError.c_str());
     }
     else if (m_activeSceneAssetDocument &&
@@ -576,11 +579,12 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
         !(skeleton.enabled && skeleton.submode == 1))
     {
         if (row.Next(ToolbarButtonWidth(mesh.vertexPaintMode ?
-                "Leave Paint" : "Paint Vertices")) &&
-            ImGui::Button(mesh.vertexPaintMode ? "Leave Paint" : "Paint Vertices",
+                "Leave Paint" : "Paint Mesh")) &&
+            ImGui::Button(mesh.vertexPaintMode ? "Leave Paint" : "Paint Mesh",
                 {0.f, 20.f}))
         {
             FinishVertexPaintStroke(mesh);
+            FinishTexturePaintStroke(mesh);
             mesh.vertexPaintMode = !mesh.vertexPaintMode;
             mesh.vertexPaintTool = mesh.vertexPaintMode ? 1 : 0;
             view->AllowObjectTransform = !mesh.vertexPaintMode;
@@ -594,6 +598,7 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
             if (ui.Combo("##VertexPaintTool", &selectedTool, tools, 4))
             {
                 FinishVertexPaintStroke(mesh);
+                FinishTexturePaintStroke(mesh);
                 mesh.vertexPaintTool = selectedTool;
                 view->AllowObjectTransform = selectedTool == 0;
             }
@@ -610,8 +615,62 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
             }
         if (ImGui::BeginPopup("##VertexPaintOptions"))
         {
-            ImGui::TextUnformatted("Vertex Paint Options");
+            ImGui::TextUnformatted("Mesh Paint Options");
             ImGui::Separator();
+            const char* targets[]{ "Vertex colors", "Material texture" };
+            if (ui.Combo("Paint target", &mesh.paintTarget, targets, 2))
+            {
+                FinishVertexPaintStroke(mesh);
+                FinishTexturePaintStroke(mesh);
+            }
+            if (mesh.paintTarget == 1)
+            {
+                ImGui::Checkbox("Mirror local X", &mesh.paintMirrorX);
+                ImGui::Checkbox("Alpha Lock", &mesh.textureAlphaLock);
+                const char* slots[]{ "Base color", "Metallic / roughness",
+                    "Normal", "Occlusion", "Emissive", "Height" };
+                if (ui.Combo("Material slot", &mesh.textureSlot, slots, 6))
+                    FinishTexturePaintStroke(mesh);
+                auto* material = mesh.activeMesh && mesh.activeMesh->Owner
+                    ? mesh.activeMesh->Owner->GetComponent<Engine::Components::Material>()
+                    : nullptr;
+                int uvSet = 0;
+                std::shared_ptr<Engine::Components::Texture> texture;
+                if (material)
+                    switch (mesh.textureSlot)
+                    {
+                    case 0: texture = material->baseColorTexture;
+                        uvSet = material->baseColorUvSet; break;
+                    case 1: texture = material->metallicRoughnessTexture;
+                        uvSet = material->metallicRoughnessUvSet; break;
+                    case 2: texture = material->normalTexture;
+                        uvSet = material->normalUvSet; break;
+                    case 3: texture = material->occlusionTexture;
+                        uvSet = material->occlusionUvSet; break;
+                    case 4: texture = material->emissiveTexture;
+                        uvSet = material->emissiveUvSet; break;
+                    case 5: texture = material->heightTexture;
+                        uvSet = material->heightUvSet; break;
+                    }
+                if (texture)
+                {
+                    ui.ValueLabel("Texture", texture->GetFilePath().c_str());
+                    const std::string set = std::to_string(uvSet);
+                    ui.ValueLabel("UV set", set.c_str());
+                }
+                else ui.ColoredLabel("Assign a PNG to this material slot first.",
+                    {1.f, .6f, .3f, 1.f});
+            }
+            else
+            {
+                ImGui::Checkbox("Mirror local X", &mesh.paintMirrorX);
+                if (mesh.selectionMode == 0)
+                    ImGui::Checkbox("Selected vertices only",
+                        &mesh.vertexSelectionMask);
+                else if (mesh.vertexSelectionMask)
+                    ui.ColoredLabel("Select vertices to use the selection mask.",
+                        {1.f, .6f, .3f, 1.f});
+            }
             Paint::DrawBrushPreview(mesh.vertexBrush);
             namespace fs = std::filesystem;
             const fs::path root = m_projectSettings.assetsDirectory.empty() ?
@@ -700,13 +759,12 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
                 0.f, 1.f);
             ui.SliderFloat("Pressure strength",
                 &mesh.vertexBrush.pressureStrength, 0.f, 1.f);
-            if (!mesh.vertexBrush.tipPath.empty() ||
-                mesh.vertexBrush.shape != 0 ||
+            if (mesh.vertexBrush.shape != 0 ||
                 mesh.vertexBrush.rotation != 0.f ||
                 mesh.vertexBrush.scatter != 0.f ||
                 mesh.vertexBrush.falloff < 0 ||
                 mesh.vertexBrush.falloff > 2)
-                ui.ColoredLabel("This preset has unsupported vertex paint settings; brush strokes are blocked.",
+                ui.ColoredLabel("This preset has unsupported mesh paint settings; brush strokes are blocked.",
                     {1.f, .6f, .3f, 1.f});
             if (!mesh.toolError.empty())
                 ui.ColoredLabel(mesh.toolError.c_str(), {1.f, .4f, .3f, 1.f});

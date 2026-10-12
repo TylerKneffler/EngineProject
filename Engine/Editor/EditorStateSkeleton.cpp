@@ -7,6 +7,7 @@
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Compoonents/Transform.h"
 #include "Core/View/Views/SceneView.h"
 #include "Core/View/Views/HierarchyView.h"
@@ -19,6 +20,7 @@
 #include "Core/SkeletonBindPose.h"
 #include "Core/MeshEditSnapshot.h"
 #include "Core/Paint/PaintInput.h"
+#include "Core/Paint/BrushTipMask.h"
 #include "Core/SnapshotHistory.h"
 #include <algorithm>
 #include <charconv>
@@ -1245,10 +1247,23 @@ bool EditorState::HandleSkeletonViewport(IEditorUi& ui,
         }
     }
     if (!camera || !session.mesh->Owner) return false;
+    std::shared_ptr<Engine::Components::Texture> paintTip;
+    bool tipUsesLuminance = false;
     if (session.paintTool != 3 && !session.brushTipPath.empty())
     {
-        session.error = "This brush needs image-tip support; no stroke was applied.";
-        return false;
+        paintTip = Engine::Components::Texture::Acquire(
+            session.brushTipPath, false);
+        if (!paintTip || !paintTip->Load() || !paintTip->GetWidth() ||
+            !paintTip->GetHeight() || paintTip->GetPixels().size() <
+                static_cast<size_t>(paintTip->GetWidth()) *
+                    paintTip->GetHeight() * 4)
+        {
+            session.error = "Could not load the selected brush image tip.";
+            return false;
+        }
+        tipUsesLuminance = Paint::TipUsesLuminance(
+            paintTip->GetPixels(), paintTip->GetWidth(),
+            paintTip->GetHeight());
     }
     const auto& source = session.mesh->GetVertices();
     if (source.empty()) return false;
@@ -1583,9 +1598,16 @@ bool EditorState::HandleSkeletonViewport(IEditorUi& ui,
             std::cos(angle) * offset.y;
         return std::max(std::abs(x), std::abs(y));
     };
-    const auto sourceCoverage = WeightPaintSurface::Coverage(topology,
+    auto sourceCoverage = WeightPaintSurface::Coverage(topology,
         screenPositions, hitFaceIndex, { mouse.x, mouse.y, 0.f }, radius,
         screenDistance, falloffAt, sourceVisible);
+    if (paintTip)
+        for (size_t i = 0; i < sourceCoverage.size(); ++i)
+            sourceCoverage[i] *= Paint::SampleTipMask(
+                paintTip->GetPixels(), paintTip->GetWidth(),
+                paintTip->GetHeight(),
+                (projected[i].x - mouse.x) / radius,
+                (projected[i].y - mouse.y) / radius, tipUsesLuminance);
     for (size_t i = 0; i < vertices.size(); ++i)
         paintVertex(i, session.boneIndex, sourceCoverage[i], original);
     if (session.mirrorBoneIndex >= 0)
@@ -1687,9 +1709,20 @@ bool EditorState::HandleSkeletonViewport(IEditorUi& ui,
                             centroid) < MirrorWeightPaint::DistanceToBone(
                                 sourceFrame, centroid);
                     };
-                    const auto targetCoverage = WeightPaintSurface::Coverage(
+                    auto targetCoverage = WeightPaintSurface::Coverage(
                         topology, worldVertices, targetFaceIndex, mirrorCenter,
                         worldRadius, worldDistance, falloffAt, targetVisible);
+                    if (paintTip)
+                        for (size_t i = 0; i < targetCoverage.size(); ++i)
+                        {
+                            const glm::vec3 delta = worldVertices[i] - mirrorCenter;
+                            targetCoverage[i] *= Paint::SampleTipMask(
+                                paintTip->GetPixels(), paintTip->GetWidth(),
+                                paintTip->GetHeight(),
+                                glm::dot(delta, targetFrame.x) / worldRadius,
+                                glm::dot(delta, targetFrame.y) / worldRadius,
+                                tipUsesLuminance);
+                        }
                     bool reachesTarget = false;
                     std::vector<float> targetOriginal(source.size());
                     for (size_t i = 0; i < source.size(); ++i)

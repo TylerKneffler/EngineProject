@@ -21,6 +21,7 @@ build/
 !.local/tests/WeightPaintBucketTests.cpp
 !.local/tests/ImagePaintTests.cpp
 !.local/tests/VertexColorPaintTests.cpp
+!.local/tests/MeshTexturePaintTests.cpp
 build
 editor-startup.log
 project-build.log

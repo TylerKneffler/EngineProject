@@ -446,9 +446,6 @@ void EditorState::DrawSkeletonEditTools(IEditorUi& ui)
                     -180.f, 180.f);
             ui.SliderFloat("Scatter", &session->brushScatter, 0.f, 1.f);
         }
-        if (session->paintTool != 3 && !session->brushTipPath.empty())
-            ui.ColoredLabel("Image tips are not supported by weight paint yet; strokes are blocked.",
-                { 1.f, .6f, .25f, 1.f });
         if (session->paintTool == 2)
             ui.DisabledLabel("Erase redistributes weight to other unlocked bones.");
         else if (session->paintTool == 3)

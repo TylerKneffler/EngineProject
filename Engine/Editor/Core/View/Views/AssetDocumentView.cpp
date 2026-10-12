@@ -7,6 +7,7 @@
 #include "Engine/Editor/Core/Paint/BrushPreview.h"
 #include "Engine/Editor/Core/Paint/PaintInput.h"
 #include "Engine/Editor/Core/Paint/PngPaintWriter.h"
+#include "Engine/Editor/Core/Paint/AbrImporter.h"
 #include <imgui.h>
 #include <filesystem>
 #include <fstream>
@@ -574,6 +575,19 @@ void AssetDocumentView::DrawPaintToolbar(IEditorUi& ui,
                 m_imageError.clear();
             }
         }
+    }
+    if (ui.Button("Import .abr pack..."))
+    {
+        wchar_t selected[MAX_PATH]{};
+        OPENFILENAMEW dialog{};
+        dialog.lStructSize = sizeof(dialog);
+        dialog.hwndOwner = static_cast<HWND>(ImGui::GetMainViewport()->PlatformHandleRaw);
+        dialog.lpstrFile = selected;
+        dialog.nMaxFile = MAX_PATH;
+        dialog.lpstrFilter = L"Photoshop brushes (*.abr)\0*.abr\0";
+        dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+        if (GetOpenFileNameW(&dialog))
+            Paint::ImportAbrPack(fs::path(selected), root, m_imageError);
     }
     if (!m_imageBrush.tipPath.empty() && m_previewScene)
     {

@@ -35,6 +35,18 @@ constexpr uint32_t ScenePreviewMagic = 0x56525053; // "SPRV"
 std::vector<uint8_t> MakeBrushPreview(const Paint::BrushPreset& brush)
 {
     std::vector<uint8_t> pixels(PreviewSize * PreviewSize * 4, 255);
+    auto tip = brush.tipPath.empty() ? nullptr :
+        Engine::Components::Texture::Acquire(brush.tipPath, false);
+    const bool hasTip = tip && tip->Load() && tip->GetWidth() &&
+        tip->GetHeight() && tip->GetPixels().size() >=
+            static_cast<size_t>(tip->GetWidth()) * tip->GetHeight() * 4;
+    bool tipUsesLuminance = hasTip;
+    if (hasTip)
+        for (size_t alpha = 3;
+            alpha < static_cast<size_t>(tip->GetWidth()) * tip->GetHeight() * 4;
+            alpha += 4)
+            if (tip->GetPixels()[alpha] != 255)
+            { tipUsesLuminance = false; break; }
     for (uint32_t y = 0; y < PreviewSize; ++y)
     for (uint32_t x = 0; x < PreviewSize; ++x)
     {
@@ -55,6 +67,22 @@ std::vector<uint8_t> MakeBrushPreview(const Paint::BrushPreset& brush)
         if (brush.falloff == 0) amount = distance <= hardness ? 1.f : 0.f;
         else if (brush.falloff == 2)
             amount = amount * amount * (3.f - 2.f * amount);
+        if (hasTip && distance <= 1.f)
+        {
+            const uint32_t tx = std::min(tip->GetWidth() - 1,
+                static_cast<uint32_t>(std::clamp(px * .5f + .5f, 0.f, 1.f) *
+                    tip->GetWidth()));
+            const uint32_t ty = std::min(tip->GetHeight() - 1,
+                static_cast<uint32_t>(std::clamp(py * .5f + .5f, 0.f, 1.f) *
+                    tip->GetHeight()));
+            const size_t offset = (static_cast<size_t>(ty) *
+                tip->GetWidth() + tx) * 4;
+            const auto& tipPixels = tip->GetPixels();
+            amount *= tipUsesLuminance ?
+                1.f - (tipPixels[offset] + tipPixels[offset + 1] +
+                    tipPixels[offset + 2]) / 765.f :
+                tipPixels[offset + 3] / 255.f;
+        }
         const uint8_t value = static_cast<uint8_t>(std::lround(
             62.f + 180.f * amount));
         const size_t pixel = (static_cast<size_t>(y) * PreviewSize + x) * 4;

@@ -185,6 +185,11 @@ private:
         bool enabled = false;
         Engine::Components::Mesh* activeMesh = nullptr;
         bool vertexPaintMode = false;
+        int paintTarget = 0; // vertex color, material texture
+        int textureSlot = 0; // base color, metallic/roughness, normal, occlusion, emissive, height
+        bool paintMirrorX = false;
+        bool vertexSelectionMask = false;
+        bool textureAlphaLock = false;
         int vertexPaintTool = 0; // cursor, brush, eraser, bucket
         float vertexPaintColor[4]{ 1.f, .2f, .1f, 1.f };
         float vertexBucketTolerance = .05f;
@@ -194,6 +199,15 @@ private:
         bool vertexStrokeChanged = false;
         std::string vertexStrokeBefore;
         EditorUiVec2 lastVertexPaintPosition{ -10000.f, -10000.f };
+        std::string texturePaintPath;
+        std::vector<uint8_t> texturePaintPixels;
+        std::vector<uint8_t> textureStrokeBefore;
+        std::deque<std::vector<uint8_t>> textureUndo;
+        std::deque<std::vector<uint8_t>> textureRedo;
+        bool texturePainting = false;
+        bool textureStrokeChanged = false;
+        uint32_t texturePaintWidth = 0;
+        uint32_t texturePaintHeight = 0;
         int selectionMode = 0; // vertex, edge, face
         uint32_t selectedElement = 0;
         std::vector<uint32_t> selectedElements;
@@ -207,6 +221,9 @@ private:
         float rotationSnap = 0.f;
         float scaleSnap = 0.f;
         float bevelWidth = .15f;
+        float unwrapSeamAngle = 65.f;
+        int unwrapUvSet = 0;
+        int unwrapSeamMode = 0; // automatic, automatic plus selected edges
         std::string toolError;
         bool selecting = false;
         EditorUiVec2 selectionStart{};
@@ -247,6 +264,8 @@ private:
         const EditorUiViewportInput& input, Engine::Scene::Scene* scene,
         MeshEditSession& session, EditorTransformTool tool);
     void FinishVertexPaintStroke(MeshEditSession& session);
+    void FinishTexturePaintStroke(MeshEditSession& session);
+    bool StepTexturePaintHistory(MeshEditSession& session, bool redo);
     struct SkeletonEditSession;
     void DrawObjectEditTools(IEditorUi& ui);
     bool SaveMeshEditSession(MeshEditSession& session);
@@ -431,6 +450,7 @@ private:
         std::deque<std::string> redo;
         bool dirty = false;
         uint32_t selectedVertex = 0;
+        int uvMapSet = 0;
         uint32_t selectedInfluence = 0;
         MeshEditSession meshEdit;
         SkeletonEditSession skeletonEdit;

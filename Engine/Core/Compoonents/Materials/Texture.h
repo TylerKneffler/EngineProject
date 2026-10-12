@@ -28,6 +28,9 @@ public:
     // Discards CPU/GPU copies so a rewritten generated texture is visible on
     // the next Prepare call.
     void Reload();
+    // Replaces the decoded RGBA8 image during an editor paint stroke. The
+    // caller persists the pixels separately when the stroke is committed.
+    bool SetPreviewPixels(const std::vector<uint8_t>& rgba);
     bool Prepare(IGraphicsProvider* graphicsProvider);
 
     const std::string& GetFilePath() const { return m_filePath; }

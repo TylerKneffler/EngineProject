@@ -429,6 +429,19 @@ void Texture::Reload()
     m_preparedProvider = nullptr;
 }
 
+bool Texture::SetPreviewPixels(const std::vector<uint8_t>& rgba)
+{
+    if (!Load() || m_format != GraphicsTextureFormat::Rgba8 ||
+        rgba.size() != static_cast<size_t>(m_width) * m_height * 4)
+        return false;
+    m_pixels = rgba;
+    m_mipLevels = FullMipCount(m_width, m_height);
+    GenerateMipChain(m_pixels, m_width, m_height, m_format, m_srgb);
+    m_graphicsTexture.reset();
+    m_preparedProvider = nullptr;
+    return true;
+}
+
 bool Texture::Prepare(IGraphicsProvider* graphicsProvider)
 {
     if (!graphicsProvider)

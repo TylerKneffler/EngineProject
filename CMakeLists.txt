@@ -762,6 +762,19 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/MeshTexturePaintTests.cpp")
+    enable_testing()
+    add_executable(MeshTexturePaintTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/MeshTexturePaintTests.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Paint/PngPaintWriter.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Paint/BrushPreset.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Paint/AbrImporter.cpp")
+    target_link_libraries(MeshTexturePaintTests PRIVATE Engine)
+    target_include_directories(MeshTexturePaintTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME MeshTexturePaintRegression COMMAND MeshTexturePaintTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PhysicsAdapterTests.cpp")
     enable_testing()
     add_executable(PhysicsAdapterTests EXCLUDE_FROM_ALL
