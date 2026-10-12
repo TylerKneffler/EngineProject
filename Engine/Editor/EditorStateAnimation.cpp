@@ -1360,6 +1360,13 @@ void EditorState::ScanAnimationRigAssets(AnimationDocument& document)
     document.rigAssetsDirty = false;
     std::unordered_set<std::string> seen;
     std::vector<std::filesystem::path> rigPaths;
+    struct PreviewCandidate
+    {
+        std::string path;
+        size_t rigIndex = 0;
+        Engine::Model::RigAsset rig;
+    };
+    std::vector<PreviewCandidate> previewCandidates;
     const std::filesystem::path assets =
         m_projectSettings.assetsDirectory.empty()
             ? std::filesystem::path("Assets")
@@ -1393,8 +1400,11 @@ void EditorState::ScanAnimationRigAssets(AnimationDocument& document)
             auto* skeleton = RigAt(candidate, rig);
             if (!skeleton) break;
             if (!skeleton->ResolveModel()) continue;
+            previewCandidates.push_back({ path, rig,
+                Engine::Model::RigAsset::Capture(candidate, *skeleton) });
             auto meshes = BoundMeshNames(candidate, skeleton);
-            std::string label = it->path().filename().string() + " / " +
+            std::string label = "[Prefab] " +
+                it->path().filename().string() + " / " +
                 skeleton->Owner->name + " (" +
                 std::to_string(meshes.size()) + " bound mesh" +
                 (meshes.size() == 1 ? "" : "es") + ")";
@@ -1403,30 +1413,51 @@ void EditorState::ScanAnimationRigAssets(AnimationDocument& document)
                     skeleton->rigPath).filename().string();
             for (const auto& mesh : meshes) label += " / " + mesh;
             if (seen.insert(RigIdentity(path, rig)).second)
-                document.rigAssets.push_back({ path, std::move(label), rig });
+                document.rigAssets.push_back({ path, std::move(label), rig,
+                    path });
         }
     }
-    // A rig can point to a prefab through a portable Assets/... path. Add it
-    // only if the prefab scan did not already find that same rig.
+    // A rig asset is a separate resource. Its prefab reference supplies a
+    // model for the animation viewport, but does not determine its identity.
     for (const auto& rigPath : rigPaths)
     {
         auto rig = Engine::Model::RigAsset::Load(rigPath.string());
-        if (!rig || rig->prefabPath.empty()) continue;
-        const std::string identity = RigIdentity(rig->prefabPath,
-            rig->rigIndex);
-        if (seen.find(identity) != seen.end()) continue;
-        Engine::Scene::Scene candidate;
-        if (!Engine::Serialization::SceneSerializer::InstantiatePrefab(
-                candidate, rig->prefabPath, nullptr)) continue;
-        auto* skeleton = RigAt(candidate, rig->rigIndex);
-        if (!skeleton || !RigMatchesSkeleton(*rig, *skeleton)) continue;
-        seen.insert(identity);
-        document.rigAssets.push_back({ rig->prefabPath,
-            std::filesystem::path(rig->prefabPath).filename().string() +
-                " / " + skeleton->Owner->name + " (" +
-                std::to_string(rig->meshNames.size()) +
-                " bound meshes) / " + rigPath.filename().string(),
-            rig->rigIndex });
+        if (!rig) continue;
+        const auto compatible = [&](const PreviewCandidate& candidate)
+        {
+            if (candidate.rig.skinIndex != rig->skinIndex ||
+                candidate.rig.joints.size() != rig->joints.size()) return false;
+            for (size_t joint = 0; joint < rig->joints.size(); ++joint)
+                if (candidate.rig.joints[joint].nodeIndex !=
+                        rig->joints[joint].nodeIndex ||
+                    candidate.rig.joints[joint].name !=
+                        rig->joints[joint].name) return false;
+            return true;
+        };
+        const PreviewCandidate* preview = nullptr;
+        for (const auto& candidate : previewCandidates)
+            if (compatible(candidate) &&
+                AnimationIdentity(candidate.path) ==
+                    AnimationIdentity(document.path))
+            { preview = &candidate; break; }
+        if (!preview)
+            for (const auto& candidate : previewCandidates)
+                if (compatible(candidate) && !rig->prefabPath.empty() &&
+                    AnimationIdentity(candidate.path) ==
+                        AnimationIdentity(rig->prefabPath))
+                { preview = &candidate; break; }
+        if (!preview)
+            for (const auto& candidate : previewCandidates)
+                if (compatible(candidate))
+                { preview = &candidate; break; }
+        const std::string label = "[Rig] " + rigPath.filename().string() +
+            " / " + std::to_string(rig->joints.size()) + " joints" +
+            (preview ? " / preview: " +
+                std::filesystem::path(preview->path).filename().string() :
+                " / choose a compatible prefab to preview");
+        document.rigAssets.push_back({ preview ? preview->path : "",
+            label, preview ? preview->rigIndex : rig->rigIndex,
+            rigPath.string() });
     }
     std::sort(document.rigAssets.begin(), document.rigAssets.end(),
         [](const auto& left, const auto& right)
@@ -1578,15 +1609,23 @@ void EditorState::DrawAnimationRigToolbar(IEditorUi& ui,
     {
         if (!query.empty() && LowerText(asset.label).find(query) ==
                 std::string::npos &&
-            LowerText(asset.path).find(query) == std::string::npos)
+            LowerText(asset.path).find(query) == std::string::npos &&
+            LowerText(asset.assetPath).find(query) == std::string::npos)
             continue;
         ImGui::PushID(&asset);
+        const bool rigAsset = LowerText(
+            std::filesystem::path(asset.assetPath).extension().string()) == ".rig";
         if (ImGui::Selectable(asset.label.c_str(),
-                RigIdentity(asset.path, asset.rigIndex) ==
-                    RigIdentity(document.path, document.rigIndex)))
+                rigAsset ? AnimationIdentity(asset.assetPath) ==
+                    AnimationIdentity(document.rigPath) :
+                    RigIdentity(asset.path, asset.rigIndex) ==
+                        RigIdentity(document.path, document.rigIndex)))
         {
-            QueueAnimationDocumentOpen(asset.path, asset.rigIndex);
-            if (document.path.empty() && document.view &&
+            if (asset.path.empty())
+                document.error = "Choose a prefab with a compatible model to preview this rig.";
+            else
+                QueueAnimationDocumentOpen(asset.path, asset.rigIndex);
+            if (!asset.path.empty() && document.path.empty() && document.view &&
                 m_activeAnimationDocument != &document)
                 document.view->SetOpen(false);
         }

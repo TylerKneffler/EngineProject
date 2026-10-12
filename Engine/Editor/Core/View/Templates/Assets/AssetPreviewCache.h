@@ -39,7 +39,6 @@ private:
     {
         std::filesystem::file_time_type writeTime{};
         Engine::Graphics::IGraphicsProvider* provider = nullptr;
-        std::string linkedPath;
         std::shared_ptr<Engine::Components::Texture> source;
         std::shared_ptr<Engine::Graphics::IGraphicsTexture> generated;
     };

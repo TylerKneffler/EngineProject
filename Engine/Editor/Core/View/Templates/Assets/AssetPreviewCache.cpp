@@ -228,6 +228,74 @@ std::vector<uint8_t> MakeImagePreview(
     return pixels;
 }
 
+std::vector<uint8_t> MakeRigPreview(const Engine::Model::RigAsset& rig)
+{
+    if (rig.joints.empty()) return {};
+    std::vector<uint8_t> pixels(PreviewSize * PreviewSize * 4, 255);
+    for (size_t pixel = 0; pixel < pixels.size(); pixel += 4)
+    {
+        pixels[pixel] = 25;
+        pixels[pixel + 1] = 34;
+        pixels[pixel + 2] = 47;
+    }
+    const size_t count = rig.joints.size();
+    std::vector<int> parents(count, -1);
+    std::vector<int> depths(count, -1);
+    int maximumDepth = 0;
+    for (size_t joint = 0; joint < count; ++joint)
+        for (size_t candidate = 0; candidate < count; ++candidate)
+            if (joint != candidate &&
+                rig.joints[joint].parentNodeIndex ==
+                    static_cast<int>(rig.joints[candidate].nodeIndex))
+            { parents[joint] = static_cast<int>(candidate); break; }
+    const auto depthOf = [&](const auto& self, size_t joint, size_t remaining) -> int
+    {
+        if (!remaining || parents[joint] < 0) return 0;
+        return 1 + self(self, static_cast<size_t>(parents[joint]), remaining - 1);
+    };
+    for (size_t joint = 0; joint < count; ++joint)
+        maximumDepth = std::max(maximumDepth,
+            depths[joint] = depthOf(depthOf, joint, count));
+    const auto point = [&](size_t joint)
+    {
+        return std::pair<int, int>{
+            12 + depths[joint] * 104 / std::max(1, maximumDepth),
+            12 + static_cast<int>(joint * 104 / std::max<size_t>(1, count - 1)) };
+    };
+    const auto paint = [&](int x, int y, uint8_t radius,
+        uint8_t red, uint8_t green, uint8_t blue)
+    {
+        for (int offsetY = -radius; offsetY <= radius; ++offsetY)
+        for (int offsetX = -radius; offsetX <= radius; ++offsetX)
+        {
+            const int px = x + offsetX, py = y + offsetY;
+            if (px < 0 || py < 0 || px >= static_cast<int>(PreviewSize) ||
+                py >= static_cast<int>(PreviewSize)) continue;
+            const size_t index = (static_cast<size_t>(py) * PreviewSize + px) * 4;
+            pixels[index] = red;
+            pixels[index + 1] = green;
+            pixels[index + 2] = blue;
+        }
+    };
+    for (size_t joint = 0; joint < count; ++joint)
+    {
+        if (parents[joint] < 0) continue;
+        const auto [x0, y0] = point(joint);
+        const auto [x1, y1] = point(static_cast<size_t>(parents[joint]));
+        const int steps = std::max(std::abs(x1 - x0), std::abs(y1 - y0));
+        for (int step = 0; step <= steps; ++step)
+            paint(x0 + (x1 - x0) * step / std::max(1, steps),
+                y0 + (y1 - y0) * step / std::max(1, steps),
+                0, 83, 154, 195);
+    }
+    for (size_t joint = 0; joint < count; ++joint)
+    {
+        const auto [x, y] = point(joint);
+        paint(x, y, 2, 139, 222, 246);
+    }
+    return pixels;
+}
+
 std::vector<uint8_t> MakeMaterialPreview(const Engine::Components::Material& material)
 {
     std::vector<uint8_t> pixels(PreviewSize * PreviewSize * 4, 0);
@@ -647,8 +715,6 @@ void* AssetPreviewCache::Get(const std::string& path,
     if (entry && entry->provider == graphicsProvider &&
         entry->writeTime == writeTime)
     {
-        if (!entry->linkedPath.empty())
-            return Get(entry->linkedPath, graphicsProvider);
         const auto* texture = entry->generated
             ? entry->generated.get()
             : (entry->source ? entry->source->GetGraphicsTexture() : nullptr);
@@ -675,17 +741,8 @@ void* AssetPreviewCache::Get(const std::string& path,
             else if (extension == ".rig")
             {
                 const auto rig = Engine::Model::RigAsset::Load(path);
-                if (rig && !rig->prefabPath.empty())
-                {
-                    std::filesystem::path prefab =
-                        Engine::Components::Mesh::ResolveFilePath(rig->prefabPath);
-                    if (!std::filesystem::exists(prefab))
-                        prefab = std::filesystem::path(path).parent_path() /
-                            rig->prefabPath;
-                    if (std::filesystem::exists(prefab) &&
-                        Extension(prefab.string()) == ".prefab")
-                        created->linkedPath = prefab.string();
-                }
+                if (rig) created->generated = Upload(graphicsProvider,
+                    MakeRigPreview(*rig));
             }
             else if (extension == ".brush")
             {
@@ -751,8 +808,6 @@ void* AssetPreviewCache::Get(const std::string& path,
             }
             return created;
         }, std::chrono::seconds(30));
-    if (entry && !entry->linkedPath.empty())
-        return Get(entry->linkedPath, graphicsProvider);
     const auto* texture = entry && entry->generated
         ? entry->generated.get()
         : (entry && entry->source ? entry->source->GetGraphicsTexture() : nullptr);

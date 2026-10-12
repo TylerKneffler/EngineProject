@@ -493,6 +493,7 @@ private:
               std::string path;
               std::string label;
               size_t rigIndex = 0;
+              std::string assetPath;
           };
         std::string path;
         std::string identity;
