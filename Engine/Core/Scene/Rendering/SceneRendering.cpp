@@ -788,7 +788,8 @@ void Scene::BuildGridPipeline()
     // Grid pipeline: 
     // - No vertex buffer (fullscreen triangle via SV_VertexID)
     // - Alpha blend for semi-transparency
-    // - Depth test at far plane to let background show through
+    // - Preserve scene alpha under transparent grid cells and lines
+    // - Depth test at the reconstructed grid plane
     auto& bp = *builder;
     m_gridPipeline = bp.SetVertexShader(vsShader.get())
         .SetPixelShader(psShader.get())
@@ -801,7 +802,7 @@ void Scene::BuildGridPipeline()
         .SetDestBlend(5)                       // D3D12_BLEND_INV_SRC_ALPHA (0-indexed: 5)
         .SetBlendOp(0)                         // D3D12_BLEND_OP_ADD (0-indexed: 0)
         .SetSrcBlendAlpha(1)                   // D3D12_BLEND_ONE (0-indexed: 1)
-        .SetDestBlendAlpha(0)                  // D3D12_BLEND_ZERO (0-indexed: 0)
+        .SetDestBlendAlpha(5)                  // D3D12_BLEND_INV_SRC_ALPHA (0-indexed: 5)
         .SetBlendOpAlpha(0)                    // D3D12_BLEND_OP_ADD (0-indexed: 0)
         .SetDepthEnable(true)
         .SetDepthWriteEnable(false)

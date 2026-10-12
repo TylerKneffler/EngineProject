@@ -21,7 +21,8 @@ Status convention:
     - [x] Test deterministic PNG stamping, erasure, connected fill, and encoded PNG reload.
     - [x] Paint vertex colors directly on a mesh with Brush, Eraser, and connected Bucket tools, a viewport brush outline, shared mesh undo/redo, and Save Mesh persistence.
     - [x] Verify vertex color snapshot undo/redo and native mesh save/reload with a focused test.
-    - [ ] Paint a mesh texture target directly on the surface.
+    - [ ] Paint a mesh texture target directly on the surface, using its selected UV set and respecting texture wrap at UV boundaries.
+    - [ ] Add mesh UV unwrap with seams and island packing; keep the existing manual UV editor for adjustments.
   - [ ] Share the preset library across weight paint, mesh paint, and image asset paint, with graphical brush previews in Assets and the paint toolbar.
     - [x] Share `.brush` presets across weight, vertex color, and PNG paint; show graphical analytic tip previews in Assets and their paint toolbars.
     - [ ] Preview imported image tips and use the same preset in mesh texture painting.

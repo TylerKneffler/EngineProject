@@ -148,6 +148,9 @@ GridPixel PSMain(float4 svPos : SV_POSITION,
         adaptiveFadeDistance * 4.0, dist);
 
     float alpha = gridA * fade * gridColor.a;
+    // Empty cells and fully faded lines must leave the scene color and alpha
+    // untouched when the viewport is composited over the editor background.
+    if (alpha <= 0.0) discard;
 
     // Highlight the world X (red) and Z (blue) axis lines.
     float2 axDeriv = fwidth(planePosition);

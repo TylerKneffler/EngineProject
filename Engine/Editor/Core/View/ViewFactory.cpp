@@ -59,6 +59,8 @@ void ViewFactory::AssignLowestAvailableTitle(const std::string& typeName,
     panel->SetTitle(slot == 1
         ? typeName
         : typeName + " " + std::to_string(slot));
+    if (typeName == "Scene")
+        panel->SetTitle(panel->GetTitle() + "###" + panel->GetTitle());
 }
 
 // ---------------------------------------------------------------------------
