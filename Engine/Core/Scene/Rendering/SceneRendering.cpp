@@ -1329,7 +1329,8 @@ void Scene::PrepareRenderFrame()
         const bool spriteReady = sprite && sprite->IsEditorVisible() &&
             sprite->PrepareRenderData(m_graphicsProvider, spriteData);
         const bool renderable = spriteReady ||
-            (mesh && mesh->IsReady() && mesh->IsEditorVisible());
+            (mesh && mesh->IsReady() && mesh->IsEditorVisible() &&
+                mesh->IsAnimationVisible());
         if (!candidate->IsEnabledInHierarchy() || !renderable)
             continue;
 

@@ -147,6 +147,8 @@ public:
     // Runtime lifecycle shared by the standalone game and Editor Play mode.
     void Start();
     void Update(float deltaTime);
+    // Re-evaluate animation-facing solvers after a manually sampled pose.
+    void ApplyPoseConstraints();
     // Advances exactly one configured fixed frame. Offline exporters use this
     // instead of supplying or sampling wall-clock deltas.
     void UpdateFixedFrame();

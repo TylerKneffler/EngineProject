@@ -109,6 +109,8 @@ public:
     // Transient editor-stage visibility; never serialized into the asset.
     bool IsEditorVisible() const { return m_editorVisible; }
     void SetEditorVisible(bool visible) { m_editorVisible = visible; }
+    bool IsAnimationVisible() const { return m_animationVisible; }
+    void SetAnimationVisible(bool visible) { m_animationVisible = visible; }
     const std::string& GetFilePath() const { return m_filePath; }
     void SetAuthoredFilePath(std::string path);
     bool HasBounds() const { return m_hasBounds; }
@@ -116,6 +118,10 @@ public:
     const glm::vec3& GetBoundsMax() const { return m_boundsMax; }
     unsigned GetMorphNodeIndex() const { return m_morphNodeIndex; }
     void SetMorphData(unsigned nodeIndex, std::vector<MorphTarget> targets,
+        std::vector<float> weights);
+    static bool SaveMorphFile(const std::string& path,
+        const std::vector<MorphTarget>& targets);
+    bool LoadMorphFile(const std::string& path, unsigned nodeIndex,
         std::vector<float> weights);
     bool SetMorphWeights(const std::vector<float>& weights);
     // Detects edits made through the mutable inspector/accessor and publishes
@@ -167,11 +173,13 @@ private:
     IGraphicsBufferFactory* m_bufferFactory = nullptr;
     bool m_ready = false;
     bool m_editorVisible = true;
+    bool m_animationVisible = true;
     bool m_hasBounds = false;
     glm::vec3 m_boundsMin{};
     glm::vec3 m_boundsMax{};
     unsigned m_morphNodeIndex = 0;
     std::vector<MorphTarget> m_morphTargets;
+    std::string m_morphFilePath;
     std::vector<float> m_morphWeights;
     std::vector<glm::vec4> m_packedMorphWeights;
     mutable std::vector<float> m_observedMorphWeights;

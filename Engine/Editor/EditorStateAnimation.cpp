@@ -13,14 +13,19 @@
 #include "Core/SkeletonBindPose.h"
 #include "Core/Compoonents/Animation/AnimationBone.h"
 #include "Core/Compoonents/Animation/AnimationManager.h"
+#include "Core/Compoonents/Animation/TwoBoneIK.h"
+#include "Core/Compoonents/Animation/ChainIK.h"
+#include "Core/Model/AnimationControlSpace.h"
 #include "Core/Compoonents/Animation/Model.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
+#include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Transform.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/ComponentReference.h"
 #include "Core/Model/RigAsset.h"
+#include "Core/Model/PoseAsset.h"
 #include "Core/Model/AnimationClipAsset.h"
 #include "Core/Object.h"
 #include "Core/Prefab/PrefabAsset.h"
@@ -32,13 +37,50 @@
 #include <cctype>
 #include <cstdio>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <unordered_set>
+#include <glm/gtc/matrix_transform.hpp>
 
 namespace Engine::Editor
 {
 namespace
 {
+template <typename Document>
+float AnimationLocalTime(const Document& document, size_t rigIndex,
+    int clipIndex)
+{
+    const auto track = std::find_if(document.tracks.begin(),
+        document.tracks.end(), [rigIndex](const auto& item)
+        { return item.index == rigIndex; });
+    if (track == document.tracks.end() || !track->sourceManager ||
+        clipIndex < 0 || clipIndex >= static_cast<int>(
+            track->sourceManager->clips.size()))
+        return document.playheadSeconds;
+    float start = 0.f;
+    bool repeat = false;
+    if (track->clipIndex == clipIndex)
+    {
+        start = track->startSeconds;
+        repeat = track->repeat;
+    }
+    else
+    {
+        const auto layer = std::find_if(track->stackedClips.begin(),
+            track->stackedClips.end(), [clipIndex](const auto& item)
+            { return item.clipIndex == clipIndex; });
+        if (layer != track->stackedClips.end())
+        {
+            start = layer->startSeconds;
+            repeat = layer->repeat;
+        }
+    }
+    const float length = std::max(.01f,
+        track->sourceManager->clips[clipIndex].duration);
+    const float elapsed = std::max(0.f, document.playheadSeconds - start);
+    return repeat ? std::fmod(elapsed, length) : elapsed;
+}
+
 std::string AnimationIdentity(const std::string& path)
 {
     std::error_code error;
@@ -162,6 +204,73 @@ std::string LowerText(std::string value)
     std::transform(value.begin(), value.end(), value.begin(),
         [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
     return value;
+}
+
+Engine::Model::RigAsset::ControlMap HumanoidControls(
+    const Engine::Components::Skeleton& skeleton)
+{
+    Engine::Model::RigAsset::ControlMap result;
+    const auto& joints = skeleton.ResolveJoints();
+    const auto nodeOf = [&](const Engine::Core::Object* object) -> int
+    {
+        const auto found = std::find(joints.begin(), joints.end(), object);
+        const size_t index = static_cast<size_t>(found - joints.begin());
+        return found == joints.end() || index >= skeleton.jointNodes.size()
+            ? -1 : static_cast<int>(skeleton.jointNodes[index]);
+    };
+    const auto normalized = [](std::string name)
+    {
+        name = LowerText(std::move(name));
+        name.erase(std::remove_if(name.begin(), name.end(),
+            [](unsigned char ch) { return !std::isalnum(ch); }), name.end());
+        return name;
+    };
+    for (auto* joint : joints)
+    {
+        if (!joint) continue;
+        const auto name = normalized(joint->name);
+        if (result.pelvis < 0 && (name.find("pelvis") != std::string::npos ||
+            name.find("hips") != std::string::npos || name == "hip"))
+            result.pelvis = nodeOf(joint);
+        if (result.root < 0 && (name == "root" || name == "armature" ||
+            name == "bip001")) result.root = nodeOf(joint);
+    }
+    if (result.root < 0)
+        for (auto* joint : joints)
+            if (joint && nodeOf(joint->Parent) < 0)
+            { result.root = nodeOf(joint); break; }
+    if (result.pelvis < 0) result.pelvis = result.root;
+    for (size_t index = 0; index < result.limbs.size(); ++index)
+    {
+        const bool left = index == 0 || index == 2;
+        const bool arm = index < 2;
+        for (auto* joint : joints)
+        {
+            if (!joint || !joint->Parent || !joint->Parent->Parent) continue;
+            const auto name = normalized(joint->name);
+            const bool side = left
+                ? name.find("left") != std::string::npos ||
+                    (!name.empty() && (name.front() == 'l' || name.back() == 'l'))
+                : name.find("right") != std::string::npos ||
+                    (!name.empty() && (name.front() == 'r' || name.back() == 'r'));
+            const bool tip = arm
+                ? name.find("hand") != std::string::npos ||
+                    name.find("wrist") != std::string::npos
+                : name.find("foot") != std::string::npos ||
+                    name.find("ankle") != std::string::npos;
+            if (!side || !tip || (arm && name.find("thumb") != std::string::npos) ||
+                (!arm && name.find("toe") != std::string::npos)) continue;
+            const int upper = nodeOf(joint->Parent->Parent);
+            const int lower = nodeOf(joint->Parent);
+            const int end = nodeOf(joint);
+            if (upper >= 0 && lower >= 0 && end >= 0)
+            {
+                result.limbs[index] = {upper, lower, end};
+                break;
+            }
+        }
+    }
+    return result;
 }
 
 ImVec4 RigTimelineColor(size_t rigIndex)
@@ -531,7 +640,8 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
             sourceSkeleton);
         if (!document->rigPath.empty())
         {
-            auto rig = Engine::Model::RigAsset::Load(document->rigPath);
+            auto rig = Engine::Model::RigAsset::Load(
+                document->rigPath, sourceSkeleton->skinIndex);
             if (!rig || !RigMatchesSkeleton(*rig, *sourceSkeleton))
                 document->error = "Rig asset is missing or out of date; saving the clip will regenerate it.";
         }
@@ -583,6 +693,14 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
             track.index = index;
             track.name = sourceRig->Owner->name;
             track.path = sourceRig->rigPath;
+            if (!track.path.empty())
+                if (auto rig = Engine::Model::RigAsset::Load(
+                        track.path, sourceRig->skinIndex))
+                {
+                    track.controls = rig->controls;
+                    track.poses = rig->poses;
+                    track.symmetryPairs = rig->symmetryPairs;
+                }
             track.boundMeshes = BoundMeshNames(*document->sourceScene,
                 sourceRig);
             track.sourceSkeleton = sourceRig;
@@ -680,11 +798,35 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
         };
         view->OnGizmoInteraction = [this, raw](bool active)
         {
-            if (active) raw->gizmoWasActive = true;
+            if (active && !raw->gizmoWasActive)
+            {
+                raw->gizmoWasActive = true;
+                raw->gizmoDragBone = raw->poseScene
+                    ? raw->poseScene->GetSelectedObject() : nullptr;
+                if (raw->gizmoDragBone)
+                {
+                    const auto& transform = raw->gizmoDragBone->transform;
+                    raw->gizmoDragStartPosition = transform.position;
+                    raw->gizmoDragStartRotation = transform.rotation;
+                    raw->gizmoDragStartScale = transform.scale;
+                }
+            }
             else if (raw->gizmoWasActive)
             {
-                raw->gizmoWasActive = false;
-                if (raw->autoKey) AddAnimationKey(*raw);
+                if (!active)
+                {
+                    raw->gizmoWasActive = false;
+                    const auto* bone = raw->gizmoDragBone;
+                    const bool changed = bone &&
+                        (bone->transform.position !=
+                            raw->gizmoDragStartPosition ||
+                         bone->transform.rotation !=
+                            raw->gizmoDragStartRotation ||
+                         bone->transform.scale !=
+                            raw->gizmoDragStartScale);
+                    raw->gizmoDragBone = nullptr;
+                    if (raw->autoKey && changed) AddAnimationKey(*raw);
+                }
             }
             if (m_renderer && active) m_renderer->MarkDirty();
         };
@@ -692,6 +834,9 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
         { SetActiveAnimationDocument(raw); };
         view->OnDrawBottomPanel = [this, raw](IEditorUi& ui)
         { DrawAnimationTimeline(ui, *raw); };
+        view->OnDrawRigControls = [this, raw](IEditorUi& ui,
+            const EditorUiViewportInput& input)
+        { return DrawAnimationRigViewport(ui, input, *raw); };
         RefreshAnimationDocumentTitle(*raw);
         SampleAnimationDocument(*raw);
         view->RequestFocusOnNextDraw();
@@ -726,6 +871,9 @@ void EditorState::FocusAnimationRig(AnimationDocument& document, size_t index)
             document.poseSkeleton = track.poseSkeleton;
             document.clipIndex = track.clipIndex;
             document.selectedBone = track.selectedBone;
+            document.ikControlTip = -1;
+            document.rigHandleKind = -1;
+            document.rigHandleDrag = -1;
             document.repairIssueChannel = -1;
             RefreshAnimationDocumentTitle(document);
             if (m_activeAnimationDocument == &document)
@@ -884,7 +1032,8 @@ void EditorState::SampleAnimationDocument(AnimationDocument& document)
     const bool layeredPreview = document.tracks.size() > 1 ||
         std::any_of(document.tracks.begin(), document.tracks.end(),
             [](const auto& track)
-            { return track.weight != 1.f || !track.stackedClips.empty(); });
+            { return track.weight != 1.f || track.startSeconds > 0.f ||
+                track.repeat || !track.stackedClips.empty(); });
     if (layeredPreview)
     {
         for (auto& track : document.tracks)
@@ -929,6 +1078,7 @@ void EditorState::SampleAnimationDocument(AnimationDocument& document)
                 for (auto* joint : track.poseSkeleton->ResolveJoints())
                     if (joint) joint->transform.ClearEditorOverride();
                 const auto addLayer = [&](int clipIndex, float weight,
+                    float startSeconds, bool repeat, int repeatCount,
                     size_t layerIndex)
                 {
                     if (clipIndex < 0 ||
@@ -944,19 +1094,33 @@ void EditorState::SampleAnimationDocument(AnimationDocument& document)
                         preview->clips.push_back(std::move(clip));
                         Engine::Components::AnimationManager::Layer layer;
                         layer.clip = preview->clips.back().clipName;
-                        layer.looping = true;
+                        layer.looping = false;
                         layer.nodeMask = track.poseSkeleton->jointNodes;
                         preview->layers.push_back(std::move(layer));
                     }
                     auto& layer = preview->layers[previewLayer++];
-                    layer.time = document.playheadSeconds;
-                    layer.weight = weight;
+                    const float length = std::max(.01f,
+                        track.sourceManager->clips[clipIndex].duration);
+                    const float elapsed = document.playheadSeconds -
+                        startSeconds;
+                    const bool active = elapsed >= 0.f &&
+                        (repeat ? repeatCount == 0 ||
+                            elapsed < length * repeatCount :
+                            elapsed <= length);
+                    layer.time = repeat ? std::fmod(
+                        std::max(0.f, elapsed), length) :
+                        std::clamp(elapsed, 0.f, length);
+                    layer.weight = active ? weight : 0.f;
                 };
-                addLayer(track.clipIndex, track.weight, 0);
+                addLayer(track.clipIndex, track.weight,
+                    track.startSeconds, track.repeat, track.repeatCount, 0);
                 for (size_t layerIndex = 0;
                     layerIndex < track.stackedClips.size(); ++layerIndex)
                     addLayer(track.stackedClips[layerIndex].clipIndex,
                         track.stackedClips[layerIndex].weight,
+                        track.stackedClips[layerIndex].startSeconds,
+                        track.stackedClips[layerIndex].repeat,
+                        track.stackedClips[layerIndex].repeatCount,
                         layerIndex + 1);
             }
             if (rebuild) document.previewLayouts[preview] = std::move(layout);
@@ -985,6 +1149,7 @@ void EditorState::SampleAnimationDocument(AnimationDocument& document)
                         sourceNodes[index]->transform.scale;
                 }
         }
+        document.poseScene->ApplyPoseConstraints();
         if (m_renderer) m_renderer->MarkDirty();
         return;
     }
@@ -1037,8 +1202,9 @@ void EditorState::SampleAnimationDocument(AnimationDocument& document)
     }
     document.poseManager->clip = clips[clipIndex].clipName;
     document.poseManager->time = document.playheadSeconds;
-    document.poseManager->looping = true;
+    document.poseManager->looping = false;
     document.poseManager->Tick(0.f);
+    document.poseScene->ApplyPoseConstraints();
     if (m_renderer) m_renderer->MarkDirty();
 }
 
@@ -1055,9 +1221,110 @@ void EditorState::RecordAnimationEdit(AnimationDocument& document,
     }
     document.redo.clear();
     document.dirty = document.sourceScene->SaveToString() !=
-        document.savedSnapshot;
+        document.savedSnapshot || std::any_of(document.tracks.begin(),
+            document.tracks.end(), [](const auto& track)
+            { return track.controlsDirty; });
     RefreshAnimationDocumentTitle(document);
     SampleAnimationDocument(document);
+}
+
+bool EditorState::CopyAnimationKeys(AnimationDocument& document)
+{
+    if (document.selectedKeys.empty()) return false;
+    const size_t rig = document.selectedKeys.front().rigIndex;
+    const auto track = std::find_if(document.tracks.begin(),
+        document.tracks.end(), [rig](const auto& item)
+        { return item.index == rig; });
+    if (track == document.tracks.end() || !track->sourceManager) return false;
+    const auto startFor = [&](int clipIndex)
+    {
+        if (clipIndex == track->clipIndex) return track->startSeconds;
+        const auto layer = std::find_if(track->stackedClips.begin(),
+            track->stackedClips.end(), [clipIndex](const auto& item)
+            { return item.clipIndex == clipIndex; });
+        return layer == track->stackedClips.end() ? 0.f :
+            layer->startSeconds;
+    };
+    float firstTime = std::numeric_limits<float>::infinity();
+    for (const auto& key : document.selectedKeys)
+        if (key.rigIndex == rig && key.clipIndex >= 0 &&
+            key.clipIndex < static_cast<int>(track->sourceManager->clips.size()))
+            firstTime = std::min(firstTime,
+                startFor(key.clipIndex) + key.time);
+    if (!std::isfinite(firstTime)) return false;
+    std::vector<Engine::Model::AnimationChannel> copied;
+    for (const auto& key : document.selectedKeys)
+    {
+        if (key.rigIndex != rig || key.clipIndex < 0 ||
+            key.clipIndex >= static_cast<int>(track->sourceManager->clips.size()))
+            continue;
+        auto blocks = AnimationClipEditing::CopyKeyBlocks(
+            track->sourceManager->clips[key.clipIndex], key.nodeIndex,
+            key.time, startFor(key.clipIndex) + key.time - firstTime);
+        copied.insert(copied.end(),
+            std::make_move_iterator(blocks.begin()),
+            std::make_move_iterator(blocks.end()));
+    }
+    if (copied.empty()) return false;
+    document.copiedKeys = std::move(copied);
+    document.copiedKeysRig = rig;
+    if (document.rigIndex != rig || document.clipIndex < 0)
+        document.pasteClipIndex = document.selectedKeys.front().clipIndex;
+    else
+        document.pasteClipIndex = document.clipIndex;
+    document.error.clear();
+    return true;
+}
+
+bool EditorState::PasteAnimationKeys(AnimationDocument& document)
+{
+    if (document.copiedKeys.empty()) return false;
+    const size_t rig = document.copiedKeysRig;
+    auto track = std::find_if(document.tracks.begin(),
+        document.tracks.end(), [rig](const auto& item)
+        { return item.index == rig; });
+    if (track == document.tracks.end() || !track->sourceManager ||
+        document.pasteClipIndex < 0 ||
+        document.pasteClipIndex >= static_cast<int>(
+            track->sourceManager->clips.size()))
+    {
+        document.error = "Choose a destination animation before pasting keys.";
+        return false;
+    }
+    auto before = track->sourceManager->clips;
+    const float localStart = AnimationLocalTime(document, rig,
+        document.pasteClipIndex);
+    if (!AnimationClipEditing::PasteKeyBlocks(
+            track->sourceManager->clips[document.pasteClipIndex],
+            document.copiedKeys, localStart))
+    {
+        document.error = "Selected keys could not be pasted into this animation.";
+        return false;
+    }
+    if (document.pasteClipIndex != track->clipIndex &&
+        std::none_of(track->stackedClips.begin(), track->stackedClips.end(),
+            [&](const auto& layer)
+            { return layer.clipIndex == document.pasteClipIndex; }))
+        track->stackedClips.push_back({ document.pasteClipIndex, 1.f });
+    if (document.rigIndex != rig) FocusAnimationRig(document, rig);
+    document.clipIndex = document.pasteClipIndex;
+    document.selectedKeys.clear();
+    for (const auto& channel : document.copiedKeys)
+    {
+        const AnimationDocument::TimelineKey key{ rig,
+            document.pasteClipIndex, channel.nodeIndex,
+            localStart + channel.times.front() };
+        if (std::none_of(document.selectedKeys.begin(),
+                document.selectedKeys.end(), [&](const auto& existing)
+                { return existing.rigIndex == key.rigIndex &&
+                    existing.clipIndex == key.clipIndex &&
+                    existing.nodeIndex == key.nodeIndex &&
+                    std::abs(existing.time - key.time) <= 1e-4f; }))
+            document.selectedKeys.push_back(key);
+    }
+    document.error.clear();
+    RecordAnimationEdit(document, std::move(before));
+    return true;
 }
 
 bool EditorState::AddAnimationKey(AnimationDocument& document, bool exactTime)
@@ -1086,7 +1353,8 @@ bool EditorState::AddAnimationKey(AnimationDocument& document, bool exactTime)
         return false;
     }
     const auto& transform = joints[document.selectedBone]->transform;
-    const float frameTime = document.playheadSeconds;
+    const float frameTime = AnimationLocalTime(document,
+        document.rigIndex, document.clipIndex);
     const float keyTime = exactTime ? frameTime :
         AnimationClipEditing::NearestKeyTime(clip,
             nodeIndex, frameTime, .02f).value_or(frameTime);
@@ -1107,6 +1375,286 @@ bool EditorState::AddAnimationKey(AnimationDocument& document, bool exactTime)
     return keyed;
 }
 
+bool EditorState::AddAnimationRowKeys(AnimationDocument& document)
+{
+    if (document.selectedRows.empty())
+        return AddAnimationKey(document, true);
+    const size_t rig = document.selectedRows.front().rigIndex;
+    auto track = std::find_if(document.tracks.begin(), document.tracks.end(),
+        [rig](const auto& item) { return item.index == rig; });
+    if (track == document.tracks.end() || !track->sourceManager ||
+        !track->poseSkeleton) return false;
+    auto* model = track->poseSkeleton->ResolveModel();
+    if (!model) return false;
+    auto& clips = track->sourceManager->clips;
+    for (const auto& row : document.selectedRows)
+    {
+        if (row.rigIndex != rig || row.clipIndex < 0 ||
+            row.clipIndex >= static_cast<int>(clips.size())) continue;
+        if (!AnimationClipMapping::Inspect(clips[row.clipIndex],
+                AnimationClipMapping::RigNodes(*track->poseSkeleton),
+                AnimationClipMapping::ModelBones(*model)).issues.empty())
+        {
+            document.error = "Repair unresolved bone mappings before keying these rows.";
+            return false;
+        }
+    }
+    auto before = clips;
+    bool keyed = false;
+    const auto& palette = track->poseSkeleton->jointNodes;
+    const auto& joints = track->poseSkeleton->ResolveJoints();
+    for (const auto& row : document.selectedRows)
+    {
+        if (row.rigIndex != rig || row.clipIndex < 0 ||
+            row.clipIndex >= static_cast<int>(clips.size())) continue;
+        const auto found = std::find(palette.begin(), palette.end(), row.nodeIndex);
+        const size_t index = static_cast<size_t>(found - palette.begin());
+        if (found == palette.end() || index >= joints.size() || !joints[index])
+            continue;
+        auto& clip = clips[row.clipIndex];
+        const auto& transform = joints[index]->transform;
+        keyed = AnimationClipEditing::UpsertBonePose(clip, row.nodeIndex,
+            AnimationLocalTime(document, row.rigIndex, row.clipIndex),
+            transform.position,
+            glm::quat(transform.rotation), transform.scale) || keyed;
+        const std::string path = AnimationClipMapping::NodePath(
+            *model, row.nodeIndex);
+        for (auto& channel : clip.channels)
+            if (channel.nodeIndex == row.nodeIndex && channel.targetPath.empty())
+                channel.targetPath = path;
+    }
+    if (keyed)
+    {
+        if (document.rigIndex != rig) FocusAnimationRig(document, rig);
+        RecordAnimationEdit(document, std::move(before));
+        document.error.clear();
+    }
+    return keyed;
+}
+
+bool EditorState::AddAnimationIKKeys(AnimationDocument& document,
+    Engine::Core::Object& upper, Engine::Core::Object& lower,
+    Engine::Core::Object& tip)
+{
+    if (!document.sourceManager || !document.poseSkeleton ||
+        document.clipIndex < 0 || document.clipIndex >=
+            static_cast<int>(document.sourceManager->clips.size())) return false;
+    auto* model = document.poseSkeleton->ResolveModel();
+    auto& clip = document.sourceManager->clips[document.clipIndex];
+    if (!model || !AnimationClipMapping::Inspect(clip,
+            AnimationClipMapping::RigNodes(*document.poseSkeleton),
+            AnimationClipMapping::ModelBones(*model)).issues.empty())
+    {
+        document.error = "Repair unresolved bone mappings before keying this clip.";
+        return false;
+    }
+    const auto& joints = document.poseSkeleton->ResolveJoints();
+    auto before = document.sourceManager->clips;
+    bool keyed = false;
+    for (auto* joint : { &upper, &lower, &tip })
+    {
+        const auto found = std::find(joints.begin(), joints.end(), joint);
+        if (found == joints.end()) continue;
+        const size_t palette = static_cast<size_t>(found - joints.begin());
+        if (palette >= document.poseSkeleton->jointNodes.size()) continue;
+        const unsigned node = document.poseSkeleton->jointNodes[palette];
+        const auto& transform = joint->transform;
+        keyed = AnimationClipEditing::UpsertBonePose(clip, node,
+            AnimationLocalTime(document, document.rigIndex,
+                document.clipIndex), transform.position,
+            glm::quat(transform.rotation), transform.scale) || keyed;
+        const std::string path = AnimationClipMapping::NodePath(*model, node);
+        for (auto& channel : clip.channels)
+            if (channel.nodeIndex == node && channel.targetPath.empty())
+                channel.targetPath = path;
+    }
+    if (keyed)
+    {
+        clip.duration = std::max(clip.duration, AnimationLocalTime(document,
+            document.rigIndex, document.clipIndex));
+        RecordAnimationEdit(document, std::move(before));
+    }
+    return keyed;
+}
+
+bool EditorState::AddAnimationLimbKey(AnimationDocument& document,
+    Engine::Core::Object& upper, Engine::Core::Object& lower,
+    Engine::Core::Object& tip, bool matchIncoming)
+{
+    if (!document.sourceManager || !document.poseSkeleton ||
+        document.clipIndex < 0 || document.clipIndex >=
+            static_cast<int>(document.sourceManager->clips.size())) return false;
+    auto* model = document.poseSkeleton->ResolveModel();
+    if (!model || !model->Owner) return false;
+    const auto& joints = document.poseSkeleton->ResolveJoints();
+    const auto indexOf = [&](Engine::Core::Object& object) -> unsigned
+    {
+        const auto found = std::find(joints.begin(), joints.end(), &object);
+        const size_t palette = static_cast<size_t>(found - joints.begin());
+        return found == joints.end() || palette >= document.poseSkeleton->jointNodes.size()
+            ? static_cast<unsigned>(-1) : document.poseSkeleton->jointNodes[palette];
+    };
+    const unsigned upperNode = indexOf(upper), lowerNode = indexOf(lower),
+        tipNode = indexOf(tip);
+    if (upperNode == static_cast<unsigned>(-1) ||
+        lowerNode == static_cast<unsigned>(-1) ||
+        tipNode == static_cast<unsigned>(-1)) return false;
+    auto before = document.sourceManager->clips;
+    auto& clip = document.sourceManager->clips[document.clipIndex];
+    auto found = std::find_if(clip.limbs.begin(), clip.limbs.end(),
+        [&](const auto& limb) { return limb.tip == tipNode; });
+    if (found == clip.limbs.end())
+    {
+        clip.limbs.push_back({upperNode, lowerNode, tipNode, {}});
+        found = std::prev(clip.limbs.end());
+    }
+    const bool hadKeys = !found->keys.empty();
+    const auto outgoing = hadKeys
+        ? Engine::Model::AnimationClip::SampleLimb(*found,
+            AnimationLocalTime(document, document.rigIndex,
+                document.clipIndex))
+        : Engine::Model::AnimationClip::LimbKey{};
+    if (matchIncoming && document.ikBlend > 0.f)
+    {
+        document.ikTarget = tip.transform.GetWorldPosition();
+        const glm::vec3 root = upper.transform.GetWorldPosition();
+        const glm::vec3 mid = lower.transform.GetWorldPosition();
+        document.ikPole = mid + mid - (root + document.ikTarget) * .5f;
+        glm::mat3 basis(tip.transform.GetWorldMatrix());
+        for (int axis = 0; axis < 3; ++axis)
+            if (glm::length(basis[axis]) > 1e-6f)
+                basis[axis] = glm::normalize(basis[axis]);
+        document.ikTargetRotation = glm::eulerAngles(glm::normalize(glm::quat_cast(basis)));
+    }
+    if (matchIncoming && document.ikBlend <= 0.f)
+    {
+        for (auto* joint : {&upper, &lower, &tip})
+        {
+            const unsigned node = indexOf(*joint);
+            const auto& transform = joint->transform;
+            AnimationClipEditing::UpsertBonePose(clip, node,
+                AnimationLocalTime(document, document.rigIndex,
+                    document.clipIndex), transform.position,
+                glm::quat(transform.rotation), transform.scale);
+            const std::string path = AnimationClipMapping::NodePath(*model, node);
+            for (auto& channel : clip.channels)
+                if (channel.nodeIndex == node && channel.targetPath.empty())
+                    channel.targetPath = path;
+        }
+    }
+    Engine::Model::AnimationClip::LimbKey key;
+    key.time = AnimationLocalTime(document, document.rigIndex,
+        document.clipIndex);
+    key.space = document.ikSpace;
+    key.spaceNode = document.ikSpaceNode;
+    key.propReference = document.ikPropReference;
+    const glm::mat4 space = Engine::Model::LimbSpaceMatrix(key,
+        model->Owner->transform.GetWorldMatrix(), upper, model->ResolveNodes());
+    const glm::mat4 inverseSpace = glm::inverse(space);
+    key.target = glm::vec3(inverseSpace * glm::vec4(document.ikTarget, 1.f));
+    key.pole = glm::vec3(inverseSpace * glm::vec4(document.ikPole, 1.f));
+    key.rotation = glm::normalize(glm::inverse(Engine::Model::LimbSpaceRotation(space)) *
+        glm::quat(document.ikTargetRotation));
+    key.blend = std::clamp(document.ikBlend, 0.f, 1.f);
+    auto& keys = found->keys;
+    if ((matchIncoming || !hadKeys || outgoing.space != key.space ||
+            outgoing.spaceNode != key.spaceNode ||
+            outgoing.propReference.objectPath != key.propReference.objectPath) &&
+        key.time > .002f &&
+        (!hadKeys || std::abs(outgoing.blend - key.blend) > .0001f ||
+            outgoing.space != key.space || outgoing.spaceNode != key.spaceNode ||
+            outgoing.propReference.objectPath != key.propReference.objectPath))
+    {
+        if (!hadKeys)
+        {
+            auto start = key;
+            start.time = 0.f;
+            start.blend = 0.f;
+            keys.push_back(start);
+        }
+        auto guard = outgoing;
+        guard.time = key.time - .001f;
+        const auto guardAt = std::lower_bound(keys.begin(), keys.end(), guard.time,
+            [](const auto& existing, float time) { return existing.time < time; });
+        keys.insert(guardAt, guard);
+    }
+    const auto at = std::lower_bound(keys.begin(), keys.end(), key.time,
+        [](const auto& existing, float time) { return existing.time < time; });
+    if (at != keys.end() && std::abs(at->time - key.time) < .0001f)
+        *at = key;
+    else keys.insert(at, key);
+    clip.duration = std::max(clip.duration, key.time);
+    document.ikControlTime = -1.f;
+    RecordAnimationEdit(document, std::move(before));
+    return true;
+}
+
+bool EditorState::BakeAnimationLimbs(AnimationDocument& document)
+{
+    if (!document.sourceManager || !document.poseSkeleton ||
+        document.clipIndex < 0 || document.clipIndex >=
+            static_cast<int>(document.sourceManager->clips.size())) return false;
+    auto& clip = document.sourceManager->clips[document.clipIndex];
+    if (clip.limbs.empty()) return false;
+    auto* model = document.poseSkeleton->ResolveModel();
+    if (!model) return false;
+    const auto before = document.sourceManager->clips;
+    auto baked = clip;
+    const float originalTime = document.playheadSeconds;
+    const auto originalTracks = document.tracks;
+    for (auto& track : document.tracks)
+    {
+        track.selected = track.index == document.rigIndex;
+        if (track.selected)
+        {
+            track.weight = 1.f;
+            track.startSeconds = 0.f;
+            track.repeat = false;
+            track.repeatCount = 0;
+            track.stackedClips.clear();
+        }
+    }
+    document.previewLayouts.clear();
+    const int frames = std::max(1, static_cast<int>(std::ceil(clip.duration * 30.f)));
+    std::vector<float> sampleTimes;
+    sampleTimes.reserve(static_cast<size_t>(frames + 1));
+    for (int frame = 0; frame <= frames; ++frame)
+        sampleTimes.push_back(clip.duration * frame / frames);
+    for (const auto& limb : clip.limbs)
+        for (const auto& key : limb.keys)
+            sampleTimes.push_back(key.time);
+    std::sort(sampleTimes.begin(), sampleTimes.end());
+    sampleTimes.erase(std::unique(sampleTimes.begin(), sampleTimes.end()),
+        sampleTimes.end());
+    const auto& nodes = model->ResolveNodes();
+    for (float sampleTime : sampleTimes)
+    {
+        document.playheadSeconds = sampleTime;
+        SampleAnimationDocument(document);
+        for (const auto& limb : clip.limbs)
+            for (unsigned node : {limb.upper, limb.lower, limb.tip})
+                if (node < nodes.size() && nodes[node])
+                {
+                    const auto& transform = nodes[node]->transform;
+                    AnimationClipEditing::UpsertBonePose(baked, node,
+                        document.playheadSeconds, transform.position,
+                        glm::quat(transform.rotation), transform.scale);
+                    const std::string path = AnimationClipMapping::NodePath(*model, node);
+                    for (auto& channel : baked.channels)
+                        if (channel.nodeIndex == node && channel.targetPath.empty())
+                            channel.targetPath = path;
+                }
+    }
+    document.playheadSeconds = originalTime;
+    document.tracks = originalTracks;
+    document.previewLayouts.clear();
+    baked.limbs.clear();
+    clip = std::move(baked);
+    document.ikControlTime = -1.f;
+    RecordAnimationEdit(document, before);
+    return true;
+}
+
 bool EditorState::StepAnimationHistory(AnimationDocument& document, bool redo)
 {
     auto& source = redo ? document.redo : document.undo;
@@ -1120,7 +1668,9 @@ bool EditorState::StepAnimationHistory(AnimationDocument& document, bool redo)
     document.clipCache.clear();
     document.previewLayouts.clear();
     document.dirty = document.sourceScene->SaveToString() !=
-        document.savedSnapshot;
+        document.savedSnapshot || std::any_of(document.tracks.begin(),
+            document.tracks.end(), [](const auto& track)
+            { return track.controlsDirty; });
     RefreshAnimationDocumentTitle(document);
     SampleAnimationDocument(document);
     return true;
@@ -1184,7 +1734,16 @@ bool EditorState::SaveAnimationDocument(AnimationDocument& document)
     latestSkeleton->rigPath = rigPath;
     auto rig = Engine::Model::RigAsset::Capture(latest, *latestSkeleton);
     rig.prefabPath = document.path;
-    const auto previousRig = Engine::Model::RigAsset::Load(rigPath);
+    const auto previousRig = Engine::Model::RigAsset::Load(
+        rigPath, latestSkeleton->skinIndex);
+    for (const auto& track : document.tracks)
+        if (track.index == document.rigIndex)
+        {
+            rig.controls = track.controls;
+            rig.poses = track.poses;
+            rig.symmetryPairs = track.symmetryPairs;
+            break;
+        }
     std::vector<std::string> animationPaths;
     for (size_t index = 0; index < document.sourceManager->clips.size(); ++index)
     {
@@ -1269,9 +1828,10 @@ bool EditorState::SaveAnimationDocument(AnimationDocument& document)
     document.rigPath = rigPath;
     for (auto& track : document.tracks)
         if (track.index == document.rigIndex)
-        { track.path = rigPath; break; }
+        { track.path = rigPath; track.controlsDirty = false; break; }
     document.savedSnapshot = document.sourceScene->SaveToString();
-    document.dirty = false;
+    document.dirty = std::any_of(document.tracks.begin(), document.tracks.end(),
+        [](const auto& track) { return track.controlsDirty; });
     document.error.clear();
     RefreshAnimationDocumentTitle(document);
     // A model Asset Stage may still be open on this prefab. Keep its manager
@@ -1421,43 +1981,46 @@ void EditorState::ScanAnimationRigAssets(AnimationDocument& document)
     // model for the animation viewport, but does not determine its identity.
     for (const auto& rigPath : rigPaths)
     {
-        auto rig = Engine::Model::RigAsset::Load(rigPath.string());
-        if (!rig) continue;
-        const auto compatible = [&](const PreviewCandidate& candidate)
+        for (const auto& rigValue :
+            Engine::Model::RigAsset::LoadAll(rigPath.string()))
         {
-            if (candidate.rig.skinIndex != rig->skinIndex ||
-                candidate.rig.joints.size() != rig->joints.size()) return false;
-            for (size_t joint = 0; joint < rig->joints.size(); ++joint)
-                if (candidate.rig.joints[joint].nodeIndex !=
-                        rig->joints[joint].nodeIndex ||
-                    candidate.rig.joints[joint].name !=
-                        rig->joints[joint].name) return false;
-            return true;
-        };
-        const PreviewCandidate* preview = nullptr;
-        for (const auto& candidate : previewCandidates)
-            if (compatible(candidate) &&
-                AnimationIdentity(candidate.path) ==
-                    AnimationIdentity(document.path))
-            { preview = &candidate; break; }
-        if (!preview)
+            const auto* rig = &rigValue;
+            const auto compatible = [&](const PreviewCandidate& candidate)
+            {
+                if (candidate.rig.skinIndex != rig->skinIndex ||
+                    candidate.rig.joints.size() != rig->joints.size()) return false;
+                for (size_t joint = 0; joint < rig->joints.size(); ++joint)
+                    if (candidate.rig.joints[joint].nodeIndex !=
+                            rig->joints[joint].nodeIndex ||
+                        candidate.rig.joints[joint].name !=
+                            rig->joints[joint].name) return false;
+                return true;
+            };
+            const PreviewCandidate* preview = nullptr;
             for (const auto& candidate : previewCandidates)
-                if (compatible(candidate) && !rig->prefabPath.empty() &&
+                if (compatible(candidate) &&
                     AnimationIdentity(candidate.path) ==
-                        AnimationIdentity(rig->prefabPath))
+                        AnimationIdentity(document.path))
                 { preview = &candidate; break; }
-        if (!preview)
-            for (const auto& candidate : previewCandidates)
-                if (compatible(candidate))
-                { preview = &candidate; break; }
-        const std::string label = "[Rig] " + rigPath.filename().string() +
-            " / " + std::to_string(rig->joints.size()) + " joints" +
-            (preview ? " / preview: " +
-                std::filesystem::path(preview->path).filename().string() :
-                " / choose a compatible prefab to preview");
-        document.rigAssets.push_back({ preview ? preview->path : "",
-            label, preview ? preview->rigIndex : rig->rigIndex,
-            rigPath.string() });
+            if (!preview)
+                for (const auto& candidate : previewCandidates)
+                    if (compatible(candidate) && !rig->prefabPath.empty() &&
+                        AnimationIdentity(candidate.path) ==
+                            AnimationIdentity(rig->prefabPath))
+                    { preview = &candidate; break; }
+            if (!preview)
+                for (const auto& candidate : previewCandidates)
+                    if (compatible(candidate))
+                    { preview = &candidate; break; }
+            const std::string label = "[Rig] " + rigPath.filename().string() +
+                " / " + std::to_string(rig->joints.size()) + " joints" +
+                (preview ? " / preview: " +
+                    std::filesystem::path(preview->path).filename().string() :
+                    " / choose a compatible prefab to preview");
+            document.rigAssets.push_back({ preview ? preview->path : "",
+                label, preview ? preview->rigIndex : rig->rigIndex,
+                rigPath.string() });
+        }
     }
     std::sort(document.rigAssets.begin(), document.rigAssets.end(),
         [](const auto& left, const auto& right)
@@ -1634,6 +2197,916 @@ void EditorState::DrawAnimationRigToolbar(IEditorUi& ui,
     ImGui::EndCombo();
 }
 
+void EditorState::DrawAnimationRigControls(IEditorUi& ui,
+    AnimationDocument& document)
+{
+    if (!document.poseSkeleton ||
+        !ImGui::CollapsingHeader("Viewport rig controls")) return;
+    auto track = std::find_if(document.tracks.begin(), document.tracks.end(),
+        [&](const auto& item) { return item.index == document.rigIndex; });
+    if (track == document.tracks.end()) return;
+    auto& controls = track->controls;
+    const auto& joints = document.poseSkeleton->ResolveJoints();
+    const auto& palette = document.poseSkeleton->jointNodes;
+    const auto labelFor = [&](int node) -> std::string
+    {
+        for (size_t i = 0; i < palette.size() && i < joints.size(); ++i)
+            if (static_cast<int>(palette[i]) == node && joints[i])
+                return joints[i]->name;
+        return "None";
+    };
+    bool changed = false;
+    if (ui.Button("Use humanoid preset"))
+    {
+        controls = HumanoidControls(*document.poseSkeleton);
+        changed = true;
+    }
+    const auto field = [&](const char* label, int& node)
+    {
+        const std::string current = labelFor(node);
+        if (!ImGui::BeginCombo(label, current.c_str())) return false;
+        bool edited = false;
+        if (ImGui::Selectable("None", node < 0))
+        { node = -1; edited = true; }
+        for (size_t i = 0; i < palette.size() && i < joints.size(); ++i)
+            if (joints[i])
+            {
+                ImGui::PushID(static_cast<int>(i));
+                if (ImGui::Selectable(joints[i]->name.c_str(),
+                        node == static_cast<int>(palette[i])))
+                { node = static_cast<int>(palette[i]); edited = true; }
+                ImGui::PopID();
+            }
+        ImGui::EndCombo();
+        return edited;
+    };
+    changed = field("Root", controls.root) || changed;
+    changed = field("Pelvis", controls.pelvis) || changed;
+    static const char* names[] = {"Left arm", "Right arm", "Left leg", "Right leg"};
+    for (size_t index = 0; index < controls.limbs.size(); ++index)
+    {
+        ImGui::PushID(static_cast<int>(index));
+        if (ImGui::TreeNode(names[index]))
+        {
+            auto& limb = controls.limbs[index];
+            changed = field("Upper", limb.upper) || changed;
+            changed = field("Lower", limb.lower) || changed;
+            changed = field("Hand / foot", limb.tip) || changed;
+            const auto resolve = [&](int node) -> Engine::Core::Object*
+            {
+                for (size_t i = 0; i < palette.size() && i < joints.size(); ++i)
+                    if (static_cast<int>(palette[i]) == node) return joints[i];
+                return nullptr;
+            };
+            auto* upper = resolve(limb.upper);
+            auto* lower = resolve(limb.lower);
+            auto* tip = resolve(limb.tip);
+            if (limb.upper >= 0 && limb.lower >= 0 && limb.tip >= 0 &&
+                (!upper || !lower || !tip || lower->Parent != upper ||
+                    tip->Parent != lower))
+                ui.ColoredLabel("IK needs an upper -> lower -> tip hierarchy.",
+                    {1.f, .56f, .36f, 1.f});
+            ImGui::TreePop();
+        }
+        ImGui::PopID();
+    }
+    if (changed)
+    {
+        track->controlsDirty = true;
+        document.dirty = true;
+        RefreshAnimationDocumentTitle(document);
+        if (m_renderer) m_renderer->MarkDirty();
+    }
+    if (ui.Button("Save rig control mapping"))
+    {
+        if (document.path.empty())
+            document.error = "Open a prefab to save its rig controls.";
+        else SaveAnimationDocument(document);
+    }
+    ui.DisabledLabel("Select or drag handles in the Animation viewport. Save Selected Rigs stores this mapping.");
+}
+
+void EditorState::DrawAnimationPoseLibrary(IEditorUi& ui,
+    AnimationDocument& document)
+{
+    if (!document.poseSkeleton ||
+        !ImGui::CollapsingHeader("Pose library and symmetry")) return;
+    auto track = std::find_if(document.tracks.begin(), document.tracks.end(),
+        [&](const auto& item) { return item.index == document.rigIndex; });
+    if (track == document.tracks.end()) return;
+    const auto& palette = document.poseSkeleton->jointNodes;
+    const auto& joints = document.poseSkeleton->ResolveJoints();
+    const auto& restJoints = track->sourceSkeleton->ResolveJoints();
+    const auto paletteIndex = [&](unsigned node) -> int
+    {
+        const auto found = std::find(palette.begin(), palette.end(), node);
+        return found == palette.end() ? -1 : static_cast<int>(found - palette.begin());
+    };
+    const auto markDirty = [&]()
+    {
+        track->controlsDirty = true;
+        document.dirty = true;
+        RefreshAnimationDocumentTitle(document);
+    };
+    const auto capturePose = [&]()
+    {
+        Engine::Model::RigAsset::Pose pose;
+        pose.name = document.poseName[0] ? document.poseName :
+            "Pose " + std::to_string(track->poses.size() + 1);
+        std::unordered_set<unsigned> selected;
+        if (document.poseSelectedOnly)
+        {
+            for (const auto& row : document.selectedRows)
+                if (row.rigIndex == document.rigIndex)
+                    selected.insert(row.nodeIndex);
+            for (const auto& key : document.selectedKeys)
+                if (key.rigIndex == document.rigIndex)
+                    selected.insert(key.nodeIndex);
+            if (selected.empty() && document.selectedBone >= 0 &&
+                document.selectedBone < static_cast<int>(palette.size()))
+                selected.insert(palette[document.selectedBone]);
+        }
+        for (size_t i = 0; i < palette.size() && i < joints.size(); ++i)
+        {
+            if (!joints[i] || (document.poseSelectedOnly &&
+                selected.find(palette[i]) == selected.end())) continue;
+            const auto& transform = joints[i]->transform;
+            pose.joints.push_back({palette[i], transform.position,
+                glm::normalize(glm::quat(transform.rotation)), transform.scale});
+        }
+        return pose;
+    };
+    ImGui::InputText("Pose name", document.poseName, sizeof(document.poseName));
+    ImGui::Checkbox("Selected controls only", &document.poseSelectedOnly);
+    if (ui.Button("Capture pose"))
+    {
+        auto pose = capturePose();
+        if (pose.joints.empty()) document.error =
+            "Select a bone or timeline controls to capture.";
+        else
+        {
+            track->poses.push_back(std::move(pose));
+            document.selectedPose = static_cast<int>(track->poses.size()) - 1;
+            document.error.clear();
+            markDirty();
+        }
+    }
+    if (ImGui::BeginCombo("Saved pose", document.selectedPose >= 0 &&
+            document.selectedPose < static_cast<int>(track->poses.size())
+            ? track->poses[document.selectedPose].name.c_str() : "Select pose"))
+    {
+        for (size_t i = 0; i < track->poses.size(); ++i)
+            if (ImGui::Selectable((track->poses[i].name + " (" +
+                    std::to_string(track->poses[i].joints.size()) + " bones)").c_str(),
+                    document.selectedPose == static_cast<int>(i)))
+                document.selectedPose = static_cast<int>(i);
+        ImGui::EndCombo();
+    }
+    ImGui::SliderFloat("Pose blend", &document.poseBlend, 0.f, 1.f);
+    ImGui::Checkbox("Mirror left/right", &document.poseMirror);
+    ImGui::Checkbox("Key result at playhead", &document.poseKeyResult);
+    const bool validPose = document.selectedPose >= 0 &&
+        document.selectedPose < static_cast<int>(track->poses.size());
+    const auto applyPose = [&](const Engine::Model::RigAsset::Pose& pose)
+    {
+        auto* model = document.poseSkeleton->ResolveModel();
+        const bool validClip = document.sourceManager && document.clipIndex >= 0 &&
+            document.clipIndex < static_cast<int>(document.sourceManager->clips.size());
+        if (document.poseKeyResult && (!validClip || !model))
+            document.error = "Choose an animation clip before keying a pose.";
+        else if (document.poseKeyResult &&
+            !AnimationClipMapping::Inspect(document.sourceManager->clips[document.clipIndex],
+                AnimationClipMapping::RigNodes(*document.poseSkeleton),
+                AnimationClipMapping::ModelBones(*model)).issues.empty())
+            document.error = "Repair unresolved bone mappings before keying this clip.";
+        else
+        {
+            const auto mirrorNode = [&](unsigned node)
+            {
+                if (!document.poseMirror) return node;
+                for (const auto& pair : track->symmetryPairs)
+                {
+                    if (pair.left == node) return pair.right;
+                    if (pair.right == node) return pair.left;
+                }
+                return node;
+            };
+            const auto mirrorVector = [](glm::vec3 value)
+            { value.x = -value.x; return value; };
+            const auto mirrorRotation = [](glm::quat value)
+            { return glm::normalize(glm::quat(value.w, value.x, -value.y, -value.z)); };
+            std::vector<unsigned> affected;
+            for (const auto& stored : pose.joints)
+            {
+                const int source = paletteIndex(stored.nodeIndex);
+                const unsigned destinationNode = mirrorNode(stored.nodeIndex);
+                const int destination = paletteIndex(destinationNode);
+                if (source < 0 || destination < 0 ||
+                    source >= static_cast<int>(restJoints.size()) ||
+                    destination >= static_cast<int>(restJoints.size()) ||
+                    !restJoints[source] || !restJoints[destination] ||
+                    !joints[destination]) continue;
+                glm::vec3 position = stored.position;
+                glm::quat rotation = stored.rotation;
+                glm::vec3 scale = stored.scale;
+                if (document.poseMirror)
+                {
+                    const auto& sourceRest = restJoints[source]->transform;
+                    const auto& targetRest = restJoints[destination]->transform;
+                    position = targetRest.position + mirrorVector(
+                        position - sourceRest.position);
+                    rotation = mirrorRotation(rotation *
+                        glm::inverse(glm::quat(sourceRest.rotation))) *
+                        glm::quat(targetRest.rotation);
+                    for (int axis = 0; axis < 3; ++axis)
+                        scale[axis] = targetRest.scale[axis] *
+                            (std::abs(sourceRest.scale[axis]) > 1e-6f
+                                ? scale[axis] / sourceRest.scale[axis] : 1.f);
+                }
+                auto& transform = joints[destination]->transform;
+                transform.position = glm::mix(transform.position, position,
+                    document.poseBlend);
+                transform.rotation = glm::eulerAngles(glm::normalize(glm::slerp(
+                    glm::quat(transform.rotation), rotation, document.poseBlend)));
+                transform.scale = glm::mix(transform.scale, scale,
+                    document.poseBlend);
+                affected.push_back(destinationNode);
+            }
+            if (document.poseKeyResult && !affected.empty())
+            {
+                auto before = document.sourceManager->clips;
+                auto& clip = document.sourceManager->clips[document.clipIndex];
+                bool keyed = false;
+                for (unsigned node : affected)
+                {
+                    const auto& transform = joints[paletteIndex(node)]->transform;
+                    keyed = AnimationClipEditing::UpsertBonePose(clip, node,
+                        AnimationLocalTime(document, document.rigIndex,
+                            document.clipIndex), transform.position,
+                        glm::quat(transform.rotation), transform.scale) || keyed;
+                    const std::string path = AnimationClipMapping::NodePath(*model, node);
+                    for (auto& channel : clip.channels)
+                        if (channel.nodeIndex == node && channel.targetPath.empty())
+                            channel.targetPath = path;
+                }
+                if (keyed)
+                {
+                    clip.duration = std::max(clip.duration,
+                        AnimationLocalTime(document, document.rigIndex,
+                            document.clipIndex));
+                    RecordAnimationEdit(document, std::move(before));
+                }
+            }
+            document.error.clear();
+            if (m_renderer) m_renderer->MarkDirty();
+        }
+    };
+    if (validPose && ui.Button("Apply pose"))
+        applyPose(track->poses[document.selectedPose]);
+    if (validPose && ui.Button("Delete pose"))
+    {
+        track->poses.erase(track->poses.begin() + document.selectedPose);
+        document.selectedPose = -1;
+        markDirty();
+    }
+    if (ImGui::TreeNode("Standalone .pose files"))
+    {
+        auto* model = document.poseSkeleton->ResolveModel();
+        const auto makeAsset = [&](const Engine::Model::RigAsset::Pose& pose)
+        {
+            Engine::Model::PoseAsset asset;
+            asset.name = pose.name;
+            if (!model) return asset;
+            for (const auto& joint : pose.joints)
+            {
+                const std::string path = AnimationClipMapping::NodePath(
+                    *model, joint.nodeIndex);
+                if (path.empty()) { asset.joints.clear(); break; }
+                asset.joints.push_back({path, joint.position,
+                    joint.rotation, joint.scale});
+            }
+            return asset;
+        };
+        const auto saveNewAsset = [&](const Engine::Model::RigAsset::Pose& pose)
+        {
+            const auto asset = makeAsset(pose);
+            if (asset.joints.empty())
+            {
+                document.error = "No compatible model bones to save as a pose.";
+                return;
+            }
+            std::string filename = pose.name;
+            for (char& ch : filename)
+                if (!std::isalnum(static_cast<unsigned char>(ch)) &&
+                    ch != '_' && ch != '-') ch = '_';
+            if (filename.empty()) filename = "Pose";
+            const std::filesystem::path directory = "Assets/Poses";
+            std::filesystem::path path = directory / (filename + ".pose");
+            for (int suffix = 2; std::filesystem::exists(path); ++suffix)
+                path = directory / (filename + "_" +
+                    std::to_string(suffix) + ".pose");
+            if (!asset.Save(path.generic_string()))
+                document.error = "Could not create the .pose file.";
+            else
+            {
+                document.poseAssetPath = path.generic_string();
+                document.error.clear();
+            }
+        };
+        if (ui.Button("Capture directly to .pose"))
+        {
+            const auto pose = capturePose();
+            if (pose.joints.empty())
+                document.error = "Select a bone or timeline controls to capture.";
+            else saveNewAsset(pose);
+        }
+        if (document.selectedPose >= 0 &&
+            document.selectedPose < static_cast<int>(track->poses.size()) &&
+            ui.Button("Copy rig pose to .pose"))
+            saveNewAsset(track->poses[document.selectedPose]);
+        Engine::Core::Component::DrawAssetPathPicker(ui, &document,
+            "poseAssetPath", "Standalone pose", "pose",
+            document.poseAssetPath);
+        const auto asset = Engine::Model::PoseAsset::Load(document.poseAssetPath);
+        if (asset)
+        {
+            ui.ValueLabel("Pose", asset->name.c_str());
+            const auto mapToRig = [&]() ->
+                std::optional<Engine::Model::RigAsset::Pose>
+            {
+                if (!model) return std::nullopt;
+                const auto bones = AnimationClipMapping::RigBones(
+                    *document.poseSkeleton);
+                Engine::Model::RigAsset::Pose pose;
+                pose.name = asset->name;
+                for (const auto& joint : asset->joints)
+                {
+                    const auto found = std::find_if(bones.begin(), bones.end(),
+                        [&](const auto& bone) { return bone.path == joint.path; });
+                    if (found == bones.end() ||
+                        std::count_if(bones.begin(), bones.end(),
+                            [&](const auto& bone)
+                            { return bone.path == joint.path; }) != 1)
+                        return std::nullopt;
+                    pose.joints.push_back({found->nodeIndex, joint.position,
+                        joint.rotation, joint.scale});
+                }
+                return pose;
+            };
+            if (ui.Button("Apply .pose"))
+            {
+                if (const auto mapped = mapToRig()) applyPose(*mapped);
+                else document.error =
+                    "Pose bone paths do not match this rig.";
+            }
+            if (ui.Button("Copy .pose into rig library"))
+            {
+                if (auto mapped = mapToRig())
+                {
+                    track->poses.push_back(std::move(*mapped));
+                    document.selectedPose =
+                        static_cast<int>(track->poses.size()) - 1;
+                    document.error.clear();
+                    markDirty();
+                }
+                else document.error =
+                    "Pose bone paths do not match this rig.";
+            }
+            if (ui.Button("Duplicate .pose file"))
+            {
+                const std::filesystem::path source(document.poseAssetPath);
+                const auto directory = source.parent_path();
+                auto copy = directory / (source.stem().string() + "_copy.pose");
+                for (int suffix = 2; std::filesystem::exists(copy); ++suffix)
+                    copy = directory / (source.stem().string() + "_copy_" +
+                        std::to_string(suffix) + ".pose");
+                if (!asset->Save(copy.generic_string()))
+                    document.error = "Could not copy the .pose file.";
+                else
+                {
+                    document.poseAssetPath = copy.generic_string();
+                    document.error.clear();
+                }
+            }
+            if (ui.Button("Delete .pose file"))
+            {
+                std::error_code error;
+                const auto resolved = Engine::Components::Mesh::ResolveFilePath(
+                    document.poseAssetPath);
+                if (std::filesystem::path(resolved).extension() != ".pose" ||
+                    !std::filesystem::remove(resolved, error) || error)
+                    document.error = "Could not delete the .pose file.";
+                else
+                {
+                    document.poseAssetPath.clear();
+                    document.error.clear();
+                }
+            }
+        }
+        else if (!document.poseAssetPath.empty())
+            ui.ColoredLabel("Invalid .pose file", {1.f, .35f, .35f, 1.f});
+        ImGui::TreePop();
+    }
+    if (ImGui::TreeNode("Left/right bone map"))
+    {
+        const auto boneChoice = [&](const char* label, unsigned& node)
+        {
+            const int current = paletteIndex(node);
+            const char* currentName = current >= 0 && current <
+                static_cast<int>(joints.size()) && joints[current]
+                ? joints[current]->name.c_str() : "Choose bone";
+            if (!ImGui::BeginCombo(label, currentName)) return false;
+            bool changed = false;
+            for (size_t i = 0; i < palette.size() && i < joints.size(); ++i)
+                if (joints[i] && ImGui::Selectable(joints[i]->name.c_str(),
+                        node == palette[i]))
+                { node = palette[i]; changed = true; }
+            ImGui::EndCombo();
+            return changed;
+        };
+        for (size_t i = 0; i < track->symmetryPairs.size(); ++i)
+        {
+            ImGui::PushID(static_cast<int>(i));
+            auto& pair = track->symmetryPairs[i];
+            const bool leftChanged = boneChoice("Left", pair.left);
+            const bool rightChanged = boneChoice("Right", pair.right);
+            if (leftChanged || rightChanged)
+                markDirty();
+            if (ui.Button("Remove pair"))
+            {
+                track->symmetryPairs.erase(track->symmetryPairs.begin() + i);
+                markDirty();
+                ImGui::PopID();
+                break;
+            }
+            ImGui::PopID();
+        }
+        if (ui.Button("Add pair") && palette.size() > 1)
+        {
+            track->symmetryPairs.push_back({palette[0], palette[1]});
+            markDirty();
+        }
+        ImGui::TreePop();
+    }
+    if (ui.Button("Save pose library and bone map"))
+    {
+        if (document.path.empty())
+            document.error = "Open a prefab to save its pose library.";
+        else SaveAnimationDocument(document);
+    }
+}
+
+void EditorState::DrawAnimationChainIK(IEditorUi& ui,
+    AnimationDocument& document)
+{
+    if (!document.poseSkeleton ||
+        !ImGui::CollapsingHeader("Chain and full-body IK")) return;
+    const auto& palette = document.poseSkeleton->jointNodes;
+    const auto& joints = document.poseSkeleton->ResolveJoints();
+    const auto jointFor = [&](unsigned node) -> Engine::Core::Object*
+    {
+        const auto found = std::find(palette.begin(), palette.end(), node);
+        const size_t index = static_cast<size_t>(found - palette.begin());
+        return found != palette.end() && index < joints.size()
+            ? joints[index] : nullptr;
+    };
+    const auto nodeFor = [&](Engine::Core::Object* joint) -> int
+    {
+        const auto found = std::find(joints.begin(), joints.end(), joint);
+        const size_t index = static_cast<size_t>(found - joints.begin());
+        return found != joints.end() && index < palette.size()
+            ? static_cast<int>(palette[index]) : -1;
+    };
+    if (ui.Button("Add selected bone as effector"))
+    {
+        Engine::Core::Object* tip = document.selectedBone >= 0 &&
+            document.selectedBone < static_cast<int>(joints.size())
+            ? joints[document.selectedBone] : nullptr;
+        Engine::Core::Object* root = tip ? tip->Parent : nullptr;
+        while (root && root->Parent && nodeFor(root->Parent) >= 0)
+            root = root->Parent;
+        if (!tip || !root || nodeFor(root) < 0)
+            document.error = "Select a bone with an ancestor in this rig.";
+        else
+        {
+            AnimationDocument::ChainEffector control;
+            control.rigIndex = document.rigIndex;
+            control.rootNode = static_cast<unsigned>(nodeFor(root));
+            control.tipNode = static_cast<unsigned>(nodeFor(tip));
+            control.target = tip->transform.GetWorldPosition();
+            glm::mat3 basis(tip->transform.GetWorldMatrix());
+            for (int axis = 0; axis < 3; ++axis)
+                if (glm::length(basis[axis]) > 1e-6f)
+                    basis[axis] = glm::normalize(basis[axis]);
+            control.targetRotation = glm::eulerAngles(
+                glm::normalize(glm::quat_cast(basis)));
+            control.pole = tip->Parent->transform.GetWorldPosition() +
+                glm::vec3(0.f, 1.f, 0.f);
+            document.chainEffectors.push_back(control);
+            document.error.clear();
+        }
+    }
+    for (size_t i = 0; i < document.chainEffectors.size(); ++i)
+    {
+        auto& control = document.chainEffectors[i];
+        if (control.rigIndex != document.rigIndex) continue;
+        ImGui::PushID(static_cast<int>(i));
+        auto* tip = jointFor(control.tipNode);
+        auto* root = jointFor(control.rootNode);
+        if (ImGui::TreeNode((tip ? tip->name : "Missing tip").c_str()))
+        {
+            if (ImGui::BeginCombo("Tip", tip ? tip->name.c_str() : "Choose"))
+            {
+                for (size_t bone = 0; bone < palette.size() &&
+                    bone < joints.size(); ++bone)
+                    if (joints[bone] && ImGui::Selectable(joints[bone]->name.c_str(),
+                            control.tipNode == palette[bone]))
+                    {
+                        control.tipNode = palette[bone];
+                        tip = joints[bone];
+                        if (tip->Parent && nodeFor(tip->Parent) >= 0)
+                            control.rootNode = static_cast<unsigned>(
+                                nodeFor(tip->Parent));
+                        control.target = tip->transform.GetWorldPosition();
+                    }
+                ImGui::EndCombo();
+            }
+            if (ImGui::BeginCombo("Root", root ? root->name.c_str() : "Choose"))
+            {
+                for (auto* ancestor = tip ? tip->Parent : nullptr; ancestor;
+                    ancestor = ancestor->Parent)
+                {
+                    const int node = nodeFor(ancestor);
+                    if (node >= 0 && ImGui::Selectable(ancestor->name.c_str(),
+                            control.rootNode == static_cast<unsigned>(node)))
+                        control.rootNode = static_cast<unsigned>(node);
+                }
+                ImGui::EndCombo();
+            }
+            ui.DragFloat3("Target (world)", &control.target.x, .01f);
+            float angles[]{glm::degrees(control.targetRotation.x),
+                glm::degrees(control.targetRotation.y),
+                glm::degrees(control.targetRotation.z)};
+            if (ui.DragFloat3("Target rotation (degrees)", angles, .5f))
+                control.targetRotation = glm::radians(glm::vec3(
+                    angles[0], angles[1], angles[2]));
+            ImGui::Checkbox("Use pole", &control.usePole);
+            if (control.usePole)
+                ui.DragFloat3("Pole (world)", &control.pole.x, .01f);
+            ui.DragFloat("Position weight", &control.positionWeight,
+                .01f, 0.f, 1.f);
+            ui.DragFloat("Rotation weight", &control.rotationWeight,
+                .01f, 0.f, 1.f);
+            if (ui.Button("Remove effector"))
+            {
+                document.chainEffectors.erase(
+                    document.chainEffectors.begin() + i);
+                ImGui::TreePop();
+                ImGui::PopID();
+                break;
+            }
+            ImGui::TreePop();
+        }
+        ImGui::PopID();
+    }
+    ImGui::InputInt("Solver iterations", &document.chainIterations);
+    document.chainIterations = std::clamp(document.chainIterations, 1, 128);
+    ui.DragFloat("Body root translation", &document.chainRootTranslation,
+        .01f, 0.f, 1.f);
+    const auto solve = [&](bool keyResult)
+    {
+        auto* model = document.poseSkeleton->ResolveModel();
+        if (keyResult && (!document.sourceManager || !model ||
+            document.clipIndex < 0 || document.clipIndex >=
+                static_cast<int>(document.sourceManager->clips.size())))
+        {
+            document.error = "Choose an animation clip before keying IK.";
+            return;
+        }
+        if (keyResult && !AnimationClipMapping::Inspect(
+                document.sourceManager->clips[document.clipIndex],
+                AnimationClipMapping::RigNodes(*document.poseSkeleton),
+                AnimationClipMapping::ModelBones(*model)).issues.empty())
+        {
+            document.error = "Repair unresolved bone mappings before keying IK.";
+            return;
+        }
+        SampleAnimationDocument(document);
+        std::unordered_map<Engine::Core::Object*,
+            std::vector<Engine::Components::ChainIK::Effector>> groups;
+        std::unordered_set<unsigned> affected;
+        for (const auto& control : document.chainEffectors)
+        {
+            if (control.rigIndex != document.rigIndex) continue;
+            auto* root = jointFor(control.rootNode);
+            auto* tip = jointFor(control.tipNode);
+            if (!root || !tip || root == tip) continue;
+            Engine::Components::ChainIK::Effector effector;
+            for (auto* joint = tip; joint; joint = joint->Parent)
+            {
+                effector.chain.push_back(joint);
+                if (joint == root) break;
+            }
+            if (effector.chain.back() != root) continue;
+            std::reverse(effector.chain.begin(), effector.chain.end());
+            effector.target = control.target;
+            effector.rotation = glm::quat(control.targetRotation);
+            effector.pole = control.pole;
+            effector.usePole = control.usePole;
+            effector.positionWeight = control.positionWeight;
+            effector.rotationWeight = control.rotationWeight;
+            for (auto* joint : effector.chain)
+                if (const int node = nodeFor(joint); node >= 0)
+                    affected.insert(static_cast<unsigned>(node));
+            groups[root].push_back(std::move(effector));
+        }
+        if (groups.empty())
+        {
+            document.error = "Add a valid chain effector first.";
+            return;
+        }
+        for (const auto& [root, effectors] : groups)
+            Engine::Components::ChainIK::SolveMultiple(effectors,
+                document.chainIterations, .001f,
+                document.chainRootTranslation);
+        for (unsigned node : affected)
+            if (auto* joint = jointFor(node))
+                joint->transform.NotifyEditorTransformChanged(
+                    Engine::Components::Transform::EditorRotation |
+                    Engine::Components::Transform::EditorPosition);
+        if (keyResult)
+        {
+            auto before = document.sourceManager->clips;
+            auto& clip = document.sourceManager->clips[document.clipIndex];
+            bool keyed = false;
+            for (unsigned node : affected)
+            {
+                auto* joint = jointFor(node);
+                if (!joint) continue;
+                const auto& transform = joint->transform;
+                keyed = AnimationClipEditing::UpsertBonePose(clip, node,
+                    AnimationLocalTime(document, document.rigIndex,
+                        document.clipIndex), transform.position,
+                    glm::quat(transform.rotation), transform.scale) || keyed;
+                const std::string path = AnimationClipMapping::NodePath(*model, node);
+                for (auto& channel : clip.channels)
+                    if (channel.nodeIndex == node && channel.targetPath.empty())
+                        channel.targetPath = path;
+            }
+            if (keyed)
+            {
+                clip.duration = std::max(clip.duration,
+                    AnimationLocalTime(document, document.rigIndex,
+                        document.clipIndex));
+                RecordAnimationEdit(document, std::move(before));
+            }
+        }
+        document.error.clear();
+        if (m_renderer) m_renderer->MarkDirty();
+    };
+    if (ui.Button("Solve all effectors")) solve(false);
+    if (ui.Button("Solve and key bone channels")) solve(true);
+    ui.DisabledLabel("Add several effectors with the same root to solve shared body joints together.");
+}
+
+bool EditorState::DrawAnimationRigViewport(IEditorUi& ui,
+    const EditorUiViewportInput& input, AnimationDocument& document)
+{
+    if (!document.poseScene || !document.poseSkeleton ||
+        input.available.x <= 1.f || input.available.y <= 1.f) return false;
+    auto track = std::find_if(document.tracks.begin(), document.tracks.end(),
+        [&](const auto& item) { return item.index == document.rigIndex; });
+    if (track == document.tracks.end()) return false;
+    auto* model = document.poseSkeleton->ResolveModel();
+    auto* camera = document.poseScene->editorCamera.GetComponent<
+        Engine::Components::Camera>();
+    if (!model || !camera) return false;
+    const auto& nodes = model->ResolveNodes();
+    const auto& joints = document.poseSkeleton->ResolveJoints();
+    const auto& palette = document.poseSkeleton->jointNodes;
+    const auto jointAt = [&](int node) -> Engine::Core::Object*
+    {
+        if (node < 0 || static_cast<size_t>(node) >= nodes.size()) return nullptr;
+        auto* object = nodes[node];
+        return std::find(joints.begin(), joints.end(), object) != joints.end()
+            ? object : nullptr;
+    };
+    const glm::mat4 viewProjection = camera->GetProjectionMatrix(
+        input.available.x / input.available.y) * camera->GetViewMatrix();
+    const auto project = [&](const glm::vec3& world, EditorUiVec2& screen)
+    {
+        const glm::vec4 clip = viewProjection * glm::vec4(world, 1.f);
+        if (clip.w <= .0001f) return false;
+        const glm::vec3 ndc = glm::vec3(clip) / clip.w;
+        if (ndc.z < 0.f || ndc.z > 1.f) return false;
+        screen = {(ndc.x * .5f + .5f) * input.available.x,
+            (.5f - ndc.y * .5f) * input.available.y};
+        return true;
+    };
+    struct Handle { int id; glm::vec3 world; const char* label; EditorUiColor color; };
+    std::vector<Handle> handles;
+    const auto addBone = [&](int id, int node, const char* label, EditorUiColor color)
+    {
+        if (auto* object = jointAt(node))
+            handles.push_back({id, object->transform.GetWorldPosition(), label, color});
+    };
+    addBone(0, track->controls.root, "Root", {.98f, .81f, .29f, 1.f});
+    addBone(1, track->controls.pelvis, "Pelvis", {.93f, .51f, .89f, 1.f});
+    const glm::mat4 modelWorld = model->Owner
+        ? model->Owner->transform.GetWorldMatrix() : glm::mat4(1.f);
+    static const char* targetNames[] = {"L hand", "R hand", "L foot", "R foot"};
+    static const char* poleNames[] = {"L elbow", "R elbow", "L knee", "R knee"};
+    for (size_t i = 0; i < track->controls.limbs.size(); ++i)
+    {
+        const auto& limb = track->controls.limbs[i];
+        auto* upper = jointAt(limb.upper);
+        auto* lower = jointAt(limb.lower);
+        auto* tip = jointAt(limb.tip);
+        if (!upper || !lower || !tip || lower->Parent != upper ||
+            tip->Parent != lower) continue;
+        glm::vec3 target = tip->transform.GetWorldPosition();
+        const glm::vec3 root = upper->transform.GetWorldPosition();
+        const glm::vec3 mid = lower->transform.GetWorldPosition();
+        glm::vec3 pole = mid * 2.f - (root + target) * .5f;
+        if (document.sourceManager && document.clipIndex >= 0 &&
+            document.clipIndex < static_cast<int>(document.sourceManager->clips.size()))
+        {
+            const auto& clip = document.sourceManager->clips[document.clipIndex];
+            const auto key = std::find_if(clip.limbs.begin(), clip.limbs.end(),
+                [&](const auto& item) { return item.tip == static_cast<unsigned>(limb.tip); });
+            if (key != clip.limbs.end() && !key->keys.empty())
+            {
+                const auto sampled = Engine::Model::AnimationClip::SampleLimb(
+                    *key, AnimationLocalTime(document, document.rigIndex,
+                        document.clipIndex));
+                const glm::mat4 space = Engine::Model::LimbSpaceMatrix(
+                    sampled, modelWorld, *upper, model->ResolveNodes());
+                target = Engine::Model::LimbWorldPoint(space, sampled.target);
+                pole = Engine::Model::LimbWorldPoint(space, sampled.pole);
+            }
+        }
+        if (document.ikControlTip >= 0 &&
+            document.ikControlTip < static_cast<int>(joints.size()) &&
+            joints[document.ikControlTip] == tip &&
+            document.ikControlTime == document.playheadSeconds)
+        {
+            target = document.ikTarget;
+            pole = document.ikPole;
+        }
+        handles.push_back({static_cast<int>(2 + 2 * i), target,
+            targetNames[i], {.22f, .91f, .78f, 1.f}});
+        handles.push_back({static_cast<int>(3 + 2 * i), pole,
+            poleNames[i], {.99f, .53f, .27f, 1.f}});
+    }
+    int hovered = -1;
+    float closest = 14.f * 14.f;
+    for (const auto& handle : handles)
+    {
+        EditorUiVec2 screen;
+        if (!project(handle.world, screen)) continue;
+        const float dx = input.mousePosInViewport.x - screen.x;
+        const float dy = input.mousePosInViewport.y - screen.y;
+        const float distance = dx * dx + dy * dy;
+        if (distance < closest)
+        { closest = distance; hovered = handle.id; }
+        const bool selected = document.rigHandleKind == handle.id;
+        ui.DrawViewportCircle(screen, selected ? 10.f : 8.f,
+            selected ? EditorUiColor{1.f, 1.f, .65f, 1.f} : handle.color);
+        ui.DrawViewportCircle(screen, selected ? 10.f : 8.f,
+            {.04f, .05f, .07f, .9f}, false, 2.f);
+        ui.DrawViewportText({screen.x + 12.f, screen.y - 8.f},
+            handle.label, handle.color);
+    }
+    if (input.leftClicked && hovered >= 0)
+    {
+        document.rigHandleKind = hovered;
+        document.rigHandleDrag = hovered;
+        const int node = hovered == 0 ? track->controls.root :
+            hovered == 1 ? track->controls.pelvis :
+            track->controls.limbs[(hovered - 2) / 2].tip;
+        for (size_t i = 0; i < palette.size(); ++i)
+            if (static_cast<int>(palette[i]) == node && i < joints.size())
+            {
+                document.selectedBone = static_cast<int>(i);
+                document.poseScene->SetSelectedObject(joints[i]);
+                if (m_primaryHierarchy)
+                    m_primaryHierarchy->SetSelectedObject(joints[i]);
+                if (m_primaryProperties)
+                    m_primaryProperties->SetSelectedObject(joints[i]);
+                break;
+            }
+        if (hovered >= 2)
+        {
+            const int limbIndex = (hovered - 2) / 2;
+            document.ikControlTip = document.selectedBone;
+            document.ikControlTime = document.playheadSeconds;
+            document.ikBlend = 1.f;
+            document.ikSpace = Engine::Model::AnimationClip::LimbKey::Space::Body;
+            document.ikSpaceNode = -1;
+            document.ikPropReference.Clear();
+            if (document.sourceManager && document.clipIndex >= 0 &&
+                document.clipIndex < static_cast<int>(document.sourceManager->clips.size()))
+            {
+                const auto& clip = document.sourceManager->clips[document.clipIndex];
+                const auto existing = std::find_if(clip.limbs.begin(), clip.limbs.end(),
+                    [&](const auto& item)
+                    { return item.tip == static_cast<unsigned>(
+                        track->controls.limbs[limbIndex].tip); });
+                if (existing != clip.limbs.end() && !existing->keys.empty())
+                {
+                    const auto key = Engine::Model::AnimationClip::SampleLimb(
+                        *existing, AnimationLocalTime(document,
+                            document.rigIndex, document.clipIndex));
+                    document.ikSpace = key.space;
+                    document.ikSpaceNode = key.spaceNode;
+                    document.ikPropReference = key.propReference;
+                }
+            }
+            for (const auto& handle : handles)
+            {
+                if (handle.id == 2 + 2 * limbIndex) document.ikTarget = handle.world;
+                if (handle.id == 3 + 2 * limbIndex) document.ikPole = handle.world;
+            }
+            if (auto* tip = jointAt(track->controls.limbs[limbIndex].tip))
+            {
+                glm::mat3 basis(tip->transform.GetWorldMatrix());
+                for (int axis = 0; axis < 3; ++axis)
+                    if (glm::length(basis[axis]) > 1e-6f)
+                        basis[axis] = glm::normalize(basis[axis]);
+                document.ikTargetRotation = glm::eulerAngles(
+                    glm::normalize(glm::quat_cast(basis)));
+            }
+        }
+        return true;
+    }
+    if (document.rigHandleDrag < 0) return hovered >= 0 && input.leftClicked;
+    const int dragging = document.rigHandleDrag;
+    if (input.leftDown && (input.mouseDelta.x != 0.f || input.mouseDelta.y != 0.f))
+    {
+        const auto found = std::find_if(handles.begin(), handles.end(),
+            [&](const Handle& item) { return item.id == dragging; });
+        if (found != handles.end())
+        {
+            const glm::mat4 cameraWorld = glm::inverse(camera->GetViewMatrix());
+            const glm::vec3 right = glm::normalize(glm::vec3(cameraWorld[0]));
+            const glm::vec3 up = glm::normalize(glm::vec3(cameraWorld[1]));
+            const float distance = glm::distance(found->world,
+                document.poseScene->editorCamera.transform.GetWorldPosition());
+            const float worldPerPixel = camera->orthographic
+                ? 2.f * camera->orthographicSize / input.available.y
+                : 2.f * std::max(.01f, distance) *
+                    std::tan(glm::radians(camera->fov) * .5f) / input.available.y;
+            const glm::vec3 delta = worldPerPixel *
+                (right * input.mouseDelta.x - up * input.mouseDelta.y);
+            if (dragging < 2)
+            {
+                const int node = dragging == 0 ? track->controls.root : track->controls.pelvis;
+                if (auto* joint = jointAt(node))
+                {
+                    const glm::mat4 parentWorld = joint->Parent
+                        ? joint->Parent->transform.GetWorldMatrix() : glm::mat4(1.f);
+                    joint->transform.position = glm::vec3(glm::inverse(parentWorld) *
+                        glm::vec4(joint->transform.GetWorldPosition() + delta, 1.f));
+                    joint->transform.NotifyEditorTransformChanged(
+                        Engine::Components::Transform::EditorPosition);
+                }
+            }
+            else
+            {
+                if ((dragging - 2) % 2 == 0) document.ikTarget += delta;
+                else document.ikPole += delta;
+                const auto& limb = track->controls.limbs[(dragging - 2) / 2];
+                auto* upper = jointAt(limb.upper);
+                auto* lower = jointAt(limb.lower);
+                auto* tip = jointAt(limb.tip);
+                if (upper && lower && tip)
+                    Engine::Components::TwoBoneIK::Blend(*upper, *lower, *tip,
+                        document.ikTarget, document.ikPole,
+                        glm::quat(document.ikTargetRotation), document.ikBlend);
+            }
+            if (m_renderer) m_renderer->MarkDirty();
+        }
+    }
+    if (!input.leftDown)
+    {
+        document.rigHandleDrag = -1;
+        if (document.autoKey)
+        {
+            if (dragging < 2) AddAnimationKey(document, true);
+            else
+            {
+                const auto& limb = track->controls.limbs[(dragging - 2) / 2];
+                auto* upper = jointAt(limb.upper);
+                auto* lower = jointAt(limb.lower);
+                auto* tip = jointAt(limb.tip);
+                if (upper && lower && tip)
+                    AddAnimationLimbKey(document, *upper, *lower, *tip, false);
+            }
+        }
+    }
+    return true;
+}
+
 void EditorState::DrawAnimationProperties(IEditorUi& ui,
     AnimationDocument& document)
 {
@@ -1659,6 +3132,9 @@ void EditorState::DrawAnimationProperties(IEditorUi& ui,
                 ui.ValueLabel(index == 0 ? "Bound meshes" : "",
                     document.boundMeshNames[index].c_str());
     }
+    DrawAnimationRigControls(ui, document);
+    DrawAnimationPoseLibrary(ui, document);
+    DrawAnimationChainIK(ui, document);
     ui.Separator();
     Engine::Core::Component::DrawAssetPathPicker(ui, &document,
         "animationAssetToAdd", "Animation asset", "animation",
@@ -1668,7 +3144,8 @@ void EditorState::DrawAnimationProperties(IEditorUi& ui,
     {
         const auto asset = Engine::Model::AnimationClipAsset::Load(
             document.animationAssetToAdd);
-        auto rig = Engine::Model::RigAsset::Load(document.rigPath);
+        auto rig = Engine::Model::RigAsset::Load(
+            document.rigPath, static_cast<unsigned>(document.rigIndex));
         if (!rig)
             document.error = "Save this rig before adding animation assets.";
         else if (!asset)
@@ -1812,6 +3289,191 @@ void EditorState::DrawAnimationProperties(IEditorUi& ui,
         document.poseControlEditPending = false;
         if (document.autoKey) AddAnimationKey(document);
     }
+    // A selected tip and its two parents form an authoring IK chain.
+    auto* lower = joint->Parent;
+    auto* upper = lower ? lower->Parent : nullptr;
+    const bool validChain = upper && lower &&
+        std::find(joints.begin(), joints.end(), upper) != joints.end() &&
+        std::find(joints.begin(), joints.end(), lower) != joints.end();
+    if (validChain && ImGui::CollapsingHeader("Two-bone IK"))
+    {
+        if (document.ikControlTip != document.selectedBone ||
+            document.ikControlTime != document.playheadSeconds)
+        {
+            document.ikControlTip = document.selectedBone;
+            document.ikControlTime = document.playheadSeconds;
+            document.ikTarget = joint->transform.GetWorldPosition();
+            glm::mat3 tipBasis(joint->transform.GetWorldMatrix());
+            for (int axis = 0; axis < 3; ++axis)
+                if (glm::length(tipBasis[axis]) > 1e-6f)
+                    tipBasis[axis] = glm::normalize(tipBasis[axis]);
+            document.ikTargetRotation = glm::eulerAngles(
+                glm::normalize(glm::quat_cast(tipBasis)));
+            const glm::vec3 root = upper->transform.GetWorldPosition();
+            const glm::vec3 mid = lower->transform.GetWorldPosition();
+            const glm::vec3 end = document.ikTarget;
+            document.ikPole = mid + (mid - (root + end) * .5f);
+            document.ikBlend = 0.f;
+            document.ikSpace = Engine::Model::AnimationClip::LimbKey::Space::Body;
+            document.ikSpaceNode = -1;
+            document.ikPropReference.Clear();
+            if (document.clipIndex >= 0 && document.clipIndex <
+                static_cast<int>(document.sourceManager->clips.size()))
+            {
+                const auto& clip = document.sourceManager->clips[document.clipIndex];
+                const auto found = std::find_if(clip.limbs.begin(), clip.limbs.end(),
+                    [&](const auto& limb) { return limb.tip == nodeIndex; });
+                if (found != clip.limbs.end() && !found->keys.empty())
+                {
+                    const auto key = Engine::Model::AnimationClip::SampleLimb(
+                        *found, AnimationLocalTime(document,
+                            document.rigIndex, document.clipIndex));
+                    auto* model = document.poseSkeleton->ResolveModel();
+                    if (model && model->Owner)
+                    {
+                        const glm::mat4 world = Engine::Model::LimbSpaceMatrix(
+                            key, model->Owner->transform.GetWorldMatrix(),
+                            *upper, model->ResolveNodes());
+                        document.ikTarget = Engine::Model::LimbWorldPoint(world, key.target);
+                        document.ikPole = Engine::Model::LimbWorldPoint(world, key.pole);
+                        document.ikTargetRotation = glm::eulerAngles(
+                            glm::normalize(Engine::Model::LimbSpaceRotation(world) * key.rotation));
+                    }
+                    document.ikBlend = key.blend;
+                    document.ikSpace = key.space;
+                    document.ikSpaceNode = key.spaceNode;
+                    document.ikPropReference = key.propReference;
+                }
+            }
+            document.ikControlEditPending = false;
+        }
+        ui.ValueLabel("Chain", (upper->name + " / " + lower->name +
+            " / " + joint->name).c_str());
+        using ControlSpace = Engine::Model::AnimationClip::LimbKey::Space;
+        const auto switchSpace = [&](ControlSpace space,
+            const Engine::Core::ComponentReference* prop = nullptr)
+        {
+            const auto& reference = prop ? *prop : document.ikPropReference;
+            if (document.ikSpace == space &&
+                (space != ControlSpace::Prop ||
+                    (document.ikPropReference.objectPath == reference.objectPath &&
+                     document.ikPropReference.objectName == reference.objectName))) return;
+            const auto oldSpace = document.ikSpace;
+            const int oldNode = document.ikSpaceNode;
+            const auto oldProp = document.ikPropReference;
+            document.ikSpace = space;
+            document.ikSpaceNode = -1;
+            if (prop) document.ikPropReference = *prop;
+            if (!AddAnimationLimbKey(document, *upper, *lower, *joint, false))
+            {
+                document.ikSpace = oldSpace;
+                document.ikSpaceNode = oldNode;
+                document.ikPropReference = oldProp;
+            }
+        };
+        ui.ValueLabel("Control space", document.ikSpace == ControlSpace::Local
+            ? "Local" : document.ikSpace == ControlSpace::World ? "World"
+            : document.ikSpace == ControlSpace::Prop ? "Prop" : "Body");
+        if (ui.Button("Local##IKSpace")) switchSpace(ControlSpace::Local);
+        ImGui::SameLine();
+        if (ui.Button("World##IKSpace")) switchSpace(ControlSpace::World);
+        ImGui::SameLine();
+        if (ui.Button("Body##IKSpace")) switchSpace(ControlSpace::Body);
+        ImGui::SameLine();
+        if (ui.Button("Prop##IKSpace") && document.ikPropReference.IsAssigned())
+            switchSpace(ControlSpace::Prop);
+        if (document.poseScene)
+        {
+            const char* propName = document.ikPropReference.IsAssigned()
+                ? document.ikPropReference.objectName.c_str() : "Choose prop";
+            if (ImGui::BeginCombo("Prop reference", propName))
+            {
+                size_t index = 0;
+                for (const auto& object : document.poseScene->GetObjects())
+                {
+                    auto* candidate = object.get();
+                    if (!candidate) continue;
+                    bool inChain = false;
+                    for (auto* parent = candidate; parent; parent = parent->Parent)
+                        if (parent == upper) { inChain = true; break; }
+                    if (inChain) continue;
+                    const auto reference = Engine::Core::CaptureComponentReference(
+                        &candidate->transform, "Transform");
+                    ImGui::PushID(static_cast<int>(index++));
+                    if (ImGui::Selectable(candidate->name.c_str(),
+                            document.ikSpace == ControlSpace::Prop &&
+                            document.ikPropReference.objectPath == reference.objectPath))
+                        switchSpace(ControlSpace::Prop, &reference);
+                    ImGui::PopID();
+                }
+                ImGui::EndCombo();
+            }
+        }
+        bool changed = ui.DragFloat3("IK target (world)",
+            &document.ikTarget.x, .01f);
+        changed = ui.DragFloat3("IK pole (world)",
+            &document.ikPole.x, .01f) || changed;
+        float targetAngles[]{ glm::degrees(document.ikTargetRotation.x),
+            glm::degrees(document.ikTargetRotation.y),
+            glm::degrees(document.ikTargetRotation.z) };
+        if (ui.DragFloat3("IK target rotation (degrees)", targetAngles, .5f))
+        {
+            document.ikTargetRotation = glm::radians(glm::vec3(
+                targetAngles[0], targetAngles[1], targetAngles[2]));
+            changed = true;
+        }
+        changed = ui.DragFloat("IK position weight",
+            &document.ikPositionWeight, .01f, 0.f, 1.f) || changed;
+        changed = ui.DragFloat("IK rotation weight",
+            &document.ikRotationWeight, .01f, 0.f, 1.f) || changed;
+        if (ui.Button("Switch to IK (match pose)"))
+        {
+            document.ikBlend = 1.f;
+            AddAnimationLimbKey(document, *upper, *lower, *joint, true);
+        }
+        if (ui.Button("Switch to FK (match pose)"))
+        {
+            document.ikBlend = 0.f;
+            AddAnimationLimbKey(document, *upper, *lower, *joint, true);
+        }
+        if (ui.DragFloat("FK / IK blend", &document.ikBlend, .01f, 0.f, 1.f))
+        {
+            document.ikBlend = std::clamp(document.ikBlend, 0.f, 1.f);
+            changed = true;
+        }
+        if (changed)
+        {
+            const glm::mat4 targetWorld = glm::translate(glm::mat4(1.f),
+                document.ikTarget) * glm::mat4_cast(
+                    glm::quat(document.ikTargetRotation));
+            if (Engine::Components::TwoBoneIK::Solve(*upper, *lower, *joint,
+                    document.ikTarget, document.ikPole,
+                    document.ikPositionWeight, document.ikRotationWeight,
+                    &targetWorld))
+            {
+                upper->transform.NotifyEditorTransformChanged(
+                    Engine::Components::Transform::EditorRotation);
+                lower->transform.NotifyEditorTransformChanged(
+                    Engine::Components::Transform::EditorRotation);
+                joint->transform.NotifyEditorTransformChanged(
+                    Engine::Components::Transform::EditorRotation);
+                document.ikControlEditPending = true;
+                if (m_renderer) m_renderer->MarkDirty();
+            }
+        }
+        if (document.ikControlEditPending && !ui.IsAnyItemActive())
+        {
+            document.ikControlEditPending = false;
+            if (document.autoKey)
+                AddAnimationLimbKey(document, *upper, *lower, *joint, false);
+        }
+        if (ui.Button("Key FK/IK controls"))
+            AddAnimationLimbKey(document, *upper, *lower, *joint, false);
+        if (ui.Button("Key current IK pose to bones"))
+            AddAnimationIKKeys(document, *upper, *lower, *joint);
+        if (ui.Button("Bake IK to bone keys (30 fps)"))
+            BakeAnimationLimbs(document);
+    }
 }
 
 void EditorState::DrawAnimationTimeline(IEditorUi& ui,
@@ -1833,26 +3495,27 @@ void EditorState::DrawAnimationTimeline(IEditorUi& ui,
         for (const auto& track : document.tracks)
             if (track.selected)
             {
-                const auto includeClip = [&](int index)
+                const auto includeClip = [&](int index, float start,
+                    bool repeat, int count)
                 {
                     if (index >= 0 && index < static_cast<int>(
                             track.sourceManager->clips.size()))
                     {
                         const auto& clip = track.sourceManager->clips[index];
-                        duration = std::max(duration, clip.duration);
-                        anyLooping |= clip.looping;
+                        duration = std::max(duration, start + clip.duration *
+                            (repeat && count > 0 ? count : 1));
+                        anyLooping |= repeat && count == 0;
                     }
                 };
-                includeClip(track.clipIndex);
+                includeClip(track.clipIndex, track.startSeconds,
+                    track.repeat, track.repeatCount);
                 for (const auto& layer : track.stackedClips)
-                    includeClip(layer.clipIndex);
+                    includeClip(layer.clipIndex, layer.startSeconds,
+                        layer.repeat, layer.repeatCount);
             }
         if (document.playheadSeconds >= duration)
         {
-            if (anyLooping)
-                document.playheadSeconds = std::fmod(
-                    document.playheadSeconds, duration);
-            else
+            if (!anyLooping)
             {
                 document.playheadSeconds = duration;
                 document.playing = false;
@@ -1860,10 +3523,60 @@ void EditorState::DrawAnimationTimeline(IEditorUi& ui,
         }
         SampleAnimationDocument(document);
     }
-    if (ui.Button("Key Selected Bone"))
+    if (ui.Button(document.selectedRows.empty()
+            ? "Key Selected Bone" : "Key Selected Rows"))
     {
         document.playing = false;
-        AddAnimationKey(document, true);
+        AddAnimationRowKeys(document);
+    }
+    ui.SameLine();
+    if (!document.selectedRows.empty() && ui.Button("Select Row Keys"))
+    {
+        document.selectedKeys.clear();
+        for (const auto& row : document.selectedRows)
+        {
+            const auto track = std::find_if(document.tracks.begin(),
+                document.tracks.end(), [&](const auto& item)
+                { return item.index == row.rigIndex; });
+            if (track == document.tracks.end() || !track->sourceManager ||
+                row.clipIndex < 0 || row.clipIndex >= static_cast<int>(
+                    track->sourceManager->clips.size())) continue;
+            for (float time : AnimationClipEditing::KeyTimes(
+                    track->sourceManager->clips[row.clipIndex], row.nodeIndex))
+                document.selectedKeys.push_back({row.rigIndex,
+                    row.clipIndex, row.nodeIndex, time});
+        }
+    }
+    if (!document.selectedRows.empty()) ui.SameLine();
+    ImGui::BeginDisabled(document.selectedKeys.empty());
+    if (ui.Button("Copy Keys")) CopyAnimationKeys(document);
+    ImGui::EndDisabled();
+    if (!document.copiedKeys.empty())
+    {
+        ui.SameLine();
+        const auto targetTrack = std::find_if(document.tracks.begin(),
+            document.tracks.end(), [&](const auto& item)
+            { return item.index == document.copiedKeysRig; });
+        if (targetTrack != document.tracks.end() && targetTrack->sourceManager)
+        {
+            const auto& available = targetTrack->sourceManager->clips;
+            const char* destination = document.pasteClipIndex >= 0 &&
+                document.pasteClipIndex < static_cast<int>(available.size())
+                    ? available[document.pasteClipIndex].clipName.c_str()
+                    : "Choose animation";
+            ImGui::SetNextItemWidth(180.f);
+            if (ImGui::BeginCombo("Paste into animation", destination))
+            {
+                for (int index = 0; index < static_cast<int>(available.size());
+                    ++index)
+                    if (ImGui::Selectable(available[index].clipName.c_str(),
+                            index == document.pasteClipIndex))
+                        document.pasteClipIndex = index;
+                ImGui::EndCombo();
+            }
+            ui.SameLine();
+            if (ui.Button("Paste Keys")) PasteAnimationKeys(document);
+        }
     }
     ui.SameLine();
     ui.Checkbox("Auto Key", &document.autoKey);
@@ -1902,6 +3615,8 @@ void EditorState::DrawAnimationTimeline(IEditorUi& ui,
                     document.playheadSeconds = 0.f;
                     document.repairIssueChannel = -1;
                     document.selectedKeys.clear();
+                    document.selectedRows.clear();
+                    document.rowSelectionAnchor.reset();
                     SampleAnimationDocument(document);
                 }
             ImGui::EndCombo();
@@ -1938,6 +3653,8 @@ void EditorState::DrawAnimationTimeline(IEditorUi& ui,
             {
                 track.stackedClips.erase(track.stackedClips.begin() + layer);
                 document.selectedKeys.clear();
+                document.selectedRows.clear();
+                document.rowSelectionAnchor.reset();
                 if (document.rigIndex == track.index)
                     document.clipIndex = track.clipIndex;
                 SampleAnimationDocument(document);
@@ -1948,7 +3665,7 @@ void EditorState::DrawAnimationTimeline(IEditorUi& ui,
         }
         ImGui::PopID();
     }
-    ImGui::TextDisabled("Double-click: key | Drag: move | Right-drag: select | Delete: remove");
+    ImGui::TextDisabled("Rows: click / Ctrl toggle / Shift range | Keys: Ctrl click / right-drag select");
     const bool hasVisibleAnimation = std::any_of(document.tracks.begin(),
         document.tracks.end(), [](const auto& track)
         { return track.selected && track.sourceManager &&
@@ -1963,15 +3680,19 @@ void EditorState::DrawAnimationTimeline(IEditorUi& ui,
         if (track.selected)
         {
             const auto& available = track.sourceManager->clips;
-            const auto includeClip = [&](int index)
+            const auto includeClip = [&](int index, float start,
+                bool repeat, int count)
             {
                 if (index >= 0 && index < static_cast<int>(available.size()))
                     timelineDuration = std::max(timelineDuration,
-                        available[index].duration);
+                        start + available[index].duration *
+                        (repeat && count > 0 ? count : 1));
             };
-            includeClip(track.clipIndex);
+            includeClip(track.clipIndex, track.startSeconds,
+                track.repeat, track.repeatCount);
             for (const auto& layer : track.stackedClips)
-                includeClip(layer.clipIndex);
+                includeClip(layer.clipIndex, layer.startSeconds,
+                    layer.repeat, layer.repeatCount);
         }
     DrawAnimationGraph(document, timelineDuration);
 }
@@ -1993,13 +3714,17 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
         int clipIndex = -1;
         float height = 25.f;
         float offset = 0.f;
+        float startSeconds = 0.f;
+        bool repeat = false;
+        int repeatCount = 0;
     };
     std::vector<Row> rows;
     for (auto& track : document.tracks)
     {
         if (!track.selected) continue;
         auto& clips = track.sourceManager->clips;
-        const auto appendClip = [&](int clipIndex, bool& expanded)
+        const auto appendClip = [&](int clipIndex, bool& expanded,
+            float startSeconds, bool repeat, int repeatCount)
         {
             Engine::Model::AnimationClip* clip = clipIndex >= 0 &&
                 clipIndex < static_cast<int>(clips.size())
@@ -2015,6 +3740,9 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
             }
             rows.push_back({ Row::Kind::Header, &track, nullptr, clip,
                 keyTimes, mappingReady, 0, 0, &expanded, clipIndex, 28.f });
+            rows.back().startSeconds = startSeconds;
+            rows.back().repeat = repeat;
+            rows.back().repeatCount = repeatCount;
             if (!expanded) return;
             const auto& joints = track.poseSkeleton->ResolveJoints();
             for (size_t boneIndex = 0; boneIndex < joints.size(); ++boneIndex)
@@ -2029,6 +3757,7 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
                 rows.push_back({ Row::Kind::Bone, &track, joint, clip,
                     keyTimes, mappingReady, boneIndex, nodeIndex,
                     nullptr, clipIndex });
+                rows.back().startSeconds = startSeconds;
             }
         };
         if (track.clipIndex >= 0 &&
@@ -2036,7 +3765,8 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
         {
             bool& expanded = track.expandedClips.try_emplace(
                 track.clipIndex, true).first->second;
-            appendClip(track.clipIndex, expanded);
+            appendClip(track.clipIndex, expanded, track.startSeconds,
+                track.repeat, track.repeatCount);
         }
         for (const auto& layer : track.stackedClips)
             if (layer.clipIndex >= 0 &&
@@ -2045,7 +3775,8 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
             {
                 bool& expanded = track.expandedClips.try_emplace(
                     layer.clipIndex, true).first->second;
-                appendClip(layer.clipIndex, expanded);
+                appendClip(layer.clipIndex, expanded, layer.startSeconds,
+                    layer.repeat, layer.repeatCount);
             }
     }
     float rowTotalHeight = 0.f;
@@ -2115,6 +3846,8 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
         ImGui::IsMouseClicked(ImGuiMouseButton_Left);
     const bool rightClicked = hovered &&
         ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+    if (document.clipDragging && !ImGui::IsMouseDown(ImGuiMouseButton_Left))
+        document.clipDragging = false;
     const auto timeAt = [&](float x)
     {
         return std::clamp((x - timeX) / pixelsPerSecond, 0.f, seconds);
@@ -2167,6 +3900,40 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
         ImGui::BeginDisabled(!primary && !isStacked);
         if (ImGui::SliderFloat("Weight", &weight, 0.f, 1.f, "%.2f"))
             SampleAnimationDocument(document);
+        float& start = primary ? row.track->startSeconds
+            : stacked->startSeconds;
+        bool& repeat = primary ? row.track->repeat : stacked->repeat;
+        int& count = primary ? row.track->repeatCount : stacked->repeatCount;
+        if (ImGui::DragFloat("Start (seconds)", &start, .01f,
+                0.f, 3600.f, "%.2f s"))
+        {
+            start = std::max(0.f, start);
+            SampleAnimationDocument(document);
+        }
+        if (ImGui::RadioButton("Isolated (play once)", !repeat))
+        {
+            repeat = false;
+            SampleAnimationDocument(document);
+        }
+        if (ImGui::RadioButton("Repeat", repeat))
+        {
+            repeat = true;
+            SampleAnimationDocument(document);
+        }
+        if (repeat)
+        {
+            bool infinite = count == 0;
+            if (ImGui::Checkbox("Infinite", &infinite))
+            {
+                count = infinite ? 0 : 2;
+                SampleAnimationDocument(document);
+            }
+            if (!infinite && ImGui::InputInt("Number of plays", &count))
+            {
+                count = std::max(1, count);
+                SampleAnimationDocument(document);
+            }
+        }
         ImGui::EndDisabled();
         auto& clip = clips[clipIndex];
         float length = clip.duration;
@@ -2213,9 +3980,10 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
             clip.looping = loop;
         }
         const float clipLength = std::max(clip.duration, .01f);
-        const float localTime = clip.looping
-            ? std::fmod(std::max(document.playheadSeconds, 0.f), clipLength)
-            : std::min(std::max(document.playheadSeconds, 0.f), clipLength);
+        const float elapsed = std::max(document.playheadSeconds - start, 0.f);
+        const float localTime = repeat
+            ? std::fmod(elapsed, clipLength)
+            : std::min(elapsed, clipLength);
         ImGui::TextDisabled("Local time %.2f / %.2f s", localTime,
             clipLength);
         if (primary) ImGui::BeginDisabled();
@@ -2266,7 +4034,8 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
         if (document.keyDragging && selected &&
             std::all_of(keys.begin(), keys.end(), isSelected))
             shownTime += document.keyDragDelta;
-        const float x = timeX + shownTime * pixelsPerSecond;
+        const float x = timeX +
+            (row.startSeconds + shownTime) * pixelsPerSecond;
         if (x < labelRight - 8.f || x > origin.x + canvasWidth + 8.f)
             return;
         if (selected)
@@ -2280,6 +4049,77 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
             draw->AddCircle({ x, center }, 8.f,
                 IM_COL32(255, 245, 195, 255), 0, 1.5f);
         keyVisuals.push_back({ &row, time, x, center, std::move(keys) });
+    };
+    using TimelineRow = AnimationDocument::TimelineRow;
+    const auto rowIdentity = [](const Row& row)
+    { return TimelineRow{row.track->index, row.clipIndex, row.nodeIndex}; };
+    const auto sameRow = [](const TimelineRow& left,
+        const TimelineRow& right)
+    {
+        return left.rigIndex == right.rigIndex &&
+            left.clipIndex == right.clipIndex &&
+            left.nodeIndex == right.nodeIndex;
+    };
+    const auto selectedRow = [&](const Row& row)
+    {
+        const auto identity = rowIdentity(row);
+        return std::any_of(document.selectedRows.begin(),
+            document.selectedRows.end(), [&](const auto& selected)
+            { return sameRow(identity, selected); });
+    };
+    const auto selectRow = [&](const Row& row, bool toggle, bool range)
+    {
+        const auto identity = rowIdentity(row);
+        if (!document.selectedRows.empty() &&
+            document.selectedRows.front().rigIndex != identity.rigIndex)
+        {
+            document.selectedRows.clear();
+            document.rowSelectionAnchor.reset();
+        }
+        if (range && document.rowSelectionAnchor &&
+            document.rowSelectionAnchor->rigIndex == identity.rigIndex)
+        {
+            const auto locate = [&](const TimelineRow& target)
+            {
+                for (size_t i = 0; i < rows.size(); ++i)
+                    if (rows[i].kind == Row::Kind::Bone &&
+                        sameRow(rowIdentity(rows[i]), target)) return i;
+                return rows.size();
+            };
+            const size_t first = locate(*document.rowSelectionAnchor);
+            const size_t last = locate(identity);
+            if (first < rows.size() && last < rows.size())
+            {
+                if (!toggle) document.selectedRows.clear();
+                for (size_t i = std::min(first, last);
+                    i <= std::max(first, last); ++i)
+                {
+                    if (rows[i].kind != Row::Kind::Bone ||
+                        rows[i].track->index != identity.rigIndex) continue;
+                    const auto candidate = rowIdentity(rows[i]);
+                    if (std::none_of(document.selectedRows.begin(),
+                            document.selectedRows.end(), [&](const auto& selected)
+                            { return sameRow(candidate, selected); }))
+                        document.selectedRows.push_back(candidate);
+                }
+                return;
+            }
+        }
+        if (toggle)
+        {
+            auto found = std::find_if(document.selectedRows.begin(),
+                document.selectedRows.end(), [&](const auto& selected)
+                { return sameRow(identity, selected); });
+            if (found == document.selectedRows.end())
+                document.selectedRows.push_back(identity);
+            else document.selectedRows.erase(found);
+        }
+        else
+        {
+            document.selectedRows.clear();
+            document.selectedRows.push_back(identity);
+        }
+        document.rowSelectionAnchor = identity;
     };
     for (size_t index = 0; index < rows.size(); ++index)
     {
@@ -2302,6 +4142,59 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
                 { labelRight, bottom },
                 ImGui::GetColorU32(RigTimelineTint(rigColor,
                     row.track->clipIndex == row.clipIndex ? .72f : .42f)));
+            if (row.clip)
+            {
+                const float length = std::max(.01f, row.clip->duration);
+                const int plays = row.repeat && row.repeatCount > 0
+                    ? row.repeatCount : 1;
+                const float barStart = timeX +
+                    row.startSeconds * pixelsPerSecond;
+                const float barEnd = timeX +
+                    (row.startSeconds + length * plays) * pixelsPerSecond;
+                draw->AddRectFilled({ barStart, bottom - 8.f },
+                    { barEnd, bottom - 2.f }, color, 2.f);
+                if (row.repeat && row.repeatCount == 0)
+                    draw->AddText({ barEnd + 4.f, bottom - 16.f }, color,
+                        "infinite");
+                if (mouseInRow && mouse.y >= bottom - 9.f &&
+                    mouse.x >= barStart && mouse.x <= barEnd &&
+                    mouse.x >= labelRight)
+                {
+                    ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+                    ImGui::SetTooltip("Drag to move animation start");
+                    if (leftClicked)
+                    {
+                        document.clipDragging = true;
+                        document.clipDragRig = row.track->index;
+                        document.clipDragIndex = row.clipIndex;
+                        document.clipDragMouseX = mouse.x;
+                        document.clipDragStart = row.startSeconds;
+                        document.playing = false;
+                    }
+                }
+                if (document.clipDragging &&
+                    document.clipDragRig == row.track->index &&
+                    document.clipDragIndex == row.clipIndex)
+                {
+                    float& start = row.track->clipIndex == row.clipIndex
+                        ? row.track->startSeconds
+                        : std::find_if(row.track->stackedClips.begin(),
+                            row.track->stackedClips.end(),
+                            [&](const auto& layer)
+                            { return layer.clipIndex == row.clipIndex; })
+                            ->startSeconds;
+                    const float moved = std::max(0.f,
+                        document.clipDragStart +
+                        (mouse.x - document.clipDragMouseX) /
+                        pixelsPerSecond);
+                    if (start != moved)
+                    {
+                        start = moved;
+                        row.startSeconds = moved;
+                        SampleAnimationDocument(document);
+                    }
+                }
+            }
             const std::string label = row.clip
                 ? row.clip->clipName : "No animation";
             const std::string rigLabel = row.track->name;
@@ -2390,10 +4283,12 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
                 IM_COL32(130, 140, 160, 13));
         const bool activeBone = document.rigIndex == row.track->index &&
             document.selectedBone == static_cast<int>(row.boneIndex);
-        if (activeBone)
+        const bool rowIsSelected = selectedRow(row);
+        if (rowIsSelected || activeBone)
             draw->AddRectFilled({ origin.x, top },
                 { origin.x + canvasWidth, bottom },
-                ImGui::GetColorU32(RigTimelineTint(rigColor, .25f)));
+                ImGui::GetColorU32(RigTimelineTint(rigColor,
+                    rowIsSelected ? .4f : .25f)));
         draw->AddLine({ origin.x, bottom },
             { origin.x + canvasWidth, bottom },
             IM_COL32(150, 160, 175, 28));
@@ -2413,14 +4308,18 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
         }
         draw->AddRectFilled({ pinnedX, top },
             { labelRight, bottom },
-            ImGui::GetColorU32(ImGuiCol_WindowBg));
+            rowIsSelected
+                ? ImGui::GetColorU32(RigTimelineTint(rigColor, .5f))
+                : ImGui::GetColorU32(ImGuiCol_WindowBg));
         draw->AddText({ pinnedX + 12.f, top + 4.f },
-            activeBone ? color : ImGui::GetColorU32(ImGuiCol_Text),
+            activeBone || rowIsSelected ? color : ImGui::GetColorU32(ImGuiCol_Text),
             row.joint->name.c_str());
         if (mouseInRow && mouse.x < labelRight && leftClicked &&
             !document.playheadDragging)
         {
             activateClip(row);
+            selectRow(row, ImGui::GetIO().KeyCtrl,
+                ImGui::GetIO().KeyShift);
             document.selectedBone = static_cast<int>(row.boneIndex);
             document.poseScene->SetSelectedObject(row.joint);
             if (m_primaryHierarchy) m_primaryHierarchy->SetSelectedObject(row.joint);
@@ -2494,6 +4393,7 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
         }
     }
     if (leftClicked && mouse.x >= labelRight && !onRuler &&
+        !document.clipDragging &&
         !document.marqueeActive && !document.playheadDragging)
     {
         Row* row = findRow(mouse.y);
@@ -2504,6 +4404,7 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
             activateClip(*hit->row);
             if (hit->row->kind == Row::Kind::Bone)
             {
+                if (!additive) selectRow(*hit->row, false, false);
                 document.selectedBone = static_cast<int>(hit->row->boneIndex);
                 document.poseScene->SetSelectedObject(hit->row->joint);
                 if (m_primaryHierarchy)
@@ -2534,7 +4435,7 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
             document.keyPressActive = true;
             document.keyDragging = false;
             document.keyDragDelta = 0.f;
-            document.playheadSeconds = hit->time;
+            document.playheadSeconds = hit->row->startSeconds + hit->time;
             document.playing = false;
             SampleAnimationDocument(document);
         }
@@ -2542,11 +4443,14 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
             ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
         {
             activateClip(*row);
-            document.playheadSeconds = hit ? hit->time : timeAt(mouse.x);
+            document.playheadSeconds = hit
+                ? hit->row->startSeconds + hit->time : timeAt(mouse.x);
             document.playing = false;
             SampleAnimationDocument(document);
-            auto* model = row->track->poseSkeleton->ResolveModel();
-            if (model)
+            if (row->kind == Row::Kind::Bone && selectedRow(*row) &&
+                document.selectedRows.size() > 1)
+                AddAnimationRowKeys(document);
+            else if (auto* model = row->track->poseSkeleton->ResolveModel())
             {
                 auto before = row->track->sourceManager->clips;
                 auto& clip = row->track->sourceManager->clips[row->clipIndex];
@@ -2566,7 +4470,8 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
                         row->track->poseSkeleton->jointNodes[boneIndex];
                     const auto& transform = joint->transform;
                     if (!AnimationClipEditing::UpsertBonePose(clip, node,
-                            document.playheadSeconds, transform.position,
+                            AnimationLocalTime(document, row->track->index,
+                                row->clipIndex), transform.position,
                             glm::quat(transform.rotation), transform.scale))
                         continue;
                     const std::string targetPath =
@@ -2579,6 +4484,19 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
                 }
                 if (keyed) RecordAnimationEdit(document, std::move(before));
             }
+        }
+        else if (row && row->kind == Row::Kind::Bone)
+        {
+            activateClip(*row);
+            selectRow(*row, ImGui::GetIO().KeyCtrl,
+                ImGui::GetIO().KeyShift);
+            document.selectedBone = static_cast<int>(row->boneIndex);
+            document.poseScene->SetSelectedObject(row->joint);
+            if (m_primaryHierarchy)
+                m_primaryHierarchy->SetSelectedObject(row->joint);
+            if (m_primaryProperties)
+                m_primaryProperties->SetSelectedObject(row->joint);
+            if (!additive) document.selectedKeys.clear();
         }
         else if (row && !additive) document.selectedKeys.clear();
     }
@@ -2641,6 +4559,16 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
             document.keyDragging = false;
             document.keyDragDelta = 0.f;
         }
+    }
+    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+        !ImGui::GetIO().WantTextInput && ImGui::GetIO().KeyCtrl)
+    {
+        if (ImGui::IsKeyPressed(ImGuiKey_C) &&
+            !document.selectedKeys.empty())
+            CopyAnimationKeys(document);
+        if (ImGui::IsKeyPressed(ImGuiKey_V) &&
+            !document.copiedKeys.empty())
+            PasteAnimationKeys(document);
     }
     if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
         !ImGui::GetIO().WantTextInput &&

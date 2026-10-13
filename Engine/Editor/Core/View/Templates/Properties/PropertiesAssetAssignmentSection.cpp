@@ -6,6 +6,8 @@
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Obj/Sprite.h"
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
+#include "Core/Compoonents/Animation/AnimationManager.h"
+#include "Core/Model/AnimationPackAsset.h"
 #include "Core/Compoonents/Audio/AudioSource.h"
 #include "Core/Compoonents/UI/UIText.h"
 #include "Core/Compoonents/UI/UIImage.h"
@@ -68,6 +70,8 @@ std::string PropertiesView::HandleWindowAssetDrop(IEditorUi& ui)
         return "Material Preview";
     if (extension == ".spriteanim")
         return "Sprite Animation Preview";
+    if (extension == ".animpack")
+        return "Animation Pack Preview";
     if (Engine::Editor::IsAudioAssetExtension(extension))
         return "Audio Source Preview";
     if (Engine::Editor::IsFontAssetExtension(extension))
@@ -105,6 +109,21 @@ bool PropertiesView::AddComponentFromAsset(const std::string& path, std::string&
     const std::string extension = Engine::Editor::LowerAssetExtension(path);
     try
     {
+        if (extension == ".animpack")
+        {
+            std::string error;
+            const auto pack = Engine::Model::AnimationPackAsset::Load(path, error);
+            if (!pack)
+            { message = "[Properties] Failed to read animation pack: " + error; return false; }
+            auto* manager = m_selectedObject->GetComponent<Engine::Components::AnimationManager>();
+            if (!manager)
+                manager = m_selectedObject->AddComponent<Engine::Components::AnimationManager>();
+            if (!pack->Apply(*manager, error))
+            { message = "[Properties] Could not apply animation pack: " + error; return false; }
+            message = "[Properties] Applied animation pack from: " + path;
+            return true;
+        }
+
         if (extension == ".mesh" || extension == ".obj")
         {
             auto mesh = std::make_unique<Engine::Components::Mesh>();

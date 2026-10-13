@@ -2,6 +2,7 @@
 
 #include <glm/glm.hpp>
 #include <cstdint>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -68,6 +69,7 @@ static_assert(std::is_trivially_copyable_v<Vertex> &&
 
 struct MorphTarget
 {
+    std::string name;
     std::vector<glm::vec3> positions;
     std::vector<glm::vec3> normals;
     std::vector<glm::vec3> tangents;

@@ -503,6 +503,56 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
 
     if(m_cubeDragObject&&input.leftDown)
     {
+        const EditorUiVec2 pointerStep=Subtract(input.mousePosInViewport,
+            m_cubeDragLastMouse);
+        const float projectedStep=Dot(pointerStep,m_cubeDragScreenDirection);
+        const int pointerDirection=projectedStep>1e-5f?1:
+            projectedStep< -1e-5f?-1:0;
+        const auto& current=m_cubeDragObject->transform;
+        // Preserve the accepted pose when another system limits the drag.
+        const bool corrected=m_cubeDragHasWritten&&(
+            (m_cubeDragTool==EditorTransformTool::Translate&&
+                glm::distance(current.position,
+                    m_cubeDragLastWrittenPosition)>1e-4f)||
+            (m_cubeDragTool==EditorTransformTool::Rotate&&
+                glm::distance(current.rotation,
+                    m_cubeDragLastWrittenRotation)>1e-4f)||
+            (m_cubeDragTool==EditorTransformTool::Scale&&
+                glm::distance(current.scale,
+                    m_cubeDragLastWrittenScale)>1e-4f));
+        if(corrected)
+        {
+            m_cubeDragBlockedDirection=m_cubeDragLastAttemptDirection;
+            m_cubeDragHasWritten=false;
+            m_cubeDragStartPosition=current.position;
+            m_cubeDragStartRotation=current.rotation;
+            m_cubeDragStartScale=current.scale;
+            m_cubeDragStartMouse=input.mousePosInViewport;
+            m_cubeDragLastMouse=input.mousePosInViewport;
+            return true;
+        }
+        if(m_cubeDragBlockedDirection!=0&&
+            (pointerDirection==0||
+                pointerDirection==m_cubeDragBlockedDirection))
+        {
+            m_cubeDragStartPosition=current.position;
+            m_cubeDragStartRotation=current.rotation;
+            m_cubeDragStartScale=current.scale;
+            m_cubeDragStartMouse=input.mousePosInViewport;
+            m_cubeDragLastMouse=input.mousePosInViewport;
+            return true;
+        }
+        if(m_cubeDragBlockedDirection!=0)
+        {
+            m_cubeDragBlockedDirection=0;
+            m_cubeDragStartPosition=current.position;
+            m_cubeDragStartRotation=current.rotation;
+            m_cubeDragStartScale=current.scale;
+            m_cubeDragStartMouse=m_cubeDragLastMouse;
+        }
+        const glm::vec3 previousPosition=m_cubeDragObject->transform.position;
+        const glm::vec3 previousRotation=m_cubeDragObject->transform.rotation;
+        const glm::vec3 previousScale=m_cubeDragObject->transform.scale;
         const float pixels=Dot(Subtract(input.mousePosInViewport,
             m_cubeDragStartMouse),m_cubeDragScreenDirection);
         if(m_cubeDragTool==EditorTransformTool::Translate)
@@ -525,17 +575,42 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
             m_cubeDragObject->transform.rotation[m_cubeDragAxis]=
                 m_cubeDragStartRotation[m_cubeDragAxis]+pixels*.01f;
         else if(m_cubeDragTool==EditorTransformTool::Scale)
-            m_cubeDragObject->transform.scale[m_cubeDragAxis]=std::max(.001f,
-                m_cubeDragStartScale[m_cubeDragAxis]+pixels*.01f);
+        {
+            const float requested=m_cubeDragStartScale[m_cubeDragAxis]+
+                pixels*.01f;
+            m_cubeDragObject->transform.scale[m_cubeDragAxis]=
+                std::max(.001f,requested);
+            if(requested<.001f)
+                m_cubeDragBlockedDirection=-1;
+        }
         const uint8_t channel = m_cubeDragTool == EditorTransformTool::Translate
             ? Engine::Components::Transform::EditorPosition
             : m_cubeDragTool == EditorTransformTool::Rotate
                 ? Engine::Components::Transform::EditorRotation
                 : Engine::Components::Transform::EditorScale;
-        m_cubeDragObject->transform.NotifyEditorTransformChanged(channel);
-        if(auto* body=m_cubeDragObject->GetComponent<
-            Engine::Components::RigidBody>())
-            body->NotifyEditorTransformChanged();
+        if(m_cubeDragObject->transform.position!=previousPosition||
+            m_cubeDragObject->transform.rotation!=previousRotation||
+            m_cubeDragObject->transform.scale!=previousScale)
+        {
+            m_cubeDragObject->transform.NotifyEditorTransformChanged(channel);
+            if(auto* body=m_cubeDragObject->GetComponent<
+                Engine::Components::RigidBody>())
+                body->NotifyEditorTransformChanged();
+        }
+        m_cubeDragLastWrittenPosition=current.position;
+        m_cubeDragLastWrittenRotation=current.rotation;
+        m_cubeDragLastWrittenScale=current.scale;
+        m_cubeDragHasWritten=true;
+        if(pointerDirection!=0)
+            m_cubeDragLastAttemptDirection=pointerDirection;
+        if(m_cubeDragBlockedDirection!=0)
+        {
+            m_cubeDragStartPosition=current.position;
+            m_cubeDragStartRotation=current.rotation;
+            m_cubeDragStartScale=current.scale;
+            m_cubeDragStartMouse=input.mousePosInViewport;
+        }
+        m_cubeDragLastMouse=input.mousePosInViewport;
         return true;
     }
 
@@ -548,6 +623,10 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
         m_cubeDragAxis=hoveredHandle;
         m_cubeDragTool=m_transformTool;
         m_cubeDragStartMouse=input.mousePosInViewport;
+        m_cubeDragLastMouse=input.mousePosInViewport;
+        m_cubeDragHasWritten=false;
+        m_cubeDragBlockedDirection=0;
+        m_cubeDragLastAttemptDirection=0;
         m_cubeDragScreenDirection=hoveredDragDirection;
         m_cubeDragStartPosition=selected->transform.position;
         m_cubeDragStartRotation=selected->transform.rotation;

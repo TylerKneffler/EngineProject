@@ -1,0 +1,65 @@
+{
+    "version": 1,
+    "baseColor": [
+        0.8,
+        0.8,
+        0.8
+    ],
+    "ambientColor": [
+        0.1,
+        0.1,
+        0.1
+    ],
+    "specularColor": [
+        1,
+        1,
+        1
+    ],
+    "emissive": [
+        0,
+        0,
+        0
+    ],
+    "shininess": 32,
+    "metallic": 0,
+    "roughness": 0.4,
+    "subsurfaceEnabled": false,
+    "subsurfaceWeight": 0,
+    "subsurfaceRadius": [
+        0.004,
+        0.002,
+        0.001
+    ],
+    "subsurfaceColor": [
+        1,
+        0.45,
+        0.35
+    ],
+    "subsurfaceThickness": 0,
+    "subsurfaceTransmission": 0,
+    "environmentDiffuseStrength": 1,
+    "reflectionStrength": 1,
+    "useCustomReflectionEnvironment": false,
+    "reflectionEnvironmentTexture": "",
+    "reflectionEnvironmentExposure": 0,
+    "reflectionEnvironmentRotation": 0,
+    "baseColorAlpha": 1,
+    "alphaMode": "Opaque",
+    "alphaCutoff": 0.5,
+    "normalScale": 1,
+    "heightScale": 0.05,
+    "heightMinSteps": 8,
+    "heightMaxSteps": 32,
+    "occlusionStrength": 1,
+    "doubleSided": false,
+    "castsShadows": true,
+    "unlit": false,
+    "lightingChannels": -1,
+    "baseColorUvSet": 0,
+    "metallicRoughnessUvSet": 0,
+    "normalUvSet": 0,
+    "occlusionUvSet": 0,
+    "emissiveUvSet": 0,
+    "heightUvSet": 0,
+    "baseColorTexture": "C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/mmd/Mococo/Textures/Outfit1_Acc.png"
+}

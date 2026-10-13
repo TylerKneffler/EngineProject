@@ -1,0 +1,11 @@
+{
+    "version": 1,
+    "id": "1adbaf09-d9ca-4327-b785-13972add8bf5",
+    "sourcePath": "C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/mmd/Mococo/Mococo (FBX No Outline).fbx",
+    "importSettings": {
+        "importer": "model-mesh",
+        "primitiveIndex": 3,
+        "sourceFormat": "fbx"
+    }
+}
+

@@ -1,4 +1,5 @@
 #include "Mesh.h"
+#include "Core/Model/MeshPackAsset.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include <fstream>
@@ -230,7 +231,10 @@ void Mesh::LoadFromFile(const std::string& path)
     }
     if (resolvedPath.extension() == ".mesh")
     {
-        std::ifstream native(resolvedPath, std::ios::binary);
+        auto nativeFile = Engine::Model::MeshPackAsset::Open(resolvedPath);
+        if (!nativeFile)
+            throw std::runtime_error("Mesh: failed to open native mesh: " + path);
+        std::istream& native = *nativeFile;
         uint32_t magic = 0, version = 0, count = 0;
         native.read(reinterpret_cast<char*>(&magic), sizeof(magic));
         native.read(reinterpret_cast<char*>(&version), sizeof(version));
@@ -693,6 +697,7 @@ void Mesh::InitializeRuntimeCloneFrom(const Mesh& source)
 void Mesh::SetMorphData(unsigned nodeIndex, std::vector<MorphTarget> targets,
     std::vector<float> weights)
 {
+    m_morphFilePath.clear();
     m_morphNodeIndex = nodeIndex;
     m_morphTargets = std::move(targets);
     m_morphWeights = std::move(weights);
@@ -703,6 +708,78 @@ void Mesh::SetMorphData(unsigned nodeIndex, std::vector<MorphTarget> targets,
     UpdateBounds();
     CreateMorphBuffers();
     MarkConfigurationDirty();
+}
+
+bool Mesh::SaveMorphFile(const std::string& path,
+    const std::vector<MorphTarget>& targets)
+{
+    static_assert(sizeof(glm::vec3) == sizeof(float) * 3);
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file) return false;
+    const uint32_t magic = 0x46524f4du; // MORF
+    const uint32_t version = 1;
+    const uint32_t count = static_cast<uint32_t>(targets.size());
+    file.write(reinterpret_cast<const char*>(&magic), sizeof(magic));
+    file.write(reinterpret_cast<const char*>(&version), sizeof(version));
+    file.write(reinterpret_cast<const char*>(&count), sizeof(count));
+    for (const auto& target : targets)
+    {
+        const uint32_t nameSize = static_cast<uint32_t>(target.name.size());
+        file.write(reinterpret_cast<const char*>(&nameSize), sizeof(nameSize));
+        file.write(target.name.data(), nameSize);
+        for (const auto* values : { &target.positions, &target.normals,
+                &target.tangents })
+        {
+            const uint32_t size = static_cast<uint32_t>(values->size());
+            file.write(reinterpret_cast<const char*>(&size), sizeof(size));
+            file.write(reinterpret_cast<const char*>(values->data()),
+                static_cast<std::streamsize>(size * sizeof(glm::vec3)));
+        }
+    }
+    return file.good();
+}
+
+bool Mesh::LoadMorphFile(const std::string& path, unsigned nodeIndex,
+    std::vector<float> weights)
+{
+    static_assert(sizeof(glm::vec3) == sizeof(float) * 3);
+    auto morphFile = Engine::Model::MeshPackAsset::Open(ResolveFilePath(path));
+    if (!morphFile) return false;
+    std::istream& file = *morphFile;
+    uint32_t magic = 0, version = 0, count = 0;
+    file.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+    file.read(reinterpret_cast<char*>(&version), sizeof(version));
+    file.read(reinterpret_cast<char*>(&count), sizeof(count));
+    if (!file || magic != 0x46524f4du || version != 1 || count > 10000u)
+        return false;
+    std::vector<MorphTarget> targets;
+    targets.reserve(count);
+    for (uint32_t index = 0; index < count; ++index)
+    {
+        MorphTarget target;
+        uint32_t nameSize = 0;
+        file.read(reinterpret_cast<char*>(&nameSize), sizeof(nameSize));
+        if (!file || nameSize > 4096u) return false;
+        target.name.resize(nameSize);
+        file.read(target.name.data(), nameSize);
+        for (auto* values : { &target.positions, &target.normals,
+                &target.tangents })
+        {
+            uint32_t size = 0;
+            file.read(reinterpret_cast<char*>(&size), sizeof(size));
+            if (!file || size > 100000000u ||
+                (!m_vertices.empty() && size != 0 && size != m_vertices.size()))
+                return false;
+            values->resize(size);
+            file.read(reinterpret_cast<char*>(values->data()),
+                static_cast<std::streamsize>(size * sizeof(glm::vec3)));
+            if (!file) return false;
+        }
+        targets.push_back(std::move(target));
+    }
+    SetMorphData(nodeIndex, std::move(targets), std::move(weights));
+    m_morphFilePath = path;
+    return true;
 }
 
 namespace
@@ -1693,9 +1770,12 @@ Mesh::JsonValue Mesh::Serialize() const
     if (m_morphTargets.empty()) return result;
     result.Set("morphNodeIndex", JsonValue(static_cast<int>(m_morphNodeIndex)));
     result.Set("morphWeights", FloatArray(m_morphWeights));
+    if (!m_morphFilePath.empty())
+        return result.Set("morphFile", JsonValue(m_morphFilePath));
     JsonValue targets = JsonValue::MakeArray();
     for (const MorphTarget& target : m_morphTargets)
         targets.Push(JsonValue::MakeObject()
+            .Set("name", JsonValue(target.name))
             .Set("positions", Vec3Array(target.positions))
             .Set("normals", Vec3Array(target.normals))
             .Set("tangents", Vec3Array(target.tangents)));
@@ -1709,6 +1789,8 @@ void Mesh::DeserializeLegacyMorphTargets(const JsonValue& value)
     for (size_t i = 0; i < list.ArraySize(); ++i)
     {
         MorphTarget target;
+        if (list.ArrayAt(i).Has("name"))
+            target.name = list.ArrayAt(i)["name"].AsString();
         target.positions = ReadVec3Array(list.ArrayAt(i)["positions"]);
         target.normals = ReadVec3Array(list.ArrayAt(i)["normals"]);
         target.tangents = ReadVec3Array(list.ArrayAt(i)["tangents"]);
@@ -1723,9 +1805,20 @@ void Mesh::DeserializeLegacyMorphTargets(const JsonValue& value)
 
 void Mesh::Deserialize(const JsonValue& v)
 {
-    if (v.Has("file"))
+    if (v.Has("file") && !v["file"].AsString().empty())
         LoadFromFile(v["file"].AsString());
-    if (v.Has("morphTargets"))
+    if (v.Has("morphFile") && !v["morphFile"].AsString().empty())
+    {
+        std::vector<float> weights;
+        for (size_t index = 0; index < v["morphWeights"].ArraySize(); ++index)
+            weights.push_back(v["morphWeights"].ArrayAt(index).AsFloat());
+        if (!LoadMorphFile(v["morphFile"].AsString(),
+                static_cast<unsigned>(v["morphNodeIndex"].AsInt()),
+                std::move(weights)))
+            throw std::runtime_error("Mesh: invalid morph file: " +
+                v["morphFile"].AsString());
+    }
+    else if (v.Has("morphTargets"))
     {
         JsonValue legacy = JsonValue::MakeObject()
             .Set("nodeIndex", v["morphNodeIndex"])

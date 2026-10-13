@@ -14,6 +14,7 @@
 #include <vector>
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 namespace Engine::Editor
 {
@@ -50,6 +51,11 @@ float Length(EditorUiVec2 value)
     return std::sqrt(Dot(value, value));
 }
 
+int DragDirection(float value)
+{
+    return value > 1e-5f ? 1 : value < -1e-5f ? -1 : 0;
+}
+
 glm::mat3 WorldRotation(const Engine::Core::Object& object)
 {
     const glm::vec3& rotation = object.transform.rotation;
@@ -80,6 +86,33 @@ bool ProjectPoint(const glm::mat4& viewProjection, const glm::vec3& world,
         (ndc.x * 0.5f + 0.5f) * viewport.x,
         (0.5f - ndc.y * 0.5f) * viewport.y
     };
+    return true;
+}
+
+bool RotationPlaneDirection(const glm::mat4& inverseViewProjection,
+    const EditorUiVec2& mouse, const EditorUiVec2& viewport,
+    const glm::vec3& pivot, const glm::vec3& axis,
+    glm::vec3& direction)
+{
+    if (viewport.x <= 1.f || viewport.y <= 1.f) return false;
+    const float x = 2.f * mouse.x / viewport.x - 1.f;
+    const float y = 1.f - 2.f * mouse.y / viewport.y;
+    const glm::vec4 nearClip = inverseViewProjection * glm::vec4(x, y, 0.f, 1.f);
+    const glm::vec4 farClip = inverseViewProjection * glm::vec4(x, y, 1.f, 1.f);
+    if (std::abs(nearClip.w) < 1e-6f || std::abs(farClip.w) < 1e-6f)
+        return false;
+    const glm::vec3 origin = glm::vec3(nearClip) / nearClip.w;
+    const glm::vec3 ray = glm::normalize(glm::vec3(farClip) / farClip.w - origin);
+    const float denominator = glm::dot(ray, axis);
+    // Edge-on rings have an unstable plane intersection. Their projected
+    // tangent remains available as the drag fallback.
+    if (std::abs(denominator) < .08f) return false;
+    const float distance = glm::dot(pivot - origin, axis) / denominator;
+    if (distance <= 0.f) return false;
+    direction = origin + ray * distance - pivot;
+    const float length = glm::length(direction);
+    if (!std::isfinite(length) || length < 1e-5f) return false;
+    direction /= length;
     return true;
 }
 
@@ -321,6 +354,7 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
     const glm::mat4 viewProjection =
         camera->GetProjectionMatrix(input.available.x / input.available.y) *
         camera->GetViewMatrix();
+    const glm::mat4 inverseViewProjection = glm::inverse(viewProjection);
     Engine::Core::Object* selected = scene.GetSelectedObject();
     const Engine::Components::Skeleton* selectedSkeleton = nullptr;
     if (m_boneEditing && selected)
@@ -656,6 +690,92 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
 
     if (m_dragObject && input.leftDown)
     {
+        const EditorUiVec2 pointerDelta = Subtract(
+            input.mousePosInViewport, m_dragLastMouse);
+        int pointerDirection = DragDirection(Dot(pointerDelta,
+            m_dragScreenDirection));
+        glm::vec3 currentPlaneDirection{};
+        const bool currentPlaneValid = m_dragTool == EditorTransformTool::Rotate &&
+            m_dragPlaneValid && RotationPlaneDirection(
+                inverseViewProjection, input.mousePosInViewport,
+                input.available, m_dragPivotWorld, m_dragWorldAxis,
+                currentPlaneDirection);
+        if (currentPlaneValid)
+            pointerDirection = DragDirection(std::atan2(glm::dot(
+                m_dragWorldAxis, glm::cross(m_dragPlaneDirection,
+                    currentPlaneDirection)),
+                glm::dot(m_dragPlaneDirection, currentPlaneDirection)));
+        const auto& current = m_dragObject->transform;
+        // A solver or constraint may have replaced the requested pose since
+        // the previous frame. Rebase at its accepted pose, keep the pointer
+        // free, and resume as soon as the drag reverses direction.
+        const bool corrected = m_dragHasWritten && (
+            (m_dragTool == EditorTransformTool::Translate &&
+                glm::distance(current.position,
+                    m_dragLastWrittenPosition) > 1e-4f) ||
+            (m_dragTool == EditorTransformTool::Rotate &&
+                (glm::distance(current.rotation,
+                    m_dragLastWrittenRotation) > 1e-4f ||
+                    (m_dragWasBone && m_bonePivotMode != 0 &&
+                        glm::distance(current.position,
+                            m_dragLastWrittenPosition) > 1e-4f))) ||
+            (m_dragTool == EditorTransformTool::Scale &&
+                (glm::distance(current.scale,
+                    m_dragLastWrittenScale) > 1e-4f ||
+                    (m_dragWasBone && m_bonePivotMode != 0 &&
+                        glm::distance(current.position,
+                            m_dragLastWrittenPosition) > 1e-4f))));
+        if (corrected)
+        {
+            m_dragBlockedDirection = m_dragLastAttemptDirection;
+            m_dragHasWritten = false;
+            m_dragStartLocalPosition = current.position;
+            m_dragStartLocalRotation = current.rotation;
+            m_dragStartLocalScale = current.scale;
+            m_dragStartWorldPosition = WorldPosition(m_dragObject);
+            m_dragStartMouse = input.mousePosInViewport;
+            m_dragLastMouse = input.mousePosInViewport;
+            m_dragAccumulatedAngle = 0.f;
+            m_dragWorldAxis = WorldRotation(*m_dragObject)[m_dragAxis];
+            m_dragPlaneValid = m_dragTool == EditorTransformTool::Rotate &&
+                RotationPlaneDirection(inverseViewProjection,
+                    input.mousePosInViewport, input.available,
+                    m_dragPivotWorld, m_dragWorldAxis, m_dragPlaneDirection);
+            result.transformDragging = true;
+            result.consumedClick = true;
+            return result;
+        }
+        if (m_dragBlockedDirection != 0 &&
+            (pointerDirection == 0 ||
+                pointerDirection == m_dragBlockedDirection))
+        {
+            m_dragStartLocalPosition = current.position;
+            m_dragStartLocalRotation = current.rotation;
+            m_dragStartLocalScale = current.scale;
+            m_dragStartWorldPosition = WorldPosition(m_dragObject);
+            m_dragStartMouse = input.mousePosInViewport;
+            m_dragLastMouse = input.mousePosInViewport;
+            if (currentPlaneValid)
+                m_dragPlaneDirection = currentPlaneDirection;
+            else if (m_dragTool == EditorTransformTool::Rotate)
+                m_dragPlaneValid = false;
+            result.transformDragging = true;
+            result.consumedClick = true;
+            return result;
+        }
+        if (m_dragBlockedDirection != 0)
+        {
+            m_dragBlockedDirection = 0;
+            m_dragStartLocalPosition = current.position;
+            m_dragStartLocalRotation = current.rotation;
+            m_dragStartLocalScale = current.scale;
+            m_dragStartWorldPosition = WorldPosition(m_dragObject);
+            m_dragStartMouse = m_dragLastMouse;
+            m_dragAccumulatedAngle = 0.f;
+        }
+        const glm::vec3 previousPosition = m_dragObject->transform.position;
+        const glm::vec3 previousRotation = m_dragObject->transform.rotation;
+        const glm::vec3 previousScale = m_dragObject->transform.scale;
         const float pixels = Dot(Subtract(
             input.mousePosInViewport, m_dragStartMouse), m_dragScreenDirection);
         if (m_dragTool == EditorTransformTool::Translate)
@@ -681,13 +801,42 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         else if (m_dragTool == EditorTransformTool::Rotate)
         {
             float angle = pixels * 0.01f;
+            glm::vec3 planeDirection{};
+            if (m_dragPlaneValid && RotationPlaneDirection(
+                    inverseViewProjection, input.mousePosInViewport,
+                    input.available, m_dragPivotWorld, m_dragWorldAxis,
+                    planeDirection))
+            {
+                const float step = std::atan2(glm::dot(m_dragWorldAxis,
+                    glm::cross(m_dragPlaneDirection, planeDirection)),
+                    glm::dot(m_dragPlaneDirection, planeDirection));
+                m_dragAccumulatedAngle += step;
+                m_dragPlaneDirection = planeDirection;
+                angle = m_dragAccumulatedAngle;
+            }
+            else
+            {
+                m_dragPlaneValid = false;
+                m_dragAccumulatedAngle += Dot(Subtract(
+                    input.mousePosInViewport, m_dragLastMouse),
+                    m_dragScreenDirection) * .01f;
+                angle = m_dragAccumulatedAngle;
+            }
+            m_dragLastMouse = input.mousePosInViewport;
             if (m_dragWasBone && m_boneRotationSnap > 0.f)
             {
                 const float step = glm::radians(m_boneRotationSnap);
                 angle = std::round(angle / step) * step;
             }
-            m_dragObject->transform.rotation[m_dragAxis] =
-                m_dragStartLocalRotation[m_dragAxis] + angle;
+            const glm::quat parentOrientation = m_dragObject->Parent
+                ? glm::quat_cast(WorldRotation(*m_dragObject->Parent))
+                : glm::quat(1.f, 0.f, 0.f, 0.f);
+            const glm::quat worldDelta = glm::angleAxis(angle,
+                glm::normalize(m_dragWorldAxis));
+            const glm::quat startLocal = glm::quat(m_dragStartLocalRotation);
+            m_dragObject->transform.rotation = glm::eulerAngles(
+                glm::normalize(glm::inverse(parentOrientation) * worldDelta *
+                    parentOrientation * startLocal));
             if (m_dragWasBone && m_bonePivotMode != 0)
             {
                 const glm::vec3 rotated = m_dragPivotWorld +
@@ -707,8 +856,12 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
             float change = pixels * 0.01f;
             if (m_dragWasBone && m_boneScaleSnap > 0.f)
                 change = std::round(change / m_boneScaleSnap) * m_boneScaleSnap;
-            m_dragObject->transform.scale[m_dragAxis] = std::max(0.001f,
-                m_dragStartLocalScale[m_dragAxis] + change);
+            const float requestedScale =
+                m_dragStartLocalScale[m_dragAxis] + change;
+            m_dragObject->transform.scale[m_dragAxis] =
+                std::max(0.001f, requestedScale);
+            if (requestedScale < 0.001f)
+                m_dragBlockedDirection = -1;
             if (m_dragWasBone && m_bonePivotMode != 0 &&
                 std::abs(m_dragStartLocalScale[m_dragAxis]) > 0.000001f)
             {
@@ -736,10 +889,31 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
                 : static_cast<uint8_t>(Engine::Components::Transform::EditorScale |
                     (m_dragWasBone && m_bonePivotMode != 0
                         ? Engine::Components::Transform::EditorPosition : 0));
-        m_dragObject->transform.NotifyEditorTransformChanged(channel);
-        if (auto* body =
-            m_dragObject->GetComponent<Engine::Components::RigidBody>())
-            body->NotifyEditorTransformChanged();
+        if (m_dragObject->transform.position != previousPosition ||
+            m_dragObject->transform.rotation != previousRotation ||
+            m_dragObject->transform.scale != previousScale)
+        {
+            m_dragObject->transform.NotifyEditorTransformChanged(channel);
+            if (auto* body =
+                m_dragObject->GetComponent<Engine::Components::RigidBody>())
+                body->NotifyEditorTransformChanged();
+        }
+        m_dragLastWrittenPosition = m_dragObject->transform.position;
+        m_dragLastWrittenRotation = m_dragObject->transform.rotation;
+        m_dragLastWrittenScale = m_dragObject->transform.scale;
+        m_dragHasWritten = true;
+        if (pointerDirection != 0)
+            m_dragLastAttemptDirection = pointerDirection;
+        if (m_dragBlockedDirection != 0)
+        {
+            m_dragStartLocalPosition = m_dragObject->transform.position;
+            m_dragStartLocalRotation = m_dragObject->transform.rotation;
+            m_dragStartLocalScale = m_dragObject->transform.scale;
+            m_dragStartWorldPosition = WorldPosition(m_dragObject);
+            m_dragStartMouse = input.mousePosInViewport;
+            m_dragAccumulatedAngle = 0.f;
+        }
+        m_dragLastMouse = input.mousePosInViewport;
         result.transformDragging = true;
         result.consumedClick = true;
     }
@@ -761,7 +935,13 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
             m_dragStartLocalRotation = selected->transform.rotation;
             m_dragStartLocalScale = selected->transform.scale;
             m_dragWorldAxis = axes[hoveredAxis];
+            m_dragAccumulatedAngle = 0.f;
+            m_dragPlaneValid = tool == EditorTransformTool::Rotate &&
+                RotationPlaneDirection(inverseViewProjection,
+                    input.mousePosInViewport, input.available,
+                    transformPivot, m_dragWorldAxis, m_dragPlaneDirection);
             m_dragStartMouse = input.mousePosInViewport;
+            m_dragLastMouse = input.mousePosInViewport;
             m_dragScreenDirection = Multiply(hoveredDragDirection,
                 1.f / screenLength);
             const float projectedAxisLength=tool==EditorTransformTool::Rotate
@@ -769,6 +949,9 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
             m_dragWorldUnitsPerPixel = tool==EditorTransformTool::Rotate
                 ?0.f:axisScale/std::max(projectedAxisLength,1.f);
             m_dragTool = tool;
+            m_dragHasWritten = false;
+            m_dragBlockedDirection = 0;
+            m_dragLastAttemptDirection = 0;
             result.transformDragging = true;
             result.consumedClick = true;
         }

@@ -64,9 +64,19 @@ private:
     glm::vec3 m_dragStartLocalRotation{};
     glm::vec3 m_dragStartLocalScale{1.f};
     glm::vec3 m_dragWorldAxis{};
+    glm::vec3 m_dragPlaneDirection{};
+    float m_dragAccumulatedAngle = 0.f;
+    bool m_dragPlaneValid = false;
     EditorUiVec2 m_dragStartMouse{};
+    EditorUiVec2 m_dragLastMouse{};
     EditorUiVec2 m_dragScreenDirection{};
     float m_dragWorldUnitsPerPixel = 0.f;
     EditorTransformTool m_dragTool = EditorTransformTool::Translate;
+    glm::vec3 m_dragLastWrittenPosition{};
+    glm::vec3 m_dragLastWrittenRotation{};
+    glm::vec3 m_dragLastWrittenScale{1.f};
+    bool m_dragHasWritten = false;
+    int m_dragBlockedDirection = 0;
+    int m_dragLastAttemptDirection = 0;
 };
 }

@@ -1,4 +1,7 @@
 #include "Core/Scene/Scene.h"
+#include "Core/Compoonents/Animation/TwoBoneIK.h"
+#include "Core/Compoonents/Animation/ChainIK.h"
+#include "Core/Compoonents/Constraints/TransformConstraint.h"
 #include "Core/Audio/Audio.h"
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
 #include "Core/Compoonents/Animation/SoftTissueSurface.h"
@@ -10,6 +13,7 @@
 #include <cmath>
 #include <functional>
 #include <unordered_set>
+#include <unordered_map>
 
 namespace Engine::Scene
 {
@@ -81,6 +85,7 @@ void Scene::Update(float deltaTime)
     m_isUpdating = true;
     for (const auto& object : m_objects)
         object->Update();
+    ApplyPoseConstraints();
     m_audio->Update(m_deltaTime);
     const double physicsDelta = m_clock.IsFixedStep()
         ? m_clock.GetFixedStep() : static_cast<double>(m_deltaTime);
@@ -137,6 +142,85 @@ void Scene::Update(float deltaTime)
     m_isUpdating = false;
     FlushPendingObjectAdditions();
     FlushPendingObjectRemovals();
+}
+
+void Scene::ApplyPoseConstraints()
+{
+    for (const auto& object : m_objects)
+        if (object && object->IsEnabledInHierarchy())
+            for (Engine::Core::Component* component : object->Components)
+                if (auto* ik = dynamic_cast<Engine::Components::TwoBoneIK*>(component))
+                    ik->Apply();
+    std::unordered_map<Engine::Core::Object*,
+        std::vector<Engine::Components::ChainIK*>> chainGroups;
+    std::vector<Engine::Core::Object*> chainRoots;
+    for (const auto& object : m_objects)
+        if (object && object->IsEnabledInHierarchy())
+            for (auto* component : object->Components)
+                if (auto* ik = dynamic_cast<Engine::Components::ChainIK*>(component))
+                {
+                    if (chainGroups.find(object.get()) == chainGroups.end())
+                        chainRoots.push_back(object.get());
+                    chainGroups[object.get()].push_back(ik);
+                }
+    for (auto* root : chainRoots)
+        Engine::Components::ChainIK::ApplyGroup(chainGroups[root]);
+    // Animation and IK establish the input pose. Constraint targets and
+    // constrained parents must be evaluated before their dependents.
+    std::vector<Engine::Components::TransformConstraint*> constraints;
+    std::unordered_map<Engine::Core::Object*,
+        std::vector<Engine::Components::TransformConstraint*>> byOwner;
+    for (const auto& object : m_objects)
+        if (object && object->IsEnabledInHierarchy())
+            for (auto* component : object->Components)
+                if (auto* constraint = dynamic_cast<
+                        Engine::Components::TransformConstraint*>(component))
+                {
+                    constraints.push_back(constraint);
+                    byOwner[object.get()].push_back(constraint);
+                }
+    std::stable_sort(constraints.begin(), constraints.end(),
+        [](const auto* left, const auto* right)
+        { return left->evaluationPriority < right->evaluationPriority; });
+    for (auto& [owner, ownerConstraints] : byOwner)
+        std::stable_sort(ownerConstraints.begin(), ownerConstraints.end(),
+            [](const auto* left, const auto* right)
+            { return left->evaluationPriority < right->evaluationPriority; });
+    std::unordered_map<Engine::Components::TransformConstraint*, int> state;
+    std::unordered_map<Engine::Components::TransformConstraint*, bool> valid;
+    const auto evaluate = [&](auto&& self,
+        Engine::Components::TransformConstraint* constraint) -> bool
+    {
+        const int current = state[constraint];
+        if (current == 2) return valid[constraint];
+        if (current == 1) return false;
+        state[constraint] = 1;
+        bool okay = constraint->ValidationError().empty();
+        const auto dependency = [&](Engine::Core::Object* object)
+        {
+            if (!okay) return;
+            if (auto found = byOwner.find(object); found != byOwner.end())
+                for (auto* candidate : found->second)
+                    if (candidate != constraint && !self(self, candidate))
+                    { okay = false; break; }
+        };
+        if (auto same = byOwner.find(constraint->Owner); same != byOwner.end())
+            for (auto* earlier : same->second)
+            {
+                if (earlier == constraint) break;
+                if (!self(self, earlier)) { okay = false; break; }
+            }
+        for (auto* parent = constraint->Owner->Parent; parent;
+            parent = parent->Parent) dependency(parent);
+        if (okay)
+            for (auto* target = constraint->Target(); target;
+                target = target->Parent) dependency(target);
+        if (okay) constraint->Apply();
+        state[constraint] = 2;
+        valid[constraint] = okay;
+        return okay;
+    };
+    for (auto* constraint : constraints) evaluate(evaluate, constraint);
 }
 
 void Scene::UpdateFixedFrame()

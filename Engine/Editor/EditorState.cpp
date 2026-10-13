@@ -31,6 +31,9 @@
 #include "Core/AssetRecord.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Importers/ModelImporter.h"
+#include "Core/Importers/VmdSceneImporter.h"
+#include "Core/Importers/MmdDanceAssetBinder.h"
+#include "Core/Importers/PortableAssetCopy.h"
 #include "Core/MeshEditGeometry.h"
 #include "Core/MeshEditSnapshot.h"
 #include "Core/SnapshotHistory.h"
@@ -3841,6 +3844,9 @@ void EditorState::InitializePanels()
         if (assets)
         {
             m_primaryAssets = static_cast<AssetsExplorerView*>(assets.get());
+            m_primaryAssets->OnObjectImportRequested =
+                [this](const std::string& source, const std::string& directory)
+                { StartObjectImport(source, false, directory); };
             m_panels.push_back(std::move(assets));
         }
         
@@ -4089,6 +4095,7 @@ void EditorState::WireupCallbacks()
         OutputDebugStringA(("[EditorState] Selection changed to: " + (obj ? obj->name : "nullptr") + "\n").c_str());
         if (Engine::Scene::Scene* scene = GetActiveDocumentScene())
             scene->SetSelectedObject(obj);
+        CaptureImportReference(obj);
         if (m_primaryAssets)
             m_primaryAssets->SetSelectedPath({});
         if (m_primaryProperties)
@@ -4105,6 +4112,7 @@ void EditorState::WireupCallbacks()
     m_viewFactory->OnSelectionSetChanged = [this](
         const std::vector<Engine::Core::Object*>& objects) {
         Engine::Core::Object* active = objects.empty() ? nullptr : objects.back();
+        CaptureImportReference(active);
         OutputDebugStringA(("[EditorState] Selection set changed: " +
             std::to_string(objects.size()) + " object(s)\n").c_str());
         if (Engine::Scene::Scene* scene = GetActiveDocumentScene())
@@ -4251,7 +4259,7 @@ void EditorState::WireupCallbacks()
     };
     m_viewFactory->OnAssetPreviewRequested = [this](const std::string& path) {
         m_assetPreviewActive = true;
-        Engine::Core::Object* preview = InstantiateAsset(path, false);
+        Engine::Core::Object* preview = InstantiateAsset(path, false, false);
         m_assetPreviewActive = preview != nullptr;
         return preview;
     };
@@ -4282,16 +4290,30 @@ void EditorState::WireupCallbacks()
 
     if (m_window)
         m_window->OnFilesDropped = [this](const std::vector<std::string>& paths) {
-            Engine::Core::Object* lastObject = nullptr;
+            POINT cursor{};
+            GetCursorPos(&cursor);
+            bool overScene = false;
+            for (const auto& panel : m_panels)
+                if (auto* view = dynamic_cast<SceneView*>(panel.get());
+                    view && view->GetScene() == GetActiveDocumentScene() &&
+                    view->ContainsScreenPoint(static_cast<float>(cursor.x),
+                        static_cast<float>(cursor.y)))
+                    overScene = true;
             for (const std::string& path : paths)
             {
-                const std::string importedPath = ImportAssetFile(path);
-                if (Engine::Core::Object* object = importedPath.empty()
-                    ? nullptr : InstantiateAsset(importedPath))
-                    lastObject = object;
+                std::string extension = std::filesystem::path(path).extension().string();
+                std::transform(extension.begin(), extension.end(), extension.begin(),
+                    [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+                if (extension == ".vmd" || extension == ".fbx" ||
+                    extension == ".gltf" || extension == ".glb" ||
+                    extension == ".obj" || extension == ".spriteanim" ||
+                    extension == ".prefab")
+                {
+                    StartObjectImport(path, overScene);
+                    continue;
+                }
+                ImportAssetFile(path);
             }
-            if (lastObject)
-                SelectObject(lastObject);
         };
 }
 
@@ -4304,8 +4326,8 @@ void EditorState::ImportAsset()
     dialog.lpstrFile = source;
     dialog.nMaxFile = MAX_PATH;
     dialog.lpstrFilter =
-        L"Supported Assets (*.obj;*.gltf;*.glb;*.fbx;*.prefab;*.spriteanim;*.spritesheet;*.png;*.jpg;*.jpeg;*.bmp;*.dds;*.tga;*.hdr;*.exr;*.ktx2;*.wav;*.ogg;*.mp3;*.ttf;*.otf)\0"
-        L"*.obj;*.gltf;*.glb;*.fbx;*.prefab;*.spriteanim;*.spritesheet;*.png;*.jpg;*.jpeg;*.bmp;*.dds;*.tga;*.hdr;*.exr;*.ktx2;*.wav;*.ogg;*.mp3;*.ttf;*.otf\0"
+        L"Supported Assets (*.obj;*.gltf;*.glb;*.fbx;*.vmd;*.prefab;*.animpack;*.spriteanim;*.spritesheet;*.png;*.jpg;*.jpeg;*.bmp;*.dds;*.tga;*.hdr;*.exr;*.ktx2;*.wav;*.ogg;*.mp3;*.ttf;*.otf)\0"
+        L"*.obj;*.gltf;*.glb;*.fbx;*.vmd;*.prefab;*.animpack;*.spriteanim;*.spritesheet;*.png;*.jpg;*.jpeg;*.bmp;*.dds;*.tga;*.hdr;*.exr;*.ktx2;*.wav;*.ogg;*.mp3;*.ttf;*.otf\0"
         L"3D Models (*.obj;*.gltf;*.glb;*.fbx)\0*.obj;*.gltf;*.glb;*.fbx\0"
         L"Images (*.png;*.jpg;*.jpeg;*.bmp;*.dds;*.tga;*.hdr;*.exr;*.ktx2)\0*.png;*.jpg;*.jpeg;*.bmp;*.dds;*.tga;*.hdr;*.exr;*.ktx2\0"
         L"Audio (*.wav;*.ogg;*.mp3)\0*.wav;*.ogg;*.mp3\0"
@@ -4314,18 +4336,268 @@ void EditorState::ImportAsset()
     dialog.nFilterIndex = 1;
     dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
     if (GetOpenFileNameW(&dialog))
-        ImportAssetFile(std::filesystem::path(source).string());
+    {
+        const std::string path = std::filesystem::path(source).string();
+        std::string extension = std::filesystem::path(path).extension().string();
+        std::transform(extension.begin(), extension.end(), extension.begin(),
+            [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+        if (extension == ".vmd" || extension == ".fbx" ||
+            extension == ".gltf" || extension == ".glb" ||
+            extension == ".obj" || extension == ".spriteanim" ||
+            extension == ".prefab")
+            StartObjectImport(path, false);
+        else ImportAssetFile(path);
+    }
 }
 
-std::string EditorState::ImportAssetFile(const std::string& path)
+void EditorState::StartObjectImport(const std::string& path, bool intoScene,
+    const std::string& destinationDirectory)
+{
+    const std::filesystem::path assetsRoot = m_projectSettings.assetsDirectory.empty()
+        ? std::filesystem::path("Assets")
+        : std::filesystem::path(m_projectSettings.assetsDirectory);
+    std::error_code directoryError;
+    std::filesystem::create_directories(assetsRoot, directoryError);
+    m_pendingImportAssetPath = path;
+    m_pendingImportDirectory = !destinationDirectory.empty()
+        ? destinationDirectory : (m_primaryAssets &&
+        !m_primaryAssets->GetCurrentDirectory().empty()
+        ? m_primaryAssets->GetCurrentDirectory()
+        : (m_projectSettings.assetsDirectory.empty()
+            ? std::string("Assets") : m_projectSettings.assetsDirectory));
+    m_pendingImportScene = GetActiveDocumentScene();
+    m_pendingImportIntoScene = intoScene;
+    m_pendingImportAsPrefab = false;
+    ClearImportReference();
+    if (m_pendingImportScene)
+    {
+        auto* selected = m_pendingImportScene->GetSelectedObject();
+        auto* root = selected ? selected->GetPrefabInstanceRoot() : nullptr;
+        if (selected && (!PendingImportSupportsReference() ||
+            (intoScene && root && root->GetComponent<Engine::Components::Model>())))
+        {
+            m_pickingImportReference = true;
+            CaptureImportReference(selected);
+        }
+    }
+}
+
+bool EditorState::PendingImportSupportsReference() const
+{
+    std::string extension = std::filesystem::path(m_pendingImportAssetPath).extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+        [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+    return extension == ".vmd";
+}
+
+void EditorState::BeginImportReferencePick()
+{
+    if (m_pendingImportAssetPath.empty()) return;
+    if (!m_pendingImportScene || !m_primaryHierarchy)
+    { m_pendingImportError = "Open a scene with a Hierarchy panel to choose an object."; return; }
+    m_pickingImportReference = true;
+    m_pendingImportError.clear();
+    // Require a fresh click, even when the desired object was already selected.
+    m_primaryHierarchy->SetSelectedObject(nullptr);
+    m_primaryHierarchy->SetOpen(true);
+    m_focusImportHierarchy = true;
+}
+
+void EditorState::CaptureImportReference(Engine::Core::Object* object)
+{
+    if (!m_pickingImportReference || !object) return;
+    Engine::Scene::Scene* scene = GetActiveDocumentScene();
+    Engine::Scene::Scene::ObjectPath path;
+    if (!scene || scene != m_pendingImportScene ||
+        !scene->TryGetObjectPath(object, path)) return;
+    m_pendingImportReferencePath = std::move(path);
+    m_pendingImportReferenceObject = object;
+    m_hasImportReference = true;
+    m_pickingImportReference = false;
+    m_pendingImportError.clear();
+    std::vector<std::string> names;
+    for (auto* node = object; node; node = node->Parent)
+        names.push_back(node->name.empty() ? "(unnamed)" : node->name);
+    m_pendingImportReferenceLabel.clear();
+    for (auto it = names.rbegin(); it != names.rend(); ++it)
+    {
+        if (!m_pendingImportReferenceLabel.empty())
+            m_pendingImportReferenceLabel += " / ";
+        m_pendingImportReferenceLabel += *it;
+    }
+}
+
+void EditorState::ClearImportReference()
+{
+    m_pendingImportReferencePath.clear();
+    m_pendingImportReferenceObject = nullptr;
+    m_pendingImportReferenceLabel.clear();
+    m_hasImportReference = false;
+    m_pickingImportReference = false;
+    m_pendingImportError.clear();
+}
+
+void EditorState::CancelPendingImportAsset()
+{
+    m_pendingImportAssetPath.clear();
+    m_pendingImportDirectory.clear();
+    m_pendingImportScene = nullptr;
+    m_pendingImportIntoScene = false;
+    m_pendingImportAsPrefab = false;
+    m_focusImportHierarchy = false;
+    ClearImportReference();
+}
+
+std::string EditorState::ConsumeImportHierarchyFocusRequest()
+{
+    if (!m_focusImportHierarchy || !m_primaryHierarchy) return {};
+    m_focusImportHierarchy = false;
+    return m_primaryHierarchy->GetTitle();
+}
+
+void EditorState::ConfirmPendingImportAsset()
+{
+    if (m_pendingImportAssetPath.empty()) return;
+    namespace fs = std::filesystem;
+    std::error_code pathError;
+    const fs::path assetRoot = fs::weakly_canonical(
+        m_projectSettings.assetsDirectory.empty()
+            ? fs::path("Assets") : fs::path(m_projectSettings.assetsDirectory),
+        pathError);
+    const fs::path destination = fs::weakly_canonical(
+        m_pendingImportDirectory, pathError);
+    const fs::path relative = destination.lexically_relative(assetRoot);
+    if (pathError || !fs::is_directory(destination) || relative.empty() ||
+        *relative.begin() == "..")
+    { m_pendingImportError = "Choose an existing directory inside Assets."; return; }
+    if (m_pendingImportIntoScene &&
+        (!m_pendingImportScene || m_pendingImportScene != GetActiveDocumentScene()))
+    { m_pendingImportError = "The target scene changed. Reopen the import tool."; return; }
+    Engine::Core::Object* reference = nullptr;
+    if (m_pendingImportIntoScene && m_hasImportReference)
+    {
+        if (!m_pendingImportScene || m_pendingImportScene != GetActiveDocumentScene())
+        { m_pendingImportError = "The target scene changed. Pick an object again."; return; }
+        reference = m_pendingImportScene->FindObjectByPath(m_pendingImportReferencePath);
+        if (!reference || reference != m_pendingImportReferenceObject)
+        { m_pendingImportError = "The selected object changed. Pick an object again."; return; }
+        if (PendingImportSupportsReference())
+        {
+            auto* root = reference->GetPrefabInstanceRoot();
+            if (!root || !root->GetComponent<Engine::Components::Model>())
+            { m_pendingImportError = "Choose an imported character prefab instance."; return; }
+        }
+    }
+    const std::string source = m_pendingImportAssetPath;
+    const bool intoScene = m_pendingImportIntoScene;
+    const bool asPrefab = m_pendingImportAsPrefab;
+    Engine::Scene::Scene* scene = m_pendingImportScene;
+    m_pendingImportError.clear();
+    std::string primary = ImportAssetFile(source, reference, true,
+        destination.string(), asPrefab);
+    if (primary.empty())
+    {
+        m_pendingImportError = "Import failed. See the Console for details, then retry.";
+        return;
+    }
+    CancelPendingImportAsset();
+    std::string extension = fs::path(source).extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+        [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+    if (asPrefab && (extension == ".obj" || extension == ".spriteanim"))
+    {
+        try
+        {
+            const fs::path configuredAssets = m_projectSettings.assetsDirectory.empty()
+                ? fs::path("Assets") : fs::path(m_projectSettings.assetsDirectory);
+            const fs::path assetsRoot = fs::weakly_canonical(configuredAssets);
+            const fs::path importedPath = fs::weakly_canonical(primary);
+            const fs::path withinAssets = importedPath.lexically_relative(assetsRoot);
+            if (withinAssets.empty() || *withinAssets.begin() == "..")
+                throw std::runtime_error("Imported asset is outside Assets");
+            const std::string portablePath =
+                (assetsRoot.filename() / withinAssets).generic_string();
+            Engine::Scene::Scene prefabScene;
+            Engine::Core::Object* object = prefabScene.AddObject(fs::path(primary).stem().string());
+            if (extension == ".obj")
+            {
+                auto* mesh = object->AddComponent<Engine::Components::Mesh>();
+                mesh->LoadFromFile(primary);
+                mesh->SetAuthoredFilePath(portablePath);
+                object->AddComponent<Engine::Components::Material>();
+            }
+            else
+            {
+                auto* manager = object->AddComponent<Engine::Components::SpriteAnimationManager>();
+                auto* sprite = object->AddComponent<Engine::Components::Sprite>();
+                sprite->SetAnimationManager(manager);
+                if (!manager->LoadFromFile(primary))
+                    throw std::runtime_error("Could not load sprite animation");
+                manager->animationFile = portablePath;
+            }
+            fs::path prefab = fs::path(primary).replace_extension(".prefab");
+            const std::string stem = prefab.stem().string();
+            for (unsigned index = 2; fs::exists(prefab); ++index)
+                prefab = prefab.parent_path() /
+                    (stem + " " + std::to_string(index) + ".prefab");
+            if (!Engine::Serialization::SceneSerializer::SavePrefab(*object, prefab.string()))
+                throw std::runtime_error("Could not save imported object prefab");
+            Engine::Core::AssetRecord::Ensure(prefab, primary,
+                { { "importer", std::string("object-prefab") } });
+            primary = prefab.string();
+            if (m_primaryConsole)
+                m_primaryConsole->AddLog(ConsoleView::Level::Info,
+                    "Prefab created: " + primary);
+        }
+        catch (const std::exception& error)
+        {
+            if (m_primaryConsole)
+                m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                    "Could not create imported prefab: " + std::string(error.what()));
+        }
+    }
+    if (!intoScene || !scene) return;
+    if (extension != ".vmd")
+    {
+        Engine::Core::Object* object = InstantiateAsset(primary, true, false);
+        if (object && reference)
+        {
+            const auto position = object->transform.position;
+            const auto rotation = object->transform.rotation;
+            const auto scale = object->transform.scale;
+            if (scene->MoveObject(object, reference,
+                    Engine::Scene::Scene::ObjectPlacement::AsChild))
+            {
+                object->transform.position = position;
+                object->transform.rotation = rotation;
+                object->transform.scale = scale;
+            }
+        }
+        SelectObject(object);
+        return;
+    }
+    const fs::path output = fs::path(primary).parent_path();
+    for (const char* name : { "Camera.prefab", "Light.prefab" })
+    {
+        const fs::path prefab = output / name;
+        if (fs::is_regular_file(prefab))
+            InstantiateAsset(prefab.string(), true, false);
+    }
+}
+
+std::string EditorState::ImportAssetFile(const std::string& path,
+    Engine::Core::Object* reference, bool explicitReference,
+    const std::string& destinationDirectory, bool asPrefab)
 {
     namespace fs = std::filesystem;
     const fs::path source(path);
     std::string extension = source.extension().string();
     std::transform(extension.begin(), extension.end(), extension.begin(),
         [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    const fs::path assetsDirectory = m_projectSettings.assetsDirectory.empty()
-        ? fs::path("Assets") : fs::path(m_projectSettings.assetsDirectory);
+    const fs::path assetsDirectory = destinationDirectory.empty()
+        ? (m_projectSettings.assetsDirectory.empty()
+            ? fs::path("Assets") : fs::path(m_projectSettings.assetsDirectory))
+        : fs::path(destinationDirectory);
 
     try
     {
@@ -4333,13 +4605,94 @@ std::string EditorState::ImportAssetFile(const std::string& path)
         if (ModelImporter::SupportsExtension(extension))
         {
             const Engine::Model::ModelImportResult imported =
-                ModelImporter::Import(source.string(), assetsDirectory.string());
+                extension == ".vmd" && asPrefab
+                ? VmdSceneImporter::Import(source.string(),
+                    assetsDirectory.string(), true)
+                : ModelImporter::Import(source.string(), assetsDirectory.string());
             if (!imported.success)
                 throw std::runtime_error(imported.message);
+            bool boundCharacter = false;
+            bool attemptedCharacterBinding = false;
+            if (extension == ".vmd")
+            {
+                Engine::Scene::Scene* activeScene = GetActiveDocumentScene();
+                Engine::Core::Object* selected = explicitReference
+                    ? reference : (activeScene ? activeScene->GetSelectedObject() : nullptr);
+                Engine::Core::Object* root = selected
+                    ? selected->GetPrefabInstanceRoot() : nullptr;
+                if (root && root->Prefab)
+                {
+                    attemptedCharacterBinding = true;
+                    const std::string prefabPath = root->Prefab->GetPath();
+                    std::string bindError;
+                    boundCharacter = MmdDanceAssetBinder::BindFromPrefab(
+                        prefabPath, source.string(), bindError,
+                        (fs::path(imported.outputDirectory) /
+                            (source.stem().string() + ".animpack")).string());
+                    if (boundCharacter)
+                    {
+                        Engine::Scene::Scene::ObjectPath selectionPath;
+                        const bool hadSelection = activeScene->TryGetObjectPath(
+                            selected, selectionPath);
+                        if (Engine::Serialization::SceneSerializer::RefreshPrefabInstances(
+                                *activeScene, prefabPath, activeScene->GetGraphicsProvider()))
+                        {
+                            if (hadSelection)
+                                SelectObject(activeScene->FindObjectByPath(selectionPath));
+                        }
+                        else if (m_primaryConsole)
+                            m_primaryConsole->AddLog(ConsoleView::Level::Warning,
+                                "MMD animations saved, but scene instances could not be refreshed");
+                        if (m_primaryConsole)
+                        {
+                            const fs::path output = fs::path(prefabPath).parent_path();
+                            const auto report = Engine::Serialization::JsonParseFile(
+                                (output / (source.stem().string() + "_mmd.json")).string());
+                            const std::string bodyClip = report["bodyClip"].AsString();
+                            const std::string faceClip = report["facialClip"].AsString();
+                            const std::string animationPack =
+                                report["animationPack"].AsString();
+                            if (!bodyClip.empty())
+                                m_primaryConsole->AddLog(ConsoleView::Level::Info,
+                                    "MMD body animation: " + bodyClip);
+                            if (!faceClip.empty())
+                                m_primaryConsole->AddLog(ConsoleView::Level::Info,
+                                    "MMD facial animation: " + faceClip);
+                            if (!animationPack.empty())
+                                m_primaryConsole->AddLog(ConsoleView::Level::Info,
+                                    "MMD animation pack: " + animationPack);
+                        }
+                    }
+                    else if (m_primaryConsole)
+                        m_primaryConsole->AddLog(ConsoleView::Level::Warning,
+                            "MMD character binding skipped: " + bindError);
+                }
+                else if (m_primaryConsole)
+                    m_primaryConsole->AddLog(ConsoleView::Level::Info,
+                        "VMD source tracks packed; select an imported FBX character to also create playable body and facial .anim files");
+            }
             if (m_primaryConsole)
+            {
+                const std::string& primaryAsset = asPrefab &&
+                    !imported.prefabPath.empty() ? imported.prefabPath
+                    : imported.primaryAssetPath.empty()
+                    ? imported.prefabPath : imported.primaryAssetPath;
                 m_primaryConsole->AddLog(ConsoleView::Level::Info,
-                    "Asset imported: " + imported.prefabPath);
-            return imported.prefabPath;
+                    "Asset imported: " + primaryAsset);
+                if (extension == ".vmd")
+                    m_primaryConsole->AddLog(ConsoleView::Level::Info,
+                        "VMD animation pack: " +
+                        (fs::path(imported.outputDirectory) /
+                            (source.stem().string() + ".animpack")).string());
+                if (extension == ".vmd" && attemptedCharacterBinding &&
+                    !boundCharacter &&
+                    imported.message.find("need target binding") != std::string::npos)
+                    m_primaryConsole->AddLog(ConsoleView::Level::Warning,
+                        imported.message);
+            }
+            return asPrefab && !imported.prefabPath.empty()
+                ? imported.prefabPath : imported.primaryAssetPath.empty()
+                ? imported.prefabPath : imported.primaryAssetPath;
         }
 
         std::error_code relativeError;
@@ -4359,10 +4712,19 @@ std::string EditorState::ImportAssetFile(const std::string& path)
         fs::path destination = assetsDirectory / source.filename();
         const std::string stem = destination.stem().string();
         const std::string suffix = destination.extension().string();
-        for (unsigned index = 2; fs::exists(destination); ++index)
+        const bool portableCopy = extension == ".obj" || extension == ".spriteanim";
+        const auto dependencyDirectory = [](const fs::path& asset)
+        {
+            return asset.parent_path() / (asset.stem().string() + "_dependencies");
+        };
+        for (unsigned index = 2; fs::exists(destination) ||
+                (portableCopy && fs::exists(dependencyDirectory(destination))); ++index)
             destination = assetsDirectory /
                 (stem + " " + std::to_string(index) + suffix);
-        fs::copy_file(source, destination);
+        if (portableCopy)
+            CopyPortableAsset(source, destination);
+        else
+            fs::copy_file(source, destination);
         Engine::Core::AssetRecord::Ensure(destination, source,
             { { "importer", std::string("copy") } });
         if (m_primaryConsole)
@@ -4379,7 +4741,8 @@ std::string EditorState::ImportAssetFile(const std::string& path)
     }
 }
 
-Engine::Core::Object* EditorState::InstantiateAsset(const std::string& path, bool recordChange)
+Engine::Core::Object* EditorState::InstantiateAsset(const std::string& path,
+    bool recordChange, bool showImportDialog)
 {
     Engine::Scene::Scene* targetScene = GetActiveDocumentScene();
     if (!targetScene)
@@ -4392,6 +4755,14 @@ Engine::Core::Object* EditorState::InstantiateAsset(const std::string& path, boo
     Engine::Core::Object* object = nullptr;
     try
     {
+        if (showImportDialog && (extension == ".vmd" ||
+            extension == ".fbx" || extension == ".gltf" ||
+            extension == ".glb" || extension == ".obj" ||
+            extension == ".spriteanim"))
+        {
+            if (recordChange) StartObjectImport(path, true);
+            return nullptr;
+        }
         if (ModelImporter::SupportsExtension(extension))
         {
             const std::string assetsDirectory = m_projectSettings.assetsDirectory.empty()

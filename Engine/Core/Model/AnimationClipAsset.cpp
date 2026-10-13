@@ -118,7 +118,7 @@ std::optional<AnimationClipAsset> AnimationClipAsset::Load(
 {
     try
     {
-        const auto root = Engine::Serialization::JsonParseFile(
+        const auto root = Engine::Serialization::AssetParseFile(
             Engine::Components::Mesh::ResolveFilePath(path));
         if (!root.IsObject()) return std::nullopt;
         const auto& source = root.Has("clip") ? root["clip"] : root;
@@ -177,7 +177,8 @@ bool AnimationClipAsset::Save(const std::string& path) const
     {
         std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
         if (!file) return false;
-        file << Engine::Serialization::JsonWrite(root) << '\n';
+        const std::string bytes = Engine::Serialization::AssetWriteBinary(root);
+        file.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
         if (!file)
         { std::filesystem::remove(temporary, error); return false; }
     }
@@ -188,6 +189,10 @@ bool AnimationClipAsset::Save(const std::string& path) const
             nullptr, REPLACEFILE_IGNORE_MERGE_ERRORS, nullptr, nullptr) != 0
         : MoveFileExW(temporary.wstring().c_str(), target.wstring().c_str(),
             MOVEFILE_WRITE_THROUGH) != 0;
+    if (!replaced)
+        replaced = MoveFileExW(temporary.wstring().c_str(),
+            target.wstring().c_str(), MOVEFILE_REPLACE_EXISTING |
+                MOVEFILE_WRITE_THROUGH) != 0;
 #else
     std::filesystem::rename(temporary, target, error);
     replaced = !error;

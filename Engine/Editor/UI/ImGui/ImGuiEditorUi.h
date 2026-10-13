@@ -55,7 +55,7 @@ public:
     float AvailableContentWidth() const override;
     EditorUiContextMenuResult ContextMenu(const void*,const char*,const char*,bool,const char*) override;
     EditorUiAssetCreateMenuResult AssetWindowContextMenu() override;
-    EditorUiAssetItemMenuResult AssetItemContextMenu(const void*) override;
+    EditorUiAssetItemMenuResult AssetItemContextMenu(const void*, bool, bool) override;
     EditorUiTextEditResult RenameText(const char*,char*,size_t,bool) override;
     EditorUiPrefabMenuResult PrefabOverrideMenu(const void*,bool) override;
     bool BeginChild(const char*) override; void EndChild() override;

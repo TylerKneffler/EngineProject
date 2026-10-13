@@ -880,6 +880,21 @@ Engine::Model::ModelImportResult GltfImporter::Import(
                     std::to_string(skeleton->skinIndex) + ".rig");
                 auto rig = Engine::Model::RigAsset::Capture(prefabScene,
                     *skeleton);
+                if (auto previous = Engine::Model::RigAsset::Load(rigPath.string());
+                    previous && previous->joints.size() == rig.joints.size())
+                {
+                    bool sameNodes = true;
+                    for (size_t joint = 0; joint < rig.joints.size(); ++joint)
+                        sameNodes &= previous->joints[joint].nodeIndex ==
+                            rig.joints[joint].nodeIndex &&
+                            previous->joints[joint].name == rig.joints[joint].name;
+                    if (sameNodes)
+                    {
+                        rig.controls = previous->controls;
+                        rig.poses = previous->poses;
+                        rig.symmetryPairs = previous->symmetryPairs;
+                    }
+                }
                 rig.prefabPath = prefabPath.generic_string();
                 if (manager)
                     WriteImportedAnimations(rig, *manager, *modelComponent,

@@ -1,0 +1,5063 @@
+{
+  "format": "mmd-retarget-map-v1",
+  "sourceRig": {
+    "profile": "Mococo.mmdrig.json",
+    "boneCount": 239
+  },
+  "targetRig": {
+    "fbx": "Mococo (FBX No Outline).fbx",
+    "nodeCount": 326
+  },
+  "motion": {
+    "file": "../dance1.vmd",
+    "declaredModelName": "black",
+    "sourceRigIdentity": "unverified; standard MMD bone names overlap Mococo"
+  },
+  "coordinates": {
+    "pmxToFbxWorldScale": 8.0,
+    "axisOrder": [
+      "x",
+      "y",
+      "z"
+    ],
+    "axisSigns": [
+      1,
+      1,
+      -1
+    ],
+    "targetWorldSpace": "decoded FBX bind world"
+  },
+  "restPose": {
+    "mode": "source delta applied around each mapped target rest transform",
+    "unanimatedBones": "preserve FBX rest pose",
+    "spatialMatchToleranceWorldUnits": 0.01
+  },
+  "rootMotion": {
+    "mode": "scene-travel",
+    "targetNode": 57,
+    "composePmxIndicesInOrder": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ]
+  },
+  "bones": [
+    {
+      "pmxIndex": 0,
+      "pmxName": "全ての親",
+      "fbxNode": 57,
+      "fbxName": "root.x",
+      "role": "scene-root",
+      "method": "manual",
+      "restErrorWorldUnits": 95.43621
+    },
+    {
+      "pmxIndex": 1,
+      "pmxName": "センター",
+      "fbxNode": 57,
+      "fbxName": "root.x",
+      "role": "center",
+      "method": "manual",
+      "restErrorWorldUnits": 35.401692
+    },
+    {
+      "pmxIndex": 2,
+      "pmxName": "グルーブ",
+      "fbxNode": 57,
+      "fbxName": "root.x",
+      "role": "groove",
+      "method": "manual",
+      "restErrorWorldUnits": 33.76983
+    },
+    {
+      "pmxIndex": 3,
+      "pmxName": "腰",
+      "fbxNode": 57,
+      "fbxName": "root.x",
+      "role": "waist",
+      "method": "manual",
+      "restErrorWorldUnits": 7.907979
+    },
+    {
+      "pmxIndex": 4,
+      "pmxName": "下半身",
+      "fbxNode": 57,
+      "fbxName": "root.x",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 4.2e-05
+    },
+    {
+      "pmxIndex": 5,
+      "pmxName": "Tail",
+      "fbxNode": 58,
+      "fbxName": "Tail",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 3.2e-05
+    },
+    {
+      "pmxIndex": 6,
+      "pmxName": "Tail.001",
+      "fbxNode": 59,
+      "fbxName": "Tail.001",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 4.4e-05
+    },
+    {
+      "pmxIndex": 7,
+      "pmxName": "Tail.002",
+      "fbxNode": 60,
+      "fbxName": "Tail.002",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 5.1e-05
+    },
+    {
+      "pmxIndex": 8,
+      "pmxName": "Tail.003",
+      "fbxNode": 61,
+      "fbxName": "Tail.003",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 5.7e-05
+    },
+    {
+      "pmxIndex": 9,
+      "pmxName": "Tail.004",
+      "fbxNode": 62,
+      "fbxName": "Tail.004",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 2.9e-05
+    },
+    {
+      "pmxIndex": 10,
+      "pmxName": "Tail.005",
+      "fbxNode": 63,
+      "fbxName": "Tail.005",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 4.8e-05
+    },
+    {
+      "pmxIndex": 11,
+      "pmxName": "Tail.006",
+      "fbxNode": 64,
+      "fbxName": "Tail.006",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 2.4e-05
+    },
+    {
+      "pmxIndex": 12,
+      "pmxName": "Tail.007",
+      "fbxNode": 65,
+      "fbxName": "Tail.007",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 6.6e-05
+    },
+    {
+      "pmxIndex": 13,
+      "pmxName": "Tail.008",
+      "fbxNode": 66,
+      "fbxName": "Tail.008",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 3.4e-05
+    },
+    {
+      "pmxIndex": 14,
+      "pmxName": "Tail.009",
+      "fbxNode": 67,
+      "fbxName": "Tail.009",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 5.6e-05
+    },
+    {
+      "pmxIndex": 15,
+      "pmxName": "Bone.010",
+      "fbxNode": 69,
+      "fbxName": "Bone.010",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 6.1e-05
+    },
+    {
+      "pmxIndex": 16,
+      "pmxName": "Bone.011",
+      "fbxNode": 70,
+      "fbxName": "Bone.011",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 2.8e-05
+    },
+    {
+      "pmxIndex": 17,
+      "pmxName": "Bone.012",
+      "fbxNode": 71,
+      "fbxName": "Bone.012",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 5.8e-05
+    },
+    {
+      "pmxIndex": 18,
+      "pmxName": "左足",
+      "fbxNode": 73,
+      "fbxName": "thigh_twist.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 1.9e-05
+    },
+    {
+      "pmxIndex": 19,
+      "pmxName": "左ひざ",
+      "fbxNode": 74,
+      "fbxName": "leg_stretch.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 2.8e-05
+    },
+    {
+      "pmxIndex": 20,
+      "pmxName": "左足首",
+      "fbxNode": 77,
+      "fbxName": "foot.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 1.4e-05
+    },
+    {
+      "pmxIndex": 21,
+      "pmxName": "左つま先",
+      "fbxNode": 78,
+      "fbxName": "toes_01.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 4e-05
+    },
+    {
+      "pmxIndex": 22,
+      "pmxName": "上半身",
+      "fbxNode": 82,
+      "fbxName": "spine_01.x",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 9e-06
+    },
+    {
+      "pmxIndex": 23,
+      "pmxName": "上半身2",
+      "fbxNode": 83,
+      "fbxName": "spine_02.x",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000242
+    },
+    {
+      "pmxIndex": 24,
+      "pmxName": "Breast",
+      "fbxNode": 84,
+      "fbxName": "Breast",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 2.3e-05
+    },
+    {
+      "pmxIndex": 25,
+      "pmxName": "Breast.001",
+      "fbxNode": 85,
+      "fbxName": "Breast.001",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000275
+    },
+    {
+      "pmxIndex": 26,
+      "pmxName": "JacketThread",
+      "fbxNode": 87,
+      "fbxName": "JacketThread",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.0003
+    },
+    {
+      "pmxIndex": 27,
+      "pmxName": "JacketThread.003",
+      "fbxNode": 88,
+      "fbxName": "JacketThread.003",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.00035
+    },
+    {
+      "pmxIndex": 28,
+      "pmxName": "JacketThread.002",
+      "fbxNode": 89,
+      "fbxName": "JacketThread.002",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000189
+    },
+    {
+      "pmxIndex": 29,
+      "pmxName": "JacketThread.004",
+      "fbxNode": 90,
+      "fbxName": "JacketThread.004",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000457
+    },
+    {
+      "pmxIndex": 30,
+      "pmxName": "JacketThread.005",
+      "fbxNode": 91,
+      "fbxName": "JacketThread.005",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000323
+    },
+    {
+      "pmxIndex": 31,
+      "pmxName": "JacketThread.001",
+      "fbxNode": 93,
+      "fbxName": "JacketThread.001",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000373
+    },
+    {
+      "pmxIndex": 32,
+      "pmxName": "JacketThread.007",
+      "fbxNode": 94,
+      "fbxName": "JacketThread.007",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000417
+    },
+    {
+      "pmxIndex": 33,
+      "pmxName": "JacketThread.006",
+      "fbxNode": 95,
+      "fbxName": "JacketThread.006",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000153
+    },
+    {
+      "pmxIndex": 34,
+      "pmxName": "JacketThread.008",
+      "fbxNode": 96,
+      "fbxName": "JacketThread.008",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000452
+    },
+    {
+      "pmxIndex": 35,
+      "pmxName": "JacketThread.010",
+      "fbxNode": 97,
+      "fbxName": "JacketThread.010",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.0005
+    },
+    {
+      "pmxIndex": 36,
+      "pmxName": "JacketThread.009",
+      "fbxNode": 98,
+      "fbxName": "JacketThread.009",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000395
+    },
+    {
+      "pmxIndex": 37,
+      "pmxName": "首",
+      "fbxNode": 100,
+      "fbxName": "neck.x",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000401
+    },
+    {
+      "pmxIndex": 38,
+      "pmxName": "CollarChain",
+      "fbxNode": 101,
+      "fbxName": "CollarChain",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000442
+    },
+    {
+      "pmxIndex": 39,
+      "pmxName": "CollarChain.002",
+      "fbxNode": 102,
+      "fbxName": "CollarChain.002",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000172
+    },
+    {
+      "pmxIndex": 40,
+      "pmxName": "CollarChain.001",
+      "fbxNode": 103,
+      "fbxName": "CollarChain.001",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.00032
+    },
+    {
+      "pmxIndex": 41,
+      "pmxName": "CollarChain.003",
+      "fbxNode": 104,
+      "fbxName": "CollarChain.003",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000373
+    },
+    {
+      "pmxIndex": 42,
+      "pmxName": "CollarChain.004",
+      "fbxNode": 105,
+      "fbxName": "CollarChain.004",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.00054
+    },
+    {
+      "pmxIndex": 43,
+      "pmxName": "頭",
+      "fbxNode": 107,
+      "fbxName": "head.x",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 5.3e-05
+    },
+    {
+      "pmxIndex": 44,
+      "pmxName": "両目",
+      "fbxNode": 107,
+      "fbxName": "head.x",
+      "role": "eye-helper",
+      "method": "manual",
+      "restErrorWorldUnits": 21.878911
+    },
+    {
+      "pmxIndex": 45,
+      "pmxName": "左目",
+      "fbxNode": 108,
+      "fbxName": "Eye_L",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000404
+    },
+    {
+      "pmxIndex": 46,
+      "pmxName": "右目",
+      "fbxNode": 110,
+      "fbxName": "Eye_R",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000404
+    },
+    {
+      "pmxIndex": 47,
+      "pmxName": "FrontHairBone",
+      "fbxNode": 112,
+      "fbxName": "FrontHairBone",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000184
+    },
+    {
+      "pmxIndex": 48,
+      "pmxName": "Hairside_L",
+      "fbxNode": 114,
+      "fbxName": "Hairside_L",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000378
+    },
+    {
+      "pmxIndex": 49,
+      "pmxName": "Hairside_L.002",
+      "fbxNode": 115,
+      "fbxName": "Hairside_L.002",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000355
+    },
+    {
+      "pmxIndex": 50,
+      "pmxName": "Hairside_L.001",
+      "fbxNode": 116,
+      "fbxName": "Hairside_L.001",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000477
+    },
+    {
+      "pmxIndex": 51,
+      "pmxName": "Hairside_L.003",
+      "fbxNode": 117,
+      "fbxName": "Hairside_L.003",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000489
+    },
+    {
+      "pmxIndex": 52,
+      "pmxName": "Hairside_L.004",
+      "fbxNode": 119,
+      "fbxName": "Hairside_L.004",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000182
+    },
+    {
+      "pmxIndex": 53,
+      "pmxName": "Hairside_L.006",
+      "fbxNode": 120,
+      "fbxName": "Hairside_L.006",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 7.3e-05
+    },
+    {
+      "pmxIndex": 54,
+      "pmxName": "Hairside_L.005",
+      "fbxNode": 121,
+      "fbxName": "Hairside_L.005",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.00046
+    },
+    {
+      "pmxIndex": 55,
+      "pmxName": "Hairside_L.007",
+      "fbxNode": 122,
+      "fbxName": "Hairside_L.007",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.00033
+    },
+    {
+      "pmxIndex": 56,
+      "pmxName": "Hairside_L.008",
+      "fbxNode": 124,
+      "fbxName": "Hairside_L.008",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000462
+    },
+    {
+      "pmxIndex": 57,
+      "pmxName": "Hairside_L.010",
+      "fbxNode": 125,
+      "fbxName": "Hairside_L.010",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000351
+    },
+    {
+      "pmxIndex": 58,
+      "pmxName": "Hairside_L.009",
+      "fbxNode": 126,
+      "fbxName": "Hairside_L.009",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 5.1e-05
+    },
+    {
+      "pmxIndex": 59,
+      "pmxName": "Hairside_L.011",
+      "fbxNode": 127,
+      "fbxName": "Hairside_L.011",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000156
+    },
+    {
+      "pmxIndex": 60,
+      "pmxName": "Hairside_L.012",
+      "fbxNode": 129,
+      "fbxName": "Hairside_L.012",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000171
+    },
+    {
+      "pmxIndex": 61,
+      "pmxName": "Hairside_L.013",
+      "fbxNode": 130,
+      "fbxName": "Hairside_L.013",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000446
+    },
+    {
+      "pmxIndex": 62,
+      "pmxName": "Hairside_R",
+      "fbxNode": 132,
+      "fbxName": "Hairside_R",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000378
+    },
+    {
+      "pmxIndex": 63,
+      "pmxName": "Hairside_R.002",
+      "fbxNode": 133,
+      "fbxName": "Hairside_R.002",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000354
+    },
+    {
+      "pmxIndex": 64,
+      "pmxName": "Hairside_R.001",
+      "fbxNode": 134,
+      "fbxName": "Hairside_R.001",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000477
+    },
+    {
+      "pmxIndex": 65,
+      "pmxName": "Hairside_R.003",
+      "fbxNode": 135,
+      "fbxName": "Hairside_R.003",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000488
+    },
+    {
+      "pmxIndex": 66,
+      "pmxName": "Hairside_R.004",
+      "fbxNode": 137,
+      "fbxName": "Hairside_R.004",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000183
+    },
+    {
+      "pmxIndex": 67,
+      "pmxName": "Hairside_R.006",
+      "fbxNode": 138,
+      "fbxName": "Hairside_R.006",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 7.3e-05
+    },
+    {
+      "pmxIndex": 68,
+      "pmxName": "Hairside_R.005",
+      "fbxNode": 139,
+      "fbxName": "Hairside_R.005",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.00046
+    },
+    {
+      "pmxIndex": 69,
+      "pmxName": "Hairside_R.007",
+      "fbxNode": 140,
+      "fbxName": "Hairside_R.007",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000329
+    },
+    {
+      "pmxIndex": 70,
+      "pmxName": "Hairside_R.008",
+      "fbxNode": 142,
+      "fbxName": "Hairside_R.008",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000463
+    },
+    {
+      "pmxIndex": 71,
+      "pmxName": "Hairside_R.010",
+      "fbxNode": 143,
+      "fbxName": "Hairside_R.010",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000351
+    },
+    {
+      "pmxIndex": 72,
+      "pmxName": "Hairside_R.009",
+      "fbxNode": 144,
+      "fbxName": "Hairside_R.009",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 5.1e-05
+    },
+    {
+      "pmxIndex": 73,
+      "pmxName": "Hairside_R.011",
+      "fbxNode": 145,
+      "fbxName": "Hairside_R.011",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000155
+    },
+    {
+      "pmxIndex": 74,
+      "pmxName": "Hairside_R.012",
+      "fbxNode": 147,
+      "fbxName": "Hairside_R.012",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000174
+    },
+    {
+      "pmxIndex": 75,
+      "pmxName": "Hairside_R.013",
+      "fbxNode": 148,
+      "fbxName": "Hairside_R.013",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000447
+    },
+    {
+      "pmxIndex": 76,
+      "pmxName": "Hairback_L",
+      "fbxNode": 150,
+      "fbxName": "Hairback_L",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000219
+    },
+    {
+      "pmxIndex": 77,
+      "pmxName": "Hairback_L.001",
+      "fbxNode": 151,
+      "fbxName": "Hairback_L.001",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000192
+    },
+    {
+      "pmxIndex": 78,
+      "pmxName": "Hairback_L.002",
+      "fbxNode": 152,
+      "fbxName": "Hairback_L.002",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000204
+    },
+    {
+      "pmxIndex": 79,
+      "pmxName": "Hairback_L.003",
+      "fbxNode": 154,
+      "fbxName": "Hairback_L.003",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 9.7e-05
+    },
+    {
+      "pmxIndex": 80,
+      "pmxName": "Hairback_L.004",
+      "fbxNode": 155,
+      "fbxName": "Hairback_L.004",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000114
+    },
+    {
+      "pmxIndex": 81,
+      "pmxName": "Hairback_L.005",
+      "fbxNode": 156,
+      "fbxName": "Hairback_L.005",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000162
+    },
+    {
+      "pmxIndex": 82,
+      "pmxName": "Hairback_L.006",
+      "fbxNode": 158,
+      "fbxName": "Hairback_L.006",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000197
+    },
+    {
+      "pmxIndex": 83,
+      "pmxName": "Hairback_L.007",
+      "fbxNode": 159,
+      "fbxName": "Hairback_L.007",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000381
+    },
+    {
+      "pmxIndex": 84,
+      "pmxName": "Hairback_L.008",
+      "fbxNode": 160,
+      "fbxName": "Hairback_L.008",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000476
+    },
+    {
+      "pmxIndex": 85,
+      "pmxName": "Hairback_L.009",
+      "fbxNode": 162,
+      "fbxName": "Hairback_L.009",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000409
+    },
+    {
+      "pmxIndex": 86,
+      "pmxName": "Hairback_L.010",
+      "fbxNode": 163,
+      "fbxName": "Hairback_L.010",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.00033
+    },
+    {
+      "pmxIndex": 87,
+      "pmxName": "Hairback_L.011",
+      "fbxNode": 164,
+      "fbxName": "Hairback_L.011",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000377
+    },
+    {
+      "pmxIndex": 88,
+      "pmxName": "Hairback_L.012",
+      "fbxNode": 166,
+      "fbxName": "Hairback_L.012",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000297
+    },
+    {
+      "pmxIndex": 89,
+      "pmxName": "Hairback_L.013",
+      "fbxNode": 167,
+      "fbxName": "Hairback_L.013",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000453
+    },
+    {
+      "pmxIndex": 90,
+      "pmxName": "Hairback_L.014",
+      "fbxNode": 168,
+      "fbxName": "Hairback_L.014",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000405
+    },
+    {
+      "pmxIndex": 91,
+      "pmxName": "Hairback_L.015",
+      "fbxNode": 170,
+      "fbxName": "Hairback_L.015",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000215
+    },
+    {
+      "pmxIndex": 92,
+      "pmxName": "Hairback_L.016",
+      "fbxNode": 171,
+      "fbxName": "Hairback_L.016",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000395
+    },
+    {
+      "pmxIndex": 93,
+      "pmxName": "Hairback_L.017",
+      "fbxNode": 172,
+      "fbxName": "Hairback_L.017",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000383
+    },
+    {
+      "pmxIndex": 94,
+      "pmxName": "Hairback_R",
+      "fbxNode": 174,
+      "fbxName": "Hairback_R",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000223
+    },
+    {
+      "pmxIndex": 95,
+      "pmxName": "Hairback_R.001",
+      "fbxNode": 175,
+      "fbxName": "Hairback_R.001",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000199
+    },
+    {
+      "pmxIndex": 96,
+      "pmxName": "Hairback_R.002",
+      "fbxNode": 176,
+      "fbxName": "Hairback_R.002",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000207
+    },
+    {
+      "pmxIndex": 97,
+      "pmxName": "Hairback_R.003",
+      "fbxNode": 178,
+      "fbxName": "Hairback_R.003",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000482
+    },
+    {
+      "pmxIndex": 98,
+      "pmxName": "Hairback_R.004",
+      "fbxNode": 179,
+      "fbxName": "Hairback_R.004",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000385
+    },
+    {
+      "pmxIndex": 99,
+      "pmxName": "Hairback_R.005",
+      "fbxNode": 180,
+      "fbxName": "Hairback_R.005",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.00018
+    },
+    {
+      "pmxIndex": 100,
+      "pmxName": "Hairback_R.006",
+      "fbxNode": 182,
+      "fbxName": "Hairback_R.006",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000141
+    },
+    {
+      "pmxIndex": 101,
+      "pmxName": "Hairback_R.007",
+      "fbxNode": 183,
+      "fbxName": "Hairback_R.007",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000262
+    },
+    {
+      "pmxIndex": 102,
+      "pmxName": "Hairback_R.008",
+      "fbxNode": 184,
+      "fbxName": "Hairback_R.008",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000149
+    },
+    {
+      "pmxIndex": 103,
+      "pmxName": "Hairback_R.009",
+      "fbxNode": 186,
+      "fbxName": "Hairback_R.009",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000417
+    },
+    {
+      "pmxIndex": 104,
+      "pmxName": "Hairback_R.010",
+      "fbxNode": 187,
+      "fbxName": "Hairback_R.010",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.00034
+    },
+    {
+      "pmxIndex": 105,
+      "pmxName": "Hairback_R.011",
+      "fbxNode": 188,
+      "fbxName": "Hairback_R.011",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000385
+    },
+    {
+      "pmxIndex": 106,
+      "pmxName": "Hairback_R.012",
+      "fbxNode": 190,
+      "fbxName": "Hairback_R.012",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000297
+    },
+    {
+      "pmxIndex": 107,
+      "pmxName": "Hairback_R.013",
+      "fbxNode": 191,
+      "fbxName": "Hairback_R.013",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000493
+    },
+    {
+      "pmxIndex": 108,
+      "pmxName": "Hairback_R.014",
+      "fbxNode": 192,
+      "fbxName": "Hairback_R.014",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000405
+    },
+    {
+      "pmxIndex": 109,
+      "pmxName": "Hairback_R.015",
+      "fbxNode": 194,
+      "fbxName": "Hairback_R.015",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000215
+    },
+    {
+      "pmxIndex": 110,
+      "pmxName": "Hairback_R.016",
+      "fbxNode": 195,
+      "fbxName": "Hairback_R.016",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000395
+    },
+    {
+      "pmxIndex": 111,
+      "pmxName": "Hairback_R.017",
+      "fbxNode": 196,
+      "fbxName": "Hairback_R.017",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000383
+    },
+    {
+      "pmxIndex": 112,
+      "pmxName": "Ear_L",
+      "fbxNode": 198,
+      "fbxName": "Ear_L",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000344
+    },
+    {
+      "pmxIndex": 113,
+      "pmxName": "Ear_R",
+      "fbxNode": 200,
+      "fbxName": "Ear_R",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000348
+    },
+    {
+      "pmxIndex": 114,
+      "pmxName": "HairbackInner_L",
+      "fbxNode": 202,
+      "fbxName": "HairbackInner_L",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000209
+    },
+    {
+      "pmxIndex": 115,
+      "pmxName": "HairbackInner_L.002",
+      "fbxNode": 203,
+      "fbxName": "HairbackInner_L.002",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000492
+    },
+    {
+      "pmxIndex": 116,
+      "pmxName": "HairbackInner_L.001",
+      "fbxNode": 204,
+      "fbxName": "HairbackInner_L.001",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000158
+    },
+    {
+      "pmxIndex": 117,
+      "pmxName": "HairbackInner_L.003",
+      "fbxNode": 206,
+      "fbxName": "HairbackInner_L.003",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000221
+    },
+    {
+      "pmxIndex": 118,
+      "pmxName": "HairbackInner_L.005",
+      "fbxNode": 207,
+      "fbxName": "HairbackInner_L.005",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000301
+    },
+    {
+      "pmxIndex": 119,
+      "pmxName": "HairbackInner_L.004",
+      "fbxNode": 208,
+      "fbxName": "HairbackInner_L.004",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.0003
+    },
+    {
+      "pmxIndex": 120,
+      "pmxName": "HairbackInner_L.006",
+      "fbxNode": 210,
+      "fbxName": "HairbackInner_L.006",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000329
+    },
+    {
+      "pmxIndex": 121,
+      "pmxName": "HairbackInner_L.008",
+      "fbxNode": 211,
+      "fbxName": "HairbackInner_L.008",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000504
+    },
+    {
+      "pmxIndex": 122,
+      "pmxName": "HairbackInner_L.007",
+      "fbxNode": 212,
+      "fbxName": "HairbackInner_L.007",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000322
+    },
+    {
+      "pmxIndex": 123,
+      "pmxName": "HairbackInner_L.009",
+      "fbxNode": 214,
+      "fbxName": "HairbackInner_L.009",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000186
+    },
+    {
+      "pmxIndex": 124,
+      "pmxName": "HairbackInner_L.011",
+      "fbxNode": 215,
+      "fbxName": "HairbackInner_L.011",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.00018
+    },
+    {
+      "pmxIndex": 125,
+      "pmxName": "HairbackInner_L.010",
+      "fbxNode": 216,
+      "fbxName": "HairbackInner_L.010",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000377
+    },
+    {
+      "pmxIndex": 126,
+      "pmxName": "HairbackInner_R",
+      "fbxNode": 218,
+      "fbxName": "HairbackInner_R",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000215
+    },
+    {
+      "pmxIndex": 127,
+      "pmxName": "HairbackInner_R.002",
+      "fbxNode": 219,
+      "fbxName": "HairbackInner_R.002",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000496
+    },
+    {
+      "pmxIndex": 128,
+      "pmxName": "HairbackInner_R.001",
+      "fbxNode": 220,
+      "fbxName": "HairbackInner_R.001",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000171
+    },
+    {
+      "pmxIndex": 129,
+      "pmxName": "HairbackInner_R.003",
+      "fbxNode": 222,
+      "fbxName": "HairbackInner_R.003",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000227
+    },
+    {
+      "pmxIndex": 130,
+      "pmxName": "HairbackInner_R.005",
+      "fbxNode": 223,
+      "fbxName": "HairbackInner_R.005",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000306
+    },
+    {
+      "pmxIndex": 131,
+      "pmxName": "HairbackInner_R.004",
+      "fbxNode": 224,
+      "fbxName": "HairbackInner_R.004",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000305
+    },
+    {
+      "pmxIndex": 132,
+      "pmxName": "HairbackInner_R.006",
+      "fbxNode": 226,
+      "fbxName": "HairbackInner_R.006",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000335
+    },
+    {
+      "pmxIndex": 133,
+      "pmxName": "HairbackInner_R.008",
+      "fbxNode": 227,
+      "fbxName": "HairbackInner_R.008",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000504
+    },
+    {
+      "pmxIndex": 134,
+      "pmxName": "HairbackInner_R.007",
+      "fbxNode": 228,
+      "fbxName": "HairbackInner_R.007",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000322
+    },
+    {
+      "pmxIndex": 135,
+      "pmxName": "HairbackInner_R.009",
+      "fbxNode": 230,
+      "fbxName": "HairbackInner_R.009",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000186
+    },
+    {
+      "pmxIndex": 136,
+      "pmxName": "HairbackInner_R.011",
+      "fbxNode": 231,
+      "fbxName": "HairbackInner_R.011",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.00018
+    },
+    {
+      "pmxIndex": 137,
+      "pmxName": "HairbackInner_R.010",
+      "fbxNode": 232,
+      "fbxName": "HairbackInner_R.010",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000327
+    },
+    {
+      "pmxIndex": 138,
+      "pmxName": "Hairback_L.018",
+      "fbxNode": 234,
+      "fbxName": "Hairback_L.018",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000454
+    },
+    {
+      "pmxIndex": 139,
+      "pmxName": "Hairback_L.019",
+      "fbxNode": 236,
+      "fbxName": "Hairback_L.019",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000496
+    },
+    {
+      "pmxIndex": 140,
+      "pmxName": "Hairtwig",
+      "fbxNode": 238,
+      "fbxName": "Hairtwig",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 9e-05
+    },
+    {
+      "pmxIndex": 141,
+      "pmxName": "Hairtwig.001",
+      "fbxNode": 239,
+      "fbxName": "Hairtwig.001",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000296
+    },
+    {
+      "pmxIndex": 142,
+      "pmxName": "Hairtwig.002",
+      "fbxNode": 240,
+      "fbxName": "Hairtwig.002",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000307
+    },
+    {
+      "pmxIndex": 143,
+      "pmxName": "Hairtwig.003",
+      "fbxNode": 241,
+      "fbxName": "Hairtwig.003",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000128
+    },
+    {
+      "pmxIndex": 144,
+      "pmxName": "Hairtwig.004",
+      "fbxNode": 242,
+      "fbxName": "Hairtwig.004",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000412
+    },
+    {
+      "pmxIndex": 145,
+      "pmxName": "Hairtwig.005",
+      "fbxNode": 243,
+      "fbxName": "Hairtwig.005",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000364
+    },
+    {
+      "pmxIndex": 146,
+      "pmxName": "Hairtwig.006",
+      "fbxNode": 244,
+      "fbxName": "Hairtwig.006",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000468
+    },
+    {
+      "pmxIndex": 147,
+      "pmxName": "Hairtwig.007",
+      "fbxNode": 245,
+      "fbxName": "Hairtwig.007",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000205
+    },
+    {
+      "pmxIndex": 148,
+      "pmxName": "Hairtwig.008",
+      "fbxNode": 246,
+      "fbxName": "Hairtwig.008",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000379
+    },
+    {
+      "pmxIndex": 149,
+      "pmxName": "Hairtwig.009",
+      "fbxNode": 247,
+      "fbxName": "Hairtwig.009",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000144
+    },
+    {
+      "pmxIndex": 150,
+      "pmxName": "右肩P",
+      "fbxNode": 249,
+      "fbxName": "shoulder.r",
+      "role": "shoulder-parent",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.00033
+    },
+    {
+      "pmxIndex": 151,
+      "pmxName": "右肩",
+      "fbxNode": 249,
+      "fbxName": "shoulder.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.00033
+    },
+    {
+      "pmxIndex": 152,
+      "pmxName": "右肩C",
+      "fbxNode": 252,
+      "fbxName": "c_arm_twist_offset.r",
+      "role": "shoulder-cancel",
+      "method": "rest-position",
+      "restErrorWorldUnits": 9.1e-05
+    },
+    {
+      "pmxIndex": 153,
+      "pmxName": "Headphones_R",
+      "fbxNode": 250,
+      "fbxName": "Headphones_R",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000122
+    },
+    {
+      "pmxIndex": 154,
+      "pmxName": "右腕",
+      "fbxNode": 252,
+      "fbxName": "c_arm_twist_offset.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 9.1e-05
+    },
+    {
+      "pmxIndex": 155,
+      "pmxName": "右腕捩",
+      "fbxNode": 253,
+      "fbxName": "arm_stretch.r",
+      "role": "twist",
+      "method": "manual",
+      "restErrorWorldUnits": 2.030485
+    },
+    {
+      "pmxIndex": 156,
+      "pmxName": "右腕捩1",
+      "fbxNode": 253,
+      "fbxName": "arm_stretch.r",
+      "role": "distributed-twist",
+      "method": "manual",
+      "restErrorWorldUnits": 3.62637
+    },
+    {
+      "pmxIndex": 157,
+      "pmxName": "右腕捩2",
+      "fbxNode": 253,
+      "fbxName": "arm_stretch.r",
+      "role": "distributed-twist",
+      "method": "manual",
+      "restErrorWorldUnits": 0.414369
+    },
+    {
+      "pmxIndex": 158,
+      "pmxName": "右腕捩3",
+      "fbxNode": 253,
+      "fbxName": "arm_stretch.r",
+      "role": "distributed-twist",
+      "method": "manual",
+      "restErrorWorldUnits": 4.454814
+    },
+    {
+      "pmxIndex": 159,
+      "pmxName": "右ひじ",
+      "fbxNode": 255,
+      "fbxName": "forearm_stretch.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000405
+    },
+    {
+      "pmxIndex": 160,
+      "pmxName": "右手捩",
+      "fbxNode": 256,
+      "fbxName": "forearm_twist.r",
+      "role": "twist",
+      "method": "manual",
+      "restErrorWorldUnits": 1.630159
+    },
+    {
+      "pmxIndex": 161,
+      "pmxName": "右手捩1",
+      "fbxNode": 256,
+      "fbxName": "forearm_twist.r",
+      "role": "distributed-twist",
+      "method": "manual",
+      "restErrorWorldUnits": 2.906134
+    },
+    {
+      "pmxIndex": 162,
+      "pmxName": "右手捩2",
+      "fbxNode": 256,
+      "fbxName": "forearm_twist.r",
+      "role": "distributed-twist",
+      "method": "manual",
+      "restErrorWorldUnits": 0.334074
+    },
+    {
+      "pmxIndex": 163,
+      "pmxName": "右手捩3",
+      "fbxNode": 256,
+      "fbxName": "forearm_twist.r",
+      "role": "distributed-twist",
+      "method": "manual",
+      "restErrorWorldUnits": 3.574284
+    },
+    {
+      "pmxIndex": 164,
+      "pmxName": "右手首",
+      "fbxNode": 258,
+      "fbxName": "hand.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000221
+    },
+    {
+      "pmxIndex": 165,
+      "pmxName": "c_pinky1_base.r",
+      "fbxNode": 259,
+      "fbxName": "c_pinky1_base.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 5.8e-05
+    },
+    {
+      "pmxIndex": 166,
+      "pmxName": "右小指１",
+      "fbxNode": 260,
+      "fbxName": "pinky1.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 7.6e-05
+    },
+    {
+      "pmxIndex": 167,
+      "pmxName": "右小指２",
+      "fbxNode": 261,
+      "fbxName": "c_pinky2.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 7.6e-05
+    },
+    {
+      "pmxIndex": 168,
+      "pmxName": "右小指３",
+      "fbxNode": 262,
+      "fbxName": "c_pinky3.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 6.8e-05
+    },
+    {
+      "pmxIndex": 169,
+      "pmxName": "c_ring1_base.r",
+      "fbxNode": 264,
+      "fbxName": "c_ring1_base.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000478
+    },
+    {
+      "pmxIndex": 170,
+      "pmxName": "右薬指１",
+      "fbxNode": 265,
+      "fbxName": "ring1.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 6.4e-05
+    },
+    {
+      "pmxIndex": 171,
+      "pmxName": "右薬指２",
+      "fbxNode": 266,
+      "fbxName": "c_ring2.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 6.8e-05
+    },
+    {
+      "pmxIndex": 172,
+      "pmxName": "右薬指３",
+      "fbxNode": 267,
+      "fbxName": "c_ring3.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 5e-05
+    },
+    {
+      "pmxIndex": 173,
+      "pmxName": "c_middle1_base.r",
+      "fbxNode": 269,
+      "fbxName": "c_middle1_base.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000475
+    },
+    {
+      "pmxIndex": 174,
+      "pmxName": "右中指１",
+      "fbxNode": 270,
+      "fbxName": "middle1.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 6.4e-05
+    },
+    {
+      "pmxIndex": 175,
+      "pmxName": "右中指２",
+      "fbxNode": 271,
+      "fbxName": "c_middle2.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 3.6e-05
+    },
+    {
+      "pmxIndex": 176,
+      "pmxName": "右中指３",
+      "fbxNode": 272,
+      "fbxName": "c_middle3.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 3.6e-05
+    },
+    {
+      "pmxIndex": 177,
+      "pmxName": "c_index1_base.r",
+      "fbxNode": 274,
+      "fbxName": "c_index1_base.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000503
+    },
+    {
+      "pmxIndex": 178,
+      "pmxName": "右人指１",
+      "fbxNode": 275,
+      "fbxName": "index1.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 9.3e-05
+    },
+    {
+      "pmxIndex": 179,
+      "pmxName": "右人指２",
+      "fbxNode": 276,
+      "fbxName": "c_index2.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 7.3e-05
+    },
+    {
+      "pmxIndex": 180,
+      "pmxName": "右人指３",
+      "fbxNode": 277,
+      "fbxName": "c_index3.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 6e-05
+    },
+    {
+      "pmxIndex": 181,
+      "pmxName": "右親指０",
+      "fbxNode": 279,
+      "fbxName": "thumb1.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000285
+    },
+    {
+      "pmxIndex": 182,
+      "pmxName": "右親指１",
+      "fbxNode": 280,
+      "fbxName": "c_thumb2.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 5.8e-05
+    },
+    {
+      "pmxIndex": 183,
+      "pmxName": "右親指２",
+      "fbxNode": 281,
+      "fbxName": "c_thumb3.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 2.7e-05
+    },
+    {
+      "pmxIndex": 184,
+      "pmxName": "左肩P",
+      "fbxNode": 283,
+      "fbxName": "shoulder.l",
+      "role": "shoulder-parent",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000329
+    },
+    {
+      "pmxIndex": 185,
+      "pmxName": "左肩",
+      "fbxNode": 283,
+      "fbxName": "shoulder.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000329
+    },
+    {
+      "pmxIndex": 186,
+      "pmxName": "左肩C",
+      "fbxNode": 286,
+      "fbxName": "c_arm_twist_offset.l",
+      "role": "shoulder-cancel",
+      "method": "rest-position",
+      "restErrorWorldUnits": 7.5e-05
+    },
+    {
+      "pmxIndex": 187,
+      "pmxName": "Headphones_L",
+      "fbxNode": 284,
+      "fbxName": "Headphones_L",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.00012
+    },
+    {
+      "pmxIndex": 188,
+      "pmxName": "左腕",
+      "fbxNode": 286,
+      "fbxName": "c_arm_twist_offset.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 7.5e-05
+    },
+    {
+      "pmxIndex": 189,
+      "pmxName": "左腕捩",
+      "fbxNode": 287,
+      "fbxName": "arm_stretch.l",
+      "role": "twist",
+      "method": "manual",
+      "restErrorWorldUnits": 2.030331
+    },
+    {
+      "pmxIndex": 190,
+      "pmxName": "左腕捩1",
+      "fbxNode": 287,
+      "fbxName": "arm_stretch.l",
+      "role": "distributed-twist",
+      "method": "manual",
+      "restErrorWorldUnits": 3.9573
+    },
+    {
+      "pmxIndex": 191,
+      "pmxName": "左腕捩2",
+      "fbxNode": 287,
+      "fbxName": "arm_stretch.l",
+      "role": "distributed-twist",
+      "method": "manual",
+      "restErrorWorldUnits": 0.19414
+    },
+    {
+      "pmxIndex": 192,
+      "pmxName": "左腕捩3",
+      "fbxNode": 287,
+      "fbxName": "arm_stretch.l",
+      "role": "distributed-twist",
+      "method": "manual",
+      "restErrorWorldUnits": 4.344331
+    },
+    {
+      "pmxIndex": 193,
+      "pmxName": "左ひじ",
+      "fbxNode": 289,
+      "fbxName": "forearm_stretch.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000401
+    },
+    {
+      "pmxIndex": 194,
+      "pmxName": "左手捩",
+      "fbxNode": 290,
+      "fbxName": "forearm_twist.l",
+      "role": "twist",
+      "method": "manual",
+      "restErrorWorldUnits": 1.630162
+    },
+    {
+      "pmxIndex": 195,
+      "pmxName": "左手捩1",
+      "fbxNode": 290,
+      "fbxName": "forearm_twist.l",
+      "role": "distributed-twist",
+      "method": "manual",
+      "restErrorWorldUnits": 2.906131
+    },
+    {
+      "pmxIndex": 196,
+      "pmxName": "左手捩2",
+      "fbxNode": 290,
+      "fbxName": "forearm_twist.l",
+      "role": "distributed-twist",
+      "method": "manual",
+      "restErrorWorldUnits": 0.334078
+    },
+    {
+      "pmxIndex": 197,
+      "pmxName": "左手捩3",
+      "fbxNode": 290,
+      "fbxName": "forearm_twist.l",
+      "role": "distributed-twist",
+      "method": "manual",
+      "restErrorWorldUnits": 3.574288
+    },
+    {
+      "pmxIndex": 198,
+      "pmxName": "左手首",
+      "fbxNode": 292,
+      "fbxName": "hand.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000204
+    },
+    {
+      "pmxIndex": 199,
+      "pmxName": "c_pinky1_base.l",
+      "fbxNode": 293,
+      "fbxName": "c_pinky1_base.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 8.2e-05
+    },
+    {
+      "pmxIndex": 200,
+      "pmxName": "左小指１",
+      "fbxNode": 294,
+      "fbxName": "pinky1.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000136
+    },
+    {
+      "pmxIndex": 201,
+      "pmxName": "左小指２",
+      "fbxNode": 295,
+      "fbxName": "c_pinky2.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000106
+    },
+    {
+      "pmxIndex": 202,
+      "pmxName": "左小指３",
+      "fbxNode": 296,
+      "fbxName": "c_pinky3.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000123
+    },
+    {
+      "pmxIndex": 203,
+      "pmxName": "c_ring1_base.l",
+      "fbxNode": 298,
+      "fbxName": "c_ring1_base.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.00048
+    },
+    {
+      "pmxIndex": 204,
+      "pmxName": "左薬指１",
+      "fbxNode": 299,
+      "fbxName": "ring1.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000165
+    },
+    {
+      "pmxIndex": 205,
+      "pmxName": "左薬指２",
+      "fbxNode": 300,
+      "fbxName": "c_ring2.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000132
+    },
+    {
+      "pmxIndex": 206,
+      "pmxName": "左薬指３l",
+      "fbxNode": 301,
+      "fbxName": "c_ring3.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.00016
+    },
+    {
+      "pmxIndex": 207,
+      "pmxName": "c_middle1_base.l",
+      "fbxNode": 303,
+      "fbxName": "c_middle1_base.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000469
+    },
+    {
+      "pmxIndex": 208,
+      "pmxName": "左中指１",
+      "fbxNode": 304,
+      "fbxName": "middle1.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 9.9e-05
+    },
+    {
+      "pmxIndex": 209,
+      "pmxName": "左中指２",
+      "fbxNode": 305,
+      "fbxName": "c_middle2.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000156
+    },
+    {
+      "pmxIndex": 210,
+      "pmxName": "左中指３",
+      "fbxNode": 306,
+      "fbxName": "c_middle3.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000243
+    },
+    {
+      "pmxIndex": 211,
+      "pmxName": "c_index1_base.l",
+      "fbxNode": 308,
+      "fbxName": "c_index1_base.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000505
+    },
+    {
+      "pmxIndex": 212,
+      "pmxName": "左人指１",
+      "fbxNode": 309,
+      "fbxName": "index1.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 8.7e-05
+    },
+    {
+      "pmxIndex": 213,
+      "pmxName": "左人指２",
+      "fbxNode": 310,
+      "fbxName": "c_index2.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000108
+    },
+    {
+      "pmxIndex": 214,
+      "pmxName": "左人指３",
+      "fbxNode": 311,
+      "fbxName": "c_index3.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.00013
+    },
+    {
+      "pmxIndex": 215,
+      "pmxName": "左親指０",
+      "fbxNode": 313,
+      "fbxName": "thumb1.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000288
+    },
+    {
+      "pmxIndex": 216,
+      "pmxName": "左親指１",
+      "fbxNode": 314,
+      "fbxName": "c_thumb2.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.000163
+    },
+    {
+      "pmxIndex": 217,
+      "pmxName": "左親指２",
+      "fbxNode": 315,
+      "fbxName": "c_thumb3.l",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 0.00017
+    },
+    {
+      "pmxIndex": 218,
+      "pmxName": "右足",
+      "fbxNode": 317,
+      "fbxName": "thigh_twist.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 1.9e-05
+    },
+    {
+      "pmxIndex": 219,
+      "pmxName": "右ひざ",
+      "fbxNode": 318,
+      "fbxName": "leg_stretch.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 2.8e-05
+    },
+    {
+      "pmxIndex": 220,
+      "pmxName": "右足首",
+      "fbxNode": 321,
+      "fbxName": "foot.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 1.4e-05
+    },
+    {
+      "pmxIndex": 221,
+      "pmxName": "右つま先",
+      "fbxNode": 322,
+      "fbxName": "toes_01.r",
+      "role": "joint",
+      "method": "rest-position",
+      "restErrorWorldUnits": 2.8e-05
+    },
+    {
+      "pmxIndex": 222,
+      "pmxName": "左足IK親",
+      "fbxNode": 57,
+      "fbxName": "root.x",
+      "role": "ik-parent",
+      "method": "manual",
+      "restErrorWorldUnits": 95.661826
+    },
+    {
+      "pmxIndex": 223,
+      "pmxName": "左足ＩＫ",
+      "fbxNode": 77,
+      "fbxName": "foot.l",
+      "role": "ik-control",
+      "method": "rest-position",
+      "restErrorWorldUnits": 1.4e-05
+    },
+    {
+      "pmxIndex": 224,
+      "pmxName": "左つま先ＩＫ",
+      "fbxNode": 78,
+      "fbxName": "toes_01.l",
+      "role": "ik-control",
+      "method": "rest-position",
+      "restErrorWorldUnits": 4e-05
+    },
+    {
+      "pmxIndex": 225,
+      "pmxName": "右足IK親",
+      "fbxNode": 57,
+      "fbxName": "root.x",
+      "role": "ik-parent",
+      "method": "manual",
+      "restErrorWorldUnits": 95.664829
+    },
+    {
+      "pmxIndex": 226,
+      "pmxName": "右足ＩＫ",
+      "fbxNode": 321,
+      "fbxName": "foot.r",
+      "role": "ik-control",
+      "method": "rest-position",
+      "restErrorWorldUnits": 1.4e-05
+    },
+    {
+      "pmxIndex": 227,
+      "pmxName": "右つま先ＩＫ",
+      "fbxNode": 322,
+      "fbxName": "toes_01.r",
+      "role": "ik-control",
+      "method": "rest-position",
+      "restErrorWorldUnits": 2.8e-05
+    },
+    {
+      "pmxIndex": 228,
+      "pmxName": "腰キャンセル左",
+      "fbxNode": 73,
+      "fbxName": "thigh_twist.l",
+      "role": "waist-cancel",
+      "method": "rest-position",
+      "restErrorWorldUnits": 1.9e-05
+    },
+    {
+      "pmxIndex": 229,
+      "pmxName": "腰キャンセル右",
+      "fbxNode": 317,
+      "fbxName": "thigh_twist.r",
+      "role": "waist-cancel",
+      "method": "rest-position",
+      "restErrorWorldUnits": 1.9e-05
+    },
+    {
+      "pmxIndex": 230,
+      "pmxName": "右足D",
+      "fbxNode": 317,
+      "fbxName": "thigh_twist.r",
+      "role": "deform-helper",
+      "method": "rest-position",
+      "restErrorWorldUnits": 1.9e-05
+    },
+    {
+      "pmxIndex": 231,
+      "pmxName": "右ひざD",
+      "fbxNode": 318,
+      "fbxName": "leg_stretch.r",
+      "role": "deform-helper",
+      "method": "rest-position",
+      "restErrorWorldUnits": 2.8e-05
+    },
+    {
+      "pmxIndex": 232,
+      "pmxName": "右足首D",
+      "fbxNode": 321,
+      "fbxName": "foot.r",
+      "role": "deform-helper",
+      "method": "rest-position",
+      "restErrorWorldUnits": 1.4e-05
+    },
+    {
+      "pmxIndex": 233,
+      "pmxName": "右足先EX",
+      "fbxNode": 322,
+      "fbxName": "toes_01.r",
+      "role": "toe-helper",
+      "method": "manual",
+      "restErrorWorldUnits": 5.790542
+    },
+    {
+      "pmxIndex": 234,
+      "pmxName": "左足D",
+      "fbxNode": 73,
+      "fbxName": "thigh_twist.l",
+      "role": "deform-helper",
+      "method": "rest-position",
+      "restErrorWorldUnits": 1.9e-05
+    },
+    {
+      "pmxIndex": 235,
+      "pmxName": "左ひざD",
+      "fbxNode": 74,
+      "fbxName": "leg_stretch.l",
+      "role": "deform-helper",
+      "method": "rest-position",
+      "restErrorWorldUnits": 2.8e-05
+    },
+    {
+      "pmxIndex": 236,
+      "pmxName": "左足首D",
+      "fbxNode": 77,
+      "fbxName": "foot.l",
+      "role": "deform-helper",
+      "method": "rest-position",
+      "restErrorWorldUnits": 1.4e-05
+    },
+    {
+      "pmxIndex": 237,
+      "pmxName": "左足先EX",
+      "fbxNode": 78,
+      "fbxName": "toes_01.l",
+      "role": "toe-helper",
+      "method": "manual",
+      "restErrorWorldUnits": 5.790567
+    },
+    {
+      "pmxIndex": 238,
+      "pmxName": "head.x",
+      "fbxNode": 107,
+      "fbxName": "head.x",
+      "role": "head-helper",
+      "method": "rest-position",
+      "restErrorWorldUnits": 6e-05
+    }
+  ],
+  "motionAliases": [
+    {
+      "vmdName": "右中指０",
+      "pmxIndex": 173
+    },
+    {
+      "vmdName": "右人指０",
+      "pmxIndex": 177
+    },
+    {
+      "vmdName": "右小指０",
+      "pmxIndex": 165
+    },
+    {
+      "vmdName": "右薬指０",
+      "pmxIndex": 169
+    },
+    {
+      "vmdName": "左中指０",
+      "pmxIndex": 207
+    },
+    {
+      "vmdName": "左人指０",
+      "pmxIndex": 211
+    },
+    {
+      "vmdName": "左小指０",
+      "pmxIndex": 199
+    },
+    {
+      "vmdName": "左薬指０",
+      "pmxIndex": 203
+    },
+    {
+      "vmdName": "左薬指３",
+      "pmxIndex": 206
+    }
+  ],
+  "trackReport": {
+    "totalBoneTracks": 807,
+    "unmatchedBoneTracks": [
+      {
+        "name": "+NBone1",
+        "keyCount": 1
+      },
+      {
+        "name": "+NBone2",
+        "keyCount": 1
+      },
+      {
+        "name": "Excited!",
+        "keyCount": 1
+      },
+      {
+        "name": "NBone1",
+        "keyCount": 2
+      },
+      {
+        "name": "NBone2",
+        "keyCount": 2
+      },
+      {
+        "name": "Null_277",
+        "keyCount": 2
+      },
+      {
+        "name": "Tei_1",
+        "keyCount": 1
+      },
+      {
+        "name": "Tei_2",
+        "keyCount": 1
+      },
+      {
+        "name": "Tei_3",
+        "keyCount": 1
+      },
+      {
+        "name": "Tei_4",
+        "keyCount": 1
+      },
+      {
+        "name": "Tei_5",
+        "keyCount": 1
+      },
+      {
+        "name": "Tei_6",
+        "keyCount": 1
+      },
+      {
+        "name": "Tei_7",
+        "keyCount": 1
+      },
+      {
+        "name": "Tei_8",
+        "keyCount": 1
+      },
+      {
+        "name": "hand_L",
+        "keyCount": 1
+      },
+      {
+        "name": "hand_R",
+        "keyCount": 1
+      },
+      {
+        "name": "headband",
+        "keyCount": 2
+      },
+      {
+        "name": "kl_te_l_wj",
+        "keyCount": 1
+      },
+      {
+        "name": "kl_te_r_wj",
+        "keyCount": 1
+      },
+      {
+        "name": "n_hara_c_wj_ex",
+        "keyCount": 1
+      },
+      {
+        "name": "n_skata_b_l_wj_",
+        "keyCount": 1
+      },
+      {
+        "name": "n_skata_b_r_wj_",
+        "keyCount": 1
+      },
+      {
+        "name": "n_skata_c_l_wj_",
+        "keyCount": 1
+      },
+      {
+        "name": "n_skata_c_r_wj_",
+        "keyCount": 1
+      },
+      {
+        "name": "あご",
+        "keyCount": 1
+      },
+      {
+        "name": "おっぱい調整",
+        "keyCount": 1
+      },
+      {
+        "name": "グルーブ2",
+        "keyCount": 2
+      },
+      {
+        "name": "センター2",
+        "keyCount": 2
+      },
+      {
+        "name": "センター先",
+        "keyCount": 1
+      },
+      {
+        "name": "メガネ",
+        "keyCount": 1
+      },
+      {
+        "name": "下半身先",
+        "keyCount": 1
+      },
+      {
+        "name": "両目先",
+        "keyCount": 1
+      },
+      {
+        "name": "前髮1_1",
+        "keyCount": 1
+      },
+      {
+        "name": "前髮1_2",
+        "keyCount": 1
+      },
+      {
+        "name": "前髮2_1",
+        "keyCount": 1
+      },
+      {
+        "name": "前髮2_2",
+        "keyCount": 1
+      },
+      {
+        "name": "前髮3_1",
+        "keyCount": 1
+      },
+      {
+        "name": "前髮3_2",
+        "keyCount": 1
+      },
+      {
+        "name": "前髮4_1",
+        "keyCount": 1
+      },
+      {
+        "name": "前髮4_2",
+        "keyCount": 1
+      },
+      {
+        "name": "前髮5_1",
+        "keyCount": 1
+      },
+      {
+        "name": "前髮5_2",
+        "keyCount": 1
+      },
+      {
+        "name": "前髮5_3",
+        "keyCount": 1
+      },
+      {
+        "name": "口上",
+        "keyCount": 1
+      },
+      {
+        "name": "口下",
+        "keyCount": 1
+      },
+      {
+        "name": "口親",
+        "keyCount": 1
+      },
+      {
+        "name": "右つま先ＩＫ先",
+        "keyCount": 1
+      },
+      {
+        "name": "右ひじ+",
+        "keyCount": 1
+      },
+      {
+        "name": "右ひじW",
+        "keyCount": 2
+      },
+      {
+        "name": "右ひじWIK",
+        "keyCount": 1
+      },
+      {
+        "name": "右ひじW先",
+        "keyCount": 2
+      },
+      {
+        "name": "右ひじ補助",
+        "keyCount": 1
+      },
+      {
+        "name": "右ひじ補助+",
+        "keyCount": 2
+      },
+      {
+        "name": "右ダミー",
+        "keyCount": 2
+      },
+      {
+        "name": "右中指先",
+        "keyCount": 1
+      },
+      {
+        "name": "右中指握",
+        "keyCount": 1
+      },
+      {
+        "name": "右中指１拡１",
+        "keyCount": 1
+      },
+      {
+        "name": "右中指１握１",
+        "keyCount": 1
+      },
+      {
+        "name": "右中指１握２",
+        "keyCount": 1
+      },
+      {
+        "name": "右中指２握１",
+        "keyCount": 1
+      },
+      {
+        "name": "右中指２握２",
+        "keyCount": 1
+      },
+      {
+        "name": "右中指３先",
+        "keyCount": 1
+      },
+      {
+        "name": "右中指３握１",
+        "keyCount": 1
+      },
+      {
+        "name": "右中指３握２",
+        "keyCount": 1
+      },
+      {
+        "name": "右人指先",
+        "keyCount": 1
+      },
+      {
+        "name": "右人指握",
+        "keyCount": 1
+      },
+      {
+        "name": "右人指１拡１",
+        "keyCount": 1
+      },
+      {
+        "name": "右人指１握１",
+        "keyCount": 1
+      },
+      {
+        "name": "右人指１握２",
+        "keyCount": 1
+      },
+      {
+        "name": "右人指２握１",
+        "keyCount": 1
+      },
+      {
+        "name": "右人指２握２",
+        "keyCount": 1
+      },
+      {
+        "name": "右人指３先",
+        "keyCount": 1
+      },
+      {
+        "name": "右人指３握１",
+        "keyCount": 1
+      },
+      {
+        "name": "右人指３握２",
+        "keyCount": 1
+      },
+      {
+        "name": "右前髮1_1",
+        "keyCount": 1
+      },
+      {
+        "name": "右前髮1_2",
+        "keyCount": 1
+      },
+      {
+        "name": "右前髮2_1",
+        "keyCount": 1
+      },
+      {
+        "name": "右前髮2_2",
+        "keyCount": 1
+      },
+      {
+        "name": "右口",
+        "keyCount": 1
+      },
+      {
+        "name": "右小指先",
+        "keyCount": 1
+      },
+      {
+        "name": "右小指握",
+        "keyCount": 1
+      },
+      {
+        "name": "右小指１拡１",
+        "keyCount": 1
+      },
+      {
+        "name": "右小指１握１",
+        "keyCount": 1
+      },
+      {
+        "name": "右小指１握２",
+        "keyCount": 1
+      },
+      {
+        "name": "右小指２握１",
+        "keyCount": 1
+      },
+      {
+        "name": "右小指２握２",
+        "keyCount": 1
+      },
+      {
+        "name": "右小指３先",
+        "keyCount": 1
+      },
+      {
+        "name": "右小指３握１",
+        "keyCount": 1
+      },
+      {
+        "name": "右小指３握２",
+        "keyCount": 1
+      },
+      {
+        "name": "右手先",
+        "keyCount": 1
+      },
+      {
+        "name": "右拡散",
+        "keyCount": 1
+      },
+      {
+        "name": "右握り",
+        "keyCount": 1
+      },
+      {
+        "name": "右涙",
+        "keyCount": 1
+      },
+      {
+        "name": "右目1",
+        "keyCount": 1
+      },
+      {
+        "name": "右目2",
+        "keyCount": 1
+      },
+      {
+        "name": "右目3",
+        "keyCount": 1
+      },
+      {
+        "name": "右目4",
+        "keyCount": 1
+      },
+      {
+        "name": "右目先",
+        "keyCount": 1
+      },
+      {
+        "name": "右目子",
+        "keyCount": 1
+      },
+      {
+        "name": "右目戻",
+        "keyCount": 1
+      },
+      {
+        "name": "右目補助",
+        "keyCount": 1
+      },
+      {
+        "name": "右眉1",
+        "keyCount": 1
+      },
+      {
+        "name": "右眉2",
+        "keyCount": 1
+      },
+      {
+        "name": "右眉3",
+        "keyCount": 1
+      },
+      {
+        "name": "右眉4",
+        "keyCount": 1
+      },
+      {
+        "name": "右肩+",
+        "keyCount": 2
+      },
+      {
+        "name": "右胸",
+        "keyCount": 1
+      },
+      {
+        "name": "右胸先",
+        "keyCount": 1
+      },
+      {
+        "name": "右腕+",
+        "keyCount": 1
+      },
+      {
+        "name": "右腕W",
+        "keyCount": 2
+      },
+      {
+        "name": "右腕WIK",
+        "keyCount": 2
+      },
+      {
+        "name": "右腕W先",
+        "keyCount": 2
+      },
+      {
+        "name": "右薬指先",
+        "keyCount": 1
+      },
+      {
+        "name": "右薬指握",
+        "keyCount": 1
+      },
+      {
+        "name": "右薬指１拡１",
+        "keyCount": 1
+      },
+      {
+        "name": "右薬指１握１",
+        "keyCount": 1
+      },
+      {
+        "name": "右薬指１握２",
+        "keyCount": 1
+      },
+      {
+        "name": "右薬指２握１",
+        "keyCount": 1
+      },
+      {
+        "name": "右薬指２握２",
+        "keyCount": 1
+      },
+      {
+        "name": "右薬指３先",
+        "keyCount": 1
+      },
+      {
+        "name": "右薬指３握１",
+        "keyCount": 1
+      },
+      {
+        "name": "右薬指３握２",
+        "keyCount": 1
+      },
+      {
+        "name": "右親指先",
+        "keyCount": 1
+      },
+      {
+        "name": "右親指握",
+        "keyCount": 1
+      },
+      {
+        "name": "右親指０拡１",
+        "keyCount": 1
+      },
+      {
+        "name": "右親指０握１",
+        "keyCount": 1
+      },
+      {
+        "name": "右親指０握２",
+        "keyCount": 1
+      },
+      {
+        "name": "右親指１握２",
+        "keyCount": 1
+      },
+      {
+        "name": "右親指２先",
+        "keyCount": 1
+      },
+      {
+        "name": "右親指２握２",
+        "keyCount": 1
+      },
+      {
+        "name": "右足先(素足用)",
+        "keyCount": 2
+      },
+      {
+        "name": "右足補",
+        "keyCount": 2
+      },
+      {
+        "name": "右足ＩＫ先",
+        "keyCount": 1
+      },
+      {
+        "name": "右頬",
+        "keyCount": 1
+      },
+      {
+        "name": "右髪飾り",
+        "keyCount": 1
+      },
+      {
+        "name": "右髮1",
+        "keyCount": 1
+      },
+      {
+        "name": "右髮10",
+        "keyCount": 1
+      },
+      {
+        "name": "右髮11",
+        "keyCount": 1
+      },
+      {
+        "name": "右髮12",
+        "keyCount": 1
+      },
+      {
+        "name": "右髮13",
+        "keyCount": 1
+      },
+      {
+        "name": "右髮14",
+        "keyCount": 1
+      },
+      {
+        "name": "右髮15",
+        "keyCount": 1
+      },
+      {
+        "name": "右髮16",
+        "keyCount": 1
+      },
+      {
+        "name": "右髮17",
+        "keyCount": 1
+      },
+      {
+        "name": "右髮18",
+        "keyCount": 1
+      },
+      {
+        "name": "右髮19",
+        "keyCount": 1
+      },
+      {
+        "name": "右髮2",
+        "keyCount": 1
+      },
+      {
+        "name": "右髮20",
+        "keyCount": 1
+      },
+      {
+        "name": "右髮3",
+        "keyCount": 1
+      },
+      {
+        "name": "右髮4",
+        "keyCount": 1
+      },
+      {
+        "name": "右髮5",
+        "keyCount": 1
+      },
+      {
+        "name": "右髮6",
+        "keyCount": 1
+      },
+      {
+        "name": "右髮7",
+        "keyCount": 1
+      },
+      {
+        "name": "右髮8",
+        "keyCount": 1
+      },
+      {
+        "name": "右髮9",
+        "keyCount": 1
+      },
+      {
+        "name": "右髮親",
+        "keyCount": 1
+      },
+      {
+        "name": "左つま先ＩＫ先",
+        "keyCount": 1
+      },
+      {
+        "name": "左ひじ+",
+        "keyCount": 1
+      },
+      {
+        "name": "左ひじW",
+        "keyCount": 2
+      },
+      {
+        "name": "左ひじWIK",
+        "keyCount": 1
+      },
+      {
+        "name": "左ひじW先",
+        "keyCount": 2
+      },
+      {
+        "name": "左ひじ補助",
+        "keyCount": 1
+      },
+      {
+        "name": "左ひじ補助+",
+        "keyCount": 2
+      },
+      {
+        "name": "左ダミー",
+        "keyCount": 2
+      },
+      {
+        "name": "左中指先",
+        "keyCount": 1
+      },
+      {
+        "name": "左中指握",
+        "keyCount": 1
+      },
+      {
+        "name": "左中指１拡１",
+        "keyCount": 1
+      },
+      {
+        "name": "左中指１握１",
+        "keyCount": 1
+      },
+      {
+        "name": "左中指１握２",
+        "keyCount": 1
+      },
+      {
+        "name": "左中指２握１",
+        "keyCount": 1
+      },
+      {
+        "name": "左中指２握２",
+        "keyCount": 1
+      },
+      {
+        "name": "左中指３先",
+        "keyCount": 1
+      },
+      {
+        "name": "左中指３握１",
+        "keyCount": 1
+      },
+      {
+        "name": "左中指３握２",
+        "keyCount": 1
+      },
+      {
+        "name": "左人指先",
+        "keyCount": 1
+      },
+      {
+        "name": "左人指握",
+        "keyCount": 1
+      },
+      {
+        "name": "左人指１拡１",
+        "keyCount": 1
+      },
+      {
+        "name": "左人指１握１",
+        "keyCount": 1
+      },
+      {
+        "name": "左人指１握２",
+        "keyCount": 1
+      },
+      {
+        "name": "左人指２握１",
+        "keyCount": 1
+      },
+      {
+        "name": "左人指２握２",
+        "keyCount": 1
+      },
+      {
+        "name": "左人指３先",
+        "keyCount": 1
+      },
+      {
+        "name": "左人指３握１",
+        "keyCount": 1
+      },
+      {
+        "name": "左人指３握２",
+        "keyCount": 1
+      },
+      {
+        "name": "左前髮1_1",
+        "keyCount": 1
+      },
+      {
+        "name": "左前髮1_2",
+        "keyCount": 1
+      },
+      {
+        "name": "左前髮2_1",
+        "keyCount": 1
+      },
+      {
+        "name": "左前髮2_2",
+        "keyCount": 1
+      },
+      {
+        "name": "左口",
+        "keyCount": 1
+      },
+      {
+        "name": "左小指先",
+        "keyCount": 1
+      },
+      {
+        "name": "左小指握",
+        "keyCount": 1
+      },
+      {
+        "name": "左小指１拡１",
+        "keyCount": 1
+      },
+      {
+        "name": "左小指１握１",
+        "keyCount": 1
+      },
+      {
+        "name": "左小指１握２",
+        "keyCount": 1
+      },
+      {
+        "name": "左小指２握１",
+        "keyCount": 1
+      },
+      {
+        "name": "左小指２握２",
+        "keyCount": 1
+      },
+      {
+        "name": "左小指３先",
+        "keyCount": 1
+      },
+      {
+        "name": "左小指３握１",
+        "keyCount": 1
+      },
+      {
+        "name": "左小指３握２",
+        "keyCount": 1
+      },
+      {
+        "name": "左手先",
+        "keyCount": 1
+      },
+      {
+        "name": "左拡散",
+        "keyCount": 1
+      },
+      {
+        "name": "左握り",
+        "keyCount": 1
+      },
+      {
+        "name": "左涙",
+        "keyCount": 1
+      },
+      {
+        "name": "左目1",
+        "keyCount": 1
+      },
+      {
+        "name": "左目2",
+        "keyCount": 1
+      },
+      {
+        "name": "左目3",
+        "keyCount": 1
+      },
+      {
+        "name": "左目4",
+        "keyCount": 1
+      },
+      {
+        "name": "左目先",
+        "keyCount": 1
+      },
+      {
+        "name": "左目子",
+        "keyCount": 1
+      },
+      {
+        "name": "左目戻",
+        "keyCount": 1
+      },
+      {
+        "name": "左目補助",
+        "keyCount": 1
+      },
+      {
+        "name": "左眉1",
+        "keyCount": 1
+      },
+      {
+        "name": "左眉2",
+        "keyCount": 1
+      },
+      {
+        "name": "左眉3",
+        "keyCount": 1
+      },
+      {
+        "name": "左眉4",
+        "keyCount": 1
+      },
+      {
+        "name": "左肩+",
+        "keyCount": 2
+      },
+      {
+        "name": "左胸",
+        "keyCount": 1
+      },
+      {
+        "name": "左胸先",
+        "keyCount": 1
+      },
+      {
+        "name": "左腕+",
+        "keyCount": 1
+      },
+      {
+        "name": "左腕W",
+        "keyCount": 2
+      },
+      {
+        "name": "左腕WIK",
+        "keyCount": 2
+      },
+      {
+        "name": "左腕W先",
+        "keyCount": 2
+      },
+      {
+        "name": "左薬指先",
+        "keyCount": 1
+      },
+      {
+        "name": "左薬指握",
+        "keyCount": 1
+      },
+      {
+        "name": "左薬指１拡１",
+        "keyCount": 1
+      },
+      {
+        "name": "左薬指１握１",
+        "keyCount": 1
+      },
+      {
+        "name": "左薬指１握２",
+        "keyCount": 1
+      },
+      {
+        "name": "左薬指２握１",
+        "keyCount": 1
+      },
+      {
+        "name": "左薬指２握２",
+        "keyCount": 1
+      },
+      {
+        "name": "左薬指３先",
+        "keyCount": 1
+      },
+      {
+        "name": "左薬指３握１",
+        "keyCount": 1
+      },
+      {
+        "name": "左薬指３握２",
+        "keyCount": 1
+      },
+      {
+        "name": "左親指先",
+        "keyCount": 1
+      },
+      {
+        "name": "左親指握",
+        "keyCount": 1
+      },
+      {
+        "name": "左親指０拡１",
+        "keyCount": 1
+      },
+      {
+        "name": "左親指０握１",
+        "keyCount": 1
+      },
+      {
+        "name": "左親指０握２",
+        "keyCount": 1
+      },
+      {
+        "name": "左親指１握２",
+        "keyCount": 1
+      },
+      {
+        "name": "左親指２先",
+        "keyCount": 1
+      },
+      {
+        "name": "左親指２握２",
+        "keyCount": 1
+      },
+      {
+        "name": "左足先(素足用)",
+        "keyCount": 2
+      },
+      {
+        "name": "左足補",
+        "keyCount": 2
+      },
+      {
+        "name": "左足ＩＫ先",
+        "keyCount": 1
+      },
+      {
+        "name": "左頬",
+        "keyCount": 1
+      },
+      {
+        "name": "左髪飾り",
+        "keyCount": 1
+      },
+      {
+        "name": "左髮1",
+        "keyCount": 1
+      },
+      {
+        "name": "左髮10",
+        "keyCount": 1
+      },
+      {
+        "name": "左髮11",
+        "keyCount": 1
+      },
+      {
+        "name": "左髮12",
+        "keyCount": 1
+      },
+      {
+        "name": "左髮13",
+        "keyCount": 1
+      },
+      {
+        "name": "左髮14",
+        "keyCount": 1
+      },
+      {
+        "name": "左髮15",
+        "keyCount": 1
+      },
+      {
+        "name": "左髮16",
+        "keyCount": 1
+      },
+      {
+        "name": "左髮17",
+        "keyCount": 1
+      },
+      {
+        "name": "左髮18",
+        "keyCount": 1
+      },
+      {
+        "name": "左髮19",
+        "keyCount": 1
+      },
+      {
+        "name": "左髮2",
+        "keyCount": 1
+      },
+      {
+        "name": "左髮20",
+        "keyCount": 1
+      },
+      {
+        "name": "左髮3",
+        "keyCount": 1
+      },
+      {
+        "name": "左髮4",
+        "keyCount": 1
+      },
+      {
+        "name": "左髮5",
+        "keyCount": 1
+      },
+      {
+        "name": "左髮6",
+        "keyCount": 1
+      },
+      {
+        "name": "左髮7",
+        "keyCount": 1
+      },
+      {
+        "name": "左髮8",
+        "keyCount": 1
+      },
+      {
+        "name": "左髮9",
+        "keyCount": 1
+      },
+      {
+        "name": "左髮親",
+        "keyCount": 1
+      },
+      {
+        "name": "操作中心",
+        "keyCount": 1
+      },
+      {
+        "name": "歯上",
+        "keyCount": 1
+      },
+      {
+        "name": "歯上A",
+        "keyCount": 1
+      },
+      {
+        "name": "歯上B",
+        "keyCount": 1
+      },
+      {
+        "name": "歯上親",
+        "keyCount": 1
+      },
+      {
+        "name": "歯下",
+        "keyCount": 1
+      },
+      {
+        "name": "歯下A",
+        "keyCount": 1
+      },
+      {
+        "name": "歯下B",
+        "keyCount": 1
+      },
+      {
+        "name": "歯下親",
+        "keyCount": 1
+      },
+      {
+        "name": "背_0_0",
+        "keyCount": 1
+      },
+      {
+        "name": "背_0_1",
+        "keyCount": 1
+      },
+      {
+        "name": "背_0_10",
+        "keyCount": 1
+      },
+      {
+        "name": "背_0_11",
+        "keyCount": 1
+      },
+      {
+        "name": "背_0_12",
+        "keyCount": 1
+      },
+      {
+        "name": "背_0_13",
+        "keyCount": 1
+      },
+      {
+        "name": "背_0_14",
+        "keyCount": 1
+      },
+      {
+        "name": "背_0_2",
+        "keyCount": 1
+      },
+      {
+        "name": "背_0_3",
+        "keyCount": 1
+      },
+      {
+        "name": "背_0_4",
+        "keyCount": 1
+      },
+      {
+        "name": "背_0_5",
+        "keyCount": 1
+      },
+      {
+        "name": "背_0_6",
+        "keyCount": 1
+      },
+      {
+        "name": "背_0_7",
+        "keyCount": 1
+      },
+      {
+        "name": "背_0_8",
+        "keyCount": 1
+      },
+      {
+        "name": "背_0_9",
+        "keyCount": 1
+      },
+      {
+        "name": "背_1_0",
+        "keyCount": 1
+      },
+      {
+        "name": "背_1_1",
+        "keyCount": 1
+      },
+      {
+        "name": "背_1_10",
+        "keyCount": 1
+      },
+      {
+        "name": "背_1_11",
+        "keyCount": 1
+      },
+      {
+        "name": "背_1_12",
+        "keyCount": 1
+      },
+      {
+        "name": "背_1_13",
+        "keyCount": 1
+      },
+      {
+        "name": "背_1_14",
+        "keyCount": 1
+      },
+      {
+        "name": "背_1_2",
+        "keyCount": 1
+      },
+      {
+        "name": "背_1_3",
+        "keyCount": 1
+      },
+      {
+        "name": "背_1_4",
+        "keyCount": 1
+      },
+      {
+        "name": "背_1_5",
+        "keyCount": 1
+      },
+      {
+        "name": "背_1_6",
+        "keyCount": 1
+      },
+      {
+        "name": "背_1_7",
+        "keyCount": 1
+      },
+      {
+        "name": "背_1_8",
+        "keyCount": 1
+      },
+      {
+        "name": "背_1_9",
+        "keyCount": 1
+      },
+      {
+        "name": "背_2_0",
+        "keyCount": 1
+      },
+      {
+        "name": "背_2_1",
+        "keyCount": 1
+      },
+      {
+        "name": "背_2_10",
+        "keyCount": 1
+      },
+      {
+        "name": "背_2_11",
+        "keyCount": 1
+      },
+      {
+        "name": "背_2_12",
+        "keyCount": 1
+      },
+      {
+        "name": "背_2_13",
+        "keyCount": 1
+      },
+      {
+        "name": "背_2_14",
+        "keyCount": 1
+      },
+      {
+        "name": "背_2_2",
+        "keyCount": 1
+      },
+      {
+        "name": "背_2_3",
+        "keyCount": 1
+      },
+      {
+        "name": "背_2_4",
+        "keyCount": 1
+      },
+      {
+        "name": "背_2_5",
+        "keyCount": 1
+      },
+      {
+        "name": "背_2_6",
+        "keyCount": 1
+      },
+      {
+        "name": "背_2_7",
+        "keyCount": 1
+      },
+      {
+        "name": "背_2_8",
+        "keyCount": 1
+      },
+      {
+        "name": "背_2_9",
+        "keyCount": 1
+      },
+      {
+        "name": "背_3_0",
+        "keyCount": 1
+      },
+      {
+        "name": "背_3_1",
+        "keyCount": 1
+      },
+      {
+        "name": "背_3_10",
+        "keyCount": 1
+      },
+      {
+        "name": "背_3_11",
+        "keyCount": 1
+      },
+      {
+        "name": "背_3_12",
+        "keyCount": 1
+      },
+      {
+        "name": "背_3_13",
+        "keyCount": 1
+      },
+      {
+        "name": "背_3_14",
+        "keyCount": 1
+      },
+      {
+        "name": "背_3_2",
+        "keyCount": 1
+      },
+      {
+        "name": "背_3_3",
+        "keyCount": 1
+      },
+      {
+        "name": "背_3_4",
+        "keyCount": 1
+      },
+      {
+        "name": "背_3_5",
+        "keyCount": 1
+      },
+      {
+        "name": "背_3_6",
+        "keyCount": 1
+      },
+      {
+        "name": "背_3_7",
+        "keyCount": 1
+      },
+      {
+        "name": "背_3_8",
+        "keyCount": 1
+      },
+      {
+        "name": "背_3_9",
+        "keyCount": 1
+      },
+      {
+        "name": "背_4_0",
+        "keyCount": 1
+      },
+      {
+        "name": "背_4_1",
+        "keyCount": 1
+      },
+      {
+        "name": "背_4_10",
+        "keyCount": 1
+      },
+      {
+        "name": "背_4_11",
+        "keyCount": 1
+      },
+      {
+        "name": "背_4_12",
+        "keyCount": 1
+      },
+      {
+        "name": "背_4_13",
+        "keyCount": 1
+      },
+      {
+        "name": "背_4_14",
+        "keyCount": 1
+      },
+      {
+        "name": "背_4_2",
+        "keyCount": 1
+      },
+      {
+        "name": "背_4_3",
+        "keyCount": 1
+      },
+      {
+        "name": "背_4_4",
+        "keyCount": 1
+      },
+      {
+        "name": "背_4_5",
+        "keyCount": 1
+      },
+      {
+        "name": "背_4_6",
+        "keyCount": 1
+      },
+      {
+        "name": "背_4_7",
+        "keyCount": 1
+      },
+      {
+        "name": "背_4_8",
+        "keyCount": 1
+      },
+      {
+        "name": "背_4_9",
+        "keyCount": 1
+      },
+      {
+        "name": "背_5_0",
+        "keyCount": 1
+      },
+      {
+        "name": "背_5_1",
+        "keyCount": 1
+      },
+      {
+        "name": "背_5_10",
+        "keyCount": 1
+      },
+      {
+        "name": "背_5_11",
+        "keyCount": 1
+      },
+      {
+        "name": "背_5_12",
+        "keyCount": 1
+      },
+      {
+        "name": "背_5_13",
+        "keyCount": 1
+      },
+      {
+        "name": "背_5_14",
+        "keyCount": 1
+      },
+      {
+        "name": "背_5_2",
+        "keyCount": 1
+      },
+      {
+        "name": "背_5_3",
+        "keyCount": 1
+      },
+      {
+        "name": "背_5_4",
+        "keyCount": 1
+      },
+      {
+        "name": "背_5_5",
+        "keyCount": 1
+      },
+      {
+        "name": "背_5_6",
+        "keyCount": 1
+      },
+      {
+        "name": "背_5_7",
+        "keyCount": 1
+      },
+      {
+        "name": "背_5_8",
+        "keyCount": 1
+      },
+      {
+        "name": "背_5_9",
+        "keyCount": 1
+      },
+      {
+        "name": "背_6_0",
+        "keyCount": 1
+      },
+      {
+        "name": "背_6_1",
+        "keyCount": 1
+      },
+      {
+        "name": "背_6_10",
+        "keyCount": 1
+      },
+      {
+        "name": "背_6_11",
+        "keyCount": 1
+      },
+      {
+        "name": "背_6_12",
+        "keyCount": 1
+      },
+      {
+        "name": "背_6_13",
+        "keyCount": 1
+      },
+      {
+        "name": "背_6_14",
+        "keyCount": 1
+      },
+      {
+        "name": "背_6_2",
+        "keyCount": 1
+      },
+      {
+        "name": "背_6_3",
+        "keyCount": 1
+      },
+      {
+        "name": "背_6_4",
+        "keyCount": 1
+      },
+      {
+        "name": "背_6_5",
+        "keyCount": 1
+      },
+      {
+        "name": "背_6_6",
+        "keyCount": 1
+      },
+      {
+        "name": "背_6_7",
+        "keyCount": 1
+      },
+      {
+        "name": "背_6_8",
+        "keyCount": 1
+      },
+      {
+        "name": "背_6_9",
+        "keyCount": 1
+      },
+      {
+        "name": "背_7_0",
+        "keyCount": 1
+      },
+      {
+        "name": "背_7_1",
+        "keyCount": 1
+      },
+      {
+        "name": "背_7_10",
+        "keyCount": 1
+      },
+      {
+        "name": "背_7_11",
+        "keyCount": 1
+      },
+      {
+        "name": "背_7_12",
+        "keyCount": 1
+      },
+      {
+        "name": "背_7_13",
+        "keyCount": 1
+      },
+      {
+        "name": "背_7_14",
+        "keyCount": 1
+      },
+      {
+        "name": "背_7_2",
+        "keyCount": 1
+      },
+      {
+        "name": "背_7_3",
+        "keyCount": 1
+      },
+      {
+        "name": "背_7_4",
+        "keyCount": 1
+      },
+      {
+        "name": "背_7_5",
+        "keyCount": 1
+      },
+      {
+        "name": "背_7_6",
+        "keyCount": 1
+      },
+      {
+        "name": "背_7_7",
+        "keyCount": 1
+      },
+      {
+        "name": "背_7_8",
+        "keyCount": 1
+      },
+      {
+        "name": "背_7_9",
+        "keyCount": 1
+      },
+      {
+        "name": "舌1",
+        "keyCount": 1
+      },
+      {
+        "name": "舌2",
+        "keyCount": 1
+      },
+      {
+        "name": "舌3",
+        "keyCount": 1
+      },
+      {
+        "name": "舌親",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_0",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_1",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_10",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_11",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_12",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_13",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_14",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_15",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_16",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_17",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_18",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_19",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_2",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_20",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_21",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_22",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_23",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_24",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_25",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_26",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_27",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_28",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_29",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_3",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_4",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_5",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_6",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_7",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_8",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_0_9",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_0",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_1",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_10",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_11",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_12",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_13",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_14",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_15",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_16",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_17",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_18",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_19",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_2",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_20",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_21",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_22",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_23",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_24",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_25",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_26",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_27",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_28",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_29",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_3",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_4",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_5",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_6",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_7",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_8",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_1_9",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_0",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_1",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_10",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_11",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_12",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_13",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_14",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_15",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_16",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_17",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_18",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_19",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_2",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_20",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_21",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_22",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_23",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_24",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_25",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_26",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_27",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_28",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_29",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_3",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_4",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_5",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_6",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_7",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_8",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_2_9",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_0",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_1",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_10",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_11",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_12",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_13",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_14",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_15",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_16",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_17",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_18",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_19",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_2",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_20",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_21",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_22",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_23",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_24",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_25",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_26",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_27",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_28",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_29",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_3",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_4",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_5",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_6",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_7",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_8",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_3_9",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_0",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_1",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_10",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_11",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_12",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_13",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_14",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_15",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_16",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_17",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_18",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_19",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_2",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_20",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_21",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_22",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_23",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_24",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_25",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_26",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_27",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_28",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_29",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_3",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_4",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_5",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_6",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_7",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_8",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_4_9",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_0",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_1",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_10",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_11",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_12",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_13",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_14",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_15",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_16",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_17",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_18",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_19",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_2",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_20",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_21",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_22",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_23",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_24",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_25",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_26",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_27",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_28",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_29",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_3",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_4",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_5",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_6",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_7",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_8",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_5_9",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_0",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_1",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_10",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_11",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_12",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_13",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_14",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_15",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_16",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_17",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_18",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_19",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_2",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_20",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_21",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_22",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_23",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_24",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_25",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_26",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_27",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_28",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_29",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_3",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_4",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_5",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_6",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_7",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_8",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_6_9",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_0",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_1",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_10",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_11",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_12",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_13",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_14",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_15",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_16",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_17",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_18",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_19",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_2",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_20",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_21",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_22",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_23",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_24",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_25",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_26",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_27",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_28",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_29",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_3",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_4",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_5",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_6",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_7",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_8",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_7_9",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_0",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_1",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_10",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_11",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_12",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_13",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_14",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_15",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_16",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_17",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_18",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_19",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_2",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_20",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_21",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_22",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_23",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_24",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_25",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_26",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_27",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_28",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_29",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_3",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_4",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_5",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_6",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_7",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_8",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_8_9",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_0",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_1",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_10",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_11",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_12",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_13",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_14",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_15",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_16",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_17",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_18",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_19",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_2",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_20",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_21",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_22",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_23",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_24",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_25",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_26",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_27",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_28",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_29",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_3",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_4",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_5",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_6",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_7",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_8",
+        "keyCount": 1
+      },
+      {
+        "name": "裙_9_9",
+        "keyCount": 1
+      },
+      {
+        "name": "頭先",
+        "keyCount": 1
+      },
+      {
+        "name": "首W",
+        "keyCount": 2
+      },
+      {
+        "name": "首WIK",
+        "keyCount": 1
+      },
+      {
+        "name": "首W先",
+        "keyCount": 2
+      },
+      {
+        "name": "髮親",
+        "keyCount": 1
+      },
+      {
+        "name": "鼻",
+        "keyCount": 1
+      }
+    ],
+    "unmatchedAnimatedTracks": []
+  }
+}

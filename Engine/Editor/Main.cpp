@@ -140,7 +140,8 @@ int WINAPI wWinMain(
                 std::filesystem::path(arguments[2]).string(),
                 std::filesystem::path(arguments[3]).string());
             WriteStartupLog(imported.success
-                ? "Model imported: " + imported.prefabPath
+                ? "Asset imported: " + (imported.primaryAssetPath.empty()
+                    ? imported.prefabPath : imported.primaryAssetPath)
                 : "Model import failed: " + imported.message);
             LocalFree(arguments);
             if (SUCCEEDED(comResult)) CoUninitialize();

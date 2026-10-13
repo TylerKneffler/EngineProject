@@ -896,12 +896,16 @@ EditorUiAssetCreateMenuResult ImGuiEditorUi::AssetWindowContextMenu()
     }
     return result;
 }
-EditorUiAssetItemMenuResult ImGuiEditorUi::AssetItemContextMenu(const void* id)
+EditorUiAssetItemMenuResult ImGuiEditorUi::AssetItemContextMenu(const void* id,
+    bool canPackMeshes, bool canExtractMeshes)
 {
     EditorUiAssetItemMenuResult result;
     ImGui::PushID(id);
     if(ImGui::BeginPopupContextItem("##assetItemContext"))
     {
+        if (canPackMeshes) result.packMeshesRequested = ImGui::MenuItem("Bundle meshes into rig pack");
+        if (canExtractMeshes) result.extractMeshesRequested = ImGui::MenuItem("Unbundle meshes from rig pack");
+        if (canPackMeshes || canExtractMeshes) ImGui::Separator();
         result.renameRequested=ImGui::MenuItem("Rename");
         result.deleteRequested=ImGui::MenuItem("Delete");
         ImGui::EndPopup();
@@ -1314,6 +1318,8 @@ EditorUiViewportInput ImGuiEditorUi::Viewport(void* texture,float aspect,EditorU
         reinterpret_cast<uintptr_t>(texture)), size);
     const ImVec2 minimum = ImGui::GetItemRectMin();
     const ImVec2 maximum = ImGui::GetItemRectMax();
+    out.screenMin = {minimum.x, minimum.y};
+    out.screenMax = {maximum.x, maximum.y};
     const ImVec2 mouse = ImGui::GetIO().MousePos;
     out.mousePosInViewport = {mouse.x - minimum.x, mouse.y - minimum.y};
     m_viewportScreenMin = {minimum.x, minimum.y};

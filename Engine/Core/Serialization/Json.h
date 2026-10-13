@@ -111,5 +111,10 @@ JsonValue JsonParse(const std::string& src);
 
 // Read a file and parse it; throws on I/O or parse error.
 JsonValue JsonParseFile(const std::string& path);
+
+// Versioned binary storage for generated assets. AssetParseFile also accepts
+// legacy JSON files; ordinary JsonParseFile remains text-only for sidecars.
+std::string AssetWriteBinary(const JsonValue& value);
+JsonValue AssetParseFile(const std::string& path);
 }
 

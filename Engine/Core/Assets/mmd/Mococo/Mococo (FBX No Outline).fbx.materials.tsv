@@ -1,0 +1,8 @@
+# FBX material name<TAB>texture path relative to this FBX<TAB>alpha mode
+MAT_Head	Textures/Head.png	Opaque
+MAT_Body	Textures/Body.png	Opaque
+Facials extra	Textures/Facials.png	Blend
+MAT_HairTailEar	Textures/Hair_Tail.png	Opaque
+MAT_Shoes_ExtraAcc	Textures/Shoes_Extra.png	Opaque
+MAT_Outfit1	Textures/Outfit1_Acc.png	Opaque
+MAT_Jacket	Textures/Jacket.png	Opaque

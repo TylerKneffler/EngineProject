@@ -108,7 +108,7 @@ void Skeleton::Deserialize(const JsonValue& value)
     }
     if (jointNodes.empty() && !rigPath.empty())
     {
-        auto rig = Engine::Model::RigAsset::Load(rigPath);
+        auto rig = Engine::Model::RigAsset::Load(rigPath, skinIndex);
         if (!rig || rig->skinIndex != skinIndex)
             throw std::runtime_error("Missing or incompatible rig asset: " +
                 rigPath);

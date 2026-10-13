@@ -1,6 +1,7 @@
 #pragma once
 #include "Core/Model/ProjectSettings.h"
 #include "Core/Model/AnimationClip.h"
+#include "Core/Model/RigAsset.h"
 #include "pch.h"
 #include "Core/ProjectLoader.h"
 #include "Core/Scene/Scene.h"
@@ -20,6 +21,7 @@
 #include <map>
 #include <tuple>
 #include <utility>
+#include <optional>
 
 namespace Engine::Core { class Window; }
 namespace Engine::Components { class Mesh; }
@@ -135,6 +137,31 @@ public:
     void BakeLighting();
     void ClearBakedLighting();
     void ImportAsset();
+    void StartObjectImport(const std::string& path, bool intoScene,
+        const std::string& destinationDirectory = {});
+    bool PendingImportSupportsReference() const;
+    bool HasPendingImportAsset() const { return !m_pendingImportAssetPath.empty(); }
+    const std::string& GetPendingImportAssetPath() const { return m_pendingImportAssetPath; }
+    const std::string& GetPendingImportDirectory() const { return m_pendingImportDirectory; }
+    void SetPendingImportDirectory(std::string directory)
+    { m_pendingImportDirectory = std::move(directory); }
+    bool IsPendingImportIntoScene() const { return m_pendingImportIntoScene; }
+    bool IsPendingImportAsPrefab() const { return m_pendingImportAsPrefab; }
+    bool CanImportIntoScene() const { return m_pendingImportScene != nullptr; }
+    void SetPendingImportIntoScene(bool value)
+    { m_pendingImportIntoScene = value; if (value) m_pendingImportAsPrefab = false;
+      else m_pickingImportReference = false; }
+    void SetPendingImportAsPrefab(bool value)
+    { m_pendingImportAsPrefab = value; if (value)
+      { m_pendingImportIntoScene = false; m_pickingImportReference = false; } }
+    const std::string& GetPendingImportReferenceLabel() const { return m_pendingImportReferenceLabel; }
+    const std::string& GetPendingImportError() const { return m_pendingImportError; }
+    bool IsPickingImportReference() const { return m_pickingImportReference; }
+    void BeginImportReferencePick();
+    void ClearImportReference();
+    void ConfirmPendingImportAsset();
+    void CancelPendingImportAsset();
+    std::string ConsumeImportHierarchyFocusRequest();
     void CapturePlayModeScene();
     void RestorePlayModeScene();
     void SetLoadingOverlay(bool visible, std::string message = {})
@@ -375,8 +402,14 @@ private:
     void CommitSkeletonEdit(Engine::Scene::Scene* scene);
     void InitializePanels();
     void WireupCallbacks();
-    Engine::Core::Object* InstantiateAsset(const std::string& path, bool recordChange = true);
-    std::string ImportAssetFile(const std::string& path);
+    Engine::Core::Object* InstantiateAsset(const std::string& path, bool recordChange = true,
+        bool showImportDialog = true);
+    std::string ImportAssetFile(const std::string& path,
+        Engine::Core::Object* reference = nullptr,
+        bool explicitReference = false,
+        const std::string& destinationDirectory = {},
+        bool asPrefab = false);
+    void CaptureImportReference(Engine::Core::Object* object);
     void SelectObject(Engine::Core::Object* object);
     struct HistoryEntry
     {
@@ -465,23 +498,39 @@ private:
             unsigned nodeIndex = 0;
             float time = 0.f;
         };
+        struct TimelineRow
+        {
+            size_t rigIndex = 0;
+            int clipIndex = -1;
+            unsigned nodeIndex = 0;
+        };
         struct RigTrack
         {
             struct ClipLayer
             {
                 int clipIndex = -1;
                 float weight = 1.f;
+                float startSeconds = 0.f;
+                bool repeat = false;
+                int repeatCount = 0; // 0 means infinite when repeat is enabled.
             };
             size_t index = 0;
             std::string name;
             std::string path;
             std::vector<std::string> boundMeshes;
+            Engine::Model::RigAsset::ControlMap controls;
+            std::vector<Engine::Model::RigAsset::Pose> poses;
+            std::vector<Engine::Model::RigAsset::SymmetryPair> symmetryPairs;
+            bool controlsDirty = false;
             Engine::Components::Skeleton* sourceSkeleton = nullptr;
             Engine::Components::Skeleton* poseSkeleton = nullptr;
             Engine::Components::AnimationManager* sourceManager = nullptr;
             Engine::Components::AnimationManager* poseManager = nullptr;
             int clipIndex = -1;
             float weight = 1.f;
+            float startSeconds = 0.f;
+            bool repeat = false;
+            int repeatCount = 0;
             std::unordered_map<int, bool> expandedClips;
             std::vector<ClipLayer> stackedClips;
             int selectedBone = -1;
@@ -537,7 +586,17 @@ private:
         bool playing = false;
         bool playbackStarted = false;
         bool playheadDragging = false;
+        bool clipDragging = false;
+        size_t clipDragRig = 0;
+        int clipDragIndex = -1;
+        float clipDragMouseX = 0.f;
+        float clipDragStart = 0.f;
         std::vector<TimelineKey> selectedKeys;
+        std::vector<Engine::Model::AnimationChannel> copiedKeys;
+        size_t copiedKeysRig = 0;
+        int pasteClipIndex = -1;
+        std::vector<TimelineRow> selectedRows;
+        std::optional<TimelineRow> rowSelectionAnchor;
         float keyPressX = 0.f;
         float keyDragDelta = 0.f;
         bool keyPressActive = false;
@@ -547,8 +606,50 @@ private:
         float marqueeStartY = 0.f;
         bool marqueeAdditive = false;
         bool autoKey = false;
+        char poseName[128]{};
+        std::string poseAssetPath;
+        int selectedPose = -1;
+        float poseBlend = 1.f;
+        bool poseMirror = false;
+        bool poseKeyResult = false;
+        bool poseSelectedOnly = false;
+        struct ChainEffector
+        {
+            size_t rigIndex = 0;
+            unsigned rootNode = 0;
+            unsigned tipNode = 0;
+            glm::vec3 target { 0.f };
+            glm::vec3 targetRotation { 0.f };
+            glm::vec3 pole { 0.f };
+            float positionWeight = 1.f;
+            float rotationWeight = 0.f;
+            bool usePole = false;
+        };
+        std::vector<ChainEffector> chainEffectors;
+        int chainIterations = 24;
+        float chainRootTranslation = 0.f;
         bool gizmoWasActive = false;
+        int rigHandleKind = -1; // 0 root, 1 pelvis, then target/pole pairs.
+        int rigHandleDrag = -1;
+        glm::vec3 rigHandleDragStart { 0.f };
+        Engine::Core::Object* gizmoDragBone = nullptr;
+        glm::vec3 gizmoDragStartPosition{};
+        glm::vec3 gizmoDragStartRotation{};
+        glm::vec3 gizmoDragStartScale{1.f};
         bool poseControlEditPending = false;
+        int ikControlTip = -1;
+        float ikControlTime = -1.f;
+        glm::vec3 ikTarget { 0.f };
+        glm::vec3 ikPole { 0.f };
+        glm::vec3 ikTargetRotation { 0.f };
+        Engine::Model::AnimationClip::LimbKey::Space ikSpace =
+            Engine::Model::AnimationClip::LimbKey::Space::Body;
+        int ikSpaceNode = -1;
+        Engine::Core::ComponentReference ikPropReference { "Transform" };
+        float ikPositionWeight = 1.f;
+        float ikRotationWeight = 1.f;
+        float ikBlend = 0.f;
+        bool ikControlEditPending = false;
         bool dirty = false;
         std::string savedSnapshot;
         std::deque<std::vector<Engine::Model::AnimationClip>> undo;
@@ -565,15 +666,33 @@ private:
         AnimationDocument& document);
     void DrawAnimationProperties(IEditorUi& ui,
         AnimationDocument& document);
+    void DrawAnimationRigControls(IEditorUi& ui,
+        AnimationDocument& document);
+    void DrawAnimationPoseLibrary(IEditorUi& ui,
+        AnimationDocument& document);
+    void DrawAnimationChainIK(IEditorUi& ui,
+        AnimationDocument& document);
+    bool DrawAnimationRigViewport(IEditorUi& ui,
+        const EditorUiViewportInput& input, AnimationDocument& document);
     void DrawAnimationMappingRepair(IEditorUi& ui,
         AnimationDocument& document);
     void DrawAnimationGraph(AnimationDocument& document,
         float duration);
     void SampleAnimationDocument(AnimationDocument& document);
+    bool CopyAnimationKeys(AnimationDocument& document);
+    bool PasteAnimationKeys(AnimationDocument& document);
     AnimationDocument::CachedClip& CachedAnimationClip(
         AnimationDocument& document, AnimationDocument::RigTrack& track,
         int clipIndex);
     bool AddAnimationKey(AnimationDocument& document, bool exactTime = false);
+    bool AddAnimationRowKeys(AnimationDocument& document);
+    bool AddAnimationIKKeys(AnimationDocument& document,
+        Engine::Core::Object& upper, Engine::Core::Object& lower,
+        Engine::Core::Object& tip);
+    bool AddAnimationLimbKey(AnimationDocument& document,
+        Engine::Core::Object& upper, Engine::Core::Object& lower,
+        Engine::Core::Object& tip, bool matchIncoming);
+    bool BakeAnimationLimbs(AnimationDocument& document);
     void RecordAnimationEdit(AnimationDocument& document,
         std::vector<Engine::Model::AnimationClip> before);
     bool SaveAnimationDocument(AnimationDocument& document);
@@ -673,6 +792,18 @@ private:
     bool m_historySelectionDirty = false;
 
     std::string m_sceneToLoad;
+    std::string m_pendingImportAssetPath;
+    std::string m_pendingImportDirectory;
+    bool m_pendingImportIntoScene = false;
+    bool m_pendingImportAsPrefab = false;
+    std::string m_pendingImportReferenceLabel;
+    std::string m_pendingImportError;
+    Engine::Scene::Scene* m_pendingImportScene = nullptr;
+    Engine::Core::Object* m_pendingImportReferenceObject = nullptr;
+    Engine::Scene::Scene::ObjectPath m_pendingImportReferencePath;
+    bool m_hasImportReference = false;
+    bool m_pickingImportReference = false;
+    bool m_focusImportHierarchy = false;
     bool m_showUnsavedWarning = false;
 
     // Timing

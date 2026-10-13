@@ -4,6 +4,7 @@
 #include "Engine/Editor/UI/EditorIcons.h"
 #include "Engine/Editor/Core/Paint/BrushPreset.h"
 #include "Core/AssetRecord.h"
+#include "Core/Model/MeshPackAsset.h"
 #include "Core/Object.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Scene/Scene.h"
@@ -80,6 +81,7 @@ std::string AssetTypeBadge(const fs::path& path)
     if (extension == "PREFAB") return "PFB";
     if (extension == "MATERIAL") return "MAT";
     if (extension == "SPRITEANIM") return "ANIM";
+    if (extension == "ANIMPACK") return "PACK";
     if (extension == "SPRITESHEET") return "SPR";
     if (extension == "CPP" || extension == "CC" || extension == "CXX")
         return "C++";
@@ -294,7 +296,22 @@ void AssetsExplorerView::DrawCurrentDirectory(IEditorUi& ui)
                 }
 
                 const EditorUiAssetItemMenuResult menu =
-                    ui.AssetItemContextMenu(entryPath.c_str());
+                    ui.AssetItemContextMenu(entryPath.c_str(),
+                        entry.path().extension() == ".rig" &&
+                            !fs::exists(entry.path().parent_path() /
+                                (entry.path().stem().string() + ".meshpack")),
+                        entry.path().extension() == ".rig" &&
+                            fs::exists(entry.path().parent_path() /
+                                (entry.path().stem().string() + ".meshpack")));
+                if (menu.packMeshesRequested || menu.extractMeshesRequested)
+                {
+                    std::string error;
+                    const bool ok = menu.packMeshesRequested
+                        ? Engine::Model::MeshPackAsset::PackRig(entry.path(), error)
+                        : Engine::Model::MeshPackAsset::ExtractRig(entry.path(), error);
+                    m_error = ok ? std::string() : error;
+                    if (ok && OnAssetContentsChanged) OnAssetContentsChanged(entryPath);
+                }
                 if (menu.renameRequested)
                 {
                     m_renamePath = entryPath;
@@ -407,7 +424,22 @@ void AssetsExplorerView::DrawGridDirectory(IEditorUi& ui)
             }
 
             const EditorUiAssetItemMenuResult menu =
-                ui.AssetItemContextMenu(entryPath.c_str());
+                ui.AssetItemContextMenu(entryPath.c_str(),
+                    entry.path().extension() == ".rig" &&
+                        !fs::exists(entry.path().parent_path() /
+                            (entry.path().stem().string() + ".meshpack")),
+                    entry.path().extension() == ".rig" &&
+                        fs::exists(entry.path().parent_path() /
+                            (entry.path().stem().string() + ".meshpack")));
+            if (menu.packMeshesRequested || menu.extractMeshesRequested)
+            {
+                std::string error;
+                const bool ok = menu.packMeshesRequested
+                    ? Engine::Model::MeshPackAsset::PackRig(entry.path(), error)
+                    : Engine::Model::MeshPackAsset::ExtractRig(entry.path(), error);
+                m_error = ok ? std::string() : error;
+                if (ok && OnAssetContentsChanged) OnAssetContentsChanged(entryPath);
+            }
             if (menu.renameRequested)
             {
                 m_renamePath = entryPath;
@@ -933,7 +965,18 @@ bool AssetsExplorerView::AcceptSceneObject(IEditorUi& ui, const std::string& dir
     {
         const auto* sourcePath = static_cast<const char*>(assetData);
         if (sourcePath && size > 1)
-            MoveAssetPath(sourcePath, directory);
+        {
+            std::string extension = fs::path(sourcePath).extension().string();
+            std::transform(extension.begin(), extension.end(), extension.begin(),
+                [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+            if ((extension == ".vmd" || extension == ".fbx" ||
+                extension == ".gltf" || extension == ".glb" ||
+                extension == ".obj" || extension == ".spriteanim") &&
+                OnObjectImportRequested)
+                OnObjectImportRequested(sourcePath, directory);
+            else
+                MoveAssetPath(sourcePath, directory);
+        }
     }
 
     const void* data = ui.AcceptDragDropPayload("ENGINE_SCENE_OBJECT", &size);

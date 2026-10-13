@@ -54,5 +54,12 @@ private:
     glm::vec3 m_cubeDragStartRotation{};
     glm::vec3 m_cubeDragStartScale{1.f};
     float m_cubeDragWorldUnitsPerPixel = 0.f;
+    EditorUiVec2 m_cubeDragLastMouse{};
+    glm::vec3 m_cubeDragLastWrittenPosition{};
+    glm::vec3 m_cubeDragLastWrittenRotation{};
+    glm::vec3 m_cubeDragLastWrittenScale{1.f};
+    bool m_cubeDragHasWritten = false;
+    int m_cubeDragBlockedDirection = 0;
+    int m_cubeDragLastAttemptDirection = 0;
 };
 }

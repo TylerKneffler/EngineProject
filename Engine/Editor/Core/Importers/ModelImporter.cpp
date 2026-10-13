@@ -3,6 +3,7 @@
 #include "FbxModelDecoder.h"
 #include "GltfImporter.h"
 #include "ModelAssetWriter.h"
+#include "VmdSceneImporter.h"
 
 #include <algorithm>
 #include <cctype>
@@ -27,13 +28,15 @@ bool ModelImporter::SupportsExtension(const std::string& extension)
     if (normalized.empty() || normalized.front() != '.') normalized.insert(normalized.begin(), '.');
     std::transform(normalized.begin(), normalized.end(), normalized.begin(),
         [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return normalized == ".gltf" || normalized == ".glb" || normalized == ".fbx";
+    return normalized == ".gltf" || normalized == ".glb" || normalized == ".fbx" || normalized == ".vmd";
 }
 
 Engine::Model::ModelImportResult ModelImporter::Import(const std::string& sourcePath,
     const std::string& assetsDirectory)
 {
     const std::string extension = LowerExtension(sourcePath);
+    if (extension == ".vmd")
+        return VmdSceneImporter::Import(sourcePath, assetsDirectory);
     if (extension == ".gltf" || extension == ".glb")
     {
         return GltfImporter::Import(sourcePath, assetsDirectory);

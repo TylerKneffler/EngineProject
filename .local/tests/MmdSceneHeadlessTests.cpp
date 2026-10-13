@@ -1,0 +1,335 @@
+#include "Core/Compoonents/Animation/AnimationManager.h"
+#include "Core/Compoonents/Animation/Model.h"
+#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Model/AnimationPackAsset.h"
+#include "Core/Model/AnimationClipAsset.h"
+#include "Core/Object.h"
+#include "Core/Scene/Scene.h"
+#include "Core/Serialization/SceneSerializer.h"
+#include "Editor/Core/Importers/FbxModelDecoder.h"
+#include "Editor/Core/Importers/MmdPoseRetargeter.h"
+#include "Editor/Core/Importers/MmdDanceAssetBinder.h"
+#include "Editor/Core/Importers/VmdMotionDecoder.h"
+#include <algorithm>
+#include <cmath>
+#include <filesystem>
+#include <iostream>
+#include <stdexcept>
+#include <unordered_map>
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/matrix_decompose.hpp>
+#ifdef _WIN32
+#define NOMINMAX
+#include <Windows.h>
+#include <Psapi.h>
+#pragma comment(lib, "Psapi.lib")
+#endif
+
+namespace fs = std::filesystem;
+using Engine::Components::AnimationManager;
+using Engine::Components::Mesh;
+using Engine::Components::Model;
+using Engine::Editor::MmdPoseRetargeter;
+using Engine::Editor::VmdMotion;
+
+namespace
+{
+void Check(bool condition, const std::string& message)
+{
+    if (!condition) throw std::runtime_error(message);
+}
+
+void Memory(const char* stage)
+{
+#ifdef _WIN32
+    PROCESS_MEMORY_COUNTERS_EX info{};
+    info.cb = sizeof(info);
+    if (GetProcessMemoryInfo(GetCurrentProcess(),
+            reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&info), sizeof(info)))
+        std::cout << "Memory " << stage << ": current " <<
+            info.WorkingSetSize / (1024 * 1024) << " MiB, peak " <<
+            info.PeakWorkingSetSize / (1024 * 1024) << " MiB, private " <<
+            info.PrivateUsage / (1024 * 1024) << " MiB\n";
+#else
+    (void)stage;
+#endif
+}
+
+float SampleWeight(const Engine::Model::AnimationChannel& channel, float time,
+    size_t target)
+{
+    const auto next = std::lower_bound(channel.times.begin(),
+        channel.times.end(), time);
+    const size_t after = next == channel.times.end()
+        ? channel.times.size() - 1 : static_cast<size_t>(next - channel.times.begin());
+    const size_t before = after == 0 ? 0 : after - 1;
+    const float span = channel.times[after] - channel.times[before];
+    const float amount = span > 0.f
+        ? std::clamp((time - channel.times[before]) / span, 0.f, 1.f) : 0.f;
+    const size_t width = channel.valueWidth;
+    return channel.values[before * width + target] * (1.f - amount) +
+        channel.values[after * width + target] * amount;
+}
+
+void FindMeshes(Engine::Core::Object* object, const std::string& path,
+    std::unordered_map<std::string, Mesh*>& meshes)
+{
+    if (auto* mesh = object->GetComponent<Mesh>()) meshes.emplace(path, mesh);
+    for (auto* child : object->Children)
+        FindMeshes(child, path.empty() ? child->name : path + "/" + child->name,
+            meshes);
+}
+}
+
+int main(int argc, char** argv)
+{
+    try
+    {
+        const fs::path root = MMD_TEST_ASSET_ROOT;
+        const fs::path scenePath = root.parent_path() /
+            "Scenes/Animation/mmd.scene";
+        const fs::path fbxPath = root / "Mococo/Mococo (FBX No Outline).fbx";
+        const fs::path profilePath = root / "Mococo/Mococo.mmdrig.json";
+        const fs::path mapPath = root / "Mococo/Mococo.mmdmap.json";
+        const fs::path vmdPath = root / "dance1.vmd";
+        const fs::path packPath = root / "Mococo Dance/dance1.animpack";
+        const bool repairAssets = argc == 2 && std::string(argv[1]) == "--repair-assets";
+        Memory("baseline");
+        Engine::Scene::Scene scene;
+        Check(Engine::Serialization::SceneSerializer::Load(scene,
+            scenePath.string()), "Saved MMD scene did not load headlessly");
+        Engine::Core::Object* character = nullptr;
+        for (const auto& object : scene.GetObjects())
+            if (object->GetComponent<Model>())
+            { Check(!character, "Scene has multiple model roots"); character = object.get(); }
+        Check(character, "MMD character is absent from saved scene");
+        auto* model = character->GetComponent<Model>();
+        auto* manager = character->GetComponent<AnimationManager>();
+        Check(manager, "Saved character has no AnimationManager");
+        scene.Start();
+        const auto* body = manager->FindClip("dance1 body");
+        const auto* face = manager->FindClip("dance1 facial");
+        Check(body && face && manager->clip == body->clipName,
+            "Scene did not bind the imported body and facial assets");
+        Check(manager->layers.size() == 1 && manager->layers[0].clip == face->clipName &&
+            manager->layers[0].enabled, "Facial layer is missing or disabled");
+        Memory("scene load and start");
+
+        VmdMotion raw;
+        std::string error;
+        Check(Engine::Editor::VmdMotionDecoder::DecodeFile(
+            vmdPath.string(), raw, error), error);
+        Check(raw.cameras.empty() && raw.lights.empty(),
+            "Dance VMD unexpectedly contains camera or light keys");
+        Engine::Model::ImportedModel imported;
+        Check(Engine::Editor::FbxModelDecoder::Decode(
+            fbxPath.string(), imported, error), error);
+        MmdPoseRetargeter retargeter;
+        Check(retargeter.Initialize(imported,
+            Engine::Serialization::JsonParseFile(profilePath.string()),
+            Engine::Serialization::JsonParseFile(mapPath.string()), raw, error),
+            error);
+        const auto rawFace = retargeter.BakeFacial(raw.lastFrame);
+        if (repairAssets)
+        {
+            const fs::path prefabPath = root / "Mococo Dance/Mococo Dance.prefab";
+            const fs::path bodyPath = root / "Mococo Dance/dance1_body.anim";
+            for (size_t primitiveIndex = 0;
+                primitiveIndex < imported.primitives.size(); ++primitiveIndex)
+            {
+                const auto& primitive = imported.primitives[primitiveIndex];
+                if (primitive.morphTargets.empty()) continue;
+                const fs::path morphPath = root / "Mococo Dance/Meshes" /
+                    (primitive.name + " " + std::to_string(primitiveIndex + 1) +
+                        ".morph");
+                Check(fs::is_regular_file(morphPath),
+                    "Missing generated morph asset: " + morphPath.string());
+                Check(Mesh::SaveMorphFile(morphPath.string(),
+                    primitive.morphTargets),
+                    "Could not refresh sorted morph asset: " + morphPath.string());
+            }
+            const auto bodyAsset = Engine::Model::AnimationClipAsset::Load(bodyPath.string());
+            Check(bodyAsset.has_value(), "Could not load saved body clip for repair");
+            Engine::Scene::Scene prefabScene;
+            auto* prefabRoot = Engine::Serialization::SceneSerializer::InstantiatePrefab(
+                prefabScene, prefabPath.string());
+            Check(prefabRoot, "Could not load character prefab for repair");
+            std::unordered_map<std::string, Mesh*> prefabMeshes;
+            FindMeshes(prefabRoot, "", prefabMeshes);
+            for (const auto& [path, mesh] : prefabMeshes)
+                if (mesh->HasMorphTargets())
+                    mesh->SetMorphWeights(std::vector<float>(
+                        mesh->GetMorphTargets().size(), 0.f));
+            Check(Engine::Serialization::SceneSerializer::SavePrefab(
+                *prefabRoot, prefabPath.string()), "Could not save neutral morph defaults");
+            const bool rebound = Engine::Editor::MmdDanceAssetBinder::BindBaked(
+                prefabPath.string(), vmdPath.string(), profilePath.string(),
+                mapPath.string(), bodyAsset->clip, rawFace, error,
+                packPath.string());
+            Check(rebound, "Could not refresh MMD animation assets: " + error);
+            const auto refreshedFace = Engine::Model::AnimationClipAsset::Load(
+                (root / "Mococo Dance/dance1_facial.anim").string());
+            Check(refreshedFace && refreshedFace->clip.channels.size() ==
+                rawFace.clip.channels.size(), "Refreshed facial asset did not reload");
+            for (size_t i = 0; i < rawFace.clip.channels.size(); ++i)
+                Check(refreshedFace->clip.channels[i].values ==
+                    rawFace.clip.channels[i].values,
+                    "Facial asset round-trip changed raw VMD weights in channel " +
+                        std::to_string(i));
+            std::cout << "Refreshed character prefab and facial clip from neutral FBX defaults.\n";
+            return 0;
+        }
+        const auto& nodes = model->ResolveNodes();
+        Check(nodes.size() == imported.nodes.size(),
+            "Saved model node count differs from source FBX");
+        std::unordered_map<std::string, Mesh*> meshes;
+        FindMeshes(character, "", meshes);
+        size_t morphOrderMismatches = 0;
+        size_t faceChannel = 0;
+        for (const auto& node : imported.nodes)
+            for (unsigned primitiveIndex : node.primitives)
+            {
+                const auto& primitive = imported.primitives[primitiveIndex];
+                if (primitive.morphTargets.empty()) continue;
+                Check(faceChannel < rawFace.clip.channels.size(),
+                    "Raw facial primitive count changed");
+                const auto found = meshes.find(rawFace.clip.channels[faceChannel].targetMesh);
+                Check(found != meshes.end(), "Saved facial mesh missing");
+                const auto& stored = found->second->GetMorphTargets();
+                Check(stored.size() == primitive.morphTargets.size(),
+                    "Saved facial target count differs from fresh FBX decode");
+                for (size_t target = 0; target < primitive.morphTargets.size(); ++target)
+                    if (primitive.morphTargets[target].name != stored[target].name)
+                    {
+                        if (morphOrderMismatches == 0)
+                            std::cout << "First morph order mismatch: " <<
+                                rawFace.clip.channels[faceChannel].targetMesh <<
+                                " target " << target << " raw=" <<
+                                primitive.morphTargets[target].name << " stored=" <<
+                                stored[target].name << '\n';
+                        ++morphOrderMismatches;
+                    }
+                ++faceChannel;
+            }
+        std::cout << "Morph target order mismatches: " << morphOrderMismatches << '\n';
+        Check(morphOrderMismatches == 0,
+            "Saved morph target order differs from a fresh FBX decode");
+        Memory("raw FBX and VMD decode");
+
+        float worstPosition = 0.f, worstAngle = 0.f, worstWeight = 0.f;
+        std::string worstWeightTarget;
+        size_t checkedBones = 0, checkedWeights = 0, checkedVisibility = 0;
+        const auto verify = [&](float frame)
+        {
+            const float time = frame / 30.f;
+            manager->time = time;
+            manager->layers[0].time = time;
+            manager->Tick(0.f);
+            const auto pose = retargeter.Sample(frame);
+            for (const auto& channel : body->channels)
+            {
+                if (channel.nodeIndex >= nodes.size() || !nodes[channel.nodeIndex])
+                    continue;
+                const glm::mat4 actual = nodes[channel.nodeIndex]->transform.GetLocalMatrix();
+                const glm::mat4 expected = pose.local[channel.nodeIndex];
+                if (channel.path == Engine::Model::AnimationChannel::Path::Translation)
+                {
+                    worstPosition = std::max(worstPosition, glm::distance(
+                        glm::vec3(actual[3]), glm::vec3(expected[3])));
+                    ++checkedBones;
+                }
+                else if (channel.path == Engine::Model::AnimationChannel::Path::Rotation)
+                {
+                    glm::vec3 scale, translation, skew;
+                    glm::vec4 perspective;
+                    glm::quat a, b;
+                    Check(glm::decompose(actual, scale, a, translation, skew, perspective) &&
+                        glm::decompose(expected, scale, b, translation, skew, perspective),
+                        "Could not decompose a runtime or raw pose");
+                    worstAngle = std::max(worstAngle, 2.f * std::acos(std::clamp(
+                        std::abs(glm::dot(glm::normalize(a), glm::normalize(b))),
+                        0.f, 1.f)));
+                    ++checkedBones;
+                }
+            }
+            for (const auto& channel : rawFace.clip.channels)
+            {
+                const auto found = meshes.find(channel.targetMesh);
+                Check(found != meshes.end(), "Raw VMD facial mesh is absent: " +
+                    channel.targetMesh);
+                const auto& weights = found->second->GetMorphWeights();
+                Check(weights.size() == channel.valueWidth,
+                    "Saved facial target width differs from raw VMD mapping");
+                for (size_t target = 0; target < weights.size(); ++target)
+                {
+                    const float expected = SampleWeight(channel, time, target);
+                    const float difference = std::abs(weights[target] - expected);
+                    if (difference > worstWeight)
+                    {
+                        worstWeight = difference;
+                        worstWeightTarget = "frame=" + std::to_string(frame) +
+                            " mesh=" + channel.targetMesh + " target=" +
+                            std::to_string(target) + " actual=" +
+                            std::to_string(weights[target]) + " expected=" +
+                            std::to_string(expected);
+                    }
+                    ++checkedWeights;
+                }
+            }
+            bool visible = true;
+            for (const auto& key : raw.properties)
+                if (key.frame <= frame) visible = key.visible;
+            for (const auto& [path, mesh] : meshes)
+                if (mesh->GetVertexCount() > 0)
+                { Check(mesh->IsAnimationVisible() == visible,
+                    "Runtime visibility differs from raw VMD at " + path);
+                    ++checkedVisibility; }
+        };
+        for (float frame : { 0.f, 30.f, 60.5f, 120.f, 240.5f, 322.f })
+            verify(frame);
+        Check(checkedBones > 100 && checkedWeights > 500 &&
+            checkedVisibility > 100, "Headless comparison covered too few targets");
+        std::cout << "Raw VMD comparison: " << checkedBones << " bone values, " <<
+            checkedWeights << " facial weights, " << checkedVisibility <<
+            " mesh visibility checks; max errors " << worstPosition <<
+            " units, " << worstAngle << " radians, " << worstWeight <<
+            " weight (" << worstWeightTarget << ")\n" << std::flush;
+        Check(worstPosition < 0.08f && worstAngle < 0.12f &&
+            worstWeight < 0.01f, "Saved scene differs from raw VMD retargeted pose");
+
+        for (const float step : { 1.f / 30.f, 1.f / 60.f })
+        {
+            manager->time = 0.f;
+            manager->layers[0].time = 0.f;
+            for (float elapsed = 0.f; elapsed < raw.durationSeconds - 0.0001f;)
+            {
+                const float delta = std::min(step, raw.durationSeconds - elapsed);
+                scene.Update(delta);
+                elapsed += delta;
+            }
+            Check(std::abs(manager->time - raw.durationSeconds) < 0.002f &&
+                std::abs(manager->layers[0].time - raw.durationSeconds) < 0.002f,
+                "Headless playback did not reach the raw VMD duration");
+            std::cout << "Headless scene playback reached frame 322 at " <<
+                static_cast<int>(std::round(1.f / step)) << " fps\n";
+        }
+        Memory("after scene playback");
+        const auto pack = Engine::Model::AnimationPackAsset::Load(
+            packPath.string(), error);
+        Check(pack && pack->clips.size() == 2, "Imported animation pack failed to load: " + error);
+        Memory("after pack load");
+        const fs::path output = fs::path(".local/test-output/mmd-headless/roundtrip.animpack");
+        Check(pack->Save(output.string(), error), "Pack round-trip save failed: " + error);
+        Memory("after pack save");
+        Check(Engine::Model::AnimationPackAsset::Load(output.string(), error).has_value(),
+            "Pack round-trip reload failed: " + error);
+        fs::remove(output);
+        std::cout << "Saved MMD scene and imported assets match the raw dance headlessly.\n";
+        return 0;
+    }
+    catch (const std::exception& exception)
+    {
+        std::cerr << exception.what() << '\n';
+        return 1;
+    }
+}

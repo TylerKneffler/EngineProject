@@ -11,6 +11,7 @@
 #include "Core/Rendering/Sprites/SpriteAnimationAsset.h"
 #include "Core/Rendering/Sprites/SpriteSheetAsset.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Model/PoseAsset.h"
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
@@ -229,6 +230,16 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
     const std::string extension = LowerAssetExtension(m_selectedPath);
     ui.ValueLabel("Type", directory ? "Folder" :
         (extension.empty() ? "Generic file" : extension.c_str()));
+    if (!directory && extension == ".pose")
+    {
+        if (const auto pose = Engine::Model::PoseAsset::Load(m_selectedPath))
+        {
+            ui.ValueLabel("Pose", pose->name.c_str());
+            const std::string count = std::to_string(pose->joints.size());
+            ui.ValueLabel("Bones", count.c_str());
+        }
+        else ui.ColoredLabel("Invalid pose asset", {1.f, .35f, .35f, 1.f});
+    }
     if (!directory && (extension == ".anim" || extension == ".animation") &&
         ui.Button("Open Animation Editor") && OnOpenAnimation)
         OnOpenAnimation(m_selectedPath);

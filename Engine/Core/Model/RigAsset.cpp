@@ -73,9 +73,8 @@ RigAsset RigAsset::Capture(const Engine::Scene::Scene& scene,
     return result;
 }
 
-bool RigAsset::Save(const std::string& path) const
+Engine::Serialization::JsonValue RigAsset::Serialize() const
 {
-    if (path.empty() || joints.empty()) return false;
     Engine::Serialization::JsonValue root =
         Engine::Serialization::JsonValue::MakeObject();
     root.Set("version", Engine::Serialization::JsonValue(1));
@@ -108,6 +107,59 @@ bool RigAsset::Save(const std::string& path) const
     for (const auto& animation : animationPaths)
         animations.Push(Engine::Serialization::JsonValue(animation));
     root.Set("animations", std::move(animations));
+    auto controlsValue = Engine::Serialization::JsonValue::MakeObject()
+        .Set("root", Engine::Serialization::JsonValue(controls.root))
+        .Set("pelvis", Engine::Serialization::JsonValue(controls.pelvis));
+    auto limbsValue = Engine::Serialization::JsonValue::MakeArray();
+    for (const auto& limb : controls.limbs)
+        limbsValue.Push(Engine::Serialization::JsonValue::MakeObject()
+            .Set("upper", Engine::Serialization::JsonValue(limb.upper))
+            .Set("lower", Engine::Serialization::JsonValue(limb.lower))
+            .Set("tip", Engine::Serialization::JsonValue(limb.tip)));
+    root.Set("controls", controlsValue.Set("limbs", std::move(limbsValue)));
+    const auto vectorValue = [](const glm::vec3& value)
+    {
+        auto array = Engine::Serialization::JsonValue::MakeArray();
+        for (int i = 0; i < 3; ++i)
+            array.Push(Engine::Serialization::JsonValue(value[i]));
+        return array;
+    };
+    auto posesValue = Engine::Serialization::JsonValue::MakeArray();
+    for (const auto& pose : poses)
+    {
+        auto jointsValue = Engine::Serialization::JsonValue::MakeArray();
+        for (const auto& joint : pose.joints)
+        {
+            auto rotation = Engine::Serialization::JsonValue::MakeArray();
+            for (float value : {joint.rotation.w, joint.rotation.x,
+                    joint.rotation.y, joint.rotation.z})
+                rotation.Push(Engine::Serialization::JsonValue(value));
+            jointsValue.Push(Engine::Serialization::JsonValue::MakeObject()
+                .Set("nodeIndex", Engine::Serialization::JsonValue(
+                    static_cast<int>(joint.nodeIndex)))
+                .Set("position", vectorValue(joint.position))
+                .Set("rotation", std::move(rotation))
+                .Set("scale", vectorValue(joint.scale)));
+        }
+        posesValue.Push(Engine::Serialization::JsonValue::MakeObject()
+            .Set("name", Engine::Serialization::JsonValue(pose.name))
+            .Set("joints", std::move(jointsValue)));
+    }
+    root.Set("poses", std::move(posesValue));
+    auto pairsValue = Engine::Serialization::JsonValue::MakeArray();
+    for (const auto& pair : symmetryPairs)
+        pairsValue.Push(Engine::Serialization::JsonValue::MakeObject()
+            .Set("left", Engine::Serialization::JsonValue(static_cast<int>(pair.left)))
+            .Set("right", Engine::Serialization::JsonValue(static_cast<int>(pair.right))));
+    root.Set("symmetryPairs", std::move(pairsValue));
+    return root;
+}
+
+namespace
+{
+bool WriteRigAsset(const std::string& path,
+    const Engine::Serialization::JsonValue& root)
+{
     std::filesystem::path target(path);
     if (!target.parent_path().empty())
         target = std::filesystem::path(
@@ -122,7 +174,8 @@ bool RigAsset::Save(const std::string& path) const
     {
         std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
         if (!output) return false;
-        output << Engine::Serialization::JsonWrite(root) << '\n';
+        const std::string bytes = Engine::Serialization::AssetWriteBinary(root);
+        output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
         if (!output)
         { std::filesystem::remove(temporary, error); return false; }
     }
@@ -135,6 +188,9 @@ bool RigAsset::Save(const std::string& path) const
             REPLACEFILE_IGNORE_MERGE_ERRORS, nullptr, nullptr) != 0
         : MoveFileExW(source.c_str(), destination.c_str(),
             MOVEFILE_WRITE_THROUGH) != 0;
+    if (!replaced)
+        replaced = MoveFileExW(source.c_str(), destination.c_str(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
 #else
     std::filesystem::rename(temporary, target, error);
     replaced = !error;
@@ -142,15 +198,79 @@ bool RigAsset::Save(const std::string& path) const
     if (!replaced) std::filesystem::remove(temporary, error);
     return replaced;
 }
+}
 
-std::optional<RigAsset> RigAsset::Load(const std::string& path)
+bool RigAsset::Save(const std::string& path) const
+{
+    if (path.empty() || joints.empty()) return false;
+    auto root = Serialize();
+    try
+    {
+        const auto existing = Engine::Serialization::AssetParseFile(
+            Engine::Components::Mesh::ResolveFilePath(path));
+        if (existing["version"].AsInt() == 2 &&
+            existing["skins"].IsArray())
+        {
+            auto bundle = existing;
+            bool found = false;
+            for (size_t index = 0; index < bundle["skins"].ArraySize(); ++index)
+                if (bundle["skins"].ArrayAt(index)["skinIndex"].AsInt() ==
+                    static_cast<int>(skinIndex))
+                {
+                    bundle["skins"].ArrayAt(index) = std::move(root);
+                    found = true;
+                    break;
+                }
+            return found && WriteRigAsset(path, bundle);
+        }
+    }
+    catch (...) { /* A new path is a standalone rig. */ }
+    return WriteRigAsset(path, root);
+}
+
+bool RigAsset::SaveBundle(const std::string& path,
+    const std::vector<RigAsset>& skins)
+{
+    if (path.empty() || skins.empty()) return false;
+    auto entries = Engine::Serialization::JsonValue::MakeArray();
+    for (size_t index = 0; index < skins.size(); ++index)
+    {
+        if (skins[index].joints.empty() || skins[index].skinIndex != index)
+            return false;
+        entries.Push(skins[index].Serialize());
+    }
+    return WriteRigAsset(path, Engine::Serialization::JsonValue::MakeObject()
+        .Set("version", Engine::Serialization::JsonValue(2))
+        .Set("skins", std::move(entries)));
+}
+
+std::optional<RigAsset> RigAsset::Load(const std::string& path,
+    std::optional<unsigned> skinIndex)
 {
     try
     {
-        const auto root = Engine::Serialization::JsonParseFile(
+        auto root = Engine::Serialization::AssetParseFile(
             Engine::Components::Mesh::ResolveFilePath(path));
+        if (root["version"].AsInt() == 2 && root["skins"].IsArray())
+        {
+            const auto& entries = root["skins"];
+            if (entries.ArraySize() == 0) return std::nullopt;
+            size_t selected = 0;
+            if (skinIndex)
+            {
+                selected = entries.ArraySize();
+                for (size_t index = 0; index < entries.ArraySize(); ++index)
+                    if (entries.ArrayAt(index)["skinIndex"].AsInt() ==
+                        static_cast<int>(*skinIndex))
+                    { selected = index; break; }
+                if (selected == entries.ArraySize()) return std::nullopt;
+            }
+            root = entries.ArrayAt(selected);
+        }
         if (!root.IsObject() || root["version"].AsInt() != 1 ||
             !root["joints"].IsArray()) return std::nullopt;
+        if (skinIndex && root["skinIndex"].AsInt() !=
+            static_cast<int>(*skinIndex)) return std::nullopt;
         RigAsset result;
         result.skinIndex = static_cast<unsigned>(root["skinIndex"].AsInt());
         result.rigIndex = static_cast<size_t>(root["rigIndex"].AsInt());
@@ -177,8 +297,95 @@ std::optional<RigAsset> RigAsset::Load(const std::string& path)
         for (size_t i = 0; i < root["animations"].ArraySize(); ++i)
             result.animationPaths.push_back(
                 root["animations"].ArrayAt(i).AsString());
+        const auto& controls = root["controls"];
+        if (controls.IsObject())
+        {
+            result.controls.root = controls.Has("root")
+                ? controls["root"].AsInt() : -1;
+            result.controls.pelvis = controls.Has("pelvis")
+                ? controls["pelvis"].AsInt() : -1;
+            for (size_t i = 0; i < result.controls.limbs.size() &&
+                i < controls["limbs"].ArraySize(); ++i)
+            {
+                const auto& limb = controls["limbs"].ArrayAt(i);
+                result.controls.limbs[i] = {
+                    limb.Has("upper") ? limb["upper"].AsInt() : -1,
+                    limb.Has("lower") ? limb["lower"].AsInt() : -1,
+                    limb.Has("tip") ? limb["tip"].AsInt() : -1};
+            }
+        }
+        const auto readVector = [](const auto& value, glm::vec3& output)
+        {
+            if (value.ArraySize() != 3) return false;
+            for (int i = 0; i < 3; ++i)
+            {
+                if (!value.ArrayAt(i).IsNumber()) return false;
+                output[i] = value.ArrayAt(i).AsFloat();
+            }
+            return true;
+        };
+        for (size_t i = 0; i < root["poses"].ArraySize(); ++i)
+        {
+            const auto& source = root["poses"].ArrayAt(i);
+            if (!source["name"].IsString() || !source["joints"].IsArray())
+                return std::nullopt;
+            Pose pose;
+            pose.name = source["name"].AsString();
+            for (size_t j = 0; j < source["joints"].ArraySize(); ++j)
+            {
+                const auto& value = source["joints"].ArrayAt(j);
+                if (!value["nodeIndex"].IsNumber() ||
+                    value["rotation"].ArraySize() != 4)
+                    return std::nullopt;
+                PoseJoint joint;
+                joint.nodeIndex = static_cast<unsigned>(value["nodeIndex"].AsInt());
+                if (!readVector(value["position"], joint.position) ||
+                    !readVector(value["scale"], joint.scale)) return std::nullopt;
+                float* rotation[] = {&joint.rotation.w, &joint.rotation.x,
+                    &joint.rotation.y, &joint.rotation.z};
+                for (size_t k = 0; k < 4; ++k)
+                {
+                    if (!value["rotation"].ArrayAt(k).IsNumber()) return std::nullopt;
+                    *rotation[k] = value["rotation"].ArrayAt(k).AsFloat();
+                }
+                pose.joints.push_back(joint);
+            }
+            result.poses.push_back(std::move(pose));
+        }
+        for (size_t i = 0; i < root["symmetryPairs"].ArraySize(); ++i)
+        {
+            const auto& value = root["symmetryPairs"].ArrayAt(i);
+            if (!value["left"].IsNumber() || !value["right"].IsNumber())
+                return std::nullopt;
+            result.symmetryPairs.push_back({
+                static_cast<unsigned>(value["left"].AsInt()),
+                static_cast<unsigned>(value["right"].AsInt())});
+        }
         return result;
     }
     catch (...) { return std::nullopt; }
+}
+
+std::vector<RigAsset> RigAsset::LoadAll(const std::string& path)
+{
+    std::vector<RigAsset> result;
+    try
+    {
+        const auto root = Engine::Serialization::AssetParseFile(
+            Engine::Components::Mesh::ResolveFilePath(path));
+        if (root["version"].AsInt() == 2 && root["skins"].IsArray())
+        {
+            for (size_t index = 0; index < root["skins"].ArraySize(); ++index)
+            {
+                const auto skin = Load(path, static_cast<unsigned>(index));
+                if (!skin) return {};
+                result.push_back(*skin);
+            }
+            return result;
+        }
+    }
+    catch (...) { return {}; }
+    if (auto skin = Load(path)) result.push_back(*skin);
+    return result;
 }
 }

@@ -8,6 +8,7 @@ cmake_minimum_required(VERSION 3.20)
 if(POLICY CMP0141)
     cmake_policy(SET CMP0141 NEW)
 endif()
+
 project(EngineProject C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -668,6 +669,30 @@ set_target_properties(Server PROPERTIES
 set(ENGINE_LOCAL_TEST_ROOT "${ENGINE_ROOT}/.local/tests")
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PortableAssetCopyTests.cpp")
+    enable_testing()
+    add_executable(PortableAssetCopyTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/PortableAssetCopyTests.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/PortableAssetCopy.cpp")
+    target_link_libraries(PortableAssetCopyTests PRIVATE Engine)
+    target_include_directories(PortableAssetCopyTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME PortableObjAndSpriteImport COMMAND PortableAssetCopyTests)
+    set_tests_properties(PortableObjAndSpriteImport PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/BinaryAssetTests.cpp")
+    enable_testing()
+    add_executable(BinaryAssetTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/BinaryAssetTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Serialization/Json.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Serialization/BinaryAsset.cpp")
+    target_include_directories(BinaryAssetTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME BinaryAssetRegression COMMAND BinaryAssetTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/SubsurfaceMaterialTests.cpp")
     enable_testing()
     add_executable(SubsurfaceMaterialTests EXCLUDE_FROM_ALL
@@ -697,6 +722,16 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/MeshPackAssetTests.cpp")
+    enable_testing()
+    add_executable(MeshPackAssetTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/MeshPackAssetTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Model/MeshPackAsset.cpp")
+    target_include_directories(MeshPackAssetTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME MeshPackAssetRoundTrip COMMAND MeshPackAssetTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/WeightInfluenceTests.cpp")
     enable_testing()
     add_executable(WeightInfluenceTests EXCLUDE_FROM_ALL
@@ -704,6 +739,113 @@ if(NOT ENGINE_PROJECT_DIR AND
     target_link_libraries(WeightInfluenceTests PRIVATE Engine)
     target_include_directories(WeightInfluenceTests PRIVATE "${ENGINE_ROOT}/Engine")
     add_test(NAME WeightInfluenceRegression COMMAND WeightInfluenceTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/MmdImportStepsTests.cpp")
+    enable_testing()
+    add_executable(MmdImportStepsTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/MmdImportStepsTests.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/FbxModelDecoder.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/VmdMotionDecoder.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/VmdSceneImporter.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/MmdPoseRetargeter.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/MmdDanceAssetBinder.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/ModelAssetWriter.cpp")
+    target_link_libraries(MmdImportStepsTests PRIVATE Engine assimp::assimp)
+    target_include_directories(MmdImportStepsTests PRIVATE
+        "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Editor")
+    target_compile_definitions(MmdImportStepsTests PRIVATE
+        MMD_TEST_ASSET_ROOT="${ENGINE_ROOT}/Engine/Core/Assets/mmd")
+    add_test(NAME MmdImportSteps COMMAND MmdImportStepsTests)
+    set_tests_properties(MmdImportSteps PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
+    find_package(Python3 QUIET COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND AND
+       EXISTS "${ENGINE_ROOT}/Scripts/extract_pmx_rig.py")
+        add_test(NAME MmdRigProfileReproducibility
+            COMMAND Python3::Interpreter
+                "${ENGINE_ROOT}/Scripts/extract_pmx_rig.py"
+                "${ENGINE_ROOT}/Engine/Core/Assets/mmd/Mococo/Mococo Abyssgard.pmx"
+                "${ENGINE_ROOT}/Engine/Core/Assets/mmd/Mococo/Mococo.mmdrig.json"
+                --check)
+    endif()
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/MmdSceneHeadlessTests.cpp" AND
+   EXISTS "${ENGINE_ROOT}/Engine/Core/Assets/Scenes/Animation/mmd.scene" AND
+   EXISTS "${ENGINE_ROOT}/Engine/Core/Assets/mmd/Mococo Dance/dance1.animpack")
+    enable_testing()
+    add_executable(MmdSceneHeadlessTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/MmdSceneHeadlessTests.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/FbxModelDecoder.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/VmdMotionDecoder.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/MmdPoseRetargeter.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/MmdDanceAssetBinder.cpp")
+    target_link_libraries(MmdSceneHeadlessTests PRIVATE Engine assimp::assimp)
+    target_include_directories(MmdSceneHeadlessTests PRIVATE
+        "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Editor")
+    target_compile_definitions(MmdSceneHeadlessTests PRIVATE
+        MMD_TEST_ASSET_ROOT="${ENGINE_ROOT}/Engine/Core/Assets/mmd")
+    add_test(NAME MmdSceneHeadless COMMAND MmdSceneHeadlessTests)
+    set_tests_properties(MmdSceneHeadless PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/MmdVisibilityTests.cpp")
+    enable_testing()
+    add_executable(MmdVisibilityTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/MmdVisibilityTests.cpp")
+    target_link_libraries(MmdVisibilityTests PRIVATE Engine)
+    target_include_directories(MmdVisibilityTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME MmdVisibility COMMAND MmdVisibilityTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/MmdFacialPlaybackTests.cpp")
+    enable_testing()
+    add_executable(MmdFacialPlaybackTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/MmdFacialPlaybackTests.cpp")
+    target_link_libraries(MmdFacialPlaybackTests PRIVATE Engine)
+    target_include_directories(MmdFacialPlaybackTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME MmdFacialPlayback COMMAND MmdFacialPlaybackTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/FbxSceneImportTests.cpp")
+    enable_testing()
+    add_executable(FbxSceneImportTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/FbxSceneImportTests.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/ModelAssetWriter.cpp")
+    target_link_libraries(FbxSceneImportTests PRIVATE Engine)
+    target_include_directories(FbxSceneImportTests PRIVATE
+        "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Editor")
+    add_test(NAME FbxSceneImport COMMAND FbxSceneImportTests)
+    set_tests_properties(FbxSceneImport PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/VmdMotionDecoderTests.cpp")
+    enable_testing()
+    add_executable(VmdMotionDecoderTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/VmdMotionDecoderTests.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/VmdMotionDecoder.cpp")
+    target_include_directories(VmdMotionDecoderTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME VmdMotionDecoderRegression COMMAND VmdMotionDecoderTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/VmdSceneImportTests.cpp")
+    enable_testing()
+    add_executable(VmdSceneImportTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/VmdSceneImportTests.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/VmdMotionDecoder.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/VmdSceneImporter.cpp")
+    target_link_libraries(VmdSceneImportTests PRIVATE Engine)
+    target_include_directories(VmdSceneImportTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME VmdSceneImport COMMAND VmdSceneImportTests)
+    set_tests_properties(VmdSceneImport PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
@@ -757,6 +899,26 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TwoBoneIKTests.cpp")
+    enable_testing()
+    add_executable(TwoBoneIKTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/TwoBoneIKTests.cpp")
+    target_link_libraries(TwoBoneIKTests PRIVATE Engine)
+    target_include_directories(TwoBoneIKTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME TwoBoneIKRegression COMMAND TwoBoneIKTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/ChainIKTests.cpp")
+    enable_testing()
+    add_executable(ChainIKTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/ChainIKTests.cpp")
+    target_link_libraries(ChainIKTests PRIVATE Engine)
+    target_include_directories(ChainIKTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME ChainIKRegression COMMAND ChainIKTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/SkeletonAuthoringRegressionTests.cpp")
     enable_testing()
     add_executable(SkeletonAuthoringRegressionTests EXCLUDE_FROM_ALL
@@ -770,6 +932,17 @@ if(NOT ENGINE_PROJECT_DIR AND
         SkeletonAuthoringRegressionTests)
     set_tests_properties(SkeletonAuthoringRegression PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/AnimationKeyClipboardTests.cpp")
+    enable_testing()
+    add_executable(AnimationKeyClipboardTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/AnimationKeyClipboardTests.cpp")
+    target_link_libraries(AnimationKeyClipboardTests PRIVATE Engine)
+    target_include_directories(AnimationKeyClipboardTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME AnimationKeyClipboard COMMAND AnimationKeyClipboardTests)
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND

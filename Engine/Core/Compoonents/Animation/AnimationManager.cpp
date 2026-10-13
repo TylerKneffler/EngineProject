@@ -1,7 +1,11 @@
 #include "AnimationManager.h"
 #include "Model.h"
 #include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Animation/TwoBoneIK.h"
 #include "Core/Model/AnimationClipAsset.h"
+#include "Core/Model/AnimationPackAsset.h"
+#include "Core/Model/AnimationControlSpace.h"
+#include "Core/AssetRecord.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Engine/Editor/UI/IEditorUi.h"
@@ -9,6 +13,7 @@
 #include <cstdint>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <sstream>
 
 namespace Engine::Components
@@ -145,6 +150,8 @@ void SampleAnimation(const Engine::Model::AnimationClip* animation, float time,
     if (!animation) return;
     for (const Engine::Model::AnimationChannel& channel : animation->channels)
     {
+        if (channel.path == Engine::Model::AnimationChannel::Path::Weights &&
+            !channel.targetMesh.empty()) continue;
         if (channel.nodeIndex >= nodeCount)
             continue;
         NodePose& node = pose.Get(channel.nodeIndex);
@@ -176,6 +183,15 @@ float AdvanceTime(float value, float delta, float speed, bool looping,
     if (!animation || animation->duration <= 0.f) return value;
     return looping ? std::fmod(std::max(value, 0.f), animation->duration)
         : std::clamp(value, 0.f, animation->duration);
+}
+
+bool SampleVisibility(const Engine::Model::AnimationClip& clip, float time)
+{
+    const auto& keys = clip.visibility;
+    const auto next = std::upper_bound(keys.begin(), keys.end(), time,
+        [](float value, const Engine::Model::AnimationClip::VisibilityKey& key)
+        { return value < key.time; });
+    return next == keys.begin() ? true : (next - 1)->visible;
 }
 }
 
@@ -298,9 +314,17 @@ std::vector<Engine::Model::RigAsset> AnimationManager::LoadRigAssets() const
 {
     std::vector<Engine::Model::RigAsset> result;
     for (const auto& path : rigPaths)
-        if (auto rig = Engine::Model::RigAsset::Load(path))
-            result.push_back(std::move(*rig));
+        for (auto& rig : Engine::Model::RigAsset::LoadAll(path))
+            result.push_back(std::move(rig));
     return result;
+}
+
+void AnimationManager::InstallEmbeddedClips(
+    std::vector<Engine::Model::AnimationClip> imported)
+{
+    rigPaths.clear();
+    m_externalClipNames.clear();
+    clips = std::move(imported);
 }
 
 void AnimationManager::RefreshRigClips(bool remap)
@@ -337,8 +361,10 @@ void AnimationManager::RefreshRigClips(bool remap)
                 static_cast<unsigned>(index);
         }
     }
+    std::unordered_set<std::string> loadedPaths;
     for (const auto& rig : LoadRigAssets())
         for (const auto& path : rig.animationPaths)
+            if (loadedPaths.insert(path).second)
             if (auto asset = Engine::Model::AnimationClipAsset::Load(path))
             {
                 if (model)
@@ -393,6 +419,7 @@ void AnimationManager::Start()
     RefreshRigClips();
     m_restPose.clear();
     m_restMorphs.clear();
+    m_restMorphsByMesh.clear();
     Model* model = ResolveModel();
     if (!model) return;
     const std::vector<Engine::Core::Object*>& nodes = model->ResolveNodes();
@@ -406,15 +433,21 @@ void AnimationManager::Start()
         if (Engine::Core::Object* object = nodes[index])
             m_restPose[index] = { object->transform.position,
                 EulerQuaternion(object->transform.rotation), object->transform.scale };
-    const auto captureMorphs = [&](auto&& self, Engine::Core::Object* object) -> void
+    const auto captureMorphs = [&](auto&& self, Engine::Core::Object* object,
+        const std::string& path) -> void
     {
         if (!object) return;
         if (const auto* mesh = object->GetComponent<Mesh>();
             mesh && mesh->HasMorphTargets())
+        {
             m_restMorphs.emplace(mesh->GetMorphNodeIndex(), mesh->GetMorphWeights());
-        for (Engine::Core::Object* child : object->Children) self(self, child);
+            m_restMorphsByMesh.emplace(path, mesh->GetMorphWeights());
+        }
+        for (Engine::Core::Object* child : object->Children)
+            self(self, child, path.empty() ? child->name :
+                path + "/" + child->name);
     };
-    captureMorphs(captureMorphs, model->Owner);
+    captureMorphs(captureMorphs, model->Owner, "");
     for (const auto& [nodeIndex, weights] : m_restMorphs)
         if (nodeIndex < nodes.size())
             for (ReusablePose* pose : { &m_scratch->basePose,
@@ -635,17 +668,153 @@ void AnimationManager::Tick(float frameDelta)
                 target->transform.scale = pose.scale;
         }
     }
-    const auto applyMorphs = [&](auto&& self, Engine::Core::Object* object) -> void
+    // Limb controls are evaluated after ordinary FK channels have populated the
+    // transforms. Their result can therefore be baked to those same channels.
+    if (model->Owner)
+    {
+        const glm::mat4 modelWorld = model->Owner->transform.GetWorldMatrix();
+        const auto applyLimbs = [&](const Engine::Model::AnimationClip& source,
+            float sampleTime, float layerWeight)
+        {
+            for (const auto& limb : source.limbs)
+            {
+                if (limb.upper >= nodes.size() || limb.lower >= nodes.size() ||
+                    limb.tip >= nodes.size()) continue;
+                auto* upper = nodes[limb.upper];
+                auto* lower = nodes[limb.lower];
+                auto* tip = nodes[limb.tip];
+                if (!upper || !lower || !tip ||
+                    lower->Parent != upper || tip->Parent != lower) continue;
+                const auto key = Engine::Model::AnimationClip::SampleLimb(limb, sampleTime);
+                const glm::mat4 space = Engine::Model::LimbSpaceMatrix(
+                    key, modelWorld, *upper, nodes);
+                const glm::vec3 target = Engine::Model::LimbWorldPoint(space, key.target);
+                const glm::vec3 pole = Engine::Model::LimbWorldPoint(space, key.pole);
+                TwoBoneIK::Blend(*upper, *lower, *tip, target, pole,
+                    Engine::Model::LimbSpaceRotation(space) * key.rotation,
+                    key.blend * layerWeight);
+            }
+        };
+        applyLimbs(*animation, time, 1.f);
+        for (const Layer& layer : layers)
+            if (layer.enabled && layer.weight > 0.f)
+                if (const auto* layerClip = resolveAnimation(layer.clip))
+                    applyLimbs(*layerClip, layer.time,
+                        std::clamp(layer.weight, 0.f, 1.f));
+    }
+    std::unordered_set<unsigned> legacyMorphNodes;
+    const auto includeLegacyMorphs = [&](const Engine::Model::AnimationClip* source)
+    {
+        if (!source) return;
+        for (const auto& channel : source->channels)
+            if (channel.path == Engine::Model::AnimationChannel::Path::Weights &&
+                channel.targetMesh.empty())
+                legacyMorphNodes.insert(channel.nodeIndex);
+    };
+    includeLegacyMorphs(animation);
+    for (const Layer& layer : layers)
+        if (layer.enabled && layer.weight > 0.f)
+            includeLegacyMorphs(resolveAnimation(layer.clip));
+    const auto applyMorphs = [&](auto&& self, Engine::Core::Object* object,
+        const std::string& path) -> void
     {
         if (!object) return;
         if (auto* mesh = object->GetComponent<Mesh>();
             mesh && mesh->HasMorphTargets())
-            if (const NodePose* found = finalPose.Find(mesh->GetMorphNodeIndex());
-                found && found->hasWeights)
-                mesh->SetMorphWeights(found->weights);
-        for (Engine::Core::Object* child : object->Children) self(self, child);
+        {
+            if (legacyMorphNodes.count(mesh->GetMorphNodeIndex()))
+            {
+                if (const NodePose* found = finalPose.Find(
+                        mesh->GetMorphNodeIndex()); found && found->hasWeights)
+                    mesh->SetMorphWeights(found->weights);
+            }
+            else if (const auto rest = m_restMorphsByMesh.find(path);
+                rest != m_restMorphsByMesh.end())
+                mesh->SetMorphWeights(rest->second);
+        }
+        for (Engine::Core::Object* child : object->Children)
+            self(self, child, path.empty() ? child->name :
+                path + "/" + child->name);
     };
-    applyMorphs(applyMorphs, model->Owner);
+    applyMorphs(applyMorphs, model->Owner, "");
+    // Named mesh channels can coexist on separate primitive objects even when
+    // those primitives share a model node and an ordinary node-index channel.
+    std::unordered_map<std::string, Mesh*> meshesByPath;
+    const auto collectMeshes = [&](auto&& self, Engine::Core::Object* object,
+        const std::string& path) -> void
+    {
+        if (!object) return;
+        if (auto* mesh = object->GetComponent<Mesh>())
+            meshesByPath.emplace(path, mesh);
+        for (Engine::Core::Object* child : object->Children)
+            self(self, child, path.empty() ? child->name :
+                path + "/" + child->name);
+    };
+    collectMeshes(collectMeshes, model->Owner, "");
+    std::unordered_set<std::string> targetedMeshes;
+    const auto resetTargeted = [&](const Engine::Model::AnimationClip* source)
+    {
+        if (!source) return;
+        for (const auto& channel : source->channels)
+            if (channel.path == Engine::Model::AnimationChannel::Path::Weights &&
+                !channel.targetMesh.empty() &&
+                targetedMeshes.insert(channel.targetMesh).second)
+                if (const auto mesh = meshesByPath.find(channel.targetMesh);
+                    mesh != meshesByPath.end())
+                    if (const auto rest = m_restMorphsByMesh.find(channel.targetMesh);
+                        rest != m_restMorphsByMesh.end())
+                        mesh->second->SetMorphWeights(rest->second);
+    };
+    resetTargeted(animation);
+    for (const Layer& layer : layers)
+        if (layer.enabled && layer.weight > 0.f)
+            resetTargeted(resolveAnimation(layer.clip));
+    const auto applyTargeted = [&](const Engine::Model::AnimationClip* source,
+        float sampleTime, float weight)
+    {
+        if (!source) return;
+        for (const auto& channel : source->channels)
+        {
+            if (channel.path != Engine::Model::AnimationChannel::Path::Weights ||
+                channel.targetMesh.empty()) continue;
+            const auto target = meshesByPath.find(channel.targetMesh);
+            if (target == meshesByPath.end() ||
+                target->second->GetMorphTargets().size() != channel.valueWidth)
+                continue;
+            std::vector<float> sampled;
+            Sample(channel, sampleTime, sampled);
+            if (sampled.size() != channel.valueWidth) continue;
+            if (weight < 1.f)
+            {
+                const auto& current = target->second->GetMorphWeights();
+                for (size_t i = 0; i < sampled.size(); ++i)
+                    sampled[i] = glm::mix(i < current.size() ? current[i] :
+                        0.f, sampled[i], weight);
+            }
+            target->second->SetMorphWeights(sampled);
+        }
+    };
+    applyTargeted(animation, time, 1.f);
+    for (const Layer& layer : layers)
+        if (layer.enabled && layer.weight > 0.f)
+            applyTargeted(resolveAnimation(layer.clip), layer.time,
+                std::clamp(layer.weight, 0.f, 1.f));
+    bool visible = SampleVisibility(*animation, time);
+    for (const Layer& layer : layers)
+        if (layer.enabled && layer.weight >= 0.5f)
+            if (const auto* layerClip = resolveAnimation(layer.clip);
+                layerClip && !layerClip->visibility.empty())
+                visible = SampleVisibility(*layerClip, layer.time);
+    const auto applyVisibility = [&](auto&& self,
+        Engine::Core::Object* object) -> void
+    {
+        if (!object) return;
+        if (auto* mesh = object->GetComponent<Mesh>())
+            mesh->SetAnimationVisible(visible);
+        for (Engine::Core::Object* child : object->Children)
+            self(self, child);
+    };
+    applyVisibility(applyVisibility, model->Owner);
 }
 
 AnimationManager::JsonValue AnimationManager::Serialize() const
@@ -747,6 +916,48 @@ bool AnimationManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
                 " s";
             ui.ValueLabel(item->clipName.c_str(), summary.c_str());
         }
+    }
+    if (ui.PropertyGroupHeader("Animation Pack", false))
+    {
+        if (packExportPath.empty())
+        {
+            const std::filesystem::path directory = rigPaths.empty()
+                ? std::filesystem::path("Assets/Animations")
+                : std::filesystem::path(rigPaths.front()).parent_path();
+            packExportPath = (directory /
+                ((Owner && !Owner->name.empty() ? Owner->name : "Animations") +
+                    ".animpack")).string();
+        }
+        char destination[1024]{};
+        strncpy_s(destination, sizeof(destination), packExportPath.c_str(), _TRUNCATE);
+        if (ui.InputText("Pack Path", destination, sizeof(destination)))
+            packExportPath = destination;
+        if (ui.Button("Export Animation Pack"))
+        {
+            std::string error;
+            const auto pack = Engine::Model::AnimationPackAsset::Capture(*this);
+            if (pack.Save(packExportPath, error))
+            {
+                Engine::Core::AssetRecord::Ensure(packExportPath, packExportPath,
+                    { { "importer", std::string("animation-pack") } });
+                packExportStatus = "Saved " + packExportPath;
+            }
+            else packExportStatus = error;
+        }
+        if (ui.Button("Import Animation Pack"))
+        {
+            std::string error;
+            const auto pack = Engine::Model::AnimationPackAsset::Load(
+                packExportPath, error);
+            if (pack && pack->Apply(*this, error))
+            {
+                packExportStatus = "Applied " + packExportPath;
+                changed = true;
+            }
+            else packExportStatus = error;
+        }
+        if (!packExportStatus.empty())
+            ui.ValueLabel("Pack", packExportStatus.c_str());
     }
     const std::string layersLabel = "Layers (" +
         std::to_string(layers.size()) + ")";

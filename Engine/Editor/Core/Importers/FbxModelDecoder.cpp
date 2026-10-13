@@ -10,8 +10,14 @@
 #include <array>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <functional>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <limits>
+#include <numeric>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace Engine::Editor
 {
@@ -19,6 +25,20 @@ namespace
 {
 glm::vec3 Vec3(const aiVector3D& value) { return { value.x, value.y, value.z }; }
 glm::quat Quat(const aiQuaternion& value) { return { value.w, value.x, value.y, value.z }; }
+glm::quat Facing(const aiVector3D& direction, const aiVector3D& up)
+{
+    const glm::vec3 forward = Vec3(direction);
+    const glm::vec3 sourceUp = Vec3(up);
+    if (glm::dot(forward, forward) < 1e-8f || glm::dot(sourceUp, sourceUp) < 1e-8f)
+        return glm::quat(1.f, 0.f, 0.f, 0.f);
+    const glm::vec3 z = glm::normalize(forward);
+    const glm::vec3 x = glm::cross(sourceUp, z);
+    if (glm::dot(x, x) < 1e-8f)
+        return glm::quat(1.f, 0.f, 0.f, 0.f);
+    const glm::vec3 right = glm::normalize(x);
+    const glm::vec3 adjustedUp = glm::cross(z, right);
+    return glm::normalize(glm::quat_cast(glm::mat3(right, adjustedUp, z)));
+}
 glm::mat4 Matrix(const aiMatrix4x4& value)
 {
     // aiMatrix4x4 is row-major while GLM indexes column first.
@@ -122,6 +142,7 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
     }
 
     std::unordered_map<std::string, unsigned> nodeByName;
+    std::unordered_map<std::string, std::vector<unsigned>> nodesByName;
     std::vector<unsigned> meshOwnerNode(scene->mNumMeshes, 0);
     std::function<void(const aiNode*, int)> readNode = [&](const aiNode* source, int parent)
     {
@@ -141,10 +162,69 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
                 meshOwnerNode[source->mMeshes[mesh]] = index;
         model.nodes.push_back(std::move(node));
         nodeByName.emplace(source->mName.C_Str(), index);
+        nodesByName[source->mName.C_Str()].push_back(index);
         for (unsigned child = 0; child < source->mNumChildren; ++child)
             readNode(source->mChildren[child], static_cast<int>(index));
     };
     readNode(scene->mRootNode, -1);
+
+    for (unsigned index = 0; index < scene->mNumCameras; ++index)
+    {
+        const aiCamera* source = scene->mCameras[index];
+        const auto node = nodeByName.find(source->mName.C_Str());
+        if (node == nodeByName.end()) continue;
+        Engine::Model::ImportedCamera camera;
+        camera.nodeIndex = node->second;
+        camera.position = Vec3(source->mPosition);
+        camera.rotation = Facing(source->mLookAt, source->mUp);
+        const float aspect = source->mAspect > 0.f ? source->mAspect : 16.f / 9.f;
+        camera.verticalFov = glm::degrees(2.f * std::atan(std::tan(source->mHorizontalFOV) / aspect));
+        camera.nearPlane = source->mClipPlaneNear;
+        camera.farPlane = source->mClipPlaneFar;
+        camera.orthographic = source->mOrthographicWidth > 0.f;
+        camera.orthographicSize = camera.orthographic ? source->mOrthographicWidth / aspect : 5.f;
+        model.cameras.push_back(camera);
+    }
+
+    for (unsigned index = 0; index < scene->mNumLights; ++index)
+    {
+        const aiLight* source = scene->mLights[index];
+        const auto node = nodeByName.find(source->mName.C_Str());
+        if (node == nodeByName.end()) continue;
+        Engine::Model::ImportedLight light;
+        light.nodeIndex = node->second;
+        light.position = Vec3(source->mPosition);
+        light.rotation = Facing(source->mDirection, source->mUp);
+        if (source->mType == aiLightSource_DIRECTIONAL)
+            light.type = Engine::Model::ImportedLight::Type::Directional;
+        else if (source->mType == aiLightSource_SPOT)
+            light.type = Engine::Model::ImportedLight::Type::Spot;
+        else if (source->mType != aiLightSource_POINT) continue;
+        const glm::vec3 diffuse(source->mColorDiffuse.r, source->mColorDiffuse.g, source->mColorDiffuse.b);
+        light.intensity = std::max({ diffuse.r, diffuse.g, diffuse.b });
+        light.color = light.intensity > 0.f ? diffuse / light.intensity : glm::vec3(0.f);
+        // A 1% attenuation cutoff approximates Assimp's distance law in the engine's range model.
+        const float constant = source->mAttenuationConstant;
+        const float linear = source->mAttenuationLinear;
+        const float quadratic = source->mAttenuationQuadratic;
+        if (quadratic > 0.f)
+            light.range = std::max(0.01f, (-linear + std::sqrt(linear * linear + 4.f * quadratic * std::max(0.f, 100.f - constant))) / (2.f * quadratic));
+        else if (linear > 0.f)
+            light.range = std::max(0.01f, (100.f - constant) / linear);
+        light.innerConeAngle = glm::degrees(source->mAngleInnerCone);
+        light.outerConeAngle = glm::degrees(source->mAngleOuterCone);
+        model.lights.push_back(light);
+    }
+
+    std::vector<glm::mat4> bindWorld(model.nodes.size(), glm::mat4(1.f));
+    for (size_t index = 0; index < model.nodes.size(); ++index)
+    {
+        const auto& node = model.nodes[index];
+        const glm::mat4 local = glm::translate(glm::mat4(1.f), node.translation) *
+            glm::mat4_cast(node.rotation) * glm::scale(glm::mat4(1.f), node.scale);
+        bindWorld[index] = node.parent < 0 ? local :
+            bindWorld[static_cast<size_t>(node.parent)] * local;
+    }
 
     model.materials.resize(scene->mNumMaterials);
     for (unsigned index = 0; index < scene->mNumMaterials; ++index)
@@ -179,7 +259,86 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
         material.emissiveTexture = TexturePath(source, aiTextureType_EMISSIVE);
     }
 
+    // An adjacent sidecar supplies explicit texture paths when an FBX omits
+    // its external texture references. Paths remain relative to the FBX so
+    // the writer can copy them into the imported asset directory.
+    std::filesystem::path materialMapPath(sourcePath);
+    materialMapPath += ".materials.tsv";
+    if (std::filesystem::exists(materialMapPath))
+    {
+        std::ifstream materialMap(materialMapPath);
+        if (!materialMap)
+        {
+            error = "Could not open FBX material map: " + materialMapPath.string();
+            return false;
+        }
+        std::string line;
+        size_t lineNumber = 0;
+        std::unordered_set<std::string> mappedMaterials;
+        while (std::getline(materialMap, line))
+        {
+            ++lineNumber;
+            if (line.empty() || line.front() == '#') continue;
+            const size_t firstTab = line.find('\t');
+            const size_t secondTab = firstTab == std::string::npos ?
+                std::string::npos : line.find('\t', firstTab + 1);
+            if (secondTab == std::string::npos ||
+                line.find('\t', secondTab + 1) != std::string::npos)
+            {
+                error = "Invalid FBX material map line " + std::to_string(lineNumber);
+                return false;
+            }
+            const std::string name = line.substr(0, firstTab);
+            const std::filesystem::path texture =
+                line.substr(firstTab + 1, secondTab - firstTab - 1);
+            const std::string alpha = line.substr(secondTab + 1);
+            const auto material = std::find_if(model.materials.begin(), model.materials.end(),
+                [&](const Engine::Model::ImportedMaterial& candidate)
+                { return candidate.name == name; });
+            if (material == model.materials.end() || texture.empty() ||
+                texture.is_absolute() ||
+                (alpha != "Opaque" && alpha != "Mask" && alpha != "Blend") ||
+                !mappedMaterials.insert(name).second)
+            {
+                error = "Invalid FBX material mapping on line " +
+                    std::to_string(lineNumber);
+                return false;
+            }
+            for (const auto& part : texture)
+                if (part == "..")
+                {
+                    error = "FBX material texture must stay beside the source";
+                    return false;
+                }
+            std::filesystem::path resolved =
+                std::filesystem::path(sourcePath).parent_path();
+            for (const auto& part : texture)
+            {
+                const auto matching = std::find_if(
+                    std::filesystem::directory_iterator(resolved),
+                    std::filesystem::directory_iterator(),
+                    [&](const std::filesystem::directory_entry& entry)
+                    { return entry.path().filename() == part; });
+                if (matching == std::filesystem::directory_iterator())
+                {
+                    error = "FBX material texture path has missing or incorrect case: " +
+                        texture.string();
+                    return false;
+                }
+                resolved /= part;
+            }
+            if (!std::filesystem::is_regular_file(resolved))
+            {
+                error = "FBX material texture not found: " + texture.string();
+                return false;
+            }
+            material->baseColorTexture = texture.generic_string();
+            material->alphaMode = alpha;
+        }
+    }
+
     model.primitives.resize(scene->mNumMeshes);
+    std::vector<std::vector<unsigned>> morphIndexRemaps(scene->mNumMeshes);
     for (unsigned meshIndex = 0; meshIndex < scene->mNumMeshes; ++meshIndex)
     {
         const aiMesh* source = scene->mMeshes[meshIndex];
@@ -193,13 +352,42 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
         {
             Engine::Model::ImportedSkin skin;
             skin.name = primitive.name + " Skeleton";
+            glm::mat4 referenceBind(1.f);
             for (unsigned boneIndex = 0; boneIndex < source->mNumBones; ++boneIndex)
             {
                 const aiBone* bone = source->mBones[boneIndex];
-                const auto found = nodeByName.find(bone->mName.C_Str());
-                if (found == nodeByName.end()) continue;
+                const auto found = nodesByName.find(bone->mName.C_Str());
+                if (found != nodesByName.end() && found->second.size() == 1)
+                {
+                    referenceBind = bindWorld[found->second.front()] *
+                        Matrix(bone->mOffsetMatrix);
+                    break;
+                }
+            }
+            for (unsigned boneIndex = 0; boneIndex < source->mNumBones; ++boneIndex)
+            {
+                const aiBone* bone = source->mBones[boneIndex];
+                const auto found = nodesByName.find(bone->mName.C_Str());
+                if (found == nodesByName.end()) continue;
+                unsigned jointNode = found->second.front();
+                float bestError = std::numeric_limits<float>::infinity();
+                for (unsigned candidate : found->second)
+                {
+                    const glm::mat4 rest = bindWorld[candidate] *
+                        Matrix(bone->mOffsetMatrix);
+                    float difference = 0.f;
+                    for (int column = 0; column < 4; ++column)
+                        for (int row = 0; row < 4; ++row)
+                            difference += std::abs(rest[column][row] -
+                                referenceBind[column][row]);
+                    if (difference < bestError)
+                    {
+                        bestError = difference;
+                        jointNode = candidate;
+                    }
+                }
                 const unsigned paletteIndex = static_cast<unsigned>(skin.jointNodes.size());
-                skin.jointNodes.push_back(found->second);
+                skin.jointNodes.push_back(jointNode);
                 skin.inverseBindMatrices.push_back(Matrix(bone->mOffsetMatrix));
                 for (unsigned weight = 0; weight < bone->mNumWeights; ++weight)
                 {
@@ -215,11 +403,36 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
             }
         }
 
+        // This FBX exports FacialsExtra_ with a complete skin palette but no
+        // positive vertex weights. Its expression geometry is attached to the
+        // head, so keep it on that existing joint and inverse bind transform.
+        // Do not invent weights for other meshes: missing authoring data there
+        // should remain visible to import validation.
+        if (primitive.name.find("FacialsExtra_") != std::string::npos &&
+            primitive.skinIndex >= 0)
+        {
+            const Engine::Model::ImportedSkin& skin =
+                model.skins[static_cast<size_t>(primitive.skinIndex)];
+            const auto head = std::find_if(skin.jointNodes.begin(), skin.jointNodes.end(),
+                [&](unsigned node) { return model.nodes[node].name == "head.x"; });
+            if (head != skin.jointNodes.end())
+            {
+                const unsigned paletteIndex = static_cast<unsigned>(
+                    std::distance(skin.jointNodes.begin(), head));
+                for (auto& vertexInfluences : influences)
+                    if (std::none_of(vertexInfluences.begin(), vertexInfluences.end(),
+                        [](const Influence& value) { return value.weight > 0.f; }))
+                        vertexInfluences.push_back({ paletteIndex, 1.f });
+            }
+        }
+
         primitive.morphTargets.reserve(source->mNumAnimMeshes);
         for (unsigned morphIndex = 0; morphIndex < source->mNumAnimMeshes; ++morphIndex)
         {
             const aiAnimMesh* morph = source->mAnimMeshes[morphIndex];
             Engine::Model::MorphTarget target;
+            target.name = Name(morph->mName,
+                "Morph " + std::to_string(morphIndex + 1));
             target.positions.resize(source->mNumVertices);
             if (morph->HasNormals()) target.normals.resize(source->mNumVertices);
             if (morph->HasTangentsAndBitangents()) target.tangents.resize(source->mNumVertices);
@@ -230,7 +443,10 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
                 if (morph->HasTangentsAndBitangents()) target.tangents[vertex] = Vec3(morph->mTangents[vertex] - source->mTangents[vertex]);
             }
             primitive.morphTargets.push_back(std::move(target));
-            primitive.morphWeights.push_back(static_cast<float>(morph->mWeight));
+            // Assimp uses mWeight for the shape geometry's contribution to an
+            // FBX blend-shape channel (often 1 for a single shape). It is not
+            // the channel's initial expression weight in the imported model.
+            primitive.morphWeights.push_back(0.f);
         }
 
         for (unsigned faceIndex = 0; faceIndex < source->mNumFaces; ++faceIndex)
@@ -281,6 +497,7 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
         for (Engine::Model::MorphTarget& target : primitive.morphTargets)
         {
             Engine::Model::MorphTarget expanded;
+            expanded.name = target.name;
             expanded.positions.reserve(primitive.vertices.size());
             if (!target.normals.empty()) expanded.normals.reserve(primitive.vertices.size());
             if (!target.tangents.empty()) expanded.tangents.reserve(primitive.vertices.size());
@@ -294,6 +511,43 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
                 }
             target = std::move(expanded);
         }
+        // Assimp enumerates FBX blend-shape connections in an unstable order.
+        // Keep mesh targets, their defaults, and animated weight indices in a
+        // reproducible order so saved clips address the same expressions after
+        // a fresh decode or import.
+        auto& remap = morphIndexRemaps[meshIndex];
+        remap.resize(primitive.morphTargets.size());
+        std::vector<unsigned> order(remap.size());
+        std::iota(order.begin(), order.end(), 0u);
+        std::sort(order.begin(), order.end(), [&](unsigned a, unsigned b)
+        {
+            const auto& first = primitive.morphTargets[a];
+            const auto& second = primitive.morphTargets[b];
+            if (first.name != second.name) return first.name < second.name;
+            const auto lessPosition = [](const glm::vec3& left,
+                const glm::vec3& right)
+            {
+                if (left.x != right.x) return left.x < right.x;
+                if (left.y != right.y) return left.y < right.y;
+                return left.z < right.z;
+            };
+            return std::lexicographical_compare(first.positions.begin(),
+                first.positions.end(), second.positions.begin(),
+                second.positions.end(), lessPosition);
+        });
+        std::vector<Engine::Model::MorphTarget> sortedTargets;
+        std::vector<float> sortedWeights;
+        sortedTargets.reserve(order.size());
+        sortedWeights.reserve(order.size());
+        for (unsigned sorted = 0; sorted < order.size(); ++sorted)
+        {
+            const unsigned original = order[sorted];
+            remap[original] = sorted;
+            sortedTargets.push_back(std::move(primitive.morphTargets[original]));
+            sortedWeights.push_back(primitive.morphWeights[original]);
+        }
+        primitive.morphTargets = std::move(sortedTargets);
+        primitive.morphWeights = std::move(sortedWeights);
     }
 
     model.animations.reserve(scene->mNumAnimations);
@@ -357,13 +611,128 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
                 channel.times.push_back(static_cast<float>(key.mTime / ticksPerSecond));
                 for (unsigned valueIndex = 0; valueIndex < key.mNumValuesAndWeights; ++valueIndex)
                     if (key.mValues[valueIndex] < width)
-                        channel.values[static_cast<size_t>(keyIndex) * width + key.mValues[valueIndex]] =
+                        channel.values[static_cast<size_t>(keyIndex) * width +
+                            morphIndexRemaps[meshIndex][key.mValues[valueIndex]]] =
                             static_cast<float>(key.mWeights[valueIndex]);
             }
             animation.channels.push_back(std::move(channel));
         }
         model.animations.push_back(std::move(animation));
     }
+
+    // Some FBX exporters put a centimeter-to-meter factor on every mesh node
+    // even though vertices and bone offsets are already in model coordinates.
+    // In that case the bind matrices resolve to identity while the mesh node
+    // alone scales the same vertices by 100. Remove only this redundant leaf
+    // transform; legitimate scaled mesh binds are left unchanged.
+    const auto nearIdentity = [](const glm::mat4& matrix)
+    {
+        for (int column = 0; column < 4; ++column)
+            for (int row = 0; row < 4; ++row)
+                if (std::abs(matrix[column][row] - (column == row ? 1.f : 0.f)) > 0.01f)
+                    return false;
+        return true;
+    };
+    for (size_t nodeIndex = 0; nodeIndex < model.nodes.size(); ++nodeIndex)
+    {
+        auto& node = model.nodes[nodeIndex];
+        if (node.primitives.empty() || !std::all_of(node.primitives.begin(),
+            node.primitives.end(), [&](unsigned primitiveIndex)
+            {
+                if (primitiveIndex >= model.primitives.size()) return false;
+                const int skinIndex = model.primitives[primitiveIndex].skinIndex;
+                if (skinIndex < 0) return false;
+                const auto& skin = model.skins[static_cast<size_t>(skinIndex)];
+                return !skin.jointNodes.empty() &&
+                    nearIdentity(bindWorld[skin.jointNodes.front()] *
+                        skin.inverseBindMatrices.front());
+            })) continue;
+        if (std::abs(node.scale.x - 100.f) > 0.01f ||
+            std::abs(node.scale.y - 100.f) > 0.01f ||
+            std::abs(node.scale.z - 100.f) > 0.01f ||
+            !nearIdentity(node.parent < 0 ? glm::mat4(1.f) :
+                bindWorld[static_cast<size_t>(node.parent)])) continue;
+        const bool hasChildren = std::any_of(model.nodes.begin(), model.nodes.end(),
+            [nodeIndex](const Engine::Model::ImportedNode& candidate)
+            { return candidate.parent == static_cast<int>(nodeIndex); });
+        if (!hasChildren)
+        {
+            node.translation = glm::vec3(0.f);
+            node.rotation = glm::quat(1.f, 0.f, 0.f, 0.f);
+            node.scale = glm::vec3(1.f);
+        }
+    }
+
+    // The runtime stores decomposed TRS nodes. Rebuild inverse binds against
+    // those exact rest transforms so every joint yields the same mesh bind
+    // pose, including FBX bones whose original matrices contained transform
+    // inheritance that decomposition cannot represent exactly.
+    std::vector<glm::mat4> runtimeWorld(model.nodes.size(), glm::mat4(1.f));
+    for (size_t index = 0; index < model.nodes.size(); ++index)
+    {
+        const auto& node = model.nodes[index];
+        const glm::mat4 local = glm::translate(glm::mat4(1.f), node.translation) *
+            glm::mat4_cast(node.rotation) * glm::scale(glm::mat4(1.f), node.scale);
+        runtimeWorld[index] = node.parent < 0 ? local :
+            runtimeWorld[static_cast<size_t>(node.parent)] * local;
+    }
+    for (size_t nodeIndex = 0; nodeIndex < model.nodes.size(); ++nodeIndex)
+        for (unsigned primitiveIndex : model.nodes[nodeIndex].primitives)
+        {
+            const int skinIndex = model.primitives[primitiveIndex].skinIndex;
+            if (skinIndex < 0) continue;
+            auto& skin = model.skins[static_cast<size_t>(skinIndex)];
+            for (size_t joint = 0; joint < skin.jointNodes.size(); ++joint)
+            {
+                const glm::mat4& jointWorld = runtimeWorld[skin.jointNodes[joint]];
+                const float determinant = glm::determinant(jointWorld);
+                if (!std::isfinite(determinant) || std::abs(determinant) < 1e-8f)
+                {
+                    error = "FBX joint has a non-invertible bind transform";
+                    return false;
+                }
+                skin.inverseBindMatrices[joint] =
+                    glm::inverse(jointWorld) * runtimeWorld[nodeIndex];
+            }
+        }
+
+    // Assimp presents many FBX meshes with their own copy of the same bone
+    // palette. Once their runtime bind matrices are final, share identical
+    // palettes without changing the per-vertex palette indices.
+    std::vector<Engine::Model::ImportedSkin> distinctSkins;
+    std::vector<int> remap(model.skins.size(), -1);
+    for (size_t sourceIndex = 0; sourceIndex < model.skins.size(); ++sourceIndex)
+    {
+        const auto& sourceSkin = model.skins[sourceIndex];
+        for (size_t targetIndex = 0; targetIndex < distinctSkins.size(); ++targetIndex)
+        {
+            const auto& targetSkin = distinctSkins[targetIndex];
+            if (sourceSkin.jointNodes != targetSkin.jointNodes ||
+                sourceSkin.inverseBindMatrices.size() !=
+                    targetSkin.inverseBindMatrices.size()) continue;
+            bool identical = true;
+            for (size_t joint = 0; identical &&
+                joint < sourceSkin.inverseBindMatrices.size(); ++joint)
+                for (int column = 0; identical && column < 4; ++column)
+                    for (int row = 0; row < 4; ++row)
+                        identical &= sourceSkin.inverseBindMatrices[joint][column][row] ==
+                            targetSkin.inverseBindMatrices[joint][column][row];
+            if (identical)
+            {
+                remap[sourceIndex] = static_cast<int>(targetIndex);
+                break;
+            }
+        }
+        if (remap[sourceIndex] < 0)
+        {
+            remap[sourceIndex] = static_cast<int>(distinctSkins.size());
+            distinctSkins.push_back(sourceSkin);
+        }
+    }
+    for (auto& primitive : model.primitives)
+        if (primitive.skinIndex >= 0)
+            primitive.skinIndex = remap[static_cast<size_t>(primitive.skinIndex)];
+    model.skins = std::move(distinctSkins);
     return true;
 }
 }

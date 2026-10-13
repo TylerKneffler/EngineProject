@@ -15,6 +15,7 @@
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Model/RigAsset.h"
+#include "Core/Model/PoseAsset.h"
 #include "Core/ComponentReference.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
@@ -125,12 +126,14 @@ int main()
             std::chrono::steady_clock::now().time_since_epoch().count()) +
             ".mesh");
     const auto rigPath = path.parent_path() / (path.stem().string() + ".rig");
+    const auto posePath = path.parent_path() / (path.stem().string() + ".pose");
     struct RemoveTemp
     {
         std::filesystem::path path;
         ~RemoveTemp() { std::error_code ignored; std::filesystem::remove(path, ignored); }
     } cleanup{ path };
     RemoveTemp removeRig{ rigPath };
+    RemoveTemp removePose{ posePath };
     std::vector<Mesh::Vertex> vertices(3);
     vertices[0].pos[0] = -1.f;
     vertices[1].pos[0] = 1.f;
@@ -293,6 +296,15 @@ int main()
         CHECK(captured.joints[1].nodeIndex == 1);
         CHECK(captured.joints[1].name == "Elbow");
         CHECK(!captured.meshNames.empty());
+        captured.controls.root = 0;
+        captured.controls.pelvis = 1;
+        captured.controls.limbs[0] = {0, 1, 2};
+        Engine::Model::RigAsset::Pose pose;
+        pose.name = "Raised elbow";
+        pose.joints.push_back({1, {0.f, 2.f, 0.f},
+            glm::quat(glm::vec3(0.f, .4f, 0.f)), {1.f, 1.f, 1.f}});
+        captured.poses.push_back(pose);
+        captured.symmetryPairs.push_back({0, 1});
         captured.prefabPath = "Assets/Prefabs/Rig.prefab";
         CHECK(captured.Save(rigPath.string()));
         auto loaded = Engine::Model::RigAsset::Load(rigPath.string());
@@ -300,6 +312,48 @@ int main()
         CHECK(loaded->prefabPath == captured.prefabPath);
         CHECK(loaded->joints[1].parentNodeIndex == 0);
         CHECK(loaded->meshNames == captured.meshNames);
+        CHECK(loaded->controls.root == 0);
+        CHECK(loaded->controls.pelvis == 1);
+        CHECK(loaded->controls.limbs[0].tip == 2);
+        CHECK(loaded->poses.size() == 1);
+        CHECK(loaded->poses[0].name == "Raised elbow");
+        CHECK(loaded->poses[0].joints[0].nodeIndex == 1);
+        CHECK(Near(loaded->poses[0].joints[0].rotation.y,
+            pose.joints[0].rotation.y));
+        CHECK(loaded->symmetryPairs.size() == 1);
+        CHECK(loaded->symmetryPairs[0].right == 1);
+        const auto bundlePath = rigPath.parent_path() /
+            (rigPath.stem().string() + "_bundle.rig");
+        auto firstSkin = captured, secondSkin = captured;
+        firstSkin.skinIndex = 0;
+        firstSkin.rigIndex = 0;
+        secondSkin.skinIndex = 1;
+        secondSkin.rigIndex = 1;
+        secondSkin.meshNames = {"Second mesh"};
+        CHECK(Engine::Model::RigAsset::SaveBundle(bundlePath.string(),
+            {firstSkin, secondSkin}));
+        CHECK(Engine::Model::RigAsset::LoadAll(bundlePath.string()).size() == 2);
+        auto selected = Engine::Model::RigAsset::Load(bundlePath.string(), 1);
+        CHECK(selected && selected->meshNames == secondSkin.meshNames);
+        CHECK(!Engine::Model::RigAsset::Load(bundlePath.string(), 2));
+        selected->meshNames = {"Edited mesh"};
+        CHECK(selected->Save(bundlePath.string()));
+        CHECK(Engine::Model::RigAsset::Load(bundlePath.string(), 0)
+            ->meshNames == firstSkin.meshNames);
+        CHECK(Engine::Model::RigAsset::Load(bundlePath.string(), 1)
+            ->meshNames == selected->meshNames);
+        Engine::Model::PoseAsset standalone;
+        standalone.name = "Raised elbow";
+        standalone.joints.push_back({"Elbow", pose.joints[0].position,
+            pose.joints[0].rotation, pose.joints[0].scale});
+        CHECK(standalone.Save(posePath.string()));
+        const auto loadedPose = Engine::Model::PoseAsset::Load(posePath.string());
+        CHECK(loadedPose && loadedPose->name == standalone.name);
+        CHECK(loadedPose->joints.size() == 1);
+        CHECK(loadedPose->joints[0].path == "Elbow");
+        CHECK(Near(loadedPose->joints[0].rotation.y,
+            pose.joints[0].rotation.y));
+        CHECK(!standalone.Save(rigPath.string()));
         skeleton->rigPath = rigPath.string();
         animation->rigPaths.push_back(rigPath.string());
         CHECK(animation->LoadRigAssets().size() == 1);
@@ -358,6 +412,12 @@ int main()
         const glm::mat4 sourceBind = skeleton->inverseBindMatrices[1];
         CHECK(Serializer::SceneSerializer::SavePrefab(*rig,
             prefabPath.string()));
+        const auto preservedControls = Engine::Model::RigAsset::Load(
+            rigPath.string());
+        CHECK(preservedControls && preservedControls->controls.root == 0);
+        CHECK(preservedControls->controls.limbs[0].tip == 2);
+        CHECK(preservedControls->poses.size() == 1);
+        CHECK(preservedControls->symmetryPairs.size() == 1);
         CHECK(skeleton->Serialize().Has("joints"));
         std::ifstream savedPrefab(prefabPath);
         const std::string prefabText(

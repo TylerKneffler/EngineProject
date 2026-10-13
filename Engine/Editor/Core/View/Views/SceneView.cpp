@@ -82,6 +82,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
     if (ui.IsWindowFocused() && OnFocused) OnFocused();
     if (!windowVisible)
     {
+        m_viewportScreenMin = m_viewportScreenMax = {};
         CancelPrefabPreview();
         ui.EndWindow();
         return;
@@ -111,6 +112,8 @@ void SceneView::DrawPanel(IEditorUi& ui)
          static_cast<float>(m_gameWindowWidth) / static_cast<float>(m_gameWindowHeight));
     const auto input = ui.Viewport(GetUiTextureHandle(), targetAspect,
         {m_letterboxColor.r,m_letterboxColor.g,m_letterboxColor.b,m_letterboxColor.a});
+    m_viewportScreenMin = input.screenMin;
+    m_viewportScreenMax = input.screenMax;
     panDX = input.keyPanDX;
     panDY = input.keyPanDY;
     dolly = input.keyDolly;
@@ -131,6 +134,8 @@ void SceneView::DrawPanel(IEditorUi& ui)
             m_scene, m_toolbar, AllowObjectTransform);
         break;
     }
+    if (OnDrawRigControls)
+        overlayConsumedClick = OnDrawRigControls(ui, input) || overlayConsumedClick;
     const EditorUiContextMenuResult createMenu = AllowObjectCreation
         ? ui.ContextMenu(this, "Create", nullptr, true)
         : EditorUiContextMenuResult{};

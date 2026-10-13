@@ -49,6 +49,10 @@ public:
     // scene's editorCamera with FPS-style look / pan / zoom.
     void DrawPanel(IEditorUi& ui) override;
     Engine::Scene::Scene* GetScene() const { return m_scene; }
+    bool ContainsScreenPoint(float x, float y) const
+    { return m_viewportScreenMax.x > m_viewportScreenMin.x &&
+        x >= m_viewportScreenMin.x && x < m_viewportScreenMax.x &&
+        y >= m_viewportScreenMin.y && y < m_viewportScreenMax.y; }
     void SetEditMode(SceneEditMode mode) { m_editMode = mode; }
     SceneEditMode GetEditMode() const { return m_editMode; }
     EditorTransformTool GetTransformTool() const
@@ -76,6 +80,7 @@ public:
     std::function<void(IEditorUi&)> OnDrawBottomPanel;
     std::function<bool(IEditorUi&, const EditorUiViewportInput&,
         EditorTransformTool)> OnMeshViewportInput;
+    std::function<bool(IEditorUi&, const EditorUiViewportInput&)> OnDrawRigControls;
     std::function<bool(const Engine::Core::Object*)> CanSelectObject;
     bool AllowObjectCreation = true;
     bool AllowAssetDrops = true;
@@ -87,6 +92,7 @@ private:
 
     // Calculates the game viewport size and position based on aspect ratio mode
     Engine::Scene::Scene* m_scene = nullptr; // non-owning; set via Init()
+    EditorUiVec2 m_viewportScreenMin{}, m_viewportScreenMax{};
     std::string m_documentPath;
     
     // Aspect ratio settings

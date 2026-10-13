@@ -152,6 +152,115 @@ struct KeyRef
     float time = 0.f;
 };
 
+// One copied key keeps its channel identity and interpolation data. Its single
+// time is relative to the first selected key on the editor timeline.
+inline std::vector<Channel> CopyKeyBlocks(const Clip& clip, unsigned node,
+    float sourceTime, float relativeTime)
+{
+    std::vector<Channel> result;
+    for (const Channel& channel : clip.channels)
+    {
+        if (channel.nodeIndex != node || channel.path == Channel::Path::Weights)
+            continue;
+        const unsigned stride = channel.valueWidth *
+            (channel.interpolation == Channel::Interpolation::CubicSpline ? 3u : 1u);
+        if (!stride || channel.values.size() != channel.times.size() * stride)
+            continue;
+        for (size_t index = 0; index < channel.times.size(); ++index)
+        {
+            if (std::abs(channel.times[index] - sourceTime) > 1e-4f)
+                continue;
+            Channel copied = channel;
+            copied.times = { relativeTime };
+            copied.values.assign(channel.values.begin() + index * stride,
+                channel.values.begin() + (index + 1) * stride);
+            result.push_back(std::move(copied));
+            break;
+        }
+    }
+    return result;
+}
+
+inline bool PasteKeyBlocks(Clip& clip, const std::vector<Channel>& copied,
+    float localStart)
+{
+    if (copied.empty() || !std::isfinite(localStart) || localStart < 0.f)
+        return false;
+    Clip result = clip;
+    bool changed = false;
+    for (const Channel& key : copied)
+    {
+        if (key.times.size() != 1 || !std::isfinite(key.times.front()) ||
+            key.times.front() < 0.f) return false;
+        const float time = localStart + key.times.front();
+        if (!std::isfinite(time) || time < 0.f) return false;
+        const unsigned sourceStride = key.valueWidth *
+            (key.interpolation == Channel::Interpolation::CubicSpline ? 3u : 1u);
+        if (!sourceStride || key.values.size() != sourceStride) return false;
+        auto found = std::find_if(result.channels.begin(), result.channels.end(),
+            [&](const Channel& channel)
+            { return channel.nodeIndex == key.nodeIndex &&
+                channel.path == key.path &&
+                channel.targetMesh == key.targetMesh; });
+        if (found == result.channels.end())
+        {
+            Channel inserted = key;
+            inserted.times.front() = time;
+            result.channels.push_back(std::move(inserted));
+        }
+        else
+        {
+            Channel& channel = *found;
+            if (channel.valueWidth != key.valueWidth) return false;
+            const unsigned destinationStride = channel.valueWidth *
+                (channel.interpolation == Channel::Interpolation::CubicSpline ? 3u : 1u);
+            if (channel.values.size() != channel.times.size() *
+                    destinationStride) return false;
+            std::vector<float> values;
+            if (destinationStride == sourceStride &&
+                channel.interpolation == key.interpolation)
+                values = key.values;
+            else if (channel.interpolation == Channel::Interpolation::CubicSpline)
+            {
+                values.assign(destinationStride, 0.f);
+                const size_t sourceCenter =
+                    key.interpolation == Channel::Interpolation::CubicSpline
+                        ? key.valueWidth : 0;
+                std::copy_n(key.values.begin() + sourceCenter,
+                    key.valueWidth, values.begin() + key.valueWidth);
+            }
+            else
+            {
+                const size_t sourceCenter =
+                    key.interpolation == Channel::Interpolation::CubicSpline
+                        ? key.valueWidth : 0;
+                values.assign(key.values.begin() + sourceCenter,
+                    key.values.begin() + sourceCenter + key.valueWidth);
+            }
+            if (channel.targetPath.empty()) channel.targetPath = key.targetPath;
+            auto at = std::lower_bound(channel.times.begin(),
+                channel.times.end(), time);
+            if (at != channel.times.begin() &&
+                std::abs(*(at - 1) - time) <= 1e-4f)
+                --at;
+            const size_t index = static_cast<size_t>(at - channel.times.begin());
+            if (at != channel.times.end() && std::abs(*at - time) <= 1e-4f)
+                std::copy(values.begin(), values.end(),
+                    channel.values.begin() + index * destinationStride);
+            else
+            {
+                channel.times.insert(at, time);
+                channel.values.insert(channel.values.begin() +
+                    index * destinationStride, values.begin(), values.end());
+            }
+        }
+        result.duration = std::max(result.duration, time);
+        changed = true;
+    }
+    if (changed) clip = std::move(result);
+    return changed;
+}
+
 // Move complete value blocks, including the tangents of cubic spline keys.
 // Reject collisions instead of silently replacing another key.
 inline bool MoveKeys(Clip& clip, const std::vector<KeyRef>& keys, float delta)

@@ -36,7 +36,11 @@ public:
     std::vector<std::string> rigPaths;
     std::vector<Engine::Model::RigAsset> LoadRigAssets() const;
     void RefreshRigClips(bool remap = true);
+    void InstallEmbeddedClips(std::vector<Engine::Model::AnimationClip> imported);
     std::vector<Layer> layers;
+    // Editor-only export state; the pack itself contains the saved playback data.
+    std::string packExportPath;
+    std::string packExportStatus;
     const Engine::Model::AnimationClip* FindClip(const std::string& name = {}) const;
     std::vector<const Engine::Model::AnimationClip*> GetAvailableClips() const;
     void Start() override;
@@ -57,6 +61,7 @@ private:
     };
     std::unordered_map<unsigned, RestTransform> m_restPose;
     std::unordered_map<unsigned, std::vector<float>> m_restMorphs;
+    std::unordered_map<std::string, std::vector<float>> m_restMorphsByMesh;
     std::string m_previousClip;
     float m_previousTime = 0.f;
     float m_fadeDuration = 0.f;

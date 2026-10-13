@@ -1,0 +1,31 @@
+#pragma once
+
+#include "Core/Model/ImportedModel.h"
+#include "MmdPoseRetargeter.h"
+#include <string>
+
+namespace Engine::Editor
+{
+// Binds one VMD dance to an existing imported character prefab. The two
+// animation assets use stable paths so rebinding updates them in place.
+class MmdDanceAssetBinder
+{
+public:
+    // Resolve the imported FBX and its matching retarget map from prefab metadata.
+    static bool BindFromPrefab(const std::string& prefabPath,
+        const std::string& vmdPath, std::string& error,
+        const std::string& sourcePackPath = {});
+
+    static bool Bind(const std::string& prefabPath,
+        const std::string& fbxPath, const std::string& vmdPath,
+        const std::string& profilePath, const std::string& mapPath,
+        std::string& error, const std::string& sourcePackPath = {});
+
+    static bool BindBaked(const std::string& prefabPath,
+        const std::string& vmdPath, const std::string& profilePath,
+        const std::string& mapPath,
+        const Engine::Model::AnimationClip& body,
+        const MmdPoseRetargeter::FacialBake& facial,
+        std::string& error, const std::string& sourcePackPath = {});
+};
+}

@@ -25,11 +25,18 @@
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
 #include "Core/Compoonents/Animation/Model.h"
 #include "Core/Compoonents/Animation/AnimationManager.h"
+#include "Core/Compoonents/Animation/VmdSceneTrack.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/AnimationBone.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Compoonents/Animation/SoftTissueSurface.h"
 #include "Core/Compoonents/Animation/IKBone.h"
+#include "Core/Compoonents/Animation/TwoBoneIK.h"
+#include "Core/Compoonents/Animation/ChainIK.h"
+#include "Core/Compoonents/Constraints/Subconstraints/AimConstraint.h"
+#include "Core/Compoonents/Constraints/Subconstraints/ParentConstraint.h"
+#include "Core/Compoonents/Constraints/Subconstraints/PositionConstraint.h"
+#include "Core/Compoonents/Constraints/Subconstraints/RotationConstraint.h"
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
 #include "Core/Compoonents/Path/SplinePath.h"
 #include "Core/Compoonents/Path/SplineFollower.h"
@@ -187,11 +194,18 @@ void SceneSerializer::EnsureBuiltinsRegistered()
     RegisterComponentType<Engine::Components::SpriteAnimationManager>();
     RegisterComponentType<Engine::Components::Model>();
     RegisterComponentType<Engine::Components::AnimationManager>();
+    RegisterComponentType<Engine::Components::VmdSceneTrack>();
     RegisterComponentType<Engine::Components::Skeleton>();
     RegisterComponentType<Engine::Components::AnimationBone>();
     RegisterComponentType<Engine::Components::SkinnedMesh>();
     RegisterComponentType<Engine::Components::SoftTissueSurface>();
     RegisterComponentType<Engine::Components::IKBone>();
+    RegisterComponentType<Engine::Components::TwoBoneIK>();
+    RegisterComponentType<Engine::Components::ChainIK>();
+    RegisterComponentType<Engine::Components::AimConstraint>();
+    RegisterComponentType<Engine::Components::ParentConstraint>();
+    RegisterComponentType<Engine::Components::PositionConstraint>();
+    RegisterComponentType<Engine::Components::RotationConstraint>();
     RegisterComponentType<Engine::Components::SpatialManipulator>();
     RegisterComponentType<SplinePath>();
     RegisterComponentType<SplineFollower>();

@@ -25,6 +25,8 @@ struct EditorUiPercentageSegment
 struct EditorUiViewportInput
 {
     EditorUiVec2 available;
+    EditorUiVec2 screenMin;
+    EditorUiVec2 screenMax;
     EditorUiVec2 mouseDelta;
     EditorUiVec2 mousePosInViewport;
     float mouseWheel = 0.f;
@@ -122,6 +124,8 @@ struct EditorUiAssetItemMenuResult
 {
     bool renameRequested = false;
     bool deleteRequested = false;
+    bool packMeshesRequested = false;
+    bool extractMeshesRequested = false;
 };
 
 struct EditorUiTextEditResult
@@ -225,7 +229,8 @@ public:
         bool objectCreationMenu = false,
         const char* unpackLabel = nullptr) = 0;
     virtual EditorUiAssetCreateMenuResult AssetWindowContextMenu() = 0;
-    virtual EditorUiAssetItemMenuResult AssetItemContextMenu(const void* id) = 0;
+    virtual EditorUiAssetItemMenuResult AssetItemContextMenu(const void* id,
+        bool canPackMeshes = false, bool canExtractMeshes = false) = 0;
     virtual EditorUiTextEditResult RenameText(const char* label, char* buffer,
         size_t size, bool focus) = 0;
     virtual EditorUiPrefabMenuResult PrefabOverrideMenu(const void* id,

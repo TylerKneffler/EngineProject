@@ -61,6 +61,32 @@ struct ImportedNode
     std::vector<unsigned> primitives;
 };
 
+struct ImportedCamera
+{
+    unsigned nodeIndex = 0;
+    glm::vec3 position { 0.f };
+    glm::quat rotation { 1.f, 0.f, 0.f, 0.f };
+    float verticalFov = 60.f;
+    float nearPlane = 0.01f;
+    float farPlane = 1000.f;
+    bool orthographic = false;
+    float orthographicSize = 5.f;
+};
+
+struct ImportedLight
+{
+    enum class Type { Point, Directional, Spot };
+    unsigned nodeIndex = 0;
+    glm::vec3 position { 0.f };
+    glm::quat rotation { 1.f, 0.f, 0.f, 0.f };
+    Type type = Type::Point;
+    glm::vec3 color { 1.f };
+    float intensity = 1.f;
+    float range = 8.f;
+    float innerConeAngle = 25.f;
+    float outerConeAngle = 35.f;
+};
+
 struct ImportedSkin
 {
     std::string name;
@@ -83,6 +109,8 @@ struct ImportedModel
     std::vector<ImportedTexture> textures;
     std::vector<ImportedPrimitive> primitives;
     std::vector<ImportedNode> nodes;
+    std::vector<ImportedCamera> cameras;
+    std::vector<ImportedLight> lights;
     std::vector<ImportedSkin> skins;
     std::vector<ImportedAnimation> animations;
 };
@@ -91,6 +119,7 @@ struct ModelImportResult
 {
     bool success = false;
     std::string prefabPath;
+    std::string primaryAssetPath;
     std::string outputDirectory;
     std::string message;
 };

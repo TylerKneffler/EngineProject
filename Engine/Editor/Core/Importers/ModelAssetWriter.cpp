@@ -4,6 +4,8 @@
 #include "Core/AssetRecord.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Animation/ModelAnimation.h"
+#include "Core/Compoonents/Camera/Camera.h"
+#include "Core/Compoonents/Lighting/Light.h"
 #include "Core/Model/RigAsset.h"
 #include "AnimationAssetWriter.h"
 #include "Core/Object.h"
@@ -106,6 +108,15 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
             fs::path original(value);
             if (original.is_relative()) original = source.parent_path() / original;
             if (!fs::exists(original)) return {};
+            // An existing project asset can be referenced directly. Copying it
+            // into every imported prefab only duplicates the same image bytes.
+            std::error_code pathError;
+            const auto relativeToAssets = fs::weakly_canonical(original,
+                pathError).lexically_relative(fs::weakly_canonical(assets));
+            if (!pathError && !relativeToAssets.empty() &&
+                *relativeToAssets.begin() != "..")
+                return importedTextures.emplace(value,
+                    original.lexically_normal().generic_string()).first->second;
             fs::path destination = texturesDirectory / original.filename();
             for (unsigned suffix = 2; fs::exists(destination); ++suffix)
                 destination = texturesDirectory /
@@ -158,6 +169,7 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
             throw std::runtime_error("Could not save default material");
 
         std::vector<std::string> meshPaths(model.primitives.size());
+        std::vector<std::string> morphPaths(model.primitives.size());
         for (size_t index = 0; index < model.primitives.size(); ++index)
         {
             const Engine::Model::ImportedPrimitive& primitive = model.primitives[index];
@@ -171,6 +183,20 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
                   { "sourceFormat", model.sourceFormat },
                   { "primitiveIndex", static_cast<double>(index) } });
             meshPaths[index] = path.generic_string();
+            if (!primitive.morphTargets.empty())
+            {
+                const fs::path morphPath = meshesDirectory /
+                    (SafeName(primitive.name, "Mesh") + " " +
+                     std::to_string(index + 1) + ".morph");
+                if (!Engine::Components::Mesh::SaveMorphFile(
+                        morphPath.string(), primitive.morphTargets))
+                    throw std::runtime_error("Could not save morph data: " +
+                        morphPath.string());
+                morphPaths[index] = morphPath.generic_string();
+                Engine::Core::AssetRecord::Ensure(morphPath, source,
+                    { { "importer", std::string("model-morph") },
+                      { "primitiveIndex", static_cast<double>(index) } });
+            }
         }
 
         ::Engine::Scene::Scene scene;
@@ -214,13 +240,19 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
             object->transform.rotation = QuaternionEuler(imported.rotation);
             object->transform.scale = imported.scale;
 
+            std::unordered_map<std::string, unsigned> primitiveNameCounts;
             for (size_t slot = 0; slot < imported.primitives.size(); ++slot)
             {
                 const unsigned primitiveIndex = imported.primitives[slot];
                 if (primitiveIndex >= model.primitives.size() || meshPaths[primitiveIndex].empty()) continue;
                 const Engine::Model::ImportedPrimitive& primitive = model.primitives[primitiveIndex];
+                std::string primitiveObjectName = SafeName(primitive.name,
+                    "Primitive " + std::to_string(slot + 1));
+                const unsigned sameName = ++primitiveNameCounts[primitiveObjectName];
+                if (sameName > 1)
+                    primitiveObjectName += " " + std::to_string(sameName);
                 Engine::Core::Object* target = imported.primitives.size() == 1 ? object :
-                    AddChild(scene, object, SafeName(primitive.name, "Primitive " + std::to_string(slot + 1)));
+                    AddChild(scene, object, primitiveObjectName);
                 Engine::Components::Mesh* mesh = target->AddComponent<Engine::Components::Mesh>();
                 mesh->LoadFromFile(meshPaths[primitiveIndex]);
                 Engine::Components::Material* material = target->AddComponent<Engine::Components::Material>();
@@ -231,14 +263,47 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
                 if (!material->LoadFromFile(materialPath))
                     throw std::runtime_error("Could not load generated material");
                 if (!primitive.morphTargets.empty())
-                    mesh->SetMorphData(static_cast<unsigned>(index),
-                        primitive.morphTargets, primitive.morphWeights);
+                    if (!mesh->LoadMorphFile(morphPaths[primitiveIndex],
+                            static_cast<unsigned>(index), primitive.morphWeights))
+                        throw std::runtime_error("Could not load generated morph data");
                 if (primitive.skinIndex >= 0 || !primitive.morphTargets.empty())
                 {
                     Engine::Components::SkinnedMesh* deformer = target->AddComponent<Engine::Components::SkinnedMesh>();
                     deformer->skinIndex = primitive.skinIndex;
                 }
             }
+        }
+
+        for (const auto& imported : model.cameras)
+        {
+            if (imported.nodeIndex >= objects.size()) continue;
+            Engine::Core::Object* object = AddChild(scene, objects[imported.nodeIndex], "Camera");
+            object->transform.position = imported.position;
+            object->transform.rotation = QuaternionEuler(imported.rotation);
+            auto* camera = object->AddComponent<Engine::Components::Camera>();
+            camera->fov = std::clamp(imported.verticalFov, 1.f, 179.f);
+            camera->nearPlane = std::max(imported.nearPlane, 0.001f);
+            camera->farPlane = std::max(imported.farPlane, camera->nearPlane + 0.001f);
+            camera->orthographic = imported.orthographic;
+            camera->orthographicSize = std::max(imported.orthographicSize, 0.01f);
+        }
+        for (const auto& imported : model.lights)
+        {
+            if (imported.nodeIndex >= objects.size()) continue;
+            Engine::Core::Object* object = AddChild(scene, objects[imported.nodeIndex], "Light");
+            object->transform.position = imported.position;
+            object->transform.rotation = QuaternionEuler(imported.rotation);
+            auto* light = object->AddComponent<Engine::Components::Light>();
+            light->lightType = imported.type == Engine::Model::ImportedLight::Type::Directional
+                ? static_cast<int>(Engine::Components::Light::Type::Directional)
+                : imported.type == Engine::Model::ImportedLight::Type::Spot
+                    ? static_cast<int>(Engine::Components::Light::Type::Spot)
+                    : static_cast<int>(Engine::Components::Light::Type::Point);
+            light->color = imported.color;
+            light->intensity = imported.intensity;
+            light->range = imported.range;
+            light->innerConeAngle = std::clamp(imported.innerConeAngle, 0.f, 89.f);
+            light->outerConeAngle = std::clamp(imported.outerConeAngle, 0.1f, 89.f);
         }
 
         // Mark skeletal nodes after the complete Object hierarchy exists.
@@ -287,26 +352,52 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
                 for (auto& channel : clip.channels)
                     channel.targetPath = AnimationClipMapping::NodePath(
                         *modelComponent, channel.nodeIndex);
+        std::vector<std::string> sharedAnimationPaths;
+        std::vector<Engine::Model::RigAsset> rigSkins;
+        const fs::path rigPath = output /
+            (output.filename().string() + ".rig");
         for (auto* component : root->Components)
             if (auto* skeleton = dynamic_cast<Engine::Components::Skeleton*>(component))
             {
-                const fs::path rigPath = output /
-                    (output.filename().string() + "_skin_" +
-                     std::to_string(skeleton->skinIndex) + ".rig");
                 auto rig = Engine::Model::RigAsset::Capture(scene,
                     *skeleton);
+                if (auto previous = Engine::Model::RigAsset::Load(
+                        rigPath.string(), skeleton->skinIndex);
+                    previous && previous->joints.size() == rig.joints.size())
+                {
+                    bool sameNodes = true;
+                    for (size_t joint = 0; joint < rig.joints.size(); ++joint)
+                        sameNodes &= previous->joints[joint].nodeIndex ==
+                            rig.joints[joint].nodeIndex &&
+                            previous->joints[joint].name == rig.joints[joint].name;
+                    if (sameNodes)
+                    {
+                        rig.controls = previous->controls;
+                        rig.poses = previous->poses;
+                        rig.symmetryPairs = previous->symmetryPairs;
+                    }
+                }
                 rig.prefabPath = prefabPath.generic_string();
-                if (manager)
+                if (manager && sharedAnimationPaths.empty())
+                {
                     WriteImportedAnimations(rig, *manager, *modelComponent,
                         rigPath, prefabPath, source);
-                if (!rig.Save(rigPath.string()))
-                    throw std::runtime_error("Could not save rig: " + rigPath.string());
+                    sharedAnimationPaths = rig.animationPaths;
+                }
+                else if (manager)
+                    rig.animationPaths = sharedAnimationPaths;
+                rigSkins.push_back(std::move(rig));
                 skeleton->rigPath = rigPath.generic_string();
-                if (manager) manager->rigPaths.push_back(skeleton->rigPath);
-                Engine::Core::AssetRecord::Ensure(rigPath, source,
-                    { { "importer", std::string("model-rig") },
-                      { "skinIndex", static_cast<double>(skeleton->skinIndex) } });
             }
+        if (!rigSkins.empty())
+        {
+            if (!Engine::Model::RigAsset::SaveBundle(rigPath.string(), rigSkins))
+                throw std::runtime_error("Could not save rig: " + rigPath.string());
+            if (manager) manager->rigPaths.push_back(rigPath.generic_string());
+            Engine::Core::AssetRecord::Ensure(rigPath, source,
+                { { "importer", std::string("model-rig") },
+                  { "skinCount", static_cast<double>(rigSkins.size()) } });
+        }
 
         if (manager) manager->RefreshRigClips();
         if (!Engine::Serialization::SceneSerializer::SavePrefab(*root, prefabPath.string()))

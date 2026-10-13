@@ -1,12 +1,15 @@
 #pragma once
 
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <array>
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace Engine::Scene { class Scene; }
 namespace Engine::Components { class Skeleton; }
+namespace Engine::Serialization { class JsonValue; }
 
 namespace Engine::Model
 {
@@ -15,6 +18,16 @@ namespace Engine::Model
 // carry the same data so editor undo can restore in-memory edits.
 struct RigAsset
 {
+    struct LimbControls
+    {
+        int upper = -1, lower = -1, tip = -1;
+    };
+    struct ControlMap
+    {
+        int root = -1, pelvis = -1;
+        // Left arm, right arm, left leg, right leg. Indices are model nodes.
+        std::array<LimbControls, 4> limbs {};
+    };
     struct Joint
     {
         unsigned nodeIndex = 0;
@@ -22,16 +35,42 @@ struct RigAsset
         int parentNodeIndex = -1;
         glm::mat4 inverseBind { 1.f };
     };
+    struct PoseJoint
+    {
+        unsigned nodeIndex = 0;
+        glm::vec3 position { 0.f };
+        glm::quat rotation { 1.f, 0.f, 0.f, 0.f };
+        glm::vec3 scale { 1.f };
+    };
+    struct Pose
+    {
+        std::string name;
+        std::vector<PoseJoint> joints;
+    };
+    struct SymmetryPair
+    {
+        unsigned left = 0, right = 0;
+    };
     unsigned skinIndex = 0;
     size_t rigIndex = 0;
     std::string prefabPath;
     std::vector<Joint> joints;
     std::vector<std::string> meshNames;
     std::vector<std::string> animationPaths;
+    ControlMap controls;
+    std::vector<Pose> poses;
+    std::vector<SymmetryPair> symmetryPairs;
 
     static RigAsset Capture(const Engine::Scene::Scene& scene,
         const Engine::Components::Skeleton& skeleton);
     bool Save(const std::string& path) const;
-    static std::optional<RigAsset> Load(const std::string& path);
+    static bool SaveBundle(const std::string& path,
+        const std::vector<RigAsset>& skins);
+    static std::optional<RigAsset> Load(const std::string& path,
+        std::optional<unsigned> skinIndex = std::nullopt);
+    static std::vector<RigAsset> LoadAll(const std::string& path);
+
+private:
+    Engine::Serialization::JsonValue Serialize() const;
 };
 }

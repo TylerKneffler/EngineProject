@@ -15,6 +15,9 @@ struct AnimationChannel
     // Name path from the model root. Numeric indices alone are not a
     // portable bone identity when a clip is used with another model.
     std::string targetPath;
+    // Optional mesh object path for weights. Keeps separate primitives on the
+    // same model node from overwriting each other's morph weights.
+    std::string targetMesh;
     Path path = Path::Translation;
     Interpolation interpolation = Interpolation::Linear;
     unsigned valueWidth = 3;

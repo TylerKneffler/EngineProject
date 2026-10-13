@@ -40,10 +40,12 @@ public:
     std::function<void(const std::string&)> OnSelectionChanged;
     std::function<void(const std::string&, const std::string&)> OnAssetRenamed;
     std::function<void(const std::string&)> OnAssetContentsChanged;
+    std::function<void(const std::string&, const std::string&)> OnObjectImportRequested;
     std::function<void(Engine::Core::Object*, const std::string&)> OnPrefabCreated;
 
     void SetSelectedPath(const std::string& path) { m_selectedPath = path; }
     const std::string& GetSelectedPath() const { return m_selectedPath; }
+    const std::string& GetCurrentDirectory() const { return m_currentDirectory; }
 
 private:
     void DrawCurrentDirectory(IEditorUi& ui);
