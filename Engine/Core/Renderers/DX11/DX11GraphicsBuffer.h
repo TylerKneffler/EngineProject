@@ -57,6 +57,9 @@ public:
         const void* initialData = nullptr,
         uint32_t elementStride = 0) override;
 
+    std::unique_ptr<Engine::Graphics::IGraphicsBuffer> CreateStaticShaderResource(
+        uint64_t sizeBytes, const void* initialData, uint32_t elementStride) override;
+
 private:
     ID3D11Device* m_device = nullptr;
 };

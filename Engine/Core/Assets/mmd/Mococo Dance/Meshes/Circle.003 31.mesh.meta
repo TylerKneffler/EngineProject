@@ -1,7 +1,7 @@
 {
     "version": 1,
-    "id": "41c57ae9-6f3e-47c9-923f-bda59303d9fb",
-    "sourcePath": "C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/mmd/Mococo/Mococo (FBX No Outline).fbx",
+    "id": "0f265f33-909b-4637-9d5a-58070e7e8c56",
+    "sourcePath": "C:/repos/EngineProject/Engine/Core/Assets/mmd/Mococo/Mococo (FBX No Outline).fbx",
     "importSettings": {
         "importer": "model-mesh",
         "primitiveIndex": 30,

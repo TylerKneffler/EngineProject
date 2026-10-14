@@ -80,6 +80,58 @@ float ToolbarButtonWidth(const char* label)
         ImGui::GetStyle().FramePadding.x * 2.f);
 }
 
+// Draw these directly so transform tools have recognizable icons even when
+// the optional system icon font is unavailable.
+bool TransformIconButton(const char* id, EditorTransformTool tool,
+    bool selected, const char* tooltip)
+{
+    if (selected)
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{.18f, .38f, .68f, 1.f});
+    const bool clicked = ImGui::Button(id, {28.f, 20.f});
+    if (selected) ImGui::PopStyleColor();
+    const ImVec2 minimum = ImGui::GetItemRectMin();
+    const ImVec2 maximum = ImGui::GetItemRectMax();
+    const ImVec2 center{(minimum.x + maximum.x) * .5f,
+        (minimum.y + maximum.y) * .5f};
+    auto* draw = ImGui::GetWindowDrawList();
+    const ImU32 color = ImGui::GetColorU32(ImGuiCol_Text);
+    const auto point = [&](float x, float y)
+    { return ImVec2{center.x + x, center.y + y}; };
+    if (tool == EditorTransformTool::Translate)
+    {
+        draw->AddLine(point(-6.f, 0.f), point(6.f, 0.f), color, 1.5f);
+        draw->AddLine(point(0.f, -6.f), point(0.f, 6.f), color, 1.5f);
+        draw->AddTriangleFilled(point(8.f, 0.f), point(4.f, -3.f), point(4.f, 3.f), color);
+        draw->AddTriangleFilled(point(-8.f, 0.f), point(-4.f, -3.f), point(-4.f, 3.f), color);
+        draw->AddTriangleFilled(point(0.f, -8.f), point(-3.f, -4.f), point(3.f, -4.f), color);
+        draw->AddTriangleFilled(point(0.f, 8.f), point(-3.f, 4.f), point(3.f, 4.f), color);
+    }
+    else if (tool == EditorTransformTool::Rotate)
+    {
+        draw->AddCircle(center, 6.f, color, 24, 1.5f);
+        draw->AddTriangleFilled(point(7.f, -1.f), point(2.f, -5.f), point(8.f, -6.f), color);
+    }
+    else if (tool == EditorTransformTool::Scale)
+    {
+        draw->AddLine(point(-5.f, 5.f), point(5.f, -5.f), color, 1.5f);
+        draw->AddRectFilled(point(-7.f, 3.f), point(-3.f, 7.f), color);
+        draw->AddRectFilled(point(3.f, -7.f), point(7.f, -3.f), color);
+    }
+    else
+    {
+        draw->AddRect(point(-4.f, -1.f), point(4.f, 7.f), color, 3.f, 0, 1.5f);
+        for (int finger = 0; finger < 4; ++finger)
+        {
+            const float x = -4.f + finger * 2.5f;
+            draw->AddLine(point(x, 1.f), point(x, finger == 0 || finger == 3 ? -5.f : -7.f), color, 1.5f);
+        }
+        draw->AddLine(point(-4.f, 4.f), point(-7.f, 0.f), color, 1.5f);
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("%s", tooltip);
+    return clicked;
+}
+
 struct ToolbarRow
 {
     bool singleRow;
@@ -229,15 +281,17 @@ float EditorState::GetToolbarSectionMinimumWidth(ToolbarSection section) const
             : mesh.enabled ? "Mesh Tools..."
             : m_activeSceneAssetDocument && m_activeSceneAssetDocument->meshStage
                 ? "Vertex Attributes..." : "Transform...";
-        controlWidth = ToolbarButtonWidth(first);
+        const std::string suffix = std::string(" ") + first;
+        const std::string label = ToolbarIconLabel(0xE713, u8"\uE713",
+            suffix.c_str(), "MinimumTools", first);
+        controlWidth = ToolbarButtonWidth(label.c_str());
         break;
     }
     case ToolbarSection::Transform:
-        controlWidth = ToolbarButtonWidth("Hand *") +
-            ImGui::GetStyle().ItemSpacing.x + ToolbarButtonWidth("Move");
+        controlWidth = 4.f * 28.f + 3.f * ImGui::GetStyle().ItemSpacing.x;
         break;
     case ToolbarSection::View:
-        controlWidth = ToolbarButtonWidth("Grid *");
+        controlWidth = ToolbarButtonWidth("Bones *");
         break;
     case ToolbarSection::Prefab:
     {
@@ -262,8 +316,16 @@ void EditorState::DrawToolbarTools(IEditorUi& ui, bool singleRow,
     ToolbarRow row{singleRow, overflow};
     const auto button = [&](const char* label)
     {
-        return row.Next(ToolbarButtonWidth(label)) &&
-            ImGui::Button(label, {0.f, 20.f});
+        const bool animation = std::string_view(label) == "Animation Editor";
+        const bool bindPose = std::string_view(label) == "Bind Pose";
+        const ImWchar codepoint = animation ? 0xE768 : bindPose ? 0xE74E : 0xE713;
+        const char* glyph = animation ? u8"\uE768" : bindPose ? u8"\uE74E" : u8"\uE713";
+        const std::string suffix = std::string(" ") + label;
+        const std::string id = std::string("Tool-") + label;
+        const std::string iconLabel = ToolbarIconLabel(codepoint, glyph,
+            suffix.c_str(), id.c_str(), label);
+        return row.Next(ToolbarButtonWidth(iconLabel.c_str())) &&
+            ToolbarIconButton(codepoint, glyph, suffix.c_str(), id.c_str(), label, label);
     };
     const auto iconButton = [&](ImWchar codepoint, const char* glyph,
         const char* suffix, const char* id, const char* fallback,
@@ -1019,44 +1081,30 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
             ui.Tooltip("Selection tool");
         }
     }
-    if (section == ToolbarSection::Transform && m_toolbarVisibility.transformTools &&
-        (singleRow || ui.AvailableContentWidth() > 340.f))
+    if (section == ToolbarSection::Transform && m_toolbarVisibility.transformTools)
     {
         const EditorTransformTool tools[]{ EditorTransformTool::Hand,
             EditorTransformTool::Translate, EditorTransformTool::Rotate,
             EditorTransformTool::Scale };
         const char* toolNames[]{ "Hand", "Move", "Rotate", "Scale" };
+        const char* toolIds[]{ "##HeaderHand", "##HeaderMove", "##HeaderRotate", "##HeaderScale" };
         for (int index = 0; index < 4; ++index)
         {
             const bool selected = view->GetTransformTool() == tools[index];
-            const std::string label = std::string(toolNames[index]) +
-                (selected ? " *" : "");
-            if (row.Next(ToolbarButtonWidth(label.c_str())) &&
-                ui.Button(label.c_str()))
+            if (row.Next(28.f) &&
+                TransformIconButton(toolIds[index], tools[index], selected, toolNames[index]))
                 view->SetTransformTool(tools[index]);
-        }
-    }
-    else if (section == ToolbarSection::Transform && m_toolbarVisibility.transformTools)
-    {
-        const char* tools[]{ "Hand", "Move", "Rotate", "Scale" };
-        int tool = view->GetTransformTool() == EditorTransformTool::Hand ? 0
-            : view->GetTransformTool() == EditorTransformTool::Translate ? 1
-            : view->GetTransformTool() == EditorTransformTool::Rotate ? 2 : 3;
-        if (row.Next(100.f))
-        {
-            ui.SetNextItemWidth(100.f);
-            if (ui.Combo("##GlobalTransformTool", &tool, tools, 4))
-            {
-                const EditorTransformTool values[]{ EditorTransformTool::Hand,
-                    EditorTransformTool::Translate, EditorTransformTool::Rotate,
-                    EditorTransformTool::Scale };
-                view->SetTransformTool(values[tool]);
-            }
-            ui.Tooltip("Transform tool");
         }
     }
     if (section == ToolbarSection::View && m_toolbarVisibility.sceneDisplay)
     {
+        const char* bonesLabel = scene->AreEditorBonesVisible() ? "Bones *" : "Bones";
+        if (row.Next(ToolbarButtonWidth(bonesLabel)))
+        {
+            if (ui.Button(bonesLabel))
+                scene->SetEditorBonesVisible(!scene->AreEditorBonesVisible());
+            ui.Tooltip("Show bones in Scene View without changing the rig");
+        }
         const char* gridLabel = scene->settings.showGrid ? "Grid *" : "Grid";
         if (row.Next(ToolbarButtonWidth(gridLabel)) && ui.Button(gridLabel))
             scene->settings.showGrid = !scene->settings.showGrid;

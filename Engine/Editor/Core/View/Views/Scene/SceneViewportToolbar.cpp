@@ -207,10 +207,12 @@ bool SceneViewportToolbar::Draw(IEditorUi& ui,
         m_sceneToolsVisible && DrawRenderModeMenu(ui, input, scene);
     const bool sceneUiOverlayConsumedClick =
         m_sceneToolsVisible && DrawSceneUiOverlayToggle(ui, input, scene);
+    const bool bonesConsumedClick =
+        m_sceneToolsVisible && DrawBonesToggle(ui, input, scene);
     const bool orientationConsumedClick=
         DrawOrientationGizmo(ui,input,scene,allowObjectTransform);
     return toolbarConsumedClick || gridToggleConsumedClick ||
-        renderModeConsumedClick || sceneUiOverlayConsumedClick ||
+        renderModeConsumedClick || sceneUiOverlayConsumedClick || bonesConsumedClick ||
         orientationConsumedClick;
 }
 
@@ -664,13 +666,13 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
 bool SceneViewportToolbar::DrawTransformToolbar(IEditorUi& ui,
     const EditorUiViewportInput& input)
 {
-    if (input.available.x < 164.f || input.available.y < 90.f)
+    if (input.available.x < 90.f || input.available.y < 70.f)
         return false;
 
     constexpr float scale = .72f;
     constexpr float radius = 16.f;
     constexpr float spacing = 38.f;
-    constexpr float padding = 54.f;
+    constexpr float padding = 13.f;
     constexpr EditorTransformTool tools[] = {
         EditorTransformTool::Hand,
         EditorTransformTool::Translate,
@@ -682,6 +684,7 @@ bool SceneViewportToolbar::DrawTransformToolbar(IEditorUi& ui,
     {
         const EditorUiVec2 center{10.f+radius+
             spacing*static_cast<float>(index),padding+radius};
+        if (center.x + radius > input.available.x - 64.f) break;
         const bool hovered = Contains(input.mousePosInViewport, center, radius);
         if (input.rawLeftClicked && hovered)
         {
@@ -706,15 +709,15 @@ bool SceneViewportToolbar::DrawTransformToolbar(IEditorUi& ui,
 bool SceneViewportToolbar::DrawGridToggle(IEditorUi& ui,
     const EditorUiViewportInput& input, Engine::Scene::Scene* scene)
 {
-    if (!scene || input.available.x < 202.f || input.available.y < 90.f)
+    if (!scene || input.available.x < 202.f || input.available.y < 70.f)
         return false;
 
     constexpr float scale = .72f;
     constexpr float radius = 16.f;
     constexpr float spacing = 38.f;
-    constexpr float padding = 54.f;
+    constexpr float padding = 13.f;
     const EditorUiVec2 center{10.f+radius+spacing*4.f,padding+radius};
-    if (center.x + radius > input.available.x)
+    if (center.x + radius > input.available.x - 64.f)
         return false;
 
     const bool hovered = Contains(input.mousePosInViewport, center, radius);
@@ -741,18 +744,18 @@ bool SceneViewportToolbar::DrawGridToggle(IEditorUi& ui,
 bool SceneViewportToolbar::DrawRenderModeMenu(IEditorUi& ui,
     const EditorUiViewportInput& input, Engine::Scene::Scene* scene)
 {
-    if (!scene || input.available.x < 240.f || input.available.y < 90.f)
+    if (!scene || input.available.x < 240.f || input.available.y < 70.f)
         return false;
 
     constexpr float scale = .72f;
     constexpr float radius = 16.f;
     constexpr float spacing = 38.f;
-    constexpr float padding = 54.f;
+    constexpr float padding = 13.f;
     const EditorUiVec2 center{
         10.f + radius + spacing * 5.f,
         padding + radius
     };
-    if (center.x + radius > input.available.x)
+    if (center.x + radius > input.available.x - 64.f)
         return false;
 
     bool consumed = false;
@@ -816,18 +819,18 @@ bool SceneViewportToolbar::DrawRenderModeMenu(IEditorUi& ui,
 bool SceneViewportToolbar::DrawSceneUiOverlayToggle(IEditorUi& ui,
     const EditorUiViewportInput& input, Engine::Scene::Scene* scene)
 {
-    if (!scene || input.available.x < 278.f || input.available.y < 90.f)
+    if (!scene || input.available.x < 278.f || input.available.y < 70.f)
         return false;
 
     constexpr float scale = .72f;
     constexpr float radius = 16.f;
     constexpr float spacing = 38.f;
-    constexpr float padding = 54.f;
+    constexpr float padding = 13.f;
     const EditorUiVec2 center{
         10.f + radius + spacing * 6.f,
         padding + radius
     };
-    if (center.x + radius > input.available.x)
+    if (center.x + radius > input.available.x - 64.f)
         return false;
 
     const bool hovered = Contains(input.mousePosInViewport, center, radius);
@@ -851,6 +854,32 @@ bool SceneViewportToolbar::DrawSceneUiOverlayToggle(IEditorUi& ui,
     ui.DrawViewportText(
         { center.x - 5.f * scale, center.y - 3.f * scale },
         "UI", {0.92f, 0.95f, 1.f, 1.f});
+    return consumed;
+}
+
+bool SceneViewportToolbar::DrawBonesToggle(IEditorUi& ui,
+    const EditorUiViewportInput& input, Engine::Scene::Scene* scene)
+{
+    constexpr float radius = 16.f;
+    const EditorUiVec2 center{292.f, 29.f};
+    if (!scene || input.available.y < 70.f ||
+        center.x + radius > input.available.x - 64.f)
+        return false;
+
+    const bool hovered = Contains(input.mousePosInViewport, center, radius);
+    const bool consumed = input.rawLeftClicked && hovered;
+    if (consumed)
+        scene->SetEditorBonesVisible(!scene->AreEditorBonesVisible());
+    const bool enabled = scene->AreEditorBonesVisible();
+    ui.DrawViewportCircle(center, radius,
+        enabled ? EditorUiColor{0.18f, 0.38f, 0.68f, 0.98f}
+                : hovered ? EditorUiColor{0.22f, 0.25f, 0.31f, 0.98f}
+                          : EditorUiColor{0.10f, 0.12f, 0.16f, 0.94f}, true);
+    ui.DrawViewportCircle(center, radius,
+        enabled ? EditorUiColor{0.45f, 0.72f, 1.f, 1.f}
+                : EditorUiColor{0.62f, 0.68f, 0.78f, 0.9f}, false, 1.08f);
+    ui.DrawViewportText({center.x - 17.f, center.y - 7.f},
+        "Bones", {0.92f, 0.95f, 1.f, 1.f});
     return consumed;
 }
 }

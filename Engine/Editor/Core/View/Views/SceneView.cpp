@@ -118,7 +118,8 @@ void SceneView::DrawPanel(IEditorUi& ui)
     panDY = input.keyPanDY;
     dolly = input.keyDolly;
     bool overlayConsumedClick = false;
-    m_toolbar.SetSceneToolsVisible(!UseGlobalToolbar);
+    // Keep the viewport header available alongside the application's toolbar.
+    m_toolbar.SetSceneToolsVisible(true);
     switch (m_editMode)
     {
     case SceneEditMode::Mesh:

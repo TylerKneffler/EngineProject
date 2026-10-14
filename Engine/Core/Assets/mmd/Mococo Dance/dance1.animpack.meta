@@ -1,10 +1,10 @@
 {
     "version": 1,
-    "id": "811f7a99-f197-435b-b625-17f37ae40a67",
-    "sourcePath": "C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/mmd/dance1.vmd",
+    "id": "130ba9f4-2b3c-4d8d-ab3c-fa0cd92d9815",
+    "sourcePath": "C:/repos/EngineProject/Engine/Core/Assets/mmd/dance1.vmd",
     "importSettings": {
         "importer": "mmd-animation-pack",
-        "map": "C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/mmd\\Mococo\\Mococo.mmdmap.json"
+        "map": "C:/repos/EngineProject/Engine/Core/Assets/mmd\\Mococo\\Mococo.mmdmap.json"
     }
 }
 

@@ -65,6 +65,16 @@ void D3D11GraphicsBuffer::FlushMappedWrites(uint64_t offset, uint64_t size)
     }
 }
 
+std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D11BufferFactory::CreateStaticShaderResource(
+    uint64_t sizeBytes, const void* initialData, uint32_t elementStride)
+{
+    if (!initialData)
+        throw std::runtime_error("Static DX11 buffers require initial data");
+    return CreateBuffer(Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Default,
+        sizeBytes, initialData, elementStride);
+}
+
 std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D11BufferFactory::CreateBuffer(
     Engine::Graphics::IGraphicsBuffer::Usage usage,
     Engine::Graphics::IGraphicsBuffer::AccessMode access,

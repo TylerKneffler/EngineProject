@@ -69,5 +69,15 @@ public:
         uint64_t sizeBytes,
         const void* initialData = nullptr,
         uint32_t elementStride = 0) = 0;
+
+    // Initialized once and never mapped by callers. Backends can avoid a CPU
+    // upload shadow; the fallback preserves initialization on upload-only APIs.
+    virtual std::unique_ptr<IGraphicsBuffer> CreateStaticShaderResource(
+        uint64_t sizeBytes, const void* initialData, uint32_t elementStride)
+    {
+        return CreateBuffer(IGraphicsBuffer::Usage::ShaderResource,
+            IGraphicsBuffer::AccessMode::Upload, sizeBytes, initialData,
+            elementStride);
+    }
 };
 }

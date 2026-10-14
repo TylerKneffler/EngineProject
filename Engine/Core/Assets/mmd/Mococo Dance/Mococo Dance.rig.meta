@@ -1,10 +1,10 @@
 {
     "version": 1,
-    "id": "b4517237-d8fc-4f8e-aa84-4a263afc0085",
-    "sourcePath": "C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/mmd/Mococo/Mococo (FBX No Outline).fbx",
+    "id": "fe521242-0bfb-48a2-8335-58132badeb20",
+    "sourcePath": "C:/repos/EngineProject/Engine/Core/Assets/mmd/Mococo/Mococo (FBX No Outline).fbx",
     "importSettings": {
         "importer": "model-rig",
-        "skinCount": 7
+        "skinCount": 11
     }
 }
 

@@ -37,7 +37,8 @@ public:
         const Serialization::JsonValue& profile,
         const Serialization::JsonValue& mapping,
         const VmdMotion& motion, std::string& error);
-    Pose Sample(float frame) const;
+    // Full evaluation is retained as a reference for validating IK dependency updates.
+    Pose Sample(float frame, bool fullIkRebuild = false) const;
     // Samples the solved rig at 120 Hz into independent, linear FK channels.
     // The caller keeps scene tracks (camera, light, morphs) separate.
     Model::AnimationClip BakeBody(unsigned lastFrame,

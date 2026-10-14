@@ -305,20 +305,29 @@ bool MmdPoseRetargeter::Initialize(const Model::ImportedModel& target,
     return true;
 }
 
-MmdPoseRetargeter::Pose MmdPoseRetargeter::Sample(float frame) const
+MmdPoseRetargeter::Pose MmdPoseRetargeter::Sample(float frame, bool fullIkRebuild) const
 {
     Pose result;
     if (m_source.empty()) return result;
     result.sourceWorld.resize(m_source.size(), glm::mat4(1.f));
     std::vector<KeyPose> raw(m_source.size()), applied(m_source.size());
     std::vector<glm::quat> ikOffset(m_source.size(), glm::quat(1.f, 0.f, 0.f, 0.f));
+    std::vector<uint8_t> dirty(m_source.size());
     for (size_t i = 0; i < m_source.size(); ++i)
         raw[i] = SampleKey(m_source[i].keys, frame);
-    const auto rebuildSource = [&]()
+    const auto rebuildSource = [&](int changedBone = -1)
     {
         for (size_t i = 0; i < m_source.size(); ++i)
         {
             const auto& bone = m_source[i];
+            // Initialize validates that parent and inheritance dependencies
+            // precede their consumers. Propagate an IK change through those
+            // dependencies without reevaluating unrelated accessory branches.
+            dirty[i] = fullIkRebuild || changedBone < 0 ||
+                static_cast<int>(i) == changedBone ||
+                (bone.parent >= 0 && dirty[bone.parent]) ||
+                (bone.inheritSource >= 0 && dirty[bone.inheritSource]);
+            if (!dirty[i]) continue;
             KeyPose pose = raw[i];
             if (bone.inheritSource >= 0)
             {
@@ -429,7 +438,7 @@ MmdPoseRetargeter::Pose MmdPoseRetargeter::Sample(float frame) const
                 const glm::quat base = applied[link.bone].rotation *
                     glm::inverse(ikOffset[link.bone]);
                 ikOffset[link.bone] = glm::normalize(glm::inverse(base) * local);
-                rebuildSource();
+                rebuildSource(link.bone);
             }
         }
         const glm::vec3 solved(result.sourceWorld[chain.tip][3]);

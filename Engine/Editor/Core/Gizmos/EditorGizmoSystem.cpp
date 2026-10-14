@@ -286,6 +286,7 @@ void EditorGizmoSystem::DrawSkeletonOverlay(
     const Engine::Components::Skeleton& skeleton, IEditorUi& ui,
     const EditorUiViewportInput& input, int selectedPaletteIndex)
 {
+    if (!scene.AreEditorBonesVisible()) return;
     const auto* camera = scene.editorCamera.GetComponent<
         Engine::Components::Camera>();
     if (!camera || input.available.x <= 1.f || input.available.y <= 1.f)
@@ -392,7 +393,7 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         for (Engine::Core::Component* component : owner->Components)
         {
             auto* skeleton = dynamic_cast<Engine::Components::Skeleton*>(component);
-            if (!skeleton || !skeleton->showBones) continue;
+            if (!scene.AreEditorBonesVisible() || !skeleton || !skeleton->showBones) continue;
             std::unordered_set<Engine::Core::Object*> joints;
             for (Engine::Core::Object* joint : skeleton->ResolveJoints())
                 if (joint)

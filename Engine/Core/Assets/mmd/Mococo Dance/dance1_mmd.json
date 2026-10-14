@@ -1,10 +1,10 @@
 {
-    "sourceVmd": "C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/mmd\\dance1.vmd",
-    "rigProfile": "C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/mmd\\Mococo/Mococo.mmdrig.json",
-    "retargetMap": "C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/mmd\\Mococo/Mococo.mmdmap.json",
-    "bodyClip": "C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/mmd/Mococo Dance/dance1_body.anim",
-    "facialClip": "C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/mmd/Mococo Dance/dance1_facial.anim",
-    "animationPack": "C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/mmd/Mococo Dance/dance1.animpack",
+    "sourceVmd": "C:/repos/EngineProject/Engine/Core/Assets/mmd\\dance1.vmd",
+    "rigProfile": "C:/repos/EngineProject/Engine/Core/Assets/mmd\\Mococo\\Mococo.mmdrig.json",
+    "retargetMap": "C:/repos/EngineProject/Engine/Core/Assets/mmd\\Mococo\\Mococo.mmdmap.json",
+    "bodyClip": "Engine/Core/Assets/mmd/Mococo Dance/dance1_body.anim",
+    "facialClip": "Engine/Core/Assets/mmd/Mococo Dance/dance1_facial.anim",
+    "animationPack": "Engine/Core/Assets/mmd/Mococo Dance/dance1.animpack",
     "matchedExpressions": 40,
     "matchedTargets": 160,
     "unmatchedExpressions": [

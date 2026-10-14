@@ -123,6 +123,21 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
     model = {};
     model.name = std::filesystem::path(sourcePath).stem().string();
     model.sourceFormat = "fbx";
+    // FBX UnitScaleFactor expresses centimeters per source unit. Assimp
+    // exposes it as float in this reader; other readers may use double.
+    float sourceUnits = 1.f;
+    if (scene->mMetaData && !scene->mMetaData->Get("UnitScaleFactor", sourceUnits))
+    {
+        double doubleUnits = 1.0;
+        if (scene->mMetaData->Get("UnitScaleFactor", doubleUnits))
+            sourceUnits = static_cast<float>(doubleUnits);
+    }
+    model.unitScaleToMeters = sourceUnits * 0.01f;
+    if (!std::isfinite(model.unitScaleToMeters) || model.unitScaleToMeters <= 0.f)
+    {
+        error = "FBX has invalid source units";
+        return false;
+    }
 
     for (unsigned index = 0; index < scene->mNumTextures; ++index)
     {
@@ -467,13 +482,16 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
                 }
                 if (source->HasTextureCoords(0))
                 {
+                    // Assimp FBX UVs use a bottom-left origin; engine image
+                    // uploads and glTF UVs use a top-left origin. Convert both
+                    // sets here, leaving image pixels and other importers alone.
                     vertex.uv[0] = source->mTextureCoords[0][sourceIndex].x;
-                    vertex.uv[1] = source->mTextureCoords[0][sourceIndex].y;
+                    vertex.uv[1] = 1.f - source->mTextureCoords[0][sourceIndex].y;
                 }
                 if (source->HasTextureCoords(1))
                 {
                     vertex.uv1[0] = source->mTextureCoords[1][sourceIndex].x;
-                    vertex.uv1[1] = source->mTextureCoords[1][sourceIndex].y;
+                    vertex.uv1[1] = 1.f - source->mTextureCoords[1][sourceIndex].y;
                 }
                 if (source->HasTangentsAndBitangents())
                 {
@@ -481,6 +499,7 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
                     vertex.tangent[0] = tangent.x; vertex.tangent[1] = tangent.y; vertex.tangent[2] = tangent.z;
                     const aiVector3D handed = source->mNormals[sourceIndex] ^ tangent;
                     vertex.tangent[3] = handed * source->mBitangents[sourceIndex] < 0.f ? -1.f : 1.f;
+                    if (source->HasTextureCoords(0)) vertex.tangent[3] *= -1.f;
                 }
                 if (source->HasVertexColors(0))
                 {
@@ -620,48 +639,10 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
         model.animations.push_back(std::move(animation));
     }
 
-    // Some FBX exporters put a centimeter-to-meter factor on every mesh node
-    // even though vertices and bone offsets are already in model coordinates.
-    // In that case the bind matrices resolve to identity while the mesh node
-    // alone scales the same vertices by 100. Remove only this redundant leaf
-    // transform; legitimate scaled mesh binds are left unchanged.
-    const auto nearIdentity = [](const glm::mat4& matrix)
-    {
-        for (int column = 0; column < 4; ++column)
-            for (int row = 0; row < 4; ++row)
-                if (std::abs(matrix[column][row] - (column == row ? 1.f : 0.f)) > 0.01f)
-                    return false;
-        return true;
-    };
-    for (size_t nodeIndex = 0; nodeIndex < model.nodes.size(); ++nodeIndex)
-    {
-        auto& node = model.nodes[nodeIndex];
-        if (node.primitives.empty() || !std::all_of(node.primitives.begin(),
-            node.primitives.end(), [&](unsigned primitiveIndex)
-            {
-                if (primitiveIndex >= model.primitives.size()) return false;
-                const int skinIndex = model.primitives[primitiveIndex].skinIndex;
-                if (skinIndex < 0) return false;
-                const auto& skin = model.skins[static_cast<size_t>(skinIndex)];
-                return !skin.jointNodes.empty() &&
-                    nearIdentity(bindWorld[skin.jointNodes.front()] *
-                        skin.inverseBindMatrices.front());
-            })) continue;
-        if (std::abs(node.scale.x - 100.f) > 0.01f ||
-            std::abs(node.scale.y - 100.f) > 0.01f ||
-            std::abs(node.scale.z - 100.f) > 0.01f ||
-            !nearIdentity(node.parent < 0 ? glm::mat4(1.f) :
-                bindWorld[static_cast<size_t>(node.parent)])) continue;
-        const bool hasChildren = std::any_of(model.nodes.begin(), model.nodes.end(),
-            [nodeIndex](const Engine::Model::ImportedNode& candidate)
-            { return candidate.parent == static_cast<int>(nodeIndex); });
-        if (!hasChildren)
-        {
-            node.translation = glm::vec3(0.f);
-            node.rotation = glm::quat(1.f, 0.f, 0.f, 0.f);
-            node.scale = glm::vec3(1.f);
-        }
-    }
+    // Preserve authored mesh-node transforms. A scale of 100 can convert
+    // meter vertices into the skeleton's centimeter space; its rotation and
+    // translation also place each mesh in the shared bind pose. Bone offsets
+    // near identity do not prove that this mesh transform is redundant.
 
     // The runtime stores decomposed TRS nodes. Rebuild inverse binds against
     // those exact rest transforms so every joint yields the same mesh bind

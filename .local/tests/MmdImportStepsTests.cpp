@@ -10,6 +10,7 @@
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Lighting/Light.h"
 #include "Core/Compoonents/Materials/Material.h"
+#include "Core/Assets/Scripts/Animation/MmdDanceReplay.h"
 #include "Core/Model/AnimationClipAsset.h"
 #include "Core/Model/AnimationPackAsset.h"
 #include "Core/Model/RigAsset.h"
@@ -23,6 +24,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
@@ -32,6 +34,9 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <assimp/Importer.hpp>
+#include <assimp/postprocess.h>
+#include <assimp/scene.h>
 #ifdef _WIN32
 #define NOMINMAX
 #include <Windows.h>
@@ -56,8 +61,49 @@ static void Memory(const char* stage)
 #endif
 }
 
+static bool SaveMmdDemo(const fs::path& prefab, const fs::path& scenePath)
+{
+    Engine::Scene::Scene demo;
+    if (!Engine::Serialization::SceneSerializer::InstantiatePrefab(
+            demo, prefab.string()))
+        return false;
+    auto* floor = demo.AddObject("Dance Floor");
+    floor->transform.position = { 0.f, -.025f, 0.f };
+    floor->transform.scale = { 6.f, .04f, 6.f };
+    floor->AddComponent<Engine::Components::Mesh>()->LoadFromFile(
+        "Assets/Mesh/diagnostic_cube.obj");
+    auto* floorMaterial = floor->AddComponent<Engine::Components::Material>();
+    floorMaterial->diffuseColor = { .16f, .19f, .24f };
+    floorMaterial->metallicFactor = .05f;
+    floorMaterial->roughnessFactor = .85f;
+    auto* cameraObject = demo.AddObject("Dance Camera");
+    cameraObject->transform.position = { 0.f, .95f, 2.7f };
+    auto* camera = cameraObject->AddComponent<Engine::Components::Camera>();
+    camera->useTransformRotation = false;
+    camera->target = { 0.f, .75f, 0.f };
+    camera->fov = 50.f;
+    camera->farPlane = 100.f;
+    auto* lightObject = demo.AddObject("Dance Key Light");
+    lightObject->transform.position = { -2.f, 3.f, 2.f };
+    lightObject->transform.rotation = { .65f, 2.6f, 0.f };
+    auto* light = lightObject->AddComponent<Engine::Components::Light>();
+    light->lightType = static_cast<int>(Engine::Components::Light::Type::Directional);
+    light->intensity = 2.f;
+    light->castsShadows = true;
+    demo.AddObject("MMD Animation Replay")->AddComponent<MmdDanceReplay>();
+    fs::create_directories(scenePath.parent_path());
+    if (!Engine::Serialization::SceneSerializer::Save(demo, scenePath.string()))
+        return false;
+    Engine::Scene::Scene reloaded;
+    if (!Engine::Serialization::SceneSerializer::Load(reloaded, scenePath.string()) ||
+        reloaded.GetObjects().size() < 4)
+        return false;
+    return true;
+}
+
 int main()
 {
+    std::cout << std::unitbuf;
     const fs::path source = fs::path(MMD_TEST_ASSET_ROOT) /
         "Mococo/Mococo (FBX No Outline).fbx";
     Engine::Model::ImportedModel model;
@@ -66,6 +112,58 @@ int main()
     {
         std::cerr << "MMD step 1: FBX decode failed: " << error << '\n';
         return 1;
+    }
+    if (std::getenv("MMD_REBUILD_DEMO"))
+    {
+        const fs::path assetRoot = MMD_TEST_ASSET_ROOT;
+        const fs::path vmd = assetRoot / "dance1.vmd";
+        const fs::path profile = source.parent_path() / "Mococo.mmdrig.json";
+        const fs::path mapping = source.parent_path() / "Mococo.mmdmap.json";
+        Engine::Editor::VmdMotion motion;
+        Engine::Editor::MmdPoseRetargeter retargeter;
+        if (!Engine::Editor::VmdMotionDecoder::DecodeFile(vmd.string(), motion, error) ||
+            !retargeter.Initialize(model, Engine::Serialization::JsonParseFile(profile.string()),
+                Engine::Serialization::JsonParseFile(mapping.string()), motion, error))
+        { std::cerr << error << '\n'; return 1; }
+        float worstDifference = 0.f;
+        for (float frame : { 0.f, 30.f, 60.5f, 120.f, 240.5f, 322.f })
+        {
+            const auto incremental = retargeter.Sample(frame);
+            const auto reference = retargeter.Sample(frame, true);
+            for (size_t bone = 0; bone < reference.sourceWorld.size(); ++bone)
+                for (int column = 0; column < 4; ++column)
+                    for (int row = 0; row < 4; ++row)
+                        worstDifference = std::max(worstDifference, std::abs(
+                            incremental.sourceWorld[bone][column][row] -
+                            reference.sourceWorld[bone][column][row]));
+        }
+        std::cout << "IK dependency update/reference matrix difference: " << worstDifference << '\n';
+        if (worstDifference > 1e-5f) return 1;
+        std::cout << "Decoded corrected FBX and VMD; baking body motion at 120 Hz.\n";
+        auto body = retargeter.BakeBody(motion.lastFrame, "dance1 body");
+        auto face = retargeter.BakeFacial(motion.lastFrame, "dance1 facial");
+        std::cout << "Baked body and facial animation; writing fresh character assets.\n";
+        model.name = "Mococo Dance";
+        const auto result = Engine::Editor::ModelAssetWriter::Write(model,
+            source.string(), "Engine/Core/Assets/mmd");
+        if (!result.success || !Engine::Editor::MmdDanceAssetBinder::BindBaked(
+                result.prefabPath, vmd.string(), profile.string(), mapping.string(), body, face, error))
+        { std::cerr << result.message << ' ' << error << '\n'; return 1; }
+        if (!SaveMmdDemo(result.prefabPath, "Engine/Core/Assets/Scenes/Animation/mmd.scene"))
+        { std::cerr << "Could not save rebuilt MMD scene\n"; return 1; }
+        std::ofstream credits(fs::path(result.outputDirectory) / "CREDITS.md");
+        credits << "# Mococo dance demo credits\n\n"
+            "Model by Antro (@antro3dcg); MMD conversion and facial work by Shinigami3D "
+            "(@Shinigami_3D). Original character and design belong to hololive. "
+            "See [ReadMe.txt](../Mococo/ReadMe.txt).\n\n"
+            "Source motion: ../dance1.vmd; its author is unidentified in the supplied files. "
+            "The motion declares model black, so artistic compatibility needs visual review.\n\n"
+            "Fresh FBX import: " << model.primitives.size() << " meshes and "
+            << model.skins.size() << " skin palettes. Body and facial clips share the VMD timeline. "
+            "Textures are referenced from ../Mococo/Textures.\n";
+        if (!credits) return 1;
+        std::cout << "Rebuilt " << result.prefabPath << " and mmd.scene.\n";
+        return 0;
     }
     if (std::getenv("MMD_DUMP_FBX_NODES"))
     {
@@ -87,8 +185,111 @@ int main()
         return 0;
     }
 
+    // Compare against the source reader, not inverse binds rebuilt from the
+    // same (potentially damaged) nodes. Mococo's 100x scale and -90 degree
+    // rotation are required to assemble meter/Z-up meshes onto its rig.
+    {
+        Assimp::Importer sourceReader;
+        const aiScene* original = sourceReader.ReadFile(source.string(), aiProcess_Triangulate);
+        if (!original || !original->mRootNode) return 1;
+        size_t index = 0;
+        bool intact = true;
+        const auto inspect = [&](auto&& self, const aiNode* node) -> void
+        {
+            if (index >= model.nodes.size()) { intact = false; return; }
+            const auto& imported = model.nodes[index++];
+            const glm::mat4 local = glm::translate(glm::mat4(1.f), imported.translation) *
+                glm::mat4_cast(imported.rotation) * glm::scale(glm::mat4(1.f), imported.scale);
+            float difference = 0.f;
+            for (int row = 0; row < 4; ++row)
+                for (int column = 0; column < 4; ++column)
+                    difference = std::max(difference, std::abs(local[column][row] - node->mTransformation[row][column]));
+            if (imported.name != node->mName.C_Str() || difference > .001f)
+            {
+                std::cerr << "FBX authored transform changed: " << node->mName.C_Str()
+                          << " (matrix error " << difference << ")\n";
+                intact = false;
+            }
+            for (unsigned child = 0; child < node->mNumChildren; ++child)
+                self(self, node->mChildren[child]);
+        };
+        inspect(inspect, original->mRootNode);
+        if (!intact || index != model.nodes.size()) return 1;
+        std::cout << "MMD step 1: authored FBX transforms preserved.\n";
+        if (original->mNumMeshes != model.primitives.size()) return 1;
+        size_t corners = 0;
+        for (unsigned meshIndex = 0; meshIndex < original->mNumMeshes; ++meshIndex)
+        {
+            const auto* mesh = original->mMeshes[meshIndex];
+            const auto& primitive = model.primitives[meshIndex];
+            if (primitive.materialIndex != static_cast<int>(mesh->mMaterialIndex)) return 1;
+            size_t cornerIndex = 0;
+            for (unsigned face = 0; face < mesh->mNumFaces; ++face)
+                if (mesh->mFaces[face].mNumIndices == 3)
+                    for (unsigned corner = 0; corner < 3; ++corner)
+                    {
+                        if (cornerIndex >= primitive.vertices.size()) return 1;
+                        const auto sourceIndex = mesh->mFaces[face].mIndices[corner];
+                        const auto& vertex = primitive.vertices[cornerIndex++];
+                        for (int axis = 0; axis < 3; ++axis)
+                            if (std::abs(vertex.pos[axis] - mesh->mVertices[sourceIndex][axis]) > 1e-6f) return 1;
+                        for (unsigned set = 0; set < 2; ++set)
+                            if (mesh->HasTextureCoords(set))
+                            {
+                                const auto& uv = mesh->mTextureCoords[set][sourceIndex];
+                                const auto* actual = set == 0 ? vertex.uv : vertex.uv1;
+                                // Assimp's vertex joining merges UVs within 1e-5.
+                                if (std::abs(actual[0] - uv.x) > 1e-5f ||
+                                    std::abs(actual[1] - (1.f - uv.y)) > 1e-5f)
+                                { std::cerr << "FBX texture orientation mismatch: " << primitive.name
+                                    << " corner " << cornerIndex - 1 << " set " << set << " actual " << actual[0] << ',' << actual[1]
+                                    << " expected " << uv.x << ',' << 1.f - uv.y << '\n'; return 1; }
+                            }
+                    }
+            if (cornerIndex != primitive.vertices.size()) return 1;
+            corners += cornerIndex;
+        }
+        std::cout << "MMD step 1: all " << corners / 3 << " triangles, material slots and top-left UVs verified.\n";
+    }
+
+    if (std::getenv("MMD_REFRESH_MESH_ASSETS"))
+    {
+        const fs::path directory = fs::path(MMD_TEST_ASSET_ROOT) / "Mococo Dance/Meshes";
+        std::vector<fs::path> paths(model.primitives.size());
+        for (const auto& entry : fs::directory_iterator(directory))
+        {
+            if (entry.path().extension() != ".mesh") continue;
+            const auto metadata = Engine::Serialization::JsonParseFile(entry.path().string() + ".meta");
+            const auto& settings = metadata["importSettings"];
+            const int primitiveIndex = settings["primitiveIndex"].IsNumber()
+                ? settings["primitiveIndex"].AsInt() : -1;
+            if (settings["importer"].AsString() != "model-mesh" || primitiveIndex < 0 ||
+                static_cast<size_t>(primitiveIndex) >= paths.size() || !paths[primitiveIndex].empty() ||
+                fs::weakly_canonical(metadata["sourcePath"].AsString()) != fs::weakly_canonical(source)) return 1;
+            Engine::Components::Mesh existing;
+            existing.LoadFromFile(entry.path().string());
+            const auto& stored = existing.GetVertices();
+            const auto& decoded = model.primitives[primitiveIndex].vertices;
+            if (stored.size() != decoded.size() || existing.GetIndexCount() != 0) return 1;
+            for (size_t vertex = 0; vertex < stored.size(); ++vertex)
+                for (int axis = 0; axis < 3; ++axis)
+                    if (stored[vertex].pos[axis] != decoded[vertex].pos[axis]) return 1;
+            paths[primitiveIndex] = entry.path();
+        }
+        for (const auto& path : paths) if (path.empty()) return 1;
+        const fs::path backup = ".local/test-output/mmd-before-uv";
+        fs::create_directories(backup);
+        for (size_t index = 0; index < paths.size(); ++index)
+        {
+            fs::copy_file(paths[index], backup / paths[index].filename(), fs::copy_options::overwrite_existing);
+            if (!Engine::Components::Mesh::SaveNativeFile(paths[index].string(), model.primitives[index].vertices)) return 1;
+        }
+        std::cout << "Refreshed " << paths.size() << " mesh assets in place; prefab, materials, morphs, rig, animation and asset IDs retained.\n";
+        return 0;
+    }
+
     if (model.primitives.size() < 55 || model.nodes.size() < 269 ||
-        model.skins.size() != 7)
+        model.skins.size() != 11 || std::abs(model.unitScaleToMeters - .01f) > 1e-6f)
     {
         std::cerr << "MMD step 1: incomplete character import: "
                   << model.primitives.size() << " meshes, "
@@ -172,6 +373,112 @@ int main()
         world[index] = node.parent < 0 ? local : world.at(static_cast<size_t>(node.parent)) * local;
     }
     bool checkedFacialBind = false;
+    if (std::getenv("MMD_VALIDATE_PREFAB"))
+    {
+        const fs::path output = ".local/test-output/mococo-rest";
+        fs::create_directories(output);
+        const char* existingPrefab = std::getenv("MMD_PREFAB_PATH");
+        const auto result = existingPrefab ? Engine::Model::ModelImportResult {
+            true, existingPrefab, {}, {} } : Engine::Editor::ModelAssetWriter::Write(
+            model, source.string(), output.string());
+        if (!result.success) { std::cerr << result.message << '\n'; return 2; }
+        Engine::Scene::Scene scene;
+        auto* root = Engine::Serialization::SceneSerializer::InstantiatePrefab(
+            scene, result.prefabPath);
+        auto* loaded = root ? root->GetComponent<Engine::Components::Model>() : nullptr;
+        if (!loaded) return 2;
+        const glm::mat4 modelWorld = root->transform.GetWorldMatrix();
+        if (!existingPrefab && glm::distance(root->transform.scale,
+                glm::vec3(model.unitScaleToMeters)) > 1e-6f) return 2;
+        const bool repair = existingPrefab && std::getenv("MMD_REPAIR_PREFAB");
+        if (repair)
+        {
+            // Preserve existing clips, materials, authored mesh files and rig
+            // references. The old shared rig was bound against the stripped
+            // mesh transforms; compensate per mesh before restoring the nodes.
+            for (size_t index = 0; index < model.nodes.size(); ++index)
+            {
+                auto* object = loaded->ResolveNode(static_cast<unsigned>(index));
+                if (!object) return 2;
+                const glm::mat4 oldWorld = object->transform.GetWorldMatrix();
+                for (size_t slot = 0; slot < model.nodes[index].primitives.size(); ++slot)
+                {
+                    auto* target = model.nodes[index].primitives.size() == 1 ? object : object->Children.at(slot);
+                    if (auto* deformer = target->GetComponent<Engine::Components::SkinnedMesh>())
+                        deformer->bindMeshToModel *= glm::inverse(oldWorld) * modelWorld * world[index];
+                }
+            }
+            for (size_t index = 0; index < model.nodes.size(); ++index)
+            {
+                auto* object = loaded->ResolveNode(static_cast<unsigned>(index));
+                const auto& imported = model.nodes[index];
+                const glm::mat4 expectedLocal = glm::translate(glm::mat4(1.f), imported.translation) *
+                    glm::mat4_cast(imported.rotation) * glm::scale(glm::mat4(1.f), imported.scale);
+                const glm::mat4 existingLocal = object->transform.GetLocalMatrix();
+                float difference = 0.f;
+                for (int c = 0; c < 4; ++c)
+                    for (int r = 0; r < 4; ++r)
+                        difference = std::max(difference, std::abs(expectedLocal[c][r] - existingLocal[c][r]));
+                if (difference <= .001f) continue;
+                const glm::quat q = glm::normalize(imported.rotation);
+                object->transform.position = imported.translation;
+                object->transform.rotation = {
+                    std::atan2(2.f * (q.w * q.x + q.y * q.z), 1.f - 2.f * (q.x * q.x + q.y * q.y)),
+                    std::asin(std::clamp(2.f * (q.w * q.y - q.z * q.x), -1.f, 1.f)),
+                    std::atan2(2.f * (q.w * q.z + q.x * q.y), 1.f - 2.f * (q.y * q.y + q.z * q.z)) };
+                object->transform.scale = imported.scale;
+            }
+        }
+        float worstTransform = 0.f, worstVertex = 0.f;
+        unsigned failedNodes = 0;
+        for (size_t index = 0; index < model.nodes.size(); ++index)
+        {
+            auto* object = loaded->ResolveNode(static_cast<unsigned>(index));
+            if (!object) return 2;
+            const glm::mat4 actual = object->transform.GetWorldMatrix();
+            float difference = 0.f;
+            for (int c = 0; c < 4; ++c)
+                for (int r = 0; r < 4; ++r)
+                    difference = std::max(difference, std::abs(actual[c][r] - (modelWorld * world[index])[c][r]));
+            worstTransform = std::max(worstTransform, difference);
+            if (difference > .01f && failedNodes++ < 12)
+                std::cerr << "Prefab transform mismatch " << index << ' ' << object->name
+                          << ": " << difference << " rotation " << object->transform.rotation.x
+                          << ',' << object->transform.rotation.y << ',' << object->transform.rotation.z << '\n';
+            for (size_t slot = 0; slot < model.nodes[index].primitives.size(); ++slot)
+            {
+                const auto& primitive = model.primitives[model.nodes[index].primitives[slot]];
+                auto* target = model.nodes[index].primitives.size() == 1 ? object : object->Children[slot];
+                auto* deformer = target->GetComponent<Engine::Components::SkinnedMesh>();
+                if (!deformer || primitive.skinIndex < 0) continue;
+                const auto& palette = deformer->BuildPalette();
+                const size_t stride = std::max<size_t>(1, primitive.vertices.size() / 128);
+                for (size_t i = 0; i < primitive.vertices.size(); i += stride)
+                {
+                    const auto& vertex = primitive.vertices[i];
+                    const glm::vec4 position(vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.f);
+                    glm::vec4 skinned(0.f);
+                    for (int influence = 0; influence < 8; ++influence)
+                    {
+                        const float weight = influence < 4 ? vertex.weights0[influence] : vertex.weights1[influence - 4];
+                        if (weight <= 0.f) continue;
+                        const size_t joint = static_cast<size_t>(influence < 4 ? vertex.joints0[influence] : vertex.joints1[influence - 4]);
+                        skinned += weight * palette.at(joint) * position;
+                    }
+                    worstVertex = std::max(worstVertex, glm::length(glm::vec3(
+                        target->transform.GetWorldMatrix() * skinned - modelWorld * world[index] * position)));
+                }
+            }
+        }
+        std::cout << "Prefab rest validation: " << failedNodes << " changed nodes, worst transform "
+                  << worstTransform << ", worst skinned vertex " << worstVertex << '\n';
+        if (repair && worstTransform <= .01f && worstVertex <= .05f)
+        {
+            if (!Engine::Serialization::SceneSerializer::SavePrefab(*root, existingPrefab)) return 2;
+            std::cout << "Repaired authored transforms and mesh bind corrections in " << existingPrefab << '\n';
+        }
+        return worstTransform > .01f || worstVertex > .05f ? 2 : 0;
+    }
     for (size_t nodeIndex = 0; nodeIndex < model.nodes.size(); ++nodeIndex)
         for (unsigned primitiveIndex : model.nodes[nodeIndex].primitives)
         {
@@ -565,6 +872,17 @@ int main()
     Engine::Editor::MmdPoseRetargeter retargeter;
     if (!retargeter.Initialize(model, rig, map, dance, error))
     { std::cerr << "MMD step 6: pose converter failed: " << error << '\n'; return 6; }
+    for (float frame : { 0.f, 30.f, 60.5f, 120.f, 240.5f, 322.f })
+    {
+        const auto incremental = retargeter.Sample(frame);
+        const auto reference = retargeter.Sample(frame, true);
+        for (size_t bone = 0; bone < reference.sourceWorld.size(); ++bone)
+            for (int column = 0; column < 4; ++column)
+                for (int row = 0; row < 4; ++row)
+                    if (std::abs(incremental.sourceWorld[bone][column][row] -
+                            reference.sourceWorld[bone][column][row]) > 1e-5f)
+                    { std::cerr << "IK dependency update differs from full solver\n"; return 6; }
+    }
     Engine::Editor::VmdMotion neutral;
     Engine::Editor::MmdPoseRetargeter restConverter;
     if (!restConverter.Initialize(model, rig, map, neutral, error))
@@ -1060,7 +1378,7 @@ int main()
     for (auto* component : boundRoot->Components)
         skeletonCount += dynamic_cast<Engine::Components::Skeleton*>(component) != nullptr;
     if (!savedBody || !savedFace || !manager ||
-        meshCount != 56 || morphMeshCount != 4 || skeletonCount != 7 ||
+        meshCount != 56 || morphMeshCount != 4 || skeletonCount != bindingModel.skins.size() ||
         boundSkinnedMeshes != 56 ||
         savedBody->clip.channels.size() != baked.channels.size() ||
         savedFace->clip.channels.size() != facial.clip.channels.size() ||
@@ -1143,40 +1461,8 @@ int main()
         ? fs::path("Engine/Core/Assets/Scenes/Animation/mmd.scene")
         : output / "mmd.scene";
     {
-    Engine::Scene::Scene demo;
-    if (!Engine::Serialization::SceneSerializer::InstantiatePrefab(
-            demo, prefab.string()))
-    { std::cerr << "MMD step 10: could not instantiate dance prefab\n"; return 10; }
-    auto* floor = demo.AddObject("Dance Floor");
-    floor->transform.position = { 0.f, -0.35f, 0.f };
-    floor->transform.scale = { 100.f, .25f, 100.f };
-    floor->AddComponent<Engine::Components::Mesh>()->LoadFromFile(
-        "Assets/Mesh/diagnostic_cube.obj");
-    auto* floorMaterial = floor->AddComponent<Engine::Components::Material>();
-    floorMaterial->diffuseColor = { .16f, .19f, .24f };
-    floorMaterial->metallicFactor = .05f;
-    floorMaterial->roughnessFactor = .85f;
-    auto* cameraObject = demo.AddObject("Dance Camera");
-    cameraObject->transform.position = { 0.f, 17.f, -65.f };
-    auto* camera = cameraObject->AddComponent<Engine::Components::Camera>();
-    camera->useTransformRotation = false;
-    camera->target = { 0.f, 9.f, 0.f };
-    camera->fov = 50.f;
-    camera->farPlane = 250.f;
-    auto* lightObject = demo.AddObject("Dance Key Light");
-    lightObject->transform.position = { -12.f, 25.f, -20.f };
-    lightObject->transform.rotation = { .65f, -.5f, 0.f };
-    auto* light = lightObject->AddComponent<Engine::Components::Light>();
-    light->lightType = static_cast<int>(Engine::Components::Light::Type::Directional);
-    light->intensity = 2.f;
-    light->castsShadows = true;
-    fs::create_directories(scenePath.parent_path());
-    if (!Engine::Serialization::SceneSerializer::Save(demo, scenePath.string()))
-    { std::cerr << "MMD step 10: could not save scene\n"; return 10; }
-    Engine::Scene::Scene reloaded;
-    if (!Engine::Serialization::SceneSerializer::Load(reloaded, scenePath.string()) ||
-        reloaded.GetObjects().size() < 4)
-    { std::cerr << "MMD step 10: scene reload failed\n"; return 10; }
+    if (!SaveMmdDemo(prefab, scenePath))
+    { std::cerr << "MMD step 10: scene setup failed\n"; return 10; }
     std::cout << "MMD step 10: saved and reloaded scene with character, "
                  "floor, camera and light.\n";
     }

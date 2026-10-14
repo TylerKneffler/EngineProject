@@ -201,6 +201,7 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
 
         ::Engine::Scene::Scene scene;
         Engine::Core::Object* root = scene.AddObject(sourceName);
+        root->transform.scale = glm::vec3(model.unitScaleToMeters);
         for (size_t index = 0; index < model.skins.size(); ++index)
         {
             Engine::Components::Skeleton* skeleton =

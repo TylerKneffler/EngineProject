@@ -1,6 +1,9 @@
 #include "Core/Compoonents/Animation/AnimationManager.h"
 #include "Core/Compoonents/Animation/Model.h"
 #include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Materials/Material.h"
+#include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Assets/Scripts/Animation/MmdDanceReplay.h"
 #include "Core/Model/AnimationPackAsset.h"
 #include "Core/Model/AnimationClipAsset.h"
 #include "Core/Object.h"
@@ -182,6 +185,35 @@ int main(int argc, char** argv)
         const auto& nodes = model->ResolveNodes();
         Check(nodes.size() == imported.nodes.size(),
             "Saved model node count differs from source FBX");
+        size_t checkedMeshes = 0;
+        for (size_t nodeIndex = 0; nodeIndex < imported.nodes.size(); ++nodeIndex)
+        {
+            const auto& primitiveIndices = imported.nodes[nodeIndex].primitives;
+            for (size_t slot = 0; slot < primitiveIndices.size(); ++slot)
+            {
+                const auto& primitive = imported.primitives[primitiveIndices[slot]];
+                auto* object = primitiveIndices.size() == 1 ? nodes[nodeIndex] : nodes[nodeIndex]->Children.at(slot);
+                auto* mesh = object->GetComponent<Mesh>();
+                Check(mesh && mesh->GetVertices().size() == primitive.vertices.size(), "Saved mesh geometry is incomplete");
+                const auto& vertices = mesh->GetVertices();
+                for (size_t index = 0; index < vertices.size(); ++index)
+                    for (int axis = 0; axis < 2; ++axis)
+                        Check(vertices[index].uv[axis] == primitive.vertices[index].uv[axis] &&
+                            vertices[index].uv1[axis] == primitive.vertices[index].uv1[axis] &&
+                            vertices[index].tangent[3] == primitive.vertices[index].tangent[3],
+                            "Saved mesh has stale texture coordinates: " + object->name);
+                auto* material = object->GetComponent<Engine::Components::Material>();
+                const auto& expected = imported.materials.at(primitive.materialIndex);
+                Check(material && material->baseColorTexture &&
+                    fs::weakly_canonical(material->baseColorTexture->GetFilePath()) ==
+                        fs::weakly_canonical(fbxPath.parent_path() / expected.baseColorTexture) &&
+                    material->alphaMode == expected.alphaMode,
+                    "Saved mesh has an incorrect material/texture: " + object->name);
+                ++checkedMeshes;
+            }
+        }
+        Check(checkedMeshes == imported.primitives.size(), "Saved scene is missing an FBX mesh");
+        std::cout << "All " << checkedMeshes << " saved meshes have the corrected UVs and source material/texture bindings.\n";
         std::unordered_map<std::string, Mesh*> meshes;
         FindMeshes(character, "", meshes);
         size_t morphOrderMismatches = 0;
@@ -217,6 +249,7 @@ int main(int argc, char** argv)
         Memory("raw FBX and VMD decode");
 
         float worstPosition = 0.f, worstAngle = 0.f, worstWeight = 0.f;
+        float worstNodeMatrix = 0.f;
         std::string worstWeightTarget;
         size_t checkedBones = 0, checkedWeights = 0, checkedVisibility = 0;
         const auto verify = [&](float frame)
@@ -226,6 +259,19 @@ int main(int argc, char** argv)
             manager->layers[0].time = time;
             manager->Tick(0.f);
             const auto pose = retargeter.Sample(frame);
+            // Static mesh nodes are absent from reduced animation channels.
+            // Check them too: missing import scale/rotation can leave all
+            // animated bones correct while the rendered character falls apart.
+            for (size_t node = 0; node < nodes.size(); ++node)
+            {
+                Check(nodes[node] && node < pose.local.size(),
+                    "Imported node missing during playback");
+                const glm::mat4 actual = nodes[node]->transform.GetLocalMatrix();
+                for (int column = 0; column < 4; ++column)
+                    for (int row = 0; row < 4; ++row)
+                        worstNodeMatrix = std::max(worstNodeMatrix,
+                            std::abs(actual[column][row] - pose.local[node][column][row]));
+            }
             for (const auto& channel : body->channels)
             {
                 if (channel.nodeIndex >= nodes.size() || !nodes[channel.nodeIndex])
@@ -296,21 +342,33 @@ int main(int argc, char** argv)
             " weight (" << worstWeightTarget << ")\n" << std::flush;
         Check(worstPosition < 0.08f && worstAngle < 0.12f &&
             worstWeight < 0.01f, "Saved scene differs from raw VMD retargeted pose");
+        std::cout << "All-node playback matrix error: " << worstNodeMatrix << '\n';
+        Check(worstNodeMatrix < 0.01f,
+            "Static mesh or animated node transforms differ from the corrected FBX/VMD pose");
 
         for (const float step : { 1.f / 30.f, 1.f / 60.f })
         {
+            auto* replayObject = scene.FindObjectByName("MMD Animation Replay");
+            Check(replayObject && replayObject->GetComponent<MmdDanceReplay>(),
+                "Saved MMD scene has no replay script");
             manager->time = 0.f;
             manager->layers[0].time = 0.f;
-            for (float elapsed = 0.f; elapsed < raw.durationSeconds - 0.0001f;)
+            unsigned restarts = 0;
+            for (float elapsed = 0.f; elapsed < raw.durationSeconds * 3.f + step * 4.f; elapsed += step)
             {
-                const float delta = std::min(step, raw.durationSeconds - elapsed);
-                scene.Update(delta);
-                elapsed += delta;
+                const float before = manager->time;
+                scene.Update(step);
+                if (manager->time < before) ++restarts;
+                Check(manager->playing &&
+                    std::abs(manager->time - manager->layers[0].time) < 0.002f,
+                    "Replay stopped or desynchronized body/facial animation");
             }
-            Check(std::abs(manager->time - raw.durationSeconds) < 0.002f &&
-                std::abs(manager->layers[0].time - raw.durationSeconds) < 0.002f,
-                "Headless playback did not reach the raw VMD duration");
-            std::cout << "Headless scene playback reached frame 322 at " <<
+            Check(restarts == 3, "MMD script did not replay the dance three times");
+            manager->playing = false;
+            scene.Update(step);
+            Check(manager->playing && manager->time == 0.f && manager->layers[0].time == 0.f,
+                "MMD script did not restart stopped playback");
+            std::cout << "Headless scene playback replayed the dance three times at " <<
                 static_cast<int>(std::round(1.f / step)) << " fps\n";
         }
         Memory("after scene playback");

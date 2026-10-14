@@ -1,10 +1,10 @@
 {
     "version": 1,
-    "id": "2906f3a4-e9b6-4e42-914f-315c5934e4c5",
-    "sourcePath": "C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/mmd/dance1.vmd",
+    "id": "fa46c398-44b5-4f44-a880-ddc2e898622f",
+    "sourcePath": "C:/repos/EngineProject/Engine/Core/Assets/mmd/dance1.vmd",
     "importSettings": {
         "importer": "mmd-body",
-        "map": "C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/mmd\\Mococo\\Mococo.mmdmap.json"
+        "map": "C:/repos/EngineProject/Engine/Core/Assets/mmd\\Mococo\\Mococo.mmdmap.json"
     }
 }
 

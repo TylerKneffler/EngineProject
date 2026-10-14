@@ -869,9 +869,7 @@ void Mesh::CreateMorphBuffers()
                     target.tangents[vertexIndex], 0.f);
         }
     }
-    m_morphDeltaBuffer = m_bufferFactory->CreateBuffer(
-        IGraphicsBuffer::Usage::ShaderResource,
-        IGraphicsBuffer::AccessMode::Upload,
+    m_morphDeltaBuffer = m_bufferFactory->CreateStaticShaderResource(
         static_cast<uint64_t>(deltas.size()) * sizeof(GpuMorphDelta),
         deltas.data(), sizeof(GpuMorphDelta));
 

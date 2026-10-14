@@ -746,6 +746,7 @@ if(NOT ENGINE_PROJECT_DIR AND
     enable_testing()
     add_executable(MmdImportStepsTests EXCLUDE_FROM_ALL
         "${ENGINE_LOCAL_TEST_ROOT}/MmdImportStepsTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Animation/MmdDanceReplay.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/FbxModelDecoder.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/VmdMotionDecoder.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/VmdSceneImporter.cpp"
@@ -759,6 +760,10 @@ if(NOT ENGINE_PROJECT_DIR AND
         MMD_TEST_ASSET_ROOT="${ENGINE_ROOT}/Engine/Core/Assets/mmd")
     add_test(NAME MmdImportSteps COMMAND MmdImportStepsTests)
     set_tests_properties(MmdImportSteps PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
+    add_test(NAME MmdPrefabRestTransforms COMMAND MmdImportStepsTests)
+    set_tests_properties(MmdPrefabRestTransforms PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}"
+        ENVIRONMENT "MMD_VALIDATE_PREFAB=1")
     find_package(Python3 QUIET COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND AND
        EXISTS "${ENGINE_ROOT}/Scripts/extract_pmx_rig.py")
@@ -778,6 +783,7 @@ if(NOT ENGINE_PROJECT_DIR AND
     enable_testing()
     add_executable(MmdSceneHeadlessTests EXCLUDE_FROM_ALL
         "${ENGINE_LOCAL_TEST_ROOT}/MmdSceneHeadlessTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Animation/MmdDanceReplay.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/FbxModelDecoder.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/VmdMotionDecoder.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/MmdPoseRetargeter.cpp"
@@ -881,6 +887,18 @@ if(NOT ENGINE_PROJECT_DIR AND
     add_test(NAME SoftTissueDemoSceneRegression COMMAND SoftTissueDemoSceneTests)
     set_tests_properties(SoftTissueDemoSceneRegression PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/MmdRenderTests.cpp")
+    enable_testing()
+    add_executable(MmdRenderTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/MmdRenderTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Animation/MmdDanceReplay.cpp")
+    target_link_libraries(MmdRenderTests PRIVATE Engine)
+    target_include_directories(MmdRenderTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME MmdRenderedPlay COMMAND MmdRenderTests)
+    set_tests_properties(MmdRenderedPlay PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND

@@ -240,6 +240,9 @@ public:
         m_renderFramePrepared = false;
     }
     bool IsEditorMeshEditPose() const { return m_editorMeshEditPose; }
+    // Viewport preference only; leave individual rig visibility and saved assets intact.
+    void SetEditorBonesVisible(bool visible) { m_editorBonesVisible = visible; }
+    bool AreEditorBonesVisible() const { return m_editorBonesVisible; }
     void SetEditorWeightPaint(Engine::Components::Mesh* mesh, int bone)
     {
         if (m_editorWeightPaintMesh == mesh && m_editorWeightPaintBone == bone)
@@ -594,6 +597,7 @@ private:
     Object* m_selectedObject = nullptr;
     Engine::Components::Mesh* m_editorSelectedMesh = nullptr;
     bool m_editorMeshEditPose = false;
+    bool m_editorBonesVisible = true;
     Engine::Components::Mesh* m_editorWeightPaintMesh = nullptr;
     int m_editorWeightPaintBone = -1;
     Object* m_previewObject = nullptr;

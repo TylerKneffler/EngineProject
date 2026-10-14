@@ -105,6 +105,9 @@ struct ImportedModel
 {
     std::string name;
     std::string sourceFormat;
+    // Source-node/clip coordinates remain intact; the prefab root converts
+    // their units to the engine's meters exactly once.
+    float unitScaleToMeters = 1.f;
     std::vector<ImportedMaterial> materials;
     std::vector<ImportedTexture> textures;
     std::vector<ImportedPrimitive> primitives;
