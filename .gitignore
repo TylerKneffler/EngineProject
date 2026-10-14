@@ -17,6 +17,7 @@ build/
 !.local/tests/WeightInfluenceTests.cpp
 !.local/tests/MmdImportStepsTests.cpp
 !.local/tests/MmdSceneHeadlessTests.cpp
+!.local/tests/EditorViewportSettingsTests.cpp
 !.local/tests/MmdRenderTests.cpp
 !.local/tests/MmdVisibilityTests.cpp
 !.local/tests/MmdFacialPlaybackTests.cpp

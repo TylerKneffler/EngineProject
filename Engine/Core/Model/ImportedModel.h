@@ -49,6 +49,7 @@ struct ImportedPrimitive
     std::vector<float> morphWeights;
     int materialIndex = -1;
     int skinIndex = -1;
+    glm::mat4 bindMeshToModel { 1.f };
 };
 
 struct ImportedNode

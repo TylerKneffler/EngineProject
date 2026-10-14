@@ -1,5 +1,6 @@
 
 #include "SceneView.h"
+#include "Editor/Core/View/EditorViewportSettings.h"
 #include "Scene/SceneCameraController.h"
 #include "Scene/ScenePlacementAndPicking.h"
 #include "Engine/Editor/Core/View/Templates/EditModes/Object/ObjectViewportTemplate.h"
@@ -63,6 +64,7 @@ void SceneView::Init(void* device,
 // ---------------------------------------------------------------------------
 void SceneView::DrawPanel(IEditorUi& ui)
 {
+    if (m_scene) EditorViewportSettings::Apply(*m_scene);
     if (m_focusOnNextDraw)
     {
         ui.FocusWindow(m_title.c_str());

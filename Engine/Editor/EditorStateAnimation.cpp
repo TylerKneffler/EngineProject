@@ -764,6 +764,8 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
         raw->view = view.get();
         view->SetDocumentPath(path);
         view->SetEditMode(SceneEditMode::Skeleton);
+        view->SetPoseEditing(true);
+        view->SetTransformTool(EditorTransformTool::Rotate);
         view->AllowObjectCreation = false;
         view->AllowAssetDrops = false;
         view->CanSelectObject = [raw](const Engine::Core::Object* object)
@@ -796,10 +798,61 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
                         }
                 }
         };
+        view->SetPoseTranslationHandler([this, raw](Engine::Core::Object* tip,
+            const glm::vec3& target)
+        {
+            auto* skeleton = raw->poseSkeleton;
+            if (!skeleton || !tip) return false;
+            const auto& joints = skeleton->ResolveJoints();
+            auto* lower = tip->Parent;
+            auto* upper = lower ? lower->Parent : nullptr;
+            if (!upper || std::find(joints.begin(), joints.end(), upper) == joints.end() ||
+                std::find(joints.begin(), joints.end(), lower) == joints.end()) return false;
+            const auto track = std::find_if(raw->tracks.begin(), raw->tracks.end(),
+                [raw](const auto& item) { return item.index == raw->rigIndex; });
+            if (track == raw->tracks.end()) return false;
+            const auto& nodes = skeleton->jointNodes;
+            const auto tipIndex = std::find(joints.begin(), joints.end(), tip) - joints.begin();
+            if (static_cast<size_t>(tipIndex) >= nodes.size()) return false;
+            const auto isTip = [&](const auto& controls)
+            {
+                return std::any_of(controls.limbs.begin(), controls.limbs.end(),
+                    [&](const auto& limb) { return limb.tip == static_cast<int>(nodes[tipIndex]); });
+            };
+            if (!raw->gizmoDragIK && !isTip(track->controls) &&
+                !isTip(HumanoidControls(*skeleton))) return false;
+            raw->playing = false;
+            if (!raw->gizmoDragIK)
+            {
+                const glm::vec3 root = upper->transform.GetWorldPosition();
+                const glm::vec3 end = tip->transform.GetWorldPosition();
+                raw->ikPole = lower->transform.GetWorldPosition() * 2.f - (root + end) * .5f;
+                glm::mat3 basis(tip->transform.GetWorldMatrix());
+                for (int axis = 0; axis < 3; ++axis)
+                    if (glm::length(basis[axis]) > 1e-6f) basis[axis] = glm::normalize(basis[axis]);
+                raw->ikTargetRotation = glm::eulerAngles(glm::normalize(glm::quat_cast(basis)));
+                raw->ikControlTip = static_cast<int>(tipIndex);
+                raw->ikControlTime = raw->playheadSeconds;
+                raw->ikSpace = Engine::Model::AnimationClip::LimbKey::Space::Body;
+                raw->ikSpaceNode = -1;
+                raw->ikPropReference.Clear();
+            }
+            raw->ikTarget = target;
+            raw->ikBlend = 1.f;
+            if (!Engine::Components::TwoBoneIK::Blend(*upper, *lower, *tip,
+                    target, raw->ikPole, glm::quat(raw->ikTargetRotation), 1.f)) return false;
+            raw->gizmoDragIK = true;
+            for (auto* joint : {upper, lower, tip})
+                joint->transform.NotifyEditorTransformChanged(Engine::Components::Transform::EditorRotation);
+            if (m_renderer) m_renderer->MarkDirty();
+            return true;
+        });
         view->OnGizmoInteraction = [this, raw](bool active)
         {
             if (active && !raw->gizmoWasActive)
             {
+                raw->playing = false;
+                raw->gizmoDragIK = false;
                 raw->gizmoWasActive = true;
                 raw->gizmoDragBone = raw->poseScene
                     ? raw->poseScene->GetSelectedObject() : nullptr;
@@ -816,16 +869,23 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
                 if (!active)
                 {
                     raw->gizmoWasActive = false;
-                    const auto* bone = raw->gizmoDragBone;
-                    const bool changed = bone &&
+                    auto* bone = raw->gizmoDragBone;
+                    const bool changed = raw->gizmoDragIK || (bone &&
                         (bone->transform.position !=
                             raw->gizmoDragStartPosition ||
                          bone->transform.rotation !=
                             raw->gizmoDragStartRotation ||
                          bone->transform.scale !=
-                            raw->gizmoDragStartScale);
+                            raw->gizmoDragStartScale));
                     raw->gizmoDragBone = nullptr;
-                    if (raw->autoKey && changed) AddAnimationKey(*raw);
+                    if (raw->autoKey && changed)
+                    {
+                        if (raw->gizmoDragIK && bone && bone->Parent && bone->Parent->Parent)
+                            AddAnimationLimbKey(*raw, *bone->Parent->Parent, *bone->Parent,
+                                *bone, false);
+                        else AddAnimationKey(*raw);
+                    }
+                    raw->gizmoDragIK = false;
                 }
             }
             if (m_renderer && active) m_renderer->MarkDirty();
@@ -1016,6 +1076,19 @@ EditorState::AnimationDocument::CachedClip& EditorState::CachedAnimationClip(
             [](float a, float b) { return std::abs(a - b) < .0001f; }),
             times.end());
     }
+    // Build clip-wide key groups once per revision, rather than sorting all
+    // bone keys on every timeline frame.
+    std::vector<std::pair<float, unsigned>> summary;
+    for (const auto& [node, times] : cached.keyTimes)
+        for (float time : times) summary.emplace_back(time, node);
+    std::sort(summary.begin(), summary.end());
+    for (const auto& [time, node] : summary)
+    {
+        if (cached.summaryKeys.empty() ||
+            std::abs(time - cached.summaryKeys.back().time) > 1e-4f)
+            cached.summaryKeys.push_back({time, {}});
+        cached.summaryKeys.back().keys.emplace_back(node, time);
+    }
     return document.clipCache.emplace(key, std::move(cached)).first->second;
 }
 
@@ -1126,6 +1199,7 @@ void EditorState::SampleAnimationDocument(AnimationDocument& document)
             if (rebuild) document.previewLayouts[preview] = std::move(layout);
             preview->holdCurrentPoseWhenStopped = false;
             preview->Tick(0.f);
+            preview->holdCurrentPoseWhenStopped = true;
         }
         for (const auto& track : document.tracks)
         {
@@ -1203,7 +1277,9 @@ void EditorState::SampleAnimationDocument(AnimationDocument& document)
     document.poseManager->clip = clips[clipIndex].clipName;
     document.poseManager->time = document.playheadSeconds;
     document.poseManager->looping = false;
+    document.poseManager->holdCurrentPoseWhenStopped = false;
     document.poseManager->Tick(0.f);
+    document.poseManager->holdCurrentPoseWhenStopped = true;
     document.poseScene->ApplyPoseConstraints();
     if (m_renderer) m_renderer->MarkDirty();
 }
@@ -2034,6 +2110,10 @@ void EditorState::DrawAnimationMappingRepair(IEditorUi& ui,
     if (!document.sourceManager || !document.poseSkeleton ||
         document.clipIndex < 0 || document.clipIndex >=
             static_cast<int>(document.sourceManager->clips.size())) return;
+    for (auto& track : document.tracks)
+        if (track.index == document.rigIndex &&
+            CachedAnimationClip(document, track, document.clipIndex).mappingReady)
+            return;
     auto* model = document.poseSkeleton->ResolveModel();
     if (!model) return;
     auto& clips = document.sourceManager->clips;
@@ -2977,8 +3057,12 @@ bool EditorState::DrawAnimationRigViewport(IEditorUi& ui,
         ui.DrawViewportText({screen.x + 12.f, screen.y - 8.f},
             handle.label, handle.color);
     }
+    const bool canDragHandles = document.view &&
+        document.view->GetTransformTool() == EditorTransformTool::Translate;
+    if (!canDragHandles && document.rigHandleDrag < 0) return false;
     if (input.leftClicked && hovered >= 0)
     {
+        document.playing = false;
         document.rigHandleKind = hovered;
         document.rigHandleDrag = hovered;
         const int node = hovered == 0 ? track->controls.root :
@@ -3050,8 +3134,10 @@ bool EditorState::DrawAnimationRigViewport(IEditorUi& ui,
             const glm::mat4 cameraWorld = glm::inverse(camera->GetViewMatrix());
             const glm::vec3 right = glm::normalize(glm::vec3(cameraWorld[0]));
             const glm::vec3 up = glm::normalize(glm::vec3(cameraWorld[1]));
-            const float distance = glm::distance(found->world,
-                document.poseScene->editorCamera.transform.GetWorldPosition());
+            // Perspective scale depends on camera-space depth. Radial distance
+            // makes handles near the edge of the viewport outrun the pointer.
+            const float distance = std::abs((camera->GetViewMatrix() *
+                glm::vec4(found->world, 1.f)).z);
             const float worldPerPixel = camera->orthographic
                 ? 2.f * camera->orthographicSize / input.available.y
                 : 2.f * std::max(.01f, distance) *
@@ -3080,9 +3166,14 @@ bool EditorState::DrawAnimationRigViewport(IEditorUi& ui,
                 auto* lower = jointAt(limb.lower);
                 auto* tip = jointAt(limb.tip);
                 if (upper && lower && tip)
+                {
                     Engine::Components::TwoBoneIK::Blend(*upper, *lower, *tip,
                         document.ikTarget, document.ikPole,
                         glm::quat(document.ikTargetRotation), document.ikBlend);
+                    for (auto* joint : {upper, lower, tip})
+                        joint->transform.NotifyEditorTransformChanged(
+                            Engine::Components::Transform::EditorRotation);
+                }
             }
             if (m_renderer) m_renderer->MarkDirty();
         }
@@ -3280,6 +3371,7 @@ void EditorState::DrawAnimationProperties(IEditorUi& ui,
         channels |= Engine::Components::Transform::EditorScale;
     if (channels)
     {
+        document.playing = false;
         transform.NotifyEditorTransformChanged(channels);
         document.poseControlEditPending = true;
         if (m_renderer) m_renderer->MarkDirty();
@@ -3717,6 +3809,7 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
         float startSeconds = 0.f;
         bool repeat = false;
         int repeatCount = 0;
+        const std::vector<AnimationDocument::CachedClip::SummaryKey>* summaryKeys = nullptr;
     };
     std::vector<Row> rows;
     for (auto& track : document.tracks)
@@ -3743,6 +3836,9 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
             rows.back().startSeconds = startSeconds;
             rows.back().repeat = repeat;
             rows.back().repeatCount = repeatCount;
+            if (clip)
+                rows.back().summaryKeys = &CachedAnimationClip(
+                    document, track, clipIndex).summaryKeys;
             if (!expanded) return;
             const auto& joints = track.poseSkeleton->ResolveJoints();
             for (size_t boneIndex = 0; boneIndex < joints.size(); ++boneIndex)
@@ -4020,6 +4116,24 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
         return a.rigIndex == b.rigIndex && a.clipIndex == b.clipIndex &&
             a.nodeIndex == b.nodeIndex && std::abs(a.time - b.time) <= 1e-4f;
     };
+    // Header keys can contain hundreds of bones. Index selection once so
+    // drawing a large selection does not scan every selected key per bone.
+    std::map<std::tuple<size_t, int, unsigned>, std::vector<float>> selectedTimes;
+    for (const auto& key : document.selectedKeys)
+        selectedTimes[{key.rigIndex, key.clipIndex, key.nodeIndex}].push_back(key.time);
+    for (auto& [identity, times] : selectedTimes)
+        std::sort(times.begin(), times.end());
+    const auto isDrawSelected = [&](const TimelineKey& key)
+    {
+        const auto found = selectedTimes.find(
+            {key.rigIndex, key.clipIndex, key.nodeIndex});
+        if (found == selectedTimes.end()) return false;
+        const auto& times = found->second;
+        const auto next = std::lower_bound(times.begin(), times.end(), key.time);
+        return (next != times.end() && std::abs(*next - key.time) <= 1e-4f) ||
+            (next != times.begin() && std::abs(*std::prev(next) - key.time) <= 1e-4f);
+    };
+    // Input handling below mutates selection during this frame.
     const auto isSelected = [&](const TimelineKey& key)
     {
         return std::any_of(document.selectedKeys.begin(),
@@ -4029,14 +4143,14 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
     const auto drawKey = [&](Row& row, float center, float time,
         std::vector<TimelineKey> keys, ImU32 color)
     {
-        const bool selected = std::any_of(keys.begin(), keys.end(), isSelected);
+        const bool selected = std::any_of(keys.begin(), keys.end(), isDrawSelected);
         float shownTime = time;
         if (document.keyDragging && selected &&
-            std::all_of(keys.begin(), keys.end(), isSelected))
+            std::all_of(keys.begin(), keys.end(), isDrawSelected))
             shownTime += document.keyDragDelta;
         const float x = timeX +
             (row.startSeconds + shownTime) * pixelsPerSecond;
-        if (x < labelRight - 8.f || x > origin.x + canvasWidth + 8.f)
+        if (x < labelRight - 8.f || x > draw->GetClipRectMax().x + 8.f)
             return;
         if (selected)
             draw->AddCircleFilled({ x, center }, 10.f,
@@ -4254,25 +4368,23 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
             }
             ImGui::PopID();
             ImGui::PopID();
-            if (row.keyTimes)
+            if (row.summaryKeys && bottom >= visibleTop && top <= visibleBottom)
             {
-                std::vector<std::pair<float, TimelineKey>> all;
-                for (const auto& [node, times] : *row.keyTimes)
-                    for (float time : times)
-                        all.push_back({ time, { row.track->index,
-                            row.clipIndex, node, time } });
-                std::sort(all.begin(), all.end(), [](const auto& a,
-                    const auto& b) { return a.first < b.first; });
-                for (size_t first = 0; first < all.size();)
+                const float drag = document.keyDragging ? document.keyDragDelta : 0.f;
+                const float firstTime = visibleStart - row.startSeconds -
+                    8.f / pixelsPerSecond - std::max(0.f, drag);
+                const float lastTime = visibleEnd - row.startSeconds +
+                    8.f / pixelsPerSecond - std::min(0.f, drag);
+                for (auto key = std::lower_bound(row.summaryKeys->begin(),
+                         row.summaryKeys->end(), firstTime,
+                         [](const auto& group, float time) { return group.time < time; });
+                     key != row.summaryKeys->end() && key->time <= lastTime; ++key)
                 {
-                    size_t last = first + 1;
-                    std::vector<TimelineKey> group{ all[first].second };
-                    while (last < all.size() &&
-                        std::abs(all[last].first - all[first].first) <= 1e-4f)
-                        group.push_back(all[last++].second);
-                    drawKey(row, center, all[first].first,
-                        std::move(group), color);
-                    first = last;
+                    std::vector<TimelineKey> group;
+                    group.reserve(key->keys.size());
+                    for (const auto& [node, time] : key->keys)
+                        group.push_back({row.track->index, row.clipIndex, node, time});
+                    drawKey(row, center, key->time, std::move(group), color);
                 }
             }
             continue;
@@ -4298,9 +4410,12 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
             : std::unordered_map<unsigned, std::vector<float>>::const_iterator{};
         if (row.keyTimes && times != row.keyTimes->end())
         for (auto time = std::lower_bound(times->second.begin(),
-                 times->second.end(), visibleStart - 8.f / pixelsPerSecond);
+                 times->second.end(), visibleStart - row.startSeconds -
+                     8.f / pixelsPerSecond - std::max(0.f,
+                         document.keyDragging ? document.keyDragDelta : 0.f));
              time != times->second.end() &&
-                 *time <= visibleEnd + 8.f / pixelsPerSecond; ++time)
+                 *time <= visibleEnd - row.startSeconds + 8.f / pixelsPerSecond -
+                     std::min(0.f, document.keyDragging ? document.keyDragDelta : 0.f); ++time)
         {
             drawKey(row, center, *time,
                 { { row.track->index, row.clipIndex,

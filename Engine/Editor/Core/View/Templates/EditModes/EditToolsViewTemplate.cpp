@@ -4,6 +4,7 @@
 #include "Engine/Editor/EditorState.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Engine/Editor/Core/View/Views/SceneView.h"
+#include "Editor/Core/View/EditorViewportSettings.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Object.h"
 #include "Core/Compoonents/Obj/Mesh.h"
@@ -169,6 +170,7 @@ SceneView* EditorState::GetGlobalToolbarSceneView() const
 {
     Engine::Scene::Scene* scene = GetActiveDocumentScene();
     if (!scene) return nullptr;
+    EditorViewportSettings::Apply(*scene);
     SceneView* view = nullptr;
     if (m_activeSceneAssetDocument)
         view = m_activeSceneAssetDocument->view;
@@ -1102,7 +1104,10 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
         if (row.Next(ToolbarButtonWidth(bonesLabel)))
         {
             if (ui.Button(bonesLabel))
-                scene->SetEditorBonesVisible(!scene->AreEditorBonesVisible());
+            {
+                EditorViewportSettings::SetBonesVisible(!scene->AreEditorBonesVisible());
+                EditorViewportSettings::Apply(*scene);
+            }
             ui.Tooltip("Show bones in Scene View without changing the rig");
         }
         const char* gridLabel = scene->settings.showGrid ? "Grid *" : "Grid";

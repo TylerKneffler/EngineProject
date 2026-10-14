@@ -271,6 +271,7 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
                 {
                     Engine::Components::SkinnedMesh* deformer = target->AddComponent<Engine::Components::SkinnedMesh>();
                     deformer->skinIndex = primitive.skinIndex;
+                    deformer->bindMeshToModel = primitive.bindMeshToModel;
                 }
             }
         }

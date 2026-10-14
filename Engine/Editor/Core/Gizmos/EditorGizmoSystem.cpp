@@ -382,6 +382,8 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         ? selected->GetPrefabInstanceRoot() : nullptr;
 
     Engine::Core::Object* boneHit = nullptr;
+    Engine::Core::Object* jointHit = nullptr;
+    float jointHitDistance = FLT_MAX;
     float boneHitDistance = FLT_MAX;
     std::set<std::pair<Engine::Core::Object*, Engine::Core::Object*>> drawnBones;
     std::unordered_set<Engine::Core::Object*> drawnRoots;
@@ -420,6 +422,11 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
                     boneHit = joint;
                     boneHitDistance = hitDistance;
                 }
+                if (hitDistance <= 9.f && hitDistance < jointHitDistance)
+                {
+                    jointHit = joint;
+                    jointHitDistance = hitDistance;
+                }
 
                 if (!parentJoint)
                 {
@@ -453,13 +460,14 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
                     rootScreen, tipScreen, parameter);
                 if (hitDistance <= 7.f && hitDistance < boneHitDistance)
                 {
-                    boneHit = joint;
+                    boneHit = m_poseEditing ? parentJoint : joint;
                     boneHitDistance = hitDistance;
                 }
             }
         }
     }
 
+    if (m_poseEditing && jointHit) boneHit = jointHit;
     Engine::Core::Object* iconHit = nullptr;
     float iconHitDistance = FLT_MAX;
     for (const auto& objectPointer : scene.GetObjects())
@@ -796,8 +804,11 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
                     localDelta = glm::vec3(glm::inverse(parentWorld) *
                         glm::vec4(worldDelta, 0.f));
             }
-            m_dragObject->transform.position =
-                m_dragStartLocalPosition + localDelta;
+            if (!m_poseEditing || !m_poseTranslationHandler ||
+                !m_poseTranslationHandler(m_dragObject,
+                    m_dragStartWorldPosition + worldDelta))
+                m_dragObject->transform.position =
+                    m_dragStartLocalPosition + localDelta;
         }
         else if (m_dragTool == EditorTransformTool::Rotate)
         {

@@ -556,9 +556,15 @@ private:
         bool rigAssetsDirty = true;
         struct CachedClip
         {
+            struct SummaryKey
+            {
+                float time = 0.f;
+                std::vector<std::pair<unsigned, float>> keys;
+            };
             Engine::Model::AnimationClip compatible;
             bool mappingReady = true;
             std::unordered_map<unsigned, std::vector<float>> keyTimes;
+            std::vector<SummaryKey> summaryKeys;
         };
         using ClipCacheKey = std::tuple<
             const Engine::Components::AnimationManager*,
@@ -629,6 +635,7 @@ private:
         int chainIterations = 24;
         float chainRootTranslation = 0.f;
         bool gizmoWasActive = false;
+        bool gizmoDragIK = false;
         int rigHandleKind = -1; // 0 root, 1 pelvis, then target/pole pairs.
         int rigHandleDrag = -1;
         glm::vec3 rigHandleDragStart { 0.f };

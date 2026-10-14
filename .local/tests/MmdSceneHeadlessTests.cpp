@@ -1,5 +1,8 @@
 #include "Core/Compoonents/Animation/AnimationManager.h"
 #include "Core/Compoonents/Animation/Model.h"
+#include "Core/Compoonents/Animation/Skeleton.h"
+#include "Core/Compoonents/Animation/SkinnedMesh.h"
+#include "Core/Compoonents/Animation/AnimationBone.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Materials/Texture.h"
@@ -183,6 +186,22 @@ int main(int argc, char** argv)
             return 0;
         }
         const auto& nodes = model->ResolveNodes();
+        auto* sharedSkeleton = character->GetComponent<Engine::Components::Skeleton>();
+        size_t skeletonCount = 0;
+        for (auto* component : character->Components)
+            skeletonCount += dynamic_cast<Engine::Components::Skeleton*>(component) != nullptr;
+        Check(skeletonCount == 1 && sharedSkeleton &&
+            imported.skins.size() == 1 && sharedSkeleton->jointNodes == imported.skins[0].jointNodes,
+            "Mococo does not use one shared skeleton");
+        Check(Engine::Model::RigAsset::LoadAll(sharedSkeleton->rigPath).size() == 1,
+            "Mococo rig asset still contains duplicate skeletons");
+        for (unsigned node : sharedSkeleton->jointNodes)
+        {
+            size_t bones = 0;
+            for (auto* component : nodes.at(node)->Components)
+                bones += dynamic_cast<Engine::Components::AnimationBone*>(component) != nullptr;
+            Check(bones == 1, "A Mococo joint has duplicate bone components");
+        }
         Check(nodes.size() == imported.nodes.size(),
             "Saved model node count differs from source FBX");
         size_t checkedMeshes = 0;
@@ -194,6 +213,9 @@ int main(int argc, char** argv)
                 const auto& primitive = imported.primitives[primitiveIndices[slot]];
                 auto* object = primitiveIndices.size() == 1 ? nodes[nodeIndex] : nodes[nodeIndex]->Children.at(slot);
                 auto* mesh = object->GetComponent<Mesh>();
+                auto* skin = object->GetComponent<Engine::Components::SkinnedMesh>();
+                Check(skin && skin->ResolveSkeleton() == sharedSkeleton,
+                    "Mococo mesh does not resolve its shared skeleton");
                 Check(mesh && mesh->GetVertices().size() == primitive.vertices.size(), "Saved mesh geometry is incomplete");
                 const auto& vertices = mesh->GetVertices();
                 for (size_t index = 0; index < vertices.size(); ++index)
@@ -202,6 +224,13 @@ int main(int argc, char** argv)
                             vertices[index].uv1[axis] == primitive.vertices[index].uv1[axis] &&
                             vertices[index].tangent[3] == primitive.vertices[index].tangent[3],
                             "Saved mesh has stale texture coordinates: " + object->name);
+                for (size_t index = 0; index < vertices.size(); ++index)
+                    for (int influence = 0; influence < 4; ++influence)
+                        Check(vertices[index].joints0[influence] == primitive.vertices[index].joints0[influence] &&
+                            vertices[index].joints1[influence] == primitive.vertices[index].joints1[influence] &&
+                            vertices[index].weights0[influence] == primitive.vertices[index].weights0[influence] &&
+                            vertices[index].weights1[influence] == primitive.vertices[index].weights1[influence],
+                            "Saved mesh uses an obsolete joint palette: " + object->name);
                 auto* material = object->GetComponent<Engine::Components::Material>();
                 const auto& expected = imported.materials.at(primitive.materialIndex);
                 Check(material && material->baseColorTexture &&

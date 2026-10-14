@@ -4,7 +4,6 @@
     "sourcePath": "C:/repos/EngineProject/Engine/Core/Assets/mmd/Mococo/Mococo (FBX No Outline).fbx",
     "importSettings": {
         "importer": "model-rig",
-        "skinCount": 11
+        "skinCount": 1
     }
 }
-

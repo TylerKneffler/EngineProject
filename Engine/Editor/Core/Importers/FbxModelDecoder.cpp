@@ -644,10 +644,8 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
     // translation also place each mesh in the shared bind pose. Bone offsets
     // near identity do not prove that this mesh transform is redundant.
 
-    // The runtime stores decomposed TRS nodes. Rebuild inverse binds against
-    // those exact rest transforms so every joint yields the same mesh bind
-    // pose, including FBX bones whose original matrices contained transform
-    // inheritance that decomposition cannot represent exactly.
+    // Use the runtime's decomposed TRS rest transforms, including bones whose
+    // original FBX inheritance cannot be represented exactly by runtime TRS.
     std::vector<glm::mat4> runtimeWorld(model.nodes.size(), glm::mat4(1.f));
     for (size_t index = 0; index < model.nodes.size(); ++index)
     {
@@ -657,63 +655,72 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
         runtimeWorld[index] = node.parent < 0 ? local :
             runtimeWorld[static_cast<size_t>(node.parent)] * local;
     }
-    for (size_t nodeIndex = 0; nodeIndex < model.nodes.size(); ++nodeIndex)
-        for (unsigned primitiveIndex : model.nodes[nodeIndex].primitives)
-        {
-            const int skinIndex = model.primitives[primitiveIndex].skinIndex;
-            if (skinIndex < 0) continue;
-            auto& skin = model.skins[static_cast<size_t>(skinIndex)];
-            for (size_t joint = 0; joint < skin.jointNodes.size(); ++joint)
-            {
-                const glm::mat4& jointWorld = runtimeWorld[skin.jointNodes[joint]];
-                const float determinant = glm::determinant(jointWorld);
-                if (!std::isfinite(determinant) || std::abs(determinant) < 1e-8f)
-                {
-                    error = "FBX joint has a non-invertible bind transform";
-                    return false;
-                }
-                skin.inverseBindMatrices[joint] =
-                    glm::inverse(jointWorld) * runtimeWorld[nodeIndex];
-            }
-        }
-
-    // Assimp presents many FBX meshes with their own copy of the same bone
-    // palette. Once their runtime bind matrices are final, share identical
-    // palettes without changing the per-vertex palette indices.
-    std::vector<Engine::Model::ImportedSkin> distinctSkins;
-    std::vector<int> remap(model.skins.size(), -1);
-    for (size_t sourceIndex = 0; sourceIndex < model.skins.size(); ++sourceIndex)
+    // Meshes sharing joints belong to one armature. Store inverse binds in
+    // model space, move the mesh-specific bind onto SkinnedMesh, and remap
+    // vertex weights to a union palette. Independent armatures remain separate.
+    std::vector<size_t> parents(model.skins.size());
+    std::iota(parents.begin(), parents.end(), 0u);
+    const auto rootOf = [&](size_t index)
     {
-        const auto& sourceSkin = model.skins[sourceIndex];
-        for (size_t targetIndex = 0; targetIndex < distinctSkins.size(); ++targetIndex)
+        while (parents[index] != index) index = parents[index];
+        return index;
+    };
+    std::unordered_map<unsigned, size_t> ownerByJoint;
+    for (size_t skin = 0; skin < model.skins.size(); ++skin)
+        for (unsigned joint : model.skins[skin].jointNodes)
         {
-            const auto& targetSkin = distinctSkins[targetIndex];
-            if (sourceSkin.jointNodes != targetSkin.jointNodes ||
-                sourceSkin.inverseBindMatrices.size() !=
-                    targetSkin.inverseBindMatrices.size()) continue;
-            bool identical = true;
-            for (size_t joint = 0; identical &&
-                joint < sourceSkin.inverseBindMatrices.size(); ++joint)
-                for (int column = 0; identical && column < 4; ++column)
-                    for (int row = 0; row < 4; ++row)
-                        identical &= sourceSkin.inverseBindMatrices[joint][column][row] ==
-                            targetSkin.inverseBindMatrices[joint][column][row];
-            if (identical)
-            {
-                remap[sourceIndex] = static_cast<int>(targetIndex);
-                break;
-            }
+            const auto [found, inserted] = ownerByJoint.emplace(joint, skin);
+            if (!inserted) parents[rootOf(skin)] = rootOf(found->second);
         }
-        if (remap[sourceIndex] < 0)
+    std::vector<Engine::Model::ImportedSkin> armatures;
+    std::unordered_map<size_t, size_t> armatureByRoot;
+    std::vector<size_t> remap(model.skins.size());
+    for (size_t skin = 0; skin < model.skins.size(); ++skin)
+    {
+        const auto [found, inserted] = armatureByRoot.emplace(rootOf(skin), armatures.size());
+        if (inserted) armatures.push_back({ model.skins[skin].name });
+        remap[skin] = found->second;
+        auto& joints = armatures[found->second].jointNodes;
+        joints.insert(joints.end(), model.skins[skin].jointNodes.begin(), model.skins[skin].jointNodes.end());
+    }
+    std::vector<std::unordered_map<unsigned, unsigned>> palettes(armatures.size());
+    for (size_t rig = 0; rig < armatures.size(); ++rig)
+    {
+        auto& skin = armatures[rig];
+        std::sort(skin.jointNodes.begin(), skin.jointNodes.end());
+        skin.jointNodes.erase(std::unique(skin.jointNodes.begin(), skin.jointNodes.end()), skin.jointNodes.end());
+        for (unsigned palette = 0; palette < skin.jointNodes.size(); ++palette)
         {
-            remap[sourceIndex] = static_cast<int>(distinctSkins.size());
-            distinctSkins.push_back(sourceSkin);
+            const unsigned node = skin.jointNodes[palette];
+            const float determinant = glm::determinant(runtimeWorld[node]);
+            if (!std::isfinite(determinant) || std::abs(determinant) < 1e-8f)
+            {
+                error = "FBX joint has a non-invertible bind transform";
+                return false;
+            }
+            palettes[rig].emplace(node, palette);
+            skin.inverseBindMatrices.push_back(glm::inverse(runtimeWorld[node]));
         }
     }
-    for (auto& primitive : model.primitives)
-        if (primitive.skinIndex >= 0)
-            primitive.skinIndex = remap[static_cast<size_t>(primitive.skinIndex)];
-    model.skins = std::move(distinctSkins);
+    for (size_t node = 0; node < model.nodes.size(); ++node)
+        for (unsigned index : model.nodes[node].primitives)
+        {
+            auto& primitive = model.primitives[index];
+            if (primitive.skinIndex < 0) continue;
+            const size_t sourceSkin = static_cast<size_t>(primitive.skinIndex);
+            const size_t rig = remap[sourceSkin];
+            for (auto& vertex : primitive.vertices)
+                for (int slot = 0; slot < 8; ++slot)
+                {
+                    float& joint = slot < 4 ? vertex.joints0[slot] : vertex.joints1[slot - 4];
+                    const float weight = slot < 4 ? vertex.weights0[slot] : vertex.weights1[slot - 4];
+                    joint = weight > 0.f ? static_cast<float>(palettes[rig].at(
+                        model.skins[sourceSkin].jointNodes.at(static_cast<size_t>(joint)))) : 0.f;
+                }
+            primitive.skinIndex = static_cast<int>(rig);
+            primitive.bindMeshToModel = runtimeWorld[node];
+        }
+    model.skins = std::move(armatures);
     return true;
 }
 }

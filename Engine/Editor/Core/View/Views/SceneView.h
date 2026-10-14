@@ -59,6 +59,10 @@ public:
     { return m_toolbar.GetTransformTool(); }
     void SetTransformTool(EditorTransformTool tool)
     { m_toolbar.SetTransformTool(tool); }
+    void SetPoseEditing(bool enabled) { m_gizmos.SetPoseEditing(enabled); }
+    void SetPoseTranslationHandler(std::function<bool(Engine::Core::Object*,
+        const glm::vec3&)> handler)
+    { m_gizmos.SetPoseTranslationHandler(std::move(handler)); }
     void SetBoneTransformSettings(int pivotMode, const glm::vec3& customPivot,
         float translationSnap, float rotationSnapDegrees, float scaleSnap)
     {

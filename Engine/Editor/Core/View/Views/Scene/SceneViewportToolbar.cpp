@@ -1,4 +1,5 @@
 #include "SceneViewportToolbar.h"
+#include "Editor/Core/View/EditorViewportSettings.h"
 
 #include "SceneCameraController.h"
 #include "Core/Object.h"
@@ -869,7 +870,10 @@ bool SceneViewportToolbar::DrawBonesToggle(IEditorUi& ui,
     const bool hovered = Contains(input.mousePosInViewport, center, radius);
     const bool consumed = input.rawLeftClicked && hovered;
     if (consumed)
-        scene->SetEditorBonesVisible(!scene->AreEditorBonesVisible());
+    {
+        EditorViewportSettings::SetBonesVisible(!scene->AreEditorBonesVisible());
+        EditorViewportSettings::Apply(*scene);
+    }
     const bool enabled = scene->AreEditorBonesVisible();
     ui.DrawViewportCircle(center, radius,
         enabled ? EditorUiColor{0.18f, 0.38f, 0.68f, 0.98f}

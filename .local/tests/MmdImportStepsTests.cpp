@@ -6,6 +6,9 @@
 #include "Editor/Core/Importers/ModelAssetWriter.h"
 #include "Core/Compoonents/Animation/ModelAnimation.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
+#include "Core/Compoonents/Animation/Skeleton.h"
+#include "Core/Compoonents/Animation/AnimationBone.h"
+#include <chrono>
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Lighting/Light.h"
@@ -98,6 +101,181 @@ static bool SaveMmdDemo(const fs::path& prefab, const fs::path& scenePath)
     if (!Engine::Serialization::SceneSerializer::Load(reloaded, scenePath.string()) ||
         reloaded.GetObjects().size() < 4)
         return false;
+    return true;
+}
+
+static bool ConsolidateMococo(const Engine::Model::ImportedModel& imported)
+{
+    using namespace Engine::Components;
+    const fs::path directory = fs::path(MMD_TEST_ASSET_ROOT) / "Mococo Dance";
+    const fs::path prefab = directory / "Mococo Dance.prefab";
+    const fs::path rigPath = directory / "Mococo Dance.rig";
+    const fs::path stage = fs::path(".local/test-output") /
+        ("mmd-consolidation-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(stage / "Meshes");
+    fs::create_directories(stage / "Before");
+    Engine::Scene::Scene scene;
+    auto* root = Engine::Serialization::SceneSerializer::InstantiatePrefab(scene, prefab.string());
+    auto* model = root ? root->GetComponent<Model>() : nullptr;
+    auto* manager = root ? root->GetComponent<AnimationManager>() : nullptr;
+    auto* skeleton = root ? root->GetComponent<Skeleton>() : nullptr;
+    auto previousRig = Engine::Model::RigAsset::Load(rigPath.string());
+    if (!model || !manager || !skeleton || !previousRig || imported.skins.size() != 1) return false;
+    const auto& nodes = model->ResolveNodes();
+    if (nodes.size() != imported.nodes.size()) return false;
+    struct Rest { glm::vec3 position, rotation, scale; };
+    std::vector<Rest> rest;
+    for (auto* node : nodes) rest.push_back({node->transform.position, node->transform.rotation, node->transform.scale});
+    const auto playback = manager->Serialize();
+    struct Entry
+    {
+        Mesh* mesh;
+        SkinnedMesh* skin;
+        const Engine::Model::ImportedPrimitive* primitive;
+        std::string path;
+        std::vector<float> morphWeights;
+    };
+    std::vector<Entry> entries;
+    for (size_t index = 0; index < nodes.size(); ++index)
+        for (size_t slot = 0; slot < imported.nodes[index].primitives.size(); ++slot)
+        {
+            const auto& indices = imported.nodes[index].primitives;
+            auto* object = indices.size() == 1 ? nodes[index] : nodes[index]->Children.at(slot);
+            auto* mesh = object->GetComponent<Mesh>();
+            auto* skin = object->GetComponent<SkinnedMesh>();
+            const auto& primitive = imported.primitives[indices[slot]];
+            if (!mesh || !skin || mesh->GetVertices().size() != primitive.vertices.size()) return false;
+            const auto relative = fs::weakly_canonical(mesh->GetFilePath()).lexically_relative(
+                fs::weakly_canonical(directory / "Meshes"));
+            if (relative.empty() || *relative.begin() == "..") return false;
+            entries.push_back({mesh, skin, &primitive, mesh->GetFilePath(), mesh->GetMorphWeights()});
+        }
+    if (entries.size() != imported.primitives.size()) return false;
+    scene.Start();
+    manager->looping = false;
+    const auto capture = [&](float frame)
+    {
+        manager->time = frame / 30.f;
+        for (auto& layer : manager->layers) layer.time = manager->time;
+        manager->Tick(0.f);
+        std::vector<glm::vec3> positions;
+        for (const auto& entry : entries)
+        {
+            const auto vertices = entry.mesh->BuildPosedVertices(&entry.skin->BuildPalette());
+            const auto world = entry.mesh->Owner->transform.GetWorldMatrix();
+            for (const auto& vertex : vertices)
+                positions.emplace_back(world * glm::vec4(vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.f));
+        }
+        return positions;
+    };
+    std::vector<std::vector<glm::vec3>> reference;
+    for (float frame : {0.f, 120.f, 322.f}) reference.push_back(capture(frame));
+
+    // These are private test-scene components, with no editor panels retaining
+    // pointers. Notify the scene after removing duplicate component identities.
+    for (auto it = root->Components.begin(); it != root->Components.end();)
+        if (auto* extra = dynamic_cast<Skeleton*>(*it); extra && extra != skeleton)
+        { extra->OnDestroy(); delete extra; it = root->Components.erase(it); }
+        else ++it;
+    root->NotifyStructureChanged();
+    skeleton->skinIndex = 0;
+    skeleton->jointNodes = imported.skins[0].jointNodes;
+    skeleton->inverseBindMatrices = imported.skins[0].inverseBindMatrices;
+    skeleton->MarkConfigurationDirty();
+    std::unordered_map<unsigned, int> palette;
+    for (size_t index = 0; index < skeleton->jointNodes.size(); ++index)
+        palette.emplace(skeleton->jointNodes[index], static_cast<int>(index));
+    for (auto* node : nodes)
+    {
+        AnimationBone* retained = nullptr;
+        for (auto it = node->Components.begin(); it != node->Components.end();)
+            if (auto* bone = dynamic_cast<AnimationBone*>(*it))
+            {
+                if (!retained) { retained = bone; ++it; }
+                else { bone->OnDestroy(); delete bone; it = node->Components.erase(it); }
+            }
+            else ++it;
+        node->NotifyStructureChanged();
+    }
+    for (const auto& [node, index] : palette)
+    {
+        auto* bone = nodes[node]->GetComponent<AnimationBone>();
+        if (!bone) bone = nodes[node]->AddComponent<AnimationBone>();
+        int parent = imported.nodes[node].parent;
+        while (parent >= 0 && !palette.count(static_cast<unsigned>(parent))) parent = imported.nodes[parent].parent;
+        bone->skinIndex = 0;
+        bone->nodeIndex = node;
+        bone->paletteIndex = index;
+        bone->parentPaletteIndex = parent < 0 ? -1 : palette.at(static_cast<unsigned>(parent));
+        bone->hierarchyRoot = parent < 0;
+        bone->MarkConfigurationDirty();
+    }
+    for (auto& entry : entries)
+    {
+        const fs::path candidate = stage / "Meshes" / fs::path(entry.path).filename();
+        if (!Mesh::SaveNativeFile(candidate.string(), entry.primitive->vertices)) return false;
+        entry.mesh->LoadFromFile(candidate.string());
+        entry.skin->skinIndex = 0;
+        entry.skin->bindMeshToModel = entry.primitive->bindMeshToModel;
+        entry.skin->MarkConfigurationDirty();
+    }
+    float worst = 0.f;
+    size_t sample = 0;
+    for (float frame : {0.f, 120.f, 322.f})
+    {
+        const auto candidate = capture(frame);
+        if (candidate.size() != reference[sample].size()) return false;
+        for (size_t vertex = 0; vertex < candidate.size(); ++vertex)
+            worst = std::max(worst, glm::distance(candidate[vertex], reference[sample][vertex]));
+        ++sample;
+    }
+    std::cout << "Shared-skeleton old/new world-vertex error at frames 0/120/322: " << worst << " meters\n";
+    if (worst > 1e-4f) return false;
+    for (size_t index = 0; index < nodes.size(); ++index)
+    {
+        nodes[index]->transform.position = rest[index].position;
+        nodes[index]->transform.rotation = rest[index].rotation;
+        nodes[index]->transform.scale = rest[index].scale;
+    }
+    for (auto& entry : entries) entry.mesh->SetMorphWeights(entry.morphWeights);
+    manager->Deserialize(playback);
+    auto rig = Engine::Model::RigAsset::Capture(scene, *skeleton);
+    rig.animationPaths = previousRig->animationPaths;
+    rig.controls = previousRig->controls;
+    rig.poses = previousRig->poses;
+    rig.symmetryPairs = previousRig->symmetryPairs;
+    rig.prefabPath = (stage / "Mococo Dance.prefab").generic_string();
+    skeleton->rigPath = (stage / "Mococo Dance.rig").generic_string();
+    manager->rigPaths = {skeleton->rigPath};
+    if (!rig.Save(skeleton->rigPath) || !Engine::Serialization::SceneSerializer::SavePrefab(
+            *root, rig.prefabPath)) return false;
+    {
+        Engine::Scene::Scene reload;
+        auto* candidate = Engine::Serialization::SceneSerializer::InstantiatePrefab(reload, rig.prefabPath);
+        auto* loadedSkeleton = candidate ? candidate->GetComponent<Skeleton>() : nullptr;
+        if (!loadedSkeleton || loadedSkeleton->jointNodes != skeleton->jointNodes) return false;
+    }
+    // Publish only after the full geometry comparison and candidate reload.
+    fs::copy_file(prefab, stage / "Before" / prefab.filename());
+    fs::copy_file(rigPath, stage / "Before" / rigPath.filename());
+    for (auto& entry : entries)
+    {
+        fs::copy_file(entry.path, stage / "Before" / fs::path(entry.path).filename());
+        if (!Mesh::SaveNativeFile(entry.path, entry.primitive->vertices)) return false;
+        entry.mesh->LoadFromFile(entry.path);
+    }
+    skeleton->rigPath = rigPath.generic_string();
+    manager->Deserialize(playback);
+    rig.prefabPath = prefab.generic_string();
+    if (!Engine::Model::RigAsset::SaveBundle(rigPath.string(), {rig}) ||
+        !Engine::Serialization::SceneSerializer::SavePrefab(*root, prefab.string())) return false;
+    auto metadata = Engine::Serialization::JsonParseFile(rigPath.string() + ".meta");
+    metadata["importSettings"].Set("skinCount", Engine::Serialization::JsonValue(1));
+    std::ofstream metadataFile(rigPath.string() + ".meta");
+    metadataFile << Engine::Serialization::JsonWrite(metadata);
+    if (!metadataFile) return false;
+    std::cout << "Consolidated " << entries.size() << " meshes onto one skeleton with " <<
+        skeleton->jointNodes.size() << " unique bones; node hierarchy, materials and clips retained.\n";
     return true;
 }
 
@@ -289,7 +467,7 @@ int main()
     }
 
     if (model.primitives.size() < 55 || model.nodes.size() < 269 ||
-        model.skins.size() != 11 || std::abs(model.unitScaleToMeters - .01f) > 1e-6f)
+        model.skins.size() != 1 || std::abs(model.unitScaleToMeters - .01f) > 1e-6f)
     {
         std::cerr << "MMD step 1: incomplete character import: "
                   << model.primitives.size() << " meshes, "
@@ -300,6 +478,7 @@ int main()
     std::cout << "MMD step 1: FBX decoded (" << model.primitives.size()
               << " meshes, " << model.nodes.size() << " nodes, "
               << model.skins.size() << " skins).\n";
+    if (std::getenv("MMD_CONSOLIDATE_PREFAB")) return ConsolidateMococo(model) ? 0 : 1;
 
     // Step 2: every vertex in a skinned mesh must have a usable palette weight.
     // This checks the actual post-import vertices, including the eight-weight
@@ -490,7 +669,7 @@ int main()
             {
                 if (model.nodes[skin.jointNodes[palette]].name != "head.x") continue;
                 const glm::mat4 rest = world[skin.jointNodes[palette]] *
-                    skin.inverseBindMatrices.at(palette);
+                    skin.inverseBindMatrices.at(palette) * primitive.bindMeshToModel;
                 float maxBindError = 0.f;
                 for (const auto& vertex : primitive.vertices)
                 {
@@ -536,7 +715,7 @@ int main()
                     const size_t joint = static_cast<size_t>(slot < 4 ?
                         vertex.joints0[slot] : vertex.joints1[slot - 4]);
                     skinned += weight * world.at(skin.jointNodes.at(joint)) *
-                        skin.inverseBindMatrices.at(joint) * position;
+                        skin.inverseBindMatrices.at(joint) * primitive.bindMeshToModel * position;
                 }
                 const float bindError = glm::length(glm::vec3(skinned - world[nodeIndex] * position));
                 if (bindError > worstSkinBind) { worstSkinBind = bindError; worstMesh = primitive.name; }
@@ -550,8 +729,9 @@ int main()
             for (unsigned primitiveIndex : model.nodes[nodeIndex].primitives)
                 if (model.primitives[primitiveIndex].name == worstMesh)
                 {
+                    const auto& primitive = model.primitives[primitiveIndex];
                     const auto& skin = model.skins[model.primitives[primitiveIndex].skinIndex];
-                    const glm::mat4 firstRest = world[skin.jointNodes.front()] * skin.inverseBindMatrices.front();
+                    const glm::mat4 firstRest = world[skin.jointNodes.front()] * skin.inverseBindMatrices.front() * primitive.bindMeshToModel;
                     std::cerr << "owner " << model.nodes[nodeIndex].name << " scale "
                               << glm::length(glm::vec3(world[nodeIndex][0])) << " first rest scale "
                               << glm::length(glm::vec3(firstRest[0])) << " parent "
@@ -560,7 +740,7 @@ int main()
                     std::string worstJoint;
                     for (size_t joint = 0; joint < skin.jointNodes.size(); ++joint)
                     {
-                        const glm::mat4 rest = world[skin.jointNodes[joint]] * skin.inverseBindMatrices[joint];
+                        const glm::mat4 rest = world[skin.jointNodes[joint]] * skin.inverseBindMatrices[joint] * primitive.bindMeshToModel;
                         const float delta = glm::length(glm::vec3(rest[3] - world[nodeIndex][3])) +
                             glm::length(glm::vec3(rest[0] - world[nodeIndex][0]));
                         if (delta > worstRest) { worstRest = delta; worstJoint = model.nodes[skin.jointNodes[joint]].name; }
@@ -586,10 +766,10 @@ int main()
             {
                 if (model.nodes[skin.jointNodes[joint]].name != jointName) continue;
                 const glm::mat4 rest = world[skin.jointNodes[joint]] *
-                    skin.inverseBindMatrices[joint];
+                    skin.inverseBindMatrices[joint] * primitive.bindMeshToModel;
                 const glm::mat4 rotated = world[skin.jointNodes[joint]] *
                     glm::rotate(glm::mat4(1.f), 0.25f, glm::vec3(0.f, 1.f, 0.f)) *
-                    skin.inverseBindMatrices[joint];
+                    skin.inverseBindMatrices[joint] * primitive.bindMeshToModel;
                 const size_t stride = std::max<size_t>(1, primitive.vertices.size() / 256);
                 for (size_t vertexIndex = 0; vertexIndex < primitive.vertices.size(); vertexIndex += stride)
                 {

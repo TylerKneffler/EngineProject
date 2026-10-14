@@ -742,6 +742,18 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/EditorViewportSettingsTests.cpp")
+    enable_testing()
+    add_executable(EditorViewportSettingsTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/EditorViewportSettingsTests.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/View/EditorViewportSettings.cpp")
+    target_link_libraries(EditorViewportSettingsTests PRIVATE Engine ImGui)
+    target_include_directories(EditorViewportSettingsTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME EditorViewportSettings COMMAND EditorViewportSettingsTests)
+    set_tests_properties(EditorViewportSettings PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/MmdImportStepsTests.cpp")
     enable_testing()
     add_executable(MmdImportStepsTests EXCLUDE_FROM_ALL

@@ -2,6 +2,7 @@
 
 #include "Engine/Editor/UI/IEditorUi.h"
 #include <glm/glm.hpp>
+#include <functional>
 
 namespace Engine::Core { class Object; }
 namespace Engine::Components { class Skeleton; }
@@ -32,6 +33,9 @@ class EditorGizmoSystem
 {
 public:
     void SetBoneEditing(bool enabled) { m_boneEditing = enabled; }
+    void SetPoseEditing(bool enabled) { m_poseEditing = enabled; }
+    void SetPoseTranslationHandler(std::function<bool(Engine::Core::Object*,
+        const glm::vec3&)> handler) { m_poseTranslationHandler = std::move(handler); }
     void SetBoneTransformSettings(int pivotMode, const glm::vec3& customPivot,
         float translationSnap, float rotationSnapDegrees, float scaleSnap)
     {
@@ -50,6 +54,8 @@ public:
 
 private:
     bool m_boneEditing = false;
+    bool m_poseEditing = false;
+    std::function<bool(Engine::Core::Object*, const glm::vec3&)> m_poseTranslationHandler;
     int m_bonePivotMode = 0;
     glm::vec3 m_boneCustomPivot{};
     float m_boneTranslationSnap = 0.f;

@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "ImGuiUiBackend.h"
+#include "Editor/Core/View/EditorViewportSettings.h"
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "imgui_impl_win32.h"
@@ -89,6 +90,7 @@ bool ImGuiUiBackend::Initialize(void* nativeWindow, ::Engine::Renderers::IEditor
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiPanelHost::RegisterToolbarSettings();
+    EditorViewportSettings::RegisterSettingsHandler();
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
     ConfigureEditorFonts();
