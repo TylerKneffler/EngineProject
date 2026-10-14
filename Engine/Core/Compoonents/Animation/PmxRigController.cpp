@@ -247,6 +247,66 @@ void PmxRigController::Apply()
         }
         m_physicsInitialized = true;
     }
+    if (Owner && !impulseMorphs.empty())
+    {
+        struct Impulses
+        {
+            glm::vec3 worldVelocity { 0.f };
+            glm::vec3 worldTorque { 0.f };
+            glm::vec3 localVelocity { 0.f };
+            glm::vec3 localTorque { 0.f };
+            bool stop = false;
+        };
+        std::unordered_map<std::string, Impulses> byBody;
+        for (const auto& morph : impulseMorphs)
+        {
+            const auto animated = m_animatedMorphWeights.find(morph.name);
+            const float weight = std::clamp(animated == m_animatedMorphWeights.end()
+                ? morph.weight : animated->second, 0.f, 1.f);
+            if (weight == 0.f) continue;
+            for (const auto& offset : morph.offsets)
+            {
+                if (offset.bodyName.empty()) continue;
+                auto& impulse = byBody[offset.bodyName];
+                if (glm::dot(offset.velocity, offset.velocity) == 0.f &&
+                    glm::dot(offset.torque, offset.torque) == 0.f)
+                {
+                    impulse.stop = true;
+                    continue;
+                }
+                if (offset.local)
+                {
+                    impulse.localVelocity += offset.velocity * weight;
+                    impulse.localTorque += offset.torque * weight;
+                }
+                else
+                {
+                    impulse.worldVelocity += offset.velocity * weight;
+                    impulse.worldTorque += offset.torque * weight;
+                }
+            }
+        }
+        const float scale = glm::length(glm::vec3(
+            Owner->transform.GetWorldMatrix()[0]));
+        if (std::isfinite(scale) && scale > 0.f)
+            for (const auto& [name, impulse] : byBody)
+            {
+                Object* bodyObject = Owner->FindObjectInChildrenByName(name);
+                auto* body = bodyObject ? bodyObject->GetComponent<RigidBody>() : nullptr;
+                if (!body || body->bodyType != "Dynamic") continue;
+                if (impulse.stop)
+                    body->StopMotion();
+                const glm::quat rotation = WorldRotation(*bodyObject);
+                const glm::vec3 velocity = impulse.worldVelocity +
+                    rotation * impulse.localVelocity;
+                const glm::vec3 torque = impulse.worldTorque +
+                    rotation * impulse.localTorque;
+                if (glm::dot(velocity, velocity) > 0.f)
+                    body->AddImpulse(velocity * scale);
+                if (glm::dot(torque, torque) > 0.f)
+                    body->AddAngularImpulse(torque * scale * scale);
+            }
+    }
 }
 
 void PmxRigController::ApplyConstraints(Model& modelValue, bool afterPhysics)
@@ -442,6 +502,8 @@ bool PmxRigController::DrawProperties(::Engine::Editor::IEditorUi& ui)
     ui.ValueLabel("Physics-driven bones", physicsCount.c_str());
     const std::string jointCount = std::to_string(physicsJoints.size());
     ui.ValueLabel("PMX physics joints", jointCount.c_str());
+    const std::string impulseCount = std::to_string(impulseMorphs.size());
+    ui.ValueLabel("PMX impulse morphs", impulseCount.c_str());
     if (!ikChains.empty() && ui.PropertyGroupHeader("PMX IK"))
     {
         ui.Indent(12.f);
@@ -468,6 +530,19 @@ bool PmxRigController::DrawProperties(::Engine::Editor::IEditorUi& ui)
             ui.PushId(id.c_str());
             changed |= ui.DragFloat(boneMorphs[i].name.c_str(),
                 &boneMorphs[i].weight, .01f, 0.f, 1.f);
+            ui.PopId();
+        }
+        ui.Unindent(12.f);
+    }
+    if (!impulseMorphs.empty() && ui.PropertyGroupHeader("Impulse Morphs"))
+    {
+        ui.Indent(12.f);
+        for (size_t i = 0; i < impulseMorphs.size(); ++i)
+        {
+            const std::string id = std::to_string(i);
+            ui.PushId(id.c_str());
+            changed |= ui.DragFloat(impulseMorphs[i].name.c_str(),
+                &impulseMorphs[i].weight, .01f, 0.f, 1.f);
             ui.PopId();
         }
         ui.Unindent(12.f);
@@ -609,7 +684,24 @@ PmxRigController::JsonValue PmxRigController::Serialize() const
             .Set("weight", Value(morph.weight))
             .Set("offsets", std::move(offsets)));
     }
-    return result.Set("boneMorphs", std::move(morphs));
+    result.Set("boneMorphs", std::move(morphs));
+    Value impulses = Value::MakeArray();
+    for (const auto& morph : impulseMorphs)
+    {
+        Value offsets = Value::MakeArray();
+        for (const auto& offset : morph.offsets)
+            offsets.Push(Value::MakeObject()
+                .Set("body", Value(offset.bodyIndex))
+                .Set("bodyName", Value(offset.bodyName))
+                .Set("local", Value(offset.local))
+                .Set("velocity", Vec3Value(offset.velocity))
+                .Set("torque", Vec3Value(offset.torque)));
+        impulses.Push(Value::MakeObject()
+            .Set("name", Value(morph.name))
+            .Set("weight", Value(morph.weight))
+            .Set("offsets", std::move(offsets)));
+    }
+    return result.Set("impulseMorphs", std::move(impulses));
 }
 
 void PmxRigController::Deserialize(const JsonValue& value)
@@ -623,6 +715,7 @@ void PmxRigController::Deserialize(const JsonValue& value)
     physicsBones.clear();
     physicsJoints.clear();
     boneMorphs.clear();
+    impulseMorphs.clear();
     for (size_t i = 0; i < value["appends"].ArraySize(); ++i)
     {
         const auto& item = value["appends"].ArrayAt(i);
@@ -732,6 +825,23 @@ void PmxRigController::Deserialize(const JsonValue& value)
             offset.nodeIndex = static_cast<unsigned>(source["node"].AsInt());
             offset.translation = ReadVec3(source["translation"]);
             offset.rotation = ReadQuaternion(source["rotation"]);
+        }
+    }
+    for (size_t i = 0; i < value["impulseMorphs"].ArraySize(); ++i)
+    {
+        const auto& source = value["impulseMorphs"].ArrayAt(i);
+        auto& morph = impulseMorphs.emplace_back();
+        morph.name = source["name"].AsString();
+        morph.weight = source["weight"].AsFloat();
+        for (size_t j = 0; j < source["offsets"].ArraySize(); ++j)
+        {
+            const auto& item = source["offsets"].ArrayAt(j);
+            auto& offset = morph.offsets.emplace_back();
+            offset.bodyIndex = item["body"].AsInt();
+            offset.bodyName = item["bodyName"].AsString();
+            offset.local = item["local"].AsBool();
+            offset.velocity = ReadVec3(item["velocity"]);
+            offset.torque = ReadVec3(item["torque"]);
         }
     }
     Start();

@@ -901,6 +901,13 @@ void Engine::Components::RigidBody::SetAngularVelocity(const glm::vec3& value)
             Engine::Physics::RigidBodyAction::SetAngularVelocity, value, {});
     else NativeSetAngularVelocity(value);
 }
+void Engine::Components::RigidBody::StopMotion()
+{
+    if (auto* adapter = PhysicsFor(*this))
+        adapter->ApplyRigidBodyAction(*this,
+            Engine::Physics::RigidBodyAction::StopMotion, {}, {});
+    else NativeStopMotion();
+}
 void Engine::Components::RigidBody::SetGravityDirection(const glm::vec3& value)
 {
     if (auto* adapter = PhysicsFor(*this))
@@ -1058,6 +1065,16 @@ void Engine::Components::RigidBody::NativeSetLinearVelocity(const glm::vec3& vel
 void Engine::Components::RigidBody::NativeSetAngularVelocity(const glm::vec3& velocity)
 {
     if (EnsureBody()) { m_impl->body->activate(true); m_impl->body->setAngularVelocity(Engine::Physics::ToBullet(velocity)); }
+}
+void Engine::Components::RigidBody::NativeStopMotion()
+{
+    if (!EnsureBody()) return;
+    const btVector3 zero(0.f, 0.f, 0.f);
+    m_impl->body->setLinearVelocity(zero);
+    m_impl->body->setAngularVelocity(zero);
+    m_impl->body->setInterpolationLinearVelocity(zero);
+    m_impl->body->setInterpolationAngularVelocity(zero);
+    m_impl->body->clearForces();
 }
 void Engine::Components::RigidBody::NativeSetGravityDirection(const glm::vec3& direction)
 {

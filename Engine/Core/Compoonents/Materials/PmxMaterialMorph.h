@@ -26,6 +26,7 @@ private:
         glm::vec3 specular { 1.f };
         float shininess = 32.f;
         glm::vec3 ambient { .1f };
+        glm::vec4 textureTint { 1.f };
         std::string alphaMode;
     };
     State m_input;

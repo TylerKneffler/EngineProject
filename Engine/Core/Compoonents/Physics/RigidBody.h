@@ -91,6 +91,7 @@ public:
     void SetWorldPose(const glm::vec3& worldPosition, const glm::quat& worldRotation);
     void SetLinearVelocity(const glm::vec3& velocity);
     void SetAngularVelocity(const glm::vec3& velocity);
+    void StopMotion();
     void SetGravityDirection(const glm::vec3& direction);
     glm::vec3 GetLinearVelocity() const;
     glm::vec3 GetAngularVelocity() const;
@@ -148,6 +149,7 @@ private:
     void NativeSetWorldPose(const glm::vec3& value, const glm::quat& rotation);
     void NativeSetLinearVelocity(const glm::vec3& value);
     void NativeSetAngularVelocity(const glm::vec3& value);
+    void NativeStopMotion();
     void NativeSetGravityDirection(const glm::vec3& value);
     glm::vec3 NativeGetLinearVelocity() const;
     glm::vec3 NativeGetAngularVelocity() const;

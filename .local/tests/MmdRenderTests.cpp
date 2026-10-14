@@ -2,6 +2,8 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Animation/AnimationManager.h"
+#include "Core/Compoonents/Animation/PmxRigController.h"
+#include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Materials/Texture.h"
@@ -85,6 +87,17 @@ int main()
             "Engine/Core/Assets/Scenes/Animation/mmd.scene"))
             throw std::runtime_error("Scene load failed");
         Checkpoint("After scene load");
+        size_t dynamicBodies = 0;
+        size_t physicsJoints = 0;
+        for (const auto& object : scene.GetObjects())
+        {
+            if (auto* body = object->GetComponent<Engine::Components::RigidBody>())
+                dynamicBodies += body->bodyType == "Dynamic";
+            if (auto* rig = object->GetComponent<Engine::Components::PmxRigController>())
+                physicsJoints += rig->physicsJoints.size();
+        }
+        if (dynamicBodies != 133 || physicsJoints != 133)
+            throw std::runtime_error("Mococo scene lost its PMX dynamic bodies or joints");
         size_t texturedMaterials = 0;
         for (const auto& object : scene.GetObjects())
             if (auto* material = object->GetComponent<Engine::Components::Material>())

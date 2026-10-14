@@ -265,7 +265,7 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
         SectionRect sectionRects[2][8]{};
         int rectCounts[2]{};
         const auto drawSide = [&](const int* indices, int count, float x,
-            int side)
+            float sideSpan, int side)
         {
             if (!count) return;
             float minimums[8]{};
@@ -277,8 +277,8 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
                 minimumTotal += minimums[i];
             }
             const float span = count == 1
-                ? std::max(std::min(sideWidth, minimumTotal),
-                    sideWidth * singleSectionFill[side]) : sideWidth;
+                ? std::max(std::min(sideSpan, minimumTotal),
+                    sideSpan * singleSectionFill[side]) : sideSpan;
             const bool fitsMinimums = span >= minimumTotal;
             const float extra = std::max(0.f, span - minimumTotal);
             float customExtra = 0.f;
@@ -436,8 +436,59 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
                 else right[rightCount++] = index;
             }
         }
-        drawSide(left, leftCount, origin.x, 0);
-        drawSide(right, rightCount, origin.x + available - sideWidth, 1);
+        const auto drawFittingSide = [&](const int* indices, int count,
+            float x, int side)
+        {
+            constexpr float overflowWidth = 30.f;
+            const auto fittingCount = [&](float width)
+            {
+                float used = 0.f;
+                int visible = 0;
+                for (; visible < count; ++visible)
+                {
+                    const float minimum = state.GetToolbarSectionMinimumWidth(
+                        sections[indices[visible]]);
+                    if (used + minimum > width) break;
+                    used += minimum;
+                }
+                return visible;
+            };
+            int visible = fittingCount(sideWidth);
+            if (visible < count)
+                visible = fittingCount(std::max(0.f, sideWidth - overflowWidth));
+            const bool hasOverflow = visible < count;
+            const float contentSpan = std::max(0.f,
+                sideWidth - (hasOverflow ? overflowWidth : 0.f));
+            drawSide(indices, visible, x, contentSpan, side);
+            if (!hasOverflow) return;
+
+            ImGui::PushID(side);
+            ImGui::SetCursorScreenPos(ImVec2(x + sideWidth - 27.f, origin.y + 1.f));
+            if (ImGui::Button("##HiddenToolbarSections", ImVec2(24.f, 20.f)))
+                ImGui::OpenPopup("HiddenToolbarSections");
+            const ImVec2 min = ImGui::GetItemRectMin();
+            ImGui::GetWindowDrawList()->AddText(ImVec2(min.x + 6.f, min.y + 2.f),
+                ImGui::GetColorU32(ImGuiCol_Text), "...");
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("More toolbar tools");
+            if (ImGui::BeginPopup("HiddenToolbarSections"))
+            {
+                for (int i = visible; i < count; ++i)
+                {
+                    const int index = indices[i];
+                    ImGui::PushID(index);
+                    if (i != visible) ImGui::Separator();
+                    ImGui::TextUnformatted(names[index]);
+                    state.DrawGlobalToolbar(m_ui, sections[index], false);
+                    ImGui::PopID();
+                }
+                ImGui::EndPopup();
+            }
+            ImGui::PopID();
+        };
+        drawFittingSide(left, leftCount, origin.x, 0);
+        drawFittingSide(right, rightCount,
+            origin.x + available - sideWidth, 1);
         if (draggingSection >= 0 && dragMode == 2)
         {
             const int targetSide = ImGui::GetIO().MousePos.x <

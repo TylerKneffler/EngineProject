@@ -21,6 +21,7 @@ public:
     std::vector<Engine::Model::ImportedPhysicsBone> physicsBones;
     std::vector<Engine::Model::ImportedPhysicsJoint> physicsJoints;
     std::vector<Engine::Model::ImportedBoneMorph> boneMorphs;
+    std::vector<Engine::Model::ImportedImpulseMorph> impulseMorphs;
 
     void Apply();
     void PostPhysicsUpdate();

@@ -21,6 +21,7 @@ struct PmxImportReport
     int importedKinematicRigidBodies = 0;
     int importedDynamicRigidBodies = 0;
     int importedPhysicsJoints = 0;
+    int importedSoftBodies = 0;
     int importedAppendRules = 0;
     int importedIkChains = 0;
     int importedBoneMorphs = 0;

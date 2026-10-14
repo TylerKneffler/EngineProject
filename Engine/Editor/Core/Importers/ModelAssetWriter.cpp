@@ -11,6 +11,7 @@
 #include "Core/Compoonents/Lighting/Light.h"
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
+#include "Core/Compoonents/Physics/Cloth.h"
 #include "Core/Model/RigAsset.h"
 #include "AnimationAssetWriter.h"
 #include "Core/Object.h"
@@ -23,6 +24,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace Engine::Editor
 {
@@ -252,6 +254,7 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
             !model.fixedAxes.empty() || !model.localAxes.empty() ||
             !model.externalParents.empty() ||
             !model.boneMorphs.empty() ||
+            !model.impulseMorphs.empty() ||
             !model.physicsJoints.empty() ||
             std::any_of(model.rigidBodies.begin(), model.rigidBodies.end(),
                 [](const auto& body) { return body.mode > 0; }))
@@ -264,9 +267,14 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
             controller->localAxes = model.localAxes;
             controller->externalParents = model.externalParents;
             controller->boneMorphs = model.boneMorphs;
+            controller->impulseMorphs = model.impulseMorphs;
             controller->physicsJoints = model.physicsJoints;
         }
         std::vector<Engine::Core::Object*> objects(model.nodes.size(), nullptr);
+        std::unordered_map<int, Engine::Core::Object*> materialObjects;
+        std::unordered_set<int> softBodyMaterials;
+        for (const auto& soft : model.softBodies)
+            softBodyMaterials.insert(soft.materialIndex);
         for (size_t index = 0; index < model.nodes.size(); ++index)
         {
             const Engine::Model::ImportedNode& imported = model.nodes[index];
@@ -293,6 +301,8 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
                     primitiveObjectName += " " + std::to_string(sameName);
                 Engine::Core::Object* target = imported.primitives.size() == 1 ? object :
                     AddChild(scene, object, primitiveObjectName);
+                if (primitive.materialIndex >= 0)
+                    materialObjects.emplace(primitive.materialIndex, target);
                 Engine::Components::Mesh* mesh = target->AddComponent<Engine::Components::Mesh>();
                 mesh->LoadFromFile(meshPaths[primitiveIndex]);
                 Engine::Components::Material* material = target->AddComponent<Engine::Components::Material>();
@@ -327,7 +337,9 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
                     if (!mesh->LoadMorphFile(morphPaths[primitiveIndex],
                             static_cast<unsigned>(index), primitive.morphWeights))
                         throw std::runtime_error("Could not load generated morph data");
-                if (primitive.skinIndex >= 0 || !primitive.morphTargets.empty())
+                if ((primitive.skinIndex >= 0 || !primitive.morphTargets.empty()) &&
+                    softBodyMaterials.find(primitive.materialIndex) ==
+                        softBodyMaterials.end())
                 {
                     Engine::Components::SkinnedMesh* deformer = target->AddComponent<Engine::Components::SkinnedMesh>();
                     deformer->skinIndex = primitive.skinIndex;
@@ -463,6 +475,29 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
                     imported.mode, imported.boneOffsetPosition,
                     imported.boneOffsetRotation });
         }
+        for (const auto& imported : model.softBodies)
+        {
+            const auto target = materialObjects.find(imported.materialIndex);
+            if (target == materialObjects.end()) continue;
+            auto* cloth = target->second->AddComponent<Engine::Components::Cloth>();
+            cloth->mass = std::max(imported.mass, .001f);
+            cloth->collisionMargin = std::max(imported.collisionMargin, .0001f);
+            cloth->linearStiffness = std::clamp(imported.linearStiffness, 0.f, 1.f);
+            cloth->bendingStiffness = std::clamp(imported.bendingStiffness, 0.f, 1.f);
+            cloth->damping = std::clamp(imported.damping, 0.f, 1.f);
+            cloth->drag = std::max(imported.drag, 0.f);
+            cloth->friction = std::clamp(imported.friction, 0.f, 1.f);
+            cloth->solverIterations = std::max(imported.solverIterations, 1);
+            cloth->collisionLayer = 1 << imported.collisionGroup;
+            cloth->collisionMask = (~imported.nonCollisionMask) & 0xffff;
+            cloth->pinMode = "Explicit";
+            cloth->explicitPinPositions = imported.pinnedVertices;
+            for (const auto& anchor : imported.anchors)
+                if (anchor.bodyIndex >= 0 &&
+                    static_cast<size_t>(anchor.bodyIndex) < rigidNames.size())
+                    cloth->anchors.push_back({ anchor.vertexPosition,
+                        rigidNames[anchor.bodyIndex], anchor.nearMode });
+        }
         if (pmxController)
             for (auto& joint : pmxController->physicsJoints)
             {
@@ -473,6 +508,12 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
                     static_cast<size_t>(joint.bodyB) < rigidNames.size())
                     joint.bodyBName = rigidNames[joint.bodyB];
             }
+        if (pmxController)
+            for (auto& morph : pmxController->impulseMorphs)
+                for (auto& offset : morph.offsets)
+                    if (offset.bodyIndex >= 0 &&
+                        static_cast<size_t>(offset.bodyIndex) < rigidNames.size())
+                        offset.bodyName = rigidNames[offset.bodyIndex];
 
         const fs::path prefabPath = output / (output.filename().string() + ".prefab");
         auto* manager = root->GetComponent<Engine::Components::AnimationManager>();

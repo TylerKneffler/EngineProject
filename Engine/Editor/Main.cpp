@@ -129,7 +129,7 @@ int WINAPI wWinMain(
     WriteStartupLog("Editor startup", true);
 
     // Headless importer entry point used by automation and project tooling.
-    // Editor.exe --import-model <source.gltf|source.glb|source.fbx|source.pmx> <Assets directory>
+    // Editor.exe --import-model <source.gltf|source.glb|source.fbx|source.pmx> <Assets directory> [--pmx-dynamic-physics]
     // --import-gltf remains accepted for existing automation.
     // Editor.exe --bind-vmd <imported PMX prefab> <motion.vmd>
     {
@@ -152,9 +152,14 @@ int WINAPI wWinMain(
             (std::wstring(arguments[1]) == L"--import-model" ||
              std::wstring(arguments[1]) == L"--import-gltf"))
         {
+            Engine::Editor::PmxImportOptions pmxOptions;
+            for (int index = 4; index < argumentCount; ++index)
+                if (std::wstring(arguments[index]) == L"--pmx-dynamic-physics")
+                    pmxOptions.dynamicPhysics = true;
             const Engine::Model::ModelImportResult imported = Engine::Editor::ModelImporter::Import(
                 std::filesystem::path(arguments[2]).string(),
-                std::filesystem::path(arguments[3]).string());
+                std::filesystem::path(arguments[3]).string(), 1.f,
+                pmxOptions);
             WriteStartupLog(imported.success
                 ? "Asset imported: " + (imported.primaryAssetPath.empty()
                     ? imported.prefabPath : imported.primaryAssetPath)

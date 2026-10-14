@@ -191,6 +191,7 @@ void BulletPhysicsAdapter::ApplyRigidBodyAction(
     case RigidBodyAction::SetWorldPose: body.NativeSetWorldPose(value, rotation); break;
     case RigidBodyAction::SetLinearVelocity: body.NativeSetLinearVelocity(value); break;
     case RigidBodyAction::SetAngularVelocity: body.NativeSetAngularVelocity(value); break;
+    case RigidBodyAction::StopMotion: body.NativeStopMotion(); break;
     case RigidBodyAction::SetGravityDirection: body.NativeSetGravityDirection(value); break;
     }
 }
@@ -689,19 +690,24 @@ void BulletPhysicsAdapter::Step(double deltaTime)
         if (!std::isfinite(scale) || scale <= 0.f) continue;
         for (const auto& imported : rig->physicsJoints)
         {
-            auto* firstObject = object->FindObjectInChildrenByName(
-                imported.bodyAName);
-            auto* secondObject = object->FindObjectInChildrenByName(
-                imported.bodyBName);
+            auto* firstObject = imported.bodyA < 0 ? nullptr :
+                object->FindObjectInChildrenByName(imported.bodyAName);
+            auto* secondObject = imported.bodyB < 0 ? nullptr :
+                object->FindObjectInChildrenByName(imported.bodyBName);
             auto* first = firstObject ?
                 firstObject->GetComponent<Engine::Components::RigidBody>() : nullptr;
             auto* second = secondObject ?
                 secondObject->GetComponent<Engine::Components::RigidBody>() : nullptr;
-            if (!first || !second || first == second) continue;
-            auto* firstNative = btRigidBody::upcast(static_cast<btCollisionObject*>(
-                first->GetNativeCollisionObjectForPhysics()));
-            auto* secondNative = btRigidBody::upcast(static_cast<btCollisionObject*>(
-                second->GetNativeCollisionObjectForPhysics()));
+            if ((imported.bodyA >= 0 && !first) ||
+                (imported.bodyB >= 0 && !second) || first == second) continue;
+            auto* firstNative = first ? btRigidBody::upcast(
+                static_cast<btCollisionObject*>(
+                    first->GetNativeCollisionObjectForPhysics())) :
+                &btTypedConstraint::getFixedBody();
+            auto* secondNative = second ? btRigidBody::upcast(
+                static_cast<btCollisionObject*>(
+                    second->GetNativeCollisionObjectForPhysics())) :
+                &btTypedConstraint::getFixedBody();
             if (!firstNative || !secondNative) continue;
             const auto frame = [scale](const glm::vec3& position,
                 const glm::quat& rotation)
@@ -709,10 +715,24 @@ void BulletPhysicsAdapter::Step(double deltaTime)
                 return btTransform(btQuaternion(rotation.x, rotation.y,
                     rotation.z, rotation.w), ToBullet(position * scale));
             };
-            const btTransform frameA = frame(imported.frameAPosition,
-                imported.frameARotation);
-            const btTransform frameB = frame(imported.frameBPosition,
-                imported.frameBRotation);
+            const auto worldFrame = [root = object.get(), scale](const glm::vec3& position,
+                const glm::quat& rotation)
+            {
+                const glm::mat4 world = root->transform.GetWorldMatrix();
+                const glm::quat worldRotation = glm::normalize(glm::quat_cast(
+                    glm::mat3(world) / scale) * rotation);
+                const glm::vec3 worldPosition = glm::vec3(world *
+                    glm::vec4(position, 1.f));
+                return btTransform(btQuaternion(worldRotation.x,
+                    worldRotation.y, worldRotation.z, worldRotation.w),
+                    ToBullet(worldPosition));
+            };
+            const btTransform frameA = imported.bodyA < 0 ?
+                worldFrame(imported.frameAPosition, imported.frameARotation) :
+                frame(imported.frameAPosition, imported.frameARotation);
+            const btTransform frameB = imported.bodyB < 0 ?
+                worldFrame(imported.frameBPosition, imported.frameBRotation) :
+                frame(imported.frameBPosition, imported.frameBRotation);
             std::unique_ptr<btTypedConstraint> joint;
             if (imported.type == 0)
             {
@@ -724,8 +744,8 @@ void BulletPhysicsAdapter::Step(double deltaTime)
                 spring->setAngularUpperLimit(ToBullet(imported.angularUpper));
                 for (int axis = 0; axis < 6; ++axis)
                 {
-                    const float stiffness = axis < 3 ?
-                        imported.linearSpring[axis] : imported.angularSpring[axis - 3];
+                    const float stiffness = std::abs(axis < 3 ?
+                        imported.linearSpring[axis] : imported.angularSpring[axis - 3]);
                     if (stiffness <= 0.f) continue;
                     spring->enableSpring(axis, true);
                     spring->setStiffness(axis, stiffness);
@@ -751,9 +771,20 @@ void BulletPhysicsAdapter::Step(double deltaTime)
             {
                 auto cone = std::make_unique<btConeTwistConstraint>(
                     *firstNative, *secondNative, frameA, frameB);
-                const glm::vec3 span = glm::max(glm::abs(imported.angularLower),
-                    glm::abs(imported.angularUpper));
-                cone->setLimit(span.y, span.z, span.x);
+                const glm::vec3 span = glm::abs(imported.angularLower);
+                cone->setLimit(span.z, span.y, span.x,
+                    imported.linearSpring.x, imported.linearSpring.y,
+                    imported.linearSpring.z);
+                cone->setDamping(imported.linearLower.x);
+                cone->setFixThresh(imported.linearUpper.x);
+                if (imported.linearLower.z != 0.f)
+                {
+                    cone->enableMotor(true);
+                    cone->setMaxMotorImpulse(std::abs(imported.linearUpper.z));
+                    cone->setMotorTargetInConstraintSpace(btQuaternion(
+                        imported.angularSpring.x, imported.angularSpring.y,
+                        imported.angularSpring.z));
+                }
                 joint = std::move(cone);
             }
             else if (imported.type == 4)
@@ -764,14 +795,36 @@ void BulletPhysicsAdapter::Step(double deltaTime)
                 slider->setUpperLinLimit(imported.linearUpper.x * scale);
                 slider->setLowerAngLimit(imported.angularLower.x);
                 slider->setUpperAngLimit(imported.angularUpper.x);
+                if (imported.linearSpring.x != 0.f)
+                {
+                    slider->setPoweredLinMotor(true);
+                    slider->setTargetLinMotorVelocity(imported.linearSpring.y);
+                    slider->setMaxLinMotorForce(std::abs(imported.linearSpring.z));
+                }
+                if (imported.angularSpring.x != 0.f)
+                {
+                    slider->setPoweredAngMotor(true);
+                    slider->setTargetAngMotorVelocity(imported.angularSpring.y);
+                    slider->setMaxAngMotorForce(std::abs(imported.angularSpring.z));
+                }
                 joint = std::move(slider);
             }
             else if (imported.type == 5)
             {
+                btTransform hingeFrameA = frameA;
+                btTransform hingeFrameB = frameB;
+                const btQuaternion xToBulletHinge(btVector3(0, 1, 0),
+                    SIMD_HALF_PI);
+                hingeFrameA.setRotation(frameA.getRotation() * xToBulletHinge);
+                hingeFrameB.setRotation(frameB.getRotation() * xToBulletHinge);
                 auto hinge = std::make_unique<btHingeConstraint>(
-                    *firstNative, *secondNative, frameA, frameB, true);
-                hinge->setLimit(imported.angularLower.z,
-                    imported.angularUpper.z);
+                    *firstNative, *secondNative, hingeFrameA, hingeFrameB, true);
+                hinge->setLimit(imported.angularLower.x,
+                    imported.angularUpper.x, imported.linearSpring.x,
+                    imported.linearSpring.y, imported.linearSpring.z);
+                if (imported.angularSpring.x != 0.f)
+                    hinge->enableAngularMotor(true, imported.angularSpring.y,
+                        std::abs(imported.angularSpring.z));
                 joint = std::move(hinge);
             }
             if (!joint) continue;

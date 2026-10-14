@@ -101,11 +101,11 @@
       </transform>
       <components>
         <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" />
-        <components:Material Material.shininess="18" Material.metallicFactor="0.08" Material.roughnessFactor="0.82" Material.environmentDiffuseStrength="1" Material.reflectionStrength="1" Material.useCustomReflectionEnvironment="false" Material.reflectionEnvironmentTexture="" Material.reflectionEnvironmentExposure="0" Material.reflectionEnvironmentRotation="0" Material.baseColorAlpha="1" Material.alphaCutoff="0.5" Material.normalScale="1" Material.heightScale="0.05" Material.heightMinSteps="8" Material.heightMaxSteps="32" Material.occlusionStrength="1" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque" Material.baseColorUvSet="0" Material.metallicRoughnessUvSet="0" Material.normalUvSet="0" Material.occlusionUvSet="0" Material.emissiveUvSet="0" Material.heightUvSet="0" Material.baseColorTexture="" Material.metallicRoughnessTexture="" Material.normalTexture="" Material.heightTexture="" Material.occlusionTexture="" Material.emissiveTexture="" Material.materialAsset="Assets/Materials/diagnostic_cube.material">
+        <components:Material Material.shininess="18" Material.metallicFactor="0.08" Material.roughnessFactor="0.82" Material.environmentDiffuseStrength="1" Material.reflectionStrength="1" Material.useCustomReflectionEnvironment="false" Material.reflectionEnvironmentTexture="" Material.reflectionEnvironmentExposure="0" Material.reflectionEnvironmentRotation="0" Material.baseColorAlpha="1" Material.alphaCutoff="0.5" Material.normalScale="1" Material.heightScale="0.05" Material.heightMinSteps="8" Material.heightMaxSteps="32" Material.occlusionStrength="1" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque" Material.baseColorUvSet="0" Material.metallicRoughnessUvSet="0" Material.normalUvSet="0" Material.occlusionUvSet="0" Material.emissiveUvSet="0" Material.heightUvSet="0" Material.metallicRoughnessTexture="" Material.normalTexture="" Material.heightTexture="" Material.occlusionTexture="" Material.emissiveTexture="" Material.materialAsset="Assets/Materials/calibration_ruler.material" Material.baseColorTexture="Assets/Textures/Calibration/ruler.png">
           <Material.diffuse>
-            <item>0.18</item>
-            <item>0.21</item>
-            <item>0.24</item>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
           </Material.diffuse>
           <Material.ambient>
             <item>0.05</item>

@@ -204,8 +204,12 @@ bool BindPmxDirect(const std::string& prefabPath, const std::string& vmdPath,
     std::unordered_set<std::string> matchedNames;
     std::unordered_set<std::string> componentMorphNames;
     if (const auto* rig = root->GetComponent<Engine::Components::PmxRigController>())
+    {
         for (const auto& morph : rig->boneMorphs)
             componentMorphNames.insert(morph.name);
+        for (const auto& morph : rig->impulseMorphs)
+            componentMorphNames.insert(morph.name);
+    }
     const auto collectMaterialMorphs = [&](auto&& self,
         Engine::Core::Object* object) -> void
     {

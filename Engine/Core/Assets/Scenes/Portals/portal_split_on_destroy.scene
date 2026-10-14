@@ -38,8 +38,8 @@
       </transform>
       <components>
         <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" />
-        <components:Material Material.baseColorAlpha="1" Material.metallicFactor="0" Material.roughnessFactor="0.85" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque" Material.materialAsset="Assets/Materials/diagnostic_cube.material">
-          <Material.diffuse><item>0.15</item><item>0.18</item><item>0.23</item></Material.diffuse>
+        <components:Material Material.baseColorAlpha="1" Material.metallicFactor="0" Material.roughnessFactor="0.85" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque" Material.materialAsset="Assets/Materials/calibration_checker.material" Material.baseColorTexture="Assets/Textures/Calibration/checker.png">
+          <Material.diffuse><item>1</item><item>1</item><item>1</item></Material.diffuse>
         </components:Material>
         <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1">
           <PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center>

@@ -41,6 +41,7 @@ struct ObjectData
     float4 subsurfaceRadiusThickness;
     float4 subsurfaceTransmission;
     float4 mmdSpecularShininess;
+    float4 pmxTextureTint;
 };
 
 #ifdef VULKAN

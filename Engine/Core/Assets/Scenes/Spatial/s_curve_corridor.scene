@@ -90,7 +90,7 @@
       </transform>
       <components>
         <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" />
-        <components:Material Material.shininess="22" Material.metallicFactor="0.05" Material.roughnessFactor="0.82" Material.baseColorAlpha="1" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque"><Material.diffuse><item>0.055</item><item>0.08</item><item>0.12</item></Material.diffuse></components:Material>
+        <components:Material Material.shininess="22" Material.metallicFactor="0.05" Material.roughnessFactor="0.82" Material.baseColorAlpha="1" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque" Material.materialAsset="Assets/Materials/calibration_direction.material" Material.baseColorTexture="Assets/Textures/Calibration/direction.png"><Material.diffuse><item>1</item><item>1</item><item>1</item></Material.diffuse></components:Material>
         <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1"><PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center><PrimitiveObjectCollider.size><item>1</item><item>1</item><item>1</item></PrimitiveObjectCollider.size></components:PrimitiveObjectCollider>
         <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0.8" RigidBody.restitution="0" RigidBody.isTrigger="false" RigidBody.continuousCollision="false" RigidBody.collisionLayer="1" RigidBody.collisionMask="-1" />
       </components>
@@ -104,7 +104,7 @@
       </transform>
       <components>
         <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" />
-        <components:Material Material.shininess="22" Material.metallicFactor="0.05" Material.roughnessFactor="0.82" Material.baseColorAlpha="1" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque"><Material.diffuse><item>0.15</item><item>0.055</item><item>0.1</item></Material.diffuse></components:Material>
+        <components:Material Material.shininess="22" Material.metallicFactor="0.05" Material.roughnessFactor="0.82" Material.baseColorAlpha="1" Material.doubleSided="false" Material.unlit="false" Material.alphaMode="Opaque" Material.materialAsset="Assets/Materials/calibration_direction.material" Material.baseColorTexture="Assets/Textures/Calibration/direction.png"><Material.diffuse><item>1</item><item>1</item><item>1</item></Material.diffuse></components:Material>
         <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1"><PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center><PrimitiveObjectCollider.size><item>1</item><item>1</item><item>1</item></PrimitiveObjectCollider.size></components:PrimitiveObjectCollider>
         <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0.8" RigidBody.restitution="0" RigidBody.isTrigger="false" RigidBody.continuousCollision="false" RigidBody.collisionLayer="1" RigidBody.collisionMask="-1" />
       </components>

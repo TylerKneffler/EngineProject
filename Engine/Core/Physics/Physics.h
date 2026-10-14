@@ -19,7 +19,7 @@ enum class RigidBodyAction : uint8_t
 {
     AddForce, AddTorque, AddImpulse, AddAngularImpulse,
     SetWorldPosition, SetWorldPose, SetLinearVelocity,
-    SetAngularVelocity, SetGravityDirection
+    SetAngularVelocity, SetGravityDirection, StopMotion
 };
 enum class RigidBodyVector : uint8_t
 {

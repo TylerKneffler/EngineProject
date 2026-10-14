@@ -41,8 +41,8 @@
       </transform>
       <components>
         <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" />
-        <components:Material Material.shininess="20" Material.metallicFactor="0.05" Material.roughnessFactor="0.8" Material.materialAsset="Assets/Materials/diagnostic_cube.material">
-          <Material.diffuse><item>0.2</item><item>0.24</item><item>0.3</item></Material.diffuse>
+        <components:Material Material.shininess="20" Material.metallicFactor="0.05" Material.roughnessFactor="0.8" Material.materialAsset="Assets/Materials/calibration_checker.material" Material.baseColorTexture="Assets/Textures/Calibration/checker.png">
+          <Material.diffuse><item>1</item><item>1</item><item>1</item></Material.diffuse>
           <Material.ambient><item>0.04</item><item>0.05</item><item>0.07</item></Material.ambient>
           <Material.specular><item>0.25</item><item>0.25</item><item>0.28</item></Material.specular>
         </components:Material>

@@ -283,6 +283,7 @@ struct ObjectGPUData
     glm::vec4 subsurfaceRadiusThickness{ 0.f }; // RGB scene units, thickness in scene units
     glm::vec4 subsurfaceTransmission{ 0.f }; // x = transmitted-light weight
     glm::vec4 mmdSpecularShininess{ 0.f }; // RGB reflectance; w = shininess + 1 when enabled
+    glm::vec4 pmxTextureTint { 1.f };
 };
 
 // Constant buffer for grid rendering
@@ -306,7 +307,7 @@ struct SkyboxCBData
 };
 
 static_assert(sizeof(DrawCBData) == 16, "Draw constants must remain small");
-static_assert(sizeof(ObjectGPUData) == 1120, "Object buffer layout must match Object.hlsl");
+static_assert(sizeof(ObjectGPUData) == 1136, "Object buffer layout must match Object.hlsl");
 static_assert(sizeof(Engine::Model::LightData) == 128,
     "Light buffer layout must match Object.hlsl");
 static_assert(sizeof(GridCBData) == 128, "Grid constant-buffer layout must match Grid.hlsl");
@@ -2593,6 +2594,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 textureFlags |= 32u;
 
             objectData.baseColor = glm::vec4(mat->diffuseColor, mat->baseColorAlpha);
+            objectData.pmxTextureTint = glm::vec4(
+                mat->baseColorTextureTint, mat->baseColorTextureTintAlpha);
             objectData.ambientUnlit = glm::vec4(
                 settings.ambientColor + mat->ambientColor + bakedIrradiance,
                 mat->unlit ? 1.f : 0.f);

@@ -57,11 +57,11 @@
       </transform>
       <components>
         <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" Mesh.useLightProbes="false" />
-        <components:Material Material.shininess="32" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.alphaCutoff="0.5" Material.doubleSided="false" Material.castsShadows="true" Material.unlit="false" Material.lightingChannels="-1" Material.metallicFactor="0.05" Material.roughnessFactor="0.85" Material.subsurfaceEnabled="false" Material.subsurfaceWeight="0" Material.subsurfaceThickness="0" Material.subsurfaceTransmission="0" Material.environmentDiffuseStrength="1" Material.occlusionStrength="1" Material.reflectionStrength="1" Material.useCustomReflectionEnvironment="false" Material.reflectionEnvironmentTexture="" Material.reflectionEnvironmentExposure="0" Material.reflectionEnvironmentRotation="0" Material.normalScale="1" Material.heightScale="0.05" Material.heightMinSteps="8" Material.heightMaxSteps="32" Material.baseColorUvSet="0" Material.metallicRoughnessUvSet="0" Material.normalUvSet="0" Material.occlusionUvSet="0" Material.emissiveUvSet="0" Material.heightUvSet="0" Material.materialAsset="" Material.baseColorTexture="" Material.metallicRoughnessTexture="" Material.normalTexture="" Material.heightTexture="" Material.occlusionTexture="" Material.emissiveTexture="" Material.subsurfaceThicknessTexture="">
+        <components:Material Material.shininess="32" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.alphaCutoff="0.5" Material.doubleSided="false" Material.castsShadows="true" Material.unlit="false" Material.lightingChannels="-1" Material.metallicFactor="0.05" Material.roughnessFactor="0.85" Material.subsurfaceEnabled="false" Material.subsurfaceWeight="0" Material.subsurfaceThickness="0" Material.subsurfaceTransmission="0" Material.environmentDiffuseStrength="1" Material.occlusionStrength="1" Material.reflectionStrength="1" Material.useCustomReflectionEnvironment="false" Material.reflectionEnvironmentTexture="" Material.reflectionEnvironmentExposure="0" Material.reflectionEnvironmentRotation="0" Material.normalScale="1" Material.heightScale="0.05" Material.heightMinSteps="8" Material.heightMaxSteps="32" Material.baseColorUvSet="0" Material.metallicRoughnessUvSet="0" Material.normalUvSet="0" Material.occlusionUvSet="0" Material.emissiveUvSet="0" Material.heightUvSet="0" Material.metallicRoughnessTexture="" Material.normalTexture="" Material.heightTexture="" Material.occlusionTexture="" Material.emissiveTexture="" Material.subsurfaceThicknessTexture="" Material.materialAsset="Assets/Materials/calibration_checker.material" Material.baseColorTexture="Assets/Textures/Calibration/checker.png">
           <Material.diffuse>
-            <item>0.16</item>
-            <item>0.19</item>
-            <item>0.24</item>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
           </Material.diffuse>
           <Material.ambient>
             <item>0.1</item>

@@ -84,6 +84,8 @@ Engine::Model::ModelImportResult ModelImporter::Import(const std::string& source
                     static_cast<double>(report.importedDynamicRigidBodies);
                 record->importSettings["pmxPhysicsJoints"] =
                     static_cast<double>(report.importedPhysicsJoints);
+                record->importSettings["pmxSoftBodies"] =
+                    static_cast<double>(report.importedSoftBodies);
                 record->importSettings["pmxAppendRules"] =
                     static_cast<double>(report.importedAppendRules);
                 record->importSettings["pmxIkChains"] =

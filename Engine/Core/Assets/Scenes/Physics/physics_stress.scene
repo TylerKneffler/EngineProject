@@ -101,11 +101,11 @@
       </transform>
       <components>
         <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj"></components:Mesh>
-        <components:Material Material.shininess="24" Material.materialAsset="Assets/Materials/diagnostic_cube.material">
+        <components:Material Material.shininess="24" Material.materialAsset="Assets/Materials/calibration_checker.material" Material.baseColorTexture="Assets/Textures/Calibration/checker.png">
           <Material.diffuse>
-            <item>0.16</item>
-            <item>0.18</item>
-            <item>0.22</item>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
           </Material.diffuse>
           <Material.ambient>
             <item>0.03</item>

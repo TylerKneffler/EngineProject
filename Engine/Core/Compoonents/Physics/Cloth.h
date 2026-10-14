@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace Engine::Physics { class Physics; class BulletPhysicsAdapter; }
 namespace Engine::Physics { struct PhysicsComponentState; }
@@ -16,6 +17,12 @@ namespace Engine::Components
 class Cloth final : public Engine::Core::Component
 {
 public:
+    struct Anchor
+    {
+        glm::vec3 vertexPosition { 0.f };
+        std::string bodyName;
+        bool nearMode = false;
+    };
     Cloth();
     ~Cloth() override;
 
@@ -46,6 +53,10 @@ public:
     float collisionMargin = 0.02f;
     PROPERTY(Inspector, EditAnywhere, Category = "Cloth", ClampMin = "1")
     int solverIterations = 8;
+    PROPERTY(Inspector, EditAnywhere, Category = "Cloth | Filtering")
+    int collisionLayer = 1;
+    PROPERTY(Inspector, EditAnywhere, Category = "Cloth | Filtering")
+    int collisionMask = -1;
     PROPERTY(Inspector, EditAnywhere, Category = "Cloth")
     bool selfCollision = false;
 
@@ -66,6 +77,10 @@ public:
     std::string pinMode = "Top"; // None, Top, Bottom, Left, Right
     PROPERTY(Inspector, EditAnywhere, Category = "Cloth | Pinning", ClampMin = "0")
     float pinThreshold = 0.001f;
+    // PMX soft-body pins and anchors use rest-space positions so duplicated
+    // triangle vertices resolve to one welded Bullet node.
+    std::vector<glm::vec3> explicitPinPositions;
+    std::vector<Anchor> anchors;
 
     PROPERTY(Inspector, EditAnywhere, Category = "Cloth | Wind")
     glm::vec3 windVelocity { 0.f };
@@ -74,6 +89,8 @@ public:
 
     bool IsSimulating() const;
     void ResetSimulation();
+    JsonValue Serialize() const override;
+    void Deserialize(const JsonValue& value) override;
 
     void Start() override;
     void Update() override;

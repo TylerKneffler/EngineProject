@@ -34,6 +34,13 @@ struct Engine::Components::Cloth::Impl final : Engine::Physics::PhysicsComponent
     std::vector<std::size_t> renderToNode;
     std::vector<glm::vec3> renderNodeOffsets;
     std::vector<int> pinnedNodes;
+    struct AnchoredNode
+    {
+        int index = -1;
+        Engine::Core::Object* body = nullptr;
+        glm::vec3 bodyLocalPosition { 0.f };
+    };
+    std::vector<AnchoredNode> anchoredNodes;
     std::unique_ptr<btSoftBody> softBody;
     glm::vec3 morphWorldNormal { 0.f, 1.f, 0.f };
     glm::vec3 morphLocalCenter { 0.f };
@@ -68,6 +75,8 @@ Engine::Components::Cloth::Cloth()
     RegisterField("gravityScale", gravityScale);
     RegisterField("collisionMargin", collisionMargin);
     RegisterField("solverIterations", solverIterations);
+    RegisterField("collisionLayer", collisionLayer, "Filtering", false);
+    RegisterField("collisionMask", collisionMask, "Filtering", false);
     RegisterField("selfCollision", selfCollision);
     RegisterField("collisionMorph", collisionMorph);
     RegisterField("collisionMorphStrength", collisionMorphStrength);
@@ -78,6 +87,50 @@ Engine::Components::Cloth::Cloth()
     RegisterField("pinThreshold", pinThreshold);
     RegisterField("windVelocity", windVelocity);
     RegisterField("windStrength", windStrength);
+}
+
+Engine::Components::Cloth::JsonValue Engine::Components::Cloth::Serialize() const
+{
+    JsonValue value = Component::Serialize();
+    JsonValue pins = JsonValue::MakeArray();
+    const auto vectorValue = [](const glm::vec3& position)
+    {
+        return JsonValue::MakeArray().Push(JsonValue(position.x))
+            .Push(JsonValue(position.y)).Push(JsonValue(position.z));
+    };
+    for (const glm::vec3& position : explicitPinPositions)
+        pins.Push(vectorValue(position));
+    value.Set("explicitPinPositions", std::move(pins));
+    JsonValue bindings = JsonValue::MakeArray();
+    for (const Anchor& anchor : anchors)
+        bindings.Push(JsonValue::MakeObject()
+            .Set("vertexPosition", vectorValue(anchor.vertexPosition))
+            .Set("bodyName", JsonValue(anchor.bodyName))
+            .Set("nearMode", JsonValue(anchor.nearMode)));
+    return value.Set("anchors", std::move(bindings));
+}
+
+void Engine::Components::Cloth::Deserialize(const JsonValue& value)
+{
+    Component::Deserialize(value);
+    const auto readPosition = [](const JsonValue& source)
+    {
+        return source.ArraySize() >= 3
+            ? glm::vec3(source.ArrayAt(0).AsFloat(),
+                source.ArrayAt(1).AsFloat(), source.ArrayAt(2).AsFloat())
+            : glm::vec3(0.f);
+    };
+    explicitPinPositions.clear();
+    for (size_t i = 0; i < value["explicitPinPositions"].ArraySize(); ++i)
+        explicitPinPositions.push_back(readPosition(
+            value["explicitPinPositions"].ArrayAt(i)));
+    anchors.clear();
+    for (size_t i = 0; i < value["anchors"].ArraySize(); ++i)
+    {
+        const auto& source = value["anchors"].ArrayAt(i);
+        anchors.push_back({ readPosition(source["vertexPosition"]),
+            source["bodyName"].AsString(), source["nearMode"].AsBool() });
+    }
 }
 
 Engine::Components::Cloth::~Cloth()
@@ -235,8 +288,16 @@ bool Engine::Components::Cloth::EnsureSoftBody()
     const glm::mat4 clothWorld = Owner->transform.GetWorldMatrix();
     const glm::mat4 renderToCloth = glm::inverse(clothWorld) *
         (mesh->Owner ? mesh->Owner->transform.GetWorldMatrix() : clothWorld);
+    const bool sameMesh = simulationMesh == mesh &&
+        simulationToNode.size() == m_impl->originalVertices.size();
     for (std::size_t index = 0; index < m_impl->originalVertices.size(); ++index)
     {
+        if (sameMesh)
+        {
+            m_impl->renderToNode[index] = simulationToNode[index];
+            m_impl->renderNodeOffsets[index] = glm::vec3(0.f);
+            continue;
+        }
         const Engine::Model::AnimationVertex& vertex = m_impl->originalVertices[index];
         const glm::vec3 renderPosition(renderToCloth * glm::vec4(
             vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.f));
@@ -300,7 +361,8 @@ bool Engine::Components::Cloth::EnsureSoftBody()
     softBody->setTotalMass(std::max(0.001f, mass), true);
 
     const std::string pin = Engine::Physics::Lower(pinMode);
-    if (pin != "none" && !m_impl->nodeLocalPositions.empty())
+    if ((pin == "top" || pin == "bottom" || pin == "left" ||
+            pin == "right") && !m_impl->nodeLocalPositions.empty())
     {
         float boundary = pin == "bottom" ? std::numeric_limits<float>::max()
             : pin == "left" ? std::numeric_limits<float>::max()
@@ -324,7 +386,42 @@ bool Engine::Components::Cloth::EnsureSoftBody()
         }
     }
 
-    physics.world->addSoftBody(softBody);
+    const auto nearestNode = [&](const glm::vec3& position)
+    {
+        int nearest = -1;
+        float distance = std::numeric_limits<float>::max();
+        for (size_t node = 0; node < m_impl->nodeLocalPositions.size(); ++node)
+        {
+            const glm::vec3 delta = m_impl->nodeLocalPositions[node] - position;
+            const float candidate = glm::dot(delta, delta);
+            if (candidate < distance)
+            {
+                distance = candidate;
+                nearest = static_cast<int>(node);
+            }
+        }
+        return nearest;
+    };
+    for (const glm::vec3& position : explicitPinPositions)
+        if (const int node = nearestNode(position); node >= 0)
+        {
+            softBody->setMass(node, 0.f);
+            m_impl->pinnedNodes.push_back(node);
+        }
+    for (const Anchor& anchor : anchors)
+    {
+        const int node = nearestNode(anchor.vertexPosition);
+        Engine::Core::Object* body = FindObjectInSceneByName(anchor.bodyName);
+        if (node < 0 || !body || !body->GetComponent<RigidBody>()) continue;
+        softBody->setMass(node, 0.f);
+        const glm::vec3 world = glm::vec3(clothWorld * glm::vec4(
+            m_impl->nodeLocalPositions[node], 1.f));
+        const glm::vec3 local = glm::vec3(glm::inverse(
+            body->transform.GetWorldMatrix()) * glm::vec4(world, 1.f));
+        m_impl->anchoredNodes.push_back({ node, body, local });
+    }
+
+    physics.world->addSoftBody(softBody, collisionLayer, collisionMask);
     m_impl->configurationRevision = GetConfigurationRevision();
     m_impl->renderMeshRevision = mesh->GetConfigurationRevision();
     m_impl->simulationMeshSource = simulationMesh;
@@ -359,6 +456,7 @@ void Engine::Components::Cloth::DestroySoftBody(bool restoreMesh)
     m_impl->renderToNode.clear();
     m_impl->renderNodeOffsets.clear();
     m_impl->pinnedNodes.clear();
+    m_impl->anchoredNodes.clear();
     m_impl->morphWorldNormal = { 0.f, 1.f, 0.f };
     m_impl->morphLocalCenter = { 0.f, 0.f, 0.f };
     m_impl->morphAmount = 0.f;
@@ -372,6 +470,15 @@ void Engine::Components::Cloth::UpdatePinnedNodes()
     {
         const glm::vec3 position(world * glm::vec4(m_impl->nodeLocalPositions[index], 1.f));
         auto& node = m_impl->softBody->m_nodes[index];
+        node.m_x = Engine::Physics::ToBullet(position);
+        node.m_q = node.m_x;
+        node.m_v.setZero();
+    }
+    for (const auto& anchor : m_impl->anchoredNodes)
+    {
+        const glm::vec3 position(anchor.body->transform.GetWorldMatrix() *
+            glm::vec4(anchor.bodyLocalPosition, 1.f));
+        auto& node = m_impl->softBody->m_nodes[anchor.index];
         node.m_x = Engine::Physics::ToBullet(position);
         node.m_q = node.m_x;
         node.m_v.setZero();

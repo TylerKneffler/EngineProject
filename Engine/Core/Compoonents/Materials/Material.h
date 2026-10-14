@@ -86,6 +86,11 @@ public:
     
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Properties")
     float     baseColorAlpha { 1.f };
+    // PMX texture morph factor, applied only to the sampled base texture.
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Color")
+    glm::vec3 baseColorTextureTint { 1.f };
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Color")
+    float baseColorTextureTintAlpha { 1.f };
     
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Properties")
     float     alphaCutoff { 0.5f };

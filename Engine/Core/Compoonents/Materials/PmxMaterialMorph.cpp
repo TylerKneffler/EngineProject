@@ -59,6 +59,8 @@ void PmxMaterialMorph::Apply()
         state.specular = material->specularColor;
         state.shininess = material->shininess;
         state.ambient = material->ambientColor;
+        state.textureTint = glm::vec4(material->baseColorTextureTint,
+            material->baseColorTextureTintAlpha);
         state.alphaMode = material->alphaMode;
         return state;
     };
@@ -69,6 +71,8 @@ void PmxMaterialMorph::Apply()
         material->specularColor = state.specular;
         material->shininess = state.shininess;
         material->ambientColor = state.ambient;
+        material->baseColorTextureTint = glm::vec3(state.textureTint);
+        material->baseColorTextureTintAlpha = state.textureTint.a;
         material->alphaMode = state.alphaMode;
     };
     if (m_applied &&
@@ -77,11 +81,15 @@ void PmxMaterialMorph::Apply()
         glm::all(glm::equal(material->specularColor, m_output.specular)) &&
         material->shininess == m_output.shininess &&
         glm::all(glm::equal(material->ambientColor, m_output.ambient)) &&
+        glm::all(glm::equal(glm::vec4(material->baseColorTextureTint,
+            material->baseColorTextureTintAlpha), m_output.textureTint)) &&
         material->alphaMode == m_output.alphaMode)
         restore(m_input);
     m_input = capture();
     m_applied = false;
     glm::vec4 diffuse(material->diffuseColor, material->baseColorAlpha);
+    glm::vec4 textureTint(material->baseColorTextureTint,
+        material->baseColorTextureTintAlpha);
     for (const auto& morph : morphs)
     {
         const auto animated = m_animatedMorphWeights.find(morph.name);
@@ -97,6 +105,7 @@ void PmxMaterialMorph::Apply()
                 material->specularColor += offset.specular * weight;
                 material->shininess += offset.shininess * weight;
                 material->ambientColor += offset.ambient * weight;
+                textureTint += offset.textureTint * weight;
             }
             else
             {
@@ -106,12 +115,17 @@ void PmxMaterialMorph::Apply()
                 material->shininess *= glm::mix(1.f, offset.shininess, weight);
                 material->ambientColor *= glm::mix(glm::vec3(1.f),
                     offset.ambient, weight);
+                textureTint *= glm::mix(glm::vec4(1.f),
+                    offset.textureTint, weight);
             }
         }
     }
     material->diffuseColor = glm::vec3(diffuse);
     material->baseColorAlpha = diffuse.a;
-    if (material->baseColorAlpha < .999f)
+    material->baseColorTextureTint = glm::vec3(textureTint);
+    material->baseColorTextureTintAlpha = textureTint.a;
+    if (material->baseColorAlpha < .999f ||
+        material->baseColorTextureTintAlpha < .999f)
         material->alphaMode = "Blend";
     m_output = capture();
 }
@@ -149,7 +163,8 @@ PmxMaterialMorph::JsonValue PmxMaterialMorph::Serialize() const
                 .Set("diffuse", VectorValue(offset.diffuse, 4))
                 .Set("specular", VectorValue(glm::vec4(offset.specular, 0.f), 3))
                 .Set("shininess", Value(offset.shininess))
-                .Set("ambient", VectorValue(glm::vec4(offset.ambient, 0.f), 3)));
+                .Set("ambient", VectorValue(glm::vec4(offset.ambient, 0.f), 3))
+                .Set("textureTint", VectorValue(offset.textureTint, 4)));
         values.Push(Value::MakeObject()
             .Set("name", Value(morph.name))
             .Set("weight", Value(morph.weight))
@@ -177,6 +192,9 @@ void PmxMaterialMorph::Deserialize(const JsonValue& value)
             offset.specular = glm::vec3(ReadVector(item["specular"], 3));
             offset.shininess = item["shininess"].AsFloat();
             offset.ambient = glm::vec3(ReadVector(item["ambient"], 3));
+            offset.textureTint = item.Has("textureTint")
+                ? ReadVector(item["textureTint"], 4)
+                : glm::vec4(offset.additive ? 0.f : 1.f);
         }
     }
     Start();

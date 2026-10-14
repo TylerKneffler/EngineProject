@@ -19,6 +19,8 @@ Material::Material()
     RegisterField("shininess", shininess, "Surface");
     RegisterField("useMmdSpecular", useMmdSpecular, "Surface");
     RegisterField("baseColorAlpha", baseColorAlpha, "Surface");
+    RegisterField("baseColorTextureTint", baseColorTextureTint, "Colors");
+    RegisterField("baseColorTextureTintAlpha", baseColorTextureTintAlpha, "Colors");
     RegisterField("alphaMode", alphaMode, "Surface");
     RegisterField("alphaCutoff", alphaCutoff, "Surface");
     RegisterField("doubleSided", doubleSided, "Surface");
@@ -159,6 +161,10 @@ bool Material::LoadFromFile(const std::string& path)
         if (root.Has("reflectionEnvironmentExposure")) reflectionEnvironmentExposure = root["reflectionEnvironmentExposure"].AsFloat();
         if (root.Has("reflectionEnvironmentRotation")) reflectionEnvironmentRotation = root["reflectionEnvironmentRotation"].AsFloat();
         if (root.Has("baseColorAlpha")) baseColorAlpha = root["baseColorAlpha"].AsFloat();
+        baseColorTextureTint = from3(root["baseColorTextureTint"],
+            baseColorTextureTint);
+        if (root.Has("baseColorTextureTintAlpha"))
+            baseColorTextureTintAlpha = root["baseColorTextureTintAlpha"].AsFloat();
         if (root.Has("alphaMode")) alphaMode = root["alphaMode"].AsString();
         if (root.Has("alphaCutoff")) alphaCutoff = root["alphaCutoff"].AsFloat();
         if (root.Has("normalScale")) normalScale = root["normalScale"].AsFloat();
@@ -227,6 +233,8 @@ bool Material::SaveToFile(const std::string& path) const
     root.Set("reflectionEnvironmentExposure", JsonValue(reflectionEnvironmentExposure));
     root.Set("reflectionEnvironmentRotation", JsonValue(reflectionEnvironmentRotation));
     root.Set("baseColorAlpha", JsonValue(baseColorAlpha));
+    root.Set("baseColorTextureTint", J3(baseColorTextureTint));
+    root.Set("baseColorTextureTintAlpha", JsonValue(baseColorTextureTintAlpha));
     root.Set("alphaMode", JsonValue(alphaMode));
     root.Set("alphaCutoff", JsonValue(alphaCutoff));
     root.Set("normalScale", JsonValue(normalScale));

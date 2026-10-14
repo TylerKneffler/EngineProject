@@ -44,6 +44,7 @@ struct ObjectData
     float4 subsurfaceRadiusThickness;
     float4 subsurfaceTransmission;
     float4 mmdSpecularShininess;
+    float4 pmxTextureTint;
 };
 
 struct SceneLightData
@@ -712,7 +713,8 @@ float4 PSMain(
     }
 
     if (flags & 1u)
-        base *= baseColorMap.Sample(materialSampler, baseUv);
+        base *= baseColorMap.Sample(materialSampler, baseUv) *
+            objectData.pmxTextureTint;
     float subsurfaceThickness = objectData.subsurfaceRadiusThickness.w;
     if ((flags & 128u) && objectData.subsurfaceColorWeight.w > 0.0)
         subsurfaceThickness *= subsurfaceThicknessMap.Sample(

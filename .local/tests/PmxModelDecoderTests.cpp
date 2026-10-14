@@ -8,6 +8,7 @@
 #include "Core/Compoonents/Materials/PmxMaterialMorph.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
+#include "Core/Compoonents/Physics/Cloth.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
@@ -47,10 +48,12 @@ void AppendFloats(std::vector<char>& bytes, std::initializer_list<float> values)
 }
 
 void WriteGroupMorphFixture(const std::filesystem::path& path,
-    uint8_t jointType = 0)
+    uint8_t jointType = 0, int8_t jointBodyA = 0,
+    bool impulseMorphs = false, bool extendedFeatures = false)
 {
     std::vector<char> bytes{ 'P', 'M', 'X', ' ' };
-    Append(bytes, jointType == 0 ? 2.f : 2.1f);
+    Append(bytes, jointType == 0 && !impulseMorphs && !extendedFeatures
+        ? 2.f : 2.1f);
     for (uint8_t value : std::array<uint8_t, 9>{ 8, 1, 1, 1, 1, 1, 1, 1, 1 })
         Append(bytes, value);
     AppendText(bytes, "group test");
@@ -90,7 +93,7 @@ void WriteGroupMorphFixture(const std::filesystem::path& path,
     AppendFloats(bytes, { 0.f, 1.f, 0.f });
     AppendFloats(bytes, { 0.f, 0.f, -1.f }); // Reflected to engine +Z.
     Append(bytes, int32_t(42)); // External-parent key.
-    Append(bytes, int32_t(7)); // Morphs.
+    Append(bytes, int32_t(impulseMorphs ? 9 : extendedFeatures ? 8 : 7)); // Morphs.
     AppendText(bytes, "move"); AppendText(bytes, "");
     Append(bytes, uint8_t(4)); Append(bytes, uint8_t(1));
     Append(bytes, int32_t(1)); Append(bytes, uint8_t(0));
@@ -119,13 +122,35 @@ void WriteGroupMorphFixture(const std::filesystem::path& path,
     Append(bytes, uint8_t(1)); // Additive material morph.
     AppendFloats(bytes, { 0.f, 0.f, 0.f, -.5f,
         -.25f, 0.f, 0.f, 8.f, 0.f, 0.f, 0.f });
-    for (int i = 0; i < 17; ++i) Append(bytes, 0.f);
+    for (int i = 0; i < 17; ++i) Append(bytes, i == 5 ? .4f : 0.f);
     AppendText(bytes, "mixed group"); AppendText(bytes, "");
     Append(bytes, uint8_t(4)); Append(bytes, uint8_t(0));
-    Append(bytes, int32_t(3));
+    Append(bytes, int32_t(impulseMorphs ? 4 : 3));
     Append(bytes, int8_t(3)); Append(bytes, .5f);  // Nested mesh group.
     Append(bytes, int8_t(4)); Append(bytes, .25f); // Bone morph.
     Append(bytes, int8_t(5)); Append(bytes, .5f);  // Material morph.
+    if (impulseMorphs)
+    {
+        Append(bytes, int8_t(7)); Append(bytes, .5f); // Impulse morph.
+        AppendText(bytes, "push"); AppendText(bytes, "");
+        Append(bytes, uint8_t(4)); Append(bytes, uint8_t(10));
+        Append(bytes, int32_t(1)); Append(bytes, int8_t(0));
+        Append(bytes, uint8_t(0)); // World-space impulse.
+        AppendFloats(bytes, { 5.f, 0.f, 0.f, 0.f, 0.f, 0.f });
+        AppendText(bytes, "stop"); AppendText(bytes, "");
+        Append(bytes, uint8_t(4)); Append(bytes, uint8_t(10));
+        Append(bytes, int32_t(1)); Append(bytes, int8_t(0));
+        Append(bytes, uint8_t(0));
+        AppendFloats(bytes, { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f });
+    }
+    if (extendedFeatures)
+    {
+        AppendText(bytes, "flip"); AppendText(bytes, "");
+        Append(bytes, uint8_t(4)); Append(bytes, uint8_t(9));
+        Append(bytes, int32_t(2));
+        Append(bytes, int8_t(0)); Append(bytes, .25f);
+        Append(bytes, int8_t(5)); Append(bytes, .5f);
+    }
     Append(bytes, int32_t(0)); // Display frames.
     Append(bytes, int32_t(2)); // Rigid bodies.
     AppendText(bytes, "falling"); AppendText(bytes, "");
@@ -147,12 +172,36 @@ void WriteGroupMorphFixture(const std::filesystem::path& path,
     Append(bytes, int32_t(1)); // Spring 6DOF joint.
     AppendText(bytes, "link"); AppendText(bytes, "");
     Append(bytes, jointType);
-    Append(bytes, int8_t(0)); Append(bytes, int8_t(1));
+    Append(bytes, jointBodyA); Append(bytes, int8_t(1));
     AppendFloats(bytes, { 1.f, 2.f, 0.f, 0.f, 0.f, 0.f,
         0.f, 0.f, 0.f, 0.f, 0.f, 0.f,
         0.f, 0.f, 0.f, 0.f, 0.f, 0.f,
         0.f, 0.f, 0.f, 0.f, 0.f, 0.f });
-    if (jointType != 0) Append(bytes, int32_t(0)); // PMX 2.1 soft bodies.
+    if (jointType != 0 || impulseMorphs || extendedFeatures)
+    {
+        Append(bytes, int32_t(extendedFeatures ? 1 : 0));
+        if (extendedFeatures)
+        {
+            AppendText(bytes, "cloth"); AppendText(bytes, "");
+            Append(bytes, uint8_t(0)); Append(bytes, int8_t(0));
+            Append(bytes, uint8_t(3)); Append(bytes, uint16_t(4));
+            Append(bytes, uint8_t(0));
+            Append(bytes, int32_t(0)); Append(bytes, int32_t(0));
+            Append(bytes, 1.f); Append(bytes, .01f);
+            Append(bytes, int32_t(0));
+            AppendFloats(bytes, { 0.f, .1f, .01f, 0.f, 0.f, 0.f,
+                .5f, 0.f, 0.f, 0.f, 0.f, 0.f });
+            AppendFloats(bytes, { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f });
+            Append(bytes, int32_t(0)); Append(bytes, int32_t(8));
+            Append(bytes, int32_t(0)); Append(bytes, int32_t(0));
+            AppendFloats(bytes, { .8f, .2f, 0.f });
+            Append(bytes, int32_t(1)); // Anchor count.
+            Append(bytes, int8_t(0)); Append(bytes, uint8_t(0));
+            Append(bytes, uint8_t(0));
+            Append(bytes, int32_t(1)); // Pin count.
+            Append(bytes, uint8_t(1));
+        }
+    }
     std::ofstream output(path, std::ios::binary);
     output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
 }
@@ -319,6 +368,42 @@ int main()
     assert(dynamicFixtureReport.importedPhysicsJoints == 1);
     assert(dynamicFixtureModel.physicsJoints[0].bodyA == 0);
     assert(dynamicFixtureModel.physicsJoints[0].bodyB == 1);
+    const fs::path extendedFixture = outputRoot / "flip_soft_body.pmx";
+    WriteGroupMorphFixture(extendedFixture, 0, 0, false, true);
+    Engine::Model::ImportedModel extendedModel;
+    Engine::Editor::PmxImportReport extendedReport;
+    assert(Engine::Editor::PmxModelDecoder::Decode(extendedFixture.string(),
+        extendedModel, error, &extendedReport, { true, true, true, true }));
+    assert(extendedReport.importedSupportedGroupMorphs == 3);
+    assert(extendedReport.importedSoftBodies == 1);
+    assert(extendedModel.materialMorphs.size() == 3);
+    assert(extendedModel.materialMorphs.back().name == "flip");
+    assert(extendedModel.materialMorphs.back().offsets[0].diffuse.a == -.25f);
+    assert(std::abs(extendedModel.materialMorphs.back().offsets[0]
+        .textureTint.r - .2f) < .0001f);
+    assert(extendedModel.primitives[0].morphTargets.back().name == "flip");
+    assert(extendedModel.primitives[0].morphTargets.back().positions[0].x == .25f);
+    assert(extendedModel.softBodies[0].anchors.size() == 1);
+    assert(extendedModel.softBodies[0].pinnedVertices.size() == 1);
+    assert(extendedModel.softBodies[0].collisionGroup == 3);
+    assert(extendedModel.softBodies[0].nonCollisionMask == 4);
+    const auto extendedImport = Engine::Editor::ModelAssetWriter::Write(
+        extendedModel, extendedFixture.string(), outputRoot.string());
+    assert(extendedImport.success);
+    Engine::Scene::Scene extendedScene;
+    assert(Engine::Serialization::SceneSerializer::InstantiatePrefab(
+        extendedScene, extendedImport.prefabPath));
+    Engine::Components::Cloth* importedCloth = nullptr;
+    for (const auto& object : extendedScene.GetObjects())
+        if (auto* cloth = object->GetComponent<Engine::Components::Cloth>())
+            importedCloth = cloth;
+    assert(importedCloth && importedCloth->anchors.size() == 1 &&
+        importedCloth->explicitPinPositions.size() == 1);
+    assert(importedCloth->collisionLayer == 8);
+    assert(importedCloth->collisionMask == 0xfffb);
+    extendedScene.Start();
+    extendedScene.Update(1.f / 60.f);
+    assert(importedCloth->IsSimulating());
     for (uint8_t type = 1; type <= 5; ++type)
     {
         const fs::path fixture = outputRoot /
@@ -336,7 +421,69 @@ int main()
         roundTrip.Deserialize(restored.Serialize());
         assert(roundTrip.physicsJoints.size() == 1 &&
             roundTrip.physicsJoints[0].type == type);
+        const auto jointImport = Engine::Editor::ModelAssetWriter::Write(
+            jointModel, fixture.string(), outputRoot.string());
+        assert(jointImport.success);
+        Engine::Scene::Scene jointScene;
+        auto* jointRoot = Engine::Serialization::SceneSerializer::InstantiatePrefab(
+            jointScene, jointImport.prefabPath);
+        assert(jointRoot);
+        jointScene.Start();
+        jointScene.Update(1.f / 60.f);
     }
+    const fs::path worldFixture = outputRoot / "world_joint.pmx";
+    WriteGroupMorphFixture(worldFixture, 2, -1);
+    Engine::Model::ImportedModel worldJointModel;
+    Engine::Editor::PmxImportReport worldJointReport;
+    assert(Engine::Editor::PmxModelDecoder::Decode(worldFixture.string(),
+        worldJointModel, error, &worldJointReport,
+        { true, true, true, true }));
+    assert(worldJointModel.physicsJoints.size() == 1);
+    assert(worldJointModel.physicsJoints[0].bodyA == -1);
+    const auto worldJointImport = Engine::Editor::ModelAssetWriter::Write(
+        worldJointModel, worldFixture.string(), outputRoot.string());
+    assert(worldJointImport.success);
+    Engine::Scene::Scene worldJointScene;
+    assert(Engine::Serialization::SceneSerializer::InstantiatePrefab(
+        worldJointScene, worldJointImport.prefabPath));
+    worldJointScene.Start();
+    worldJointScene.Update(1.f / 60.f);
+    const fs::path impulseFixture = outputRoot / "impulse.pmx";
+    WriteGroupMorphFixture(impulseFixture, 0, 0, true);
+    Engine::Model::ImportedModel impulseModel;
+    Engine::Editor::PmxImportReport impulseReport;
+    assert(Engine::Editor::PmxModelDecoder::Decode(impulseFixture.string(),
+        impulseModel, error, &impulseReport, { true, true, true, true }));
+    assert(impulseModel.impulseMorphs.size() == 3);
+    assert(impulseModel.impulseMorphs[0].name == "mixed group");
+    assert(impulseModel.impulseMorphs[0].offsets[0].velocity.x == 2.5f);
+    assert(impulseModel.impulseMorphs[1].name == "push");
+    assert(impulseModel.impulseMorphs[2].name == "stop");
+    const auto impulseImport = Engine::Editor::ModelAssetWriter::Write(
+        impulseModel, impulseFixture.string(), outputRoot.string());
+    assert(impulseImport.success);
+    Engine::Scene::Scene impulseScene;
+    auto* impulseRoot = Engine::Serialization::SceneSerializer::InstantiatePrefab(
+        impulseScene, impulseImport.prefabPath);
+    assert(impulseRoot);
+    auto* impulseRig = impulseRoot->GetComponent<
+        Engine::Components::PmxRigController>();
+    assert(impulseRig && impulseRig->impulseMorphs.size() == 3);
+    assert(!impulseRig->impulseMorphs[0].offsets[0].bodyName.empty());
+    auto* impulseBodyObject = impulseRoot->FindObjectInChildrenByName(
+        impulseRig->impulseMorphs[0].offsets[0].bodyName);
+    assert(impulseBodyObject);
+    auto* impulseBody = impulseBodyObject->GetComponent<
+        Engine::Components::RigidBody>();
+    assert(impulseBody);
+    impulseScene.Start();
+    impulseRig->impulseMorphs[0].weight = 1.f;
+    impulseRig->Apply();
+    assert(impulseBody->GetLinearVelocity().x > 0.f);
+    impulseRig->impulseMorphs[0].weight = 0.f;
+    impulseRig->impulseMorphs[2].weight = 1.f;
+    impulseRig->Apply();
+    assert(std::abs(impulseBody->GetLinearVelocity().x) < 1e-5f);
     const auto dynamicImport = Engine::Editor::ModelAssetWriter::Write(
         dynamicFixtureModel, groupFixture.string(), outputRoot.string());
     assert(dynamicImport.success);
@@ -665,6 +812,7 @@ int main()
     materialMorph->Apply();
     assert(material->baseColorAlpha == .75f);
     assert(material->shininess == 36.f);
+    assert(std::abs(material->baseColorTextureTint.r - 1.2f) < .0001f);
     materialMorph->SetAnimatedMorphWeights({});
     materialMorph->Apply();
     Engine::Components::PmxMaterialMorph restoredMaterialMorph;

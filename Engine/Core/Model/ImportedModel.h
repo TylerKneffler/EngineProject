@@ -152,6 +152,31 @@ struct ImportedPhysicsBone
     glm::quat offsetRotation { 1.f, 0.f, 0.f, 0.f };
 };
 
+struct ImportedSoftBody
+{
+    struct Anchor
+    {
+        int bodyIndex = -1; // Index in ImportedModel::rigidBodies.
+        glm::vec3 vertexPosition { 0.f };
+        bool nearMode = false;
+    };
+    std::string name;
+    int materialIndex = -1;
+    int shape = 0; // PMX 0: triangle mesh; 1: rope.
+    int collisionGroup = 0;
+    int nonCollisionMask = 0;
+    float mass = 1.f;
+    float collisionMargin = .02f;
+    float linearStiffness = .8f;
+    float bendingStiffness = .2f;
+    float damping = .01f;
+    float drag = .01f;
+    float friction = .5f;
+    int solverIterations = 8;
+    std::vector<glm::vec3> pinnedVertices;
+    std::vector<Anchor> anchors;
+};
+
 struct ImportedAppendRule
 {
     unsigned nodeIndex = 0;
@@ -226,6 +251,22 @@ struct ImportedBoneMorph
     std::vector<ImportedBoneMorphOffset> offsets;
 };
 
+struct ImportedImpulseMorphOffset
+{
+    int bodyIndex = -1; // Index in ImportedModel::rigidBodies.
+    std::string bodyName;
+    bool local = false;
+    glm::vec3 velocity { 0.f };
+    glm::vec3 torque { 0.f };
+};
+
+struct ImportedImpulseMorph
+{
+    std::string name;
+    float weight = 0.f;
+    std::vector<ImportedImpulseMorphOffset> offsets;
+};
+
 struct ImportedMaterialMorphOffset
 {
     int materialIndex = -1; // -1 applies to every material.
@@ -234,6 +275,7 @@ struct ImportedMaterialMorphOffset
     glm::vec3 specular { 0.f };
     float shininess = 0.f;
     glm::vec3 ambient { 0.f };
+    glm::vec4 textureTint { 0.f };
 };
 
 struct ImportedMaterialMorph
@@ -266,6 +308,7 @@ struct ImportedModel
     std::vector<ImportedSkin> skins;
     std::vector<ImportedRigidBody> rigidBodies;
     std::vector<ImportedPhysicsJoint> physicsJoints;
+    std::vector<ImportedSoftBody> softBodies;
     std::vector<ImportedAppendRule> appendRules;
     std::vector<ImportedIkChain> ikChains;
     std::vector<ImportedFixedAxis> fixedAxes;
@@ -273,6 +316,7 @@ struct ImportedModel
     std::vector<ImportedExternalParent> externalParents;
     std::vector<ImportedBoneMorph> boneMorphs;
     std::vector<ImportedMaterialMorph> materialMorphs;
+    std::vector<ImportedImpulseMorph> impulseMorphs;
     std::vector<ImportedAnimation> animations;
 };
 
