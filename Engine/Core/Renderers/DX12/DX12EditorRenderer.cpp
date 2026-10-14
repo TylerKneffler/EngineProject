@@ -86,12 +86,12 @@ void DX12EditorRenderer::Resize(uint32_t width, uint32_t height)
         m_fenceValues[i] = m_fenceValues[m_frameIndex];
     }
 
-    // The editor swap chain does not carry the ALLOW_TEARING flag — it was
-    // never set at creation — so it must not be passed to ResizeBuffers either.
+    // Preserve the tearing flag selected when the swap chain was created.
     ThrowIfFailed(m_swapChain->ResizeBuffers(
         FRAME_COUNT, width, height,
         DXGI_FORMAT_R8G8B8A8_UNORM,
-        DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH));
+        DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH |
+            (m_tearingSupported ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0u)));
 
     m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
     m_width  = width;
@@ -191,8 +191,7 @@ void DX12EditorRenderer::Clear(float r, float g, float b, float a)
 // EndFrame
 //
 // Transitions the back-buffer to PRESENT state before submitting, then calls
-// Present(1, 0) — vsync, no tearing. The editor does not need to exceed the
-// monitor refresh rate and vsync avoids tearing at no meaningful cost.
+// Present without VSync so the editor frame limit controls pacing.
 // ---------------------------------------------------------------------------
 void DX12EditorRenderer::EndFrame()
 {
@@ -218,9 +217,9 @@ void DX12EditorRenderer::EndFrame()
     ID3D12CommandList* lists[] = { m_commandList.Get() };
     m_commandQueue->ExecuteCommandLists(1, lists);
 
-    // SyncInterval = 1: wait for one vblank before presenting.
-    // PresentFlags = 0: no tearing; the editor does not need uncapped frames.
-    ThrowIfFailed(m_swapChain->Present(1, 0));
+    // Present without a vblank wait; allow tearing when the swap chain supports it.
+    ThrowIfFailed(m_swapChain->Present(0,
+        m_tearingSupported ? DXGI_PRESENT_ALLOW_TEARING : 0u));
 
     m_fenceValues[m_frameIndex] = ++m_fenceValue;
     ThrowIfFailed(m_commandQueue->Signal(m_fence.Get(), m_fenceValues[m_frameIndex]));
@@ -384,10 +383,7 @@ void DX12EditorRenderer::CreateCommandObjects()
 // ---------------------------------------------------------------------------
 // CreateSwapChain
 //
-// The editor swap chain omits DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING entirely.
-// Tearing is desirable for uncapped game rendering but unnecessary here —
-// Present(1, 0) waits for vblank and the editor never renders faster than
-// the screen can display.
+// Allow tearing when supported so the optional frame limit can exceed refresh.
 // ---------------------------------------------------------------------------
 void DX12EditorRenderer::CreateSwapChain(HWND hwnd, uint32_t width, uint32_t height)
 {
@@ -399,7 +395,14 @@ void DX12EditorRenderer::CreateSwapChain(HWND hwnd, uint32_t width, uint32_t hei
     scDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     scDesc.BufferCount = FRAME_COUNT;
     scDesc.SwapEffect  = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-    scDesc.Flags       = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+    ComPtr<IDXGIFactory5> factory5;
+    BOOL allowed = FALSE;
+    m_tearingSupported = SUCCEEDED(m_factory.As(&factory5)) &&
+        SUCCEEDED(factory5->CheckFeatureSupport(
+            DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allowed,
+            sizeof(allowed))) && allowed;
+    scDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH |
+        (m_tearingSupported ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0u);
 
     ComPtr<IDXGISwapChain1> sc1;
     ThrowIfFailed(m_factory->CreateSwapChainForHwnd(

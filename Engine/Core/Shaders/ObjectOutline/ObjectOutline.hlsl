@@ -40,21 +40,20 @@ struct ObjectData
     float4 subsurfaceColorWeight;
     float4 subsurfaceRadiusThickness;
     float4 subsurfaceTransmission;
+    float4 mmdSpecularShininess;
 };
 
 #ifdef VULKAN
 [[vk::push_constant]] DrawConstants draw;
 [[vk::binding(8, 0)]] StructuredBuffer<ObjectData> objects;
 [[vk::binding(9, 0)]] StructuredBuffer<float4x4> boneMatrices;
-struct MorphDelta { float4 position; float4 normal; float4 tangent; };
-[[vk::binding(11, 0)]] StructuredBuffer<MorphDelta> morphDeltas;
+[[vk::binding(11, 0)]] StructuredBuffer<float4> morphDeltas;
 [[vk::binding(12, 0)]] StructuredBuffer<float4> morphWeights;
 #else
 cbuffer DrawBuffer : register(b0) { DrawConstants draw; };
 StructuredBuffer<ObjectData> objects : register(t7);
 StructuredBuffer<float4x4> boneMatrices : register(t8);
-struct MorphDelta { float4 position; float4 normal; float4 tangent; };
-StructuredBuffer<MorphDelta> morphDeltas : register(t10);
+StructuredBuffer<float4> morphDeltas : register(t10);
 StructuredBuffer<float4> morphWeights : register(t11);
 #endif
 
@@ -76,12 +75,13 @@ void VSMain(
     float4 localPosition = float4(pos, 1.0);
     uint morphTargetCount = (uint)objectData.morphParams.x;
     uint morphVertexCount = (uint)objectData.morphParams.y;
+    uint morphStride = (uint)objectData.morphParams.w;
     [loop] for (uint target = 0; target < morphTargetCount; ++target)
     {
         float weight = morphWeights[target >> 2][target & 3];
         if (weight != 0.0)
             localPosition.xyz += morphDeltas[
-                target * morphVertexCount + vertexId].position.xyz * weight;
+                (target * morphVertexCount + vertexId) * morphStride].xyz * weight;
     }
     uint jointCount = (uint)objectData.skinParams.y;
     if (jointCount > 0)

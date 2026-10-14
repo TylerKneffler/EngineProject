@@ -4,6 +4,7 @@
 #include "Core/Compoonents/Animation/AnimationBone.h"
 #include "Core/Compoonents/Animation/Model.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
+#include "Core/Compoonents/Animation/BoneGroup.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Obj/Mesh.h"
@@ -413,7 +414,19 @@ void EditorState::SyncSkeletonEditSelection(Engine::Scene::Scene* scene,
     session.observedSubmode = session.submode;
     const int previousBoneIndex = session.boneIndex;
     Engine::Components::Skeleton* chosen = nullptr;
-    if (selected)
+    auto* selectedGroup = Engine::Components::BoneGroup::ForSelection(selected);
+    if (selectedGroup)
+        for (const auto& object : scene->GetObjects())
+        {
+            if (!object || chosen) continue;
+            if (object->GetPrefabInstanceRoot() !=
+                selectedGroup->Owner->GetPrefabInstanceRoot()) continue;
+            for (auto* component : object->Components)
+                if (auto* skeleton = dynamic_cast<Engine::Components::Skeleton*>(component);
+                    skeleton && skeleton->skinIndex == selectedGroup->skinIndex)
+                { chosen = skeleton; break; }
+        }
+    if (!chosen && selected)
         for (auto* component : selected->Components)
             if (auto* skin = dynamic_cast<Engine::Components::SkinnedMesh*>(component))
             { chosen = skin->ResolveSkeleton(); break; }
@@ -425,7 +438,7 @@ void EditorState::SyncSkeletonEditSelection(Engine::Scene::Scene* scene,
                 { chosen = skeleton; break; }
     // A rig's model root and its joint hierarchy need not contain the
     // Skeleton component. Resolve a selected joint from the palette itself.
-    if (selected && (!chosen || chosen->Owner != selected))
+    if (selected && !selectedGroup && (!chosen || chosen->Owner != selected))
     {
         Engine::Components::Skeleton* jointSkeleton = nullptr;
         for (const auto& object : scene->GetObjects())
@@ -489,11 +502,13 @@ void EditorState::SyncSkeletonEditSelection(Engine::Scene::Scene* scene,
                 { session.boneIndex = static_cast<int>(i); break; }
         if (session.boneIndex < 0 ||
             session.boneIndex >= static_cast<int>(joints.size()) ||
-            !joints[session.boneIndex])
+            !joints[session.boneIndex] ||
+            (selectedGroup && !selectedGroup->Contains(joints[session.boneIndex])))
         {
             session.boneIndex = -1;
             for (size_t i = 0; i < joints.size(); ++i)
-                if (joints[i])
+                if (joints[i] && (!selectedGroup ||
+                    selectedGroup->Contains(joints[i])))
                 { session.boneIndex = static_cast<int>(i); break; }
         }
         if (selected != previousSelection ||
@@ -849,6 +864,13 @@ bool EditorState::ApplySkeletonBoneAction(Engine::Scene::Scene* scene,
     Engine::Core::Object* selected = session.boneIndex >= 0 &&
         session.boneIndex < static_cast<int>(bones.size()) &&
         bones[session.boneIndex] ? bones[session.boneIndex] : nullptr;
+    const auto* selectedGroup = Engine::Components::BoneGroup::ForSelection(
+        scene->GetSelectedObject());
+    if (selectedGroup && (!selected || !selectedGroup->Contains(selected)))
+    { session.error = "Select a bone in this bone group."; return false; }
+    if (selectedGroup && action == 3 && selected == selectedGroup->Owner)
+    { session.error = "Select a child bone to duplicate within this group.";
+        return false; }
     const auto captureNodes = [&]()
     {
         const auto& nodes = model->ResolveNodes();
@@ -1096,6 +1118,10 @@ bool EditorState::ApplySkeletonBoneAction(Engine::Scene::Scene* scene,
         if (targetIndex < -1 || targetIndex >= static_cast<int>(bones.size()))
         { session.error = "Choose a valid parent bone."; return false; }
         auto* parent = targetIndex < 0 ? model->Owner : bones[targetIndex];
+        if (selectedGroup && (!parent ||
+                !selectedGroup->Contains(parent) ||
+                selected == selectedGroup->Owner))
+        { session.error = "Choose a parent within this bone group."; return false; }
         if (!parent || parent == selected)
         { session.error = "A bone cannot parent itself."; return false; }
         for (auto* ancestor = parent; ancestor; ancestor = ancestor->Parent)
@@ -1163,6 +1189,20 @@ bool EditorState::ApplySkeletonBoneAction(Engine::Scene::Scene* scene,
     }
     else
     { session.error = "Unknown bone action."; return false; }
+    if (action == 0 || action == 1 || action == 3)
+        if (auto* rootSkeleton = model->Owner->GetComponent<
+                Engine::Components::Skeleton>();
+            rootSkeleton && !rootSkeleton->rootBoneNodes.empty())
+        {
+            std::vector<unsigned> allBones;
+            for (auto* component : model->Owner->Components)
+                if (auto* skin = dynamic_cast<Engine::Components::Skeleton*>(component))
+                    for (unsigned node : skin->jointNodes)
+                        if (std::find(allBones.begin(), allBones.end(), node) ==
+                            allBones.end())
+                            allBones.push_back(node);
+            rootSkeleton->rootBoneNodes = std::move(allBones);
+        }
     if (!SkeletonBindPose::Commit(*scene, *skeleton, session.error))
         return false;
     session.error.clear();

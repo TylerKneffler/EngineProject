@@ -92,6 +92,7 @@ public:
 
     void SaveScene();
     void SaveAll();
+    uint32_t GetEditorMaxFps() const { return m_projectSettings.editorMaxFps; }
     void LoadScene(const std::string& path);
     void RequestSceneLoad(const std::string& path);
     bool ConfirmSceneLoad(bool saveCurrentScene);
@@ -143,6 +144,23 @@ public:
     bool HasPendingImportAsset() const { return !m_pendingImportAssetPath.empty(); }
     const std::string& GetPendingImportAssetPath() const { return m_pendingImportAssetPath; }
     const std::string& GetPendingImportDirectory() const { return m_pendingImportDirectory; }
+    bool IsPendingPmxImport() const;
+    float GetPendingPmxUnitScaleToMeters() const { return m_pendingPmxUnitScaleToMeters; }
+    void SetPendingPmxUnitScaleToMeters(float value)
+    { m_pendingPmxUnitScaleToMeters = value; }
+    bool GetPendingPmxImportMorphs() const { return m_pendingPmxImportMorphs; }
+    bool GetPendingPmxImportRigConstraints() const { return m_pendingPmxImportRigConstraints; }
+    bool GetPendingPmxImportFollowBoneColliders() const
+    { return m_pendingPmxImportFollowBoneColliders; }
+    bool GetPendingPmxImportDynamicPhysics() const
+    { return m_pendingPmxImportDynamicPhysics; }
+    void SetPendingPmxImportMorphs(bool value) { m_pendingPmxImportMorphs = value; }
+    void SetPendingPmxImportRigConstraints(bool value)
+    { m_pendingPmxImportRigConstraints = value; }
+    void SetPendingPmxImportFollowBoneColliders(bool value)
+    { m_pendingPmxImportFollowBoneColliders = value; }
+    void SetPendingPmxImportDynamicPhysics(bool value)
+    { m_pendingPmxImportDynamicPhysics = value; }
     void SetPendingImportDirectory(std::string directory)
     { m_pendingImportDirectory = std::move(directory); }
     bool IsPendingImportIntoScene() const { return m_pendingImportIntoScene; }
@@ -408,7 +426,10 @@ private:
         Engine::Core::Object* reference = nullptr,
         bool explicitReference = false,
         const std::string& destinationDirectory = {},
-        bool asPrefab = false);
+        bool asPrefab = false, float pmxUnitScaleToMeters = 1.f,
+        bool pmxImportMorphs = true, bool pmxImportRigConstraints = true,
+        bool pmxImportFollowBoneColliders = true,
+        bool pmxImportDynamicPhysics = false);
     void CaptureImportReference(Engine::Core::Object* object);
     void SelectObject(Engine::Core::Object* object);
     struct HistoryEntry
@@ -803,6 +824,11 @@ private:
     std::string m_pendingImportDirectory;
     bool m_pendingImportIntoScene = false;
     bool m_pendingImportAsPrefab = false;
+    float m_pendingPmxUnitScaleToMeters = 1.f;
+    bool m_pendingPmxImportMorphs = true;
+    bool m_pendingPmxImportRigConstraints = true;
+    bool m_pendingPmxImportFollowBoneColliders = true;
+    bool m_pendingPmxImportDynamicPhysics = false;
     std::string m_pendingImportReferenceLabel;
     std::string m_pendingImportError;
     Engine::Scene::Scene* m_pendingImportScene = nullptr;

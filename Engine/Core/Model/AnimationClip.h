@@ -18,6 +18,18 @@ struct AnimationClip
         float time = 0.f;
         bool visible = true;
     };
+    struct IkSwitchKey
+    {
+        float time = 0.f;
+        std::string name;
+        bool enabled = true;
+    };
+    struct ComponentMorphTrack
+    {
+        std::string name;
+        std::vector<float> times;
+        std::vector<float> weights;
+    };
     struct LimbKey
     {
         enum class Space { Body, Local, World, Prop };
@@ -40,6 +52,8 @@ struct AnimationClip
     bool looping = true;
     std::vector<AnimationChannel> channels;
     std::vector<VisibilityKey> visibility;
+    std::vector<IkSwitchKey> ikSwitches;
+    std::vector<ComponentMorphTrack> componentMorphs;
     std::vector<LimbTrack> limbs;
 
     static LimbKey SampleLimb(const LimbTrack& track, float time);

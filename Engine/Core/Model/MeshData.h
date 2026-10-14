@@ -73,5 +73,7 @@ struct MorphTarget
     std::vector<glm::vec3> positions;
     std::vector<glm::vec3> normals;
     std::vector<glm::vec3> tangents;
+    // xy affect the primary UV set; zw affect the first additional UV set.
+    std::vector<glm::vec4> uv;
 };
 }

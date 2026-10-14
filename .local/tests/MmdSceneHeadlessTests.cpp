@@ -93,7 +93,7 @@ int main(int argc, char** argv)
     {
         const fs::path root = MMD_TEST_ASSET_ROOT;
         const fs::path scenePath = root.parent_path() /
-            "Scenes/Animation/mmd.scene";
+            "Scenes/Animation/mmd_fbx.scene";
         const fs::path fbxPath = root / "Mococo/Mococo (FBX No Outline).fbx";
         const fs::path profilePath = root / "Mococo/Mococo.mmdrig.json";
         const fs::path mapPath = root / "Mococo/Mococo.mmdmap.json";

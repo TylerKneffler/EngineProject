@@ -47,7 +47,7 @@ void EditorUI::Render(PlayState playState)
             if (m_state->PendingImportSupportsReference() && !intoScene && !asPrefab)
                 ImGui::TextWrapped("Saves the VMD source tracks as an animation pack. Import into the active scene to bind body and facial motion to a character.");
             if (m_state->PendingImportSupportsReference() && intoScene)
-                ImGui::TextWrapped("Creates camera and light objects when those tracks exist. Choose an imported FBX character below to create playable body and facial clips.");
+                ImGui::TextWrapped("Creates camera and light objects when those tracks exist. Choose an imported FBX or PMX character below to create playable body and facial clips.");
             if (m_state->IsPendingImportAsPrefab())
                 ImGui::TextWrapped(m_state->PendingImportSupportsReference()
                     ? "Requires camera or light keys. Saves a reusable scene track prefab; character tracks stay in the animation pack."
@@ -57,6 +57,31 @@ void EditorUI::Render(PlayState playState)
                 m_state->GetPendingImportDirectory().c_str(), _TRUNCATE);
             if (ImGui::InputText("Assets directory", directory, sizeof(directory)))
                 m_state->SetPendingImportDirectory(directory);
+            if (m_state->IsPendingPmxImport())
+            {
+                ImGui::Separator();
+                ImGui::TextUnformatted("PMX parameters");
+                float scale = m_state->GetPendingPmxUnitScaleToMeters();
+                if (ImGui::InputFloat("Meters per PMX unit", &scale,
+                        0.01f, 0.1f, "%.6g"))
+                    m_state->SetPendingPmxUnitScaleToMeters(scale);
+                ImGui::TextWrapped("PMX does not specify a physical unit. This scales the generated prefab root; the source geometry and skeleton retain their original coordinates.");
+                bool morphs = m_state->GetPendingPmxImportMorphs();
+                if (ImGui::Checkbox("Morphs", &morphs))
+                    m_state->SetPendingPmxImportMorphs(morphs);
+                ImGui::TextDisabled("Vertex/UV targets and bone/material controls.");
+                bool constraints = m_state->GetPendingPmxImportRigConstraints();
+                if (ImGui::Checkbox("Append and IK constraints", &constraints))
+                    m_state->SetPendingPmxImportRigConstraints(constraints);
+                bool colliders = m_state->GetPendingPmxImportFollowBoneColliders();
+                if (ImGui::Checkbox("Follow-bone colliders", &colliders))
+                    m_state->SetPendingPmxImportFollowBoneColliders(colliders);
+                bool dynamicPhysics = m_state->GetPendingPmxImportDynamicPhysics();
+                if (ImGui::Checkbox("Dynamic rigid bodies (experimental)",
+                        &dynamicPhysics))
+                    m_state->SetPendingPmxImportDynamicPhysics(dynamicPhysics);
+                ImGui::TextDisabled("Dynamic bodies drive bones; PMX joint constraints are unavailable.");
+            }
             if (m_state->IsPendingImportIntoScene())
             {
                 ImGui::Separator();

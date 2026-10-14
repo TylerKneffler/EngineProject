@@ -1,0 +1,21 @@
+{
+    "version": 1,
+    "id": "fdb8d373-9581-4668-b040-54c2c0eb5f96",
+    "sourcePath": "C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/mmd/Mococo/Mococo Abyssgard.pmx",
+    "importSettings": {
+        "importer": "model",
+        "pmxAppendRules": 25,
+        "pmxBoneMorphs": 0,
+        "pmxIkChains": 4,
+        "pmxImportFollowBoneColliders": true,
+        "pmxImportMorphs": true,
+        "pmxImportRigConstraints": true,
+        "pmxImportedGroups": 0,
+        "pmxKinematicRigidBodies": 24,
+        "pmxMaterialMorphs": 2,
+        "pmxUnitScaleToMeters": 1,
+        "pmxWarnings": "Material morph specular/shininess render through a PBR approximation of MMD lighting; 272 material morph edge/texture/tint values present but not faithfully imported; 133 gravity-driven rigid bodies present but not faithfully imported; 133 physics joints present but not faithfully imported; 40 toon materials present but not faithfully imported; 4 fixed-axis bones present but not faithfully imported; 6 local-axis bones present but not faithfully imported; PMX append/IK constraints use a CCD pass; exact MMD deform ordering remains unavailable; matching VMD IK toggles can be applied after motion binding",
+        "sourceFormat": "pmx"
+    }
+}
+

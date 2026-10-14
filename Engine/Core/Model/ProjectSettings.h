@@ -40,7 +40,9 @@ struct ProjectSettings
     std::string editorRenderingAPI;
     std::string gameRenderingAPI;
     glm::vec4 clearColor;
-    uint32_t targetFramerate;
+    uint32_t targetFramerate = 60; // Default video export frame rate.
+    uint32_t editorMaxFps = 0;    // 0 means unlimited.
+    uint32_t gameMaxFps = 0;      // 0 means unlimited.
     Engine::Model::BakedLightingSettings bakedLighting;
     Engine::Model::RealtimeShadowSettings realtimeShadows;
     Engine::Model::DistanceLightingSettings distanceLighting;

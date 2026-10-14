@@ -24,9 +24,11 @@ public:
     bool CanUndo() const { return !m_undo.empty(); }
     bool CanRedo() const { return !m_redo.empty(); }
     bool IsDirty() const { return m_dirty; }
+    bool HasPendingRename() const { return m_inspector.HasPendingRename(); }
     bool Undo();
     bool Redo();
     bool Save();
+    void HandleExternalRename(const std::string& newPath);
     bool CanPaintImage() const;
     void DrawPaintToolbar(IEditorUi& ui, const std::string& assetsDirectory,
         bool singleRow, bool* overflow);
@@ -38,6 +40,7 @@ private:
     bool RestoreSnapshot(const std::string& contents);
     std::string ReadContents() const;
     void RefreshTitle();
+    void ApplyRenamedPath(const std::string& newPath);
     bool LoadImageCanvas();
     void DrawImageCanvas(IEditorUi& ui);
     bool CommitImageStroke();

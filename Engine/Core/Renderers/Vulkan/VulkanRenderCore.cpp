@@ -243,7 +243,22 @@ void VulkanRenderCore::CreateSwapchain()
     createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     createInfo.preTransform = capabilities.currentTransform;
     createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    uint32_t presentModeCount = 0;
+    vkGetPhysicalDeviceSurfacePresentModesKHR(m_physicalDevice, m_surface,
+        &presentModeCount, nullptr);
+    std::vector<VkPresentModeKHR> presentModes(presentModeCount);
+    if (presentModeCount)
+        vkGetPhysicalDeviceSurfacePresentModesKHR(m_physicalDevice, m_surface,
+            &presentModeCount, presentModes.data());
+    // Mailbox and immediate modes allow the application to exceed display
+    // refresh. FIFO remains the required fallback on surfaces without either.
     createInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    if (std::find(presentModes.begin(), presentModes.end(),
+            VK_PRESENT_MODE_MAILBOX_KHR) != presentModes.end())
+        createInfo.presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
+    else if (std::find(presentModes.begin(), presentModes.end(),
+            VK_PRESENT_MODE_IMMEDIATE_KHR) != presentModes.end())
+        createInfo.presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
     createInfo.clipped = VK_TRUE;
     VkCheck(vkCreateSwapchainKHR(m_device, &createInfo, nullptr, &m_swapchain), "vkCreateSwapchainKHR");
     vkGetSwapchainImagesKHR(m_device, m_swapchain, &imageCount, nullptr);

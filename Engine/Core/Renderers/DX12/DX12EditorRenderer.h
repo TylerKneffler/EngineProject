@@ -19,9 +19,7 @@
 //
 //   Present mode
 //     Game:   Present(0, DXGI_PRESENT_ALLOW_TEARING) — uncapped, no vsync.
-//     Editor: Present(1, 0) — vsync, one frame per vblank when dirty.
-//             The editor does not need to push frames faster than the monitor
-//             refresh rate; vsync prevents tearing at no meaningful cost.
+//     Editor: Present(0, optional tearing), only when dirty.
 //
 //   Dirty flag
 //     Call MarkDirty() whenever the display needs updating — on resize, input,
@@ -154,6 +152,7 @@ private:
 
     // Initialized true so the very first call to RenderIfNeeded always draws.
     bool m_dirty = true;
+    bool m_tearingSupported = false;
 
     // Graphics provider for shader compilation, buffer creation, pipeline building
     std::unique_ptr<D3D12GraphicsProvider> m_graphicsProvider;

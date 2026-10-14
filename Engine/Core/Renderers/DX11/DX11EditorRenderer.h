@@ -45,6 +45,8 @@ private:
     uint32_t m_width = 0;
     uint32_t m_height = 0;
     bool m_dirty = true;
+    bool m_allowTearing = false;
+    UINT m_swapChainFlags = 0;
     EditorUiRenderHooks m_uiHooks;
 };
 }

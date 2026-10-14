@@ -16,8 +16,10 @@ build/
 !.local/tests/MeshPackAssetTests.cpp
 !.local/tests/WeightInfluenceTests.cpp
 !.local/tests/MmdImportStepsTests.cpp
+!.local/tests/PmxModelDecoderTests.cpp
 !.local/tests/MmdSceneHeadlessTests.cpp
 !.local/tests/EditorViewportSettingsTests.cpp
+!.local/tests/SceneCameraFocusTests.cpp
 !.local/tests/MmdRenderTests.cpp
 !.local/tests/MmdVisibilityTests.cpp
 !.local/tests/MmdFacialPlaybackTests.cpp

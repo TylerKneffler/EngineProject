@@ -1,5 +1,6 @@
 #include "Material.h"
 #include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Serialization/Json.h"
 #include <algorithm>
 #include <cctype>
@@ -16,6 +17,7 @@ Material::Material()
     RegisterField("specular", specularColor, "Colors");
     RegisterField("emissiveColor", emissiveColor, "Colors");
     RegisterField("shininess", shininess, "Surface");
+    RegisterField("useMmdSpecular", useMmdSpecular, "Surface");
     RegisterField("baseColorAlpha", baseColorAlpha, "Surface");
     RegisterField("alphaMode", alphaMode, "Surface");
     RegisterField("alphaCutoff", alphaCutoff, "Surface");
@@ -84,7 +86,10 @@ namespace
         if (texturePath.empty())
             return {};
         const std::filesystem::path requested(texturePath);
-        if (requested.is_absolute() || std::filesystem::exists(requested))
+        const std::string resolved = Mesh::ResolveFilePath(texturePath);
+        if (std::filesystem::exists(resolved))
+            return resolved;
+        if (requested.is_absolute())
             return requested.lexically_normal().generic_string();
         const std::filesystem::path projectAssets("Assets");
         const std::filesystem::path relativeAsset =
@@ -133,11 +138,13 @@ bool Material::LoadFromFile(const std::string& path)
         subsurfaceColor = { 1.f, 0.45f, 0.35f };
         subsurfaceThickness = 0.f;
         subsurfaceTransmission = 0.f;
+        useMmdSpecular = false;
         diffuseColor = from3(root["baseColor"], diffuseColor);
         ambientColor = from3(root["ambientColor"], ambientColor);
         specularColor = from3(root["specularColor"], specularColor);
         emissiveColor = from3(root["emissive"], emissiveColor);
         if (root.Has("shininess")) shininess = root["shininess"].AsFloat();
+        if (root.Has("useMmdSpecular")) useMmdSpecular = root["useMmdSpecular"].AsBool();
         if (root.Has("metallic")) metallicFactor = root["metallic"].AsFloat();
         if (root.Has("roughness")) roughnessFactor = root["roughness"].AsFloat();
         if (root.Has("subsurfaceEnabled")) subsurfaceEnabled = root["subsurfaceEnabled"].AsBool();
@@ -204,6 +211,7 @@ bool Material::SaveToFile(const std::string& path) const
     root.Set("specularColor", J3(specularColor));
     root.Set("emissive", J3(emissiveColor));
     root.Set("shininess", JsonValue(shininess));
+    root.Set("useMmdSpecular", JsonValue(useMmdSpecular));
     root.Set("metallic", JsonValue(metallicFactor));
     root.Set("roughness", JsonValue(roughnessFactor));
     root.Set("subsurfaceEnabled", JsonValue(subsurfaceEnabled));

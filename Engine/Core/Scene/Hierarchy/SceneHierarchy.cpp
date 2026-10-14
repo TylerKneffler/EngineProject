@@ -1,6 +1,8 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Animation/TwoBoneIK.h"
 #include "Core/Compoonents/Animation/ChainIK.h"
+#include "Core/Compoonents/Animation/PmxRigController.h"
+#include "Core/Compoonents/Materials/PmxMaterialMorph.h"
 #include "Core/Compoonents/Constraints/TransformConstraint.h"
 #include "Core/Audio/Audio.h"
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
@@ -90,6 +92,10 @@ void Scene::Update(float deltaTime)
     const double physicsDelta = m_clock.IsFixedStep()
         ? m_clock.GetFixedStep() : static_cast<double>(m_deltaTime);
     m_physics->Step(physicsDelta);
+    for (const auto& object : m_objects)
+        if (object && object->IsEnabledInHierarchy())
+            if (auto* rig = object->GetComponent<Engine::Components::PmxRigController>())
+                rig->PostPhysicsUpdate();
     // Bullet has now published current-frame poses and overlap pairs. Portal
     // traversal deliberately runs here rather than in Component::Update so a
     // crossing is evaluated against the motion that just occurred.
@@ -146,6 +152,16 @@ void Scene::Update(float deltaTime)
 
 void Scene::ApplyPoseConstraints()
 {
+    for (const auto& object : m_objects)
+        if (object && object->IsEnabledInHierarchy())
+            for (Engine::Core::Component* component : object->Components)
+                if (auto* morph = dynamic_cast<Engine::Components::PmxMaterialMorph*>(component))
+                    morph->Apply();
+    for (const auto& object : m_objects)
+        if (object && object->IsEnabledInHierarchy())
+            for (Engine::Core::Component* component : object->Components)
+                if (auto* pmx = dynamic_cast<Engine::Components::PmxRigController*>(component))
+                    pmx->Apply();
     for (const auto& object : m_objects)
         if (object && object->IsEnabledInHierarchy())
             for (Engine::Core::Component* component : object->Components)

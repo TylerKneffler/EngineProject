@@ -4,6 +4,9 @@
 #include "Core/AssetRecord.h"
 #include "Core/Compoonents/Animation/ModelAnimation.h"
 #include "Core/Compoonents/Animation/Model.h"
+#include "Core/Compoonents/Animation/PmxRigController.h"
+#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Materials/PmxMaterialMorph.h"
 #include "Core/Model/AnimationClipAsset.h"
 #include "Core/Model/AnimationPackAsset.h"
 #include "Core/Model/RigAsset.h"
@@ -12,12 +15,282 @@
 #include "Core/Serialization/Json.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include <algorithm>
+#include <cctype>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <unordered_map>
+#include <unordered_set>
+#include <glm/gtc/quaternion.hpp>
 
 namespace Engine::Editor
 {
 namespace fs = std::filesystem;
+
+namespace
+{
+std::string PathFromRoot(const Engine::Core::Object& object,
+    const Engine::Core::Object& root)
+{
+    std::vector<std::string> parts;
+    for (auto* current = &object; current && current != &root;
+        current = current->Parent)
+        parts.push_back(current->name);
+    std::string path;
+    for (auto it = parts.rbegin(); it != parts.rend(); ++it)
+    {
+        if (!path.empty()) path += '/';
+        path += *it;
+    }
+    return path;
+}
+
+float SampleMorph(const std::vector<const VmdMorphFrame*>& frames, float time)
+{
+    if (frames.empty()) return 0.f;
+    if (time <= frames.front()->timeSeconds) return frames.front()->weight;
+    const auto later = std::upper_bound(frames.begin(), frames.end(), time,
+        [](float value, const VmdMorphFrame* key)
+        { return value < key->timeSeconds; });
+    if (later == frames.end()) return frames.back()->weight;
+    const auto* right = *later;
+    const auto* left = *(later - 1);
+    const float width = right->timeSeconds - left->timeSeconds;
+    const float blend = width > 0.f
+        ? (time - left->timeSeconds) / width : 0.f;
+    return left->weight + (right->weight - left->weight) * blend;
+}
+
+float BoneBezier(float fraction, const std::array<uint8_t, 64>& bytes,
+    size_t channel)
+{
+    const auto control = [&](size_t row)
+    {
+        size_t index = row * 4 + channel;
+        if (row == 0 && (channel == 2 || channel == 3) &&
+            bytes[2] == 99 && bytes[3] == 15)
+            index = channel == 2 ? 17 : 18;
+        return std::clamp(static_cast<float>(bytes[index]) / 127.f, 0.f, 1.f);
+    };
+    const float x1 = control(0), y1 = control(1);
+    const float x2 = control(2), y2 = control(3);
+    if (x1 == 0.f && y1 == 0.f && x2 == 0.f && y2 == 0.f)
+        return fraction;
+    const auto cubic = [](float t, float a, float b)
+    {
+        const float u = 1.f - t;
+        return 3.f * u * u * t * a + 3.f * u * t * t * b + t * t * t;
+    };
+    float low = 0.f, high = 1.f;
+    for (int i = 0; i < 18; ++i)
+    {
+        const float mid = (low + high) * 0.5f;
+        if (cubic(mid, x1, x2) < fraction) low = mid;
+        else high = mid;
+    }
+    return cubic((low + high) * 0.5f, y1, y2);
+}
+
+bool BindPmxDirect(const std::string& prefabPath, const std::string& vmdPath,
+    std::string& error, const std::string& sourcePackPath)
+{
+    VmdMotion motion;
+    if (!VmdMotionDecoder::DecodeFile(vmdPath, motion, error)) return false;
+    Engine::Scene::Scene scene;
+    auto* root = Engine::Serialization::SceneSerializer::InstantiatePrefab(
+        scene, prefabPath);
+    auto* model = root ? root->GetComponent<Engine::Components::Model>() : nullptr;
+    if (!model)
+    { error = "PMX prefab has no model component"; return false; }
+
+    const std::string stem = fs::path(vmdPath).stem().string();
+    Engine::Model::AnimationClip body;
+    body.clipName = stem + " body";
+    body.duration = motion.durationSeconds;
+    MmdPoseRetargeter::FacialBake facial;
+    facial.clip.clipName = stem + " facial";
+    facial.clip.duration = motion.durationSeconds;
+
+    std::unordered_map<std::string, unsigned> boneByName;
+    const auto& nodes = model->ResolveNodes();
+    for (unsigned i = 0; i < nodes.size(); ++i)
+        if (nodes[i]) boneByName.emplace(nodes[i]->name, i);
+    std::unordered_map<std::string, std::vector<const VmdBoneFrame*>> boneFrames;
+    for (const auto& frame : motion.bones)
+        if (boneByName.count(frame.name))
+            boneFrames[frame.name].push_back(&frame);
+    for (auto& [name, keys] : boneFrames)
+    {
+        std::stable_sort(keys.begin(), keys.end(),
+            [](const auto* a, const auto* b) { return a->frame < b->frame; });
+        const unsigned nodeIndex = boneByName.at(name);
+        const auto* target = nodes[nodeIndex];
+        const std::string targetPath = PathFromRoot(*target, *root);
+        Engine::Model::AnimationChannel translation, rotation;
+        translation.nodeIndex = rotation.nodeIndex = nodeIndex;
+        translation.targetPath = rotation.targetPath = targetPath;
+        translation.path = Engine::Model::AnimationChannel::Path::Translation;
+        rotation.path = Engine::Model::AnimationChannel::Path::Rotation;
+        translation.valueWidth = 3;
+        rotation.valueWidth = 4;
+        const auto appendSample = [&](const VmdBoneFrame& from,
+            const VmdBoneFrame& to, float fraction, float sampleTime)
+        {
+            const auto blend = [&](size_t axis)
+            {
+                return glm::mix(from.translation[axis], to.translation[axis],
+                    BoneBezier(fraction, to.interpolation, axis));
+            };
+            translation.times.push_back(sampleTime);
+            rotation.times.push_back(sampleTime);
+            translation.values.insert(translation.values.end(), {
+                target->transform.position.x + blend(0),
+                target->transform.position.y + blend(1),
+                target->transform.position.z - blend(2) });
+            const glm::quat first(from.rotation[3], -from.rotation[0],
+                -from.rotation[1], from.rotation[2]);
+            const glm::quat second(to.rotation[3], -to.rotation[0],
+                -to.rotation[1], to.rotation[2]);
+            const glm::quat identity(1.f, 0.f, 0.f, 0.f);
+            const glm::quat source = glm::normalize(glm::slerp(
+                glm::dot(first, first) > 1e-12f ? glm::normalize(first) : identity,
+                glm::dot(second, second) > 1e-12f ? glm::normalize(second) : identity,
+                BoneBezier(fraction, to.interpolation, 3)));
+            const glm::quat base(target->transform.rotation);
+            const glm::quat converted = glm::normalize(base * source);
+            rotation.values.insert(rotation.values.end(), { converted.x,
+                converted.y, converted.z, converted.w });
+        };
+        if (!keys.empty()) appendSample(*keys.front(), *keys.front(), 0.f,
+            keys.front()->timeSeconds);
+        for (size_t i = 1; i < keys.size(); ++i)
+        {
+            const auto& from = *keys[i - 1];
+            const auto& to = *keys[i];
+            if (to.frame == from.frame) continue;
+            const uint64_t quarterFrames = std::min<uint64_t>(
+                static_cast<uint64_t>(to.frame - from.frame) * 4u, 4096u);
+            for (uint64_t step = 1; step <= quarterFrames; ++step)
+            {
+                const float fraction = static_cast<float>(step) /
+                    static_cast<float>(quarterFrames);
+                appendSample(from, to, fraction,
+                    glm::mix(from.timeSeconds, to.timeSeconds, fraction));
+            }
+        }
+        body.channels.push_back(std::move(translation));
+        body.channels.push_back(std::move(rotation));
+    }
+    for (const auto& key : motion.properties)
+        body.visibility.push_back({ key.timeSeconds, key.visible });
+    std::unordered_set<std::string> ikNames;
+    if (const auto* rig = root->GetComponent<Engine::Components::PmxRigController>())
+        for (const auto& chain : rig->ikChains)
+            if (const auto* controller = model->ResolveNode(chain.controllerNodeIndex))
+                ikNames.insert(controller->name);
+    size_t unmatchedIkSwitches = 0;
+    for (const auto& key : motion.properties)
+        for (const auto& ik : key.ik)
+            if (ikNames.count(ik.name))
+                body.ikSwitches.push_back({ key.timeSeconds, ik.name, ik.enabled });
+            else ++unmatchedIkSwitches;
+
+    std::unordered_map<std::string, std::vector<const VmdMorphFrame*>> morphFrames;
+    for (const auto& frame : motion.morphs)
+        morphFrames[frame.name].push_back(&frame);
+    for (auto& [name, keys] : morphFrames)
+        std::stable_sort(keys.begin(), keys.end(),
+            [](const auto* a, const auto* b) { return a->frame < b->frame; });
+    std::unordered_set<std::string> matchedNames;
+    std::unordered_set<std::string> componentMorphNames;
+    if (const auto* rig = root->GetComponent<Engine::Components::PmxRigController>())
+        for (const auto& morph : rig->boneMorphs)
+            componentMorphNames.insert(morph.name);
+    const auto collectMaterialMorphs = [&](auto&& self,
+        Engine::Core::Object* object) -> void
+    {
+        if (const auto* component =
+            object->GetComponent<Engine::Components::PmxMaterialMorph>())
+            for (const auto& morph : component->morphs)
+                componentMorphNames.insert(morph.name);
+        for (auto* child : object->Children) self(self, child);
+    };
+    collectMaterialMorphs(collectMaterialMorphs, root);
+    for (const auto& [name, keys] : morphFrames)
+        if (componentMorphNames.count(name))
+        {
+            matchedNames.insert(name);
+            auto& track = facial.clip.componentMorphs.emplace_back();
+            track.name = name;
+            for (const auto* key : keys)
+            {
+                track.times.push_back(key->timeSeconds);
+                track.weights.push_back(key->weight);
+            }
+        }
+    const auto collectMeshes = [&](auto&& self, Engine::Core::Object* object)
+        -> void
+    {
+        if (!object) return;
+        if (const auto* mesh = object->GetComponent<Engine::Components::Mesh>();
+            mesh && mesh->HasMorphTargets())
+        {
+            const auto& targets = mesh->GetMorphTargets();
+            std::vector<float> times;
+            for (const auto& target : targets)
+                if (const auto found = morphFrames.find(target.name);
+                    found != morphFrames.end())
+                {
+                    matchedNames.insert(target.name);
+                    ++facial.matchedTargets;
+                    for (const auto* key : found->second)
+                        times.push_back(key->timeSeconds);
+                }
+            if (!times.empty())
+            {
+                std::sort(times.begin(), times.end());
+                times.erase(std::unique(times.begin(), times.end()), times.end());
+                Engine::Model::AnimationChannel channel;
+                channel.path = Engine::Model::AnimationChannel::Path::Weights;
+                channel.targetMesh = PathFromRoot(*object, *root);
+                channel.valueWidth = static_cast<unsigned>(targets.size());
+                channel.times = std::move(times);
+                for (float time : channel.times)
+                    for (const auto& target : targets)
+                    {
+                        const auto found = morphFrames.find(target.name);
+                        channel.values.push_back(found == morphFrames.end()
+                            ? 0.f : SampleMorph(found->second, time));
+                    }
+                facial.clip.channels.push_back(std::move(channel));
+            }
+        }
+        for (auto* child : object->Children) self(self, child);
+    };
+    collectMeshes(collectMeshes, root);
+    facial.matchedExpressions = matchedNames.size();
+    for (const auto& [name, frames] : morphFrames)
+        if (!matchedNames.count(name))
+            facial.unmatchedExpressions.push_back(name);
+    std::sort(facial.unmatchedExpressions.begin(),
+        facial.unmatchedExpressions.end());
+    if (body.channels.empty() && body.visibility.empty() && body.ikSwitches.empty() &&
+        facial.clip.channels.empty() && facial.clip.componentMorphs.empty())
+    { error = "VMD has no bone, IK, visibility, or morph keys matching the PMX prefab"; return false; }
+    std::vector<std::string> limitations;
+    if (!boneFrames.empty())
+        limitations.push_back("VMD Bezier bone curves are sampled at up to 120 Hz "
+            "and interpolated linearly between samples");
+    if (unmatchedIkSwitches)
+        limitations.push_back(std::to_string(unmatchedIkSwitches) +
+            " VMD IK switch keys have no matching PMX IK controller");
+    if (!facial.unmatchedExpressions.empty())
+        limitations.push_back(std::to_string(facial.unmatchedExpressions.size()) +
+            " VMD morph names have no imported mesh, bone, or material target");
+    return MmdDanceAssetBinder::BindBaked(prefabPath, vmdPath, {}, {},
+        body, facial, error, sourcePackPath, limitations);
+}
+}
 
 bool MmdDanceAssetBinder::BindFromPrefab(const std::string& prefabPath,
     const std::string& vmdPath, std::string& error,
@@ -25,7 +298,12 @@ bool MmdDanceAssetBinder::BindFromPrefab(const std::string& prefabPath,
 {
     const auto record = Engine::Core::AssetRecord::Load(prefabPath);
     if (!record || record->sourcePath.empty())
-    { error = "Selected prefab has no source FBX metadata"; return false; }
+    { error = "Selected prefab has no source model metadata"; return false; }
+    std::string extension = fs::path(record->sourcePath).extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+        [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+    if (extension == ".pmx")
+        return BindPmxDirect(prefabPath, vmdPath, error, sourcePackPath);
     const fs::path fbxPath(record->sourcePath);
     if (fbxPath.extension() != ".fbx" || !fs::is_regular_file(fbxPath))
     { error = "Selected prefab source FBX is unavailable: " + fbxPath.string(); return false; }
@@ -98,10 +376,13 @@ bool MmdDanceAssetBinder::BindBaked(const std::string& prefabPath,
     const std::string& mapPath,
     const Engine::Model::AnimationClip& body,
     const MmdPoseRetargeter::FacialBake& facial,
-    std::string& error, const std::string& sourcePackPath)
+    std::string& error, const std::string& sourcePackPath,
+    const std::vector<std::string>& limitations)
 {
-    const bool hasBody = !body.channels.empty() || !body.visibility.empty();
-    const bool hasFace = !facial.clip.channels.empty();
+    const bool hasBody = !body.channels.empty() || !body.visibility.empty() ||
+        !body.ikSwitches.empty();
+    const bool hasFace = !facial.clip.channels.empty() ||
+        !facial.clip.componentMorphs.empty();
     if (!hasBody && !hasFace)
     { error = "MMD motion has no bindable body or facial tracks"; return false; }
     Engine::Scene::Scene scene;
@@ -170,6 +451,10 @@ bool MmdDanceAssetBinder::BindBaked(const std::string& prefabPath,
     for (const auto& name : facial.unmatchedExpressions)
         unmatched.Push(Engine::Serialization::JsonValue(name));
     report.Set("unmatchedExpressions", std::move(unmatched));
+    auto warnings = Engine::Serialization::JsonValue::MakeArray();
+    for (const auto& limitation : limitations)
+        warnings.Push(Engine::Serialization::JsonValue(limitation));
+    report.Set("limitations", std::move(warnings));
     {
         std::ofstream file(reportPath, std::ios::binary | std::ios::trunc);
         if (!file || !(file << Engine::Serialization::JsonWrite(report) << '\n'))

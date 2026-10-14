@@ -35,6 +35,10 @@ public:
     
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Properties", Range = "1.0, 256.0")
     float     shininess     { 32.f };
+
+    // Use imported MMD specular and shininess in the PBR lighting pass.
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Properties")
+    bool useMmdSpecular { false };
     
     PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "0.0, 1.0")
     float     metallicFactor { 0.f };

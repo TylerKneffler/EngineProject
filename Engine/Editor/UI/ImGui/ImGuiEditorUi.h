@@ -44,6 +44,8 @@ public:
     void ValueLabel(const char*, const char*) override; bool CollapsingHeader(const char*, bool) override;
     bool PropertyGroupHeader(const char*, bool) override;
     bool ComponentHeader(EditorUiObjectIcon, const char*, bool) override;
+    void SetNextComponentHeaderOpen(bool) override;
+    void ScrollItemIntoView() override;
     bool TreeNode(const void*, const char*, bool, bool, bool) override; void TreePop() override;
     EditorUiObjectRowResult ObjectTreeRow(const void*,EditorUiObjectIcon,char*,size_t,bool*,bool,bool,bool,bool,int,bool,uint64_t,bool) override;
     void ObjectTreePop() override;
@@ -59,6 +61,7 @@ public:
     EditorUiTextEditResult RenameText(const char*,char*,size_t,bool) override;
     EditorUiPrefabMenuResult PrefabOverrideMenu(const void*,bool) override;
     bool BeginChild(const char*) override; void EndChild() override;
+    bool BeginChildRegion(const char*, float) override;
     bool IsItemHovered() const override; bool IsItemClicked() const override;
     bool IsItemDoubleClicked() const override; bool IsWindowBackgroundClicked() const override;
     bool IsAnyItemActive() const override;

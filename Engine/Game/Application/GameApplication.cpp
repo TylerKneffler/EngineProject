@@ -10,6 +10,7 @@
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/SceneManager.h"
+#include "Core/Timing/FramePacer.h"
 #include <filesystem>
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
 #include "Core/Assets/Scripts/Utilities/Rotate.h"
@@ -105,6 +106,7 @@ int GameApplication::Run(HINSTANCE instance)
     LARGE_INTEGER lastCounter{};
     QueryPerformanceFrequency(&performanceFrequency);
     QueryPerformanceCounter(&lastCounter);
+    Engine::Core::FramePacer gameFramePacer;
 
     window->OnResize = [&renderer](uint32_t width, uint32_t height)
     {
@@ -112,6 +114,7 @@ int GameApplication::Run(HINSTANCE instance)
     };
     window->OnUpdate = [&]()
     {
+        gameFramePacer.Wait(settings.gameMaxFps);
         LARGE_INTEGER currentCounter{};
         QueryPerformanceCounter(&currentCounter);
         const float deltaTime =

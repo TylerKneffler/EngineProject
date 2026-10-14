@@ -81,7 +81,7 @@ void GameBuildManager::StartBuild(PostBuildAction action)
             {".hlsl", ".glsl", ".vert", ".frag", ".comp"});
         const size_t assets = m_developmentSettings.includedAssets.empty()
             ? CountFiles(m_developmentSettings.assetsDirectory,
-                {".png", ".jpg", ".jpeg", ".dds", ".obj", ".fbx", ".gltf", ".glb",
+                {".png", ".jpg", ".jpeg", ".dds", ".obj", ".fbx", ".pmx", ".gltf", ".glb",
                  ".wav", ".ogg", ".mp3", ".ttf", ".otf"})
             : m_developmentSettings.includedAssets.size();
         m_console->AddLog(ConsoleView::Level::Build,

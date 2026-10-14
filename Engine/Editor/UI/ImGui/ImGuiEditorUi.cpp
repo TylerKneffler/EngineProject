@@ -541,6 +541,14 @@ bool ImGuiEditorUi::ComponentHeader(EditorUiObjectIcon icon,const char* label,
     ImGui::PopID();
     return open;
 }
+void ImGuiEditorUi::SetNextComponentHeaderOpen(bool open)
+{
+    ImGui::SetNextItemOpen(open, ImGuiCond_Always);
+}
+void ImGuiEditorUi::ScrollItemIntoView()
+{
+    ImGui::SetScrollHereY(.15f);
+}
 bool ImGuiEditorUi::TreeNode(const void*id,const char*l,bool s,bool leaf,bool d){ImGuiTreeNodeFlags f=ImGuiTreeNodeFlags_OpenOnArrow|ImGuiTreeNodeFlags_SpanAvailWidth|(s?ImGuiTreeNodeFlags_Selected:0)|(d?ImGuiTreeNodeFlags_DefaultOpen:0);if(leaf)f|=ImGuiTreeNodeFlags_Leaf|ImGuiTreeNodeFlags_NoTreePushOnOpen;return ImGui::TreeNodeEx(id,f,"%s",l);}
 void ImGuiEditorUi::TreePop(){ImGui::TreePop();}
 EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,
@@ -942,6 +950,10 @@ EditorUiPrefabMenuResult ImGuiEditorUi::PrefabOverrideMenu(const void* id,bool h
     return result;
 }
 bool ImGuiEditorUi::BeginChild(const char*i){return ImGui::BeginChild(i,{0,0},false,ImGuiWindowFlags_HorizontalScrollbar);} void ImGuiEditorUi::EndChild(){ImGui::EndChild();}
+bool ImGuiEditorUi::BeginChildRegion(const char* id, float height)
+{
+    return ImGui::BeginChild(id, {0.f, height}, true);
+}
 bool ImGuiEditorUi::IsItemHovered()const{return ImGui::IsItemHovered();} bool ImGuiEditorUi::IsItemClicked()const{return ImGui::IsItemClicked()&&!ImGui::IsItemToggledOpen();}
 bool ImGuiEditorUi::IsItemDoubleClicked()const{return ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);}
 bool ImGuiEditorUi::IsWindowBackgroundClicked()const{return ImGui::IsMouseClicked(ImGuiMouseButton_Left)&&ImGui::IsWindowHovered()&&!ImGui::IsAnyItemHovered();}

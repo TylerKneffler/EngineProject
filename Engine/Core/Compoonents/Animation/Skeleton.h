@@ -39,6 +39,9 @@ public:
     std::string rigPath;
     unsigned skinIndex = 0;
     std::vector<unsigned> jointNodes;
+    // The first imported skin also records every distinct bone node in the
+    // model. Skinning continues to use jointNodes in palette order.
+    std::vector<unsigned> rootBoneNodes;
     std::vector<glm::mat4> inverseBindMatrices;
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;

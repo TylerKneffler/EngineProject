@@ -5,6 +5,8 @@
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Lighting/Light.h"
 #include "Core/Compoonents/Animation/AnimationManager.h"
+#include "Core/Compoonents/Animation/BoneGroup.h"
+#include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Model/RigAsset.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Object.h"
@@ -88,6 +90,21 @@ int main()
         auto* a = root->Children[0]->Children[0];
         auto* b = root->Children[0]->Children[1];
         auto* face = root->Children[0]->Children[2];
+        auto* rootSkeleton = root->GetComponent<Engine::Components::Skeleton>();
+        auto* groupA = a->GetComponent<Engine::Components::BoneGroup>();
+        auto* groupB = b->GetComponent<Engine::Components::BoneGroup>();
+        if (!rootSkeleton || rootSkeleton->jointNodes != std::vector<unsigned>{ 1 } ||
+            rootSkeleton->rootBoneNodes != std::vector<unsigned>({ 1, 2 }) ||
+            !groupA || !groupB || groupA->skinIndex != 0 ||
+            groupB->skinIndex != 1 ||
+            Engine::Components::BoneGroup::ForSelection(a->Children[0]) != groupA ||
+            !groupA->Contains(a->Children[0]) || groupA->Contains(b))
+            throw std::runtime_error("Bone groups or root skeleton lost on prefab reload");
+        auto* nestedGroup = a->Children[0]
+            ->AddComponent<Engine::Components::BoneGroup>();
+        if (groupA->Contains(a->Children[0]) ||
+            Engine::Components::BoneGroup::ForSelection(a->Children[0]) != nestedGroup)
+            throw std::runtime_error("Nested bone groups must stay separate");
         if (a->name != "Mesh A" || b->name != "Mesh B" ||
             a->Children.empty() || b->Children.empty())
             throw std::runtime_error("Separate FBX objects did not survive prefab reload");

@@ -2,6 +2,8 @@
 #include "Model.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Animation/TwoBoneIK.h"
+#include "Core/Compoonents/Animation/PmxRigController.h"
+#include "Core/Compoonents/Materials/PmxMaterialMorph.h"
 #include "Core/Model/AnimationClipAsset.h"
 #include "Core/Model/AnimationPackAsset.h"
 #include "Core/Model/AnimationControlSpace.h"
@@ -192,6 +194,20 @@ bool SampleVisibility(const Engine::Model::AnimationClip& clip, float time)
         [](float value, const Engine::Model::AnimationClip::VisibilityKey& key)
         { return value < key.time; });
     return next == keys.begin() ? true : (next - 1)->visible;
+}
+
+float SampleComponentMorph(const Engine::Model::AnimationClip::ComponentMorphTrack& track,
+    float time)
+{
+    const auto later = std::upper_bound(track.times.begin(), track.times.end(), time);
+    if (later == track.times.begin()) return track.weights.front();
+    if (later == track.times.end()) return track.weights.back();
+    const size_t right = static_cast<size_t>(later - track.times.begin());
+    const size_t left = right - 1;
+    const float span = track.times[right] - track.times[left];
+    const float blend = span > 0.f
+        ? (time - track.times[left]) / span : 0.f;
+    return glm::mix(track.weights[left], track.weights[right], blend);
 }
 }
 
@@ -498,7 +514,26 @@ void AnimationManager::Tick(float frameDelta)
     const auto resolveAnimation = [this](const std::string& clipName)
     { return FindClip(clipName); };
     const Engine::Model::AnimationClip* animation = resolveAnimation(clip);
-    if (!animation) return;
+    if (!animation)
+    {
+        if (Model* currentModel = ResolveModel())
+            if (currentModel->Owner)
+            {
+                if (auto* pmxRig = currentModel->Owner->GetComponent<PmxRigController>())
+                {
+                    pmxRig->SetAnimatedIkSwitches({});
+                    pmxRig->SetAnimatedMorphWeights({});
+                }
+                const auto clearMorphs = [&](auto&& self, Engine::Core::Object* object) -> void
+                {
+                    if (auto* material = object->GetComponent<PmxMaterialMorph>())
+                        material->SetAnimatedMorphWeights({});
+                    for (auto* child : object->Children) self(self, child);
+                };
+                clearMorphs(clearMorphs, currentModel->Owner);
+            }
+        return;
+    }
     Model* model = ResolveModel();
     if (!model) return;
     const size_t nodeCount = model->GetNodeCount();
@@ -815,6 +850,53 @@ void AnimationManager::Tick(float frameDelta)
             self(self, child);
     };
     applyVisibility(applyVisibility, model->Owner);
+    std::unordered_map<std::string, float> componentWeights;
+    const auto sampleComponentMorphs = [&](const Engine::Model::AnimationClip* source,
+        float sampleTime, float layerWeight)
+    {
+        if (!source) return;
+        for (const auto& track : source->componentMorphs)
+        {
+            const float sampled = SampleComponentMorph(track, sampleTime);
+            const auto existing = componentWeights.find(track.name);
+            componentWeights[track.name] = layerWeight >= 1.f ? sampled :
+                glm::mix(existing == componentWeights.end() ? 0.f : existing->second,
+                    sampled, layerWeight);
+        }
+    };
+    sampleComponentMorphs(animation, time, 1.f);
+    for (const Layer& layer : layers)
+        if (layer.enabled && layer.weight > 0.f)
+            sampleComponentMorphs(resolveAnimation(layer.clip), layer.time,
+                std::clamp(layer.weight, 0.f, 1.f));
+    const auto applyComponentMorphs = [&](auto&& self,
+        Engine::Core::Object* object) -> void
+    {
+        if (auto* material = object->GetComponent<PmxMaterialMorph>())
+            material->SetAnimatedMorphWeights(componentWeights);
+        for (auto* child : object->Children) self(self, child);
+    };
+    applyComponentMorphs(applyComponentMorphs, model->Owner);
+    if (auto* pmxRig = model->Owner->GetComponent<PmxRigController>())
+    {
+        pmxRig->SetAnimatedMorphWeights(componentWeights);
+        std::unordered_map<std::string, bool> switches;
+        const auto sampleSwitches = [&](const Engine::Model::AnimationClip* source,
+            float sampleTime)
+        {
+            if (!source) return;
+            for (const auto& key : source->ikSwitches)
+            {
+                if (key.time > sampleTime) break;
+                switches[key.name] = key.enabled;
+            }
+        };
+        sampleSwitches(animation, time);
+        for (const Layer& layer : layers)
+            if (layer.enabled && layer.weight >= 0.5f)
+                sampleSwitches(resolveAnimation(layer.clip), layer.time);
+        pmxRig->SetAnimatedIkSwitches(switches);
+    }
 }
 
 AnimationManager::JsonValue AnimationManager::Serialize() const

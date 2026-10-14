@@ -2,6 +2,7 @@
 #include "Core/Startup/StartupSplash.h"
 #include "Core/ProjectLoader.h"
 #include "Core/SceneManager.h"
+#include "Core/Timing/FramePacer.h"
 #include "Core/Renderers/IEditorRenderer.h"
 #include "Core/Renderers/RendererFactory.h"
 #include "Core/View/View.h"
@@ -13,6 +14,7 @@
 #include "Engine/Editor/Core/View/Views/GameView.h"
 #include "Engine/Editor/UI/IEditorUiBackend.h"
 #include "Engine/Editor/Core/Importers/ModelImporter.h"
+#include "Engine/Editor/Core/Importers/MmdDanceAssetBinder.h"
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
 #include "Core/Assets/Scripts/Utilities/Rotate.h"
 #include "Core/Assets/Scripts/Controllers/FirstPersonController.h"
@@ -127,11 +129,25 @@ int WINAPI wWinMain(
     WriteStartupLog("Editor startup", true);
 
     // Headless importer entry point used by automation and project tooling.
-    // Editor.exe --import-model <source.gltf|source.glb|source.fbx> <Assets directory>
+    // Editor.exe --import-model <source.gltf|source.glb|source.fbx|source.pmx> <Assets directory>
     // --import-gltf remains accepted for existing automation.
+    // Editor.exe --bind-vmd <imported PMX prefab> <motion.vmd>
     {
         int argumentCount = 0;
         LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
+        if (arguments && argumentCount >= 4 &&
+            std::wstring(arguments[1]) == L"--bind-vmd")
+        {
+            std::string error;
+            const bool bound = Engine::Editor::MmdDanceAssetBinder::BindFromPrefab(
+                std::filesystem::path(arguments[2]).string(),
+                std::filesystem::path(arguments[3]).string(), error);
+            WriteStartupLog(bound ? "VMD bound to imported prefab" :
+                "VMD binding failed: " + error);
+            LocalFree(arguments);
+            if (SUCCEEDED(comResult)) CoUninitialize();
+            return bound ? 0 : 1;
+        }
         if (arguments && argumentCount >= 4 &&
             (std::wstring(arguments[1]) == L"--import-model" ||
              std::wstring(arguments[1]) == L"--import-gltf"))
@@ -374,6 +390,7 @@ int WINAPI wWinMain(
     LARGE_INTEGER perfFreq, lastCounter;
     QueryPerformanceFrequency(&perfFreq);
     QueryPerformanceCounter(&lastCounter);
+    Engine::Core::FramePacer editorFramePacer;
 
     // Play state
     Engine::Editor::PlayState playState = Engine::Editor::PlayState::Stopped;
@@ -430,6 +447,7 @@ int WINAPI wWinMain(
     std::string displayedWindowTitle;
     window->OnUpdate = [&]()
     {
+        editorFramePacer.Wait(editorState->GetEditorMaxFps());
         // Update delta time
         LARGE_INTEGER now;
         QueryPerformanceCounter(&now);

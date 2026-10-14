@@ -78,6 +78,7 @@ private:
     void EnsureRigidBodyState(Engine::Components::RigidBody& body);
     void EnsureClothState(Engine::Components::Cloth& cloth);
     void EnsureIKBoneState(Engine::Components::IKBone& bone);
+    void ClearPmxJoints();
     PhysicsWorldState* GetInternalState();
     struct Impl;
     Impl* m_impl = nullptr;

@@ -754,6 +754,32 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/SceneCameraFocusTests.cpp")
+    enable_testing()
+    add_executable(SceneCameraFocusTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/SceneCameraFocusTests.cpp")
+    target_link_libraries(SceneCameraFocusTests PRIVATE Engine)
+    target_include_directories(SceneCameraFocusTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME SceneCameraFocus COMMAND SceneCameraFocusTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PmxModelDecoderTests.cpp")
+    enable_testing()
+    add_executable(PmxModelDecoderTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/PmxModelDecoderTests.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/PmxModelDecoder.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/ModelAssetWriter.cpp")
+    target_link_libraries(PmxModelDecoderTests PRIVATE Engine)
+    target_include_directories(PmxModelDecoderTests PRIVATE
+        "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Editor")
+    target_compile_definitions(PmxModelDecoderTests PRIVATE
+        PMX_TEST_ASSET_ROOT="${ENGINE_ROOT}/Engine/Core/Assets/mmd"
+        PMX_TEST_OUTPUT_ROOT="${ENGINE_ROOT}/.local")
+    add_test(NAME PmxModelDecoder COMMAND PmxModelDecoderTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/MmdImportStepsTests.cpp")
     enable_testing()
     add_executable(MmdImportStepsTests EXCLUDE_FROM_ALL
@@ -764,6 +790,7 @@ if(NOT ENGINE_PROJECT_DIR AND
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/VmdSceneImporter.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/MmdPoseRetargeter.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/MmdDanceAssetBinder.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/PmxModelDecoder.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/ModelAssetWriter.cpp")
     target_link_libraries(MmdImportStepsTests PRIVATE Engine assimp::assimp)
     target_include_directories(MmdImportStepsTests PRIVATE

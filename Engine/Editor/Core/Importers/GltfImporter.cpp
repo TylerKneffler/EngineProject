@@ -5,6 +5,7 @@
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Animation/ModelAnimation.h"
+#include "Core/Compoonents/Animation/BoneGroup.h"
 #include "Core/Model/RigAsset.h"
 #include "AnimationAssetWriter.h"
 #include "Core/Object.h"
@@ -655,6 +656,19 @@ Engine::Model::ModelImportResult GltfImporter::Import(
                             skeleton->inverseBindMatrices[matrixIndex][column][row] = matrices[matrixIndex][column][row];
             }
         }
+        if (!asset.skins.empty())
+        {
+            auto* rootSkeleton = prefabRoot->GetComponent<Engine::Components::Skeleton>();
+            for (const auto& skin : asset.skins)
+                for (size_t node : skin.joints)
+                {
+                    const unsigned index = static_cast<unsigned>(node);
+                    if (std::find(rootSkeleton->rootBoneNodes.begin(),
+                            rootSkeleton->rootBoneNodes.end(), index) ==
+                        rootSkeleton->rootBoneNodes.end())
+                        rootSkeleton->rootBoneNodes.push_back(index);
+                }
+        }
 
         Engine::Components::AnimationManager* manager = asset.animations.empty()
             ? nullptr : prefabRoot->AddComponent<Engine::Components::AnimationManager>();
@@ -786,6 +800,11 @@ Engine::Model::ModelImportResult GltfImporter::Import(
                 bone->paletteIndex = binding.palette;
                 bone->parentPaletteIndex = binding.parentPalette;
                 bone->hierarchyRoot = binding.parentPalette < 0;
+                if (bone->hierarchyRoot)
+                {
+                    auto* group = object->AddComponent<Engine::Components::BoneGroup>();
+                    group->skinIndex = binding.skin;
+                }
             }
             if (const auto* trs = std::get_if<fastgltf::TRS>(&node.transform))
             {

@@ -25,7 +25,17 @@ bool DX11EditorRenderer::Init(void* hwndHandle, uint32_t width, uint32_t height)
         swap.BufferCount = 2;
         swap.OutputWindow = hwnd;
         swap.Windowed = TRUE;
-        swap.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+        swap.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+        Microsoft::WRL::ComPtr<IDXGIFactory5> factory5;
+        BOOL tearingSupported = FALSE;
+        if (SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory5))) &&
+            SUCCEEDED(factory5->CheckFeatureSupport(
+                DXGI_FEATURE_PRESENT_ALLOW_TEARING, &tearingSupported,
+                sizeof(tearingSupported))) && tearingSupported)
+        {
+            swap.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+            m_allowTearing = true;
+        }
 
         const D3D_FEATURE_LEVEL levels[] = { D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0 };
         D3D_FEATURE_LEVEL selected{};
@@ -46,7 +56,20 @@ bool DX11EditorRenderer::Init(void* hwndHandle, uint32_t width, uint32_t height)
             hr = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
                 flags & ~D3D11_CREATE_DEVICE_DEBUG, levels + 1, 1, D3D11_SDK_VERSION,
                 &swap, &m_swapChain, &m_device, &selected, &m_context);
+        if (FAILED(hr))
+        {
+            m_swapChain.Reset(); m_context.Reset(); m_device.Reset();
+            swap.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+            swap.Flags = 0;
+            m_allowTearing = false;
+            hr = D3D11CreateDeviceAndSwapChain(nullptr,
+                D3D_DRIVER_TYPE_HARDWARE, nullptr,
+                flags & ~D3D11_CREATE_DEVICE_DEBUG, levels + 1, 1,
+                D3D11_SDK_VERSION, &swap, &m_swapChain, &m_device,
+                &selected, &m_context);
+        }
         ThrowIfFailed(hr);
+        m_swapChainFlags = swap.Flags;
         m_width = width;
         m_height = height;
         CreateRenderTarget();
@@ -79,7 +102,8 @@ void DX11EditorRenderer::Resize(uint32_t width, uint32_t height)
     if (!m_swapChain || width == 0 || height == 0 || (width == m_width && height == m_height)) return;
     m_context->OMSetRenderTargets(0, nullptr, nullptr);
     m_rtv.Reset();
-    ThrowIfFailed(m_swapChain->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0));
+    ThrowIfFailed(m_swapChain->ResizeBuffers(0, width, height,
+        DXGI_FORMAT_UNKNOWN, m_swapChainFlags));
     m_width = width;
     m_height = height;
     CreateRenderTarget();
@@ -112,7 +136,8 @@ void DX11EditorRenderer::RenderIfNeeded(std::function<void()> drawFn)
     m_context->OMSetRenderTargets(1, &target, nullptr);
     if (m_uiHooks.render) m_uiHooks.render(m_context.Get());
     if (m_uiHooks.endFrame) m_uiHooks.endFrame();
-    ThrowIfFailed(m_swapChain->Present(1, 0));
+    ThrowIfFailed(m_swapChain->Present(0,
+        m_allowTearing ? DXGI_PRESENT_ALLOW_TEARING : 0));
 }
 
 std::pair<std::pair<void*, void*>, uint32_t> DX11EditorRenderer::AllocateSrvSlot()

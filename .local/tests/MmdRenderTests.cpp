@@ -3,6 +3,8 @@
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Animation/AnimationManager.h"
 #include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Materials/Material.h"
+#include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Object.h"
 #include "Core/Model/ProjectSettings.h"
 #include "Core/Renderers/RendererFactory.h"
@@ -78,8 +80,23 @@ int main()
         Checkpoint("Before scene initialization");
         scene.Init(renderer->GetGraphicsProvider());
         Checkpoint("Before scene load");
-        if (!scene.Load("Engine/Core/Assets/Scenes/Animation/mmd.scene")) throw std::runtime_error("Scene load failed");
+        const char* selectedScene = std::getenv("MMD_SCENE");
+        if (!scene.Load(selectedScene ? selectedScene :
+            "Engine/Core/Assets/Scenes/Animation/mmd.scene"))
+            throw std::runtime_error("Scene load failed");
         Checkpoint("After scene load");
+        size_t texturedMaterials = 0;
+        for (const auto& object : scene.GetObjects())
+            if (auto* material = object->GetComponent<Engine::Components::Material>())
+                if (material->baseColorTexture)
+                {
+                    if (!std::filesystem::is_regular_file(
+                        material->baseColorTexture->GetFilePath()))
+                        throw std::runtime_error("Model material has a missing texture");
+                    ++texturedMaterials;
+                }
+        if (texturedMaterials == 0)
+            throw std::runtime_error("Model has no textured materials");
         uint64_t staticMorphBytes = 0;
         for (const auto& object : scene.GetObjects()) staticMorphBytes += CheckMorphBuffers(object.get());
         if (!staticMorphBytes) throw std::runtime_error("MMD scene has no GPU morph buffers");

@@ -7,6 +7,8 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Object.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
+#include "Core/Compoonents/Animation/BoneGroup.h"
+#include "Core/Compoonents/Animation/Model.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Engine/Editor/Core/View/Templates/EditModes/Skeleton/SkinBindingWeights.h"
@@ -111,19 +113,31 @@ void EditorState::DrawSkeletonEditTools(IEditorUi& ui)
             RigOrdinal(*scene, skeleton));
     }
     const auto& bones = skeleton->ResolveJoints();
+    const auto* selectedGroup = Engine::Components::BoneGroup::ForSelection(
+        scene->GetSelectedObject());
     std::vector<std::string> labels;
     std::vector<const char*> names;
+    std::vector<int> boneChoices;
     labels.reserve(bones.size()); names.reserve(bones.size());
     for (size_t i = 0; i < bones.size(); ++i)
-        labels.push_back(bones[i] ? bones[i]->name : "Missing joint");
+        if (!selectedGroup ||
+            (selectedGroup->skinIndex == skeleton->skinIndex &&
+                selectedGroup->Contains(bones[i])))
+        {
+            boneChoices.push_back(static_cast<int>(i));
+            labels.push_back(bones[i] ? bones[i]->name : "Missing joint");
+        }
     for (const auto& label : labels) names.push_back(label.c_str());
-    int selected = std::max(0, session->boneIndex);
+    auto foundChoice = std::find(boneChoices.begin(), boneChoices.end(),
+        session->boneIndex);
+    int selected = foundChoice == boneChoices.end() ? 0
+        : static_cast<int>(foundChoice - boneChoices.begin());
     if (!names.empty() && ui.Combo("Bone", &selected, names.data(),
         static_cast<int>(names.size())))
     {
         FinishSkeletonPaintStroke(*session);
-        session->boneIndex = selected;
-        auto* object = bones[selected];
+        session->boneIndex = boneChoices[selected];
+        auto* object = bones[session->boneIndex];
         if (object)
         {
             scene->SetSelectedObject(object);
@@ -163,7 +177,13 @@ void EditorState::DrawSkeletonEditTools(IEditorUi& ui)
                     std::max(0.f, session->translationSnap),
                     std::max(0.f, session->rotationSnap),
                     std::max(0.f, session->scaleSnap));
-        if (ui.Checkbox("Show bone overlays", &skeleton->showBones))
+        auto* displaySkeleton = skeleton;
+        if (auto* model = skeleton->ResolveModel(); model && model->Owner)
+            if (auto* root = model->Owner->GetComponent<
+                    Engine::Components::Skeleton>();
+                root && !root->rootBoneNodes.empty())
+                displaySkeleton = root;
+        if (ui.Checkbox("Show bone overlays", &displaySkeleton->showBones))
         {
             CommitSkeletonEdit(scene);
             if (m_renderer) m_renderer->MarkDirty();
@@ -186,12 +206,23 @@ void EditorState::DrawSkeletonEditTools(IEditorUi& ui)
         if (!toolbarPopup && ui.Button("Rename selected bone"))
             ApplySkeletonBoneAction(scene, *session, 4);
         std::vector<const char*> parents;
-        parents.push_back("Model root");
-        for (const auto& label : labels) parents.push_back(label.c_str());
-        int parentChoice = session->reparentBoneIndex + 1;
-        if (ui.Combo("New bone parent", &parentChoice, parents.data(),
-            static_cast<int>(parents.size())))
-            session->reparentBoneIndex = parentChoice - 1;
+        std::vector<int> parentChoices;
+        if (!selectedGroup)
+        { parents.push_back("Model root"); parentChoices.push_back(-1); }
+        for (size_t choice = 0; choice < labels.size(); ++choice)
+        {
+            parents.push_back(labels[choice].c_str());
+            parentChoices.push_back(boneChoices[choice]);
+        }
+        auto foundParent = std::find(parentChoices.begin(), parentChoices.end(),
+            session->reparentBoneIndex);
+        int parentChoice = foundParent == parentChoices.end() ? 0
+            : static_cast<int>(foundParent - parentChoices.begin());
+        if (!parents.empty() && ui.Combo("New bone parent", &parentChoice,
+                parents.data(), static_cast<int>(parents.size())))
+            session->reparentBoneIndex = parentChoices[parentChoice];
+        if (foundParent == parentChoices.end() && !parentChoices.empty())
+            session->reparentBoneIndex = parentChoices.front();
         if (!toolbarPopup && ui.Button("Reparent selected bone"))
             ApplySkeletonBoneAction(scene, *session, 5);
         if (!toolbarPopup && ui.Button("Mirror selected bone (X)"))
@@ -199,7 +230,8 @@ void EditorState::DrawSkeletonEditTools(IEditorUi& ui)
         if (!toolbarPopup && ui.Button("Apply bind pose"))
             ApplySkeletonBoneAction(scene, *session, 2);
         if (!toolbarPopup && session->boneTool == 0 &&
-            ValidBone(skeleton, scene->GetSelectedObject()))
+            ValidBone(skeleton, scene->GetSelectedObject()) &&
+            (!selectedGroup || selectedGroup->Contains(scene->GetSelectedObject())))
         {
             ui.Separator();
             auto* joint = scene->GetSelectedObject();
@@ -274,12 +306,22 @@ void EditorState::DrawSkeletonEditTools(IEditorUi& ui)
         mirrorNames.reserve(names.size() + 1);
         mirrorNames.push_back("Off");
         mirrorNames.insert(mirrorNames.end(), names.begin(), names.end());
-        int mirrorChoice = session->mirrorBoneIndex + 1;
+        auto foundMirror = std::find(boneChoices.begin(), boneChoices.end(),
+            session->mirrorBoneIndex);
+        if (session->mirrorBoneIndex >= 0 &&
+            foundMirror == boneChoices.end())
+        {
+            FinishSkeletonPaintStroke(*session);
+            session->mirrorBoneIndex = -1;
+        }
+        int mirrorChoice = session->mirrorBoneIndex < 0 ? 0
+            : static_cast<int>(foundMirror - boneChoices.begin()) + 1;
         if (ui.Combo("Mirror paint onto bone", &mirrorChoice,
                 mirrorNames.data(), static_cast<int>(mirrorNames.size())))
         {
             FinishSkeletonPaintStroke(*session);
-            session->mirrorBoneIndex = mirrorChoice - 1;
+            session->mirrorBoneIndex = mirrorChoice == 0 ? -1
+                : boneChoices[mirrorChoice - 1];
         }
         if (session->mirrorBoneIndex == session->boneIndex)
             ui.DisabledLabel("Choose a different target bone for mirroring.");

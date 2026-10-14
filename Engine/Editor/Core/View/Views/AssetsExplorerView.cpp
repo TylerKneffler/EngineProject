@@ -56,7 +56,8 @@ const std::unordered_map<std::string, std::string>& AssetEditorRegistry()
         { ".skeleton", "Skeleton Editor" },
         { ".mesh", "Mesh Editor" }, { ".obj", "Mesh Editor" },
         { ".ply", "Mesh Editor" }, { ".stl", "Mesh Editor" },
-        { ".fbx", "Model Editor" }, { ".gltf", "Model Editor" },
+        { ".fbx", "Model Editor" }, { ".pmx", "Model Editor" },
+        { ".gltf", "Model Editor" },
         { ".glb", "Model Editor" }, { ".h", "Script Editor" },
         { ".hpp", "Script Editor" }, { ".cpp", "Script Editor" },
         { ".cc", "Script Editor" }, { ".cxx", "Script Editor" },
@@ -970,6 +971,7 @@ bool AssetsExplorerView::AcceptSceneObject(IEditorUi& ui, const std::string& dir
             std::transform(extension.begin(), extension.end(), extension.begin(),
                 [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
             if ((extension == ".vmd" || extension == ".fbx" ||
+                extension == ".pmx" ||
                 extension == ".gltf" || extension == ".glb" ||
                 extension == ".obj" || extension == ".spriteanim") &&
                 OnObjectImportRequested)

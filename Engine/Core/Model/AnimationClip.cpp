@@ -49,6 +49,20 @@ Engine::Serialization::JsonValue AnimationClip::Serialize() const
             .Set("time", JsonValue(key.time))
             .Set("visible", JsonValue(key.visible)));
     value.Set("visibility", std::move(visibilityKeys));
+    JsonValue ikKeys = JsonValue::MakeArray();
+    for (const auto& key : ikSwitches)
+        ikKeys.Push(JsonValue::MakeObject()
+            .Set("time", JsonValue(key.time))
+            .Set("name", JsonValue(key.name))
+            .Set("enabled", JsonValue(key.enabled)));
+    value.Set("ikSwitches", std::move(ikKeys));
+    JsonValue morphTracks = JsonValue::MakeArray();
+    for (const auto& track : componentMorphs)
+        morphTracks.Push(JsonValue::MakeObject()
+            .Set("name", JsonValue(track.name))
+            .Set("times", FloatArray(track.times))
+            .Set("weights", FloatArray(track.weights)));
+    value.Set("componentMorphs", std::move(morphTracks));
     JsonValue serializedLimbs = JsonValue::MakeArray();
     for (const auto& limb : limbs)
     {
@@ -82,6 +96,8 @@ void AnimationClip::Deserialize(const JsonValue& value)
     looping = !value.Has("looping") || value["looping"].AsBool();
     channels.clear();
     visibility.clear();
+    ikSwitches.clear();
+    componentMorphs.clear();
     limbs.clear();
     const JsonValue& visibilityKeys = value["visibility"];
     for (size_t i = 0; i < visibilityKeys.ArraySize(); ++i)
@@ -94,6 +110,35 @@ void AnimationClip::Deserialize(const JsonValue& value)
     std::stable_sort(visibility.begin(), visibility.end(),
         [](const VisibilityKey& a, const VisibilityKey& b)
         { return a.time < b.time; });
+    const JsonValue& ikKeys = value["ikSwitches"];
+    for (size_t i = 0; i < ikKeys.ArraySize(); ++i)
+    {
+        const auto& key = ikKeys.ArrayAt(i);
+        const float keyTime = key["time"].AsFloat();
+        const std::string name = key["name"].AsString();
+        if (keyTime >= 0.f && std::isfinite(keyTime) && !name.empty())
+            ikSwitches.push_back({ keyTime, name, key["enabled"].AsBool() });
+    }
+    std::stable_sort(ikSwitches.begin(), ikSwitches.end(),
+        [](const IkSwitchKey& a, const IkSwitchKey& b)
+        { return a.time < b.time; });
+    const JsonValue& morphTracks = value["componentMorphs"];
+    for (size_t i = 0; i < morphTracks.ArraySize(); ++i)
+    {
+        const auto& source = morphTracks.ArrayAt(i);
+        ComponentMorphTrack track;
+        track.name = source["name"].AsString();
+        track.times = ReadFloats(source["times"]);
+        track.weights = ReadFloats(source["weights"]);
+        if (track.name.empty() || track.times.empty() ||
+            track.times.size() != track.weights.size()) continue;
+        bool valid = true;
+        for (size_t j = 0; j < track.times.size(); ++j)
+            valid &= std::isfinite(track.times[j]) && track.times[j] >= 0.f &&
+                std::isfinite(track.weights[j]) &&
+                (j == 0 || track.times[j] >= track.times[j - 1]);
+        if (valid) componentMorphs.push_back(std::move(track));
+    }
     const JsonValue& list = value["channels"];
     channels.reserve(list.ArraySize());
     for (size_t i = 0; i < list.ArraySize(); ++i)

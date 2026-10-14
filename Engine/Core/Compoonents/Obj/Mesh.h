@@ -140,6 +140,8 @@ public:
     { return m_morphWeightBuffer.get(); }
     uint32_t GetMorphTargetCount() const
     { return static_cast<uint32_t>(m_morphTargets.size()); }
+    uint32_t GetMorphDeltaStrideFloat4() const
+    { return m_morphDeltaStrideFloat4; }
 
     using SliceResult = std::pair<std::vector<Vertex>, std::vector<Vertex>>;
     // Returns closed positive/negative halves. For a closed intersected mesh,
@@ -169,6 +171,7 @@ private:
     std::vector<glm::vec3> m_surfaceOffsets;
     std::unique_ptr<IGraphicsBuffer> m_indexBuffer;
     std::unique_ptr<IGraphicsBuffer> m_morphDeltaBuffer;
+    uint32_t m_morphDeltaStrideFloat4 = 3;
     std::unique_ptr<IGraphicsBuffer> m_morphWeightBuffer;
     IGraphicsBufferFactory* m_bufferFactory = nullptr;
     bool m_ready = false;

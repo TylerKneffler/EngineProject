@@ -12,6 +12,7 @@
 #include <cmath>
 #include <chrono>
 #include <limits>
+#include <string_view>
 #include <unordered_map>
 #ifdef _WIN32
 #define NOMINMAX
@@ -37,6 +38,20 @@ std::string Mesh::ResolveFilePath(const std::string& path)
     if (std::filesystem::exists(requested))
         return requested.lexically_normal().generic_string();
 
+    // Bundled assets may carry absolute paths from the checkout that authored
+    // them. Resolve only paths under the built-in asset root in this checkout.
+    const std::string generic = requested.generic_string();
+    constexpr std::string_view marker = "Engine/Core/Assets/";
+    const size_t root = generic.find(marker);
+    if (root != std::string::npos)
+    {
+        const std::filesystem::path relocated =
+            std::filesystem::path(ENGINE_ASSETS_PATH) /
+            generic.substr(root + marker.size());
+        if (std::filesystem::exists(relocated))
+            return relocated.lexically_normal().generic_string();
+    }
+
     // Scenes distributed with a project deliberately store portable paths such
     // as Assets/Mesh/cube.obj. In the project-free Engine Sandbox, resolve that
     // same path against the built-in template assets instead.
@@ -58,14 +73,6 @@ namespace
 constexpr uint32_t kNativeMeshMagic = 0x4853454d; // "MESH"
 constexpr uint32_t kNativeMeshVersion = 5;
 constexpr float kPi = 3.14159265358979323846f;
-struct alignas(16) GpuMorphDelta
-{
-    glm::vec4 position{};
-    glm::vec4 normal{};
-    glm::vec4 tangent{};
-};
-static_assert(sizeof(GpuMorphDelta) == 48,
-    "GPU morph delta layout must match Object.hlsl");
 struct LegacyVertexV2
 {
     float pos[3], normal[3], uv[2], tangent[4];
@@ -99,6 +106,30 @@ std::vector<glm::vec3> ReadVec3Array(const Engine::Serialization::JsonValue& val
         const Engine::Serialization::JsonValue& item = value.ArrayAt(i);
         result.emplace_back(item.ArrayAt(0).AsFloat(), item.ArrayAt(1).AsFloat(),
             item.ArrayAt(2).AsFloat());
+    }
+    return result;
+}
+
+Engine::Serialization::JsonValue Vec4Array(const std::vector<glm::vec4>& values)
+{
+    auto result = Engine::Serialization::JsonValue::MakeArray();
+    for (const glm::vec4& value : values)
+        result.Push(Engine::Serialization::JsonValue::MakeArray()
+            .Push(Engine::Serialization::JsonValue(value.x))
+            .Push(Engine::Serialization::JsonValue(value.y))
+            .Push(Engine::Serialization::JsonValue(value.z))
+            .Push(Engine::Serialization::JsonValue(value.w)));
+    return result;
+}
+
+std::vector<glm::vec4> ReadVec4Array(const Engine::Serialization::JsonValue& value)
+{
+    std::vector<glm::vec4> result;
+    for (size_t i = 0; i < value.ArraySize(); ++i)
+    {
+        const auto& item = value.ArrayAt(i);
+        result.emplace_back(item.ArrayAt(0).AsFloat(), item.ArrayAt(1).AsFloat(),
+            item.ArrayAt(2).AsFloat(), item.ArrayAt(3).AsFloat());
     }
     return result;
 }
@@ -665,7 +696,8 @@ uint64_t Mesh::GetCpuMeshMemoryBytes() const
     for (const MorphTarget& target : m_morphTargets)
         bytes += static_cast<uint64_t>(target.positions.capacity() +
             target.normals.capacity() + target.tangents.capacity()) *
-            sizeof(glm::vec3);
+            sizeof(glm::vec3) + static_cast<uint64_t>(target.uv.capacity()) *
+            sizeof(glm::vec4);
     return bytes + static_cast<uint64_t>(m_morphWeights.capacity()) * sizeof(float) +
         static_cast<uint64_t>(m_surfaceOffsets.capacity()) * sizeof(glm::vec3);
 }
@@ -717,7 +749,7 @@ bool Mesh::SaveMorphFile(const std::string& path,
     std::ofstream file(path, std::ios::binary | std::ios::trunc);
     if (!file) return false;
     const uint32_t magic = 0x46524f4du; // MORF
-    const uint32_t version = 1;
+    const uint32_t version = 2;
     const uint32_t count = static_cast<uint32_t>(targets.size());
     file.write(reinterpret_cast<const char*>(&magic), sizeof(magic));
     file.write(reinterpret_cast<const char*>(&version), sizeof(version));
@@ -735,6 +767,10 @@ bool Mesh::SaveMorphFile(const std::string& path,
             file.write(reinterpret_cast<const char*>(values->data()),
                 static_cast<std::streamsize>(size * sizeof(glm::vec3)));
         }
+        const uint32_t uvSize = static_cast<uint32_t>(target.uv.size());
+        file.write(reinterpret_cast<const char*>(&uvSize), sizeof(uvSize));
+        file.write(reinterpret_cast<const char*>(target.uv.data()),
+            static_cast<std::streamsize>(uvSize * sizeof(glm::vec4)));
     }
     return file.good();
 }
@@ -750,7 +786,8 @@ bool Mesh::LoadMorphFile(const std::string& path, unsigned nodeIndex,
     file.read(reinterpret_cast<char*>(&magic), sizeof(magic));
     file.read(reinterpret_cast<char*>(&version), sizeof(version));
     file.read(reinterpret_cast<char*>(&count), sizeof(count));
-    if (!file || magic != 0x46524f4du || version != 1 || count > 10000u)
+    if (!file || magic != 0x46524f4du || (version != 1 && version != 2) ||
+        count > 10000u)
         return false;
     std::vector<MorphTarget> targets;
     targets.reserve(count);
@@ -773,6 +810,18 @@ bool Mesh::LoadMorphFile(const std::string& path, unsigned nodeIndex,
             values->resize(size);
             file.read(reinterpret_cast<char*>(values->data()),
                 static_cast<std::streamsize>(size * sizeof(glm::vec3)));
+            if (!file) return false;
+        }
+        if (version >= 2)
+        {
+            uint32_t size = 0;
+            file.read(reinterpret_cast<char*>(&size), sizeof(size));
+            if (!file || size > 100000000u ||
+                (!m_vertices.empty() && size != 0 && size != m_vertices.size()))
+                return false;
+            target.uv.resize(size);
+            file.read(reinterpret_cast<char*>(target.uv.data()),
+                static_cast<std::streamsize>(size * sizeof(glm::vec4)));
             if (!file) return false;
         }
         targets.push_back(std::move(target));
@@ -850,28 +899,34 @@ void Mesh::CreateMorphBuffers()
         return;
 
     const size_t vertexCount = m_vertices.size();
-    std::vector<GpuMorphDelta> deltas;
-    deltas.resize(vertexCount * m_morphTargets.size());
+    m_morphDeltaStrideFloat4 = std::any_of(m_morphTargets.begin(),
+        m_morphTargets.end(), [](const MorphTarget& target)
+        { return !target.uv.empty(); }) ? 4u : 3u;
+    std::vector<glm::vec4> deltas(vertexCount * m_morphTargets.size() *
+        m_morphDeltaStrideFloat4, glm::vec4(0.f));
     for (size_t targetIndex = 0; targetIndex < m_morphTargets.size(); ++targetIndex)
     {
         const MorphTarget& target = m_morphTargets[targetIndex];
-        GpuMorphDelta* destination = deltas.data() + targetIndex * vertexCount;
         for (size_t vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex)
         {
+            const size_t base = (targetIndex * vertexCount + vertexIndex) *
+                m_morphDeltaStrideFloat4;
             if (vertexIndex < target.positions.size())
-                destination[vertexIndex].position = glm::vec4(
+                deltas[base] = glm::vec4(
                     target.positions[vertexIndex], 0.f);
             if (vertexIndex < target.normals.size())
-                destination[vertexIndex].normal = glm::vec4(
+                deltas[base + 1] = glm::vec4(
                     target.normals[vertexIndex], 0.f);
             if (vertexIndex < target.tangents.size())
-                destination[vertexIndex].tangent = glm::vec4(
+                deltas[base + 2] = glm::vec4(
                     target.tangents[vertexIndex], 0.f);
+            if (m_morphDeltaStrideFloat4 == 4 && vertexIndex < target.uv.size())
+                deltas[base + 3] = target.uv[vertexIndex];
         }
     }
     m_morphDeltaBuffer = m_bufferFactory->CreateStaticShaderResource(
-        static_cast<uint64_t>(deltas.size()) * sizeof(GpuMorphDelta),
-        deltas.data(), sizeof(GpuMorphDelta));
+        static_cast<uint64_t>(deltas.size()) * sizeof(glm::vec4),
+        deltas.data(), sizeof(glm::vec4));
 
     const size_t weightGroups = (m_morphTargets.size() + 3u) / 4u;
     m_packedMorphWeights.assign(weightGroups, glm::vec4(0.f));
@@ -1512,6 +1567,13 @@ std::vector<Mesh::Vertex> Mesh::BuildPosedVertices(
                 vertex.tangent[1] += target.tangents[index].y * weight;
                 vertex.tangent[2] += target.tangents[index].z * weight;
             }
+            if (index < target.uv.size())
+            {
+                vertex.uv[0] += target.uv[index].x * weight;
+                vertex.uv[1] += target.uv[index].y * weight;
+                vertex.uv1[0] += target.uv[index].z * weight;
+                vertex.uv1[1] += target.uv[index].w * weight;
+            }
         }
     }
     if (skinPalette && !skinPalette->empty())
@@ -1776,7 +1838,8 @@ Mesh::JsonValue Mesh::Serialize() const
             .Set("name", JsonValue(target.name))
             .Set("positions", Vec3Array(target.positions))
             .Set("normals", Vec3Array(target.normals))
-            .Set("tangents", Vec3Array(target.tangents)));
+            .Set("tangents", Vec3Array(target.tangents))
+            .Set("uv", Vec4Array(target.uv)));
     return result.Set("morphTargets", std::move(targets));
 }
 
@@ -1792,6 +1855,7 @@ void Mesh::DeserializeLegacyMorphTargets(const JsonValue& value)
         target.positions = ReadVec3Array(list.ArrayAt(i)["positions"]);
         target.normals = ReadVec3Array(list.ArrayAt(i)["normals"]);
         target.tangents = ReadVec3Array(list.ArrayAt(i)["tangents"]);
+        target.uv = ReadVec4Array(list.ArrayAt(i)["uv"]);
         targets.push_back(std::move(target));
     }
     std::vector<float> weights;

@@ -11,6 +11,7 @@ void PropertiesView::DrawTransform(IEditorUi& ui)
 {
     Engine::Components::Transform& t = m_selectedObject->transform;
     Engine::Core::Object* prefabRoot = m_selectedObject->GetPrefabInstanceRoot();
+    ui.PushId(&t);
 
     // A completed inspector drag needs one fresh prefab patch.  While the
     // control is active, keep the previous patch cached so drawing this panel
@@ -21,8 +22,14 @@ void PropertiesView::DrawTransform(IEditorUi& ui)
         m_deferredTransformPrefabRoot = nullptr;
     }
 
+    if (m_componentHeaderOverride >= 0 || m_componentJumpTarget == &t ||
+        m_propertiesSearch[0] != '\0')
+        ui.SetNextComponentHeaderOpen(m_componentHeaderOverride >= 0
+            ? m_componentHeaderOverride != 0 : true);
     const bool transformOpen = ui.ComponentHeader(
         ComponentIconForType("Transform"), "Transform");
+    if (m_componentJumpTarget == &t)
+        ui.ScrollItemIntoView();
     EditorUiContextMenuResult menu;
     if (prefabRoot)
         HandlePrefabMenu(ui.PrefabOverrideMenu(&t,
@@ -82,5 +89,6 @@ void PropertiesView::DrawTransform(IEditorUi& ui)
             ui.Button("Resume Animation and Physics"))
             t.ClearEditorOverride();
     }
+    ui.PopId();
 }
 }

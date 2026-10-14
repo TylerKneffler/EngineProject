@@ -77,8 +77,11 @@ Skeleton::JsonValue Skeleton::Serialize() const
     JsonValue result = Component::Serialize()
         .Set("skinIndex", JsonValue(static_cast<int>(skinIndex)));
     JsonValue nodes = JsonValue::MakeArray(), matrices = JsonValue::MakeArray();
+    JsonValue rootNodes = JsonValue::MakeArray();
     for (unsigned node : jointNodes)
         nodes.Push(JsonValue(static_cast<int>(node)));
+    for (unsigned node : rootBoneNodes)
+        rootNodes.Push(JsonValue(static_cast<int>(node)));
     for (const glm::mat4& matrix : inverseBindMatrices)
     {
         JsonValue serialized = JsonValue::MakeArray();
@@ -87,6 +90,7 @@ Skeleton::JsonValue Skeleton::Serialize() const
         matrices.Push(std::move(serialized));
     }
     return result.Set("joints", std::move(nodes))
+        .Set("rootBoneNodes", std::move(rootNodes))
         .Set("inverseBindMatrices", std::move(matrices));
 }
 
@@ -95,9 +99,12 @@ void Skeleton::Deserialize(const JsonValue& value)
     Component::Deserialize(value);
     skinIndex = static_cast<unsigned>(value["skinIndex"].AsInt());
     jointNodes.clear();
+    rootBoneNodes.clear();
     inverseBindMatrices.clear();
     for (size_t i = 0; i < value["joints"].ArraySize(); ++i)
         jointNodes.push_back(static_cast<unsigned>(value["joints"].ArrayAt(i).AsInt()));
+    for (size_t i = 0; i < value["rootBoneNodes"].ArraySize(); ++i)
+        rootBoneNodes.push_back(static_cast<unsigned>(value["rootBoneNodes"].ArrayAt(i).AsInt()));
     for (size_t i = 0; i < value["inverseBindMatrices"].ArraySize(); ++i)
     {
         glm::mat4 matrix(1.f);

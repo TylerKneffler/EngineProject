@@ -3,6 +3,7 @@
 #include "Editor/Core/Importers/VmdSceneImporter.h"
 #include "Editor/Core/Importers/MmdPoseRetargeter.h"
 #include "Editor/Core/Importers/MmdDanceAssetBinder.h"
+#include "Editor/Core/Importers/PmxModelDecoder.h"
 #include "Editor/Core/Importers/ModelAssetWriter.h"
 #include "Core/Compoonents/Animation/ModelAnimation.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
@@ -327,7 +328,7 @@ int main()
         if (!result.success || !Engine::Editor::MmdDanceAssetBinder::BindBaked(
                 result.prefabPath, vmd.string(), profile.string(), mapping.string(), body, face, error))
         { std::cerr << result.message << ' ' << error << '\n'; return 1; }
-        if (!SaveMmdDemo(result.prefabPath, "Engine/Core/Assets/Scenes/Animation/mmd.scene"))
+        if (!SaveMmdDemo(result.prefabPath, "Engine/Core/Assets/Scenes/Animation/mmd_fbx.scene"))
         { std::cerr << "Could not save rebuilt MMD scene\n"; return 1; }
         std::ofstream credits(fs::path(result.outputDirectory) / "CREDITS.md");
         credits << "# Mococo dance demo credits\n\n"
@@ -340,7 +341,7 @@ int main()
             << model.skins.size() << " skin palettes. Body and facial clips share the VMD timeline. "
             "Textures are referenced from ../Mococo/Textures.\n";
         if (!credits) return 1;
-        std::cout << "Rebuilt " << result.prefabPath << " and mmd.scene.\n";
+        std::cout << "Rebuilt " << result.prefabPath << " and mmd_fbx.scene.\n";
         return 0;
     }
     if (std::getenv("MMD_DUMP_FBX_NODES"))
@@ -1638,7 +1639,7 @@ int main()
     std::cout << "MMD step 9: selecting imported FBX resolves the retarget map "
                  "and writes separate .anim files plus a stacked .animpack.\n";
     const fs::path scenePath = exportDemo
-        ? fs::path("Engine/Core/Assets/Scenes/Animation/mmd.scene")
+        ? fs::path("Engine/Core/Assets/Scenes/Animation/mmd_fbx.scene")
         : output / "mmd.scene";
     {
     if (!SaveMmdDemo(prefab, scenePath))
@@ -1675,6 +1676,60 @@ int main()
                     << error << '\n'; return 9; }
         std::cout << "MMD step 9: body-only and face-only motions save only "
                      "their matching .anim asset.\n";
+    }
+    if (!exportDemo)
+    {
+        const fs::path pmxSource = fs::path(MMD_TEST_ASSET_ROOT) /
+            "Mococo/Mococo Abyssgard.pmx";
+        Engine::Model::ImportedModel pmxModel;
+        if (!Engine::Editor::PmxModelDecoder::Decode(
+                pmxSource.string(), pmxModel, error))
+        { std::cerr << "MMD PMX bind: decode failed: " << error << '\n'; return 11; }
+        const auto pmxImported = Engine::Editor::ModelAssetWriter::Write(
+            pmxModel, pmxSource.string(), output.string());
+        if (!pmxImported.success ||
+            !Engine::Editor::MmdDanceAssetBinder::BindFromPrefab(
+                pmxImported.prefabPath, vmd.string(), error, sourcePackPath))
+        { std::cerr << "MMD PMX bind failed: " << error << '\n'; return 11; }
+        const fs::path pmxDirectory = pmxImported.outputDirectory;
+        const auto pmxBody = Engine::Model::AnimationClipAsset::Load(
+            (pmxDirectory / "dance1_body.anim").string());
+        const auto pmxFace = Engine::Model::AnimationClipAsset::Load(
+            (pmxDirectory / "dance1_facial.anim").string());
+        if (!pmxBody || pmxBody->clip.channels.empty() ||
+            !pmxFace || pmxFace->clip.channels.empty())
+        { std::cerr << "MMD PMX bind did not write body and mesh morph clips\n"; return 11; }
+        std::unordered_set<std::string> importedComponentNames;
+        for (const auto& morph : pmxModel.boneMorphs)
+            importedComponentNames.insert(morph.name);
+        for (const auto& morph : pmxModel.materialMorphs)
+            importedComponentNames.insert(morph.name);
+        std::unordered_set<std::string> expectedComponentNames;
+        for (const auto& key : dance.morphs)
+            if (importedComponentNames.count(key.name))
+                expectedComponentNames.insert(key.name);
+        std::unordered_set<std::string> boundComponentNames;
+        for (const auto& track : pmxFace->clip.componentMorphs)
+            boundComponentNames.insert(track.name);
+        if (boundComponentNames != expectedComponentNames)
+        { std::cerr << "MMD PMX bind omitted bone or material morph tracks\n";
+            return 11; }
+        const auto pmxReport = Engine::Serialization::JsonParseFile(
+            (pmxDirectory / "dance1_mmd.json").string());
+        Engine::Scene::Scene pmxScene;
+        auto* pmxRoot = Engine::Serialization::SceneSerializer::InstantiatePrefab(
+            pmxScene, pmxImported.prefabPath);
+        auto* pmxManager = pmxRoot
+            ? pmxRoot->GetComponent<Engine::Components::AnimationManager>() : nullptr;
+        if (!pmxManager || pmxReport["limitations"].ArraySize() == 0)
+        { std::cerr << "MMD PMX bind omitted playback or compatibility warnings\n"; return 11; }
+        pmxManager->RefreshRigClips();
+        if (!pmxManager->FindClip(pmxBody->clip.clipName) ||
+            !pmxManager->FindClip(pmxFace->clip.clipName))
+        { std::cerr << "MMD PMX clips are not available on the prefab\n"; return 11; }
+        if (pmxDirectory.parent_path().lexically_normal() == output.lexically_normal())
+            fs::remove_all(pmxDirectory);
+        std::cout << "MMD PMX bind: direct bone and mesh morph clips saved.\n";
     }
     if (!exportDemo &&
         fs::path(imported.outputDirectory).parent_path().lexically_normal() ==

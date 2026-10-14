@@ -5,10 +5,39 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include <algorithm>
+#include <array>
 #include <memory>
+#include <unordered_set>
 
 namespace Engine::Editor
 {
+namespace
+{
+size_t ComponentCategory(const std::string& type,
+    const std::unordered_set<std::string>& scripts)
+{
+    if (scripts.count(type)) return 6;
+    if (type == "Mesh" || type == "Material" || type == "Camera" ||
+        type == "Light" || type == "LightProbe" || type == "LightProbeGroup" ||
+        type == "Sprite" || type == "BakedLightingData") return 0;
+    if (type == "RigidBody" || type == "PrimitiveObjectCollider" ||
+        type == "MeshObjectCollider" || type == "Cloth") return 1;
+    if (type == "Model" || type == "AnimationManager" ||
+        type == "VmdSceneTrack" || type == "Skeleton" ||
+        type == "AnimationBone" || type == "SkinnedMesh" ||
+        type == "SoftTissueSurface" || type == "IKBone" ||
+        type == "TwoBoneIK" || type == "ChainIK" ||
+        type == "AimConstraint" || type == "ParentConstraint" ||
+        type == "PositionConstraint" || type == "RotationConstraint" ||
+        type == "SpriteAnimationManager" || type == "CameraTrack") return 2;
+    if (type == "Canvas" || type == "UIButton" || type == "UIImage" ||
+        type == "UIObject" || type == "UIText") return 3;
+    if (type == "AudioSource") return 4;
+    if (type == "SpatialManipulator" || type == "SplinePath" ||
+        type == "SplineFollower") return 5;
+    return 7;
+}
+}
 
 bool PropertiesView::AddRegisteredComponent(const std::string& typeName, std::string& message)
 {
@@ -75,28 +104,54 @@ void PropertiesView::DrawComponentPicker(IEditorUi& ui)
         return;
     }
 
-    ui.InputText("Search", m_componentSearch, sizeof(m_componentSearch));
+    ui.SearchInput("##componentSearch", m_componentSearch,
+        sizeof(m_componentSearch), "Find component...");
     ui.Separator();
     const std::vector<std::string>& types =
         Engine::Serialization::SceneSerializer::GetRegisteredComponentTypes();
+    const std::vector<std::string> registeredScripts =
+        Engine::Serialization::SceneSerializer::GetRegisteredScriptTypes();
+    const std::unordered_set<std::string> scripts(
+        registeredScripts.begin(), registeredScripts.end());
+    constexpr std::array<const char*, 8> categoryNames = {
+        "Rendering", "Physics", "Animation", "UI", "Audio",
+        "Spatial", "Scripts", "Other"
+    };
+    std::array<std::vector<const std::string*>, categoryNames.size()> categories;
     bool foundMatch = false;
     for (const std::string& type : types)
     {
         if (!ContainsIgnoringCase(type, m_componentSearch))
             continue;
         foundMatch = true;
-        if (ui.Selectable(type.c_str()))
+        categories[ComponentCategory(type, scripts)].push_back(&type);
+    }
+    for (size_t category = 0; category < categories.size(); ++category)
+    {
+        const auto& entries = categories[category];
+        if (entries.empty()) continue;
+        if (m_componentSearch[0] != '\0')
+            ui.SetNextComponentHeaderOpen(true);
+        const std::string label = std::string(categoryNames[category]) +
+            " (" + std::to_string(entries.size()) + ")";
+        if (!ui.CollapsingHeader(label.c_str(), false)) continue;
+        ui.Indent(8.f);
+        for (const std::string* type : entries)
         {
-            std::string message;
-            const bool added = AddRegisteredComponent(type, message);
-            LogAssetDrop(message, !added);
-            if (added)
+            if (ui.Selectable(type->c_str()))
             {
-                if (OnComponentsChanged)
-                    OnComponentsChanged();
-                m_componentPickerOpen = false;
+                std::string message;
+                const bool added = AddRegisteredComponent(*type, message);
+                LogAssetDrop(message, !added);
+                if (added)
+                {
+                    if (OnComponentsChanged)
+                        OnComponentsChanged();
+                    m_componentPickerOpen = false;
+                }
             }
         }
+        ui.Unindent(8.f);
     }
     if (!foundMatch)
         ui.DisabledLabel("No matching components");

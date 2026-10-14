@@ -134,12 +134,22 @@ void SceneCameraController::Apply(Engine::Scene::Scene& scene,
 
     if (zoom != 0.f)
     {
-        constexpr float kMoveFactor = 0.1f;
-        const float distance = glm::max(glm::length(target - eye), 0.05f);
+        constexpr float kZoomPerStep = 0.85f;
+        const float minDistance = std::max(cam->nearPlane * 2.f, 0.05f);
+        const float distance = glm::length(target - eye);
         forward = glm::normalize(target - eye);
-        const glm::vec3 movement = forward * (zoom * distance * kMoveFactor);
-        const glm::vec3 nextEye = eye + movement;
-        const glm::vec3 nextTarget = target + movement;
+        const float desiredDistance = distance * std::pow(kZoomPerStep, zoom);
+        if (!std::isfinite(desiredDistance))
+            return;
+
+        // Scale around the focus point so each wheel step covers the same
+        // proportion of the remaining distance, including when zooming out.
+        // Once close enough, advance the focus point as well so zooming in
+        // can continue through it instead of stopping there.
+        const float focusAdvance = std::max(minDistance - desiredDistance, 0.f);
+        const glm::vec3 nextTarget = target + forward * focusAdvance;
+        const glm::vec3 nextEye = nextTarget - forward *
+            std::max(desiredDistance, minDistance);
         if (isFinite(nextEye) && isFinite(nextTarget))
         {
             pos = nextEye;

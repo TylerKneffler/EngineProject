@@ -46,6 +46,7 @@
 #include <chrono>
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <cstring>
@@ -1751,6 +1752,23 @@ void EditorState::SaveScene()
         return;
     if (!SavePendingMeshEdits()) return;
 
+    if (m_activeAssetDocument && !m_activeSceneAssetDocument &&
+        (m_activePrefabPath.empty() || !m_prefabDocumentFocused))
+    {
+        if (!m_activeAssetDocument->Save() && m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                "Failed to save asset: " + m_activeAssetDocument->GetPath());
+        return;
+    }
+
+    if (m_primaryProperties && !m_primaryProperties->CommitPendingAssetRename())
+    {
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                "Could not rename selected asset. Check its Filename in Properties.");
+        return;
+    }
+
     if (m_activeSceneAssetDocument)
     {
         SaveSceneAssetDocument(*m_activeSceneAssetDocument);
@@ -1797,14 +1815,6 @@ void EditorState::SaveScene()
         if (m_primaryConsole)
             m_primaryConsole->AddLog(ConsoleView::Level::Info,
                 "Prefab saved: " + m_activePrefabPath);
-        return;
-    }
-
-    if (m_activeAssetDocument)
-    {
-        if (!m_activeAssetDocument->Save() && m_primaryConsole)
-            m_primaryConsole->AddLog(ConsoleView::Level::Error,
-                "Failed to save asset: " + m_activeAssetDocument->GetPath());
         return;
     }
 
@@ -1879,8 +1889,21 @@ void EditorState::SaveAll()
     if (!SavePendingMeshEdits()) return;
 
     for (AssetDocumentView* document : m_assetDocuments)
-        if (document && document->IsDirty())
-            document->Save();
+        if (document && (document->IsDirty() || document->HasPendingRename()) &&
+            !document->Save())
+        {
+            if (m_primaryConsole)
+                m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                    "Could not save asset: " + document->GetPath());
+            return;
+        }
+    if (m_primaryProperties && !m_primaryProperties->CommitPendingAssetRename())
+    {
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                "Could not rename selected asset. Check its Filename in Properties.");
+        return;
+    }
 
     for (auto& document : m_sceneAssetDocuments)
         if (document && (document->dirty || document->meshEdit.dirty))
@@ -3923,6 +3946,17 @@ void EditorState::WireupCallbacks()
 
         const std::string oldNormalized = NormalizeAssetPath(oldPath);
         const std::string newNormalized = NormalizeAssetPath(newPath);
+        const std::string oldIdentity = AssetPathIdentity(oldPath);
+
+        if (m_primaryProperties &&
+            !m_primaryProperties->GetSelectedAsset().empty() &&
+            AssetPathIdentity(m_primaryProperties->GetSelectedAsset()) ==
+                oldIdentity)
+            m_primaryProperties->SetSelectedAsset(newPath);
+        for (AssetDocumentView* document : m_assetDocuments)
+            if (document && AssetPathIdentity(document->GetPath()) ==
+                oldIdentity)
+                document->HandleExternalRename(newPath);
 
         const auto remapPath = [&](const std::string& value)
         {
@@ -4304,7 +4338,7 @@ void EditorState::WireupCallbacks()
                 std::string extension = std::filesystem::path(path).extension().string();
                 std::transform(extension.begin(), extension.end(), extension.begin(),
                     [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
-                if (extension == ".vmd" || extension == ".fbx" ||
+                if (extension == ".vmd" || extension == ".fbx" || extension == ".pmx" ||
                     extension == ".gltf" || extension == ".glb" ||
                     extension == ".obj" || extension == ".spriteanim" ||
                     extension == ".prefab")
@@ -4326,9 +4360,9 @@ void EditorState::ImportAsset()
     dialog.lpstrFile = source;
     dialog.nMaxFile = MAX_PATH;
     dialog.lpstrFilter =
-        L"Supported Assets (*.obj;*.gltf;*.glb;*.fbx;*.vmd;*.prefab;*.animpack;*.spriteanim;*.spritesheet;*.png;*.jpg;*.jpeg;*.bmp;*.dds;*.tga;*.hdr;*.exr;*.ktx2;*.wav;*.ogg;*.mp3;*.ttf;*.otf)\0"
-        L"*.obj;*.gltf;*.glb;*.fbx;*.vmd;*.prefab;*.animpack;*.spriteanim;*.spritesheet;*.png;*.jpg;*.jpeg;*.bmp;*.dds;*.tga;*.hdr;*.exr;*.ktx2;*.wav;*.ogg;*.mp3;*.ttf;*.otf\0"
-        L"3D Models (*.obj;*.gltf;*.glb;*.fbx)\0*.obj;*.gltf;*.glb;*.fbx\0"
+        L"Supported Assets (*.obj;*.gltf;*.glb;*.fbx;*.pmx;*.vmd;*.prefab;*.animpack;*.spriteanim;*.spritesheet;*.png;*.jpg;*.jpeg;*.bmp;*.dds;*.tga;*.hdr;*.exr;*.ktx2;*.wav;*.ogg;*.mp3;*.ttf;*.otf)\0"
+        L"*.obj;*.gltf;*.glb;*.fbx;*.pmx;*.vmd;*.prefab;*.animpack;*.spriteanim;*.spritesheet;*.png;*.jpg;*.jpeg;*.bmp;*.dds;*.tga;*.hdr;*.exr;*.ktx2;*.wav;*.ogg;*.mp3;*.ttf;*.otf\0"
+        L"3D Models (*.obj;*.gltf;*.glb;*.fbx;*.pmx)\0*.obj;*.gltf;*.glb;*.fbx;*.pmx\0"
         L"Images (*.png;*.jpg;*.jpeg;*.bmp;*.dds;*.tga;*.hdr;*.exr;*.ktx2)\0*.png;*.jpg;*.jpeg;*.bmp;*.dds;*.tga;*.hdr;*.exr;*.ktx2\0"
         L"Audio (*.wav;*.ogg;*.mp3)\0*.wav;*.ogg;*.mp3\0"
         L"Fonts (*.ttf;*.otf)\0*.ttf;*.otf\0"
@@ -4341,7 +4375,7 @@ void EditorState::ImportAsset()
         std::string extension = std::filesystem::path(path).extension().string();
         std::transform(extension.begin(), extension.end(), extension.begin(),
             [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
-        if (extension == ".vmd" || extension == ".fbx" ||
+        if (extension == ".vmd" || extension == ".fbx" || extension == ".pmx" ||
             extension == ".gltf" || extension == ".glb" ||
             extension == ".obj" || extension == ".spriteanim" ||
             extension == ".prefab")
@@ -4368,6 +4402,11 @@ void EditorState::StartObjectImport(const std::string& path, bool intoScene,
     m_pendingImportScene = GetActiveDocumentScene();
     m_pendingImportIntoScene = intoScene;
     m_pendingImportAsPrefab = false;
+    m_pendingPmxUnitScaleToMeters = 1.f;
+    m_pendingPmxImportMorphs = true;
+    m_pendingPmxImportRigConstraints = true;
+    m_pendingPmxImportFollowBoneColliders = true;
+    m_pendingPmxImportDynamicPhysics = false;
     ClearImportReference();
     if (m_pendingImportScene)
     {
@@ -4388,6 +4427,14 @@ bool EditorState::PendingImportSupportsReference() const
     std::transform(extension.begin(), extension.end(), extension.begin(),
         [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
     return extension == ".vmd";
+}
+
+bool EditorState::IsPendingPmxImport() const
+{
+    std::string extension = std::filesystem::path(m_pendingImportAssetPath).extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+        [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+    return extension == ".pmx";
 }
 
 void EditorState::BeginImportReferencePick()
@@ -4444,6 +4491,11 @@ void EditorState::CancelPendingImportAsset()
     m_pendingImportScene = nullptr;
     m_pendingImportIntoScene = false;
     m_pendingImportAsPrefab = false;
+    m_pendingPmxUnitScaleToMeters = 1.f;
+    m_pendingPmxImportMorphs = true;
+    m_pendingPmxImportRigConstraints = true;
+    m_pendingPmxImportFollowBoneColliders = true;
+    m_pendingPmxImportDynamicPhysics = false;
     m_focusImportHierarchy = false;
     ClearImportReference();
 }
@@ -4458,6 +4510,10 @@ std::string EditorState::ConsumeImportHierarchyFocusRequest()
 void EditorState::ConfirmPendingImportAsset()
 {
     if (m_pendingImportAssetPath.empty()) return;
+    if (IsPendingPmxImport() && (!std::isfinite(m_pendingPmxUnitScaleToMeters) ||
+        m_pendingPmxUnitScaleToMeters <= 0.f ||
+        m_pendingPmxUnitScaleToMeters > 1000.f))
+    { m_pendingImportError = "PMX unit scale must be greater than zero and at most 1000."; return; }
     namespace fs = std::filesystem;
     std::error_code pathError;
     const fs::path assetRoot = fs::weakly_canonical(
@@ -4494,7 +4550,10 @@ void EditorState::ConfirmPendingImportAsset()
     Engine::Scene::Scene* scene = m_pendingImportScene;
     m_pendingImportError.clear();
     std::string primary = ImportAssetFile(source, reference, true,
-        destination.string(), asPrefab);
+        destination.string(), asPrefab, m_pendingPmxUnitScaleToMeters,
+        m_pendingPmxImportMorphs, m_pendingPmxImportRigConstraints,
+        m_pendingPmxImportFollowBoneColliders,
+        m_pendingPmxImportDynamicPhysics);
     if (primary.empty())
     {
         m_pendingImportError = "Import failed. See the Console for details, then retry.";
@@ -4587,7 +4646,10 @@ void EditorState::ConfirmPendingImportAsset()
 
 std::string EditorState::ImportAssetFile(const std::string& path,
     Engine::Core::Object* reference, bool explicitReference,
-    const std::string& destinationDirectory, bool asPrefab)
+    const std::string& destinationDirectory, bool asPrefab,
+    float pmxUnitScaleToMeters, bool pmxImportMorphs,
+    bool pmxImportRigConstraints, bool pmxImportFollowBoneColliders,
+    bool pmxImportDynamicPhysics)
 {
     namespace fs = std::filesystem;
     const fs::path source(path);
@@ -4608,7 +4670,10 @@ std::string EditorState::ImportAssetFile(const std::string& path,
                 extension == ".vmd" && asPrefab
                 ? VmdSceneImporter::Import(source.string(),
                     assetsDirectory.string(), true)
-                : ModelImporter::Import(source.string(), assetsDirectory.string());
+                : ModelImporter::Import(source.string(), assetsDirectory.string(),
+                    pmxUnitScaleToMeters, { pmxImportMorphs,
+                        pmxImportRigConstraints, pmxImportFollowBoneColliders,
+                        pmxImportDynamicPhysics });
             if (!imported.success)
                 throw std::runtime_error(imported.message);
             bool boundCharacter = false;
@@ -4661,6 +4726,10 @@ std::string EditorState::ImportAssetFile(const std::string& path,
                             if (!animationPack.empty())
                                 m_primaryConsole->AddLog(ConsoleView::Level::Info,
                                     "MMD animation pack: " + animationPack);
+                            for (size_t index = 0;
+                                index < report["limitations"].ArraySize(); ++index)
+                                m_primaryConsole->AddLog(ConsoleView::Level::Warning,
+                                    report["limitations"].ArrayAt(index).AsString());
                         }
                     }
                     else if (m_primaryConsole)
@@ -4669,10 +4738,13 @@ std::string EditorState::ImportAssetFile(const std::string& path,
                 }
                 else if (m_primaryConsole)
                     m_primaryConsole->AddLog(ConsoleView::Level::Info,
-                        "VMD source tracks packed; select an imported FBX character to also create playable body and facial .anim files");
+                        "VMD source tracks packed; select an imported FBX or PMX character to also create playable body and facial .anim files");
             }
             if (m_primaryConsole)
             {
+                if (extension == ".pmx" && !imported.message.empty())
+                    m_primaryConsole->AddLog(ConsoleView::Level::Warning,
+                        imported.message);
                 const std::string& primaryAsset = asPrefab &&
                     !imported.prefabPath.empty() ? imported.prefabPath
                     : imported.primaryAssetPath.empty()
@@ -4756,7 +4828,7 @@ Engine::Core::Object* EditorState::InstantiateAsset(const std::string& path,
     try
     {
         if (showImportDialog && (extension == ".vmd" ||
-            extension == ".fbx" || extension == ".gltf" ||
+            extension == ".fbx" || extension == ".pmx" || extension == ".gltf" ||
             extension == ".glb" || extension == ".obj" ||
             extension == ".spriteanim"))
         {

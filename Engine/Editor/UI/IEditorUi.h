@@ -208,6 +208,8 @@ public:
         bool defaultOpen = true) { return CollapsingHeader(label, defaultOpen); }
     virtual bool ComponentHeader(EditorUiObjectIcon, const char* label,
         bool defaultOpen = true) { return CollapsingHeader(label, defaultOpen); }
+    virtual void SetNextComponentHeaderOpen(bool) {}
+    virtual void ScrollItemIntoView() {}
     virtual bool TreeNode(const void* id, const char* label, bool selected, bool leaf, bool defaultOpen = false) = 0;
     virtual void TreePop() = 0;
     virtual EditorUiObjectRowResult ObjectTreeRow(const void* id,
@@ -236,6 +238,8 @@ public:
     virtual EditorUiPrefabMenuResult PrefabOverrideMenu(const void* id,
         bool hasOverrides) = 0;
     virtual bool BeginChild(const char* id) = 0;
+    virtual bool BeginChildRegion(const char* id, float)
+    { return BeginChild(id); }
     virtual void EndChild() = 0;
     virtual bool IsItemHovered() const = 0;
     virtual bool IsItemClicked() const = 0;

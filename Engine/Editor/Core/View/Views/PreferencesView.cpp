@@ -604,6 +604,12 @@ void PreferencesView::DrawDiagnosticsSection(IEditorUi& ui)
 
 void PreferencesView::DrawEditorSection(IEditorUi& ui)
 {
+    ui.Label("Performance");
+    ui.Separator();
+    if (ui.InputUInt("Editor Max FPS", &m_settings.editorMaxFps))
+        NotifyChanged();
+    ui.Tooltip("0 means unlimited. Applies to the editor window, including its Game view.");
+    ui.Spacing();
     ui.Label("Appearance");
     ui.Separator();
     const auto& themes = ImGuiThemeManager::AvailableThemes();
@@ -957,8 +963,9 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
         NotifyChanged();
     }
 
-    if (ui.SliderInt("Target Framerate", reinterpret_cast<int*>(&m_settings.targetFramerate), 30, 240))
+    if (ui.InputUInt("Game Max FPS", &m_settings.gameMaxFps))
         NotifyChanged();
+    ui.Tooltip("0 means unlimited. Applies to the standalone game.");
 
     if (ui.InputUInt("##editorViewportWidth", &m_settings.viewportWidth))
         NotifyChanged();
@@ -1276,6 +1283,7 @@ bool PreferencesView::SaveSettings()
             return false;
 
         // Update metadata
+        bool fpsSettingsSaved = false;
         for (auto prop : projectNode.children("PropertyGroup"))
         {
             auto nameNode = prop.child("ProjectName");
@@ -1342,6 +1350,17 @@ bool PreferencesView::SaveSettings()
             auto framerate = prop.child("TargetFramerate");
             if (framerate)
                 framerate.text().set(std::to_string(m_settings.targetFramerate).c_str());
+            if (!fpsSettingsSaved && (renderingApi || editorRenderingApi ||
+                gameRenderingApi || framerate || defaultSceneNode))
+            {
+                auto editorMaxFps = prop.child("EditorMaxFPS");
+                if (!editorMaxFps) editorMaxFps = prop.append_child("EditorMaxFPS");
+                editorMaxFps.text().set(m_settings.editorMaxFps);
+                auto gameMaxFps = prop.child("GameMaxFPS");
+                if (!gameMaxFps) gameMaxFps = prop.append_child("GameMaxFPS");
+                gameMaxFps.text().set(m_settings.gameMaxFps);
+                fpsSettingsSaved = true;
+            }
 
             if (renderingApi || editorRenderingApi || gameRenderingApi)
             {
@@ -1474,6 +1493,14 @@ bool PreferencesView::SaveSettings()
             auto lbA = prop.child("LetterboxColorA");
             if (lbA)
                 lbA.text().set(std::to_string(m_settings.letterboxColor.a).c_str());
+        }
+
+        if (!fpsSettingsSaved)
+        {
+            auto prop = projectNode.child("PropertyGroup");
+            if (!prop) prop = projectNode.append_child("PropertyGroup");
+            prop.append_child("EditorMaxFPS").text().set(m_settings.editorMaxFps);
+            prop.append_child("GameMaxFPS").text().set(m_settings.gameMaxFps);
         }
 
         // Save to file

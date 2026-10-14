@@ -282,6 +282,7 @@ struct ObjectGPUData
     glm::vec4 subsurfaceColorWeight{ 0.f }; // RGB color, enabled weight
     glm::vec4 subsurfaceRadiusThickness{ 0.f }; // RGB scene units, thickness in scene units
     glm::vec4 subsurfaceTransmission{ 0.f }; // x = transmitted-light weight
+    glm::vec4 mmdSpecularShininess{ 0.f }; // RGB reflectance; w = shininess + 1 when enabled
 };
 
 // Constant buffer for grid rendering
@@ -305,7 +306,7 @@ struct SkyboxCBData
 };
 
 static_assert(sizeof(DrawCBData) == 16, "Draw constants must remain small");
-static_assert(sizeof(ObjectGPUData) == 1104, "Object buffer layout must match Object.hlsl");
+static_assert(sizeof(ObjectGPUData) == 1120, "Object buffer layout must match Object.hlsl");
 static_assert(sizeof(Engine::Model::LightData) == 128,
     "Light buffer layout must match Object.hlsl");
 static_assert(sizeof(GridCBData) == 128, "Grid constant-buffer layout must match Grid.hlsl");
@@ -432,7 +433,7 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     m_emptyMorphDeltaBuffer = bufferFactory->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
         Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
-        sizeof(emptyMorphDelta), emptyMorphDelta.data(), sizeof(emptyMorphDelta));
+        sizeof(emptyMorphDelta), emptyMorphDelta.data(), sizeof(glm::vec4));
     m_emptyMorphWeightBuffer = bufferFactory->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
         Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
@@ -2530,7 +2531,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             preparedDraw.morphWeightBuffer = mesh->GetMorphWeightBuffer();
             objectData.morphParams = {
                 static_cast<float>(mesh->GetMorphTargetCount()),
-                static_cast<float>(mesh->GetVertexCount()), 0.f, 0.f };
+                static_cast<float>(mesh->GetVertexCount()), 0.f,
+                static_cast<float>(mesh->GetMorphDeltaStrideFloat4()) };
         }
         Engine::Components::MaterialAlphaMode alphaMode = Engine::Components::MaterialAlphaMode::Opaque;
         bool doubleSided = false;
@@ -2600,6 +2602,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 mat->metallicFactor, mat->roughnessFactor, mat->normalScale,
                 static_cast<float>(textureFlags)
             };
+            if (mat->useMmdSpecular)
+                objectData.mmdSpecularShininess = glm::vec4(
+                    mat->specularColor, std::max(mat->shininess, 0.f) + 1.f);
             // Blended and unlit materials opt out. A metallic-roughness map can
             // still suppress scattering per pixel in the shader.
             if (mat->subsurfaceEnabled && !mat->unlit &&

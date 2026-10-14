@@ -26,6 +26,8 @@ public:
     void Clear();
     bool HasSelection() const { return !m_selectedPath.empty(); }
     const std::string& GetSelectedPath() const { return m_selectedPath; }
+    bool HasPendingRename() const;
+    bool CommitPendingRename();
     void Draw(IEditorUi& ui, Engine::Scene::Scene* scene);
 
     std::function<void(const std::string&, const std::string&)> OnRenamed;

@@ -4,6 +4,7 @@
 #include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include "Core/Compoonents/Animation/IKBone.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
+#include "Core/Compoonents/Animation/PmxRigController.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Physics/Internal/PhysicsInternal.h"
@@ -15,6 +16,7 @@
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
+#include <glm/gtc/quaternion.hpp>
 
 namespace Engine::Physics
 {
@@ -118,10 +120,22 @@ struct BulletPhysicsAdapter::Impl
     };
     std::unordered_map<const void*, PortalMeshCollider> portalMeshColliders;
     std::unordered_map<const void*, PortalMeshCollider> portalApertureColliders;
+    std::vector<std::unique_ptr<btTypedConstraint>> pmxJoints;
 };
 
 BulletPhysicsAdapter::BulletPhysicsAdapter(Engine::Scene::Scene& scene) : m_impl(new Impl(scene)) {}
-BulletPhysicsAdapter::~BulletPhysicsAdapter() { delete m_impl; }
+BulletPhysicsAdapter::~BulletPhysicsAdapter()
+{
+    ClearPmxJoints();
+    delete m_impl;
+}
+void BulletPhysicsAdapter::ClearPmxJoints()
+{
+    if (!m_impl || !m_impl->state) return;
+    for (const auto& joint : m_impl->pmxJoints)
+        m_impl->state->world->removeConstraint(joint.get());
+    m_impl->pmxJoints.clear();
+}
 PhysicsWorldState* BulletPhysicsAdapter::GetInternalState()
 {
     return m_impl ? m_impl->state.get() : nullptr;
@@ -165,6 +179,7 @@ void BulletPhysicsAdapter::ApplyRigidBodyAction(
     Engine::Components::RigidBody& body, RigidBodyAction action,
     const glm::vec3& value, const glm::quat& rotation)
 {
+    if (!m_impl->pmxJoints.empty()) ClearPmxJoints();
     EnsureRigidBodyState(body);
     switch (action)
     {
@@ -214,6 +229,7 @@ uint64_t BulletPhysicsAdapter::GetRigidBodyGeneration(
 void BulletPhysicsAdapter::NotifyRigidBodyTransformChanged(
     Engine::Components::RigidBody& body)
 {
+    if (!m_impl->pmxJoints.empty()) ClearPmxJoints();
     EnsureRigidBodyState(body);
     body.NativeNotifyEditorTransformChanged();
 }
@@ -240,6 +256,7 @@ bool BulletPhysicsAdapter::HasPortalLocalMeshCollider(
 
 void BulletPhysicsAdapter::DestroyRigidBody(Engine::Components::RigidBody& body)
 {
+    ClearPmxJoints();
     body.DestroyBody();
     body.BindBulletState(nullptr);
     m_componentStates.erase(&body);
@@ -596,6 +613,7 @@ PhysicsWorldState::PhysicsWorldState()
 void BulletPhysicsAdapter::Step(double deltaTime)
 {
     Engine::Scene::Scene& scene = *m_impl->scene;
+    ClearPmxJoints();
     std::vector<Engine::Components::MeshObjectCollider*> meshColliders;
     for (const auto& object : scene.GetObjects())
         for (Engine::Core::Component* component : object->Components)
@@ -661,6 +679,106 @@ void BulletPhysicsAdapter::Step(double deltaTime)
         bone->EnsureConstraint();
     for (Engine::Components::IKBone* bone : ikBones)
         bone->SyncBodyFromBone();
+    for (const auto& object : scene.GetObjects())
+    {
+        if (!object || !object->IsEnabledInHierarchy()) continue;
+        auto* rig = object->GetComponent<Engine::Components::PmxRigController>();
+        if (!rig || rig->physicsJoints.empty()) continue;
+        const float scale = glm::length(glm::vec3(
+            object->transform.GetWorldMatrix()[0]));
+        if (!std::isfinite(scale) || scale <= 0.f) continue;
+        for (const auto& imported : rig->physicsJoints)
+        {
+            auto* firstObject = object->FindObjectInChildrenByName(
+                imported.bodyAName);
+            auto* secondObject = object->FindObjectInChildrenByName(
+                imported.bodyBName);
+            auto* first = firstObject ?
+                firstObject->GetComponent<Engine::Components::RigidBody>() : nullptr;
+            auto* second = secondObject ?
+                secondObject->GetComponent<Engine::Components::RigidBody>() : nullptr;
+            if (!first || !second || first == second) continue;
+            auto* firstNative = btRigidBody::upcast(static_cast<btCollisionObject*>(
+                first->GetNativeCollisionObjectForPhysics()));
+            auto* secondNative = btRigidBody::upcast(static_cast<btCollisionObject*>(
+                second->GetNativeCollisionObjectForPhysics()));
+            if (!firstNative || !secondNative) continue;
+            const auto frame = [scale](const glm::vec3& position,
+                const glm::quat& rotation)
+            {
+                return btTransform(btQuaternion(rotation.x, rotation.y,
+                    rotation.z, rotation.w), ToBullet(position * scale));
+            };
+            const btTransform frameA = frame(imported.frameAPosition,
+                imported.frameARotation);
+            const btTransform frameB = frame(imported.frameBPosition,
+                imported.frameBRotation);
+            std::unique_ptr<btTypedConstraint> joint;
+            if (imported.type == 0)
+            {
+                auto spring = std::make_unique<btGeneric6DofSpringConstraint>(
+                    *firstNative, *secondNative, frameA, frameB, true);
+                spring->setLinearLowerLimit(ToBullet(imported.linearLower * scale));
+                spring->setLinearUpperLimit(ToBullet(imported.linearUpper * scale));
+                spring->setAngularLowerLimit(ToBullet(imported.angularLower));
+                spring->setAngularUpperLimit(ToBullet(imported.angularUpper));
+                for (int axis = 0; axis < 6; ++axis)
+                {
+                    const float stiffness = axis < 3 ?
+                        imported.linearSpring[axis] : imported.angularSpring[axis - 3];
+                    if (stiffness <= 0.f) continue;
+                    spring->enableSpring(axis, true);
+                    spring->setStiffness(axis, stiffness);
+                    spring->setEquilibriumPoint(axis, 0.f);
+                }
+                joint = std::move(spring);
+            }
+            else if (imported.type == 1)
+            {
+                auto sixDof = std::make_unique<btGeneric6DofConstraint>(
+                    *firstNative, *secondNative, frameA, frameB, true);
+                sixDof->setLinearLowerLimit(ToBullet(imported.linearLower * scale));
+                sixDof->setLinearUpperLimit(ToBullet(imported.linearUpper * scale));
+                sixDof->setAngularLowerLimit(ToBullet(imported.angularLower));
+                sixDof->setAngularUpperLimit(ToBullet(imported.angularUpper));
+                joint = std::move(sixDof);
+            }
+            else if (imported.type == 2)
+                joint = std::make_unique<btPoint2PointConstraint>(
+                    *firstNative, *secondNative,
+                    frameA.getOrigin(), frameB.getOrigin());
+            else if (imported.type == 3)
+            {
+                auto cone = std::make_unique<btConeTwistConstraint>(
+                    *firstNative, *secondNative, frameA, frameB);
+                const glm::vec3 span = glm::max(glm::abs(imported.angularLower),
+                    glm::abs(imported.angularUpper));
+                cone->setLimit(span.y, span.z, span.x);
+                joint = std::move(cone);
+            }
+            else if (imported.type == 4)
+            {
+                auto slider = std::make_unique<btSliderConstraint>(
+                    *firstNative, *secondNative, frameA, frameB, true);
+                slider->setLowerLinLimit(imported.linearLower.x * scale);
+                slider->setUpperLinLimit(imported.linearUpper.x * scale);
+                slider->setLowerAngLimit(imported.angularLower.x);
+                slider->setUpperAngLimit(imported.angularUpper.x);
+                joint = std::move(slider);
+            }
+            else if (imported.type == 5)
+            {
+                auto hinge = std::make_unique<btHingeConstraint>(
+                    *firstNative, *secondNative, frameA, frameB, true);
+                hinge->setLimit(imported.angularLower.z,
+                    imported.angularUpper.z);
+                joint = std::move(hinge);
+            }
+            if (!joint) continue;
+            m_impl->state->world->addConstraint(joint.get(), true);
+            m_impl->pmxJoints.push_back(std::move(joint));
+        }
+    }
     m_impl->lastSubstepCount = 0u;
     if (bodies.empty() && clothBodies.empty() && ikBones.empty())
     {
@@ -833,6 +951,7 @@ void BulletPhysicsAdapter::Step(double deltaTime)
 
 void BulletPhysicsAdapter::Reset()
 {
+    ClearPmxJoints();
     Engine::Scene::Scene& scene = *m_impl->scene;
     for (const auto& object : scene.GetObjects())
         for (Engine::Core::Component* component : object->Components)

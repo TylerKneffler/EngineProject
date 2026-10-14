@@ -18,7 +18,7 @@
     </ambientColor>
   </settings>
   <objects>
-    <item prefab="Engine/Core/Assets/mmd/Mococo Dance/Mococo Dance.prefab">
+    <item prefab="Engine/Core/Assets/mmd/Mococo Abyssgard/Mococo Abyssgard.prefab">
       <transform>
         <Transform.position>
           <item>0</item>
@@ -31,9 +31,9 @@
           <item>0</item>
         </Transform.rotation>
         <Transform.scale>
-          <item>0.01</item>
-          <item>0.01</item>
-          <item>0.01</item>
+          <item>0.08</item>
+          <item>0.08</item>
+          <item>0.08</item>
         </Transform.scale>
       </transform>
     </item>
@@ -157,7 +157,7 @@
     </item>
     <item name="MMD Animation Replay" enabled="true">
       <components>
-        <components:MmdDanceReplay MmdDanceReplay.characterObjectName="Mococo Dance" />
+        <components:MmdDanceReplay MmdDanceReplay.characterObjectName="Mococo Abyssgard" />
       </components>
       <children />
     </item>

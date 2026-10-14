@@ -25,7 +25,7 @@ struct ObjectData
     float4 textureUvSets0;
     float4 textureUvSets1;
     float4 skinParams;
-    float4 morphParams; // target count, vertex count, reserved, reserved
+    float4 morphParams; // target count, vertex count, editor bone, float4 stride
     float4 environmentParams;
     float4 environmentSH[9];
     float4 reflectionEnvironmentParams;
@@ -43,6 +43,7 @@ struct ObjectData
     float4 subsurfaceColorWeight;
     float4 subsurfaceRadiusThickness;
     float4 subsurfaceTransmission;
+    float4 mmdSpecularShininess;
 };
 
 struct SceneLightData
@@ -62,8 +63,7 @@ struct SceneLightData
 [[vk::binding(7, 0)]] StructuredBuffer<SceneLightData> sceneLights;
 [[vk::binding(8, 0)]] StructuredBuffer<ObjectData> objects;
 [[vk::binding(9, 0)]] StructuredBuffer<float4x4> boneMatrices;
-struct MorphDelta { float4 position; float4 normal; float4 tangent; };
-[[vk::binding(11, 0)]] StructuredBuffer<MorphDelta> morphDeltas;
+[[vk::binding(11, 0)]] StructuredBuffer<float4> morphDeltas;
 [[vk::binding(12, 0)]] StructuredBuffer<float4> morphWeights;
 [[vk::binding(0, 0)]] Texture2D baseColorMap;
 [[vk::binding(1, 0)]] Texture2D metallicRoughnessMap;
@@ -110,8 +110,7 @@ Texture2D subsurfaceThicknessMap : register(t24);
 StructuredBuffer<SceneLightData> sceneLights : register(t6);
 StructuredBuffer<ObjectData> objects : register(t7);
 StructuredBuffer<float4x4> boneMatrices : register(t8);
-struct MorphDelta { float4 position; float4 normal; float4 tangent; };
-StructuredBuffer<MorphDelta> morphDeltas : register(t10);
+StructuredBuffer<float4> morphDeltas : register(t10);
 StructuredBuffer<float4> morphWeights : register(t11);
 SamplerState materialSampler : register(s0);
 #endif
@@ -159,17 +158,21 @@ void VSMain(
     float4 localPosition = float4(pos, 1.0);
     float3 localNormal = normal;
     float3 localTangent = tangent.xyz;
+    float4 localUv = float4(uv, uv1);
     uint morphTargetCount = (uint)objectData.morphParams.x;
     uint morphVertexCount = (uint)objectData.morphParams.y;
+    uint morphStride = (uint)objectData.morphParams.w;
     [loop] for (uint target = 0; target < morphTargetCount; ++target)
     {
         float weight = morphWeights[target >> 2][target & 3];
         if (weight != 0.0)
         {
-            MorphDelta delta = morphDeltas[target * morphVertexCount + vertexId];
-            localPosition.xyz += delta.position.xyz * weight;
-            localNormal += delta.normal.xyz * weight;
-            localTangent += delta.tangent.xyz * weight;
+            uint base = (target * morphVertexCount + vertexId) * morphStride;
+            localPosition.xyz += morphDeltas[base].xyz * weight;
+            localNormal += morphDeltas[base + 1].xyz * weight;
+            localTangent += morphDeltas[base + 2].xyz * weight;
+            if (morphStride == 4)
+                localUv += morphDeltas[base + 3] * weight;
         }
     }
     if (dot(localNormal, localNormal) > 0.000001)
@@ -210,8 +213,8 @@ void VSMain(
         oPos.z = oPos.w;
     oWorldPos = worldPosition.xyz;
     oNormal = normalize(mul((float3x3)objectData.world, localNormal));
-    oUv = objectData.spriteUvRect.xy + uv * objectData.spriteUvRect.zw;
-    oUv1 = uv1;
+    oUv = objectData.spriteUvRect.xy + localUv.xy * objectData.spriteUvRect.zw;
+    oUv1 = localUv.zw;
     oColor = color;
     if (objectData.morphParams.z > 0.0)
     {
@@ -448,11 +451,10 @@ float3 EvaluateEnvironmentIrradiance(ObjectData objectData, float3 normal)
 }
 
 float3 EvaluatePbrBrdf(
-    float3 baseColor, float metallic, float roughness,
+    float3 baseColor, float metallic, float roughness, float3 f0,
     float3 n, float3 v, float3 l)
 {
     float3 h = normalize(v + l);
-    float3 f0 = lerp(float3(0.04, 0.04, 0.04), baseColor, metallic);
     float3 fresnel = FresnelSchlick(saturate(dot(h, v)), f0);
     float distribution = DistributionGGX(n, h, roughness);
     float geometry = GeometrySmith(n, v, l, roughness);
@@ -723,6 +725,10 @@ float4 PSMain(
     }
     roughness = clamp(roughness, 0.045, 1.0);
     metallic = saturate(metallic);
+    const bool mmdSpecular = objectData.mmdSpecularShininess.w > 0.0;
+    if (mmdSpecular)
+        roughness = clamp(sqrt(2.0 /
+            (objectData.mmdSpecularShininess.w + 1.0)), 0.045, 1.0);
     if (flags & 8u)
         occlusion = lerp(1.0, occlusionMap.Sample(materialSampler, occlusionUv).r,
             objectData.emissiveOcclusion.w);
@@ -747,6 +753,9 @@ float4 PSMain(
 
     float3 n = normalize(normal);
     float3 v = viewDirection;
+    float3 f0 = mmdSpecular
+        ? saturate(objectData.mmdSpecularShininess.rgb)
+        : lerp(float3(0.04, 0.04, 0.04), base.rgb, metallic);
     float3 directLight = 0.0;
     uint lightListOffset = 0u;
     uint lightIterationCount = draw.lightCount;
@@ -848,7 +857,7 @@ float4 PSMain(
             objectData, light, worldPos, n, lightDirection,
             (int)objectData.shadowParams.w);
         directLight += EvaluatePbrBrdf(
-            base.rgb, metallic, roughness, n, v, lightDirection) *
+            base.rgb, metallic, roughness, f0, n, v, lightDirection) *
             radiance * centerShadow * nDotL;
         float scatteringWeight = objectData.subsurfaceColorWeight.w;
         if (scatteringWeight > 0.0)
@@ -858,7 +867,6 @@ float4 PSMain(
             float3 wrappedNdotL = saturate((dot(geometryNormal,
                 lightDirection) + wrap) / (1.0 + wrap));
             float3 halfDirection = normalize(v + lightDirection);
-            float3 f0 = lerp(float3(0.04, 0.04, 0.04), base.rgb, metallic);
             float3 diffuse = (1.0 - FresnelSchlick(
                 saturate(dot(halfDirection, v)), f0)) *
                 (1.0 - metallic) * base.rgb / PI;
@@ -883,10 +891,9 @@ float4 PSMain(
     {
         float3 bakedDirection = normalize(objectData.bakedLightDirection.xyz);
         bakedDirect = EvaluatePbrBrdf(
-            base.rgb, metallic, roughness, n, v, bakedDirection) *
+            base.rgb, metallic, roughness, f0, n, v, bakedDirection) *
             objectData.bakedDirectional.rgb * saturate(dot(n, bakedDirection));
     }
-    float3 f0 = lerp(float3(0.04, 0.04, 0.04), base.rgb, metallic);
     float3 ambient = objectData.ambientUnlit.rgb *
         (base.rgb * (1.0 - metallic) + f0 * 0.25) * occlusion;
     float3 environment = 0.0;

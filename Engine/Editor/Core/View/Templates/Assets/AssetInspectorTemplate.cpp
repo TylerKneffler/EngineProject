@@ -162,6 +162,61 @@ void AssetInspectorTemplate::Clear()
     m_animationPreview.reset();
 }
 
+bool AssetInspectorTemplate::HasPendingRename() const
+{
+    return !m_selectedPath.empty() &&
+        std::string(m_nameEdit) !=
+            std::filesystem::path(m_selectedPath).filename().string();
+}
+
+bool AssetInspectorTemplate::CommitPendingRename()
+{
+    namespace fs = std::filesystem;
+    if (!HasPendingRename()) return true;
+    const fs::path path(m_selectedPath);
+    const std::string requested(m_nameEdit);
+
+    std::error_code error;
+    if (fs::is_directory(path, error)) return true;
+    const bool invalid = requested.empty() || requested == "." ||
+        requested == ".." ||
+        requested.find_first_of("<>:\"/\\|?*") != std::string::npos;
+    if (invalid)
+    {
+        m_renameError = "Filename is empty or contains invalid characters.";
+        return false;
+    }
+    const fs::path destination = path.parent_path() / requested;
+    if (fs::exists(destination, error))
+    {
+        m_renameError = "An asset with that filename already exists.";
+        return false;
+    }
+    const std::string oldPath = m_selectedPath;
+    fs::rename(path, destination, error);
+    if (error)
+    {
+        m_renameError = "Rename failed: " + error.message();
+        return false;
+    }
+    std::error_code recordError;
+    if (!Engine::Core::AssetRecord::Move(path, destination, recordError))
+    {
+        std::error_code rollbackError;
+        fs::rename(destination, path, rollbackError);
+        m_renameError = "Asset record rename failed: " +
+            recordError.message();
+        return false;
+    }
+    m_selectedPath = destination.string();
+    m_renameError.clear();
+    m_texturePreview.reset();
+    m_previewCache.Invalidate(oldPath);
+    if (OnRenamed)
+        OnRenamed(oldPath, m_selectedPath);
+    return true;
+}
+
 void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
 {
     namespace fs = std::filesystem;
@@ -179,47 +234,10 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
         { 0.35f, 0.7f, 1.f, 1.f });
     ui.Separator();
     ui.BeginDisabled(directory);
-    ui.InputText("Filename", m_nameEdit, sizeof(m_nameEdit));
-    if (ui.Button("Apply Rename"))
-    {
-        const std::string requested(m_nameEdit);
-        const bool invalid = requested.empty() || requested == "." || requested == ".." ||
-            requested.find_first_of("<>:\"/\\|?*") != std::string::npos;
-        if (invalid)
-            m_renameError = "Filename is empty or contains invalid characters.";
-        else
-        {
-            const fs::path destination = path.parent_path() / requested;
-            if (fs::exists(destination, error) && destination != path)
-                m_renameError = "An asset with that filename already exists.";
-            else
-            {
-                const std::string oldPath = m_selectedPath;
-                fs::rename(path, destination, error);
-                if (error)
-                    m_renameError = "Rename failed: " + error.message();
-                else
-                {
-                    std::error_code recordError;
-                    if (!Engine::Core::AssetRecord::Move(path, destination, recordError))
-                    {
-                        std::error_code rollbackError;
-                        fs::rename(destination, path, rollbackError);
-                        m_renameError = "Asset record rename failed: " +
-                            recordError.message();
-                        ui.EndDisabled();
-                        return;
-                    }
-                    m_selectedPath = destination.string();
-                    m_renameError.clear();
-                    m_texturePreview.reset();
-                    m_previewCache.Invalidate(oldPath);
-                    if (OnRenamed)
-                        OnRenamed(oldPath, m_selectedPath);
-                }
-            }
-        }
-    }
+    if (ui.InputText("Filename", m_nameEdit, sizeof(m_nameEdit)))
+        m_renameError.clear();
+    if (!directory)
+        ui.Tooltip("Filename changes apply when you Save or Save All.");
     ui.EndDisabled();
     if (directory)
         ui.DisabledLabel("Folder renaming is disabled here to protect asset paths.");
@@ -230,6 +248,8 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
     const std::string extension = LowerAssetExtension(m_selectedPath);
     ui.ValueLabel("Type", directory ? "Folder" :
         (extension.empty() ? "Generic file" : extension.c_str()));
+    if (!directory && extension == ".pmx")
+        ui.DisabledLabel("PMX import supports geometry, base materials, linear skinning, morphs, append/IK and fixed-axis controls, external-parent bindings, follow-bone colliders, and optional dynamic bodies. See imported prefab warnings for remaining MMD features.");
     if (!directory && extension == ".pose")
     {
         if (const auto pose = Engine::Model::PoseAsset::Load(m_selectedPath))
@@ -344,8 +364,110 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
                 ui.ValueLabel("Source", record->sourcePath.c_str());
                 for (const auto& [name, setting] : record->importSettings)
                 {
+                    if (name == "pmxWarnings" || name == "pmxImportedGroups" ||
+                        name == "pmxKinematicRigidBodies" || name == "pmxAppendRules" ||
+                        name == "pmxIkChains" || name == "pmxBoneMorphs" ||
+                        name == "pmxMaterialMorphs" || name == "pmxUnitScaleToMeters" ||
+                        name == "pmxImportMorphs" ||
+                        name == "pmxImportRigConstraints" ||
+                        name == "pmxImportFollowBoneColliders")
+                        continue;
                     const std::string value = ImportSettingText(setting);
                     ui.ValueLabel(name.c_str(), value.c_str());
+                }
+                ui.Unindent(12.f);
+            }
+            if (const auto format = record->importSettings.find("sourceFormat");
+                format != record->importSettings.end() &&
+                std::get_if<std::string>(&format->second) &&
+                std::get<std::string>(format->second) == "pmx" &&
+                ui.PropertyGroupHeader("PMX Import", false))
+            {
+                ui.Indent(12.f);
+                if (const auto scale = record->importSettings.find("pmxUnitScaleToMeters");
+                    scale != record->importSettings.end())
+                {
+                    const std::string value = ImportSettingText(scale->second);
+                    ui.ValueLabel("Meters per PMX unit", value.c_str());
+                }
+                for (const auto& [key, label] : {
+                    std::pair{ "pmxImportMorphs", "Morphs" },
+                    std::pair{ "pmxImportRigConstraints", "Append and IK" },
+                    std::pair{ "pmxImportFollowBoneColliders", "Follow-bone colliders" },
+                    std::pair{ "pmxImportDynamicPhysics", "Dynamic rigid bodies" } })
+                    if (const auto setting = record->importSettings.find(key);
+                        setting != record->importSettings.end())
+                    {
+                        const bool* enabled = std::get_if<bool>(&setting->second);
+                        ui.ValueLabel(label, enabled && *enabled ? "Enabled" : "Disabled");
+                    }
+                if (const auto groups = record->importSettings.find("pmxImportedGroups");
+                    groups != record->importSettings.end())
+                {
+                    const std::string count = ImportSettingText(groups->second);
+                    ui.ValueLabel("Imported group morphs", count.c_str());
+                }
+                if (const auto bodies = record->importSettings.find("pmxKinematicRigidBodies");
+                    bodies != record->importSettings.end())
+                {
+                    const std::string count = ImportSettingText(bodies->second);
+                    ui.ValueLabel("Follow-bone rigid bodies", count.c_str());
+                }
+                if (const auto bodies = record->importSettings.find("pmxDynamicRigidBodies");
+                    bodies != record->importSettings.end())
+                {
+                    const std::string count = ImportSettingText(bodies->second);
+                    ui.ValueLabel("Dynamic rigid bodies", count.c_str());
+                }
+                if (const auto joints = record->importSettings.find("pmxPhysicsJoints");
+                    joints != record->importSettings.end())
+                {
+                    const std::string count = ImportSettingText(joints->second);
+                    ui.ValueLabel("PMX physics joints", count.c_str());
+                }
+                if (const auto appends = record->importSettings.find("pmxAppendRules");
+                    appends != record->importSettings.end())
+                {
+                    const std::string count = ImportSettingText(appends->second);
+                    ui.ValueLabel("Append rules", count.c_str());
+                }
+                if (const auto ik = record->importSettings.find("pmxIkChains");
+                    ik != record->importSettings.end())
+                {
+                    const std::string count = ImportSettingText(ik->second);
+                    ui.ValueLabel("IK chains", count.c_str());
+                }
+                if (const auto morphs = record->importSettings.find("pmxBoneMorphs");
+                    morphs != record->importSettings.end())
+                {
+                    const std::string count = ImportSettingText(morphs->second);
+                    ui.ValueLabel("Bone morphs", count.c_str());
+                }
+                if (const auto morphs = record->importSettings.find("pmxMaterialMorphs");
+                    morphs != record->importSettings.end())
+                {
+                    const std::string count = ImportSettingText(morphs->second);
+                    ui.ValueLabel("Material morphs", count.c_str());
+                }
+                if (const auto warnings = record->importSettings.find("pmxWarnings");
+                    warnings != record->importSettings.end())
+                {
+                    const std::string value = ImportSettingText(warnings->second);
+                    if (value.empty()) ui.ValueLabel("Compatibility", "All detected features imported");
+                    else
+                    {
+                        ui.ValueLabel("Compatibility", "Some PMX features need engine support:");
+                        size_t begin = 0;
+                        while (begin < value.size())
+                        {
+                            const size_t end = value.find("; ", begin);
+                            const std::string warning = value.substr(begin,
+                                end == std::string::npos ? end : end - begin);
+                            ui.ColoredLabel(warning.c_str(), { 1.f, .7f, .3f, 1.f });
+                            if (end == std::string::npos) break;
+                            begin = end + 2;
+                        }
+                    }
                 }
                 ui.Unindent(12.f);
             }

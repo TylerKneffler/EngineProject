@@ -3,9 +3,14 @@
 
 #include "Core/AssetRecord.h"
 #include "Core/Compoonents/Materials/Material.h"
+#include "Core/Compoonents/Materials/PmxMaterialMorph.h"
 #include "Core/Compoonents/Animation/ModelAnimation.h"
+#include "Core/Compoonents/Animation/BoneGroup.h"
+#include "Core/Compoonents/Animation/PmxRigController.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Lighting/Light.h"
+#include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
+#include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Model/RigAsset.h"
 #include "AnimationAssetWriter.h"
 #include "Core/Object.h"
@@ -136,12 +141,17 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
             Engine::Components::Material material;
             material.diffuseColor = glm::vec3(imported.baseColor);
             material.baseColorAlpha = imported.baseColor.a;
+            material.ambientColor = imported.ambientColor;
+            material.specularColor = imported.specularColor;
+            material.shininess = imported.shininess;
+            material.useMmdSpecular = imported.useMmdSpecular;
             material.emissiveColor = imported.emissiveColor;
             material.metallicFactor = imported.metallic;
             material.roughnessFactor = imported.roughness;
             material.alphaCutoff = imported.alphaCutoff;
             material.normalScale = imported.normalScale;
             material.doubleSided = imported.doubleSided;
+            material.castsShadows = imported.castsShadows;
             material.unlit = imported.unlit;
             material.alphaMode = imported.alphaMode;
             material.baseColorUvSet = imported.baseColorUvSet;
@@ -210,6 +220,16 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
             skeleton->jointNodes = model.skins[index].jointNodes;
             skeleton->inverseBindMatrices = model.skins[index].inverseBindMatrices;
         }
+        if (!model.skins.empty())
+        {
+            auto* rootSkeleton = root->GetComponent<Engine::Components::Skeleton>();
+            for (const auto& skin : model.skins)
+                for (unsigned node : skin.jointNodes)
+                    if (std::find(rootSkeleton->rootBoneNodes.begin(),
+                            rootSkeleton->rootBoneNodes.end(), node) ==
+                        rootSkeleton->rootBoneNodes.end())
+                        rootSkeleton->rootBoneNodes.push_back(node);
+        }
         if (!model.animations.empty())
         {
             Engine::Components::AnimationManager* manager = root->AddComponent<Engine::Components::AnimationManager>();
@@ -227,6 +247,25 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
 
         ::Engine::Components::Model* modelComponent =
             root->AddComponent<::Engine::Components::Model>();
+        Engine::Components::PmxRigController* pmxController = nullptr;
+        if (!model.appendRules.empty() || !model.ikChains.empty() ||
+            !model.fixedAxes.empty() || !model.localAxes.empty() ||
+            !model.externalParents.empty() ||
+            !model.boneMorphs.empty() ||
+            !model.physicsJoints.empty() ||
+            std::any_of(model.rigidBodies.begin(), model.rigidBodies.end(),
+                [](const auto& body) { return body.mode > 0; }))
+        {
+            auto* controller = root->AddComponent<Engine::Components::PmxRigController>();
+            pmxController = controller;
+            controller->appendRules = model.appendRules;
+            controller->ikChains = model.ikChains;
+            controller->fixedAxes = model.fixedAxes;
+            controller->localAxes = model.localAxes;
+            controller->externalParents = model.externalParents;
+            controller->boneMorphs = model.boneMorphs;
+            controller->physicsJoints = model.physicsJoints;
+        }
         std::vector<Engine::Core::Object*> objects(model.nodes.size(), nullptr);
         for (size_t index = 0; index < model.nodes.size(); ++index)
         {
@@ -263,6 +302,27 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
                     : defaultMaterialPath.generic_string();
                 if (!material->LoadFromFile(materialPath))
                     throw std::runtime_error("Could not load generated material");
+                if (primitive.materialIndex >= 0 && !model.materialMorphs.empty())
+                {
+                    std::vector<Engine::Model::ImportedMaterialMorph> applicable;
+                    for (const auto& morph : model.materialMorphs)
+                    {
+                        Engine::Model::ImportedMaterialMorph selected;
+                        selected.name = morph.name;
+                        for (const auto& offset : morph.offsets)
+                            if (offset.materialIndex == -1 ||
+                                offset.materialIndex == primitive.materialIndex)
+                                selected.offsets.push_back(offset);
+                        if (!selected.offsets.empty())
+                            applicable.push_back(std::move(selected));
+                    }
+                    if (!applicable.empty())
+                    {
+                        auto* controller = target->AddComponent<
+                            Engine::Components::PmxMaterialMorph>();
+                        controller->morphs = std::move(applicable);
+                    }
+                }
                 if (!primitive.morphTargets.empty())
                     if (!mesh->LoadMorphFile(morphPaths[primitiveIndex],
                             static_cast<unsigned>(index), primitive.morphWeights))
@@ -344,8 +404,75 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
                 bone->paletteIndex = static_cast<int>(palette);
                 bone->parentPaletteIndex = parentPalette;
                 bone->hierarchyRoot = parentPalette < 0;
+                if (bone->hierarchyRoot)
+                {
+                    auto* group = objects[nodeIndex]
+                        ->AddComponent<Engine::Components::BoneGroup>();
+                    group->skinIndex = static_cast<unsigned>(skinIndex);
+                }
             }
         }
+
+        std::vector<std::string> rigidNames(model.rigidBodies.size());
+        for (size_t rigidIndex = 0; rigidIndex < model.rigidBodies.size();
+            ++rigidIndex)
+        {
+            const auto& imported = model.rigidBodies[rigidIndex];
+            Engine::Core::Object* parent = imported.parentNode >= 0 &&
+                static_cast<size_t>(imported.parentNode) < objects.size()
+                ? objects[static_cast<size_t>(imported.parentNode)] : root;
+            Engine::Core::Object* object = AddChild(scene, parent,
+                SafeName(imported.name, "Rigid body") + " [PMX " +
+                    std::to_string(rigidIndex) + "]");
+            rigidNames[rigidIndex] = object->name;
+            object->transform.position = imported.localPosition;
+            object->transform.rotation = QuaternionEuler(imported.localRotation);
+            auto* collider = object->AddComponent<
+                Engine::Components::PrimitiveObjectCollider>();
+            if (imported.shape == 0)
+            {
+                collider->shape = "Sphere";
+                collider->radius = imported.size.x;
+            }
+            else if (imported.shape == 1)
+            {
+                collider->shape = "Box";
+                collider->size = imported.size * 2.f;
+            }
+            else
+            {
+                collider->shape = "Capsule";
+                collider->radius = imported.size.x;
+                collider->height = imported.size.y;
+            }
+            auto* body = object->AddComponent<Engine::Components::RigidBody>();
+            body->bodyType = imported.mode == 0 ? "Kinematic" : "Dynamic";
+            body->mass = imported.mode == 0 ? 0.f :
+                std::max(imported.mass, .001f);
+            body->useGravity = imported.mode != 0;
+            body->linearDamping = std::clamp(imported.linearDamping, 0.f, 1.f);
+            body->angularDamping = std::clamp(imported.angularDamping, 0.f, 1.f);
+            body->collisionLayer = 1 << imported.collisionGroup;
+            body->collisionMask = (~imported.nonCollisionMask) & 0xffff;
+            body->friction = imported.friction;
+            body->restitution = imported.restitution;
+            if (pmxController && imported.mode > 0 &&
+                imported.relatedBoneNode >= 0)
+                pmxController->physicsBones.push_back({ object->name,
+                    static_cast<unsigned>(imported.relatedBoneNode),
+                    imported.mode, imported.boneOffsetPosition,
+                    imported.boneOffsetRotation });
+        }
+        if (pmxController)
+            for (auto& joint : pmxController->physicsJoints)
+            {
+                if (joint.bodyA >= 0 &&
+                    static_cast<size_t>(joint.bodyA) < rigidNames.size())
+                    joint.bodyAName = rigidNames[joint.bodyA];
+                if (joint.bodyB >= 0 &&
+                    static_cast<size_t>(joint.bodyB) < rigidNames.size())
+                    joint.bodyBName = rigidNames[joint.bodyB];
+            }
 
         const fs::path prefabPath = output / (output.filename().string() + ".prefab");
         auto* manager = root->GetComponent<Engine::Components::AnimationManager>();

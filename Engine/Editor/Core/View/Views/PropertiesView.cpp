@@ -10,6 +10,7 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "../Focus/WindowFocusHandler.h"
+#include "Engine/Editor/Core/View/Templates/Properties/PropertiesViewTemplateHelpers.h"
 #include <filesystem>
 #include <algorithm>
 #include <shellapi.h>
@@ -454,7 +455,46 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
     ui.Indent(8.f);
     
     // Draw Engine::Components::Transform (always present, not in Components list)
-    DrawTransform(ui);
+    if (ui.CollapsingHeader("Component Outline"))
+    {
+        const bool outlineVisible = ui.BeginChildRegion("componentOutline", 112.f);
+        if (outlineVisible)
+        {
+            const auto outlineEntry = [&](const void* id, const std::string& name)
+            {
+                ui.PushId(id);
+                if (ui.Selectable(name.c_str()))
+                {
+                    m_componentJumpTarget = id;
+                    m_propertiesSearch[0] = '\0';
+                }
+                ui.PopId();
+            };
+            outlineEntry(&m_selectedObject->transform, "Transform");
+            for (Engine::Core::Component* component : m_selectedObject->Components)
+                if (component)
+                    outlineEntry(component, component->GetTypeName());
+        }
+        ui.EndChild();
+    }
+    if (ui.Button("Collapse All"))
+    {
+        m_componentHeaderOverride = 0;
+        m_propertiesSearch[0] = '\0';
+    }
+    ui.SameLine();
+    if (ui.Button("Expand All"))
+    {
+        m_componentHeaderOverride = 1;
+        m_propertiesSearch[0] = '\0';
+    }
+    ui.SearchInput("##propertiesSearch", m_propertiesSearch,
+        sizeof(m_propertiesSearch), "Find component...");
+    ui.Separator();
+    const bool transformMatches = ContainsIgnoringCase("Transform", m_propertiesSearch);
+    if (transformMatches)
+        DrawTransform(ui);
+    bool foundComponent = transformMatches;
 
     if (prefabRoot && prefabRoot->Prefab)
     {
@@ -470,13 +510,19 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
     for (Engine::Core::Component* component : m_selectedObject->Components)
     {
         if (!component) continue;
-        ui.PushId(component);
-        
         std::string componentType = component->GetTypeName();
         if (componentType.empty()) componentType = "Component";
-        
+        if (!ContainsIgnoringCase(componentType, m_propertiesSearch)) continue;
+        foundComponent = true;
+        ui.PushId(component);
+        if (m_componentHeaderOverride >= 0 || m_componentJumpTarget == component ||
+            m_propertiesSearch[0] != '\0')
+            ui.SetNextComponentHeaderOpen(m_componentHeaderOverride >= 0
+                ? m_componentHeaderOverride != 0 : true);
         const bool componentOpen = ui.ComponentHeader(
             ComponentIconForType(componentType), componentType.c_str());
+        if (m_componentJumpTarget == component)
+            ui.ScrollItemIntoView();
         Engine::Core::Object* componentPrefabRoot = m_selectedObject->GetPrefabInstanceRoot();
         const bool componentEditable = componentPrefabRoot == nullptr;
         // Bind the menu to the header before drag/drop helpers replace the
@@ -523,6 +569,10 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
                 component->DrawProperties(ui) || componentPropertiesChanged;
         ui.PopId();
     }
+    if (!foundComponent)
+        ui.DisabledLabel("No matching components");
+    m_componentHeaderOverride = -1;
+    m_componentJumpTarget = nullptr;
 
     if (componentPropertiesChanged && OnComponentsChanged)
     {

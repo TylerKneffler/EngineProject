@@ -6,10 +6,12 @@
 #include "Core/Compoonents/Lighting/LightProbe.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
+#include "Core/Compoonents/Animation/BoneGroup.h"
 #include <algorithm>
 #include <cmath>
 #include <cfloat>
 #include <set>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 #include <glm/gtc/matrix_inverse.hpp>
@@ -357,6 +359,7 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         camera->GetViewMatrix();
     const glm::mat4 inverseViewProjection = glm::inverse(viewProjection);
     Engine::Core::Object* selected = scene.GetSelectedObject();
+    const auto* selectedGroup = Engine::Components::BoneGroup::ForSelection(selected);
     const Engine::Components::Skeleton* selectedSkeleton = nullptr;
     if (m_boneEditing && selected)
         for (const auto& owner : scene.GetObjects())
@@ -388,6 +391,21 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
     std::set<std::pair<Engine::Core::Object*, Engine::Core::Object*>> drawnBones;
     std::unordered_set<Engine::Core::Object*> drawnRoots;
     std::unordered_set<Engine::Core::Object*> visibleSkeletonJoints;
+    struct ProjectedJoint
+    {
+        EditorUiVec2 screen{};
+        bool visible = false;
+    };
+    std::unordered_map<Engine::Core::Object*, ProjectedJoint> projectedJoints;
+    const auto projectJoint = [&](Engine::Core::Object* joint)
+        -> const ProjectedJoint&
+    {
+        auto [entry, inserted] = projectedJoints.try_emplace(joint);
+        if (inserted)
+            entry->second.visible = ProjectPoint(viewProjection,
+                WorldPosition(joint), input.available, entry->second.screen);
+        return entry->second;
+    };
     for (const auto& ownerPointer : scene.GetObjects())
     {
         Engine::Core::Object* owner = ownerPointer.get();
@@ -396,24 +414,31 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         {
             auto* skeleton = dynamic_cast<Engine::Components::Skeleton*>(component);
             if (!scene.AreEditorBonesVisible() || !skeleton || !skeleton->showBones) continue;
+            const auto* rootSkeleton = owner->GetComponent<Engine::Components::Skeleton>();
+            if (rootSkeleton != skeleton && rootSkeleton &&
+                !rootSkeleton->rootBoneNodes.empty()) continue;
             std::unordered_set<Engine::Core::Object*> joints;
-            for (Engine::Core::Object* joint : skeleton->ResolveJoints())
+            const auto& displayNodes = skeleton->rootBoneNodes.empty()
+                ? skeleton->jointNodes : skeleton->rootBoneNodes;
+            for (unsigned node : displayNodes)
+            {
+                Engine::Core::Object* joint = skeleton->FindNode(node);
                 if (joint)
                 {
+                    if (selectedGroup && !selectedGroup->Contains(joint)) continue;
                     joints.insert(joint);
                     visibleSkeletonJoints.insert(joint);
                 }
+            }
             for (Engine::Core::Object* joint : joints)
             {
                 Engine::Core::Object* parentJoint = joint->Parent;
                 while (parentJoint && joints.find(parentJoint) == joints.end())
                     parentJoint = parentJoint->Parent;
 
-                EditorUiVec2 tipScreen{};
-                if (!ProjectPoint(viewProjection,
-                    WorldPosition(joint), input.available,
-                    tipScreen))
-                    continue;
+                const auto& tip = projectJoint(joint);
+                if (!tip.visible) continue;
+                const EditorUiVec2 tipScreen = tip.screen;
 
                 float hitDistance = Length(Subtract(
                     input.mousePosInViewport, tipScreen));
@@ -443,11 +468,9 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
 
                 if (!drawnBones.insert({ parentJoint, joint }).second)
                     continue;
-                EditorUiVec2 rootScreen{};
-                if (!ProjectPoint(viewProjection,
-                    WorldPosition(parentJoint), input.available,
-                    rootScreen))
-                    continue;
+                const auto& root = projectJoint(parentJoint);
+                if (!root.visible) continue;
+                const EditorUiVec2 rootScreen = root.screen;
                 DrawBoneShape(ui, rootScreen, tipScreen,
                     joint == selected || parentJoint == selected);
                 ui.DrawViewportCircle(rootScreen, 4.f, kOutline, true);

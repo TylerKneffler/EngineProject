@@ -48,27 +48,38 @@ AssetDocumentView::AssetDocumentView(const std::string& path,
     m_inspector.OnRenamed = [this](const std::string& oldPath,
         const std::string& newPath)
     {
-        std::error_code error;
-        const std::filesystem::path canonical =
-            std::filesystem::weakly_canonical(newPath, error);
-        m_path = (error ? std::filesystem::absolute(newPath).lexically_normal()
-            : canonical).string();
-        m_identity = m_path;
-#ifdef _WIN32
-        std::transform(m_identity.begin(), m_identity.end(), m_identity.begin(),
-            [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
-#endif
-        m_undo.clear();
-        m_redo.clear();
-        m_imagePixels.clear();
-        m_imageTexture.reset();
-        m_imageStrokeActive = false;
-        m_imageStrokeChanged = false;
-        m_knownContents = ReadContents();
-        RefreshTitle();
+        ApplyRenamedPath(newPath);
         if (OnRenamed)
             OnRenamed(oldPath, m_path);
     };
+}
+
+void AssetDocumentView::ApplyRenamedPath(const std::string& newPath)
+{
+    std::error_code error;
+    const std::filesystem::path canonical =
+        std::filesystem::weakly_canonical(newPath, error);
+    m_path = (error ? std::filesystem::absolute(newPath).lexically_normal()
+        : canonical).string();
+    m_identity = m_path;
+#ifdef _WIN32
+    std::transform(m_identity.begin(), m_identity.end(), m_identity.begin(),
+        [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+#endif
+    m_undo.clear();
+    m_redo.clear();
+    m_imagePixels.clear();
+    m_imageTexture.reset();
+    m_imageStrokeActive = false;
+    m_imageStrokeChanged = false;
+    m_knownContents = ReadContents();
+    RefreshTitle();
+}
+
+void AssetDocumentView::HandleExternalRename(const std::string& newPath)
+{
+    m_inspector.Select(newPath);
+    ApplyRenamedPath(newPath);
 }
 
 void AssetDocumentView::RefreshTitle()
@@ -193,6 +204,7 @@ bool AssetDocumentView::Redo()
 bool AssetDocumentView::Save()
 {
     if (m_imageStrokeActive && !CommitImageStroke()) return false;
+    if (!m_inspector.CommitPendingRename()) return false;
     const std::string current = ReadContents();
     if (current.empty() && !std::filesystem::exists(m_path))
         return false;

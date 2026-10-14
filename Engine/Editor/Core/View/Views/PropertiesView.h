@@ -48,6 +48,8 @@ public:
             m_deferredTransformPrefabRoot = nullptr;
             m_componentPickerOpen = false;
             m_componentSearch[0] = '\0';
+            m_componentJumpTarget = nullptr;
+            m_componentHeaderOverride = -1;
             m_editingSkyboxTexture = false;
         }
         m_selectedObjects = objects;
@@ -60,6 +62,8 @@ public:
     {
         return m_assetInspector.GetSelectedPath();
     }
+    bool CommitPendingAssetRename()
+    { return m_assetInspector.CommitPendingRename(); }
 
     void DrawPanel(IEditorUi& ui) override;
 
@@ -97,6 +101,9 @@ private:
     char m_componentSearch[128]{};
     bool m_editingSkyboxTexture = false;
     bool m_allowComponentStructureEdits = true;
+    char m_propertiesSearch[128]{};
+    int m_componentHeaderOverride = -1;
+    const void* m_componentJumpTarget = nullptr;
     char m_skyboxTextureEdit[512]{};
     bool m_skyboxRevealPending = false;
     std::chrono::steady_clock::time_point m_skyboxRevealRequestedAt{};

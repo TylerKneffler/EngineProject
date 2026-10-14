@@ -232,6 +232,10 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
         auto framerate = prop.child("TargetFramerate");
         if (framerate)
             settings.targetFramerate = std::stoul(framerate.child_value());
+        if (auto editorMaxFps = prop.child("EditorMaxFPS"))
+            settings.editorMaxFps = editorMaxFps.text().as_uint();
+        if (auto gameMaxFps = prop.child("GameMaxFPS"))
+            settings.gameMaxFps = gameMaxFps.text().as_uint();
 
         auto lightmapResolution = prop.child("BakedLightmapResolution");
         if (lightmapResolution)

@@ -3676,7 +3676,7 @@ void EditorState::DrawAnimationTimeline(IEditorUi& ui,
     ImGui::Text("%.3f s", document.playheadSeconds);
     ImGui::SetNextItemWidth(150.f);
     ImGui::SliderFloat("Zoom", &document.timelinePixelsPerSecond,
-        35.f, 320.f, "%.0f px/s");
+        35.f, 3200.f, "%.0f px/s", ImGuiSliderFlags_Logarithmic);
     for (auto& track : document.tracks)
     {
         if (!track.selected || !track.sourceManager) continue;
@@ -3907,7 +3907,7 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
     draw->AddLine({ timeX, origin.y }, { timeX, bottomY },
         ImGui::GetColorU32(ImGuiCol_Border));
 
-    constexpr float steps[] = { .1f, .2f, .5f, 1.f, 2.f, 5.f,
+    constexpr float steps[] = { .02f, .05f, .1f, .2f, .5f, 1.f, 2.f, 5.f,
         10.f, 20.f, 50.f, 100.f };
     float step = steps[std::size(steps) - 1];
     for (float candidate : steps)
@@ -4111,6 +4111,10 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
         std::vector<TimelineKey> keys;
     };
     std::vector<KeyVisual> keyVisuals;
+    // Key hit testing is only needed while interacting with the graph.
+    // Keep camera and gizmo drags from allocating a visual for every key.
+    const bool collectKeyVisuals = hovered || document.marqueeActive ||
+        document.keyPressActive || document.keyDragging;
     const auto sameKey = [](const TimelineKey& a, const TimelineKey& b)
     {
         return a.rigIndex == b.rigIndex && a.clipIndex == b.clipIndex &&
@@ -4141,7 +4145,7 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
             { return sameKey(key, selected); });
     };
     const auto drawKey = [&](Row& row, float center, float time,
-        std::vector<TimelineKey> keys, ImU32 color)
+        const std::vector<TimelineKey>& keys, ImU32 color)
     {
         const bool selected = std::any_of(keys.begin(), keys.end(), isDrawSelected);
         float shownTime = time;
@@ -4162,7 +4166,8 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
         if (selected)
             draw->AddCircle({ x, center }, 8.f,
                 IM_COL32(255, 245, 195, 255), 0, 1.5f);
-        keyVisuals.push_back({ &row, time, x, center, std::move(keys) });
+        if (collectKeyVisuals)
+            keyVisuals.push_back({ &row, time, x, center, keys });
     };
     using TimelineRow = AnimationDocument::TimelineRow;
     const auto rowIdentity = [](const Row& row)
@@ -4235,6 +4240,9 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
         }
         document.rowSelectionAnchor = identity;
     };
+    std::vector<TimelineKey> keyGroup;
+    std::vector<TimelineKey> singleKey;
+    singleKey.reserve(1);
     for (size_t index = 0; index < rows.size(); ++index)
     {
         Row& row = rows[index];
@@ -4380,11 +4388,11 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
                          [](const auto& group, float time) { return group.time < time; });
                      key != row.summaryKeys->end() && key->time <= lastTime; ++key)
                 {
-                    std::vector<TimelineKey> group;
-                    group.reserve(key->keys.size());
+                    keyGroup.clear();
+                    keyGroup.reserve(key->keys.size());
                     for (const auto& [node, time] : key->keys)
-                        group.push_back({row.track->index, row.clipIndex, node, time});
-                    drawKey(row, center, key->time, std::move(group), color);
+                        keyGroup.push_back({row.track->index, row.clipIndex, node, time});
+                    drawKey(row, center, key->time, keyGroup, color);
                 }
             }
             continue;
@@ -4417,9 +4425,10 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
                  *time <= visibleEnd - row.startSeconds + 8.f / pixelsPerSecond -
                      std::min(0.f, document.keyDragging ? document.keyDragDelta : 0.f); ++time)
         {
-            drawKey(row, center, *time,
-                { { row.track->index, row.clipIndex,
-                    row.nodeIndex, *time } }, color);
+            singleKey.clear();
+            singleKey.push_back({ row.track->index, row.clipIndex,
+                row.nodeIndex, *time });
+            drawKey(row, center, *time, singleKey, color);
         }
         draw->AddRectFilled({ pinnedX, top },
             { labelRight, bottom },
