@@ -1,5 +1,11 @@
 # History
 
+- [x] **PMX authored rig and physics reset:** Extend the synthetic rig fixture to check an external-parent target after physics, post-physics IK before a later-layer append, and a simulated body driving its bone. Reset physics and restart the same scene, then verify that bone/body alignment and the sampled playback height repeat. The Debug `PmxModelDecoder` test passes.
+
+- [x] **PMX material edge outlines:** Correct the outline shader's object-buffer layout so it reads imported edge color and width, and apply morph normals before skinning and extrusion. All Vulkan outline shader variants compile; a visual render audit remains open under material morph verification.
+
+- [x] **PMX rope soft bodies:** Import rope topology from the selected material's welded mesh vertices, build Bullet links without faces, and update the rendered mesh from simulated nodes. A synthetic rope fixture checks links, wind deformation, anchors, and reset. Rope mass uses per-node distribution to avoid Bullet's face-area assertion; transient render updates no longer rebuild the body every frame.
+
 - [x] **PMX sphere textures and modes:** Decode BMP-backed `.sph` and `.spa` textures, retain the PMX sphere mode through native material import, and shade multiply, additive, and additional-UV1 modes. Normal-based mapping now uses camera view rotation without projection distortion, including portal views. Synthetic imports verify all modes and copied textures; a DX11 visual audit confirms distinct rendered output for the three modes.
 
 - [x] **Reusable rig components:** Split ordered append, axis, CCD IK, and external-parent evaluation into `RigConstraints`; physics bone feedback and joint descriptors into `RigPhysicsBinding`; and named bone/impulse morph controls into `RigMorphControls`. The PMX writer and bundled Mococo prefab use the new components, Bullet reads joint descriptors from the physics binding, and old serialized `RigController` data migrates on load. The Debug Editor builds; PMX decoder/import, runtime migration, and VMD scene import tests pass.
@@ -235,3 +241,13 @@ Reference workflows: [Unity Animation Rigging constraints](https://docs.unity.cn
 - [x] Migrate existing serialized PMX prefabs and clips to the reusable components with an on-load conversion; verify Mococo scene playback and non-PMX component authoring. The bundled Mococo prefab, rigid-body names, and materials use the new names. Old rig/material/VMD track data convert to the new components, and headless playback advances both Mococo body and facial clips. Authored rig constraint and material morph tests pass.
 - [x] Audit other importer-created runtime components for format-specific names or direct importer dependencies; current model and VMD writers create generic runtime component types under `Engine/Core/Compoonents`.
 - [x] Keep `PmxModelDecoder`, `MmdDanceAssetBinder`, and `MmdPoseRetargeter` format-specific in `Engine/Editor/Core/Importers`; keep `MmdDanceReplay` as scene choreography in `Engine/Core/Assets/Scripts/Animation`.
+- [x] Build rope soft-body topology from PMX material vertices and render its simulated deformation.
+- [x] Map PMX soft-body cluster settings to Bullet and test a clustered fixture.
+- [x] Implement near-anchor behavior and two-way forces between soft bodies and dynamic rigid bodies.
+  - [x] Use Bullet anchors for two-way force exchange; a synthetic PMX fixture verifies that cloth wind moves an anchored dynamic body.
+    - [x] Record Bullet/PMX behavior and verify engine reset and body-rebuild anchor survival in `.md/near_mode_comparison.md`.
+- [x] Import sphere textures and implement PMX multiply, additive, and additional-UV sphere modes.
+- [x] Render material edge outlines using imported color and width, including skinned meshes.
+- [x] **PMX model import:** Implement the staged PMX importer and Properties controls below.
+- [x] Verify external-parent targets and after-physics append/IK order with an authored test rig.
+- [x] Compare physics-driven bone feedback over repeated playback and reset.

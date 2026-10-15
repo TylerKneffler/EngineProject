@@ -984,7 +984,6 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
                     else ++unavailableSoftAttachments;
                 }
                 if (options.dynamicPhysics &&
-                    soft.shape == Engine::Model::SoftBodyTopology::TriangleMesh &&
                     ranges[soft.materialIndex].count > 0 &&
                     importedSoftMaterials.insert(soft.materialIndex).second)
                     model.softBodies.push_back(std::move(soft));
@@ -1039,15 +1038,18 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
             else
                 warn(unsupportedJointCount, "unsupported physics joints");
             warn(unavailableSoftBodies,
-                "soft bodies (dynamic physics disabled, rope, or empty material)");
+                "soft bodies (dynamic physics disabled or empty material)");
             warn(unavailableSoftAttachments,
                 "soft-body anchors or pins outside imported rigid bodies/material surfaces");
             if (!model.softBodies.empty())
-                report->warnings.push_back("PMX triangle-mesh soft bodies use "
-                    "Bullet cloth with pinned and rigid-body-following anchors; "
-                    "Bullet anchors exchange forces with rigid bodies; "
-                    "near-anchor collision semantics and MMD motion parity "
-                    "remain unverified");
+                report->warnings.push_back("PMX soft bodies use Bullet mesh or "
+                    "rope links with two-way rigid-body anchors; near-anchor "
+                    "semantics and MMD motion parity remain unverified");
+            if (std::any_of(model.softBodies.begin(), model.softBodies.end(),
+                [](const auto& soft) { return soft.shape ==
+                    Engine::Model::SoftBodyTopology::Rope && soft.clusterCount > 0; }))
+                report->warnings.push_back("PMX rope cluster settings are not "
+                    "applied; Bullet rope simulation uses links only");
             if (toonMaterials)
                 report->warnings.push_back(std::to_string(toonMaterials) +
                     " toon materials use a PBR lighting approximation");

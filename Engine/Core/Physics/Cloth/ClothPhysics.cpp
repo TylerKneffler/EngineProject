@@ -13,6 +13,7 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <numeric>
 #include <utility>
 #include <vector>
 
@@ -68,6 +69,7 @@ Engine::Components::Cloth::Cloth()
     RegisterField("simulationMeshReference", simulationMeshReference);
     RegisterField("renderMeshReference", renderMeshReference);
     RegisterField("meshPath", meshPath);
+    RegisterField("topology", topology);
     RegisterField("mass", mass);
     RegisterField("linearStiffness", linearStiffness);
     RegisterField("bendingStiffness", bendingStiffness);
@@ -163,6 +165,18 @@ int Engine::Components::Cloth::GetActiveAnchorCount() const
 {
     return m_impl && m_impl->softBody
         ? m_impl->softBody->m_anchors.size() : 0;
+}
+
+int Engine::Components::Cloth::GetActiveLinkCount() const
+{
+    return m_impl && m_impl->softBody
+        ? m_impl->softBody->m_links.size() : 0;
+}
+
+int Engine::Components::Cloth::GetActiveFaceCount() const
+{
+    return m_impl && m_impl->softBody
+        ? m_impl->softBody->m_faces.size() : 0;
 }
 
 bool Engine::Components::Cloth::NativeIsSimulating() const
@@ -351,9 +365,63 @@ bool Engine::Components::Cloth::EnsureSoftBody()
         triangles.push_back(static_cast<int>(node));
 
     Engine::Physics::PhysicsWorldState& physics = Engine::Physics::StateFor(m_impl->scene);
-    m_impl->softBody.reset(btSoftBodyHelpers::CreateFromTriMesh(
-        physics.softBodyInfo, worldVertices.data(), triangles.data(),
-        static_cast<int>(triangles.size() / 3), false));
+    if (Engine::Physics::Lower(topology) == "rope")
+    {
+        // A PMX rope still references a triangle material. Use its welded
+        // triangle edges to connect every vertex without retaining faces or
+        // adding diagonal cycles that would stiffen a narrow strip.
+        struct Edge { int first, second; float lengthSquared; };
+        std::vector<Edge> edges;
+        for (size_t face = 0; face + 2 < triangles.size(); face += 3)
+            for (int side = 0; side < 3; ++side)
+            {
+                const int first = triangles[face + side];
+                const int second = triangles[face + (side + 1) % 3];
+                if (first == second) continue;
+                const glm::vec3 delta = m_impl->nodeLocalPositions[first] -
+                    m_impl->nodeLocalPositions[second];
+                edges.push_back({ std::min(first, second), std::max(first, second),
+                    glm::dot(delta, delta) });
+            }
+        std::sort(edges.begin(), edges.end(), [](const Edge& a, const Edge& b)
+        {
+            if (a.lengthSquared != b.lengthSquared)
+                return a.lengthSquared < b.lengthSquared;
+            if (a.first != b.first) return a.first < b.first;
+            return a.second < b.second;
+        });
+        std::vector<int> parent(m_impl->nodeLocalPositions.size());
+        std::iota(parent.begin(), parent.end(), 0);
+        const auto root = [&](int node)
+        {
+            while (parent[node] != node)
+            {
+                parent[node] = parent[parent[node]];
+                node = parent[node];
+            }
+            return node;
+        };
+        std::vector<btVector3> positions;
+        positions.reserve(parent.size());
+        for (size_t index = 0; index < parent.size(); ++index)
+            positions.emplace_back(worldVertices[index * 3],
+                worldVertices[index * 3 + 1], worldVertices[index * 3 + 2]);
+        std::vector<btScalar> nodeMass(parent.size(), btScalar(1));
+        m_impl->softBody = std::make_unique<btSoftBody>(&physics.softBodyInfo,
+            static_cast<int>(positions.size()), positions.data(), nodeMass.data());
+        for (const Edge& edge : edges)
+        {
+            const int firstRoot = root(edge.first);
+            const int secondRoot = root(edge.second);
+            if (firstRoot == secondRoot) continue;
+            m_impl->softBody->appendLink(edge.first, edge.second);
+            parent[firstRoot] = secondRoot;
+        }
+    }
+    else
+        m_impl->softBody.reset(btSoftBodyHelpers::CreateFromTriMesh(
+            physics.softBodyInfo, worldVertices.data(), triangles.data(),
+            static_cast<int>(triangles.size() / 3), false));
     if (!m_impl->softBody)
     {
         DestroySoftBody(true);
@@ -367,7 +435,8 @@ bool Engine::Components::Cloth::EnsureSoftBody()
     btSoftBody::Material* material = softBody->appendMaterial();
     material->m_kLST = std::clamp(linearStiffness, 0.f, 1.f);
     material->m_kAST = std::clamp(bendingStiffness, 0.f, 1.f);
-    if (bendingStiffness > 0.f) softBody->generateBendingConstraints(2, material);
+    if (bendingStiffness > 0.f && Engine::Physics::Lower(topology) != "rope")
+        softBody->generateBendingConstraints(2, material);
     softBody->m_cfg.kDP = std::clamp(damping, 0.f, 1.f);
     softBody->m_cfg.kDG = std::max(0.f, drag);
     softBody->m_cfg.kDF = std::clamp(friction, 0.f, 1.f);
@@ -381,7 +450,7 @@ bool Engine::Components::Cloth::EnsureSoftBody()
     softBody->m_cfg.kSK_SPLT_CL = std::clamp(clusterImpulseSplit.y, 0.f, 1.f);
     softBody->m_cfg.kSS_SPLT_CL = std::clamp(clusterImpulseSplit.z, 0.f, 1.f);
     softBody->m_cfg.collisions = btSoftBody::fCollision::SDF_RS;
-    if (clusterCount > 0)
+    if (clusterCount > 0 && Engine::Physics::Lower(topology) != "rope")
     {
         softBody->generateClusters(std::min(clusterCount,
             static_cast<int>(m_impl->nodeLocalPositions.size())));
@@ -389,7 +458,10 @@ bool Engine::Components::Cloth::EnsureSoftBody()
     }
     if (selfCollision) softBody->m_cfg.collisions |= btSoftBody::fCollision::VF_SS;
     softBody->getCollisionShape()->setMargin(std::max(0.0001f, collisionMargin));
-    softBody->setTotalMass(std::max(0.001f, mass), true);
+    // Ropes have links but no faces; face-area mass distribution divides by
+    // zero and poisons Bullet's constraint matrices with NaNs.
+    softBody->setTotalMass(std::max(0.001f, mass),
+        Engine::Physics::Lower(topology) != "rope");
 
     const std::string pin = Engine::Physics::Lower(pinMode);
     if ((pin == "top" || pin == "bottom" || pin == "left" ||
@@ -589,6 +661,11 @@ void Engine::Components::Cloth::SyncMeshFromSoftBody()
         }
     }
     m_impl->mesh->SetDeformedVertices(deformed);
+    // Uploading a simulated frame advances Mesh's revision. It must not make
+    // the next physics step treat this transient deformation as new authoring.
+    m_impl->renderMeshRevision = m_impl->mesh->GetConfigurationRevision();
+    if (m_impl->simulationMeshSource == m_impl->mesh)
+        m_impl->simulationMeshRevision = m_impl->renderMeshRevision;
 }
 
 void Engine::Components::Cloth::NotifyRigidBodyCollision(

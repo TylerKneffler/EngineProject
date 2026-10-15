@@ -704,6 +704,9 @@ void BulletPhysicsAdapter::Step(double deltaTime)
         bone->EnsureConstraint();
     for (Engine::Components::IKBone* bone : ikBones)
         bone->SyncBodyFromBone();
+    for (Engine::Components::Cloth* cloth : clothBodies)
+        if (!cloth->collisionMorph && cloth->IsSimulating())
+            cloth->BindAnchors();
     std::vector<Impl::PmxBindingState> currentPmxBindings;
     for (const auto& object : scene.GetObjects())
     {

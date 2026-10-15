@@ -554,7 +554,8 @@ void ImGuiEditorUi::TreePop(){ImGui::TreePop();}
 EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,
     EditorUiObjectIcon icon,char* name,size_t size,bool* enabled,bool selected,
     bool leaf,bool lockName,bool enabledInHierarchy,int hierarchyDepth,
-    bool lastSibling,uint64_t ancestorGuideMask,bool expandForFilter)
+    bool lastSibling,uint64_t ancestorGuideMask,bool expandForFilter,
+    uint8_t* editorOverlays,uint8_t extraOverlayOptions)
 {
     EditorUiObjectRowResult result;
     (void)size;
@@ -662,9 +663,16 @@ EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,
         ImGui::GetWindowPos().x+ImGui::GetWindowContentRegionMax().x,
         textMin.y+ImGui::GetFrameHeight()};
     const ImVec2 textSize=ImGui::CalcTextSize(display);
+    const float overlayActionsWidth=editorOverlays
+        ? (extraOverlayOptions?4.f:3.f)*ImGui::GetFrameHeight()+4.f : 0.f;
+    const float labelRight=std::max(textMin.x,
+        rowMaximum.x-overlayActionsWidth-4.f);
+    ImGui::GetWindowDrawList()->PushClipRect(textMin,
+        {labelRight,textMax.y},true);
     ImGui::GetWindowDrawList()->AddText(
         {textMin.x,textMin.y+(textMax.y-textMin.y-textSize.y)*0.5f},
         ImGui::GetColorU32(lockName?ImGuiCol_TextDisabled:ImGuiCol_Text),display);
+    ImGui::GetWindowDrawList()->PopClipRect();
     ImVec4 separatorColor=ImGui::GetStyleColorVec4(ImGuiCol_Separator);
     separatorColor.w*=0.45f;
     const ImVec2 contentMin={branchX,textMax.y};
@@ -674,11 +682,86 @@ EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,
         contentMin,contentMax,ImGui::GetColorU32(separatorColor),1.f);
     // Keep the name hit target on the same line as the arrow and checkbox.
     // A new-line dummy here used to add a second, empty row to every object.
+    const float buttonWidth=ImGui::GetFrameHeight();
+    const int visibleOptionCount=3;
+    const bool hasMoreOptions=extraOverlayOptions!=0;
+    const float actionWidth=(visibleOptionCount+(hasMoreOptions?1:0))*buttonWidth;
+    const float actionStart=std::max(textMin.x,rowMaximum.x-actionWidth-4.f);
     ImGui::InvisibleButton("##name",
-        {std::max(ImGui::GetContentRegionAvail().x,1.f),ImGui::GetFrameHeight()});
+        {std::max(actionStart-textMin.x,1.f),ImGui::GetFrameHeight()});
     result.clicked=result.clicked||ImGui::IsItemClicked();
     result.doubleClicked=result.doubleClicked||
         (ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left));
+    if(editorOverlays){
+        struct OverlayAction { uint8_t flag; const char* label; };
+        const OverlayAction actions[]={
+            {1,"Always show position arrows"},
+            {2,"Always show rotation ellipses"},
+            {4,"Always show scale handles"},
+            {8,"Always show bones"},
+            {16,"Always show skeleton joints"},
+            {32,"Always show object bounds"},
+            {64,"Always show light range or cone"},
+            {128,"Always show camera frustum"}
+        };
+        ImGui::SetCursorScreenPos({actionStart,textMin.y});
+        for(int index=0;index<visibleOptionCount;++index){
+            if(index) ImGui::SameLine(0.f,0.f);
+            const bool active=(*editorOverlays&actions[index].flag)!=0;
+            ImGui::PushID(index);
+            if(active){
+                ImGui::PushStyleColor(ImGuiCol_Button,ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
+                ImGui::PushStyleColor(ImGuiCol_Text,ImGui::GetStyleColorVec4(ImGuiCol_CheckMark));
+            }
+            if(ImGui::Button("##overlay",{buttonWidth,buttonWidth})){
+                *editorOverlays^=actions[index].flag;
+                result.overlaysChanged=true;
+            }
+            const ImVec2 minimum=ImGui::GetItemRectMin();
+            const ImVec2 maximum=ImGui::GetItemRectMax();
+            const ImVec2 center{(minimum.x+maximum.x)*.5f,
+                (minimum.y+maximum.y)*.5f};
+            ImDrawList* icons=ImGui::GetWindowDrawList();
+            const ImU32 ink=ImGui::GetColorU32(active
+                ? ImGuiCol_CheckMark:ImGuiCol_TextDisabled);
+            if(index==0){
+                icons->AddLine({center.x-5.f,center.y+5.f},
+                    {center.x+5.f,center.y-5.f},ink,1.5f);
+                icons->AddLine({center.x+5.f,center.y-5.f},
+                    {center.x+1.f,center.y-5.f},ink,1.5f);
+                icons->AddLine({center.x+5.f,center.y-5.f},
+                    {center.x+5.f,center.y-1.f},ink,1.5f);
+            }else if(index==1){
+                icons->AddEllipse(center,{6.f,4.f},ink,0.f,0,1.5f);
+                icons->AddCircleFilled({center.x+6.f,center.y},1.6f,ink);
+            }else{
+                icons->AddLine({center.x-5.f,center.y+5.f},
+                    {center.x+3.f,center.y-3.f},ink,1.5f);
+                icons->AddRect({center.x+1.f,center.y-5.f},
+                    {center.x+6.f,center.y},ink,0.f,0,1.5f);
+            }
+            if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s",actions[index].label);
+            if(active) ImGui::PopStyleColor(2);
+            ImGui::PopID();
+        }
+        if(hasMoreOptions){
+            ImGui::SameLine(0.f,0.f);
+            if(ImGui::Button("\xE2\x8B\xAE##more",{buttonWidth,buttonWidth}))
+                ImGui::OpenPopup("##overlayOptions");
+            if(ImGui::IsItemHovered()) ImGui::SetTooltip("More viewport overlays");
+            if(ImGui::BeginPopup("##overlayOptions")){
+                for(int index=3;index<8;++index){
+                    if(!(extraOverlayOptions&actions[index].flag)) continue;
+                    const bool active=(*editorOverlays&actions[index].flag)!=0;
+                    if(ImGui::MenuItem(actions[index].label,nullptr,active)){
+                        *editorOverlays^=actions[index].flag;
+                        result.overlaysChanged=true;
+                    }
+                }
+                ImGui::EndPopup();
+            }
+        }
+    }
     if(!enabledInHierarchy&&!result.dragActive){
         // Effective hierarchy disablement is visual only. The checkbox still
         // reflects and edits this object's own saved enabled state.

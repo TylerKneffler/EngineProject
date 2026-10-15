@@ -573,32 +573,32 @@ float SampleDirectionalShadowCascade(ObjectData objectData,
         ? int2((cascade & 1u) * tileWidth, (cascade >> 1u) * tileHeight)
         : int2(0, 0);
     int radius = clamp(pcfRadius, 0, 4);
-    int2 center = tileOrigin + int2(
-        shadowUv * float2(tileWidth, tileHeight));
+    // Interpolate the comparison result between neighboring texels. Snapping
+    // the PCF kernel to an integer center makes shadow edges visibly blocky.
+    float2 texelPosition = shadowUv * float2(tileWidth, tileHeight) - 0.5;
+    int2 center = tileOrigin + int2(floor(texelPosition));
+    float2 texelFraction = frac(texelPosition);
     int2 tileMaximum = tileOrigin + int2(
         (int)tileWidth - 1, (int)tileHeight - 1);
-    if (radius == 0)
-    {
-        float storedDepth = shadowMap.Load(int3(
-            clamp(center, tileOrigin, tileMaximum), 0));
-        return projected.z - objectData.shadowParams.x <= storedDepth
-            ? 1.0 : 0.0;
-    }
     float litSamples = 0.0;
-    float sampleCount = 0.0;
-    [loop] for (int y = -4; y <= 4; ++y)
-    [loop] for (int x = -4; x <= 4; ++x)
+    [loop] for (int y = -4; y <= 5; ++y)
+    [loop] for (int x = -4; x <= 5; ++x)
     {
-        if (abs(x) > radius || abs(y) > radius)
+        if (x < -radius || x > radius + 1 ||
+            y < -radius || y > radius + 1)
             continue;
+        float weightX = x == -radius ? 1.0 - texelFraction.x :
+            (x == radius + 1 ? texelFraction.x : 1.0);
+        float weightY = y == -radius ? 1.0 - texelFraction.y :
+            (y == radius + 1 ? texelFraction.y : 1.0);
         int2 coordinate = clamp(center + int2(x, y),
             tileOrigin, tileMaximum);
         float storedDepth = shadowMap.Load(int3(coordinate, 0));
-        litSamples += projected.z - objectData.shadowParams.x <= storedDepth
-            ? 1.0 : 0.0;
-        sampleCount += 1.0;
+        litSamples += (projected.z - objectData.shadowParams.x <= storedDepth
+            ? 1.0 : 0.0) * weightX * weightY;
     }
-    return litSamples / max(sampleCount, 1.0);
+    float diameter = 2.0 * radius + 1.0;
+    return litSamples / (diameter * diameter);
 }
 
 float EvaluateDirectionalShadow(ObjectData objectData, SceneLightData light,

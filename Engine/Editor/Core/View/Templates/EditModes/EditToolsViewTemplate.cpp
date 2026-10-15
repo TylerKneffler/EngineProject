@@ -8,6 +8,11 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Object.h"
 #include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Obj/Sprite.h"
+#include "Core/Compoonents/Animation/Skeleton.h"
+#include "Core/Compoonents/Camera/Camera.h"
+#include "Core/Compoonents/Lighting/Light.h"
+#include "Core/Compoonents/Lighting/LightProbe.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Prefab/PrefabAsset.h"
@@ -127,6 +132,58 @@ bool TransformIconButton(const char* id, EditorTransformTool tool,
             draw->AddLine(point(x, 1.f), point(x, finger == 0 || finger == 3 ? -5.f : -7.f), color, 1.5f);
         }
         draw->AddLine(point(-4.f, 4.f), point(-7.f, 0.f), color, 1.5f);
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("%s", tooltip);
+    return clicked;
+}
+
+enum class ViewIcon { Bones, Grid, Overlays, Ui };
+
+bool ViewIconButton(const char* id, ViewIcon icon, bool active,
+    const char* tooltip)
+{
+    if (active)
+    {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{.18f, .38f, .68f, 1.f});
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{.24f, .46f, .75f, 1.f});
+    }
+    const bool clicked = ImGui::Button(id, {28.f, 20.f});
+    if (active) ImGui::PopStyleColor(2);
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 center{min.x + 14.f, min.y + 10.f};
+    const auto point = [&](float x, float y)
+    { return ImVec2{center.x + x, center.y + y}; };
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    const ImU32 color = ImGui::GetColorU32(ImGuiCol_Text);
+    switch (icon)
+    {
+    case ViewIcon::Bones:
+        draw->AddLine(point(-5.f, 4.f), point(5.f, -4.f), color, 2.f);
+        draw->AddCircleFilled(point(-6.f, 5.f), 2.f, color);
+        draw->AddCircleFilled(point(6.f, -5.f), 2.f, color);
+        break;
+    case ViewIcon::Grid:
+        for (int offset = -1; offset <= 1; ++offset)
+        {
+            draw->AddLine(point(-7.f, offset * 5.f),
+                point(7.f, offset * 5.f), color, 1.f);
+            draw->AddLine(point(offset * 7.f, -5.f),
+                point(offset * 7.f, 5.f), color, 1.f);
+        }
+        break;
+    case ViewIcon::Overlays:
+        draw->AddCircle(center, 5.f, color, 16, 1.5f);
+        draw->AddLine(point(-8.f, 0.f), point(-5.f, 0.f), color, 1.5f);
+        draw->AddLine(point(5.f, 0.f), point(8.f, 0.f), color, 1.5f);
+        draw->AddLine(point(0.f, -8.f), point(0.f, -5.f), color, 1.5f);
+        draw->AddLine(point(0.f, 5.f), point(0.f, 8.f), color, 1.5f);
+        break;
+    case ViewIcon::Ui:
+        draw->AddRect(point(-7.f, -5.f), point(7.f, 5.f), color, 1.f, 0, 1.3f);
+        draw->AddLine(point(-7.f, -2.f), point(7.f, -2.f), color);
+        draw->AddRectFilled(point(-4.f, 0.f), point(-1.f, 3.f), color);
+        break;
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("%s", tooltip);
@@ -293,7 +350,7 @@ float EditorState::GetToolbarSectionMinimumWidth(ToolbarSection section) const
         controlWidth = 4.f * 28.f + 3.f * ImGui::GetStyle().ItemSpacing.x;
         break;
     case ToolbarSection::View:
-        controlWidth = ToolbarButtonWidth("Bones *");
+        controlWidth = 28.f;
         break;
     case ToolbarSection::Prefab:
     {
@@ -1100,38 +1157,73 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
     }
     if (section == ToolbarSection::View && m_toolbarVisibility.sceneDisplay)
     {
-        const char* bonesLabel = scene->AreEditorBonesVisible() ? "Bones *" : "Bones";
-        if (row.Next(ToolbarButtonWidth(bonesLabel)))
+        if (row.Next(28.f) && ViewIconButton("##ViewBones", ViewIcon::Bones,
+            scene->AreEditorBonesVisible(),
+            "Show or hide all bone overlays in the Scene View"))
         {
-            if (ui.Button(bonesLabel))
-            {
-                EditorViewportSettings::SetBonesVisible(!scene->AreEditorBonesVisible());
-                EditorViewportSettings::Apply(*scene);
-            }
-            ui.Tooltip("Show bones in Scene View without changing the rig");
+            EditorViewportSettings::SetBonesVisible(!scene->AreEditorBonesVisible());
+            EditorViewportSettings::Apply(*scene);
         }
-        const char* gridLabel = scene->settings.showGrid ? "Grid *" : "Grid";
-        if (row.Next(ToolbarButtonWidth(gridLabel)) && ui.Button(gridLabel))
+        if (row.Next(28.f) && ViewIconButton("##ViewGrid", ViewIcon::Grid,
+            scene->settings.showGrid, "Show or hide the scene grid"))
             scene->settings.showGrid = !scene->settings.showGrid;
+        Engine::Core::Object* selected = scene->GetSelectedObject();
+        const bool hasOverlays = selected && selected->editorOverlays != 0;
+        if (row.Next(28.f) && ViewIconButton("##ViewOverlays",
+            ViewIcon::Overlays, hasOverlays,
+            "Visual controls for the selected object (also in Hierarchy)"))
+            ImGui::OpenPopup("##ViewOverlayOptions");
+        if (ImGui::BeginPopup("##ViewOverlayOptions"))
+        {
+            if (!selected)
+                ImGui::TextDisabled("Select an object to edit its visual controls.");
+            else
+            {
+                ImGui::TextDisabled("Visual controls: %s", selected->name.c_str());
+                ImGui::Separator();
+                const auto overlayItem = [&](const char* label, uint8_t flag)
+                {
+                    if (ImGui::MenuItem(label, nullptr,
+                        (selected->editorOverlays & flag) != 0))
+                        selected->editorOverlays ^= flag;
+                };
+                overlayItem("Position arrows", Engine::Core::Object::PositionOverlay);
+                overlayItem("Rotation ellipses", Engine::Core::Object::RotationOverlay);
+                overlayItem("Scale handles", Engine::Core::Object::ScaleOverlay);
+                if (selected->GetComponent<Engine::Components::Skeleton>())
+                {
+                    ImGui::Separator();
+                    overlayItem("Bones", Engine::Core::Object::BoneOverlay);
+                    overlayItem("Skeleton joints", Engine::Core::Object::SkeletonOverlay);
+                    if (!scene->AreEditorBonesVisible())
+                        ImGui::TextDisabled("Enable the toolbar bone icon to see these.");
+                }
+                if (selected->GetComponent<Engine::Components::Mesh>() ||
+                    selected->GetComponent<Engine::Components::Sprite>() ||
+                    selected->GetComponent<Engine::Components::LightProbeGroup>())
+                    overlayItem("Object bounds", Engine::Core::Object::BoundsOverlay);
+                if (selected->GetComponent<Engine::Components::Light>())
+                    overlayItem("Light range or cone", Engine::Core::Object::LightVolumeOverlay);
+                if (selected->GetComponent<Engine::Components::Camera>())
+                    overlayItem("Camera frustum", Engine::Core::Object::CameraFrustumOverlay);
+            }
+            ImGui::EndPopup();
+        }
         int renderMode = static_cast<int>(scene->settings.renderMode);
         const char* renderNames[]{ "Lit", "Unlit", "Wireframe" };
-        if (row.Next(95.f))
+        if (row.Next(92.f))
         {
-            ui.SetNextItemWidth(95.f);
+            ui.SetNextItemWidth(92.f);
             if (ui.Combo("##GlobalRenderMode", &renderMode, renderNames, 3))
                 scene->settings.renderMode =
                     static_cast<Engine::Model::SceneRenderMode>(renderMode);
             ui.Tooltip("Scene render mode");
         }
-        const char* overlayLabel = scene->settings.sceneViewUiOverlay
-            ? "UI Overlay *" : "UI Overlay";
-        if (row.Next(ToolbarButtonWidth(overlayLabel)))
-        {
-            if (ui.Button(overlayLabel))
-                scene->settings.sceneViewUiOverlay =
-                    !scene->settings.sceneViewUiOverlay;
-            ui.Tooltip("Show scene UI in the editor viewport");
-        }
+        if (row.Next(28.f) && ViewIconButton("##ViewUi", ViewIcon::Ui,
+            scene->settings.sceneViewUiOverlay,
+            "Show or hide scene UI in the editor viewport"))
+            scene->settings.sceneViewUiOverlay =
+                !scene->settings.sceneViewUiOverlay;
     }
 }
 

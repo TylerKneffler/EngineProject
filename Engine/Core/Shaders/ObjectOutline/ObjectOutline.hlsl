@@ -9,6 +9,7 @@ struct DrawConstants
 struct ObjectData
 {
     float4x4 viewProjection;
+    float4x4 sphereView;
     float4x4 world;
     float4 baseColor;
     float4 ambientUnlit;
@@ -154,6 +155,7 @@ void VSMmdMain(
 {
     ObjectData objectData = objects[draw.objectIndex];
     float4 localPosition = float4(pos, 1.0);
+    float3 outlineNormal = normal;
     uint activeMorphCount = (uint)objectData.morphParams.x;
     uint morphVertexCount = (uint)objectData.morphParams.y;
     uint morphStride = (uint)objectData.morphParams.w;
@@ -161,11 +163,11 @@ void VSMmdMain(
     {
         float2 morph = morphWeights[active].xy;
         uint target = (uint)morph.x;
-        localPosition.xyz += morphDeltas[
-            (target * morphVertexCount + vertexId) * morphStride].xyz * morph.y;
+        uint base = (target * morphVertexCount + vertexId) * morphStride;
+        localPosition.xyz += morphDeltas[base].xyz * morph.y;
+        outlineNormal += morphDeltas[base + 1].xyz * morph.y;
     }
     uint jointCount = (uint)objectData.skinParams.y;
-    float3 outlineNormal = normal;
     if (jointCount > 0)
     {
         uint paletteOffset = (uint)objectData.skinParams.x;

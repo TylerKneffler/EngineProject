@@ -66,9 +66,9 @@ struct ToolbarLayout
 {
     float widths[8]{ 105.f, 90.f, 200.f, 180.f, 220.f, 180.f, 165.f, 240.f };
     bool sized[8]{};
-    float singleSectionFill[2]{ 1.f, 1.f };
     int order[8]{ 0, 1, 2, 3, 7, 4, 5, 6 };
     int side[8]{ 0, 0, 0, 0, 1, 1, 1, 1 };
+    int floatMode[8]{ 0, 0, 0, 0, 2, 2, 2, 2 }; // left, center, right
 };
 
 ToolbarLayout g_toolbarLayout;
@@ -128,6 +128,18 @@ void ToolbarSettingsReadLine(ImGuiContext*, ImGuiSettingsHandler*, void* entry,
             if (side[i] == 0 || side[i] == 1) layout.side[i] = side[i];
         return;
     }
+    int floatMode[8]{};
+    if (sscanf_s(line, "Float=%d,%d,%d,%d,%d,%d,%d,%d",
+        &floatMode[0], &floatMode[1], &floatMode[2], &floatMode[3],
+        &floatMode[4], &floatMode[5], &floatMode[6], &floatMode[7]) == 8)
+    {
+        bool valid = true;
+        for (int value : floatMode) valid &= value >= 0 && value <= 2;
+        if (valid)
+            for (int i = 0; i < 8; ++i)
+                layout.floatMode[i] = floatMode[i];
+        return;
+    }
     float widths[8]{};
     if (sscanf_s(line, "Widths=%f,%f,%f,%f,%f,%f,%f,%f", &widths[0],
         &widths[1], &widths[2], &widths[3], &widths[4], &widths[5],
@@ -149,7 +161,6 @@ void ToolbarSettingsReadLine(ImGuiContext*, ImGuiSettingsHandler*, void* entry,
                 widths[i] <= 10000.f) layout.widths[i] = widths[i];
         return;
     }
-    float fill[2]{};
     int sized[8]{};
     if (sscanf_s(line, "Sized=%d,%d,%d,%d,%d,%d,%d,%d", &sized[0],
         &sized[1], &sized[2], &sized[3], &sized[4], &sized[5],
@@ -157,14 +168,6 @@ void ToolbarSettingsReadLine(ImGuiContext*, ImGuiSettingsHandler*, void* entry,
     {
         for (int i = 0; i < 8; ++i) layout.sized[i] = sized[i] == 1;
         return;
-    }
-    if (sscanf_s(line, "Fill=%f,%f", &fill[0], &fill[1]) == 2 &&
-        std::isfinite(fill[0]) && std::isfinite(fill[1]) &&
-        fill[0] >= .18f && fill[0] <= 1.f &&
-        fill[1] >= .18f && fill[1] <= 1.f)
-    {
-        layout.singleSectionFill[0] = fill[0];
-        layout.singleSectionFill[1] = fill[1];
     }
 }
 
@@ -175,20 +178,21 @@ void ToolbarSettingsWriteAll(ImGuiContext*, ImGuiSettingsHandler* handler,
     output->appendf("[Toolbar][Main]\n"
         "Order=%d,%d,%d,%d,%d,%d,%d,%d\n"
         "Side=%d,%d,%d,%d,%d,%d,%d,%d\n"
+        "Float=%d,%d,%d,%d,%d,%d,%d,%d\n"
         "Widths=%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n"
-        "Sized=%d,%d,%d,%d,%d,%d,%d,%d\n"
-        "Fill=%.3f,%.3f\n\n",
+        "Sized=%d,%d,%d,%d,%d,%d,%d,%d\n\n",
         layout.order[0], layout.order[1], layout.order[2], layout.order[3],
         layout.order[4], layout.order[5], layout.order[6], layout.order[7],
         layout.side[0], layout.side[1], layout.side[2], layout.side[3],
         layout.side[4], layout.side[5], layout.side[6], layout.side[7],
+        layout.floatMode[0], layout.floatMode[1], layout.floatMode[2],
+        layout.floatMode[3], layout.floatMode[4], layout.floatMode[5],
+        layout.floatMode[6], layout.floatMode[7],
         layout.widths[0], layout.widths[1], layout.widths[2],
         layout.widths[3], layout.widths[4], layout.widths[5],
         layout.widths[6], layout.widths[7],
         layout.sized[0], layout.sized[1], layout.sized[2], layout.sized[3],
-        layout.sized[4], layout.sized[5], layout.sized[6], layout.sized[7],
-        layout.singleSectionFill[0],
-        layout.singleSectionFill[1]);
+        layout.sized[4], layout.sized[5], layout.sized[6], layout.sized[7]);
 }
 
 void PushCompactPanelStyle(bool tree)
@@ -247,9 +251,9 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
         const float sideWidth = std::max(0.f, (available - playWidth) * .5f - 5.f);
         auto& sectionWidths = g_toolbarLayout.widths;
         auto& sectionSized = g_toolbarLayout.sized;
-        auto& singleSectionFill = g_toolbarLayout.singleSectionFill;
         auto& sectionOrder = g_toolbarLayout.order;
         auto& sectionSide = g_toolbarLayout.side;
+        auto& sectionFloat = g_toolbarLayout.floatMode;
         static int draggingSection = -1;
         static int dragMode = 0; // 1: resize with Shift, 2: reorder
         static ImVec2 dragStart{};
@@ -267,6 +271,42 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
         struct SectionRect { int index; float x; float width; };
         SectionRect sectionRects[2][8]{};
         int rectCounts[2]{};
+        int visualOrder[8]{};
+        int visualCount = 0;
+        for (int side = 0; side < 2; ++side)
+            for (int alignment = 0; alignment < 3; ++alignment)
+                for (int position = 0; position < 8; ++position)
+                {
+                    const int index = sectionOrder[position];
+                    if (sectionSide[index] == side &&
+                        sectionFloat[index] == alignment &&
+                        state.HasToolbarSection(sections[index]))
+                        visualOrder[visualCount++] = index;
+                }
+        const auto swapWithNeighbor = [&](int index, int direction)
+        {
+            int visualPosition = 0;
+            while (visualPosition < visualCount &&
+                visualOrder[visualPosition] != index) ++visualPosition;
+            const int neighborPosition = visualPosition + direction;
+            if (neighborPosition < 0 || neighborPosition >= visualCount)
+                return false;
+            const int neighbor = visualOrder[neighborPosition];
+            int orderPosition = 0;
+            int neighborOrderPosition = 0;
+            for (int position = 0; position < 8; ++position)
+            {
+                if (sectionOrder[position] == index) orderPosition = position;
+                if (sectionOrder[position] == neighbor)
+                    neighborOrderPosition = position;
+            }
+            std::swap(sectionOrder[orderPosition],
+                sectionOrder[neighborOrderPosition]);
+            std::swap(sectionSide[index], sectionSide[neighbor]);
+            std::swap(sectionFloat[index], sectionFloat[neighbor]);
+            ImGui::MarkIniSettingsDirty();
+            return true;
+        };
         const auto drawSide = [&](const int* indices, int count, float x,
             float sideSpan, int side)
         {
@@ -279,9 +319,7 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
                     sections[indices[i]]);
                 minimumTotal += minimums[i];
             }
-            const float span = count == 1
-                ? std::max(std::min(sideSpan, minimumTotal),
-                    sideSpan * singleSectionFill[side]) : sideSpan;
+            const float span = sideSpan;
             const bool fitsMinimums = span >= minimumTotal;
             const float extra = std::max(0.f, span - minimumTotal);
             float customExtra = 0.f;
@@ -331,7 +369,37 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
                 ImGui::InvisibleButton("SectionGrip", ImVec2(16.f, 11.f));
                 const bool gripHovered = ImGui::IsItemHovered();
                 const bool gripActive = ImGui::IsItemActive();
-                if (ImGui::IsItemActivated())
+                const bool gripActivated = ImGui::IsItemActivated();
+                ImGui::OpenPopupOnItemClick("SectionPlacementMenu",
+                    ImGuiPopupFlags_MouseButtonRight);
+                if (ImGui::BeginPopup("SectionPlacementMenu"))
+                {
+                    int visualPosition = 0;
+                    while (visualPosition < visualCount &&
+                        visualOrder[visualPosition] != index) ++visualPosition;
+                    ImGui::BeginDisabled(visualPosition == 0 ||
+                        visualPosition == visualCount);
+                    if (ImGui::ArrowButton("##MoveSectionLeft", ImGuiDir_Left))
+                    {
+                        swapWithNeighbor(index, -1);
+                        ImGui::CloseCurrentPopup();
+                    }
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                        ImGui::SetTooltip("Swap with previous section");
+                    ImGui::EndDisabled();
+                    ImGui::SameLine();
+                    ImGui::BeginDisabled(visualPosition + 1 >= visualCount);
+                    if (ImGui::ArrowButton("##MoveSectionRight", ImGuiDir_Right))
+                    {
+                        swapWithNeighbor(index, 1);
+                        ImGui::CloseCurrentPopup();
+                    }
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                        ImGui::SetTooltip("Swap with next section");
+                    ImGui::EndDisabled();
+                    ImGui::EndPopup();
+                }
+                if (gripActivated)
                 {
                     draggingSection = index;
                     dragMode = ImGui::GetIO().KeyShift ? 1 : 0;
@@ -349,14 +417,14 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
                     }
                     if (dragMode == 1 && count == 1)
                     {
-                        const float lower = std::clamp(
-                            minimumTotal / std::max(1.f, sideWidth), .18f, 1.f);
-                        const float fill = std::clamp(singleSectionFill[side] +
-                                ImGui::GetIO().MouseDelta.x /
-                                    std::max(1.f, sideWidth), lower, 1.f);
-                        if (fill != singleSectionFill[side])
+                        const float nextWidth = std::clamp(
+                            allocated[0] + ImGui::GetIO().MouseDelta.x,
+                            minimumTotal, sideWidth);
+                        if (nextWidth != sectionWidths[index] ||
+                            !sectionSized[index])
                         {
-                            singleSectionFill[side] = fill;
+                            sectionWidths[index] = nextWidth;
+                            sectionSized[index] = true;
                             ImGui::MarkIniSettingsDirty();
                         }
                     }
@@ -381,7 +449,7 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
                     ImGui::SetMouseCursor(dragMode == 1
                         ? ImGuiMouseCursor_ResizeEW : ImGuiMouseCursor_ResizeAll);
                     if (gripHovered && !gripActive)
-                        ImGui::SetTooltip("%s: drag to move; Shift+drag to resize",
+                        ImGui::SetTooltip("%s: drag to move; Shift+drag to resize; right-click for arrows",
                             names[index]);
                 }
                 const ImU32 dotColor = ImGui::GetColorU32(gripHovered || gripActive
@@ -426,21 +494,17 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
                 cursor += width;
             }
         };
-        int left[8]{};
-        int right[8]{};
-        int leftCount = 0;
-        int rightCount = 0;
+        int groups[2][3][8]{};
+        int groupCounts[2][3]{};
         for (int position = 0; position < 8; ++position)
         {
             const int index = sectionOrder[position];
             if (state.HasToolbarSection(sections[index]))
-            {
-                if (sectionSide[index] == 0) left[leftCount++] = index;
-                else right[rightCount++] = index;
-            }
+                groups[sectionSide[index]][sectionFloat[index]]
+                    [groupCounts[sectionSide[index]][sectionFloat[index]]++] = index;
         }
         const auto drawFittingSide = [&](const int* indices, int count,
-            float x, int side)
+            float x, float span, int side, int alignment)
         {
             constexpr float overflowWidth = 30.f;
             const auto fittingCount = [&](float width)
@@ -456,17 +520,17 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
                 }
                 return visible;
             };
-            int visible = fittingCount(sideWidth);
+            int visible = fittingCount(span);
             if (visible < count)
-                visible = fittingCount(std::max(0.f, sideWidth - overflowWidth));
+                visible = fittingCount(std::max(0.f, span - overflowWidth));
             const bool hasOverflow = visible < count;
             const float contentSpan = std::max(0.f,
-                sideWidth - (hasOverflow ? overflowWidth : 0.f));
+                span - (hasOverflow ? overflowWidth : 0.f));
             drawSide(indices, visible, x, contentSpan, side);
             if (!hasOverflow) return;
 
-            ImGui::PushID(side);
-            ImGui::SetCursorScreenPos(ImVec2(x + sideWidth - 27.f, origin.y + 1.f));
+            ImGui::PushID(side * 3 + alignment);
+            ImGui::SetCursorScreenPos(ImVec2(x + span - 27.f, origin.y + 1.f));
             if (ImGui::Button("##HiddenToolbarSections", ImVec2(24.f, 20.f)))
                 ImGui::OpenPopup("HiddenToolbarSections");
             const ImVec2 min = ImGui::GetItemRectMin();
@@ -489,30 +553,86 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
             }
             ImGui::PopID();
         };
-        drawFittingSide(left, leftCount, origin.x, 0);
-        drawFittingSide(right, rightCount,
-            origin.x + available - sideWidth, 1);
+        for (int side = 0; side < 2; ++side)
+        {
+            const float regionX = side == 0 ? origin.x :
+                origin.x + available - sideWidth;
+            float desired[3]{};
+            float total = 0.f;
+            for (int alignment = 0; alignment < 3; ++alignment)
+            {
+                for (int i = 0; i < groupCounts[side][alignment]; ++i)
+                {
+                    const int index = groups[side][alignment][i];
+                    desired[alignment] += std::max(
+                        state.GetToolbarSectionMinimumWidth(sections[index]),
+                        sectionWidths[index]);
+                }
+                total += desired[alignment];
+            }
+            const float scale = total > sideWidth ? sideWidth / total : 1.f;
+            float widths[3]{ desired[0] * scale, desired[1] * scale,
+                desired[2] * scale };
+            const float leftEnd = regionX + widths[0];
+            const float rightStart = regionX + sideWidth - widths[2];
+            const float middleX = std::clamp(
+                regionX + (sideWidth - widths[1]) * .5f,
+                leftEnd, std::max(leftEnd, rightStart - widths[1]));
+            const float positions[3]{ regionX, middleX, rightStart };
+            for (int alignment = 0; alignment < 3; ++alignment)
+                if (groupCounts[side][alignment])
+                    drawFittingSide(groups[side][alignment],
+                        groupCounts[side][alignment], positions[alignment],
+                        widths[alignment], side, alignment);
+        }
         if (draggingSection >= 0 && dragMode == 2)
         {
-            const int targetSide = ImGui::GetIO().MousePos.x <
+            const ImVec2 mouse = ImGui::GetIO().MousePos;
+            const bool overToolbar = mouse.x >= origin.x &&
+                mouse.x <= origin.x + available &&
+                mouse.y >= origin.y - 4.f && mouse.y <= origin.y + 27.f;
+            if (overToolbar)
+            {
+            const int targetSide = mouse.x <
                 origin.x + available * .5f ? 0 : 1;
+            const float regionX = targetSide == 0 ? origin.x :
+                origin.x + available - sideWidth;
+            const float hoverPosition = sideWidth > 0.f
+                ? std::clamp((mouse.x - regionX) / sideWidth, 0.f, 1.f)
+                : .5f;
+            const int targetFloat = hoverPosition < 1.f / 3.f ? 0 :
+                hoverPosition < 2.f / 3.f ? 1 : 2;
             SectionRect candidates[8]{};
             int candidateCount = 0;
             for (int i = 0; i < rectCounts[targetSide]; ++i)
-                if (sectionRects[targetSide][i].index != draggingSection)
+                if (sectionRects[targetSide][i].index != draggingSection &&
+                    sectionFloat[sectionRects[targetSide][i].index] == targetFloat)
                     candidates[candidateCount++] = sectionRects[targetSide][i];
             int slot = 0;
-            while (slot < candidateCount && ImGui::GetIO().MousePos.x >=
+            while (slot < candidateCount && mouse.x >=
                 candidates[slot].x + candidates[slot].width * .5f)
                 ++slot;
             const float markerX = slot < candidateCount
                 ? candidates[slot].x : candidateCount
                 ? candidates[candidateCount - 1].x +
                     candidates[candidateCount - 1].width
-                : targetSide == 0 ? origin.x : origin.x + available - sideWidth;
-            ImGui::GetWindowDrawList()->AddLine(
-                ImVec2(markerX, origin.y), ImVec2(markerX, origin.y + 23.f),
-                ImGui::GetColorU32(ImGuiCol_CheckMark), 2.f);
+                : regionX +
+                    (targetFloat == 0 ? 0.f : targetFloat == 1
+                        ? sideWidth * .5f : sideWidth);
+            ImDrawList* magnet = ImGui::GetForegroundDrawList();
+            const ImU32 glow = ImGui::GetColorU32(
+                ImVec4{.30f, .75f, 1.f, .25f});
+            const ImU32 ink = ImGui::GetColorU32(ImGuiCol_CheckMark);
+            magnet->AddLine(ImVec2(markerX, origin.y - 2.f),
+                ImVec2(markerX, origin.y + 25.f), glow, 6.f);
+            magnet->AddLine(ImVec2(markerX, origin.y - 2.f),
+                ImVec2(markerX, origin.y + 25.f), ink, 2.f);
+            magnet->AddLine(ImVec2(markerX - 4.f, origin.y - 2.f),
+                ImVec2(markerX + 4.f, origin.y - 2.f), ink, 2.f);
+            magnet->AddLine(ImVec2(markerX - 4.f, origin.y + 25.f),
+                ImVec2(markerX + 4.f, origin.y + 25.f), ink, 2.f);
+            ImGui::SetTooltip("Drop %s: float %s", names[draggingSection],
+                targetFloat == 0 ? "left" : targetFloat == 1 ? "center" : "right");
             if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
             {
                 const int before = slot < candidateCount
@@ -542,7 +662,9 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
                 for (int position = 0; position < 8; ++position)
                     sectionOrder[position] = reordered[position];
                 sectionSide[draggingSection] = targetSide;
+                sectionFloat[draggingSection] = targetFloat;
                 ImGui::MarkIniSettingsDirty();
+            }
             }
         }
         if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))

@@ -58,7 +58,8 @@ void WriteGroupMorphFixture(const std::filesystem::path& path,
     uint8_t jointType = 0, int8_t jointBodyA = 0,
     bool impulseMorphs = false, bool extendedFeatures = false,
     bool fullUv = false, bool skinModes = false,
-    uint8_t sphereMode = 1, const char* sphereTextureName = "toon.png")
+    uint8_t sphereMode = 1, const char* sphereTextureName = "toon.png",
+    bool ropeSoftBody = false)
 {
     std::vector<char> bytes{ 'P', 'M', 'X', ' ' };
     Append(bytes, jointType == 0 && !impulseMorphs && !extendedFeatures && !fullUv && !skinModes
@@ -234,7 +235,7 @@ void WriteGroupMorphFixture(const std::filesystem::path& path,
         if (extendedFeatures)
         {
             AppendText(bytes, "cloth"); AppendText(bytes, "");
-            Append(bytes, uint8_t(0)); Append(bytes, int8_t(0));
+            Append(bytes, uint8_t(ropeSoftBody ? 1 : 0)); Append(bytes, int8_t(0));
             Append(bytes, uint8_t(3)); Append(bytes, uint16_t(4));
             Append(bytes, uint8_t(0));
             Append(bytes, int32_t(0)); Append(bytes, int32_t(1));
@@ -748,6 +749,55 @@ int main(int argc, char** argv)
     for (int frame = 0; frame < 30; ++frame)
         extendedScene.Update(1.f / 60.f);
     assert(anchoredRigid->GetLinearVelocity().z > .001f);
+    extendedScene.GetPhysics().Reset();
+    extendedScene.Update(1.f / 60.f);
+    assert(anchoredRigid->GetPhysicsBodyGeneration() > 0);
+    assert(importedCloth->GetActiveAnchorCount() == 1);
+    const uint64_t resetBodyGeneration =
+        anchoredRigid->GetPhysicsBodyGeneration();
+    anchoredRigid->MarkConfigurationDirty();
+    extendedScene.Update(1.f / 60.f);
+    assert(anchoredRigid->GetPhysicsBodyGeneration() > resetBodyGeneration);
+    assert(importedCloth->GetActiveAnchorCount() == 1);
+    {
+    const fs::path ropeFixture = outputRoot / "rope_soft_body.pmx";
+    WriteGroupMorphFixture(ropeFixture, 0, 0, false, true, false, false,
+        1, "toon.png", true);
+    Engine::Model::ImportedModel ropeModel;
+    Engine::Editor::PmxImportReport ropeReport;
+    assert(Engine::Editor::PmxModelDecoder::Decode(ropeFixture.string(),
+        ropeModel, error, &ropeReport, { true, true, true, true }));
+    assert(ropeReport.importedSoftBodies == 1);
+    assert(ropeModel.softBodies[0].shape == Engine::Model::SoftBodyTopology::Rope);
+    const auto ropeImport = Engine::Editor::ModelAssetWriter::Write(
+        ropeModel, ropeFixture.string(), outputRoot.string());
+    assert(ropeImport.success);
+    Engine::Scene::Scene ropeScene;
+    assert(Engine::Serialization::SceneSerializer::InstantiatePrefab(
+        ropeScene, ropeImport.prefabPath));
+    Engine::Components::Cloth* ropeCloth = nullptr;
+    Engine::Components::Mesh* ropeMesh = nullptr;
+    for (const auto& object : ropeScene.GetObjects())
+        if (auto* cloth = object->GetComponent<Engine::Components::Cloth>())
+        {
+            ropeCloth = cloth;
+            ropeMesh = object->GetComponent<Engine::Components::Mesh>();
+        }
+    assert(ropeCloth && ropeMesh && ropeCloth->topology == "Rope");
+    // PMX winding reversal places source vertex 2 at render index 1.
+    const float ropeRestZ = ropeMesh->GetVertices()[1].pos[2];
+    ropeCloth->windVelocity = { 0.f, 0.f, 1.f };
+    ropeCloth->windStrength = 10.f;
+    ropeScene.Start();
+    for (int frame = 0; frame < 30; ++frame)
+        ropeScene.Update(1.f / 60.f);
+    assert(ropeCloth->GetActiveLinkCount() == 2);
+    assert(ropeCloth->GetActiveFaceCount() == 0);
+    assert(ropeCloth->GetActiveAnchorCount() == 1);
+    assert(ropeMesh->GetVertices()[1].pos[2] > ropeRestZ + .0001f);
+    ropeCloth->ResetSimulation();
+    assert(std::abs(ropeMesh->GetVertices()[1].pos[2] - ropeRestZ) < .0001f);
+    }
     for (uint8_t type = 1; type <= 5; ++type)
     {
         const fs::path fixture = outputRoot /
@@ -1007,6 +1057,7 @@ int main(int argc, char** argv)
     rig->Apply();
     assert(std::abs(externalBone->transform.position.x - 3.f) < .01f);
     auto* physicsBody = rigScene.AddObject("PMX physics body");
+    physicsBody->AddComponent<Engine::Components::RigidBody>();
     auto* physicsBone = rigScene.AddObject("PMX physics bone");
     physicsBody->Parent = rigRoot;
     physicsBone->Parent = rigRoot;
@@ -1056,7 +1107,27 @@ int main(int argc, char** argv)
     rig->appendRules.back().deformLayer = -1;
     rig->Apply();
     assert(glm::length(ikFollower->transform.rotation) < .01f);
+    // Post-physics IK must run before a later-layer append that reads its link.
+    rig->appendRules.back().deformLayer = 1;
+    rig->appendRules.back().afterPhysics = true;
+    rig->ikChains[0].afterPhysics = true;
+    ikJoint->transform.rotation = { 0.f, 0.f, 0.f };
+    rig->Apply();
+    assert(glm::distance(ikTip->transform.GetWorldPosition(),
+        ikGoal->transform.GetWorldPosition()) > .5f);
+    rig->PostPhysicsUpdate();
+    assert(glm::distance(ikTip->transform.GetWorldPosition(),
+        ikGoal->transform.GetWorldPosition()) < .01f);
+    assert(glm::distance(ikFollower->transform.rotation,
+        ikJoint->transform.rotation) < .01f);
+    rig->ikChains[0].afterPhysics = false;
     rig->appendRules.pop_back();
+    rig->externalParents[0].afterPhysics = true;
+    externalTarget->transform.position.x = 4.f;
+    rig->Apply();
+    rig->PostPhysicsUpdate();
+    assert(std::abs(externalBone->transform.position.x - 4.f) < .01f);
+    rig->externalParents[0].afterPhysics = false;
     Engine::Model::ImportedBoneMorph boneMorph;
     boneMorph.name = "raise";
     boneMorph.weight = .5f;
@@ -1123,9 +1194,25 @@ int main(int argc, char** argv)
         fallingRigid->bodyType = "Dynamic";
         fallingRigid->mass = 1.f;
         physicsScene.Start();
-        for (int frame = 0; frame < 30; ++frame)
-            physicsScene.Update(1.f / 60.f);
-        assert(fallingBone->transform.GetWorldPosition().y < 1.5f);
+        std::array<float, 2> playbackHeights{};
+        for (int playback = 0; playback < 2; ++playback)
+        {
+            if (playback != 0)
+            {
+                physicsScene.GetPhysics().Reset();
+                fallingBone->transform.position.y = 2.f;
+                fallingBody->transform.position.y = 2.f;
+                physicsScene.Start();
+            }
+            for (int frame = 0; frame < 30; ++frame)
+                physicsScene.Update(1.f / 60.f);
+            assert(fallingBone->transform.GetWorldPosition().y < 1.5f);
+            assert(glm::distance(fallingBone->transform.GetWorldPosition(),
+                fallingBody->transform.GetWorldPosition()) < .01f);
+            playbackHeights[playback] =
+                fallingBone->transform.GetWorldPosition().y;
+        }
+        assert(std::abs(playbackHeights[0] - playbackHeights[1]) < 1e-4f);
     }
     assert(restoredRig.boneMorphs.size() == 1);
     assert(restoredRig.boneMorphs[0].offsets[0].translation.y == 2.f);

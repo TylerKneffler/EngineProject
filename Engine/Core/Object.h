@@ -22,6 +22,11 @@ public:
 
     std::string name;
     bool enabled = true;
+    // Editor viewport overlays are transient and start hidden for each object.
+    enum EditorOverlay : uint8_t { PositionOverlay = 1, RotationOverlay = 2,
+        ScaleOverlay = 4, BoneOverlay = 8, SkeletonOverlay = 16,
+        BoundsOverlay = 32, LightVolumeOverlay = 64, CameraFrustumOverlay = 128 };
+    uint8_t editorOverlays = 0;
     // Runtime-derived objects participate normally in update/render/physics
     // but are omitted from authored scene and prefab serialization.
     bool runtimeOnly = false;

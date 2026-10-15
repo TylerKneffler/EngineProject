@@ -47,7 +47,7 @@ public:
     void SetNextComponentHeaderOpen(bool) override;
     void ScrollItemIntoView() override;
     bool TreeNode(const void*, const char*, bool, bool, bool) override; void TreePop() override;
-    EditorUiObjectRowResult ObjectTreeRow(const void*,EditorUiObjectIcon,char*,size_t,bool*,bool,bool,bool,bool,int,bool,uint64_t,bool) override;
+    EditorUiObjectRowResult ObjectTreeRow(const void*,EditorUiObjectIcon,char*,size_t,bool*,bool,bool,bool,bool,int,bool,uint64_t,bool,uint8_t*,uint8_t) override;
     void ObjectTreePop() override;
     EditorUiHierarchyDropResult HierarchyDropTarget(const char*) override;
     EditorUiHierarchyDropResult HierarchyBackgroundDropTarget(const char*) override;

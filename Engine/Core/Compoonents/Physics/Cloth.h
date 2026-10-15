@@ -12,7 +12,7 @@ namespace Engine::Physics { struct PhysicsComponentState; }
 
 namespace Engine::Components
 {
-// Simulates an independently selectable triangle mesh as a soft body. The
+// Simulates an independently selectable mesh as a soft body. The
 // object's Mesh component is the rendered target and is restored on stop.
 class Cloth final : public Engine::Core::Component
 {
@@ -35,6 +35,8 @@ public:
     ComponentReference renderMeshReference { "Mesh" };
     PROPERTY(Inspector, EditAnywhere, Category = "Cloth")
     std::string meshPath;
+    PROPERTY(Inspector, EditAnywhere, Category = "Cloth")
+    std::string topology = "TriangleMesh"; // TriangleMesh or Rope.
     PROPERTY(Inspector, EditAnywhere, Category = "Cloth", ClampMin = "0.001")
     float mass = 1.f;
     PROPERTY(Inspector, EditAnywhere, Category = "Cloth", Range = "0, 1")
@@ -96,6 +98,8 @@ public:
     bool IsSimulating() const;
     int GetActiveClusterCount() const;
     int GetActiveAnchorCount() const;
+    int GetActiveLinkCount() const;
+    int GetActiveFaceCount() const;
     void ResetSimulation();
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;

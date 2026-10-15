@@ -79,6 +79,7 @@ struct EditorUiObjectRowResult
     bool doubleClicked = false;
     bool nameChanged = false;
     bool enabledChanged = false;
+    bool overlaysChanged = false;
     const void* droppedItem = nullptr;
     EditorUiHierarchyDropPosition dropPosition = EditorUiHierarchyDropPosition::None;
     bool dragActive = false;
@@ -216,7 +217,8 @@ public:
         EditorUiObjectIcon icon, char* name, size_t size,
         bool* enabled, bool selected, bool leaf, bool lockName,
         bool enabledInHierarchy, int hierarchyDepth, bool lastSibling,
-        uint64_t ancestorGuideMask, bool expandForFilter = false) = 0;
+        uint64_t ancestorGuideMask, bool expandForFilter = false,
+        uint8_t* editorOverlays = nullptr, uint8_t extraOverlayOptions = 0) = 0;
     virtual void ObjectTreePop() = 0;
     virtual EditorUiHierarchyDropResult HierarchyDropTarget(const char* type) = 0;
     virtual EditorUiHierarchyDropResult HierarchyBackgroundDropTarget(const char* type) = 0;

@@ -4,6 +4,8 @@
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Lighting/Light.h"
 #include "Core/Compoonents/Lighting/LightProbe.h"
+#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Obj/Sprite.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/BoneGroup.h"
@@ -127,6 +129,106 @@ float DistanceToSegment(EditorUiVec2 point, EditorUiVec2 start,
         ? std::clamp(Dot(Subtract(point, start), segment) / lengthSquared, 0.f, 1.f)
         : 0.f;
     return Length(Subtract(point, Add(start, Multiply(segment, parameter))));
+}
+
+void DrawSpotGizmo(IEditorUi& ui, const glm::mat4& viewProjection,
+    const EditorUiVec2& viewport, const Engine::Core::Object& object,
+    const Engine::Components::Light& light);
+
+void DrawWorldBox(IEditorUi& ui, const glm::mat4& viewProjection,
+    EditorUiVec2 viewport, const glm::mat4& world,
+    glm::vec3 minimum, glm::vec3 maximum, EditorUiColor color)
+{
+    const glm::vec3 corners[8] = {
+        {minimum.x,minimum.y,minimum.z},{maximum.x,minimum.y,minimum.z},
+        {maximum.x,maximum.y,minimum.z},{minimum.x,maximum.y,minimum.z},
+        {minimum.x,minimum.y,maximum.z},{maximum.x,minimum.y,maximum.z},
+        {maximum.x,maximum.y,maximum.z},{minimum.x,maximum.y,maximum.z}
+    };
+    EditorUiVec2 projected[8]{};
+    bool visible[8]{};
+    for (int i=0;i<8;++i)
+        visible[i]=ProjectPoint(viewProjection,
+            glm::vec3(world*glm::vec4(corners[i],1.f)),viewport,projected[i]);
+    constexpr int edges[12][2] = {
+        {0,1},{1,2},{2,3},{3,0},{4,5},{5,6},{6,7},{7,4},
+        {0,4},{1,5},{2,6},{3,7}
+    };
+    for (const auto& edge:edges)
+        if (visible[edge[0]] && visible[edge[1]])
+            ui.DrawViewportLine(projected[edge[0]],projected[edge[1]],color,1.5f);
+}
+
+void DrawLightVolume(IEditorUi& ui, const glm::mat4& viewProjection,
+    EditorUiVec2 viewport, const Engine::Core::Object& object,
+    const Engine::Components::Light& light)
+{
+    if (light.GetLightType()==Engine::Components::Light::Type::Spot)
+    {
+        DrawSpotGizmo(ui,viewProjection,viewport,object,light);
+        return;
+    }
+    const glm::vec3 center=glm::vec3(object.transform.GetWorldMatrix()[3]);
+    const EditorUiColor color{1.f,.72f,.16f,.85f};
+    if (light.GetLightType()==Engine::Components::Light::Type::Directional)
+    {
+        const glm::vec3 direction=glm::normalize(
+            glm::vec3(object.transform.GetWorldMatrix()[2]));
+        EditorUiVec2 start{},end{};
+        if (ProjectPoint(viewProjection,center,viewport,start) &&
+            ProjectPoint(viewProjection,center+direction*2.f,viewport,end))
+            ui.DrawViewportLine(start,end,color,2.f);
+        return;
+    }
+    const float radius=std::max(light.range,.01f);
+    for (int plane=0;plane<3;++plane)
+    {
+        EditorUiVec2 previous{};
+        bool previousVisible=false;
+        for (int step=0;step<=64;++step)
+        {
+            const float angle=6.28318530718f*step/64.f;
+            glm::vec3 offset(0.f);
+            offset[(plane+1)%3]=std::cos(angle)*radius;
+            offset[(plane+2)%3]=std::sin(angle)*radius;
+            EditorUiVec2 current{};
+            const bool visible=ProjectPoint(viewProjection,center+offset,
+                viewport,current);
+            if (visible && previousVisible)
+                ui.DrawViewportLine(previous,current,color,1.25f);
+            previous=current;
+            previousVisible=visible;
+        }
+    }
+}
+
+void DrawCameraFrustum(IEditorUi& ui, const glm::mat4& viewProjection,
+    EditorUiVec2 viewport, const Engine::Components::Camera& camera)
+{
+    const float aspect=viewport.x/std::max(viewport.y,1.f);
+    const glm::mat4 inverse=glm::inverse(
+        camera.GetProjectionMatrix(aspect)*camera.GetViewMatrix());
+    const glm::vec2 corners[4]={{-1.f,-1.f},{1.f,-1.f},
+        {1.f,1.f},{-1.f,1.f}};
+    EditorUiVec2 screen[8]{};
+    bool visible[8]{};
+    for (int plane=0;plane<2;++plane)
+        for (int i=0;i<4;++i)
+        {
+            const glm::vec4 point=inverse*glm::vec4(corners[i],
+                plane?1.f:0.f,1.f);
+            if (std::abs(point.w)<1e-6f) continue;
+            visible[plane*4+i]=ProjectPoint(viewProjection,
+                glm::vec3(point)/point.w,viewport,screen[plane*4+i]);
+        }
+    constexpr int edges[12][2] = {
+        {0,1},{1,2},{2,3},{3,0},{4,5},{5,6},{6,7},{7,4},
+        {0,4},{1,5},{2,6},{3,7}
+    };
+    const EditorUiColor color{.25f,.82f,1.f,.8f};
+    for (const auto& edge:edges)
+        if (visible[edge[0]] && visible[edge[1]])
+            ui.DrawViewportLine(screen[edge[0]],screen[edge[1]],color,1.5f);
 }
 
 void DrawLightIcon(IEditorUi& ui, EditorUiVec2 center, bool selected)
@@ -358,6 +460,104 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         camera->GetProjectionMatrix(input.available.x / input.available.y) *
         camera->GetViewMatrix();
     const glm::mat4 inverseViewProjection = glm::inverse(viewProjection);
+    // Pinned hierarchy overlays are visual aids and do not take input.
+    for (const auto& objectPointer : scene.GetObjects())
+    {
+        Engine::Core::Object* object = objectPointer.get();
+        if (!object || !object->IsEnabledInHierarchy()) continue;
+        const uint8_t overlays = object->editorOverlays;
+        if (!(overlays & (Engine::Core::Object::PositionOverlay |
+            Engine::Core::Object::RotationOverlay |
+            Engine::Core::Object::ScaleOverlay))) continue;
+        const glm::vec3 center = WorldPosition(object);
+        EditorUiVec2 origin{};
+        if (!ProjectPoint(viewProjection, center, input.available, origin)) continue;
+        const glm::vec3 cameraPosition =
+            glm::vec3(scene.editorCamera.transform.GetWorldMatrix()[3]);
+        const float axisScale = std::clamp(glm::length(center-cameraPosition)*.18f,
+            .35f,8.f);
+        const glm::mat3 rotation = WorldRotation(*object);
+        const glm::vec3 axes[3] = { rotation[0],rotation[1],rotation[2] };
+        const EditorUiColor colors[3] = { kXColor,kYColor,kZColor };
+        for (int axis=0;axis<3;++axis)
+        {
+            EditorUiVec2 end{};
+            if ((overlays & Engine::Core::Object::PositionOverlay) &&
+                ProjectPoint(viewProjection,center+axes[axis]*axisScale,
+                    input.available,end))
+            {
+                ui.DrawViewportLine(origin,end,colors[axis],2.f);
+                const EditorUiVec2 direction=Subtract(end,origin);
+                const float length=Length(direction);
+                if (length>7.f)
+                {
+                    const EditorUiVec2 unit=Multiply(direction,1.f/length);
+                    const EditorUiVec2 side{-unit.y,unit.x};
+                    ui.DrawViewportTriangle(end,
+                        Add(Subtract(end,Multiply(unit,10.f)),Multiply(side,4.f)),
+                        Subtract(Subtract(end,Multiply(unit,10.f)),Multiply(side,4.f)),
+                        colors[axis]);
+                }
+            }
+            if ((overlays & Engine::Core::Object::ScaleOverlay) &&
+                ProjectPoint(viewProjection,center+axes[axis]*axisScale*.8f,
+                    input.available,end))
+            {
+                ui.DrawViewportLine(origin,end,colors[axis],2.f);
+                DrawBoxHandle(ui,end,5.f,colors[axis]);
+            }
+            if (overlays & Engine::Core::Object::RotationOverlay)
+            {
+                EditorUiVec2 previous{};
+                bool previousVisible=false;
+                for (int segment=0;segment<=48;++segment)
+                {
+                    const float angle=6.28318530718f*segment/48.f;
+                    EditorUiVec2 current{};
+                    const bool visible=ProjectPoint(viewProjection,
+                        center+(axes[(axis+1)%3]*std::cos(angle)+
+                            axes[(axis+2)%3]*std::sin(angle))*axisScale*.78f,
+                        input.available,current);
+                    if (previousVisible && visible)
+                        ui.DrawViewportLine(previous,current,colors[axis],1.5f);
+                    previous=current;
+                    previousVisible=visible;
+                }
+            }
+        }
+    }
+    for (const auto& objectPointer : scene.GetObjects())
+    {
+        Engine::Core::Object* object=objectPointer.get();
+        if (!object || !object->IsEnabledInHierarchy()) continue;
+        const uint8_t overlays=object->editorOverlays;
+        if (overlays & Engine::Core::Object::BoundsOverlay)
+        {
+            const glm::mat4 world=object->transform.GetWorldMatrix();
+            const EditorUiColor color{.58f,.78f,1.f,.85f};
+            if (const auto* mesh=object->GetComponent<Engine::Components::Mesh>();
+                mesh && mesh->HasBounds())
+                DrawWorldBox(ui,viewProjection,input.available,world,
+                    mesh->GetBoundsMin(),mesh->GetBoundsMax(),color);
+            if (const auto* sprite=object->GetComponent<Engine::Components::Sprite>())
+            {
+                const glm::vec2 half=sprite->GetWorldSize()*.5f;
+                DrawWorldBox(ui,viewProjection,input.available,world,
+                    {-half.x,-half.y,0.f},{half.x,half.y,0.f},color);
+            }
+            if (const auto* probes=object->GetComponent<
+                    Engine::Components::LightProbeGroup>())
+                DrawWorldBox(ui,viewProjection,input.available,world,
+                    -glm::abs(probes->size)*.5f,
+                    glm::abs(probes->size)*.5f,color);
+        }
+        if (overlays & Engine::Core::Object::LightVolumeOverlay)
+            if (const auto* light=object->GetComponent<Engine::Components::Light>())
+                DrawLightVolume(ui,viewProjection,input.available,*object,*light);
+        if (overlays & Engine::Core::Object::CameraFrustumOverlay)
+            if (const auto* sceneCamera=object->GetComponent<Engine::Components::Camera>())
+                DrawCameraFrustum(ui,viewProjection,input.available,*sceneCamera);
+    }
     Engine::Core::Object* selected = scene.GetSelectedObject();
     const auto* selectedGroup = Engine::Components::BoneGroup::ForSelection(selected);
     const Engine::Components::Skeleton* selectedSkeleton = nullptr;
@@ -413,7 +613,9 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         for (Engine::Core::Component* component : owner->Components)
         {
             auto* skeleton = dynamic_cast<Engine::Components::Skeleton*>(component);
-            if (!scene.AreEditorBonesVisible() || !skeleton || !skeleton->showBones) continue;
+            if (!scene.AreEditorBonesVisible() || !skeleton ||
+                !(owner->editorOverlays & (Engine::Core::Object::BoneOverlay |
+                    Engine::Core::Object::SkeletonOverlay))) continue;
             const auto* rootSkeleton = owner->GetComponent<Engine::Components::Skeleton>();
             if (rootSkeleton != skeleton && rootSkeleton &&
                 !rootSkeleton->rootBoneNodes.empty()) continue;
@@ -442,12 +644,14 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
 
                 float hitDistance = Length(Subtract(
                     input.mousePosInViewport, tipScreen));
-                if (hitDistance <= 9.f && hitDistance < boneHitDistance)
+                if ((owner->editorOverlays & Engine::Core::Object::BoneOverlay) &&
+                    hitDistance <= 9.f && hitDistance < boneHitDistance)
                 {
                     boneHit = joint;
                     boneHitDistance = hitDistance;
                 }
-                if (hitDistance <= 9.f && hitDistance < jointHitDistance)
+                if ((owner->editorOverlays & Engine::Core::Object::SkeletonOverlay) &&
+                    hitDistance <= 9.f && hitDistance < jointHitDistance)
                 {
                     jointHit = joint;
                     jointHitDistance = hitDistance;
@@ -455,7 +659,8 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
 
                 if (!parentJoint)
                 {
-                    if (drawnRoots.insert(joint).second)
+                    if ((owner->editorOverlays & Engine::Core::Object::SkeletonOverlay) &&
+                        drawnRoots.insert(joint).second)
                     {
                         ui.DrawViewportCircle(tipScreen, joint == selected ? 7.f : 5.f,
                             kOutline, true);
@@ -471,17 +676,22 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
                 const auto& root = projectJoint(parentJoint);
                 if (!root.visible) continue;
                 const EditorUiVec2 rootScreen = root.screen;
-                DrawBoneShape(ui, rootScreen, tipScreen,
-                    joint == selected || parentJoint == selected);
-                ui.DrawViewportCircle(rootScreen, 4.f, kOutline, true);
-                ui.DrawViewportCircle(rootScreen, 2.5f,
-                    parentJoint == selected ? kHoverColor :
-                        EditorUiColor{ 0.55f, 0.9f, 1.f, 1.f }, true);
+                if (owner->editorOverlays & Engine::Core::Object::BoneOverlay)
+                    DrawBoneShape(ui, rootScreen, tipScreen,
+                        joint == selected || parentJoint == selected);
+                if (owner->editorOverlays & Engine::Core::Object::SkeletonOverlay)
+                {
+                    ui.DrawViewportCircle(rootScreen, 4.f, kOutline, true);
+                    ui.DrawViewportCircle(rootScreen, 2.5f,
+                        parentJoint == selected ? kHoverColor :
+                            EditorUiColor{ 0.55f, 0.9f, 1.f, 1.f }, true);
+                }
 
                 float parameter = 0.f;
                 hitDistance = DistanceToSegment(input.mousePosInViewport,
                     rootScreen, tipScreen, parameter);
-                if (hitDistance <= 7.f && hitDistance < boneHitDistance)
+                if ((owner->editorOverlays & Engine::Core::Object::BoneOverlay) &&
+                    hitDistance <= 7.f && hitDistance < boneHitDistance)
                 {
                     boneHit = m_poseEditing ? parentJoint : joint;
                     boneHitDistance = hitDistance;
@@ -514,7 +724,9 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         if (hasLight)
         {
             DrawLightIcon(ui, center, object == selected);
-            if (object == selected && light->GetLightType() ==
+            if (object == selected &&
+                !(object->editorOverlays & Engine::Core::Object::LightVolumeOverlay) &&
+                light->GetLightType() ==
                 Engine::Components::Light::Type::Spot)
                 DrawSpotGizmo(ui, viewProjection, input.available, *object,
                     *light);

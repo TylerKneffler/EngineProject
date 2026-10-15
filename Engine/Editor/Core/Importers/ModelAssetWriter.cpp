@@ -499,6 +499,8 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
             const auto target = materialObjects.find(imported.materialIndex);
             if (target == materialObjects.end()) continue;
             auto* cloth = target->second->AddComponent<Engine::Components::Cloth>();
+            cloth->topology = imported.shape == Engine::Model::SoftBodyTopology::Rope
+                ? "Rope" : "TriangleMesh";
             cloth->mass = std::max(imported.mass, .001f);
             cloth->collisionMargin = std::max(imported.collisionMargin, .0001f);
             cloth->linearStiffness = std::clamp(imported.linearStiffness, 0.f, 1.f);

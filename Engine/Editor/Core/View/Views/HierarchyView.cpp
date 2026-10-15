@@ -9,6 +9,9 @@
 #include "Core/Compoonents/Obj/Sprite.h"
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
 #include "Core/Compoonents/Lighting/LightProbe.h"
+#include "Core/Compoonents/Animation/Skeleton.h"
+#include "Core/Compoonents/Camera/Camera.h"
+#include "Core/Compoonents/Lighting/Light.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "../Focus/WindowFocusHandler.h"
@@ -503,7 +506,20 @@ void HierarchyView::DrawObjectNode(
         std::find(m_selectedObjects.begin(), m_selectedObjects.end(), obj) != m_selectedObjects.end(),
         !hasChildren, readOnlySkeletonRow,
         obj->IsEnabledInHierarchy(),
-        depth, lastSibling, ancestorGuideMask, m_search[0] != '\0');
+        depth, lastSibling, ancestorGuideMask, m_search[0] != '\0',
+        &obj->editorOverlays,
+        static_cast<uint8_t>(
+            (obj->GetComponent<Engine::Components::Skeleton>()
+                ? Engine::Core::Object::BoneOverlay |
+                  Engine::Core::Object::SkeletonOverlay : 0) |
+            (obj->GetComponent<Engine::Components::Mesh>() ||
+             obj->GetComponent<Engine::Components::Sprite>() ||
+             obj->GetComponent<Engine::Components::LightProbeGroup>()
+                ? Engine::Core::Object::BoundsOverlay : 0) |
+            (obj->GetComponent<Engine::Components::Light>()
+                ? Engine::Core::Object::LightVolumeOverlay : 0) |
+            (obj->GetComponent<Engine::Components::Camera>()
+                ? Engine::Core::Object::CameraFrustumOverlay : 0)));
     const bool editableHierarchy = prefabRoot == nullptr;
     const bool deletable = editableHierarchy || prefabRoot == obj;
     EditorUiContextMenuResult menu;
