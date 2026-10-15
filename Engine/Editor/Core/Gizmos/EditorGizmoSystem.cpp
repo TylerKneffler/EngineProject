@@ -1,4 +1,5 @@
 #include "EditorGizmoSystem.h"
+#include "Editor/Core/View/EditorViewportSettings.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Object.h"
 #include "Core/Compoonents/Camera/Camera.h"
@@ -7,6 +8,9 @@
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Obj/Sprite.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
+#include "Core/Compoonents/Physics/Collider.h"
+#include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
+#include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/BoneGroup.h"
 #include <algorithm>
@@ -157,6 +161,138 @@ void DrawWorldBox(IEditorUi& ui, const glm::mat4& viewProjection,
     for (const auto& edge:edges)
         if (visible[edge[0]] && visible[edge[1]])
             ui.DrawViewportLine(projected[edge[0]],projected[edge[1]],color,1.5f);
+}
+
+void DrawWorldLine(IEditorUi& ui, const glm::mat4& viewProjection,
+    EditorUiVec2 viewport, glm::vec3 a, glm::vec3 b, EditorUiColor color)
+{
+    EditorUiVec2 start{}, end{};
+    if (ProjectPoint(viewProjection, a, viewport, start) &&
+        ProjectPoint(viewProjection, b, viewport, end))
+        ui.DrawViewportLine(start, end, color, 1.25f);
+}
+
+void DrawColliderRing(IEditorUi& ui, const glm::mat4& viewProjection,
+    EditorUiVec2 viewport, const glm::mat4& world, float radius,
+    float height, int plane, EditorUiColor color)
+{
+    glm::vec3 previous{};
+    for (int step = 0; step <= 32; ++step)
+    {
+        const float angle = 6.28318530718f * step / 32.f;
+        glm::vec3 point(0.f);
+        point[(plane + 1) % 3] = std::cos(angle) * radius;
+        point[(plane + 2) % 3] = std::sin(angle) * radius;
+        point[plane] = height;
+        const glm::vec3 current = glm::vec3(world * glm::vec4(point, 1.f));
+        if (step) DrawWorldLine(ui, viewProjection, viewport, previous, current, color);
+        previous = current;
+    }
+}
+
+void DrawColliderOverlay(IEditorUi& ui, const glm::mat4& viewProjection,
+    EditorUiVec2 viewport, const Engine::Core::Object& object,
+    const Engine::Components::Collider& collider)
+{
+    if (!collider.collisionEnabled) return;
+    const glm::mat4 world = object.transform.GetWorldMatrix() *
+        glm::translate(glm::mat4(1.f), collider.center);
+    const EditorUiColor color{.3f, 1.f, .62f, .85f};
+    if (const auto* primitive = dynamic_cast<const Engine::Components::PrimitiveObjectCollider*>(&collider))
+    {
+        const float radius = std::max(primitive->radius, .001f);
+        if (primitive->shape == "Sphere" || primitive->shape == "Circle")
+        {
+            for (int plane = 0; plane < 3; ++plane)
+                DrawColliderRing(ui, viewProjection, viewport, world,
+                    radius, 0.f, plane, color);
+        }
+        else if (primitive->shape == "Capsule" || primitive->shape == "Cylinder")
+        {
+            const float half = std::max(primitive->height, 0.f) * .5f;
+            DrawColliderRing(ui, viewProjection, viewport, world, radius, -half, 1, color);
+            DrawColliderRing(ui, viewProjection, viewport, world, radius, half, 1, color);
+            for (int side = 0; side < 4; ++side)
+            {
+                const float angle = 1.57079632679f * side;
+                const glm::vec3 radial(std::cos(angle) * radius, 0.f,
+                    std::sin(angle) * radius);
+                DrawWorldLine(ui, viewProjection, viewport,
+                    glm::vec3(world * glm::vec4(radial + glm::vec3(0.f, -half, 0.f), 1.f)),
+                    glm::vec3(world * glm::vec4(radial + glm::vec3(0.f, half, 0.f), 1.f)), color);
+            }
+        }
+        else
+        {
+            const glm::vec3 half = glm::max(glm::abs(primitive->size) * .5f,
+                glm::vec3(.001f));
+            DrawWorldBox(ui, viewProjection, viewport, world, -half, half, color);
+        }
+    }
+    else if (dynamic_cast<const Engine::Components::MeshObjectCollider*>(&collider))
+    {
+        const auto* mesh = object.GetComponent<Engine::Components::Mesh>();
+        if (!mesh) return;
+        const auto& vertices = mesh->GetVertices();
+        const auto& indices = mesh->GetIndices();
+        if (vertices.empty())
+        {
+            if (mesh->HasBounds()) DrawWorldBox(ui, viewProjection, viewport,
+                world, mesh->GetBoundsMin(), mesh->GetBoundsMax(), color);
+            return;
+        }
+        const size_t triangleCount = indices.empty() ? vertices.size() / 3 : indices.size() / 3;
+        const size_t stride = std::max<size_t>(1, (triangleCount + 999) / 1000);
+        for (size_t triangle = 0; triangle < triangleCount; triangle += stride)
+        {
+            glm::vec3 points[3];
+            bool valid = true;
+            for (int corner = 0; corner < 3; ++corner)
+            {
+                const size_t index = indices.empty() ? triangle * 3 + corner :
+                    indices[triangle * 3 + corner];
+                if (index >= vertices.size()) { valid = false; break; }
+                const auto& vertex = vertices[index];
+                points[corner] = glm::vec3(world * glm::vec4(
+                    vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.f));
+            }
+            if (!valid) continue;
+            for (int edge = 0; edge < 3; ++edge)
+                DrawWorldLine(ui, viewProjection, viewport,
+                    points[edge], points[(edge + 1) % 3], color);
+        }
+    }
+}
+
+void DrawMeshNormals(IEditorUi& ui, const glm::mat4& viewProjection,
+    EditorUiVec2 viewport, const Engine::Core::Object& object,
+    const Engine::Components::Mesh& mesh)
+{
+    const auto& vertices = mesh.GetVertices();
+    const auto& terrain = mesh.GetTerrainVertices();
+    const size_t count = terrain.empty() ? vertices.size() : terrain.size();
+    if (!count) return;
+    const glm::mat4 world = object.transform.GetWorldMatrix();
+    if (std::abs(glm::determinant(glm::mat3(world))) < 1e-8f) return;
+    const glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(world)));
+    const float length = mesh.HasBounds() ? std::clamp(
+        glm::length(mesh.GetBoundsMax() - mesh.GetBoundsMin()) * .035f,
+        .025f, .5f) : .1f;
+    const size_t stride = std::max<size_t>(1, (count + 511) / 512);
+    const EditorUiColor color{.22f, .82f, 1.f, .9f};
+    for (size_t index = 0; index < count; index += stride)
+    {
+        const auto& vertex = terrain.empty()
+            ? static_cast<const Engine::Model::Vertex&>(vertices[index])
+            : static_cast<const Engine::Model::Vertex&>(terrain[index]);
+        const glm::vec3 normal = normalMatrix * glm::vec3(
+            vertex.normal[0], vertex.normal[1], vertex.normal[2]);
+        if (glm::dot(normal, normal) < 1e-8f) continue;
+        const glm::vec3 start = glm::vec3(world * glm::vec4(
+            vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.f));
+        DrawWorldLine(ui, viewProjection, viewport, start,
+            start + glm::normalize(normal) * length, color);
+    }
 }
 
 void DrawLightVolume(IEditorUi& ui, const glm::mat4& viewProjection,
@@ -531,7 +667,17 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         Engine::Core::Object* object=objectPointer.get();
         if (!object || !object->IsEnabledInHierarchy()) continue;
         const uint8_t overlays=object->editorOverlays;
-        if (overlays & Engine::Core::Object::BoundsOverlay)
+        if (EditorViewportSettings::AreCollidersVisible())
+            for (const auto* component : object->Components)
+                if (const auto* collider = dynamic_cast<const Engine::Components::Collider*>(component))
+                    DrawColliderOverlay(ui, viewProjection, input.available,
+                        *object, *collider);
+        if (EditorViewportSettings::AreMeshNormalsVisible())
+            if (const auto* mesh = object->GetComponent<Engine::Components::Mesh>();
+                mesh && mesh->IsEditorVisible())
+                DrawMeshNormals(ui, viewProjection, input.available, *object, *mesh);
+        if ((overlays & Engine::Core::Object::BoundsOverlay) ||
+            EditorViewportSettings::AreBoundsVisible())
         {
             const glm::mat4 world=object->transform.GetWorldMatrix();
             const EditorUiColor color{.58f,.78f,1.f,.85f};
@@ -551,10 +697,12 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
                     -glm::abs(probes->size)*.5f,
                     glm::abs(probes->size)*.5f,color);
         }
-        if (overlays & Engine::Core::Object::LightVolumeOverlay)
+        if ((overlays & Engine::Core::Object::LightVolumeOverlay) ||
+            EditorViewportSettings::AreLightVolumesVisible())
             if (const auto* light=object->GetComponent<Engine::Components::Light>())
                 DrawLightVolume(ui,viewProjection,input.available,*object,*light);
-        if (overlays & Engine::Core::Object::CameraFrustumOverlay)
+        if ((overlays & Engine::Core::Object::CameraFrustumOverlay) ||
+            EditorViewportSettings::AreCameraFrustumsVisible())
             if (const auto* sceneCamera=object->GetComponent<Engine::Components::Camera>())
                 DrawCameraFrustum(ui,viewProjection,input.available,*sceneCamera);
     }

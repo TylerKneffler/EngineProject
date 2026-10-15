@@ -1168,13 +1168,35 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
             scene->settings.showGrid, "Show or hide the scene grid"))
             scene->settings.showGrid = !scene->settings.showGrid;
         Engine::Core::Object* selected = scene->GetSelectedObject();
-        const bool hasOverlays = selected && selected->editorOverlays != 0;
+        const bool hasOverlays = (selected && selected->editorOverlays != 0) ||
+            EditorViewportSettings::AreCollidersVisible() ||
+            EditorViewportSettings::AreMeshNormalsVisible() ||
+            EditorViewportSettings::AreBoundsVisible() ||
+            EditorViewportSettings::AreLightVolumesVisible() ||
+            EditorViewportSettings::AreCameraFrustumsVisible();
         if (row.Next(28.f) && ViewIconButton("##ViewOverlays",
             ViewIcon::Overlays, hasOverlays,
-            "Visual controls for the selected object (also in Hierarchy)"))
+            "Scene View visuals and selected object controls"))
             ImGui::OpenPopup("##ViewOverlayOptions");
         if (ImGui::BeginPopup("##ViewOverlayOptions"))
         {
+            ImGui::TextDisabled("Scene View visuals");
+            const auto visualOption = [](const char* label, bool visible,
+                void (*setVisible)(bool))
+            {
+                if (ImGui::MenuItem(label, nullptr, visible)) setVisible(!visible);
+            };
+            visualOption("Colliders", EditorViewportSettings::AreCollidersVisible(),
+                EditorViewportSettings::SetCollidersVisible);
+            visualOption("Mesh normals", EditorViewportSettings::AreMeshNormalsVisible(),
+                EditorViewportSettings::SetMeshNormalsVisible);
+            visualOption("All object bounds", EditorViewportSettings::AreBoundsVisible(),
+                EditorViewportSettings::SetBoundsVisible);
+            visualOption("All light volumes", EditorViewportSettings::AreLightVolumesVisible(),
+                EditorViewportSettings::SetLightVolumesVisible);
+            visualOption("All camera frustums", EditorViewportSettings::AreCameraFrustumsVisible(),
+                EditorViewportSettings::SetCameraFrustumsVisible);
+            ImGui::Separator();
             if (!selected)
                 ImGui::TextDisabled("Select an object to edit its visual controls.");
             else
