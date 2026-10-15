@@ -29,7 +29,7 @@ VulkanTextureSystem::VulkanTextureSystem(
       m_queue(queue),
       m_queueFamily(queueFamily)
 {
-    VkDescriptorSetLayoutBinding bindings[26]{};
+    VkDescriptorSetLayoutBinding bindings[28]{};
     for (uint32_t binding = 0; binding < 6; ++binding)
     {
         bindings[binding].binding = binding;
@@ -87,6 +87,13 @@ VulkanTextureSystem::VulkanTextureSystem(
         bindings[18 + index].descriptorCount = 1;
         bindings[18 + index].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     }
+    for (uint32_t index = 0; index < 2; ++index)
+    {
+        bindings[26 + index].binding = 26 + index;
+        bindings[26 + index].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        bindings[26 + index].descriptorCount = 1;
+        bindings[26 + index].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
     VkDescriptorSetLayoutCreateInfo layoutInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
     layoutInfo.bindingCount = ARRAYSIZE(bindings);
@@ -95,7 +102,7 @@ VulkanTextureSystem::VulkanTextureSystem(
         m_device, &layoutInfo, nullptr, &m_layout), "vkCreateDescriptorSetLayout");
 
     VkDescriptorPoolSize sizes[3]{
-        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 18 * 512 },
+        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 20 * 512 },
         { VK_DESCRIPTOR_TYPE_SAMPLER, 512 },
         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 7 * 512 }
     };
@@ -412,8 +419,8 @@ void VulkanTextureSystem::Bind(
         VkCheck(vkAllocateDescriptorSets(m_device, &allocate, &set),
             "vkAllocateDescriptorSets(material)");
 
-        VkDescriptorImageInfo images[18]{};
-        VkWriteDescriptorSet writes[26]{};
+        VkDescriptorImageInfo images[20]{};
+        VkWriteDescriptorSet writes[28]{};
         for (uint32_t index = 0; index < 6; ++index)
         {
             images[index].imageView =
@@ -473,6 +480,19 @@ void VulkanTextureSystem::Bind(
             writes[writeIndex].descriptorType =
                 VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
             writes[writeIndex].pImageInfo = &images[10 + index];
+        }
+        for (uint32_t index = 0; index < 2; ++index)
+        {
+            images[18 + index].imageView = textures[10 + index]
+                ? textures[10 + index]->GetView() : m_white.view;
+            images[18 + index].imageLayout =
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            writes[26 + index] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            writes[26 + index].dstSet = set;
+            writes[26 + index].dstBinding = 26 + index;
+            writes[26 + index].descriptorCount = 1;
+            writes[26 + index].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+            writes[26 + index].pImageInfo = &images[18 + index];
         }
         VkDescriptorImageInfo samplerInfo{};
         samplerInfo.sampler = m_sampler;

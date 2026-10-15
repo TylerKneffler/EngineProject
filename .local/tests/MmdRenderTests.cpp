@@ -2,8 +2,9 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Animation/AnimationManager.h"
-#include "Core/Compoonents/Animation/PmxRigController.h"
+#include "Core/Compoonents/Physics/RigPhysicsBinding.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
+#include "Core/Physics/Adapters/BulletPhysicsAdapter.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Materials/Texture.h"
@@ -93,7 +94,7 @@ int main()
         {
             if (auto* body = object->GetComponent<Engine::Components::RigidBody>())
                 dynamicBodies += body->bodyType == "Dynamic";
-            if (auto* rig = object->GetComponent<Engine::Components::PmxRigController>())
+            if (auto* rig = object->GetComponent<Engine::Components::RigPhysicsBinding>())
                 physicsJoints += rig->physicsJoints.size();
         }
         if (dynamicBodies != 133 || physicsJoints != 133)
@@ -133,6 +134,87 @@ int main()
             renderer->EndFrame();
             renderer->WaitIdle();
         };
+        const bool sphereOnlyAudit = std::getenv("MMD_SPHERE_VISUAL_AUDIT") != nullptr;
+        if (sphereOnlyAudit || std::getenv("MMD_MATERIAL_VISUAL_AUDIT"))
+        {
+            render();
+            std::vector<uint8_t> baseline;
+            if (!dx->ReadExportFrameRGBA(baseline, true))
+                throw std::runtime_error("Baseline material capture failed");
+            std::vector<Engine::Components::Material*> affected;
+            for (const auto& object : scene.GetObjects())
+                if (auto* material = object->GetComponent<Engine::Components::Material>())
+                    if (material->baseColorTexture)
+                        affected.push_back(material);
+            if (affected.empty()) throw std::runtime_error("No material to audit");
+            const auto compare = [&](const char* effect, size_t minimum)
+            {
+                render();
+                std::vector<uint8_t> shaded;
+                if (!dx->ReadExportFrameRGBA(shaded, true) ||
+                    shaded.size() != baseline.size())
+                    throw std::runtime_error("PMX material capture failed");
+                size_t changedPixels = 0;
+                for (size_t pixel = 0; pixel < shaded.size(); pixel += 4)
+                    if (std::abs(int(shaded[pixel]) - int(baseline[pixel])) +
+                        std::abs(int(shaded[pixel + 1]) - int(baseline[pixel + 1])) +
+                        std::abs(int(shaded[pixel + 2]) - int(baseline[pixel + 2])) > 24)
+                        ++changedPixels;
+                if (changedPixels < minimum)
+                    throw std::runtime_error(std::string(effect) +
+                        " did not change the rendered image");
+                std::cout << effect << " pixels: " << changedPixels << '\n';
+                return shaded;
+            };
+            if (!sphereOnlyAudit)
+            {
+                for (auto* material : affected)
+                {
+                    material->edgeEnabled = true;
+                    material->edgeColor = { 0.f, 0.f, 0.f, 1.f };
+                    material->edgeWidth = 6.f;
+                }
+                compare("PMX edge", 100);
+            }
+            for (auto* material : affected)
+            {
+                material->edgeEnabled = false;
+                material->SetSphereTexture(
+                    material->baseColorTexture->GetFilePath());
+                material->sphereMode = 1;
+                material->sphereTint = { .7f, .8f, 1.f, 1.f };
+            }
+            const auto multiplied = compare("PMX sphere multiply", 1000);
+            for (auto* material : affected) material->sphereMode = 2;
+            const auto added = compare("PMX sphere additive", 1000);
+            for (auto* material : affected) material->sphereMode = 3;
+            const auto additionalUv = compare("PMX sphere additional UV", 1000);
+            const auto modeDifference = [](const auto& first, const auto& second)
+            {
+                size_t changed = 0;
+                for (size_t pixel = 0; pixel < first.size(); pixel += 4)
+                    if (std::abs(int(first[pixel]) - int(second[pixel])) +
+                        std::abs(int(first[pixel + 1]) - int(second[pixel + 1])) +
+                        std::abs(int(first[pixel + 2]) - int(second[pixel + 2])) > 24)
+                        ++changed;
+                return changed;
+            };
+            if (modeDifference(multiplied, added) < 1000 ||
+                modeDifference(multiplied, additionalUv) < 1000)
+                throw std::runtime_error("PMX sphere modes rendered identically");
+            if (!sphereOnlyAudit)
+            {
+                for (auto* material : affected)
+                {
+                    material->sphereMode = 0;
+                    material->SetToonTexture(
+                        material->baseColorTexture->GetFilePath());
+                    material->toonTint = { 1.f, .6f, .6f, 1.f };
+                }
+                compare("PMX toon", 1000);
+            }
+            return 0;
+        }
         if (std::getenv("MMD_RENDER_VISUAL_AUDIT"))
         {
             bool flipped = false;
@@ -167,9 +249,15 @@ int main()
                 }
             return 0;
         }
+        auto* bullet = dynamic_cast<Engine::Physics::BulletPhysicsAdapter*>(
+            &scene.GetPhysics().GetAdapter());
+        if (!bullet) throw std::runtime_error("MMD scene lacks Bullet physics");
+        uint64_t initialJointBuilds = 0;
         for (unsigned frame = 0; frame < 660; ++frame)
         {
             scene.Update(1.f / 60.f);
+            if (frame == 0)
+                initialJointBuilds = bullet->GetImportedJointRebuildCount();
             if (frame != 0 && frame != 30 && frame != 89 && frame != 320 && frame != 644) continue;
             render();
             std::vector<uint8_t> rgba;
@@ -178,6 +266,10 @@ int main()
             SaveBmp(rgba, width, height, path.c_str());
             Checkpoint("Captured animated frame");
         }
+        if (initialJointBuilds == 0)
+            throw std::runtime_error("MMD joints were not built");
+        if (bullet->GetImportedJointRebuildCount() != initialJointBuilds)
+            throw std::runtime_error("MMD joints rebuilt during steady playback");
         for (unsigned cycle = 0; cycle < 3; ++cycle)
         {
             if (!scene.LoadFromString(snapshot)) throw std::runtime_error("Play snapshot restore failed");

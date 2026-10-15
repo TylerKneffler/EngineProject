@@ -4,9 +4,10 @@
 #include "Core/AssetRecord.h"
 #include "Core/Compoonents/Animation/ModelAnimation.h"
 #include "Core/Compoonents/Animation/Model.h"
-#include "Core/Compoonents/Animation/PmxRigController.h"
+#include "Core/Compoonents/Animation/RigConstraints.h"
+#include "Core/Compoonents/Animation/RigMorphControls.h"
 #include "Core/Compoonents/Obj/Mesh.h"
-#include "Core/Compoonents/Materials/PmxMaterialMorph.h"
+#include "Core/Compoonents/Materials/MaterialPropertyMorph.h"
 #include "Core/Model/AnimationClipAsset.h"
 #include "Core/Model/AnimationPackAsset.h"
 #include "Core/Model/RigAsset.h"
@@ -184,7 +185,7 @@ bool BindPmxDirect(const std::string& prefabPath, const std::string& vmdPath,
     for (const auto& key : motion.properties)
         body.visibility.push_back({ key.timeSeconds, key.visible });
     std::unordered_set<std::string> ikNames;
-    if (const auto* rig = root->GetComponent<Engine::Components::PmxRigController>())
+    if (const auto* rig = root->GetComponent<Engine::Components::RigConstraints>())
         for (const auto& chain : rig->ikChains)
             if (const auto* controller = model->ResolveNode(chain.controllerNodeIndex))
                 ikNames.insert(controller->name);
@@ -203,7 +204,7 @@ bool BindPmxDirect(const std::string& prefabPath, const std::string& vmdPath,
             [](const auto* a, const auto* b) { return a->frame < b->frame; });
     std::unordered_set<std::string> matchedNames;
     std::unordered_set<std::string> componentMorphNames;
-    if (const auto* rig = root->GetComponent<Engine::Components::PmxRigController>())
+    if (const auto* rig = root->GetComponent<Engine::Components::RigMorphControls>())
     {
         for (const auto& morph : rig->boneMorphs)
             componentMorphNames.insert(morph.name);
@@ -214,7 +215,7 @@ bool BindPmxDirect(const std::string& prefabPath, const std::string& vmdPath,
         Engine::Core::Object* object) -> void
     {
         if (const auto* component =
-            object->GetComponent<Engine::Components::PmxMaterialMorph>())
+            object->GetComponent<Engine::Components::MaterialPropertyMorph>())
             for (const auto& morph : component->morphs)
                 componentMorphNames.insert(morph.name);
         for (auto* child : object->Children) self(self, child);

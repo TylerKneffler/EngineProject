@@ -315,7 +315,9 @@ bool Texture::Load()
         free(decoded);
         if (error) FreeEXRErrorMessage(error);
     }
-    else if (extension == ".tga")
+    // MMD sphere maps commonly store BMP image data under .sph or .spa.
+    // stb_image identifies the image from its header, independent of the suffix.
+    else if (extension == ".tga" || extension == ".sph" || extension == ".spa")
     {
         int width = 0, height = 0, channels = 0;
         std::unique_ptr<stbi_uc, decltype(&stbi_image_free)> decoded(
@@ -362,7 +364,8 @@ bool Texture::Load()
     }
 
     if (!success && extension != ".hdr" && extension != ".exr" &&
-        extension != ".tga" && extension != ".ktx2")
+        extension != ".tga" && extension != ".sph" &&
+        extension != ".spa" && extension != ".ktx2")
     {
         const HRESULT comResult = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
         const bool uninitialize = SUCCEEDED(comResult);

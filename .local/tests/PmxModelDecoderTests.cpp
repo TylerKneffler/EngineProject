@@ -2,10 +2,14 @@
 #include "Editor/Core/Importers/ModelAssetWriter.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Animation/Model.h"
-#include "Core/Compoonents/Animation/PmxRigController.h"
+#include "Core/Compoonents/Animation/RigController.h"
+#include "Core/Compoonents/Animation/RigConstraints.h"
+#include "Core/Compoonents/Animation/RigMorphControls.h"
+#include "Core/Compoonents/Physics/RigPhysicsBinding.h"
 #include "Core/Model/AnimationClip.h"
 #include "Core/Compoonents/Materials/Material.h"
-#include "Core/Compoonents/Materials/PmxMaterialMorph.h"
+#include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Compoonents/Materials/MaterialPropertyMorph.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
 #include "Core/Compoonents/Physics/Cloth.h"
@@ -25,6 +29,9 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <utility>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <vector>
 
 namespace
@@ -49,12 +56,14 @@ void AppendFloats(std::vector<char>& bytes, std::initializer_list<float> values)
 
 void WriteGroupMorphFixture(const std::filesystem::path& path,
     uint8_t jointType = 0, int8_t jointBodyA = 0,
-    bool impulseMorphs = false, bool extendedFeatures = false)
+    bool impulseMorphs = false, bool extendedFeatures = false,
+    bool fullUv = false, bool skinModes = false,
+    uint8_t sphereMode = 1, const char* sphereTextureName = "toon.png")
 {
     std::vector<char> bytes{ 'P', 'M', 'X', ' ' };
-    Append(bytes, jointType == 0 && !impulseMorphs && !extendedFeatures
+    Append(bytes, jointType == 0 && !impulseMorphs && !extendedFeatures && !fullUv && !skinModes
         ? 2.f : 2.1f);
-    for (uint8_t value : std::array<uint8_t, 9>{ 8, 1, 1, 1, 1, 1, 1, 1, 1 })
+    for (uint8_t value : std::array<uint8_t, 9>{ 8, 1, uint8_t(fullUv ? 4 : 1), 1, 1, 1, 1, 1, 1 })
         Append(bytes, value);
     AppendText(bytes, "group test");
     for (int i = 0; i < 3; ++i) AppendText(bytes, "");
@@ -63,25 +72,46 @@ void WriteGroupMorphFixture(const std::filesystem::path& path,
     {
         AppendFloats(bytes, { float(i == 1), float(i == 2), 0.f,
             0.f, 0.f, 1.f, 0.f, 0.f });
-        AppendFloats(bytes, { .2f, .3f, 0.f, 0.f }); // Additional UV1.
-        Append(bytes, uint8_t(0)); // BDEF1.
-        Append(bytes, int8_t(-1));
+        AppendFloats(bytes, { .2f, .3f, fullUv ? .4f : 0.f, fullUv ? .5f : 0.f });
+        if (fullUv)
+            for (int channel = 2; channel <= 4; ++channel)
+                AppendFloats(bytes, { float(channel), float(channel) + .1f,
+                    float(channel) + .2f, float(channel) + .3f });
+        if (skinModes && i == 0)
+        {
+            Append(bytes, uint8_t(3)); // SDEF.
+            Append(bytes, int8_t(0)); Append(bytes, int8_t(0));
+            Append(bytes, .25f);
+            AppendFloats(bytes, { 1.f, 2.f, 3.f, 4.f, 5.f, 6.f, 7.f, 8.f, 9.f });
+        }
+        else if (skinModes && i == 1)
+        {
+            Append(bytes, uint8_t(4)); // QDEF.
+            for (int bone = 0; bone < 4; ++bone) Append(bytes, int8_t(0));
+            AppendFloats(bytes, { .4f, .3f, .2f, .1f });
+        }
+        else
+        {
+            Append(bytes, uint8_t(0)); // BDEF1.
+            Append(bytes, int8_t(skinModes ? 0 : -1));
+        }
         Append(bytes, 1.f);
     }
     Append(bytes, int32_t(3));
     for (uint8_t i = 0; i < 3; ++i) Append(bytes, i);
-    Append(bytes, int32_t(0)); // Textures.
+    Append(bytes, int32_t(1)); // Textures.
+    AppendText(bytes, sphereTextureName);
     Append(bytes, int32_t(1)); // Materials.
     AppendText(bytes, "material"); AppendText(bytes, "");
     AppendFloats(bytes, { 1.f, 1.f, 1.f, 1.f, 0.f, 0.f, 0.f,
         1.f, 0.f, 0.f, 0.f });
     Append(bytes, uint8_t(0));
-    AppendFloats(bytes, { 0.f, 0.f, 0.f, 0.f, 1.f });
+    AppendFloats(bytes, { .1f, .2f, .3f, .4f, 2.f });
     Append(bytes, int8_t(-1)); // Base texture.
-    Append(bytes, int8_t(-1)); // Sphere texture.
-    Append(bytes, uint8_t(0)); // Sphere mode.
-    Append(bytes, uint8_t(1)); // Built-in toon.
-    Append(bytes, uint8_t(0));
+    Append(bytes, int8_t(0)); // Sphere texture.
+    Append(bytes, sphereMode);
+    Append(bytes, uint8_t(0)); // Custom toon.
+    Append(bytes, int8_t(0));
     AppendText(bytes, "");
     Append(bytes, int32_t(3));
     Append(bytes, int32_t(1)); // Bones.
@@ -93,7 +123,8 @@ void WriteGroupMorphFixture(const std::filesystem::path& path,
     AppendFloats(bytes, { 0.f, 1.f, 0.f });
     AppendFloats(bytes, { 0.f, 0.f, -1.f }); // Reflected to engine +Z.
     Append(bytes, int32_t(42)); // External-parent key.
-    Append(bytes, int32_t(impulseMorphs ? 9 : extendedFeatures ? 8 : 7)); // Morphs.
+    Append(bytes, int32_t((impulseMorphs ? 9 : extendedFeatures ? 8 : 7) +
+        (fullUv ? 3 : 0))); // Morphs.
     AppendText(bytes, "move"); AppendText(bytes, "");
     Append(bytes, uint8_t(4)); Append(bytes, uint8_t(1));
     Append(bytes, int32_t(1)); Append(bytes, uint8_t(0));
@@ -101,17 +132,24 @@ void WriteGroupMorphFixture(const std::filesystem::path& path,
     AppendText(bytes, "uv0"); AppendText(bytes, "");
     Append(bytes, uint8_t(4)); Append(bytes, uint8_t(3));
     Append(bytes, int32_t(1)); Append(bytes, uint8_t(0));
-    AppendFloats(bytes, { 1.f, 0.f, 0.f, 0.f });
+    AppendFloats(bytes, { 1.f, 0.f, fullUv ? .6f : 0.f,
+        fullUv ? .7f : 0.f });
     AppendText(bytes, "uv1"); AppendText(bytes, "");
     Append(bytes, uint8_t(4)); Append(bytes, uint8_t(4));
     Append(bytes, int32_t(1)); Append(bytes, uint8_t(0));
-    AppendFloats(bytes, { 0.f, 1.f, 0.f, 0.f });
+    AppendFloats(bytes, { 0.f, 1.f, fullUv ? .8f : 0.f,
+        fullUv ? .9f : 0.f });
     AppendText(bytes, "group"); AppendText(bytes, "");
     Append(bytes, uint8_t(4)); Append(bytes, uint8_t(0));
-    Append(bytes, int32_t(3));
+    Append(bytes, int32_t(fullUv ? 6 : 3));
     Append(bytes, int8_t(0)); Append(bytes, .5f);
     Append(bytes, int8_t(1)); Append(bytes, .25f);
     Append(bytes, int8_t(2)); Append(bytes, .75f);
+    if (fullUv)
+        for (int8_t child = 7; child <= 9; ++child)
+        {
+            Append(bytes, child); Append(bytes, .5f);
+        }
     AppendText(bytes, "bone move"); AppendText(bytes, "");
     Append(bytes, uint8_t(4)); Append(bytes, uint8_t(2));
     Append(bytes, int32_t(1)); Append(bytes, int8_t(0));
@@ -122,7 +160,10 @@ void WriteGroupMorphFixture(const std::filesystem::path& path,
     Append(bytes, uint8_t(1)); // Additive material morph.
     AppendFloats(bytes, { 0.f, 0.f, 0.f, -.5f,
         -.25f, 0.f, 0.f, 8.f, 0.f, 0.f, 0.f });
-    for (int i = 0; i < 17; ++i) Append(bytes, i == 5 ? .4f : 0.f);
+    AppendFloats(bytes, { .2f, .3f, .4f, .5f, .6f,
+        .4f, 0.f, 0.f, 0.f,
+        .7f, .8f, .9f, 1.f,
+        .1f, .2f, .3f, .4f });
     AppendText(bytes, "mixed group"); AppendText(bytes, "");
     Append(bytes, uint8_t(4)); Append(bytes, uint8_t(0));
     Append(bytes, int32_t(impulseMorphs ? 4 : 3));
@@ -151,6 +192,16 @@ void WriteGroupMorphFixture(const std::filesystem::path& path,
         Append(bytes, int8_t(0)); Append(bytes, .25f);
         Append(bytes, int8_t(5)); Append(bytes, .5f);
     }
+    if (fullUv)
+        for (uint8_t type = 5; type <= 7; ++type)
+        {
+            const std::string name = "uv" + std::to_string(type - 3);
+            AppendText(bytes, name.c_str()); AppendText(bytes, "");
+            Append(bytes, uint8_t(4)); Append(bytes, type);
+            Append(bytes, int32_t(1)); Append(bytes, uint8_t(0));
+            AppendFloats(bytes, { .1f * type, .2f * type,
+                .3f * type, .4f * type });
+        }
     Append(bytes, int32_t(0)); // Display frames.
     Append(bytes, int32_t(2)); // Rigid bodies.
     AppendText(bytes, "falling"); AppendText(bytes, "");
@@ -177,7 +228,7 @@ void WriteGroupMorphFixture(const std::filesystem::path& path,
         0.f, 0.f, 0.f, 0.f, 0.f, 0.f,
         0.f, 0.f, 0.f, 0.f, 0.f, 0.f,
         0.f, 0.f, 0.f, 0.f, 0.f, 0.f });
-    if (jointType != 0 || impulseMorphs || extendedFeatures)
+    if (jointType != 0 || impulseMorphs || extendedFeatures || fullUv || skinModes)
     {
         Append(bytes, int32_t(extendedFeatures ? 1 : 0));
         if (extendedFeatures)
@@ -186,18 +237,18 @@ void WriteGroupMorphFixture(const std::filesystem::path& path,
             Append(bytes, uint8_t(0)); Append(bytes, int8_t(0));
             Append(bytes, uint8_t(3)); Append(bytes, uint16_t(4));
             Append(bytes, uint8_t(0));
-            Append(bytes, int32_t(0)); Append(bytes, int32_t(0));
+            Append(bytes, int32_t(0)); Append(bytes, int32_t(1));
             Append(bytes, 1.f); Append(bytes, .01f);
             Append(bytes, int32_t(0));
             AppendFloats(bytes, { 0.f, .1f, .01f, 0.f, 0.f, 0.f,
                 .5f, 0.f, 0.f, 0.f, 0.f, 0.f });
-            AppendFloats(bytes, { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f });
+            AppendFloats(bytes, { .2f, .3f, .4f, .5f, .6f, .7f });
             Append(bytes, int32_t(0)); Append(bytes, int32_t(8));
-            Append(bytes, int32_t(0)); Append(bytes, int32_t(0));
+            Append(bytes, int32_t(0)); Append(bytes, int32_t(3));
             AppendFloats(bytes, { .8f, .2f, 0.f });
             Append(bytes, int32_t(1)); // Anchor count.
             Append(bytes, int8_t(0)); Append(bytes, uint8_t(0));
-            Append(bytes, uint8_t(0));
+            Append(bytes, uint8_t(1)); // Near anchor.
             Append(bytes, int32_t(1)); // Pin count.
             Append(bytes, uint8_t(1));
         }
@@ -205,15 +256,181 @@ void WriteGroupMorphFixture(const std::filesystem::path& path,
     std::ofstream output(path, std::ios::binary);
     output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
 }
-}
 
-int main()
+void TestFullUv(const std::filesystem::path& outputRoot)
 {
     namespace fs = std::filesystem;
-    const fs::path source = fs::path(PMX_TEST_ASSET_ROOT) /
-        "Mococo/Mococo Abyssgard.pmx";
+    std::string error;
+    const fs::path fullUvFixture = outputRoot / "full-uv.pmx";
+    WriteGroupMorphFixture(fullUvFixture, 0, 0, false, false, true);
+    Engine::Model::ImportedModel fullUvModel;
+    Engine::Editor::PmxImportReport fullUvReport;
+    assert(Engine::Editor::PmxModelDecoder::Decode(
+        fullUvFixture.string(), fullUvModel, error, &fullUvReport));
+    const auto& fullPrimitive = fullUvModel.primitives[0];
+    assert(fullPrimitive.vertices[0].uvChannels[1][2] == .4f);
+    assert(std::abs(fullPrimitive.vertices[0].uvChannels[4][3] - 4.3f) < 1e-5f);
+    assert(fullPrimitive.morphTargets.size() == 8);
+    assert(fullPrimitive.morphTargets[5].uvChannels[2][0].x == .5f);
+    assert(fullPrimitive.morphTargets[3].uvChannels[2][0].x == .25f);
+    const fs::path fullUvMeshFile = outputRoot / "full-uv.mesh";
+    const fs::path fullUvMorphFile = outputRoot / "full-uv.morph";
+    assert(Engine::Components::Mesh::SaveNativeFile(
+        fullUvMeshFile.string(), fullPrimitive.vertices));
+    assert(Engine::Components::Mesh::SaveMorphFile(
+        fullUvMorphFile.string(), fullPrimitive.morphTargets));
+    Engine::Components::Mesh fullUvMesh;
+    fullUvMesh.LoadFromFile(fullUvMeshFile.string());
+    assert(std::abs(fullUvMesh.GetVertices()[0].uvChannels[4][3] - 4.3f) < 1e-5f);
+    const fs::path legacyMeshFile = outputRoot / "legacy-uv.mesh";
+    {
+        std::ofstream legacy(legacyMeshFile, std::ios::binary);
+        const uint32_t header[]{ 0x4853454d, 5,
+            static_cast<uint32_t>(fullPrimitive.vertices.size()), 0 };
+        legacy.write(reinterpret_cast<const char*>(header), sizeof(header));
+        for (const auto& vertex : fullPrimitive.vertices)
+            legacy.write(reinterpret_cast<const char*>(&vertex), 136);
+    }
+    Engine::Components::Mesh legacyMesh;
+    legacyMesh.LoadFromFile(legacyMeshFile.string());
+    assert(legacyMesh.GetVertices()[0].uvChannels[0][0] ==
+        legacyMesh.GetVertices()[0].uv[0]);
+    assert(legacyMesh.GetVertices()[0].uvChannels[1][1] == .3f);
+    const fs::path version6MeshFile = outputRoot / "version6-uv.mesh";
+    {
+        std::ofstream version6(version6MeshFile, std::ios::binary);
+        const uint32_t header[]{ 0x4853454d, 6,
+            static_cast<uint32_t>(fullPrimitive.vertices.size()), 0 };
+        version6.write(reinterpret_cast<const char*>(header), sizeof(header));
+        for (const auto& vertex : fullPrimitive.vertices)
+            version6.write(reinterpret_cast<const char*>(&vertex), 216);
+    }
+    Engine::Components::Mesh version6Mesh;
+    version6Mesh.LoadFromFile(version6MeshFile.string());
+    assert(std::abs(version6Mesh.GetVertices()[0].uvChannels[4][3] - 4.3f) < 1e-5f);
+    assert(version6Mesh.GetVertices()[0].sdefCenterAndMode[3] == 0.f);
+    assert(fullUvMesh.LoadMorphFile(fullUvMorphFile.string(), 0,
+        { 0.f, 1.f, 1.f, 0.f, 0.f, 1.f, 1.f, 1.f }));
+    const auto fullPosed = fullUvMesh.BuildPosedVertices();
+    assert(fullPosed[0].uvChannels[0][2] == .6f);
+    assert(std::abs(fullPosed[0].uvChannels[1][2] - 1.2f) < 1e-5f);
+    assert(fullPosed[0].uvChannels[2][0] == 2.5f);
+    assert(std::abs(fullPosed[0].uvChannels[3][1] - 4.3f) < 1e-5f);
+    assert(std::abs(fullPosed[0].uvChannels[4][3] - 7.1f) < 1e-5f);
+}
+
+void TestSkinModes(const std::filesystem::path& outputRoot)
+{
+    const auto source = outputRoot / "skin-modes.pmx";
+    WriteGroupMorphFixture(source, 0, 0, false, false, false, true);
+    Engine::Model::ImportedModel model;
+    Engine::Editor::PmxImportReport report;
+    std::string error;
+    if (!Engine::Editor::PmxModelDecoder::Decode(
+            source.string(), model, error, &report))
+    {
+        std::cerr << "Skin-mode PMX fixture: " << error << '\n';
+        assert(false);
+    }
+    const auto& vertices = model.primitives[0].vertices;
+    assert(vertices[0].sdefCenterAndMode[3] == 3.f);
+    assert(vertices[0].sdefCenterAndMode[2] == -3.f);
+    assert(vertices[0].sdefRadius0[2] == -6.f);
+    assert(vertices[0].sdefRadius1[2] == -9.f);
+    assert(vertices[1].sdefCenterAndMode[3] == 0.f);
+    assert(vertices[2].sdefCenterAndMode[3] == 4.f);
+    const auto saved = outputRoot / "skin-modes.mesh";
+    assert(Engine::Components::Mesh::SaveNativeFile(saved.string(), vertices));
+    Engine::Components::Mesh mesh;
+    mesh.LoadFromFile(saved.string());
+    assert(mesh.GetVertices()[0].sdefCenterAndMode[0] == 1.f);
+    assert(mesh.GetVertices()[0].sdefRadius1[1] == 8.f);
+    assert(mesh.GetVertices()[2].sdefCenterAndMode[3] == 4.f);
+}
+
+void TestSkinPoseReferences()
+{
+    using Vertex = Engine::Components::Mesh::Vertex;
+    Vertex sdef{}, qdef{};
+    sdef.pos[0] = 2.f; sdef.pos[1] = 1.f;
+    sdef.normal[2] = 1.f;
+    sdef.joints0[0] = 0.f; sdef.joints0[1] = 1.f;
+    sdef.weights0[0] = .25f; sdef.weights0[1] = .75f;
+    sdef.sdefCenterAndMode[0] = 1.f;
+    sdef.sdefCenterAndMode[3] = 3.f;
+    sdef.sdefRadius0[1] = 1.f;
+    sdef.sdefRadius1[1] = -1.f;
+    qdef.pos[0] = 1.f;
+    qdef.normal[0] = 1.f;
+    qdef.joints0[0] = 0.f; qdef.joints0[1] = 1.f;
+    qdef.weights0[0] = .5f; qdef.weights0[1] = .5f;
+    qdef.sdefCenterAndMode[3] = 4.f;
+    Engine::Components::Mesh mesh;
+    assert(mesh.SetAuthoredVertices({ sdef, qdef, qdef }));
+    const auto close = [](const Vertex& actual, glm::vec3 expected)
+    {
+        assert(glm::length(glm::vec3(actual.pos[0], actual.pos[1],
+            actual.pos[2]) - expected) < 1e-4f);
+    };
+    const glm::vec3 p(sdef.pos[0], sdef.pos[1], sdef.pos[2]);
+    const glm::vec3 center(sdef.sdefCenterAndMode[0], 0.f, 0.f);
+    const glm::vec3 r0(0.f, 1.f, 0.f), r1(0.f, -1.f, 0.f);
+    for (const float angle : { 0.f, 30.f, 90.f })
+    {
+        const glm::quat q0 = glm::angleAxis(glm::radians(-angle), glm::vec3(0, 0, 1));
+        const glm::quat q1 = glm::angleAxis(glm::radians(angle), glm::vec3(0, 0, 1));
+        const glm::vec3 translation(2.f, 1.f, 0.f);
+        std::vector<glm::mat4> palette(2);
+        palette[0] = glm::translate(glm::mat4(1.f), translation) * glm::mat4_cast(q0);
+        palette[1] = glm::translate(glm::mat4(1.f), translation) * glm::mat4_cast(q1);
+        const auto posed = mesh.BuildPosedVertices(&palette);
+        const glm::quat blend = glm::slerp(q1, q0, .25f);
+        const glm::vec3 sdefReference =
+            .25f * (q0 * (p - center + r0) + translation) +
+            .75f * (q1 * (p - center + r1) + translation) +
+            blend * (center - .25f * r0 - .75f * r1);
+        close(posed[0], sdefReference);
+        // Equal QDEF weights on opposite rotations cancel the rotation,
+        // while the common translation remains intact at every pose.
+        close(posed[1], glm::vec3(1.f, 0.f, 0.f) + translation);
+    }
+    std::vector<glm::mat4> palette(2);
+    palette[0] = glm::mat4(1.f);
+    palette[1] = glm::mat4_cast(glm::angleAxis(glm::radians(90.f),
+        glm::vec3(0, 0, 1)));
+    const auto quarterTurn = mesh.BuildPosedVertices(&palette);
+    const float diagonal = std::sqrt(.5f);
+    close(quarterTurn[1], glm::vec3(diagonal, diagonal, 0.f));
+    assert(glm::length(glm::vec3(quarterTurn[1].normal[0],
+        quarterTurn[1].normal[1], quarterTurn[1].normal[2]) -
+        glm::vec3(diagonal, diagonal, 0.f)) < 1e-4f);
+}
+}
+
+int main(int argc, char** argv)
+{
+    namespace fs = std::filesystem;
+    if (argc > 1 && std::string(argv[1]) == "--uv-only")
+    {
+        const fs::path root = fs::path(PMX_TEST_OUTPUT_ROOT) / "pmx-uv-fixture";
+        fs::create_directories(root);
+        TestFullUv(root);
+        TestSkinModes(root);
+        TestSkinPoseReferences();
+        fs::remove_all(root);
+        return 0;
+    }
+    const fs::path outputRoot = fs::path(PMX_TEST_OUTPUT_ROOT) /
+        ("engine_pmx_import_" + std::to_string(GetCurrentProcessId()));
+    fs::create_directories(outputRoot);
     Engine::Model::ImportedModel model;
     std::string error;
+    // The bundled model exercises the full asset writer but takes minutes.
+    // The default CTest path uses small generated PMX fixtures instead.
+    if (argc > 1 && std::string(argv[1]) == "--bundled")
+    {
+    const fs::path source = fs::path(PMX_TEST_ASSET_ROOT) /
+        "Mococo/Mococo Abyssgard.pmx";
     Engine::Editor::PmxImportReport report;
     std::cerr << "Decoding PMX\n";
     if (!Engine::Editor::PmxModelDecoder::Decode(
@@ -250,7 +467,8 @@ int main()
             static_cast<int>(dynamicModel.physicsJoints.size()));
         assert(std::any_of(dynamicModel.rigidBodies.begin(),
             dynamicModel.rigidBodies.end(), [](const auto& body)
-            { return body.mode > 0 && body.mass > 0.f &&
+            { return body.mode != Engine::Model::RigidBodyMotion::FollowTransform &&
+                body.mass > 0.f &&
                 body.relatedBoneNode >= 0; }));
     }
     {
@@ -271,7 +489,9 @@ int main()
         assert(minimalReport.importedKinematicRigidBodies == 0);
     }
     assert(std::all_of(model.materials.begin(), model.materials.end(),
-        [](const auto& material) { return material.useMmdSpecular; }));
+        [](const auto& material) { return material.specularModel == "BlinnPhong"; }));
+    assert(std::any_of(model.materials.begin(), model.materials.end(),
+        [](const auto& material) { return material.builtinToon >= 0; }));
     size_t morphMeshes = 0;
     bool hasNonzeroMorphOffset = false;
     for (const auto& primitive : model.primitives)
@@ -295,9 +515,6 @@ int main()
     }
     assert(morphMeshes > 0 && hasNonzeroMorphOffset);
 
-    const fs::path outputRoot = fs::path(PMX_TEST_OUTPUT_ROOT) /
-        ("engine_pmx_import_" + std::to_string(GetCurrentProcessId()));
-    fs::create_directories(outputRoot);
     std::cerr << "Writing PMX assets\n";
     const auto imported = Engine::Editor::ModelAssetWriter::Write(
         model, source.string(), outputRoot.string());
@@ -310,8 +527,11 @@ int main()
             std::istreambuf_iterator<char>());
         assert(serialized.find("PrimitiveObjectCollider") != std::string::npos);
         assert(serialized.find("Kinematic") != std::string::npos);
-        assert(serialized.find("PmxRigController") != std::string::npos);
-        assert(serialized.find("PmxMaterialMorph") != std::string::npos);
+        assert(serialized.find("RigConstraints") != std::string::npos);
+        if (!model.physicsJoints.empty())
+            assert(serialized.find("RigPhysicsBinding") != std::string::npos);
+        assert(serialized.find("RigController") == std::string::npos);
+        assert(serialized.find("MaterialPropertyMorph") != std::string::npos);
     }
     assert(fs::exists(fs::path(imported.outputDirectory) /
         (fs::path(imported.outputDirectory).filename().string() + ".rig")));
@@ -325,12 +545,13 @@ int main()
             {
                 const auto contents = Engine::Serialization::JsonParseFile(
                     entry.path().string());
-                if (contents["useMmdSpecular"].AsBool())
+                if (contents["specularModel"].AsString() == "BlinnPhong")
                     ++mmdMaterials;
             }
         }
     assert(morphFiles == morphMeshes);
     assert(mmdMaterials == model.materials.size());
+    }
     assert(outputRoot.parent_path() == fs::path(PMX_TEST_OUTPUT_ROOT));
     const fs::path groupFixture = outputRoot / "group.pmx";
     WriteGroupMorphFixture(groupFixture);
@@ -347,6 +568,15 @@ int main()
     assert(groupModel.externalParents.size() == 1);
     assert(groupModel.externalParents[0].key == 42);
     assert(groupModel.materialMorphs[0].offsets[0].diffuse.a == -.5f);
+    assert(groupModel.materials[0].edgeColor.a == .4f);
+    assert(groupModel.materials[0].edgeWidth == 2.f);
+    assert(groupModel.materials[0].sphereMode == 1);
+    assert(groupModel.materials[0].sphereTexture == "toon.png");
+    assert(groupModel.materials[0].toonTexture == "toon.png");
+    assert(groupModel.materialMorphs[0].offsets[0].edgeColor.x == .2f);
+    assert(groupModel.materialMorphs[0].offsets[0].edgeWidth == .6f);
+    assert(groupModel.materialMorphs[0].offsets[0].sphereTint.x == .7f);
+    assert(groupModel.materialMorphs[0].offsets[0].toonTint.w == .4f);
     assert(groupModel.primitives.size() == 1);
     assert(groupModel.primitives[0].vertices[0].uv1[0] == .2f);
     assert(groupModel.primitives[0].morphTargets.size() == 5);
@@ -354,11 +584,100 @@ int main()
     assert(groupModel.boneMorphs[1].offsets[0].translation.y == .5f);
     assert(groupModel.materialMorphs[1].name == "mixed group");
     assert(groupModel.materialMorphs[1].offsets[0].diffuse.a == -.25f);
+    assert(groupModel.materialMorphs[1].offsets[0].edgeWidth == .3f);
     assert(groupModel.primitives[0].morphTargets[4].positions[0].x == .25f);
+    // MMD sphere maps are BMP images with .sph/.spa suffixes. Exercise the
+    // texture loader and the full PMX -> native material import for each mode.
+    const auto writeSphereBmp = [](const fs::path& path)
+    {
+        BITMAPFILEHEADER file{};
+        BITMAPINFOHEADER info{};
+        file.bfType = 0x4d42;
+        file.bfOffBits = sizeof(file) + sizeof(info);
+        file.bfSize = file.bfOffBits + 4;
+        info.biSize = sizeof(info);
+        info.biWidth = 1;
+        info.biHeight = 1;
+        info.biPlanes = 1;
+        info.biBitCount = 24;
+        info.biSizeImage = 4;
+        const uint8_t pixel[] = { 32, 64, 128, 0 };
+        std::ofstream output(path, std::ios::binary);
+        output.write(reinterpret_cast<const char*>(&file), sizeof(file));
+        output.write(reinterpret_cast<const char*>(&info), sizeof(info));
+        output.write(reinterpret_cast<const char*>(pixel), sizeof(pixel));
+        assert(output.good());
+    };
+    const auto sphereSources = outputRoot / "sphere-sources";
+    const auto sphereImports = outputRoot / "sphere-imports";
+    fs::create_directories(sphereSources);
+    fs::create_directories(sphereImports);
+    writeSphereBmp(sphereSources / "sphere.sph");
+    writeSphereBmp(sphereSources / "sphere.spa");
+    for (const auto& [mode, suffix] :
+        std::array<std::pair<uint8_t, const char*>, 3>{
+            std::pair<uint8_t, const char*>{ uint8_t{ 1 }, "sphere.sph" },
+            { uint8_t{ 2 }, "sphere.spa" },
+            { uint8_t{ 3 }, "sphere.sph" } })
+    {
+        const auto fixture = sphereSources /
+            ("sphere_mode_" + std::to_string(mode) + ".pmx");
+        WriteGroupMorphFixture(fixture, 0, 0, false, false,
+            mode == 3, false, mode, suffix);
+        Engine::Model::ImportedModel sphereModel;
+        assert(Engine::Editor::PmxModelDecoder::Decode(
+            fixture.string(), sphereModel, error));
+        assert(sphereModel.materials[0].sphereMode == mode);
+        assert(sphereModel.materials[0].sphereTexture == suffix);
+        const auto sphereImport = Engine::Editor::ModelAssetWriter::Write(
+            sphereModel, fixture.string(), sphereImports.string());
+        assert(sphereImport.success);
+        bool checkedMaterial = false;
+        for (const auto& entry : fs::recursive_directory_iterator(
+            sphereImport.outputDirectory))
+            if (entry.path().extension() == ".material" &&
+                entry.path().filename() != "Default.material")
+            {
+                Engine::Components::Material material;
+                assert(material.LoadFromFile(entry.path().string()));
+                assert(material.sphereMode == mode);
+                assert(material.sphereTexture);
+                assert(fs::exists(material.sphereTexture->GetFilePath()));
+                assert(fs::path(material.sphereTexture->GetFilePath()).parent_path() ==
+                    fs::path(sphereImport.outputDirectory) / "Textures");
+                assert(material.sphereTexture->Load());
+                assert(material.sphereTexture->GetPixels()[0] == 128);
+                assert(material.sphereTexture->GetPixels()[1] == 64);
+                assert(material.sphereTexture->GetPixels()[2] == 32);
+                if (mode == 3)
+                    assert(sphereModel.primitives[0].vertices[0].uv1[0] == .2f);
+                checkedMaterial = true;
+            }
+        assert(checkedMaterial);
+    }
+    if (argc > 1 && std::string(argv[1]) == "--sphere-only")
+    {
+        fs::remove_all(outputRoot);
+        return 0;
+    }
     groupModel.unitScaleToMeters = .1f;
     const auto scaledImport = Engine::Editor::ModelAssetWriter::Write(
         groupModel, groupFixture.string(), outputRoot.string());
     assert(scaledImport.success);
+    {
+        bool foundEdgeMaterial = false;
+        for (const auto& entry : fs::recursive_directory_iterator(
+            scaledImport.outputDirectory))
+            if (entry.path().extension() == ".material")
+            {
+                const auto contents = Engine::Serialization::JsonParseFile(
+                    entry.path().string());
+                foundEdgeMaterial |= contents["edgeWidth"].AsFloat() == 2.f &&
+                    contents["edgeColor"].ArrayAt(3).AsFloat() == .4f &&
+                    contents["sphereMode"].AsInt() == 1;
+            }
+        assert(foundEdgeMaterial);
+    }
     Engine::Model::ImportedModel dynamicFixtureModel;
     Engine::Editor::PmxImportReport dynamicFixtureReport;
     assert(Engine::Editor::PmxModelDecoder::Decode(groupFixture.string(),
@@ -384,9 +703,14 @@ int main()
     assert(extendedModel.primitives[0].morphTargets.back().name == "flip");
     assert(extendedModel.primitives[0].morphTargets.back().positions[0].x == .25f);
     assert(extendedModel.softBodies[0].anchors.size() == 1);
+    assert(extendedModel.softBodies[0].anchors[0].nearMode);
     assert(extendedModel.softBodies[0].pinnedVertices.size() == 1);
     assert(extendedModel.softBodies[0].collisionGroup == 3);
     assert(extendedModel.softBodies[0].nonCollisionMask == 4);
+    assert(extendedModel.softBodies[0].clusterCount == 1);
+    assert(extendedModel.softBodies[0].clusterIterations == 3);
+    assert(extendedModel.softBodies[0].clusterHardness.x == .2f);
+    assert(extendedModel.softBodies[0].clusterImpulseSplit.z == .7f);
     const auto extendedImport = Engine::Editor::ModelAssetWriter::Write(
         extendedModel, extendedFixture.string(), outputRoot.string());
     assert(extendedImport.success);
@@ -399,11 +723,31 @@ int main()
             importedCloth = cloth;
     assert(importedCloth && importedCloth->anchors.size() == 1 &&
         importedCloth->explicitPinPositions.size() == 1);
+    assert(importedCloth->anchors[0].nearMode);
     assert(importedCloth->collisionLayer == 8);
     assert(importedCloth->collisionMask == 0xfffb);
+    assert(importedCloth->clusterCount == 1);
+    assert(importedCloth->clusterIterations == 3);
+    assert(importedCloth->clusterHardness.y == .3f);
+    importedCloth->windVelocity = { 0.f, 0.f, 1.f };
+    importedCloth->windStrength = 10.f;
+    Engine::Components::RigidBody* anchoredRigid = nullptr;
+    for (const auto& object : extendedScene.GetObjects())
+        if (auto* rigid = object->GetComponent<Engine::Components::RigidBody>())
+        {
+            rigid->useGravity = false;
+            if (object->name == importedCloth->anchors[0].bodyName)
+                anchoredRigid = rigid;
+        }
+    assert(anchoredRigid);
     extendedScene.Start();
     extendedScene.Update(1.f / 60.f);
     assert(importedCloth->IsSimulating());
+    assert(importedCloth->GetActiveClusterCount() == 1);
+    assert(importedCloth->GetActiveAnchorCount() == 1);
+    for (int frame = 0; frame < 30; ++frame)
+        extendedScene.Update(1.f / 60.f);
+    assert(anchoredRigid->GetLinearVelocity().z > .001f);
     for (uint8_t type = 1; type <= 5; ++type)
     {
         const fs::path fixture = outputRoot /
@@ -414,13 +758,13 @@ int main()
         assert(Engine::Editor::PmxModelDecoder::Decode(fixture.string(),
             jointModel, error, &jointReport, { true, true, true, true }));
         assert(jointReport.importedPhysicsJoints == 1);
-        assert(jointModel.physicsJoints[0].type == type);
-        Engine::Components::PmxRigController restored;
+        assert(static_cast<int>(jointModel.physicsJoints[0].type) == type);
+        Engine::Components::RigController restored;
         restored.physicsJoints = jointModel.physicsJoints;
-        Engine::Components::PmxRigController roundTrip;
+        Engine::Components::RigController roundTrip;
         roundTrip.Deserialize(restored.Serialize());
         assert(roundTrip.physicsJoints.size() == 1 &&
-            roundTrip.physicsJoints[0].type == type);
+            static_cast<int>(roundTrip.physicsJoints[0].type) == type);
         const auto jointImport = Engine::Editor::ModelAssetWriter::Write(
             jointModel, fixture.string(), outputRoot.string());
         assert(jointImport.success);
@@ -467,7 +811,7 @@ int main()
         impulseScene, impulseImport.prefabPath);
     assert(impulseRoot);
     auto* impulseRig = impulseRoot->GetComponent<
-        Engine::Components::PmxRigController>();
+        Engine::Components::RigMorphControls>();
     assert(impulseRig && impulseRig->impulseMorphs.size() == 3);
     assert(!impulseRig->impulseMorphs[0].offsets[0].bodyName.empty());
     auto* impulseBodyObject = impulseRoot->FindObjectInChildrenByName(
@@ -478,11 +822,11 @@ int main()
     assert(impulseBody);
     impulseScene.Start();
     impulseRig->impulseMorphs[0].weight = 1.f;
-    impulseRig->Apply();
+    impulseRig->ApplyImpulseMorphs();
     assert(impulseBody->GetLinearVelocity().x > 0.f);
     impulseRig->impulseMorphs[0].weight = 0.f;
     impulseRig->impulseMorphs[2].weight = 1.f;
-    impulseRig->Apply();
+    impulseRig->ApplyImpulseMorphs();
     assert(std::abs(impulseBody->GetLinearVelocity().x) < 1e-5f);
     const auto dynamicImport = Engine::Editor::ModelAssetWriter::Write(
         dynamicFixtureModel, groupFixture.string(), outputRoot.string());
@@ -493,7 +837,7 @@ int main()
             dynamicScene, dynamicImport.prefabPath);
         assert(dynamicRoot);
         auto* dynamicRig = dynamicRoot->GetComponent<
-            Engine::Components::PmxRigController>();
+            Engine::Components::RigPhysicsBinding>();
         assert(dynamicRig && dynamicRig->physicsBones.size() == 2);
         assert(dynamicRig->physicsJoints.size() == 1);
         auto* bodyObject = dynamicRoot->FindObjectInChildrenByName(
@@ -534,6 +878,7 @@ int main()
     const auto posed = uvMesh.BuildPosedVertices();
     assert(posed[0].uv[0] == .25f);
     assert(posed[0].uv1[1] == 1.05f);
+    TestFullUv(outputRoot);
 
     // Append transforms must not accumulate when no animation rewrites the pose.
     Engine::Scene::Scene rigScene;
@@ -547,7 +892,7 @@ int main()
     auto* rigModel = rigRoot->AddComponent<Engine::Components::Model>();
     rigModel->BindNode(0, sourceBone);
     rigModel->BindNode(1, drivenBone);
-    auto* rig = rigRoot->AddComponent<Engine::Components::PmxRigController>();
+    auto* rig = rigRoot->AddComponent<Engine::Components::RigController>();
     Engine::Model::ImportedAppendRule append;
     append.nodeIndex = 1;
     append.sourceNodeIndex = 0;
@@ -585,7 +930,7 @@ int main()
     rig->Apply();
     assert(glm::distance(ikTip->transform.GetWorldPosition(),
         ikGoal->transform.GetWorldPosition()) > .5f);
-    Engine::Components::PmxRigController disabledIk;
+    Engine::Components::RigController disabledIk;
     disabledIk.Deserialize(rig->Serialize());
     assert(!disabledIk.ikChains[0].enabled);
     rig->ikChains[0].enabled = true;
@@ -668,7 +1013,8 @@ int main()
     rigRoot->Children.push_back(physicsBody);
     rigRoot->Children.push_back(physicsBone);
     rigModel->BindNode(8, physicsBone);
-    rig->physicsBones.push_back({ "PMX physics body", 8, 1 });
+    rig->physicsBones.push_back({ "PMX physics body", 8,
+        Engine::Model::RigidBodyMotion::Simulated });
     rig->Apply();
     physicsBody->transform.position.x = 2.f;
     rig->PostPhysicsUpdate();
@@ -734,7 +1080,7 @@ int main()
     restoredMorphClip.Deserialize(morphClip.Serialize());
     assert(restoredMorphClip.componentMorphs.size() == 1);
     assert(restoredMorphClip.componentMorphs[0].weights[1] == 1.f);
-    Engine::Components::PmxRigController restoredRig;
+    Engine::Components::RigController restoredRig;
     restoredRig.Deserialize(rig->Serialize());
     assert(restoredRig.appendRules.size() == 1);
     assert(restoredRig.ikChains.size() == 1);
@@ -765,8 +1111,9 @@ int main()
         auto* fallingModel = physicsRoot->AddComponent<Engine::Components::Model>();
         fallingModel->BindNode(0, fallingBone);
         auto* fallingRig = physicsRoot->AddComponent<
-            Engine::Components::PmxRigController>();
-        fallingRig->physicsBones.push_back({ "Falling body", 0, 1 });
+            Engine::Components::RigController>();
+        fallingRig->physicsBones.push_back({ "Falling body", 0,
+            Engine::Model::RigidBodyMotion::Simulated });
         auto* collider = fallingBody->AddComponent<
             Engine::Components::PrimitiveObjectCollider>();
         collider->shape = "Sphere";
@@ -786,8 +1133,10 @@ int main()
     materialObject->Parent = rigRoot;
     rigRoot->Children.push_back(materialObject);
     auto* material = materialObject->AddComponent<Engine::Components::Material>();
+    material->edgeColor = groupModel.materials[0].edgeColor;
+    material->edgeWidth = groupModel.materials[0].edgeWidth;
     auto* materialMorph = materialObject->AddComponent<
-        Engine::Components::PmxMaterialMorph>();
+        Engine::Components::MaterialPropertyMorph>();
     materialMorph->morphs = groupModel.materialMorphs;
     materialMorph->morphs[0].weight = 1.f;
     materialMorph->Apply();
@@ -795,6 +1144,10 @@ int main()
     assert(material->specularColor.x == .75f);
     assert(material->shininess == 40.f);
     assert(material->alphaMode == "Blend");
+    assert(std::abs(material->edgeColor.r - .3f) < .0001f);
+    assert(std::abs(material->edgeWidth - 2.6f) < .0001f);
+    assert(std::abs(material->sphereTint.r - 1.7f) < .0001f);
+    assert(std::abs(material->toonTint.a - 1.4f) < .0001f);
     materialMorph->Apply();
     assert(material->baseColorAlpha == .5f);
     materialMorph->morphs[0].weight = 0.f;
@@ -802,6 +1155,8 @@ int main()
     assert(material->baseColorAlpha == 1.f);
     assert(material->specularColor.x == 1.f);
     assert(material->shininess == 32.f);
+    assert(material->edgeWidth == 2.f);
+    assert(material->sphereTint.r == 1.f);
     materialMorph->SetAnimatedMorphWeights({ { materialMorph->morphs[0].name, 1.f } });
     materialMorph->Apply();
     assert(material->baseColorAlpha == .5f);
@@ -815,9 +1170,48 @@ int main()
     assert(std::abs(material->baseColorTextureTint.r - 1.2f) < .0001f);
     materialMorph->SetAnimatedMorphWeights({});
     materialMorph->Apply();
-    Engine::Components::PmxMaterialMorph restoredMaterialMorph;
+    Engine::Components::MaterialPropertyMorph restoredMaterialMorph;
     restoredMaterialMorph.Deserialize(materialMorph->Serialize());
     assert(restoredMaterialMorph.morphs.size() == 2);
+    assert(restoredMaterialMorph.morphs[0].offsets[0].edgeWidth == .6f);
+    assert(restoredMaterialMorph.morphs[0].offsets[0].sphereTint.x == .7f);
+    assert(restoredMaterialMorph.morphs[0].offsets[0].toonTint.w == .4f);
+    auto* authoredObject = rigScene.AddObject("Authored material morph");
+    auto* authoredMaterial = authoredObject->AddComponent<Engine::Components::Material>();
+    auto* authoredMorph = authoredObject->AddComponent<
+        Engine::Components::MaterialPropertyMorph>();
+    assert(authoredMorph->editorAddable);
+    Engine::Model::ImportedMaterialMorph authoredEffect;
+    authoredEffect.name = "fade";
+    Engine::Model::ImportedMaterialMorphOffset authoredOffset;
+    authoredOffset.additive = true;
+    authoredOffset.diffuse.a = -.25f;
+    authoredEffect.offsets.push_back(authoredOffset);
+    authoredMorph->morphs.push_back(authoredEffect);
+    authoredMorph->SetAnimatedMorphWeights({ { "fade", 1.f } });
+    authoredMorph->Apply();
+    assert(std::abs(authoredMaterial->baseColorAlpha - .75f) < .0001f);
+    authoredMorph->SetAnimatedMorphWeights({});
+    authoredMorph->Apply();
+    assert(authoredMaterial->baseColorAlpha == 1.f);
+    Engine::Model::ImportedMaterialMorph multiplyMorph;
+    multiplyMorph.name = "multiply tint";
+    multiplyMorph.weight = .5f;
+    Engine::Model::ImportedMaterialMorphOffset multiplyOffset;
+    multiplyOffset.edgeColor = glm::vec4(.5f);
+    multiplyOffset.edgeWidth = .5f;
+    multiplyOffset.sphereTint = glm::vec4(.5f);
+    multiplyOffset.toonTint = glm::vec4(.5f);
+    multiplyMorph.offsets.push_back(multiplyOffset);
+    materialMorph->morphs.clear();
+    materialMorph->morphs.push_back(multiplyMorph);
+    materialMorph->Apply();
+    assert(std::abs(material->edgeWidth - 1.5f) < .0001f);
+    assert(std::abs(material->sphereTint.r - .75f) < .0001f);
+    assert(std::abs(material->toonTint.a - .75f) < .0001f);
+    materialMorph->morphs.clear();
+    materialMorph->Apply();
+    assert(material->edgeWidth == 2.f);
     rig->Apply();
     assert(drivenBone->transform.position.x == 1.f);
     fs::remove_all(outputRoot);

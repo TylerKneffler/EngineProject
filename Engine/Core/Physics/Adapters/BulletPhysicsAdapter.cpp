@@ -4,7 +4,7 @@
 #include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include "Core/Compoonents/Animation/IKBone.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
-#include "Core/Compoonents/Animation/PmxRigController.h"
+#include "Core/Compoonents/Physics/RigPhysicsBinding.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Physics/Internal/PhysicsInternal.h"
@@ -121,6 +121,23 @@ struct BulletPhysicsAdapter::Impl
     std::unordered_map<const void*, PortalMeshCollider> portalMeshColliders;
     std::unordered_map<const void*, PortalMeshCollider> portalApertureColliders;
     std::vector<std::unique_ptr<btTypedConstraint>> pmxJoints;
+    struct PmxBindingState
+    {
+        const Engine::Components::RigPhysicsBinding* binding = nullptr;
+        uint64_t configurationRevision = 0;
+        size_t jointCount = 0;
+        float scale = 0.f;
+        uint64_t worldRevision = 0;
+        bool operator==(const PmxBindingState& other) const
+        {
+            return binding == other.binding &&
+                configurationRevision == other.configurationRevision &&
+                jointCount == other.jointCount && scale == other.scale &&
+                worldRevision == other.worldRevision;
+        }
+    };
+    std::vector<PmxBindingState> pmxBindings;
+    uint64_t pmxJointRebuildCount = 0;
 };
 
 BulletPhysicsAdapter::BulletPhysicsAdapter(Engine::Scene::Scene& scene) : m_impl(new Impl(scene)) {}
@@ -135,6 +152,7 @@ void BulletPhysicsAdapter::ClearPmxJoints()
     for (const auto& joint : m_impl->pmxJoints)
         m_impl->state->world->removeConstraint(joint.get());
     m_impl->pmxJoints.clear();
+    m_impl->pmxBindings.clear();
 }
 PhysicsWorldState* BulletPhysicsAdapter::GetInternalState()
 {
@@ -179,7 +197,6 @@ void BulletPhysicsAdapter::ApplyRigidBodyAction(
     Engine::Components::RigidBody& body, RigidBodyAction action,
     const glm::vec3& value, const glm::quat& rotation)
 {
-    if (!m_impl->pmxJoints.empty()) ClearPmxJoints();
     EnsureRigidBodyState(body);
     switch (action)
     {
@@ -233,6 +250,12 @@ void BulletPhysicsAdapter::NotifyRigidBodyTransformChanged(
     if (!m_impl->pmxJoints.empty()) ClearPmxJoints();
     EnsureRigidBodyState(body);
     body.NativeNotifyEditorTransformChanged();
+}
+
+void BulletPhysicsAdapter::BeforeRigidBodyDestroyed(
+    Engine::Components::RigidBody&)
+{
+    if (!m_impl->pmxJoints.empty()) ClearPmxJoints();
 }
 
 void BulletPhysicsAdapter::SetPortalLocalMeshCollider(
@@ -346,6 +369,8 @@ double BulletPhysicsAdapter::GetFixedStep() const { return m_impl->fixedStepSeco
 uint32_t BulletPhysicsAdapter::GetMaximumSubsteps() const { return m_impl->maximumSubsteps; }
 uint32_t BulletPhysicsAdapter::GetSolverIterations() const { return m_impl->solverIterations; }
 uint32_t BulletPhysicsAdapter::GetLastSubstepCount() const { return m_impl->lastSubstepCount; }
+uint64_t BulletPhysicsAdapter::GetImportedJointRebuildCount() const
+{ return m_impl->pmxJointRebuildCount; }
 
 void BulletPhysicsAdapter::RemovePortalMeshCollider(const void* instanceKey)
 {
@@ -614,7 +639,6 @@ PhysicsWorldState::PhysicsWorldState()
 void BulletPhysicsAdapter::Step(double deltaTime)
 {
     Engine::Scene::Scene& scene = *m_impl->scene;
-    ClearPmxJoints();
     std::vector<Engine::Components::MeshObjectCollider*> meshColliders;
     for (const auto& object : scene.GetObjects())
         for (Engine::Core::Component* component : object->Components)
@@ -680,24 +704,45 @@ void BulletPhysicsAdapter::Step(double deltaTime)
         bone->EnsureConstraint();
     for (Engine::Components::IKBone* bone : ikBones)
         bone->SyncBodyFromBone();
+    std::vector<Impl::PmxBindingState> currentPmxBindings;
     for (const auto& object : scene.GetObjects())
     {
         if (!object || !object->IsEnabledInHierarchy()) continue;
-        auto* rig = object->GetComponent<Engine::Components::PmxRigController>();
-        if (!rig || rig->physicsJoints.empty()) continue;
+        auto* binding = object->GetComponent<Engine::Components::RigPhysicsBinding>();
+        if (!binding || binding->physicsJoints.empty()) continue;
         const float scale = glm::length(glm::vec3(
             object->transform.GetWorldMatrix()[0]));
         if (!std::isfinite(scale) || scale <= 0.f) continue;
-        for (const auto& imported : rig->physicsJoints)
+        const bool hasWorldAnchor = std::any_of(binding->physicsJoints.begin(),
+            binding->physicsJoints.end(), [](const auto& joint)
+            { return joint.bodyA < 0 || joint.bodyB < 0; });
+        currentPmxBindings.push_back({ binding,
+            binding->GetConfigurationRevision(), binding->physicsJoints.size(),
+            scale, hasWorldAnchor ? object->transform.GetWorldRevision() : 0 });
+    }
+    const bool rebuildPmxJoints =
+        currentPmxBindings != m_impl->pmxBindings ||
+        (!currentPmxBindings.empty() && m_impl->pmxJoints.empty());
+    if (rebuildPmxJoints)
+    {
+        ClearPmxJoints();
+        m_impl->pmxBindings = currentPmxBindings;
+        if (!currentPmxBindings.empty())
+            ++m_impl->pmxJointRebuildCount;
+    for (const auto& object : scene.GetObjects())
+    {
+        if (!object || !object->IsEnabledInHierarchy()) continue;
+        auto* binding = object->GetComponent<Engine::Components::RigPhysicsBinding>();
+        if (!binding || binding->physicsJoints.empty()) continue;
+        const float scale = glm::length(glm::vec3(
+            object->transform.GetWorldMatrix()[0]));
+        if (!std::isfinite(scale) || scale <= 0.f) continue;
+        for (const auto& imported : binding->physicsJoints)
         {
-            auto* firstObject = imported.bodyA < 0 ? nullptr :
-                object->FindObjectInChildrenByName(imported.bodyAName);
-            auto* secondObject = imported.bodyB < 0 ? nullptr :
-                object->FindObjectInChildrenByName(imported.bodyBName);
-            auto* first = firstObject ?
-                firstObject->GetComponent<Engine::Components::RigidBody>() : nullptr;
-            auto* second = secondObject ?
-                secondObject->GetComponent<Engine::Components::RigidBody>() : nullptr;
+            auto* first = imported.bodyA < 0 ? nullptr :
+                binding->ResolveBody(imported.bodyAName);
+            auto* second = imported.bodyB < 0 ? nullptr :
+                binding->ResolveBody(imported.bodyBName);
             if ((imported.bodyA >= 0 && !first) ||
                 (imported.bodyB >= 0 && !second) || first == second) continue;
             auto* firstNative = first ? btRigidBody::upcast(
@@ -734,7 +779,7 @@ void BulletPhysicsAdapter::Step(double deltaTime)
                 worldFrame(imported.frameBPosition, imported.frameBRotation) :
                 frame(imported.frameBPosition, imported.frameBRotation);
             std::unique_ptr<btTypedConstraint> joint;
-            if (imported.type == 0)
+            if (imported.type == Engine::Model::PhysicsJointKind::SpringSixDof)
             {
                 auto spring = std::make_unique<btGeneric6DofSpringConstraint>(
                     *firstNative, *secondNative, frameA, frameB, true);
@@ -753,7 +798,7 @@ void BulletPhysicsAdapter::Step(double deltaTime)
                 }
                 joint = std::move(spring);
             }
-            else if (imported.type == 1)
+            else if (imported.type == Engine::Model::PhysicsJointKind::SixDof)
             {
                 auto sixDof = std::make_unique<btGeneric6DofConstraint>(
                     *firstNative, *secondNative, frameA, frameB, true);
@@ -763,11 +808,11 @@ void BulletPhysicsAdapter::Step(double deltaTime)
                 sixDof->setAngularUpperLimit(ToBullet(imported.angularUpper));
                 joint = std::move(sixDof);
             }
-            else if (imported.type == 2)
+            else if (imported.type == Engine::Model::PhysicsJointKind::Point)
                 joint = std::make_unique<btPoint2PointConstraint>(
                     *firstNative, *secondNative,
                     frameA.getOrigin(), frameB.getOrigin());
-            else if (imported.type == 3)
+            else if (imported.type == Engine::Model::PhysicsJointKind::ConeTwist)
             {
                 auto cone = std::make_unique<btConeTwistConstraint>(
                     *firstNative, *secondNative, frameA, frameB);
@@ -787,7 +832,7 @@ void BulletPhysicsAdapter::Step(double deltaTime)
                 }
                 joint = std::move(cone);
             }
-            else if (imported.type == 4)
+            else if (imported.type == Engine::Model::PhysicsJointKind::Slider)
             {
                 auto slider = std::make_unique<btSliderConstraint>(
                     *firstNative, *secondNative, frameA, frameB, true);
@@ -809,7 +854,7 @@ void BulletPhysicsAdapter::Step(double deltaTime)
                 }
                 joint = std::move(slider);
             }
-            else if (imported.type == 5)
+            else if (imported.type == Engine::Model::PhysicsJointKind::Hinge)
             {
                 btTransform hingeFrameA = frameA;
                 btTransform hingeFrameB = frameB;
@@ -831,6 +876,7 @@ void BulletPhysicsAdapter::Step(double deltaTime)
             m_impl->state->world->addConstraint(joint.get(), true);
             m_impl->pmxJoints.push_back(std::move(joint));
         }
+    }
     }
     m_impl->lastSubstepCount = 0u;
     if (bodies.empty() && clothBodies.empty() && ikBones.empty())

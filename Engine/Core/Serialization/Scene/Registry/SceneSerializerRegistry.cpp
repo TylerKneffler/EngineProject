@@ -25,7 +25,7 @@
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
 #include "Core/Compoonents/Animation/Model.h"
 #include "Core/Compoonents/Animation/AnimationManager.h"
-#include "Core/Compoonents/Animation/VmdSceneTrack.h"
+#include "Core/Compoonents/Animation/SceneCameraLightTrack.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/AnimationBone.h"
 #include "Core/Compoonents/Animation/BoneGroup.h"
@@ -34,8 +34,11 @@
 #include "Core/Compoonents/Animation/IKBone.h"
 #include "Core/Compoonents/Animation/TwoBoneIK.h"
 #include "Core/Compoonents/Animation/ChainIK.h"
-#include "Core/Compoonents/Animation/PmxRigController.h"
-#include "Core/Compoonents/Materials/PmxMaterialMorph.h"
+#include "Core/Compoonents/Animation/RigController.h"
+#include "Core/Compoonents/Animation/RigConstraints.h"
+#include "Core/Compoonents/Animation/RigMorphControls.h"
+#include "Core/Compoonents/Physics/RigPhysicsBinding.h"
+#include "Core/Compoonents/Materials/MaterialPropertyMorph.h"
 #include "Core/Compoonents/Constraints/Subconstraints/AimConstraint.h"
 #include "Core/Compoonents/Constraints/Subconstraints/ParentConstraint.h"
 #include "Core/Compoonents/Constraints/Subconstraints/PositionConstraint.h"
@@ -197,7 +200,7 @@ void SceneSerializer::EnsureBuiltinsRegistered()
     RegisterComponentType<Engine::Components::SpriteAnimationManager>();
     RegisterComponentType<Engine::Components::Model>();
     RegisterComponentType<Engine::Components::AnimationManager>();
-    RegisterComponentType<Engine::Components::VmdSceneTrack>();
+    RegisterComponentType<Engine::Components::SceneCameraLightTrack>();
     RegisterComponentType<Engine::Components::Skeleton>();
     RegisterComponentType<Engine::Components::AnimationBone>();
     RegisterComponentType<Engine::Components::BoneGroup>();
@@ -206,8 +209,11 @@ void SceneSerializer::EnsureBuiltinsRegistered()
     RegisterComponentType<Engine::Components::IKBone>();
     RegisterComponentType<Engine::Components::TwoBoneIK>();
     RegisterComponentType<Engine::Components::ChainIK>();
-    RegisterComponentType<Engine::Components::PmxRigController>();
-    RegisterComponentType<Engine::Components::PmxMaterialMorph>();
+    RegisterComponentType<Engine::Components::RigController>();
+    RegisterComponentType<Engine::Components::RigConstraints>();
+    RegisterComponentType<Engine::Components::RigMorphControls>();
+    RegisterComponentType<Engine::Components::RigPhysicsBinding>();
+    RegisterComponentType<Engine::Components::MaterialPropertyMorph>();
     RegisterComponentType<Engine::Components::AimConstraint>();
     RegisterComponentType<Engine::Components::ParentConstraint>();
     RegisterComponentType<Engine::Components::PositionConstraint>();

@@ -147,6 +147,7 @@ struct PmxMorph
     {
         glm::vec3 position { 0.f };
         glm::vec4 uv { 0.f };
+        std::array<glm::vec4, 5> uvChannels {};
     };
     std::string name;
     int type = -1;
@@ -190,9 +191,14 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
         if (report) *report = {};
         std::ifstream input(sourcePath, std::ios::binary);
         if (!input) throw std::runtime_error("Could not open PMX file");
-        const std::vector<unsigned char> bytes{
-            std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>() };
-        Reader reader(bytes);
+        input.seekg(0, std::ios::end);
+        const auto byteCount = input.tellg();
+        if (byteCount < 0) throw std::runtime_error("Could not read PMX file size");
+        std::vector<unsigned char> bytes(static_cast<size_t>(byteCount));
+        input.seekg(0, std::ios::beg);
+        if (!input.read(reinterpret_cast<char*>(bytes.data()), byteCount))
+            throw std::runtime_error("Could not read PMX file");
+        Reader reader(std::move(bytes));
         const auto signature = reader.Read<std::array<char, 4>>();
         if (signature != std::array<char, 4>{ 'P', 'M', 'X', ' ' })
             throw std::runtime_error("Invalid PMX signature");
@@ -234,8 +240,6 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
         const int vertexCount = reader.Count("vertex", 5'000'000);
         std::vector<Engine::Model::AnimationVertex> vertices(vertexCount);
         std::vector<std::array<int, 4>> vertexBones(vertexCount);
-        int sdefVertices = 0, qdefVertices = 0;
-        int additionalUvZOrW = 0;
         for (int i = 0; i < vertexCount; ++i)
         {
             auto& vertex = vertices[i];
@@ -246,12 +250,16 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
             vertex.tangent[0] = 1.f; vertex.tangent[3] = 1.f;
             vertex.uv[0] = reader.Read<float>();
             vertex.uv[1] = reader.Read<float>();
+            vertex.uvChannels[0][0] = vertex.uv[0];
+            vertex.uvChannels[0][1] = vertex.uv[1];
             for (int channel = 0; channel < extraUv; ++channel)
             {
                 const float x = reader.Read<float>(), y = reader.Read<float>();
                 const float z = reader.Read<float>(), w = reader.Read<float>();
-                if (channel == 0 && (z != 0.f || w != 0.f))
-                    ++additionalUvZOrW;
+                vertex.uvChannels[channel + 1][0] = x;
+                vertex.uvChannels[channel + 1][1] = y;
+                vertex.uvChannels[channel + 1][2] = z;
+                vertex.uvChannels[channel + 1][3] = w;
                 if (channel == 0)
                 {
                     vertex.uv1[0] = x;
@@ -272,15 +280,29 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
                 weights[0] = reader.Read<float>(); weights[1] = 1.f - weights[0];
                 if (deform == 3)
                 {
-                    ++sdefVertices;
-                    reader.Skip(36); // SDEF center and radii.
+                    const auto center = reader.Vec3();
+                    const auto radius0 = reader.Vec3();
+                    const auto radius1 = reader.Vec3();
+                    vertex.sdefCenterAndMode[0] = center.x;
+                    vertex.sdefCenterAndMode[1] = center.y;
+                    vertex.sdefCenterAndMode[2] = center.z;
+                    vertex.sdefCenterAndMode[3] = 3.f;
+                    vertex.sdefRadius0[0] = radius0.x;
+                    vertex.sdefRadius0[1] = radius0.y;
+                    vertex.sdefRadius0[2] = radius0.z;
+                    vertex.sdefRadius1[0] = radius1.x;
+                    vertex.sdefRadius1[1] = radius1.y;
+                    vertex.sdefRadius1[2] = radius1.z;
                 }
             }
             else if (deform == 2 || deform == 4)
             {
                 for (int& bone : bones) bone = reader.Index(boneWidth);
                 for (float& weight : weights) weight = reader.Read<float>();
-                if (deform == 4) ++qdefVertices;
+                if (deform == 4)
+                {
+                    vertex.sdefCenterAndMode[3] = 4.f;
+                }
             }
             else throw std::runtime_error("Unsupported PMX vertex deform type");
             vertexBones[i] = bones;
@@ -314,7 +336,7 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
         const int materialCount = reader.Count("material", 100'000);
         std::vector<MaterialRange> ranges(materialCount);
         int covered = 0;
-        int toonMaterials = 0, sphereMaterials = 0, outlineMaterials = 0;
+        int toonMaterials = 0, outlineMaterials = 0;
         for (int i = 0; i < materialCount; ++i)
         {
             auto& material = model.materials.emplace_back();
@@ -329,20 +351,25 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
             material.shininess = reader.Read<float>();
             material.ambientColor = { reader.Read<float>(), reader.Read<float>(),
                 reader.Read<float>() };
-            material.useMmdSpecular = true;
+            material.specularModel = "BlinnPhong";
             const uint8_t flags = reader.Read<uint8_t>();
             material.doubleSided = (flags & 1) != 0;
             material.castsShadows = (flags & 0x04) != 0;
-            if (flags & 0x10) ++outlineMaterials;
+            material.edgeEnabled = (flags & 0x10) != 0;
+            if (material.edgeEnabled) ++outlineMaterials;
             material.alphaMode = material.baseColor.a < .999f ? "Blend" : "Opaque";
-            reader.Skip(16 + 4); // Edge color and scale.
+            for (int channel = 0; channel < 4; ++channel)
+                material.edgeColor[channel] = reader.Read<float>();
+            material.edgeWidth = reader.Read<float>();
             const int texture = reader.Index(textureWidth);
             const int sphereTexture = reader.Index(textureWidth);
             const int sphereMode = reader.Read<uint8_t>();
             if (sphereMode > 3) throw std::runtime_error("Invalid PMX sphere mode");
             CheckIndex(sphereTexture, static_cast<int>(textures.size()),
                 "sphere texture", true);
-            if (sphereTexture >= 0 && sphereMode != 0) ++sphereMaterials;
+            if (sphereTexture >= 0 && sphereMode != 0)
+                material.sphereTexture = textures[sphereTexture];
+            material.sphereMode = sphereMode;
             const int toonReference = reader.Read<uint8_t>();
             if (toonReference == 0)
             {
@@ -350,10 +377,13 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
                 CheckIndex(toonTexture, static_cast<int>(textures.size()),
                     "toon texture", true);
                 if (toonTexture >= 0) ++toonMaterials;
+                if (toonTexture >= 0)
+                    material.toonTexture = textures[toonTexture];
             }
             else if (toonReference == 1)
             {
-                if (reader.Read<uint8_t>() > 9)
+                material.builtinToon = reader.Read<uint8_t>();
+                if (material.builtinToon > 9)
                     throw std::runtime_error("Invalid PMX built-in toon index");
                 ++toonMaterials;
             }
@@ -467,8 +497,6 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
         const int morphCount = reader.Count("morph", 100'000);
         std::vector<PmxMorph> morphs(morphCount);
         std::array<int, 11> morphTypeCounts{};
-        int uvMorphExtraChannels = 0;
-        int extendedMaterialOffsets = 0;
         std::vector<int> impulseRigidReferences;
         for (int i = 0; i < morphCount; ++i)
         {
@@ -496,9 +524,9 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
                     morph.offsets[index].position += reader.Vec3();
                 }
             }
-            else if (type == 3 || type == 4)
+            else if (type >= 3 && type <= 7)
             {
-                morph.supported = type == 3 || extraUv > 0;
+                morph.supported = type == 3 || type - 3 <= extraUv;
                 for (int j = 0; j < count; ++j)
                 {
                     const int index = reader.Index(vertexWidth, true);
@@ -508,12 +536,13 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
                     if (!std::isfinite(x) || !std::isfinite(y) ||
                         !std::isfinite(z) || !std::isfinite(w))
                         throw std::runtime_error("Non-finite PMX UV morph offset");
-                    if (z != 0.f || w != 0.f) ++uvMorphExtraChannels;
                     if (morph.supported)
                     {
                         auto& offset = morph.offsets[index].uv;
                         if (type == 3) { offset.x += x; offset.y += y; }
-                        else { offset.z += x; offset.w += y; }
+                        else if (type == 4) { offset.z += x; offset.w += y; }
+                        auto& full = morph.offsets[index].uvChannels[type - 3];
+                        full += glm::vec4(x, y, z, w);
                     }
                 }
             }
@@ -549,12 +578,6 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
                         offset.rotation = glm::normalize(glm::quat(w, -x, -y, z));
                         morph.boneOffsets.push_back(offset);
                     }
-                    else if (type >= 5 && type <= 7)
-                    {
-                        CheckIndex(reader.Index(vertexWidth, true), vertexCount,
-                            "additional UV morph vertex");
-                        reader.Skip(16);
-                    }
                     else if (type == 8)
                     {
                         Engine::Model::ImportedMaterialMorphOffset offset;
@@ -572,15 +595,15 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
                         offset.shininess = reader.Read<float>();
                         for (int channel = 0; channel < 3; ++channel)
                             offset.ambient[channel] = reader.Read<float>();
-                        const float neutral = offset.additive ? 0.f : 1.f;
-                        for (int channel = 0; channel < 5; ++channel)
-                            if (reader.Read<float>() != neutral)
-                                ++extendedMaterialOffsets;
+                        for (int channel = 0; channel < 4; ++channel)
+                            offset.edgeColor[channel] = reader.Read<float>();
+                        offset.edgeWidth = reader.Read<float>();
                         for (int channel = 0; channel < 4; ++channel)
                             offset.textureTint[channel] = reader.Read<float>();
-                        for (int channel = 0; channel < 8; ++channel)
-                            if (reader.Read<float>() != neutral)
-                                ++extendedMaterialOffsets;
+                        for (int channel = 0; channel < 4; ++channel)
+                            offset.sphereTint[channel] = reader.Read<float>();
+                        for (int channel = 0; channel < 4; ++channel)
+                            offset.toonTint[channel] = reader.Read<float>();
                         morph.materialOffsets.push_back(offset);
                     }
                     else if (type == 10)
@@ -626,6 +649,9 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
                             auto& combined = morph.offsets[vertex];
                             combined.position += offset.position * influence;
                             combined.uv += offset.uv * influence;
+                            for (size_t channel = 0; channel < combined.uvChannels.size(); ++channel)
+                                combined.uvChannels[channel] +=
+                                    offset.uvChannels[channel] * influence;
                         }
                         for (auto offset : child.boneOffsets)
                         {
@@ -644,6 +670,10 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
                                 offset.shininess *= influence;
                                 offset.ambient *= influence;
                                 offset.textureTint *= influence;
+                                offset.edgeColor *= influence;
+                                offset.edgeWidth *= influence;
+                                offset.sphereTint *= influence;
+                                offset.toonTint *= influence;
                             }
                             else
                             {
@@ -657,6 +687,14 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
                                     offset.ambient, influence);
                                 offset.textureTint = glm::mix(glm::vec4(1.f),
                                     offset.textureTint, influence);
+                                offset.edgeColor = glm::mix(glm::vec4(1.f),
+                                    offset.edgeColor, influence);
+                                offset.edgeWidth = glm::mix(1.f,
+                                    offset.edgeWidth, influence);
+                                offset.sphereTint = glm::mix(glm::vec4(1.f),
+                                    offset.sphereTint, influence);
+                                offset.toonTint = glm::mix(glm::vec4(1.f),
+                                    offset.toonTint, influence);
                             }
                             morph.materialOffsets.push_back(offset);
                         }
@@ -760,11 +798,11 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
                 body.boneOffsetPosition = worldPosition -
                     (bone < 0 ? glm::vec3(0.f) : bones[bone].position);
                 body.boneOffsetRotation = body.localRotation;
-                body.mode = mode;
+                body.mode = static_cast<Engine::Model::RigidBodyMotion>(mode);
                 body.mass = mass;
                 body.linearDamping = linearDamping;
                 body.angularDamping = angularDamping;
-                body.shape = shape;
+                body.shape = static_cast<Engine::Model::RigidBodyShape>(shape);
                 body.size = size;
                 body.collisionGroup = group;
                 body.nonCollisionMask = mask;
@@ -822,7 +860,7 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
             }
             auto& joint = model.physicsJoints.emplace_back();
             joint.name = local.empty() ? english : local;
-            joint.type = type;
+            joint.type = static_cast<Engine::Model::PhysicsJointKind>(type);
             joint.bodyA = bodyA < 0 ? -1 : importedRigidIndex[bodyA];
             joint.bodyB = bodyB < 0 ? -1 : importedRigidIndex[bodyB];
             joint.position = position;
@@ -857,7 +895,8 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
                 const std::string english = reader.Text(utf8);
                 Engine::Model::ImportedSoftBody soft;
                 soft.name = local.empty() ? english : local;
-                soft.shape = reader.Read<uint8_t>();
+                const int sourceShape = reader.Read<uint8_t>();
+                soft.shape = static_cast<Engine::Model::SoftBodyTopology>(sourceShape);
                 soft.materialIndex = reader.Index(materialWidth);
                 CheckIndex(soft.materialIndex, materialCount,
                     "soft body material");
@@ -866,7 +905,7 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
                 soft.nonCollisionMask = reader.Read<uint16_t>();
                 reader.Read<uint8_t>(); // B-link, cluster, link-crossing flags.
                 reader.Read<int32_t>(); // B-link distance.
-                reader.Read<int32_t>(); // Cluster count.
+                soft.clusterCount = reader.Read<int32_t>();
                 soft.mass = reader.Read<float>();
                 soft.collisionMargin = reader.Read<float>();
                 reader.Read<int32_t>(); // Aerodynamics model.
@@ -876,15 +915,18 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
                 reader.Skip(4 * 3); // Lift, pressure, volume conservation.
                 soft.friction = reader.Read<float>();
                 reader.Skip(4 * 5); // Pose match and contact hardness values.
-                reader.Skip(4 * 6); // Cluster coefficients.
+                for (int channel = 0; channel < 3; ++channel)
+                    soft.clusterHardness[channel] = reader.Read<float>();
+                for (int channel = 0; channel < 3; ++channel)
+                    soft.clusterImpulseSplit[channel] = reader.Read<float>();
                 reader.Read<int32_t>(); // Velocity iterations.
                 soft.solverIterations = reader.Read<int32_t>();
                 reader.Read<int32_t>(); // Drift iterations.
-                reader.Read<int32_t>(); // Cluster iterations.
+                soft.clusterIterations = reader.Read<int32_t>();
                 soft.linearStiffness = reader.Read<float>();
                 soft.bendingStiffness = reader.Read<float>();
                 reader.Read<float>(); // Volume stiffness.
-                if (soft.shape > 1 || group > 15 ||
+                if (sourceShape > 1 || group > 15 ||
                     !std::isfinite(soft.mass) || soft.mass < 0.f ||
                     !std::isfinite(soft.collisionMargin) ||
                     soft.collisionMargin < 0.f ||
@@ -893,7 +935,14 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
                     !std::isfinite(soft.damping) ||
                     !std::isfinite(soft.drag) ||
                     !std::isfinite(soft.friction) ||
-                    soft.solverIterations < 0)
+                    soft.solverIterations < 0 || soft.clusterCount < 0 ||
+                    soft.clusterIterations < 0 ||
+                    !std::isfinite(soft.clusterHardness.x) ||
+                    !std::isfinite(soft.clusterHardness.y) ||
+                    !std::isfinite(soft.clusterHardness.z) ||
+                    !std::isfinite(soft.clusterImpulseSplit.x) ||
+                    !std::isfinite(soft.clusterImpulseSplit.y) ||
+                    !std::isfinite(soft.clusterImpulseSplit.z))
                     throw std::runtime_error("Invalid PMX soft body settings");
                 const auto vertexInMaterial = [&](int vertex)
                 {
@@ -934,7 +983,8 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
                             vertices[vertex].pos[1], vertices[vertex].pos[2]);
                     else ++unavailableSoftAttachments;
                 }
-                if (options.dynamicPhysics && soft.shape == 0 &&
+                if (options.dynamicPhysics &&
+                    soft.shape == Engine::Model::SoftBodyTopology::TriangleMesh &&
                     ranges[soft.materialIndex].count > 0 &&
                     importedSoftMaterials.insert(soft.materialIndex).second)
                     model.softBodies.push_back(std::move(soft));
@@ -956,30 +1006,22 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
             warn(incompleteGroups, "group morphs with unsupported children");
             if (morphTypeCounts[4] && extraUv == 0)
                 warn(morphTypeCounts[4], "additional-UV morphs without a UV1 stream");
-            warn(morphTypeCounts[5] + morphTypeCounts[6] + morphTypeCounts[7],
-                "additional-UV2/3/4 morphs");
-            warn(uvMorphExtraChannels, "UV morph offsets in unused Z/W channels");
-            warn(additionalUvZOrW, "vertices with unused additional-UV1 Z/W values");
-            if (extraUv > 1 && vertexCount > 0)
-                warn(extraUv - 1, "additional UV streams beyond UV1");
             if (morphTypeCounts[8])
                 report->warnings.push_back("Material morph specular/shininess render "
                     "through a PBR approximation of MMD lighting");
-            warn(extendedMaterialOffsets,
-                "material morph edge/sphere/toon tint values");
             if (morphTypeCounts[10] && !options.dynamicPhysics)
                 warn(morphTypeCounts[10], "impulse morphs (dynamic physics disabled)");
             else
                 warn(unavailableImpulseOffsets,
                     "impulse offsets targeting unavailable rigid bodies");
-            warn(sdefVertices, "SDEF vertices (using linear weights)");
-            warn(qdefVertices, "QDEF vertices (using linear weights)");
             report->importedKinematicRigidBodies = static_cast<int>(
                 std::count_if(model.rigidBodies.begin(), model.rigidBodies.end(),
-                    [](const auto& body) { return body.mode == 0; }));
+                    [](const auto& body) { return body.mode ==
+                        Engine::Model::RigidBodyMotion::FollowTransform; }));
             report->importedDynamicRigidBodies = static_cast<int>(
                 std::count_if(model.rigidBodies.begin(), model.rigidBodies.end(),
-                    [](const auto& body) { return body.mode > 0; }));
+                    [](const auto& body) { return body.mode !=
+                        Engine::Model::RigidBodyMotion::FollowTransform; }));
             report->importedPhysicsJoints =
                 static_cast<int>(model.physicsJoints.size());
             report->importedSoftBodies =
@@ -1003,11 +1045,15 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
             if (!model.softBodies.empty())
                 report->warnings.push_back("PMX triangle-mesh soft bodies use "
                     "Bullet cloth with pinned and rigid-body-following anchors; "
-                    "cluster, near-anchor, and two-way anchor "
-                    "behavior remain unavailable");
-            warn(toonMaterials, "toon materials");
-            warn(sphereMaterials, "sphere-mapped materials");
-            warn(outlineMaterials, "outlined materials");
+                    "Bullet anchors exchange forces with rigid bodies; "
+                    "near-anchor collision semantics and MMD motion parity "
+                    "remain unverified");
+            if (toonMaterials)
+                report->warnings.push_back(std::to_string(toonMaterials) +
+                    " toon materials use a PBR lighting approximation");
+            if (outlineMaterials)
+                report->warnings.push_back(std::to_string(outlineMaterials) +
+                    " outlined materials use approximate mesh-normal extrusion");
             warn(fixedAxisBones,
                 "fixed-axis bones (rotation projection approximates MMD behavior)");
             warn(localAxisBones,
@@ -1176,41 +1222,58 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
                 primitive.vertices.push_back(vertices[indices[j + 2]]);
                 primitive.vertices.push_back(vertices[indices[j + 1]]);
             }
+            if (options.morphs)
+            {
+            // Link source vertices to the slots in this material's expanded mesh.
+            // A morph usually touches few vertices, so visit those slots instead
+            // of scanning every triangle once for every morph.
+            std::vector<int> firstSlot(vertexCount, -1);
+            std::vector<int> nextSlot(range.count, -1);
+            for (int slot = 0; slot < range.count; ++slot)
+            {
+                const int triangleSlot = slot % 3;
+                const int source = indices[range.begin + slot - triangleSlot +
+                    (triangleSlot == 1 ? 2 : triangleSlot == 2 ? 1 : 0)];
+                nextSlot[slot] = firstSlot[source];
+                firstSlot[source] = slot;
+            }
             for (const auto& morph : morphs)
             {
                 if (!morph.supported || morph.offsets.empty()) continue;
                 Engine::Model::MorphTarget target;
                 target.name = morph.name;
-                for (int j = range.begin; j < range.begin + range.count; j += 3)
+                for (const auto& [source, offset] : morph.offsets)
                 {
-                    const int sourceIndices[3]{ indices[j], indices[j + 2], indices[j + 1] };
-                    for (int slot = 0; slot < 3; ++slot)
+                    if (firstSlot[source] < 0) continue;
+                    if (glm::any(glm::notEqual(offset.position, glm::vec3(0.f))) &&
+                        target.positions.empty())
+                        target.positions.assign(range.count, glm::vec3(0.f));
+                    if (glm::any(glm::notEqual(offset.uv, glm::vec4(0.f))) &&
+                        target.uv.empty())
+                        target.uv.assign(range.count, glm::vec4(0.f));
+                    for (size_t channel = 0; channel < target.uvChannels.size(); ++channel)
+                        if (glm::any(glm::notEqual(offset.uvChannels[channel],
+                                glm::vec4(0.f))) && target.uvChannels[channel].empty())
+                            target.uvChannels[channel].assign(range.count, glm::vec4(0.f));
+                    for (int slot = firstSlot[source]; slot >= 0; slot = nextSlot[slot])
                     {
-                        const auto offset = morph.offsets.find(sourceIndices[slot]);
-                        if (offset != morph.offsets.end() &&
-                            glm::any(glm::notEqual(offset->second.position,
-                                glm::vec3(0.f))) &&
-                            target.positions.empty())
-                            target.positions.assign(range.count, glm::vec3(0.f));
                         if (!target.positions.empty())
-                            target.positions[static_cast<size_t>(j - range.begin) +
-                                slot] = offset == morph.offsets.end()
-                                ? glm::vec3(0.f) : offset->second.position;
-                        if (offset != morph.offsets.end() &&
-                            glm::any(glm::notEqual(offset->second.uv,
-                                glm::vec4(0.f))) && target.uv.empty())
-                            target.uv.assign(range.count, glm::vec4(0.f));
+                            target.positions[slot] = offset.position;
                         if (!target.uv.empty())
-                            target.uv[static_cast<size_t>(j - range.begin) +
-                                slot] = offset == morph.offsets.end()
-                                ? glm::vec4(0.f) : offset->second.uv;
+                            target.uv[slot] = offset.uv;
+                        for (size_t channel = 0; channel < target.uvChannels.size(); ++channel)
+                            if (!target.uvChannels[channel].empty())
+                                target.uvChannels[channel][slot] = offset.uvChannels[channel];
                     }
                 }
-                if (!target.positions.empty() || !target.uv.empty())
+                if (!target.positions.empty() || !target.uv.empty() ||
+                    std::any_of(target.uvChannels.begin(), target.uvChannels.end(),
+                        [](const auto& channel) { return !channel.empty(); }))
                 {
                     primitive.morphTargets.push_back(std::move(target));
                     primitive.morphWeights.push_back(0.f);
                 }
+            }
             }
             meshNode.primitives.push_back(primitiveIndex);
         }
@@ -1264,7 +1327,8 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
         {
             model.rigidBodies.erase(std::remove_if(model.rigidBodies.begin(),
                 model.rigidBodies.end(), [](const auto& body)
-                { return body.mode == 0; }), model.rigidBodies.end());
+                { return body.mode == Engine::Model::RigidBodyMotion::FollowTransform; }),
+                model.rigidBodies.end());
             if (report)
             {
                 report->importedKinematicRigidBodies = 0;

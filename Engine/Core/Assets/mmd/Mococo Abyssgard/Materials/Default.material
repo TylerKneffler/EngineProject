@@ -21,7 +21,7 @@
         0
     ],
     "shininess": 32,
-    "useMmdSpecular": false,
+    "specularModel": "MetallicRoughness",
     "metallic": 0,
     "roughness": 1,
     "subsurfaceEnabled": false,
@@ -61,5 +61,17 @@
     "normalUvSet": 0,
     "occlusionUvSet": 0,
     "emissiveUvSet": 0,
-    "heightUvSet": 0
+    "heightUvSet": 0,
+    "edgeColor": [
+        0,
+        0,
+        0,
+        0
+    ],
+    "edgeWidth": 0,
+    "edgeEnabled": false,
+    "sphereMode": 0,
+    "builtinToon": -1,
+    "sphereTexture": "",
+    "toonTexture": ""
 }

@@ -21,7 +21,7 @@
         0
     ],
     "shininess": 1,
-    "useMmdSpecular": true,
+    "specularModel": "BlinnPhong",
     "metallic": 0,
     "roughness": 1,
     "subsurfaceEnabled": false,
@@ -62,5 +62,17 @@
     "occlusionUvSet": 0,
     "emissiveUvSet": 0,
     "heightUvSet": 0,
-    "baseColorTexture": "Engine/Core/Assets/mmd/Mococo/Textures/OutlineJacket.png"
+    "baseColorTexture": "Engine/Core/Assets/mmd/Mococo/Textures/OutlineJacket.png",
+    "edgeColor": [
+        0,
+        0,
+        0,
+        1
+    ],
+    "edgeWidth": 1,
+    "edgeEnabled": false,
+    "sphereMode": 0,
+    "builtinToon": 8,
+    "sphereTexture": "",
+    "toonTexture": ""
 }

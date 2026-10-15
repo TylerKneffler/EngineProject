@@ -14,6 +14,7 @@
 #include <limits>
 #include <string_view>
 #include <unordered_map>
+#include <glm/gtc/quaternion.hpp>
 #ifdef _WIN32
 #define NOMINMAX
 #include <Windows.h>
@@ -71,7 +72,7 @@ std::string Mesh::ResolveFilePath(const std::string& path)
 namespace
 {
 constexpr uint32_t kNativeMeshMagic = 0x4853454d; // "MESH"
-constexpr uint32_t kNativeMeshVersion = 5;
+constexpr uint32_t kNativeMeshVersion = 7;
 constexpr float kPi = 3.14159265358979323846f;
 struct LegacyVertexV2
 {
@@ -81,6 +82,18 @@ struct LegacyVertexV3
 {
     float pos[3], normal[3], uv[2], tangent[4], uv1[2], color[4];
 };
+struct LegacyVertexV5
+{
+    float pos[3], normal[3], uv[2], tangent[4], uv1[2], color[4];
+    float joints0[4], weights0[4], joints1[4], weights1[4];
+};
+static_assert(sizeof(LegacyVertexV5) == 136);
+struct LegacyVertexV6
+{
+    LegacyVertexV5 base;
+    float uvChannels[5][4];
+};
+static_assert(sizeof(LegacyVertexV6) == 216);
 
 Engine::Serialization::JsonValue FloatArray(const std::vector<float>& values)
 {
@@ -271,11 +284,12 @@ void Mesh::LoadFromFile(const std::string& path)
         native.read(reinterpret_cast<char*>(&version), sizeof(version));
         native.read(reinterpret_cast<char*>(&count), sizeof(count));
         if (!native || magic != kNativeMeshMagic ||
-            (version != 2 && version != 3 && version != 4 &&
+            (version != 2 && version != 3 && version != 4 && version != 5 &&
+                version != 6 &&
                 version != kNativeMeshVersion))
             throw std::runtime_error("Mesh: invalid native mesh: " + path);
         uint32_t indexCount = 0;
-        if (version == 5)
+        if (version >= 5)
             native.read(reinterpret_cast<char*>(&indexCount), sizeof(indexCount));
         if (!native || count == 0 || count > 100000000u ||
             indexCount > 300000000u)
@@ -304,15 +318,37 @@ void Mesh::LoadFromFile(const std::string& path)
                 std::memcpy(m_vertices[i].pos, legacy[i].pos, sizeof(LegacyVertexV3));
             }
         }
+        else if (version <= 5)
+        {
+            std::vector<LegacyVertexV5> legacy(count);
+            native.read(reinterpret_cast<char*>(legacy.data()),
+                static_cast<std::streamsize>(legacy.size() * sizeof(LegacyVertexV5)));
+            for (size_t i = 0; i < legacy.size(); ++i)
+                std::memcpy(m_vertices[i].pos, legacy[i].pos, sizeof(LegacyVertexV5));
+        }
+        else if (version == 6)
+        {
+            std::vector<LegacyVertexV6> legacy(count);
+            native.read(reinterpret_cast<char*>(legacy.data()),
+                static_cast<std::streamsize>(legacy.size() * sizeof(LegacyVertexV6)));
+            for (size_t i = 0; i < legacy.size(); ++i)
+                std::memcpy(m_vertices[i].pos, &legacy[i], sizeof(LegacyVertexV6));
+        }
         else
             native.read(reinterpret_cast<char*>(m_vertices.data()),
                 static_cast<std::streamsize>(m_vertices.size() * sizeof(Vertex)));
-        if (version == 5)
+        if (version >= 5)
         {
             m_indices.resize(indexCount);
             native.read(reinterpret_cast<char*>(m_indices.data()),
                 static_cast<std::streamsize>(m_indices.size() * sizeof(uint32_t)));
         }
+        if (version <= 5)
+            for (Vertex& vertex : m_vertices)
+            {
+                std::copy(std::begin(vertex.uv), std::end(vertex.uv), vertex.uvChannels[0]);
+                std::copy(std::begin(vertex.uv1), std::end(vertex.uv1), vertex.uvChannels[1]);
+            }
         if (!native)
             throw std::runtime_error("Mesh: truncated native mesh: " + path);
         if (!ValidateAuthoredGeometry(m_vertices, m_indices))
@@ -694,10 +730,14 @@ uint64_t Mesh::GetCpuMeshMemoryBytes() const
         static_cast<uint64_t>(m_terrainVertices.capacity()) * sizeof(TerrainVertex) +
         static_cast<uint64_t>(m_indices.capacity()) * sizeof(uint32_t);
     for (const MorphTarget& target : m_morphTargets)
+    {
         bytes += static_cast<uint64_t>(target.positions.capacity() +
             target.normals.capacity() + target.tangents.capacity()) *
             sizeof(glm::vec3) + static_cast<uint64_t>(target.uv.capacity()) *
             sizeof(glm::vec4);
+        for (const auto& channel : target.uvChannels)
+            bytes += static_cast<uint64_t>(channel.capacity()) * sizeof(glm::vec4);
+    }
     return bytes + static_cast<uint64_t>(m_morphWeights.capacity()) * sizeof(float) +
         static_cast<uint64_t>(m_surfaceOffsets.capacity()) * sizeof(glm::vec3);
 }
@@ -749,7 +789,7 @@ bool Mesh::SaveMorphFile(const std::string& path,
     std::ofstream file(path, std::ios::binary | std::ios::trunc);
     if (!file) return false;
     const uint32_t magic = 0x46524f4du; // MORF
-    const uint32_t version = 2;
+    const uint32_t version = 3;
     const uint32_t count = static_cast<uint32_t>(targets.size());
     file.write(reinterpret_cast<const char*>(&magic), sizeof(magic));
     file.write(reinterpret_cast<const char*>(&version), sizeof(version));
@@ -771,6 +811,13 @@ bool Mesh::SaveMorphFile(const std::string& path,
         file.write(reinterpret_cast<const char*>(&uvSize), sizeof(uvSize));
         file.write(reinterpret_cast<const char*>(target.uv.data()),
             static_cast<std::streamsize>(uvSize * sizeof(glm::vec4)));
+        for (const auto& channel : target.uvChannels)
+        {
+            const uint32_t size = static_cast<uint32_t>(channel.size());
+            file.write(reinterpret_cast<const char*>(&size), sizeof(size));
+            file.write(reinterpret_cast<const char*>(channel.data()),
+                static_cast<std::streamsize>(size * sizeof(glm::vec4)));
+        }
     }
     return file.good();
 }
@@ -786,7 +833,7 @@ bool Mesh::LoadMorphFile(const std::string& path, unsigned nodeIndex,
     file.read(reinterpret_cast<char*>(&magic), sizeof(magic));
     file.read(reinterpret_cast<char*>(&version), sizeof(version));
     file.read(reinterpret_cast<char*>(&count), sizeof(count));
-    if (!file || magic != 0x46524f4du || (version != 1 && version != 2) ||
+    if (!file || magic != 0x46524f4du || (version != 1 && version != 2 && version != 3) ||
         count > 10000u)
         return false;
     std::vector<MorphTarget> targets;
@@ -824,6 +871,19 @@ bool Mesh::LoadMorphFile(const std::string& path, unsigned nodeIndex,
                 static_cast<std::streamsize>(size * sizeof(glm::vec4)));
             if (!file) return false;
         }
+        if (version >= 3)
+            for (auto& channel : target.uvChannels)
+            {
+                uint32_t size = 0;
+                file.read(reinterpret_cast<char*>(&size), sizeof(size));
+                if (!file || size > 100000000u ||
+                    (!m_vertices.empty() && size != 0 && size != m_vertices.size()))
+                    return false;
+                channel.resize(size);
+                file.read(reinterpret_cast<char*>(channel.data()),
+                    static_cast<std::streamsize>(size * sizeof(glm::vec4)));
+                if (!file) return false;
+            }
         targets.push_back(std::move(target));
     }
     SetMorphData(nodeIndex, std::move(targets), std::move(weights));
@@ -895,11 +955,24 @@ void Mesh::CreateMorphBuffers()
     m_morphDeltaBuffer.reset();
     m_morphWeightBuffer.reset();
     m_packedMorphWeights.clear();
+    m_activeMorphTargetCount = 0;
     if (!m_bufferFactory || m_vertices.empty() || m_morphTargets.empty())
         return;
 
     const size_t vertexCount = m_vertices.size();
-    m_morphDeltaStrideFloat4 = std::any_of(m_morphTargets.begin(),
+    const bool hasFullUv = std::any_of(m_morphTargets.begin(),
+        m_morphTargets.end(), [](const MorphTarget& target)
+        {
+            for (size_t channel = 0; channel < target.uvChannels.size(); ++channel)
+            {
+                const auto& values = target.uvChannels[channel];
+                if (channel >= 2 && !values.empty()) return true;
+                if (std::any_of(values.begin(), values.end(), [](const glm::vec4& value)
+                    { return value.z != 0.f || value.w != 0.f; })) return true;
+            }
+            return false;
+        });
+    m_morphDeltaStrideFloat4 = hasFullUv ? 9u : std::any_of(m_morphTargets.begin(),
         m_morphTargets.end(), [](const MorphTarget& target)
         { return !target.uv.empty(); }) ? 4u : 3u;
     std::vector<glm::vec4> deltas(vertexCount * m_morphTargets.size() *
@@ -920,16 +993,21 @@ void Mesh::CreateMorphBuffers()
             if (vertexIndex < target.tangents.size())
                 deltas[base + 2] = glm::vec4(
                     target.tangents[vertexIndex], 0.f);
-            if (m_morphDeltaStrideFloat4 == 4 && vertexIndex < target.uv.size())
+            if (m_morphDeltaStrideFloat4 >= 4 && vertexIndex < target.uv.size())
                 deltas[base + 3] = target.uv[vertexIndex];
+            if (hasFullUv)
+                for (size_t channel = 0; channel < target.uvChannels.size(); ++channel)
+                    if (vertexIndex < target.uvChannels[channel].size())
+                        deltas[base + 4 + channel] = target.uvChannels[channel][vertexIndex];
         }
     }
     m_morphDeltaBuffer = m_bufferFactory->CreateStaticShaderResource(
         static_cast<uint64_t>(deltas.size()) * sizeof(glm::vec4),
         deltas.data(), sizeof(glm::vec4));
 
-    const size_t weightGroups = (m_morphTargets.size() + 3u) / 4u;
-    m_packedMorphWeights.assign(weightGroups, glm::vec4(0.f));
+    // Each float4 stores the authored target index and its current weight.
+    // The vertex shaders can then skip inactive targets entirely.
+    m_packedMorphWeights.assign(m_morphTargets.size(), glm::vec4(0.f));
     m_morphWeightBuffer = m_bufferFactory->CreateBuffer(
         IGraphicsBuffer::Usage::ShaderResource,
         IGraphicsBuffer::AccessMode::Upload,
@@ -942,15 +1020,15 @@ void Mesh::UploadMorphWeights()
 {
     if (!m_morphWeightBuffer)
         return;
-    const size_t groupCount = (m_morphTargets.size() + 3u) / 4u;
-    m_packedMorphWeights.assign(groupCount, glm::vec4(0.f));
+    m_activeMorphTargetCount = 0;
     for (size_t index = 0; index < m_morphWeights.size() &&
         index < m_morphTargets.size(); ++index)
-        m_packedMorphWeights[index / 4u][static_cast<glm::length_t>(index % 4u)] =
-            m_morphWeights[index];
+        if (m_morphWeights[index] != 0.f)
+            m_packedMorphWeights[m_activeMorphTargetCount++] = glm::vec4(
+                static_cast<float>(index), m_morphWeights[index], 0.f, 0.f);
     if (void* mapped = m_morphWeightBuffer->Map())
     {
-        const uint64_t byteCount = static_cast<uint64_t>(m_packedMorphWeights.size()) *
+        const uint64_t byteCount = static_cast<uint64_t>(m_activeMorphTargetCount) *
             sizeof(glm::vec4);
         std::memcpy(mapped, m_packedMorphWeights.data(), static_cast<size_t>(byteCount));
         m_morphWeightBuffer->Unmap();
@@ -1022,6 +1100,11 @@ bool Mesh::ValidateAuthoredGeometry(const std::vector<Vertex>& vertices,
             !finite(vertex.joints0, 4) || !finite(vertex.weights0, 4) ||
             !finite(vertex.joints1, 4) || !finite(vertex.weights1, 4))
             return false;
+        for (const auto& channel : vertex.uvChannels)
+            if (!finite(channel, 4)) return false;
+        if (!finite(vertex.sdefCenterAndMode, 4) ||
+            !finite(vertex.sdefRadius0, 4) ||
+            !finite(vertex.sdefRadius1, 4)) return false;
         for (float value : vertex.weights0)
             if (value < 0.f) return false;
         for (float value : vertex.weights1)
@@ -1121,6 +1204,10 @@ Mesh::Vertex InterpolateVertex(const Mesh::Vertex& a, const Mesh::Vertex& b, flo
     {
         mixed.color[i] = a.color[i] + (b.color[i] - a.color[i]) * t;
     }
+    for (int channel = 0; channel < 5; ++channel)
+        for (int component = 0; component < 4; ++component)
+            mixed.uvChannels[channel][component] = a.uvChannels[channel][component] +
+                (b.uvChannels[channel][component] - a.uvChannels[channel][component]) * t;
     for (int i = 0; i < 4; ++i)
     {
         mixed.joints0[i] = a.joints0[i] + (b.joints0[i] - a.joints0[i]) * t;
@@ -1574,12 +1661,107 @@ std::vector<Mesh::Vertex> Mesh::BuildPosedVertices(
                 vertex.uv1[0] += target.uv[index].z * weight;
                 vertex.uv1[1] += target.uv[index].w * weight;
             }
+            for (size_t channel = 0; channel < target.uvChannels.size(); ++channel)
+                if (index < target.uvChannels[channel].size())
+                {
+                    const glm::vec4 delta = target.uvChannels[channel][index] * weight;
+                    for (size_t component = channel < 2 ? 2 : 0; component < 4; ++component)
+                        vertex.uvChannels[channel][component] += delta[static_cast<glm::length_t>(component)];
+                }
+            vertex.uvChannels[0][0] = vertex.uv[0];
+            vertex.uvChannels[0][1] = vertex.uv[1];
+            vertex.uvChannels[1][0] = vertex.uv1[0];
+            vertex.uvChannels[1][1] = vertex.uv1[1];
         }
     }
     if (skinPalette && !skinPalette->empty())
     {
         for (Vertex& vertex : deformed)
         {
+            const glm::vec3 sourcePosition(vertex.pos[0], vertex.pos[1], vertex.pos[2]);
+            const glm::vec3 sourceNormal(vertex.normal[0], vertex.normal[1], vertex.normal[2]);
+            const glm::vec3 sourceTangent(vertex.tangent[0], vertex.tangent[1], vertex.tangent[2]);
+            const int deformMode = static_cast<int>(vertex.sdefCenterAndMode[3]);
+            glm::vec3 specialPosition(0.f), specialNormal(0.f), specialTangent(0.f);
+            bool special = false;
+            if (deformMode == 3)
+            {
+                const auto joint0 = static_cast<uint32_t>(vertex.joints0[0]);
+                const auto joint1 = static_cast<uint32_t>(vertex.joints0[1]);
+                if (joint0 < skinPalette->size() && joint1 < skinPalette->size())
+                {
+                    const glm::mat4& bone0 = (*skinPalette)[joint0];
+                    const glm::mat4& bone1 = (*skinPalette)[joint1];
+                    const float weight = vertex.weights0[0];
+                    const glm::vec3 center(vertex.sdefCenterAndMode[0],
+                        vertex.sdefCenterAndMode[1], vertex.sdefCenterAndMode[2]);
+                    const glm::vec3 radius0(vertex.sdefRadius0[0],
+                        vertex.sdefRadius0[1], vertex.sdefRadius0[2]);
+                    const glm::vec3 radius1(vertex.sdefRadius1[0],
+                        vertex.sdefRadius1[1], vertex.sdefRadius1[2]);
+                    glm::quat q0 = glm::normalize(glm::quat_cast(bone0));
+                    glm::quat q1 = glm::normalize(glm::quat_cast(bone1));
+                    if (glm::dot(q0, q1) < 0.f) q1 = -q1;
+                    const glm::quat rotation = glm::normalize(glm::slerp(q1, q0, weight));
+                    specialPosition = weight * glm::vec3(bone0 * glm::vec4(
+                        sourcePosition - center + radius0, 1.f)) +
+                        (1.f - weight) * glm::vec3(bone1 * glm::vec4(
+                            sourcePosition - center + radius1, 1.f)) +
+                        rotation * (center - weight * radius0 -
+                            (1.f - weight) * radius1);
+                    specialNormal = rotation * sourceNormal;
+                    specialTangent = rotation * sourceTangent;
+                    special = true;
+                }
+            }
+            else if (deformMode == 4)
+            {
+                glm::quat real(0.f, 0.f, 0.f, 0.f);
+                glm::quat dual(0.f, 0.f, 0.f, 0.f);
+                glm::quat reference(1.f, 0.f, 0.f, 0.f);
+                bool hasReference = false;
+                for (int influence = 0; influence < 4; ++influence)
+                {
+                    const auto joint = static_cast<uint32_t>(vertex.joints0[influence]);
+                    const float weight = vertex.weights0[influence];
+                    if (joint >= skinPalette->size() || weight == 0.f) continue;
+                    const glm::mat4& bone = (*skinPalette)[joint];
+                    glm::quat rotation = glm::normalize(glm::quat_cast(bone));
+                    if (!hasReference) { reference = rotation; hasReference = true; }
+                    if (glm::dot(reference, rotation) < 0.f) rotation = -rotation;
+                    const glm::vec3 translation(bone[3]);
+                    const glm::quat displacement = .5f *
+                        glm::quat(0.f, translation.x, translation.y, translation.z) * rotation;
+                    real += weight * rotation;
+                    dual += weight * displacement;
+                }
+                const float magnitude = glm::length(real);
+                if (magnitude > 1e-7f)
+                {
+                    real /= magnitude;
+                    dual /= magnitude;
+                    const glm::quat displacement = dual * glm::conjugate(real);
+                    specialPosition = real * sourcePosition + 2.f *
+                        glm::vec3(displacement.x, displacement.y, displacement.z);
+                    specialNormal = real * sourceNormal;
+                    specialTangent = real * sourceTangent;
+                    special = true;
+                }
+            }
+            if (special)
+            {
+                const glm::vec3 normal = glm::length(specialNormal) > 1e-7f
+                    ? glm::normalize(specialNormal) : specialNormal;
+                const glm::vec3 tangent = glm::length(specialTangent) > 1e-7f
+                    ? glm::normalize(specialTangent) : specialTangent;
+                vertex.pos[0] = specialPosition.x; vertex.pos[1] = specialPosition.y;
+                vertex.pos[2] = specialPosition.z;
+                vertex.normal[0] = normal.x; vertex.normal[1] = normal.y;
+                vertex.normal[2] = normal.z;
+                vertex.tangent[0] = tangent.x; vertex.tangent[1] = tangent.y;
+                vertex.tangent[2] = tangent.z;
+                continue;
+            }
             glm::mat4 skin(0.f);
             float totalWeight = 0.f;
             for (int influence = 0; influence < 4; ++influence)
@@ -1834,12 +2016,18 @@ Mesh::JsonValue Mesh::Serialize() const
         return result.Set("morphFile", JsonValue(m_morphFilePath));
     JsonValue targets = JsonValue::MakeArray();
     for (const MorphTarget& target : m_morphTargets)
+    {
+        JsonValue channels = JsonValue::MakeArray();
+        for (const auto& channel : target.uvChannels)
+            channels.Push(Vec4Array(channel));
         targets.Push(JsonValue::MakeObject()
             .Set("name", JsonValue(target.name))
             .Set("positions", Vec3Array(target.positions))
             .Set("normals", Vec3Array(target.normals))
             .Set("tangents", Vec3Array(target.tangents))
-            .Set("uv", Vec4Array(target.uv)));
+            .Set("uv", Vec4Array(target.uv))
+            .Set("uvChannels", std::move(channels)));
+    }
     return result.Set("morphTargets", std::move(targets));
 }
 
@@ -1856,6 +2044,10 @@ void Mesh::DeserializeLegacyMorphTargets(const JsonValue& value)
         target.normals = ReadVec3Array(list.ArrayAt(i)["normals"]);
         target.tangents = ReadVec3Array(list.ArrayAt(i)["tangents"]);
         target.uv = ReadVec4Array(list.ArrayAt(i)["uv"]);
+        const JsonValue& channels = list.ArrayAt(i)["uvChannels"];
+        for (size_t channel = 0; channel < target.uvChannels.size() &&
+            channel < channels.ArraySize(); ++channel)
+            target.uvChannels[channel] = ReadVec4Array(channels.ArrayAt(channel));
         targets.push_back(std::move(target));
     }
     std::vector<float> weights;

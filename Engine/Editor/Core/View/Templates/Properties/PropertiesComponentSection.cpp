@@ -17,13 +17,18 @@ size_t ComponentCategory(const std::string& type,
     const std::unordered_set<std::string>& scripts)
 {
     if (scripts.count(type)) return 6;
-    if (type == "Mesh" || type == "Material" || type == "Camera" ||
+    if (type == "Mesh" || type == "Material" ||
+        type == "MaterialPropertyMorph" || type == "Camera" ||
         type == "Light" || type == "LightProbe" || type == "LightProbeGroup" ||
         type == "Sprite" || type == "BakedLightingData") return 0;
     if (type == "RigidBody" || type == "PrimitiveObjectCollider" ||
-        type == "MeshObjectCollider" || type == "Cloth") return 1;
+        type == "MeshObjectCollider" || type == "Cloth" ||
+        type == "RigPhysicsBinding") return 1;
     if (type == "Model" || type == "AnimationManager" ||
-        type == "VmdSceneTrack" || type == "Skeleton" ||
+        type == "RigController" || type == "RigConstraints" ||
+        type == "RigMorphControls" ||
+        type == "SceneCameraLightTrack" ||
+        type == "Skeleton" ||
         type == "AnimationBone" || type == "SkinnedMesh" ||
         type == "SoftTissueSurface" || type == "IKBone" ||
         type == "TwoBoneIK" || type == "ChainIK" ||

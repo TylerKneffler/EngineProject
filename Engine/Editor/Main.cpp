@@ -22,6 +22,7 @@
 #include "Core/Assets/Scripts/Physics/FoxRagdollBlend.h"
 #include "Core/Serialization/SceneSerializer.h"
 #endif
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <unordered_set>
@@ -349,7 +350,7 @@ int WINAPI wWinMain(
     if (!projectSettings.defaultScene.empty())
     {
         OutputDebugStringA(("[Main] Loading default scene: " + projectSettings.defaultScene + "\n").c_str());
-        editorState->LoadScene(projectSettings.defaultScene);
+        editorState->LoadStartupScene(projectSettings.defaultScene);
     }
     splash.SetProgress(0.90f, L"Finishing startup...");
 
@@ -477,7 +478,10 @@ int WINAPI wWinMain(
         // Tick game objects while playing
         if (playState == Engine::Editor::PlayState::Playing)
         {
-            scene->Update(dt);
+            // Bullet advances at most six 60 Hz steps per rendered frame.
+            // Keep animation on the same bounded clock after a slow frame so
+            // the character does not jump ahead of its simulated rig.
+            scene->Update(std::clamp(dt, 0.f, 0.1f));
             Engine::Core::SceneManager::ProcessPendingSceneLoad();
         }
 
@@ -560,6 +564,10 @@ int WINAPI wWinMain(
                     break;
                 }
         });
+
+        // Scene requests made while drawing the UI now have a presented frame
+        // with the loading overlay before deserialization blocks this thread.
+        editorState->ProcessPendingSceneLoad();
 
         // Avoid spinning the editor loop while idle. Window input wakes this
         // wait immediately; the short timeout also services asynchronous

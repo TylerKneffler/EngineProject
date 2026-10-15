@@ -241,6 +241,7 @@ struct ObjectGPUData
     // world into this matrix per object can expose sub-pixel cracks between
     // otherwise identical terrain borders.
     glm::mat4 viewProjection;
+    glm::mat4 sphereView; // View rotation for PMX normal-based sphere coordinates.
     glm::mat4 world;
     glm::vec4 baseColor;
     glm::vec4 ambientUnlit;
@@ -282,8 +283,12 @@ struct ObjectGPUData
     glm::vec4 subsurfaceColorWeight{ 0.f }; // RGB color, enabled weight
     glm::vec4 subsurfaceRadiusThickness{ 0.f }; // RGB scene units, thickness in scene units
     glm::vec4 subsurfaceTransmission{ 0.f }; // x = transmitted-light weight
-    glm::vec4 mmdSpecularShininess{ 0.f }; // RGB reflectance; w = shininess + 1 when enabled
+    glm::vec4 blinnPhongSpecularShininess{ 0.f }; // RGB reflectance; w = shininess + 1 when enabled
     glm::vec4 pmxTextureTint { 1.f };
+    glm::vec4 pmxSphereTint { 1.f };
+    glm::vec4 pmxToonTint { 1.f };
+    glm::vec4 pmxEdgeColor { 0.f };
+    glm::vec4 pmxParams { 0.f }; // edge width, sphere mode, toon source, edge enabled
 };
 
 // Constant buffer for grid rendering
@@ -307,7 +312,7 @@ struct SkyboxCBData
 };
 
 static_assert(sizeof(DrawCBData) == 16, "Draw constants must remain small");
-static_assert(sizeof(ObjectGPUData) == 1136, "Object buffer layout must match Object.hlsl");
+static_assert(sizeof(ObjectGPUData) == 1264, "Object buffer layout must match Object.hlsl");
 static_assert(sizeof(Engine::Model::LightData) == 128,
     "Light buffer layout must match Object.hlsl");
 static_assert(sizeof(GridCBData) == 128, "Grid constant-buffer layout must match Grid.hlsl");
@@ -871,6 +876,14 @@ void Scene::BuildObjectPipeline()
         { "WEIGHTS",  0, 2, 0, 88, false },
         { "JOINTS",   1, 2, 0, 104, false },
         { "WEIGHTS",  1, 2, 0, 120, false },
+        { "TEXCOORD", 3, 2, 0, 136, false },
+        { "TEXCOORD", 4, 2, 0, 152, false },
+        { "TEXCOORD", 5, 2, 0, 168, false },
+        { "TEXCOORD", 6, 2, 0, 184, false },
+        { "TEXCOORD", 7, 2, 0, 200, false },
+        { "TEXCOORD", 8, 2, 0, 216, false },
+        { "TEXCOORD", 9, 2, 0, 232, false },
+        { "TEXCOORD", 10, 2, 0, 248, false },
     };
     Engine::Graphics::IPipelineStateBuilder::VertexElement terrainLayout[] =
     {
@@ -972,7 +985,7 @@ void Scene::BuildObjectPipeline()
                 stencilMode == PortalStencilMode::Increment
                 ? 3 : (blend ? 3 : 1))
             .SetInputLayout(terrainFormat ? terrainLayout : layout,
-                terrainFormat ? 4u : 10u)
+                terrainFormat ? 4u : 18u)
             .SetPrimitiveTopology(
                 Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
             .SetRenderTargetFormat(10, 20)
@@ -1124,7 +1137,7 @@ void Scene::BuildObjectPipeline()
             .SetDepthEnable(false)
             .SetDepthWriteEnable(false)
             .SetDepthFunc(7)
-            .SetInputLayout(layout, 10)
+            .SetInputLayout(layout, 18)
             .SetPrimitiveTopology(
                 Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
             .SetRenderTargetFormat(10, 20)
@@ -1175,12 +1188,47 @@ void Scene::BuildObjectPipeline()
         .SetDepthEnable(true)
         .SetDepthWriteEnable(false)
         .SetDepthFunc(3)                       // D3D12_COMPARISON_FUNC_LESS_EQUAL
-        .SetInputLayout(layout, 10)
+        .SetInputLayout(layout, 18)
         .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
         .SetRenderTargetFormat(10, 20)
         .Build();
     if (!m_objectOutlinePipeline)
         throw std::runtime_error("Failed to build object outline pipeline: " + outlineBuilder->GetLastError());
+
+    auto pmxOutlineVs = shaderCompiler->CompileFromFile(
+        outlineShaderPath.c_str(), "VSMmdMain",
+        Engine::Graphics::IShaderCompiler::CompileProfile::VS_5_0);
+    auto pmxOutlinePs = shaderCompiler->CompileFromFile(
+        outlineShaderPath.c_str(), "PSMmdMain",
+        Engine::Graphics::IShaderCompiler::CompileProfile::PS_5_0);
+    if (!pmxOutlineVs || !pmxOutlinePs)
+        throw std::runtime_error("Failed to compile PMX outline shaders: " +
+            shaderCompiler->GetLastError());
+    auto pmxOutlineBuilder = pipelineFactory->CreateBuilder();
+    m_pmxOutlinePipeline = pmxOutlineBuilder->SetVertexShader(pmxOutlineVs.get())
+        .SetPixelShader(pmxOutlinePs.get())
+        .SetFillMode(false)
+        .SetCullMode(true)
+        .SetFrontCounterClockwise(true)
+        .SetDepthClipEnable(true)
+        .SetBlendEnable(true)
+        .SetSrcBlend(4)
+        .SetDestBlend(5)
+        .SetBlendOp(0)
+        .SetSrcBlendAlpha(1)
+        .SetDestBlendAlpha(0)
+        .SetBlendOpAlpha(0)
+        .SetDepthEnable(true)
+        .SetDepthWriteEnable(false)
+        .SetDepthFunc(3)
+        .SetInputLayout(layout, 18)
+        .SetPrimitiveTopology(
+            Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
+        .SetRenderTargetFormat(10, 20)
+        .Build();
+    if (!m_pmxOutlinePipeline)
+        throw std::runtime_error("Failed to build PMX outline pipeline: " +
+            pmxOutlineBuilder->GetLastError());
 
     auto terrainOutlineBuilder = pipelineFactory->CreateBuilder();
     if (!terrainOutlineBuilder)
@@ -2368,7 +2416,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         Engine::Graphics::IGraphicsBuffer* morphDeltaBuffer = nullptr;
         Engine::Graphics::IGraphicsBuffer* morphWeightBuffer = nullptr;
         Engine::Graphics::IPipelineState* pipeline = nullptr;
-        std::array<const Engine::Graphics::IGraphicsTexture*, 10> textures{};
+        std::array<const Engine::Graphics::IGraphicsTexture*, 12> textures{};
         UINT64 constantBufferOffset = 0;
         DrawCBData drawData{};
         ObjectGPUData objectData{};
@@ -2380,6 +2428,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         bool preview = false;
         bool terrain = false;
         bool blended = false;
+        bool pmxOutline = false;
         bool castsShadow = false;
         bool doubleSided = false;
         bool occlusionCandidate = false;
@@ -2445,6 +2494,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         preparedDraw.preview = isPreview;
         preparedDraw.terrain = mesh && mesh->UsesTerrainVertexFormat();
         preparedDraw.blended = sortedItem.blended;
+        preparedDraw.pmxOutline = mat && mat->edgeEnabled &&
+            mat->edgeWidth > 0.f && mat->edgeColor.a > 0.f &&
+            !preparedDraw.terrain && !isPreview;
         preparedDraw.castsShadow = shadowSelection.valid && mesh && !sprite &&
             !sortedItem.blended && !belongsToPreview &&
             (!mat || mat->castsShadows);
@@ -2509,6 +2561,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 objectData.reflectionEnvironmentParams.w = 1.f;
         }
         objectData.viewProjection = proj * view;
+        objectData.sphereView = view;
         objectData.world = world;
         objectData.traversalClipPlane = renderItem->traversalClipPlane;
         objectData.spriteUvRect = { 0.f, 0.f, 1.f, 1.f };
@@ -2531,7 +2584,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             preparedDraw.morphDeltaBuffer = mesh->GetMorphDeltaBuffer();
             preparedDraw.morphWeightBuffer = mesh->GetMorphWeightBuffer();
             objectData.morphParams = {
-                static_cast<float>(mesh->GetMorphTargetCount()),
+                static_cast<float>(mesh->GetActiveMorphTargetCount()),
                 static_cast<float>(mesh->GetVertexCount()), 0.f,
                 static_cast<float>(mesh->GetMorphDeltaStrideFloat4()) };
         }
@@ -2580,6 +2633,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     textureFlags |= flag;
             };
             prepareTexture(0, mat->baseColorTexture, 1u);
+            prepareTexture(10, mat->sphereTexture, 256u);
+            prepareTexture(11, mat->toonTexture, 512u);
             prepareTexture(1, mat->metallicRoughnessTexture, 2u);
             if (allowNormalMapping)
                 prepareTexture(2, mat->normalTexture, 4u);
@@ -2596,6 +2651,12 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             objectData.baseColor = glm::vec4(mat->diffuseColor, mat->baseColorAlpha);
             objectData.pmxTextureTint = glm::vec4(
                 mat->baseColorTextureTint, mat->baseColorTextureTintAlpha);
+            objectData.pmxSphereTint = mat->sphereTint;
+            objectData.pmxToonTint = mat->toonTint;
+            objectData.pmxEdgeColor = mat->edgeColor;
+            objectData.pmxParams = {
+                mat->edgeWidth, static_cast<float>(mat->sphereMode),
+                static_cast<float>(mat->builtinToon), mat->edgeEnabled ? 1.f : 0.f };
             objectData.ambientUnlit = glm::vec4(
                 settings.ambientColor + mat->ambientColor + bakedIrradiance,
                 mat->unlit ? 1.f : 0.f);
@@ -2605,8 +2666,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 mat->metallicFactor, mat->roughnessFactor, mat->normalScale,
                 static_cast<float>(textureFlags)
             };
-            if (mat->useMmdSpecular)
-                objectData.mmdSpecularShininess = glm::vec4(
+            if (mat->specularModel == "BlinnPhong")
+                objectData.blinnPhongSpecularShininess = glm::vec4(
                     mat->specularColor, std::max(mat->shininess, 0.f) + 1.f);
             // Blended and unlit materials opt out. A metallic-roughness map can
             // still suppress scattering per pixel in the shader.
@@ -3138,6 +3199,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 : Engine::Graphics::GpuTimingStage::Opaque));
         if (draw.occlusionCandidate)
             context->BeginOcclusionQuery(draw.occlusionId);
+        if (draw.pmxOutline && m_pmxOutlinePipeline)
+        {
+            context->SetPipeline(m_pmxOutlinePipeline.get());
+            context->SetConstantBuffer(
+                0, m_objectConstantBuffer.get(), draw.constantBufferOffset);
+            submitGeometry(draw);
+        }
         context->SetPipeline(geometryPipeline(draw, draw.pipeline));
         context->SetConstantBuffer(
             0, m_objectConstantBuffer.get(), draw.constantBufferOffset);
@@ -4076,6 +4144,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 continue;
             ObjectGPUData mappedData = draw.objectData;
             mappedData.viewProjection = proj * portalJob.mappedView;
+            mappedData.sphereView = portalJob.mappedView;
             mappedData.portalClipPlane = portalClipPlane;
             mappedData.viewPositionAlphaCutoff.x =
                 portalJob.mappedCameraPosition.x;

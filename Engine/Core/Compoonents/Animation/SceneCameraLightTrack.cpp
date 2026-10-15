@@ -1,4 +1,4 @@
-#include "VmdSceneTrack.h"
+#include "SceneCameraLightTrack.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Lighting/Light.h"
 #include "Core/Object.h"
@@ -12,14 +12,6 @@ namespace Engine::Components
 namespace
 {
 using JsonValue = Engine::Serialization::JsonValue;
-
-template<size_t N, typename T>
-JsonValue Array(const std::array<T, N>& source)
-{
-    JsonValue result = JsonValue::MakeArray();
-    for (T value : source) result.Push(JsonValue(static_cast<int>(value)));
-    return result;
-}
 
 template<size_t N>
 JsonValue FloatArray(const std::array<float, N>& source)
@@ -36,13 +28,13 @@ void ReadFloats(const JsonValue& value, std::array<float, N>& target)
         target[i] = value.ArrayAt(i).AsFloat();
 }
 
-float Bezier(float t, const std::array<uint8_t, 24>& bytes, size_t channel)
+float Bezier(float t, const std::array<float, 24>& bytes, size_t channel)
 {
     const size_t offset = channel * 4;
-    const float x1 = std::clamp(bytes[offset] / 127.f, 0.f, 1.f);
-    const float y1 = std::clamp(bytes[offset + 1] / 127.f, 0.f, 1.f);
-    const float x2 = std::clamp(bytes[offset + 2] / 127.f, 0.f, 1.f);
-    const float y2 = std::clamp(bytes[offset + 3] / 127.f, 0.f, 1.f);
+    const float x1 = std::clamp(bytes[offset], 0.f, 1.f);
+    const float y1 = std::clamp(bytes[offset + 1], 0.f, 1.f);
+    const float x2 = std::clamp(bytes[offset + 2], 0.f, 1.f);
+    const float y2 = std::clamp(bytes[offset + 3], 0.f, 1.f);
     if (bytes[offset] == 0 && bytes[offset + 1] == 0 &&
         bytes[offset + 2] == 0 && bytes[offset + 3] == 0) return t;
     const auto curve = [](float u, float a, float b)
@@ -75,17 +67,18 @@ glm::quat Rotation(const std::array<float, 3>& euler)
 }
 }
 
-VmdSceneTrack::VmdSceneTrack()
+SceneCameraLightTrack::SceneCameraLightTrack()
 {
-    SetTypeName(COMPONENT_TYPE_NAME(VmdSceneTrack));
+    SetTypeName(COMPONENT_TYPE_NAME(SceneCameraLightTrack));
     RegisterField("kind", kind);
     RegisterField("playOnStart", playOnStart);
     RegisterField("looping", looping);
     RegisterField("speed", speed);
     RegisterField("time", time);
+    RegisterField("framesPerSecond", framesPerSecond);
 }
 
-VmdSceneTrack::JsonValue VmdSceneTrack::Serialize() const
+SceneCameraLightTrack::JsonValue SceneCameraLightTrack::Serialize() const
 {
     JsonValue result = Component::Serialize();
     JsonValue cameraKeys = JsonValue::MakeArray();
@@ -95,7 +88,7 @@ VmdSceneTrack::JsonValue VmdSceneTrack::Serialize() const
             .Set("distance", JsonValue(key.distance))
             .Set("target", FloatArray(key.target))
             .Set("rotation", FloatArray(key.rotation))
-            .Set("interpolation", Array(key.interpolation))
+            .Set("interpolation", FloatArray(key.interpolation))
             .Set("fov", JsonValue(key.fov))
             .Set("perspective", JsonValue(key.perspective)));
     JsonValue lightKeys = JsonValue::MakeArray();
@@ -108,7 +101,7 @@ VmdSceneTrack::JsonValue VmdSceneTrack::Serialize() const
     return result.Set("lights", std::move(lightKeys));
 }
 
-void VmdSceneTrack::Deserialize(const JsonValue& value)
+void SceneCameraLightTrack::Deserialize(const JsonValue& value)
 {
     Component::Deserialize(value);
     cameras.clear(); lights.clear();
@@ -122,7 +115,7 @@ void VmdSceneTrack::Deserialize(const JsonValue& value)
         ReadFloats(item["rotation"], key.rotation);
         for (size_t j = 0; j < key.interpolation.size() &&
             j < item["interpolation"].ArraySize(); ++j)
-            key.interpolation[j] = static_cast<uint8_t>(item["interpolation"].ArrayAt(j).AsInt());
+            key.interpolation[j] = item["interpolation"].ArrayAt(j).AsFloat();
         key.fov = item["fov"].AsFloat();
         key.perspective = item["perspective"].AsBool();
         cameras.push_back(key);
@@ -143,35 +136,35 @@ void VmdSceneTrack::Deserialize(const JsonValue& value)
     m_playing = false;
 }
 
-float VmdSceneTrack::Duration() const
+float SceneCameraLightTrack::Duration() const
 {
     const auto last = kind == static_cast<int>(Kind::Camera)
         ? (cameras.empty() ? 0u : cameras.back().frame)
         : (lights.empty() ? 0u : lights.back().frame);
-    return static_cast<float>(last / 30.0);
+    return framesPerSecond > 0.f ? last / framesPerSecond : 0.f;
 }
 
-void VmdSceneTrack::Start()
+void SceneCameraLightTrack::Start()
 {
     time = 0.f;
     m_playing = playOnStart;
     Apply();
 }
 
-void VmdSceneTrack::Restart()
+void SceneCameraLightTrack::Restart()
 {
     time = 0.f;
     m_playing = true;
     Apply();
 }
 
-void VmdSceneTrack::Seek(float seconds)
+void SceneCameraLightTrack::Seek(float seconds)
 {
     time = std::clamp(seconds, 0.f, Duration());
     Apply();
 }
 
-void VmdSceneTrack::Update()
+void SceneCameraLightTrack::Update()
 {
     if (!m_playing || !Owner || !Owner->GetScene()) return;
     const float duration = Duration();
@@ -190,10 +183,10 @@ void VmdSceneTrack::Update()
     Apply();
 }
 
-void VmdSceneTrack::Apply()
+void SceneCameraLightTrack::Apply()
 {
     if (!Owner) return;
-    const float frame = time * 30.f;
+    const float frame = time * framesPerSecond;
     if (kind == static_cast<int>(Kind::Camera))
     {
         auto* camera = Owner->GetComponent<Camera>();
@@ -215,7 +208,6 @@ void VmdSceneTrack::Apply()
         const glm::quat orientation = Rotation(rotation);
         Owner->transform.position = glm::vec3(target[0], target[1], target[2]) +
             orientation * glm::vec3(0.f, 0.f, distance);
-        // MMD's usual negative distance places the camera behind its target.
         const glm::quat view = distance > 0.f
             ? orientation * glm::angleAxis(3.14159265f, glm::vec3(0.f, 1.f, 0.f))
             : orientation;

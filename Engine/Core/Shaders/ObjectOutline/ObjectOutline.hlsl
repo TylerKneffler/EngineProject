@@ -40,8 +40,12 @@ struct ObjectData
     float4 subsurfaceColorWeight;
     float4 subsurfaceRadiusThickness;
     float4 subsurfaceTransmission;
-    float4 mmdSpecularShininess;
+    float4 blinnPhongSpecularShininess;
     float4 pmxTextureTint;
+    float4 pmxSphereTint;
+    float4 pmxToonTint;
+    float4 pmxEdgeColor;
+    float4 pmxParams;
 };
 
 #ifdef VULKAN
@@ -58,6 +62,8 @@ StructuredBuffer<float4> morphDeltas : register(t10);
 StructuredBuffer<float4> morphWeights : register(t11);
 #endif
 
+#include "../SkinDeformation.hlsli"
+
 void VSMain(
     float3 pos : POSITION,
     float3 normal : NORMAL,
@@ -69,34 +75,37 @@ void VSMain(
     float4 weights0 : WEIGHTS0,
     float4 joints1 : JOINTS1,
     float4 weights1 : WEIGHTS1,
+    float4 uvChannels0 : TEXCOORD3,
+    float4 uvChannels1 : TEXCOORD4,
+    float4 uvChannels2 : TEXCOORD5,
+    float4 uvChannels3 : TEXCOORD6,
+    float4 uvChannels4 : TEXCOORD7,
+    float4 sdefCenterAndMode : TEXCOORD8,
+    float4 sdefRadius0 : TEXCOORD9,
+    float4 sdefRadius1 : TEXCOORD10,
     uint vertexId : SV_VertexID,
     out float4 oPos : SV_POSITION)
 {
     ObjectData objectData = objects[draw.objectIndex];
     float4 localPosition = float4(pos, 1.0);
-    uint morphTargetCount = (uint)objectData.morphParams.x;
+    uint activeMorphCount = (uint)objectData.morphParams.x;
     uint morphVertexCount = (uint)objectData.morphParams.y;
     uint morphStride = (uint)objectData.morphParams.w;
-    [loop] for (uint target = 0; target < morphTargetCount; ++target)
+    [loop] for (uint active = 0; active < activeMorphCount; ++active)
     {
-        float weight = morphWeights[target >> 2][target & 3];
-        if (weight != 0.0)
-            localPosition.xyz += morphDeltas[
-                (target * morphVertexCount + vertexId) * morphStride].xyz * weight;
+        float2 morph = morphWeights[active].xy;
+        uint target = (uint)morph.x;
+        localPosition.xyz += morphDeltas[
+            (target * morphVertexCount + vertexId) * morphStride].xyz * morph.y;
     }
     uint jointCount = (uint)objectData.skinParams.y;
     if (jointCount > 0)
     {
         uint paletteOffset = (uint)objectData.skinParams.x;
-        float4x4 skin = (float4x4)0;
-        [unroll] for (uint influence = 0; influence < 4; ++influence)
-        {
-            uint joint0 = (uint)joints0[influence];
-            uint joint1 = (uint)joints1[influence];
-            if (joint0 < jointCount) skin += boneMatrices[paletteOffset + joint0] * weights0[influence];
-            if (joint1 < jointCount) skin += boneMatrices[paletteOffset + joint1] * weights1[influence];
-        }
-        localPosition = mul(skin, localPosition);
+        float3 skinNormal = normal, skinTangent = tangent.xyz;
+        SkinDeform(localPosition, skinNormal, skinTangent,
+            joints0, weights0, joints1, weights1, sdefCenterAndMode,
+            sdefRadius0, sdefRadius1, paletteOffset, jointCount);
     }
     localPosition.xyz *= 1.03;
     const float4 worldPosition = mul(objectData.world, localPosition);
@@ -119,4 +128,59 @@ void VSTerrainMain(
 float4 PSMain(float4 pos : SV_POSITION) : SV_TARGET
 {
     return float4(1.0, 0.85, 0.1, 1.0);
+}
+
+void VSMmdMain(
+    float3 pos : POSITION,
+    float3 normal : NORMAL,
+    float2 uv : TEXCOORD,
+    float4 tangent : TANGENT,
+    float2 uv1 : TEXCOORD1,
+    float4 color : COLOR,
+    float4 joints0 : JOINTS0,
+    float4 weights0 : WEIGHTS0,
+    float4 joints1 : JOINTS1,
+    float4 weights1 : WEIGHTS1,
+    float4 uvChannels0 : TEXCOORD3,
+    float4 uvChannels1 : TEXCOORD4,
+    float4 uvChannels2 : TEXCOORD5,
+    float4 uvChannels3 : TEXCOORD6,
+    float4 uvChannels4 : TEXCOORD7,
+    float4 sdefCenterAndMode : TEXCOORD8,
+    float4 sdefRadius0 : TEXCOORD9,
+    float4 sdefRadius1 : TEXCOORD10,
+    uint vertexId : SV_VertexID,
+    out float4 oPos : SV_POSITION)
+{
+    ObjectData objectData = objects[draw.objectIndex];
+    float4 localPosition = float4(pos, 1.0);
+    uint activeMorphCount = (uint)objectData.morphParams.x;
+    uint morphVertexCount = (uint)objectData.morphParams.y;
+    uint morphStride = (uint)objectData.morphParams.w;
+    [loop] for (uint active = 0; active < activeMorphCount; ++active)
+    {
+        float2 morph = morphWeights[active].xy;
+        uint target = (uint)morph.x;
+        localPosition.xyz += morphDeltas[
+            (target * morphVertexCount + vertexId) * morphStride].xyz * morph.y;
+    }
+    uint jointCount = (uint)objectData.skinParams.y;
+    float3 outlineNormal = normal;
+    if (jointCount > 0)
+    {
+        uint paletteOffset = (uint)objectData.skinParams.x;
+        float3 skinTangent = tangent.xyz;
+        SkinDeform(localPosition, outlineNormal, skinTangent,
+            joints0, weights0, joints1, weights1, sdefCenterAndMode,
+            sdefRadius0, sdefRadius1, paletteOffset, jointCount);
+    }
+    localPosition.xyz += normalize(outlineNormal) *
+        max(objectData.pmxParams.x, 0.0) * 0.01;
+    oPos = mul(objectData.viewProjection,
+        mul(objectData.world, localPosition));
+}
+
+float4 PSMmdMain(float4 pos : SV_POSITION) : SV_TARGET
+{
+    return objects[draw.objectIndex].pmxEdgeColor;
 }

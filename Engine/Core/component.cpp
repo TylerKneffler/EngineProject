@@ -33,6 +33,14 @@ struct ReferenceSearchState
     std::vector<std::string> assets;
 };
 static std::map<std::string, ReferenceSearchState> s_referenceSearch;
+struct ReferencePickState
+{
+    Engine::Scene::Scene* scene = nullptr;
+    Object* owner = nullptr;
+    Component* component = nullptr;
+    ComponentReference* reference = nullptr;
+};
+static ReferencePickState s_referencePick;
 static std::string s_editorAssetDirectory;
 static bool IsCompatiblePathAsset(const std::string& property,
     const std::string& path);
@@ -46,6 +54,53 @@ void Component::SetEditorAssetDirectory(const std::string& path)
 void Component::ClearEditorReferenceSearches()
 {
     s_referenceSearch.clear();
+    s_referencePick = {};
+}
+
+bool Component::HasEditorReferencePick()
+{
+    return s_referencePick.reference != nullptr;
+}
+
+void Component::CancelEditorReferencePick()
+{
+    s_referencePick = {};
+}
+
+bool Component::CaptureEditorReferencePick(Object* object)
+{
+    const auto pick = s_referencePick;
+    if (!pick.reference || !pick.owner || !object || !pick.scene ||
+        object->GetScene() != pick.scene)
+        return false;
+    const auto& objects = pick.scene->GetObjects();
+    const bool ownerAlive = std::any_of(objects.begin(), objects.end(),
+        [&](const auto& entry) { return entry.get() == pick.owner; });
+    if (!ownerAlive)
+    {
+        s_referencePick = {};
+        return false;
+    }
+    if (pick.component != &pick.owner->transform &&
+        std::find(pick.owner->Components.begin(),
+            pick.owner->Components.end(), pick.component) ==
+            pick.owner->Components.end())
+    {
+        s_referencePick = {};
+        return false;
+    }
+    Component* target = nullptr;
+    const std::string& type = pick.reference->expectedType;
+    if (type == "Transform") target = &object->transform;
+    else
+        for (Component* candidate : object->Components)
+            if (candidate && (type.empty() || candidate->GetTypeName() == type))
+            { target = candidate; break; }
+    if (!target) return false;
+    *pick.reference = CaptureComponentReference(target, type);
+    pick.component->MarkConfigurationDirty();
+    pick.owner->InvalidatePrefabOverrideCache();
+    return true;
 }
 
 static std::string LowerText(std::string value)
@@ -301,6 +356,20 @@ bool Component::DrawReferenceProperty(::Engine::Editor::IEditorUi& ui,
     if (ui.Button("...##sceneSearch", 24.f))
         search.open = !search.open;
     if (ui.IsItemHovered()) ui.Tooltip("Search scene");
+    ui.SameLine();
+    const bool picking = s_referencePick.component == this &&
+        s_referencePick.reference == &reference;
+    if (ui.Button(picking ? "Done##pickReference" : "Pick##pickReference"))
+    {
+        if (picking) s_referencePick = {};
+        else s_referencePick = { Owner ? Owner->GetScene() : nullptr,
+            Owner, this, &reference };
+    }
+    if (ui.IsItemHovered())
+        ui.Tooltip("Click a target in the hierarchy or scene view; press Enter to finish.");
+    if (picking)
+        ui.ColoredLabel("Picking target: click an object or press Enter to finish",
+            { .9f, .8f, .3f, 1.f });
     if (reference.IsAssigned())
     {
         ui.SameLine();

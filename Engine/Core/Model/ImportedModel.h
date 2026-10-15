@@ -10,6 +10,24 @@
 
 namespace Engine::Model
 {
+enum class RigidBodyShape : int { Sphere = 0, Box = 1, Capsule = 2 };
+enum class RigidBodyMotion : int
+{
+    FollowTransform = 0,
+    Simulated = 1,
+    SimulatedRotation = 2
+};
+enum class PhysicsJointKind : int
+{
+    SpringSixDof = 0,
+    SixDof = 1,
+    Point = 2,
+    ConeTwist = 3,
+    Slider = 4,
+    Hinge = 5
+};
+enum class SoftBodyTopology : int { TriangleMesh = 0, Rope = 1 };
+
 struct ImportedMaterial
 {
     std::string name;
@@ -18,7 +36,14 @@ struct ImportedMaterial
     glm::vec3 ambientColor { 0.1f };
     glm::vec3 specularColor { 1.f };
     float shininess = 32.f;
-    bool useMmdSpecular = false;
+    std::string specularModel = "MetallicRoughness";
+    glm::vec4 edgeColor { 0.f };
+    float edgeWidth = 0.f;
+    bool edgeEnabled = false;
+    std::string sphereTexture;
+    int sphereMode = 0;
+    std::string toonTexture;
+    int builtinToon = -1;
     float metallic = 0.f;
     float roughness = 1.f;
     float alphaCutoff = 0.5f;
@@ -106,13 +131,13 @@ struct ImportedRigidBody
     int parentNode = -1;
     glm::vec3 localPosition { 0.f };
     glm::quat localRotation { 1.f, 0.f, 0.f, 0.f };
-    int shape = 0; // PMX sphere, box, capsule.
+    RigidBodyShape shape = RigidBodyShape::Sphere;
     glm::vec3 size { 1.f };
     int collisionGroup = 0;
     int nonCollisionMask = 0;
     float friction = 0.5f;
     float restitution = 0.f;
-    int mode = 0; // 0 follows bone; 1 physics; 2 physics rotation with bone position.
+    RigidBodyMotion mode = RigidBodyMotion::FollowTransform;
     int relatedBoneNode = -1;
     glm::vec3 boneOffsetPosition { 0.f };
     glm::quat boneOffsetRotation { 1.f, 0.f, 0.f, 0.f };
@@ -124,7 +149,7 @@ struct ImportedRigidBody
 struct ImportedPhysicsJoint
 {
     std::string name;
-    int type = 0; // PMX: spring 6DOF, 6DOF, point, cone twist, slider, hinge.
+    PhysicsJointKind type = PhysicsJointKind::SpringSixDof;
     int bodyA = -1; // Index in ImportedModel::rigidBodies.
     int bodyB = -1;
     std::string bodyAName;
@@ -147,7 +172,7 @@ struct ImportedPhysicsBone
 {
     std::string bodyName;
     unsigned nodeIndex = 0;
-    int mode = 1;
+    RigidBodyMotion mode = RigidBodyMotion::Simulated;
     glm::vec3 offsetPosition { 0.f };
     glm::quat offsetRotation { 1.f, 0.f, 0.f, 0.f };
 };
@@ -162,7 +187,7 @@ struct ImportedSoftBody
     };
     std::string name;
     int materialIndex = -1;
-    int shape = 0; // PMX 0: triangle mesh; 1: rope.
+    SoftBodyTopology shape = SoftBodyTopology::TriangleMesh;
     int collisionGroup = 0;
     int nonCollisionMask = 0;
     float mass = 1.f;
@@ -173,6 +198,10 @@ struct ImportedSoftBody
     float drag = .01f;
     float friction = .5f;
     int solverIterations = 8;
+    int clusterCount = 0;
+    int clusterIterations = 4;
+    glm::vec3 clusterHardness { .1f, 1.f, .5f };
+    glm::vec3 clusterImpulseSplit { .5f };
     std::vector<glm::vec3> pinnedVertices;
     std::vector<Anchor> anchors;
 };
@@ -184,7 +213,7 @@ struct ImportedAppendRule
     glm::vec3 sourceRestTranslation { 0.f };
     float influence = 0.f;
     int deformLayer = 0;
-    int deformOrder = -1; // Original PMX bone index within the layer.
+    int deformOrder = -1; // Stable evaluation order within the layer.
     bool afterPhysics = false;
     bool rotation = false;
     bool translation = false;
@@ -208,7 +237,7 @@ struct ImportedIkChain
     int iterations = 1;
     float angleLimit = 0.f;
     int deformLayer = 0;
-    int deformOrder = -1; // Original PMX bone index within the layer.
+    int deformOrder = -1; // Stable evaluation order within the layer.
     bool afterPhysics = false;
     std::vector<ImportedIkLink> links;
 };
@@ -234,7 +263,7 @@ struct ImportedExternalParent
     int deformLayer = 0;
     int deformOrder = -1;
     bool afterPhysics = false;
-    std::string targetName; // Scene object selected for this PMX key.
+    std::string targetName; // Scene object bound to this key.
 };
 
 struct ImportedBoneMorphOffset
@@ -276,6 +305,10 @@ struct ImportedMaterialMorphOffset
     float shininess = 0.f;
     glm::vec3 ambient { 0.f };
     glm::vec4 textureTint { 0.f };
+    glm::vec4 edgeColor { 0.f };
+    float edgeWidth = 0.f;
+    glm::vec4 sphereTint { 0.f };
+    glm::vec4 toonTint { 0.f };
 };
 
 struct ImportedMaterialMorph

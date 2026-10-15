@@ -140,6 +140,8 @@ public:
     { return m_morphWeightBuffer.get(); }
     uint32_t GetMorphTargetCount() const
     { return static_cast<uint32_t>(m_morphTargets.size()); }
+    uint32_t GetActiveMorphTargetCount() const
+    { return m_activeMorphTargetCount; }
     uint32_t GetMorphDeltaStrideFloat4() const
     { return m_morphDeltaStrideFloat4; }
 
@@ -185,6 +187,7 @@ private:
     std::string m_morphFilePath;
     std::vector<float> m_morphWeights;
     std::vector<glm::vec4> m_packedMorphWeights;
+    uint32_t m_activeMorphTargetCount = 0;
     mutable std::vector<float> m_observedMorphWeights;
     mutable uint64_t m_morphWeightsRevision = 1;
     mutable bool m_morphWeightsObserved = false;

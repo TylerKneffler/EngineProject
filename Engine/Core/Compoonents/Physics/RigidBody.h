@@ -14,6 +14,7 @@ namespace Engine::Physics { struct PhysicsComponentState; }
 
 namespace Engine::Components
 {
+class Cloth;
 class RigidBody final : public Engine::Core::Component
 {
 public:
@@ -133,6 +134,7 @@ public:
 private:
     friend class Engine::Physics::Physics;
     friend class Engine::Physics::BulletPhysicsAdapter;
+    friend class Cloth;
     void BeginOverlapFrame();
     void RegisterOverlap(const RigidBody* other);
     bool EnsureBody();

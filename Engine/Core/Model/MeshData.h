@@ -2,6 +2,7 @@
 
 #include <glm/glm.hpp>
 #include <cstdint>
+#include <array>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -37,6 +38,15 @@ struct AnimationVertex : SurfaceVertex
     float weights0[4] {};
     float joints1[4] {};
     float weights1[4] {};
+    // PMX stores four components for the primary and four additional UV sets.
+    // The first two components of sets 0 and 1 also live in uv/uv1 for the
+    // existing material pipeline. These channels retain the full source data.
+    float uvChannels[5][4] {};
+    // PMX SDEF uses two bone-specific radii and a shared center. The fourth
+    // center component selects BDEF (0), SDEF (3), or QDEF (4).
+    float sdefCenterAndMode[4] {};
+    float sdefRadius0[4] {};
+    float sdefRadius1[4] {};
 };
 
 // Terrain never uses skeletal influences, morph streams, a secondary UV set,
@@ -59,7 +69,7 @@ static_assert(sizeof(Vertex) == 32,
     "Base vertex layout must remain render-compatible");
 static_assert(sizeof(SurfaceVertex) == 72,
     "Surface vertex layout must remain render-compatible");
-static_assert(sizeof(AnimationVertex) == 136,
+static_assert(sizeof(AnimationVertex) == 264,
     "Animation vertex layout must preserve native mesh compatibility");
 static_assert(std::is_trivially_copyable_v<Vertex> &&
     std::is_trivially_copyable_v<SurfaceVertex> &&
@@ -75,5 +85,7 @@ struct MorphTarget
     std::vector<glm::vec3> tangents;
     // xy affect the primary UV set; zw affect the first additional UV set.
     std::vector<glm::vec4> uv;
+    // Full four-component offsets for primary UV and additional UV1-4.
+    std::array<std::vector<glm::vec4>, 5> uvChannels;
 };
 }

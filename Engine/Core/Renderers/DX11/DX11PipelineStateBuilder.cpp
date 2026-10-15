@@ -92,19 +92,26 @@ std::unique_ptr<Engine::Graphics::IPipelineState> D3D11PipelineStateBuilder::Bui
     }
 
     auto pipeline = std::make_unique<D3D11PipelineState>();
+    const char* operation = "vertex shader";
     HRESULT hr = m_device->CreateVertexShader(m_vsBytecode.data(), m_vsBytecode.size(), nullptr, &pipeline->vertexShader);
     if (SUCCEEDED(hr))
+    {
+        operation = "pixel shader";
         hr = m_device->CreatePixelShader(m_psBytecode.data(), m_psBytecode.size(), nullptr, &pipeline->pixelShader);
+    }
     if (SUCCEEDED(hr) && !m_inputLayout.empty())
+    {
+        operation = "input layout";
         hr = m_device->CreateInputLayout(m_inputLayout.data(), static_cast<UINT>(m_inputLayout.size()),
             m_vsBytecode.data(), m_vsBytecode.size(), &pipeline->inputLayout);
+    }
 
     D3D11_RASTERIZER_DESC raster{};
     raster.FillMode = m_fillMode;
     raster.CullMode = m_cullMode;
     raster.FrontCounterClockwise = m_frontCCW;
     raster.DepthClipEnable = m_depthClip;
-    if (SUCCEEDED(hr)) hr = m_device->CreateRasterizerState(&raster, &pipeline->rasterizerState);
+    if (SUCCEEDED(hr)) { operation = "rasterizer state"; hr = m_device->CreateRasterizerState(&raster, &pipeline->rasterizerState); }
 
     D3D11_BLEND_DESC blend{};
     blend.RenderTarget[0].BlendEnable = m_blendEnable;
@@ -115,7 +122,7 @@ std::unique_ptr<Engine::Graphics::IPipelineState> D3D11PipelineStateBuilder::Bui
     blend.RenderTarget[0].DestBlendAlpha = m_destBlendAlpha;
     blend.RenderTarget[0].BlendOpAlpha = m_blendOpAlpha;
     blend.RenderTarget[0].RenderTargetWriteMask = m_colorWriteMask;
-    if (SUCCEEDED(hr)) hr = m_device->CreateBlendState(&blend, &pipeline->blendState);
+    if (SUCCEEDED(hr)) { operation = "blend state"; hr = m_device->CreateBlendState(&blend, &pipeline->blendState); }
 
     D3D11_DEPTH_STENCIL_DESC depth{};
     depth.DepthEnable = m_depthEnable;
@@ -129,12 +136,12 @@ std::unique_ptr<Engine::Graphics::IPipelineState> D3D11PipelineStateBuilder::Bui
     depth.FrontFace.StencilDepthFailOp = m_stencilDepthFailOp;
     depth.FrontFace.StencilPassOp = m_stencilPassOp;
     depth.BackFace = depth.FrontFace;
-    if (SUCCEEDED(hr)) hr = m_device->CreateDepthStencilState(&depth, &pipeline->depthStencilState);
+    if (SUCCEEDED(hr)) { operation = "depth stencil state"; hr = m_device->CreateDepthStencilState(&depth, &pipeline->depthStencilState); }
 
     if (FAILED(hr))
     {
         std::ostringstream out;
-        out << "Failed to create DX11 pipeline state (HRESULT 0x" << std::hex << hr << ')';
+        out << "Failed to create DX11 " << operation << " (HRESULT 0x" << std::hex << hr << ')';
         m_lastError = out.str();
         return nullptr;
     }

@@ -17,10 +17,14 @@ Material::Material()
     RegisterField("specular", specularColor, "Colors");
     RegisterField("emissiveColor", emissiveColor, "Colors");
     RegisterField("shininess", shininess, "Surface");
-    RegisterField("useMmdSpecular", useMmdSpecular, "Surface");
+    RegisterField("specularModel", specularModel, "Surface");
     RegisterField("baseColorAlpha", baseColorAlpha, "Surface");
     RegisterField("baseColorTextureTint", baseColorTextureTint, "Colors");
     RegisterField("baseColorTextureTintAlpha", baseColorTextureTintAlpha, "Colors");
+    RegisterField("edgeWidth", edgeWidth, "MMD");
+    RegisterField("edgeEnabled", edgeEnabled, "MMD");
+    RegisterField("sphereMode", sphereMode, "MMD");
+    RegisterField("builtinToon", builtinToon, "MMD");
     RegisterField("alphaMode", alphaMode, "Surface");
     RegisterField("alphaCutoff", alphaCutoff, "Surface");
     RegisterField("doubleSided", doubleSided, "Surface");
@@ -54,6 +58,8 @@ Material::Material()
     RegisterField("heightUvSet", heightUvSet, "Texture Coordinates", false);
     RegisterEditorFieldGroup("materialAsset", "Asset Link", false);
     RegisterEditorFieldGroup("baseColorTexture", "Textures");
+    RegisterEditorFieldGroup("sphereTexture", "Textures");
+    RegisterEditorFieldGroup("toonTexture", "Textures");
     RegisterEditorFieldGroup("metallicRoughnessTexture", "Textures");
     RegisterEditorFieldGroup("normalTexture", "Textures");
     RegisterEditorFieldGroup("heightTexture", "Textures");
@@ -79,6 +85,16 @@ namespace
     {
         if (!v.IsArray() || v.ArraySize() < 3) return def;
         return { v.ArrayAt(0).AsFloat(), v.ArrayAt(1).AsFloat(), v.ArrayAt(2).AsFloat() };
+    }
+    Engine::Serialization::JsonValue J4(const glm::vec4& v)
+    {
+        return J3(glm::vec3(v)).Push(Engine::Serialization::JsonValue(v.w));
+    }
+    glm::vec4 from4(const Engine::Serialization::JsonValue& v, glm::vec4 def)
+    {
+        if (!v.IsArray() || v.ArraySize() < 4) return def;
+        return { v.ArrayAt(0).AsFloat(), v.ArrayAt(1).AsFloat(),
+            v.ArrayAt(2).AsFloat(), v.ArrayAt(3).AsFloat() };
     }
 
     std::string ResolveTexturePath(
@@ -140,13 +156,26 @@ bool Material::LoadFromFile(const std::string& path)
         subsurfaceColor = { 1.f, 0.45f, 0.35f };
         subsurfaceThickness = 0.f;
         subsurfaceTransmission = 0.f;
-        useMmdSpecular = false;
+        specularModel = "MetallicRoughness";
+        edgeColor = glm::vec4(0.f);
+        edgeWidth = 0.f;
+        edgeEnabled = false;
+        sphereTint = glm::vec4(1.f);
+        toonTint = glm::vec4(1.f);
+        sphereMode = 0;
+        builtinToon = -1;
+        sphereTexture.reset();
+        toonTexture.reset();
         diffuseColor = from3(root["baseColor"], diffuseColor);
         ambientColor = from3(root["ambientColor"], ambientColor);
         specularColor = from3(root["specularColor"], specularColor);
         emissiveColor = from3(root["emissive"], emissiveColor);
         if (root.Has("shininess")) shininess = root["shininess"].AsFloat();
-        if (root.Has("useMmdSpecular")) useMmdSpecular = root["useMmdSpecular"].AsBool();
+        if (root.Has("specularModel")) specularModel = root["specularModel"].AsString();
+        else if (root.Has("useMmdSpecular"))
+            specularModel = (root["useMmdSpecular"].AsBool() ||
+                root["useMmdSpecular"].AsString() == "true")
+                ? "BlinnPhong" : "MetallicRoughness";
         if (root.Has("metallic")) metallicFactor = root["metallic"].AsFloat();
         if (root.Has("roughness")) roughnessFactor = root["roughness"].AsFloat();
         if (root.Has("subsurfaceEnabled")) subsurfaceEnabled = root["subsurfaceEnabled"].AsBool();
@@ -165,6 +194,13 @@ bool Material::LoadFromFile(const std::string& path)
             baseColorTextureTint);
         if (root.Has("baseColorTextureTintAlpha"))
             baseColorTextureTintAlpha = root["baseColorTextureTintAlpha"].AsFloat();
+        edgeColor = from4(root["edgeColor"], edgeColor);
+        if (root.Has("edgeWidth")) edgeWidth = root["edgeWidth"].AsFloat();
+        if (root.Has("edgeEnabled")) edgeEnabled = root["edgeEnabled"].AsBool();
+        sphereTint = from4(root["sphereTint"], sphereTint);
+        toonTint = from4(root["toonTint"], toonTint);
+        if (root.Has("sphereMode")) sphereMode = root["sphereMode"].AsInt();
+        if (root.Has("builtinToon")) builtinToon = root["builtinToon"].AsInt();
         if (root.Has("alphaMode")) alphaMode = root["alphaMode"].AsString();
         if (root.Has("alphaCutoff")) alphaCutoff = root["alphaCutoff"].AsFloat();
         if (root.Has("normalScale")) normalScale = root["normalScale"].AsFloat();
@@ -184,6 +220,10 @@ bool Material::LoadFromFile(const std::string& path)
         if (root.Has("heightUvSet")) heightUvSet = root["heightUvSet"].AsInt();
         if (root.Has("baseColorTexture")) SetBaseColorTexture(
             ResolveTexturePath(path, root["baseColorTexture"].AsString()));
+        if (root.Has("sphereTexture")) SetSphereTexture(
+            ResolveTexturePath(path, root["sphereTexture"].AsString()));
+        if (root.Has("toonTexture")) SetToonTexture(
+            ResolveTexturePath(path, root["toonTexture"].AsString()));
         if (root.Has("metallicRoughnessTexture")) SetMetallicRoughnessTexture(
             ResolveTexturePath(path, root["metallicRoughnessTexture"].AsString()));
         if (root.Has("normalTexture")) SetNormalTexture(
@@ -217,7 +257,7 @@ bool Material::SaveToFile(const std::string& path) const
     root.Set("specularColor", J3(specularColor));
     root.Set("emissive", J3(emissiveColor));
     root.Set("shininess", JsonValue(shininess));
-    root.Set("useMmdSpecular", JsonValue(useMmdSpecular));
+    root.Set("specularModel", JsonValue(specularModel));
     root.Set("metallic", JsonValue(metallicFactor));
     root.Set("roughness", JsonValue(roughnessFactor));
     root.Set("subsurfaceEnabled", JsonValue(subsurfaceEnabled));
@@ -235,6 +275,15 @@ bool Material::SaveToFile(const std::string& path) const
     root.Set("baseColorAlpha", JsonValue(baseColorAlpha));
     root.Set("baseColorTextureTint", J3(baseColorTextureTint));
     root.Set("baseColorTextureTintAlpha", JsonValue(baseColorTextureTintAlpha));
+    root.Set("edgeColor", J4(edgeColor));
+    root.Set("edgeWidth", JsonValue(edgeWidth));
+    root.Set("edgeEnabled", JsonValue(edgeEnabled));
+    root.Set("sphereTint", J4(sphereTint));
+    root.Set("toonTint", J4(toonTint));
+    root.Set("sphereMode", JsonValue(sphereMode));
+    root.Set("builtinToon", JsonValue(builtinToon));
+    root.Set("sphereTexture", JsonValue(TexturePath(sphereTexture)));
+    root.Set("toonTexture", JsonValue(TexturePath(toonTexture)));
     root.Set("alphaMode", JsonValue(alphaMode));
     root.Set("alphaCutoff", JsonValue(alphaCutoff));
     root.Set("normalScale", JsonValue(normalScale));
@@ -270,6 +319,18 @@ bool Material::SaveToFile(const std::string& path) const
 std::string Material::TexturePath(const std::shared_ptr<Texture>& texture)
 {
     return texture ? texture->GetFilePath() : std::string{};
+}
+
+void Material::SetSphereTexture(const std::string& path)
+{
+    sphereTexture = path.empty() ? nullptr :
+        Texture::Acquire(ResolveTexturePath(path), true);
+}
+
+void Material::SetToonTexture(const std::string& path)
+{
+    toonTexture = path.empty() ? nullptr :
+        Texture::Acquire(ResolveTexturePath(path), true);
 }
 
 void Material::SetBaseColorTexture(const std::string& path)
@@ -330,7 +391,7 @@ void Material::PrepareTextures(IGraphicsProvider* graphicsProvider)
     for (const auto& texture : {
         baseColorTexture, metallicRoughnessTexture, normalTexture,
         heightTexture, occlusionTexture, emissiveTexture,
-        subsurfaceThicknessTexture })
+        subsurfaceThicknessTexture, sphereTexture, toonTexture })
         if (texture)
             texture->Prepare(graphicsProvider);
     // Diffuse environment lighting uses the CPU-side SH projection, while
@@ -356,6 +417,8 @@ MaterialAlphaMode Material::GetAlphaMode() const
 
 void Material::Validate()
 {
+    if (specularModel != "BlinnPhong")
+        specularModel = "MetallicRoughness";
     metallicFactor = std::clamp(metallicFactor, 0.f, 1.f);
     roughnessFactor = std::clamp(roughnessFactor, 0.045f, 1.f);
     subsurfaceWeight = std::clamp(subsurfaceWeight, 0.f, 1.f);
@@ -374,12 +437,12 @@ void Material::Validate()
     heightMinSteps = std::clamp(heightMinSteps, 4.f, 64.f);
     heightMaxSteps = std::clamp(heightMaxSteps, heightMinSteps, 64.f);
     occlusionStrength = std::clamp(occlusionStrength, 0.f, 1.f);
-    baseColorUvSet = std::clamp(baseColorUvSet, 0, 1);
-    metallicRoughnessUvSet = std::clamp(metallicRoughnessUvSet, 0, 1);
-    normalUvSet = std::clamp(normalUvSet, 0, 1);
-    occlusionUvSet = std::clamp(occlusionUvSet, 0, 1);
-    emissiveUvSet = std::clamp(emissiveUvSet, 0, 1);
-    heightUvSet = std::clamp(heightUvSet, 0, 1);
+    baseColorUvSet = std::clamp(baseColorUvSet, 0, 9);
+    metallicRoughnessUvSet = std::clamp(metallicRoughnessUvSet, 0, 9);
+    normalUvSet = std::clamp(normalUvSet, 0, 9);
+    occlusionUvSet = std::clamp(occlusionUvSet, 0, 9);
+    emissiveUvSet = std::clamp(emissiveUvSet, 0, 9);
+    heightUvSet = std::clamp(heightUvSet, 0, 9);
     switch (GetAlphaMode())
     {
     case MaterialAlphaMode::Mask: alphaMode = "Mask"; break;
@@ -392,6 +455,11 @@ Material::JsonValue Material::Serialize() const
 {
     JsonValue value = Component::Serialize();
     value.Set("materialAsset", JsonValue(m_filePath));
+    value.Set("edgeColor", J4(edgeColor));
+    value.Set("sphereTint", J4(sphereTint));
+    value.Set("toonTint", J4(toonTint));
+    value.Set("sphereTexture", JsonValue(TexturePath(sphereTexture)));
+    value.Set("toonTexture", JsonValue(TexturePath(toonTexture)));
     value.Set("baseColorTexture", JsonValue(TexturePath(baseColorTexture)));
     value.Set("metallicRoughnessTexture", JsonValue(TexturePath(metallicRoughnessTexture)));
     value.Set("normalTexture", JsonValue(TexturePath(normalTexture)));
@@ -409,8 +477,19 @@ void Material::Deserialize(const JsonValue& value)
     if (value.Has("materialAsset") && !value["materialAsset"].AsString().empty())
         LoadFromFile(value["materialAsset"].AsString());
     Component::Deserialize(value);
+    if (!value.Has("specularModel") && value.Has("useMmdSpecular"))
+        specularModel = (value["useMmdSpecular"].AsBool() ||
+            value["useMmdSpecular"].AsString() == "true")
+            ? "BlinnPhong" : "MetallicRoughness";
+    edgeColor = from4(value["edgeColor"], edgeColor);
+    sphereTint = from4(value["sphereTint"], sphereTint);
+    toonTint = from4(value["toonTint"], toonTint);
     if (value.Has("baseColorTexture"))
         SetBaseColorTexture(value["baseColorTexture"].AsString());
+    if (value.Has("sphereTexture"))
+        SetSphereTexture(value["sphereTexture"].AsString());
+    if (value.Has("toonTexture"))
+        SetToonTexture(value["toonTexture"].AsString());
     if (value.Has("metallicRoughnessTexture"))
         SetMetallicRoughnessTexture(value["metallicRoughnessTexture"].AsString());
     if (value.Has("normalTexture"))

@@ -414,6 +414,7 @@ private:
     std::unique_ptr<IPipelineState> m_objectSpatialDebugPipeline;
     std::unique_ptr<IPipelineState> m_objectSpatialDebugWirePipeline;
     std::unique_ptr<IPipelineState> m_objectOutlinePipeline;
+    std::unique_ptr<IPipelineState> m_pmxOutlinePipeline;
     std::unique_ptr<IPipelineState> m_directionalShadowPipeline;
     std::unique_ptr<IPipelineState> m_directionalShadowDoubleSidedPipeline;
     std::unordered_map<const IPipelineState*, std::unique_ptr<IPipelineState>>

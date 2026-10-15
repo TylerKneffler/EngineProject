@@ -84,6 +84,8 @@ struct IKBone::Impl final : Engine::Physics::PhysicsComponentState
     uint64_t colliderRevision = 0;
     bool poseOnlyCollision = false;
     bool poseOnlyAnchor = false;
+    Skeleton* poseOnlySkeleton = nullptr;
+    RigidBody* poseOnlyRootBody = nullptr;
     bool fittedSkinnedCollider = false;
     btTransform poseRootWorld;
 };
@@ -324,6 +326,17 @@ bool IKBone::EnsureBody()
     }
     const bool poseOnlyCollision = UsesMeshColliderPoseOnly();
     const bool poseOnlyAnchor = poseOnlyCollision && !FindParentIKBone();
+    m_impl->poseOnlySkeleton = nullptr;
+    m_impl->poseOnlyRootBody = nullptr;
+    if (poseOnlyCollision)
+        for (Object* ancestor = Owner; ancestor; ancestor = ancestor->Parent)
+            if (auto* skeleton = ancestor->GetComponent<Skeleton>();
+                skeleton && skeleton->UsesMeshCollider())
+            {
+                m_impl->poseOnlySkeleton = skeleton;
+                m_impl->poseOnlyRootBody = ancestor->GetComponent<RigidBody>();
+                break;
+            }
     if (IsSimulating() && m_impl->collider == collider &&
         m_impl->colliderRevision == collider->GetConfigurationRevision() &&
         m_impl->poseOnlyCollision == poseOnlyCollision &&
@@ -626,18 +639,11 @@ void IKBone::SyncBodyFromBone()
 void IKBone::ApplyLiveBodySettings()
 {
     if (!m_impl->body) return;
-    bool dynamicMeshRoot = false;
-    Skeleton* meshSkeleton = nullptr;
-    if (m_impl->poseOnlyCollision)
-        for (Object* ancestor = Owner; ancestor; ancestor = ancestor->Parent)
-            if (auto* skeleton = ancestor->GetComponent<Skeleton>();
-                skeleton && skeleton->UsesMeshCollider())
-            {
-                meshSkeleton = skeleton;
-                if (auto* root = ancestor->GetComponent<RigidBody>())
-                    dynamicMeshRoot = root->bodyType == "Dynamic";
-                break;
-            }
+    Skeleton* meshSkeleton = m_impl->poseOnlyCollision
+        ? m_impl->poseOnlySkeleton : nullptr;
+    const bool dynamicMeshRoot = meshSkeleton &&
+        m_impl->poseOnlyRootBody &&
+        m_impl->poseOnlyRootBody->bodyType == "Dynamic";
     m_impl->body->setDamping(std::clamp(dynamicMeshRoot
         ? meshPoseLinearDamping : linearDamping, 0.f, 1.f),
         std::clamp(dynamicMeshRoot
@@ -674,19 +680,14 @@ void IKBone::ApplyGroundedPoseGravity()
     if (!m_impl->body || !m_impl->poseOnlyCollision) return;
     glm::vec3 gravity(0.f);
     if (!m_impl->poseOnlyAnchor)
-        for (Object* ancestor = Owner; ancestor; ancestor = ancestor->Parent)
-            if (auto* skeleton = ancestor->GetComponent<Skeleton>();
-                skeleton && skeleton->UsesMeshCollider())
-            {
-                if (auto* root = ancestor->GetComponent<RigidBody>();
-                    root && root->bodyType == "Dynamic" &&
-                    root->useGravity && root->IsGrounded())
-                    gravity = root->GetGravityDirection() *
-                        (9.81f * std::max(root->gravityScale, 0.f) *
-                            std::max(skeleton->meshIKGroundedGravityScale,
-                                0.f));
-                break;
-            }
+        if (auto* root = m_impl->poseOnlyRootBody;
+            root && root->bodyType == "Dynamic" &&
+            root->useGravity && root->IsGrounded() &&
+            m_impl->poseOnlySkeleton)
+            gravity = root->GetGravityDirection() *
+                (9.81f * std::max(root->gravityScale, 0.f) *
+                    std::max(m_impl->poseOnlySkeleton->meshIKGroundedGravityScale,
+                        0.f));
     m_impl->body->setGravity(Engine::Physics::ToBullet(gravity));
 }
 

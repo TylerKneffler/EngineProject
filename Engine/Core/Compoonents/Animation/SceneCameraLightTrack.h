@@ -1,15 +1,15 @@
 #pragma once
 
-#include "Core/component.h"
+#include "Core/Component.h"
 #include <array>
 #include <cstdint>
 #include <vector>
 
 namespace Engine::Components
 {
-// Scene-object playback for independently imported VMD camera or light tracks.
-// Character bones and morphs use their own retargeted clips.
-class VmdSceneTrack : public Engine::Core::Component
+// Camera and light keyframes in engine coordinates. Interpolation stores six
+// cubic Bezier curves as normalized (x1, y1, x2, y2) control points.
+class SceneCameraLightTrack : public Engine::Core::Component
 {
 public:
     enum class Kind : int { Camera = 0, Light = 1 };
@@ -19,7 +19,7 @@ public:
         float distance = 0.f;
         std::array<float, 3> target{};
         std::array<float, 3> rotation{};
-        std::array<uint8_t, 24> interpolation{};
+        std::array<float, 24> interpolation{};
         float fov = 45.f;
         bool perspective = true;
     };
@@ -30,12 +30,13 @@ public:
         std::array<float, 3> position{};
     };
 
-    VmdSceneTrack();
+    SceneCameraLightTrack();
     int kind = static_cast<int>(Kind::Camera);
     bool playOnStart = true;
     bool looping = false;
     float speed = 1.f;
     float time = 0.f;
+    float framesPerSecond = 30.f;
     std::vector<CameraKey> cameras;
     std::vector<LightKey> lights;
 

@@ -17,6 +17,8 @@ build/
 !.local/tests/WeightInfluenceTests.cpp
 !.local/tests/MmdImportStepsTests.cpp
 !.local/tests/PmxModelDecoderTests.cpp
+!.local/tests/SkinDeformationTests.cpp
+!.local/tests/RuntimeMigrationTests.cpp
 !.local/tests/MmdSceneHeadlessTests.cpp
 !.local/tests/EditorViewportSettingsTests.cpp
 !.local/tests/SceneCameraFocusTests.cpp

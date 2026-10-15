@@ -36,9 +36,9 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Properties", Range = "1.0, 256.0")
     float     shininess     { 32.f };
 
-    // Use imported MMD specular and shininess in the PBR lighting pass.
+    // Select the specular lighting model independently of the source format.
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Properties")
-    bool useMmdSpecular { false };
+    std::string specularModel { "MetallicRoughness" };
     
     PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "0.0, 1.0")
     float     metallicFactor { 0.f };
@@ -91,6 +91,20 @@ public:
     glm::vec3 baseColorTextureTint { 1.f };
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Color")
     float baseColorTextureTintAlpha { 1.f };
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | MMD")
+    glm::vec4 edgeColor { 0.f };
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | MMD")
+    float edgeWidth { 0.f };
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | MMD")
+    bool edgeEnabled { false };
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | MMD")
+    glm::vec4 sphereTint { 1.f };
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | MMD")
+    glm::vec4 toonTint { 1.f };
+    std::shared_ptr<Texture> sphereTexture;
+    std::shared_ptr<Texture> toonTexture;
+    int sphereMode = 0; // PMX: 1 multiply, 2 add, 3 additional UV.
+    int builtinToon = -1;
     
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Properties")
     float     alphaCutoff { 0.5f };
@@ -137,6 +151,7 @@ public:
     std::shared_ptr<Texture> emissiveTexture;
     std::shared_ptr<Texture> subsurfaceThicknessTexture;
     std::shared_ptr<Texture> reflectionEnvironmentMap;
+    // 0-4 select XY of primary/additional UV1-4; 5-9 select their ZW.
     int baseColorUvSet = 0;
     int metallicRoughnessUvSet = 0;
     int normalUvSet = 0;
@@ -148,6 +163,8 @@ public:
     bool SaveToFile(const std::string& path) const;
     const std::string& GetFilePath() const { return m_filePath; }
     void SetBaseColorTexture(const std::string& path);
+    void SetSphereTexture(const std::string& path);
+    void SetToonTexture(const std::string& path);
     void SetMetallicRoughnessTexture(const std::string& path);
     
     void SetNormalTexture(const std::string& path);

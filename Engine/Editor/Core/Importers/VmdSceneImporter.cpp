@@ -2,7 +2,7 @@
 #include "VmdMotionDecoder.h"
 #include "Core/AssetRecord.h"
 #include "Core/Model/AnimationPackAsset.h"
-#include "Core/Compoonents/Animation/VmdSceneTrack.h"
+#include "Core/Compoonents/Animation/SceneCameraLightTrack.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Lighting/Light.h"
 #include "Core/Object.h"
@@ -149,16 +149,17 @@ Engine::Model::ModelImportResult VmdSceneImporter::Import(
             auto* object = scene.AddObject("VMD Camera");
             if (root) { object->Parent = root; root->Children.push_back(object); }
             object->AddComponent<Engine::Components::Camera>();
-            auto* track = object->AddComponent<Engine::Components::VmdSceneTrack>();
-            track->kind = static_cast<int>(Engine::Components::VmdSceneTrack::Kind::Camera);
+            auto* track = object->AddComponent<Engine::Components::SceneCameraLightTrack>();
+            track->kind = static_cast<int>(Engine::Components::SceneCameraLightTrack::Kind::Camera);
             for (const auto& sourceKey : motion.cameras)
             {
-                Engine::Components::VmdSceneTrack::CameraKey key;
+                Engine::Components::SceneCameraLightTrack::CameraKey key;
                 key.frame = sourceKey.frame;
                 key.distance = sourceKey.distance;
                 key.target = sourceKey.position;
                 key.rotation = sourceKey.rotation;
-                key.interpolation = sourceKey.interpolation;
+                for (size_t i = 0; i < key.interpolation.size(); ++i)
+                    key.interpolation[i] = sourceKey.interpolation[i] / 127.f;
                 key.fov = static_cast<float>(sourceKey.fieldOfViewDegrees);
                 key.perspective = sourceKey.perspective;
                 track->cameras.push_back(key);
@@ -176,11 +177,11 @@ Engine::Model::ModelImportResult VmdSceneImporter::Import(
             auto* light = object->AddComponent<Engine::Components::Light>();
             light->lightType = static_cast<int>(Engine::Components::Light::Type::Directional);
             light->intensity = 1.f;
-            auto* track = object->AddComponent<Engine::Components::VmdSceneTrack>();
-            track->kind = static_cast<int>(Engine::Components::VmdSceneTrack::Kind::Light);
+            auto* track = object->AddComponent<Engine::Components::SceneCameraLightTrack>();
+            track->kind = static_cast<int>(Engine::Components::SceneCameraLightTrack::Kind::Light);
             for (const auto& sourceKey : motion.lights)
             {
-                Engine::Components::VmdSceneTrack::LightKey key;
+                Engine::Components::SceneCameraLightTrack::LightKey key;
                 key.frame = sourceKey.frame;
                 key.color = sourceKey.color;
                 key.position = sourceKey.position;

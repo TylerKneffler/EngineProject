@@ -53,6 +53,12 @@ public:
     float collisionMargin = 0.02f;
     PROPERTY(Inspector, EditAnywhere, Category = "Cloth", ClampMin = "1")
     int solverIterations = 8;
+    PROPERTY(Inspector, EditAnywhere, Category = "Cloth | Clusters", ClampMin = "0")
+    int clusterCount = 0;
+    PROPERTY(Inspector, EditAnywhere, Category = "Cloth | Clusters", ClampMin = "1")
+    int clusterIterations = 4;
+    glm::vec3 clusterHardness { .1f, 1.f, .5f };
+    glm::vec3 clusterImpulseSplit { .5f };
     PROPERTY(Inspector, EditAnywhere, Category = "Cloth | Filtering")
     int collisionLayer = 1;
     PROPERTY(Inspector, EditAnywhere, Category = "Cloth | Filtering")
@@ -88,6 +94,8 @@ public:
     float windStrength = 0.f;
 
     bool IsSimulating() const;
+    int GetActiveClusterCount() const;
+    int GetActiveAnchorCount() const;
     void ResetSimulation();
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
@@ -106,6 +114,7 @@ private:
     void DestroySoftBody(bool restoreMesh);
     void ApplyForces();
     void UpdatePinnedNodes();
+    void BindAnchors();
     void SyncMeshFromSoftBody();
     void NotifyRigidBodyCollision(const glm::vec3& worldNormal,
         const glm::vec3& worldPoint, float impulse);

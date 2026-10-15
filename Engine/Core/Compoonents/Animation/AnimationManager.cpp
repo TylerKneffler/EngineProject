@@ -2,8 +2,10 @@
 #include "Model.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Animation/TwoBoneIK.h"
-#include "Core/Compoonents/Animation/PmxRigController.h"
-#include "Core/Compoonents/Materials/PmxMaterialMorph.h"
+#include "Core/Compoonents/Animation/RigController.h"
+#include "Core/Compoonents/Animation/RigConstraints.h"
+#include "Core/Compoonents/Animation/RigMorphControls.h"
+#include "Core/Compoonents/Materials/MaterialPropertyMorph.h"
 #include "Core/Model/AnimationClipAsset.h"
 #include "Core/Model/AnimationPackAsset.h"
 #include "Core/Model/AnimationControlSpace.h"
@@ -430,14 +432,54 @@ Model* AnimationManager::ResolveModel() const
     return m_cachedModel;
 }
 
+void AnimationManager::RefreshSceneBindings(Model* model)
+{
+    Engine::Core::Object* root = model ? model->Owner : nullptr;
+    const uint64_t revision = root && root->GetScene()
+        ? root->GetScene()->GetStructureRevision() : 0;
+    if (root == m_cachedBindingRoot &&
+        revision == m_cachedBindingStructureRevision)
+        return;
+    m_cachedBindingRoot = root;
+    m_cachedBindingStructureRevision = revision;
+    m_meshesByPath.clear();
+    m_morphMeshes.clear();
+    m_visibleMeshes.clear();
+    m_materialMorphs.clear();
+    const auto collect = [&](auto&& self, Engine::Core::Object* object,
+        const std::string& path) -> void
+    {
+        if (!object) return;
+        if (auto* mesh = object->GetComponent<Mesh>())
+        {
+            m_meshesByPath.emplace(path, mesh);
+            m_visibleMeshes.push_back(mesh);
+            if (mesh->HasMorphTargets())
+                m_morphMeshes.emplace_back(path, mesh);
+        }
+        if (auto* material = object->GetComponent<MaterialPropertyMorph>())
+            m_materialMorphs.push_back(material);
+        for (auto* child : object->Children)
+            self(self, child, path.empty() ? child->name :
+                path + "/" + child->name);
+    };
+    collect(collect, root, "");
+}
+
 void AnimationManager::Start()
 {
     RefreshRigClips();
+    m_cachedBindingRoot = nullptr;
+    m_meshesByPath.clear();
+    m_morphMeshes.clear();
+    m_visibleMeshes.clear();
+    m_materialMorphs.clear();
     m_restPose.clear();
     m_restMorphs.clear();
     m_restMorphsByMesh.clear();
     Model* model = ResolveModel();
     if (!model) return;
+    RefreshSceneBindings(model);
     const std::vector<Engine::Core::Object*>& nodes = model->ResolveNodes();
     for (ReusablePose* pose : { &m_scratch->basePose,
         &m_scratch->finalPose })
@@ -519,14 +561,18 @@ void AnimationManager::Tick(float frameDelta)
         if (Model* currentModel = ResolveModel())
             if (currentModel->Owner)
             {
-                if (auto* pmxRig = currentModel->Owner->GetComponent<PmxRigController>())
+                if (auto* rig = currentModel->Owner->GetComponent<RigController>())
                 {
-                    pmxRig->SetAnimatedIkSwitches({});
-                    pmxRig->SetAnimatedMorphWeights({});
+                    rig->SetAnimatedIkSwitches({});
+                    rig->SetAnimatedMorphWeights({});
                 }
+                if (auto* constraints = currentModel->Owner->GetComponent<RigConstraints>())
+                    constraints->SetAnimatedIkSwitches({});
+                if (auto* morphs = currentModel->Owner->GetComponent<RigMorphControls>())
+                    morphs->SetAnimatedMorphWeights({});
                 const auto clearMorphs = [&](auto&& self, Engine::Core::Object* object) -> void
                 {
-                    if (auto* material = object->GetComponent<PmxMaterialMorph>())
+                    if (auto* material = object->GetComponent<MaterialPropertyMorph>())
                         material->SetAnimatedMorphWeights({});
                     for (auto* child : object->Children) self(self, child);
                 };
@@ -536,6 +582,7 @@ void AnimationManager::Tick(float frameDelta)
     }
     Model* model = ResolveModel();
     if (!model) return;
+    RefreshSceneBindings(model);
     const size_t nodeCount = model->GetNodeCount();
     time = AdvanceTime(time, delta, speed,
         looping && animation->looping, animation);
@@ -750,42 +797,20 @@ void AnimationManager::Tick(float frameDelta)
     for (const Layer& layer : layers)
         if (layer.enabled && layer.weight > 0.f)
             includeLegacyMorphs(resolveAnimation(layer.clip));
-    const auto applyMorphs = [&](auto&& self, Engine::Core::Object* object,
-        const std::string& path) -> void
+    for (const auto& [path, mesh] : m_morphMeshes)
     {
-        if (!object) return;
-        if (auto* mesh = object->GetComponent<Mesh>();
-            mesh && mesh->HasMorphTargets())
+        if (legacyMorphNodes.count(mesh->GetMorphNodeIndex()))
         {
-            if (legacyMorphNodes.count(mesh->GetMorphNodeIndex()))
-            {
-                if (const NodePose* found = finalPose.Find(
-                        mesh->GetMorphNodeIndex()); found && found->hasWeights)
-                    mesh->SetMorphWeights(found->weights);
-            }
-            else if (const auto rest = m_restMorphsByMesh.find(path);
-                rest != m_restMorphsByMesh.end())
-                mesh->SetMorphWeights(rest->second);
+            if (const NodePose* found = finalPose.Find(
+                    mesh->GetMorphNodeIndex()); found && found->hasWeights)
+                mesh->SetMorphWeights(found->weights);
         }
-        for (Engine::Core::Object* child : object->Children)
-            self(self, child, path.empty() ? child->name :
-                path + "/" + child->name);
-    };
-    applyMorphs(applyMorphs, model->Owner, "");
+        else if (const auto rest = m_restMorphsByMesh.find(path);
+            rest != m_restMorphsByMesh.end())
+            mesh->SetMorphWeights(rest->second);
+    }
     // Named mesh channels can coexist on separate primitive objects even when
     // those primitives share a model node and an ordinary node-index channel.
-    std::unordered_map<std::string, Mesh*> meshesByPath;
-    const auto collectMeshes = [&](auto&& self, Engine::Core::Object* object,
-        const std::string& path) -> void
-    {
-        if (!object) return;
-        if (auto* mesh = object->GetComponent<Mesh>())
-            meshesByPath.emplace(path, mesh);
-        for (Engine::Core::Object* child : object->Children)
-            self(self, child, path.empty() ? child->name :
-                path + "/" + child->name);
-    };
-    collectMeshes(collectMeshes, model->Owner, "");
     std::unordered_set<std::string> targetedMeshes;
     const auto resetTargeted = [&](const Engine::Model::AnimationClip* source)
     {
@@ -794,8 +819,8 @@ void AnimationManager::Tick(float frameDelta)
             if (channel.path == Engine::Model::AnimationChannel::Path::Weights &&
                 !channel.targetMesh.empty() &&
                 targetedMeshes.insert(channel.targetMesh).second)
-                if (const auto mesh = meshesByPath.find(channel.targetMesh);
-                    mesh != meshesByPath.end())
+                if (const auto mesh = m_meshesByPath.find(channel.targetMesh);
+                    mesh != m_meshesByPath.end())
                     if (const auto rest = m_restMorphsByMesh.find(channel.targetMesh);
                         rest != m_restMorphsByMesh.end())
                         mesh->second->SetMorphWeights(rest->second);
@@ -812,8 +837,8 @@ void AnimationManager::Tick(float frameDelta)
         {
             if (channel.path != Engine::Model::AnimationChannel::Path::Weights ||
                 channel.targetMesh.empty()) continue;
-            const auto target = meshesByPath.find(channel.targetMesh);
-            if (target == meshesByPath.end() ||
+            const auto target = m_meshesByPath.find(channel.targetMesh);
+            if (target == m_meshesByPath.end() ||
                 target->second->GetMorphTargets().size() != channel.valueWidth)
                 continue;
             std::vector<float> sampled;
@@ -840,16 +865,8 @@ void AnimationManager::Tick(float frameDelta)
             if (const auto* layerClip = resolveAnimation(layer.clip);
                 layerClip && !layerClip->visibility.empty())
                 visible = SampleVisibility(*layerClip, layer.time);
-    const auto applyVisibility = [&](auto&& self,
-        Engine::Core::Object* object) -> void
-    {
-        if (!object) return;
-        if (auto* mesh = object->GetComponent<Mesh>())
-            mesh->SetAnimationVisible(visible);
-        for (Engine::Core::Object* child : object->Children)
-            self(self, child);
-    };
-    applyVisibility(applyVisibility, model->Owner);
+    for (auto* mesh : m_visibleMeshes)
+        mesh->SetAnimationVisible(visible);
     std::unordered_map<std::string, float> componentWeights;
     const auto sampleComponentMorphs = [&](const Engine::Model::AnimationClip* source,
         float sampleTime, float layerWeight)
@@ -869,33 +886,31 @@ void AnimationManager::Tick(float frameDelta)
         if (layer.enabled && layer.weight > 0.f)
             sampleComponentMorphs(resolveAnimation(layer.clip), layer.time,
                 std::clamp(layer.weight, 0.f, 1.f));
-    const auto applyComponentMorphs = [&](auto&& self,
-        Engine::Core::Object* object) -> void
+    for (auto* material : m_materialMorphs)
+        material->SetAnimatedMorphWeights(componentWeights);
+    if (auto* morphs = model->Owner->GetComponent<RigMorphControls>())
+        morphs->SetAnimatedMorphWeights(componentWeights);
+    std::unordered_map<std::string, bool> switches;
+    const auto sampleSwitches = [&](const Engine::Model::AnimationClip* source,
+        float sampleTime)
     {
-        if (auto* material = object->GetComponent<PmxMaterialMorph>())
-            material->SetAnimatedMorphWeights(componentWeights);
-        for (auto* child : object->Children) self(self, child);
-    };
-    applyComponentMorphs(applyComponentMorphs, model->Owner);
-    if (auto* pmxRig = model->Owner->GetComponent<PmxRigController>())
-    {
-        pmxRig->SetAnimatedMorphWeights(componentWeights);
-        std::unordered_map<std::string, bool> switches;
-        const auto sampleSwitches = [&](const Engine::Model::AnimationClip* source,
-            float sampleTime)
+        if (!source) return;
+        for (const auto& key : source->ikSwitches)
         {
-            if (!source) return;
-            for (const auto& key : source->ikSwitches)
-            {
-                if (key.time > sampleTime) break;
-                switches[key.name] = key.enabled;
-            }
-        };
-        sampleSwitches(animation, time);
-        for (const Layer& layer : layers)
-            if (layer.enabled && layer.weight >= 0.5f)
-                sampleSwitches(resolveAnimation(layer.clip), layer.time);
-        pmxRig->SetAnimatedIkSwitches(switches);
+            if (key.time > sampleTime) break;
+            switches[key.name] = key.enabled;
+        }
+    };
+    sampleSwitches(animation, time);
+    for (const Layer& layer : layers)
+        if (layer.enabled && layer.weight >= 0.5f)
+            sampleSwitches(resolveAnimation(layer.clip), layer.time);
+    if (auto* constraints = model->Owner->GetComponent<RigConstraints>())
+        constraints->SetAnimatedIkSwitches(switches);
+    if (auto* rig = model->Owner->GetComponent<RigController>())
+    {
+        rig->SetAnimatedMorphWeights(componentWeights);
+        rig->SetAnimatedIkSwitches(switches);
     }
 }
 

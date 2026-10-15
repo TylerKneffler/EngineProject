@@ -38,7 +38,9 @@ struct Engine::Components::Cloth::Impl final : Engine::Physics::PhysicsComponent
     {
         int index = -1;
         Engine::Core::Object* body = nullptr;
-        glm::vec3 bodyLocalPosition { 0.f };
+        bool nearMode = false;
+        void* nativeBody = nullptr;
+        uint64_t bodyGeneration = 0;
     };
     std::vector<AnchoredNode> anchoredNodes;
     std::unique_ptr<btSoftBody> softBody;
@@ -75,6 +77,10 @@ Engine::Components::Cloth::Cloth()
     RegisterField("gravityScale", gravityScale);
     RegisterField("collisionMargin", collisionMargin);
     RegisterField("solverIterations", solverIterations);
+    RegisterField("clusterCount", clusterCount);
+    RegisterField("clusterIterations", clusterIterations);
+    RegisterField("clusterHardness", clusterHardness);
+    RegisterField("clusterImpulseSplit", clusterImpulseSplit);
     RegisterField("collisionLayer", collisionLayer, "Filtering", false);
     RegisterField("collisionMask", collisionMask, "Filtering", false);
     RegisterField("selfCollision", selfCollision);
@@ -145,6 +151,18 @@ bool Engine::Components::Cloth::IsSimulating() const
     if (Owner && Owner->GetScene())
         return Owner->GetScene()->GetPhysics().IsClothSimulating(*this);
     return NativeIsSimulating();
+}
+
+int Engine::Components::Cloth::GetActiveClusterCount() const
+{
+    return m_impl && m_impl->softBody
+        ? m_impl->softBody->m_clusters.size() : 0;
+}
+
+int Engine::Components::Cloth::GetActiveAnchorCount() const
+{
+    return m_impl && m_impl->softBody
+        ? m_impl->softBody->m_anchors.size() : 0;
 }
 
 bool Engine::Components::Cloth::NativeIsSimulating() const
@@ -355,7 +373,20 @@ bool Engine::Components::Cloth::EnsureSoftBody()
     softBody->m_cfg.kDF = std::clamp(friction, 0.f, 1.f);
     softBody->m_cfg.piterations = std::max(1, solverIterations);
     softBody->m_cfg.viterations = std::max(1, solverIterations / 2);
+    softBody->m_cfg.citerations = std::max(1, clusterIterations);
+    softBody->m_cfg.kSRHR_CL = std::clamp(clusterHardness.x, 0.f, 1.f);
+    softBody->m_cfg.kSKHR_CL = std::clamp(clusterHardness.y, 0.f, 1.f);
+    softBody->m_cfg.kSSHR_CL = std::clamp(clusterHardness.z, 0.f, 1.f);
+    softBody->m_cfg.kSR_SPLT_CL = std::clamp(clusterImpulseSplit.x, 0.f, 1.f);
+    softBody->m_cfg.kSK_SPLT_CL = std::clamp(clusterImpulseSplit.y, 0.f, 1.f);
+    softBody->m_cfg.kSS_SPLT_CL = std::clamp(clusterImpulseSplit.z, 0.f, 1.f);
     softBody->m_cfg.collisions = btSoftBody::fCollision::SDF_RS;
+    if (clusterCount > 0)
+    {
+        softBody->generateClusters(std::min(clusterCount,
+            static_cast<int>(m_impl->nodeLocalPositions.size())));
+        softBody->m_cfg.collisions |= btSoftBody::fCollision::CL_RS;
+    }
     if (selfCollision) softBody->m_cfg.collisions |= btSoftBody::fCollision::VF_SS;
     softBody->getCollisionShape()->setMargin(std::max(0.0001f, collisionMargin));
     softBody->setTotalMass(std::max(0.001f, mass), true);
@@ -413,12 +444,9 @@ bool Engine::Components::Cloth::EnsureSoftBody()
         const int node = nearestNode(anchor.vertexPosition);
         Engine::Core::Object* body = FindObjectInSceneByName(anchor.bodyName);
         if (node < 0 || !body || !body->GetComponent<RigidBody>()) continue;
-        softBody->setMass(node, 0.f);
-        const glm::vec3 world = glm::vec3(clothWorld * glm::vec4(
-            m_impl->nodeLocalPositions[node], 1.f));
-        const glm::vec3 local = glm::vec3(glm::inverse(
-            body->transform.GetWorldMatrix()) * glm::vec4(world, 1.f));
-        m_impl->anchoredNodes.push_back({ node, body, local });
+        if (std::find(m_impl->pinnedNodes.begin(), m_impl->pinnedNodes.end(),
+                node) != m_impl->pinnedNodes.end()) continue;
+        m_impl->anchoredNodes.push_back({ node, body, anchor.nearMode });
     }
 
     physics.world->addSoftBody(softBody, collisionLayer, collisionMask);
@@ -474,14 +502,37 @@ void Engine::Components::Cloth::UpdatePinnedNodes()
         node.m_q = node.m_x;
         node.m_v.setZero();
     }
+}
+
+void Engine::Components::Cloth::BindAnchors()
+{
+    if (!m_impl || !m_impl->softBody) return;
+    // Bullet stores raw rigid-body pointers in its anchors. Rebuild before a
+    // replaced or removed body can leave an obsolete pointer in the solver.
     for (const auto& anchor : m_impl->anchoredNodes)
     {
-        const glm::vec3 position(anchor.body->transform.GetWorldMatrix() *
-            glm::vec4(anchor.bodyLocalPosition, 1.f));
-        auto& node = m_impl->softBody->m_nodes[anchor.index];
-        node.m_x = Engine::Physics::ToBullet(position);
-        node.m_q = node.m_x;
-        node.m_v.setZero();
+        auto* rigid = anchor.body ? anchor.body->GetComponent<RigidBody>() : nullptr;
+        if (anchor.nativeBody && (!rigid ||
+            anchor.nativeBody != rigid->GetNativeCollisionObjectForPhysics() ||
+            anchor.bodyGeneration != rigid->GetPhysicsBodyGeneration()))
+        {
+            DestroySoftBody(true);
+            if (!EnsureSoftBody()) return;
+            break;
+        }
+    }
+    for (auto& anchor : m_impl->anchoredNodes)
+    {
+        if (anchor.nativeBody) continue;
+        auto* rigid = anchor.body ? anchor.body->GetComponent<RigidBody>() : nullptr;
+        if (!rigid) continue;
+        auto* native = static_cast<btRigidBody*>(
+            rigid->GetNativeCollisionObjectForPhysics());
+        if (!native) continue;
+        // Near mode avoids contact fighting the constraint around the anchor.
+        m_impl->softBody->appendAnchor(anchor.index, native, anchor.nearMode);
+        anchor.nativeBody = native;
+        anchor.bodyGeneration = rigid->GetPhysicsBodyGeneration();
     }
 }
 

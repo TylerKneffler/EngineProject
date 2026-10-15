@@ -6,10 +6,10 @@
 
 namespace Engine::Components
 {
-class PmxMaterialMorph final : public Engine::Core::Component
+class MaterialPropertyMorph final : public Engine::Core::Component
 {
 public:
-    PmxMaterialMorph();
+    MaterialPropertyMorph();
     std::vector<Engine::Model::ImportedMaterialMorph> morphs;
     void Apply();
     void SetAnimatedMorphWeights(const std::unordered_map<std::string, float>& weights);
@@ -27,6 +27,10 @@ private:
         float shininess = 32.f;
         glm::vec3 ambient { .1f };
         glm::vec4 textureTint { 1.f };
+        glm::vec4 edgeColor { 0.f };
+        float edgeWidth = 0.f;
+        glm::vec4 sphereTint { 1.f };
+        glm::vec4 toonTint { 1.f };
         std::string alphaMode;
     };
     State m_input;

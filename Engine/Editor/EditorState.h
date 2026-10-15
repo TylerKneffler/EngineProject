@@ -94,7 +94,9 @@ public:
     void SaveAll();
     uint32_t GetEditorMaxFps() const { return m_projectSettings.editorMaxFps; }
     void LoadScene(const std::string& path);
+    void LoadStartupScene(const std::string& path);
     void RequestSceneLoad(const std::string& path);
+    void ProcessPendingSceneLoad();
     bool ConfirmSceneLoad(bool saveCurrentScene);
     void CancelSceneLoad();
     bool HasPendingSceneLoadWarning() const { return m_showUnsavedWarning; }
@@ -187,8 +189,11 @@ public:
         m_loadingOverlayVisible = visible;
         m_loadingOverlayMessage = std::move(message);
     }
-    bool IsLoadingOverlayVisible() const { return m_loadingOverlayVisible; }
-    const std::string& GetLoadingOverlayMessage() const { return m_loadingOverlayMessage; }
+    bool IsLoadingOverlayVisible() const { return m_loadingOverlayVisible || !m_queuedScenePath.empty(); }
+    const std::string& GetLoadingOverlayMessage() const
+    {
+        return m_queuedScenePath.empty() ? m_loadingOverlayMessage : m_sceneLoadingMessage;
+    }
     void RefreshSelectionAfterReload(const ::Engine::Scene::Scene::ObjectPath& selectedPath);
 
     // ---- Undo/Redo ----
@@ -452,6 +457,7 @@ private:
     void CommitPendingHistoryEdit();
     void TrimHistory();
     bool SaveMainScene();
+    void QueueSceneLoad(const std::string& path);
     void LoadSceneNow(const std::string& path);
     void RemovePrefabPanels();
     void SetPrefabDocumentFocused(bool focused);
@@ -791,6 +797,8 @@ private:
     bool m_showPreferences = false;
     bool m_loadingOverlayVisible = false;
     std::string m_loadingOverlayMessage;
+    std::string m_queuedScenePath;
+    std::string m_sceneLoadingMessage;
     std::string m_playModeSceneSnapshot;
     bool m_prePlayHasUnsavedChanges = false;
     bool m_prePlayHadObjectSelection = false;

@@ -21,5 +21,9 @@ public:
         const Engine::Scene::Scene& scene,
         const EditorUiVec2& mousePos,
         const EditorUiVec2& viewportSize);
+    static Engine::Core::Object* PickBoneInViewport(
+        const Engine::Scene::Scene& scene,
+        const EditorUiVec2& mousePos,
+        const EditorUiVec2& viewportSize);
 };
 }

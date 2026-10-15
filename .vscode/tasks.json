@@ -21,10 +21,7 @@
                 "--parallel"
             ],
             "dependsOn": "CMake: Configure (Debug)",
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            },
+            "group": "build",
             "presentation": { "reveal": "always", "panel": "shared" },
             "problemMatcher": "$msCompile"
         },
@@ -37,7 +34,10 @@
                 "--target", "Editor",
                 "--parallel"
             ],
-            "group": "build",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
             "presentation": { "reveal": "always", "panel": "shared" },
             "problemMatcher": "$msCompile"
         },

@@ -15,6 +15,8 @@
 namespace Engine::Components
 {
 class Model;
+class Mesh;
+class MaterialPropertyMorph;
 struct AnimationManagerScratch;
 class AnimationManager : public Engine::Core::Component
 {
@@ -53,6 +55,7 @@ public:
 
 private:
     Model* ResolveModel() const;
+    void RefreshSceneBindings(Model* model);
     struct RestTransform
     {
         glm::vec3 translation{};
@@ -70,6 +73,12 @@ private:
     mutable uint64_t m_cachedStructureRevision = 0;
     mutable uint64_t m_cachedConfigurationRevision = 0;
     mutable bool m_modelCacheValid = false;
+    Engine::Core::Object* m_cachedBindingRoot = nullptr;
+    uint64_t m_cachedBindingStructureRevision = 0;
+    std::unordered_map<std::string, Mesh*> m_meshesByPath;
+    std::vector<std::pair<std::string, Mesh*>> m_morphMeshes;
+    std::vector<Mesh*> m_visibleMeshes;
+    std::vector<MaterialPropertyMorph*> m_materialMorphs;
     std::unique_ptr<AnimationManagerScratch> m_scratch;
     std::unordered_set<std::string> m_externalClipNames;
 };

@@ -416,7 +416,7 @@ if(ENGINE_VULKAN_ENABLED)
                 COMMAND "${DXC_SPIRV_EXECUTABLE}" -spirv -fspv-target-env=vulkan1.1
                         -fvk-use-dx-layout -D VULKAN=1 -T ${SHADER_PROFILE}
                         -E ${SHADER_ENTRY} -Fo "${SHADER_OUTPUT}" "${SHADER_SOURCE}"
-                DEPENDS "${SHADER_SOURCE}"
+                DEPENDS "${SHADER_SOURCE}" "${ENGINE_ROOT}/Engine/Core/Shaders/SkinDeformation.hlsli"
                 VERBATIM
                 COMMENT "Compiling ${SHADER_NAME}.${STAGE} for Vulkan"
             )
@@ -435,9 +435,36 @@ if(ENGINE_VULKAN_ENABLED)
                     -fvk-use-dx-layout -fspv-entrypoint-name=VSMain
                     -D VULKAN=1 -T vs_6_0
                     -E VSTerrainMain -Fo "${SHADER_OUTPUT}" "${SHADER_SOURCE}"
-            DEPENDS "${SHADER_SOURCE}"
+            DEPENDS "${SHADER_SOURCE}" "${ENGINE_ROOT}/Engine/Core/Shaders/SkinDeformation.hlsli"
             VERBATIM
             COMMENT "Compiling ${SHADER_NAME}.VSTerrainMain.VS for Vulkan"
+        )
+        list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
+    endforeach()
+    foreach(SHADER_ENTRY VSMmdMain PSMmdMain)
+        if(SHADER_ENTRY STREQUAL "VSMmdMain")
+            set(SHADER_PROFILE vs_6_0)
+            set(SHADER_STAGE VS)
+            set(SHADER_SPIRV_ENTRY VSMain)
+        else()
+            set(SHADER_PROFILE ps_6_0)
+            set(SHADER_STAGE PS)
+            set(SHADER_SPIRV_ENTRY PSMain)
+        endif()
+        set(SHADER_SOURCE
+            "${ENGINE_ROOT}/Engine/Core/Shaders/ObjectOutline/ObjectOutline.hlsl")
+        set(SHADER_OUTPUT
+            "${VULKAN_SHADER_DIR}/ObjectOutline.${SHADER_ENTRY}.${SHADER_STAGE}.spv")
+        add_custom_command(
+            OUTPUT "${SHADER_OUTPUT}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${VULKAN_SHADER_DIR}"
+            COMMAND "${DXC_SPIRV_EXECUTABLE}" -spirv -fspv-target-env=vulkan1.1
+                    -fvk-use-dx-layout -fspv-entrypoint-name=${SHADER_SPIRV_ENTRY}
+                    -D VULKAN=1 -T ${SHADER_PROFILE}
+                    -E ${SHADER_ENTRY} -Fo "${SHADER_OUTPUT}" "${SHADER_SOURCE}"
+            DEPENDS "${SHADER_SOURCE}" "${ENGINE_ROOT}/Engine/Core/Shaders/SkinDeformation.hlsli"
+            VERBATIM
+            COMMENT "Compiling ObjectOutline.${SHADER_ENTRY} for Vulkan"
         )
         list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
     endforeach()
@@ -666,6 +693,15 @@ set_target_properties(Server PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "${ENGINE_RUNTIME_WORKING_DIRECTORY}"
 )
 
+# cmake --build --parallel runs MSBuild projects concurrently, but does not
+# parallelize source files inside one project. Engine already uses /MP; apply it
+# to the other first-party targets, including the editor's hot-reload module.
+if(MSVC)
+    foreach(target Editor ProjectScripts Game VideoExporter Server)
+        target_compile_options(${target} PRIVATE /MP)
+    endforeach()
+endif()
+
 set(ENGINE_LOCAL_TEST_ROOT "${ENGINE_ROOT}/.local/tests")
 
 if(NOT ENGINE_PROJECT_DIR AND
@@ -777,6 +813,28 @@ if(NOT ENGINE_PROJECT_DIR AND
         PMX_TEST_ASSET_ROOT="${ENGINE_ROOT}/Engine/Core/Assets/mmd"
         PMX_TEST_OUTPUT_ROOT="${ENGINE_ROOT}/.local")
     add_test(NAME PmxModelDecoder COMMAND PmxModelDecoderTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/SkinDeformationTests.cpp")
+    enable_testing()
+    add_executable(SkinDeformationTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/SkinDeformationTests.cpp")
+    target_link_libraries(SkinDeformationTests PRIVATE Engine)
+    target_include_directories(SkinDeformationTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME SkinDeformation COMMAND SkinDeformationTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/RuntimeMigrationTests.cpp")
+    enable_testing()
+    add_executable(RuntimeMigrationTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/RuntimeMigrationTests.cpp")
+    target_link_libraries(RuntimeMigrationTests PRIVATE Engine)
+    target_include_directories(RuntimeMigrationTests PRIVATE "${ENGINE_ROOT}/Engine")
+    target_compile_definitions(RuntimeMigrationTests PRIVATE
+        PMX_MIGRATION_PREFAB="${ENGINE_ROOT}/Engine/Core/Assets/mmd/Mococo Abyssgard/Mococo Abyssgard.prefab")
+    add_test(NAME RuntimeMigration COMMAND RuntimeMigrationTests)
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND

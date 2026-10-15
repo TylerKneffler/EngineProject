@@ -7,7 +7,10 @@
 #include "Engine/Editor/Core/View/ViewFactory.h"
 #include "Engine/Editor/Core/View/Views/PreferencesView.h"
 #include "Engine/Editor/Core/View/Views/HierarchyView.h"
+#include "Engine/Editor/Core/View/Views/PropertiesView.h"
+#include "Engine/Editor/Core/View/Views/SceneView.h"
 #include "Engine/Editor/Core/View/Views/AssetsExplorerView.h"
+#include "Core/Component.h"
 #include "imgui.h"
 #include "imgui_internal.h"
 #include <algorithm>
@@ -623,6 +626,31 @@ void ImGuiPanelHost::DrawPanels(EditorState& state)
             if (compactTree)
                 PopCompactPanelStyle(true);
         }
+
+    if (Engine::Core::Component::HasEditorReferencePick())
+    {
+        const bool confirmed = ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
+            ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false);
+        ImGuiWindow* focused = ImGui::GetCurrentContext()->NavWindow;
+        bool allowedFocus = !focused;
+        for (const auto& panel : panels)
+        {
+            if (!panel || (!dynamic_cast<HierarchyView*>(panel.get()) &&
+                !dynamic_cast<PropertiesView*>(panel.get()) &&
+                !dynamic_cast<SceneView*>(panel.get())))
+                continue;
+            ImGuiWindow* window = ImGui::FindWindowByName(
+                panel->GetTitle().c_str());
+            if (window && focused &&
+                window->RootWindow == focused->RootWindow)
+            {
+                allowedFocus = true;
+                break;
+            }
+        }
+        if (confirmed || !allowedFocus)
+            Engine::Core::Component::CancelEditorReferencePick();
+    }
 
     // Asset callbacks may request panels to be added. Apply those requests only
     // after traversal, because push_back can invalidate this vector's iterators.

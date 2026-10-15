@@ -56,6 +56,10 @@ public:
         const Engine::Components::RigidBody& body) const = 0;
     virtual void NotifyRigidBodyTransformChanged(
         Engine::Components::RigidBody& body) = 0;
+    // Called while the native body is still alive so adapters can release
+    // constraints that reference it before a configuration rebuild.
+    virtual void BeforeRigidBodyDestroyed(
+        Engine::Components::RigidBody&) {}
     virtual void SetPortalLocalMeshCollider(Engine::Components::RigidBody& body,
         const void* key, const std::vector<glm::vec3>& vertices) = 0;
     virtual void ClearPortalLocalMeshCollider(Engine::Components::RigidBody& body,

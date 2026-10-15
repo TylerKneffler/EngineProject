@@ -12,6 +12,7 @@ struct DrawConstants
 struct ObjectData
 {
     float4x4 viewProjection;
+    float4x4 sphereView;
     float4x4 world;
     float4 baseColor;
     float4 ambientUnlit;
@@ -43,8 +44,12 @@ struct ObjectData
     float4 subsurfaceColorWeight;
     float4 subsurfaceRadiusThickness;
     float4 subsurfaceTransmission;
-    float4 mmdSpecularShininess;
+    float4 blinnPhongSpecularShininess;
     float4 pmxTextureTint;
+    float4 pmxSphereTint;
+    float4 pmxToonTint;
+    float4 pmxEdgeColor;
+    float4 pmxParams;
 };
 
 struct SceneLightData
@@ -86,6 +91,8 @@ struct SceneLightData
 [[vk::binding(23, 0)]] Texture2D ies2;
 [[vk::binding(24, 0)]] Texture2D ies3;
 [[vk::binding(25, 0)]] Texture2D subsurfaceThicknessMap;
+[[vk::binding(26, 0)]] Texture2D sphereMap;
+[[vk::binding(27, 0)]] Texture2D toonMap;
 [[vk::binding(6, 0)]] SamplerState materialSampler;
 #else
 cbuffer DrawBuffer : register(b0)
@@ -108,6 +115,8 @@ Texture2D cookie2 : register(t18); Texture2D cookie3 : register(t19);
 Texture2D ies0 : register(t20); Texture2D ies1 : register(t21);
 Texture2D ies2 : register(t22); Texture2D ies3 : register(t23);
 Texture2D subsurfaceThicknessMap : register(t24);
+Texture2D sphereMap : register(t25);
+Texture2D toonMap : register(t26);
 StructuredBuffer<SceneLightData> sceneLights : register(t6);
 StructuredBuffer<ObjectData> objects : register(t7);
 StructuredBuffer<float4x4> boneMatrices : register(t8);
@@ -115,6 +124,8 @@ StructuredBuffer<float4> morphDeltas : register(t10);
 StructuredBuffer<float4> morphWeights : register(t11);
 SamplerState materialSampler : register(s0);
 #endif
+
+#include "../SkinDeformation.hlsli"
 
 float SampleCookie(uint index, float2 uv)
 {
@@ -146,6 +157,14 @@ void VSMain(
     float4 weights0 : WEIGHTS0,
     float4 joints1 : JOINTS1,
     float4 weights1 : WEIGHTS1,
+    float4 uvChannels0 : TEXCOORD3,
+    float4 uvChannels1 : TEXCOORD4,
+    float4 uvChannels2 : TEXCOORD5,
+    float4 uvChannels3 : TEXCOORD6,
+    float4 uvChannels4 : TEXCOORD7,
+    float4 sdefCenterAndMode : TEXCOORD8,
+    float4 sdefRadius0 : TEXCOORD9,
+    float4 sdefRadius1 : TEXCOORD10,
     uint vertexId : SV_VertexID,
     out float4 oPos : SV_POSITION,
     out float3 oWorldPos : TEXCOORD2,
@@ -153,27 +172,44 @@ void VSMain(
     out float2 oUv : TEXCOORD,
     out float2 oUv1 : TEXCOORD1,
     out float4 oColor : COLOR,
-    out float4 oTangent : TANGENT)
+    out float4 oTangent : TANGENT,
+    out float4 oUvChannels0 : TEXCOORD3,
+    out float4 oUvChannels1 : TEXCOORD4,
+    out float4 oUvChannels2 : TEXCOORD5,
+    out float4 oUvChannels3 : TEXCOORD6,
+    out float4 oUvChannels4 : TEXCOORD7)
 {
     ObjectData objectData = objects[draw.objectIndex];
     float4 localPosition = float4(pos, 1.0);
     float3 localNormal = normal;
     float3 localTangent = tangent.xyz;
     float4 localUv = float4(uv, uv1);
-    uint morphTargetCount = (uint)objectData.morphParams.x;
+    float4 fullUv0 = float4(uv, uvChannels0.zw);
+    float4 fullUv1 = float4(uv1, uvChannels1.zw);
+    float4 fullUv2 = uvChannels2;
+    float4 fullUv3 = uvChannels3;
+    float4 fullUv4 = uvChannels4;
+    uint activeMorphCount = (uint)objectData.morphParams.x;
     uint morphVertexCount = (uint)objectData.morphParams.y;
     uint morphStride = (uint)objectData.morphParams.w;
-    [loop] for (uint target = 0; target < morphTargetCount; ++target)
+    [loop] for (uint active = 0; active < activeMorphCount; ++active)
     {
-        float weight = morphWeights[target >> 2][target & 3];
-        if (weight != 0.0)
+        float2 morph = morphWeights[active].xy;
+        uint target = (uint)morph.x;
+        float weight = morph.y;
+        uint base = (target * morphVertexCount + vertexId) * morphStride;
+        localPosition.xyz += morphDeltas[base].xyz * weight;
+        localNormal += morphDeltas[base + 1].xyz * weight;
+        localTangent += morphDeltas[base + 2].xyz * weight;
+        if (morphStride >= 4)
+            localUv += morphDeltas[base + 3] * weight;
+        if (morphStride >= 9)
         {
-            uint base = (target * morphVertexCount + vertexId) * morphStride;
-            localPosition.xyz += morphDeltas[base].xyz * weight;
-            localNormal += morphDeltas[base + 1].xyz * weight;
-            localTangent += morphDeltas[base + 2].xyz * weight;
-            if (morphStride == 4)
-                localUv += morphDeltas[base + 3] * weight;
+            fullUv0.zw += morphDeltas[base + 4].zw * weight;
+            fullUv1.zw += morphDeltas[base + 5].zw * weight;
+            fullUv2 += morphDeltas[base + 6] * weight;
+            fullUv3 += morphDeltas[base + 7] * weight;
+            fullUv4 += morphDeltas[base + 8] * weight;
         }
     }
     if (dot(localNormal, localNormal) > 0.000001)
@@ -184,18 +220,12 @@ void VSMain(
     if (jointCount > 0)
     {
         uint paletteOffset = (uint)objectData.skinParams.x;
-        float4x4 skin = (float4x4)0;
-        [unroll] for (uint influence = 0; influence < 4; ++influence)
-        {
-            uint joint0 = (uint)joints0[influence];
-            uint joint1 = (uint)joints1[influence];
-            if (joint0 < jointCount) skin += boneMatrices[paletteOffset + joint0] * weights0[influence];
-            if (joint1 < jointCount) skin += boneMatrices[paletteOffset + joint1] * weights1[influence];
-        }
-        localPosition = mul(skin, localPosition);
-        localNormal = normalize(mul((float3x3)skin, localNormal));
+        SkinDeform(localPosition, localNormal, localTangent,
+            joints0, weights0, joints1, weights1, sdefCenterAndMode,
+            sdefRadius0, sdefRadius1, paletteOffset, jointCount);
+        localNormal = normalize(localNormal);
         if (dot(localTangent, localTangent) > 0.0001)
-            localTangent = normalize(mul((float3x3)skin, localTangent));
+            localTangent = normalize(localTangent);
     }
     // Resolve world space first, then use the shared view-projection matrix.
     // Adjacent terrain patches can own different transforms while still
@@ -216,6 +246,11 @@ void VSMain(
     oNormal = normalize(mul((float3x3)objectData.world, localNormal));
     oUv = objectData.spriteUvRect.xy + localUv.xy * objectData.spriteUvRect.zw;
     oUv1 = localUv.zw;
+    oUvChannels0 = float4(localUv.xy, fullUv0.zw);
+    oUvChannels1 = float4(localUv.zw, fullUv1.zw);
+    oUvChannels2 = fullUv2;
+    oUvChannels3 = fullUv3;
+    oUvChannels4 = fullUv4;
     oColor = color;
     if (objectData.morphParams.z > 0.0)
     {
@@ -257,7 +292,12 @@ void VSTerrainMain(
     out float2 oUv : TEXCOORD,
     out float2 oUv1 : TEXCOORD1,
     out float4 oColor : COLOR,
-    out float4 oTangent : TANGENT)
+    out float4 oTangent : TANGENT,
+    out float4 oUvChannels0 : TEXCOORD3,
+    out float4 oUvChannels1 : TEXCOORD4,
+    out float4 oUvChannels2 : TEXCOORD5,
+    out float4 oUvChannels3 : TEXCOORD6,
+    out float4 oUvChannels4 : TEXCOORD7)
 {
     ObjectData objectData = objects[draw.objectIndex];
     const float3 localNormal = normalize(normal);
@@ -279,6 +319,11 @@ void VSTerrainMain(
     oNormal = normalize(mul((float3x3)objectData.world, localNormal));
     oUv = objectData.spriteUvRect.xy + uv * objectData.spriteUvRect.zw;
     oUv1 = uv;
+    oUvChannels0 = float4(uv, 0.0, 0.0);
+    oUvChannels1 = float4(uv, 0.0, 0.0);
+    oUvChannels2 = 0.0;
+    oUvChannels3 = 0.0;
+    oUvChannels4 = 0.0;
     oColor = color;
     // cross(+Y, +X) points toward -Z, while terrain V increases toward +Z.
     oTangent = float4(normalize(mul((float3x3)objectData.world,
@@ -649,6 +694,25 @@ float3 EvaluateSubsurfaceShadow(ObjectData objectData,
             scatteringRadius.b, centerShadow));
 }
 
+// UV selector: 0-4 choose XY from primary/additional UV1-4;
+// 5-9 choose ZW from the same sets.
+float2 SelectMaterialUv(float set, float2 uv, float2 uv1,
+    float4 uvChannels0, float4 uvChannels1, float4 uvChannels2,
+    float4 uvChannels3, float4 uvChannels4)
+{
+    uint index = min((uint)max(set, 0.0), 9u);
+    if (index == 0u) return uv;
+    if (index == 1u) return uv1;
+    if (index == 2u) return uvChannels2.xy;
+    if (index == 3u) return uvChannels3.xy;
+    if (index == 4u) return uvChannels4.xy;
+    if (index == 5u) return uvChannels0.zw;
+    if (index == 6u) return uvChannels1.zw;
+    if (index == 7u) return uvChannels2.zw;
+    if (index == 8u) return uvChannels3.zw;
+    return uvChannels4.zw;
+}
+
 float4 PSMain(
     float4 pos : SV_POSITION,
     float3 worldPos : TEXCOORD2,
@@ -657,6 +721,11 @@ float4 PSMain(
     float2 uv1 : TEXCOORD1,
     float4 vertexColor : COLOR,
     float4 tangent : TANGENT,
+    float4 uvChannels0 : TEXCOORD3,
+    float4 uvChannels1 : TEXCOORD4,
+    float4 uvChannels2 : TEXCOORD5,
+    float4 uvChannels3 : TEXCOORD6,
+    float4 uvChannels4 : TEXCOORD7,
     bool frontFace : SV_IsFrontFace) : SV_TARGET
 {
     ObjectData objectData = objects[draw.objectIndex];
@@ -679,12 +748,18 @@ float4 PSMain(
     float roughness = clamp(objectData.materialParams.y, 0.045, 1.0);
     float occlusion = 1.0;
     float3 emissive = objectData.emissiveOcclusion.rgb;
-    float2 baseUv = objectData.textureUvSets0.x > 0.5 ? uv1 : uv;
-    float2 metallicRoughnessUv = objectData.textureUvSets0.y > 0.5 ? uv1 : uv;
-    float2 normalUv = objectData.textureUvSets0.z > 0.5 ? uv1 : uv;
-    float2 occlusionUv = objectData.textureUvSets0.w > 0.5 ? uv1 : uv;
-    float2 emissiveUv = objectData.textureUvSets1.x > 0.5 ? uv1 : uv;
-    float2 heightUv = objectData.textureUvSets1.y > 0.5 ? uv1 : uv;
+    float2 baseUv = SelectMaterialUv(objectData.textureUvSets0.x, uv, uv1,
+        uvChannels0, uvChannels1, uvChannels2, uvChannels3, uvChannels4);
+    float2 metallicRoughnessUv = SelectMaterialUv(objectData.textureUvSets0.y, uv, uv1,
+        uvChannels0, uvChannels1, uvChannels2, uvChannels3, uvChannels4);
+    float2 normalUv = SelectMaterialUv(objectData.textureUvSets0.z, uv, uv1,
+        uvChannels0, uvChannels1, uvChannels2, uvChannels3, uvChannels4);
+    float2 occlusionUv = SelectMaterialUv(objectData.textureUvSets0.w, uv, uv1,
+        uvChannels0, uvChannels1, uvChannels2, uvChannels3, uvChannels4);
+    float2 emissiveUv = SelectMaterialUv(objectData.textureUvSets1.x, uv, uv1,
+        uvChannels0, uvChannels1, uvChannels2, uvChannels3, uvChannels4);
+    float2 heightUv = SelectMaterialUv(objectData.textureUvSets1.y, uv, uv1,
+        uvChannels0, uvChannels1, uvChannels2, uvChannels3, uvChannels4);
 
     float3 geometryNormal = normalize(normal) * (frontFace ? 1.0 : -1.0);
     bool hasTangents = dot(tangent.xyz, tangent.xyz) > 0.0001;
@@ -727,10 +802,10 @@ float4 PSMain(
     }
     roughness = clamp(roughness, 0.045, 1.0);
     metallic = saturate(metallic);
-    const bool mmdSpecular = objectData.mmdSpecularShininess.w > 0.0;
-    if (mmdSpecular)
+    const bool blinnPhongSpecular = objectData.blinnPhongSpecularShininess.w > 0.0;
+    if (blinnPhongSpecular)
         roughness = clamp(sqrt(2.0 /
-            (objectData.mmdSpecularShininess.w + 1.0)), 0.045, 1.0);
+            (objectData.blinnPhongSpecularShininess.w + 1.0)), 0.045, 1.0);
     if (flags & 8u)
         occlusion = lerp(1.0, occlusionMap.Sample(materialSampler, occlusionUv).r,
             objectData.emissiveOcclusion.w);
@@ -746,6 +821,21 @@ float4 PSMain(
             sampledNormal.y * bitangentDirection +
             sampledNormal.z * geometryNormal);
     }
+    if ((flags & 256u) && objectData.pmxParams.y > 0.5)
+    {
+        // Modes 1 and 2 project the posed world normal in camera space.
+        // Mode 3 uses the first PMX additional UV channel directly.
+        float2 sphereUv = objectData.pmxParams.y > 2.5 ? uv1 :
+            normalize(mul((float3x3)objectData.sphereView,
+                geometryNormal)).xy * float2(0.5, -0.5) + 0.5;
+        float4 sphere = sphereMap.Sample(materialSampler, sphereUv) *
+            objectData.pmxSphereTint;
+        if (objectData.pmxParams.y > 1.5 && objectData.pmxParams.y < 2.5)
+            base.rgb += sphere.rgb * sphere.a;
+        else
+            base.rgb *= lerp(float3(1.0, 1.0, 1.0), sphere.rgb,
+                saturate(sphere.a));
+    }
 
     if (flags & 32u)
         clip(base.a - objectData.viewPositionAlphaCutoff.w);
@@ -755,10 +845,11 @@ float4 PSMain(
 
     float3 n = normalize(normal);
     float3 v = viewDirection;
-    float3 f0 = mmdSpecular
-        ? saturate(objectData.mmdSpecularShininess.rgb)
+    float3 f0 = blinnPhongSpecular
+        ? saturate(objectData.blinnPhongSpecularShininess.rgb)
         : lerp(float3(0.04, 0.04, 0.04), base.rgb, metallic);
     float3 directLight = 0.0;
+    float toonLight = 0.0;
     uint lightListOffset = 0u;
     uint lightIterationCount = draw.lightCount;
     const bool clusteredLighting = (draw.drawFlags & 1u) != 0u;
@@ -853,6 +944,7 @@ float4 PSMain(
             attenuation *= SampleIes(iesIndex, dot(-lightDirection,
                 normalize(light.directionCone.xyz)));
         float nDotL = saturate(dot(n, lightDirection));
+        toonLight = max(toonLight, nDotL);
         float3 radiance = light.colorIntensity.rgb *
             light.colorIntensity.w * attenuation;
         float centerShadow = EvaluateDirectionalShadow(
@@ -944,6 +1036,18 @@ float4 PSMain(
         }
         environment = (diffuseEnvironment + specularEnvironment) * occlusion;
     }
-    return float4(ambient + environment + directLight + bakedDirect + emissive,
-        base.a);
+    float3 litColor = ambient + environment + directLight + bakedDirect;
+    if ((flags & 512u) || objectData.pmxParams.z >= 0.0)
+    {
+        float builtinToon = lerp(0.65, 1.0,
+            smoothstep(0.0, 1.0, toonLight));
+        float3 toon = (flags & 512u)
+            ? toonMap.Sample(materialSampler,
+                float2(0.5, clamp(1.0 - toonLight, 0.001, 0.999))).rgb
+            : float3(builtinToon, builtinToon, builtinToon);
+        litColor *= lerp(float3(1.0, 1.0, 1.0),
+            toon * objectData.pmxToonTint.rgb,
+            saturate(objectData.pmxToonTint.a));
+    }
+    return float4(litColor + emissive, base.a);
 }

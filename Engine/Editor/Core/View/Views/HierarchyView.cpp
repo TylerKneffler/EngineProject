@@ -3,6 +3,7 @@
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Object.h"
+#include "Core/Component.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Obj/Sprite.h"
@@ -427,7 +428,12 @@ void HierarchyView::LogInteraction(const std::string& message) const
 
 void HierarchyView::SetSelectedObject(Engine::Core::Object* obj)
 {
-    if (m_selectedObject == obj && m_selectedObjects.size() == (obj ? 1u : 0u)) return;
+    if (m_selectedObject == obj && m_selectedObjects.size() == (obj ? 1u : 0u))
+    {
+        if (Engine::Core::Component::HasEditorReferencePick())
+            NotifySelectionChanged();
+        return;
+    }
     m_selectedObject = obj;
     m_selectionAnchor = obj;
     m_selectedObjects.clear();

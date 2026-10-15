@@ -644,6 +644,7 @@ void Engine::Components::RigidBody::DestroyBody()
     if (!m_impl) return;
     if (m_impl->body && m_impl->scene)
     {
+        m_impl->scene->GetPhysics().GetAdapter().BeforeRigidBodyDestroyed(*this);
         Engine::Physics::StateFor(m_impl->scene).world->removeRigidBody(m_impl->body.get());
     }
     m_impl->body.reset();

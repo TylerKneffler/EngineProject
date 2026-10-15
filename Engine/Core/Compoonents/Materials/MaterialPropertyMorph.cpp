@@ -1,4 +1,4 @@
-#include "PmxMaterialMorph.h"
+#include "MaterialPropertyMorph.h"
 
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Object.h"
@@ -28,26 +28,25 @@ glm::vec4 ReadVector(const Value& value, int size)
 }
 }
 
-PmxMaterialMorph::PmxMaterialMorph()
+MaterialPropertyMorph::MaterialPropertyMorph()
 {
-    SetTypeName(COMPONENT_TYPE_NAME(PmxMaterialMorph));
-    editorAddable = false;
+    SetTypeName(COMPONENT_TYPE_NAME(MaterialPropertyMorph));
     singlecomponent = true;
 }
 
-void PmxMaterialMorph::Start()
+void MaterialPropertyMorph::Start()
 {
     m_applied = false;
     m_animatedMorphWeights.clear();
 }
 
-void PmxMaterialMorph::SetAnimatedMorphWeights(
+void MaterialPropertyMorph::SetAnimatedMorphWeights(
     const std::unordered_map<std::string, float>& weights)
 {
     m_animatedMorphWeights = weights;
 }
 
-void PmxMaterialMorph::Apply()
+void MaterialPropertyMorph::Apply()
 {
     Material* material = Owner ? Owner->GetComponent<Material>() : nullptr;
     if (!material) return;
@@ -61,6 +60,10 @@ void PmxMaterialMorph::Apply()
         state.ambient = material->ambientColor;
         state.textureTint = glm::vec4(material->baseColorTextureTint,
             material->baseColorTextureTintAlpha);
+        state.edgeColor = material->edgeColor;
+        state.edgeWidth = material->edgeWidth;
+        state.sphereTint = material->sphereTint;
+        state.toonTint = material->toonTint;
         state.alphaMode = material->alphaMode;
         return state;
     };
@@ -73,6 +76,10 @@ void PmxMaterialMorph::Apply()
         material->ambientColor = state.ambient;
         material->baseColorTextureTint = glm::vec3(state.textureTint);
         material->baseColorTextureTintAlpha = state.textureTint.a;
+        material->edgeColor = state.edgeColor;
+        material->edgeWidth = state.edgeWidth;
+        material->sphereTint = state.sphereTint;
+        material->toonTint = state.toonTint;
         material->alphaMode = state.alphaMode;
     };
     if (m_applied &&
@@ -83,6 +90,10 @@ void PmxMaterialMorph::Apply()
         glm::all(glm::equal(material->ambientColor, m_output.ambient)) &&
         glm::all(glm::equal(glm::vec4(material->baseColorTextureTint,
             material->baseColorTextureTintAlpha), m_output.textureTint)) &&
+        glm::all(glm::equal(material->edgeColor, m_output.edgeColor)) &&
+        material->edgeWidth == m_output.edgeWidth &&
+        glm::all(glm::equal(material->sphereTint, m_output.sphereTint)) &&
+        glm::all(glm::equal(material->toonTint, m_output.toonTint)) &&
         material->alphaMode == m_output.alphaMode)
         restore(m_input);
     m_input = capture();
@@ -106,6 +117,10 @@ void PmxMaterialMorph::Apply()
                 material->shininess += offset.shininess * weight;
                 material->ambientColor += offset.ambient * weight;
                 textureTint += offset.textureTint * weight;
+                material->edgeColor += offset.edgeColor * weight;
+                material->edgeWidth += offset.edgeWidth * weight;
+                material->sphereTint += offset.sphereTint * weight;
+                material->toonTint += offset.toonTint * weight;
             }
             else
             {
@@ -117,6 +132,13 @@ void PmxMaterialMorph::Apply()
                     offset.ambient, weight);
                 textureTint *= glm::mix(glm::vec4(1.f),
                     offset.textureTint, weight);
+                material->edgeColor *= glm::mix(glm::vec4(1.f),
+                    offset.edgeColor, weight);
+                material->edgeWidth *= glm::mix(1.f, offset.edgeWidth, weight);
+                material->sphereTint *= glm::mix(glm::vec4(1.f),
+                    offset.sphereTint, weight);
+                material->toonTint *= glm::mix(glm::vec4(1.f),
+                    offset.toonTint, weight);
             }
         }
     }
@@ -130,10 +152,10 @@ void PmxMaterialMorph::Apply()
     m_output = capture();
 }
 
-bool PmxMaterialMorph::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool MaterialPropertyMorph::DrawProperties(::Engine::Editor::IEditorUi& ui)
 {
     bool changed = Component::DrawProperties(ui);
-    if (ui.PropertyGroupHeader("PMX Material Morphs"))
+    if (ui.PropertyGroupHeader("Material Property Morphs"))
     {
         ui.Indent(12.f);
         for (size_t i = 0; i < morphs.size(); ++i)
@@ -150,7 +172,7 @@ bool PmxMaterialMorph::DrawProperties(::Engine::Editor::IEditorUi& ui)
     return changed;
 }
 
-PmxMaterialMorph::JsonValue PmxMaterialMorph::Serialize() const
+MaterialPropertyMorph::JsonValue MaterialPropertyMorph::Serialize() const
 {
     Value result = Component::Serialize();
     Value values = Value::MakeArray();
@@ -164,7 +186,11 @@ PmxMaterialMorph::JsonValue PmxMaterialMorph::Serialize() const
                 .Set("specular", VectorValue(glm::vec4(offset.specular, 0.f), 3))
                 .Set("shininess", Value(offset.shininess))
                 .Set("ambient", VectorValue(glm::vec4(offset.ambient, 0.f), 3))
-                .Set("textureTint", VectorValue(offset.textureTint, 4)));
+                .Set("textureTint", VectorValue(offset.textureTint, 4))
+                .Set("edgeColor", VectorValue(offset.edgeColor, 4))
+                .Set("edgeWidth", Value(offset.edgeWidth))
+                .Set("sphereTint", VectorValue(offset.sphereTint, 4))
+                .Set("toonTint", VectorValue(offset.toonTint, 4)));
         values.Push(Value::MakeObject()
             .Set("name", Value(morph.name))
             .Set("weight", Value(morph.weight))
@@ -173,7 +199,7 @@ PmxMaterialMorph::JsonValue PmxMaterialMorph::Serialize() const
     return result.Set("morphs", std::move(values));
 }
 
-void PmxMaterialMorph::Deserialize(const JsonValue& value)
+void MaterialPropertyMorph::Deserialize(const JsonValue& value)
 {
     Component::Deserialize(value);
     morphs.clear();
@@ -195,6 +221,15 @@ void PmxMaterialMorph::Deserialize(const JsonValue& value)
             offset.textureTint = item.Has("textureTint")
                 ? ReadVector(item["textureTint"], 4)
                 : glm::vec4(offset.additive ? 0.f : 1.f);
+            const glm::vec4 neutral(offset.additive ? 0.f : 1.f);
+            offset.edgeColor = item.Has("edgeColor")
+                ? ReadVector(item["edgeColor"], 4) : neutral;
+            offset.edgeWidth = item.Has("edgeWidth")
+                ? item["edgeWidth"].AsFloat() : neutral.x;
+            offset.sphereTint = item.Has("sphereTint")
+                ? ReadVector(item["sphereTint"], 4) : neutral;
+            offset.toonTint = item.Has("toonTint")
+                ? ReadVector(item["toonTint"], 4) : neutral;
         }
     }
     Start();

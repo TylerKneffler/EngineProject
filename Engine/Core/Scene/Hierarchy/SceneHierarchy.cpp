@@ -1,8 +1,11 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Animation/TwoBoneIK.h"
 #include "Core/Compoonents/Animation/ChainIK.h"
-#include "Core/Compoonents/Animation/PmxRigController.h"
-#include "Core/Compoonents/Materials/PmxMaterialMorph.h"
+#include "Core/Compoonents/Animation/RigController.h"
+#include "Core/Compoonents/Animation/RigConstraints.h"
+#include "Core/Compoonents/Animation/RigMorphControls.h"
+#include "Core/Compoonents/Physics/RigPhysicsBinding.h"
+#include "Core/Compoonents/Materials/MaterialPropertyMorph.h"
 #include "Core/Compoonents/Constraints/TransformConstraint.h"
 #include "Core/Audio/Audio.h"
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
@@ -94,8 +97,20 @@ void Scene::Update(float deltaTime)
     m_physics->Step(physicsDelta);
     for (const auto& object : m_objects)
         if (object && object->IsEnabledInHierarchy())
-            if (auto* rig = object->GetComponent<Engine::Components::PmxRigController>())
-                rig->PostPhysicsUpdate();
+            if (auto* binding = object->GetComponent<Engine::Components::RigPhysicsBinding>())
+                binding->PostPhysicsUpdate();
+    for (const auto& object : m_objects)
+        if (object && object->IsEnabledInHierarchy())
+            if (auto* constraints = object->GetComponent<Engine::Components::RigConstraints>())
+            {
+                constraints->RefreshPoseOutputs();
+                constraints->PostPhysicsUpdate();
+            }
+    for (const auto& object : m_objects)
+        if (object && object->IsEnabledInHierarchy() &&
+            !object->GetComponent<Engine::Components::RigConstraints>())
+            if (auto* morphs = object->GetComponent<Engine::Components::RigMorphControls>())
+                morphs->RefreshPoseOutputs();
     // Bullet has now published current-frame poses and overlap pairs. Portal
     // traversal deliberately runs here rather than in Component::Update so a
     // crossing is evaluated against the motion that just occurred.
@@ -154,14 +169,25 @@ void Scene::ApplyPoseConstraints()
 {
     for (const auto& object : m_objects)
         if (object && object->IsEnabledInHierarchy())
-            for (Engine::Core::Component* component : object->Components)
-                if (auto* morph = dynamic_cast<Engine::Components::PmxMaterialMorph*>(component))
-                    morph->Apply();
+            if (auto* legacy = object->GetComponent<Engine::Components::RigController>())
+                legacy->EnsureComponents();
     for (const auto& object : m_objects)
         if (object && object->IsEnabledInHierarchy())
             for (Engine::Core::Component* component : object->Components)
-                if (auto* pmx = dynamic_cast<Engine::Components::PmxRigController*>(component))
-                    pmx->Apply();
+                if (auto* morph = dynamic_cast<Engine::Components::MaterialPropertyMorph*>(component))
+                    morph->Apply();
+    for (const auto& object : m_objects)
+        if (object && object->IsEnabledInHierarchy())
+        {
+            auto* constraints = object->GetComponent<Engine::Components::RigConstraints>();
+            auto* morphs = object->GetComponent<Engine::Components::RigMorphControls>();
+            if (constraints) constraints->RestorePose();
+            if (morphs) morphs->ApplyBoneMorphs();
+            if (constraints) constraints->Apply();
+            if (auto* binding = object->GetComponent<Engine::Components::RigPhysicsBinding>())
+                binding->Apply();
+            if (morphs) morphs->ApplyImpulseMorphs();
+        }
     for (const auto& object : m_objects)
         if (object && object->IsEnabledInHierarchy())
             for (Engine::Core::Component* component : object->Components)

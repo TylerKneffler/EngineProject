@@ -46,6 +46,36 @@ namespace Engine::Editor
 {
 namespace
 {
+constexpr size_t kAnimationDropdownLabelLength = 40;
+
+std::string AnimationDropdownLabel(const std::string& label)
+{
+    size_t end = 0;
+    size_t ellipsisEnd = 0;
+    size_t characters = 0;
+    while (end < label.size() && characters < kAnimationDropdownLabelLength)
+    {
+        if (characters == kAnimationDropdownLabelLength - 3)
+            ellipsisEnd = end;
+        const unsigned char byte = static_cast<unsigned char>(label[end]);
+        const size_t length = byte < 0x80 ? 1 : byte < 0xE0 ? 2 :
+            byte < 0xF0 ? 3 : 4;
+        end = std::min(label.size(), end + length);
+        ++characters;
+    }
+    return end == label.size() ? label :
+        label.substr(0, ellipsisEnd) + "...";
+}
+
+bool AnimationDropdownItem(const std::string& label, bool selected = false)
+{
+    const std::string display = AnimationDropdownLabel(label);
+    const bool clicked = ImGui::Selectable(display.c_str(), selected);
+    if (display != label && ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", label.c_str());
+    return clicked;
+}
+
 template <typename Document>
 float AnimationLocalTime(const Document& document, size_t rigIndex,
     int clipIndex)
@@ -2210,7 +2240,10 @@ void EditorState::DrawAnimationRigToolbar(IEditorUi& ui,
     ImGui::SetNextItemWidth(240.f);
     const std::string label = document.sourceManager
         ? "Rig: " + document.rigName : "Choose animation rig";
-    if (!ImGui::BeginCombo("##AnimationRigToolbar", label.c_str())) return;
+    const std::string preview = AnimationDropdownLabel(label);
+    ImGui::SetNextWindowSizeConstraints({ 240.f, 0.f },
+        { 420.f, FLT_MAX });
+    if (!ImGui::BeginCombo("##AnimationRigToolbar", preview.c_str())) return;
     if (document.sourceManager)
     {
         for (auto& track : document.tracks)
@@ -2234,7 +2267,7 @@ void EditorState::DrawAnimationRigToolbar(IEditorUi& ui,
                 }
             }
             ImGui::SameLine();
-            if (ImGui::Selectable(track.name.c_str(),
+            if (AnimationDropdownItem(track.name,
                     document.rigIndex == track.index))
                 FocusAnimationRig(document, track.index);
             ImGui::PopID();
@@ -2258,7 +2291,7 @@ void EditorState::DrawAnimationRigToolbar(IEditorUi& ui,
         ImGui::PushID(&asset);
         const bool rigAsset = LowerText(
             std::filesystem::path(asset.assetPath).extension().string()) == ".rig";
-        if (ImGui::Selectable(asset.label.c_str(),
+        if (AnimationDropdownItem(asset.label,
                 rigAsset ? AnimationIdentity(asset.assetPath) ==
                     AnimationIdentity(document.rigPath) :
                     RigIdentity(asset.path, asset.rigIndex) ==
@@ -3657,13 +3690,20 @@ void EditorState::DrawAnimationTimeline(IEditorUi& ui,
                     ? available[document.pasteClipIndex].clipName.c_str()
                     : "Choose animation";
             ImGui::SetNextItemWidth(180.f);
-            if (ImGui::BeginCombo("Paste into animation", destination))
+            ImGui::SetNextWindowSizeConstraints({ 180.f, 0.f },
+                { 420.f, FLT_MAX });
+            if (ImGui::BeginCombo("Paste into animation",
+                    AnimationDropdownLabel(destination).c_str()))
             {
                 for (int index = 0; index < static_cast<int>(available.size());
                     ++index)
-                    if (ImGui::Selectable(available[index].clipName.c_str(),
+                {
+                    ImGui::PushID(index);
+                    if (AnimationDropdownItem(available[index].clipName,
                             index == document.pasteClipIndex))
                         document.pasteClipIndex = index;
+                    ImGui::PopID();
+                }
                 ImGui::EndCombo();
             }
             ui.SameLine();
@@ -3689,10 +3729,15 @@ void EditorState::DrawAnimationTimeline(IEditorUi& ui,
             track.clipIndex < static_cast<int>(available.size())
                 ? available[track.clipIndex].clipName.c_str() : "Choose animation";
         ImGui::SetNextItemWidth(220.f);
-        if (ImGui::BeginCombo("Base animation", baseName))
+        ImGui::SetNextWindowSizeConstraints({ 220.f, 0.f },
+            { 420.f, FLT_MAX });
+        if (ImGui::BeginCombo("Base animation",
+                AnimationDropdownLabel(baseName).c_str()))
         {
             for (int index = 0; index < static_cast<int>(available.size()); ++index)
-                if (ImGui::Selectable(available[index].clipName.c_str(),
+            {
+                ImGui::PushID(index);
+                if (AnimationDropdownItem(available[index].clipName,
                         index == track.clipIndex))
                 {
                     track.clipIndex = index;
@@ -3711,9 +3756,13 @@ void EditorState::DrawAnimationTimeline(IEditorUi& ui,
                     document.rowSelectionAnchor.reset();
                     SampleAnimationDocument(document);
                 }
+                ImGui::PopID();
+            }
             ImGui::EndCombo();
         }
         ImGui::SameLine();
+        ImGui::SetNextWindowSizeConstraints({ 220.f, 0.f },
+            { 420.f, FLT_MAX });
         if (ImGui::BeginCombo("Add stacked animation", "+ Add"))
         {
             bool hasOption = false;
@@ -3724,11 +3773,13 @@ void EditorState::DrawAnimationTimeline(IEditorUi& ui,
                         [index](const auto& layer)
                         { return layer.clipIndex == index; })) continue;
                 hasOption = true;
-                if (ImGui::Selectable(available[index].clipName.c_str()))
+                ImGui::PushID(index);
+                if (AnimationDropdownItem(available[index].clipName))
                 {
                     track.stackedClips.push_back({ index, 1.f });
                     SampleAnimationDocument(document);
                 }
+                ImGui::PopID();
             }
             if (!hasOption) ImGui::TextDisabled("No other animations");
             ImGui::EndCombo();
@@ -4111,10 +4162,10 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
         std::vector<TimelineKey> keys;
     };
     std::vector<KeyVisual> keyVisuals;
-    // Key hit testing is only needed while interacting with the graph.
-    // Keep camera and gizmo drags from allocating a visual for every key.
-    const bool collectKeyVisuals = hovered || document.marqueeActive ||
-        document.keyPressActive || document.keyDragging;
+    // Ordinary hit testing only needs the row under the mouse. A marquee
+    // needs every visible row while it is active or starting this frame.
+    const bool collectAllKeyVisuals = document.marqueeActive || rightClicked;
+    const bool collectHitRowVisuals = hovered && mouse.x >= labelRight;
     const auto sameKey = [](const TimelineKey& a, const TimelineKey& b)
     {
         return a.rigIndex == b.rigIndex && a.clipIndex == b.clipIndex &&
@@ -4166,7 +4217,9 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
         if (selected)
             draw->AddCircle({ x, center }, 8.f,
                 IM_COL32(255, 245, 195, 255), 0, 1.5f);
-        if (collectKeyVisuals)
+        if (collectAllKeyVisuals ||
+            (collectHitRowVisuals &&
+                std::abs(mouse.y - center) <= row.height * .5f))
             keyVisuals.push_back({ &row, time, x, center, keys });
     };
     using TimelineRow = AnimationDocument::TimelineRow;

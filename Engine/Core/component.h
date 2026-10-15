@@ -67,6 +67,10 @@ public:
     // The generic reference picker searches the active project's asset folder.
     static void SetEditorAssetDirectory(const std::string& path);
     static void ClearEditorReferenceSearches();
+    // A reference field can temporarily capture hierarchy or viewport picks.
+    static bool HasEditorReferencePick();
+    static void CancelEditorReferencePick();
+    static bool CaptureEditorReferencePick(Object* object);
     static bool DrawAssetPathPicker(::Engine::Editor::IEditorUi& ui,
         const void* context, const char* fieldKey, const char* label,
         const char* assetKind, std::string& path);

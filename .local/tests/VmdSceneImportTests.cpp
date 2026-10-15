@@ -1,5 +1,5 @@
 #include "Editor/Core/Importers/VmdSceneImporter.h"
-#include "Core/Compoonents/Animation/VmdSceneTrack.h"
+#include "Core/Compoonents/Animation/SceneCameraLightTrack.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Lighting/Light.h"
 #include "Core/Model/AnimationPackAsset.h"
@@ -120,14 +120,59 @@ int main()
         auto* lightObject = Engine::Serialization::SceneSerializer::InstantiatePrefab(
             scene, (fs::path(result.outputDirectory) / "Light.prefab").string());
         Check(cameraObject && lightObject, "Separate VMD track prefabs did not reload");
-        auto* cameraTrack = cameraObject->GetComponent<Engine::Components::VmdSceneTrack>();
-        auto* lightTrack = lightObject->GetComponent<Engine::Components::VmdSceneTrack>();
+        auto* cameraTrack = cameraObject->GetComponent<Engine::Components::SceneCameraLightTrack>();
+        auto* lightTrack = lightObject->GetComponent<Engine::Components::SceneCameraLightTrack>();
         auto* camera = cameraObject->GetComponent<Engine::Components::Camera>();
         auto* light = lightObject->GetComponent<Engine::Components::Light>();
         Check(cameraTrack && lightTrack && camera && light, "Track components missing after reload");
+        Check(cameraTrack->GetTypeName() == "SceneCameraLightTrack" &&
+            lightTrack->GetTypeName() == "SceneCameraLightTrack",
+            "VMD importer still writes a format-specific runtime track");
         Check(cameraTrack->cameras.size() == 2 && cameraTrack->lights.empty() &&
             lightTrack->lights.size() == 2 && lightTrack->cameras.empty(),
             "VMD tracks were not split by type");
+        Check(cameraTrack->framesPerSecond == 30.f &&
+            cameraTrack->cameras[1].interpolation[0] <= 1.f,
+            "VMD camera interpolation was not converted to reusable track data");
+        Engine::Components::SceneCameraLightTrack authored;
+        authored.framesPerSecond = 24.f;
+        Engine::Components::SceneCameraLightTrack::CameraKey authoredKey;
+        authoredKey.frame = 48;
+        authoredKey.interpolation[0] = 64.f / 127.f;
+        authored.cameras.push_back(authoredKey);
+        Check(Near(authored.Duration(), 2.f),
+            "Reusable scene track ignored authored frame rate");
+        Engine::Components::SceneCameraLightTrack restoredAuthored;
+        restoredAuthored.Deserialize(authored.Serialize());
+        Check(Near(restoredAuthored.Duration(), 2.f) &&
+            Near(restoredAuthored.cameras[0].interpolation[0], 64.f / 127.f),
+            "Reusable scene track changed authored timing or interpolation on reload");
+        auto* oldTrackObject = scene.AddObject("Old VMD track");
+        oldTrackObject->AddComponent<Engine::Components::Camera>();
+        auto* oldTrack = oldTrackObject->AddComponent<
+            Engine::Components::SceneCameraLightTrack>();
+        Engine::Components::SceneCameraLightTrack::CameraKey oldKey;
+        oldKey.interpolation[0] = 64.f;
+        oldTrack->cameras.push_back(oldKey);
+        std::string oldXml = Engine::Serialization::SceneSerializer::SaveObjectToString(
+            *oldTrackObject);
+        const std::string currentType = "SceneCameraLightTrack";
+        const std::string legacyType = "VmdSceneTrack";
+        for (size_t at = 0; (at = oldXml.find(currentType, at)) != std::string::npos;
+            at += legacyType.size())
+            oldXml.replace(at, currentType.size(), legacyType);
+        auto* convertedTrackObject =
+            Engine::Serialization::SceneSerializer::InstantiateObjectFromString(
+                scene, oldXml);
+        auto* convertedTrack = convertedTrackObject
+            ? convertedTrackObject->GetComponent<Engine::Components::SceneCameraLightTrack>()
+            : nullptr;
+        Check(convertedTrack && convertedTrack->cameras.size() == 1 &&
+            Near(convertedTrack->cameras[0].interpolation[0], 64.f / 127.f),
+            "Serialized legacy VMD controls were not converted on load");
+        Check(!Engine::Serialization::SceneSerializer::GetRegisteredFactory(
+            "VmdSceneTrack"),
+            "Legacy VMD component class remains registered");
         cameraTrack->Seek(0.5f);
         Check(Near(cameraObject->transform.position.x, 5.f) &&
             Near(cameraObject->transform.position.z, -15.f) && Near(camera->fov, 50.f),
@@ -152,9 +197,9 @@ int main()
         for (auto* child : combined->Children)
         {
             foundCamera |= child->GetComponent<Engine::Components::Camera>() != nullptr &&
-                child->GetComponent<Engine::Components::VmdSceneTrack>() != nullptr;
+                child->GetComponent<Engine::Components::SceneCameraLightTrack>() != nullptr;
             foundLight |= child->GetComponent<Engine::Components::Light>() != nullptr &&
-                child->GetComponent<Engine::Components::VmdSceneTrack>() != nullptr;
+                child->GetComponent<Engine::Components::SceneCameraLightTrack>() != nullptr;
         }
         Check(foundCamera && foundLight,
             "Combined VMD prefab lost its track components");

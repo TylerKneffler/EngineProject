@@ -249,7 +249,7 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
     ui.ValueLabel("Type", directory ? "Folder" :
         (extension.empty() ? "Generic file" : extension.c_str()));
     if (!directory && extension == ".pmx")
-        ui.DisabledLabel("PMX import supports geometry, base materials, linear skinning, morphs, append/IK and fixed-axis controls, external-parent bindings, follow-bone colliders, and optional dynamic bodies. See imported prefab warnings for remaining MMD features.");
+        ui.DisabledLabel("PMX import supports geometry, base materials, BDEF/SDEF/QDEF skinning, morphs, append/IK and fixed-axis controls, external-parent bindings, follow-bone colliders, and optional dynamic bodies. See imported prefab warnings for remaining MMD features.");
     if (!directory && extension == ".pose")
     {
         if (const auto pose = Engine::Model::PoseAsset::Load(m_selectedPath))

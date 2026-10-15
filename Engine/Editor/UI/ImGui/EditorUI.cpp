@@ -2,6 +2,7 @@
 #include "Engine/Editor/UI/ImGui/EditorUI.h"
 #include "Engine/Editor/EditorState.h"
 #include "imgui.h"
+#include <cmath>
 
 namespace Engine::Editor
 {
@@ -127,13 +128,29 @@ void EditorUI::Render(PlayState playState)
         constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration |
             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
             ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoNav;
-        ImGui::Begin("##scriptReloadLoading", nullptr, flags);
+        ImGui::Begin("##editorLoading", nullptr, flags);
         const char* message = m_state->GetLoadingOverlayMessage().empty()
-            ? "Compiling scripts..." : m_state->GetLoadingOverlayMessage().c_str();
+            ? "Loading..." : m_state->GetLoadingOverlayMessage().c_str();
         const ImVec2 textSize = ImGui::CalcTextSize(message);
+        const ImVec2 windowSize = ImGui::GetWindowSize();
+        const ImVec2 windowPos = ImGui::GetWindowPos();
+        const ImVec2 center(windowPos.x + windowSize.x * 0.5f,
+            windowPos.y + windowSize.y * 0.5f - 18.0f);
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+        drawList->AddCircle(center, 14.0f, IM_COL32(95, 95, 95, 255), 32, 3.0f);
+        constexpr float fullTurn = 6.28318530718f;
+        const float start = static_cast<float>(ImGui::GetTime()) * 4.0f;
+        ImVec2 arc[17];
+        for (int i = 0; i < 17; ++i)
+        {
+            const float angle = start + fullTurn * static_cast<float>(i) / 24.0f;
+            arc[i] = ImVec2(center.x + std::cos(angle) * 14.0f,
+                center.y + std::sin(angle) * 14.0f);
+        }
+        drawList->AddPolyline(arc, 17, IM_COL32(235, 235, 235, 255), 0, 3.0f);
         ImGui::SetCursorPos({
-            (ImGui::GetWindowSize().x - textSize.x) * 0.5f,
-            (ImGui::GetWindowSize().y - textSize.y) * 0.5f });
+            (windowSize.x - textSize.x) * 0.5f,
+            windowSize.y * 0.5f + 10.0f });
         ImGui::TextUnformatted(message);
         ImGui::End();
     }

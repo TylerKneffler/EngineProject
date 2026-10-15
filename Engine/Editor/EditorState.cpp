@@ -2019,6 +2019,11 @@ void EditorState::LoadScene(const std::string& path)
     RequestSceneLoad(path);
 }
 
+void EditorState::LoadStartupScene(const std::string& path)
+{
+    LoadSceneNow(path);
+}
+
 void EditorState::RequestSceneLoad(const std::string& path)
 {
     if (!m_scene)
@@ -2036,7 +2041,7 @@ void EditorState::RequestSceneLoad(const std::string& path)
         return;
     }
 
-    LoadSceneNow(path);
+    QueueSceneLoad(path);
 }
 
 bool EditorState::ConfirmSceneLoad(bool saveCurrentScene)
@@ -2049,8 +2054,26 @@ bool EditorState::ConfirmSceneLoad(bool saveCurrentScene)
     m_showUnsavedWarning = false;
     if (m_renderer)
         m_renderer->MarkDirty();
-    LoadSceneNow(path);
+    QueueSceneLoad(path);
     return true;
+}
+
+void EditorState::QueueSceneLoad(const std::string& path)
+{
+    if (path.empty()) return;
+    m_queuedScenePath = path;
+    m_sceneLoadingMessage = "Loading scene: " + std::filesystem::path(path).filename().string();
+    if (m_renderer) m_renderer->MarkDirty();
+}
+
+void EditorState::ProcessPendingSceneLoad()
+{
+    if (m_queuedScenePath.empty()) return;
+    const std::string path = std::move(m_queuedScenePath);
+    m_queuedScenePath.clear();
+    LoadSceneNow(path);
+    m_sceneLoadingMessage.clear();
+    if (m_renderer) m_renderer->MarkDirty();
 }
 
 void EditorState::CancelSceneLoad()
@@ -2205,6 +2228,13 @@ void EditorState::OpenPrefabStage(const std::string& path)
     m_prefabSceneView->SetTitle(prefabName + "###PrefabDocument:" + normalized);
     m_prefabSceneView->OnObjectSelected = [this](Engine::Core::Object* object)
     {
+        if (Engine::Core::Component::CaptureEditorReferencePick(object))
+        {
+            SetPrefabDirty(true);
+            if (m_primaryProperties && m_primaryProperties->OnComponentsChanged)
+                m_primaryProperties->OnComponentsChanged();
+            return;
+        }
         if (m_prefabScene) m_prefabScene->SetSelectedObject(object);
         if (m_primaryHierarchy) m_primaryHierarchy->SetSelectedObject(object);
         if (m_primaryProperties) m_primaryProperties->SetSelectedObject(object);
@@ -2566,6 +2596,12 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
         };
         view->OnObjectSelected = [this, raw](Engine::Core::Object* object)
         {
+            if (Engine::Core::Component::CaptureEditorReferencePick(object))
+            {
+                if (m_primaryProperties && m_primaryProperties->OnComponentsChanged)
+                    m_primaryProperties->OnComponentsChanged();
+                return;
+            }
             if (raw->skeletonStage && object &&
                 raw->selectableObjects.find(object) ==
                     raw->selectableObjects.end())
@@ -4126,6 +4162,12 @@ void EditorState::WireupCallbacks()
 
     // Wire up selection changed callback (for hierarchy -> properties)
     m_viewFactory->OnSelectionChanged = [this](Engine::Core::Object* obj) {
+        if (Engine::Core::Component::CaptureEditorReferencePick(obj))
+        {
+            if (m_primaryProperties && m_primaryProperties->OnComponentsChanged)
+                m_primaryProperties->OnComponentsChanged();
+            return;
+        }
         OutputDebugStringA(("[EditorState] Selection changed to: " + (obj ? obj->name : "nullptr") + "\n").c_str());
         if (Engine::Scene::Scene* scene = GetActiveDocumentScene())
             scene->SetSelectedObject(obj);
@@ -4146,6 +4188,12 @@ void EditorState::WireupCallbacks()
     m_viewFactory->OnSelectionSetChanged = [this](
         const std::vector<Engine::Core::Object*>& objects) {
         Engine::Core::Object* active = objects.empty() ? nullptr : objects.back();
+        if (Engine::Core::Component::CaptureEditorReferencePick(active))
+        {
+            if (m_primaryProperties && m_primaryProperties->OnComponentsChanged)
+                m_primaryProperties->OnComponentsChanged();
+            return;
+        }
         CaptureImportReference(active);
         OutputDebugStringA(("[EditorState] Selection set changed: " +
             std::to_string(objects.size()) + " object(s)\n").c_str());
@@ -4160,6 +4208,12 @@ void EditorState::WireupCallbacks()
 
     // Scene viewport click-selection -> hierarchy/properties + render selection state
     m_viewFactory->OnObjectSelected = [this](Engine::Core::Object* obj) {
+        if (Engine::Core::Component::CaptureEditorReferencePick(obj))
+        {
+            if (m_primaryProperties && m_primaryProperties->OnComponentsChanged)
+                m_primaryProperties->OnComponentsChanged();
+            return;
+        }
         if (m_primaryHierarchy)
             m_primaryHierarchy->SetSelectedObject(obj);
         if (m_primaryProperties)

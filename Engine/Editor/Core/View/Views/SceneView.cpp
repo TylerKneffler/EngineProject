@@ -1,5 +1,6 @@
 
 #include "SceneView.h"
+#include "Core/Component.h"
 #include "Editor/Core/View/EditorViewportSettings.h"
 #include "Scene/SceneCameraController.h"
 #include "Scene/ScenePlacementAndPicking.h"
@@ -339,8 +340,14 @@ void SceneView::DrawPanel(IEditorUi& ui)
         ? OnMeshViewportInput(ui, meshInput, transformTool) : false;
     if (selectSceneObject && !documentToolsConsumedClick &&
         !meshConsumedClick && AllowObjectTransform)
-        OnObjectSelected(ScenePlacementAndPicking::PickObjectInViewport(
-            *m_scene, input.mousePosInViewport, input.available));
+    {
+        Engine::Core::Object* bone = Engine::Core::Component::HasEditorReferencePick()
+            ? ScenePlacementAndPicking::PickBoneInViewport(*m_scene,
+                input.mousePosInViewport, input.available) : nullptr;
+        OnObjectSelected(bone ? bone :
+            ScenePlacementAndPicking::PickObjectInViewport(*m_scene,
+                input.mousePosInViewport, input.available));
+    }
     if (OnDrawBottomPanel)
     {
         ImGui::EndChild();

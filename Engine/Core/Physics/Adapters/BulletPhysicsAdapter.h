@@ -24,6 +24,7 @@ public:
     uint32_t GetMaximumSubsteps() const override;
     uint32_t GetSolverIterations() const override;
     uint32_t GetLastSubstepCount() const override;
+    uint64_t GetImportedJointRebuildCount() const;
     void SetPortalMeshCollider(const void* instanceKey,
         const Engine::Components::RigidBody& owner,
         const std::vector<glm::vec3>& worldVertices) override;
@@ -51,6 +52,8 @@ public:
     uint64_t GetRigidBodyGeneration(
         const Engine::Components::RigidBody& body) const override;
     void NotifyRigidBodyTransformChanged(
+        Engine::Components::RigidBody& body) override;
+    void BeforeRigidBodyDestroyed(
         Engine::Components::RigidBody& body) override;
     void SetPortalLocalMeshCollider(Engine::Components::RigidBody& body,
         const void* key, const std::vector<glm::vec3>& vertices) override;

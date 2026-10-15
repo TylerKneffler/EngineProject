@@ -41,6 +41,12 @@ cmake --build --preset debug --parallel
 
 Set `-DENGINE_ENABLE_VULKAN=OFF` on the configure command if you only need DirectX. For a distributable game, use **File > Project Preferences > Export > Build Portable Export** in the project editor. Build output and startup diagnostics are written to `project-build.log` and `editor-startup.log` in the project folder.
 
+### Faster incremental builds
+
+Keep the same `build/Debug` or `build/Release` directory between builds; CMake and MSBuild reuse unchanged objects and downloaded dependencies. Build only the executable you need, for example `cmake --build --preset debug --target Editor --parallel`. Building `Editor` also builds its `ProjectScripts` dependency. A build without `--target` compiles the other applications too.
+
+The engine, editor, game, and script targets use MSVC `/MP` to compile source files concurrently within each target. `--parallel` additionally runs independent targets concurrently. If a full build exhausts memory, limit target concurrency with `--parallel 2`.
+
 ## Engine graphs and game loop
 
 ### Startup appearance and Windows icons

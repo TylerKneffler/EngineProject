@@ -18,7 +18,7 @@
         "pmxPhysicsJoints": 133,
         "pmxSoftBodies": 0,
         "pmxUnitScaleToMeters": 1,
-        "pmxWarnings": "Material morph specular/shininess render through a PBR approximation of MMD lighting; 208 material morph edge/sphere/toon tint values present but not faithfully imported; PMX joints use Bullet constraints; MMD motion parity remains unverified; 40 toon materials present but not faithfully imported; 4 fixed-axis bones (rotation projection approximates MMD behavior) present but not faithfully imported; 6 local-axis bones (authored basis applied to animation; MMD parity remains unverified) present but not faithfully imported; PMX append/IK constraints use a layer/file-order CCD pass; exact MMD deform timing remains unavailable; matching VMD IK toggles can be applied after motion binding",
+        "pmxWarnings": "Material morph specular/shininess render through a PBR approximation of MMD lighting; PMX joints use Bullet constraints; MMD motion parity remains unverified; 40 toon materials use a PBR lighting approximation; 4 fixed-axis bones (rotation projection approximates MMD behavior) present but not faithfully imported; 6 local-axis bones (authored basis applied to animation; MMD parity remains unverified) present but not faithfully imported; PMX append/IK constraints use a layer/file-order CCD pass; exact MMD deform timing remains unavailable; matching VMD IK toggles can be applied after motion binding",
         "sourceFormat": "pmx"
     }
 }

@@ -22,6 +22,10 @@
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
 #include "Core/Compoonents/Animation/Model.h"
 #include "Core/Compoonents/Animation/AnimationManager.h"
+#include "Core/Compoonents/Animation/RigController.h"
+#include "Core/Compoonents/Animation/RigConstraints.h"
+#include "Core/Compoonents/Animation/RigMorphControls.h"
+#include "Core/Compoonents/Physics/RigPhysicsBinding.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
@@ -43,6 +47,35 @@ namespace Engine::Serialization::Detail
 {
 namespace
 {
+std::string CurrentComponentType(const std::string& type)
+{
+    if (type == "PmxRigController") return "RigController";
+    if (type == "PmxMaterialMorph") return "MaterialPropertyMorph";
+    if (type == "VmdSceneTrack") return "SceneCameraLightTrack";
+    return type;
+}
+
+JsonValue CurrentComponentData(const JsonValue& source)
+{
+    if (source["type"].AsString() != "VmdSceneTrack") return source;
+    JsonValue migrated = source;
+    migrated.Set("type", JsonValue("SceneCameraLightTrack"));
+    if (source["interpolationEncoding"].AsString() == "normalized")
+        return migrated;
+    JsonValue cameras = JsonValue::MakeArray();
+    for (size_t i = 0; i < source["cameras"].ArraySize(); ++i)
+    {
+        JsonValue key = source["cameras"].ArrayAt(i);
+        JsonValue controls = JsonValue::MakeArray();
+        for (size_t j = 0; j < key["interpolation"].ArraySize(); ++j)
+            controls.Push(JsonValue(key["interpolation"].ArrayAt(j).AsFloat() / 127.f));
+        key.Set("interpolation", std::move(controls));
+        cameras.Push(std::move(key));
+    }
+    migrated.Set("cameras", std::move(cameras));
+    return migrated;
+}
+
 bool DeserializeExpandedObject(
     Engine::Core::Object& object,
     Engine::Scene::Scene& scene,
@@ -113,7 +146,8 @@ bool DeserializeExpandedObject(
     for (std::size_t i = 0; i < components.ArraySize(); ++i)
     {
         const JsonValue& componentNode = components.ArrayAt(i);
-        const std::string type = componentNode["type"].AsString();
+        const std::string type = CurrentComponentType(
+            componentNode["type"].AsString());
         const SceneSerializer::Factory* factory =
             ComponentRegistryBehavior::FindFactory(registry, type);
         if (!factory)
@@ -145,10 +179,20 @@ bool DeserializeExpandedObject(
 
         Engine::Core::Component* component = (*factory)();
         component->Owner = &object;
-        component->Deserialize(componentNode);
+        if (componentNode["type"].AsString() == "VmdSceneTrack")
+        {
+            const JsonValue migrated = CurrentComponentData(componentNode);
+            component->Deserialize(migrated);
+        }
+        else component->Deserialize(componentNode);
         component->OnAfterDeserialize(graphicsProvider);
         object.Components.push_back(component);
     }
+
+    // Convert old serialized rig payloads after the component loop so the
+    // new components can participate in normal runtime evaluation.
+    if (auto* legacy = object.GetComponent<Engine::Components::RigController>())
+        legacy->EnsureComponents();
 
     const JsonValue& children = node["children"];
     for (std::size_t i = 0; i < children.ArraySize(); ++i)
@@ -522,9 +566,15 @@ bool SceneObjectBehavior::ApplyObjectState(Engine::Core::Object& object, const J
     auto component = object.Components.begin();
     for (size_t i = 0; i < components.ArraySize(); ++i, ++component)
     {
+        const JsonValue& source = components.ArrayAt(i);
         if (!*component || (*component)->GetTypeName() !=
-            components.ArrayAt(i)["type"].AsString()) return false;
-        (*component)->Deserialize(components.ArrayAt(i));
+            CurrentComponentType(source["type"].AsString())) return false;
+        if (source["type"].AsString() == "VmdSceneTrack")
+        {
+            const JsonValue migrated = CurrentComponentData(source);
+            (*component)->Deserialize(migrated);
+        }
+        else (*component)->Deserialize(source);
         (*component)->OnAfterDeserialize(graphicsProvider);
     }
     const JsonValue& children = node["children"];

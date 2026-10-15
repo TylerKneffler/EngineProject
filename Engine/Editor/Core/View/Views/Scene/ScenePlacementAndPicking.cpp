@@ -2,6 +2,7 @@
 
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
+#include "Core/Compoonents/Animation/AnimationBone.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Obj/Sprite.h"
 #include "Core/Scene/Scene.h"
@@ -204,6 +205,42 @@ bool ScenePlacementAndPicking::FindPrefabPlacement(
         }
     }
     return found;
+}
+
+Engine::Core::Object* ScenePlacementAndPicking::PickBoneInViewport(
+    const Engine::Scene::Scene& scene, const EditorUiVec2& mousePos,
+    const EditorUiVec2& viewportSize)
+{
+    if (viewportSize.x <= 1.f || viewportSize.y <= 1.f) return nullptr;
+    const auto* camera = scene.editorCamera.GetComponent<
+        Engine::Components::Camera>();
+    if (!camera) return nullptr;
+    const glm::mat4 viewProjection = camera->GetProjectionMatrix(
+        viewportSize.x / viewportSize.y) * camera->GetViewMatrix();
+    Engine::Core::Object* closest = nullptr;
+    float closestDepth = FLT_MAX;
+    constexpr float radiusSquared = 14.f * 14.f;
+    for (const auto& entry : scene.GetObjects())
+    {
+        auto* object = entry.get();
+        if (!object || !object->IsEnabledInHierarchy() ||
+            !object->GetComponent<Engine::Components::AnimationBone>())
+            continue;
+        const glm::vec4 clip = viewProjection * glm::vec4(
+            object->transform.GetWorldPosition(), 1.f);
+        if (clip.w <= 0.f) continue;
+        const glm::vec3 ndc = glm::vec3(clip) / clip.w;
+        if (ndc.z < 0.f || ndc.z > 1.f) continue;
+        const float x = (ndc.x * .5f + .5f) * viewportSize.x;
+        const float y = (.5f - ndc.y * .5f) * viewportSize.y;
+        const float dx = x - mousePos.x, dy = y - mousePos.y;
+        if (dx * dx + dy * dy <= radiusSquared && ndc.z < closestDepth)
+        {
+            closest = object;
+            closestDepth = ndc.z;
+        }
+    }
+    return closest;
 }
 
 Engine::Core::Object* ScenePlacementAndPicking::PickObjectInViewport(
