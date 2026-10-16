@@ -75,6 +75,16 @@ std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D11BufferFactory::CreateSta
         sizeBytes, initialData, elementStride);
 }
 
+std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D11BufferFactory::CreateStaticVertexBuffer(
+    uint64_t sizeBytes, const void* initialData)
+{
+    if (!initialData)
+        throw std::runtime_error("Static DX11 buffers require initial data");
+    return CreateBuffer(Engine::Graphics::IGraphicsBuffer::Usage::VertexBuffer,
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Default,
+        sizeBytes, initialData);
+}
+
 std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D11BufferFactory::CreateBuffer(
     Engine::Graphics::IGraphicsBuffer::Usage usage,
     Engine::Graphics::IGraphicsBuffer::AccessMode access,

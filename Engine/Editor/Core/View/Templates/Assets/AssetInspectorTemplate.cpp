@@ -394,7 +394,8 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
                     std::pair{ "pmxImportMorphs", "Morphs" },
                     std::pair{ "pmxImportRigConstraints", "Append and IK" },
                     std::pair{ "pmxImportFollowBoneColliders", "Follow-bone colliders" },
-                    std::pair{ "pmxImportDynamicPhysics", "Dynamic rigid bodies" } })
+                    std::pair{ "pmxImportDynamicPhysics", "Dynamic rigid bodies" },
+                    std::pair{ "pmxWeightFittedColliders", "Weight-fitted colliders" } })
                     if (const auto setting = record->importSettings.find(key);
                         setting != record->importSettings.end())
                     {

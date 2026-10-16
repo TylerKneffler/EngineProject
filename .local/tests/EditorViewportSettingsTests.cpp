@@ -73,6 +73,7 @@ int main()
         ImGui::LoadIniSettingsFromDisk(path.string().c_str());
         EditorViewportSettings::Apply(restored);
         Check(restored.AreEditorBonesVisible(), "Visible bones did not survive restart");
+        EditorViewportSettings::SetCollidersVisible(false);
         ImGui::LoadIniSettingsFromMemory("[SceneView][Preferences]\nShowBones=2\n\n");
         Check(EditorViewportSettings::AreBonesVisible(), "Invalid preference did not retain the default");
         ImGui::LoadIniSettingsFromMemory("[SceneView][Preferences]\nShowColliders=2\n\n");

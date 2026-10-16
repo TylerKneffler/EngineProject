@@ -12,6 +12,7 @@
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Lighting/Light.h"
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
+#include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Physics/Cloth.h"
 #include "Core/Model/RigAsset.h"
@@ -22,8 +23,16 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <cstring>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <limits>
+#include <optional>
+#include <set>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
@@ -55,6 +64,78 @@ fs::path UniqueDirectory(const fs::path& assets, const std::string& base)
     return result;
 }
 
+struct IndexedPrimitiveAsset
+{
+    std::vector<Engine::Model::AnimationVertex> vertices;
+    std::vector<uint32_t> indices;
+    std::vector<Engine::Model::MorphTarget> morphTargets;
+};
+
+template<class T>
+bool CompactOffsets(const std::vector<T>& source,
+    const std::vector<uint32_t>& representatives,
+    const std::vector<uint32_t>& indices, std::vector<T>& result)
+{
+    if (source.empty()) return true;
+    if (source.size() != indices.size()) return false;
+    for (size_t old = 0; old < source.size(); ++old)
+        if (std::memcmp(&source[old], &source[representatives[indices[old]]],
+                sizeof(T)) != 0)
+            return false;
+    result.reserve(representatives.size());
+    for (uint32_t representative : representatives)
+        result.push_back(source[representative]);
+    return true;
+}
+
+std::optional<IndexedPrimitiveAsset> IndexPmxPrimitive(
+    const Engine::Model::ImportedPrimitive& primitive)
+{
+    if (primitive.vertices.size() < 6 || primitive.vertices.size() % 3)
+        return std::nullopt;
+    IndexedPrimitiveAsset result;
+    result.vertices.reserve(primitive.vertices.size());
+    result.indices.reserve(primitive.vertices.size());
+    std::vector<uint32_t> representatives;
+    std::unordered_map<std::string, uint32_t> byVertex;
+    byVertex.reserve(primitive.vertices.size());
+    for (size_t old = 0; old < primitive.vertices.size(); ++old)
+    {
+        const auto& vertex = primitive.vertices[old];
+        std::string key(reinterpret_cast<const char*>(&vertex), sizeof(vertex));
+        const auto [found, inserted] = byVertex.emplace(std::move(key),
+            static_cast<uint32_t>(result.vertices.size()));
+        if (inserted)
+        {
+            result.vertices.push_back(vertex);
+            representatives.push_back(static_cast<uint32_t>(old));
+        }
+        result.indices.push_back(found->second);
+    }
+    if (result.vertices.size() == primitive.vertices.size())
+        return std::nullopt;
+    for (const auto& target : primitive.morphTargets)
+    {
+        Engine::Model::MorphTarget compact;
+        compact.name = target.name;
+        if (!CompactOffsets(target.positions, representatives, result.indices,
+                compact.positions) ||
+            !CompactOffsets(target.normals, representatives, result.indices,
+                compact.normals) ||
+            !CompactOffsets(target.tangents, representatives, result.indices,
+                compact.tangents) ||
+            !CompactOffsets(target.uv, representatives, result.indices,
+                compact.uv))
+            return std::nullopt;
+        for (size_t channel = 0; channel < compact.uvChannels.size(); ++channel)
+            if (!CompactOffsets(target.uvChannels[channel], representatives,
+                    result.indices, compact.uvChannels[channel]))
+                return std::nullopt;
+        result.morphTargets.push_back(std::move(compact));
+    }
+    return result;
+}
+
 glm::vec3 QuaternionEuler(const glm::quat& q)
 {
     const float sinX = 2.f * (q.w * q.x + q.y * q.z);
@@ -72,10 +153,211 @@ Engine::Core::Object* AddChild(Engine::Scene::Scene& scene, Engine::Core::Object
     parent->Children.push_back(child);
     return child;
 }
+
+// PMX rigid bodies are separate from render meshes. Gather rest-pose points
+// across material sections, then save a small convex point cloud in body space.
+std::vector<std::string> BuildWeightFittedColliderMeshes(
+    const Engine::Model::ImportedModel& model, const fs::path& meshesDirectory,
+    const fs::path& source)
+{
+    std::vector<std::string> paths(model.rigidBodies.size());
+    if (model.rigidBodies.empty() || model.skins.empty()) return paths;
+
+    std::vector<glm::mat4> nodeWorld(model.nodes.size(), glm::mat4(1.f));
+    for (size_t i = 0; i < model.nodes.size(); ++i)
+    {
+        const auto& node = model.nodes[i];
+        const glm::mat4 local = glm::translate(glm::mat4(1.f), node.translation) *
+            glm::mat4_cast(node.rotation) *
+            glm::scale(glm::mat4(1.f), node.scale);
+        nodeWorld[i] = node.parent >= 0 &&
+            static_cast<size_t>(node.parent) < i
+            ? nodeWorld[static_cast<size_t>(node.parent)] * local : local;
+    }
+    std::vector<glm::mat4> primitiveWorld(model.primitives.size(), glm::mat4(1.f));
+    for (size_t node = 0; node < model.nodes.size(); ++node)
+        for (unsigned primitive : model.nodes[node].primitives)
+            if (primitive < primitiveWorld.size())
+                primitiveWorld[primitive] = nodeWorld[node];
+
+    std::unordered_set<int> softBodyMaterials;
+    for (const auto& softBody : model.softBodies)
+        softBodyMaterials.insert(softBody.materialIndex);
+    std::unordered_map<int, std::vector<glm::vec3>> pointsByBone;
+    for (size_t primitiveIndex = 0; primitiveIndex < model.primitives.size(); ++primitiveIndex)
+    {
+        const auto& primitive = model.primitives[primitiveIndex];
+        if (primitive.skinIndex < 0 ||
+            softBodyMaterials.count(primitive.materialIndex) ||
+            static_cast<size_t>(primitive.skinIndex) >= model.skins.size()) continue;
+        const auto& joints = model.skins[static_cast<size_t>(primitive.skinIndex)].jointNodes;
+        for (const auto& vertex : primitive.vertices)
+        {
+            int strongest = -1;
+            float maximum = 0.f;
+            const auto visit = [&](const float* indices, const float* weights,
+                int slot, int& best, float& bestWeight)
+            {
+                if (weights[slot] <= bestWeight || !std::isfinite(weights[slot])) return;
+                const int palette = static_cast<int>(indices[slot]);
+                if (palette < 0 || static_cast<size_t>(palette) >= joints.size()) return;
+                best = palette;
+                bestWeight = weights[slot];
+            };
+            for (int slot = 0; slot < 4; ++slot)
+            {
+                visit(vertex.joints0, vertex.weights0, slot, strongest, maximum);
+                visit(vertex.joints1, vertex.weights1, slot, strongest, maximum);
+            }
+            if (strongest < 0 || maximum < 0.15f) continue;
+            const glm::vec3 point = glm::vec3(primitiveWorld[primitiveIndex] *
+                glm::vec4(vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.f));
+            if (!std::isfinite(point.x) || !std::isfinite(point.y) ||
+                !std::isfinite(point.z)) continue;
+            pointsByBone[static_cast<int>(joints[strongest])].push_back(point);
+            // A narrow shared band keeps adjacent hulls touching at blended joints.
+            const auto addSecondary = [&](const float* indices, const float* weights)
+            {
+                for (int slot = 0; slot < 4; ++slot)
+                {
+                    const float weight = weights[slot];
+                    const int palette = static_cast<int>(indices[slot]);
+                    if (palette == strongest || weight < 0.35f ||
+                        weight < maximum * 0.75f || palette < 0 ||
+                        static_cast<size_t>(palette) >= joints.size()) continue;
+                    pointsByBone[static_cast<int>(joints[palette])].push_back(point);
+                }
+            };
+            addSecondary(vertex.joints0, vertex.weights0);
+            addSecondary(vertex.joints1, vertex.weights1);
+        }
+    }
+
+    std::vector<glm::mat4> bodyWorld(model.rigidBodies.size(), glm::mat4(1.f));
+    std::unordered_map<int, std::vector<size_t>> bodiesByBone;
+    for (size_t i = 0; i < model.rigidBodies.size(); ++i)
+    {
+        const auto& body = model.rigidBodies[i];
+        const int bone = body.relatedBoneNode >= 0
+            ? body.relatedBoneNode : body.parentNode;
+        if (bone < 0 || static_cast<size_t>(bone) >= nodeWorld.size()) continue;
+        bodiesByBone[bone].push_back(i);
+        const glm::mat4 local = glm::translate(glm::mat4(1.f),
+            body.localPosition) * glm::mat4_cast(body.localRotation);
+        bodyWorld[i] = body.parentNode >= 0 &&
+            static_cast<size_t>(body.parentNode) < nodeWorld.size()
+            ? nodeWorld[static_cast<size_t>(body.parentNode)] * local : local;
+    }
+    for (const auto& [bone, bodyIndices] : bodiesByBone)
+    {
+        const auto found = pointsByBone.find(bone);
+        if (found == pointsByBone.end()) continue;
+        for (size_t bodyIndex : bodyIndices)
+        {
+            const glm::mat4 toBody = glm::inverse(bodyWorld[bodyIndex]);
+            std::vector<glm::vec3> localPoints;
+            localPoints.reserve(found->second.size());
+            for (const glm::vec3& worldPoint : found->second)
+            {
+                if (bodyIndices.size() > 1)
+                {
+                    size_t nearest = bodyIndices.front();
+                    float nearestDistance = std::numeric_limits<float>::max();
+                    for (size_t candidate : bodyIndices)
+                    {
+                        const glm::vec3 delta = worldPoint -
+                            glm::vec3(bodyWorld[candidate][3]);
+                        const float distance = glm::dot(delta, delta);
+                        if (distance < nearestDistance)
+                        { nearest = candidate; nearestDistance = distance; }
+                    }
+                    if (nearest != bodyIndex) continue;
+                }
+                localPoints.push_back(glm::vec3(toBody * glm::vec4(worldPoint, 1.f)));
+            }
+            if (localPoints.size() < 4) continue;
+            // Directional support points retain the convex envelope while
+            // bounding the generated asset and Bullet hull build cost.
+            std::set<size_t> extremes;
+            for (int x = -3; x <= 3; ++x)
+                for (int y = -3; y <= 3; ++y)
+                    for (int z = -3; z <= 3; ++z)
+                    {
+                        if (!x && !y && !z) continue;
+                        const glm::vec3 direction(x, y, z);
+                        size_t best = 0;
+                        float maximum = -std::numeric_limits<float>::max();
+                        for (size_t index = 0; index < localPoints.size(); ++index)
+                        {
+                            const float projection = glm::dot(localPoints[index], direction);
+                            if (projection > maximum)
+                            { best = index; maximum = projection; }
+                        }
+                        extremes.insert(best);
+                    }
+            if (extremes.size() < 4) continue;
+            const glm::vec3 first = localPoints[*extremes.begin()];
+            glm::vec3 low = first, high = first;
+            for (size_t index : extremes)
+            { low = glm::min(low, localPoints[index]); high = glm::max(high, localPoints[index]); }
+            const float extent = glm::length(high - low);
+            if (extent < 1e-5f) continue;
+            size_t second = *extremes.begin(), third = second;
+            float farthest = 0.f, largestArea = 0.f, largestVolume = 0.f;
+            for (size_t index : extremes)
+            {
+                const glm::vec3 delta = localPoints[index] - first;
+                const float distance = glm::dot(delta, delta);
+                if (distance > farthest) { second = index; farthest = distance; }
+            }
+            for (size_t index : extremes)
+            {
+                const glm::vec3 area = glm::cross(localPoints[second] - first,
+                    localPoints[index] - first);
+                const float size = glm::dot(area, area);
+                if (size > largestArea) { third = index; largestArea = size; }
+            }
+            const glm::vec3 normal = glm::cross(localPoints[second] - first,
+                localPoints[third] - first);
+            for (size_t index : extremes)
+                largestVolume = std::max(largestVolume,
+                    std::abs(glm::dot(normal, localPoints[index] - first)));
+            if (farthest < extent * extent * 1e-8f ||
+                largestArea < std::pow(extent, 4.f) * 1e-10f ||
+                largestVolume < std::pow(extent, 3.f) * 1e-6f) continue;
+
+            std::vector<Engine::Model::AnimationVertex> vertices;
+            vertices.reserve(extremes.size() + 2);
+            for (size_t index : extremes)
+            {
+                Engine::Model::AnimationVertex vertex {};
+                const glm::vec3& point = localPoints[index];
+                vertex.pos[0] = point.x;
+                vertex.pos[1] = point.y;
+                vertex.pos[2] = point.z;
+                vertex.normal[1] = 1.f;
+                vertex.tangent[0] = vertex.tangent[3] = 1.f;
+                vertices.push_back(vertex);
+            }
+            while (vertices.size() % 3u) vertices.push_back(vertices.front());
+            const fs::path path = meshesDirectory /
+                (SafeName(model.rigidBodies[bodyIndex].name, "Body") +
+                " Collider " + std::to_string(bodyIndex) + ".mesh");
+            if (!Engine::Components::Mesh::SaveNativeFile(path.string(), vertices))
+                throw std::runtime_error("Could not save fitted collider: " + path.string());
+            Engine::Core::AssetRecord::Ensure(path, source,
+                { { "importer", std::string("pmx-weight-fitted-collider") },
+                  { "bodyIndex", static_cast<double>(bodyIndex) } });
+            paths[bodyIndex] = path.generic_string();
+        }
+    }
+    return paths;
+}
 }
 
 Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::ImportedModel& model,
-    const std::string& sourcePath, const std::string& assetsDirectory)
+    const std::string& sourcePath, const std::string& assetsDirectory,
+    bool weightFittedColliders)
 {
     Engine::Model::ModelImportResult result;
     const fs::path source = fs::path(sourcePath).lexically_normal();
@@ -191,26 +473,35 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
 
         std::vector<std::string> meshPaths(model.primitives.size());
         std::vector<std::string> morphPaths(model.primitives.size());
+        const std::vector<uint32_t> noIndices;
         for (size_t index = 0; index < model.primitives.size(); ++index)
         {
             const Engine::Model::ImportedPrimitive& primitive = model.primitives[index];
             if (primitive.vertices.empty()) continue;
+            const auto indexed = model.sourceFormat == "pmx"
+                ? IndexPmxPrimitive(primitive)
+                : std::optional<IndexedPrimitiveAsset>{};
+            const auto& vertices = indexed ? indexed->vertices : primitive.vertices;
+            const auto& indices = indexed ? indexed->indices : noIndices;
+            const auto& morphTargets = indexed ? indexed->morphTargets :
+                primitive.morphTargets;
             const fs::path path = meshesDirectory /
                 (SafeName(primitive.name, "Mesh") + " " + std::to_string(index + 1) + ".mesh");
-            if (!Engine::Components::Mesh::SaveNativeFile(path.string(), primitive.vertices))
+            if (!Engine::Components::Mesh::SaveNativeFile(path.string(),
+                    vertices, indices))
                 throw std::runtime_error("Could not save mesh: " + path.string());
             Engine::Core::AssetRecord::Ensure(path, source,
                 { { "importer", std::string("model-mesh") },
                   { "sourceFormat", model.sourceFormat },
                   { "primitiveIndex", static_cast<double>(index) } });
             meshPaths[index] = path.generic_string();
-            if (!primitive.morphTargets.empty())
+            if (!morphTargets.empty())
             {
                 const fs::path morphPath = meshesDirectory /
                     (SafeName(primitive.name, "Mesh") + " " +
                      std::to_string(index + 1) + ".morph");
                 if (!Engine::Components::Mesh::SaveMorphFile(
-                        morphPath.string(), primitive.morphTargets))
+                        morphPath.string(), morphTargets))
                     throw std::runtime_error("Could not save morph data: " +
                         morphPath.string());
                 morphPaths[index] = morphPath.generic_string();
@@ -219,6 +510,11 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
                       { "primitiveIndex", static_cast<double>(index) } });
             }
         }
+
+        const std::vector<std::string> fittedColliderPaths =
+            weightFittedColliders && model.sourceFormat == "pmx"
+            ? BuildWeightFittedColliderMeshes(model, meshesDirectory, source)
+            : std::vector<std::string>(model.rigidBodies.size());
 
         ::Engine::Scene::Scene scene;
         Engine::Core::Object* root = scene.AddObject(sourceName);
@@ -454,23 +750,33 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
             rigidNames[rigidIndex] = object->name;
             object->transform.position = imported.localPosition;
             object->transform.rotation = QuaternionEuler(imported.localRotation);
-            auto* collider = object->AddComponent<
-                Engine::Components::PrimitiveObjectCollider>();
-            if (imported.shape == Engine::Model::RigidBodyShape::Sphere)
+            if (!fittedColliderPaths[rigidIndex].empty())
             {
-                collider->shape = "Sphere";
-                collider->radius = imported.size.x;
-            }
-            else if (imported.shape == Engine::Model::RigidBodyShape::Box)
-            {
-                collider->shape = "Box";
-                collider->size = imported.size * 2.f;
+                auto* collider = object->AddComponent<
+                    Engine::Components::MeshObjectCollider>();
+                collider->meshPath = fittedColliderPaths[rigidIndex];
+                collider->convex = true;
             }
             else
             {
-                collider->shape = "Capsule";
-                collider->radius = imported.size.x;
-                collider->height = imported.size.y;
+                auto* collider = object->AddComponent<
+                    Engine::Components::PrimitiveObjectCollider>();
+                if (imported.shape == Engine::Model::RigidBodyShape::Sphere)
+                {
+                    collider->shape = "Sphere";
+                    collider->radius = imported.size.x;
+                }
+                else if (imported.shape == Engine::Model::RigidBodyShape::Box)
+                {
+                    collider->shape = "Box";
+                    collider->size = imported.size * 2.f;
+                }
+                else
+                {
+                    collider->shape = "Capsule";
+                    collider->radius = imported.size.x;
+                    collider->height = imported.size.y;
+                }
             }
             auto* body = object->AddComponent<Engine::Components::RigidBody>();
             body->bodyType = imported.mode ==

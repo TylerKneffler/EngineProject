@@ -39,7 +39,9 @@ public:
     uint32_t GetMipLevels() const { return m_mipLevels; }
     GraphicsTextureFormat GetFormat() const { return m_format; }
     bool HasPixels() const { return !m_pixels.empty(); }
-    const std::vector<uint8_t>& GetPixels() const { return m_pixels; }
+    // Decode on demand for editor tools after the render upload has released
+    // its CPU copy.
+    const std::vector<uint8_t>& GetPixels() const;
     bool IsSrgb() const { return m_srgb; }
     const IGraphicsTexture* GetGraphicsTexture() const { return m_graphicsTexture.get(); }
 

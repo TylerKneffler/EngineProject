@@ -12,6 +12,7 @@ struct PmxImportOptions
     bool rigConstraints = true;
     bool followBoneColliders = true;
     bool dynamicPhysics = false;
+    bool weightFittedColliders = false;
 };
 
 struct PmxImportReport

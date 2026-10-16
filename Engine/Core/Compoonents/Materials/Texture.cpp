@@ -419,6 +419,13 @@ bool Texture::Load()
     return success;
 }
 
+const std::vector<uint8_t>& Texture::GetPixels() const
+{
+    if (m_pixels.empty())
+        const_cast<Texture*>(this)->Load();
+    return m_pixels;
+}
+
 void Texture::Reload()
 {
     Engine::Rendering::EnvironmentMap::Invalidate(m_filePath);
@@ -493,6 +500,10 @@ bool Texture::Prepare(IGraphicsProvider* graphicsProvider)
         m_graphicsTexture.reset();
     }
     m_preparedProvider = m_graphicsTexture ? graphicsProvider : nullptr;
+    // Ordinary material textures remain on the GPU. Editors can decode the
+    // source again through GetPixels() when they actually need CPU pixels.
+    if (m_graphicsTexture && m_format == GraphicsTextureFormat::Rgba8)
+        std::vector<uint8_t>().swap(m_pixels);
     return static_cast<bool>(m_graphicsTexture);
 }
 }

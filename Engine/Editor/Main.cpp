@@ -157,6 +157,9 @@ int WINAPI wWinMain(
             for (int index = 4; index < argumentCount; ++index)
                 if (std::wstring(arguments[index]) == L"--pmx-dynamic-physics")
                     pmxOptions.dynamicPhysics = true;
+                else if (std::wstring(arguments[index]) ==
+                    L"--pmx-weight-fitted-colliders")
+                    pmxOptions.weightFittedColliders = true;
             const Engine::Model::ModelImportResult imported = Engine::Editor::ModelImporter::Import(
                 std::filesystem::path(arguments[2]).string(),
                 std::filesystem::path(arguments[3]).string(), 1.f,
@@ -478,10 +481,9 @@ int WINAPI wWinMain(
         // Tick game objects while playing
         if (playState == Engine::Editor::PlayState::Playing)
         {
-            // Bullet advances at most six 60 Hz steps per rendered frame.
-            // Keep animation on the same bounded clock after a slow frame so
-            // the character does not jump ahead of its simulated rig.
-            scene->Update(std::clamp(dt, 0.f, 0.1f));
+            // Physics bounds its own fixed-step work. Keep animation on wall
+            // time so a slow render frame does not slow down playback.
+            scene->Update(std::max(dt, 0.f));
             Engine::Core::SceneManager::ProcessPendingSceneLoad();
         }
 

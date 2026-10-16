@@ -874,6 +874,7 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
             DrawLightIcon(ui, center, object == selected);
             if (object == selected &&
                 !(object->editorOverlays & Engine::Core::Object::LightVolumeOverlay) &&
+                !EditorViewportSettings::AreLightVolumesVisible() &&
                 light->GetLightType() ==
                 Engine::Components::Light::Type::Spot)
                 DrawSpotGizmo(ui, viewProjection, input.available, *object,

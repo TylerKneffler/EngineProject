@@ -28,6 +28,9 @@ public:
     void Update() override;
     void OnAfterDeserialize(IGraphicsProvider*) override { Start(); }
     const std::vector<glm::mat4>& BuildPalette() const;
+    // Joint world transforms can be shared by meshes bound to one skeleton.
+    const std::vector<glm::mat4>& BuildPalette(
+        const std::vector<glm::mat4>& jointSkinMatrices) const;
     Skeleton* ResolveSkeleton() const;
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
     JsonValue Serialize() const override;

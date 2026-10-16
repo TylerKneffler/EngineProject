@@ -1,4 +1,5 @@
 #include "ConsoleView.h"
+#include "PerformanceRecording.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "../Focus/WindowFocusHandler.h"
 #include <algorithm>
@@ -47,6 +48,8 @@ bool ContainsDiagnostic(const std::string& message, const char* word)
 
 void ConsoleView::AddLog(Level level,const std::string& message)
 {
+    if (m_performanceRecording)
+        m_performanceRecording->Event("console", LevelName(level), message);
     m_entries.push_back({level,message});
     if(!m_textBlock.empty()&&m_textBlock.back()!='\n')m_textBlock+='\n';
     m_textBlock+=DisplayText(m_entries.back());

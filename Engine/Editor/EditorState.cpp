@@ -4461,6 +4461,7 @@ void EditorState::StartObjectImport(const std::string& path, bool intoScene,
     m_pendingPmxImportRigConstraints = true;
     m_pendingPmxImportFollowBoneColliders = true;
     m_pendingPmxImportDynamicPhysics = false;
+    m_pendingPmxWeightFittedColliders = false;
     ClearImportReference();
     if (m_pendingImportScene)
     {
@@ -4550,6 +4551,7 @@ void EditorState::CancelPendingImportAsset()
     m_pendingPmxImportRigConstraints = true;
     m_pendingPmxImportFollowBoneColliders = true;
     m_pendingPmxImportDynamicPhysics = false;
+    m_pendingPmxWeightFittedColliders = false;
     m_focusImportHierarchy = false;
     ClearImportReference();
 }
@@ -4607,7 +4609,8 @@ void EditorState::ConfirmPendingImportAsset()
         destination.string(), asPrefab, m_pendingPmxUnitScaleToMeters,
         m_pendingPmxImportMorphs, m_pendingPmxImportRigConstraints,
         m_pendingPmxImportFollowBoneColliders,
-        m_pendingPmxImportDynamicPhysics);
+        m_pendingPmxImportDynamicPhysics,
+        m_pendingPmxWeightFittedColliders);
     if (primary.empty())
     {
         m_pendingImportError = "Import failed. See the Console for details, then retry.";
@@ -4703,7 +4706,7 @@ std::string EditorState::ImportAssetFile(const std::string& path,
     const std::string& destinationDirectory, bool asPrefab,
     float pmxUnitScaleToMeters, bool pmxImportMorphs,
     bool pmxImportRigConstraints, bool pmxImportFollowBoneColliders,
-    bool pmxImportDynamicPhysics)
+    bool pmxImportDynamicPhysics, bool pmxWeightFittedColliders)
 {
     namespace fs = std::filesystem;
     const fs::path source(path);
@@ -4727,7 +4730,7 @@ std::string EditorState::ImportAssetFile(const std::string& path,
                 : ModelImporter::Import(source.string(), assetsDirectory.string(),
                     pmxUnitScaleToMeters, { pmxImportMorphs,
                         pmxImportRigConstraints, pmxImportFollowBoneColliders,
-                        pmxImportDynamicPhysics });
+                        pmxImportDynamicPhysics, pmxWeightFittedColliders });
             if (!imported.success)
                 throw std::runtime_error(imported.message);
             bool boundCharacter = false;

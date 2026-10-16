@@ -65,7 +65,8 @@ Engine::Model::ModelImportResult ModelImporter::Import(const std::string& source
         if (!PmxModelDecoder::Decode(sourcePath, model, error, &report, pmxOptions))
             return { false, {}, {}, error.empty() ? "Could not decode PMX" : error };
         model.unitScaleToMeters = pmxUnitScaleToMeters;
-        auto result = ModelAssetWriter::Write(model, sourcePath, assetsDirectory);
+        auto result = ModelAssetWriter::Write(model, sourcePath, assetsDirectory,
+            pmxOptions.weightFittedColliders);
         if (result.success)
         {
             result.message.clear();
@@ -103,6 +104,8 @@ Engine::Model::ModelImportResult ModelImporter::Import(const std::string& source
                     pmxOptions.followBoneColliders;
                 record->importSettings["pmxImportDynamicPhysics"] =
                     pmxOptions.dynamicPhysics;
+                record->importSettings["pmxWeightFittedColliders"] =
+                    pmxOptions.weightFittedColliders;
                 record->importSettings["pmxWarnings"] = result.message;
                 if (!record->Save(result.prefabPath))
                     result.message += "; could not save PMX import report";

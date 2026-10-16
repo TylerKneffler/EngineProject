@@ -9,6 +9,7 @@ class ModelAssetWriter
 {
 public:
     static Engine::Model::ModelImportResult Write(const Engine::Model::ImportedModel& model,
-        const std::string& sourcePath, const std::string& assetsDirectory);
+        const std::string& sourcePath, const std::string& assetsDirectory,
+        bool weightFittedColliders = false);
 };
 }

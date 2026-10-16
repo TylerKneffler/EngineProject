@@ -79,5 +79,12 @@ public:
             IGraphicsBuffer::AccessMode::Upload, sizeBytes, initialData,
             elementStride);
     }
+
+    virtual std::unique_ptr<IGraphicsBuffer> CreateStaticVertexBuffer(
+        uint64_t sizeBytes, const void* initialData)
+    {
+        return CreateBuffer(IGraphicsBuffer::Usage::VertexBuffer,
+            IGraphicsBuffer::AccessMode::Upload, sizeBytes, initialData);
+    }
 };
 }

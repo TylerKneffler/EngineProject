@@ -60,6 +60,9 @@ public:
     std::unique_ptr<Engine::Graphics::IGraphicsBuffer> CreateStaticShaderResource(
         uint64_t sizeBytes, const void* initialData, uint32_t elementStride) override;
 
+    std::unique_ptr<Engine::Graphics::IGraphicsBuffer> CreateStaticVertexBuffer(
+        uint64_t sizeBytes, const void* initialData) override;
+
 private:
     ID3D11Device* m_device = nullptr;
 };

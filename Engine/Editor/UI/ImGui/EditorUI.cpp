@@ -81,7 +81,12 @@ void EditorUI::Render(PlayState playState)
                 if (ImGui::Checkbox("Dynamic rigid bodies (experimental)",
                         &dynamicPhysics))
                     m_state->SetPendingPmxImportDynamicPhysics(dynamicPhysics);
-                ImGui::TextDisabled("Dynamic bodies drive bones; PMX joint constraints are unavailable.");
+                ImGui::TextDisabled("Dynamic bodies and supported PMX joints drive bones.");
+                bool fitted = m_state->GetPendingPmxWeightFittedColliders();
+                if (ImGui::Checkbox("Fit rigid-body colliders to skin weights",
+                        &fitted))
+                    m_state->SetPendingPmxWeightFittedColliders(fitted);
+                ImGui::TextWrapped("Builds a convex hull for each imported PMX body from the mesh vertices weighted to its bone. Bodies without enough vertices keep their PMX collider shape.");
             }
             if (m_state->IsPendingImportIntoScene())
             {

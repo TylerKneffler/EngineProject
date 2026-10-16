@@ -5,6 +5,7 @@
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
 #include "Core/Compoonents/Obj/Sprite.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
+#include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
 #include "Core/Rendering/Lighting/EnvironmentMap.h"
@@ -741,7 +742,8 @@ Scene::ResolveReflectionEnvironment(
 {
     if (!material.useCustomReflectionEnvironment ||
         !material.reflectionEnvironmentMap ||
-        !material.reflectionEnvironmentMap->HasPixels())
+        (!material.reflectionEnvironmentMap->HasPixels() &&
+            !material.reflectionEnvironmentMap->Load()))
         return nullptr;
     auto environment = Engine::Rendering::EnvironmentMap::Acquire(
         *material.reflectionEnvironmentMap);
@@ -1367,6 +1369,8 @@ void Scene::PrepareRenderFrame()
         }
     }
     uint32_t skinPaletteSlot = 0;
+    std::unordered_map<const Engine::Components::Skeleton*,
+        std::vector<glm::mat4>> jointSkinMatrices;
     bool boneDataChanged = false;
     for (const FrameComponentLookup& lookup : m_frameComponentLookupScratch)
     {
@@ -1588,8 +1592,29 @@ void Scene::PrepareRenderFrame()
             if (mesh && !mesh->IsPortalPoseSnapshot())
             if (Engine::Components::SkinnedMesh* skinned = lookup.skinnedMesh)
             {
+                const auto* skeleton = skinned->ResolveSkeleton();
+                const std::vector<glm::mat4>* sharedJoints = nullptr;
+                if (skeleton)
+                {
+                    auto [found, inserted] = jointSkinMatrices.try_emplace(skeleton);
+                    if (inserted)
+                    {
+                        const auto& joints = skeleton->ResolveJoints();
+                        auto& matrices = found->second;
+                        matrices.assign(skeleton->jointNodes.size(), glm::mat4(1.f));
+                        for (size_t i = 0; i < std::min(joints.size(),
+                                matrices.size()); ++i)
+                            if (auto* joint = joints[i])
+                                matrices[i] = joint->transform.GetWorldMatrix() *
+                                    (i < skeleton->inverseBindMatrices.size()
+                                        ? skeleton->inverseBindMatrices[i]
+                                        : glm::mat4(1.f));
+                    }
+                    sharedJoints = &found->second;
+                }
                 const std::vector<glm::mat4>& palette =
-                    skinned->BuildPalette();
+                    sharedJoints ? skinned->BuildPalette(*sharedJoints) :
+                        skinned->BuildPalette();
                 if (!palette.empty())
                 {
                     const size_t count =
@@ -2889,7 +2914,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     const auto geometryPipeline = [&](const PreparedDraw& draw,
         Engine::Graphics::IPipelineState* base)
     {
-        if (!draw.indexBuffer)
+        if (!draw.terrain)
             return base;
         const auto terrain = m_terrainPipelineByBase.find(base);
         return terrain != m_terrainPipelineByBase.end()

@@ -47,6 +47,7 @@ build/
 !.local/tests/VertexColorPaintTests.cpp
 !.local/tests/MeshTexturePaintTests.cpp
 !.local/tests/PortableAssetCopyTests.cpp
+!.local/tests/PerformanceRecordingTests.cpp
 build
 editor-startup.log
 project-build.log

@@ -462,10 +462,10 @@ bool Mesh::SetDeformedVertices(const std::vector<Vertex>& vertices)
     m_terrainVertices.clear();
     m_indices.clear();
     m_indexBuffer.reset();
-    const bool sizeChanged = vertices.size() != m_vertices.size();
     const bool canReuseBuffer = m_vertexBuffer &&
+        m_vertexBuffer->GetAccessMode() == IGraphicsBuffer::AccessMode::Upload &&
         byteSize <= m_vertexBuffer->GetSize();
-    if (sizeChanged && !canReuseBuffer)
+    if (!canReuseBuffer)
     {
         if (m_vertexBuffer || m_bufferFactory)
         {
@@ -514,10 +514,10 @@ bool Mesh::SetDeformedVertices(std::vector<Vertex>&& vertices)
     m_terrainVertices.clear();
     m_indices.clear();
     m_indexBuffer.reset();
-    const bool sizeChanged = vertices.size() != m_vertices.size();
     const bool canReuseBuffer = m_vertexBuffer &&
+        m_vertexBuffer->GetAccessMode() == IGraphicsBuffer::AccessMode::Upload &&
         byteSize <= m_vertexBuffer->GetSize();
-    if (sizeChanged && !canReuseBuffer && (m_vertexBuffer || m_bufferFactory))
+    if (!canReuseBuffer && (m_vertexBuffer || m_bufferFactory))
     {
         if (!m_bufferFactory)
             return false;
@@ -532,7 +532,7 @@ bool Mesh::SetDeformedVertices(std::vector<Vertex>&& vertices)
     m_vertices = std::move(vertices);
     UpdateBounds();
     m_ready = true;
-    if (m_vertexBuffer && (!sizeChanged || canReuseBuffer))
+    if (m_vertexBuffer && canReuseBuffer)
     {
         if (void* mapped = m_vertexBuffer->Map())
         {
@@ -569,10 +569,22 @@ bool Mesh::UpdateAuthoredVertices(std::vector<Vertex> vertices)
     if (m_vertexBuffer)
     {
         if (byteSize > m_vertexBuffer->GetSize()) return false;
-        void* mapped = m_vertexBuffer->Map();
-        if (!mapped) return false;
-        std::memcpy(mapped, vertices.data(), byteSize);
-        m_vertexBuffer->Unmap();
+        if (m_vertexBuffer->GetAccessMode() != IGraphicsBuffer::AccessMode::Upload)
+        {
+            if (!m_bufferFactory) return false;
+            auto replacement = m_bufferFactory->CreateBuffer(
+                IGraphicsBuffer::Usage::VertexBuffer,
+                IGraphicsBuffer::AccessMode::Upload, byteSize, vertices.data());
+            if (!replacement) return false;
+            m_vertexBuffer = std::move(replacement);
+        }
+        else
+        {
+            void* mapped = m_vertexBuffer->Map();
+            if (!mapped) return false;
+            std::memcpy(mapped, vertices.data(), byteSize);
+            m_vertexBuffer->Unmap();
+        }
     }
     ClearSurfaceOffsets();
     m_vertices = std::move(vertices);
@@ -972,9 +984,14 @@ void Mesh::CreateMorphBuffers()
             }
             return false;
         });
-    m_morphDeltaStrideFloat4 = hasFullUv ? 9u : std::any_of(m_morphTargets.begin(),
+    const bool hasUv = std::any_of(m_morphTargets.begin(),
         m_morphTargets.end(), [](const MorphTarget& target)
-        { return !target.uv.empty(); }) ? 4u : 3u;
+        { return !target.uv.empty(); });
+    const bool hasNormalOrTangent = std::any_of(m_morphTargets.begin(),
+        m_morphTargets.end(), [](const MorphTarget& target)
+        { return !target.normals.empty() || !target.tangents.empty(); });
+    m_morphDeltaStrideFloat4 = hasFullUv ? 9u : hasUv ? 4u :
+        hasNormalOrTangent ? 3u : 1u;
     std::vector<glm::vec4> deltas(vertexCount * m_morphTargets.size() *
         m_morphDeltaStrideFloat4, glm::vec4(0.f));
     for (size_t targetIndex = 0; targetIndex < m_morphTargets.size(); ++targetIndex)
@@ -987,10 +1004,12 @@ void Mesh::CreateMorphBuffers()
             if (vertexIndex < target.positions.size())
                 deltas[base] = glm::vec4(
                     target.positions[vertexIndex], 0.f);
-            if (vertexIndex < target.normals.size())
+            if (m_morphDeltaStrideFloat4 >= 3 &&
+                vertexIndex < target.normals.size())
                 deltas[base + 1] = glm::vec4(
                     target.normals[vertexIndex], 0.f);
-            if (vertexIndex < target.tangents.size())
+            if (m_morphDeltaStrideFloat4 >= 3 &&
+                vertexIndex < target.tangents.size())
                 deltas[base + 2] = glm::vec4(
                     target.tangents[vertexIndex], 0.f);
             if (m_morphDeltaStrideFloat4 >= 4 && vertexIndex < target.uv.size())
@@ -1936,12 +1955,8 @@ void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory)
     }
     const uint64_t byteSize = m_vertices.size() * sizeof(Vertex);
 
-    // Create upload buffer through the graphics factory
-    m_vertexBuffer = bufferFactory->CreateBuffer(
-        IGraphicsBuffer::Usage::VertexBuffer,
-        IGraphicsBuffer::AccessMode::Upload,
-        byteSize,
-        m_vertices.data());
+    m_vertexBuffer = bufferFactory->CreateStaticVertexBuffer(
+        byteSize, m_vertices.data());
 
     if (!m_vertexBuffer)
         throw std::runtime_error("Failed to create vertex buffer");

@@ -12,6 +12,7 @@
 #include "Core/Compoonents/Materials/MaterialPropertyMorph.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
+#include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include "Core/Compoonents/Physics/Cloth.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
@@ -29,6 +30,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <stdexcept>
 #include <utility>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -552,6 +554,63 @@ int main(int argc, char** argv)
         }
     assert(morphFiles == morphMeshes);
     assert(mmdMaterials == model.materials.size());
+    // PMX triangles may repeat the same source vertex. The writer must save
+    // those as indexed geometry and remap morph offsets to the unique stream.
+    {
+        auto repeated = model;
+        repeated.name += " indexed";
+        auto selected = std::find_if(repeated.primitives.begin(),
+            repeated.primitives.end(), [](const auto& primitive)
+            { return !primitive.morphTargets.empty(); });
+        if (selected == repeated.primitives.end())
+            throw std::runtime_error("PMX fixture has no morph mesh to index");
+        const size_t originalCount = selected->vertices.size();
+        const auto originalVertices = selected->vertices;
+        selected->vertices.insert(selected->vertices.end(),
+            originalVertices.begin(), originalVertices.end());
+        const auto duplicateOffsets = [](auto& values)
+        {
+            if (values.empty()) return;
+            const auto original = values;
+            values.insert(values.end(), original.begin(), original.end());
+        };
+        for (auto& morph : selected->morphTargets)
+        {
+            duplicateOffsets(morph.positions);
+            duplicateOffsets(morph.normals);
+            duplicateOffsets(morph.tangents);
+            duplicateOffsets(morph.uv);
+            for (auto& channel : morph.uvChannels)
+                duplicateOffsets(channel);
+        }
+        const auto indexedImport = Engine::Editor::ModelAssetWriter::Write(
+            repeated, source.string(), outputRoot.string());
+        if (!indexedImport.success)
+            throw std::runtime_error("Repeated PMX import failed");
+        bool foundIndexed = false;
+        for (const auto& entry : fs::recursive_directory_iterator(
+                indexedImport.outputDirectory))
+        {
+            if (entry.path().extension() != ".mesh") continue;
+            Engine::Components::Mesh mesh;
+            mesh.LoadFromFile(entry.path().string());
+            if (mesh.GetIndexCount() != originalCount * 2) continue;
+            if (mesh.GetVertexCount() > originalCount)
+                throw std::runtime_error("Repeated PMX vertices were not compacted");
+            const auto morphPath = entry.path().parent_path() /
+                (entry.path().stem().string() + ".morph");
+            if (!mesh.LoadMorphFile(morphPath.string(), 0, {}))
+                throw std::runtime_error("Indexed PMX morph file did not load");
+            for (const auto& morph : mesh.GetMorphTargets())
+                if (!morph.positions.empty() &&
+                    morph.positions.size() != mesh.GetVertexCount())
+                    throw std::runtime_error("Indexed PMX morphs were not remapped");
+            foundIndexed = true;
+            break;
+        }
+        if (!foundIndexed)
+            throw std::runtime_error("PMX writer did not create indexed geometry");
+    }
     }
     assert(outputRoot.parent_path() == fs::path(PMX_TEST_OUTPUT_ROOT));
     const fs::path groupFixture = outputRoot / "group.pmx";
@@ -688,6 +747,82 @@ int main(int argc, char** argv)
     assert(dynamicFixtureReport.importedPhysicsJoints == 1);
     assert(dynamicFixtureModel.physicsJoints[0].bodyA == 0);
     assert(dynamicFixtureModel.physicsJoints[0].bodyB == 1);
+    {
+        Engine::Model::ImportedModel fitted;
+        fitted.name = "Weighted hull fixture";
+        fitted.sourceFormat = "pmx";
+        fitted.materials.resize(2);
+        fitted.nodes.resize(3);
+        fitted.nodes[0].name = "Bone";
+        fitted.nodes[1].name = "First mesh section";
+        fitted.nodes[1].primitives = { 0 };
+        fitted.nodes[2].name = "Second mesh section";
+        fitted.nodes[2].translation = { 0.f, 0.f, 1.f };
+        fitted.nodes[2].primitives = { 1 };
+        fitted.skins.resize(1);
+        fitted.skins[0].jointNodes = { 0 };
+        fitted.skins[0].inverseBindMatrices = { glm::mat4(1.f) };
+        fitted.primitives.resize(2);
+        const glm::vec3 corners[] = {
+            { 0.f, 0.f, 0.f }, { 1.f, 0.f, 0.f },
+            { 0.f, 1.f, 0.f }, { 0.f, 0.f, 1.f } };
+        const int triangleCorners[2][3] = { { 0, 1, 2 }, { 0, 1, 3 } };
+        for (int section = 0; section < 2; ++section)
+        {
+            auto& primitive = fitted.primitives[section];
+            primitive.name = "Body section " + std::to_string(section);
+            primitive.materialIndex = section;
+            primitive.skinIndex = 0;
+            for (int corner : triangleCorners[section])
+            {
+                Engine::Model::AnimationVertex vertex {};
+                vertex.pos[0] = corners[corner].x;
+                vertex.pos[1] = corners[corner].y;
+                vertex.pos[2] = corners[corner].z;
+                vertex.normal[1] = vertex.tangent[0] =
+                    vertex.tangent[3] = vertex.weights0[0] = 1.f;
+                primitive.vertices.push_back(vertex);
+            }
+        }
+        fitted.rigidBodies.resize(2);
+        fitted.rigidBodies[0].name = "Weighted body";
+        fitted.rigidBodies[0].relatedBoneNode = 0;
+        fitted.rigidBodies[0].localPosition = { .25f, .1f, .2f };
+        fitted.rigidBodies[0].mode = Engine::Model::RigidBodyMotion::Simulated;
+        fitted.rigidBodies[0].mass = 1.f;
+        fitted.rigidBodies[1].name = "Unweighted body";
+        const auto fittedImport = Engine::Editor::ModelAssetWriter::Write(
+            fitted, groupFixture.string(), outputRoot.string(), true);
+        assert(fittedImport.success);
+        Engine::Scene::Scene fittedScene;
+        auto* root = Engine::Serialization::SceneSerializer::InstantiatePrefab(
+            fittedScene, fittedImport.prefabPath);
+        assert(root);
+        auto* fittedBody = root->FindObjectInChildrenByName("Weighted body [Body 0]");
+        auto* fallbackBody = root->FindObjectInChildrenByName("Unweighted body [Body 1]");
+        assert(fittedBody && fallbackBody);
+        auto* hull = fittedBody->GetComponent<Engine::Components::MeshObjectCollider>();
+        assert(hull && hull->convex && fs::exists(hull->meshPath));
+        assert(!fittedBody->GetComponent<Engine::Components::PrimitiveObjectCollider>());
+        assert(fallbackBody->GetComponent<Engine::Components::PrimitiveObjectCollider>());
+        Engine::Components::Mesh hullMesh;
+        hullMesh.LoadFromFile(hull->meshPath);
+        assert(hullMesh.GetVertices().size() >= 4);
+        float highestZ = -100.f;
+        float lowestX = 100.f;
+        for (const auto& vertex : hullMesh.GetVertices())
+        {
+            highestZ = std::max(highestZ, vertex.pos[2]);
+            lowestX = std::min(lowestX, vertex.pos[0]);
+        }
+        assert(std::abs(highestZ - 1.8f) < 1e-5f);
+        assert(std::abs(lowestX + .25f) < 1e-5f);
+        fittedScene.Start();
+        fittedScene.Update(1.f / 60.f);
+        glm::vec3 hullPoint(0.f);
+        assert(fittedBody->GetComponent<Engine::Components::RigidBody>()
+            ->GetWorldMeshHullVertex(0, hullPoint));
+    }
     const fs::path extendedFixture = outputRoot / "flip_soft_body.pmx";
     WriteGroupMorphFixture(extendedFixture, 0, 0, false, true);
     Engine::Model::ImportedModel extendedModel;

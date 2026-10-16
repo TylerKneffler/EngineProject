@@ -199,8 +199,11 @@ void VSMain(
         float weight = morph.y;
         uint base = (target * morphVertexCount + vertexId) * morphStride;
         localPosition.xyz += morphDeltas[base].xyz * weight;
-        localNormal += morphDeltas[base + 1].xyz * weight;
-        localTangent += morphDeltas[base + 2].xyz * weight;
+        if (morphStride >= 3)
+        {
+            localNormal += morphDeltas[base + 1].xyz * weight;
+            localTangent += morphDeltas[base + 2].xyz * weight;
+        }
         if (morphStride >= 4)
             localUv += morphDeltas[base + 3] * weight;
         if (morphStride >= 9)

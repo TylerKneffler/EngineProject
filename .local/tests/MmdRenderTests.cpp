@@ -19,6 +19,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <cstdlib>
+#include <chrono>
 #pragma comment(lib, "Psapi.lib")
 
 static void Checkpoint(const char* text)
@@ -87,7 +88,31 @@ int main()
         if (!scene.Load(selectedScene ? selectedScene :
             "Engine/Core/Assets/Scenes/Animation/mmd.scene"))
             throw std::runtime_error("Scene load failed");
+        if (std::getenv("MMD_PROFILE_ONE_CASCADE"))
+        {
+            Engine::Model::RealtimeShadowSettings shadows;
+            shadows.directionalCascadeCount = 1;
+            scene.SetRealtimeShadowSettings(shadows);
+        }
         Checkpoint("After scene load");
+        uint64_t totalVertices = 0, totalIndices = 0;
+        uint64_t cpuMeshBytes = 0, uploadShadowBytes = 0;
+        size_t renderMeshes = 0, morphMeshes = 0;
+        for (const auto& object : scene.GetObjects())
+            if (auto* mesh = object->GetComponent<Engine::Components::Mesh>())
+            {
+                ++renderMeshes;
+                totalVertices += mesh->GetVertexCount();
+                totalIndices += mesh->GetIndexCount();
+                morphMeshes += mesh->HasMorphTargets();
+                cpuMeshBytes += mesh->GetCpuMeshMemoryBytes();
+                uploadShadowBytes += mesh->GetUploadShadowMemoryBytes();
+            }
+        std::cout << "Scene geometry: " << renderMeshes << " meshes, "
+            << totalVertices << " vertices, " << totalIndices << " indices, "
+            << morphMeshes << " morph meshes; CPU mesh "
+            << cpuMeshBytes / (1024 * 1024) << " MiB, upload shadows "
+            << uploadShadowBytes / (1024 * 1024) << " MiB\n";
         size_t dynamicBodies = 0;
         size_t physicsJoints = 0;
         for (const auto& object : scene.GetObjects())
@@ -114,6 +139,40 @@ int main()
         uint64_t staticMorphBytes = 0;
         for (const auto& object : scene.GetObjects()) staticMorphBytes += CheckMorphBuffers(object.get());
         if (!staticMorphBytes) throw std::runtime_error("MMD scene has no GPU morph buffers");
+        if (!selectedScene)
+        {
+            if (totalVertices >= 300000 || totalIndices < 1000000)
+                throw std::runtime_error("Bundled Mococo meshes are not indexed");
+            if (uploadShadowBytes >= 5ull * 1024 * 1024)
+                throw std::runtime_error("Static MMD vertex buffers retain DX11 upload shadows");
+            if (staticMorphBytes >= 160ull * 1024 * 1024)
+                throw std::runtime_error("Position-only MMD morphs use an expanded GPU layout");
+            size_t releasedLargeTextures = 0;
+            for (const auto& object : scene.GetObjects())
+                if (auto* material = object->GetComponent<Engine::Components::Material>())
+                    if (const auto& texture = material->baseColorTexture;
+                        texture && texture->GetGraphicsTexture() &&
+                        texture->GetWidth() >= 2048)
+                    {
+                        if (texture->HasPixels())
+                            throw std::runtime_error("Prepared MMD texture retains decoded pixels");
+                        ++releasedLargeTextures;
+                    }
+            if (releasedLargeTextures < 6)
+                throw std::runtime_error("MMD texture release check covered too few materials");
+            for (const auto& object : scene.GetObjects())
+                if (auto* material = object->GetComponent<Engine::Components::Material>())
+                    if (const auto& texture = material->baseColorTexture;
+                        texture && texture->GetGraphicsTexture() &&
+                        texture->GetWidth() <= 512)
+                    {
+                        if (texture->GetPixels().size() <
+                            static_cast<size_t>(texture->GetWidth()) *
+                                texture->GetHeight() * 4)
+                            throw std::runtime_error("Released texture did not decode on demand");
+                        break;
+                    }
+        }
         std::cout << "Static morph upload shadows avoided: " << staticMorphBytes / (1024 * 1024) << " MiB\n";
         const auto snapshot = scene.SaveToString();
         Checkpoint("After editor Play snapshot");
@@ -122,17 +181,35 @@ int main()
         std::filesystem::create_directories(".local/test-output/mmd-render");
         const auto render = [&]()
         {
+            const auto begin = std::chrono::steady_clock::now();
             scene.PrepareRenderFrame();
+            const auto prepared = std::chrono::steady_clock::now();
             dx->BeginExportFrame(1);
             renderer->BeginFrame();
             auto context = renderer->CreateFrameGraphicsContext();
             auto* camera = scene.FindGameCamera();
             if (!context || !camera) throw std::runtime_error("Missing graphics context or camera");
             scene.Render(context.get(), float(width) / height, camera, false, width, height, true);
+            const auto shadowed = std::chrono::steady_clock::now();
+            const auto shadow = scene.GetShadowDebugSnapshot();
             renderer->Clear(.025f, .025f, .035f);
             scene.Render(context.get(), float(width) / height, camera, false, width, height, false);
+            const auto drawn = std::chrono::steady_clock::now();
             renderer->EndFrame();
             renderer->WaitIdle();
+            const auto complete = std::chrono::steady_clock::now();
+            if (std::getenv("MMD_PROFILE"))
+            {
+                const auto ms = [](auto first, auto last) {
+                    return std::chrono::duration<double, std::milli>(last - first).count();
+                };
+                std::cout << "Render profile: prepare " << ms(begin, prepared)
+                    << " ms, shadow submit " << ms(prepared, shadowed)
+                    << " ms, main submit " << ms(shadowed, drawn)
+                    << " ms, EndFrame/WaitIdle " << ms(drawn, complete)
+                    << " ms; " << shadow.casterCount << " casters x "
+                    << shadow.cascadeCount << " cascades\n";
+            }
         };
         const bool sphereOnlyAudit = std::getenv("MMD_SPHERE_VISUAL_AUDIT") != nullptr;
         if (sphereOnlyAudit || std::getenv("MMD_MATERIAL_VISUAL_AUDIT"))

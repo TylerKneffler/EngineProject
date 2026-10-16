@@ -5,6 +5,7 @@
 
 namespace Engine::Editor
 {
+class PerformanceRecording;
 // ---------------------------------------------------------------------------
 // ConsoleView — editor Console panel
 //
@@ -42,6 +43,8 @@ public:
     // Defines the package-neutral Console panel.
     void DrawPanel(IEditorUi& ui) override;
     const std::vector<Entry>& GetEntries() const { return m_entries; }
+    void SetPerformanceRecording(std::shared_ptr<PerformanceRecording> recording)
+    { m_performanceRecording = std::move(recording); }
 
 private:
     std::vector<Entry> m_entries;
@@ -49,5 +52,6 @@ private:
     bool m_autoScroll     = true;
     bool m_scrollToBottom = false;
     std::shared_ptr<EditorProblemStore> m_problemStore;
+    std::shared_ptr<PerformanceRecording> m_performanceRecording;
 };
 }

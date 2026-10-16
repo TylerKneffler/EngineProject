@@ -705,6 +705,17 @@ endif()
 set(ENGINE_LOCAL_TEST_ROOT "${ENGINE_ROOT}/.local/tests")
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PerformanceRecordingTests.cpp")
+    enable_testing()
+    add_executable(PerformanceRecordingTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/PerformanceRecordingTests.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/View/Views/PerformanceRecording.cpp")
+    target_include_directories(PerformanceRecordingTests PRIVATE
+        "${ENGINE_ROOT}/Engine/Editor")
+    add_test(NAME PerformanceRecording COMMAND PerformanceRecordingTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PortableAssetCopyTests.cpp")
     enable_testing()
     add_executable(PortableAssetCopyTests EXCLUDE_FROM_ALL

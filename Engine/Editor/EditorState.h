@@ -156,6 +156,8 @@ public:
     { return m_pendingPmxImportFollowBoneColliders; }
     bool GetPendingPmxImportDynamicPhysics() const
     { return m_pendingPmxImportDynamicPhysics; }
+    bool GetPendingPmxWeightFittedColliders() const
+    { return m_pendingPmxWeightFittedColliders; }
     void SetPendingPmxImportMorphs(bool value) { m_pendingPmxImportMorphs = value; }
     void SetPendingPmxImportRigConstraints(bool value)
     { m_pendingPmxImportRigConstraints = value; }
@@ -163,6 +165,8 @@ public:
     { m_pendingPmxImportFollowBoneColliders = value; }
     void SetPendingPmxImportDynamicPhysics(bool value)
     { m_pendingPmxImportDynamicPhysics = value; }
+    void SetPendingPmxWeightFittedColliders(bool value)
+    { m_pendingPmxWeightFittedColliders = value; }
     void SetPendingImportDirectory(std::string directory)
     { m_pendingImportDirectory = std::move(directory); }
     bool IsPendingImportIntoScene() const { return m_pendingImportIntoScene; }
@@ -434,7 +438,8 @@ private:
         bool asPrefab = false, float pmxUnitScaleToMeters = 1.f,
         bool pmxImportMorphs = true, bool pmxImportRigConstraints = true,
         bool pmxImportFollowBoneColliders = true,
-        bool pmxImportDynamicPhysics = false);
+        bool pmxImportDynamicPhysics = false,
+        bool pmxWeightFittedColliders = false);
     void CaptureImportReference(Engine::Core::Object* object);
     void SelectObject(Engine::Core::Object* object);
     struct HistoryEntry
@@ -837,6 +842,7 @@ private:
     bool m_pendingPmxImportRigConstraints = true;
     bool m_pendingPmxImportFollowBoneColliders = true;
     bool m_pendingPmxImportDynamicPhysics = false;
+    bool m_pendingPmxWeightFittedColliders = false;
     std::string m_pendingImportReferenceLabel;
     std::string m_pendingImportError;
     Engine::Scene::Scene* m_pendingImportScene = nullptr;

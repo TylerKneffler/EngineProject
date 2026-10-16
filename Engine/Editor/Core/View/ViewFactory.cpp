@@ -1,4 +1,5 @@
 #include "ViewFactory.h"
+#include "Views/PerformanceRecording.h"
 #include <stdexcept>
 
 namespace Engine::Editor
@@ -21,6 +22,7 @@ ViewFactory::ViewFactory(::Engine::Renderers::IEditorRenderer*    renderer,
     : m_renderer(renderer)
     , m_scene(scene)
     , m_settings(settings)
+    , m_performanceRecording(std::make_shared<PerformanceRecording>())
 {
     OutputDebugStringA("[ViewFactory] Constructor called\n");
     OutputDebugStringA("[ViewFactory] Constructor completed\n");
@@ -222,6 +224,7 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
         AssignLowestAvailableTitle(typeName, view.get());
         view->SetDefaultDockArea(EditorPanelDockArea::BottomPanel);
         view->SetProblemStore(m_problemStore);
+        view->SetPerformanceRecording(m_performanceRecording);
         m_singletonInstances[typeName] = view.get();
         return view;
     }
@@ -247,7 +250,8 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
 
     if (typeName == "Performance")
     {
-        auto view = std::make_unique<PerformanceView>(m_scene);
+        auto view = std::make_unique<PerformanceView>(m_scene,
+            m_performanceRecording);
         AssignLowestAvailableTitle(typeName, view.get());
         view->SetDefaultDockArea(EditorPanelDockArea::BottomPanel);
         m_singletonInstances[typeName] = view.get();

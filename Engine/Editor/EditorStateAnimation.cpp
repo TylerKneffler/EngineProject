@@ -3610,11 +3610,11 @@ void EditorState::DrawAnimationTimeline(IEditorUi& ui,
         return;
     }
     auto& clips = document.sourceManager->clips;
-    if (ui.FrameRate() > 1.f && document.playing &&
+    if (document.playing &&
         document.clipIndex >= 0 &&
         document.clipIndex < static_cast<int>(clips.size()))
     {
-        document.playheadSeconds += std::min(1.f / ui.FrameRate(), .1f);
+        document.playheadSeconds += std::max(0.f, ImGui::GetIO().DeltaTime);
         float duration = .01f;
         bool anyLooping = false;
         for (const auto& track : document.tracks)

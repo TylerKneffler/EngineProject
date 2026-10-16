@@ -1,4 +1,5 @@
 #include "PerformanceView.h"
+#include "PerformanceRecording.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
 #include <pdh.h>
@@ -7,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
+#include <filesystem>
 #include <numeric>
 #include <sstream>
 
@@ -311,14 +313,19 @@ private:
     ComPtr<IDXGIAdapter3> m_adapter;
 };
 
-PerformanceView::PerformanceView(Engine::Scene::Scene* scene)
-    : m_sampler(std::make_unique<Sampler>()), m_scene(scene)
+PerformanceView::PerformanceView(Engine::Scene::Scene* scene,
+    std::shared_ptr<PerformanceRecording> recording)
+    : m_sampler(std::make_unique<Sampler>()), m_scene(scene),
+      m_recording(std::move(recording))
 {
     SetCursorBehaviorOnFocus(CursorBehaviorOnFocus::Visible);
     m_hardware = m_sampler->Hardware();
 }
 
-PerformanceView::~PerformanceView() = default;
+PerformanceView::~PerformanceView()
+{
+    StopRecording();
+}
 
 void PerformanceView::Refresh(float frameRate)
 {
@@ -326,6 +333,7 @@ void PerformanceView::Refresh(float frameRate)
     if (now < m_nextSample) return;
     m_nextSample = now + std::chrono::milliseconds(500);
     m_snapshot = m_sampler->Sample();
+    RecordSnapshot(frameRate);
     PushHistory(m_cpuHistory, std::min(100.f,
         m_snapshot.cpuUser + m_snapshot.cpuKernel));
     PushHistory(m_memoryHistory, Percent(m_snapshot.memoryUsed,
@@ -335,6 +343,130 @@ void PerformanceView::Refresh(float frameRate)
     PushHistory(m_gpuMemoryHistory, Percent(m_snapshot.gpuMemoryUsed,
         m_snapshot.gpuMemoryBudget));
     PushHistory(m_frameHistory, frameRate);
+}
+
+void PerformanceView::StartRecording()
+{
+    if (!m_recording) m_recording = std::make_shared<PerformanceRecording>();
+    m_recordingError.clear();
+    try
+    {
+        const auto directory = std::filesystem::absolute(
+            std::filesystem::path(".local") / "performance-logs");
+        std::filesystem::create_directories(directory);
+        const auto now = std::chrono::system_clock::now();
+        const std::time_t seconds = std::chrono::system_clock::to_time_t(now);
+        std::tm local{};
+        localtime_s(&local, &seconds);
+        std::ostringstream name;
+        name << "performance-" << std::put_time(&local, "%Y%m%d-%H%M%S")
+            << '-' << std::chrono::duration_cast<std::chrono::milliseconds>(
+                now.time_since_epoch()).count() % 1000;
+        const std::string prefix = name.str();
+        std::filesystem::path path;
+        for (unsigned suffix = 0; ; ++suffix)
+        {
+            path = directory / (prefix + (suffix ? "-" + std::to_string(suffix)
+                : "") + ".jsonl");
+            if (!std::filesystem::exists(path)) break;
+        }
+        if (!m_recording->Start(path))
+            throw std::runtime_error("Could not create performance log file.");
+        m_recordingPath = path.string();
+        std::ostringstream hardware;
+        hardware << "Started. CPU: " << m_hardware.cpuName
+            << "; physical/logical cores: " << m_hardware.physicalCores
+            << '/' << m_hardware.logicalCores
+            << "; reported MHz: " << m_hardware.cpuMHz
+            << "; cache bytes L1/L2/L3/L4: ";
+        for (uint64_t bytes : m_hardware.cacheBytes) hardware << bytes << ' ';
+        hardware << "; installed RAM bytes: " << m_hardware.installedMemory
+            << "; GPU: " << m_hardware.gpuName
+            << "; dedicated/shared VRAM bytes: "
+            << m_hardware.dedicatedVideoMemory << '/'
+            << m_hardware.sharedVideoMemory
+            << "; GPU engine order: 3D, compute, copy, video decode, video encode";
+        m_recording->Event("recorder", "info", hardware.str());
+        m_nextSample = {};
+        m_lastFrame = {};
+    }
+    catch (const std::exception& error)
+    {
+        m_recordingError = error.what();
+    }
+}
+
+void PerformanceView::StopRecording()
+{
+    if (!m_recording || !m_recording->IsRecording()) return;
+    m_recording->Event("recorder", "info", "Stopped.");
+    m_recording->Stop();
+}
+
+void PerformanceView::RecordSnapshot(float frameRate)
+{
+    if (!m_recording || !m_recording->IsRecording()) return;
+    std::ostringstream out;
+    out << std::fixed << std::setprecision(3)
+        << "\"fps\":" << frameRate << ",\"frame_ms\":"
+        << (frameRate > 0.f ? 1000.f / frameRate : 0.f)
+        << ",\"cpu_user_pct\":" << m_snapshot.cpuUser
+        << ",\"cpu_kernel_pct\":" << m_snapshot.cpuKernel
+        << ",\"memory_total_bytes\":" << m_snapshot.memoryTotal
+        << ",\"memory_used_bytes\":" << m_snapshot.memoryUsed
+        << ",\"editor_working_set_bytes\":" << m_snapshot.processMemory
+        << ",\"system_cache_bytes\":" << m_snapshot.systemCache
+        << ",\"commit_used_bytes\":" << m_snapshot.commitUsed
+        << ",\"commit_limit_bytes\":" << m_snapshot.commitLimit
+        << ",\"gpu_memory_used_bytes\":" << m_snapshot.gpuMemoryUsed
+        << ",\"gpu_memory_budget_bytes\":" << m_snapshot.gpuMemoryBudget
+        << ",\"gpu_engines_pct\":[";
+    for (size_t index = 0; index < m_snapshot.gpuEngines.size(); ++index)
+        out << (index ? "," : "") << m_snapshot.gpuEngines[index];
+    out << "],\"cpu_cores_pct\":[";
+    for (size_t index = 0; index < m_snapshot.cores.size(); ++index)
+        out << (index ? "," : "") << '[' << m_snapshot.cores[index].user
+            << ',' << m_snapshot.cores[index].kernel << ']';
+    out << ']';
+    if (m_scene)
+    {
+        const auto& shadow = m_scene->GetShadowDebugSnapshot();
+        out << ",\"shadow_enabled\":" << (shadow.enabled ? "true" : "false")
+            << ",\"shadow_cascades\":" << shadow.cascadeCount
+            << ",\"shadow_casters\":" << shadow.casterCount
+            << ",\"shadow_draws\":" << shadow.submittedCasterDrawCount
+            << ",\"shadow_portal_atlases\":" << shadow.portalAtlasCount
+            << ",\"shadow_rendered_portal_atlases\":"
+            << shadow.renderedPortalAtlasCount;
+    }
+    m_recording->Sample(out.str());
+}
+
+void PerformanceView::DrawRecording(IEditorUi& ui)
+{
+    ui.Label("Recording");
+    const bool active = m_recording && m_recording->IsRecording();
+    if (ui.Button(active ? "Stop recording" : "Start recording"))
+    {
+        if (active) StopRecording();
+        else StartRecording();
+    }
+    ui.SameLine();
+    ui.DisabledLabel(active ? "Recording CPU/GPU stats and editor output"
+        : "Saved when recording stops");
+    if (!m_recordingPath.empty())
+    {
+        ui.ValueLabel(active ? "Recording to" : "Saved performance log",
+            m_recordingPath.c_str());
+        if (ui.Button("Copy log path"))
+            ui.SetClipboardText(m_recordingPath.c_str());
+    }
+    else
+        ui.DisabledLabel("Logs are saved in .local/performance-logs.");
+    ui.DisabledLabel("Captures Console, C++ stdout/stderr, per-frame timing, and sampled CPU/GPU/memory/shadow stats. Share the .jsonl file for diagnosis.");
+    if (!m_recordingError.empty())
+        ui.Label(m_recordingError.c_str());
+    ui.Separator();
 }
 
 void PerformanceView::DrawMetric(IEditorUi& ui, const char* id, const char* title,
@@ -634,13 +766,21 @@ void PerformanceView::DrawShadows(IEditorUi& ui)
 
 void PerformanceView::DrawPanel(IEditorUi& ui)
 {
+    const float frameRate = ui.FrameRate();
+    const auto now = std::chrono::steady_clock::now();
+    const double elapsedMs = m_lastFrame.time_since_epoch().count()
+        ? std::chrono::duration<double, std::milli>(now - m_lastFrame).count()
+        : 0.0;
+    m_lastFrame = now;
+    Refresh(frameRate);
+    if (m_recording && elapsedMs > 0.0)
+        m_recording->Frame(frameRate, elapsedMs);
     if (!ui.BeginWindow(m_title.c_str(), &m_open))
     {
         ui.EndWindow();
         return;
     }
-    const float frameRate = ui.FrameRate();
-    Refresh(frameRate);
+    DrawRecording(ui);
     if (ui.BeginTabBar("##performanceTabs"))
     {
         if (ui.BeginTab("Overview"))

@@ -111,6 +111,7 @@ private:
     Engine::Model::ProjectSettings     m_settings;
     std::shared_ptr<EditorProblemStore> m_problemStore =
         std::make_shared<EditorProblemStore>();
+    std::shared_ptr<PerformanceRecording> m_performanceRecording;
 
     // Tracks live singleton panel instances (raw, non-owning).
     // Cleared via NotifyPanelRemoved when a panel is erased from the panels vector.

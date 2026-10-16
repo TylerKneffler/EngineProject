@@ -171,6 +171,25 @@ const std::vector<glm::mat4>& SkinnedMesh::BuildPalette() const
     return m_palette;
 }
 
+const std::vector<glm::mat4>& SkinnedMesh::BuildPalette(
+    const std::vector<glm::mat4>& jointSkinMatrices) const
+{
+    m_palette.clear();
+    if (!Owner || skinIndex < 0) return m_palette;
+    ResolveBindings();
+    if (!m_cachedSkeleton ||
+        jointSkinMatrices.size() != m_cachedSkeleton->jointNodes.size())
+        return BuildPalette();
+    Mesh* mesh = m_cachedMesh;
+    Object* meshObject = mesh && mesh->Owner ? mesh->Owner : Owner;
+    const glm::mat4 inverseMesh = glm::inverse(
+        meshObject->transform.GetWorldMatrix());
+    m_palette.resize(jointSkinMatrices.size());
+    for (size_t i = 0; i < jointSkinMatrices.size(); ++i)
+        m_palette[i] = inverseMesh * jointSkinMatrices[i] * bindMeshToModel;
+    return m_palette;
+}
+
 Skeleton* SkinnedMesh::ResolveSkeleton() const
 {
     ResolveBindings();

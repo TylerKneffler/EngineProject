@@ -10,6 +10,7 @@ namespace Engine::Scene { class Scene; }
 
 namespace Engine::Editor
 {
+class PerformanceRecording;
 struct PerformanceCoreLoad
 {
     float user = 0.f;
@@ -48,7 +49,8 @@ struct PerformanceHardware
 class PerformanceView final : public IEditorPanel
 {
 public:
-    explicit PerformanceView(Engine::Scene::Scene* scene);
+    PerformanceView(Engine::Scene::Scene* scene,
+        std::shared_ptr<PerformanceRecording> recording = {});
     ~PerformanceView() override;
     void DrawPanel(IEditorUi& ui) override;
 
@@ -59,6 +61,10 @@ private:
     void DrawCoreGrid(IEditorUi& ui);
     void DrawHardware(IEditorUi& ui);
     void DrawShadows(IEditorUi& ui);
+    void DrawRecording(IEditorUi& ui);
+    void RecordSnapshot(float frameRate);
+    void StartRecording();
+    void StopRecording();
     void DrawMetric(IEditorUi& ui, const char* id, const char* title,
         const EditorUiPercentageSegment* segments, size_t count,
         const std::deque<float>& history, EditorUiColor historyColor);
@@ -67,6 +73,7 @@ private:
     PerformanceSnapshot m_snapshot;
     PerformanceHardware m_hardware;
     std::chrono::steady_clock::time_point m_nextSample{};
+    std::chrono::steady_clock::time_point m_lastFrame{};
     std::deque<float> m_cpuHistory;
     std::deque<float> m_memoryHistory;
     std::deque<float> m_gpuHistory;
@@ -74,5 +81,8 @@ private:
     std::deque<float> m_frameHistory;
     int m_visualMode = 0;
     Engine::Scene::Scene* m_scene = nullptr;
+    std::shared_ptr<PerformanceRecording> m_recording;
+    std::string m_recordingPath;
+    std::string m_recordingError;
 };
 }

@@ -165,7 +165,8 @@ void VSMmdMain(
         uint target = (uint)morph.x;
         uint base = (target * morphVertexCount + vertexId) * morphStride;
         localPosition.xyz += morphDeltas[base].xyz * morph.y;
-        outlineNormal += morphDeltas[base + 1].xyz * morph.y;
+        if (morphStride >= 3)
+            outlineNormal += morphDeltas[base + 1].xyz * morph.y;
     }
     uint jointCount = (uint)objectData.skinParams.y;
     if (jointCount > 0)
