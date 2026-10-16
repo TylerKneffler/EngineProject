@@ -39,6 +39,40 @@ bool IsHairOrEar(const std::string& name)
 void ApplyPmxPhysicsQuality(Engine::Model::ImportedModel& model,
     PmxImportOptions options, PmxImportReport& report)
 {
+    if (options.colliderMode == PmxColliderMode::None)
+    {
+        if (options.dynamicPhysics)
+        {
+            std::vector<bool> skinned(model.nodes.size(), false);
+            for (const auto& skin : model.skins)
+                for (unsigned node : skin.jointNodes)
+                    if (node < skinned.size()) skinned[node] = true;
+            for (const auto& body : model.rigidBodies)
+                if (body.mode != Engine::Model::RigidBodyMotion::FollowTransform &&
+                    body.relatedBoneNode >= 0 &&
+                    static_cast<size_t>(body.relatedBoneNode) < skinned.size() &&
+                    skinned[body.relatedBoneNode])
+                    model.secondaryMotionNodes.push_back(
+                        static_cast<unsigned>(body.relatedBoneNode));
+            std::sort(model.secondaryMotionNodes.begin(), model.secondaryMotionNodes.end());
+            model.secondaryMotionNodes.erase(std::unique(
+                model.secondaryMotionNodes.begin(), model.secondaryMotionNodes.end()),
+                model.secondaryMotionNodes.end());
+        }
+        model.rigidBodies.clear();
+        model.physicsJoints.clear();
+        model.impulseMorphs.clear();
+        model.softBodies.clear();
+        report.importedKinematicRigidBodies = 0;
+        report.importedDynamicRigidBodies = 0;
+        report.importedPhysicsJoints = 0;
+        report.importedSoftBodies = 0;
+        report.springMotionBones = static_cast<int>(model.secondaryMotionNodes.size());
+        report.warnings.push_back("No PMX colliders or Bullet bodies imported; " +
+            std::to_string(report.springMotionBones) +
+            " bones use pose-following springs without contacts");
+        return;
+    }
     if (!options.dynamicPhysics ||
         options.physicsQuality == PmxPhysicsQuality::High) return;
 
@@ -166,6 +200,11 @@ Engine::Model::ModelImportResult ModelImporter::Import(const std::string& source
     }
     if (extension == ".pmx")
     {
+        if (pmxOptions.weightFittedColliders &&
+            pmxOptions.colliderMode == PmxColliderMode::Primitive)
+            pmxOptions.colliderMode = PmxColliderMode::Hull;
+        pmxOptions.weightFittedColliders =
+            pmxOptions.colliderMode == PmxColliderMode::Hull;
         if (!std::isfinite(pmxUnitScaleToMeters) ||
             pmxUnitScaleToMeters <= 0.f || pmxUnitScaleToMeters > 1000.f)
             return { false, {}, {}, "PMX unit scale must be greater than zero and at most 1000" };
@@ -223,6 +262,10 @@ Engine::Model::ModelImportResult ModelImporter::Import(const std::string& source
                     pmxOptions.dynamicPhysics;
                 record->importSettings["pmxWeightFittedColliders"] =
                     pmxOptions.weightFittedColliders;
+                record->importSettings["pmxColliderMode"] =
+                    pmxOptions.colliderMode == PmxColliderMode::Hull ? "Hull" :
+                    pmxOptions.colliderMode == PmxColliderMode::Primitive ?
+                    "Primitive" : "None";
                 record->importSettings["pmxWarnings"] = result.message;
                 if (!record->Save(result.prefabPath))
                     result.message += "; could not save PMX import report";

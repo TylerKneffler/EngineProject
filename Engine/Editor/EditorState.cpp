@@ -4470,6 +4470,7 @@ void EditorState::StartObjectImport(const std::string& path, bool intoScene,
     m_pendingPmxImportDynamicPhysics = false;
     m_pendingPmxPhysicsQuality = 1;
     m_pendingPmxWeightFittedColliders = false;
+    m_pendingPmxColliderMode = 1;
     ClearImportReference();
     if (m_pendingImportScene)
     {
@@ -4561,6 +4562,7 @@ void EditorState::CancelPendingImportAsset()
     m_pendingPmxImportDynamicPhysics = false;
     m_pendingPmxPhysicsQuality = 1;
     m_pendingPmxWeightFittedColliders = false;
+    m_pendingPmxColliderMode = 1;
     m_focusImportHierarchy = false;
     ClearImportReference();
 }
@@ -4620,7 +4622,8 @@ void EditorState::ConfirmPendingImportAsset()
         m_pendingPmxImportFollowBoneColliders,
         m_pendingPmxImportDynamicPhysics,
         m_pendingPmxWeightFittedColliders,
-        m_pendingPmxPhysicsQuality);
+        m_pendingPmxPhysicsQuality,
+        m_pendingPmxColliderMode);
     if (primary.empty())
     {
         m_pendingImportError = "Import failed. See the Console for details, then retry.";
@@ -4717,7 +4720,7 @@ std::string EditorState::ImportAssetFile(const std::string& path,
     float pmxUnitScaleToMeters, bool pmxImportMorphs,
     bool pmxImportRigConstraints, bool pmxImportFollowBoneColliders,
     bool pmxImportDynamicPhysics, bool pmxWeightFittedColliders,
-    int pmxPhysicsQuality)
+    int pmxPhysicsQuality, int pmxColliderMode)
 {
     namespace fs = std::filesystem;
     const fs::path source(path);
@@ -4744,7 +4747,10 @@ std::string EditorState::ImportAssetFile(const std::string& path,
                         pmxImportDynamicPhysics, pmxWeightFittedColliders,
                         pmxPhysicsQuality <= 0 ? PmxPhysicsQuality::High :
                         pmxPhysicsQuality == 1 ? PmxPhysicsQuality::Medium :
-                        PmxPhysicsQuality::Low });
+                        PmxPhysicsQuality::Low,
+                        pmxColliderMode <= 0 ? PmxColliderMode::Hull :
+                        pmxColliderMode == 1 ? PmxColliderMode::Primitive :
+                        PmxColliderMode::None });
             if (!imported.success)
                 throw std::runtime_error(imported.message);
             bool boundCharacter = false;

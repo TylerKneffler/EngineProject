@@ -136,6 +136,7 @@ int WINAPI wWinMain(
     // Headless importer entry point used by automation and project tooling.
     // Editor.exe --import-model <source> <Assets directory>
     //     [--pmx-physics-high|--pmx-physics-medium|--pmx-physics-low]
+    //     [--pmx-collider-hull|--pmx-collider-primitive|--pmx-collider-none]
     // --pmx-dynamic-physics remains an alias for the full High profile.
     // --import-gltf remains accepted for existing automation.
     // Editor.exe --bind-vmd <imported PMX prefab> <motion.vmd>
@@ -183,7 +184,25 @@ int WINAPI wWinMain(
                 }
                 else if (std::wstring(arguments[index]) ==
                     L"--pmx-weight-fitted-colliders")
+                {
                     pmxOptions.weightFittedColliders = true;
+                    pmxOptions.colliderMode = Engine::Editor::PmxColliderMode::Hull;
+                }
+                else if (std::wstring(arguments[index]) == L"--pmx-collider-hull")
+                {
+                    pmxOptions.weightFittedColliders = true;
+                    pmxOptions.colliderMode = Engine::Editor::PmxColliderMode::Hull;
+                }
+                else if (std::wstring(arguments[index]) == L"--pmx-collider-primitive")
+                {
+                    pmxOptions.weightFittedColliders = false;
+                    pmxOptions.colliderMode = Engine::Editor::PmxColliderMode::Primitive;
+                }
+                else if (std::wstring(arguments[index]) == L"--pmx-collider-none")
+                {
+                    pmxOptions.weightFittedColliders = false;
+                    pmxOptions.colliderMode = Engine::Editor::PmxColliderMode::None;
+                }
             const Engine::Model::ModelImportResult imported = Engine::Editor::ModelImporter::Import(
                 std::filesystem::path(arguments[2]).string(),
                 std::filesystem::path(arguments[3]).string(), 1.f,

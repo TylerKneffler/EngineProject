@@ -7,6 +7,7 @@
 namespace Engine::Editor
 {
 enum class PmxPhysicsQuality { High, Medium, Low };
+enum class PmxColliderMode { Hull, Primitive, None };
 
 struct PmxImportOptions
 {
@@ -16,6 +17,7 @@ struct PmxImportOptions
     bool dynamicPhysics = false;
     bool weightFittedColliders = false;
     PmxPhysicsQuality physicsQuality = PmxPhysicsQuality::Medium;
+    PmxColliderMode colliderMode = PmxColliderMode::Primitive;
 };
 
 struct PmxImportReport

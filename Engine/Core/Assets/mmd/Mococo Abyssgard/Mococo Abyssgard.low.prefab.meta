@@ -21,6 +21,8 @@
         "pmxWarnings": "Low profile: secondary bones use pose-following springs without Bullet contacts.",
         "sourceFormat": "pmx",
         "pmxPhysicsQuality": "Low",
+        "pmxColliderMode": "Primitive",
+        "pmxWeightFittedColliders": false,
         "pmxSpringMotionBones": 133
     }
 }

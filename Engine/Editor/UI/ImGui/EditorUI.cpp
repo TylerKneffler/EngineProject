@@ -89,13 +89,22 @@ void EditorUI::Render(PlayState playState)
                         "Medium - spring hair and ears", "Low - spring secondary bones" };
                     if (ImGui::Combo("Physics quality", &quality, qualities, 3))
                         m_state->SetPendingPmxPhysicsQuality(quality);
-                    ImGui::TextWrapped("High keeps all PMX bodies and joints for export. Medium replaces hair and ear dynamics with springs. Low replaces eligible secondary dynamics with springs. Springs follow animation but do not collide.");
+                    ImGui::TextWrapped("With colliders enabled, High keeps all PMX bodies and joints for export. Medium replaces hair and ear dynamics with springs. Low replaces eligible secondary dynamics with springs. Springs follow animation but do not collide.");
                 }
-                bool fitted = m_state->GetPendingPmxWeightFittedColliders();
-                if (ImGui::Checkbox("Fit rigid-body colliders to skin weights",
-                        &fitted))
-                    m_state->SetPendingPmxWeightFittedColliders(fitted);
-                ImGui::TextWrapped("Builds a convex hull for each imported PMX body from the mesh vertices weighted to its bone. Bodies without enough vertices keep their PMX collider shape.");
+                int colliderMode = m_state->GetPendingPmxColliderMode();
+                const char* colliderModes[] = { "Hull", "Primitive", "None" };
+                if (ImGui::Combo("PMX colliders", &colliderMode,
+                        colliderModes, 3))
+                {
+                    m_state->SetPendingPmxColliderMode(colliderMode);
+                    m_state->SetPendingPmxWeightFittedColliders(
+                        colliderMode == 0);
+                }
+                ImGui::TextWrapped(colliderMode == 0
+                    ? "Fit convex hulls to weighted mesh vertices. Bodies without enough vertices use their PMX primitive."
+                    : colliderMode == 1
+                    ? "Use the PMX sphere, box, or capsule shapes."
+                    : "Import no PMX collision bodies, regardless of physics quality. Animated secondary bones use springs when dynamic physics is enabled; they will not collide.");
             }
             if (m_state->IsPendingImportIntoScene())
             {
