@@ -6,6 +6,8 @@
 
 namespace Engine::Editor
 {
+enum class PmxPhysicsQuality { High, Medium, Low };
+
 struct PmxImportOptions
 {
     bool morphs = true;
@@ -13,6 +15,7 @@ struct PmxImportOptions
     bool followBoneColliders = true;
     bool dynamicPhysics = false;
     bool weightFittedColliders = false;
+    PmxPhysicsQuality physicsQuality = PmxPhysicsQuality::Medium;
 };
 
 struct PmxImportReport
@@ -22,6 +25,7 @@ struct PmxImportReport
     int importedKinematicRigidBodies = 0;
     int importedDynamicRigidBodies = 0;
     int importedPhysicsJoints = 0;
+    int springMotionBones = 0;
     int importedSoftBodies = 0;
     int importedAppendRules = 0;
     int importedIkChains = 0;

@@ -10,7 +10,7 @@ struct ObjectViewportTemplate
         Engine::Scene::Scene* scene, SceneViewportToolbar& toolbar,
         bool allowObjectTransform)
     {
-        return toolbar.Draw(ui, input, scene, true, allowObjectTransform);
+        return toolbar.Draw(ui, input, scene, allowObjectTransform);
     }
 };
 }

@@ -59,14 +59,20 @@ void D3D11GpuTimingState::PrepareFrame()
 {
     if (!device || !context)
         return;
-    for (Frame& frame : frames)
+    const auto resolveBegin = std::chrono::steady_clock::now();
+    frameIndex = (frameIndex + 1u) % BufferedFrames;
+    Frame& frame = frames[frameIndex];
+    if (frame.pending && frame.disjoint)
     {
-        if (!frame.pending || !frame.disjoint)
-            continue;
         D3D11_QUERY_DATA_TIMESTAMP_DISJOINT disjoint{};
         if (context->GetData(frame.disjoint.Get(), &disjoint,
                 sizeof(disjoint), D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK)
-            continue;
+        {
+            telemetry.cpuGpuQueryResolveMilliseconds =
+                std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - resolveBegin).count();
+            return;
+        }
         std::array<double, static_cast<size_t>(
             Engine::Graphics::GpuTimingStage::Count)> completed{};
         bool available = !disjoint.Disjoint && disjoint.Frequency != 0;
@@ -94,9 +100,10 @@ void D3D11GpuTimingState::PrepareFrame()
         else if (disjoint.Disjoint)
             frame.pending = false;
     }
+    telemetry.cpuGpuQueryResolveMilliseconds =
+        std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - resolveBegin).count();
 
-    frameIndex = (frameIndex + 1u) % BufferedFrames;
-    Frame& frame = frames[frameIndex];
     if (frame.pending)
         return;
     if (!frame.disjoint)
@@ -110,7 +117,11 @@ void D3D11GpuTimingState::PrepareFrame()
     activeRegion = UINT32_MAX;
     recording = true;
     cpuSubmissionStart = std::chrono::steady_clock::now();
+    const auto beginQuery = std::chrono::steady_clock::now();
     context->Begin(frame.disjoint.Get());
+    telemetry.cpuGpuQueryBeginMilliseconds =
+        std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - beginQuery).count();
 }
 
 void D3D11GpuTimingState::FinalizeFrame()

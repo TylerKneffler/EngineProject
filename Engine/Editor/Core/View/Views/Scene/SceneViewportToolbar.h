@@ -12,15 +12,13 @@ class SceneViewportToolbar
 {
 public:
     bool Draw(IEditorUi& ui, const EditorUiViewportInput& input,
-        Engine::Scene::Scene* scene, bool allowTransformTools = true,
-        bool allowObjectTransform = true);
+        Engine::Scene::Scene* scene, bool allowObjectTransform = true);
 
     EditorTransformTool GetTransformTool() const
     {
         return m_transformTool;
     }
     void SetTransformTool(EditorTransformTool tool) { m_transformTool = tool; }
-    void SetSceneToolsVisible(bool visible) { m_sceneToolsVisible = visible; }
 
     bool IsTransformDragging() const
     {
@@ -28,25 +26,11 @@ public:
     }
 
 private:
-    bool DrawTransformToolbar(IEditorUi& ui,
-        const EditorUiViewportInput& input);
-    bool DrawGridToggle(IEditorUi& ui, const EditorUiViewportInput& input,
-        Engine::Scene::Scene* scene);
-    bool DrawRenderModeMenu(IEditorUi& ui,
-        const EditorUiViewportInput& input,
-        Engine::Scene::Scene* scene);
-    bool DrawSceneUiOverlayToggle(IEditorUi& ui,
-        const EditorUiViewportInput& input,
-        Engine::Scene::Scene* scene);
-    bool DrawBonesToggle(IEditorUi& ui, const EditorUiViewportInput& input,
-        Engine::Scene::Scene* scene);
     bool DrawOrientationGizmo(IEditorUi& ui,
         const EditorUiViewportInput& input,
         Engine::Scene::Scene* scene, bool allowObjectTransform);
 
     EditorTransformTool m_transformTool = EditorTransformTool::Translate;
-    bool m_sceneToolsVisible = true;
-    bool m_renderModeExpanded = false;
     Engine::Core::Object* m_cubeDragObject = nullptr;
     int m_cubeDragAxis = -1;
     EditorTransformTool m_cubeDragTool = EditorTransformTool::Translate;

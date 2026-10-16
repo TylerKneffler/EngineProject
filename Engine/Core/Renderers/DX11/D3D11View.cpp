@@ -46,12 +46,23 @@ void D3D11View::CreateResources(ID3D11Device* device, uint32_t width, uint32_t h
     ThrowIfFailed(device->CreateRenderTargetView(m_texture.Get(), nullptr, &m_rtv));
     ThrowIfFailed(device->CreateShaderResourceView(m_texture.Get(), nullptr, &m_srv));
 
+    // Smooth thin geometry in editor views while keeping the UI texture single-sampled.
+    UINT colorQuality = 0;
+    UINT depthQuality = 0;
+    const uint32_t samples =
+        SUCCEEDED(device->CheckMultisampleQualityLevels(
+            DXGI_FORMAT_R16G16B16A16_FLOAT, 4, &colorQuality)) && colorQuality > 0 &&
+        SUCCEEDED(device->CheckMultisampleQualityLevels(
+            DXGI_FORMAT_D32_FLOAT_S8X24_UINT, 4, &depthQuality)) && depthQuality > 0
+        ? 4u : 1u;
+
     D3D11_TEXTURE2D_DESC depth = color;
     depth.Format = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
+    depth.SampleDesc.Count = samples;
     depth.BindFlags = D3D11_BIND_DEPTH_STENCIL;
     ThrowIfFailed(device->CreateTexture2D(&depth, nullptr, &m_depthTexture));
     ThrowIfFailed(device->CreateDepthStencilView(m_depthTexture.Get(), nullptr, &m_dsv));
-    m_postProcess.Create(device, width, height);
+    m_postProcess.Create(device, width, height, samples);
 }
 
 void D3D11View::Render(void* contextHandle, void* mainRtvHandle,

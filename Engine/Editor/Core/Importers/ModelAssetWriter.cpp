@@ -9,6 +9,7 @@
 #include "Core/Compoonents/Animation/RigConstraints.h"
 #include "Core/Compoonents/Animation/RigMorphControls.h"
 #include "Core/Compoonents/Physics/RigPhysicsBinding.h"
+#include "Core/Compoonents/Animation/IKBone.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Lighting/Light.h"
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
@@ -734,6 +735,16 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
                     group->skinIndex = static_cast<unsigned>(skinIndex);
                 }
             }
+        }
+
+        for (unsigned nodeIndex : model.secondaryMotionNodes)
+        {
+            if (nodeIndex >= objects.size() || !objects[nodeIndex] ||
+                !objects[nodeIndex]->GetComponent<Engine::Components::AnimationBone>())
+                continue;
+            auto* spring = objects[nodeIndex]->AddComponent<Engine::Components::IKBone>();
+            spring->simulate = false;
+            spring->wiggleEnabled = true;
         }
 
         std::vector<std::string> rigidNames(model.rigidBodies.size());

@@ -12,6 +12,10 @@
 #include "Core/Model/ProjectSettings.h"
 #include "Core/Renderers/RendererFactory.h"
 #include "Core/Renderers/DX11/DX11GameRenderer.h"
+#include "Core/Renderers/DX11/DX11EditorRenderer.h"
+#include "Core/Renderers/IView.h"
+#include "Core/Graphics/IGraphicsProvider.h"
+#include <algorithm>
 #include <Windows.h>
 #include <Psapi.h>
 #include <filesystem>
@@ -68,10 +72,182 @@ static uint64_t CheckMorphBuffers(Engine::Core::Object* object)
     return staticBytes;
 }
 
+// Set MMD_EDITOR_PLAY_PROFILE=scene, game, or both to exercise the DX11 editor
+// swap chain, offscreen view, wall-clock updates, and continuous Present loop.
+// MMD_EDITOR_PLAY_FRAMES extends the run; MMD_EDITOR_PLAY_CASCADES compares the
+// playback shadow budget. This mode does not draw the ImGui editor chrome.
+// The capture test below remains deterministic and uses the export renderer.
+static int ProfileEditorPlay(const char* viewMode)
+{
+    using Clock = std::chrono::steady_clock;
+    using Engine::Renderers::DX11EditorRenderer;
+    constexpr unsigned windowWidth = 1536, windowHeight = 900;
+    constexpr unsigned viewWidth = 783, viewHeight = 721;
+    constexpr unsigned idleFrames = 30;
+    const char* frameOverride = std::getenv("MMD_EDITOR_PLAY_FRAMES");
+    const unsigned playFrames = frameOverride
+        ? static_cast<unsigned>(std::clamp(std::atoi(frameOverride), 30, 1200))
+        : 180u;
+    const std::string mode = viewMode && *viewMode ? viewMode : "scene";
+    if (mode != "scene" && mode != "game" && mode != "both")
+        throw std::runtime_error("MMD_EDITOR_PLAY_PROFILE must be scene, game, or both");
+
+    Engine::Core::Window window(GetModuleHandleW(nullptr),
+        L"MMD hidden editor Play profile", windowWidth, windowHeight);
+    DX11EditorRenderer renderer;
+    if (!renderer.Init(window.GetHWND(), windowWidth, windowHeight))
+        throw std::runtime_error("DX11 editor initialization failed");
+    auto makeView = [&]()
+    {
+        auto [handles, slot] = renderer.AllocateSrvSlot();
+        auto view = renderer.CreateViewBackend();
+        view->Init(renderer.GetNativeDeviceHandle(), viewWidth, viewHeight,
+            handles.first, handles.second, slot);
+        return view;
+    };
+    auto sceneView = mode == "game" ? nullptr : makeView();
+    auto gameView = mode == "scene" ? nullptr : makeView();
+
+    Engine::Scene::Scene scene;
+    scene.Init(renderer.GetGraphicsProvider());
+    const char* selectedScene = std::getenv("MMD_SCENE");
+    if (!scene.Load(selectedScene ? selectedScene :
+        "Engine/Core/Assets/Scenes/Animation/mmd.scene"))
+        throw std::runtime_error("Scene load failed");
+    Engine::Model::RealtimeShadowSettings shadows;
+    scene.SetRealtimeShadowSettings(shadows);
+    Engine::Model::ProjectSettings projectSettings;
+    scene.SetDistanceLightingSettings(projectSettings.distanceLighting);
+    auto* bullet = dynamic_cast<Engine::Physics::BulletPhysicsAdapter*>(
+        &scene.GetPhysics().GetAdapter());
+    if (!bullet) throw std::runtime_error("MMD scene lacks Bullet physics");
+
+    struct FrameSample
+    {
+        double deltaMs = 0, updateMs = 0, renderMs = 0, frameMs = 0;
+        uint32_t substeps = 0, shadowDraws = 0;
+    };
+    std::vector<FrameSample> idle, playing;
+    auto lastTick = Clock::now();
+    auto drawView = [&](Engine::Renderers::IView& view, bool editorCamera)
+    {
+        auto* factory = renderer.GetGraphicsProvider()->GetContextFactory();
+        void* cmd = renderer.GetCurrentCommandBuffer();
+        auto renderScene = [&](void* command, bool shadowsOnly)
+        {
+            factory->SetCommandBuffer(command);
+            auto context = factory->CreateContext();
+            Engine::Components::Camera* camera = editorCamera
+                ? nullptr : scene.FindGameCamera();
+            if (!editorCamera && !camera)
+                throw std::runtime_error("MMD scene has no Game camera");
+            scene.Render(context.get(), view.GetAspect(), camera, editorCamera,
+                view.GetWidth(), view.GetHeight(), shadowsOnly);
+        };
+        view.Render(cmd, renderer.GetCurrentRenderTargetHandle(),
+            [&](void* command) { renderScene(command, false); },
+            [&](void* command) { renderScene(command, true); });
+    };
+    const auto tick = [&](bool play)
+    {
+        const auto begin = Clock::now();
+        const float delta = std::chrono::duration<float>(begin - lastTick).count();
+        lastTick = begin;
+        FrameSample sample;
+        sample.deltaMs = delta * 1000.0;
+        if (play)
+        {
+            scene.Update(std::max(delta, 0.f));
+            sample.substeps = bullet->GetLastSubstepCount();
+        }
+        const auto updated = Clock::now();
+        renderer.MarkDirty();
+        renderer.RenderIfNeeded([&]
+        {
+            renderer.Clear(.18f, .18f, .18f);
+            scene.PrepareRenderFrame();
+            if (sceneView)
+            {
+                scene.UpdateEditorCameraFollow();
+                drawView(*sceneView, true);
+                sample.shadowDraws += scene.GetShadowDebugSnapshot().submittedCasterDrawCount;
+            }
+            if (gameView)
+            {
+                drawView(*gameView, false);
+                sample.shadowDraws += scene.GetShadowDebugSnapshot().submittedCasterDrawCount;
+            }
+        });
+        const auto end = Clock::now();
+        sample.updateMs = std::chrono::duration<double, std::milli>(updated - begin).count();
+        sample.renderMs = std::chrono::duration<double, std::milli>(end - updated).count();
+        sample.frameMs = std::chrono::duration<double, std::milli>(end - begin).count();
+        (play ? playing : idle).push_back(sample);
+    };
+    for (unsigned i = 0; i < idleFrames; ++i) tick(false);
+    const auto transitionStart = Clock::now();
+    const auto snapshot = scene.SaveToString();
+    scene.Start();
+    const double startMs = std::chrono::duration<double, std::milli>(
+        Clock::now() - transitionStart).count();
+    const char* cascadeOverride = std::getenv("MMD_EDITOR_PLAY_CASCADES");
+    shadows.directionalCascadeCount = cascadeOverride
+        ? static_cast<uint32_t>(std::clamp(std::atoi(cascadeOverride), 1, 4))
+        : shadows.directionalCascadeCount;
+    scene.SetRealtimeShadowSettings(shadows);
+    for (unsigned i = 0; i < playFrames; ++i) tick(true);
+    const auto stopStart = Clock::now();
+    if (!scene.LoadFromString(snapshot))
+        throw std::runtime_error("Play snapshot restore failed");
+    const double stopMs = std::chrono::duration<double, std::milli>(
+        Clock::now() - stopStart).count();
+
+    const auto report = [](const char* name, const std::vector<FrameSample>& samples)
+    {
+        const size_t skip = std::min<size_t>(5, samples.size());
+        auto metric = [&](auto pick)
+        {
+            std::vector<double> values;
+            for (size_t i = skip; i < samples.size(); ++i)
+                values.push_back(pick(samples[i]));
+            std::sort(values.begin(), values.end());
+            return std::pair{ values[values.size() / 2],
+                values[std::min(values.size() - 1, values.size() * 95 / 100)] };
+        };
+        const auto [frame50, frame95] = metric([](const auto& s) { return s.frameMs; });
+        const auto [update50, update95] = metric([](const auto& s) { return s.updateMs; });
+        const auto [render50, render95] = metric([](const auto& s) { return s.renderMs; });
+        const auto [delta50, delta95] = metric([](const auto& s) { return s.deltaMs; });
+        const auto [steps50, steps95] = metric([](const auto& s) { return double(s.substeps); });
+        std::cout << name << ": frame p50/p95 " << frame50 << '/' << frame95
+            << " ms, update " << update50 << '/' << update95
+            << " ms, render+Present " << render50 << '/' << render95
+            << " ms, input dt " << delta50 << '/' << delta95
+            << " ms, physics steps " << steps50 << '/' << steps95
+            << ", shadow draws " << samples.back().shadowDraws << '\n';
+    };
+    std::cout << "Editor Play profile: DX11 " << mode << " view "
+        << viewWidth << 'x' << viewHeight << ", window "
+        << windowWidth << 'x' << windowHeight << ", Play cascades "
+        << shadows.directionalCascadeCount << '\n';
+    report("Idle continuous redraw", idle);
+    std::cout << "Play snapshot + Start " << startMs << " ms\n";
+    report("Playing", playing);
+    if (playing.size() >= 240)
+    {
+        report("Playing first 120", { playing.begin(), playing.begin() + 120 });
+        report("Playing last 120", { playing.end() - 120, playing.end() });
+    }
+    std::cout << "Play restore " << stopMs << " ms\n";
+    return 0;
+}
+
 int main()
 {
     try
     {
+        if (const char* editorProfile = std::getenv("MMD_EDITOR_PLAY_PROFILE"))
+            return ProfileEditorPlay(editorProfile);
         constexpr unsigned width = 960, height = 540;
         Engine::Core::Window window(GetModuleHandleW(nullptr), L"MMD hidden playback test", width, height);
         Engine::Model::ProjectSettings settings;
@@ -330,9 +506,19 @@ int main()
             &scene.GetPhysics().GetAdapter());
         if (!bullet) throw std::runtime_error("MMD scene lacks Bullet physics");
         uint64_t initialJointBuilds = 0;
+        double updateMilliseconds = 0.0;
+        double maxUpdateMilliseconds = 0.0;
         for (unsigned frame = 0; frame < 660; ++frame)
         {
+            const auto updateBegin = std::chrono::steady_clock::now();
             scene.Update(1.f / 60.f);
+            const double updateMs = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - updateBegin).count();
+            if (frame >= 60)
+            {
+                updateMilliseconds += updateMs;
+                maxUpdateMilliseconds = std::max(maxUpdateMilliseconds, updateMs);
+            }
             if (frame == 0)
                 initialJointBuilds = bullet->GetImportedJointRebuildCount();
             if (frame != 0 && frame != 30 && frame != 89 && frame != 320 && frame != 644) continue;
@@ -347,6 +533,10 @@ int main()
             throw std::runtime_error("MMD joints were not built");
         if (bullet->GetImportedJointRebuildCount() != initialJointBuilds)
             throw std::runtime_error("MMD joints rebuilt during steady playback");
+        if (std::getenv("MMD_PROFILE"))
+            std::cout << "Scene update (animation + physics), frames 60-659: mean "
+                << updateMilliseconds / 600.0 << " ms, max "
+                << maxUpdateMilliseconds << " ms\n";
         for (unsigned cycle = 0; cycle < 3; ++cycle)
         {
             if (!scene.LoadFromString(snapshot)) throw std::runtime_error("Play snapshot restore failed");

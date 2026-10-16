@@ -967,6 +967,23 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
         NotifyChanged();
     ui.Tooltip("0 means unlimited. Applies to the standalone game.");
 
+    if (ui.InputUInt("Physics Target (ms/frame)",
+        &m_settings.physicsTargetMilliseconds))
+    {
+        m_settings.physicsTargetMilliseconds = std::clamp(
+            m_settings.physicsTargetMilliseconds, 1u, 100u);
+        NotifyChanged();
+    }
+    ui.Tooltip("CPU time target for fixed physics steps each frame. At least one due step runs; excess work is carried to later frames.");
+    if (ui.InputUInt("Physics Maximum Substeps",
+        &m_settings.physicsMaximumSubsteps))
+    {
+        m_settings.physicsMaximumSubsteps = std::clamp(
+            m_settings.physicsMaximumSubsteps, 1u, 12u);
+        NotifyChanged();
+    }
+    ui.Tooltip("Hard limit on 60 Hz physics steps in one frame. Sustained overload can slow simulated time.");
+
     if (ui.InputUInt("##editorViewportWidth", &m_settings.viewportWidth))
         NotifyChanged();
     ui.SameLine(); ui.DisabledLabel("Editor Viewport Width");
@@ -1359,6 +1376,12 @@ bool PreferencesView::SaveSettings()
                 auto gameMaxFps = prop.child("GameMaxFPS");
                 if (!gameMaxFps) gameMaxFps = prop.append_child("GameMaxFPS");
                 gameMaxFps.text().set(m_settings.gameMaxFps);
+                auto physicsTarget = prop.child("PhysicsTargetMilliseconds");
+                if (!physicsTarget) physicsTarget = prop.append_child("PhysicsTargetMilliseconds");
+                physicsTarget.text().set(m_settings.physicsTargetMilliseconds);
+                auto physicsMaximum = prop.child("PhysicsMaximumSubsteps");
+                if (!physicsMaximum) physicsMaximum = prop.append_child("PhysicsMaximumSubsteps");
+                physicsMaximum.text().set(m_settings.physicsMaximumSubsteps);
                 fpsSettingsSaved = true;
             }
 
@@ -1501,6 +1524,10 @@ bool PreferencesView::SaveSettings()
             if (!prop) prop = projectNode.append_child("PropertyGroup");
             prop.append_child("EditorMaxFPS").text().set(m_settings.editorMaxFps);
             prop.append_child("GameMaxFPS").text().set(m_settings.gameMaxFps);
+            prop.append_child("PhysicsTargetMilliseconds").text().set(
+                m_settings.physicsTargetMilliseconds);
+            prop.append_child("PhysicsMaximumSubsteps").text().set(
+                m_settings.physicsMaximumSubsteps);
         }
 
         // Save to file

@@ -18,7 +18,7 @@
     </ambientColor>
   </settings>
   <objects>
-    <item prefab="Engine/Core/Assets/mmd/Mococo Abyssgard/Mococo Abyssgard.prefab">
+    <item prefab="Engine/Core/Assets/mmd/Mococo Abyssgard/Mococo Abyssgard.low.prefab">
       <transform>
         <Transform.position>
           <item>0</item>
@@ -36,6 +36,96 @@
           <item>0.08</item>
         </Transform.scale>
       </transform>
+      <prefabOverrides>
+        <item value="0.8">
+          <path>
+            <item key="components" />
+            <item index="3" />
+            <item key="speed" />
+          </path>
+        </item>
+        <item value="0.8">
+          <path>
+            <item key="components" />
+            <item index="3" />
+            <item key="layers" />
+            <item index="0" />
+            <item key="speed" />
+          </path>
+        </item>
+        <item value="false">
+          <path>
+            <item key="children" />
+            <item index="2" />
+            <item key="children" />
+            <item index="1" />
+            <item key="enabled" />
+          </path>
+        </item>
+        <item value="false">
+          <path>
+            <item key="children" />
+            <item index="2" />
+            <item key="children" />
+            <item index="32" />
+            <item key="enabled" />
+          </path>
+        </item>
+        <item value="false">
+          <path>
+            <item key="children" />
+            <item index="2" />
+            <item key="children" />
+            <item index="33" />
+            <item key="enabled" />
+          </path>
+        </item>
+        <item value="false">
+          <path>
+            <item key="children" />
+            <item index="2" />
+            <item key="children" />
+            <item index="34" />
+            <item key="enabled" />
+          </path>
+        </item>
+        <item value="false">
+          <path>
+            <item key="children" />
+            <item index="2" />
+            <item key="children" />
+            <item index="35" />
+            <item key="enabled" />
+          </path>
+        </item>
+        <item value="false">
+          <path>
+            <item key="children" />
+            <item index="2" />
+            <item key="children" />
+            <item index="36" />
+            <item key="enabled" />
+          </path>
+        </item>
+        <item value="false">
+          <path>
+            <item key="children" />
+            <item index="2" />
+            <item key="children" />
+            <item index="37" />
+            <item key="enabled" />
+          </path>
+        </item>
+        <item value="false">
+          <path>
+            <item key="children" />
+            <item index="2" />
+            <item key="children" />
+            <item index="38" />
+            <item key="enabled" />
+          </path>
+        </item>
+      </prefabOverrides>
     </item>
     <item name="Dance Floor" enabled="true">
       <transform>

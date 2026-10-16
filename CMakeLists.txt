@@ -339,12 +339,41 @@ set(BUILD_EXTRAS OFF CACHE BOOL "" FORCE)
 set(INSTALL_LIBS OFF CACHE BOOL "" FORCE)
 set(USE_MSVC_RUNTIME_LIBRARY_DLL ON CACHE BOOL "" FORCE)
 set(USE_MSVC_DISABLE_RTTI OFF CACHE BOOL "" FORCE)
+option(ENGINE_OPTIMIZE_BULLET_IN_DEBUG
+    "Optimize Bullet libraries in MSVC Debug builds while retaining debug symbols" ON)
 FetchContent_Declare(
     bullet
     GIT_REPOSITORY https://github.com/bulletphysics/bullet3.git
     GIT_TAG        3.25
 )
+# MSVC rejects /O2 when /RTC1 is present, even if /RTC- follows it. Bullet's
+# child directory inherits these variables when FetchContent adds its targets;
+# restore them immediately afterward for the engine and editor targets.
+if(MSVC AND ENGINE_OPTIMIZE_BULLET_IN_DEBUG)
+    set(_engine_debug_cxx_flags "${CMAKE_CXX_FLAGS_DEBUG}")
+    set(_engine_debug_c_flags "${CMAKE_C_FLAGS_DEBUG}")
+    string(REPLACE "/RTC1" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+    string(REPLACE "/RTC1" "" CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
+endif()
 FetchContent_MakeAvailable(bullet)
+if(MSVC AND ENGINE_OPTIMIZE_BULLET_IN_DEBUG)
+    set(CMAKE_CXX_FLAGS_DEBUG "${_engine_debug_cxx_flags}")
+    set(CMAKE_C_FLAGS_DEBUG "${_engine_debug_c_flags}")
+    unset(_engine_debug_cxx_flags)
+    unset(_engine_debug_c_flags)
+endif()
+
+# Bullet's unoptimized Debug solver can take longer than a 60 Hz step for a
+# single animated character. Keep symbols and the Debug CRT, but optimize the
+# third-party simulation libraries so Editor Play does not enter a catch-up
+# loop solely because Bullet was built with /Od.
+if(MSVC AND ENGINE_OPTIMIZE_BULLET_IN_DEBUG)
+    foreach(bullet_target IN ITEMS BulletDynamics BulletCollision BulletSoftBody LinearMath)
+        target_compile_options(${bullet_target} PRIVATE
+            $<$<CONFIG:Debug>:/O2>
+            $<$<CONFIG:Debug>:/Ob2>)
+    endforeach()
+endif()
 
 # ---------------------------------------------------------------------------
 

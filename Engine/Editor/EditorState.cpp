@@ -14,6 +14,7 @@
 #include "Core/Window.h"
 #include "Core/Renderers/RendererFactory.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Physics/Physics.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Camera/Camera.h"
@@ -289,6 +290,9 @@ bool EditorState::Init()
     try
     {
         m_scene->Init(graphicsProvider);
+        m_scene->GetPhysics().ConfigureStepBudget(
+            m_projectSettings.physicsTargetMilliseconds,
+            m_projectSettings.physicsMaximumSubsteps);
         m_scene->SetRealtimeShadowSettings(m_projectSettings.realtimeShadows);
         m_scene->SetDistanceLightingSettings(m_projectSettings.distanceLighting);
         OutputDebugStringA("[EditorState] Scene initialized\n");
@@ -3784,6 +3788,9 @@ void EditorState::InitializePanels()
         m_projectSettings = m_preferences->GetSettings();
         if (m_scene)
         {
+            m_scene->GetPhysics().ConfigureStepBudget(
+                m_projectSettings.physicsTargetMilliseconds,
+                m_projectSettings.physicsMaximumSubsteps);
             m_scene->SetRealtimeShadowSettings(
                 m_projectSettings.realtimeShadows);
             m_scene->SetDistanceLightingSettings(
@@ -4461,6 +4468,7 @@ void EditorState::StartObjectImport(const std::string& path, bool intoScene,
     m_pendingPmxImportRigConstraints = true;
     m_pendingPmxImportFollowBoneColliders = true;
     m_pendingPmxImportDynamicPhysics = false;
+    m_pendingPmxPhysicsQuality = 1;
     m_pendingPmxWeightFittedColliders = false;
     ClearImportReference();
     if (m_pendingImportScene)
@@ -4551,6 +4559,7 @@ void EditorState::CancelPendingImportAsset()
     m_pendingPmxImportRigConstraints = true;
     m_pendingPmxImportFollowBoneColliders = true;
     m_pendingPmxImportDynamicPhysics = false;
+    m_pendingPmxPhysicsQuality = 1;
     m_pendingPmxWeightFittedColliders = false;
     m_focusImportHierarchy = false;
     ClearImportReference();
@@ -4610,7 +4619,8 @@ void EditorState::ConfirmPendingImportAsset()
         m_pendingPmxImportMorphs, m_pendingPmxImportRigConstraints,
         m_pendingPmxImportFollowBoneColliders,
         m_pendingPmxImportDynamicPhysics,
-        m_pendingPmxWeightFittedColliders);
+        m_pendingPmxWeightFittedColliders,
+        m_pendingPmxPhysicsQuality);
     if (primary.empty())
     {
         m_pendingImportError = "Import failed. See the Console for details, then retry.";
@@ -4706,7 +4716,8 @@ std::string EditorState::ImportAssetFile(const std::string& path,
     const std::string& destinationDirectory, bool asPrefab,
     float pmxUnitScaleToMeters, bool pmxImportMorphs,
     bool pmxImportRigConstraints, bool pmxImportFollowBoneColliders,
-    bool pmxImportDynamicPhysics, bool pmxWeightFittedColliders)
+    bool pmxImportDynamicPhysics, bool pmxWeightFittedColliders,
+    int pmxPhysicsQuality)
 {
     namespace fs = std::filesystem;
     const fs::path source(path);
@@ -4730,7 +4741,10 @@ std::string EditorState::ImportAssetFile(const std::string& path,
                 : ModelImporter::Import(source.string(), assetsDirectory.string(),
                     pmxUnitScaleToMeters, { pmxImportMorphs,
                         pmxImportRigConstraints, pmxImportFollowBoneColliders,
-                        pmxImportDynamicPhysics, pmxWeightFittedColliders });
+                        pmxImportDynamicPhysics, pmxWeightFittedColliders,
+                        pmxPhysicsQuality <= 0 ? PmxPhysicsQuality::High :
+                        pmxPhysicsQuality == 1 ? PmxPhysicsQuality::Medium :
+                        PmxPhysicsQuality::Low });
             if (!imported.success)
                 throw std::runtime_error(imported.message);
             bool boundCharacter = false;

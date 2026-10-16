@@ -10,7 +10,7 @@ struct MeshViewportTemplate
         Engine::Scene::Scene* scene, SceneViewportToolbar& toolbar)
     {
         // Transform handles act on mesh elements; object transforms stay off.
-        return toolbar.Draw(ui, input, scene, true, false);
+        return toolbar.Draw(ui, input, scene, false);
     }
 };
 }

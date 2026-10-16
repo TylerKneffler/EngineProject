@@ -11,6 +11,7 @@ namespace Engine::Graphics
 {
 enum class GpuTimingStage : uint32_t
 {
+    Shadow,
     Terrain,
     Portal,
     Opaque,
@@ -24,6 +25,8 @@ struct FrameTimingTelemetry
         gpuMilliseconds{};
     double cpuSubmissionMilliseconds = 0.0;
     double cpuPresentationMilliseconds = 0.0;
+    double cpuGpuQueryResolveMilliseconds = 0.0;
+    double cpuGpuQueryBeginMilliseconds = 0.0;
     uint64_t gpuSampleId = 0;
     uint32_t gpuRegionCount = 0;
     bool gpuTimingsValid = false;

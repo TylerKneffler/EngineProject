@@ -82,6 +82,15 @@ void EditorUI::Render(PlayState playState)
                         &dynamicPhysics))
                     m_state->SetPendingPmxImportDynamicPhysics(dynamicPhysics);
                 ImGui::TextDisabled("Dynamic bodies and supported PMX joints drive bones.");
+                if (dynamicPhysics)
+                {
+                    int quality = m_state->GetPendingPmxPhysicsQuality();
+                    const char* qualities[] = { "High - full PMX physics",
+                        "Medium - spring hair and ears", "Low - spring secondary bones" };
+                    if (ImGui::Combo("Physics quality", &quality, qualities, 3))
+                        m_state->SetPendingPmxPhysicsQuality(quality);
+                    ImGui::TextWrapped("High keeps all PMX bodies and joints for export. Medium replaces hair and ear dynamics with springs. Low replaces eligible secondary dynamics with springs. Springs follow animation but do not collide.");
+                }
                 bool fitted = m_state->GetPendingPmxWeightFittedColliders();
                 if (ImGui::Checkbox("Fit rigid-body colliders to skin weights",
                         &fitted))

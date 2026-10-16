@@ -20,6 +20,8 @@ public:
     virtual void Reset() = 0;
     virtual void ConfigureFixedStep(double seconds, uint32_t maximumSubsteps,
         uint32_t solverIterations) = 0;
+    virtual void ConfigureStepBudget(uint32_t targetMilliseconds,
+        uint32_t maximumSubsteps) = 0;
     virtual double GetFixedStep() const = 0;
     virtual uint32_t GetMaximumSubsteps() const = 0;
     virtual uint32_t GetSolverIterations() const = 0;

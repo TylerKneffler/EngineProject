@@ -59,6 +59,8 @@ public:
     // frame sampling.
     void ConfigureFixedStep(double seconds, uint32_t maximumSubsteps,
         uint32_t solverIterations);
+    void ConfigureStepBudget(uint32_t targetMilliseconds,
+        uint32_t maximumSubsteps);
     double GetFixedStep() const;
     uint32_t GetMaximumSubsteps() const;
     uint32_t GetSolverIterations() const;

@@ -341,6 +341,8 @@ struct ImportedModel
     std::vector<ImportedSkin> skins;
     std::vector<ImportedRigidBody> rigidBodies;
     std::vector<ImportedPhysicsJoint> physicsJoints;
+    // PMX secondary-motion bones driven by inexpensive pose-following springs.
+    std::vector<unsigned> secondaryMotionNodes;
     std::vector<ImportedSoftBody> softBodies;
     std::vector<ImportedAppendRule> appendRules;
     std::vector<ImportedIkChain> ikChains;

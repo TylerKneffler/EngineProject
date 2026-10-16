@@ -2,6 +2,7 @@
 #include "DX11EditorRenderer.h"
 #include "D3D11View.h"
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 
 namespace Engine::Renderers
@@ -120,24 +121,47 @@ void DX11EditorRenderer::Clear(float r, float g, float b, float a)
 
 void DX11EditorRenderer::RenderIfNeeded(std::function<void()> drawFn)
 {
+    m_lastUiRenderMilliseconds = 0.0;
+    m_lastPresentMilliseconds = 0.0;
+    m_lastPrepareFrameMilliseconds = 0.0;
+    m_lastBeginUiMilliseconds = 0.0;
+    m_lastRenderSetupMilliseconds = 0.0;
     if (!m_dirty || !m_rtv) return;
     m_dirty = false;
-    if (m_graphicsProvider)
+    const auto setupBegin = std::chrono::steady_clock::now();
+    if (m_gpuTimingEnabled && m_graphicsProvider)
         m_graphicsProvider->GetContextFactory()->PrepareFrame(0);
+    const auto afterPrepareFrame = std::chrono::steady_clock::now();
     ID3D11RenderTargetView* target = m_rtv.Get();
     m_context->OMSetRenderTargets(1, &target, nullptr);
     D3D11_VIEWPORT viewport{ 0.0f, 0.0f, static_cast<float>(m_width), static_cast<float>(m_height), 0.0f, 1.0f };
     m_context->RSSetViewports(1, &viewport);
+    const auto beforeBeginUi = std::chrono::steady_clock::now();
     if (m_uiHooks.beginFrame) m_uiHooks.beginFrame();
+    const auto afterBeginUi = std::chrono::steady_clock::now();
+    m_lastPrepareFrameMilliseconds = std::chrono::duration<double, std::milli>(
+        afterPrepareFrame - setupBegin).count();
+    m_lastRenderSetupMilliseconds = std::chrono::duration<double, std::milli>(
+        beforeBeginUi - afterPrepareFrame).count();
+    m_lastBeginUiMilliseconds = std::chrono::duration<double, std::milli>(
+        afterBeginUi - beforeBeginUi).count();
 
     if (drawFn) drawFn(); else Clear(0.18f, 0.18f, 0.18f);
 
     target = m_rtv.Get();
     m_context->OMSetRenderTargets(1, &target, nullptr);
+    const auto uiBegin = std::chrono::steady_clock::now();
     if (m_uiHooks.render) m_uiHooks.render(m_context.Get());
     if (m_uiHooks.endFrame) m_uiHooks.endFrame();
+    if (m_gpuTimingEnabled && m_graphicsProvider)
+        m_graphicsProvider->GetContextFactory()->FinalizeFrame();
+    const auto presentBegin = std::chrono::steady_clock::now();
+    m_lastUiRenderMilliseconds = std::chrono::duration<double, std::milli>(
+        presentBegin - uiBegin).count();
     ThrowIfFailed(m_swapChain->Present(0,
         m_allowTearing ? DXGI_PRESENT_ALLOW_TEARING : 0));
+    m_lastPresentMilliseconds = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - presentBegin).count();
 }
 
 std::pair<std::pair<void*, void*>, uint32_t> DX11EditorRenderer::AllocateSrvSlot()

@@ -5,6 +5,8 @@
 #include "Core/Timing/FramePacer.h"
 #include "Core/Renderers/IEditorRenderer.h"
 #include "Core/Renderers/RendererFactory.h"
+#include "Core/Renderers/DX11/DX11EditorRenderer.h"
+#include "Core/Physics/Adapters/BulletPhysicsAdapter.h"
 #include "Core/View/View.h"
 #include "Engine/Editor/EditorState.h"
 #include "Engine/Editor/GameBuildManager.h"
@@ -23,6 +25,8 @@
 #include "Core/Serialization/SceneSerializer.h"
 #endif
 #include <algorithm>
+#include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <unordered_set>
@@ -130,7 +134,9 @@ int WINAPI wWinMain(
     WriteStartupLog("Editor startup", true);
 
     // Headless importer entry point used by automation and project tooling.
-    // Editor.exe --import-model <source.gltf|source.glb|source.fbx|source.pmx> <Assets directory> [--pmx-dynamic-physics]
+    // Editor.exe --import-model <source> <Assets directory>
+    //     [--pmx-physics-high|--pmx-physics-medium|--pmx-physics-low]
+    // --pmx-dynamic-physics remains an alias for the full High profile.
     // --import-gltf remains accepted for existing automation.
     // Editor.exe --bind-vmd <imported PMX prefab> <motion.vmd>
     {
@@ -156,7 +162,25 @@ int WINAPI wWinMain(
             Engine::Editor::PmxImportOptions pmxOptions;
             for (int index = 4; index < argumentCount; ++index)
                 if (std::wstring(arguments[index]) == L"--pmx-dynamic-physics")
+                {
                     pmxOptions.dynamicPhysics = true;
+                    pmxOptions.physicsQuality = Engine::Editor::PmxPhysicsQuality::High;
+                }
+                else if (std::wstring(arguments[index]) == L"--pmx-physics-high")
+                {
+                    pmxOptions.dynamicPhysics = true;
+                    pmxOptions.physicsQuality = Engine::Editor::PmxPhysicsQuality::High;
+                }
+                else if (std::wstring(arguments[index]) == L"--pmx-physics-medium")
+                {
+                    pmxOptions.dynamicPhysics = true;
+                    pmxOptions.physicsQuality = Engine::Editor::PmxPhysicsQuality::Medium;
+                }
+                else if (std::wstring(arguments[index]) == L"--pmx-physics-low")
+                {
+                    pmxOptions.dynamicPhysics = true;
+                    pmxOptions.physicsQuality = Engine::Editor::PmxPhysicsQuality::Low;
+                }
                 else if (std::wstring(arguments[index]) ==
                     L"--pmx-weight-fitted-colliders")
                     pmxOptions.weightFittedColliders = true;
@@ -349,11 +373,24 @@ int WINAPI wWinMain(
     editorState->InitializeUiState();
     splash.SetProgress(0.75f, L"Loading startup scene...");
 
-    // Load default scene if specified
-    if (!projectSettings.defaultScene.empty())
+    // The opt-in playback audit loads the same bundled scene as the MMD
+    // harness, but runs it through the complete editor and UI frame loop.
+    const bool autoProfileMmdPlay =
+        std::getenv("ENGINE_EDITOR_AUTO_PROFILE_MMD") != nullptr;
+    const char* requestedAutoProfileFrames =
+        std::getenv("ENGINE_EDITOR_AUTO_PROFILE_FRAMES");
+    const uint32_t autoProfilePlayFrames = requestedAutoProfileFrames
+        ? static_cast<uint32_t>(std::clamp(
+            std::atoi(requestedAutoProfileFrames), 30, 1200))
+        : 180u;
+    const std::string startupScene = autoProfileMmdPlay
+        ? (std::filesystem::path(ENGINE_ASSETS_PATH) / "Scenes" /
+            "Animation" / "mmd.scene").string()
+        : projectSettings.defaultScene;
+    if (!startupScene.empty())
     {
-        OutputDebugStringA(("[Main] Loading default scene: " + projectSettings.defaultScene + "\n").c_str());
-        editorState->LoadStartupScene(projectSettings.defaultScene);
+        OutputDebugStringA(("[Main] Loading default scene: " + startupScene + "\n").c_str());
+        editorState->LoadStartupScene(startupScene);
     }
     splash.SetProgress(0.90f, L"Finishing startup...");
 
@@ -454,9 +491,35 @@ int WINAPI wWinMain(
 
     OutputDebugStringA("[Main] Setting OnUpdate callback...\n");
     std::string displayedWindowTitle;
+    std::ofstream frameProfile;
+    // ENGINE_EDITOR_AUTO_PROFILE_MMD also enables this trace by default.
+    const char* requestedProfile = std::getenv("ENGINE_EDITOR_FRAME_PROFILE");
+    if (!requestedProfile && autoProfileMmdPlay)
+        requestedProfile = "1";
+    if (requestedProfile && std::string(requestedProfile) != "0")
+    {
+        const std::filesystem::path path =
+            std::string(requestedProfile) == "1"
+            ? std::filesystem::path(".local/performance-logs/editor-play-phases.jsonl")
+            : std::filesystem::path(requestedProfile);
+        if (!path.parent_path().empty())
+            std::filesystem::create_directories(path.parent_path());
+        frameProfile.open(path, std::ios::trunc);
+    }
+    scene->SetUpdateProfilingEnabled(frameProfile.is_open());
+    if (auto* bullet = dynamic_cast<Engine::Physics::BulletPhysicsAdapter*>(
+        &scene->GetPhysics().GetAdapter()))
+        bullet->SetProfilingEnabled(frameProfile.is_open());
+    if (auto* dx11 = dynamic_cast<Engine::Renderers::DX11EditorRenderer*>(renderer))
+        dx11->SetGpuTimingEnabled(frameProfile.is_open());
+    uint64_t frameProfileIndex = 0;
+    uint32_t autoProfileTick = 0;
     window->OnUpdate = [&]()
     {
+        using Clock = std::chrono::steady_clock;
+        const auto frameBegin = Clock::now();
         editorFramePacer.Wait(editorState->GetEditorMaxFps());
+        const auto afterPacing = Clock::now();
         // Update delta time
         LARGE_INTEGER now;
         QueryPerformanceCounter(&now);
@@ -471,8 +534,11 @@ int WINAPI wWinMain(
         const bool wasBuilding = gameBuildManager->IsBuilding();
         const bool wasHotReloadBusy = hotReload->IsBusy();
         Engine::Editor::PostBuildAction postBuildAction;
+        if (autoProfileMmdPlay && autoProfileTick == 30u)
+            gameBuildManager->PlayInEditor();
         gameBuildManager->Update(playState, postBuildAction);
         hotReload->Update(window->IsFocused());
+        const auto afterBackground = Clock::now();
         if (previousPlayState != playState ||
             wasBuilding != gameBuildManager->IsBuilding() ||
             wasHotReloadBusy != hotReload->IsBusy())
@@ -486,6 +552,20 @@ int WINAPI wWinMain(
             scene->Update(std::max(dt, 0.f));
             Engine::Core::SceneManager::ProcessPendingSceneLoad();
         }
+        const auto afterSceneUpdate = Clock::now();
+
+        double prepareMilliseconds = 0.0;
+        double renderEntryMilliseconds = 0.0;
+        double clearMilliseconds = 0.0;
+        double scenePrepareMilliseconds = 0.0;
+        double viewMilliseconds = 0.0;
+        double shadowSubmitMilliseconds = 0.0;
+        double mainSubmitMilliseconds = 0.0;
+        double editorUiMilliseconds = 0.0;
+        uint32_t renderedViews = 0;
+        uint32_t renderedSceneViews = 0;
+        uint32_t renderedGameViews = 0;
+        uint32_t submittedShadowDraws = 0;
 
         const auto needsContinuousRendering = [&]()
         {
@@ -510,7 +590,13 @@ int WINAPI wWinMain(
         // Render frame
         renderer->RenderIfNeeded([&]()
         {
+            const auto drawBegin = Clock::now();
+            renderEntryMilliseconds = std::chrono::duration<double, std::milli>(
+                drawBegin - afterSceneUpdate).count();
             renderer->Clear(projectSettings.clearColor.r, projectSettings.clearColor.g, projectSettings.clearColor.b);
+            const auto afterClear = Clock::now();
+            clearMilliseconds = std::chrono::duration<double, std::milli>(
+                afterClear - drawBegin).count();
 
             // Prepare render data for every scene that will render this frame.
             // Prefab edit opens its own scene-backed viewport, so relying on
@@ -537,6 +623,11 @@ int WINAPI wWinMain(
                             panelScene->PrepareRenderFrame();
                 }
             }
+            const auto afterPrepare = Clock::now();
+            prepareMilliseconds = std::chrono::duration<double, std::milli>(
+                afterPrepare - afterSceneUpdate).count();
+            scenePrepareMilliseconds = std::chrono::duration<double, std::milli>(
+                afterPrepare - afterClear).count();
 
             // Render 3D panels
             for (auto& panel : editorState->GetPanels())
@@ -549,13 +640,46 @@ int WINAPI wWinMain(
                 void* cmdList = renderer->GetCurrentCommandBuffer();
                 void* rtvHandle = renderer->GetCurrentRenderTargetHandle();
                 
+                const auto viewBegin = Clock::now();
                 view->Render(cmdList, rtvHandle,
-                    [view](void* cmd) { view->Render3D(cmd); },
-                    [view](void* cmd) { view->RenderShadow3D(cmd); });
+                    [&, view](void* cmd)
+                    {
+                        const auto begin = Clock::now();
+                        view->Render3D(cmd);
+                        mainSubmitMilliseconds += std::chrono::duration<double,
+                            std::milli>(Clock::now() - begin).count();
+                    },
+                    [&, view](void* cmd)
+                    {
+                        const auto begin = Clock::now();
+                        view->RenderShadow3D(cmd);
+                        shadowSubmitMilliseconds += std::chrono::duration<double,
+                            std::milli>(Clock::now() - begin).count();
+                    });
+                viewMilliseconds += std::chrono::duration<double,
+                    std::milli>(Clock::now() - viewBegin).count();
+                ++renderedViews;
+                if (auto* sceneView = dynamic_cast<Engine::Editor::SceneView*>(view))
+                {
+                    ++renderedSceneViews;
+                    if (auto* panelScene = sceneView->GetScene())
+                        submittedShadowDraws += panelScene->GetShadowDebugSnapshot()
+                            .submittedCasterDrawCount;
+                }
+                else if (auto* gameView = dynamic_cast<Engine::Editor::GameView*>(view))
+                {
+                    ++renderedGameViews;
+                    if (auto* panelScene = gameView->GetScene())
+                        submittedShadowDraws += panelScene->GetShadowDebugSnapshot()
+                            .submittedCasterDrawCount;
+                }
             }
 
             // Render UI
+            const auto beforeUi = Clock::now();
             uiBackend->DrawEditor(*editorState, playState, gameBuildManager.get());
+            editorUiMilliseconds = std::chrono::duration<double, std::milli>(
+                Clock::now() - beforeUi).count();
             for (auto& panel : editorState->GetPanels())
                 if (auto* view = dynamic_cast<Engine::Editor::View*>(panel.get()))
                 {
@@ -566,10 +690,125 @@ int WINAPI wWinMain(
                     break;
                 }
         });
+        const auto afterRender = Clock::now();
 
         // Scene requests made while drawing the UI now have a presented frame
         // with the loading overlay before deserialization blocks this thread.
         editorState->ProcessPendingSceneLoad();
+        const auto afterPendingLoad = Clock::now();
+        if (frameProfile)
+        {
+            const auto ms = [](auto first, auto last)
+            {
+                return std::chrono::duration<double, std::milli>(
+                    last - first).count();
+            };
+            uint32_t physicsSubsteps = 0;
+            double physicsDroppedMilliseconds = 0.0;
+            double physicsPendingMilliseconds = 0.0;
+            Engine::Physics::BulletPhysicsAdapter::StepTimings bulletTimings{};
+            const auto& updateTimings = scene->GetLastUpdateTimings();
+            const auto& prepareTimings = scene->GetLastPrepareTimings();
+            double uiRenderMilliseconds = 0.0;
+            double presentMilliseconds = 0.0;
+            double prepareFrameMilliseconds = 0.0;
+            double beginUiMilliseconds = 0.0;
+            double renderSetupMilliseconds = 0.0;
+            const auto gpuTiming = renderer->GetGraphicsProvider()
+                ->GetContextFactory()->GetFrameTimingTelemetry();
+            if (auto* dx11 = dynamic_cast<Engine::Renderers::DX11EditorRenderer*>(
+                renderer))
+            {
+                uiRenderMilliseconds = dx11->GetLastUiRenderMilliseconds();
+                presentMilliseconds = dx11->GetLastPresentMilliseconds();
+                prepareFrameMilliseconds = dx11->GetLastPrepareFrameMilliseconds();
+                beginUiMilliseconds = dx11->GetLastBeginUiMilliseconds();
+                renderSetupMilliseconds = dx11->GetLastRenderSetupMilliseconds();
+            }
+            if (playState == Engine::Editor::PlayState::Playing)
+                if (auto* bullet = dynamic_cast<Engine::Physics::BulletPhysicsAdapter*>(
+                    &scene->GetPhysics().GetAdapter()))
+                {
+                    physicsSubsteps = bullet->GetLastSubstepCount();
+                    physicsDroppedMilliseconds = bullet->GetLastDroppedSeconds() * 1000.0;
+                    physicsPendingMilliseconds = bullet->GetPendingSeconds() * 1000.0;
+                    bulletTimings = bullet->GetLastStepTimings();
+                }
+            frameProfile << "{\"frame\":" << frameProfileIndex
+                << ",\"playing\":"
+                << (playState == Engine::Editor::PlayState::Playing ? "true" : "false")
+                << ",\"dt_ms\":" << dt * 1000.f
+                << ",\"frame_ms\":" << ms(frameBegin, afterPendingLoad)
+                << ",\"pacing_ms\":" << ms(frameBegin, afterPacing)
+                << ",\"background_ms\":" << ms(afterPacing, afterBackground)
+                << ",\"update_ms\":" << ms(afterBackground, afterSceneUpdate)
+                << ",\"objects_ms\":" << updateTimings.objectsMs
+                << ",\"pose_ms\":" << updateTimings.poseMs
+                << ",\"physics_ms\":" << updateTimings.physicsMs
+                << ",\"physics_setup_ms\":" << bulletTimings.setupMs
+                << ",\"physics_simulation_ms\":" << bulletTimings.simulationMs
+                << ",\"physics_post_ms\":" << bulletTimings.postMs
+                << ",\"post_physics_ms\":" << updateTimings.postPhysicsMs
+                << ",\"render_ms\":" << ms(afterSceneUpdate, afterRender)
+                << ",\"prepare_ms\":" << prepareMilliseconds
+                << ",\"render_entry_ms\":" << renderEntryMilliseconds
+                << ",\"gpu_query_poll_ms\":" << prepareFrameMilliseconds
+                << ",\"render_setup_ms\":" << renderSetupMilliseconds
+                << ",\"begin_ui_ms\":" << beginUiMilliseconds
+                << ",\"clear_ms\":" << clearMilliseconds
+                << ",\"scene_prepare_ms\":" << scenePrepareMilliseconds
+                << ",\"prepare_lookup_ms\":" << prepareTimings.lookupMs
+                << ",\"prepare_items_ms\":" << prepareTimings.itemsMs
+                << ",\"prepare_bone_upload_ms\":" << prepareTimings.boneUploadMs
+                << ",\"prepare_capacity_ms\":" << prepareTimings.capacityMs
+                << ",\"view_ms\":" << viewMilliseconds
+                << ",\"shadow_submit_ms\":" << shadowSubmitMilliseconds
+                << ",\"main_submit_ms\":" << mainSubmitMilliseconds
+                << ",\"editor_ui_ms\":" << editorUiMilliseconds
+                << ",\"ui_render_ms\":" << uiRenderMilliseconds
+                << ",\"present_ms\":" << presentMilliseconds
+                << ",\"gpu_valid\":"
+                << (gpuTiming.gpuTimingsValid ? "true" : "false")
+                << ",\"gpu_sample_id\":" << gpuTiming.gpuSampleId
+                << ",\"gpu_query_resolve_ms\":"
+                << gpuTiming.cpuGpuQueryResolveMilliseconds
+                << ",\"gpu_query_begin_ms\":"
+                << gpuTiming.cpuGpuQueryBeginMilliseconds
+                << ",\"gpu_shadow_ms\":" << gpuTiming.gpuMilliseconds[
+                    static_cast<size_t>(Engine::Graphics::GpuTimingStage::Shadow)]
+                << ",\"gpu_terrain_ms\":" << gpuTiming.gpuMilliseconds[
+                    static_cast<size_t>(Engine::Graphics::GpuTimingStage::Terrain)]
+                << ",\"gpu_portal_ms\":" << gpuTiming.gpuMilliseconds[
+                    static_cast<size_t>(Engine::Graphics::GpuTimingStage::Portal)]
+                << ",\"gpu_opaque_ms\":" << gpuTiming.gpuMilliseconds[
+                    static_cast<size_t>(Engine::Graphics::GpuTimingStage::Opaque)]
+                << ",\"gpu_transparent_ms\":" << gpuTiming.gpuMilliseconds[
+                    static_cast<size_t>(Engine::Graphics::GpuTimingStage::Transparent)]
+                << ",\"pending_load_ms\":" << ms(afterRender, afterPendingLoad)
+                << ",\"views\":" << renderedViews
+                << ",\"scene_views\":" << renderedSceneViews
+                << ",\"game_views\":" << renderedGameViews
+                << ",\"shadow_draws\":" << submittedShadowDraws
+                << ",\"physics_substeps\":" << physicsSubsteps;
+            frameProfile << ",\"physics_dropped_ms\":" << physicsDroppedMilliseconds
+                << ",\"physics_pending_ms\":" << physicsPendingMilliseconds;
+            const auto writeStepArray = [&](const char* key, const auto& values)
+            {
+                frameProfile << ",\"" << key << "\":[";
+                for (size_t index = 0; index < values.size(); ++index)
+                {
+                    if (index) frameProfile << ',';
+                    frameProfile << values[index];
+                }
+                frameProfile << ']';
+            };
+            writeStepArray("physics_step_ms", bulletTimings.substepMs);
+            writeStepArray("physics_bullet_world_ms", bulletTimings.bulletWorldMs);
+            writeStepArray("physics_contacts_ms", bulletTimings.contactsMs);
+            frameProfile << "}\n";
+            if (++frameProfileIndex % 30u == 0u)
+                frameProfile.flush();
+        }
 
         // Avoid spinning the editor loop while idle. Window input wakes this
         // wait immediately; the short timeout also services asynchronous
@@ -577,6 +816,11 @@ int WINAPI wWinMain(
         if (!renderer->IsDirty() && !needsContinuousRendering())
             MsgWaitForMultipleObjectsEx(0, nullptr, 50, QS_ALLINPUT,
                 MWMO_INPUTAVAILABLE);
+        if (autoProfileMmdPlay && ++autoProfileTick == 30u + autoProfilePlayFrames)
+        {
+            gameBuildManager->Stop();
+            PostMessageW(window->GetHWND(), WM_CLOSE, 0, 0);
+        }
     };
     OutputDebugStringA("[Main] OnUpdate callback set\n");
 

@@ -1,4 +1,5 @@
 #include "Core/Scene/Scene.h"
+#include <chrono>
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Materials/Material.h"
@@ -1263,6 +1264,9 @@ void Scene::BuildObjectPipeline()
 
 void Scene::PrepareRenderFrame()
 {
+    using PrepareClock = std::chrono::steady_clock;
+    const auto prepareBegin = m_updateProfilingEnabled
+        ? PrepareClock::now() : PrepareClock::time_point{};
     m_renderFramePrepared = false;
     m_frameRenderItems.clear();
     m_frameLightCount = 0;
@@ -1369,6 +1373,8 @@ void Scene::PrepareRenderFrame()
         }
     }
     uint32_t skinPaletteSlot = 0;
+    const auto afterLookup = m_updateProfilingEnabled
+        ? PrepareClock::now() : PrepareClock::time_point{};
     std::unordered_map<const Engine::Components::Skeleton*,
         std::vector<glm::mat4>> jointSkinMatrices;
     bool boneDataChanged = false;
@@ -1646,13 +1652,25 @@ void Scene::PrepareRenderFrame()
         }
     }
 
+    const auto afterItems = m_updateProfilingEnabled
+        ? PrepareClock::now() : PrepareClock::time_point{};
     if (boneDataChanged)
         m_boneDataBuffer->FlushMappedWrites();
+    const auto afterBoneUpload = m_updateProfilingEnabled
+        ? PrepareClock::now() : PrepareClock::time_point{};
     m_lastSkinnedObjectCount = skinPaletteSlot;
     if (m_frameRenderItems.size() > std::numeric_limits<uint32_t>::max())
         throw std::runtime_error("Prepared draw count exceeds renderer index range");
     EnsureObjectRenderCapacity(
         static_cast<uint32_t>(m_frameRenderItems.size()));
+    if (m_updateProfilingEnabled)
+    {
+        const auto ms = [](auto first, auto last)
+        { return std::chrono::duration<double, std::milli>(last - first).count(); };
+        m_lastPrepareTimings = { ms(prepareBegin, afterLookup),
+            ms(afterLookup, afterItems), ms(afterItems, afterBoneUpload),
+            ms(afterBoneUpload, PrepareClock::now()) };
+    }
     m_renderFramePrepared = true;
 }
 
@@ -2941,6 +2959,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     if (shadowOnly && shadowSelection.valid && m_directionalShadowPipeline &&
         context->BeginDepthOnlyPass(m_directionalShadowMap.get(), 1.f))
     {
+        context->BeginGpuTiming(Engine::Graphics::GpuTimingStage::Shadow);
         for (uint32_t cascade = 0; cascade < shadowCascadeCount; ++cascade)
         {
             for (const PreparedDraw& draw : preparedDraws)
@@ -3016,6 +3035,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             }
         }
         context->EndDepthOnlyPass();
+        context->EndGpuTiming(Engine::Graphics::GpuTimingStage::Shadow);
 
     }
 

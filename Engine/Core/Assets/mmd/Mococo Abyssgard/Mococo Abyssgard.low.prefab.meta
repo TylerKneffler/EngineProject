@@ -1,0 +1,26 @@
+{
+    "version": 1,
+    "id": "84f88ecf-5bae-40df-8ed6-bc6d5a8ebaf5",
+    "sourcePath": "C:/Users/tyler/source/repos/EngineProject/Engine/Core/Assets/mmd/Mococo/Mococo Abyssgard.pmx",
+    "importSettings": {
+        "importer": "model",
+        "pmxAppendRules": 25,
+        "pmxBoneMorphs": 0,
+        "pmxDynamicRigidBodies": 0,
+        "pmxIkChains": 4,
+        "pmxImportDynamicPhysics": true,
+        "pmxImportFollowBoneColliders": true,
+        "pmxImportMorphs": true,
+        "pmxImportRigConstraints": true,
+        "pmxImportedGroups": 0,
+        "pmxKinematicRigidBodies": 24,
+        "pmxMaterialMorphs": 2,
+        "pmxPhysicsJoints": 0,
+        "pmxSoftBodies": 0,
+        "pmxUnitScaleToMeters": 1,
+        "pmxWarnings": "Low profile: secondary bones use pose-following springs without Bullet contacts.",
+        "sourceFormat": "pmx",
+        "pmxPhysicsQuality": "Low",
+        "pmxSpringMotionBones": 133
+    }
+}

@@ -9,6 +9,7 @@
 #include "Core/Renderers/IGameRenderer.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Physics/Physics.h"
 #include "Core/SceneManager.h"
 #include "Core/Timing/FramePacer.h"
 #include <filesystem>
@@ -90,6 +91,8 @@ int GameApplication::Run(HINSTANCE instance)
 
     ::Engine::Scene::Scene scene;
     scene.Init(renderer->GetGraphicsProvider());
+    scene.GetPhysics().ConfigureStepBudget(settings.physicsTargetMilliseconds,
+        settings.physicsMaximumSubsteps);
     scene.SetRealtimeShadowSettings(settings.realtimeShadows);
     scene.SetDistanceLightingSettings(settings.distanceLighting);
     Engine::Core::SceneManager::SetActiveScene(&scene);

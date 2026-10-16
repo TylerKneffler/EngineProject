@@ -32,6 +32,12 @@ public:
     void* GetCurrentRenderTargetHandle() const override { return m_rtv.Get(); }
     ID3D11Device* GetDevice() const { return m_device.Get(); }
     ID3D11DeviceContext* GetDeviceContext() const { return m_context.Get(); }
+    double GetLastUiRenderMilliseconds() const { return m_lastUiRenderMilliseconds; }
+    double GetLastPresentMilliseconds() const { return m_lastPresentMilliseconds; }
+    double GetLastPrepareFrameMilliseconds() const { return m_lastPrepareFrameMilliseconds; }
+    double GetLastBeginUiMilliseconds() const { return m_lastBeginUiMilliseconds; }
+    double GetLastRenderSetupMilliseconds() const { return m_lastRenderSetupMilliseconds; }
+    void SetGpuTimingEnabled(bool enabled) { m_gpuTimingEnabled = enabled; }
 
 private:
     void CreateRenderTarget();
@@ -48,5 +54,11 @@ private:
     bool m_allowTearing = false;
     UINT m_swapChainFlags = 0;
     EditorUiRenderHooks m_uiHooks;
+    double m_lastUiRenderMilliseconds = 0.0;
+    double m_lastPresentMilliseconds = 0.0;
+    double m_lastPrepareFrameMilliseconds = 0.0;
+    double m_lastBeginUiMilliseconds = 0.0;
+    double m_lastRenderSetupMilliseconds = 0.0;
+    bool m_gpuTimingEnabled = false;
 };
 }

@@ -43,6 +43,8 @@ struct ProjectSettings
     uint32_t targetFramerate = 60; // Default video export frame rate.
     uint32_t editorMaxFps = 0;    // 0 means unlimited.
     uint32_t gameMaxFps = 0;      // 0 means unlimited.
+    uint32_t physicsTargetMilliseconds = 30; // CPU budget per rendered frame.
+    uint32_t physicsMaximumSubsteps = 6;     // Hard per-frame catch-up limit.
     Engine::Model::BakedLightingSettings bakedLighting;
     Engine::Model::RealtimeShadowSettings realtimeShadows;
     Engine::Model::DistanceLightingSettings distanceLighting;

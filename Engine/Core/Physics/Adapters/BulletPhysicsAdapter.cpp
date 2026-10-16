@@ -9,6 +9,7 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Physics/Internal/PhysicsInternal.h"
 #include <algorithm>
+#include <chrono>
 #include <array>
 #include <cstdint>
 #include <memory>
@@ -105,8 +106,12 @@ struct BulletPhysicsAdapter::Impl
     double fixedStepSeconds = 1.0 / 60.0;
     double accumulatorSeconds = 0.0;
     uint32_t maximumSubsteps = 6u;
+    uint32_t targetStepMilliseconds = 0u; // 0 keeps offline fixed-step runs unbudgeted.
     uint32_t solverIterations = 10u;
     uint32_t lastSubstepCount = 0u;
+    double lastDroppedSeconds = 0.0;
+    bool profilingEnabled = false;
+    BulletPhysicsAdapter::StepTimings lastStepTimings{};
     struct PortalMeshCollider
     {
         const Engine::Components::RigidBody* owner = nullptr;
@@ -360,15 +365,38 @@ void BulletPhysicsAdapter::ConfigureFixedStep(double seconds, uint32_t maximumSu
     m_impl->maximumSubsteps = maximumSubsteps;
     m_impl->solverIterations = solverIterations;
     m_impl->accumulatorSeconds = 0.0;
+    m_impl->lastDroppedSeconds = 0.0;
     m_impl->lastSubstepCount = 0u;
+    if (m_impl->profilingEnabled)
+        m_impl->lastStepTimings = {};
     m_impl->state->world->getSolverInfo().m_numIterations =
         static_cast<int>(solverIterations);
+}
+
+void BulletPhysicsAdapter::ConfigureStepBudget(uint32_t targetMilliseconds,
+    uint32_t maximumSubsteps)
+{
+    if (targetMilliseconds == 0u || maximumSubsteps == 0u)
+        throw std::invalid_argument(
+            "Physics target milliseconds and maximum substeps must be positive");
+    m_impl->targetStepMilliseconds = targetMilliseconds;
+    m_impl->maximumSubsteps = maximumSubsteps;
+    m_impl->accumulatorSeconds = std::min(m_impl->accumulatorSeconds,
+        2.0 * m_impl->fixedStepSeconds * m_impl->maximumSubsteps);
 }
 
 double BulletPhysicsAdapter::GetFixedStep() const { return m_impl->fixedStepSeconds; }
 uint32_t BulletPhysicsAdapter::GetMaximumSubsteps() const { return m_impl->maximumSubsteps; }
 uint32_t BulletPhysicsAdapter::GetSolverIterations() const { return m_impl->solverIterations; }
 uint32_t BulletPhysicsAdapter::GetLastSubstepCount() const { return m_impl->lastSubstepCount; }
+double BulletPhysicsAdapter::GetLastDroppedSeconds() const
+{ return m_impl->lastDroppedSeconds; }
+double BulletPhysicsAdapter::GetPendingSeconds() const
+{ return m_impl->accumulatorSeconds; }
+void BulletPhysicsAdapter::SetProfilingEnabled(bool enabled)
+{ m_impl->profilingEnabled = enabled; }
+BulletPhysicsAdapter::StepTimings BulletPhysicsAdapter::GetLastStepTimings() const
+{ return m_impl->lastStepTimings; }
 uint64_t BulletPhysicsAdapter::GetImportedJointRebuildCount() const
 { return m_impl->pmxJointRebuildCount; }
 
@@ -638,6 +666,11 @@ PhysicsWorldState::PhysicsWorldState()
 
 void BulletPhysicsAdapter::Step(double deltaTime)
 {
+    using StepClock = std::chrono::steady_clock;
+    if (m_impl->profilingEnabled)
+        m_impl->lastStepTimings = {};
+    const auto stepBegin = m_impl->profilingEnabled
+        ? StepClock::now() : StepClock::time_point{};
     Engine::Scene::Scene& scene = *m_impl->scene;
     std::vector<Engine::Components::MeshObjectCollider*> meshColliders;
     for (const auto& object : scene.GetObjects())
@@ -882,21 +915,29 @@ void BulletPhysicsAdapter::Step(double deltaTime)
     }
     }
     m_impl->lastSubstepCount = 0u;
+    const auto afterSetup = m_impl->profilingEnabled
+        ? StepClock::now() : StepClock::time_point{};
     if (bodies.empty() && clothBodies.empty() && ikBones.empty())
     {
         m_impl->accumulatorSeconds = 0.0;
+        m_impl->lastDroppedSeconds = 0.0;
+        m_impl->lastStepTimings = {};
         return;
     }
 
     Engine::Physics::PhysicsWorldState& physics = *m_impl->state;
     physics.world->getSolverInfo().m_numIterations =
         static_cast<int>(m_impl->solverIterations);
-    const double boundedDelta = std::clamp(
-        std::isfinite(deltaTime) ? deltaTime : 0.0, 0.0,
-        m_impl->fixedStepSeconds * m_impl->maximumSubsteps);
-    m_impl->accumulatorSeconds = std::min(
-        m_impl->accumulatorSeconds + boundedDelta,
-        m_impl->fixedStepSeconds * m_impl->maximumSubsteps);
+    const double inputDelta = std::max(0.0,
+        std::isfinite(deltaTime) ? deltaTime : 0.0);
+    const double maximumFrameDelta =
+        m_impl->fixedStepSeconds * m_impl->maximumSubsteps;
+    const double boundedDelta = std::min(inputDelta, maximumFrameDelta);
+    const double maximumPending = 2.0 * maximumFrameDelta;
+    const double pending = m_impl->accumulatorSeconds + boundedDelta;
+    m_impl->lastDroppedSeconds = inputDelta - boundedDelta +
+        std::max(0.0, pending - maximumPending);
+    m_impl->accumulatorSeconds = std::min(pending, maximumPending);
     const double epsilon = m_impl->fixedStepSeconds * 1e-9;
     const auto recordSubstepContacts = [&]()
     {
@@ -983,9 +1024,22 @@ void BulletPhysicsAdapter::Step(double deltaTime)
             }
         }
     };
+    const auto budgetBegin = StepClock::now();
     while (m_impl->lastSubstepCount < m_impl->maximumSubsteps &&
         m_impl->accumulatorSeconds + epsilon >= m_impl->fixedStepSeconds)
     {
+        // Always perform the first due fixed step. Subsequent steps use the
+        // remaining CPU budget, while a bounded backlog permits later frames
+        // to catch up when simulation becomes cheaper.
+        if (m_impl->targetStepMilliseconds > 0u &&
+            m_impl->lastSubstepCount > 0u &&
+            std::chrono::duration<double, std::milli>(
+                StepClock::now() - budgetBegin).count() >=
+                static_cast<double>(m_impl->targetStepMilliseconds))
+            break;
+        const uint32_t substepIndex = m_impl->lastSubstepCount;
+        const auto substepBegin = m_impl->profilingEnabled
+            ? StepClock::now() : StepClock::time_point{};
         // Reapply live settings at simulation cadence, not output cadence.
         // Besides making runtime edits visible, this prevents calls such as
         // setAngularFactor/updateInertiaTensor from making contact outcomes
@@ -994,19 +1048,39 @@ void BulletPhysicsAdapter::Step(double deltaTime)
             body->ApplyBodySettings();
         for (Engine::Components::IKBone* bone : ikBones)
             bone->ApplyLiveBodySettings();
+        const auto beforeWorld = m_impl->profilingEnabled
+            ? StepClock::now() : StepClock::time_point{};
         const btScalar step = static_cast<btScalar>(m_impl->fixedStepSeconds);
         // maxSubSteps = 0 disables Bullet's float accumulator. The engine's
         // double accumulator above makes chunking independent of output FPS.
         physics.world->stepSimulation(step, 0, step);
+        const auto afterWorld = m_impl->profilingEnabled
+            ? StepClock::now() : StepClock::time_point{};
         recordSubstepContacts();
+        const auto afterContacts = m_impl->profilingEnabled
+            ? StepClock::now() : StepClock::time_point{};
         for (Engine::Components::IKBone* bone : ikBones)
             bone->ApplyGroundedPoseGravity();
         m_impl->accumulatorSeconds -= m_impl->fixedStepSeconds;
         if (m_impl->accumulatorSeconds < 0.0 &&
             m_impl->accumulatorSeconds > -epsilon)
             m_impl->accumulatorSeconds = 0.0;
+        if (m_impl->profilingEnabled &&
+            substepIndex < m_impl->lastStepTimings.substepMs.size())
+        {
+            const auto ms = [](auto first, auto last)
+            { return std::chrono::duration<double, std::milli>(last - first).count(); };
+            m_impl->lastStepTimings.substepMs[substepIndex] =
+                ms(substepBegin, StepClock::now());
+            m_impl->lastStepTimings.bulletWorldMs[substepIndex] =
+                ms(beforeWorld, afterWorld);
+            m_impl->lastStepTimings.contactsMs[substepIndex] =
+                ms(afterWorld, afterContacts);
+        }
         ++m_impl->lastSubstepCount;
     }
+    const auto afterSimulation = m_impl->profilingEnabled
+        ? StepClock::now() : StepClock::time_point{};
 
     for (Engine::Components::RigidBody* body : bodies)
     {
@@ -1049,6 +1123,16 @@ void BulletPhysicsAdapter::Step(double deltaTime)
         });
     for (Engine::Components::IKBone* bone : ikBones)
         bone->ApplyWiggle(static_cast<float>(boundedDelta));
+    if (m_impl->profilingEnabled)
+    {
+        const auto ms = [](auto first, auto last)
+        { return std::chrono::duration<double, std::milli>(last - first).count(); };
+        m_impl->lastStepTimings.setupMs = ms(stepBegin, afterSetup);
+        m_impl->lastStepTimings.simulationMs =
+            ms(afterSetup, afterSimulation);
+        m_impl->lastStepTimings.postMs =
+            ms(afterSimulation, StepClock::now());
+    }
 }
 
 void BulletPhysicsAdapter::Reset()
@@ -1099,5 +1183,6 @@ void BulletPhysicsAdapter::Reset()
     m_componentStates.clear();
     m_impl->accumulatorSeconds = 0.0;
     m_impl->lastSubstepCount = 0u;
+    m_impl->lastDroppedSeconds = 0.0;
 }
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/Physics/IPhysicsAdapter.h"
+#include <array>
 #include <unordered_map>
 
 namespace Engine::Physics
@@ -20,10 +21,25 @@ public:
     void Reset() override;
     void ConfigureFixedStep(double seconds, uint32_t maximumSubsteps,
         uint32_t solverIterations) override;
+    void ConfigureStepBudget(uint32_t targetMilliseconds,
+        uint32_t maximumSubsteps) override;
     double GetFixedStep() const override;
     uint32_t GetMaximumSubsteps() const override;
     uint32_t GetSolverIterations() const override;
     uint32_t GetLastSubstepCount() const override;
+    double GetLastDroppedSeconds() const;
+    double GetPendingSeconds() const;
+    struct StepTimings
+    {
+        double setupMs = 0.0;
+        double simulationMs = 0.0;
+        double postMs = 0.0;
+        std::array<double, 12> substepMs{};
+        std::array<double, 12> bulletWorldMs{};
+        std::array<double, 12> contactsMs{};
+    };
+    void SetProfilingEnabled(bool enabled);
+    StepTimings GetLastStepTimings() const;
     uint64_t GetImportedJointRebuildCount() const;
     void SetPortalMeshCollider(const void* instanceKey,
         const Engine::Components::RigidBody& owner,

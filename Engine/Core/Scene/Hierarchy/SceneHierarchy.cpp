@@ -15,6 +15,7 @@
 #include "Core/Physics/IPhysicsAdapter.h"
 #include "Core/Renderers/UIRenderer.h"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <functional>
 #include <unordered_set>
@@ -86,15 +87,20 @@ void Scene::Start()
 
 void Scene::Update(float deltaTime)
 {
+    using Clock = std::chrono::steady_clock;
+    const auto updateBegin = m_updateProfilingEnabled ? Clock::now() : Clock::time_point{};
     m_deltaTime = m_clock.Advance(deltaTime);
     m_isUpdating = true;
     for (const auto& object : m_objects)
         object->Update();
+    const auto afterObjects = m_updateProfilingEnabled ? Clock::now() : Clock::time_point{};
     ApplyPoseConstraints();
     m_audio->Update(m_deltaTime);
+    const auto afterPose = m_updateProfilingEnabled ? Clock::now() : Clock::time_point{};
     const double physicsDelta = m_clock.IsFixedStep()
         ? m_clock.GetFixedStep() : static_cast<double>(m_deltaTime);
     m_physics->Step(physicsDelta);
+    const auto afterPhysics = m_updateProfilingEnabled ? Clock::now() : Clock::time_point{};
     for (const auto& object : m_objects)
         if (object && object->IsEnabledInHierarchy())
             if (auto* binding = object->GetComponent<Engine::Components::RigPhysicsBinding>())
@@ -163,6 +169,14 @@ void Scene::Update(float deltaTime)
     m_isUpdating = false;
     FlushPendingObjectAdditions();
     FlushPendingObjectRemovals();
+    if (m_updateProfilingEnabled)
+    {
+        const auto ms = [](auto first, auto last)
+        { return std::chrono::duration<double, std::milli>(last - first).count(); };
+        m_lastUpdateTimings = { ms(updateBegin, afterObjects),
+            ms(afterObjects, afterPose), ms(afterPose, afterPhysics),
+            ms(afterPhysics, Clock::now()) };
+    }
 }
 
 void Scene::ApplyPoseConstraints()

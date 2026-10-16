@@ -7,12 +7,11 @@ namespace Engine::Editor
 struct SkeletonViewportTemplate
 {
     static bool Draw(IEditorUi& ui, const EditorUiViewportInput& input,
-        Engine::Scene::Scene* scene, SceneViewportToolbar& toolbar,
-        bool editingBoneTransform)
+        Engine::Scene::Scene* scene, SceneViewportToolbar& toolbar)
     {
-        // Weight Paint uses the brush and camera controls; bone editing also
-        // exposes the transform handles.
-        return toolbar.Draw(ui, input, scene, editingBoneTransform, false);
+        // The viewport only draws the camera control; transform tools are in
+        // the editor header.
+        return toolbar.Draw(ui, input, scene, false);
     }
 };
 }

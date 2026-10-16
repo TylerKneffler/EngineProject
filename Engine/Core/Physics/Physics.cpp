@@ -22,6 +22,11 @@ void Physics::ConfigureFixedStep(double seconds, uint32_t maximumSubsteps,
 {
     m_adapter->ConfigureFixedStep(seconds, maximumSubsteps, solverIterations);
 }
+void Physics::ConfigureStepBudget(uint32_t targetMilliseconds,
+    uint32_t maximumSubsteps)
+{
+    m_adapter->ConfigureStepBudget(targetMilliseconds, maximumSubsteps);
+}
 double Physics::GetFixedStep() const { return m_adapter->GetFixedStep(); }
 uint32_t Physics::GetMaximumSubsteps() const { return m_adapter->GetMaximumSubsteps(); }
 uint32_t Physics::GetSolverIterations() const { return m_adapter->GetSolverIterations(); }

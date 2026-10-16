@@ -147,6 +147,23 @@ public:
     // Runtime lifecycle shared by the standalone game and Editor Play mode.
     void Start();
     void Update(float deltaTime);
+    struct UpdateTimings
+    {
+        double objectsMs = 0.0;
+        double poseMs = 0.0;
+        double physicsMs = 0.0;
+        double postPhysicsMs = 0.0;
+    };
+    void SetUpdateProfilingEnabled(bool enabled) { m_updateProfilingEnabled = enabled; }
+    const UpdateTimings& GetLastUpdateTimings() const { return m_lastUpdateTimings; }
+    struct PrepareTimings
+    {
+        double lookupMs = 0.0;
+        double itemsMs = 0.0;
+        double boneUploadMs = 0.0;
+        double capacityMs = 0.0;
+    };
+    const PrepareTimings& GetLastPrepareTimings() const { return m_lastPrepareTimings; }
     // Re-evaluate animation-facing solvers after a manually sampled pose.
     void ApplyPoseConstraints();
     // Advances exactly one configured fixed frame. Offline exporters use this
@@ -589,6 +606,9 @@ private:
     std::vector<std::unique_ptr<Object>> m_pendingObjectAdditions;
     std::vector<Object*> m_pendingObjectRemovals;
     bool m_isUpdating = false;
+    bool m_updateProfilingEnabled = false;
+    UpdateTimings m_lastUpdateTimings{};
+    PrepareTimings m_lastPrepareTimings{};
     bool m_hasStarted = false;
     float m_deltaTime = 0.f;
     Engine::Time::SimulationClock m_clock;

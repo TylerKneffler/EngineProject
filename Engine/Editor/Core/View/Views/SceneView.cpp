@@ -121,8 +121,6 @@ void SceneView::DrawPanel(IEditorUi& ui)
     panDY = input.keyPanDY;
     dolly = input.keyDolly;
     bool overlayConsumedClick = false;
-    // Keep the viewport header available alongside the application's toolbar.
-    m_toolbar.SetSceneToolsVisible(true);
     switch (m_editMode)
     {
     case SceneEditMode::Mesh:
@@ -131,7 +129,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
         break;
     case SceneEditMode::Skeleton:
         overlayConsumedClick = SkeletonViewportTemplate::Draw(ui, input,
-            m_scene, m_toolbar, AllowObjectTransform);
+            m_scene, m_toolbar);
         break;
     default:
         overlayConsumedClick = ObjectViewportTemplate::Draw(ui, input,
