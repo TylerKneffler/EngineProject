@@ -128,6 +128,7 @@ public:
     bool CanCreateAnimationClip() const;
     bool CreateAnimationClip(const std::string& name);
     void ProcessPendingAnimationDocumentOpens();
+    void UpdateAnimationPlayback(float deltaTime);
     void HandleAnimationDocumentClosures();
     bool IsAnimationEditorFocused() const;
     bool IsAnimationPlaying() const;
@@ -709,6 +710,7 @@ private:
     void FocusAnimationRig(AnimationDocument& document, size_t index);
     std::pair<std::string, size_t> SelectedAnimationRig() const;
     void DrawAnimationTimeline(IEditorUi& ui, AnimationDocument& document);
+    void DrawAnimationTimelinePanel(IEditorUi& ui);
     void DrawAnimationRigToolbar(IEditorUi& ui,
         AnimationDocument& document);
     void DrawAnimationProperties(IEditorUi& ui,
@@ -791,6 +793,7 @@ private:
       std::deque<std::pair<std::string, size_t>> m_pendingAnimationDocuments;
     std::unordered_map<std::string, std::string> m_pendingAnimationClipSelections;
     AnimationDocument* m_activeAnimationDocument = nullptr;
+    AnimationDocument* m_timelineAnimationDocument = nullptr;
     MeshEditSession m_mainMeshEdit;
     MeshEditSession m_prefabMeshEdit;
     SkeletonEditSession m_mainSkeletonEdit;

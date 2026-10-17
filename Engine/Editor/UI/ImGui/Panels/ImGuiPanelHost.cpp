@@ -733,6 +733,7 @@ void ImGuiPanelHost::Draw(EditorState& state)
 
 void ImGuiPanelHost::DrawPanels(EditorState& state)
 {
+    state.UpdateAnimationPlayback(ImGui::GetIO().DeltaTime);
     auto& panels = state.GetPanels();
     for (auto& panel : panels)
         if (panel)

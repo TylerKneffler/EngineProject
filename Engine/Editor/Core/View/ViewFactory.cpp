@@ -10,7 +10,7 @@ namespace Engine::Editor
 const std::unordered_set<std::string> ViewFactory::kSingletonTypes =
 {
     "Hierarchy", "Properties", "Assets", "Console", "Terminal", "Problems",
-    "Performance"
+    "Performance", "Animation Timeline"
 };
 
 // ---------------------------------------------------------------------------
@@ -214,6 +214,16 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
         view->OnAssetRenamed = OnAssetRenamed;
         view->OnAssetContentsChanged = OnAssetContentsChanged;
         view->OnPrefabCreated = OnPrefabCreated;
+        m_singletonInstances[typeName] = view.get();
+        return view;
+    }
+
+    if (typeName == "Animation Timeline")
+    {
+        auto view = std::make_unique<AnimationTimelineView>();
+        AssignLowestAvailableTitle(typeName, view.get());
+        view->SetDefaultDockArea(EditorPanelDockArea::BottomPanel);
+        view->OnDrawTimeline = OnDrawAnimationTimeline;
         m_singletonInstances[typeName] = view.get();
         return view;
     }

@@ -70,6 +70,7 @@ void ImGuiDockspace::Draw()
     ImGui::DockBuilderDockWindow("Console", centerBottom);
     ImGui::DockBuilderDockWindow("Problems", centerBottom);
     ImGui::DockBuilderDockWindow("Terminal", centerBottom);
+    ImGui::DockBuilderDockWindow("Animation Timeline", centerBottom);
     ImGui::DockBuilderDockWindow("Properties", right);
     ImGui::DockBuilderFinish(dockspaceId);
     m_startupMigrationComplete = true;

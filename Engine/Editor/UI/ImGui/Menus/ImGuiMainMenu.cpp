@@ -170,6 +170,7 @@ void ImGuiMainMenu::DrawViewsMenu(EditorState& state) const
     if (ImGui::MenuItem("Properties")) OpenPanel(state, "Properties");
     if (ImGui::MenuItem("Assets")) OpenPanel(state, "Assets");
     if (ImGui::MenuItem("Console")) OpenPanel(state, "Console");
+    if (ImGui::MenuItem("Animation Timeline")) OpenPanel(state, "Animation Timeline");
     if (ImGui::MenuItem("Problems")) OpenPanel(state, "Problems");
     if (ImGui::MenuItem("Terminal")) OpenPanel(state, "Terminal");
     if (ImGui::MenuItem("Performance")) OpenPanel(state, "Performance");

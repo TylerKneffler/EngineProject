@@ -2,6 +2,7 @@
 #include "pch.h"
 #include "Views/SceneView.h"
 #include "Views/AnimationView.h"
+#include "Views/AnimationTimelineView.h"
 #include "Views/GameView.h"
 #include "Views/HierarchyView.h"
 #include "Views/PropertiesView.h"
@@ -81,6 +82,7 @@ public:
     std::function<void(Engine::Core::Object*)>           OnSelectionChanged;  // HierarchyView
     std::function<void(const std::vector<Engine::Core::Object*>&)> OnSelectionSetChanged;
     std::function<void()>                  OnMainDocumentFocused;
+    std::function<void(IEditorUi&)>        OnDrawAnimationTimeline;
     std::function<void(Engine::Core::Object*)>           OnObjectSelected;    // SceneView click selection
     std::function<void(Engine::Core::Object*)>           OnObjectCreated;     // SceneView context creation
     std::function<void()>                  OnDeleteSelectionRequested;

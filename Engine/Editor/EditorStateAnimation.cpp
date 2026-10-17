@@ -606,6 +606,16 @@ void EditorState::SelectAnimationDocumentClip(AnimationDocument& document,
 
 void EditorState::ProcessPendingAnimationDocumentOpens()
 {
+    if (!m_pendingAnimationDocuments.empty())
+    {
+        bool hasTimeline = false;
+        for (const auto& panel : m_panels)
+            if (dynamic_cast<AnimationTimelineView*>(panel.get()))
+            { panel->SetOpen(true); hasTimeline = true; break; }
+        if (!hasTimeline)
+            if (auto timeline = m_viewFactory->Create("Animation Timeline"))
+                m_panels.push_back(std::move(timeline));
+    }
     while (!m_pendingAnimationDocuments.empty())
     {
         const auto [path, rigIndex] =
@@ -628,8 +638,6 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
             view->AllowAssetDrops = false;
             view->OnFocused = [this, raw]()
             { SetActiveAnimationDocument(raw); };
-            view->OnDrawBottomPanel = [this, raw](IEditorUi& ui)
-            { DrawAnimationTimeline(ui, *raw); };
             view->RequestFocusOnNextDraw();
             m_panels.push_back(std::move(view));
             m_animationDocuments.push_back(std::move(document));
@@ -922,8 +930,6 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
         };
         view->OnFocused = [this, raw]()
         { SetActiveAnimationDocument(raw); };
-        view->OnDrawBottomPanel = [this, raw](IEditorUi& ui)
-        { DrawAnimationTimeline(ui, *raw); };
         view->OnDrawRigControls = [this, raw](IEditorUi& ui,
             const EditorUiViewportInput& input)
         { return DrawAnimationRigViewport(ui, input, *raw); };
@@ -978,6 +984,7 @@ void EditorState::FocusAnimationRig(AnimationDocument& document, size_t index)
 
 void EditorState::SetActiveAnimationDocument(AnimationDocument* document)
 {
+    if (document) m_timelineAnimationDocument = document;
     if (!document)
     {
         m_activeAnimationDocument = nullptr;
@@ -3601,20 +3608,38 @@ void EditorState::DrawAnimationProperties(IEditorUi& ui,
     }
 }
 
-void EditorState::DrawAnimationTimeline(IEditorUi& ui,
-    AnimationDocument& document)
+void EditorState::DrawAnimationTimelinePanel(IEditorUi& ui)
 {
-    if (!document.sourceManager)
+    if (!m_timelineAnimationDocument)
     {
-        ui.DisabledLabel("Choose a rig in the toolbar to open its timeline.");
+        ui.DisabledLabel("Open an animation in the Animation Editor to view its timeline.");
         return;
     }
-    auto& clips = document.sourceManager->clips;
-    if (document.playing &&
-        document.clipIndex >= 0 &&
-        document.clipIndex < static_cast<int>(clips.size()))
+    if (ui.IsWindowFocused())
+        SetActiveAnimationDocument(m_timelineAnimationDocument);
+    if (ImGui::BeginCombo("Animation document",
+            m_timelineAnimationDocument->view->GetTitle().c_str()))
     {
-        document.playheadSeconds += std::max(0.f, ImGui::GetIO().DeltaTime);
+        for (const auto& open : m_animationDocuments)
+            if (ImGui::Selectable(open->view->GetTitle().c_str(),
+                    open.get() == m_timelineAnimationDocument))
+                SetActiveAnimationDocument(open.get());
+        ImGui::EndCombo();
+    }
+    ImGui::PushID(m_timelineAnimationDocument);
+    DrawAnimationTimeline(ui, *m_timelineAnimationDocument);
+    ImGui::PopID();
+}
+
+void EditorState::UpdateAnimationPlayback(float deltaTime)
+{
+    for (const auto& open : m_animationDocuments)
+    {
+        auto& document = *open;
+        if (!document.playing || !document.sourceManager ||
+            document.clipIndex < 0 || document.clipIndex >=
+                static_cast<int>(document.sourceManager->clips.size())) continue;
+        document.playheadSeconds += std::clamp(deltaTime, 0.f, .1f);
         float duration = .01f;
         bool anyLooping = false;
         for (const auto& track : document.tracks)
@@ -3647,6 +3672,16 @@ void EditorState::DrawAnimationTimeline(IEditorUi& ui,
             }
         }
         SampleAnimationDocument(document);
+    }
+}
+
+void EditorState::DrawAnimationTimeline(IEditorUi& ui,
+    AnimationDocument& document)
+{
+    if (!document.sourceManager)
+    {
+        ui.DisabledLabel("Choose a rig in the toolbar to open its timeline.");
+        return;
     }
     if (ui.Button(document.selectedRows.empty()
             ? "Key Selected Bone" : "Key Selected Rows"))
@@ -4846,6 +4881,8 @@ void EditorState::HandleAnimationDocumentClosures()
         }
         if (m_activeAnimationDocument == document)
             SetActiveAnimationDocument(nullptr);
+        if (m_timelineAnimationDocument == document)
+            m_timelineAnimationDocument = nullptr;
         for (IEditorPanel* closing : { static_cast<IEditorPanel*>(document->view) })
             for (auto panel = m_panels.begin(); panel != m_panels.end(); ++panel)
                 if (panel->get() == closing)
@@ -4858,5 +4895,7 @@ void EditorState::HandleAnimationDocumentClosures()
                 }
         it = m_animationDocuments.erase(it);
     }
+    if (!m_timelineAnimationDocument && !m_animationDocuments.empty())
+        m_timelineAnimationDocument = m_animationDocuments.back().get();
 }
 }

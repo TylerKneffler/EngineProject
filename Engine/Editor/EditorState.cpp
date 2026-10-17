@@ -3934,6 +3934,8 @@ void EditorState::InitializePanels()
         auto terminal = m_viewFactory->Create("Terminal");
         if (terminal)
             m_panels.push_back(std::move(terminal));
+        if (auto timeline = m_viewFactory->Create("Animation Timeline"))
+            m_panels.push_back(std::move(timeline));
     }
     RefreshSceneDocumentTitle();
     OutputDebugStringA("[EditorState::InitializePanels] Complete\n");
@@ -3946,6 +3948,8 @@ void EditorState::WireupCallbacks()
 {
     if (!m_viewFactory)
         return;
+    m_viewFactory->OnDrawAnimationTimeline = [this](IEditorUi& ui)
+    { DrawAnimationTimelinePanel(ui); };
     m_viewFactory->OnMainDocumentFocused = [this]()
     {
         // Hierarchy and Properties are shared panels. Their focus alone must
