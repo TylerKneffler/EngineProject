@@ -18,7 +18,7 @@
     </ambientColor>
   </settings>
   <objects>
-    <item prefab="Engine/Core/Assets/mmd/Mococo Abyssgard/Mococo Abyssgard.low.prefab">
+    <item prefab="Engine/Core/Assets/Models/mmd/Mococo Abyssgard/Mococo Abyssgard.low.prefab">
       <transform>
         <Transform.position>
           <item>0</item>

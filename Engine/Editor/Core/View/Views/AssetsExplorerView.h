@@ -4,6 +4,8 @@
 #include <vector>
 #include "View/IEditorPanel.h"
 #include "Engine/Editor/Core/View/Templates/Assets/AssetPreviewCache.h"
+#include "AssetLocationIndex.h"
+#include <chrono>
 
 namespace Engine::Core { class Object; }
 namespace Engine::Scene { class Scene; }
@@ -44,6 +46,13 @@ public:
     std::function<void(Engine::Core::Object*, const std::string&)> OnPrefabCreated;
 
     void SetSelectedPath(const std::string& path) { m_selectedPath = path; }
+    bool ContainsScreenPoint(float x, float y) const
+    { return m_open && m_hasScreenBounds && x >= m_screenLeft &&
+        x < m_screenRight && y >= m_screenTop && y < m_screenBottom; }
+    bool CopyExternalPath(const std::string& sourcePath,
+        const std::string& destinationDirectory = {});
+    void RecordKnownMove(const std::string& oldPath, const std::string& newPath)
+    { m_locationIndex.RecordKnownMove(oldPath, newPath); }
     const std::string& GetSelectedPath() const { return m_selectedPath; }
     const std::string& GetCurrentDirectory() const { return m_currentDirectory; }
 
@@ -85,5 +94,13 @@ private:
     bool m_renamingAsset = false;
     bool m_focusAssetRename = false;
     std::string m_error;
+    bool m_hasScreenBounds = false;
+    float m_screenLeft = 0.f;
+    float m_screenTop = 0.f;
+    float m_screenRight = 0.f;
+    float m_screenBottom = 0.f;
+    AssetLocationIndex m_locationIndex;
+    std::vector<AssetLocationIndex::Move> m_externalMoves;
+    std::chrono::steady_clock::time_point m_nextLocationScan{};
 };
 }

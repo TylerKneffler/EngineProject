@@ -154,6 +154,11 @@ public:
     virtual ~IEditorUi() = default;
     virtual void SetNextWindowRect(float x, float y, float width, float height) = 0;
     virtual bool BeginWindow(const char* title, bool* open, bool noPadding = false) = 0;
+    virtual bool CurrentWindowScreenRect(float&, float&, float&, float&) const
+    { return false; }
+    virtual bool BeginModal(const char*, bool) { return false; }
+    virtual void EndModal() {}
+    virtual void CloseModal() {}
     // Starts a transient panel over the current viewport without reserving layout space.
     virtual bool BeginViewportOverlay(const char* id, float width, float height) = 0;
     // Draws rotated tabs attached to the viewport's right edge.

@@ -287,6 +287,22 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(assimp)
 
+# ufbx reads pre-7.1 FBX files that Assimp does not support.
+FetchContent_Declare(
+    ufbx
+    GIT_REPOSITORY https://github.com/ufbx/ufbx.git
+    GIT_TAG        26a482ae66871d7de36eb722aa060bce95bce274 # v0.23.1
+)
+FetchContent_MakeAvailable(ufbx)
+if(NOT EXISTS "${ufbx_SOURCE_DIR}/ufbx.c")
+    message(FATAL_ERROR
+        "ufbx source is missing from ${ufbx_SOURCE_DIR}. Configure once with "
+        "-DFETCHCONTENT_FULLY_DISCONNECTED=OFF to populate the pinned dependency, "
+        "then offline builds can be enabled again.")
+endif()
+add_library(ufbx STATIC "${ufbx_SOURCE_DIR}/ufbx.c")
+target_include_directories(ufbx PUBLIC "${ufbx_SOURCE_DIR}")
+
 # Texture codecs. stb_image is supplied by the pinned Assimp checkout;
 # TinyEXR handles floating-point EXR and libktx handles KTX2/BasisU.
 set(TINYEXR_BUILD_SAMPLE OFF CACHE BOOL "" FORCE)
@@ -594,7 +610,7 @@ if(ENGINE_PROJECT_DIR)
     source_group(TREE "${ENGINE_PROJECT_DIR}" PREFIX "Project" FILES
         ${ASSET_SOURCES} ${PROJECT_BROWSE_FILES} ${PROJECT_ROOT_FILES})
 endif()
-target_link_libraries(Editor PRIVATE Engine ImGui fastgltf::fastgltf assimp::assimp shell32.lib ole32.lib comdlg32.lib)
+target_link_libraries(Editor PRIVATE Engine ImGui fastgltf::fastgltf assimp::assimp ufbx shell32.lib ole32.lib comdlg32.lib)
 target_precompile_headers(Editor REUSE_FROM Engine)
 target_include_directories(Editor PRIVATE
     ${ENGINE_ROOT}/Engine
@@ -732,6 +748,18 @@ if(MSVC)
 endif()
 
 set(ENGINE_LOCAL_TEST_ROOT "${ENGINE_ROOT}/.local/tests")
+
+if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/AssetLocationIndexTests.cpp")
+    enable_testing()
+    add_executable(AssetLocationIndexTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/AssetLocationIndexTests.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/View/Views/AssetLocationIndex.cpp")
+    target_link_libraries(AssetLocationIndexTests PRIVATE Engine)
+    target_include_directories(AssetLocationIndexTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME AssetLocationIndexRegression COMMAND AssetLocationIndexTests)
+endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PerformanceRecordingTests.cpp")
@@ -884,13 +912,14 @@ if(NOT ENGINE_PROJECT_DIR AND
         "${ENGINE_LOCAL_TEST_ROOT}/MmdImportStepsTests.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Animation/MmdDanceReplay.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/FbxModelDecoder.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/LegacyFbxModelDecoder.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/VmdMotionDecoder.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/VmdSceneImporter.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/MmdPoseRetargeter.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/MmdDanceAssetBinder.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/PmxModelDecoder.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/ModelAssetWriter.cpp")
-    target_link_libraries(MmdImportStepsTests PRIVATE Engine assimp::assimp)
+    target_link_libraries(MmdImportStepsTests PRIVATE Engine assimp::assimp ufbx)
     target_include_directories(MmdImportStepsTests PRIVATE
         "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Editor")
     target_compile_definitions(MmdImportStepsTests PRIVATE
@@ -922,10 +951,11 @@ if(NOT ENGINE_PROJECT_DIR AND
         "${ENGINE_LOCAL_TEST_ROOT}/MmdSceneHeadlessTests.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Animation/MmdDanceReplay.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/FbxModelDecoder.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/LegacyFbxModelDecoder.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/VmdMotionDecoder.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/MmdPoseRetargeter.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/MmdDanceAssetBinder.cpp")
-    target_link_libraries(MmdSceneHeadlessTests PRIVATE Engine assimp::assimp)
+    target_link_libraries(MmdSceneHeadlessTests PRIVATE Engine assimp::assimp ufbx)
     target_include_directories(MmdSceneHeadlessTests PRIVATE
         "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Editor")
     target_compile_definitions(MmdSceneHeadlessTests PRIVATE
@@ -966,6 +996,21 @@ if(NOT ENGINE_PROJECT_DIR AND
         "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Editor")
     add_test(NAME FbxSceneImport COMMAND FbxSceneImportTests)
     set_tests_properties(FbxSceneImport PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/LegacyFbxImportTests.cpp")
+    enable_testing()
+    add_executable(LegacyFbxImportTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/LegacyFbxImportTests.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/FbxModelDecoder.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/LegacyFbxModelDecoder.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/ModelAssetWriter.cpp")
+    target_link_libraries(LegacyFbxImportTests PRIVATE Engine assimp::assimp ufbx)
+    target_include_directories(LegacyFbxImportTests PRIVATE
+        "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Editor")
+    add_test(NAME LegacyFbxImport COMMAND LegacyFbxImportTests)
+    set_tests_properties(LegacyFbxImport PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND

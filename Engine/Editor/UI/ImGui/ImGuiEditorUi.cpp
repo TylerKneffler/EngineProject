@@ -199,6 +199,14 @@ bool InspectorField(const char* label, DrawControl&& drawControl)
 }
 
 void ImGuiEditorUi::SetNextWindowRect(float x,float y,float w,float h){ ImGui::SetNextWindowPos({x,y},ImGuiCond_FirstUseEver); ImGui::SetNextWindowSize({w,h},ImGuiCond_FirstUseEver); }
+bool ImGuiEditorUi::BeginModal(const char* title, bool open)
+{
+    if (open) ImGui::OpenPopup(title);
+    ImGui::SetNextWindowSize({ 680.f, 420.f }, ImGuiCond_FirstUseEver);
+    return ImGui::BeginPopupModal(title, nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+}
+void ImGuiEditorUi::EndModal() { ImGui::EndPopup(); }
+void ImGuiEditorUi::CloseModal() { ImGui::CloseCurrentPopup(); }
 bool ImGuiEditorUi::BeginWindow(const char* title, bool* open, bool noPadding)
 {
     ImGuiContext* context = ImGui::GetCurrentContext();
@@ -227,6 +235,18 @@ bool ImGuiEditorUi::BeginWindow(const char* title, bool* open, bool noPadding)
     if (noPadding)
         ImGui::PopStyleVar();
     return visible;
+}
+bool ImGuiEditorUi::CurrentWindowScreenRect(float& left, float& top,
+    float& right, float& bottom) const
+{
+    if (!ImGui::GetCurrentWindow()) return false;
+    const ImVec2 position = ImGui::GetWindowPos();
+    const ImVec2 size = ImGui::GetWindowSize();
+    left = position.x;
+    top = position.y;
+    right = position.x + size.x;
+    bottom = position.y + size.y;
+    return size.x > 0.f && size.y > 0.f;
 }
 bool ImGuiEditorUi::BeginViewportOverlay(const char* id, float width, float height)
 {

@@ -1,4 +1,5 @@
 #include "FbxModelDecoder.h"
+#include "LegacyFbxModelDecoder.h"
 
 #include <assimp/Importer.hpp>
 #include <assimp/config.h>
@@ -9,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -107,6 +109,26 @@ Engine::Model::AnimationChannel VectorChannel(unsigned nodeIndex, Engine::Model:
 bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::ImportedModel& model,
     std::string& error)
 {
+    // Assimp's FBX reader starts at binary FBX 7.1. Report legacy files
+    // before the parser produces an opaque FBX-DOM failure.
+    std::ifstream sourceFile(sourcePath, std::ios::binary);
+    if (!sourceFile)
+    {
+        error = "Could not open FBX source: " + sourcePath;
+        return false;
+    }
+    std::array<unsigned char, 27> header{};
+    sourceFile.read(reinterpret_cast<char*>(header.data()), header.size());
+    if (sourceFile.gcount() == static_cast<std::streamsize>(header.size()) &&
+        std::memcmp(header.data(), "Kaydara FBX Binary", 18) == 0)
+    {
+        const unsigned version = static_cast<unsigned>(header[23]) |
+            (static_cast<unsigned>(header[24]) << 8) |
+            (static_cast<unsigned>(header[25]) << 16) |
+            (static_cast<unsigned>(header[26]) << 24);
+        if (version < 7100)
+            return LegacyFbxModelDecoder::Decode(sourcePath, model, error);
+    }
     Assimp::Importer importer;
     importer.SetPropertyInteger(AI_CONFIG_PP_LBW_MAX_WEIGHTS, 8);
     const aiScene* scene = importer.ReadFile(sourcePath,
@@ -117,6 +139,9 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
     if (!scene || !scene->mRootNode)
     {
         error = importer.GetErrorString();
+        // ASCII 6.x files do not carry the binary version header above.
+        if (error.find("old format version") != std::string::npos)
+            return LegacyFbxModelDecoder::Decode(sourcePath, model, error);
         return false;
     }
 

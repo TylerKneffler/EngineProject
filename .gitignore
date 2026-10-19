@@ -9,7 +9,9 @@ build/
 .local/tests/*
 !.local/tests/PmxModelDecoderTests.cpp
 !.local/tests/MmdRenderTests.cpp
+!.local/tests/LegacyFbxImportTests.cpp
 !.local/tests/PerformanceRecordingTests.cpp
+!.local/tests/AssetLocationIndexTests.cpp
 build
 editor-startup.log
 project-build.log

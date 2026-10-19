@@ -300,6 +300,11 @@ LRESULT CALLBACK Window::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
     if (self && msg == WM_DROPFILES)
     {
         HDROP drop = reinterpret_cast<HDROP>(wParam);
+        POINT dropPoint{};
+        if (DragQueryPoint(drop, &dropPoint))
+            ClientToScreen(hwnd, &dropPoint);
+        else
+            GetCursorPos(&dropPoint);
         const UINT count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
         std::vector<std::string> paths;
         paths.reserve(count);
@@ -313,7 +318,7 @@ LRESULT CALLBACK Window::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         }
         DragFinish(drop);
         if (self->OnFilesDropped)
-            self->OnFilesDropped(paths);
+            self->OnFilesDropped(paths, dropPoint.x, dropPoint.y);
         return 0;
     }
 

@@ -123,6 +123,19 @@ namespace
         size_t position = 0;
         while ((position = text.find(from, position)) != std::string::npos)
         {
+            const size_t end = position + from.size();
+            const bool embeddedBefore = position > 0 &&
+                (std::isalnum(static_cast<unsigned char>(text[position - 1])) ||
+                    text[position - 1] == '_');
+            const bool embeddedAfter = end < text.size() &&
+                (std::isalnum(static_cast<unsigned char>(text[end])) ||
+                    text[end] == '_' || text[end] == '.' ||
+                    text[end] == '-' || text[end] == ' ');
+            if (embeddedBefore || embeddedAfter)
+            {
+                position = end;
+                continue;
+            }
             text.replace(position, from.size(), to);
             position += to.size();
             replaced = true;
@@ -3988,22 +4001,37 @@ void EditorState::WireupCallbacks()
 
     m_viewFactory->OnAssetRenamed = [this](const std::string& oldPath,
         const std::string& newPath) {
-        if (m_primaryAssets)
-            m_primaryAssets->SetSelectedPath(newPath);
-
         const std::string oldNormalized = NormalizeAssetPath(oldPath);
         const std::string newNormalized = NormalizeAssetPath(newPath);
-        const std::string oldIdentity = AssetPathIdentity(oldPath);
+        if (m_primaryAssets && !m_primaryAssets->GetSelectedPath().empty())
+        {
+            const std::string selected = NormalizeAssetPath(
+                m_primaryAssets->GetSelectedPath());
+            const std::string remapped = RemapPathPrefix(selected,
+                oldNormalized, newNormalized);
+            if (remapped != selected)
+                m_primaryAssets->SetSelectedPath(remapped);
+        }
 
         if (m_primaryProperties &&
-            !m_primaryProperties->GetSelectedAsset().empty() &&
-            AssetPathIdentity(m_primaryProperties->GetSelectedAsset()) ==
-                oldIdentity)
-            m_primaryProperties->SetSelectedAsset(newPath);
+            !m_primaryProperties->GetSelectedAsset().empty())
+        {
+            const std::string selected = NormalizeAssetPath(
+                m_primaryProperties->GetSelectedAsset());
+            const std::string remapped = RemapPathPrefix(selected,
+                oldNormalized, newNormalized);
+            if (remapped != selected)
+                m_primaryProperties->SetSelectedAsset(remapped);
+        }
         for (AssetDocumentView* document : m_assetDocuments)
-            if (document && AssetPathIdentity(document->GetPath()) ==
-                oldIdentity)
-                document->HandleExternalRename(newPath);
+            if (document)
+            {
+                const std::string path = NormalizeAssetPath(document->GetPath());
+                const std::string remapped = RemapPathPrefix(path,
+                    oldNormalized, newNormalized);
+                if (remapped != path)
+                    document->HandleExternalRename(remapped);
+            }
 
         const auto remapPath = [&](const std::string& value)
         {
@@ -4105,6 +4133,9 @@ void EditorState::WireupCallbacks()
                     lowerExtension != ".rig" &&
                     lowerExtension != ".anim" &&
                     lowerExtension != ".animation" &&
+                    lowerExtension != ".material" &&
+                    lowerExtension != ".spriteanim" &&
+                    lowerExtension != ".spritesheet" &&
                     lowerExtension != ".xml")
                     continue;
 
@@ -4137,6 +4168,8 @@ void EditorState::WireupCallbacks()
             m_hasUnsavedChanges = true;
             MarkSceneEdited();
         }
+        if (m_primaryAssets)
+            m_primaryAssets->RecordKnownMove(oldPath, newPath);
     };
 
     m_viewFactory->OnAssetContentsChanged = [this](const std::string&) {
@@ -4388,18 +4421,34 @@ void EditorState::WireupCallbacks()
     };
 
     if (m_window)
-        m_window->OnFilesDropped = [this](const std::vector<std::string>& paths) {
-            POINT cursor{};
-            GetCursorPos(&cursor);
+        m_window->OnFilesDropped = [this](const std::vector<std::string>& paths,
+            int dropX, int dropY) {
+            const bool overAssets = m_primaryAssets &&
+                m_primaryAssets->ContainsScreenPoint(static_cast<float>(dropX),
+                    static_cast<float>(dropY));
             bool overScene = false;
             for (const auto& panel : m_panels)
                 if (auto* view = dynamic_cast<SceneView*>(panel.get());
                     view && view->GetScene() == GetActiveDocumentScene() &&
-                    view->ContainsScreenPoint(static_cast<float>(cursor.x),
-                        static_cast<float>(cursor.y)))
+                    view->ContainsScreenPoint(static_cast<float>(dropX),
+                        static_cast<float>(dropY)))
                     overScene = true;
             for (const std::string& path : paths)
             {
+                std::error_code pathError;
+                if (overAssets || std::filesystem::is_directory(path, pathError))
+                {
+                    if (m_primaryAssets)
+                    {
+                        const std::string assetsDirectory =
+                            m_projectSettings.assetsDirectory.empty()
+                            ? "Assets" : m_projectSettings.assetsDirectory;
+                        m_primaryAssets->CopyExternalPath(path,
+                            overAssets ? std::string() :
+                                assetsDirectory);
+                    }
+                    continue;
+                }
                 std::string extension = std::filesystem::path(path).extension().string();
                 std::transform(extension.begin(), extension.end(), extension.begin(),
                     [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
@@ -4630,7 +4679,8 @@ void EditorState::ConfirmPendingImportAsset()
         m_pendingPmxColliderMode);
     if (primary.empty())
     {
-        m_pendingImportError = "Import failed. See the Console for details, then retry.";
+        if (m_pendingImportError.empty())
+            m_pendingImportError = "Import failed. See the Console for details, then retry.";
         return;
     }
     CancelPendingImportAsset();
@@ -4887,6 +4937,7 @@ std::string EditorState::ImportAssetFile(const std::string& path,
     }
     catch (const std::exception& error)
     {
+        m_pendingImportError = error.what();
         if (m_primaryConsole)
             m_primaryConsole->AddLog(ConsoleView::Level::Error,
                 "Asset import failed: " + std::string(error.what()));

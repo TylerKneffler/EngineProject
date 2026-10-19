@@ -18,7 +18,7 @@
     </ambientColor>
   </settings>
   <objects>
-    <item prefab="Engine/Core/Assets/mmd/Mococo Dance/Mococo Dance.prefab">
+    <item prefab="Engine/Core/Assets/Models/mmd/Mococo Dance/Mococo Dance.prefab">
       <transform>
         <Transform.position>
           <item>0</item>

@@ -124,6 +124,10 @@ void AssetsExplorerView::Init(const std::string& assetsPath,
     m_backHistory.clear();
     m_scene = scene;
     m_previewCache.Clear();
+    m_locationIndex.Open(m_assetsPath);
+    m_externalMoves.clear();
+    m_nextLocationScan = std::chrono::steady_clock::now() +
+        std::chrono::seconds(5);
 }
 
 // ---------------------------------------------------------------------------
@@ -131,7 +135,62 @@ void AssetsExplorerView::Init(const std::string& assetsPath,
 // ---------------------------------------------------------------------------
 void AssetsExplorerView::DrawPanel(IEditorUi& ui)
 {
-    if (!ui.BeginWindow(m_title.c_str(), &m_open))
+    if (m_externalMoves.empty() &&
+        std::chrono::steady_clock::now() >= m_nextLocationScan)
+    {
+        m_externalMoves = m_locationIndex.Detect();
+        m_nextLocationScan = std::chrono::steady_clock::now() +
+            std::chrono::seconds(5);
+    }
+    if (ui.BeginModal("Asset moves detected", !m_externalMoves.empty()))
+    {
+        ui.Label("These assets moved outside the editor. Update references?");
+        ui.Separator();
+        if (ui.BeginChildRegion("##detectedAssetMoves", 260.f))
+        {
+            for (const auto& move : m_externalMoves)
+            {
+                const std::string label =
+                    std::string(move.directory ? "Folder: " : "File: ") +
+                    move.oldPath + "  ->  " + move.newPath;
+                ui.Label(label.c_str());
+            }
+        }
+        ui.EndChild();
+        ui.Separator();
+        if (ui.Button("Update references"))
+        {
+            for (const auto& move : m_externalMoves)
+            {
+                const fs::path oldPath = fs::path(m_assetsPath) / move.oldPath;
+                const fs::path newPath = fs::path(m_assetsPath) / move.newPath;
+                if (!move.directory &&
+                    !fs::exists(Engine::Core::AssetRecord::SidecarPath(newPath)))
+                {
+                    std::error_code metadataError;
+                    Engine::Core::AssetRecord::Move(oldPath, newPath,
+                        metadataError);
+                }
+                if (OnAssetRenamed)
+                    OnAssetRenamed(oldPath.string(), newPath.string());
+            }
+            m_locationIndex.Accept();
+            m_externalMoves.clear();
+            ui.CloseModal();
+        }
+        ui.SameLine();
+        if (ui.Button("Ignore changes"))
+        {
+            m_locationIndex.Accept();
+            m_externalMoves.clear();
+            ui.CloseModal();
+        }
+        ui.EndModal();
+    }
+    const bool visible = ui.BeginWindow(m_title.c_str(), &m_open);
+    m_hasScreenBounds = m_open && ui.CurrentWindowScreenRect(
+        m_screenLeft, m_screenTop, m_screenRight, m_screenBottom);
+    if (!visible)
     {
         ui.EndWindow();
         return;
@@ -177,6 +236,23 @@ void AssetsExplorerView::DrawPanel(IEditorUi& ui)
         "Search assets...");
     ui.SameLine();
     if (ui.Button("New brush")) CreateBrush();
+    std::error_code selectedPathError;
+    if (!m_selectedPath.empty() &&
+        fs::is_directory(fs::path(m_selectedPath), selectedPathError) &&
+        fs::path(m_selectedPath) != fs::path(m_assetsPath))
+    {
+        ui.SameLine();
+        if (ui.Button("Rename folder"))
+        {
+            m_renamePath = m_selectedPath;
+            strncpy_s(m_renameName,
+                fs::path(m_selectedPath).filename().string().c_str(),
+                sizeof(m_renameName));
+            m_renamingAsset = true;
+            m_focusAssetRename = true;
+            m_error.clear();
+        }
+    }
     ui.Separator();
 
     if (!m_error.empty())
@@ -194,6 +270,7 @@ void AssetsExplorerView::DrawPanel(IEditorUi& ui)
     }
     if (m_renamingAsset)
     {
+        ui.Label("New name");
         const EditorUiTextEditResult rename = ui.RenameText(
             "##assetRename", m_renameName, sizeof(m_renameName),
             m_focusAssetRename);
@@ -797,7 +874,8 @@ void AssetsExplorerView::CommitAssetRename()
     }
 
     const std::string requested = CleanAssetFileName(m_renameName);
-    if (requested.empty() || requested == "." || requested == "..")
+    if (requested.empty() || requested == "." || requested == ".." ||
+        oldPath == fs::path(m_assetsPath))
     {
         m_error = "Filename is empty or invalid.";
         m_renamingAsset = false;
@@ -844,6 +922,7 @@ void AssetsExplorerView::CommitAssetRename()
         const std::string destinationString = destination.string();
         if (OnAssetRenamed)
             OnAssetRenamed(oldPathString, destinationString);
+        m_locationIndex.RecordKnownMove(oldPath, destination);
         AssetPreviewCache::MovePersistentPreview(oldPathString,
             destinationString);
         SelectPath(destinationString);
@@ -907,6 +986,7 @@ bool AssetsExplorerView::MoveAssetPath(const std::string& sourcePath,
     const std::string destinationString = destination.string();
     if (OnAssetRenamed)
         OnAssetRenamed(sourceString, destinationString);
+    m_locationIndex.RecordKnownMove(source, destination);
 
     if (m_selectedPath == sourceString)
         SelectPath(destinationString);
@@ -914,6 +994,128 @@ bool AssetsExplorerView::MoveAssetPath(const std::string& sourcePath,
     if (movedPath)
         *movedPath = destinationString;
     m_error.clear();
+    return true;
+}
+
+bool AssetsExplorerView::CopyExternalPath(const std::string& sourcePath,
+    const std::string& destinationDirectory)
+{
+    if (m_assetsPath.empty())
+    {
+        m_error = "Assets path is not initialized.";
+        return false;
+    }
+    std::error_code error;
+    const fs::path source = fs::weakly_canonical(sourcePath, error);
+    if (error || !fs::exists(source))
+    {
+        m_error = "Dropped file or folder no longer exists.";
+        return false;
+    }
+    const fs::path assetsRoot = fs::weakly_canonical(m_assetsPath, error);
+    const fs::path destinationRoot = fs::weakly_canonical(
+        destinationDirectory.empty() ? m_currentDirectory : destinationDirectory,
+        error);
+    if (error || !fs::is_directory(destinationRoot) ||
+        (destinationRoot != assetsRoot &&
+            !IsPathWithin(assetsRoot, destinationRoot)))
+    {
+        m_error = "Drop destination must be inside Assets.";
+        return false;
+    }
+    const bool directory = fs::is_directory(source, error);
+    if (error || (!directory && !fs::is_regular_file(source, error)))
+    {
+        m_error = "Only files and folders can be copied into Assets.";
+        return false;
+    }
+    if (directory && (destinationRoot == source ||
+        IsPathWithin(source, destinationRoot)))
+    {
+        m_error = "Cannot copy a folder into itself.";
+        return false;
+    }
+
+    fs::path destination = destinationRoot / source.filename();
+    const std::string stem = destination.stem().string();
+    const std::string extension = destination.extension().string();
+    for (unsigned suffix = 2; fs::exists(destination); ++suffix)
+        destination = destinationRoot /
+            (stem + " " + std::to_string(suffix) + extension);
+
+    bool createdDestination = false;
+    try
+    {
+        const auto copyFile = [&](const fs::path& from, const fs::path& to)
+        {
+            if (!fs::copy_file(from, to))
+                throw std::runtime_error("Destination already exists");
+            if (to == destination) createdDestination = true;
+            if (from.extension() == ".meta" ||
+                (!from.filename().string().empty() &&
+                    from.filename().string().front() == '.'))
+                return;
+            std::optional<Engine::Core::AssetRecord> record;
+            try { record = Engine::Core::AssetRecord::Load(from); }
+            catch (...) { /* Copy the file even if its sidecar is invalid. */ }
+            Engine::Core::AssetRecord::Ensure(to,
+                record ? fs::path(record->sourcePath) : from,
+                record ? record->importSettings :
+                    Engine::Model::AssetImportSettings{});
+        };
+
+        if (directory)
+        {
+            if (!fs::create_directory(destination))
+                throw std::runtime_error("Destination already exists");
+            createdDestination = true;
+            for (fs::recursive_directory_iterator it(source,
+                    fs::directory_options::none), end;
+                it != end; ++it)
+            {
+                const fs::directory_entry& entry = *it;
+                if (entry.is_symlink())
+                {
+                    it.disable_recursion_pending();
+                    continue;
+                }
+                const fs::path relative = entry.path().lexically_relative(source);
+                const fs::path target = destination / relative;
+                if (entry.is_directory())
+                    fs::create_directories(target);
+                else if (entry.is_regular_file())
+                {
+                    if (entry.path().filename() == ".assetlocations.json")
+                        continue;
+                    if (entry.path().extension() == ".meta")
+                    {
+                        const std::string path = entry.path().string();
+                        if (fs::exists(fs::path(path.substr(0, path.size() - 5))))
+                            continue;
+                    }
+                    copyFile(entry.path(), target);
+                }
+            }
+        }
+        else
+            copyFile(source, destination);
+    }
+    catch (const std::exception& exception)
+    {
+        if (createdDestination && IsPathWithin(assetsRoot, destination))
+        {
+            std::error_code cleanupError;
+            fs::remove_all(destination, cleanupError);
+        }
+        m_error = "Could not copy dropped asset: " +
+            std::string(exception.what());
+        return false;
+    }
+
+    m_error.clear();
+    SelectPath(destination.string());
+    if (OnAssetContentsChanged)
+        OnAssetContentsChanged(destination.string());
     return true;
 }
 
@@ -970,7 +1172,9 @@ bool AssetsExplorerView::AcceptSceneObject(IEditorUi& ui, const std::string& dir
             std::string extension = fs::path(sourcePath).extension().string();
             std::transform(extension.begin(), extension.end(), extension.begin(),
                 [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
-            if ((extension == ".vmd" || extension == ".fbx" ||
+            std::error_code sourceError;
+            if (fs::is_regular_file(sourcePath, sourceError) &&
+                (extension == ".vmd" || extension == ".fbx" ||
                 extension == ".pmx" ||
                 extension == ".gltf" || extension == ".glb" ||
                 extension == ".obj" || extension == ".spriteanim") &&

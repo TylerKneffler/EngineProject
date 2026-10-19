@@ -12,6 +12,10 @@ class ImGuiEditorUi final : public IEditorUi
 public:
     void SetNextWindowRect(float x, float y, float width, float height) override;
     bool BeginWindow(const char*, bool*, bool) override; void EndWindow() override;
+    bool CurrentWindowScreenRect(float&, float&, float&, float&) const override;
+    bool BeginModal(const char*, bool) override;
+    void EndModal() override;
+    void CloseModal() override;
     bool BeginViewportOverlay(const char*, float, float) override;
     int ViewportSideTabs(const char*, const char* const*, int, int, float) override;
     bool BeginViewportHeader(const char*, float) override;
