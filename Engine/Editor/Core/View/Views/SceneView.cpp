@@ -12,6 +12,7 @@
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Camera/Camera.h"
+#include "Core/Compoonents/Animation/AnimationBone.h"
 #include "Core/Compoonents/Obj/Sprite.h"
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
 #include "Core/Compoonents/Lighting/LightProbe.h"
@@ -117,6 +118,94 @@ void SceneView::DrawPanel(IEditorUi& ui)
         {m_letterboxColor.r,m_letterboxColor.g,m_letterboxColor.b,m_letterboxColor.a});
     m_viewportScreenMin = input.screenMin;
     m_viewportScreenMax = input.screenMax;
+    bool modelHeaderConsumedClick = false;
+    if (input.available.x > (UseGlobalToolbar ? 685.f : 450.f))
+    {
+        ImGui::SetNextWindowPos({ input.screenMin.x +
+            (UseGlobalToolbar ? 246.f : 8.f), input.screenMin.y + 6.f },
+            ImGuiCond_Always);
+        ImGui::SetNextWindowBgAlpha(.92f);
+        ImGui::Begin(("Model Manipulator##" + m_title).c_str(), nullptr,
+            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove |
+            ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings |
+            ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoScrollbar |
+            ImGuiWindowFlags_AlwaysAutoResize);
+        ImGui::Checkbox("Pose", &m_modelManipulation);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Drag a limb in the active camera view. Hold Shift to move in depth.");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(90.f);
+        const char* selections[] = { "Mesh", "Bones", "Hybrid", "Points" };
+        ImGui::Combo("##PoseSelection", &m_modelSelectionMode,
+            selections, 4);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Blue: move joint. Green: aim segment. Pink: twist segment. Ctrl-click blue points for direct grouped movement.");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(75.f);
+        const char* actions[] = { "Move", "Rotate" };
+        ImGui::Combo("##PoseAction", &m_modelAction, actions, 2);
+        ImGui::SameLine();
+        ImGui::Checkbox("Scroll depth", &m_modelScrollDepth);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("While dragging, scroll up to pull toward the camera or down to push away.");
+        if (m_modelManipulation)
+        {
+            const char* scopes[] = { "Selected", "Body Part", "Full Body" };
+            ImGui::SetNextItemWidth(110.f);
+            ImGui::Combo("Scope", &m_modelScope, scopes, 3);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Selected moves one joint; Body Part solves a limb; Full Body solves the hierarchy with pinned effectors.");
+            auto* selected = m_scene ? m_scene->GetSelectedObject() : nullptr;
+            if (selected && selected->GetComponent<Engine::Components::AnimationBone>())
+            {
+                bool controllerActive = m_gizmos.IsModelControllerActive(selected);
+                ImGui::SameLine();
+                if (ImGui::Checkbox("Active", &controllerActive))
+                {
+                    m_gizmos.SetModelControllerActive(selected, controllerActive);
+                    if (OnModelControllerEdited) OnModelControllerEdited();
+                }
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Active controllers retain a soft target during Full Body posing. Fixed pins remain hard targets.");
+                bool pinPosition = m_gizmos.IsModelPinned(selected, false);
+                bool pinRotation = m_gizmos.IsModelPinned(selected, true);
+                ImGui::SameLine();
+                ImGui::BeginDisabled(!selected->Parent ||
+                    !selected->Parent->Parent ||
+                    !selected->Parent->GetComponent<Engine::Components::AnimationBone>() ||
+                    !selected->Parent->Parent->GetComponent<Engine::Components::AnimationBone>());
+                if (ImGui::Checkbox("Pin position", &pinPosition))
+                {
+                    m_gizmos.SetModelPin(selected, false, pinPosition);
+                    if (OnModelControllerEdited) OnModelControllerEdited();
+                }
+                ImGui::EndDisabled();
+                ImGui::SameLine();
+                if (ImGui::Checkbox("Pin rotation", &pinRotation))
+                {
+                    m_gizmos.SetModelPin(selected, true, pinRotation);
+                    if (OnModelControllerEdited) OnModelControllerEdited();
+                }
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Clear pins") && m_scene)
+            {
+                m_gizmos.ClearModelPins(*m_scene);
+                if (OnModelControllerEdited) OnModelControllerEdited();
+            }
+            if (OnKeyModelControllersRequested)
+            {
+                ImGui::SameLine();
+                if (ImGui::Button("Key controllers"))
+                    OnKeyModelControllersRequested();
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Key active controllers and fixed pins at the animation playhead.");
+            }
+        }
+        modelHeaderConsumedClick = ImGui::IsWindowHovered() &&
+            ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+        ImGui::End();
+    }
     panDX = input.keyPanDX;
     panDY = input.keyPanDY;
     dolly = input.keyDolly;
@@ -198,19 +287,28 @@ void SceneView::DrawPanel(IEditorUi& ui)
     }
     EditorUiViewportInput gizmoInput = input;
     const EditorTransformTool transformTool = m_toolbar.GetTransformTool();
-    if (overlayConsumedClick || transformTool == EditorTransformTool::Hand)
+    if (overlayConsumedClick || modelHeaderConsumedClick ||
+        (transformTool == EditorTransformTool::Hand && !m_modelManipulation))
         gizmoInput.leftClicked = false;
+    gizmoInput.modelDepthDown = ImGui::GetIO().KeyShift;
+    gizmoInput.modelGroupSelectDown = ImGui::GetIO().KeyCtrl;
+    m_gizmos.SetModelManipulation(m_modelManipulation,
+        m_modelSelectionMode, m_modelAction == 1);
+    m_gizmos.SetModelScrollDepth(m_modelScrollDepth);
+    m_gizmos.SetModelScope(m_modelScope);
+    m_gizmos.SetModelPickFilter(CanSelectObject);
     m_gizmos.SetBoneEditing(m_editMode == SceneEditMode::Skeleton &&
         AllowObjectTransform);
     const EditorGizmoResult gizmoResult = m_scene && AllowObjectTransform
-        ? m_gizmos.DrawAndHandle(*m_scene, ui, gizmoInput, transformTool)
+        ? m_gizmos.DrawAndHandle(*m_scene, ui, gizmoInput,
+            m_modelManipulation ? EditorTransformTool::Hand : transformTool)
         : EditorGizmoResult{};
-    if (OnGizmoInteraction)
-        OnGizmoInteraction(gizmoResult.transformDragging ||
-            m_toolbar.IsTransformDragging());
     if (gizmoResult.selectionRequested && OnObjectSelected &&
         (!CanSelectObject || CanSelectObject(gizmoResult.selectedObject)))
         OnObjectSelected(gizmoResult.selectedObject);
+    if (OnGizmoInteraction)
+        OnGizmoInteraction(gizmoResult.transformDragging ||
+            m_toolbar.IsTransformDragging());
     bool prefabDragObserved = false;
     if (AllowAssetDrops && ui.BeginDragDropTarget())
     {
@@ -292,7 +390,9 @@ void SceneView::DrawPanel(IEditorUi& ui)
             input.zoomDragDown)
         {
             if (input.leftClicked && !overlayConsumedClick &&
+                !modelHeaderConsumedClick &&
                 transformTool != EditorTransformTool::Hand &&
+                !m_modelManipulation &&
                 !gizmoResult.consumedClick &&
                 !input.rightDown && !input.middleDown && OnObjectSelected)
                 selectSceneObject = true;
@@ -322,7 +422,8 @@ void SceneView::DrawPanel(IEditorUi& ui)
             }
 
             // Scroll wheel → zoom.
-            zoom = input.mouseWheel;
+            zoom = m_modelManipulation && m_modelScrollDepth &&
+                m_gizmos.IsModelDragging() ? 0.f : input.mouseWheel;
             // Alt+Ctrl+left drag provides a trackpad-friendly dolly gesture.
             if (input.zoomDragDown)
                 zoom += -d.y * 0.05f;

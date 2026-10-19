@@ -345,6 +345,12 @@ void EditorState::InitializeUiState()
     InitializePanels();
 }
 
+void EditorState::CheckAssetLocations()
+{
+    if (m_primaryAssets)
+        m_primaryAssets->CheckForExternalMoves();
+}
+
 // ---------------------------------------------------------------------------
 // EditorState::SaveScene
 // ---------------------------------------------------------------------------
@@ -3991,7 +3997,8 @@ void EditorState::WireupCallbacks()
             m_primaryProperties->SetSelectedObject(nullptr);
             m_primaryProperties->SetSelectedAsset(assetPath);
         }
-        if (m_primaryAssets)
+        if (m_primaryAssets &&
+            m_primaryAssets->GetSelectedPath() != assetPath)
             m_primaryAssets->SetSelectedPath(assetPath);
         MarkHistorySelectionChanged();
     };

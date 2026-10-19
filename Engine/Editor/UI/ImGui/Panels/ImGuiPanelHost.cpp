@@ -64,11 +64,12 @@ bool TransportButton(const char* id, TransportIcon icon)
 
 struct ToolbarLayout
 {
-    float widths[8]{ 105.f, 90.f, 200.f, 180.f, 220.f, 180.f, 165.f, 240.f };
+    float widths[8]{ 126.f, 100.f, 150.f, 150.f, 176.f, 176.f, 100.f, 220.f };
     bool sized[8]{};
-    int order[8]{ 0, 1, 2, 3, 7, 4, 5, 6 };
-    int side[8]{ 0, 0, 0, 0, 1, 1, 1, 1 };
-    int floatMode[8]{ 0, 0, 0, 0, 2, 2, 2, 2 }; // left, center, right
+    // Keep Save at the left edge and reserve the center for Play/Stop.
+    int order[8]{ 0, 1, 2, 4, 3, 7, 5, 6 };
+    int side[8]{ 0, 0, 0, 1, 0, 1, 1, 1 };
+    int floatMode[8]{ 0, 0, 0, 0, 0, 0, 0, 0 }; // left, center, right
 };
 
 ToolbarLayout g_toolbarLayout;
@@ -248,7 +249,8 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
         const ImGuiStyle& toolbarStyle = ImGui::GetStyle();
         const float playWidth = state.GetToolbarVisibility().playControls
             ? 56.f + toolbarStyle.ItemSpacing.x : 0.f;
-        const float sideWidth = std::max(0.f, (available - playWidth) * .5f - 5.f);
+        const float sideWidth = std::max(0.f,
+            (available - playWidth) * .5f - 5.f);
         auto& sectionWidths = g_toolbarLayout.widths;
         auto& sectionSized = g_toolbarLayout.sized;
         auto& sectionOrder = g_toolbarLayout.order;
@@ -307,10 +309,25 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
             ImGui::MarkIniSettingsDirty();
             return true;
         };
+        const auto moveToEdge = [&](int index, int side)
+        {
+            int reordered[8]{};
+            int next = 0;
+            if (side == 0) reordered[next++] = index;
+            for (int position = 0; position < 8; ++position)
+                if (sectionOrder[position] != index)
+                    reordered[next++] = sectionOrder[position];
+            if (side == 1) reordered[next++] = index;
+            for (int position = 0; position < 8; ++position)
+                sectionOrder[position] = reordered[position];
+            sectionSide[index] = side;
+            sectionFloat[index] = side == 0 ? 0 : 2;
+            ImGui::MarkIniSettingsDirty();
+        };
         const auto drawSide = [&](const int* indices, int count, float x,
             float sideSpan, int side)
         {
-            if (!count) return;
+            if (!count) return 0.f;
             float minimums[8]{};
             float minimumTotal = 0.f;
             for (int i = 0; i < count; ++i)
@@ -319,28 +336,21 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
                     sections[indices[i]]);
                 minimumTotal += minimums[i];
             }
-            const float span = sideSpan;
-            const bool fitsMinimums = span >= minimumTotal;
-            const float extra = std::max(0.f, span - minimumTotal);
-            float customExtra = 0.f;
-            for (int i = 1; i < count; ++i)
-                if (sectionSized[indices[i]])
-                    customExtra += std::max(0.f,
-                        sectionWidths[indices[i]] - minimums[i]);
-            const float customScale = customExtra > extra && customExtra > 0.f
-                ? extra / customExtra : 1.f;
             float allocated[8]{};
-            float used = 0.f;
-            for (int i = 1; i < count; ++i)
+            float remaining = sideSpan;
+            float remainingMinimum = minimumTotal;
+            for (int i = 0; i < count; ++i)
             {
-                allocated[i] = fitsMinimums
-                    ? minimums[i] + (sectionSized[indices[i]]
-                        ? std::max(0.f, sectionWidths[indices[i]] - minimums[i]) *
-                            customScale : 0.f)
-                    : span * minimums[i] / minimumTotal;
-                used += allocated[i];
+                remainingMinimum -= minimums[i];
+                const int index = indices[i];
+                const float preferred = std::max(minimums[i],
+                    sectionSized[index] ? sectionWidths[index] :
+                        state.GetToolbarSectionPreferredWidth(sections[index]));
+                allocated[i] = sideSpan >= minimumTotal
+                    ? std::min(preferred, remaining - remainingMinimum)
+                    : sideSpan * minimums[i] / minimumTotal;
+                remaining -= allocated[i];
             }
-            allocated[0] = span - used;
             float cursor = x;
             for (int i = 0; i < count; ++i)
             {
@@ -349,6 +359,12 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
                 if (width < 32.f) { cursor += width; continue; }
                 sectionRects[side][rectCounts[side]++] = {index, cursor, width};
                 ImGui::PushID(index);
+                ImVec4 sectionColor = ImGui::GetStyleColorVec4(ImGuiCol_FrameBg);
+                sectionColor.w *= .55f;
+                ImGui::GetWindowDrawList()->AddRectFilled(
+                    ImVec2(cursor + 5.f, origin.y - 1.f),
+                    ImVec2(cursor + width - 3.f, origin.y + 25.f),
+                    ImGui::GetColorU32(sectionColor), 5.f);
                 if (i)
                     ImGui::GetWindowDrawList()->AddLine(
                         ImVec2(cursor + 2.f, origin.y + 2.f),
@@ -397,6 +413,17 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
                     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
                         ImGui::SetTooltip("Swap with next section");
                     ImGui::EndDisabled();
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Move to left edge"))
+                        moveToEdge(index, 0);
+                    if (ImGui::MenuItem("Move to right edge"))
+                        moveToEdge(index, 1);
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Reset toolbar layout"))
+                    {
+                        g_toolbarLayout = ToolbarLayout{};
+                        ImGui::MarkIniSettingsDirty();
+                    }
                     ImGui::EndPopup();
                 }
                 if (gripActivated)
@@ -415,31 +442,16 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
                         if (std::abs(dx) > 4.f || std::abs(dy) > 4.f)
                             dragMode = 2;
                     }
-                    if (dragMode == 1 && count == 1)
+                    if (dragMode == 1)
                     {
                         const float nextWidth = std::clamp(
-                            allocated[0] + ImGui::GetIO().MouseDelta.x,
-                            minimumTotal, sideWidth);
+                            allocated[i] + ImGui::GetIO().MouseDelta.x,
+                            minimums[i], std::max(minimums[i], sideWidth));
                         if (nextWidth != sectionWidths[index] ||
                             !sectionSized[index])
                         {
                             sectionWidths[index] = nextWidth;
                             sectionSized[index] = true;
-                            ImGui::MarkIniSettingsDirty();
-                        }
-                    }
-                    else if (dragMode == 1 && count > 1 && extra > 1.f)
-                    {
-                        const int resizedPosition = i == 0 ? 1 : i;
-                        const int resizedIndex = indices[resizedPosition];
-                        const float delta = ImGui::GetIO().MouseDelta.x *
-                            (i == 0 ? -1.f : 1.f);
-                        const float nextWidth = allocated[resizedPosition] + delta;
-                        if (nextWidth >= minimums[resizedPosition] &&
-                            allocated[0] - delta >= minimums[0])
-                        {
-                            sectionWidths[resizedIndex] = nextWidth;
-                            sectionSized[resizedIndex] = true;
                             ImGui::MarkIniSettingsDirty();
                         }
                     }
@@ -449,7 +461,7 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
                     ImGui::SetMouseCursor(dragMode == 1
                         ? ImGuiMouseCursor_ResizeEW : ImGuiMouseCursor_ResizeAll);
                     if (gripHovered && !gripActive)
-                        ImGui::SetTooltip("%s: drag to move; Shift+drag to resize; right-click for arrows",
+                        ImGui::SetTooltip("%s: drag to move; drag right divider to resize; right-click for options",
                             names[index]);
                 }
                 const ImU32 dotColor = ImGui::GetColorU32(gripHovered || gripActive
@@ -459,6 +471,30 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
                         ImGui::GetWindowDrawList()->AddCircleFilled(
                             ImVec2(gripMin.x + 5.f + column * 6.f,
                                 gripMin.y + 2.f + row * 3.f), 1.f, dotColor);
+                ImGui::SetCursorScreenPos(ImVec2(cursor + width - 6.f,
+                    origin.y + 1.f));
+                ImGui::InvisibleButton("SectionResize", ImVec2(6.f, 22.f));
+                const bool resizeHovered = ImGui::IsItemHovered();
+                const bool resizeActive = ImGui::IsItemActive();
+                if (resizeHovered || resizeActive)
+                {
+                    ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+                    if (resizeHovered && !resizeActive)
+                        ImGui::SetTooltip("Drag to resize %s", names[index]);
+                }
+                if (resizeActive && ImGui::GetIO().MouseDelta.x != 0.f)
+                {
+                    sectionWidths[index] = std::clamp(
+                        allocated[i] + ImGui::GetIO().MouseDelta.x,
+                        minimums[i], std::max(minimums[i], sideWidth));
+                    sectionSized[index] = true;
+                    ImGui::MarkIniSettingsDirty();
+                }
+                ImGui::GetWindowDrawList()->AddLine(
+                    ImVec2(cursor + width - 3.f, origin.y + 5.f),
+                    ImVec2(cursor + width - 3.f, origin.y + 19.f),
+                    ImGui::GetColorU32(resizeHovered || resizeActive
+                        ? ImGuiCol_Text : ImGuiCol_Separator));
                 if (overflow)
                 {
                     ImGui::SetCursorScreenPos(ImVec2(cursor + width - 22.f,
@@ -493,6 +529,7 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
                 ImGui::PopID();
                 cursor += width;
             }
+            return cursor - x;
         };
         int groups[2][3][8]{};
         int groupCounts[2][3]{};
@@ -526,11 +563,14 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
             const bool hasOverflow = visible < count;
             const float contentSpan = std::max(0.f,
                 span - (hasOverflow ? overflowWidth : 0.f));
-            drawSide(indices, visible, x, contentSpan, side);
+            const float usedWidth = drawSide(indices, visible, x,
+                contentSpan, side);
             if (!hasOverflow) return;
 
             ImGui::PushID(side * 3 + alignment);
-            ImGui::SetCursorScreenPos(ImVec2(x + span - 27.f, origin.y + 1.f));
+            const float overflowX = alignment == 0
+                ? x + usedWidth + 3.f : x + span - 27.f;
+            ImGui::SetCursorScreenPos(ImVec2(overflowX, origin.y + 1.f));
             if (ImGui::Button("##HiddenToolbarSections", ImVec2(24.f, 20.f)))
                 ImGui::OpenPopup("HiddenToolbarSections");
             const ImVec2 min = ImGui::GetItemRectMin();
@@ -564,9 +604,11 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
                 for (int i = 0; i < groupCounts[side][alignment]; ++i)
                 {
                     const int index = groups[side][alignment][i];
-                    desired[alignment] += std::max(
-                        state.GetToolbarSectionMinimumWidth(sections[index]),
-                        sectionWidths[index]);
+                    const float minimum =
+                        state.GetToolbarSectionMinimumWidth(sections[index]);
+                    desired[alignment] += std::max(minimum,
+                        sectionSized[index] ? sectionWidths[index] :
+                            state.GetToolbarSectionPreferredWidth(sections[index]));
                 }
                 total += desired[alignment];
             }
@@ -674,7 +716,8 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
         }
         if (state.GetToolbarVisibility().playControls)
         {
-            ImGui::SetCursorScreenPos(ImVec2(origin.x + (available - playWidth) * .5f,
+            ImGui::SetCursorScreenPos(ImVec2(origin.x +
+                (available - playWidth) * .5f,
                 origin.y + 1.f));
             const bool animationFocused = state.IsAnimationEditorFocused();
             const bool animationPlaying = state.IsAnimationPlaying();

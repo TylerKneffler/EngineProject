@@ -86,7 +86,31 @@ Engine::Serialization::JsonValue AnimationClip::Serialize() const
             .Set("tip", JsonValue(static_cast<int>(limb.tip)))
             .Set("keys", std::move(keys)));
     }
-    return value.Set("limbs", std::move(serializedLimbs));
+    value.Set("limbs", std::move(serializedLimbs));
+    JsonValue serializedControllers = JsonValue::MakeArray();
+    for (const auto& track : controllers)
+    {
+        JsonValue keys = JsonValue::MakeArray();
+        for (const auto& key : track.keys)
+            keys.Push(JsonValue::MakeObject()
+                .Set("time", JsonValue(key.time))
+                .Set("active", JsonValue(key.active))
+                .Set("fixedPosition", JsonValue(key.fixedPosition))
+                .Set("fixedRotation", JsonValue(key.fixedRotation))
+                .Set("target", FloatArray({key.target.x, key.target.y,
+                    key.target.z}))
+                .Set("fixedTarget", FloatArray({key.fixedTarget.x,
+                    key.fixedTarget.y, key.fixedTarget.z}))
+                .Set("fixedRotationEuler", FloatArray({
+                    key.fixedRotationEuler.x, key.fixedRotationEuler.y,
+                    key.fixedRotationEuler.z}))
+                .Set("pole", FloatArray({key.pole.x, key.pole.y,
+                    key.pole.z})));
+        serializedControllers.Push(JsonValue::MakeObject()
+            .Set("node", JsonValue(static_cast<int>(track.node)))
+            .Set("keys", std::move(keys)));
+    }
+    return value.Set("controllers", std::move(serializedControllers));
 }
 
 void AnimationClip::Deserialize(const JsonValue& value)
@@ -99,6 +123,7 @@ void AnimationClip::Deserialize(const JsonValue& value)
     ikSwitches.clear();
     componentMorphs.clear();
     limbs.clear();
+    controllers.clear();
     const JsonValue& visibilityKeys = value["visibility"];
     for (size_t i = 0; i < visibilityKeys.ArraySize(); ++i)
     {
@@ -200,6 +225,61 @@ void AnimationClip::Deserialize(const JsonValue& value)
             [](const LimbKey& a, const LimbKey& b) { return a.time < b.time; });
         if (!limb.keys.empty()) limbs.push_back(std::move(limb));
     }
+    const JsonValue& controllerList = value["controllers"];
+    for (size_t i = 0; i < controllerList.ArraySize(); ++i)
+    {
+        const auto& item = controllerList.ArrayAt(i);
+        ControllerTrack track;
+        track.node = static_cast<unsigned>(item["node"].AsInt());
+        const auto& keys = item["keys"];
+        for (size_t j = 0; j < keys.ArraySize(); ++j)
+        {
+            const auto& entry = keys.ArrayAt(j);
+            ControllerKey key;
+            key.time = entry["time"].AsFloat();
+            if (!std::isfinite(key.time) || key.time < 0.f) continue;
+            const auto target = ReadFloats(entry["target"]);
+            const auto fixedTarget = ReadFloats(entry["fixedTarget"]);
+            const auto fixedRotation = ReadFloats(
+                entry["fixedRotationEuler"]);
+            const auto pole = ReadFloats(entry["pole"]);
+            if (target.size() != 3 || fixedTarget.size() != 3 ||
+                fixedRotation.size() != 3 || pole.size() != 3) continue;
+            key.active = entry["active"].AsBool();
+            key.fixedPosition = entry["fixedPosition"].AsBool();
+            key.fixedRotation = entry["fixedRotation"].AsBool();
+            key.target = {target[0], target[1], target[2]};
+            key.fixedTarget = {fixedTarget[0], fixedTarget[1],
+                fixedTarget[2]};
+            key.fixedRotationEuler = {fixedRotation[0],
+                fixedRotation[1], fixedRotation[2]};
+            key.pole = {pole[0], pole[1], pole[2]};
+            const auto finite = [](glm::vec3 value) {
+                return std::isfinite(value.x) && std::isfinite(value.y) &&
+                    std::isfinite(value.z);
+            };
+            if (finite(key.target) && finite(key.fixedTarget) &&
+                finite(key.fixedRotationEuler) && finite(key.pole))
+                track.keys.push_back(key);
+        }
+        std::stable_sort(track.keys.begin(), track.keys.end(),
+            [](const ControllerKey& a, const ControllerKey& b) {
+                return a.time < b.time;
+            });
+        if (!track.keys.empty()) controllers.push_back(std::move(track));
+    }
+}
+
+AnimationClip::ControllerKey AnimationClip::SampleController(
+    const ControllerTrack& track, float time)
+{
+    if (track.keys.empty()) return {};
+    const auto next = std::upper_bound(track.keys.begin(), track.keys.end(),
+        time, [](float t, const ControllerKey& key) {
+            return t < key.time;
+        });
+    if (next == track.keys.begin()) return {};
+    return *(next - 1);
 }
 
 AnimationClip::LimbKey AnimationClip::SampleLimb(const LimbTrack& track, float time)

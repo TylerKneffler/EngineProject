@@ -73,6 +73,7 @@ public:
     // ---- Initialization ----
     bool Init();
     void InitializeUiState();
+    void CheckAssetLocations();
 
     // ---- Access ----
     ::Engine::Core::Window* GetWindow() const { return m_window.get(); }
@@ -110,6 +111,7 @@ public:
     float GetGlobalToolbarHeight() const;
     bool HasToolbarSection(ToolbarSection section) const;
     float GetToolbarSectionMinimumWidth(ToolbarSection section) const;
+    float GetToolbarSectionPreferredWidth(ToolbarSection section) const;
     ToolbarVisibility& GetToolbarVisibility() { return m_toolbarVisibility; }
     void ClosePrefabStage();
     void HandlePrefabPanelClosures();
@@ -626,6 +628,8 @@ private:
         AnimationView* view = nullptr;
         int clipIndex = -1;
         int selectedBone = -1;
+        int sampledControllerClip = -2;
+        size_t sampledControllerRig = static_cast<size_t>(-1);
         int repairIssueChannel = -1;
         int repairBoneIndex = 0;
         float playheadSeconds = 0.f;
@@ -734,6 +738,10 @@ private:
         AnimationDocument& document, AnimationDocument::RigTrack& track,
         int clipIndex);
     bool AddAnimationKey(AnimationDocument& document, bool exactTime = false);
+    bool AddAnimationPoseKeys(AnimationDocument& document,
+        const std::vector<Engine::Core::Object*>& joints);
+    bool AddAnimationControllerKeys(AnimationDocument& document,
+        bool useExistingUndo = false);
     bool AddAnimationRowKeys(AnimationDocument& document);
     bool AddAnimationIKKeys(AnimationDocument& document,
         Engine::Core::Object& upper, Engine::Core::Object& lower,

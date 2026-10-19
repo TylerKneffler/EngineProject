@@ -5,7 +5,6 @@
 #include "View/IEditorPanel.h"
 #include "Engine/Editor/Core/View/Templates/Assets/AssetPreviewCache.h"
 #include "AssetLocationIndex.h"
-#include <chrono>
 
 namespace Engine::Core { class Object; }
 namespace Engine::Scene { class Scene; }
@@ -45,12 +44,15 @@ public:
     std::function<void(const std::string&, const std::string&)> OnObjectImportRequested;
     std::function<void(Engine::Core::Object*, const std::string&)> OnPrefabCreated;
 
-    void SetSelectedPath(const std::string& path) { m_selectedPath = path; }
+    void SetSelectedPath(const std::string& path)
+    { m_selectedPath = path; m_selectedPaths.clear(); if (!path.empty()) m_selectedPaths.push_back(path); m_selectionAnchor = path; }
     bool ContainsScreenPoint(float x, float y) const
     { return m_open && m_hasScreenBounds && x >= m_screenLeft &&
         x < m_screenRight && y >= m_screenTop && y < m_screenBottom; }
     bool CopyExternalPath(const std::string& sourcePath,
-        const std::string& destinationDirectory = {});
+        const std::string& destinationDirectory = {},
+        std::string* copiedPath = nullptr);
+    void CheckForExternalMoves();
     void RecordKnownMove(const std::string& oldPath, const std::string& newPath)
     { m_locationIndex.RecordKnownMove(oldPath, newPath); }
     const std::string& GetSelectedPath() const { return m_selectedPath; }
@@ -71,11 +73,17 @@ private:
     bool MoveAssetPath(const std::string& sourcePath,
         const std::string& destinationDirectory, std::string* movedPath = nullptr);
     bool DeleteAssetPath(const std::string& path);
+    void QueueDeletePath(const std::string& path);
+    void DeleteQueuedPaths();
+    void CopySelectionToClipboard(const std::string& path, bool cut);
+    void PasteClipboard(const std::string& directory);
+    void ProcessPendingAssetDrop();
 
     // Opens a file with the system's default application (unless it's a scene file)
     void OpenFile(const std::string& filePath);
     bool AcceptSceneObject(IEditorUi& ui, const std::string& directory);
-    void SelectPath(const std::string& path);
+    void SelectPath(const std::string& path, bool multi = false,
+        bool range = false);
 
     std::string m_assetsPath;
     Engine::Scene::Scene* m_scene = nullptr;
@@ -83,6 +91,16 @@ private:
     std::string m_currentDirectory;
     std::vector<std::string> m_backHistory;
     std::string m_selectedPath;
+    std::vector<std::string> m_selectedPaths;
+    std::string m_selectionAnchor;
+    std::vector<std::string> m_visiblePaths;
+    std::vector<std::string> m_previousVisiblePaths;
+    std::vector<std::string> m_pendingDeletePaths;
+    std::vector<std::string> m_clipboardPaths;
+    bool m_clipboardCut = false;
+    std::string m_pendingPasteDirectory;
+    std::vector<std::string> m_pendingAssetDropSources;
+    std::string m_pendingAssetDropDirectory;
     bool m_gridView = false;
     char m_search[256]{};
     char m_scriptName[256]{};
@@ -101,6 +119,6 @@ private:
     float m_screenBottom = 0.f;
     AssetLocationIndex m_locationIndex;
     std::vector<AssetLocationIndex::Move> m_externalMoves;
-    std::chrono::steady_clock::time_point m_nextLocationScan{};
+    bool m_locationCheckPending = false;
 };
 }

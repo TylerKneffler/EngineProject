@@ -60,6 +60,10 @@ public:
     void SetTransformTool(EditorTransformTool tool)
     { m_toolbar.SetTransformTool(tool); }
     void SetPoseEditing(bool enabled) { m_gizmos.SetPoseEditing(enabled); }
+    void SetModelManipulation(bool enabled) { m_modelManipulation = enabled; }
+    const std::vector<Engine::Core::Object*>& ModelChangedBones() const
+    { return m_gizmos.ModelChangedBones(); }
+    bool ModelDragEnded() const { return m_gizmos.ModelDragEnded(); }
     void SetPoseTranslationHandler(std::function<bool(Engine::Core::Object*,
         const glm::vec3&)> handler)
     { m_gizmos.SetPoseTranslationHandler(std::move(handler)); }
@@ -80,6 +84,8 @@ public:
     std::function<void(Engine::Core::Object*)> OnObjectCreated;
     std::function<void()> OnDeleteSelectionRequested;
     std::function<void(bool)> OnGizmoInteraction;
+    std::function<void()> OnKeyModelControllersRequested;
+    std::function<void()> OnModelControllerEdited;
     std::function<bool(IEditorUi&)> OnDrawDocumentTools;
     std::function<void(IEditorUi&)> OnDrawBottomPanel;
     std::function<bool(IEditorUi&, const EditorUiViewportInput&,
@@ -113,6 +119,11 @@ private:
     bool m_prefabPreviewHasPlacement = false;
     bool m_focusOnNextDraw = false;
     SceneEditMode m_editMode = SceneEditMode::Object;
+    bool m_modelManipulation = false;
+    int m_modelSelectionMode = 2;
+    int m_modelAction = 0;
+    bool m_modelScrollDepth = false;
+    int m_modelScope = 1;
     EditorGizmoSystem m_gizmos;
     SceneViewportToolbar m_toolbar;
 };

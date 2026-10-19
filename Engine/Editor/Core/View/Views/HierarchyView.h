@@ -65,8 +65,14 @@ private:
     void SelectSceneRoot();
     void LogInteraction(const std::string& message) const;
     void CopySelection();
-    void PasteClipboard();
+    void CutSelection();
+    void PasteClipboard(Engine::Core::Object* target = nullptr,
+        bool useTarget = false);
     void NotifySelectionChanged();
+    void QueueDeleteObject(Engine::Core::Object* object);
+    bool MoveDraggedObjects(Engine::Core::Object* dragged,
+        Engine::Core::Object* target,
+        ::Engine::Scene::Scene::ObjectPlacement placement);
 
     Engine::Scene::Scene*  m_scene          = nullptr;
     Engine::Core::Object* m_selectedObject = nullptr;
@@ -74,8 +80,10 @@ private:
     std::vector<Engine::Core::Object*> m_selectedObjects;
     Engine::Core::Object* m_pendingDragged = nullptr;
     Engine::Core::Object* m_pendingTarget = nullptr;
+    Engine::Core::Object* m_pendingPasteTarget = nullptr;
+    bool m_hasPendingPaste = false;
     Engine::Core::Object* m_pendingAddParent = nullptr;
-    Engine::Core::Object* m_pendingDelete = nullptr;
+    std::vector<Engine::Core::Object*> m_pendingDeletes;
     Engine::Core::Object* m_pendingPrefabRoot = nullptr;
     PendingPrefabAction m_pendingPrefabAction = PendingPrefabAction::None;
     PendingAddType m_pendingAddType = PendingAddType::Empty;
@@ -91,8 +99,15 @@ private:
     EditorUiHierarchyDropPosition m_debugHoverPosition = EditorUiHierarchyDropPosition::None;
     int m_debugHoverTargetDepth = 0;
     int m_debugDropDepth = -1;
-    std::string m_objectClipboard;
-    ::Engine::Scene::Scene::ObjectPath m_clipboardSourcePath;
+    struct ClipboardObject
+    {
+        std::string serialized;
+        ::Engine::Scene::Scene::ObjectPath sourcePath;
+        Engine::Core::Object* sourceObject = nullptr;
+    };
+    std::vector<ClipboardObject> m_objectClipboard;
+    Engine::Scene::Scene* m_clipboardScene = nullptr;
+    bool m_clipboardCut = false;
     std::function<bool(const Engine::Core::Object*)> m_objectFilter;
     char m_search[128]{};
     mutable std::unordered_map<const Engine::Core::Object*, bool> m_searchMatches;

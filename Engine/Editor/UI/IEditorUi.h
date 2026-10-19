@@ -39,6 +39,8 @@ struct EditorUiViewportInput
     bool rightDown = false;
     bool middleDown = false;
     bool zoomDragDown = false;
+    bool modelDepthDown = false;
+    bool modelGroupSelectDown = false;
     float keyPanDX = 0.f;
     float keyPanDY = 0.f;
     float keyDolly = 0.f;
@@ -89,6 +91,9 @@ struct EditorUiObjectRowResult
 
 struct EditorUiContextMenuResult
 {
+    bool copyRequested = false;
+    bool cutRequested = false;
+    bool pasteRequested = false;
     bool addRequested = false;
     bool addSpriteRequested = false;
     bool addLightProbeRequested = false;
@@ -100,6 +105,9 @@ struct EditorUiContextMenuResult
 
 struct EditorUiPrefabMenuResult
 {
+    bool copyRequested = false;
+    bool cutRequested = false;
+    bool pasteRequested = false;
     bool editRequested = false;
     bool applyRequested = false;
     bool applyAllRequested = false;
@@ -119,10 +127,14 @@ struct EditorUiAssetCreateMenuResult
 {
     bool folderRequested = false;
     bool scriptRequested = false;
+    bool pasteRequested = false;
 };
 
 struct EditorUiAssetItemMenuResult
 {
+    bool copyRequested = false;
+    bool cutRequested = false;
+    bool pasteRequested = false;
     bool renameRequested = false;
     bool deleteRequested = false;
     bool packMeshesRequested = false;
@@ -236,14 +248,16 @@ public:
     virtual EditorUiContextMenuResult ContextMenu(const void* id,
         const char* addLabel, const char* deleteLabel,
         bool objectCreationMenu = false,
-        const char* unpackLabel = nullptr) = 0;
-    virtual EditorUiAssetCreateMenuResult AssetWindowContextMenu() = 0;
+        const char* unpackLabel = nullptr,
+        bool clipboardActions = false, bool canPaste = false) = 0;
+    virtual EditorUiAssetCreateMenuResult AssetWindowContextMenu(bool canPaste) = 0;
     virtual EditorUiAssetItemMenuResult AssetItemContextMenu(const void* id,
-        bool canPackMeshes = false, bool canExtractMeshes = false) = 0;
+        bool canPackMeshes = false, bool canExtractMeshes = false,
+        bool isDirectory = false, bool canPaste = false) = 0;
     virtual EditorUiTextEditResult RenameText(const char* label, char* buffer,
         size_t size, bool focus) = 0;
     virtual EditorUiPrefabMenuResult PrefabOverrideMenu(const void* id,
-        bool hasOverrides) = 0;
+        bool hasOverrides, bool canPaste = false) = 0;
     virtual bool BeginChild(const char* id) = 0;
     virtual bool BeginChildRegion(const char* id, float)
     { return BeginChild(id); }
@@ -254,6 +268,7 @@ public:
     virtual bool IsAnyItemActive() const { return false; }
     virtual bool IsWindowBackgroundClicked() const = 0;
     virtual bool CopyShortcutPressed() const = 0;
+    virtual bool CutShortcutPressed() const = 0;
     virtual bool PasteShortcutPressed() const = 0;
     virtual bool DeleteShortcutPressed() const = 0;
     virtual bool IsMultiSelectModifierDown() const { return false; }

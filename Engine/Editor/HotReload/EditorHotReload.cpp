@@ -181,6 +181,7 @@ void EditorHotReload::PollCompile()
         Log(ConsoleView::Level::Error,
             "Script compilation failed; the last working scripts are still active.");
         m_editorState.SetLoadingOverlay(false);
+        m_editorState.CheckAssetLocations();
         return;
     }
 
@@ -193,6 +194,7 @@ void EditorHotReload::PollCompile()
     Log(applied ? ConsoleView::Level::Info : ConsoleView::Level::Error,
         applied ? "Scripts compiled and loaded." :
         "Could not load compiled scripts; the last working scripts are still active.");
+    m_editorState.CheckAssetLocations();
 }
 
 bool EditorHotReload::LoadModule(const std::filesystem::path& path,

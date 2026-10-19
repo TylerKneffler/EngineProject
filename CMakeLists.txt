@@ -1109,6 +1109,18 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PoseControllerSerializationTests.cpp")
+    enable_testing()
+    add_executable(PoseControllerSerializationTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/PoseControllerSerializationTests.cpp")
+    target_link_libraries(PoseControllerSerializationTests PRIVATE Engine)
+    target_include_directories(PoseControllerSerializationTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME PoseControllerSerialization
+        COMMAND PoseControllerSerializationTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/ChainIKTests.cpp")
     enable_testing()
     add_executable(ChainIKTests EXCLUDE_FROM_ALL

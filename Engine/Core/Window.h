@@ -78,6 +78,7 @@ public:
     std::function<void()> OnInputEnd;
     std::function<void()> OnEscapePressed;
     std::function<void()> OnApplicationFocusLost;
+    std::function<void()> OnApplicationFocusGained;
     std::function<void(uint32_t w, uint32_t h)> OnResize;
     std::function<void(const std::vector<std::string>&, int, int)> OnFilesDropped;
     std::function<bool(HWND, UINT, WPARAM, LPARAM)> WndProcHook;

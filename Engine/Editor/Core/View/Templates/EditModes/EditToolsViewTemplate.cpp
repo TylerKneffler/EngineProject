@@ -364,6 +364,39 @@ float EditorState::GetToolbarSectionMinimumWidth(ToolbarSection section) const
     return controlWidth + 34.f;
 }
 
+float EditorState::GetToolbarSectionPreferredWidth(ToolbarSection section) const
+{
+    float width = GetToolbarSectionMinimumWidth(section);
+    const float spacing = ImGui::GetStyle().ItemSpacing.x;
+    if (section == ToolbarSection::File)
+    {
+        const std::string saveAll = ToolbarIconLabel(0xE74E, u8"\uE74E",
+            " All", "PreferredSaveAll", "Save All");
+        width += spacing + ToolbarButtonWidth(saveAll.c_str());
+    }
+    else if (section == ToolbarSection::Edit)
+    {
+        const std::string redo = ToolbarIconLabel(0xE7A6, u8"\uE7A6",
+            "", "PreferredRedo", "Redo");
+        width += spacing + ToolbarButtonWidth(redo.c_str());
+    }
+    else if (section == ToolbarSection::View)
+        width += 3.f * (28.f + spacing);
+    else if (section == ToolbarSection::Mode && !m_activeAnimationDocument &&
+        !m_activeAssetDocument && m_toolbarVisibility.modeTools)
+    {
+        const MeshEditSession& mesh = m_activeSceneAssetDocument
+            ? m_activeSceneAssetDocument->meshEdit
+            : m_prefabDocumentFocused ? m_prefabMeshEdit : m_mainMeshEdit;
+        const SkeletonEditSession& skeleton = m_activeSceneAssetDocument
+            ? m_activeSceneAssetDocument->skeletonEdit
+            : m_prefabDocumentFocused ? m_prefabSkeletonEdit : m_mainSkeletonEdit;
+        if (skeleton.enabled) width += 110.f + spacing;
+        else if (mesh.enabled) width += 150.f + 2.f * spacing;
+    }
+    return width;
+}
+
 void EditorState::DrawToolbarTools(IEditorUi& ui, bool singleRow,
     bool* overflow)
 {

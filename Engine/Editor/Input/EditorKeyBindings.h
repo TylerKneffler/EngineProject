@@ -13,6 +13,7 @@ enum class EditorCommand
     SaveScene,
     SaveAll,
     Copy,
+    Cut,
     Paste,
     Build,
     BuildAndPlay,

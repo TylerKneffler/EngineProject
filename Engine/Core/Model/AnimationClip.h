@@ -47,6 +47,22 @@ struct AnimationClip
         unsigned upper = 0, lower = 0, tip = 0;
         std::vector<LimbKey> keys;
     };
+    struct ControllerKey
+    {
+        float time = 0.f;
+        bool active = false;
+        bool fixedPosition = false;
+        bool fixedRotation = false;
+        glm::vec3 target{0.f};
+        glm::vec3 fixedTarget{0.f};
+        glm::vec3 fixedRotationEuler{0.f};
+        glm::vec3 pole{0.f};
+    };
+    struct ControllerTrack
+    {
+        unsigned node = 0;
+        std::vector<ControllerKey> keys;
+    };
     std::string clipName;
     float duration = 0.f;
     bool looping = true;
@@ -55,8 +71,11 @@ struct AnimationClip
     std::vector<IkSwitchKey> ikSwitches;
     std::vector<ComponentMorphTrack> componentMorphs;
     std::vector<LimbTrack> limbs;
+    std::vector<ControllerTrack> controllers;
 
     static LimbKey SampleLimb(const LimbTrack& track, float time);
+    static ControllerKey SampleController(const ControllerTrack& track,
+        float time);
 
     Engine::Serialization::JsonValue Serialize() const;
     void Deserialize(const Engine::Serialization::JsonValue& value);

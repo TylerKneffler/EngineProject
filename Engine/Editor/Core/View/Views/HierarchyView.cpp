@@ -67,12 +67,68 @@ bool CanMoveInPrefabContext(Engine::Scene::Scene* scene, Engine::Core::Object* o
 
 void HierarchyView::RequestDeleteSelectedObject()
 {
-    if (!m_allowDelete || !m_selectedObject)
-        return;
-    if (Engine::Core::Object* prefabRoot = m_selectedObject->GetPrefabInstanceRoot())
-        m_pendingDelete = prefabRoot;
+    if (m_allowDelete && m_selectedObject)
+        QueueDeleteObject(m_selectedObject);
+}
+
+void HierarchyView::QueueDeleteObject(Engine::Core::Object* object)
+{
+    if (!m_allowDelete || !object) return;
+    if (m_objectFilter && (!m_allowFilteredContextActions ||
+        object == m_filteredContextRoot)) return;
+    const bool selectedObject = std::find(m_selectedObjects.begin(),
+        m_selectedObjects.end(), object) != m_selectedObjects.end();
+    if (Engine::Core::Object* prefabRoot = object->GetPrefabInstanceRoot())
+        object = prefabRoot;
+    if (m_objectFilter && object == m_filteredContextRoot) return;
+    if (selectedObject)
+    {
+        for (Engine::Core::Object* selected : m_selectedObjects)
+        {
+            if (m_objectFilter && selected == m_filteredContextRoot) continue;
+            Engine::Core::Object* target = selected->GetPrefabInstanceRoot();
+            if (m_objectFilter && target == m_filteredContextRoot) continue;
+            m_pendingDeletes.push_back(target ? target : selected);
+        }
+    }
     else
-        m_pendingDelete = m_selectedObject;
+        m_pendingDeletes.push_back(object);
+}
+
+bool HierarchyView::MoveDraggedObjects(Engine::Core::Object* dragged,
+    Engine::Core::Object* target,
+    ::Engine::Scene::Scene::ObjectPlacement placement)
+{
+    if (!m_scene || !dragged || (m_objectFilter && !m_allowFilteredReparent))
+        return false;
+    const bool inSelection = std::find(m_selectedObjects.begin(),
+        m_selectedObjects.end(), dragged) != m_selectedObjects.end();
+    const std::vector<Engine::Core::Object*> candidates = inSelection
+        ? m_selectedObjects : std::vector<Engine::Core::Object*>{ dragged };
+    std::vector<Engine::Core::Object*> roots;
+    for (Engine::Core::Object* candidate : candidates)
+    {
+        bool nested = false;
+        for (Engine::Core::Object* parent = candidate->Parent; parent;
+            parent = parent->Parent)
+            if (std::find(candidates.begin(), candidates.end(), parent) !=
+                candidates.end()) { nested = true; break; }
+        if (!nested) roots.push_back(candidate);
+    }
+    for (Engine::Core::Object* root : roots)
+    {
+        for (Engine::Core::Object* parent = target; parent;
+            parent = parent->Parent)
+            if (parent == root) return false;
+        if (!CanMoveInPrefabContext(m_scene, root, target, placement))
+            return false;
+    }
+    if (placement == ::Engine::Scene::Scene::ObjectPlacement::After)
+        std::reverse(roots.begin(), roots.end());
+    bool moved = false;
+    for (Engine::Core::Object* root : roots)
+        moved = m_scene->MoveObject(root, target, placement) || moved;
+    return moved;
 }
 
 void HierarchyView::DrawPanel(IEditorUi& ui)
@@ -102,9 +158,11 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
     m_searchMatches.clear();
     ui.Separator();
     const bool copyRequested = ui.CopyShortcutPressed();
+    const bool cutRequested = ui.CutShortcutPressed();
     const bool pasteRequested = ui.PasteShortcutPressed();
     const bool deleteRequested = ui.DeleteShortcutPressed();
     if (copyRequested) CopySelection();
+    if (cutRequested) CutSelection();
     if (pasteRequested) PasteClipboard();
     if (deleteRequested && m_allowDelete) RequestDeleteSelectedObject();
     m_dragObservedThisFrame = false;
@@ -113,7 +171,10 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
         this, "World", m_selectedObject == nullptr, false, true);
     const EditorUiContextMenuResult worldMenu = m_objectFilter
         ? EditorUiContextMenuResult{}
-        : ui.ContextMenu(this, "Create", nullptr, true);
+        : ui.ContextMenu(this, "Create", nullptr, true, nullptr, true,
+            !m_objectClipboard.empty());
+    if (worldMenu.pasteRequested)
+        PasteClipboard(nullptr, true);
     if (worldMenu.addRequested || !worldMenu.primitive3D.empty() ||
         worldMenu.addSpriteRequested || worldMenu.addLightProbeRequested ||
         worldMenu.addLightProbeGroupRequested)
@@ -161,6 +222,12 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
             DrawObjectNode(ui, roots[index], 0, index + 1 == roots.size());
         ui.TreePop();
     }
+    if (m_hasPendingPaste)
+    {
+        PasteClipboard(m_pendingPasteTarget, true);
+        m_pendingPasteTarget = nullptr;
+        m_hasPendingPaste = false;
+    }
     if (m_pendingPrefabRoot && m_pendingPrefabAction != PendingPrefabAction::None)
     {
         bool changed = false;
@@ -184,15 +251,27 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
         m_pendingPrefabAction = PendingPrefabAction::None;
         if (changed && OnHierarchyChanged) OnHierarchyChanged();
     }
-    if (m_pendingDelete)
+    if (!m_pendingDeletes.empty())
     {
-        const std::string deletedName = ObjectName(m_pendingDelete);
-        const auto isDeleted = [this](Engine::Core::Object* selected)
+        std::vector<Engine::Core::Object*> roots;
+        for (Engine::Core::Object* candidate : m_pendingDeletes)
+        {
+            if (!candidate || std::find(roots.begin(), roots.end(), candidate) != roots.end())
+                continue;
+            bool covered = false;
+            for (Engine::Core::Object* parent = candidate->Parent; parent; parent = parent->Parent)
+                if (std::find(m_pendingDeletes.begin(), m_pendingDeletes.end(), parent) !=
+                    m_pendingDeletes.end()) { covered = true; break; }
+            if (!covered) roots.push_back(candidate);
+        }
+        const auto isDeleted = [&roots](Engine::Core::Object* selected)
         {
             for (Engine::Core::Object* current = selected; current; current = current->Parent)
-                if (current == m_pendingDelete) return true;
+                if (std::find(roots.begin(), roots.end(), current) != roots.end()) return true;
             return false;
         };
+        if (m_selectionAnchor && isDeleted(m_selectionAnchor))
+            m_selectionAnchor = nullptr;
         const auto newEnd = std::remove_if(m_selectedObjects.begin(),
             m_selectedObjects.end(), isDeleted);
         if (newEnd != m_selectedObjects.end())
@@ -201,9 +280,13 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
             m_selectedObject = m_selectedObjects.empty() ? nullptr : m_selectedObjects.back();
             NotifySelectionChanged();
         }
-        m_scene->RemoveObject(m_pendingDelete);
-        LogInteraction("Deleted '" + deletedName + "' and its child hierarchy");
-        m_pendingDelete = nullptr;
+        for (Engine::Core::Object* root : roots)
+        {
+            const std::string deletedName = ObjectName(root);
+            m_scene->RemoveObject(root);
+            LogInteraction("Deleted '" + deletedName + "' and its child hierarchy");
+        }
+        m_pendingDeletes.clear();
         if (OnHierarchyChanged) OnHierarchyChanged();
     }
     if (m_hasPendingAdd)
@@ -293,11 +376,8 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
     {
         const std::string sourceName = ObjectName(m_pendingDragged);
         const std::string targetName = ObjectName(m_pendingTarget);
-        const bool moved = (!m_objectFilter || m_allowFilteredReparent) &&
-            CanMoveInPrefabContext(
-            m_scene, m_pendingDragged, m_pendingTarget, m_pendingPlacement) &&
-            m_scene->MoveObject(
-                m_pendingDragged, m_pendingTarget, m_pendingPlacement);
+        const bool moved = MoveDraggedObjects(m_pendingDragged,
+            m_pendingTarget, m_pendingPlacement);
         LogInteraction(std::string(moved ? "Move succeeded: '" : "Move rejected: '") +
             sourceName + "' -> '" + targetName + "'");
         if (moved && OnHierarchyChanged) OnHierarchyChanged();
@@ -341,11 +421,8 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
             LogInteraction("Release recovered at last valid target: '" + sourceName +
                 "' -> '" + targetName + "' (" + PlacementName(m_debugHoverPosition) +
                 ", depth " + std::to_string(m_debugDropDepth) + ")");
-            const bool moved = (!m_objectFilter || m_allowFilteredReparent) &&
-                CanMoveInPrefabContext(
-                m_scene, m_debugDragSource, resolvedTarget, placement) &&
-                m_scene->MoveObject(
-                    m_debugDragSource, resolvedTarget, placement);
+            const bool moved = MoveDraggedObjects(m_debugDragSource,
+                resolvedTarget, placement);
             LogInteraction(std::string(moved ? "Move succeeded: '" : "Move rejected: '") +
                 sourceName + "' -> '" + targetName + "'");
             if (moved && OnHierarchyChanged) OnHierarchyChanged();
@@ -371,44 +448,143 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
 
 void HierarchyView::CopySelection()
 {
-    if (!m_scene || !m_selectedObject)
-        return;
-    m_objectClipboard = Engine::Serialization::SceneSerializer::SaveObjectToString(*m_selectedObject);
-    m_clipboardSourcePath.clear();
-    m_scene->TryGetObjectPath(m_selectedObject, m_clipboardSourcePath);
-    LogInteraction("Copied '" + ObjectName(m_selectedObject) + "' with " +
-        std::to_string(m_selectedObject->Children.size()) + " direct child object(s)");
+    if (!m_scene || m_selectedObjects.empty()) return;
+    m_objectClipboard.clear();
+    m_clipboardCut = false;
+    m_clipboardScene = m_scene;
+    for (Engine::Core::Object* object : m_selectedObjects)
+    {
+        bool nested = false;
+        for (Engine::Core::Object* parent = object->Parent; parent; parent = parent->Parent)
+            if (std::find(m_selectedObjects.begin(), m_selectedObjects.end(), parent) !=
+                m_selectedObjects.end()) { nested = true; break; }
+        if (nested) continue;
+        ClipboardObject copied;
+        copied.serialized = Engine::Serialization::SceneSerializer::SaveObjectToString(*object);
+        copied.sourceObject = object;
+        m_scene->TryGetObjectPath(object, copied.sourcePath);
+        m_objectClipboard.push_back(std::move(copied));
+    }
+    LogInteraction("Copied " + std::to_string(m_objectClipboard.size()) +
+        " object hierarchy(s)");
 }
 
-void HierarchyView::PasteClipboard()
+void HierarchyView::CutSelection()
+{
+    if (!m_scene || m_selectedObjects.empty()) return;
+    CopySelection();
+    if (!m_objectClipboard.empty())
+        m_clipboardCut = true;
+}
+
+void HierarchyView::PasteClipboard(Engine::Core::Object* pasteTarget,
+    bool useTarget)
 {
     if (!m_scene || m_objectClipboard.empty())
         return;
+    if (m_clipboardCut && m_clipboardScene != m_scene)
+        return;
 
-    Engine::Core::Object* source = m_scene->FindObjectByPath(m_clipboardSourcePath);
-    Engine::Core::Object* pasted = Engine::Serialization::SceneSerializer::InstantiateObjectFromString(
-        *m_scene, m_objectClipboard, m_scene->GetGraphicsProvider());
-    if (!pasted)
+    std::vector<Engine::Core::Object*> sources;
+    for (const ClipboardObject& copied : m_objectClipboard)
+    {
+        if (m_clipboardCut)
+        {
+            const auto& objects = m_scene->GetObjects();
+            const bool exists = std::any_of(objects.begin(), objects.end(),
+                [&copied](const auto& object)
+                { return object.get() == copied.sourceObject; });
+            sources.push_back(exists ? copied.sourceObject : nullptr);
+        }
+        else
+            sources.push_back(m_scene->FindObjectByPath(copied.sourcePath));
+    }
+    if (m_clipboardCut)
+    {
+        Engine::Core::Object* target = useTarget ? pasteTarget : m_selectedObject;
+        if (!useTarget)
+            for (Engine::Core::Object* source : sources)
+                for (Engine::Core::Object* parent = target; parent; parent = parent->Parent)
+                    if (parent == source) { target = source->Parent; break; }
+        std::vector<Engine::Core::Object*> movedObjects;
+        std::vector<ClipboardObject> remaining;
+        for (size_t index = 0; index < sources.size(); ++index)
+        {
+            Engine::Core::Object* source = sources[index];
+            if (source && (!m_objectFilter || m_allowFilteredReparent) &&
+                CanMoveInPrefabContext(m_scene, source, target,
+                    ::Engine::Scene::Scene::ObjectPlacement::AsChild) &&
+                m_scene->MoveObject(source, target,
+                    ::Engine::Scene::Scene::ObjectPlacement::AsChild))
+                movedObjects.push_back(source);
+            else
+                remaining.push_back(m_objectClipboard[index]);
+        }
+        m_objectClipboard = std::move(remaining);
+        if (movedObjects.empty()) return;
+        m_selectedObjects = std::move(movedObjects);
+        m_selectedObject = m_selectedObjects.back();
+        m_selectionAnchor = m_selectedObject;
+        NotifySelectionChanged();
+        if (OnHierarchyChanged) OnHierarchyChanged();
+        if (m_objectClipboard.empty()) m_clipboardCut = false;
+        LogInteraction("Moved " + std::to_string(m_selectedObjects.size()) +
+            " object hierarchy(s)");
+        return;
+    }
+    std::vector<Engine::Core::Object*> pastedObjects;
+    std::vector<Engine::Core::Object*> pastedByIndex(m_objectClipboard.size(), nullptr);
+    for (size_t index = 0; index < m_objectClipboard.size(); ++index)
+    {
+        ClipboardObject& copied = m_objectClipboard[index];
+        Engine::Core::Object* source = sources[index];
+        Engine::Core::Object* pasted =
+            Engine::Serialization::SceneSerializer::InstantiateObjectFromString(
+                *m_scene, copied.serialized, m_scene->GetGraphicsProvider());
+        if (!pasted) continue;
+        const glm::vec3 localPosition = pasted->transform.position;
+        const glm::vec3 localRotation = pasted->transform.rotation;
+        const glm::vec3 localScale = pasted->transform.scale;
+        if (useTarget)
+        {
+            if (pasteTarget && !m_scene->MoveObject(pasted, pasteTarget,
+                ::Engine::Scene::Scene::ObjectPlacement::AsChild))
+            {
+                m_scene->RemoveObject(pasted);
+                continue;
+            }
+            pasted->transform.position = localPosition;
+            pasted->transform.rotation = localRotation;
+            pasted->transform.scale = localScale;
+        }
+        else if (source)
+        {
+            m_scene->MoveObject(pasted, source,
+                ::Engine::Scene::Scene::ObjectPlacement::After);
+            pasted->transform.position = localPosition;
+            pasted->transform.rotation = localRotation;
+            pasted->transform.scale = localScale;
+        }
+        pasted->name += " (Copy)";
+        pastedByIndex[index] = pasted;
+        pastedObjects.push_back(pasted);
+    }
+    if (pastedObjects.empty())
     {
         LogInteraction("Paste failed: copied object data could not be instantiated");
         return;
     }
-
-    const glm::vec3 localPosition = pasted->transform.position;
-    const glm::vec3 localRotation = pasted->transform.rotation;
-    const glm::vec3 localScale = pasted->transform.scale;
-    if (source)
-    {
-        m_scene->MoveObject(pasted, source, ::Engine::Scene::Scene::ObjectPlacement::After);
-        pasted->transform.position = localPosition;
-        pasted->transform.rotation = localRotation;
-        pasted->transform.scale = localScale;
-    }
-    pasted->name += " (Copy)";
-    SetSelectedObject(pasted);
-    m_scene->TryGetObjectPath(pasted, m_clipboardSourcePath);
+    for (size_t index = 0; index < pastedByIndex.size(); ++index)
+        if (pastedByIndex[index])
+            m_scene->TryGetObjectPath(pastedByIndex[index],
+                m_objectClipboard[index].sourcePath);
+    m_selectedObjects = std::move(pastedObjects);
+    m_selectedObject = m_selectedObjects.back();
+    m_selectionAnchor = m_selectedObject;
+    NotifySelectionChanged();
     if (OnHierarchyChanged) OnHierarchyChanged();
-    LogInteraction("Pasted '" + ObjectName(pasted) + "' with its child hierarchy");
+    LogInteraction("Pasted " + std::to_string(m_selectedObjects.size()) +
+        " object hierarchy(s)");
 }
 
 void HierarchyView::SetDebugInteractionLogging(bool enabled)
@@ -523,6 +699,7 @@ void HierarchyView::DrawObjectNode(
     const bool editableHierarchy = prefabRoot == nullptr;
     const bool deletable = editableHierarchy || prefabRoot == obj;
     EditorUiContextMenuResult menu;
+    bool contextCopy = false, contextCut = false, contextPaste = false;
     if (m_objectFilter && m_allowSkeletonContextActions)
     {
         // These actions only change the editor selection. Imported model
@@ -538,7 +715,11 @@ void HierarchyView::DrawObjectNode(
     else if (prefabRoot)
     {
         const EditorUiPrefabMenuResult prefabMenu = ui.PrefabOverrideMenu(obj,
-            Engine::Serialization::SceneSerializer::HasPrefabOverrides(*prefabRoot, true));
+            Engine::Serialization::SceneSerializer::HasPrefabOverrides(*prefabRoot, true),
+            !m_objectClipboard.empty());
+        contextCopy = prefabMenu.copyRequested;
+        contextCut = prefabMenu.cutRequested;
+        contextPaste = prefabMenu.pasteRequested;
         if (prefabMenu.editRequested && prefabRoot->Prefab && OnPrefabRequested)
             OnPrefabRequested(prefabRoot->Prefab->GetPath());
         if (prefabMenu.applyRequested)
@@ -550,7 +731,7 @@ void HierarchyView::DrawObjectNode(
         if (prefabMenu.unpackRequested)
             m_pendingPrefabAction = PendingPrefabAction::Unpack;
         if (prefabMenu.deleteRequested)
-            m_pendingDelete = prefabRoot;
+            QueueDeleteObject(obj);
         if (m_pendingPrefabAction != PendingPrefabAction::None)
             m_pendingPrefabRoot = prefabRoot;
     }
@@ -561,7 +742,23 @@ void HierarchyView::DrawObjectNode(
             : deletable;
         menu = ui.ContextMenu(obj,
             m_objectFilter ? "Add Child" : "Create",
-            canDelete ? "Delete Object" : nullptr, true);
+            canDelete ? "Delete Object" : nullptr, true, nullptr,
+            true, !m_objectClipboard.empty());
+    }
+    contextCopy = contextCopy || menu.copyRequested;
+    contextCut = contextCut || menu.cutRequested;
+    contextPaste = contextPaste || menu.pasteRequested;
+    if (contextCopy || contextCut)
+    {
+        if (std::find(m_selectedObjects.begin(), m_selectedObjects.end(), obj) ==
+            m_selectedObjects.end()) SetSelectedObject(obj);
+        if (contextCopy) CopySelection();
+        else CutSelection();
+    }
+    if (contextPaste)
+    {
+        m_pendingPasteTarget = obj;
+        m_hasPendingPaste = true;
     }
     if (menu.addRequested || !menu.primitive3D.empty() || menu.addSpriteRequested ||
         menu.addLightProbeRequested || menu.addLightProbeGroupRequested)
@@ -576,7 +773,7 @@ void HierarchyView::DrawObjectNode(
         m_hasPendingAdd = true;
     }
     if (menu.deleteRequested)
-        m_pendingDelete = obj;
+        QueueDeleteObject(obj);
     if (row.nameChanged)
     {
         obj->name = name;
@@ -584,9 +781,17 @@ void HierarchyView::DrawObjectNode(
     }
     if (row.enabledChanged)
     {
-        enabled ? obj->Enabled() : obj->Disabled();
-        obj->InvalidatePrefabOverrideCache();
-        LogInteraction("Set '" + ObjectName(obj) + "' " + (enabled ? "enabled" : "disabled"));
+        const bool inSelection = std::find(m_selectedObjects.begin(),
+            m_selectedObjects.end(), obj) != m_selectedObjects.end();
+        const std::vector<Engine::Core::Object*> targets = inSelection
+            ? m_selectedObjects : std::vector<Engine::Core::Object*>{ obj };
+        for (Engine::Core::Object* target : targets)
+        {
+            enabled ? target->Enabled() : target->Disabled();
+            target->InvalidatePrefabOverrideCache();
+        }
+        LogInteraction("Set " + std::to_string(targets.size()) +
+            " object(s) " + (enabled ? "enabled" : "disabled"));
     }
     if ((row.nameChanged || row.enabledChanged) && OnHierarchyChanged)
         OnHierarchyChanged();
@@ -611,6 +816,12 @@ void HierarchyView::DrawObjectNode(
                 const auto first = anchor < clicked ? anchor : clicked;
                 const auto last = anchor < clicked ? clicked : anchor;
                 m_selectedObjects.assign(first, std::next(last));
+                if (m_selectedObjects.back() != obj)
+                {
+                    m_selectedObjects.erase(std::find(m_selectedObjects.begin(),
+                        m_selectedObjects.end(), obj));
+                    m_selectedObjects.push_back(obj);
+                }
                 m_selectedObject = obj;
                 NotifySelectionChanged();
             }

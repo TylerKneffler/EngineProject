@@ -803,6 +803,7 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
         view->SetDocumentPath(path);
         view->SetEditMode(SceneEditMode::Skeleton);
         view->SetPoseEditing(true);
+        view->SetModelManipulation(true);
         view->SetTransformTool(EditorTransformTool::Rotate);
         view->AllowObjectCreation = false;
         view->AllowAssetDrops = false;
@@ -908,7 +909,9 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
                 {
                     raw->gizmoWasActive = false;
                     auto* bone = raw->gizmoDragBone;
-                    const bool changed = raw->gizmoDragIK || (bone &&
+                    const bool changed = raw->gizmoDragIK ||
+                        (raw->view && raw->view->ModelDragEnded() &&
+                            !raw->view->ModelChangedBones().empty()) || (bone &&
                         (bone->transform.position !=
                             raw->gizmoDragStartPosition ||
                          bone->transform.rotation !=
@@ -918,15 +921,77 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
                     raw->gizmoDragBone = nullptr;
                     if (raw->autoKey && changed)
                     {
+                        const bool modelDrag = raw->view && raw->view->ModelDragEnded();
+                        std::vector<std::pair<Engine::Components::AnimationBone*,
+                            Engine::Model::AnimationClip::ControllerKey>>
+                            controllerState;
+                        if (modelDrag && raw->poseSkeleton)
+                            for (auto* joint : raw->poseSkeleton->ResolveJoints())
+                                if (auto* controller = joint ?
+                                        joint->GetComponent<
+                                            Engine::Components::AnimationBone>()
+                                        : nullptr)
+                                {
+                                    Engine::Model::AnimationClip::ControllerKey state;
+                                    state.active = controller->poseControllerActive;
+                                    state.target = controller->poseControllerTarget;
+                                    state.fixedPosition = controller->posePinPosition;
+                                    state.fixedRotation = controller->posePinRotation;
+                                    state.fixedTarget = controller->posePinTarget;
+                                    state.fixedRotationEuler =
+                                        controller->posePinRotationEuler;
+                                    state.pole = controller->posePinPole;
+                                    controllerState.emplace_back(controller, state);
+                                }
+                        std::vector<Engine::Core::Object*> affected = modelDrag
+                            ? raw->view->ModelChangedBones()
+                            : std::vector<Engine::Core::Object*>{};
+                        bool poseKeyed = false;
                         if (raw->gizmoDragIK && bone && bone->Parent && bone->Parent->Parent)
-                            AddAnimationLimbKey(*raw, *bone->Parent->Parent, *bone->Parent,
+                        {
+                            poseKeyed = AddAnimationLimbKey(*raw,
+                                *bone->Parent->Parent, *bone->Parent,
                                 *bone, false);
-                        else AddAnimationKey(*raw);
+                            affected.erase(std::remove_if(affected.begin(),
+                                affected.end(), [bone](Engine::Core::Object* item) {
+                                    return item == bone || item == bone->Parent ||
+                                        item == bone->Parent->Parent;
+                                }), affected.end());
+                        }
+                        if (!affected.empty())
+                            poseKeyed = AddAnimationPoseKeys(*raw, affected) ||
+                                poseKeyed;
+                        else if (!raw->gizmoDragIK)
+                            poseKeyed = AddAnimationKey(*raw) || poseKeyed;
+                        if (modelDrag)
+                        {
+                            // Pose keying resamples the preview. Restore the
+                            // controller targets reached by this drag before
+                            // recording their key at the same playhead.
+                            for (const auto& [controller, state] : controllerState)
+                            {
+                                controller->poseControllerActive = state.active;
+                                controller->poseControllerTarget = state.target;
+                                controller->posePinPosition = state.fixedPosition;
+                                controller->posePinRotation = state.fixedRotation;
+                                controller->posePinTarget = state.fixedTarget;
+                                controller->posePinRotationEuler =
+                                    state.fixedRotationEuler;
+                                controller->posePinPole = state.pole;
+                            }
+                            AddAnimationControllerKeys(*raw, poseKeyed);
+                        }
                     }
                     raw->gizmoDragIK = false;
                 }
             }
             if (m_renderer && active) m_renderer->MarkDirty();
+        };
+        view->OnKeyModelControllersRequested = [this, raw]()
+        { AddAnimationControllerKeys(*raw); };
+        view->OnModelControllerEdited = [this, raw]()
+        {
+            if (raw->autoKey) AddAnimationControllerKeys(*raw);
         };
         view->OnFocused = [this, raw]()
         { SetActiveAnimationDocument(raw); };
@@ -1105,6 +1170,12 @@ EditorState::AnimationDocument::CachedClip& EditorState::CachedAnimationClip(
     {
         auto& times = cached.keyTimes[channel.nodeIndex];
         times.insert(times.end(), channel.times.begin(), channel.times.end());
+    }
+    for (const auto& controller : cached.compatible.controllers)
+    {
+        auto& times = cached.keyTimes[controller.node];
+        for (const auto& controllerKey : controller.keys)
+            times.push_back(controllerKey.time);
     }
     for (auto& [node, times] : cached.keyTimes)
     {
@@ -1317,6 +1388,65 @@ void EditorState::SampleAnimationDocument(AnimationDocument& document)
     document.poseManager->holdCurrentPoseWhenStopped = false;
     document.poseManager->Tick(0.f);
     document.poseManager->holdCurrentPoseWhenStopped = true;
+    if (document.sampledControllerClip != clipIndex ||
+        document.sampledControllerRig != document.rigIndex)
+    {
+        auto* sourceSkeleton = RigAt(*document.sourceScene,
+            document.rigIndex);
+        if (sourceSkeleton)
+            for (auto* sourceJoint : sourceSkeleton->ResolveJoints())
+            {
+                const auto* sourceBone = sourceJoint ?
+                    sourceJoint->GetComponent<
+                        Engine::Components::AnimationBone>() : nullptr;
+                if (!sourceBone) continue;
+                for (auto* poseJoint : document.poseSkeleton->ResolveJoints())
+                    if (auto* poseBone = poseJoint ?
+                            poseJoint->GetComponent<
+                                Engine::Components::AnimationBone>() : nullptr;
+                        poseBone && poseBone->nodeIndex ==
+                            sourceBone->nodeIndex)
+                    {
+                        poseBone->poseControllerActive =
+                            sourceBone->poseControllerActive;
+                        poseBone->poseControllerTarget =
+                            sourceBone->poseControllerTarget;
+                        poseBone->posePinPosition =
+                            sourceBone->posePinPosition;
+                        poseBone->posePinRotation =
+                            sourceBone->posePinRotation;
+                        poseBone->posePinTarget = sourceBone->posePinTarget;
+                        poseBone->posePinRotationEuler =
+                            sourceBone->posePinRotationEuler;
+                        poseBone->posePinPole = sourceBone->posePinPole;
+                        break;
+                    }
+            }
+        document.sampledControllerClip = clipIndex;
+        document.sampledControllerRig = document.rigIndex;
+    }
+    const auto& controllerClip = clips[clipIndex];
+    const float controllerTime = AnimationLocalTime(document,
+        document.rigIndex, clipIndex);
+    for (const auto& track : controllerClip.controllers)
+    {
+        const auto key = Engine::Model::AnimationClip::SampleController(
+            track, controllerTime);
+        for (auto* joint : document.poseSkeleton->ResolveJoints())
+            if (auto* bone = joint ? joint->GetComponent<
+                    Engine::Components::AnimationBone>() : nullptr;
+                bone && bone->nodeIndex == track.node)
+            {
+                bone->poseControllerActive = key.active;
+                bone->poseControllerTarget = key.target;
+                bone->posePinPosition = key.fixedPosition;
+                bone->posePinRotation = key.fixedRotation;
+                bone->posePinTarget = key.fixedTarget;
+                bone->posePinRotationEuler = key.fixedRotationEuler;
+                bone->posePinPole = key.pole;
+                break;
+            }
+    }
     document.poseScene->ApplyPoseConstraints();
     if (m_renderer) m_renderer->MarkDirty();
 }
@@ -1484,6 +1614,126 @@ bool EditorState::AddAnimationKey(AnimationDocument& document, bool exactTime)
                 channel.targetPath = targetPath;
         clip.duration = std::max(clip.duration, keyTime);
         RecordAnimationEdit(document, std::move(before));
+    }
+    return keyed;
+}
+
+bool EditorState::AddAnimationPoseKeys(AnimationDocument& document,
+    const std::vector<Engine::Core::Object*>& affected)
+{
+    if (affected.empty() || !document.sourceManager ||
+        !document.poseSkeleton || document.clipIndex < 0 ||
+        document.clipIndex >= static_cast<int>(
+            document.sourceManager->clips.size())) return false;
+    auto* model = document.poseSkeleton->ResolveModel();
+    if (!model) return false;
+    auto& clip = document.sourceManager->clips[document.clipIndex];
+    if (!AnimationClipMapping::Inspect(clip,
+            AnimationClipMapping::RigNodes(*document.poseSkeleton),
+            AnimationClipMapping::ModelBones(*model)).issues.empty())
+    {
+        document.error = "Repair unresolved bone mappings before keying this clip.";
+        return false;
+    }
+    auto before = document.sourceManager->clips;
+    const auto& joints = document.poseSkeleton->ResolveJoints();
+    const auto& palette = document.poseSkeleton->jointNodes;
+    const float time = AnimationLocalTime(document,
+        document.rigIndex, document.clipIndex);
+    bool keyed = false;
+    for (auto* joint : affected)
+    {
+        const auto found = std::find(joints.begin(), joints.end(), joint);
+        const size_t index = static_cast<size_t>(found - joints.begin());
+        if (found == joints.end() || index >= palette.size()) continue;
+        const unsigned node = palette[index];
+        const auto& transform = joint->transform;
+        keyed = AnimationClipEditing::UpsertBonePose(clip, node, time,
+            transform.position, glm::quat(transform.rotation),
+            transform.scale) || keyed;
+        const std::string path = AnimationClipMapping::NodePath(*model, node);
+        for (auto& channel : clip.channels)
+            if (channel.nodeIndex == node && channel.targetPath.empty())
+                channel.targetPath = path;
+    }
+    if (keyed)
+    {
+        clip.duration = std::max(clip.duration, time);
+        RecordAnimationEdit(document, std::move(before));
+    }
+    return keyed;
+}
+
+bool EditorState::AddAnimationControllerKeys(AnimationDocument& document,
+    bool useExistingUndo)
+{
+    if (!document.sourceManager || !document.poseSkeleton ||
+        document.clipIndex < 0 || document.clipIndex >=
+            static_cast<int>(document.sourceManager->clips.size()))
+        return false;
+    auto before = useExistingUndo
+        ? std::vector<Engine::Model::AnimationClip>{}
+        : document.sourceManager->clips;
+    auto& clip = document.sourceManager->clips[document.clipIndex];
+    const float time = AnimationLocalTime(document, document.rigIndex,
+        document.clipIndex);
+    bool keyed = false;
+    for (auto* joint : document.poseSkeleton->ResolveJoints())
+    {
+        const auto* bone = joint ? joint->GetComponent<
+            Engine::Components::AnimationBone>() : nullptr;
+        if (!bone) continue;
+        auto track = std::find_if(clip.controllers.begin(),
+            clip.controllers.end(), [bone](const auto& item) {
+                return item.node == bone->nodeIndex;
+            });
+        if (!bone->poseControllerActive && !bone->posePinPosition &&
+            !bone->posePinRotation && track == clip.controllers.end())
+            continue;
+        if (track == clip.controllers.end())
+        {
+            Engine::Model::AnimationClip::ControllerTrack added;
+            added.node = bone->nodeIndex;
+            clip.controllers.push_back(std::move(added));
+            track = std::prev(clip.controllers.end());
+        }
+        Engine::Model::AnimationClip::ControllerKey key;
+        key.time = time;
+        key.active = bone->poseControllerActive;
+        key.fixedPosition = bone->posePinPosition;
+        key.fixedRotation = bone->posePinRotation;
+        key.target = bone->poseControllerTarget;
+        key.fixedTarget = bone->posePinTarget;
+        key.fixedRotationEuler = bone->posePinRotationEuler;
+        key.pole = bone->posePinPole;
+        auto existing = std::find_if(track->keys.begin(), track->keys.end(),
+            [time](const auto& entry) {
+                return std::abs(entry.time - time) < 1e-4f;
+            });
+        if (existing != track->keys.end()) *existing = key;
+        else
+        {
+            track->keys.push_back(key);
+            std::stable_sort(track->keys.begin(), track->keys.end(),
+                [](const auto& a, const auto& b) {
+                    return a.time < b.time;
+                });
+        }
+        keyed = true;
+    }
+    if (keyed)
+    {
+        clip.duration = std::max(clip.duration, time);
+        if (useExistingUndo)
+        {
+            ++document.clipRevision;
+            document.clipCache.clear();
+            document.previewLayouts.clear();
+            document.dirty = true;
+            RefreshAnimationDocumentTitle(document);
+            SampleAnimationDocument(document);
+        }
+        else RecordAnimationEdit(document, std::move(before));
     }
     return keyed;
 }

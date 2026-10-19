@@ -13,6 +13,10 @@
 #include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/BoneGroup.h"
+#include "Core/Compoonents/Animation/AnimationBone.h"
+#include "Core/Compoonents/Animation/TwoBoneIK.h"
+#include "Core/Compoonents/Animation/ChainIK.h"
+#include "Editor/Core/View/Views/Scene/ScenePlacementAndPicking.h"
 #include <algorithm>
 #include <cmath>
 #include <cfloat>
@@ -121,6 +125,27 @@ bool RotationPlaneDirection(const glm::mat4& inverseViewProjection,
     const float length = glm::length(direction);
     if (!std::isfinite(length) || length < 1e-5f) return false;
     direction /= length;
+    return true;
+}
+
+bool ViewPlanePoint(const glm::mat4& inverseViewProjection,
+    EditorUiVec2 mouse, EditorUiVec2 viewport, glm::vec3 pivot,
+    glm::vec3 normal, glm::vec3& point)
+{
+    if (viewport.x <= 1.f || viewport.y <= 1.f) return false;
+    const float x = 2.f * mouse.x / viewport.x - 1.f;
+    const float y = 1.f - 2.f * mouse.y / viewport.y;
+    const glm::vec4 nearClip = inverseViewProjection * glm::vec4(x, y, 0.f, 1.f);
+    const glm::vec4 farClip = inverseViewProjection * glm::vec4(x, y, 1.f, 1.f);
+    if (std::abs(nearClip.w) < 1e-6f || std::abs(farClip.w) < 1e-6f)
+        return false;
+    const glm::vec3 origin = glm::vec3(nearClip) / nearClip.w;
+    const glm::vec3 ray = glm::normalize(glm::vec3(farClip) / farClip.w - origin);
+    const float denominator = glm::dot(ray, normal);
+    if (std::abs(denominator) < 1e-5f) return false;
+    const float distance = glm::dot(pivot - origin, normal) / denominator;
+    if (distance <= 0.f) return false;
+    point = origin + ray * distance;
     return true;
 }
 
@@ -521,6 +546,125 @@ void DrawBoneShape(IEditorUi& ui, EditorUiVec2 root, EditorUiVec2 tip,
 }
 }
 
+bool EditorGizmoSystem::IsModelPinned(
+    const Engine::Core::Object* joint, bool rotation) const
+{
+    const auto found = std::find_if(m_modelPins.begin(), m_modelPins.end(),
+        [joint](const ModelPin& pin) { return pin.joint == joint; });
+    const auto* bone = joint ? joint->GetComponent<
+        Engine::Components::AnimationBone>() : nullptr;
+    if (bone) return rotation ? bone->posePinRotation :
+        bone->posePinPosition;
+    return found != m_modelPins.end() &&
+        (rotation ? found->rotation : found->position);
+}
+
+bool EditorGizmoSystem::IsModelControllerActive(
+    const Engine::Core::Object* joint) const
+{
+    const auto* bone = joint ? joint->GetComponent<
+        Engine::Components::AnimationBone>() : nullptr;
+    return bone && bone->poseControllerActive;
+}
+
+void EditorGizmoSystem::SetModelControllerActive(
+    Engine::Core::Object* joint, bool active)
+{
+    auto* bone = joint ? joint->GetComponent<
+        Engine::Components::AnimationBone>() : nullptr;
+    if (!bone || bone->poseControllerActive == active) return;
+    bone->poseControllerActive = active;
+    if (active) bone->poseControllerTarget = WorldPosition(joint);
+    bone->MarkConfigurationDirty();
+}
+
+void EditorGizmoSystem::SetModelPin(
+    Engine::Core::Object* joint, bool rotation, bool enabled)
+{
+    if (!joint) return;
+    auto found = std::find_if(m_modelPins.begin(), m_modelPins.end(),
+        [joint](const ModelPin& pin) { return pin.joint == joint; });
+    if (found != m_modelPins.end())
+        if (const auto* bone = joint->GetComponent<
+                Engine::Components::AnimationBone>())
+        {
+            found->position = bone->posePinPosition;
+            found->rotation = bone->posePinRotation;
+            found->worldPosition = bone->posePinTarget;
+            found->worldRotation = glm::quat(bone->posePinRotationEuler);
+            found->pole = bone->posePinPole;
+        }
+    if (found == m_modelPins.end())
+    {
+        const auto* bone = joint->GetComponent<
+            Engine::Components::AnimationBone>();
+        if (!enabled && (!bone || (!bone->posePinPosition &&
+                !bone->posePinRotation))) return;
+        ModelPin pin;
+        pin.joint = joint;
+        pin.position = bone && bone->posePinPosition;
+        pin.rotation = bone && bone->posePinRotation;
+        pin.worldPosition = pin.position ? bone->posePinTarget :
+            WorldPosition(joint);
+        pin.worldRotation = pin.rotation ?
+            glm::quat(bone->posePinRotationEuler) :
+            glm::quat_cast(WorldRotation(*joint));
+        pin.pole = pin.position ? bone->posePinPole : glm::vec3(0.f);
+        if (!pin.position && joint->Parent && joint->Parent->Parent)
+            pin.pole = WorldPosition(joint->Parent) * 2.f -
+                (WorldPosition(joint->Parent->Parent) + pin.worldPosition) * .5f;
+        m_modelPins.push_back(pin);
+        found = std::prev(m_modelPins.end());
+    }
+    if (rotation)
+    {
+        if (enabled && !found->rotation)
+            found->worldRotation = glm::quat_cast(WorldRotation(*joint));
+        found->rotation = enabled;
+    }
+    else
+    {
+        const bool validChain = joint->Parent && joint->Parent->Parent &&
+            joint->Parent->GetComponent<Engine::Components::AnimationBone>() &&
+            joint->Parent->Parent->GetComponent<Engine::Components::AnimationBone>();
+        if (enabled && !found->position && validChain)
+        {
+            found->worldPosition = WorldPosition(joint);
+            found->pole = WorldPosition(joint->Parent) * 2.f -
+                (WorldPosition(joint->Parent->Parent) +
+                    found->worldPosition) * .5f;
+        }
+        found->position = enabled && validChain;
+    }
+    if (auto* bone = joint->GetComponent<
+            Engine::Components::AnimationBone>())
+    {
+        bone->posePinPosition = found->position;
+        bone->posePinRotation = found->rotation;
+        bone->posePinTarget = found->worldPosition;
+        bone->posePinRotationEuler = glm::eulerAngles(
+            found->worldRotation);
+        bone->posePinPole = found->pole;
+        bone->MarkConfigurationDirty();
+    }
+    if (!found->position && !found->rotation)
+        m_modelPins.erase(found);
+}
+
+void EditorGizmoSystem::ClearModelPins(Engine::Scene::Scene& scene)
+{
+    for (const auto& owner : scene.GetObjects())
+        if (auto* bone = owner->GetComponent<
+                Engine::Components::AnimationBone>();
+            bone && (bone->posePinPosition || bone->posePinRotation))
+        {
+            bone->posePinPosition = false;
+            bone->posePinRotation = false;
+            bone->MarkConfigurationDirty();
+        }
+    m_modelPins.clear();
+}
+
 void EditorGizmoSystem::DrawSkeletonOverlay(
     Engine::Scene::Scene& scene,
     const Engine::Components::Skeleton& skeleton, IEditorUi& ui,
@@ -596,6 +740,381 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         camera->GetProjectionMatrix(input.available.x / input.available.y) *
         camera->GetViewMatrix();
     const glm::mat4 inverseViewProjection = glm::inverse(viewProjection);
+    m_modelDragEnded = false;
+    m_modelPins.erase(std::remove_if(m_modelPins.begin(), m_modelPins.end(),
+        [&](const ModelPin& pin) {
+            if (!SceneContains(scene, pin.joint)) return true;
+            const auto* bone = pin.joint->GetComponent<
+                Engine::Components::AnimationBone>();
+            return bone && !bone->posePinPosition &&
+                !bone->posePinRotation;
+        }),
+        m_modelPins.end());
+    for (ModelPin& pin : m_modelPins)
+        if (const auto* bone = pin.joint->GetComponent<
+                Engine::Components::AnimationBone>())
+        {
+            pin.position = bone->posePinPosition;
+            pin.rotation = bone->posePinRotation;
+            pin.worldPosition = bone->posePinTarget;
+            pin.worldRotation = glm::quat(bone->posePinRotationEuler);
+            pin.pole = bone->posePinPole;
+        }
+    for (const auto& owner : scene.GetObjects())
+    {
+        auto* joint = owner.get();
+        const auto* bone = joint ? joint->GetComponent<
+            Engine::Components::AnimationBone>() : nullptr;
+        if (!bone || (!bone->posePinPosition &&
+                !bone->posePinRotation)) continue;
+        if (std::find_if(m_modelPins.begin(), m_modelPins.end(),
+                [joint](const ModelPin& pin) {
+                    return pin.joint == joint;
+                }) != m_modelPins.end()) continue;
+        ModelPin pin;
+        pin.joint = joint;
+        pin.position = bone->posePinPosition;
+        pin.rotation = bone->posePinRotation;
+        pin.worldPosition = bone->posePinTarget;
+        pin.worldRotation = glm::quat(bone->posePinRotationEuler);
+        pin.pole = bone->posePinPole;
+        m_modelPins.push_back(pin);
+    }
+    m_modelSelectedPoints.erase(std::remove_if(m_modelSelectedPoints.begin(),
+        m_modelSelectedPoints.end(), [&](Engine::Core::Object* joint) {
+            return !SceneContains(scene, joint);
+        }), m_modelSelectedPoints.end());
+    for (const ModelPin& pin : m_modelPins)
+    {
+        EditorUiVec2 point{};
+        const glm::vec3 marker = pin.position ? pin.worldPosition
+            : WorldPosition(pin.joint);
+        if (!ProjectPoint(viewProjection, marker,
+                input.available, point)) continue;
+        ui.DrawViewportCircle(point, 7.f,
+            pin.position ? EditorUiColor{1.f, .36f, .24f, .95f}
+                : EditorUiColor{.65f, .42f, 1.f, .95f}, false, 2.f);
+        ui.DrawViewportText(Add(point, {9.f, -8.f}),
+            pin.position && pin.rotation ? "P/R" :
+                pin.position ? "P" : "R",
+            {1.f, 1.f, 1.f, .95f});
+    }
+    if (m_modelDragObject && (!SceneContains(scene, m_modelDragObject) ||
+            !input.leftDown || !m_modelManipulation))
+    {
+        m_modelDragEnded = !input.leftDown;
+        m_modelDragObject = nullptr;
+    }
+    if (m_modelDragObject)
+    {
+        auto* joint = m_modelDragObject;
+        const EditorUiVec2 mouseMotion = Subtract(
+            input.mousePosInViewport, m_modelStartMouse);
+        if (!m_modelDidMove && Length(mouseMotion) < .5f &&
+            input.mouseWheel == 0.f)
+        {
+            result.transformDragging = true;
+            result.consumedClick = true;
+            return result;
+        }
+        m_modelDidMove = true;
+        const auto markChanged = [&](Engine::Core::Object* bone) {
+            if (bone && std::find(m_modelChangedBones.begin(),
+                    m_modelChangedBones.end(), bone) == m_modelChangedBones.end())
+                m_modelChangedBones.push_back(bone);
+        };
+        const glm::mat4 cameraWorld = scene.editorCamera.transform.GetWorldMatrix();
+        const glm::vec3 forward = -glm::normalize(glm::vec3(cameraWorld[2]));
+        const glm::vec3 oldPosition = joint->transform.position;
+        const glm::vec3 oldRotation = joint->transform.rotation;
+        if (m_modelScrollDepthEnabled && !m_modelDragRotate &&
+            input.mouseWheel != 0.f)
+        {
+            const float cameraDistance = glm::length(m_modelStartWorld -
+                glm::vec3(cameraWorld[3]));
+            m_modelScrollDepth -= input.mouseWheel *
+                std::max(cameraDistance * .08f, .02f);
+        }
+        bool fullBodyHandled = false;
+        if (m_modelDragTwist)
+        {
+            glm::vec3 hit{};
+            if (ViewPlanePoint(inverseViewProjection,
+                    input.mousePosInViewport, input.available,
+                    m_modelStartHandleWorld, forward, hit))
+            {
+                const glm::vec3 initial = m_modelStartHandleWorld -
+                    m_modelTwistBaseWorld;
+                glm::vec3 desired = m_modelStartHandleWorld +
+                    hit - m_modelPlaneHit - m_modelTwistBaseWorld;
+                desired -= m_modelTwistAxis *
+                    glm::dot(desired, m_modelTwistAxis);
+                if (glm::dot(initial, initial) > 1e-8f &&
+                    glm::dot(desired, desired) > 1e-8f)
+                {
+                    const float angle = std::atan2(glm::dot(m_modelTwistAxis,
+                        glm::cross(initial, desired)),
+                        glm::dot(initial, desired));
+                    const glm::quat parent = joint->Parent
+                        ? glm::quat_cast(WorldRotation(*joint->Parent))
+                        : glm::quat(1.f, 0.f, 0.f, 0.f);
+                    const glm::quat delta = glm::angleAxis(angle,
+                        m_modelTwistAxis);
+                    joint->transform.rotation = glm::eulerAngles(
+                        glm::normalize(glm::inverse(parent) * delta * parent *
+                            glm::quat(m_modelStartRotation)));
+                }
+            }
+        }
+        else if (m_modelDragDirection)
+        {
+            glm::vec3 hit{};
+            if (ViewPlanePoint(inverseViewProjection,
+                    input.mousePosInViewport, input.available,
+                    m_modelStartHandleWorld, forward, hit))
+            {
+                const glm::vec3 initial = m_modelStartHandleWorld -
+                    m_modelStartWorld;
+                const glm::vec3 desired = m_modelStartHandleWorld +
+                    hit - m_modelPlaneHit - m_modelStartWorld;
+                if (glm::dot(initial, initial) > 1e-8f &&
+                    glm::dot(desired, desired) > 1e-8f)
+                {
+                    const glm::quat parent = joint->Parent
+                        ? glm::quat_cast(WorldRotation(*joint->Parent))
+                        : glm::quat(1.f, 0.f, 0.f, 0.f);
+                    const glm::quat delta = glm::quat(
+                        glm::normalize(initial), glm::normalize(desired));
+                    joint->transform.rotation = glm::eulerAngles(
+                        glm::normalize(glm::inverse(parent) * delta * parent *
+                            glm::quat(m_modelStartRotation)));
+                }
+            }
+        }
+        else if (m_modelDragRotate)
+        {
+            const float angle = (input.mousePosInViewport.x - m_modelStartMouse.x) * .01f;
+            const glm::quat parent = joint->Parent
+                ? glm::quat_cast(WorldRotation(*joint->Parent))
+                : glm::quat(1.f, 0.f, 0.f, 0.f);
+            const glm::quat delta = glm::angleAxis(angle, forward);
+            joint->transform.rotation = glm::eulerAngles(glm::normalize(
+                glm::inverse(parent) * delta * parent *
+                glm::quat(m_modelStartRotation)));
+        }
+        else
+        {
+            glm::vec3 target = m_modelStartWorld;
+            if (input.modelDepthDown)
+            {
+                const float depth = glm::length(m_modelStartWorld -
+                    glm::vec3(cameraWorld[3]));
+                target += forward * ((m_modelStartMouse.y -
+                    input.mousePosInViewport.y) * depth *
+                    2.f / input.available.y);
+            }
+            else
+            {
+                glm::vec3 hit{};
+                if (ViewPlanePoint(inverseViewProjection,
+                        input.mousePosInViewport, input.available,
+                        m_modelStartWorld, forward, hit))
+                    target += hit - m_modelPlaneHit;
+            }
+            target += forward * m_modelScrollDepth;
+            if (auto* draggedBone = joint->GetComponent<
+                    Engine::Components::AnimationBone>();
+                draggedBone && draggedBone->poseControllerActive)
+            {
+                draggedBone->poseControllerTarget = target;
+                draggedBone->MarkConfigurationDirty();
+            }
+            bool groupHandled = false;
+            if (!m_modelDragRotate && m_modelDragGroup.size() > 1)
+            {
+                const glm::vec3 delta = target - m_modelStartWorld;
+                for (const auto& [member, startWorld] : m_modelDragGroup)
+                {
+                    if (!SceneContains(scene, member) ||
+                        IsModelPinned(member, false)) continue;
+                    if (auto* memberBone = member->GetComponent<
+                            Engine::Components::AnimationBone>();
+                        memberBone && memberBone->poseControllerActive)
+                    {
+                        memberBone->poseControllerTarget = startWorld + delta;
+                        memberBone->MarkConfigurationDirty();
+                    }
+                    bool selectedAncestor = false;
+                    for (auto* ancestor = member->Parent; ancestor;
+                        ancestor = ancestor->Parent)
+                        if (std::find_if(m_modelDragGroup.begin(),
+                                m_modelDragGroup.end(), [&](const auto& entry) {
+                                    return entry.first == ancestor &&
+                                        !IsModelPinned(ancestor, false);
+                                }) != m_modelDragGroup.end())
+                        { selectedAncestor = true; break; }
+                    if (selectedAncestor) continue;
+                    const glm::mat4 parentWorld = member->Parent
+                        ? member->Parent->transform.GetWorldMatrix()
+                        : glm::mat4(1.f);
+                    if (std::abs(glm::determinant(parentWorld)) <= 1e-8f)
+                        continue;
+                    const glm::vec3 local = glm::vec3(glm::inverse(
+                        parentWorld) * glm::vec4(startWorld + delta, 1.f));
+                    if (member->transform.position != local)
+                    {
+                        member->transform.position = local;
+                        member->transform.NotifyEditorTransformChanged(
+                            Engine::Components::Transform::EditorPosition);
+                        markChanged(member);
+                    }
+                }
+                groupHandled = true;
+            }
+            if (!groupHandled && m_modelScope == 2 && m_modelRoot &&
+                m_modelRoot != joint)
+            {
+                const auto chainTo = [&](Engine::Core::Object* tip) {
+                    std::vector<Engine::Core::Object*> chain;
+                    for (auto* current = tip; current;
+                        current = current->Parent)
+                    {
+                        chain.push_back(current);
+                        if (current == m_modelRoot) break;
+                    }
+                    if (chain.empty() || chain.back() != m_modelRoot)
+                        chain.clear();
+                    else std::reverse(chain.begin(), chain.end());
+                    return chain;
+                };
+                std::vector<Engine::Components::ChainIK::Effector> effectors;
+                Engine::Components::ChainIK::Effector selectedEffector;
+                selectedEffector.chain = chainTo(joint);
+                selectedEffector.target = target;
+                selectedEffector.positionWeight = 1.f;
+                if (selectedEffector.chain.size() >= 2)
+                    effectors.push_back(std::move(selectedEffector));
+                for (const ModelPin& pin : m_modelPins)
+                {
+                    if (!pin.position || pin.joint == joint) continue;
+                    Engine::Components::ChainIK::Effector pinnedEffector;
+                    pinnedEffector.chain = chainTo(pin.joint);
+                    if (pinnedEffector.chain.size() < 2) continue;
+                    pinnedEffector.target = pin.worldPosition;
+                    pinnedEffector.positionWeight = 1.f;
+                    pinnedEffector.rotationWeight = pin.rotation ? 1.f : 0.f;
+                    pinnedEffector.rotation = pin.worldRotation;
+                    effectors.push_back(std::move(pinnedEffector));
+                }
+                for (const auto& owner : scene.GetObjects())
+                {
+                    auto* active = owner.get();
+                    if (!active || active == joint ||
+                        IsModelPinned(active, false)) continue;
+                    const auto* bone = active->GetComponent<
+                        Engine::Components::AnimationBone>();
+                    if (!bone || !bone->poseControllerActive) continue;
+                    Engine::Components::ChainIK::Effector activeEffector;
+                    activeEffector.chain = chainTo(active);
+                    if (activeEffector.chain.size() < 2) continue;
+                    activeEffector.target = bone->poseControllerTarget;
+                    activeEffector.positionWeight = .4f;
+                    effectors.push_back(std::move(activeEffector));
+                }
+                fullBodyHandled = !effectors.empty() &&
+                    Engine::Components::ChainIK::SolveMultiple(
+                        effectors, 24, .001f, .35f, 45.f);
+                if (fullBodyHandled)
+                {
+                    // Store the animation editor's limb target after the
+                    // shared solve has moved the root and pinned effectors.
+                    if (m_poseEditing && m_poseTranslationHandler)
+                        m_poseTranslationHandler(joint, target);
+                    for (const auto& effector : effectors)
+                        for (auto* bone : effector.chain)
+                        {
+                            bone->transform.NotifyEditorTransformChanged(
+                                static_cast<uint8_t>(
+                                    Engine::Components::Transform::EditorRotation |
+                                    (bone == m_modelRoot
+                                        ? Engine::Components::Transform::EditorPosition : 0)));
+                            markChanged(bone);
+                        }
+                }
+            }
+            const bool poseHandled = !groupHandled && !fullBodyHandled &&
+                m_modelScope > 0 && m_poseEditing &&
+                m_poseTranslationHandler &&
+                m_poseTranslationHandler(joint, target);
+            const bool ikHandled = !groupHandled && !fullBodyHandled && !poseHandled &&
+                !m_poseEditing &&
+                m_modelScope > 0 &&
+                m_modelDragIK && joint->Parent && joint->Parent->Parent &&
+                Engine::Components::TwoBoneIK::Blend(
+                    *joint->Parent->Parent, *joint->Parent, *joint,
+                    target, m_modelPole, m_modelTipRotation, 1.f);
+            if (ikHandled)
+                for (auto* bone : {joint->Parent->Parent, joint->Parent, joint})
+                {
+                    bone->transform.NotifyEditorTransformChanged(
+                        Engine::Components::Transform::EditorRotation);
+                    markChanged(bone);
+                }
+            if (poseHandled && joint->Parent && joint->Parent->Parent)
+                for (auto* bone : {joint->Parent->Parent, joint->Parent, joint})
+                    markChanged(bone);
+            if (!groupHandled && !fullBodyHandled && !poseHandled && !ikHandled)
+            {
+                const glm::mat4 parentWorld = joint->Parent
+                    ? joint->Parent->transform.GetWorldMatrix()
+                    : glm::mat4(1.f);
+                if (std::abs(glm::determinant(parentWorld)) > 1e-8f)
+                    joint->transform.position = glm::vec3(
+                        glm::inverse(parentWorld) * glm::vec4(target, 1.f));
+            }
+        }
+        for (const ModelPin& pin : m_modelPins)
+        {
+            auto* pinned = pin.joint;
+            if (!pinned || pinned == joint) continue;
+            if (!fullBodyHandled && pin.position && pinned->Parent &&
+                pinned->Parent->Parent &&
+                Engine::Components::TwoBoneIK::Solve(
+                    *pinned->Parent->Parent, *pinned->Parent, *pinned,
+                    pin.worldPosition, pin.pole, 1.f, 0.f))
+            {
+                for (auto* bone : {pinned->Parent->Parent,
+                        pinned->Parent, pinned})
+                {
+                    bone->transform.NotifyEditorTransformChanged(
+                        Engine::Components::Transform::EditorRotation);
+                    markChanged(bone);
+                }
+            }
+            if (pin.rotation)
+            {
+                const glm::quat parent = pinned->Parent
+                    ? glm::quat_cast(WorldRotation(*pinned->Parent))
+                    : glm::quat(1.f, 0.f, 0.f, 0.f);
+                pinned->transform.rotation = glm::eulerAngles(glm::normalize(
+                    glm::inverse(parent) * pin.worldRotation));
+                pinned->transform.NotifyEditorTransformChanged(
+                    Engine::Components::Transform::EditorRotation);
+                markChanged(pinned);
+            }
+        }
+        if (joint->transform.position != oldPosition ||
+            joint->transform.rotation != oldRotation)
+        {
+            joint->transform.NotifyEditorTransformChanged(m_modelDragRotate
+                ? Engine::Components::Transform::EditorRotation
+                : Engine::Components::Transform::EditorPosition);
+            markChanged(joint);
+        }
+        result.transformDragging = true;
+        result.consumedClick = true;
+        return result;
+    }
     // Pinned hierarchy overlays are visual aids and do not take input.
     for (const auto& objectPointer : scene.GetObjects())
     {
@@ -848,7 +1367,261 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         }
     }
 
+    // Point selection uses the resolved skeleton, independent of the regular
+    // bone overlay flags. This keeps controllers available when bone shapes
+    // are hidden and avoids picking unrelated scene objects as joints.
+    Engine::Core::Object* pointHit = nullptr;
+    bool pointHitDirection = false;
+    bool pointHitTwist = false;
+    glm::vec3 pointHitWorld{};
+    glm::vec3 pointHitTwistAxis{};
+    glm::vec3 pointHitTwistBase{};
+    float pointHitDistance = FLT_MAX;
+    if (m_modelManipulation && m_modelSelectionMode == 3)
+    {
+        std::unordered_set<Engine::Core::Object*> drawnPoints;
+        for (const auto& ownerPointer : scene.GetObjects())
+        {
+            auto* owner = ownerPointer.get();
+            if (!owner || !owner->IsEnabledInHierarchy()) continue;
+            for (auto* component : owner->Components)
+            {
+                auto* skeleton = dynamic_cast<Engine::Components::Skeleton*>(component);
+                if (!skeleton) continue;
+                for (auto* joint : skeleton->ResolveJoints())
+                {
+                    if (!joint || !drawnPoints.insert(joint).second ||
+                        (selectedGroup && !selectedGroup->Contains(joint)) ||
+                        (m_modelPickFilter && !m_modelPickFilter(joint)))
+                        continue;
+                    EditorUiVec2 screen{};
+                    if (!ProjectPoint(viewProjection, WorldPosition(joint),
+                            input.available, screen)) continue;
+                    const float distance = Length(Subtract(
+                        input.mousePosInViewport, screen));
+                    if (distance <= 10.f && distance < pointHitDistance)
+                    {
+                        pointHit = joint;
+                        pointHitDirection = false;
+                        pointHitTwist = false;
+                        pointHitWorld = WorldPosition(joint);
+                        pointHitDistance = distance;
+                    }
+                    const bool selectedPoint = joint == selected ||
+                        std::find(m_modelSelectedPoints.begin(),
+                            m_modelSelectedPoints.end(), joint) !=
+                                m_modelSelectedPoints.end();
+                    const bool active = IsModelControllerActive(joint);
+                    ui.DrawViewportCircle(screen, selectedPoint ? 7.f : 5.5f,
+                        kOutline, true);
+                    ui.DrawViewportCircle(screen, selectedPoint ? 5.f : 3.5f,
+                        selectedPoint ? kHoverColor : active
+                            ? EditorUiColor{.28f, .78f, 1.f, 1.f}
+                            : EditorUiColor{.36f, .75f, .4f, 1.f}, true);
+                    // Dragging the midpoint rotates the parent toward the
+                    // pointer while the endpoint remains a position target.
+                    auto* parent = joint->Parent;
+                    if (!parent || !parent->GetComponent<
+                            Engine::Components::AnimationBone>() ||
+                        glm::dot(WorldPosition(joint) - WorldPosition(parent),
+                            WorldPosition(joint) - WorldPosition(parent)) < 1e-8f)
+                        continue;
+                    const glm::vec3 parentWorld = WorldPosition(parent);
+                    const glm::vec3 childWorld = WorldPosition(joint);
+                    const glm::vec3 axis = glm::normalize(childWorld -
+                        parentWorld);
+                    const glm::vec3 handleWorld = glm::mix(parentWorld,
+                        childWorld, .5f);
+                    EditorUiVec2 handleScreen{};
+                    if (!ProjectPoint(viewProjection, handleWorld,
+                            input.available, handleScreen)) continue;
+                    ui.DrawViewportCircle(handleScreen, 5.f, kOutline, true);
+                    ui.DrawViewportCircle(handleScreen, 3.f,
+                        parent == selected ? kHoverColor :
+                            EditorUiColor{.45f, 1.f, .58f, 1.f}, true);
+                    if (m_modelPickFilter && !m_modelPickFilter(parent))
+                        continue;
+                    const float handleDistance = Length(Subtract(
+                        input.mousePosInViewport, handleScreen));
+                    if (handleDistance <= 8.f &&
+                        handleDistance < pointHitDistance)
+                    {
+                        pointHit = parent;
+                        pointHitDirection = true;
+                        pointHitTwist = false;
+                        pointHitWorld = handleWorld;
+                        pointHitDistance = handleDistance;
+                    }
+                    const glm::mat3 orientation = WorldRotation(*parent);
+                    glm::vec3 side = orientation[0] - axis *
+                        glm::dot(orientation[0], axis);
+                    if (glm::dot(side, side) < 1e-6f)
+                        side = orientation[1] - axis *
+                            glm::dot(orientation[1], axis);
+                    if (glm::dot(side, side) < 1e-6f) continue;
+                    const glm::vec3 twistWorld = handleWorld +
+                        glm::normalize(side) *
+                            (.3f * glm::length(childWorld - parentWorld));
+                    EditorUiVec2 twistScreen{};
+                    if (!ProjectPoint(viewProjection, twistWorld,
+                            input.available, twistScreen)) continue;
+                    ui.DrawViewportCircle(twistScreen, 5.f, kOutline, true);
+                    ui.DrawViewportCircle(twistScreen, 3.f,
+                        parent == selected ? kHoverColor :
+                            EditorUiColor{1.f, .55f, .85f, 1.f}, true);
+                    const float twistDistance = Length(Subtract(
+                        input.mousePosInViewport, twistScreen));
+                    if (twistDistance <= 8.f &&
+                        twistDistance < pointHitDistance)
+                    {
+                        pointHit = parent;
+                        pointHitDirection = false;
+                        pointHitTwist = true;
+                        pointHitWorld = twistWorld;
+                        pointHitTwistAxis = axis;
+                        pointHitTwistBase = handleWorld;
+                        pointHitDistance = twistDistance;
+                    }
+                }
+            }
+        }
+    }
+
     if (m_poseEditing && jointHit) boneHit = jointHit;
+    if (m_modelManipulation && input.hovered && input.leftClicked &&
+        !input.rightDown && !input.middleDown)
+    {
+        Engine::Core::Object* meshHit = m_modelSelectionMode != 1 &&
+            m_modelSelectionMode != 3
+            ? ScenePlacementAndPicking::PickSkinnedBoneInViewport(scene,
+                input.mousePosInViewport, input.available) : nullptr;
+        Engine::Core::Object* candidate = m_modelSelectionMode == 0
+            ? meshHit : m_modelSelectionMode == 1
+                ? boneHit : m_modelSelectionMode == 3
+                    ? pointHit : (boneHit ? boneHit : meshHit);
+        if (!candidate && m_modelSelectionMode != 0 &&
+            m_modelSelectionMode != 3)
+            candidate = ScenePlacementAndPicking::PickBoneInViewport(scene,
+                input.mousePosInViewport, input.available);
+        if (candidate && m_modelPickFilter && !m_modelPickFilter(candidate))
+            candidate = nullptr;
+        if (candidate)
+        {
+            const bool directionHandle = m_modelSelectionMode == 3 &&
+                pointHitDirection;
+            const bool twistHandle = m_modelSelectionMode == 3 &&
+                pointHitTwist;
+            if (m_modelSelectionMode == 3 && !directionHandle &&
+                !twistHandle &&
+                input.modelGroupSelectDown)
+            {
+                const auto found = std::find(m_modelSelectedPoints.begin(),
+                    m_modelSelectedPoints.end(), candidate);
+                if (found == m_modelSelectedPoints.end())
+                    m_modelSelectedPoints.push_back(candidate);
+                else m_modelSelectedPoints.erase(found);
+                result.selectedObject = candidate;
+                result.selectionRequested = candidate != selected;
+                result.consumedClick = true;
+                return result;
+            }
+            if (m_modelSelectionMode == 3 && !directionHandle &&
+                !twistHandle &&
+                std::find(m_modelSelectedPoints.begin(),
+                    m_modelSelectedPoints.end(), candidate) ==
+                        m_modelSelectedPoints.end())
+                m_modelSelectedPoints.assign(1, candidate);
+            if (IsModelPinned(candidate,
+                    m_modelRotate || directionHandle || twistHandle))
+            {
+                result.selectedObject = candidate;
+                result.selectionRequested = candidate != selected;
+                result.consumedClick = true;
+                return result;
+            }
+            const glm::vec3 forward = -glm::normalize(glm::vec3(
+                scene.editorCamera.transform.GetWorldMatrix()[2]));
+            glm::vec3 planeHit{};
+            const glm::vec3 world = directionHandle || twistHandle ? pointHitWorld
+                : WorldPosition(candidate);
+            if (ViewPlanePoint(inverseViewProjection,
+                    input.mousePosInViewport, input.available,
+                    world, forward, planeHit))
+            {
+                m_modelDragObject = candidate;
+                m_modelDragGroup.clear();
+                if (m_modelSelectionMode == 3 && !directionHandle &&
+                    !twistHandle &&
+                    !m_modelRotate)
+                    for (auto* member : m_modelSelectedPoints)
+                        if (SceneContains(scene, member))
+                        {
+                            SetModelControllerActive(member, true);
+                            m_modelDragGroup.emplace_back(member,
+                                WorldPosition(member));
+                        }
+                m_modelStartWorld = WorldPosition(candidate);
+                m_modelStartHandleWorld = world;
+                m_modelStartRotation = candidate->transform.rotation;
+                m_modelPlaneHit = planeHit;
+                m_modelStartMouse = input.mousePosInViewport;
+                m_modelDragRotate = m_modelRotate || directionHandle ||
+                    twistHandle;
+                if (m_modelSelectionMode == 3 && !m_modelDragRotate)
+                    SetModelControllerActive(candidate, true);
+                m_modelDragDirection = directionHandle;
+                m_modelDragTwist = twistHandle;
+                m_modelTwistAxis = pointHitTwistAxis;
+                m_modelTwistBaseWorld = pointHitTwistBase;
+                m_modelDidMove = false;
+                m_modelChangedBones.clear();
+                m_modelScrollDepth = 0.f;
+                m_modelDragIK = false;
+                m_modelRoot = nullptr;
+                if (!m_modelDragRotate &&
+                    candidate->Parent && candidate->Parent->Parent)
+                {
+                    for (const auto& owner : scene.GetObjects())
+                        for (auto* component : owner->Components)
+                            if (auto* skeleton = dynamic_cast<
+                                    Engine::Components::Skeleton*>(component))
+                            {
+                                const auto& joints = skeleton->ResolveJoints();
+                                const auto contains = [&](Engine::Core::Object* bone) {
+                                    return std::find(joints.begin(), joints.end(), bone)
+                                        != joints.end();
+                                };
+                                if (!contains(candidate) ||
+                                    !contains(candidate->Parent) ||
+                                    !contains(candidate->Parent->Parent)) continue;
+                                auto* hierarchyRoot = candidate;
+                                while (hierarchyRoot->Parent &&
+                                    contains(hierarchyRoot->Parent))
+                                    hierarchyRoot = hierarchyRoot->Parent;
+                                m_modelRoot = hierarchyRoot;
+                                const bool leaf = std::none_of(joints.begin(),
+                                    joints.end(), [&](Engine::Core::Object* bone) {
+                                        return bone && bone->Parent == candidate;
+                                    });
+                                if (!leaf) continue;
+                                const glm::vec3 root = WorldPosition(candidate->Parent->Parent);
+                                const glm::vec3 end = WorldPosition(candidate);
+                                m_modelPole = WorldPosition(candidate->Parent) * 2.f -
+                                    (root + end) * .5f;
+                                m_modelTipRotation = glm::quat_cast(
+                                    WorldRotation(*candidate));
+                                m_modelDragIK = m_modelScope > 0;
+                                break;
+                            }
+                }
+                result.selectedObject = candidate;
+                result.selectionRequested = candidate != selected;
+                result.transformDragging = true;
+                result.consumedClick = true;
+                return result;
+            }
+        }
+    }
     Engine::Core::Object* iconHit = nullptr;
     float iconHitDistance = FLT_MAX;
     for (const auto& objectPointer : scene.GetObjects())

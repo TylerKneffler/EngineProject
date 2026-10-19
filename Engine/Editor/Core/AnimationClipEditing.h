@@ -20,6 +20,10 @@ inline bool IsKeyed(const Clip& clip, unsigned node, float time,
         if (channel.nodeIndex == node && channel.path != Channel::Path::Weights)
             for (float key : channel.times)
                 if (std::abs(key - time) <= tolerance) return true;
+    for (const auto& track : clip.controllers)
+        if (track.node == node)
+            for (const auto& key : track.keys)
+                if (std::abs(key.time - time) <= tolerance) return true;
     return false;
 }
 
@@ -29,6 +33,10 @@ inline std::vector<float> KeyTimes(const Clip& clip, unsigned node)
     for (const Channel& channel : clip.channels)
         if (channel.nodeIndex == node && channel.path != Channel::Path::Weights)
             times.insert(times.end(), channel.times.begin(), channel.times.end());
+    for (const auto& track : clip.controllers)
+        if (track.node == node)
+            for (const auto& key : track.keys)
+                times.push_back(key.time);
     std::sort(times.begin(), times.end());
     times.erase(std::unique(times.begin(), times.end(),
         [](float a, float b) { return std::abs(a - b) <= 1e-4f; }),
@@ -142,6 +150,22 @@ inline bool DeleteBoneKey(Clip& clip, unsigned node, float time)
             { it = clip.channels.erase(it); continue; }
         }
         ++it;
+    }
+    for (auto track = clip.controllers.begin();
+        track != clip.controllers.end();)
+    {
+        if (track->node == node)
+        {
+            const size_t oldSize = track->keys.size();
+            track->keys.erase(std::remove_if(track->keys.begin(),
+                track->keys.end(), [time](const auto& key) {
+                    return std::abs(key.time - time) <= 1e-4f;
+                }), track->keys.end());
+            removed |= track->keys.size() != oldSize;
+            if (track->keys.empty())
+            { track = clip.controllers.erase(track); continue; }
+        }
+        ++track;
     }
     return removed;
 }
@@ -318,6 +342,30 @@ inline bool MoveKeys(Clip& clip, const std::vector<KeyRef>& keys, float delta)
         }
         channel.times = std::move(times);
         channel.values = std::move(values);
+    }
+    for (auto& track : moved.controllers)
+    {
+        std::vector<bool> selected(track.keys.size(), false);
+        for (size_t i = 0; i < track.keys.size(); ++i)
+            for (const KeyRef& key : keys)
+                if (key.node == track.node &&
+                    std::abs(key.time - track.keys[i].time) <= 1e-4f)
+                { selected[i] = true; changed = true; break; }
+        for (size_t i = 0; i < track.keys.size(); ++i)
+        {
+            if (!selected[i]) continue;
+            const float target = track.keys[i].time + delta;
+            if (!std::isfinite(target) || target < 0.f) return false;
+            for (size_t j = 0; j < track.keys.size(); ++j)
+                if (!selected[j] &&
+                    std::abs(track.keys[j].time - target) <= 1e-4f)
+                    return false;
+            track.keys[i].time = target;
+        }
+        std::stable_sort(track.keys.begin(), track.keys.end(),
+            [](const auto& a, const auto& b) {
+                return a.time < b.time;
+            });
     }
     if (!changed) return false;
     for (const KeyRef& key : keys)

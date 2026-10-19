@@ -2,7 +2,10 @@
 
 #include "Engine/Editor/UI/IEditorUi.h"
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <functional>
+#include <utility>
+#include <vector>
 
 namespace Engine::Core { class Object; }
 namespace Engine::Components { class Skeleton; }
@@ -32,6 +35,22 @@ struct EditorGizmoResult
 class EditorGizmoSystem
 {
 public:
+    void SetModelManipulation(bool enabled, int selectionMode, bool rotate)
+    { m_modelManipulation = enabled; m_modelSelectionMode = selectionMode;
+        m_modelRotate = rotate; }
+    void SetModelScrollDepth(bool enabled) { m_modelScrollDepthEnabled = enabled; }
+    void SetModelScope(int scope) { m_modelScope = scope; }
+    bool IsModelDragging() const { return m_modelDragObject != nullptr; }
+    bool ModelDragEnded() const { return m_modelDragEnded; }
+    bool IsModelPinned(const Engine::Core::Object* joint, bool rotation) const;
+    bool IsModelControllerActive(const Engine::Core::Object* joint) const;
+    void SetModelControllerActive(Engine::Core::Object* joint, bool active);
+    void SetModelPin(Engine::Core::Object* joint, bool rotation, bool enabled);
+    void ClearModelPins(Engine::Scene::Scene& scene);
+    const std::vector<Engine::Core::Object*>& ModelChangedBones() const
+    { return m_modelChangedBones; }
+    void SetModelPickFilter(std::function<bool(const Engine::Core::Object*)> filter)
+    { m_modelPickFilter = std::move(filter); }
     void SetBoneEditing(bool enabled) { m_boneEditing = enabled; }
     void SetPoseEditing(bool enabled) { m_poseEditing = enabled; }
     void SetPoseTranslationHandler(std::function<bool(Engine::Core::Object*,
@@ -53,6 +72,43 @@ public:
         const EditorUiViewportInput& input, int selectedPaletteIndex);
 
 private:
+    bool m_modelManipulation = false;
+    struct ModelPin
+    {
+        Engine::Core::Object* joint = nullptr;
+        bool position = false;
+        bool rotation = false;
+        glm::vec3 worldPosition{};
+        glm::quat worldRotation{1.f, 0.f, 0.f, 0.f};
+        glm::vec3 pole{};
+    };
+    std::vector<ModelPin> m_modelPins;
+    std::vector<Engine::Core::Object*> m_modelSelectedPoints;
+    std::vector<std::pair<Engine::Core::Object*, glm::vec3>> m_modelDragGroup;
+    std::vector<Engine::Core::Object*> m_modelChangedBones;
+    int m_modelScope = 1;
+    int m_modelSelectionMode = 2;
+    bool m_modelRotate = false;
+    Engine::Core::Object* m_modelDragObject = nullptr;
+    glm::vec3 m_modelStartWorld{};
+    glm::vec3 m_modelStartHandleWorld{};
+    glm::vec3 m_modelStartRotation{};
+    glm::vec3 m_modelPlaneHit{};
+    EditorUiVec2 m_modelStartMouse{};
+    bool m_modelDragRotate = false;
+    bool m_modelDragDirection = false;
+    bool m_modelDragTwist = false;
+    glm::vec3 m_modelTwistAxis{};
+    glm::vec3 m_modelTwistBaseWorld{};
+    bool m_modelDidMove = false;
+    bool m_modelDragEnded = false;
+    bool m_modelScrollDepthEnabled = false;
+    float m_modelScrollDepth = 0.f;
+    bool m_modelDragIK = false;
+    Engine::Core::Object* m_modelRoot = nullptr;
+    glm::vec3 m_modelPole{};
+    glm::quat m_modelTipRotation{1.f, 0.f, 0.f, 0.f};
+    std::function<bool(const Engine::Core::Object*)> m_modelPickFilter;
     bool m_boneEditing = false;
     bool m_poseEditing = false;
     std::function<bool(Engine::Core::Object*, const glm::vec3&)> m_poseTranslationHandler;

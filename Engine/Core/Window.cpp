@@ -324,6 +324,7 @@ LRESULT CALLBACK Window::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
     if (self && msg == WM_ACTIVATEAPP)
     {
+        const bool wasFocused = self->m_focused;
         self->m_focused = wParam != FALSE;
         if (!self->m_focused)
         {
@@ -332,6 +333,8 @@ LRESULT CALLBACK Window::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             if (self->OnApplicationFocusLost)
                 self->OnApplicationFocusLost();
         }
+        else if (!wasFocused && self->OnApplicationFocusGained)
+            self->OnApplicationFocusGained();
     }
 
     // Escape always releases gameplay input before the UI hook so a focused

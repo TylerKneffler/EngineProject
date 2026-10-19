@@ -122,12 +122,35 @@ void AssetsExplorerView::Init(const std::string& assetsPath,
     m_assetsPath = fs::path(assetsPath).lexically_normal().string();
     m_currentDirectory = m_assetsPath;
     m_backHistory.clear();
+    m_selectedPath.clear();
+    m_selectedPaths.clear();
+    m_selectionAnchor.clear();
+    m_visiblePaths.clear();
+    m_previousVisiblePaths.clear();
+    m_pendingDeletePaths.clear();
+    m_clipboardPaths.clear();
+    m_clipboardCut = false;
+    m_pendingPasteDirectory.clear();
+    m_pendingAssetDropSources.clear();
+    m_pendingAssetDropDirectory.clear();
     m_scene = scene;
     m_previewCache.Clear();
     m_locationIndex.Open(m_assetsPath);
     m_externalMoves.clear();
-    m_nextLocationScan = std::chrono::steady_clock::now() +
-        std::chrono::seconds(5);
+    m_locationCheckPending = false;
+    CheckForExternalMoves();
+}
+
+void AssetsExplorerView::CheckForExternalMoves()
+{
+    if (m_assetsPath.empty()) return;
+    if (!m_externalMoves.empty())
+    {
+        m_locationCheckPending = true;
+        return;
+    }
+    m_locationCheckPending = false;
+    m_externalMoves = m_locationIndex.Detect();
 }
 
 // ---------------------------------------------------------------------------
@@ -135,13 +158,8 @@ void AssetsExplorerView::Init(const std::string& assetsPath,
 // ---------------------------------------------------------------------------
 void AssetsExplorerView::DrawPanel(IEditorUi& ui)
 {
-    if (m_externalMoves.empty() &&
-        std::chrono::steady_clock::now() >= m_nextLocationScan)
-    {
-        m_externalMoves = m_locationIndex.Detect();
-        m_nextLocationScan = std::chrono::steady_clock::now() +
-            std::chrono::seconds(5);
-    }
+    if (m_locationCheckPending && m_externalMoves.empty())
+        CheckForExternalMoves();
     if (ui.BeginModal("Asset moves detected", !m_externalMoves.empty()))
     {
         ui.Label("These assets moved outside the editor. Update references?");
@@ -176,6 +194,7 @@ void AssetsExplorerView::DrawPanel(IEditorUi& ui)
             }
             m_locationIndex.Accept();
             m_externalMoves.clear();
+            m_locationCheckPending = true;
             ui.CloseModal();
         }
         ui.SameLine();
@@ -183,6 +202,7 @@ void AssetsExplorerView::DrawPanel(IEditorUi& ui)
         {
             m_locationIndex.Accept();
             m_externalMoves.clear();
+            m_locationCheckPending = true;
             ui.CloseModal();
         }
         ui.EndModal();
@@ -235,10 +255,18 @@ void AssetsExplorerView::DrawPanel(IEditorUi& ui)
     ui.SearchInput("##assetSearch", m_search, sizeof(m_search),
         "Search assets...");
     ui.SameLine();
+    if (ui.Button(Icons::Refresh))
+    {
+        m_previewCache.Clear();
+        CheckForExternalMoves();
+    }
+    ui.Tooltip("Refresh Assets and check for moved files and folders");
+    ui.SameLine();
     if (ui.Button("New brush")) CreateBrush();
     std::error_code selectedPathError;
-    if (!m_selectedPath.empty() &&
-        fs::is_directory(fs::path(m_selectedPath), selectedPathError) &&
+    const bool selectedDirectory = !m_selectedPath.empty() &&
+        fs::is_directory(fs::path(m_selectedPath), selectedPathError);
+    if (m_selectedPaths.size() == 1 && selectedDirectory &&
         fs::path(m_selectedPath) != fs::path(m_assetsPath))
     {
         ui.SameLine();
@@ -252,6 +280,13 @@ void AssetsExplorerView::DrawPanel(IEditorUi& ui)
             m_focusAssetRename = true;
             m_error.clear();
         }
+    }
+    if (!m_selectedPaths.empty())
+    {
+        ui.SameLine();
+        if (ui.Button(m_selectedPaths.size() > 1 ? "Delete selected" :
+            (selectedDirectory ? "Delete folder" : "Delete asset")))
+            QueueDeletePath(m_selectedPath);
     }
     ui.Separator();
 
@@ -278,12 +313,32 @@ void AssetsExplorerView::DrawPanel(IEditorUi& ui)
         if (rename.submitted || rename.deactivated)
             CommitAssetRename();
     }
+    if (ui.CopyShortcutPressed() && !m_selectedPath.empty())
+        CopySelectionToClipboard(m_selectedPath, false);
+    if (ui.CutShortcutPressed() && !m_selectedPath.empty())
+        CopySelectionToClipboard(m_selectedPath, true);
+    if (ui.PasteShortcutPressed())
+        PasteClipboard(m_currentDirectory);
+    if (ui.DeleteShortcutPressed() && !m_selectedPath.empty())
+        QueueDeletePath(m_selectedPath);
+    m_previousVisiblePaths = std::move(m_visiblePaths);
+    m_visiblePaths.clear();
     DrawCurrentDirectory(ui);
-    const EditorUiAssetCreateMenuResult create = ui.AssetWindowContextMenu();
+    DeleteQueuedPaths();
+    ProcessPendingAssetDrop();
+    if (!m_pendingPasteDirectory.empty())
+    {
+        PasteClipboard(m_pendingPasteDirectory);
+        m_pendingPasteDirectory.clear();
+    }
+    const EditorUiAssetCreateMenuResult create =
+        ui.AssetWindowContextMenu(!m_clipboardPaths.empty());
     if (create.folderRequested)
         CreateFolder();
     if (create.scriptRequested)
         CreateScript();
+    if (create.pasteRequested)
+        PasteClipboard(m_currentDirectory);
 
     ui.EndWindow();
 }
@@ -337,7 +392,9 @@ void AssetsExplorerView::DrawCurrentDirectory(IEditorUi& ui)
             for (const auto& entry : entries)
             {
                 const std::string entryPath = entry.path().string();
-                const bool selected = m_selectedPath == entryPath;
+                m_visiblePaths.push_back(entryPath);
+                const bool selected = std::find(m_selectedPaths.begin(),
+                    m_selectedPaths.end(), entryPath) != m_selectedPaths.end();
                 const bool directory = entry.is_directory();
                 const bool expandable = directory && !entry.is_symlink();
                 const std::string label = directory
@@ -364,7 +421,8 @@ void AssetsExplorerView::DrawCurrentDirectory(IEditorUi& ui)
 
                 const bool doubleClicked = ui.IsItemDoubleClicked();
                 if (activated)
-                    SelectPath(entryPath);
+                    SelectPath(entryPath, ui.IsMultiSelectModifierDown(),
+                        ui.IsRangeSelectModifierDown());
                 if (doubleClicked)
                 {
                     if (directory)
@@ -380,7 +438,14 @@ void AssetsExplorerView::DrawCurrentDirectory(IEditorUi& ui)
                                 (entry.path().stem().string() + ".meshpack")),
                         entry.path().extension() == ".rig" &&
                             fs::exists(entry.path().parent_path() /
-                                (entry.path().stem().string() + ".meshpack")));
+                                (entry.path().stem().string() + ".meshpack")),
+                        directory, !m_clipboardPaths.empty());
+                if (menu.copyRequested)
+                    CopySelectionToClipboard(entryPath, false);
+                if (menu.cutRequested)
+                    CopySelectionToClipboard(entryPath, true);
+                if (menu.pasteRequested)
+                    m_pendingPasteDirectory = entryPath;
                 if (menu.packMeshesRequested || menu.extractMeshesRequested)
                 {
                     std::string error;
@@ -402,7 +467,10 @@ void AssetsExplorerView::DrawCurrentDirectory(IEditorUi& ui)
                 }
                 bool deleted = false;
                 if (menu.deleteRequested)
-                    deleted = DeleteAssetPath(entryPath);
+                {
+                    QueueDeletePath(entryPath);
+                    deleted = true;
+                }
 
                 if (!deleted && ui.BeginDragDropSource())
                 {
@@ -478,6 +546,7 @@ void AssetsExplorerView::DrawGridDirectory(IEditorUi& ui)
         for (const auto& entry : entries)
         {
             const std::string entryPath = entry.path().string();
+            m_visiblePaths.push_back(entryPath);
             const bool directory = entry.is_directory();
             void* preview = nullptr;
             if (!directory && m_scene && AssetPreviewCache::Supports(entryPath))
@@ -490,9 +559,11 @@ void AssetsExplorerView::DrawGridDirectory(IEditorUi& ui)
             const EditorUiAssetTileResult tile = ui.AssetTile(
                 entry.path().filename().string().c_str(),
                 fallback.c_str(), preview,
-                m_selectedPath == entryPath, tileSize);
+                std::find(m_selectedPaths.begin(), m_selectedPaths.end(),
+                    entryPath) != m_selectedPaths.end(), tileSize);
             if (tile.clicked)
-                SelectPath(entryPath);
+                SelectPath(entryPath, ui.IsMultiSelectModifierDown(),
+                    ui.IsRangeSelectModifierDown());
             if (tile.doubleClicked)
             {
                 if (directory)
@@ -508,7 +579,14 @@ void AssetsExplorerView::DrawGridDirectory(IEditorUi& ui)
                             (entry.path().stem().string() + ".meshpack")),
                     entry.path().extension() == ".rig" &&
                         fs::exists(entry.path().parent_path() /
-                            (entry.path().stem().string() + ".meshpack")));
+                            (entry.path().stem().string() + ".meshpack")),
+                    directory, !m_clipboardPaths.empty());
+            if (menu.copyRequested)
+                CopySelectionToClipboard(entryPath, false);
+            if (menu.cutRequested)
+                CopySelectionToClipboard(entryPath, true);
+            if (menu.pasteRequested)
+                m_pendingPasteDirectory = entryPath;
             if (menu.packMeshesRequested || menu.extractMeshesRequested)
             {
                 std::string error;
@@ -530,7 +608,10 @@ void AssetsExplorerView::DrawGridDirectory(IEditorUi& ui)
             }
             bool deleted = false;
             if (menu.deleteRequested)
-                deleted = DeleteAssetPath(entryPath);
+            {
+                QueueDeletePath(entryPath);
+                deleted = true;
+            }
 
             if (!deleted && ui.BeginDragDropSource())
             {
@@ -572,7 +653,7 @@ void AssetsExplorerView::NavigateToDirectory(const std::string& path,
     if (addToHistory && fs::is_directory(current))
         m_backHistory.push_back(current.string());
     m_currentDirectory = destination.string();
-    m_selectedPath.clear();
+    SetSelectedPath({});
     m_error.clear();
     if (OnSelectionChanged)
         OnSelectionChanged({});
@@ -851,11 +932,51 @@ void AssetsExplorerView::CommitScriptRename()
     SelectPath(newBase.string() + ".cpp");
 }
 
-void AssetsExplorerView::SelectPath(const std::string& path)
+void AssetsExplorerView::SelectPath(const std::string& path, bool multi,
+    bool range)
 {
-    m_selectedPath = path;
+    if (range && !m_selectionAnchor.empty())
+    {
+        const auto selectRange = [&](const std::vector<std::string>& ordered)
+        {
+            const auto anchor = std::find(ordered.begin(), ordered.end(),
+                m_selectionAnchor);
+            const auto clicked = std::find(ordered.begin(), ordered.end(), path);
+            if (anchor == ordered.end() || clicked == ordered.end()) return false;
+            const auto first = anchor < clicked ? anchor : clicked;
+            const auto last = anchor < clicked ? clicked : anchor;
+            m_selectedPaths.assign(first, std::next(last));
+            if (m_selectedPaths.back() != path)
+            {
+                m_selectedPaths.erase(std::find(m_selectedPaths.begin(),
+                    m_selectedPaths.end(), path));
+                m_selectedPaths.push_back(path);
+            }
+            return true;
+        };
+        if (!selectRange(m_visiblePaths) &&
+            !selectRange(m_previousVisiblePaths))
+            m_selectedPaths.assign(1, path);
+        m_selectedPath = path;
+    }
+    else if (multi)
+    {
+        const auto selected = std::find(m_selectedPaths.begin(),
+            m_selectedPaths.end(), path);
+        if (selected == m_selectedPaths.end())
+            m_selectedPaths.push_back(path);
+        else
+            m_selectedPaths.erase(selected);
+        m_selectedPath = m_selectedPaths.empty() ? std::string() :
+            m_selectedPaths.back();
+        m_selectionAnchor = path;
+    }
+    else
+    {
+        SetSelectedPath(path);
+    }
     if (OnSelectionChanged)
-        OnSelectionChanged(path);
+        OnSelectionChanged(m_selectedPath);
 }
 
 void AssetsExplorerView::CommitAssetRename()
@@ -942,7 +1063,9 @@ bool AssetsExplorerView::MoveAssetPath(const std::string& sourcePath,
         error);
     const fs::path assetsRoot = fs::weakly_canonical(m_assetsPath, error);
     if (error || !fs::exists(source) || !fs::is_directory(destinationRoot) ||
-        !IsPathWithin(assetsRoot, source) || !IsPathWithin(assetsRoot, destinationRoot))
+        !IsPathWithin(assetsRoot, source) ||
+        (destinationRoot != assetsRoot &&
+            !IsPathWithin(assetsRoot, destinationRoot)))
         return false;
 
     if (fs::is_directory(source))
@@ -998,7 +1121,7 @@ bool AssetsExplorerView::MoveAssetPath(const std::string& sourcePath,
 }
 
 bool AssetsExplorerView::CopyExternalPath(const std::string& sourcePath,
-    const std::string& destinationDirectory)
+    const std::string& destinationDirectory, std::string* copiedPath)
 {
     if (m_assetsPath.empty())
     {
@@ -1114,9 +1237,161 @@ bool AssetsExplorerView::CopyExternalPath(const std::string& sourcePath,
 
     m_error.clear();
     SelectPath(destination.string());
+    if (copiedPath) *copiedPath = destination.string();
     if (OnAssetContentsChanged)
         OnAssetContentsChanged(destination.string());
+    CheckForExternalMoves();
     return true;
+}
+
+void AssetsExplorerView::CopySelectionToClipboard(const std::string& path,
+    bool cut)
+{
+    const bool inSelection = std::find(m_selectedPaths.begin(),
+        m_selectedPaths.end(), path) != m_selectedPaths.end();
+    const std::vector<std::string> requested = inSelection
+        ? m_selectedPaths : std::vector<std::string>{ path };
+    m_clipboardPaths.clear();
+    for (const std::string& item : requested)
+    {
+        const fs::path candidate = fs::path(item).lexically_normal();
+        const bool nested = std::any_of(requested.begin(), requested.end(),
+            [&candidate](const std::string& other)
+            { return fs::path(other) != candidate &&
+                IsPathWithin(fs::path(other), candidate); });
+        if (!nested && std::find(m_clipboardPaths.begin(),
+            m_clipboardPaths.end(), candidate.string()) == m_clipboardPaths.end())
+            m_clipboardPaths.push_back(candidate.string());
+    }
+    m_clipboardCut = cut;
+}
+
+void AssetsExplorerView::PasteClipboard(const std::string& directory)
+{
+    if (m_clipboardPaths.empty()) return;
+    for (const std::string& source : m_clipboardPaths)
+        if (fs::is_directory(source) &&
+            (fs::path(directory) == fs::path(source) ||
+                IsPathWithin(source, directory)))
+        {
+            m_error = "Cannot paste a folder into itself.";
+            return;
+        }
+    std::vector<std::string> pasted;
+    std::vector<std::string> remaining;
+    std::string firstError;
+    for (const std::string& source : m_clipboardPaths)
+    {
+        std::string destination;
+        bool success = false;
+        if (m_clipboardCut && fs::path(source).parent_path() == fs::path(directory))
+        {
+            destination = source;
+            success = true;
+        }
+        else if (m_clipboardCut)
+            success = MoveAssetPath(source, directory, &destination);
+        else
+            success = CopyExternalPath(source, directory, &destination);
+        if (success)
+            pasted.push_back(destination);
+        else
+        {
+            remaining.push_back(source);
+            if (firstError.empty()) firstError = m_error;
+        }
+    }
+    if (m_clipboardCut)
+        m_clipboardPaths = std::move(remaining);
+    if (!pasted.empty())
+    {
+        m_selectedPaths = std::move(pasted);
+        m_selectedPath = m_selectedPaths.back();
+        m_selectionAnchor = m_selectedPath;
+        if (OnSelectionChanged) OnSelectionChanged(m_selectedPath);
+    }
+    if (!firstError.empty()) m_error = firstError;
+}
+
+void AssetsExplorerView::ProcessPendingAssetDrop()
+{
+    if (m_pendingAssetDropSources.empty()) return;
+    const std::vector<std::string> sources =
+        std::move(m_pendingAssetDropSources);
+    m_pendingAssetDropSources.clear();
+    const std::string directory = std::move(m_pendingAssetDropDirectory);
+    m_pendingAssetDropDirectory.clear();
+    for (const std::string& source : sources)
+        if (fs::is_directory(source) &&
+            (fs::path(directory) == fs::path(source) ||
+                IsPathWithin(source, directory)))
+        {
+            m_error = "Cannot move a folder into itself.";
+            return;
+        }
+    std::vector<std::string> movedPaths;
+    for (const std::string& source : sources)
+    {
+        const bool nested = std::any_of(sources.begin(), sources.end(),
+            [&source](const std::string& other)
+            { return source != other && IsPathWithin(other, source); });
+        if (nested) continue;
+        std::string extension = fs::path(source).extension().string();
+        std::transform(extension.begin(), extension.end(), extension.begin(),
+            [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+        std::error_code sourceError;
+        if (fs::is_regular_file(source, sourceError) &&
+            (extension == ".vmd" || extension == ".fbx" ||
+            extension == ".pmx" || extension == ".gltf" ||
+            extension == ".glb" || extension == ".obj" ||
+            extension == ".spriteanim") && OnObjectImportRequested)
+            OnObjectImportRequested(source, directory);
+        else
+        {
+            std::string moved;
+            if (MoveAssetPath(source, directory, &moved))
+                movedPaths.push_back(std::move(moved));
+        }
+    }
+    if (!movedPaths.empty())
+    {
+        m_selectedPaths = std::move(movedPaths);
+        m_selectedPath = m_selectedPaths.back();
+        m_selectionAnchor = m_selectedPath;
+        if (OnSelectionChanged) OnSelectionChanged(m_selectedPath);
+    }
+}
+
+void AssetsExplorerView::QueueDeletePath(const std::string& path)
+{
+    if (path.empty()) return;
+    const bool selected = std::find(m_selectedPaths.begin(),
+        m_selectedPaths.end(), path) != m_selectedPaths.end();
+    if (selected)
+        m_pendingDeletePaths.insert(m_pendingDeletePaths.end(),
+            m_selectedPaths.begin(), m_selectedPaths.end());
+    else
+        m_pendingDeletePaths.push_back(path);
+}
+
+void AssetsExplorerView::DeleteQueuedPaths()
+{
+    if (m_pendingDeletePaths.empty()) return;
+    std::vector<fs::path> roots;
+    for (const std::string& pending : m_pendingDeletePaths)
+    {
+        const fs::path candidate = fs::path(pending).lexically_normal();
+        if (std::find(roots.begin(), roots.end(), candidate) == roots.end())
+            roots.push_back(candidate);
+    }
+    m_pendingDeletePaths.clear();
+    for (const fs::path& root : roots)
+    {
+        const bool covered = std::any_of(roots.begin(), roots.end(),
+            [&root](const fs::path& other)
+            { return other != root && IsPathWithin(other, root); });
+        if (!covered) DeleteAssetPath(root.string());
+    }
 }
 
 bool AssetsExplorerView::DeleteAssetPath(const std::string& path)
@@ -1149,8 +1424,27 @@ bool AssetsExplorerView::DeleteAssetPath(const std::string& path)
         return false;
     }
 
-    if (m_selectedPath == candidate.string())
-        SelectPath({});
+    const auto removed = [&candidate](const std::string& selected)
+    {
+        const fs::path selectedPath = fs::path(selected).lexically_normal();
+        return selectedPath == candidate || IsPathWithin(candidate, selectedPath);
+    };
+    m_selectedPaths.erase(std::remove_if(m_selectedPaths.begin(),
+        m_selectedPaths.end(), removed), m_selectedPaths.end());
+    if (!m_selectionAnchor.empty() && removed(m_selectionAnchor))
+        m_selectionAnchor.clear();
+    if (!m_selectedPath.empty() && removed(m_selectedPath))
+    {
+        m_selectedPath = m_selectedPaths.empty() ? std::string() :
+            m_selectedPaths.back();
+        if (OnSelectionChanged) OnSelectionChanged(m_selectedPath);
+    }
+    if (fs::is_directory(assetsRoot) &&
+        (fs::path(m_currentDirectory) == candidate ||
+            IsPathWithin(candidate, fs::path(m_currentDirectory))))
+        m_currentDirectory = candidate.parent_path().string();
+    m_backHistory.erase(std::remove_if(m_backHistory.begin(),
+        m_backHistory.end(), removed), m_backHistory.end());
     if (OnAssetContentsChanged)
         OnAssetContentsChanged(candidate.string());
     m_error.clear();
@@ -1169,19 +1463,12 @@ bool AssetsExplorerView::AcceptSceneObject(IEditorUi& ui, const std::string& dir
         const auto* sourcePath = static_cast<const char*>(assetData);
         if (sourcePath && size > 1)
         {
-            std::string extension = fs::path(sourcePath).extension().string();
-            std::transform(extension.begin(), extension.end(), extension.begin(),
-                [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
-            std::error_code sourceError;
-            if (fs::is_regular_file(sourcePath, sourceError) &&
-                (extension == ".vmd" || extension == ".fbx" ||
-                extension == ".pmx" ||
-                extension == ".gltf" || extension == ".glb" ||
-                extension == ".obj" || extension == ".spriteanim") &&
-                OnObjectImportRequested)
-                OnObjectImportRequested(sourcePath, directory);
-            else
-                MoveAssetPath(sourcePath, directory);
+            const std::string source(sourcePath);
+            const bool selected = std::find(m_selectedPaths.begin(),
+                m_selectedPaths.end(), source) != m_selectedPaths.end();
+            m_pendingAssetDropSources = selected
+                ? m_selectedPaths : std::vector<std::string>{ source };
+            m_pendingAssetDropDirectory = directory;
         }
     }
 
@@ -1192,7 +1479,7 @@ bool AssetsExplorerView::AcceptSceneObject(IEditorUi& ui, const std::string& dir
         Engine::Core::Object* prefabRoot = object ? object->GetPrefabInstanceRoot() : nullptr;
         if (prefabRoot && prefabRoot->Prefab)
         {
-            m_selectedPath = prefabRoot->Prefab->GetPath();
+            SetSelectedPath(prefabRoot->Prefab->GetPath());
         }
         else if (object)
         {
@@ -1212,7 +1499,7 @@ bool AssetsExplorerView::AcceptSceneObject(IEditorUi& ui, const std::string& dir
                 Engine::Core::AssetRecord::Ensure(destination, destination,
                     { { "importer", std::string("native") } });
                 object->SetPrefab(destination.string());
-                m_selectedPath = destination.string();
+                SetSelectedPath(destination.string());
                 created = true;
                 if (OnPrefabCreated)
                     OnPrefabCreated(object, destination.string());

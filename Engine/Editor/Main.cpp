@@ -445,6 +445,11 @@ int WINAPI wWinMain(
         Engine::Core::SceneManager::CancelPendingSceneLoad();
         editorState->RestorePlayModeScene();
     };
+    gameBuildManager->OnBuildComplete = [&](bool)
+    {
+        editorState->CheckAssetLocations();
+        renderer->MarkDirty();
+    };
     editorState->OnSceneLoadRequested = [&](const std::string&)
     {
         gameBuildManager->Stop();
@@ -504,6 +509,11 @@ int WINAPI wWinMain(
     window->OnApplicationFocusLost = [&]()
     {
         uiBackend->ClearFocus();
+        renderer->MarkDirty();
+    };
+    window->OnApplicationFocusGained = [&]()
+    {
+        editorState->CheckAssetLocations();
         renderer->MarkDirty();
     };
     OutputDebugStringA("[Main] WndProcHook callback set\n");

@@ -13,6 +13,16 @@ AnimationBone::AnimationBone()
     RegisterField("paletteIndex", paletteIndex, "Animation Bone");
     RegisterField("parentPaletteIndex", parentPaletteIndex, "Animation Bone");
     RegisterField("hierarchyRoot", hierarchyRoot, "Animation Bone");
+    RegisterField("poseControllerActive", poseControllerActive,
+        "Point Controller");
+    RegisterField("poseControllerTarget", poseControllerTarget,
+        "Point Controller");
+    RegisterField("posePinPosition", posePinPosition, "Point Controller");
+    RegisterField("posePinRotation", posePinRotation, "Point Controller");
+    RegisterField("posePinTarget", posePinTarget, "Point Controller");
+    RegisterField("posePinRotationEuler", posePinRotationEuler,
+        "Point Controller");
+    RegisterField("posePinPole", posePinPole, "Point Controller");
 }
 
 AnimationBone* AnimationBone::GetParentBone() const

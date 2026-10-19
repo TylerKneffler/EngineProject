@@ -96,6 +96,7 @@ void EditorKeyBindings::SetCompiledDefaults()
         { EditorCommand::SaveScene, "file.save", "File", "Save Scene", { Key("S", true), Key("") } },
         { EditorCommand::SaveAll, "file.save_all", "File", "Save All", { Key("S", true, true), Key("") } },
         { EditorCommand::Copy, "edit.copy", "Editing", "Copy", { Key("C", true), Key("") } },
+        { EditorCommand::Cut, "edit.cut", "Editing", "Cut", { Key("X", true), Key("") } },
         { EditorCommand::Paste, "edit.paste", "Editing", "Paste", { Key("V", true), Key("") } },
         { EditorCommand::Build, "build.build", "Build", "Build", { Key("B", true), Key("") } },
         { EditorCommand::BuildAndPlay, "build.play", "Build", "Build and Run in Editor", { Key("B", true, true), Key("") } },

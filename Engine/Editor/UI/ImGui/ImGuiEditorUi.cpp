@@ -1002,18 +1002,38 @@ float ImGuiEditorUi::AvailableContentWidth() const
 {
     return ImGui::GetContentRegionAvail().x;
 }
-EditorUiContextMenuResult ImGuiEditorUi::ContextMenu(const void* id,const char* addLabel,const char* deleteLabel,bool objectCreationMenu,const char* unpackLabel)
+EditorUiContextMenuResult ImGuiEditorUi::ContextMenu(const void* id,const char* addLabel,const char* deleteLabel,bool objectCreationMenu,const char* unpackLabel,bool clipboardActions,bool canPaste)
 {
     EditorUiContextMenuResult result;
     const bool hasAdd=addLabel&&addLabel[0];
     const bool hasDelete=deleteLabel&&deleteLabel[0];
     const bool hasUnpack=unpackLabel&&unpackLabel[0];
-    if(!hasAdd&&!hasDelete&&!hasUnpack)return result;
+    if(!hasAdd&&!hasDelete&&!hasUnpack&&!clipboardActions)return result;
     ImGui::PushID(id);
-    if(!ImGui::GetIO().KeyAlt&&ImGui::IsItemHovered()&&
+    if (!ImGui::GetIO().KeyAlt && ImGui::IsItemHovered() &&
         ImGui::IsMouseReleased(ImGuiMouseButton_Right))
-        ImGui::OpenPopup("##context");
+    {
+        const ImGuiIO& io = ImGui::GetIO();
+        const ImVec2 clickPos = io.MouseClickedPos[ImGuiMouseButton_Right];
+        const float releaseDX = io.MousePos.x - clickPos.x;
+        const float releaseDY = io.MousePos.y - clickPos.y;
+        const float dragDistanceSquared = std::max(
+            io.MouseDragMaxDistanceSqr[ImGuiMouseButton_Right],
+            releaseDX * releaseDX + releaseDY * releaseDY);
+        if (dragDistanceSquared < io.MouseDragThreshold * io.MouseDragThreshold)
+            ImGui::OpenPopup("##context");
+    }
     if(ImGui::BeginPopup("##context")){
+        if (clipboardActions)
+        {
+            result.copyRequested = ImGui::MenuItem("Copy", nullptr, false,
+                hasDelete);
+            result.cutRequested = ImGui::MenuItem("Cut", nullptr, false,
+                hasDelete);
+            result.pasteRequested = ImGui::MenuItem("Paste", nullptr, false,
+                canPaste);
+            ImGui::Separator();
+        }
         if(hasAdd){
             if(objectCreationMenu){
                 if(ImGui::BeginMenu(addLabel)){
@@ -1043,7 +1063,7 @@ EditorUiContextMenuResult ImGuiEditorUi::ContextMenu(const void* id,const char* 
     ImGui::PopID();
     return result;
 }
-EditorUiAssetCreateMenuResult ImGuiEditorUi::AssetWindowContextMenu()
+EditorUiAssetCreateMenuResult ImGuiEditorUi::AssetWindowContextMenu(bool canPaste)
 {
     EditorUiAssetCreateMenuResult result;
     if(ImGui::BeginPopupContextWindow("##windowContext",
@@ -1053,12 +1073,15 @@ EditorUiAssetCreateMenuResult ImGuiEditorUi::AssetWindowContextMenu()
             result.scriptRequested=ImGui::MenuItem("Script");
             ImGui::EndMenu();
         }
+        result.pasteRequested = ImGui::MenuItem("Paste", nullptr, false,
+            canPaste);
         ImGui::EndPopup();
     }
     return result;
 }
 EditorUiAssetItemMenuResult ImGuiEditorUi::AssetItemContextMenu(const void* id,
-    bool canPackMeshes, bool canExtractMeshes)
+    bool canPackMeshes, bool canExtractMeshes, bool isDirectory,
+    bool canPaste)
 {
     EditorUiAssetItemMenuResult result;
     ImGui::PushID(id);
@@ -1067,8 +1090,14 @@ EditorUiAssetItemMenuResult ImGuiEditorUi::AssetItemContextMenu(const void* id,
         if (canPackMeshes) result.packMeshesRequested = ImGui::MenuItem("Bundle meshes into rig pack");
         if (canExtractMeshes) result.extractMeshesRequested = ImGui::MenuItem("Unbundle meshes from rig pack");
         if (canPackMeshes || canExtractMeshes) ImGui::Separator();
+        result.copyRequested = ImGui::MenuItem("Copy");
+        result.cutRequested = ImGui::MenuItem("Cut");
+        if (isDirectory)
+            result.pasteRequested = ImGui::MenuItem("Paste into Folder",
+                nullptr, false, canPaste);
+        ImGui::Separator();
         result.renameRequested=ImGui::MenuItem("Rename");
-        result.deleteRequested=ImGui::MenuItem("Delete");
+        result.deleteRequested=ImGui::MenuItem(isDirectory ? "Delete Folder" : "Delete");
         ImGui::EndPopup();
     }
     ImGui::PopID();
@@ -1083,11 +1112,15 @@ EditorUiTextEditResult ImGuiEditorUi::RenameText(const char* label,char* buffer,
     result.deactivated=ImGui::IsItemDeactivated();
     return result;
 }
-EditorUiPrefabMenuResult ImGuiEditorUi::PrefabOverrideMenu(const void* id,bool hasOverrides)
+EditorUiPrefabMenuResult ImGuiEditorUi::PrefabOverrideMenu(const void* id,bool hasOverrides,bool canPaste)
 {
     EditorUiPrefabMenuResult result;
     ImGui::PushID(id);
     if(ImGui::BeginPopupContextItem("##prefabOverrides")){
+        result.copyRequested=ImGui::MenuItem("Copy");
+        result.cutRequested=ImGui::MenuItem("Cut");
+        result.pasteRequested=ImGui::MenuItem("Paste",nullptr,false,canPaste);
+        ImGui::Separator();
         result.editRequested=ImGui::MenuItem("Edit Prefab");
         ImGui::BeginDisabled(!hasOverrides);
         result.applyRequested=ImGui::MenuItem("Apply Overrides to Prefab");
@@ -1111,6 +1144,7 @@ bool ImGuiEditorUi::IsItemHovered()const{return ImGui::IsItemHovered();} bool Im
 bool ImGuiEditorUi::IsItemDoubleClicked()const{return ImGui::IsItemHovered()&&ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);}
 bool ImGuiEditorUi::IsWindowBackgroundClicked()const{return ImGui::IsMouseClicked(ImGuiMouseButton_Left)&&ImGui::IsWindowHovered()&&!ImGui::IsAnyItemHovered();}
 bool ImGuiEditorUi::CopyShortcutPressed()const{return ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)&&EditorKeyBindings::Get().Pressed(EditorCommand::Copy);}
+bool ImGuiEditorUi::CutShortcutPressed()const{return ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)&&EditorKeyBindings::Get().Pressed(EditorCommand::Cut);}
 bool ImGuiEditorUi::PasteShortcutPressed()const{return ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)&&EditorKeyBindings::Get().Pressed(EditorCommand::Paste);}
 bool ImGuiEditorUi::DeleteShortcutPressed()const
 {

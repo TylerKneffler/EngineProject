@@ -21,6 +21,10 @@
       { "key": "C", "control": true, "shift": false, "alt": false },
       { "key": "", "control": false, "shift": false, "alt": false }
     ],
+    "edit.cut": [
+      { "key": "X", "control": true, "shift": false, "alt": false },
+      { "key": "", "control": false, "shift": false, "alt": false }
+    ],
     "edit.paste": [
       { "key": "V", "control": true, "shift": false, "alt": false },
       { "key": "", "control": false, "shift": false, "alt": false }

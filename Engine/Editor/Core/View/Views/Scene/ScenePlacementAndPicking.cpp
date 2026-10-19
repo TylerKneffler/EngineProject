@@ -3,6 +3,7 @@
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Compoonents/Animation/AnimationBone.h"
+#include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Obj/Sprite.h"
 #include "Core/Scene/Scene.h"
@@ -241,6 +242,102 @@ Engine::Core::Object* ScenePlacementAndPicking::PickBoneInViewport(
         }
     }
     return closest;
+}
+
+Engine::Core::Object* ScenePlacementAndPicking::PickSkinnedBoneInViewport(
+    const Engine::Scene::Scene& scene, const EditorUiVec2& mousePos,
+    const EditorUiVec2& viewportSize)
+{
+    glm::vec3 rayOrigin{}, rayDirection{};
+    if (!BuildViewportRay(scene, mousePos, viewportSize,
+            rayOrigin, rayDirection)) return nullptr;
+    Engine::Core::Object* picked = nullptr;
+    float closest = FLT_MAX;
+    for (const auto& entry : scene.GetObjects())
+    {
+        auto* object = entry.get();
+        if (!object || !object->IsEnabledInHierarchy()) continue;
+        auto* mesh = object->GetComponent<Engine::Components::Mesh>();
+        auto* skin = object->GetComponent<Engine::Components::SkinnedMesh>();
+        if (!mesh || !skin || !mesh->IsEditorVisible()) continue;
+        auto* skeleton = skin->ResolveSkeleton();
+        if (!skeleton) continue;
+        const auto& joints = skeleton->ResolveJoints();
+        const auto& source = mesh->GetVertices();
+        const auto& indices = mesh->GetIndices();
+        if (source.empty()) continue;
+        const auto posed = mesh->BuildPosedVertices(&skin->BuildPalette());
+        if (posed.size() != source.size()) continue;
+        const glm::mat4 world = object->transform.GetWorldMatrix();
+        if (std::abs(glm::determinant(world)) < 1e-8f) continue;
+        const glm::mat4 inverseWorld = glm::inverse(world);
+        const glm::vec3 origin = glm::vec3(inverseWorld *
+            glm::vec4(rayOrigin, 1.f));
+        const glm::vec3 direction = glm::vec3(inverseWorld *
+            glm::vec4(rayDirection, 0.f));
+        const size_t count = indices.empty() ? posed.size() : indices.size();
+        for (size_t i = 0; i + 2 < count; i += 3)
+        {
+            const size_t ids[3] = { indices.empty() ? i : indices[i],
+                indices.empty() ? i + 1 : indices[i + 1],
+                indices.empty() ? i + 2 : indices[i + 2] };
+            if (ids[0] >= posed.size() || ids[1] >= posed.size() ||
+                ids[2] >= posed.size()) continue;
+            const auto position = [&](size_t id) {
+                return glm::vec3(posed[id].pos[0], posed[id].pos[1],
+                    posed[id].pos[2]);
+            };
+            const glm::vec3 a = position(ids[0]);
+            const glm::vec3 edge1 = position(ids[1]) - a;
+            const glm::vec3 edge2 = position(ids[2]) - a;
+            const glm::vec3 p = glm::cross(direction, edge2);
+            const float det = glm::dot(edge1, p);
+            if (std::abs(det) < 1e-7f) continue;
+            const float invDet = 1.f / det;
+            const glm::vec3 offset = origin - a;
+            const float u = glm::dot(offset, p) * invDet;
+            if (u < 0.f || u > 1.f) continue;
+            const glm::vec3 q = glm::cross(offset, edge1);
+            const float v = glm::dot(direction, q) * invDet;
+            if (v < 0.f || u + v > 1.f) continue;
+            const float t = glm::dot(edge2, q) * invDet;
+            if (t <= 0.f) continue;
+            const float worldDistance = glm::length(glm::vec3(world *
+                glm::vec4(origin + direction * t, 1.f)) - rayOrigin);
+            if (worldDistance >= closest) continue;
+            float bestWeight = 0.f;
+            unsigned bestJoint = 0;
+            const float barycentric[3] = { 1.f - u - v, u, v };
+            for (unsigned joint = 0; joint < joints.size(); ++joint)
+            {
+                if (!joints[joint]) continue;
+                float weight = 0.f;
+                for (int corner = 0; corner < 3; ++corner)
+                {
+                    const size_t vertex = ids[corner];
+                    for (int slot = 0; slot < 4; ++slot)
+                    {
+                        if (source[vertex].weights0[slot] > 0.f &&
+                            static_cast<unsigned>(source[vertex].joints0[slot]) == joint)
+                            weight += barycentric[corner] * source[vertex].weights0[slot];
+                        if (source[vertex].weights1[slot] > 0.f &&
+                            static_cast<unsigned>(source[vertex].joints1[slot]) == joint)
+                            weight += barycentric[corner] * source[vertex].weights1[slot];
+                        if (source[vertex].weights0[slot] == 0.f &&
+                            vertex < skin->joints.size() &&
+                            vertex < skin->weights.size() &&
+                            skin->joints[vertex][slot] == joint)
+                            weight += barycentric[corner] * skin->weights[vertex][slot];
+                    }
+                }
+                if (weight > bestWeight)
+                { bestWeight = weight; bestJoint = joint; }
+            }
+            if (bestWeight > 0.f)
+            { picked = joints[bestJoint]; closest = worldDistance; }
+        }
+    }
+    return picked;
 }
 
 Engine::Core::Object* ScenePlacementAndPicking::PickObjectInViewport(

@@ -12,6 +12,7 @@ build/
 !.local/tests/LegacyFbxImportTests.cpp
 !.local/tests/PerformanceRecordingTests.cpp
 !.local/tests/AssetLocationIndexTests.cpp
+!.local/tests/PoseControllerSerializationTests.cpp
 build
 editor-startup.log
 project-build.log
