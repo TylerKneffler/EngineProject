@@ -13,6 +13,8 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Animation/AnimationBone.h"
+#include "Core/Compoonents/Animation/Model.h"
+#include "Core/Compoonents/Transform.h"
 #include "Core/Compoonents/Obj/Sprite.h"
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
 #include "Core/Compoonents/Lighting/LightProbe.h"
@@ -158,6 +160,8 @@ void SceneView::DrawPanel(IEditorUi& ui)
             auto* selected = m_scene ? m_scene->GetSelectedObject() : nullptr;
             if (selected && selected->GetComponent<Engine::Components::AnimationBone>())
             {
+                auto* controller = selected->GetComponent<
+                    Engine::Components::AnimationBone>();
                 bool controllerActive = m_gizmos.IsModelControllerActive(selected);
                 ImGui::SameLine();
                 if (ImGui::Checkbox("Active", &controllerActive))
@@ -186,6 +190,121 @@ void SceneView::DrawPanel(IEditorUi& ui)
                     m_gizmos.SetModelPin(selected, true, pinRotation);
                     if (OnModelControllerEdited) OnModelControllerEdited();
                 }
+                ImGui::SameLine();
+                if (ImGui::Button("Controller settings"))
+                    ImGui::OpenPopup("##ControllerSettings");
+                if (ImGui::BeginPopup("##ControllerSettings"))
+                {
+                    bool changed = false;
+                    const char* modes[] = {"Follow scope", "IK", "FK"};
+                    changed |= ImGui::Combo("Solve mode",
+                        &controller->poseControllerMode, modes, 3);
+                    int scopeChoice = controller->poseControllerScope + 1;
+                    const char* controllerScopes[] = {"Follow viewport", "Selected",
+                        "Body Part", "Full Body"};
+                    if (ImGui::Combo("Hierarchy scope", &scopeChoice,
+                            controllerScopes, 4))
+                    {
+                        controller->poseControllerScope = scopeChoice - 1;
+                        changed = true;
+                    }
+                    changed |= ImGui::SliderInt("Chain ancestors",
+                        &controller->poseControllerChainDepth, 1, 32);
+                    if (ImGui::Checkbox("Face target",
+                            &controller->poseFacingEnabled))
+                    {
+                        if (controller->poseFacingEnabled)
+                        {
+                            const glm::vec3 axis = glm::dot(
+                                controller->poseFacingAxis,
+                                controller->poseFacingAxis) > 1e-8f
+                                ? glm::normalize(controller->poseFacingAxis)
+                                : glm::vec3(0.f, 0.f, 1.f);
+                            controller->poseFacingTarget =
+                                selected->transform.GetWorldPosition() +
+                                glm::vec3(selected->transform.GetWorldMatrix() *
+                                    glm::vec4(axis, 0.f));
+                        }
+                        changed = true;
+                    }
+                    changed |= ImGui::DragFloat3("Facing target (world)",
+                        &controller->poseFacingTarget.x, .01f);
+                    changed |= ImGui::DragFloat3("Local forward axis",
+                        &controller->poseFacingAxis.x, .01f);
+                    changed |= ImGui::SliderFloat("Facing weight",
+                        &controller->poseFacingWeight, 0.f, 1.f);
+                    ImGui::Text("Connection length: %.1f%% of rest",
+                        controller->PoseLengthRatio() * 100.f);
+                    if (ImGui::Button("Capture current length"))
+                    {
+                        controller->CapturePoseRestOffset();
+                        changed = true;
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Restore rest length") &&
+                        controller->RestorePoseLength())
+                    {
+                        selected->transform.NotifyEditorTransformChanged(
+                            Engine::Components::Transform::EditorPosition);
+                        changed = true;
+                    }
+                    if (ImGui::Button("Aim now") &&
+                        m_gizmos.ApplyModelFacing(selected))
+                        changed = true;
+                    ImGui::TextWrapped("FK moves this point directly. IK solves "
+                        "its ancestor chain. Body Part uses Chain ancestors; "
+                        "Full Body also respects other active points and pins.");
+                    if (changed)
+                    {
+                        controller->MarkConfigurationDirty();
+                        if (OnModelControllerEdited)
+                            OnModelControllerEdited();
+                    }
+                    ImGui::EndPopup();
+                }
+            }
+            if (selected && m_scene && AllowObjectCreation)
+            {
+                Engine::Components::Model* model = nullptr;
+                for (auto* ancestor = selected; ancestor;
+                    ancestor = ancestor->Parent)
+                    if ((model = ancestor->GetComponent<
+                            Engine::Components::Model>())) break;
+                ImGui::SameLine();
+                if (ImGui::Button("Add control point"))
+                {
+                    auto* point = m_scene->AddObject("Control Point");
+                    if (m_scene->MoveObject(point, selected,
+                            Engine::Scene::Scene::ObjectPlacement::AsChild))
+                    {
+                        point->transform.position = {0.f, .15f, 0.f};
+                        point->transform.rotation = {0.f, 0.f, 0.f};
+                        point->transform.scale = {1.f, 1.f, 1.f};
+                        const unsigned node = model
+                            ? static_cast<unsigned>(model->GetNodeCount())
+                            : static_cast<unsigned>(-1);
+                        if (model)
+                            model->BindNode(node, point);
+                        auto* controller = point->AddComponent<
+                            Engine::Components::AnimationBone>();
+                        if (const auto* parentBone = selected->GetComponent<
+                                Engine::Components::AnimationBone>())
+                            controller->skinIndex = parentBone->skinIndex;
+                        controller->nodeIndex = node;
+                        controller->poseControlOnly = true;
+                        controller->poseControllerTarget =
+                            point->transform.GetWorldPosition();
+                        m_scene->SetSelectedObject(point);
+                        if (OnObjectCreated) OnObjectCreated(point);
+                    }
+                    else m_scene->RemoveObject(point);
+                }
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip(model
+                        ? "Add a model-bound point without skinning weights. "
+                          "Attach it to a hand, finger, prop, or another node."
+                        : "Add a scene-only point under this object. "
+                          "Model-bound points can also be keyed in animations.");
             }
             ImGui::SameLine();
             if (ImGui::Button("Clear pins") && m_scene)

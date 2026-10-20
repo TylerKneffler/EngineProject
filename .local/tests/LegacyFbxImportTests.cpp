@@ -2,11 +2,17 @@
 #include "Editor/Core/Importers/ModelAssetWriter.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
+#include "Core/Model/AnimationClipAsset.h"
+#include "Core/Model/AnimationRigMapping.h"
+#include "Core/Model/RigAsset.h"
+#include "Core/Compoonents/Animation/Model.h"
 
 #include <filesystem>
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <string>
 
 int main()
@@ -60,11 +66,88 @@ int main()
         return 1;
     }
     Engine::Scene::Scene scene;
-    if (!Engine::Serialization::SceneSerializer::InstantiatePrefab(
-            scene, imported.prefabPath, nullptr))
+    auto* target = Engine::Serialization::SceneSerializer::InstantiatePrefab(
+        scene, imported.prefabPath, nullptr);
+    if (!target)
     {
         std::cerr << "Generated legacy prefab could not be instantiated\n";
         return 1;
+    }
+    const fs::path walking = fs::path("Engine/Core/Assets/Models/Mixemo") /
+        "Walking.fbx";
+    if (fs::is_regular_file(walking))
+    {
+        Engine::Model::ImportedModel walkingModel;
+        if (!Engine::Editor::FbxModelDecoder::Decode(
+                walking.string(), walkingModel, error) ||
+            walkingModel.skins.size() != 1 || !walkingModel.primitives.empty())
+        {
+            std::cerr << "Animation-only FBX lost its pose-only rig: " << error << '\n';
+            return 1;
+        }
+        const auto extracted = Engine::Editor::ModelAssetWriter::Write(
+            walkingModel, walking.string(), output.string());
+        if (!extracted.success)
+        { std::cerr << extracted.message << '\n'; return 1; }
+        std::optional<Engine::Model::AnimationClipAsset> motion;
+        for (const auto& entry : fs::directory_iterator(extracted.outputDirectory))
+            if (entry.path().extension() == ".anim")
+                motion = Engine::Model::AnimationClipAsset::Load(
+                    entry.path().string());
+        const auto targetRig = Engine::Model::RigAsset::Load(
+            (fs::path(imported.outputDirectory) /
+                (fs::path(imported.outputDirectory).filename().string() + ".rig")).string());
+        auto* targetModel = target->GetComponent<Engine::Components::Model>();
+        if (!motion || !targetRig || !targetModel ||
+            !fs::is_regular_file(fs::path(extracted.outputDirectory) /
+                (fs::path(extracted.outputDirectory).filename().string() + "_Rest.pose")))
+        { std::cerr << "Extracted motion assets are incomplete\n"; return 1; }
+        const auto mapping = Engine::Model::AnimationRigMapping::Map(
+            *motion, *targetModel, *targetRig);
+        if (mapping.unmatchedChannels != 0 || mapping.inferredChannels == 0)
+        {
+            std::cerr << "Mixamo motion did not map to Crash Dummy: " <<
+                mapping.unmatchedChannels << " unmatched channels\n";
+            for (const auto& path : mapping.unmatchedPaths)
+                std::cerr << "  " << path << '\n';
+            return 1;
+        }
+        const fs::path mococoPrefab = fs::path("Engine/Core/Assets/Models/mmd") /
+            "Mococo Abyssgard/Mococo Abyssgard.prefab";
+        if (fs::is_regular_file(mococoPrefab))
+        {
+            Engine::Scene::Scene mococoScene;
+            auto* mococo = Engine::Serialization::SceneSerializer::InstantiatePrefab(
+                mococoScene, mococoPrefab.string(), nullptr);
+            const auto mococoRig = Engine::Model::RigAsset::Load(
+                (mococoPrefab.parent_path() / "Mococo Abyssgard.rig").string());
+            auto* mococoModel = mococo
+                ? mococo->GetComponent<Engine::Components::Model>() : nullptr;
+            if (!mococoRig || !mococoModel)
+            { std::cerr << "Mococo rig could not be loaded\n"; return 1; }
+            const auto mococoMapping = Engine::Model::AnimationRigMapping::Map(
+                *motion, *mococoModel, *mococoRig);
+            if (mococoMapping.unmatchedChannels > 3 ||
+                mococoMapping.clip.channels.size() != motion->clip.channels.size() ||
+                std::count_if(mococoMapping.clip.channels.begin(),
+                    mococoMapping.clip.channels.end(), [](const auto& channel)
+                    { return channel.nodeIndex ==
+                        std::numeric_limits<unsigned>::max(); }) !=
+                    static_cast<std::ptrdiff_t>(mococoMapping.unmatchedChannels) ||
+                mococoMapping.inferredChannels == 0 ||
+                std::any_of(mococoMapping.unmatchedPaths.begin(),
+                    mococoMapping.unmatchedPaths.end(),
+                    [](const std::string& path)
+                    { return Engine::Model::AnimationRigMapping::Role(
+                        Engine::Model::AnimationRigMapping::Leaf(path)) != "spine3"; }))
+            {
+                std::cerr << "Mococo bone translation changed unexpectedly: " <<
+                    mococoMapping.unmatchedChannels << " channels unmatched\n";
+                for (const auto& path : mococoMapping.unmatchedPaths)
+                    std::cerr << "  " << Engine::Model::AnimationRigMapping::Leaf(path) << '\n';
+                return 1;
+            }
+        }
     }
     std::cout << "Imported " << model.primitives.size() << " meshes and "
         << model.skins.size() << " skins\n";

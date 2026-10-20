@@ -20,7 +20,8 @@ size_t ComponentCategory(const std::string& type,
     if (type == "Mesh" || type == "Material" ||
         type == "MaterialPropertyMorph" || type == "Camera" ||
         type == "Light" || type == "LightProbe" || type == "LightProbeGroup" ||
-        type == "Sprite" || type == "BakedLightingData") return 0;
+        type == "Sprite" || type == "ParticleEmitter" ||
+        type == "BakedLightingData") return 0;
     if (type == "RigidBody" || type == "PrimitiveObjectCollider" ||
         type == "MeshObjectCollider" || type == "Cloth" ||
         type == "RigPhysicsBinding") return 1;

@@ -130,6 +130,8 @@ public:
     bool CanCreateAnimationClip() const;
     bool CreateAnimationClip(const std::string& name);
     void ProcessPendingAnimationDocumentOpens();
+    void RestoreAnimationEditorSession();
+    void SaveAnimationEditorSession() const;
     void UpdateAnimationPlayback(float deltaTime);
     void HandleAnimationDocumentClosures();
     bool IsAnimationEditorFocused() const;
@@ -599,6 +601,13 @@ private:
         bool rigAssetsDirty = true;
         struct CachedClip
         {
+            struct UnresolvedRow
+            {
+                std::string path;
+                unsigned nodeIndex = 0;
+                size_t channelIndex = 0;
+                std::vector<float> times;
+            };
             struct SummaryKey
             {
                 float time = 0.f;
@@ -608,6 +617,7 @@ private:
             bool mappingReady = true;
             std::unordered_map<unsigned, std::vector<float>> keyTimes;
             std::vector<SummaryKey> summaryKeys;
+            std::vector<UnresolvedRow> unresolvedRows;
         };
         using ClipCacheKey = std::tuple<
             const Engine::Components::AnimationManager*,
@@ -632,6 +642,9 @@ private:
         size_t sampledControllerRig = static_cast<size_t>(-1);
         int repairIssueChannel = -1;
         int repairBoneIndex = 0;
+        bool repairAwaitingViewportBone = false;
+        size_t repairRigIndex = 0;
+        int repairClipIndex = -1;
         float playheadSeconds = 0.f;
         float timelinePixelsPerSecond = 110.f;
         bool playing = false;
@@ -657,6 +670,8 @@ private:
         float marqueeStartY = 0.f;
         bool marqueeAdditive = false;
         bool autoKey = false;
+        Engine::Model::AnimationClip::ControllerKey::Space controllerSpace =
+            Engine::Model::AnimationClip::ControllerKey::Space::Body;
         char poseName[128]{};
         std::string poseAssetPath;
         int selectedPose = -1;
@@ -729,6 +744,9 @@ private:
         const EditorUiViewportInput& input, AnimationDocument& document);
     void DrawAnimationMappingRepair(IEditorUi& ui,
         AnimationDocument& document);
+    bool AssignAnimationChannels(AnimationDocument& document,
+        size_t rigIndex, int clipIndex, size_t channelIndex,
+        size_t boneIndex);
     void DrawAnimationGraph(AnimationDocument& document,
         float duration);
     void SampleAnimationDocument(AnimationDocument& document);

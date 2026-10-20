@@ -89,11 +89,15 @@ public:
 
     void SetCommandBuffer(void* cmd) override;
     void PrepareFrame(uint32_t frameSlot) override;
+    uint32_t GetPreparedFrameSlot() const override { return m_preparedFrameSlot; }
+    uint64_t GetPreparedFrameSerial() const override { return m_preparedFrameSerial; }
     void FinalizeFrame() override;
     Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const override;
     std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateContext() override;
 
 private:
+    uint32_t m_preparedFrameSlot = 0;
+    uint64_t m_preparedFrameSerial = 0;
     ID3D12Device* m_device;
     ID3D12CommandQueue* m_commandQueue;
     ID3D12RootSignature* m_rootSignature;

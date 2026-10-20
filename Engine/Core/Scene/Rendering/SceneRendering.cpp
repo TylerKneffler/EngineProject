@@ -5,6 +5,7 @@
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
 #include "Core/Compoonents/Obj/Sprite.h"
+#include "Core/Compoonents/Particles/ParticleEmitter.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Materials/Texture.h"
@@ -313,12 +314,29 @@ struct SkyboxCBData
     glm::vec4 displayParams; // x: fullscreen 2D background mode
 };
 
+struct ParticleGPUData
+{
+    glm::vec4 positionSize;
+    glm::vec4 colorAlpha;
+    glm::vec4 rotation;
+};
+
+struct ParticleCBData
+{
+    glm::mat4 viewProjection;
+    glm::vec4 cameraRight;
+    glm::vec4 cameraUp;
+    glm::vec4 particleParams;
+};
+
 static_assert(sizeof(DrawCBData) == 16, "Draw constants must remain small");
 static_assert(sizeof(ObjectGPUData) == 1264, "Object buffer layout must match Object.hlsl");
 static_assert(sizeof(Engine::Model::LightData) == 128,
     "Light buffer layout must match Object.hlsl");
 static_assert(sizeof(GridCBData) == 128, "Grid constant-buffer layout must match Grid.hlsl");
 static_assert(sizeof(SkyboxCBData) == 80, "Skybox constant-buffer layout must match Skybox.hlsl");
+static_assert(sizeof(ParticleGPUData) == 48, "Particle vertex layout must match Particle.hlsl");
+static_assert(sizeof(ParticleCBData) == 112, "Particle constants must fit Vulkan push constants");
 
 // ---------------------------------------------------------------------------
 // Scene::Init
@@ -330,6 +348,7 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
         throw std::runtime_error("Scene::Init requires a non-null graphics provider");
 
     m_graphicsProvider = graphicsProvider;
+    m_particleDrawSlots.clear();
 
     // Create constant buffers via the graphics buffer factory
     auto* bufferFactory = m_graphicsProvider->GetBufferFactory();
@@ -479,6 +498,7 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
 
     // Build pipeline states
     BuildGridPipeline();
+    BuildParticlePipeline();
     BuildSkyboxPipeline();
     BuildObjectPipeline();
     m_uiRenderer = std::make_unique<Engine::Renderers::UIRenderer>();
@@ -624,7 +644,7 @@ void Scene::SetEditorMode2D(bool enabled)
     camera->up = { 0.f, 1.f, 0.f };
     editorCamera.transform.position = enabled
         ? glm::vec3(0.f, 0.f, -10.f)
-        : glm::vec3(0.f, 1.5f, -3.f);
+        : glm::vec3(0.f, 1.5f, 3.f);
 }
 
 void Scene::BuildSkyboxPipeline()
@@ -832,6 +852,173 @@ void Scene::BuildGridPipeline()
 // ---------------------------------------------------------------------------
 // Scene::BuildObjectPipeline
 // ---------------------------------------------------------------------------
+
+void Scene::BuildParticlePipeline()
+{
+    auto* compiler = m_graphicsProvider->GetShaderCompiler();
+    auto* factory = m_graphicsProvider->GetPipelineStateFactory();
+    if (!compiler || !factory)
+        throw std::runtime_error("Particle rendering requires shader and pipeline factories");
+    const std::string path = EngineShaderPath("Particle.hlsl");
+    auto vertex = compiler->CompileFromFile(path, "VSMain",
+        Engine::Graphics::IShaderCompiler::CompileProfile::VS_5_0);
+    if (!vertex)
+        throw std::runtime_error("Particle vertex shader: " + compiler->GetLastError());
+    auto pixel = compiler->CompileFromFile(path, "PSMain",
+        Engine::Graphics::IShaderCompiler::CompileProfile::PS_5_0);
+    if (!pixel)
+        throw std::runtime_error("Particle pixel shader: " + compiler->GetLastError());
+
+    const Engine::Graphics::IPipelineStateBuilder::VertexElement layout[] = {
+        { "POSITION", 0, 2, 0, 0, true },
+        { "COLOR", 0, 2, 0, 16, true },
+        { "TEXCOORD", 0, 2, 0, 32, true }
+    };
+    const auto build = [&](bool alphaBlend)
+    {
+        auto builder = factory->CreateBuilder();
+        auto pipeline = builder->SetVertexShader(vertex.get())
+            .SetPixelShader(pixel.get())
+            .SetFillMode(false)
+            .SetCullMode(false)
+            .SetFrontCounterClockwise(false)
+            .SetDepthClipEnable(true)
+            .SetBlendEnable(true)
+            .SetSrcBlend(4) // source alpha
+            .SetDestBlend(alphaBlend ? 5 : 1)
+            .SetBlendOp(0)
+            .SetSrcBlendAlpha(1)
+            .SetDestBlendAlpha(alphaBlend ? 5 : 1)
+            .SetBlendOpAlpha(0)
+            .SetDepthEnable(true)
+            .SetDepthWriteEnable(false)
+            .SetDepthFunc(3)
+            .SetInputLayout(layout, 3)
+            .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
+            .SetRenderTargetFormat(10, 20)
+            .Build();
+        if (!pipeline)
+            throw std::runtime_error("Particle pipeline: " + builder->GetLastError());
+        return pipeline;
+    };
+    m_particlePipeline = build(false);
+    m_particleAlphaPipeline = build(true);
+}
+
+void Scene::RenderParticles(IGraphicsContext* context,
+    const glm::mat4& viewProjection, const glm::mat4& view)
+{
+    if (!context || !m_particlePipeline || !m_particleAlphaPipeline || !m_graphicsProvider)
+        return;
+    auto* contextFactory = m_graphicsProvider->GetContextFactory();
+    auto* bufferFactory = m_graphicsProvider->GetBufferFactory();
+    if (!contextFactory || !bufferFactory)
+        return;
+    const uint32_t frameSlot = contextFactory->GetPreparedFrameSlot();
+    if (frameSlot >= m_particleDrawSlots.size())
+        m_particleDrawSlots.resize(static_cast<size_t>(frameSlot) + 1u);
+    const uint64_t serial = contextFactory->GetPreparedFrameSerial();
+    auto& slot = m_particleDrawSlots[frameSlot];
+    if (serial == 0 || serial != slot.preparedSerial)
+    {
+        slot.preparedSerial = serial;
+        slot.constantCursor = 0;
+        slot.batches.clear();
+        std::vector<ParticleGPUData> records;
+        constexpr size_t RenderLimit = 100000;
+        for (const auto& object : m_objects)
+        {
+            if (!object || !object->IsEnabledInHierarchy()) continue;
+            auto* emitter = object->GetComponent<Engine::Components::ParticleEmitter>();
+            if (!emitter) continue;
+            const uint32_t batchFirst = static_cast<uint32_t>(records.size());
+            const glm::mat4 world = object->transform.GetWorldMatrix();
+            for (const auto& particle : emitter->GetParticles())
+            {
+                if (records.size() >= RenderLimit) break;
+                const glm::vec3 position = emitter->worldSpace
+                    ? particle.position
+                    : glm::vec3(world * glm::vec4(particle.position, 1.f));
+                const float fade = std::clamp(1.f - particle.age /
+                    std::max(particle.lifetime, 0.001f), 0.f, 1.f);
+                records.push_back({ glm::vec4(position, particle.size),
+                    glm::vec4(particle.color, fade * std::clamp(emitter->opacity, 0.f, 1.f)),
+                    glm::vec4(particle.rotation, 0.f, 0.f, 0.f) });
+            }
+            const uint32_t batchCount = static_cast<uint32_t>(records.size()) - batchFirst;
+            if (batchCount)
+                slot.batches.push_back({ batchFirst, batchCount,
+                    emitter->PrepareTexture(m_graphicsProvider),
+                    emitter->blendMode == static_cast<int>(
+                        Engine::Components::ParticleEmitter::BlendMode::Alpha) });
+            if (records.size() >= RenderLimit) break;
+        }
+        slot.particleCount = static_cast<uint32_t>(records.size());
+        if (slot.particleCount)
+        {
+            if (slot.particleCount > slot.vertexCapacity)
+            {
+                if (slot.vertices)
+                    m_retiredRenderBuffers.push_back(std::move(slot.vertices));
+                slot.vertexCapacity = ExpandedCapacity(slot.vertexCapacity,
+                    slot.particleCount);
+                slot.vertices = bufferFactory->CreateBuffer(
+                    IGraphicsBuffer::Usage::VertexBuffer,
+                    IGraphicsBuffer::AccessMode::Upload,
+                    static_cast<uint64_t>(slot.vertexCapacity) * sizeof(ParticleGPUData));
+                slot.mappedVertices = slot.vertices ? slot.vertices->Map() : nullptr;
+                if (!slot.mappedVertices)
+                    throw std::runtime_error("Could not map particle vertex buffer");
+            }
+            const uint64_t bytes = static_cast<uint64_t>(slot.particleCount) *
+                sizeof(ParticleGPUData);
+            std::memcpy(slot.mappedVertices, records.data(), static_cast<size_t>(bytes));
+            slot.vertices->FlushMappedWrites(0, bytes);
+        }
+    }
+    if (!slot.particleCount || !slot.vertices) return;
+
+    const uint32_t requiredConstants = slot.constantCursor +
+        static_cast<uint32_t>(slot.batches.size());
+    if (requiredConstants > slot.constantCapacity)
+    {
+        if (slot.constants)
+            m_retiredRenderBuffers.push_back(std::move(slot.constants));
+        slot.constantCapacity = ExpandedCapacity(slot.constantCapacity,
+            requiredConstants);
+        slot.constants = bufferFactory->CreateBuffer(
+            IGraphicsBuffer::Usage::ConstantBuffer,
+            IGraphicsBuffer::AccessMode::Upload,
+            static_cast<uint64_t>(slot.constantCapacity) * 256u,
+            nullptr, sizeof(ParticleCBData));
+        slot.mappedConstants = slot.constants ? slot.constants->Map() : nullptr;
+        if (!slot.mappedConstants)
+            throw std::runtime_error("Could not map particle constant buffer");
+    }
+    const glm::mat4 cameraWorld = glm::inverse(view);
+    ParticleCBData constants{};
+    constants.viewProjection = viewProjection;
+    constants.cameraRight = glm::vec4(glm::normalize(glm::vec3(cameraWorld[0])), 0.f);
+    constants.cameraUp = glm::vec4(glm::normalize(glm::vec3(cameraWorld[1])), 0.f);
+    context->BeginGpuTiming(Engine::Graphics::GpuTimingStage::Transparent);
+    for (const auto& batch : slot.batches)
+    {
+        const uint64_t offset = static_cast<uint64_t>(slot.constantCursor++) * 256u;
+        constants.particleParams.x = batch.texture ? 1.f : 0.f;
+        std::memcpy(static_cast<uint8_t*>(slot.mappedConstants) + offset,
+            &constants, sizeof(constants));
+        slot.constants->FlushMappedWrites(offset, sizeof(constants));
+        context->SetPipeline(batch.alphaBlend
+            ? m_particleAlphaPipeline.get() : m_particlePipeline.get());
+        context->SetConstantBuffer(0, slot.constants.get(), offset);
+        context->SetTexture(0, batch.texture
+            ? batch.texture->GetGraphicsTexture() : nullptr);
+        context->SetVertexBuffer(0, slot.vertices.get(), sizeof(ParticleGPUData),
+            static_cast<uint64_t>(batch.first) * sizeof(ParticleGPUData));
+        context->DrawInstanced(6, batch.count);
+    }
+    context->EndGpuTiming(Engine::Graphics::GpuTimingStage::Transparent);
+}
 
 void Scene::BuildObjectPipeline()
 {
@@ -4778,6 +4965,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             }
         }
     }
+
+    RenderParticles(context, proj * view, view);
 
     // Draw scene helpers (grid) after opaque objects so blending works correctly
     if (includeEditorVisuals && settings.showGrid && m_gridPipeline)

@@ -587,6 +587,8 @@ void D3D12GraphicsContextFactory::SetCommandBuffer(void* cmd)
 
 void D3D12GraphicsContextFactory::PrepareFrame(uint32_t frameSlot)
 {
+    m_preparedFrameSlot = frameSlot;
+    ++m_preparedFrameSerial;
     if (m_occlusionState) m_occlusionState->Prepare(frameSlot);
     if (m_gpuTimings) m_gpuTimings->Prepare(frameSlot);
 }

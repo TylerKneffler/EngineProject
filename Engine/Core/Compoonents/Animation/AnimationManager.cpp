@@ -7,6 +7,7 @@
 #include "Core/Compoonents/Animation/RigMorphControls.h"
 #include "Core/Compoonents/Materials/MaterialPropertyMorph.h"
 #include "Core/Model/AnimationClipAsset.h"
+#include "Core/Model/AnimationRigMapping.h"
 #include "Core/Model/AnimationPackAsset.h"
 #include "Core/Model/AnimationControlSpace.h"
 #include "Core/AssetRecord.h"
@@ -352,33 +353,6 @@ void AnimationManager::RefreshRigClips(bool remap)
         { return m_externalClipNames.count(item.clipName) != 0; }), clips.end());
     m_externalClipNames.clear();
     Model* model = remap && Owner ? ResolveModel() : nullptr;
-    std::unordered_map<std::string, unsigned> targetNodes;
-    if (model && model->Owner)
-    {
-        const auto& nodes = model->ResolveNodes();
-        for (size_t index = 0; index < nodes.size(); ++index)
-        {
-            std::vector<std::string> names;
-            auto* current = nodes[index];
-            for (; current && current != model->Owner;
-                current = current->Parent)
-                names.push_back(current->name);
-            if (current != model->Owner) continue;
-            if (names.empty())
-            {
-                targetNodes["."] = static_cast<unsigned>(index);
-                continue;
-            }
-            std::string path;
-            for (auto it = names.rbegin(); it != names.rend(); ++it)
-            {
-                if (!path.empty()) path += '/';
-                path += *it;
-            }
-            if (!path.empty()) targetNodes[path] =
-                static_cast<unsigned>(index);
-        }
-    }
     std::unordered_set<std::string> loadedPaths;
     for (const auto& rig : LoadRigAssets())
         for (const auto& path : rig.animationPaths)
@@ -386,19 +360,8 @@ void AnimationManager::RefreshRigClips(bool remap)
             if (auto asset = Engine::Model::AnimationClipAsset::Load(path))
             {
                 if (model)
-                {
-                    auto& channels = asset->clip.channels;
-                    channels.erase(std::remove_if(channels.begin(), channels.end(),
-                        [&](auto& channel)
-                        {
-                            if (channel.targetPath.empty())
-                                return channel.nodeIndex >= model->GetNodeCount();
-                            const auto found = targetNodes.find(channel.targetPath);
-                            if (found == targetNodes.end()) return true;
-                            channel.nodeIndex = found->second;
-                            return false;
-                        }), channels.end());
-                }
+                    asset->clip = Engine::Model::AnimationRigMapping::Map(
+                        *asset, *model, rig).clip;
                 auto found = std::find_if(clips.begin(), clips.end(),
                     [&](const auto& item)
                     { return item.clipName == asset->clip.clipName; });

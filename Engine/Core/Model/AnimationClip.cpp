@@ -94,6 +94,8 @@ Engine::Serialization::JsonValue AnimationClip::Serialize() const
         for (const auto& key : track.keys)
             keys.Push(JsonValue::MakeObject()
                 .Set("time", JsonValue(key.time))
+                .Set("space", JsonValue(key.space == ControllerKey::Space::Body
+                    ? "body" : "world"))
                 .Set("active", JsonValue(key.active))
                 .Set("fixedPosition", JsonValue(key.fixedPosition))
                 .Set("fixedRotation", JsonValue(key.fixedRotation))
@@ -238,6 +240,8 @@ void AnimationClip::Deserialize(const JsonValue& value)
             ControllerKey key;
             key.time = entry["time"].AsFloat();
             if (!std::isfinite(key.time) || key.time < 0.f) continue;
+            key.space = entry["space"].AsString() == "body"
+                ? ControllerKey::Space::Body : ControllerKey::Space::World;
             const auto target = ReadFloats(entry["target"]);
             const auto fixedTarget = ReadFloats(entry["fixedTarget"]);
             const auto fixedRotation = ReadFloats(

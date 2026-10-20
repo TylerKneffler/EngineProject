@@ -46,4 +46,39 @@ inline glm::vec3 LimbWorldPoint(const glm::mat4& space,
 {
     return glm::vec3(space * glm::vec4(point, 1.f));
 }
+
+inline glm::vec3 ControllerWorldPoint(
+    AnimationClip::ControllerKey::Space space,
+    const glm::mat4& modelWorld, const glm::vec3& point)
+{
+    return space == AnimationClip::ControllerKey::Space::Body
+        ? LimbWorldPoint(modelWorld, point) : point;
+}
+
+inline glm::vec3 ControllerStoredPoint(
+    AnimationClip::ControllerKey::Space space,
+    const glm::mat4& modelWorld, const glm::vec3& point)
+{
+    return space == AnimationClip::ControllerKey::Space::Body
+        ? LimbWorldPoint(glm::inverse(modelWorld), point) : point;
+}
+
+inline glm::quat ControllerWorldRotation(
+    AnimationClip::ControllerKey::Space space,
+    const glm::mat4& modelWorld, const glm::vec3& euler)
+{
+    const glm::quat rotation(euler);
+    return space == AnimationClip::ControllerKey::Space::Body
+        ? glm::normalize(LimbSpaceRotation(modelWorld) * rotation)
+        : rotation;
+}
+
+inline glm::vec3 ControllerStoredRotation(
+    AnimationClip::ControllerKey::Space space,
+    const glm::mat4& modelWorld, const glm::vec3& euler)
+{
+    return space == AnimationClip::ControllerKey::Space::Body
+        ? glm::eulerAngles(glm::normalize(glm::inverse(
+            LimbSpaceRotation(modelWorld)) * glm::quat(euler))) : euler;
+}
 }

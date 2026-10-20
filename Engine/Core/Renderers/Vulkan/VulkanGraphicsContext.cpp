@@ -180,6 +180,8 @@ void VulkanGraphicsContextFactory::SetDevice(VkDevice device, float timestampPer
 
 void VulkanGraphicsContextFactory::PrepareFrame(uint32_t frameSlot)
 {
+    m_preparedFrameSlot = frameSlot;
+    ++m_preparedFrameSerial;
     if (m_occlusionState)
         m_occlusionState->Prepare(frameSlot, m_commandBuffer);
     if (m_gpuTimings)

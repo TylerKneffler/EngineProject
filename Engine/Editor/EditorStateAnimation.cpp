@@ -23,16 +23,19 @@
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Transform.h"
 #include "Core/Serialization/SceneSerializer.h"
+#include "Core/Serialization/Json.h"
 #include "Core/ComponentReference.h"
 #include "Core/Model/RigAsset.h"
 #include "Core/Model/PoseAsset.h"
 #include "Core/Model/AnimationClipAsset.h"
+#include "Core/Model/AnimationRigMapping.h"
 #include "Core/Object.h"
 #include "Core/Prefab/PrefabAsset.h"
 #include "imgui.h"
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <cstring>
 #include <cctype>
 #include <cstdio>
@@ -349,7 +352,22 @@ std::pair<std::string, size_t> EditorState::SelectedAnimationRig() const
 {
     auto* scene = GetActiveDocumentScene();
     auto* selected = scene ? scene->GetSelectedObject() : nullptr;
-    if (!selected || m_activeAnimationDocument) return {};
+    if (m_activeAnimationDocument) return {};
+    if (!selected && scene)
+    {
+        // The Views menu can open the only character in a scene without first
+        // requiring a hierarchy click. Ambiguous scenes keep the empty editor.
+        for (const auto& object : scene->GetObjects())
+            if (object)
+                for (auto* component : object->Components)
+                    if (auto* candidate = dynamic_cast<Engine::Components::Skeleton*>(component);
+                        candidate && candidate->ResolveModel())
+                    {
+                        if (selected) return {};
+                        selected = object.get();
+                    }
+    }
+    if (!selected) return {};
 
     auto* prefabRoot = selected->GetPrefabInstanceRoot();
     auto samePrefab = [&](Engine::Components::Skeleton* skeleton)
@@ -537,6 +555,72 @@ void EditorState::QueueAnimationDocumentOpen(const std::string& path,
     m_pendingAnimationDocuments.emplace_back(path, rigIndex);
 }
 
+void EditorState::SaveAnimationEditorSession() const
+{
+    namespace fs = std::filesystem;
+    const fs::path projectDirectory = m_projectFilePath.empty()
+        ? fs::current_path() : fs::path(m_projectFilePath).parent_path();
+    const fs::path file = projectDirectory / ".local" /
+        "animation-editor-session.json";
+    auto documents = Engine::Serialization::JsonValue::MakeArray();
+    for (const auto& document : m_animationDocuments)
+        if (document && document->view && document->view->IsOpen())
+            documents.Push(Engine::Serialization::JsonValue::MakeObject()
+                .Set("path", Engine::Serialization::JsonValue(document->path))
+                .Set("rigIndex", Engine::Serialization::JsonValue(
+                    static_cast<int>(document->rigIndex)))
+                .Set("active", Engine::Serialization::JsonValue(
+                    document.get() == m_activeAnimationDocument)));
+    std::error_code error;
+    fs::create_directories(file.parent_path(), error);
+    if (error) return;
+    std::ofstream output(file, std::ios::binary | std::ios::trunc);
+    if (output)
+        output << Engine::Serialization::JsonWrite(
+            Engine::Serialization::JsonValue::MakeObject()
+                .Set("version", Engine::Serialization::JsonValue(1))
+                .Set("documents", std::move(documents)));
+}
+
+void EditorState::RestoreAnimationEditorSession()
+{
+    namespace fs = std::filesystem;
+    const fs::path projectDirectory = m_projectFilePath.empty()
+        ? fs::current_path() : fs::path(m_projectFilePath).parent_path();
+    const fs::path file = projectDirectory / ".local" /
+        "animation-editor-session.json";
+    if (!fs::exists(file)) return;
+    try
+    {
+        const auto session = Engine::Serialization::JsonParseFile(file.string());
+        if (session["version"].AsInt() != 1) return;
+        const auto& documents = session["documents"];
+        std::optional<std::pair<std::string, size_t>> active;
+        for (size_t i = 0; i < std::min<size_t>(documents.ArraySize(), 16); ++i)
+        {
+            const auto& entry = documents.ArrayAt(i);
+            if (!entry["path"].IsString()) continue;
+            const std::string path = entry["path"].AsString();
+            if (!path.empty() && !fs::exists(path)) continue;
+            const int rig = entry["rigIndex"].AsInt();
+            if (rig < 0 || rig > 1024) continue;
+            if (entry["active"].AsBool())
+                active = { path, static_cast<size_t>(rig) };
+            else QueueAnimationDocumentOpen(path, static_cast<size_t>(rig));
+        }
+        if (active)
+            QueueAnimationDocumentOpen(active->first, active->second);
+        ProcessPendingAnimationDocumentOpens();
+    }
+    catch (const std::exception& error)
+    {
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Warning,
+                "Could not restore Animation Editor session: " +
+                std::string(error.what()));
+    }
+}
+
 void EditorState::QueueAnimationAssetOpen(const std::string& path)
 {
     const auto asset = Engine::Model::AnimationClipAsset::Load(path);
@@ -596,6 +680,13 @@ void EditorState::SelectAnimationDocumentClip(AnimationDocument& document,
                     if (document.rigIndex != rigIndex)
                         FocusAnimationRig(document, rigIndex);
                     document.clipIndex = track.clipIndex;
+                    const auto& controllers = track.sourceManager->clips[
+                        index].controllers;
+                    document.controllerSpace = !controllers.empty() &&
+                        !controllers.front().keys.empty()
+                        ? controllers.front().keys.front().space
+                        : Engine::Model::AnimationClip::ControllerKey::
+                            Space::Body;
                     document.playheadSeconds = 0.f;
                     document.selectedKeys.clear();
                     SampleAnimationDocument(document);
@@ -788,6 +879,10 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
             document->selectedBone = 0;
             document->poseScene->SetSelectedObject(joints[0]);
         }
+        Engine::Core::Object* poseRoot = document->poseSkeleton->Owner;
+        while (poseRoot && poseRoot->Parent) poseRoot = poseRoot->Parent;
+        document->poseScene->FocusEditorCamera(poseRoot);
+        document->poseScene->StopEditorCameraFollow();
         const std::string filename = std::filesystem::path(path).filename().string();
         auto view = m_viewFactory->CreateAnimationView(
             document->poseScene.get(), "Animation: " + filename);
@@ -814,6 +909,15 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
                 if (track.selected)
                     for (auto* joint : track.poseSkeleton->ResolveJoints())
                         if (joint == object) return true;
+            if (const auto* point = object->GetComponent<
+                    Engine::Components::AnimationBone>();
+                point && point->poseControlOnly)
+                for (const auto& track : raw->tracks)
+                    if (track.selected)
+                        if (const auto* model =
+                                track.poseSkeleton->ResolveModel())
+                            for (auto* node : model->ResolveNodes())
+                                if (node == object) return true;
             return false;
         };
         view->OnObjectSelected = [this, raw](Engine::Core::Object* object)
@@ -826,6 +930,26 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
                     for (size_t index = 0; index < bones.size(); ++index)
                         if (bones[index] == object)
                         {
+                            if (raw->repairAwaitingViewportBone &&
+                                raw->repairRigIndex == track.index)
+                            {
+                                const auto rigBones = AnimationClipMapping::RigNodes(
+                                    *track.poseSkeleton);
+                                const auto* model = track.poseSkeleton->ResolveModel();
+                                const auto* bone = object->GetComponent<
+                                    Engine::Components::AnimationBone>();
+                                const unsigned node = bone ? bone->nodeIndex :
+                                    index < track.poseSkeleton->jointNodes.size()
+                                        ? track.poseSkeleton->jointNodes[index] : 0;
+                                const auto found = std::find_if(rigBones.begin(),
+                                    rigBones.end(), [node](const auto& item)
+                                    { return item.nodeIndex == node; });
+                                if (model && found != rigBones.end())
+                                    AssignAnimationChannels(*raw, track.index,
+                                        raw->repairClipIndex,
+                                        raw->repairIssueChannel,
+                                        static_cast<size_t>(found - rigBones.begin()));
+                            }
                             FocusAnimationRig(*raw, track.index);
                             raw->selectedBone = static_cast<int>(index);
                             raw->poseScene->SetSelectedObject(object);
@@ -836,6 +960,25 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
                             return;
                         }
                 }
+            if (const auto* controller = object->GetComponent<
+                    Engine::Components::AnimationBone>();
+                controller && controller->poseControlOnly)
+                for (const auto& track : raw->tracks)
+                    if (track.selected)
+                        if (const auto* model =
+                                track.poseSkeleton->ResolveModel())
+                            for (auto* node : model->ResolveNodes())
+                                if (node == object)
+                                {
+                                    FocusAnimationRig(*raw, track.index);
+                                    raw->selectedBone = -1;
+                                    raw->poseScene->SetSelectedObject(object);
+                                    if (m_primaryHierarchy)
+                                        m_primaryHierarchy->SetSelectedObject(object);
+                                    if (m_primaryProperties)
+                                        m_primaryProperties->SetSelectedObject(object);
+                                    return;
+                                }
         };
         view->SetPoseTranslationHandler([this, raw](Engine::Core::Object* tip,
             const glm::vec3& target)
@@ -991,6 +1134,48 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
         { AddAnimationControllerKeys(*raw); };
         view->OnModelControllerEdited = [this, raw]()
         {
+            auto* sourceSkeleton = RigAt(*raw->sourceScene,
+                raw->rigIndex);
+            auto* sourceModel = sourceSkeleton
+                ? sourceSkeleton->ResolveModel() : nullptr;
+            auto* poseModel = raw->poseSkeleton
+                ? raw->poseSkeleton->ResolveModel() : nullptr;
+            if (sourceModel && poseModel)
+            {
+                const auto& sourceNodes = sourceModel->ResolveNodes();
+                const auto& poseNodes = poseModel->ResolveNodes();
+                for (size_t node = 0; node < std::min(sourceNodes.size(),
+                        poseNodes.size()); ++node)
+                {
+                    auto* sourceBone = sourceNodes[node]
+                        ? sourceNodes[node]->GetComponent<
+                            Engine::Components::AnimationBone>() : nullptr;
+                    const auto* poseBone = poseNodes[node]
+                        ? poseNodes[node]->GetComponent<
+                            Engine::Components::AnimationBone>() : nullptr;
+                    if (!sourceBone || !poseBone) continue;
+                    sourceBone->poseControllerMode =
+                        poseBone->poseControllerMode;
+                    sourceBone->poseControllerScope =
+                        poseBone->poseControllerScope;
+                    sourceBone->poseControllerChainDepth =
+                        poseBone->poseControllerChainDepth;
+                    sourceBone->poseFacingEnabled =
+                        poseBone->poseFacingEnabled;
+                    sourceBone->poseFacingTarget =
+                        poseBone->poseFacingTarget;
+                    sourceBone->poseFacingAxis =
+                        poseBone->poseFacingAxis;
+                    sourceBone->poseFacingWeight =
+                        poseBone->poseFacingWeight;
+                    sourceBone->poseRestOffsetConfigured =
+                        poseBone->poseRestOffsetConfigured;
+                    sourceBone->poseRestLocalOffset =
+                        poseBone->poseRestLocalOffset;
+                }
+                raw->dirty = true;
+                RefreshAnimationDocumentTitle(*raw);
+            }
             if (raw->autoKey) AddAnimationControllerKeys(*raw);
         };
         view->OnFocused = [this, raw]()
@@ -1166,6 +1351,30 @@ EditorState::AnimationDocument::CachedClip& EditorState::CachedAnimationClip(
     AnimationDocument::CachedClip cached;
     cached.mappingReady = mapping.issues.empty();
     cached.compatible = AnimationClipMapping::CompatibleClip(source, mapping);
+    for (const auto& issue : mapping.issues)
+    {
+        const auto& channel = source.channels[issue.channelIndex];
+        auto row = std::find_if(cached.unresolvedRows.begin(),
+            cached.unresolvedRows.end(), [&](const auto& candidate)
+            { return candidate.path == issue.targetPath &&
+                (candidate.path.size() ||
+                    candidate.nodeIndex == issue.nodeIndex); });
+        if (row == cached.unresolvedRows.end())
+        {
+            cached.unresolvedRows.push_back({issue.targetPath,
+                issue.nodeIndex, issue.channelIndex, {}});
+            row = std::prev(cached.unresolvedRows.end());
+        }
+        row->times.insert(row->times.end(), channel.times.begin(),
+            channel.times.end());
+    }
+    for (auto& row : cached.unresolvedRows)
+    {
+        std::sort(row.times.begin(), row.times.end());
+        row.times.erase(std::unique(row.times.begin(), row.times.end(),
+            [](float a, float b) { return std::abs(a - b) < .0001f; }),
+            row.times.end());
+    }
     for (const auto& channel : cached.compatible.channels)
     {
         auto& times = cached.keyTimes[channel.nodeIndex];
@@ -1393,14 +1602,17 @@ void EditorState::SampleAnimationDocument(AnimationDocument& document)
     {
         auto* sourceSkeleton = RigAt(*document.sourceScene,
             document.rigIndex);
-        if (sourceSkeleton)
-            for (auto* sourceJoint : sourceSkeleton->ResolveJoints())
+        auto* sourceModel = sourceSkeleton
+            ? sourceSkeleton->ResolveModel() : nullptr;
+        auto* poseModel = document.poseSkeleton->ResolveModel();
+        if (sourceModel && poseModel)
+            for (auto* sourceJoint : sourceModel->ResolveNodes())
             {
                 const auto* sourceBone = sourceJoint ?
                     sourceJoint->GetComponent<
                         Engine::Components::AnimationBone>() : nullptr;
                 if (!sourceBone) continue;
-                for (auto* poseJoint : document.poseSkeleton->ResolveJoints())
+                for (auto* poseJoint : poseModel->ResolveNodes())
                     if (auto* poseBone = poseJoint ?
                             poseJoint->GetComponent<
                                 Engine::Components::AnimationBone>() : nullptr;
@@ -1428,22 +1640,31 @@ void EditorState::SampleAnimationDocument(AnimationDocument& document)
     const auto& controllerClip = clips[clipIndex];
     const float controllerTime = AnimationLocalTime(document,
         document.rigIndex, clipIndex);
+    const auto* poseModel = document.poseSkeleton->ResolveModel();
+    if (!poseModel) return;
+    const glm::mat4 modelWorld = poseModel && poseModel->Owner
+        ? poseModel->Owner->transform.GetWorldMatrix() : glm::mat4(1.f);
     for (const auto& track : controllerClip.controllers)
     {
         const auto key = Engine::Model::AnimationClip::SampleController(
             track, controllerTime);
-        for (auto* joint : document.poseSkeleton->ResolveJoints())
+        for (auto* joint : poseModel->ResolveNodes())
             if (auto* bone = joint ? joint->GetComponent<
                     Engine::Components::AnimationBone>() : nullptr;
                 bone && bone->nodeIndex == track.node)
             {
                 bone->poseControllerActive = key.active;
-                bone->poseControllerTarget = key.target;
+                bone->poseControllerTarget = Engine::Model::
+                    ControllerWorldPoint(key.space, modelWorld, key.target);
                 bone->posePinPosition = key.fixedPosition;
                 bone->posePinRotation = key.fixedRotation;
-                bone->posePinTarget = key.fixedTarget;
-                bone->posePinRotationEuler = key.fixedRotationEuler;
-                bone->posePinPole = key.pole;
+                bone->posePinTarget = Engine::Model::ControllerWorldPoint(
+                    key.space, modelWorld, key.fixedTarget);
+                bone->posePinRotationEuler = glm::eulerAngles(
+                    Engine::Model::ControllerWorldRotation(key.space,
+                        modelWorld, key.fixedRotationEuler));
+                bone->posePinPole = Engine::Model::ControllerWorldPoint(
+                    key.space, modelWorld, key.pole);
                 break;
             }
     }
@@ -1677,8 +1898,13 @@ bool EditorState::AddAnimationControllerKeys(AnimationDocument& document,
     auto& clip = document.sourceManager->clips[document.clipIndex];
     const float time = AnimationLocalTime(document, document.rigIndex,
         document.clipIndex);
+    const auto* model = document.poseSkeleton->ResolveModel();
+    const glm::mat4 modelWorld = model && model->Owner
+        ? model->Owner->transform.GetWorldMatrix() : glm::mat4(1.f);
     bool keyed = false;
-    for (auto* joint : document.poseSkeleton->ResolveJoints())
+    const auto* poseModel = document.poseSkeleton->ResolveModel();
+    if (!poseModel) return false;
+    for (auto* joint : poseModel->ResolveNodes())
     {
         const auto* bone = joint ? joint->GetComponent<
             Engine::Components::AnimationBone>() : nullptr;
@@ -1699,13 +1925,18 @@ bool EditorState::AddAnimationControllerKeys(AnimationDocument& document,
         }
         Engine::Model::AnimationClip::ControllerKey key;
         key.time = time;
+        key.space = document.controllerSpace;
         key.active = bone->poseControllerActive;
         key.fixedPosition = bone->posePinPosition;
         key.fixedRotation = bone->posePinRotation;
-        key.target = bone->poseControllerTarget;
-        key.fixedTarget = bone->posePinTarget;
-        key.fixedRotationEuler = bone->posePinRotationEuler;
-        key.pole = bone->posePinPole;
+        key.target = Engine::Model::ControllerStoredPoint(key.space,
+            modelWorld, bone->poseControllerTarget);
+        key.fixedTarget = Engine::Model::ControllerStoredPoint(key.space,
+            modelWorld, bone->posePinTarget);
+        key.fixedRotationEuler = Engine::Model::ControllerStoredRotation(
+            key.space, modelWorld, bone->posePinRotationEuler);
+        key.pole = Engine::Model::ControllerStoredPoint(key.space,
+            modelWorld, bone->posePinPole);
         auto existing = std::find_if(track->keys.begin(), track->keys.end(),
             [time](const auto& entry) {
                 return std::abs(entry.time - time) < 1e-4f;
@@ -1958,13 +2189,23 @@ bool EditorState::BakeAnimationLimbs(AnimationDocument& document)
         document.clipIndex < 0 || document.clipIndex >=
             static_cast<int>(document.sourceManager->clips.size())) return false;
     auto& clip = document.sourceManager->clips[document.clipIndex];
-    if (clip.limbs.empty()) return false;
+    if (clip.limbs.empty() && clip.controllers.empty()) return false;
     auto* model = document.poseSkeleton->ResolveModel();
-    if (!model) return false;
+    if (!model || !model->Owner) return false;
+    if (!AnimationClipMapping::Inspect(clip,
+            AnimationClipMapping::RigNodes(*document.poseSkeleton),
+            AnimationClipMapping::ModelBones(*model)).issues.empty())
+    {
+        document.error = "Repair unresolved bone mappings before baking controls.";
+        return false;
+    }
     const auto before = document.sourceManager->clips;
     auto baked = clip;
     const float originalTime = document.playheadSeconds;
     const auto originalTracks = document.tracks;
+    const auto rootPosition = model->Owner->transform.position;
+    const auto rootRotation = model->Owner->transform.rotation;
+    const auto rootScale = model->Owner->transform.scale;
     for (auto& track : document.tracks)
     {
         track.selected = track.index == document.rigIndex;
@@ -1986,34 +2227,135 @@ bool EditorState::BakeAnimationLimbs(AnimationDocument& document)
     for (const auto& limb : clip.limbs)
         for (const auto& key : limb.keys)
             sampleTimes.push_back(key.time);
+    for (const auto& controller : clip.controllers)
+        for (const auto& key : controller.keys)
+        {
+            sampleTimes.push_back(key.time);
+            if (key.time > .001f)
+                sampleTimes.push_back(key.time - .001f);
+        }
     std::sort(sampleTimes.begin(), sampleTimes.end());
     sampleTimes.erase(std::unique(sampleTimes.begin(), sampleTimes.end()),
         sampleTimes.end());
     const auto& nodes = model->ResolveNodes();
-    for (float sampleTime : sampleTimes)
+    std::vector<unsigned> bakeNodes;
+    if (!clip.controllers.empty())
     {
-        document.playheadSeconds = sampleTime;
-        SampleAnimationDocument(document);
+        bakeNodes = document.poseSkeleton->jointNodes;
+        for (const auto& controller : clip.controllers)
+            if (controller.node < nodes.size())
+                for (auto* ancestor = nodes[controller.node]; ancestor;
+                    ancestor = ancestor->Parent)
+                {
+                    const auto found = std::find(nodes.begin(), nodes.end(),
+                        ancestor);
+                    if (found != nodes.end())
+                        bakeNodes.push_back(static_cast<unsigned>(
+                            found - nodes.begin()));
+                    if (ancestor == model->Owner) break;
+                }
+        for (unsigned node = 0; node < nodes.size(); ++node)
+            if (nodes[node] == model->Owner)
+            { bakeNodes.push_back(node); break; }
+    }
+    else
         for (const auto& limb : clip.limbs)
             for (unsigned node : {limb.upper, limb.lower, limb.tip})
+                bakeNodes.push_back(node);
+    std::sort(bakeNodes.begin(), bakeNodes.end());
+    bakeNodes.erase(std::unique(bakeNodes.begin(), bakeNodes.end()),
+        bakeNodes.end());
+    for (float sampleTime : sampleTimes)
+    {
+        model->Owner->transform.position = rootPosition;
+        model->Owner->transform.rotation = rootRotation;
+        model->Owner->transform.scale = rootScale;
+        document.playheadSeconds = sampleTime;
+        SampleAnimationDocument(document);
+        if (!clip.controllers.empty())
+        {
+            std::vector<Engine::Components::ChainIK::Effector> effectors;
+            std::vector<Engine::Components::ChainIK::PosePreference>
+                preferences;
+            for (unsigned node : bakeNodes)
                 if (node < nodes.size() && nodes[node])
                 {
-                    const auto& transform = nodes[node]->transform;
-                    AnimationClipEditing::UpsertBonePose(baked, node,
-                        document.playheadSeconds, transform.position,
-                        glm::quat(transform.rotation), transform.scale);
-                    const std::string path = AnimationClipMapping::NodePath(*model, node);
-                    for (auto& channel : baked.channels)
-                        if (channel.nodeIndex == node && channel.targetPath.empty())
-                            channel.targetPath = path;
+                    int depth = 0;
+                    auto* ancestor = nodes[node];
+                    while (ancestor && ancestor != model->Owner)
+                    { ancestor = ancestor->Parent; ++depth; }
+                    if (ancestor)
+                        preferences.push_back({nodes[node],
+                            glm::quat(nodes[node]->transform.rotation),
+                            depth == 0 ? .12f : depth <= 2 ? .08f : .04f});
                 }
+            const glm::mat4 modelWorld = model->Owner->transform.GetWorldMatrix();
+            for (const auto& track : clip.controllers)
+            {
+                if (track.node >= nodes.size() || !nodes[track.node]) continue;
+                const auto key = Engine::Model::AnimationClip::SampleController(
+                    track, sampleTime);
+                if (!key.active && !key.fixedPosition &&
+                    !key.fixedRotation) continue;
+                Engine::Components::ChainIK::Effector effector;
+                for (auto* joint = nodes[track.node]; joint;
+                    joint = joint->Parent)
+                {
+                    effector.chain.push_back(joint);
+                    if (joint == model->Owner) break;
+                }
+                if (effector.chain.size() < 2 ||
+                    effector.chain.back() != model->Owner) continue;
+                std::reverse(effector.chain.begin(), effector.chain.end());
+                if (key.fixedPosition || key.fixedRotation)
+                {
+                    effector.target = Engine::Model::ControllerWorldPoint(
+                        key.space, modelWorld, key.fixedTarget);
+                    effector.positionWeight = key.fixedPosition ? 1.f : 0.f;
+                    effector.rotationWeight = key.fixedRotation ? 1.f : 0.f;
+                    effector.rotation = Engine::Model::ControllerWorldRotation(
+                        key.space, modelWorld, key.fixedRotationEuler);
+                    effector.pole = Engine::Model::ControllerWorldPoint(
+                        key.space, modelWorld, key.pole);
+                    effector.usePole = key.fixedPosition;
+                    effector.fixed = true;
+                }
+                else
+                {
+                    effector.target = Engine::Model::ControllerWorldPoint(
+                        key.space, modelWorld, key.target);
+                    effector.positionWeight = .4f;
+                }
+                effectors.push_back(std::move(effector));
+            }
+            if (!effectors.empty())
+                Engine::Components::ChainIK::SolveMultiple(effectors,
+                    24, .001f, .35f, 45.f, &preferences);
+        }
+        for (unsigned node : bakeNodes)
+            if (node < nodes.size() && nodes[node])
+            {
+                const auto& transform = nodes[node]->transform;
+                AnimationClipEditing::UpsertBonePose(baked, node,
+                    sampleTime, transform.position,
+                    glm::quat(transform.rotation), transform.scale);
+                const std::string path = AnimationClipMapping::NodePath(*model, node);
+                for (auto& channel : baked.channels)
+                    if (channel.nodeIndex == node && channel.targetPath.empty())
+                        channel.targetPath = path;
+            }
     }
+    model->Owner->transform.position = rootPosition;
+    model->Owner->transform.rotation = rootRotation;
+    model->Owner->transform.scale = rootScale;
     document.playheadSeconds = originalTime;
     document.tracks = originalTracks;
     document.previewLayouts.clear();
     baked.limbs.clear();
+    baked.controllers.clear();
     clip = std::move(baked);
     document.ikControlTime = -1.f;
+    document.sampledControllerClip = -2;
     RecordAnimationEdit(document, before);
     return true;
 }
@@ -2391,6 +2733,43 @@ void EditorState::ScanAnimationRigAssets(AnimationDocument& document)
     document.error.clear();
 }
 
+bool EditorState::AssignAnimationChannels(AnimationDocument& document,
+    size_t rigIndex, int clipIndex, size_t channelIndex, size_t boneIndex)
+{
+    const auto track = std::find_if(document.tracks.begin(),
+        document.tracks.end(), [rigIndex](const auto& candidate)
+        { return candidate.index == rigIndex; });
+    if (track == document.tracks.end() || !track->sourceManager ||
+        !track->poseSkeleton || clipIndex < 0 ||
+        clipIndex >= static_cast<int>(track->sourceManager->clips.size()))
+        return false;
+    auto* model = track->poseSkeleton->ResolveModel();
+    if (!model) return false;
+    const auto bones = AnimationClipMapping::RigNodes(*track->poseSkeleton);
+    if (boneIndex >= bones.size()) return false;
+    auto& clips = track->sourceManager->clips;
+    auto& clip = clips[clipIndex];
+    if (channelIndex >= clip.channels.size()) return false;
+    const auto& reference = clip.channels[channelIndex];
+    std::vector<size_t> matching;
+    for (size_t index = 0; index < clip.channels.size(); ++index)
+        if (clip.channels[index].targetPath == reference.targetPath &&
+            clip.channels[index].nodeIndex == reference.nodeIndex)
+            matching.push_back(index);
+    if (matching.empty()) return false;
+    if (reference.nodeIndex == bones[boneIndex].nodeIndex &&
+        reference.targetPath == bones[boneIndex].path)
+        return false;
+    auto before = clips;
+    for (size_t index : matching)
+        AnimationClipMapping::Repair(clip, index, bones[boneIndex]);
+    document.repairIssueChannel = -1;
+    document.repairAwaitingViewportBone = false;
+    document.error.clear();
+    RecordAnimationEdit(document, std::move(before));
+    return true;
+}
+
 void EditorState::DrawAnimationMappingRepair(IEditorUi& ui,
     AnimationDocument& document)
 {
@@ -2477,18 +2856,23 @@ void EditorState::DrawAnimationMappingRepair(IEditorUi& ui,
     ui.Combo("Target bone", &document.repairBoneIndex, names.data(),
         static_cast<int>(names.size()));
     if (ui.Button("Apply bone mapping"))
+        AssignAnimationChannels(document, document.rigIndex,
+            document.clipIndex, document.repairIssueChannel,
+            document.repairBoneIndex);
+    ImGui::SameLine();
+    if (ui.Button("Pick bone in 3D"))
     {
-        auto before = clips;
-        if (AnimationClipMapping::Repair(clip,
-                static_cast<size_t>(document.repairIssueChannel),
-                rigBones[document.repairBoneIndex]))
-        {
-            document.repairIssueChannel = -1;
-            document.error.clear();
-            RecordAnimationEdit(document, std::move(before));
-            SampleAnimationDocument(document);
-        }
+        document.repairAwaitingViewportBone = true;
+        document.repairRigIndex = document.rigIndex;
+        document.repairClipIndex = document.clipIndex;
+        document.view->SetEditMode(SceneEditMode::Skeleton);
+        document.view->SetPoseEditing(true);
+        document.view->SetModelManipulation(true);
+        document.view->SetModelSelectionMode(1);
+        document.poseScene->SetEditorBonesVisible(true);
     }
+    if (document.repairAwaitingViewportBone)
+        ui.DisabledLabel("Click a bone in the 3D view to assign it.");
 }
 
 void EditorState::DrawAnimationRigToolbar(IEditorUi& ui,
@@ -3514,6 +3898,20 @@ void EditorState::DrawAnimationProperties(IEditorUi& ui,
                     document.boundMeshNames[index].c_str());
     }
     DrawAnimationRigControls(ui, document);
+    if (ImGui::CollapsingHeader("Pose controller keys"))
+    {
+        using Space = Engine::Model::AnimationClip::ControllerKey::Space;
+        ui.ValueLabel("New key target space",
+            document.controllerSpace == Space::Body ? "Body" : "World");
+        if (ui.Button("Body##ControllerSpace"))
+            document.controllerSpace = Space::Body;
+        ui.SameLine();
+        if (ui.Button("World##ControllerSpace"))
+            document.controllerSpace = Space::World;
+        ui.DisabledLabel("Body follows the model root; World stays in scene space.");
+        if (ui.Button("Bake IK and controllers to bone keys (30 fps)"))
+            BakeAnimationLimbs(document);
+    }
     DrawAnimationPoseLibrary(ui, document);
     DrawAnimationChainIK(ui, document);
     ui.Separator();
@@ -3542,23 +3940,17 @@ void EditorState::DrawAnimationProperties(IEditorUi& ui,
         else
         {
             auto* model = document.poseSkeleton->ResolveModel();
-            auto mapped = asset->clip;
-            bool compatible = model != nullptr;
-            if (model)
-            {
-                const auto nodes = AnimationClipMapping::ModelBones(*model);
-                for (auto& channel : mapped.channels)
-                {
-                    const auto found = std::find_if(nodes.begin(), nodes.end(),
-                        [&](const auto& node)
-                        { return node.path == channel.targetPath; });
-                    if (channel.targetPath.empty() || found == nodes.end())
-                    { compatible = false; break; }
-                    channel.nodeIndex = found->nodeIndex;
-                }
-            }
-            if (!compatible)
-                document.error = "Animation channels do not match this rig.";
+            const auto mapping = model
+                ? Engine::Model::AnimationRigMapping::Map(*asset, *model, *rig)
+                : Engine::Model::AnimationRigMapping::Result{};
+            const bool insufficientCoverage = mapping.unmatchedChannels != 0 &&
+                mapping.unmatchedChannels * 20 > asset->clip.channels.size();
+            if (!model || insufficientCoverage ||
+                (!asset->clip.channels.empty() &&
+                    mapping.unmatchedChannels == asset->clip.channels.size()))
+                document.error = "Animation channels could not be matched uniquely to this rig" +
+                    (mapping.unmatchedPaths.empty() ? std::string(".") :
+                        std::string(": ") + mapping.unmatchedPaths.front());
             else
             {
                 rig->animationPaths.push_back(document.animationAssetToAdd);
@@ -3572,7 +3964,7 @@ void EditorState::DrawAnimationProperties(IEditorUi& ui,
                             for (size_t index = 0;
                                 index < track.sourceManager->clips.size(); ++index)
                                 if (track.sourceManager->clips[index].clipName ==
-                                    mapped.clipName)
+                                    mapping.clip.clipName)
                                 { track.clipIndex = static_cast<int>(index); break; }
                     document.clipIndex = [&]()
                     {
@@ -3582,7 +3974,13 @@ void EditorState::DrawAnimationProperties(IEditorUi& ui,
                         return -1;
                     }();
                     document.animationAssetToAdd.clear();
-                    document.error.clear();
+                    document.error = mapping.unmatchedChannels == 0 ?
+                        std::string() :
+                        "Added with " + std::to_string(mapping.unmatchedChannels) +
+                        " unmatched channels (first: " +
+                        Engine::Model::AnimationRigMapping::Leaf(
+                            mapping.unmatchedPaths.front()) +
+                        "); review playback.";
                     ++document.clipRevision;
                     document.clipCache.clear();
                     SampleAnimationDocument(document);
@@ -3853,7 +4251,7 @@ void EditorState::DrawAnimationProperties(IEditorUi& ui,
             AddAnimationLimbKey(document, *upper, *lower, *joint, false);
         if (ui.Button("Key current IK pose to bones"))
             AddAnimationIKKeys(document, *upper, *lower, *joint);
-        if (ui.Button("Bake IK to bone keys (30 fps)"))
+        if (ui.Button("Bake IK and controllers to bone keys (30 fps)"))
             BakeAnimationLimbs(document);
     }
 }
@@ -4130,7 +4528,7 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
 {
     struct Row
     {
-        enum class Kind { Header, Bone } kind = Kind::Header;
+        enum class Kind { Header, Bone, Unresolved } kind = Kind::Header;
         AnimationDocument::RigTrack* track = nullptr;
         Engine::Core::Object* joint = nullptr;
         Engine::Model::AnimationClip* clip = nullptr;
@@ -4146,6 +4544,7 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
         bool repeat = false;
         int repeatCount = 0;
         const std::vector<AnimationDocument::CachedClip::SummaryKey>* summaryKeys = nullptr;
+        const AnimationDocument::CachedClip::UnresolvedRow* unresolved = nullptr;
     };
     std::vector<Row> rows;
     for (auto& track : document.tracks)
@@ -4191,6 +4590,16 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
                     nullptr, clipIndex });
                 rows.back().startSeconds = startSeconds;
             }
+            if (clip)
+                for (const auto& unresolved : CachedAnimationClip(
+                    document, track, clipIndex).unresolvedRows)
+                {
+                    rows.push_back({ Row::Kind::Unresolved, &track,
+                        nullptr, clip, keyTimes, false, 0, 0,
+                        nullptr, clipIndex });
+                    rows.back().startSeconds = startSeconds;
+                    rows.back().unresolved = &unresolved;
+                }
         };
         if (track.clipIndex >= 0 &&
             track.clipIndex < static_cast<int>(clips.size()))
@@ -4581,6 +4990,76 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
     std::vector<TimelineKey> keyGroup;
     std::vector<TimelineKey> singleKey;
     singleKey.reserve(1);
+    struct PendingAssignment
+    {
+        size_t rig = 0;
+        int clip = -1;
+        size_t channel = 0;
+        size_t bone = 0;
+        bool ready = false;
+    } pendingAssignment;
+    const auto drawAssignmentPicker = [&](Row& row,
+        size_t channelIndex, const std::string& boneName,
+        ImU32 textColor, float top)
+    {
+        if (!row.clip || channelIndex >= row.clip->channels.size()) return;
+        const auto& channel = row.clip->channels[channelIndex];
+        ImGui::PushID(row.track);
+        ImGui::PushID(row.clipIndex);
+        ImGui::PushID(static_cast<int>(channelIndex));
+        const float nameWidth = std::min(
+            ImGui::CalcTextSize(boneName.c_str()).x + 8.f,
+            labelWidth - 20.f);
+        ImGui::SetCursorScreenPos({ pinnedX + 8.f, top + 2.f });
+        if (ImGui::InvisibleButton("##BoneName", { nameWidth, 20.f }))
+        {
+            if (document.rigIndex != row.track->index)
+                FocusAnimationRig(document, row.track->index);
+            document.clipIndex = row.clipIndex;
+            document.repairIssueChannel = static_cast<int>(channelIndex);
+            ImGui::OpenPopup("##AssignBone");
+        }
+        const bool nameHovered = ImGui::IsItemHovered();
+        draw->PushClipRect({ pinnedX + 12.f, top },
+            { labelRight - 8.f, top + row.height }, true);
+        draw->AddText({ pinnedX + 12.f, top + 4.f },
+            textColor, boneName.c_str());
+        if (nameHovered)
+            draw->AddLine({ pinnedX + 12.f, top + 20.f },
+                { pinnedX + 8.f + nameWidth, top + 20.f }, textColor);
+        draw->PopClipRect();
+        if (nameHovered)
+            ImGui::SetTooltip("%s\nClick to choose a bone",
+                channel.targetPath.c_str());
+        if (ImGui::BeginPopup("##AssignBone"))
+        {
+            ImGui::TextUnformatted(channel.targetPath.c_str());
+            const auto bones = AnimationClipMapping::RigNodes(
+                *row.track->poseSkeleton);
+            for (size_t boneIndex = 0; boneIndex < bones.size(); ++boneIndex)
+                if (ImGui::Selectable(bones[boneIndex].path.c_str(),
+                        bones[boneIndex].nodeIndex == channel.nodeIndex))
+                    pendingAssignment = {row.track->index, row.clipIndex,
+                        channelIndex, boneIndex, true};
+            ImGui::Separator();
+            if (ImGui::Selectable("Pick bone in 3D view"))
+            {
+                document.repairIssueChannel = static_cast<int>(channelIndex);
+                document.repairRigIndex = row.track->index;
+                document.repairClipIndex = row.clipIndex;
+                document.repairAwaitingViewportBone = true;
+                document.view->SetEditMode(SceneEditMode::Skeleton);
+                document.view->SetPoseEditing(true);
+                document.view->SetModelManipulation(true);
+                document.view->SetModelSelectionMode(1);
+                document.poseScene->SetEditorBonesVisible(true);
+            }
+            ImGui::EndPopup();
+        }
+        ImGui::PopID();
+        ImGui::PopID();
+        ImGui::PopID();
+    };
     for (size_t index = 0; index < rows.size(); ++index)
     {
         Row& row = rows[index];
@@ -4735,6 +5214,31 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
             }
             continue;
         }
+        if (row.kind == Row::Kind::Unresolved)
+        {
+            draw->AddRectFilled({ origin.x, top },
+                { origin.x + canvasWidth, bottom },
+                IM_COL32(170, 85, 35, 28));
+            draw->AddRectFilled({ pinnedX, top }, { labelRight, bottom },
+                IM_COL32(65, 42, 30, 255));
+            const auto& unresolved = *row.unresolved;
+            const std::string label = unresolved.path.empty()
+                ? "Node " + std::to_string(unresolved.nodeIndex)
+                : unresolved.path.substr(
+                    unresolved.path.find_last_of('/') == std::string::npos
+                        ? 0 : unresolved.path.find_last_of('/') + 1);
+            for (float time : unresolved.times)
+            {
+                const float x = timeX + (row.startSeconds + time) *
+                    pixelsPerSecond;
+                if (x >= labelRight && x <= draw->GetClipRectMax().x)
+                    draw->AddCircleFilled({ x, center }, 3.5f,
+                        IM_COL32(255, 160, 90, 230));
+            }
+            drawAssignmentPicker(row, unresolved.channelIndex, label,
+                IM_COL32(255, 170, 110, 255), top);
+            continue;
+        }
         if (index % 2 == 0)
             draw->AddRectFilled({ origin.x, top },
                 { origin.x + canvasWidth, bottom },
@@ -4773,9 +5277,29 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
             rowIsSelected
                 ? ImGui::GetColorU32(RigTimelineTint(rigColor, .5f))
                 : ImGui::GetColorU32(ImGuiCol_WindowBg));
-        draw->AddText({ pinnedX + 12.f, top + 4.f },
-            activeBone || rowIsSelected ? color : ImGui::GetColorU32(ImGuiCol_Text),
-            row.joint->name.c_str());
+        size_t assignedChannel = 0;
+        if (row.clip)
+            for (; assignedChannel < row.clip->channels.size();
+                ++assignedChannel)
+                if (const auto& channel = row.clip->channels[assignedChannel];
+                    channel.nodeIndex == row.nodeIndex &&
+                    !channel.targetPath.empty()) break;
+        const bool canReassign = row.clip &&
+            assignedChannel < row.clip->channels.size();
+        if (canReassign)
+            drawAssignmentPicker(row, assignedChannel, row.joint->name,
+                activeBone || rowIsSelected ? color :
+                    ImGui::GetColorU32(ImGuiCol_Text), top);
+        else
+        {
+            draw->PushClipRect({ pinnedX + 12.f, top },
+                { labelRight, bottom }, true);
+            draw->AddText({ pinnedX + 12.f, top + 4.f },
+                activeBone || rowIsSelected ? color :
+                    ImGui::GetColorU32(ImGuiCol_Text),
+                row.joint->name.c_str());
+            draw->PopClipRect();
+        }
         if (mouseInRow && mouse.x < labelRight && leftClicked &&
             !document.playheadDragging)
         {
@@ -5110,6 +5634,10 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
             ImGui::SetScrollX(std::max(0.f,
                 markerLocalX - labelWidth - 4.f));
     }
+    if (pendingAssignment.ready)
+        AssignAnimationChannels(document, pendingAssignment.rig,
+            pendingAssignment.clip, pendingAssignment.channel,
+            pendingAssignment.bone);
     ImGui::EndChild();
 }
 

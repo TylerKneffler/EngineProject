@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include "View/View.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
@@ -61,6 +62,8 @@ public:
     { m_toolbar.SetTransformTool(tool); }
     void SetPoseEditing(bool enabled) { m_gizmos.SetPoseEditing(enabled); }
     void SetModelManipulation(bool enabled) { m_modelManipulation = enabled; }
+    void SetModelSelectionMode(int mode)
+    { m_modelSelectionMode = std::clamp(mode, 0, 3); }
     const std::vector<Engine::Core::Object*>& ModelChangedBones() const
     { return m_gizmos.ModelChangedBones(); }
     bool ModelDragEnded() const { return m_gizmos.ModelDragEnded(); }

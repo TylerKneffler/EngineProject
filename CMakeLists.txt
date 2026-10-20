@@ -443,7 +443,7 @@ target_compile_definitions(Engine PUBLIC
 if(ENGINE_VULKAN_ENABLED)
     set(VULKAN_SHADER_DIR "${CMAKE_BINARY_DIR}/VulkanShaders")
     set(VULKAN_SHADER_OUTPUTS)
-    foreach(SHADER_NAME Grid Object ObjectOutline Skybox UI UIFont PostProcess)
+    foreach(SHADER_NAME Grid Object ObjectOutline Particle Skybox UI UIFont PostProcess)
         foreach(STAGE VS PS)
             if(STAGE STREQUAL "VS")
                 set(SHADER_PROFILE vs_6_0)
@@ -1081,6 +1081,26 @@ if(NOT ENGINE_PROJECT_DIR AND
     target_include_directories(MmdRenderTests PRIVATE "${ENGINE_ROOT}/Engine")
     add_test(NAME MmdRenderedPlay COMMAND MmdRenderTests)
     set_tests_properties(MmdRenderedPlay PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/ParticleEmitterTests.cpp")
+    enable_testing()
+    add_executable(ParticleEmitterTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/ParticleEmitterTests.cpp")
+    target_link_libraries(ParticleEmitterTests PRIVATE Engine)
+    target_include_directories(ParticleEmitterTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME ParticleEmitterRegression COMMAND ParticleEmitterTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/ParticleRenderingTests.cpp")
+    enable_testing()
+    add_executable(ParticleRenderingTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/ParticleRenderingTests.cpp")
+    target_link_libraries(ParticleRenderingTests PRIVATE Engine)
+    target_include_directories(ParticleRenderingTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME ParticleRenderingRegression COMMAND ParticleRenderingTests)
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND

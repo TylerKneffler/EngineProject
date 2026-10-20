@@ -390,6 +390,30 @@ private:
     std::unique_ptr<IGraphicsBuffer> m_gridConstantBuffer;
     void* m_gridCBMapped = nullptr;
 
+    struct ParticleDrawSlot
+    {
+        struct Batch
+        {
+            uint32_t first = 0;
+            uint32_t count = 0;
+            std::shared_ptr<Engine::Components::Texture> texture;
+            bool alphaBlend = false;
+        };
+        std::unique_ptr<IGraphicsBuffer> vertices;
+        std::unique_ptr<IGraphicsBuffer> constants;
+        void* mappedVertices = nullptr;
+        void* mappedConstants = nullptr;
+        uint32_t vertexCapacity = 0;
+        uint32_t constantCapacity = 0;
+        uint32_t particleCount = 0;
+        uint32_t constantCursor = 0;
+        uint64_t preparedSerial = 0;
+        std::vector<Batch> batches;
+    };
+    std::unique_ptr<IPipelineState> m_particlePipeline;
+    std::unique_ptr<IPipelineState> m_particleAlphaPipeline;
+    std::vector<ParticleDrawSlot> m_particleDrawSlots;
+
     std::unique_ptr<IPipelineState> m_skyboxPipeline;
     std::unique_ptr<IPipelineState> m_portalSkyboxStencilReadPipeline;
     std::unique_ptr<IGraphicsBuffer> m_skyboxConstantBuffer;
@@ -509,6 +533,9 @@ private:
     std::string m_lightingBakeStatus = "Lighting has not been baked.";
 
     void BuildGridPipeline();
+    void BuildParticlePipeline();
+    void RenderParticles(IGraphicsContext* context,
+        const glm::mat4& viewProjection, const glm::mat4& view);
     void BuildSkyboxPipeline();
     void BuildObjectPipeline();
     void EnsureObjectRenderCapacity(uint32_t requiredObjects);

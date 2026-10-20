@@ -78,6 +78,7 @@ private:
     void CopySelectionToClipboard(const std::string& path, bool cut);
     void PasteClipboard(const std::string& directory);
     void ProcessPendingAssetDrop();
+    void ExtractModelAssets(const std::string& sourcePath);
 
     // Opens a file with the system's default application (unless it's a scene file)
     void OpenFile(const std::string& filePath);

@@ -1081,15 +1081,17 @@ EditorUiAssetCreateMenuResult ImGuiEditorUi::AssetWindowContextMenu(bool canPast
 }
 EditorUiAssetItemMenuResult ImGuiEditorUi::AssetItemContextMenu(const void* id,
     bool canPackMeshes, bool canExtractMeshes, bool isDirectory,
-    bool canPaste)
+    bool canPaste, bool canExtractModelAssets)
 {
     EditorUiAssetItemMenuResult result;
     ImGui::PushID(id);
     if(ImGui::BeginPopupContextItem("##assetItemContext"))
     {
+        if (canExtractModelAssets)
+            result.extractModelAssetsRequested = ImGui::MenuItem("Extract model assets");
         if (canPackMeshes) result.packMeshesRequested = ImGui::MenuItem("Bundle meshes into rig pack");
         if (canExtractMeshes) result.extractMeshesRequested = ImGui::MenuItem("Unbundle meshes from rig pack");
-        if (canPackMeshes || canExtractMeshes) ImGui::Separator();
+        if (canExtractModelAssets || canPackMeshes || canExtractMeshes) ImGui::Separator();
         result.copyRequested = ImGui::MenuItem("Copy");
         result.cutRequested = ImGui::MenuItem("Cut");
         if (isDirectory)

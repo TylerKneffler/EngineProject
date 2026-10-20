@@ -49,6 +49,7 @@ struct AnimationClip
     };
     struct ControllerKey
     {
+        enum class Space { World, Body };
         float time = 0.f;
         bool active = false;
         bool fixedPosition = false;
@@ -57,6 +58,8 @@ struct AnimationClip
         glm::vec3 fixedTarget{0.f};
         glm::vec3 fixedRotationEuler{0.f};
         glm::vec3 pole{0.f};
+        // Older clips stored world-space targets without a space field.
+        Space space = Space::World;
     };
     struct ControllerTrack
     {

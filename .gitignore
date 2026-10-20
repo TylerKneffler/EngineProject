@@ -13,6 +13,9 @@ build/
 !.local/tests/PerformanceRecordingTests.cpp
 !.local/tests/AssetLocationIndexTests.cpp
 !.local/tests/PoseControllerSerializationTests.cpp
+!.local/tests/ChainIKTests.cpp
+!.local/tests/ParticleEmitterTests.cpp
+!.local/tests/ParticleRenderingTests.cpp
 build
 editor-startup.log
 project-build.log

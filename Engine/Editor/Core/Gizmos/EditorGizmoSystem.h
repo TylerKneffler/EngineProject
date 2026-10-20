@@ -45,6 +45,7 @@ public:
     bool IsModelPinned(const Engine::Core::Object* joint, bool rotation) const;
     bool IsModelControllerActive(const Engine::Core::Object* joint) const;
     void SetModelControllerActive(Engine::Core::Object* joint, bool active);
+    bool ApplyModelFacing(Engine::Core::Object* joint);
     void SetModelPin(Engine::Core::Object* joint, bool rotation, bool enabled);
     void ClearModelPins(Engine::Scene::Scene& scene);
     const std::vector<Engine::Core::Object*>& ModelChangedBones() const
@@ -87,6 +88,9 @@ private:
     std::vector<std::pair<Engine::Core::Object*, glm::vec3>> m_modelDragGroup;
     std::vector<Engine::Core::Object*> m_modelChangedBones;
     int m_modelScope = 1;
+    int m_modelEffectiveScope = 1;
+    int m_modelControllerMode = 0;
+    int m_modelChainDepth = 2;
     int m_modelSelectionMode = 2;
     bool m_modelRotate = false;
     Engine::Core::Object* m_modelDragObject = nullptr;
@@ -106,6 +110,15 @@ private:
     float m_modelScrollDepth = 0.f;
     bool m_modelDragIK = false;
     Engine::Core::Object* m_modelRoot = nullptr;
+    glm::vec3 m_modelSupportCenter{};
+    float m_modelSupportRadius = 0.f;
+    struct ModelPosePreference
+    {
+        Engine::Core::Object* joint = nullptr;
+        glm::quat localRotation { 1.f, 0.f, 0.f, 0.f };
+        float stiffness = 0.f;
+    };
+    std::vector<ModelPosePreference> m_modelPosePreferences;
     glm::vec3 m_modelPole{};
     glm::quat m_modelTipRotation{1.f, 0.f, 0.f, 0.f};
     std::function<bool(const Engine::Core::Object*)> m_modelPickFilter;

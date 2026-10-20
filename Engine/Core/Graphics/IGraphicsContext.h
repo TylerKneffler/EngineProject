@@ -166,6 +166,10 @@ public:
     // commands are recorded. Explicit APIs use this to consume completed
     // asynchronous query results and recycle that slot's query storage.
     virtual void PrepareFrame(uint32_t /*frameSlot*/) {}
+    // The slot whose fence was waited before PrepareFrame. Persistent upload
+    // buffers may be reused only within this slot.
+    virtual uint32_t GetPreparedFrameSlot() const { return 0; }
+    virtual uint64_t GetPreparedFrameSerial() const { return 0; }
     virtual void FinalizeFrame() {}
     virtual FrameTimingTelemetry GetFrameTimingTelemetry() const { return {}; }
     virtual bool UsesPersistentConstantBufferArena() const { return false; }

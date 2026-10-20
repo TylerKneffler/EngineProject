@@ -163,6 +163,7 @@ void DX11PostProcess::Compose(ID3D11DeviceContext* context,
     }
     context->OMSetRenderTargets(1, &output, nullptr);
     context->OMSetDepthStencilState(m_depthDisabled.Get(), 0);
+    context->OMSetBlendState(nullptr, nullptr, 0xffffffffu);
     context->IASetInputLayout(nullptr);
     context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     context->VSSetShader(m_vertexShader.Get(), nullptr, 0);

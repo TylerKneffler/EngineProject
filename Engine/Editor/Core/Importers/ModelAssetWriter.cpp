@@ -17,6 +17,7 @@
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Physics/Cloth.h"
 #include "Core/Model/RigAsset.h"
+#include "Core/Model/PoseAsset.h"
 #include "AnimationAssetWriter.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
@@ -858,6 +859,34 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
                         offset.bodyName = rigidNames[offset.bodyIndex];
 
         const fs::path prefabPath = output / (output.filename().string() + ".prefab");
+        if (!model.skins.empty())
+        {
+            Engine::Model::PoseAsset restPose;
+            restPose.name = "Rest pose";
+            std::set<unsigned> visited;
+            for (const auto& skin : model.skins)
+                for (unsigned nodeIndex : skin.jointNodes)
+                    if (nodeIndex < model.nodes.size() && visited.insert(nodeIndex).second)
+                    {
+                        const std::string path = AnimationClipMapping::NodePath(
+                            *modelComponent, nodeIndex);
+                        if (path.empty()) continue;
+                        const auto& node = model.nodes[nodeIndex];
+                        restPose.joints.push_back({ path, node.translation,
+                            node.rotation, node.scale });
+                    }
+            if (!restPose.joints.empty())
+            {
+                const fs::path posePath = output /
+                    (output.filename().string() + "_Rest.pose");
+                if (!restPose.Save(posePath.string()))
+                    throw std::runtime_error("Could not save rest pose: " +
+                        posePath.string());
+                Engine::Core::AssetRecord::Ensure(posePath, source,
+                    { { "importer", std::string("model-pose") },
+                      { "sourceFormat", model.sourceFormat } });
+            }
+        }
         auto* manager = root->GetComponent<Engine::Components::AnimationManager>();
         if (manager)
             for (auto& clip : manager->clips)

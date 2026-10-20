@@ -92,7 +92,9 @@ void ChainIK::Start()
 
 bool ChainIK::SolveMultiple(const std::vector<Effector>& effectors,
     int iterations, float tolerance, float rootTranslationWeight,
-    float maxJointAngleDegrees)
+    float maxJointAngleDegrees,
+    const std::vector<PosePreference>* preferences,
+    const BalanceConstraint* balance)
 {
     if (effectors.empty()) return false;
     Object* root = effectors.front().chain.empty() ? nullptr :
@@ -106,15 +108,36 @@ bool ChainIK::SolveMultiple(const std::vector<Effector>& effectors,
     const float maxAngle = glm::radians(std::clamp(maxJointAngleDegrees,
         1.f, 180.f));
     const float rootBlend = std::clamp(rootTranslationWeight, 0.f, 1.f);
+    std::vector<size_t> order(effectors.size());
+    for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+    if (preferences)
+        std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+            return effectors[a].fixed < effectors[b].fixed;
+        });
+    std::unordered_set<Object*> affected;
+    for (const auto& effector : effectors)
+        affected.insert(effector.chain.begin(), effector.chain.end());
     std::vector<glm::vec3> goals;
     goals.reserve(effectors.size());
     for (const auto& effector : effectors)
-        goals.push_back(glm::mix(
+        goals.push_back(preferences ? effector.target : glm::mix(
             effector.chain.back()->transform.GetWorldPosition(),
             effector.target, std::clamp(effector.positionWeight, 0.f, 1.f)));
 
     for (int pass = 0; pass < iterations; ++pass)
     {
+        if (preferences)
+            for (const PosePreference& preference : *preferences)
+                if (preference.joint && affected.count(preference.joint))
+                {
+                    const float weight = std::clamp(preference.stiffness,
+                        0.f, 1.f);
+                    if (weight <= 0.f) continue;
+                    auto& rotation = preference.joint->transform.rotation;
+                    rotation = glm::eulerAngles(glm::normalize(glm::slerp(
+                        glm::quat(rotation), preference.localRotation,
+                        weight)));
+                }
         float largestError = 0.f;
         for (size_t i = 0; i < effectors.size(); ++i)
             largestError = std::max(largestError, glm::distance(
@@ -140,9 +163,10 @@ bool ChainIK::SolveMultiple(const std::vector<Effector>& effectors,
                         glm::inverse(root->Parent->transform.GetWorldMatrix()) *
                         glm::vec4(delta, 0.f));
                 else root->transform.position += delta;
+                if (balance) ConstrainRootBalance(*root, *balance);
             }
         }
-        for (size_t i = 0; i < effectors.size(); ++i)
+        for (size_t i : order)
         {
             const auto& effector = effectors[i];
             if (effector.positionWeight <= 0.f) continue;
@@ -160,8 +184,10 @@ bool ChainIK::SolveMultiple(const std::vector<Effector>& effectors,
                     ? effector.pole - pivot
                     : effector.chain[std::min(jointIndex + 1,
                         effector.chain.size() - 1)]->transform.GetWorldPosition() - pivot;
+                const float weight = preferences
+                    ? std::clamp(effector.positionWeight, 0.f, 1.f) : 1.f;
                 RotateWorld(*joint, FromTo(glm::normalize(toTip),
-                    glm::normalize(toGoal), pole, maxAngle));
+                    glm::normalize(toGoal), pole, maxAngle * weight));
             }
         }
     }
@@ -174,6 +200,28 @@ bool ChainIK::SolveMultiple(const std::vector<Effector>& effectors,
         RotateWorld(*tip, glm::slerp(glm::quat(1.f, 0.f, 0.f, 0.f),
             effector.rotation * glm::inverse(current), weight));
     }
+    return true;
+}
+
+bool ChainIK::ConstrainRootBalance(Object& root,
+    const BalanceConstraint& balance)
+{
+    if (!std::isfinite(balance.horizontalRadius) ||
+        balance.horizontalRadius <= 0.f) return false;
+    glm::vec3 world = root.transform.GetWorldPosition();
+    glm::vec2 offset(world.x - balance.supportCenter.x,
+        world.z - balance.supportCenter.z);
+    const float distance = glm::length(offset);
+    if (!std::isfinite(distance) ||
+        distance <= balance.horizontalRadius) return false;
+    offset *= balance.horizontalRadius / distance;
+    world.x = balance.supportCenter.x + offset.x;
+    world.z = balance.supportCenter.z + offset.y;
+    const glm::mat4 parentWorld = root.Parent
+        ? root.Parent->transform.GetWorldMatrix() : glm::mat4(1.f);
+    if (std::abs(glm::determinant(parentWorld)) < 1e-8f) return false;
+    root.transform.position = glm::vec3(glm::inverse(parentWorld) *
+        glm::vec4(world, 1.f));
     return true;
 }
 

@@ -114,7 +114,7 @@ void Scene::FocusEditorCamera(Object* obj)
     float oldLen = glm::length(oldDir);
     if (oldLen < 0.001f)
     {
-        oldDir = glm::vec3(0.f, 1.5f, -1.f);
+        oldDir = glm::vec3(0.f, 1.5f, 1.f);
         oldLen = glm::length(oldDir);
     }
 

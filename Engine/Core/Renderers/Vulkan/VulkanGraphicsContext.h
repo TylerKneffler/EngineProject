@@ -67,6 +67,8 @@ public:
     void SetCommandBuffer(void* commandBuffer) override
     { m_commandBuffer = reinterpret_cast<VkCommandBuffer>(commandBuffer); }
     void PrepareFrame(uint32_t frameSlot) override;
+    uint32_t GetPreparedFrameSlot() const override { return m_preparedFrameSlot; }
+    uint64_t GetPreparedFrameSerial() const override { return m_preparedFrameSerial; }
     void FinalizeFrame() override;
     Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const override;
     std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateContext() override
@@ -80,6 +82,8 @@ public:
     void SetTextureSystem(std::shared_ptr<VulkanTextureSystem> textureSystem)
     { m_textureSystem = std::move(textureSystem); }
 private:
+    uint32_t m_preparedFrameSlot = 0;
+    uint64_t m_preparedFrameSerial = 0;
     VkCommandBuffer m_commandBuffer = VK_NULL_HANDLE;
     std::shared_ptr<VulkanTextureSystem> m_textureSystem;
     std::shared_ptr<VulkanOcclusionQueryState> m_occlusionState;

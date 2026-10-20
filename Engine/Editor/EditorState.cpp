@@ -16,6 +16,7 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Physics/Physics.h"
 #include "Core/Serialization/SceneSerializer.h"
+#include "Core/Serialization/Json.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Materials/Material.h"
@@ -141,6 +142,29 @@ namespace
             replaced = true;
         }
         return replaced;
+    }
+
+    bool ReplaceAssetStrings(Engine::Serialization::JsonValue& value,
+        const std::vector<std::string>& from,
+        const std::vector<std::string>& to)
+    {
+        if (value.IsString())
+        {
+            std::string text = value.AsString();
+            bool changed = false;
+            for (size_t i = 0; i < from.size(); ++i)
+                changed = ReplaceAllInText(text, from[i], to[i]) || changed;
+            if (changed) value = Engine::Serialization::JsonValue(std::move(text));
+            return changed;
+        }
+        bool changed = false;
+        if (value.IsArray())
+            for (size_t i = 0; i < value.ArraySize(); ++i)
+                changed = ReplaceAssetStrings(value.ArrayAt(i), from, to) || changed;
+        else if (value.IsObject())
+            for (size_t i = 0; i < value.ObjectSize(); ++i)
+                changed = ReplaceAssetStrings(value[value.ObjectKey(i)], from, to) || changed;
+        return changed;
     }
 
     std::string RemapPathPrefix(const std::string& value,
@@ -4154,9 +4178,32 @@ void EditorState::WireupCallbacks()
                 input.close();
 
                 bool changed = false;
-                for (size_t index = 0; index < oldCandidates.size(); ++index)
-                    changed = ReplaceAllInText(contents, oldCandidates[index],
-                        newCandidates[index]) || changed;
+                const bool binary = contents.size() >= 5 &&
+                    contents.compare(0, 4, "EBIN") == 0;
+                if (binary)
+                {
+                    try
+                    {
+                        auto asset = Engine::Serialization::AssetParseFile(
+                            entry.path().string());
+                        changed = ReplaceAssetStrings(asset, oldCandidates,
+                            newCandidates);
+                        if (changed)
+                            contents = Engine::Serialization::AssetWriteBinary(asset);
+                    }
+                    catch (const std::exception& error)
+                    {
+                        if (m_primaryConsole)
+                            m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                                "Could not update binary asset references: " +
+                                entry.path().string() + " (" + error.what() + ")");
+                        continue;
+                    }
+                }
+                else
+                    for (size_t index = 0; index < oldCandidates.size(); ++index)
+                        changed = ReplaceAllInText(contents, oldCandidates[index],
+                            newCandidates[index]) || changed;
                 if (!changed)
                     continue;
 

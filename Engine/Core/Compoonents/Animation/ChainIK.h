@@ -21,6 +21,18 @@ public:
         float positionWeight = 1.f;
         float rotationWeight = 0.f;
         bool usePole = false;
+        bool fixed = false; // Fixed pins are corrected after movable targets.
+    };
+    struct PosePreference
+    {
+        Engine::Core::Object* joint = nullptr;
+        glm::quat localRotation { 1.f, 0.f, 0.f, 0.f };
+        float stiffness = 0.f;
+    };
+    struct BalanceConstraint
+    {
+        glm::vec3 supportCenter { 0.f };
+        float horizontalRadius = 0.f;
     };
 
     ChainIK();
@@ -44,7 +56,11 @@ public:
     static bool SolveMultiple(const std::vector<Effector>& effectors,
         int iterations = 16, float tolerance = .001f,
         float rootTranslationWeight = 0.f,
-        float maxJointAngleDegrees = 180.f);
+        float maxJointAngleDegrees = 180.f,
+        const std::vector<PosePreference>* preferences = nullptr,
+        const BalanceConstraint* balance = nullptr);
+    static bool ConstrainRootBalance(Engine::Core::Object& root,
+        const BalanceConstraint& balance);
     static void ApplyGroup(const std::vector<ChainIK*>& group);
 
 private:

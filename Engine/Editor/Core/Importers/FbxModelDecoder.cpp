@@ -664,6 +664,42 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
         model.animations.push_back(std::move(animation));
     }
 
+    // Animation-only FBX exports have no mesh bones for Assimp to report as a
+    // skin. Keep their authored joint hierarchy as a pose-only rig so the
+    // writer can produce a standalone clip and an editable source skeleton.
+    if (model.primitives.empty() && model.skins.empty() &&
+        !model.animations.empty())
+    {
+        std::vector<bool> animated(model.nodes.size(), false);
+        std::vector<bool> ancestorOfAnimation(model.nodes.size(), false);
+        for (const auto& animation : model.animations)
+            for (const auto& channel : animation.channels)
+                if (channel.nodeIndex < model.nodes.size())
+                {
+                    animated[channel.nodeIndex] = true;
+                    for (int node = static_cast<int>(channel.nodeIndex);
+                        node >= 0; node = model.nodes[static_cast<size_t>(node)].parent)
+                        ancestorOfAnimation[static_cast<size_t>(node)] = true;
+                }
+        Engine::Model::ImportedSkin skin;
+        skin.name = model.name + " Skeleton";
+        for (unsigned index = 1; index < model.nodes.size(); ++index)
+        {
+            const auto& node = model.nodes[index];
+            if (node.name.find("$AssimpFbx$") != std::string::npos)
+                continue;
+            bool descendantOfAnimation = false;
+            for (int parent = static_cast<int>(index); parent > 0;
+                parent = model.nodes[static_cast<size_t>(parent)].parent)
+                if (animated[static_cast<size_t>(parent)])
+                { descendantOfAnimation = true; break; }
+            if (ancestorOfAnimation[index] || descendantOfAnimation)
+                skin.jointNodes.push_back(index);
+        }
+        if (!skin.jointNodes.empty())
+            model.skins.push_back(std::move(skin));
+    }
+
     // Preserve authored mesh-node transforms. A scale of 100 can convert
     // meter vertices into the skeleton's centimeter space; its rotation and
     // translation also place each mesh in the shared bind pose. Bone offsets

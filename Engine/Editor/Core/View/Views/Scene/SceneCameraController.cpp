@@ -79,7 +79,7 @@ void SceneCameraController::Apply(Engine::Scene::Scene& scene,
     {
         // Recover cameras saved in a state produced by formerly unbounded
         // zooming instead of feeding invalid values into the view matrix.
-        pos = { 0.f, 1.5f, -3.f };
+        pos = { 0.f, 1.5f, 3.f };
         cam->target = { 0.f, 0.f, 0.f };
         eye = pos;
         target = cam->target;

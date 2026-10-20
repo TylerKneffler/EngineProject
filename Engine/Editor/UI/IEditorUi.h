@@ -139,6 +139,7 @@ struct EditorUiAssetItemMenuResult
     bool deleteRequested = false;
     bool packMeshesRequested = false;
     bool extractMeshesRequested = false;
+    bool extractModelAssetsRequested = false;
 };
 
 struct EditorUiTextEditResult
@@ -253,7 +254,8 @@ public:
     virtual EditorUiAssetCreateMenuResult AssetWindowContextMenu(bool canPaste) = 0;
     virtual EditorUiAssetItemMenuResult AssetItemContextMenu(const void* id,
         bool canPackMeshes = false, bool canExtractMeshes = false,
-        bool isDirectory = false, bool canPaste = false) = 0;
+        bool isDirectory = false, bool canPaste = false,
+        bool canExtractModelAssets = false) = 0;
     virtual EditorUiTextEditResult RenameText(const char* label, char* buffer,
         size_t size, bool focus) = 0;
     virtual EditorUiPrefabMenuResult PrefabOverrideMenu(const void* id,

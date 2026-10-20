@@ -23,6 +23,7 @@
 #include "Core/Compoonents/UI/UIObject.h"
 #include "Core/Compoonents/UI/UIText.h"
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
+#include "Core/Compoonents/Particles/ParticleEmitter.h"
 #include "Core/Compoonents/Animation/Model.h"
 #include "Core/Compoonents/Animation/AnimationManager.h"
 #include "Core/Compoonents/Animation/SceneCameraLightTrack.h"
@@ -198,6 +199,7 @@ void SceneSerializer::EnsureBuiltinsRegistered()
     RegisterComponentType<Engine::Components::UIObject>();
     RegisterComponentType<Engine::Components::UIText>();
     RegisterComponentType<Engine::Components::SpriteAnimationManager>();
+    RegisterComponentType<Engine::Components::ParticleEmitter>();
     RegisterComponentType<Engine::Components::Model>();
     RegisterComponentType<Engine::Components::AnimationManager>();
     RegisterComponentType<Engine::Components::SceneCameraLightTrack>();

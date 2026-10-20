@@ -5,6 +5,7 @@
 #include "Engine/Editor/Core/Paint/BrushPreset.h"
 #include "Core/AssetRecord.h"
 #include "Core/Model/MeshPackAsset.h"
+#include "Engine/Editor/Core/Importers/ModelImporter.h"
 #include "Core/Object.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Scene/Scene.h"
@@ -31,6 +32,15 @@ namespace fs = std::filesystem;
 namespace
 {
 constexpr float AssetThumbnailSize = 96.f;
+
+bool IsCompoundModelSource(const fs::path& path)
+{
+    std::string extension = path.extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+        [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+    return extension == ".fbx" || extension == ".gltf" ||
+        extension == ".glb" || extension == ".pmx";
+}
 
 const std::unordered_map<std::string, std::string>& AssetEditorRegistry()
 {
@@ -139,6 +149,26 @@ void AssetsExplorerView::Init(const std::string& assetsPath,
     m_externalMoves.clear();
     m_locationCheckPending = false;
     CheckForExternalMoves();
+}
+
+void AssetsExplorerView::ExtractModelAssets(const std::string& sourcePath)
+{
+    const fs::path source(sourcePath);
+    if (!fs::is_regular_file(source) || !IsCompoundModelSource(source))
+    {
+        m_error = "Choose an FBX, glTF, GLB, or PMX model file.";
+        return;
+    }
+    const auto imported = ModelImporter::Import(source.string(),
+        source.parent_path().string());
+    if (!imported.success)
+    {
+        m_error = imported.message;
+        return;
+    }
+    m_error.clear();
+    if (OnAssetContentsChanged)
+        OnAssetContentsChanged(imported.outputDirectory);
 }
 
 void AssetsExplorerView::CheckForExternalMoves()
@@ -439,7 +469,8 @@ void AssetsExplorerView::DrawCurrentDirectory(IEditorUi& ui)
                         entry.path().extension() == ".rig" &&
                             fs::exists(entry.path().parent_path() /
                                 (entry.path().stem().string() + ".meshpack")),
-                        directory, !m_clipboardPaths.empty());
+                        directory, !m_clipboardPaths.empty(),
+                        !directory && IsCompoundModelSource(entry.path()));
                 if (menu.copyRequested)
                     CopySelectionToClipboard(entryPath, false);
                 if (menu.cutRequested)
@@ -455,6 +486,8 @@ void AssetsExplorerView::DrawCurrentDirectory(IEditorUi& ui)
                     m_error = ok ? std::string() : error;
                     if (ok && OnAssetContentsChanged) OnAssetContentsChanged(entryPath);
                 }
+                if (menu.extractModelAssetsRequested)
+                    ExtractModelAssets(entryPath);
                 if (menu.renameRequested)
                 {
                     m_renamePath = entryPath;
@@ -580,7 +613,8 @@ void AssetsExplorerView::DrawGridDirectory(IEditorUi& ui)
                     entry.path().extension() == ".rig" &&
                         fs::exists(entry.path().parent_path() /
                             (entry.path().stem().string() + ".meshpack")),
-                    directory, !m_clipboardPaths.empty());
+                    directory, !m_clipboardPaths.empty(),
+                    !directory && IsCompoundModelSource(entry.path()));
             if (menu.copyRequested)
                 CopySelectionToClipboard(entryPath, false);
             if (menu.cutRequested)
@@ -596,6 +630,8 @@ void AssetsExplorerView::DrawGridDirectory(IEditorUi& ui)
                 m_error = ok ? std::string() : error;
                 if (ok && OnAssetContentsChanged) OnAssetContentsChanged(entryPath);
             }
+            if (menu.extractModelAssetsRequested)
+                ExtractModelAssets(entryPath);
             if (menu.renameRequested)
             {
                 m_renamePath = entryPath;

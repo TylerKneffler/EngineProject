@@ -411,6 +411,7 @@ int WINAPI wWinMain(
         OutputDebugStringA(("[Main] Loading default scene: " + startupScene + "\n").c_str());
         editorState->LoadStartupScene(startupScene);
     }
+    editorState->RestoreAnimationEditorSession();
     splash.SetProgress(0.90f, L"Finishing startup...");
 
     OutputDebugStringA("[Main] Creating GameBuildManager...\n");
@@ -869,6 +870,8 @@ int WINAPI wWinMain(
     OutputDebugStringA("[Main] Window shown, entering message loop...\n");
 
     int result = window->Run();
+
+    editorState->SaveAnimationEditorSession();
 
     // Panels release UI texture registrations while the selected package is
     // still alive. The renderer itself is owned by EditorState.
