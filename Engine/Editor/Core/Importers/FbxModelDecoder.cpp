@@ -6,6 +6,7 @@
 #include <assimp/material.h>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
+#include <ufbx.h>
 
 #include <algorithm>
 #include <array>
@@ -17,6 +18,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <limits>
+#include <memory>
 #include <numeric>
 #include <unordered_map>
 #include <unordered_set>
@@ -104,6 +106,245 @@ Engine::Model::AnimationChannel VectorChannel(unsigned nodeIndex, Engine::Model:
     }
     return channel;
 }
+
+// Assimp splits FBX pivot and pre-rotation properties into helper nodes, but
+// its animation channels on those nodes do not reconstruct the authored pose
+// for animation-only Mixamo exports. ufbx evaluates those FBX properties as a
+// whole, producing a compact local TRS hierarchy with the intended motion.
+bool DecodeAnimationOnly(const std::string& sourcePath,
+    Engine::Model::ImportedModel& model, std::string& error)
+{
+    const auto validTransform = [](const ufbx_transform& transform)
+    {
+        const auto finite3 = [](const ufbx_vec3& value)
+        { return std::isfinite(value.x) && std::isfinite(value.y) &&
+            std::isfinite(value.z); };
+        const auto& rotation = transform.rotation;
+        const double lengthSquared = rotation.x * rotation.x +
+            rotation.y * rotation.y + rotation.z * rotation.z +
+            rotation.w * rotation.w;
+        return finite3(transform.translation) && finite3(transform.scale) &&
+            std::isfinite(lengthSquared) && lengthSquared > 1e-12;
+    };
+    ufbx_error loadError{};
+    std::unique_ptr<ufbx_scene, decltype(&ufbx_free_scene)> scene(
+        ufbx_load_file(sourcePath.c_str(), nullptr, &loadError), ufbx_free_scene);
+    if (!scene || scene->meshes.count || !scene->nodes.count)
+    {
+        char message[1024]{};
+        ufbx_format_error(message, sizeof(message), &loadError);
+        error = std::string("Could not evaluate animation-only FBX: ") + message;
+        return false;
+    }
+    model = {};
+    model.name = std::filesystem::path(sourcePath).stem().string();
+    model.sourceFormat = "fbx";
+    model.unitScaleToMeters = static_cast<float>(scene->settings.unit_meters);
+    if (!(model.unitScaleToMeters > 0.f) ||
+        !std::isfinite(model.unitScaleToMeters))
+    { error = "Animation-only FBX has invalid units"; return false; }
+
+    std::unordered_map<const ufbx_node*, unsigned> indices;
+    for (size_t index = 0; index < scene->nodes.count; ++index)
+    {
+        const auto* source = scene->nodes.data[index];
+        Engine::Model::ImportedNode node;
+        node.name = source->name.length
+            ? std::string(source->name.data, source->name.length)
+            : "Node " + std::to_string(index + 1);
+        if (source->parent)
+        {
+            const auto parent = indices.find(source->parent);
+            if (parent == indices.end())
+            { error = "Animation-only FBX node order is invalid"; return false; }
+            node.parent = static_cast<int>(parent->second);
+        }
+        const auto& transform = source->local_transform;
+        if (!validTransform(transform))
+        { error = "Animation-only FBX contains an invalid rest transform"; return false; }
+        node.translation = { static_cast<float>(transform.translation.x),
+            static_cast<float>(transform.translation.y),
+            static_cast<float>(transform.translation.z) };
+        node.rotation = glm::normalize(glm::quat(
+            static_cast<float>(transform.rotation.w),
+            static_cast<float>(transform.rotation.x),
+            static_cast<float>(transform.rotation.y),
+            static_cast<float>(transform.rotation.z)));
+        node.scale = { static_cast<float>(transform.scale.x),
+            static_cast<float>(transform.scale.y),
+            static_cast<float>(transform.scale.z) };
+        indices.emplace(source, static_cast<unsigned>(index));
+        model.nodes.push_back(std::move(node));
+    }
+
+    const size_t stackCount = scene->anim_stacks.count;
+    for (size_t stackIndex = 0; stackIndex < stackCount; ++stackIndex)
+    {
+        const ufbx_anim_stack* stack = scene->anim_stacks.data[stackIndex];
+        const double duration = stack->time_end - stack->time_begin;
+        if (!(duration > 0.0) || !std::isfinite(duration)) continue;
+        Engine::Model::ImportedAnimation animation;
+        animation.name = stack->name.length
+            ? std::string(stack->name.data, stack->name.length)
+            : "Animation " + std::to_string(stackIndex + 1);
+        animation.duration = static_cast<float>(duration);
+        std::vector<Engine::Model::AnimationChannel> channels(model.nodes.size() * 3);
+        for (unsigned node = 0; node < model.nodes.size(); ++node)
+            for (unsigned property = 0; property < 3; ++property)
+            {
+                auto& channel = channels[static_cast<size_t>(node) * 3 + property];
+                channel.nodeIndex = node;
+                channel.path = static_cast<Engine::Model::AnimationChannel::Path>(property);
+                channel.valueWidth = property == 1 ? 4u : 3u;
+            }
+        if (duration > 2000.0)
+        { error = "Animation-only FBX exceeds the supported 2000-second clip length"; return false; }
+        const unsigned intervals = std::max(1u,
+            static_cast<unsigned>(std::ceil(duration * 60.0)));
+        std::vector<double> sampleTimes;
+        sampleTimes.reserve(intervals + 1);
+        for (unsigned frame = 0; frame <= intervals; ++frame)
+            sampleTimes.push_back(duration * frame / intervals);
+        // Include authored times: a short key or step can fall between 60 Hz
+        // samples and would otherwise disappear from the exported .anim.
+        for (size_t layerIndex = 0; layerIndex < stack->layers.count; ++layerIndex)
+        {
+            const ufbx_anim_layer* layer = stack->layers.data[layerIndex];
+            for (size_t valueIndex = 0; valueIndex < layer->anim_values.count; ++valueIndex)
+            {
+                const ufbx_anim_value* value = layer->anim_values.data[valueIndex];
+                for (const ufbx_anim_curve* curve : value->curves)
+                    if (curve)
+                        for (size_t keyIndex = 0; keyIndex < curve->keyframes.count;
+                            ++keyIndex)
+                        {
+                            const ufbx_keyframe& key = curve->keyframes.data[keyIndex];
+                            if (!std::isfinite(key.time) ||
+                                key.time < stack->time_begin ||
+                                key.time > stack->time_end) continue;
+                            const double time = key.time - stack->time_begin;
+                            sampleTimes.push_back(time);
+                            if (key.interpolation == UFBX_INTERPOLATION_CONSTANT_PREV &&
+                                keyIndex + 1 < curve->keyframes.count)
+                            {
+                                const double next = curve->keyframes.data[keyIndex + 1].time -
+                                    stack->time_begin;
+                                sampleTimes.push_back(std::max(0.0,
+                                    next - 1.0 / 6000.0));
+                            }
+                            if (key.interpolation == UFBX_INTERPOLATION_CONSTANT_NEXT)
+                                sampleTimes.push_back(std::min(duration,
+                                    time + 1.0 / 6000.0));
+                        }
+            }
+        }
+        std::sort(sampleTimes.begin(), sampleTimes.end());
+        sampleTimes.erase(std::unique(sampleTimes.begin(), sampleTimes.end(),
+            [](double a, double b) { return std::abs(a - b) < 1e-7; }),
+            sampleTimes.end());
+        if (sampleTimes.size() > 150000 ||
+            (model.nodes.size() && sampleTimes.size() >
+                3000000 / model.nodes.size()))
+        { error = "Animation-only FBX has too many node samples"; return false; }
+        for (double sampleTime : sampleTimes)
+        {
+            const double time = stack->time_begin + sampleTime;
+            std::unique_ptr<ufbx_scene, decltype(&ufbx_free_scene)> pose(
+                ufbx_evaluate_scene(scene.get(), stack->anim, time,
+                    nullptr, &loadError), ufbx_free_scene);
+            if (!pose || pose->nodes.count != model.nodes.size())
+            { error = "Could not sample animation-only FBX"; return false; }
+            for (unsigned node = 0; node < model.nodes.size(); ++node)
+            {
+                const auto& transform = pose->nodes.data[node]->local_transform;
+                if (!validTransform(transform))
+                { error = "Animation-only FBX contains an invalid animated transform"; return false; }
+                auto& translation = channels[static_cast<size_t>(node) * 3];
+                auto& rotation = channels[static_cast<size_t>(node) * 3 + 1];
+                auto& scale = channels[static_cast<size_t>(node) * 3 + 2];
+                const float keyTime = static_cast<float>(sampleTime);
+                translation.times.push_back(keyTime);
+                rotation.times.push_back(keyTime);
+                scale.times.push_back(keyTime);
+                translation.values.insert(translation.values.end(), {
+                    static_cast<float>(transform.translation.x),
+                    static_cast<float>(transform.translation.y),
+                    static_cast<float>(transform.translation.z) });
+                rotation.values.insert(rotation.values.end(), {
+                    static_cast<float>(transform.rotation.x),
+                    static_cast<float>(transform.rotation.y),
+                    static_cast<float>(transform.rotation.z),
+                    static_cast<float>(transform.rotation.w) });
+                scale.values.insert(scale.values.end(), {
+                    static_cast<float>(transform.scale.x),
+                    static_cast<float>(transform.scale.y),
+                    static_cast<float>(transform.scale.z) });
+            }
+        }
+        for (auto& channel : channels)
+        {
+            bool differs = false;
+            const auto& rest = model.nodes[channel.nodeIndex];
+            for (size_t key = 0; key < channel.times.size() && !differs; ++key)
+            {
+                const size_t offset = key * channel.valueWidth;
+                if (channel.path == Engine::Model::AnimationChannel::Path::Rotation)
+                {
+                    const glm::quat value(channel.values[offset + 3],
+                        channel.values[offset], channel.values[offset + 1],
+                        channel.values[offset + 2]);
+                    differs = std::abs(glm::dot(value, rest.rotation)) < .99999f;
+                }
+                else
+                {
+                    const glm::vec3 value(channel.values[offset],
+                        channel.values[offset + 1], channel.values[offset + 2]);
+                    const glm::vec3 base = channel.path ==
+                        Engine::Model::AnimationChannel::Path::Translation
+                        ? rest.translation : rest.scale;
+                    differs = glm::length(value - base) > 1e-4f;
+                }
+            }
+            if (differs) animation.channels.push_back(std::move(channel));
+        }
+        model.animations.push_back(std::move(animation));
+    }
+    if (model.animations.empty())
+    { error = "Animation-only FBX has no playable animation"; return false; }
+
+    Engine::Model::ImportedSkin skin;
+    skin.name = model.name + " Skeleton";
+    std::vector<bool> jointNodes(model.nodes.size(), false);
+    for (const auto& animation : model.animations)
+        for (const auto& channel : animation.channels)
+            if (channel.nodeIndex < jointNodes.size())
+                jointNodes[channel.nodeIndex] = true;
+    for (unsigned node = 0; node < model.nodes.size(); ++node)
+        jointNodes[node] = jointNodes[node] || scene->nodes.data[node]->bone != nullptr;
+    if (std::none_of(jointNodes.begin(), jointNodes.end(),
+            [](bool value) { return value; }))
+        for (unsigned node = 1; node < model.nodes.size(); ++node)
+            jointNodes[node] = true;
+    std::vector<glm::mat4> world(model.nodes.size(), glm::mat4(1.f));
+    for (unsigned node = 0; node < model.nodes.size(); ++node)
+    {
+        const auto& value = model.nodes[node];
+        const glm::mat4 local = glm::translate(glm::mat4(1.f), value.translation) *
+            glm::mat4_cast(value.rotation) *
+            glm::scale(glm::mat4(1.f), value.scale);
+        world[node] = value.parent < 0 ? local :
+            world[static_cast<size_t>(value.parent)] * local;
+        if (jointNodes[node])
+        {
+            skin.jointNodes.push_back(node);
+            skin.inverseBindMatrices.push_back(glm::inverse(world[node]));
+        }
+    }
+    if (skin.jointNodes.empty())
+    { error = "Animation-only FBX has no skeleton"; return false; }
+    model.skins.push_back(std::move(skin));
+    return true;
+}
 }
 
 bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::ImportedModel& model,
@@ -142,8 +383,16 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
         // ASCII 6.x files do not carry the binary version header above.
         if (error.find("old format version") != std::string::npos)
             return LegacyFbxModelDecoder::Decode(sourcePath, model, error);
+        // Some valid animation-only FBX files are rejected by Assimp before
+        // it can report a mesh and animation count. Let ufbx handle those.
+        std::string animationError;
+        if (DecodeAnimationOnly(sourcePath, model, animationError))
+            return true;
         return false;
     }
+
+    if (scene->mNumMeshes == 0 && scene->mNumAnimations > 0)
+        return DecodeAnimationOnly(sourcePath, model, error);
 
     model = {};
     model.name = std::filesystem::path(sourcePath).stem().string();
@@ -605,20 +854,27 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
         for (unsigned channelIndex = 0; channelIndex < source->mNumChannels; ++channelIndex)
         {
             const aiNodeAnim* sourceChannel = source->mChannels[channelIndex];
-            const auto found = nodeByName.find(sourceChannel->mNodeName.C_Str());
-            if (found == nodeByName.end()) continue;
+            const std::string nodeName = sourceChannel->mNodeName.C_Str();
+            const auto found = nodesByName.find(nodeName);
+            if (found == nodesByName.end() || found->second.size() != 1)
+            {
+                error = "FBX animation channel has a missing or ambiguous node: " +
+                    nodeName;
+                return false;
+            }
+            const unsigned nodeIndex = found->second.front();
             if (sourceChannel->mNumPositionKeys)
-                animation.channels.push_back(VectorChannel(found->second,
+                animation.channels.push_back(VectorChannel(nodeIndex,
                     Engine::Model::AnimationChannel::Path::Translation, sourceChannel->mPositionKeys,
                     sourceChannel->mNumPositionKeys, ticksPerSecond));
             if (sourceChannel->mNumScalingKeys)
-                animation.channels.push_back(VectorChannel(found->second,
+                animation.channels.push_back(VectorChannel(nodeIndex,
                     Engine::Model::AnimationChannel::Path::Scale, sourceChannel->mScalingKeys,
                     sourceChannel->mNumScalingKeys, ticksPerSecond));
             if (sourceChannel->mNumRotationKeys)
             {
                 Engine::Model::AnimationChannel channel;
-                channel.nodeIndex = found->second;
+                channel.nodeIndex = nodeIndex;
                 channel.path = Engine::Model::AnimationChannel::Path::Rotation;
                 channel.valueWidth = 4;
                 channel.times.reserve(sourceChannel->mNumRotationKeys);

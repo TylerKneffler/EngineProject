@@ -129,18 +129,24 @@ std::optional<AnimationClipAsset> AnimationClipAsset::Load(
         asset.previewPrefab = root["previewPrefab"].AsString();
         asset.previewRig = static_cast<size_t>(
             std::max(0, root["previewRig"].AsInt()));
-        for (size_t index = 0; index < root["baseSkeleton"].ArraySize(); ++index)
+        const auto readNodes = [&](const auto& source,
+            std::vector<BaseNode>& destination)
         {
-            const auto& node = root["baseSkeleton"].ArrayAt(index);
-            if (!node["path"].IsString()) continue;
-            BaseNode base;
-            base.path = node["path"].AsString();
-            base.parent = node["parent"].AsString();
-            base.position = ReadVector(node["position"], {});
-            base.rotation = ReadVector(node["rotation"], {});
-            base.scale = ReadVector(node["scale"], glm::vec3(1.f));
-            asset.baseSkeleton.push_back(std::move(base));
-        }
+            for (size_t index = 0; index < source.ArraySize(); ++index)
+            {
+                const auto& node = source.ArrayAt(index);
+                if (!node["path"].IsString()) continue;
+                BaseNode base;
+                base.path = node["path"].AsString();
+                base.parent = node["parent"].AsString();
+                base.position = ReadVector(node["position"], {});
+                base.rotation = ReadVector(node["rotation"], {});
+                base.scale = ReadVector(node["scale"], glm::vec3(1.f));
+                destination.push_back(std::move(base));
+            }
+        };
+        readNodes(root["baseSkeleton"], asset.baseSkeleton);
+        readNodes(root["bindSkeleton"], asset.bindSkeleton);
         return asset;
     }
     catch (...) { return std::nullopt; }
@@ -156,15 +162,21 @@ bool AnimationClipAsset::Save(const std::string& path) const
         .Set("clip", clip.Serialize());
     auto baseNodes = baseSkeleton;
     ApplyFirstKeyPose(clip, baseNodes);
-    auto nodes = Engine::Serialization::JsonValue::MakeArray();
-    for (const auto& node : baseNodes)
-        nodes.Push(Engine::Serialization::JsonValue::MakeObject()
-            .Set("path", Engine::Serialization::JsonValue(node.path))
-            .Set("parent", Engine::Serialization::JsonValue(node.parent))
-            .Set("position", WriteVector(node.position))
-            .Set("rotation", WriteVector(node.rotation))
-            .Set("scale", WriteVector(node.scale)));
-    root.Set("baseSkeleton", std::move(nodes));
+    const auto writeNodes = [](const std::vector<BaseNode>& source)
+    {
+        auto nodes = Engine::Serialization::JsonValue::MakeArray();
+        for (const auto& node : source)
+            nodes.Push(Engine::Serialization::JsonValue::MakeObject()
+                .Set("path", Engine::Serialization::JsonValue(node.path))
+                .Set("parent", Engine::Serialization::JsonValue(node.parent))
+                .Set("position", WriteVector(node.position))
+                .Set("rotation", WriteVector(node.rotation))
+                .Set("scale", WriteVector(node.scale)));
+        return nodes;
+    };
+    root.Set("baseSkeleton", writeNodes(baseNodes));
+    if (!bindSkeleton.empty())
+        root.Set("bindSkeleton", writeNodes(bindSkeleton));
     const std::filesystem::path target =
         Engine::Components::Mesh::ResolveFilePath(path);
     std::error_code error;

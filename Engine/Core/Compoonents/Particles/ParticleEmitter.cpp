@@ -95,8 +95,10 @@ void ParticleEmitter::Reset()
     m_emitRemainder = 0.0;
     m_stepRemainder = 0.0;
     m_emissionTicks = 0;
+    m_simulationTicks = 0;
     m_pendingBurst = 0;
     m_playing = false;
+    m_emissionStarted = false;
 }
 
 void ParticleEmitter::SetSolver(std::unique_ptr<IParticleSolver> solver)
@@ -109,12 +111,24 @@ void ParticleEmitter::SetSolver(std::unique_ptr<IParticleSolver> solver)
 void ParticleEmitter::Play()
 {
     const uint64_t durationTicks = EmissionDurationTicks(duration);
-    if (!m_playing && durationTicks && m_emissionTicks >= durationTicks)
+    if (!m_playing)
     {
-        m_emissionTicks = 0;
-        Burst(burstOnStart);
+        if (durationTicks && m_emissionTicks >= durationTicks)
+        {
+            m_emissionTicks = 0;
+            Burst(burstOnStart);
+        }
+        else if (!m_emissionStarted)
+            Burst(burstOnStart);
+        m_emissionStarted = true;
     }
     m_playing = true;
+}
+
+void ParticleEmitter::Restart()
+{
+    Reset();
+    Play();
 }
 
 ParticleEmitter::Bounds ParticleEmitter::GetWorldBounds(
@@ -146,9 +160,7 @@ ParticleEmitter::Bounds ParticleEmitter::GetWorldBounds(
 void ParticleEmitter::Start()
 {
     Reset();
-    m_playing = playOnStart;
-    if (m_playing)
-        Burst(burstOnStart);
+    if (playOnStart) Play();
 }
 
 void ParticleEmitter::Deserialize(const JsonValue& value)
@@ -273,6 +285,35 @@ void ParticleEmitter::Advance(float seconds, const glm::mat4& emitterWorld)
         m_stepRemainder = std::fmod(m_stepRemainder, FixedStep);
 }
 
+bool ParticleEmitter::Seek(double seconds, const glm::mat4& emitterWorld,
+    uint64_t maxReplaySteps)
+{
+    return Seek(seconds, [&emitterWorld](double) { return emitterWorld; },
+        maxReplaySteps);
+}
+
+bool ParticleEmitter::Seek(double seconds,
+    const std::function<glm::mat4(double)>& worldAtTime,
+    uint64_t maxReplaySteps)
+{
+    if (!worldAtTime || !std::isfinite(seconds) || seconds < 0.0 ||
+        seconds > (static_cast<double>(maxReplaySteps) + 1.0) * FixedStep)
+        return false;
+    const double ticks = seconds / FixedStep;
+    const uint64_t wholeSteps = static_cast<uint64_t>(
+        std::floor(ticks + 1e-7));
+    if (wholeSteps > maxReplaySteps) return false;
+
+    Start();
+    for (uint64_t step = 0; step < wholeSteps; ++step)
+        Step(static_cast<float>(FixedStep),
+            worldAtTime(static_cast<double>(step + 1) * FixedStep));
+    m_stepRemainder = std::max(0.0,
+        seconds - static_cast<double>(wholeSteps) * FixedStep);
+    if (m_stepRemainder < 1e-8) m_stepRemainder = 0.0;
+    return true;
+}
+
 void ParticleEmitter::Step(float seconds, const glm::mat4& emitterWorld)
 {
     const int capacity = std::clamp(maxParticles, 0, ParticleLimit);
@@ -324,6 +365,7 @@ void ParticleEmitter::Step(float seconds, const glm::mat4& emitterWorld)
         capacity - static_cast<int>(m_particles.size()));
     for (int i = 0; i < requested; ++i)
         SpawnOne(emitterWorld);
+    ++m_simulationTicks;
 }
 
 bool ParticleEmitter::DrawProperties(::Engine::Editor::IEditorUi& ui)
@@ -361,6 +403,29 @@ bool ParticleEmitter::DrawProperties(::Engine::Editor::IEditorUi& ui)
     const char* blends[] = { "Additive", "Alpha" };
     renderChanged = ui.Combo("Blend", &blendMode, blends, 2) || renderChanged;
     if (changed) Reset();
+    ui.Separator();
+    const std::string count = std::to_string(m_particles.size()) + " / " +
+        std::to_string(std::clamp(maxParticles, 0, ParticleLimit));
+    ui.ValueLabel("Live particles", count.c_str());
+    ui.ValueLabel("Emission", m_playing ? "Playing" : "Stopped / paused");
+    if (ui.Button("Play", 65.f)) Play();
+    ui.SameLine();
+    if (ui.Button("Pause", 65.f)) Pause();
+    ui.SameLine();
+    if (ui.Button("Restart", 75.f)) Restart();
+    ui.SameLine();
+    if (ui.Button("Clear", 65.f)) Reset();
+    if (ui.Button("Burst", 65.f)) Burst(std::max(1, burstOnStart));
+    ui.SameLine();
+    if (ui.Button("Step 1/60", 90.f) && Owner)
+        Advance(1.f / 60.f, Owner->transform.GetWorldMatrix());
+    ui.DisabledLabel("Step advances particles while scene playback is paused.");
+    float previewSeconds = static_cast<float>(
+        static_cast<double>(m_simulationTicks) * FixedStep + m_stepRemainder);
+    if (ui.DragFloat("Preview time (s)", &previewSeconds, 0.01f, 0.f, 60.f))
+        Seek(previewSeconds, Owner ? Owner->transform.GetWorldMatrix() :
+            glm::mat4(1.f));
+    ui.DisabledLabel("Scrub replays from scene start at the current transform.");
     return changed || renderChanged;
 }
 }

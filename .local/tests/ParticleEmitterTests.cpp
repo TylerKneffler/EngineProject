@@ -1,8 +1,12 @@
 #include "Core/Compoonents/Particles/ParticleEmitter.h"
 #include "Core/Compoonents/Particles/ParticleSolver.h"
 #include "Core/Serialization/SceneSerializer.h"
+#include "Core/Scene/Scene.h"
+#include "Core/Compoonents/Camera/Camera.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <cmath>
+#include <chrono>
+#include <filesystem>
 #include <stdexcept>
 #include <memory>
 
@@ -18,6 +22,21 @@ void Require(bool value, const char* message)
 bool Near(const glm::vec3& a, const glm::vec3& b)
 {
     return glm::length(a - b) < 1e-5f;
+}
+
+bool SameSettings(const ParticleEmitter& a, const ParticleEmitter& b)
+{
+    return a.rate == b.rate && a.burstOnStart == b.burstOnStart &&
+        a.maxParticles == b.maxParticles && a.lifetime == b.lifetime &&
+        a.speed == b.speed && a.spreadDegrees == b.spreadDegrees &&
+        Near(a.direction, b.direction) && Near(a.gravity, b.gravity) &&
+        a.drag == b.drag && Near(a.color, b.color) && a.size == b.size &&
+        a.shape == b.shape && Near(a.boxExtents, b.boxExtents) &&
+        a.sphereRadius == b.sphereRadius && a.worldSpace == b.worldSpace &&
+        a.playOnStart == b.playOnStart && a.duration == b.duration &&
+        a.loop == b.loop && a.seed == b.seed &&
+        a.texturePath == b.texturePath && a.opacity == b.opacity &&
+        a.blendMode == b.blendMode;
 }
 
 class KillParticleSolver final : public Engine::Components::IParticleSolver
@@ -161,4 +180,188 @@ int main()
     Require(finite.GetParticles().size() == 3, "loop resumes from paused clock");
     finite.Reset();
     Require(!finite.GetWorldBounds(translated).valid, "empty emitter has no bounds");
+
+    finite.playOnStart = false;
+    finite.Restart();
+    finite.Advance(1.f / 60.f, translated);
+    Require(finite.IsPlaying() && finite.GetParticles().size() == 1,
+        "restart previews an emitter with play-on-start disabled");
+
+    ParticleEmitter manualStart;
+    manualStart.rate = 0.f;
+    manualStart.burstOnStart = 2;
+    manualStart.speed = 0.f;
+    manualStart.gravity = {0.f, 0.f, 0.f};
+    manualStart.playOnStart = false;
+    manualStart.Start();
+    manualStart.Advance(1.f / 60.f, translated);
+    Require(manualStart.GetParticles().empty(),
+        "play-on-start disabled holds the initial burst");
+    manualStart.Play();
+    manualStart.Pause();
+    manualStart.Play();
+    manualStart.Advance(1.f / 60.f, translated);
+    Require(manualStart.GetParticles().size() == 2,
+        "manual play queues the start burst exactly once");
+
+    Engine::Scene::Scene scene;
+    auto* editorCamera = scene.editorCamera.AddComponent<Engine::Components::Camera>();
+    auto* particleObject = scene.AddObject("Focus particles");
+    auto* focusEmitter = particleObject->AddComponent<ParticleEmitter>();
+    focusEmitter->rate = 0.f;
+    focusEmitter->burstOnStart = 1;
+    focusEmitter->speed = 60.f;
+    focusEmitter->spreadDegrees = 0.f;
+    focusEmitter->direction = {1.f, 0.f, 0.f};
+    focusEmitter->gravity = {0.f, 0.f, 0.f};
+    focusEmitter->Start();
+    focusEmitter->Advance(2.f / 60.f, glm::mat4(1.f));
+    scene.FocusEditorCamera(particleObject);
+    Require(std::abs(editorCamera->target.x - 1.f) < 1e-4f,
+        "editor camera focuses live particle bounds");
+
+    ParticleEmitter replayEmitter;
+    replayEmitter.rate = 37.f;
+    replayEmitter.burstOnStart = 3;
+    replayEmitter.maxParticles = 64;
+    replayEmitter.lifetime = 4.f;
+    replayEmitter.speed = 2.f;
+    replayEmitter.gravity = {0.f, -1.f, 0.f};
+    replayEmitter.shape = static_cast<int>(ParticleEmitter::Shape::Sphere);
+    replayEmitter.seed = 91;
+    replayEmitter.duration = .4f;
+    replayEmitter.loop = true;
+    replayEmitter.Start();
+    for (int step = 0; step < 120; ++step)
+        replayEmitter.Advance(1.f / 60.f, translated);
+    const auto expected = replayEmitter.GetParticles();
+    Require(replayEmitter.GetSimulationTicks() == 120 && !expected.empty(),
+        "normal playback advances fixed ticks");
+    Require(replayEmitter.Seek(.5, translated) &&
+        replayEmitter.GetSimulationTicks() == 30,
+        "backward seek resets and replays fixed ticks");
+    Require(replayEmitter.Seek(2.0, translated) &&
+        replayEmitter.GetSimulationTicks() == 120,
+        "forward seek replays fixed ticks");
+    const auto matchesExpected = [&]()
+    {
+        const auto& actual = replayEmitter.GetParticles();
+        if (actual.size() != expected.size()) return false;
+        for (size_t index = 0; index < actual.size(); ++index)
+            if (actual[index].id != expected[index].id ||
+                !Near(actual[index].position, expected[index].position) ||
+                !Near(actual[index].velocity, expected[index].velocity) ||
+                std::abs(actual[index].age - expected[index].age) > 1e-5f)
+                return false;
+        return true;
+    };
+    Require(matchesExpected(), "seek reproduces seeded particle state and IDs");
+    Require(!replayEmitter.Seek(601.0, translated) &&
+        replayEmitter.GetSimulationTicks() == 120 && matchesExpected(),
+        "out-of-range seek preserves state");
+    replayEmitter.Pause();
+    replayEmitter.Play();
+    Require(replayEmitter.GetSimulationTicks() == 120 && matchesExpected(),
+        "play resumes without resetting live state");
+
+    const auto sceneSaved = replayEmitter.Serialize();
+    replayEmitter.Deserialize(sceneSaved);
+    Require(replayEmitter.GetSimulationTicks() == 0 &&
+        replayEmitter.GetParticles().empty() && !replayEmitter.IsPlaying(),
+        "scene reload clears runtime particle state");
+    replayEmitter.Start();
+    for (int step = 0; step < 120; ++step)
+        replayEmitter.Advance(1.f / 60.f, translated);
+    Require(matchesExpected(), "scene reload replays the same IDs and state");
+
+    ParticleEmitter moving;
+    moving.rate = 0.f;
+    moving.burstOnStart = 1;
+    moving.lifetime = 10.f;
+    moving.speed = 0.f;
+    moving.gravity = {0.f, 0.f, 0.f};
+    moving.Start();
+    for (int tick = 1; tick <= 3; ++tick)
+        moving.Advance(1.f / 60.f, glm::translate(glm::mat4(1.f),
+            glm::vec3(static_cast<float>(tick), 0.f, 0.f)));
+    Require(moving.GetParticles().size() == 1 &&
+        std::abs(moving.GetParticles()[0].position.x - 1.f) < 1e-5f,
+        "moving emitter spawns at its first tick transform");
+    const auto movingExpected = moving.GetParticles()[0];
+    int sampledTicks = 0;
+    Require(moving.Seek(3.0 / 60.0, [&](double time)
+    {
+        ++sampledTicks;
+        return glm::translate(glm::mat4(1.f),
+            glm::vec3(static_cast<float>(time * 60.0), 0.f, 0.f));
+    }) && sampledTicks == 3, "seek samples the moving emitter per tick");
+    Require(moving.GetParticles().size() == 1 &&
+        moving.GetParticles()[0].id == movingExpected.id &&
+        Near(moving.GetParticles()[0].position, movingExpected.position) &&
+        std::abs(moving.GetParticles()[0].age - movingExpected.age) < 1e-5f,
+        "moving emitter seek reproduces spawned state");
+
+    Engine::Scene::Scene prefabScene;
+    auto* source = prefabScene.AddObject("Emitter prefab source");
+    auto* configured = source->AddComponent<ParticleEmitter>();
+    configured->rate = 19.5f;
+    configured->burstOnStart = 5;
+    configured->maxParticles = 23;
+    configured->lifetime = 3.25f;
+    configured->speed = 7.5f;
+    configured->spreadDegrees = 38.f;
+    configured->direction = {0.f, 0.f, 1.f};
+    configured->gravity = {1.f, -2.f, 3.f};
+    configured->drag = 0.4f;
+    configured->color = {0.2f, 0.4f, 0.8f};
+    configured->size = 0.3f;
+    configured->shape = static_cast<int>(ParticleEmitter::Shape::Sphere);
+    configured->boxExtents = {1.f, 2.f, 3.f};
+    configured->sphereRadius = 2.5f;
+    configured->worldSpace = false;
+    configured->playOnStart = false;
+    configured->duration = 1.5f;
+    configured->loop = true;
+    configured->seed = 341;
+    configured->texturePath = "Textures/particle-preset.png";
+    configured->opacity = 0.7f;
+    configured->blendMode = static_cast<int>(ParticleEmitter::BlendMode::Alpha);
+    configured->Restart();
+    configured->Advance(1.f / 60.f, translated);
+    Require(!configured->GetParticles().empty(), "prefab source has runtime state");
+
+    ParticleEmitter presetCopy;
+    presetCopy.Deserialize(configured->Serialize());
+    Require(SameSettings(*configured, presetCopy) &&
+        presetCopy.GetParticles().empty(), "all preset settings round-trip without runtime state");
+
+    const auto prefabPath = std::filesystem::temp_directory_path() /
+        ("engine-particle-emitter-" + std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count()) +
+            ".prefab");
+    struct RemovePrefab
+    {
+        std::filesystem::path path;
+        ~RemovePrefab() { std::error_code error; std::filesystem::remove(path, error); }
+    } removePrefab{prefabPath};
+    Require(Engine::Serialization::SceneSerializer::SavePrefab(*source,
+        prefabPath.string()), "save emitter prefab");
+    Engine::Scene::Scene instantiatedScene;
+    auto* instance = Engine::Serialization::SceneSerializer::InstantiatePrefab(
+        instantiatedScene, prefabPath.string());
+    auto* prefabEmitter = instance ? instance->GetComponent<ParticleEmitter>() : nullptr;
+    Require(prefabEmitter && SameSettings(*configured, *prefabEmitter) &&
+        prefabEmitter->GetParticles().empty(),
+        "prefab preserves emitter settings without runtime particles");
+
+    const std::string savedScene = Engine::Serialization::SceneSerializer::SaveToString(
+        instantiatedScene);
+    Engine::Scene::Scene reloadedScene;
+    Require(Engine::Serialization::SceneSerializer::LoadFromString(
+        reloadedScene, savedScene), "reload scene with emitter prefab");
+    auto* sceneObject = reloadedScene.FindObjectByName("Emitter prefab source");
+    auto* sceneEmitter = sceneObject ? sceneObject->GetComponent<ParticleEmitter>() : nullptr;
+    Require(sceneEmitter && SameSettings(*configured, *sceneEmitter) &&
+        sceneEmitter->GetParticles().empty(),
+        "scene reload preserves emitter prefab settings");
 }

@@ -4,6 +4,7 @@
 #include "ParticleSolver.h"
 #include <glm/glm.hpp>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -61,13 +62,27 @@ public:
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
 
     void Reset();
+    void Restart();
+    // Play resumes a paused emitter without clearing live particles. After a
+    // finite emission window, it begins a new emission cycle. Start() is the
+    // scene-load reset and honors playOnStart; Restart() always clears/plays.
     void Play();
     void Pause() { m_playing = false; }
     void Burst(int count);
     // Exposed for deterministic tools and solvers; Update passes the scene's
     // simulation delta and the emitter world transform.
     void Advance(float seconds, const glm::mat4& emitterWorld);
+    // Rebuild state from scene start for editor scrubbing and deterministic
+    // replay. Moving world-space emitters should supply a transform at each
+    // tick; the fixed-transform overload is useful for static previews.
+    // Invalid targets and targets beyond the replay budget leave state intact.
+    bool Seek(double seconds, const glm::mat4& emitterWorld,
+        uint64_t maxReplaySteps = 36000);
+    bool Seek(double seconds,
+        const std::function<glm::mat4(double)>& worldAtTime,
+        uint64_t maxReplaySteps = 36000);
     bool IsPlaying() const { return m_playing; }
+    uint64_t GetSimulationTicks() const { return m_simulationTicks; }
     const std::vector<Particle>& GetParticles() const { return m_particles; }
     Bounds GetWorldBounds(const glm::mat4& emitterWorld) const;
     // Replacing a solver resets the emitter and its particle state.
@@ -87,8 +102,10 @@ private:
     double m_emitRemainder = 0.0;
     double m_stepRemainder = 0.0;
     uint64_t m_emissionTicks = 0;
+    uint64_t m_simulationTicks = 0;
     int m_pendingBurst = 0;
     bool m_playing = false;
+    bool m_emissionStarted = false;
     std::unique_ptr<IParticleSolver> m_solver;
     std::shared_ptr<Texture> m_texture;
     std::string m_loadedTexturePath;

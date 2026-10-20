@@ -422,6 +422,7 @@ bool MmdDanceAssetBinder::BindBaked(const std::string& prefabPath,
         Engine::Model::AnimationClipAsset asset;
         asset.clip = body;
         asset.baseSkeleton = skeleton;
+        asset.bindSkeleton = skeleton;
         asset.previewPrefab = prefabPath;
         asset.previewRig = rigs.front().second.rigIndex;
         if (!asset.Save(bodyPath.string()))
@@ -432,6 +433,7 @@ bool MmdDanceAssetBinder::BindBaked(const std::string& prefabPath,
         Engine::Model::AnimationClipAsset asset;
         asset.clip = facial.clip;
         asset.baseSkeleton = skeleton;
+        asset.bindSkeleton = skeleton;
         asset.previewPrefab = prefabPath;
         asset.previewRig = rigs.front().second.rigIndex;
         if (!asset.Save(facePath.string()))

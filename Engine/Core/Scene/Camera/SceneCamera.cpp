@@ -1,6 +1,7 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Particles/ParticleEmitter.h"
 #include <algorithm>
 #include <cmath>
 #include <glm/trigonometric.hpp>
@@ -59,6 +60,15 @@ void IncludeFocusBounds(const Engine::Core::Object& object,
                     meshes.Include(glm::vec3(world * glm::vec4(
                         x ? high.x : low.x, y ? high.y : low.y,
                         z ? high.z : low.z, 1.f)));
+    }
+    if (const auto* emitter = object.GetComponent<Engine::Components::ParticleEmitter>())
+    {
+        const auto bounds = emitter->GetWorldBounds(world);
+        if (bounds.valid)
+        {
+            meshes.Include(bounds.minimum);
+            meshes.Include(bounds.maximum);
+        }
     }
     for (const Engine::Core::Object* child : object.Children)
         if (child)

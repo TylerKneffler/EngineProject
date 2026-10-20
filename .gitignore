@@ -16,6 +16,7 @@ build/
 !.local/tests/ChainIKTests.cpp
 !.local/tests/ParticleEmitterTests.cpp
 !.local/tests/ParticleRenderingTests.cpp
+!.local/tests/ParticleNeighborGridTests.cpp
 build
 editor-startup.log
 project-build.log

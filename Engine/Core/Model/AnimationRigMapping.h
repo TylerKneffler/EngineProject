@@ -13,6 +13,9 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include <cmath>
+#include <functional>
+#include <glm/gtc/quaternion.hpp>
 
 namespace Engine::Model::AnimationRigMapping
 {
@@ -191,9 +194,85 @@ inline std::string NodePath(const Engine::Components::Model& model,
     return path;
 }
 
+inline glm::quat LocalRotation(const glm::vec3& euler)
+{
+    return glm::normalize(glm::angleAxis(euler.z, glm::vec3(0.f, 0.f, 1.f)) *
+        glm::angleAxis(euler.y, glm::vec3(0.f, 1.f, 0.f)) *
+        glm::angleAxis(euler.x, glm::vec3(1.f, 0.f, 0.f)));
+}
+
+inline glm::quat ObjectWorldRotation(const Engine::Core::Object* object)
+{
+    glm::quat rotation(1.f, 0.f, 0.f, 0.f);
+    std::vector<const Engine::Core::Object*> parents;
+    for (auto* current = object; current; current = current->Parent)
+        parents.push_back(current);
+    for (auto it = parents.rbegin(); it != parents.rend(); ++it)
+        rotation = glm::normalize(rotation * LocalRotation((*it)->transform.rotation));
+    return rotation;
+}
+
+inline bool SameBindPose(const std::string& path,
+    const Engine::Core::Object* target,
+    const std::unordered_map<std::string,
+        const AnimationClipAsset::BaseNode*>& sourceNodes)
+{
+    const auto closeVectors = [](const glm::vec3& a, const glm::vec3& b)
+    { return glm::length(a - b) < 1e-3f; };
+    const auto same = [&](const AnimationClipAsset::BaseNode& source,
+        const Engine::Core::Object* object)
+    {
+        return object && closeVectors(source.position, object->transform.position) &&
+            closeVectors(source.scale, object->transform.scale) &&
+            std::abs(glm::dot(LocalRotation(source.rotation),
+                LocalRotation(object->transform.rotation))) >= .9999f;
+    };
+    std::string currentPath = path;
+    while (!currentPath.empty() && target)
+    {
+        const auto found = sourceNodes.find(currentPath);
+        if (found == sourceNodes.end()) return false;
+        const auto& source = *found->second;
+        if (!same(source, target)) return false;
+        currentPath = source.parent;
+        target = target->Parent;
+    }
+    if (!currentPath.empty()) return false;
+    if (const auto root = sourceNodes.find("."); root != sourceNodes.end())
+        return same(*root->second, target);
+    return true;
+}
+
 inline Result Map(const AnimationClipAsset& source,
     const Engine::Components::Model& model, const RigAsset& rig)
 {
+    std::unordered_map<std::string, const AnimationClipAsset::BaseNode*> bindNodes;
+    for (const auto& node : source.bindSkeleton)
+        bindNodes.emplace(node.path, &node);
+    std::unordered_map<std::string, const AnimationClipAsset::BaseNode*> poseNodes;
+    for (const auto& node : source.baseSkeleton)
+        poseNodes.emplace(node.path, &node);
+    std::unordered_map<std::string, glm::quat> sourceWorldRotations;
+    const auto sourceWorldRotation = [&](auto&& self,
+        const std::string& path) -> glm::quat
+    {
+        if (path.empty())
+        {
+            const auto root = poseNodes.find(".");
+            return root != poseNodes.end()
+                ? LocalRotation(root->second->rotation)
+                : glm::quat(1.f, 0.f, 0.f, 0.f);
+        }
+        if (const auto found = sourceWorldRotations.find(path);
+            found != sourceWorldRotations.end()) return found->second;
+        const auto node = poseNodes.find(path);
+        if (node == poseNodes.end()) return glm::quat(1.f, 0.f, 0.f, 0.f);
+        const glm::quat value = glm::normalize(
+            self(self, node->second->parent) *
+            LocalRotation(node->second->rotation));
+        sourceWorldRotations.emplace(path, value);
+        return value;
+    };
     struct Target { unsigned index; std::string path, role, parentRole; bool joint; };
     std::vector<Target> targets;
     std::unordered_set<unsigned> joints;
@@ -253,6 +332,73 @@ inline Result Map(const AnimationClipAsset& source,
         auto mapped = channel;
         mapped.nodeIndex = match->index;
         mapped.targetPath = match->path;
+        // FBX helper nodes bake axis corrections into the source bone's parent.
+        // Copying its local quaternion or centimeters directly onto a different
+        // rig destroys that rig's bind pose even when the bone names agree.
+        if (channel.interpolation != AnimationChannel::Interpolation::CubicSpline &&
+            (source.previewPrefab.empty() ||
+                source.previewPrefab != rig.prefabPath ||
+                !SameBindPose(path, model.ResolveNode(match->index), bindNodes)))
+            if (const auto sourceNode = bindNodes.find(path);
+                sourceNode != bindNodes.end())
+            {
+                const auto* targetNode = model.ResolveNode(match->index);
+                if (targetNode)
+                {
+                    const glm::quat sourceParent = sourceWorldRotation(
+                        sourceWorldRotation, sourceNode->second->parent);
+                    const glm::quat targetParent = ObjectWorldRotation(
+                        targetNode->Parent);
+                    const glm::quat conversion = glm::normalize(
+                        glm::inverse(targetParent) * sourceParent);
+                    if (channel.path == AnimationChannel::Path::Rotation &&
+                        channel.valueWidth == 4)
+                    {
+                        const auto pose = poseNodes.find(path);
+                        const glm::quat sourceRest = pose != poseNodes.end()
+                            ? LocalRotation(pose->second->rotation)
+                            : LocalRotation(sourceNode->second->rotation);
+                        const glm::quat targetRest = LocalRotation(
+                            targetNode->transform.rotation);
+                        for (size_t key = 0; key + 3 < mapped.values.size(); key += 4)
+                        {
+                            const glm::quat animated = glm::normalize(glm::quat(
+                                mapped.values[key + 3], mapped.values[key],
+                                mapped.values[key + 1], mapped.values[key + 2]));
+                            const glm::quat retargeted = glm::normalize(conversion *
+                                animated * glm::inverse(sourceRest) *
+                                glm::inverse(conversion) * targetRest);
+                            mapped.values[key] = retargeted.x;
+                            mapped.values[key + 1] = retargeted.y;
+                            mapped.values[key + 2] = retargeted.z;
+                            mapped.values[key + 3] = retargeted.w;
+                        }
+                    }
+                    else if (channel.path == AnimationChannel::Path::Translation &&
+                        channel.valueWidth == 3 && mapped.values.size() >= 3)
+                    {
+                        const glm::vec3 rest = targetNode->transform.position;
+                        for (size_t key = 0; key + 2 < mapped.values.size(); key += 3)
+                        {
+                            mapped.values[key] = rest.x;
+                            mapped.values[key + 1] = rest.y;
+                            mapped.values[key + 2] = rest.z;
+                        }
+                    }
+                    else if (channel.path == AnimationChannel::Path::Scale &&
+                        channel.valueWidth == 3)
+                    {
+                        const glm::vec3 sourceRest = sourceNode->second->scale;
+                        const glm::vec3 targetRest = targetNode->transform.scale;
+                        for (size_t key = 0; key + 2 < mapped.values.size(); key += 3)
+                            for (glm::length_t axis = 0; axis < 3; ++axis)
+                                mapped.values[key + axis] = targetRest[axis] *
+                                    (std::abs(sourceRest[axis]) > 1e-6f
+                                        ? mapped.values[key + axis] /
+                                            sourceRest[axis] : 1.f);
+                    }
+                }
+            }
         result.clip.channels.push_back(std::move(mapped));
         if (match->path != path) ++result.inferredChannels;
     }

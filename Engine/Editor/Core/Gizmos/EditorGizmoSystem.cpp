@@ -7,6 +7,7 @@
 #include "Core/Compoonents/Lighting/LightProbe.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Obj/Sprite.h"
+#include "Core/Compoonents/Particles/ParticleEmitter.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Physics/Collider.h"
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
@@ -1347,6 +1348,39 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         Engine::Core::Object* object=objectPointer.get();
         if (!object || !object->IsEnabledInHierarchy()) continue;
         const uint8_t overlays=object->editorOverlays;
+        if (object == scene.GetSelectedObject())
+            if (const auto* emitter=object->GetComponent<Engine::Components::ParticleEmitter>())
+            {
+                const glm::mat4 world=object->transform.GetWorldMatrix();
+                const EditorUiColor shapeColor{1.f,.72f,.22f,.85f};
+                if (emitter->shape == static_cast<int>(
+                        Engine::Components::ParticleEmitter::Shape::Box))
+                {
+                    const glm::vec3 extents=glm::abs(emitter->boxExtents);
+                    DrawWorldBox(ui,viewProjection,input.available,world,
+                        -extents,extents,shapeColor);
+                }
+                else if (emitter->shape == static_cast<int>(
+                        Engine::Components::ParticleEmitter::Shape::Sphere))
+                {
+                    const float radius=std::max(0.f,emitter->sphereRadius);
+                    for (int axis=0;axis<3;++axis)
+                        DrawColliderRing(ui,viewProjection,input.available,
+                            world,radius,0.f,axis,shapeColor);
+                }
+                else
+                {
+                    const float radius=std::clamp(emitter->size,.1f,.5f);
+                    for (int axis=0;axis<3;++axis)
+                    {
+                        glm::vec3 end(0.f);
+                        end[axis]=radius;
+                        DrawWorldLine(ui,viewProjection,input.available,
+                            glm::vec3(world*glm::vec4(-end,1.f)),
+                            glm::vec3(world*glm::vec4(end,1.f)),shapeColor);
+                    }
+                }
+            }
         if (EditorViewportSettings::AreCollidersVisible())
             for (const auto* component : object->Components)
                 if (const auto* collider = dynamic_cast<const Engine::Components::Collider*>(component))
@@ -1370,6 +1404,13 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
                 const glm::vec2 half=sprite->GetWorldSize()*.5f;
                 DrawWorldBox(ui,viewProjection,input.available,world,
                     {-half.x,-half.y,0.f},{half.x,half.y,0.f},color);
+            }
+            if (const auto* emitter=object->GetComponent<Engine::Components::ParticleEmitter>())
+            {
+                const auto bounds=emitter->GetWorldBounds(world);
+                if (bounds.valid)
+                    DrawWorldBox(ui,viewProjection,input.available,glm::mat4(1.f),
+                        bounds.minimum,bounds.maximum,color);
             }
             if (const auto* probes=object->GetComponent<
                     Engine::Components::LightProbeGroup>())

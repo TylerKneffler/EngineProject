@@ -1104,6 +1104,16 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/ParticleNeighborGridTests.cpp")
+    enable_testing()
+    add_executable(ParticleNeighborGridTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/ParticleNeighborGridTests.cpp")
+    target_link_libraries(ParticleNeighborGridTests PRIVATE Engine)
+    target_include_directories(ParticleNeighborGridTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME ParticleNeighborGridRegression COMMAND ParticleNeighborGridTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/SoftTissueRenderTests.cpp")
     enable_testing()
     add_executable(SoftTissueRenderTests EXCLUDE_FROM_ALL
