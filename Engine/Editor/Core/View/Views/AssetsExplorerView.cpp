@@ -6,6 +6,7 @@
 #include "Core/AssetRecord.h"
 #include "Core/Model/MeshPackAsset.h"
 #include "Engine/Editor/Core/Importers/ModelImporter.h"
+#include "Engine/Editor/Core/Importers/AssetDataExtractor.h"
 #include "Core/Object.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Scene/Scene.h"
@@ -35,11 +36,7 @@ constexpr float AssetThumbnailSize = 96.f;
 
 bool IsCompoundModelSource(const fs::path& path)
 {
-    std::string extension = path.extension().string();
-    std::transform(extension.begin(), extension.end(), extension.begin(),
-        [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
-    return extension == ".fbx" || extension == ".gltf" ||
-        extension == ".glb" || extension == ".pmx";
+    return AssetDataExtractor::Supports(path);
 }
 
 const std::unordered_map<std::string, std::string>& AssetEditorRegistry()
@@ -156,11 +153,10 @@ void AssetsExplorerView::ExtractModelAssets(const std::string& sourcePath)
     const fs::path source(sourcePath);
     if (!fs::is_regular_file(source) || !IsCompoundModelSource(source))
     {
-        m_error = "Choose an FBX, glTF, GLB, or PMX model file.";
+        m_error = "Choose a model, rig, animation pack, or mesh pack.";
         return;
     }
-    const auto imported = ModelImporter::Import(source.string(),
-        source.parent_path().string());
+    const auto imported = AssetDataExtractor::Extract(source, source.parent_path());
     if (!imported.success)
     {
         m_error = imported.message;

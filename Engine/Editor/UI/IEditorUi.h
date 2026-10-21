@@ -252,7 +252,7 @@ public:
         const char* unpackLabel = nullptr,
         bool clipboardActions = false, bool canPaste = false) = 0;
     virtual EditorUiAssetCreateMenuResult AssetWindowContextMenu(bool canPaste) = 0;
-    virtual EditorUiAssetItemMenuResult AssetItemContextMenu(const void* id,
+    virtual EditorUiAssetItemMenuResult AssetItemContextMenu(const char* assetPath,
         bool canPackMeshes = false, bool canExtractMeshes = false,
         bool isDirectory = false, bool canPaste = false,
         bool canExtractModelAssets = false) = 0;

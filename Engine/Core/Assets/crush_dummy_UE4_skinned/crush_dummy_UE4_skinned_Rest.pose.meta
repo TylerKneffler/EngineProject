@@ -1,0 +1,10 @@
+{
+    "version": 1,
+    "id": "bd5c215b-9934-4d20-a730-be1c857e9aa2",
+    "sourcePath": "C:/repos/EngineProject/Engine/Core/Assets/Models/crash-dummy/source/crush_dummy_UE4_skinned.fbx",
+    "importSettings": {
+        "importer": "model-pose",
+        "sourceFormat": "fbx"
+    }
+}
+

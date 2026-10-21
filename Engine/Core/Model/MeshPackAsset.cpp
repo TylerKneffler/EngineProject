@@ -177,15 +177,13 @@ bool PackRig(const fs::path& rig, std::string& error)
     return true;
 }
 
-bool ExtractRig(const fs::path& rig, std::string& error)
+bool Extract(const fs::path& pack, const fs::path& root, std::string& error)
 {
     error.clear();
-    const auto pack = PackPath(rig);
     std::ifstream in(pack, std::ios::binary);
     std::vector<Entry> entries;
     if (!in || !Index(in, entries))
-    { error = "No valid mesh pack beside this rig."; return false; }
-    const auto root = pack.parent_path();
+    { error = "Not a valid mesh pack: " + pack.string(); return false; }
     for (const auto& entry : entries)
     {
         const auto target = root / fs::path(entry.name);
@@ -203,7 +201,13 @@ bool ExtractRig(const fs::path& rig, std::string& error)
         if (!out || !Copy(in, out, entry.size))
         { error = "Could not extract " + target.string(); return false; }
     }
-    in.close();
+    return true;
+}
+
+bool ExtractRig(const fs::path& rig, std::string& error)
+{
+    const auto pack = PackPath(rig);
+    if (!Extract(pack, pack.parent_path(), error)) return false;
     std::error_code ec;
     fs::remove(pack, ec);
     if (ec) { error = ec.message(); return false; }

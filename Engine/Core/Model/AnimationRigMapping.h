@@ -244,7 +244,8 @@ inline bool SameBindPose(const std::string& path,
 }
 
 inline Result Map(const AnimationClipAsset& source,
-    const Engine::Components::Model& model, const RigAsset& rig)
+    const Engine::Components::Model& model, const RigAsset& rig,
+    bool preserveLocalKeys = false)
 {
     std::unordered_map<std::string, const AnimationClipAsset::BaseNode*> bindNodes;
     for (const auto& node : source.bindSkeleton)
@@ -335,7 +336,8 @@ inline Result Map(const AnimationClipAsset& source,
         // FBX helper nodes bake axis corrections into the source bone's parent.
         // Copying its local quaternion or centimeters directly onto a different
         // rig destroys that rig's bind pose even when the bone names agree.
-        if (channel.interpolation != AnimationChannel::Interpolation::CubicSpline &&
+        if (!preserveLocalKeys &&
+            channel.interpolation != AnimationChannel::Interpolation::CubicSpline &&
             (source.previewPrefab.empty() ||
                 source.previewPrefab != rig.prefabPath ||
                 !SameBindPose(path, model.ResolveNode(match->index), bindNodes)))

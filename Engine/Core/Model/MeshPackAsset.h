@@ -11,4 +11,7 @@ namespace Engine::Model::MeshPackAsset
 std::unique_ptr<std::ifstream> Open(const std::filesystem::path& asset);
 bool PackRig(const std::filesystem::path& rig, std::string& error);
 bool ExtractRig(const std::filesystem::path& rig, std::string& error);
+// Copies entries to a new directory while retaining the source package.
+bool Extract(const std::filesystem::path& pack,
+    const std::filesystem::path& destination, std::string& error);
 }

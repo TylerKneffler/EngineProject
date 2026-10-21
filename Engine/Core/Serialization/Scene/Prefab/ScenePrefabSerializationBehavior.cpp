@@ -50,7 +50,8 @@ bool SaveRigAssets(const Engine::Core::Object& object,
     for (const auto* component : object.Components)
         if (const auto* skeleton = dynamic_cast<const
                 Engine::Components::Skeleton*>(component);
-            skeleton && !skeleton->rigPath.empty())
+            skeleton && !skeleton->rigPath.empty() &&
+            std::filesystem::path(skeleton->rigPath).extension() != ".skeleton")
         {
             const auto* scene = object.GetScene();
             if (!scene) return false;
@@ -59,6 +60,8 @@ bool SaveRigAssets(const Engine::Core::Object& object,
                     skeleton->rigPath, skeleton->skinIndex))
             {
                 rig.animationPaths = std::move(existing->animationPaths);
+                if (!existing->bindNodes.empty())
+                    rig.bindNodes = std::move(existing->bindNodes);
                 rig.controls = existing->controls;
                 rig.poses = existing->poses;
                 rig.symmetryPairs = existing->symmetryPairs;
@@ -95,7 +98,8 @@ void RemoveRigBackedInlineData(JsonValue& object)
     {
         auto& component = components.ArrayAt(i);
         if (component["type"].AsString() == "Skeleton" &&
-            !component["rigPath"].AsString().empty())
+            !component["rigPath"].AsString().empty() &&
+            std::filesystem::path(component["rigPath"].AsString()).extension() != ".skeleton")
         {
             component.Erase("joints");
             component.Erase("inverseBindMatrices");

@@ -1,5 +1,6 @@
 #include "AnimationManager.h"
 #include "Model.h"
+#include "Skeleton.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Animation/TwoBoneIK.h"
 #include "Core/Compoonents/Animation/RigController.h"
@@ -25,6 +26,40 @@ namespace Engine::Components
 {
 namespace
 {
+Engine::Model::RigAsset ReferencedTargetRig(Model& model)
+{
+    Engine::Model::RigAsset result;
+    if (model.Owner && model.Owner->GetScene())
+        if (auto* skeleton = model.Owner->GetComponent<Skeleton>())
+        {
+            result = Engine::Model::RigAsset::Capture(*model.Owner->GetScene(), *skeleton);
+            // Playback changes live transforms. Compare reusable clips against
+            // the stored bind pose when the skeleton has an asset reference.
+            if (auto stored = Engine::Model::RigAsset::Load(skeleton->rigPath, skeleton->skinIndex);
+                stored && !stored->bindNodes.empty())
+                result.bindNodes = std::move(stored->bindNodes);
+        }
+    if (result.bindNodes.empty())
+        result.bindNodes = Engine::Model::AnimationClipAsset::CaptureBaseSkeleton(model);
+    return result;
+}
+
+bool SameBindHierarchy(const Engine::Model::AnimationClipAsset& asset,
+    const Engine::Model::RigAsset& target)
+{
+    if (asset.bindSkeleton.empty()) return false;
+    for (const auto& source : asset.bindSkeleton)
+    {
+        const auto found = std::find_if(target.bindNodes.begin(), target.bindNodes.end(),
+            [&](const auto& node) { return node.path == source.path; });
+        if (found == target.bindNodes.end() || source.parent != found->parent ||
+            glm::length(source.position - found->position) > 1e-5f ||
+            glm::length(source.rotation - found->rotation) > 1e-5f ||
+            glm::length(source.scale - found->scale) > 1e-5f) return false;
+    }
+    return true;
+}
+
 glm::vec3 QuaternionEuler(const glm::quat& q)
 {
     const float sinX = 2.f * (q.w * q.x + q.y * q.z);
@@ -342,6 +377,7 @@ void AnimationManager::InstallEmbeddedClips(
     std::vector<Engine::Model::AnimationClip> imported)
 {
     rigPaths.clear();
+    animationPaths.clear();
     m_externalClipNames.clear();
     clips = std::move(imported);
 }
@@ -370,6 +406,44 @@ void AnimationManager::RefreshRigClips(bool remap)
                 else *found = std::move(asset->clip);
                 m_externalClipNames.insert(name);
             }
+    const auto target = model ? ReferencedTargetRig(*model) : Engine::Model::RigAsset();
+    for (const auto& path : animationPaths)
+        if (loadedPaths.insert(path).second)
+            if (auto asset = Engine::Model::AnimationClipAsset::Load(path))
+            {
+                if (model)
+                    asset->clip = Engine::Model::AnimationRigMapping::Map(*asset, *model, target,
+                        SameBindHierarchy(*asset, target)).clip;
+                const std::string name = asset->clip.clipName;
+                auto found = std::find_if(clips.begin(), clips.end(),
+                    [&](const auto& item) { return item.clipName == name; });
+                if (found == clips.end()) clips.push_back(std::move(asset->clip));
+                else *found = std::move(asset->clip);
+                m_externalClipNames.insert(name);
+            }
+}
+
+bool AnimationManager::AddAnimationAsset(const std::string& path, std::string& error)
+{
+    const auto asset = Engine::Model::AnimationClipAsset::Load(path);
+    if (!asset) { error = "Could not load animation asset: " + path; return false; }
+    auto* model = ResolveModel();
+    if (!model) { error = "Assign a Model or skeleton hierarchy before attaching an animation."; return false; }
+    const auto target = ReferencedTargetRig(*model);
+    const auto mapped = Engine::Model::AnimationRigMapping::Map(*asset, *model, target,
+        SameBindHierarchy(*asset, target));
+    if (mapped.clip.channels.empty() && mapped.clip.visibility.empty() &&
+        mapped.clip.ikSwitches.empty() && mapped.clip.componentMorphs.empty() &&
+        mapped.clip.limbs.empty() && mapped.clip.controllers.empty())
+    { error = "Animation has no compatible channels for the selected model."; return false; }
+    if (std::find(animationPaths.begin(), animationPaths.end(), path) == animationPaths.end())
+        animationPaths.push_back(path);
+    RefreshRigClips();
+    clip = asset->clip.clipName;
+    time = 0.f;
+    MarkConfigurationDirty();
+    error.clear();
+    return true;
 }
 
 Model* AnimationManager::ResolveModel() const
@@ -890,6 +964,9 @@ AnimationManager::JsonValue AnimationManager::Serialize() const
     for (const auto& path : rigPaths)
         serializedRigs.Push(JsonValue(path));
     result.Set("rigPaths", std::move(serializedRigs));
+    JsonValue serializedAnimations = JsonValue::MakeArray();
+    for (const auto& path : animationPaths) serializedAnimations.Push(JsonValue(path));
+    result.Set("animationPaths", std::move(serializedAnimations));
     JsonValue serializedLayers = JsonValue::MakeArray();
     for (const Layer& layer : layers)
     {
@@ -914,6 +991,9 @@ void AnimationManager::Deserialize(const JsonValue& value)
     rigPaths.clear();
     for (size_t i = 0; i < value["rigPaths"].ArraySize(); ++i)
         rigPaths.push_back(value["rigPaths"].ArrayAt(i).AsString());
+    animationPaths.clear();
+    for (size_t i = 0; i < value["animationPaths"].ArraySize(); ++i)
+        animationPaths.push_back(value["animationPaths"].ArrayAt(i).AsString());
     const JsonValue& serializedClips = value["clips"];
     clips.reserve(serializedClips.ArraySize());
     for (size_t i = 0; i < serializedClips.ArraySize(); ++i)
@@ -976,6 +1056,8 @@ bool AnimationManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
                 " s";
             ui.ValueLabel(item->clipName.c_str(), summary.c_str());
         }
+        for (const auto& path : animationPaths)
+            ui.ValueLabel("Animation Asset", path.c_str());
     }
     if (ui.PropertyGroupHeader("Animation Pack", false))
     {

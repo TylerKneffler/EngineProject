@@ -2,6 +2,7 @@
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Compoonents/Animation/Model.h"
+#include "Core/Compoonents/Animation/AnimationBone.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
@@ -43,6 +44,9 @@ RigAsset RigAsset::Capture(const Engine::Scene::Scene& scene,
     std::unordered_map<const Engine::Core::Object*, unsigned> indices;
     if (auto* model = skeleton.ResolveModel())
     {
+        result.bindNodes = AnimationClipAsset::CaptureBaseSkeleton(*model);
+        if (result.bindNodes.size() != model->GetNodeCount())
+            result.bindNodes.clear();
         const auto& modelNodes = model->ResolveNodes();
         for (size_t i = 0; i < modelNodes.size(); ++i)
             if (modelNodes[i]) indices[modelNodes[i]] =
@@ -99,6 +103,24 @@ Engine::Serialization::JsonValue RigAsset::Serialize() const
             .Set("inverseBind", std::move(matrix)));
     }
     root.Set("joints", std::move(serializedJoints));
+    auto nodes = Engine::Serialization::JsonValue::MakeArray();
+    for (const auto& node : bindNodes)
+    {
+        const auto vector = [](const glm::vec3& value)
+        {
+            auto result = Engine::Serialization::JsonValue::MakeArray();
+            for (int axis = 0; axis < 3; ++axis)
+                result.Push(Engine::Serialization::JsonValue(value[axis]));
+            return result;
+        };
+        nodes.Push(Engine::Serialization::JsonValue::MakeObject()
+            .Set("path", Engine::Serialization::JsonValue(node.path))
+            .Set("parent", Engine::Serialization::JsonValue(node.parent))
+            .Set("position", vector(node.position))
+            .Set("rotation", vector(node.rotation))
+            .Set("scale", vector(node.scale)));
+    }
+    root.Set("bindNodes", std::move(nodes));
     auto meshes = Engine::Serialization::JsonValue::MakeArray();
     for (const auto& name : meshNames)
         meshes.Push(Engine::Serialization::JsonValue(name));
@@ -275,6 +297,23 @@ std::optional<RigAsset> RigAsset::Load(const std::string& path,
         result.skinIndex = static_cast<unsigned>(root["skinIndex"].AsInt());
         result.rigIndex = static_cast<size_t>(root["rigIndex"].AsInt());
         result.prefabPath = root["prefabPath"].AsString();
+        for (size_t i = 0; i < root["bindNodes"].ArraySize(); ++i)
+        {
+            const auto& value = root["bindNodes"].ArrayAt(i);
+            if (!value["path"].IsString()) return std::nullopt;
+            AnimationClipAsset::BaseNode node;
+            node.path = value["path"].AsString();
+            node.parent = value["parent"].AsString();
+            for (const auto* field : { "position", "rotation", "scale" })
+                if (value[field].ArraySize() != 3) return std::nullopt;
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                node.position[axis] = value["position"].ArrayAt(axis).AsFloat();
+                node.rotation[axis] = value["rotation"].ArrayAt(axis).AsFloat();
+                node.scale[axis] = value["scale"].ArrayAt(axis).AsFloat();
+            }
+            result.bindNodes.push_back(std::move(node));
+        }
         for (size_t i = 0; i < root["joints"].ArraySize(); ++i)
         {
             const auto& source = root["joints"].ArrayAt(i);
@@ -364,6 +403,92 @@ std::optional<RigAsset> RigAsset::Load(const std::string& path,
         return result;
     }
     catch (...) { return std::nullopt; }
+}
+
+bool RigAsset::ApplySkeleton(Engine::Core::Object& owner,
+    const std::string& assetPath, std::string& error) const
+{
+    error.clear();
+    if (!owner.GetScene() || joints.empty() || bindNodes.empty())
+    { error = "Skeleton has no standalone bind hierarchy. Split the source model again."; return false; }
+    std::unordered_map<std::string, size_t> byPath;
+    for (size_t i = 0; i < bindNodes.size(); ++i)
+    {
+        const auto& node = bindNodes[i];
+        const auto slash = node.path.find_last_of('/');
+        const std::string parent = slash == std::string::npos ? "" : node.path.substr(0, slash);
+        if (node.path.empty() || node.parent != parent ||
+            !byPath.emplace(node.path, i).second)
+        { error = "Skeleton has an invalid or ambiguous node hierarchy."; return false; }
+    }
+    for (const auto& node : bindNodes)
+        if (!node.parent.empty() && !byPath.count(node.parent))
+        { error = "Skeleton is missing a parent node."; return false; }
+    for (const auto& joint : joints)
+        if (joint.nodeIndex >= bindNodes.size())
+        { error = "Skeleton contains an invalid joint binding."; return false; }
+
+    auto* model = owner.GetComponent<Engine::Components::Model>();
+    if (!model) model = owner.AddComponent<Engine::Components::Model>();
+    std::unordered_map<std::string, Engine::Core::Object*> objects;
+    objects.emplace(".", &owner);
+    const auto resolve = [&](auto&& self, size_t index) -> Engine::Core::Object*
+    {
+        const auto& node = bindNodes[index];
+        if (const auto found = objects.find(node.path); found != objects.end())
+            return found->second;
+        auto* parent = node.parent.empty() ? &owner : self(self, byPath.at(node.parent));
+        const std::string name = node.path.substr(node.path.find_last_of('/') ==
+            std::string::npos ? 0 : node.path.find_last_of('/') + 1);
+        Engine::Core::Object* object = nullptr;
+        for (auto* child : parent->Children)
+            if (child && child->name == name) { object = child; break; }
+        if (!object)
+        {
+            object = owner.GetScene()->AddObject(name);
+            object->Parent = parent;
+            parent->Children.push_back(object);
+            object->transform.position = node.position;
+            object->transform.rotation = node.rotation;
+            object->transform.scale = node.scale;
+        }
+        objects.emplace(node.path, object);
+        return object;
+    };
+    std::vector<unsigned> mapped;
+    for (size_t i = 0; i < bindNodes.size(); ++i)
+    {
+        auto* object = resolve(resolve, i);
+        const auto& existing = model->ResolveNodes();
+        const auto found = std::find(existing.begin(), existing.end(), object);
+        unsigned index = found == existing.end() ? static_cast<unsigned>(model->GetNodeCount())
+            : static_cast<unsigned>(found - existing.begin());
+        if (found == existing.end()) model->BindNode(index, object);
+        mapped.push_back(index);
+    }
+    auto* skeleton = owner.GetComponent<Engine::Components::Skeleton>();
+    if (!skeleton) skeleton = owner.AddComponent<Engine::Components::Skeleton>();
+    skeleton->rigPath = assetPath;
+    skeleton->skinIndex = skinIndex;
+    skeleton->jointNodes.clear();
+    skeleton->rootBoneNodes.clear();
+    skeleton->inverseBindMatrices.clear();
+    for (size_t i = 0; i < joints.size(); ++i)
+    {
+        const auto& joint = joints[i];
+        const unsigned index = mapped[joint.nodeIndex];
+        skeleton->jointNodes.push_back(index);
+        skeleton->rootBoneNodes.push_back(index);
+        skeleton->inverseBindMatrices.push_back(joint.inverseBind);
+        auto* object = model->ResolveNode(index);
+        auto* bone = object->GetComponent<Engine::Components::AnimationBone>();
+        if (!bone) bone = object->AddComponent<Engine::Components::AnimationBone>();
+        bone->nodeIndex = index;
+        bone->skinIndex = skinIndex;
+        bone->paletteIndex = static_cast<int>(i);
+    }
+    skeleton->MarkConfigurationDirty();
+    return true;
 }
 
 std::vector<RigAsset> RigAsset::LoadAll(const std::string& path)

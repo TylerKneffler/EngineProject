@@ -12,6 +12,7 @@
 #include "Core/Rendering/Sprites/SpriteSheetAsset.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Model/PoseAsset.h"
+#include "Core/Model/RigAsset.h"
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
@@ -250,6 +251,16 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
         (extension.empty() ? "Generic file" : extension.c_str()));
     if (!directory && extension == ".pmx")
         ui.DisabledLabel("PMX import supports geometry, base materials, BDEF/SDEF/QDEF skinning, morphs, append/IK and fixed-axis controls, external-parent bindings, follow-bone colliders, and optional dynamic bodies. See imported prefab warnings for remaining MMD features.");
+    if (!directory && extension == ".skeleton")
+    {
+        if (const auto skeleton = Engine::Model::RigAsset::Load(m_selectedPath))
+        {
+            const auto bones = std::to_string(skeleton->joints.size());
+            ui.ValueLabel("Bones", bones.c_str());
+            ui.DisabledLabel("Drop onto an object's Properties to attach this skeleton hierarchy.");
+        }
+        else ui.ColoredLabel("Invalid skeleton asset", {1.f, .35f, .35f, 1.f});
+    }
     if (!directory && extension == ".pose")
     {
         if (const auto pose = Engine::Model::PoseAsset::Load(m_selectedPath))

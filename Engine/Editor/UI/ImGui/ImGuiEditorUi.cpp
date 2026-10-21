@@ -1079,16 +1079,23 @@ EditorUiAssetCreateMenuResult ImGuiEditorUi::AssetWindowContextMenu(bool canPast
     }
     return result;
 }
-EditorUiAssetItemMenuResult ImGuiEditorUi::AssetItemContextMenu(const void* id,
+EditorUiAssetItemMenuResult ImGuiEditorUi::AssetItemContextMenu(const char* assetPath,
     bool canPackMeshes, bool canExtractMeshes, bool isDirectory,
     bool canPaste, bool canExtractModelAssets)
 {
     EditorUiAssetItemMenuResult result;
-    ImGui::PushID(id);
+    // Hash the path contents: directory entries and their strings are rebuilt
+    // each frame, so their addresses cannot identify a persistent popup.
+    ImGui::PushID(assetPath);
     if(ImGui::BeginPopupContextItem("##assetItemContext"))
     {
         if (canExtractModelAssets)
-            result.extractModelAssetsRequested = ImGui::MenuItem("Extract model assets");
+        {
+            result.extractModelAssetsRequested = ImGui::MenuItem("Split into engine assets");
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Extract available meshes, skeletons, animations, materials,\n"
+                    "textures, poses, and tracks into a new folder beside the package.");
+        }
         if (canPackMeshes) result.packMeshesRequested = ImGui::MenuItem("Bundle meshes into rig pack");
         if (canExtractMeshes) result.extractMeshesRequested = ImGui::MenuItem("Unbundle meshes from rig pack");
         if (canExtractModelAssets || canPackMeshes || canExtractMeshes) ImGui::Separator();

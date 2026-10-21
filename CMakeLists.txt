@@ -999,6 +999,22 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/StandaloneAssetTests.cpp")
+    enable_testing()
+    file(GLOB STANDALONE_ASSET_IMPORT_SOURCES CONFIGURE_DEPENDS
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/*.cpp")
+    add_executable(StandaloneAssetTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/StandaloneAssetTests.cpp"
+        ${STANDALONE_ASSET_IMPORT_SOURCES})
+    target_link_libraries(StandaloneAssetTests PRIVATE Engine fastgltf::fastgltf assimp::assimp ufbx)
+    target_include_directories(StandaloneAssetTests PRIVATE
+        "${ENGINE_ROOT}" "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Editor")
+    add_test(NAME StandaloneAssetExtractionAndReferences COMMAND StandaloneAssetTests)
+    set_tests_properties(StandaloneAssetExtractionAndReferences PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/LegacyFbxImportTests.cpp")
     enable_testing()
     add_executable(LegacyFbxImportTests EXCLUDE_FROM_ALL

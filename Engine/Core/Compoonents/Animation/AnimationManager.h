@@ -36,6 +36,8 @@ public:
     float time = 0.f;
     std::vector<Engine::Model::AnimationClip> clips;
     std::vector<std::string> rigPaths;
+    std::vector<std::string> animationPaths;
+    bool AddAnimationAsset(const std::string& path, std::string& error);
     std::vector<Engine::Model::RigAsset> LoadRigAssets() const;
     void RefreshRigClips(bool remap = true);
     void InstallEmbeddedClips(std::vector<Engine::Model::AnimationClip> imported);

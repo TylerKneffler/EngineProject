@@ -1,0 +1,10 @@
+{
+    "version": 1,
+    "id": "cc475b37-664f-4ab9-8713-56637fd53d92",
+    "sourcePath": "C:/repos/EngineProject/Engine/Core/Assets/Models/crash-dummy/source/crush_dummy_UE4_skinned.fbx",
+    "importSettings": {
+        "importer": "model-rig",
+        "skinCount": 1
+    }
+}
+

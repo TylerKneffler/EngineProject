@@ -8,6 +8,9 @@
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
 #include "Core/Compoonents/Animation/AnimationManager.h"
 #include "Core/Model/AnimationPackAsset.h"
+#include "Core/Compoonents/Animation/Skeleton.h"
+#include "Core/Compoonents/Animation/Model.h"
+#include "Core/Model/RigAsset.h"
 #include "Core/Compoonents/Audio/AudioSource.h"
 #include "Core/Compoonents/UI/UIText.h"
 #include "Core/Compoonents/UI/UIImage.h"
@@ -72,6 +75,10 @@ std::string PropertiesView::HandleWindowAssetDrop(IEditorUi& ui)
         return "Sprite Animation Preview";
     if (extension == ".animpack")
         return "Animation Pack Preview";
+    if (extension == ".anim" || extension == ".animation")
+        return "Animation Preview";
+    if (extension == ".skeleton")
+        return "Skeleton Preview";
     if (Engine::Editor::IsAudioAssetExtension(extension))
         return "Audio Source Preview";
     if (Engine::Editor::IsFontAssetExtension(extension))
@@ -109,6 +116,27 @@ bool PropertiesView::AddComponentFromAsset(const std::string& path, std::string&
     const std::string extension = Engine::Editor::LowerAssetExtension(path);
     try
     {
+        if (extension == ".skeleton")
+        {
+            const auto rig = Engine::Model::RigAsset::Load(path);
+            std::string error;
+            if (!rig || !rig->ApplySkeleton(*m_selectedObject, path, error))
+            { message = "[Properties] Could not attach skeleton: " + error; return false; }
+            message = "[Properties] Assigned skeleton from: " + path;
+            return true;
+        }
+        if (extension == ".anim" || extension == ".animation")
+        {
+            if (!m_selectedObject->GetComponentInParent<Engine::Components::Model>())
+            { message = "[Properties] Attach a skeleton or Model hierarchy before adding an animation."; return false; }
+            auto* manager = m_selectedObject->GetComponent<Engine::Components::AnimationManager>();
+            if (!manager) manager = m_selectedObject->AddComponent<Engine::Components::AnimationManager>();
+            std::string error;
+            if (!manager->AddAnimationAsset(path, error))
+            { message = "[Properties] " + error; return false; }
+            message = "[Properties] Referenced animation from: " + path;
+            return true;
+        }
         if (extension == ".animpack")
         {
             std::string error;

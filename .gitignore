@@ -17,6 +17,7 @@ build/
 !.local/tests/ParticleEmitterTests.cpp
 !.local/tests/ParticleRenderingTests.cpp
 !.local/tests/ParticleNeighborGridTests.cpp
+!.local/tests/StandaloneAssetTests.cpp
 build
 editor-startup.log
 project-build.log

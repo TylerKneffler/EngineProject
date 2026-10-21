@@ -6,10 +6,12 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include "AnimationClipAsset.h"
 
 namespace Engine::Scene { class Scene; }
 namespace Engine::Components { class Skeleton; }
 namespace Engine::Serialization { class JsonValue; }
+namespace Engine::Core { class Object; }
 
 namespace Engine::Model
 {
@@ -55,6 +57,9 @@ struct RigAsset
     size_t rigIndex = 0;
     std::string prefabPath;
     std::vector<Joint> joints;
+    // Model-node order and local bind transforms make a skeleton reusable
+    // without loading its original prefab or model package.
+    std::vector<AnimationClipAsset::BaseNode> bindNodes;
     std::vector<std::string> meshNames;
     std::vector<std::string> animationPaths;
     ControlMap controls;
@@ -69,6 +74,8 @@ struct RigAsset
     static std::optional<RigAsset> Load(const std::string& path,
         std::optional<unsigned> skinIndex = std::nullopt);
     static std::vector<RigAsset> LoadAll(const std::string& path);
+    bool ApplySkeleton(Engine::Core::Object& owner,
+        const std::string& assetPath, std::string& error) const;
 
 private:
     Engine::Serialization::JsonValue Serialize() const;

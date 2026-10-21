@@ -930,6 +930,28 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
                 rigSkins.push_back(std::move(rig));
                 skeleton->rigPath = rigPath.generic_string();
             }
+        // Animations without a skinned mesh must still be available as .anim.
+        if (manager && sharedAnimationPaths.empty())
+        {
+            Engine::Model::RigAsset animations;
+            WriteImportedAnimations(animations, *manager, *modelComponent,
+                rigPath, prefabPath, source);
+            sharedAnimationPaths = animations.animationPaths;
+            manager->animationPaths = sharedAnimationPaths;
+        }
+        for (const auto& rig : rigSkins)
+        {
+            auto standalone = rig;
+            standalone.prefabPath.clear();
+            standalone.animationPaths.clear();
+            standalone.meshNames.clear();
+            const auto path = output / (output.filename().string() +
+                (rigSkins.size() > 1 ? "_" + std::to_string(rig.skinIndex) : "") + ".skeleton");
+            if (!standalone.Save(path.string()))
+                throw std::runtime_error("Could not save skeleton: " + path.string());
+            Engine::Core::AssetRecord::Ensure(path, source,
+                { { "importer", std::string("model-skeleton") } });
+        }
         if (!rigSkins.empty())
         {
             if (!Engine::Model::RigAsset::SaveBundle(rigPath.string(), rigSkins))

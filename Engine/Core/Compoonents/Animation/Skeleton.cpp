@@ -191,6 +191,7 @@ bool Skeleton::DrawProperties(::Engine::Editor::IEditorUi& ui)
     const std::string bones = std::to_string(jointNodes.size());
     ui.ValueLabel("Skin", skin.c_str());
     ui.ValueLabel("Bones", bones.c_str());
+    ui.ValueLabel("Skeleton Asset", rigPath.empty() ? "(embedded)" : rigPath.c_str());
     if (changed) MarkConfigurationDirty();
     return changed;
 }
