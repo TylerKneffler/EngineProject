@@ -432,6 +432,92 @@ void D3D11GraphicsContext::SetStructuredBuffer(uint32_t slot, const Engine::Grap
     m_context->PSSetShaderResources(slot, 1, &view);
 }
 
+bool D3D11GraphicsContext::SetComputePipeline(
+    const Engine::Graphics::IPipelineState* pipeline)
+{
+    const auto* compute = dynamic_cast<const D3D11ComputePipeline*>(pipeline);
+    if (!m_context || !compute) return false;
+    m_context->CSSetShader(compute->GetShader(), nullptr, 0);
+    return true;
+}
+
+void D3D11GraphicsContext::SetComputeConstants(const void* data, uint32_t size)
+{
+    if (!m_device || !m_context || !data || !size || size > 256) return;
+    if (!m_computeConstants)
+    {
+        D3D11_BUFFER_DESC desc{};
+        desc.ByteWidth = 256;
+        desc.Usage = D3D11_USAGE_DYNAMIC;
+        desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        ThrowIfFailed(m_device->CreateBuffer(&desc, nullptr, &m_computeConstants));
+    }
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    ThrowIfFailed(m_context->Map(m_computeConstants.Get(), 0,
+        D3D11_MAP_WRITE_DISCARD, 0, &mapped));
+    std::memset(mapped.pData, 0, 256);
+    std::memcpy(mapped.pData, data, size);
+    m_context->Unmap(m_computeConstants.Get(), 0);
+    ID3D11Buffer* native = m_computeConstants.Get();
+    m_context->CSSetConstantBuffers(0, 1, &native);
+}
+
+void D3D11GraphicsContext::SetComputeReadBuffer(
+    const Engine::Graphics::IGraphicsBuffer* buffer)
+{
+    if (!m_context) return;
+    const auto* native = dynamic_cast<const D3D11GraphicsBuffer*>(buffer);
+    ID3D11ShaderResourceView* view = native ? native->GetShaderResourceView() : nullptr;
+    m_context->CSSetShaderResources(0, 1, &view);
+}
+
+void D3D11GraphicsContext::SetComputeWriteBuffer(
+    const Engine::Graphics::IGraphicsBuffer* buffer)
+{
+    if (!m_context) return;
+    const auto* native = dynamic_cast<const D3D11GraphicsBuffer*>(buffer);
+    ID3D11UnorderedAccessView* view = native ? native->GetUnorderedAccessView() : nullptr;
+    m_context->CSSetUnorderedAccessViews(0, 1, &view, nullptr);
+}
+
+void D3D11GraphicsContext::DispatchCompute(uint32_t x, uint32_t y, uint32_t z)
+{
+    if (m_context && x && y && z) m_context->Dispatch(x, y, z);
+}
+
+void D3D11GraphicsContext::StorageBarrier(const Engine::Graphics::IGraphicsBuffer*)
+{
+    if (!m_context) return;
+    ID3D11UnorderedAccessView* emptyUav = nullptr;
+    ID3D11ShaderResourceView* emptySrv = nullptr;
+    m_context->CSSetUnorderedAccessViews(0, 1, &emptyUav, nullptr);
+    m_context->CSSetShaderResources(0, 1, &emptySrv);
+    m_context->CSSetShader(nullptr, nullptr, 0);
+}
+
+bool D3D11GraphicsContext::CopyBuffer(
+    const Engine::Graphics::IGraphicsBuffer* source,
+    Engine::Graphics::IGraphicsBuffer* destination, uint64_t bytes)
+{
+    const auto* src = dynamic_cast<const D3D11GraphicsBuffer*>(source);
+    auto* dst = dynamic_cast<D3D11GraphicsBuffer*>(destination);
+    if (!m_context || !src || !dst || !source || !destination ||
+        destination->GetAccessMode() !=
+            Engine::Graphics::IGraphicsBuffer::AccessMode::Readback)
+        return false;
+    const uint64_t size = bytes ? bytes : source->GetSize();
+    if (!size || size > source->GetSize() || size > destination->GetSize() ||
+        size > UINT_MAX) return false;
+    D3D11_BOX region{};
+    region.right = static_cast<UINT>(size);
+    region.bottom = 1;
+    region.back = 1;
+    m_context->CopySubresourceRegion(dst->GetBuffer(), 0, 0, 0, 0,
+        src->GetBuffer(), 0, &region);
+    return true;
+}
+
 void D3D11GraphicsContext::SetVertexBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset)
 {
     if (!m_context || !buffer || offset > UINT_MAX) return;

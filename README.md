@@ -39,6 +39,14 @@ cmake --build --preset debug --parallel
 .\build\Debug\Engine\Debug\Game.exe
 ```
 
+### Edit and debug scripts in VS Code
+
+With VS Code and its Microsoft C/C++ extension installed, click **Code Editor** in the editor's top menu row to open the active project folder as a VS Code workspace. It also opens the last code file worked on in that workspace, including scripts outside Assets when the VS Code bridge is installed. If there is no remembered file or it was removed, it opens `.vscode/launch.json`. Double-click a code file in the Assets panel to open it and remember it for the shortcut. For manual debugging, set a breakpoint in the script, then select **Debug x64** (engine workspace) or **Debug <project name> Editor** (generated project) and press VS Code **F5**. In the running editor, press **F5** to play the scene and reach the breakpoint. VS Code pauses there; use **F10** to step over, **F11** to step into, **Shift+F11** to step out, and **F5** to continue. Without the auto attach bridge, the editor's Play button alone does not attach a debugger.
+
+For automatic attach, run the VS Code task **Engine: Install VS Code Auto Attach** once, then reopen the VS Code workspace. On editor startup, the editor opens that workspace and requests a debugger attach. Every Play requests attach again if needed and waits up to four seconds before running scene `Start()`, so breakpoints in `Start()` can bind. If VS Code is unavailable, Play continues after the wait. The bridge uses a local VSIX package from `Engine/Editor/VSCodeBridge`; it does not publish anything.
+
+For an editor already running, select **Attach to Editor (Debug)** or **Attach to <project name> Editor**, press VS Code **F5**, and choose that `Editor.exe` process. Save script changes and return focus to the editor to trigger hot reload. Wait for **Scripts compiled and loaded** in the Console before pressing Play; breakpoints in the rebuilt script DLL bind when the new module loads. Use a Debug build for source-level stepping.
+
 Set `-DENGINE_ENABLE_VULKAN=OFF` on the configure command if you only need DirectX. For a distributable game, use **File > Project Preferences > Export > Build Portable Export** in the project editor. Build output and startup diagnostics are written to `project-build.log` and `editor-startup.log` in the project folder.
 
 ### Faster incremental builds

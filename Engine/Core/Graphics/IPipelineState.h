@@ -113,5 +113,9 @@ class IPipelineStateFactory
 public:
     virtual ~IPipelineStateFactory() = default;
     virtual std::unique_ptr<IPipelineStateBuilder> CreateBuilder() = 0;
+    // Compute pipelines use their own fixed binding contract: b0 constants,
+    // t0 read-only structured input, u0 writable structured output.
+    virtual std::unique_ptr<IPipelineState> CreateComputePipeline(const IShader*)
+    { return nullptr; }
 };
 }

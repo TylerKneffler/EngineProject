@@ -4,6 +4,7 @@
 #include "DX12GraphicsProvider.h"
 #include "DX12PostProcess.h"
 #include <memory>
+#include <vector>
 
 namespace Engine::Renderers
 {
@@ -86,6 +87,8 @@ public:
     void Clear(float r, float g, float b, float a = 1.0f) override;
     Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override;
     void WaitIdle() override { FlushGPU(); }
+    void RequestSceneCapture() { m_captureRequested = true; }
+    bool ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels);
 
     // IGameRenderer interface
     void BeginFrame() override;   // reset allocator + list, transition backbuffer to RENDER_TARGET
@@ -104,6 +107,7 @@ public:
     static constexpr uint32_t FRAME_COUNT = 2;
 
 private:
+    void RecordSceneCapture();
     void CreateDevice();
     void CreateCommandObjects();
     void CreateSwapChain(HWND hwnd, uint32_t width, uint32_t height);
@@ -122,6 +126,9 @@ private:
     //               GetCurrentBackBufferIndex() which tells us which slot is
     //               ready to render into after each Present() call.
     ComPtr<ID3D12Device>              m_device;
+    ComPtr<ID3D12Resource>            m_captureReadback;
+    uint32_t m_captureRowPitch = 0;
+    bool m_captureRequested = false;
     ComPtr<IDXGIFactory6>             m_factory;
     ComPtr<IDXGISwapChain3>           m_swapChain;
 

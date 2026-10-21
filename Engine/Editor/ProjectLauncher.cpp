@@ -226,6 +226,7 @@ std::string CreateProject(const std::string& name, const std::string& location,
         WriteTemplate(templateRoot / "CMakePresets.json.in", projectRoot / "CMakePresets.json", name);
         WriteTemplate(templateRoot / "Project.proj.in", projectRoot / (name + ".proj"), name);
         WriteTemplate(templateRoot / "tasks.json.in", projectRoot / ".vscode" / "tasks.json", name);
+        WriteTemplate(templateRoot / "launch.json.in", projectRoot / ".vscode" / "launch.json", name);
         WriteTemplate(templateRoot / "gitignore.in", projectRoot / ".gitignore", name);
         if (progress) progress->Set(0.48f, ProjectSetupStage::CreatingShortcut);
         CreateEditorShortcut(projectRoot, projectRoot / (name + ".proj"), name);

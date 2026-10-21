@@ -40,6 +40,9 @@ public:
     virtual std::vector<Physics::RaycastHit> RaycastAll(
         const glm::vec3& origin, const glm::vec3& direction,
         float maxDistance, uint32_t collisionMask) const = 0;
+    virtual std::vector<Physics::RaycastHit> SweepSphereAll(
+        const glm::vec3& origin, const glm::vec3& direction,
+        float maxDistance, float radius, uint32_t collisionMask) const = 0;
 
     // Component operations use engine values only. The Bullet implementation
     // dispatches these to its native component state; another adapter can

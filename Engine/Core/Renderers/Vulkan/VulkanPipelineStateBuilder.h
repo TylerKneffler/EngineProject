@@ -21,6 +21,26 @@ private:
     VkPipelineLayout m_layout;
 };
 
+class VulkanComputePipeline final : public Engine::Graphics::IPipelineState
+{
+public:
+    VulkanComputePipeline(VkDevice device, VkPipeline pipeline,
+        VkPipelineLayout layout, VkDescriptorSetLayout setLayout)
+        : m_device(device), m_pipeline(pipeline), m_layout(layout),
+          m_setLayout(setLayout) {}
+    ~VulkanComputePipeline() override;
+    void* GetNativeHandle() const override
+    { return reinterpret_cast<void*>(m_pipeline); }
+    VkPipeline GetPipeline() const { return m_pipeline; }
+    VkPipelineLayout GetLayout() const { return m_layout; }
+    VkDescriptorSetLayout GetSetLayout() const { return m_setLayout; }
+private:
+    VkDevice m_device;
+    VkPipeline m_pipeline;
+    VkPipelineLayout m_layout;
+    VkDescriptorSetLayout m_setLayout;
+};
+
 class VulkanPipelineStateBuilder : public Engine::Graphics::IPipelineStateBuilder
 {
 public:
@@ -110,6 +130,8 @@ public:
         return std::make_unique<VulkanPipelineStateBuilder>(
             m_device, m_renderPass, m_materialLayout);
     }
+    std::unique_ptr<Engine::Graphics::IPipelineState> CreateComputePipeline(
+        const Engine::Graphics::IShader* shader) override;
 private:
     VkDevice m_device;
     VkRenderPass m_renderPass;

@@ -1,6 +1,8 @@
 build/
 .vs/
 .vscode/settings.json
+.vscode/engine-attach-request.json
+.vscode/engine-last-code-file.txt
 /AGENTS.md
 .local/
 !.local/
@@ -15,8 +17,15 @@ build/
 !.local/tests/PoseControllerSerializationTests.cpp
 !.local/tests/ChainIKTests.cpp
 !.local/tests/ParticleEmitterTests.cpp
+!.local/tests/GpuComputeTests.cpp
+!.local/tests/GpuParticleBackendsTests.cpp
+!.local/tests/GpuParticleImageComparison.py
 !.local/tests/ParticleRenderingTests.cpp
 !.local/tests/ParticleNeighborGridTests.cpp
+!.local/tests/GpuParticleNeighborGridTests.cpp
+!.local/tests/FluidParticleSolverTests.cpp
+!.local/tests/ParticleSceneExamplesTests.cpp
+!.local/tests/VSCodeBridgeTests.js
 !.local/tests/StandaloneAssetTests.cpp
 !.local/tests/PrefabComponentOverrideTests.cpp
 build

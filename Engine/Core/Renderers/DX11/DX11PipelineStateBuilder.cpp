@@ -5,6 +5,17 @@
 
 namespace Engine::Renderers
 {
+std::unique_ptr<Engine::Graphics::IPipelineState>
+D3D11PipelineStateFactory::CreateComputePipeline(
+    const Engine::Graphics::IShader* shader)
+{
+    if (!m_device || !shader || !shader->GetBytecode() ||
+        !shader->GetBytecodeSize()) return nullptr;
+    Microsoft::WRL::ComPtr<ID3D11ComputeShader> native;
+    if (FAILED(m_device->CreateComputeShader(shader->GetBytecode(),
+        shader->GetBytecodeSize(), nullptr, &native))) return nullptr;
+    return std::make_unique<D3D11ComputePipeline>(std::move(native));
+}
 Engine::Graphics::IPipelineStateBuilder& D3D11PipelineStateBuilder::SetVertexShader(const Engine::Graphics::IShader* shader)
 {
     m_vsBytecode.clear();

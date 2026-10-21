@@ -616,6 +616,89 @@ std::vector<BulletPhysicsAdapter::RaycastHit> BulletPhysicsAdapter::RaycastAll(
     return hits;
 }
 
+std::vector<BulletPhysicsAdapter::RaycastHit>
+BulletPhysicsAdapter::SweepSphereAll(const glm::vec3& origin,
+    const glm::vec3& direction, float maxDistance, float radius,
+    uint32_t collisionMask) const
+{
+    std::vector<RaycastHit> hits;
+    if (!m_impl || !m_impl->state || !m_impl->state->world ||
+        !std::isfinite(maxDistance) || maxDistance <= 0.f ||
+        !std::isfinite(radius) || radius <= 0.f)
+        return hits;
+    const float directionLength = glm::length(direction);
+    if (!std::isfinite(directionLength) || directionLength <= 1e-6f)
+        return hits;
+
+    struct AllSphereHits final : btCollisionWorld::ConvexResultCallback
+    {
+        struct Entry
+        {
+            const btCollisionObject* object;
+            btVector3 normal;
+            btVector3 point;
+            btScalar fraction;
+        };
+        std::vector<Entry> entries;
+
+        btScalar addSingleResult(btCollisionWorld::LocalConvexResult& result,
+            bool normalInWorldSpace) override
+        {
+            const btVector3 normal = normalInWorldSpace
+                ? result.m_hitNormalLocal
+                : result.m_hitCollisionObject->getWorldTransform().getBasis() *
+                    result.m_hitNormalLocal;
+            entries.push_back({result.m_hitCollisionObject, normal,
+                result.m_hitPointLocal, result.m_hitFraction});
+            return btScalar(1.0); // Keep collecting beyond the first hit.
+        }
+    } callback;
+    callback.m_collisionFilterMask = static_cast<short>(collisionMask);
+    btSphereShape sphere(radius);
+    btTransform from;
+    from.setIdentity();
+    from.setOrigin(ToBullet(origin));
+    btTransform to = from;
+    to.setOrigin(ToBullet(origin + direction / directionLength * maxDistance));
+    m_impl->state->world->convexSweepTest(&sphere, from, to, callback);
+
+    hits.reserve(callback.entries.size());
+    for (const auto& entry : callback.entries)
+    {
+        RaycastHit hit;
+        hit.point = ToGlm(entry.point);
+        hit.normal = glm::normalize(ToGlm(entry.normal));
+        hit.distance = entry.fraction * maxDistance;
+        if (auto* body = static_cast<Engine::Components::RigidBody*>(
+                entry.object->getUserPointer()))
+        {
+            hit.rigidBody = body;
+            hit.object = body->Owner;
+        }
+        for (const auto& pair : m_impl->portalMeshColliders)
+            if (pair.second.object.get() == entry.object)
+            {
+                hit.kind = RaycastHitKind::PortalSplitPiece;
+                hit.rigidBody = const_cast<Engine::Components::RigidBody*>(
+                    pair.second.owner);
+                hit.object = hit.rigidBody ? hit.rigidBody->Owner : nullptr;
+                hit.instanceKey = pair.first;
+                break;
+            }
+        for (const auto& pair : m_impl->portalApertureColliders)
+            if (pair.second.object.get() == entry.object)
+            {
+                hit.kind = RaycastHitKind::PortalApertureRim;
+                hit.instanceKey = pair.first;
+                break;
+            }
+        hits.push_back(hit);
+    }
+    std::sort(hits.begin(), hits.end(), [](const RaycastHit& a,
+        const RaycastHit& b) { return a.distance < b.distance; });
+    return hits;
+}
+
 PhysicsWorldState& StateFor(Engine::Scene::Scene* scene)
 {
     auto& physics = scene->GetPhysics();

@@ -11,6 +11,53 @@
 
 namespace Engine::Renderers
 {
+struct VulkanComputeDescriptorArena
+{
+    explicit VulkanComputeDescriptorArena(VkDevice value) : device(value) {}
+    ~VulkanComputeDescriptorArena()
+    {
+        for (const auto& entry : pools)
+            vkDestroyDescriptorPool(device, entry.second, nullptr);
+    }
+    void Prepare(uint32_t slot)
+    {
+        currentSlot = slot;
+        auto& pool = pools[slot];
+        if (!pool)
+        {
+            VkDescriptorPoolSize size{};
+            size.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            size.descriptorCount = 16384;
+            VkDescriptorPoolCreateInfo info{
+                VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+            info.maxSets = 8192;
+            info.poolSizeCount = 1;
+            info.pPoolSizes = &size;
+            VkCheck(vkCreateDescriptorPool(device, &info, nullptr, &pool),
+                "vkCreateDescriptorPool(compute)");
+        }
+        else
+            VkCheck(vkResetDescriptorPool(device, pool, 0),
+                "vkResetDescriptorPool(compute)");
+    }
+    VkDescriptorSet Allocate(VkDescriptorSetLayout layout)
+    {
+        const auto entry = pools.find(currentSlot);
+        if (entry == pools.end()) return VK_NULL_HANDLE;
+        VkDescriptorSetAllocateInfo info{
+            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+        info.descriptorPool = entry->second;
+        info.descriptorSetCount = 1;
+        info.pSetLayouts = &layout;
+        VkDescriptorSet set = VK_NULL_HANDLE;
+        VkCheck(vkAllocateDescriptorSets(device, &info, &set),
+            "vkAllocateDescriptorSets(compute)");
+        return set;
+    }
+    VkDevice device = VK_NULL_HANDLE;
+    std::unordered_map<uint32_t, VkDescriptorPool> pools;
+    uint32_t currentSlot = 0;
+};
 struct VulkanOcclusionQueryState
 {
     static constexpr uint32_t QueryCapacity = 16384;
@@ -176,6 +223,7 @@ void VulkanGraphicsContextFactory::SetDevice(VkDevice device, float timestampPer
 {
     m_occlusionState = std::make_shared<VulkanOcclusionQueryState>(device);
     m_gpuTimings = std::make_shared<VulkanGpuTimingState>(device, timestampPeriod);
+    m_computeDescriptors = std::make_shared<VulkanComputeDescriptorArena>(device);
 }
 
 void VulkanGraphicsContextFactory::PrepareFrame(uint32_t frameSlot)
@@ -186,6 +234,8 @@ void VulkanGraphicsContextFactory::PrepareFrame(uint32_t frameSlot)
         m_occlusionState->Prepare(frameSlot, m_commandBuffer);
     if (m_gpuTimings)
         m_gpuTimings->Prepare(frameSlot, m_commandBuffer);
+    if (m_computeDescriptors)
+        m_computeDescriptors->Prepare(frameSlot);
 }
 
 void VulkanGraphicsContextFactory::FinalizeFrame()
@@ -368,6 +418,119 @@ void VulkanGraphicsContext::SetStructuredBuffer(uint32_t slot, const Engine::Gra
     else
         return;
     m_structuredBuffers[index] = dynamic_cast<const VulkanGraphicsBuffer*>(buffer);
+}
+
+bool VulkanGraphicsContext::SetComputePipeline(
+    const Engine::Graphics::IPipelineState* pipeline)
+{
+    m_computePipeline = dynamic_cast<const VulkanComputePipeline*>(pipeline);
+    if (!m_commandBuffer || !m_computePipeline || !m_computeDescriptors)
+        return false;
+    vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+        m_computePipeline->GetPipeline());
+    return true;
+}
+
+void VulkanGraphicsContext::SetComputeConstants(const void* data, uint32_t size)
+{
+    if (m_commandBuffer && m_computePipeline && data && size &&
+        size <= 128 && size % 4 == 0)
+        vkCmdPushConstants(m_commandBuffer, m_computePipeline->GetLayout(),
+            VK_SHADER_STAGE_COMPUTE_BIT, 0, size, data);
+}
+
+void VulkanGraphicsContext::SetComputeReadBuffer(
+    const Engine::Graphics::IGraphicsBuffer* buffer)
+{
+    m_computeRead = dynamic_cast<const VulkanGraphicsBuffer*>(buffer);
+}
+
+void VulkanGraphicsContext::SetComputeWriteBuffer(
+    const Engine::Graphics::IGraphicsBuffer* buffer)
+{
+    m_computeWrite = dynamic_cast<const VulkanGraphicsBuffer*>(buffer);
+}
+
+void VulkanGraphicsContext::DispatchCompute(uint32_t x, uint32_t y, uint32_t z)
+{
+    if (!m_commandBuffer || !m_computePipeline || !m_computeDescriptors ||
+        !m_computeWrite || !x || !y || !z) return;
+    const VulkanGraphicsBuffer* read = m_computeRead ? m_computeRead : m_computeWrite;
+    VkDescriptorSet set = m_computeDescriptors->Allocate(
+        m_computePipeline->GetSetLayout());
+    if (!set) return;
+    VkDescriptorBufferInfo buffers[2]{};
+    buffers[0] = { read->GetBuffer(), 0, VK_WHOLE_SIZE };
+    buffers[1] = { m_computeWrite->GetBuffer(), 0, VK_WHOLE_SIZE };
+    VkWriteDescriptorSet writes[2]{};
+    for (uint32_t index = 0; index < 2; ++index)
+    {
+        writes[index] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        writes[index].dstSet = set;
+        writes[index].dstBinding = index;
+        writes[index].descriptorCount = 1;
+        writes[index].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[index].pBufferInfo = &buffers[index];
+    }
+    vkUpdateDescriptorSets(m_computeDescriptors->device, 2, writes, 0, nullptr);
+    vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+        m_computePipeline->GetLayout(), 0, 1, &set, 0, nullptr);
+    vkCmdDispatch(m_commandBuffer, x, y, z);
+}
+
+void VulkanGraphicsContext::StorageBarrier(
+    const Engine::Graphics::IGraphicsBuffer* buffer)
+{
+    const auto* native = dynamic_cast<const VulkanGraphicsBuffer*>(buffer);
+    if (!m_commandBuffer || !native) return;
+    VkBufferMemoryBarrier barrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
+    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT |
+        VK_ACCESS_SHADER_WRITE_BIT;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.buffer = native->GetBuffer();
+    barrier.size = VK_WHOLE_SIZE;
+    vkCmdPipelineBarrier(m_commandBuffer,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+        0, 0, nullptr, 1, &barrier, 0, nullptr);
+}
+
+bool VulkanGraphicsContext::CopyBuffer(
+    const Engine::Graphics::IGraphicsBuffer* source,
+    Engine::Graphics::IGraphicsBuffer* destination, uint64_t bytes)
+{
+    const auto* src = dynamic_cast<const VulkanGraphicsBuffer*>(source);
+    auto* dst = dynamic_cast<VulkanGraphicsBuffer*>(destination);
+    if (!m_commandBuffer || !src || !dst || destination->GetAccessMode() !=
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Readback)
+        return false;
+    const uint64_t size = bytes ? bytes : source->GetSize();
+    if (!size || size > source->GetSize() || size > destination->GetSize())
+        return false;
+    VkBufferMemoryBarrier before{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
+    before.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    before.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    before.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    before.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    before.buffer = src->GetBuffer();
+    before.size = size;
+    vkCmdPipelineBarrier(m_commandBuffer,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &before, 0, nullptr);
+    VkBufferCopy region{};
+    region.size = size;
+    vkCmdCopyBuffer(m_commandBuffer, src->GetBuffer(), dst->GetBuffer(),
+        1, &region);
+    VkBufferMemoryBarrier after = before;
+    after.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    after.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    after.buffer = dst->GetBuffer();
+    vkCmdPipelineBarrier(m_commandBuffer,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1, &after, 0, nullptr);
+    return true;
 }
 
 void VulkanGraphicsContext::SetViewport(const Viewport& value)

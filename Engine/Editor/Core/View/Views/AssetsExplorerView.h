@@ -56,6 +56,7 @@ public:
     void RecordKnownMove(const std::string& oldPath, const std::string& newPath)
     { m_locationIndex.RecordKnownMove(oldPath, newPath); }
     const std::string& GetSelectedPath() const { return m_selectedPath; }
+    std::function<void(const std::string&)> OnCodeFileOpened;
     const std::string& GetCurrentDirectory() const { return m_currentDirectory; }
 
 private:

@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "EditorState.h"
+#include "Engine/Editor/CodeEditorLink.h"
 #include "Core/View/ViewFactory.h"
 #include "Core/View/IEditorPanel.h"
 #include "Core/View/View.h"
@@ -11,6 +12,7 @@
 #include "Core/View/Views/GameView.h"
 #include "Core/View/Templates/EditModes/ViewportModeTemplate.h"
 #include "Core/View/Views/AssetDocumentView.h"
+#include "Core/View/Views/AssetsExplorerView.h"
 #include "Core/Window.h"
 #include "Core/Renderers/RendererFactory.h"
 #include "Core/Scene/Scene.h"
@@ -59,8 +61,45 @@
 #include <commdlg.h>
 #include <glm/gtc/matrix_inverse.hpp>
 
+#ifndef ENGINE_ROOT_PATH
+#define ENGINE_ROOT_PATH "."
+#endif
+
 namespace Engine::Editor
 {
+void EditorState::OpenCodeEditor()
+{
+    const std::filesystem::path workspace = m_projectFilePath.empty()
+        ? std::filesystem::path(ENGINE_ROOT_PATH)
+        : std::filesystem::path(m_projectFilePath).parent_path();
+    if (!OpenInCodeEditor(workspace, true))
+    {
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                "Could not open VS Code. Check that VS Code is installed.");
+        return;
+    }
+
+    std::filesystem::path file = LastCodeFile(workspace);
+    if (file.empty())
+        file = workspace / ".vscode" / "launch.json";
+    std::error_code error;
+    if (std::filesystem::is_regular_file(file, error))
+        OpenInCodeEditor(file);
+    RequestCodeEditorAttach();
+}
+
+bool EditorState::RequestCodeEditorAttach(bool openWorkspace)
+{
+    const std::filesystem::path workspace = m_projectFilePath.empty()
+        ? std::filesystem::path(ENGINE_ROOT_PATH)
+        : std::filesystem::path(m_projectFilePath).parent_path();
+    const bool requested = Engine::Editor::RequestCodeEditorAttach(workspace);
+    if (requested && openWorkspace)
+        OpenInCodeEditor(workspace, true);
+    return requested;
+}
+
 namespace
 {
     std::shared_ptr<Engine::Components::Texture> PaintTextureForSlot(
@@ -3953,6 +3992,12 @@ void EditorState::InitializePanels()
         if (assets)
         {
             m_primaryAssets = static_cast<AssetsExplorerView*>(assets.get());
+            m_primaryAssets->OnCodeFileOpened = [this](const std::string& file) {
+                const std::filesystem::path workspace = m_projectFilePath.empty()
+                    ? std::filesystem::path(ENGINE_ROOT_PATH)
+                    : std::filesystem::path(m_projectFilePath).parent_path();
+                RememberCodeFile(workspace, file);
+            };
             m_primaryAssets->OnObjectImportRequested =
                 [this](const std::string& source, const std::string& directory)
                 { StartObjectImport(source, false, directory); };

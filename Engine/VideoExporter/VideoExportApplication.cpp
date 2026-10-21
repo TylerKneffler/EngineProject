@@ -532,40 +532,65 @@ std::wstring FrameName(uint64_t frame, const wchar_t* extension)
 bool SavePng(const fs::path& path, uint32_t width, uint32_t height,
     const std::vector<uint8_t>& rgba)
 {
+    if (rgba.size() != static_cast<size_t>(width) * height * 4u)
+        return false;
     const HRESULT comResult = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     const bool uninitialize = SUCCEEDED(comResult);
     const fs::path temporary = path.wstring() + L".tmp";
     bool success = false;
+    const char* failedAt = "unknown";
+    HRESULT failure = S_OK;
     do
     {
         Microsoft::WRL::ComPtr<IWICImagingFactory> factory;
         HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr,
             CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory));
-        if (FAILED(hr)) break;
+        if (FAILED(hr)) { failedAt = "CreateFactory"; failure = hr; break; }
         Microsoft::WRL::ComPtr<IWICStream> stream;
-        if (FAILED(factory->CreateStream(&stream)) ||
-            FAILED(stream->InitializeFromFilename(temporary.c_str(), GENERIC_WRITE))) break;
+        hr = factory->CreateStream(&stream);
+        if (FAILED(hr)) { failedAt = "CreateStream"; failure = hr; break; }
+        hr = stream->InitializeFromFilename(temporary.c_str(), GENERIC_WRITE);
+        if (FAILED(hr)) { failedAt = "OpenTemporary"; failure = hr; break; }
         Microsoft::WRL::ComPtr<IWICBitmapEncoder> encoder;
-        if (FAILED(factory->CreateEncoder(GUID_ContainerFormatPng, nullptr,
-            &encoder)) || FAILED(encoder->Initialize(stream.Get(),
-                WICBitmapEncoderNoCache))) break;
+        hr = factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder);
+        if (FAILED(hr)) { failedAt = "CreateEncoder"; failure = hr; break; }
+        hr = encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache);
+        if (FAILED(hr)) { failedAt = "InitializeEncoder"; failure = hr; break; }
         Microsoft::WRL::ComPtr<IWICBitmapFrameEncode> frame;
         Microsoft::WRL::ComPtr<IPropertyBag2> properties;
-        if (FAILED(encoder->CreateNewFrame(&frame, &properties)) ||
-            FAILED(frame->Initialize(properties.Get())) ||
-            FAILED(frame->SetSize(width, height))) break;
-        WICPixelFormatGUID pixelFormat = GUID_WICPixelFormat32bppRGBA;
-        if (FAILED(frame->SetPixelFormat(&pixelFormat)) ||
-            !IsEqualGUID(pixelFormat, GUID_WICPixelFormat32bppRGBA) ||
-            FAILED(frame->WritePixels(height, width * 4u,
-                static_cast<UINT>(rgba.size()),
-                const_cast<BYTE*>(rgba.data()))) ||
-            FAILED(frame->Commit()) || FAILED(encoder->Commit())) break;
+        hr = encoder->CreateNewFrame(&frame, &properties);
+        if (FAILED(hr)) { failedAt = "CreateFrame"; failure = hr; break; }
+        hr = frame->Initialize(properties.Get());
+        if (FAILED(hr)) { failedAt = "InitializeFrame"; failure = hr; break; }
+        hr = frame->SetSize(width, height);
+        if (FAILED(hr)) { failedAt = "SetSize"; failure = hr; break; }
+        // The WIC PNG encoder negotiates BGRA on Windows. Convert the GPU's
+        // RGBA readback before handing it to the encoder.
+        WICPixelFormatGUID pixelFormat = GUID_WICPixelFormat32bppBGRA;
+        hr = frame->SetPixelFormat(&pixelFormat);
+        if (FAILED(hr) || !IsEqualGUID(pixelFormat, GUID_WICPixelFormat32bppBGRA))
+        { failedAt = "SetPixelFormat"; failure = hr; break; }
+        std::vector<uint8_t> bgra = rgba;
+        for (size_t i = 0; i < bgra.size(); i += 4u)
+            std::swap(bgra[i], bgra[i + 2u]);
+        hr = frame->WritePixels(height, width * 4u,
+            static_cast<UINT>(bgra.size()), bgra.data());
+        if (FAILED(hr)) { failedAt = "WritePixels"; failure = hr; break; }
+        hr = frame->Commit();
+        if (FAILED(hr)) { failedAt = "CommitFrame"; failure = hr; break; }
+        hr = encoder->Commit();
+        if (FAILED(hr)) { failedAt = "CommitEncoder"; failure = hr; break; }
         frame.Reset(); encoder.Reset(); stream.Reset();
         success = MoveFileExW(temporary.c_str(), path.c_str(),
             MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != FALSE;
+        if (!success) { failedAt = "MoveTemporary"; failure = HRESULT_FROM_WIN32(GetLastError()); }
     } while (false);
-    if (!success) fs::remove(temporary);
+    if (!success)
+    {
+        std::cerr << "PNG save failed at " << failedAt << " (HRESULT 0x"
+            << std::hex << static_cast<uint32_t>(failure) << std::dec << ").\n";
+        fs::remove(temporary);
+    }
     if (uninitialize) CoUninitialize();
     return success;
 }

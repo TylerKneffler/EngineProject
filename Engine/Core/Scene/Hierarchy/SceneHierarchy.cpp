@@ -11,6 +11,7 @@
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
 #include "Core/Compoonents/Animation/SoftTissueSurface.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
+#include "Core/Compoonents/Particles/ParticleEmitter.h"
 #include "Core/Physics/Physics.h"
 #include "Core/Physics/IPhysicsAdapter.h"
 #include "Core/Renderers/UIRenderer.h"
@@ -90,6 +91,7 @@ void Scene::Update(float deltaTime)
     using Clock = std::chrono::steady_clock;
     const auto updateBegin = m_updateProfilingEnabled ? Clock::now() : Clock::time_point{};
     m_deltaTime = m_clock.Advance(deltaTime);
+    EnforceParticleBudget();
     m_isUpdating = true;
     for (const auto& object : m_objects)
         object->Update();
@@ -169,6 +171,7 @@ void Scene::Update(float deltaTime)
     m_isUpdating = false;
     FlushPendingObjectAdditions();
     FlushPendingObjectRemovals();
+    EnforceParticleBudget();
     if (m_updateProfilingEnabled)
     {
         const auto ms = [](auto first, auto last)
@@ -176,6 +179,56 @@ void Scene::Update(float deltaTime)
         m_lastUpdateTimings = { ms(updateBegin, afterObjects),
             ms(afterObjects, afterPose), ms(afterPose, afterPhysics),
             ms(afterPhysics, Clock::now()) };
+    }
+}
+
+void Scene::SetParticleBudget(size_t capacity)
+{
+    m_particleBudget = std::min(capacity, size_t{100000});
+    EnforceParticleBudget();
+}
+
+size_t Scene::GetParticleLiveCount() const
+{
+    size_t count = 0;
+    for (const auto& object : m_objects)
+        if (object)
+            if (const auto* emitter = object->GetComponent<
+                Engine::Components::ParticleEmitter>())
+                count += emitter->GetParticles().size();
+    return count;
+}
+
+size_t Scene::GetParticleCapacityFor(
+    const Engine::Components::ParticleEmitter* target) const
+{
+    size_t remaining = m_particleBudget;
+    for (const auto& object : m_objects)
+    {
+        if (!object) continue;
+        const auto* emitter = object->GetComponent<
+            Engine::Components::ParticleEmitter>();
+        if (!emitter || emitter == target) continue;
+        const size_t live = std::max(emitter->GetParticles().size(),
+            static_cast<size_t>(emitter->GetGpuReservedCapacity()));
+        remaining = live >= remaining ? 0 : remaining - live;
+    }
+    return remaining;
+}
+
+void Scene::EnforceParticleBudget()
+{
+    size_t remaining = m_particleBudget;
+    for (const auto& object : m_objects)
+    {
+        if (!object) continue;
+        auto* emitter = object->GetComponent<
+            Engine::Components::ParticleEmitter>();
+        if (!emitter) continue;
+        emitter->TrimToCapacity(remaining);
+        const size_t reserved = std::max(emitter->GetParticles().size(),
+            static_cast<size_t>(emitter->GetGpuReservedCapacity()));
+        remaining = reserved >= remaining ? 0 : remaining - reserved;
     }
 }
 

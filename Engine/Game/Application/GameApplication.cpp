@@ -134,6 +134,7 @@ int GameApplication::Run(HINSTANCE instance)
             static_cast<float>(window->GetHeight());
         std::unique_ptr<Engine::Graphics::IGraphicsContext> graphicsContext =
             renderer->CreateFrameGraphicsContext();
+        scene.RecordGpuParticleSimulation(graphicsContext.get());
         Engine::Components::Camera* gameCamera = scene.FindGameCamera();
         if (graphicsContext && gameCamera)
             scene.Render(graphicsContext.get(), aspect, gameCamera, false,

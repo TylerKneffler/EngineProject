@@ -64,6 +64,18 @@ public:
     // Constant buffer binding
     virtual void SetConstantBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint64_t offset = 0) = 0;
     virtual void SetStructuredBuffer(uint32_t slot, const IGraphicsBuffer* buffer) = 0;
+    // Returns false if this backend/context cannot dispatch compute here.
+    // Callers must issue an explicit storage barrier before graphics reads.
+    virtual bool SetComputePipeline(const IPipelineState*) { return false; }
+    virtual void SetComputeConstants(const void*, uint32_t) {}
+    virtual void SetComputeReadBuffer(const IGraphicsBuffer*) {}
+    virtual void SetComputeWriteBuffer(const IGraphicsBuffer*) {}
+    virtual void DispatchCompute(uint32_t, uint32_t = 1, uint32_t = 1) {}
+    virtual void StorageBarrier(const IGraphicsBuffer*) {}
+    // Copies GPU data into a Readback buffer. The caller must wait for the
+    // submitting frame's fence before mapping on explicit APIs.
+    virtual bool CopyBuffer(const IGraphicsBuffer*, IGraphicsBuffer*,
+        uint64_t = 0) { return false; }
 
     // Vertex buffer binding
     virtual void SetVertexBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset = 0) = 0;

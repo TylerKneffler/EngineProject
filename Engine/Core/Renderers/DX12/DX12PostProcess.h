@@ -16,6 +16,7 @@ public:
         const float clearColor[4]);
     void Compose(ID3D12GraphicsCommandList* commandList,
         D3D12_CPU_DESCRIPTOR_HANDLE output);
+    ID3D12Resource* GetSceneColor() const { return m_sceneColor.Get(); }
 
 private:
     Microsoft::WRL::ComPtr<ID3D12Resource> m_sceneColor;

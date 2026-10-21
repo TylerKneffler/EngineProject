@@ -18,6 +18,7 @@ public:
     void BeginComposition(VkCommandBuffer command, VkFramebuffer output,
         uint32_t width, uint32_t height, const float clearColor[4]);
     void EndComposition(VkCommandBuffer command);
+    VkImage GetSceneColor() const { return m_sceneColor.image; }
 
 private:
     void CreateImages(uint32_t width, uint32_t height);

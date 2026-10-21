@@ -29,6 +29,7 @@ std::unique_ptr<Engine::Graphics::IGraphicsBuffer> VulkanBufferFactory::CreateBu
         case Engine::Graphics::IGraphicsBuffer::Usage::VertexBuffer: vkUsage |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT; break;
         case Engine::Graphics::IGraphicsBuffer::Usage::IndexBuffer: vkUsage |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT; break;
         case Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource: vkUsage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT; break;
+        case Engine::Graphics::IGraphicsBuffer::Usage::StorageBuffer: vkUsage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT; break;
     }
     VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
     bufferInfo.size = sizeBytes;

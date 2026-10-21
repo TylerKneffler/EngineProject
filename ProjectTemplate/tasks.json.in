@@ -2,10 +2,28 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "Engine: Install VS Code Auto Attach",
+      "type": "process",
+      "command": "powershell",
+      "args": [
+        "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+        "{{ENGINE_ROOT}}/Engine/Editor/VSCodeBridge/Install-VSCodeBridge.ps1"
+      ],
+      "problemMatcher": []
+    },
+    {
       "label": "CMake: Configure Debug",
       "type": "process",
       "command": "cmake",
       "args": ["--preset", "debug"]
+    },
+    {
+      "label": "CMake: Build Editor Debug",
+      "type": "process",
+      "command": "cmake",
+      "args": ["--build", "--preset", "debug", "--target", "Editor", "--parallel"],
+      "dependsOn": "CMake: Configure Debug",
+      "problemMatcher": "$msCompile"
     },
     {
       "label": "CMake: Build Debug",

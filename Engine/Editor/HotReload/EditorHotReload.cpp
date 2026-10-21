@@ -229,11 +229,27 @@ bool EditorHotReload::ApplyModule()
         m_buildDirectory / ".hotreload";
     std::filesystem::create_directories(runtimeDirectory, error);
     if (error) return false;
-    const std::filesystem::path candidatePath = runtimeDirectory /
-        ("ProjectScripts_" + std::to_string(++m_generation) + ".dll");
+    const std::filesystem::path candidateDirectory = runtimeDirectory /
+        ("ProjectScripts_" + std::to_string(++m_generation));
+    std::filesystem::create_directories(candidateDirectory, error);
+    if (error) return false;
+    const std::filesystem::path candidatePath =
+        candidateDirectory / m_modulePath.filename();
     if (!std::filesystem::copy_file(m_modulePath, candidatePath,
         std::filesystem::copy_options::overwrite_existing, error))
         return false;
+    std::filesystem::path symbolsPath = m_modulePath;
+    symbolsPath.replace_extension(".pdb");
+    if (std::filesystem::exists(symbolsPath, error))
+    {
+        error.clear();
+        std::filesystem::copy_file(symbolsPath,
+            candidateDirectory / symbolsPath.filename(),
+            std::filesystem::copy_options::overwrite_existing, error);
+        if (error)
+            Log(ConsoleView::Level::Error,
+                "Could not copy script debug symbols: " + error.message());
+    }
 
     HMODULE candidate = nullptr;
     std::vector<std::string> candidateTypes;
@@ -293,6 +309,9 @@ bool EditorHotReload::ApplyModule()
     {
         FreeLibrary(previousModule);
         std::filesystem::remove(previousModulePath, error);
+        std::filesystem::remove(previousModulePath.parent_path() /
+            symbolsPath.filename(), error);
+        std::filesystem::remove(previousModulePath.parent_path(), error);
     }
     return true;
 }

@@ -321,12 +321,21 @@ struct ParticleGPUData
     glm::vec4 rotation;
 };
 
+struct FluidSurfaceParticleData
+{
+    glm::vec4 positionAge;
+    glm::vec4 velocityLife;
+    glm::vec4 colorSize;
+    glm::uvec4 meta;
+};
+
 struct ParticleCBData
 {
     glm::mat4 viewProjection;
     glm::vec4 cameraRight;
     glm::vec4 cameraUp;
     glm::vec4 particleParams;
+    glm::vec4 portalClipPlane;
 };
 
 static_assert(sizeof(DrawCBData) == 16, "Draw constants must remain small");
@@ -336,7 +345,8 @@ static_assert(sizeof(Engine::Model::LightData) == 128,
 static_assert(sizeof(GridCBData) == 128, "Grid constant-buffer layout must match Grid.hlsl");
 static_assert(sizeof(SkyboxCBData) == 80, "Skybox constant-buffer layout must match Skybox.hlsl");
 static_assert(sizeof(ParticleGPUData) == 48, "Particle vertex layout must match Particle.hlsl");
-static_assert(sizeof(ParticleCBData) == 112, "Particle constants must fit Vulkan push constants");
+static_assert(sizeof(FluidSurfaceParticleData) == 64, "Fluid surface buffer must match Particle.hlsl");
+static_assert(sizeof(ParticleCBData) == 128, "Particle constants must fit Vulkan push constants");
 
 // ---------------------------------------------------------------------------
 // Scene::Init
@@ -868,16 +878,29 @@ void Scene::BuildParticlePipeline()
         Engine::Graphics::IShaderCompiler::CompileProfile::PS_5_0);
     if (!pixel)
         throw std::runtime_error("Particle pixel shader: " + compiler->GetLastError());
+    auto gpuVertex = compiler->CompileFromFile(path, "VSMainGpu",
+        Engine::Graphics::IShaderCompiler::CompileProfile::VS_5_0);
+    if (!gpuVertex)
+        throw std::runtime_error("GPU particle vertex shader: " +
+            compiler->GetLastError());
+    auto fluidVertex = compiler->CompileFromFile(path, "VSMainFluid",
+        Engine::Graphics::IShaderCompiler::CompileProfile::VS_5_0);
+    if (!fluidVertex)
+        throw std::runtime_error("Fluid surface vertex shader: " + compiler->GetLastError());
+    auto fluidPixel = compiler->CompileFromFile(path, "PSMainFluid",
+        Engine::Graphics::IShaderCompiler::CompileProfile::PS_5_0);
+    if (!fluidPixel)
+        throw std::runtime_error("Fluid surface pixel shader: " + compiler->GetLastError());
 
     const Engine::Graphics::IPipelineStateBuilder::VertexElement layout[] = {
         { "POSITION", 0, 2, 0, 0, true },
         { "COLOR", 0, 2, 0, 16, true },
         { "TEXCOORD", 0, 2, 0, 32, true }
     };
-    const auto build = [&](bool alphaBlend)
+    const auto build = [&](bool alphaBlend, bool portalView, bool gpu)
     {
         auto builder = factory->CreateBuilder();
-        auto pipeline = builder->SetVertexShader(vertex.get())
+        auto& state = builder->SetVertexShader(gpu ? gpuVertex.get() : vertex.get())
             .SetPixelShader(pixel.get())
             .SetFillMode(false)
             .SetCullMode(false)
@@ -892,23 +915,82 @@ void Scene::BuildParticlePipeline()
             .SetBlendOpAlpha(0)
             .SetDepthEnable(true)
             .SetDepthWriteEnable(false)
-            .SetDepthFunc(3)
-            .SetInputLayout(layout, 3)
+            .SetDepthFunc(3);
+        if (portalView)
+            state.SetStencilEnable(true)
+                .SetStencilReadMask(0xFF)
+                .SetStencilWriteMask(0x00)
+                .SetStencilFunc(2)
+                .SetStencilFailOp(0)
+                .SetStencilDepthFailOp(0)
+                .SetStencilPassOp(0)
+                .SetStencilRef(1);
+        auto pipeline = state
+            .SetInputLayout(gpu ? nullptr : layout, gpu ? 0 : 3)
             .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
             .SetRenderTargetFormat(10, 20)
             .Build();
         if (!pipeline)
-            throw std::runtime_error("Particle pipeline: " + builder->GetLastError());
+            throw std::runtime_error(std::string("Particle pipeline ") +
+                (gpu ? "GPU " : "CPU ") +
+                (alphaBlend ? "alpha " : "additive ") +
+                (portalView ? "portal: " : "main: ") +
+                builder->GetLastError());
         return pipeline;
     };
-    m_particlePipeline = build(false);
-    m_particleAlphaPipeline = build(true);
+    m_particlePipeline = build(false, false, false);
+    m_particleAlphaPipeline = build(true, false, false);
+    m_particlePortalPipeline = build(false, true, false);
+    m_particlePortalAlphaPipeline = build(true, true, false);
+    m_particleGpuPipeline = build(false, false, true);
+    m_particleGpuAlphaPipeline = build(true, false, true);
+    m_particleGpuPortalPipeline = build(false, true, true);
+    m_particleGpuPortalAlphaPipeline = build(true, true, true);
+    const auto buildFluid = [&](bool portalView)
+    {
+        auto builder = factory->CreateBuilder();
+        auto& state = builder->SetVertexShader(fluidVertex.get())
+            .SetPixelShader(fluidPixel.get())
+            .SetFillMode(false).SetCullMode(false)
+            .SetFrontCounterClockwise(false).SetDepthClipEnable(true)
+            .SetBlendEnable(true).SetSrcBlend(4).SetDestBlend(5)
+            .SetBlendOp(0).SetSrcBlendAlpha(1).SetDestBlendAlpha(5)
+            .SetBlendOpAlpha(0).SetDepthEnable(true)
+            .SetDepthWriteEnable(false).SetDepthFunc(3);
+        if (portalView)
+            state.SetStencilEnable(true).SetStencilReadMask(0xFF)
+                .SetStencilWriteMask(0x00).SetStencilFunc(2)
+                .SetStencilFailOp(0).SetStencilDepthFailOp(0)
+                .SetStencilPassOp(0).SetStencilRef(1);
+        auto pipeline = state.SetInputLayout(nullptr, 0)
+            .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
+            .SetRenderTargetFormat(10, 20).Build();
+        if (!pipeline)
+            throw std::runtime_error("Fluid surface pipeline: " + builder->GetLastError());
+        return pipeline;
+    };
+    m_fluidSurfacePipeline = buildFluid(false);
+    m_fluidSurfacePortalPipeline = buildFluid(true);
+}
+
+void Scene::RecordGpuParticleSimulation(IGraphicsContext* context)
+{
+    if (!context) return;
+    for (const auto& object : m_objects)
+        if (object && object->IsEnabledInHierarchy())
+            if (auto* emitter = object->GetComponent<
+                    Engine::Components::ParticleEmitter>())
+                emitter->RecordGpuSimulation(context);
 }
 
 void Scene::RenderParticles(IGraphicsContext* context,
-    const glm::mat4& viewProjection, const glm::mat4& view)
+    const glm::mat4& viewProjection, const glm::mat4& view,
+    const Object* contentScopeRoot, const glm::vec4& clipPlane,
+    bool portalView)
 {
-    if (!context || !m_particlePipeline || !m_particleAlphaPipeline || !m_graphicsProvider)
+    if (!context || !m_particlePipeline || !m_particleAlphaPipeline ||
+        !m_particlePortalPipeline || !m_particlePortalAlphaPipeline ||
+        !m_graphicsProvider)
         return;
     auto* contextFactory = m_graphicsProvider->GetContextFactory();
     auto* bufferFactory = m_graphicsProvider->GetBufferFactory();
@@ -924,6 +1006,7 @@ void Scene::RenderParticles(IGraphicsContext* context,
         slot.preparedSerial = serial;
         slot.constantCursor = 0;
         slot.batches.clear();
+        slot.fluidSurfaces.clear();
         std::vector<ParticleGPUData> records;
         constexpr size_t RenderLimit = 100000;
         for (const auto& object : m_objects)
@@ -933,6 +1016,40 @@ void Scene::RenderParticles(IGraphicsContext* context,
             if (!emitter) continue;
             const uint32_t batchFirst = static_cast<uint32_t>(records.size());
             const glm::mat4 world = object->transform.GetWorldMatrix();
+            constexpr size_t FluidSurfaceLimit = 512;
+            if (emitter->fluidEnabled && emitter->fluidVisual &&
+                !emitter->GetParticles().empty())
+            {
+                const auto& particles = emitter->GetParticles();
+                const size_t sampleCount = std::min(particles.size(), FluidSurfaceLimit);
+                std::vector<FluidSurfaceParticleData> surface(sampleCount + 1u);
+                surface[0].meta.x = static_cast<uint32_t>(sampleCount);
+                for (size_t i = 0; i < sampleCount; ++i)
+                {
+                    const auto& particle = particles[i * particles.size() / sampleCount];
+                    const glm::vec3 position = emitter->worldSpace
+                        ? particle.position
+                        : glm::vec3(world * glm::vec4(particle.position, 1.f));
+                    surface[i + 1u].positionAge = glm::vec4(position, 0.f);
+                    surface[i + 1u].velocityLife = glm::vec4(
+                        emitter->worldSpace ? particle.velocity :
+                        glm::mat3(world) * particle.velocity, 0.f);
+                    surface[i + 1u].colorSize = glm::vec4(particle.color,
+                        particle.size * std::clamp(emitter->fluidVisualRadiusScale,
+                            0.5f, 3.f));
+                }
+                auto buffer = bufferFactory->CreateBuffer(
+                    IGraphicsBuffer::Usage::ShaderResource,
+                    IGraphicsBuffer::AccessMode::Upload,
+                    static_cast<uint64_t>(surface.size()) * sizeof(surface[0]),
+                    surface.data(), sizeof(surface[0]));
+                if (!buffer)
+                    throw std::runtime_error("Could not create fluid surface buffer");
+                slot.fluidSurfaces.push_back({ std::move(buffer), object.get(),
+                    std::clamp(emitter->opacity, 0.f, 1.f),
+                    static_cast<uint32_t>(particles.size()) });
+                continue;
+            }
             for (const auto& particle : emitter->GetParticles())
             {
                 if (records.size() >= RenderLimit) break;
@@ -942,7 +1059,8 @@ void Scene::RenderParticles(IGraphicsContext* context,
                 const float fade = std::clamp(1.f - particle.age /
                     std::max(particle.lifetime, 0.001f), 0.f, 1.f);
                 records.push_back({ glm::vec4(position, particle.size),
-                    glm::vec4(particle.color, fade * std::clamp(emitter->opacity, 0.f, 1.f)),
+                    glm::vec4(particle.color, fade *
+                        std::clamp(emitter->opacity, 0.f, 1.f)),
                     glm::vec4(particle.rotation, 0.f, 0.f, 0.f) });
             }
             const uint32_t batchCount = static_cast<uint32_t>(records.size()) - batchFirst;
@@ -950,7 +1068,8 @@ void Scene::RenderParticles(IGraphicsContext* context,
                 slot.batches.push_back({ batchFirst, batchCount,
                     emitter->PrepareTexture(m_graphicsProvider),
                     emitter->blendMode == static_cast<int>(
-                        Engine::Components::ParticleEmitter::BlendMode::Alpha) });
+                        Engine::Components::ParticleEmitter::BlendMode::Alpha),
+                    object.get() });
             if (records.size() >= RenderLimit) break;
         }
         slot.particleCount = static_cast<uint32_t>(records.size());
@@ -976,10 +1095,18 @@ void Scene::RenderParticles(IGraphicsContext* context,
             slot.vertices->FlushMappedWrites(0, bytes);
         }
     }
-    if (!slot.particleCount || !slot.vertices) return;
+    uint32_t gpuBatchCount = 0;
+    for (const auto& object : m_objects)
+        if (object && object->IsEnabledInHierarchy())
+            if (const auto* emitter = object->GetComponent<
+                    Engine::Components::ParticleEmitter>())
+                if (emitter->GetGpuDrawBuffer()) ++gpuBatchCount;
+    if ((!slot.particleCount || !slot.vertices) && !gpuBatchCount &&
+        slot.fluidSurfaces.empty()) return;
 
     const uint32_t requiredConstants = slot.constantCursor +
-        static_cast<uint32_t>(slot.batches.size());
+        static_cast<uint32_t>(slot.batches.size() + slot.fluidSurfaces.size()) +
+        gpuBatchCount;
     if (requiredConstants > slot.constantCapacity)
     {
         if (slot.constants)
@@ -1000,24 +1127,81 @@ void Scene::RenderParticles(IGraphicsContext* context,
     constants.viewProjection = viewProjection;
     constants.cameraRight = glm::vec4(glm::normalize(glm::vec3(cameraWorld[0])), 0.f);
     constants.cameraUp = glm::vec4(glm::normalize(glm::vec3(cameraWorld[1])), 0.f);
-    context->BeginGpuTiming(Engine::Graphics::GpuTimingStage::Transparent);
+    constants.portalClipPlane = clipPlane;
+    if (!portalView)
+        context->BeginGpuTiming(Engine::Graphics::GpuTimingStage::Transparent);
     for (const auto& batch : slot.batches)
     {
+        if (portalView && !IsObjectInSpatialRegion(batch.owner,
+            contentScopeRoot)) continue;
         const uint64_t offset = static_cast<uint64_t>(slot.constantCursor++) * 256u;
         constants.particleParams.x = batch.texture ? 1.f : 0.f;
+        constants.particleParams.z = 0.f;
         std::memcpy(static_cast<uint8_t*>(slot.mappedConstants) + offset,
             &constants, sizeof(constants));
         slot.constants->FlushMappedWrites(offset, sizeof(constants));
-        context->SetPipeline(batch.alphaBlend
-            ? m_particleAlphaPipeline.get() : m_particlePipeline.get());
+        context->SetPipeline(portalView
+            ? (batch.alphaBlend ? m_particlePortalAlphaPipeline.get()
+                : m_particlePortalPipeline.get())
+            : (batch.alphaBlend ? m_particleAlphaPipeline.get()
+                : m_particlePipeline.get()));
         context->SetConstantBuffer(0, slot.constants.get(), offset);
         context->SetTexture(0, batch.texture
             ? batch.texture->GetGraphicsTexture() : nullptr);
         context->SetVertexBuffer(0, slot.vertices.get(), sizeof(ParticleGPUData),
             static_cast<uint64_t>(batch.first) * sizeof(ParticleGPUData));
         context->DrawInstanced(6, batch.count);
+        if (portalView)
+            m_lastParticlePortalDrawCount += batch.count;
     }
-    context->EndGpuTiming(Engine::Graphics::GpuTimingStage::Transparent);
+    for (const auto& surface : slot.fluidSurfaces)
+    {
+        if (portalView && !IsObjectInSpatialRegion(surface.owner,
+            contentScopeRoot)) continue;
+        const uint64_t offset = static_cast<uint64_t>(slot.constantCursor++) * 256u;
+        constants.particleParams = glm::vec4(0.f, surface.opacity,
+            static_cast<float>(GetElapsedTime()), 0.f);
+        std::memcpy(static_cast<uint8_t*>(slot.mappedConstants) + offset,
+            &constants, sizeof(constants));
+        slot.constants->FlushMappedWrites(offset, sizeof(constants));
+        context->SetPipeline(portalView ? m_fluidSurfacePortalPipeline.get()
+            : m_fluidSurfacePipeline.get());
+        context->SetConstantBuffer(0, slot.constants.get(), offset);
+        context->SetStructuredBuffer(6, surface.particles.get());
+        context->DrawInstanced(6, 1);
+        if (portalView) m_lastParticlePortalDrawCount += surface.count;
+    }
+    for (const auto& object : m_objects)
+    {
+        if (!object || !object->IsEnabledInHierarchy() ||
+            (portalView && !IsObjectInSpatialRegion(object.get(),
+                contentScopeRoot))) continue;
+        auto* emitter = object->GetComponent<Engine::Components::ParticleEmitter>();
+        if (!emitter || !emitter->GetGpuDrawBuffer()) continue;
+        const auto texture = emitter->PrepareTexture(m_graphicsProvider);
+        const uint64_t offset = static_cast<uint64_t>(slot.constantCursor++) * 256u;
+        constants.particleParams.x = texture ? 1.f : 0.f;
+        constants.particleParams.y = std::clamp(emitter->opacity, 0.f, 1.f);
+        constants.particleParams.z = 0.f;
+        std::memcpy(static_cast<uint8_t*>(slot.mappedConstants) + offset,
+            &constants, sizeof(constants));
+        slot.constants->FlushMappedWrites(offset, sizeof(constants));
+        const bool alpha = emitter->blendMode == static_cast<int>(
+            Engine::Components::ParticleEmitter::BlendMode::Alpha);
+        context->SetPipeline(portalView
+            ? (alpha ? m_particleGpuPortalAlphaPipeline.get()
+                : m_particleGpuPortalPipeline.get())
+            : (alpha ? m_particleGpuAlphaPipeline.get()
+                : m_particleGpuPipeline.get()));
+        context->SetConstantBuffer(0, slot.constants.get(), offset);
+        context->SetTexture(0, texture ? texture->GetGraphicsTexture() : nullptr);
+        context->SetStructuredBuffer(6, emitter->GetGpuDrawBuffer());
+        context->DrawInstanced(6, emitter->GetGpuDrawCapacity());
+        if (portalView)
+            m_lastParticlePortalDrawCount += emitter->GetGpuDrawCapacity();
+    }
+    if (!portalView)
+        context->EndGpuTiming(Engine::Graphics::GpuTimingStage::Transparent);
 }
 
 void Scene::BuildObjectPipeline()
@@ -1871,6 +2055,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 {
     m_lastObjectDataUploadBytes = 0;
     m_lastOcclusionCulledCount = 0;
+    m_lastParticlePortalDrawCount = 0;
     m_shadowDebugSnapshot = {};
     if (!context)
     {
@@ -4895,6 +5080,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 }
                 submitGeometry(draw);
             }
+
+            // The connected chart uses the same particle records with its
+            // own camera, stencil aperture, content scope, and clip plane.
+            context->SetStencilReference(stencilStep.sceneReadReference);
+            RenderParticles(context, proj * portalJob.mappedView,
+                portalJob.mappedView, portalJob.contentScopeRoot,
+                connectedSpaceClipPlane(portalPass,
+                    portalJob.mappedCameraPosition), true);
 
             if (portalScissor)
             {

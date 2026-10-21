@@ -11,7 +11,25 @@
             "cwd": "${workspaceFolder}",
             "environment": [],
             "console": "internalConsole",
-            "preLaunchTask": "CMake: Build Editor Debug"
+            "preLaunchTask": "CMake: Build Editor Debug",
+            "symbolOptions": {
+                "searchPaths": [
+                    "${workspaceFolder}/build/Debug/lib/Debug",
+                    "${workspaceFolder}/build/Debug/.hotreload"
+                ]
+            }
+        },
+        {
+            "name": "Attach to Editor (Debug)",
+            "type": "cppvsdbg",
+            "request": "attach",
+            "processId": "${command:pickProcess}",
+            "symbolOptions": {
+                "searchPaths": [
+                    "${workspaceFolder}/build/Debug/lib/Debug",
+                    "${workspaceFolder}/build/Debug/.hotreload"
+                ]
+            }
         }
     ]
 }

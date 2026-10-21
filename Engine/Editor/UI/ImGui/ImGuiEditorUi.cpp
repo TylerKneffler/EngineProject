@@ -1077,6 +1077,7 @@ EditorUiContextMenuResult ImGuiEditorUi::ContextMenu(const void* id,const char* 
                         result.addSpriteRequested=ImGui::MenuItem("Sprite");
                         ImGui::EndMenu();
                     }
+                    result.addParticleEmitterRequested=ImGui::MenuItem("Particle Emitter");
                     if(ImGui::BeginMenu("Lighting")){
                         result.addLightProbeRequested=ImGui::MenuItem("Light Probe");
                         result.addLightProbeGroupRequested=ImGui::MenuItem("Light Probe Volume");

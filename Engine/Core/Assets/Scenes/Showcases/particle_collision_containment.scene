@@ -1,0 +1,352 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Scene xmlns:components="urn:engine-components" version="1">
+  <settings dimension="0" showGrid="false" skyboxEnabled="false" toneMapping="1" outputExposure="0">
+    <ambientColor><item>0.08</item><item>0.095</item><item>0.12</item></ambientColor>
+  </settings>
+  <objects>
+    <item name="Containment Camera" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>5.5</item><item>-12</item></Transform.position>
+        <Transform.rotation><item>0.245</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Camera Camera.active="true" Camera.useTransformRotation="true" Camera.fov="55" Camera.near="0.01" Camera.far="80">
+          <Camera.target><item>0</item><item>2.5</item><item>0</item></Camera.target>
+          <Camera.up><item>0</item><item>1</item><item>0</item></Camera.up>
+        </components:Camera>
+      </components>
+      <children />
+    </item>
+    <item name="Room Floor" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>-0.25</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>6.5</item><item>0.5</item><item>6.5</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" Mesh.useLightProbes="false" />
+        <components:Material Material.shininess="5" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="0.85" Material.castsShadows="false">
+          <Material.diffuse><item>0.075</item><item>0.085</item><item>0.13</item></Material.diffuse>
+          <Material.ambient><item>0.011</item><item>0.013</item><item>0.019</item></Material.ambient>
+          <Material.specular><item>0.06</item><item>0.06</item><item>0.06</item></Material.specular>
+          <Material.emissiveColor><item>0</item><item>0</item><item>0</item></Material.emissiveColor>
+        </components:Material>
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box">
+          <PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size><item>1</item><item>1</item><item>1</item></PrimitiveObjectCollider.size>
+        </components:PrimitiveObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0.8" RigidBody.restitution="0.1" />
+      </components>
+      <children />
+    </item>
+    <item name="Ceiling" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>5.25</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>6.5</item><item>0.5</item><item>6.5</item></Transform.scale>
+      </transform>
+      <components>
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box">
+          <PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size><item>1</item><item>1</item><item>1</item></PrimitiveObjectCollider.size>
+        </components:PrimitiveObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0.8" RigidBody.restitution="0.1" />
+      </components>
+      <children />
+    </item>
+    <item name="Left Wall" enabled="true">
+      <transform>
+        <Transform.position><item>-3.25</item><item>2.5</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>0.5</item><item>5</item><item>6.5</item></Transform.scale>
+      </transform>
+      <components>
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box">
+          <PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size><item>1</item><item>1</item><item>1</item></PrimitiveObjectCollider.size>
+        </components:PrimitiveObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0.8" RigidBody.restitution="0.1" />
+      </components>
+      <children />
+    </item>
+    <item name="Right Wall" enabled="true">
+      <transform>
+        <Transform.position><item>3.25</item><item>2.5</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>0.5</item><item>5</item><item>6.5</item></Transform.scale>
+      </transform>
+      <components>
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box">
+          <PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size><item>1</item><item>1</item><item>1</item></PrimitiveObjectCollider.size>
+        </components:PrimitiveObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0.8" RigidBody.restitution="0.1" />
+      </components>
+      <children />
+    </item>
+    <item name="Front Wall" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>2.5</item><item>-3.25</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>6.5</item><item>5</item><item>0.5</item></Transform.scale>
+      </transform>
+      <components>
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box">
+          <PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size><item>1</item><item>1</item><item>1</item></PrimitiveObjectCollider.size>
+        </components:PrimitiveObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0.8" RigidBody.restitution="0.1" />
+      </components>
+      <children />
+    </item>
+    <item name="Back Wall" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>2.5</item><item>3.25</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>6.5</item><item>5</item><item>0.5</item></Transform.scale>
+      </transform>
+      <components>
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box">
+          <PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size><item>1</item><item>1</item><item>1</item></PrimitiveObjectCollider.size>
+        </components:PrimitiveObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0.8" RigidBody.restitution="0.1" />
+      </components>
+      <children />
+    </item>
+    <item name="Frame Vertical -3.02 -3.02" enabled="true">
+      <transform>
+        <Transform.position><item>-3.02</item><item>2.5</item><item>-3.02</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>0.06</item><item>5</item><item>0.06</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" Mesh.useLightProbes="false" />
+        <components:Material Material.shininess="5" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="0.85" Material.castsShadows="false">
+          <Material.diffuse><item>0.13</item><item>0.36</item><item>0.52</item></Material.diffuse>
+          <Material.ambient><item>0.019</item><item>0.054</item><item>0.078</item></Material.ambient>
+          <Material.specular><item>0.06</item><item>0.06</item><item>0.06</item></Material.specular>
+          <Material.emissiveColor><item>0.02</item><item>0.1</item><item>0.16</item></Material.emissiveColor>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Frame Vertical -3.02 3.02" enabled="true">
+      <transform>
+        <Transform.position><item>-3.02</item><item>2.5</item><item>3.02</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>0.06</item><item>5</item><item>0.06</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" Mesh.useLightProbes="false" />
+        <components:Material Material.shininess="5" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="0.85" Material.castsShadows="false">
+          <Material.diffuse><item>0.13</item><item>0.36</item><item>0.52</item></Material.diffuse>
+          <Material.ambient><item>0.019</item><item>0.054</item><item>0.078</item></Material.ambient>
+          <Material.specular><item>0.06</item><item>0.06</item><item>0.06</item></Material.specular>
+          <Material.emissiveColor><item>0.02</item><item>0.1</item><item>0.16</item></Material.emissiveColor>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Frame Vertical 3.02 -3.02" enabled="true">
+      <transform>
+        <Transform.position><item>3.02</item><item>2.5</item><item>-3.02</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>0.06</item><item>5</item><item>0.06</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" Mesh.useLightProbes="false" />
+        <components:Material Material.shininess="5" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="0.85" Material.castsShadows="false">
+          <Material.diffuse><item>0.13</item><item>0.36</item><item>0.52</item></Material.diffuse>
+          <Material.ambient><item>0.019</item><item>0.054</item><item>0.078</item></Material.ambient>
+          <Material.specular><item>0.06</item><item>0.06</item><item>0.06</item></Material.specular>
+          <Material.emissiveColor><item>0.02</item><item>0.1</item><item>0.16</item></Material.emissiveColor>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Frame Vertical 3.02 3.02" enabled="true">
+      <transform>
+        <Transform.position><item>3.02</item><item>2.5</item><item>3.02</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>0.06</item><item>5</item><item>0.06</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" Mesh.useLightProbes="false" />
+        <components:Material Material.shininess="5" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="0.85" Material.castsShadows="false">
+          <Material.diffuse><item>0.13</item><item>0.36</item><item>0.52</item></Material.diffuse>
+          <Material.ambient><item>0.019</item><item>0.054</item><item>0.078</item></Material.ambient>
+          <Material.specular><item>0.06</item><item>0.06</item><item>0.06</item></Material.specular>
+          <Material.emissiveColor><item>0.02</item><item>0.1</item><item>0.16</item></Material.emissiveColor>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Frame X 0 -3.02" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>0</item><item>-3.02</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>6.1</item><item>0.06</item><item>0.06</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" Mesh.useLightProbes="false" />
+        <components:Material Material.shininess="5" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="0.85" Material.castsShadows="false">
+          <Material.diffuse><item>0.13</item><item>0.36</item><item>0.52</item></Material.diffuse>
+          <Material.ambient><item>0.019</item><item>0.054</item><item>0.078</item></Material.ambient>
+          <Material.specular><item>0.06</item><item>0.06</item><item>0.06</item></Material.specular>
+          <Material.emissiveColor><item>0.02</item><item>0.1</item><item>0.16</item></Material.emissiveColor>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Frame X 0 3.02" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>0</item><item>3.02</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>6.1</item><item>0.06</item><item>0.06</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" Mesh.useLightProbes="false" />
+        <components:Material Material.shininess="5" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="0.85" Material.castsShadows="false">
+          <Material.diffuse><item>0.13</item><item>0.36</item><item>0.52</item></Material.diffuse>
+          <Material.ambient><item>0.019</item><item>0.054</item><item>0.078</item></Material.ambient>
+          <Material.specular><item>0.06</item><item>0.06</item><item>0.06</item></Material.specular>
+          <Material.emissiveColor><item>0.02</item><item>0.1</item><item>0.16</item></Material.emissiveColor>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Frame Z 0 -3.02" enabled="true">
+      <transform>
+        <Transform.position><item>-3.02</item><item>0</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>0.06</item><item>0.06</item><item>6.1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" Mesh.useLightProbes="false" />
+        <components:Material Material.shininess="5" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="0.85" Material.castsShadows="false">
+          <Material.diffuse><item>0.13</item><item>0.36</item><item>0.52</item></Material.diffuse>
+          <Material.ambient><item>0.019</item><item>0.054</item><item>0.078</item></Material.ambient>
+          <Material.specular><item>0.06</item><item>0.06</item><item>0.06</item></Material.specular>
+          <Material.emissiveColor><item>0.02</item><item>0.1</item><item>0.16</item></Material.emissiveColor>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Frame Z 0 3.02" enabled="true">
+      <transform>
+        <Transform.position><item>3.02</item><item>0</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>0.06</item><item>0.06</item><item>6.1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" Mesh.useLightProbes="false" />
+        <components:Material Material.shininess="5" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="0.85" Material.castsShadows="false">
+          <Material.diffuse><item>0.13</item><item>0.36</item><item>0.52</item></Material.diffuse>
+          <Material.ambient><item>0.019</item><item>0.054</item><item>0.078</item></Material.ambient>
+          <Material.specular><item>0.06</item><item>0.06</item><item>0.06</item></Material.specular>
+          <Material.emissiveColor><item>0.02</item><item>0.1</item><item>0.16</item></Material.emissiveColor>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Frame X 5 -3.02" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>5</item><item>-3.02</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>6.1</item><item>0.06</item><item>0.06</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" Mesh.useLightProbes="false" />
+        <components:Material Material.shininess="5" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="0.85" Material.castsShadows="false">
+          <Material.diffuse><item>0.13</item><item>0.36</item><item>0.52</item></Material.diffuse>
+          <Material.ambient><item>0.019</item><item>0.054</item><item>0.078</item></Material.ambient>
+          <Material.specular><item>0.06</item><item>0.06</item><item>0.06</item></Material.specular>
+          <Material.emissiveColor><item>0.02</item><item>0.1</item><item>0.16</item></Material.emissiveColor>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Frame X 5 3.02" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>5</item><item>3.02</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>6.1</item><item>0.06</item><item>0.06</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" Mesh.useLightProbes="false" />
+        <components:Material Material.shininess="5" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="0.85" Material.castsShadows="false">
+          <Material.diffuse><item>0.13</item><item>0.36</item><item>0.52</item></Material.diffuse>
+          <Material.ambient><item>0.019</item><item>0.054</item><item>0.078</item></Material.ambient>
+          <Material.specular><item>0.06</item><item>0.06</item><item>0.06</item></Material.specular>
+          <Material.emissiveColor><item>0.02</item><item>0.1</item><item>0.16</item></Material.emissiveColor>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Frame Z 5 -3.02" enabled="true">
+      <transform>
+        <Transform.position><item>-3.02</item><item>5</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>0.06</item><item>0.06</item><item>6.1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" Mesh.useLightProbes="false" />
+        <components:Material Material.shininess="5" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="0.85" Material.castsShadows="false">
+          <Material.diffuse><item>0.13</item><item>0.36</item><item>0.52</item></Material.diffuse>
+          <Material.ambient><item>0.019</item><item>0.054</item><item>0.078</item></Material.ambient>
+          <Material.specular><item>0.06</item><item>0.06</item><item>0.06</item></Material.specular>
+          <Material.emissiveColor><item>0.02</item><item>0.1</item><item>0.16</item></Material.emissiveColor>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Frame Z 5 3.02" enabled="true">
+      <transform>
+        <Transform.position><item>3.02</item><item>5</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>0.06</item><item>0.06</item><item>6.1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" Mesh.useLightProbes="false" />
+        <components:Material Material.shininess="5" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="0.85" Material.castsShadows="false">
+          <Material.diffuse><item>0.13</item><item>0.36</item><item>0.52</item></Material.diffuse>
+          <Material.ambient><item>0.019</item><item>0.054</item><item>0.078</item></Material.ambient>
+          <Material.specular><item>0.06</item><item>0.06</item><item>0.06</item></Material.specular>
+          <Material.emissiveColor><item>0.02</item><item>0.1</item><item>0.16</item></Material.emissiveColor>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Contained Bouncing Particles" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>2.5</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:ParticleEmitter ParticleEmitter.rate="180" ParticleEmitter.burstOnStart="200" ParticleEmitter.maxParticles="900" ParticleEmitter.lifetime="5" ParticleEmitter.speed="8" ParticleEmitter.spreadDegrees="180" ParticleEmitter.drag="0.01" ParticleEmitter.size="0.055" ParticleEmitter.shape="0" ParticleEmitter.worldSpace="true" ParticleEmitter.playOnStart="true" ParticleEmitter.duration="0" ParticleEmitter.loop="false" ParticleEmitter.seed="747" ParticleEmitter.texturePath="" ParticleEmitter.opacity="0.85" ParticleEmitter.blendMode="0" ParticleEmitter.collisionMode="2" ParticleEmitter.collisionBounce="0.95" ParticleEmitter.collisionFriction="0.02" ParticleEmitter.collisionMask="-1" ParticleEmitter.useGpuSimulation="false">
+          <ParticleEmitter.direction><item>0</item><item>1</item><item>0</item></ParticleEmitter.direction>
+          <ParticleEmitter.gravity><item>0</item><item>0</item><item>0</item></ParticleEmitter.gravity>
+          <ParticleEmitter.color><item>0.24</item><item>0.85</item><item>1</item></ParticleEmitter.color>
+          <ParticleEmitter.boxExtents><item>0.5</item><item>0.5</item><item>0.5</item></ParticleEmitter.boxExtents>
+        </components:ParticleEmitter>
+      </components>
+      <children />
+    </item>
+    <item name="Soft Fill" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>7</item><item>-5</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Light Light.lightType="1" Light.intensity="1.1" Light.range="20" Light.castsShadows="false">
+          <Light.color><item>0.65</item><item>0.82</item><item>1</item></Light.color>
+        </components:Light>
+      </components>
+      <children />
+    </item>
+  </objects>
+</Scene>

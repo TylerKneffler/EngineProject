@@ -16,6 +16,8 @@ public:
                         Usage usage, AccessMode access, uint64_t size,
                         const void* initialData, uint32_t elementStride,
                         Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv);
+    void SetUnorderedAccessView(Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> view)
+    { m_uav = std::move(view); }
 
     Usage GetUsage() const override { return m_usage; }
     AccessMode GetAccessMode() const override { return m_access; }
@@ -34,6 +36,7 @@ public:
     ID3D11Buffer* GetBuffer() const { return m_buffer.Get(); }
     const uint8_t* GetShadowData() const { return m_shadowData.empty() ? nullptr : m_shadowData.data(); }
     ID3D11ShaderResourceView* GetShaderResourceView() const { return m_srv.Get(); }
+    ID3D11UnorderedAccessView* GetUnorderedAccessView() const { return m_uav.Get(); }
 
 private:
     Microsoft::WRL::ComPtr<ID3D11Buffer> m_buffer;
@@ -42,6 +45,8 @@ private:
     uint64_t m_size;
     uint32_t m_elementStride = 0;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_srv;
+    Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> m_uav;
+    Microsoft::WRL::ComPtr<ID3D11DeviceContext> m_readbackContext;
     std::vector<uint8_t> m_shadowData;
 };
 

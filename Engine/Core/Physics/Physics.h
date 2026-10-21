@@ -92,6 +92,10 @@ public:
     std::vector<RaycastHit> RaycastAll(const glm::vec3& origin,
         const glm::vec3& direction, float maxDistance,
         uint32_t collisionMask = ~0u) const;
+    // Sweeps a sphere along a straight segment and returns every hit.
+    std::vector<RaycastHit> SweepSphereAll(const glm::vec3& origin,
+        const glm::vec3& direction, float maxDistance, float radius,
+        uint32_t collisionMask = ~0u) const;
 
     void ApplyRigidBodyAction(Engine::Components::RigidBody& body,
         RigidBodyAction action, const glm::vec3& value,

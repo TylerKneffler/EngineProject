@@ -145,6 +145,8 @@ public:
     void BakeLighting();
     void ClearBakedLighting();
     void ImportAsset();
+    void OpenCodeEditor();
+    bool RequestCodeEditorAttach(bool openWorkspace = false);
     void StartObjectImport(const std::string& path, bool intoScene,
         const std::string& destinationDirectory = {});
     bool PendingImportSupportsReference() const;

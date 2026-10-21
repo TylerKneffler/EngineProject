@@ -6,6 +6,7 @@
 #include "Core/Startup/StartupSplash.h"
 #include "Core/ProjectLoader.h"
 #include "Core/SceneManager.h"
+#include "Core/Compoonents/Particles/ParticleEmitter.h"
 #include "Core/Timing/FramePacer.h"
 #include "Core/Renderers/IEditorRenderer.h"
 #include "Core/Renderers/RendererFactory.h"
@@ -226,13 +227,27 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     
     OutputDebugStringA("[Main] Got editor components\n");
 
+    bool waitingForPlayDebugger = false;
+    std::chrono::steady_clock::time_point debuggerDeadline;
     gameBuildManager->OnPlayStart = [&]()
     {
+        const bool requested = editorState->RequestCodeEditorAttach();
         editorState->CapturePlayModeScene();
-        scene->Start();
+        waitingForPlayDebugger = requested && !IsDebuggerPresent();
+        if (waitingForPlayDebugger)
+        {
+            debuggerDeadline = std::chrono::steady_clock::now() +
+                std::chrono::seconds(4);
+            if (auto* console = editorState->GetConsole())
+                console->AddLog(Engine::Editor::ConsoleView::Level::Info,
+                    "[Debug] Waiting up to 4 seconds for VS Code to attach.");
+        }
+        else
+            scene->Start();
     };
     gameBuildManager->OnPlayStop = [&]()
     {
+        waitingForPlayDebugger = false;
         Engine::Core::SceneManager::CancelPendingSceneLoad();
         editorState->RestorePlayModeScene();
     };
@@ -344,13 +359,49 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             wasHotReloadBusy != hotReload->IsBusy())
             renderer->MarkDirty();
 
+        // Let an auto attach request reach VS Code before scene Start() runs.
+        const bool debuggerAttached = IsDebuggerPresent();
+        if (waitingForPlayDebugger &&
+            playState == Engine::Editor::PlayState::Playing &&
+            (debuggerAttached || Clock::now() >= debuggerDeadline))
+        {
+            if (auto* console = editorState->GetConsole())
+                console->AddLog(debuggerAttached
+                    ? Engine::Editor::ConsoleView::Level::Info
+                    : Engine::Editor::ConsoleView::Level::Warning,
+                    debuggerAttached
+                    ? "[Debug] VS Code debugger attached."
+                    : "[Debug] VS Code did not attach; continuing Play.");
+            waitingForPlayDebugger = false;
+            scene->Start();
+        }
+
         // Tick game objects while playing
-        if (playState == Engine::Editor::PlayState::Playing)
+        if (playState == Engine::Editor::PlayState::Playing &&
+            !waitingForPlayDebugger)
         {
             // Physics bounds its own fixed-step work. Keep animation on wall
             // time so a slow render frame does not slow down playback.
             scene->Update(std::max(dt, 0.f));
             Engine::Core::SceneManager::ProcessPendingSceneLoad();
+        }
+        else if (playState == Engine::Editor::PlayState::Stopped)
+        {
+            // Only explicitly played emitters advance in Edit mode. Their
+            // transient state is not serialized or marked as a scene edit.
+            bool previewAdvanced = false;
+            for (const auto& object : scene->GetObjects())
+            {
+                if (!object || !object->IsEnabledInHierarchy()) continue;
+                if (auto* emitter = object->GetComponent<Engine::Components::ParticleEmitter>();
+                    emitter && emitter->IsEditorPreviewRunning())
+                {
+                    emitter->Advance(std::max(dt, 0.f),
+                        object->transform.GetWorldMatrix());
+                    previewAdvanced = true;
+                }
+            }
+            if (previewAdvanced) renderer->MarkDirty();
         }
         const auto afterSceneUpdate = Clock::now();
 
@@ -424,6 +475,14 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                 }
             }
             const auto afterPrepare = Clock::now();
+            if (auto* provider = renderer->GetGraphicsProvider())
+                if (auto* factory = provider->GetContextFactory())
+                {
+                    factory->SetCommandBuffer(renderer->GetCurrentCommandBuffer());
+                    auto computeContext = factory->CreateContext();
+                    for (Engine::Scene::Scene* prepared : preparedScenes)
+                        prepared->RecordGpuParticleSimulation(computeContext.get());
+                }
             prepareMilliseconds = std::chrono::duration<double, std::milli>(
                 afterPrepare - afterSceneUpdate).count();
             scenePrepareMilliseconds = std::chrono::duration<double, std::milli>(
@@ -549,6 +608,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     renderer->MarkDirty();
     window->OnUpdate();
     splash.Close();
+    editorState->RequestCodeEditorAttach(true);
     OutputDebugStringA("[Main] Window shown, entering message loop...\n");
 
     int result = window->Run();

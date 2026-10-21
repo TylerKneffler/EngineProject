@@ -55,6 +55,9 @@ public:
     std::vector<RaycastHit> RaycastAll(const glm::vec3& origin,
         const glm::vec3& direction, float maxDistance,
         uint32_t collisionMask) const override;
+    std::vector<RaycastHit> SweepSphereAll(const glm::vec3& origin,
+        const glm::vec3& direction, float maxDistance, float radius,
+        uint32_t collisionMask) const override;
     void ApplyRigidBodyAction(Engine::Components::RigidBody& body,
         RigidBodyAction action, const glm::vec3& value,
         const glm::quat& rotation) override;

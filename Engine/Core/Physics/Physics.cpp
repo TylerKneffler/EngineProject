@@ -62,6 +62,12 @@ std::vector<Physics::RaycastHit> Physics::RaycastAll(
 {
     return m_adapter->RaycastAll(origin, direction, distance, mask);
 }
+std::vector<Physics::RaycastHit> Physics::SweepSphereAll(
+    const glm::vec3& origin, const glm::vec3& direction,
+    float distance, float radius, uint32_t mask) const
+{
+    return m_adapter->SweepSphereAll(origin, direction, distance, radius, mask);
+}
 void Physics::ApplyRigidBodyAction(Engine::Components::RigidBody& body,
     RigidBodyAction action, const glm::vec3& value,
     const glm::quat& rotation)

@@ -34,6 +34,8 @@ void ImGuiMainMenu::Draw(EditorState& state, PlayState playState,
         ImGui::EndMenu();
     }
     DrawViewsMenu(state);
+    if (ImGui::MenuItem("Code Editor"))
+        state.OpenCodeEditor();
     DrawToolbarMenu(state);
     DrawRenderingMenu(state, playState);
     ImGui::EndMainMenuBar();

@@ -1,0 +1,260 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Scene xmlns:components="urn:engine-components" version="1">
+  <settings dimension="0" showGrid="false" skyboxEnabled="false" toneMapping="1" outputExposure="0">
+    <ambientColor><item>0.055</item><item>0.065</item><item>0.085</item></ambientColor>
+  </settings>
+  <objects>
+    <item name="Stress Test Camera" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>12</item><item>-17</item></Transform.position>
+        <Transform.rotation><item>0.55</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Camera Camera.active="true" Camera.useTransformRotation="true" Camera.fov="58" Camera.near="0.01" Camera.far="120">
+          <Camera.target><item>0</item><item>1.5</item><item>0</item></Camera.target>
+          <Camera.up><item>0</item><item>1</item><item>0</item></Camera.up>
+        </components:Camera>
+      </components>
+      <children />
+    </item>
+    <item name="Dark Ground" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>-0.35</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>19</item><item>0.25</item><item>16</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" Mesh.useLightProbes="false" />
+        <components:Material Material.shininess="4" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="1" Material.castsShadows="false">
+          <Material.diffuse><item>0.08</item><item>0.09</item><item>0.13</item></Material.diffuse>
+          <Material.ambient><item>0.015</item><item>0.02</item><item>0.035</item></Material.ambient>
+          <Material.specular><item>0.02</item><item>0.02</item><item>0.03</item></Material.specular>
+          <Material.emissiveColor><item>0</item><item>0</item><item>0</item></Material.emissiveColor>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Ambient Key" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>8</item><item>-3</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Light Light.lightType="1" Light.intensity="1.1" Light.range="35" Light.castsShadows="false">
+          <Light.color><item>0.67</item><item>0.78</item><item>1</item></Light.color>
+        </components:Light>
+      </components>
+      <children />
+    </item>
+    <item name="Load 01 | plume" enabled="true">
+      <transform>
+        <Transform.position><item>-6</item><item>0.65</item><item>-4</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:ParticleEmitter ParticleEmitter.rate="4000" ParticleEmitter.burstOnStart="0" ParticleEmitter.maxParticles="6000" ParticleEmitter.lifetime="1.3" ParticleEmitter.speed="1.5" ParticleEmitter.spreadDegrees="28" ParticleEmitter.drag="0.18" ParticleEmitter.size="0.045" ParticleEmitter.shape="1" ParticleEmitter.sphereRadius="1.35" ParticleEmitter.worldSpace="true" ParticleEmitter.playOnStart="true" ParticleEmitter.duration="0" ParticleEmitter.loop="false" ParticleEmitter.seed="100" ParticleEmitter.texturePath="" ParticleEmitter.opacity="0.72" ParticleEmitter.blendMode="0" ParticleEmitter.collisionMode="0" ParticleEmitter.useGpuSimulation="false">
+          <ParticleEmitter.direction><item>0</item><item>1</item><item>0</item></ParticleEmitter.direction>
+          <ParticleEmitter.gravity><item>0</item><item>-0.25</item><item>0</item></ParticleEmitter.gravity>
+          <ParticleEmitter.color><item>1</item><item>0.28</item><item>0.07</item></ParticleEmitter.color>
+          <ParticleEmitter.boxExtents><item>1.45</item><item>0.45</item><item>1.45</item></ParticleEmitter.boxExtents>
+        </components:ParticleEmitter>
+      </components>
+      <children />
+    </item>
+    <item name="Load 02 | plume" enabled="true">
+      <transform>
+        <Transform.position><item>-2</item><item>0.65</item><item>-4</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:ParticleEmitter ParticleEmitter.rate="4000" ParticleEmitter.burstOnStart="0" ParticleEmitter.maxParticles="6000" ParticleEmitter.lifetime="1.3" ParticleEmitter.speed="1.5" ParticleEmitter.spreadDegrees="28" ParticleEmitter.drag="0.18" ParticleEmitter.size="0.045" ParticleEmitter.shape="1" ParticleEmitter.sphereRadius="1.35" ParticleEmitter.worldSpace="true" ParticleEmitter.playOnStart="true" ParticleEmitter.duration="0" ParticleEmitter.loop="false" ParticleEmitter.seed="101" ParticleEmitter.texturePath="" ParticleEmitter.opacity="0.72" ParticleEmitter.blendMode="0" ParticleEmitter.collisionMode="0" ParticleEmitter.useGpuSimulation="false">
+          <ParticleEmitter.direction><item>0</item><item>1</item><item>0</item></ParticleEmitter.direction>
+          <ParticleEmitter.gravity><item>0</item><item>-0.25</item><item>0</item></ParticleEmitter.gravity>
+          <ParticleEmitter.color><item>1</item><item>0.72</item><item>0.11</item></ParticleEmitter.color>
+          <ParticleEmitter.boxExtents><item>1.45</item><item>0.45</item><item>1.45</item></ParticleEmitter.boxExtents>
+        </components:ParticleEmitter>
+      </components>
+      <children />
+    </item>
+    <item name="Load 03 | plume" enabled="true">
+      <transform>
+        <Transform.position><item>2</item><item>0.65</item><item>-4</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:ParticleEmitter ParticleEmitter.rate="4000" ParticleEmitter.burstOnStart="0" ParticleEmitter.maxParticles="6000" ParticleEmitter.lifetime="1.3" ParticleEmitter.speed="1.5" ParticleEmitter.spreadDegrees="28" ParticleEmitter.drag="0.18" ParticleEmitter.size="0.045" ParticleEmitter.shape="1" ParticleEmitter.sphereRadius="1.35" ParticleEmitter.worldSpace="true" ParticleEmitter.playOnStart="true" ParticleEmitter.duration="0" ParticleEmitter.loop="false" ParticleEmitter.seed="102" ParticleEmitter.texturePath="" ParticleEmitter.opacity="0.72" ParticleEmitter.blendMode="0" ParticleEmitter.collisionMode="0" ParticleEmitter.useGpuSimulation="false">
+          <ParticleEmitter.direction><item>0</item><item>1</item><item>0</item></ParticleEmitter.direction>
+          <ParticleEmitter.gravity><item>0</item><item>-0.25</item><item>0</item></ParticleEmitter.gravity>
+          <ParticleEmitter.color><item>0.35</item><item>0.82</item><item>1</item></ParticleEmitter.color>
+          <ParticleEmitter.boxExtents><item>1.45</item><item>0.45</item><item>1.45</item></ParticleEmitter.boxExtents>
+        </components:ParticleEmitter>
+      </components>
+      <children />
+    </item>
+    <item name="Load 04 | plume" enabled="true">
+      <transform>
+        <Transform.position><item>6</item><item>0.65</item><item>-4</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:ParticleEmitter ParticleEmitter.rate="4000" ParticleEmitter.burstOnStart="0" ParticleEmitter.maxParticles="6000" ParticleEmitter.lifetime="1.3" ParticleEmitter.speed="1.5" ParticleEmitter.spreadDegrees="28" ParticleEmitter.drag="0.18" ParticleEmitter.size="0.045" ParticleEmitter.shape="1" ParticleEmitter.sphereRadius="1.35" ParticleEmitter.worldSpace="true" ParticleEmitter.playOnStart="true" ParticleEmitter.duration="0" ParticleEmitter.loop="false" ParticleEmitter.seed="103" ParticleEmitter.texturePath="" ParticleEmitter.opacity="0.72" ParticleEmitter.blendMode="0" ParticleEmitter.collisionMode="0" ParticleEmitter.useGpuSimulation="false">
+          <ParticleEmitter.direction><item>0</item><item>1</item><item>0</item></ParticleEmitter.direction>
+          <ParticleEmitter.gravity><item>0</item><item>-0.25</item><item>0</item></ParticleEmitter.gravity>
+          <ParticleEmitter.color><item>0.35</item><item>1</item><item>0.7</item></ParticleEmitter.color>
+          <ParticleEmitter.boxExtents><item>1.45</item><item>0.45</item><item>1.45</item></ParticleEmitter.boxExtents>
+        </components:ParticleEmitter>
+      </components>
+      <children />
+    </item>
+    <item name="Load 05 | cloud" enabled="true">
+      <transform>
+        <Transform.position><item>-6</item><item>1.7</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:ParticleEmitter ParticleEmitter.rate="4000" ParticleEmitter.burstOnStart="0" ParticleEmitter.maxParticles="6000" ParticleEmitter.lifetime="1.3" ParticleEmitter.speed="1" ParticleEmitter.spreadDegrees="28" ParticleEmitter.drag="0.18" ParticleEmitter.size="0.045" ParticleEmitter.shape="2" ParticleEmitter.sphereRadius="1.35" ParticleEmitter.worldSpace="true" ParticleEmitter.playOnStart="true" ParticleEmitter.duration="0" ParticleEmitter.loop="false" ParticleEmitter.seed="104" ParticleEmitter.texturePath="" ParticleEmitter.opacity="0.72" ParticleEmitter.blendMode="0" ParticleEmitter.collisionMode="0" ParticleEmitter.useGpuSimulation="false">
+          <ParticleEmitter.direction><item>0</item><item>1</item><item>0</item></ParticleEmitter.direction>
+          <ParticleEmitter.gravity><item>0</item><item>0.35</item><item>0</item></ParticleEmitter.gravity>
+          <ParticleEmitter.color><item>0.94</item><item>0.28</item><item>1</item></ParticleEmitter.color>
+          <ParticleEmitter.boxExtents><item>1.45</item><item>0.45</item><item>1.45</item></ParticleEmitter.boxExtents>
+        </components:ParticleEmitter>
+      </components>
+      <children />
+    </item>
+    <item name="Load 06 | cloud" enabled="true">
+      <transform>
+        <Transform.position><item>-2</item><item>1.7</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:ParticleEmitter ParticleEmitter.rate="4000" ParticleEmitter.burstOnStart="0" ParticleEmitter.maxParticles="6000" ParticleEmitter.lifetime="1.3" ParticleEmitter.speed="1" ParticleEmitter.spreadDegrees="28" ParticleEmitter.drag="0.18" ParticleEmitter.size="0.045" ParticleEmitter.shape="2" ParticleEmitter.sphereRadius="1.35" ParticleEmitter.worldSpace="true" ParticleEmitter.playOnStart="true" ParticleEmitter.duration="0" ParticleEmitter.loop="false" ParticleEmitter.seed="105" ParticleEmitter.texturePath="" ParticleEmitter.opacity="0.72" ParticleEmitter.blendMode="0" ParticleEmitter.collisionMode="0" ParticleEmitter.useGpuSimulation="false">
+          <ParticleEmitter.direction><item>0</item><item>1</item><item>0</item></ParticleEmitter.direction>
+          <ParticleEmitter.gravity><item>0</item><item>0.35</item><item>0</item></ParticleEmitter.gravity>
+          <ParticleEmitter.color><item>0.3</item><item>0.46</item><item>1</item></ParticleEmitter.color>
+          <ParticleEmitter.boxExtents><item>1.45</item><item>0.45</item><item>1.45</item></ParticleEmitter.boxExtents>
+        </components:ParticleEmitter>
+      </components>
+      <children />
+    </item>
+    <item name="Load 07 | cloud" enabled="true">
+      <transform>
+        <Transform.position><item>2</item><item>1.7</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:ParticleEmitter ParticleEmitter.rate="4000" ParticleEmitter.burstOnStart="0" ParticleEmitter.maxParticles="6000" ParticleEmitter.lifetime="1.3" ParticleEmitter.speed="1" ParticleEmitter.spreadDegrees="28" ParticleEmitter.drag="0.18" ParticleEmitter.size="0.045" ParticleEmitter.shape="2" ParticleEmitter.sphereRadius="1.35" ParticleEmitter.worldSpace="true" ParticleEmitter.playOnStart="true" ParticleEmitter.duration="0" ParticleEmitter.loop="false" ParticleEmitter.seed="106" ParticleEmitter.texturePath="" ParticleEmitter.opacity="0.72" ParticleEmitter.blendMode="0" ParticleEmitter.collisionMode="0" ParticleEmitter.useGpuSimulation="false">
+          <ParticleEmitter.direction><item>0</item><item>1</item><item>0</item></ParticleEmitter.direction>
+          <ParticleEmitter.gravity><item>0</item><item>0.35</item><item>0</item></ParticleEmitter.gravity>
+          <ParticleEmitter.color><item>1</item><item>0.43</item><item>0.45</item></ParticleEmitter.color>
+          <ParticleEmitter.boxExtents><item>1.45</item><item>0.45</item><item>1.45</item></ParticleEmitter.boxExtents>
+        </components:ParticleEmitter>
+      </components>
+      <children />
+    </item>
+    <item name="Load 08 | cloud" enabled="true">
+      <transform>
+        <Transform.position><item>6</item><item>1.7</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:ParticleEmitter ParticleEmitter.rate="4000" ParticleEmitter.burstOnStart="0" ParticleEmitter.maxParticles="6000" ParticleEmitter.lifetime="1.3" ParticleEmitter.speed="1" ParticleEmitter.spreadDegrees="28" ParticleEmitter.drag="0.18" ParticleEmitter.size="0.045" ParticleEmitter.shape="2" ParticleEmitter.sphereRadius="1.35" ParticleEmitter.worldSpace="true" ParticleEmitter.playOnStart="true" ParticleEmitter.duration="0" ParticleEmitter.loop="false" ParticleEmitter.seed="107" ParticleEmitter.texturePath="" ParticleEmitter.opacity="0.72" ParticleEmitter.blendMode="0" ParticleEmitter.collisionMode="0" ParticleEmitter.useGpuSimulation="false">
+          <ParticleEmitter.direction><item>0</item><item>1</item><item>0</item></ParticleEmitter.direction>
+          <ParticleEmitter.gravity><item>0</item><item>0.35</item><item>0</item></ParticleEmitter.gravity>
+          <ParticleEmitter.color><item>0.75</item><item>1</item><item>0.33</item></ParticleEmitter.color>
+          <ParticleEmitter.boxExtents><item>1.45</item><item>0.45</item><item>1.45</item></ParticleEmitter.boxExtents>
+        </components:ParticleEmitter>
+      </components>
+      <children />
+    </item>
+    <item name="Load 09 | crossflow" enabled="true">
+      <transform>
+        <Transform.position><item>-6</item><item>0.65</item><item>4</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:ParticleEmitter ParticleEmitter.rate="4000" ParticleEmitter.burstOnStart="0" ParticleEmitter.maxParticles="6000" ParticleEmitter.lifetime="1.3" ParticleEmitter.speed="0.65" ParticleEmitter.spreadDegrees="75" ParticleEmitter.drag="0.45" ParticleEmitter.size="0.035" ParticleEmitter.shape="1" ParticleEmitter.sphereRadius="1.35" ParticleEmitter.worldSpace="true" ParticleEmitter.playOnStart="true" ParticleEmitter.duration="0" ParticleEmitter.loop="false" ParticleEmitter.seed="108" ParticleEmitter.texturePath="" ParticleEmitter.opacity="0.72" ParticleEmitter.blendMode="0" ParticleEmitter.collisionMode="0" ParticleEmitter.useGpuSimulation="false">
+          <ParticleEmitter.direction><item>0</item><item>0</item><item>1</item></ParticleEmitter.direction>
+          <ParticleEmitter.gravity><item>0</item><item>0</item><item>0</item></ParticleEmitter.gravity>
+          <ParticleEmitter.color><item>0.34</item><item>1</item><item>0.97</item></ParticleEmitter.color>
+          <ParticleEmitter.boxExtents><item>1.45</item><item>0.45</item><item>1.45</item></ParticleEmitter.boxExtents>
+        </components:ParticleEmitter>
+      </components>
+      <children />
+    </item>
+    <item name="Load 10 | crossflow" enabled="true">
+      <transform>
+        <Transform.position><item>-2</item><item>0.65</item><item>4</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:ParticleEmitter ParticleEmitter.rate="4000" ParticleEmitter.burstOnStart="0" ParticleEmitter.maxParticles="6000" ParticleEmitter.lifetime="1.3" ParticleEmitter.speed="0.65" ParticleEmitter.spreadDegrees="75" ParticleEmitter.drag="0.45" ParticleEmitter.size="0.035" ParticleEmitter.shape="1" ParticleEmitter.sphereRadius="1.35" ParticleEmitter.worldSpace="true" ParticleEmitter.playOnStart="true" ParticleEmitter.duration="0" ParticleEmitter.loop="false" ParticleEmitter.seed="109" ParticleEmitter.texturePath="" ParticleEmitter.opacity="0.72" ParticleEmitter.blendMode="0" ParticleEmitter.collisionMode="0" ParticleEmitter.useGpuSimulation="false">
+          <ParticleEmitter.direction><item>0</item><item>0</item><item>1</item></ParticleEmitter.direction>
+          <ParticleEmitter.gravity><item>0</item><item>0</item><item>0</item></ParticleEmitter.gravity>
+          <ParticleEmitter.color><item>1</item><item>0.48</item><item>0.12</item></ParticleEmitter.color>
+          <ParticleEmitter.boxExtents><item>1.45</item><item>0.45</item><item>1.45</item></ParticleEmitter.boxExtents>
+        </components:ParticleEmitter>
+      </components>
+      <children />
+    </item>
+    <item name="Load 11 | crossflow" enabled="true">
+      <transform>
+        <Transform.position><item>2</item><item>0.65</item><item>4</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:ParticleEmitter ParticleEmitter.rate="4000" ParticleEmitter.burstOnStart="0" ParticleEmitter.maxParticles="6000" ParticleEmitter.lifetime="1.3" ParticleEmitter.speed="0.65" ParticleEmitter.spreadDegrees="75" ParticleEmitter.drag="0.45" ParticleEmitter.size="0.035" ParticleEmitter.shape="1" ParticleEmitter.sphereRadius="1.35" ParticleEmitter.worldSpace="true" ParticleEmitter.playOnStart="true" ParticleEmitter.duration="0" ParticleEmitter.loop="false" ParticleEmitter.seed="110" ParticleEmitter.texturePath="" ParticleEmitter.opacity="0.72" ParticleEmitter.blendMode="0" ParticleEmitter.collisionMode="0" ParticleEmitter.useGpuSimulation="false">
+          <ParticleEmitter.direction><item>0</item><item>0</item><item>1</item></ParticleEmitter.direction>
+          <ParticleEmitter.gravity><item>0</item><item>0</item><item>0</item></ParticleEmitter.gravity>
+          <ParticleEmitter.color><item>0.55</item><item>0.4</item><item>1</item></ParticleEmitter.color>
+          <ParticleEmitter.boxExtents><item>1.45</item><item>0.45</item><item>1.45</item></ParticleEmitter.boxExtents>
+        </components:ParticleEmitter>
+      </components>
+      <children />
+    </item>
+    <item name="Load 12 | crossflow" enabled="true">
+      <transform>
+        <Transform.position><item>6</item><item>0.65</item><item>4</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:ParticleEmitter ParticleEmitter.rate="4000" ParticleEmitter.burstOnStart="0" ParticleEmitter.maxParticles="6000" ParticleEmitter.lifetime="1.3" ParticleEmitter.speed="0.65" ParticleEmitter.spreadDegrees="75" ParticleEmitter.drag="0.45" ParticleEmitter.size="0.035" ParticleEmitter.shape="1" ParticleEmitter.sphereRadius="1.35" ParticleEmitter.worldSpace="true" ParticleEmitter.playOnStart="true" ParticleEmitter.duration="0" ParticleEmitter.loop="false" ParticleEmitter.seed="111" ParticleEmitter.texturePath="" ParticleEmitter.opacity="0.72" ParticleEmitter.blendMode="0" ParticleEmitter.collisionMode="0" ParticleEmitter.useGpuSimulation="false">
+          <ParticleEmitter.direction><item>0</item><item>0</item><item>1</item></ParticleEmitter.direction>
+          <ParticleEmitter.gravity><item>0</item><item>0</item><item>0</item></ParticleEmitter.gravity>
+          <ParticleEmitter.color><item>1</item><item>0.86</item><item>0.45</item></ParticleEmitter.color>
+          <ParticleEmitter.boxExtents><item>1.45</item><item>0.45</item><item>1.45</item></ParticleEmitter.boxExtents>
+        </components:ParticleEmitter>
+      </components>
+      <children />
+    </item>
+    <item name="Periodic Burst | 8000 particles" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>2.7</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:ParticleEmitter ParticleEmitter.rate="0" ParticleEmitter.burstOnStart="8000" ParticleEmitter.maxParticles="8000" ParticleEmitter.lifetime="0.45" ParticleEmitter.speed="5" ParticleEmitter.spreadDegrees="180" ParticleEmitter.drag="0.35" ParticleEmitter.size="0.026" ParticleEmitter.shape="2" ParticleEmitter.sphereRadius="0.6" ParticleEmitter.worldSpace="true" ParticleEmitter.playOnStart="true" ParticleEmitter.duration="2" ParticleEmitter.loop="true" ParticleEmitter.seed="999" ParticleEmitter.texturePath="" ParticleEmitter.opacity="0.6" ParticleEmitter.blendMode="0" ParticleEmitter.collisionMode="0" ParticleEmitter.useGpuSimulation="false">
+          <ParticleEmitter.direction><item>0</item><item>1</item><item>0</item></ParticleEmitter.direction>
+          <ParticleEmitter.gravity><item>0</item><item>0</item><item>0</item></ParticleEmitter.gravity>
+          <ParticleEmitter.color><item>1</item><item>1</item><item>1</item></ParticleEmitter.color>
+          <ParticleEmitter.boxExtents><item>0.35</item><item>0.12</item><item>0.35</item></ParticleEmitter.boxExtents>
+        </components:ParticleEmitter>
+      </components>
+      <children />
+    </item>
+  </objects>
+</Scene>

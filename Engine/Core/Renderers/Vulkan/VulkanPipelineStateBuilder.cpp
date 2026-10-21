@@ -7,6 +7,82 @@
 
 namespace Engine::Renderers
 {
+VulkanComputePipeline::~VulkanComputePipeline()
+{
+    if (m_pipeline) vkDestroyPipeline(m_device, m_pipeline, nullptr);
+    if (m_layout) vkDestroyPipelineLayout(m_device, m_layout, nullptr);
+    if (m_setLayout) vkDestroyDescriptorSetLayout(m_device, m_setLayout, nullptr);
+}
+
+std::unique_ptr<Engine::Graphics::IPipelineState>
+VulkanPipelineStateFactory::CreateComputePipeline(
+    const Engine::Graphics::IShader* shader)
+{
+    if (!m_device || !shader || !shader->GetBytecode() ||
+        !shader->GetBytecodeSize()) return nullptr;
+    VkDescriptorSetLayoutBinding bindings[2]{};
+    for (uint32_t index = 0; index < 2; ++index)
+    {
+        bindings[index].binding = index;
+        bindings[index].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        bindings[index].descriptorCount = 1;
+        bindings[index].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    }
+    VkDescriptorSetLayoutCreateInfo setInfo{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+    setInfo.bindingCount = 2;
+    setInfo.pBindings = bindings;
+    VkDescriptorSetLayout setLayout = VK_NULL_HANDLE;
+    if (vkCreateDescriptorSetLayout(m_device, &setInfo, nullptr,
+        &setLayout) != VK_SUCCESS) return nullptr;
+    VkPushConstantRange push{};
+    push.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    push.size = 128;
+    VkPipelineLayoutCreateInfo layoutInfo{
+        VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+    layoutInfo.setLayoutCount = 1;
+    layoutInfo.pSetLayouts = &setLayout;
+    layoutInfo.pushConstantRangeCount = 1;
+    layoutInfo.pPushConstantRanges = &push;
+    VkPipelineLayout layout = VK_NULL_HANDLE;
+    if (vkCreatePipelineLayout(m_device, &layoutInfo, nullptr,
+        &layout) != VK_SUCCESS)
+    {
+        vkDestroyDescriptorSetLayout(m_device, setLayout, nullptr);
+        return nullptr;
+    }
+    VkShaderModuleCreateInfo moduleInfo{
+        VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+    moduleInfo.codeSize = shader->GetBytecodeSize();
+    moduleInfo.pCode = static_cast<const uint32_t*>(shader->GetBytecode());
+    VkShaderModule module = VK_NULL_HANDLE;
+    if (vkCreateShaderModule(m_device, &moduleInfo, nullptr,
+        &module) != VK_SUCCESS)
+    {
+        vkDestroyPipelineLayout(m_device, layout, nullptr);
+        vkDestroyDescriptorSetLayout(m_device, setLayout, nullptr);
+        return nullptr;
+    }
+    VkComputePipelineCreateInfo pipelineInfo{
+        VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+    pipelineInfo.layout = layout;
+    pipelineInfo.stage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+    pipelineInfo.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    pipelineInfo.stage.module = module;
+    pipelineInfo.stage.pName = "main";
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    const VkResult result = vkCreateComputePipelines(m_device, VK_NULL_HANDLE,
+        1, &pipelineInfo, nullptr, &pipeline);
+    vkDestroyShaderModule(m_device, module, nullptr);
+    if (result != VK_SUCCESS)
+    {
+        vkDestroyPipelineLayout(m_device, layout, nullptr);
+        vkDestroyDescriptorSetLayout(m_device, setLayout, nullptr);
+        return nullptr;
+    }
+    return std::make_unique<VulkanComputePipeline>(m_device, pipeline,
+        layout, setLayout);
+}
 VulkanPipelineState::~VulkanPipelineState()
 {
     if (m_pipeline) vkDestroyPipeline(m_device, m_pipeline, nullptr);

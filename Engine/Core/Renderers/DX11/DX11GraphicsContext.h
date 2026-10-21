@@ -92,6 +92,15 @@ public:
     void SetStencilReference(uint32_t reference) override;
     void SetConstantBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint64_t offset = 0) override;
     void SetStructuredBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer) override;
+    bool SetComputePipeline(const Engine::Graphics::IPipelineState* pipeline) override;
+    void SetComputeConstants(const void* data, uint32_t size) override;
+    void SetComputeReadBuffer(const Engine::Graphics::IGraphicsBuffer* buffer) override;
+    void SetComputeWriteBuffer(const Engine::Graphics::IGraphicsBuffer* buffer) override;
+    void DispatchCompute(uint32_t x, uint32_t y = 1, uint32_t z = 1) override;
+    void StorageBarrier(const Engine::Graphics::IGraphicsBuffer* buffer) override;
+    bool CopyBuffer(const Engine::Graphics::IGraphicsBuffer* source,
+        Engine::Graphics::IGraphicsBuffer* destination,
+        uint64_t bytes = 0) override;
     void SetVertexBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset = 0) override;
     void SetIndexBuffer(const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t indexCount, uint64_t offset = 0) override;
     void SetTexture(uint32_t slot, const Engine::Graphics::IGraphicsTexture* texture) override;
@@ -119,6 +128,7 @@ private:
     ID3D11Device* m_device = nullptr;
     ID3D11DeviceContext* m_context = nullptr;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext1> m_context1;
+    Microsoft::WRL::ComPtr<ID3D11Buffer> m_computeConstants;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilState> m_depthStencilState;
     const Engine::Graphics::IPipelineState* m_boundPipeline = nullptr;
     std::array<ID3D11ShaderResourceView*,

@@ -2,6 +2,7 @@
 
 #include "ParticleState.h"
 #include <cstddef>
+#include <cstdint>
 
 namespace Engine::Components
 {
@@ -20,6 +21,9 @@ class IParticleSolver
 public:
     virtual ~IParticleSolver() = default;
     virtual void Reset() {}
+    // Called before a particle leaves the dense live array, including expiry,
+    // solver death, and budget truncation. Release solver-owned data keyed by id.
+    virtual void OnParticleRemoved(uint64_t id) { (void)id; }
     virtual void Step(ParticleState* particles, size_t count, float seconds,
         const ParticleStepForces& forces) = 0;
 };

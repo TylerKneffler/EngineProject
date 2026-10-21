@@ -27,7 +27,9 @@ void* D3D12GraphicsBuffer::Map()
     if (m_access == AccessMode::Default)
         throw std::runtime_error("Cannot map a Default access buffer");
 
-    D3D12_RANGE readRange = { 0, 0 };  // We're writing, no read range needed
+    D3D12_RANGE readRange = m_access == AccessMode::Readback
+        ? D3D12_RANGE{ 0, static_cast<SIZE_T>(m_size) }
+        : D3D12_RANGE{ 0, 0 };
     HRESULT hr = m_resource->Map(0, &readRange, &m_mappedData);
     if (FAILED(hr))
         throw std::runtime_error("Failed to map D3D12 buffer");
@@ -93,6 +95,9 @@ std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D12BufferFactory::CreateBuf
             case Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource:
                 initialState = D3D12_RESOURCE_STATE_COMMON;
                 break;
+            case Engine::Graphics::IGraphicsBuffer::Usage::StorageBuffer:
+                initialState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+                break;
         }
     }
 
@@ -108,6 +113,9 @@ std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D12BufferFactory::CreateBuf
     bufDesc.Format = DXGI_FORMAT_UNKNOWN;
     bufDesc.SampleDesc.Count = 1;
     bufDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    if (usage == Engine::Graphics::IGraphicsBuffer::Usage::StorageBuffer &&
+        access == Engine::Graphics::IGraphicsBuffer::AccessMode::Default)
+        bufDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
     Microsoft::WRL::ComPtr<ID3D12Resource> resource;
     HRESULT hr = m_device->CreateCommittedResource(
@@ -122,6 +130,7 @@ std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D12BufferFactory::CreateBuf
         throw std::runtime_error("Failed to create D3D12 buffer");
 
     auto buffer = std::make_unique<D3D12GraphicsBuffer>(resource, usage, access, sizeBytes);
+    buffer->SetResourceState(initialState);
     buffer->SetElementStride(elementStride);
 
     // If initial data provided, copy it

@@ -58,7 +58,7 @@ public:
     std::function<void(const std::string&)> OnInteractionLog;
 
 private:
-    enum class PendingAddType { Empty, Primitive3D, Sprite, LightProbe,
+    enum class PendingAddType { Empty, Primitive3D, Sprite, ParticleEmitter, LightProbe,
         LightProbeGroup };
     enum class PendingPrefabAction { None, Apply, ApplyAll, Revert, Unpack };
     void DrawObjectNode(IEditorUi& ui, Engine::Core::Object* obj, int depth,

@@ -21,6 +21,7 @@ public:
         VertexBuffer,
         IndexBuffer,
         ShaderResource,
+        StorageBuffer, // GPU writable structured data, also readable by shaders.
     };
 
     enum class AccessMode

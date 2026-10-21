@@ -1,0 +1,33 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug {{PROJECT_NAME}} Editor",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/Debug/Engine/Debug/Editor.exe",
+      "args": ["${workspaceFolder}/{{PROJECT_NAME}}.proj"],
+      "cwd": "${workspaceFolder}",
+      "stopAtEntry": false,
+      "preLaunchTask": "CMake: Build Editor Debug",
+      "symbolOptions": {
+        "searchPaths": [
+          "${workspaceFolder}/build/Debug/Engine/lib/Debug",
+          "${workspaceFolder}/build/Debug/.hotreload"
+        ]
+      }
+    },
+    {
+      "name": "Attach to {{PROJECT_NAME}} Editor",
+      "type": "cppvsdbg",
+      "request": "attach",
+      "processId": "${command:pickProcess}",
+      "symbolOptions": {
+        "searchPaths": [
+          "${workspaceFolder}/build/Debug/Engine/lib/Debug",
+          "${workspaceFolder}/build/Debug/.hotreload"
+        ]
+      }
+    }
+  ]
+}

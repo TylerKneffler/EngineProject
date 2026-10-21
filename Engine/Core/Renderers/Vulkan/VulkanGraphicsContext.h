@@ -12,6 +12,7 @@ class VulkanPipelineState;
 class VulkanGraphicsBuffer;
 struct VulkanOcclusionQueryState;
 struct VulkanGpuTimingState;
+struct VulkanComputeDescriptorArena;
 class VulkanGraphicsContext : public Engine::Graphics::IGraphicsContext
 {
 public:
@@ -19,13 +20,24 @@ public:
         VkCommandBuffer commandBuffer,
         std::shared_ptr<VulkanTextureSystem> textureSystem,
         std::shared_ptr<VulkanOcclusionQueryState> occlusionState,
-        std::shared_ptr<VulkanGpuTimingState> gpuTimings)
+        std::shared_ptr<VulkanGpuTimingState> gpuTimings,
+        std::shared_ptr<VulkanComputeDescriptorArena> computeDescriptors)
         : m_commandBuffer(commandBuffer), m_textureSystem(std::move(textureSystem)),
-          m_occlusionState(std::move(occlusionState)), m_gpuTimings(std::move(gpuTimings)) {}
+          m_occlusionState(std::move(occlusionState)), m_gpuTimings(std::move(gpuTimings)),
+          m_computeDescriptors(std::move(computeDescriptors)) {}
     void SetPipeline(const Engine::Graphics::IPipelineState* pipeline) override;
     void SetStencilReference(uint32_t reference) override;
     void SetConstantBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint64_t offset = 0) override;
     void SetStructuredBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer) override;
+    bool SetComputePipeline(const Engine::Graphics::IPipelineState* pipeline) override;
+    void SetComputeConstants(const void* data, uint32_t size) override;
+    void SetComputeReadBuffer(const Engine::Graphics::IGraphicsBuffer* buffer) override;
+    void SetComputeWriteBuffer(const Engine::Graphics::IGraphicsBuffer* buffer) override;
+    void DispatchCompute(uint32_t x, uint32_t y = 1, uint32_t z = 1) override;
+    void StorageBarrier(const Engine::Graphics::IGraphicsBuffer* buffer) override;
+    bool CopyBuffer(const Engine::Graphics::IGraphicsBuffer* source,
+        Engine::Graphics::IGraphicsBuffer* destination,
+        uint64_t bytes = 0) override;
     void SetVertexBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset = 0) override;
     void SetIndexBuffer(const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t indexCount, uint64_t offset = 0) override;
     void SetTexture(uint32_t slot, const Engine::Graphics::IGraphicsTexture* texture) override;
@@ -49,6 +61,10 @@ public:
 private:
     VkCommandBuffer m_commandBuffer;
     const VulkanPipelineState* m_pipeline = nullptr;
+    const class VulkanComputePipeline* m_computePipeline = nullptr;
+    const VulkanGraphicsBuffer* m_computeRead = nullptr;
+    const VulkanGraphicsBuffer* m_computeWrite = nullptr;
+    std::shared_ptr<VulkanComputeDescriptorArena> m_computeDescriptors;
     std::shared_ptr<VulkanTextureSystem> m_textureSystem;
     std::array<const VulkanGraphicsTexture*, 24> m_textures{};
     std::array<const VulkanGraphicsBuffer*, 7> m_structuredBuffers{};
@@ -75,7 +91,8 @@ public:
     {
         return m_commandBuffer
             ? std::make_unique<VulkanGraphicsContext>(
-                m_commandBuffer, m_textureSystem, m_occlusionState, m_gpuTimings)
+                m_commandBuffer, m_textureSystem, m_occlusionState, m_gpuTimings,
+                m_computeDescriptors)
             : nullptr;
     }
     void SetDevice(VkDevice device, float timestampPeriod);
@@ -88,6 +105,7 @@ private:
     std::shared_ptr<VulkanTextureSystem> m_textureSystem;
     std::shared_ptr<VulkanOcclusionQueryState> m_occlusionState;
     std::shared_ptr<VulkanGpuTimingState> m_gpuTimings;
+    std::shared_ptr<VulkanComputeDescriptorArena> m_computeDescriptors;
 };
 }
 #endif

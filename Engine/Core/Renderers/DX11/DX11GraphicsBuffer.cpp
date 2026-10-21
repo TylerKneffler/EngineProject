@@ -22,6 +22,22 @@ D3D11GraphicsBuffer::D3D11GraphicsBuffer(
 
 void* D3D11GraphicsBuffer::Map()
 {
+    if (m_access == AccessMode::Readback)
+    {
+        if (m_readbackContext) return nullptr;
+        Microsoft::WRL::ComPtr<ID3D11Device> device;
+        m_buffer->GetDevice(&device);
+        if (!device) return nullptr;
+        device->GetImmediateContext(&m_readbackContext);
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        if (!m_readbackContext || FAILED(m_readbackContext->Map(m_buffer.Get(),
+            0, D3D11_MAP_READ, 0, &mapped)))
+        {
+            m_readbackContext.Reset();
+            return nullptr;
+        }
+        return mapped.pData;
+    }
     if (m_access != AccessMode::Upload)
         throw std::runtime_error("Only upload buffers are CPU-writable in the DX11 backend");
     return m_shadowData.data();
@@ -29,6 +45,13 @@ void* D3D11GraphicsBuffer::Map()
 
 void D3D11GraphicsBuffer::Unmap()
 {
+    if (m_access == AccessMode::Readback)
+    {
+        if (m_readbackContext)
+            m_readbackContext->Unmap(m_buffer.Get(), 0);
+        m_readbackContext.Reset();
+        return;
+    }
     // Map() exposes the CPU shadow for every upload-buffer usage.  Callers
     // reasonably expect Unmap() to publish those writes regardless of whether
     // the buffer contains vertices, indices, constants, or structured data.
@@ -116,7 +139,14 @@ std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D11BufferFactory::CreateBuf
         case Engine::Graphics::IGraphicsBuffer::Usage::VertexBuffer: desc.BindFlags = D3D11_BIND_VERTEX_BUFFER; break;
         case Engine::Graphics::IGraphicsBuffer::Usage::IndexBuffer: desc.BindFlags = D3D11_BIND_INDEX_BUFFER; break;
         case Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource:
+        case Engine::Graphics::IGraphicsBuffer::Usage::StorageBuffer:
             desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+            if (usage == Engine::Graphics::IGraphicsBuffer::Usage::StorageBuffer)
+            {
+                if (access == Engine::Graphics::IGraphicsBuffer::AccessMode::Upload)
+                    throw std::runtime_error("Writable DX11 storage requires Default access");
+                desc.BindFlags |= D3D11_BIND_UNORDERED_ACCESS;
+            }
             if (!elementStride || sizeBytes % elementStride != 0)
                 throw std::runtime_error("Structured DX11 buffers require a valid element stride");
             desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
@@ -124,14 +154,20 @@ std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D11BufferFactory::CreateBuf
             break;
     }
     if (access == Engine::Graphics::IGraphicsBuffer::AccessMode::Readback)
+    {
         desc.BindFlags = 0;
+        desc.MiscFlags = 0;
+        desc.StructureByteStride = 0;
+    }
 
     D3D11_SUBRESOURCE_DATA data{};
     data.pSysMem = initialData;
     Microsoft::WRL::ComPtr<ID3D11Buffer> buffer;
     ThrowIfFailed(m_device->CreateBuffer(&desc, initialData ? &data : nullptr, &buffer));
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv;
-    if (usage == Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource)
+    if (access != Engine::Graphics::IGraphicsBuffer::AccessMode::Readback &&
+        (usage == Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource ||
+         usage == Engine::Graphics::IGraphicsBuffer::Usage::StorageBuffer))
     {
         D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
         srvDesc.Format = DXGI_FORMAT_UNKNOWN;
@@ -139,7 +175,20 @@ std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D11BufferFactory::CreateBuf
         srvDesc.Buffer.NumElements = static_cast<UINT>(sizeBytes / elementStride);
         ThrowIfFailed(m_device->CreateShaderResourceView(buffer.Get(), &srvDesc, &srv));
     }
-    return std::make_unique<D3D11GraphicsBuffer>(
+    auto result = std::make_unique<D3D11GraphicsBuffer>(
         std::move(buffer), usage, access, sizeBytes, initialData, elementStride, std::move(srv));
+    if (usage == Engine::Graphics::IGraphicsBuffer::Usage::StorageBuffer &&
+        access == Engine::Graphics::IGraphicsBuffer::AccessMode::Default)
+    {
+        D3D11_UNORDERED_ACCESS_VIEW_DESC viewDesc{};
+        viewDesc.Format = DXGI_FORMAT_UNKNOWN;
+        viewDesc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
+        viewDesc.Buffer.NumElements = static_cast<UINT>(sizeBytes / elementStride);
+        Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> view;
+        ThrowIfFailed(m_device->CreateUnorderedAccessView(result->GetBuffer(),
+            &viewDesc, &view));
+        result->SetUnorderedAccessView(std::move(view));
+    }
+    return result;
 }
 }

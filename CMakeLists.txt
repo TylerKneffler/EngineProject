@@ -468,6 +468,85 @@ if(ENGINE_VULKAN_ENABLED)
             list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
         endforeach()
     endforeach()
+    foreach(SHADER_ENTRY CSClear CSUpdate CSSpawn)
+        set(SHADER_SOURCE
+            "${ENGINE_ROOT}/Engine/Core/Shaders/ParticleGpu/ParticleGpu.hlsl")
+        set(SHADER_OUTPUT
+            "${VULKAN_SHADER_DIR}/ParticleGpu.${SHADER_ENTRY}.CS.spv")
+        add_custom_command(
+            OUTPUT "${SHADER_OUTPUT}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${VULKAN_SHADER_DIR}"
+            COMMAND "${DXC_SPIRV_EXECUTABLE}" -spirv -fspv-target-env=vulkan1.1
+                    -fvk-use-dx-layout -fspv-entrypoint-name=main
+                    -D VULKAN=1 -T cs_6_0
+                    -E ${SHADER_ENTRY} -Fo "${SHADER_OUTPUT}" "${SHADER_SOURCE}"
+            DEPENDS "${SHADER_SOURCE}"
+            VERBATIM
+            COMMENT "Compiling ParticleGpu.${SHADER_ENTRY}.CS for Vulkan"
+        )
+        list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
+    endforeach()
+    foreach(SHADER_SPEC
+            "ParticleNeighborBuild:CSClear"
+            "ParticleNeighborBuild:CSBuild"
+            "ParticleNeighborQuery:CSQuery")
+        string(REPLACE ":" ";" SHADER_PARTS "${SHADER_SPEC}")
+        list(GET SHADER_PARTS 0 SHADER_NAME)
+        list(GET SHADER_PARTS 1 SHADER_ENTRY)
+        set(SHADER_SOURCE
+            "${ENGINE_ROOT}/Engine/Core/Shaders/ParticleGpu/${SHADER_NAME}.hlsl")
+        set(SHADER_OUTPUT
+            "${VULKAN_SHADER_DIR}/${SHADER_NAME}.${SHADER_ENTRY}.CS.spv")
+        add_custom_command(
+            OUTPUT "${SHADER_OUTPUT}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${VULKAN_SHADER_DIR}"
+            COMMAND "${DXC_SPIRV_EXECUTABLE}" -spirv -fspv-target-env=vulkan1.1
+                    -fvk-use-dx-layout -fspv-entrypoint-name=main
+                    -D VULKAN=1 -T cs_6_0
+                    -E ${SHADER_ENTRY} -Fo "${SHADER_OUTPUT}" "${SHADER_SOURCE}"
+            DEPENDS "${SHADER_SOURCE}"
+            VERBATIM
+            COMMENT "Compiling ${SHADER_NAME}.${SHADER_ENTRY}.CS for Vulkan"
+        )
+        list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
+    endforeach()
+    set(SHADER_SOURCE
+        "${ENGINE_ROOT}/Engine/Core/Shaders/Particle/Particle.hlsl")
+    set(SHADER_OUTPUT
+        "${VULKAN_SHADER_DIR}/Particle.VSMainGpu.VS.spv")
+    add_custom_command(
+        OUTPUT "${SHADER_OUTPUT}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${VULKAN_SHADER_DIR}"
+        COMMAND "${DXC_SPIRV_EXECUTABLE}" -spirv -fspv-target-env=vulkan1.1
+                -fvk-use-dx-layout -fspv-entrypoint-name=VSMain
+                -D VULKAN=1 -T vs_6_0
+                -E VSMainGpu -Fo "${SHADER_OUTPUT}" "${SHADER_SOURCE}"
+        DEPENDS "${SHADER_SOURCE}"
+        VERBATIM
+        COMMENT "Compiling Particle.VSMainGpu.VS for Vulkan"
+    )
+    list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
+    foreach(SHADER_SPEC "VSMainFluid:VS:vs_6_0:VSMain" "PSMainFluid:PS:ps_6_0:PSMain")
+        string(REPLACE ":" ";" SHADER_PARTS "${SHADER_SPEC}")
+        list(GET SHADER_PARTS 0 SHADER_ENTRY)
+        list(GET SHADER_PARTS 1 SHADER_STAGE)
+        list(GET SHADER_PARTS 2 SHADER_PROFILE)
+        list(GET SHADER_PARTS 3 SPIRV_ENTRY)
+        set(SHADER_OUTPUT
+            "${VULKAN_SHADER_DIR}/Particle.${SHADER_ENTRY}.${SHADER_STAGE}.spv")
+        add_custom_command(
+            OUTPUT "${SHADER_OUTPUT}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${VULKAN_SHADER_DIR}"
+            COMMAND "${DXC_SPIRV_EXECUTABLE}" -spirv -fspv-target-env=vulkan1.1
+                    -fvk-use-dx-layout -fspv-entrypoint-name=${SPIRV_ENTRY}
+                    -D VULKAN=1 -T ${SHADER_PROFILE}
+                    -E ${SHADER_ENTRY} -Fo "${SHADER_OUTPUT}" "${SHADER_SOURCE}"
+            DEPENDS "${SHADER_SOURCE}"
+            VERBATIM
+            COMMENT "Compiling Particle.${SHADER_ENTRY}.${SHADER_STAGE} for Vulkan"
+        )
+        list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
+    endforeach()
     foreach(SHADER_NAME Object ObjectOutline)
         set(SHADER_SOURCE
             "${ENGINE_ROOT}/Engine/Core/Shaders/${SHADER_NAME}/${SHADER_NAME}.hlsl")
@@ -1123,6 +1202,42 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/GpuComputeTests.cpp")
+    enable_testing()
+    add_executable(GpuComputeTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/GpuComputeTests.cpp")
+    target_link_libraries(GpuComputeTests PRIVATE Engine)
+    target_include_directories(GpuComputeTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME GpuComputeRegression COMMAND GpuComputeTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/GpuParticleBackendsTests.cpp")
+    enable_testing()
+    add_executable(GpuParticleBackendsTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/GpuParticleBackendsTests.cpp")
+    target_link_libraries(GpuParticleBackendsTests PRIVATE Engine)
+    target_include_directories(GpuParticleBackendsTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME GpuParticleDX11Regression COMMAND GpuParticleBackendsTests DX11)
+    add_test(NAME GpuParticleDX12Regression COMMAND GpuParticleBackendsTests DX12)
+    if(ENGINE_VULKAN_ENABLED)
+        add_test(NAME GpuParticleVulkanRegression COMMAND GpuParticleBackendsTests Vulkan)
+    endif()
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND ENGINE_VULKAN_ENABLED AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/GpuParticleImageComparison.py")
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME GpuParticleImageComparison
+            COMMAND "${Python3_EXECUTABLE}"
+                "${ENGINE_LOCAL_TEST_ROOT}/GpuParticleImageComparison.py")
+        set_tests_properties(GpuParticleImageComparison PROPERTIES
+            DEPENDS "GpuParticleDX11Regression;GpuParticleDX12Regression;GpuParticleVulkanRegression")
+    endif()
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/ParticleRenderingTests.cpp")
     enable_testing()
     add_executable(ParticleRenderingTests EXCLUDE_FROM_ALL
@@ -1140,6 +1255,39 @@ if(NOT ENGINE_PROJECT_DIR AND
     target_link_libraries(ParticleNeighborGridTests PRIVATE Engine)
     target_include_directories(ParticleNeighborGridTests PRIVATE "${ENGINE_ROOT}/Engine")
     add_test(NAME ParticleNeighborGridRegression COMMAND ParticleNeighborGridTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/GpuParticleNeighborGridTests.cpp")
+    enable_testing()
+    add_executable(GpuParticleNeighborGridTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/GpuParticleNeighborGridTests.cpp")
+    target_link_libraries(GpuParticleNeighborGridTests PRIVATE Engine d3d11)
+    target_include_directories(GpuParticleNeighborGridTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME GpuParticleNeighborGridRegression COMMAND GpuParticleNeighborGridTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/FluidParticleSolverTests.cpp")
+    enable_testing()
+    add_executable(FluidParticleSolverTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/FluidParticleSolverTests.cpp")
+    target_link_libraries(FluidParticleSolverTests PRIVATE Engine)
+    target_include_directories(FluidParticleSolverTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME FluidParticleSolverRegression COMMAND FluidParticleSolverTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/ParticleSceneExamplesTests.cpp")
+    enable_testing()
+    add_executable(ParticleSceneExamplesTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/ParticleSceneExamplesTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Particles/ParticleVfxShowcaseDriver.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Particles/FluidTestSceneDriver.cpp")
+    target_link_libraries(ParticleSceneExamplesTests PRIVATE Engine d3d11)
+    target_include_directories(ParticleSceneExamplesTests PRIVATE
+        "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Core/Assets")
+    add_test(NAME ParticleSceneExamplesRegression COMMAND ParticleSceneExamplesTests)
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND

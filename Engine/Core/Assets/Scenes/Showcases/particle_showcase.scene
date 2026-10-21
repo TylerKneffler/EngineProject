@@ -1,0 +1,306 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Scene xmlns:components="urn:engine-components" version="1">
+  <settings dimension="0" showGrid="false" skyboxEnabled="false" toneMapping="1" outputExposure="0">
+    <ambientColor><item>0.08</item><item>0.095</item><item>0.13</item></ambientColor>
+  </settings>
+  <objects>
+    <item name="Particle Gallery Camera" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>3.3</item><item>-12</item></Transform.position>
+        <Transform.rotation><item>0.35</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Camera Camera.active="true" Camera.useTransformRotation="true" Camera.fov="60" Camera.near="0.01" Camera.far="100">
+          <Camera.target><item>0</item><item>1.6</item><item>0</item></Camera.target>
+          <Camera.up><item>0</item><item>1</item><item>0</item></Camera.up>
+        </components:Camera>
+      </components>
+      <children />
+    </item>
+    <item name="Gallery Floor" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>-0.25</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>14</item><item>0.25</item><item>6</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" Mesh.useLightProbes="false" />
+        <components:Material Material.shininess="8" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="0.85" Material.castsShadows="false">
+          <Material.diffuse><item>0.12</item><item>0.15</item><item>0.2</item></Material.diffuse>
+          <Material.ambient><item>0.014</item><item>0.018</item><item>0.024</item></Material.ambient>
+          <Material.specular><item>0.08</item><item>0.08</item><item>0.08</item></Material.specular>
+          <Material.emissiveColor><item>0</item><item>0</item><item>0</item></Material.emissiveColor>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Fire Display Base" enabled="true">
+      <transform>
+        <Transform.position><item>-5</item><item>0.06</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1.8</item><item>0.18</item><item>2.3</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" Mesh.useLightProbes="false" />
+        <components:Material Material.shininess="8" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="0.85" Material.castsShadows="false">
+          <Material.diffuse><item>0.22</item><item>0.25</item><item>0.31</item></Material.diffuse>
+          <Material.ambient><item>0.026</item><item>0.03</item><item>0.037</item></Material.ambient>
+          <Material.specular><item>0.08</item><item>0.08</item><item>0.08</item></Material.specular>
+          <Material.emissiveColor><item>0</item><item>0</item><item>0</item></Material.emissiveColor>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Smoke Display Base" enabled="true">
+      <transform>
+        <Transform.position><item>-3</item><item>0.06</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1.8</item><item>0.18</item><item>2.3</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" Mesh.useLightProbes="false" />
+        <components:Material Material.shininess="8" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="0.85" Material.castsShadows="false">
+          <Material.diffuse><item>0.22</item><item>0.25</item><item>0.31</item></Material.diffuse>
+          <Material.ambient><item>0.026</item><item>0.03</item><item>0.037</item></Material.ambient>
+          <Material.specular><item>0.08</item><item>0.08</item><item>0.08</item></Material.specular>
+          <Material.emissiveColor><item>0</item><item>0</item><item>0</item></Material.emissiveColor>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Gun Flash Display Base" enabled="true">
+      <transform>
+        <Transform.position><item>-1</item><item>0.06</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1.8</item><item>0.18</item><item>2.3</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" Mesh.useLightProbes="false" />
+        <components:Material Material.shininess="8" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="0.85" Material.castsShadows="false">
+          <Material.diffuse><item>0.22</item><item>0.25</item><item>0.31</item></Material.diffuse>
+          <Material.ambient><item>0.026</item><item>0.03</item><item>0.037</item></Material.ambient>
+          <Material.specular><item>0.08</item><item>0.08</item><item>0.08</item></Material.specular>
+          <Material.emissiveColor><item>0</item><item>0</item><item>0</item></Material.emissiveColor>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Sparks Display Base" enabled="true">
+      <transform>
+        <Transform.position><item>1</item><item>0.06</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1.8</item><item>0.18</item><item>2.3</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" Mesh.useLightProbes="false" />
+        <components:Material Material.shininess="8" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="0.85" Material.castsShadows="false">
+          <Material.diffuse><item>0.22</item><item>0.25</item><item>0.31</item></Material.diffuse>
+          <Material.ambient><item>0.026</item><item>0.03</item><item>0.037</item></Material.ambient>
+          <Material.specular><item>0.08</item><item>0.08</item><item>0.08</item></Material.specular>
+          <Material.emissiveColor><item>0</item><item>0</item><item>0</item></Material.emissiveColor>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Fountain Display Base" enabled="true">
+      <transform>
+        <Transform.position><item>3</item><item>0.06</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1.8</item><item>0.18</item><item>2.3</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" Mesh.useLightProbes="false" />
+        <components:Material Material.shininess="8" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="0.85" Material.castsShadows="false">
+          <Material.diffuse><item>0.22</item><item>0.25</item><item>0.31</item></Material.diffuse>
+          <Material.ambient><item>0.026</item><item>0.03</item><item>0.037</item></Material.ambient>
+          <Material.specular><item>0.08</item><item>0.08</item><item>0.08</item></Material.specular>
+          <Material.emissiveColor><item>0</item><item>0</item><item>0</item></Material.emissiveColor>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Snow Display Base" enabled="true">
+      <transform>
+        <Transform.position><item>5</item><item>0.06</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1.8</item><item>0.18</item><item>2.3</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" Mesh.useLightProbes="false" />
+        <components:Material Material.shininess="8" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.metallicFactor="0" Material.roughnessFactor="0.85" Material.castsShadows="false">
+          <Material.diffuse><item>0.22</item><item>0.25</item><item>0.31</item></Material.diffuse>
+          <Material.ambient><item>0.026</item><item>0.03</item><item>0.037</item></Material.ambient>
+          <Material.specular><item>0.08</item><item>0.08</item><item>0.08</item></Material.specular>
+          <Material.emissiveColor><item>0</item><item>0</item><item>0</item></Material.emissiveColor>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Fire | hot core" enabled="true">
+      <transform>
+        <Transform.position><item>-5</item><item>0.42</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:ParticleEmitter ParticleEmitter.rate="55" ParticleEmitter.burstOnStart="0" ParticleEmitter.maxParticles="160" ParticleEmitter.lifetime="0.8" ParticleEmitter.speed="1.75" ParticleEmitter.spreadDegrees="27" ParticleEmitter.drag="0.28" ParticleEmitter.size="0.17" ParticleEmitter.shape="2" ParticleEmitter.sphereRadius="0.23" ParticleEmitter.worldSpace="true" ParticleEmitter.playOnStart="true" ParticleEmitter.duration="0" ParticleEmitter.loop="false" ParticleEmitter.seed="11" ParticleEmitter.texturePath="" ParticleEmitter.opacity="1" ParticleEmitter.blendMode="0" ParticleEmitter.collisionMode="0" ParticleEmitter.useGpuSimulation="false">
+          <ParticleEmitter.direction><item>0</item><item>1</item><item>0</item></ParticleEmitter.direction>
+          <ParticleEmitter.gravity><item>0</item><item>0.65</item><item>0</item></ParticleEmitter.gravity>
+          <ParticleEmitter.color><item>1</item><item>0.58</item><item>0.06</item></ParticleEmitter.color>
+          <ParticleEmitter.boxExtents><item>0.5</item><item>0.5</item><item>0.5</item></ParticleEmitter.boxExtents>
+        </components:ParticleEmitter>
+      </components>
+      <children />
+    </item>
+    <item name="Fire | embers" enabled="true">
+      <transform>
+        <Transform.position><item>-5</item><item>0.48</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:ParticleEmitter ParticleEmitter.rate="18" ParticleEmitter.burstOnStart="0" ParticleEmitter.maxParticles="90" ParticleEmitter.lifetime="1.2" ParticleEmitter.speed="2.3" ParticleEmitter.spreadDegrees="42" ParticleEmitter.drag="0.1" ParticleEmitter.size="0.055" ParticleEmitter.shape="2" ParticleEmitter.sphereRadius="0.18" ParticleEmitter.worldSpace="true" ParticleEmitter.playOnStart="true" ParticleEmitter.duration="0" ParticleEmitter.loop="false" ParticleEmitter.seed="12" ParticleEmitter.texturePath="" ParticleEmitter.opacity="1" ParticleEmitter.blendMode="0" ParticleEmitter.collisionMode="0" ParticleEmitter.useGpuSimulation="false">
+          <ParticleEmitter.direction><item>0</item><item>1</item><item>0</item></ParticleEmitter.direction>
+          <ParticleEmitter.gravity><item>0</item><item>-0.85</item><item>0</item></ParticleEmitter.gravity>
+          <ParticleEmitter.color><item>1</item><item>0.14</item><item>0.015</item></ParticleEmitter.color>
+          <ParticleEmitter.boxExtents><item>0.5</item><item>0.5</item><item>0.5</item></ParticleEmitter.boxExtents>
+        </components:ParticleEmitter>
+      </components>
+      <children />
+    </item>
+    <item name="Smoke | rising plume" enabled="true">
+      <transform>
+        <Transform.position><item>-3</item><item>0.45</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:ParticleEmitter ParticleEmitter.rate="26" ParticleEmitter.burstOnStart="0" ParticleEmitter.maxParticles="170" ParticleEmitter.lifetime="3.1" ParticleEmitter.speed="0.75" ParticleEmitter.spreadDegrees="24" ParticleEmitter.drag="0.38" ParticleEmitter.size="0.32" ParticleEmitter.shape="2" ParticleEmitter.sphereRadius="0.17" ParticleEmitter.worldSpace="true" ParticleEmitter.playOnStart="true" ParticleEmitter.duration="0" ParticleEmitter.loop="false" ParticleEmitter.seed="21" ParticleEmitter.texturePath="" ParticleEmitter.opacity="0.42" ParticleEmitter.blendMode="1" ParticleEmitter.collisionMode="0" ParticleEmitter.useGpuSimulation="false">
+          <ParticleEmitter.direction><item>0</item><item>1</item><item>0</item></ParticleEmitter.direction>
+          <ParticleEmitter.gravity><item>0</item><item>0.27</item><item>0</item></ParticleEmitter.gravity>
+          <ParticleEmitter.color><item>0.52</item><item>0.56</item><item>0.62</item></ParticleEmitter.color>
+          <ParticleEmitter.boxExtents><item>0.5</item><item>0.5</item><item>0.5</item></ParticleEmitter.boxExtents>
+        </components:ParticleEmitter>
+      </components>
+      <children />
+    </item>
+    <item name="Gun Flash | repeated burst" enabled="true">
+      <transform>
+        <Transform.position><item>-1</item><item>1.05</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:ParticleEmitter ParticleEmitter.rate="0" ParticleEmitter.burstOnStart="15" ParticleEmitter.maxParticles="40" ParticleEmitter.lifetime="0.105" ParticleEmitter.speed="6.2" ParticleEmitter.spreadDegrees="18" ParticleEmitter.drag="0" ParticleEmitter.size="0.16" ParticleEmitter.shape="0" ParticleEmitter.sphereRadius="0.5" ParticleEmitter.worldSpace="true" ParticleEmitter.playOnStart="true" ParticleEmitter.duration="0.65" ParticleEmitter.loop="true" ParticleEmitter.seed="31" ParticleEmitter.texturePath="" ParticleEmitter.opacity="1" ParticleEmitter.blendMode="0" ParticleEmitter.collisionMode="0" ParticleEmitter.useGpuSimulation="false">
+          <ParticleEmitter.direction><item>0</item><item>0</item><item>-1</item></ParticleEmitter.direction>
+          <ParticleEmitter.gravity><item>0</item><item>0</item><item>0</item></ParticleEmitter.gravity>
+          <ParticleEmitter.color><item>1</item><item>0.76</item><item>0.19</item></ParticleEmitter.color>
+          <ParticleEmitter.boxExtents><item>0.5</item><item>0.5</item><item>0.5</item></ParticleEmitter.boxExtents>
+        </components:ParticleEmitter>
+      </components>
+      <children />
+    </item>
+    <item name="Gun Flash | tracer" enabled="true">
+      <transform>
+        <Transform.position><item>-1</item><item>1.05</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:ParticleEmitter ParticleEmitter.rate="0" ParticleEmitter.burstOnStart="3" ParticleEmitter.maxParticles="20" ParticleEmitter.lifetime="0.28" ParticleEmitter.speed="10" ParticleEmitter.spreadDegrees="3" ParticleEmitter.drag="0" ParticleEmitter.size="0.045" ParticleEmitter.shape="0" ParticleEmitter.sphereRadius="0.5" ParticleEmitter.worldSpace="true" ParticleEmitter.playOnStart="true" ParticleEmitter.duration="0.65" ParticleEmitter.loop="true" ParticleEmitter.seed="32" ParticleEmitter.texturePath="" ParticleEmitter.opacity="1" ParticleEmitter.blendMode="0" ParticleEmitter.collisionMode="0" ParticleEmitter.useGpuSimulation="false">
+          <ParticleEmitter.direction><item>0</item><item>0</item><item>-1</item></ParticleEmitter.direction>
+          <ParticleEmitter.gravity><item>0</item><item>-0.7</item><item>0</item></ParticleEmitter.gravity>
+          <ParticleEmitter.color><item>1</item><item>0.91</item><item>0.46</item></ParticleEmitter.color>
+          <ParticleEmitter.boxExtents><item>0.5</item><item>0.5</item><item>0.5</item></ParticleEmitter.boxExtents>
+        </components:ParticleEmitter>
+      </components>
+      <children />
+    </item>
+    <item name="Sparks | welding shower" enabled="true">
+      <transform>
+        <Transform.position><item>1</item><item>1.4</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:ParticleEmitter ParticleEmitter.rate="46" ParticleEmitter.burstOnStart="0" ParticleEmitter.maxParticles="110" ParticleEmitter.lifetime="0.7" ParticleEmitter.speed="4.6" ParticleEmitter.spreadDegrees="48" ParticleEmitter.drag="0.03" ParticleEmitter.size="0.045" ParticleEmitter.shape="0" ParticleEmitter.sphereRadius="0.5" ParticleEmitter.worldSpace="true" ParticleEmitter.playOnStart="true" ParticleEmitter.duration="0" ParticleEmitter.loop="false" ParticleEmitter.seed="41" ParticleEmitter.texturePath="" ParticleEmitter.opacity="1" ParticleEmitter.blendMode="0" ParticleEmitter.collisionMode="0" ParticleEmitter.useGpuSimulation="false">
+          <ParticleEmitter.direction><item>0</item><item>-1</item><item>0</item></ParticleEmitter.direction>
+          <ParticleEmitter.gravity><item>0</item><item>-8</item><item>0</item></ParticleEmitter.gravity>
+          <ParticleEmitter.color><item>0.38</item><item>0.75</item><item>1</item></ParticleEmitter.color>
+          <ParticleEmitter.boxExtents><item>0.5</item><item>0.5</item><item>0.5</item></ParticleEmitter.boxExtents>
+        </components:ParticleEmitter>
+      </components>
+      <children />
+    </item>
+    <item name="Fountain | spray" enabled="true">
+      <transform>
+        <Transform.position><item>3</item><item>0.45</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:ParticleEmitter ParticleEmitter.rate="75" ParticleEmitter.burstOnStart="0" ParticleEmitter.maxParticles="190" ParticleEmitter.lifetime="1.5" ParticleEmitter.speed="4.8" ParticleEmitter.spreadDegrees="24" ParticleEmitter.drag="0" ParticleEmitter.size="0.075" ParticleEmitter.shape="2" ParticleEmitter.sphereRadius="0.13" ParticleEmitter.worldSpace="true" ParticleEmitter.playOnStart="true" ParticleEmitter.duration="0" ParticleEmitter.loop="false" ParticleEmitter.seed="51" ParticleEmitter.texturePath="" ParticleEmitter.opacity="1" ParticleEmitter.blendMode="0" ParticleEmitter.collisionMode="0" ParticleEmitter.useGpuSimulation="false">
+          <ParticleEmitter.direction><item>0</item><item>1</item><item>0</item></ParticleEmitter.direction>
+          <ParticleEmitter.gravity><item>0</item><item>-9.81</item><item>0</item></ParticleEmitter.gravity>
+          <ParticleEmitter.color><item>0.19</item><item>0.68</item><item>1</item></ParticleEmitter.color>
+          <ParticleEmitter.boxExtents><item>0.5</item><item>0.5</item><item>0.5</item></ParticleEmitter.boxExtents>
+        </components:ParticleEmitter>
+      </components>
+      <children />
+    </item>
+    <item name="Snow | broad field" enabled="true">
+      <transform>
+        <Transform.position><item>5</item><item>3.7</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:ParticleEmitter ParticleEmitter.rate="32" ParticleEmitter.burstOnStart="0" ParticleEmitter.maxParticles="220" ParticleEmitter.lifetime="4.4" ParticleEmitter.speed="0.65" ParticleEmitter.spreadDegrees="17" ParticleEmitter.drag="0.04" ParticleEmitter.size="0.065" ParticleEmitter.shape="1" ParticleEmitter.sphereRadius="0.5" ParticleEmitter.worldSpace="true" ParticleEmitter.playOnStart="true" ParticleEmitter.duration="0" ParticleEmitter.loop="false" ParticleEmitter.seed="61" ParticleEmitter.texturePath="" ParticleEmitter.opacity="0.75" ParticleEmitter.blendMode="1" ParticleEmitter.collisionMode="0" ParticleEmitter.useGpuSimulation="false">
+          <ParticleEmitter.direction><item>0</item><item>-1</item><item>0</item></ParticleEmitter.direction>
+          <ParticleEmitter.gravity><item>0</item><item>-0.12</item><item>0</item></ParticleEmitter.gravity>
+          <ParticleEmitter.color><item>0.82</item><item>0.91</item><item>1</item></ParticleEmitter.color>
+          <ParticleEmitter.boxExtents><item>1.05</item><item>0.12</item><item>1.05</item></ParticleEmitter.boxExtents>
+        </components:ParticleEmitter>
+      </components>
+      <children />
+    </item>
+    <item name="Fire Warm Light" enabled="true">
+      <transform>
+        <Transform.position><item>-5</item><item>1.15</item><item>0.2</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Light Light.lightType="0" Light.intensity="2.8" Light.range="4" Light.falloff="2" Light.castsShadows="false">
+          <Light.color><item>1</item><item>0.35</item><item>0.07</item></Light.color>
+        </components:Light>
+      </components>
+      <children />
+    </item>
+    <item name="Cool Gallery Fill" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>5</item><item>-3</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Light Light.lightType="1" Light.intensity="1.2" Light.range="25" Light.castsShadows="false">
+          <Light.color><item>0.58</item><item>0.72</item><item>1</item></Light.color>
+        </components:Light>
+      </components>
+      <children />
+    </item>
+    <item name="Particle Gallery | cue controller" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>0</item><item>0</item></Transform.position>
+        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+      </transform>
+      <components>
+        <components:ParticleVfxShowcaseDriver ParticleVfxShowcaseDriver.muzzleObjectName="Gun Flash | repeated burst" ParticleVfxShowcaseDriver.tracerObjectName="Gun Flash | tracer" ParticleVfxShowcaseDriver.intervalSeconds="0.65" ParticleVfxShowcaseDriver.muzzleCount="15" ParticleVfxShowcaseDriver.tracerCount="3" />
+      </components>
+      <children />
+    </item>
+  </objects>
+</Scene>

@@ -1,5 +1,7 @@
 #include "DX12GameRenderer.h"
 #include <chrono>
+#include <algorithm>
+#include <cmath>
 #include "DX12GraphicsContext.h"
 
 
@@ -259,6 +261,7 @@ void DX12GameRenderer::Clear(float r, float g, float b, float a)
 void DX12GameRenderer::EndFrame()
 {
     m_postProcess.Compose(m_commandList.Get(), GetCurrentRTV());
+    if (m_captureRequested) RecordSceneCapture();
     // NOTE: The RENDER_TARGET → PRESENT barrier is NOT recorded here.
     // RenderOverlay() calls ReleaseWrappedResources which issues that barrier
     // via the D3D11On12 device's command list, submitted with Flush().
@@ -312,6 +315,89 @@ void DX12GameRenderer::EndFrame()
     // 0→1→0→… after each Present(). We query rather than manually toggling
     // to stay in sync with the swap chain’s internal state.
     m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+}
+
+void DX12GameRenderer::RecordSceneCapture()
+{
+    auto* sceneColor = m_postProcess.GetSceneColor();
+    if (!sceneColor || !m_device) return;
+    const auto desc = sceneColor->GetDesc();
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};
+    UINT64 bytes = 0;
+    m_device->GetCopyableFootprints(&desc, 0, 1, 0, &footprint,
+        nullptr, nullptr, &bytes);
+    m_captureRowPitch = footprint.Footprint.RowPitch;
+    if (!m_captureReadback || m_captureReadback->GetDesc().Width < bytes)
+    {
+        D3D12_HEAP_PROPERTIES heap{};
+        heap.Type = D3D12_HEAP_TYPE_READBACK;
+        D3D12_RESOURCE_DESC buffer{};
+        buffer.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        buffer.Width = bytes;
+        buffer.Height = 1;
+        buffer.DepthOrArraySize = 1;
+        buffer.MipLevels = 1;
+        buffer.SampleDesc.Count = 1;
+        buffer.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        ThrowIfFailed(m_device->CreateCommittedResource(&heap,
+            D3D12_HEAP_FLAG_NONE, &buffer, D3D12_RESOURCE_STATE_COPY_DEST,
+            nullptr, IID_PPV_ARGS(&m_captureReadback)));
+    }
+    D3D12_RESOURCE_BARRIER barrier{};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Transition.pResource = sceneColor;
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    m_commandList->ResourceBarrier(1, &barrier);
+    D3D12_TEXTURE_COPY_LOCATION source{};
+    source.pResource = sceneColor;
+    source.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    D3D12_TEXTURE_COPY_LOCATION destination{};
+    destination.pResource = m_captureReadback.Get();
+    destination.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    destination.PlacedFootprint = footprint;
+    m_commandList->CopyTextureRegion(&destination, 0, 0, 0,
+        &source, nullptr);
+    std::swap(barrier.Transition.StateBefore,
+        barrier.Transition.StateAfter);
+    m_commandList->ResourceBarrier(1, &barrier);
+    m_captureRequested = false;
+}
+
+bool DX12GameRenderer::ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels)
+{
+    if (!m_captureReadback || !m_captureRowPitch) return false;
+    const auto halfToByte = [](uint16_t bits)
+    {
+        const int exponent = (bits >> 10) & 31;
+        const float value = exponent == 0
+            ? std::ldexp(static_cast<float>(bits & 1023), -24)
+            : (exponent == 31 ? 1.f : std::ldexp(
+                1.f + static_cast<float>(bits & 1023) / 1024.f,
+                exponent - 15));
+        return static_cast<uint8_t>(std::round(std::pow(
+            std::clamp(value, 0.f, 1.f), 1.f / 2.2f) * 255.f));
+    };
+    void* mapped = nullptr;
+    D3D12_RANGE readRange{0,
+        static_cast<SIZE_T>(m_captureRowPitch) * m_height};
+    if (FAILED(m_captureReadback->Map(0, &readRange, &mapped)) || !mapped)
+        return false;
+    pixels.resize(static_cast<size_t>(m_width) * m_height * 4);
+    for (uint32_t y = 0; y < m_height; ++y)
+    {
+        const auto* row = reinterpret_cast<const uint16_t*>(
+            static_cast<const uint8_t*>(mapped) +
+            static_cast<size_t>(y) * m_captureRowPitch);
+        for (uint32_t x = 0; x < m_width; ++x)
+            for (uint32_t channel = 0; channel < 4; ++channel)
+                pixels[(static_cast<size_t>(y) * m_width + x) * 4 + channel] =
+                    halfToByte(row[x * 4 + channel]);
+    }
+    D3D12_RANGE writeRange{0, 0};
+    m_captureReadback->Unmap(0, &writeRange);
+    return true;
 }
 
 // ---------------------------------------------------------------------------

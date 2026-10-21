@@ -2,6 +2,7 @@
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Graphics/IPipelineState.h"
 #include "DX12GraphicsBuffer.h"
+#include "DX12PipelineStateBuilder.h"
 #include "DX12GraphicsTexture.h"
 #include <algorithm>
 #include <chrono>
@@ -380,6 +381,106 @@ void D3D12GraphicsContext::SetStructuredBuffer(uint32_t slot, const Engine::Grap
     const uint32_t rootParameter = slot + 1;
     m_cmdList->SetGraphicsRootShaderResourceView(
         rootParameter, structured->GetGPUVirtualAddress());
+}
+
+namespace
+{
+void TransitionComputeBuffer(ID3D12GraphicsCommandList* commands,
+    D3D12GraphicsBuffer* buffer, D3D12_RESOURCE_STATES destination)
+{
+    if (!commands || !buffer || buffer->GetResourceState() == destination) return;
+    D3D12_RESOURCE_BARRIER barrier{};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Transition.pResource = buffer->GetResource();
+    barrier.Transition.StateBefore = buffer->GetResourceState();
+    barrier.Transition.StateAfter = destination;
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    commands->ResourceBarrier(1, &barrier);
+    buffer->SetResourceState(destination);
+}
+}
+
+bool D3D12GraphicsContext::SetComputePipeline(
+    const Engine::Graphics::IPipelineState* pipeline)
+{
+    const auto* compute = dynamic_cast<const D3D12ComputePipeline*>(pipeline);
+    if (!m_cmdList || !compute) return false;
+    m_cmdList->SetComputeRootSignature(compute->GetRootSignature());
+    m_cmdList->SetPipelineState(static_cast<ID3D12PipelineState*>(
+        compute->GetNativeHandle()));
+    return true;
+}
+
+void D3D12GraphicsContext::SetComputeConstants(const void* data, uint32_t size)
+{
+    if (m_cmdList && data && size && size <= 128 && size % 4 == 0)
+        m_cmdList->SetComputeRoot32BitConstants(0, size / 4, data, 0);
+}
+
+void D3D12GraphicsContext::SetComputeReadBuffer(
+    const Engine::Graphics::IGraphicsBuffer* buffer)
+{
+    auto* native = dynamic_cast<D3D12GraphicsBuffer*>(
+        const_cast<Engine::Graphics::IGraphicsBuffer*>(buffer));
+    if (!m_cmdList || !native) return;
+    TransitionComputeBuffer(m_cmdList, native,
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    m_cmdList->SetComputeRootShaderResourceView(1,
+        native->GetGPUVirtualAddress());
+}
+
+void D3D12GraphicsContext::SetComputeWriteBuffer(
+    const Engine::Graphics::IGraphicsBuffer* buffer)
+{
+    auto* native = dynamic_cast<D3D12GraphicsBuffer*>(
+        const_cast<Engine::Graphics::IGraphicsBuffer*>(buffer));
+    if (!m_cmdList || !native || native->GetUsage() !=
+        Engine::Graphics::IGraphicsBuffer::Usage::StorageBuffer) return;
+    TransitionComputeBuffer(m_cmdList, native,
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    m_cmdList->SetComputeRootUnorderedAccessView(2,
+        native->GetGPUVirtualAddress());
+}
+
+void D3D12GraphicsContext::DispatchCompute(uint32_t x, uint32_t y, uint32_t z)
+{
+    if (m_cmdList && x && y && z) m_cmdList->Dispatch(x, y, z);
+}
+
+void D3D12GraphicsContext::StorageBarrier(
+    const Engine::Graphics::IGraphicsBuffer* buffer)
+{
+    auto* native = dynamic_cast<D3D12GraphicsBuffer*>(
+        const_cast<Engine::Graphics::IGraphicsBuffer*>(buffer));
+    if (!m_cmdList || !native) return;
+    D3D12_RESOURCE_BARRIER barrier{};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+    barrier.UAV.pResource = native->GetResource();
+    m_cmdList->ResourceBarrier(1, &barrier);
+    TransitionComputeBuffer(m_cmdList, native,
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE |
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+}
+
+bool D3D12GraphicsContext::CopyBuffer(
+    const Engine::Graphics::IGraphicsBuffer* source,
+    Engine::Graphics::IGraphicsBuffer* destination, uint64_t bytes)
+{
+    auto* src = dynamic_cast<D3D12GraphicsBuffer*>(
+        const_cast<Engine::Graphics::IGraphicsBuffer*>(source));
+    auto* dst = dynamic_cast<D3D12GraphicsBuffer*>(destination);
+    if (!m_cmdList || !src || !dst || destination->GetAccessMode() !=
+        Engine::Graphics::IGraphicsBuffer::AccessMode::Readback)
+        return false;
+    const uint64_t size = bytes ? bytes : source->GetSize();
+    if (!size || size > source->GetSize() || size > destination->GetSize())
+        return false;
+    const auto previous = src->GetResourceState();
+    TransitionComputeBuffer(m_cmdList, src, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    m_cmdList->CopyBufferRegion(dst->GetResource(), 0,
+        src->GetResource(), 0, size);
+    TransitionComputeBuffer(m_cmdList, src, previous);
+    return true;
 }
 
 void D3D12GraphicsContext::SetTexture(uint32_t slot, const Engine::Graphics::IGraphicsTexture* texture)

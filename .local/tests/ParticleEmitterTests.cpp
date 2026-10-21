@@ -3,12 +3,15 @@
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Camera/Camera.h"
+#include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
+#include "Core/Compoonents/Physics/RigidBody.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <cmath>
 #include <chrono>
 #include <filesystem>
 #include <stdexcept>
 #include <memory>
+#include <iostream>
 
 using Engine::Components::ParticleEmitter;
 
@@ -36,7 +39,11 @@ bool SameSettings(const ParticleEmitter& a, const ParticleEmitter& b)
         a.playOnStart == b.playOnStart && a.duration == b.duration &&
         a.loop == b.loop && a.seed == b.seed &&
         a.texturePath == b.texturePath && a.opacity == b.opacity &&
-        a.blendMode == b.blendMode;
+        a.blendMode == b.blendMode &&
+        a.collisionMode == b.collisionMode &&
+        a.collisionBounce == b.collisionBounce &&
+        a.collisionFriction == b.collisionFriction &&
+        a.collisionMask == b.collisionMask;
 }
 
 class KillParticleSolver final : public Engine::Components::IParticleSolver
@@ -53,9 +60,25 @@ public:
 private:
     int& m_resetCount;
 };
+
+class TrackingParticleSolver final : public Engine::Components::IParticleSolver
+{
+public:
+    explicit TrackingParticleSolver(std::vector<uint64_t>& removed)
+        : m_removed(removed) {}
+    void OnParticleRemoved(uint64_t id) override { m_removed.push_back(id); }
+    void Step(Engine::Components::ParticleState* particles, size_t count,
+        float seconds, const Engine::Components::ParticleStepForces& forces) override
+    {
+        m_ballistic.Step(particles, count, seconds, forces);
+    }
+private:
+    std::vector<uint64_t>& m_removed;
+    Engine::Components::BallisticParticleSolver m_ballistic;
+};
 }
 
-int main()
+int RunTests()
 {
     ParticleEmitter emitter;
     emitter.rate = 0.f;
@@ -326,6 +349,10 @@ int main()
     configured->texturePath = "Textures/particle-preset.png";
     configured->opacity = 0.7f;
     configured->blendMode = static_cast<int>(ParticleEmitter::BlendMode::Alpha);
+    configured->collisionMode = static_cast<int>(ParticleEmitter::CollisionMode::Bounce);
+    configured->collisionBounce = 0.8f;
+    configured->collisionFriction = 0.3f;
+    configured->collisionMask = 7;
     configured->Restart();
     configured->Advance(1.f / 60.f, translated);
     Require(!configured->GetParticles().empty(), "prefab source has runtime state");
@@ -364,4 +391,195 @@ int main()
     Require(sceneEmitter && SameSettings(*configured, *sceneEmitter) &&
         sceneEmitter->GetParticles().empty(),
         "scene reload preserves emitter prefab settings");
+
+    Engine::Scene::Scene budgetScene;
+    budgetScene.SetParticleBudget(3);
+    auto* firstObject = budgetScene.AddObject("First budget emitter");
+    auto* firstEmitter = firstObject->AddComponent<ParticleEmitter>();
+    firstEmitter->rate = 0.f;
+    firstEmitter->burstOnStart = 2;
+    firstEmitter->lifetime = 0.05f;
+    firstEmitter->speed = 0.f;
+    firstEmitter->gravity = {0.f, 0.f, 0.f};
+    std::vector<uint64_t> firstRemoved;
+    firstEmitter->SetSolver(std::make_unique<TrackingParticleSolver>(firstRemoved));
+    auto* secondObject = budgetScene.AddObject("Second budget emitter");
+    auto* secondEmitter = secondObject->AddComponent<ParticleEmitter>();
+    secondEmitter->rate = 0.f;
+    secondEmitter->burstOnStart = 2;
+    secondEmitter->lifetime = 10.f;
+    secondEmitter->speed = 0.f;
+    secondEmitter->gravity = {0.f, 0.f, 0.f};
+    std::vector<uint64_t> secondRemoved;
+    secondEmitter->SetSolver(std::make_unique<TrackingParticleSolver>(secondRemoved));
+    budgetScene.Start();
+    budgetScene.Update(1.f / 60.f);
+    Require(budgetScene.GetParticleLiveCount() == 3 &&
+        firstEmitter->GetParticles().size() == 2 &&
+        secondEmitter->GetParticles().size() == 1,
+        "scene budget drops excess spawns in object order");
+    Require(!firstEmitter->AddParticleForce(999, {1.f, 0.f, 0.f}) &&
+        firstEmitter->AddParticleForce(1, {30.f, 0.f, 0.f}) &&
+        firstEmitter->AddParticleForce(1, {30.f, 0.f, 0.f}),
+        "force accumulation targets a stable live ID");
+    budgetScene.Update(1.f / 60.f);
+    Require(std::abs(firstEmitter->GetParticles()[0].velocity.x - 1.f) < 1e-5f &&
+        Near(firstEmitter->GetParticles()[0].force, {0.f, 0.f, 0.f}) &&
+        firstEmitter->GetWorldBounds(glm::mat4(1.f)).maximum.x > 0.f,
+        "solver consumes force and live bounds reflect integration");
+    budgetScene.SetParticleBudget(2);
+    Require(budgetScene.GetParticleLiveCount() == 2 &&
+        secondEmitter->GetParticles().empty() &&
+        secondRemoved == std::vector<uint64_t>{1},
+        "lowering scene budget trims later emitters and retires solver state");
+    budgetScene.Update(2.f / 60.f);
+    Require(firstEmitter->GetParticles().empty() &&
+        firstRemoved == (std::vector<uint64_t>{1, 2}) &&
+        !firstEmitter->GetWorldBounds(glm::mat4(1.f)).valid,
+        "expiry recycles dense slots and invalidates empty bounds");
+    firstEmitter->Burst(2);
+    budgetScene.Update(1.f / 60.f);
+    Require(firstEmitter->GetParticles().size() == 2 &&
+        firstEmitter->GetParticles()[0].id == 3 &&
+        firstEmitter->GetParticles()[1].id == 4,
+        "recycled slots receive new stable IDs");
+    budgetScene.SetParticleBudget(4);
+    budgetScene.Update(1.f / 60.f);
+    Require(secondEmitter->GetParticles().empty(),
+        "dropped burst particles do not queue for a later budget increase");
+    secondEmitter->Burst(2);
+    budgetScene.Update(1.f / 60.f);
+    Require(budgetScene.GetParticleLiveCount() == 4 &&
+        secondEmitter->GetParticles().size() == 2 &&
+        secondEmitter->GetParticles()[0].id == 2,
+        "released scene budget admits later bursts without backlog");
+
+    Engine::Scene::Scene collisionScene;
+    auto* floor = collisionScene.AddObject("Floor");
+    floor->transform.position = {0.f, -0.5f, 0.f};
+    auto* floorShape = floor->AddComponent<Engine::Components::PrimitiveObjectCollider>();
+    floorShape->size = {10.f, 1.f, 10.f};
+    auto* floorBody = floor->AddComponent<Engine::Components::RigidBody>();
+    floorBody->bodyType = "Static";
+    auto* drop = collisionScene.AddObject("Drop");
+    drop->transform.position = {0.f, 1.f, 0.f};
+    auto* collisionEmitter = drop->AddComponent<ParticleEmitter>();
+    collisionEmitter->rate = 0.f;
+    collisionEmitter->burstOnStart = 1;
+    collisionEmitter->speed = 120.f;
+    collisionEmitter->spreadDegrees = 0.f;
+    collisionEmitter->direction = {0.f, -1.f, 0.f};
+    collisionEmitter->gravity = {0.f, 0.f, 0.f};
+    collisionEmitter->collisionMode = static_cast<int>(ParticleEmitter::CollisionMode::Kill);
+    collisionScene.Start();
+    collisionScene.GetPhysics().Step(1.f / 60.f);
+    collisionEmitter->Advance(1.f / 60.f, drop->transform.GetWorldMatrix());
+    collisionEmitter->Advance(1.f / 60.f, drop->transform.GetWorldMatrix());
+    Require(collisionEmitter->GetParticles().empty() &&
+        collisionEmitter->GetCollisionHits().size() == 1 &&
+        collisionEmitter->GetCollisionHits()[0].particleId == 1 &&
+        collisionEmitter->GetCollisionHits()[0].object == floor &&
+        collisionEmitter->GetCollisionHits()[0].killed,
+        "kill on contact reports a stable particle ID and collider");
+    collisionEmitter->collisionMode = static_cast<int>(ParticleEmitter::CollisionMode::Bounce);
+    collisionEmitter->collisionBounce = 0.5f;
+    collisionEmitter->collisionFriction = 0.f;
+    collisionEmitter->Restart();
+    collisionEmitter->Advance(2.f / 60.f, drop->transform.GetWorldMatrix());
+    Require(collisionEmitter->GetParticles().size() == 1 &&
+        collisionEmitter->GetCollisionHits().size() == 1 &&
+        !collisionEmitter->GetCollisionHits()[0].killed &&
+        collisionEmitter->GetParticles()[0].velocity.y > 50.f,
+        "bounce reflects velocity and retains the particle");
+    collisionEmitter->Advance(1.f / 60.f, drop->transform.GetWorldMatrix());
+    Require(collisionEmitter->GetCollisionHits().empty(),
+        "hit batch is replaced at the next advance");
+    collisionEmitter->worldSpace = false;
+    collisionEmitter->collisionMask = 0;
+    collisionEmitter->Restart();
+    collisionEmitter->Advance(2.f / 60.f, drop->transform.GetWorldMatrix());
+    Require(collisionEmitter->GetCollisionHits().empty() &&
+        collisionEmitter->GetParticles()[0].position.y < -1.f,
+        "collision mask can exclude scene colliders");
+    collisionEmitter->collisionMask = -1;
+    collisionEmitter->Restart();
+    collisionEmitter->Advance(2.f / 60.f, drop->transform.GetWorldMatrix());
+    Require(collisionEmitter->GetCollisionHits().size() == 1 &&
+        collisionEmitter->GetParticles()[0].velocity.y > 50.f &&
+        collisionEmitter->GetParticles()[0].position.y < 0.f,
+        "local-space response converts the world hit back to emitter space");
+
+    Engine::Scene::Scene enclosure;
+    const auto addWall = [&enclosure](const char* name,
+        const glm::vec3& position, const glm::vec3& size)
+    {
+        auto* wall = enclosure.AddObject(name);
+        wall->transform.position = position;
+        auto* shape = wall->AddComponent<Engine::Components::PrimitiveObjectCollider>();
+        shape->size = size;
+        auto* body = wall->AddComponent<Engine::Components::RigidBody>();
+        body->bodyType = "Static";
+        return wall;
+    };
+    Engine::Core::Object* walls[] = {
+        addWall("Floor", {0.f, -0.25f, 0.f}, {6.5f, 0.5f, 6.5f}),
+        addWall("Ceiling", {0.f, 5.25f, 0.f}, {6.5f, 0.5f, 6.5f}),
+        addWall("Left", {-3.25f, 2.5f, 0.f}, {0.5f, 5.f, 6.5f}),
+        addWall("Right", {3.25f, 2.5f, 0.f}, {0.5f, 5.f, 6.5f}),
+        addWall("Front", {0.f, 2.5f, -3.25f}, {6.5f, 5.f, 0.5f}),
+        addWall("Back", {0.f, 2.5f, 3.25f}, {6.5f, 5.f, 0.5f})
+    };
+    auto* enclosureSource = enclosure.AddObject("Contained Particles");
+    enclosureSource->transform.position = {0.f, 2.5f, 0.f};
+    auto* contained = enclosureSource->AddComponent<ParticleEmitter>();
+    contained->rate = 0.f;
+    contained->burstOnStart = 256;
+    contained->maxParticles = 256;
+    contained->lifetime = 5.f;
+    contained->speed = 10.f;
+    contained->spreadDegrees = 180.f;
+    contained->gravity = {0.f, 0.f, 0.f};
+    contained->collisionMode = static_cast<int>(ParticleEmitter::CollisionMode::Bounce);
+    contained->collisionBounce = 0.95f;
+    contained->collisionFriction = 0.02f;
+    enclosure.Start();
+    enclosure.GetPhysics().Step(1.f / 60.f);
+    size_t wallHits[6]{};
+    for (int tick = 0; tick < 240; ++tick)
+    {
+        contained->Advance(1.f / 60.f, enclosureSource->transform.GetWorldMatrix());
+        for (const auto& hit : contained->GetCollisionHits())
+        {
+            for (size_t wall = 0; wall < 6; ++wall)
+                if (hit.object == walls[wall]) ++wallHits[wall];
+        }
+        for (const auto& particle : contained->GetParticles())
+        {
+            const glm::vec3 p = particle.position;
+            const bool inside = std::abs(p.x) <= 3.01f &&
+                std::abs(p.z) <= 3.01f && p.y >= -0.01f && p.y <= 5.01f;
+            if (!inside)
+                std::cerr << "escape tick=" << tick << " id=" << particle.id
+                    << " position=" << p.x << ',' << p.y << ',' << p.z
+                    << " velocity=" << particle.velocity.x << ','
+                    << particle.velocity.y << ',' << particle.velocity.z << '\n';
+            Require(inside,
+                "bouncing particle escaped the enclosed room");
+        }
+    }
+    Require(contained->GetParticles().size() == 256,
+        "enclosure retains live particles before their lifetime expires");
+    for (size_t hits : wallHits)
+        Require(hits > 0, "particles must collide with every enclosure face");
+    return 0;
+}
+
+int main()
+{
+    try { return RunTests(); }
+    catch (const std::exception& error)
+    {
+        std::cerr << error.what() << '\n';
+        return 1;
+    }
 }

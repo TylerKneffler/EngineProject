@@ -24,6 +24,8 @@ public:
     AccessMode GetAccessMode() const override { return m_access; }
     uint64_t GetSize() const override { return m_size; }
     uint32_t GetElementStride() const override { return m_elementStride; }
+    D3D12_RESOURCE_STATES GetResourceState() const { return m_resourceState; }
+    void SetResourceState(D3D12_RESOURCE_STATES state) { m_resourceState = state; }
     void SetElementStride(uint32_t value) { m_elementStride = value; }
 
     void* Map() override;
@@ -42,6 +44,7 @@ private:
     uint64_t m_size;
     void* m_mappedData = nullptr;
     uint32_t m_elementStride = 0;
+    D3D12_RESOURCE_STATES m_resourceState = D3D12_RESOURCE_STATE_COMMON;
 };
 
 // ---------------------------------------------------------------------------

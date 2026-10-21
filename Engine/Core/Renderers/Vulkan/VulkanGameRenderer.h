@@ -4,6 +4,7 @@
 #include "VulkanRenderCore.h"
 #include "VulkanGraphicsProvider.h"
 #include "VulkanPostProcess.h"
+#include <vector>
 
 namespace Engine::Renderers
 {
@@ -18,12 +19,16 @@ public:
     void Clear(float r, float g, float b, float a = 1.0f) override;
     Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override { return m_provider.get(); }
     void WaitIdle() override { m_core.WaitIdle(); }
+    void RequestSceneCapture() { m_captureRequested = true; }
+    bool ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels);
     void BeginFrame() override;
     void EndFrame() override;
     std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateFrameGraphicsContext() override;
     Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const override
     { return m_frameTelemetry; }
 private:
+    void RecordSceneCapture();
+    void DestroySceneCapture();
     void BeginMainRenderPass(const float color[4]);
     VulkanRenderCore m_core;
     std::unique_ptr<VulkanGraphicsProvider> m_provider;
@@ -31,6 +36,9 @@ private:
     uint32_t m_width = 0, m_height = 0;
     bool m_renderPassActive = false;
     VulkanPostProcess m_postProcess;
+    VkBuffer m_captureBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory m_captureMemory = VK_NULL_HANDLE;
+    bool m_captureRequested = false;
     float m_clearColor[4] = { 0.1f, 0.1f, 0.1f, 1.0f };
     Engine::Graphics::FrameTimingTelemetry m_frameTelemetry{};
 };

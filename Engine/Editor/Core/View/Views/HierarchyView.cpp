@@ -7,6 +7,7 @@
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Obj/Sprite.h"
+#include "Core/Compoonents/Particles/ParticleEmitter.h"
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
 #include "Core/Compoonents/Lighting/LightProbe.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
@@ -176,15 +177,17 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
     if (worldMenu.pasteRequested)
         PasteClipboard(nullptr, true);
     if (worldMenu.addRequested || !worldMenu.primitive3D.empty() ||
-        worldMenu.addSpriteRequested || worldMenu.addLightProbeRequested ||
+        worldMenu.addSpriteRequested || worldMenu.addParticleEmitterRequested ||
+        worldMenu.addLightProbeRequested ||
         worldMenu.addLightProbeGroupRequested)
     {
         m_pendingAddParent = nullptr;
         m_pendingAddType = !worldMenu.primitive3D.empty() ? PendingAddType::Primitive3D
             : (worldMenu.addSpriteRequested ? PendingAddType::Sprite
+            : (worldMenu.addParticleEmitterRequested ? PendingAddType::ParticleEmitter
             : (worldMenu.addLightProbeRequested ? PendingAddType::LightProbe
             : (worldMenu.addLightProbeGroupRequested
-                ? PendingAddType::LightProbeGroup : PendingAddType::Empty)));
+                ? PendingAddType::LightProbeGroup : PendingAddType::Empty))));
         m_pendingPrimitive3D = worldMenu.primitive3D;
         m_hasPendingAdd = true;
     }
@@ -303,6 +306,11 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
                     created->AddComponent<Engine::Components::SpriteAnimationManager>();
                 Engine::Components::Sprite* sprite = created->AddComponent<Engine::Components::Sprite>();
                 sprite->SetAnimationManager(manager);
+            }
+            else if (m_pendingAddType == PendingAddType::ParticleEmitter)
+            {
+                created = m_scene->AddObject("Particle Emitter");
+                created->AddComponent<Engine::Components::ParticleEmitter>();
             }
             else if(m_pendingAddType==PendingAddType::LightProbe)
             {
@@ -775,14 +783,16 @@ void HierarchyView::DrawObjectNode(
         m_hasPendingPaste = true;
     }
     if (menu.addRequested || !menu.primitive3D.empty() || menu.addSpriteRequested ||
+        menu.addParticleEmitterRequested ||
         menu.addLightProbeRequested || menu.addLightProbeGroupRequested)
     {
         m_pendingAddParent = obj;
         m_pendingAddType = !menu.primitive3D.empty() ? PendingAddType::Primitive3D
             : (menu.addSpriteRequested ? PendingAddType::Sprite
+            : (menu.addParticleEmitterRequested ? PendingAddType::ParticleEmitter
             : (menu.addLightProbeRequested ? PendingAddType::LightProbe
             : (menu.addLightProbeGroupRequested
-                ? PendingAddType::LightProbeGroup : PendingAddType::Empty)));
+                ? PendingAddType::LightProbeGroup : PendingAddType::Empty))));
         m_pendingPrimitive3D = menu.primitive3D;
         m_hasPendingAdd = true;
     }

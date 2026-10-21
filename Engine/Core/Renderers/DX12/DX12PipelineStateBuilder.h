@@ -31,6 +31,19 @@ private:
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
 };
 
+class D3D12ComputePipeline final : public Engine::Graphics::IPipelineState
+{
+public:
+    D3D12ComputePipeline(Microsoft::WRL::ComPtr<ID3D12PipelineState> state,
+        Microsoft::WRL::ComPtr<ID3D12RootSignature> signature)
+        : m_state(std::move(state)), m_signature(std::move(signature)) {}
+    void* GetNativeHandle() const override { return m_state.Get(); }
+    ID3D12RootSignature* GetRootSignature() const { return m_signature.Get(); }
+private:
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_state;
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_signature;
+};
+
 // ---------------------------------------------------------------------------
 // D3D12PipelineStateBuilder — Fluent pipeline state construction
 // ---------------------------------------------------------------------------
@@ -132,6 +145,8 @@ public:
         : m_device(device), m_rootSig(rootSig) {}
 
     std::unique_ptr<Engine::Graphics::IPipelineStateBuilder> CreateBuilder() override;
+    std::unique_ptr<Engine::Graphics::IPipelineState> CreateComputePipeline(
+        const Engine::Graphics::IShader* shader) override;
 
 private:
     ID3D12Device* m_device;

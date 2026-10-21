@@ -28,6 +28,7 @@ namespace Engine::Components
     class Material;
     class SpatialManipulator;
     class SkinnedMesh;
+    class ParticleEmitter;
 }
 namespace Engine::Rendering
 {
@@ -172,6 +173,14 @@ public:
     void SetFixedTimeStep(double seconds) { m_clock.SetFixedStep(seconds); }
     void UseVariableTimeStep() { m_clock.UseVariableStep(); }
     float GetDeltaTime() const { return m_deltaTime; }
+    // CPU particle storage is capped across all emitters. Existing particles
+    // keep their slots in scene object order; new spawns are dropped at budget.
+    // The default matches the current particle renderer's 100k draw limit.
+    void SetParticleBudget(size_t capacity);
+    size_t GetParticleBudget() const { return m_particleBudget; }
+    size_t GetParticleLiveCount() const;
+    size_t GetParticleCapacityFor(
+        const Engine::Components::ParticleEmitter* emitter) const;
     double GetElapsedTime() const { return m_clock.GetElapsedTime(); }
     uint64_t GetFrameIndex() const { return m_clock.GetFrameIndex(); }
     const Engine::Time::SimulationClock& GetClock() const { return m_clock; }
@@ -197,6 +206,8 @@ public:
     // multiple views can then reuse the resulting object, light, material,
     // and skin data.
     void PrepareRenderFrame();
+    // Record queued GPU particle steps before a Vulkan render pass begins.
+    void RecordGpuParticleSimulation(IGraphicsContext* context);
     void Render(IGraphicsContext* context, float aspect,
         Camera* cameraOverride = nullptr, bool includeEditorVisuals = true,
           uint32_t viewportWidth = 0u, uint32_t viewportHeight = 0u,
@@ -214,6 +225,10 @@ public:
     uint32_t GetLastOrdinaryDrawCount() const
     {
         return m_lastOrdinaryDrawCount;
+    }
+    uint32_t GetLastParticlePortalDrawCount() const
+    {
+        return m_lastParticlePortalDrawCount;
     }
     uint32_t GetLastSkinnedObjectCount() const
     {
@@ -398,6 +413,14 @@ private:
             uint32_t count = 0;
             std::shared_ptr<Engine::Components::Texture> texture;
             bool alphaBlend = false;
+            const Object* owner = nullptr;
+        };
+        struct FluidSurfaceBatch
+        {
+            std::unique_ptr<IGraphicsBuffer> particles;
+            const Object* owner = nullptr;
+            float opacity = 1.f;
+            uint32_t count = 0;
         };
         std::unique_ptr<IGraphicsBuffer> vertices;
         std::unique_ptr<IGraphicsBuffer> constants;
@@ -409,9 +432,18 @@ private:
         uint32_t constantCursor = 0;
         uint64_t preparedSerial = 0;
         std::vector<Batch> batches;
+        std::vector<FluidSurfaceBatch> fluidSurfaces;
     };
     std::unique_ptr<IPipelineState> m_particlePipeline;
     std::unique_ptr<IPipelineState> m_particleAlphaPipeline;
+    std::unique_ptr<IPipelineState> m_particlePortalPipeline;
+    std::unique_ptr<IPipelineState> m_particlePortalAlphaPipeline;
+    std::unique_ptr<IPipelineState> m_particleGpuPipeline;
+    std::unique_ptr<IPipelineState> m_particleGpuAlphaPipeline;
+    std::unique_ptr<IPipelineState> m_particleGpuPortalPipeline;
+    std::unique_ptr<IPipelineState> m_particleGpuPortalAlphaPipeline;
+    std::unique_ptr<IPipelineState> m_fluidSurfacePipeline;
+    std::unique_ptr<IPipelineState> m_fluidSurfacePortalPipeline;
     std::vector<ParticleDrawSlot> m_particleDrawSlots;
 
     std::unique_ptr<IPipelineState> m_skyboxPipeline;
@@ -535,7 +567,10 @@ private:
     void BuildGridPipeline();
     void BuildParticlePipeline();
     void RenderParticles(IGraphicsContext* context,
-        const glm::mat4& viewProjection, const glm::mat4& view);
+        const glm::mat4& viewProjection, const glm::mat4& view,
+        const Object* contentScopeRoot = nullptr,
+        const glm::vec4& clipPlane = glm::vec4(0.f),
+        bool portalView = false);
     void BuildSkyboxPipeline();
     void BuildObjectPipeline();
     void EnsureObjectRenderCapacity(uint32_t requiredObjects);
@@ -624,6 +659,7 @@ private:
     uint64_t m_lastObjectDataUploadBytes = 0;
     uint32_t m_lastOcclusionCulledCount = 0;
     uint32_t m_lastOrdinaryDrawCount = 0;
+    uint32_t m_lastParticlePortalDrawCount = 0;
     uint32_t m_lastSkinnedObjectCount = 0;
     ShadowDebugSnapshot m_shadowDebugSnapshot;
     bool m_renderFramePrepared = false;
@@ -637,11 +673,13 @@ private:
     UpdateTimings m_lastUpdateTimings{};
     PrepareTimings m_lastPrepareTimings{};
     bool m_hasStarted = false;
+    size_t m_particleBudget = 100000;
     float m_deltaTime = 0.f;
     Engine::Time::SimulationClock m_clock;
     uint64_t m_structureRevision = 1;
     void FlushPendingObjectAdditions();
     void FlushPendingObjectRemovals();
+    void EnforceParticleBudget();
     Object* m_selectedObject = nullptr;
     Engine::Components::Mesh* m_editorSelectedMesh = nullptr;
     bool m_editorMeshEditPose = false;

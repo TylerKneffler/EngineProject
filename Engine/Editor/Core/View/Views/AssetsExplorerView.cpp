@@ -1,4 +1,5 @@
 #include "AssetsExplorerView.h"
+#include "Engine/Editor/CodeEditorLink.h"
 #include "Engine/Editor/Core/View/Templates/Common/AssetPathTemplate.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Engine/Editor/UI/EditorIcons.h"
@@ -65,15 +66,7 @@ const std::unordered_map<std::string, std::string>& AssetEditorRegistry()
         { ".ply", "Mesh Editor" }, { ".stl", "Mesh Editor" },
         { ".fbx", "Model Editor" }, { ".pmx", "Model Editor" },
         { ".gltf", "Model Editor" },
-        { ".glb", "Model Editor" }, { ".h", "Script Editor" },
-        { ".hpp", "Script Editor" }, { ".cpp", "Script Editor" },
-        { ".cc", "Script Editor" }, { ".cxx", "Script Editor" },
-        { ".inl", "Script Editor" }, { ".cs", "Script Editor" },
-        { ".c", "Script Editor" }, { ".m", "Script Editor" },
-        { ".mm", "Script Editor" }, { ".py", "Script Editor" },
-        { ".lua", "Script Editor" }, { ".js", "Script Editor" },
-        { ".ts", "Script Editor" }, { ".sh", "Script Editor" },
-        { ".ps1", "Script Editor" }
+        { ".glb", "Model Editor" }
     };
     return registry;
 }
@@ -1549,6 +1542,15 @@ void AssetsExplorerView::OpenFile(const std::string& filePath)
 {
     const std::string extension =
         Engine::Editor::LowerAssetExtension(filePath);
+    if (IsCodeFile(filePath))
+    {
+        if (OpenInCodeEditor(filePath))
+        {
+            if (OnCodeFileOpened) OnCodeFileOpened(filePath);
+            return;
+        }
+        // VS Code is optional; keep the system file association available.
+    }
     if (extension == ".xml")
     {
         pugi::xml_document document;
@@ -1576,12 +1578,9 @@ void AssetsExplorerView::OpenFile(const std::string& filePath)
         return;
     }
 
-    // Convert to wide string for Windows API
-    int size_needed = MultiByteToWideChar(CP_UTF8, 0, filePath.c_str(), (int)filePath.length(), NULL, 0);
-    std::wstring wideFilePath(size_needed, 0);
-    MultiByteToWideChar(CP_UTF8, 0, filePath.c_str(), (int)filePath.length(), &wideFilePath[0], size_needed);
-
     // Use ShellExecute to open the file with the default application
-    ShellExecuteW(NULL, L"open", wideFilePath.c_str(), NULL, NULL, SW_SHOW);
+    const std::wstring wideFilePath = fs::absolute(fs::path(filePath)).wstring();
+    ShellExecuteW(nullptr, L"open", wideFilePath.c_str(), nullptr, nullptr,
+        SW_SHOWNORMAL);
 }
 }

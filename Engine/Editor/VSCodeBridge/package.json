@@ -1,0 +1,12 @@
+{
+  "name": "engine-editor-auto-attach",
+  "displayName": "Engine Editor Auto Attach",
+  "description": "Attaches the VS Code C++ debugger and remembers the active script for Engine Editor.",
+  "version": "0.1.1",
+  "publisher": "engineproject",
+  "engines": { "vscode": "^1.74.0" },
+  "categories": ["Debuggers"],
+  "activationEvents": ["onStartupFinished"],
+  "extensionDependencies": ["ms-vscode.cpptools"],
+  "main": "./extension.js"
+}

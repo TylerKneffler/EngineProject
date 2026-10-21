@@ -10,6 +10,41 @@
 
 namespace Engine::Renderers
 {
+std::unique_ptr<Engine::Graphics::IPipelineState>
+D3D12PipelineStateFactory::CreateComputePipeline(
+    const Engine::Graphics::IShader* shader)
+{
+    if (!m_device || !shader || !shader->GetBytecode() ||
+        !shader->GetBytecodeSize()) return nullptr;
+    D3D12_ROOT_PARAMETER parameters[3]{};
+    parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    parameters[0].Constants = { 0, 0, 32 };
+    parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+    parameters[1].Descriptor = { 0, 0 };
+    parameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
+    parameters[2].Descriptor = { 0, 0 };
+    for (auto& parameter : parameters)
+        parameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    D3D12_ROOT_SIGNATURE_DESC signatureDesc{};
+    signatureDesc.NumParameters = 3;
+    signatureDesc.pParameters = parameters;
+    Microsoft::WRL::ComPtr<ID3DBlob> signatureBytes;
+    Microsoft::WRL::ComPtr<ID3DBlob> errors;
+    if (FAILED(D3D12SerializeRootSignature(&signatureDesc,
+        D3D_ROOT_SIGNATURE_VERSION_1, &signatureBytes, &errors)))
+        return nullptr;
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> signature;
+    if (FAILED(m_device->CreateRootSignature(0, signatureBytes->GetBufferPointer(),
+        signatureBytes->GetBufferSize(), IID_PPV_ARGS(&signature)))) return nullptr;
+    D3D12_COMPUTE_PIPELINE_STATE_DESC desc{};
+    desc.pRootSignature = signature.Get();
+    desc.CS = { shader->GetBytecode(), shader->GetBytecodeSize() };
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> state;
+    if (FAILED(m_device->CreateComputePipelineState(&desc,
+        IID_PPV_ARGS(&state)))) return nullptr;
+    return std::make_unique<D3D12ComputePipeline>(
+        std::move(state), std::move(signature));
+}
 D3D12PipelineStateBuilder::D3D12PipelineStateBuilder(ID3D12Device* device, ID3D12RootSignature* rootSig)
     : m_device(device), m_rootSig(rootSig)
 {

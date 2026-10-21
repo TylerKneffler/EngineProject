@@ -20,6 +20,17 @@ public:
     D3D11_PRIMITIVE_TOPOLOGY topology = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
 };
 
+class D3D11ComputePipeline final : public Engine::Graphics::IPipelineState
+{
+public:
+    explicit D3D11ComputePipeline(Microsoft::WRL::ComPtr<ID3D11ComputeShader> shader)
+        : m_shader(std::move(shader)) {}
+    void* GetNativeHandle() const override { return m_shader.Get(); }
+    ID3D11ComputeShader* GetShader() const { return m_shader.Get(); }
+private:
+    Microsoft::WRL::ComPtr<ID3D11ComputeShader> m_shader;
+};
+
 class D3D11PipelineStateBuilder : public Engine::Graphics::IPipelineStateBuilder
 {
 public:
@@ -99,6 +110,8 @@ public:
     {
         return std::make_unique<D3D11PipelineStateBuilder>(m_device);
     }
+    std::unique_ptr<Engine::Graphics::IPipelineState> CreateComputePipeline(
+        const Engine::Graphics::IShader* shader) override;
 private:
     ID3D11Device* m_device = nullptr;
 };

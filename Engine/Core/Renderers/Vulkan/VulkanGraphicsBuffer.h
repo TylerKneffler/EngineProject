@@ -16,7 +16,7 @@ public:
     uint64_t GetSize() const override { return m_size; }
     uint32_t GetElementStride() const override { return m_elementStride; }
     void SetElementStride(uint32_t value) { m_elementStride = value; }
-    void* Map() override { return m_mapped; }
+    void* Map() override { return m_access == AccessMode::Default ? nullptr : m_mapped; }
     void Unmap() override {}
     void* GetNativeHandle() const override { return reinterpret_cast<void*>(m_buffer); }
     VkBuffer GetBuffer() const { return m_buffer; }

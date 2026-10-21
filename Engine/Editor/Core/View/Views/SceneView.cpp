@@ -19,6 +19,7 @@
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Transform.h"
 #include "Core/Compoonents/Obj/Sprite.h"
+#include "Core/Compoonents/Particles/ParticleEmitter.h"
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
 #include "Core/Compoonents/Lighting/LightProbe.h"
 #include "Core/Graphics/IGraphicsContext.h"
@@ -421,6 +422,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
         : EditorUiContextMenuResult{};
     if (m_scene && (createMenu.addRequested ||
         !createMenu.primitive3D.empty() || createMenu.addSpriteRequested ||
+        createMenu.addParticleEmitterRequested ||
         createMenu.addLightProbeRequested ||
         createMenu.addLightProbeGroupRequested))
     {
@@ -442,6 +444,11 @@ void SceneView::DrawPanel(IEditorUi& ui)
                 Engine::Components::Sprite* sprite =
                     created->AddComponent<Engine::Components::Sprite>();
                 sprite->SetAnimationManager(manager);
+            }
+            else if (createMenu.addParticleEmitterRequested)
+            {
+                created = m_scene->AddObject("Particle Emitter");
+                created->AddComponent<Engine::Components::ParticleEmitter>();
             }
             else if(createMenu.addLightProbeRequested)
             {
