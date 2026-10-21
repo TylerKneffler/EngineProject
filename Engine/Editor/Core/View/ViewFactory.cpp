@@ -131,6 +131,7 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
         view->Init(deviceHandle, w, h, cpu, gpu, slot, m_scene, m_settings);
         view->OnFocused = OnMainDocumentFocused;
         view->OnAssetDropped = OnAssetDropped;
+        view->OnAssetAssigned = OnAssetAssigned;
         view->OnAssetPreviewRequested = OnAssetPreviewRequested;
         view->OnAssetPreviewCancelled = OnAssetPreviewCancelled;
         view->OnAssetPreviewCommitted = OnAssetPreviewCommitted;
@@ -172,6 +173,8 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
             view->OnSelectionSetChanged = OnSelectionSetChanged;
         if (OnFocusObject)
             view->OnFocusObject = OnFocusObject;
+        if (OnPropertiesRequested)
+            view->OnPropertiesRequested = OnPropertiesRequested;
         if (OnHierarchyChanged)
             view->OnHierarchyChanged = OnHierarchyChanged;
         if (OnHierarchyInteraction)

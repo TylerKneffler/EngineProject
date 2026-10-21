@@ -15,4 +15,6 @@ inline constexpr const char* Save = "\xEE\x9D\x8E";       // U+E74E
 inline constexpr const char* Settings = "\xEE\x9C\x93";   // U+E713
 inline constexpr const char* Play = "\xEE\x9D\xA8";       // U+E768
 inline constexpr const char* Pause = "\xEE\x9D\xA9";      // U+E769
+inline constexpr const char* Lock = "\xEE\x9C\xAE";       // U+E72E
+inline constexpr const char* Unlock = "\xEE\x9E\x85";     // U+E785
 }

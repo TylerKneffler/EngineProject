@@ -598,7 +598,9 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
             const float regionX = side == 0 ? origin.x :
                 origin.x + available - sideWidth;
             float desired[3]{};
-            float total = 0.f;
+            float minimums[3]{};
+            float totalDesired = 0.f;
+            float totalMinimum = 0.f;
             for (int alignment = 0; alignment < 3; ++alignment)
             {
                 for (int i = 0; i < groupCounts[side][alignment]; ++i)
@@ -606,15 +608,31 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
                     const int index = groups[side][alignment][i];
                     const float minimum =
                         state.GetToolbarSectionMinimumWidth(sections[index]);
+                    minimums[alignment] += minimum;
                     desired[alignment] += std::max(minimum,
                         sectionSized[index] ? sectionWidths[index] :
                             state.GetToolbarSectionPreferredWidth(sections[index]));
                 }
-                total += desired[alignment];
+                totalDesired += desired[alignment];
+                totalMinimum += minimums[alignment];
             }
-            const float scale = total > sideWidth ? sideWidth / total : 1.f;
-            float widths[3]{ desired[0] * scale, desired[1] * scale,
-                desired[2] * scale };
+            float widths[3]{};
+            if (totalDesired <= sideWidth)
+                for (int alignment = 0; alignment < 3; ++alignment)
+                    widths[alignment] = desired[alignment];
+            else if (totalMinimum <= sideWidth)
+            {
+                const float extra = totalDesired - totalMinimum;
+                const float scale = extra > 0.f
+                    ? (sideWidth - totalMinimum) / extra : 0.f;
+                for (int alignment = 0; alignment < 3; ++alignment)
+                    widths[alignment] = minimums[alignment] +
+                        (desired[alignment] - minimums[alignment]) * scale;
+            }
+            else if (totalMinimum > 0.f)
+                for (int alignment = 0; alignment < 3; ++alignment)
+                    widths[alignment] = sideWidth *
+                        minimums[alignment] / totalMinimum;
             const float leftEnd = regionX + widths[0];
             const float rightStart = regionX + sideWidth - widths[2];
             const float middleX = std::clamp(

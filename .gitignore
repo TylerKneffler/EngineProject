@@ -18,6 +18,7 @@ build/
 !.local/tests/ParticleRenderingTests.cpp
 !.local/tests/ParticleNeighborGridTests.cpp
 !.local/tests/StandaloneAssetTests.cpp
+!.local/tests/PrefabComponentOverrideTests.cpp
 build
 editor-startup.log
 project-build.log

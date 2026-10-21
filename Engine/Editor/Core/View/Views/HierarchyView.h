@@ -52,6 +52,7 @@ public:
 
     // Fires when the user double-clicks an object — editor should frame it in the scene view.
     std::function<void(Engine::Core::Object*)> OnFocusObject;
+    std::function<void(Engine::Core::Object*)> OnPropertiesRequested;
     std::function<void(const std::string&)> OnPrefabRequested;
     std::function<void()> OnHierarchyChanged;
     std::function<void(const std::string&)> OnInteractionLog;

@@ -1015,6 +1015,19 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PrefabComponentOverrideTests.cpp")
+    enable_testing()
+    add_executable(PrefabComponentOverrideTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/PrefabComponentOverrideTests.cpp")
+    target_link_libraries(PrefabComponentOverrideTests PRIVATE Engine)
+    target_include_directories(PrefabComponentOverrideTests PRIVATE
+        "${ENGINE_ROOT}" "${ENGINE_ROOT}/Engine")
+    add_test(NAME PrefabComponentOverrides COMMAND PrefabComponentOverrideTests)
+    set_tests_properties(PrefabComponentOverrides PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/LegacyFbxImportTests.cpp")
     enable_testing()
     add_executable(LegacyFbxImportTests EXCLUDE_FROM_ALL

@@ -27,7 +27,11 @@ public:
     ~PropertiesView() = default;
 
     void Init(Engine::Scene::Scene* scene)
-    { m_scene = scene; OnDrawContext = {}; }
+    {
+        if (m_scene != scene) m_selectionLocked = false;
+        m_scene = scene;
+        OnDrawContext = {};
+    }
     void SetAllowComponentStructureEdits(bool allow)
     { m_allowComponentStructureEdits = allow; }
 
@@ -37,25 +41,7 @@ public:
             ? std::vector<Engine::Core::Object*>{ obj }
             : std::vector<Engine::Core::Object*>{});
     }
-    void SetSelectedObjects(const std::vector<Engine::Core::Object*>& objects)
-    {
-        Engine::Core::Object* obj = objects.empty() ? nullptr : objects.back();
-        if (obj != m_selectedObject)
-        {
-            Engine::Core::Component::ClearEditorReferenceSearches();
-            if (m_deferredTransformPrefabRoot)
-                m_deferredTransformPrefabRoot->PrefabOverrideCacheValid = false;
-            m_deferredTransformPrefabRoot = nullptr;
-            m_componentPickerOpen = false;
-            m_componentSearch[0] = '\0';
-            m_componentJumpTarget = nullptr;
-            m_componentHeaderOverride = -1;
-            m_editingSkyboxTexture = false;
-        }
-        m_selectedObjects = objects;
-        m_selectedObject = obj;
-        m_assetInspector.Clear();
-    }
+    void SetSelectedObjects(const std::vector<Engine::Core::Object*>& objects);
     Engine::Core::Object* GetSelectedObject() const   { return m_selectedObject; }
     void SetSelectedAsset(const std::string& path);
     const std::string& GetSelectedAsset() const
@@ -64,8 +50,12 @@ public:
     }
     bool CommitPendingAssetRename()
     { return m_assetInspector.CommitPendingRename(); }
+    bool IsSelectionLocked() const { return m_selectionLocked; }
 
     void DrawPanel(IEditorUi& ui) override;
+
+    static bool AssignAssetToObject(Engine::Core::Object& object,
+        const std::string& path, std::string& message);
 
     std::function<void()> OnComponentsChanged;
     std::function<void(const std::string&, bool)> OnAssetDropLog;
@@ -90,9 +80,15 @@ private:
     void RevertSelectedPrefabOverrides();
     void HandlePrefabMenu(const EditorUiPrefabMenuResult& menu);
     void LogAssetDrop(const std::string& message, bool error = false) const;
+    bool HasLiveSelectedObject() const;
+    void ApplySelectedObjects(const std::vector<Engine::Core::Object*>& objects);
+    void ApplySelectedAsset(const std::string& path);
 
     Engine::Core::Object* m_selectedObject = nullptr;
     std::vector<Engine::Core::Object*> m_selectedObjects;
+    std::vector<Engine::Core::Object*> m_followingObjects;
+    std::string m_followingAsset;
+    bool m_selectionLocked = false;
     Engine::Core::Object* m_deferredTransformPrefabRoot = nullptr;
     AssetInspectorTemplate m_assetInspector;
     Engine::Scene::Scene* m_scene = nullptr;
@@ -102,6 +98,7 @@ private:
     bool m_editingSkyboxTexture = false;
     bool m_allowComponentStructureEdits = true;
     char m_propertiesSearch[128]{};
+    bool m_componentOutlineOpen = false;
     int m_componentHeaderOverride = -1;
     const void* m_componentJumpTarget = nullptr;
     char m_skyboxTextureEdit[512]{};

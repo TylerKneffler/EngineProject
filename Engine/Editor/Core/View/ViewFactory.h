@@ -88,6 +88,7 @@ public:
     std::function<void()>                  OnDeleteSelectionRequested;
     std::function<void(bool)>              OnGizmoInteraction;  // SceneView transform drag
     std::function<void(Engine::Core::Object*)>           OnFocusObject;       // HierarchyView double-click
+    std::function<void(Engine::Core::Object*)>           OnPropertiesRequested;
     std::function<void()>                  OnHierarchyChanged;
     std::function<void(const std::string&)> OnHierarchyInteraction;
     std::function<void(const std::string&)> OnSceneRequested;   // AssetsExplorerView
@@ -95,6 +96,7 @@ public:
     std::function<void(const std::string&, const std::string&)> OnAssetDocumentRequested;
     std::function<void(const std::string&)> OnAssetSelected;    // AssetsExplorerView
     std::function<void(const std::string&)> OnAssetDropped;     // SceneView
+    std::function<void(const std::string&, Engine::Core::Object*)> OnAssetAssigned;
     std::function<Engine::Core::Object*(const std::string&)> OnAssetPreviewRequested;
     std::function<void(Engine::Core::Object*)> OnAssetPreviewCancelled;
     std::function<void(Engine::Core::Object*, const std::string&)> OnAssetPreviewCommitted;

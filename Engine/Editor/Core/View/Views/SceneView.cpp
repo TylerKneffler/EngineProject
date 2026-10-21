@@ -14,6 +14,9 @@
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Animation/AnimationBone.h"
 #include "Core/Compoonents/Animation/Model.h"
+#include "Core/Compoonents/Animation/AnimationManager.h"
+#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Transform.h"
 #include "Core/Compoonents/Obj/Sprite.h"
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
@@ -26,6 +29,73 @@
 
 namespace Engine::Editor
 {
+namespace
+{
+Engine::Core::Object* AssetDropTarget(Engine::Core::Object* hovered,
+    const std::string& extension)
+{
+    if (!hovered) return nullptr;
+    if (extension == ".material" || extension == ".mat")
+        return hovered->GetComponent<Engine::Components::Mesh>() ? hovered : nullptr;
+    if (extension == ".anim" || extension == ".animation" ||
+        extension == ".animpack")
+    {
+        // The visible mesh can be several levels below its controller.
+        for (auto* current = hovered; current; current = current->Parent)
+            if (current->GetComponent<Engine::Components::AnimationManager>())
+                return current;
+        for (auto* current = hovered; current; current = current->Parent)
+            if (current->GetComponent<Engine::Components::Model>())
+                return current;
+    }
+    return nullptr;
+}
+
+void DrawAssetDropHighlight(IEditorUi& ui, const Engine::Scene::Scene& scene,
+    const Engine::Core::Object& target, const EditorUiVec2& viewport)
+{
+    const auto* camera = scene.editorCamera.GetComponent<Engine::Components::Camera>();
+    if (!camera || viewport.x <= 1.f || viewport.y <= 1.f) return;
+    const glm::mat4 vp = camera->GetProjectionMatrix(viewport.x / viewport.y) *
+        camera->GetViewMatrix();
+    const EditorUiColor color{ 1.f, .75f, .12f, 1.f };
+    for (const auto& object : scene.GetObjects())
+    {
+        const auto* current = object.get();
+        bool descendant = false;
+        for (auto* ancestor = current; ancestor; ancestor = ancestor->Parent)
+            if (ancestor == &target) { descendant = true; break; }
+        if (!descendant) continue;
+        const auto* mesh = current->GetComponent<Engine::Components::Mesh>();
+        if (!mesh || !mesh->HasBounds()) continue;
+        const glm::vec3 minimum = mesh->GetBoundsMin();
+        const glm::vec3 maximum = mesh->GetBoundsMax();
+        const glm::mat4 world = current->transform.GetWorldMatrix();
+        EditorUiVec2 points[8]{};
+        bool visible[8]{};
+        for (int corner = 0; corner < 8; ++corner)
+        {
+            const glm::vec3 local{
+                corner & 1 ? maximum.x : minimum.x,
+                corner & 2 ? maximum.y : minimum.y,
+                corner & 4 ? maximum.z : minimum.z };
+            const glm::vec4 clip = vp * world * glm::vec4(local, 1.f);
+            if (clip.w <= 0.f) continue;
+            const glm::vec3 ndc = glm::vec3(clip) / clip.w;
+            if (ndc.z < 0.f || ndc.z > 1.f) continue;
+            points[corner] = { (ndc.x * .5f + .5f) * viewport.x,
+                (.5f - ndc.y * .5f) * viewport.y };
+            visible[corner] = true;
+        }
+        constexpr int edges[12][2] = {
+            {0,1},{1,3},{3,2},{2,0}, {4,5},{5,7},{7,6},{6,4},
+            {0,4},{1,5},{2,6},{3,7} };
+        for (const auto& edge : edges)
+            if (visible[edge[0]] && visible[edge[1]])
+                ui.DrawViewportLine(points[edge[0]], points[edge[1]], color, 2.5f);
+    }
+}
+}
 
 
 // ---------------------------------------------------------------------------
@@ -478,8 +548,32 @@ void SceneView::DrawPanel(IEditorUi& ui)
                         OnAssetPreviewCommitted(placed, placedPath);
                 }
             }
-            else if (AllowAssetDrops && payload.delivered && OnAssetDropped)
-                OnAssetDropped(path);
+            else
+            {
+                Engine::Core::Object* target = nullptr;
+                if (m_scene && (extension == ".material" || extension == ".mat" ||
+                    extension == ".anim" || extension == ".animation" ||
+                    extension == ".animpack"))
+                {
+                    auto* hovered = ScenePlacementAndPicking::PickObjectInViewport(
+                        *m_scene, input.mousePosInViewport, input.available, true);
+                    target = AssetDropTarget(hovered, extension);
+                    if (target)
+                    {
+                        DrawAssetDropHighlight(ui, *m_scene, *target, input.available);
+                        ui.DrawViewportText({ input.mousePosInViewport.x + 14.f,
+                            input.mousePosInViewport.y + 18.f }, target->name.c_str(),
+                            { 1.f, .75f, .12f, 1.f });
+                    }
+                }
+                if (payload.delivered)
+                {
+                    if (target && OnAssetAssigned)
+                        OnAssetAssigned(path, target);
+                    else if (OnAssetDropped)
+                        OnAssetDropped(path);
+                }
+            }
         }
         ui.EndDragDropTarget();
     }

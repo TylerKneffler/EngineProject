@@ -2878,7 +2878,7 @@ void EditorState::DrawAnimationMappingRepair(IEditorUi& ui,
 void EditorState::DrawAnimationRigToolbar(IEditorUi& ui,
     AnimationDocument& document)
 {
-    ImGui::SetNextItemWidth(240.f);
+    ImGui::SetNextItemWidth(std::min(240.f, ImGui::GetContentRegionAvail().x));
     const std::string label = document.sourceManager
         ? "Rig: " + document.rigName : "Choose animation rig";
     const std::string preview = AnimationDropdownLabel(label);

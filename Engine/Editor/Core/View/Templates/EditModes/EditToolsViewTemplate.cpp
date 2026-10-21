@@ -195,7 +195,16 @@ struct ToolbarRow
     bool singleRow;
     bool* overflow;
     bool previous = false;
-    bool hidden = false;
+
+    bool Fits(float width) const
+    {
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float right = ImGui::GetWindowPos().x +
+            ImGui::GetWindowContentRegionMax().x;
+        const float x = previous ? ImGui::GetItemRectMax().x +
+            style.ItemSpacing.x : ImGui::GetCursorScreenPos().x;
+        return x + width <= right;
+    }
 
     bool Next(float width)
     {
@@ -204,12 +213,7 @@ struct ToolbarRow
             ImGui::GetWindowContentRegionMax().x;
         const float x = previous ? ImGui::GetItemRectMax().x +
             style.ItemSpacing.x : ImGui::GetCursorScreenPos().x;
-        if (singleRow && (hidden || x + width > right))
-        {
-            hidden = true;
-            if (overflow) *overflow = true;
-            return false;
-        }
+        if (singleRow && !Fits(width) && overflow) *overflow = true;
         if (previous && (singleRow || x + width <= right))
             ImGui::SameLine();
         previous = true;
@@ -288,7 +292,7 @@ bool EditorState::HasToolbarSection(ToolbarSection section) const
 float EditorState::GetToolbarSectionMinimumWidth(ToolbarSection section) const
 {
     if (m_activeAnimationDocument)
-        return section == ToolbarSection::Mode ? 280.f : 0.f;
+        return section == ToolbarSection::Mode ? 150.f : 0.f;
     if (m_activeAssetDocument && section == ToolbarSection::Paint)
         return 190.f;
     float controlWidth = 0.f;
@@ -340,9 +344,8 @@ float EditorState::GetToolbarSectionMinimumWidth(ToolbarSection section) const
             : mesh.enabled ? "Mesh Tools..."
             : m_activeSceneAssetDocument && m_activeSceneAssetDocument->meshStage
                 ? "Vertex Attributes..." : "Transform...";
-        const std::string suffix = std::string(" ") + first;
         const std::string label = ToolbarIconLabel(0xE713, u8"\uE713",
-            suffix.c_str(), "MinimumTools", first);
+            "", "MinimumTools", first);
         controlWidth = ToolbarButtonWidth(label.c_str());
         break;
     }
@@ -367,6 +370,8 @@ float EditorState::GetToolbarSectionMinimumWidth(ToolbarSection section) const
 float EditorState::GetToolbarSectionPreferredWidth(ToolbarSection section) const
 {
     float width = GetToolbarSectionMinimumWidth(section);
+    if (m_activeAnimationDocument && section == ToolbarSection::Mode)
+        return 280.f;
     const float spacing = ImGui::GetStyle().ItemSpacing.x;
     if (section == ToolbarSection::File)
     {
@@ -416,8 +421,13 @@ void EditorState::DrawToolbarTools(IEditorUi& ui, bool singleRow,
         const std::string id = std::string("Tool-") + label;
         const std::string iconLabel = ToolbarIconLabel(codepoint, glyph,
             suffix.c_str(), id.c_str(), label);
-        return row.Next(ToolbarButtonWidth(iconLabel.c_str())) &&
-            ToolbarIconButton(codepoint, glyph, suffix.c_str(), id.c_str(), label, label);
+        const bool compact = singleRow && ImGui::GetFont()->IsGlyphInFont(codepoint) &&
+            !row.Fits(ToolbarButtonWidth(iconLabel.c_str())) && row.Fits(28.f);
+        const char* shownSuffix = compact ? "" : suffix.c_str();
+        const std::string shownLabel = ToolbarIconLabel(codepoint, glyph,
+            shownSuffix, id.c_str(), label);
+        return row.Next(ToolbarButtonWidth(shownLabel.c_str())) &&
+            ToolbarIconButton(codepoint, glyph, shownSuffix, id.c_str(), label, label);
     };
     const auto iconButton = [&](ImWchar codepoint, const char* glyph,
         const char* suffix, const char* id, const char* fallback,
@@ -425,8 +435,13 @@ void EditorState::DrawToolbarTools(IEditorUi& ui, bool singleRow,
     {
         const std::string label = ToolbarIconLabel(codepoint, glyph,
             suffix, id, fallback);
-        return row.Next(ToolbarButtonWidth(label.c_str())) &&
-            ToolbarIconButton(codepoint, glyph, suffix, id, fallback, tooltip);
+        const bool compact = singleRow && ImGui::GetFont()->IsGlyphInFont(codepoint) &&
+            !row.Fits(ToolbarButtonWidth(label.c_str())) && row.Fits(28.f);
+        const char* shownSuffix = compact ? "" : suffix;
+        const std::string shownLabel = ToolbarIconLabel(codepoint, glyph,
+            shownSuffix, id, fallback);
+        return row.Next(ToolbarButtonWidth(shownLabel.c_str())) &&
+            ToolbarIconButton(codepoint, glyph, shownSuffix, id, fallback, tooltip);
     };
     MeshEditSession* mesh = ActiveMeshEditSession();
     SkeletonEditSession* skeleton = ActiveSkeletonEditSession();

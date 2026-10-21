@@ -342,7 +342,7 @@ Engine::Core::Object* ScenePlacementAndPicking::PickSkinnedBoneInViewport(
 
 Engine::Core::Object* ScenePlacementAndPicking::PickObjectInViewport(
     const Engine::Scene::Scene& scene, const EditorUiVec2& mousePos,
-    const EditorUiVec2& viewportSize)
+    const EditorUiVec2& viewportSize, bool preserveMeshChild)
 {
     if (viewportSize.x <= 1.f || viewportSize.y <= 1.f)
         return nullptr;
@@ -467,12 +467,22 @@ Engine::Core::Object* ScenePlacementAndPicking::PickObjectInViewport(
                         segment.ray.origin, segment.ray.direction, distance)
                     : IntersectMeshBounds(*obj, *mesh, segment.ray.origin,
                         segment.ray.direction, distance);
-                if (hit &&
-                    distance < segment.maxDistance &&
-                    travelledDistance + distance < bestDistance)
+                const bool deeperChild = preserveMeshChild && best && [&] {
+                    for (auto* parent = obj->Parent; parent; parent = parent->Parent)
+                        if (parent == best) return true;
+                    return false;
+                }();
+                const bool shallowerParent = preserveMeshChild && best && [&] {
+                    for (auto* parent = best->Parent; parent; parent = parent->Parent)
+                        if (parent == obj) return true;
+                    return false;
+                }();
+                if (hit && distance < segment.maxDistance &&
+                    (deeperChild || (!shallowerParent &&
+                        travelledDistance + distance < bestDistance)))
                 {
                     bestDistance = travelledDistance + distance;
-                    best = skinned && obj->GetPrefabInstanceRoot()
+                    best = !preserveMeshChild && skinned && obj->GetPrefabInstanceRoot()
                         ? obj->GetPrefabInstanceRoot() : obj;
                 }
                 continue;

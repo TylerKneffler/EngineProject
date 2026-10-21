@@ -4258,6 +4258,14 @@ void EditorState::WireupCallbacks()
                 refresh(document->scene.get());
     };
 
+    m_viewFactory->OnPropertiesRequested = [this](Engine::Core::Object* obj) {
+        if (m_primaryProperties)
+        {
+            m_primaryProperties->SetSelectedObject(obj);
+            m_primaryProperties->SetOpen(true);
+        }
+    };
+
     // Wire up selection changed callback (for hierarchy -> properties)
     m_viewFactory->OnSelectionChanged = [this](Engine::Core::Object* obj) {
         if (Engine::Core::Component::CaptureEditorReferencePick(obj))
@@ -4442,6 +4450,22 @@ void EditorState::WireupCallbacks()
 
     m_viewFactory->OnAssetDropped = [this](const std::string& path) {
         SelectObject(InstantiateAsset(path));
+    };
+    m_viewFactory->OnAssetAssigned = [this](const std::string& path,
+        Engine::Core::Object* target) {
+        if (!target) return;
+        std::string message;
+        const bool assigned = PropertiesView::AssignAssetToObject(
+            *target, path, message);
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(assigned ? ConsoleView::Level::Info :
+                ConsoleView::Level::Error, message);
+        if (assigned)
+        {
+            SelectObject(target);
+            if (m_primaryProperties && m_primaryProperties->OnComponentsChanged)
+                m_primaryProperties->OnComponentsChanged();
+        }
     };
     m_viewFactory->OnAssetPreviewRequested = [this](const std::string& path) {
         m_assetPreviewActive = true;

@@ -8,7 +8,7 @@ namespace Engine::Editor
 {
 bool PropertiesView::CanEditSelectedObject() const
 {
-    return m_selectedObject && !m_selectedObject->IsPartOfPrefabInstance();
+    return m_selectedObject != nullptr;
 }
 
 void PropertiesView::UnpackSelectedPrefab()

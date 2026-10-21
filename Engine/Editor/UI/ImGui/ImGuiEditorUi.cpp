@@ -809,8 +809,17 @@ EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,
         }
         if(hasMoreOptions){
             if(quickCount) ImGui::SameLine(0.f,0.f);
-            if(ImGui::Button("\xE2\x8B\xAE##more",{buttonWidth,buttonWidth}))
+            if(ImGui::Button("##more",{buttonWidth,buttonWidth}))
                 ImGui::OpenPopup("##overlayOptions");
+            const ImVec2 moreMin=ImGui::GetItemRectMin();
+            const ImVec2 moreMax=ImGui::GetItemRectMax();
+            const ImVec2 moreCenter{(moreMin.x+moreMax.x)*.5f,
+                (moreMin.y+moreMax.y)*.5f};
+            const ImU32 moreInk=ImGui::GetColorU32(ImGuiCol_Text);
+            ImDrawList* moreIcons=ImGui::GetWindowDrawList();
+            for(int dot=-1;dot<=1;++dot)
+                moreIcons->AddCircleFilled(
+                    {moreCenter.x,moreCenter.y+dot*4.f},1.5f,moreInk);
             if(ImGui::IsItemHovered()) ImGui::SetTooltip("More viewport overlays");
             if(ImGui::BeginPopup("##overlayOptions")){
                 for(int index=selected?3:0;index<8;++index){
@@ -863,6 +872,19 @@ EditorUiObjectRowResult ImGuiEditorUi::ObjectTreeRow(const void* id,
         foreground->AddText({ghostMin.x+8.f,ghostMin.y+
             (ghostMax.y-ghostMin.y-textSize.y)*.5f},
             ImGui::GetColorU32(ImGuiCol_Text),display);
+    }
+    if (!ImGui::GetIO().KeyAlt &&
+        ImGui::IsMouseHoveringRect(rowMinimum, rowMaximum) &&
+        ImGui::IsMouseReleased(ImGuiMouseButton_Right))
+    {
+        const ImGuiIO& io = ImGui::GetIO();
+        const ImVec2 clickPos = io.MouseClickedPos[ImGuiMouseButton_Right];
+        const float dx = io.MousePos.x - clickPos.x;
+        const float dy = io.MousePos.y - clickPos.y;
+        const float dragDistanceSquared = std::max(
+            io.MouseDragMaxDistanceSqr[ImGuiMouseButton_Right], dx * dx + dy * dy);
+        result.contextMenuRequested =
+            dragDistanceSquared < io.MouseDragThreshold * io.MouseDragThreshold;
     }
     ImGui::PopID();
     return result;
@@ -1002,15 +1024,17 @@ float ImGuiEditorUi::AvailableContentWidth() const
 {
     return ImGui::GetContentRegionAvail().x;
 }
-EditorUiContextMenuResult ImGuiEditorUi::ContextMenu(const void* id,const char* addLabel,const char* deleteLabel,bool objectCreationMenu,const char* unpackLabel,bool clipboardActions,bool canPaste)
+EditorUiContextMenuResult ImGuiEditorUi::ContextMenu(const void* id,const char* addLabel,const char* deleteLabel,bool objectCreationMenu,const char* unpackLabel,bool clipboardActions,bool canPaste,bool propertiesAction,bool openRequested)
 {
     EditorUiContextMenuResult result;
     const bool hasAdd=addLabel&&addLabel[0];
     const bool hasDelete=deleteLabel&&deleteLabel[0];
     const bool hasUnpack=unpackLabel&&unpackLabel[0];
-    if(!hasAdd&&!hasDelete&&!hasUnpack&&!clipboardActions)return result;
+    if(!hasAdd&&!hasDelete&&!hasUnpack&&!clipboardActions&&!propertiesAction)return result;
     ImGui::PushID(id);
-    if (!ImGui::GetIO().KeyAlt && ImGui::IsItemHovered() &&
+    if (openRequested)
+        ImGui::OpenPopup("##context");
+    else if (!ImGui::GetIO().KeyAlt && ImGui::IsItemHovered() &&
         ImGui::IsMouseReleased(ImGuiMouseButton_Right))
     {
         const ImGuiIO& io = ImGui::GetIO();
@@ -1024,6 +1048,12 @@ EditorUiContextMenuResult ImGuiEditorUi::ContextMenu(const void* id,const char* 
             ImGui::OpenPopup("##context");
     }
     if(ImGui::BeginPopup("##context")){
+        if(propertiesAction)
+        {
+            result.propertiesRequested = ImGui::MenuItem("Properties");
+            if (clipboardActions || hasAdd || hasDelete || hasUnpack)
+                ImGui::Separator();
+        }
         if (clipboardActions)
         {
             result.copyRequested = ImGui::MenuItem("Copy", nullptr, false,
@@ -1121,11 +1151,15 @@ EditorUiTextEditResult ImGuiEditorUi::RenameText(const char* label,char* buffer,
     result.deactivated=ImGui::IsItemDeactivated();
     return result;
 }
-EditorUiPrefabMenuResult ImGuiEditorUi::PrefabOverrideMenu(const void* id,bool hasOverrides,bool canPaste)
+EditorUiPrefabMenuResult ImGuiEditorUi::PrefabOverrideMenu(const void* id,bool hasOverrides,bool canPaste,bool propertiesAction,bool openRequested)
 {
     EditorUiPrefabMenuResult result;
     ImGui::PushID(id);
+    if (openRequested) ImGui::OpenPopup("##prefabOverrides");
     if(ImGui::BeginPopupContextItem("##prefabOverrides")){
+        if (propertiesAction)
+            result.propertiesRequested = ImGui::MenuItem("Properties");
+        if (propertiesAction) ImGui::Separator();
         result.copyRequested=ImGui::MenuItem("Copy");
         result.cutRequested=ImGui::MenuItem("Cut");
         result.pasteRequested=ImGui::MenuItem("Paste",nullptr,false,canPaste);

@@ -40,6 +40,17 @@ constexpr EditorUiColor kZColor{ 0.22f, 0.48f, 1.f, 1.f };
 constexpr EditorUiColor kHoverColor{ 1.f, 0.82f, 0.16f, 1.f };
 constexpr EditorUiColor kOutline{ 0.04f, 0.04f, 0.05f, 0.92f };
 
+const Engine::Components::Skeleton& DisplaySkeleton(
+    const Engine::Components::Skeleton& skeleton)
+{
+    if (auto* model = skeleton.ResolveModel(); model && model->Owner)
+        if (auto* root = model->Owner->GetComponent<
+                Engine::Components::Skeleton>();
+            root && !root->rootBoneNodes.empty())
+            return *root;
+    return skeleton;
+}
+
 EditorUiVec2 Add(EditorUiVec2 a, EditorUiVec2 b)
 {
     return { a.x + b.x, a.y + b.y };
@@ -725,7 +736,14 @@ void EditorGizmoSystem::DrawSkeletonOverlay(
     const Engine::Components::Skeleton& skeleton, IEditorUi& ui,
     const EditorUiViewportInput& input, int selectedPaletteIndex)
 {
-    if (!scene.AreEditorBonesVisible()) return;
+    const auto& displaySkeleton = DisplaySkeleton(skeleton);
+    if (!scene.AreEditorBonesVisible() ||
+        (!displaySkeleton.showBones &&
+            (!skeleton.Owner || !(skeleton.Owner->editorOverlays &
+                Engine::Core::Object::BoneOverlay)) &&
+            (!displaySkeleton.Owner || !(displaySkeleton.Owner->editorOverlays &
+                Engine::Core::Object::BoneOverlay))))
+        return;
     const auto* camera = scene.editorCamera.GetComponent<
         Engine::Components::Camera>();
     if (!camera || input.available.x <= 1.f || input.available.y <= 1.f)
@@ -1482,9 +1500,17 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         for (Engine::Core::Component* component : owner->Components)
         {
             auto* skeleton = dynamic_cast<Engine::Components::Skeleton*>(component);
-            if (!scene.AreEditorBonesVisible() || !skeleton ||
-                !(owner->editorOverlays & (Engine::Core::Object::BoneOverlay |
-                    Engine::Core::Object::SkeletonOverlay))) continue;
+            if (!scene.AreEditorBonesVisible() || !skeleton) continue;
+            const auto& displaySkeleton = DisplaySkeleton(*skeleton);
+            const uint8_t displayOverlays = displaySkeleton.Owner
+                ? displaySkeleton.Owner->editorOverlays : 0;
+            const bool drawBones = displaySkeleton.showBones ||
+                (owner->editorOverlays & Engine::Core::Object::BoneOverlay) ||
+                (displayOverlays & Engine::Core::Object::BoneOverlay);
+            const bool drawJoints = displaySkeleton.showBones ||
+                (owner->editorOverlays & Engine::Core::Object::SkeletonOverlay) ||
+                (displayOverlays & Engine::Core::Object::SkeletonOverlay);
+            if (!drawBones && !drawJoints) continue;
             const auto* rootSkeleton = owner->GetComponent<Engine::Components::Skeleton>();
             if (rootSkeleton != skeleton && rootSkeleton &&
                 !rootSkeleton->rootBoneNodes.empty()) continue;
@@ -1513,13 +1539,13 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
 
                 float hitDistance = Length(Subtract(
                     input.mousePosInViewport, tipScreen));
-                if ((owner->editorOverlays & Engine::Core::Object::BoneOverlay) &&
+                if (drawBones &&
                     hitDistance <= 9.f && hitDistance < boneHitDistance)
                 {
                     boneHit = joint;
                     boneHitDistance = hitDistance;
                 }
-                if ((owner->editorOverlays & Engine::Core::Object::SkeletonOverlay) &&
+                if (drawJoints &&
                     hitDistance <= 9.f && hitDistance < jointHitDistance)
                 {
                     jointHit = joint;
@@ -1528,7 +1554,7 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
 
                 if (!parentJoint)
                 {
-                    if ((owner->editorOverlays & Engine::Core::Object::SkeletonOverlay) &&
+                    if (drawJoints &&
                         drawnRoots.insert(joint).second)
                     {
                         ui.DrawViewportCircle(tipScreen, joint == selected ? 7.f : 5.f,
@@ -1545,10 +1571,10 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
                 const auto& root = projectJoint(parentJoint);
                 if (!root.visible) continue;
                 const EditorUiVec2 rootScreen = root.screen;
-                if (owner->editorOverlays & Engine::Core::Object::BoneOverlay)
+                if (drawBones)
                     DrawBoneShape(ui, rootScreen, tipScreen,
                         joint == selected || parentJoint == selected);
-                if (owner->editorOverlays & Engine::Core::Object::SkeletonOverlay)
+                if (drawJoints)
                 {
                     ui.DrawViewportCircle(rootScreen, 4.f, kOutline, true);
                     ui.DrawViewportCircle(rootScreen, 2.5f,
@@ -1559,7 +1585,7 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
                 float parameter = 0.f;
                 hitDistance = DistanceToSegment(input.mousePosInViewport,
                     rootScreen, tipScreen, parameter);
-                if ((owner->editorOverlays & Engine::Core::Object::BoneOverlay) &&
+                if (drawBones &&
                     hitDistance <= 7.f && hitDistance < boneHitDistance)
                 {
                     boneHit = m_poseEditing ? parentJoint : joint;

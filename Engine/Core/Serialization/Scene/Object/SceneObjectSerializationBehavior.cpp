@@ -557,12 +557,52 @@ bool SceneObjectBehavior::ApplyObjectState(Engine::Core::Object& object, const J
     Engine::Graphics::IGraphicsProvider* graphicsProvider)
 {
     if (!node.IsObject()) return false;
+    if (node.Has("prefab"))
+    {
+        if (node.Has("name")) object.name = node["name"].AsString();
+        object.enabled = !node.Has("enabled") || node["enabled"].AsBool();
+        DeserializeTransform(object.transform, node["transform"]);
+        return true;
+    }
+    const JsonValue& components = node["components"];
+    bool componentLayoutChanged = components.ArraySize() != object.Components.size();
+    if (!componentLayoutChanged)
+    {
+        auto existing = object.Components.begin();
+        for (size_t i = 0; i < components.ArraySize(); ++i, ++existing)
+            if (!*existing || (*existing)->GetTypeName() !=
+                CurrentComponentType(components.ArrayAt(i)["type"].AsString()))
+            {
+                componentLayoutChanged = true;
+                break;
+            }
+    }
+    if (componentLayoutChanged)
+    {
+        std::vector<std::unique_ptr<Engine::Core::Component>> replacements;
+        replacements.reserve(components.ArraySize());
+        for (size_t i = 0; i < components.ArraySize(); ++i)
+        {
+            auto replacement = std::unique_ptr<Engine::Core::Component>(
+                SceneSerializer::CreateRegisteredComponent(CurrentComponentType(
+                    components.ArrayAt(i)["type"].AsString())));
+            if (!replacement) return false;
+            replacement->Owner = &object;
+            replacements.push_back(std::move(replacement));
+        }
+        for (Engine::Core::Component* component : object.Components)
+        {
+            if (component) component->OnDestroy();
+            delete component;
+        }
+        object.Components.clear();
+        for (auto& replacement : replacements)
+            object.Components.push_back(replacement.release());
+        object.NotifyStructureChanged();
+    }
     if (node.Has("name")) object.name = node["name"].AsString();
     object.enabled = !node.Has("enabled") || node["enabled"].AsBool();
     DeserializeTransform(object.transform, node["transform"]);
-    if (node.Has("prefab")) return true;
-    const JsonValue& components = node["components"];
-    if (components.ArraySize() != object.Components.size()) return false;
     auto component = object.Components.begin();
     for (size_t i = 0; i < components.ArraySize(); ++i, ++component)
     {

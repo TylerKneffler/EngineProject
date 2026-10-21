@@ -28,6 +28,15 @@ PropertiesView::PropertiesView()
 
 namespace
 {
+bool IsObjectInScene(const Engine::Scene::Scene* scene,
+    const Engine::Core::Object* object)
+{
+    if (!scene || !object) return false;
+    const auto& objects = scene->GetObjects();
+    return std::any_of(objects.begin(), objects.end(),
+        [object](const auto& candidate) { return candidate.get() == object; });
+}
+
 void RevealFileInExplorer(const std::string& path)
 {
     if (path.empty())
@@ -45,11 +54,63 @@ void RevealFileInExplorer(const std::string& path)
 
 }
 
-void PropertiesView::SetSelectedAsset(const std::string& path)
+bool PropertiesView::HasLiveSelectedObject() const
+{
+    return m_selectedObject &&
+        std::all_of(m_selectedObjects.begin(), m_selectedObjects.end(),
+            [this](const Engine::Core::Object* object)
+            { return IsObjectInScene(m_scene, object); });
+}
+
+void PropertiesView::ApplySelectedObjects(
+    const std::vector<Engine::Core::Object*>& objects)
+{
+    Engine::Core::Object* obj = objects.empty() ? nullptr : objects.back();
+    if (obj != m_selectedObject)
+    {
+        Engine::Core::Component::ClearEditorReferenceSearches();
+        if (m_deferredTransformPrefabRoot && HasLiveSelectedObject())
+            m_deferredTransformPrefabRoot->PrefabOverrideCacheValid = false;
+        m_deferredTransformPrefabRoot = nullptr;
+        m_componentPickerOpen = false;
+        m_componentSearch[0] = '\0';
+        m_componentJumpTarget = nullptr;
+        m_componentHeaderOverride = -1;
+        m_editingSkyboxTexture = false;
+    }
+    m_selectedObjects = objects;
+    m_selectedObject = obj;
+    m_assetInspector.Clear();
+}
+
+void PropertiesView::SetSelectedObjects(
+    const std::vector<Engine::Core::Object*>& objects)
+{
+    m_followingObjects = objects;
+    m_followingAsset.clear();
+    if (m_selectionLocked && (HasLiveSelectedObject() ||
+        m_assetInspector.HasSelection()))
+        return;
+    m_selectionLocked = false;
+    ApplySelectedObjects(objects);
+}
+
+void PropertiesView::ApplySelectedAsset(const std::string& path)
 {
     m_selectedObject = nullptr;
     m_selectedObjects.clear();
     m_assetInspector.Select(path);
+}
+
+void PropertiesView::SetSelectedAsset(const std::string& path)
+{
+    m_followingObjects.clear();
+    m_followingAsset = path;
+    if (m_selectionLocked && (HasLiveSelectedObject() ||
+        m_assetInspector.HasSelection()))
+        return;
+    m_selectionLocked = false;
+    ApplySelectedAsset(path);
 }
 
 void PropertiesView::DrawMultiSelection(IEditorUi& ui)
@@ -197,6 +258,40 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         return;
     }
     ui.BeginTextWrap();
+    if (m_selectionLocked && m_selectedObject && !HasLiveSelectedObject())
+    {
+        m_selectionLocked = false;
+        ApplySelectedObjects({});
+        if (!m_followingAsset.empty())
+            ApplySelectedAsset(m_followingAsset);
+        else if (std::all_of(m_followingObjects.begin(),
+            m_followingObjects.end(), [this](const auto* object)
+            { return IsObjectInScene(m_scene, object); }))
+            ApplySelectedObjects(m_followingObjects);
+    }
+    ui.Label("Properties");
+    ui.SameLineRight(32.f);
+    const char* lockIcon = m_selectionLocked ? Icons::Lock : Icons::Unlock;
+    const std::string lockLabel = std::string(lockIcon) + "##propertiesSelectionLock";
+    if (ui.Button(lockLabel.c_str(), 28.f))
+    {
+        m_selectionLocked = !m_selectionLocked;
+        if (!m_selectionLocked)
+        {
+            if (!m_followingAsset.empty())
+                ApplySelectedAsset(m_followingAsset);
+            else if (std::all_of(m_followingObjects.begin(),
+                m_followingObjects.end(), [this](const auto* object)
+                { return IsObjectInScene(m_scene, object); }))
+                ApplySelectedObjects(m_followingObjects);
+            else
+                ApplySelectedObjects({});
+        }
+    }
+    ui.Tooltip(m_selectionLocked
+        ? "Unlock Properties to follow selection"
+        : "Lock Properties to this selection");
+    ui.Separator();
     const auto drawContext = OnDrawContext;
     if (drawContext && drawContext(ui))
     {
@@ -455,7 +550,29 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
     ui.Indent(8.f);
     
     // Draw Engine::Components::Transform (always present, not in Components list)
-    if (ui.CollapsingHeader("Component Outline"))
+    if (ui.Button(m_componentOutlineOpen
+            ? "List <##componentOutlineToggle"
+            : "List >##componentOutlineToggle", 48.f))
+        m_componentOutlineOpen = !m_componentOutlineOpen;
+    ui.Tooltip("Show or hide the component outline");
+    ui.SameLine();
+    if (ui.Button("-##collapseComponents", 24.f))
+    {
+        m_componentHeaderOverride = 0;
+        m_propertiesSearch[0] = '\0';
+    }
+    ui.Tooltip("Collapse all components");
+    ui.SameLine();
+    if (ui.Button("+##expandComponents", 24.f))
+    {
+        m_componentHeaderOverride = 1;
+        m_propertiesSearch[0] = '\0';
+    }
+    ui.Tooltip("Expand all components");
+    ui.SameLine();
+    ui.SearchInput("##propertiesSearch", m_propertiesSearch,
+        sizeof(m_propertiesSearch), "Find component...");
+    if (m_componentOutlineOpen)
     {
         const bool outlineVisible = ui.BeginChildRegion("componentOutline", 112.f);
         if (outlineVisible)
@@ -477,19 +594,6 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         }
         ui.EndChild();
     }
-    if (ui.Button("Collapse All"))
-    {
-        m_componentHeaderOverride = 0;
-        m_propertiesSearch[0] = '\0';
-    }
-    ui.SameLine();
-    if (ui.Button("Expand All"))
-    {
-        m_componentHeaderOverride = 1;
-        m_propertiesSearch[0] = '\0';
-    }
-    ui.SearchInput("##propertiesSearch", m_propertiesSearch,
-        sizeof(m_propertiesSearch), "Find component...");
     ui.Separator();
     const bool transformMatches = ContainsIgnoringCase("Transform", m_propertiesSearch);
     if (transformMatches)

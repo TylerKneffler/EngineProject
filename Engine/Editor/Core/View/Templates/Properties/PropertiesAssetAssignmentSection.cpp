@@ -25,6 +25,19 @@
 
 namespace Engine::Editor
 {
+bool PropertiesView::AssignAssetToObject(Engine::Core::Object& object,
+    const std::string& path, std::string& message)
+{
+    PropertiesView assignment;
+    assignment.m_scene = object.GetScene();
+    assignment.m_selectedObject = &object;
+    if (!assignment.AddComponentFromAsset(path, message))
+        return false;
+    object.NotifyStructureChanged();
+    object.InvalidatePrefabOverrideCache();
+    return true;
+}
+
 namespace
 {
 bool IsUiContext(const Engine::Core::Object* object)
@@ -57,8 +70,13 @@ std::string PropertiesView::HandleWindowAssetDrop(IEditorUi& ui)
         std::string message;
         const bool added = AddComponentFromAsset(path, message);
         LogAssetDrop(message, !added);
-        if (added && OnComponentsChanged)
-            OnComponentsChanged();
+        if (added)
+        {
+            m_selectedObject->NotifyStructureChanged();
+            m_selectedObject->InvalidatePrefabOverrideCache();
+            if (OnComponentsChanged)
+                OnComponentsChanged();
+        }
         return {};
     }
 
@@ -74,9 +92,9 @@ std::string PropertiesView::HandleWindowAssetDrop(IEditorUi& ui)
     if (extension == ".spriteanim")
         return "Sprite Animation Preview";
     if (extension == ".animpack")
-        return "Animation Pack Preview";
+        return "Animation Pack for AnimationManager";
     if (extension == ".anim" || extension == ".animation")
-        return "Animation Preview";
+        return "Animation for AnimationManager";
     if (extension == ".skeleton")
         return "Skeleton Preview";
     if (Engine::Editor::IsAudioAssetExtension(extension))
@@ -102,11 +120,6 @@ bool PropertiesView::AddComponentFromAsset(const std::string& path, std::string&
         message = "[Properties] Select an object before dropping an asset.";
         return false;
     }
-    if (m_selectedObject->IsPartOfPrefabInstance())
-    {
-        message = "[Properties] Prefab instance content is read-only. Open the prefab asset or unpack the instance first.";
-        return false;
-    }
     if (path.empty() || !std::filesystem::is_regular_file(path))
     {
         message = "[Properties] Dropped asset does not exist: " + path;
@@ -130,11 +143,19 @@ bool PropertiesView::AddComponentFromAsset(const std::string& path, std::string&
             if (!m_selectedObject->GetComponentInParent<Engine::Components::Model>())
             { message = "[Properties] Attach a skeleton or Model hierarchy before adding an animation."; return false; }
             auto* manager = m_selectedObject->GetComponent<Engine::Components::AnimationManager>();
-            if (!manager) manager = m_selectedObject->AddComponent<Engine::Components::AnimationManager>();
+            std::unique_ptr<Engine::Components::AnimationManager> newManager;
+            if (!manager)
+            {
+                newManager = std::make_unique<Engine::Components::AnimationManager>();
+                newManager->Owner = m_selectedObject;
+                manager = newManager.get();
+            }
             std::string error;
             if (!manager->AddAnimationAsset(path, error))
             { message = "[Properties] " + error; return false; }
-            message = "[Properties] Referenced animation from: " + path;
+            if (newManager)
+                m_selectedObject->Components.push_back(newManager.release());
+            message = "[Properties] Added animation to AnimationManager from: " + path;
             return true;
         }
         if (extension == ".animpack")

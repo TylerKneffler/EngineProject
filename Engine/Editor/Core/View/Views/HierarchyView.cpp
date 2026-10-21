@@ -705,18 +705,22 @@ void HierarchyView::DrawObjectNode(
         // These actions only change the editor selection. Imported model
         // hierarchy is deliberately not structurally editable here because
         // its serialized node bindings may use child-index paths.
-        menu = ui.ContextMenu(obj, "Focus Bone", "Focus Skeleton Root", false);
+        menu = ui.ContextMenu(obj, "Focus Bone", "Focus Skeleton Root",
+            false, nullptr, false, false, true, row.contextMenuRequested);
         if (menu.addRequested)
             SetSelectedObject(obj);
         if (menu.deleteRequested && m_filteredContextRoot)
             SetSelectedObject(m_filteredContextRoot);
+        const bool propertiesRequested = menu.propertiesRequested;
         menu = {};
+        menu.propertiesRequested = propertiesRequested;
     }
     else if (prefabRoot)
     {
         const EditorUiPrefabMenuResult prefabMenu = ui.PrefabOverrideMenu(obj,
             Engine::Serialization::SceneSerializer::HasPrefabOverrides(*prefabRoot, true),
-            !m_objectClipboard.empty());
+            !m_objectClipboard.empty(), true, row.contextMenuRequested);
+        menu.propertiesRequested = prefabMenu.propertiesRequested;
         contextCopy = prefabMenu.copyRequested;
         contextCut = prefabMenu.cutRequested;
         contextPaste = prefabMenu.pasteRequested;
@@ -743,7 +747,17 @@ void HierarchyView::DrawObjectNode(
         menu = ui.ContextMenu(obj,
             m_objectFilter ? "Add Child" : "Create",
             canDelete ? "Delete Object" : nullptr, true, nullptr,
-            true, !m_objectClipboard.empty());
+            true, !m_objectClipboard.empty(), true, row.contextMenuRequested);
+    }
+    else
+    {
+        menu = ui.ContextMenu(obj, nullptr, nullptr, false, nullptr,
+            false, false, true, row.contextMenuRequested);
+    }
+    if (menu.propertiesRequested)
+    {
+        SetSelectedObject(obj);
+        if (OnPropertiesRequested) OnPropertiesRequested(obj);
     }
     contextCopy = contextCopy || menu.copyRequested;
     contextCut = contextCut || menu.cutRequested;

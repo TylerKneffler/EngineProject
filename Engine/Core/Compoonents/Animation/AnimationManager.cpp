@@ -336,6 +336,7 @@ AnimationManager::AnimationManager()
     : m_scratch(std::make_unique<AnimationManagerScratch>())
 {
     SetTypeName(COMPONENT_TYPE_NAME(AnimationManager));
+    singlecomponent = true;
     RegisterField("modelReference", modelReference);
     RegisterField("playing", playing);
     RegisterField("holdCurrentPoseWhenStopped", holdCurrentPoseWhenStopped);
@@ -1046,9 +1047,11 @@ bool AnimationManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
     }
     const std::string animationsLabel = "Animations (" +
         std::to_string(available.size()) + ")";
-    if (ui.PropertyGroupHeader(animationsLabel.c_str(), false))
+    if (ui.PropertyGroupHeader(animationsLabel.c_str(), true))
     {
-        if (available.empty()) ui.DisabledLabel("No animation clips");
+        ui.Indent(12.f);
+        if (available.empty())
+            ui.DisabledLabel("Drop a .anim asset on this object to add a clip.");
         for (const auto* item : available)
         {
             const std::string summary = std::to_string(item->channels.size()) +
@@ -1056,8 +1059,13 @@ bool AnimationManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
                 " s";
             ui.ValueLabel(item->clipName.c_str(), summary.c_str());
         }
-        for (const auto& path : animationPaths)
-            ui.ValueLabel("Animation Asset", path.c_str());
+        if (!animationPaths.empty())
+        {
+            ui.Label("Referenced animation assets");
+            for (const auto& path : animationPaths)
+                ui.ValueLabel("Asset", path.c_str());
+        }
+        ui.Unindent(12.f);
     }
     if (ui.PropertyGroupHeader("Animation Pack", false))
     {

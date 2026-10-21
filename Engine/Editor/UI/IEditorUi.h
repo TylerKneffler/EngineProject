@@ -76,6 +76,7 @@ struct EditorUiHierarchyDropResult
 
 struct EditorUiObjectRowResult
 {
+    bool contextMenuRequested = false;
     bool open = false;
     bool clicked = false;
     bool doubleClicked = false;
@@ -91,6 +92,7 @@ struct EditorUiObjectRowResult
 
 struct EditorUiContextMenuResult
 {
+    bool propertiesRequested = false;
     bool copyRequested = false;
     bool cutRequested = false;
     bool pasteRequested = false;
@@ -105,6 +107,7 @@ struct EditorUiContextMenuResult
 
 struct EditorUiPrefabMenuResult
 {
+    bool propertiesRequested = false;
     bool copyRequested = false;
     bool cutRequested = false;
     bool pasteRequested = false;
@@ -250,7 +253,8 @@ public:
         const char* addLabel, const char* deleteLabel,
         bool objectCreationMenu = false,
         const char* unpackLabel = nullptr,
-        bool clipboardActions = false, bool canPaste = false) = 0;
+        bool clipboardActions = false, bool canPaste = false,
+        bool propertiesAction = false, bool openRequested = false) = 0;
     virtual EditorUiAssetCreateMenuResult AssetWindowContextMenu(bool canPaste) = 0;
     virtual EditorUiAssetItemMenuResult AssetItemContextMenu(const char* assetPath,
         bool canPackMeshes = false, bool canExtractMeshes = false,
@@ -259,7 +263,8 @@ public:
     virtual EditorUiTextEditResult RenameText(const char* label, char* buffer,
         size_t size, bool focus) = 0;
     virtual EditorUiPrefabMenuResult PrefabOverrideMenu(const void* id,
-        bool hasOverrides, bool canPaste = false) = 0;
+        bool hasOverrides, bool canPaste = false,
+        bool propertiesAction = false, bool openRequested = false) = 0;
     virtual bool BeginChild(const char* id) = 0;
     virtual bool BeginChildRegion(const char* id, float)
     { return BeginChild(id); }

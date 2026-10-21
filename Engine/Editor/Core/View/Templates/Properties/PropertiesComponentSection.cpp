@@ -52,11 +52,6 @@ bool PropertiesView::AddRegisteredComponent(const std::string& typeName, std::st
         message = "[Properties] Select an object before adding a component.";
         return false;
     }
-    if (m_selectedObject->IsPartOfPrefabInstance())
-    {
-        message = "[Properties] Prefab instance content is read-only. Open the prefab asset or unpack the instance first.";
-        return false;
-    }
     try
     {
         std::unique_ptr<Engine::Core::Component> component(
@@ -85,6 +80,8 @@ bool PropertiesView::AddRegisteredComponent(const std::string& typeName, std::st
         component->Owner = m_selectedObject;
         component->OnAfterDeserialize(m_scene ? m_scene->GetGraphicsProvider() : nullptr);
         m_selectedObject->Components.push_back(component.release());
+        m_selectedObject->NotifyStructureChanged();
+        m_selectedObject->InvalidatePrefabOverrideCache();
         message = "[Properties] Added component '" + typeName + "'";
         return true;
     }

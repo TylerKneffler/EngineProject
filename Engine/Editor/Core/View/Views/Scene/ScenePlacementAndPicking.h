@@ -20,7 +20,8 @@ public:
     static Engine::Core::Object* PickObjectInViewport(
         const Engine::Scene::Scene& scene,
         const EditorUiVec2& mousePos,
-        const EditorUiVec2& viewportSize);
+        const EditorUiVec2& viewportSize,
+        bool preserveMeshChild = false);
     static Engine::Core::Object* PickBoneInViewport(
         const Engine::Scene::Scene& scene,
         const EditorUiVec2& mousePos,

@@ -80,6 +80,7 @@ public:
     void SetDocumentPath(std::string path) { m_documentPath = std::move(path); }
     void RequestFocusOnNextDraw() { m_focusOnNextDraw = true; }
     std::function<void(const std::string&)> OnAssetDropped;
+    std::function<void(const std::string&, Engine::Core::Object*)> OnAssetAssigned;
     std::function<Engine::Core::Object*(const std::string&)> OnAssetPreviewRequested;
     std::function<void(Engine::Core::Object*)> OnAssetPreviewCancelled;
     std::function<void(Engine::Core::Object*, const std::string&)> OnAssetPreviewCommitted;

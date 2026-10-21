@@ -19,7 +19,7 @@
       </Transform.scale>
     </transform>
     <components>
-      <components:Skeleton Skeleton.colliderMode="PerBone" Skeleton.meshContactResponseEnabled="true" Skeleton.meshContactResponseStrength="8" Skeleton.meshContactDamping="7" Skeleton.meshContactMaxBend="0.35" Skeleton.meshImpactImpulseThreshold="0.5" Skeleton.meshIKGroundedGravityScale="0.02" Skeleton.meshIKTorqueLimitPerMass="0.015" Skeleton.meshRagdollEnabled="false" Skeleton.meshRagdollGravityStrength="3" Skeleton.showBones="true" Skeleton.rigPath="C:/repos/EngineProject/Engine/Core/Assets/Models/Mixemo/Walking/Walking.rig" Skeleton.skinIndex="0">
+      <components:Skeleton Skeleton.colliderMode="PerBone" Skeleton.meshContactResponseEnabled="true" Skeleton.meshContactResponseStrength="8" Skeleton.meshContactDamping="7" Skeleton.meshContactMaxBend="0.35" Skeleton.meshImpactImpulseThreshold="0.5" Skeleton.meshIKGroundedGravityScale="0.02" Skeleton.meshIKTorqueLimitPerMass="0.015" Skeleton.meshRagdollEnabled="false" Skeleton.meshRagdollGravityStrength="3" Skeleton.showBones="true" Skeleton.rigPath="C:/repos/EngineProject/Engine/Core/Assets/Walking/Walking.rig" Skeleton.skinIndex="0">
         <Skeleton.modelReference expectedType="Model" objectPath="" objectName="" componentType="" componentIndex="0" />
         <Skeleton.meshColliderReference expectedType="MeshObjectCollider" objectPath="" objectName="" componentType="" componentIndex="0" />
         <Skeleton.rootBoneNodes>
@@ -94,9 +94,8 @@
         <AnimationManager.modelReference expectedType="Model" objectPath="" objectName="" componentType="" componentIndex="0" />
         <AnimationManager.clips />
         <AnimationManager.rigPaths>
-          <item>C:/repos/EngineProject/Engine/Core/Assets/Models/Mixemo/Walking/Walking.rig</item>
+          <item>C:/repos/EngineProject/Engine/Core/Assets/Walking/Walking.rig</item>
         </AnimationManager.rigPaths>
-        <AnimationManager.animationPaths />
         <AnimationManager.layers />
       </components:AnimationManager>
       <components:Model>
