@@ -119,8 +119,8 @@ void CaptureExamples()
                 {
                     const size_t offset = (static_cast<size_t>(y) * Width + x) * 4u;
                     const bool water = pixels[offset + 2u] >
-                        pixels[offset] + 55u &&
-                        pixels[offset + 2u] > pixels[offset + 1u] + 10u;
+                        pixels[offset] + 30u &&
+                        pixels[offset + 1u] > pixels[offset] + 20u;
                     if (!water) continue;
                     if (y >= 235 && x < 310) ++poolPixels;
                     if (y < 220 && x >= 205 && x < 255) ++streamPixels;
@@ -139,8 +139,8 @@ void CaptureExamples()
                 {
                     const size_t offset = (static_cast<size_t>(y) * Width + x) * 4u;
                     const bool water = pixels[offset + 2u] >
-                        pixels[offset + 1u] + 20u &&
-                        pixels[offset + 2u] > pixels[offset] + 70u;
+                        pixels[offset] + 30u &&
+                        pixels[offset + 1u] > pixels[offset] + 20u;
                     if (!water) continue;
                     hasWater = true;
                     if (x < 210) ++sourcePixels;

@@ -238,7 +238,8 @@ FluidPixel PSMainFluid(FluidVertex input)
     float3 tint = colorSum / max(density, 0.001);
     float nearestSpeed = speedSum / max(density, 0.001);
     float thickness = saturate(density * 0.27);
-    float rim = 1.0 - smoothstep(0.2, 0.8, density);
+    float coverage = smoothstep(0.12, 0.22, density);
+    float rim = 1.0 - smoothstep(0.16, 0.72, density);
     float time = particleParams.z;
     float phaseA = dot(input.ndc, float2(84.0, 37.0)) - time * 2.1;
     float phaseB = dot(input.ndc, float2(-51.0, 73.0)) + time * 1.6;
@@ -252,16 +253,12 @@ FluidPixel PSMainFluid(FluidVertex input)
     float flowHighlight = pow(saturate(0.5 + 0.5 *
         sin(phaseA + 0.3 * sin(phaseB))), 10.0) *
         smoothstep(0.3, 2.5, nearestSpeed);
-    float3 shallow = tint * float3(0.62, 0.88, 1.0);
-    float3 deep = tint * float3(0.2, 0.48, 0.72);
-    float3 water = lerp(shallow, deep, thickness);
-    water = lerp(water, float3(0.68, 0.88, 1.0),
-        saturate(rim * (0.2 + 0.09 * min(nearestSpeed, 3.0)) +
-            fresnel * 0.18));
-    water += (0.07 * specular + 0.045 * flowHighlight) *
-        float3(0.75, 0.9, 1.0);
-    float opacity = particleParams.y * smoothstep(0.12, 0.33, density) *
-        (0.78 + 0.17 * thickness + 0.05 * fresnel);
+    float3 interior = lerp(float3(0.42, 0.68, 0.78), tint, 0.22);
+    float3 water = lerp(interior, float3(0.38, 0.78, 1.0), rim);
+    water += (0.10 * specular + 0.035 * flowHighlight) *
+        float3(0.85, 0.95, 1.0);
+    float opacity = particleParams.y * coverage *
+        (0.12 + 0.60 * rim + 0.07 * fresnel + 0.04 * thickness);
     FluidPixel result;
     result.color = float4(saturate(water), opacity);
     result.depth = frontDepth;

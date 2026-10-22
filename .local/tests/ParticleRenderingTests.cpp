@@ -117,13 +117,26 @@ int main()
     emitter->Start();
     scene.Update(1.f / 60.f);
     const auto fluidRendered = capture();
-    const int fluidBlueRed = static_cast<int>(fluidRendered[center + 2u]) -
-        static_cast<int>(fluidRendered[center]);
-    const int emptyBlueRed = static_cast<int>(empty[center + 2u]) -
-        static_cast<int>(empty[center]);
-    if (fluidBlueRed < emptyBlueRed + 50 ||
-        fluidRendered[center + 2u] <= fluidRendered[center + 1u] + 20u)
-        throw std::runtime_error("Fluid water material did not render blue");
+    int blueEdgePixels = 0;
+    int maximumBlueContrast = 0;
+    for (size_t index = 0; index < fluidRendered.size(); index += 4u)
+    {
+        const int contrast = (static_cast<int>(fluidRendered[index + 2u]) -
+            static_cast<int>(fluidRendered[index])) -
+            (static_cast<int>(empty[index + 2u]) -
+                static_cast<int>(empty[index]));
+        maximumBlueContrast = std::max(maximumBlueContrast, contrast);
+        if (contrast > 5) ++blueEdgePixels;
+    }
+    const int centerChange = std::abs(static_cast<int>(fluidRendered[center]) -
+        static_cast<int>(empty[center])) +
+        std::abs(static_cast<int>(fluidRendered[center + 1u]) -
+            static_cast<int>(empty[center + 1u])) +
+        std::abs(static_cast<int>(fluidRendered[center + 2u]) -
+            static_cast<int>(empty[center + 2u]));
+    if (blueEdgePixels < 300 || maximumBlueContrast < 12 ||
+        centerChange > 25)
+        throw std::runtime_error("Fluid water should have a blue rim and clear center");
     emitter->burstOnStart = 64;
     emitter->maxParticles = 64;
     emitter->shape = static_cast<int>(

@@ -492,25 +492,10 @@ void ImGuiEditorUi::ValueLabel(const char*l,const char*v){const char* value=Cons
 bool ImGuiEditorUi::CollapsingHeader(const char*l,bool d){return ImGui::CollapsingHeader(l,d?ImGuiTreeNodeFlags_DefaultOpen:0);}
 bool ImGuiEditorUi::PropertyGroupHeader(const char* label,bool defaultOpen)
 {
-    const ImGuiStyle& style=ImGui::GetStyle();
-    const ImVec4 background=ImGui::GetStyleColorVec4(ImGuiCol_FrameBg);
-    const ImVec4 header=ImGui::GetStyleColorVec4(ImGuiCol_Header);
-    const ImVec4 hovered=ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered);
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
-        {style.FramePadding.x+1.f,style.FramePadding.y+1.f});
-    ImGui::PushStyleColor(ImGuiCol_Header,ImLerp(background,header,.6f));
-    ImGui::PushStyleColor(ImGuiCol_HeaderHovered,
-        ImLerp(background,hovered,.68f));
-    ImGui::PushStyleColor(ImGuiCol_HeaderActive,
-        ImLerp(background,hovered,.82f));
-    const bool open=ImGui::CollapsingHeader(label,
-        defaultOpen?ImGuiTreeNodeFlags_DefaultOpen:0);
-    ImGui::GetWindowDrawList()->AddRect(ImGui::GetItemRectMin(),
-        ImGui::GetItemRectMax(),ImGui::GetColorU32(ImGuiCol_Border),
-        std::max(style.FrameRounding,3.f));
-    ImGui::PopStyleColor(3);
-    ImGui::PopStyleVar();
-    return open;
+    (void)defaultOpen;
+    ImGui::Spacing();
+    ImGui::TextDisabled("%s",label);
+    return true;
 }
 bool ImGuiEditorUi::ComponentHeader(EditorUiObjectIcon icon,const char* label,
     bool defaultOpen)

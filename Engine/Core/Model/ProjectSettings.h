@@ -33,6 +33,7 @@ struct ProjectSettings
     bool debugHierarchyInteractions = true;
     uint32_t editorHistoryLimit = 100;
     std::string editorTheme = "Graphite";
+    std::string codeEditor = "None";
     std::vector<std::string> leftPanelTabs;
     std::vector<std::string> centerPanelTabs;
     std::vector<std::string> rightPanelTabs;

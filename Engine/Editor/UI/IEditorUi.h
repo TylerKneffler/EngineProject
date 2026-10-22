@@ -228,7 +228,7 @@ public:
     virtual void ValueLabel(const char* label, const char* value) = 0;
     virtual bool CollapsingHeader(const char* label, bool defaultOpen = true) = 0;
     virtual bool PropertyGroupHeader(const char* label,
-        bool defaultOpen = true) { return CollapsingHeader(label, defaultOpen); }
+        bool defaultOpen = true) { (void)defaultOpen; Label(label); return true; }
     virtual bool ComponentHeader(EditorUiObjectIcon, const char* label,
         bool defaultOpen = true) { return CollapsingHeader(label, defaultOpen); }
     virtual void SetNextComponentHeaderOpen(bool) {}

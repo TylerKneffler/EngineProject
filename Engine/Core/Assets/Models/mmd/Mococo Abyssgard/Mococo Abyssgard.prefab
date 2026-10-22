@@ -2675,7 +2675,7 @@
           </item>
         </RigPhysicsBinding.physicsBones>
         <RigPhysicsBinding.physicsJoints>
-          <item name="CollarChain" type="0" bodyA="6" bodyB="24" bodyAName="首 [Body 6]" bodyBName="CollarChain [Body 24]">
+          <item name="CollarChain" type="0" bodyA="6" bodyB="24" bodyAName="Neck [Body 6]" bodyBName="CollarChain [Body 24]">
             <position>
               <item>3.41359e-10</item>
               <item>15.3892</item>
@@ -3000,7 +3000,7 @@
               <item>0.985992</item>
             </frameBRotation>
           </item>
-          <item name="JacketThread" type="0" bodyA="4" bodyB="29" bodyAName="上半身2 [Body 4]" bodyBName="JacketThread [Body 29]">
+          <item name="JacketThread" type="0" bodyA="4" bodyB="29" bodyAName="Upper Body 2 [Body 4]" bodyBName="JacketThread [Body 29]">
             <position>
               <item>0.486019</item>
               <item>14.1621</item>
@@ -3325,7 +3325,7 @@
               <item>0.999729</item>
             </frameBRotation>
           </item>
-          <item name="JacketThread.001" type="0" bodyA="4" bodyB="34" bodyAName="上半身2 [Body 4]" bodyBName="JacketThread.001 [Body 34]">
+          <item name="JacketThread.001" type="0" bodyA="4" bodyB="34" bodyAName="Upper Body 2 [Body 4]" bodyBName="JacketThread.001 [Body 34]">
             <position>
               <item>-0.467086</item>
               <item>14.1621</item>
@@ -3715,7 +3715,7 @@
               <item>0.999915</item>
             </frameBRotation>
           </item>
-          <item name="Breast.001" type="0" bodyA="4" bodyB="40" bodyAName="上半身2 [Body 4]" bodyBName="Breast.001 [Body 40]">
+          <item name="Breast.001" type="0" bodyA="4" bodyB="40" bodyAName="Upper Body 2 [Body 4]" bodyBName="Breast.001 [Body 40]">
             <position>
               <item>-4.07612e-07</item>
               <item>14.0881</item>
@@ -3780,7 +3780,7 @@
               <item>0.707107</item>
             </frameBRotation>
           </item>
-          <item name="Tail" type="0" bodyA="0" bodyB="41" bodyAName="下半身 [Body 0]" bodyBName="Tail [Body 41]">
+          <item name="Tail" type="0" bodyA="0" bodyB="41" bodyAName="Lower Body [Body 0]" bodyBName="Tail [Body 41]">
             <position>
               <item>0</item>
               <item>11.2381</item>
@@ -4625,7 +4625,7 @@
               <item>0.945853</item>
             </frameBRotation>
           </item>
-          <item name="FrontHairBone" type="0" bodyA="7" bodyB="54" bodyAName="頭 [Body 7]" bodyBName="FrontHairBone [Body 54]">
+          <item name="FrontHairBone" type="0" bodyA="7" bodyB="54" bodyAName="Head [Body 7]" bodyBName="FrontHairBone [Body 54]">
             <position>
               <item>0.0048019</item>
               <item>17.8474</item>
@@ -4690,7 +4690,7 @@
               <item>0.999995</item>
             </frameBRotation>
           </item>
-          <item name="Hairside_L" type="0" bodyA="7" bodyB="55" bodyAName="頭 [Body 7]" bodyBName="Hairside_L [Body 55]">
+          <item name="Hairside_L" type="0" bodyA="7" bodyB="55" bodyAName="Head [Body 7]" bodyBName="Hairside_L [Body 55]">
             <position>
               <item>0.966885</item>
               <item>16.9227</item>
@@ -4950,7 +4950,7 @@
               <item>0.825586</item>
             </frameBRotation>
           </item>
-          <item name="Hairside_L.004" type="0" bodyA="7" bodyB="59" bodyAName="頭 [Body 7]" bodyBName="Hairside_L.004 [Body 59]">
+          <item name="Hairside_L.004" type="0" bodyA="7" bodyB="59" bodyAName="Head [Body 7]" bodyBName="Hairside_L.004 [Body 59]">
             <position>
               <item>0.803336</item>
               <item>16.3683</item>
@@ -5210,7 +5210,7 @@
               <item>0.793299</item>
             </frameBRotation>
           </item>
-          <item name="Hairside_L.008" type="0" bodyA="7" bodyB="63" bodyAName="頭 [Body 7]" bodyBName="Hairside_L.008 [Body 63]">
+          <item name="Hairside_L.008" type="0" bodyA="7" bodyB="63" bodyAName="Head [Body 7]" bodyBName="Hairside_L.008 [Body 63]">
             <position>
               <item>0.893535</item>
               <item>16.1658</item>
@@ -5470,7 +5470,7 @@
               <item>0.867996</item>
             </frameBRotation>
           </item>
-          <item name="Hairside_L.012" type="0" bodyA="7" bodyB="67" bodyAName="頭 [Body 7]" bodyBName="Hairside_L.012 [Body 67]">
+          <item name="Hairside_L.012" type="0" bodyA="7" bodyB="67" bodyAName="Head [Body 7]" bodyBName="Hairside_L.012 [Body 67]">
             <position>
               <item>0.942882</item>
               <item>16.0159</item>
@@ -5600,7 +5600,7 @@
               <item>0.850569</item>
             </frameBRotation>
           </item>
-          <item name="Hairside_R" type="0" bodyA="7" bodyB="69" bodyAName="頭 [Body 7]" bodyBName="Hairside_R [Body 69]">
+          <item name="Hairside_R" type="0" bodyA="7" bodyB="69" bodyAName="Head [Body 7]" bodyBName="Hairside_R [Body 69]">
             <position>
               <item>-0.966885</item>
               <item>16.9227</item>
@@ -5860,7 +5860,7 @@
               <item>0.825586</item>
             </frameBRotation>
           </item>
-          <item name="Hairside_R.004" type="0" bodyA="7" bodyB="73" bodyAName="頭 [Body 7]" bodyBName="Hairside_R.004 [Body 73]">
+          <item name="Hairside_R.004" type="0" bodyA="7" bodyB="73" bodyAName="Head [Body 7]" bodyBName="Hairside_R.004 [Body 73]">
             <position>
               <item>-0.803336</item>
               <item>16.3683</item>
@@ -6120,7 +6120,7 @@
               <item>0.793299</item>
             </frameBRotation>
           </item>
-          <item name="Hairside_R.008" type="0" bodyA="7" bodyB="77" bodyAName="頭 [Body 7]" bodyBName="Hairside_R.008 [Body 77]">
+          <item name="Hairside_R.008" type="0" bodyA="7" bodyB="77" bodyAName="Head [Body 7]" bodyBName="Hairside_R.008 [Body 77]">
             <position>
               <item>-0.893535</item>
               <item>16.1658</item>
@@ -6380,7 +6380,7 @@
               <item>0.867996</item>
             </frameBRotation>
           </item>
-          <item name="Hairside_R.012" type="0" bodyA="7" bodyB="81" bodyAName="頭 [Body 7]" bodyBName="Hairside_R.012 [Body 81]">
+          <item name="Hairside_R.012" type="0" bodyA="7" bodyB="81" bodyAName="Head [Body 7]" bodyBName="Hairside_R.012 [Body 81]">
             <position>
               <item>-0.942882</item>
               <item>16.0159</item>
@@ -6510,7 +6510,7 @@
               <item>0.850569</item>
             </frameBRotation>
           </item>
-          <item name="Hairback_L" type="0" bodyA="7" bodyB="83" bodyAName="頭 [Body 7]" bodyBName="Hairback_L [Body 83]">
+          <item name="Hairback_L" type="0" bodyA="7" bodyB="83" bodyAName="Head [Body 7]" bodyBName="Hairback_L [Body 83]">
             <position>
               <item>0.784265</item>
               <item>16.2517</item>
@@ -6705,7 +6705,7 @@
               <item>0.805757</item>
             </frameBRotation>
           </item>
-          <item name="Hairback_L.003" type="0" bodyA="7" bodyB="86" bodyAName="頭 [Body 7]" bodyBName="Hairback_L.003 [Body 86]">
+          <item name="Hairback_L.003" type="0" bodyA="7" bodyB="86" bodyAName="Head [Body 7]" bodyBName="Hairback_L.003 [Body 86]">
             <position>
               <item>1.15586</item>
               <item>16.3057</item>
@@ -6900,7 +6900,7 @@
               <item>0.710146</item>
             </frameBRotation>
           </item>
-          <item name="Hairback_L.006" type="0" bodyA="7" bodyB="89" bodyAName="頭 [Body 7]" bodyBName="Hairback_L.006 [Body 89]">
+          <item name="Hairback_L.006" type="0" bodyA="7" bodyB="89" bodyAName="Head [Body 7]" bodyBName="Hairback_L.006 [Body 89]">
             <position>
               <item>1.17209</item>
               <item>16.3311</item>
@@ -7095,7 +7095,7 @@
               <item>0.848228</item>
             </frameBRotation>
           </item>
-          <item name="Hairback_L.009" type="0" bodyA="7" bodyB="92" bodyAName="頭 [Body 7]" bodyBName="Hairback_L.009 [Body 92]">
+          <item name="Hairback_L.009" type="0" bodyA="7" bodyB="92" bodyAName="Head [Body 7]" bodyBName="Hairback_L.009 [Body 92]">
             <position>
               <item>1.02687</item>
               <item>16.3863</item>
@@ -7290,7 +7290,7 @@
               <item>0.96174</item>
             </frameBRotation>
           </item>
-          <item name="Hairback_L.012" type="0" bodyA="7" bodyB="95" bodyAName="頭 [Body 7]" bodyBName="Hairback_L.012 [Body 95]">
+          <item name="Hairback_L.012" type="0" bodyA="7" bodyB="95" bodyAName="Head [Body 7]" bodyBName="Hairback_L.012 [Body 95]">
             <position>
               <item>0.673135</item>
               <item>16.3477</item>
@@ -7485,7 +7485,7 @@
               <item>0.939505</item>
             </frameBRotation>
           </item>
-          <item name="Hairback_L.015" type="0" bodyA="7" bodyB="98" bodyAName="頭 [Body 7]" bodyBName="Hairback_L.015 [Body 98]">
+          <item name="Hairback_L.015" type="0" bodyA="7" bodyB="98" bodyAName="Head [Body 7]" bodyBName="Hairback_L.015 [Body 98]">
             <position>
               <item>0.17747</item>
               <item>16.1456</item>
@@ -7680,7 +7680,7 @@
               <item>0.960632</item>
             </frameBRotation>
           </item>
-          <item name="Hairback_R" type="0" bodyA="7" bodyB="101" bodyAName="頭 [Body 7]" bodyBName="Hairback_R [Body 101]">
+          <item name="Hairback_R" type="0" bodyA="7" bodyB="101" bodyAName="Head [Body 7]" bodyBName="Hairback_R [Body 101]">
             <position>
               <item>-0.784265</item>
               <item>16.2517</item>
@@ -7875,7 +7875,7 @@
               <item>0.805757</item>
             </frameBRotation>
           </item>
-          <item name="Hairback_R.003" type="0" bodyA="7" bodyB="104" bodyAName="頭 [Body 7]" bodyBName="Hairback_R.003 [Body 104]">
+          <item name="Hairback_R.003" type="0" bodyA="7" bodyB="104" bodyAName="Head [Body 7]" bodyBName="Hairback_R.003 [Body 104]">
             <position>
               <item>-1.15482</item>
               <item>16.2839</item>
@@ -8070,7 +8070,7 @@
               <item>0.764562</item>
             </frameBRotation>
           </item>
-          <item name="Hairback_R.006" type="0" bodyA="7" bodyB="107" bodyAName="頭 [Body 7]" bodyBName="Hairback_R.006 [Body 107]">
+          <item name="Hairback_R.006" type="0" bodyA="7" bodyB="107" bodyAName="Head [Body 7]" bodyBName="Hairback_R.006 [Body 107]">
             <position>
               <item>-1.15383</item>
               <item>16.3839</item>
@@ -8265,7 +8265,7 @@
               <item>0.837628</item>
             </frameBRotation>
           </item>
-          <item name="Hairback_R.009" type="0" bodyA="7" bodyB="110" bodyAName="頭 [Body 7]" bodyBName="Hairback_R.009 [Body 110]">
+          <item name="Hairback_R.009" type="0" bodyA="7" bodyB="110" bodyAName="Head [Body 7]" bodyBName="Hairback_R.009 [Body 110]">
             <position>
               <item>-1.02687</item>
               <item>16.3863</item>
@@ -8460,7 +8460,7 @@
               <item>0.96174</item>
             </frameBRotation>
           </item>
-          <item name="Hairback_R.012" type="0" bodyA="7" bodyB="113" bodyAName="頭 [Body 7]" bodyBName="Hairback_R.012 [Body 113]">
+          <item name="Hairback_R.012" type="0" bodyA="7" bodyB="113" bodyAName="Head [Body 7]" bodyBName="Hairback_R.012 [Body 113]">
             <position>
               <item>-0.673135</item>
               <item>16.3477</item>
@@ -8655,7 +8655,7 @@
               <item>0.939505</item>
             </frameBRotation>
           </item>
-          <item name="Hairback_R.015" type="0" bodyA="7" bodyB="116" bodyAName="頭 [Body 7]" bodyBName="Hairback_R.015 [Body 116]">
+          <item name="Hairback_R.015" type="0" bodyA="7" bodyB="116" bodyAName="Head [Body 7]" bodyBName="Hairback_R.015 [Body 116]">
             <position>
               <item>-0.17747</item>
               <item>16.1456</item>
@@ -8850,7 +8850,7 @@
               <item>0.960632</item>
             </frameBRotation>
           </item>
-          <item name="Ear_L" type="0" bodyA="7" bodyB="119" bodyAName="頭 [Body 7]" bodyBName="Ear_L [Body 119]">
+          <item name="Ear_L" type="0" bodyA="7" bodyB="119" bodyAName="Head [Body 7]" bodyBName="Ear_L [Body 119]">
             <position>
               <item>0.636993</item>
               <item>18.147</item>
@@ -8915,7 +8915,7 @@
               <item>0.956038</item>
             </frameBRotation>
           </item>
-          <item name="Ear_R" type="0" bodyA="7" bodyB="120" bodyAName="頭 [Body 7]" bodyBName="Ear_R [Body 120]">
+          <item name="Ear_R" type="0" bodyA="7" bodyB="120" bodyAName="Head [Body 7]" bodyBName="Ear_R [Body 120]">
             <position>
               <item>-0.636993</item>
               <item>18.147</item>
@@ -8980,7 +8980,7 @@
               <item>0.956038</item>
             </frameBRotation>
           </item>
-          <item name="HairbackInner_L" type="0" bodyA="7" bodyB="121" bodyAName="頭 [Body 7]" bodyBName="HairbackInner_L [Body 121]">
+          <item name="HairbackInner_L" type="0" bodyA="7" bodyB="121" bodyAName="Head [Body 7]" bodyBName="HairbackInner_L [Body 121]">
             <position>
               <item>0.946081</item>
               <item>16.4339</item>
@@ -9175,7 +9175,7 @@
               <item>0.877954</item>
             </frameBRotation>
           </item>
-          <item name="HairbackInner_L.003" type="0" bodyA="7" bodyB="124" bodyAName="頭 [Body 7]" bodyBName="HairbackInner_L.003 [Body 124]">
+          <item name="HairbackInner_L.003" type="0" bodyA="7" bodyB="124" bodyAName="Head [Body 7]" bodyBName="HairbackInner_L.003 [Body 124]">
             <position>
               <item>0.686698</item>
               <item>16.3893</item>
@@ -9370,7 +9370,7 @@
               <item>0.891878</item>
             </frameBRotation>
           </item>
-          <item name="HairbackInner_L.006" type="0" bodyA="7" bodyB="127" bodyAName="頭 [Body 7]" bodyBName="HairbackInner_L.006 [Body 127]">
+          <item name="HairbackInner_L.006" type="0" bodyA="7" bodyB="127" bodyAName="Head [Body 7]" bodyBName="HairbackInner_L.006 [Body 127]">
             <position>
               <item>0.356627</item>
               <item>16.2797</item>
@@ -9565,7 +9565,7 @@
               <item>0.877647</item>
             </frameBRotation>
           </item>
-          <item name="HairbackInner_L.009" type="0" bodyA="7" bodyB="130" bodyAName="頭 [Body 7]" bodyBName="HairbackInner_L.009 [Body 130]">
+          <item name="HairbackInner_L.009" type="0" bodyA="7" bodyB="130" bodyAName="Head [Body 7]" bodyBName="HairbackInner_L.009 [Body 130]">
             <position>
               <item>0.124115</item>
               <item>16.2864</item>
@@ -9760,7 +9760,7 @@
               <item>0.971855</item>
             </frameBRotation>
           </item>
-          <item name="HairbackInner_R" type="0" bodyA="7" bodyB="133" bodyAName="頭 [Body 7]" bodyBName="HairbackInner_R [Body 133]">
+          <item name="HairbackInner_R" type="0" bodyA="7" bodyB="133" bodyAName="Head [Body 7]" bodyBName="HairbackInner_R [Body 133]">
             <position>
               <item>-0.946081</item>
               <item>16.4339</item>
@@ -9955,7 +9955,7 @@
               <item>0.877954</item>
             </frameBRotation>
           </item>
-          <item name="HairbackInner_R.003" type="0" bodyA="7" bodyB="136" bodyAName="頭 [Body 7]" bodyBName="HairbackInner_R.003 [Body 136]">
+          <item name="HairbackInner_R.003" type="0" bodyA="7" bodyB="136" bodyAName="Head [Body 7]" bodyBName="HairbackInner_R.003 [Body 136]">
             <position>
               <item>-0.686698</item>
               <item>16.3893</item>
@@ -10150,7 +10150,7 @@
               <item>0.891878</item>
             </frameBRotation>
           </item>
-          <item name="HairbackInner_R.006" type="0" bodyA="7" bodyB="139" bodyAName="頭 [Body 7]" bodyBName="HairbackInner_R.006 [Body 139]">
+          <item name="HairbackInner_R.006" type="0" bodyA="7" bodyB="139" bodyAName="Head [Body 7]" bodyBName="HairbackInner_R.006 [Body 139]">
             <position>
               <item>-0.356627</item>
               <item>16.2797</item>
@@ -10345,7 +10345,7 @@
               <item>0.877647</item>
             </frameBRotation>
           </item>
-          <item name="HairbackInner_R.009" type="0" bodyA="7" bodyB="142" bodyAName="頭 [Body 7]" bodyBName="HairbackInner_R.009 [Body 142]">
+          <item name="HairbackInner_R.009" type="0" bodyA="7" bodyB="142" bodyAName="Head [Body 7]" bodyBName="HairbackInner_R.009 [Body 142]">
             <position>
               <item>-0.124115</item>
               <item>16.2864</item>
@@ -10540,7 +10540,7 @@
               <item>0.971855</item>
             </frameBRotation>
           </item>
-          <item name="Hairback_L.018" type="0" bodyA="7" bodyB="145" bodyAName="頭 [Body 7]" bodyBName="Hairback_L.018 [Body 145]">
+          <item name="Hairback_L.018" type="0" bodyA="7" bodyB="145" bodyAName="Head [Body 7]" bodyBName="Hairback_L.018 [Body 145]">
             <position>
               <item>1.18023</item>
               <item>17.8829</item>
@@ -10605,7 +10605,7 @@
               <item>0.999606</item>
             </frameBRotation>
           </item>
-          <item name="Hairback_L.019" type="0" bodyA="7" bodyB="146" bodyAName="頭 [Body 7]" bodyBName="Hairback_L.019 [Body 146]">
+          <item name="Hairback_L.019" type="0" bodyA="7" bodyB="146" bodyAName="Head [Body 7]" bodyBName="Hairback_L.019 [Body 146]">
             <position>
               <item>-1.21732</item>
               <item>17.9173</item>
@@ -10670,7 +10670,7 @@
               <item>0.999606</item>
             </frameBRotation>
           </item>
-          <item name="Hairtwig" type="0" bodyA="7" bodyB="147" bodyAName="頭 [Body 7]" bodyBName="Hairtwig [Body 147]">
+          <item name="Hairtwig" type="0" bodyA="7" bodyB="147" bodyAName="Head [Body 7]" bodyBName="Hairtwig [Body 147]">
             <position>
               <item>-0.121585</item>
               <item>18.2111</item>
@@ -11336,7 +11336,7 @@
       </components:AnimationManager>
     </components>
     <children>
-      <item name="全ての親" enabled="true">
+      <item name="master" enabled="true">
         <transform>
           <Transform.position>
             <item>0</item>
@@ -11359,7 +11359,7 @@
           <components:BoneGroup BoneGroup.skinIndex="0" />
         </components>
         <children>
-          <item name="センター" enabled="true">
+          <item name="Character Root" enabled="true">
             <transform>
               <Transform.position>
                 <item>0</item>
@@ -11381,7 +11381,7 @@
               <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="1" AnimationBone.paletteIndex="1" AnimationBone.parentPaletteIndex="0" AnimationBone.hierarchyRoot="false" />
             </components>
             <children>
-              <item name="グルーブ" enabled="true">
+              <item name="groove" enabled="true">
                 <transform>
                   <Transform.position>
                     <item>0</item>
@@ -11403,7 +11403,7 @@
                   <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="2" AnimationBone.paletteIndex="2" AnimationBone.parentPaletteIndex="1" AnimationBone.hierarchyRoot="false" />
                 </components>
                 <children>
-                  <item name="腰" enabled="true">
+                  <item name="Waist" enabled="true">
                     <transform>
                       <Transform.position>
                         <item>0.019857</item>
@@ -11425,7 +11425,7 @@
                       <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="3" AnimationBone.paletteIndex="3" AnimationBone.parentPaletteIndex="2" AnimationBone.hierarchyRoot="false" />
                     </components>
                     <children>
-                      <item name="下半身" enabled="true">
+                      <item name="Lower Body" enabled="true">
                         <transform>
                           <Transform.position>
                             <item>-0.0169139</item>
@@ -11757,7 +11757,7 @@
                               </item>
                             </children>
                           </item>
-                          <item name="左足" enabled="true">
+                          <item name="Left Leg" enabled="true">
                             <transform>
                               <Transform.position>
                                 <item>0.92352</item>
@@ -11779,7 +11779,7 @@
                               <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="18" AnimationBone.paletteIndex="18" AnimationBone.parentPaletteIndex="4" AnimationBone.hierarchyRoot="false" />
                             </components>
                             <children>
-                              <item name="左ひざ" enabled="true">
+                              <item name="Left Knee" enabled="true">
                                 <transform>
                                   <Transform.position>
                                     <item>-0.199588</item>
@@ -11801,7 +11801,7 @@
                                   <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="19" AnimationBone.paletteIndex="19" AnimationBone.parentPaletteIndex="18" AnimationBone.hierarchyRoot="false" />
                                 </components>
                                 <children>
-                                  <item name="左足首" enabled="true">
+                                  <item name="Left Ankle" enabled="true">
                                     <transform>
                                       <Transform.position>
                                         <item>0.0357256</item>
@@ -11823,7 +11823,7 @@
                                       <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="20" AnimationBone.paletteIndex="20" AnimationBone.parentPaletteIndex="19" AnimationBone.hierarchyRoot="false" />
                                     </components>
                                     <children>
-                                      <item name="左つま先" enabled="true">
+                                      <item name="Left Toe" enabled="true">
                                         <transform>
                                           <Transform.position>
                                             <item>-0.000255644</item>
@@ -11846,7 +11846,7 @@
                                         </components>
                                         <children />
                                       </item>
-                                      <item name="左足首 [Body 18]" enabled="true">
+                                      <item name="Left Ankle [Body 18]" enabled="true">
                                         <transform>
                                           <Transform.position>
                                             <item>0.00913513</item>
@@ -11900,7 +11900,7 @@
                                       </item>
                                     </children>
                                   </item>
-                                  <item name="左ひざ [Body 17]" enabled="true">
+                                  <item name="Left Knee [Body 17]" enabled="true">
                                     <transform>
                                       <Transform.position>
                                         <item>-0.0489038</item>
@@ -11954,7 +11954,7 @@
                                   </item>
                                 </children>
                               </item>
-                              <item name="左足 [Body 16]" enabled="true">
+                              <item name="Left Leg [Body 16]" enabled="true">
                                 <transform>
                                   <Transform.position>
                                     <item>-0.158229</item>
@@ -12008,7 +12008,7 @@
                               </item>
                             </children>
                           </item>
-                          <item name="右足" enabled="true">
+                          <item name="Right Leg" enabled="true">
                             <transform>
                               <Transform.position>
                                 <item>-0.929406</item>
@@ -12030,7 +12030,7 @@
                               <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="218" AnimationBone.paletteIndex="218" AnimationBone.parentPaletteIndex="4" AnimationBone.hierarchyRoot="false" />
                             </components>
                             <children>
-                              <item name="右ひざ" enabled="true">
+                              <item name="Right Knee" enabled="true">
                                 <transform>
                                   <Transform.position>
                                     <item>0.199588</item>
@@ -12052,7 +12052,7 @@
                                   <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="219" AnimationBone.paletteIndex="219" AnimationBone.parentPaletteIndex="218" AnimationBone.hierarchyRoot="false" />
                                 </components>
                                 <children>
-                                  <item name="右足首" enabled="true">
+                                  <item name="Right Ankle" enabled="true">
                                     <transform>
                                       <Transform.position>
                                         <item>-0.0357256</item>
@@ -12074,7 +12074,7 @@
                                       <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="220" AnimationBone.paletteIndex="220" AnimationBone.parentPaletteIndex="219" AnimationBone.hierarchyRoot="false" />
                                     </components>
                                     <children>
-                                      <item name="右つま先" enabled="true">
+                                      <item name="Right Toe" enabled="true">
                                         <transform>
                                           <Transform.position>
                                             <item>0.000255644</item>
@@ -12097,7 +12097,7 @@
                                         </components>
                                         <children />
                                       </item>
-                                      <item name="右足首 [Body 21]" enabled="true">
+                                      <item name="Right Ankle [Body 21]" enabled="true">
                                         <transform>
                                           <Transform.position>
                                             <item>-0.00913513</item>
@@ -12151,7 +12151,7 @@
                                       </item>
                                     </children>
                                   </item>
-                                  <item name="右ひざ [Body 20]" enabled="true">
+                                  <item name="Right Knee [Body 20]" enabled="true">
                                     <transform>
                                       <Transform.position>
                                         <item>0.0489038</item>
@@ -12205,7 +12205,7 @@
                                   </item>
                                 </children>
                               </item>
-                              <item name="右足 [Body 19]" enabled="true">
+                              <item name="Right Leg [Body 19]" enabled="true">
                                 <transform>
                                   <Transform.position>
                                     <item>0.158229</item>
@@ -12259,7 +12259,7 @@
                               </item>
                             </children>
                           </item>
-                          <item name="腰キャンセル左" enabled="true">
+                          <item name="Left Waist Cancel" enabled="true">
                             <transform>
                               <Transform.position>
                                 <item>0.92352</item>
@@ -12282,7 +12282,7 @@
                             </components>
                             <children />
                           </item>
-                          <item name="腰キャンセル右" enabled="true">
+                          <item name="Right Waist Cancel" enabled="true">
                             <transform>
                               <Transform.position>
                                 <item>-0.929406</item>
@@ -12305,7 +12305,7 @@
                             </components>
                             <children />
                           </item>
-                          <item name="右足D" enabled="true">
+                          <item name="Right Leg D" enabled="true">
                             <transform>
                               <Transform.position>
                                 <item>-0.929406</item>
@@ -12327,7 +12327,7 @@
                               <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="230" AnimationBone.paletteIndex="230" AnimationBone.parentPaletteIndex="4" AnimationBone.hierarchyRoot="false" />
                             </components>
                             <children>
-                              <item name="右ひざD" enabled="true">
+                              <item name="Right Knee D" enabled="true">
                                 <transform>
                                   <Transform.position>
                                     <item>0.199588</item>
@@ -12349,7 +12349,7 @@
                                   <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="231" AnimationBone.paletteIndex="231" AnimationBone.parentPaletteIndex="230" AnimationBone.hierarchyRoot="false" />
                                 </components>
                                 <children>
-                                  <item name="右足首D" enabled="true">
+                                  <item name="Right Ankle D" enabled="true">
                                     <transform>
                                       <Transform.position>
                                         <item>-0.0357256</item>
@@ -12371,7 +12371,7 @@
                                       <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="232" AnimationBone.paletteIndex="232" AnimationBone.parentPaletteIndex="231" AnimationBone.hierarchyRoot="false" />
                                     </components>
                                     <children>
-                                      <item name="右足先EX" enabled="true">
+                                      <item name="Right Toe Extension" enabled="true">
                                         <transform>
                                           <Transform.position>
                                             <item>0.00017041</item>
@@ -12400,7 +12400,7 @@
                               </item>
                             </children>
                           </item>
-                          <item name="左足D" enabled="true">
+                          <item name="Left Leg D" enabled="true">
                             <transform>
                               <Transform.position>
                                 <item>0.92352</item>
@@ -12422,7 +12422,7 @@
                               <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="234" AnimationBone.paletteIndex="234" AnimationBone.parentPaletteIndex="4" AnimationBone.hierarchyRoot="false" />
                             </components>
                             <children>
-                              <item name="左ひざD" enabled="true">
+                              <item name="Left Knee D" enabled="true">
                                 <transform>
                                   <Transform.position>
                                     <item>-0.199588</item>
@@ -12444,7 +12444,7 @@
                                   <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="235" AnimationBone.paletteIndex="235" AnimationBone.parentPaletteIndex="234" AnimationBone.hierarchyRoot="false" />
                                 </components>
                                 <children>
-                                  <item name="左足首D" enabled="true">
+                                  <item name="Left Ankle D" enabled="true">
                                     <transform>
                                       <Transform.position>
                                         <item>0.0357256</item>
@@ -12466,7 +12466,7 @@
                                       <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="236" AnimationBone.paletteIndex="236" AnimationBone.parentPaletteIndex="235" AnimationBone.hierarchyRoot="false" />
                                     </components>
                                     <children>
-                                      <item name="左足先EX" enabled="true">
+                                      <item name="Left Toe Extension" enabled="true">
                                         <transform>
                                           <Transform.position>
                                             <item>-0.00017041</item>
@@ -12495,7 +12495,7 @@
                               </item>
                             </children>
                           </item>
-                          <item name="下半身 [Body 0]" enabled="true">
+                          <item name="Lower Body [Body 0]" enabled="true">
                             <transform>
                               <Transform.position>
                                 <item>-0.00294311</item>
@@ -12547,7 +12547,7 @@
                             </components>
                             <children />
                           </item>
-                          <item name="右尻 [Body 1]" enabled="true">
+                          <item name="Right Hip [Body 1]" enabled="true">
                             <transform>
                               <Transform.position>
                                 <item>-0.56448</item>
@@ -12599,7 +12599,7 @@
                             </components>
                             <children />
                           </item>
-                          <item name="左尻 [Body 2]" enabled="true">
+                          <item name="Left Hip [Body 2]" enabled="true">
                             <transform>
                               <Transform.position>
                                 <item>0.558593</item>
@@ -12653,7 +12653,7 @@
                           </item>
                         </children>
                       </item>
-                      <item name="上半身" enabled="true">
+                      <item name="Upper Body" enabled="true">
                         <transform>
                           <Transform.position>
                             <item>-0.019857</item>
@@ -12675,7 +12675,7 @@
                           <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="22" AnimationBone.paletteIndex="22" AnimationBone.parentPaletteIndex="3" AnimationBone.hierarchyRoot="false" />
                         </components>
                         <children>
-                          <item name="上半身2" enabled="true">
+                          <item name="Upper Body 2" enabled="true">
                             <transform>
                               <Transform.position>
                                 <item>0</item>
@@ -13006,7 +13006,7 @@
                                   </item>
                                 </children>
                               </item>
-                              <item name="首" enabled="true">
+                              <item name="Neck" enabled="true">
                                 <transform>
                                   <Transform.position>
                                     <item>0</item>
@@ -13147,7 +13147,7 @@
                                       </item>
                                     </children>
                                   </item>
-                                  <item name="頭" enabled="true">
+                                  <item name="Head" enabled="true">
                                     <transform>
                                       <Transform.position>
                                         <item>0</item>
@@ -13169,7 +13169,7 @@
                                       <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="43" AnimationBone.paletteIndex="43" AnimationBone.parentPaletteIndex="37" AnimationBone.hierarchyRoot="false" />
                                     </components>
                                     <children>
-                                      <item name="両目" enabled="true">
+                                      <item name="Both Eyes" enabled="true">
                                         <transform>
                                           <Transform.position>
                                             <item>0</item>
@@ -13192,7 +13192,7 @@
                                         </components>
                                         <children />
                                       </item>
-                                      <item name="左目" enabled="true">
+                                      <item name="Left Eye" enabled="true">
                                         <transform>
                                           <Transform.position>
                                             <item>0.482055</item>
@@ -13215,7 +13215,7 @@
                                         </components>
                                         <children />
                                       </item>
-                                      <item name="右目" enabled="true">
+                                      <item name="Right Eye" enabled="true">
                                         <transform>
                                           <Transform.position>
                                             <item>-0.482055</item>
@@ -15676,7 +15676,7 @@
                                           </item>
                                         </children>
                                       </item>
-                                      <item name="頭 [Body 7]" enabled="true">
+                                      <item name="Head [Body 7]" enabled="true">
                                         <transform>
                                           <Transform.position>
                                             <item>0</item>
@@ -15782,7 +15782,7 @@
                                       </item>
                                     </children>
                                   </item>
-                                  <item name="首 [Body 6]" enabled="true">
+                                  <item name="Neck [Body 6]" enabled="true">
                                     <transform>
                                       <Transform.position>
                                         <item>0</item>
@@ -15836,7 +15836,7 @@
                                   </item>
                                 </children>
                               </item>
-                              <item name="右肩P" enabled="true">
+                              <item name="Right Shoulder Parent" enabled="true">
                                 <transform>
                                   <Transform.position>
                                     <item>-0.537153</item>
@@ -15858,7 +15858,7 @@
                                   <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="150" AnimationBone.paletteIndex="150" AnimationBone.parentPaletteIndex="23" AnimationBone.hierarchyRoot="false" />
                                 </components>
                                 <children>
-                                  <item name="右肩" enabled="true">
+                                  <item name="Right Shoulder" enabled="true">
                                     <transform>
                                       <Transform.position>
                                         <item>0</item>
@@ -15880,7 +15880,7 @@
                                       <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="151" AnimationBone.paletteIndex="151" AnimationBone.parentPaletteIndex="150" AnimationBone.hierarchyRoot="false" />
                                     </components>
                                     <children>
-                                      <item name="右肩C" enabled="true">
+                                      <item name="Right Shoulder Cancel" enabled="true">
                                         <transform>
                                           <Transform.position>
                                             <item>-0.699971</item>
@@ -15902,7 +15902,7 @@
                                           <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="152" AnimationBone.paletteIndex="152" AnimationBone.parentPaletteIndex="151" AnimationBone.hierarchyRoot="false" />
                                         </components>
                                         <children>
-                                          <item name="右腕" enabled="true">
+                                          <item name="Right Upper Arm" enabled="true">
                                             <transform>
                                               <Transform.position>
                                                 <item>0</item>
@@ -15924,7 +15924,7 @@
                                               <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="154" AnimationBone.paletteIndex="154" AnimationBone.parentPaletteIndex="152" AnimationBone.hierarchyRoot="false" />
                                             </components>
                                             <children>
-                                              <item name="右腕捩" enabled="true">
+                                              <item name="Right Arm Twist" enabled="true">
                                                 <transform>
                                                   <Transform.position>
                                                     <item>-1.29134</item>
@@ -15946,7 +15946,7 @@
                                                   <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="155" AnimationBone.paletteIndex="155" AnimationBone.parentPaletteIndex="154" AnimationBone.hierarchyRoot="false" />
                                                 </components>
                                                 <children>
-                                                  <item name="右ひじ" enabled="true">
+                                                  <item name="Right Elbow" enabled="true">
                                                     <transform>
                                                       <Transform.position>
                                                         <item>-0.860896</item>
@@ -15968,7 +15968,7 @@
                                                       <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="159" AnimationBone.paletteIndex="159" AnimationBone.parentPaletteIndex="155" AnimationBone.hierarchyRoot="false" />
                                                     </components>
                                                     <children>
-                                                      <item name="右手捩" enabled="true">
+                                                      <item name="Right Wrist Twist" enabled="true">
                                                         <transform>
                                                           <Transform.position>
                                                             <item>-1.06191</item>
@@ -15990,7 +15990,7 @@
                                                           <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="160" AnimationBone.paletteIndex="160" AnimationBone.parentPaletteIndex="159" AnimationBone.hierarchyRoot="false" />
                                                         </components>
                                                         <children>
-                                                          <item name="右手首" enabled="true">
+                                                          <item name="Right Wrist" enabled="true">
                                                             <transform>
                                                               <Transform.position>
                                                                 <item>-0.70794</item>
@@ -16034,7 +16034,7 @@
                                                                   <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="165" AnimationBone.paletteIndex="165" AnimationBone.parentPaletteIndex="164" AnimationBone.hierarchyRoot="false" />
                                                                 </components>
                                                                 <children>
-                                                                  <item name="右小指１" enabled="true">
+                                                                  <item name="Right Pinky 1" enabled="true">
                                                                     <transform>
                                                                       <Transform.position>
                                                                         <item>-0.470735</item>
@@ -16056,7 +16056,7 @@
                                                                       <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="166" AnimationBone.paletteIndex="166" AnimationBone.parentPaletteIndex="165" AnimationBone.hierarchyRoot="false" />
                                                                     </components>
                                                                     <children>
-                                                                      <item name="右小指２" enabled="true">
+                                                                      <item name="Right Pinky 2" enabled="true">
                                                                         <transform>
                                                                           <Transform.position>
                                                                             <item>-0.154353</item>
@@ -16078,7 +16078,7 @@
                                                                           <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="167" AnimationBone.paletteIndex="167" AnimationBone.parentPaletteIndex="166" AnimationBone.hierarchyRoot="false" />
                                                                         </components>
                                                                         <children>
-                                                                          <item name="右小指３" enabled="true">
+                                                                          <item name="Right Pinky 3" enabled="true">
                                                                             <transform>
                                                                               <Transform.position>
                                                                                 <item>-0.128473</item>
@@ -16129,7 +16129,7 @@
                                                                   <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="169" AnimationBone.paletteIndex="169" AnimationBone.parentPaletteIndex="164" AnimationBone.hierarchyRoot="false" />
                                                                 </components>
                                                                 <children>
-                                                                  <item name="右薬指１" enabled="true">
+                                                                  <item name="Right Ring Finger 1" enabled="true">
                                                                     <transform>
                                                                       <Transform.position>
                                                                         <item>-0.514777</item>
@@ -16151,7 +16151,7 @@
                                                                       <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="170" AnimationBone.paletteIndex="170" AnimationBone.parentPaletteIndex="169" AnimationBone.hierarchyRoot="false" />
                                                                     </components>
                                                                     <children>
-                                                                      <item name="右薬指２" enabled="true">
+                                                                      <item name="Right Ring Finger 2" enabled="true">
                                                                         <transform>
                                                                           <Transform.position>
                                                                             <item>-0.198319</item>
@@ -16173,7 +16173,7 @@
                                                                           <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="171" AnimationBone.paletteIndex="171" AnimationBone.parentPaletteIndex="170" AnimationBone.hierarchyRoot="false" />
                                                                         </components>
                                                                         <children>
-                                                                          <item name="右薬指３" enabled="true">
+                                                                          <item name="Right Ring Finger 3" enabled="true">
                                                                             <transform>
                                                                               <Transform.position>
                                                                                 <item>-0.172145</item>
@@ -16224,7 +16224,7 @@
                                                                   <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="173" AnimationBone.paletteIndex="173" AnimationBone.parentPaletteIndex="164" AnimationBone.hierarchyRoot="false" />
                                                                 </components>
                                                                 <children>
-                                                                  <item name="右中指１" enabled="true">
+                                                                  <item name="Right Middle Finger 1" enabled="true">
                                                                     <transform>
                                                                       <Transform.position>
                                                                         <item>-0.52838</item>
@@ -16246,7 +16246,7 @@
                                                                       <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="174" AnimationBone.paletteIndex="174" AnimationBone.parentPaletteIndex="173" AnimationBone.hierarchyRoot="false" />
                                                                     </components>
                                                                     <children>
-                                                                      <item name="右中指２" enabled="true">
+                                                                      <item name="Right Middle Finger 2" enabled="true">
                                                                         <transform>
                                                                           <Transform.position>
                                                                             <item>-0.217416</item>
@@ -16268,7 +16268,7 @@
                                                                           <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="175" AnimationBone.paletteIndex="175" AnimationBone.parentPaletteIndex="174" AnimationBone.hierarchyRoot="false" />
                                                                         </components>
                                                                         <children>
-                                                                          <item name="右中指３" enabled="true">
+                                                                          <item name="Right Middle Finger 3" enabled="true">
                                                                             <transform>
                                                                               <Transform.position>
                                                                                 <item>-0.193975</item>
@@ -16319,7 +16319,7 @@
                                                                   <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="177" AnimationBone.paletteIndex="177" AnimationBone.parentPaletteIndex="164" AnimationBone.hierarchyRoot="false" />
                                                                 </components>
                                                                 <children>
-                                                                  <item name="右人指１" enabled="true">
+                                                                  <item name="Right Index Finger 1" enabled="true">
                                                                     <transform>
                                                                       <Transform.position>
                                                                         <item>-0.532439</item>
@@ -16341,7 +16341,7 @@
                                                                       <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="178" AnimationBone.paletteIndex="178" AnimationBone.parentPaletteIndex="177" AnimationBone.hierarchyRoot="false" />
                                                                     </components>
                                                                     <children>
-                                                                      <item name="右人指２" enabled="true">
+                                                                      <item name="Right Index Finger 2" enabled="true">
                                                                         <transform>
                                                                           <Transform.position>
                                                                             <item>-0.202913</item>
@@ -16363,7 +16363,7 @@
                                                                           <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="179" AnimationBone.paletteIndex="179" AnimationBone.parentPaletteIndex="178" AnimationBone.hierarchyRoot="false" />
                                                                         </components>
                                                                         <children>
-                                                                          <item name="右人指３" enabled="true">
+                                                                          <item name="Right Index Finger 3" enabled="true">
                                                                             <transform>
                                                                               <Transform.position>
                                                                                 <item>-0.167001</item>
@@ -16392,7 +16392,7 @@
                                                                   </item>
                                                                 </children>
                                                               </item>
-                                                              <item name="右親指０" enabled="true">
+                                                              <item name="Right Thumb 0" enabled="true">
                                                                 <transform>
                                                                   <Transform.position>
                                                                     <item>-0.116111</item>
@@ -16414,7 +16414,7 @@
                                                                   <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="181" AnimationBone.paletteIndex="181" AnimationBone.parentPaletteIndex="164" AnimationBone.hierarchyRoot="false" />
                                                                 </components>
                                                                 <children>
-                                                                  <item name="右親指１" enabled="true">
+                                                                  <item name="Right Thumb 1" enabled="true">
                                                                     <transform>
                                                                       <Transform.position>
                                                                         <item>-0.293781</item>
@@ -16436,7 +16436,7 @@
                                                                       <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="182" AnimationBone.paletteIndex="182" AnimationBone.parentPaletteIndex="181" AnimationBone.hierarchyRoot="false" />
                                                                     </components>
                                                                     <children>
-                                                                      <item name="右親指２" enabled="true">
+                                                                      <item name="Right Thumb 2" enabled="true">
                                                                         <transform>
                                                                           <Transform.position>
                                                                             <item>-0.171841</item>
@@ -16463,7 +16463,7 @@
                                                                   </item>
                                                                 </children>
                                                               </item>
-                                                              <item name="右手首 [Body 15]" enabled="true">
+                                                              <item name="Right Wrist [Body 15]" enabled="true">
                                                                 <transform>
                                                                   <Transform.position>
                                                                     <item>-0.932505</item>
@@ -16519,7 +16519,7 @@
                                                           </item>
                                                         </children>
                                                       </item>
-                                                      <item name="右手捩1" enabled="true">
+                                                      <item name="Right Wrist Twist 1" enabled="true">
                                                         <transform>
                                                           <Transform.position>
                                                             <item>-0.566352</item>
@@ -16542,7 +16542,7 @@
                                                         </components>
                                                         <children />
                                                       </item>
-                                                      <item name="右手捩2" enabled="true">
+                                                      <item name="Right Wrist Twist 2" enabled="true">
                                                         <transform>
                                                           <Transform.position>
                                                             <item>-0.920322</item>
@@ -16565,7 +16565,7 @@
                                                         </components>
                                                         <children />
                                                       </item>
-                                                      <item name="右手捩3" enabled="true">
+                                                      <item name="Right Wrist Twist 3" enabled="true">
                                                         <transform>
                                                           <Transform.position>
                                                             <item>-1.27429</item>
@@ -16588,7 +16588,7 @@
                                                         </components>
                                                         <children />
                                                       </item>
-                                                      <item name="右ひじ [Body 14]" enabled="true">
+                                                      <item name="Right Elbow [Body 14]" enabled="true">
                                                         <transform>
                                                           <Transform.position>
                                                             <item>-0.934234</item>
@@ -16644,7 +16644,7 @@
                                                   </item>
                                                 </children>
                                               </item>
-                                              <item name="右腕捩1" enabled="true">
+                                              <item name="Right Arm Twist 1" enabled="true">
                                                 <transform>
                                                   <Transform.position>
                                                     <item>-0.688717</item>
@@ -16667,7 +16667,7 @@
                                                 </components>
                                                 <children />
                                               </item>
-                                              <item name="右腕捩2" enabled="true">
+                                              <item name="Right Arm Twist 2" enabled="true">
                                                 <transform>
                                                   <Transform.position>
                                                     <item>-1.11917</item>
@@ -16690,7 +16690,7 @@
                                                 </components>
                                                 <children />
                                               </item>
-                                              <item name="右腕捩3" enabled="true">
+                                              <item name="Right Arm Twist 3" enabled="true">
                                                 <transform>
                                                   <Transform.position>
                                                     <item>-1.54961</item>
@@ -16713,7 +16713,7 @@
                                                 </components>
                                                 <children />
                                               </item>
-                                              <item name="右腕 [Body 13]" enabled="true">
+                                              <item name="Right Upper Arm [Body 13]" enabled="true">
                                                 <transform>
                                                   <Transform.position>
                                                     <item>-1.02695</item>
@@ -16792,7 +16792,7 @@
                                         </components>
                                         <children />
                                       </item>
-                                      <item name="右肩 [Body 12]" enabled="true">
+                                      <item name="Right Shoulder [Body 12]" enabled="true">
                                         <transform>
                                           <Transform.position>
                                             <item>-0.196131</item>
@@ -16848,7 +16848,7 @@
                                   </item>
                                 </children>
                               </item>
-                              <item name="左肩P" enabled="true">
+                              <item name="Left Shoulder Parent" enabled="true">
                                 <transform>
                                   <Transform.position>
                                     <item>0.537153</item>
@@ -16870,7 +16870,7 @@
                                   <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="184" AnimationBone.paletteIndex="184" AnimationBone.parentPaletteIndex="23" AnimationBone.hierarchyRoot="false" />
                                 </components>
                                 <children>
-                                  <item name="左肩" enabled="true">
+                                  <item name="Left Shoulder" enabled="true">
                                     <transform>
                                       <Transform.position>
                                         <item>0</item>
@@ -16892,7 +16892,7 @@
                                       <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="185" AnimationBone.paletteIndex="185" AnimationBone.parentPaletteIndex="184" AnimationBone.hierarchyRoot="false" />
                                     </components>
                                     <children>
-                                      <item name="左肩C" enabled="true">
+                                      <item name="Left Shoulder Cancel" enabled="true">
                                         <transform>
                                           <Transform.position>
                                             <item>0.699971</item>
@@ -16914,7 +16914,7 @@
                                           <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="186" AnimationBone.paletteIndex="186" AnimationBone.parentPaletteIndex="185" AnimationBone.hierarchyRoot="false" />
                                         </components>
                                         <children>
-                                          <item name="左腕" enabled="true">
+                                          <item name="Left Upper Arm" enabled="true">
                                             <transform>
                                               <Transform.position>
                                                 <item>0</item>
@@ -16936,7 +16936,7 @@
                                               <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="188" AnimationBone.paletteIndex="188" AnimationBone.parentPaletteIndex="186" AnimationBone.hierarchyRoot="false" />
                                             </components>
                                             <children>
-                                              <item name="左腕捩" enabled="true">
+                                              <item name="Left Arm Twist" enabled="true">
                                                 <transform>
                                                   <Transform.position>
                                                     <item>1.29134</item>
@@ -16958,7 +16958,7 @@
                                                   <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="189" AnimationBone.paletteIndex="189" AnimationBone.parentPaletteIndex="188" AnimationBone.hierarchyRoot="false" />
                                                 </components>
                                                 <children>
-                                                  <item name="左ひじ" enabled="true">
+                                                  <item name="Left Elbow" enabled="true">
                                                     <transform>
                                                       <Transform.position>
                                                         <item>0.860896</item>
@@ -16980,7 +16980,7 @@
                                                       <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="193" AnimationBone.paletteIndex="193" AnimationBone.parentPaletteIndex="189" AnimationBone.hierarchyRoot="false" />
                                                     </components>
                                                     <children>
-                                                      <item name="左手捩" enabled="true">
+                                                      <item name="Left Wrist Twist" enabled="true">
                                                         <transform>
                                                           <Transform.position>
                                                             <item>1.06191</item>
@@ -17002,7 +17002,7 @@
                                                           <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="194" AnimationBone.paletteIndex="194" AnimationBone.parentPaletteIndex="193" AnimationBone.hierarchyRoot="false" />
                                                         </components>
                                                         <children>
-                                                          <item name="左手首" enabled="true">
+                                                          <item name="Left Wrist" enabled="true">
                                                             <transform>
                                                               <Transform.position>
                                                                 <item>0.70794</item>
@@ -17046,7 +17046,7 @@
                                                                   <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="199" AnimationBone.paletteIndex="199" AnimationBone.parentPaletteIndex="198" AnimationBone.hierarchyRoot="false" />
                                                                 </components>
                                                                 <children>
-                                                                  <item name="左小指１" enabled="true">
+                                                                  <item name="Left Pinky 1" enabled="true">
                                                                     <transform>
                                                                       <Transform.position>
                                                                         <item>0.470735</item>
@@ -17068,7 +17068,7 @@
                                                                       <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="200" AnimationBone.paletteIndex="200" AnimationBone.parentPaletteIndex="199" AnimationBone.hierarchyRoot="false" />
                                                                     </components>
                                                                     <children>
-                                                                      <item name="左小指２" enabled="true">
+                                                                      <item name="Left Pinky 2" enabled="true">
                                                                         <transform>
                                                                           <Transform.position>
                                                                             <item>0.154353</item>
@@ -17090,7 +17090,7 @@
                                                                           <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="201" AnimationBone.paletteIndex="201" AnimationBone.parentPaletteIndex="200" AnimationBone.hierarchyRoot="false" />
                                                                         </components>
                                                                         <children>
-                                                                          <item name="左小指３" enabled="true">
+                                                                          <item name="Left Pinky 3" enabled="true">
                                                                             <transform>
                                                                               <Transform.position>
                                                                                 <item>0.128473</item>
@@ -17141,7 +17141,7 @@
                                                                   <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="203" AnimationBone.paletteIndex="203" AnimationBone.parentPaletteIndex="198" AnimationBone.hierarchyRoot="false" />
                                                                 </components>
                                                                 <children>
-                                                                  <item name="左薬指１" enabled="true">
+                                                                  <item name="Left Ring Finger 1" enabled="true">
                                                                     <transform>
                                                                       <Transform.position>
                                                                         <item>0.514777</item>
@@ -17163,7 +17163,7 @@
                                                                       <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="204" AnimationBone.paletteIndex="204" AnimationBone.parentPaletteIndex="203" AnimationBone.hierarchyRoot="false" />
                                                                     </components>
                                                                     <children>
-                                                                      <item name="左薬指２" enabled="true">
+                                                                      <item name="Left Ring Finger 2" enabled="true">
                                                                         <transform>
                                                                           <Transform.position>
                                                                             <item>0.198319</item>
@@ -17185,7 +17185,7 @@
                                                                           <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="205" AnimationBone.paletteIndex="205" AnimationBone.parentPaletteIndex="204" AnimationBone.hierarchyRoot="false" />
                                                                         </components>
                                                                         <children>
-                                                                          <item name="左薬指３l" enabled="true">
+                                                                          <item name="Left Ring Finger 3" enabled="true">
                                                                             <transform>
                                                                               <Transform.position>
                                                                                 <item>0.172145</item>
@@ -17236,7 +17236,7 @@
                                                                   <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="207" AnimationBone.paletteIndex="207" AnimationBone.parentPaletteIndex="198" AnimationBone.hierarchyRoot="false" />
                                                                 </components>
                                                                 <children>
-                                                                  <item name="左中指１" enabled="true">
+                                                                  <item name="Left Middle Finger 1" enabled="true">
                                                                     <transform>
                                                                       <Transform.position>
                                                                         <item>0.52838</item>
@@ -17258,7 +17258,7 @@
                                                                       <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="208" AnimationBone.paletteIndex="208" AnimationBone.parentPaletteIndex="207" AnimationBone.hierarchyRoot="false" />
                                                                     </components>
                                                                     <children>
-                                                                      <item name="左中指２" enabled="true">
+                                                                      <item name="Left Middle Finger 2" enabled="true">
                                                                         <transform>
                                                                           <Transform.position>
                                                                             <item>0.217416</item>
@@ -17280,7 +17280,7 @@
                                                                           <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="209" AnimationBone.paletteIndex="209" AnimationBone.parentPaletteIndex="208" AnimationBone.hierarchyRoot="false" />
                                                                         </components>
                                                                         <children>
-                                                                          <item name="左中指３" enabled="true">
+                                                                          <item name="Left Middle Finger 3" enabled="true">
                                                                             <transform>
                                                                               <Transform.position>
                                                                                 <item>0.193975</item>
@@ -17331,7 +17331,7 @@
                                                                   <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="211" AnimationBone.paletteIndex="211" AnimationBone.parentPaletteIndex="198" AnimationBone.hierarchyRoot="false" />
                                                                 </components>
                                                                 <children>
-                                                                  <item name="左人指１" enabled="true">
+                                                                  <item name="Left Index Finger 1" enabled="true">
                                                                     <transform>
                                                                       <Transform.position>
                                                                         <item>0.532439</item>
@@ -17353,7 +17353,7 @@
                                                                       <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="212" AnimationBone.paletteIndex="212" AnimationBone.parentPaletteIndex="211" AnimationBone.hierarchyRoot="false" />
                                                                     </components>
                                                                     <children>
-                                                                      <item name="左人指２" enabled="true">
+                                                                      <item name="Left Index Finger 2" enabled="true">
                                                                         <transform>
                                                                           <Transform.position>
                                                                             <item>0.202913</item>
@@ -17375,7 +17375,7 @@
                                                                           <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="213" AnimationBone.paletteIndex="213" AnimationBone.parentPaletteIndex="212" AnimationBone.hierarchyRoot="false" />
                                                                         </components>
                                                                         <children>
-                                                                          <item name="左人指３" enabled="true">
+                                                                          <item name="Left Index Finger 3" enabled="true">
                                                                             <transform>
                                                                               <Transform.position>
                                                                                 <item>0.167001</item>
@@ -17404,7 +17404,7 @@
                                                                   </item>
                                                                 </children>
                                                               </item>
-                                                              <item name="左親指０" enabled="true">
+                                                              <item name="Left Thumb 0" enabled="true">
                                                                 <transform>
                                                                   <Transform.position>
                                                                     <item>0.116111</item>
@@ -17426,7 +17426,7 @@
                                                                   <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="215" AnimationBone.paletteIndex="215" AnimationBone.parentPaletteIndex="198" AnimationBone.hierarchyRoot="false" />
                                                                 </components>
                                                                 <children>
-                                                                  <item name="左親指１" enabled="true">
+                                                                  <item name="Left Thumb 1" enabled="true">
                                                                     <transform>
                                                                       <Transform.position>
                                                                         <item>0.293781</item>
@@ -17448,7 +17448,7 @@
                                                                       <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="216" AnimationBone.paletteIndex="216" AnimationBone.parentPaletteIndex="215" AnimationBone.hierarchyRoot="false" />
                                                                     </components>
                                                                     <children>
-                                                                      <item name="左親指２" enabled="true">
+                                                                      <item name="Left Thumb 2" enabled="true">
                                                                         <transform>
                                                                           <Transform.position>
                                                                             <item>0.171841</item>
@@ -17475,7 +17475,7 @@
                                                                   </item>
                                                                 </children>
                                                               </item>
-                                                              <item name="左手首 [Body 11]" enabled="true">
+                                                              <item name="Left Wrist [Body 11]" enabled="true">
                                                                 <transform>
                                                                   <Transform.position>
                                                                     <item>0.932505</item>
@@ -17531,7 +17531,7 @@
                                                           </item>
                                                         </children>
                                                       </item>
-                                                      <item name="左手捩1" enabled="true">
+                                                      <item name="Left Wrist Twist 1" enabled="true">
                                                         <transform>
                                                           <Transform.position>
                                                             <item>0.566352</item>
@@ -17554,7 +17554,7 @@
                                                         </components>
                                                         <children />
                                                       </item>
-                                                      <item name="左手捩2" enabled="true">
+                                                      <item name="Left Wrist Twist 2" enabled="true">
                                                         <transform>
                                                           <Transform.position>
                                                             <item>0.920322</item>
@@ -17577,7 +17577,7 @@
                                                         </components>
                                                         <children />
                                                       </item>
-                                                      <item name="左手捩3" enabled="true">
+                                                      <item name="Left Wrist Twist 3" enabled="true">
                                                         <transform>
                                                           <Transform.position>
                                                             <item>1.27429</item>
@@ -17600,7 +17600,7 @@
                                                         </components>
                                                         <children />
                                                       </item>
-                                                      <item name="左ひじ [Body 10]" enabled="true">
+                                                      <item name="Left Elbow [Body 10]" enabled="true">
                                                         <transform>
                                                           <Transform.position>
                                                             <item>0.934234</item>
@@ -17656,7 +17656,7 @@
                                                   </item>
                                                 </children>
                                               </item>
-                                              <item name="左腕捩1" enabled="true">
+                                              <item name="Left Arm Twist 1" enabled="true">
                                                 <transform>
                                                   <Transform.position>
                                                     <item>0.653474</item>
@@ -17679,7 +17679,7 @@
                                                 </components>
                                                 <children />
                                               </item>
-                                              <item name="左腕捩2" enabled="true">
+                                              <item name="Left Arm Twist 2" enabled="true">
                                                 <transform>
                                                   <Transform.position>
                                                     <item>1.09567</item>
@@ -17702,7 +17702,7 @@
                                                 </components>
                                                 <children />
                                               </item>
-                                              <item name="左腕捩3" enabled="true">
+                                              <item name="Left Arm Twist 3" enabled="true">
                                                 <transform>
                                                   <Transform.position>
                                                     <item>1.53787</item>
@@ -17725,7 +17725,7 @@
                                                 </components>
                                                 <children />
                                               </item>
-                                              <item name="左腕 [Body 9]" enabled="true">
+                                              <item name="Left Upper Arm [Body 9]" enabled="true">
                                                 <transform>
                                                   <Transform.position>
                                                     <item>1.02695</item>
@@ -17804,7 +17804,7 @@
                                         </components>
                                         <children />
                                       </item>
-                                      <item name="左肩 [Body 8]" enabled="true">
+                                      <item name="Left Shoulder [Body 8]" enabled="true">
                                         <transform>
                                           <Transform.position>
                                             <item>0.196131</item>
@@ -17860,7 +17860,7 @@
                                   </item>
                                 </children>
                               </item>
-                              <item name="上半身2 [Body 4]" enabled="true">
+                              <item name="Upper Body 2 [Body 4]" enabled="true">
                                 <transform>
                                   <Transform.position>
                                     <item>0</item>
@@ -17966,7 +17966,7 @@
                               </item>
                             </children>
                           </item>
-                          <item name="上半身 [Body 3]" enabled="true">
+                          <item name="Upper Body [Body 3]" enabled="true">
                             <transform>
                               <Transform.position>
                                 <item>0</item>
@@ -18026,7 +18026,7 @@
               </item>
             </children>
           </item>
-          <item name="左足IK親" enabled="true">
+          <item name="Left Leg IK Parent" enabled="true">
             <transform>
               <Transform.position>
                 <item>0.762601</item>
@@ -18048,7 +18048,7 @@
               <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="222" AnimationBone.paletteIndex="222" AnimationBone.parentPaletteIndex="0" AnimationBone.hierarchyRoot="false" />
             </components>
             <children>
-              <item name="左足ＩＫ" enabled="true">
+              <item name="Left Leg IK" enabled="true">
                 <transform>
                   <Transform.position>
                     <item>0</item>
@@ -18070,7 +18070,7 @@
                   <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="223" AnimationBone.paletteIndex="223" AnimationBone.parentPaletteIndex="222" AnimationBone.hierarchyRoot="false" />
                 </components>
                 <children>
-                  <item name="左つま先ＩＫ" enabled="true">
+                  <item name="Left Toe IK" enabled="true">
                     <transform>
                       <Transform.position>
                         <item>-0.000255644</item>
@@ -18097,7 +18097,7 @@
               </item>
             </children>
           </item>
-          <item name="右足IK親" enabled="true">
+          <item name="Right Leg IK Parent" enabled="true">
             <transform>
               <Transform.position>
                 <item>-0.762601</item>
@@ -18119,7 +18119,7 @@
               <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="225" AnimationBone.paletteIndex="225" AnimationBone.parentPaletteIndex="0" AnimationBone.hierarchyRoot="false" />
             </components>
             <children>
-              <item name="右足ＩＫ" enabled="true">
+              <item name="Right Leg IK" enabled="true">
                 <transform>
                   <Transform.position>
                     <item>0</item>
@@ -18141,7 +18141,7 @@
                   <components:AnimationBone AnimationBone.skinIndex="0" AnimationBone.nodeIndex="226" AnimationBone.paletteIndex="226" AnimationBone.parentPaletteIndex="225" AnimationBone.hierarchyRoot="false" />
                 </components>
                 <children>
-                  <item name="右つま先ＩＫ" enabled="true">
+                  <item name="Right Toe IK" enabled="true">
                     <transform>
                       <Transform.position>
                         <item>0.000255644</item>
@@ -22530,7 +22530,7 @@
           </item>
         </children>
       </item>
-      <item name="上半身3 [Body 5]" enabled="true">
+      <item name="Upper Body 3 [Body 5]" enabled="true">
         <transform>
           <Transform.position>
             <item>0</item>

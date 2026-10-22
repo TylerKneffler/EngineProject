@@ -172,6 +172,7 @@ void PropertiesView::DrawMultiSelection(IEditorUi& ui)
     }
     if (ui.ComponentHeader(ComponentIconForType("Transform"), "Transform"))
     {
+        ui.Indent(12.f);
         if (transforms.front()->DrawPropertiesMulti(ui, transforms))
         {
             for (size_t index = 0; index < m_selectedObjects.size(); ++index)
@@ -197,6 +198,7 @@ void PropertiesView::DrawMultiSelection(IEditorUi& ui)
             ui.Button("Resume Animation and Physics"))
             for (Engine::Core::Object* object : m_selectedObjects)
                 object->transform.ClearEditorOverride();
+        ui.Unindent(12.f);
     }
 
     std::unordered_map<std::string, size_t> occurrences;
@@ -224,16 +226,21 @@ void PropertiesView::DrawMultiSelection(IEditorUi& ui)
         if (common.empty()) continue;
 
         ui.PushId(component);
-        if (ui.ComponentHeader(ComponentIconForType(type), type.c_str()) &&
-            component->DrawPropertiesMulti(ui, common))
+        if (ui.ComponentHeader(ComponentIconForType(type), type.c_str()))
         {
-            for (Engine::Core::Object* object : m_selectedObjects)
+            ui.Indent(12.f);
+            const bool changed = component->DrawPropertiesMulti(ui, common);
+            ui.Unindent(12.f);
+            if (changed)
             {
-                if (auto* body = object->GetComponent<Engine::Components::RigidBody>())
-                    body->NotifyEditorTransformChanged();
-                object->InvalidatePrefabOverrideCache();
+                for (Engine::Core::Object* object : m_selectedObjects)
+                {
+                    if (auto* body = object->GetComponent<Engine::Components::RigidBody>())
+                        body->NotifyEditorTransformChanged();
+                    object->InvalidatePrefabOverrideCache();
+                }
+                if (OnComponentsChanged) OnComponentsChanged();
             }
-            if (OnComponentsChanged) OnComponentsChanged();
         }
         ui.PopId();
     }
@@ -669,8 +676,12 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             ui.EndDragDropTarget();
         }
         if (componentOpen)
+        {
+            ui.Indent(12.f);
             componentPropertiesChanged =
                 component->DrawProperties(ui) || componentPropertiesChanged;
+            ui.Unindent(12.f);
+        }
         ui.PopId();
     }
     if (!foundComponent)
@@ -733,12 +744,8 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
 
     if (!assetDropPreview.empty())
     {
-        ui.PushId("assetDropPreview");
-        ui.BeginDisabled();
-        const std::string label = assetDropPreview + " (Drop to Add)";
-        ui.CollapsingHeader(label.c_str(), false);
-        ui.EndDisabled();
-        ui.PopId();
+        const std::string label = "Drop to add: " + assetDropPreview;
+        ui.DisabledLabel(label.c_str());
     }
 
     ui.BeginDisabled(!CanEditSelectedObject());
