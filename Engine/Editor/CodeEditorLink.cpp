@@ -8,6 +8,85 @@
 
 namespace Engine::Editor
 {
+namespace
+{
+std::filesystem::path EnvironmentPath(const wchar_t* name)
+{
+    std::wstring buffer(32768, L'\0');
+    const DWORD length = GetEnvironmentVariableW(name, buffer.data(),
+        static_cast<DWORD>(buffer.size()));
+    if (length == 0 || length >= buffer.size())
+        return {};
+    buffer.resize(length);
+    return buffer;
+}
+
+std::filesystem::path FindOnPath(const wchar_t* name)
+{
+    const auto searchPath = EnvironmentPath(L"PATH");
+    if (searchPath.empty())
+        return {};
+    std::wstring buffer(32768, L'\0');
+    const DWORD length = SearchPathW(searchPath.c_str(), name, nullptr,
+        static_cast<DWORD>(buffer.size()), buffer.data(), nullptr);
+    if (length == 0 || length >= buffer.size())
+        return {};
+    buffer.resize(length);
+    return buffer;
+}
+
+std::filesystem::path FindInstalledEditor(const wchar_t* executable,
+    const wchar_t* directory, const wchar_t* cli = nullptr)
+{
+    if (cli)
+    {
+        const auto cliPath = FindOnPath(cli);
+        if (!cliPath.empty())
+        {
+            const auto sibling = cliPath.parent_path().parent_path() / executable;
+            std::error_code error;
+            if (std::filesystem::is_regular_file(sibling, error))
+                return sibling;
+        }
+    }
+    if (const auto onPath = FindOnPath(executable); !onPath.empty())
+        return onPath;
+    for (const wchar_t* variable : { L"LOCALAPPDATA", L"ProgramFiles",
+        L"ProgramFiles(x86)" })
+    {
+        const auto root = EnvironmentPath(variable);
+        if (root.empty()) continue;
+        const auto candidate = (std::wstring(variable) == L"LOCALAPPDATA"
+            ? root / L"Programs" : root) / directory / executable;
+        std::error_code error;
+        if (std::filesystem::is_regular_file(candidate, error))
+            return candidate;
+    }
+    return {};
+}
+}
+
+std::vector<DetectedCodeEditor> DetectCodeEditors()
+{
+    std::vector<DetectedCodeEditor> editors;
+    const auto add = [&](const char* id, const char* name,
+        const std::filesystem::path& executable)
+    {
+        if (!executable.empty())
+            editors.push_back({ id, name, executable });
+    };
+    add("VSCode", "Visual Studio Code", FindInstalledEditor(L"Code.exe",
+        L"Microsoft VS Code", L"code.cmd"));
+    add("VSCodeInsiders", "Visual Studio Code Insiders", FindInstalledEditor(
+        L"Code - Insiders.exe", L"Microsoft VS Code Insiders",
+        L"code-insiders.cmd"));
+    add("SublimeText", "Sublime Text", FindInstalledEditor(
+        L"sublime_text.exe", L"Sublime Text"));
+    add("NotepadPlusPlus", "Notepad++", FindInstalledEditor(
+        L"notepad++.exe", L"Notepad++"));
+    return editors;
+}
+
 bool IsCodeFile(const std::filesystem::path& path)
 {
     std::string extension = path.extension().string();
@@ -21,28 +100,28 @@ bool IsCodeFile(const std::filesystem::path& path)
     return extensions.find(extension) != extensions.end();
 }
 
-bool OpenInCodeEditor(const std::filesystem::path& path, bool directory)
+bool OpenInCodeEditor(const std::filesystem::path& path,
+    const std::string& editorId, bool directory)
 {
-    const std::string utf8 = std::filesystem::absolute(path).generic_u8string();
-    std::string uri = "vscode://file/";
-    constexpr char hex[] = "0123456789ABCDEF";
-    for (unsigned char byte : utf8)
+    if (editorId == "None")
+        return false;
+    const auto editors = DetectCodeEditors();
+    const auto selected = std::find_if(editors.begin(), editors.end(),
+        [&](const DetectedCodeEditor& editor) { return editor.id == editorId; });
+    if (selected == editors.end())
+        return false;
+
+    std::wstring arguments;
+    if (!(directory && editorId == "NotepadPlusPlus"))
     {
-        if ((byte < 128 && std::isalnum(byte)) || byte == '-' || byte == '_' ||
-            byte == '.' || byte == '~' || byte == '/' || byte == ':')
-            uri.push_back(static_cast<char>(byte));
-        else
-        {
-            uri.push_back('%');
-            uri.push_back(hex[byte >> 4]);
-            uri.push_back(hex[byte & 15]);
-        }
+        if (editorId == "VSCode" || editorId == "VSCodeInsiders")
+            arguments = L"--reuse-window ";
+        arguments += L"\"" + std::filesystem::absolute(path).wstring() + L"\"";
     }
-    if (directory && !uri.empty() && uri.back() != '/')
-        uri.push_back('/');
-    const std::wstring wideUri(uri.begin(), uri.end());
     return reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open",
-        wideUri.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) > 32;
+        selected->executable.c_str(),
+        arguments.empty() ? nullptr : arguments.c_str(), nullptr,
+        SW_SHOWNORMAL)) > 32;
 }
 
 void RememberCodeFile(const std::filesystem::path& workspace,

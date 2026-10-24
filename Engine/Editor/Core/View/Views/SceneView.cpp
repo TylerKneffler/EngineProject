@@ -16,6 +16,9 @@
 #include "Core/Compoonents/Animation/Model.h"
 #include "Core/Compoonents/Animation/AnimationManager.h"
 #include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Obj/Terrain.h"
+#include "Core/Compoonents/Obj/TerrainManager.h"
+#include <set>
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Transform.h"
 #include "Core/Compoonents/Obj/Sprite.h"
@@ -27,6 +30,7 @@
 #include "../Focus/WindowFocusHandler.h"
 #include "imgui.h"
 #include <algorithm>
+#include <glm/gtc/matrix_inverse.hpp>
 
 namespace Engine::Editor
 {
@@ -191,6 +195,134 @@ void SceneView::DrawPanel(IEditorUi& ui)
         {m_letterboxColor.r,m_letterboxColor.g,m_letterboxColor.b,m_letterboxColor.a});
     m_viewportScreenMin = input.screenMin;
     m_viewportScreenMax = input.screenMax;
+    bool terrainConsumedClick = false;
+    static bool editTerrainCells = false;
+    auto* terrain = m_scene && m_scene->GetSelectedObject()
+        ? m_scene->GetSelectedObject()->GetComponent<Engine::Components::Terrain>()
+        : nullptr;
+    auto* manager = m_scene && m_scene->GetSelectedObject()
+        ? m_scene->GetSelectedObject()->GetComponent<Engine::Components::TerrainManager>()
+        : nullptr;
+    if (!manager && m_scene && m_scene->GetSelectedObject() &&
+        m_scene->GetSelectedObject()->Parent)
+        manager = m_scene->GetSelectedObject()->Parent->GetComponent<Engine::Components::TerrainManager>();
+    if (terrain || manager)
+    {
+        static int brush = 0, layer = 0;
+        static float radius = 3.f, strength = .25f;
+        ImGui::SetNextWindowPos({input.screenMin.x + 8.f, input.screenMin.y + 48.f}, ImGuiCond_Always);
+        ImGui::SetNextWindowBgAlpha(.92f);
+        ImGui::Begin(("Terrain tools##" + m_title).c_str(), nullptr,
+            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove |
+            ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings);
+        const char* modes[] = {"Raise", "Lower", "Average", "Blend", "Paint"};
+        ImGui::Combo("Brush", &brush, modes, 5);
+        ImGui::DragFloat("Radius", &radius, .05f, .05f, 100.f);
+        ImGui::DragFloat("Strength", &strength, .01f, .001f, 2.f);
+        if (brush == 4 && terrain)
+        {
+            layer = std::clamp(layer, 0, static_cast<int>(terrain->layers.size()) - 1);
+            ImGui::SliderInt("Layer", &layer, 0,
+                std::max(0, static_cast<int>(terrain->layers.size()) - 1));
+        }
+        terrainConsumedClick = ImGui::IsWindowHovered();
+        ImGui::End();
+        if (input.hovered && input.leftDown && !terrainConsumedClick &&
+            !(manager && editTerrainCells) &&
+            input.available.x > 0.f && input.available.y > 0.f)
+        {
+            auto* camera = m_scene->editorCamera.GetComponent<Engine::Components::Camera>();
+            if (camera)
+            {
+                const glm::mat4 inverse = glm::inverse(camera->GetProjectionMatrix(
+                    input.available.x / input.available.y) * camera->GetViewMatrix());
+                const float nx = 2.f * input.mousePosInViewport.x / input.available.x - 1.f;
+                const float ny = 1.f - 2.f * input.mousePosInViewport.y / input.available.y;
+                glm::vec4 nearPoint = inverse * glm::vec4(nx, ny, 0.f, 1.f);
+                glm::vec4 farPoint = inverse * glm::vec4(nx, ny, 1.f, 1.f);
+                nearPoint /= nearPoint.w; farPoint /= farPoint.w;
+                const glm::mat4 worldToLocal = glm::inverse(
+                    (manager ? manager->Owner : m_scene->GetSelectedObject())->transform.GetWorldMatrix());
+                const glm::vec3 a = glm::vec3(worldToLocal * nearPoint);
+                const glm::vec3 b = glm::vec3(worldToLocal * farPoint);
+                if (manager)
+                {
+                    const float dy = b.y - a.y;
+                    if (std::abs(dy) > .00001f)
+                    {
+                        const float t = -a.y / dy;
+                        if (t >= 0.f && t <= 1.f)
+                        {
+                            const glm::vec3 hit = a + (b - a) * t;
+                            terrainConsumedClick = manager->ApplyBrush(hit.x, hit.z,
+                                radius, strength * ImGui::GetIO().DeltaTime * 30.f,
+                                static_cast<Engine::Components::Terrain::Brush>(brush), layer);
+                        }
+                    }
+                }
+                else terrainConsumedClick = terrain->ApplyBrushFromLocalRay(a, b,
+                    radius, strength * ImGui::GetIO().DeltaTime * 30.f,
+                    static_cast<Engine::Components::Terrain::Brush>(brush), layer);
+            }
+        }
+    }
+    if (manager && input.available.x > 0.f && input.available.y > 0.f)
+    {
+        ImGui::SetNextWindowPos({input.screenMin.x + 8.f, input.screenMin.y + 170.f}, ImGuiCond_Always);
+        ImGui::Begin(("Terrain cells##" + m_title).c_str(), nullptr,
+            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize |
+            ImGuiWindowFlags_NoSavedSettings);
+        ImGui::Checkbox("Edit terrain cells", &editTerrainCells);
+        ImGui::End();
+        if (editTerrainCells)
+        {
+            auto* camera = m_scene->editorCamera.GetComponent<Engine::Components::Camera>();
+            if (camera)
+            {
+                const glm::mat4 viewProjection = camera->GetProjectionMatrix(
+                    input.available.x / input.available.y) * camera->GetViewMatrix() *
+                    manager->Owner->transform.GetWorldMatrix();
+                auto cells = manager->GetCells();
+                if (cells.empty()) cells.push_back({0, 0});
+                std::set<std::pair<int, int>> candidates(cells.begin(), cells.end());
+                for (const auto& cell : cells)
+                    for (const auto offset : {std::pair{-1, 0}, {1, 0}, {0, -1}, {0, 1}})
+                        candidates.insert({cell.first + offset.first, cell.second + offset.second});
+                for (const auto& cell : candidates)
+                {
+                    const float x = cell.first * manager->cellsX * manager->cellWidth;
+                    const float z = cell.second * manager->cellsY * manager->cellDepth;
+                    const float w = manager->cellsX * manager->cellWidth;
+                    const float h = manager->cellsY * manager->cellDepth;
+                    ImVec2 corners[4];
+                    bool visible = true;
+                    for (int i = 0; i < 4; ++i)
+                    {
+                        const glm::vec4 clip = viewProjection * glm::vec4(
+                            x + ((i == 1 || i == 2) ? w : 0.f), 0.f,
+                            z + (i >= 2 ? h : 0.f), 1.f);
+                        if (clip.w <= 0.f) { visible = false; break; }
+                        corners[i] = {input.screenMin.x + (clip.x / clip.w + 1.f) * input.available.x * .5f,
+                            input.screenMin.y + (1.f - clip.y / clip.w) * input.available.y * .5f};
+                    }
+                    if (!visible) continue;
+                    const bool exists = manager->HasCell(cell.first, cell.second);
+                    ImGui::GetForegroundDrawList()->AddQuad(corners[0], corners[1], corners[2], corners[3],
+                        exists ? IM_COL32(255, 95, 70, 220) : IM_COL32(70, 220, 120, 220), 3.f);
+                    const ImVec2 minimum{std::min(corners[0].x, corners[2].x), std::min(corners[0].y, corners[2].y)};
+                    const ImVec2 maximum{std::max(corners[0].x, corners[2].x), std::max(corners[0].y, corners[2].y)};
+                    if (input.hovered && ImGui::IsMouseClicked(0) &&
+                        ImGui::IsMouseHoveringRect(minimum, maximum))
+                    {
+                        if (exists) manager->RemoveCell(cell.first, cell.second);
+                        else manager->AddCell(cell.first, cell.second);
+                        terrainConsumedClick = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
     bool modelHeaderConsumedClick = false;
     if (input.available.x > (UseGlobalToolbar ? 685.f : 450.f))
     {
@@ -483,7 +615,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
     }
     EditorUiViewportInput gizmoInput = input;
     const EditorTransformTool transformTool = m_toolbar.GetTransformTool();
-    if (overlayConsumedClick || modelHeaderConsumedClick ||
+    if (overlayConsumedClick || modelHeaderConsumedClick || terrainConsumedClick ||
         (transformTool == EditorTransformTool::Hand && !m_modelManipulation))
         gizmoInput.leftClicked = false;
     gizmoInput.modelDepthDown = ImGui::GetIO().KeyShift;

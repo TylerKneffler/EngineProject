@@ -169,6 +169,9 @@ void ProjectLoader::ParseEditor(const pugi::xml_node& projectNode, ProjectSettin
         if (editorTheme && *editorTheme.child_value())
             settings.editorTheme = editorTheme.child_value();
 
+        if (auto codeEditor = prop.child("CodeEditor"))
+            settings.codeEditor = codeEditor.child_value();
+
     }
 
     // Parse panel tabs

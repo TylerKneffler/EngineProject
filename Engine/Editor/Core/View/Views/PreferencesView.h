@@ -1,6 +1,7 @@
 #pragma once
 #include "pch.h"
 #include "Core/ProjectLoader.h"
+#include "Engine/Editor/CodeEditorLink.h"
 #include <atomic>
 #include <cstdint>
 #include <functional>
@@ -8,6 +9,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 namespace Engine::Editor
 {
 class IEditorUi;
@@ -81,6 +83,7 @@ private:
     std::string m_keybindStatus;
     bool m_keybindStatusSucceeded = false;
     std::string m_themeStatus;
+    std::vector<DetectedCodeEditor> m_codeEditors;
     bool m_themeStatusSucceeded = false;
     bool m_lastSaveSucceeded = false;
     bool m_exporting = false;

@@ -51,6 +51,8 @@ public:
     void Update() override;
     void Tick(float deltaSeconds);
     void Play(const std::string& clipName, float fadeSeconds = 0.2f);
+    void BeginEditorPreview();
+    bool IsEditorPreviewRunning() const { return m_editorPreviewRunning && playing; }
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
@@ -83,5 +85,6 @@ private:
     std::vector<MaterialPropertyMorph*> m_materialMorphs;
     std::unique_ptr<AnimationManagerScratch> m_scratch;
     std::unordered_set<std::string> m_externalClipNames;
+    bool m_editorPreviewRunning = false;
 };
 }

@@ -1544,12 +1544,12 @@ void AssetsExplorerView::OpenFile(const std::string& filePath)
         Engine::Editor::LowerAssetExtension(filePath);
     if (IsCodeFile(filePath))
     {
-        if (OpenInCodeEditor(filePath))
+        if (OpenInCodeEditor(filePath, m_codeEditor))
         {
             if (OnCodeFileOpened) OnCodeFileOpened(filePath);
             return;
         }
-        // VS Code is optional; keep the system file association available.
+        // Keep the system file association available when no editor is selected.
     }
     if (extension == ".xml")
     {

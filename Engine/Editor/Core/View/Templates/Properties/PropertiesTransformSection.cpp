@@ -44,6 +44,7 @@ void PropertiesView::DrawTransform(IEditorUi& ui)
     }
     if (transformOpen)
     {
+        ui.Indent(12.f);
         bool transformChanged = false;
         const glm::vec3 previousPosition = t.position;
         const glm::vec3 previousRotation = t.rotation;
@@ -88,6 +89,7 @@ void PropertiesView::DrawTransform(IEditorUi& ui)
         if (t.HasEditorOverride() &&
             ui.Button("Resume Animation and Physics"))
             t.ClearEditorOverride();
+        ui.Unindent(12.f);
     }
     ui.PopId();
 }

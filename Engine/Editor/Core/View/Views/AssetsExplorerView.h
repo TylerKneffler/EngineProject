@@ -56,6 +56,7 @@ public:
     void RecordKnownMove(const std::string& oldPath, const std::string& newPath)
     { m_locationIndex.RecordKnownMove(oldPath, newPath); }
     const std::string& GetSelectedPath() const { return m_selectedPath; }
+    void SetCodeEditor(const std::string& id) { m_codeEditor = id; }
     std::function<void(const std::string&)> OnCodeFileOpened;
     const std::string& GetCurrentDirectory() const { return m_currentDirectory; }
 
@@ -88,6 +89,7 @@ private:
         bool range = false);
 
     std::string m_assetsPath;
+    std::string m_codeEditor = "None";
     Engine::Scene::Scene* m_scene = nullptr;
     AssetPreviewCache m_previewCache;
     std::string m_currentDirectory;

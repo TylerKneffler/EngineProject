@@ -1,4 +1,5 @@
 #include "Engine/Editor/Core/View/Views/PreferencesView.h"
+#include "Engine/Editor/CodeEditorLink.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Engine/Editor/Input/EditorKeyBindings.h"
 #include "Engine/Editor/UI/ImGui/Themes/ImGuiThemeManager.h"
@@ -359,6 +360,7 @@ void PreferencesView::Init(const Engine::Model::ProjectSettings& settings, const
 {
     m_settings = settings;
     m_projFilePath = projFilePath;
+    m_codeEditors = DetectCodeEditors();
     EditorKeyBindings::Get().Initialize(projFilePath);
 
     std::string discoveryMessage;
@@ -604,6 +606,38 @@ void PreferencesView::DrawDiagnosticsSection(IEditorUi& ui)
 
 void PreferencesView::DrawEditorSection(IEditorUi& ui)
 {
+    ui.Label("Code Editor");
+    ui.Separator();
+    std::vector<const char*> editorNames { "None" };
+    int selectedEditor = 0;
+    for (size_t index = 0; index < m_codeEditors.size(); ++index)
+    {
+        editorNames.push_back(m_codeEditors[index].name.c_str());
+        if (m_settings.codeEditor == m_codeEditors[index].id)
+            selectedEditor = static_cast<int>(index + 1);
+    }
+    if (ui.Combo("Code Editor", &selectedEditor, editorNames.data(),
+        static_cast<int>(editorNames.size())))
+    {
+        m_settings.codeEditor = selectedEditor == 0 ? "None"
+            : m_codeEditors[selectedEditor - 1].id;
+        NotifyChanged();
+    }
+    ui.SameLine();
+    if (ui.Button("Rescan Editors"))
+        m_codeEditors = DetectCodeEditors();
+    ui.Tooltip("Finds installed code editors again.");
+    if (m_settings.codeEditor != "None" && selectedEditor == 0)
+    {
+        ui.DisabledLabel("Selected editor is unavailable. Choose another editor or None.");
+        if (ui.Button("Use None"))
+        {
+            m_settings.codeEditor = "None";
+            NotifyChanged();
+        }
+    }
+    ui.Spacing();
+
     ui.Label("Performance");
     ui.Separator();
     if (ui.InputUInt("Editor Max FPS", &m_settings.editorMaxFps))
@@ -1516,6 +1550,23 @@ bool PreferencesView::SaveSettings()
             auto lbA = prop.child("LetterboxColorA");
             if (lbA)
                 lbA.text().set(std::to_string(m_settings.letterboxColor.a).c_str());
+        }
+
+        bool codeEditorSaved = false;
+        for (auto prop : projectNode.children("PropertyGroup"))
+        {
+            if (auto codeEditor = prop.child("CodeEditor"))
+            {
+                codeEditor.text().set(m_settings.codeEditor.c_str());
+                codeEditorSaved = true;
+            }
+        }
+        if (!codeEditorSaved)
+        {
+            auto prop = projectNode.child("PropertyGroup");
+            if (!prop) prop = projectNode.append_child("PropertyGroup");
+            prop.append_child("CodeEditor").text().set(
+                m_settings.codeEditor.c_str());
         }
 
         if (!fpsSettingsSaved)

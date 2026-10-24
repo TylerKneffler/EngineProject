@@ -576,6 +576,15 @@ void AnimationManager::Play(const std::string& clipName, float fadeSeconds)
     playing = true;
 }
 
+void AnimationManager::BeginEditorPreview()
+{
+    m_editorPreviewRunning = true;
+    playing = true;
+    // Capture the current bind pose before the first edit-mode sample.
+    if (m_restPose.empty()) Start();
+    Tick(0.f);
+}
+
 void AnimationManager::Update()
 {
     Tick(Owner && Owner->GetScene()
@@ -1025,7 +1034,10 @@ void AnimationManager::Deserialize(const JsonValue& value)
 
 bool AnimationManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
 {
+    const bool wasPlaying = playing;
     bool changed = Component::DrawProperties(ui);
+    if (!wasPlaying && playing)
+        BeginEditorPreview();
     const auto available = GetAvailableClips();
     if (!available.empty())
     {
@@ -1042,30 +1054,29 @@ bool AnimationManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
             static_cast<int>(names.size())))
         {
             Play(available[static_cast<size_t>(selected)]->clipName, 0.f);
+            BeginEditorPreview();
             changed = true;
         }
     }
-    const std::string animationsLabel = "Animations (" +
-        std::to_string(available.size()) + ")";
-    if (ui.PropertyGroupHeader(animationsLabel.c_str(), true))
+    const std::string clipCount = std::to_string(available.size()) +
+        (available.size() == 1 ? " clip" : " clips");
+    ui.ValueLabel("Clips", clipCount.c_str());
+    ui.Indent(12.f);
+    if (available.empty())
+        ui.DisabledLabel("Drop a .anim asset on this object to add a clip.");
+    for (const auto* item : available)
     {
-        ui.Indent(12.f);
-        if (available.empty())
-            ui.DisabledLabel("Drop a .anim asset on this object to add a clip.");
-        for (const auto* item : available)
-        {
-            const std::string summary = std::to_string(item->channels.size()) +
-                " channels  |  " + std::to_string(item->duration).substr(0, 5) +
-                " s";
-            ui.ValueLabel(item->clipName.c_str(), summary.c_str());
-        }
-        if (!animationPaths.empty())
-        {
-            ui.Label("Referenced animation assets");
-            for (const auto& path : animationPaths)
-                ui.ValueLabel("Asset", path.c_str());
-        }
-        ui.Unindent(12.f);
+        const std::string summary = std::to_string(item->channels.size()) +
+            " channels  |  " + std::to_string(item->duration).substr(0, 5) +
+            " s";
+        ui.ValueLabel(item->clipName.c_str(), summary.c_str());
+    }
+    ui.Unindent(12.f);
+    for (const auto& path : animationPaths)
+    {
+        ui.PushId(&path);
+        ui.ValueLabel("Clip Asset", path.c_str());
+        ui.PopId();
     }
     if (ui.PropertyGroupHeader("Animation Pack", false))
     {
@@ -1120,7 +1131,8 @@ bool AnimationManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
         ui.PushId(&layer);
         const std::string title = layer.clip.empty()
             ? "Layer " + std::to_string(index + 1) : layer.clip;
-        if (ui.CollapsingHeader(title.c_str(), false))
+        ui.PropertyGroupHeader(title.c_str(), true);
+        ui.Indent(12.f);
         {
             char clipName[256]{};
             strncpy_s(clipName, sizeof(clipName), layer.clip.c_str(), _TRUNCATE);
@@ -1155,6 +1167,7 @@ bool AnimationManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
             }
             if (ui.Button("Remove Layer")) removeIndex = index;
         }
+        ui.Unindent(12.f);
         ui.PopId();
     }
     if (removeIndex < layers.size())

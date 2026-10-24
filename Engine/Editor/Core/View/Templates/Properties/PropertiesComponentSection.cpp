@@ -17,7 +17,7 @@ size_t ComponentCategory(const std::string& type,
     const std::unordered_set<std::string>& scripts)
 {
     if (scripts.count(type)) return 6;
-    if (type == "Mesh" || type == "Material" ||
+    if (type == "Mesh" || type == "Terrain" || type == "TerrainManager" || type == "Material" ||
         type == "MaterialPropertyMorph" || type == "Camera" ||
         type == "Light" || type == "LightProbe" || type == "LightProbeGroup" ||
         type == "Sprite" || type == "ParticleEmitter" ||

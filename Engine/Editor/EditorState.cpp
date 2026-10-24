@@ -69,34 +69,47 @@ namespace Engine::Editor
 {
 void EditorState::OpenCodeEditor()
 {
+    if (m_projectSettings.codeEditor == "None")
+    {
+        m_showPreferences = true;
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Info,
+                "Select a code editor in Project Preferences > Editor.");
+        return;
+    }
     const std::filesystem::path workspace = m_projectFilePath.empty()
         ? std::filesystem::path(ENGINE_ROOT_PATH)
         : std::filesystem::path(m_projectFilePath).parent_path();
-    if (!OpenInCodeEditor(workspace, true))
+    if (!OpenInCodeEditor(workspace, m_projectSettings.codeEditor, true))
     {
         if (m_primaryConsole)
             m_primaryConsole->AddLog(ConsoleView::Level::Error,
-                "Could not open VS Code. Check that VS Code is installed.");
+                "Could not open the selected code editor. Check Project Preferences.");
         return;
     }
 
+    if (m_projectSettings.codeEditor != "VSCode")
+        return;
     std::filesystem::path file = LastCodeFile(workspace);
     if (file.empty())
         file = workspace / ".vscode" / "launch.json";
     std::error_code error;
     if (std::filesystem::is_regular_file(file, error))
-        OpenInCodeEditor(file);
+        OpenInCodeEditor(file, m_projectSettings.codeEditor);
     RequestCodeEditorAttach();
 }
 
 bool EditorState::RequestCodeEditorAttach(bool openWorkspace)
 {
+    if (m_projectSettings.codeEditor == "None")
+        return false;
     const std::filesystem::path workspace = m_projectFilePath.empty()
         ? std::filesystem::path(ENGINE_ROOT_PATH)
         : std::filesystem::path(m_projectFilePath).parent_path();
-    const bool requested = Engine::Editor::RequestCodeEditorAttach(workspace);
-    if (requested && openWorkspace)
-        OpenInCodeEditor(workspace, true);
+    const bool requested = m_projectSettings.codeEditor == "VSCode" &&
+        Engine::Editor::RequestCodeEditorAttach(workspace);
+    if (openWorkspace)
+        OpenInCodeEditor(workspace, m_projectSettings.codeEditor, true);
     return requested;
 }
 
@@ -3868,6 +3881,8 @@ void EditorState::InitializePanels()
         m_scene && m_scene->settings.portalDebugVisuals);
     m_preferences->OnSettingsChanged = [this]() {
         m_projectSettings = m_preferences->GetSettings();
+        if (m_primaryAssets)
+            m_primaryAssets->SetCodeEditor(m_projectSettings.codeEditor);
         if (m_scene)
         {
             m_scene->GetPhysics().ConfigureStepBudget(
@@ -3992,6 +4007,7 @@ void EditorState::InitializePanels()
         if (assets)
         {
             m_primaryAssets = static_cast<AssetsExplorerView*>(assets.get());
+            m_primaryAssets->SetCodeEditor(m_projectSettings.codeEditor);
             m_primaryAssets->OnCodeFileOpened = [this](const std::string& file) {
                 const std::filesystem::path workspace = m_projectFilePath.empty()
                     ? std::filesystem::path(ENGINE_ROOT_PATH)

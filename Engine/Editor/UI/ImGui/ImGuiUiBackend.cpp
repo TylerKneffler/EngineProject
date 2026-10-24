@@ -44,6 +44,22 @@ void ConfigureEditorFonts()
     if (!io.FontDefault)
         io.FontDefault = io.Fonts->AddFontDefault();
 
+    // Imported MMD bone names are UTF-8, but Segoe UI lacks Japanese glyphs.
+    // Merge a system Japanese font into the same atlas used by every editor panel.
+    for (const std::filesystem::path japaneseFont : {
+        std::filesystem::path("C:/Windows/Fonts/YuGothR.ttc"),
+        std::filesystem::path("C:/Windows/Fonts/msgothic.ttc") })
+    {
+        if (!std::filesystem::exists(japaneseFont)) continue;
+        ImFontConfig japaneseConfig{};
+        japaneseConfig.MergeMode = true;
+        japaneseConfig.OversampleH = 1;
+        japaneseConfig.OversampleV = 1;
+        if (io.Fonts->AddFontFromFileTTF(japaneseFont.string().c_str(),
+            16.f, &japaneseConfig, io.Fonts->GetGlyphRangesJapanese()))
+            break;
+    }
+
     const std::filesystem::path iconFont("C:/Windows/Fonts/segmdl2.ttf");
     if (std::filesystem::exists(iconFont))
     {

@@ -95,8 +95,8 @@ public:
 protected:
     void SetTypeName(const char* typeName) { m_typeName = typeName ? typeName : "Component"; }
 
-    // editorGroup places this field in a named collapsible section in the
-    // generic inspector. Leave it null/empty for the original flat layout.
+    // editorGroup places this field under a named label in the inspector.
+    // Leave it null/empty for the original flat layout.
     template<typename T>
     void RegisterField(const char* name, T& member,
         const char* editorGroup = nullptr, bool groupDefaultOpen = true)

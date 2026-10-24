@@ -3,6 +3,7 @@
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Materials/Material.h"
+#include "Core/Compoonents/Obj/Terrain.h"
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
 #include "Core/Compoonents/Obj/Sprite.h"
 #include "Core/Compoonents/Particles/ParticleEmitter.h"
@@ -3138,6 +3139,28 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             objectData.viewPositionAlphaCutoff = glm::vec4(
                 cameraPosition, 0.5f);
         }
+        if (mesh && !mesh->UsesTerrainVertexFormat())
+            if (auto* terrain = obj->GetComponent<Engine::Components::Terrain>())
+            {
+                const auto& materials = terrain->GetLayerMaterials();
+                bool textured = false;
+                preparedDraw.textures[0] = nullptr;
+                preparedDraw.textures[1] = nullptr;
+                preparedDraw.textures[2] = nullptr;
+                preparedDraw.textures[3] = nullptr;
+                preparedDraw.textures[4] = nullptr;
+                preparedDraw.textures[5] = nullptr;
+                for (size_t layer = 0; layer < std::min<size_t>(materials.size(), 6); ++layer)
+                {
+                    const auto* texture = materials[layer] && materials[layer]->baseColorTexture
+                        ? materials[layer]->baseColorTexture->GetGraphicsTexture() : nullptr;
+                    preparedDraw.textures[layer] = texture;
+                    textured |= texture != nullptr;
+                }
+                objectData.baseColor = { 1.f, 1.f, 1.f, 1.f };
+                objectData.materialParams.w = textured ? 2048.f : 0.f;
+                objectData.textureUvSets1.z = terrain->textureTiling;
+            }
         if (includeEditorVisuals && mesh == m_editorWeightPaintMesh &&
             m_editorWeightPaintBone >= 0)
         {

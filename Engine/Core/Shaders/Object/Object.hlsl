@@ -747,6 +747,20 @@ float4 PSMain(
         dot(float4(worldPos, 1.0), objectData.portalClipPlane) < 0.0)
         clip(-1.0);
     float4 base = objectData.baseColor * vertexColor;
+    // Authored terrain stores six painted weights in the spare UV channels.
+    // Vertex color carries the contribution of layers without a texture.
+    if (flags & 2048u)
+    {
+        float2 terrainUv = uv * max(1.0, objectData.textureUvSets1.z);
+        float4 weights0 = uvChannels2;
+        float2 weights1 = uvChannels3.xy;
+        if (weights0.x > 0.0) base.rgb += baseColorMap.Sample(materialSampler, terrainUv).rgb * weights0.x;
+        if (weights0.y > 0.0) base.rgb += metallicRoughnessMap.Sample(materialSampler, terrainUv).rgb * weights0.y;
+        if (weights0.z > 0.0) base.rgb += normalMap.Sample(materialSampler, terrainUv).rgb * weights0.z;
+        if (weights0.w > 0.0) base.rgb += occlusionMap.Sample(materialSampler, terrainUv).rgb * weights0.w;
+        if (weights1.x > 0.0) base.rgb += emissiveMap.Sample(materialSampler, terrainUv).rgb * weights1.x;
+        if (weights1.y > 0.0) base.rgb += heightMap.Sample(materialSampler, terrainUv).rgb * weights1.y;
+    }
     float metallic = saturate(objectData.materialParams.x);
     float roughness = clamp(objectData.materialParams.y, 0.045, 1.0);
     float occlusion = 1.0;

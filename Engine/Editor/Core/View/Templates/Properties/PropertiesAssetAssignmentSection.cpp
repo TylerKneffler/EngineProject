@@ -155,6 +155,7 @@ bool PropertiesView::AddComponentFromAsset(const std::string& path, std::string&
             { message = "[Properties] " + error; return false; }
             if (newManager)
                 m_selectedObject->Components.push_back(newManager.release());
+            manager->BeginEditorPreview();
             message = "[Properties] Added animation to AnimationManager from: " + path;
             return true;
         }
@@ -165,10 +166,21 @@ bool PropertiesView::AddComponentFromAsset(const std::string& path, std::string&
             if (!pack)
             { message = "[Properties] Failed to read animation pack: " + error; return false; }
             auto* manager = m_selectedObject->GetComponent<Engine::Components::AnimationManager>();
+            std::unique_ptr<Engine::Components::AnimationManager> newManager;
             if (!manager)
-                manager = m_selectedObject->AddComponent<Engine::Components::AnimationManager>();
+            {
+                newManager = std::make_unique<Engine::Components::AnimationManager>();
+                newManager->Owner = m_selectedObject;
+                manager = newManager.get();
+            }
             if (!pack->Apply(*manager, error))
             { message = "[Properties] Could not apply animation pack: " + error; return false; }
+            if (newManager)
+                m_selectedObject->Components.push_back(newManager.release());
+            if (manager->playing)
+                manager->BeginEditorPreview();
+            else
+                manager->Tick(0.f);
             message = "[Properties] Applied animation pack from: " + path;
             return true;
         }

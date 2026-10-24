@@ -7,6 +7,7 @@
 #include "Core/ProjectLoader.h"
 #include "Core/SceneManager.h"
 #include "Core/Compoonents/Particles/ParticleEmitter.h"
+#include "Core/Compoonents/Animation/AnimationManager.h"
 #include "Core/Timing/FramePacer.h"
 #include "Core/Renderers/IEditorRenderer.h"
 #include "Core/Renderers/RendererFactory.h"
@@ -387,18 +388,32 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         }
         else if (playState == Engine::Editor::PlayState::Stopped)
         {
-            // Only explicitly played emitters advance in Edit mode. Their
-            // transient state is not serialized or marked as a scene edit.
+            // Explicit previews advance in Edit mode without running scripts,
+            // physics, or every AnimationManager in the scene.
             bool previewAdvanced = false;
-            for (const auto& object : scene->GetObjects())
+            std::unordered_set<Engine::Scene::Scene*> previewScenes{scene};
+            for (const auto& panel : editorState->GetPanels())
+                if (auto* view = dynamic_cast<Engine::Editor::SceneView*>(panel.get());
+                    view && view->IsOpen() && view->GetScene())
+                    previewScenes.insert(view->GetScene());
+            for (Engine::Scene::Scene* previewScene : previewScenes)
             {
-                if (!object || !object->IsEnabledInHierarchy()) continue;
-                if (auto* emitter = object->GetComponent<Engine::Components::ParticleEmitter>();
-                    emitter && emitter->IsEditorPreviewRunning())
+                for (const auto& object : previewScene->GetObjects())
                 {
-                    emitter->Advance(std::max(dt, 0.f),
-                        object->transform.GetWorldMatrix());
-                    previewAdvanced = true;
+                    if (!object || !object->IsEnabledInHierarchy()) continue;
+                    if (auto* emitter = object->GetComponent<Engine::Components::ParticleEmitter>();
+                        emitter && emitter->IsEditorPreviewRunning())
+                    {
+                        emitter->Advance(std::max(dt, 0.f),
+                            object->transform.GetWorldMatrix());
+                        previewAdvanced = true;
+                    }
+                    if (auto* animation = object->GetComponent<Engine::Components::AnimationManager>();
+                        animation && animation->IsEditorPreviewRunning())
+                    {
+                        animation->Tick(std::max(dt, 0.f));
+                        previewAdvanced = true;
+                    }
                 }
             }
             if (previewAdvanced) renderer->MarkDirty();
