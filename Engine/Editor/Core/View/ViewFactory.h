@@ -83,6 +83,8 @@ public:
     std::function<void(const std::vector<Engine::Core::Object*>&)> OnSelectionSetChanged;
     std::function<void()>                  OnMainDocumentFocused;
     std::function<void(IEditorUi&)>        OnDrawAnimationTimeline;
+    std::function<void(const std::string&)> OnOpenAnimation;
+    std::function<void(Engine::Core::Object*, const std::string&)> OnEditObjectAnimation;
     std::function<void(Engine::Core::Object*)>           OnObjectSelected;    // SceneView click selection
     std::function<void(Engine::Core::Object*)>           OnObjectCreated;     // SceneView context creation
     std::function<void()>                  OnDeleteSelectionRequested;

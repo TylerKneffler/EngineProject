@@ -4092,11 +4092,10 @@ void EditorState::WireupCallbacks()
             m_primaryAssets->SetSelectedPath(assetPath);
         MarkHistorySelectionChanged();
     };
-    if (m_primaryProperties)
-        m_primaryProperties->OnOpenAnimation = [this](const std::string& path)
-        { QueueAnimationAssetOpen(path); };
-        m_primaryProperties->OnEditObjectAnimation = [this](Engine::Core::Object* object,
-            const std::string& clipName) { QueueAnimationObjectOpen(object, clipName); };
+    m_viewFactory->OnOpenAnimation = [this](const std::string& path)
+    { QueueAnimationAssetOpen(path); };
+    m_viewFactory->OnEditObjectAnimation = [this](Engine::Core::Object* object,
+        const std::string& clipName) { QueueAnimationObjectOpen(object, clipName); };
 
     m_viewFactory->OnAssetRenamed = [this](const std::string& oldPath,
         const std::string& newPath) {

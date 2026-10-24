@@ -45,6 +45,32 @@ int main()
         copiedManager->clips[0].channels[0].values[0] = 13.f;
         Check(manager->clips[0].channels[0].values[0] == 42.f, "Preview modified the live object before save");
         Check(Editor::AnimationEditorSource::Rigs(copied).size() == 1, "Object source lost its skeleton");
+        // A clip's saved skeleton defines the standalone preview even when
+        // legacy metadata points at a prefab and a different rig ordinal.
+        asset.previewPrefab = "Original.prefab";
+        asset.previewRig = 7;
+        asset.bindSkeleton.resize(2);
+        asset.bindSkeleton[0].path = "Hips";
+        asset.bindSkeleton[0].position = {0.f, 3.f, 0.f};
+        asset.bindSkeleton[1].path = "Hips/Hand";
+        asset.bindSkeleton[1].parent = "Hips";
+        asset.bindSkeleton[1].position = {2.f, 1.f, 0.f};
+        asset.baseSkeleton = asset.bindSkeleton;
+        asset.baseSkeleton[1].position = {9.f, 9.f, 9.f};
+        Scene::Scene standalone;
+        Check(Serialization::SceneSerializer::LoadFromString(standalone,
+            Editor::AnimationEditorSource::ClipPreview(asset)), "Clip with prefab metadata did not open");
+        auto* standaloneRoot = standalone.GetObjects().front().get();
+        auto* standaloneModel = standaloneRoot->GetComponent<Components::Model>();
+        Check(!standaloneRoot->Prefab, "Standalone clip retained a prefab binding");
+        Check(Editor::AnimationEditorSource::Rigs(standaloneRoot).size() == 1,
+            "Preview rig hint changed standalone rig identity");
+        Check(standaloneModel->ResolveNode(1)->Parent == standaloneModel->ResolveNode(0),
+            "Standalone preview lost saved skeleton hierarchy");
+        Check(standaloneModel->ResolveNode(1)->transform.position == asset.bindSkeleton[1].position,
+            "Standalone preview replaced bind transforms with the animated base pose");
+        Check(standaloneRoot->GetComponent<Components::AnimationManager>()->clips[0].channels[0].values ==
+            asset.clip.channels[0].values, "Standalone preview changed the original animation channels");
         asset.bindSkeleton.resize(2);
         asset.bindSkeleton[0].path = "A"; asset.bindSkeleton[0].parent = "B";
         asset.bindSkeleton[1].path = "B"; asset.bindSkeleton[1].parent = "A";

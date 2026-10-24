@@ -249,7 +249,7 @@ bool EditorState::HasToolbarSection(ToolbarSection section) const
 {
     if (m_gameViewFocused) return false;
     if (m_activeAnimationDocument)
-        return section == ToolbarSection::Mode;
+        return section == ToolbarSection::Mode || section == ToolbarSection::Tools;
     if (m_activeAssetDocument)
         return section == ToolbarSection::File ? m_toolbarVisibility.save :
             section == ToolbarSection::Edit ? m_toolbarVisibility.undoRedo :
@@ -292,7 +292,8 @@ bool EditorState::HasToolbarSection(ToolbarSection section) const
 float EditorState::GetToolbarSectionMinimumWidth(ToolbarSection section) const
 {
     if (m_activeAnimationDocument)
-        return section == ToolbarSection::Mode ? 150.f : 0.f;
+        return section == ToolbarSection::Mode ? 150.f :
+            section == ToolbarSection::Tools ? 175.f : 0.f;
     if (m_activeAssetDocument && section == ToolbarSection::Paint)
         return 190.f;
     float controlWidth = 0.f;
@@ -370,8 +371,9 @@ float EditorState::GetToolbarSectionMinimumWidth(ToolbarSection section) const
 float EditorState::GetToolbarSectionPreferredWidth(ToolbarSection section) const
 {
     float width = GetToolbarSectionMinimumWidth(section);
-    if (m_activeAnimationDocument && section == ToolbarSection::Mode)
-        return 280.f;
+    if (m_activeAnimationDocument)
+        return section == ToolbarSection::Mode ? 280.f :
+            section == ToolbarSection::Tools ? 650.f : 0.f;
     const float spacing = ImGui::GetStyle().ItemSpacing.x;
     if (section == ToolbarSection::File)
     {
@@ -670,6 +672,47 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
     {
         if (section == ToolbarSection::Mode)
             DrawAnimationRigToolbar(ui, *m_activeAnimationDocument);
+        if (section == ToolbarSection::Tools)
+        {
+            auto& document = *m_activeAnimationDocument;
+            ToolbarRow row{singleRow, overflow};
+            ImGui::PushID(&document);
+            ImGui::BeginDisabled(!document.sourceManager);
+            const char* keyLabel = document.selectedRows.empty()
+                ? "Key Selected Bone" : "Key Selected Rows";
+            if (row.Next(ToolbarButtonWidth(keyLabel)) && ui.Button(keyLabel))
+            {
+                document.playing = false;
+                AddAnimationRowKeys(document);
+            }
+            if (row.Next(ToolbarButtonWidth("Keys...")) && ui.Button("Keys..."))
+                ImGui::OpenPopup("##AnimationKeyTools");
+            if (row.Next(ToolbarButtonWidth("Animations...")) && ui.Button("Animations..."))
+                ImGui::OpenPopup("##AnimationLayerTools");
+            if (row.Next(ImGui::CalcTextSize("Auto Key").x + ImGui::GetFrameHeight() +
+                    ImGui::GetStyle().ItemInnerSpacing.x))
+                ui.Checkbox("Auto Key", &document.autoKey);
+            if (row.Next(180.f))
+            {
+                ImGui::SetNextItemWidth(140.f);
+                ImGui::SliderFloat("Zoom", &document.timelinePixelsPerSecond,
+                    35.f, 3200.f, "%.0f px/s", ImGuiSliderFlags_Logarithmic);
+            }
+            ImGui::EndDisabled();
+            ImGui::SetNextWindowSizeConstraints({340.f, 0.f}, {520.f, 650.f});
+            if (ImGui::BeginPopup("##AnimationKeyTools", ImGuiWindowFlags_NoSavedSettings))
+            {
+                DrawAnimationKeyTools(ui, document);
+                ImGui::EndPopup();
+            }
+            ImGui::SetNextWindowSizeConstraints({340.f, 0.f}, {520.f, 650.f});
+            if (ImGui::BeginPopup("##AnimationLayerTools", ImGuiWindowFlags_NoSavedSettings))
+            {
+                DrawAnimationLayerTools(ui, document);
+                ImGui::EndPopup();
+            }
+            ImGui::PopID();
+        }
         return;
     }
     if (m_gameViewFocused)

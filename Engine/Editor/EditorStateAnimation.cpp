@@ -599,32 +599,26 @@ void EditorState::QueueAnimationAssetOpen(const std::string& path)
             "Could not read animation asset: " + path);
         return;
     }
-    std::string prefab = asset->previewPrefab;
-    size_t rigIndex = asset->previewRig;
-    std::error_code pathError;
-    if (prefab.empty() || !std::filesystem::is_regular_file(
-            Engine::Components::Mesh::ResolveFilePath(prefab), pathError))
+    // An animation is its own document. Preview-prefab metadata is only a hint
+    // for mesh previews, never the identity or save destination of a clip.
+    const std::string sourceKey = "__AnimationAsset__" + AnimationIdentity(path);
+    constexpr size_t rigIndex = 0;
+    try
     {
-        prefab = "__AnimationAsset__" + std::to_string(
-            std::hash<std::string>{}(AnimationIdentity(path)));
-        rigIndex = 0;
-        try
-        {
-            const bool open = std::any_of(m_animationDocuments.begin(), m_animationDocuments.end(),
-                [&](const auto& document) { return document->identity == AnimationIdentity(prefab); });
-            if (!open && !m_pendingAnimationSources.count(prefab))
-                m_pendingAnimationSources[prefab] = {
-                    AnimationEditorSource::ClipPreview(*asset), "", nullptr, path };
-        }
-        catch (const std::exception& error)
-        {
-            if (m_primaryConsole) m_primaryConsole->AddLog(ConsoleView::Level::Error, error.what());
-            return;
-        }
+        const bool open = std::any_of(m_animationDocuments.begin(), m_animationDocuments.end(),
+            [&](const auto& document) { return document->identity == AnimationIdentity(sourceKey); });
+        if (!open && !m_pendingAnimationSources.count(sourceKey))
+            m_pendingAnimationSources[sourceKey] = {
+                AnimationEditorSource::ClipPreview(*asset), "", nullptr, path };
     }
-    m_pendingAnimationClipSelections[AnimationIdentity(prefab)] = asset->clip.clipName;
-    m_pendingAnimationClipAssets[AnimationIdentity(prefab)] = path;
-    QueueAnimationDocumentOpen(prefab, rigIndex);
+    catch (const std::exception& error)
+    {
+        if (m_primaryConsole) m_primaryConsole->AddLog(ConsoleView::Level::Error, error.what());
+        return;
+    }
+    m_pendingAnimationClipSelections[AnimationIdentity(sourceKey)] = asset->clip.clipName;
+    m_pendingAnimationClipAssets[AnimationIdentity(sourceKey)] = path;
+    QueueAnimationDocumentOpen(sourceKey, rigIndex);
 }
 
 void EditorState::SelectAnimationDocumentClip(AnimationDocument& document,
@@ -734,7 +728,7 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
         {
             if (m_primaryConsole) m_primaryConsole->AddLog(
                 ConsoleView::Level::Error,
-                "Animation Editor needs a prefab with a resolved skeleton and model.");
+                "Animation Editor needs a resolved skeleton and model.");
             continue;
         }
         document->rigName = sourceSkeleton->Owner->name;
@@ -826,6 +820,9 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
                     track.poses = rig->poses;
                     track.symmetryPairs = rig->symmetryPairs;
                 }
+            if (!document->standaloneAssetPath.empty())
+                if (const auto asset = Engine::Model::AnimationClipAsset::Load(document->standaloneAssetPath))
+                    track.humanoid = asset->humanoid;
             track.boundMeshes = BoundMeshNames(*document->sourceScene,
                 sourceRig);
             track.sourceSkeleton = sourceRig;
@@ -2456,6 +2453,11 @@ bool EditorState::SaveAnimationDocument(AnimationDocument& document)
             }
             auto asset = Engine::Model::AnimationClipAsset::Load(path).value_or(Engine::Model::AnimationClipAsset{});
             asset.clip = clip;
+            for (const auto& track : document.tracks)
+                if (track.index == document.rigIndex) asset.humanoid = track.humanoid;
+            if (asset.baseSkeleton.empty())
+                asset.baseSkeleton = Engine::Model::AnimationClipAsset::CaptureBaseSkeleton(
+                    *RigAt(*document.sourceScene, document.rigIndex)->ResolveModel());
             if (asset.bindSkeleton.empty())
                 asset.bindSkeleton = Engine::Model::AnimationClipAsset::CaptureBaseSkeleton(
                     *RigAt(*document.sourceScene, document.rigIndex)->ResolveModel());
@@ -4319,21 +4321,10 @@ void EditorState::UpdateAnimationPlayback(float deltaTime)
     }
 }
 
-void EditorState::DrawAnimationTimeline(IEditorUi& ui,
+void EditorState::DrawAnimationKeyTools(IEditorUi& ui,
     AnimationDocument& document)
 {
-    if (!document.sourceManager)
-    {
-        ui.DisabledLabel("Drop a prefab, scene object, or .anim onto the Animation Editor.");
-        return;
-    }
-    if (ui.Button(document.selectedRows.empty()
-            ? "Key Selected Bone" : "Key Selected Rows"))
-    {
-        document.playing = false;
-        AddAnimationRowKeys(document);
-    }
-    ui.SameLine();
+    if (!document.sourceManager) return;
     if (!document.selectedRows.empty() && ui.Button("Select Row Keys"))
     {
         document.selectedKeys.clear();
@@ -4351,13 +4342,11 @@ void EditorState::DrawAnimationTimeline(IEditorUi& ui,
                     row.clipIndex, row.nodeIndex, time});
         }
     }
-    if (!document.selectedRows.empty()) ui.SameLine();
     ImGui::BeginDisabled(document.selectedKeys.empty());
     if (ui.Button("Copy Keys")) CopyAnimationKeys(document);
     ImGui::EndDisabled();
     if (!document.copiedKeys.empty())
     {
-        ui.SameLine();
         const auto targetTrack = std::find_if(document.tracks.begin(),
             document.tracks.end(), [&](const auto& item)
             { return item.index == document.copiedKeysRig; });
@@ -4385,17 +4374,15 @@ void EditorState::DrawAnimationTimeline(IEditorUi& ui,
                 }
                 ImGui::EndCombo();
             }
-            ui.SameLine();
             if (ui.Button("Paste Keys")) PasteAnimationKeys(document);
         }
     }
-    ui.SameLine();
-    ui.Checkbox("Auto Key", &document.autoKey);
-    ui.SameLine();
-    ImGui::Text("%.3f s", document.playheadSeconds);
-    ImGui::SetNextItemWidth(150.f);
-    ImGui::SliderFloat("Zoom", &document.timelinePixelsPerSecond,
-        35.f, 3200.f, "%.0f px/s", ImGuiSliderFlags_Logarithmic);
+}
+
+void EditorState::DrawAnimationLayerTools(IEditorUi&,
+    AnimationDocument& document)
+{
+    if (!document.sourceManager) return;
     for (auto& track : document.tracks)
     {
         if (!track.selected || !track.sourceManager) continue;
@@ -4439,7 +4426,6 @@ void EditorState::DrawAnimationTimeline(IEditorUi& ui,
             }
             ImGui::EndCombo();
         }
-        ImGui::SameLine();
         ImGui::SetNextWindowSizeConstraints({ 220.f, 0.f },
             { 420.f, FLT_MAX });
         if (ImGui::BeginCombo("Add stacked animation", "+ Add"))
@@ -4470,7 +4456,6 @@ void EditorState::DrawAnimationTimeline(IEditorUi& ui,
                 continue;
             ImGui::PushID(static_cast<int>(layer));
             ImGui::Text("Stacked: %s", available[index].clipName.c_str());
-            ImGui::SameLine();
             if (ImGui::SmallButton("Remove"))
             {
                 track.stackedClips.erase(track.stackedClips.begin() + layer);
@@ -4487,6 +4472,18 @@ void EditorState::DrawAnimationTimeline(IEditorUi& ui,
         }
         ImGui::PopID();
     }
+}
+
+void EditorState::DrawAnimationTimeline(IEditorUi& ui,
+    AnimationDocument& document)
+{
+    if (!document.sourceManager)
+    {
+        ui.DisabledLabel("Drop a prefab, scene object, or .anim onto the Animation Editor.");
+        return;
+    }
+    ImGui::Text("%.3f s", document.playheadSeconds);
+    ImGui::SameLine();
     ImGui::TextDisabled("Rows: click / Ctrl toggle / Shift range | Keys: Ctrl click / right-drag select");
     const bool hasVisibleAnimation = std::any_of(document.tracks.begin(),
         document.tracks.end(), [](const auto& track)

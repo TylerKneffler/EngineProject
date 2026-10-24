@@ -729,6 +729,8 @@ private:
     void HandleAnimationEditorDrop(IEditorUi& ui);
     void DrawAnimationTimeline(IEditorUi& ui, AnimationDocument& document);
     void DrawAnimationTimelinePanel(IEditorUi& ui);
+    void DrawAnimationKeyTools(IEditorUi& ui, AnimationDocument& document);
+    void DrawAnimationLayerTools(IEditorUi& ui, AnimationDocument& document);
     void DrawAnimationRigToolbar(IEditorUi& ui,
         AnimationDocument& document);
     void DrawAnimationProperties(IEditorUi& ui,

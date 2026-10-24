@@ -195,6 +195,8 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
         view->Init(m_scene);
         view->OnFocused = OnMainDocumentFocused;
         view->OnComponentsChanged = OnPropertiesChanged;
+        view->OnOpenAnimation = OnOpenAnimation;
+        view->OnEditObjectAnimation = OnEditObjectAnimation;
         view->OnAssetDropLog = OnPropertiesAssetDropLog;
         view->OnAssetRenamed = OnAssetRenamed;
         view->OnAssetContentsChanged = OnAssetContentsChanged;
