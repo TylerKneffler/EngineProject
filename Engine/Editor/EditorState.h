@@ -566,6 +566,9 @@ private:
             std::string path;
             std::vector<std::string> boundMeshes;
             Engine::Model::RigAsset::ControlMap controls;
+            Engine::Model::HumanoidRig::Mapping humanoid;
+            std::array<float, Engine::Model::HumanoidRig::Count> humanoidConfidence{};
+            char humanoidSearch[128]{};
             std::vector<Engine::Model::RigAsset::Pose> poses;
             std::vector<Engine::Model::RigAsset::SymmetryPair> symmetryPairs;
             bool controlsDirty = false;

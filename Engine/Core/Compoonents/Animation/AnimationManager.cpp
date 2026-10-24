@@ -28,20 +28,7 @@ namespace
 {
 Engine::Model::RigAsset ReferencedTargetRig(Model& model)
 {
-    Engine::Model::RigAsset result;
-    if (model.Owner && model.Owner->GetScene())
-        if (auto* skeleton = model.Owner->GetComponent<Skeleton>())
-        {
-            result = Engine::Model::RigAsset::Capture(*model.Owner->GetScene(), *skeleton);
-            // Playback changes live transforms. Compare reusable clips against
-            // the stored bind pose when the skeleton has an asset reference.
-            if (auto stored = Engine::Model::RigAsset::Load(skeleton->rigPath, skeleton->skinIndex);
-                stored && !stored->bindNodes.empty())
-                result.bindNodes = std::move(stored->bindNodes);
-        }
-    if (result.bindNodes.empty())
-        result.bindNodes = Engine::Model::AnimationClipAsset::CaptureBaseSkeleton(model);
-    return result;
+    return Engine::Model::RigAsset::ForModel(model);
 }
 
 bool SameBindHierarchy(const Engine::Model::AnimationClipAsset& asset,
@@ -377,6 +364,7 @@ std::vector<Engine::Model::RigAsset> AnimationManager::LoadRigAssets() const
 void AnimationManager::InstallEmbeddedClips(
     std::vector<Engine::Model::AnimationClip> imported)
 {
+    EndEditorPreview();
     rigPaths.clear();
     animationPaths.clear();
     m_externalClipNames.clear();
@@ -433,6 +421,9 @@ bool AnimationManager::AddAnimationAsset(const std::string& path, std::string& e
     const auto target = ReferencedTargetRig(*model);
     const auto mapped = Engine::Model::AnimationRigMapping::Map(*asset, *model, target,
         SameBindHierarchy(*asset, target));
+    if (!mapped.clip.channels.empty() && mapped.unmatchedChannels == mapped.clip.channels.size() &&
+        mapped.clip.componentMorphs.empty() && mapped.clip.visibility.empty())
+    { error = "No animation bones match this avatar. Assign its Humanoid animation mapping or repair the unresolved channels."; return false; }
     if (mapped.clip.channels.empty() && mapped.clip.visibility.empty() &&
         mapped.clip.ikSwitches.empty() && mapped.clip.componentMorphs.empty() &&
         mapped.clip.limbs.empty() && mapped.clip.controllers.empty())
@@ -994,6 +985,7 @@ AnimationManager::JsonValue AnimationManager::Serialize() const
 
 void AnimationManager::Deserialize(const JsonValue& value)
 {
+    EndEditorPreview();
     Component::Deserialize(value);
     clip = value["clip"].AsString();
     clips.clear();
@@ -1034,10 +1026,20 @@ void AnimationManager::Deserialize(const JsonValue& value)
 
 bool AnimationManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
 {
-    const bool wasPlaying = playing;
-    bool changed = Component::DrawProperties(ui);
-    if (!wasPlaying && playing)
-        BeginEditorPreview();
+    // The generic inspector calls virtual Serialize(), which builds a JSON
+    // tree for every embedded key. Keep routine UI work independent of keys.
+    bool changed = DrawReferenceProperty(ui, "modelReference", "Model Reference", modelReference);
+    changed = ui.Checkbox("Playing", &playing) || changed;
+    changed = ui.Checkbox("Hold Current Pose When Stopped", &holdCurrentPoseWhenStopped) || changed;
+    changed = ui.Checkbox("Looping", &looping) || changed;
+    changed = ui.DragFloat("Speed", &speed, .05f) || changed;
+    changed = ui.DragFloat("Time", &time, .01f, 0.f) || changed;
+    if (changed) MarkConfigurationDirty();
+    if (IsEditorPreviewRunning())
+    {
+        if (ui.Button("Stop Editor Preview")) EndEditorPreview();
+    }
+    else if (ui.Button("Play Editor Preview")) BeginEditorPreview();
     const auto available = GetAvailableClips();
     if (!available.empty())
     {
@@ -1054,7 +1056,6 @@ bool AnimationManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
             static_cast<int>(names.size())))
         {
             Play(available[static_cast<size_t>(selected)]->clipName, 0.f);
-            BeginEditorPreview();
             changed = true;
         }
     }

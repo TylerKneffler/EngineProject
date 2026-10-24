@@ -459,7 +459,7 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     m_boneDataBuffer = bufferFactory->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
         Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
-        static_cast<uint64_t>(m_skinnedObjectCapacity) * kMaxBonesPerObject *
+        static_cast<uint64_t>(m_boneMatrixCapacity) *
             sizeof(glm::mat4),
         nullptr, sizeof(glm::mat4));
     m_boneDataMapped = m_boneDataBuffer ? m_boneDataBuffer->Map() : nullptr;
@@ -610,31 +610,31 @@ void Scene::EnsureObjectRenderCapacity(uint32_t requiredObjects)
     m_objectCapacity = capacity;
 }
 
-void Scene::EnsureSkinPaletteCapacity(uint32_t requiredObjects)
+void Scene::EnsureSkinPaletteCapacity(uint32_t requiredMatrices)
 {
-    if (requiredObjects <= m_skinnedObjectCapacity)
+    if (requiredMatrices <= m_boneMatrixCapacity)
         return;
     if (!m_graphicsProvider || !m_graphicsProvider->GetBufferFactory())
         throw std::runtime_error("Cannot grow bone palette buffer before graphics initialization");
 
     const uint32_t capacity = ExpandedCapacity(
-        m_skinnedObjectCapacity, requiredObjects);
+        m_boneMatrixCapacity, requiredMatrices);
     auto buffer = m_graphicsProvider->GetBufferFactory()->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
         Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
-        static_cast<uint64_t>(capacity) * kMaxBonesPerObject *
+        static_cast<uint64_t>(capacity) *
             sizeof(glm::mat4), nullptr, sizeof(glm::mat4));
     void* mapped = buffer ? buffer->Map() : nullptr;
     if (!mapped)
         throw std::runtime_error("Failed to grow bone palette buffer to " +
-            std::to_string(capacity) + " skinned objects");
+            std::to_string(capacity) + " joint matrices");
     if (m_boneDataBuffer && m_boneDataMapped)
         m_boneDataBuffer->Unmap();
     if (m_boneDataBuffer)
         m_retiredRenderBuffers.push_back(std::move(m_boneDataBuffer));
     m_boneDataBuffer = std::move(buffer);
     m_boneDataMapped = mapped;
-    m_skinnedObjectCapacity = capacity;
+    m_boneMatrixCapacity = capacity;
 }
 
 void Scene::SetEditorMode2D(bool enabled)
@@ -1651,7 +1651,7 @@ void Scene::PrepareRenderFrame()
     m_frameComponentLookupScratch.reserve(m_objects.size());
     m_frameSpatialManipulatorScratch.clear();
     m_frameSpatialManipulatorScratch.reserve(m_objects.size());
-    size_t skinnedObjectCount = 0;
+    size_t requiredBoneMatrices = 0;
     for (const auto& object : m_objects)
     {
         FrameComponentLookup lookup{};
@@ -1674,13 +1674,14 @@ void Scene::PrepareRenderFrame()
                 m_frameSpatialManipulatorScratch.push_back(
                     lookup.spatialManipulator);
             if (lookup.skinnedMesh)
-                ++skinnedObjectCount;
+                if (const auto* skeleton = lookup.skinnedMesh->ResolveSkeleton())
+                    requiredBoneMatrices += skeleton->jointNodes.size();
         }
         m_frameComponentLookupScratch.push_back(lookup);
     }
-    if (skinnedObjectCount > std::numeric_limits<uint32_t>::max())
-        throw std::runtime_error("Skinned object count exceeds renderer index range");
-    EnsureSkinPaletteCapacity(static_cast<uint32_t>(skinnedObjectCount));
+    if (requiredBoneMatrices > std::numeric_limits<uint32_t>::max())
+        throw std::runtime_error("Bone matrix count exceeds renderer index range");
+    EnsureSkinPaletteCapacity(static_cast<uint32_t>(requiredBoneMatrices));
 
     // Nonlinear mesh results depend on authored geometry and active warp
     // volumes, not on camera motion. A compact signature lets both editor and
@@ -1745,6 +1746,7 @@ void Scene::PrepareRenderFrame()
         }
     }
     uint32_t skinPaletteSlot = 0;
+    uint32_t boneMatrixOffset = 0;
     const auto afterLookup = m_updateProfilingEnabled
         ? PrepareClock::now() : PrepareClock::time_point{};
     std::unordered_map<const Engine::Components::Skeleton*,
@@ -1965,7 +1967,7 @@ void Scene::PrepareRenderFrame()
         }
         item.blended = item.belongsToPreview || item.blended;
 
-        if (skinPaletteSlot < m_skinnedObjectCapacity)
+        // Pack complete palettes by their actual size, including large rigs.
         {
             if (mesh && !mesh->IsPortalPoseSnapshot())
             if (Engine::Components::SkinnedMesh* skinned = lookup.skinnedMesh)
@@ -1995,15 +1997,17 @@ void Scene::PrepareRenderFrame()
                         skinned->BuildPalette();
                 if (!palette.empty())
                 {
-                    const size_t count =
-                        std::min<size_t>(palette.size(), kMaxBonesPerObject);
-                    item.skinPaletteOffset = skinPaletteSlot * kMaxBonesPerObject;
+                    const size_t count = palette.size();
+                    if (count > m_boneMatrixCapacity - boneMatrixOffset)
+                        throw std::runtime_error("Bone palette capacity changed during frame preparation");
+                    item.skinPaletteOffset = boneMatrixOffset;
                     item.skinJointCount = static_cast<uint32_t>(count);
                     std::memcpy(
                         static_cast<glm::mat4*>(m_boneDataMapped) +
                             item.skinPaletteOffset,
                         palette.data(), count * sizeof(glm::mat4));
                     ++skinPaletteSlot;
+                    boneMatrixOffset += static_cast<uint32_t>(count);
                     boneDataChanged = true;
                 }
             }
@@ -3038,6 +3042,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             alphaMode = mat->GetAlphaMode();
             doubleSided = mat->doubleSided;
             uint32_t textureFlags = 0;
+            if (!mat->useVertexColors) textureFlags |= 4096u;
             auto prepareTexture = [&](uint32_t textureSlot,
                                       const std::shared_ptr<Engine::Components::Texture>& texture,
                                       uint32_t flag)

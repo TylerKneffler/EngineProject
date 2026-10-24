@@ -26,6 +26,8 @@ public:
     // Phong shading properties — must match the CBData layout expected by the HLSL.
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Color")
     glm::vec3 diffuseColor  { 1.f, 0.5f, 0.1f }; // base/albedo colour
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Color")
+    bool useVertexColors = true;
     
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Color")
     glm::vec3 ambientColor  { 0.1f, 0.1f, 0.1f };

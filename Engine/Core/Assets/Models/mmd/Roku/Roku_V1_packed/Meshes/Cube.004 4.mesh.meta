@@ -1,0 +1,11 @@
+{
+    "version": 1,
+    "id": "3a19ad51-bd5b-42f3-b34e-4f930d1df8ed",
+    "sourcePath": "C:/repos/EngineProject/Engine/Core/Assets/Models/mmd/Roku/Roku_V1_packed.fbx",
+    "importSettings": {
+        "importer": "model-mesh",
+        "primitiveIndex": 3,
+        "sourceFormat": "fbx"
+    }
+}
+

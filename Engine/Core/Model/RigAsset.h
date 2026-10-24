@@ -10,6 +10,7 @@
 
 namespace Engine::Scene { class Scene; }
 namespace Engine::Components { class Skeleton; }
+namespace Engine::Components { class Model; }
 namespace Engine::Serialization { class JsonValue; }
 namespace Engine::Core { class Object; }
 
@@ -63,11 +64,15 @@ struct RigAsset
     std::vector<std::string> meshNames;
     std::vector<std::string> animationPaths;
     ControlMap controls;
+    HumanoidRig::Mapping humanoid;
     std::vector<Pose> poses;
     std::vector<SymmetryPair> symmetryPairs;
 
     static RigAsset Capture(const Engine::Scene::Scene& scene,
         const Engine::Components::Skeleton& skeleton);
+    // Prefer the explicitly mapped humanoid, then the largest armature, when
+    // one imported model contains body, hair, and accessory skeletons.
+    static RigAsset ForModel(Engine::Components::Model& model);
     bool Save(const std::string& path) const;
     static bool SaveBundle(const std::string& path,
         const std::vector<RigAsset>& skins);

@@ -2,6 +2,7 @@
 #include "Engine/Editor/Core/View/Templates/Common/AssetPathTemplate.h"
 #include "Engine/Editor/Core/View/Templates/Properties/PropertiesViewTemplateHelpers.h"
 #include "Engine/Editor/UI/IEditorUi.h"
+#include "Engine/Editor/Core/Importers/MmdDanceAssetBinder.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Obj/Sprite.h"
@@ -93,6 +94,8 @@ std::string PropertiesView::HandleWindowAssetDrop(IEditorUi& ui)
         return "Sprite Animation Preview";
     if (extension == ".animpack")
         return "Animation Pack for AnimationManager";
+    if (extension == ".vmd")
+        return "Bind VMD motion to character";
     if (extension == ".anim" || extension == ".animation")
         return "Animation for AnimationManager";
     if (extension == ".skeleton")
@@ -155,32 +158,43 @@ bool PropertiesView::AddComponentFromAsset(const std::string& path, std::string&
             { message = "[Properties] " + error; return false; }
             if (newManager)
                 m_selectedObject->Components.push_back(newManager.release());
-            manager->BeginEditorPreview();
+            manager->EndEditorPreview();
             message = "[Properties] Added animation to AnimationManager from: " + path;
             return true;
         }
-        if (extension == ".animpack")
+        if (extension == ".animpack" || extension == ".vmd")
         {
             std::string error;
-            const auto pack = Engine::Model::AnimationPackAsset::Load(path, error);
-            if (!pack)
+            std::optional<Engine::Model::AnimationPackAsset> pack;
+            if (extension == ".animpack") pack = Engine::Model::AnimationPackAsset::Load(path, error);
+            if (extension == ".animpack" && !pack)
             { message = "[Properties] Failed to read animation pack: " + error; return false; }
-            auto* manager = m_selectedObject->GetComponent<Engine::Components::AnimationManager>();
+            auto* model = m_selectedObject->GetComponentInParent<Engine::Components::Model>();
+            if (!model)
+            { message = "[Properties] Select a character Model or one of its bones before applying motion."; return false; }
+            if (extension == ".vmd" || pack->clips.empty())
+            {
+                auto* root = model->Owner->GetPrefabInstanceRoot();
+                if (!root || !root->Prefab)
+                { message = "[Properties] VMD binding needs an imported character prefab with source model metadata."; return false; }
+                Engine::Model::AnimationPackAsset bound;
+                if (!MmdDanceAssetBinder::BuildForPrefab(root->Prefab->GetPath(), path, bound, error))
+                { message = "[Properties] Could not bind VMD motion: " + error; return false; }
+                pack = std::move(bound);
+            }
+            auto* manager = model->Owner->GetComponent<Engine::Components::AnimationManager>();
             std::unique_ptr<Engine::Components::AnimationManager> newManager;
             if (!manager)
             {
                 newManager = std::make_unique<Engine::Components::AnimationManager>();
-                newManager->Owner = m_selectedObject;
+                newManager->Owner = model->Owner;
                 manager = newManager.get();
             }
             if (!pack->Apply(*manager, error))
             { message = "[Properties] Could not apply animation pack: " + error; return false; }
             if (newManager)
-                m_selectedObject->Components.push_back(newManager.release());
-            if (manager->playing)
-                manager->BeginEditorPreview();
-            else
-                manager->Tick(0.f);
+                model->Owner->Components.push_back(newManager.release());
+            manager->EndEditorPreview();
             message = "[Properties] Applied animation pack from: " + path;
             return true;
         }

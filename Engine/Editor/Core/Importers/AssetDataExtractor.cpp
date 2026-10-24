@@ -90,6 +90,9 @@ Engine::Model::ModelImportResult AssetDataExtractor::Extract(
             {
                 Engine::Model::AnimationClipAsset asset;
                 asset.clip = pack->clips[i];
+                asset.bindSkeleton = pack->bindSkeleton;
+                asset.baseSkeleton = pack->bindSkeleton;
+                asset.humanoid = pack->humanoid;
                 writeClip(asset, i);
             }
             for (size_t i = 0; i < pack->sourceTracks.size(); ++i)

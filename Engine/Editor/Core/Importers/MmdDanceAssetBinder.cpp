@@ -1,9 +1,11 @@
 #include "MmdDanceAssetBinder.h"
 #include "FbxModelDecoder.h"
+#include "PmxModelDecoder.h"
 #include "VmdMotionDecoder.h"
 #include "Core/AssetRecord.h"
 #include "Core/Compoonents/Animation/ModelAnimation.h"
 #include "Core/Compoonents/Animation/Model.h"
+#include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/RigConstraints.h"
 #include "Core/Compoonents/Animation/RigMorphControls.h"
 #include "Core/Compoonents/Obj/Mesh.h"
@@ -11,6 +13,7 @@
 #include "Core/Model/AnimationClipAsset.h"
 #include "Core/Model/AnimationPackAsset.h"
 #include "Core/Model/RigAsset.h"
+#include "Core/Model/AnimationRigMapping.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/Json.h"
@@ -20,6 +23,9 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <limits>
+#include <stdexcept>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <glm/gtc/quaternion.hpp>
@@ -92,11 +98,49 @@ float BoneBezier(float fraction, const std::array<uint8_t, 64>& bytes,
     return cubic((low + high) * 0.5f, y1, y2);
 }
 
-bool BindPmxDirect(const std::string& prefabPath, const std::string& vmdPath,
-    std::string& error, const std::string& sourcePackPath)
+// Source palette order survives display-name edits and older imports that used
+// English PMX names. Validate the entire hierarchy and rest pose before using
+// it to recover the original local names used by VMD keys.
+bool AddPmxSourceNames(const std::string& sourcePath,
+    Engine::Components::Model& targetModel, Engine::Core::Object& root,
+    std::unordered_map<std::string, unsigned>& names, std::string& error)
+{
+    Engine::Model::ImportedModel source;
+    PmxImportOptions options;
+    options.morphs = options.rigConstraints = options.followBoneColliders = false;
+    if (!PmxModelDecoder::Decode(sourcePath, source, error, nullptr, options)) return false;
+    auto* skeleton = root.GetComponent<Engine::Components::Skeleton>();
+    if (!skeleton || source.skins.size() != 1 ||
+        skeleton->jointNodes.size() != source.skins.front().jointNodes.size())
+    { error = "PMX source palette does not match the selected prefab"; return false; }
+    const auto& sourcePalette = source.skins.front().jointNodes;
+    std::unordered_map<unsigned, size_t> paletteBySourceNode;
+    for (size_t i = 0; i < sourcePalette.size(); ++i) paletteBySourceNode[sourcePalette[i]] = i;
+    for (size_t i = 0; i < sourcePalette.size(); ++i)
+    {
+        const auto& original = source.nodes[sourcePalette[i]];
+        const auto* target = targetModel.ResolveNode(skeleton->jointNodes[i]);
+        if (!target || glm::length(target->transform.position - original.translation) > .001f)
+        { error = "PMX source rest pose does not match the selected prefab"; return false; }
+        const auto parent = original.parent < 0 ? paletteBySourceNode.end() :
+            paletteBySourceNode.find(static_cast<unsigned>(original.parent));
+        const auto* targetParent = parent == paletteBySourceNode.end() ? &root :
+            targetModel.ResolveNode(skeleton->jointNodes[parent->second]);
+        if (target->Parent != targetParent)
+        { error = "PMX source hierarchy does not match the selected prefab"; return false; }
+    }
+    for (size_t i = 0; i < sourcePalette.size(); ++i)
+        names[source.nodes[sourcePalette[i]].name] = skeleton->jointNodes[i];
+    return true;
+}
+
+bool BindPmxDirect(const std::string& prefabPath, const std::string& sourcePath, const std::string& vmdPath,
+    std::string& error, const std::string& sourcePackPath,
+    Engine::Model::AnimationPackAsset* outputPack = nullptr, const VmdMotion* suppliedMotion = nullptr)
 {
     VmdMotion motion;
-    if (!VmdMotionDecoder::DecodeFile(vmdPath, motion, error)) return false;
+    if (suppliedMotion) motion = *suppliedMotion;
+    else if (!VmdMotionDecoder::DecodeFile(vmdPath, motion, error)) return false;
     Engine::Scene::Scene scene;
     auto* root = Engine::Serialization::SceneSerializer::InstantiatePrefab(
         scene, prefabPath);
@@ -116,6 +160,33 @@ bool BindPmxDirect(const std::string& prefabPath, const std::string& vmdPath,
     const auto& nodes = model->ResolveNodes();
     for (unsigned i = 0; i < nodes.size(); ++i)
         if (nodes[i]) boneByName.emplace(nodes[i]->name, i);
+    Engine::Model::HumanoidRig::Mapping humanoid;
+    if (const auto* skeleton = root->GetComponent<Engine::Components::Skeleton>())
+        if (auto rig = Engine::Model::RigAsset::Load(skeleton->rigPath, skeleton->skinIndex))
+            humanoid = rig->humanoid;
+    if (std::any_of(motion.bones.begin(), motion.bones.end(),
+        [&](const auto& frame) { return !boneByName.count(frame.name); }))
+    {
+        // The source is needed only for compatibility aliases; a source that
+        // cannot be verified must not silently redirect unrelated bone tracks.
+        std::string aliasError;
+        if (!sourcePath.empty() && fs::is_regular_file(sourcePath) &&
+            !AddPmxSourceNames(sourcePath, *model, *root, boneByName, aliasError))
+        {
+            if (!humanoid.HasAssignments()) { error = aliasError; return false; }
+        }
+    }
+    // Standard MMD body labels have deterministic semantic meanings. A saved
+    // humanoid profile can bind them even when display/source names differ.
+    for (const auto& frame : motion.bones)
+        if (!boneByName.count(frame.name))
+        {
+            const auto role = Engine::Model::AnimationRigMapping::MmdRole(frame.name);
+            for (size_t i=0;i<Engine::Model::HumanoidRig::Count;++i)
+                if (!role.empty() && role == Engine::Model::HumanoidRig::Keys[i])
+                    if (const int node=humanoid.bones[i]; node>=0 && model->ResolveNode(unsigned(node)))
+                        boneByName.emplace(frame.name,unsigned(node));
+        }
     std::unordered_map<std::string, std::vector<const VmdBoneFrame*>> boneFrames;
     for (const auto& frame : motion.bones)
         if (boneByName.count(frame.name))
@@ -184,16 +255,17 @@ bool BindPmxDirect(const std::string& prefabPath, const std::string& vmdPath,
     }
     for (const auto& key : motion.properties)
         body.visibility.push_back({ key.timeSeconds, key.visible });
-    std::unordered_set<std::string> ikNames;
+    std::unordered_set<unsigned> ikNodes;
     if (const auto* rig = root->GetComponent<Engine::Components::RigConstraints>())
         for (const auto& chain : rig->ikChains)
             if (const auto* controller = model->ResolveNode(chain.controllerNodeIndex))
-                ikNames.insert(controller->name);
+                ikNodes.insert(chain.controllerNodeIndex);
     size_t unmatchedIkSwitches = 0;
     for (const auto& key : motion.properties)
         for (const auto& ik : key.ik)
-            if (ikNames.count(ik.name))
-                body.ikSwitches.push_back({ key.timeSeconds, ik.name, ik.enabled });
+            if (const auto found = boneByName.find(ik.name);
+                found != boneByName.end() && ikNodes.count(found->second))
+                body.ikSwitches.push_back({ key.timeSeconds, nodes[found->second]->name, ik.enabled });
             else ++unmatchedIkSwitches;
 
     std::unordered_map<std::string, std::vector<const VmdMorphFrame*>> morphFrames;
@@ -283,6 +355,8 @@ bool BindPmxDirect(const std::string& prefabPath, const std::string& vmdPath,
         facial.clip.channels.empty() && facial.clip.componentMorphs.empty())
     { error = "VMD has no bone, IK, visibility, or morph keys matching the PMX prefab"; return false; }
     std::vector<std::string> limitations;
+    if (!motion.bones.empty() && boneFrames.empty())
+        limitations.push_back("No VMD body bone names matched the selected PMX skeleton; only non-bone tracks were bound");
     if (!boneFrames.empty())
         limitations.push_back("VMD Bezier bone curves are sampled at up to 120 Hz "
             "and interpolated linearly between samples");
@@ -292,9 +366,148 @@ bool BindPmxDirect(const std::string& prefabPath, const std::string& vmdPath,
     if (!facial.unmatchedExpressions.empty())
         limitations.push_back(std::to_string(facial.unmatchedExpressions.size()) +
             " VMD morph names have no imported mesh, bone, or material target");
+    if (outputPack)
+    {
+        if (!motion.bones.empty() && body.channels.empty())
+        { error = "No VMD body bones match this PMX character; check the source model or humanoid assignments."; return false; }
+        Engine::Model::AnimationPackAsset result;
+        const bool hasBody = !body.channels.empty() || !body.visibility.empty() || !body.ikSwitches.empty();
+        const bool hasFace = !facial.clip.channels.empty() || !facial.clip.componentMorphs.empty();
+        result.activeClip = hasBody ? body.clipName : facial.clip.clipName;
+        result.bindSkeleton = Engine::Model::AnimationClipAsset::CaptureBaseSkeleton(*model);
+        result.humanoid = humanoid;
+        result.sourcePrefab = prefabPath;
+        if (hasBody) result.clips.push_back(std::move(body));
+        if (hasFace)
+        {
+            if (hasBody)
+            {
+                Engine::Model::AnimationLayer layer;
+                layer.clip = facial.clip.clipName;
+                result.layers.push_back(std::move(layer));
+            }
+            result.clips.push_back(std::move(facial.clip));
+        }
+        *outputPack = std::move(result);
+        return true;
+    }
     return MmdDanceAssetBinder::BindBaked(prefabPath, vmdPath, {}, {},
         body, facial, error, sourcePackPath, limitations);
 }
+}
+
+bool MmdDanceAssetBinder::BuildForPrefab(const std::string& prefabPath,
+    const std::string& motionPath, Engine::Model::AnimationPackAsset& pack,
+    std::string& error)
+{
+    try
+    {
+        const auto record = Engine::Core::AssetRecord::Load(prefabPath);
+        if (!record || record->sourcePath.empty())
+        { error = "Character prefab has no source model metadata."; return false; }
+        fs::path source(record->sourcePath);
+        std::string extension = source.extension().string();
+        std::transform(extension.begin(), extension.end(), extension.begin(),
+            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (extension != ".pmx")
+        { error = "Direct VMD drops currently require a PMX character. Use the MMD retarget import for an FBX character."; return false; }
+        if (!fs::is_regular_file(source))
+            for (auto directory = fs::absolute(prefabPath).parent_path(); !directory.empty();)
+            {
+                const auto candidate = directory / source.filename();
+                if (fs::is_regular_file(candidate)) { source = candidate; break; }
+                const auto parent = directory.parent_path();
+                if (parent == directory) break;
+                directory = parent;
+            }
+        extension = fs::path(motionPath).extension().string();
+        std::transform(extension.begin(), extension.end(), extension.begin(),
+            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (extension == ".vmd")
+            return BindPmxDirect(prefabPath, source.string(), motionPath, error, {}, &pack);
+        std::optional<Engine::Model::AnimationPackAsset> input;
+        if (extension == ".animpack") input = Engine::Model::AnimationPackAsset::Load(motionPath, error);
+        if (!input) { if (error.empty()) error = "Expected a VMD or VMD source animation pack."; return false; }
+        VmdMotion motion;
+        using Engine::Serialization::JsonValue;
+        const auto frameNumber = [](const JsonValue& value) -> uint32_t
+        {
+            const double number = value.AsDouble();
+            if (!value.IsNumber() || !std::isfinite(number) || number < 0 ||
+                number > std::numeric_limits<uint32_t>::max() || std::floor(number) != number)
+                throw std::runtime_error("Invalid VMD source frame number");
+            return static_cast<uint32_t>(number);
+        };
+        const auto numbers = [](const JsonValue& value, auto& destination)
+        {
+            if (!value.IsArray() || value.ArraySize() != destination.size())
+                throw std::runtime_error("Invalid VMD source key width");
+            for (size_t i=0;i<destination.size();++i)
+            {
+                const auto& number=value.ArrayAt(i);
+                if (!number.IsNumber() || !std::isfinite(number.AsFloat()))
+                    throw std::runtime_error("Invalid VMD source key number");
+                using T=typename std::decay_t<decltype(destination)>::value_type;
+                if constexpr (std::is_same_v<T,uint8_t>)
+                    if (number.AsDouble()<0 || number.AsDouble()>255 ||
+                        std::floor(number.AsDouble())!=number.AsDouble())
+                        throw std::runtime_error("Invalid VMD interpolation byte");
+                destination[i]=static_cast<T>(number.AsDouble());
+            }
+        };
+        for (const auto& track : input->sourceTracks)
+        {
+            if (track.kind!="Body" && track.kind!="Facial" && track.kind!="Properties") continue;
+            const auto json=Engine::Serialization::JsonParse(track.json);
+            if (json["version"].AsInt()!=1 || json["kind"].AsString()!=track.kind || !json["frames"].IsArray())
+                throw std::runtime_error("Malformed VMD character source track");
+            motion.lastFrame=std::max(motion.lastFrame,frameNumber(json["lastFrame"]));
+            for (size_t i=0;i<json["frames"].ArraySize();++i)
+            {
+                const auto& key=json["frames"].ArrayAt(i);
+                const uint32_t frame=frameNumber(key["frame"]);
+                const float time=static_cast<float>(frame/30.0);
+                motion.lastFrame=std::max(motion.lastFrame,frame);
+                if (track.kind=="Body")
+                {
+                    VmdBoneFrame bone;bone.name=key["name"].AsString();bone.frame=frame;bone.timeSeconds=time;
+                    if (bone.name.empty()) throw std::runtime_error("Missing VMD bone name");
+                    numbers(key["translation"],bone.translation);numbers(key["rotation"],bone.rotation);
+                    numbers(key["interpolation"],bone.interpolation);motion.bones.push_back(std::move(bone));
+                }
+                else if (track.kind=="Facial")
+                {
+                    VmdMorphFrame morph;morph.name=key["name"].AsString();morph.frame=frame;morph.timeSeconds=time;
+                    if (morph.name.empty() || !key["weight"].IsNumber() || !std::isfinite(key["weight"].AsFloat()))
+                        throw std::runtime_error("Invalid VMD facial key");
+                    morph.weight=key["weight"].AsFloat();motion.morphs.push_back(std::move(morph));
+                }
+                else
+                {
+                    VmdPropertyFrame property;property.frame=frame;property.timeSeconds=time;
+                    if (!key["visible"].IsBool() || !key["ik"].IsArray())
+                        throw std::runtime_error("Invalid VMD property key");
+                    property.visible=key["visible"].AsBool();
+                    for (size_t j=0;j<key["ik"].ArraySize();++j)
+                    {
+                        const auto& item=key["ik"].ArrayAt(j);
+                        if (item["name"].AsString().empty() || !item["enabled"].IsBool())
+                            throw std::runtime_error("Invalid VMD IK switch");
+                        property.ik.push_back({item["name"].AsString(),item["enabled"].AsBool()});
+                    }
+                    motion.properties.push_back(std::move(property));
+                }
+            }
+        }
+        motion.durationSeconds=static_cast<float>(motion.lastFrame/30.0);
+        Engine::Model::AnimationPackAsset result;
+        if (!BindPmxDirect(prefabPath,source.string(),motionPath,error,{},&result,&motion)) return false;
+        result.sourceTracks=std::move(input->sourceTracks);
+        pack=std::move(result);
+        return true;
+    }
+    catch (const std::exception& exception)
+    { error=exception.what();return false; }
 }
 
 bool MmdDanceAssetBinder::BindFromPrefab(const std::string& prefabPath,
@@ -308,7 +521,19 @@ bool MmdDanceAssetBinder::BindFromPrefab(const std::string& prefabPath,
     std::transform(extension.begin(), extension.end(), extension.begin(),
         [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
     if (extension == ".pmx")
-        return BindPmxDirect(prefabPath, vmdPath, error, sourcePackPath);
+    {
+        fs::path source(record->sourcePath);
+        if (!fs::is_regular_file(source))
+            for (fs::path directory = fs::absolute(prefabPath).parent_path(); !directory.empty();)
+            {
+                const auto candidate = directory / source.filename();
+                if (fs::is_regular_file(candidate)) { source = candidate; break; }
+                const auto parent = directory.parent_path();
+                if (parent == directory) break;
+                directory = parent;
+            }
+        return BindPmxDirect(prefabPath, source.string(), vmdPath, error, sourcePackPath);
+    }
     const fs::path fbxPath(record->sourcePath);
     if (fbxPath.extension() != ".fbx" || !fs::is_regular_file(fbxPath))
     { error = "Selected prefab source FBX is unavailable: " + fbxPath.string(); return false; }
@@ -423,6 +648,7 @@ bool MmdDanceAssetBinder::BindBaked(const std::string& prefabPath,
         asset.clip = body;
         asset.baseSkeleton = skeleton;
         asset.bindSkeleton = skeleton;
+        asset.humanoid = rigs.front().second.humanoid;
         asset.previewPrefab = prefabPath;
         asset.previewRig = rigs.front().second.rigIndex;
         if (!asset.Save(bodyPath.string()))
@@ -452,6 +678,7 @@ bool MmdDanceAssetBinder::BindBaked(const std::string& prefabPath,
             packPath.generic_string()))
         .Set("matchedExpressions", Engine::Serialization::JsonValue(
             static_cast<int>(facial.matchedExpressions)))
+        .Set("bodyChannels", Engine::Serialization::JsonValue(static_cast<int>(body.channels.size())))
         .Set("matchedTargets", Engine::Serialization::JsonValue(
             static_cast<int>(facial.matchedTargets)));
     auto unmatched = Engine::Serialization::JsonValue::MakeArray();
@@ -518,6 +745,9 @@ bool MmdDanceAssetBinder::BindBaked(const std::string& prefabPath,
         pack.sourceTracks = std::move(sourcePack->sourceTracks);
     }
     pack.activeClip = hasBody ? body.clipName : facial.clip.clipName;
+    pack.bindSkeleton = skeleton;
+    pack.humanoid = rigs.front().second.humanoid;
+    pack.sourcePrefab = prefabPath;
     if (hasBody) pack.clips.push_back(body);
     if (hasFace)
     {

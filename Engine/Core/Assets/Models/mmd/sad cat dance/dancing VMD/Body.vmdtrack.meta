@@ -1,0 +1,10 @@
+{
+    "version": 1,
+    "id": "5007cd34-d460-4bcd-aca1-756ed30ebf62",
+    "sourcePath": "C:/repos/EngineProject/Engine/Core/Assets/Models/mmd/sad cat dance/dancing.vmd",
+    "importSettings": {
+        "importer": "vmd-track",
+        "trackKind": "Body"
+    }
+}
+

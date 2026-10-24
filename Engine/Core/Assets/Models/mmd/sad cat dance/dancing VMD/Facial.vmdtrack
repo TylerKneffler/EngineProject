@@ -1,0 +1,2503 @@
+{"version":1,"kind":"Facial"
+,"sourceModel":"TDA Natsume base(б"
+,"sourceFps":30,"lastFrame":531,"frames":[{
+    "name": "AH",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "AH",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "AH",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "BLUE EYES",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "BLUE EYES",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "BLUE EYES",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "HYPNOTIC EYES",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "HYPNOTIC EYES",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "HYPNOTIC EYES",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "RED EYES",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "RED EYES",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "RED EYES",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "RED2 EYES",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "RED2 EYES",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "RED2 EYES",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "TWISTED EYES",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "TWISTED EYES",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "TWISTED EYES",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "big eyes",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "big eyes",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "big eyes",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "blush face",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "blush face",
+    "frame": 47,
+    "weight": 1
+}
+,{
+    "name": "blush face",
+    "frame": 96,
+    "weight": 1
+}
+,{
+    "name": "blush face",
+    "frame": 120,
+    "weight": 1
+}
+,{
+    "name": "blush face",
+    "frame": 140,
+    "weight": 1
+}
+,{
+    "name": "blush face",
+    "frame": 141,
+    "weight": 1
+}
+,{
+    "name": "blush face OFF",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "blush face OFF",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "blush face OFF",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "compressed lips",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "compressed lips",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "compressed lips",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "cry",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "cry",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "cry",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "cry L",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "cry L",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "cry L",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "cry L OFF",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "cry L OFF",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "cry L OFF",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "cry R",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "cry R",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "cry R",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "cry R OFF",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "cry R OFF",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "cry R OFF",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "gloves OFF",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "gloves OFF",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "gloves OFF",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "look at the cam",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "look at the cam",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "look at the cam",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "rawr",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "rawr",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "rawr",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "small eyes",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "small eyes",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "small eyes",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "squint",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "squint",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "squint",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "stress1",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "stress1",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "stress1",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "stress2",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "stress2",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "stress2",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "stress3",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "stress3",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "stress3",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "sweat",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "sweat",
+    "frame": 119,
+    "weight": 0
+}
+,{
+    "name": "sweat",
+    "frame": 120,
+    "weight": 1
+}
+,{
+    "name": "sweat",
+    "frame": 140,
+    "weight": 1
+}
+,{
+    "name": "sweat",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "sweat down",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "sweat down",
+    "frame": 120,
+    "weight": 0
+}
+,{
+    "name": "sweat down",
+    "frame": 130,
+    "weight": 0.48
+}
+,{
+    "name": "sweat down",
+    "frame": 140,
+    "weight": 0.48
+}
+,{
+    "name": "sweat down",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "sweat more",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "sweat more",
+    "frame": 124,
+    "weight": 0
+}
+,{
+    "name": "sweat more",
+    "frame": 129,
+    "weight": 0.53
+}
+,{
+    "name": "sweat more",
+    "frame": 140,
+    "weight": 0.53
+}
+,{
+    "name": "sweat more",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "tilt L",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "tilt L",
+    "frame": 47,
+    "weight": 1
+}
+,{
+    "name": "tilt L",
+    "frame": 96,
+    "weight": 1
+}
+,{
+    "name": "tilt L",
+    "frame": 120,
+    "weight": 1
+}
+,{
+    "name": "tilt L",
+    "frame": 140,
+    "weight": 1
+}
+,{
+    "name": "tilt L",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "tilt R",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "tilt R",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "tilt R",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "tilt2 L",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "tilt2 L",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "tilt2 L",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "tilt2 R",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "tilt2 R",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "tilt2 R",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "weird",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "weird",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "weird",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "weird RE",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "weird RE",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "weird RE",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "ω",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "ω",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "ω",
+    "frame": 141,
+    "weight": -1
+}
+,{
+    "name": "ω□",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "ω□",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "ω□",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "∧",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "∧",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "∧",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "∧Half",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "∧Half",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "∧Half",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "□",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "□",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "□",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "▲",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "▲",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "▲",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "あ",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "あ",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "あ",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "あ２",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "あ２",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "あ２",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "い",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "い",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "い",
+    "frame": 141,
+    "weight": 1
+}
+,{
+    "name": "い２",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "い２",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "い２",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "う",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "う",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "う",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "え",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "え",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "え",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "お",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "お",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "お",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "じと目",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "じと目",
+    "frame": 47,
+    "weight": 0
+}
+,{
+    "name": "じと目",
+    "frame": 59,
+    "weight": 0.15
+}
+,{
+    "name": "じと目",
+    "frame": 74,
+    "weight": 0.02
+}
+,{
+    "name": "じと目",
+    "frame": 96,
+    "weight": 0
+}
+,{
+    "name": "じと目",
+    "frame": 108,
+    "weight": 0.15
+}
+,{
+    "name": "じと目",
+    "frame": 120,
+    "weight": 0
+}
+,{
+    "name": "じと目",
+    "frame": 132,
+    "weight": 0.15
+}
+,{
+    "name": "じと目",
+    "frame": 140,
+    "weight": 0.15
+}
+,{
+    "name": "じと目",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "じと目右",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "じと目右",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "じと目右",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "じと目左",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "じと目左",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "じと目左",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "たれ目",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "たれ目",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "たれ目",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "てへぺろ",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "てへぺろ",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "てへぺろ",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "てへぺろ２",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "てへぺろ２",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "てへぺろ２",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "なごみ",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "なごみ",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "なごみ",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "にこり",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "にこり",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "にこり",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "にこり右",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "にこり右",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "にこり右",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "にこり左",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "にこり左",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "にこり左",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "にっこり",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "にっこり",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "にっこり",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "にっこり2",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "にっこり2",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "にっこり2",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "にやり",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "にやり",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "にやり",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "にやり２",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "にやり２",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "にやり２",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "はぁと",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "はぁと",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "はぁと",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "はぅ",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "はぅ",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "はぅ",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "はちゅ目",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "はちゅ目",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "はちゅ目",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "はちゅ目横潰れ",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "はちゅ目横潰れ",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "はちゅ目横潰れ",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "はちゅ目縦潰れ",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "はちゅ目縦潰れ",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "はちゅ目縦潰れ",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "びっくり",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "びっくり",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "びっくり",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "びっくり右",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "びっくり右",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "びっくり右",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "びっくり左",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "びっくり左",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "びっくり左",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "ぺろっ",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "ぺろっ",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "ぺろっ",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "まばたき",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "まばたき",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "まばたき",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "ん",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "ん",
+    "frame": 47,
+    "weight": 1
+}
+,{
+    "name": "ん",
+    "frame": 96,
+    "weight": 1
+}
+,{
+    "name": "ん",
+    "frame": 120,
+    "weight": 1
+}
+,{
+    "name": "ん",
+    "frame": 140,
+    "weight": 1
+}
+,{
+    "name": "ん",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "ウィンク右",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "ウィンク右",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "ウィンク右",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "ウィンク左",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "ウィンク左",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "ウィンク左",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "ウィンク２右",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "ウィンク２右",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "ウィンク２右",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "ウィンク２左",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "ウィンク２左",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "ウィンク２左",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "キッス",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "キッス",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "キッス",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "ダム・アイズ",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "ダム・アイズ",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "ダム・アイズ",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "ハイライト消",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "ハイライト消",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "ハイライト消",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "フラットな目",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "フラットな目",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "フラットな目",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "ワ",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "ワ",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "ワ",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "上",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "上",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "上",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "上右",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "上右",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "上右",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "上左",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "上左",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "上左",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "下",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "下",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "下",
+    "frame": 141,
+    "weight": 1
+}
+,{
+    "name": "下右",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "下右",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "下右",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "下左",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "下左",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "下左",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "光下",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "光下",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "光下",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "前",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "前",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "前",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "口上",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "口上",
+    "frame": 47,
+    "weight": 1
+}
+,{
+    "name": "口上",
+    "frame": 96,
+    "weight": 1
+}
+,{
+    "name": "口上",
+    "frame": 120,
+    "weight": 1
+}
+,{
+    "name": "口上",
+    "frame": 140,
+    "weight": 1
+}
+,{
+    "name": "口上",
+    "frame": 141,
+    "weight": 0.64
+}
+,{
+    "name": "口下",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "口下",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "口下",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "口右",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "口右",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "口右",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "口左",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "口左",
+    "frame": 47,
+    "weight": 1
+}
+,{
+    "name": "口左",
+    "frame": 96,
+    "weight": 1
+}
+,{
+    "name": "口左",
+    "frame": 120,
+    "weight": 1
+}
+,{
+    "name": "口左",
+    "frame": 140,
+    "weight": 1
+}
+,{
+    "name": "口左",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "口横小げ",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "口横小げ",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "口横小げ",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "口横広げ",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "口横広げ",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "口横広げ",
+    "frame": 141,
+    "weight": 0.75
+}
+,{
+    "name": "口横広げ右",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "口横広げ右",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "口横広げ右",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "口横広げ左",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "口横広げ左",
+    "frame": 47,
+    "weight": 0.59
+}
+,{
+    "name": "口横広げ左",
+    "frame": 52,
+    "weight": 0.38
+}
+,{
+    "name": "口横広げ左",
+    "frame": 62,
+    "weight": 0.38
+}
+,{
+    "name": "口横広げ左",
+    "frame": 76,
+    "weight": 0.38
+}
+,{
+    "name": "口横広げ左",
+    "frame": 96,
+    "weight": 0.59
+}
+,{
+    "name": "口横広げ左",
+    "frame": 101,
+    "weight": 0.38
+}
+,{
+    "name": "口横広げ左",
+    "frame": 111,
+    "weight": 0.38
+}
+,{
+    "name": "口横広げ左",
+    "frame": 120,
+    "weight": 0.59
+}
+,{
+    "name": "口横広げ左",
+    "frame": 125,
+    "weight": 0.38
+}
+,{
+    "name": "口横広げ左",
+    "frame": 135,
+    "weight": 0.38
+}
+,{
+    "name": "口横広げ左",
+    "frame": 140,
+    "weight": 0.38
+}
+,{
+    "name": "口横広げ左",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "口角上げ",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "口角上げ",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "口角上げ",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "口角上げ右",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "口角上げ右",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "口角上げ右",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "口角上げ左",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "口角上げ左",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "口角上げ左",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "口角下げ",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "口角下げ",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "口角下げ",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "口角下げ右",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "口角下げ右",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "口角下げ右",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "口角下げ左",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "口角下げ左",
+    "frame": 49,
+    "weight": 0
+}
+,{
+    "name": "口角下げ左",
+    "frame": 52,
+    "weight": 0.38
+}
+,{
+    "name": "口角下げ左",
+    "frame": 59,
+    "weight": 0
+}
+,{
+    "name": "口角下げ左",
+    "frame": 62,
+    "weight": 0.38
+}
+,{
+    "name": "口角下げ左",
+    "frame": 73,
+    "weight": 0
+}
+,{
+    "name": "口角下げ左",
+    "frame": 76,
+    "weight": 0.38
+}
+,{
+    "name": "口角下げ左",
+    "frame": 98,
+    "weight": 0
+}
+,{
+    "name": "口角下げ左",
+    "frame": 101,
+    "weight": 0.38
+}
+,{
+    "name": "口角下げ左",
+    "frame": 108,
+    "weight": 0
+}
+,{
+    "name": "口角下げ左",
+    "frame": 111,
+    "weight": 0.38
+}
+,{
+    "name": "口角下げ左",
+    "frame": 122,
+    "weight": 0
+}
+,{
+    "name": "口角下げ左",
+    "frame": 125,
+    "weight": 0.38
+}
+,{
+    "name": "口角下げ左",
+    "frame": 132,
+    "weight": 0
+}
+,{
+    "name": "口角下げ左",
+    "frame": 135,
+    "weight": 0.38
+}
+,{
+    "name": "口角下げ左",
+    "frame": 140,
+    "weight": 0.38
+}
+,{
+    "name": "口角下げ左",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "困る",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "困る",
+    "frame": 47,
+    "weight": 0.42
+}
+,{
+    "name": "困る",
+    "frame": 96,
+    "weight": 0.42
+}
+,{
+    "name": "困る",
+    "frame": 120,
+    "weight": 0.42
+}
+,{
+    "name": "困る",
+    "frame": 140,
+    "weight": 0.42
+}
+,{
+    "name": "困る",
+    "frame": 141,
+    "weight": 0.75
+}
+,{
+    "name": "困る右",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "困る右",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "困る右",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "困る左",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "困る左",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "困る左",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "大きな目",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "大きな目",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "大きな目",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "怒り",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "怒り",
+    "frame": 47,
+    "weight": 0
+}
+,{
+    "name": "怒り",
+    "frame": 52,
+    "weight": 0.19
+}
+,{
+    "name": "怒り",
+    "frame": 60,
+    "weight": 0.07
+}
+,{
+    "name": "怒り",
+    "frame": 70,
+    "weight": 0.21
+}
+,{
+    "name": "怒り",
+    "frame": 80,
+    "weight": 0.13
+}
+,{
+    "name": "怒り",
+    "frame": 96,
+    "weight": 0
+}
+,{
+    "name": "怒り",
+    "frame": 101,
+    "weight": 0.19
+}
+,{
+    "name": "怒り",
+    "frame": 109,
+    "weight": 0.07
+}
+,{
+    "name": "怒り",
+    "frame": 119,
+    "weight": 0.21
+}
+,{
+    "name": "怒り",
+    "frame": 120,
+    "weight": 0
+}
+,{
+    "name": "怒り",
+    "frame": 125,
+    "weight": 0.19
+}
+,{
+    "name": "怒り",
+    "frame": 133,
+    "weight": 0.07
+}
+,{
+    "name": "怒り",
+    "frame": 140,
+    "weight": 0.07
+}
+,{
+    "name": "怒り",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "怒り右",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "怒り右",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "怒り右",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "怒り左",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "怒り左",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "怒り左",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "恐ろしい子！",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "恐ろしい子！",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "恐ろしい子！",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "斜視",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "斜視",
+    "frame": 47,
+    "weight": 0.3
+}
+,{
+    "name": "斜視",
+    "frame": 52,
+    "weight": 0.44
+}
+,{
+    "name": "斜視",
+    "frame": 58,
+    "weight": 0.35
+}
+,{
+    "name": "斜視",
+    "frame": 62,
+    "weight": 0.44
+}
+,{
+    "name": "斜視",
+    "frame": 68,
+    "weight": 0.35
+}
+,{
+    "name": "斜視",
+    "frame": 76,
+    "weight": 0.44
+}
+,{
+    "name": "斜視",
+    "frame": 82,
+    "weight": 0.35
+}
+,{
+    "name": "斜視",
+    "frame": 96,
+    "weight": 0.3
+}
+,{
+    "name": "斜視",
+    "frame": 101,
+    "weight": 0.44
+}
+,{
+    "name": "斜視",
+    "frame": 107,
+    "weight": 0.35
+}
+,{
+    "name": "斜視",
+    "frame": 111,
+    "weight": 0.44
+}
+,{
+    "name": "斜視",
+    "frame": 117,
+    "weight": 0.35
+}
+,{
+    "name": "斜視",
+    "frame": 120,
+    "weight": 0.3
+}
+,{
+    "name": "斜視",
+    "frame": 125,
+    "weight": 0.44
+}
+,{
+    "name": "斜視",
+    "frame": 131,
+    "weight": 0.35
+}
+,{
+    "name": "斜視",
+    "frame": 135,
+    "weight": 0.44
+}
+,{
+    "name": "斜視",
+    "frame": 140,
+    "weight": 0.44
+}
+,{
+    "name": "斜視",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "斜視 RE",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "斜視 RE",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "斜視 RE",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "斜視右",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "斜視右",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "斜視右",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "斜視右 RE",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "斜視右 RE",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "斜視右 RE",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "斜視左",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "斜視左",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "斜視左",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "斜視左 RE",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "斜視左 RE",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "斜視左 RE",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "星目",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "星目",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "星目",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "歯無し上",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "歯無し上",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "歯無し上",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "歯無し下",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "歯無し下",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "歯無し下",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "涙",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "涙",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "涙",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "照れ",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "照れ",
+    "frame": 47,
+    "weight": 0
+}
+,{
+    "name": "照れ",
+    "frame": 96,
+    "weight": 0
+}
+,{
+    "name": "照れ",
+    "frame": 120,
+    "weight": 0
+}
+,{
+    "name": "照れ",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "照れ",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "照れ消",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "照れ消",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "照れ消",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "眉頭右",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "眉頭右",
+    "frame": 47,
+    "weight": 1
+}
+,{
+    "name": "眉頭右",
+    "frame": 96,
+    "weight": 1
+}
+,{
+    "name": "眉頭右",
+    "frame": 120,
+    "weight": 1
+}
+,{
+    "name": "眉頭右",
+    "frame": 140,
+    "weight": 1
+}
+,{
+    "name": "眉頭右",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "眉頭左",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "眉頭左",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "眉頭左",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "真面目",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "真面目",
+    "frame": 47,
+    "weight": 1
+}
+,{
+    "name": "真面目",
+    "frame": 96,
+    "weight": 1
+}
+,{
+    "name": "真面目",
+    "frame": 120,
+    "weight": 1
+}
+,{
+    "name": "真面目",
+    "frame": 140,
+    "weight": 1
+}
+,{
+    "name": "真面目",
+    "frame": 141,
+    "weight": 0.82
+}
+,{
+    "name": "真面目右",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "真面目右",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "真面目右",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "真面目左",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "真面目左",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "真面目左",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "瞳小",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "瞳小",
+    "frame": 47,
+    "weight": 1
+}
+,{
+    "name": "瞳小",
+    "frame": 96,
+    "weight": 1
+}
+,{
+    "name": "瞳小",
+    "frame": 120,
+    "weight": 1
+}
+,{
+    "name": "瞳小",
+    "frame": 140,
+    "weight": 1
+}
+,{
+    "name": "瞳小",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "瞳小右",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "瞳小右",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "瞳小右",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "瞳小大",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "瞳小大",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "瞳小大",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "瞳小左",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "瞳小左",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "瞳小左",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "瞳縦潰れ",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "瞳縦潰れ",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "瞳縦潰れ",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "笑い",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "笑い",
+    "frame": 47,
+    "weight": 0.2
+}
+,{
+    "name": "笑い",
+    "frame": 96,
+    "weight": 0.2
+}
+,{
+    "name": "笑い",
+    "frame": 120,
+    "weight": 0.2
+}
+,{
+    "name": "笑い",
+    "frame": 140,
+    "weight": 0.2
+}
+,{
+    "name": "笑い",
+    "frame": 141,
+    "weight": 1
+}
+,{
+    "name": "細い目",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "細い目",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "細い目",
+    "frame": 141,
+    "weight": 0
+}
+,{
+    "name": "ｷﾘｯ",
+    "frame": 0,
+    "weight": 0
+}
+,{
+    "name": "ｷﾘｯ",
+    "frame": 140,
+    "weight": 0
+}
+,{
+    "name": "ｷﾘｯ",
+    "frame": 141,
+    "weight": 0
+}
+]}

@@ -13,6 +13,7 @@ Material::Material()
 {
     SetTypeName(COMPONENT_TYPE_NAME(Material));
     RegisterField("diffuse", diffuseColor, "Colors");
+    RegisterField("useVertexColors", useVertexColors, "Colors");
     RegisterField("ambient", ambientColor, "Colors");
     RegisterField("specular", specularColor, "Colors");
     RegisterField("emissiveColor", emissiveColor, "Colors");
@@ -167,6 +168,7 @@ bool Material::LoadFromFile(const std::string& path)
         sphereTexture.reset();
         toonTexture.reset();
         diffuseColor = from3(root["baseColor"], diffuseColor);
+        useVertexColors = !root.Has("useVertexColors") || root["useVertexColors"].AsBool();
         ambientColor = from3(root["ambientColor"], ambientColor);
         specularColor = from3(root["specularColor"], specularColor);
         emissiveColor = from3(root["emissive"], emissiveColor);
@@ -253,6 +255,7 @@ bool Material::SaveToFile(const std::string& path) const
     JsonValue root = JsonValue::MakeObject();
     root.Set("version", JsonValue(1));
     root.Set("baseColor", J3(diffuseColor));
+    root.Set("useVertexColors", JsonValue(useVertexColors));
     root.Set("ambientColor", J3(ambientColor));
     root.Set("specularColor", J3(specularColor));
     root.Set("emissive", J3(emissiveColor));

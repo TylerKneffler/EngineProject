@@ -746,7 +746,7 @@ float4 PSMain(
     if (dot(objectData.portalClipPlane.xyz, objectData.portalClipPlane.xyz) > 0.0 &&
         dot(float4(worldPos, 1.0), objectData.portalClipPlane) < 0.0)
         clip(-1.0);
-    float4 base = objectData.baseColor * vertexColor;
+    float4 base = objectData.baseColor * ((flags & 4096u) ? float4(1, 1, 1, 1) : vertexColor);
     // Authored terrain stores six painted weights in the spare UV channels.
     // Vertex color carries the contribution of layers without a texture.
     if (flags & 2048u)

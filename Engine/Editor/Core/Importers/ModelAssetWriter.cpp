@@ -377,6 +377,7 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
         fs::create_directories(texturesDirectory);
 
         std::unordered_map<std::string, std::string> importedTextures;
+        std::set<std::string> missingTextures;
         auto importTexture = [&](const std::string& value) -> std::string
         {
             if (value.empty()) return {};
@@ -400,7 +401,11 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
             }
             fs::path original(value);
             if (original.is_relative()) original = source.parent_path() / original;
-            if (!fs::exists(original)) return {};
+            if (!fs::exists(original))
+            {
+                missingTextures.insert(original.filename().string());
+                return {};
+            }
             // An existing project asset can be referenced directly. Copying it
             // into every imported prefab only duplicates the same image bytes.
             std::error_code pathError;
@@ -428,6 +433,7 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
             const Engine::Model::ImportedMaterial& imported = model.materials[index];
             Engine::Components::Material material;
             material.diffuseColor = glm::vec3(imported.baseColor);
+            material.useVertexColors = imported.useVertexColors;
             material.baseColorAlpha = imported.baseColor.a;
             material.ambientColor = imported.ambientColor;
             material.specularColor = imported.specularColor;
@@ -914,6 +920,7 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
                     if (sameNodes)
                     {
                         rig.controls = previous->controls;
+                        rig.humanoid = previous->humanoid;
                         rig.poses = previous->poses;
                         rig.symmetryPairs = previous->symmetryPairs;
                     }
@@ -971,6 +978,11 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
         result.prefabPath = prefabPath.generic_string();
         result.outputDirectory = output.generic_string();
         result.message = "Imported " + source.filename().string();
+        if (!missingTextures.empty())
+        {
+            result.message += "; missing source texture files:";
+            for (const auto& name : missingTextures) result.message += " " + name;
+        }
     }
     catch (const std::exception& error)
     {

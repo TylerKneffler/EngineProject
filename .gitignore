@@ -27,6 +27,11 @@ build/
 !.local/tests/ParticleSceneExamplesTests.cpp
 !.local/tests/VSCodeBridgeTests.js
 !.local/tests/StandaloneAssetTests.cpp
+!.local/tests/InspectorTestUi.h
+!.local/tests/VmdMotionDecoderTests.cpp
+!.local/tests/FbxDuplicateNameTests.cpp
+!.local/tests/ImportVisualAudit.cpp
+!.local/tests/HumanoidRigTests.cpp
 !.local/tests/PrefabComponentOverrideTests.cpp
 !.local/tests/TerrainComponentTests.cpp
 !.local/tests/TerrainViewportTests.cpp

@@ -191,8 +191,9 @@ The initial SDF atlas covers printable ASCII; unsupported characters render as
 Importing a Blender glTF/GLB or FBX creates skeleton, animation, animation-manager,
 morph-target, and skinned-mesh components automatically. The renderer performs
 skinning and morph-target position/normal/tangent blending on the GPU on
-DirectX 11, DirectX 12, and Vulkan, with up to eight influences per vertex and
-256 joints per rendered primitive. Morph deltas remain in persistent structured
+DirectX 11, DirectX 12, and Vulkan, with up to eight influences per vertex.
+The palette buffer grows to upload complete skeletons, including rigs larger
+than 256 joints. Morph deltas remain in persistent structured
 buffers; animation updates only a compact packed-weight buffer.
 
 The editor routes all supported model formats through `ModelImporter`. FBX is
@@ -285,6 +286,11 @@ Use `--layers N`, `--mask-all`, and `--keys N` for animation-graph stress, or
 raise `--vertices` and `--morphs` for GPU deformation stress.
 
 ## Troubleshooting
+
+For animation application across different bone names, see
+[Humanoid animation mapping](humanoid-mapping.md). The Animation Editor can
+suggest body roles from hierarchy and rest positions, save reviewed assignments,
+and reuse them when applying animations to another humanoid.
 
 - **Build failed:** Check `project-build.log` in the project folder.
 - **Editor failed to start:** Check `editor-startup.log` in the project folder.

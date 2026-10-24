@@ -9,6 +9,9 @@
 #include "Core/Object.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "Engine/Editor/Core/Importers/AssetDataExtractor.h"
+#include "Engine/Editor/Core/Importers/ModelImporter.h"
+#include "Engine/Editor/Core/Importers/MmdDanceAssetBinder.h"
+#include "InspectorTestUi.h"
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -16,6 +19,17 @@
 #include <stdexcept>
 
 #define CHECK(value) do { if (!(value)) throw std::runtime_error(#value); } while (false)
+
+class InspectorAnimationManager : public Engine::Components::AnimationManager
+{
+public:
+    mutable size_t serializationCalls=0;
+    JsonValue Serialize() const override
+    {
+        ++serializationCalls;
+        return AnimationManager::Serialize();
+    }
+};
 
 int main()
 {
@@ -147,6 +161,123 @@ int main()
         extracted = Editor::AssetDataExtractor::Extract(meshPack, output);
         CHECK(extracted.success && fs::exists(meshPack));
         CHECK(fs::exists(fs::path(extracted.outputDirectory) / "Meshes/Test.mesh"));
+
+        // Importing and splitting must both accept fixed-byte truncated CP932
+        // names, and preserve portable bone/morph tracks in the saved pack.
+        const fs::path sadCat("Engine/Core/Assets/Models/mmd/sad cat dance/dancing.vmd");
+        const std::string mococo="Engine/Core/Assets/Models/mmd/Mococo/Mococo Abyssgard/Mococo Abyssgard.low.prefab";
+        const auto prefabBefore=fs::last_write_time(mococo);
+        Model::AnimationPackAsset rawDance;
+        if (!Editor::MmdDanceAssetBinder::BuildForPrefab(mococo,sadCat.string(),rawDance,error))
+            throw std::runtime_error(error);
+        CHECK(rawDance.activeClip=="dancing body");
+        CHECK(rawDance.clips.size()==2 && rawDance.clips[0].channels.size()>100);
+        CHECK(rawDance.layers.size()==1 && rawDance.layers[0].clip=="dancing facial");
+        Scene::Scene characterScene;
+        auto* character=Serialization::SceneSerializer::InstantiatePrefab(characterScene,mococo);
+        CHECK(character);
+        auto* characterModel=character->GetComponent<Components::Model>();
+        CHECK(characterModel);
+        if (auto* oldManager=character->GetComponent<Components::AnimationManager>())
+        {
+            character->Components.remove(oldManager);
+            delete oldManager;
+        }
+        auto* danceManager=character->AddComponent<Components::AnimationManager>();
+        if (!rawDance.Apply(*danceManager,error)) throw std::runtime_error(error);
+        danceManager->BeginEditorPreview();
+        CHECK(danceManager->clip=="dancing body" && danceManager->clips.size()==2);
+        danceManager->time=7.f;danceManager->Tick(0.f);
+        size_t movedBones=0;
+        for (const auto& danceChannel : rawDance.clips[0].channels)
+            if (danceChannel.path==Model::AnimationChannel::Path::Rotation)
+                if (auto* bone=characterModel->ResolveNode(danceChannel.nodeIndex))
+                    movedBones+=glm::length(bone->transform.rotation-rawDance.bindSkeleton[danceChannel.nodeIndex].rotation)>.01f;
+        CHECK(movedBones>10);
+        const auto sceneSnapshot=characterScene.SaveToString();
+        Scene::Scene reopened;
+        CHECK(Serialization::SceneSerializer::LoadFromString(reopened,sceneSnapshot));
+        bool persistedDance=false;
+        for (const auto& object : reopened.GetObjects())
+            if (auto* playback=object->GetComponent<Components::AnimationManager>())
+                persistedDance|=playback->clip=="dancing body" && playback->FindClip("dancing body") &&
+                    playback->FindClip("dancing body")->channels.size()>100;
+        CHECK(persistedDance);
+        for (bool split : { false, true })
+        {
+            const auto imported = split ? Editor::AssetDataExtractor::Extract(sadCat, output) :
+                Editor::ModelImporter::Import(sadCat.string(), output.string());
+            if (!imported.success) throw std::runtime_error(imported.message);
+            CHECK(fs::is_regular_file(imported.primaryAssetPath));
+            auto motionPack = Model::AnimationPackAsset::Load(imported.primaryAssetPath, error);
+            CHECK(motionPack && !motionPack->sourceTracks.empty());
+            bool bones = false, morphs = false;
+            for (const auto& track : motionPack->sourceTracks)
+            {
+                bones |= track.kind == "Body";
+                morphs |= track.kind == "Facial";
+            }
+            CHECK(bones && morphs);
+            // A portable source-only pack must bind from its embedded keys,
+            // without relying on a source VMD beside it or .meta metadata.
+            const auto portable=output/(split?"Split portable.animpack":"Portable.animpack");
+            CHECK(motionPack->Save(portable.string(),error));
+            Model::AnimationPackAsset baked;
+            if (!Editor::MmdDanceAssetBinder::BuildForPrefab(mococo,portable.string(),baked,error))
+                throw std::runtime_error(error);
+            CHECK(baked.clips.size()==rawDance.clips.size());
+            CHECK(baked.clips[0].channels.size()==rawDance.clips[0].channels.size());
+            for (const auto& bakedChannel : baked.clips[0].channels)
+            {
+                const auto found=std::find_if(rawDance.clips[0].channels.begin(),rawDance.clips[0].channels.end(),
+                    [&](const auto& raw) {return raw.nodeIndex==bakedChannel.nodeIndex && raw.path==bakedChannel.path;});
+                CHECK(found!=rawDance.clips[0].channels.end());
+                CHECK(found->times==bakedChannel.times);
+                CHECK(found->values.size()==bakedChannel.values.size());
+                // Native source-track JSON stores seven significant digits.
+                for (size_t key=0;key<found->values.size();++key)
+                    CHECK(std::abs(found->values[key]-bakedChannel.values[key])<1e-4f);
+            }
+            if (!baked.Apply(*danceManager,error)) throw std::runtime_error(error);
+            CHECK(danceManager->FindClip(baked.activeClip)->channels.size()>100);
+        }
+        CHECK(fs::last_write_time(mococo)==prefabBefore);
+
+        InspectorAnimationManager inspector;
+        inspector.Owner=character;
+        inspector.InstallEmbeddedClips(rawDance.clips);
+        inspector.clip=rawDance.activeClip;
+        Editor::InspectorTestUi inspectorUi;
+        const auto drawStarted=std::chrono::steady_clock::now();
+        for (int frame=0;frame<120;++frame) CHECK(!inspector.DrawProperties(inspectorUi));
+        const auto drawMs=std::chrono::duration<double,std::milli>(
+            std::chrono::steady_clock::now()-drawStarted).count();
+        CHECK(inspector.serializationCalls==0);
+        CHECK(!inspector.IsEditorPreviewRunning());
+        inspectorUi.changePlaying=true;
+        CHECK(inspector.DrawProperties(inspectorUi));
+        CHECK(!inspector.IsEditorPreviewRunning());
+        inspectorUi.changeClip=true;
+        CHECK(inspector.DrawProperties(inspectorUi));
+        CHECK(!inspector.IsEditorPreviewRunning());
+        inspectorUi.clickButton="Play Editor Preview";
+        inspector.DrawProperties(inspectorUi);
+        CHECK(inspector.IsEditorPreviewRunning());
+        inspectorUi.clickButton="Stop Editor Preview";
+        inspector.DrawProperties(inspectorUi);
+        CHECK(!inspector.IsEditorPreviewRunning() && inspector.playing);
+        const float stoppedTime=inspector.time;
+        inspector.Tick(.1f); // Scene Play can still advance the attached clip.
+        CHECK(inspector.time>stoppedTime);
+        inspector.BeginEditorPreview();
+        inspector.InstallEmbeddedClips(rawDance.clips);
+        CHECK(!inspector.IsEditorPreviewRunning());
+        std::cout<<"Dense Sad Cat Dance inspector: 120 draws in "<<drawMs<<" ms; no clip serialization\n";
+
+        const auto missingFbx = Editor::ModelImporter::Import(
+            (output / "missing.fbx").string(), output.string());
+        CHECK(!missingFbx.success && !missingFbx.message.empty());
+        CHECK(missingFbx.outputDirectory.empty());
 
         const fs::path walking("Engine/Core/Assets/Models/Mixemo/Walking.fbx");
         if (fs::exists(walking))

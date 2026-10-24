@@ -195,7 +195,7 @@ Engine::Model::ModelImportResult ModelImporter::Import(const std::string& source
         Engine::Model::ImportedModel model;
         std::string error;
         if (!FbxModelDecoder::Decode(sourcePath, model, error))
-            return { false, {}, {}, error.empty() ? "Could not decode FBX" : error };
+            return { false, {}, {}, {}, error.empty() ? "Could not decode FBX" : error };
         return ModelAssetWriter::Write(model, sourcePath, assetsDirectory);
     }
     if (extension == ".pmx")
@@ -207,12 +207,12 @@ Engine::Model::ModelImportResult ModelImporter::Import(const std::string& source
             pmxOptions.colliderMode == PmxColliderMode::Hull;
         if (!std::isfinite(pmxUnitScaleToMeters) ||
             pmxUnitScaleToMeters <= 0.f || pmxUnitScaleToMeters > 1000.f)
-            return { false, {}, {}, "PMX unit scale must be greater than zero and at most 1000" };
+            return { false, {}, {}, {}, "PMX unit scale must be greater than zero and at most 1000" };
         Engine::Model::ImportedModel model;
         std::string error;
         PmxImportReport report;
         if (!PmxModelDecoder::Decode(sourcePath, model, error, &report, pmxOptions))
-            return { false, {}, {}, error.empty() ? "Could not decode PMX" : error };
+            return { false, {}, {}, {}, error.empty() ? "Could not decode PMX" : error };
         ApplyPmxPhysicsQuality(model, pmxOptions, report);
         model.unitScaleToMeters = pmxUnitScaleToMeters;
         auto result = ModelAssetWriter::Write(model, sourcePath, assetsDirectory,
@@ -273,6 +273,6 @@ Engine::Model::ModelImportResult ModelImporter::Import(const std::string& source
         }
         return result;
     }
-    return { false, {}, {}, "Unsupported model format: " + extension };
+    return { false, {}, {}, {}, "Unsupported model format: " + extension };
 }
 }

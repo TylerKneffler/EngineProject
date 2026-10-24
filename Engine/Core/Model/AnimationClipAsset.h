@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AnimationClip.h"
+#include "HumanoidRig.h"
 #include <glm/glm.hpp>
 #include <optional>
 #include <string>
@@ -26,6 +27,7 @@ struct AnimationClipAsset
     // Original imported local transforms, including FBX helper nodes.
     // baseSkeleton is the first animated pose for editing and preview.
     std::vector<BaseNode> bindSkeleton;
+    HumanoidRig::Mapping humanoid;
     std::string previewPrefab;
     size_t previewRig = 0;
 

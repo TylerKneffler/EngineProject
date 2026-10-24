@@ -34,6 +34,7 @@ inline void WriteImportedAnimations(Engine::Model::RigAsset& rig,
         asset.clip = manager.clips[index];
         asset.baseSkeleton = skeleton;
         asset.bindSkeleton = skeleton;
+        asset.humanoid = rig.humanoid;
         asset.previewPrefab = prefabPath.generic_string();
         asset.previewRig = rig.rigIndex;
         if (!asset.Save(animationPath.string()))

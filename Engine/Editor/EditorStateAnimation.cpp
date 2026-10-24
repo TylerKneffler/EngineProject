@@ -240,7 +240,8 @@ std::string LowerText(std::string value)
 }
 
 Engine::Model::RigAsset::ControlMap HumanoidControls(
-    const Engine::Components::Skeleton& skeleton)
+    const Engine::Components::Skeleton& skeleton,
+    const Engine::Model::HumanoidRig::Mapping* assigned = nullptr)
 {
     Engine::Model::RigAsset::ControlMap result;
     const auto& joints = skeleton.ResolveJoints();
@@ -301,6 +302,23 @@ Engine::Model::RigAsset::ControlMap HumanoidControls(
                 result.limbs[index] = {upper, lower, end};
                 break;
             }
+        }
+    }
+    auto profile = assigned ? *assigned : Engine::Model::HumanoidRig::Mapping();
+    if (!assigned)
+        if (auto rig = Engine::Model::RigAsset::Load(skeleton.rigPath, skeleton.skinIndex))
+            profile = rig->humanoid;
+    if (profile.HasAssignments())
+    {
+        namespace H = Engine::Model::HumanoidRig;
+        if (profile.bones[H::Root]>=0) result.root=profile.bones[H::Root];
+        if (profile.bones[H::Pelvis]>=0) result.pelvis=profile.bones[H::Pelvis];
+        const std::array<size_t,4> starts {H::LeftUpperArm,H::RightUpperArm,H::LeftThigh,H::RightThigh};
+        for (size_t i=0;i<starts.size();++i)
+        {
+            const size_t first=starts[i];
+            if (profile.bones[first]>=0 && profile.bones[first+1]>=0 && profile.bones[first+2]>=0)
+                result.limbs[i]={profile.bones[first],profile.bones[first+1],profile.bones[first+2]};
         }
     }
     return result;
@@ -821,12 +839,17 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
             AnimationDocument::RigTrack track;
             track.index = index;
             track.name = sourceRig->Owner->name;
+            if (std::count_if(sourceRig->Owner->Components.begin(), sourceRig->Owner->Components.end(),
+                    [](const auto* component) {return dynamic_cast<const Engine::Components::Skeleton*>(component)!=nullptr;}) > 1)
+                track.name += " / rig " + std::to_string(sourceRig->skinIndex) + " (" +
+                    std::to_string(sourceRig->jointNodes.size()) + " joints)";
             track.path = sourceRig->rigPath;
             if (!track.path.empty())
                 if (auto rig = Engine::Model::RigAsset::Load(
                         track.path, sourceRig->skinIndex))
                 {
                     track.controls = rig->controls;
+                    track.humanoid = rig->humanoid;
                     track.poses = rig->poses;
                     track.symmetryPairs = rig->symmetryPairs;
                 }
@@ -2445,6 +2468,7 @@ bool EditorState::SaveAnimationDocument(AnimationDocument& document)
         if (track.index == document.rigIndex)
         {
             rig.controls = track.controls;
+            rig.humanoid = track.humanoid;
             rig.poses = track.poses;
             rig.symmetryPairs = track.symmetryPairs;
             break;
@@ -2486,14 +2510,14 @@ bool EditorState::SaveAnimationDocument(AnimationDocument& document)
         if (auto existing = Engine::Model::AnimationClipAsset::Load(animationPath))
             asset = std::move(*existing);
         asset.clip = std::move(animation);
-        if (asset.previewPrefab.empty())
-        {
-            asset.previewPrefab = document.path;
-            asset.previewRig = document.rigIndex;
-        }
-        if (asset.baseSkeleton.empty())
-            asset.baseSkeleton = Engine::Model::AnimationClipAsset::
-                CaptureBaseSkeleton(*latestModel);
+        asset.humanoid = rig.humanoid;
+        // These channels now address the edited avatar, even if the clip was
+        // originally retargeted from another prefab.
+        asset.previewPrefab = document.path;
+        asset.previewRig = document.rigIndex;
+        asset.baseSkeleton = Engine::Model::AnimationClipAsset::
+            CaptureBaseSkeleton(*latestModel);
+        asset.bindSkeleton = rig.bindNodes.empty() ? asset.baseSkeleton : rig.bindNodes;
         if (!asset.Save(animationPath))
         {
             document.error = "Could not save animation asset: " + animationPath;
@@ -2954,14 +2978,110 @@ void EditorState::DrawAnimationRigToolbar(IEditorUi& ui,
 void EditorState::DrawAnimationRigControls(IEditorUi& ui,
     AnimationDocument& document)
 {
-    if (!document.poseSkeleton ||
-        !ImGui::CollapsingHeader("Viewport rig controls")) return;
+    if (!document.poseSkeleton) return;
     auto track = std::find_if(document.tracks.begin(), document.tracks.end(),
         [&](const auto& item) { return item.index == document.rigIndex; });
     if (track == document.tracks.end()) return;
     auto& controls = track->controls;
     const auto& joints = document.poseSkeleton->ResolveJoints();
     const auto& palette = document.poseSkeleton->jointNodes;
+    if (ImGui::CollapsingHeader("Humanoid animation mapping"))
+    {
+        namespace H = Engine::Model::HumanoidRig;
+        auto& mapping = track->humanoid;
+        auto* model = document.poseSkeleton->ResolveModel();
+        if (!model) { ui.DisabledLabel("This skeleton has no model to map."); return; }
+        auto stored = Engine::Model::RigAsset::Load(track->path, document.poseSkeleton->skinIndex);
+        const auto rest = stored && !stored->bindNodes.empty() ? stored->bindNodes :
+            Engine::Model::AnimationClipAsset::CaptureBaseSkeleton(*model);
+        const auto nodes = H::Nodes(rest, palette);
+        bool edited = false;
+        ui.DisabledLabel("Assign body parts once, then reuse this rig for animations with different bone names. Detection uses rest positions and parent chains.");
+        static const char* axes[] = {"X", "Y", "Z"};
+        edited = ui.Combo("Rest-pose up axis", &mapping.upAxis, axes, 3) || edited;
+        edited = ui.Combo("Rest-pose forward axis", &mapping.forwardAxis, axes, 3) || edited;
+        edited = ui.Checkbox("Left is positive side", &mapping.leftPositive) || edited;
+        if (ui.Button("Detect unassigned body parts"))
+        {
+            const auto detection = H::Detect(nodes, mapping);
+            for (size_t role = 0; role < H::Count; ++role)
+                if (mapping.bones[role] < 0)
+                {
+                    mapping.bones[role] = detection.mapping.bones[role];
+                    track->humanoidConfidence[role] = detection.confidence[role];
+                }
+            edited = true;
+        }
+        ui.SameLine();
+        if (ui.Button("Clear body assignments"))
+        { mapping.bones.fill(-1); track->humanoidConfidence.fill(0.f); edited = true; }
+        ui.SearchInput("##HumanoidBoneSearch", track->humanoidSearch,
+            sizeof(track->humanoidSearch), "Filter bone paths");
+        for (size_t role = 0; role < H::Count; ++role)
+        {
+            ImGui::PushID(int(role));
+            const int current = mapping.bones[role];
+            const std::string path = current >= 0 && model->ResolveNode(unsigned(current))
+                ? AnimationClipMapping::NodePath(*model, unsigned(current)) : "Unassigned";
+            if (ImGui::BeginCombo(H::Labels[role], path.c_str()))
+            {
+                if (ImGui::Selectable("Unassigned", current < 0))
+                { mapping.bones[role] = -1; edited = true; }
+                for (size_t index = 0; index < palette.size() && index < joints.size(); ++index)
+                    if (joints[index])
+                    {
+                        const auto bonePath = AnimationClipMapping::NodePath(*model, palette[index]);
+                        if (track->humanoidSearch[0] && LowerText(bonePath).find(
+                                LowerText(track->humanoidSearch)) == std::string::npos) continue;
+                        ImGui::PushID(int(index));
+                        const std::string label = "[" + std::to_string(palette[index]) + "] " + bonePath;
+                        if (ImGui::Selectable(label.c_str(), current == int(palette[index])))
+                        { mapping.bones[role] = int(palette[index]); track->humanoidConfidence[role] = 1.f; edited = true; }
+                        ImGui::PopID();
+                    }
+                ImGui::EndCombo();
+            }
+            const bool selected = document.selectedBone >= 0 && size_t(document.selectedBone) < palette.size();
+            ImGui::BeginDisabled(!selected);
+            if (ImGui::SmallButton("Assign selected bone"))
+            {
+                mapping.bones[role] = int(palette[document.selectedBone]);
+                track->humanoidConfidence[role] = 1.f; edited = true;
+            }
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            ImGui::BeginDisabled(current < 0);
+            if (ImGui::SmallButton("Select assigned bone"))
+                if (const auto found = std::find(palette.begin(), palette.end(), unsigned(current)); found != palette.end())
+                {
+                    document.selectedBone = int(found - palette.begin());
+                    auto* object = model->ResolveNode(unsigned(current));
+                    document.poseScene->SetSelectedObject(object);
+                    if (m_primaryHierarchy) m_primaryHierarchy->SetSelectedObject(object);
+                    if (m_primaryProperties) m_primaryProperties->SetSelectedObject(object);
+                    if (m_renderer) m_renderer->MarkDirty();
+                }
+            ImGui::EndDisabled();
+            if (track->humanoidConfidence[role] > 0.f && track->humanoidConfidence[role] < 1.f)
+            {
+                ImGui::SameLine();
+                ImGui::TextDisabled("Suggested; review assignment");
+            }
+            ImGui::PopID();
+        }
+        const auto issues = H::Validate(mapping, nodes);
+        if (issues.empty()) ui.DisabledLabel("Major humanoid chains are assigned and connected.");
+        else for (const auto& issue : issues)
+            ui.ColoredLabel(issue.c_str(), {1.f,.65f,.3f,1.f});
+        if (edited)
+        {
+            track->controlsDirty = true; document.dirty = true;
+            RefreshAnimationDocumentTitle(document);
+        }
+        if (ui.Button("Save humanoid mapping")) SaveAnimationDocument(document);
+        ui.DisabledLabel("Save on both source and target rigs. Their exported .anim files retain the source body assignments. Hair, tails, props, and unusual chains can stay unassigned.");
+    }
+    if (!ImGui::CollapsingHeader("Viewport rig controls")) return;
     const auto labelFor = [&](int node) -> std::string
     {
         for (size_t i = 0; i < palette.size() && i < joints.size(); ++i)
@@ -2972,7 +3092,7 @@ void EditorState::DrawAnimationRigControls(IEditorUi& ui,
     bool changed = false;
     if (ui.Button("Use humanoid preset"))
     {
-        controls = HumanoidControls(*document.poseSkeleton);
+        controls = HumanoidControls(*document.poseSkeleton, &track->humanoid);
         changed = true;
     }
     const auto field = [&](const char* label, int& node)

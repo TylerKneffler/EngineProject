@@ -5012,7 +5012,8 @@ std::string EditorState::ImportAssetFile(const std::string& path,
             }
             if (m_primaryConsole)
             {
-                if (extension == ".pmx" && !imported.message.empty())
+                if (!imported.message.empty() && (extension == ".pmx" ||
+                    imported.message.find("; missing source texture files:") != std::string::npos))
                     m_primaryConsole->AddLog(ConsoleView::Level::Warning,
                         imported.message);
                 const std::string& primaryAsset = asPrefab &&

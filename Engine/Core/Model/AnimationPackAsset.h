@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AnimationClip.h"
+#include "AnimationClipAsset.h"
 #include "Core/Serialization/Json.h"
 #include <optional>
 #include <string>
@@ -31,6 +32,9 @@ struct AnimationPackAsset
     // Source tracks retain their native keys and timeline. A later editor
     // action can extract one as a .vmdtrack or bind it to a scene component.
     std::vector<SourceTrack> sourceTracks;
+    std::vector<AnimationClipAsset::BaseNode> bindSkeleton;
+    HumanoidRig::Mapping humanoid;
+    std::string sourcePrefab;
 
     static AnimationPackAsset Capture(const Engine::Components::AnimationManager& manager);
     static std::optional<AnimationPackAsset> Load(const std::string& path,

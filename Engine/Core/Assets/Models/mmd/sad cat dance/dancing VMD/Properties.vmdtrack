@@ -1,0 +1,179 @@
+{"version":1,"kind":"Properties"
+,"sourceModel":"TDA Natsume base(б"
+,"sourceFps":30,"lastFrame":531,"frames":[{
+    "frame": 0,
+    "visible": false,
+    "ik": [
+        {
+            "name": "右つま先ＩＫ",
+            "enabled": true
+        },
+        {
+            "name": "右足ＩＫ",
+            "enabled": true
+        },
+        {
+            "name": "左つま先ＩＫ",
+            "enabled": true
+        },
+        {
+            "name": "左足ＩＫ",
+            "enabled": true
+        }
+    ]
+}
+,{
+    "frame": 46,
+    "visible": true,
+    "ik": [
+        {
+            "name": "右つま先ＩＫ",
+            "enabled": true
+        },
+        {
+            "name": "右足ＩＫ",
+            "enabled": true
+        },
+        {
+            "name": "左つま先ＩＫ",
+            "enabled": true
+        },
+        {
+            "name": "左足ＩＫ",
+            "enabled": true
+        }
+    ]
+}
+,{
+    "frame": 84,
+    "visible": false,
+    "ik": [
+        {
+            "name": "右つま先ＩＫ",
+            "enabled": true
+        },
+        {
+            "name": "右足ＩＫ",
+            "enabled": true
+        },
+        {
+            "name": "左つま先ＩＫ",
+            "enabled": true
+        },
+        {
+            "name": "左足ＩＫ",
+            "enabled": true
+        }
+    ]
+}
+,{
+    "frame": 96,
+    "visible": true,
+    "ik": [
+        {
+            "name": "右つま先ＩＫ",
+            "enabled": true
+        },
+        {
+            "name": "右足ＩＫ",
+            "enabled": true
+        },
+        {
+            "name": "左つま先ＩＫ",
+            "enabled": true
+        },
+        {
+            "name": "左足ＩＫ",
+            "enabled": true
+        }
+    ]
+}
+,{
+    "frame": 111,
+    "visible": false,
+    "ik": [
+        {
+            "name": "右つま先ＩＫ",
+            "enabled": true
+        },
+        {
+            "name": "右足ＩＫ",
+            "enabled": true
+        },
+        {
+            "name": "左つま先ＩＫ",
+            "enabled": true
+        },
+        {
+            "name": "左足ＩＫ",
+            "enabled": true
+        }
+    ]
+}
+,{
+    "frame": 120,
+    "visible": true,
+    "ik": [
+        {
+            "name": "右つま先ＩＫ",
+            "enabled": true
+        },
+        {
+            "name": "右足ＩＫ",
+            "enabled": true
+        },
+        {
+            "name": "左つま先ＩＫ",
+            "enabled": true
+        },
+        {
+            "name": "左足ＩＫ",
+            "enabled": true
+        }
+    ]
+}
+,{
+    "frame": 132,
+    "visible": false,
+    "ik": [
+        {
+            "name": "右つま先ＩＫ",
+            "enabled": true
+        },
+        {
+            "name": "右足ＩＫ",
+            "enabled": true
+        },
+        {
+            "name": "左つま先ＩＫ",
+            "enabled": true
+        },
+        {
+            "name": "左足ＩＫ",
+            "enabled": true
+        }
+    ]
+}
+,{
+    "frame": 141,
+    "visible": true,
+    "ik": [
+        {
+            "name": "右つま先ＩＫ",
+            "enabled": true
+        },
+        {
+            "name": "右足ＩＫ",
+            "enabled": true
+        },
+        {
+            "name": "左つま先ＩＫ",
+            "enabled": true
+        },
+        {
+            "name": "左足ＩＫ",
+            "enabled": true
+        }
+    ]
+}
+]}

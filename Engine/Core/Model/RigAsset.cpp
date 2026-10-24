@@ -77,6 +77,44 @@ RigAsset RigAsset::Capture(const Engine::Scene::Scene& scene,
     return result;
 }
 
+RigAsset RigAsset::ForModel(Engine::Components::Model& model)
+{
+    RigAsset result;
+    Engine::Components::Skeleton* selected = nullptr;
+    std::optional<RigAsset> selectedAsset;
+    size_t selectedRoles = 0, selectedJoints = 0;
+    if (model.Owner && model.Owner->GetScene())
+        for (const auto& object : model.Owner->GetScene()->GetObjects())
+            if (object) for (auto* component : object->Components)
+                if (auto* skeleton = dynamic_cast<Engine::Components::Skeleton*>(component);
+                    skeleton && skeleton->ResolveModel() == &model)
+                {
+                    auto stored = Load(skeleton->rigPath,skeleton->skinIndex);
+                    size_t roles = 0;
+                    if (stored) for (int node : stored->humanoid.bones)
+                        if (node>=0 && std::find(skeleton->jointNodes.begin(),skeleton->jointNodes.end(),unsigned(node))
+                                != skeleton->jointNodes.end()) ++roles;
+                    if (!selected || roles>selectedRoles ||
+                        (roles==selectedRoles && skeleton->jointNodes.size()>selectedJoints))
+                    {
+                        selected=skeleton; selectedAsset=std::move(stored);
+                        selectedRoles=roles; selectedJoints=skeleton->jointNodes.size();
+                    }
+                }
+    if (selected)
+    {
+        result=Capture(*model.Owner->GetScene(),*selected);
+        if (selectedAsset)
+        {
+            result.humanoid=selectedAsset->humanoid;
+            result.prefabPath=selectedAsset->prefabPath;
+            if (!selectedAsset->bindNodes.empty()) result.bindNodes=std::move(selectedAsset->bindNodes);
+        }
+    }
+    if (result.bindNodes.empty()) result.bindNodes=AnimationClipAsset::CaptureBaseSkeleton(model);
+    return result;
+}
+
 Engine::Serialization::JsonValue RigAsset::Serialize() const
 {
     Engine::Serialization::JsonValue root =
@@ -139,6 +177,7 @@ Engine::Serialization::JsonValue RigAsset::Serialize() const
             .Set("lower", Engine::Serialization::JsonValue(limb.lower))
             .Set("tip", Engine::Serialization::JsonValue(limb.tip)));
     root.Set("controls", controlsValue.Set("limbs", std::move(limbsValue)));
+    root.Set("humanoid", humanoid.Serialize());
     const auto vectorValue = [](const glm::vec3& value)
     {
         auto array = Engine::Serialization::JsonValue::MakeArray();
@@ -337,6 +376,7 @@ std::optional<RigAsset> RigAsset::Load(const std::string& path,
             result.animationPaths.push_back(
                 root["animations"].ArrayAt(i).AsString());
         const auto& controls = root["controls"];
+        result.humanoid = HumanoidRig::Mapping::Deserialize(root["humanoid"]);
         if (controls.IsObject())
         {
             result.controls.root = controls.Has("root")

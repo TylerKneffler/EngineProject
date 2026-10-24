@@ -52,6 +52,7 @@ public:
     void Tick(float deltaSeconds);
     void Play(const std::string& clipName, float fadeSeconds = 0.2f);
     void BeginEditorPreview();
+    void EndEditorPreview() { m_editorPreviewRunning = false; }
     bool IsEditorPreviewRunning() const { return m_editorPreviewRunning && playing; }
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;

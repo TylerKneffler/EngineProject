@@ -574,7 +574,7 @@ private:
     void BuildSkyboxPipeline();
     void BuildObjectPipeline();
     void EnsureObjectRenderCapacity(uint32_t requiredObjects);
-    void EnsureSkinPaletteCapacity(uint32_t requiredObjects);
+    void EnsureSkinPaletteCapacity(uint32_t requiredMatrices);
     const Engine::Components::Texture* ResolveSkyboxTexture();
     void UpdateEnvironmentLighting(const Engine::Components::Texture* texture);
     std::shared_ptr<Engine::Rendering::EnvironmentMap> ResolveReflectionEnvironment(
@@ -710,11 +710,11 @@ private:
     static constexpr uint32_t kMaxPortalRenderViews = 64;
     static constexpr uint32_t kMaxSpatialDebugDraws =
         kMaxSpatialObjects * kMaxSpatialVerticesPerObject / 24;
-    static constexpr uint32_t kMaxBonesPerObject = 256;
+    static constexpr uint32_t kInitialBoneMatrixCapacity = kInitialSkinnedObjectCapacity * 256;
     static constexpr uint32_t kMaxLights =
         Engine::Model::MaxRealtimeLights;
     static constexpr uint32_t kCBStride = 256;
     uint32_t m_objectCapacity = kInitialObjectCapacity;
-    uint32_t m_skinnedObjectCapacity = kInitialSkinnedObjectCapacity;
+    uint32_t m_boneMatrixCapacity = kInitialBoneMatrixCapacity;
 };
 }

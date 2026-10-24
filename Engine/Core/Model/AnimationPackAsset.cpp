@@ -1,8 +1,10 @@
 #include "AnimationPackAsset.h"
 #include "Core/Compoonents/Animation/AnimationManager.h"
 #include "Core/Compoonents/Animation/Model.h"
+#include "AnimationRigMapping.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Object.h"
+#include "Core/ComponentReference.h"
 #include "Core/Serialization/Json.h"
 #include <algorithm>
 #include <chrono>
@@ -20,6 +22,16 @@ namespace Engine::Model
 namespace
 {
 using Engine::Serialization::JsonValue;
+
+Engine::Components::Model* TargetModel(const Engine::Components::AnimationManager& manager)
+{
+    if (manager.modelReference.IsAssigned())
+        return Engine::Core::ResolveComponentReference<Engine::Components::Model>(
+            manager.Owner, manager.modelReference);
+    for (auto* object=manager.Owner;object;object=object->Parent)
+        if (auto* model=object->GetComponent<Engine::Components::Model>()) return model;
+    return nullptr;
+}
 
 bool Validate(const AnimationPackAsset& pack, std::string& error)
 {
@@ -96,13 +108,17 @@ AnimationPackAsset AnimationPackAsset::Capture(
     pack.speed = manager.speed;
     pack.time = manager.time;
     pack.layers = manager.layers;
-    const Engine::Components::Model* model = nullptr;
-    for (auto* object = manager.Owner; object && !model; object = object->Parent)
-        model = object->GetComponent<Engine::Components::Model>();
+    auto* model = TargetModel(manager);
     std::unordered_map<unsigned, std::string> pathsByIndex;
     if (model)
+    {
+        const auto rig = RigAsset::ForModel(*model);
+        pack.bindSkeleton = rig.bindNodes;
+        pack.humanoid = rig.humanoid;
+        pack.sourcePrefab = rig.prefabPath;
         for (const auto& [path, index] : NodePaths(*model))
             pathsByIndex.emplace(index, path);
+    }
     for (const auto& layer : manager.layers)
     {
         std::vector<std::string> paths;
@@ -127,6 +143,24 @@ std::optional<AnimationPackAsset> AnimationPackAsset::Load(
             !root["layers"].IsArray())
         { error = "Unsupported animation pack format"; return std::nullopt; }
         AnimationPackAsset pack;
+        pack.humanoid = HumanoidRig::Mapping::Deserialize(root["humanoid"]);
+        pack.sourcePrefab = root["sourcePrefab"].AsString();
+        for (size_t i=0;i<root["bindSkeleton"].ArraySize();++i)
+        {
+            const auto& value=root["bindSkeleton"].ArrayAt(i);
+            AnimationClipAsset::BaseNode node;
+            if (!value["path"].IsString()) {error="Invalid animation pack rest node";return std::nullopt;}
+            node.path=value["path"].AsString();node.parent=value["parent"].AsString();
+            for (const auto* field : {"position","rotation","scale"})
+                if (value[field].ArraySize()!=3) {error="Invalid animation pack rest transform";return std::nullopt;}
+            for (int axis=0;axis<3;++axis)
+            {
+                node.position[axis]=value["position"].ArrayAt(axis).AsFloat();
+                node.rotation[axis]=value["rotation"].ArrayAt(axis).AsFloat();
+                node.scale[axis]=value["scale"].ArrayAt(axis).AsFloat();
+            }
+            pack.bindSkeleton.push_back(std::move(node));
+        }
         pack.activeClip = root["activeClip"].AsString();
         pack.playing = !root.Has("playing") || root["playing"].AsBool();
         pack.looping = !root.Has("looping") || root["looping"].AsBool();
@@ -194,6 +228,16 @@ bool AnimationPackAsset::Save(const std::string& path, std::string& error) const
         savedClips.Push(JsonValue(
             Engine::Serialization::JsonWrite(clip.Serialize())));
     root.Set("clips", std::move(savedClips));
+    root.Set("humanoid",humanoid.Serialize()).Set("sourcePrefab",JsonValue(sourcePrefab));
+    auto rest=JsonValue::MakeArray();
+    for (const auto& node : bindSkeleton)
+    {
+        const auto vector=[](const glm::vec3& v)
+        {return JsonValue::MakeArray().Push(JsonValue(v.x)).Push(JsonValue(v.y)).Push(JsonValue(v.z));};
+        rest.Push(JsonValue::MakeObject().Set("path",JsonValue(node.path)).Set("parent",JsonValue(node.parent))
+            .Set("position",vector(node.position)).Set("rotation",vector(node.rotation)).Set("scale",vector(node.scale)));
+    }
+    root.Set("bindSkeleton",std::move(rest));
     JsonValue savedLayers = JsonValue::MakeArray();
     for (size_t index = 0; index < layers.size(); ++index)
     {
@@ -263,14 +307,35 @@ bool AnimationPackAsset::Apply(Engine::Components::AnimationManager& manager,
     if (!Validate(*this, error)) return false;
     if (clips.empty())
     { error = "Pack has source tracks only; bind or extract a track before playback"; return false; }
-    Engine::Components::Model* model = nullptr;
-    for (auto* object = manager.Owner; object && !model; object = object->Parent)
-        model = object->GetComponent<Engine::Components::Model>();
+    auto* model = TargetModel(manager);
     if (!model)
     { error = "Animation pack needs a target model"; return false; }
     const auto paths = NodePaths(*model);
     const auto meshWidths = MorphMeshWidths(*model);
     auto remapped = clips;
+    std::unordered_map<std::string,unsigned> semanticPaths;
+    if (!bindSkeleton.empty())
+    {
+        const auto target=RigAsset::ForModel(*model);
+        bool same=bindSkeleton.size()==target.bindNodes.size();
+        for (size_t i=0;same && i<bindSkeleton.size();++i)
+        {
+            const auto& a=bindSkeleton[i];const auto& b=target.bindNodes[i];
+            same=a.path==b.path && a.parent==b.parent && glm::length(a.position-b.position)<1e-5f &&
+                glm::length(a.rotation-b.rotation)<1e-5f && glm::length(a.scale-b.scale)<1e-5f;
+        }
+        for (auto& clip : remapped)
+        {
+            AnimationClipAsset source;source.clip=clip;source.bindSkeleton=bindSkeleton;
+            source.baseSkeleton=bindSkeleton;source.humanoid=humanoid;source.previewPrefab=sourcePrefab;
+            auto mapped=AnimationRigMapping::Map(source,*model,target,same);
+            if (mapped.unmatchedChannels)
+            {error="Animation pack has unresolved body/mesh channels; assign humanoid roles or extract and repair individual clips.";return false;}
+            for (size_t i=0;i<clip.channels.size();++i)
+                semanticPaths[clip.channels[i].targetPath]=mapped.clip.channels[i].nodeIndex;
+            clip=std::move(mapped.clip);
+        }
+    }
     for (auto& clip : remapped)
         for (auto& channel : clip.channels)
         {
@@ -305,9 +370,10 @@ bool AnimationPackAsset::Apply(Engine::Components::AnimationManager& manager,
             for (const auto& path : nodeMaskPaths[index])
             {
                 const auto found = paths.find(path);
-                if (found == paths.end())
-                { error = "Target model lacks masked node: " + path; return false; }
-                mask.push_back(found->second);
+                if (found != paths.end()) mask.push_back(found->second);
+                else if (const auto mapped=semanticPaths.find(path);mapped!=semanticPaths.end())
+                    mask.push_back(mapped->second);
+                else { error = "Target model lacks masked node: " + path; return false; }
             }
         }
         else

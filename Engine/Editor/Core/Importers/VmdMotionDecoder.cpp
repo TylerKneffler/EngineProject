@@ -92,6 +92,18 @@ std::string Cp932Name(const uint8_t* bytes, size_t capacity)
     while (size < capacity && bytes[size] != 0) ++size;
     if (size == 0) return {};
 #ifdef _WIN32
+    // VMD exporters can byte-truncate names at the fixed field boundary,
+    // leaving the lead byte of a CP932 character without its trailing byte.
+    // Discard only that incomplete final character; malformed sequences
+    // elsewhere (or before a terminator) must still fail strict conversion.
+    if (size == capacity)
+        for (size_t index = 0; index < size; ++index)
+            if (IsDBCSLeadByteEx(932, bytes[index]))
+            {
+                if (index + 1 == size) { --size; break; }
+                ++index;
+            }
+    if (size == 0) return {};
     const int wideCount = MultiByteToWideChar(932, MB_ERR_INVALID_CHARS,
         reinterpret_cast<const char*>(bytes), static_cast<int>(size), nullptr, 0);
     if (wideCount <= 0) throw std::runtime_error("Invalid CP932 VMD name");

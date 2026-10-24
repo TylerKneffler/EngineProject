@@ -838,6 +838,14 @@ if(MSVC)
 endif()
 
 set(ENGINE_LOCAL_TEST_ROOT "${ENGINE_ROOT}/.local/tests")
+if(NOT ENGINE_PROJECT_DIR AND EXISTS "${ENGINE_LOCAL_TEST_ROOT}/HumanoidRigTests.cpp")
+    enable_testing()
+    add_executable(HumanoidRigTests EXCLUDE_FROM_ALL "${ENGINE_LOCAL_TEST_ROOT}/HumanoidRigTests.cpp")
+    target_link_libraries(HumanoidRigTests PRIVATE Engine)
+    target_include_directories(HumanoidRigTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME HumanoidRigMapping COMMAND HumanoidRigTests)
+    set_tests_properties(HumanoidRigMapping PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
 
 if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/AssetLocationIndexTests.cpp")
@@ -1104,6 +1112,13 @@ if(NOT ENGINE_PROJECT_DIR AND
         WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()
 
+if(NOT ENGINE_PROJECT_DIR AND EXISTS "${ENGINE_LOCAL_TEST_ROOT}/ImportVisualAudit.cpp")
+    file(GLOB IMPORT_AUDIT_SOURCES CONFIGURE_DEPENDS "${ENGINE_ROOT}/Engine/Editor/Core/Importers/*.cpp")
+    add_executable(ImportVisualAudit EXCLUDE_FROM_ALL "${ENGINE_LOCAL_TEST_ROOT}/ImportVisualAudit.cpp" ${IMPORT_AUDIT_SOURCES})
+    target_link_libraries(ImportVisualAudit PRIVATE Engine fastgltf::fastgltf assimp::assimp ufbx)
+    target_include_directories(ImportVisualAudit PRIVATE "${ENGINE_ROOT}" "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Editor")
+endif()
+
 if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PrefabComponentOverrideTests.cpp")
     enable_testing()
@@ -1133,6 +1148,21 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/FbxDuplicateNameTests.cpp")
+    enable_testing()
+    add_executable(FbxDuplicateNameTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/FbxDuplicateNameTests.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/FbxModelDecoder.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/LegacyFbxModelDecoder.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/ModelAssetWriter.cpp")
+    target_link_libraries(FbxDuplicateNameTests PRIVATE Engine assimp::assimp ufbx)
+    target_include_directories(FbxDuplicateNameTests PRIVATE
+        "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Editor")
+    add_test(NAME FbxDuplicateNames COMMAND FbxDuplicateNameTests)
+    set_tests_properties(FbxDuplicateNames PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/VmdMotionDecoderTests.cpp")
     enable_testing()
     add_executable(VmdMotionDecoderTests EXCLUDE_FROM_ALL
@@ -1140,6 +1170,7 @@ if(NOT ENGINE_PROJECT_DIR AND
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/VmdMotionDecoder.cpp")
     target_include_directories(VmdMotionDecoderTests PRIVATE "${ENGINE_ROOT}/Engine")
     add_test(NAME VmdMotionDecoderRegression COMMAND VmdMotionDecoderTests)
+    set_tests_properties(VmdMotionDecoderRegression PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND

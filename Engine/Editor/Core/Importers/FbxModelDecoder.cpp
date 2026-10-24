@@ -347,6 +347,117 @@ bool DecodeAnimationOnly(const std::string& sourcePath,
 }
 }
 
+// Assimp animation channels identify their target by name, losing the FBX
+// connection identity when separate armatures reuse a bone name. Recover those
+// channels from ufbx and bind them through the complete source hierarchy.
+static bool AppendDuplicateNodeAnimations(const ufbx_scene& scene,
+    const std::unordered_set<std::string>& names,
+    const Engine::Model::ImportedModel& model,
+    Engine::Model::ImportedAnimation& animation, std::string& error)
+{
+    const ufbx_anim_stack* stack = nullptr;
+    for (const auto* candidate : scene.anim_stacks)
+        if (std::string(candidate->name.data, candidate->name.length) == animation.name)
+        {
+            if (stack) { error = "FBX animation stack name is ambiguous: " + animation.name; return false; }
+            stack = candidate;
+        }
+    if (!stack) { error = "Could not resolve FBX animation stack: " + animation.name; return false; }
+    ufbx_bake_opts options{};
+    options.trim_start_time = true;
+    options.resample_rate = 60.0;
+    ufbx_error bakeError{};
+    std::unique_ptr<ufbx_baked_anim, decltype(&ufbx_free_baked_anim)> baked(
+        ufbx_bake_anim(&scene, stack->anim, &options, &bakeError), ufbx_free_baked_anim);
+    if (!baked)
+    {
+        char message[1024]{};
+        ufbx_format_error(message, sizeof(message), &bakeError);
+        error = std::string("Could not bake duplicate-name FBX animation: ") + message;
+        return false;
+    }
+    std::unordered_set<std::string> resolved;
+    for (const auto& track : baked->nodes)
+    {
+        const auto* node = scene.nodes.data[track.typed_id];
+        const std::string name(node->name.data, node->name.length);
+        if (!names.count(name)) continue;
+        unsigned target = static_cast<unsigned>(model.nodes.size());
+        for (unsigned index = 0; index < model.nodes.size(); ++index)
+        {
+            if (model.nodes[index].name != name) continue;
+            int imported = static_cast<int>(index);
+            const ufbx_node* original = node;
+            while (original->parent && imported >= 0 && model.nodes[imported].parent >= 0)
+            {
+                if (model.nodes[imported].name.find("$AssimpFbx$") != std::string::npos)
+                { imported = model.nodes[imported].parent; continue; }
+                if (model.nodes[imported].name != std::string(original->name.data, original->name.length)) break;
+                imported = model.nodes[imported].parent;
+                original = original->parent;
+            }
+            if (original->parent || imported < 0 || model.nodes[imported].parent >= 0) continue;
+            if (target != model.nodes.size())
+            { error = "FBX duplicate bone hierarchy is ambiguous: " + name; return false; }
+            target = index;
+        }
+        if (target == model.nodes.size())
+        { error = "Could not match FBX duplicate bone hierarchy: " + name; return false; }
+        // Baked local TRS must use the same basis as the imported node. Reject
+        // split pivot/helper transforms rather than applying curves in a wrong basis.
+        const auto& rest = model.nodes[target];
+        const auto& transform = node->local_transform;
+        const glm::vec3 translation(static_cast<float>(transform.translation.x),
+            static_cast<float>(transform.translation.y), static_cast<float>(transform.translation.z));
+        const glm::vec3 scale(static_cast<float>(transform.scale.x),
+            static_cast<float>(transform.scale.y), static_cast<float>(transform.scale.z));
+        const glm::quat rotation(static_cast<float>(transform.rotation.w),
+            static_cast<float>(transform.rotation.x), static_cast<float>(transform.rotation.y),
+            static_cast<float>(transform.rotation.z));
+        if (glm::length(translation - rest.translation) > 1e-3f ||
+            glm::length(scale - rest.scale) > 1e-3f ||
+            std::abs(glm::dot(glm::normalize(rotation), glm::normalize(rest.rotation))) < .99999f)
+        { error = "FBX duplicate bone has incompatible pivot transforms: " + name; return false; }
+        const auto vectorChannel = [&](const ufbx_baked_vec3_list& keys,
+            Engine::Model::AnimationChannel::Path path)
+        {
+            if (!keys.count) return;
+            Engine::Model::AnimationChannel channel;
+            channel.nodeIndex = target;
+            channel.path = path;
+            channel.valueWidth = 3;
+            for (const auto& key : keys)
+            {
+                channel.times.push_back(static_cast<float>(key.time));
+                channel.values.insert(channel.values.end(), { static_cast<float>(key.value.x),
+                    static_cast<float>(key.value.y), static_cast<float>(key.value.z) });
+            }
+            animation.channels.push_back(std::move(channel));
+        };
+        vectorChannel(track.translation_keys, Engine::Model::AnimationChannel::Path::Translation);
+        vectorChannel(track.scale_keys, Engine::Model::AnimationChannel::Path::Scale);
+        if (track.rotation_keys.count)
+        {
+            Engine::Model::AnimationChannel channel;
+            channel.nodeIndex = target;
+            channel.path = Engine::Model::AnimationChannel::Path::Rotation;
+            channel.valueWidth = 4;
+            for (const auto& key : track.rotation_keys)
+            {
+                channel.times.push_back(static_cast<float>(key.time));
+                channel.values.insert(channel.values.end(), { static_cast<float>(key.value.x),
+                    static_cast<float>(key.value.y), static_cast<float>(key.value.z),
+                    static_cast<float>(key.value.w) });
+            }
+            animation.channels.push_back(std::move(channel));
+        }
+        resolved.insert(name);
+    }
+    if (resolved.size() != names.size())
+    { error = "Could not recover all duplicate-name FBX animation channels"; return false; }
+    return true;
+}
+
 bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::ImportedModel& model,
     std::string& error)
 {
@@ -520,6 +631,10 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
     {
         const aiMaterial* source = scene->mMaterials[index];
         Engine::Model::ImportedMaterial& material = model.materials[index];
+        // FBX color layers are independent of the surface material. Keep the
+        // data for painting, but do not multiply unused exporter color sets
+        // (often black) into the material's diffuse color by default.
+        material.useVertexColors = false;
         aiString materialName;
         if (source->Get(AI_MATKEY_NAME, materialName) == AI_SUCCESS)
             material.name = Name(materialName, "Material " + std::to_string(index + 1));
@@ -843,6 +958,7 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
         primitive.morphWeights = std::move(sortedWeights);
     }
 
+    std::unique_ptr<ufbx_scene, decltype(&ufbx_free_scene)> identityScene(nullptr, ufbx_free_scene);
     model.animations.reserve(scene->mNumAnimations);
     for (unsigned animationIndex = 0; animationIndex < scene->mNumAnimations; ++animationIndex)
     {
@@ -851,10 +967,34 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
         animation.name = Name(source->mName, "Animation " + std::to_string(animationIndex + 1));
         const double ticksPerSecond = source->mTicksPerSecond > 0.0 ? source->mTicksPerSecond : 25.0;
         animation.duration = static_cast<float>(source->mDuration / ticksPerSecond);
+        std::unordered_set<std::string> duplicateNames;
+        for (unsigned channel = 0; channel < source->mNumChannels; ++channel)
+        {
+            const std::string name = source->mChannels[channel]->mNodeName.C_Str();
+            const auto found = nodesByName.find(name);
+            if (found != nodesByName.end() && found->second.size() > 1)
+                duplicateNames.insert(name);
+        }
+        if (!duplicateNames.empty())
+        {
+            if (!identityScene)
+            {
+                ufbx_load_opts options{};
+                options.ignore_geometry = true;
+                options.ignore_embedded = true;
+                ufbx_error loadError{};
+                identityScene.reset(ufbx_load_file(sourcePath.c_str(), &options, &loadError));
+                if (!identityScene)
+                { error = "Could not read FBX source identities for duplicate bone names"; return false; }
+            }
+            if (!AppendDuplicateNodeAnimations(*identityScene, duplicateNames, model, animation, error))
+                return false;
+        }
         for (unsigned channelIndex = 0; channelIndex < source->mNumChannels; ++channelIndex)
         {
             const aiNodeAnim* sourceChannel = source->mChannels[channelIndex];
             const std::string nodeName = sourceChannel->mNodeName.C_Str();
+            if (duplicateNames.count(nodeName)) continue;
             const auto found = nodesByName.find(nodeName);
             if (found == nodesByName.end() || found->second.size() != 1)
             {

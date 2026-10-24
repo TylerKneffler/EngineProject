@@ -51,6 +51,7 @@ struct ImportedMaterial
     bool doubleSided = false;
     bool castsShadows = true;
     bool unlit = false;
+    bool useVertexColors = true;
     std::string alphaMode = "Opaque";
     std::string baseColorTexture;
     std::string metallicRoughnessTexture;

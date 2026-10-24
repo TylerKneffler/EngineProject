@@ -147,6 +147,7 @@ std::optional<AnimationClipAsset> AnimationClipAsset::Load(
         };
         readNodes(root["baseSkeleton"], asset.baseSkeleton);
         readNodes(root["bindSkeleton"], asset.bindSkeleton);
+        asset.humanoid = HumanoidRig::Mapping::Deserialize(root["humanoid"]);
         return asset;
     }
     catch (...) { return std::nullopt; }
@@ -160,6 +161,7 @@ bool AnimationClipAsset::Save(const std::string& path) const
         .Set("previewRig", Engine::Serialization::JsonValue(
             static_cast<int>(previewRig)))
         .Set("clip", clip.Serialize());
+    root.Set("humanoid", humanoid.Serialize());
     auto baseNodes = baseSkeleton;
     ApplyFirstKeyPose(clip, baseNodes);
     const auto writeNodes = [](const std::vector<BaseNode>& source)

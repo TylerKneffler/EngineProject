@@ -253,6 +253,38 @@ inline Result Map(const AnimationClipAsset& source,
     std::unordered_map<std::string, const AnimationClipAsset::BaseNode*> poseNodes;
     for (const auto& node : source.baseSkeleton)
         poseNodes.emplace(node.path, &node);
+    const auto& sourceRestNodes = source.bindSkeleton.empty() ? source.baseSkeleton : source.bindSkeleton;
+    auto sourceHumanoid = source.humanoid;
+    auto targetHumanoid = rig.humanoid;
+    std::unordered_map<std::string, size_t> sourceRoles;
+    bool humanoidReady = false;
+    const auto prepareHumanoid = [&]()
+    {
+        if (humanoidReady) return;
+        humanoidReady = true;
+        const auto conservative = [](const HumanoidRig::Detection& detection)
+        {
+            auto mapping = detection.mapping;
+            if (mapping.bones[HumanoidRig::Pelvis]<0 || mapping.bones[HumanoidRig::Spine]<0 ||
+                mapping.bones[HumanoidRig::LeftThigh]<0 || mapping.bones[HumanoidRig::RightThigh]<0)
+                return HumanoidRig::Mapping();
+            for (size_t role=0;role<HumanoidRig::Count;++role)
+                if (detection.confidence[role]<.75f) mapping.bones[role]=-1;
+            return mapping;
+        };
+        if (!sourceHumanoid.HasAssignments())
+            sourceHumanoid = conservative(HumanoidRig::Detect(HumanoidRig::Nodes(sourceRestNodes), sourceHumanoid));
+        if (!targetHumanoid.HasAssignments())
+        {
+            std::vector<unsigned> jointIndices;
+            for (const auto& joint : rig.joints) jointIndices.push_back(joint.nodeIndex);
+            const auto rest = rig.bindNodes.empty() ? AnimationClipAsset::CaptureBaseSkeleton(model) : rig.bindNodes;
+            targetHumanoid = conservative(HumanoidRig::Detect(HumanoidRig::Nodes(rest, jointIndices), targetHumanoid));
+        }
+        for (size_t role = 0; role < HumanoidRig::Count; ++role)
+            if (const int node = sourceHumanoid.bones[role]; node >= 0 && size_t(node) < sourceRestNodes.size())
+                sourceRoles.emplace(sourceRestNodes[node].path, role);
+    };
     std::unordered_map<std::string, glm::quat> sourceWorldRotations;
     const auto sourceWorldRotation = [&](auto&& self,
         const std::string& path) -> glm::quat
@@ -290,8 +322,33 @@ inline Result Map(const AnimationClipAsset& source,
     std::unordered_map<unsigned, std::string> owner;
     for (const auto& channel : source.clip.channels)
     {
-        const std::string& path = channel.targetPath;
+        std::string path = channel.targetPath;
+        if (path.empty() && channel.nodeIndex < sourceRestNodes.size()) path = sourceRestNodes[channel.nodeIndex].path;
         const Target* match = nullptr;
+        const auto humanoidTarget = [&]() -> const Target*
+        {
+            prepareHumanoid();
+            const auto role = sourceRoles.find(path);
+            size_t roleIndex = HumanoidRig::Count;
+            if (role != sourceRoles.end()) roleIndex = role->second;
+            else
+            {
+                const auto key = Role(Leaf(path));
+                for (size_t i=0;i<HumanoidRig::Count;++i)
+                    if (!key.empty() && key == HumanoidRig::Keys[i]) {roleIndex=i;break;}
+            }
+            if (roleIndex == HumanoidRig::Count) return nullptr;
+            const int node = targetHumanoid.bones[roleIndex];
+            if (node < 0) return nullptr;
+            for (const auto& target : targets)
+                if (target.joint && int(target.index) == node) return &target;
+            return nullptr;
+        };
+        // Saved semantic assignments take precedence across avatars. Exact
+        // identity and legacy name matching remain available for other tracks.
+        if (source.humanoid.HasAssignments() && rig.humanoid.HasAssignments() &&
+            !preserveLocalKeys && (source.previewPrefab.empty() || rig.prefabPath.empty() ||
+                source.previewPrefab != rig.prefabPath)) match = humanoidTarget();
         if (path.empty())
             for (const auto& target : targets)
                 if (target.index == channel.nodeIndex)
@@ -318,6 +375,7 @@ inline Result Map(const AnimationClipAsset& source,
             }
             if (candidates.size() == 1) match = candidates.front();
         }
+        if (!match) match = humanoidTarget();
         if (!match || (owner.count(match->index) && owner[match->index] != path))
         {
             ++result.unmatchedChannels;
