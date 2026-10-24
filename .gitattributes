@@ -5,3 +5,4 @@ ReleaseBuilds/EngineProject-v1.0.0-windows-x64.zip filter=lfs diff=lfs merge=lfs
 *.animpack -text -diff
 Engine/Core/Assets/mmd/Mococo[[:space:]]Dance/Meshes/*.morph filter=lfs diff=lfs merge=lfs -text
 Engine/Core/Assets/Models/mmd/Mococo[[:space:]]Dance/Meshes/*.morph filter=lfs diff=lfs merge=lfs -text
+*.morph filter=lfs diff=lfs merge=lfs -text
