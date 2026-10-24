@@ -683,6 +683,17 @@ target_include_directories(ProjectScripts PRIVATE
 set_target_properties(ProjectScripts PROPERTIES PREFIX "" OUTPUT_NAME "ProjectScripts")
 target_precompile_headers(ProjectScripts REUSE_FROM Engine)
 add_dependencies(Editor ProjectScripts)
+add_executable(TerrainCacheBake EXCLUDE_FROM_ALL
+    "${ENGINE_ROOT}/Tools/TerrainCacheBake.cpp"
+    "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainPerformance/TerrainPerformanceDriver.cpp"
+    "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/PerlinNoiseField.cpp"
+    "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainStreamingCameraDriver.cpp"
+)
+target_link_libraries(TerrainCacheBake PRIVATE Engine)
+target_include_directories(TerrainCacheBake PRIVATE
+    "${ENGINE_ROOT}/Engine"
+    "${ENGINE_ROOT}/Engine/Core/Assets"
+)
 source_group(TREE "${ENGINE_ROOT}" FILES
     ${EDITOR_SOURCES} ${EDITOR_HEADERS} ${EDITOR_RESOURCE_FILES})
 if(ENGINE_PROJECT_DIR)
@@ -1741,6 +1752,57 @@ if(NOT ENGINE_PROJECT_DIR AND
     set_tests_properties(TerrainGenGeneration PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}"
     )
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TerrainComponentTests.cpp")
+    enable_testing()
+    add_executable(TerrainComponentTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/TerrainComponentTests.cpp")
+    target_link_libraries(TerrainComponentTests PRIVATE Engine)
+    target_include_directories(TerrainComponentTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME TerrainComponentRegression COMMAND TerrainComponentTests)
+    set_tests_properties(TerrainComponentRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TerrainViewportTests.cpp")
+    enable_testing()
+    add_executable(TerrainViewportTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/TerrainViewportTests.cpp")
+    target_link_libraries(TerrainViewportTests PRIVATE Engine)
+    target_include_directories(TerrainViewportTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME TerrainViewportRegression COMMAND TerrainViewportTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TerrainManagerTests.cpp")
+    enable_testing()
+    add_executable(TerrainManagerTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/TerrainManagerTests.cpp")
+    target_link_libraries(TerrainManagerTests PRIVATE Engine)
+    target_include_directories(TerrainManagerTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME TerrainManagerRegression COMMAND TerrainManagerTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TerrainPerformanceSceneTests.cpp")
+    enable_testing()
+    add_executable(TerrainPerformanceSceneTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/TerrainPerformanceSceneTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainPerformance/TerrainPerformanceDriver.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/PerlinNoiseField.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainStreamingCameraDriver.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGen.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainChunk.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainPatch.cpp")
+    target_link_libraries(TerrainPerformanceSceneTests PRIVATE Engine)
+    target_include_directories(TerrainPerformanceSceneTests PRIVATE
+        "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Core/Assets")
+    add_test(NAME TerrainPerformanceSceneRegression COMMAND TerrainPerformanceSceneTests)
+    set_tests_properties(TerrainPerformanceSceneRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND

@@ -28,6 +28,10 @@ build/
 !.local/tests/VSCodeBridgeTests.js
 !.local/tests/StandaloneAssetTests.cpp
 !.local/tests/PrefabComponentOverrideTests.cpp
+!.local/tests/TerrainComponentTests.cpp
+!.local/tests/TerrainViewportTests.cpp
+!.local/tests/TerrainManagerTests.cpp
+!.local/tests/TerrainPerformanceSceneTests.cpp
 build
 editor-startup.log
 project-build.log
