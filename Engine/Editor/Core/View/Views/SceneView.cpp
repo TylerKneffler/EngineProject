@@ -811,6 +811,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
         OnDrawBottomPanel(ui);
         ImGui::EndChild();
     }
+    if (OnDocumentDrop) OnDocumentDrop(ui);
     ui.EndWindow();
 
     if (m_scene)

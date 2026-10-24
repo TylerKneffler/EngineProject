@@ -726,7 +726,8 @@ void HierarchyView::DrawObjectNode(
     else if (prefabRoot)
     {
         const EditorUiPrefabMenuResult prefabMenu = ui.PrefabOverrideMenu(obj,
-            Engine::Serialization::SceneSerializer::HasPrefabOverrides(*prefabRoot, true),
+            m_scene && m_scene->HasStarted() ? prefabRoot->PrefabHasOverrides :
+                Engine::Serialization::SceneSerializer::HasPrefabOverrides(*prefabRoot, true),
             !m_objectClipboard.empty(), true, row.contextMenuRequested);
         menu.propertiesRequested = prefabMenu.propertiesRequested;
         contextCopy = prefabMenu.copyRequested;

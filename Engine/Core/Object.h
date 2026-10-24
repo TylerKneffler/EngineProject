@@ -43,6 +43,7 @@ public:
     mutable bool PrefabOverrideCacheValid = false;
     mutable bool PrefabHasOverrides = false;
     mutable bool PrefabHasNonTransformOverrides = false;
+    // Internal lossless binary cache; scene/prefab files keep their public format.
     mutable std::string PrefabOverridePatchSnapshot;
     // Kept separately so moving a prefab root can be checked without parsing
     // and diffing the complete serialized prefab hierarchy every frame.

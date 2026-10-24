@@ -355,11 +355,11 @@ JsonValue SceneObjectBehavior::SerializeObject(
         try
         {
             if (!obj.PrefabOverridePatchSnapshot.empty())
-                prefabOverrides = JsonParse(obj.PrefabOverridePatchSnapshot);
+                prefabOverrides = AssetParse(obj.PrefabOverridePatchSnapshot);
         }
         catch (...) {}
         if (prefabOverrides.ArraySize() > 0)
-            node.Set("prefabOverrides", prefabOverrides);
+            node.Set("prefabOverrides", std::move(prefabOverrides));
         const JsonValue overrides = SerializeBakedMaterialOverrides(obj);
         if (overrides.ArraySize() > 0)
             node.Set("bakedMaterialOverrides", overrides);
@@ -451,6 +451,9 @@ void SceneObjectBehavior::AddPatch(JsonValue& patches, const JsonValue& path,
 void SceneObjectBehavior::DiffJson(const JsonValue& baseline, const JsonValue& current,
     const JsonValue& path, JsonValue& patches, bool skipRootTransform)
 {
+    // Unchanged tracks can contain millions of samples. Compare their values
+    // before allocating and deep-copying a patch path for each sample.
+    if (JsonEquals(baseline, current)) return;
     if (baseline.GetType() != current.GetType())
     {
         AddPatch(patches, path, &current);
@@ -513,7 +516,7 @@ void SceneObjectBehavior::EnsurePrefabPatchCache(const Engine::Core::Object& ins
 {
     if (instance.PrefabOverrideCacheValid) return;
     const JsonValue nonTransform = BuildPrefabPatches(instance, false);
-    instance.PrefabOverridePatchSnapshot = JsonWrite(nonTransform);
+    instance.PrefabOverridePatchSnapshot = AssetWriteBinary(nonTransform);
     instance.PrefabHasNonTransformOverrides = nonTransform.ArraySize() > 0;
     instance.PrefabHasOverrides = instance.PrefabHasNonTransformOverrides ||
         PrefabRootTransformDiffers(instance);
@@ -609,6 +612,10 @@ bool SceneObjectBehavior::ApplyObjectState(Engine::Core::Object& object, const J
         const JsonValue& source = components.ArrayAt(i);
         if (!*component || (*component)->GetTypeName() !=
             CurrentComponentType(source["type"].AsString())) return false;
+        // A transform/enabled override must not reload every mesh, material,
+        // rig and animation asset in the prefab.
+        if (!componentLayoutChanged && JsonEquals((*component)->Serialize(), source))
+            continue;
         if (source["type"].AsString() == "VmdSceneTrack")
         {
             const JsonValue migrated = CurrentComponentData(source);

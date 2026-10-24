@@ -326,13 +326,13 @@ bool AnimationPackAsset::Apply(Engine::Components::AnimationManager& manager,
         }
         for (auto& clip : remapped)
         {
-            AnimationClipAsset source;source.clip=clip;source.bindSkeleton=bindSkeleton;
+            AnimationClipAsset source;source.clip=std::move(clip);source.bindSkeleton=bindSkeleton;
             source.baseSkeleton=bindSkeleton;source.humanoid=humanoid;source.previewPrefab=sourcePrefab;
             auto mapped=AnimationRigMapping::Map(source,*model,target,same);
             if (mapped.unmatchedChannels)
             {error="Animation pack has unresolved body/mesh channels; assign humanoid roles or extract and repair individual clips.";return false;}
-            for (size_t i=0;i<clip.channels.size();++i)
-                semanticPaths[clip.channels[i].targetPath]=mapped.clip.channels[i].nodeIndex;
+            for (size_t i=0;i<source.clip.channels.size();++i)
+                semanticPaths[source.clip.channels[i].targetPath]=mapped.clip.channels[i].nodeIndex;
             clip=std::move(mapped.clip);
         }
     }

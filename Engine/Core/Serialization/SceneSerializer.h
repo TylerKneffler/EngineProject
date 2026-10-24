@@ -82,6 +82,9 @@ public:
     // Capture/restore a scene entirely in memory. Used by the editor to keep
     // play-mode mutations separate from the editable scene state.
     static std::string SaveToString(const Scene& scene);
+    // Compact, lossless editor history/play snapshot. LoadFromString accepts
+    // these bytes as well as the public XML/JSON scene formats.
+    static std::string SaveSnapshotToString(const Scene& scene);
     static bool LoadFromString(Scene& scene, const std::string& source,
         IGraphicsProvider* graphicsProvider = nullptr);
 

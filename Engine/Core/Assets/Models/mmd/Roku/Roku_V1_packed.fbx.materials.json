@@ -1,0 +1,334 @@
+{
+  "version": 1,
+  "materials": [
+    {
+      "name": "ACCESS.001",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "baseColorTexture": "Roku_RecoveredTextures/ACCESS.001_BaseColor.png",
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "doubleSided": false,
+      "alphaMode": "Opaque",
+      "metallicRoughnessTexture": "Roku_RecoveredTextures/ACCESS.001_MetallicRoughness.png",
+      "normalTexture": "Roku_RecoveredTextures/ACCESS.001_Normal.png",
+      "occlusionTexture": "",
+      "emissiveTexture": ""
+    },
+    {
+      "name": "Arms-2.001",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "baseColorTexture": "Roku_RecoveredTextures/Arms-2.001_BaseColor.png",
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "doubleSided": false,
+      "alphaMode": "Opaque",
+      "metallicRoughnessTexture": "Roku_RecoveredTextures/Arms-2.001_MetallicRoughness.png",
+      "normalTexture": "Roku_RecoveredTextures/Arms-2.001_Normal.png",
+      "occlusionTexture": "",
+      "emissiveTexture": ""
+    },
+    {
+      "name": "basemat.001",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "baseColorTexture": "Roku_RecoveredTextures/basemat.001_BaseColor.png",
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "doubleSided": false,
+      "alphaMode": "Opaque",
+      "metallicRoughnessTexture": "Roku_RecoveredTextures/basemat.001_MetallicRoughness.png",
+      "normalTexture": "Roku_RecoveredTextures/basemat.001_Normal.png",
+      "occlusionTexture": "",
+      "emissiveTexture": ""
+    },
+    {
+      "name": "Body-2.001",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "baseColorTexture": "Roku_RecoveredTextures/Body-2.001_BaseColor.png",
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "doubleSided": false,
+      "alphaMode": "Opaque",
+      "metallicRoughnessTexture": "Roku_RecoveredTextures/Body-2.001_MetallicRoughness.png",
+      "normalTexture": "Roku_RecoveredTextures/Body-2.001_Normal.png",
+      "occlusionTexture": "",
+      "emissiveTexture": ""
+    },
+    {
+      "name": "Fingernails-2.001",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "baseColorTexture": "Roku_RecoveredTextures/Fingernails-2.001_BaseColor.png",
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "doubleSided": false,
+      "alphaMode": "Opaque",
+      "metallicRoughnessTexture": "Roku_RecoveredTextures/Fingernails-2.001_MetallicRoughness.png",
+      "normalTexture": "Roku_RecoveredTextures/Fingernails-2.001_Normal.png",
+      "occlusionTexture": "",
+      "emissiveTexture": ""
+    },
+    {
+      "name": "GP_Torso.001",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "baseColorTexture": "Roku_RecoveredTextures/GP_Torso.001_BaseColor.png",
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "doubleSided": false,
+      "alphaMode": "Opaque",
+      "metallicRoughnessTexture": "Roku_RecoveredTextures/GP_Torso.001_MetallicRoughness.png",
+      "normalTexture": "Roku_RecoveredTextures/GP_Torso.001_Normal.png",
+      "occlusionTexture": "",
+      "emissiveTexture": ""
+    },
+    {
+      "name": "HAIRMAT.002",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "baseColorTexture": "Roku_RecoveredTextures/HAIRMAT.002_BaseColor.png",
+      "metallic": 0.26335877,
+      "roughness": 0.66793895,
+      "doubleSided": true,
+      "alphaMode": "Mask",
+      "normalTexture": "",
+      "metallicRoughnessTexture": "",
+      "occlusionTexture": "",
+      "emissiveTexture": ""
+    },
+    {
+      "name": "HAIRMAT.004",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "baseColorTexture": "Roku_RecoveredTextures/HAIRMAT.004_BaseColor.png",
+      "metallic": 0.26335877,
+      "roughness": 0.66793895,
+      "doubleSided": true,
+      "alphaMode": "Mask",
+      "normalTexture": "",
+      "metallicRoughnessTexture": "",
+      "occlusionTexture": "",
+      "emissiveTexture": ""
+    },
+    {
+      "name": "Head-2.001",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "baseColorTexture": "Roku_RecoveredTextures/Head-2.001_BaseColor.png",
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "doubleSided": false,
+      "alphaMode": "Opaque",
+      "metallicRoughnessTexture": "Roku_RecoveredTextures/Head-2.001_MetallicRoughness.png",
+      "normalTexture": "Roku_RecoveredTextures/Head-2.001_Normal.png",
+      "occlusionTexture": "",
+      "emissiveTexture": ""
+    },
+    {
+      "name": "InFace",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "baseColorTexture": "Roku_RecoveredTextures/InFace_BaseColor.png",
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "doubleSided": false,
+      "alphaMode": "Opaque",
+      "metallicRoughnessTexture": "Roku_RecoveredTextures/InFace_MetallicRoughness.png",
+      "normalTexture": "Roku_RecoveredTextures/InFace_Normal.png",
+      "occlusionTexture": "",
+      "emissiveTexture": ""
+    },
+    {
+      "name": "InFace.002",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "baseColorTexture": "Roku_RecoveredTextures/InFace.002_BaseColor.png",
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "doubleSided": false,
+      "alphaMode": "Opaque",
+      "metallicRoughnessTexture": "Roku_RecoveredTextures/InFace.002_MetallicRoughness.png",
+      "normalTexture": "Roku_RecoveredTextures/InFace.002_Normal.png",
+      "occlusionTexture": "",
+      "emissiveTexture": ""
+    },
+    {
+      "name": "Legs-2.002",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "baseColorTexture": "Roku_RecoveredTextures/Legs-2.002_BaseColor.png",
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "doubleSided": false,
+      "alphaMode": "Opaque",
+      "metallicRoughnessTexture": "Roku_RecoveredTextures/Legs-2.002_MetallicRoughness.png",
+      "normalTexture": "Roku_RecoveredTextures/Legs-2.002_Normal.png",
+      "occlusionTexture": "",
+      "emissiveTexture": ""
+    },
+    {
+      "name": "M_Roku.009",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "baseColorTexture": "Roku_RecoveredTextures/M_Roku.009_BaseColor.png",
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "doubleSided": false,
+      "alphaMode": "Opaque",
+      "metallicRoughnessTexture": "Roku_RecoveredTextures/M_Roku.009_MetallicRoughness.png",
+      "normalTexture": "Roku_RecoveredTextures/M_Roku.009_Normal.png",
+      "occlusionTexture": "",
+      "emissiveTexture": ""
+    },
+    {
+      "name": "M_Roku_Access.001",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "baseColorTexture": "Roku_RecoveredTextures/M_Roku_Access.001_BaseColor.png",
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "doubleSided": false,
+      "alphaMode": "Mask",
+      "metallicRoughnessTexture": "Roku_RecoveredTextures/M_Roku_Access.001_MetallicRoughness.png",
+      "normalTexture": "Roku_RecoveredTextures/M_Roku_Access.001_Normal.png",
+      "occlusionTexture": "",
+      "emissiveTexture": ""
+    },
+    {
+      "name": "Material.003",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "baseColorTexture": "Roku_RecoveredTextures/Material.003_BaseColor.png",
+      "metallic": 0.26335877,
+      "roughness": 0.66793895,
+      "doubleSided": true,
+      "alphaMode": "Mask",
+      "normalTexture": "",
+      "metallicRoughnessTexture": "",
+      "occlusionTexture": "",
+      "emissiveTexture": ""
+    },
+    {
+      "name": "Mouth Cavity-2.001",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "baseColorTexture": "Roku_RecoveredTextures/Mouth_Cavity-2.001_BaseColor.png",
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "doubleSided": false,
+      "alphaMode": "Opaque",
+      "metallicRoughnessTexture": "Roku_RecoveredTextures/Mouth_Cavity-2.001_MetallicRoughness.png",
+      "normalTexture": "Roku_RecoveredTextures/Mouth_Cavity-2.001_Normal.png",
+      "occlusionTexture": "",
+      "emissiveTexture": ""
+    },
+    {
+      "name": "Tear-1.002",
+      "baseColor": [
+        1,
+        1,
+        1,
+        0.035
+      ],
+      "baseColorTexture": "Roku_RecoveredTextures/Tear-1.002_BaseColor.png",
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "doubleSided": false,
+      "alphaMode": "Blend",
+      "metallicRoughnessTexture": "Roku_RecoveredTextures/Tear-1.002_MetallicRoughness.png",
+      "normalTexture": "Roku_RecoveredTextures/Tear-1.002_Normal.png",
+      "occlusionTexture": "",
+      "emissiveTexture": ""
+    },
+    {
+      "name": "eyemat",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "baseColorTexture": "Roku_RecoveredTextures/eyemat_BaseColor.png",
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "doubleSided": false,
+      "alphaMode": "Opaque",
+      "normalTexture": "",
+      "metallicRoughnessTexture": "Roku_RecoveredTextures/eyemat_MetallicRoughness.png",
+      "occlusionTexture": "",
+      "emissiveTexture": "Roku_RecoveredTextures/eyemat_Emissive.png",
+      "emissiveColor": [
+        1,
+        1,
+        1
+      ]
+    }
+  ]
+}

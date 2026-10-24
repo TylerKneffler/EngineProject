@@ -7,6 +7,8 @@
 #include <cassert>
 #include <iomanip>
 #include <algorithm>
+#include <charconv>
+#include <cmath>
 
 namespace Engine::Serialization
 {
@@ -234,16 +236,16 @@ void WriteImpl(const JsonValue& v, std::string& out, int indent)
     {
         double d = v.AsDouble();
         // Emit integer form when the value is a whole number in safe range.
-        if (d == static_cast<double>(static_cast<long long>(d)) &&
-            d >= -1e15 && d <= 1e15)
+        if (d >= -1e15 && d <= 1e15 && std::trunc(d) == d)
         {
             out += std::to_string(static_cast<long long>(d));
         }
         else
         {
-            std::ostringstream ss;
-            ss << std::setprecision(7) << d;
-            out += ss.str();
+            char buffer[64];
+            const auto converted = std::to_chars(buffer, buffer + sizeof(buffer),
+                d, std::chars_format::general, 7);
+            out.append(buffer, converted.ptr);
         }
         break;
     }

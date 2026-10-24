@@ -21,6 +21,11 @@ std::string Scene::SaveToString() const
     return Engine::Serialization::SceneSerializer::SaveToString(*this);
 }
 
+std::string Scene::SaveSnapshotToString() const
+{
+    return Engine::Serialization::SceneSerializer::SaveSnapshotToString(*this);
+}
+
 bool Scene::LoadFromString(const std::string& source)
 {
     if (!m_graphicsProvider)

@@ -87,31 +87,8 @@ void EditorState::DrawSkeletonEditTools(IEditorUi& ui)
     auto* skeleton = session->skeleton;
     if (!skeleton)
     { ui.DisabledLabel("Select an object containing a skeleton."); return; }
-    std::string animationPath;
-    if (m_activeSceneAssetDocument && m_activeSceneAssetDocument->prefab)
-        animationPath = m_activeSceneAssetDocument->stageDataPath.empty()
-            ? m_activeSceneAssetDocument->path
-            : m_activeSceneAssetDocument->stageDataPath;
-    else if (m_prefabDocumentFocused && !m_activePrefabPath.empty())
-        animationPath = m_activePrefabPath;
-    else if (skeleton->Owner)
-        if (auto* prefabRoot = skeleton->Owner->GetPrefabInstanceRoot();
-            prefabRoot && prefabRoot->Prefab)
-            animationPath = prefabRoot->Prefab->GetPath();
-    const bool selectedRig = ExplicitRigSelection(skeleton,
-        scene->GetSelectedObject());
-    if (!toolbarPopup && !animationPath.empty() && selectedRig &&
-        ui.Button("Open Animation Editor"))
-    {
-        if (m_activeSceneAssetDocument &&
-            (m_activeSceneAssetDocument->dirty ||
-                m_activeSceneAssetDocument->meshEdit.dirty))
-            session->error = "Save the rig and weights before opening the Animation Editor.";
-        else if (m_prefabDocumentFocused && m_prefabHasUnsavedChanges)
-            session->error = "Save the prefab before opening the Animation Editor.";
-        else QueueAnimationDocumentOpen(animationPath,
-            RigOrdinal(*scene, skeleton));
-    }
+    if (!toolbarPopup && ui.Button("Edit Animation"))
+        QueueAnimationObjectOpen(skeleton->Owner);
     const auto& bones = skeleton->ResolveJoints();
     const auto* selectedGroup = Engine::Components::BoneGroup::ForSelection(
         scene->GetSelectedObject());

@@ -95,6 +95,7 @@ public:
     std::function<bool(IEditorUi&, const EditorUiViewportInput&,
         EditorTransformTool)> OnMeshViewportInput;
     std::function<bool(IEditorUi&, const EditorUiViewportInput&)> OnDrawRigControls;
+    std::function<void(IEditorUi&)> OnDocumentDrop;
     std::function<bool(const Engine::Core::Object*)> CanSelectObject;
     bool AllowObjectCreation = true;
     bool AllowAssetDrops = true;

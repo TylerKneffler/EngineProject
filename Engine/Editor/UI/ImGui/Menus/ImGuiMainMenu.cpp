@@ -164,7 +164,7 @@ void ImGuiMainMenu::DrawViewsMenu(EditorState& state) const
     if (ImGui::MenuItem("Scene")) OpenPanel(state, "Scene");
     if (ImGui::MenuItem("Game")) OpenPanel(state, "Game");
     if (ImGui::MenuItem("Animation Editor"))
-        state.OpenAnimationForSelection();
+        state.OpenAnimationEditor();
     if (no3D) ImGui::EndDisabled();
 
     ImGui::Separator();

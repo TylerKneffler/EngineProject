@@ -12,6 +12,7 @@
 #include <chrono>
 #include <iostream>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <stdexcept>
 
@@ -34,6 +35,22 @@ int main(int argc, char** argv)
         << " meshes, " << model.animations.size() << " animations\n";
     CHECK(model.primitives.size() == 31 && !model.skins.empty());
     for (const auto& material : model.materials) CHECK(!material.useVertexColors);
+    // The original FBX contains no usable body texture references. Recovery
+    // must survive a fresh import, including cutout hair and packed PBR maps.
+    unsigned recoveredMaterials = 0;
+    for (const auto& material : model.materials)
+    {
+        if (material.baseColorTexture.empty()) continue;
+        CHECK(std::filesystem::is_regular_file(std::filesystem::path(source).parent_path() / material.baseColorTexture));
+        CHECK(glm::length(glm::vec3(material.baseColor) - glm::vec3(1.f)) < .0001f);
+        if (!material.normalTexture.empty())
+            CHECK(std::filesystem::is_regular_file(std::filesystem::path(source).parent_path() / material.normalTexture));
+        if (material.name == "HAIRMAT.002" || material.name == "HAIRMAT.004")
+            CHECK(material.alphaMode == "Mask" && material.doubleSided);
+        if (material.name == "Body-2.001") CHECK(!material.metallicRoughnessTexture.empty());
+        ++recoveredMaterials;
+    }
+    CHECK(recoveredMaterials == 18);
     CHECK(std::any_of(model.skins.begin(), model.skins.end(),
         [](const auto& skin) { return skin.jointNodes.size() > 256; }));
     if (argc > 1 && std::string(argv[1]) == "--inspect")
@@ -115,7 +132,7 @@ int main(int argc, char** argv)
         ("roku-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())));
     const auto result = Engine::Editor::ModelAssetWriter::Write(model, source, output.string());
     if (!result.success) throw std::runtime_error(result.message);
-    CHECK(result.message.find("missing source texture files") != std::string::npos);
+    CHECK(result.message.find("missing source texture files") == std::string::npos);
     Engine::Scene::Scene importedScene;
     auto* root = Engine::Serialization::SceneSerializer::InstantiatePrefab(importedScene, result.prefabPath, nullptr);
     CHECK(root);
@@ -135,6 +152,22 @@ int main(int argc, char** argv)
             CHECK(bone->Parent->name == model.nodes[model.nodes[index].parent].name);
         }
     std::cout << "Both braid animations match source keys; Roku prefab imports into a scene\n";
+    // Invalid recovery data must fail with a useful error rather than silently
+    // falling back to the untextured FBX or loading a file outside its folder.
+    const auto fixture = output / "material-fixture.fbx";
+    std::filesystem::copy_file(source, fixture);
+    for (const char* invalid : {
+        R"({"version":2,"materials":[]})",
+        R"({"version":1,"materials":[{"name":"not-a-material"}]})",
+        R"({"version":1,"materials":[{"name":"Body-2.001","roughness":2}]})",
+        R"({"version":1,"materials":[{"name":"Body-2.001","baseColorTexture":"../outside.png"}]})" })
+    {
+        { std::ofstream file(fixture.string() + ".materials.json"); file << invalid; }
+        Engine::Model::ImportedModel rejected;
+        CHECK(!Engine::Editor::FbxModelDecoder::Decode(fixture.string(), rejected, error));
+        CHECK(error.find("Invalid FBX material companion") != std::string::npos);
+    }
+    std::cout << "Recovered material textures, cutout hair, and invalid companion checks passed\n";
     return 0;
     }
     catch (const std::exception& error)

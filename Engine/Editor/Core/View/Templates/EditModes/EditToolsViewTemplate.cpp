@@ -621,8 +621,8 @@ void EditorState::DrawToolbarTools(IEditorUi& ui, bool singleRow,
             open("Hierarchy...", "Hierarchy");
     }
 
-    if (CanOpenAnimationForSelection() && button("Animation Editor"))
-        OpenAnimationForSelection();
+    if (button("Animation Editor"))
+        OpenAnimationEditor();
 
     if (ImGui::IsPopupOpen("##ToolbarToolPopup"))
     {

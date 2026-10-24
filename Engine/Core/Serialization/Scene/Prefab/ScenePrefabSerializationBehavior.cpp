@@ -268,6 +268,12 @@ Engine::Core::Object* SceneSerializer::InstantiatePrefab(
                 model->BindNode(index, object);
         }
         Detail::SceneObjectBehavior::SetPrefabSourceSnapshot(*rootObject, Detail::SceneObjectBehavior::SerializeObject(*rootObject, false));
+        // The baseline was captured from this exact instance. Its first
+        // inspector/undo query does not need to parse and diff it again.
+        rootObject->PrefabOverridePatchSnapshot.clear();
+        rootObject->PrefabHasNonTransformOverrides = false;
+        rootObject->PrefabHasOverrides = false;
+        rootObject->PrefabOverrideCacheValid = true;
         rootObject->SetPrefab(path);
         return rootObject;
     }

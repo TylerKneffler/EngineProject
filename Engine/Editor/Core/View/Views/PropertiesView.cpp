@@ -515,7 +515,8 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         ? HandleWindowAssetDrop(ui) : std::string{};
     Engine::Core::Object* prefabRoot = m_selectedObject->GetPrefabInstanceRoot();
     const bool hasPrefabOverrides = prefabRoot &&
-        Engine::Serialization::SceneSerializer::HasPrefabOverrides(*prefabRoot, true);
+        (m_scene && m_scene->HasStarted() ? prefabRoot->PrefabHasOverrides :
+            Engine::Serialization::SceneSerializer::HasPrefabOverrides(*prefabRoot, true));
     char name[256]; strncpy_s(name, m_selectedObject->name.c_str(), sizeof(name));
     bool enabled = m_selectedObject->enabled;
     const EditorUiObjectRowResult header = ui.ObjectHeader(
@@ -641,7 +642,7 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         EditorUiContextMenuResult menu;
         if (componentPrefabRoot)
             HandlePrefabMenu(ui.PrefabOverrideMenu(component,
-                Engine::Serialization::SceneSerializer::HasPrefabOverrides(*componentPrefabRoot, true)));
+                hasPrefabOverrides));
         else if (m_allowComponentStructureEdits)
             menu = ui.ContextMenu(component, "Add Component",
                 "Delete Component", false);
@@ -680,6 +681,13 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             ui.Indent(12.f);
             componentPropertiesChanged =
                 component->DrawProperties(ui) || componentPropertiesChanged;
+            if (auto* manager = dynamic_cast<Engine::Components::AnimationManager*>(component);
+                manager && !manager->editAnimationRequest.empty())
+            {
+                const auto clipName = std::move(manager->editAnimationRequest);
+                manager->editAnimationRequest.clear();
+                if (OnEditObjectAnimation) OnEditObjectAnimation(manager->Owner, clipName);
+            }
             ui.Unindent(12.f);
         }
         ui.PopId();

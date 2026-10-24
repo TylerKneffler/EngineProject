@@ -125,8 +125,9 @@ public:
       void QueueAnimationDocumentOpen(const std::string& path,
           size_t rigIndex = 0);
     void QueueAnimationAssetOpen(const std::string& path);
-    bool CanOpenAnimationForSelection() const;
-    void OpenAnimationForSelection();
+    void OpenAnimationEditor();
+    void QueueAnimationObjectOpen(Engine::Core::Object* object,
+        const std::string& clipName = {});
     bool CanCreateAnimationClip() const;
     bool CreateAnimationClip(const std::string& name);
     void ProcessPendingAnimationDocumentOpens();
@@ -587,23 +588,16 @@ private:
             bool selected = false;
         };
         std::vector<RigTrack> tracks;
-          struct RigAsset
-          {
-              std::string path;
-              std::string label;
-              size_t rigIndex = 0;
-              std::string assetPath;
-          };
         std::string path;
         std::string identity;
+        Engine::Core::Object* sourceObject = nullptr;
+        std::string standaloneAssetPath;
+        std::unordered_map<std::string, std::string> clipAssetPaths;
           size_t rigIndex = 0;
           std::string rigName;
           std::string rigPath;
         std::string animationAssetToAdd;
           std::vector<std::string> boundMeshNames;
-          std::vector<RigAsset> rigAssets;
-          char rigSearch[128]{};
-        bool rigAssetsDirty = true;
         struct CachedClip
         {
             struct UnresolvedRow
@@ -732,7 +726,7 @@ private:
     void SelectAnimationDocumentClip(AnimationDocument& document,
         const std::string& clipName, size_t rigIndex);
     void FocusAnimationRig(AnimationDocument& document, size_t index);
-    std::pair<std::string, size_t> SelectedAnimationRig() const;
+    void HandleAnimationEditorDrop(IEditorUi& ui);
     void DrawAnimationTimeline(IEditorUi& ui, AnimationDocument& document);
     void DrawAnimationTimelinePanel(IEditorUi& ui);
     void DrawAnimationRigToolbar(IEditorUi& ui,
@@ -778,7 +772,6 @@ private:
     bool SaveAnimationDocument(AnimationDocument& document);
     bool StepAnimationHistory(AnimationDocument& document, bool redo);
     void RefreshAnimationDocumentTitle(AnimationDocument& document);
-      void ScanAnimationRigAssets(AnimationDocument& document);
     void DrawObjectStageTools(IEditorUi& ui, SceneAssetDocument& document);
     void DrawMeshStageTools(IEditorUi& ui, SceneAssetDocument& document);
     void SetActiveSceneAssetDocument(SceneAssetDocument* document,
@@ -823,6 +816,15 @@ private:
     std::vector<std::unique_ptr<AnimationDocument>> m_animationDocuments;
       std::deque<std::pair<std::string, size_t>> m_pendingAnimationDocuments;
     std::unordered_map<std::string, std::string> m_pendingAnimationClipSelections;
+    struct AnimationSourceRequest
+    {
+        std::string snapshot;
+        std::string prefabPath;
+        Engine::Core::Object* sourceObject = nullptr;
+        std::string standaloneAssetPath;
+    };
+    std::unordered_map<std::string, AnimationSourceRequest> m_pendingAnimationSources;
+    std::unordered_map<std::string, std::string> m_pendingAnimationClipAssets;
     AnimationDocument* m_activeAnimationDocument = nullptr;
     AnimationDocument* m_timelineAnimationDocument = nullptr;
     MeshEditSession m_mainMeshEdit;

@@ -1,5 +1,6 @@
 #include "FbxModelDecoder.h"
 #include "LegacyFbxModelDecoder.h"
+#include "Core/Serialization/Json.h"
 
 #include <assimp/Importer.hpp>
 #include <assimp/config.h>
@@ -20,6 +21,7 @@
 #include <limits>
 #include <memory>
 #include <numeric>
+#include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -65,6 +67,111 @@ std::string TexturePath(const aiMaterial* material, aiTextureType type)
     aiString path;
     return material && material->GetTexture(type, 0, &path) == AI_SUCCESS
         ? std::string(path.C_Str()) : std::string{};
+}
+
+// FBX cannot represent arbitrary Blender node graphs. A companion material
+// file can restore baked PBR inputs without changing mesh/rig/animation data.
+bool ApplyMaterialCompanion(const std::string& sourcePath,
+    Engine::Model::ImportedModel& model, std::string& error)
+{
+    namespace fs = std::filesystem;
+    const fs::path path = sourcePath + ".materials.json";
+    if (!fs::exists(path)) return true;
+    try
+    {
+        const auto root = Engine::Serialization::JsonParseFile(path.string());
+        if (root["version"].AsInt() != 1 || !root["materials"].IsArray())
+            throw std::runtime_error("Expected version 1 and a materials array");
+        const auto directory = fs::weakly_canonical(fs::path(sourcePath).parent_path());
+        std::unordered_set<std::string> names;
+        for (size_t i = 0; i < root["materials"].ArraySize(); ++i)
+        {
+            const auto& entry = root["materials"].ArrayAt(i);
+            const auto& name = entry["name"].AsString();
+            auto found = std::find_if(model.materials.begin(), model.materials.end(),
+                [&](const auto& material) { return material.name == name; });
+            if (name.empty() || found == model.materials.end() || !names.insert(name).second)
+                throw std::runtime_error("Unknown or duplicate material: " + name);
+            auto& material = *found;
+            auto scalar = [&](const char* key, float& value)
+            {
+                if (!entry.Has(key)) return;
+                const auto& input = entry[key];
+                if (!input.IsNumber() || !std::isfinite(input.AsFloat()) ||
+                    input.AsFloat() < 0.f || input.AsFloat() > 1.f)
+                    throw std::runtime_error(std::string("Invalid ") + key + " for " + name);
+                value = input.AsFloat();
+            };
+            scalar("metallic", material.metallic);
+            scalar("roughness", material.roughness);
+            scalar("alphaCutoff", material.alphaCutoff);
+            if (entry.Has("emissiveColor"))
+            {
+                const auto& color = entry["emissiveColor"];
+                if (!color.IsArray() || color.ArraySize() != 3)
+                    throw std::runtime_error("Expected RGB emissiveColor for " + name);
+                for (size_t component = 0; component < 3; ++component)
+                {
+                    const auto& value = color.ArrayAt(component);
+                    if (!value.IsNumber() || !std::isfinite(value.AsFloat()) || value.AsFloat() < 0.f)
+                        throw std::runtime_error("Invalid emissiveColor for " + name);
+                    material.emissiveColor[static_cast<int>(component)] = value.AsFloat();
+                }
+            }
+            if (entry.Has("baseColor"))
+            {
+                const auto& color = entry["baseColor"];
+                if (!color.IsArray() || color.ArraySize() != 4)
+                    throw std::runtime_error("Expected RGBA baseColor for " + name);
+                for (size_t component = 0; component < 4; ++component)
+                {
+                    const auto& value = color.ArrayAt(component);
+                    if (!value.IsNumber() || !std::isfinite(value.AsFloat()) ||
+                        value.AsFloat() < 0.f || value.AsFloat() > 1.f)
+                        throw std::runtime_error("Invalid baseColor for " + name);
+                    material.baseColor[static_cast<int>(component)] = value.AsFloat();
+                }
+            }
+            if (entry.Has("alphaMode"))
+            {
+                const auto& mode = entry["alphaMode"].AsString();
+                if (mode != "Opaque" && mode != "Mask" && mode != "Blend")
+                    throw std::runtime_error("Invalid alphaMode for " + name);
+                material.alphaMode = mode;
+            }
+            if (entry.Has("doubleSided"))
+            {
+                if (!entry["doubleSided"].IsBool())
+                    throw std::runtime_error("Expected doubleSided boolean for " + name);
+                material.doubleSided = entry["doubleSided"].AsBool();
+            }
+            auto texture = [&](const char* key, std::string& value)
+            {
+                if (!entry.Has(key)) return;
+                if (!entry[key].IsString())
+                    throw std::runtime_error(std::string("Expected texture path: ") + key);
+                const fs::path relative(entry[key].AsString());
+                if (relative.empty()) { value.clear(); return; }
+                const auto resolved = fs::weakly_canonical(directory / relative);
+                const auto local = resolved.lexically_relative(directory);
+                if (relative.is_absolute() || local.empty() ||
+                    *local.begin() == ".." || !fs::is_regular_file(resolved))
+                    throw std::runtime_error("Missing texture or path outside source directory: " + relative.string());
+                value = relative.generic_string();
+            };
+            texture("baseColorTexture", material.baseColorTexture);
+            texture("metallicRoughnessTexture", material.metallicRoughnessTexture);
+            texture("normalTexture", material.normalTexture);
+            texture("occlusionTexture", material.occlusionTexture);
+            texture("emissiveTexture", material.emissiveTexture);
+        }
+        return true;
+    }
+    catch (const std::exception& exception)
+    {
+        error = "Invalid FBX material companion " + path.string() + ": " + exception.what();
+        return false;
+    }
 }
 
 struct Influence { unsigned joint = 0; float weight = 0.f; };
@@ -740,6 +847,8 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
             material->alphaMode = alpha;
         }
     }
+
+    if (!ApplyMaterialCompanion(sourcePath, model, error)) return false;
 
     model.primitives.resize(scene->mNumMeshes);
     std::vector<std::vector<unsigned>> morphIndexRemaps(scene->mNumMeshes);

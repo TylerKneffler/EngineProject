@@ -318,10 +318,11 @@ inline Result Map(const AnimationClipAsset& source,
     }
     Result result;
     result.clip = source.clip;
-    result.clip.channels.clear();
     std::unordered_map<unsigned, std::string> owner;
-    for (const auto& channel : source.clip.channels)
+    for (size_t channelIndex = 0; channelIndex < source.clip.channels.size(); ++channelIndex)
     {
+        const auto& channel = source.clip.channels[channelIndex];
+        auto& mapped = result.clip.channels[channelIndex];
         std::string path = channel.targetPath;
         if (path.empty() && channel.nodeIndex < sourceRestNodes.size()) path = sourceRestNodes[channel.nodeIndex].path;
         const Target* match = nullptr;
@@ -382,13 +383,10 @@ inline Result Map(const AnimationClipAsset& source,
             if (std::find(result.unmatchedPaths.begin(), result.unmatchedPaths.end(),
                     path) == result.unmatchedPaths.end())
                 result.unmatchedPaths.push_back(path);
-            auto unresolved = channel;
-            unresolved.nodeIndex = std::numeric_limits<unsigned>::max();
-            result.clip.channels.push_back(std::move(unresolved));
+            mapped.nodeIndex = std::numeric_limits<unsigned>::max();
             continue;
         }
         owner[match->index] = path;
-        auto mapped = channel;
         mapped.nodeIndex = match->index;
         mapped.targetPath = match->path;
         // FBX helper nodes bake axis corrections into the source bone's parent.
@@ -459,7 +457,6 @@ inline Result Map(const AnimationClipAsset& source,
                     }
                 }
             }
-        result.clip.channels.push_back(std::move(mapped));
         if (match->path != path) ++result.inferredChannels;
     }
     return result;

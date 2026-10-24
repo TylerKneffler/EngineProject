@@ -2,9 +2,9 @@
     "version": 1,
     "useVertexColors": false,
     "baseColor": [
-        0,
-        0,
-        0
+        1,
+        1,
+        1
     ],
     "ambientColor": [
         0.1,
@@ -17,14 +17,14 @@
         1
     ],
     "emissive": [
-        0,
-        0,
-        0
+        1,
+        1,
+        1
     ],
     "shininess": 32,
     "specularModel": "MetallicRoughness",
-    "metallic": 0,
-    "roughness": 0,
+    "metallic": 1.0,
+    "roughness": 1.0,
     "subsurfaceEnabled": false,
     "subsurfaceWeight": 0,
     "subsurfaceRadius": [
@@ -92,5 +92,8 @@
     "normalUvSet": 0,
     "occlusionUvSet": 0,
     "emissiveUvSet": 0,
-    "heightUvSet": 0
+    "heightUvSet": 0,
+    "baseColorTexture": "Engine/Core/Assets/Models/mmd/Roku/Roku_RecoveredTextures/eyemat_BaseColor.png",
+    "metallicRoughnessTexture": "Engine/Core/Assets/Models/mmd/Roku/Roku_RecoveredTextures/eyemat_MetallicRoughness.png",
+    "emissiveTexture": "Engine/Core/Assets/Models/mmd/Roku/Roku_RecoveredTextures/eyemat_Emissive.png"
 }

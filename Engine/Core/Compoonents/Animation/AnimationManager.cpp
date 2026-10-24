@@ -285,6 +285,7 @@ struct AnimationManagerScratch
     ReusablePose basePose;
     ReusablePose finalPose;
     std::vector<float> channelValues;
+    std::unordered_map<Mesh*, std::vector<float>> morphWeights;
     std::vector<LayerMaskCache> layerMasks;
     std::vector<SampleCacheEntry> sampleCache;
     size_t sampleCacheUsed = 0;
@@ -395,7 +396,8 @@ void AnimationManager::RefreshRigClips(bool remap)
                 else *found = std::move(asset->clip);
                 m_externalClipNames.insert(name);
             }
-    const auto target = model ? ReferencedTargetRig(*model) : Engine::Model::RigAsset();
+    const auto target = model && !animationPaths.empty()
+        ? ReferencedTargetRig(*model) : Engine::Model::RigAsset();
     for (const auto& path : animationPaths)
         if (loadedPaths.insert(path).second)
             if (auto asset = Engine::Model::AnimationClipAsset::Load(path))
@@ -471,6 +473,7 @@ void AnimationManager::RefreshSceneBindings(Model* model)
         return;
     m_cachedBindingRoot = root;
     m_cachedBindingStructureRevision = revision;
+    m_scratch->morphWeights.clear();
     m_meshesByPath.clear();
     m_morphMeshes.clear();
     m_visibleMeshes.clear();
@@ -837,15 +840,17 @@ void AnimationManager::Tick(float frameDelta)
             includeLegacyMorphs(resolveAnimation(layer.clip));
     for (const auto& [path, mesh] : m_morphMeshes)
     {
+        auto& weights = m_scratch->morphWeights[mesh];
+        weights = mesh->GetMorphWeights();
         if (legacyMorphNodes.count(mesh->GetMorphNodeIndex()))
         {
             if (const NodePose* found = finalPose.Find(
                     mesh->GetMorphNodeIndex()); found && found->hasWeights)
-                mesh->SetMorphWeights(found->weights);
+                weights = found->weights;
         }
         else if (const auto rest = m_restMorphsByMesh.find(path);
             rest != m_restMorphsByMesh.end())
-            mesh->SetMorphWeights(rest->second);
+            weights = rest->second;
     }
     // Named mesh channels can coexist on separate primitive objects even when
     // those primitives share a model node and an ordinary node-index channel.
@@ -861,7 +866,7 @@ void AnimationManager::Tick(float frameDelta)
                     mesh != m_meshesByPath.end())
                     if (const auto rest = m_restMorphsByMesh.find(channel.targetMesh);
                         rest != m_restMorphsByMesh.end())
-                        mesh->second->SetMorphWeights(rest->second);
+                        m_scratch->morphWeights[mesh->second] = rest->second;
     };
     resetTargeted(animation);
     for (const Layer& layer : layers)
@@ -879,17 +884,17 @@ void AnimationManager::Tick(float frameDelta)
             if (target == m_meshesByPath.end() ||
                 target->second->GetMorphTargets().size() != channel.valueWidth)
                 continue;
-            std::vector<float> sampled;
+            auto& sampled = m_scratch->channelValues;
             Sample(channel, sampleTime, sampled);
             if (sampled.size() != channel.valueWidth) continue;
             if (weight < 1.f)
             {
-                const auto& current = target->second->GetMorphWeights();
+                const auto& current = m_scratch->morphWeights[target->second];
                 for (size_t i = 0; i < sampled.size(); ++i)
                     sampled[i] = glm::mix(i < current.size() ? current[i] :
                         0.f, sampled[i], weight);
             }
-            target->second->SetMorphWeights(sampled);
+            m_scratch->morphWeights[target->second] = sampled;
         }
     };
     applyTargeted(animation, time, 1.f);
@@ -897,6 +902,10 @@ void AnimationManager::Tick(float frameDelta)
         if (layer.enabled && layer.weight > 0.f)
             applyTargeted(resolveAnimation(layer.clip), layer.time,
                 std::clamp(layer.weight, 0.f, 1.f));
+    // Publish the final blend once. Resetting GPU weights to rest and then
+    // uploading each layer caused redundant uploads and collider revisions.
+    for (const auto& [mesh, weights] : m_scratch->morphWeights)
+        mesh->SetMorphWeights(weights);
     bool visible = SampleVisibility(*animation, time);
     for (const Layer& layer : layers)
         if (layer.enabled && layer.weight >= 0.5f)
@@ -1071,6 +1080,9 @@ bool AnimationManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
             " channels  |  " + std::to_string(item->duration).substr(0, 5) +
             " s";
         ui.ValueLabel(item->clipName.c_str(), summary.c_str());
+        ui.PushId(item);
+        if (ui.Button("Edit Animation")) editAnimationRequest = item->clipName;
+        ui.PopId();
     }
     ui.Unindent(12.f);
     for (const auto& path : animationPaths)

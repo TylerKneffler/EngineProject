@@ -19,6 +19,24 @@ namespace Engine::Model
 {
 namespace
 {
+// Keep decoded vectors, not a JSON tree with one allocation per key. Each
+// caller receives its own editable value. Bound residency and observe disk
+// changes so play/stop and repeated prefab drops reuse unchanged clips.
+struct CachedClip
+{
+    std::string path;
+    std::filesystem::file_time_type modified;
+    uintmax_t bytes;
+    AnimationClipAsset asset;
+};
+thread_local std::vector<CachedClip> clipCache;
+constexpr uintmax_t clipCacheBudget = 64u * 1024u * 1024u;
+
+std::string ClipCacheKey(const std::string& path)
+{
+    return std::filesystem::absolute(path).lexically_normal().generic_string();
+}
+
 Engine::Serialization::JsonValue WriteVector(const glm::vec3& value)
 {
     return Engine::Serialization::JsonValue::MakeArray()
@@ -118,8 +136,23 @@ std::optional<AnimationClipAsset> AnimationClipAsset::Load(
 {
     try
     {
+        const auto resolved = Engine::Components::Mesh::ResolveFilePath(path);
+        const auto key = ClipCacheKey(resolved);
+        const auto modified = std::filesystem::last_write_time(resolved);
+        const auto bytes = std::filesystem::file_size(resolved);
+        for (auto it = clipCache.begin(); it != clipCache.end(); ++it)
+            if (it->path == key)
+            {
+                if (it->modified == modified && it->bytes == bytes)
+                {
+                    std::rotate(it, it + 1, clipCache.end());
+                    return clipCache.back().asset;
+                }
+                clipCache.erase(it);
+                break;
+            }
         const auto root = Engine::Serialization::AssetParseFile(
-            Engine::Components::Mesh::ResolveFilePath(path));
+            resolved);
         if (!root.IsObject()) return std::nullopt;
         const auto& source = root.Has("clip") ? root["clip"] : root;
         if (!source.IsObject() || !source["name"].IsString() ||
@@ -148,6 +181,18 @@ std::optional<AnimationClipAsset> AnimationClipAsset::Load(
         readNodes(root["baseSkeleton"], asset.baseSkeleton);
         readNodes(root["bindSkeleton"], asset.bindSkeleton);
         asset.humanoid = HumanoidRig::Mapping::Deserialize(root["humanoid"]);
+        if (bytes <= clipCacheBudget)
+        {
+            uintmax_t resident = 0;
+            for (const auto& cached : clipCache) resident += cached.bytes;
+            while (!clipCache.empty() &&
+                (clipCache.size() >= 8 || resident + bytes > clipCacheBudget))
+            {
+                resident -= clipCache.front().bytes;
+                clipCache.erase(clipCache.begin());
+            }
+            clipCache.push_back({ key, modified, bytes, asset });
+        }
         return asset;
     }
     catch (...) { return std::nullopt; }
@@ -181,6 +226,9 @@ bool AnimationClipAsset::Save(const std::string& path) const
         root.Set("bindSkeleton", writeNodes(bindSkeleton));
     const std::filesystem::path target =
         Engine::Components::Mesh::ResolveFilePath(path);
+    const auto key = ClipCacheKey(target.string());
+    clipCache.erase(std::remove_if(clipCache.begin(), clipCache.end(),
+        [&](const auto& cached) { return cached.path == key; }), clipCache.end());
     std::error_code error;
     if (!target.parent_path().empty())
         std::filesystem::create_directories(target.parent_path(), error);

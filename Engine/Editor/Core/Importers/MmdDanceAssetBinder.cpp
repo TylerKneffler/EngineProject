@@ -210,15 +210,25 @@ bool BindPmxDirect(const std::string& prefabPath, const std::string& sourcePath,
         {
             const auto blend = [&](size_t axis)
             {
+                if (from.translation[axis] == to.translation[axis])
+                    return from.translation[axis];
                 return glm::mix(from.translation[axis], to.translation[axis],
                     BoneBezier(fraction, to.interpolation, axis));
             };
-            translation.times.push_back(sampleTime);
-            rotation.times.push_back(sampleTime);
-            translation.values.insert(translation.values.end(), {
+            // Constant intervals only need their endpoints, even when the
+            // other channel needs dense Bezier samples. Keep all authored
+            // endpoints so transitions into/out of a hold stay exact.
+            if (fraction == 0.f || fraction == 1.f || from.translation != to.translation)
+            {
+                translation.times.push_back(sampleTime);
+                translation.values.insert(translation.values.end(), {
                 target->transform.position.x + blend(0),
                 target->transform.position.y + blend(1),
                 target->transform.position.z - blend(2) });
+            }
+            if (fraction != 0.f && fraction != 1.f && from.rotation == to.rotation)
+                return;
+            rotation.times.push_back(sampleTime);
             const glm::quat first(from.rotation[3], -from.rotation[0],
                 -from.rotation[1], from.rotation[2]);
             const glm::quat second(to.rotation[3], -to.rotation[0],

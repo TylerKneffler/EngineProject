@@ -684,6 +684,7 @@ void Scene::FlushPendingObjectRemovals()
 
 void Scene::ClearObjects()
 {
+    m_hasStarted = false;
     m_pendingObjectAdditions.clear();
     m_pendingObjectRemovals.clear();
     m_audio->Reset();

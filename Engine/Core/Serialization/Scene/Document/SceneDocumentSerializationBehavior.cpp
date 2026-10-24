@@ -47,6 +47,11 @@ std::string SceneSerializer::SaveToString(const Engine::Scene::Scene& scene)
     return Detail::SceneXmlBehavior::WriteDocument(Detail::SceneObjectBehavior::SerializeScene(scene));
 }
 
+std::string SceneSerializer::SaveSnapshotToString(const Engine::Scene::Scene& scene)
+{
+    return AssetWriteBinary(Detail::SceneObjectBehavior::SerializeScene(scene));
+}
+
 bool SceneSerializer::Save(const Engine::Scene::Scene& scene, const std::string& path)
 {
     std::ofstream file(path);
@@ -98,7 +103,7 @@ bool SceneSerializer::LoadFromString(Engine::Scene::Scene& scene, const std::str
     try
     {
         if (Detail::SceneDocumentBehavior::DeserializeScene(
-            scene, JsonParse(source), graphicsProvider, GetRegistry()))
+            scene, AssetParse(source), graphicsProvider, GetRegistry()))
             return true;
     }
     catch (const std::exception&) {}

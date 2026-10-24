@@ -1958,7 +1958,7 @@ bool EditorState::SaveMainScene()
         m_currentScenePath = NormalizeAssetPath(destination);
         m_hasUnsavedChanges = false;
         RefreshSceneDocumentTitle();
-        m_savedSceneSnapshot = m_scene->SaveToString();
+        m_savedSceneSnapshot = m_scene->SaveSnapshotToString();
         AssetPreviewCache::CaptureScene(m_currentScenePath, *m_scene,
             m_scene->GetGraphicsProvider());
         if (m_primaryConsole)
@@ -3786,7 +3786,11 @@ void EditorState::CapturePlayModeScene()
     // baseline. Runtime changes must never enter the undo history.
     TrackSceneChanges(true, false);
     CommitPendingHistoryEdit();
-    m_playModeSceneSnapshot = m_scene->SaveToString();
+    // TrackSceneChanges just brought this baseline up to date.
+    m_playModeSceneSnapshot = !m_activeSceneAssetDocument &&
+        !m_activeAnimationDocument && !m_historyBaseline.scene.empty() &&
+        m_historyCapturedRevision == m_sceneEditRevision
+        ? m_historyBaseline.scene : m_scene->SaveSnapshotToString();
     m_prePlayHasUnsavedChanges = m_hasUnsavedChanges;
     m_prePlayHadObjectSelection = false;
     m_prePlaySelectionPath.clear();
@@ -3840,7 +3844,8 @@ void EditorState::RestorePlayModeScene()
                     m_mainMeshEdit.baseline))
                 m_mainMeshEdit.activeMesh = m_mainSkeletonEdit.mesh;
         }
-        m_historyBaseline = CaptureHistoryEntry();
+        m_historyBaseline.scene = m_playModeSceneSnapshot;
+        CaptureHistorySelection(m_historyBaseline);
         m_historyCapturedRevision = m_sceneEditRevision;
         m_historySelectionDirty = false;
         m_sceneEditInProgress = false;
@@ -4090,6 +4095,8 @@ void EditorState::WireupCallbacks()
     if (m_primaryProperties)
         m_primaryProperties->OnOpenAnimation = [this](const std::string& path)
         { QueueAnimationAssetOpen(path); };
+        m_primaryProperties->OnEditObjectAnimation = [this](Engine::Core::Object* object,
+            const std::string& clipName) { QueueAnimationObjectOpen(object, clipName); };
 
     m_viewFactory->OnAssetRenamed = [this](const std::string& oldPath,
         const std::string& newPath) {
@@ -4288,8 +4295,6 @@ void EditorState::WireupCallbacks()
     };
 
     m_viewFactory->OnAssetContentsChanged = [this](const std::string&) {
-        for (auto& document : m_animationDocuments)
-            document->rigAssetsDirty = true;
         auto refresh = [this](Engine::Scene::Scene* scene)
         {
             if (!scene) return;
@@ -5267,7 +5272,7 @@ EditorState::HistoryEntry EditorState::CaptureHistoryEntry() const
     HistoryEntry entry;
     if (!m_scene)
         return entry;
-    entry.scene = m_scene->SaveToString();
+    entry.scene = m_scene->SaveSnapshotToString();
     CaptureHistorySelection(entry);
     return entry;
 }

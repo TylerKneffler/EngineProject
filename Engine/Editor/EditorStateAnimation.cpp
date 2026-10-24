@@ -3,6 +3,7 @@
 #include "Core/AnimationClipEditing.h"
 #include "Core/AnimationClipMapping.h"
 #include "Core/AnimationRigSelection.h"
+#include "Core/AnimationEditorSource.h"
 #include "Core/View/ViewFactory.h"
 #include "Core/View/Views/AnimationView.h"
 #include "Core/View/Views/GameView.h"
@@ -212,12 +213,6 @@ std::vector<std::string> BoundMeshNames(Engine::Scene::Scene& scene,
     return names;
 }
 
-std::string RigIdentity(const std::string& path, size_t rigIndex)
-{
-    return AnimationIdentity(Engine::Components::Mesh::ResolveFilePath(path)) +
-        "#rig=" + std::to_string(rigIndex);
-}
-
 bool RigMatchesSkeleton(const Engine::Model::RigAsset& rig,
     Engine::Components::Skeleton& skeleton)
 {
@@ -366,141 +361,67 @@ float LastKeyTime(const Engine::Model::AnimationClip& clip)
 }
 }
 
-std::pair<std::string, size_t> EditorState::SelectedAnimationRig() const
+void EditorState::OpenAnimationEditor()
 {
-    auto* scene = GetActiveDocumentScene();
-    auto* selected = scene ? scene->GetSelectedObject() : nullptr;
-    if (m_activeAnimationDocument) return {};
-    if (!selected && scene)
-    {
-        // The Views menu can open the only character in a scene without first
-        // requiring a hierarchy click. Ambiguous scenes keep the empty editor.
-        for (const auto& object : scene->GetObjects())
-            if (object)
-                for (auto* component : object->Components)
-                    if (auto* candidate = dynamic_cast<Engine::Components::Skeleton*>(component);
-                        candidate && candidate->ResolveModel())
-                    {
-                        if (selected) return {};
-                        selected = object.get();
-                    }
-    }
-    if (!selected) return {};
+    QueueAnimationDocumentOpen("", 0);
+}
 
-    auto* prefabRoot = selected->GetPrefabInstanceRoot();
-    auto samePrefab = [&](Engine::Components::Skeleton* skeleton)
+void EditorState::QueueAnimationObjectOpen(Engine::Core::Object* object,
+    const std::string& clipName)
+{
+    const auto contains = [&](Engine::Scene::Scene* scene)
     {
-        return skeleton && skeleton->Owner &&
-            (!prefabRoot || skeleton->Owner->GetPrefabInstanceRoot() == prefabRoot);
+        return scene && std::any_of(scene->GetObjects().begin(), scene->GetObjects().end(),
+            [&](const auto& candidate) { return candidate.get() == object; });
     };
-    Engine::Components::Skeleton* rig =
-        AnimationRigSelection::ExplicitRig(selected);
-    if (!rig)
+    bool live = contains(m_scene.get()) || contains(m_prefabScene.get());
+    for (const auto& open : m_sceneAssetDocuments) live |= contains(open->scene.get());
+    if (!live || !object) return;
+    auto* root = object->GetPrefabInstanceRoot();
+    if (!root)
     {
-        size_t jointRigs = 0;
-        for (const auto& object : scene->GetObjects())
-            if (object)
-                for (auto* component : object->Components)
-                    if (auto* candidate = dynamic_cast<Engine::Components::Skeleton*>(component);
-                        samePrefab(candidate))
-                        for (auto* joint : candidate->ResolveJoints())
-                            if (joint == selected)
-                            { rig = candidate; ++jointRigs; }
-        if (jointRigs > 1) return {};
+        auto* model = object->GetComponentInParent<Engine::Components::Model>();
+        root = model ? model->Owner : object;
     }
-
-    if (!rig)
+    const auto rigs = AnimationEditorSource::Rigs(root);
+    if (rigs.empty())
     {
-        Engine::Components::AnimationManager* manager = nullptr;
-        for (auto* object = selected; object; object = object->Parent)
-            if ((manager = object->GetComponent<Engine::Components::AnimationManager>()))
-                break;
-        if (!manager) return {};
-        auto* model = ManagerModel(*manager);
-        std::vector<Engine::Components::Skeleton*> matches;
-        for (const auto& object : scene->GetObjects())
-            if (object)
-                for (auto* component : object->Components)
-                    if (auto* candidate = dynamic_cast<Engine::Components::Skeleton*>(component);
-                        samePrefab(candidate) && candidate->ResolveModel() == model)
-                        matches.push_back(candidate);
-        if (matches.size() == 1) rig = matches.front();
-        else
-        {
-            size_t pathMatches = 0;
-            for (auto* candidate : matches)
-                if (!candidate->rigPath.empty() &&
-                    std::find(manager->rigPaths.begin(), manager->rigPaths.end(),
-                        candidate->rigPath) != manager->rigPaths.end())
-                { rig = candidate; ++pathMatches; }
-            if (pathMatches != 1)
-            {
-                if (matches.empty()) return {};
-                return { matches.front()->Owner->GetPrefabInstanceRoot() &&
-                    matches.front()->Owner->GetPrefabInstanceRoot()->Prefab
-                    ? matches.front()->Owner->GetPrefabInstanceRoot()->Prefab->GetPath()
-                    : m_activeSceneAssetDocument && m_activeSceneAssetDocument->prefab
-                        ? (m_activeSceneAssetDocument->stageDataPath.empty()
-                            ? m_activeSceneAssetDocument->path
-                            : m_activeSceneAssetDocument->stageDataPath)
-                        : m_activePrefabPath,
-                    static_cast<size_t>(-1) };
-            }
-        }
+        if (m_primaryConsole) m_primaryConsole->AddLog(ConsoleView::Level::Warning,
+            "Drop an object with a skeleton and model into the Animation Editor.");
+        return;
     }
-    if (!samePrefab(rig) || !rig->ResolveModel()) return {};
-
-    std::string path;
-    if (m_activeSceneAssetDocument && m_activeSceneAssetDocument->prefab)
-        path = m_activeSceneAssetDocument->stageDataPath.empty()
-            ? m_activeSceneAssetDocument->path
-            : m_activeSceneAssetDocument->stageDataPath;
-    else if (m_prefabDocumentFocused && !m_activePrefabPath.empty())
-        path = m_activePrefabPath;
-    else if (auto* root = rig->Owner->GetPrefabInstanceRoot();
-        root && root->Prefab)
-        path = root->Prefab->GetPath();
-    if (path.empty()) return {};
-
     size_t ordinal = 0;
-    auto* rigRoot = rig->Owner->GetPrefabInstanceRoot();
-    for (const auto& object : scene->GetObjects())
-        if (object && (!rigRoot || object->GetPrefabInstanceRoot() == rigRoot))
-            for (auto* component : object->Components)
-                if (auto* candidate = dynamic_cast<Engine::Components::Skeleton*>(component))
-                {
-                    if (candidate == rig) return { path, ordinal };
-                    ++ordinal;
-                }
-    return {};
+    if (auto* explicitRig = AnimationRigSelection::ExplicitRig(object))
+        for (size_t i = 0; i < rigs.size(); ++i)
+            if (rigs[i] == explicitRig) { ordinal = i; break; }
+    const std::string key = "__SceneAnimation__" +
+        std::to_string(reinterpret_cast<uintptr_t>(root));
+    const auto identity = AnimationIdentity(key);
+    if (!clipName.empty()) m_pendingAnimationClipSelections[identity] = clipName;
+    const bool alreadyOpen = std::any_of(m_animationDocuments.begin(), m_animationDocuments.end(),
+        [&](const auto& document) { return document->identity == identity; });
+    if (!alreadyOpen && !m_pendingAnimationSources.count(key))
+        m_pendingAnimationSources[key] = { AnimationEditorSource::Capture(*root),
+            root->Prefab ? root->Prefab->GetPath() : "", root, "" };
+    QueueAnimationDocumentOpen(key, ordinal);
 }
 
-bool EditorState::CanOpenAnimationForSelection() const
+void EditorState::HandleAnimationEditorDrop(IEditorUi& ui)
 {
-    return !SelectedAnimationRig().first.empty();
-}
-
-void EditorState::OpenAnimationForSelection()
-{
-    const auto [path, ordinal] = SelectedAnimationRig();
-    if (path.empty())
+    const auto asset = ui.WindowDragDropTarget("ENGINE_ASSET_PATH");
+    if (asset.data && asset.delivered && asset.size > 0)
     {
-        QueueAnimationDocumentOpen("", 0);
-        return;
+        const auto* bytes = static_cast<const char*>(asset.data);
+        size_t size = 0;
+        while (size < asset.size && bytes[size]) ++size;
+        const std::string path(bytes, size);
+        const auto extension = LowerText(std::filesystem::path(path).extension().string());
+        if (extension == ".prefab") QueueAnimationDocumentOpen(path, static_cast<size_t>(-1));
+        else if (extension == ".anim" || extension == ".animation") QueueAnimationAssetOpen(path);
     }
-    const char* error = nullptr;
-    if (m_activeSceneAssetDocument &&
-        (m_activeSceneAssetDocument->dirty ||
-            m_activeSceneAssetDocument->meshEdit.dirty))
-        error = "Save the rig and weights before opening the Animation Editor.";
-    else if (m_prefabDocumentFocused && m_prefabHasUnsavedChanges)
-        error = "Save the prefab before opening the Animation Editor.";
-    if (error)
-    {
-        if (m_primaryConsole) m_primaryConsole->AddLog(ConsoleView::Level::Warning, error);
-        return;
-    }
-    QueueAnimationDocumentOpen(path, ordinal);
+    const auto object = ui.WindowDragDropTarget("ENGINE_SCENE_OBJECT");
+    if (object.data && object.delivered && object.size == sizeof(Engine::Core::Object*))
+        QueueAnimationObjectOpen(*static_cast<Engine::Core::Object* const*>(object.data));
 }
 
 bool EditorState::CanCreateAnimationClip() const
@@ -555,6 +476,28 @@ void EditorState::QueueAnimationDocumentOpen(const std::string& path,
         if (document && document->identity == identity)
         {
             document->view->SetOpen(true);
+            document->view->RequestFocusOnNextDraw();
+            if (auto pending = m_pendingAnimationClipAssets.find(identity);
+                pending != m_pendingAnimationClipAssets.end())
+            {
+                if (const auto asset = Engine::Model::AnimationClipAsset::Load(pending->second))
+                {
+                    document->clipAssetPaths[asset->clip.clipName] = pending->second;
+                    for (auto& track : document->tracks)
+                        if (track.index == rigIndex && !track.sourceManager->FindClip(asset->clip.clipName))
+                        {
+                            std::string error;
+                            if (track.sourceManager->AddAnimationAsset(pending->second, error))
+                            {
+                                track.poseManager->clips = track.sourceManager->clips;
+                                ++document->clipRevision;
+                                document->clipCache.clear();
+                            }
+                            else document->error = error;
+                        }
+                }
+                m_pendingAnimationClipAssets.erase(pending);
+            }
             if (rigIndex != static_cast<size_t>(-1))
                 FocusAnimationRig(*document, rigIndex);
             if (auto requested = m_pendingAnimationClipSelections.find(identity);
@@ -582,9 +525,10 @@ void EditorState::SaveAnimationEditorSession() const
         "animation-editor-session.json";
     auto documents = Engine::Serialization::JsonValue::MakeArray();
     for (const auto& document : m_animationDocuments)
-        if (document && document->view && document->view->IsOpen())
+        if (document && document->view && document->view->IsOpen() && !document->sourceObject)
             documents.Push(Engine::Serialization::JsonValue::MakeObject()
-                .Set("path", Engine::Serialization::JsonValue(document->path))
+                .Set("path", Engine::Serialization::JsonValue(document->standaloneAssetPath.empty()
+                    ? document->path : document->standaloneAssetPath))
                 .Set("rigIndex", Engine::Serialization::JsonValue(
                     static_cast<int>(document->rigIndex)))
                 .Set("active", Engine::Serialization::JsonValue(
@@ -624,10 +568,17 @@ void EditorState::RestoreAnimationEditorSession()
             if (rig < 0 || rig > 1024) continue;
             if (entry["active"].AsBool())
                 active = { path, static_cast<size_t>(rig) };
+            else if (LowerText(fs::path(path).extension().string()) == ".anim" ||
+                LowerText(fs::path(path).extension().string()) == ".animation")
+                QueueAnimationAssetOpen(path);
             else QueueAnimationDocumentOpen(path, static_cast<size_t>(rig));
         }
         if (active)
-            QueueAnimationDocumentOpen(active->first, active->second);
+        {
+            const auto extension = LowerText(fs::path(active->first).extension().string());
+            if (extension == ".anim" || extension == ".animation") QueueAnimationAssetOpen(active->first);
+            else QueueAnimationDocumentOpen(active->first, active->second);
+        }
         ProcessPendingAnimationDocumentOpens();
     }
     catch (const std::exception& error)
@@ -650,38 +601,29 @@ void EditorState::QueueAnimationAssetOpen(const std::string& path)
     }
     std::string prefab = asset->previewPrefab;
     size_t rigIndex = asset->previewRig;
-    if (prefab.empty())
+    std::error_code pathError;
+    if (prefab.empty() || !std::filesystem::is_regular_file(
+            Engine::Components::Mesh::ResolveFilePath(prefab), pathError))
     {
-        const auto assets = m_projectSettings.assetsDirectory.empty()
-            ? std::filesystem::path("Assets")
-            : std::filesystem::path(m_projectSettings.assetsDirectory);
-        std::error_code error;
-        for (std::filesystem::recursive_directory_iterator it(assets,
-                std::filesystem::directory_options::skip_permission_denied,
-                error), end;
-            it != end && !error; it.increment(error))
-            if (it->is_regular_file(error) &&
-                LowerText(it->path().extension().string()) == ".rig")
-                if (auto rig = Engine::Model::RigAsset::Load(
-                        it->path().string()))
-                    if (std::any_of(rig->animationPaths.begin(),
-                            rig->animationPaths.end(), [&](const auto& item)
-                            { return AnimationIdentity(item) ==
-                                AnimationIdentity(path); }))
-                    {
-                        prefab = rig->prefabPath;
-                        rigIndex = rig->rigIndex;
-                        break;
-                    }
+        prefab = "__AnimationAsset__" + std::to_string(
+            std::hash<std::string>{}(AnimationIdentity(path)));
+        rigIndex = 0;
+        try
+        {
+            const bool open = std::any_of(m_animationDocuments.begin(), m_animationDocuments.end(),
+                [&](const auto& document) { return document->identity == AnimationIdentity(prefab); });
+            if (!open && !m_pendingAnimationSources.count(prefab))
+                m_pendingAnimationSources[prefab] = {
+                    AnimationEditorSource::ClipPreview(*asset), "", nullptr, path };
+        }
+        catch (const std::exception& error)
+        {
+            if (m_primaryConsole) m_primaryConsole->AddLog(ConsoleView::Level::Error, error.what());
+            return;
+        }
     }
-    if (prefab.empty())
-    {
-        if (m_primaryConsole) m_primaryConsole->AddLog(ConsoleView::Level::Error,
-            "Assign this animation to a rig before opening it: " + path);
-        return;
-    }
-    m_pendingAnimationClipSelections[AnimationIdentity(prefab)] =
-        asset->clip.clipName;
+    m_pendingAnimationClipSelections[AnimationIdentity(prefab)] = asset->clip.clipName;
+    m_pendingAnimationClipAssets[AnimationIdentity(prefab)] = path;
     QueueAnimationDocumentOpen(prefab, rigIndex);
 }
 
@@ -736,7 +678,6 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
             document->identity = "__EmptyAnimationEditor__";
             document->poseScene = std::make_unique<Engine::Scene::Scene>();
             document->poseScene->Init(m_renderer->GetGraphicsProvider());
-            ScanAnimationRigAssets(*document);
             auto view = m_viewFactory->CreateAnimationView(
                 document->poseScene.get(), "Animation Editor");
             if (!view) continue;
@@ -745,6 +686,12 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
             view->SetEditMode(SceneEditMode::Skeleton);
             view->AllowObjectCreation = false;
             view->AllowAssetDrops = false;
+            view->OnDocumentDrop = [this](IEditorUi& ui) { HandleAnimationEditorDrop(ui); };
+            view->OnDrawDocumentTools = [](IEditorUi& ui)
+            {
+                ui.DisabledLabel("Drop a prefab, scene object, or .anim here to edit animations.");
+                return false;
+            };
             view->OnFocused = [this, raw]()
             { SetActiveAnimationDocument(raw); };
             view->RequestFocusOnNextDraw();
@@ -761,7 +708,17 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
         document->identity = AnimationIdentity(path);
         document->sourceScene = std::make_unique<Engine::Scene::Scene>();
         document->sourceScene->Init(m_renderer->GetGraphicsProvider());
-        document->sourceRoot = Engine::Serialization::SceneSerializer::
+        if (auto source = m_pendingAnimationSources.find(path); source != m_pendingAnimationSources.end())
+        {
+            if (document->sourceScene->LoadFromString(source->second.snapshot) &&
+                !document->sourceScene->GetObjects().empty())
+                document->sourceRoot = document->sourceScene->GetObjects().front().get();
+            document->sourceObject = source->second.sourceObject;
+            document->standaloneAssetPath = source->second.standaloneAssetPath;
+            if (!source->second.prefabPath.empty()) document->path = source->second.prefabPath;
+            m_pendingAnimationSources.erase(source);
+        }
+        else document->sourceRoot = Engine::Serialization::SceneSerializer::
             InstantiatePrefab(*document->sourceScene, path,
                 document->sourceScene->GetGraphicsProvider());
         if (!document->sourceRoot)
@@ -780,7 +737,6 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
                 "Animation Editor needs a prefab with a resolved skeleton and model.");
             continue;
         }
-        ScanAnimationRigAssets(*document);
         document->rigName = sourceSkeleton->Owner->name;
         document->rigPath = sourceSkeleton->rigPath;
         document->boundMeshNames = BoundMeshNames(*document->sourceScene,
@@ -811,7 +767,22 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
                     sourceSkeleton->ResolveModel(), "Model");
         }
         document->sourceManager->RefreshRigClips();
-        document->savedSnapshot = document->sourceScene->SaveToString();
+        if (auto asset = m_pendingAnimationClipAssets.find(document->identity);
+            asset != m_pendingAnimationClipAssets.end())
+        {
+            if (const auto clipAsset = Engine::Model::AnimationClipAsset::Load(asset->second))
+            {
+                document->clipAssetPaths[clipAsset->clip.clipName] = asset->second;
+                if (!document->sourceManager->FindClip(clipAsset->clip.clipName))
+                {
+                    std::string error;
+                    if (!document->sourceManager->AddAnimationAsset(asset->second, error))
+                        document->error = error;
+                }
+            }
+            m_pendingAnimationClipAssets.erase(asset);
+        }
+        document->savedSnapshot = document->sourceScene->SaveSnapshotToString();
         document->poseScene = std::make_unique<Engine::Scene::Scene>();
         document->poseScene->Init(m_renderer->GetGraphicsProvider());
         if (!document->poseScene->LoadFromString(document->savedSnapshot))
@@ -826,6 +797,8 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
             document->poseSkeleton);
         if (!document->poseSkeleton || !document->poseManager)
             continue;
+        if (!document->poseScene->GetObjects().empty())
+            document->poseScene->GetObjects().front()->enabled = true;
         for (size_t index = 0; auto* sourceRig =
                 RigAt(*document->sourceScene, index); ++index)
         {
@@ -1206,6 +1179,7 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
         view->OnDrawRigControls = [this, raw](IEditorUi& ui,
             const EditorUiViewportInput& input)
         { return DrawAnimationRigViewport(ui, input, *raw); };
+        view->OnDocumentDrop = [this](IEditorUi& ui) { HandleAnimationEditorDrop(ui); };
         RefreshAnimationDocumentTitle(*raw);
         SampleAnimationDocument(*raw);
         view->RequestFocusOnNextDraw();
@@ -1707,7 +1681,7 @@ void EditorState::RecordAnimationEdit(AnimationDocument& document,
         document.undo.push_back(std::move(before));
     }
     document.redo.clear();
-    document.dirty = document.sourceScene->SaveToString() !=
+    document.dirty = document.sourceScene->SaveSnapshotToString() !=
         document.savedSnapshot || std::any_of(document.tracks.begin(),
             document.tracks.end(), [](const auto& track)
             { return track.controlsDirty; });
@@ -2395,7 +2369,7 @@ bool EditorState::StepAnimationHistory(AnimationDocument& document, bool redo)
     ++document.clipRevision;
     document.clipCache.clear();
     document.previewLayouts.clear();
-    document.dirty = document.sourceScene->SaveToString() !=
+    document.dirty = document.sourceScene->SaveSnapshotToString() !=
         document.savedSnapshot || std::any_of(document.tracks.begin(),
             document.tracks.end(), [](const auto& track)
             { return track.controlsDirty; });
@@ -2406,6 +2380,93 @@ bool EditorState::StepAnimationHistory(AnimationDocument& document, bool redo)
 
 bool EditorState::SaveAnimationDocument(AnimationDocument& document)
 {
+    if (document.sourceObject)
+    {
+        const auto contains = [&](Engine::Scene::Scene* scene)
+        {
+            return scene && std::any_of(scene->GetObjects().begin(), scene->GetObjects().end(),
+                [&](const auto& object) { return object.get() == document.sourceObject; });
+        };
+        Engine::Scene::Scene* destination = nullptr;
+        if (contains(m_scene.get())) destination = m_scene.get();
+        else if (contains(m_prefabScene.get())) destination = m_prefabScene.get();
+        for (const auto& open : m_sceneAssetDocuments)
+            if (contains(open->scene.get())) destination = open->scene.get();
+        if (!destination)
+        { document.error = "The source object was removed. Drop its replacement into the editor."; return false; }
+        const auto rigs = AnimationEditorSource::Rigs(document.sourceObject);
+        if (document.rigIndex >= rigs.size() || !document.sourceManager)
+        { document.error = "The source skeleton changed. Reopen the object to edit its animations."; return false; }
+        bool ambiguous = false;
+        auto* manager = ManagerForRig(*destination, rigs[document.rigIndex], &ambiguous);
+        if (ambiguous)
+        { document.error = "Multiple Animation Managers target the source rig."; return false; }
+        if (!manager)
+        {
+            manager = rigs[document.rigIndex]->Owner->AddComponent<Engine::Components::AnimationManager>();
+            manager->modelReference = Engine::Core::CaptureComponentReference(
+                rigs[document.rigIndex]->ResolveModel(), "Model");
+            manager->clip = document.sourceManager->clip;
+        }
+        for (auto& track : document.tracks)
+            if (track.index == document.rigIndex && track.controlsDirty)
+            {
+                auto rig = Engine::Model::RigAsset::Capture(*document.sourceScene,
+                    *RigAt(*document.sourceScene, document.rigIndex));
+                rig.controls = track.controls; rig.humanoid = track.humanoid;
+                rig.poses = track.poses; rig.symmetryPairs = track.symmetryPairs;
+                if (track.path.empty() || !rig.Save(track.path))
+                { document.error = "Could not save the rig mapping."; return false; }
+                track.controlsDirty = false;
+            }
+        manager->InstallEmbeddedClips(document.sourceManager->clips);
+        manager->MarkConfigurationDirty();
+        document.sourceObject->InvalidatePrefabOverrideCache();
+        if (destination == m_scene.get())
+        { m_hasUnsavedChanges = true; MarkSceneEdited(); RefreshSceneDocumentTitle(); }
+        else if (destination == m_prefabScene.get()) SetPrefabDirty(true);
+        for (const auto& open : m_sceneAssetDocuments)
+            if (open->scene.get() == destination)
+            { open->dirty = true; RefreshSceneAssetDocumentTitle(*open); }
+        document.savedSnapshot = document.sourceScene->SaveSnapshotToString();
+        document.dirty = std::any_of(document.tracks.begin(), document.tracks.end(),
+            [](const auto& track) { return track.controlsDirty; });
+        document.error.clear(); RefreshAnimationDocumentTitle(document);
+        return true;
+    }
+    if (!document.standaloneAssetPath.empty() && document.sourceManager)
+    {
+        for (const auto& clip : document.sourceManager->clips)
+        {
+            const auto known = document.clipAssetPaths.find(clip.clipName);
+            std::string path = known != document.clipAssetPaths.end() ? known->second :
+                document.sourceManager->clips.size() == 1 ? document.standaloneAssetPath : "";
+            if (path.empty())
+            {
+                std::string name = clip.clipName;
+                for (char& ch : name)
+                    if (std::string("<>:\"/\\|?*").find(ch) != std::string::npos) ch = '_';
+                if (name.empty()) name = "Animation";
+                const auto directory = std::filesystem::path(document.standaloneAssetPath).parent_path();
+                for (size_t suffix = 0;; ++suffix)
+                {
+                    const auto candidate = directory / (name + (suffix ? "_" + std::to_string(suffix) : "") + ".anim");
+                    if (!std::filesystem::exists(candidate)) { path = candidate.string(); break; }
+                }
+            }
+            auto asset = Engine::Model::AnimationClipAsset::Load(path).value_or(Engine::Model::AnimationClipAsset{});
+            asset.clip = clip;
+            if (asset.bindSkeleton.empty())
+                asset.bindSkeleton = Engine::Model::AnimationClipAsset::CaptureBaseSkeleton(
+                    *RigAt(*document.sourceScene, document.rigIndex)->ResolveModel());
+            if (!asset.Save(path)) { document.error = "Could not save animation: " + path; return false; }
+            document.clipAssetPaths[clip.clipName] = path;
+        }
+        document.savedSnapshot = document.sourceScene->SaveSnapshotToString();
+        document.dirty = false; document.error.clear();
+        RefreshAnimationDocumentTitle(document);
+        return true;
+    }
     if (document.path.empty()) return true;
     Engine::Scene::Scene latest;
     latest.Init(m_renderer->GetGraphicsProvider());
@@ -2482,7 +2543,9 @@ bool EditorState::SaveAnimationDocument(AnimationDocument& document)
                 channel.targetPath = AnimationClipMapping::NodePath(
                     *latestModel, channel.nodeIndex);
         std::string animationPath;
-        if (previousRig)
+        if (const auto direct = document.clipAssetPaths.find(animation.clipName);
+            direct != document.clipAssetPaths.end()) animationPath = direct->second;
+        if (animationPath.empty() && previousRig)
             for (const auto& candidate : previousRig->animationPaths)
                 if (auto existing = Engine::Model::AnimationClipAsset::Load(candidate);
                     existing && existing->clip.clipName == animation.clipName)
@@ -2558,7 +2621,7 @@ bool EditorState::SaveAnimationDocument(AnimationDocument& document)
     for (auto& track : document.tracks)
         if (track.index == document.rigIndex)
         { track.path = rigPath; track.controlsDirty = false; break; }
-    document.savedSnapshot = document.sourceScene->SaveToString();
+    document.savedSnapshot = document.sourceScene->SaveSnapshotToString();
     document.dirty = std::any_of(document.tracks.begin(), document.tracks.end(),
         [](const auto& track) { return track.controlsDirty; });
     document.error.clear();
@@ -2635,126 +2698,14 @@ bool EditorState::SaveAnimationDocument(AnimationDocument& document)
 void EditorState::RefreshAnimationDocumentTitle(AnimationDocument& document)
 {
     const std::string filename =
-        std::filesystem::path(document.path).filename().string();
+        document.sourceObject && document.sourceRoot ? document.sourceRoot->name :
+        std::filesystem::path(document.standaloneAssetPath.empty() ? document.path :
+            document.standaloneAssetPath).filename().string();
     if (document.view)
         document.view->SetTitle("Animation: " + filename + " / " +
             document.rigName +
             (document.dirty ? " *" : "") +
             "###AnimationDocument:" + document.identity);
-}
-
-void EditorState::ScanAnimationRigAssets(AnimationDocument& document)
-{
-    document.rigAssets.clear();
-    document.rigAssetsDirty = false;
-    std::unordered_set<std::string> seen;
-    std::vector<std::filesystem::path> rigPaths;
-    struct PreviewCandidate
-    {
-        std::string path;
-        size_t rigIndex = 0;
-        Engine::Model::RigAsset rig;
-    };
-    std::vector<PreviewCandidate> previewCandidates;
-    const std::filesystem::path assets =
-        m_projectSettings.assetsDirectory.empty()
-            ? std::filesystem::path("Assets")
-            : std::filesystem::path(m_projectSettings.assetsDirectory);
-    std::error_code error;
-    if (!std::filesystem::is_directory(assets, error))
-    {
-        document.error = "Assets directory was not found.";
-        return;
-    }
-    for (std::filesystem::recursive_directory_iterator it(assets,
-            std::filesystem::directory_options::skip_permission_denied,
-            error), end;
-        it != end && !error; it.increment(error))
-    {
-        if (!it->is_regular_file(error)) continue;
-        const std::string extension =
-            LowerText(it->path().extension().string());
-        if (extension == ".rig")
-        {
-            rigPaths.push_back(it->path());
-            continue;
-        }
-        if (extension != ".prefab") continue;
-        Engine::Scene::Scene candidate;
-        const std::string path = it->path().string();
-        if (!Engine::Serialization::SceneSerializer::InstantiatePrefab(
-                candidate, path, nullptr)) continue;
-        for (size_t rig = 0;; ++rig)
-        {
-            auto* skeleton = RigAt(candidate, rig);
-            if (!skeleton) break;
-            if (!skeleton->ResolveModel()) continue;
-            previewCandidates.push_back({ path, rig,
-                Engine::Model::RigAsset::Capture(candidate, *skeleton) });
-            auto meshes = BoundMeshNames(candidate, skeleton);
-            std::string label = "[Prefab] " +
-                it->path().filename().string() + " / " +
-                skeleton->Owner->name + " (" +
-                std::to_string(meshes.size()) + " bound mesh" +
-                (meshes.size() == 1 ? "" : "es") + ")";
-            if (!skeleton->rigPath.empty())
-                label += " / " + std::filesystem::path(
-                    skeleton->rigPath).filename().string();
-            for (const auto& mesh : meshes) label += " / " + mesh;
-            if (seen.insert(RigIdentity(path, rig)).second)
-                document.rigAssets.push_back({ path, std::move(label), rig,
-                    path });
-        }
-    }
-    // A rig asset is a separate resource. Its prefab reference supplies a
-    // model for the animation viewport, but does not determine its identity.
-    for (const auto& rigPath : rigPaths)
-    {
-        for (const auto& rigValue :
-            Engine::Model::RigAsset::LoadAll(rigPath.string()))
-        {
-            const auto* rig = &rigValue;
-            const auto compatible = [&](const PreviewCandidate& candidate)
-            {
-                if (candidate.rig.skinIndex != rig->skinIndex ||
-                    candidate.rig.joints.size() != rig->joints.size()) return false;
-                for (size_t joint = 0; joint < rig->joints.size(); ++joint)
-                    if (candidate.rig.joints[joint].nodeIndex !=
-                            rig->joints[joint].nodeIndex ||
-                        candidate.rig.joints[joint].name !=
-                            rig->joints[joint].name) return false;
-                return true;
-            };
-            const PreviewCandidate* preview = nullptr;
-            for (const auto& candidate : previewCandidates)
-                if (compatible(candidate) &&
-                    AnimationIdentity(candidate.path) ==
-                        AnimationIdentity(document.path))
-                { preview = &candidate; break; }
-            if (!preview)
-                for (const auto& candidate : previewCandidates)
-                    if (compatible(candidate) && !rig->prefabPath.empty() &&
-                        AnimationIdentity(candidate.path) ==
-                            AnimationIdentity(rig->prefabPath))
-                    { preview = &candidate; break; }
-            if (!preview)
-                for (const auto& candidate : previewCandidates)
-                    if (compatible(candidate))
-                    { preview = &candidate; break; }
-            const std::string label = "[Rig] " + rigPath.filename().string() +
-                " / " + std::to_string(rig->joints.size()) + " joints" +
-                (preview ? " / preview: " +
-                    std::filesystem::path(preview->path).filename().string() :
-                    " / choose a compatible prefab to preview");
-            document.rigAssets.push_back({ preview ? preview->path : "",
-                label, preview ? preview->rigIndex : rig->rigIndex,
-                rigPath.string() });
-        }
-    }
-    std::sort(document.rigAssets.begin(), document.rigAssets.end(),
-        [](const auto& left, const auto& right)
-        { return left.label < right.label; });
-    document.error.clear();
 }
 
 bool EditorState::AssignAnimationChannels(AnimationDocument& document,
@@ -2902,77 +2853,8 @@ void EditorState::DrawAnimationMappingRepair(IEditorUi& ui,
 void EditorState::DrawAnimationRigToolbar(IEditorUi& ui,
     AnimationDocument& document)
 {
-    ImGui::SetNextItemWidth(std::min(240.f, ImGui::GetContentRegionAvail().x));
-    const std::string label = document.sourceManager
-        ? "Rig: " + document.rigName : "Choose animation rig";
-    const std::string preview = AnimationDropdownLabel(label);
-    ImGui::SetNextWindowSizeConstraints({ 240.f, 0.f },
-        { 420.f, FLT_MAX });
-    if (!ImGui::BeginCombo("##AnimationRigToolbar", preview.c_str())) return;
-    if (document.sourceManager)
-    {
-        for (auto& track : document.tracks)
-        {
-            ImGui::PushID(&track);
-            bool selected = track.selected;
-            if (ImGui::Checkbox("##Preview", &selected))
-            {
-                const int count = static_cast<int>(std::count_if(
-                    document.tracks.begin(), document.tracks.end(),
-                    [](const auto& item) { return item.selected; }));
-                if (selected || count > 1)
-                {
-                    track.selected = selected;
-                    if (selected) FocusAnimationRig(document, track.index);
-                    else if (track.index == document.rigIndex)
-                        for (const auto& other : document.tracks)
-                            if (other.selected)
-                            { FocusAnimationRig(document, other.index); break; }
-                    SampleAnimationDocument(document);
-                }
-            }
-            ImGui::SameLine();
-            if (AnimationDropdownItem(track.name,
-                    document.rigIndex == track.index))
-                FocusAnimationRig(document, track.index);
-            ImGui::PopID();
-        }
-        ImGui::Separator();
-    }
-    if (document.rigAssetsDirty)
-        ScanAnimationRigAssets(document);
-    ui.SearchInput("##RigAssetSearch", document.rigSearch,
-        sizeof(document.rigSearch), "Search rig assets");
-    ImGui::SameLine();
-    if (ui.Button("Refresh rigs")) ScanAnimationRigAssets(document);
-    const std::string query = LowerText(document.rigSearch);
-    for (const auto& asset : document.rigAssets)
-    {
-        if (!query.empty() && LowerText(asset.label).find(query) ==
-                std::string::npos &&
-            LowerText(asset.path).find(query) == std::string::npos &&
-            LowerText(asset.assetPath).find(query) == std::string::npos)
-            continue;
-        ImGui::PushID(&asset);
-        const bool rigAsset = LowerText(
-            std::filesystem::path(asset.assetPath).extension().string()) == ".rig";
-        if (AnimationDropdownItem(asset.label,
-                rigAsset ? AnimationIdentity(asset.assetPath) ==
-                    AnimationIdentity(document.rigPath) :
-                    RigIdentity(asset.path, asset.rigIndex) ==
-                        RigIdentity(document.path, document.rigIndex)))
-        {
-            if (asset.path.empty())
-                document.error = "Choose a prefab with a compatible model to preview this rig.";
-            else
-                QueueAnimationDocumentOpen(asset.path, asset.rigIndex);
-            if (!asset.path.empty() && document.path.empty() && document.view &&
-                m_activeAnimationDocument != &document)
-                document.view->SetOpen(false);
-        }
-        ImGui::PopID();
-    }
-    ImGui::EndCombo();
+    ui.ValueLabel("Animation Editor", document.sourceManager
+        ? document.rigName.c_str() : "Drop a prefab, scene object, or .anim here");
 }
 
 void EditorState::DrawAnimationRigControls(IEditorUi& ui,
@@ -3997,7 +3879,7 @@ void EditorState::DrawAnimationProperties(IEditorUi& ui,
 {
     if (!document.sourceManager)
     {
-        ui.DisabledLabel("Choose a rig in the toolbar to edit its animations.");
+        ui.DisabledLabel("Drop a prefab, scene object, or .anim onto the Animation Editor.");
         if (!document.error.empty()) ui.ColoredLabel(
             document.error.c_str(), { 1.f, .5f, .35f, 1.f });
         return;
@@ -4117,7 +3999,8 @@ void EditorState::DrawAnimationProperties(IEditorUi& ui,
     }
     DrawAnimationMappingRepair(ui, document);
     const std::string saveLabel = std::string(Icons::Save) +
-        " Save Selected Rigs";
+        (document.sourceObject ? " Apply Animation to Object" :
+            !document.standaloneAssetPath.empty() ? " Save Animation" : " Save Selected Rigs");
     if (ui.Button(saveLabel.c_str()))
     {
         const size_t focused = document.rigIndex;
@@ -4378,6 +4261,7 @@ void EditorState::DrawAnimationProperties(IEditorUi& ui,
 
 void EditorState::DrawAnimationTimelinePanel(IEditorUi& ui)
 {
+    HandleAnimationEditorDrop(ui);
     if (!m_timelineAnimationDocument)
     {
         ui.DisabledLabel("Open an animation in the Animation Editor to view its timeline.");
@@ -4385,15 +4269,7 @@ void EditorState::DrawAnimationTimelinePanel(IEditorUi& ui)
     }
     if (ui.IsWindowFocused())
         SetActiveAnimationDocument(m_timelineAnimationDocument);
-    if (ImGui::BeginCombo("Animation document",
-            m_timelineAnimationDocument->view->GetTitle().c_str()))
-    {
-        for (const auto& open : m_animationDocuments)
-            if (ImGui::Selectable(open->view->GetTitle().c_str(),
-                    open.get() == m_timelineAnimationDocument))
-                SetActiveAnimationDocument(open.get());
-        ImGui::EndCombo();
-    }
+    ui.ValueLabel("Animation", m_timelineAnimationDocument->view->GetTitle().c_str());
     ImGui::PushID(m_timelineAnimationDocument);
     DrawAnimationTimeline(ui, *m_timelineAnimationDocument);
     ImGui::PopID();
@@ -4448,7 +4324,7 @@ void EditorState::DrawAnimationTimeline(IEditorUi& ui,
 {
     if (!document.sourceManager)
     {
-        ui.DisabledLabel("Choose a rig in the toolbar to open its timeline.");
+        ui.DisabledLabel("Drop a prefab, scene object, or .anim onto the Animation Editor.");
         return;
     }
     if (ui.Button(document.selectedRows.empty()

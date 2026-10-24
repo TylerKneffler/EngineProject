@@ -147,6 +147,7 @@ public:
 
     // Runtime lifecycle shared by the standalone game and Editor Play mode.
     void Start();
+    bool HasStarted() const { return m_hasStarted; }
     void Update(float deltaTime);
     struct UpdateTimings
     {
@@ -384,6 +385,7 @@ public:
     bool Save(const std::string& path) const;
     bool Load(const std::string& path);
     std::string SaveToString() const;
+    std::string SaveSnapshotToString() const;
     bool LoadFromString(const std::string& source);
 
     Engine::Model::BakeResult BakeLighting(

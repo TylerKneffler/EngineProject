@@ -838,6 +838,29 @@ if(MSVC)
 endif()
 
 set(ENGINE_LOCAL_TEST_ROOT "${ENGINE_ROOT}/.local/tests")
+
+if(NOT ENGINE_PROJECT_DIR)
+    enable_testing()
+    add_executable(AnimationEditorSourceTests EXCLUDE_FROM_ALL
+        "${ENGINE_ROOT}/Tests/AnimationEditorSourceTests.cpp")
+    target_link_libraries(AnimationEditorSourceTests PRIVATE Engine)
+    target_include_directories(AnimationEditorSourceTests PRIVATE
+        "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Editor")
+    add_test(NAME AnimationEditorSources COMMAND AnimationEditorSourceTests)
+    add_executable(CharacterPerformanceTests EXCLUDE_FROM_ALL
+        "${ENGINE_ROOT}/Tests/CharacterPerformanceTests.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/MmdDanceAssetBinder.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/MmdPoseRetargeter.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/PmxModelDecoder.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/VmdMotionDecoder.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/FbxModelDecoder.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Importers/LegacyFbxModelDecoder.cpp")
+    target_link_libraries(CharacterPerformanceTests PRIVATE Engine assimp::assimp ufbx)
+    target_include_directories(CharacterPerformanceTests PRIVATE
+        "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Editor")
+    add_test(NAME CharacterPerformance COMMAND CharacterPerformanceTests)
+    set_tests_properties(CharacterPerformance PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
 if(NOT ENGINE_PROJECT_DIR AND EXISTS "${ENGINE_LOCAL_TEST_ROOT}/HumanoidRigTests.cpp")
     enable_testing()
     add_executable(HumanoidRigTests EXCLUDE_FROM_ALL "${ENGINE_LOCAL_TEST_ROOT}/HumanoidRigTests.cpp")

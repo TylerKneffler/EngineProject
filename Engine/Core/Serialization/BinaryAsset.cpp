@@ -254,6 +254,11 @@ JsonValue AssetParseFile(const std::string& path)
     if (!file) throw std::runtime_error("Cannot open asset: " + path);
     const std::string bytes((std::istreambuf_iterator<char>(file)),
         std::istreambuf_iterator<char>());
+    return AssetParse(bytes);
+}
+
+JsonValue AssetParse(const std::string& bytes)
+{
     if (bytes.size() < 4 || std::memcmp(bytes.data(), Magic, 4) != 0)
         return JsonParse(bytes);
     if (bytes.size() < sizeof(Magic) || bytes[4] != Magic[4])

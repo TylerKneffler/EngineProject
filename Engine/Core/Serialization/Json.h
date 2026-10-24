@@ -115,6 +115,7 @@ JsonValue JsonParseFile(const std::string& path);
 // Versioned binary storage for generated assets. AssetParseFile also accepts
 // legacy JSON files; ordinary JsonParseFile remains text-only for sidecars.
 std::string AssetWriteBinary(const JsonValue& value);
+JsonValue AssetParse(const std::string& bytes);
 JsonValue AssetParseFile(const std::string& path);
 }
 

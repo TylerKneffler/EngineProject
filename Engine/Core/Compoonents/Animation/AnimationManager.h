@@ -57,6 +57,9 @@ public:
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    // Consumed by PropertiesView after drawing; opening an editor does not
+    // change component playback or mark the scene edited.
+    std::string editAnimationRequest;
 
 private:
     Model* ResolveModel() const;
