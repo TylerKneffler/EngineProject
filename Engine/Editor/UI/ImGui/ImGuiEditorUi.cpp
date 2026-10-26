@@ -207,7 +207,18 @@ bool ImGuiEditorUi::BeginModal(const char* title, bool open)
 }
 void ImGuiEditorUi::EndModal() { ImGui::EndPopup(); }
 void ImGuiEditorUi::CloseModal() { ImGui::CloseCurrentPopup(); }
+bool ImGuiEditorUi::BeginViewportWindow(const char* title, bool* open)
+{
+    ImGui::SetNextWindowScroll({0.f, 0.f});
+    return BeginWindowWithFlags(title, open, true,
+        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+}
 bool ImGuiEditorUi::BeginWindow(const char* title, bool* open, bool noPadding)
+{
+    return BeginWindowWithFlags(title, open, noPadding, 0);
+}
+bool ImGuiEditorUi::BeginWindowWithFlags(const char* title, bool* open,
+    bool noPadding, int flags)
 {
     ImGuiContext* context = ImGui::GetCurrentContext();
     if (!(context->NextWindowData.HasFlags & ImGuiNextWindowDataFlags_HasSize))
@@ -231,7 +242,7 @@ bool ImGuiEditorUi::BeginWindow(const char* title, bool* open, bool noPadding)
     }
     if (noPadding)
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, { 0.f, 0.f });
-    const bool visible = ImGui::Begin(title, open);
+    const bool visible = ImGui::Begin(title, open, flags);
     if (noPadding)
         ImGui::PopStyleVar();
     return visible;
@@ -1105,6 +1116,11 @@ EditorUiAssetItemMenuResult ImGuiEditorUi::AssetItemContextMenu(const char* asse
     ImGui::PushID(assetPath);
     if(ImGui::BeginPopupContextItem("##assetItemContext"))
     {
+        if (std::filesystem::path(assetPath).extension() == ".vmdtrack")
+        {
+            result.createTrackAnimationRequested = ImGui::MenuItem("Create .anim...");
+            ImGui::Separator();
+        }
         if (canExtractModelAssets)
         {
             result.extractModelAssetsRequested = ImGui::MenuItem("Split into engine assets");

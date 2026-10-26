@@ -30,7 +30,8 @@ Engine::Serialization::JsonValue AnimationClip::Serialize() const
     JsonValue value = JsonValue::MakeObject()
         .Set("name", JsonValue(clipName))
         .Set("duration", JsonValue(duration))
-        .Set("looping", JsonValue(looping));
+        .Set("looping", JsonValue(looping))
+        .Set("rigIkOverride", JsonValue(static_cast<int>(rigIkOverride)));
     JsonValue serializedChannels = JsonValue::MakeArray();
     for (const auto& channel : channels)
         serializedChannels.Push(JsonValue::MakeObject()
@@ -120,6 +121,9 @@ void AnimationClip::Deserialize(const JsonValue& value)
     clipName = value["name"].AsString();
     duration = value["duration"].AsFloat();
     looping = !value.Has("looping") || value["looping"].AsBool();
+    const int overrideValue = value["rigIkOverride"].AsInt();
+    rigIkOverride = overrideValue >= 0 && overrideValue <= 2
+        ? static_cast<RigIkOverride>(overrideValue) : RigIkOverride::UseModel;
     channels.clear();
     visibility.clear();
     ikSwitches.clear();

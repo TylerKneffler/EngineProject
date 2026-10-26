@@ -423,9 +423,6 @@ bool AnimationManager::AddAnimationAsset(const std::string& path, std::string& e
     const auto target = ReferencedTargetRig(*model);
     const auto mapped = Engine::Model::AnimationRigMapping::Map(*asset, *model, target,
         SameBindHierarchy(*asset, target));
-    if (!mapped.clip.channels.empty() && mapped.unmatchedChannels == mapped.clip.channels.size() &&
-        mapped.clip.componentMorphs.empty() && mapped.clip.visibility.empty())
-    { error = "No animation bones match this avatar. Assign its Humanoid animation mapping or repair the unresolved channels."; return false; }
     if (mapped.clip.channels.empty() && mapped.clip.visibility.empty() &&
         mapped.clip.ikSwitches.empty() && mapped.clip.componentMorphs.empty() &&
         mapped.clip.limbs.empty() && mapped.clip.controllers.empty())
@@ -434,6 +431,8 @@ bool AnimationManager::AddAnimationAsset(const std::string& path, std::string& e
         animationPaths.push_back(path);
     RefreshRigClips();
     clip = asset->clip.clipName;
+    baseAnimationEnabled = true;
+    timelinePlayback = false;
     time = 0.f;
     MarkConfigurationDirty();
     error.clear();
@@ -543,7 +542,7 @@ void AnimationManager::Start()
             for (ReusablePose* pose : { &m_scratch->basePose,
                 &m_scratch->finalPose })
                 pose->nodes[nodeIndex].weights.reserve(weights.size());
-    if (clip.empty())
+    if (clip.empty() && baseAnimationEnabled && !timelinePlayback)
     {
         const auto* first = FindClip();
         if (first) clip = first->clipName;
@@ -552,7 +551,9 @@ void AnimationManager::Start()
 
 void AnimationManager::Play(const std::string& clipName, float fadeSeconds)
 {
-    if (clipName.empty() || clipName == clip) return;
+    if (clipName.empty() || (baseAnimationEnabled && clipName == clip)) return;
+    baseAnimationEnabled = true;
+    timelinePlayback = false;
     if (!clip.empty() && fadeSeconds > 0.f)
     {
         m_previousClip = clip;
@@ -594,9 +595,24 @@ void AnimationManager::Tick(float frameDelta)
     if (m_restPose.empty()) Start();
     frameDelta = std::max(frameDelta, 0.f);
     const float delta = playing ? frameDelta : 0.f;
+    if (timelinePlayback) timelineTime = std::max(0.f, timelineTime + delta * speed);
+    const auto layerActive = [&](const Layer& layer)
+    {
+        if (!layer.enabled) return false;
+        if (!timelinePlayback) return true;
+        const auto* animation = FindClip(layer.clip);
+        if (!animation) return false;
+        const float elapsed = (timelineTime - layer.startSeconds) * std::abs(layer.speed);
+        return timelineTime >= layer.startSeconds &&
+            ((layer.looping && layer.repeatCount == 0) ||
+             elapsed <= std::max(.01f, animation->duration) *
+                (layer.looping ? std::max(1, layer.repeatCount) : 1));
+    };
     const auto resolveAnimation = [this](const std::string& clipName)
     { return FindClip(clipName); };
-    const Engine::Model::AnimationClip* animation = resolveAnimation(clip);
+    static const Engine::Model::AnimationClip restAnimation;
+    const Engine::Model::AnimationClip* animation = baseAnimationEnabled
+        ? resolveAnimation(clip) : &restAnimation;
     if (!animation)
     {
         if (Model* currentModel = ResolveModel())
@@ -713,12 +729,20 @@ void AnimationManager::Tick(float frameDelta)
     for (size_t layerIndex = 0; layerIndex < layers.size(); ++layerIndex)
     {
         Layer& layer = layers[layerIndex];
-        if (!layer.enabled || layer.weight <= 0.f) continue;
+        if (!layerActive(layer) || layer.weight <= 0.f) continue;
         const Engine::Model::AnimationClip* layerAnimation =
             resolveAnimation(layer.clip);
         if (!layerAnimation) continue;
-        layer.time = AdvanceTime(layer.time, delta, layer.speed,
-            layer.looping && layerAnimation->looping, layerAnimation);
+        if (timelinePlayback)
+        {
+            const float length = std::max(.01f, layerAnimation->duration);
+            const float elapsed = std::max(0.f, (timelineTime - layer.startSeconds) * std::abs(layer.speed));
+            layer.time = layer.looping ? std::fmod(elapsed, length) : std::min(elapsed, length);
+            if (layer.speed < 0.f) layer.time = length - layer.time;
+        }
+        else
+            layer.time = AdvanceTime(layer.time, delta, layer.speed,
+                layer.looping && layerAnimation->looping, layerAnimation);
         AnimationManagerScratch::LayerMaskCache& mask =
             m_scratch->layerMasks[layerIndex];
         if (!mask.Matches(layer, nodeCount))
@@ -820,7 +844,7 @@ void AnimationManager::Tick(float frameDelta)
         };
         applyLimbs(*animation, time, 1.f);
         for (const Layer& layer : layers)
-            if (layer.enabled && layer.weight > 0.f)
+            if (layerActive(layer) && layer.weight > 0.f)
                 if (const auto* layerClip = resolveAnimation(layer.clip))
                     applyLimbs(*layerClip, layer.time,
                         std::clamp(layer.weight, 0.f, 1.f));
@@ -836,7 +860,7 @@ void AnimationManager::Tick(float frameDelta)
     };
     includeLegacyMorphs(animation);
     for (const Layer& layer : layers)
-        if (layer.enabled && layer.weight > 0.f)
+        if (layerActive(layer) && layer.weight > 0.f)
             includeLegacyMorphs(resolveAnimation(layer.clip));
     for (const auto& [path, mesh] : m_morphMeshes)
     {
@@ -870,7 +894,7 @@ void AnimationManager::Tick(float frameDelta)
     };
     resetTargeted(animation);
     for (const Layer& layer : layers)
-        if (layer.enabled && layer.weight > 0.f)
+        if (layerActive(layer) && layer.weight > 0.f)
             resetTargeted(resolveAnimation(layer.clip));
     const auto applyTargeted = [&](const Engine::Model::AnimationClip* source,
         float sampleTime, float weight)
@@ -899,7 +923,7 @@ void AnimationManager::Tick(float frameDelta)
     };
     applyTargeted(animation, time, 1.f);
     for (const Layer& layer : layers)
-        if (layer.enabled && layer.weight > 0.f)
+        if (layerActive(layer) && layer.weight > 0.f)
             applyTargeted(resolveAnimation(layer.clip), layer.time,
                 std::clamp(layer.weight, 0.f, 1.f));
     // Publish the final blend once. Resetting GPU weights to rest and then
@@ -908,7 +932,7 @@ void AnimationManager::Tick(float frameDelta)
         mesh->SetMorphWeights(weights);
     bool visible = SampleVisibility(*animation, time);
     for (const Layer& layer : layers)
-        if (layer.enabled && layer.weight >= 0.5f)
+        if (layerActive(layer) && layer.weight >= 0.5f)
             if (const auto* layerClip = resolveAnimation(layer.clip);
                 layerClip && !layerClip->visibility.empty())
                 visible = SampleVisibility(*layerClip, layer.time);
@@ -930,7 +954,7 @@ void AnimationManager::Tick(float frameDelta)
     };
     sampleComponentMorphs(animation, time, 1.f);
     for (const Layer& layer : layers)
-        if (layer.enabled && layer.weight > 0.f)
+        if (layerActive(layer) && layer.weight > 0.f)
             sampleComponentMorphs(resolveAnimation(layer.clip), layer.time,
                 std::clamp(layer.weight, 0.f, 1.f));
     for (auto* material : m_materialMorphs)
@@ -938,10 +962,14 @@ void AnimationManager::Tick(float frameDelta)
     if (auto* morphs = model->Owner->GetComponent<RigMorphControls>())
         morphs->SetAnimatedMorphWeights(componentWeights);
     std::unordered_map<std::string, bool> switches;
+    using RigIkOverride = Engine::Model::AnimationClip::RigIkOverride;
+    RigIkOverride rigIkOverride = RigIkOverride::UseModel;
     const auto sampleSwitches = [&](const Engine::Model::AnimationClip* source,
         float sampleTime)
     {
         if (!source) return;
+        if (source->rigIkOverride != RigIkOverride::UseModel)
+            rigIkOverride = source->rigIkOverride;
         for (const auto& key : source->ikSwitches)
         {
             if (key.time > sampleTime) break;
@@ -950,8 +978,21 @@ void AnimationManager::Tick(float frameDelta)
     };
     sampleSwitches(animation, time);
     for (const Layer& layer : layers)
-        if (layer.enabled && layer.weight >= 0.5f)
+        if (layerActive(layer) && layer.weight >= 0.5f)
             sampleSwitches(resolveAnimation(layer.clip), layer.time);
+    if (rigIkOverride != RigIkOverride::UseModel)
+    {
+        const auto overrideChains = [&](const auto& chains)
+        {
+            for (const auto& chain : chains)
+                if (const auto* controller = model->ResolveNode(chain.controllerNodeIndex))
+                    switches[controller->name] = rigIkOverride == RigIkOverride::Enabled;
+        };
+        if (const auto* constraints = model->Owner->GetComponent<RigConstraints>())
+            overrideChains(constraints->ikChains);
+        else if (const auto* legacy = model->Owner->GetComponent<RigController>())
+            overrideChains(legacy->ikChains);
+    }
     if (auto* constraints = model->Owner->GetComponent<RigConstraints>())
         constraints->SetAnimatedIkSwitches(switches);
     if (auto* rig = model->Owner->GetComponent<RigController>())
@@ -965,6 +1006,9 @@ AnimationManager::JsonValue AnimationManager::Serialize() const
 {
     JsonValue result = Component::Serialize();
     result.Set("clip", JsonValue(clip));
+    result.Set("baseAnimationEnabled", JsonValue(baseAnimationEnabled));
+    result.Set("timelinePlayback", JsonValue(timelinePlayback));
+    result.Set("timelineTime", JsonValue(timelineTime));
     JsonValue serializedClips = JsonValue::MakeArray();
     for (const auto& item : clips)
         if (!m_externalClipNames.count(item.clipName))
@@ -987,7 +1031,9 @@ AnimationManager::JsonValue AnimationManager::Serialize() const
             .Set("weight", JsonValue(layer.weight)).Set("speed", JsonValue(layer.speed))
             .Set("time", JsonValue(layer.time)).Set("enabled", JsonValue(layer.enabled))
             .Set("looping", JsonValue(layer.looping)).Set("additive", JsonValue(layer.additive))
-            .Set("nodeMask", std::move(mask)));
+            .Set("nodeMask", std::move(mask))
+            .Set("startSeconds", JsonValue(layer.startSeconds))
+            .Set("repeatCount", JsonValue(layer.repeatCount)));
     }
     return result.Set("layers", std::move(serializedLayers));
 }
@@ -997,6 +1043,10 @@ void AnimationManager::Deserialize(const JsonValue& value)
     EndEditorPreview();
     Component::Deserialize(value);
     clip = value["clip"].AsString();
+    baseAnimationEnabled = !value.Has("baseAnimationEnabled") ||
+        value["baseAnimationEnabled"].AsBool();
+    timelinePlayback = value.Has("timelinePlayback") && value["timelinePlayback"].AsBool();
+    timelineTime = value["timelineTime"].AsFloat();
     clips.clear();
     m_externalClipNames.clear();
     rigPaths.clear();
@@ -1021,6 +1071,8 @@ void AnimationManager::Deserialize(const JsonValue& value)
         const JsonValue& item = serializedLayers.ArrayAt(i);
         Layer layer;
         layer.clip = item["clip"].AsString();
+        layer.startSeconds = item["startSeconds"].AsFloat();
+        layer.repeatCount = item["repeatCount"].AsInt();
         layer.weight = item["weight"].AsFloat();
         layer.speed = item["speed"].AsFloat();
         layer.time = item["time"].AsFloat();

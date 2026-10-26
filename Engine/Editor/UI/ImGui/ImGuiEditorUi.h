@@ -11,6 +11,7 @@ class ImGuiEditorUi final : public IEditorUi
 {
 public:
     void SetNextWindowRect(float x, float y, float width, float height) override;
+    bool BeginViewportWindow(const char*, bool*) override;
     bool BeginWindow(const char*, bool*, bool) override; void EndWindow() override;
     bool CurrentWindowScreenRect(float&, float&, float&, float&) const override;
     bool BeginModal(const char*, bool) override;
@@ -110,6 +111,7 @@ public:
     void FocusWindow(const char*) override;
     void DockWindowToArea(const char* title, EditorPanelDockArea area);
 private:
+    bool BeginWindowWithFlags(const char*, bool*, bool, int flags);
     bool ConsumeMixedValue();
     bool m_nextItemMixed = false;
     std::vector<unsigned char> m_dropResultPayload;

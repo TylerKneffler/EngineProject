@@ -81,6 +81,8 @@ private:
     void PasteClipboard(const std::string& directory);
     void ProcessPendingAssetDrop();
     void ExtractModelAssets(const std::string& sourcePath);
+    void BeginTrackAnimation(const std::string& sourcePath);
+    void DrawTrackAnimationDialog(IEditorUi& ui);
 
     // Opens a file with the system's default application (unless it's a scene file)
     void OpenFile(const std::string& filePath);
@@ -116,6 +118,10 @@ private:
     bool m_renamingAsset = false;
     bool m_focusAssetRename = false;
     std::string m_error;
+    std::string m_trackAnimationSource;
+    std::string m_trackAnimationPrefab;
+    std::string m_trackAnimationOutput;
+    std::string m_trackAnimationError;
     bool m_hasScreenBounds = false;
     float m_screenLeft = 0.f;
     float m_screenTop = 0.f;

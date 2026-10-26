@@ -22,6 +22,9 @@ struct AnimationPackAsset
         std::string json;
     };
     std::string activeClip;
+    bool baseAnimationEnabled = true;
+    bool timelinePlayback = false;
+    float timelineTime = 0.f;
     bool playing = true;
     bool looping = true;
     float speed = 1.f;

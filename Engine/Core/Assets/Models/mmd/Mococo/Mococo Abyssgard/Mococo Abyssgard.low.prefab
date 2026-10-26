@@ -687,7 +687,7 @@
           </item>
         </RigConstraints.appends>
         <RigConstraints.ikChains>
-          <item controller="223" effector="20" enabled="true" iterations="200" angleLimit="2" layer="0" order="223" afterPhysics="false">
+          <item controller="223" effector="20" enabled="false" iterations="200" angleLimit="2" layer="0" order="223" afterPhysics="false">
             <links>
               <item node="19" limited="true" fixedAxis="false">
                 <minimum>
@@ -725,7 +725,7 @@
               </item>
             </links>
           </item>
-          <item controller="224" effector="21" enabled="true" iterations="20" angleLimit="4" layer="0" order="224" afterPhysics="false">
+          <item controller="224" effector="21" enabled="false" iterations="20" angleLimit="4" layer="0" order="224" afterPhysics="false">
             <links>
               <item node="20" limited="true" fixedAxis="false">
                 <minimum>
@@ -746,7 +746,7 @@
               </item>
             </links>
           </item>
-          <item controller="226" effector="220" enabled="true" iterations="200" angleLimit="2" layer="0" order="226" afterPhysics="false">
+          <item controller="226" effector="220" enabled="false" iterations="200" angleLimit="2" layer="0" order="226" afterPhysics="false">
             <links>
               <item node="219" limited="true" fixedAxis="false">
                 <minimum>
@@ -784,7 +784,7 @@
               </item>
             </links>
           </item>
-          <item controller="227" effector="221" enabled="true" iterations="1" angleLimit="1" layer="0" order="227" afterPhysics="false">
+          <item controller="227" effector="221" enabled="false" iterations="1" angleLimit="1" layer="0" order="227" afterPhysics="false">
             <links>
               <item node="220" limited="true" fixedAxis="false">
                 <minimum>
@@ -942,21 +942,14 @@
         </RigConstraints.localAxes>
         <RigConstraints.externalParents />
       </components:RigConstraints>
-      <components:AnimationManager AnimationManager.playing="true" AnimationManager.holdCurrentPoseWhenStopped="false" AnimationManager.looping="true" AnimationManager.speed="1" AnimationManager.time="0" AnimationManager.clip="dancing body">
+      <components:AnimationManager AnimationManager.playing="true" AnimationManager.holdCurrentPoseWhenStopped="false" AnimationManager.looping="true" AnimationManager.speed="1" AnimationManager.time="0" AnimationManager.clip="" AnimationManager.baseAnimationEnabled="false" AnimationManager.timelinePlayback="true" AnimationManager.timelineTime="0">
         <AnimationManager.modelReference expectedType="Model" objectPath="" objectName="" componentType="" componentIndex="0" />
         <AnimationManager.clips />
         <AnimationManager.rigPaths>
           <item>Engine/Core/Assets/Models/mmd/Mococo/Mococo Abyssgard/Mococo Abyssgard.rig</item>
         </AnimationManager.rigPaths>
         <AnimationManager.animationPaths />
-        <AnimationManager.layers>
-          <item clip="dance1 facial" weight="1" speed="1" time="0" enabled="true" looping="true" additive="false">
-            <nodeMask />
-          </item>
-          <item clip="dancing facial" weight="1" speed="1" time="0" enabled="true" looping="true" additive="false">
-            <nodeMask />
-          </item>
-        </AnimationManager.layers>
+        <AnimationManager.layers />
       </components:AnimationManager>
     </components>
     <children>

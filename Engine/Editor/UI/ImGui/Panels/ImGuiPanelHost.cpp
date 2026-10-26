@@ -847,6 +847,7 @@ void ImGuiPanelHost::DrawPanels(EditorState& state)
     // properties panels retarget based on focused document.
     state.HandlePrefabPanelClosures();
     state.HandleSceneAssetDocumentClosures();
+    state.DrawAnimationCloseConfirmation(m_ui);
     state.HandleAnimationDocumentClosures();
     state.HandleAssetDocumentClosures();
 

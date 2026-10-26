@@ -8,7 +8,9 @@
 #include "Core/Model/MeshPackAsset.h"
 #include "Engine/Editor/Core/Importers/ModelImporter.h"
 #include "Engine/Editor/Core/Importers/AssetDataExtractor.h"
+#include "Engine/Editor/Core/Importers/MmdDanceAssetBinder.h"
 #include "Core/Object.h"
+#include "Core/Prefab/PrefabAsset.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Scene/Scene.h"
 #include "../Focus/WindowFocusHandler.h"
@@ -61,6 +63,7 @@ const std::unordered_map<std::string, std::string>& AssetEditorRegistry()
         { ".spriteanim", "Sprite Animation Editor" },
         { ".spritesheet", "Sprite Sheet Editor" },
         { ".anim", "Animation Editor" }, { ".animation", "Animation Editor" },
+        { ".animpack", "Animation Editor" },
         { ".skeleton", "Skeleton Editor" },
         { ".mesh", "Mesh Editor" }, { ".obj", "Mesh Editor" },
         { ".ply", "Mesh Editor" }, { ".stl", "Mesh Editor" },
@@ -175,8 +178,61 @@ void AssetsExplorerView::CheckForExternalMoves()
 // ---------------------------------------------------------------------------
 // DrawPanel
 // ---------------------------------------------------------------------------
+void AssetsExplorerView::BeginTrackAnimation(const std::string& sourcePath)
+{
+    m_trackAnimationSource = sourcePath;
+    m_trackAnimationError.clear();
+    m_trackAnimationPrefab.clear();
+    if (auto* selected = m_scene ? m_scene->GetSelectedObject() : nullptr)
+        if (auto* root = selected->GetPrefabInstanceRoot(); root && root->Prefab)
+            m_trackAnimationPrefab = root->Prefab->GetPath();
+    const auto source = fs::path(sourcePath);
+    auto output = source.parent_path() / (source.stem().string() + ".anim");
+    for (unsigned index = 2; fs::exists(output); ++index)
+        output = source.parent_path() / (source.stem().string() + "_" + std::to_string(index) + ".anim");
+    m_trackAnimationOutput = output.string();
+}
+
+void AssetsExplorerView::DrawTrackAnimationDialog(IEditorUi& ui)
+{
+    if (!ui.BeginModal("Create animation from VMD track", !m_trackAnimationSource.empty())) return;
+    ui.Label(m_trackAnimationSource.c_str());
+    ui.DisabledLabel("Choose the character whose bind pose will be stored in the animation.");
+    Engine::Core::Component::DrawAssetPathPicker(ui, this, "vmdTargetPrefab",
+        "Target character", "prefab", m_trackAnimationPrefab);
+    char output[2048]{};
+    strncpy_s(output, m_trackAnimationOutput.c_str(), sizeof(output));
+    if (ui.InputText("Output .anim", output, sizeof(output))) m_trackAnimationOutput = output;
+    if (!m_trackAnimationError.empty())
+        ui.ColoredLabel(m_trackAnimationError.c_str(), {1.f, .55f, .3f, 1.f});
+    ui.BeginDisabled(m_trackAnimationPrefab.empty());
+    if (ui.Button("Create .anim") && !m_trackAnimationPrefab.empty())
+    {
+        if (MmdDanceAssetBinder::ExportTrackAnimation(m_trackAnimationSource, m_trackAnimationPrefab,
+                m_trackAnimationOutput, m_trackAnimationError))
+        {
+            const auto created = m_trackAnimationOutput;
+            m_trackAnimationSource.clear();
+            m_error.clear();
+            m_previewCache.Clear();
+            SelectPath(created);
+            if (OnAssetContentsChanged) OnAssetContentsChanged(created);
+            ui.CloseModal();
+        }
+    }
+    ui.EndDisabled();
+    ui.SameLine();
+    if (ui.Button("Cancel"))
+    {
+        m_trackAnimationSource.clear();
+        ui.CloseModal();
+    }
+    ui.EndModal();
+}
+
 void AssetsExplorerView::DrawPanel(IEditorUi& ui)
 {
+    DrawTrackAnimationDialog(ui);
     if (m_locationCheckPending && m_externalMoves.empty())
         CheckForExternalMoves();
     if (ui.BeginModal("Asset moves detected", !m_externalMoves.empty()))
@@ -477,6 +533,8 @@ void AssetsExplorerView::DrawCurrentDirectory(IEditorUi& ui)
                 }
                 if (menu.extractModelAssetsRequested)
                     ExtractModelAssets(entryPath);
+                if (menu.createTrackAnimationRequested)
+                    BeginTrackAnimation(entryPath);
                 if (menu.renameRequested)
                 {
                     m_renamePath = entryPath;
@@ -621,6 +679,8 @@ void AssetsExplorerView::DrawGridDirectory(IEditorUi& ui)
             }
             if (menu.extractModelAssetsRequested)
                 ExtractModelAssets(entryPath);
+            if (menu.createTrackAnimationRequested)
+                BeginTrackAnimation(entryPath);
             if (menu.renameRequested)
             {
                 m_renamePath = entryPath;

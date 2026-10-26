@@ -203,7 +203,8 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         OutputDebugStringA(("[Main] Loading default scene: " + startupScene + "\n").c_str());
         editorState->LoadStartupScene(startupScene);
     }
-    editorState->RestoreAnimationEditorSession();
+    // Character animation documents open explicitly. A saved session must not
+    // reopen a character tab after the user closes the Animation Editor.
     splash.SetProgress(0.90f, L"Finishing startup...");
 
     OutputDebugStringA("[Main] Creating GameBuildManager...\n");

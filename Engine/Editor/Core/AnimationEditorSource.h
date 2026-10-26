@@ -1,11 +1,13 @@
 #pragma once
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializerInternal.h"
+#include "Core/Serialization/SceneSerializer.h"
 #include "Core/Compoonents/Animation/Model.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/AnimationBone.h"
 #include "Core/Compoonents/Animation/AnimationManager.h"
 #include "Core/Model/AnimationClipAsset.h"
+#include "Core/Model/AnimationPackAsset.h"
 #include <stdexcept>
 
 namespace Engine::Editor::AnimationEditorSource
@@ -116,4 +118,27 @@ inline std::string ClipPreview(const Engine::Model::AnimationClipAsset& asset)
     manager->playing = false;
     return scene.SaveSnapshotToString();
 }
+inline std::string PackPreview(const Engine::Model::AnimationPackAsset& pack)
+{
+    if (pack.clips.empty()) throw std::runtime_error("Pack contains no editable clips.");
+    Engine::Model::AnimationClipAsset asset;
+    asset.clip = pack.clips.front();
+    asset.bindSkeleton = pack.bindSkeleton;
+    asset.humanoid = pack.humanoid;
+    for (size_t index = 1; index < pack.clips.size(); ++index)
+        asset.clip.channels.insert(asset.clip.channels.end(),
+            pack.clips[index].channels.begin(), pack.clips[index].channels.end());
+    Engine::Scene::Scene scene;
+    if (!Engine::Serialization::SceneSerializer::LoadFromString(scene, ClipPreview(asset)))
+        throw std::runtime_error("Could not construct the animation pack skeleton.");
+    auto* manager = scene.GetObjects().front()->GetComponent<Engine::Components::AnimationManager>();
+    manager->InstallEmbeddedClips(pack.clips);
+    manager->clip = pack.activeClip;
+    manager->baseAnimationEnabled = pack.baseAnimationEnabled;
+    manager->timelinePlayback = pack.timelinePlayback;
+    manager->timelineTime = pack.timelineTime;
+    manager->layers = pack.layers;
+    return scene.SaveSnapshotToString();
+}
+
 }

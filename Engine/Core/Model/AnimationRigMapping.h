@@ -127,6 +127,8 @@ inline std::string Role(const std::string& name)
         return translated;
     std::string value = NormalizedName(name);
     const bool numberedSpine = name.find("spine_") != std::string::npos;
+    const bool arpCenter = name.size() > 2 && name.compare(name.size() - 2, 2, ".x") == 0;
+    if (arpCenter && !value.empty()) value.pop_back();
     std::string side;
     if (value.rfind("left", 0) == 0)
     { side = "l"; value.erase(0, 4); }
@@ -134,10 +136,20 @@ inline std::string Role(const std::string& name)
     { side = "r"; value.erase(0, 5); }
     else if (value.size() > 1 && (value.back() == 'l' || value.back() == 'r'))
     {
-        if (name.find('_') != std::string::npos)
+        if ((name.size() > 2 && (name[name.size() - 2] == '.' || name[name.size() - 2] == '_')) ||
+            name.find('_') != std::string::npos)
         { side = value.back(); value.pop_back(); }
     }
-    if (value == "hips" || value == "pelvis") value = "pelvis";
+    // Auto-Rig Pro deform names used by the original Mococo FBX.
+    if (value == "carmtwistoffset") value = "upperarm";
+    else if (value == "thightwist") value = "thigh";
+    else if (value == "legstretch") value = "calf";
+    else if (value == "forearmstretch") value = "lowerarm";
+    if (name.rfind("c_", 0) == 0 && value.size() > 1 && value.front() == 'c' && value.find("base") == std::string::npos)
+        value.erase(0, 1);
+    if (value == "hips" || value == "pelvis" || value == "lowerbody" || (arpCenter && value == "root")) value = "pelvis";
+    else if (value == "upperbody") value = "spine1";
+    else if (value == "upperbody2") value = "spine2";
     else if (value == "spine") value = "spine1";
     else if (value == "spine1" || value == "spine01") value = numberedSpine ? "spine1" : "spine2";
     else if (value == "spine2" || value == "spine02") value = numberedSpine ? "spine2" : "spine3";
@@ -146,13 +158,22 @@ inline std::string Role(const std::string& name)
     else if (value == "shoulder" || value == "clavicle") value = "clavicle";
     else if (value == "arm" || value == "upperarm") value = "upperarm";
     else if (value == "forearm" || value == "lowerarm") value = "lowerarm";
+    else if (value == "elbow") value = "lowerarm";
+    else if (value == "wrist") value = "hand";
     else if (value == "upleg" || value == "thigh") value = "thigh";
     else if (value == "leg" || value == "calf") value = "calf";
+    else if (value == "knee") value = "calf";
+    else if (value == "ankle") value = "foot";
     else if (value == "toebase" || value == "ball") value = "toe";
     else if (value != "hand" && value.rfind("hand", 0) == 0) value.erase(0, 4);
     for (const std::string finger : { "thumb", "index", "middle", "ring", "pinky" })
         if (value.rfind(finger, 0) == 0)
         {
+            if (value.compare(finger.size(), 6, "finger") == 0)
+                value.erase(finger.size(), 6);
+            if (finger == "thumb" && name.find("Thumb ") != std::string::npos &&
+                value.size() == 6 && value.back() >= '0' && value.back() <= '2')
+                ++value.back();
             const int digit = value.size() > finger.size()
                 ? std::atoi(value.c_str() + finger.size()) : 0;
             if (digit > 0) value = finger + std::to_string(digit);
@@ -272,15 +293,20 @@ inline Result Map(const AnimationClipAsset& source,
                 if (detection.confidence[role]<.75f) mapping.bones[role]=-1;
             return mapping;
         };
-        if (!sourceHumanoid.HasAssignments())
-            sourceHumanoid = conservative(HumanoidRig::Detect(HumanoidRig::Nodes(sourceRestNodes), sourceHumanoid));
-        if (!targetHumanoid.HasAssignments())
+        const auto fillMissing = [&](HumanoidRig::Mapping& mapping,
+            const std::vector<HumanoidRig::Node>& nodes)
         {
-            std::vector<unsigned> jointIndices;
-            for (const auto& joint : rig.joints) jointIndices.push_back(joint.nodeIndex);
-            const auto rest = rig.bindNodes.empty() ? AnimationClipAsset::CaptureBaseSkeleton(model) : rig.bindNodes;
-            targetHumanoid = conservative(HumanoidRig::Detect(HumanoidRig::Nodes(rest, jointIndices), targetHumanoid));
-        }
+            if (std::all_of(mapping.bones.begin(), mapping.bones.end(),
+                    [](int node) { return node >= 0; })) return;
+            const auto inferred = conservative(HumanoidRig::Detect(nodes, mapping));
+            for (size_t role = 0; role < HumanoidRig::Count; ++role)
+                if (mapping.bones[role] < 0) mapping.bones[role] = inferred.bones[role];
+        };
+        fillMissing(sourceHumanoid, HumanoidRig::Nodes(sourceRestNodes));
+        std::vector<unsigned> jointIndices;
+        for (const auto& joint : rig.joints) jointIndices.push_back(joint.nodeIndex);
+        const auto rest = rig.bindNodes.empty() ? AnimationClipAsset::CaptureBaseSkeleton(model) : rig.bindNodes;
+        fillMissing(targetHumanoid, HumanoidRig::Nodes(rest, jointIndices));
         for (size_t role = 0; role < HumanoidRig::Count; ++role)
             if (const int node = sourceHumanoid.bones[role]; node >= 0 && size_t(node) < sourceRestNodes.size())
                 sourceRoles.emplace(sourceRestNodes[node].path, role);
@@ -291,15 +317,15 @@ inline Result Map(const AnimationClipAsset& source,
     {
         if (path.empty())
         {
-            const auto root = poseNodes.find(".");
-            return root != poseNodes.end()
+            const auto root = bindNodes.find(".");
+            return root != bindNodes.end()
                 ? LocalRotation(root->second->rotation)
                 : glm::quat(1.f, 0.f, 0.f, 0.f);
         }
         if (const auto found = sourceWorldRotations.find(path);
             found != sourceWorldRotations.end()) return found->second;
-        const auto node = poseNodes.find(path);
-        if (node == poseNodes.end()) return glm::quat(1.f, 0.f, 0.f, 0.f);
+        const auto node = bindNodes.find(path);
+        if (node == bindNodes.end()) return glm::quat(1.f, 0.f, 0.f, 0.f);
         const glm::quat value = glm::normalize(
             self(self, node->second->parent) *
             LocalRotation(node->second->rotation));
@@ -318,6 +344,14 @@ inline Result Map(const AnimationClipAsset& source,
     }
     Result result;
     result.clip = source.clip;
+    std::unordered_set<std::string> transformRows;
+    for (const auto& channel : source.clip.channels)
+        if (channel.path == AnimationChannel::Path::Translation || channel.path == AnimationChannel::Path::Rotation)
+        {
+            auto path = channel.targetPath;
+            if (path.empty() && channel.nodeIndex < sourceRestNodes.size()) path = sourceRestNodes[channel.nodeIndex].path;
+            transformRows.insert(std::move(path));
+        }
     std::unordered_map<unsigned, std::string> owner;
     for (size_t channelIndex = 0; channelIndex < source.clip.channels.size(); ++channelIndex)
     {
@@ -325,9 +359,15 @@ inline Result Map(const AnimationClipAsset& source,
         auto& mapped = result.clip.channels[channelIndex];
         std::string path = channel.targetPath;
         if (path.empty() && channel.nodeIndex < sourceRestNodes.size()) path = sourceRestNodes[channel.nodeIndex].path;
+        // Legacy FBX packs contain mesh-object scale tracks (often 100 for
+        // centimeters). Without a source rest transform or other transform
+        // keys, a matching leaf name is insufficient to identify a target bone.
+        const bool inferJoint = channel.path != AnimationChannel::Path::Scale ||
+            bindNodes.count(path) || poseNodes.count(path) || transformRows.count(path);
         const Target* match = nullptr;
         const auto humanoidTarget = [&]() -> const Target*
         {
+            if (!inferJoint) return nullptr;
             prepareHumanoid();
             const auto role = sourceRoles.find(path);
             size_t roleIndex = HumanoidRig::Count;
@@ -347,8 +387,7 @@ inline Result Map(const AnimationClipAsset& source,
         };
         // Saved semantic assignments take precedence across avatars. Exact
         // identity and legacy name matching remain available for other tracks.
-        if (source.humanoid.HasAssignments() && rig.humanoid.HasAssignments() &&
-            !preserveLocalKeys && (source.previewPrefab.empty() || rig.prefabPath.empty() ||
+        if (!preserveLocalKeys && (source.previewPrefab.empty() || rig.prefabPath.empty() ||
                 source.previewPrefab != rig.prefabPath)) match = humanoidTarget();
         if (path.empty())
             for (const auto& target : targets)
@@ -364,7 +403,7 @@ inline Result Map(const AnimationClipAsset& source,
             const std::string parentRole = AncestorRole(path);
             std::vector<const Target*> candidates;
             for (const auto& target : targets)
-                if (target.joint && ((!role.empty() && target.role == role) ||
+                if (inferJoint && target.joint && ((!role.empty() && target.role == role) ||
                     (role.empty() && !name.empty() &&
                         NormalizedName(Leaf(target.path)) == name)))
                     candidates.push_back(&target);
@@ -377,6 +416,24 @@ inline Result Map(const AnimationClipAsset& source,
             if (candidates.size() == 1) match = candidates.front();
         }
         if (!match) match = humanoidTarget();
+        if (match && owner.count(match->index) && owner[match->index] != path &&
+            owner[match->index] != match->path && AncestorRole(owner[match->index]).empty() &&
+            !AncestorRole(path).empty())
+        {
+            // FBX exports can give a mesh and a bone the same leaf name.
+            // Prefer the channel under a recognized skeletal parent chain.
+            const auto previousPath = owner[match->index];
+            for (size_t previous = 0; previous < channelIndex; ++previous)
+                if (result.clip.channels[previous].nodeIndex == match->index)
+                {
+                    result.clip.channels[previous].nodeIndex = std::numeric_limits<unsigned>::max();
+                    result.clip.channels[previous].targetPath = previousPath;
+                    ++result.unmatchedChannels;
+                }
+            if (std::find(result.unmatchedPaths.begin(), result.unmatchedPaths.end(), previousPath) == result.unmatchedPaths.end())
+                result.unmatchedPaths.push_back(previousPath);
+            owner.erase(match->index);
+        }
         if (!match || (owner.count(match->index) && owner[match->index] != path))
         {
             ++result.unmatchedChannels;
@@ -384,6 +441,11 @@ inline Result Map(const AnimationClipAsset& source,
                     path) == result.unmatchedPaths.end())
                 result.unmatchedPaths.push_back(path);
             mapped.nodeIndex = std::numeric_limits<unsigned>::max();
+            // Keep distinct legacy numeric rows assignable even when the file
+            // has no saved skeleton or node paths. Never reuse source indices
+            // as target indices on an unrelated avatar.
+            mapped.targetPath = path.empty()
+                ? "@source-node/" + std::to_string(channel.nodeIndex) : path;
             continue;
         }
         owner[match->index] = path;
@@ -412,10 +474,7 @@ inline Result Map(const AnimationClipAsset& source,
                     if (channel.path == AnimationChannel::Path::Rotation &&
                         channel.valueWidth == 4)
                     {
-                        const auto pose = poseNodes.find(path);
-                        const glm::quat sourceRest = pose != poseNodes.end()
-                            ? LocalRotation(pose->second->rotation)
-                            : LocalRotation(sourceNode->second->rotation);
+                        const glm::quat sourceRest = LocalRotation(sourceNode->second->rotation);
                         const glm::quat targetRest = LocalRotation(
                             targetNode->transform.rotation);
                         for (size_t key = 0; key + 3 < mapped.values.size(); key += 4)

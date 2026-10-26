@@ -69,6 +69,8 @@ struct AnimationClip
     std::string clipName;
     float duration = 0.f;
     bool looping = true;
+    enum class RigIkOverride { UseModel, Disabled, Enabled };
+    RigIkOverride rigIkOverride = RigIkOverride::UseModel;
     std::vector<AnimationChannel> channels;
     std::vector<VisibilityKey> visibility;
     std::vector<IkSwitchKey> ikSwitches;

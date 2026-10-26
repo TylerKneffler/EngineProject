@@ -7,16 +7,20 @@
 #include "Core/Compoonents/Animation/Model.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/AnimationManager.h"
+#include "Core/Compoonents/Animation/RigConstraints.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Lighting/Light.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Object.h"
 #include "Core/Serialization/SceneSerializer.h"
+#include "Core/Serialization/SceneSerializerInternal.h"
+#include <pugixml.hpp>
 #include "Core/Renderers/DX11/DX11GameRenderer.h"
 #include "Core/Window.h"
 #include <Windows.h>
 #include <ufbx.h>
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -45,12 +49,29 @@ void SaveBmp(const std::vector<uint8_t>& pixels, const fs::path& path)
 
 std::vector<uint8_t> Capture(Renderers::DX11GameRenderer& renderer, const std::string& prefab,
     const std::string& prefix, glm::vec3 center, float height, float rootScale = 0.f,
-    const std::vector<int>& frames = { -1, 0, 60, 100, 150, 210, 300, 450 })
+    const std::vector<int>& frames = { -1, 0, 60, 100, 150, 210, 300, 450 },
+    const std::string& motion = {}, bool disableIk = false)
 {
     Scene::Scene scene; scene.Init(renderer.GetGraphicsProvider());
     auto* root = Serialization::SceneSerializer::InstantiatePrefab(scene, prefab, renderer.GetGraphicsProvider());
     if (!root) throw std::runtime_error("Failed to load " + prefab);
     if (rootScale > 0) root->transform.scale = glm::vec3(rootScale);
+    if (!motion.empty())
+    {
+        auto* animation = root->GetComponent<Components::AnimationManager>();
+        if (!animation) animation = root->AddComponent<Components::AnimationManager>();
+        std::string error;
+        const bool added = fs::path(motion).extension() == ".anim"
+            ? Editor::MmdDanceAssetBinder::AddClipForPrefab(prefab, motion, *animation, error)
+            : Editor::MmdDanceAssetBinder::ApplyForPrefab(prefab, motion, *animation, error);
+        if (!added) throw std::runtime_error(error);
+        animation->layers.clear();
+        animation->timelinePlayback = false;
+        animation->baseAnimationEnabled = true;
+    }
+    if (disableIk)
+        if (auto* constraints = root->GetComponent<Components::RigConstraints>())
+            for (auto& chain : constraints->ikChains) chain.enabled = false;
     auto* light = scene.AddObject("Audit light")->AddComponent<Components::Light>();
     light->lightType = int(Components::Light::Type::Directional);
     light->intensity = 2.f; light->castsShadows = false;
@@ -176,11 +197,79 @@ int main(int argc, char** argv)
     try
     {
         fs::create_directories(output);
+        if (argc > 1 && std::string(argv[1]) == "repair-dance-rig")
+        {
+            const auto target = fs::path("Engine/Core/Assets/Models/mmd/Mococo/Mococo Dance/Mococo Dance.rig");
+            const auto backup = fs::path(".local/backups") / ("Mococo-Dance-" +
+                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".rig");
+            fs::create_directories(backup.parent_path());
+            fs::copy_file(target, backup);
+            const auto bytes = Serialization::AssetWriteBinary(Serialization::JsonParseFile(".local/test-output/recovered-dance-source.json"));
+            std::ofstream file(target, std::ios::binary | std::ios::trunc);
+            file.write(bytes.data(), bytes.size());
+            if (!file) throw std::runtime_error("Could not restore rig asset");
+            std::cout << "Repaired rig paths. Backup: " << backup << '\n';
+            return 0;
+        }
+        if (argc > 1 && std::string(argv[1]) == "open-dance")
+        {
+            Scene::Scene scene;
+            pugi::xml_document xml;
+            if (!xml.load_file("Engine/Core/Assets/Models/mmd/Mococo/Mococo Dance/Mococo Dance.prefab"))
+                throw std::runtime_error("Could not read dance prefab XML");
+            const auto json = Serialization::Detail::SceneXmlBehavior::ReadNode(xml.child("Prefab"));
+            std::unordered_map<std::string, Serialization::SceneSerializer::Factory> registry;
+            for (const auto& name : Serialization::SceneSerializer::GetRegisteredComponentTypes())
+                registry[name] = Serialization::SceneSerializer::GetRegisteredFactory(name);
+            auto* object = Serialization::Detail::SceneObjectBehavior::DeserializeObjectTree(scene, json["object"], nullptr, registry);
+            std::cout << "Opened " << (object ? object->name : "null") << '\n';
+            return object ? 0 : 1;
+        }
+        if (argc > 1 && std::string(argv[1]) == "repair-dance")
+        {
+            const std::string bodyPath = "Engine/Core/Assets/Models/mmd/Mococo/Mococo Dance/dance1_body.anim";
+            const std::string sourcePrefab = "Engine/Core/Assets/Models/mmd/Mococo/Mococo Dance/Mococo Dance.prefab";
+            auto asset = Model::AnimationClipAsset::Load(".local/test-output/dance1-source-bind.anim");
+            if (!asset) throw std::runtime_error("Recovered original animation is unreadable");
+            if (asset->bindSkeleton.size() != 326) throw std::runtime_error("Recovered neutral FBX skeleton is incomplete");
+            asset->previewPrefab = sourcePrefab;
+            const auto backup = fs::path(".local/backups") / ("dance1_body-" +
+                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".anim");
+            fs::create_directories(backup.parent_path());
+            fs::copy_file(bodyPath, backup);
+            if (!asset->Save(bodyPath)) throw std::runtime_error("Could not save repaired animation");
+            std::cout << "Restored self-contained source bind data; backup: " << backup << '\n';
+            return 0;
+        }
         Core::Window window(GetModuleHandleW(nullptr), L"Hidden import audit", 640, 800);
         Renderers::DX11GameRenderer renderer;
         if (!renderer.Init(window.GetHWND(), 640, 800) || !renderer.EnableOffscreenExport(640,800,1,2))
             throw std::runtime_error("DX11 audit initialization failed");
         std::string error;
+        if (argc > 1 && std::string(argv[1]) == "dance1-bind")
+        {
+            const std::string prefab = "Engine/Core/Assets/Models/mmd/Mococo/Mococo Abyssgard/Mococo Abyssgard.low.prefab";
+            const std::string body = ".local/test-output/dance1-source-bind.anim";
+            Capture(renderer, prefab, "dance1-bind", {0,.85f,0}, 1.9f, .08f, {0,60,150}, body);
+            Capture(renderer, prefab, "dance1-bind-noik", {0,.85f,0}, 1.9f, .08f, {0,60,150}, body, true);
+            return 0;
+        }
+        if (argc > 1 && std::string(argv[1]) == "dance1-fixed")
+        {
+            Capture(renderer, "Engine/Core/Assets/Models/mmd/Mococo/Mococo Abyssgard/Mococo Abyssgard.low.prefab",
+                "dance1-fixed", {0,.85f,0}, 1.9f, .08f, {0,60,150},
+                "Engine/Core/Assets/Models/mmd/Mococo/Mococo Dance/dance1_body.anim");
+            return 0;
+        }
+        if (argc > 1 && std::string(argv[1]) == "dance1")
+        {
+            const std::string prefab = "Engine/Core/Assets/Models/mmd/Mococo/Mococo Abyssgard/Mococo Abyssgard.low.prefab";
+            const std::string body = "Engine/Core/Assets/Models/mmd/Mococo/Mococo Dance/dance1_body.anim";
+            Capture(renderer, prefab, "dance1-anim", {0,.85f,0}, 1.9f, .08f, {-1,0,60,150}, body);
+            Capture(renderer, prefab, "dance1-anim-noik", {0,.85f,0}, 1.9f, .08f, {0,60,150}, body, true);
+            Capture(renderer, prefab, "dance1-native", {0,.85f,0}, 1.9f, .08f, {0,60,150}, "Engine/Core/Assets/Models/mmd/dance1.vmd");
+            return 0;
+        }
         if (argc > 1 && std::string(argv[1]) == "saved")
         {
             Capture(renderer, "Engine/Core/Assets/Roku_V1_packed/Roku_V1_packed.prefab",

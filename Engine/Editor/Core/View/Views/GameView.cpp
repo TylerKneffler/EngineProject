@@ -41,7 +41,7 @@ void GameView::Init(void* device,
 // ---------------------------------------------------------------------------
 void GameView::DrawPanel(IEditorUi& ui)
 {
-    const bool windowVisible = ui.BeginWindow(m_title.c_str(), &m_open, true);
+    const bool windowVisible = ui.BeginViewportWindow(m_title.c_str(), &m_open);
     SetPanelVisible(windowVisible);
     if (ui.IsWindowFocused() && OnFocused) OnFocused();
     if (windowVisible)

@@ -1,6 +1,7 @@
 #include "HumanoidRig.h"
 #include <algorithm>
 #include <cmath>
+#include <cctype>
 #include <functional>
 #include <limits>
 #include <unordered_map>
@@ -47,6 +48,8 @@ std::vector<Node> BuildNodes(const std::vector<RestTransform>& input,
     for (size_t i = 0; i < input.size(); ++i)
     {
         const auto found = indices.find(input[i].parent);
+        const auto slash = input[i].path.find_last_of('/');
+        nodes[i].name = input[i].path.substr(slash == std::string::npos ? 0 : slash + 1);
         if (found != indices.end()) nodes[i].parent = found->second;
         else if (input[i].parent.empty() && root != indices.end() && root->second != int(i))
             nodes[i].parent = root->second;
@@ -105,6 +108,28 @@ bool AxesValid(const Mapping& map)
         map.forwardAxis < 3 && map.upAxis != map.forwardAxis;
 }
 struct Chain { int upper=-1, lower=-1, tip=-1; float score=-1e9f; };
+
+bool HelperCopy(const std::vector<Node>& nodes, const std::vector<glm::vec3>& positions,
+    const Chain& helper, const Chain& primary)
+{
+    const int copy[] = {helper.upper, helper.lower, helper.tip};
+    const int original[] = {primary.upper, primary.lower, primary.tip};
+    if (nodes[helper.upper].parent != nodes[primary.upper].parent) return false;
+    for (int joint = 0; joint < 3; ++joint)
+    {
+        if (glm::length(positions[copy[joint]] - positions[original[joint]]) > .001f)
+            return false;
+        std::string name = nodes[copy[joint]].name;
+        const auto& base = nodes[original[joint]].name;
+        // MMD D bones copy the control chain. Do not infer roles from names or
+        // silently choose between two otherwise indistinguishable armatures.
+        if (base.empty() || name.empty() || name.back() != 'D') return false;
+        name.pop_back();
+        while (!name.empty() && (name.back() == ' ' || name.back() == '_')) name.pop_back();
+        if (name != base) return false;
+    }
+    return true;
+}
 }
 
 Detection Detect(const std::vector<Node>& nodes, const Mapping& settings)
@@ -160,14 +185,18 @@ Detection Detect(const std::vector<Node>& nodes, const Mapping& settings)
     {
         std::vector<Chain> candidates;
         const float sign = left ? 1.f : -1.f;
+        const size_t role = arm ? (left ? LeftUpperArm : RightUpperArm)
+            : (left ? LeftThigh : RightThigh);
         for (int upper = 0; upper < int(nodes.size()); ++upper)
         {
             const auto a=p[upper]; const float x=a.x*sign;
+            if (settings.bones[role] >= 0 && settings.bones[role] != upper) continue;
             if (!eligible(upper) || (arm ? (a.y < .55f || a.y > .9f || x < .025f || x > .24f)
                 : (a.y < .38f || a.y > .67f || x < .01f || x > .22f))) continue;
             for (int lower = 0; lower < int(nodes.size()); ++lower)
             {
                 if (!eligible(lower) || lower == upper || !Descendant(nodes,lower,upper)) continue;
+                if (settings.bones[role + 1] >= 0 && settings.bones[role + 1] != lower) continue;
                 const auto b=p[lower]; const auto first=b-a;
                 const float length1=glm::length(first);
                 if (length1 < (arm ? .075f : .13f) || length1 > .32f ||
@@ -175,6 +204,7 @@ Detection Detect(const std::vector<Node>& nodes, const Mapping& settings)
                 for (int tip = 0; tip < int(nodes.size()); ++tip)
                 {
                     if (!eligible(tip) || tip == lower || !Descendant(nodes,tip,lower)) continue;
+                    if (settings.bones[role + 2] >= 0 && settings.bones[role + 2] != tip) continue;
                     const auto c=p[tip]; const auto second=c-b;
                     const float length2=glm::length(second);
                     if (length2 < (arm ? .065f : .12f) || length2 > .32f ||
@@ -201,7 +231,12 @@ Detection Detect(const std::vector<Node>& nodes, const Mapping& settings)
         // Equally plausible *different branches* require human identification.
         for (size_t i=1;i<candidates.size() && best.score-candidates[i].score<.025f;++i)
             if (!Descendant(nodes,best.upper,candidates[i].upper) &&
-                !Descendant(nodes,candidates[i].upper,best.upper)) return Chain{};
+                !Descendant(nodes,candidates[i].upper,best.upper))
+            {
+                if (HelperCopy(nodes, p, candidates[i], best)) continue;
+                if (HelperCopy(nodes, p, best, candidates[i])) { best = candidates[i]; continue; }
+                return Chain{};
+            }
         // Exporters often insert several co-located parent/control joints.
         // Prefer the last joint before the limb actually leaves that position.
         for (int node=0;node<int(nodes.size());++node)
@@ -283,7 +318,7 @@ Detection Detect(const std::vector<Node>& nodes, const Mapping& settings)
         std::vector<int> torso;
         const float hipHeight=bones[Pelvis]>=0?p[bones[Pelvis]].y:.45f;
         for (int node=bones[Chest];node>=0;node=nodes[node].parent)
-            if (eligible(node) && p[node].y>hipHeight+.025f && std::abs(p[node].x)<.06f &&
+            if (eligible(node) && p[node].y>hipHeight+.002f && std::abs(p[node].x)<.06f &&
                 (torso.empty() || glm::length(p[node]-p[torso.back()])>.015f)) torso.push_back(node);
         std::reverse(torso.begin(),torso.end());
         if (!torso.empty())

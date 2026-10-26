@@ -847,6 +847,13 @@ if(NOT ENGINE_PROJECT_DIR)
     target_include_directories(AnimationEditorSourceTests PRIVATE
         "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Editor")
     add_test(NAME AnimationEditorSources COMMAND AnimationEditorSourceTests)
+    add_executable(HumanoidRigDetectionTests EXCLUDE_FROM_ALL
+        "${ENGINE_ROOT}/Tests/HumanoidRigDetectionTests.cpp")
+    target_link_libraries(HumanoidRigDetectionTests PRIVATE Engine)
+    target_include_directories(HumanoidRigDetectionTests PRIVATE
+        "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Editor")
+    add_test(NAME HumanoidRigDetection COMMAND HumanoidRigDetectionTests)
+    set_tests_properties(HumanoidRigDetection PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
     add_executable(CharacterPerformanceTests EXCLUDE_FROM_ALL
         "${ENGINE_ROOT}/Tests/CharacterPerformanceTests.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/MmdDanceAssetBinder.cpp"

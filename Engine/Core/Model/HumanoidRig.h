@@ -48,6 +48,7 @@ struct Node
     int parent = -1;
     glm::vec3 position{}; // Rest position in model/world coordinates.
     bool joint = true;
+    std::string name; // Optional: distinguish explicitly suffixed helper copies.
 };
 struct Detection
 {
@@ -56,8 +57,8 @@ struct Detection
     std::vector<std::string> issues;
 };
 
-// Names deliberately do not participate. A/T-pose geometry and ancestry
-// identify the major chains; indistinguishable chains remain unassigned.
+// A/T-pose geometry and ancestry identify the major chains. Names only break
+// ties between coincident primary and explicitly suffixed helper copies.
 Detection Detect(const std::vector<Node>& nodes, const Mapping& settings = {});
 std::vector<std::string> Validate(const Mapping& mapping, const std::vector<Node>& nodes);
 

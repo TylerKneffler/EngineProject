@@ -27,6 +27,10 @@ public:
     ~AnimationManager() override;
     ComponentReference modelReference { "Model" };
     std::string clip;
+    bool baseAnimationEnabled = true;
+    // Timeline clips use a shared clock and per-layer start/repeat settings.
+    bool timelinePlayback = false;
+    float timelineTime = 0.f;
     bool playing = true;
     // Keep the current skeletal transforms when playback stops, including
     // an IK-blended pose authored by another component.

@@ -22,11 +22,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:100000:324768",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/H_BRAID1.001 3.mesh",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:50000:30778c",
             "path": "Models/crash-dummy/crush_dummy_UE4_skinned/crush_dummy_UE4_skinned.prefab",
             "directory": false
@@ -35,11 +30,6 @@
             "id": "file:a8e05ef1:290000:708e4",
             "path": "Audio",
             "directory": true
-        },
-        {
-            "id": "file:a8e05ef1:120000:303b1",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/InFace.002_Normal.png",
-            "directory": false
         },
         {
             "id": "file:a8e05ef1:230000:70952",
@@ -62,6 +52,11 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:360000:13801",
+            "path": "Prefabs/Cube.prefab",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:210000:6bb4c",
             "path": "Mesh/impossible_staircase_flight.obj",
             "directory": false
@@ -74,11 +69,6 @@
         {
             "id": "file:a8e05ef1:130000:31d2e3",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Meshes/Hand cover 26.mesh",
-            "directory": false
-        },
-        {
-            "id": "asset:1eba94ec-a89a-42c9-a5a7-f28319340dbd",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/from_init_zbrush.004 18.mesh",
             "directory": false
         },
         {
@@ -107,6 +97,11 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:c0000:3078b4",
+            "path": "Models/mmd/sad cat dance/headband with cat ears BY »½α¬ία/headband(black).png",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:210000:7092d",
             "path": "Audio/TestTone.ogg",
             "directory": false
@@ -117,24 +112,9 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:24f0000:58d60",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/Arms-2.001_MetallicRoughness.png",
-            "directory": false
-        },
-        {
-            "id": "asset:d62f57ee-accb-4af4-bb79-d01e5d10c671",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_Roku_Eye_L_Roku_bodyAction_003_9.anim",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:5e0000:62fe1",
             "path": "HDRI",
             "directory": true
-        },
-        {
-            "id": "asset:10888c0f-84ba-4b94-bca6-e26cff666703",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/eyemat 8.material",
-            "directory": false
         },
         {
             "id": "file:a8e05ef1:730000:6961c",
@@ -149,11 +129,6 @@
         {
             "id": "file:a8e05ef1:3e0000:cf853",
             "path": "Mesh/cone.obj",
-            "directory": false
-        },
-        {
-            "id": "asset:4b865d99-020a-4a2d-a53e-a3dc9b752840",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Genesis9.001 28.mesh",
             "directory": false
         },
         {
@@ -174,11 +149,6 @@
         {
             "id": "file:a8e05ef1:140000:31d314",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Meshes/Outline Body 38.morph",
-            "directory": false
-        },
-        {
-            "id": "asset:99a30b9f-7593-4fce-8312-b529e10161fc",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Cylinder.010 10.mesh",
             "directory": false
         },
         {
@@ -244,11 +214,6 @@
         {
             "id": "file:a8e05ef1:100000:30d1ca",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Materials/Choker metal 5.material",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:90000:32476d",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/H_BRAID1.008 5.mesh",
             "directory": false
         },
         {
@@ -337,11 +302,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:3a0000:207887",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/GP_Torso.001_Normal.png",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:3e0000:10813f",
             "path": "Scenes/Spatial/crossing_warp_volumes.scene",
             "directory": false
@@ -382,11 +342,6 @@
             "directory": false
         },
         {
-            "id": "asset:498b7ef8-67fd-4b11-ab27-c3d4b396a347",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/M_Roku_Access.001 3.material",
-            "directory": false
-        },
-        {
             "id": "asset:3bc3b4e8-5013-4f15-84ca-6a6b982c8deb",
             "path": "Models/mmd/Mococo/Mococo Dance/Meshes/Plane.006 26.mesh",
             "directory": false
@@ -407,18 +362,8 @@
             "directory": false
         },
         {
-            "id": "asset:64c4d51f-8cc3-4166-8f21-c4ff5bfa4602",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_Roku_Acc_Thighs_SPIKE_005Action_003_7.anim",
-            "directory": false
-        },
-        {
             "id": "asset:74877c3d-5cff-4a2e-ae56-1cbd7aae6658",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Materials/Collar Chain 8.material",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:d0000:3247dd",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_0.skeleton",
             "directory": false
         },
         {
@@ -497,18 +442,8 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:3d0000:2571fd",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/Fingernails-2.001_Normal.png",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:880000:7098d",
             "path": "Mesh/room_larger_inside_interior.obj",
-            "directory": false
-        },
-        {
-            "id": "asset:5b377a45-0ed7-47e0-adee-73615a36905a",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_1.skeleton",
             "directory": false
         },
         {
@@ -527,11 +462,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:7f0000:30fcab",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/Material.003 1.material",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:330000:f9025",
             "path": "Models/crash-dummy/crush_dummy_UE4_skinned",
             "directory": true
@@ -539,11 +469,6 @@
         {
             "id": "file:a8e05ef1:c0000:30b4b0",
             "path": "Scripts/TerrainGen",
-            "directory": true
-        },
-        {
-            "id": "file:a8e05ef1:470000:30af78",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials",
             "directory": true
         },
         {
@@ -574,11 +499,6 @@
         {
             "id": "file:a8e05ef1:220000:31c852",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Meshes/Collar Chain 8.mesh",
-            "directory": false
-        },
-        {
-            "id": "asset:b1d43bac-fdd8-4e60-bb3c-f5c51deaa68a",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_0.skeleton",
             "directory": false
         },
         {
@@ -732,11 +652,6 @@
             "directory": true
         },
         {
-            "id": "file:a8e05ef1:430000:3258c4",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/M_Roku.009_MetallicRoughness.png",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:b0000:30b49b",
             "path": "Scripts/Gameplay/MainMenuGameManager.cpp",
             "directory": false
@@ -760,16 +675,6 @@
             "id": "file:a8e05ef1:e90000:6afbb",
             "path": "Models/Mixemo/Walking/Materials",
             "directory": true
-        },
-        {
-            "id": "file:a8e05ef1:b0000:30b49d",
-            "path": "Scripts/Physics",
-            "directory": true
-        },
-        {
-            "id": "file:a8e05ef1:63b0000:8c37",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/HAIRMAT.004_BaseColor.png",
-            "directory": false
         },
         {
             "id": "file:a8e05ef1:1ca0000:6fdba",
@@ -804,11 +709,6 @@
         {
             "id": "file:a8e05ef1:120000:e68f7",
             "path": "Scenes/Cinematics/camera_track_demo.scene",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:90000:324775",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/sk_FRINGE1.001 7.mesh",
             "directory": false
         },
         {
@@ -857,13 +757,13 @@
             "directory": false
         },
         {
-            "id": "asset:25660bf5-4c11-4d90-b7aa-6594e88f12ce",
-            "path": "Models/mmd/sad cat dance/dancing VMD/dancing.vmd",
+            "id": "asset:35ee0258-bea1-4e92-8550-97bf87d50946",
+            "path": "Models/Mixemo/Walking/Walking_Rest.pose",
             "directory": false
         },
         {
-            "id": "asset:35ee0258-bea1-4e92-8550-97bf87d50946",
-            "path": "Models/Mixemo/Walking/Walking_Rest.pose",
+            "id": "asset:25660bf5-4c11-4d90-b7aa-6594e88f12ce",
+            "path": "Models/mmd/sad cat dance/dancing VMD/dancing.vmd",
             "directory": false
         },
         {
@@ -890,11 +790,6 @@
             "id": "file:a8e05ef1:370000:31e568",
             "path": "Models/mmd/Mococo",
             "directory": true
-        },
-        {
-            "id": "file:a8e05ef1:e0000:32471c",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/Tear-1.002 9.material",
-            "directory": false
         },
         {
             "id": "asset:5e7cbbf6-3ecf-42df-b01b-a2a69b50fd1e",
@@ -939,6 +834,16 @@
         {
             "id": "asset:e0c8275d-91ec-45b3-b757-6c0c2316d893",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Materials/Tshirt 27.material",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:b0000:30b492",
+            "path": "Scripts/Demos/Snake/SnakeGameManager.cpp",
+            "directory": false
+        },
+        {
+            "id": "asset:796597e0-56ab-48f3-9f63-e1f67a36f79c",
+            "path": "Prefabs/Fox/Fox.prefab",
             "directory": false
         },
         {
@@ -1012,13 +917,13 @@
             "directory": true
         },
         {
-            "id": "file:a8e05ef1:4d0000:10ed1f",
-            "path": "Prefabs/Fox/Fox_rig_0_Walk_2.anim",
+            "id": "asset:18fa844b-1603-4217-92f1-a477d9f2db15",
+            "path": "Models/mmd/Mococo/Mococo Abyssgard/Materials/Belt 1.material",
             "directory": false
         },
         {
-            "id": "asset:18fa844b-1603-4217-92f1-a477d9f2db15",
-            "path": "Models/mmd/Mococo/Mococo Abyssgard/Materials/Belt 1.material",
+            "id": "file:a8e05ef1:4d0000:10ed1f",
+            "path": "Prefabs/Fox/Fox_rig_0_Walk_2.anim",
             "directory": false
         },
         {
@@ -1097,13 +1002,13 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:a0000:31ad09",
-            "path": "Models/mmd/sad cat dance/headband with cat ears BY »½α¬ία/toonblack.png",
+            "id": "file:a8e05ef1:100000:30d1ce",
+            "path": "Models/mmd/Mococo/Mococo Abyssgard/Materials/Claws 7.material",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:100000:30d1ce",
-            "path": "Models/mmd/Mococo/Mococo Abyssgard/Materials/Claws 7.material",
+            "id": "file:a8e05ef1:a0000:31ad09",
+            "path": "Models/mmd/sad cat dance/headband with cat ears BY »½α¬ία/toonblack.png",
             "directory": false
         },
         {
@@ -1129,11 +1034,6 @@
         {
             "id": "file:a8e05ef1:1e0000:30d201",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Materials/Collar gem 9.material",
-            "directory": false
-        },
-        {
-            "id": "asset:c562619c-72a8-4b16-90c7-ddbaac773366",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/Material.003 1.material",
             "directory": false
         },
         {
@@ -1197,11 +1097,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:4e0000:a466c",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/Fingernails-2.001_BaseColor.png",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:d0000:31e574",
             "path": "Models/mmd/Mococo/Mococo Abyssgard - toon.pmx",
             "directory": false
@@ -1242,26 +1137,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:430000:30b3e5",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/M_Roku.009_BaseColor.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:f0000:31bcd0",
-            "path": "Models/mmd/Mococo/Mococo Abyssgard/Materials/Outline Jacket 39.material",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:14c0000:b98b",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/Head-2.001_MetallicRoughness.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:560000:78cd",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/Mouth_Cavity-2.001_Normal.png",
-            "directory": false
-        },
-        {
             "id": "asset:b7bbb091-dfa9-439c-bd7b-0cb5e2e78f2f",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Materials/Facials extra 40.material",
             "directory": false
@@ -1272,8 +1147,18 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:f0000:31bcd0",
+            "path": "Models/mmd/Mococo/Mococo Abyssgard/Materials/Outline Jacket 39.material",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:720000:310923",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Materials/Hair Accessory 12.material",
+            "directory": false
+        },
+        {
+            "id": "asset:d4f89d47-27e9-464f-9648-5e42ca3b894f",
+            "path": "Prefabs/Fox/Materials/Default.material",
             "directory": false
         },
         {
@@ -1284,16 +1169,6 @@
         {
             "id": "asset:f33ef78a-6b10-4ead-a7b6-667e3aac98e9",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Materials/Hair band 13.material",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:1010000:7005f",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/HAIRMAT.002_BaseColor.png",
-            "directory": false
-        },
-        {
-            "id": "asset:efaf8ea9-c8db-4e36-947b-c5b9776e974e",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_Roku_Eye_R_Roku_bodyAction_10.anim",
             "directory": false
         },
         {
@@ -1347,14 +1222,14 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:e40000:a343",
-            "path": "Models/mmd/sad cat dance",
-            "directory": true
-        },
-        {
             "id": "file:a8e05ef1:110000:31bbf2",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Materials/Head 29.material",
             "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:e40000:a343",
+            "path": "Models/mmd/sad cat dance",
+            "directory": true
         },
         {
             "id": "asset:a2e99af1-232b-4c38-86f0-7cf861f24797",
@@ -1390,16 +1265,6 @@
             "id": "file:a8e05ef1:140000:31d302",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Meshes/Outline Body 38.mesh",
             "directory": false
-        },
-        {
-            "id": "asset:8887b686-321a-45a3-9781-13b72c699b4b",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Genesis9.001 30.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:1af0000:6168b",
-            "path": "Models/mmd/Roku/Roku_V1_packed",
-            "directory": true
         },
         {
             "id": "asset:e54a2877-b70b-455a-9127-884c70561286",
@@ -1439,11 +1304,6 @@
         {
             "id": "asset:ba66fd38-bd50-44eb-bfe9-c4e458738c13",
             "path": "Models/mmd/Mococo/Mococo Dance/Meshes/Body_ 3.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:80000:3247af",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Genesis9.001 28.mesh",
             "directory": false
         },
         {
@@ -1542,11 +1402,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:a0000:32479c",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Cylinder.001 21.morph",
-            "directory": false
-        },
-        {
             "id": "asset:acbe9c2d-67a6-4618-854b-483014f10491",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Materials/Outline Claws 36.material",
             "directory": false
@@ -1572,19 +1427,9 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:660000:313a5d",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/M_Roku_Access.001 3.material",
-            "directory": false
-        },
-        {
             "id": "asset:08f75932-8acf-4efb-bcdd-11eb16d0a436",
             "path": "Models/mmd/Mococo/Mococo Dance/Meshes/Plane.023 50.mesh",
             "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:130000:709f1",
-            "path": "Prefabs/Fox/Materials",
-            "directory": true
         },
         {
             "id": "file:a8e05ef1:f0000:31bd27",
@@ -1597,8 +1442,18 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:130000:709f1",
+            "path": "Prefabs/Fox/Materials",
+            "directory": true
+        },
+        {
             "id": "asset:49c94e41-646e-4ad0-b9eb-5973ba0e78b0",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Materials/Outline outfit 37.material",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:1b90000:608f7",
+            "path": "Prefabs/Fox/FoxRagdoll.prefab",
             "directory": false
         },
         {
@@ -1632,11 +1487,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:110000:26d03",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/GP_Torso.001_BaseColor.png",
-            "directory": false
-        },
-        {
             "id": "asset:a36f6571-f677-40c2-944b-554e16d48cf2",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Materials/Outline Teeth 33.material",
             "directory": false
@@ -1652,18 +1502,8 @@
             "directory": false
         },
         {
-            "id": "asset:d5cddd53-6413-4ab0-b4bb-1232dee060cc",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/HAIRMAT.002 2.material",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:f0000:31bd3c",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Materials/Shoes 22.material",
-            "directory": false
-        },
-        {
-            "id": "asset:36fd1d14-8a11-40dd-a59f-71b351436a3e",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/from_init_zbrush.005 16.mesh",
             "directory": false
         },
         {
@@ -1682,16 +1522,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:920000:eb9c2",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/eyemat_Emissive.png",
-            "directory": false
-        },
-        {
-            "id": "asset:98d91dca-fbca-4f12-9aaf-f320440b0187",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/Body-2.001 15.material",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:110000:31bd5f",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Materials/Tongue 31.material",
             "directory": false
@@ -1699,11 +1529,6 @@
         {
             "id": "asset:ecbbbafc-b170-46cb-b01b-b543821b532f",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Materials/Tongue 31.material",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:90000:3247bb",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_Rest.pose",
             "directory": false
         },
         {
@@ -1719,6 +1544,11 @@
         {
             "id": "file:a8e05ef1:140000:31d2f7",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Meshes/Iris 16.morph",
+            "directory": false
+        },
+        {
+            "id": "asset:02f94481-5c2b-49e4-8512-f7a4f47e8592",
+            "path": "Models/mmd/sad cat dance/dancing VMD/Facial.vmdtrack",
             "directory": false
         },
         {
@@ -1762,11 +1592,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:2a60000:63755",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/eyemat_BaseColor.png",
-            "directory": false
-        },
-        {
             "id": "asset:4103e801-969e-4eb0-8c5e-a2fde67fbbe3",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Meshes/Body 25.morph",
             "directory": false
@@ -1779,11 +1604,6 @@
         {
             "id": "file:a8e05ef1:b0000:30b48e",
             "path": "Scripts/Demos/Pong/PongUI.h",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:d0000:32472b",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/Arms-2.001 13.material",
             "directory": false
         },
         {
@@ -1852,11 +1672,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:4f0000:cd9ea",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/Body-2.001_BaseColor.png",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:450000:31cd7a",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Meshes/Eye highlight 10.mesh",
             "directory": false
@@ -1869,11 +1684,6 @@
         {
             "id": "asset:d9cf6e2b-603c-4d7c-bf34-2cc98eb4649b",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Meshes/Eye highlight 10.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:1400000:70aae",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/Tear-1.002_MetallicRoughness.png",
             "directory": false
         },
         {
@@ -1912,8 +1722,8 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:410000:10eb64",
-            "path": "Prefabs/Fox/Fox_rig_0_Survey_1.anim",
+            "id": "asset:ab9848be-4cb8-48b4-8691-e2666034d7d3",
+            "path": "Models/mmd/Mococo/Mococo Abyssgard/Meshes/Eye white 32.mesh",
             "directory": false
         },
         {
@@ -1922,23 +1732,18 @@
             "directory": false
         },
         {
-            "id": "asset:ab9848be-4cb8-48b4-8691-e2666034d7d3",
-            "path": "Models/mmd/Mococo/Mococo Abyssgard/Meshes/Eye white 32.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:c0000:31ad29",
-            "path": "Models/mmd/sad cat dance/headband.vmd",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:c0000:3247c5",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_Roku_Acc_Earring_R_SPIKE_005Action_001_4.anim",
+            "id": "file:a8e05ef1:410000:10eb64",
+            "path": "Prefabs/Fox/Fox_rig_0_Survey_1.anim",
             "directory": false
         },
         {
             "id": "file:a8e05ef1:190000:31d032",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Meshes/Eye white 32.morph",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:c0000:31ad29",
+            "path": "Models/mmd/sad cat dance/headband.vmd",
             "directory": false
         },
         {
@@ -1949,11 +1754,6 @@
         {
             "id": "asset:43bbad40-c42a-4ee3-8828-c69f428d7d3d",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Meshes/Eye white 32.morph",
-            "directory": false
-        },
-        {
-            "id": "asset:6aadaec8-1815-4d51-836f-0d161ab695c2",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Roku Eyelashes-1.001 13.mesh",
             "directory": false
         },
         {
@@ -1979,11 +1779,6 @@
         {
             "id": "asset:f305346d-35e6-4b3d-a725-9997472a82b1",
             "path": "Models/mmd/Mococo/Mococo Dance/dance1_mmd.json",
-            "directory": false
-        },
-        {
-            "id": "asset:905c18b9-748c-4092-bdbc-6515847311ac",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/Mouth Cavity-2.001 12.material",
             "directory": false
         },
         {
@@ -2082,13 +1877,13 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:160000:3078b9",
-            "path": "Models/mmd/sad cat dance/headband with cat ears BY »½α¬ία/headband.pmx",
+            "id": "asset:8e7a4842-f52e-463e-b435-98e936d88fee",
+            "path": "Models/mmd/Mococo/Mococo Abyssgard/Meshes/Head 29.mesh",
             "directory": false
         },
         {
-            "id": "asset:8e7a4842-f52e-463e-b435-98e936d88fee",
-            "path": "Models/mmd/Mococo/Mococo Abyssgard/Meshes/Head 29.mesh",
+            "id": "file:a8e05ef1:160000:3078b9",
+            "path": "Models/mmd/sad cat dance/headband with cat ears BY »½α¬ία/headband.pmx",
             "directory": false
         },
         {
@@ -2127,23 +1922,8 @@
             "directory": false
         },
         {
-            "id": "asset:b3118001-b8bc-4fe2-932c-fde4eb0055a1",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Genesis9.001 26.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:690000:50e05",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/M_Roku_Access.001_Normal.png",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:130000:31d2fb",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Meshes/Jacket 19.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:90000:3247b4",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Genesis9.001 30.mesh",
             "directory": false
         },
         {
@@ -2159,6 +1939,11 @@
         {
             "id": "asset:febf9362-e0b8-4225-ae3f-fe9b1c3d5c56",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Meshes/Jacket 19.mesh",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:540000:31ad78",
+            "path": "Models/mmd/sad cat dance/rules for motion.txt",
             "directory": false
         },
         {
@@ -2187,11 +1972,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:1dc0000:47835",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/Legs-2.002_Normal.png",
-            "directory": false
-        },
-        {
             "id": "asset:8c0bb497-d696-4db9-ae98-ca0dccd8a92f",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Meshes/Outline  Fur 34.mesh",
             "directory": false
@@ -2199,16 +1979,6 @@
         {
             "id": "asset:ed092a98-bc52-4297-9e62-d162d52ea3b1",
             "path": "Models/mmd/Mococo/Mococo Dance/Meshes/Plane.016 44.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:b0000:324071",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/InFace 7.material",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:3e0000:30b3eb",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/GP_Torso.001_MetallicRoughness.png",
             "directory": false
         },
         {
@@ -2232,19 +2002,14 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:4e0000:e632f",
-            "path": "Prefabs/Fox/Meshes/fox1 1_1.mesh",
-            "directory": false
-        },
-        {
             "id": "asset:d631fc04-5ad8-4ce1-9201-f922d3e9f3fa",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Meshes/Outline Hair 35.mesh",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:1910000:6301b",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures",
-            "directory": true
+            "id": "file:a8e05ef1:4e0000:e632f",
+            "path": "Prefabs/Fox/Meshes/fox1 1_1.mesh",
+            "directory": false
         },
         {
             "id": "asset:09924986-9d07-4288-95bd-c7545b0bc419",
@@ -2257,18 +2022,13 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:120000:324812",
-            "path": "Models/mmd/sad cat dance/dancing VMD/Properties.vmdtrack",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:80000:32479f",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Genesis9Tear.001 22.mesh",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:130000:31d320",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Meshes/Outline Jacket 39.mesh",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:120000:324812",
+            "path": "Models/mmd/sad cat dance/dancing VMD/Properties.vmdtrack",
             "directory": false
         },
         {
@@ -2302,16 +2062,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:570000:17715e",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/eyemat_MetallicRoughness.png",
-            "directory": false
-        },
-        {
-            "id": "asset:eb6012e2-3113-45fd-8c62-94b255c6bd7a",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/GP_Torso.001 16.material",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:120000:31d331",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Meshes/Shoe sole 21.mesh",
             "directory": false
@@ -2322,14 +2072,14 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:680000:709aa",
-            "path": "Prefabs/Fox",
-            "directory": true
-        },
-        {
             "id": "asset:a64d9d51-4f70-4ba1-b5d6-db0525e3c088",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Meshes/Shoe sole 21.mesh",
             "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:680000:709aa",
+            "path": "Prefabs/Fox",
+            "directory": true
         },
         {
             "id": "file:a8e05ef1:120000:31d334",
@@ -2397,11 +2147,6 @@
             "directory": false
         },
         {
-            "id": "asset:9d61dca6-f5d1-4902-91ea-1223cb0e0c09",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Cylinder.008 8.mesh",
-            "directory": false
-        },
-        {
             "id": "asset:e75a6519-49b0-4e2e-80c7-263dd4db94da",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Meshes/Tshirt 27.mesh",
             "directory": false
@@ -2409,11 +2154,6 @@
         {
             "id": "file:a8e05ef1:670000:6cb26",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Mococo Abyssgard.low.prefab",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:a0000:324779",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Cylinder.009 9.mesh",
             "directory": false
         },
         {
@@ -2427,13 +2167,13 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:1a0000:619b8",
-            "path": "Prefabs/Fox/Fox_rig_0.rig",
+            "id": "file:a8e05ef1:bf0000:6cb78",
+            "path": "Models/mmd/Mococo/Mococo Abyssgard/Mococo Abyssgard.prefab",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:bf0000:6cb78",
-            "path": "Models/mmd/Mococo/Mococo Abyssgard/Mococo Abyssgard.prefab",
+            "id": "file:a8e05ef1:1a0000:619b8",
+            "path": "Prefabs/Fox/Fox_rig_0.rig",
             "directory": false
         },
         {
@@ -2442,7 +2182,12 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:2500000:62c47",
+            "id": "file:a8e05ef1:70000:12e5af",
+            "path": "Textures/Sprites/Slime/slime_idle.spritesheet",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:26e0000:302dc",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Mococo Abyssgard.rig",
             "directory": false
         },
@@ -2452,23 +2197,28 @@
             "directory": true
         },
         {
-            "id": "asset:5007cd34-d460-4bcd-aca1-756ed30ebf62",
-            "path": "Models/mmd/sad cat dance/dancing VMD/Body.vmdtrack",
-            "directory": false
-        },
-        {
             "id": "asset:d8437e64-2ade-42b2-a035-da7052204e88",
             "path": "Models/mmd/Mococo/Mococo Abyssgard/Mococo Abyssgard.rig",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:d0000:31e578",
-            "path": "Models/mmd/Mococo/Mococo Abyssgard.pmx",
+            "id": "asset:5007cd34-d460-4bcd-aca1-756ed30ebf62",
+            "path": "Models/mmd/sad cat dance/dancing VMD/Body.vmdtrack",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:a0000:324797",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Cylinder.007 20.morph",
+            "id": "file:a8e05ef1:f0000:31d879",
+            "path": "Models/mmd/Mococo/Mococo Dance/Meshes/Plane.003 7.mesh",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:390000:f12bc",
+            "path": "Models/mmd/Mococo/Mococo Abyssgard/Mococo Abyssgard_mixamo_com_1.anim",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:d0000:31e578",
+            "path": "Models/mmd/Mococo/Mococo Abyssgard.pmx",
             "directory": false
         },
         {
@@ -2487,23 +2237,13 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:50000:3077ae",
-            "path": "Scripts/Particles",
-            "directory": true
-        },
-        {
-            "id": "asset:ebc88982-a369-4511-b54e-3fef1c264587",
-            "path": "Models/mmd/Mococo/Mococo Dance/Meshes/Sphere.001 29.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:a60000:60593",
-            "path": "Prefabs/Fox/Fox.prefab",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:2a0000:31e552",
+            "id": "file:a8e05ef1:1440000:63932",
             "path": "Models/mmd/Mococo/Mococo Dance/dance1_body.anim",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:150000:31d3c0",
+            "path": "Models/mmd/Mococo/Mococo Dance/Materials/MAT_Head 1.material",
             "directory": false
         },
         {
@@ -2557,23 +2297,13 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:100000:324711",
-            "path": "Models/mmd/sad cat dance/dancing VMD/Body.vmdtrack",
-            "directory": false
-        },
-        {
-            "id": "asset:999af708-6300-4a30-bfd5-740c08b5f2c7",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Sphere.001 31.mesh",
-            "directory": false
-        },
-        {
             "id": "asset:f6aec01e-d631-43c2-9fe3-ed061e55a606",
             "path": "Models/mmd/Mococo/Mococo Dance/Materials/MAT_HairTailEar 4.material",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:150000:31d3c0",
-            "path": "Models/mmd/Mococo/Mococo Dance/Materials/MAT_Head 1.material",
+            "id": "file:a8e05ef1:100000:324711",
+            "path": "Models/mmd/sad cat dance/dancing VMD/Body.vmdtrack",
             "directory": false
         },
         {
@@ -2602,21 +2332,6 @@
             "directory": false
         },
         {
-            "id": "asset:20517aa1-fe80-4dab-b269-36dd90740d60",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Cylinder.001 21.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:100000:30b3f6",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/InFace.002_BaseColor.png",
-            "directory": false
-        },
-        {
-            "id": "asset:dbde1e09-1a84-4b63-b831-12815b8bce13",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_Roku_Acc_Earring_R_SPIKE_005Action_001_4.anim",
-            "directory": false
-        },
-        {
             "id": "asset:5f7ee2de-0f3b-49a8-8a5b-fab0482d13b5",
             "path": "Models/mmd/Mococo/Mococo Dance/Materials/MAT_Shoes_ExtraAcc 5.material",
             "directory": false
@@ -2637,18 +2352,8 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:b60000:47035",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/Arms-2.001_Normal.png",
-            "directory": false
-        },
-        {
             "id": "asset:72b5b8e9-dfc9-4da7-b074-571109f156a9",
             "path": "Models/mmd/Mococo/Mococo Dance/Meshes/Circle.001 38.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:80000:3247d8",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_Roku_Eyes_001_Roku_bodyAction_001_11.anim",
             "directory": false
         },
         {
@@ -2657,9 +2362,9 @@
             "directory": false
         },
         {
-            "id": "asset:d7562379-4967-4019-a647-97d617709220",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/ACCESS.001 5.material",
-            "directory": false
+            "id": "file:a8e05ef1:810000:70aaf",
+            "path": "Prefabs/Fox/Meshes",
+            "directory": true
         },
         {
             "id": "asset:0f265f33-909b-4637-9d5a-58070e7e8c56",
@@ -2699,11 +2404,6 @@
         {
             "id": "file:a8e05ef1:b0000:30b480",
             "path": "Scripts/Controllers/FirstPersonController.cpp",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:d0000:324727",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/Legs-2.002 11.material",
             "directory": false
         },
         {
@@ -2747,18 +2447,13 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:430000:611f6",
-            "path": "Prefabs/Fox/FoxRagdoll_rig_0.rig",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:d0000:32478c",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/from_init_zbrush.001 17.mesh",
-            "directory": false
-        },
-        {
             "id": "asset:6e8d0c64-515c-44f4-b623-b4c2fb47abc9",
             "path": "Models/mmd/Mococo/Mococo Dance/Meshes/Circle.015 36.mesh",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:430000:611f6",
+            "path": "Prefabs/Fox/FoxRagdoll_rig_0.rig",
             "directory": false
         },
         {
@@ -2767,19 +2462,9 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:150000:3032f",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/Fingernails-2.001_MetallicRoughness.png",
-            "directory": false
-        },
-        {
             "id": "asset:87bf416e-48d0-4234-a38f-e2e9c02d8be2",
             "path": "Models/mmd/Mococo/Mococo Dance/Meshes/Circle.017 33.mesh",
             "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:230000:30af7a",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Textures",
-            "directory": true
         },
         {
             "id": "file:a8e05ef1:120000:31d659",
@@ -2789,11 +2474,6 @@
         {
             "id": "file:a8e05ef1:120000:31d6b2",
             "path": "Models/mmd/Mococo/Mococo Dance/Meshes/Cube 8.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:80000:3247e6",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_2.skeleton",
             "directory": false
         },
         {
@@ -2807,18 +2487,23 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:7d0000:226b4",
+            "path": "Models/mmd/sad cat dance/dancing VMD",
+            "directory": true
+        },
+        {
             "id": "asset:76072269-5784-430a-ac56-077f9d138cc3",
             "path": "Models/mmd/Mococo/Mococo Dance/Meshes/Face_.001 12.mesh",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:90000:3078bd",
-            "path": "Models/mmd/sad cat dance/headband with cat ears BY »½α¬ία/headband.png",
+            "id": "file:a8e05ef1:120000:31d802",
+            "path": "Models/mmd/Mococo/Mococo Dance/Meshes/Face_.002 39.mesh",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:120000:31d802",
-            "path": "Models/mmd/Mococo/Mococo Dance/Meshes/Face_.002 39.mesh",
+            "id": "file:a8e05ef1:90000:3078bd",
+            "path": "Models/mmd/sad cat dance/headband with cat ears BY »½α¬ία/headband.png",
             "directory": false
         },
         {
@@ -2837,16 +2522,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:80000:3247a1",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Genesis9.001 23.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:f0000:31d879",
-            "path": "Models/mmd/Mococo/Mococo Dance/Meshes/Plane.003 7.mesh",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:60000:12e59c",
             "path": "Textures/PBRDemo/CopperSlate_BaseColor.png",
             "directory": false
@@ -2859,11 +2534,6 @@
         {
             "id": "asset:df239ac8-3245-4b0b-a2b9-aeeb6ed0edd7",
             "path": "Models/mmd/Mococo/Mococo Dance/Meshes/Plane.020 47.mesh",
-            "directory": false
-        },
-        {
-            "id": "asset:736317da-682f-41d3-bede-27987183d2a4",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Cylinder.012 12.mesh",
             "directory": false
         },
         {
@@ -2912,18 +2582,13 @@
             "directory": false
         },
         {
-            "id": "asset:529ee456-a553-4c8e-bf4f-e4a4ac08da9d",
-            "path": "Prefabs/Fox/Meshes/fox1 1_1.mesh",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:150000:31e3f0",
             "path": "Models/mmd/Mococo/Mococo Dance/Meshes/Plane.017 32.mesh",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:90000:32476a",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Cube.004 4.mesh",
+            "id": "asset:529ee456-a553-4c8e-bf4f-e4a4ac08da9d",
+            "path": "Prefabs/Fox/Meshes/fox1 1_1.mesh",
             "directory": false
         },
         {
@@ -2952,23 +2617,18 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:100000:30b3ef",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/Legs-2.002_BaseColor.png",
-            "directory": false
-        },
-        {
             "id": "asset:771a44d6-3364-4573-a654-a61d823b5197",
             "path": "Models/mmd/Mococo/Mococo Dance/Meshes/Plane.026 53.mesh",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:a0000:31b131",
-            "path": "Models/mmd/sad cat dance/Sad Cat Dance.wav",
+            "id": "file:a8e05ef1:340000:31e50e",
+            "path": "Models/mmd/Mococo/Mococo Dance/Meshes/Plane.027 35.mesh",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:340000:31e50e",
-            "path": "Models/mmd/Mococo/Mococo Dance/Meshes/Plane.027 35.mesh",
+            "id": "file:a8e05ef1:a0000:31b131",
+            "path": "Models/mmd/sad cat dance/Sad Cat Dance.wav",
             "directory": false
         },
         {
@@ -2978,6 +2638,21 @@
         },
         {
             "id": "file:a8e05ef1:320000:31e517",
+            "path": "Models/mmd/Mococo/Mococo Dance/Meshes/Sphere.001 29.mesh",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:a60000:60593",
+            "path": "Prefabs/Fox/Fox.prefab",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:50000:3077ae",
+            "path": "Scripts/Particles",
+            "directory": true
+        },
+        {
+            "id": "asset:ebc88982-a369-4511-b54e-3fef1c264587",
             "path": "Models/mmd/Mococo/Mococo Dance/Meshes/Sphere.001 29.mesh",
             "directory": false
         },
@@ -3012,23 +2687,8 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:890000:310775",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/HAIRMAT.002 2.material",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:2c0000:31e57d",
             "path": "Models/mmd/Mococo/Mococo.mmdmap.json",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:1b0000:a5a2",
-            "path": "Models/mmd/Roku",
-            "directory": true
-        },
-        {
-            "id": "file:a8e05ef1:120000:324062",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/M_Roku.009 6.material",
             "directory": false
         },
         {
@@ -3047,11 +2707,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:e0000:30b3f4",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/InFace_Normal.png",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:12f0000:6ffe9",
             "path": "Scripts/TerrainPerformance/TerrainPerformanceDriver.cpp",
             "directory": false
@@ -3067,23 +2722,8 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:90000:324787",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/H_SCALP 15.mesh",
-            "directory": false
-        },
-        {
-            "id": "asset:23c8d163-4c9a-46cb-913c-d7c2c5416848",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Cylinder.009 9.mesh",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:2b0000:31e591",
             "path": "Models/mmd/Mococo/Textures/Jacket.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:b0000:3247cc",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_Roku_Acc_Thighs_SPIKE_005Action_003_7.anim",
             "directory": false
         },
         {
@@ -3102,453 +2742,8 @@
             "directory": true
         },
         {
-            "id": "asset:d6bf2059-6428-452c-8dc5-d081f1489787",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/H_BRAID1.001 2.mesh",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:60000:31e623",
             "path": "Models/mmd/Mococo/Textures/OutlineHair.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:2710000:2d62b",
-            "path": "Models/mmd/Roku/MaterialRecovery.md",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:c0000:30b4a4",
-            "path": "Scripts/Portals/MovingPortalPairDriver.h",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:b0000:30b488",
-            "path": "Scripts/Demos/Pong/PongBall.h",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:3a0000:1aebd2",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/ACCESS.001_BaseColor.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:660000:ee1c4",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/ACCESS.001_MetallicRoughness.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:1370000:65be",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/ACCESS.001_Normal.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:af0000:441eb",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/Arms-2.001_BaseColor.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:a80000:4d3da",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/basemat.001_BaseColor.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:1440000:5807f",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/basemat.001_MetallicRoughness.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:d20000:a50c4",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/basemat.001_Normal.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:500000:a1678",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/Body-2.001_MetallicRoughness.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:b0000:30b48a",
-            "path": "Scripts/Demos/Pong/PongGameManager.h",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:280000:e5c43",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/Body-2.001_Normal.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:4190000:94d3",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/Head-2.001_BaseColor.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:2e0000:c6482",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/Head-2.001_Normal.png",
-            "directory": false
-        },
-        {
-            "id": "asset:18fa588b-12e8-4d4e-8fba-87360254620a",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/from_init_zbrush.001 17.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:e0000:30b3f9",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/InFace.002_MetallicRoughness.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:190000:30b3f3",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/InFace_BaseColor.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:d60000:9570",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/InFace_MetallicRoughness.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:8e0000:1ccd8",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/Legs-2.002_MetallicRoughness.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:60000:12e5c0",
-            "path": "Textures/Sprites/Slime/slime_swallow.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:b0000:30b47d",
-            "path": "Scenes/UI/ui_test.scene",
-            "directory": false
-        },
-        {
-            "id": "asset:6912fee3-eda6-4da1-b744-3819db56aa9b",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/HAIRMAT.004 4.material",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:19a0000:486e2",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/Material.003_BaseColor.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:60000:12e5ae",
-            "path": "Textures/Sprites/Slime/slime_idle.spriteanim",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:2050000:191be",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/Mouth_Cavity-2.001_BaseColor.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:ce0000:60ac4",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/Mouth_Cavity-2.001_MetallicRoughness.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:1f0000:4af0e",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/M_Roku.009_Normal.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:1b0000:324075",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/M_Roku_Access.001_BaseColor.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:270000:508b0",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/M_Roku_Access.001_MetallicRoughness.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:11e0000:54561",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/Tear-1.002_BaseColor.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:620000:30ad6b",
-            "path": "Models/mmd/Roku/Roku_RecoveredTextures/Tear-1.002_Normal.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:b0000:30b4a1",
-            "path": "Scripts/Physics/FoxRagdollBlend.h",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:90000:32404c",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/ACCESS.001 5.material",
-            "directory": false
-        },
-        {
-            "id": "asset:cb8b3a1f-606e-4824-8ebe-b1fe6d4a9e1d",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/Arms-2.001 13.material",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:b0000:324740",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/basemat.001 17.material",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:b0000:30b47f",
-            "path": "Scripts/Controllers",
-            "directory": true
-        },
-        {
-            "id": "asset:d3a811ea-fa38-49ba-a792-db5249484d95",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/basemat.001 17.material",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:a0000:324731",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/Body-2.001 15.material",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:a0000:324762",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/Default.material",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:500000:e6b55",
-            "path": "Scenes/Demo/snake.scene",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:f0000:32471a",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/eyemat 8.material",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:b0000:30b482",
-            "path": "Scripts/Demos",
-            "directory": true
-        },
-        {
-            "id": "file:a8e05ef1:d0000:324725",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/Fingernails-2.001 10.material",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:7e0000:714a0",
-            "path": "Textures/Terrain",
-            "directory": true
-        },
-        {
-            "id": "asset:23e0cd98-b333-4331-976b-925bbcb2c040",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/Fingernails-2.001 10.material",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:a0000:324733",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/GP_Torso.001 16.material",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:120000:319eae",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/HAIRMAT.004 4.material",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:b0000:30b48c",
-            "path": "Scripts/Demos/Pong/PongPlayer.h",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:d0000:32472d",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/Head-2.001 14.material",
-            "directory": false
-        },
-        {
-            "id": "asset:24c7c3d5-443c-4cf5-9f89-2e51d4fc85f4",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/Head-2.001 14.material",
-            "directory": false
-        },
-        {
-            "id": "asset:d472bcd6-6660-43dd-b281-464cd7bd6ae1",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/InFace 7.material",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:d0000:32474e",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/InFace.002 18.material",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:520000:e218e",
-            "path": "Models/mmd/sad cat dance/dancing.vmd",
-            "directory": false
-        },
-        {
-            "id": "asset:398151c1-7e35-48f8-8e1a-df50161366d3",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/InFace.002 18.material",
-            "directory": false
-        },
-        {
-            "id": "asset:8855b09e-c146-4409-a507-77e7dde033bc",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/Legs-2.002 11.material",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:90000:3247d4",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_Roku_Eye_R_Roku_bodyAction_10.anim",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:d0000:324729",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/Mouth Cavity-2.001 12.material",
-            "directory": false
-        },
-        {
-            "id": "asset:607fea1a-6a55-4c15-a1d0-81967831ebf7",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/M_Roku.009 6.material",
-            "directory": false
-        },
-        {
-            "id": "asset:d9f327c7-cd5e-4b91-a96e-fbbda0d4b211",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Materials/Tear-1.002 9.material",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:7d0000:30ad4f",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes",
-            "directory": true
-        },
-        {
-            "id": "file:a8e05ef1:120000:324763",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Cube.002 1.mesh",
-            "directory": false
-        },
-        {
-            "id": "asset:b2347f6b-c707-4e3c-9dc0-536eb4927bec",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Cube.002 1.mesh",
-            "directory": false
-        },
-        {
-            "id": "asset:3a19ad51-bd5b-42f3-b34e-4f930d1df8ed",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Cube.004 4.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:60000:12e5a0",
-            "path": "Textures/PBRDemo/CopperSlate_MetallicRoughness.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:80000:324799",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Cylinder.001 21.mesh",
-            "directory": false
-        },
-        {
-            "id": "asset:f4389f2a-53b4-4146-9575-017318ec97d6",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Cylinder.001 21.morph",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:80000:324794",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Cylinder.007 20.mesh",
-            "directory": false
-        },
-        {
-            "id": "asset:cf68e394-0d16-44b2-8cdc-8485390e40b6",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Cylinder.007 20.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:290000:10f487",
-            "path": "Scenes/Rendering/subsurface_scattering_demo.md",
-            "directory": false
-        },
-        {
-            "id": "asset:f7b12963-495f-4529-ba19-0aa20be45ea3",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Cylinder.007 20.morph",
-            "directory": false
-        },
-        {
-            "id": "asset:2f7e368c-3211-4258-88af-ef1b9a80feab",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/H_SCALP 15.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:b0000:324777",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Cylinder.008 8.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:a0000:32477b",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Cylinder.010 10.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:90000:32477d",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Cylinder.011 11.mesh",
-            "directory": false
-        },
-        {
-            "id": "asset:13d156b1-1c7e-40ea-9302-1e5340c9f4c4",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Cylinder.011 11.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:90000:32477f",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Cylinder.012 12.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:b0000:324791",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/from_init_zbrush.002 19.mesh",
-            "directory": false
-        },
-        {
-            "id": "asset:e30e76c1-6ed9-4cc4-9083-fd111679ba62",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/from_init_zbrush.002 19.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:70000:12e5b5",
-            "path": "Textures/Sprites/Slime/slime_idle3.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:90000:32478f",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/from_init_zbrush.004 18.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:a0000:324789",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/from_init_zbrush.005 16.mesh",
-            "directory": false
-        },
-        {
-            "id": "asset:771a9e16-05a1-4362-a681-67c649be52df",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Genesis9.001 23.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:80000:3247a4",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Genesis9.001 24.mesh",
-            "directory": false
-        },
-        {
-            "id": "asset:673a9062-19d7-41c8-8f8a-7752ca20ca55",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Genesis9.001 24.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:90000:3247a7",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Genesis9.001 25.mesh",
-            "directory": false
-        },
-        {
-            "id": "asset:69f2ba58-a947-458c-a399-5bc72cf8860b",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Genesis9.001 25.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:90000:3247a9",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Genesis9.001 26.mesh",
             "directory": false
         },
         {
@@ -3557,242 +2752,12 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:90000:3247ac",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Genesis9.001 27.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:50000:30779a",
-            "path": "Scenes/Showcases/particle_collision_containment.scene",
-            "directory": false
-        },
-        {
-            "id": "asset:58dfc81d-760c-4edc-803e-6ddc79922062",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Genesis9.001 27.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:80000:3247b1",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Genesis9.001 29.mesh",
-            "directory": false
-        },
-        {
-            "id": "asset:6375e632-d302-49eb-930f-b3f315076128",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Genesis9.001 29.mesh",
-            "directory": false
-        },
-        {
-            "id": "asset:32a6780d-00a2-4c6f-87df-244c76ddc2e3",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Genesis9Tear.001 22.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:b0000:324765",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/H_BRAID1.001 2.mesh",
-            "directory": false
-        },
-        {
-            "id": "asset:7b90ca84-e183-4040-b43c-ebc749b4ab3b",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/H_BRAID1.001 3.mesh",
-            "directory": false
-        },
-        {
-            "id": "asset:a7f5467f-1e52-4c30-affa-33a520aeda02",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/H_BRAID1.008 5.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:90000:32476f",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/H_BRAID1.008 6.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:c0000:30b4b7",
-            "path": "Scripts/TerrainGen/TerrainGen.h",
-            "directory": false
-        },
-        {
-            "id": "asset:bf29b698-f4cf-482c-a7f7-3ce922237c22",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/H_BRAID1.008 6.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:70000:12e5bf",
-            "path": "Textures/Sprites/Slime/slime_move.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:90000:324785",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/H_twinhead.001 14.mesh",
-            "directory": false
-        },
-        {
-            "id": "asset:aa5d4bce-f6a6-40d8-9154-4670bbe65fc9",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/H_twinhead.001 14.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:90000:324783",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Roku Eyelashes-1.001 13.mesh",
-            "directory": false
-        },
-        {
-            "id": "asset:49f9c1df-6a2f-4833-82ba-db60f1f71eed",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/sk_FRINGE1.001 7.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:80000:3247b7",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Meshes/Sphere.001 31.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:100000:324718",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed.prefab",
-            "directory": false
-        },
-        {
-            "id": "asset:f2fc2555-0579-4c93-af45-3c578faa118d",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed.prefab",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:140000:3247ec",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed.rig",
-            "directory": false
-        },
-        {
-            "id": "asset:1b28185b-496e-4e2f-9ed3-2554365d0632",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed.rig",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:80000:3247e3",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_1.skeleton",
-            "directory": false
-        },
-        {
-            "id": "asset:c9bd6d53-515f-4ffa-a1db-54b1f7eddb8e",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_2.skeleton",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:80000:3247e9",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_3.skeleton",
-            "directory": false
-        },
-        {
-            "id": "asset:5b74b9c8-31a9-406a-afe3-ffeabe499fa7",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_Roku_Mouth_T_Roku_bodyAction_004_12.anim",
-            "directory": false
-        },
-        {
-            "id": "asset:5de3db68-7cda-475f-a512-e056c2ca974a",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_3.skeleton",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:90000:3247bd",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_Base_Layer_1.anim",
-            "directory": false
-        },
-        {
-            "id": "asset:2dc9ebd8-ba75-4e89-8ae9-277dd692af08",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_Base_Layer_1.anim",
-            "directory": false
-        },
-        {
-            "id": "asset:9c6810ba-57e3-4054-8a50-736111ed3d4f",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_Rest.pose",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:720000:3247b9",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_Roku_Acc_Choker_SPIKE_005Action_005_2.anim",
-            "directory": false
-        },
-        {
-            "id": "asset:faf3d8e5-7b06-475f-82dc-97a9881b0f3b",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_Roku_Acc_Choker_SPIKE_005Action_005_2.anim",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:80000:3247c3",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_Roku_Acc_Earring_L_SPIKE_005Action_007_3.anim",
-            "directory": false
-        },
-        {
-            "id": "asset:522a97ee-718b-4831-a8c5-a1d6ee44b1f1",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_Roku_Acc_Earring_L_SPIKE_005Action_007_3.anim",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:1a90000:18e1b",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_Roku_Acc_Heels_SPIKE_005Action_004_5.anim",
-            "directory": false
-        },
-        {
-            "id": "asset:0a988370-5eb7-4a8d-9aef-eabf7ad4b2fb",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_Roku_Acc_Heels_SPIKE_005Action_004_5.anim",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:110000:324072",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_Roku_Acc_Piercings_SPIKE_005Action_006_6.anim",
-            "directory": false
-        },
-        {
-            "id": "asset:515b4b25-5f30-49e4-b5ac-810f88faa000",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_Roku_Acc_Piercings_SPIKE_005Action_006_6.anim",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:90000:3247cf",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_Roku_Acc_Wrists_SPIKE_005Action_002_8.anim",
-            "directory": false
-        },
-        {
-            "id": "asset:157f422b-83d8-47da-9d60-4455c872d704",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_Roku_Acc_Wrists_SPIKE_005Action_002_8.anim",
-            "directory": false
-        },
-        {
-            "id": "asset:4730a8e8-0e5d-4d49-8c39-fffb341bd442",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_Roku_Eyes_001_Roku_bodyAction_001_11.anim",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:d0000:3247d1",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_Roku_Eye_L_Roku_bodyAction_003_9.anim",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:80000:3247dc",
-            "path": "Models/mmd/Roku/Roku_V1_packed/Roku_V1_packed_Roku_Mouth_T_Roku_bodyAction_004_12.anim",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:390000:e8429",
-            "path": "Models/mmd/Roku/Roku_V1_packed.fbx",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:30000:33feaf",
-            "path": "Scenes/Animation",
-            "directory": true
-        },
-        {
-            "id": "file:a8e05ef1:70000:328c39",
-            "path": "Models/mmd/Roku/Roku_V1_packed.fbx.materials.json",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:7d0000:226b4",
-            "path": "Models/mmd/sad cat dance/dancing VMD",
-            "directory": true
-        },
-        {
             "id": "file:a8e05ef1:a0000:324814",
+            "path": "Models/mmd/sad cat dance/dancing VMD/dancing.animpack",
+            "directory": false
+        },
+        {
+            "id": "asset:d3b75214-8eb3-4cf7-aa84-0b15c6ac01de",
             "path": "Models/mmd/sad cat dance/dancing VMD/dancing.animpack",
             "directory": false
         },
@@ -3800,11 +2765,6 @@
             "id": "file:a8e05ef1:120000:f9c0a",
             "path": "Prefabs",
             "directory": true
-        },
-        {
-            "id": "asset:d3b75214-8eb3-4cf7-aa84-0b15c6ac01de",
-            "path": "Models/mmd/sad cat dance/dancing VMD/dancing.animpack",
-            "directory": false
         },
         {
             "id": "file:a8e05ef1:11e0000:a1087",
@@ -3817,13 +2777,13 @@
             "directory": false
         },
         {
-            "id": "asset:02f94481-5c2b-49e4-8512-f7a4f47e8592",
-            "path": "Models/mmd/sad cat dance/dancing VMD/Facial.vmdtrack",
+            "id": "asset:215ac1a6-43d8-4868-b5d9-b27a28af0c79",
+            "path": "Models/mmd/sad cat dance/dancing VMD/Properties.vmdtrack",
             "directory": false
         },
         {
-            "id": "asset:215ac1a6-43d8-4868-b5d9-b27a28af0c79",
-            "path": "Models/mmd/sad cat dance/dancing VMD/Properties.vmdtrack",
+            "id": "file:a8e05ef1:520000:e218e",
+            "path": "Models/mmd/sad cat dance/dancing.vmd",
             "directory": false
         },
         {
@@ -3842,11 +2802,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:c0000:3078b4",
-            "path": "Models/mmd/sad cat dance/headband with cat ears BY »½α¬ία/headband(black).png",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:b0000:30b49a",
             "path": "Scripts/Gameplay",
             "directory": true
@@ -3862,11 +2817,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:540000:31ad78",
-            "path": "Models/mmd/sad cat dance/rules for motion.txt",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:100000:31b0a4",
             "path": "Models/mmd/sad cat dance/sad cat dance.png",
             "directory": false
@@ -3874,26 +2824,6 @@
         {
             "id": "file:a8e05ef1:140000:709a1",
             "path": "Prefabs/CharacterCapsule.prefab",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:360000:13801",
-            "path": "Prefabs/Cube.prefab",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:b0000:30b492",
-            "path": "Scripts/Demos/Snake/SnakeGameManager.cpp",
-            "directory": false
-        },
-        {
-            "id": "asset:796597e0-56ab-48f3-9f63-e1f67a36f79c",
-            "path": "Prefabs/Fox/Fox.prefab",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:1b90000:608f7",
-            "path": "Prefabs/Fox/FoxRagdoll.prefab",
             "directory": false
         },
         {
@@ -3907,11 +2837,6 @@
             "directory": false
         },
         {
-            "id": "asset:d4f89d47-27e9-464f-9648-5e42ca3b894f",
-            "path": "Prefabs/Fox/Materials/Default.material",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:1d0000:70a76",
             "path": "Prefabs/Fox/Materials/fox_material 1.material",
             "directory": false
@@ -3920,11 +2845,6 @@
             "id": "asset:5dd38e5a-a799-4565-bf79-2594e3ff44d0",
             "path": "Prefabs/Fox/Materials/fox_material 1.material",
             "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:810000:70aaf",
-            "path": "Prefabs/Fox/Meshes",
-            "directory": true
         },
         {
             "id": "file:a8e05ef1:120000:e635e",
@@ -3967,6 +2887,11 @@
             "directory": true
         },
         {
+            "id": "file:a8e05ef1:30000:33feaf",
+            "path": "Scenes/Animation",
+            "directory": true
+        },
+        {
             "id": "file:a8e05ef1:2e0000:e6392",
             "path": "Scenes/Basics",
             "directory": true
@@ -3985,6 +2910,11 @@
             "id": "file:a8e05ef1:160000:e6b39",
             "path": "Scenes/Demo",
             "directory": true
+        },
+        {
+            "id": "file:a8e05ef1:500000:e6b55",
+            "path": "Scenes/Demo/snake.scene",
+            "directory": false
         },
         {
             "id": "file:a8e05ef1:b0000:f6c0a",
@@ -4062,6 +2992,11 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:290000:10f487",
+            "path": "Scenes/Rendering/subsurface_scattering_demo.md",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:50000:30779e",
             "path": "Scenes/Showcases/particle_fluid_river.scene",
             "directory": false
@@ -4074,6 +3009,11 @@
         {
             "id": "file:a8e05ef1:b0000:30b46f",
             "path": "Scenes/Showcases/animation_showcase.scene",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:50000:30779a",
+            "path": "Scenes/Showcases/particle_collision_containment.scene",
             "directory": false
         },
         {
@@ -4117,6 +3057,16 @@
             "directory": true
         },
         {
+            "id": "file:a8e05ef1:60000:12e5c0",
+            "path": "Textures/Sprites/Slime/slime_swallow.png",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:b0000:30b47d",
+            "path": "Scenes/UI/ui_test.scene",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:b0000:30b47e",
             "path": "Scripts",
             "directory": true
@@ -4125,6 +3075,16 @@
             "id": "file:a8e05ef1:1c0000:3423b1",
             "path": "Scripts/Animation/MmdDanceReplay.h",
             "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:b0000:30b47f",
+            "path": "Scripts/Controllers",
+            "directory": true
+        },
+        {
+            "id": "file:a8e05ef1:b0000:30b482",
+            "path": "Scripts/Demos",
+            "directory": true
         },
         {
             "id": "file:a8e05ef1:c0000:30b4a8",
@@ -4142,6 +3102,16 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:c0000:30b4a4",
+            "path": "Scripts/Portals/MovingPortalPairDriver.h",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:b0000:30b488",
+            "path": "Scripts/Demos/Pong/PongBall.h",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:c0000:30b4a5",
             "path": "Scripts/Portals/PortalSplitAfterDelay.cpp",
             "directory": false
@@ -4152,8 +3122,18 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:b0000:30b48a",
+            "path": "Scripts/Demos/Pong/PongGameManager.h",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:b0000:30b48b",
             "path": "Scripts/Demos/Pong/PongPlayer.cpp",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:b0000:30b48c",
+            "path": "Scripts/Demos/Pong/PongPlayer.h",
             "directory": false
         },
         {
@@ -4197,6 +3177,11 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:b0000:30b49d",
+            "path": "Scripts/Physics",
+            "directory": true
+        },
+        {
             "id": "file:a8e05ef1:3a0000:6417f",
             "path": "Scripts/Physics/FoxProceduralWalk.cpp",
             "directory": false
@@ -4214,6 +3199,11 @@
         {
             "id": "file:a8e05ef1:b0000:30b4a0",
             "path": "Scripts/Physics/FoxRagdollBlend.cpp",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:b0000:30b4a1",
+            "path": "Scripts/Physics/FoxRagdollBlend.h",
             "directory": false
         },
         {
@@ -4249,6 +3239,11 @@
         {
             "id": "file:a8e05ef1:c0000:30b49e",
             "path": "Scripts/TerrainGen/TerrainGen.cpp",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:c0000:30b4b7",
+            "path": "Scripts/TerrainGen/TerrainGen.h",
             "directory": false
         },
         {
@@ -4312,6 +3307,11 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:60000:12e5a0",
+            "path": "Textures/PBRDemo/CopperSlate_MetallicRoughness.png",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:120000:12e5a6",
             "path": "Textures/Skyboxes",
             "directory": true
@@ -4327,8 +3327,8 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:70000:12e5af",
-            "path": "Textures/Sprites/Slime/slime_idle.spritesheet",
+            "id": "file:a8e05ef1:60000:12e5ae",
+            "path": "Textures/Sprites/Slime/slime_idle.spriteanim",
             "directory": false
         },
         {
@@ -4342,9 +3342,24 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:70000:12e5b5",
+            "path": "Textures/Sprites/Slime/slime_idle3.png",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:70000:12e5bc",
             "path": "Textures/Sprites/Slime/slime_jump.png",
             "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:70000:12e5bf",
+            "path": "Textures/Sprites/Slime/slime_move.png",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:7e0000:714a0",
+            "path": "Textures/Terrain",
+            "directory": true
         },
         {
             "id": "file:a8e05ef1:1ee0000:719cc",

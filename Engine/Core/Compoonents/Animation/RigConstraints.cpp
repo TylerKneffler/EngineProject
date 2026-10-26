@@ -382,16 +382,28 @@ bool RigConstraints::DrawProperties(::Engine::Editor::IEditorUi& ui)
     const std::string ikCount = std::to_string(ikChains.size());
     ui.ValueLabel("Append rules", appendCount.c_str());
     ui.ValueLabel("IK chains", ikCount.c_str());
-    if (ui.PropertyGroupHeader("IK")) {
+    if (!ikChains.empty()) {
+        if (ui.Button("Disable all IK"))
+            for (auto& chain : ikChains) {
+                changed = chain.enabled || changed;
+                chain.enabled = false;
+            }
+        ui.SameLine();
+        if (ui.Button("Enable all IK"))
+            for (auto& chain : ikChains) {
+                changed = !chain.enabled || changed;
+                chain.enabled = true;
+            }
         Model* model = Owner ? Owner->GetComponent<Model>() : nullptr;
         for (size_t i = 0; i < ikChains.size(); ++i) {
             const Object* controller = model ? model->ResolveNode(ikChains[i].controllerNodeIndex) : nullptr;
             const std::string label = controller ? controller->name : "IK chain " + std::to_string(i + 1);
             ui.PushId(std::to_string(i).c_str());
-            if (ui.Button((label + (ikChains[i].enabled ? " [On]" : " [Off]")).c_str())) {
-                ikChains[i].enabled = !ikChains[i].enabled;
-                changed = true;
-            }
+            changed = ui.Checkbox(label.c_str(), &ikChains[i].enabled) || changed;
+            if (controller)
+                if (const auto animated = m_animatedIkSwitches.find(controller->name);
+                    animated != m_animatedIkSwitches.end())
+                    ui.ValueLabel("Animation override", animated->second ? "On" : "Off");
             ui.PopId();
         }
     }

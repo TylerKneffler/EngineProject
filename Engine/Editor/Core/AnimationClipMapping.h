@@ -169,4 +169,20 @@ inline bool Repair(Engine::Model::AnimationClip& clip,
     channel.targetPath = target.path;
     return true;
 }
+
+// A timeline row owns all properties for one source node, so assigning it
+// moves translation, rotation, and scale together without changing key data.
+inline bool AssignRow(Engine::Model::AnimationClip& clip,
+    size_t channelIndex, const Bone& target)
+{
+    if (channelIndex >= clip.channels.size() || target.path.empty()) return false;
+    const auto sourceNode = clip.channels[channelIndex].nodeIndex;
+    const auto sourcePath = clip.channels[channelIndex].targetPath;
+    if (sourceNode == target.nodeIndex && sourcePath == target.path) return false;
+    for (size_t index = 0; index < clip.channels.size(); ++index)
+        if (clip.channels[index].targetPath == sourcePath &&
+            clip.channels[index].nodeIndex == sourceNode)
+            Repair(clip, index, target);
+    return true;
+}
 }

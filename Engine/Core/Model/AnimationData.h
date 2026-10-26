@@ -35,6 +35,8 @@ struct AnimationLayer
     bool looping = true;
     bool additive = false;
     std::vector<unsigned> nodeMask;
+    float startSeconds = 0.f;
+    int repeatCount = 0;
 };
 }
 

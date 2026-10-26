@@ -143,45 +143,11 @@ bool PropertiesView::AddComponentFromAsset(const std::string& path, std::string&
         }
         if (extension == ".anim" || extension == ".animation")
         {
-            if (!m_selectedObject->GetComponentInParent<Engine::Components::Model>())
-            { message = "[Properties] Attach a skeleton or Model hierarchy before adding an animation."; return false; }
-            auto* manager = m_selectedObject->GetComponent<Engine::Components::AnimationManager>();
-            std::unique_ptr<Engine::Components::AnimationManager> newManager;
-            if (!manager)
-            {
-                newManager = std::make_unique<Engine::Components::AnimationManager>();
-                newManager->Owner = m_selectedObject;
-                manager = newManager.get();
-            }
-            std::string error;
-            if (!manager->AddAnimationAsset(path, error))
-            { message = "[Properties] " + error; return false; }
-            if (newManager)
-                m_selectedObject->Components.push_back(newManager.release());
-            manager->EndEditorPreview();
-            message = "[Properties] Added animation to AnimationManager from: " + path;
-            return true;
-        }
-        if (extension == ".animpack" || extension == ".vmd")
-        {
-            std::string error;
-            std::optional<Engine::Model::AnimationPackAsset> pack;
-            if (extension == ".animpack") pack = Engine::Model::AnimationPackAsset::Load(path, error);
-            if (extension == ".animpack" && !pack)
-            { message = "[Properties] Failed to read animation pack: " + error; return false; }
             auto* model = m_selectedObject->GetComponentInParent<Engine::Components::Model>();
             if (!model)
-            { message = "[Properties] Select a character Model or one of its bones before applying motion."; return false; }
-            if (extension == ".vmd" || pack->clips.empty())
-            {
-                auto* root = model->Owner->GetPrefabInstanceRoot();
-                if (!root || !root->Prefab)
-                { message = "[Properties] VMD binding needs an imported character prefab with source model metadata."; return false; }
-                Engine::Model::AnimationPackAsset bound;
-                if (!MmdDanceAssetBinder::BuildForPrefab(root->Prefab->GetPath(), path, bound, error))
-                { message = "[Properties] Could not bind VMD motion: " + error; return false; }
-                pack = std::move(bound);
-            }
+            { message = "[Properties] Attach a skeleton or Model hierarchy before adding an animation."; return false; }
+            auto* root = model->Owner->GetPrefabInstanceRoot();
+            const std::string prefabPath = root && root->Prefab ? root->Prefab->GetPath() : std::string{};
             auto* manager = model->Owner->GetComponent<Engine::Components::AnimationManager>();
             std::unique_ptr<Engine::Components::AnimationManager> newManager;
             if (!manager)
@@ -190,7 +156,32 @@ bool PropertiesView::AddComponentFromAsset(const std::string& path, std::string&
                 newManager->Owner = model->Owner;
                 manager = newManager.get();
             }
-            if (!pack->Apply(*manager, error))
+            std::string error;
+            if (!MmdDanceAssetBinder::AddClipForPrefab(prefabPath, path, *manager, error))
+            { message = "[Properties] " + error; return false; }
+            if (newManager)
+                model->Owner->Components.push_back(newManager.release());
+            manager->EndEditorPreview();
+            message = "[Properties] Added animation to AnimationManager from: " + path;
+            return true;
+        }
+        if (extension == ".animpack" || extension == ".vmd")
+        {
+            std::string error;
+            auto* model = m_selectedObject->GetComponentInParent<Engine::Components::Model>();
+            if (!model)
+            { message = "[Properties] Select a character Model or one of its bones before applying motion."; return false; }
+            auto* root = model->Owner->GetPrefabInstanceRoot();
+            const std::string prefabPath = root && root->Prefab ? root->Prefab->GetPath() : std::string{};
+            auto* manager = model->Owner->GetComponent<Engine::Components::AnimationManager>();
+            std::unique_ptr<Engine::Components::AnimationManager> newManager;
+            if (!manager)
+            {
+                newManager = std::make_unique<Engine::Components::AnimationManager>();
+                newManager->Owner = model->Owner;
+                manager = newManager.get();
+            }
+            if (!MmdDanceAssetBinder::ApplyForPrefab(prefabPath, path, *manager, error))
             { message = "[Properties] Could not apply animation pack: " + error; return false; }
             if (newManager)
                 model->Owner->Components.push_back(newManager.release());

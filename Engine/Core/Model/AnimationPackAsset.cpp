@@ -103,6 +103,9 @@ AnimationPackAsset AnimationPackAsset::Capture(
 {
     AnimationPackAsset pack;
     pack.activeClip = manager.clip;
+    pack.baseAnimationEnabled = manager.baseAnimationEnabled;
+    pack.timelinePlayback = manager.timelinePlayback;
+    pack.timelineTime = manager.timelineTime;
     pack.playing = manager.playing;
     pack.looping = manager.looping;
     pack.speed = manager.speed;
@@ -162,6 +165,10 @@ std::optional<AnimationPackAsset> AnimationPackAsset::Load(
             pack.bindSkeleton.push_back(std::move(node));
         }
         pack.activeClip = root["activeClip"].AsString();
+        pack.baseAnimationEnabled = !root.Has("baseAnimationEnabled") ||
+            root["baseAnimationEnabled"].AsBool();
+        pack.timelinePlayback = root.Has("timelinePlayback") && root["timelinePlayback"].AsBool();
+        pack.timelineTime = root["timelineTime"].AsFloat();
         pack.playing = !root.Has("playing") || root["playing"].AsBool();
         pack.looping = !root.Has("looping") || root["looping"].AsBool();
         pack.speed = root.Has("speed") ? root["speed"].AsFloat() : 1.f;
@@ -182,6 +189,8 @@ std::optional<AnimationPackAsset> AnimationPackAsset::Load(
             const auto& value = root["layers"].ArrayAt(i);
             AnimationLayer layer;
             layer.clip = value["clip"].AsString();
+            layer.startSeconds = value["startSeconds"].AsFloat();
+            layer.repeatCount = value["repeatCount"].AsInt();
             layer.weight = value.Has("weight") ? value["weight"].AsFloat() : 1.f;
             layer.speed = value.Has("speed") ? value["speed"].AsFloat() : 1.f;
             layer.time = value["time"].AsFloat();
@@ -217,6 +226,9 @@ bool AnimationPackAsset::Save(const std::string& path, std::string& error) const
         .Set("format", JsonValue("engine-animation-pack"))
         .Set("version", JsonValue(1))
         .Set("activeClip", JsonValue(activeClip))
+        .Set("baseAnimationEnabled", JsonValue(baseAnimationEnabled))
+        .Set("timelinePlayback", JsonValue(timelinePlayback))
+        .Set("timelineTime", JsonValue(timelineTime))
         .Set("playing", JsonValue(playing))
         .Set("looping", JsonValue(looping))
         .Set("speed", JsonValue(speed))
@@ -251,6 +263,8 @@ bool AnimationPackAsset::Save(const std::string& path, std::string& error) const
                 maskPaths.Push(JsonValue(nodePath));
         savedLayers.Push(JsonValue::MakeObject()
             .Set("clip", JsonValue(layer.clip))
+            .Set("startSeconds", JsonValue(layer.startSeconds))
+            .Set("repeatCount", JsonValue(layer.repeatCount))
             .Set("weight", JsonValue(layer.weight))
             .Set("speed", JsonValue(layer.speed))
             .Set("time", JsonValue(layer.time))
@@ -383,6 +397,9 @@ bool AnimationPackAsset::Apply(Engine::Components::AnimationManager& manager,
     }
     manager.InstallEmbeddedClips(std::move(remapped));
     manager.clip = activeClip;
+    manager.baseAnimationEnabled = baseAnimationEnabled;
+    manager.timelinePlayback = timelinePlayback;
+    manager.timelineTime = timelineTime;
     manager.playing = playing;
     manager.looping = looping;
     manager.speed = speed;

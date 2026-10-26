@@ -4,6 +4,7 @@
 #include "Engine/Editor/EditorState.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Engine/Editor/Core/View/Views/SceneView.h"
+#include "Engine/Editor/Core/View/Views/AnimationView.h"
 #include "Editor/Core/View/EditorViewportSettings.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Object.h"
@@ -623,6 +624,9 @@ void EditorState::DrawToolbarTools(IEditorUi& ui, bool singleRow,
             open("Hierarchy...", "Hierarchy");
     }
 
+    if (auto* view = GetGlobalToolbarSceneView())
+        view->DrawPoseToolbar([&](float width) { return row.Next(width); });
+
     if (button("Animation Editor"))
         OpenAnimationEditor();
 
@@ -676,6 +680,9 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
         {
             auto& document = *m_activeAnimationDocument;
             ToolbarRow row{singleRow, overflow};
+            if (document.view)
+                document.view->DrawPoseToolbar(
+                    [&](float width) { return row.Next(width); });
             ImGui::PushID(&document);
             ImGui::BeginDisabled(!document.sourceManager);
             const char* keyLabel = document.selectedRows.empty()

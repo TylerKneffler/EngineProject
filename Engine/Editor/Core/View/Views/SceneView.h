@@ -76,6 +76,7 @@ public:
         m_gizmos.SetBoneTransformSettings(pivotMode, customPivot,
             translationSnap, rotationSnapDegrees, scaleSnap);
     }
+    void DrawPoseToolbar(const std::function<bool(float)>& next);
     bool UseGlobalToolbar = false;
     void SetDocumentPath(std::string path) { m_documentPath = std::move(path); }
     void RequestFocusOnNextDraw() { m_focusOnNextDraw = true; }

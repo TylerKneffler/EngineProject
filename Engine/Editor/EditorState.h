@@ -1,6 +1,7 @@
 #pragma once
 #include "Core/Model/ProjectSettings.h"
 #include "Core/Model/AnimationClip.h"
+#include "Core/AnimationTimelineEditing.h"
 #include "Core/Model/RigAsset.h"
 #include "pch.h"
 #include "Core/ProjectLoader.h"
@@ -135,6 +136,7 @@ public:
     void SaveAnimationEditorSession() const;
     void UpdateAnimationPlayback(float deltaTime);
     void HandleAnimationDocumentClosures();
+    void DrawAnimationCloseConfirmation(IEditorUi& ui);
     bool IsAnimationEditorFocused() const;
     bool IsAnimationPlaying() const;
     bool CanToggleAnimationPlayback() const;
@@ -552,16 +554,8 @@ private:
             int clipIndex = -1;
             unsigned nodeIndex = 0;
         };
-        struct RigTrack
+        struct RigTrack : AnimationTimelineEditing::Playback
         {
-            struct ClipLayer
-            {
-                int clipIndex = -1;
-                float weight = 1.f;
-                float startSeconds = 0.f;
-                bool repeat = false;
-                int repeatCount = 0; // 0 means infinite when repeat is enabled.
-            };
             size_t index = 0;
             std::string name;
             std::string path;
@@ -573,17 +567,13 @@ private:
             std::vector<Engine::Model::RigAsset::Pose> poses;
             std::vector<Engine::Model::RigAsset::SymmetryPair> symmetryPairs;
             bool controlsDirty = false;
+            bool rigConstraintsDirty = false;
             Engine::Components::Skeleton* sourceSkeleton = nullptr;
             Engine::Components::Skeleton* poseSkeleton = nullptr;
             Engine::Components::AnimationManager* sourceManager = nullptr;
             Engine::Components::AnimationManager* poseManager = nullptr;
-            int clipIndex = -1;
-            float weight = 1.f;
-            float startSeconds = 0.f;
-            bool repeat = false;
-            int repeatCount = 0;
             std::unordered_map<int, bool> expandedClips;
-            std::vector<ClipLayer> stackedClips;
+            std::unordered_map<int, float> clipSettingsHeights;
             int selectedBone = -1;
             bool selected = false;
         };
@@ -650,6 +640,7 @@ private:
         bool playbackStarted = false;
         bool playheadDragging = false;
         bool clipDragging = false;
+        std::optional<AnimationTimelineEditing::Playback> clipDragBefore;
         size_t clipDragRig = 0;
         int clipDragIndex = -1;
         float clipDragMouseX = 0.f;
@@ -718,22 +709,33 @@ private:
         bool ikControlEditPending = false;
         bool dirty = false;
         std::string savedSnapshot;
-        std::deque<std::vector<Engine::Model::AnimationClip>> undo;
-        std::deque<std::vector<Engine::Model::AnimationClip>> redo;
+        struct EditSnapshot
+        {
+            size_t rigIndex = 0;
+            std::vector<Engine::Model::AnimationClip> clips;
+            AnimationTimelineEditing::Playback playback;
+        };
+        std::deque<EditSnapshot> undo;
+        std::deque<EditSnapshot> redo;
         std::string error;
     };
     void SetActiveAnimationDocument(AnimationDocument* document);
     void SelectAnimationDocumentClip(AnimationDocument& document,
         const std::string& clipName, size_t rigIndex);
     void FocusAnimationRig(AnimationDocument& document, size_t index);
-    void HandleAnimationEditorDrop(IEditorUi& ui);
+    void HandleAnimationEditorDrop(IEditorUi& ui, AnimationDocument* target = nullptr);
     void DrawAnimationTimeline(IEditorUi& ui, AnimationDocument& document);
     void DrawAnimationTimelinePanel(IEditorUi& ui);
     void DrawAnimationKeyTools(IEditorUi& ui, AnimationDocument& document);
     void DrawAnimationLayerTools(IEditorUi& ui, AnimationDocument& document);
     void DrawAnimationRigToolbar(IEditorUi& ui,
         AnimationDocument& document);
+    bool AddAnimationToDocument(AnimationDocument& document, const std::string& path);
+    void RemoveAnimationFromDocument(AnimationDocument& document, size_t rigIndex, int clipIndex);
+    void AnimationPlaybackChanged(AnimationDocument& document, bool recordHistory = true);
     void DrawAnimationProperties(IEditorUi& ui,
+        AnimationDocument& document);
+    void DrawAnimationRigConstraints(IEditorUi& ui,
         AnimationDocument& document);
     void DrawAnimationRigControls(IEditorUi& ui,
         AnimationDocument& document);
@@ -770,7 +772,8 @@ private:
         Engine::Core::Object& tip, bool matchIncoming);
     bool BakeAnimationLimbs(AnimationDocument& document);
     void RecordAnimationEdit(AnimationDocument& document,
-        std::vector<Engine::Model::AnimationClip> before);
+        std::vector<Engine::Model::AnimationClip> before,
+        std::optional<AnimationTimelineEditing::Playback> playbackBefore = std::nullopt);
     bool SaveAnimationDocument(AnimationDocument& document);
     bool StepAnimationHistory(AnimationDocument& document, bool redo);
     void RefreshAnimationDocumentTitle(AnimationDocument& document);
@@ -816,6 +819,7 @@ private:
     std::deque<std::string> m_pendingSceneAssetDocuments;
     SceneAssetDocument* m_activeSceneAssetDocument = nullptr;
     std::vector<std::unique_ptr<AnimationDocument>> m_animationDocuments;
+    std::string m_animationDocumentOpenError;
       std::deque<std::pair<std::string, size_t>> m_pendingAnimationDocuments;
     std::unordered_map<std::string, std::string> m_pendingAnimationClipSelections;
     struct AnimationSourceRequest
@@ -828,6 +832,7 @@ private:
     std::unordered_map<std::string, AnimationSourceRequest> m_pendingAnimationSources;
     std::unordered_map<std::string, std::string> m_pendingAnimationClipAssets;
     AnimationDocument* m_activeAnimationDocument = nullptr;
+    AnimationDocument* m_animationCloseDocument = nullptr;
     AnimationDocument* m_timelineAnimationDocument = nullptr;
     MeshEditSession m_mainMeshEdit;
     MeshEditSession m_prefabMeshEdit;

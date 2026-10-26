@@ -13,6 +13,23 @@ namespace Engine::Editor
 class MmdDanceAssetBinder
 {
 public:
+    static bool ExportTrackAnimation(const std::string& trackPath,
+        const std::string& prefabPath, const std::string& outputPath,
+        std::string& error);
+    static bool LoadClipForPrefab(const std::string& prefabPath,
+        const std::string& animationPath, Engine::Model::AnimationClipAsset& asset,
+        bool& rebound, std::string& error);
+    static bool RebindLegacyClipForPrefab(const std::string& prefabPath,
+        const std::string& animationPath, Engine::Model::AnimationClipAsset& asset,
+        bool& rebound, std::string& error);
+    static bool AddClipForPrefab(const std::string& prefabPath,
+        const std::string& animationPath, Engine::Components::AnimationManager& manager,
+        std::string& error);
+    // Prefer the saved tracks, then rebuild incompatible VMD packs for the
+    // selected prefab. The original pack and prefab remain untouched.
+    static bool ApplyForPrefab(const std::string& prefabPath,
+        const std::string& motionPath, Engine::Components::AnimationManager& manager,
+        std::string& error);
     // Bake onto the prefab's neutral skeleton without changing the prefab or
     // source assets. Used when dropping motion onto a scene instance.
     static bool BuildForPrefab(const std::string& prefabPath,

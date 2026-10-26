@@ -144,6 +144,7 @@ struct EditorUiAssetItemMenuResult
     bool packMeshesRequested = false;
     bool extractMeshesRequested = false;
     bool extractModelAssetsRequested = false;
+    bool createTrackAnimationRequested = false;
 };
 
 struct EditorUiTextEditResult
@@ -171,6 +172,9 @@ public:
     virtual ~IEditorUi() = default;
     virtual void SetNextWindowRect(float x, float y, float width, float height) = 0;
     virtual bool BeginWindow(const char* title, bool* open, bool noPadding = false) = 0;
+    // Edge-to-edge render surface with window scrolling disabled.
+    virtual bool BeginViewportWindow(const char* title, bool* open)
+    { return BeginWindow(title, open, true); }
     virtual bool CurrentWindowScreenRect(float&, float&, float&, float&) const
     { return false; }
     virtual bool BeginModal(const char*, bool) { return false; }

@@ -306,6 +306,7 @@ std::unique_ptr<AnimationView> ViewFactory::CreateAnimationView(
     if (!deviceHandle) return nullptr;
     auto [handles, slot] = m_renderer->AllocateSrvSlot();
     auto view = std::make_unique<AnimationView>();
+    view->UseGlobalToolbar = true;
     view->SetViewBackend(m_renderer->CreateViewBackend());
     view->SetTitle(title);
     view->SetDefaultDockArea(EditorPanelDockArea::MainDocument);

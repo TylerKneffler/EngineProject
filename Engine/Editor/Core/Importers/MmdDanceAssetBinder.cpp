@@ -3,7 +3,9 @@
 #include "PmxModelDecoder.h"
 #include "VmdMotionDecoder.h"
 #include "Core/AssetRecord.h"
+#include "Core/ComponentReference.h"
 #include "Core/Compoonents/Animation/ModelAnimation.h"
+#include "Core/Compoonents/Animation/AnimationManager.h"
 #include "Core/Compoonents/Animation/Model.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/RigConstraints.h"
@@ -406,6 +408,192 @@ bool BindPmxDirect(const std::string& prefabPath, const std::string& sourcePath,
 }
 }
 
+bool MmdDanceAssetBinder::LoadClipForPrefab(const std::string& prefabPath,
+    const std::string& animationPath, Engine::Model::AnimationClipAsset& asset,
+    bool& rebound, std::string& error)
+{
+    auto loaded = Engine::Model::AnimationClipAsset::Load(animationPath);
+    asset = loaded ? std::move(*loaded) : Engine::Model::AnimationClipAsset{};
+    rebound = false;
+    // Valid .anim files are self-contained. Missing matches are assigned in
+    // the timeline; source motion and importer metadata are not prerequisites.
+    if (loaded) { error.clear(); return true; }
+    const auto record = Engine::Core::AssetRecord::Load(animationPath);
+    if (record)
+    {
+        const auto importer = record->importSettings.find("importer");
+        const auto* kind = importer != record->importSettings.end()
+            ? std::get_if<std::string>(&importer->second) : nullptr;
+        if (kind && (*kind == "mmd-body" || *kind == "mmd-facial"))
+        {
+            const std::string suffix = *kind == "mmd-body" ? "_body" : "_facial";
+            auto stem = fs::path(animationPath).stem().string();
+            if (stem.size() > suffix.size() && stem.compare(stem.size() - suffix.size(), suffix.size(), suffix) == 0)
+            {
+                stem.resize(stem.size() - suffix.size());
+                std::string packError;
+                if (auto pack = Engine::Model::AnimationPackAsset::Load(
+                    (fs::path(animationPath).parent_path() / (stem + ".animpack")).string(), packError))
+                {
+                    const std::string name = stem + (*kind == "mmd-body" ? " body" : " facial");
+                    const auto clip = std::find_if(pack->clips.begin(), pack->clips.end(),
+                        [&](const auto& candidate) { return candidate.clipName == name; });
+                    if (clip != pack->clips.end())
+                    {
+                        asset.clip = *clip;
+                        asset.bindSkeleton = pack->bindSkeleton;
+                        asset.baseSkeleton = pack->bindSkeleton;
+                        asset.humanoid = pack->humanoid;
+                        asset.previewPrefab = pack->sourcePrefab;
+                        rebound = true;
+                        error.clear();
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    if (!RebindLegacyClipForPrefab(prefabPath, animationPath, asset, rebound, error)) return false;
+    if (!loaded && !rebound)
+    { error = "Could not load animation asset: " + animationPath; return false; }
+    error.clear();
+    return true;
+}
+
+bool MmdDanceAssetBinder::RebindLegacyClipForPrefab(const std::string& prefabPath,
+    const std::string& animationPath, Engine::Model::AnimationClipAsset& asset,
+    bool& rebound, std::string& error)
+{
+    rebound = false;
+    if (!asset.bindSkeleton.empty() || prefabPath.empty()) return true;
+    const auto record = Engine::Core::AssetRecord::Load(animationPath);
+    if (!record) return true;
+    const auto importer = record->importSettings.find("importer");
+    if (importer == record->importSettings.end()) return true;
+    const auto* kind = std::get_if<std::string>(&importer->second);
+    if (!kind || (*kind != "mmd-body" && *kind != "mmd-facial")) return true;
+    const auto targetRecord = Engine::Core::AssetRecord::Load(prefabPath);
+    if (!targetRecord) return true;
+    auto targetExtension = fs::path(targetRecord->sourcePath).extension().string();
+    std::transform(targetExtension.begin(), targetExtension.end(), targetExtension.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (targetExtension != ".pmx") return true;
+    Engine::Model::AnimationPackAsset pack;
+    if (!BuildForPrefab(prefabPath, animationPath, pack, error)) return false;
+    const std::string suffix = *kind == "mmd-body" ? " body" : " facial";
+    const auto clip = std::find_if(pack.clips.begin(), pack.clips.end(), [&](const auto& candidate)
+        { return candidate.clipName.size() >= suffix.size() &&
+            candidate.clipName.compare(candidate.clipName.size() - suffix.size(), suffix.size(), suffix) == 0; });
+    if (clip == pack.clips.end())
+    { error = "The original VMD has no matching " + *kind + " tracks for this character."; return false; }
+    const auto name = asset.clip.clipName;
+    const auto ikOverride = asset.clip.rigIkOverride;
+    asset.clip = *clip;
+    if (!name.empty()) asset.clip.clipName = name;
+    asset.clip.rigIkOverride = ikOverride;
+    asset.bindSkeleton = std::move(pack.bindSkeleton);
+    asset.baseSkeleton = asset.bindSkeleton;
+    asset.humanoid = std::move(pack.humanoid);
+    asset.previewPrefab = prefabPath;
+    rebound = true;
+    error.clear();
+    return true;
+}
+
+bool MmdDanceAssetBinder::AddClipForPrefab(const std::string& prefabPath,
+    const std::string& animationPath, Engine::Components::AnimationManager& manager,
+    std::string& error)
+{
+    Engine::Model::AnimationClipAsset asset;
+    bool rebound = false;
+    if (!LoadClipForPrefab(prefabPath, animationPath, asset, rebound, error)) return false;
+    if (!rebound) return manager.AddAnimationAsset(animationPath, error);
+    auto* model = manager.modelReference.IsAssigned()
+        ? Engine::Core::ResolveComponentReference<Engine::Components::Model>(manager.Owner, manager.modelReference)
+        : nullptr;
+    if (!manager.modelReference.IsAssigned())
+        for (auto* owner = manager.Owner; owner && !model; owner = owner->Parent)
+            model = owner->GetComponent<Engine::Components::Model>();
+    if (!model) { error = "Assign a Model or skeleton hierarchy before attaching an animation."; return false; }
+    asset.clip = Engine::Model::AnimationRigMapping::Map(asset, *model,
+        Engine::Model::RigAsset::ForModel(*model), asset.previewPrefab == prefabPath).clip;
+    std::vector<Engine::Model::AnimationClip> clips;
+    for (const auto* clip : manager.GetAvailableClips()) if (clip) clips.push_back(*clip);
+    const auto found = std::find_if(clips.begin(), clips.end(),
+        [&](const auto& clip) { return clip.clipName == asset.clip.clipName; });
+    const auto name = asset.clip.clipName;
+    if (found == clips.end()) clips.push_back(std::move(asset.clip));
+    else *found = std::move(asset.clip);
+    manager.InstallEmbeddedClips(std::move(clips));
+    manager.clip = name;
+    manager.baseAnimationEnabled = true;
+    manager.timelinePlayback = false;
+    manager.time = 0.f;
+    manager.MarkConfigurationDirty();
+    manager.Start();
+    error.clear();
+    return true;
+}
+
+bool MmdDanceAssetBinder::ApplyForPrefab(const std::string& prefabPath,
+    const std::string& motionPath, Engine::Components::AnimationManager& manager,
+    std::string& error)
+{
+    error.clear();
+    std::string extension = fs::path(motionPath).extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (extension == ".animpack")
+    {
+        auto input = Engine::Model::AnimationPackAsset::Load(motionPath, error);
+        if (!input) return false;
+        if (input->Apply(manager, error)) return true;
+    }
+    const std::string originalError = error;
+    Engine::Model::AnimationPackAsset rebound;
+    std::string bindError;
+    if (prefabPath.empty() || !BuildForPrefab(prefabPath, motionPath, rebound, bindError) ||
+        !rebound.Apply(manager, bindError))
+    {
+        error = originalError;
+        if (!error.empty()) error += ". Could not rebind motion: ";
+        error += prefabPath.empty() ? "Select an imported character prefab to rebind this motion." : bindError;
+        return false;
+    }
+    error.clear();
+    return true;
+}
+
+bool MmdDanceAssetBinder::ExportTrackAnimation(const std::string& trackPath,
+    const std::string& prefabPath, const std::string& outputPath, std::string& error)
+{
+    error.clear();
+    try
+    {
+        if (fs::path(outputPath).extension() != ".anim")
+        { error = "Choose an output filename ending in .anim."; return false; }
+        if (fs::exists(outputPath))
+        { error = "That file already exists. Choose another animation filename."; return false; }
+        Engine::Model::AnimationPackAsset pack;
+        if (!BuildForPrefab(prefabPath, trackPath, pack, error)) return false;
+        if (pack.clips.size() != 1)
+        { error = "The VMD track did not produce one character animation."; return false; }
+        Engine::Model::AnimationClipAsset asset;
+        asset.clip = std::move(pack.clips.front());
+        asset.clip.clipName = fs::path(outputPath).stem().string();
+        asset.bindSkeleton = std::move(pack.bindSkeleton);
+        asset.baseSkeleton = asset.bindSkeleton;
+        asset.humanoid = std::move(pack.humanoid);
+        asset.previewPrefab = prefabPath;
+        if (!asset.Save(outputPath))
+        { error = "Could not save animation: " + outputPath; return false; }
+        Engine::Core::AssetRecord::Ensure(outputPath, trackPath,
+            {{"importer", std::string("vmd-track-animation")}, {"targetPrefab", prefabPath}});
+        return true;
+    }
+    catch (const std::exception& exception) { error = exception.what(); return false; }
+}
+
 bool MmdDanceAssetBinder::BuildForPrefab(const std::string& prefabPath,
     const std::string& motionPath, Engine::Model::AnimationPackAsset& pack,
     std::string& error)
@@ -437,7 +625,43 @@ bool MmdDanceAssetBinder::BuildForPrefab(const std::string& prefabPath,
             return BindPmxDirect(prefabPath, source.string(), motionPath, error, {}, &pack);
         std::optional<Engine::Model::AnimationPackAsset> input;
         if (extension == ".animpack") input = Engine::Model::AnimationPackAsset::Load(motionPath, error);
+        else if (extension == ".vmdtrack")
+        {
+            const auto track = Engine::Serialization::JsonParseFile(motionPath);
+            const auto kind = track["kind"].AsString();
+            if (kind != "Body" && kind != "Facial" && kind != "Properties")
+            { error = "Only Body, Facial, and Properties VMD tracks can become character .anim files."; return false; }
+            input.emplace();
+            input->sourceTracks.push_back({kind, Engine::Serialization::JsonWrite(track)});
+        }
+        else if (extension == ".anim" || extension == ".animation") input.emplace();
         if (!input) { if (error.empty()) error = "Expected a VMD or VMD source animation pack."; return false; }
+        const bool hasCharacterSource = std::any_of(input->sourceTracks.begin(), input->sourceTracks.end(),
+            [](const auto& track) { return track.kind == "Body" || track.kind == "Facial" || track.kind == "Properties"; });
+        if (!hasCharacterSource)
+        {
+            // Older packs only contain FBX-baked channels. Their import sidecar
+            // identifies the VMD; ancestor lookup also handles moved asset folders.
+            const auto motionRecord = Engine::Core::AssetRecord::Load(motionPath);
+            fs::path vmd = motionRecord ? fs::path(motionRecord->sourcePath) : fs::path{};
+            std::string sourceExtension = vmd.extension().string();
+            std::transform(sourceExtension.begin(), sourceExtension.end(), sourceExtension.begin(),
+                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (sourceExtension != ".vmd")
+            { error = "Pack uses another model's baked tracks and has no VMD source; import the original VMD for this character."; return false; }
+            if (!fs::is_regular_file(vmd))
+                for (auto directory = fs::absolute(motionPath).parent_path(); !directory.empty();)
+                {
+                    const auto candidate = directory / vmd.filename();
+                    if (fs::is_regular_file(candidate)) { vmd = candidate; break; }
+                    const auto parent = directory.parent_path();
+                    if (parent == directory) break;
+                    directory = parent;
+                }
+            if (!fs::is_regular_file(vmd))
+            { error = "Original VMD source is missing: " + vmd.string(); return false; }
+            return BindPmxDirect(prefabPath, source.string(), vmd.string(), error, {}, &pack);
+        }
         VmdMotion motion;
         using Engine::Serialization::JsonValue;
         const auto frameNumber = [](const JsonValue& value) -> uint32_t

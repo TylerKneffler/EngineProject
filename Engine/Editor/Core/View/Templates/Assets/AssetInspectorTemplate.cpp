@@ -271,7 +271,7 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
         }
         else ui.ColoredLabel("Invalid pose asset", {1.f, .35f, .35f, 1.f});
     }
-    if (!directory && (extension == ".anim" || extension == ".animation") &&
+    if (!directory && (extension == ".anim" || extension == ".animation" || extension == ".animpack") &&
         ui.Button("Open Animation Editor") && OnOpenAnimation)
         OnOpenAnimation(m_selectedPath);
     if (!directory && (extension == ".anim" || extension == ".animation"))

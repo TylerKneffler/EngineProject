@@ -860,6 +860,7 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
     for (const ModelPin& pin : m_modelPins)
     {
         EditorUiVec2 point{};
+        if (!scene.AreEditorBonesVisible()) continue;
         const glm::vec3 marker = pin.position ? pin.worldPosition
             : WorldPosition(pin.joint);
         if (!ProjectPoint(viewProjection, marker,
@@ -1595,9 +1596,8 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         }
     }
 
-    // Point selection uses the resolved skeleton, independent of the regular
-    // bone overlay flags. This keeps controllers available when bone shapes
-    // are hidden and avoids picking unrelated scene objects as joints.
+    // Point selection uses the resolved skeleton rather than unrelated scene
+    // objects, and follows the viewport's bone-gizmo visibility control.
     Engine::Core::Object* pointHit = nullptr;
     bool pointHitDirection = false;
     bool pointHitTwist = false;
@@ -1605,7 +1605,7 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
     glm::vec3 pointHitTwistAxis{};
     glm::vec3 pointHitTwistBase{};
     float pointHitDistance = FLT_MAX;
-    if (m_modelManipulation && m_modelSelectionMode == 3)
+    if (scene.AreEditorBonesVisible() && m_modelManipulation && m_modelSelectionMode == 3)
     {
         std::unordered_set<Engine::Core::Object*> drawnPoints;
         for (const auto& ownerPointer : scene.GetObjects())
