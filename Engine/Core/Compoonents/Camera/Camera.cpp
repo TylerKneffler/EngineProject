@@ -2,6 +2,7 @@
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include <cassert>
+#include <algorithm>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 
@@ -54,6 +55,21 @@ glm::mat4 Camera::GetViewMatrix() const
     return glm::lookAtLH(p, p + forward, cameraUp);
 }
 
+glm::dmat4 Camera::GetViewMatrixD() const
+{
+    assert(Owner && "Camera requires an owner Object with a Transform");
+    // Spatial warp mappings currently expose float matrices. Preserve their
+    // established behavior; ordinary world cameras keep double translation.
+    if (Owner->transform.matrixLayer.enabled)
+        return glm::dmat4(GetViewMatrix());
+    const glm::dmat4 world = Owner->transform.GetWorldMatrixD();
+    const glm::dvec3 eye(world[3]);
+    if (!useTransformRotation)
+        return glm::lookAtLH(eye, glm::dvec3(target), glm::dvec3(up));
+    return glm::lookAtLH(eye, eye + glm::normalize(glm::dvec3(world[2])),
+        glm::normalize(glm::dvec3(world[1])));
+}
+
 glm::mat4 Camera::GetProjectionMatrix(float aspect, bool forceOrthographic) const
 {
     if (orthographic || forceOrthographic)
@@ -65,5 +81,19 @@ glm::mat4 Camera::GetProjectionMatrix(float aspect, bool forceOrthographic) cons
     }
     return glm::perspectiveLH_ZO(
         glm::radians(fov), aspect, nearPlane, farPlane);
+}
+
+glm::dmat4 Camera::GetProjectionMatrixD(double aspect,
+    bool forceOrthographic) const
+{
+    if (orthographic || forceOrthographic)
+    {
+        const double halfHeight = std::max(static_cast<double>(orthographicSize), .01);
+        const double halfWidth = halfHeight * std::max(aspect, .01);
+        return glm::orthoLH_ZO(-halfWidth, halfWidth, -halfHeight, halfHeight,
+            static_cast<double>(nearPlane), static_cast<double>(farPlane));
+    }
+    return glm::perspectiveLH_ZO(glm::radians(static_cast<double>(fov)), aspect,
+        static_cast<double>(nearPlane), static_cast<double>(farPlane));
 }
 }

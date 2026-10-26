@@ -5,6 +5,7 @@
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Renderers/DX11/DX11GameRenderer.h"
 #include <Windows.h>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -74,8 +75,8 @@ int main()
         for (int col = 0; col <= 4; ++col)
         {
             const size_t index = static_cast<size_t>(row * 5 + col) * 2;
-            terrain->weights[index] = col < 2 ? 1.f : 0.f;
-            terrain->weights[index + 1] = col < 2 ? 0.f : 1.f;
+            terrain->weights[index] = 1.f - static_cast<float>(col) / 4.f;
+            terrain->weights[index + 1] = static_cast<float>(col) / 4.f;
         }
     terrain->OnAfterDeserialize(renderer.GetGraphicsProvider());
     auto* material = terrainObject->AddComponent<Engine::Components::Material>();
@@ -98,6 +99,10 @@ int main()
     if (channel(45, 64, 0) < channel(45, 64, 2) + 30 ||
         channel(83, 64, 2) < channel(83, 64, 0) + 30)
         throw std::runtime_error("Painted terrain materials did not render red and blue regions");
-    std::cout << "Terrain red and blue material regions rendered\n";
+    if (channel(64, 64, 0) < 50 || channel(64, 64, 2) < 50 ||
+        std::abs(static_cast<int>(channel(64, 64, 0)) -
+            static_cast<int>(channel(64, 64, 2))) > 50)
+        throw std::runtime_error("Painted terrain materials did not blend in the viewport");
+    std::cout << "Terrain red and blue materials blended in the viewport\n";
     std::filesystem::remove_all(assetDir);
 }

@@ -412,7 +412,7 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
         // Preserve the accepted pose when another system limits the drag.
         const bool corrected=m_cubeDragHasWritten&&(
             (m_cubeDragTool==EditorTransformTool::Translate&&
-                glm::distance(current.position,
+                glm::distance(glm::vec3(current.position),
                     m_cubeDragLastWrittenPosition)>1e-4f)||
             (m_cubeDragTool==EditorTransformTool::Rotate&&
                 glm::distance(current.rotation,
@@ -488,7 +488,7 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
             : m_cubeDragTool == EditorTransformTool::Rotate
                 ? Engine::Components::Transform::EditorRotation
                 : Engine::Components::Transform::EditorScale;
-        if(m_cubeDragObject->transform.position!=previousPosition||
+        if(glm::vec3(m_cubeDragObject->transform.position)!=previousPosition||
             m_cubeDragObject->transform.rotation!=previousRotation||
             m_cubeDragObject->transform.scale!=previousScale)
         {

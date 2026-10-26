@@ -280,3 +280,33 @@ Reference workflows: [Unity Animation Rigging constraints](https://docs.unity.cn
 - [x] **First fluid solver:** Implement a small 2D/3D SPH or position-based-fluids prototype using fixed substeps, density/pressure or density constraints, viscosity, gravity, and static boundaries. Expose fluid-specific parameters separately from general emitter controls; validate stability, mass/count behavior, and reproducible reset.
 - [x] **Fluid rendering and coupling:** Add a fluid material/visual mode, then evaluate screen-space smoothing or surface reconstruction for coherent water. Add rigid-body coupling and moving boundaries only after the basic solver is stable; define whether interactions affect gameplay physics or visual effects only.
 - [x] **Verification and examples:** Keep focused regression tests in `.local/tests` and guard their optional CMake targets with source-file existence checks. Create one ordinary VFX scene and one fluid test scene; place their scripted demonstrations in `Engine/Core/Assets/Scripts/Particles`.
+- [x] Add a reusable Terrain component with configurable X/Y cell counts and N/M cell dimensions, editable height samples, and generated mesh geometry.
+- [x] Persist terrain dimensions, height data, and material layers with scene serialization.
+- [x] Show terrain tools when a selected object has Terrain: brush size/strength and raise, lower, average, blend/smooth operations in the scene viewport.
+- [x] Support a list of layers with height based assignment and manual painting; preview the weights through vertex colors.
+- [x] Load terrain layer material assets and blend base color textures using painted weights in the viewport shader (up to six layers); use material or preview colors when a texture is unavailable.
+- [x] Integrate terrain creation and inspection into editor component workflows.
+- [x] Add focused headless regression tests for terrain mesh generation, brush editing, painted weights, and persistence.
+- [x] Add editor brush ray integration coverage and a DX11 rendered viewport regression for painted material blending.
+
+Target: a roughly 225–230 km² world (about 15 km across) that can be traversed end to end. At 128 m per cell, a 15.36 km square has 120 × 120 = 14,400 cells. The current 16.5 km test scene has a 20,000-cell cap, enough to populate its full grid as the camera traverses it.
+
+Earlier baseline (Release DX11, 960×540, this machine, dirt/grass textures, before far-field LOD): radius 2 / 256 m / 25 cells averaged about 108 FPS after loading; radius 3 / 384 m / 49 cells averaged about 91 FPS. With a two-cell load budget, radius-2 streaming averaged 13.6 ms per frame and peaked at 21.8 ms in the measured route. Rebenchmark with far-field LOD enabled before quoting an FPS target.
+
+- [x] Store world cells as compact coordinate runs, load unedited heights from a saved indexed archive, and retain separate sparse data only for edited cells. Verify the full 16,641-cell scene without resident meshes or inline JSON payloads.
+- [x] Cache generated static cell heights, painted weights, and mesh geometry on disk as cells are visited; restore them on reload and regenerate when terrain settings or source materials change.
+- [x] Add an offline full-map bake. The scene ships a roughly 40 MB indexed height and paint archive; the optional compact CPU mesh cache for all 16,641 cells takes about 0.75 GiB.
+- [x] Persist a compact world manifest with row runs for procedural cells and independent sparse height/paint edit files. Save and reload edits at opposite map edges without rewriting the other edge's data.
+- [x] Add distance-based LOD meshes and coarse far-field terrain so hills remain visible several kilometers away while nearby cells stay editable at full resolution. Stitch LOD borders without cracks.
+- [x] Cap synchronous cell loads and unloads per update and load nearby cells first, reducing sudden full-radius rebuilds.
+- [x] Generate noise, meshes, and cell data asynchronously; cap GPU uploads and prioritize cells in the travel direction. A short Release 960×540 radius-2 streaming run averaged 10–12 ms with one upload per frame; a frame above 30 ms remains to profile on the full-map route.
+- [x] Reduce terrain draw calls and material bindings through batching or instancing; add frustum, distance, and shadow-pass culling. Profile CPU and GPU costs before and after.
+- [x] Preserve cross-cell brush editing and saved edits through LOD changes and load/unload cycles; add regressions at cell, LOD, and world-coordinate boundaries.
+- [x] Keep terrain coordinates stable across at least 15 km with double-precision transform positions, world matrices, camera picking rays, terrain cell placement, and brush coordinates. Release regressions cover camera position and scene round-trip, ray picking, sub-millimeter brush selection and shared borders at opposite edges, plus physics raycasts near ±7.68 km.
+- [x] Define bounded CPU/GPU terrain allocation and mesh-cache budgets for a 15.36 km route; measure peaks while traversing, teleporting, and backtracking. The Release radius-8 route peaked at 38.8 MiB terrain CPU, 28.6 MiB terrain GPU buffers, and 831.2 MiB mesh cache; process working set peaked at 421.2 MiB. Shared textures and renderer allocations are outside the terrain allocation totals.
+- [x] Add a repeatable Release 1080p performance test in `.local/tests` that samples full-map traversal, teleport, and backtracking and records frame, streaming, visibility, resident-cell, CPU/GPU, and memory metrics.
+
+- [x] Compare 5 km and 25 km game-camera far planes at 1080p from one viewpoint while looking around, walking at 1.4 m/s, and running at 5 m/s.
+- [x] Bake a compact full-map distant visual mesh and keep detailed terrain streaming local. The 25 km game camera can see terrain across the map while the scene camera keeps its shorter edit view.
+- [x] Bring the 1080p fixed-view test near 100 FPS with kilometer-scale terrain visibility. At a 25 km far plane and 16-cell detailed radius, the distant mesh reached 22.5 km; the cold-cache run measured 5.8 ms median frame, 6.3 ms p95, and 4.5 ms median GPU time. The performance scene opts into fast directional diffuse terrain lighting while the scene editor and other terrain scenes retain their existing shading.
+- [x] Rebuild the distant visual grid from saved terrain edits during an offline bake. Sparse edited-cell patches preserve interior sculpted silhouettes after restarting the scene without enlarging the base grid.

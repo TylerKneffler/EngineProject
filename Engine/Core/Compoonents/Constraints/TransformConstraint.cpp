@@ -108,7 +108,7 @@ void TransformConstraint::Apply()
     }
     auto& transform = Owner->transform;
     if (m_lastApplied &&
-        glm::distance(transform.position, m_lastOutputPosition) < 1e-5f &&
+        glm::distance(glm::vec3(transform.position), m_lastOutputPosition) < 1e-5f &&
         glm::distance(transform.rotation, m_lastOutputRotation) < 1e-5f)
     {
         transform.position = m_lastInputPosition;

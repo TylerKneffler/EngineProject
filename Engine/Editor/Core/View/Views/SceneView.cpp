@@ -19,6 +19,7 @@
 #include "Core/Compoonents/Obj/Terrain.h"
 #include "Core/Compoonents/Obj/TerrainManager.h"
 #include <set>
+#include <vector>
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Transform.h"
 #include "Core/Compoonents/Obj/Sprite.h"
@@ -30,6 +31,7 @@
 #include "../Focus/WindowFocusHandler.h"
 #include "imgui.h"
 #include <algorithm>
+#include <cmath>
 #include <glm/gtc/matrix_inverse.hpp>
 
 namespace Engine::Editor
@@ -401,6 +403,28 @@ void SceneView::DrawPanel(IEditorUi& ui)
         {m_letterboxColor.r,m_letterboxColor.g,m_letterboxColor.b,m_letterboxColor.a});
     m_viewportScreenMin = input.screenMin;
     m_viewportScreenMax = input.screenMax;
+    if (m_scene && !m_scene->HasStarted())
+    {
+        const glm::dvec3 viewer =
+            m_scene->editorCamera.transform.GetWorldPositionD();
+        std::vector<Engine::Components::TerrainManager*> terrainWorlds;
+        for (const auto& object : m_scene->GetObjects())
+            if (object)
+                if (auto* world = object->GetComponent<Engine::Components::TerrainManager>();
+                    world && world->asyncStreaming)
+                    terrainWorlds.push_back(world);
+        for (auto* world : terrainWorlds)
+        {
+            const glm::dvec3 local = glm::dvec3(
+                glm::inverse(world->Owner->transform.GetWorldMatrixD()) *
+                glm::dvec4(viewer, 1.0));
+            world->UpdateStreaming(
+                static_cast<int>(std::floor(local.x /
+                    (world->cellsX * world->cellWidth))),
+                static_cast<int>(std::floor(local.z /
+                    (world->cellsY * world->cellDepth))));
+        }
+    }
     bool terrainConsumedClick = false;
     static bool editTerrainCells = false;
     auto* terrain = m_scene && m_scene->GetSelectedObject()
@@ -440,33 +464,35 @@ void SceneView::DrawPanel(IEditorUi& ui)
             auto* camera = m_scene->editorCamera.GetComponent<Engine::Components::Camera>();
             if (camera)
             {
-                const glm::mat4 inverse = glm::inverse(camera->GetProjectionMatrix(
-                    input.available.x / input.available.y) * camera->GetViewMatrix());
-                const float nx = 2.f * input.mousePosInViewport.x / input.available.x - 1.f;
-                const float ny = 1.f - 2.f * input.mousePosInViewport.y / input.available.y;
-                glm::vec4 nearPoint = inverse * glm::vec4(nx, ny, 0.f, 1.f);
-                glm::vec4 farPoint = inverse * glm::vec4(nx, ny, 1.f, 1.f);
+                const glm::dmat4 inverse = glm::inverse(camera->GetProjectionMatrixD(
+                    static_cast<double>(input.available.x) / input.available.y) *
+                    camera->GetViewMatrixD());
+                const double nx = 2.0 * input.mousePosInViewport.x / input.available.x - 1.0;
+                const double ny = 1.0 - 2.0 * input.mousePosInViewport.y / input.available.y;
+                glm::dvec4 nearPoint = inverse * glm::dvec4(nx, ny, 0.0, 1.0);
+                glm::dvec4 farPoint = inverse * glm::dvec4(nx, ny, 1.0, 1.0);
                 nearPoint /= nearPoint.w; farPoint /= farPoint.w;
-                const glm::mat4 worldToLocal = glm::inverse(
-                    (manager ? manager->Owner : m_scene->GetSelectedObject())->transform.GetWorldMatrix());
-                const glm::vec3 a = glm::vec3(worldToLocal * nearPoint);
-                const glm::vec3 b = glm::vec3(worldToLocal * farPoint);
+                const glm::dmat4 worldToLocal = glm::inverse(
+                    (manager ? manager->Owner : m_scene->GetSelectedObject())->transform.GetWorldMatrixD());
+                const glm::dvec3 a = glm::dvec3(worldToLocal * nearPoint);
+                const glm::dvec3 b = glm::dvec3(worldToLocal * farPoint);
                 if (manager)
                 {
-                    const float dy = b.y - a.y;
+                    const double dy = b.y - a.y;
                     if (std::abs(dy) > .00001f)
                     {
-                        const float t = -a.y / dy;
+                        const double t = -a.y / dy;
                         if (t >= 0.f && t <= 1.f)
                         {
-                            const glm::vec3 hit = a + (b - a) * t;
+                            const glm::dvec3 hit = a + (b - a) * t;
                             terrainConsumedClick = manager->ApplyBrush(hit.x, hit.z,
                                 radius, strength * ImGui::GetIO().DeltaTime * 30.f,
                                 static_cast<Engine::Components::Terrain::Brush>(brush), layer);
                         }
                     }
                 }
-                else terrainConsumedClick = terrain->ApplyBrushFromLocalRay(a, b,
+                else terrainConsumedClick = terrain->ApplyBrushFromLocalRay(
+                    glm::vec3(a), glm::vec3(b),
                     radius, strength * ImGui::GetIO().DeltaTime * 30.f,
                     static_cast<Engine::Components::Terrain::Brush>(brush), layer);
             }
@@ -485,9 +511,10 @@ void SceneView::DrawPanel(IEditorUi& ui)
             auto* camera = m_scene->editorCamera.GetComponent<Engine::Components::Camera>();
             if (camera)
             {
-                const glm::mat4 viewProjection = camera->GetProjectionMatrix(
-                    input.available.x / input.available.y) * camera->GetViewMatrix() *
-                    manager->Owner->transform.GetWorldMatrix();
+                const glm::dmat4 viewProjection = camera->GetProjectionMatrixD(
+                    static_cast<double>(input.available.x) / input.available.y) *
+                    camera->GetViewMatrixD() *
+                    manager->Owner->transform.GetWorldMatrixD();
                 auto cells = manager->GetCells();
                 if (cells.empty()) cells.push_back({0, 0});
                 std::set<std::pair<int, int>> candidates(cells.begin(), cells.end());
@@ -496,20 +523,22 @@ void SceneView::DrawPanel(IEditorUi& ui)
                         candidates.insert({cell.first + offset.first, cell.second + offset.second});
                 for (const auto& cell : candidates)
                 {
-                    const float x = cell.first * manager->cellsX * manager->cellWidth;
-                    const float z = cell.second * manager->cellsY * manager->cellDepth;
-                    const float w = manager->cellsX * manager->cellWidth;
-                    const float h = manager->cellsY * manager->cellDepth;
+                    const double x = static_cast<double>(cell.first) * manager->cellsX * manager->cellWidth;
+                    const double z = static_cast<double>(cell.second) * manager->cellsY * manager->cellDepth;
+                    const double w = static_cast<double>(manager->cellsX) * manager->cellWidth;
+                    const double h = static_cast<double>(manager->cellsY) * manager->cellDepth;
                     ImVec2 corners[4];
                     bool visible = true;
                     for (int i = 0; i < 4; ++i)
                     {
-                        const glm::vec4 clip = viewProjection * glm::vec4(
-                            x + ((i == 1 || i == 2) ? w : 0.f), 0.f,
-                            z + (i >= 2 ? h : 0.f), 1.f);
+                        const glm::dvec4 clip = viewProjection * glm::dvec4(
+                            x + ((i == 1 || i == 2) ? w : 0.0), 0.0,
+                            z + (i >= 2 ? h : 0.0), 1.0);
                         if (clip.w <= 0.f) { visible = false; break; }
-                        corners[i] = {input.screenMin.x + (clip.x / clip.w + 1.f) * input.available.x * .5f,
-                            input.screenMin.y + (1.f - clip.y / clip.w) * input.available.y * .5f};
+                        corners[i] = {static_cast<float>(input.screenMin.x +
+                                (clip.x / clip.w + 1.0) * input.available.x * .5),
+                            static_cast<float>(input.screenMin.y +
+                                (1.0 - clip.y / clip.w) * input.available.y * .5)};
                     }
                     if (!visible) continue;
                     const bool exists = manager->HasCell(cell.first, cell.second);
@@ -816,8 +845,20 @@ void SceneView::DrawPanel(IEditorUi& ui)
     ui.EndWindow();
 
     if (m_scene)
+    {
         SceneCameraController::Apply(*m_scene,
             panDX, panDY, orbitDX, orbitDY, zoom, dolly);
+        m_scene->UpdateEditorCameraFollow();
+        const glm::dvec3 cameraPosition =
+            m_scene->editorCamera.transform.GetWorldPositionD();
+        std::vector<Engine::Components::TerrainManager*> terrainManagers;
+        for (const auto& object : m_scene->GetObjects())
+            if (auto* terrainManager =
+                    object->GetComponent<Engine::Components::TerrainManager>())
+                terrainManagers.push_back(terrainManager);
+        for (auto* terrainManager : terrainManagers)
+            terrainManager->UpdateEditorStreaming(cameraPosition);
+    }
 }
 
 void SceneView::CancelPrefabPreview()

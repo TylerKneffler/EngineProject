@@ -255,6 +255,13 @@ void VSMain(
     oUvChannels3 = fullUv3;
     oUvChannels4 = fullUv4;
     oColor = color;
+    if (((uint)objectData.materialParams.w & 16384u) != 0u)
+    {
+        float sunFacing = saturate(dot(oNormal,
+            objectData.bakedLightDirection.xyz));
+        oColor.rgb *= objectData.ambientUnlit.rgb +
+            objectData.bakedDirectional.rgb * (sunFacing * 0.31830988618);
+    }
     if (objectData.morphParams.z > 0.0)
     {
         uint selectedJoint = (uint)objectData.morphParams.z - 1u;
@@ -716,6 +723,38 @@ float2 SelectMaterialUv(float set, float2 uv, float2 uv1,
     return uvChannels4.zw;
 }
 
+// Smooth, world-anchored offset breaks up the short repeating period of the
+// terrain color maps without adding another texture fetch per painted layer.
+float2 TerrainTextureHash(float2 gridPoint)
+{
+    float3 value = frac(float3(gridPoint.x, gridPoint.y, gridPoint.x) * 0.1031);
+    value += dot(value, value.yzx + 33.33);
+    return frac((value.xx + value.yz) * value.zy);
+}
+
+float2 TerrainTextureOffset(float2 worldXZ)
+{
+    float2 cell = worldXZ / 48.0;
+    float2 corner = floor(cell);
+    float2 blend = frac(cell);
+    blend = blend * blend * (3.0 - 2.0 * blend);
+    float2 a = TerrainTextureHash(corner);
+    float2 b = TerrainTextureHash(corner + float2(1.0, 0.0));
+    float2 c = TerrainTextureHash(corner + float2(0.0, 1.0));
+    float2 d = TerrainTextureHash(corner + 1.0);
+    return lerp(lerp(a, b, blend.x), lerp(c, d, blend.x), blend.y) - 0.5;
+}
+
+float3 SampleTerrainColor(Texture2D colorMap, float2 uv,
+    float2 alternateUv, float blendAmount)
+{
+    float3 color = colorMap.Sample(materialSampler, uv).rgb;
+    if (blendAmount > 0.0)
+        color = lerp(color,
+            colorMap.Sample(materialSampler, alternateUv).rgb, blendAmount);
+    return color;
+}
+
 float4 PSMain(
     float4 pos : SV_POSITION,
     float3 worldPos : TEXCOORD2,
@@ -747,19 +786,78 @@ float4 PSMain(
         dot(float4(worldPos, 1.0), objectData.portalClipPlane) < 0.0)
         clip(-1.0);
     float4 base = objectData.baseColor * ((flags & 4096u) ? float4(1, 1, 1, 1) : vertexColor);
+    if (flags & 32768u)
+    {
+        // The ruler repeats every 100 metres in world space. Cell borders use
+        // the manager's real dimensions, so LODs and distant tiles line up.
+        float3 gridColor = baseColorMap.Sample(materialSampler,
+            worldPos.xz / 100.0).rgb;
+        float2 span = max(objectData.textureUvSets1.xy, 0.001);
+        float2 cellMetres = abs(frac(worldPos.xz / span + 0.5) - 0.5) * span;
+        float2 borderWidth = max(fwidth(worldPos.xz), 0.2);
+        float border = 1.0 - saturate(min(cellMetres.x / borderWidth.x,
+            cellMetres.y / borderWidth.y));
+        gridColor = lerp(gridColor, float3(1.0, 0.66, 0.15), border);
+        return float4(gridColor, 1.0);
+    }
     // Authored terrain stores six painted weights in the spare UV channels.
     // Vertex color carries the contribution of layers without a texture.
     if (flags & 2048u)
     {
         float2 terrainUv = uv * max(1.0, objectData.textureUvSets1.z);
+        if (objectData.textureUvSets1.x > 0.0)
+            terrainUv = worldPos.xz *
+                (objectData.textureUvSets1.z / objectData.textureUvSets1.x);
+        const float2 terrainVariation = TerrainTextureOffset(worldPos.xz);
+        terrainUv += terrainVariation * 0.9;
+        // A rotated second lookup hides the short repeat period in close
+        // views. Fade it away before the extra samples affect distant cells.
+        const float2 alternateUv = float2(-terrainUv.y, terrainUv.x) * 0.73 +
+            float2(0.173, 0.617);
+        const float nearDistance = distance(worldPos,
+            objectData.viewPositionAlphaCutoff.xyz);
+        const float detailBlend = 0.5 * (1.0 - smoothstep(16.0, 48.0,
+            nearDistance));
         float4 weights0 = uvChannels2;
         float2 weights1 = uvChannels3.xy;
-        if (weights0.x > 0.0) base.rgb += baseColorMap.Sample(materialSampler, terrainUv).rgb * weights0.x;
-        if (weights0.y > 0.0) base.rgb += metallicRoughnessMap.Sample(materialSampler, terrainUv).rgb * weights0.y;
-        if (weights0.z > 0.0) base.rgb += normalMap.Sample(materialSampler, terrainUv).rgb * weights0.z;
-        if (weights0.w > 0.0) base.rgb += occlusionMap.Sample(materialSampler, terrainUv).rgb * weights0.w;
-        if (weights1.x > 0.0) base.rgb += emissiveMap.Sample(materialSampler, terrainUv).rgb * weights1.x;
-        if (weights1.y > 0.0) base.rgb += heightMap.Sample(materialSampler, terrainUv).rgb * weights1.y;
+        if (weights0.x > 0.0) base.rgb += SampleTerrainColor(baseColorMap, terrainUv, alternateUv, detailBlend) * weights0.x;
+        if (weights0.y > 0.0) base.rgb += SampleTerrainColor(metallicRoughnessMap, terrainUv, alternateUv, detailBlend) * weights0.y;
+        if (weights0.z > 0.0) base.rgb += SampleTerrainColor(normalMap, terrainUv, alternateUv, detailBlend) * weights0.z;
+        if (weights0.w > 0.0) base.rgb += SampleTerrainColor(occlusionMap, terrainUv, alternateUv, detailBlend) * weights0.w;
+        if (weights1.x > 0.0) base.rgb += SampleTerrainColor(emissiveMap, terrainUv, alternateUv, detailBlend) * weights1.x;
+        if (weights1.y > 0.0) base.rgb += SampleTerrainColor(heightMap, terrainUv, alternateUv, detailBlend) * weights1.y;
+        base.rgb *= 1.0 + (terrainVariation.x + terrainVariation.y) * 0.10;
+    }
+    // Static runtime terrain shares one global sun at every view distance.
+    // Only the closest terrain receives a single-tap realtime shadow.
+    if ((flags & 8192u) && objectData.ambientUnlit.w < 0.5)
+    {
+        float3 terrainNormal = normalize(normal) * (frontFace ? 1.0 : -1.0);
+        float3 diffuseLight = objectData.ambientUnlit.rgb;
+        float3 sunDirection = objectData.bakedLightDirection.xyz;
+        float sunFacing = saturate(dot(terrainNormal, sunDirection));
+        if (sunFacing > 0.0)
+        {
+            float shadow = 1.0;
+            [branch] if (objectData.bakedDirectional.w > 0.5 &&
+                objectData.shadowParams.z > 0.5)
+            {
+                float cameraDistance = distance(worldPos,
+                    objectData.viewPositionAlphaCutoff.xyz);
+                [branch] if (cameraDistance < 96.0)
+                {
+                    SceneLightData sun = sceneLights[
+                        (uint)objectData.bakedDirectional.w - 1u];
+                    shadow = lerp(EvaluateDirectionalShadow(objectData, sun,
+                        worldPos, terrainNormal, sunDirection, 0), 1.0,
+                        smoothstep(48.0, 96.0, cameraDistance));
+                }
+            }
+            diffuseLight += objectData.bakedDirectional.rgb *
+                (sunFacing * shadow / PI);
+        }
+        return float4(base.rgb * diffuseLight + objectData.emissiveOcclusion.rgb,
+            base.a);
     }
     float metallic = saturate(objectData.materialParams.x);
     float roughness = clamp(objectData.materialParams.y, 0.045, 1.0);

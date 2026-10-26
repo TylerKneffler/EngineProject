@@ -57,7 +57,8 @@ void PongPlayer::Update()
     const float halfHeight = PaddleHalfHeight();
     Owner->transform.position.y = std::clamp(
         Owner->transform.position.y + input * speed * deltaTime,
-        -fieldHalfHeight + halfHeight, fieldHalfHeight - halfHeight);
+        static_cast<double>(-fieldHalfHeight + halfHeight),
+        static_cast<double>(fieldHalfHeight - halfHeight));
 }
 
 void PongPlayer::ResolveManager()

@@ -1,6 +1,10 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Obj/TerrainManager.h"
 #include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Camera/Camera.h"
+#include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
+#include "Core/Compoonents/Physics/RigidBody.h"
+#include "Core/Serialization/SceneSerializer.h"
 #include <chrono>
 #include <atomic>
 #include <mutex>
@@ -9,11 +13,20 @@
 #include <iterator>
 #include <thread>
 #include <stdexcept>
+#include <array>
+#include <algorithm>
+#include <glm/gtc/constants.hpp>
+#include <iostream>
 
-static void Require(bool condition)
+static void RequireAt(bool condition, int line)
 {
-    if (!condition) throw std::runtime_error("Terrain manager regression failed");
+    if (!condition)
+    {
+        std::cerr << "Terrain manager regression failed at line " << line << '\n';
+        throw std::runtime_error("Terrain manager regression failed");
+    }
 }
+#define Require(condition) RequireAt((condition), __LINE__)
 
 int main()
 {
@@ -80,6 +93,15 @@ int main()
     budget->UpdateStreaming(0, 0);
     Require(budget->GetLoadedCellCount() == 4);
     budget->UpdateStreaming(100, 100);
+    Require(budget->GetLoadedCellCount() == 3);
+    budget->editorRadius = 0;
+    for (int step = 0; step < 4; ++step)
+        budget->UpdateEditorStreaming({0.5, 0.0, 0.5});
+    Require(budget->GetLoadedCellCount() == 1);
+    Require(budget->GetLoadedCell(0, 0) != nullptr);
+    Require(budget->GetLoadedCell(0, 0)->GetMeshLodStride() == 1);
+    Require(budget->Serialize()["editorRadius"].AsInt() == 0);
+    budget->UpdateStreaming(1, 1);
     Require(budget->GetLoadedCellCount() == 3);
 
     auto* asyncObject = scene.AddObject("Async streaming");
@@ -163,6 +185,33 @@ int main()
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     Require(async->GetLoadedCellCount() == 3);
+    async->loadedRadius = 0;
+    async->farRadius = -1;
+    async->UpdateStreaming(-1, 0);
+    Require(async->GetLoadedCell(-1, 0) != nullptr);
+    Require(async->GetLoadedCell(0, 0) == nullptr);
+    Require(async->ApplyBrush(0.f, 1.f, 1.f, 1.f,
+        Engine::Components::Terrain::Brush::Raise));
+    Require(async->GetLoadedCell(0, 0) != nullptr);
+    const float asyncSeamHeight = async->GetLoadedCell(-1, 0)->heights[5];
+    Require(async->GetLoadedCell(0, 0)->heights[3] == asyncSeamHeight);
+    async->UpdateStreaming(100, 100);
+    Require(std::filesystem::exists(asyncEditPath / "-1_0.terrainedit"));
+    Require(std::filesystem::exists(asyncEditPath / "0_0.terrainedit"));
+    for (int attempt = 0; attempt < 500 && !async->GetLoadedCell(-1, 0); ++attempt)
+    {
+        async->UpdateStreaming(-1, 0);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    Require(async->GetLoadedCell(-1, 0) &&
+        async->GetLoadedCell(-1, 0)->heights[5] == asyncSeamHeight);
+    for (int attempt = 0; attempt < 500 && !async->GetLoadedCell(0, 0); ++attempt)
+    {
+        async->UpdateStreaming(0, 0);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    Require(async->GetLoadedCell(0, 0) &&
+        async->GetLoadedCell(0, 0)->heights[3] == asyncSeamHeight);
     std::filesystem::remove_all(asyncCachePath);
     std::filesystem::remove_all(asyncEditPath);
 
@@ -330,4 +379,186 @@ int main()
     restored->Serialize();
     Require(std::filesystem::last_write_time(farFile) == farTime);
     std::filesystem::remove_all(editPath);
+
+    const auto seamPath = std::filesystem::temp_directory_path() /
+        ("terrain_boundary_edits_" + std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count()));
+    auto seamBuilder = [](Engine::Components::TerrainManager::Cell cell,
+        Engine::Components::Terrain& terrain) {
+        terrain.layers = { {"", -1000.f, 1000.f, {.3f, .4f, .2f}},
+            {"", -1000.f, 1000.f, {.5f, .3f, .2f}} };
+        terrain.weights.assign(terrain.heights.size() * 2, 0.f);
+        for (int row = 0; row <= terrain.cellsY; ++row)
+            for (int col = 0; col <= terrain.cellsX; ++col)
+            {
+                const size_t index = static_cast<size_t>(
+                    row * (terrain.cellsX + 1) + col);
+                terrain.heights[index] = .01f * (cell.first * terrain.cellsX + col) +
+                    .02f * (cell.second * terrain.cellsY + row);
+                terrain.weights[index * 2] = 1.f;
+            }
+        terrain.Rebuild();
+    };
+    auto* seamObject = scene.AddObject("Boundary paint world");
+    auto* seams = seamObject->AddComponent<Engine::Components::TerrainManager>();
+    seams->cellsX = seams->cellsY = 4;
+    seams->cellWidth = seams->cellDepth = 4.f;
+    seams->loadedRadius = 0;
+    seams->farRadius = -1;
+    seams->lod2Radius = 1;
+    seams->cellDataDirectory = seamPath.string();
+    seams->SetProceduralBuilder(seamBuilder);
+    for (const auto cell : {Engine::Components::TerrainManager::Cell{0, 0},
+            {1, 0}, {0, 1}, {1, 1}, {-1024, 0}, {-1023, 0},
+            {1023, 0}, {1024, 0}})
+        Require(seams->AddProceduralCell(cell.first, cell.second));
+    seams->SyncLoadedCells(0, 0);
+    Require(seams->GetLoadedCellCount() == 1);
+    Require(seams->ApplyBrush(16.f, 16.f, 5.f, 1.f,
+        Engine::Components::Terrain::Brush::Raise));
+    Require(seams->GetLoadedCellCount() == 4);
+    Require(seams->ApplyBrush(16.f, 16.f, 5.f, 1.f,
+        Engine::Components::Terrain::Brush::Average));
+    Require(seams->ApplyBrush(16.f, 16.f, 5.f, 1.f,
+        Engine::Components::Terrain::Brush::Paint, 1));
+    const std::array<std::pair<Engine::Components::TerrainManager::Cell, size_t>, 4>
+        corners{{{{0, 0}, 24}, {{1, 0}, 20}, {{0, 1}, 4}, {{1, 1}, 0}}};
+    const float cornerHeight = seams->GetLoadedCell(0, 0)->heights[24];
+    for (const auto& [cell, index] : corners)
+    {
+        auto* terrain = seams->GetLoadedCell(cell.first, cell.second);
+        Require(terrain && terrain->heights[index] == cornerHeight);
+        Require(terrain->weights[index * 2 + 1] == 1.f);
+    }
+    seams->farRadius = 2;
+    seams->SyncLoadedCells(0, 0);
+    Require(seams->GetLoadedCell(0, 0)->GetMeshLodStride() == 1);
+    Require(seams->GetLoadedCell(1, 0)->GetMeshLodStride() == 2);
+    const auto paintedMeshCorner = [](const Engine::Components::Terrain& terrain,
+        float x, float z, float height) {
+        const auto* mesh = terrain.Owner->GetComponent<Engine::Components::Mesh>();
+        return mesh && std::any_of(mesh->GetVertices().begin(),
+            mesh->GetVertices().end(), [&](const auto& vertex) {
+                return vertex.pos[0] == x && vertex.pos[2] == z &&
+                    vertex.pos[1] == height && vertex.color[0] == .5f &&
+                    vertex.color[1] == .3f && vertex.color[2] == .2f;
+            });
+    };
+    Require(paintedMeshCorner(*seams->GetLoadedCell(1, 0), 0.f, 16.f,
+        cornerHeight));
+    seams->SyncLoadedCells(1, 1);
+    Require(seams->GetLoadedCell(1, 1)->GetMeshLodStride() == 1);
+    Require(paintedMeshCorner(*seams->GetLoadedCell(1, 1), 0.f, 0.f,
+        cornerHeight));
+    seams->farRadius = -1;
+    seams->SyncLoadedCells(-1024, 0);
+    for (const auto& [cell, index] : corners)
+        Require(std::filesystem::exists(seamPath /
+            (std::to_string(cell.first) + "_" + std::to_string(cell.second) +
+                ".terrainedit")));
+    Require(seams->GetLoadedCell(-1023, 0) == nullptr);
+    Require(!seams->ApplyBrush(-16368.0 + .0001, 8.0, .00005f, 1.f,
+        Engine::Components::Terrain::Brush::Raise));
+    Require(seams->ApplyBrush(-16368.f, 8.f, 5.f, 1.f,
+        Engine::Components::Terrain::Brush::Paint, 1));
+    Require(seams->GetLoadedCell(-1023, 0) != nullptr);
+    Require(seams->GetLoadedCell(-1024, 0)->weights[14 * 2 + 1] ==
+        seams->GetLoadedCell(-1023, 0)->weights[10 * 2 + 1]);
+    seams->SyncLoadedCells(1023, 0);
+    Require(seams->GetLoadedCell(1024, 0) == nullptr);
+    Require(!seams->ApplyBrush(16384.0 + .0001, 8.0, .00005f, 1.f,
+        Engine::Components::Terrain::Brush::Raise));
+    Require(seams->ApplyBrush(16384.f, 8.f, 5.f, 1.f,
+        Engine::Components::Terrain::Brush::Raise));
+    Require(seams->GetLoadedCell(1024, 0) != nullptr);
+    const float positiveHeight = seams->GetLoadedCell(1023, 0)->heights[14];
+    Require(seams->GetLoadedCell(1024, 0)->heights[10] == positiveHeight);
+    const auto seamManifest = seams->Serialize();
+    Require(seamManifest["editedCells"].ArraySize() == 8);
+    auto* seamRestoredObject = scene.AddObject("Restored boundary world");
+    auto* seamRestored = seamRestoredObject->AddComponent<
+        Engine::Components::TerrainManager>();
+    seamRestored->SetProceduralBuilder(seamBuilder);
+    seamRestored->Deserialize(seamManifest);
+    seamRestored->OnAfterDeserialize(nullptr);
+    seamRestored->SyncLoadedCells(0, 0);
+    Require(seamRestored->GetLoadedCell(0, 0)->heights[24] == cornerHeight);
+    Require(seamRestored->GetLoadedCell(0, 0)->weights[24 * 2 + 1] == 1.f);
+    seamRestored->SyncLoadedCells(1, 1);
+    Require(seamRestored->GetLoadedCell(1, 1)->heights[0] == cornerHeight);
+    seamRestored->SyncLoadedCells(-1024, 0);
+    Require(seamRestored->GetLoadedCell(-1024, 0)->weights[14 * 2 + 1] == 1.f);
+    seamRestored->SyncLoadedCells(-1023, 0);
+    Require(seamRestored->GetLoadedCell(-1023, 0)->weights[10 * 2 + 1] == 1.f);
+    seamRestored->SyncLoadedCells(1023, 0);
+    Require(seamRestored->GetLoadedCell(1023, 0)->heights[14] == positiveHeight);
+    seamRestored->SyncLoadedCells(1024, 0);
+    Require(seamRestored->GetLoadedCell(1024, 0)->heights[10] == positiveHeight);
+    std::filesystem::remove_all(seamPath);
+
+    // A sub-millimeter offset at either side of a 15.36 km route must survive
+    // transforms, scene persistence, ray picking, and world-to-cell brushing.
+    Engine::Scene::Scene precisionScene;
+    auto* precisionCamera = precisionScene.AddObject("Precise camera");
+    auto* camera = precisionCamera->AddComponent<Engine::Components::Camera>();
+    camera->useTransformRotation = true;
+    precisionCamera->transform.rotation.x = glm::half_pi<float>();
+    for (double edge : {-7680.0, 7680.0})
+    {
+        precisionCamera->transform.position = {edge + .000123456, 20.0, 0.0};
+        for (int step = 0; step < 100; ++step)
+            precisionCamera->transform.position.x += .00001;
+        const double expectedX = edge + .001123456;
+        Require(std::abs(precisionCamera->transform.GetWorldPositionD().x -
+            expectedX) < 1e-10);
+        const glm::dmat4 inverse = glm::inverse(camera->GetProjectionMatrixD(1.0) *
+            camera->GetViewMatrixD());
+        glm::dvec4 nearPoint = inverse * glm::dvec4(0.0, 0.0, 0.0, 1.0);
+        glm::dvec4 farPoint = inverse * glm::dvec4(0.0, 0.0, 1.0, 1.0);
+        nearPoint /= nearPoint.w; farPoint /= farPoint.w;
+        const double t = -nearPoint.y / (farPoint.y - nearPoint.y);
+        const glm::dvec4 hit = nearPoint + (farPoint - nearPoint) * t;
+        Require(std::abs(hit.x - expectedX) < 1e-7);
+    }
+    const double savedX = precisionCamera->transform.position.x;
+    const std::string precisionXml = precisionScene.SaveToString();
+    Engine::Scene::Scene reopenedPrecision;
+    Require(Engine::Serialization::SceneSerializer::LoadFromString(
+        reopenedPrecision, precisionXml, nullptr));
+    Require(std::abs(reopenedPrecision.FindObjectByName("Precise camera")
+        ->transform.position.x - savedX) < 1e-10);
+
+    Engine::Scene::Scene collisionScene;
+    for (double edge : {-7680.0, 7680.0})
+    {
+        auto* ground = collisionScene.AddObject("Edge ground");
+        ground->transform.position = {edge, -.5, 0.0};
+        auto* shape = ground->AddComponent<Engine::Components::PrimitiveObjectCollider>();
+        shape->size = {4.f, 1.f, 4.f};
+        ground->AddComponent<Engine::Components::RigidBody>()->bodyType = "Static";
+    }
+    collisionScene.Start();
+    collisionScene.GetPhysics().Step(1.f / 60.f);
+    for (double edge : {-7680.0, 7680.0})
+    {
+        const auto hits = collisionScene.GetPhysics().RaycastAll(
+            {static_cast<float>(edge), 4.f, 0.f}, {0.f, -1.f, 0.f}, 10.f);
+        Require(!hits.empty());
+        Require(std::abs(hits.front().point.x - edge) < .01);
+    }
+
+    Engine::Scene::Scene runtimeTerrainScene;
+    auto* runtimeMap = runtimeTerrainScene.AddObject("Static runtime map");
+    auto* runtimeTerrain = runtimeMap->AddComponent<Engine::Components::TerrainManager>();
+    runtimeTerrain->cellsX = runtimeTerrain->cellsY = 2;
+    Require(runtimeTerrain->AddCell(0, 0));
+    runtimeTerrainScene.Start();
+    Require(!runtimeTerrain->ApplyBrush(1.0, 1.0, 1.f, 1.f,
+        Engine::Components::Terrain::Brush::Raise));
+    Require(!runtimeTerrain->GetLoadedCell(0, 0)->ApplyBrush(
+        1.f, 1.f, 1.f, 1.f, Engine::Components::Terrain::Brush::Raise));
+    Require(!runtimeTerrain->AddCell(1, 0));
+    Require(!runtimeTerrain->RemoveCell(0, 0));
+    Require(runtimeTerrain->HasCell(0, 0));
+    Require(!runtimeTerrain->HasCell(1, 0));
 }

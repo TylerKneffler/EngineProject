@@ -1036,7 +1036,7 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
                         continue;
                     const glm::vec3 local = glm::vec3(glm::inverse(
                         parentWorld) * glm::vec4(startWorld + delta, 1.f));
-                    if (member->transform.position != local)
+                    if (member->transform.position != glm::dvec3(local))
                     {
                         member->transform.position = local;
                         if (auto* point = member != m_modelRoot
@@ -1284,7 +1284,7 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
                 markChanged(pinned);
             }
         }
-        if (joint->transform.position != oldPosition ||
+        if (glm::vec3(joint->transform.position) != oldPosition ||
             joint->transform.rotation != oldRotation)
         {
             joint->transform.NotifyEditorTransformChanged(m_modelDragRotate
@@ -2260,19 +2260,19 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         // free, and resume as soon as the drag reverses direction.
         const bool corrected = m_dragHasWritten && (
             (m_dragTool == EditorTransformTool::Translate &&
-                glm::distance(current.position,
+                glm::distance(glm::vec3(current.position),
                     m_dragLastWrittenPosition) > 1e-4f) ||
             (m_dragTool == EditorTransformTool::Rotate &&
                 (glm::distance(current.rotation,
                     m_dragLastWrittenRotation) > 1e-4f ||
                     (m_dragWasBone && m_bonePivotMode != 0 &&
-                        glm::distance(current.position,
+                        glm::distance(glm::vec3(current.position),
                             m_dragLastWrittenPosition) > 1e-4f))) ||
             (m_dragTool == EditorTransformTool::Scale &&
                 (glm::distance(current.scale,
                     m_dragLastWrittenScale) > 1e-4f ||
                     (m_dragWasBone && m_bonePivotMode != 0 &&
-                        glm::distance(current.position,
+                        glm::distance(glm::vec3(current.position),
                             m_dragLastWrittenPosition) > 1e-4f))));
         if (corrected)
         {
@@ -2441,7 +2441,7 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
                 : static_cast<uint8_t>(Engine::Components::Transform::EditorScale |
                     (m_dragWasBone && m_bonePivotMode != 0
                         ? Engine::Components::Transform::EditorPosition : 0));
-        if (m_dragObject->transform.position != previousPosition ||
+        if (glm::vec3(m_dragObject->transform.position) != previousPosition ||
             m_dragObject->transform.rotation != previousRotation ||
             m_dragObject->transform.scale != previousScale)
         {

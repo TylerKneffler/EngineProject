@@ -5,7 +5,7 @@ import math
 import random
 from PIL import Image
 
-SIZE = 128
+SIZE = 512
 OUTPUT = Path(__file__).parent
 
 
@@ -29,9 +29,9 @@ def sample(grid, x, y):
 
 
 def make(name, base, variation, seed, grass=False):
-    broad = lattice(seed, 6)
-    medium = lattice(seed + 1, 19)
-    fine = lattice(seed + 2, 48)
+    broad = lattice(seed, 18)
+    medium = lattice(seed + 1, 55)
+    fine = lattice(seed + 2, 151)
     image = Image.new("RGB", (SIZE, SIZE))
     pixels = image.load()
     for y in range(SIZE):
@@ -57,3 +57,5 @@ make("dark_soil", (66, 57, 43), 38, 11)
 make("warm_dirt", (119, 92, 62), 43, 23)
 make("meadow_grass", (70, 111, 47), 46, 37, grass=True)
 make("highland_grass", (126, 135, 74), 37, 53, grass=True)
+make("valley_grass", (58, 105, 44), 40, 67, grass=True)
+make("field_grass", (100, 127, 56), 39, 79, grass=True)

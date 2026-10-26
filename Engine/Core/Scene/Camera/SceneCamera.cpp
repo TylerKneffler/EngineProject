@@ -141,7 +141,7 @@ void Scene::UpdateEditorCameraFollow()
     const glm::quat rotation = WorldRotation(*m_editorCameraFollowTarget);
     const glm::quat change = rotation * glm::inverse(m_editorCameraFollowRotation);
     editorCamera.transform.position = current +
-        change * (editorCamera.transform.position - m_editorCameraFollowPosition);
+        change * (glm::vec3(editorCamera.transform.position) - m_editorCameraFollowPosition);
     if (Camera* cam = editorCamera.GetComponent<Camera>())
     {
         cam->target = current + change * (cam->target - m_editorCameraFollowPosition);

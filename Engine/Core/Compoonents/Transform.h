@@ -112,7 +112,7 @@ public:
     ~Transform() = default;
 
     PROPERTY(Inspector, EditAnywhere, Category = "Transform")
-    glm::vec3 position { 0.f, 0.f, 0.f };
+    glm::dvec3 position { 0.0, 0.0, 0.0 };
     
     PROPERTY(Inspector, EditAnywhere, Category = "Transform")
     glm::vec3 rotation { 0.f, 0.f, 0.f }; // Euler angles in radians (XYZ)
@@ -130,6 +130,7 @@ public:
 
     // Returns the world matrix: parent world * T * Rz * Ry * Rx * S.
     glm::mat4 GetWorldMatrix() const;
+    glm::dmat4 GetWorldMatrixD() const;
     glm::mat4 GetWorldMatrixWithLayer() const;
 
     uint64_t GetLocalRevision() const;
@@ -141,6 +142,7 @@ public:
     void ClearEditorOverride() { m_editorOverrideChannels = 0; }
 
     glm::vec3 GetWorldPosition() const;
+    glm::dvec3 GetWorldPositionD() const;
     glm::vec3 GetLocalPosition() const;
     glm::vec3 ApplyLocalMatrixLayer(const glm::vec3& point) const;
     glm::vec3 InverseApplyLocalMatrixLayer(const glm::vec3& point) const;
@@ -152,11 +154,13 @@ private:
     void UpdateWorldCache() const;
     static void AdvanceRevision(uint64_t& revision);
 
-    mutable glm::vec3 m_cachedPosition { 0.f };
+    mutable glm::dvec3 m_cachedPosition { 0.0 };
     mutable glm::vec3 m_cachedRotation { 0.f };
     mutable glm::vec3 m_cachedScale { 1.f };
     mutable glm::mat4 m_cachedLocalMatrix { 1.f };
     mutable glm::mat4 m_cachedWorldMatrix { 1.f };
+    mutable glm::dmat4 m_cachedLocalMatrixD { 1.0 };
+    mutable glm::dmat4 m_cachedWorldMatrixD { 1.0 };
     mutable const Engine::Core::Object* m_cachedParent = nullptr;
     mutable uint64_t m_cachedParentWorldRevision = 0;
     mutable uint64_t m_cachedLocalRevisionForWorld = 0;

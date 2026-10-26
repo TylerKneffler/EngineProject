@@ -332,7 +332,7 @@ void ChainIK::ApplyGroup(const std::vector<ChainIK*>& group)
     if (history->m_lastSolved && affected.size() ==
         history->m_lastOutputRotations.size())
     {
-        bool unchanged = glm::distance(root->transform.position,
+        bool unchanged = glm::distance(glm::vec3(root->transform.position),
             history->m_lastOutputPosition) < 1e-5f;
         for (auto* joint : affected)
         {

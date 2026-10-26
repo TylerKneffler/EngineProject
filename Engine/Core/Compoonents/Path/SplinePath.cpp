@@ -244,7 +244,7 @@ bool SplinePath::DrawProperties(Engine::Editor::IEditorUi& ui)
         Owner->Children.push_back(point);
         point->transform.position = Owner->Children.size() > 1u
             ? Owner->Children[Owner->Children.size() - 2u]->transform.position +
-                glm::vec3(0.f, 0.f, 2.f)
+                glm::dvec3(0.0, 0.0, 2.0)
             : glm::vec3(0.f);
         changed = true;
     }

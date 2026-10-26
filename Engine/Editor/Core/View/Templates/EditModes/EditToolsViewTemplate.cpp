@@ -694,8 +694,6 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
             }
             if (row.Next(ToolbarButtonWidth("Keys...")) && ui.Button("Keys..."))
                 ImGui::OpenPopup("##AnimationKeyTools");
-            if (row.Next(ToolbarButtonWidth("Animations...")) && ui.Button("Animations..."))
-                ImGui::OpenPopup("##AnimationLayerTools");
             if (row.Next(ImGui::CalcTextSize("Auto Key").x + ImGui::GetFrameHeight() +
                     ImGui::GetStyle().ItemInnerSpacing.x))
                 ui.Checkbox("Auto Key", &document.autoKey);
@@ -710,12 +708,6 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
             if (ImGui::BeginPopup("##AnimationKeyTools", ImGuiWindowFlags_NoSavedSettings))
             {
                 DrawAnimationKeyTools(ui, document);
-                ImGui::EndPopup();
-            }
-            ImGui::SetNextWindowSizeConstraints({340.f, 0.f}, {520.f, 650.f});
-            if (ImGui::BeginPopup("##AnimationLayerTools", ImGuiWindowFlags_NoSavedSettings))
-            {
-                DrawAnimationLayerTools(ui, document);
                 ImGui::EndPopup();
             }
             ImGui::PopID();

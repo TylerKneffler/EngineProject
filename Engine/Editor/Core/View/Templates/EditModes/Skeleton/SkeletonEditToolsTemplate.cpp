@@ -213,12 +213,15 @@ void EditorState::DrawSkeletonEditTools(IEditorUi& ui)
             ui.Separator();
             auto* joint = scene->GetSelectedObject();
             auto& transform = joint->transform;
-            const glm::vec3 oldPosition = transform.position;
+            const glm::dvec3 oldPosition = transform.position;
             const glm::vec3 oldRotation = transform.rotation;
             float orientation[]{ glm::degrees(oldRotation.x),
                 glm::degrees(oldRotation.y), glm::degrees(oldRotation.z) };
-            bool changed = ui.DragFloat3("Joint position (local)", &transform.position.x,
+            glm::vec3 editedPosition(transform.position);
+            bool changed = ui.DragFloat3("Joint position (local)", &editedPosition.x,
                 .01f);
+            if (editedPosition != glm::vec3(transform.position))
+                transform.position = glm::dvec3(editedPosition);
             if (ui.DragFloat3("Joint orientation (local degrees)",
                     orientation, .5f))
             {

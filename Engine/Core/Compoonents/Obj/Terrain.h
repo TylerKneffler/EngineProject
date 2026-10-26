@@ -24,7 +24,7 @@ public:
     struct Prepared
     {
         int cellsX = 0, cellsY = 0, lodStride = 1;
-        float cellWidth = 1.f, cellDepth = 1.f, textureTiling = 16.f;
+        float cellWidth = 1.f, cellDepth = 1.f, textureTiling = 4.f;
         std::vector<float> heights, weights;
         std::vector<Layer> layers;
         std::vector<Mesh::Vertex> vertices;
@@ -35,7 +35,7 @@ public:
     Terrain();
     int cellsX = 32, cellsY = 32;
     float cellWidth = 1.f, cellDepth = 1.f;
-    float textureTiling = 16.f;
+    float textureTiling = 4.f;
     std::vector<float> heights;
     std::vector<Layer> layers;
     std::vector<float> weights; // one weight per vertex and layer

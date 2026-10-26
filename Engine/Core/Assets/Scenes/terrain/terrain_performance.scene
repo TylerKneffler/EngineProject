@@ -13,7 +13,7 @@
         <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
       </transform>
       <components>
-        <components:Camera Camera.active="true" Camera.useTransformRotation="true" Camera.fov="70" Camera.near="0.1" Camera.far="5000" Camera.orthographic="false" Camera.orthographicSize="5">
+        <components:Camera Camera.active="true" Camera.useTransformRotation="true" Camera.fov="70" Camera.near="0.1" Camera.far="25000" Camera.orthographic="false" Camera.orthographicSize="5">
           <Camera.target><item>0</item><item>0</item><item>0</item></Camera.target>
           <Camera.up><item>0</item><item>1</item><item>0</item></Camera.up>
         </components:Camera>
@@ -27,11 +27,11 @@
     <item name="Terrain Performance Sun" enabled="true">
       <transform>
         <Transform.position><item>0</item><item>250</item><item>0</item></Transform.position>
-        <Transform.rotation><item>0.8</item><item>-0.55</item><item>0</item></Transform.rotation>
+        <Transform.rotation><item>1.3962634</item><item>-0.55</item><item>0</item></Transform.rotation>
         <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
       </transform>
       <components>
-        <components:Light Light.lightType="1" Light.intensity="3.2" Light.range="500" Light.falloff="1.5" Light.baked="false" Light.castsShadows="true" Light.shadowStrength="1" Light.shadowDepthBias="0.0015" Light.shadowNormalBias="0.01" Light.shadowResolutionScale="1" Light.shadowFilterScale="1">
+        <components:Light Light.lightType="1" Light.intensity="3.2" Light.range="500" Light.falloff="1.5" Light.baked="false" Light.castsShadows="true" Light.shadowStrength="1" Light.shadowDepthBias="0.0015" Light.shadowNormalBias="0.01" Light.shadowResolutionScale="0.5" Light.shadowFilterScale="1">
           <Light.color><item>1</item><item>0.95</item><item>0.85</item></Light.color>
         </components:Light>
       </components>
@@ -44,13 +44,158 @@
         <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
       </transform>
       <components>
-        <components:PerlinNoiseField PerlinNoiseField.seed="9187" PerlinNoiseField.frequency="0.0016" PerlinNoiseField.octaves="5" PerlinNoiseField.lacunarity="2" PerlinNoiseField.persistence="0.5">
+        <components:Mesh /><components:Material Material.unlit="true" Material.castsShadows="false" /><components:PerlinNoiseField PerlinNoiseField.seed="9187" PerlinNoiseField.frequency="0.0016" PerlinNoiseField.octaves="5" PerlinNoiseField.lacunarity="2" PerlinNoiseField.persistence="0.5">
           <PerlinNoiseField.coordinateOffset><item>41</item><item>0</item><item>-27</item></PerlinNoiseField.coordinateOffset>
         </components:PerlinNoiseField>
-        <components:TerrainManager TerrainManager.cellsX="32" TerrainManager.cellsY="32" TerrainManager.cellWidth="4" TerrainManager.cellDepth="4" TerrainManager.loadedRadius="2" TerrainManager.farRadius="32" TerrainManager.lod2Radius="8" TerrainManager.lod4Radius="16" TerrainManager.maxLodChangesPerUpdate="4" TerrainManager.maxLoadsPerUpdate="2" TerrainManager.maxUnloadsPerUpdate="4" TerrainManager.asyncStreaming="true" TerrainManager.maxPreparedCells="4" TerrainManager.maxUploadsPerUpdate="1" TerrainManager.viewerObjectName="Terrain Performance Camera" TerrainManager.cellDataDirectory="Engine/Core/Assets/TerrainData/TerrainPerformance">
+        <components:TerrainManager TerrainManager.cellsX="32" TerrainManager.cellsY="32" TerrainManager.cellWidth="4" TerrainManager.cellDepth="4" TerrainManager.loadedRadius="2" TerrainManager.editorRadius="6" TerrainManager.farRadius="16" TerrainManager.lod2Radius="8" TerrainManager.lod4Radius="16" TerrainManager.maxLodChangesPerUpdate="4" TerrainManager.maxLoadsPerUpdate="2" TerrainManager.maxUnloadsPerUpdate="4" TerrainManager.asyncStreaming="true" TerrainManager.maxPreparedCells="4" TerrainManager.maxUploadsPerUpdate="1" TerrainManager.fastRuntimeLighting="true" TerrainManager.cpuBudgetMiB="512" TerrainManager.gpuBudgetMiB="256" TerrainManager.cacheBudgetMiB="1024" TerrainManager.viewerObjectName="Terrain Performance Camera" TerrainManager.cellDataDirectory="Engine/Core/Assets/TerrainData/TerrainPerformance">
           <TerrainManager.cells />
+          <TerrainManager.proceduralRuns>
+            <item y="-64" start="-64" end="64" />
+            <item y="-63" start="-64" end="64" />
+            <item y="-62" start="-64" end="64" />
+            <item y="-61" start="-64" end="64" />
+            <item y="-60" start="-64" end="64" />
+            <item y="-59" start="-64" end="64" />
+            <item y="-58" start="-64" end="64" />
+            <item y="-57" start="-64" end="64" />
+            <item y="-56" start="-64" end="64" />
+            <item y="-55" start="-64" end="64" />
+            <item y="-54" start="-64" end="64" />
+            <item y="-53" start="-64" end="64" />
+            <item y="-52" start="-64" end="64" />
+            <item y="-51" start="-64" end="64" />
+            <item y="-50" start="-64" end="64" />
+            <item y="-49" start="-64" end="64" />
+            <item y="-48" start="-64" end="64" />
+            <item y="-47" start="-64" end="64" />
+            <item y="-46" start="-64" end="64" />
+            <item y="-45" start="-64" end="64" />
+            <item y="-44" start="-64" end="64" />
+            <item y="-43" start="-64" end="64" />
+            <item y="-42" start="-64" end="64" />
+            <item y="-41" start="-64" end="64" />
+            <item y="-40" start="-64" end="64" />
+            <item y="-39" start="-64" end="64" />
+            <item y="-38" start="-64" end="64" />
+            <item y="-37" start="-64" end="64" />
+            <item y="-36" start="-64" end="64" />
+            <item y="-35" start="-64" end="64" />
+            <item y="-34" start="-64" end="64" />
+            <item y="-33" start="-64" end="64" />
+            <item y="-32" start="-64" end="64" />
+            <item y="-31" start="-64" end="64" />
+            <item y="-30" start="-64" end="64" />
+            <item y="-29" start="-64" end="64" />
+            <item y="-28" start="-64" end="64" />
+            <item y="-27" start="-64" end="64" />
+            <item y="-26" start="-64" end="64" />
+            <item y="-25" start="-64" end="64" />
+            <item y="-24" start="-64" end="64" />
+            <item y="-23" start="-64" end="64" />
+            <item y="-22" start="-64" end="64" />
+            <item y="-21" start="-64" end="64" />
+            <item y="-20" start="-64" end="64" />
+            <item y="-19" start="-64" end="64" />
+            <item y="-18" start="-64" end="64" />
+            <item y="-17" start="-64" end="64" />
+            <item y="-16" start="-64" end="64" />
+            <item y="-15" start="-64" end="64" />
+            <item y="-14" start="-64" end="64" />
+            <item y="-13" start="-64" end="64" />
+            <item y="-12" start="-64" end="64" />
+            <item y="-11" start="-64" end="64" />
+            <item y="-10" start="-64" end="64" />
+            <item y="-9" start="-64" end="64" />
+            <item y="-8" start="-64" end="64" />
+            <item y="-7" start="-64" end="64" />
+            <item y="-6" start="-64" end="64" />
+            <item y="-5" start="-64" end="64" />
+            <item y="-4" start="-64" end="64" />
+            <item y="-3" start="-64" end="64" />
+            <item y="-2" start="-64" end="64" />
+            <item y="-1" start="-64" end="64" />
+            <item y="0" start="-64" end="64" />
+            <item y="1" start="-64" end="64" />
+            <item y="2" start="-64" end="64" />
+            <item y="3" start="-64" end="64" />
+            <item y="4" start="-64" end="64" />
+            <item y="5" start="-64" end="64" />
+            <item y="6" start="-64" end="64" />
+            <item y="7" start="-64" end="64" />
+            <item y="8" start="-64" end="64" />
+            <item y="9" start="-64" end="64" />
+            <item y="10" start="-64" end="64" />
+            <item y="11" start="-64" end="64" />
+            <item y="12" start="-64" end="64" />
+            <item y="13" start="-64" end="64" />
+            <item y="14" start="-64" end="64" />
+            <item y="15" start="-64" end="64" />
+            <item y="16" start="-64" end="64" />
+            <item y="17" start="-64" end="64" />
+            <item y="18" start="-64" end="64" />
+            <item y="19" start="-64" end="64" />
+            <item y="20" start="-64" end="64" />
+            <item y="21" start="-64" end="64" />
+            <item y="22" start="-64" end="64" />
+            <item y="23" start="-64" end="64" />
+            <item y="24" start="-64" end="64" />
+            <item y="25" start="-64" end="64" />
+            <item y="26" start="-64" end="64" />
+            <item y="27" start="-64" end="64" />
+            <item y="28" start="-64" end="64" />
+            <item y="29" start="-64" end="64" />
+            <item y="30" start="-64" end="64" />
+            <item y="31" start="-64" end="64" />
+            <item y="32" start="-64" end="64" />
+            <item y="33" start="-64" end="64" />
+            <item y="34" start="-64" end="64" />
+            <item y="35" start="-64" end="64" />
+            <item y="36" start="-64" end="64" />
+            <item y="37" start="-64" end="64" />
+            <item y="38" start="-64" end="64" />
+            <item y="39" start="-64" end="64" />
+            <item y="40" start="-64" end="64" />
+            <item y="41" start="-64" end="64" />
+            <item y="42" start="-64" end="64" />
+            <item y="43" start="-64" end="64" />
+            <item y="44" start="-64" end="64" />
+            <item y="45" start="-64" end="64" />
+            <item y="46" start="-64" end="64" />
+            <item y="47" start="-64" end="64" />
+            <item y="48" start="-64" end="64" />
+            <item y="49" start="-64" end="64" />
+            <item y="50" start="-64" end="64" />
+            <item y="51" start="-64" end="64" />
+            <item y="52" start="-64" end="64" />
+            <item y="53" start="-64" end="64" />
+            <item y="54" start="-64" end="64" />
+            <item y="55" start="-64" end="64" />
+            <item y="56" start="-64" end="64" />
+            <item y="57" start="-64" end="64" />
+            <item y="58" start="-64" end="64" />
+            <item y="59" start="-64" end="64" />
+            <item y="60" start="-64" end="64" />
+            <item y="61" start="-64" end="64" />
+            <item y="62" start="-64" end="64" />
+            <item y="63" start="-64" end="64" />
+            <item y="64" start="-64" end="64" />
+          </TerrainManager.proceduralRuns>
         </components:TerrainManager>
-        <components:TerrainPerformanceDriver TerrainPerformanceDriver.viewerObjectName="Terrain Performance Camera" TerrainPerformanceDriver.mapHalfExtentCells="64" TerrainPerformanceDriver.generationRadiusCells="32" TerrainPerformanceDriver.cellsPerUpdate="16" TerrainPerformanceDriver.maxGeneratedCells="20000" TerrainPerformanceDriver.cacheDirectory=".local/cache/terrain_performance" TerrainPerformanceDriver.heightAmplitude="38" TerrainPerformanceDriver.baseHeight="-8" TerrainPerformanceDriver.reportIntervalSeconds="5" />
+        <components:TerrainPerformanceDriver TerrainPerformanceDriver.viewerObjectName="Terrain Performance Camera" TerrainPerformanceDriver.mapHalfExtentCells="64" TerrainPerformanceDriver.cacheDirectory=".local/cache/terrain_performance" TerrainPerformanceDriver.heightArchive="Assets/TerrainData/TerrainPerformance/world.heights" TerrainPerformanceDriver.farGrid="Assets/TerrainData/TerrainPerformance/world.fargrid" TerrainPerformanceDriver.heightAmplitude="114" TerrainPerformanceDriver.baseHeight="-24" TerrainPerformanceDriver.reportIntervalSeconds="5" />
+      </components>
+      <children />
+    </item>
+    <item name="Terrain Scale Dummy (1.8 m)" enabled="true">
+      <transform>
+        <Transform.position><item>0</item><item>-16.98151947</item><item>0</item></Transform.position>
+        <Transform.rotation><item>-1.5707963</item><item>0</item><item>0</item></Transform.rotation>
+        <Transform.scale><item>0.01</item><item>0.01</item><item>0.01</item></Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Models/crash-dummy/crush_dummy_UE4_skinned/Meshes/cd_body_LOD0_ncl1_1 1.mesh" />
+        <components:Material Material.materialAsset="Assets/Models/crash-dummy/crush_dummy_UE4_skinned/Materials/default 1.material" Material.baseColorTexture="Assets/Models/crash-dummy/textures/crush_dummy_default_BaseColor.tga.png">
+          <Material.diffuse><item>1</item><item>1</item><item>1</item></Material.diffuse>
+        </components:Material>
       </components>
       <children />
     </item>

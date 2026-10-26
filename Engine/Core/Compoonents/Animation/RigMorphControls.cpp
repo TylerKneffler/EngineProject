@@ -44,7 +44,7 @@ void RigMorphControls::ApplyBoneMorphs() {
     if (!model) return;
     for (const auto& [node, last] : m_lastPose)
         if (Object* bone = model->ResolveNode(node);
-            bone && glm::distance(bone->transform.position, last.outputPosition) < 1e-5f &&
+            bone && glm::distance(glm::vec3(bone->transform.position), last.outputPosition) < 1e-5f &&
             glm::distance(bone->transform.rotation, last.outputRotation) < 1e-5f) {
             bone->transform.position = last.inputPosition;
             bone->transform.rotation = last.inputRotation;

@@ -122,7 +122,7 @@ bool AddPmxSourceNames(const std::string& sourcePath,
     {
         const auto& original = source.nodes[sourcePalette[i]];
         const auto* target = targetModel.ResolveNode(skeleton->jointNodes[i]);
-        if (!target || glm::length(target->transform.position - original.translation) > .001f)
+        if (!target || glm::length(glm::vec3(target->transform.position) - original.translation) > .001f)
         { error = "PMX source rest pose does not match the selected prefab"; return false; }
         const auto parent = original.parent < 0 ? paletteBySourceNode.end() :
             paletteBySourceNode.find(static_cast<unsigned>(original.parent));
@@ -224,9 +224,9 @@ bool BindPmxDirect(const std::string& prefabPath, const std::string& sourcePath,
             {
                 translation.times.push_back(sampleTime);
                 translation.values.insert(translation.values.end(), {
-                target->transform.position.x + blend(0),
-                target->transform.position.y + blend(1),
-                target->transform.position.z - blend(2) });
+                static_cast<float>(target->transform.position.x) + blend(0),
+                static_cast<float>(target->transform.position.y) + blend(1),
+                static_cast<float>(target->transform.position.z) - blend(2) });
             }
             if (fraction != 0.f && fraction != 1.f && from.rotation == to.rotation)
                 return;

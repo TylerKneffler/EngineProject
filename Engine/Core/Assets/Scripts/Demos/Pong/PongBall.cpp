@@ -156,7 +156,7 @@ void PongBall::BounceFromPaddle(Engine::Core::Object& paddle,
 {
     const float offset = std::clamp(
         (Owner->transform.position.y - paddle.transform.position.y) /
-            std::max(paddleHalfHeight, 0.01f), -1.f, 1.f);
+            std::max(paddleHalfHeight, 0.01f), -1.0, 1.0);
     const float angle = offset * glm::radians(60.f);
     const float nextSpeed = std::min(maximumSpeed,
         std::max(speed, glm::length(m_velocity) + speedGainPerHit));

@@ -162,7 +162,7 @@ void RigConstraints::RestorePose()
     if (!model) return;
     for (const auto& [node, last] : m_lastPose)
         if (Object* bone = model->ResolveNode(node); bone && last.applied &&
-            glm::distance(bone->transform.position, last.outputPosition) < 1e-5f &&
+            glm::distance(glm::vec3(bone->transform.position), last.outputPosition) < 1e-5f &&
             glm::distance(bone->transform.rotation, last.outputRotation) < 1e-5f)
         {
             bone->transform.position = last.inputPosition;
@@ -209,7 +209,7 @@ void RigConstraints::Apply()
             x, y, z)));
         capture(local.nodeIndex, *bone);
         bone->transform.position = local.restTranslation +
-            basis * (bone->transform.position - local.restTranslation);
+            basis * (glm::vec3(bone->transform.position) - local.restTranslation);
         bone->transform.rotation = glm::eulerAngles(glm::normalize(
             basis * glm::quat(bone->transform.rotation) * glm::inverse(basis)));
     }
@@ -348,8 +348,8 @@ void RigConstraints::ApplyConstraints(Model& modelValue, bool afterPhysics)
         capture(rule.nodeIndex, *driven);
         auto& transform = driven->transform;
         if (rule.translation)
-            transform.position += (source->transform.position -
-                rule.sourceRestTranslation) * rule.influence;
+            transform.position += glm::dvec3(glm::vec3(source->transform.position) -
+                rule.sourceRestTranslation) * static_cast<double>(rule.influence);
         if (rule.rotation)
         {
             const glm::quat sourceRotation(source->transform.rotation);

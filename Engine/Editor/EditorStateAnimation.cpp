@@ -1098,7 +1098,7 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
                     const bool changed = raw->gizmoDragIK ||
                         (raw->view && raw->view->ModelDragEnded() &&
                             !raw->view->ModelChangedBones().empty()) || (bone &&
-                        (bone->transform.position !=
+                        (glm::vec3(bone->transform.position) !=
                             raw->gizmoDragStartPosition ||
                          bone->transform.rotation !=
                             raw->gizmoDragStartRotation ||
@@ -3285,8 +3285,8 @@ void EditorState::DrawAnimationPoseLibrary(IEditorUi& ui,
                 {
                     const auto& sourceRest = restJoints[source]->transform;
                     const auto& targetRest = restJoints[destination]->transform;
-                    position = targetRest.position + mirrorVector(
-                        position - sourceRest.position);
+                    position = glm::vec3(targetRest.position) + mirrorVector(
+                        position - glm::vec3(sourceRest.position));
                     rotation = mirrorRotation(rotation *
                         glm::inverse(glm::quat(sourceRest.rotation))) *
                         glm::quat(targetRest.rotation);
@@ -3296,7 +3296,7 @@ void EditorState::DrawAnimationPoseLibrary(IEditorUi& ui,
                                 ? scale[axis] / sourceRest.scale[axis] : 1.f);
                 }
                 auto& transform = joints[destination]->transform;
-                transform.position = glm::mix(transform.position, position,
+                transform.position = glm::mix(glm::vec3(transform.position), position,
                     document.poseBlend);
                 transform.rotation = glm::eulerAngles(glm::normalize(glm::slerp(
                     glm::quat(transform.rotation), rotation, document.poseBlend)));
@@ -4107,13 +4107,15 @@ void EditorState::DrawAnimationProperties(IEditorUi& ui,
         std::to_string(nodeIndex) + ")";
     ui.ValueLabel("Selected bone", boneInfo.c_str());
     auto& transform = joint->transform;
-    const glm::vec3 oldPosition = transform.position;
+    const glm::dvec3 oldPosition = transform.position;
     const glm::vec3 oldRotation = transform.rotation;
     const glm::vec3 oldScale = transform.scale;
     float angles[]{ glm::degrees(oldRotation.x),
         glm::degrees(oldRotation.y), glm::degrees(oldRotation.z) };
+    glm::vec3 editedPosition(transform.position);
     const bool positionChanged = ui.DragFloat3("Pose position",
-        &transform.position.x, .01f);
+        &editedPosition.x, .01f);
+    if (positionChanged) transform.position = glm::dvec3(editedPosition);
     const bool rotationChanged = ui.DragFloat3("Pose rotation (degrees)",
         angles, .5f);
     if (rotationChanged)
@@ -4684,13 +4686,6 @@ void EditorState::DrawAnimationTimeline(IEditorUi& ui,
         ui.DisabledLabel("Drop a prefab, scene object, or .anim onto the Animation Editor.");
         return;
     }
-    if (ImGui::Button("Animations...")) ImGui::OpenPopup("##TimelineAnimations");
-    if (ImGui::BeginPopup("##TimelineAnimations"))
-    {
-        DrawAnimationLayerTools(ui, document);
-        ImGui::EndPopup();
-    }
-    ImGui::SameLine();
     ImGui::Text("%.3f s", document.playheadSeconds);
     ImGui::SameLine();
     ImGui::TextDisabled("Rows: click / Ctrl toggle / Shift range | Keys: Ctrl click / right-drag select");

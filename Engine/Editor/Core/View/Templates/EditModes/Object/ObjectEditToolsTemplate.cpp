@@ -21,10 +21,13 @@ void EditorState::DrawObjectEditTools(IEditorUi& ui)
     }
     ui.ValueLabel("Selected object", object->name.c_str());
     auto& transform = object->transform;
-    const glm::vec3 previousPosition = transform.position;
+    const glm::dvec3 previousPosition = transform.position;
     const glm::vec3 previousRotation = transform.rotation;
     const glm::vec3 previousScale = transform.scale;
-    bool changed = ui.DragFloat3("Position", &transform.position.x, .01f);
+    glm::vec3 editedPosition(transform.position);
+    bool changed = ui.DragFloat3("Position", &editedPosition.x, .01f);
+    if (editedPosition != glm::vec3(transform.position))
+        transform.position = glm::dvec3(editedPosition);
     changed |= ui.DragFloat3("Rotation", &transform.rotation.x, .01f);
     changed |= ui.DragFloat3("Scale", &transform.scale.x, .01f);
     if (!changed) return;

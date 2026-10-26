@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cmath>
+#include <limits>
 
 namespace Engine::Serialization
 {
@@ -244,7 +245,8 @@ void WriteImpl(const JsonValue& v, std::string& out, int indent)
         {
             char buffer[64];
             const auto converted = std::to_chars(buffer, buffer + sizeof(buffer),
-                d, std::chars_format::general, 7);
+                d, std::chars_format::general,
+                std::numeric_limits<double>::max_digits10);
             out.append(buffer, converted.ptr);
         }
         break;

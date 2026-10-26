@@ -159,7 +159,8 @@ void PropertiesView::DrawMultiSelection(IEditorUi& ui)
 
     std::vector<Engine::Core::Component*> transforms;
     transforms.reserve(m_selectedObjects.size());
-    std::vector<glm::vec3> previousPositions, previousRotations, previousScales;
+    std::vector<glm::dvec3> previousPositions;
+    std::vector<glm::vec3> previousRotations, previousScales;
     previousPositions.reserve(m_selectedObjects.size());
     previousRotations.reserve(m_selectedObjects.size());
     previousScales.reserve(m_selectedObjects.size());

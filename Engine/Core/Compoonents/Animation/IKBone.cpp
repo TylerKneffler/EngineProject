@@ -786,7 +786,7 @@ void IKBone::SyncBoneFromBody()
         const glm::quat simulatedRotation = glm::normalize(rotation);
         if (!overridePosition)
             Owner->transform.position = glm::mix(
-                Owner->transform.position, translation, influence);
+                glm::vec3(Owner->transform.position), translation, influence);
         if (!overrideRotation)
             Owner->transform.rotation = glm::eulerAngles(glm::normalize(
                 glm::slerp(animationRotation, simulatedRotation, influence)));

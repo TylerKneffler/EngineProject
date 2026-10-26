@@ -46,7 +46,7 @@ void PropertiesView::DrawTransform(IEditorUi& ui)
     {
         ui.Indent(12.f);
         bool transformChanged = false;
-        const glm::vec3 previousPosition = t.position;
+        const glm::dvec3 previousPosition = t.position;
         const glm::vec3 previousRotation = t.rotation;
         const glm::vec3 previousScale = t.scale;
         if (m_scene && m_scene->IsEditorMode2D())
@@ -54,9 +54,12 @@ void PropertiesView::DrawTransform(IEditorUi& ui)
             // In a 2D scene X/Y are spatial axes while Z is only the painter's
             // ordering value.  Present that model directly instead of exposing
             // three misleading 3D vector controls.
-            transformChanged |= ui.DragFloat("Position X", &t.position.x, 0.01f);
-            transformChanged |= ui.DragFloat("Position Y", &t.position.y, 0.01f);
-            transformChanged |= ui.DragFloat("Draw Order", &t.position.z, 0.01f);
+            glm::vec3 editedPosition(t.position);
+            const bool positionChanged = ui.DragFloat("Position X", &editedPosition.x, 0.01f) |
+                ui.DragFloat("Position Y", &editedPosition.y, 0.01f) |
+                ui.DragFloat("Draw Order", &editedPosition.z, 0.01f);
+            if (positionChanged) t.position = glm::dvec3(editedPosition);
+            transformChanged |= positionChanged;
             transformChanged |= ui.DragFloat("Rotation", &t.rotation.z, 0.01f);
             transformChanged |= ui.DragFloat("Scale X", &t.scale.x, 0.01f);
             transformChanged |= ui.DragFloat("Scale Y", &t.scale.y, 0.01f);

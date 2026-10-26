@@ -5,6 +5,8 @@
 #include <cctype>
 #include <cstdlib>
 #include <sstream>
+#include <iomanip>
+#include <limits>
 
 namespace Engine::Serialization
 {
@@ -109,7 +111,8 @@ std::string ScalarToText(const JsonValue& value)
     case JsonValue::Type::Number:
     {
         std::ostringstream stream;
-        stream << value.AsDouble();
+        stream << std::setprecision(std::numeric_limits<double>::max_digits10)
+            << value.AsDouble();
         return stream.str();
     }
     case JsonValue::Type::String:
@@ -283,7 +286,8 @@ void SceneXmlBehavior::WriteNode(pugi::xml_node node, const JsonValue& value)
     case JsonValue::Type::Number:
     {
         std::ostringstream stream;
-        stream << value.AsDouble();
+        stream << std::setprecision(std::numeric_limits<double>::max_digits10)
+            << value.AsDouble();
         node.text().set(stream.str().c_str());
         break;
     }

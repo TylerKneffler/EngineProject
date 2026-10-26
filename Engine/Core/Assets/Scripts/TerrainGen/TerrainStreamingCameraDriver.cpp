@@ -108,10 +108,10 @@ void TerrainStreamingCameraDriver::Update()
         return;
     }
 
-    const glm::vec3 target = m_towardEnd ? endPosition : startPosition;
-    const glm::vec3 delta = target - Owner->transform.position;
-    const float distance = glm::length(delta);
-    const float step = std::max(0.01f, movementSpeed) * deltaTime;
+    const glm::dvec3 target = glm::dvec3(m_towardEnd ? endPosition : startPosition);
+    const glm::dvec3 delta = target - Owner->transform.position;
+    const double distance = glm::length(delta);
+    const double step = static_cast<double>(std::max(0.01f, movementSpeed)) * deltaTime;
     if (distance <= step || distance <= 0.0001f)
     {
         Owner->transform.position = target;

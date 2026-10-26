@@ -20,7 +20,7 @@ void SceneCameraController::SnapToDirection(Engine::Scene::Scene& scene,
 
     const glm::vec3 direction = glm::normalize(cameraDirection);
     const float distance = std::max(glm::length(
-        scene.editorCamera.transform.position - camera->target), 0.25f);
+        glm::vec3(scene.editorCamera.transform.position) - camera->target), 0.25f);
     scene.editorCamera.transform.position = camera->target + direction * distance;
     // Looking straight down the Y axis requires a non-parallel up vector.
     // Keeping +Z toward the top of top/bottom views also makes those views
@@ -46,7 +46,7 @@ void SceneCameraController::Apply(Engine::Scene::Scene& scene,
     assert(cam && "Scene editorCamera must have a Camera component");
     if (panDX != 0.f || panDY != 0.f || dolly != 0.f)
         scene.StopEditorCameraFollow();
-    glm::vec3& pos = scene.editorCamera.transform.position;
+    glm::dvec3& pos = scene.editorCamera.transform.position;
 
     if (scene.IsEditorMode2D())
     {
@@ -66,7 +66,7 @@ void SceneCameraController::Apply(Engine::Scene::Scene& scene,
         return;
     }
 
-    glm::vec3 eye = pos;
+    glm::vec3 eye = glm::vec3(pos);
     glm::vec3 target = cam->target;
     const auto isFinite = [](const glm::vec3& value)
     {

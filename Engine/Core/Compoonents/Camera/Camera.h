@@ -46,10 +46,13 @@ public:
     // Returns the view matrix using the owner Transform's world position as the eye.
     // Asserts that Owner and its Transform are valid.
     glm::mat4 GetViewMatrix() const;
+    glm::dmat4 GetViewMatrixD() const;
 
     // Returns a left-handed perspective projection matrix.
     // aspect = viewport width / height.
     glm::mat4 GetProjectionMatrix(float aspect, bool forceOrthographic = false) const;
+    glm::dmat4 GetProjectionMatrixD(double aspect,
+        bool forceOrthographic = false) const;
 
 };
 }

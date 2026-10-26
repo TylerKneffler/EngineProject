@@ -4,6 +4,8 @@
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Obj/Terrain.h"
+#include "Core/Compoonents/Obj/TerrainManager.h"
+#include "Core/Compoonents/Obj/TerrainBatchAppearance.h"
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
 #include "Core/Compoonents/Obj/Sprite.h"
 #include "Core/Compoonents/Particles/ParticleEmitter.h"
@@ -2280,6 +2282,25 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             m_distanceLightingSettings.maximumRealtimeLights),
         !cameraUsesSourceWarpChart, &m_realtimeShadowSettings,
         &shadowSelection, &cameraPosition, &cookiePaths, &iesPaths);
+    // Terrain needs one scene-wide sun regardless of object distance. Select
+    // it once per view instead of walking the light list for every pixel.
+    glm::vec3 terrainSunDirection(0.f, 1.f, 0.f);
+    glm::vec3 terrainSunRadiance(0.f);
+    int terrainSunIndex = -1;
+    const auto* frameLights = static_cast<const Engine::Model::LightData*>(
+        m_lightDataMapped);
+    for (uint32_t index = 0; index < m_frameLightCount; ++index)
+    {
+        const auto& light = frameLights[index];
+        if (std::abs(light.params.y - 1.f) >= 0.25f) continue;
+        const glm::vec3 radiance = glm::vec3(light.colorIntensity) *
+            light.colorIntensity.w;
+        if (terrainSunIndex >= 0 &&
+            glm::length(radiance) <= glm::length(terrainSunRadiance)) continue;
+        terrainSunDirection = glm::normalize(glm::vec3(light.positionRange));
+        terrainSunRadiance = radiance;
+        terrainSunIndex = static_cast<int>(index);
+    }
     std::array<std::shared_ptr<Engine::Components::Texture>, 8> photometryTextures{};
     for (size_t index = 0; index < cookiePaths.size(); ++index)
     {
@@ -2847,6 +2868,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         const Engine::Components::SpatialManipulator* spatialManipulator = nullptr;
         bool preview = false;
         bool terrain = false;
+        bool terrainCell = false;
         bool blended = false;
         bool pmxOutline = false;
         bool castsShadow = false;
@@ -2856,6 +2878,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     };
     std::vector<PreparedDraw> preparedDraws;
     preparedDraws.reserve(renderObjects.size());
+    std::shared_ptr<Engine::Components::Texture> measurementGridTexture;
+    bool measurementGridReady = false;
 
     UINT slot = 0;
     for (const ViewRenderItem& sortedItem : renderObjects)
@@ -2913,6 +2937,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         preparedDraw.spatialManipulator = renderItem->spatialManipulator;
         preparedDraw.preview = isPreview;
         preparedDraw.terrain = mesh && mesh->UsesTerrainVertexFormat();
+        preparedDraw.terrainCell = mesh &&
+            (obj->GetComponent<Engine::Components::Terrain>() != nullptr ||
+                obj->GetComponent<Engine::Components::TerrainBatchAppearance>() != nullptr);
         preparedDraw.blended = sortedItem.blended;
         preparedDraw.pmxOutline = mat && mat->edgeEnabled &&
             mat->edgeWidth > 0.f && mat->edgeColor.a > 0.f &&
@@ -3145,9 +3172,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 cameraPosition, 0.5f);
         }
         if (mesh && !mesh->UsesTerrainVertexFormat())
-            if (auto* terrain = obj->GetComponent<Engine::Components::Terrain>())
+        {
+            auto* terrain = obj->GetComponent<Engine::Components::Terrain>();
+            auto* batch = obj->GetComponent<Engine::Components::TerrainBatchAppearance>();
+            if (terrain || batch)
             {
-                const auto& materials = terrain->GetLayerMaterials();
+                const auto& materials = terrain ? terrain->GetLayerMaterials() :
+                    batch->materials;
                 bool textured = false;
                 preparedDraw.textures[0] = nullptr;
                 preparedDraw.textures[1] = nullptr;
@@ -3164,8 +3195,50 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 }
                 objectData.baseColor = { 1.f, 1.f, 1.f, 1.f };
                 objectData.materialParams.w = textured ? 2048.f : 0.f;
-                objectData.textureUvSets1.z = terrain->textureTiling;
+                // Opt-in static terrain keeps its painted texture blend while
+                // using a cheaper directional diffuse pass during play.
+                const auto* terrainManager = obj->GetComponentInParent<
+                    Engine::Components::TerrainManager>();
+                if (!includeEditorVisuals && !forceUnlitMode && terrainManager &&
+                    terrainManager->fastRuntimeLighting)
+                {
+                    objectData.materialParams.w += batch && batch->distantVisual
+                        ? 16384.f : 8192.f;
+                    objectData.textureUvSets1.w =
+                        static_cast<float>(std::max(terrainManager->loadedRadius,
+                            terrainManager->farRadius)) *
+                        std::max(terrainManager->cellsX * terrainManager->cellWidth,
+                            terrainManager->cellsY * terrainManager->cellDepth);
+                }
+                objectData.textureUvSets1.z = terrain ? terrain->textureTiling :
+                    batch->textureTiling;
+                if (terrainManager && !includeEditorVisuals)
+                    objectData.textureUvSets1.x =
+                        std::max(terrainManager->cellsX * terrainManager->cellWidth,
+                            terrainManager->cellsY * terrainManager->cellDepth);
+                if (terrainManager && terrainManager->measurementGrid)
+                {
+                    if (!measurementGridTexture)
+                    {
+                        measurementGridTexture = Engine::Components::Texture::Acquire(
+                            Engine::Components::Mesh::ResolveFilePath(
+                                "Assets/Textures/Terrain/measurement_grid.png"));
+                        measurementGridReady = measurementGridTexture &&
+                            measurementGridTexture->Prepare(m_graphicsProvider);
+                    }
+                    if (measurementGridReady)
+                    {
+                        preparedDraw.textures[0] =
+                            measurementGridTexture->GetGraphicsTexture();
+                        objectData.materialParams.w = 32768.f;
+                        objectData.textureUvSets1.x =
+                            terrainManager->cellsX * terrainManager->cellWidth;
+                        objectData.textureUvSets1.y =
+                            terrainManager->cellsY * terrainManager->cellDepth;
+                    }
+                }
             }
+        }
         if (includeEditorVisuals && mesh == m_editorWeightPaintMesh &&
             m_editorWeightPaintBone >= 0)
         {
@@ -3229,7 +3302,25 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 probeLighting.direction,1.f);
         }
 
-        const uint32_t qualityLightCount = beyondLightingDistance ? 0u :
+        // Static terrain's inexpensive directional pass must keep the sun
+        // through the detailed-to-far-field join. The generic lighting
+        // distance cap otherwise leaves an ambient-only dark ring before the
+        // unlit distant terrain starts.
+        const bool fastTerrainLighting =
+            (static_cast<uint32_t>(objectData.materialParams.w) & 8192u) != 0u &&
+            objectData.ambientUnlit.w < 0.5f;
+        const bool farTerrainVertexLighting =
+            (static_cast<uint32_t>(objectData.materialParams.w) & 16384u) != 0u;
+        if (fastTerrainLighting || farTerrainVertexLighting)
+        {
+            objectData.bakedDirectional = glm::vec4(terrainSunRadiance,
+                fastTerrainLighting && shadowSelection.valid && terrainSunIndex ==
+                    static_cast<int>(shadowSelection.lightIndex)
+                    ? static_cast<float>(terrainSunIndex + 1) : 0.f);
+            objectData.bakedLightDirection = glm::vec4(terrainSunDirection, 0.f);
+        }
+        const uint32_t qualityLightCount = fastTerrainLighting
+            ? 0u : beyondLightingDistance ? 0u :
             (lightingBand
                 ? std::min(m_frameLightCount, lightingBand->maxRealtimeLights)
                 : m_frameLightCount);
@@ -3301,8 +3392,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             return draw.castsShadow && draw.vertexBuffer &&
                 !(draw.spatialManipulator && draw.spatialManipulator->enabled);
         }));
-    m_shadowDebugSnapshot.submittedCasterDrawCount =
-        m_shadowDebugSnapshot.casterCount * shadowCascadeCount;
+    m_shadowDebugSnapshot.submittedCasterDrawCount = 0;
 
     // DX11 buffers use CPU-side shadow storage. Upload the complete object
     // array once, then keep structured-buffer binding free of hidden copies.
@@ -3353,6 +3443,35 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             context->DrawInstanced(draw.vertexCount, 1, 0, 0);
     };
 
+    const auto outsideShadowCascade = [&](const PreparedDraw& draw,
+        uint32_t cascade)
+    {
+        if (!draw.terrainCell || !draw.mesh->HasBounds()) return false;
+        const glm::vec3 minimum = draw.mesh->GetBoundsMin();
+        const glm::vec3 maximum = draw.mesh->GetBoundsMax();
+        const glm::mat4 localToClip = shadowViewProjections[cascade] *
+            draw.objectData.world;
+        std::array<glm::vec4, 8> corners{};
+        size_t index = 0;
+        for (int z = 0; z < 2; ++z)
+            for (int y = 0; y < 2; ++y)
+                for (int x = 0; x < 2; ++x)
+                    corners[index++] = localToClip * glm::vec4(
+                        x ? maximum.x : minimum.x,
+                        y ? maximum.y : minimum.y,
+                        z ? maximum.z : minimum.z, 1.f);
+        const auto allOutside = [&](const auto& predicate)
+        {
+            return std::all_of(corners.begin(), corners.end(), predicate);
+        };
+        return allOutside([](const glm::vec4& p) { return p.x < -p.w; }) ||
+            allOutside([](const glm::vec4& p) { return p.x > p.w; }) ||
+            allOutside([](const glm::vec4& p) { return p.y < -p.w; }) ||
+            allOutside([](const glm::vec4& p) { return p.y > p.w; }) ||
+            allOutside([](const glm::vec4& p) { return p.z < 0.f; }) ||
+            allOutside([](const glm::vec4& p) { return p.z > p.w; });
+    };
+
     // Render the selected realtime directional light into its depth map during
     // the explicit pre-view phase. This keeps Vulkan render passes unnested and
     // lets DX12 bind a depth-only target without reconstructing prior OM state.
@@ -3364,6 +3483,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         {
             for (const PreparedDraw& draw : preparedDraws)
             {
+                if (!draw.castsShadow || !draw.vertexBuffer ||
+                    isSpatialManipulatorCarrierDraw(draw) ||
+                    outsideShadowCascade(draw, cascade))
+                    continue;
                 const uint32_t recordIndex = cascade * m_objectCapacity +
                     draw.drawData.objectIndex;
                 ObjectGPUData shadowData = draw.objectData;
@@ -3395,6 +3518,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         const uint32_t tileResolution = shadowCascadeCount > 1u
             ? m_directionalShadowResolution / 2u
             : m_directionalShadowResolution;
+        std::array<const Engine::Graphics::IGraphicsTexture*, 12> shadowTextures{};
+        bool shadowTexturesBound = false;
         for (uint32_t cascade = 0; cascade < shadowCascadeCount; ++cascade)
         {
             const uint32_t tileX = shadowCascadeCount > 1u
@@ -3414,7 +3539,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             for (const PreparedDraw& draw : preparedDraws)
             {
                 if (!draw.castsShadow || !draw.vertexBuffer ||
-                    isSpatialManipulatorCarrierDraw(draw))
+                    isSpatialManipulatorCarrierDraw(draw) ||
+                    outsideShadowCascade(draw, cascade))
                     continue;
                 Engine::Graphics::IPipelineState* shadowPipeline =
                     draw.doubleSided
@@ -3428,10 +3554,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 for (uint32_t textureSlot = 0;
                     textureSlot < draw.textures.size(); ++textureSlot)
                 {
-                    if (textureSlot != 7u)
+                    if (textureSlot != 7u && (!shadowTexturesBound ||
+                        shadowTextures[textureSlot] != draw.textures[textureSlot]))
                         context->SetTexture(textureSlot, draw.textures[textureSlot]);
                 }
+                shadowTextures = draw.textures;
+                shadowTexturesBound = true;
                 submitGeometry(draw);
+                ++m_shadowDebugSnapshot.submittedCasterDrawCount;
             }
         }
         context->EndDepthOnlyPass();
@@ -3613,6 +3743,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     }
 
     std::optional<Engine::Graphics::GpuTimingStage> activeGpuStage;
+    std::array<const Engine::Graphics::IGraphicsTexture*, 12> boundTextures{};
+    bool texturesBound = false;
     const auto switchGpuStage = [&](Engine::Graphics::GpuTimingStage stage)
     {
         if (activeGpuStage && *activeGpuStage == stage)
@@ -3637,7 +3769,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             ++m_lastOcclusionCulledCount;
             continue;
         }
-        switchGpuStage(draw.terrain
+        switchGpuStage((draw.terrain || draw.terrainCell)
             ? Engine::Graphics::GpuTimingStage::Terrain
             : (draw.blended
                 ? Engine::Graphics::GpuTimingStage::Transparent
@@ -3655,7 +3787,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         context->SetConstantBuffer(
             0, m_objectConstantBuffer.get(), draw.constantBufferOffset);
         for (uint32_t textureSlot = 0; textureSlot < draw.textures.size(); ++textureSlot)
-            context->SetTexture(textureSlot, draw.textures[textureSlot]);
+            if (!texturesBound || boundTextures[textureSlot] != draw.textures[textureSlot])
+                context->SetTexture(textureSlot, draw.textures[textureSlot]);
+        boundTextures = draw.textures;
+        texturesBound = true;
         submitGeometry(draw);
         if (draw.occlusionCandidate)
             context->EndOcclusionQuery();

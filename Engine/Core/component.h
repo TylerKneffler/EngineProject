@@ -140,7 +140,7 @@ private:
     static JsonValue ToJson(const char* value) { return JsonValue(std::string(value ? value : "")); }
     static JsonValue ToJson(bool value) { return JsonValue(value); }
     static JsonValue ToJson(float value) { return JsonValue(value); }
-    static JsonValue ToJson(double value) { return JsonValue(static_cast<float>(value)); }
+    static JsonValue ToJson(double value) { return JsonValue(value); }
     static JsonValue ToJson(int value) { return JsonValue(value); }
     static JsonValue ToJson(unsigned value) { return JsonValue(static_cast<int>(value)); }
     static JsonValue ToJson(const ComponentReference& value)
@@ -159,11 +159,17 @@ private:
             .Push(JsonValue(value.y))
             .Push(JsonValue(value.z));
     }
+    static JsonValue ToJson(const glm::dvec3& value)
+    {
+        return JsonValue::MakeArray()
+            .Push(JsonValue(value.x)).Push(JsonValue(value.y))
+            .Push(JsonValue(value.z));
+    }
 
     static void FromJson(const JsonValue& value, std::string& out) { out = value.AsString(); }
     static void FromJson(const JsonValue& value, bool& out) { out = value.AsBool(); }
     static void FromJson(const JsonValue& value, float& out) { out = value.AsFloat(); }
-    static void FromJson(const JsonValue& value, double& out) { out = value.AsFloat(); }
+    static void FromJson(const JsonValue& value, double& out) { out = value.AsDouble(); }
     static void FromJson(const JsonValue& value, int& out) { out = value.AsInt(); }
     static void FromJson(const JsonValue& value, unsigned& out) { out = static_cast<unsigned>(value.AsInt()); }
     static void FromJson(const JsonValue& value, ComponentReference& out)
@@ -180,6 +186,12 @@ private:
         if (!value.IsArray() || value.ArraySize() < 3)
             return;
         out = { value.ArrayAt(0).AsFloat(), value.ArrayAt(1).AsFloat(), value.ArrayAt(2).AsFloat() };
+    }
+    static void FromJson(const JsonValue& value, glm::dvec3& out)
+    {
+        if (!value.IsArray() || value.ArraySize() < 3) return;
+        out = {value.ArrayAt(0).AsDouble(), value.ArrayAt(1).AsDouble(),
+            value.ArrayAt(2).AsDouble()};
     }
 
     std::vector<SerializedField> m_serializedFields;

@@ -1867,6 +1867,31 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TerrainStreamingPerformanceTests.cpp")
+    enable_testing()
+    add_executable(TerrainStreamingPerformanceTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/TerrainStreamingPerformanceTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainPerformance/TerrainPerformanceDriver.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/PerlinNoiseField.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainStreamingCameraDriver.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGen.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainChunk.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainPatch.cpp")
+    target_link_libraries(TerrainStreamingPerformanceTests PRIVATE Engine)
+    target_include_directories(TerrainStreamingPerformanceTests PRIVATE
+        "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Core/Assets")
+    add_test(NAME TerrainStreamingPerformance COMMAND TerrainStreamingPerformanceTests)
+    set_tests_properties(TerrainStreamingPerformance PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}" LABELS "performance" TIMEOUT 300)
+    add_test(NAME TerrainRenderedRangeRegression
+        COMMAND TerrainStreamingPerformanceTests)
+    set_tests_properties(TerrainRenderedRangeRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}" LABELS "rendered"
+        ENVIRONMENT "TERRAIN_CAPTURE_IMAGES=1;TERRAIN_CAPTURE_VIEW=high"
+        TIMEOUT 300)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/CameraTrackTests.cpp")
     enable_testing()
     add_executable(CameraTrackTests EXCLUDE_FROM_ALL

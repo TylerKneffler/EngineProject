@@ -1,5 +1,6 @@
 #include "Terrain.h"
 #include "Core/Object.h"
+#include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Materials/Texture.h"
@@ -182,6 +183,7 @@ void Terrain::AssignLayersByHeight()
 bool Terrain::ApplyBrush(float x, float z, float radius, float strength,
     Brush brush, int layer)
 {
+    if (Owner && Owner->GetScene() && Owner->GetScene()->HasStarted()) return false;
     if (radius <= 0.f || strength <= 0.f || heights.empty()) return false;
     if (brush == Brush::Paint && (layer < 0 || layer >= static_cast<int>(layers.size())))
         return false;
@@ -571,7 +573,7 @@ void Terrain::Deserialize(const JsonValue& value)
     cellWidth = std::max(.001f, value["cellWidth"].AsFloat());
     cellDepth = std::max(.001f, value["cellDepth"].AsFloat());
     textureTiling = value.Has("textureTiling")
-        ? std::max(1.f, value["textureTiling"].AsFloat()) : 16.f;
+        ? std::max(1.f, value["textureTiling"].AsFloat()) : 4.f;
     heights.assign(static_cast<size_t>(cellsX + 1) * (cellsY + 1), 0.f);
     for (size_t i = 0; i < std::min(heights.size(), value["heights"].ArraySize()); ++i)
         heights[i] = value["heights"].ArrayAt(i).AsFloat();
