@@ -1908,6 +1908,19 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/DefaultScenePerformanceTests.cpp")
+    enable_testing()
+    add_executable(DefaultScenePerformanceTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/DefaultScenePerformanceTests.cpp")
+    target_link_libraries(DefaultScenePerformanceTests PRIVATE Engine)
+    target_include_directories(DefaultScenePerformanceTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME DefaultScenePerformance COMMAND DefaultScenePerformanceTests)
+    set_tests_properties(DefaultScenePerformance PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}" LABELS "performance" TIMEOUT 300)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/CameraTrackTests.cpp")
     enable_testing()
     add_executable(CameraTrackTests EXCLUDE_FROM_ALL
