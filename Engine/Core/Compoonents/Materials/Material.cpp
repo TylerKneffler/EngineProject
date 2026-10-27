@@ -49,6 +49,9 @@ Material::Material()
     RegisterField("reflectionEnvironmentRotation", reflectionEnvironmentRotation, "Reflections");
     RegisterField("normalScale", normalScale, "Height and Normal", false);
     RegisterField("heightScale", heightScale, "Height and Normal", false);
+    RegisterField("terrainHeightBlendStrength", terrainHeightBlendStrength,
+        "Terrain", false);
+    RegisterField("terrainMacroColor", terrainMacroColor, "Terrain", false);
     RegisterField("heightMinSteps", heightMinSteps, "Height and Normal", false);
     RegisterField("heightMaxSteps", heightMaxSteps, "Height and Normal", false);
     RegisterField("baseColorUvSet", baseColorUvSet, "Texture Coordinates", false);
@@ -207,6 +210,9 @@ bool Material::LoadFromFile(const std::string& path)
         if (root.Has("alphaCutoff")) alphaCutoff = root["alphaCutoff"].AsFloat();
         if (root.Has("normalScale")) normalScale = root["normalScale"].AsFloat();
         if (root.Has("heightScale")) heightScale = root["heightScale"].AsFloat();
+        if (root.Has("terrainHeightBlendStrength"))
+            terrainHeightBlendStrength = root["terrainHeightBlendStrength"].AsFloat();
+        terrainMacroColor = from3(root["terrainMacroColor"], terrainMacroColor);
         if (root.Has("heightMinSteps")) heightMinSteps = root["heightMinSteps"].AsFloat();
         if (root.Has("heightMaxSteps")) heightMaxSteps = root["heightMaxSteps"].AsFloat();
         if (root.Has("occlusionStrength")) occlusionStrength = root["occlusionStrength"].AsFloat();
@@ -291,6 +297,8 @@ bool Material::SaveToFile(const std::string& path) const
     root.Set("alphaCutoff", JsonValue(alphaCutoff));
     root.Set("normalScale", JsonValue(normalScale));
     root.Set("heightScale", JsonValue(heightScale));
+    root.Set("terrainHeightBlendStrength", JsonValue(terrainHeightBlendStrength));
+    root.Set("terrainMacroColor", J3(terrainMacroColor));
     root.Set("heightMinSteps", JsonValue(heightMinSteps));
     root.Set("heightMaxSteps", JsonValue(heightMaxSteps));
     root.Set("occlusionStrength", JsonValue(occlusionStrength));
@@ -437,6 +445,9 @@ void Material::Validate()
     alphaCutoff = std::clamp(alphaCutoff, 0.f, 1.f);
     normalScale = std::max(normalScale, 0.f);
     heightScale = std::clamp(heightScale, 0.f, 0.2f);
+    terrainHeightBlendStrength = std::clamp(terrainHeightBlendStrength, 0.f, 1.f);
+    terrainMacroColor = glm::clamp(terrainMacroColor,
+        glm::vec3(0.f), glm::vec3(1.f));
     heightMinSteps = std::clamp(heightMinSteps, 4.f, 64.f);
     heightMaxSteps = std::clamp(heightMaxSteps, heightMinSteps, 64.f);
     occlusionStrength = std::clamp(occlusionStrength, 0.f, 1.f);

@@ -658,11 +658,15 @@ int main()
         crossingCamera->transform.GetWorldPositionD().z / 128.0));
     const auto checkFarSeam = [&](int nearX, int nearY, int edge)
     {
-        std::vector<float> heights;
+        std::vector<float> heights, weights;
         Require(TerrainHeightArchive::ReadCell(
             Engine::Components::Mesh::ResolveFilePath(driver->heightArchive),
             driver->SourceSignature(), driver->mapHalfExtentCells,
-            manager->cellsX, manager->cellsY, nearX, nearY, heights));
+            manager->cellsX, manager->cellsY, nearX, nearY, heights,
+            &weights));
+        constexpr glm::vec3 baseColors[] = {
+            {.04927f, .15253f, .03096f}, {.13832f, .22583f, .04636f},
+            {.07028f, .17221f, .03527f}, {.21779f, .25200f, .07456f}};
         const bool vertical = edge == 0 || edge == 2;
         const int count = vertical ? manager->cellsY : manager->cellsX;
         for (int sample = 0; sample <= count; ++sample)
@@ -675,24 +679,60 @@ int main()
                 row * manager->cellDepth;
             const float expectedHeight = heights[static_cast<size_t>(
                 row * (manager->cellsX + 1) + col)];
+            const size_t weightIndex = static_cast<size_t>(
+                row * (manager->cellsX + 1) + col) *
+                TerrainHeightArchive::LayerCount;
+            glm::vec3 expectedColor(0.f);
+            for (int layer = 0; layer < TerrainHeightArchive::LayerCount;
+                ++layer)
+                expectedColor += baseColors[layer] *
+                    weights[weightIndex + layer];
+            const auto sampleHeight = [&](int x, int y) {
+                return heights[static_cast<size_t>(
+                    std::clamp(y, 0, manager->cellsY) *
+                        (manager->cellsX + 1) +
+                    std::clamp(x, 0, manager->cellsX))];
+            };
+            const glm::vec3 expectedNormal = glm::normalize(glm::vec3(
+                (sampleHeight(col - 1, row) -
+                    sampleHeight(col + 1, row)) /
+                    (2.f * manager->cellWidth), 1.f,
+                (sampleHeight(col, row - 1) -
+                    sampleHeight(col, row + 1)) /
+                    (2.f * manager->cellDepth)));
             bool matched = false;
             for (const auto* tile : farTiles)
             {
                 const glm::dvec3 origin = tile->Owner->transform.GetWorldPositionD();
-                for (const auto& vertex : tile->GetVertices())
+                const auto& vertices = tile->GetVertices();
+                for (uint32_t index : tile->GetIndices())
+                {
+                    const auto& vertex = vertices[index];
                     if (std::abs(origin.x + vertex.pos[0] - worldX) < .001 &&
                         std::abs(origin.z + vertex.pos[2] - worldZ) < .001 &&
-                        std::abs(vertex.pos[1] - expectedHeight) < .001f)
+                        std::abs(vertex.pos[1] - expectedHeight) < .001f &&
+                        glm::dot(glm::vec3(vertex.normal[0],
+                            vertex.normal[1], vertex.normal[2]),
+                            expectedNormal) > .9999f &&
+                        glm::length(glm::vec3(vertex.color[0],
+                            vertex.color[1], vertex.color[2]) -
+                            expectedColor) < .0001f)
                     { matched = true; break; }
+                }
                 if (matched) break;
             }
+            if (!matched)
+                std::cerr << "Far seam mismatch cell=" << nearX << ',' << nearY
+                    << " edge=" << edge << " sample=" << sample << '\n';
             Require(matched);
         }
     };
-    checkFarSeam(viewCellX + manager->farRadius, viewCellY, 2);
-    checkFarSeam(viewCellX - manager->farRadius, viewCellY, 0);
-    checkFarSeam(viewCellX, viewCellY + manager->farRadius, 1);
-    checkFarSeam(viewCellX, viewCellY - manager->farRadius, 3);
+    const int detailedRadius = std::max(manager->loadedRadius,
+        manager->farRadius);
+    checkFarSeam(viewCellX + detailedRadius, viewCellY, 2);
+    checkFarSeam(viewCellX - detailedRadius, viewCellY, 0);
+    checkFarSeam(viewCellX, viewCellY + detailedRadius, 1);
+    checkFarSeam(viewCellX, viewCellY - detailedRadius, 3);
     crossingCamera->transform.position = {-60.0 * 128.0 + 127.5,
         110.0, -60.0 * 128.0 + 64.0};
     driver->Update();
@@ -722,4 +762,109 @@ int main()
             scene.GetLastOrdinaryDrawCount());
     }
     std::filesystem::remove_all(patchDirectory);
+    // Play mode removes editor preview cells while the scene starts. Keep the
+    // authored runtime-bake configuration here to exercise that transition.
+    {
+        Engine::Scene::Scene playScene;
+        playScene.Init(renderer.GetGraphicsProvider());
+        Require(playScene.Load(
+            "Engine/Core/Assets/Scenes/terrain/terrain_performance.scene"));
+        auto* playMap = playScene.FindObjectByName("Terrain Performance Map");
+        Require(playMap != nullptr);
+        auto* playManager = playMap->GetComponent<
+            Engine::Components::TerrainManager>();
+        Require(playManager && playManager->GetLoadedCellCount() > 0 &&
+            playManager->requireRuntimeBake &&
+            !playManager->runtimeBakeDirectory.empty());
+        playScene.Start();
+        Require(playScene.HasStarted() &&
+            playManager->GetLoadedCellCount() == 0);
+        auto* playDriver = playMap->GetComponent<TerrainPerformanceDriver>();
+        Require(playDriver);
+        playDriver->Update();
+        const auto playFarTiles = playDriver->GetFarTileMeshes();
+        Require(!playFarTiles.empty());
+        auto* playCamera = playScene.FindObjectByName(
+            "Terrain Performance Camera");
+        Require(playCamera);
+        const int cameraCellX = static_cast<int>(std::floor(
+            playCamera->transform.GetWorldPositionD().x / 128.0));
+        const int cameraCellY = static_cast<int>(std::floor(
+            playCamera->transform.GetWorldPositionD().z / 128.0));
+        const int nearCellX = cameraCellX +
+            std::max(playManager->loadedRadius, playManager->farRadius);
+        std::vector<float> bakedHeights, bakedWeights;
+        uint32_t layerCount = 0;
+        Require(playManager->ReadBakedCellHeights(
+            {nearCellX, cameraCellY}, bakedHeights, &bakedWeights,
+            &layerCount));
+        Require(layerCount == 6 && bakedWeights.size() ==
+            bakedHeights.size() * layerCount);
+        constexpr glm::vec3 layerColors[] = {
+            {.05856f, .04472f, .02751f}, {.19217f, .11348f, .05328f},
+            {.07028f, .17221f, .03527f}, {.21779f, .25200f, .07456f},
+            {.04927f, .15253f, .03096f}, {.13832f, .22583f, .04636f}};
+        const int seamRow = playManager->cellsY / 2;
+        const size_t sample = static_cast<size_t>(seamRow) *
+            (playManager->cellsX + 1) + playManager->cellsX;
+        glm::vec3 expectedColor(0.f);
+        for (uint32_t layer = 0; layer < layerCount; ++layer)
+            expectedColor += layerColors[layer] *
+                bakedWeights[sample * layerCount + layer];
+        const double worldX = static_cast<double>(nearCellX + 1) * 128.0;
+        const double worldZ = static_cast<double>(cameraCellY) * 128.0 +
+            seamRow * playManager->cellDepth;
+        bool matchedColor = false;
+        for (const auto* tile : playFarTiles)
+        {
+            const glm::dvec3 origin =
+                tile->Owner->transform.GetWorldPositionD();
+            const auto& vertices = tile->GetVertices();
+            for (uint32_t index : tile->GetIndices())
+            {
+                const auto& vertex = vertices[index];
+                if (std::abs(origin.x + vertex.pos[0] - worldX) < .001 &&
+                    std::abs(origin.z + vertex.pos[2] - worldZ) < .001 &&
+                    std::abs(vertex.pos[1] - bakedHeights[sample]) < .001f &&
+                    glm::length(glm::vec3(vertex.color[0],
+                        vertex.color[1], vertex.color[2]) - expectedColor) <
+                        .0001f)
+                { matchedColor = true; break; }
+            }
+            if (matchedColor) break;
+        }
+        Require(matchedColor);
+    }
+    // Exercise the optional terrain material slots with real GPU textures.
+    // The bundled landscape uses albedo maps only, so borrow an existing map
+    // here to verify normal, roughness, and height binding through a draw.
+    manager->SyncLoadedCells(0, 0);
+    auto* materialCell = manager->GetLoadedCell(0, 0);
+    Require(materialCell && !materialCell->GetLayerMaterials().empty());
+    auto layerMaterial = materialCell->GetLayerMaterials().front();
+    Require(layerMaterial && layerMaterial->baseColorTexture);
+    const std::string testMap = layerMaterial->baseColorTexture->GetFilePath();
+    layerMaterial->SetNormalTexture(testMap);
+    layerMaterial->SetMetallicRoughnessTexture(testMap);
+    layerMaterial->SetHeightTexture(testMap);
+    layerMaterial->terrainHeightBlendStrength = .4f;
+    layerMaterial->PrepareTextures(renderer.GetGraphicsProvider());
+    Require(layerMaterial->normalTexture &&
+        layerMaterial->normalTexture->GetGraphicsTexture() &&
+        layerMaterial->metallicRoughnessTexture &&
+        layerMaterial->metallicRoughnessTexture->GetGraphicsTexture() &&
+        layerMaterial->heightTexture &&
+        layerMaterial->heightTexture->GetGraphicsTexture());
+    crossingCamera->transform.position = {64.0, 100.0, -80.0};
+    crossingCamera->transform.rotation = {.7f, 0.f, 0.f};
+    renderer.BeginFrame();
+    renderer.Clear(0.f, 0.f, 0.f);
+    auto materialContext = renderer.CreateFrameGraphicsContext();
+    scene.PrepareRenderFrame();
+    scene.Render(materialContext.get(), 1.f,
+        crossingCamera->GetComponent<Engine::Components::Camera>(),
+        false, width, height);
+    renderer.EndFrame();
+    renderer.WaitIdle();
+    Require(scene.GetLastOrdinaryDrawCount() > 0);
 }

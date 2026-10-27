@@ -258,16 +258,38 @@ int main()
     const auto runtimeBakePath = std::filesystem::temp_directory_path() /
         ("terrain_runtime_bake_" + std::to_string(
             std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(runtimeBakePath);
+    const auto bakedMaterialPath = runtimeBakePath / "paint.material";
+    {
+        std::ofstream material(bakedMaterialPath);
+        material << "{\"version\":1,\"baseColor\":[0.8,0.2,0.1]}";
+        Require(material.good());
+    }
     baked->runtimeBakeDirectory = runtimeBakePath.string();
-    baked->SetProceduralBuilder([](Engine::Components::TerrainManager::Cell,
+    baked->SetProceduralBuilder([&](Engine::Components::TerrainManager::Cell,
         Engine::Components::Terrain& terrain) {
         terrain.heights[4] = 7.f;
+        terrain.layers.push_back({bakedMaterialPath.string(), 0.f, 10.f,
+            {.8f, .2f, .1f}});
+        terrain.weights.assign(terrain.heights.size() * 2, 0.f);
+        for (size_t i = 0; i < terrain.heights.size(); ++i)
+            terrain.weights[i * 2] = 1.f;
+        terrain.weights[4 * 2] = .25f;
+        terrain.weights[4 * 2 + 1] = .75f;
         terrain.Rebuild();
     });
     Require(baked->AddProceduralCell(0, 0));
     Require(baked->AddProceduralCell(1, 0));
     Require(!baked->HasCompleteRuntimeBake());
     Require(baked->BakeRuntimeTerrain());
+    Require(baked->HasCompleteRuntimeBake());
+    const auto originalMaterialTime =
+        std::filesystem::last_write_time(bakedMaterialPath);
+    std::filesystem::last_write_time(bakedMaterialPath,
+        originalMaterialTime + std::chrono::seconds(5));
+    Require(!baked->HasCompleteRuntimeBake());
+    std::filesystem::last_write_time(bakedMaterialPath,
+        originalMaterialTime);
     Require(baked->HasCompleteRuntimeBake());
     const auto packedBake = runtimeBakePath / "123.terrainpack";
     {
@@ -302,9 +324,13 @@ int main()
         terrain.Rebuild();
     });
     bakedScene.Start();
-    std::vector<float> bakedSeamHeights;
-    Require(baked->ReadBakedCellHeights({1, 0}, bakedSeamHeights));
+    std::vector<float> bakedSeamHeights, bakedSeamWeights;
+    uint32_t bakedLayerCount = 0;
+    Require(baked->ReadBakedCellHeights({1, 0}, bakedSeamHeights,
+        &bakedSeamWeights, &bakedLayerCount));
     Require(bakedSeamHeights.size() == 9 && bakedSeamHeights[4] == 7.f);
+    Require(bakedLayerCount == 2 && bakedSeamWeights.size() == 18 &&
+        bakedSeamWeights[8] == .25f && bakedSeamWeights[9] == .75f);
     baked->UpdateStreaming(0, 0);
     Require(baked->GetLoadedCell(0, 0) &&
         baked->GetLoadedCell(0, 0)->heights[4] == 7.f);

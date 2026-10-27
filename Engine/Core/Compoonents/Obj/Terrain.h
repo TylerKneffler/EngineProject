@@ -7,6 +7,8 @@
 #include <vector>
 #include <memory>
 #include <array>
+#include <iosfwd>
+#include <map>
 
 namespace Engine::Components
 {
@@ -80,7 +82,13 @@ public:
         int expectedX, int expectedY, std::vector<float>& heights);
     static bool ReadCacheHeightsRange(const std::string& path,
         uint64_t signature, int expectedX, int expectedY,
-        std::vector<float>& heights, uint64_t offset, uint64_t size);
+        std::vector<float>& heights, uint64_t offset, uint64_t size,
+        std::vector<float>* weights = nullptr,
+        uint32_t* weightLayerCount = nullptr);
+    static bool CacheMaterialsMatchRange(std::istream& stream,
+        uint64_t signature, int expectedX, int expectedY,
+        uint64_t offset, uint64_t size,
+        std::map<std::string, int64_t>& materialStamps);
     const std::vector<std::shared_ptr<Material>>& GetLayerMaterials() const { return m_materials; }
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;

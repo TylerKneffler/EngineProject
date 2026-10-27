@@ -223,6 +223,10 @@ public:
     {
         return m_lastOcclusionCulledCount;
     }
+    uint32_t GetLastTerrainOcclusionCulledCount() const
+    {
+        return m_lastTerrainOcclusionCulledCount;
+    }
     uint32_t GetLastOrdinaryDrawCount() const
     {
         return m_lastOrdinaryDrawCount;
@@ -664,6 +668,7 @@ private:
     Engine::Model::DistanceLightingSettings m_distanceLightingSettings;
     uint64_t m_lastObjectDataUploadBytes = 0;
     uint32_t m_lastOcclusionCulledCount = 0;
+    uint32_t m_lastTerrainOcclusionCulledCount = 0;
     uint32_t m_lastOrdinaryDrawCount = 0;
     uint64_t m_lastOrdinaryTriangleCount = 0;
     uint32_t m_lastParticlePortalDrawCount = 0;

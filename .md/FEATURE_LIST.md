@@ -44,5 +44,4 @@ These are candidate priorities based on gaps in the current implementation. Thei
 ## References
 
 - [README](README.md) for supported platforms, setup, and the game loop.
-- [Feature guide](.md/feature-guide.md) for detailed current behavior and limitations.
-- [Roadmap notes](.md/todo.md) for ongoing implementation notes.
+- [Terrain TODO](todo.md) for ongoing implementation notes.

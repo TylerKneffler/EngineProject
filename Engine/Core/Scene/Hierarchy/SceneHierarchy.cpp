@@ -81,8 +81,17 @@ void Scene::Start()
     for (const auto& object : m_objects)
         if (object)
             object->transform.ClearEditorOverride();
+    // Component Start() can remove preview objects (terrain does this when
+    // switching to its runtime bake), invalidating an m_objects iterator.
+    std::vector<Engine::Core::Object*> startingObjects;
+    startingObjects.reserve(m_objects.size());
     for (const auto& object : m_objects)
-        object->Start();
+        if (object)
+            startingObjects.push_back(object.get());
+    for (Engine::Core::Object* object : startingObjects)
+        if (std::any_of(m_objects.begin(), m_objects.end(),
+            [object](const auto& current) { return current.get() == object; }))
+            object->Start();
     m_hasStarted = true;
 }
 

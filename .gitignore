@@ -3,7 +3,6 @@ build/
 .vscode/settings.json
 .vscode/engine-attach-request.json
 .vscode/engine-last-code-file.txt
-/AGENTS.md
 .local/
 !.local/
 .local/*

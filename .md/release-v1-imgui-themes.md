@@ -1,6 +1,6 @@
 # ImGui editor themes
 
-The editor scans this directory for files ending in `.imguitheme`. A valid file
+The packaged editor scans `ReleaseBuilds/v1.0.0/Engine/Editor/UI/ImGui/Themes` for files ending in `.imguitheme`. A valid file
 uses an `ImGuiTheme` root with `version="1"`, one `Style` element, and one
 `Colors` element. Copy either bundled theme when creating a new one.
 

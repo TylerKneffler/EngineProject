@@ -19,5 +19,7 @@ public:
     std::vector<std::shared_ptr<Material>> materials;
     float textureTiling = 16.f;
     bool distantVisual = false;
+    // True only when every cell of a resident 4x4 batch is present.
+    bool completeFootprint = false;
 };
 }

@@ -50,6 +50,9 @@ struct ObjectData
     float4 pmxToonTint;
     float4 pmxEdgeColor;
     float4 pmxParams;
+    uint4 terrainMapMasks;
+    float4 terrainLayerParams[6];
+    float4 terrainMacroColors[6];
 };
 
 struct SceneLightData
@@ -93,6 +96,24 @@ struct SceneLightData
 [[vk::binding(25, 0)]] Texture2D subsurfaceThicknessMap;
 [[vk::binding(26, 0)]] Texture2D sphereMap;
 [[vk::binding(27, 0)]] Texture2D toonMap;
+[[vk::binding(28, 0)]] Texture2D terrainNormal0;
+[[vk::binding(29, 0)]] Texture2D terrainNormal1;
+[[vk::binding(30, 0)]] Texture2D terrainNormal2;
+[[vk::binding(31, 0)]] Texture2D terrainNormal3;
+[[vk::binding(32, 0)]] Texture2D terrainNormal4;
+[[vk::binding(33, 0)]] Texture2D terrainNormal5;
+[[vk::binding(34, 0)]] Texture2D terrainRoughness0;
+[[vk::binding(35, 0)]] Texture2D terrainRoughness1;
+[[vk::binding(36, 0)]] Texture2D terrainRoughness2;
+[[vk::binding(37, 0)]] Texture2D terrainRoughness3;
+[[vk::binding(38, 0)]] Texture2D terrainRoughness4;
+[[vk::binding(39, 0)]] Texture2D terrainRoughness5;
+[[vk::binding(40, 0)]] Texture2D terrainHeight0;
+[[vk::binding(41, 0)]] Texture2D terrainHeight1;
+[[vk::binding(42, 0)]] Texture2D terrainHeight2;
+[[vk::binding(43, 0)]] Texture2D terrainHeight3;
+[[vk::binding(44, 0)]] Texture2D terrainHeight4;
+[[vk::binding(45, 0)]] Texture2D terrainHeight5;
 [[vk::binding(6, 0)]] SamplerState materialSampler;
 #else
 cbuffer DrawBuffer : register(b0)
@@ -117,6 +138,24 @@ Texture2D ies2 : register(t22); Texture2D ies3 : register(t23);
 Texture2D subsurfaceThicknessMap : register(t24);
 Texture2D sphereMap : register(t25);
 Texture2D toonMap : register(t26);
+Texture2D terrainNormal0 : register(t27);
+Texture2D terrainNormal1 : register(t28);
+Texture2D terrainNormal2 : register(t29);
+Texture2D terrainNormal3 : register(t30);
+Texture2D terrainNormal4 : register(t31);
+Texture2D terrainNormal5 : register(t32);
+Texture2D terrainRoughness0 : register(t33);
+Texture2D terrainRoughness1 : register(t34);
+Texture2D terrainRoughness2 : register(t35);
+Texture2D terrainRoughness3 : register(t36);
+Texture2D terrainRoughness4 : register(t37);
+Texture2D terrainRoughness5 : register(t38);
+Texture2D terrainHeight0 : register(t39);
+Texture2D terrainHeight1 : register(t40);
+Texture2D terrainHeight2 : register(t41);
+Texture2D terrainHeight3 : register(t42);
+Texture2D terrainHeight4 : register(t43);
+Texture2D terrainHeight5 : register(t44);
 StructuredBuffer<SceneLightData> sceneLights : register(t6);
 StructuredBuffer<ObjectData> objects : register(t7);
 StructuredBuffer<float4x4> boneMatrices : register(t8);
@@ -590,6 +629,22 @@ float SampleDirectionalShadowCascade(ObjectData objectData,
     float2 texelFraction = frac(texelPosition);
     int2 tileMaximum = tileOrigin + int2(
         (int)tileWidth - 1, (int)tileHeight - 1);
+    // Terrain asks for a single bilinear shadow tap. Keep that path to four
+    // depth reads instead of entering the general PCF loop for every pixel.
+    [branch] if (radius == 0)
+    {
+        int2 p00 = clamp(center, tileOrigin, tileMaximum);
+        int2 p10 = clamp(center + int2(1, 0), tileOrigin, tileMaximum);
+        int2 p01 = clamp(center + int2(0, 1), tileOrigin, tileMaximum);
+        int2 p11 = clamp(center + int2(1, 1), tileOrigin, tileMaximum);
+        float receiverDepth = projected.z - objectData.shadowParams.x;
+        float s00 = receiverDepth <= shadowMap.Load(int3(p00, 0));
+        float s10 = receiverDepth <= shadowMap.Load(int3(p10, 0));
+        float s01 = receiverDepth <= shadowMap.Load(int3(p01, 0));
+        float s11 = receiverDepth <= shadowMap.Load(int3(p11, 0));
+        return lerp(lerp(s00, s10, texelFraction.x),
+            lerp(s01, s11, texelFraction.x), texelFraction.y);
+    }
     float litSamples = 0.0;
     [loop] for (int y = -4; y <= 5; ++y)
     [loop] for (int x = -4; x <= 5; ++x)
@@ -751,8 +806,90 @@ float3 SampleTerrainColor(Texture2D colorMap, float2 uv,
     float3 color = colorMap.Sample(materialSampler, uv).rgb;
     if (blendAmount > 0.0)
         color = lerp(color,
-            colorMap.Sample(materialSampler, alternateUv).rgb, blendAmount);
+            colorMap.Sample(materialSampler, alternateUv).rgb,
+            blendAmount);
     return color;
+}
+
+float3 SampleTerrainLayerColor(uint layer, float2 uv, float2 alternateUv,
+    float blendAmount, float macroBlend, float3 macroColor)
+{
+    float3 color;
+    if (layer == 0u) color = SampleTerrainColor(baseColorMap, uv, alternateUv, blendAmount);
+    else if (layer == 1u) color = SampleTerrainColor(metallicRoughnessMap, uv, alternateUv, blendAmount);
+    else if (layer == 2u) color = SampleTerrainColor(normalMap, uv, alternateUv, blendAmount);
+    else if (layer == 3u) color = SampleTerrainColor(occlusionMap, uv, alternateUv, blendAmount);
+    else if (layer == 4u) color = SampleTerrainColor(emissiveMap, uv, alternateUv, blendAmount);
+    else color = SampleTerrainColor(heightMap, uv, alternateUv, blendAmount);
+    return lerp(color, macroColor, macroBlend);
+}
+
+float3 SampleTerrainLayerNormal(uint layer, float2 uv)
+{
+    if (layer == 0u) return terrainNormal0.Sample(materialSampler, uv).xyz;
+    if (layer == 1u) return terrainNormal1.Sample(materialSampler, uv).xyz;
+    if (layer == 2u) return terrainNormal2.Sample(materialSampler, uv).xyz;
+    if (layer == 3u) return terrainNormal3.Sample(materialSampler, uv).xyz;
+    if (layer == 4u) return terrainNormal4.Sample(materialSampler, uv).xyz;
+    return terrainNormal5.Sample(materialSampler, uv).xyz;
+}
+
+float SampleTerrainLayerRoughness(uint layer, float2 uv)
+{
+    if (layer == 0u) return terrainRoughness0.Sample(materialSampler, uv).g;
+    if (layer == 1u) return terrainRoughness1.Sample(materialSampler, uv).g;
+    if (layer == 2u) return terrainRoughness2.Sample(materialSampler, uv).g;
+    if (layer == 3u) return terrainRoughness3.Sample(materialSampler, uv).g;
+    if (layer == 4u) return terrainRoughness4.Sample(materialSampler, uv).g;
+    return terrainRoughness5.Sample(materialSampler, uv).g;
+}
+
+float SampleTerrainLayerHeight(uint layer, float2 uv)
+{
+    if (layer == 0u) return terrainHeight0.Sample(materialSampler, uv).r;
+    if (layer == 1u) return terrainHeight1.Sample(materialSampler, uv).r;
+    if (layer == 2u) return terrainHeight2.Sample(materialSampler, uv).r;
+    if (layer == 3u) return terrainHeight3.Sample(materialSampler, uv).r;
+    if (layer == 4u) return terrainHeight4.Sample(materialSampler, uv).r;
+    return terrainHeight5.Sample(materialSampler, uv).r;
+}
+
+float4 PSShadowMain(
+    float3 worldPos : TEXCOORD2,
+    float2 uv : TEXCOORD,
+    float2 uv1 : TEXCOORD1,
+    float4 vertexColor : COLOR,
+    float4 uvChannels0 : TEXCOORD3,
+    float4 uvChannels1 : TEXCOORD4,
+    float4 uvChannels2 : TEXCOORD5,
+    float4 uvChannels3 : TEXCOORD6,
+    float4 uvChannels4 : TEXCOORD7) : SV_TARGET
+{
+    ObjectData objectData = objects[draw.objectIndex];
+    if (dot(objectData.traversalClipPlane.xyz,
+        objectData.traversalClipPlane.xyz) > 0.0 &&
+        dot(float4(worldPos, 1.0), objectData.traversalClipPlane) < 0.0)
+        clip(-1.0);
+    if (dot(objectData.portalClipPlane.xyz,
+        objectData.portalClipPlane.xyz) > 0.0 &&
+        dot(float4(worldPos, 1.0), objectData.portalClipPlane) < 0.0)
+        clip(-1.0);
+    uint flags = (uint)objectData.materialParams.w;
+    if (flags & 32u)
+    {
+        float alpha = objectData.baseColor.a *
+            ((flags & 4096u) ? 1.0 : vertexColor.a);
+        if (flags & 1u)
+        {
+            float2 baseUv = SelectMaterialUv(objectData.textureUvSets0.x,
+                uv, uv1, uvChannels0, uvChannels1, uvChannels2,
+                uvChannels3, uvChannels4);
+            alpha *= baseColorMap.Sample(materialSampler, baseUv).a *
+                objectData.pmxTextureTint.a;
+        }
+        clip(alpha - objectData.viewPositionAlphaCutoff.w);
+    }
+    return 0.0;
 }
 
 float4 PSMain(
@@ -800,6 +937,9 @@ float4 PSMain(
         gridColor = lerp(gridColor, float3(1.0, 0.66, 0.15), border);
         return float4(gridColor, 1.0);
     }
+    float3 terrainNormalForLighting = normalize(normal) *
+        (frontFace ? 1.0 : -1.0);
+    float terrainRoughness = 1.0;
     // Authored terrain stores six painted weights in the spare UV channels.
     // Vertex color carries the contribution of layers without a texture.
     if (flags & 2048u)
@@ -809,30 +949,184 @@ float4 PSMain(
             terrainUv = worldPos.xz *
                 (objectData.textureUvSets1.z / objectData.textureUvSets1.x);
         const float2 terrainVariation = TerrainTextureOffset(worldPos.xz);
-        terrainUv += terrainVariation * 0.9;
-        // A rotated second lookup hides the short repeat period in close
-        // views. Fade it away before the extra samples affect distant cells.
-        const float2 alternateUv = float2(-terrainUv.y, terrainUv.x) * 0.73 +
-            float2(0.173, 0.617);
         const float nearDistance = distance(worldPos,
             objectData.viewPositionAlphaCutoff.xyz);
-        const float detailBlend = 0.5 * (1.0 - smoothstep(16.0, 48.0,
+        const bool stochastic = (flags & 65536u) != 0u;
+        if (!stochastic) terrainUv += terrainVariation * 0.9;
+        float2 alternateUv = float2(-terrainUv.y, terrainUv.x) * 0.73 +
+            float2(0.173, 0.617);
+        float detailBlend = 0.5 * (1.0 - smoothstep(16.0, 48.0,
             nearDistance));
-        float4 weights0 = uvChannels2;
-        float2 weights1 = uvChannels3.xy;
-        if (weights0.x > 0.0) base.rgb += SampleTerrainColor(baseColorMap, terrainUv, alternateUv, detailBlend) * weights0.x;
-        if (weights0.y > 0.0) base.rgb += SampleTerrainColor(metallicRoughnessMap, terrainUv, alternateUv, detailBlend) * weights0.y;
-        if (weights0.z > 0.0) base.rgb += SampleTerrainColor(normalMap, terrainUv, alternateUv, detailBlend) * weights0.z;
-        if (weights0.w > 0.0) base.rgb += SampleTerrainColor(occlusionMap, terrainUv, alternateUv, detailBlend) * weights0.w;
-        if (weights1.x > 0.0) base.rgb += SampleTerrainColor(emissiveMap, terrainUv, alternateUv, detailBlend) * weights1.x;
-        if (weights1.y > 0.0) base.rgb += SampleTerrainColor(heightMap, terrainUv, alternateUv, detailBlend) * weights1.y;
-        base.rgb *= 1.0 + (terrainVariation.x + terrainVariation.y) * 0.10;
+        if (stochastic)
+        {
+            const float2 tile = worldPos.xz / 24.0;
+            const float2 local = frac(tile);
+            const float edge = min(min(local.x, 1.0 - local.x),
+                min(local.y, 1.0 - local.y));
+            const float2 randomOffset = TerrainTextureHash(floor(tile));
+            alternateUv = float2(-terrainUv.y, terrainUv.x) * 0.73 +
+                randomOffset;
+            detailBlend = 0.5 * smoothstep(0.0, 0.18, edge) *
+                (1.0 - smoothstep(16.0, 48.0, nearDistance));
+        }
+        // Measured lowest-mip colors supply inexpensive macro appearance.
+        const float macroBlend = (flags & 131072u)
+            ? smoothstep(512.0, 2048.0, nearDistance) : 0.0;
+        float weights[6] = {uvChannels2.x, uvChannels2.y,
+            uvChannels2.z, uvChannels2.w, uvChannels3.x, uvChannels3.y};
+        float originalWeightSum = 0.0;
+        [unroll] for (uint layer = 0u; layer < 6u; ++layer)
+            originalWeightSum += weights[layer];
+        [branch] if (objectData.terrainMapMasks.x == 0u &&
+            objectData.terrainMapMasks.y == 0u &&
+            objectData.terrainMapMasks.z == 0u)
+        {
+            [branch] if ((flags & 131072u) == 0u)
+            {
+                if (weights[0] > 0.0 && (objectData.terrainMapMasks.w & 1u))
+                    base.rgb += SampleTerrainColor(baseColorMap, terrainUv,
+                        alternateUv, detailBlend) * weights[0];
+                if (weights[1] > 0.0 && (objectData.terrainMapMasks.w & 2u))
+                    base.rgb += SampleTerrainColor(metallicRoughnessMap,
+                        terrainUv, alternateUv, detailBlend) * weights[1];
+                if (weights[2] > 0.0 && (objectData.terrainMapMasks.w & 4u))
+                    base.rgb += SampleTerrainColor(normalMap, terrainUv,
+                        alternateUv, detailBlend) * weights[2];
+                if (weights[3] > 0.0 && (objectData.terrainMapMasks.w & 8u))
+                    base.rgb += SampleTerrainColor(occlusionMap, terrainUv,
+                        alternateUv, detailBlend) * weights[3];
+                if (weights[4] > 0.0 && (objectData.terrainMapMasks.w & 16u))
+                    base.rgb += SampleTerrainColor(emissiveMap, terrainUv,
+                        alternateUv, detailBlend) * weights[4];
+                if (weights[5] > 0.0 && (objectData.terrainMapMasks.w & 32u))
+                    base.rgb += SampleTerrainColor(heightMap, terrainUv,
+                        alternateUv, detailBlend) * weights[5];
+            }
+            else
+            {
+                [branch] if (macroBlend >= 0.999)
+                {
+                    [unroll] for (uint layer = 0u; layer < 6u; ++layer)
+                        if (objectData.terrainMapMasks.w & (1u << layer))
+                            base.rgb += objectData.terrainMacroColors[layer].rgb *
+                                weights[layer];
+                }
+                else
+                {
+                    if (weights[0] > 0.0 && (objectData.terrainMapMasks.w & 1u))
+                        base.rgb += lerp(SampleTerrainColor(baseColorMap,
+                            terrainUv, alternateUv, detailBlend),
+                            objectData.terrainMacroColors[0].rgb, macroBlend) * weights[0];
+                    if (weights[1] > 0.0 && (objectData.terrainMapMasks.w & 2u))
+                        base.rgb += lerp(SampleTerrainColor(metallicRoughnessMap,
+                            terrainUv, alternateUv, detailBlend),
+                            objectData.terrainMacroColors[1].rgb, macroBlend) * weights[1];
+                    if (weights[2] > 0.0 && (objectData.terrainMapMasks.w & 4u))
+                        base.rgb += lerp(SampleTerrainColor(normalMap,
+                            terrainUv, alternateUv, detailBlend),
+                            objectData.terrainMacroColors[2].rgb, macroBlend) * weights[2];
+                    if (weights[3] > 0.0 && (objectData.terrainMapMasks.w & 8u))
+                        base.rgb += lerp(SampleTerrainColor(occlusionMap,
+                            terrainUv, alternateUv, detailBlend),
+                            objectData.terrainMacroColors[3].rgb, macroBlend) * weights[3];
+                    if (weights[4] > 0.0 && (objectData.terrainMapMasks.w & 16u))
+                        base.rgb += lerp(SampleTerrainColor(emissiveMap,
+                            terrainUv, alternateUv, detailBlend),
+                            objectData.terrainMacroColors[4].rgb, macroBlend) * weights[4];
+                    if (weights[5] > 0.0 && (objectData.terrainMapMasks.w & 32u))
+                        base.rgb += lerp(SampleTerrainColor(heightMap,
+                            terrainUv, alternateUv, detailBlend),
+                            objectData.terrainMacroColors[5].rgb, macroBlend) * weights[5];
+                }
+            }
+            if (originalWeightSum > 0.00001)
+            {
+                float roughnessSum = 0.0;
+                [unroll] for (uint layer = 0u; layer < 6u; ++layer)
+                    roughnessSum += weights[layer] *
+                        objectData.terrainLayerParams[layer].x;
+                terrainRoughness = clamp(roughnessSum / originalWeightSum,
+                    0.045, 1.0);
+            }
+        }
+        else if (originalWeightSum > 0.00001)
+        {
+            [unroll] for (uint layer = 0u; layer < 6u; ++layer)
+                weights[layer] /= originalWeightSum;
+            float heightWeightSum = 0.0;
+            [unroll] for (uint layer = 0u; layer < 6u; ++layer)
+            {
+                if (weights[layer] > 0.0 &&
+                    (objectData.terrainMapMasks.z & (1u << layer)))
+                {
+                    const float height = SampleTerrainLayerHeight(layer,
+                        terrainUv);
+                    weights[layer] = max(0.0, weights[layer] +
+                        objectData.terrainLayerParams[layer].z *
+                        (height - 0.5));
+                }
+                heightWeightSum += weights[layer];
+            }
+            if (heightWeightSum <= 0.00001)
+            {
+                weights[0] = uvChannels2.x / originalWeightSum;
+                weights[1] = uvChannels2.y / originalWeightSum;
+                weights[2] = uvChannels2.z / originalWeightSum;
+                weights[3] = uvChannels2.w / originalWeightSum;
+                weights[4] = uvChannels3.x / originalWeightSum;
+                weights[5] = uvChannels3.y / originalWeightSum;
+                heightWeightSum = 1.0;
+            }
+            if (heightWeightSum > 0.00001)
+            {
+                float3 tangentNormal = float3(0.0, 0.0, 0.0);
+                float roughnessSum = 0.0;
+                [unroll] for (uint layer = 0u; layer < 6u; ++layer)
+                {
+                    const float weight = weights[layer] / heightWeightSum;
+                    if (weight <= 0.0) continue;
+                    if (objectData.terrainMapMasks.w & (1u << layer))
+                        base.rgb += SampleTerrainLayerColor(layer, terrainUv,
+                            alternateUv, detailBlend, macroBlend,
+                            objectData.terrainMacroColors[layer].rgb) *
+                            (weight * originalWeightSum);
+                    float layerRoughness =
+                        objectData.terrainLayerParams[layer].x;
+                    if (objectData.terrainMapMasks.y & (1u << layer))
+                        layerRoughness *= SampleTerrainLayerRoughness(layer,
+                            terrainUv);
+                    roughnessSum += layerRoughness * weight;
+                    float3 layerNormal = float3(0.0, 0.0, 1.0);
+                    if (objectData.terrainMapMasks.x & (1u << layer))
+                    {
+                        layerNormal = SampleTerrainLayerNormal(layer,
+                            terrainUv) * 2.0 - 1.0;
+                        layerNormal.xy *=
+                            objectData.terrainLayerParams[layer].y;
+                    }
+                    tangentNormal += normalize(layerNormal) * weight;
+                }
+                terrainRoughness = clamp(roughnessSum, 0.045, 1.0);
+                if (objectData.terrainMapMasks.x != 0u)
+                {
+                    const float3 terrainTangent = normalize(tangent.xyz);
+                    const float3 terrainBitangent = normalize(cross(
+                        terrainNormalForLighting, terrainTangent)) * tangent.w;
+                    terrainNormalForLighting = normalize(
+                        terrainTangent * tangentNormal.x +
+                        terrainBitangent * tangentNormal.y +
+                        terrainNormalForLighting * tangentNormal.z);
+                }
+            }
+        }
+        if (!stochastic)
+            base.rgb *= 1.0 + (terrainVariation.x + terrainVariation.y) * 0.10;
     }
     // Static runtime terrain shares one global sun at every view distance.
     // Only the closest terrain receives a single-tap realtime shadow.
     if ((flags & 8192u) && objectData.ambientUnlit.w < 0.5)
     {
-        float3 terrainNormal = normalize(normal) * (frontFace ? 1.0 : -1.0);
+        float3 terrainNormal = terrainNormalForLighting;
         float3 diffuseLight = objectData.ambientUnlit.rgb;
         float3 sunDirection = objectData.bakedLightDirection.xyz;
         float sunFacing = saturate(dot(terrainNormal, sunDirection));
@@ -860,7 +1154,8 @@ float4 PSMain(
             base.a);
     }
     float metallic = saturate(objectData.materialParams.x);
-    float roughness = clamp(objectData.materialParams.y, 0.045, 1.0);
+    float roughness = (flags & 2048u) ? terrainRoughness :
+        clamp(objectData.materialParams.y, 0.045, 1.0);
     float occlusion = 1.0;
     float3 emissive = objectData.emissiveOcclusion.rgb;
     float2 baseUv = SelectMaterialUv(objectData.textureUvSets0.x, uv, uv1,
@@ -926,7 +1221,7 @@ float4 PSMain(
             objectData.emissiveOcclusion.w);
     if (flags & 16u)
         emissive *= emissiveMap.Sample(materialSampler, emissiveUv).rgb;
-    normal = geometryNormal;
+    normal = (flags & 2048u) ? terrainNormalForLighting : geometryNormal;
     if ((flags & 4u) && hasTangents)
     {
         float3 sampledNormal = normalMap.Sample(materialSampler, normalUv).xyz * 2.0 - 1.0;

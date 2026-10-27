@@ -565,6 +565,22 @@ if(ENGINE_VULKAN_ENABLED)
         )
         list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
     endforeach()
+    set(SHADER_SOURCE
+        "${ENGINE_ROOT}/Engine/Core/Shaders/Object/Object.hlsl")
+    set(SHADER_OUTPUT
+        "${VULKAN_SHADER_DIR}/Object.PSShadowMain.PS.spv")
+    add_custom_command(
+        OUTPUT "${SHADER_OUTPUT}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${VULKAN_SHADER_DIR}"
+        COMMAND "${DXC_SPIRV_EXECUTABLE}" -spirv -fspv-target-env=vulkan1.1
+                -fvk-use-dx-layout -fspv-entrypoint-name=PSMain
+                -D VULKAN=1 -T ps_6_0
+                -E PSShadowMain -Fo "${SHADER_OUTPUT}" "${SHADER_SOURCE}"
+        DEPENDS "${SHADER_SOURCE}"
+        VERBATIM
+        COMMENT "Compiling Object.PSShadowMain.PS for Vulkan"
+    )
+    list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
     foreach(SHADER_ENTRY VSMmdMain PSMmdMain)
         if(SHADER_ENTRY STREQUAL "VSMmdMain")
             set(SHADER_PROFILE vs_6_0)

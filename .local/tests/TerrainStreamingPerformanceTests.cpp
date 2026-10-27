@@ -24,6 +24,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <stdexcept>
 #include <string_view>
 #include <thread>
@@ -119,7 +120,7 @@ struct Samples
 {
     std::vector<double> frames, streaming, managerCpu, farTileCpu,
         renderCpu, prepareCpu, sceneRenderCpu, frameEndCpu,
-        gpuTotal, gpuTerrain;
+        gpuTotal, gpuTerrain, batchRefreshCpu, batchBuildCpu;
     std::vector<double> visibleDistances;
     double worstStreaming = 0.0, visibleDistance = 0.0;
     uint64_t peakTerrainCpu = 0, peakTerrainGpu = 0, peakCache = 0;
@@ -127,7 +128,8 @@ struct Samples
     uint64_t peakWorkingSet = 0, peakPrivate = 0;
     size_t peakResident = 0;
     uint32_t peakDraws = 0;
-    std::vector<double> draws, submittedTriangles, objectUploadKiB,
+    std::vector<double> draws, terrainOcclusionCulls,
+        submittedTriangles, objectUploadKiB,
         residentCells;
     std::array<std::vector<double>,
         static_cast<size_t>(Engine::Graphics::GpuTimingStage::Count)> gpuStages;
@@ -300,6 +302,12 @@ int Run()
         "TERRAIN_TEST_DISABLE_SUN", nullptr, 0) == 0;
     const bool unlit = GetEnvironmentVariableA(
         "TERRAIN_TEST_UNLIT", nullptr, 0) > 0;
+    const bool stochasticVariation = GetEnvironmentVariableA(
+        "TERRAIN_TEST_STOCHASTIC", nullptr, 0) > 0;
+    manager->stochasticTerrainVariation = stochasticVariation;
+    const bool macroColorEnabled = GetEnvironmentVariableA(
+        "TERRAIN_TEST_MACRO_COLOR", nullptr, 0) > 0;
+    manager->terrainMacroColorEnabled = macroColorEnabled;
     if (unlit) scene.settings.renderMode = Engine::Model::SceneRenderMode::Unlit;
     if (!shadowsEnabled)
         if (auto* sun = scene.FindObjectByName("Terrain Performance Sun"))
@@ -416,7 +424,9 @@ int Run()
                 (captureWithoutBatches ? "_no_batches" : "") +
                 (!shadowsEnabled ? "_no_shadows" : "") +
                 (!sunEnabled ? "_no_sun" : "") +
-                (unlit ? "_unlit" : "") + ".png"),
+                (unlit ? "_unlit" : "") +
+                (stochasticVariation ? "_stochastic" : "") +
+                (macroColorEnabled ? "_macro" : "") + ".png"),
                 pixels), "could not save terrain PNG");
             std::cerr << "Saved terrain view: " << name << std::endl;
         };
@@ -444,6 +454,10 @@ int Run()
     const float viewPitch = viewpoint == "ridge" ? .18f : .06f;
     const auto runFrame = [&](double x, double z, double yaw, Samples* samples) {
         const auto start = Clock::now();
+        const double refreshBefore =
+            manager->GetRenderBatchRefreshMilliseconds();
+        const double buildBefore =
+            manager->GetRenderBatchBuildMilliseconds();
         cameraObject->transform.position = {
             x, viewHeight, z};
         cameraObject->transform.rotation = {viewPitch, static_cast<float>(yaw), 0.f};
@@ -470,6 +484,10 @@ int Run()
         const double streamingMs = Milliseconds(start, streamed);
         samples->streaming.push_back(streamingMs);
         samples->managerCpu.push_back(Milliseconds(start, managed));
+        samples->batchRefreshCpu.push_back(
+            manager->GetRenderBatchRefreshMilliseconds() - refreshBefore);
+        samples->batchBuildCpu.push_back(
+            manager->GetRenderBatchBuildMilliseconds() - buildBefore);
         samples->farTileCpu.push_back(Milliseconds(managed, streamed));
         samples->worstStreaming = std::max(samples->worstStreaming, streamingMs);
         samples->renderCpu.push_back(Milliseconds(streamed, finished));
@@ -479,6 +497,8 @@ int Run()
         samples->peakDraws = std::max(samples->peakDraws,
             scene.GetLastOrdinaryDrawCount());
         samples->draws.push_back(scene.GetLastOrdinaryDrawCount());
+        samples->terrainOcclusionCulls.push_back(
+            scene.GetLastTerrainOcclusionCulledCount());
         samples->submittedTriangles.push_back(
             static_cast<double>(scene.GetLastOrdinaryTriangleCount()));
         samples->residentCells.push_back(
@@ -572,6 +592,9 @@ int Run()
     }
     Require(samples.frames.size() == FramesPerPhase * 3,
         "look, walk, and run test was incomplete");
+    if (samples.peakResident == 0 || samples.peakDraws == 0)
+        std::cerr << "Terrain samples: peakResident=" << samples.peakResident
+            << " peakDraws=" << samples.peakDraws << '\n';
     Require(samples.peakResident > 0 && samples.peakDraws > 0,
         "terrain did not render during the performance test");
     Require(!samples.gpuTotal.empty(), "GPU timing queries did not resolve");
@@ -594,7 +617,13 @@ int Run()
         driver->GetFarTileRebuildMilliseconds();
     const uint64_t batchUploadsBeforeCrossing =
         manager->GetRenderBatchUploadCount();
+    const double batchBuildBeforeCrossing =
+        manager->GetRenderBatchBuildMilliseconds();
     const size_t loadedBeforeCrossing = manager->GetLoadedCellCount();
+    std::map<Engine::Components::TerrainManager::Cell, int> lodBeforeCrossing;
+    for (const auto cell : allCells)
+        if (const auto* terrain = manager->GetLoadedCell(cell.first, cell.second))
+            lodBeforeCrossing[cell] = terrain->GetMeshLodStride();
     Samples crossingSamples;
     const auto crossingStart = Clock::now();
     for (int frame = 1; frame <= 60; ++frame)
@@ -614,6 +643,12 @@ int Run()
         driver->GetFarTileRebuildMilliseconds() - rebuildBeforeCrossing;
     const uint64_t crossingBatchUploads =
         manager->GetRenderBatchUploadCount() - batchUploadsBeforeCrossing;
+    uint32_t crossingLodChanges = 0;
+    for (const auto& [cell, oldStride] : lodBeforeCrossing)
+        if (const auto* terrain = manager->GetLoadedCell(cell.first, cell.second))
+            crossingLodChanges += terrain->GetMeshLodStride() != oldStride;
+    Require(crossingLodChanges > 0,
+        "cell crossing did not exercise a terrain LOD transition");
     if (farFieldEnabled)
         Require(crossingTileUploads > 0 && crossingTileUploads < 16,
             "distant terrain crossing rebuilt too many tiles");
@@ -644,6 +679,10 @@ int Run()
             << "  \"sunEnabled\": " << (sunEnabled ? "true" : "false")
                 << ",\n"
             << "  \"unlit\": " << (unlit ? "true" : "false") << ",\n"
+            << "  \"stochasticTerrainVariation\": "
+                << (stochasticVariation ? "true" : "false") << ",\n"
+            << "  \"terrainMacroColorEnabled\": "
+                << (macroColorEnabled ? "true" : "false") << ",\n"
             << "  \"farFieldTriangles\": " << farFieldTriangles << ",\n"
             << "  \"submittedTrianglesP50\": "
                 << Percentile(samples.submittedTriangles, .5) << ",\n"
@@ -661,6 +700,8 @@ int Run()
                 << crossingTileRebuildMs << ",\n"
             << "  \"crossingBatchUploads\": "
                 << crossingBatchUploads << ",\n"
+            << "  \"crossingLodChanges\": "
+                << crossingLodChanges << ",\n"
             << "  \"crossingLoadedCellsBefore\": "
                 << loadedBeforeCrossing << ",\n"
             << "  \"crossingLoadedCellsAfter\": "
@@ -673,6 +714,13 @@ int Run()
                 << Percentile(crossingSamples.frames, .95) << ",\n"
             << "  \"crossingManagerP95Ms\": "
                 << Percentile(crossingSamples.managerCpu, .95) << ",\n"
+            << "  \"crossingBatchRefreshP95Ms\": "
+                << Percentile(crossingSamples.batchRefreshCpu, .95) << ",\n"
+            << "  \"crossingBatchBuildP95Ms\": "
+                << Percentile(crossingSamples.batchBuildCpu, .95) << ",\n"
+            << "  \"crossingBatchBuildTotalMs\": "
+                << manager->GetRenderBatchBuildMilliseconds() -
+                    batchBuildBeforeCrossing << ",\n"
             << "  \"crossingFarTileP95Ms\": "
                 << Percentile(crossingSamples.farTileCpu, .95) << ",\n"
             << "  \"crossingRenderCpuP95Ms\": "
@@ -743,6 +791,8 @@ int Run()
         out << "  \"drawsP50\": " << Percentile(samples.draws, .5)
             << ",\n  \"drawsP95\": " << Percentile(samples.draws, .95)
             << ",\n  \"drawsP99\": " << Percentile(samples.draws, .99)
+            << ",\n  \"terrainOcclusionCullsP95\": " <<
+                Percentile(samples.terrainOcclusionCulls, .95)
             << ",\n  \"residentCellsP50\": "
             << Percentile(samples.residentCells, .5)
             << ",\n  \"residentCellsP95\": "
@@ -759,6 +809,8 @@ int Run()
             (shadowsEnabled ? "" : "-no-shadows") +
             (sunEnabled ? "" : "-no-sun") +
             (unlit ? "-unlit" : "") +
+            (stochasticVariation ? "-stochastic" : "") +
+            (macroColorEnabled ? "-macro" : "") +
             ".json");
     std::filesystem::create_directories(output.parent_path());
     std::ofstream file(output, std::ios::trunc);

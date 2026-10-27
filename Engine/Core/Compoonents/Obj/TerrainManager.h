@@ -38,6 +38,11 @@ public:
     bool batchFarCells = true;
     // Optional fast directional diffuse shading for static play-mode terrain.
     bool fastRuntimeLighting = false;
+    // Compare stochastic tile variation with the low-cost world-space UV warp.
+    bool stochasticTerrainVariation = false;
+    // Measured lowest-mip layer colors can replace distant detail in the
+    // resident terrain window. Keep opt-in until its GPU cost is lower.
+    bool terrainMacroColorEnabled = false;
     // Show a world-space metric ruler and cell boundaries on every terrain mesh.
     bool measurementGrid = false;
     // Terrain mesh and cell data only; shared textures and renderer targets are excluded.
@@ -64,6 +69,10 @@ public:
     size_t GetLoadedCellCount() const { return m_loaded.size(); }
     size_t GetRenderBatchCount() const { return m_renderBatches.size(); }
     uint64_t GetRenderBatchUploadCount() const { return m_renderBatchUploadCount; }
+    double GetRenderBatchRefreshMilliseconds() const
+    { return m_renderBatchRefreshMilliseconds; }
+    double GetRenderBatchBuildMilliseconds() const
+    { return m_renderBatchBuildMilliseconds; }
     size_t GetPreparingCellCount() const { return m_preparingCells.size(); }
     size_t GetCacheHitCount() const { return m_cacheHits; }
     Terrain* GetLoadedCell(int x, int y) const;
@@ -71,7 +80,9 @@ public:
     bool AddProceduralCell(int x, int y);
     void SetProceduralBuilder(std::function<void(Cell, Terrain&)> builder);
     void SetStaticCache(std::string directory, uint64_t signature);
-    bool ReadBakedCellHeights(Cell cell, std::vector<float>& heights) const;
+    bool ReadBakedCellHeights(Cell cell, std::vector<float>& heights,
+        std::vector<float>* weights = nullptr,
+        uint32_t* weightLayerCount = nullptr) const;
     std::string GetCacheFilePath(int x, int y) const;
     // Bake a deterministic cell without retaining it in the scene or GPU memory.
     bool BakeProceduralCell(int x, int y, bool force = false);
@@ -113,6 +124,8 @@ private:
     };
     std::map<Cell, RenderBatch> m_renderBatches;
     uint64_t m_renderBatchUploadCount = 0;
+    double m_renderBatchRefreshMilliseconds = 0.0;
+    double m_renderBatchBuildMilliseconds = 0.0;
     bool m_renderBatchRefreshPending = false;
     std::string m_bakeStatus;
     bool m_runtimeBakeActive = false;

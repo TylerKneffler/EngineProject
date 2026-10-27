@@ -142,11 +142,18 @@ bool TerrainManager::ReadRuntimeBakeIndex(const std::string& path,
         if (range.first != next) return false;
         next = range.second;
     }
-    return entries.size() == GetCellCount() && next == fileSize;
+    if (entries.size() != GetCellCount() || next != fileSize) return false;
+    std::map<std::string, int64_t> materialStamps;
+    for (const auto& [cell, entry] : entries)
+        if (!Terrain::CacheMaterialsMatchRange(file, m_cacheSignature,
+            cellsX, cellsY, entry.offset, entry.size, materialStamps))
+            return false;
+    return true;
 }
 
 bool TerrainManager::ReadBakedCellHeights(Cell cell,
-    std::vector<float>& heights) const
+    std::vector<float>& heights, std::vector<float>* weights,
+    uint32_t* weightLayerCount) const
 {
     if (!m_runtimeBakeActive || !HasCell(cell.first, cell.second))
         return false;
@@ -154,7 +161,8 @@ bool TerrainManager::ReadBakedCellHeights(Cell cell,
     return found != m_bakeIndex.end() &&
         Terrain::ReadCacheHeightsRange(GetRuntimeBakeArchivePath(),
             m_cacheSignature, cellsX, cellsY, heights,
-            found->second.offset, found->second.size);
+            found->second.offset, found->second.size,
+            weights, weightLayerCount);
 }
 
 bool TerrainManager::BakeRuntimeTerrain(bool reuseExistingCells)
@@ -1070,6 +1078,7 @@ void TerrainManager::RefreshRenderBatches(int uploadBudget, int centerX,
     int centerY, int radius)
 {
     if (!Owner || !Owner->GetScene()) return;
+    const auto refreshStart = std::chrono::steady_clock::now();
     m_renderBatchRefreshPending = false;
     constexpr int side = 4;
     const auto groupOf = [side](Cell cell) -> Cell {
@@ -1192,24 +1201,47 @@ void TerrainManager::RefreshRenderBatches(int uploadBudget, int centerX,
             m_renderBatchRefreshPending = true;
             continue;
         }
+        const auto buildStart = std::chrono::steady_clock::now();
         std::vector<Mesh::Vertex> vertices;
         std::vector<uint32_t> indices;
+        size_t vertexCount = 0, indexCount = 0;
+        for (const auto& [cell, terrain] : members)
+        {
+            const auto* mesh = terrain->Owner->GetComponent<Mesh>();
+            vertexCount += mesh->GetVertices().size();
+            indexCount += mesh->GetIndices().size();
+        }
+        vertices.reserve(vertexCount);
+        indices.reserve(indexCount);
         for (const auto& [cell, terrain] : members)
         {
             const auto* mesh = terrain->Owner->GetComponent<Mesh>();
             const glm::mat4 world = terrain->Owner->transform.GetWorldMatrix();
-            const glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(world)));
+            const bool translationOnly =
+                glm::length(glm::vec3(world[0]) - glm::vec3(1.f, 0.f, 0.f)) < 1e-6f &&
+                glm::length(glm::vec3(world[1]) - glm::vec3(0.f, 1.f, 0.f)) < 1e-6f &&
+                glm::length(glm::vec3(world[2]) - glm::vec3(0.f, 0.f, 1.f)) < 1e-6f;
+            const glm::mat3 normalMatrix = translationOnly
+                ? glm::mat3(1.f) :
+                glm::transpose(glm::inverse(glm::mat3(world)));
+            const glm::vec3 translation(world[3]);
             const uint32_t base = static_cast<uint32_t>(vertices.size());
             for (auto vertex : mesh->GetVertices())
             {
-                const glm::vec3 position = glm::vec3(world * glm::vec4(
-                    vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.f));
-                const glm::vec3 normal = glm::normalize(normalMatrix * glm::vec3(
-                    vertex.normal[0], vertex.normal[1], vertex.normal[2]));
+                const glm::vec3 position = translationOnly
+                    ? glm::vec3(vertex.pos[0], vertex.pos[1], vertex.pos[2]) + translation
+                    : glm::vec3(world * glm::vec4(
+                        vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.f));
                 vertex.pos[0] = position.x; vertex.pos[1] = position.y;
                 vertex.pos[2] = position.z;
-                vertex.normal[0] = normal.x; vertex.normal[1] = normal.y;
-                vertex.normal[2] = normal.z;
+                if (!translationOnly)
+                {
+                    const glm::vec3 normal = glm::normalize(normalMatrix *
+                        glm::vec3(vertex.normal[0], vertex.normal[1],
+                            vertex.normal[2]));
+                    vertex.normal[0] = normal.x; vertex.normal[1] = normal.y;
+                    vertex.normal[2] = normal.z;
+                }
                 vertices.push_back(vertex);
             }
             for (uint32_t index : mesh->GetIndices()) indices.push_back(base + index);
@@ -1229,6 +1261,7 @@ void TerrainManager::RefreshRenderBatches(int uploadBudget, int centerX,
         auto* appearance = object->AddComponent<TerrainBatchAppearance>();
         appearance->materials = first->GetLayerMaterials();
         appearance->textureTiling = first->textureTiling;
+        appearance->completeFootprint = members.size() == side * side;
         RenderBatch batch;
         batch.object = object;
         batch.revision = revisionOf(members);
@@ -1244,8 +1277,12 @@ void TerrainManager::RefreshRenderBatches(int uploadBudget, int centerX,
         }
         m_renderBatches[group] = std::move(batch);
         ++m_renderBatchUploadCount;
+        m_renderBatchBuildMilliseconds += std::chrono::duration<double,
+            std::milli>(std::chrono::steady_clock::now() - buildStart).count();
         --uploadBudget;
     }
+    m_renderBatchRefreshMilliseconds += std::chrono::duration<double,
+        std::milli>(std::chrono::steady_clock::now() - refreshStart).count();
 }
 
 void TerrainManager::UpdateStreaming(int centerX, int centerY)
@@ -1530,6 +1567,8 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         .Set("maxUploadsPerUpdate", JsonValue(maxUploadsPerUpdate))
         .Set("batchFarCells", JsonValue(batchFarCells))
         .Set("fastRuntimeLighting", JsonValue(fastRuntimeLighting))
+        .Set("stochasticTerrainVariation", JsonValue(stochasticTerrainVariation))
+        .Set("terrainMacroColorEnabled", JsonValue(terrainMacroColorEnabled))
         .Set("measurementGrid", JsonValue(measurementGrid))
         .Set("cpuBudgetMiB", JsonValue(cpuBudgetMiB))
         .Set("gpuBudgetMiB", JsonValue(gpuBudgetMiB))
@@ -1620,6 +1659,10 @@ void TerrainManager::Deserialize(const JsonValue& value)
     batchFarCells = !value.Has("batchFarCells") || value["batchFarCells"].AsBool();
     fastRuntimeLighting = value.Has("fastRuntimeLighting") &&
         value["fastRuntimeLighting"].AsBool();
+    stochasticTerrainVariation = value.Has("stochasticTerrainVariation") &&
+        value["stochasticTerrainVariation"].AsBool();
+    terrainMacroColorEnabled = value.Has("terrainMacroColorEnabled") &&
+        value["terrainMacroColorEnabled"].AsBool();
     measurementGrid = value.Has("measurementGrid") &&
         value["measurementGrid"].AsBool();
     cpuBudgetMiB = value.Has("cpuBudgetMiB")
@@ -1717,6 +1760,10 @@ bool TerrainManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
     changed |= ui.SliderInt("Uploads per update", &maxUploadsPerUpdate, 1, 64);
     changed |= ui.Checkbox("Batch far terrain cells", &batchFarCells);
     changed |= ui.Checkbox("Fast runtime terrain lighting", &fastRuntimeLighting);
+    changed |= ui.Checkbox("Stochastic terrain tile variation",
+        &stochasticTerrainVariation);
+    changed |= ui.Checkbox("Terrain macro color blend",
+        &terrainMacroColorEnabled);
     changed |= ui.Checkbox("Measurement grid (metres and cell borders)",
         &measurementGrid);
     changed |= ui.SliderInt("CPU terrain budget MiB", &cpuBudgetMiB, 1, 16384);

@@ -1,6 +1,6 @@
 # Subsurface scattering demo
 
-Open `subsurface_scattering_demo.scene` in the editor. The fixed camera shows
+Open `Engine/Core/Assets/Scenes/Rendering/subsurface_scattering_demo.scene` in the editor. The fixed camera shows
 three matching skin spheres: SSS off, short RGB radius, and broad red radius.
 The directional key casts shadows; the warm rear light reveals transmission
 through the two flattened ear shapes. The right ear uses

@@ -1,20 +1,20 @@
 <?xml version="1.0"?>
 <Scene xmlns:components="urn:engine-components" version="1">
-  <settings dimension="0" showGrid="true" gridHalfSize="10" gridCellSize="1" gridOpacity="0.4" gridFadeDistance="80" skyboxEnabled="true" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" toneMapping="1" outputExposure="0" renderMode="0" sceneViewUiOverlay="false" portalDebugVisuals="false" sceneCameraWarpLookThrough="false" portalDebugWireframe="false" portalDebugTintRemoteView="true" portalDebugOverlayAlpha="0.45" portalRecursionDepth="2" portalConnectionRepeatLimit="2" portalMaxViewsPerFrame="24">
+  <settings dimension="0" showGrid="true" gridHalfSize="10" gridCellSize="1" gridOpacity="0.40000000596046448" gridFadeDistance="80" skyboxEnabled="true" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" toneMapping="1" outputExposure="0" renderMode="0" sceneViewUiOverlay="false" portalDebugVisuals="false" sceneCameraWarpLookThrough="false" portalDebugWireframe="false" portalDebugTintRemoteView="true" portalDebugOverlayAlpha="0.44999998807907104" portalRecursionDepth="2" portalConnectionRepeatLimit="2" portalMaxViewsPerFrame="24">
     <gridColor>
-      <item>0.45</item>
-      <item>0.45</item>
-      <item>0.45</item>
+      <item>0.44999998807907104</item>
+      <item>0.44999998807907104</item>
+      <item>0.44999998807907104</item>
     </gridColor>
     <gridOriginColor>
-      <item>0.3</item>
+      <item>0.30000001192092896</item>
       <item>0.5</item>
-      <item>0.8</item>
+      <item>0.80000001192092896</item>
     </gridOriginColor>
     <ambientColor>
-      <item>0.12</item>
-      <item>0.12</item>
-      <item>0.12</item>
+      <item>0.11999999731779099</item>
+      <item>0.11999999731779099</item>
+      <item>0.11999999731779099</item>
     </ambientColor>
   </settings>
   <objects>
@@ -26,7 +26,7 @@
           <item>-3</item>
         </Transform.position>
         <Transform.rotation>
-          <item>0.463648</item>
+          <item>0.4636479914188385</item>
           <item>0</item>
           <item>0</item>
         </Transform.rotation>
@@ -37,7 +37,7 @@
         </Transform.scale>
       </transform>
       <components>
-        <components:Camera Camera.active="true" Camera.useTransformRotation="true" Camera.fov="60" Camera.near="0.01" Camera.far="100" Camera.orthographic="false" Camera.orthographicSize="5">
+        <components:Camera Camera.active="true" Camera.useTransformRotation="true" Camera.fov="60" Camera.near="0.0099999997764825821" Camera.far="100" Camera.orthographic="false" Camera.orthographicSize="5">
           <Camera.target>
             <item>0</item>
             <item>0</item>
@@ -60,7 +60,7 @@
           <item>-1</item>
         </Transform.position>
         <Transform.rotation>
-          <item>0.55</item>
+          <item>0.55000001192092896</item>
           <item>0.75</item>
           <item>0</item>
         </Transform.rotation>
@@ -71,11 +71,11 @@
         </Transform.scale>
       </transform>
       <components>
-        <components:Light Light.lightType="1" Light.intensity="1.9" Light.range="9.91" Light.falloff="1.4" Light.intensityMode="0" Light.innerConeAngle="25" Light.outerConeAngle="35" Light.lightingChannels="-1" Light.cookieTexture="" Light.iesProfileTexture="" Light.cookieScale="1" Light.baked="false" Light.castsShadows="true" Light.shadowStrength="1" Light.shadowDepthBias="0.0015" Light.shadowNormalBias="0.01" Light.shadowResolutionScale="1" Light.shadowFilterScale="1">
+        <components:Light Light.lightType="1" Light.intensity="1.8999999761581421" Light.range="9.9099998474121094" Light.falloff="1.3999999761581421" Light.intensityMode="0" Light.innerConeAngle="25" Light.outerConeAngle="35" Light.lightingChannels="-1" Light.cookieTexture="" Light.iesProfileTexture="" Light.cookieScale="1" Light.baked="false" Light.castsShadows="true" Light.shadowStrength="1" Light.shadowDepthBias="0.001500000013038516" Light.shadowNormalBias="0.0099999997764825821" Light.shadowResolutionScale="1" Light.shadowFilterScale="1">
           <Light.color>
             <item>1</item>
-            <item>0.95</item>
-            <item>0.85</item>
+            <item>0.94999998807907104</item>
+            <item>0.85000002384185791</item>
           </Light.color>
         </components:Light>
       </components>

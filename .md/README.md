@@ -6,7 +6,7 @@ Skeletal animations are saved as individual `.anim` assets. A `.rig` records the
 
 ## Start with a packaged build
 
-1. Download the [current Windows x64 ZIP (v1.0.0)](ReleaseBuilds/EngineProject-v1.0.0-windows-x64.zip?raw=1). Browse [all packaged builds](ReleaseBuilds/) for other versions.
+1. Download the [current Windows x64 ZIP (v1.0.0)](../ReleaseBuilds/EngineProject-v1.0.0-windows-x64.zip?raw=1). Browse [all packaged builds](../ReleaseBuilds/) for other versions.
 2. Extract the ZIP and keep the complete `v1.0.0` folder together.
 3. Run `Editor.exe` inside that folder.
 
@@ -181,11 +181,11 @@ The standalone game renders every frame. The editor updates the scene only in Pl
      [Present Frame]
 ```
 
-Core scene and component code lives in `Engine/Core/`; the editor, standalone game, and built-in demo scripts live in `Engine/Editor/`, `Engine/Game/`, and `Engine/Core/Assets/Scripts/`. See the [detailed system graphs](.md/engine-system-graph.md) and [feature guide](.md/feature-guide.md).
+Core scene and component code lives in `Engine/Core/`; the editor, standalone game, and built-in demo scripts live in `Engine/Editor/`, `Engine/Game/`, and `Engine/Core/Assets/Scripts/`. See the [feature list](FEATURE_LIST.md) and [terrain work](todo.md).
 
 ## Third-party libraries and includes
 
-CMake retrieves these dependencies with `FetchContent`; their versions and options are defined in [CMakeLists.txt](CMakeLists.txt). No separate manual install is needed for the source build.
+CMake retrieves these dependencies with `FetchContent`; their versions and options are defined in [CMakeLists.txt](../CMakeLists.txt). No separate manual install is needed for the source build.
 
 | Dependency | Used for |
 | --- | --- |

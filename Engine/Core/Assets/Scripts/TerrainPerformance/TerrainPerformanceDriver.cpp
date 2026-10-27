@@ -14,6 +14,7 @@
 #include <iostream>
 #include <filesystem>
 #include <map>
+#include <optional>
 #include <set>
 #include <stdexcept>
 
@@ -174,6 +175,10 @@ void TerrainPerformanceDriver::RefreshFarTerrain(int centerX, int centerY)
     constexpr glm::vec3 palette[] = {
         {.04926f, .15254f, .03097f}, {.13833f, .22573f, .04635f},
         {.07026f, .17219f, .03528f}, {.21771f, .25187f, .07453f}};
+    constexpr glm::vec3 nearPalette[] = {
+        {.05856f, .04472f, .02751f}, {.19217f, .11348f, .05328f},
+        {.07028f, .17221f, .03527f}, {.21779f, .25200f, .07456f},
+        {.04927f, .15253f, .03096f}, {.13832f, .22583f, .04636f}};
     const int nearRadius = std::max(manager->loadedRadius, manager->farRadius);
     const auto visible = [nearRadius](int x, int y, int cx, int cy) {
         return std::abs(x - cx) > nearRadius ||
@@ -188,22 +193,55 @@ void TerrainPerformanceDriver::RefreshFarTerrain(int centerX, int centerY)
     // the first far cell so its shared edge has identical vertices.
     const std::string archivePath = Engine::Components::Mesh::ResolveFilePath(
         heightArchive);
-    std::map<std::pair<int, int>, std::vector<float>> seamCache;
-    const auto seamHeights = [&](int x, int y) -> const std::vector<float>* {
+    struct SeamSurface
+    {
+        const std::vector<float>* heights = nullptr;
+        const std::vector<float>* weights = nullptr;
+        uint32_t layerCount = 0;
+        std::vector<float> ownedHeights;
+        std::vector<float> ownedWeights;
+    };
+    std::map<std::pair<int, int>, SeamSurface> seamCache;
+    const auto seamSurface = [&](int x, int y) -> const SeamSurface* {
         const size_t expected = static_cast<size_t>(manager->cellsX + 1) *
             (manager->cellsY + 1);
-        if (const auto* loaded = manager->GetLoadedCell(x, y))
-            if (loaded->heights.size() == expected) return &loaded->heights;
         auto [it, inserted] = seamCache.try_emplace({x, y});
-        const bool bakedRuntime = scene->HasStarted() &&
-            manager->requireRuntimeBake;
-        if (inserted && !(bakedRuntime
-            ? manager->ReadBakedCellHeights({x, y}, it->second)
-            : TerrainHeightArchive::ReadCell(archivePath,
-                m_configuredSignature, mapHalfExtentCells, manager->cellsX,
-                manager->cellsY, x, y, it->second)))
-            it->second.clear();
-        return it->second.size() == expected ? &it->second : nullptr;
+        SeamSurface& surface = it->second;
+        if (inserted)
+        {
+            if (const auto* loaded = manager->GetLoadedCell(x, y);
+                loaded && loaded->heights.size() == expected)
+            {
+                surface.heights = &loaded->heights;
+                surface.weights = &loaded->weights;
+                surface.layerCount = static_cast<uint32_t>(loaded->layers.size());
+            }
+            else
+            {
+                const bool bakedRuntime = scene->HasStarted() &&
+                    manager->requireRuntimeBake;
+                bool read = false;
+                if (bakedRuntime)
+                    read = manager->ReadBakedCellHeights({x, y},
+                        surface.ownedHeights, &surface.ownedWeights,
+                        &surface.layerCount);
+                else
+                {
+                    read = TerrainHeightArchive::ReadCell(archivePath,
+                        m_configuredSignature, mapHalfExtentCells,
+                        manager->cellsX, manager->cellsY, x, y,
+                        surface.ownedHeights, &surface.ownedWeights);
+                    surface.layerCount = TerrainHeightArchive::LayerCount;
+                }
+                if (read)
+                {
+                    surface.heights = &surface.ownedHeights;
+                    surface.weights = &surface.ownedWeights;
+                }
+            }
+        }
+        return surface.heights && surface.heights->size() == expected
+            ? &surface : nullptr;
     };
     // 0/1/2/3 identify the far cell's left/bottom/right/top edge.
     const auto seamSide = [&](int x, int y, int cx, int cy) {
@@ -212,6 +250,32 @@ void TerrainPerformanceDriver::RefreshFarTerrain(int centerX, int centerY)
         if (!visible(x + 1, y, cx, cy)) return 2;
         if (!visible(x, y - 1, cx, cy)) return 3;
         return -1;
+    };
+    const auto detailedNormal = [&](const std::vector<float>& heights,
+        int col, int row) {
+        const auto sample = [&](int x, int y) {
+            return heights[static_cast<size_t>(
+                std::clamp(y, 0, manager->cellsY) * (manager->cellsX + 1) +
+                std::clamp(x, 0, manager->cellsX))];
+        };
+        return glm::normalize(glm::vec3(
+            (sample(col - 1, row) - sample(col + 1, row)) /
+                (2.f * manager->cellWidth), 1.f,
+            (sample(col, row - 1) - sample(col, row + 1)) /
+                (2.f * manager->cellDepth)));
+    };
+    const auto seamNormal = [&](const std::vector<float>* nearHeights,
+        int seam, int col, int row) -> std::optional<glm::vec3> {
+        if (!nearHeights) return std::nullopt;
+        if (seam == 0 && col == 0)
+            return detailedNormal(*nearHeights, manager->cellsX, row);
+        if (seam == 1 && row == manager->cellsY)
+            return detailedNormal(*nearHeights, col, 0);
+        if (seam == 2 && col == manager->cellsX)
+            return detailedNormal(*nearHeights, 0, row);
+        if (seam == 3 && row == 0)
+            return detailedNormal(*nearHeights, col, manager->cellsY);
+        return std::nullopt;
     };
     const auto setColor = [&](Engine::Components::Mesh::Vertex& vertex,
         float height) {
@@ -225,6 +289,40 @@ void TerrainPerformanceDriver::RefreshFarTerrain(int centerX, int centerY)
         vertex.color[1] = color.g;
         vertex.color[2] = color.b;
         vertex.color[3] = 1.f;
+    };
+    const auto blendSeamColor = [&](Engine::Components::Mesh::Vertex& vertex,
+        const SeamSurface* surface, int seam, int col, int row,
+        float u, float v) {
+        if (!surface || !surface->weights ||
+            (surface->layerCount != 4 && surface->layerCount != 6))
+            return;
+        const float edgeBlend = seam == 0 ? 1.f - u :
+            seam == 1 ? v : seam == 2 ? u :
+            seam == 3 ? 1.f - v : 0.f;
+        if (edgeBlend <= 0.f) return;
+        const int nearCol = seam == 0 ? manager->cellsX :
+            seam == 2 ? 0 : col;
+        const int nearRow = seam == 1 ? 0 :
+            seam == 3 ? manager->cellsY : row;
+        const size_t sample = static_cast<size_t>(nearRow) *
+            (manager->cellsX + 1) + nearCol;
+        if (surface->weights->size() != surface->heights->size() *
+            surface->layerCount) return;
+        constexpr int archiveToNear[] = {4, 5, 2, 3};
+        glm::vec3 color(0.f);
+        for (uint32_t layer = 0; layer < surface->layerCount; ++layer)
+        {
+            const int nearLayer = surface->layerCount == 4
+                ? archiveToNear[layer] : static_cast<int>(layer);
+            color += nearPalette[nearLayer] *
+                (*surface->weights)[sample * surface->layerCount + layer];
+        }
+        const glm::vec3 farColor(vertex.color[0], vertex.color[1],
+            vertex.color[2]);
+        color = glm::mix(farColor, color, edgeBlend);
+        vertex.color[0] = color.r;
+        vertex.color[1] = color.g;
+        vertex.color[2] = color.b;
     };
     if (m_farTiles.empty())
         for (int y = -mapHalfExtentCells; y <= mapHalfExtentCells;
@@ -282,11 +380,13 @@ void TerrainPerformanceDriver::RefreshFarTerrain(int centerX, int centerY)
                 if (!visible(x, y, centerX, centerY) ||
                     patchCells.count({x, y})) continue;
                 const int seam = seamSide(x, y, centerX, centerY);
-                const std::vector<float>* nearHeights = seam == 0
-                    ? seamHeights(x - 1, y) : seam == 1
-                    ? seamHeights(x, y + 1) : seam == 2
-                    ? seamHeights(x + 1, y) : seam == 3
-                    ? seamHeights(x, y - 1) : nullptr;
+                const SeamSurface* nearSurface = seam == 0
+                    ? seamSurface(x - 1, y) : seam == 1
+                    ? seamSurface(x, y + 1) : seam == 2
+                    ? seamSurface(x + 1, y) : seam == 3
+                    ? seamSurface(x, y - 1) : nullptr;
+                const std::vector<float>* nearHeights = nearSurface
+                    ? nearSurface->heights : nullptr;
                 if (nearHeights)
                 {
                     const float topLeft = gridHeight(x, y);
@@ -319,8 +419,9 @@ void TerrainPerformanceDriver::RefreshFarTerrain(int centerX, int centerY)
                             v * (bottomRight - bottomLeft)) / spanX;
                         const float dz = ((1.f - u) * (bottomLeft - topLeft) +
                             u * (bottomRight - topRight)) / spanZ;
-                        const glm::vec3 normal = glm::normalize(
-                            glm::vec3(-dx, 1.f, -dz));
+                        const glm::vec3 normal = seamNormal(nearHeights,
+                            seam, col, row).value_or(glm::normalize(
+                                glm::vec3(-dx, 1.f, -dz)));
                         vertex.normal[0] = normal.x;
                         vertex.normal[1] = normal.y;
                         vertex.normal[2] = normal.z;
@@ -329,6 +430,8 @@ void TerrainPerformanceDriver::RefreshFarTerrain(int centerX, int centerY)
                         vertex.uv[1] = static_cast<float>(y + v + mapHalfExtentCells) /
                             (side - 1);
                         setColor(vertex, height);
+                        blendSeamColor(vertex, nearSurface, seam, col, row,
+                            u, v);
                         const uint32_t index = static_cast<uint32_t>(vertices.size());
                         vertices.push_back(vertex);
                         return index;
@@ -371,11 +474,13 @@ void TerrainPerformanceDriver::RefreshFarTerrain(int centerX, int centerY)
             if (patch.heights.size() !=
                 static_cast<size_t>(patchWidth) * patchDepth) continue;
             const int seam = seamSide(patch.x, patch.y, centerX, centerY);
-            const std::vector<float>* nearHeights = seam == 0
-                ? seamHeights(patch.x - 1, patch.y) : seam == 1
-                ? seamHeights(patch.x, patch.y + 1) : seam == 2
-                ? seamHeights(patch.x + 1, patch.y) : seam == 3
-                ? seamHeights(patch.x, patch.y - 1) : nullptr;
+            const SeamSurface* nearSurface = seam == 0
+                ? seamSurface(patch.x - 1, patch.y) : seam == 1
+                ? seamSurface(patch.x, patch.y + 1) : seam == 2
+                ? seamSurface(patch.x + 1, patch.y) : seam == 3
+                ? seamSurface(patch.x, patch.y - 1) : nullptr;
+            const std::vector<float>* nearHeights = nearSurface
+                ? nearSurface->heights : nullptr;
             const float topLeft = gridHeight(patch.x, patch.y);
             const float topRight = gridHeight(patch.x + 1, patch.y);
             const float bottomLeft = gridHeight(patch.x, patch.y + 1);
@@ -420,16 +525,19 @@ void TerrainPerformanceDriver::RefreshFarTerrain(int centerX, int centerY)
                     vertex.pos[1] = height;
                     vertex.pos[2] = (patch.y - tile.startY) * spanZ +
                         row * manager->cellDepth;
-                    const glm::vec3 normal = glm::normalize(glm::vec3(
+                    const glm::vec3 coarseNormal = glm::normalize(glm::vec3(
                         (sample(col - 1, row) - sample(col + 1, row)) /
                             (2.f * manager->cellWidth), 1.f,
                         (sample(col, row - 1) - sample(col, row + 1)) /
                             (2.f * manager->cellDepth)));
+                    const glm::vec3 normal = seamNormal(nearHeights,
+                        seam, col, row).value_or(coarseNormal);
                     vertex.normal[0] = normal.x;
                     vertex.normal[1] = normal.y;
                     vertex.normal[2] = normal.z;
                     vertex.uv[0] = u; vertex.uv[1] = v;
                     setColor(vertex, height);
+                    blendSeamColor(vertex, nearSurface, seam, col, row, u, v);
                     vertices.push_back(vertex);
                 }
             for (int row = 0; row < manager->cellsY; ++row)

@@ -295,6 +295,9 @@ struct ObjectGPUData
     glm::vec4 pmxToonTint { 1.f };
     glm::vec4 pmxEdgeColor { 0.f };
     glm::vec4 pmxParams { 0.f }; // edge width, sphere mode, toon source, edge enabled
+    glm::uvec4 terrainMapMasks{ 0u }; // normal, roughness, height, reserved
+    glm::vec4 terrainLayerParams[6]{}; // roughness, normal scale, height blend, reserved
+    glm::vec4 terrainMacroColors[6]{}; // measured linear albedo averages
 };
 
 // Constant buffer for grid rendering
@@ -342,7 +345,7 @@ struct ParticleCBData
 };
 
 static_assert(sizeof(DrawCBData) == 16, "Draw constants must remain small");
-static_assert(sizeof(ObjectGPUData) == 1264, "Object buffer layout must match Object.hlsl");
+static_assert(sizeof(ObjectGPUData) == 1472, "Object buffer layout must match Object.hlsl");
 static_assert(sizeof(Engine::Model::LightData) == 128,
     "Light buffer layout must match Object.hlsl");
 static_assert(sizeof(GridCBData) == 128, "Grid constant-buffer layout must match Grid.hlsl");
@@ -1239,6 +1242,12 @@ void Scene::BuildObjectPipeline()
         Engine::Graphics::IShaderCompiler::CompileProfile::PS_5_0);
     if (!psShader)
         throw std::runtime_error("Failed to compile object pixel shader: " + shaderCompiler->GetLastError());
+    auto shadowPsShader = shaderCompiler->CompileFromFile(
+        shaderPath.c_str(), "PSShadowMain",
+        Engine::Graphics::IShaderCompiler::CompileProfile::PS_5_0);
+    if (!shadowPsShader)
+        throw std::runtime_error("Failed to compile shadow pixel shader: " +
+            shaderCompiler->GetLastError());
 
     // Engine-native model stream, including the second UV set and vertex colour.
     Engine::Graphics::IPipelineStateBuilder::VertexElement layout[] =
@@ -1285,7 +1294,8 @@ void Scene::BuildObjectPipeline()
                                      PortalStencilMode stencilMode,
                                      bool colorWriteEnabled,
                                      const char* description,
-                                     bool terrainFormat)
+                                     bool terrainFormat,
+                                     bool shadowPass = false)
     {
         auto materialBuilder = pipelineFactory->CreateBuilder();
         if (!materialBuilder)
@@ -1294,7 +1304,7 @@ void Scene::BuildObjectPipeline()
                 " pipeline state builder");
         auto& state = materialBuilder->SetVertexShader(
                 terrainFormat ? terrainVsShader.get() : vsShader.get())
-            .SetPixelShader(psShader.get())
+            .SetPixelShader(shadowPass ? shadowPsShader.get() : psShader.get())
             .SetFillMode(wireframe)
             .SetCullMode(!doubleSided)
             .SetFrontCounterClockwise(false)
@@ -1378,12 +1388,15 @@ void Scene::BuildObjectPipeline()
                                      bool wireframe,
                                      PortalStencilMode stencilMode,
                                      bool colorWriteEnabled,
-                                     const char* description)
+                                     const char* description,
+                                     bool shadowPass = false)
     {
         auto base = buildMaterialPipelineVariant(doubleSided, blend,
-            wireframe, stencilMode, colorWriteEnabled, description, false);
+            wireframe, stencilMode, colorWriteEnabled, description, false,
+            shadowPass);
         auto terrain = buildMaterialPipelineVariant(doubleSided, blend,
-            wireframe, stencilMode, colorWriteEnabled, description, true);
+            wireframe, stencilMode, colorWriteEnabled, description, true,
+            shadowPass);
         m_terrainPipelineByBase.emplace(base.get(), std::move(terrain));
         return base;
     };
@@ -1403,15 +1416,14 @@ void Scene::BuildObjectPipeline()
             true,
             "blended double-sided material");
 
-    // Reuse the complete object vertex path so the shadow pass inherits the
-    // same world, terrain, skinning, and morph transforms as visible geometry.
-    // Color writes are disabled; PSMain still preserves alpha-mask cutouts.
+    // Reuse the complete object vertex path for skinning and morphs. The
+    // shadow pixel shader only evaluates alpha-mask cutouts before depth write.
     m_directionalShadowPipeline =
         buildMaterialPipeline(false, false, false, PortalStencilMode::None,
-            false, "directional shadow caster");
+            false, "directional shadow caster", true);
     m_directionalShadowDoubleSidedPipeline =
         buildMaterialPipeline(true, false, false, PortalStencilMode::None,
-            false, "double-sided directional shadow caster");
+            false, "double-sided directional shadow caster", true);
 
     m_objectWirePipeline =
         buildMaterialPipeline(false, false, true, PortalStencilMode::None,
@@ -2062,6 +2074,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 {
     m_lastObjectDataUploadBytes = 0;
     m_lastOcclusionCulledCount = 0;
+    m_lastTerrainOcclusionCulledCount = 0;
     m_lastParticlePortalDrawCount = 0;
     m_shadowDebugSnapshot = {};
     if (!context)
@@ -2770,6 +2783,207 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             return target && target->enabled && target->Owner &&
                 portal->HasCompatiblePortalShapeWith(*target);
         });
+    // A terrain cell covers its rectangular footprint. Bound the entry and
+    // exit of each sightline through that surface; a draw is hidden only when
+    // every sightline crosses a nearer cell. Rebuild for each camera position.
+    constexpr float terrainHorizonCircle = 6.28318530718f;
+    struct TerrainFootprint
+    {
+        float minX, maxX, minZ, maxZ, minY, maxY;
+        float nearDistance, farDistance;
+        float angleStart, angleEnd;
+    };
+    std::vector<TerrainFootprint> terrainBlockers;
+    const bool terrainWarpActive = std::any_of(
+        m_frameSpatialManipulatorScratch.begin(),
+        m_frameSpatialManipulatorScratch.end(),
+        [](const Engine::Components::SpatialManipulator* manipulator)
+        {
+            return manipulator && manipulator->enabled &&
+                manipulator->definesWarpVolume && manipulator->Owner &&
+                manipulator->Owner->IsEnabledInHierarchy();
+        });
+    const bool useTerrainOcclusion = !shadowOnly && !includeEditorVisuals &&
+        !hasPortalViews && !m_editorMode2D && !terrainWarpActive;
+    const auto terrainFootprint = [&](const FrameRenderItem& item)
+        -> std::optional<TerrainFootprint>
+    {
+        if (!item.mesh || !item.mesh->HasBounds() || item.sprite ||
+            item.warpedVertexBuffer || item.traversalChartPortal ||
+            item.blended)
+            return std::nullopt;
+        // A warped or rotated footprint may have gaps inside its XZ bounds.
+        const glm::mat4& world = item.world;
+        for (int column = 0; column < 3; ++column)
+            for (int row = 0; row < 3; ++row)
+                if (std::abs(world[column][row] -
+                    (column == row ? 1.f : 0.f)) > 0.0001f)
+                    return std::nullopt;
+        const glm::vec3 minimum = item.mesh->GetBoundsMin() +
+            glm::vec3(world[3]);
+        const glm::vec3 maximum = item.mesh->GetBoundsMax() +
+            glm::vec3(world[3]);
+        if (minimum.x >= maximum.x || minimum.z >= maximum.z ||
+            (cameraPosition.x >= minimum.x &&
+                cameraPosition.x <= maximum.x &&
+                cameraPosition.z >= minimum.z &&
+                cameraPosition.z <= maximum.z))
+            return std::nullopt;
+        const float nearX = std::clamp(cameraPosition.x,
+            minimum.x, maximum.x) - cameraPosition.x;
+        const float nearZ = std::clamp(cameraPosition.z,
+            minimum.z, maximum.z) - cameraPosition.z;
+        const float nearDistance = std::hypot(nearX, nearZ);
+        std::array<float, 4> angles{};
+        float farDistance = 0.f;
+        int corner = 0;
+        for (float z : { minimum.z, maximum.z })
+            for (float x : { minimum.x, maximum.x })
+            {
+                const float dx = x - cameraPosition.x;
+                const float dz = z - cameraPosition.z;
+                float angle = std::atan2(dz, dx);
+                if (angle < 0.f)
+                    angle += terrainHorizonCircle;
+                angles[corner++] = angle;
+                farDistance = std::max(farDistance, std::hypot(dx, dz));
+            }
+        std::sort(angles.begin(), angles.end());
+        int gapAfter = 3;
+        float largestGap = angles[0] + terrainHorizonCircle - angles[3];
+        for (int i = 0; i < 3; ++i)
+        {
+            const float gap = angles[i + 1] - angles[i];
+            if (gap > largestGap)
+            {
+                largestGap = gap;
+                gapAfter = i;
+            }
+        }
+        const float start = angles[(gapAfter + 1) % 4];
+        return TerrainFootprint{ minimum.x, maximum.x, minimum.z,
+            maximum.z, minimum.y, maximum.y, nearDistance, farDistance,
+            start, start + terrainHorizonCircle - largestGap };
+    };
+    const auto rayDistances = [&](const TerrainFootprint& footprint,
+        float angle)
+    {
+        const float dx = std::cos(angle);
+        const float dz = std::sin(angle);
+        const auto slab = [](float direction, float low, float high)
+        {
+            if (direction == 0.f)
+                return std::pair<float, float>{
+                    -std::numeric_limits<float>::infinity(),
+                    std::numeric_limits<float>::infinity() };
+            const float a = low / direction;
+            const float b = high / direction;
+            return std::pair<float, float>{ std::min(a, b), std::max(a, b) };
+        };
+        const auto x = slab(dx, footprint.minX - cameraPosition.x,
+            footprint.maxX - cameraPosition.x);
+        const auto z = slab(dz, footprint.minZ - cameraPosition.z,
+            footprint.maxZ - cameraPosition.z);
+        return std::pair<float, float>{ std::max(x.first, z.first),
+            std::min(x.second, z.second) };
+    };
+    if (useTerrainOcclusion)
+    {
+        terrainBlockers.reserve(m_frameRenderItems.size());
+        for (const FrameRenderItem& item : m_frameRenderItems)
+        {
+            if (!item.object || item.belongsToPreview ||
+                (m_previewObject && IsObjectOrDescendant(
+                    item.object, m_previewObject)))
+                continue;
+            const auto* batch = item.object->GetComponent<
+                Engine::Components::TerrainBatchAppearance>();
+            if (!item.object->GetComponent<Engine::Components::Terrain>() &&
+                !(batch && batch->completeFootprint && !batch->distantVisual))
+                continue;
+            const auto footprint = terrainFootprint(item);
+            if (footprint)
+                terrainBlockers.push_back(*footprint);
+        }
+    }
+    const auto hiddenByTerrain = [&](const FrameRenderItem& item)
+    {
+        if (!useTerrainOcclusion || !item.object ||
+            (!item.object->GetComponent<Engine::Components::Terrain>() &&
+                !item.object->GetComponent<
+                    Engine::Components::TerrainBatchAppearance>()))
+            return false;
+        const auto footprint = terrainFootprint(item);
+        if (!footprint)
+            return false;
+        const float height = footprint->maxY - cameraPosition.y;
+        const float targetSlope = height / (height >= 0.f
+            ? footprint->nearDistance : footprint->farDistance);
+        const float lowHeight = footprint->minY - cameraPosition.y;
+        const float targetLowSlope = lowHeight / (lowHeight >= 0.f
+            ? footprint->farDistance : footprint->nearDistance);
+        for (const TerrainFootprint& blocker : terrainBlockers)
+        {
+            if (blocker.farDistance + 0.01f >= footprint->nearDistance)
+                continue;
+            float start = footprint->angleStart;
+            float end = footprint->angleEnd;
+            if (start < blocker.angleStart)
+            {
+                start += terrainHorizonCircle;
+                end += terrainHorizonCircle;
+            }
+            if (start < blocker.angleStart + 0.00001f ||
+                end > blocker.angleEnd - 0.00001f)
+                continue;
+            std::array<float, 14> angles{};
+            size_t angleCount = 0;
+            angles[angleCount++] = start;
+            angles[angleCount++] = end;
+            // Rectangle entry and exit switch sides at corner angles; their
+            // extrema between corners occur at cardinal directions.
+            for (float z : { blocker.minZ, blocker.maxZ })
+                for (float x : { blocker.minX, blocker.maxX })
+                {
+                    float angle = std::atan2(z - cameraPosition.z,
+                        x - cameraPosition.x);
+                    if (angle < 0.f)
+                        angle += terrainHorizonCircle;
+                    if (angle < start)
+                        angle += terrainHorizonCircle;
+                    if (angle > start && angle < end)
+                        angles[angleCount++] = angle;
+                }
+            for (int quadrant = 0; quadrant <= 8; ++quadrant)
+            {
+                const float angle = quadrant * terrainHorizonCircle * 0.25f;
+                if (angle > start && angle < end)
+                    angles[angleCount++] = angle;
+            }
+            float entryMin = std::numeric_limits<float>::max();
+            float entryMax = 0.f;
+            float exitMin = std::numeric_limits<float>::max();
+            float exitMax = 0.f;
+            for (size_t i = 0; i < angleCount; ++i)
+            {
+                const auto [entry, leave] = rayDistances(blocker, angles[i]);
+                entryMin = std::min(entryMin, entry);
+                entryMax = std::max(entryMax, entry);
+                exitMin = std::min(exitMin, leave);
+                exitMax = std::max(exitMax, leave);
+            }
+            const float highHeight = blocker.maxY - cameraPosition.y;
+            const float lowBlockerHeight = blocker.minY - cameraPosition.y;
+            const float entrySlope = highHeight /
+                (highHeight >= 0.f ? entryMin : entryMax);
+            const float exitSlope = lowBlockerHeight /
+                (lowBlockerHeight >= 0.f ? exitMax : exitMin);
+            if (targetLowSlope > entrySlope + 0.001f &&
+                targetSlope + 0.001f < exitSlope)
+                return true;
+        }
+        return false;
+    };
     std::vector<ViewRenderItem>& renderObjects = m_viewRenderItemScratch;
     renderObjects.clear();
     renderObjects.reserve(m_frameRenderItems.size());
@@ -2789,6 +3003,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             if (!shadowOnly && !hasPortalViews &&
                 outsideViewFrustum(item, itemWorld))
                 continue;
+            if (hiddenByTerrain(item))
+            {
+                ++m_lastTerrainOcclusionCulledCount;
+                continue;
+            }
             const glm::vec3 delta = glm::vec3(itemWorld[3]) - cameraPosition;
             renderObjects.push_back({ &item, glm::dot(delta, delta),
                 nearestLightingDistanceSquared(item, itemWorld),
@@ -2858,7 +3077,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         Engine::Graphics::IGraphicsBuffer* morphDeltaBuffer = nullptr;
         Engine::Graphics::IGraphicsBuffer* morphWeightBuffer = nullptr;
         Engine::Graphics::IPipelineState* pipeline = nullptr;
-        std::array<const Engine::Graphics::IGraphicsTexture*, 12> textures{};
+        std::array<const Engine::Graphics::IGraphicsTexture*, 30> textures{};
+        uint32_t textureSlotCount = 12;
         UINT64 constantBufferOffset = 0;
         DrawCBData drawData{};
         ObjectGPUData objectData{};
@@ -3189,10 +3409,41 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 preparedDraw.textures[5] = nullptr;
                 for (size_t layer = 0; layer < std::min<size_t>(materials.size(), 6); ++layer)
                 {
-                    const auto* texture = materials[layer] && materials[layer]->baseColorTexture
-                        ? materials[layer]->baseColorTexture->GetGraphicsTexture() : nullptr;
+                    const auto* material = materials[layer].get();
+                    const auto* texture = material && material->baseColorTexture
+                        ? material->baseColorTexture->GetGraphicsTexture() : nullptr;
                     preparedDraw.textures[layer] = texture;
                     textured |= texture != nullptr;
+                    if (texture) objectData.terrainMapMasks.w |= 1u << layer;
+                    objectData.terrainLayerParams[layer] = {
+                        material ? material->roughnessFactor : 1.f,
+                        material ? material->normalScale : 1.f,
+                        material ? material->terrainHeightBlendStrength : 0.f,
+                        0.f };
+                    if (material)
+                        objectData.terrainMacroColors[layer] = glm::vec4(
+                            glm::length(material->terrainMacroColor) > 0.f
+                                ? material->terrainMacroColor
+                                : material->diffuseColor, 0.f);
+                    const auto* normalTexture = material && material->normalTexture
+                        ? material->normalTexture->GetGraphicsTexture() : nullptr;
+                    const auto* roughnessTexture = material &&
+                        material->metallicRoughnessTexture
+                        ? material->metallicRoughnessTexture->GetGraphicsTexture()
+                        : nullptr;
+                    const auto* heightTexture = material && material->heightTexture
+                        ? material->heightTexture->GetGraphicsTexture() : nullptr;
+                    preparedDraw.textures[12 + layer] = normalTexture;
+                    preparedDraw.textures[18 + layer] = roughnessTexture;
+                    preparedDraw.textures[24 + layer] = heightTexture;
+                    if (normalTexture || roughnessTexture || heightTexture)
+                        preparedDraw.textureSlotCount = 30;
+                    if (normalTexture) objectData.terrainMapMasks.x |= 1u << layer;
+                    if (roughnessTexture) objectData.terrainMapMasks.y |= 1u << layer;
+                    if (heightTexture && material->terrainHeightBlendStrength > 0.f)
+                        objectData.terrainMapMasks.z |= 1u << layer;
+                    textured |= normalTexture || roughnessTexture ||
+                        heightTexture;
                 }
                 objectData.baseColor = { 1.f, 1.f, 1.f, 1.f };
                 objectData.materialParams.w = textured ? 2048.f : 0.f;
@@ -3217,6 +3468,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     objectData.textureUvSets1.x =
                         std::max(terrainManager->cellsX * terrainManager->cellWidth,
                             terrainManager->cellsY * terrainManager->cellDepth);
+                if (terrainManager && terrainManager->stochasticTerrainVariation)
+                    objectData.materialParams.w += 65536.f;
+                if (terrainManager && terrainManager->terrainMacroColorEnabled)
+                    objectData.materialParams.w += 131072.f;
                 if (terrainManager && terrainManager->measurementGrid)
                 {
                     if (!measurementGridTexture)
@@ -3523,7 +3778,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         const uint32_t tileResolution = shadowCascadeCount > 1u
             ? m_directionalShadowResolution / 2u
             : m_directionalShadowResolution;
-        std::array<const Engine::Graphics::IGraphicsTexture*, 12> shadowTextures{};
+        std::array<const Engine::Graphics::IGraphicsTexture*, 30> shadowTextures{};
         bool shadowTexturesBound = false;
         for (uint32_t cascade = 0; cascade < shadowCascadeCount; ++cascade)
         {
@@ -3557,7 +3812,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 context->SetConstantBuffer(0, m_shadowConstantBuffer.get(),
                     static_cast<uint64_t>(recordIndex) * kCBStride);
                 for (uint32_t textureSlot = 0;
-                    textureSlot < draw.textures.size(); ++textureSlot)
+                    textureSlot < 12; ++textureSlot)
                 {
                     if (textureSlot != 7u && (!shadowTexturesBound ||
                         shadowTextures[textureSlot] != draw.textures[textureSlot]))
@@ -3712,7 +3967,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     context->SetConstantBuffer(0, entry.constantBuffer.get(),
                         static_cast<uint64_t>(recordIndex) * kCBStride);
                     for (uint32_t textureSlot = 0;
-                        textureSlot < draw.textures.size(); ++textureSlot)
+                        textureSlot < 12; ++textureSlot)
                         if (textureSlot != 7u)
                             context->SetTexture(
                                 textureSlot, draw.textures[textureSlot]);
@@ -3748,8 +4003,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     }
 
     std::optional<Engine::Graphics::GpuTimingStage> activeGpuStage;
-    std::array<const Engine::Graphics::IGraphicsTexture*, 12> boundTextures{};
+    std::array<const Engine::Graphics::IGraphicsTexture*, 30> boundTextures{};
     bool texturesBound = false;
+    uint32_t boundTextureSlotCount = 12;
     const auto switchGpuStage = [&](Engine::Graphics::GpuTimingStage stage)
     {
         if (activeGpuStage && *activeGpuStage == stage)
@@ -3791,11 +4047,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         context->SetPipeline(geometryPipeline(draw, draw.pipeline));
         context->SetConstantBuffer(
             0, m_objectConstantBuffer.get(), draw.constantBufferOffset);
-        for (uint32_t textureSlot = 0; textureSlot < draw.textures.size(); ++textureSlot)
+        for (uint32_t textureSlot = 0;
+            textureSlot < std::max(draw.textureSlotCount,
+                boundTextureSlotCount); ++textureSlot)
             if (!texturesBound || boundTextures[textureSlot] != draw.textures[textureSlot])
                 context->SetTexture(textureSlot, draw.textures[textureSlot]);
         boundTextures = draw.textures;
         texturesBound = true;
+        boundTextureSlotCount = draw.textureSlotCount;
         submitGeometry(draw);
         if (draw.occlusionCandidate)
             context->EndOcclusionQuery();
@@ -5030,7 +5289,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                                 0, m_objectConstantBuffer.get(),
                                 static_cast<uint64_t>(drawSlot) * kCBStride);
                             for (uint32_t textureSlot = 0;
-                                textureSlot < draw.textures.size(); ++textureSlot)
+                                textureSlot < draw.textureSlotCount; ++textureSlot)
                             {
                                 context->SetTexture(textureSlot,
                                     portalTexture(portalJob, draw, textureSlot));
@@ -5241,7 +5500,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     0, m_objectConstantBuffer.get(),
                     static_cast<uint64_t>(drawSlot) * kCBStride);
                 for (uint32_t textureSlot = 0;
-                    textureSlot < draw.textures.size(); ++textureSlot)
+                    textureSlot < draw.textureSlotCount; ++textureSlot)
                 {
                     context->SetTexture(textureSlot,
                         portalTexture(portalJob, draw, textureSlot));

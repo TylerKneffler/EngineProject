@@ -22,7 +22,7 @@ template<class T> bool WriteValue(std::ofstream& stream, const T& value)
     stream.write(reinterpret_cast<const char*>(&value), sizeof(value));
     return static_cast<bool>(stream);
 }
-template<class T> bool ReadValue(std::ifstream& stream, T& value)
+template<class T> bool ReadValue(std::istream& stream, T& value)
 {
     static_assert(std::is_trivially_copyable_v<T>);
     stream.read(reinterpret_cast<char*>(&value), sizeof(value));
@@ -68,6 +68,24 @@ int64_t MaterialStamp(const std::string& material)
         Engine::Components::Mesh::ResolveFilePath(material), error);
     return error ? 0 : static_cast<int64_t>(time.time_since_epoch().count());
 }
+template<class NormalAt>
+glm::vec3 FilterLodNormal(int x, int y, int stride,
+    int cellsX, int cellsY, NormalAt&& normalAt)
+{
+    const glm::vec3 original = normalAt(x, y);
+    // Shared edges retain the exact detailed normal across unequal LODs.
+    if (stride <= 1 || x == 0 || y == 0 ||
+        x == cellsX || y == cellsY) return original;
+    const int radius = stride / 2;
+    glm::vec3 sum(0.f);
+    for (int row = std::max(0, y - radius);
+        row <= std::min(cellsY, y + radius); ++row)
+        for (int col = std::max(0, x - radius);
+            col <= std::min(cellsX, x + radius); ++col)
+            sum += normalAt(col, row);
+    return glm::dot(sum, sum) > 0.000001f
+        ? glm::normalize(sum) : original;
+}
 void ReduceMeshForLod(std::vector<Engine::Components::Mesh::Vertex>& vertices,
     std::vector<uint32_t>& indices, int cellsX, int cellsY, int stride)
 {
@@ -83,6 +101,16 @@ void ReduceMeshForLod(std::vector<Engine::Components::Mesh::Vertex>& vertices,
         {
             remap[source] = static_cast<uint32_t>(vertices.size());
             vertices.push_back(full[source]);
+            const glm::vec3 filtered = FilterLodNormal(x, y, stride,
+                cellsX, cellsY, [&](int col, int row) {
+                    const auto& sample = full[
+                        static_cast<size_t>(row) * (cellsX + 1) + col];
+                    return glm::vec3(sample.normal[0], sample.normal[1],
+                        sample.normal[2]);
+                });
+            vertices.back().normal[0] = filtered.x;
+            vertices.back().normal[1] = filtered.y;
+            vertices.back().normal[2] = filtered.z;
         }
         return remap[source];
     };
@@ -292,11 +320,10 @@ void Terrain::Rebuild()
             for (size_t l = 0; l < layers.size(); ++l)
             {
                 const float weight = weights[i * layers.size() + l];
-                if (l < 6 && textured[l])
-                {
+                if (l < 6)
                     v.uvChannels[2 + l / 4][l % 4] = weight;
-                }
-                else color += (l < m_materials.size() && m_materials[l]
+                if (l >= 6 || !textured[l])
+                    color += (l < m_materials.size() && m_materials[l]
                     ? m_materials[l]->diffuseColor : layers[l].previewColor) * weight;
             }
             v.color[0] = color.x; v.color[1] = color.y; v.color[2] = color.z;
@@ -342,15 +369,23 @@ bool Terrain::InstallBakedLod(int stride)
         vertex.pos[0] = col * cellWidth;
         vertex.pos[1] = heights[source];
         vertex.pos[2] = row * cellDepth;
-        std::copy_n(m_bakedAppearance[source].normal, 3, vertex.normal);
+        const glm::vec3 filtered = FilterLodNormal(col, row, stride,
+            cellsX, cellsY, [&](int sampleX, int sampleY) {
+                const auto& sample = m_bakedAppearance[
+                    static_cast<size_t>(sampleY) * (cellsX + 1) + sampleX];
+                return glm::vec3(sample.normal[0], sample.normal[1],
+                    sample.normal[2]);
+            });
+        vertex.normal[0] = filtered.x;
+        vertex.normal[1] = filtered.y;
+        vertex.normal[2] = filtered.z;
         vertex.uv[0] = static_cast<float>(col) / cellsX;
         vertex.uv[1] = static_cast<float>(row) / cellsY;
         std::copy_n(m_bakedAppearance[source].color, 3, vertex.color);
         vertex.color[3] = 1.f;
-        for (size_t layer = 0; layer < layers.size(); ++layer)
-            if (m_bakedTextureMask & (1u << layer))
-                vertex.uvChannels[2 + layer / 4][layer % 4] =
-                    weights[static_cast<size_t>(source) * layers.size() + layer];
+        for (size_t layer = 0; layer < std::min<size_t>(layers.size(), 6); ++layer)
+            vertex.uvChannels[2 + layer / 4][layer % 4] =
+                weights[static_cast<size_t>(source) * layers.size() + layer];
         vertices.push_back(vertex);
     }
     Mesh* mesh = Owner->GetComponent<Mesh>();
@@ -520,7 +555,8 @@ bool Terrain::ReadCacheHeights(const std::string& path, uint64_t signature,
 
 bool Terrain::ReadCacheHeightsRange(const std::string& path,
     uint64_t signature, int expectedX, int expectedY,
-    std::vector<float>& result, uint64_t offset, uint64_t size)
+    std::vector<float>& result, uint64_t offset, uint64_t size,
+    std::vector<float>* resultWeights, uint32_t* weightLayerCount)
 {
     std::ifstream stream(path, std::ios::binary);
     if (offset) stream.seekg(static_cast<std::streamoff>(offset));
@@ -545,17 +581,70 @@ bool Terrain::ReadCacheHeightsRange(const std::string& path,
     {
         uint32_t length = 0;
         if (!ReadValue(stream, length) || length > 4096) return false;
-        stream.seekg(static_cast<std::streamoff>(length) +
-            5 * sizeof(float) + sizeof(int64_t), std::ios::cur);
-        if (!stream) return false;
+        std::string material(length, '\0');
+        stream.read(material.data(), length);
+        float ignored[5]{};
+        int64_t storedStamp = 0;
+        if (!stream || !stream.read(reinterpret_cast<char*>(ignored),
+                sizeof(ignored)) || !ReadValue(stream, storedStamp) ||
+            storedStamp != MaterialStamp(material)) return false;
     }
     const uint64_t count = static_cast<uint64_t>(x + 1) * (y + 1);
     std::vector<float> heights;
     if (!ReadVector(stream, heights, count)) return false;
+    std::vector<float> weights;
+    if (resultWeights && !ReadVector(stream, weights, count * layerCount))
+        return false;
     if (size && static_cast<uint64_t>(stream.tellg()) > offset + size)
         return false;
     result = std::move(heights);
+    if (resultWeights) *resultWeights = std::move(weights);
+    if (weightLayerCount) *weightLayerCount = layerCount;
     return true;
+}
+
+bool Terrain::CacheMaterialsMatchRange(std::istream& stream,
+    uint64_t signature, int expectedX, int expectedY,
+    uint64_t offset, uint64_t size,
+    std::map<std::string, int64_t>& materialStamps)
+{
+    stream.clear();
+    stream.seekg(static_cast<std::streamoff>(offset));
+    uint64_t magic = 0, storedSignature = 0;
+    uint32_t version = 0, layerCount = 0;
+    uint8_t texturedMask = 0;
+    int x = 0, y = 0;
+    float width = 0.f, depth = 0.f, tiling = 0.f;
+    if (!stream || !ReadValue(stream, magic) ||
+        magic != 0x31484341434e5254ull ||
+        !ReadValue(stream, version) || version != 5 ||
+        !ReadValue(stream, storedSignature) || storedSignature != signature ||
+        !ReadValue(stream, x) || x != expectedX ||
+        !ReadValue(stream, y) || y != expectedY ||
+        !ReadValue(stream, width) || width <= 0.f ||
+        !ReadValue(stream, depth) || depth <= 0.f ||
+        !ReadValue(stream, tiling) || tiling < 1.f ||
+        !ReadValue(stream, texturedMask) ||
+        !ReadValue(stream, layerCount) || layerCount < 1 || layerCount > 6)
+        return false;
+    for (uint32_t layer = 0; layer < layerCount; ++layer)
+    {
+        uint32_t length = 0;
+        if (!ReadValue(stream, length) || length > 4096) return false;
+        std::string material(length, '\0');
+        stream.read(material.data(), length);
+        float ignored[5]{};
+        int64_t storedStamp = 0;
+        if (!stream || !stream.read(reinterpret_cast<char*>(ignored),
+                sizeof(ignored)) || !ReadValue(stream, storedStamp))
+            return false;
+        const auto found = materialStamps.find(material);
+        const int64_t currentStamp = found == materialStamps.end()
+            ? materialStamps.emplace(material, MaterialStamp(material)).first->second
+            : found->second;
+        if (storedStamp != currentStamp) return false;
+    }
+    return static_cast<uint64_t>(stream.tellg()) <= offset + size;
 }
 
 bool Terrain::LoadCache(const std::string& path, uint64_t signature,
@@ -668,9 +757,8 @@ bool Terrain::LoadCacheRange(const std::string& path, uint64_t signature,
             std::copy_n(appearance[i].color, 3, vertex.color);
             vertex.color[3] = 1.f;
             for (uint32_t layer = 0; layer < layerCount; ++layer)
-                if (texturedMask & (1u << layer))
-                    vertex.uvChannels[2 + layer / 4][layer % 4] =
-                        cachedWeights[i * layerCount + layer];
+                vertex.uvChannels[2 + layer / 4][layer % 4] =
+                    cachedWeights[i * layerCount + layer];
         }
     std::vector<uint32_t> indices;
     indices.reserve(static_cast<size_t>(x) * y * 6);

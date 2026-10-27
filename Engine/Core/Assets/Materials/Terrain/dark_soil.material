@@ -1,1 +1,1 @@
-{"version":1,"baseColor":[1,1,1],"roughness":1,"metallic":0,"baseColorTexture":"Assets/Textures/Terrain/dark_soil.png"}
+{"version":1,"baseColor":[1,1,1],"roughness":1,"metallic":0,"terrainMacroColor":[0.05856,0.04472,0.02751],"baseColorTexture":"Assets/Textures/Terrain/dark_soil.png"}

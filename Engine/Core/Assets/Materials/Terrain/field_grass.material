@@ -1,1 +1,1 @@
-{"version":1,"baseColor":[1,1,1],"roughness":1,"metallic":0,"baseColorTexture":"Assets/Textures/Terrain/field_grass.png"}
+{"version":1,"baseColor":[1,1,1],"roughness":1,"metallic":0,"terrainMacroColor":[0.13832,0.22583,0.04636],"baseColorTexture":"Assets/Textures/Terrain/field_grass.png"}

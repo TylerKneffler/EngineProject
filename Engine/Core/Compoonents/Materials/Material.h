@@ -117,6 +117,14 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "0.0, 0.2")
     float     heightScale { 0.05f };
 
+    // Optional terrain-only paint transition driven by heightTexture.r.
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Terrain", Range = "0.0, 1.0")
+    float     terrainHeightBlendStrength { 0.f };
+
+    // Linear RGB average of the layer albedo's lowest mip for distant terrain.
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Terrain")
+    glm::vec3 terrainMacroColor { 0.f };
+
     PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "4.0, 64.0")
     float     heightMinSteps { 8.f };
 

@@ -1063,8 +1063,17 @@ void Mesh::UpdateBounds()
         m_boundsMax = {};
         return;
     }
-    const float* firstPosition = !m_terrainVertices.empty()
-        ? m_terrainVertices.front().pos : m_vertices.front().pos;
+    // Only indexed vertices can reach the rasterizer. Distant terrain tiles
+    // retain a shared grid while their index buffer omits the moving near
+    // window; including those unused vertices keeps offscreen tiles alive.
+    const bool terrainFormat = !m_terrainVertices.empty();
+    const size_t vertexCount = terrainFormat
+        ? m_terrainVertices.size() : m_vertices.size();
+    const bool indexed = !m_indices.empty();
+    const uint32_t firstIndex = indexed && m_indices.front() < vertexCount
+        ? m_indices.front() : 0u;
+    const float* firstPosition = terrainFormat
+        ? m_terrainVertices[firstIndex].pos : m_vertices[firstIndex].pos;
     m_boundsMin = { firstPosition[0], firstPosition[1], firstPosition[2] };
     m_boundsMax = m_boundsMin;
     const auto includePosition = [&](const float* positionValues)
@@ -1074,10 +1083,23 @@ void Mesh::UpdateBounds()
         m_boundsMin = glm::min(m_boundsMin, position);
         m_boundsMax = glm::max(m_boundsMax, position);
     };
-    for (const Vertex& vertex : m_vertices)
-        includePosition(vertex.pos);
-    for (const TerrainVertex& vertex : m_terrainVertices)
-        includePosition(vertex.pos);
+    if (indexed)
+    {
+        for (uint32_t index : m_indices)
+            if (index < vertexCount)
+                includePosition(terrainFormat
+                    ? m_terrainVertices[index].pos : m_vertices[index].pos);
+    }
+    else if (terrainFormat)
+    {
+        for (const TerrainVertex& vertex : m_terrainVertices)
+            includePosition(vertex.pos);
+    }
+    else
+    {
+        for (const Vertex& vertex : m_vertices)
+            includePosition(vertex.pos);
+    }
 
     // GPU morphing no longer rebuilds bounds each frame. Expand the authored
     // bounds once by the full signed envelope of every target so any animated

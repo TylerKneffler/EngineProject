@@ -66,7 +66,7 @@ private:
     const VulkanGraphicsBuffer* m_computeWrite = nullptr;
     std::shared_ptr<VulkanComputeDescriptorArena> m_computeDescriptors;
     std::shared_ptr<VulkanTextureSystem> m_textureSystem;
-    std::array<const VulkanGraphicsTexture*, 24> m_textures{};
+    std::array<const VulkanGraphicsTexture*, 30> m_textures{};
     std::array<const VulkanGraphicsBuffer*, 7> m_structuredBuffers{};
     std::shared_ptr<VulkanOcclusionQueryState> m_occlusionState;
     std::shared_ptr<VulkanGpuTimingState> m_gpuTimings;
