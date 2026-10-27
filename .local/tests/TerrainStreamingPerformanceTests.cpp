@@ -641,6 +641,8 @@ int Run()
                 << ",\n"
             << "  \"shadowsEnabled\": " << (shadowsEnabled ? "true" : "false")
                 << ",\n"
+            << "  \"sunEnabled\": " << (sunEnabled ? "true" : "false")
+                << ",\n"
             << "  \"unlit\": " << (unlit ? "true" : "false") << ",\n"
             << "  \"farFieldTriangles\": " << farFieldTriangles << ",\n"
             << "  \"submittedTrianglesP50\": "
@@ -754,6 +756,9 @@ int Run()
             "-radius-" + std::to_string(farRadiusCells) +
             (farFieldEnabled ? "-distant-" : "-cells-only-") + viewpoint +
             "-" + runtimeMode + "-" + headingMode + "-" + cacheMode +
+            (shadowsEnabled ? "" : "-no-shadows") +
+            (sunEnabled ? "" : "-no-sun") +
+            (unlit ? "-unlit" : "") +
             ".json");
     std::filesystem::create_directories(output.parent_path());
     std::ofstream file(output, std::ios::trunc);
