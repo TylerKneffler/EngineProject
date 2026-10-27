@@ -232,6 +232,10 @@ int Run()
         "TERRAIN_TEST_RUNTIME_MODE", "baked");
     Require(runtimeMode == "baked" || runtimeMode == "legacy",
         "TERRAIN_TEST_RUNTIME_MODE must be baked or legacy");
+    const std::string headingMode = ReadStringSetting(
+        "TERRAIN_TEST_HEADING_MODE", "oscillate");
+    Require(headingMode == "oscillate" || headingMode == "sweep",
+        "TERRAIN_TEST_HEADING_MODE must be oscillate or sweep");
     Require(cacheMode == "cold" || cacheMode == "warm",
         "TERRAIN_TEST_CACHE_MODE must be cold or warm");
     const std::string persistentCache = ReadStringSetting(
@@ -517,7 +521,9 @@ int Run()
     // walking and 5 m/s running speeds using a fixed 60 Hz simulation step.
     for (int frame = 0; frame < FramesPerPhase; ++frame)
         runFrame(startX, startZ,
-            heading + .35 * std::sin(frame * .07), &samples);
+            heading + (headingMode == "sweep"
+                ? 6.283185307179586 * frame / (FramesPerPhase - 1)
+                : .35 * std::sin(frame * .07)), &samples);
     double travel = 0.0;
     for (int frame = 0; frame < FramesPerPhase; ++frame)
     {
@@ -627,6 +633,7 @@ int Run()
                 << (runtimeMode == "baked" ? "not-applicable" : cacheMode)
                 << "\",\n"
             << "  \"runtimeMode\": \"" << runtimeMode << "\",\n"
+            << "  \"headingMode\": \"" << headingMode << "\",\n"
             << "  \"viewpoint\": \"" << viewpoint << "\",\n"
             << "  \"cameraFarPlaneMeters\": " << farPlaneMeters << ",\n"
             << "  \"terrainFarRadiusCells\": " << farRadiusCells << ",\n"
@@ -746,7 +753,8 @@ int Run()
         ("terrain-1080p-far-" + std::to_string(farPlaneMeters) +
             "-radius-" + std::to_string(farRadiusCells) +
             (farFieldEnabled ? "-distant-" : "-cells-only-") + viewpoint +
-            "-" + cacheMode + ".json");
+            "-" + runtimeMode + "-" + headingMode + "-" + cacheMode +
+            ".json");
     std::filesystem::create_directories(output.parent_path());
     std::ofstream file(output, std::ios::trunc);
     Require(static_cast<bool>(file), "could not write terrain performance report");
