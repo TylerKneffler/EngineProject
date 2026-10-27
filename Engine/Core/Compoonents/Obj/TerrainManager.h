@@ -10,6 +10,7 @@
 #include <mutex>
 #include <thread>
 #include <atomic>
+#include <optional>
 
 namespace Engine::Components
 {
@@ -49,9 +50,14 @@ public:
         uint64_t cacheBytes = 0;
     };
     MemoryUsage GetMemoryUsage() const;
+    uint64_t GetTerrainTextureMemoryBytes() const;
     std::string viewerObjectName;
     // When set, procedural brush edits are stored as independent sparse files.
     std::string cellDataDirectory;
+    // Persistent, distributable cells written by the inspector bake action.
+    std::string runtimeBakeDirectory;
+    // Require the authored bake in play mode; editor source data remains available for rebaking.
+    bool requireRuntimeBake = false;
     bool HasCell(int x, int y) const;
     std::vector<Cell> GetCells() const;
     size_t GetCellCount() const { return m_cells.size() + m_proceduralCells.size(); }
@@ -65,17 +71,22 @@ public:
     bool AddProceduralCell(int x, int y);
     void SetProceduralBuilder(std::function<void(Cell, Terrain&)> builder);
     void SetStaticCache(std::string directory, uint64_t signature);
+    bool ReadBakedCellHeights(Cell cell, std::vector<float>& heights) const;
     std::string GetCacheFilePath(int x, int y) const;
     // Bake a deterministic cell without retaining it in the scene or GPU memory.
     bool BakeProceduralCell(int x, int y, bool force = false);
+    bool BakeRuntimeTerrain(bool reuseExistingCells = false);
+    bool HasCompleteRuntimeBake() const;
     size_t GetStoredTerrainCount() const { return m_cells.size(); }
     bool RemoveCell(int x, int y);
     bool ApplyBrush(double x, double z, float radius, float strength,
         Terrain::Brush brush, int layer = 0);
     void SyncLoadedCells(int centerX, int centerY);
     void UpdateStreaming(int centerX, int centerY);
+    void UpdateStreamingAtPosition(const glm::dvec3& worldPosition);
     void UpdateEditorStreaming(const glm::dvec3& worldPosition);
     void Update() override;
+    void Start() override;
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
     void OnAfterDeserialize(IGraphicsProvider* provider) override;
@@ -96,9 +107,17 @@ private:
         Engine::Core::Object* object = nullptr;
         uint64_t revision = 0;
         std::set<Cell> members;
+        std::map<Cell, int> lodStrides;
+        std::map<Cell, uint64_t> geometryRevisions;
+        std::map<Cell, uint64_t> transformRevisions;
     };
     std::map<Cell, RenderBatch> m_renderBatches;
     uint64_t m_renderBatchUploadCount = 0;
+    bool m_renderBatchRefreshPending = false;
+    std::string m_bakeStatus;
+    bool m_runtimeBakeActive = false;
+    struct BakeEntry { uint64_t offset = 0, size = 0; };
+    std::map<Cell, BakeEntry> m_bakeIndex;
     IGraphicsProvider* m_provider = nullptr;
     struct PrepareTask
     {
@@ -107,8 +126,11 @@ private:
         int cellsX = 0, cellsY = 0, lodStride = 1;
         float cellWidth = 1.f, cellDepth = 1.f;
         bool hasSaved = false, edited = false;
+        bool requireBake = false;
         JsonValue saved;
         std::string cachePath, editPath;
+        std::string bakePath;
+        uint64_t bakeOffset = 0, bakeSize = 0;
         std::function<void(Cell, Terrain&)> builder;
     };
     struct PreparedCell
@@ -129,12 +151,17 @@ private:
     bool m_haveLastCenter = false;
     bool m_editorStreaming = false;
     Cell m_lastCenter{0, 0};
+    std::optional<Cell> m_prefetchCenter;
     void LoadCell(Cell cell, int lodStride = 1);
     void StartPrepareWorker();
     void InvalidatePrepared();
     void PrepareLoop();
     int CommitPrepared(int centerX, int centerY, int radius, int uploadBudget);
     std::string GetEditFilePath(Cell cell) const;
+    std::string GetRuntimeBakeFilePath(Cell cell) const;
+    std::string GetRuntimeBakeArchivePath() const;
+    bool ReadRuntimeBakeIndex(const std::string& path,
+        std::map<Cell, BakeEntry>& entries) const;
     int DesiredLodStride(Cell cell, int centerX, int centerY) const;
     void StreamCells(int centerX, int centerY);
     void UnloadCell(Cell cell);

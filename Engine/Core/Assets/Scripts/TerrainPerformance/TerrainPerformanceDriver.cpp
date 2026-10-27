@@ -1,6 +1,5 @@
 #include "Scripts/TerrainPerformance/TerrainPerformanceDriver.h"
 #include "Scripts/TerrainPerformance/TerrainHeightArchive.h"
-#include "Scripts/TerrainGen/PerlinNoiseField.h"
 #include "Core/Compoonents/Obj/TerrainManager.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Materials/Material.h"
@@ -25,9 +24,8 @@ TerrainPerformanceDriver::TerrainPerformanceDriver()
     RegisterField("mapHalfExtentCells", mapHalfExtentCells);
     RegisterField("cacheDirectory", cacheDirectory);
     RegisterField("heightArchive", heightArchive);
+    RegisterField("archiveSignature", archiveSignature);
     RegisterField("farGrid", farGrid);
-    RegisterField("heightAmplitude", heightAmplitude);
-    RegisterField("baseHeight", baseHeight);
     RegisterField("reportIntervalSeconds", reportIntervalSeconds);
 }
 
@@ -47,24 +45,20 @@ uint64_t TerrainPerformanceDriver::SourceSignature() const
 {
     if (!Owner) return 0;
     auto* manager = Owner->GetComponent<Engine::Components::TerrainManager>();
-    auto* noise = Owner->GetComponent<PerlinNoiseField>();
-    if (!manager || !noise) return 0;
-    uint64_t signature = 14695981039346656037ull;
-    const auto mix = [&signature](const auto& value) {
-        const auto* bytes = reinterpret_cast<const unsigned char*>(&value);
-        for (size_t i = 0; i < sizeof(value); ++i)
-            signature = (signature ^ bytes[i]) * 1099511628211ull;
-    };
-    const uint32_t generatorVersion = 3;
-    mix(generatorVersion);
-    mix(manager->cellsX); mix(manager->cellsY);
-    mix(manager->cellWidth); mix(manager->cellDepth);
-    mix(noise->seed); mix(noise->frequency); mix(noise->octaves);
-    mix(noise->lacunarity); mix(noise->persistence);
-    mix(noise->coordinateOffset.x); mix(noise->coordinateOffset.y);
-    mix(noise->coordinateOffset.z);
-    mix(baseHeight); mix(heightAmplitude);
-    return signature;
+    if (!manager) return 0;
+    const std::string path =
+        Engine::Components::Mesh::ResolveFilePath(heightArchive);
+    uint64_t saved = 0;
+    if (!archiveSignature.empty())
+    {
+        try { saved = std::stoull(archiveSignature); }
+        catch (...) { return 0; }
+    }
+    uint64_t archive = 0;
+    if (TerrainHeightArchive::ReadSignature(path, mapHalfExtentCells,
+        manager->cellsX, manager->cellsY, archive))
+        return saved && saved != archive ? 0 : archive;
+    return saved;
 }
 
 bool TerrainPerformanceDriver::ConfigureTerrain()
@@ -74,20 +68,25 @@ bool TerrainPerformanceDriver::ConfigureTerrain()
     if (!manager) return false;
     const uint64_t signature = SourceSignature();
     const std::string archivePath = Engine::Components::Mesh::ResolveFilePath(heightArchive);
-    if (!signature || !std::filesystem::exists(archivePath)) return false;
+    if (!signature) return false;
     const int countX = manager->cellsX, countY = manager->cellsY;
     const int extent = mapHalfExtentCells;
     std::error_code archiveError;
-    if (std::filesystem::file_size(archivePath, archiveError) !=
-        TerrainHeightArchive::ExpectedBytes(extent, countX, countY) ||
-        archiveError) return false;
+    const bool sourceAvailable = std::filesystem::exists(archivePath) &&
+        std::filesystem::file_size(archivePath, archiveError) ==
+            TerrainHeightArchive::ExpectedBytes(extent, countX, countY) &&
+        !archiveError;
     std::vector<float> probeHeights, probeWeights;
-    if (!TerrainHeightArchive::ReadCell(archivePath, signature, extent,
-        countX, countY, 0, 0, probeHeights, &probeWeights)) return false;
+    if (sourceAvailable && !TerrainHeightArchive::ReadCell(archivePath,
+        signature, extent, countX, countY, 0, 0, probeHeights,
+        &probeWeights)) return false;
+    if (!sourceAvailable && !manager->requireRuntimeBake) return false;
     // Mesh caches include reconstructed paint weights and texture tiling.
     // Refresh them when either appearance setting changes.
     manager->SetStaticCache(cacheDirectory, signature ^ 0x4c41524745555633ull);
-    manager->SetProceduralBuilder([=](Engine::Components::TerrainManager::Cell cell,
+    manager->SetProceduralBuilder(sourceAvailable ?
+        std::function<void(Engine::Components::TerrainManager::Cell,
+            Engine::Components::Terrain&)>{[=](Engine::Components::TerrainManager::Cell cell,
         Engine::Components::Terrain& terrain)
     {
         // One 512 px color map now covers 4 m, so its texels are about 8 mm
@@ -130,7 +129,8 @@ bool TerrainPerformanceDriver::ConfigureTerrain()
                 archivedWeights[vertex * archivedLayers + 3];
         }
         terrain.Rebuild();
-    });
+    }} : std::function<void(Engine::Components::TerrainManager::Cell,
+        Engine::Components::Terrain&)>{});
     m_configuredSignature = signature;
     m_farHeights.clear();
     m_farPatches.clear();
@@ -195,9 +195,13 @@ void TerrainPerformanceDriver::RefreshFarTerrain(int centerX, int centerY)
         if (const auto* loaded = manager->GetLoadedCell(x, y))
             if (loaded->heights.size() == expected) return &loaded->heights;
         auto [it, inserted] = seamCache.try_emplace({x, y});
-        if (inserted && !TerrainHeightArchive::ReadCell(archivePath,
-            m_configuredSignature, mapHalfExtentCells, manager->cellsX,
-            manager->cellsY, x, y, it->second))
+        const bool bakedRuntime = scene->HasStarted() &&
+            manager->requireRuntimeBake;
+        if (inserted && !(bakedRuntime
+            ? manager->ReadBakedCellHeights({x, y}, it->second)
+            : TerrainHeightArchive::ReadCell(archivePath,
+                m_configuredSignature, mapHalfExtentCells, manager->cellsX,
+                manager->cellsY, x, y, it->second)))
             it->second.clear();
         return it->second.size() == expected ? &it->second : nullptr;
     };

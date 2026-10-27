@@ -98,6 +98,28 @@ inline bool BeginWrite(std::ofstream& file, uint64_t signature,
         Write(file, cellsX) && Write(file, cellsY) && Write(file, Scale);
 }
 
+inline bool ReadSignature(const std::string& path, int expectedExtent,
+    int expectedX, int expectedY, uint64_t& signature)
+{
+    std::ifstream file(path, std::ios::binary);
+    uint64_t magic = 0, savedSignature = 0;
+    uint32_t version = 0;
+    int extent = 0, cellsX = 0, cellsY = 0;
+    float scale = 0.f;
+    if (!file || !Read(file, magic) || magic != Magic ||
+        !Read(file, version) || version != Version ||
+        !Read(file, savedSignature) || !savedSignature ||
+        !Read(file, extent) || extent != expectedExtent ||
+        !Read(file, cellsX) || cellsX != expectedX ||
+        !Read(file, cellsY) || cellsY != expectedY ||
+        !Read(file, scale) || scale != Scale) return false;
+    std::error_code error;
+    if (std::filesystem::file_size(path, error) !=
+        ExpectedBytes(extent, cellsX, cellsY) || error) return false;
+    signature = savedSignature;
+    return true;
+}
+
 inline int16_t Quantize(float height)
 {
     return static_cast<int16_t>(std::clamp(std::lround(height * Scale),

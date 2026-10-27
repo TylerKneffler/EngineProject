@@ -215,6 +215,148 @@ int main()
     std::filesystem::remove_all(asyncCachePath);
     std::filesystem::remove_all(asyncEditPath);
 
+    auto* prefetchObject = scene.AddObject("Approach prefetch");
+    auto* prefetch = prefetchObject->AddComponent<Engine::Components::TerrainManager>();
+    prefetch->cellsX = prefetch->cellsY = 2;
+    prefetch->loadedRadius = 0;
+    prefetch->asyncStreaming = true;
+    prefetch->maxPreparedCells = 1;
+    prefetch->maxUploadsPerUpdate = 1;
+    std::atomic<int> aheadBuilds{0};
+    prefetch->SetProceduralBuilder([&aheadBuilds](
+        Engine::Components::TerrainManager::Cell cell,
+        Engine::Components::Terrain& terrain) {
+        if (cell.first == 1) ++aheadBuilds;
+        terrain.Rebuild();
+    });
+    Require(prefetch->AddProceduralCell(0, 0));
+    Require(prefetch->AddProceduralCell(1, 0));
+    prefetch->SyncLoadedCells(0, 0);
+    for (int attempt = 0; attempt < 500 && aheadBuilds.load() == 0; ++attempt)
+    {
+        prefetch->UpdateStreamingAtPosition({1.8, 0.0, 1.0});
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    Require(aheadBuilds.load() == 1);
+    Require(prefetch->GetLoadedCell(1, 0) == nullptr);
+    Require(prefetch->GetPreparingCellCount() == 1);
+    for (int attempt = 0; attempt < 500 && !prefetch->GetLoadedCell(1, 0);
+        ++attempt)
+    {
+        prefetch->UpdateStreamingAtPosition({2.1, 0.0, 1.0});
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    Require(prefetch->GetLoadedCell(1, 0) != nullptr);
+    Require(aheadBuilds.load() == 1);
+
+    Engine::Scene::Scene bakedScene;
+    auto* bakedObject = bakedScene.AddObject("Baked terrain manager");
+    auto* baked = bakedObject->AddComponent<Engine::Components::TerrainManager>();
+    baked->cellsX = baked->cellsY = 2;
+    baked->loadedRadius = 0;
+    baked->SetStaticCache({}, 123);
+    const auto runtimeBakePath = std::filesystem::temp_directory_path() /
+        ("terrain_runtime_bake_" + std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count()));
+    baked->runtimeBakeDirectory = runtimeBakePath.string();
+    baked->SetProceduralBuilder([](Engine::Components::TerrainManager::Cell,
+        Engine::Components::Terrain& terrain) {
+        terrain.heights[4] = 7.f;
+        terrain.Rebuild();
+    });
+    Require(baked->AddProceduralCell(0, 0));
+    Require(baked->AddProceduralCell(1, 0));
+    Require(!baked->HasCompleteRuntimeBake());
+    Require(baked->BakeRuntimeTerrain());
+    Require(baked->HasCompleteRuntimeBake());
+    const auto packedBake = runtimeBakePath / "123.terrainpack";
+    {
+        std::fstream packed(packedBake,
+            std::ios::binary | std::ios::in | std::ios::out);
+        Require(static_cast<bool>(packed));
+        const int32_t invalidX = 999;
+        packed.seekp(24);
+        packed.write(reinterpret_cast<const char*>(&invalidX),
+            sizeof(invalidX));
+        Require(static_cast<bool>(packed));
+    }
+    Require(!baked->HasCompleteRuntimeBake());
+    {
+        std::fstream packed(packedBake,
+            std::ios::binary | std::ios::in | std::ios::out);
+        const int32_t originalX = 0;
+        packed.seekp(24);
+        packed.write(reinterpret_cast<const char*>(&originalX),
+            sizeof(originalX));
+        Require(static_cast<bool>(packed));
+    }
+    Require(baked->HasCompleteRuntimeBake());
+    Require(std::filesystem::exists(packedBake));
+    Require(baked->Serialize()["runtimeBakeDirectory"].AsString() ==
+        runtimeBakePath.string());
+    baked->requireRuntimeBake = true;
+    Require(baked->Serialize()["requireRuntimeBake"].AsBool());
+    baked->SetProceduralBuilder([](Engine::Components::TerrainManager::Cell,
+        Engine::Components::Terrain& terrain) {
+        terrain.heights[4] = 99.f;
+        terrain.Rebuild();
+    });
+    bakedScene.Start();
+    std::vector<float> bakedSeamHeights;
+    Require(baked->ReadBakedCellHeights({1, 0}, bakedSeamHeights));
+    Require(bakedSeamHeights.size() == 9 && bakedSeamHeights[4] == 7.f);
+    baked->UpdateStreaming(0, 0);
+    Require(baked->GetLoadedCell(0, 0) &&
+        baked->GetLoadedCell(0, 0)->heights[4] == 7.f);
+    Require(baked->GetLoadedCell(0, 0)->GetBakedCpuMemoryBytes() > 0);
+    baked->GetLoadedCell(0, 0)->SetMeshLodStride(2);
+    Require(baked->GetLoadedCell(0, 0)->GetBakedCpuMemoryBytes() > 0);
+    Require(baked->GetCacheHitCount() > 0);
+    Require(std::filesystem::remove(packedBake));
+    Require(!baked->HasCompleteRuntimeBake());
+    baked->UpdateStreaming(1, 0);
+    Require(baked->GetLoadedCell(1, 0) == nullptr);
+    std::filesystem::remove_all(runtimeBakePath);
+
+    Engine::Scene::Scene missingBakeScene;
+    auto* missingObject = missingBakeScene.AddObject("Missing bake");
+    auto* missingBake = missingObject->AddComponent<Engine::Components::TerrainManager>();
+    missingBake->cellsX = missingBake->cellsY = 2;
+    missingBake->loadedRadius = 0;
+    missingBake->runtimeBakeDirectory = runtimeBakePath.string();
+    missingBake->requireRuntimeBake = true;
+    missingBake->SetStaticCache({}, 123);
+    int unexpectedBuilds = 0;
+    missingBake->SetProceduralBuilder([&](auto, auto& terrain) {
+        ++unexpectedBuilds;
+        terrain.Rebuild();
+    });
+    Require(missingBake->AddProceduralCell(0, 0));
+    missingBakeScene.Start();
+    Require(!missingBake->ReadBakedCellHeights({0, 0},
+        bakedSeamHeights));
+    missingBake->SyncLoadedCells(0, 0);
+    Require(missingBake->GetLoadedCell(0, 0) == nullptr);
+    Require(unexpectedBuilds == 0);
+
+    Engine::Core::Object standaloneObject;
+    auto* standalone = standaloneObject.AddComponent<Engine::Components::Terrain>();
+    standalone->Resize(2, 2, 1.f, 1.f);
+    standalone->heights[4] = 7.f;
+    standalone->Rebuild();
+    const auto standaloneBake = std::filesystem::temp_directory_path() /
+        ("terrain_single_bake_" + std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count()) +
+            ".terrainmesh");
+    Require(standalone->SaveCache(standaloneBake.string(), 0, true));
+    standalone->heights[4] = 99.f;
+    standalone->Rebuild();
+    standalone->bakedAssetPath = standaloneBake.string();
+    standalone->Start();
+    Require(standalone->heights[4] == 7.f);
+    Require(standalone->GetBakedCpuMemoryBytes() > 0);
+    std::filesystem::remove(standaloneBake);
+
     auto* lodObject = scene.AddObject("LOD borders");
     auto* lod = lodObject->AddComponent<Engine::Components::TerrainManager>();
     lod->cellsX = lod->cellsY = 32;

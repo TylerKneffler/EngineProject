@@ -2082,6 +2082,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     if (!m_renderFramePrepared)
         PrepareRenderFrame();
     m_lastOrdinaryDrawCount = 0;
+    m_lastOrdinaryTriangleCount = 0;
     const uint32_t portalRenderSlotsPerView = m_objectCapacity + 2u;
     const uint32_t portalObjectSlotCount =
         kMaxPortalRenderViews * portalRenderSlotsPerView;
@@ -3385,6 +3386,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         ++slot;
     }
     m_lastOrdinaryDrawCount = static_cast<uint32_t>(preparedDraws.size());
+    m_lastOrdinaryTriangleCount = 0;
+    for (const PreparedDraw& draw : preparedDraws)
+        m_lastOrdinaryTriangleCount +=
+            (draw.indexBuffer ? draw.indexCount : draw.vertexCount) / 3;
     m_shadowDebugSnapshot.casterCount = static_cast<uint32_t>(std::count_if(
         preparedDraws.begin(), preparedDraws.end(),
         [&](const PreparedDraw& draw)

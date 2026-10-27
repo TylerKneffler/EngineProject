@@ -7,7 +7,6 @@
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Scripts/TerrainPerformance/TerrainPerformanceDriver.h"
 #include "Scripts/TerrainPerformance/TerrainHeightArchive.h"
-#include "Scripts/TerrainGen/PerlinNoiseField.h"
 #include "Core/Window.h"
 #include "Core/Renderers/DX11/DX11GameRenderer.h"
 #include <Windows.h>
@@ -59,8 +58,7 @@ int main()
     Require(object != nullptr);
     auto* manager = object->GetComponent<Engine::Components::TerrainManager>();
     auto* driver = object->GetComponent<TerrainPerformanceDriver>();
-    auto* noise = object->GetComponent<PerlinNoiseField>();
-    Require(manager && driver && noise);
+    Require(manager && driver && manager->requireRuntimeBake);
     auto* scaleDummy = scene.FindObjectByName("Terrain Scale Dummy (1.8 m)");
     Require(scaleDummy != nullptr);
     Require(scaleDummy->transform.position.x == 0.0 &&
@@ -631,6 +629,10 @@ int main()
     Require(legacyCell->weights[0] == 1.f &&
         legacyCell->weights[4] == 0.f && legacyCell->weights[5] == 0.f);
     std::filesystem::remove_all(editPath);
+    // The legacy preview and far-grid checks use the archive source. Runtime
+    // bake enforcement is covered by TerrainManagerTests.
+    manager->requireRuntimeBake = false;
+    manager->runtimeBakeDirectory.clear();
     scene.Start();
     driver->farGrid = patchedGrid.string();
     Require(driver->GetFarTileMeshes().empty());
@@ -716,6 +718,8 @@ int main()
         renderer.EndFrame();
         renderer.WaitIdle();
         Require(scene.GetLastOrdinaryDrawCount() > 0);
+        Require(scene.GetLastOrdinaryTriangleCount() >
+            scene.GetLastOrdinaryDrawCount());
     }
     std::filesystem::remove_all(patchDirectory);
 }

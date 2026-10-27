@@ -601,11 +601,11 @@ void SceneView::DrawPanel(IEditorUi& ui)
             else if (createMenu.addSpriteRequested)
             {
                 created = m_scene->AddObject("Sprite");
-                Engine::Components::SpriteAnimationManager* manager =
+                Engine::Components::SpriteAnimationManager* animationManager =
                     created->AddComponent<Engine::Components::SpriteAnimationManager>();
                 Engine::Components::Sprite* sprite =
                     created->AddComponent<Engine::Components::Sprite>();
-                sprite->SetAnimationManager(manager);
+                sprite->SetAnimationManager(animationManager);
             }
             else if (createMenu.addParticleEmitterRequested)
             {

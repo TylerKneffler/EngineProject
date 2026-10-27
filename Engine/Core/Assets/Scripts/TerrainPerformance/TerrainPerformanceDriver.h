@@ -23,13 +23,13 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain Performance")
     std::string heightArchive =
         "Assets/TerrainData/TerrainPerformance/world.heights";
+    // Saved with the authored map so play mode can load baked cells without
+    // shipping the source height archive.
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain Performance")
+    std::string archiveSignature;
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain Performance")
     std::string farGrid =
         "Assets/TerrainData/TerrainPerformance/world.fargrid";
-    PROPERTY(Inspector, EditAnywhere, Category = "Terrain Performance")
-    float heightAmplitude = 38.f;
-    PROPERTY(Inspector, EditAnywhere, Category = "Terrain Performance")
-    float baseHeight = -8.f;
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain Performance")
     float reportIntervalSeconds = 5.f;
     void Update() override;

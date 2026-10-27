@@ -227,6 +227,10 @@ public:
     {
         return m_lastOrdinaryDrawCount;
     }
+    uint64_t GetLastOrdinaryTriangleCount() const
+    {
+        return m_lastOrdinaryTriangleCount;
+    }
     uint32_t GetLastParticlePortalDrawCount() const
     {
         return m_lastParticlePortalDrawCount;
@@ -661,6 +665,7 @@ private:
     uint64_t m_lastObjectDataUploadBytes = 0;
     uint32_t m_lastOcclusionCulledCount = 0;
     uint32_t m_lastOrdinaryDrawCount = 0;
+    uint64_t m_lastOrdinaryTriangleCount = 0;
     uint32_t m_lastParticlePortalDrawCount = 0;
     uint32_t m_lastSkinnedObjectCount = 0;
     ShadowDebugSnapshot m_shadowDebugSnapshot;

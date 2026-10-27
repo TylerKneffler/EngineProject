@@ -1,3 +1,7 @@
+// Run with TERRAIN_TEST_VIEWPOINT=low|ridge|edge. For a disk-cache pair,
+// set TERRAIN_TEST_CACHE_DIRECTORY to an empty benchmark-owned directory,
+// run once with TERRAIN_TEST_CACHE_MODE=cold, then again with mode=warm.
+// Reports are written under .local/performance-logs.
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Obj/TerrainManager.h"
 #include "Core/Compoonents/Camera/Camera.h"
@@ -5,7 +9,6 @@
 #include "Core/Renderers/DX11/DX11GameRenderer.h"
 #include "Core/Window.h"
 #include "Scripts/TerrainPerformance/TerrainPerformanceDriver.h"
-#include "Scripts/TerrainGen/PerlinNoiseField.h"
 #include <Windows.h>
 #include <Psapi.h>
 #include <wincodec.h>
@@ -13,6 +16,7 @@
 #pragma comment(lib, "Psapi.lib")
 #pragma comment(lib, "windowscodecs.lib")
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -119,18 +123,24 @@ struct Samples
     std::vector<double> visibleDistances;
     double worstStreaming = 0.0, visibleDistance = 0.0;
     uint64_t peakTerrainCpu = 0, peakTerrainGpu = 0, peakCache = 0;
+    uint64_t peakTerrainTextureBytes = 0;
     uint64_t peakWorkingSet = 0, peakPrivate = 0;
     size_t peakResident = 0;
     uint32_t peakDraws = 0;
-    std::vector<double> draws, objectUploadKiB;
+    std::vector<double> draws, submittedTriangles, objectUploadKiB,
+        residentCells;
+    std::array<std::vector<double>,
+        static_cast<size_t>(Engine::Graphics::GpuTimingStage::Count)> gpuStages;
     uint64_t lastGpuSampleId = 0;
 };
 
 struct TemporaryCache
 {
     std::filesystem::path path;
+    bool removeOnExit = true;
     ~TemporaryCache()
     {
+        if (!removeOnExit) return;
         std::error_code error;
         const auto parent = std::filesystem::weakly_canonical(".local/cache", error);
         if (error) return;
@@ -140,6 +150,17 @@ struct TemporaryCache
     }
 };
 
+std::string ReadStringSetting(const char* name, const char* fallback)
+{
+    const DWORD length = GetEnvironmentVariableA(name, nullptr, 0);
+    if (!length) return fallback;
+    std::string value(length, '\0');
+    const DWORD copied = GetEnvironmentVariableA(name, value.data(), length);
+    Require(copied > 0 && copied < length, "invalid terrain benchmark setting");
+    value.resize(copied);
+    return value;
+}
+
 void SampleMemory(Samples& samples,
     Engine::Components::TerrainManager& manager)
 {
@@ -147,6 +168,9 @@ void SampleMemory(Samples& samples,
     samples.peakTerrainCpu = std::max(samples.peakTerrainCpu, memory.cpuBytes);
     samples.peakTerrainGpu = std::max(samples.peakTerrainGpu, memory.gpuBytes);
     samples.peakCache = std::max(samples.peakCache, memory.cacheBytes);
+    samples.peakTerrainTextureBytes = std::max(
+        samples.peakTerrainTextureBytes,
+        manager.GetTerrainTextureMemoryBytes());
     samples.peakResident = std::max(samples.peakResident,
         manager.GetLoadedCellCount());
     PROCESS_MEMORY_COUNTERS_EX counters{};
@@ -198,6 +222,27 @@ int Run()
         "TERRAIN_TEST_FAR_PLANE_METERS", 25000, 1000, 50000);
     const int farRadiusCells = ReadIntSetting(
         "TERRAIN_TEST_FAR_RADIUS_CELLS", 16, 1, 32);
+    const std::string viewpoint = ReadStringSetting(
+        "TERRAIN_TEST_VIEWPOINT", "ridge");
+    Require(viewpoint == "low" || viewpoint == "ridge" ||
+        viewpoint == "edge", "unknown TERRAIN_TEST_VIEWPOINT");
+    const std::string cacheMode = ReadStringSetting(
+        "TERRAIN_TEST_CACHE_MODE", "cold");
+    const std::string runtimeMode = ReadStringSetting(
+        "TERRAIN_TEST_RUNTIME_MODE", "baked");
+    Require(runtimeMode == "baked" || runtimeMode == "legacy",
+        "TERRAIN_TEST_RUNTIME_MODE must be baked or legacy");
+    Require(cacheMode == "cold" || cacheMode == "warm",
+        "TERRAIN_TEST_CACHE_MODE must be cold or warm");
+    const std::string persistentCache = ReadStringSetting(
+        "TERRAIN_TEST_CACHE_DIRECTORY", "");
+    Require(runtimeMode != "legacy" || cacheMode != "warm" ||
+        !persistentCache.empty(),
+        "warm cache mode requires TERRAIN_TEST_CACHE_DIRECTORY");
+    if (runtimeMode == "legacy" && cacheMode == "warm")
+        Require(std::filesystem::is_directory(persistentCache) &&
+            !std::filesystem::is_empty(persistentCache),
+            "warm terrain cache directory is missing or empty");
     Engine::Core::Window window(GetModuleHandleW(nullptr),
         L"Terrain 1080p performance test", Width, Height);
     Engine::Renderers::DX11GameRenderer renderer;
@@ -214,9 +259,21 @@ int Run()
         Require(renderer.EnableOffscreenExport(Width, Height, 1, 2),
             "could not enable terrain image capture");
     // Destroy the cache after the scene has stopped its streaming workers.
-    const TemporaryCache cache{std::filesystem::path(".local/cache") /
-        ("terrain_streaming_test_" + std::to_string(GetCurrentProcessId()) +
-            "_" + std::to_string(Clock::now().time_since_epoch().count()))};
+    const TemporaryCache cache{
+        persistentCache.empty()
+            ? std::filesystem::path(".local/cache") /
+                ("terrain_streaming_test_" + std::to_string(GetCurrentProcessId()) +
+                    "_" + std::to_string(Clock::now().time_since_epoch().count()))
+            : std::filesystem::path(persistentCache),
+        persistentCache.empty()};
+    if (runtimeMode == "legacy" && cacheMode == "cold" &&
+        !persistentCache.empty())
+    {
+        // Only remove a cache owned by this benchmark, never an arbitrary path.
+        Require(!std::filesystem::exists(cache.path) ||
+            std::filesystem::is_empty(cache.path),
+            "cold terrain cache directory must be empty");
+    }
     Engine::Scene::Scene scene;
     scene.Init(renderer.GetGraphicsProvider());
     Require(scene.Load("Engine/Core/Assets/Scenes/terrain/terrain_performance.scene"),
@@ -228,7 +285,7 @@ int Run()
     auto* driver = map->GetComponent<TerrainPerformanceDriver>();
     auto* camera = cameraObject->GetComponent<Engine::Components::Camera>();
     Require(manager && driver && camera &&
-        map->GetComponent<PerlinNoiseField>(), "terrain benchmark components missing");
+        manager->requireRuntimeBake, "terrain benchmark components missing");
     Require(manager->GetCellCount() == 16641,
         "terrain benchmark must use the saved full map");
     const bool farFieldEnabled = GetEnvironmentVariableA(
@@ -249,10 +306,28 @@ int Run()
             sun->enabled = false;
     if (!farFieldEnabled) driver->farGrid.clear();
     camera->farPlane = static_cast<float>(farPlaneMeters);
-    // A fresh, test-owned cache makes this a repeatable cold-cache run. The
-    // manager still exercises normal compact cache writes and reads.
+    // Without a caller-owned cache path, each run gets a fresh cache. Pass
+    // the same directory to separate cold and warm process runs to compare
+    // disk-cache behavior without deleting another run's data.
     driver->cacheDirectory = cache.path.string();
     Require(driver->ConfigureTerrain(), "could not configure test-owned mesh cache");
+    if (runtimeMode == "baked")
+    {
+        if (!manager->HasCompleteRuntimeBake())
+        {
+            std::cerr << "Runtime terrain bake missing or incomplete; baking "
+                << manager->GetCellCount() << " cells before benchmark...\n";
+            Require(manager->BakeRuntimeTerrain(true),
+                "could not bake the full runtime terrain map");
+        }
+        Require(manager->HasCompleteRuntimeBake(),
+            "runtime terrain bake is incomplete");
+    }
+    else
+    {
+        manager->requireRuntimeBake = false;
+        manager->runtimeBakeDirectory.clear();
+    }
 
     // Preload the first viewpoint outside measured frames. The camera clip
     // and streamed radius vary independently, so a long clip plane cannot
@@ -266,14 +341,16 @@ int Run()
     manager->maxUnloadsPerUpdate = 32;
     manager->maxPreparedCells = 16;
     manager->maxUploadsPerUpdate = 4;
-    manager->SyncLoadedCells(-60, -60);
+    const int initialCell = viewpoint == "edge" ? 61 : -60;
+    if (runtimeMode == "baked") scene.Start();
+    manager->SyncLoadedCells(initialCell, initialCell);
     // SyncLoadedCells preloads the viewpoint; measured frames use the scene's
     // actual streaming limits rather than the temporary preload limits.
     manager->maxLoadsPerUpdate = 2;
     manager->maxUnloadsPerUpdate = 4;
     manager->maxPreparedCells = 4;
     manager->maxUploadsPerUpdate = 1;
-    scene.Start();
+    if (runtimeMode != "baked") scene.Start();
     if (captureImages)
     {
         char requestedView[32]{};
@@ -358,13 +435,16 @@ int Run()
         return 0;
     }
     const auto allCells = manager->GetCells();
+    const double viewHeight = viewpoint == "low" ? -11.77 :
+        viewpoint == "ridge" ? 600.0 : 110.0;
+    const float viewPitch = viewpoint == "ridge" ? .18f : .06f;
     const auto runFrame = [&](double x, double z, double yaw, Samples* samples) {
         const auto start = Clock::now();
         cameraObject->transform.position = {
-            x, 110.0, z};
-        cameraObject->transform.rotation = {.06f, static_cast<float>(yaw), 0.f};
-        manager->UpdateStreaming(static_cast<int>(std::floor(x / 128.0)),
-            static_cast<int>(std::floor(z / 128.0)));
+            x, viewHeight, z};
+        cameraObject->transform.rotation = {viewPitch, static_cast<float>(yaw), 0.f};
+        manager->UpdateStreamingAtPosition(
+            cameraObject->transform.GetWorldPositionD());
         const auto managed = Clock::now();
         driver->Update();
         const auto streamed = Clock::now();
@@ -395,6 +475,10 @@ int Run()
         samples->peakDraws = std::max(samples->peakDraws,
             scene.GetLastOrdinaryDrawCount());
         samples->draws.push_back(scene.GetLastOrdinaryDrawCount());
+        samples->submittedTriangles.push_back(
+            static_cast<double>(scene.GetLastOrdinaryTriangleCount()));
+        samples->residentCells.push_back(
+            static_cast<double>(manager->GetLoadedCellCount()));
         samples->objectUploadKiB.push_back(
             scene.GetLastObjectDataUploadBytes() / 1024.0);
         const auto telemetry = renderer.GetFrameTimingTelemetry();
@@ -407,6 +491,8 @@ int Run()
             samples->gpuTotal.push_back(total);
             samples->gpuTerrain.push_back(telemetry.gpuMilliseconds[
                 static_cast<size_t>(Engine::Graphics::GpuTimingStage::Terrain)]);
+            for (size_t stage = 0; stage < samples->gpuStages.size(); ++stage)
+                samples->gpuStages[stage].push_back(telemetry.gpuMilliseconds[stage]);
         }
         SampleMemory(*samples, *manager);
         if (samples->frames.size() % 8 == 0)
@@ -420,29 +506,30 @@ int Run()
 
     constexpr int FramesPerPhase = 90;
     constexpr double FrameSeconds = 1.0 / 60.0;
-    constexpr double Heading = .7853981633974483;
-    const double startX = -60.0 * 128.0 + 64.0;
+    const double heading = viewpoint == "edge"
+        ? -2.356194490192345 : .7853981633974483;
+    const double startX = initialCell * 128.0 + 64.0;
     const double startZ = startX;
     for (int i = 0; i < 30; ++i)
-        runFrame(startX, startZ, Heading, nullptr);
+        runFrame(startX, startZ, heading, nullptr);
     Samples samples;
     // Look across the map from one high viewpoint, then move at 1.4 m/s
     // walking and 5 m/s running speeds using a fixed 60 Hz simulation step.
     for (int frame = 0; frame < FramesPerPhase; ++frame)
         runFrame(startX, startZ,
-            Heading + .35 * std::sin(frame * .07), &samples);
+            heading + .35 * std::sin(frame * .07), &samples);
     double travel = 0.0;
     for (int frame = 0; frame < FramesPerPhase; ++frame)
     {
         travel += 1.4 * FrameSeconds;
         runFrame(startX + travel / std::sqrt(2.0),
-            startZ + travel / std::sqrt(2.0), Heading, &samples);
+            startZ + travel / std::sqrt(2.0), heading, &samples);
     }
     for (int frame = 0; frame < FramesPerPhase; ++frame)
     {
         travel += 5.0 * FrameSeconds;
         runFrame(startX + travel / std::sqrt(2.0),
-            startZ + travel / std::sqrt(2.0), Heading, &samples);
+            startZ + travel / std::sqrt(2.0), heading, &samples);
     }
     renderer.WaitIdle();
 
@@ -493,8 +580,8 @@ int Run()
     Require(samples.peakCache <=
         static_cast<uint64_t>(manager->cacheBudgetMiB) << 20,
         "terrain mesh cache budget exceeded");
-    const double boundaryX = -60.0 * 128.0 + 127.5;
-    runFrame(boundaryX, startZ, Heading, nullptr);
+    const double boundaryX = initialCell * 128.0 + 127.5;
+    runFrame(boundaryX, startZ, heading, nullptr);
     const uint64_t uploadsBeforeCrossing = driver->GetFarTileUploadCount();
     const uint64_t bytesBeforeCrossing = driver->GetFarTileUploadedBytes();
     const double rebuildBeforeCrossing =
@@ -507,7 +594,7 @@ int Run()
     for (int frame = 1; frame <= 60; ++frame)
     {
         runFrame(boundaryX + 5.0 * frame / 60.0, startZ,
-            Heading, &crossingSamples);
+            heading, &crossingSamples);
         std::this_thread::sleep_until(crossingStart +
             std::chrono::duration_cast<Clock::duration>(
                 std::chrono::duration<double>(frame / 60.0)));
@@ -528,9 +615,19 @@ int Run()
     const double p95 = Percentile(samples.frames, .95);
     const bool meets100Fps = p95 <= 10.0;
     const auto report = [&](std::ostream& out) {
+        const auto metric = [&](const char* name, const std::vector<double>& values) {
+            out << "  \"" << name << "P50Ms\": " << Percentile(values, .5)
+                << ",\n  \"" << name << "P95Ms\": " << Percentile(values, .95)
+                << ",\n  \"" << name << "P99Ms\": " << Percentile(values, .99)
+                << ",\n";
+        };
         out << std::fixed << std::setprecision(3)
             << "{\n  \"resolution\": \"1920x1080\",\n"
-            << "  \"cacheMode\": \"cold\",\n"
+            << "  \"cacheMode\": \""
+                << (runtimeMode == "baked" ? "not-applicable" : cacheMode)
+                << "\",\n"
+            << "  \"runtimeMode\": \"" << runtimeMode << "\",\n"
+            << "  \"viewpoint\": \"" << viewpoint << "\",\n"
             << "  \"cameraFarPlaneMeters\": " << farPlaneMeters << ",\n"
             << "  \"terrainFarRadiusCells\": " << farRadiusCells << ",\n"
             << "  \"farFieldEnabled\": " << (farFieldEnabled ? "true" : "false")
@@ -539,6 +636,14 @@ int Run()
                 << ",\n"
             << "  \"unlit\": " << (unlit ? "true" : "false") << ",\n"
             << "  \"farFieldTriangles\": " << farFieldTriangles << ",\n"
+            << "  \"submittedTrianglesP50\": "
+                << Percentile(samples.submittedTriangles, .5) << ",\n"
+            << "  \"submittedTrianglesP95\": "
+                << Percentile(samples.submittedTriangles, .95) << ",\n"
+            << "  \"submittedTrianglesP99\": "
+                << Percentile(samples.submittedTriangles, .99) << ",\n"
+            << "  \"peakTerrainTextureMiBEstimate\": "
+                << samples.peakTerrainTextureBytes / 1048576.0 << ",\n"
             << "  \"farFieldTiles\": " << farMeshes.size() << ",\n"
             << "  \"crossingFarTileUploads\": " << crossingTileUploads << ",\n"
             << "  \"crossingFarTileUploadKiB\": "
@@ -610,12 +715,38 @@ int Run()
             << "  \"peakWorkingSetMiB\": " << samples.peakWorkingSet / MiB << ",\n"
             << "  \"peakPrivateMiB\": " << samples.peakPrivate / MiB << ",\n"
             << "  \"targetP95Under10Ms\": " << (meets100Fps ? "true" : "false")
+            << ",\n";
+        metric("frame", samples.frames);
+        metric("managerCpu", samples.managerCpu);
+        metric("farTileCpu", samples.farTileCpu);
+        metric("renderCpu", samples.renderCpu);
+        metric("gpuTotal", samples.gpuTotal);
+        metric("gpuShadow", samples.gpuStages[static_cast<size_t>(
+            Engine::Graphics::GpuTimingStage::Shadow)]);
+        metric("gpuTerrain", samples.gpuStages[static_cast<size_t>(
+            Engine::Graphics::GpuTimingStage::Terrain)]);
+        metric("gpuOpaque", samples.gpuStages[static_cast<size_t>(
+            Engine::Graphics::GpuTimingStage::Opaque)]);
+        metric("gpuTransparent", samples.gpuStages[static_cast<size_t>(
+            Engine::Graphics::GpuTimingStage::Transparent)]);
+        metric("crossingFrame", crossingSamples.frames);
+        metric("crossingGpuTotal", crossingSamples.gpuTotal);
+        out << "  \"drawsP50\": " << Percentile(samples.draws, .5)
+            << ",\n  \"drawsP95\": " << Percentile(samples.draws, .95)
+            << ",\n  \"drawsP99\": " << Percentile(samples.draws, .99)
+            << ",\n  \"residentCellsP50\": "
+            << Percentile(samples.residentCells, .5)
+            << ",\n  \"residentCellsP95\": "
+            << Percentile(samples.residentCells, .95)
+            << ",\n  \"residentCellsP99\": "
+            << Percentile(samples.residentCells, .99)
             << "\n}\n";
     };
     const auto output = std::filesystem::path(".local/performance-logs") /
         ("terrain-1080p-far-" + std::to_string(farPlaneMeters) +
             "-radius-" + std::to_string(farRadiusCells) +
-            (farFieldEnabled ? "-distant.json" : "-cells-only.json"));
+            (farFieldEnabled ? "-distant-" : "-cells-only-") + viewpoint +
+            "-" + cacheMode + ".json");
     std::filesystem::create_directories(output.parent_path());
     std::ofstream file(output, std::ios::trunc);
     Require(static_cast<bool>(file), "could not write terrain performance report");

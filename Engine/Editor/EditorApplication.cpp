@@ -31,6 +31,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <unordered_set>
 
 #ifndef ENGINE_ASSETS_PATH
@@ -45,6 +46,22 @@
 
 namespace
 {
+    std::optional<std::string> EnvironmentVariable(const char* name)
+    {
+#ifdef _MSC_VER
+        char* value = nullptr;
+        size_t length = 0;
+        if (_dupenv_s(&value, &length, name) != 0 || !value)
+            return std::nullopt;
+        std::string result(value);
+        std::free(value);
+        return result;
+#else
+        const char* value = std::getenv(name);
+        return value ? std::optional<std::string>(value) : std::nullopt;
+#endif
+    }
+
     void WriteStartupLog(const std::string& message, bool reset = false)
     {
         std::ofstream log("editor-startup.log", reset ? std::ios::trunc : std::ios::app);
@@ -187,12 +204,12 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     // The opt-in playback audit loads the same bundled scene as the MMD
     // harness, but runs it through the complete editor and UI frame loop.
     const bool autoProfileMmdPlay =
-        std::getenv("ENGINE_EDITOR_AUTO_PROFILE_MMD") != nullptr;
-    const char* requestedAutoProfileFrames =
-        std::getenv("ENGINE_EDITOR_AUTO_PROFILE_FRAMES");
+        EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_MMD").has_value();
+    const auto requestedAutoProfileFrames =
+        EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_FRAMES");
     const uint32_t autoProfilePlayFrames = requestedAutoProfileFrames
         ? static_cast<uint32_t>(std::clamp(
-            std::atoi(requestedAutoProfileFrames), 30, 1200))
+            std::atoi(requestedAutoProfileFrames->c_str()), 30, 1200))
         : 180u;
     const std::string startupScene = autoProfileMmdPlay
         ? (std::filesystem::path(ENGINE_ASSETS_PATH) / "Scenes" /

@@ -42,3 +42,5 @@ build
 editor-startup.log
 project-build.log
 ReleaseBuilds/.staging-*/
+# Generated runtime terrain archives and legacy per-cell bake data.
+/Engine/Core/Assets/TerrainData/TerrainPerformance/BakedCells/

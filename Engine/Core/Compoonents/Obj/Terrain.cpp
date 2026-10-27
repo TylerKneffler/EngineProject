@@ -7,6 +7,7 @@
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -47,11 +48,17 @@ template<class T> bool ReadVector(std::ifstream& stream, std::vector<T>& values,
         static_cast<std::streamsize>(count * sizeof(T)));
     return static_cast<bool>(stream);
 }
-struct CachedAppearance
+template<class T> bool ReadBoundedVector(std::ifstream& stream,
+    std::vector<T>& values, uint64_t maximum)
 {
-    float normal[3];
-    float color[3];
-};
+    uint64_t count = 0;
+    if (!ReadValue(stream, count) || count == 0 || count > maximum) return false;
+    values.resize(static_cast<size_t>(count));
+    stream.read(reinterpret_cast<char*>(values.data()),
+        static_cast<std::streamsize>(count * sizeof(T)));
+    return static_cast<bool>(stream);
+}
+using CachedAppearance = Engine::Components::Terrain::BakedAppearance;
 static_assert(sizeof(CachedAppearance) == 24);
 int64_t MaterialStamp(const std::string& material)
 {
@@ -251,6 +258,8 @@ bool Terrain::ApplyBrushFromLocalRay(const glm::vec3& nearPoint,
 void Terrain::Rebuild()
 {
     if (!Owner || heights.size() != static_cast<size_t>(cellsX + 1) * (cellsY + 1)) return;
+    m_bakedAppearance.clear();
+    for (auto& lod : m_bakedLods) lod = {};
     NormalizeWeights();
     RefreshMaterials();
     bool textured[6]{};
@@ -311,7 +320,51 @@ void Terrain::SetMeshLodStride(int stride)
         cellsX % stride || cellsY % stride)) stride /= 2;
     if (m_meshLodStride == stride) return;
     m_meshLodStride = stride;
-    if (Owner && Owner->GetComponent<Mesh>()) Rebuild();
+    if (Owner && Owner->GetComponent<Mesh>() && !InstallBakedLod(stride))
+        Rebuild();
+}
+
+bool Terrain::InstallBakedLod(int stride)
+{
+    const size_t lodIndex = stride <= 1 ? 0 : stride <= 2 ? 1 :
+        stride <= 4 ? 2 : 3;
+    const auto& lod = m_bakedLods[lodIndex];
+    if (!Owner || m_bakedAppearance.size() != heights.size() ||
+        lod.sourceVertices.empty() || lod.indices.empty()) return false;
+    std::vector<Mesh::Vertex> vertices;
+    vertices.reserve(lod.sourceVertices.size());
+    for (uint32_t source : lod.sourceVertices)
+    {
+        if (source >= heights.size()) return false;
+        const int col = source % (cellsX + 1);
+        const int row = source / (cellsX + 1);
+        Mesh::Vertex vertex{};
+        vertex.pos[0] = col * cellWidth;
+        vertex.pos[1] = heights[source];
+        vertex.pos[2] = row * cellDepth;
+        std::copy_n(m_bakedAppearance[source].normal, 3, vertex.normal);
+        vertex.uv[0] = static_cast<float>(col) / cellsX;
+        vertex.uv[1] = static_cast<float>(row) / cellsY;
+        std::copy_n(m_bakedAppearance[source].color, 3, vertex.color);
+        vertex.color[3] = 1.f;
+        for (size_t layer = 0; layer < layers.size(); ++layer)
+            if (m_bakedTextureMask & (1u << layer))
+                vertex.uvChannels[2 + layer / 4][layer % 4] =
+                    weights[static_cast<size_t>(source) * layers.size() + layer];
+        vertices.push_back(vertex);
+    }
+    Mesh* mesh = Owner->GetComponent<Mesh>();
+    if (!mesh) mesh = Owner->AddComponent<Mesh>();
+    return mesh->SetIndexedGeometry(std::move(vertices), lod.indices);
+}
+
+uint64_t Terrain::GetBakedCpuMemoryBytes() const
+{
+    uint64_t bytes = m_bakedAppearance.capacity() * sizeof(BakedAppearance);
+    for (const auto& lod : m_bakedLods)
+        bytes += (lod.sourceVertices.capacity() + lod.indices.capacity()) *
+            sizeof(uint32_t);
+    return bytes;
 }
 
 Terrain::Prepared Terrain::TakePrepared()
@@ -325,6 +378,9 @@ Terrain::Prepared Terrain::TakePrepared()
     result.layers = std::move(layers);
     result.materials = std::move(m_materials);
     result.materialPaths = std::move(m_materialPaths);
+    result.bakedAppearance = std::move(m_bakedAppearance);
+    result.bakedLods = std::move(m_bakedLods);
+    result.bakedTextureMask = m_bakedTextureMask;
     if (const auto* mesh = Owner ? Owner->GetComponent<Mesh>() : nullptr)
     {
         result.vertices = mesh->GetVertices();
@@ -345,6 +401,9 @@ bool Terrain::InstallPrepared(Prepared prepared, IGraphicsProvider* provider)
     layers = std::move(prepared.layers);
     m_materials = std::move(prepared.materials);
     m_materialPaths = std::move(prepared.materialPaths);
+    m_bakedAppearance = std::move(prepared.bakedAppearance);
+    m_bakedLods = std::move(prepared.bakedLods);
+    m_bakedTextureMask = prepared.bakedTextureMask;
     m_provider = provider;
     for (auto& material : m_materials)
         if (material && provider) material->PrepareTextures(provider);
@@ -365,7 +424,8 @@ void Terrain::FinalizePreparedGraphics(IGraphicsProvider* provider)
         if (provider && !mesh->IsReady()) mesh->OnAfterDeserialize(provider);
 }
 
-bool Terrain::SaveCache(const std::string& path, uint64_t signature) const
+bool Terrain::SaveCache(const std::string& path, uint64_t signature,
+    bool includeBakedLods) const
 {
     const auto* mesh = Owner ? Owner->GetComponent<Mesh>() : nullptr;
     if (!mesh || mesh->GetVertices().size() != heights.size() ||
@@ -380,7 +440,7 @@ bool Terrain::SaveCache(const std::string& path, uint64_t signature) const
     std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
     if (!stream) return false;
     const uint64_t magic = 0x31484341434e5254ull; // TRNCACH1
-    const uint32_t version = 4;
+    const uint32_t version = includeBakedLods ? 5 : 4;
     const uint32_t layerCount = static_cast<uint32_t>(layers.size());
     uint8_t texturedMask = 0;
     for (size_t layer = 0; layer < layers.size(); ++layer)
@@ -414,6 +474,24 @@ bool Terrain::SaveCache(const std::string& path, uint64_t signature) const
     }
     valid &= WriteVector(stream, heights) && WriteVector(stream, weights) &&
         WriteVector(stream, appearance);
+    if (includeBakedLods)
+        for (int stride : {1, 2, 4, 8})
+        {
+            auto vertices = mesh->GetVertices();
+            auto indices = mesh->GetIndices();
+            ReduceMeshForLod(vertices, indices, cellsX, cellsY, stride);
+            std::vector<uint32_t> sources;
+            sources.reserve(vertices.size());
+            for (const auto& vertex : vertices)
+            {
+                const int col = static_cast<int>(std::lround(
+                    vertex.pos[0] / cellWidth));
+                const int row = static_cast<int>(std::lround(
+                    vertex.pos[2] / cellDepth));
+                sources.push_back(static_cast<uint32_t>(row * (cellsX + 1) + col));
+            }
+            valid &= WriteVector(stream, sources) && WriteVector(stream, indices);
+        }
     stream.close();
     valid &= static_cast<bool>(stream);
     bool committed = false;
@@ -433,11 +511,66 @@ bool Terrain::SaveCache(const std::string& path, uint64_t signature) const
     return committed;
 }
 
+bool Terrain::ReadCacheHeights(const std::string& path, uint64_t signature,
+    int expectedX, int expectedY, std::vector<float>& result)
+{
+    return ReadCacheHeightsRange(path, signature, expectedX, expectedY,
+        result, 0, 0);
+}
+
+bool Terrain::ReadCacheHeightsRange(const std::string& path,
+    uint64_t signature, int expectedX, int expectedY,
+    std::vector<float>& result, uint64_t offset, uint64_t size)
+{
+    std::ifstream stream(path, std::ios::binary);
+    if (offset) stream.seekg(static_cast<std::streamoff>(offset));
+    uint64_t magic = 0, storedSignature = 0;
+    uint32_t version = 0, layerCount = 0;
+    uint8_t texturedMask = 0;
+    int x = 0, y = 0;
+    float width = 0.f, depth = 0.f, tiling = 0.f;
+    if (!stream || !ReadValue(stream, magic) ||
+        magic != 0x31484341434e5254ull ||
+        !ReadValue(stream, version) || version != 5 ||
+        !ReadValue(stream, storedSignature) || storedSignature != signature ||
+        !ReadValue(stream, x) || x != expectedX ||
+        !ReadValue(stream, y) || y != expectedY ||
+        !ReadValue(stream, width) || width <= 0.f ||
+        !ReadValue(stream, depth) || depth <= 0.f ||
+        !ReadValue(stream, tiling) || tiling < 1.f ||
+        !ReadValue(stream, texturedMask) ||
+        !ReadValue(stream, layerCount) || layerCount < 1 || layerCount > 6)
+        return false;
+    for (uint32_t layer = 0; layer < layerCount; ++layer)
+    {
+        uint32_t length = 0;
+        if (!ReadValue(stream, length) || length > 4096) return false;
+        stream.seekg(static_cast<std::streamoff>(length) +
+            5 * sizeof(float) + sizeof(int64_t), std::ios::cur);
+        if (!stream) return false;
+    }
+    const uint64_t count = static_cast<uint64_t>(x + 1) * (y + 1);
+    std::vector<float> heights;
+    if (!ReadVector(stream, heights, count)) return false;
+    if (size && static_cast<uint64_t>(stream.tellg()) > offset + size)
+        return false;
+    result = std::move(heights);
+    return true;
+}
+
 bool Terrain::LoadCache(const std::string& path, uint64_t signature,
     IGraphicsProvider* provider)
 {
+    return LoadCacheRange(path, signature, provider, 0, 0);
+}
+
+bool Terrain::LoadCacheRange(const std::string& path, uint64_t signature,
+    IGraphicsProvider* provider, uint64_t offset, uint64_t size)
+{
     if (!Owner) return false;
     std::ifstream stream(path, std::ios::binary);
+    if (!stream) return false;
+    if (offset) stream.seekg(static_cast<std::streamoff>(offset));
     if (!stream) return false;
     uint64_t magic = 0, storedSignature = 0;
     uint32_t version = 0, layerCount = 0;
@@ -445,7 +578,7 @@ bool Terrain::LoadCache(const std::string& path, uint64_t signature,
     int x = 0, y = 0;
     float width = 0.f, depth = 0.f, tiling = 0.f;
     if (!ReadValue(stream, magic) || magic != 0x31484341434e5254ull ||
-        !ReadValue(stream, version) || version != 4 ||
+        !ReadValue(stream, version) || (version != 4 && version != 5) ||
         !ReadValue(stream, storedSignature) || storedSignature != signature ||
         !ReadValue(stream, x) || !ReadValue(stream, y) ||
         !ReadValue(stream, width) || !ReadValue(stream, depth) ||
@@ -477,10 +610,50 @@ bool Terrain::LoadCache(const std::string& path, uint64_t signature,
         !ReadVector(stream, cachedWeights, vertexCount * layerCount) ||
         !ReadVector(stream, appearance, vertexCount))
         return false;
-    char trailing = 0;
-    if (stream.read(&trailing, 1)) return false;
-    if (!stream.eof()) return false;
+    std::array<BakedLod, 4> bakedLods;
+    if (version == 5)
+        for (auto& lod : bakedLods)
+        {
+            if (!ReadBoundedVector(stream, lod.sourceVertices, vertexCount) ||
+                !ReadBoundedVector(stream, lod.indices,
+                    static_cast<uint64_t>(x) * y * 6)) return false;
+            for (uint32_t source : lod.sourceVertices)
+                if (source >= vertexCount) return false;
+            for (uint32_t index : lod.indices)
+                if (index >= lod.sourceVertices.size()) return false;
+        }
+    if (size)
+    {
+        if (static_cast<uint64_t>(stream.tellg()) != offset + size)
+            return false;
+    }
+    else
+    {
+        char trailing = 0;
+        if (stream.read(&trailing, 1) || !stream.eof()) return false;
+    }
+    if (version == 5)
+    {
+        cellsX = x; cellsY = y; cellWidth = width; cellDepth = depth;
+        textureTiling = tiling;
+        heights = std::move(cachedHeights);
+        weights = std::move(cachedWeights);
+        layers = std::move(cachedLayers);
+        m_bakedAppearance = std::move(appearance);
+        m_bakedLods = std::move(bakedLods);
+        m_bakedTextureMask = texturedMask;
+        m_provider = provider;
+        m_materialPaths.clear(); m_materials.clear();
+        RefreshMaterials();
+        if (!InstallBakedLod(m_meshLodStride)) return false;
+        if (provider)
+            if (auto* mesh = Owner->GetComponent<Mesh>())
+                if (!mesh->IsReady()) mesh->OnAfterDeserialize(provider);
+        return true;
+    }
     std::vector<Mesh::Vertex> vertices(static_cast<size_t>(vertexCount));
+    m_bakedAppearance.clear();
+    for (auto& lod : m_bakedLods) lod = {};
     for (int row = 0; row <= y; ++row)
         for (int col = 0; col <= x; ++col)
         {
@@ -551,7 +724,8 @@ Terrain::JsonValue Terrain::Serialize() const
     JsonValue out = Component::Serialize();
     out.Set("cellsX", JsonValue(cellsX)).Set("cellsY", JsonValue(cellsY))
         .Set("cellWidth", JsonValue(cellWidth)).Set("cellDepth", JsonValue(cellDepth))
-        .Set("textureTiling", JsonValue(textureTiling));
+        .Set("textureTiling", JsonValue(textureTiling))
+        .Set("bakedAssetPath", JsonValue(bakedAssetPath));
     JsonValue h = JsonValue::MakeArray(), w = JsonValue::MakeArray(), ls = JsonValue::MakeArray();
     for (float value : heights) h.Push(JsonValue(value));
     for (float value : weights) w.Push(JsonValue(value));
@@ -574,6 +748,8 @@ void Terrain::Deserialize(const JsonValue& value)
     cellDepth = std::max(.001f, value["cellDepth"].AsFloat());
     textureTiling = value.Has("textureTiling")
         ? std::max(1.f, value["textureTiling"].AsFloat()) : 4.f;
+    bakedAssetPath = value.Has("bakedAssetPath")
+        ? value["bakedAssetPath"].AsString() : std::string{};
     heights.assign(static_cast<size_t>(cellsX + 1) * (cellsY + 1), 0.f);
     for (size_t i = 0; i < std::min(heights.size(), value["heights"].ArraySize()); ++i)
         heights[i] = value["heights"].ArrayAt(i).AsFloat();
@@ -606,17 +782,35 @@ void Terrain::OnAfterDeserialize(IGraphicsProvider* provider)
     Rebuild();
 }
 
+void Terrain::Start()
+{
+    if (!bakedAssetPath.empty())
+        LoadCache(Mesh::ResolveFilePath(bakedAssetPath), 0, m_provider);
+}
+
 bool Terrain::DrawProperties(::Engine::Editor::IEditorUi& ui)
 {
     bool changed = false;
+    bool geometryChanged = false;
+    bool appearanceChanged = false;
     int x = cellsX, y = cellsY;
     float width = cellWidth, depth = cellDepth;
-    changed |= ui.SliderInt("Cells X", &x, 1, 512);
-    changed |= ui.SliderInt("Cells Y", &y, 1, 512);
-    changed |= ui.DragFloat("Cell width", &width, .1f, .001f, 1000.f);
-    changed |= ui.DragFloat("Cell depth", &depth, .1f, .001f, 1000.f);
-    changed |= ui.DragFloat("Texture tiling", &textureTiling, .25f, 1.f, 128.f);
-    if (changed) { Resize(x, y, width, depth); MarkConfigurationDirty(); }
+    geometryChanged |= ui.SliderInt("Cells X", &x, 1, 512);
+    geometryChanged |= ui.SliderInt("Cells Y", &y, 1, 512);
+    geometryChanged |= ui.DragFloat("Cell width", &width, .1f, .001f, 1000.f);
+    geometryChanged |= ui.DragFloat("Cell depth", &depth, .1f, .001f, 1000.f);
+    geometryChanged |= ui.DragFloat("Texture tiling", &textureTiling, .25f, 1.f, 128.f);
+    char bakePath[512]{};
+    std::memcpy(bakePath, bakedAssetPath.data(),
+        std::min(bakedAssetPath.size(), sizeof(bakePath) - 1));
+    if (ui.InputText("Runtime baked mesh", bakePath, sizeof(bakePath)))
+    { bakedAssetPath = bakePath; changed = true; }
+    if (geometryChanged)
+    {
+        Resize(x, y, width, depth);
+        MarkConfigurationDirty();
+        changed = true;
+    }
     if (layers.size() < 6 && ui.Button("Add material layer"))
     {
         const size_t oldCount = layers.size();
@@ -625,7 +819,7 @@ bool Terrain::DrawProperties(::Engine::Editor::IEditorUi& ui)
         for (size_t i = 0; i < heights.size(); ++i)
             for (size_t l = 0; l < oldCount; ++l)
                 next[i * layers.size() + l] = weights[i * oldCount + l];
-        weights = std::move(next); changed = true;
+        weights = std::move(next); appearanceChanged = true;
     }
     for (size_t l = 0; l < layers.size(); ++l)
     {
@@ -635,15 +829,31 @@ bool Terrain::DrawProperties(::Engine::Editor::IEditorUi& ui)
         std::memcpy(path, layers[l].material.data(),
             std::min(layers[l].material.size(), sizeof(path) - 1));
         if (ui.InputText("Material asset", path, sizeof(path)))
-        { layers[l].material = path; changed = true; }
-        changed |= ui.DragFloat("Minimum height", &layers[l].minHeight, .1f);
-        changed |= ui.DragFloat("Maximum height", &layers[l].maxHeight, .1f);
-        changed |= ui.ColorEdit3("Preview color", &layers[l].previewColor.x);
+        { layers[l].material = path; appearanceChanged = true; }
+        appearanceChanged |= ui.DragFloat("Minimum height", &layers[l].minHeight, .1f);
+        appearanceChanged |= ui.DragFloat("Maximum height", &layers[l].maxHeight, .1f);
+        appearanceChanged |= ui.ColorEdit3("Preview color", &layers[l].previewColor.x);
         ui.PopId();
     }
     if (ui.Button("Assign layers by height"))
-    { AssignLayersByHeight(); changed = true; }
-    if (changed) { Rebuild(); MarkConfigurationDirty(); }
+    { AssignLayersByHeight(); appearanceChanged = true; }
+    if (appearanceChanged) { Rebuild(); MarkConfigurationDirty(); changed = true; }
+    if (ui.Button("Bake terrain for runtime"))
+    {
+        if (bakedAssetPath.empty())
+        {
+            std::string name = Owner ? Owner->name : "Terrain";
+            for (char& ch : name)
+                if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '-' &&
+                    ch != '_') ch = '_';
+            bakedAssetPath = "Assets/TerrainBakes/" + name + ".terrainmesh";
+            MarkConfigurationDirty();
+            changed = true;
+        }
+        m_bakeStatus = SaveCache(Mesh::ResolveFilePath(bakedAssetPath), 0, true)
+            ? "Runtime terrain bake saved" : "Runtime terrain bake failed";
+    }
+    if (!m_bakeStatus.empty()) ui.Label(m_bakeStatus.c_str());
     return changed;
 }
 }

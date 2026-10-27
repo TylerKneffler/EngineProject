@@ -2,6 +2,8 @@
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Obj/TerrainBatchAppearance.h"
+#include "Core/Compoonents/Materials/Material.h"
+#include "Core/Compoonents/Materials/Texture.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include <algorithm>
 #include <cmath>
@@ -10,7 +12,9 @@
 #include <type_traits>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <limits>
+#include <stdexcept>
 
 namespace
 {
@@ -85,6 +89,185 @@ void TerrainManager::SetStaticCache(std::string directory, uint64_t signature)
     m_cacheReservedBytes.store(bytes);
 }
 
+std::string TerrainManager::GetRuntimeBakeFilePath(Cell cell) const
+{
+    if (runtimeBakeDirectory.empty()) return {};
+    return (std::filesystem::path(Mesh::ResolveFilePath(runtimeBakeDirectory)) /
+        std::to_string(m_cacheSignature) /
+        (std::to_string(cell.first) + "_" + std::to_string(cell.second) +
+            ".terrainmesh")).string();
+}
+
+std::string TerrainManager::GetRuntimeBakeArchivePath() const
+{
+    if (runtimeBakeDirectory.empty()) return {};
+    return (std::filesystem::path(Mesh::ResolveFilePath(runtimeBakeDirectory)) /
+        (std::to_string(m_cacheSignature) + ".terrainpack")).string();
+}
+
+bool TerrainManager::ReadRuntimeBakeIndex(const std::string& path,
+    std::map<Cell, BakeEntry>& entries) const
+{
+    entries.clear();
+    std::ifstream file(path, std::ios::binary);
+    uint64_t magic = 0, signature = 0;
+    uint32_t version = 0, count = 0;
+    if (!file || !ReadBinary(file, magic) ||
+        magic != 0x31304b41504e5254ull || // TRNPAK01
+        !ReadBinary(file, version) || version != 1 ||
+        !ReadBinary(file, signature) || signature != m_cacheSignature ||
+        !ReadBinary(file, count) || count != GetCellCount()) return false;
+    std::error_code error;
+    const uint64_t fileSize = std::filesystem::file_size(path, error);
+    const uint64_t dataStart = 24ull + static_cast<uint64_t>(count) * 24;
+    if (error || fileSize < dataStart) return false;
+    std::vector<std::pair<uint64_t, uint64_t>> ranges;
+    ranges.reserve(count);
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        int32_t x = 0, y = 0;
+        BakeEntry entry;
+        if (!ReadBinary(file, x) || !ReadBinary(file, y) ||
+            !ReadBinary(file, entry.offset) || !ReadBinary(file, entry.size) ||
+            !HasCell(x, y) || entry.offset < dataStart ||
+            entry.size == 0 || entry.size > (256ull << 20) ||
+            entry.offset > fileSize || entry.size > fileSize - entry.offset ||
+            !entries.emplace(Cell{x, y}, entry).second) return false;
+        ranges.emplace_back(entry.offset, entry.offset + entry.size);
+    }
+    std::sort(ranges.begin(), ranges.end());
+    uint64_t next = dataStart;
+    for (const auto& range : ranges)
+    {
+        if (range.first != next) return false;
+        next = range.second;
+    }
+    return entries.size() == GetCellCount() && next == fileSize;
+}
+
+bool TerrainManager::ReadBakedCellHeights(Cell cell,
+    std::vector<float>& heights) const
+{
+    if (!m_runtimeBakeActive || !HasCell(cell.first, cell.second))
+        return false;
+    const auto found = m_bakeIndex.find(cell);
+    return found != m_bakeIndex.end() &&
+        Terrain::ReadCacheHeightsRange(GetRuntimeBakeArchivePath(),
+            m_cacheSignature, cellsX, cellsY, heights,
+            found->second.offset, found->second.size);
+}
+
+bool TerrainManager::BakeRuntimeTerrain(bool reuseExistingCells)
+{
+    if (!Owner || !Owner->GetScene() || Owner->GetScene()->HasStarted() ||
+        runtimeBakeDirectory.empty() ||
+        (m_proceduralCells.empty() && m_cells.empty())) return false;
+    // One indexed file preserves random cell reads without thousands of
+    // filesystem entries. The temporary file is committed only when complete.
+    const std::filesystem::path target(GetRuntimeBakeArchivePath());
+    const std::filesystem::path temporary = target.string() + ".tmp";
+    const std::filesystem::path cellTemporary = target.string() + ".cell";
+    std::error_code error;
+    std::filesystem::create_directories(target.parent_path(), error);
+    if (error) return false;
+    std::ofstream packed(temporary, std::ios::binary | std::ios::trunc);
+    const uint64_t magic = 0x31304b41504e5254ull;
+    const uint32_t version = 1;
+    const auto cells = GetCells();
+    const uint32_t count = static_cast<uint32_t>(cells.size());
+    if (!packed || !WriteBinary(packed, magic) ||
+        !WriteBinary(packed, version) ||
+        !WriteBinary(packed, m_cacheSignature) || !WriteBinary(packed, count))
+        return false;
+    const std::vector<char> emptyIndex(static_cast<size_t>(count) * 24);
+    packed.write(emptyIndex.data(),
+        static_cast<std::streamsize>(emptyIndex.size()));
+    if (!packed) return false;
+    std::map<Cell, BakeEntry> index;
+    for (const Cell cell : cells)
+    {
+        std::string sourcePath;
+        std::vector<float> legacyHeights;
+        if (reuseExistingCells && Terrain::ReadCacheHeights(
+            GetRuntimeBakeFilePath(cell), m_cacheSignature, cellsX,
+            cellsY, legacyHeights))
+            sourcePath = GetRuntimeBakeFilePath(cell);
+        else
+        {
+            Engine::Core::Object object;
+            auto* terrain = object.AddComponent<Terrain>();
+            const auto saved = m_cells.find(cell);
+            if (saved != m_cells.end()) terrain->Deserialize(saved->second);
+            else
+            {
+                if (!m_proceduralBuilder) return false;
+                terrain->Resize(cellsX, cellsY, cellWidth, cellDepth);
+                m_proceduralBuilder(cell, *terrain);
+            }
+            if (m_editedProcedural.count(cell))
+            {
+                if (const auto* loaded = GetLoadedCell(cell.first, cell.second))
+                {
+                    terrain->heights = loaded->heights;
+                    terrain->weights = loaded->weights;
+                    terrain->Rebuild();
+                }
+                else if (!LoadEdit(cell, *terrain)) return false;
+            }
+            if (!terrain->SaveCache(cellTemporary.string(),
+                m_cacheSignature, true))
+            {
+                m_bakeStatus = "Bake failed at cell " +
+                    std::to_string(cell.first) + "," + std::to_string(cell.second);
+                return false;
+            }
+            sourcePath = cellTemporary.string();
+        }
+        const uint64_t size = std::filesystem::file_size(sourcePath, error);
+        if (error || !size || size > (256ull << 20)) return false;
+        const uint64_t offset = static_cast<uint64_t>(packed.tellp());
+        std::ifstream source(sourcePath, std::ios::binary);
+        packed << source.rdbuf();
+        if (!source || !packed ||
+            static_cast<uint64_t>(packed.tellp()) != offset + size) return false;
+        source.close();
+        index[cell] = {offset, size};
+        if (sourcePath == cellTemporary.string())
+            std::filesystem::remove(cellTemporary, error);
+    }
+    packed.seekp(24);
+    for (const auto& [cell, entry] : index)
+    {
+        const int32_t x = cell.first, y = cell.second;
+        if (!WriteBinary(packed, x) || !WriteBinary(packed, y) ||
+            !WriteBinary(packed, entry.offset) ||
+            !WriteBinary(packed, entry.size)) return false;
+    }
+    packed.close();
+    std::map<Cell, BakeEntry> verified;
+    if (!packed || !ReadRuntimeBakeIndex(temporary.string(), verified))
+        return false;
+    std::filesystem::rename(temporary, target, error);
+    if (error)
+    {
+        error.clear();
+        std::filesystem::remove(target, error);
+        error.clear();
+        std::filesystem::rename(temporary, target, error);
+    }
+    if (error) return false;
+    m_bakeStatus = "Baked " + std::to_string(count) +
+        " terrain cells into one file";
+    return true;
+}
+
+bool TerrainManager::HasCompleteRuntimeBake() const
+{
+    if (runtimeBakeDirectory.empty() || !GetCellCount()) return false;
+    std::map<Cell, BakeEntry> entries;
+    return ReadRuntimeBakeIndex(GetRuntimeBakeArchivePath(), entries);
+}
+
 bool TerrainManager::ReserveCacheWrite(const std::string& path,
     const Terrain& terrain)
 {
@@ -116,7 +299,8 @@ TerrainManager::MemoryUsage TerrainManager::GetMemoryUsage() const
         if (!terrain) continue;
         usage.cpuBytes += terrain->heights.capacity() * sizeof(float) +
             terrain->weights.capacity() * sizeof(float) +
-            terrain->layers.capacity() * sizeof(Terrain::Layer);
+            terrain->layers.capacity() * sizeof(Terrain::Layer) +
+            terrain->GetBakedCpuMemoryBytes();
         for (const auto& layer : terrain->layers)
             usage.cpuBytes += layer.material.capacity();
         if (const auto* mesh = terrain->Owner->GetComponent<Mesh>())
@@ -143,9 +327,48 @@ TerrainManager::MemoryUsage TerrainManager::GetMemoryUsage() const
             data.vertices.capacity() * sizeof(Mesh::Vertex) +
             data.indices.capacity() * sizeof(uint32_t) +
             data.layers.capacity() * sizeof(Terrain::Layer);
+        usage.preparedBytes +=
+            data.bakedAppearance.capacity() * sizeof(Terrain::BakedAppearance);
+        for (const auto& lod : data.bakedLods)
+            usage.preparedBytes +=
+                (lod.sourceVertices.capacity() + lod.indices.capacity()) *
+                sizeof(uint32_t);
     }
     usage.cpuBytes += usage.preparedBytes;
     return usage;
+}
+
+uint64_t TerrainManager::GetTerrainTextureMemoryBytes() const
+{
+    std::set<const Texture*> unique;
+    uint64_t bytes = 0;
+    const auto countTexture = [&](const std::shared_ptr<Texture>& texture) {
+        if (!texture || !texture->GetGraphicsTexture() ||
+            !unique.insert(texture.get()).second) return;
+        uint32_t width = texture->GetWidth();
+        uint32_t height = texture->GetHeight();
+        const uint32_t pixelBytes =
+            Engine::Graphics::GraphicsTextureBytesPerPixel(texture->GetFormat());
+        for (uint32_t level = 0; level < texture->GetMipLevels(); ++level)
+        {
+            bytes += static_cast<uint64_t>(width) * height * pixelBytes;
+            width = std::max(1u, width / 2);
+            height = std::max(1u, height / 2);
+        }
+    };
+    for (const auto& [cell, terrain] : m_loaded)
+        if (terrain)
+            for (const auto& material : terrain->GetLayerMaterials())
+                if (material)
+                {
+                    countTexture(material->baseColorTexture);
+                    countTexture(material->metallicRoughnessTexture);
+                    countTexture(material->normalTexture);
+                    countTexture(material->heightTexture);
+                    countTexture(material->occlusionTexture);
+                    countTexture(material->emissiveTexture);
+                }
+    return bytes;
 }
 
 void TerrainManager::TrimMemoryBudget(int centerX, int centerY)
@@ -207,11 +430,19 @@ void TerrainManager::PrepareLoop()
         {
             Engine::Core::Object object;
             auto* terrain = object.AddComponent<Terrain>();
-            if (task.hasSaved) terrain->Deserialize(task.saved);
-            else
+            const bool baked = !task.bakePath.empty() && task.bakeSize &&
+                terrain->LoadCacheRange(task.bakePath,
+                    task.cacheSignature, nullptr, task.bakeOffset,
+                    task.bakeSize);
+            if (task.requireBake && !baked)
+                throw std::runtime_error("Missing or stale runtime terrain bake");
+            result.cacheHit = baked;
+            if (!baked && task.hasSaved) terrain->Deserialize(task.saved);
+            else if (!baked)
             {
                 result.cacheHit = !task.cachePath.empty() &&
-                    terrain->LoadCache(task.cachePath, task.cacheSignature, nullptr);
+                    terrain->LoadCache(task.cachePath,
+                        task.cacheSignature, nullptr);
                 if (!result.cacheHit && task.builder)
                 {
                     terrain->Resize(task.cellsX, task.cellsY,
@@ -222,7 +453,7 @@ void TerrainManager::PrepareLoop()
                         terrain->SaveCache(task.cachePath, task.cacheSignature);
                 }
             }
-            if (task.edited && !task.editPath.empty())
+            if (!baked && task.edited && !task.editPath.empty())
                 LoadEditFile(task.editPath, *terrain);
             terrain->SetMeshLodStride(task.lodStride);
             result.terrain = terrain->TakePrepared();
@@ -247,8 +478,21 @@ int TerrainManager::CommitPrepared(int centerX, int centerY, int radius,
         {
             std::lock_guard<std::mutex> lock(m_prepareMutex);
             if (m_preparedCells.empty()) break;
-            prepared = std::move(m_preparedCells.front());
-            m_preparedCells.pop_front();
+            const auto inWindow = [&](Cell cell, Cell center) {
+                return std::abs(cell.first - center.first) <= radius &&
+                    std::abs(cell.second - center.second) <= radius;
+            };
+            auto ready = std::find_if(m_preparedCells.begin(),
+                m_preparedCells.end(), [&](const PreparedCell& candidate) {
+                    const bool current = inWindow(candidate.cell, {centerX, centerY});
+                    const bool prefetched = m_prefetchCenter &&
+                        inWindow(candidate.cell, *m_prefetchCenter);
+                    return candidate.revision != m_prepareRevision ||
+                        current || !prefetched;
+                });
+            if (ready == m_preparedCells.end()) break;
+            prepared = std::move(*ready);
+            m_preparedCells.erase(ready);
             if (prepared.revision != m_prepareRevision) continue;
             const auto found = m_preparingCells.find(prepared.cell);
             if (found != m_preparingCells.end() &&
@@ -462,7 +706,8 @@ void TerrainManager::LoadCell(Cell cell, int lodStride)
 {
     if (!Owner || !Owner->GetScene() || !HasCell(cell.first, cell.second) || m_loaded.count(cell)) return;
     const auto saved = m_cells.find(cell);
-    if (saved == m_cells.end() && !m_proceduralBuilder) return;
+    if (saved == m_cells.end() && !m_proceduralBuilder &&
+        !(Owner->GetScene()->HasStarted() && requireRuntimeBake)) return;
     auto* object = Owner->GetScene()->AddObject("Terrain cell " +
         std::to_string(cell.first) + "," + std::to_string(cell.second));
     object->runtimeOnly = true;
@@ -473,9 +718,23 @@ void TerrainManager::LoadCell(Cell cell, int lodStride)
         static_cast<double>(cell.second) * cellsY * cellDepth};
     auto* terrain = object->AddComponent<Terrain>();
     const auto cachePath = GetCacheFilePath(cell.first, cell.second);
-    bool ready = false;
-    if (saved != m_cells.end()) terrain->Deserialize(saved->second);
-    else
+    const std::string bakePath = (m_runtimeBakeActive || requireRuntimeBake) &&
+        Owner->GetScene()->HasStarted()
+        ? GetRuntimeBakeArchivePath() : std::string{};
+    const auto bakeEntry = m_bakeIndex.find(cell);
+    bool ready = !bakePath.empty() && bakeEntry != m_bakeIndex.end() &&
+        terrain->LoadCacheRange(bakePath, m_cacheSignature, m_provider,
+            bakeEntry->second.offset, bakeEntry->second.size);
+    if (Owner->GetScene()->HasStarted() &&
+        (m_runtimeBakeActive || requireRuntimeBake) && !ready)
+    {
+        Owner->GetScene()->RemoveObject(object);
+        return;
+    }
+    const bool baked = ready;
+    if (ready) ++m_cacheHits;
+    if (!ready && saved != m_cells.end()) terrain->Deserialize(saved->second);
+    else if (!ready)
     {
         ready = !cachePath.empty() &&
             terrain->LoadCache(cachePath, m_cacheSignature, m_provider);
@@ -492,7 +751,7 @@ void TerrainManager::LoadCell(Cell cell, int lodStride)
         if (saved == m_cells.end() && ReserveCacheWrite(cachePath, *terrain))
             terrain->SaveCache(cachePath, m_cacheSignature);
     }
-    if (m_editedProcedural.count(cell)) LoadEdit(cell, *terrain);
+    if (!baked && m_editedProcedural.count(cell)) LoadEdit(cell, *terrain);
     m_loaded[cell] = terrain;
     Stitch(cell);
     terrain->SetMeshLodStride(lodStride);
@@ -811,6 +1070,7 @@ void TerrainManager::RefreshRenderBatches(int uploadBudget, int centerX,
     int centerY, int radius)
 {
     if (!Owner || !Owner->GetScene()) return;
+    m_renderBatchRefreshPending = false;
     constexpr int side = 4;
     const auto groupOf = [side](Cell cell) -> Cell {
         const auto floorDiv = [side](int value) {
@@ -847,6 +1107,41 @@ void TerrainManager::RefreshRenderBatches(int uploadBudget, int centerX,
         if (found != groups.end() && found->second.size() >= 2 &&
             it->second.revision == revisionOf(found->second))
         { ++it; continue; }
+        // A far-cell LOD change uploads its cell mesh first. With no upload
+        // slot left, keep drawing the previous batch for the same members;
+        // replace it on a later frame instead of exposing every cell draw.
+        if (!m_editorStreaming && uploadBudget <= 0 &&
+            found != groups.end() &&
+            found->second.size() == it->second.members.size())
+        {
+            bool sameMembers = true;
+            bool lodChanged = false;
+            for (const auto& [cell, terrain] : found->second)
+            {
+                const auto oldLod = it->second.lodStrides.find(cell);
+                const auto oldGeometry =
+                    it->second.geometryRevisions.find(cell);
+                const auto oldTransform =
+                    it->second.transformRevisions.find(cell);
+                const auto* mesh = terrain->Owner->GetComponent<Mesh>();
+                if (!it->second.members.count(cell) ||
+                    oldLod == it->second.lodStrides.end() ||
+                    oldGeometry == it->second.geometryRevisions.end() ||
+                    oldTransform == it->second.transformRevisions.end() ||
+                    oldTransform->second !=
+                        terrain->Owner->transform.GetWorldRevision() ||
+                    (!mesh || (oldLod->second == terrain->GetMeshLodStride() &&
+                        oldGeometry->second != mesh->GetAuthoredGeometryRevision())))
+                { sameMembers = false; break; }
+                lodChanged |= oldLod->second != terrain->GetMeshLodStride();
+            }
+            if (sameMembers && lodChanged)
+            {
+                m_renderBatchRefreshPending = true;
+                ++it;
+                continue;
+            }
+        }
         // A moving streaming window fills a 4x4 group one cell at a time.
         // Keep its old batch while the missing cells render individually;
         // replace it once every cell required by this window has arrived.
@@ -879,7 +1174,6 @@ void TerrainManager::RefreshRenderBatches(int uploadBudget, int centerX,
     }
     for (const auto& [group, members] : groups)
     {
-        if (uploadBudget <= 0) break;
         if (members.size() < 2 || m_renderBatches.count(group)) continue;
         const Terrain* first = members.front().second;
         const auto sameAppearance = [&](const Terrain* terrain) {
@@ -893,6 +1187,11 @@ void TerrainManager::RefreshRenderBatches(int uploadBudget, int centerX,
         if (!std::all_of(members.begin(), members.end(),
             [&](const auto& member) { return sameAppearance(member.second); }))
             continue;
+        if (uploadBudget <= 0)
+        {
+            m_renderBatchRefreshPending = true;
+            continue;
+        }
         std::vector<Mesh::Vertex> vertices;
         std::vector<uint32_t> indices;
         for (const auto& [cell, terrain] : members)
@@ -936,6 +1235,11 @@ void TerrainManager::RefreshRenderBatches(int uploadBudget, int centerX,
         for (const auto& [cell, terrain] : members)
         {
             batch.members.insert(cell);
+            batch.lodStrides[cell] = terrain->GetMeshLodStride();
+            batch.geometryRevisions[cell] = terrain->Owner->
+                GetComponent<Mesh>()->GetAuthoredGeometryRevision();
+            batch.transformRevisions[cell] =
+                terrain->Owner->transform.GetWorldRevision();
             terrain->Owner->GetComponent<Mesh>()->SetEditorVisible(false);
         }
         m_renderBatches[group] = std::move(batch);
@@ -946,6 +1250,34 @@ void TerrainManager::RefreshRenderBatches(int uploadBudget, int centerX,
 
 void TerrainManager::UpdateStreaming(int centerX, int centerY)
 {
+    if (m_editorStreaming) InvalidatePrepared();
+    m_editorStreaming = false;
+    m_prefetchCenter.reset();
+    StreamCells(centerX, centerY);
+}
+
+void TerrainManager::UpdateStreamingAtPosition(
+    const glm::dvec3& worldPosition)
+{
+    if (!Owner) return;
+    const glm::dvec3 local = glm::dvec3(
+        glm::inverse(Owner->transform.GetWorldMatrixD()) *
+        glm::dvec4(worldPosition, 1.0));
+    const double spanX = static_cast<double>(cellsX) * cellWidth;
+    const double spanY = static_cast<double>(cellsY) * cellDepth;
+    if (spanX <= 0.0 || spanY <= 0.0) return;
+    const double cellX = local.x / spanX;
+    const double cellY = local.z / spanY;
+    const int centerX = static_cast<int>(std::floor(cellX));
+    const int centerY = static_cast<int>(std::floor(cellY));
+    const double fractionX = cellX - centerX;
+    const double fractionY = cellY - centerY;
+    const int aheadX = fractionX >= .875 ? 1 : fractionX < .125 ? -1 : 0;
+    const int aheadY = fractionY >= .875 ? 1 : fractionY < .125 ? -1 : 0;
+    m_prefetchCenter = asyncStreaming && !m_editorStreaming &&
+        (aheadX || aheadY)
+        ? std::optional<Cell>{{centerX + aheadX, centerY + aheadY}}
+        : std::nullopt;
     if (m_editorStreaming) InvalidatePrepared();
     m_editorStreaming = false;
     StreamCells(centerX, centerY);
@@ -962,6 +1294,7 @@ void TerrainManager::UpdateEditorStreaming(const glm::dvec3& worldPosition)
     if (spanX <= 0.0 || spanZ <= 0.0) return;
     if (!m_editorStreaming) InvalidatePrepared();
     m_editorStreaming = true;
+    m_prefetchCenter.reset();
     StreamCells(static_cast<int>(std::floor(local.x / spanX)),
         static_cast<int>(std::floor(local.z / spanZ)));
 }
@@ -970,6 +1303,14 @@ void TerrainManager::StreamCells(int centerX, int centerY)
 {
     const int radius = m_editorStreaming ? std::clamp(editorRadius, 0, 32) :
         std::clamp(std::max(loadedRadius, farRadius), 0, 32);
+    const auto wanted = [&](Cell cell) {
+        const auto inside = [&](Cell center) {
+            return std::abs(cell.first - center.first) <= radius &&
+                std::abs(cell.second - center.second) <= radius;
+        };
+        return inside({centerX, centerY}) ||
+            (m_prefetchCenter && inside(*m_prefetchCenter));
+    };
     const Cell travel{m_haveLastCenter ? centerX - m_lastCenter.first : 0,
         m_haveLastCenter ? centerY - m_lastCenter.second : 0};
     m_lastCenter = {centerX, centerY};
@@ -981,8 +1322,7 @@ void TerrainManager::StreamCells(int centerX, int centerY)
         for (auto it = m_prepareQueue.begin(); it != m_prepareQueue.end(); )
         {
             const Cell cell = it->cell;
-            if (std::abs(cell.first - centerX) > radius ||
-                std::abs(cell.second - centerY) > radius ||
+            if (!wanted(cell) ||
                 !HasCell(cell.first, cell.second))
             {
                 m_preparingCells.erase(cell);
@@ -1016,9 +1356,17 @@ void TerrainManager::StreamCells(int centerX, int centerY)
         }
     }
     std::vector<Cell> pending;
-    for (int y = centerY - radius; y <= centerY + radius; ++y)
-        for (int x = centerX - radius; x <= centerX + radius; ++x)
-            if (HasCell(x, y) && !GetLoadedCell(x, y) &&
+    const int minX = std::min(centerX,
+        m_prefetchCenter ? m_prefetchCenter->first : centerX) - radius;
+    const int maxX = std::max(centerX,
+        m_prefetchCenter ? m_prefetchCenter->first : centerX) + radius;
+    const int minY = std::min(centerY,
+        m_prefetchCenter ? m_prefetchCenter->second : centerY) - radius;
+    const int maxY = std::max(centerY,
+        m_prefetchCenter ? m_prefetchCenter->second : centerY) + radius;
+    for (int y = minY; y <= maxY; ++y)
+        for (int x = minX; x <= maxX; ++x)
+            if (wanted({x, y}) && HasCell(x, y) && !GetLoadedCell(x, y) &&
                 (!asyncStreaming || !m_preparingCells.count({x, y})))
                 pending.emplace_back(x, y);
     const auto priority = [&](Cell cell) {
@@ -1055,8 +1403,22 @@ void TerrainManager::StreamCells(int centerX, int centerY)
             task.hasSaved = saved != m_cells.end();
             if (task.hasSaved) task.saved = saved->second;
             task.builder = m_proceduralBuilder;
-            if (!task.hasSaved && !task.builder) continue;
+            if (!task.hasSaved && !task.builder &&
+                !(Owner->GetScene()->HasStarted() && requireRuntimeBake)) continue;
             task.cachePath = GetCacheFilePath(cell.first, cell.second);
+            if ((m_runtimeBakeActive || requireRuntimeBake) &&
+                Owner->GetScene()->HasStarted())
+            {
+                task.bakePath = GetRuntimeBakeArchivePath();
+                if (const auto found = m_bakeIndex.find(cell);
+                    found != m_bakeIndex.end())
+                {
+                    task.bakeOffset = found->second.offset;
+                    task.bakeSize = found->second.size;
+                }
+            }
+            task.requireBake = Owner->GetScene()->HasStarted() &&
+                (m_runtimeBakeActive || requireRuntimeBake);
             task.edited = m_editedProcedural.count(cell) != 0;
             task.editPath = GetEditFilePath(cell);
             {
@@ -1088,11 +1450,14 @@ void TerrainManager::StreamCells(int centerX, int centerY)
         return distanceA == distanceB ? a < b : distanceA < distanceB;
     });
     int changed = 0;
+    const int uploadCapacity = std::clamp(maxUploadsPerUpdate, 1, 64);
+    const int reservedBatchUploads =
+        asyncStreaming && batchFarCells && m_renderBatchRefreshPending ? 1 : 0;
     for (Cell cell : lodPending)
     {
         const int lodLimit = asyncStreaming
             ? std::min(std::clamp(maxLodChangesPerUpdate, 1, 64),
-                std::clamp(maxUploadsPerUpdate, 1, 64))
+                uploadCapacity - reservedBatchUploads)
             : std::clamp(maxLodChangesPerUpdate, 1, 64);
         if (changed >= lodLimit) break;
         m_loaded.at(cell)->SetMeshLodStride(DesiredLodStride(cell, centerX, centerY));
@@ -1101,8 +1466,9 @@ void TerrainManager::StreamCells(int centerX, int centerY)
     int batchUploads = 8;
     if (asyncStreaming)
     {
-        batchUploads = std::max(0, std::clamp(maxUploadsPerUpdate, 1, 64) - changed);
-        batchUploads -= CommitPrepared(centerX, centerY, radius, batchUploads);
+        batchUploads = std::max(0, uploadCapacity - changed);
+        batchUploads -= CommitPrepared(centerX, centerY, radius,
+            batchUploads - reservedBatchUploads);
     }
     RefreshRenderBatches(batchUploads, centerX, centerY, radius);
     TrimMemoryBudget(centerX, centerY);
@@ -1113,11 +1479,37 @@ void TerrainManager::Update()
     if (!Owner || viewerObjectName.empty()) return;
     auto* viewer = Owner->FindObjectInSceneByName(viewerObjectName);
     if (!viewer) return;
-    const glm::dvec3 local = glm::dvec3(
-        glm::inverse(Owner->transform.GetWorldMatrixD()) *
-        glm::dvec4(viewer->transform.GetWorldPositionD(), 1.0));
-    UpdateStreaming(static_cast<int>(std::floor(local.x / (cellsX * cellWidth))),
-        static_cast<int>(std::floor(local.z / (cellsY * cellDepth))));
+    UpdateStreamingAtPosition(viewer->transform.GetWorldPositionD());
+}
+
+void TerrainManager::Start()
+{
+    m_runtimeBakeActive = false;
+    m_bakeIndex.clear();
+    if (runtimeBakeDirectory.empty())
+    {
+        m_bakeStatus = requireRuntimeBake ?
+            "Runtime bake required; set a bake directory and bake terrain" :
+            std::string{};
+        return;
+    }
+    m_runtimeBakeActive = ReadRuntimeBakeIndex(
+        GetRuntimeBakeArchivePath(), m_bakeIndex);
+    if (!m_runtimeBakeActive) m_bakeIndex.clear();
+    m_bakeStatus = m_runtimeBakeActive ? "Runtime terrain bake active" :
+        requireRuntimeBake ? "Runtime bake required; use Bake all terrain cells" :
+        "No complete runtime bake; using source terrain";
+    InvalidatePrepared();
+    for (auto it = m_loaded.begin(); it != m_loaded.end(); )
+    {
+        const Cell cell = it->first;
+        ++it;
+        UnloadCell(cell);
+    }
+    for (auto& [group, batch] : m_renderBatches)
+        if (Owner && Owner->GetScene()) Owner->GetScene()->RemoveObject(batch.object);
+    m_renderBatches.clear();
+    m_haveLastCenter = false;
 }
 
 TerrainManager::JsonValue TerrainManager::Serialize() const
@@ -1143,7 +1535,9 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         .Set("gpuBudgetMiB", JsonValue(gpuBudgetMiB))
         .Set("cacheBudgetMiB", JsonValue(cacheBudgetMiB))
         .Set("viewerObjectName", JsonValue(viewerObjectName))
-        .Set("cellDataDirectory", JsonValue(cellDataDirectory));
+        .Set("cellDataDirectory", JsonValue(cellDataDirectory))
+        .Set("runtimeBakeDirectory", JsonValue(runtimeBakeDirectory));
+    out.Set("requireRuntimeBake", JsonValue(requireRuntimeBake));
     JsonValue cells = JsonValue::MakeArray();
     for (const auto& [cell, data] : m_cells)
     {
@@ -1192,6 +1586,8 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
 void TerrainManager::Deserialize(const JsonValue& value)
 {
     InvalidatePrepared();
+    m_runtimeBakeActive = false;
+    m_bakeIndex.clear();
     m_editorStreaming = false;
     m_haveLastCenter = false;
     for (auto& [group, batch] : m_renderBatches)
@@ -1235,6 +1631,10 @@ void TerrainManager::Deserialize(const JsonValue& value)
     viewerObjectName = value["viewerObjectName"].AsString();
     cellDataDirectory = value.Has("cellDataDirectory")
         ? value["cellDataDirectory"].AsString() : std::string{};
+    runtimeBakeDirectory = value.Has("runtimeBakeDirectory")
+        ? value["runtimeBakeDirectory"].AsString() : std::string{};
+    requireRuntimeBake = value.Has("requireRuntimeBake") &&
+        value["requireRuntimeBake"].AsBool();
     m_cells.clear();
     m_proceduralCells.clear();
     m_editedProcedural.clear();
@@ -1322,6 +1722,29 @@ bool TerrainManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
     changed |= ui.SliderInt("CPU terrain budget MiB", &cpuBudgetMiB, 1, 16384);
     changed |= ui.SliderInt("GPU terrain budget MiB", &gpuBudgetMiB, 1, 16384);
     changed |= ui.SliderInt("Mesh cache budget MiB", &cacheBudgetMiB, 1, 16384);
+    char bakeDirectory[512]{};
+    std::memcpy(bakeDirectory, runtimeBakeDirectory.data(),
+        std::min(runtimeBakeDirectory.size(), sizeof(bakeDirectory) - 1));
+    if (ui.InputText("Runtime bake directory", bakeDirectory,
+        sizeof(bakeDirectory)))
+    {
+        runtimeBakeDirectory = bakeDirectory;
+        changed = true;
+    }
+    changed |= ui.Checkbox("Require runtime terrain bake", &requireRuntimeBake);
+    if (ui.Button("Bake all terrain cells for runtime") &&
+        Owner && Owner->GetScene() && !Owner->GetScene()->HasStarted())
+    {
+        if (runtimeBakeDirectory.empty())
+        {
+            runtimeBakeDirectory = !cellDataDirectory.empty()
+                ? cellDataDirectory + "/BakedCells"
+                : "Assets/TerrainBakes";
+            changed = true;
+        }
+        changed |= BakeRuntimeTerrain();
+    }
+    if (!m_bakeStatus.empty()) ui.Label(m_bakeStatus.c_str());
     if (priorAsync != asyncStreaming) InvalidatePrepared();
     if (cellsX != previousX || cellsY != previousY ||
         cellWidth != previousWidth || cellDepth != previousDepth)
