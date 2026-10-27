@@ -13,7 +13,7 @@
         <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
       </transform>
       <components>
-        <components:Camera Camera.active="true" Camera.useTransformRotation="true" Camera.fov="70" Camera.near="0.1" Camera.far="25000" Camera.orthographic="false" Camera.orthographicSize="5">
+        <components:Camera Camera.active="true" Camera.useTransformRotation="true" Camera.fov="70" Camera.near="0.1" Camera.far="3218" Camera.orthographic="false" Camera.orthographicSize="5">
           <Camera.target><item>0</item><item>0</item><item>0</item></Camera.target>
           <Camera.up><item>0</item><item>1</item><item>0</item></Camera.up>
         </components:Camera>
@@ -45,7 +45,7 @@
       </transform>
       <components>
         <components:Mesh /><components:Material Material.unlit="true" Material.castsShadows="false" />
-        <components:TerrainManager TerrainManager.cellsX="32" TerrainManager.cellsY="32" TerrainManager.cellWidth="4" TerrainManager.cellDepth="4" TerrainManager.loadedRadius="2" TerrainManager.editorRadius="6" TerrainManager.farRadius="16" TerrainManager.lod2Radius="8" TerrainManager.lod4Radius="16" TerrainManager.maxLodChangesPerUpdate="4" TerrainManager.maxLoadsPerUpdate="2" TerrainManager.maxUnloadsPerUpdate="4" TerrainManager.asyncStreaming="true" TerrainManager.maxPreparedCells="4" TerrainManager.maxUploadsPerUpdate="1" TerrainManager.fastRuntimeLighting="true" TerrainManager.cpuBudgetMiB="512" TerrainManager.gpuBudgetMiB="256" TerrainManager.cacheBudgetMiB="1024" TerrainManager.viewerObjectName="Terrain Performance Camera" TerrainManager.cellDataDirectory="Engine/Core/Assets/TerrainData/TerrainPerformance" TerrainManager.runtimeBakeDirectory="Engine/Core/Assets/TerrainData/TerrainPerformance/BakedCells" TerrainManager.requireRuntimeBake="true">
+        <components:TerrainManager TerrainManager.cellsX="32" TerrainManager.cellsY="32" TerrainManager.cellWidth="4" TerrainManager.cellDepth="4" TerrainManager.loadedRadius="2" TerrainManager.editorRadius="6" TerrainManager.farRadius="8" TerrainManager.lod2Radius="8" TerrainManager.lod4Radius="16" TerrainManager.maxLodChangesPerUpdate="4" TerrainManager.maxLoadsPerUpdate="2" TerrainManager.maxUnloadsPerUpdate="4" TerrainManager.asyncStreaming="true" TerrainManager.maxPreparedCells="4" TerrainManager.maxUploadsPerUpdate="1" TerrainManager.fastRuntimeLighting="true" TerrainManager.cpuBudgetMiB="512" TerrainManager.gpuBudgetMiB="256" TerrainManager.cacheBudgetMiB="1024" TerrainManager.viewerObjectName="Terrain Performance Camera" TerrainManager.cellDataDirectory="Engine/Core/Assets/TerrainData/TerrainPerformance" TerrainManager.runtimeBakeDirectory="Engine/Core/Assets/TerrainData/TerrainPerformance/BakedCells" TerrainManager.requireRuntimeBake="true">
           <TerrainManager.cells />
           <TerrainManager.proceduralRuns>
             <item y="-64" start="-64" end="64" />

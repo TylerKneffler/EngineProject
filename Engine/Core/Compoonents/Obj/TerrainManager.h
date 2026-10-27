@@ -26,7 +26,7 @@ public:
     // Scene view streams only editable, full-resolution cells around its camera.
     int editorRadius = 6;
     // -1 follows loadedRadius for older scenes; larger values stream coarse cells.
-    int farRadius = -1;
+    int farRadius = 8;
     int lod2Radius = 8;
     int lod4Radius = 16;
     int maxLodChangesPerUpdate = 4;

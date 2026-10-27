@@ -1,6 +1,10 @@
 // Run with TERRAIN_TEST_VIEWPOINT=low|ridge|edge. For a disk-cache pair,
 // set TERRAIN_TEST_CACHE_DIRECTORY to an empty benchmark-owned directory,
 // run once with TERRAIN_TEST_CACHE_MODE=cold, then again with mode=warm.
+// Optional view-distance controls:
+// TERRAIN_TEST_VIEW_DISTANCE_METERS, TERRAIN_TEST_VIEW_DISTANCE_CELLS,
+// TERRAIN_TEST_LOADED_RADIUS_CELLS, TERRAIN_TEST_LOD2_RADIUS_CELLS,
+// TERRAIN_TEST_LOD4_RADIUS_CELLS.
 // Reports are written under .local/performance-logs.
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Obj/TerrainManager.h"
@@ -25,6 +29,7 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <numeric>
 #include <stdexcept>
 #include <string_view>
 #include <thread>
@@ -83,6 +88,20 @@ int ReadIntSetting(const char* name, int fallback, int minimum, int maximum)
     char buffer[32]{};
     const DWORD length = GetEnvironmentVariableA(name, buffer, sizeof(buffer));
     if (length == 0) return fallback;
+    Require(length < sizeof(buffer), "terrain benchmark setting is too long");
+    char* end = nullptr;
+    const long value = std::strtol(buffer, &end, 10);
+    Require(end != buffer && *end == '\0' && value >= minimum &&
+        value <= maximum, "invalid terrain benchmark setting");
+    return static_cast<int>(value);
+}
+
+std::optional<int> ReadOptionalIntSetting(const char* name,
+    int minimum, int maximum)
+{
+    char buffer[32]{};
+    const DWORD length = GetEnvironmentVariableA(name, buffer, sizeof(buffer));
+    if (length == 0) return std::nullopt;
     Require(length < sizeof(buffer), "terrain benchmark setting is too long");
     char* end = nullptr;
     const long value = std::strtol(buffer, &end, 10);
@@ -220,10 +239,25 @@ double VisibleCellCenterDistance(
 int Run()
 {
     SetErrorMode(SEM_NOGPFAULTERRORBOX);
-    const int farPlaneMeters = ReadIntSetting(
-        "TERRAIN_TEST_FAR_PLANE_METERS", 25000, 1000, 50000);
-    const int farRadiusCells = ReadIntSetting(
-        "TERRAIN_TEST_FAR_RADIUS_CELLS", 16, 1, 32);
+    int farPlaneMeters = ReadIntSetting(
+        "TERRAIN_TEST_FAR_PLANE_METERS", 3218, 1000, 50000);
+    int farRadiusCells = ReadIntSetting(
+        "TERRAIN_TEST_FAR_RADIUS_CELLS", 8, 1, 32);
+    if (const auto viewDistanceMeters = ReadOptionalIntSetting(
+        "TERRAIN_TEST_VIEW_DISTANCE_METERS", 1000, 50000))
+        farPlaneMeters = *viewDistanceMeters;
+    if (const auto viewDistanceCells = ReadOptionalIntSetting(
+        "TERRAIN_TEST_VIEW_DISTANCE_CELLS", 1, 32))
+        farRadiusCells = *viewDistanceCells;
+    const int loadedRadiusCells = ReadIntSetting(
+        "TERRAIN_TEST_LOADED_RADIUS_CELLS", 2, 0, 16);
+    int lod2RadiusCells = ReadIntSetting(
+        "TERRAIN_TEST_LOD2_RADIUS_CELLS", 8, 0, 32);
+    int lod4RadiusCells = ReadIntSetting(
+        "TERRAIN_TEST_LOD4_RADIUS_CELLS", 12, 0, 32);
+    lod2RadiusCells = std::max(lod2RadiusCells, loadedRadiusCells);
+    lod4RadiusCells = std::max(lod4RadiusCells, lod2RadiusCells);
+    farRadiusCells = std::max(farRadiusCells, loadedRadiusCells);
     const std::string viewpoint = ReadStringSetting(
         "TERRAIN_TEST_VIEWPOINT", "ridge");
     Require(viewpoint == "low" || viewpoint == "ridge" ||
@@ -344,11 +378,11 @@ int Run()
     // Preload the first viewpoint outside measured frames. The camera clip
     // and streamed radius vary independently, so a long clip plane cannot
     // imply coverage.
-    manager->loadedRadius = 2;
+    manager->loadedRadius = loadedRadiusCells;
     if (captureWithoutBatches) manager->batchFarCells = false;
     manager->farRadius = farRadiusCells;
-    manager->lod2Radius = 8;
-    manager->lod4Radius = 12;
+    manager->lod2Radius = lod2RadiusCells;
+    manager->lod4Radius = lod4RadiusCells;
     manager->maxLoadsPerUpdate = 8;
     manager->maxUnloadsPerUpdate = 32;
     manager->maxPreparedCells = 16;
@@ -654,6 +688,10 @@ int Run()
             "distant terrain crossing rebuilt too many tiles");
     const double median = Percentile(samples.frames, .5);
     const double p95 = Percentile(samples.frames, .95);
+    const double average = std::accumulate(samples.frames.begin(),
+        samples.frames.end(), 0.0) / samples.frames.size();
+    const double averageFps = average > 0.0 ? 1000.0 / average : 0.0;
+    const bool meetsAverage100Fps = average <= 10.0;
     const bool meets100Fps = p95 <= 10.0;
     const auto report = [&](std::ostream& out) {
         const auto metric = [&](const char* name, const std::vector<double>& values) {
@@ -672,6 +710,9 @@ int Run()
             << "  \"viewpoint\": \"" << viewpoint << "\",\n"
             << "  \"cameraFarPlaneMeters\": " << farPlaneMeters << ",\n"
             << "  \"terrainFarRadiusCells\": " << farRadiusCells << ",\n"
+            << "  \"terrainLoadedRadiusCells\": " << loadedRadiusCells << ",\n"
+            << "  \"terrainLod2RadiusCells\": " << lod2RadiusCells << ",\n"
+            << "  \"terrainLod4RadiusCells\": " << lod4RadiusCells << ",\n"
             << "  \"farFieldEnabled\": " << (farFieldEnabled ? "true" : "false")
                 << ",\n"
             << "  \"shadowsEnabled\": " << (shadowsEnabled ? "true" : "false")
@@ -741,6 +782,8 @@ int Run()
             << "  \"runMetersPerSecond\": 5.0,\n"
             << "  \"travelMeters\": " << travel << ",\n"
             << "  \"frameCount\": " << samples.frames.size() << ",\n"
+            << "  \"frameAverageMs\": " << average << ",\n"
+            << "  \"frameAverageFps\": " << averageFps << ",\n"
             << "  \"frameMedianMs\": " << median << ",\n"
             << "  \"frameP95Ms\": " << p95 << ",\n"
             << "  \"lookMedianMs\": " << PhasePercentile(samples.frames,
@@ -771,6 +814,8 @@ int Run()
             << "  \"peakCacheMiB\": " << samples.peakCache / MiB << ",\n"
             << "  \"peakWorkingSetMiB\": " << samples.peakWorkingSet / MiB << ",\n"
             << "  \"peakPrivateMiB\": " << samples.peakPrivate / MiB << ",\n"
+            << "  \"targetAverageUnder10Ms\": " <<
+                (meetsAverage100Fps ? "true" : "false") << ",\n"
             << "  \"targetP95Under10Ms\": " << (meets100Fps ? "true" : "false")
             << ",\n";
         metric("frame", samples.frames);
@@ -818,6 +863,9 @@ int Run()
     report(file);
     file.flush();
     report(std::cout);
+    if (GetEnvironmentVariableA("TERRAIN_REQUIRE_100FPS_AVERAGE", nullptr, 0) > 0)
+        Require(meetsAverage100Fps,
+            "terrain 1080p average frame time did not meet 100 FPS target");
     if (GetEnvironmentVariableA("TERRAIN_REQUIRE_100FPS", nullptr, 0) > 0)
         Require(meets100Fps, "terrain 1080p p95 did not meet 100 FPS target");
     return 0;

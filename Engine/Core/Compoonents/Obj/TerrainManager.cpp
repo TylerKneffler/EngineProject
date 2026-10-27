@@ -1642,7 +1642,7 @@ void TerrainManager::Deserialize(const JsonValue& value)
     loadedRadius = std::clamp(value["loadedRadius"].AsInt(), 0, 32);
     editorRadius = value.Has("editorRadius")
         ? std::clamp(value["editorRadius"].AsInt(), 0, 32) : 6;
-    farRadius = value.Has("farRadius") ? std::clamp(value["farRadius"].AsInt(), -1, 32) : -1;
+    farRadius = value.Has("farRadius") ? std::clamp(value["farRadius"].AsInt(), -1, 32) : 8;
     lod2Radius = value.Has("lod2Radius") ? std::clamp(value["lod2Radius"].AsInt(), 0, 32) : 8;
     lod4Radius = value.Has("lod4Radius") ? std::clamp(value["lod4Radius"].AsInt(), 0, 32) : 16;
     maxLodChangesPerUpdate = value.Has("maxLodChangesPerUpdate")
