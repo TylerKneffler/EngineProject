@@ -140,7 +140,7 @@
             <item>0</item>
           </Camera.up>
         </components:Camera>
-        <components:TerrainStreamingCameraDriver TerrainStreamingCameraDriver.movementSpeed="50" TerrainStreamingCameraDriver.pauseAtEndpoints="0" TerrainStreamingCameraDriver.moveOnStart="true" TerrainStreamingCameraDriver.waitForInitialTerrain="true" TerrainStreamingCameraDriver.terrainObjectName="Terrain Performance Map" TerrainStreamingCameraDriver.moveInfinitely="true" TerrainStreamingCameraDriver.lookInMovementDirection="true" TerrainStreamingCameraDriver.usePhysicsBody="true" TerrainStreamingCameraDriver.terrainGroundOffset="1" TerrainStreamingCameraDriver.downwardLook="0.40000000596046448" TerrainStreamingCameraDriver.secondsPerUpdate="0.01666666753590107">
+        <components:TerrainStreamingCameraDriver TerrainStreamingCameraDriver.movementSpeed="50" TerrainStreamingCameraDriver.pauseAtEndpoints="0" TerrainStreamingCameraDriver.moveOnStart="true" TerrainStreamingCameraDriver.waitForInitialTerrain="true" TerrainStreamingCameraDriver.terrainObjectName="Terrain Performance Map" TerrainStreamingCameraDriver.moveInfinitely="false" TerrainStreamingCameraDriver.lookInMovementDirection="true" TerrainStreamingCameraDriver.usePhysicsBody="true" TerrainStreamingCameraDriver.terrainGroundOffset="1" TerrainStreamingCameraDriver.downwardLook="0.40000000596046448" TerrainStreamingCameraDriver.secondsPerUpdate="0.01666666753590107">
           <TerrainStreamingCameraDriver.startPosition>
             <item>-7600</item>
             <item>110</item>

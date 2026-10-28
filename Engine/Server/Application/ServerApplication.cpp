@@ -408,6 +408,7 @@ int ServerApplication::Run(int argc, char** argv)
 
     int lastFrame = 0;
     auto* lastUpdateLabel = "start";
+    bool crashed = false;
     [&]() {
         __try {
             for (int frame = 1; frame <= options.frames; ++frame)
@@ -436,8 +437,8 @@ int ServerApplication::Run(int argc, char** argv)
                         reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr)))
                     : 0ULL),
             fflush(stderr),
-            EXCEPTION_EXECUTE_HANDLER) {}
+            EXCEPTION_EXECUTE_HANDLER) { crashed = true; }
     }();
-    return 0;
+    return crashed ? 2 : 0;
 }
 }

@@ -700,7 +700,7 @@ set_target_properties(ProjectScripts PROPERTIES PREFIX "" OUTPUT_NAME "ProjectSc
 target_precompile_headers(ProjectScripts REUSE_FROM Engine)
 add_dependencies(Editor ProjectScripts)
 add_executable(TerrainCacheBake EXCLUDE_FROM_ALL
-    "${ENGINE_ROOT}/Tools/TerrainCacheBake.cpp"
+    "${ENGINE_ROOT}/.local/tools/TerrainCacheBake.cpp"
     "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainPerformance/TerrainPerformanceDriver.cpp"
     "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/PerlinNoiseField.cpp"
     "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainStreamingCameraDriver.cpp"
@@ -858,20 +858,20 @@ set(ENGINE_LOCAL_TEST_ROOT "${ENGINE_ROOT}/.local/tests")
 if(NOT ENGINE_PROJECT_DIR)
     enable_testing()
     add_executable(AnimationEditorSourceTests EXCLUDE_FROM_ALL
-        "${ENGINE_ROOT}/Tests/AnimationEditorSourceTests.cpp")
+        "${ENGINE_ROOT}/.local/tests/AnimationEditorSourceTests.cpp")
     target_link_libraries(AnimationEditorSourceTests PRIVATE Engine)
     target_include_directories(AnimationEditorSourceTests PRIVATE
         "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Editor")
     add_test(NAME AnimationEditorSources COMMAND AnimationEditorSourceTests)
     add_executable(HumanoidRigDetectionTests EXCLUDE_FROM_ALL
-        "${ENGINE_ROOT}/Tests/HumanoidRigDetectionTests.cpp")
+        "${ENGINE_ROOT}/.local/tests/HumanoidRigDetectionTests.cpp")
     target_link_libraries(HumanoidRigDetectionTests PRIVATE Engine)
     target_include_directories(HumanoidRigDetectionTests PRIVATE
         "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Editor")
     add_test(NAME HumanoidRigDetection COMMAND HumanoidRigDetectionTests)
     set_tests_properties(HumanoidRigDetection PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
     add_executable(CharacterPerformanceTests EXCLUDE_FROM_ALL
-        "${ENGINE_ROOT}/Tests/CharacterPerformanceTests.cpp"
+        "${ENGINE_ROOT}/.local/tests/CharacterPerformanceTests.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/MmdDanceAssetBinder.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/MmdPoseRetargeter.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/PmxModelDecoder.cpp"

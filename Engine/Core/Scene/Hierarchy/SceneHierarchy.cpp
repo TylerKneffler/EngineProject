@@ -11,6 +11,8 @@
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
 #include "Core/Compoonents/Animation/SoftTissueSurface.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
+#include "Core/Compoonents/Physics/Cloth.h"
+#include "Core/Compoonents/Animation/IKBone.h"
 #include "Core/Compoonents/Particles/ParticleEmitter.h"
 #include "Core/Physics/Physics.h"
 #include "Core/Physics/IPhysicsAdapter.h"
@@ -604,6 +606,19 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
     // valid. Component destructors then only need to clear local state.
     for (Engine::Core::Object* object : objectsToRemove)
         DisconnectSpatialManipulators(object);
+    // Physics component state is keyed by component address. Release it before
+    // detaching the object from the scene, or a later streaming cell can reuse
+    // the address and inherit a stale state with no bound body.
+    for (Engine::Core::Object* object : objectsToRemove)
+        for (Engine::Core::Component* component : object->Components)
+        {
+            if (auto* body = dynamic_cast<Engine::Components::RigidBody*>(component))
+                m_physics->DestroyRigidBody(*body);
+            else if (auto* cloth = dynamic_cast<Engine::Components::Cloth*>(component))
+                m_physics->DestroyCloth(*cloth);
+            else if (auto* bone = dynamic_cast<Engine::Components::IKBone*>(component))
+                m_physics->DestroyIKBone(*bone);
+        }
     for (Engine::Core::Object* object : objectsToRemove)
         if (object)
             object->OwnerScene = nullptr;

@@ -218,21 +218,30 @@ void TerrainStreamingCameraDriver::Update()
 
     const glm::dvec3 target = glm::dvec3(m_towardEnd ? endPosition : startPosition);
     const glm::dvec3 delta = target - Owner->transform.position;
-    const double distance = glm::length(delta);
+    auto* physicsBody = usePhysicsBody
+        ? Owner->GetComponent<Engine::Components::RigidBody>() : nullptr;
+    // A physics body follows the ground. Its height must not prevent it from
+    // reaching a horizontal waypoint or make it drive through the map edge.
+    const glm::dvec3 travelDelta = physicsBody
+        ? glm::dvec3(delta.x, 0.0, delta.z) : delta;
+    const double distance = glm::length(travelDelta);
     if (distance > 0.0001)
-        updateLookFromDirection(glm::vec3(delta / distance));
+        updateLookFromDirection(glm::vec3(travelDelta / distance));
     const double step = static_cast<double>(std::max(0.01f, movementSpeed)) * deltaTime;
     if (distance <= step || distance <= 0.0001f)
     {
         if (usePhysicsBody)
         {
-            if (auto* body = Owner->GetComponent<Engine::Components::RigidBody>())
+            if (physicsBody)
             {
-                body->SetWorldPosition(glm::vec3(target));
-                glm::vec3 velocity = body->GetLinearVelocity();
+                glm::dvec3 reached = Owner->transform.GetWorldPositionD();
+                reached.x = target.x;
+                reached.z = target.z;
+                physicsBody->SetWorldPosition(glm::vec3(reached));
+                glm::vec3 velocity = physicsBody->GetLinearVelocity();
                 velocity.x = 0.f;
                 velocity.z = 0.f;
-                body->SetLinearVelocity(velocity);
+                physicsBody->SetLinearVelocity(velocity);
             }
             else
                 Owner->transform.position = target;
@@ -245,15 +254,15 @@ void TerrainStreamingCameraDriver::Update()
     }
     if (usePhysicsBody)
     {
-        if (auto* body = Owner->GetComponent<Engine::Components::RigidBody>())
+        if (physicsBody)
         {
-            const glm::dvec3 direction = delta / distance;
+            const glm::dvec3 direction = travelDelta / distance;
             updateLookFromDirection(glm::vec3(direction));
-            glm::vec3 velocity = body->GetLinearVelocity();
+            glm::vec3 velocity = physicsBody->GetLinearVelocity();
             const float speed = std::max(0.01f, movementSpeed);
             velocity.x = static_cast<float>(direction.x) * speed;
             velocity.z = static_cast<float>(direction.z) * speed;
-            body->SetLinearVelocity(velocity);
+            physicsBody->SetLinearVelocity(velocity);
         }
         else
             Owner->transform.position += delta * (step / distance);
