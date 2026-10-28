@@ -1,51 +1,270 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0"?>
 <Scene xmlns:components="urn:engine-components" version="1">
-  <settings dimension="0" showGrid="false" gridHalfSize="160" gridCellSize="1" gridOpacity="0.1" gridFadeDistance="280" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" renderMode="0" sceneViewUiOverlay="false">
-    <gridColor><item>0.14</item><item>0.18</item><item>0.14</item></gridColor>
-    <gridOriginColor><item>0.42</item><item>0.72</item><item>0.3</item></gridOriginColor>
-    <ambientColor><item>0.12</item><item>0.14</item><item>0.12</item></ambientColor>
+  <settings dimension="0" showGrid="false" gridHalfSize="160" gridCellSize="1" gridOpacity="0.10000000149011612" gridFadeDistance="280" skyboxEnabled="true" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" toneMapping="1" outputExposure="0" renderMode="0" sceneViewUiOverlay="false" portalDebugVisuals="false" sceneCameraWarpLookThrough="false" portalDebugWireframe="false" portalDebugTintRemoteView="true" portalDebugOverlayAlpha="0.44999998807907104" portalRecursionDepth="2" portalConnectionRepeatLimit="2" portalMaxViewsPerFrame="24">
+    <gridColor>
+      <item>0.14000000059604645</item>
+      <item>0.18000000715255737</item>
+      <item>0.14000000059604645</item>
+    </gridColor>
+    <gridOriginColor>
+      <item>0.41999998688697815</item>
+      <item>0.72000002861022949</item>
+      <item>0.30000001192092896</item>
+    </gridOriginColor>
+    <ambientColor>
+      <item>0.11999999731779099</item>
+      <item>0.14000000059604645</item>
+      <item>0.11999999731779099</item>
+    </ambientColor>
   </settings>
   <objects>
-    <item name="Terrain Performance Camera" enabled="true">
+    <item name="Terrain Performance Capsule" enabled="true">
       <transform>
-        <Transform.position><item>0</item><item>110</item><item>-300</item></Transform.position>
-        <Transform.rotation><item>0.38</item><item>0</item><item>0</item></Transform.rotation>
-        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+        <Transform.position>
+          <item>0</item>
+          <item>110</item>
+          <item>-300</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0.37999999523162842</item>
+          <item>0.78539818525314331</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
       </transform>
       <components>
-        <components:Camera Camera.active="true" Camera.useTransformRotation="true" Camera.fov="70" Camera.near="0.1" Camera.far="3218" Camera.orthographic="false" Camera.orthographicSize="5">
-          <Camera.target><item>0</item><item>0</item><item>0</item></Camera.target>
-          <Camera.up><item>0</item><item>1</item><item>0</item></Camera.up>
+        <components:Mesh Mesh.file="Assets/Mesh/capsule.obj" Mesh.useLightProbes="false" />
+        <components:Material Material.useVertexColors="true" Material.shininess="48" Material.specularModel="MetallicRoughness" Material.baseColorAlpha="1" Material.baseColorTextureTintAlpha="1" Material.edgeWidth="0" Material.edgeEnabled="false" Material.sphereMode="0" Material.builtinToon="-1" Material.alphaMode="Opaque" Material.alphaCutoff="0.5" Material.doubleSided="false" Material.castsShadows="true" Material.unlit="false" Material.lightingChannels="-1" Material.metallicFactor="0" Material.roughnessFactor="1" Material.subsurfaceEnabled="false" Material.subsurfaceWeight="0" Material.subsurfaceThickness="0" Material.subsurfaceTransmission="0" Material.environmentDiffuseStrength="1" Material.occlusionStrength="1" Material.reflectionStrength="1" Material.useCustomReflectionEnvironment="false" Material.reflectionEnvironmentTexture="" Material.reflectionEnvironmentExposure="0" Material.reflectionEnvironmentRotation="0" Material.normalScale="1" Material.heightScale="0.05000000074505806" Material.terrainHeightBlendStrength="0" Material.heightMinSteps="8" Material.heightMaxSteps="32" Material.baseColorUvSet="0" Material.metallicRoughnessUvSet="0" Material.normalUvSet="0" Material.occlusionUvSet="0" Material.emissiveUvSet="0" Material.heightUvSet="0" Material.materialAsset="" Material.sphereTexture="" Material.toonTexture="" Material.baseColorTexture="" Material.metallicRoughnessTexture="" Material.normalTexture="" Material.heightTexture="" Material.occlusionTexture="" Material.emissiveTexture="" Material.subsurfaceThicknessTexture="">
+          <Material.diffuse>
+            <item>0.15000000596046448</item>
+            <item>0.55000001192092896</item>
+            <item>0.89999997615814209</item>
+          </Material.diffuse>
+          <Material.ambient>
+            <item>0.059999998658895493</item>
+            <item>0.079999998211860657</item>
+            <item>0.10000000149011612</item>
+          </Material.ambient>
+          <Material.specular>
+            <item>0.80000001192092896</item>
+            <item>0.89999997615814209</item>
+            <item>1</item>
+          </Material.specular>
+          <Material.emissiveColor>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </Material.emissiveColor>
+          <Material.baseColorTextureTint>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+          </Material.baseColorTextureTint>
+          <Material.subsurfaceRadius>
+            <item>0.0040000001899898052</item>
+            <item>0.0020000000949949026</item>
+            <item>0.0010000000474974513</item>
+          </Material.subsurfaceRadius>
+          <Material.subsurfaceColor>
+            <item>1</item>
+            <item>0.44999998807907104</item>
+            <item>0.34999999403953552</item>
+          </Material.subsurfaceColor>
+          <Material.terrainMacroColor>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </Material.terrainMacroColor>
+          <Material.edgeColor>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </Material.edgeColor>
+          <Material.sphereTint>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+          </Material.sphereTint>
+          <Material.toonTint>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+          </Material.toonTint>
+        </components:Material>
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Capsule" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="2" PrimitiveObjectCollider.alignToBoneChild="false" PrimitiveObjectCollider.fitToSkinnedMesh="false" PrimitiveObjectCollider.childBone="">
+          <PrimitiveObjectCollider.center>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size>
+            <item>0.5</item>
+            <item>1</item>
+            <item>0.5</item>
+          </PrimitiveObjectCollider.size>
+        </components:PrimitiveObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Dynamic" RigidBody.mass="1" RigidBody.useGravity="true" RigidBody.gravityScale="1" RigidBody.linearDamping="0.20000000298023224" RigidBody.angularDamping="0.80000001192092896" RigidBody.friction="0.05000000074505806" RigidBody.restitution="0" RigidBody.isTrigger="false" RigidBody.continuousCollision="true" RigidBody.freezePositionX="false" RigidBody.freezePositionY="false" RigidBody.freezePositionZ="false" RigidBody.freezeRotationX="true" RigidBody.freezeRotationY="true" RigidBody.freezeRotationZ="true" RigidBody.collisionLayer="1" RigidBody.collisionMask="-1" RigidBody.collisionIdentifier="">
+          <RigidBody.gravityDirection>
+            <item>0</item>
+            <item>-1</item>
+            <item>0</item>
+          </RigidBody.gravityDirection>
+          <RigidBody.initialLinearVelocity>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </RigidBody.initialLinearVelocity>
+          <RigidBody.initialAngularVelocity>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </RigidBody.initialAngularVelocity>
+          <RigidBody.frictionBehaviors />
+        </components:RigidBody>
+        <components:Camera Camera.active="true" Camera.useTransformRotation="true" Camera.fov="70" Camera.near="0.10000000149011612" Camera.far="3218" Camera.orthographic="false" Camera.orthographicSize="5">
+          <Camera.target>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </Camera.target>
+          <Camera.up>
+            <item>0</item>
+            <item>1</item>
+            <item>0</item>
+          </Camera.up>
         </components:Camera>
-        <components:TerrainStreamingCameraDriver TerrainStreamingCameraDriver.movementSpeed="120" TerrainStreamingCameraDriver.pauseAtEndpoints="0" TerrainStreamingCameraDriver.moveOnStart="true" TerrainStreamingCameraDriver.waitForInitialTerrain="false" TerrainStreamingCameraDriver.terrainObjectName="" TerrainStreamingCameraDriver.moveInfinitely="true" TerrainStreamingCameraDriver.lookInMovementDirection="true" TerrainStreamingCameraDriver.downwardLook="0.4" TerrainStreamingCameraDriver.secondsPerUpdate="0.016666667">
-          <TerrainStreamingCameraDriver.startPosition><item>-7600</item><item>110</item><item>-7600</item></TerrainStreamingCameraDriver.startPosition>
-          <TerrainStreamingCameraDriver.endPosition><item>7600</item><item>110</item><item>7600</item></TerrainStreamingCameraDriver.endPosition>
+        <components:TerrainStreamingCameraDriver TerrainStreamingCameraDriver.movementSpeed="50" TerrainStreamingCameraDriver.pauseAtEndpoints="0" TerrainStreamingCameraDriver.moveOnStart="true" TerrainStreamingCameraDriver.waitForInitialTerrain="true" TerrainStreamingCameraDriver.terrainObjectName="Terrain Performance Map" TerrainStreamingCameraDriver.moveInfinitely="true" TerrainStreamingCameraDriver.lookInMovementDirection="true" TerrainStreamingCameraDriver.usePhysicsBody="true" TerrainStreamingCameraDriver.terrainGroundOffset="1" TerrainStreamingCameraDriver.downwardLook="0.40000000596046448" TerrainStreamingCameraDriver.secondsPerUpdate="0.01666666753590107">
+          <TerrainStreamingCameraDriver.startPosition>
+            <item>-7600</item>
+            <item>110</item>
+            <item>-7600</item>
+          </TerrainStreamingCameraDriver.startPosition>
+          <TerrainStreamingCameraDriver.endPosition>
+            <item>7600</item>
+            <item>110</item>
+            <item>7600</item>
+          </TerrainStreamingCameraDriver.endPosition>
         </components:TerrainStreamingCameraDriver>
       </components>
       <children />
     </item>
     <item name="Terrain Performance Sun" enabled="true">
       <transform>
-        <Transform.position><item>0</item><item>250</item><item>0</item></Transform.position>
-        <Transform.rotation><item>1.3962634</item><item>-0.55</item><item>0</item></Transform.rotation>
-        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+        <Transform.position>
+          <item>0</item>
+          <item>250</item>
+          <item>0</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>1.3962633609771729</item>
+          <item>-0.55000001192092896</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
       </transform>
       <components>
-        <components:Light Light.lightType="1" Light.intensity="3.2" Light.range="500" Light.falloff="1.5" Light.baked="false" Light.castsShadows="true" Light.shadowStrength="1" Light.shadowDepthBias="0.0015" Light.shadowNormalBias="0.01" Light.shadowResolutionScale="0.5" Light.shadowFilterScale="1">
-          <Light.color><item>1</item><item>0.95</item><item>0.85</item></Light.color>
+        <components:Light Light.lightType="1" Light.intensity="3.2000000476837158" Light.range="500" Light.falloff="1.5" Light.intensityMode="0" Light.innerConeAngle="25" Light.outerConeAngle="35" Light.lightingChannels="-1" Light.cookieTexture="" Light.iesProfileTexture="" Light.cookieScale="1" Light.baked="false" Light.castsShadows="true" Light.shadowStrength="1" Light.shadowDepthBias="0.001500000013038516" Light.shadowNormalBias="0.0099999997764825821" Light.shadowResolutionScale="0.5" Light.shadowFilterScale="1">
+          <Light.color>
+            <item>1</item>
+            <item>0.94999998807907104</item>
+            <item>0.85000002384185791</item>
+          </Light.color>
         </components:Light>
       </components>
       <children />
     </item>
     <item name="Terrain Performance Map" enabled="true">
       <transform>
-        <Transform.position><item>0</item><item>0</item><item>0</item></Transform.position>
-        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
-        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+        <Transform.position>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
       </transform>
       <components>
-        <components:Mesh /><components:Material Material.unlit="true" Material.castsShadows="false" />
-        <components:TerrainManager TerrainManager.cellsX="32" TerrainManager.cellsY="32" TerrainManager.cellWidth="4" TerrainManager.cellDepth="4" TerrainManager.loadedRadius="2" TerrainManager.editorRadius="6" TerrainManager.farRadius="8" TerrainManager.lod2Radius="8" TerrainManager.lod4Radius="16" TerrainManager.maxLodChangesPerUpdate="4" TerrainManager.maxLoadsPerUpdate="2" TerrainManager.maxUnloadsPerUpdate="4" TerrainManager.asyncStreaming="true" TerrainManager.maxPreparedCells="4" TerrainManager.maxUploadsPerUpdate="1" TerrainManager.fastRuntimeLighting="true" TerrainManager.cpuBudgetMiB="512" TerrainManager.gpuBudgetMiB="256" TerrainManager.cacheBudgetMiB="1024" TerrainManager.viewerObjectName="Terrain Performance Camera" TerrainManager.cellDataDirectory="Engine/Core/Assets/TerrainData/TerrainPerformance" TerrainManager.runtimeBakeDirectory="Engine/Core/Assets/TerrainData/TerrainPerformance/BakedCells" TerrainManager.requireRuntimeBake="true">
+        <components:Mesh Mesh.file="" Mesh.useLightProbes="false" />
+        <components:Material Material.useVertexColors="true" Material.shininess="32" Material.specularModel="MetallicRoughness" Material.baseColorAlpha="1" Material.baseColorTextureTintAlpha="1" Material.edgeWidth="0" Material.edgeEnabled="false" Material.sphereMode="0" Material.builtinToon="-1" Material.alphaMode="Opaque" Material.alphaCutoff="0.5" Material.doubleSided="false" Material.castsShadows="false" Material.unlit="true" Material.lightingChannels="-1" Material.metallicFactor="0" Material.roughnessFactor="1" Material.subsurfaceEnabled="false" Material.subsurfaceWeight="0" Material.subsurfaceThickness="0" Material.subsurfaceTransmission="0" Material.environmentDiffuseStrength="1" Material.occlusionStrength="1" Material.reflectionStrength="1" Material.useCustomReflectionEnvironment="false" Material.reflectionEnvironmentTexture="" Material.reflectionEnvironmentExposure="0" Material.reflectionEnvironmentRotation="0" Material.normalScale="1" Material.heightScale="0.05000000074505806" Material.terrainHeightBlendStrength="0" Material.heightMinSteps="8" Material.heightMaxSteps="32" Material.baseColorUvSet="0" Material.metallicRoughnessUvSet="0" Material.normalUvSet="0" Material.occlusionUvSet="0" Material.emissiveUvSet="0" Material.heightUvSet="0" Material.materialAsset="" Material.sphereTexture="" Material.toonTexture="" Material.baseColorTexture="" Material.metallicRoughnessTexture="" Material.normalTexture="" Material.heightTexture="" Material.occlusionTexture="" Material.emissiveTexture="" Material.subsurfaceThicknessTexture="">
+          <Material.diffuse>
+            <item>1</item>
+            <item>0.5</item>
+            <item>0.10000000149011612</item>
+          </Material.diffuse>
+          <Material.ambient>
+            <item>0.10000000149011612</item>
+            <item>0.10000000149011612</item>
+            <item>0.10000000149011612</item>
+          </Material.ambient>
+          <Material.specular>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+          </Material.specular>
+          <Material.emissiveColor>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </Material.emissiveColor>
+          <Material.baseColorTextureTint>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+          </Material.baseColorTextureTint>
+          <Material.subsurfaceRadius>
+            <item>0.0040000001899898052</item>
+            <item>0.0020000000949949026</item>
+            <item>0.0010000000474974513</item>
+          </Material.subsurfaceRadius>
+          <Material.subsurfaceColor>
+            <item>1</item>
+            <item>0.44999998807907104</item>
+            <item>0.34999999403953552</item>
+          </Material.subsurfaceColor>
+          <Material.terrainMacroColor>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </Material.terrainMacroColor>
+          <Material.edgeColor>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </Material.edgeColor>
+          <Material.sphereTint>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+          </Material.sphereTint>
+          <Material.toonTint>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+          </Material.toonTint>
+        </components:Material>
+        <components:TerrainManager TerrainManager.cellsX="32" TerrainManager.cellsY="32" TerrainManager.cellWidth="4" TerrainManager.cellDepth="4" TerrainManager.loadedRadius="3" TerrainManager.editorRadius="6" TerrainManager.farRadius="8" TerrainManager.lod2Radius="8" TerrainManager.lod4Radius="16" TerrainManager.maxLodChangesPerUpdate="4" TerrainManager.maxLoadsPerUpdate="6" TerrainManager.maxUnloadsPerUpdate="4" TerrainManager.asyncStreaming="false" TerrainManager.maxPreparedCells="4" TerrainManager.maxUploadsPerUpdate="4" TerrainManager.batchFarCells="false" TerrainManager.fastRuntimeLighting="true" TerrainManager.stochasticTerrainVariation="false" TerrainManager.terrainMacroColorEnabled="false" TerrainManager.measurementGrid="false" TerrainManager.generateColliders="true" TerrainManager.streamCollidersByDistance="true" TerrainManager.cpuBudgetMiB="512" TerrainManager.gpuBudgetMiB="256" TerrainManager.cacheBudgetMiB="1024" TerrainManager.viewerObjectName="Terrain Performance Capsule" TerrainManager.cellDataDirectory="Engine/Core/Assets/TerrainData/TerrainPerformance" TerrainManager.runtimeBakeDirectory="" TerrainManager.requireRuntimeBake="false">
           <TerrainManager.cells />
           <TerrainManager.proceduralRuns>
             <item y="-64" start="-64" end="64" />
@@ -178,21 +397,91 @@
             <item y="63" start="-64" end="64" />
             <item y="64" start="-64" end="64" />
           </TerrainManager.proceduralRuns>
+          <TerrainManager.editedCells />
         </components:TerrainManager>
-        <components:TerrainPerformanceDriver TerrainPerformanceDriver.viewerObjectName="Terrain Performance Camera" TerrainPerformanceDriver.mapHalfExtentCells="64" TerrainPerformanceDriver.cacheDirectory=".local/cache/terrain_performance" TerrainPerformanceDriver.heightArchive="Assets/TerrainData/TerrainPerformance/world.heights" TerrainPerformanceDriver.archiveSignature="10019745058863430545" TerrainPerformanceDriver.farGrid="Assets/TerrainData/TerrainPerformance/world.fargrid" TerrainPerformanceDriver.reportIntervalSeconds="5" />
+        <components:TerrainPerformanceDriver TerrainPerformanceDriver.viewerObjectName="Terrain Performance Capsule" TerrainPerformanceDriver.mapHalfExtentCells="64" TerrainPerformanceDriver.cacheDirectory=".local/cache/terrain_performance" TerrainPerformanceDriver.heightArchive="Assets/TerrainData/TerrainPerformance/world.heights" TerrainPerformanceDriver.archiveSignature="" TerrainPerformanceDriver.farGrid="Assets/TerrainData/TerrainPerformance/world.fargrid" TerrainPerformanceDriver.enableFarTerrain="false" TerrainPerformanceDriver.reportIntervalSeconds="5" />
       </components>
       <children />
     </item>
     <item name="Terrain Scale Dummy (1.8 m)" enabled="true">
       <transform>
-        <Transform.position><item>0</item><item>-16.98151947</item><item>0</item></Transform.position>
-        <Transform.rotation><item>-1.5707963</item><item>0</item><item>0</item></Transform.rotation>
-        <Transform.scale><item>0.01</item><item>0.01</item><item>0.01</item></Transform.scale>
+        <Transform.position>
+          <item>0</item>
+          <item>-16.981519469999999</item>
+          <item>0</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>-1.5707962512969971</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>0.0099999997764825821</item>
+          <item>0.0099999997764825821</item>
+          <item>0.0099999997764825821</item>
+        </Transform.scale>
       </transform>
       <components>
-        <components:Mesh Mesh.file="Assets/Models/crash-dummy/crush_dummy_UE4_skinned/Meshes/cd_body_LOD0_ncl1_1 1.mesh" />
-        <components:Material Material.materialAsset="Assets/Models/crash-dummy/crush_dummy_UE4_skinned/Materials/default 1.material" Material.baseColorTexture="Assets/Models/crash-dummy/textures/crush_dummy_default_BaseColor.tga.png">
-          <Material.diffuse><item>1</item><item>1</item><item>1</item></Material.diffuse>
+        <components:Mesh Mesh.file="Assets/Models/crash-dummy/crush_dummy_UE4_skinned/Meshes/cd_body_LOD0_ncl1_1 1.mesh" Mesh.useLightProbes="false" />
+        <components:Material Material.useVertexColors="true" Material.shininess="32" Material.specularModel="MetallicRoughness" Material.baseColorAlpha="1" Material.baseColorTextureTintAlpha="1" Material.edgeWidth="0" Material.edgeEnabled="false" Material.sphereMode="0" Material.builtinToon="-1" Material.alphaMode="Opaque" Material.alphaCutoff="0.5" Material.doubleSided="false" Material.castsShadows="true" Material.unlit="false" Material.lightingChannels="-1" Material.metallicFactor="0" Material.roughnessFactor="1" Material.subsurfaceEnabled="false" Material.subsurfaceWeight="0" Material.subsurfaceThickness="0" Material.subsurfaceTransmission="0" Material.environmentDiffuseStrength="1" Material.occlusionStrength="1" Material.reflectionStrength="1" Material.useCustomReflectionEnvironment="false" Material.reflectionEnvironmentTexture="" Material.reflectionEnvironmentExposure="0" Material.reflectionEnvironmentRotation="0" Material.normalScale="1" Material.heightScale="0.05000000074505806" Material.terrainHeightBlendStrength="0" Material.heightMinSteps="8" Material.heightMaxSteps="32" Material.baseColorUvSet="0" Material.metallicRoughnessUvSet="0" Material.normalUvSet="0" Material.occlusionUvSet="0" Material.emissiveUvSet="0" Material.heightUvSet="0" Material.materialAsset="" Material.sphereTexture="" Material.toonTexture="" Material.baseColorTexture="C:/repos/EngineProject/Engine/Core/Assets/Models/crash-dummy/textures/crush_dummy_default_BaseColor.tga.png" Material.metallicRoughnessTexture="" Material.normalTexture="" Material.heightTexture="" Material.occlusionTexture="" Material.emissiveTexture="" Material.subsurfaceThicknessTexture="">
+          <Material.diffuse>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+          </Material.diffuse>
+          <Material.ambient>
+            <item>0.10000000149011612</item>
+            <item>0.10000000149011612</item>
+            <item>0.10000000149011612</item>
+          </Material.ambient>
+          <Material.specular>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+          </Material.specular>
+          <Material.emissiveColor>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </Material.emissiveColor>
+          <Material.baseColorTextureTint>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+          </Material.baseColorTextureTint>
+          <Material.subsurfaceRadius>
+            <item>0.0040000001899898052</item>
+            <item>0.0020000000949949026</item>
+            <item>0.0010000000474974513</item>
+          </Material.subsurfaceRadius>
+          <Material.subsurfaceColor>
+            <item>1</item>
+            <item>0.44999998807907104</item>
+            <item>0.34999999403953552</item>
+          </Material.subsurfaceColor>
+          <Material.terrainMacroColor>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </Material.terrainMacroColor>
+          <Material.edgeColor>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </Material.edgeColor>
+          <Material.sphereTint>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+          </Material.sphereTint>
+          <Material.toonTint>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+          </Material.toonTint>
         </components:Material>
       </components>
       <children />

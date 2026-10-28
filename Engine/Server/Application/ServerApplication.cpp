@@ -11,6 +11,8 @@
 #include "Core/Assets/Scripts/Controllers/FirstPersonController.h"
 #include "Core/Assets/Scripts/Gameplay/MainMenuGameManager.h"
 #include "Core/Assets/Scripts/TerrainGen/TerrainGen.h"
+#include "Core/Assets/Scripts/TerrainGen/TerrainStreamingCameraDriver.h"
+#include "Core/Assets/Scripts/TerrainPerformance/TerrainPerformanceDriver.h"
 #include "Core/Assets/Scripts/Portals/PortalSplitAfterDelay.h"
 #include "Core/Assets/Scripts/Physics/FoxRagdollBlend.h"
 #include "Core/Assets/Scripts/Utilities/Rotate.h"
@@ -51,6 +53,10 @@ void RegisterServerComponents()
         "PortalSplitAfterDelay");
     Engine::Serialization::RegisterComponentType<FoxRagdollBlend>(
         "FoxRagdollBlend");
+    Engine::Serialization::RegisterComponentType<TerrainStreamingCameraDriver>(
+        "TerrainStreamingCameraDriver");
+    Engine::Serialization::RegisterComponentType<TerrainPerformanceDriver>(
+        "TerrainPerformanceDriver");
 #endif
 }
 
@@ -385,9 +391,6 @@ int ServerApplication::Run(int argc, char** argv)
 
     RegisterServerComponents();
     Engine::Scene::Scene scene;
-    // Scene::Load is deliberately renderer-facing and rejects a null graphics
-    // provider. The serializer supports headless deserialization directly;
-    // meshes and other CPU scene state remain available for simulation.
     if (!Engine::Serialization::SceneSerializer::Load(scene, options.scenePath,
             nullptr))
     {
@@ -396,7 +399,6 @@ int ServerApplication::Run(int argc, char** argv)
     }
 
     scene.Start();
-    // Establish static bodies and portal links before the initial sample.
     scene.Update(0.f);
     std::cout << "{\"type\":\"scene_loaded\",\"scene\":";
     WriteJsonString(std::cout, options.scenePath);
@@ -404,12 +406,38 @@ int ServerApplication::Run(int argc, char** argv)
         << std::setprecision(7) << options.deltaTime << "}\n";
     WriteSceneState(scene, 0, 0.f);
 
-    for (int frame = 1; frame <= options.frames; ++frame)
-    {
-        scene.Update(options.deltaTime);
-        if (frame % options.every == 0 || frame == options.frames)
-            WriteSceneState(scene, frame, frame * options.deltaTime);
-    }
+    int lastFrame = 0;
+    auto* lastUpdateLabel = "start";
+    [&]() {
+        __try {
+            for (int frame = 1; frame <= options.frames; ++frame)
+            {
+                lastFrame = frame;
+                lastUpdateLabel = "Update";
+                scene.Update(options.deltaTime);
+                if (frame % options.every == 0 || frame == options.frames)
+                {
+                    lastUpdateLabel = "WriteState";
+                    WriteSceneState(scene, frame, frame * options.deltaTime);
+                }
+                lastUpdateLabel = "loop_top";
+            }
+        } __except(
+            fprintf(stderr, "[CRASH] Frame %d during %s: code=0x%08lX fault=0x%p base=0x%p rva=0x%llX\n",
+                lastFrame, lastUpdateLabel,
+                GetExceptionCode(),
+                GetExceptionInformation() && GetExceptionInformation()->ExceptionRecord
+                    ? reinterpret_cast<void*>(GetExceptionInformation()->ExceptionRecord->ExceptionAddress)
+                    : nullptr,
+                GetModuleHandleA(nullptr),
+                GetExceptionInformation() && GetExceptionInformation()->ExceptionRecord
+                    ? static_cast<unsigned long long>(
+                        reinterpret_cast<uintptr_t>(GetExceptionInformation()->ExceptionRecord->ExceptionAddress) -
+                        reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr)))
+                    : 0ULL),
+            fflush(stderr),
+            EXCEPTION_EXECUTE_HANDLER) {}
+    }();
     return 0;
 }
 }

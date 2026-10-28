@@ -4,6 +4,8 @@
 #include "Core/Compoonents/Obj/TerrainBatchAppearance.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Compoonents/Physics/MeshObjectCollider.h"
+#include "Core/Compoonents/Physics/RigidBody.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include <algorithm>
 #include <cmath>
@@ -30,6 +32,7 @@ template<class T> bool ReadBinary(std::ifstream& file, T& value)
     file.read(reinterpret_cast<char*>(&value), sizeof(value));
     return static_cast<bool>(file);
 }
+
 }
 
 namespace Engine::Components
@@ -304,7 +307,7 @@ TerrainManager::MemoryUsage TerrainManager::GetMemoryUsage() const
     usage.cacheBytes = m_cacheReservedBytes.load();
     for (const auto& [cell, terrain] : m_loaded)
     {
-        if (!terrain) continue;
+        if (!terrain || !terrain->Owner) continue;
         usage.cpuBytes += terrain->heights.capacity() * sizeof(float) +
             terrain->weights.capacity() * sizeof(float) +
             terrain->layers.capacity() * sizeof(Terrain::Layer) +
@@ -365,7 +368,7 @@ uint64_t TerrainManager::GetTerrainTextureMemoryBytes() const
         }
     };
     for (const auto& [cell, terrain] : m_loaded)
-        if (terrain)
+        if (terrain && terrain->Owner)
             for (const auto& material : terrain->GetLayerMaterials())
                 if (material)
                 {
@@ -531,6 +534,7 @@ int TerrainManager::CommitPrepared(int centerX, int centerY, int radius,
         Stitch(cell);
         terrain->SetMeshLodStride(DesiredLodStride(cell, centerX, centerY));
         terrain->FinalizePreparedGraphics(m_provider);
+        ConfigureCellPhysics(*object);
         ++uploaded;
     }
     return uploaded;
@@ -710,6 +714,39 @@ bool TerrainManager::LoadEdit(Cell cell, Terrain& terrain) const
     return !path.empty() && LoadEditFile(path, terrain);
 }
 
+void TerrainManager::ConfigureCellPhysics(Engine::Core::Object& object) const
+{
+    if (!generateColliders) return;
+    auto* mesh = object.GetComponent<Mesh>();
+    if (!mesh || mesh->GetVertexCount() == 0u) return;
+    auto* collider = object.GetComponent<MeshObjectCollider>();
+    if (!collider) collider = object.AddComponent<MeshObjectCollider>();
+    collider->convex = false;
+    auto* body = object.GetComponent<RigidBody>();
+    if (!body) body = object.AddComponent<RigidBody>();
+    body->bodyType = "Static";
+    body->useGravity = false;
+    body->friction = 0.9f;
+    body->restitution = 0.f;
+}
+
+void TerrainManager::RefreshColliderActivation(int centerX, int centerY)
+{
+    if (!generateColliders || !streamCollidersByDistance) return;
+    const int colliderRadius = std::clamp(loadedRadius + 1, 0, 64);
+    for (const auto& [cell, terrain] : m_loaded)
+    {
+        if (!terrain || !terrain->Owner) continue;
+        auto* collider = terrain->Owner->GetComponent<MeshObjectCollider>();
+        if (!collider) continue;
+        const bool active = std::abs(cell.first - centerX) <= colliderRadius &&
+            std::abs(cell.second - centerY) <= colliderRadius;
+        if (collider->collisionEnabled == active) continue;
+        collider->collisionEnabled = active;
+        collider->MarkConfigurationDirty();
+    }
+}
+
 void TerrainManager::LoadCell(Cell cell, int lodStride)
 {
     if (!Owner || !Owner->GetScene() || !HasCell(cell.first, cell.second) || m_loaded.count(cell)) return;
@@ -763,6 +800,7 @@ void TerrainManager::LoadCell(Cell cell, int lodStride)
     m_loaded[cell] = terrain;
     Stitch(cell);
     terrain->SetMeshLodStride(lodStride);
+    ConfigureCellPhysics(*object);
 }
 
 int TerrainManager::DesiredLodStride(Cell cell, int centerX, int centerY) const
@@ -825,6 +863,8 @@ void TerrainManager::Stitch(Cell cell)
             Terrain* source = useIncoming ? terrain : neighbor;
             const size_t dst = useIncoming ? b : a;
             const size_t src = useIncoming ? a : b;
+            if (dst >= destination->heights.size() || src >= source->heights.size())
+                continue;
             if (destination->heights[dst] != source->heights[src])
             {
                 destination->heights[dst] = source->heights[src];
@@ -1070,6 +1110,7 @@ void TerrainManager::SyncLoadedCells(int centerX, int centerY)
             std::abs(cell.second - centerY) > radius)
             UnloadCell(cell);
     }
+    RefreshColliderActivation(centerX, centerY);
     RefreshRenderBatches(64, centerX, centerY, radius);
     TrimMemoryBudget(centerX, centerY);
 }
@@ -1092,16 +1133,20 @@ void TerrainManager::RefreshRenderBatches(int uploadBudget, int centerX,
     if (batchFarCells)
     for (const auto& [cell, terrain] : m_loaded)
     {
-        if (!terrain || terrain->GetMeshLodStride() < 2) continue;
+        if (!terrain || !terrain->Owner || terrain->GetMeshLodStride() < 2)
+            continue;
         auto* mesh = terrain->Owner->GetComponent<Mesh>();
-        if (mesh && mesh->IsReady() && !mesh->GetVertices().empty())
+        if (mesh && mesh->IsReady() && !mesh->GetVertices().empty() &&
+            !mesh->GetIndices().empty())
             groups[groupOf(cell)].emplace_back(cell, terrain);
     }
     const auto revisionOf = [](const Members& members) {
         uint64_t revision = 1469598103934665603ull;
         for (const auto& [cell, terrain] : members)
         {
+            if (!terrain || !terrain->Owner) continue;
             const auto* mesh = terrain->Owner->GetComponent<Mesh>();
+            if (!mesh) continue;
             for (uint64_t value : {static_cast<uint64_t>(static_cast<uint32_t>(cell.first)),
                     static_cast<uint64_t>(static_cast<uint32_t>(cell.second)),
                     mesh->GetAuthoredGeometryRevision(),
@@ -1127,6 +1172,8 @@ void TerrainManager::RefreshRenderBatches(int uploadBudget, int centerX,
             bool lodChanged = false;
             for (const auto& [cell, terrain] : found->second)
             {
+                if (!terrain || !terrain->Owner)
+                { sameMembers = false; break; }
                 const auto oldLod = it->second.lodStrides.find(cell);
                 const auto oldGeometry =
                     it->second.geometryRevisions.find(cell);
@@ -1168,7 +1215,8 @@ void TerrainManager::RefreshRenderBatches(int uploadBudget, int centerX,
         {
             Members previousMembers;
             for (const auto& member : found->second)
-                if (it->second.members.count(member.first))
+                if (member.second && member.second->Owner &&
+                    it->second.members.count(member.first))
                     previousMembers.push_back(member);
             if (previousMembers.size() == it->second.members.size() &&
                 it->second.revision == revisionOf(previousMembers))
@@ -1185,7 +1233,9 @@ void TerrainManager::RefreshRenderBatches(int uploadBudget, int centerX,
     {
         if (members.size() < 2 || m_renderBatches.count(group)) continue;
         const Terrain* first = members.front().second;
+        if (!first || !first->Owner) continue;
         const auto sameAppearance = [&](const Terrain* terrain) {
+            if (!terrain || !terrain->Owner) return false;
             if (terrain->layers.size() != first->layers.size() ||
                 terrain->textureTiling != first->textureTiling) return false;
             for (size_t layer = 0; layer < first->layers.size(); ++layer)
@@ -1207,15 +1257,22 @@ void TerrainManager::RefreshRenderBatches(int uploadBudget, int centerX,
         size_t vertexCount = 0, indexCount = 0;
         for (const auto& [cell, terrain] : members)
         {
+            if (!terrain || !terrain->Owner) continue;
             const auto* mesh = terrain->Owner->GetComponent<Mesh>();
+            if (!mesh || mesh->GetVertices().empty() || mesh->GetIndices().empty())
+                continue;
             vertexCount += mesh->GetVertices().size();
             indexCount += mesh->GetIndices().size();
         }
+        if (vertexCount == 0 || indexCount == 0) continue;
         vertices.reserve(vertexCount);
         indices.reserve(indexCount);
         for (const auto& [cell, terrain] : members)
         {
+            if (!terrain || !terrain->Owner) continue;
             const auto* mesh = terrain->Owner->GetComponent<Mesh>();
+            if (!mesh || mesh->GetVertices().empty() || mesh->GetIndices().empty())
+                continue;
             const glm::mat4 world = terrain->Owner->transform.GetWorldMatrix();
             const bool translationOnly =
                 glm::length(glm::vec3(world[0]) - glm::vec3(1.f, 0.f, 0.f)) < 1e-6f &&
@@ -1244,8 +1301,14 @@ void TerrainManager::RefreshRenderBatches(int uploadBudget, int centerX,
                 }
                 vertices.push_back(vertex);
             }
-            for (uint32_t index : mesh->GetIndices()) indices.push_back(base + index);
+            const size_t vertexSize = mesh->GetVertices().size();
+            for (uint32_t index : mesh->GetIndices())
+            {
+                if (index >= vertexSize) continue;
+                indices.push_back(base + index);
+            }
         }
+        if (vertices.empty() || indices.empty()) continue;
         auto* object = Owner->GetScene()->AddObject("Terrain batch " +
             std::to_string(group.first) + "," + std::to_string(group.second));
         object->runtimeOnly = true;
@@ -1336,8 +1399,67 @@ void TerrainManager::UpdateEditorStreaming(const glm::dvec3& worldPosition)
         static_cast<int>(std::floor(local.z / spanZ)));
 }
 
+bool TerrainManager::TryGetHeightAtWorldPosition(
+    const glm::dvec3& worldPosition, double& height) const
+{
+    if (!Owner || cellsX <= 0 || cellsY <= 0 ||
+        cellWidth <= 0.f || cellDepth <= 0.f)
+        return false;
+    const glm::dvec3 local = glm::dvec3(
+        glm::inverse(Owner->transform.GetWorldMatrixD()) *
+        glm::dvec4(worldPosition, 1.0));
+    const double spanX = static_cast<double>(cellsX) * cellWidth;
+    const double spanZ = static_cast<double>(cellsY) * cellDepth;
+    if (spanX <= 0.0 || spanZ <= 0.0)
+        return false;
+    const int cellX = static_cast<int>(std::floor(local.x / spanX));
+    const int cellY = static_cast<int>(std::floor(local.z / spanZ));
+    const Terrain* terrain = GetLoadedCell(cellX, cellY);
+    if (!terrain || terrain->heights.size() !=
+        static_cast<size_t>(cellsX + 1) * (cellsY + 1))
+        return false;
+    const double cellLocalX = local.x - static_cast<double>(cellX) * spanX;
+    const double cellLocalZ = local.z - static_cast<double>(cellY) * spanZ;
+    const double sampleX = std::clamp(cellLocalX /
+        static_cast<double>(cellWidth), 0.0, static_cast<double>(cellsX));
+    const double sampleZ = std::clamp(cellLocalZ /
+        static_cast<double>(cellDepth), 0.0, static_cast<double>(cellsY));
+    const int x0 = std::clamp(static_cast<int>(std::floor(sampleX)), 0, cellsX);
+    const int z0 = std::clamp(static_cast<int>(std::floor(sampleZ)), 0, cellsY);
+    const int x1 = std::min(cellsX, x0 + 1);
+    const int z1 = std::min(cellsY, z0 + 1);
+    const double tx = sampleX - static_cast<double>(x0);
+    const double tz = sampleZ - static_cast<double>(z0);
+    const auto sample = [&](int x, int z) {
+        const size_t index = static_cast<size_t>(z) *
+            static_cast<size_t>(cellsX + 1) + static_cast<size_t>(x);
+        return static_cast<double>(terrain->heights[index]);
+    };
+    const double h00 = sample(x0, z0);
+    const double h10 = sample(x1, z0);
+    const double h01 = sample(x0, z1);
+    const double h11 = sample(x1, z1);
+    const double hx0 = h00 + (h10 - h00) * tx;
+    const double hx1 = h01 + (h11 - h01) * tx;
+    const double localHeight = hx0 + (hx1 - hx0) * tz;
+    const glm::dvec4 world = Owner->transform.GetWorldMatrixD() *
+        glm::dvec4(local.x, localHeight, local.z, 1.0);
+    height = world.y;
+    return std::isfinite(height);
+}
+
 void TerrainManager::StreamCells(int centerX, int centerY)
 {
+    for (auto it = m_loaded.begin(); it != m_loaded.end(); )
+    {
+        Terrain* terrain = it->second;
+        if (!terrain || !terrain->Owner || !terrain->Owner->GetScene())
+        {
+            it = m_loaded.erase(it);
+            continue;
+        }
+        ++it;
+    }
     const int radius = m_editorStreaming ? std::clamp(editorRadius, 0, 32) :
         std::clamp(std::max(loadedRadius, farRadius), 0, 32);
     const auto wanted = [&](Cell cell) {
@@ -1474,13 +1596,20 @@ void TerrainManager::StreamCells(int centerX, int centerY)
     }
     std::vector<Cell> lodPending;
     for (const auto& [cell, terrain] : m_loaded)
-        if (terrain->GetMeshLodStride() != DesiredLodStride(cell, centerX, centerY))
+        if (terrain && terrain->Owner &&
+            terrain->GetMeshLodStride() != DesiredLodStride(cell, centerX, centerY))
             lodPending.push_back(cell);
     std::sort(lodPending.begin(), lodPending.end(), [&](Cell a, Cell b) {
+        const auto foundA = m_loaded.find(a);
+        const auto foundB = m_loaded.find(b);
+        if (foundA == m_loaded.end() || !foundA->second ||
+            !foundA->second->Owner) return false;
+        if (foundB == m_loaded.end() || !foundB->second ||
+            !foundB->second->Owner) return true;
         const int strideA = DesiredLodStride(a, centerX, centerY);
         const int strideB = DesiredLodStride(b, centerX, centerY);
-        const bool upgradeA = strideA < m_loaded.at(a)->GetMeshLodStride();
-        const bool upgradeB = strideB < m_loaded.at(b)->GetMeshLodStride();
+        const bool upgradeA = strideA < foundA->second->GetMeshLodStride();
+        const bool upgradeB = strideB < foundB->second->GetMeshLodStride();
         if (upgradeA != upgradeB) return upgradeA;
         const int distanceA = std::max(std::abs(a.first - centerX), std::abs(a.second - centerY));
         const int distanceB = std::max(std::abs(b.first - centerX), std::abs(b.second - centerY));
@@ -1497,16 +1626,26 @@ void TerrainManager::StreamCells(int centerX, int centerY)
                 uploadCapacity - reservedBatchUploads)
             : std::clamp(maxLodChangesPerUpdate, 1, 64);
         if (changed >= lodLimit) break;
-        m_loaded.at(cell)->SetMeshLodStride(DesiredLodStride(cell, centerX, centerY));
-        ++changed;
+        if (auto found = m_loaded.find(cell);
+            found != m_loaded.end() && found->second && found->second->Owner)
+        {
+            found->second->SetMeshLodStride(
+                DesiredLodStride(cell, centerX, centerY));
+            ++changed;
+        }
     }
     int batchUploads = 8;
     if (asyncStreaming)
     {
         batchUploads = std::max(0, uploadCapacity - changed);
+        const int preparedBudget = batchUploads > 0
+            ? std::min(batchUploads, std::max(1,
+                batchUploads - reservedBatchUploads))
+            : 0;
         batchUploads -= CommitPrepared(centerX, centerY, radius,
-            batchUploads - reservedBatchUploads);
+            preparedBudget);
     }
+    RefreshColliderActivation(centerX, centerY);
     RefreshRenderBatches(batchUploads, centerX, centerY, radius);
     TrimMemoryBudget(centerX, centerY);
 }
@@ -1527,15 +1666,17 @@ void TerrainManager::Start()
     {
         m_bakeStatus = requireRuntimeBake ?
             "Runtime bake required; set a bake directory and bake terrain" :
-            std::string{};
-        return;
+            "No runtime bake directory; using source terrain";
     }
-    m_runtimeBakeActive = ReadRuntimeBakeIndex(
-        GetRuntimeBakeArchivePath(), m_bakeIndex);
-    if (!m_runtimeBakeActive) m_bakeIndex.clear();
-    m_bakeStatus = m_runtimeBakeActive ? "Runtime terrain bake active" :
-        requireRuntimeBake ? "Runtime bake required; use Bake all terrain cells" :
-        "No complete runtime bake; using source terrain";
+    else
+    {
+        m_runtimeBakeActive = ReadRuntimeBakeIndex(
+            GetRuntimeBakeArchivePath(), m_bakeIndex);
+        if (!m_runtimeBakeActive) m_bakeIndex.clear();
+        m_bakeStatus = m_runtimeBakeActive ? "Runtime terrain bake active" :
+            requireRuntimeBake ? "Runtime bake required; use Bake all terrain cells" :
+            "No complete runtime bake; using source terrain";
+    }
     InvalidatePrepared();
     for (auto it = m_loaded.begin(); it != m_loaded.end(); )
     {
@@ -1570,6 +1711,9 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         .Set("stochasticTerrainVariation", JsonValue(stochasticTerrainVariation))
         .Set("terrainMacroColorEnabled", JsonValue(terrainMacroColorEnabled))
         .Set("measurementGrid", JsonValue(measurementGrid))
+        .Set("generateColliders", JsonValue(generateColliders))
+        .Set("streamCollidersByDistance",
+            JsonValue(streamCollidersByDistance))
         .Set("cpuBudgetMiB", JsonValue(cpuBudgetMiB))
         .Set("gpuBudgetMiB", JsonValue(gpuBudgetMiB))
         .Set("cacheBudgetMiB", JsonValue(cacheBudgetMiB))
@@ -1665,6 +1809,10 @@ void TerrainManager::Deserialize(const JsonValue& value)
         value["terrainMacroColorEnabled"].AsBool();
     measurementGrid = value.Has("measurementGrid") &&
         value["measurementGrid"].AsBool();
+    generateColliders = value.Has("generateColliders") &&
+        value["generateColliders"].AsBool();
+    streamCollidersByDistance = !value.Has("streamCollidersByDistance") ||
+        value["streamCollidersByDistance"].AsBool();
     cpuBudgetMiB = value.Has("cpuBudgetMiB")
         ? std::clamp(value["cpuBudgetMiB"].AsInt(), 1, 16384) : 512;
     gpuBudgetMiB = value.Has("gpuBudgetMiB")
@@ -1766,6 +1914,10 @@ bool TerrainManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
         &terrainMacroColorEnabled);
     changed |= ui.Checkbox("Measurement grid (metres and cell borders)",
         &measurementGrid);
+    changed |= ui.Checkbox("Generate terrain cell colliders",
+        &generateColliders);
+    changed |= ui.Checkbox("Enable only near terrain colliders",
+        &streamCollidersByDistance);
     changed |= ui.SliderInt("CPU terrain budget MiB", &cpuBudgetMiB, 1, 16384);
     changed |= ui.SliderInt("GPU terrain budget MiB", &gpuBudgetMiB, 1, 16384);
     changed |= ui.SliderInt("Mesh cache budget MiB", &cacheBudgetMiB, 1, 16384);

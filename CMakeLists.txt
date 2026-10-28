@@ -1864,6 +1864,20 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TerrainCapsuleTraversalTests.cpp")
+    enable_testing()
+    add_executable(TerrainCapsuleTraversalTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/TerrainCapsuleTraversalTests.cpp")
+    target_link_libraries(TerrainCapsuleTraversalTests PRIVATE Engine)
+    target_include_directories(TerrainCapsuleTraversalTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME TerrainCapsuleTraversalRegression
+        COMMAND TerrainCapsuleTraversalTests)
+    set_tests_properties(TerrainCapsuleTraversalRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TerrainPerformanceSceneTests.cpp")
     enable_testing()
     add_executable(TerrainPerformanceSceneTests EXCLUDE_FROM_ALL

@@ -31,6 +31,8 @@ public:
     std::string farGrid =
         "Assets/TerrainData/TerrainPerformance/world.fargrid";
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain Performance")
+    bool enableFarTerrain = true;
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain Performance")
     float reportIntervalSeconds = 5.f;
     void Update() override;
     void OnAfterDeserialize(IGraphicsProvider* provider) override;

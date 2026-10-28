@@ -1,6 +1,7 @@
 #pragma once
 #include "Core/Component.h"
 #include "Core/Compoonents/Obj/Terrain.h"
+#include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include <map>
 #include <set>
 #include <functional>
@@ -45,6 +46,10 @@ public:
     bool terrainMacroColorEnabled = false;
     // Show a world-space metric ruler and cell boundaries on every terrain mesh.
     bool measurementGrid = false;
+    // Adds static mesh colliders to streamed terrain cells for physics actors.
+    bool generateColliders = false;
+    // Keep terrain collision active only near the viewer.
+    bool streamCollidersByDistance = true;
     // Terrain mesh and cell data only; shared textures and renderer targets are excluded.
     int cpuBudgetMiB = 512;
     int gpuBudgetMiB = 256;
@@ -96,6 +101,8 @@ public:
     void UpdateStreaming(int centerX, int centerY);
     void UpdateStreamingAtPosition(const glm::dvec3& worldPosition);
     void UpdateEditorStreaming(const glm::dvec3& worldPosition);
+    bool TryGetHeightAtWorldPosition(const glm::dvec3& worldPosition,
+        double& height) const;
     void Update() override;
     void Start() override;
     JsonValue Serialize() const override;
@@ -181,9 +188,11 @@ private:
     void Stitch(Cell cell);
     void RefreshRenderBatches(int uploadBudget, int centerX, int centerY,
         int radius);
+    void RefreshColliderActivation(int centerX, int centerY);
     void TrimMemoryBudget(int centerX, int centerY);
     bool ReserveCacheWrite(const std::string& path, const Terrain& terrain);
     bool SaveEdit(Cell cell, const Terrain& terrain) const;
     bool LoadEdit(Cell cell, Terrain& terrain) const;
+    void ConfigureCellPhysics(Engine::Core::Object& object) const;
 };
 }

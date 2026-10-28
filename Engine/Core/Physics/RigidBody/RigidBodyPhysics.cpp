@@ -188,8 +188,12 @@ bool Engine::Components::RigidBody::EnsureBody()
     if (animatedCollider)
     {
         if (animatedCollider->meshReference.IsAssigned())
+        {
             animatedMesh = Engine::Core::ResolveComponentReference<Mesh>(
                 Owner, animatedCollider->meshReference);
+            if (!animatedMesh && animatedCollider->meshPath.empty())
+                animatedMesh = Owner->GetComponent<Mesh>();
+        }
         else if (animatedCollider->meshPath.empty())
             animatedMesh = Owner->GetComponent<Mesh>();
         if (animatedMesh && animatedMesh->Owner &&
@@ -460,7 +464,11 @@ bool Engine::Components::RigidBody::EnsureBody()
             std::unique_ptr<Engine::Components::Mesh> loadedMesh;
             const Engine::Components::Mesh* mesh = nullptr;
             if (meshCollider->meshReference.IsAssigned())
+            {
                 mesh = Engine::Core::ResolveComponentReference<Engine::Components::Mesh>(Owner, meshCollider->meshReference);
+                if (!mesh && meshCollider->meshPath.empty())
+                    mesh = Owner->GetComponent<Engine::Components::Mesh>();
+            }
             else if (!meshCollider->meshPath.empty())
             {
                 loadedMesh = std::make_unique<Engine::Components::Mesh>();
@@ -555,15 +563,35 @@ bool Engine::Components::RigidBody::EnsureBody()
                 else
                 {
                     const auto& vertices = mesh->GetVertices();
+                    const auto& indices = mesh->GetIndices();
                     const auto point = [&vertices, &scale](std::size_t index)
                     {
                         return btVector3(vertices[index].pos[0] * scale.x,
                             vertices[index].pos[1] * scale.y,
                             vertices[index].pos[2] * scale.z);
                     };
-                    for (std::size_t i = 0; i + 2 < vertices.size(); i += 3)
+                    bool addedFromIndices = false;
+                    if (!indices.empty())
+                    {
+                        for (std::size_t i = 0; i + 2 < indices.size();
+                            i += 3)
+                        {
+                            if (indices[i] >= vertices.size() ||
+                                indices[i + 1] >= vertices.size() ||
+                                indices[i + 2] >= vertices.size())
+                                continue;
+                            triangles->addTriangle(point(indices[i]),
+                                point(indices[i + 1]),
+                                point(indices[i + 2]));
+                            addedFromIndices = true;
+                        }
+                    }
+                    if (!addedFromIndices)
+                    {
+                        for (std::size_t i = 0; i + 2 < vertices.size(); i += 3)
                         triangles->addTriangle(point(i), point(i + 1),
                             point(i + 2));
+                    }
                 }
                 shape = std::make_unique<btBvhTriangleMeshShape>(triangles.get(), true);
                 m_impl->triangleMeshes.push_back(std::move(triangles));
@@ -645,7 +673,30 @@ void Engine::Components::RigidBody::DestroyBody()
     if (m_impl->body && m_impl->scene)
     {
         m_impl->scene->GetPhysics().GetAdapter().BeforeRigidBodyDestroyed(*this);
-        Engine::Physics::StateFor(m_impl->scene).world->removeRigidBody(m_impl->body.get());
+        auto& physState = Engine::Physics::StateFor(m_impl->scene);
+        // Flush all existing contact manifolds referencing this body before
+        // removing it. Bullet's broadphase removal cleans up overlapping pairs
+        // but may leave stale narrow-phase manifold entries in the dispatcher
+        // that reference the body's collision shapes. Clearing them here
+        // prevents use-after-free when shapes are freed below.
+        if (physState.world)
+        {
+            btDispatcher* dispatcher = physState.world->getDispatcher();
+            if (dispatcher)
+            {
+                const int numManifolds = dispatcher->getNumManifolds();
+                for (int i = numManifolds - 1; i >= 0; --i)
+                {
+                    btPersistentManifold* manifold =
+                        dispatcher->getManifoldByIndexInternal(i);
+                    if (!manifold) continue;
+                    if (manifold->getBody0() == m_impl->body.get() ||
+                        manifold->getBody1() == m_impl->body.get())
+                        dispatcher->clearManifold(manifold);
+                }
+            }
+            physState.world->removeRigidBody(m_impl->body.get());
+        }
     }
     m_impl->body.reset();
     m_impl->motionState.reset();
@@ -680,8 +731,18 @@ void Engine::Components::RigidBody::ApplyBodySettings()
     m_impl->body->setAngularFactor(btVector3(!freezeRotationX, !freezeRotationY, !freezeRotationZ));
     if (continuousCollision)
     {
+        float ccdRadius = 0.1f;
+        if (const btCollisionShape* shape = m_impl->body->getCollisionShape())
+        {
+            btVector3 minimum(0.f, 0.f, 0.f), maximum(0.f, 0.f, 0.f);
+            shape->getAabb(m_impl->body->getWorldTransform(), minimum, maximum);
+            const btVector3 halfExtents = (maximum - minimum) * 0.5f;
+            const float smallestExtent = std::min({halfExtents.x(),
+                halfExtents.y(), halfExtents.z()});
+            ccdRadius = std::max(0.1f, smallestExtent * 0.8f);
+        }
         m_impl->body->setCcdMotionThreshold(0.001f);
-        m_impl->body->setCcdSweptSphereRadius(0.1f);
+        m_impl->body->setCcdSweptSphereRadius(ccdRadius);
     }
     else
         m_impl->body->setCcdMotionThreshold(0.f);

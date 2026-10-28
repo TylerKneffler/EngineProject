@@ -164,6 +164,8 @@ void MeshObjectCollider::ResolveContactSurfaces()
     Mesh* mesh = meshReference.IsAssigned()
         ? Engine::Core::ResolveComponentReference<Mesh>(Owner, meshReference)
         : meshPath.empty() ? Owner->GetComponent<Mesh>() : nullptr;
+    if (!mesh && meshReference.IsAssigned() && meshPath.empty())
+        mesh = Owner->GetComponent<Mesh>();
     if (!mesh || !mesh->Owner) return;
     auto* skin = mesh->Owner->GetComponent<SkinnedMesh>();
     const std::vector<glm::mat4>* palette = skin ? &skin->BuildPalette() : nullptr;

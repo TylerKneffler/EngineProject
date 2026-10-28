@@ -40,6 +40,12 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain Streaming Probe")
     bool lookInMovementDirection = true;
 
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain Streaming Probe")
+    bool usePhysicsBody = false;
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain Streaming Probe", ClampMin = "0")
+    float terrainGroundOffset = 1.f;
+
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain Streaming Probe", ClampMin = "0", ClampMax = "1")
     float downwardLook = 0.35f;
 
@@ -56,4 +62,5 @@ private:
     float m_pauseRemaining = 0.f;
     bool m_towardEnd = true;
     bool m_initialTerrainReady = false;
+    bool m_groundSnapped = false;
 };

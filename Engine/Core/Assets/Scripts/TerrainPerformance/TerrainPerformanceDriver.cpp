@@ -27,6 +27,7 @@ TerrainPerformanceDriver::TerrainPerformanceDriver()
     RegisterField("heightArchive", heightArchive);
     RegisterField("archiveSignature", archiveSignature);
     RegisterField("farGrid", farGrid);
+    RegisterField("enableFarTerrain", enableFarTerrain);
     RegisterField("reportIntervalSeconds", reportIntervalSeconds);
 }
 
@@ -84,7 +85,7 @@ bool TerrainPerformanceDriver::ConfigureTerrain()
     if (!sourceAvailable && !manager->requireRuntimeBake) return false;
     // Mesh caches include reconstructed paint weights and texture tiling.
     // Refresh them when either appearance setting changes.
-    manager->SetStaticCache(cacheDirectory, signature ^ 0x4c41524745555633ull);
+    manager->SetStaticCache(cacheDirectory, signature ^ 0x4c41524745555634ull);
     manager->SetProceduralBuilder(sourceAvailable ?
         std::function<void(Engine::Components::TerrainManager::Cell,
             Engine::Components::Terrain&)>{[=](Engine::Components::TerrainManager::Cell cell,
@@ -629,27 +630,45 @@ void TerrainPerformanceDriver::Update()
         SourceSignature() != m_configuredSignature && !ConfigureTerrain()) return;
     const float spanX = manager->cellsX * manager->cellWidth;
     const float spanZ = manager->cellsY * manager->cellDepth;
+    Engine::Core::Object* viewer =
+        Owner->FindObjectInSceneByName(viewerObjectName);
+    glm::dvec3 viewerWorld(0.0);
+    glm::dvec3 viewerLocal(0.0);
+    int viewerCellX = 0, viewerCellY = 0;
+    bool viewerCellValid = false;
+    if (viewer)
+    {
+        viewerWorld = viewer->transform.GetWorldPositionD();
+        viewerLocal = glm::dvec3(glm::inverse(Owner->transform.GetWorldMatrixD()) *
+            glm::dvec4(viewerWorld, 1.0));
+        viewerCellX = static_cast<int>(std::floor(viewerLocal.x / spanX));
+        viewerCellY = static_cast<int>(std::floor(viewerLocal.z / spanZ));
+        viewerCellValid = std::isfinite(viewerLocal.x) &&
+            std::isfinite(viewerLocal.z);
+    }
     if (Owner->GetScene() && Owner->GetScene()->HasStarted())
     {
-        if (!m_farAttempted)
+        if (!enableFarTerrain)
         {
-            m_farAttempted = true;
-            TerrainHeightArchive::ReadFarGrid(
-                Engine::Components::Mesh::ResolveFilePath(farGrid),
-                m_configuredSignature, mapHalfExtentCells, m_farHeights,
-                &m_farPatches);
+            for (auto& tile : m_farTiles)
+                if (tile.object)
+                    tile.object->enabled = false;
+            m_farCenterValid = false;
         }
-        if (!m_farHeights.empty())
-            if (auto* viewer = Owner->FindObjectInSceneByName(viewerObjectName))
+        else
+        {
+            if (!m_farAttempted)
             {
-                const glm::dvec3 local = glm::dvec3(
-                    glm::inverse(Owner->transform.GetWorldMatrixD()) *
-                    glm::dvec4(viewer->transform.GetWorldPositionD(), 1.0));
-                const int centerX = static_cast<int>(std::floor(local.x / spanX));
-                const int centerY = static_cast<int>(std::floor(local.z / spanZ));
-                if (!m_farCenterValid || centerX != m_farCenterX ||
-                    centerY != m_farCenterY)
-                    RefreshFarTerrain(centerX, centerY);
+                m_farAttempted = true;
+                TerrainHeightArchive::ReadFarGrid(
+                    Engine::Components::Mesh::ResolveFilePath(farGrid),
+                    m_configuredSignature, mapHalfExtentCells, m_farHeights,
+                    &m_farPatches);
+            }
+            if (!m_farHeights.empty() && viewerCellValid)
+                if (!m_farCenterValid || viewerCellX != m_farCenterX ||
+                    viewerCellY != m_farCenterY)
+                    RefreshFarTerrain(viewerCellX, viewerCellY);
             }
     }
     m_peakLoaded = std::max(m_peakLoaded, manager->GetLoadedCellCount());
@@ -663,7 +682,31 @@ void TerrainPerformanceDriver::Update()
             << " nearRadiusCells=" << manager->loadedRadius
             << " farRadiusCells=" << std::max(manager->loadedRadius, manager->farRadius)
             << " viewDistanceMeters=" << std::max(manager->loadedRadius,
-                manager->farRadius) * std::max(spanX, spanZ)
+                manager->farRadius) * std::max(spanX, spanZ);
+        if (viewer)
+        {
+            const bool hasCell = viewerCellValid &&
+                manager->HasCell(viewerCellX, viewerCellY);
+            const bool loadedCell = viewerCellValid &&
+                manager->GetLoadedCell(viewerCellX, viewerCellY) != nullptr;
+            double groundY = 0.0;
+            const bool sampledHeight =
+                manager->TryGetHeightAtWorldPosition(viewerWorld, groundY);
+            std::cout << " viewerWorld=(" << viewerWorld.x << ','
+                << viewerWorld.y << ',' << viewerWorld.z << ')'
+                << " viewerLocal=(" << viewerLocal.x << ','
+                << viewerLocal.y << ',' << viewerLocal.z << ')'
+                << " viewerCell=(" << viewerCellX << ',' << viewerCellY << ')'
+                << " cellInBounds=" << (hasCell ? "true" : "false")
+                << " cellLoaded=" << (loadedCell ? "true" : "false")
+                << " sampledHeight=" << (sampledHeight ? "true" : "false");
+            if (sampledHeight)
+                std::cout << " groundY=" << groundY
+                    << " clearanceY=" << (viewerWorld.y - groundY);
+        }
+        else
+            std::cout << " viewerMissing=true";
+        std::cout
             << '\n';
         m_reportElapsed = 0.f;
     }

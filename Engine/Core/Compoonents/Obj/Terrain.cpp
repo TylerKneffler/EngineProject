@@ -333,7 +333,7 @@ void Terrain::Rebuild()
         for (int col = 0; col < cellsX; ++col)
         {
             const uint32_t a = row * (cellsX + 1) + col, b = a + cellsX + 1;
-            indices.insert(indices.end(), {a, b, a + 1, a + 1, b, b + 1});
+            indices.insert(indices.end(), {a, a + 1, b, a + 1, b + 1, b});
         }
     ReduceMeshForLod(vertices, indices, cellsX, cellsY, m_meshLodStride);
     mesh->SetIndexedGeometry(std::move(vertices), std::move(indices));
@@ -766,7 +766,7 @@ bool Terrain::LoadCacheRange(const std::string& path, uint64_t signature,
         for (int col = 0; col < x; ++col)
         {
             const uint32_t a = row * (x + 1) + col, b = a + x + 1;
-            indices.insert(indices.end(), {a, b, a + 1, a + 1, b, b + 1});
+            indices.insert(indices.end(), {a, a + 1, b, a + 1, b + 1, b});
         }
     ReduceMeshForLod(vertices, indices, x, y, m_meshLodStride);
     Mesh* mesh = Owner->GetComponent<Mesh>();
