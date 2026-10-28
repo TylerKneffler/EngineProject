@@ -1,8 +1,10 @@
 #pragma once
 #include "Core/Component.h"
 #include "Core/Compoonents/Obj/Terrain.h"
+#include "Core/Compoonents/Obj/TerrainHeightArchive.h"
 #include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include <map>
+#include <array>
 #include <set>
 #include <functional>
 #include <utility>
@@ -12,9 +14,12 @@
 #include <thread>
 #include <atomic>
 #include <optional>
+#include <memory>
+#include <filesystem>
 
 namespace Engine::Components
 {
+class Camera;
 class TerrainManager final : public Engine::Core::Component
 {
 public:
@@ -36,6 +41,9 @@ public:
     bool asyncStreaming = false;
     int maxPreparedCells = 4;
     int maxUploadsPerUpdate = 2;
+    float maxFarRebuildMilliseconds = 4.f;
+    float farTileScreenErrorPixels = 3.f;
+    float farTileLodHysteresis = .2f;
     bool batchFarCells = true;
     // Optional fast directional diffuse shading for static play-mode terrain.
     bool fastRuntimeLighting = false;
@@ -93,14 +101,48 @@ public:
     bool BakeProceduralCell(int x, int y, bool force = false);
     bool BakeRuntimeTerrain(bool reuseExistingCells = false);
     bool HasCompleteRuntimeBake() const;
+    struct FarTerrainPalette
+    {
+        std::array<glm::vec3, TerrainHeightArchive::LayerCount> farColors{};
+        std::array<glm::vec3, 6> nearColors{};
+        std::array<int, TerrainHeightArchive::LayerCount> archiveToNear{};
+    };
+    // Distant visual tiles share this manager's cell grid and scene lifetime.
+    void ConfigureFarTerrain(int halfExtentCells, std::vector<float> heights,
+        std::vector<TerrainHeightArchive::FarPatch> patches,
+        std::string heightArchivePath, uint64_t sourceSignature,
+        FarTerrainPalette palette);
+    void ClearFarTerrain();
+    void SetFarTerrainEnabled(bool enabled);
+    void UpdateFarTerrain(int centerX, int centerY,
+        const Camera* camera = nullptr, int viewportHeight = 1080,
+        float aspect = 16.f / 9.f);
+    std::vector<Mesh*> GetFarTileMeshes() const;
+    size_t GetVisibleFarTileCount() const;
+    size_t GetVisibleFarTileCountForStride(int stride) const;
+    size_t GetDesiredFarTileCount() const;
+    size_t GetBuiltFarTileCount() const;
+    size_t GetPreparingFarTileCount() const;
+    size_t GetQueuedFarTileCount() const;
+    size_t GetPreparedFarTileCount() const;
+    size_t GetVisibleFarTileVertexCount() const;
+    uint64_t GetFarTileUploadCount() const { return m_farTileUploadCount; }
+    uint64_t GetFarTileCacheHits() const { return m_farTileCacheHits; }
+    uint64_t GetFarTileUploadedBytes() const { return m_farTileUploadedBytes; }
+    double GetFarTileRebuildMilliseconds() const
+    { return m_farTileRebuildMilliseconds; }
     size_t GetStoredTerrainCount() const { return m_cells.size(); }
+    std::vector<Cell> GetEditedProceduralCells() const
+    { return {m_editedProcedural.begin(), m_editedProcedural.end()}; }
     bool RemoveCell(int x, int y);
     bool ApplyBrush(double x, double z, float radius, float strength,
         Terrain::Brush brush, int layer = 0);
     void SyncLoadedCells(int centerX, int centerY);
     void UpdateStreaming(int centerX, int centerY);
     void UpdateStreamingAtPosition(const glm::dvec3& worldPosition);
-    void UpdateEditorStreaming(const glm::dvec3& worldPosition);
+    void UpdateEditorStreaming(const glm::dvec3& worldPosition,
+        const Camera* camera = nullptr, int viewportHeight = 1080,
+        float aspect = 16.f / 9.f);
     bool TryGetHeightAtWorldPosition(const glm::dvec3& worldPosition,
         double& height) const;
     void Update() override;
@@ -130,6 +172,87 @@ private:
         std::map<Cell, uint64_t> transformRevisions;
     };
     std::map<Cell, RenderBatch> m_renderBatches;
+    struct FarTile
+    {
+        int startX = 0, startY = 0, endX = 0, endY = 0;
+        std::vector<size_t> patchIndices;
+        std::map<size_t, size_t> patchVertexOffsets;
+        std::set<size_t> dirtyPatchIndices;
+        std::vector<size_t> children;
+        size_t parentIndex = static_cast<size_t>(-1);
+        int lodStride = 1;
+        bool desired = false;
+        bool outOfRange = false;
+        bool coarseSelected = false;
+        float maxHeightError = 0.f;
+        float minHeight = 0.f, maxHeight = 0.f;
+        Engine::Core::Object* object = nullptr;
+        Mesh* mesh = nullptr;
+        int builtCenterX = 0, builtCenterY = 0, builtNearRadius = 0;
+        std::vector<uint8_t> builtVisibility;
+        bool built = false, hasGeometry = false;
+        bool preparing = false;
+    };
+    int m_farHalfExtentCells = 0;
+    std::vector<float> m_farHeights;
+    std::shared_ptr<const std::vector<float>> m_farHeightsSnapshot;
+    std::vector<TerrainHeightArchive::FarPatch> m_farPatches;
+    std::set<Cell> m_farPatchCells;
+    std::vector<FarTile> m_farTiles;
+    void RefreshFarTerrainEditedCells(const std::set<Cell>& changedCells);
+    std::string m_farHeightArchivePath;
+    FarTerrainPalette m_farPalette;
+    uint64_t m_farSourceSignature = 0;
+    uint64_t m_farTileUploadCount = 0;
+    uint64_t m_farTileCacheHits = 0;
+    uint64_t m_farTileUploadedBytes = 0;
+    double m_farTileRebuildMilliseconds = 0.0;
+    bool m_farEnabled = false;
+    uint64_t m_uploadBudgetFrame = UINT64_MAX;
+    size_t m_nearFrameUploads = 0;
+    size_t m_farFrameUploads = 0;
+    struct FarPrepareTask
+    {
+        size_t tileIndex = 0;
+        uint64_t revision = 0, fingerprint = 0;
+        int startX = 0, startY = 0, endX = 0, endY = 0;
+        int lodStride = 1, side = 0, halfExtent = 0;
+        float spanX = 1.f, spanZ = 1.f;
+        FarTerrainPalette palette;
+        std::shared_ptr<const std::vector<float>> heights;
+        int cellsX = 1, cellsY = 1;
+        float cellWidth = 1.f, cellDepth = 1.f;
+        std::set<Cell> hiddenCells;
+        struct SeamSurface
+        {
+            std::vector<float> heights, weights;
+            uint32_t layerCount = 0;
+        };
+        std::map<Cell, SeamSurface> seams;
+        std::vector<std::pair<size_t, TerrainHeightArchive::FarPatch>> patches;
+        std::filesystem::path cachePath;
+    };
+    struct PreparedFarTile
+    {
+        size_t tileIndex = 0;
+        uint64_t revision = 0;
+        bool cacheHit = false;
+        bool success = false;
+        double buildMilliseconds = 0.0;
+        std::vector<Mesh::Vertex> vertices;
+        std::vector<uint32_t> indices;
+        std::map<size_t, size_t> patchVertexOffsets;
+        std::vector<uint8_t> builtVisibility;
+    };
+    std::thread m_farWorker;
+    mutable std::mutex m_farPrepareMutex;
+    std::condition_variable m_farPrepareWake;
+    std::deque<FarPrepareTask> m_farPrepareQueue;
+    std::deque<PreparedFarTile> m_preparedFarTiles;
+    uint64_t m_farPrepareRevision = 1;
+    bool m_stopFarWorker = false;
+    void StartFarPrepareWorker();
+    void FarPrepareLoop();
     uint64_t m_renderBatchUploadCount = 0;
     double m_renderBatchRefreshMilliseconds = 0.0;
     double m_renderBatchBuildMilliseconds = 0.0;

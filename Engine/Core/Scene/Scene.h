@@ -184,6 +184,10 @@ public:
         const Engine::Components::ParticleEmitter* emitter) const;
     double GetElapsedTime() const { return m_clock.GetElapsedTime(); }
     uint64_t GetFrameIndex() const { return m_clock.GetFrameIndex(); }
+    // Manual render loops can advance the shared streaming/upload frame
+    // budget without running the scene's component and physics updates.
+    void AdvanceManualFrame(float deltaTime)
+    { m_deltaTime = m_clock.Advance(deltaTime); }
     const Engine::Time::SimulationClock& GetClock() const { return m_clock; }
     Engine::Physics::Physics& GetPhysics() { return *m_physics; }
     const Engine::Physics::Physics& GetPhysics() const { return *m_physics; }

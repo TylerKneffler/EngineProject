@@ -595,6 +595,42 @@ bool Mesh::UpdateAuthoredVertices(std::vector<Vertex> vertices)
     return true;
 }
 
+bool Mesh::UpdateIndexedVertexRange(size_t first,
+    const std::vector<Vertex>& vertices)
+{
+    if (vertices.empty() || m_indices.empty() || !m_terrainVertices.empty() ||
+        first > m_vertices.size() ||
+        vertices.size() > m_vertices.size() - first) return false;
+    if (m_vertexBuffer &&
+        m_vertexBuffer->GetAccessMode() == IGraphicsBuffer::AccessMode::Upload)
+    {
+        void* mapped = m_vertexBuffer->Map();
+        if (!mapped) return false;
+        const size_t offset = first * sizeof(Vertex);
+        const size_t bytes = vertices.size() * sizeof(Vertex);
+        std::memcpy(static_cast<char*>(mapped) + offset, vertices.data(), bytes);
+        m_vertexBuffer->Unmap();
+        m_vertexBuffer->FlushMappedWrites(offset, bytes);
+    }
+    std::copy(vertices.begin(), vertices.end(), m_vertices.begin() + first);
+    if (m_vertexBuffer &&
+        m_vertexBuffer->GetAccessMode() != IGraphicsBuffer::AccessMode::Upload)
+    {
+        if (!m_bufferFactory) return false;
+        auto replacement = m_bufferFactory->CreateBuffer(
+            IGraphicsBuffer::Usage::VertexBuffer,
+            IGraphicsBuffer::AccessMode::Upload,
+            m_vertices.size() * sizeof(Vertex), m_vertices.data());
+        if (!replacement) return false;
+        m_vertexBuffer = std::move(replacement);
+    }
+    ClearSurfaceOffsets();
+    ++m_authoredGeometryRevision;
+    MarkConfigurationDirty();
+    UpdateBounds();
+    return true;
+}
+
 void Mesh::SetAuthoredFilePath(std::string path)
 {
     if (m_filePath == path) return;

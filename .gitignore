@@ -36,6 +36,7 @@ build/
 !.local/tests/TerrainViewportTests.cpp
 !.local/tests/TerrainManagerTests.cpp
 !.local/tests/TerrainPerformanceSceneTests.cpp
+!.local/tests/TerrainFarTileSchedulingTests.cpp
 !.local/tests/TerrainStreamingPerformanceTests.cpp
 build
 editor-startup.log

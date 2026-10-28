@@ -699,17 +699,19 @@ target_include_directories(ProjectScripts PRIVATE
 set_target_properties(ProjectScripts PROPERTIES PREFIX "" OUTPUT_NAME "ProjectScripts")
 target_precompile_headers(ProjectScripts REUSE_FROM Engine)
 add_dependencies(Editor ProjectScripts)
-add_executable(TerrainCacheBake EXCLUDE_FROM_ALL
-    "${ENGINE_ROOT}/.local/tools/TerrainCacheBake.cpp"
-    "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainPerformance/TerrainPerformanceDriver.cpp"
-    "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/PerlinNoiseField.cpp"
-    "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainStreamingCameraDriver.cpp"
-)
-target_link_libraries(TerrainCacheBake PRIVATE Engine)
-target_include_directories(TerrainCacheBake PRIVATE
-    "${ENGINE_ROOT}/Engine"
-    "${ENGINE_ROOT}/Engine/Core/Assets"
-)
+if(EXISTS "${ENGINE_ROOT}/.local/tools/TerrainCacheBake.cpp")
+    add_executable(TerrainCacheBake EXCLUDE_FROM_ALL
+        "${ENGINE_ROOT}/.local/tools/TerrainCacheBake.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainPerformance/TerrainPerformanceDriver.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/PerlinNoiseField.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainStreamingCameraDriver.cpp"
+    )
+    target_link_libraries(TerrainCacheBake PRIVATE Engine)
+    target_include_directories(TerrainCacheBake PRIVATE
+        "${ENGINE_ROOT}/Engine"
+        "${ENGINE_ROOT}/Engine/Core/Assets"
+    )
+endif()
 source_group(TREE "${ENGINE_ROOT}" FILES
     ${EDITOR_SOURCES} ${EDITOR_HEADERS} ${EDITOR_RESOURCE_FILES})
 if(ENGINE_PROJECT_DIR)
@@ -1861,6 +1863,17 @@ if(NOT ENGINE_PROJECT_DIR AND
     target_link_libraries(TerrainManagerTests PRIVATE Engine)
     target_include_directories(TerrainManagerTests PRIVATE "${ENGINE_ROOT}/Engine")
     add_test(NAME TerrainManagerRegression COMMAND TerrainManagerTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TerrainFarTileSchedulingTests.cpp")
+    enable_testing()
+    add_executable(TerrainFarTileSchedulingTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/TerrainFarTileSchedulingTests.cpp")
+    target_link_libraries(TerrainFarTileSchedulingTests PRIVATE Engine)
+    target_include_directories(TerrainFarTileSchedulingTests PRIVATE
+        "${ENGINE_ROOT}/Engine")
+    add_test(NAME TerrainFarTileScheduling COMMAND TerrainFarTileSchedulingTests)
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND

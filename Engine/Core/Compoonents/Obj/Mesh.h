@@ -89,6 +89,9 @@ public:
     // Updates authored vertex data without changing topology or reallocating
     // the index buffer. Used for interactive Mesh Edit transforms.
     bool UpdateAuthoredVertices(std::vector<Vertex> vertices);
+    // Updates a contiguous part of an indexed surface without rebuilding its
+    // topology; upload buffers receive only the changed byte range.
+    bool UpdateIndexedVertexRange(size_t first, const std::vector<Vertex>& vertices);
     // Installs an authored indexed surface without expanding shared vertices.
     // Portal cuts expand only their transient CPU snapshot.
     bool SetIndexedGeometry(std::vector<Vertex> vertices,

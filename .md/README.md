@@ -4,6 +4,8 @@ A C++17 game engine and editor for Windows x64. It includes scene editing and se
 
 Skeletal animations are saved as individual `.anim` assets. A `.rig` records the skeleton and paths to the animations it can use; prefabs choose the active clip through `AnimationManager`. Double-click an animation asset, or select it and choose **Open Animation Editor**, to edit it with its preview rig. In the Animation Editor, use **Add to rig** to reference a compatible animation asset from another rig. Animation assets include a lightweight base skeleton without mesh weights for standalone asset previews.
 
+For terrain code ownership and authored versus generated data, see [Terrain architecture](terrain-architecture.md).
+
 ## Start with a packaged build
 
 1. Download the [current Windows x64 ZIP (v1.0.0)](../ReleaseBuilds/EngineProject-v1.0.0-windows-x64.zip?raw=1). Browse [all packaged builds](../ReleaseBuilds/) for other versions.

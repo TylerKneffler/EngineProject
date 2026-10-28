@@ -857,7 +857,10 @@ void SceneView::DrawPanel(IEditorUi& ui)
                     object->GetComponent<Engine::Components::TerrainManager>())
                 terrainManagers.push_back(terrainManager);
         for (auto* terrainManager : terrainManagers)
-            terrainManager->UpdateEditorStreaming(cameraPosition);
+            terrainManager->UpdateEditorStreaming(cameraPosition,
+                m_scene->editorCamera.GetComponent<Engine::Components::Camera>(),
+                static_cast<int>(GetHeight()),
+                GetHeight() > 0.f ? GetWidth() / GetHeight() : 1.f);
     }
 }
 

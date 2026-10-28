@@ -399,7 +399,7 @@
           </TerrainManager.proceduralRuns>
           <TerrainManager.editedCells />
         </components:TerrainManager>
-        <components:TerrainPerformanceDriver TerrainPerformanceDriver.viewerObjectName="Terrain Performance Capsule" TerrainPerformanceDriver.mapHalfExtentCells="64" TerrainPerformanceDriver.cacheDirectory=".local/cache/terrain_performance" TerrainPerformanceDriver.heightArchive="Assets/TerrainData/TerrainPerformance/world.heights" TerrainPerformanceDriver.archiveSignature="" TerrainPerformanceDriver.farGrid="Assets/TerrainData/TerrainPerformance/world.fargrid" TerrainPerformanceDriver.enableFarTerrain="false" TerrainPerformanceDriver.reportIntervalSeconds="5" />
+        <components:TerrainPerformanceDriver TerrainPerformanceDriver.viewerObjectName="Terrain Performance Capsule" TerrainPerformanceDriver.mapHalfExtentCells="64" TerrainPerformanceDriver.cacheDirectory=".local/cache/terrain_performance" TerrainPerformanceDriver.heightArchive="Assets/TerrainData/TerrainPerformance/world.heights" TerrainPerformanceDriver.archiveSignature="" TerrainPerformanceDriver.farGrid="Assets/TerrainData/TerrainPerformance/world.fargrid" TerrainPerformanceDriver.enableFarTerrain="true" TerrainPerformanceDriver.reportIntervalSeconds="5" />
       </components>
       <children />
     </item>
