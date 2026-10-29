@@ -29,7 +29,7 @@ public:
     ~TerrainManager() override;
     int cellsX = 32, cellsY = 32;
     float cellWidth = 1.f, cellDepth = 1.f;
-    int loadedRadius = 2;
+    int loadedRadius = 1;
     // Scene view streams only editable, full-resolution cells around its camera.
     int editorRadius = 6;
     // -1 follows loadedRadius for older scenes; larger values stream coarse cells.
@@ -44,6 +44,13 @@ public:
     int maxUploadsPerUpdate = 2;
     float maxFarRebuildMilliseconds = 4.f;
     float farTileScreenErrorPixels = 3.f;
+    // Negative values inherit the legacy shared threshold.
+    float farTileErrorPixelsLod2 = -1.f;
+    float farTileErrorPixelsLod4 = -1.f;
+    float farTileErrorPixelsLod8 = -1.f;
+    float farTileErrorPixelsLod16 = -1.f;
+    // Zero follows the camera clip distance.
+    float maxFarViewDistanceMeters = 0.f;
     float farTileLodHysteresis = .2f;
     bool batchFarCells = true;
     // Optional fast directional diffuse shading for static play-mode terrain.
@@ -157,6 +164,14 @@ public:
     size_t GetQueuedFarTileCount() const;
     size_t GetPreparedFarTileCount() const;
     size_t GetVisibleFarTileVertexCount() const;
+    struct FarLevelUsage
+    {
+        int stride = 1;
+        size_t residentTiles = 0, visibleTiles = 0;
+        uint64_t cpuBytes = 0, gpuBytes = 0;
+    };
+    std::vector<FarLevelUsage> GetFarLevelUsage() const;
+    size_t GetFarTileNodeCount() const { return m_farTiles.size(); }
     uint64_t GetFarTileUploadCount() const { return m_farTileUploadCount; }
     uint64_t GetFarTileCacheHits() const { return m_farTileCacheHits; }
     uint64_t GetFarTileUploadedBytes() const { return m_farTileUploadedBytes; }

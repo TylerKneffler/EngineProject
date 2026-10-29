@@ -179,6 +179,31 @@ int main()
     if (manager->GetVisibleFarTileCount() <= coarseCount)
         throw std::runtime_error("Projected error did not refine visible far tiles");
 
+    // The hierarchy must keep growing on maps wider than the original
+    // 129-cell benchmark, without instantiating one object per map cell.
+    constexpr int extendedExtent = 192;
+    const int extendedSide = extendedExtent * 2 + 2;
+    manager->ConfigureFarTerrain(extendedExtent,
+        std::vector<float>(static_cast<size_t>(extendedSide) *
+            extendedSide, 0.f), {}, "", 12, {});
+    manager->farTileScreenErrorPixels = 64.f;
+    camera->farPlane = 100000.f;
+    for (int update = 0; update < 100; ++update)
+    {
+        manager->UpdateFarTerrain(0, 0, camera, 1080, 16.f / 9.f);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    if (manager->GetFarTileNodeCount() < 100 ||
+        manager->GetVisibleFarTileCountForStride(8) == 0 ||
+        manager->GetVisibleFarTileCount() >= 100)
+        throw std::runtime_error("Extended map did not use coarse hierarchy");
+    const size_t extendedVisible = manager->GetVisibleFarTileCount();
+    manager->maxFarViewDistanceMeters = 500.f;
+    manager->UpdateFarTerrain(0, 0, camera, 1080, 16.f / 9.f);
+    if (manager->GetVisibleFarTileCount() >= extendedVisible)
+        throw std::runtime_error("Independent far distance cap had no effect");
+    manager->maxFarViewDistanceMeters = 0.f;
+
     Engine::Components::TerrainManager::FarTerrainPalette brushPalette;
     brushPalette.nearColors[1] = {1.f, 0.f, 0.f};
     manager->ConfigureFarTerrain(extent,

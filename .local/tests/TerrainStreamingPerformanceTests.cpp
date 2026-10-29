@@ -150,6 +150,8 @@ struct Samples
     uint64_t peakTerrainTextureBytes = 0;
     uint64_t peakWorkingSet = 0, peakPrivate = 0;
     size_t peakResident = 0;
+    std::map<int, Engine::Components::TerrainManager::FarLevelUsage>
+        peakFarLevels;
     uint32_t peakDraws = 0;
     std::vector<double> draws, terrainOcclusionCulls,
         submittedTriangles, objectUploadKiB,
@@ -198,6 +200,17 @@ void SampleMemory(Samples& samples,
         manager.GetTerrainTextureMemoryBytes());
     samples.peakResident = std::max(samples.peakResident,
         manager.GetLoadedCellCount());
+    for (const auto& level : manager.GetFarLevelUsage())
+    {
+        auto& peak = samples.peakFarLevels[level.stride];
+        peak.stride = level.stride;
+        peak.residentTiles = std::max(peak.residentTiles,
+            level.residentTiles);
+        peak.visibleTiles = std::max(peak.visibleTiles,
+            level.visibleTiles);
+        peak.cpuBytes = std::max(peak.cpuBytes, level.cpuBytes);
+        peak.gpuBytes = std::max(peak.gpuBytes, level.gpuBytes);
+    }
     PROCESS_MEMORY_COUNTERS_EX counters{};
     counters.cb = sizeof(counters);
     if (GetProcessMemoryInfo(GetCurrentProcess(),
@@ -429,6 +442,16 @@ int Run()
     manager->farTileScreenErrorPixels = static_cast<float>(ReadIntSetting(
         "TERRAIN_TEST_FAR_TILE_ERROR_PIXELS",
         static_cast<int>(manager->farTileScreenErrorPixels), 1, 64));
+    manager->farTileErrorPixelsLod2 = static_cast<float>(ReadIntSetting(
+        "TERRAIN_TEST_LOD2_ERROR_PIXELS", -1, -1, 64));
+    manager->farTileErrorPixelsLod4 = static_cast<float>(ReadIntSetting(
+        "TERRAIN_TEST_LOD4_ERROR_PIXELS", -1, -1, 64));
+    manager->farTileErrorPixelsLod8 = static_cast<float>(ReadIntSetting(
+        "TERRAIN_TEST_LOD8_ERROR_PIXELS", -1, -1, 64));
+    manager->farTileErrorPixelsLod16 = static_cast<float>(ReadIntSetting(
+        "TERRAIN_TEST_LOD16_ERROR_PIXELS", -1, -1, 64));
+    manager->maxFarViewDistanceMeters = static_cast<float>(ReadIntSetting(
+        "TERRAIN_TEST_MAX_FAR_DISTANCE_METERS", 0, 0, 1000000));
     manager->maxLoadsPerUpdate = 8;
     manager->maxUnloadsPerUpdate = 32;
     manager->maxPreparedCells = 16;
@@ -676,6 +699,10 @@ int Run()
                 static_cast<int>(std::floor(z /
                     (manager->cellsY * manager->cellDepth))),
                 loadedRadiusCells + 2) : 0));
+        step("visibleFarTiles", static_cast<double>(
+            manager->GetVisibleFarTileCount()));
+        step("farTileNodes", static_cast<double>(
+            manager->GetFarTileNodeCount()));
         step("nearHousekeeping", nearPhase(&Engine::Components::TerrainManager::
             StreamingTiming::housekeepingMs));
         step("nearQueue", nearPhase(&Engine::Components::TerrainManager::
@@ -855,11 +882,19 @@ int Run()
     }
     Require(samples.frames.size() == FramesPerPhase * 3,
         "look, walk, and run test was incomplete");
+    if (farFieldEnabled)
+        Require(*std::max_element(samples.terrainSteps.at("farCoverageGaps")
+            .begin(), samples.terrainSteps.at("farCoverageGaps").end()) == 0.0,
+            "terrain coverage gap while looking or moving");
     if (samples.peakResident == 0 || samples.peakDraws == 0)
         std::cerr << "Terrain samples: peakResident=" << samples.peakResident
             << " peakDraws=" << samples.peakDraws << '\n';
     Require(samples.peakResident > 0 && samples.peakDraws > 0,
         "terrain did not render during the performance test");
+    if (farFieldEnabled)
+        Require(samples.peakResident <= static_cast<size_t>(
+            (2 * loadedRadiusCells + 3) * (2 * loadedRadiusCells + 3)),
+            "view distance multiplied near-cell objects");
     Require(!samples.gpuTotal.empty(), "GPU timing queries did not resolve");
     if (GetEnvironmentVariableA("TERRAIN_TEST_ALLOW_SHORT_VISIBILITY",
         nullptr, 0) == 0)
@@ -894,7 +929,7 @@ int Run()
     for (int frame = 1; frame <= 60; ++frame)
     {
         runFrame(boundaryX + 5.0 * frame / 60.0, startZ,
-            heading, &crossingSamples);
+            heading + .5 * std::sin(frame * .15), &crossingSamples);
         std::this_thread::sleep_until(crossingStart +
             std::chrono::duration_cast<Clock::duration>(
                 std::chrono::duration<double>(frame / 60.0)));
@@ -959,6 +994,16 @@ int Run()
             << "  \"terrainLod4RadiusCells\": " << lod4RadiusCells << ",\n"
             << "  \"farTileScreenErrorPixels\": "
                 << manager->farTileScreenErrorPixels << ",\n"
+            << "  \"maxFarViewDistanceMeters\": "
+                << manager->maxFarViewDistanceMeters << ",\n"
+            << "  \"farTileErrorPixelsLod2\": "
+                << manager->farTileErrorPixelsLod2 << ",\n"
+            << "  \"farTileErrorPixelsLod4\": "
+                << manager->farTileErrorPixelsLod4 << ",\n"
+            << "  \"farTileErrorPixelsLod8\": "
+                << manager->farTileErrorPixelsLod8 << ",\n"
+            << "  \"farTileErrorPixelsLod16\": "
+                << manager->farTileErrorPixelsLod16 << ",\n"
             << "  \"farFieldEnabled\": " << (farFieldEnabled ? "true" : "false")
                 << ",\n"
             << "  \"shadowsEnabled\": " << (shadowsEnabled ? "true" : "false")
@@ -980,6 +1025,8 @@ int Run()
             << "  \"peakTerrainTextureMiBEstimate\": "
                 << samples.peakTerrainTextureBytes / 1048576.0 << ",\n"
             << "  \"farFieldTiles\": " << farMeshes.size() << ",\n"
+            << "  \"farTileNodes\": " << manager->GetFarTileNodeCount()
+                << ",\n"
             << "  \"farTilesStride1\": " <<
                 manager->GetVisibleFarTileCountForStride(1) << ",\n"
             << "  \"farTilesStride2\": " <<
@@ -1109,7 +1156,8 @@ int Run()
             return name == "nearScheduledCells" ||
                 name == "nearCommittedCells" || name == "nearChangedLods" ||
                 name == "farQueuedTiles" || name == "farUploadedTiles" ||
-                name == "farAppearedTiles" || name == "farCoverageGaps"
+                name == "farAppearedTiles" || name == "farCoverageGaps" ||
+                name == "visibleFarTiles" || name == "farTileNodes"
                 ? "" : "Ms";
         };
         for (const auto& [name, values] : samples.terrainSteps)
@@ -1128,7 +1176,19 @@ int Run()
             << Percentile(samples.residentCells, .95)
             << ",\n  \"residentCellsP99\": "
             << Percentile(samples.residentCells, .99)
-            << "\n}\n";
+            << ",\n  \"farLevelPeakUsage\": [\n";
+        bool firstLevel = true;
+        for (const auto& [stride, level] : samples.peakFarLevels)
+        {
+            if (!firstLevel) out << ",\n";
+            firstLevel = false;
+            out << "    {\"stride\": " << stride
+                << ", \"residentTiles\": " << level.residentTiles
+                << ", \"visibleTiles\": " << level.visibleTiles
+                << ", \"cpuMiB\": " << level.cpuBytes / MiB
+                << ", \"gpuMiB\": " << level.gpuBytes / MiB << "}";
+        }
+        out << "\n  ]\n}\n";
     };
     const auto output = std::filesystem::path(".local/performance-logs") /
         ("terrain-1080p-far-" + std::to_string(farPlaneMeters) +

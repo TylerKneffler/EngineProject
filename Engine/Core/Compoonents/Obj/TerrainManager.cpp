@@ -24,6 +24,15 @@
 
 namespace
 {
+// Near cells and far tiles use the same distance and travel bias within the
+// frame's shared upload budget. Coverage repairs are sorted ahead separately.
+int StreamingRequestScore(int dx, int dy, int travelX, int travelY)
+{
+    return 4 * (dx * dx + dy * dy) -
+        2 * (dx * std::clamp(travelX, -1, 1) +
+            dy * std::clamp(travelY, -1, 1));
+}
+
 template<class T> bool WriteBinary(std::ofstream& file, const T& value)
 {
     static_assert(std::is_trivially_copyable_v<T>);
@@ -1643,9 +1652,7 @@ void TerrainManager::StreamCells(int centerX, int centerY, int initialRadius)
         }
         const auto score = [&](Cell cell) {
             const int dx = cell.first - centerX, dy = cell.second - centerY;
-            return 4 * (dx * dx + dy * dy) -
-                2 * (dx * std::clamp(travel.first, -1, 1) +
-                    dy * std::clamp(travel.second, -1, 1));
+            return StreamingRequestScore(dx, dy, travel.first, travel.second);
         };
         std::sort(m_prepareQueue.begin(), m_prepareQueue.end(),
             [&](const PrepareTask& a, const PrepareTask& b) {
@@ -1685,9 +1692,7 @@ void TerrainManager::StreamCells(int centerX, int centerY, int initialRadius)
                 pending.emplace_back(x, y);
     const auto priority = [&](Cell cell) {
         const int dx = cell.first - centerX, dy = cell.second - centerY;
-        return 4 * (dx * dx + dy * dy) -
-            2 * (dx * std::clamp(travel.first, -1, 1) +
-                dy * std::clamp(travel.second, -1, 1));
+        return StreamingRequestScore(dx, dy, travel.first, travel.second);
     };
     std::sort(pending.begin(), pending.end(), [&](Cell a, Cell b) {
         const int da = priority(a), db = priority(b);
@@ -1887,6 +1892,11 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         .Set("maxUploadsPerUpdate", JsonValue(maxUploadsPerUpdate))
         .Set("maxFarRebuildMilliseconds", JsonValue(maxFarRebuildMilliseconds))
         .Set("farTileScreenErrorPixels", JsonValue(farTileScreenErrorPixels))
+        .Set("farTileErrorPixelsLod2", JsonValue(farTileErrorPixelsLod2))
+        .Set("farTileErrorPixelsLod4", JsonValue(farTileErrorPixelsLod4))
+        .Set("farTileErrorPixelsLod8", JsonValue(farTileErrorPixelsLod8))
+        .Set("farTileErrorPixelsLod16", JsonValue(farTileErrorPixelsLod16))
+        .Set("maxFarViewDistanceMeters", JsonValue(maxFarViewDistanceMeters))
         .Set("farTileLodHysteresis", JsonValue(farTileLodHysteresis))
         .Set("batchFarCells", JsonValue(batchFarCells))
         .Set("fastRuntimeLighting", JsonValue(fastRuntimeLighting))
@@ -1987,6 +1997,17 @@ void TerrainManager::Deserialize(const JsonValue& value)
         : 4.f;
     farTileScreenErrorPixels = value.Has("farTileScreenErrorPixels")
         ? std::clamp(value["farTileScreenErrorPixels"].AsFloat(), .1f, 64.f) : 3.f;
+    const auto levelError = [&](const char* name) {
+        return value.Has(name) ? std::clamp(value[name].AsFloat(), -1.f, 64.f)
+            : -1.f;
+    };
+    farTileErrorPixelsLod2 = levelError("farTileErrorPixelsLod2");
+    farTileErrorPixelsLod4 = levelError("farTileErrorPixelsLod4");
+    farTileErrorPixelsLod8 = levelError("farTileErrorPixelsLod8");
+    farTileErrorPixelsLod16 = levelError("farTileErrorPixelsLod16");
+    maxFarViewDistanceMeters = value.Has("maxFarViewDistanceMeters")
+        ? std::clamp(value["maxFarViewDistanceMeters"].AsFloat(), 0.f,
+            1000000.f) : 0.f;
     farTileLodHysteresis = value.Has("farTileLodHysteresis")
         ? std::clamp(value["farTileLodHysteresis"].AsFloat(), 0.f, .9f) : .2f;
     batchFarCells = !value.Has("batchFarCells") || value["batchFarCells"].AsBool();
@@ -2098,6 +2119,16 @@ bool TerrainManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
         &maxFarRebuildMilliseconds, .001f, 100.f);
     changed |= ui.SliderFloat("Far tile error (pixels)",
         &farTileScreenErrorPixels, .1f, 64.f);
+    changed |= ui.SliderFloat("LOD 2 error (pixels, -1 inherits)",
+        &farTileErrorPixelsLod2, -1.f, 64.f);
+    changed |= ui.SliderFloat("LOD 4 error (pixels, -1 inherits)",
+        &farTileErrorPixelsLod4, -1.f, 64.f);
+    changed |= ui.SliderFloat("LOD 8 error (pixels, -1 inherits)",
+        &farTileErrorPixelsLod8, -1.f, 64.f);
+    changed |= ui.SliderFloat("LOD 16+ error (pixels, -1 inherits)",
+        &farTileErrorPixelsLod16, -1.f, 64.f);
+    changed |= ui.DragFloat("Maximum far view distance (m, 0 follows camera)",
+        &maxFarViewDistanceMeters, 10.f, 0.f, 1000000.f);
     changed |= ui.SliderFloat("Far tile LOD hysteresis",
         &farTileLodHysteresis, 0.f, .9f);
     changed |= ui.Checkbox("Batch far terrain cells", &batchFarCells);
@@ -2970,6 +3001,25 @@ size_t TerrainManager::GetVisibleFarTileVertexCount() const
     return count;
 }
 
+std::vector<TerrainManager::FarLevelUsage> TerrainManager::GetFarLevelUsage() const
+{
+    std::map<int, FarLevelUsage> levels;
+    for (const auto& tile : m_farTiles)
+    {
+        auto& level = levels[tile.lodStride];
+        level.stride = tile.lodStride;
+        if (!tile.mesh || !tile.hasGeometry) continue;
+        ++level.residentTiles;
+        if (tile.object && tile.object->enabled) ++level.visibleTiles;
+        level.cpuBytes += tile.mesh->GetCpuMeshMemoryBytes() +
+            tile.mesh->GetUploadShadowMemoryBytes();
+        level.gpuBytes += tile.mesh->GetGpuBufferMemoryBytes();
+    }
+    std::vector<FarLevelUsage> result;
+    for (const auto& [stride, level] : levels) result.push_back(level);
+    return result;
+}
+
 void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
     const Camera* camera, int viewportHeight, float aspect)
 {
@@ -3257,6 +3307,78 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                 m_farTiles[childIndex].parentIndex = m_farTiles.size();
             m_farTiles.push_back(std::move(root));
         }
+        // Keep adding coarser parents for maps wider than the original
+        // 129-cell test scene. Only the selected nodes create scene objects.
+        std::vector<size_t> layer;
+        for (size_t index = 0; index < m_farTiles.size(); ++index)
+            if (m_farTiles[index].lodStride == 4) layer.push_back(index);
+        for (int stride = 8; layer.size() > 4 && stride <= 1024;
+            stride *= 2)
+        {
+            int firstX = std::numeric_limits<int>::max();
+            int firstY = std::numeric_limits<int>::max();
+            for (size_t index : layer)
+            {
+                firstX = std::min(firstX, m_farTiles[index].startX);
+                firstY = std::min(firstY, m_farTiles[index].startY);
+            }
+            const int groupCells = tileCells * stride;
+            std::map<Cell, std::vector<size_t>> groups;
+            for (size_t index : layer)
+            {
+                const auto& tile = m_farTiles[index];
+                groups[{(tile.startX - firstX) / groupCells,
+                    (tile.startY - firstY) / groupCells}].push_back(index);
+            }
+            std::vector<size_t> next;
+            for (auto& [coordinate, children] : groups)
+            {
+                FarTile parent;
+                parent.lodStride = stride;
+                parent.children = std::move(children);
+                parent.startX = parent.startY = std::numeric_limits<int>::max();
+                parent.endX = parent.endY = std::numeric_limits<int>::lowest();
+                parent.minHeight = std::numeric_limits<float>::max();
+                parent.maxHeight = std::numeric_limits<float>::lowest();
+                for (size_t childIndex : parent.children)
+                {
+                    const auto& child = m_farTiles[childIndex];
+                    parent.startX = std::min(parent.startX, child.startX);
+                    parent.startY = std::min(parent.startY, child.startY);
+                    parent.endX = std::max(parent.endX, child.endX);
+                    parent.endY = std::max(parent.endY, child.endY);
+                    parent.minHeight = std::min(parent.minHeight, child.minHeight);
+                    parent.maxHeight = std::max(parent.maxHeight, child.maxHeight);
+                }
+                for (int gy = parent.startY; gy <= parent.endY; ++gy)
+                    for (int gx = parent.startX; gx <= parent.endX; ++gx)
+                    {
+                        const float height = gridHeight(gx, gy);
+                        const int x0 = parent.startX +
+                            ((gx - parent.startX) / stride) * stride;
+                        const int y0 = parent.startY +
+                            ((gy - parent.startY) / stride) * stride;
+                        const int x1 = std::min(x0 + stride, parent.endX);
+                        const int y1 = std::min(y0 + stride, parent.endY);
+                        const float tx = x1 == x0 ? 0.f :
+                            static_cast<float>(gx - x0) / (x1 - x0);
+                        const float ty = y1 == y0 ? 0.f :
+                            static_cast<float>(gy - y0) / (y1 - y0);
+                        const float bottom = glm::mix(gridHeight(x0, y0),
+                            gridHeight(x1, y0), tx);
+                        const float top = glm::mix(gridHeight(x0, y1),
+                            gridHeight(x1, y1), tx);
+                        parent.maxHeightError = std::max(parent.maxHeightError,
+                            std::abs(height - glm::mix(bottom, top, ty)));
+                    }
+                for (size_t childIndex : parent.children)
+                    m_farTiles[childIndex].parentIndex = m_farTiles.size();
+                next.push_back(m_farTiles.size());
+                m_farTiles.push_back(std::move(parent));
+            }
+            if (next.size() >= layer.size()) break;
+            layer = std::move(next);
+        }
         for (size_t patchIndex = 0; patchIndex < m_farPatches.size();
             ++patchIndex)
         {
@@ -3287,6 +3409,12 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
     const double viewHeight = std::max(1, viewportHeight);
     const glm::dvec3 cameraWorld = camera && camera->Owner
         ? camera->Owner->transform.GetWorldPositionD() : glm::dvec3(0.0);
+    const double viewDistance = camera ?
+        (maxFarViewDistanceMeters > 0.f
+            ? std::min(static_cast<double>(camera->farPlane),
+                static_cast<double>(maxFarViewDistanceMeters))
+            : static_cast<double>(camera->farPlane)) :
+        static_cast<double>(maxFarViewDistanceMeters);
     for (auto& tile : m_farTiles)
     {
         tile.outOfRange = false;
@@ -3302,7 +3430,7 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
             (tile.maxHeight - tile.minHeight) * .5,
             (tile.endY - tile.startY) * .5 * spanZ));
         tile.outOfRange = glm::distance(worldCenter, cameraWorld) - radius >
-            camera->farPlane;
+            viewDistance;
     }
     std::function<void(size_t)> selectTile = [&](size_t tileIndex)
     {
@@ -3339,8 +3467,7 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                 (parent.endY - parent.startY) * .5 * spanZ));
             const double nearDistance = std::max(.001,
                 static_cast<double>(camera->nearPlane));
-            const double farDistance = std::max(nearDistance,
-                static_cast<double>(camera->farPlane));
+            const double farDistance = std::max(nearDistance, viewDistance);
             const double halfY = camera->orthographic ?
                 std::max(.01, static_cast<double>(camera->orthographicSize)) :
                 std::max(0.0, viewCenter.z) * tanY;
@@ -3353,7 +3480,12 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                     (2.0 * std::max(.01, static_cast<double>(camera->orthographicSize))) :
                 parent.maxHeightError * terrainScale * viewHeight /
                     (2.0 * tanY * std::max(nearDistance, viewCenter.z - radius));
-            const double threshold = std::clamp(farTileScreenErrorPixels, .1f, 64.f);
+            const float levelError = parent.lodStride == 2
+                ? farTileErrorPixelsLod2 : parent.lodStride == 4
+                ? farTileErrorPixelsLod4 : parent.lodStride == 8
+                ? farTileErrorPixelsLod8 : farTileErrorPixelsLod16;
+            const double threshold = std::clamp(levelError >= 0.f
+                ? levelError : farTileScreenErrorPixels, .1f, 64.f);
             const double hysteresis = std::clamp(farTileLodHysteresis, 0.f, .9f);
             if (!inView) parent.coarseSelected = true;
             else if (parent.coarseSelected)
@@ -3400,11 +3532,15 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
     }
     const auto tileDistance = [&](size_t index) {
         const FarTile& tile = m_farTiles[index];
-        const int dx = std::max({tile.startX - centerX, 0,
-            centerX - (tile.endX - 1)});
-        const int dy = std::max({tile.startY - centerY, 0,
-            centerY - (tile.endY - 1)});
-        return std::max(dx, dy);
+        const int dx = tile.startX > centerX ? tile.startX - centerX :
+            tile.endX <= centerX ? tile.endX - 1 - centerX : 0;
+        const int dy = tile.startY > centerY ? tile.startY - centerY :
+            tile.endY <= centerY ? tile.endY - 1 - centerY : 0;
+        const int travelX = m_prefetchCenter
+            ? m_prefetchCenter->first - centerX : 0;
+        const int travelY = m_prefetchCenter
+            ? m_prefetchCenter->second - centerY : 0;
+        return StreamingRequestScore(dx, dy, travelX, travelY);
     };
     const auto exposesGap = [&](size_t index) {
         const FarTile& tile = m_farTiles[index];
@@ -3444,7 +3580,7 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
             std::max(.01, static_cast<double>(camera->orthographicSize)) :
             std::max(0.0, viewCenter.z) * tanY;
         return viewCenter.z + radius >= camera->nearPlane &&
-            viewCenter.z - radius <= camera->farPlane &&
+            viewCenter.z - radius <= viewDistance &&
             std::abs(viewCenter.x) <= halfY * viewAspect + radius &&
             std::abs(viewCenter.y) <= halfY + radius;
     };
